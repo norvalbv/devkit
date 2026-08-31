@@ -109,6 +109,7 @@ describe('line-growth block enabler', () => {
       readFileSync(join(root, '.devkit', 'baselines', 'size-lines.json'), 'utf8'),
     );
     expect(lines).toEqual({
+      lineCountVersion: 2,
       maxLines: LINE_CAP,
       maxTestLines: TEST_LINE_CAP,
       files: { 'src/giant.test.ts': 2200, 'src/giant.ts': 600 },

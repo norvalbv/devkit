@@ -4,12 +4,15 @@ import { join } from 'node:path';
 import { resolveGuardConfig, sourceMatchers } from '../config.mts';
 import { LEGACY_LINES_BASELINE, readRatchetBaseline } from './baseline-paths.mts';
 import { stagedSet, treeTextAtRef } from './git-index.mts';
-import { decodeLineBaseline } from './size-line-authority.mts';
+import {
+  decodeLineBaseline,
+  type DecodedLineBaseline,
+  effectiveLineCeiling,
+  measureLines,
+  normalizeCandidateLineBaseline,
+  normalizeLineBaseline,
+} from './size-line-authority.mts';
 import { LINES_BASELINE, SIZE_SKIP_DIRS } from './size-policy.mts';
-
-interface LinesBaseline {
-  files: Record<string, number>;
-}
 
 interface LinesPreflightRow {
   file: string;
@@ -19,13 +22,13 @@ interface LinesPreflightRow {
   localCeiling: number;
 }
 
-function readLinesBaseline(contents: string | null, label: string): LinesBaseline {
+function readLinesBaseline(contents: string | null, label: string): DecodedLineBaseline {
   const decoded = decodeLineBaseline(contents, label);
   if (decoded.error) throw new Error(decoded.error);
   return decoded;
 }
 
-function readLinesBaselineAtRef(root: string, ref: string): LinesBaseline | null {
+function readLinesBaselineAtRef(root: string, ref: string): DecodedLineBaseline | null {
   execFileSync('git', ['rev-parse', '--verify', `${ref}^{commit}`], {
     cwd: root,
     stdio: ['ignore', 'pipe', 'ignore'],
@@ -33,7 +36,17 @@ function readLinesBaselineAtRef(root: string, ref: string): LinesBaseline | null
   const text =
     treeTextAtRef(root, ref, LINES_BASELINE) ?? treeTextAtRef(root, ref, LEGACY_LINES_BASELINE);
   if (text === null) return null;
-  return readLinesBaseline(text, ref);
+  return normalizeLineBaseline(readLinesBaseline(text, ref), (file) =>
+    treeTextAtRef(root, ref, file),
+  );
+}
+
+function workingText(root: string, file: string): string | null {
+  try {
+    return readFileSync(join(root, file), 'utf8');
+  } catch {
+    return null;
+  }
 }
 
 function sourcePaths(
@@ -57,7 +70,7 @@ function sourcePaths(
 // A missing ref baseline is an overlay/untracked baseline, which ship links from the working copy.
 export function preflightLines(root: string, ref: string, requested: string[] = []): number {
   let cfg: ReturnType<typeof resolveGuardConfig>;
-  let local: LinesBaseline;
+  let local: DecodedLineBaseline;
   try {
     cfg = resolveGuardConfig(root);
     if (!cfg.maxLines && !cfg.maxTestLines) return 0;
@@ -70,13 +83,14 @@ export function preflightLines(root: string, ref: string, requested: string[] = 
     console.error(`guard-size preflight unavailable: ${String(error)}`);
     return 2;
   }
-  let committed: LinesBaseline | null;
+  let committed: DecodedLineBaseline | null;
   try {
     committed = readLinesBaselineAtRef(root, ref);
   } catch (error) {
     console.error(`guard-size preflight unavailable at ${ref}: ${String(error)}`);
     return 2;
   }
+  local = normalizeCandidateLineBaseline(root, local, [ref], (file) => workingText(root, file));
   const match = sourceMatchers(cfg.sourceExtensions);
   const cap = (file: string) => (match.isTest(file) ? cfg.maxTestLines : cfg.maxLines);
   const selected = requested.length > 0 ? requested : [...(stagedSet(root) ?? [])];
@@ -94,15 +108,21 @@ export function preflightLines(root: string, ref: string, requested: string[] = 
   }
 
   const usesWorkingBaseline = baselineIncluded || !committed;
-  const baseline: LinesBaseline = usesWorkingBaseline ? local : (committed ?? local);
+  const baseline: DecodedLineBaseline = usesWorkingBaseline ? local : (committed ?? local);
   const baselineLabel = usesWorkingBaseline ? 'working tree' : ref;
   let rows: LinesPreflightRow[];
   try {
     rows = files.map((file) => {
-      const lines = readFileSync(join(root, file), 'utf8').split('\n').length;
-      const ceiling = Math.max(cap(file), baseline.files[file] ?? 0);
-      const localCeiling = Math.max(cap(file), local.files[file] ?? 0);
-      return { file, lines, ceiling, headroom: ceiling - lines, localCeiling };
+      const measured = measureLines(readFileSync(join(root, file), 'utf8'));
+      const ceiling = effectiveLineCeiling(baseline, file, cap(file));
+      const localCeiling = effectiveLineCeiling(local, file, cap(file));
+      return {
+        file,
+        lines: measured.lines,
+        ceiling,
+        headroom: ceiling - measured.lines,
+        localCeiling,
+      };
     });
   } catch (error) {
     console.error(`guard-size preflight unavailable while reading source files: ${String(error)}`);
