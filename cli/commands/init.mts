@@ -105,21 +105,15 @@ const BIOME_SCRIPTS = ['lint', 'format'];
 // (preserves the //-comment guidance keys a JSON round-trip would drop). Hoisted (perf).
 const SCANROOTS_RE = /("scanRoots"\s*:\s*)\[[^\]]*\]/;
 
-interface RecordedComponents {
-  biome?: boolean;
-  tsconfig?: boolean;
-  skills?: boolean;
-  agents?: boolean;
-  searchSteering?: boolean;
-  agentHooks?: boolean;
-  husky?: boolean;
-  structure?: boolean;
-  fallow?: boolean;
-  antiSlop?: boolean;
-  searchCode?: boolean;
-  lineGrowth?: boolean;
-  adhd?: boolean;
-  priorArtGate?: boolean;
+/**
+ * The `components` block as .devkit/config.json records it. Every toggle is OPTIONAL because an
+ * ABSENT key is what marks a component as never-offered — see {@link unofferedComponents}.
+ */
+type SelectionToggles = {
+  [K in keyof Selection as Selection[K] extends boolean ? K : never]?: boolean;
+};
+
+interface RecordedComponents extends SelectionToggles {
   agentTargets?: string[];
   guards?: string[];
   disabledGuards?: string[];
@@ -720,6 +714,7 @@ function applyOverlay(cwd: string, plan: InitPlan, pkgRel: string, devkitRef: st
       lineGrowth: Boolean(selection.lineGrowth),
       adhd: Boolean(selection.adhd),
       priorArtGate: Boolean(selection.priorArtGate),
+      baseDrift: Boolean(selection.baseDrift),
       agentTargets: [...(selection.agentTargets ?? AGENT_TARGETS)],
     } as Record<string, unknown>,
     upgradeOffers.overlayUndecidedLineGrowth(cwd, selection, plan.undecided),
@@ -968,6 +963,7 @@ export async function applyInit(cwd: string, plan: InitPlan) {
     // recording the decline is what stops `devkit upgrade` re-asking (see unofferedComponents).
     adhd: Boolean(selection.adhd),
     priorArtGate: Boolean(selection.priorArtGate),
+    baseDrift: Boolean(selection.baseDrift),
     agentTargets: [...agentTargets],
     // Most guards are pre-commit capabilities and disappear with husky. Decisions additionally
     // owns an agent pre-edit hook, so it remains authoritative in config even without husky.

@@ -195,6 +195,7 @@ function selectionFlags(sel: Partial<Selection>): string[] {
     ['searchCode', '--search-code'],
     ['adhd', '--adhd'],
     ['priorArtGate', '--prior-art-gate'],
+    ['baseDrift', '--base-drift'],
     ['antiSlop', '--anti-slop'],
   ] as const)
     if (sel[id]) flags.push(flag);

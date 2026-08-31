@@ -152,8 +152,10 @@ export const RECORDED_COMPONENT_IDS = [
     'structure',
     'adhd',
     'priorArtGate',
+    'baseDrift',
     'antiSlop',
 ];
+/** What `--yes` and a non-TTY run select. Per-field exceptions are noted at each field. */
 export function defaultSelection() {
     return {
         biome: true,
@@ -176,6 +178,9 @@ export function defaultSelection() {
         adhd: false,
         // Denies harness tool calls — never arrives uninvited. See Selection.priorArtGate.
         priorArtGate: false,
+        // Fetches from the consumer's remote on the pre-edit path — never arrives uninvited.
+        // See Selection.baseDrift.
+        baseDrift: false,
         agentTargets: [...FRESH_DEFAULT_AGENT_PROVIDERS],
         guards: [...RECOMMENDED_GUARD_IDS],
     };
@@ -286,6 +291,14 @@ export const OPTIONAL_COMPONENTS = [
         hint: 'deny-once PreToolUse gate: plans must run (or explicitly skip) step-0 prior-art',
         flag: '--prior-art-gate',
         since: '0.51.0',
+    },
+    {
+        id: 'baseDrift',
+        kind: 'hook',
+        label: 'base-drift advisories',
+        hint: 'warns when origin/<base> moved a file you are about to edit (fetches from your remote)',
+        flag: '--base-drift',
+        since: '0.59.0',
     },
     {
         id: 'antiSlop',
