@@ -101,12 +101,12 @@ So **5/6 electron trees + react-app → data; electron/main stays the one named 
 
 ## DECISIONS
 
-1. **Size caps — RESOLVED: the guard-size ratchet caps raw lines (option C).** Today the ratchet only
+1. **Size caps — RESOLVED: the guard-size ratchet caps non-comment physical lines (option C).** Today the ratchet only
    COUNTS `eslint-disable max-lines` directives — it relies on eslint's `max-lines` rule as the actual
    cap, so a structure-only shim would silently drop size enforcement (and component-lib + devkit's own
    repo, already structure-only shims, currently have NO file-size cap — a pre-existing gap). Fix: add
    `maxLines` (+ later `maxLinesPerFunction`) to `guard.config.json`; make `gate-engine/ratchets/size-disable.mjs`
-   enforce a raw-line cap directly (grandfather-and-shrink baseline, language-aware via sourceExtensions),
+   enforce a comment-excluded physical-line cap directly (grandfather-and-shrink baseline, language-aware via sourceExtensions),
    so NO eslint size rule is needed anywhere and size is fully data/ratchet-owned across ALL stacks.
    - **Sub-caveat:** per-FILE cap is trivial (count lines). per-FUNCTION cap needs an AST/parser (eslint
      does this today). Implement file-cap in the ratchet first; per-function is a follow-up (light parser,

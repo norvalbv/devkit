@@ -4,8 +4,8 @@ import { join } from 'node:path';
 import { resolveGuardConfig, sourceMatchers } from '../config.mjs';
 import { LEGACY_LINES_BASELINE, readRatchetBaseline } from './baseline-paths.mjs';
 import { stagedSet, treeTextAtRef } from './git-index.mjs';
-import { decodeLineBaseline } from './size-line-authority.mjs';
-import { LINES_BASELINE, SIZE_SKIP_DIRS } from './size-policy.mjs';
+import { countGovernedFileLines, decodeLineBaseline, effectiveLineCeiling, normalizeCandidateLineBaseline, normalizeLineBaselineAtRef, } from './size-line-authority.mjs';
+import { governedSourceFile, LINES_BASELINE } from './size-policy.mjs';
 function readLinesBaseline(contents, label) {
     const decoded = decodeLineBaseline(contents, label);
     if (decoded.error)
@@ -13,21 +13,30 @@ function readLinesBaseline(contents, label) {
     return decoded;
 }
 function readLinesBaselineAtRef(root, ref) {
-    execFileSync('git', ['rev-parse', '--verify', `${ref}^{commit}`], {
+    const snapshot = execFileSync('git', ['rev-parse', '--verify', `${ref}^{commit}`], {
         cwd: root,
+        encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'ignore'],
-    });
-    const text = treeTextAtRef(root, ref, LINES_BASELINE) ?? treeTextAtRef(root, ref, LEGACY_LINES_BASELINE);
-    if (text === null)
+    }).trim();
+    const text = treeTextAtRef(root, snapshot, LINES_BASELINE) ??
+        treeTextAtRef(root, snapshot, LEGACY_LINES_BASELINE);
+    return {
+        baseline: text === null
+            ? null
+            : normalizeLineBaselineAtRef(root, snapshot, readLinesBaseline(text, snapshot)),
+        snapshot,
+    };
+}
+function workingText(root, file) {
+    try {
+        return readFileSync(join(root, file), 'utf8');
+    }
+    catch {
         return null;
-    return readLinesBaseline(text, ref);
+    }
 }
 function sourcePaths(root, cfg, selected) {
-    const match = sourceMatchers(cfg.sourceExtensions);
-    return selected.filter((file) => existsSync(join(root, file)) &&
-        match.isSource(file) &&
-        !file.split('/').some((part) => SIZE_SKIP_DIRS.has(part)) &&
-        cfg.scanRoots.some((scanRoot) => file === scanRoot || file.startsWith(`${scanRoot}/`)));
+    return selected.filter((file) => existsSync(join(root, file)) && governedSourceFile(file, cfg));
 }
 // Compare the caller's current bytes with the raw-line baseline from the exact ref a ship will use.
 // A missing ref baseline is an overlay/untracked baseline, which ship links from the working copy.
@@ -46,13 +55,17 @@ export function preflightLines(root, ref, requested = []) {
         return 2;
     }
     let committed;
+    let baseSnapshot;
     try {
-        committed = readLinesBaselineAtRef(root, ref);
+        const resolved = readLinesBaselineAtRef(root, ref);
+        committed = resolved.baseline;
+        baseSnapshot = resolved.snapshot;
     }
     catch (error) {
         console.error(`guard-size preflight unavailable at ${ref}: ${String(error)}`);
         return 2;
     }
+    local = normalizeCandidateLineBaseline(root, local, [baseSnapshot], (file) => workingText(root, file));
     const match = sourceMatchers(cfg.sourceExtensions);
     const cap = (file) => (match.isTest(file) ? cfg.maxTestLines : cfg.maxLines);
     const selected = requested.length > 0 ? requested : [...(stagedSet(root) ?? [])];
@@ -72,10 +85,16 @@ export function preflightLines(root, ref, requested = []) {
     let rows;
     try {
         rows = files.map((file) => {
-            const lines = readFileSync(join(root, file), 'utf8').split('\n').length;
-            const ceiling = Math.max(cap(file), baseline.files[file] ?? 0);
-            const localCeiling = Math.max(cap(file), local.files[file] ?? 0);
-            return { file, lines, ceiling, headroom: ceiling - lines, localCeiling };
+            const lines = countGovernedFileLines(readFileSync(join(root, file), 'utf8'), file);
+            const ceiling = effectiveLineCeiling(baseline, file, cap(file));
+            const localCeiling = effectiveLineCeiling(local, file, cap(file));
+            return {
+                file,
+                lines,
+                ceiling,
+                headroom: ceiling - lines,
+                localCeiling,
+            };
         });
     }
     catch (error) {

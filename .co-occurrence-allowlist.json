@@ -5,11 +5,11 @@
       "fileA": "cli/lib/overlay-global-hook.mts",
       "symbolB": "installOverlayHook",
       "fileB": "cli/lib/overlay.mts",
-      "description": "Two hook installers at different scopes that share only an idempotent write skeleton. installGlobalHook maintains a devkit block inside the machine-global init.sh (single file, strip-then-reinsert, no git config). installOverlayHook writes a repo's .devkit/hooks/pre-commit plus pass-through wrappers for every other existing hook, chmods them, and sets core.hooksPath. Matched as drifted (code 0.87, description 0.90) because both read as 'install a devkit hook idempotently'; merging them would couple machine-global state with per-repo git config. Pre-existing pair, surfaced when an unrelated change staged overlay.mts.",
-      "date": "2026-07-31",
-      "rangeA": "85-105",
-      "rangeB": "283-324",
-      "similarity": 0.8698
+      "description": "Re-reviewed for SC-2272 after an unrelated skipComments-only overlay edit resurfaced the pair. These installers intentionally serve different scopes: installGlobalHook maintains one machine-global init.sh marker block without Git configuration, while installOverlayHook writes repository hook wrappers, chmods them, and configures core.hooksPath. Their shared idempotent-write shape is not a common abstraction boundary.",
+      "date": "2026-08-31",
+      "rangeA": "114-134",
+      "rangeB": "271-312",
+      "similarity": 0.8697
     },
     {
       "symbolA": "removeHookRegistrations",

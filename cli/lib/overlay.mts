@@ -210,10 +210,10 @@ export default [
     files: ['**/*.{ts,tsx,js,jsx}'],
     ignores: ['**/*.{test,spec}.{ts,tsx,js,jsx}'],
     rules: {
-      'max-lines': ['error', { max: 500, skipBlankLines: false, skipComments: false }],
+      'max-lines': ['error', { max: 500, skipBlankLines: false, skipComments: true }],
       'max-lines-per-function': [
         'error',
-        { max: 300, skipBlankLines: false, skipComments: false, IIFEs: true },
+        { max: 300, skipBlankLines: false, skipComments: true, IIFEs: true },
       ],
     },
   },

@@ -435,7 +435,7 @@ prepare_gate_worktree() {
   fi
 }
 
-# Preview the raw-line ratchet before creating a gate worktree. Exit 2 means the optional preview is
+# Preview the governed-line ratchet before creating a gate worktree. Exit 2 means the optional preview is
 # unavailable; the authoritative worktree gate still runs. Exit 1 is a proven size violation.
 ship_size_preflight() {
   local root=${1:?root} base=${2:?base} size_guard rc

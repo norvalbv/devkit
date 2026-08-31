@@ -27,6 +27,9 @@ const LINE_COMMENT_PREFIX = /^\s*\/\/[/!]?[ \t]?/;
 const BLOCK_COMMENT_PREFIX = /^\s*\/\*+!?[ \t]?/;
 const BLOCK_COMMENT_SUFFIX = /[ \t]*\*\/[ \t]*$/;
 const BLOCK_COMMENT_CONTINUATION = /^\s*\*[ \t]?/;
+export function supportsCommentScan(extension) {
+    return SUPPORTED_EXTENSIONS.has(extension.toLowerCase());
+}
 const sha12 = (value) => createHash('sha256').update(value).digest('hex').slice(0, 12);
 function git(cwd, args) {
     return execFileSync('git', args, {
@@ -195,6 +198,8 @@ export function scanCommentTokens(source, extension) {
         const clearAfter = after.length === 0 || TRAILING_STRUCTURAL_PUNCTUATION.test(after);
         return {
             kind,
+            startOffset: start,
+            endOffset: end,
             startLine,
             endLine,
             text: source.slice(start, end),
@@ -258,6 +263,8 @@ export function paragraphCommentTokens(tokens) {
             if (first && last) {
                 const paragraph = {
                     kind: first.kind,
+                    startOffset: first.startOffset,
+                    endOffset: last.endOffset,
                     startLine: first.startLine,
                     endLine: last.endLine,
                     text: run.map((token) => token.text).join('\n'),

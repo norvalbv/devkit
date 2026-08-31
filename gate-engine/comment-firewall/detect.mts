@@ -39,10 +39,16 @@ interface PatchHunk {
 
 export interface CommentToken {
   kind: 'line' | 'block';
+  startOffset: number;
+  endOffset: number;
   startLine: number;
   endLine: number;
   text: string;
   standalone: boolean;
+}
+
+export function supportsCommentScan(extension: string): boolean {
+  return SUPPORTED_EXTENSIONS.has(extension.toLowerCase());
 }
 
 const sha12 = (value: string) => createHash('sha256').update(value).digest('hex').slice(0, 12);
@@ -220,6 +226,8 @@ export function scanCommentTokens(source: string, extension: string): CommentTok
       const clearAfter = after.length === 0 || TRAILING_STRUCTURAL_PUNCTUATION.test(after);
       return {
         kind,
+        startOffset: start,
+        endOffset: end,
         startLine,
         endLine,
         text: source.slice(start, end),
@@ -291,6 +299,8 @@ export function paragraphCommentTokens(tokens: CommentToken[]): CommentToken[] {
       if (first && last) {
         const paragraph: CommentToken = {
           kind: first.kind,
+          startOffset: first.startOffset,
+          endOffset: last.endOffset,
           startLine: first.startLine,
           endLine: last.endLine,
           text: run.map((token) => token.text).join('\n'),

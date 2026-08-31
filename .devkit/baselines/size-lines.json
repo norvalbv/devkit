@@ -1,20 +1,19 @@
 {
-  "lineCountVersion": 2,
+  "lineCountVersion": 3,
   "maxLines": 500,
   "maxTestLines": 2000,
   "files": {
-    "cli/commands/init.mts": 1158,
-    "cli/lib/generate/generate-structure-baseline.mts": 867,
-    "cli/lib/overlay.mts": 557,
-    "gate-engine/co-occurrence/matcher.mts": 539,
-    "gate-engine/critique/eval/bench.mts": 1164,
-    "gate-engine/decisions/detect.mts": 542,
-    "gate-engine/decisions/eval/bench.mts": 833,
-    "gate-engine/edge-cases/eval/lib/sources.mts": 570,
-    "gate-engine/judge/verdict-store.mts": 519,
-    "gate-engine/review/__tests__/run-review.test.mts": 2438,
-    "gate-engine/review/eval/bench.mts": 877,
-    "gate-engine/review/eval/conventions/bench.mts": 986,
-    "gate-engine/review/eval/reviewers/bench.mts": 880
+    "cli/commands/init.mts": 964,
+    "cli/lib/generate/generate-structure-baseline.mts": 747,
+    "gate-engine/co-occurrence/matcher.mts": 387,
+    "gate-engine/critique/eval/bench.mts": 1057,
+    "gate-engine/decisions/detect.mts": 424,
+    "gate-engine/decisions/eval/bench.mts": 686,
+    "gate-engine/edge-cases/eval/lib/sources.mts": 523,
+    "gate-engine/judge/verdict-store.mts": 486,
+    "gate-engine/review/__tests__/run-review.test.mts": 2218,
+    "gate-engine/review/eval/bench.mts": 757,
+    "gate-engine/review/eval/conventions/bench.mts": 822,
+    "gate-engine/review/eval/reviewers/bench.mts": 742
   }
 }

@@ -4,10 +4,15 @@
 // ONE code path rather than duplicated per ratchet.
 
 import { execFileSync, spawnSync } from 'node:child_process';
-import { lstatSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { existsSync, lstatSync, readFileSync } from 'node:fs';
+import { dirname, join, resolve as resolvePath } from 'node:path';
 
 const INDEX_LOCK_RETRY = new Int32Array(new SharedArrayBuffer(4));
+
+export interface CommitParents {
+  hidden: boolean;
+  parents: string[];
+}
 
 function stagePathStrict(
   root: string,
@@ -42,6 +47,58 @@ function isGitWorktree(root: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** Read declared parents without letting a shallow boundary masquerade as a root commit. */
+export function commitParentsAt(root: string, snapshot: string): CommitParents {
+  try {
+    const commit = execFileSync('git', ['cat-file', '-p', snapshot], {
+      cwd: root,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    const declared = (commit.split('\n\n', 1)[0] ?? '')
+      .split('\n')
+      .flatMap((line) => (line.startsWith('parent ') ? [line.slice('parent '.length)] : []));
+    const parents = declared.filter(
+      (parent) =>
+        spawnSync('git', ['cat-file', '-e', `${parent}^{commit}`], {
+          cwd: root,
+          stdio: 'ignore',
+        }).status === 0,
+    );
+    return { hidden: parents.length !== declared.length, parents };
+  } catch {
+    return { hidden: true, parents: [] };
+  }
+}
+
+/** Pin local commit-parent refs before callers read any baseline or source bytes. */
+export function lineBaselineParents(root: string): string[] {
+  const resolve = (ref: string) =>
+    execFileSync('git', ['rev-parse', '--verify', `${ref}^{commit}`], {
+      cwd: root,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+  let head: string;
+  try {
+    head = resolve('HEAD');
+  } catch {
+    return ['HEAD'];
+  }
+  const mergeHeadPath = resolvePath(
+    root,
+    execFileSync('git', ['rev-parse', '--git-path', 'MERGE_HEAD'], {
+      cwd: root,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim(),
+  );
+  if (!existsSync(mergeHeadPath)) return [head];
+  const mergeHeads = readFileSync(mergeHeadPath, 'utf8').trim().split(/\s+/).filter(Boolean);
+  if (mergeHeads.length === 0) throw new Error('Git MERGE_HEAD is empty.');
+  return [head, ...mergeHeads.map(resolve)];
 }
 
 export function indexTracksBaseline(root: string, rel: string): boolean {

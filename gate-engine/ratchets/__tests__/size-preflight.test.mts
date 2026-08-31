@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -36,7 +36,11 @@ function seedBaseline(root: string): void {
   write(
     root,
     '.devkit/baselines/size-lines.json',
-    JSON.stringify({ maxLines: 50, files: { 'src/legacy.ts': 60 } }),
+    JSON.stringify({
+      lineCountVersion: 3,
+      maxLines: 50,
+      files: { 'src/legacy.ts': 60 },
+    }),
   );
   execFileSync(
     'git',
@@ -62,7 +66,11 @@ describe('guard-size base-aware preflight', () => {
     write(
       root,
       '.devkit/baselines/size-lines.json',
-      JSON.stringify({ maxLines: 50, files: { 'src/legacy.ts': 80 } }),
+      JSON.stringify({
+        lineCountVersion: 3,
+        maxLines: 50,
+        files: { 'src/legacy.ts': 80 },
+      }),
     );
 
     const result = run(root, 'preflight', '--base', 'HEAD', '--', 'src/legacy.ts');
@@ -98,7 +106,8 @@ describe('guard-size base-aware preflight', () => {
     const result = run(root, 'preflight', '--base', 'HEAD', '--', 'src/legacy.ts');
 
     expect(result.status).toBe(1);
-    expect(result.stdout).toContain('max 60; headroom -10; working-tree max 80 differs by 20');
+    expect(result.stdout).toContain('src/legacy.ts: 70 lines; max 60; headroom -10');
+    expect(result.stdout).not.toContain('working-tree max');
   });
 
   it('defaults to staged source files and prints remaining headroom', () => {
@@ -182,7 +191,11 @@ describe('guard-size base-aware preflight', () => {
     write(
       root,
       '.devkit/baselines/size-lines.json',
-      JSON.stringify({ maxLines: 50, files: { 'src/legacy.ts': 60, 'src/new.ts': 70 } }),
+      JSON.stringify({
+        lineCountVersion: 3,
+        maxLines: 50,
+        files: { 'src/legacy.ts': 60, 'src/new.ts': 70 },
+      }),
     );
 
     const result = run(
@@ -198,6 +211,116 @@ describe('guard-size base-aware preflight', () => {
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toContain('effective ceilings from working tree');
     expect(result.stdout).toContain('src/new.ts: 70 lines; max 70; headroom 0');
+  });
+
+  it('rejects a working legacy ceiling whose file is absent from the pinned base', () => {
+    const root = makeRoot();
+    write(
+      root,
+      'guard.config.json',
+      JSON.stringify({ scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 5 }),
+    );
+    execFileSync('git', ['add', 'guard.config.json'], { cwd: root });
+    execFileSync('git', ['commit', '-qm', 'base without source'], { cwd: root });
+    write(root, 'src/new.ts', big(7));
+    write(
+      root,
+      '.devkit/baselines/size-lines.json',
+      JSON.stringify({ maxLines: 5, files: { 'src/new.ts': 10 } }),
+    );
+
+    const result = run(
+      root,
+      'preflight',
+      '--base',
+      'HEAD',
+      '--',
+      'src/new.ts',
+      '.devkit/baselines/size-lines.json',
+    );
+
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain('src/new.ts: 7 lines; max 5; headroom -2');
+    expect(result.stderr).toContain('src/new.ts: 7 lines (max 5)');
+  });
+
+  it('pins a symbolic base before reading its baseline and source', () => {
+    const root = makeRoot();
+    seedBaseline(root);
+    const original = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: root,
+      encoding: 'utf8',
+    }).trim();
+    execFileSync('git', ['branch', 'moving', original], { cwd: root });
+    write(root, 'src/legacy.ts', big(80));
+    write(
+      root,
+      '.devkit/baselines/size-lines.json',
+      JSON.stringify({
+        lineCountVersion: 3,
+        maxLines: 50,
+        files: { 'src/legacy.ts': 80 },
+      }),
+    );
+    execFileSync('git', ['add', 'src/legacy.ts', '.devkit/baselines/size-lines.json'], {
+      cwd: root,
+    });
+    execFileSync('git', ['commit', '-qm', 'newer moving base'], { cwd: root });
+    const moved = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: root,
+      encoding: 'utf8',
+    }).trim();
+    write(root, 'src/legacy.ts', big(70));
+
+    const bin = join(root, 'test-bin');
+    const wrapper = join(bin, 'git');
+    mkdirSync(bin);
+    writeFileSync(
+      wrapper,
+      `#!/usr/bin/env node
+const { spawnSync } = require('node:child_process');
+const args = process.argv.slice(2);
+const options = { cwd: process.cwd(), encoding: 'utf8', env: process.env };
+const result = spawnSync(process.env.DEVKIT_TEST_REAL_GIT, args, options);
+if (result.stdout) process.stdout.write(result.stdout);
+if (result.stderr) process.stderr.write(result.stderr);
+if (result.status === 0 && args[0] === 'rev-parse' && args.at(-1) === 'moving^{commit}') {
+  const move = spawnSync(
+    process.env.DEVKIT_TEST_REAL_GIT,
+    ['branch', '-f', 'moving', process.env.DEVKIT_TEST_MOVE_TO],
+    options,
+  );
+  if (move.status !== 0) {
+    if (move.stderr) process.stderr.write(move.stderr);
+    process.exit(move.status ?? 1);
+  }
+}
+process.exit(result.status ?? 1);
+`,
+    );
+    chmodSync(wrapper, 0o755);
+    const realGit = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
+
+    const result = spawnSync(
+      process.execPath,
+      [SCRIPT, 'preflight', '--base', 'moving', '--', 'src/legacy.ts'],
+      {
+        cwd: root,
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          DEVKIT_TEST_MOVE_TO: moved,
+          DEVKIT_TEST_REAL_GIT: realGit,
+          PATH: `${bin}:${process.env.PATH ?? ''}`,
+        },
+      },
+    );
+
+    expect(result.status, result.stderr).toBe(1);
+    expect(result.stdout).toContain('src/legacy.ts: 70 lines; max 60; headroom -10');
+    expect(
+      execFileSync('git', ['rev-parse', 'moving'], { cwd: root, encoding: 'utf8' }).trim(),
+    ).toBe(moved);
   });
 
   it('matches the gate by excluding skipped directories and names unmatched paths', () => {

@@ -62,7 +62,8 @@ Renderer logic / atom / non-component      →  src/renderer/lib/<concern>/     
 Pure renderer util                        →  src/renderer/lib/utils/               →  <kebab>.ts
 
 HARD STOPS (lint errors, not guidelines):
- 1. SIZE: new file >500 lines, or fn >200 (.ts) / >300 (.tsx) → SPLIT before writing.
+ 1. SIZE: new file >500 governed code lines, or fn >200 (.ts) / >300 (.tsx) → SPLIT before writing.
+    Comment-only lines are excluded; blank and mixed code/comment lines still count.
     Adding `eslint-disable max-lines` is BLOCKED by the size ratchet (counts shrink-only).
  2. FEATURE: feature folders are UI ONLY (Pascal component folders + index.ts barrel).
     Logic/hooks/atoms/stores → renderer/lib/<concern>, /hooks. Never loose .ts at feature root.

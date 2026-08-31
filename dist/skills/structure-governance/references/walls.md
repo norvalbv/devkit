@@ -10,10 +10,10 @@ This file OWNS one thing: **what each wall is + where its live truth lives** (wh
 
 The walls split across **two** enforcement mechanisms — no single `bun run` covers both:
 
-- **eslint** (`bun run lint` / `lint:structure`, staged-only at commit): placement (Walls 1, 2, 5), import walls (Wall 6), and the size **cap** (`max-lines` 500 / fn 200·300).
-- **husky-only ratchets** (fire at commit via `.husky/pre-commit`, NOT in `bun run lint`): the size-disable **count gate** (Wall 3) and the fan-out **count gate** (Wall 4).
+- **eslint** (`bun run lint` / `lint:structure`, staged-only at commit): placement (Walls 1, 2, 5), import walls (Wall 6), and comment-excluded size **caps** (`max-lines` 500 / fn 200·300).
+- **husky-only ratchets** (fire at commit via `.husky/pre-commit`, NOT in `bun run lint`): the per-file line ceiling and size-disable **count gates** (Wall 3), plus the fan-out **count gate** (Wall 4).
 
-So `bun run lint` catches a misplaced file, a forbidden import, or an over-cap file — but a *new* `eslint-disable max-lines` or a folder breaching 12 files is caught only by the husky ratchet gates. Full mechanism split + the by-hand approximation: structure-governance.md [`## 7`](../../../../docs/developer-docs/structure-governance.md#7-how-it-runs-at-commit-time).
+So `bun run lint` catches a misplaced file, a forbidden import, or an over-cap file — while the husky ratchet also enforces the per-file ceiling against its shrink-only baseline and catches a *new* `eslint-disable max-lines` or a folder breaching 12 files. Full mechanism split + the by-hand approximation: structure-governance.md [`## 7`](../../../../docs/developer-docs/structure-governance.md#7-how-it-runs-at-commit-time).
 
 ---
 
@@ -31,8 +31,8 @@ So `bun run lint` catches a misplaced file, a forbidden import, or an over-cap f
 
 ## Wall 3 — File size (cap + ratchet)
 
-- **Triggers when:** a file exceeds 500 lines, a `.ts` function exceeds 200, or a `.tsx` function exceeds 300 (the **cap**, in eslint); or a *new* `// eslint-disable max-lines` directive appears (the **ratchet**, husky-only — the count may only shrink).
-- **Live truth:** cap rules in [`eslint.config.mjs`](../../../../eslint.config.mjs) (`max-lines`); frozen per-file disable allowance in [`.devkit/baselines/size.json`](../../../../.devkit/baselines/size.json) and raw-line ceilings in [`.devkit/baselines/size-lines.json`](../../../../.devkit/baselines/size-lines.json), gated by Devkit `guard-size`.
+- **Triggers when:** a file exceeds 500 non-comment physical lines, a `.ts` function exceeds 200, or a `.tsx` function exceeds 300 (comment-only lines are ignored; blanks and mixed code/comment lines count); or a *new* `// eslint-disable max-lines` directive appears (the **ratchet**, husky-only — the count may only shrink).
+- **Live truth:** cap rules in [`eslint.config.mjs`](../../../../eslint.config.mjs) (`max-lines`); frozen per-file disable allowance in [`.devkit/baselines/size.json`](../../../../.devkit/baselines/size.json) and comment-excluded line ceilings in [`.devkit/baselines/size-lines.json`](../../../../.devkit/baselines/size-lines.json), gated by Devkit `guard-size`.
 - **Detail:** structure-governance.md [`Wall 3 — file size`](../../../../docs/developer-docs/structure-governance.md#wall-3--file-size).
 
 ## Wall 4 — Folder fan-out (ratchet)

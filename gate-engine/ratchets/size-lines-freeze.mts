@@ -56,24 +56,34 @@ export function freezeLinesBaseline(
   const cap = (file: string) => (match.isTest(file) ? config.maxTestLines : config.maxLines);
   const previousCeiling = (file: OversizedFile) => previous.files[file.file];
   const unverifiableLegacy = (file: OversizedFile) =>
-    decodedPrevious.lineCountVersion === 1 &&
+    decodedPrevious.lineCountVersion !== CURRENT_LINE_COUNT_VERSION &&
     decodedPrevious.files[file.file] !== undefined &&
     previousCeiling(file) === undefined;
   const raised =
     mode === 'refresh'
+      ? oversized.filter(
+          (file) =>
+            decodedPrevious.lineCountVersion === CURRENT_LINE_COUNT_VERSION &&
+            file.lines > Math.max(cap(file.file), previousCeiling(file) ?? 0),
+        )
+      : [];
+  const deferredLegacyRaises =
+    mode === 'refresh' && decodedPrevious.lineCountVersion !== CURRENT_LINE_COUNT_VERSION
       ? oversized.filter(
           (file) => file.lines > Math.max(cap(file.file), previousCeiling(file) ?? 0),
         )
       : [];
   const files = Object.fromEntries(
     oversized.flatMap((file) => {
-      if (mode === 'shrink-only' && unverifiableLegacy(file)) return [];
+      if (unverifiableLegacy(file)) return [];
+      const refreshable =
+        mode === 'refresh' &&
+        (decodedPrevious.lineCountVersion === CURRENT_LINE_COUNT_VERSION ||
+          decodedPrevious.files[file.file] === undefined);
       return [
         [
           file.file,
-          mode === 'refresh'
-            ? file.lines
-            : Math.min(previousCeiling(file) ?? file.lines, file.lines),
+          refreshable ? file.lines : Math.min(previousCeiling(file) ?? file.lines, file.lines),
         ],
       ];
     }),
@@ -104,6 +114,11 @@ export function freezeLinesBaseline(
         `     ${file.file}: ${Math.max(cap(file.file), previousCeiling(file) ?? 0)} → ${file.lines}`,
       );
     }
+  }
+  if (deferredLegacyRaises.length > 0) {
+    console.log(
+      `  ⚠ ${deferredLegacyRaises.length} legacy ceiling raise(s) deferred while migrating the line metric; run \`guard-size freeze\` again to refresh them.`,
+    );
   }
   return oversized.length;
 }

@@ -1,25 +1,55 @@
-import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { resolveGuardConfig } from '../config.mts';
 import { sourceMatchers } from '../config.mts';
 import { LEGACY_LINES_BASELINE, LINES_BASELINE, readRatchetBaseline } from './baseline-paths.mts';
-import { mergeBaseRef, treeTextAtRef } from './git-index.mts';
-import { SIZE_SKIP_DIRS } from './size-policy.mts';
+import {
+  commitParentsAt,
+  type CommitParents,
+  lineBaselineParents,
+  mergeBaseRef,
+  treeTextAtRef,
+} from './git-index.mts';
+import {
+  convertCeiling,
+  countGovernedFileLines,
+  CURRENT_LINE_COUNT_VERSION,
+  decodeLineBaseline,
+  type DecodedLineBaseline,
+  effectiveLineCeiling,
+  lineBaselineOrExit,
+  type LineCountVersion,
+} from './size-line-count.mts';
+export { lineBaselineParents } from './git-index.mts';
+import { governedSourceFile } from './size-policy.mts';
 
-export type LineCountVersion = 1 | 2;
-
-export interface LinesBaseline {
-  files: Record<string, number>;
-  lineCountVersion: LineCountVersion;
-}
-
-export interface DecodedLineBaseline extends LinesBaseline {
-  error: string | null;
-}
+export {
+  countGovernedFileLines,
+  countGovernedLines,
+  countLines,
+  CURRENT_LINE_COUNT_VERSION,
+  decodeLineBaseline,
+  effectiveLineCeiling,
+  lineBaselineOrExit,
+  measureLines,
+  normalizeLineBaseline,
+} from './size-line-count.mts';
+export type {
+  DecodedLineBaseline,
+  LineCountVersion,
+  LineMeasure,
+  LinesBaseline,
+} from './size-line-count.mts';
 
 interface SnapshotLineBaseline extends DecodedLineBaseline {
   present: boolean;
+}
+
+interface LegacyAuthorityCache {
+  baselines: Map<Snapshot, SnapshotLineBaseline>;
+  ceilings: Map<string, number | null>;
+  parents: Map<Snapshot, CommitParents>;
+  sources: Map<string, string | null>;
 }
 
 export interface LineViolationResult {
@@ -50,107 +80,6 @@ export interface LineCount {
   lines: number;
 }
 
-export interface LineMeasure {
-  legacyLines: number;
-  lines: number;
-}
-
-export const CURRENT_LINE_COUNT_VERSION = 2;
-
-const LINE_SEPARATOR_RE = /\r\n|\r|\n/;
-const TRAILING_SEPARATOR_RE = /[\r\n]$/;
-
-/** Count source lines without treating a trailing line separator as an extra empty line. */
-export function measureLines(contents: string): LineMeasure {
-  if (contents === '') return { legacyLines: 1, lines: 0 };
-  const separators = contents.split(LINE_SEPARATOR_RE).length - 1;
-  return {
-    legacyLines: contents.split('\n').length,
-    lines: TRAILING_SEPARATOR_RE.test(contents) ? separators : separators + 1,
-  };
-}
-
-export function countLines(contents: string): number {
-  return measureLines(contents).lines;
-}
-
-/** Convert an unversioned split-count baseline once, using the immutable source bytes that
- * produced it. Callers choose the matching worktree/index/ref boundary. */
-export function normalizeLineBaseline(
-  baseline: DecodedLineBaseline,
-  contentsForFile: (file: string) => string | null,
-): DecodedLineBaseline {
-  if (baseline.lineCountVersion === CURRENT_LINE_COUNT_VERSION) return baseline;
-  const files: Record<string, number> = {};
-  for (const [file, stored] of Object.entries(baseline.files)) {
-    const contents = contentsForFile(file);
-    // A missing producer blob means stale grandfathering, not permission for a reintroduced file.
-    if (contents === null) continue;
-    const measured = measureLines(contents);
-    files[file] = stored - (measured.legacyLines - measured.lines);
-  }
-  return { ...baseline, files, lineCountVersion: CURRENT_LINE_COUNT_VERSION };
-}
-
-function parseBaseline(contents: string | null, label: string): LinesBaseline {
-  if (contents === null) return { files: {}, lineCountVersion: CURRENT_LINE_COUNT_VERSION };
-  let parsed: {
-    files?: Record<string, number>;
-    lineCountVersion?: number;
-  } | null;
-  try {
-    // SAFETY: the parsed files representation is decoded into a fresh numeric map below.
-    parsed = JSON.parse(contents) as {
-      files?: Record<string, number>;
-      lineCountVersion?: number;
-    } | null;
-  } catch {
-    throw new LineAuthorityError(`guard-size: invalid line baseline JSON in ${label}`);
-  }
-  const lineCountVersion = parsed?.lineCountVersion ?? 1;
-  if (lineCountVersion !== 1 && lineCountVersion !== CURRENT_LINE_COUNT_VERSION) {
-    throw new LineAuthorityError(
-      `guard-size: unsupported line count version ${lineCountVersion} in ${label}`,
-    );
-  }
-  const files = parsed?.files ?? {};
-  if (!files || Object(files) !== files || Array.isArray(files)) {
-    throw new LineAuthorityError(`guard-size: invalid line baseline files map in ${label}`);
-  }
-  const decoded: Record<string, number> = {};
-  for (const [file, ceiling] of Object.entries(files)) {
-    if (!Number.isFinite(ceiling) || ceiling < 0) {
-      throw new LineAuthorityError(`guard-size: invalid line ceiling for ${file} in ${label}`);
-    }
-    decoded[file] = ceiling;
-  }
-  return { files: decoded, lineCountVersion };
-}
-
-export function decodeLineBaseline(contents: string | null, label: string): DecodedLineBaseline {
-  try {
-    return { ...parseBaseline(contents, label), error: null };
-  } catch (error) {
-    if (!(error instanceof LineAuthorityError)) throw error;
-    return {
-      error: error.message,
-      files: {},
-      lineCountVersion: CURRENT_LINE_COUNT_VERSION,
-    };
-  }
-}
-
-export function lineBaselineOrExit(
-  contents: string | null,
-  label: string,
-  prefix = '',
-): DecodedLineBaseline {
-  const decoded = decodeLineBaseline(contents, label);
-  if (!decoded.error) return decoded;
-  console.error(prefix ? `${prefix}: ${decoded.error}` : decoded.error);
-  process.exit(2);
-}
-
 function snapshotText(root: string, snapshot: Snapshot, relativePath: string): string | null {
   return treeTextAtRef(root, snapshot, relativePath);
 }
@@ -163,51 +92,230 @@ function workingText(root: string, relativePath: string): string | null {
   }
 }
 
-function rawBaselineAt(root: string, snapshot: Snapshot): SnapshotLineBaseline {
+function newLegacyAuthorityCache(): LegacyAuthorityCache {
+  return {
+    baselines: new Map(),
+    ceilings: new Map(),
+    parents: new Map(),
+    sources: new Map(),
+  };
+}
+
+function rawBaselineAt(
+  root: string,
+  snapshot: Snapshot,
+  cache?: LegacyAuthorityCache,
+): SnapshotLineBaseline {
+  const cached = cache?.baselines.get(snapshot);
+  if (cached) return cached;
   const contents =
     snapshotText(root, snapshot, LINES_BASELINE) ??
     snapshotText(root, snapshot, LEGACY_LINES_BASELINE);
-  return { ...decodeLineBaseline(contents, snapshot), present: contents !== null };
+  const baseline = { ...decodeLineBaseline(contents, snapshot), present: contents !== null };
+  cache?.baselines.set(snapshot, baseline);
+  return baseline;
 }
 
-function baselineAt(root: string, snapshot: Snapshot): SnapshotLineBaseline {
-  const raw = rawBaselineAt(root, snapshot);
+function cachedCommitParentsAt(
+  root: string,
+  snapshot: Snapshot,
+  cache?: LegacyAuthorityCache,
+): CommitParents {
+  const cached = cache?.parents.get(snapshot);
+  if (cached) return cached;
+  const parents = commitParentsAt(root, snapshot);
+  cache?.parents.set(snapshot, parents);
+  return parents;
+}
+
+function sourceAt(
+  root: string,
+  snapshot: Snapshot,
+  file: string,
+  cache: LegacyAuthorityCache,
+): string | null {
+  const key = `${snapshot}\0${file}`;
+  if (cache.sources.has(key)) return cache.sources.get(key) ?? null;
+  const contents = snapshotText(root, snapshot, file);
+  cache.sources.set(key, contents);
+  return contents;
+}
+
+function authoritativeLegacyCeiling(
+  root: string,
+  snapshot: Snapshot,
+  file: string,
+  stored: number,
+  version: LineCountVersion,
+  cache: LegacyAuthorityCache,
+): number | null {
+  const key = `${snapshot}\0${file}\0${stored}\0${version}`;
+  if (cache.ceilings.has(key)) return cache.ceilings.get(key) ?? null;
+  const contents = sourceAt(root, snapshot, file, cache);
+  // A ceiling cannot remain authoritative across a commit where its source file disappeared.
+  if (contents === null) {
+    cache.ceilings.set(key, null);
+    return null;
+  }
+  const directCeiling = convertCeiling(stored, contents, file, version);
+  const ancestry = cachedCommitParentsAt(root, snapshot, cache);
+  if (ancestry.hidden) {
+    cache.ceilings.set(key, null);
+    return null;
+  }
+  const legacyParents = ancestry.parents.filter((parent) => {
+    const raw = rawBaselineAt(root, parent, cache);
+    return (
+      !raw.error && raw.present && raw.lineCountVersion === version && raw.files[file] !== undefined
+    );
+  });
+  if (legacyParents.length === 0) {
+    cache.ceilings.set(key, directCeiling);
+    return directCeiling;
+  }
+  const inherited = legacyParents.map((parent) => {
+    const parentStored = rawBaselineAt(root, parent, cache).files[file] ?? 0;
+    const parentCeiling = authoritativeLegacyCeiling(
+      root,
+      parent,
+      file,
+      parentStored,
+      version,
+      cache,
+    );
+    if (parentCeiling === null) return null;
+    if (stored === parentStored) return parentCeiling;
+    const deltaBound = Math.max(0, parentCeiling + Math.min(0, stored - parentStored));
+    return Math.min(directCeiling, deltaBound);
+  });
+  const ceiling = inherited.some((value) => value === null)
+    ? null
+    : Math.min(...inherited.filter((value): value is number => value !== null));
+  cache.ceilings.set(key, ceiling);
+  return ceiling;
+}
+
+export function normalizeLineBaselineAtRef(
+  root: string,
+  snapshot: Snapshot,
+  baseline: DecodedLineBaseline,
+  cache = newLegacyAuthorityCache(),
+): DecodedLineBaseline {
+  if (baseline.lineCountVersion === CURRENT_LINE_COUNT_VERSION) return baseline;
+  const files: Record<string, number> = {};
+  for (const [file, stored] of Object.entries(baseline.files)) {
+    const ceiling = authoritativeLegacyCeiling(
+      root,
+      snapshot,
+      file,
+      stored,
+      baseline.lineCountVersion,
+      cache,
+    );
+    if (ceiling !== null) files[file] = ceiling;
+  }
+  return { ...baseline, files, lineCountVersion: CURRENT_LINE_COUNT_VERSION };
+}
+
+function baselineAt(
+  root: string,
+  snapshot: Snapshot,
+  cache = newLegacyAuthorityCache(),
+): SnapshotLineBaseline {
+  const raw = rawBaselineAt(root, snapshot, cache);
   return {
-    ...normalizeLineBaseline(raw, (file) => snapshotText(root, snapshot, file)),
+    ...normalizeLineBaselineAtRef(root, snapshot, raw, cache),
     present: raw.present,
   };
 }
 
-/** Normalize a candidate v1 entry only when it matches a parent entry, taking the strictest
- * logical ceiling when multiple merge parents could have supplied it. */
+/** Normalize a candidate legacy entry against its producer, taking the strictest inherited
+ * governed-line ceiling when multiple merge parents could have supplied it. */
 export function normalizeCandidateLineBaseline(
   root: string,
   baseline: DecodedLineBaseline,
   parents: Snapshot[],
   candidateContents: (file: string) => string | null,
+  cache = newLegacyAuthorityCache(),
 ): DecodedLineBaseline {
-  if (baseline.lineCountVersion === CURRENT_LINE_COUNT_VERSION) return baseline;
-  const parentBaselines = parents.map((parent) => ({ parent, raw: rawBaselineAt(root, parent) }));
+  const parentBaselines = parents.map((parent) => ({
+    parent,
+    raw: rawBaselineAt(root, parent, cache),
+  }));
   const files: Record<string, number> = {};
   for (const [file, stored] of Object.entries(baseline.files)) {
-    const matchingParents = parentBaselines.filter(
-      ({ raw }) =>
-        !raw.error && raw.present && raw.lineCountVersion === 1 && raw.files[file] === stored,
-    );
-    const inheritedCeilings = matchingParents.flatMap(({ parent }) => {
-      const contents = snapshotText(root, parent, file);
-      if (contents === null) return [];
-      const measured = measureLines(contents);
-      return [stored - (measured.legacyLines - measured.lines)];
-    });
-    if (matchingParents.length > 0) {
-      if (inheritedCeilings.length > 0) files[file] = Math.min(...inheritedCeilings);
+    if (baseline.lineCountVersion === CURRENT_LINE_COUNT_VERSION) {
+      const legacyParents = parentBaselines.filter(
+        ({ raw }) =>
+          !raw.error &&
+          raw.present &&
+          raw.lineCountVersion !== CURRENT_LINE_COUNT_VERSION &&
+          raw.files[file] !== undefined,
+      );
+      if (legacyParents.length === 0) {
+        files[file] = stored;
+        continue;
+      }
+      const inherited = legacyParents.map(({ parent, raw }) =>
+        authoritativeLegacyCeiling(
+          root,
+          parent,
+          file,
+          raw.files[file] ?? 0,
+          raw.lineCountVersion,
+          cache,
+        ),
+      );
+      if (inherited.some((ceiling) => ceiling === null)) continue;
+      files[file] = Math.min(
+        stored,
+        ...inherited.filter((ceiling): ceiling is number => ceiling !== null),
+      );
       continue;
     }
     const contents = candidateContents(file);
     if (contents === null) continue;
-    const measured = measureLines(contents);
-    files[file] = stored - (measured.legacyLines - measured.lines);
+    const directCeiling = convertCeiling(stored, contents, file, baseline.lineCountVersion);
+    const legacyParents = parentBaselines.filter(
+      ({ raw }) =>
+        !raw.error &&
+        raw.present &&
+        raw.lineCountVersion === baseline.lineCountVersion &&
+        raw.lineCountVersion !== CURRENT_LINE_COUNT_VERSION &&
+        raw.files[file] !== undefined,
+    );
+    if (legacyParents.length === 0) continue;
+    const inherited = legacyParents.map(({ parent, raw }) => {
+      const parentStored = raw.files[file] ?? 0;
+      const parentCeiling = authoritativeLegacyCeiling(
+        root,
+        parent,
+        file,
+        parentStored,
+        raw.lineCountVersion,
+        cache,
+      );
+      if (parentCeiling === null) return null;
+      if (stored === parentStored) return parentCeiling;
+      const deltaBound = Math.max(0, parentCeiling + Math.min(0, stored - parentStored));
+      return Math.min(directCeiling, deltaBound);
+    });
+    if (inherited.some((ceiling) => ceiling === null)) continue;
+    const differentVersionParents = parentBaselines.filter(
+      ({ raw }) =>
+        !raw.error &&
+        raw.present &&
+        raw.lineCountVersion !== baseline.lineCountVersion &&
+        raw.files[file] !== undefined,
+    );
+    const differentVersionCeilings = differentVersionParents.map(
+      ({ parent, raw }) => normalizeLineBaselineAtRef(root, parent, raw, cache).files[file],
+    );
+    if (differentVersionCeilings.some((ceiling) => ceiling === undefined)) continue;
+    files[file] = Math.min(
+      ...inherited.filter((ceiling): ceiling is number => ceiling !== null),
+      ...differentVersionCeilings.filter((ceiling): ceiling is number => ceiling !== undefined),
+    );
   }
   return { ...baseline, files, lineCountVersion: CURRENT_LINE_COUNT_VERSION };
 }
@@ -236,39 +344,9 @@ export function lineBaselineForGate(
   return normalizeCandidateLineBaseline(root, decoded, parents, (file) => workingText(root, file));
 }
 
-export function lineBaselineParents(root: string): string[] {
-  try {
-    execFileSync('git', ['rev-parse', '--verify', 'MERGE_HEAD^{commit}'], {
-      cwd: root,
-      stdio: ['ignore', 'pipe', 'ignore'],
-    });
-    return ['HEAD', 'MERGE_HEAD'];
-  } catch {
-    return ['HEAD'];
-  }
-}
-
-function governed(file: string, cfg: GuardConfig): boolean {
-  if (
-    file.startsWith('/') ||
-    file.split('/').some((part) => !part || part === '..' || SIZE_SKIP_DIRS.has(part))
-  ) {
-    return false;
-  }
-  const match = sourceMatchers(cfg.sourceExtensions);
-  return (
-    match.isSource(file) &&
-    cfg.scanRoots.some((root: string) => file === root || file.startsWith(`${root}/`))
-  );
-}
-
 function sourceLines(root: string, snapshot: Snapshot, file: string): number | null {
   const contents = snapshotText(root, snapshot, file);
-  return contents === null ? null : countLines(contents);
-}
-
-export function effectiveLineCeiling(baseline: LinesBaseline, file: string, cap: number): number {
-  return Math.max(cap, baseline.files[file] ?? 0);
+  return contents === null ? null : countGovernedFileLines(contents, file);
 }
 
 export function lineCountsAtRef(
@@ -279,7 +357,7 @@ export function lineCountsAtRef(
 ): LineCount[] {
   const counts: LineCount[] = [];
   for (const file of files) {
-    if (!governed(file, cfg)) continue;
+    if (!governedSourceFile(file, cfg)) continue;
     const lines = sourceLines(root, snapshot, file);
     if (lines !== null) counts.push({ file, lines });
   }
@@ -310,14 +388,16 @@ export function lineCeilingChanges(
     throw new LineAuthorityError(`guard-size: pull-request merge base is unavailable: ${prBase}`);
   }
   const parents = suppliedParents ?? (prParent ? [prParent] : lineBaselineParents(root));
-  const priorResults = parents.map((parent) => baselineAt(root, parent));
+  const authorityCache = newLegacyAuthorityCache();
+  const priorResults = parents.map((parent) => baselineAt(root, parent, authorityCache));
   if (priorResults.some((baseline) => baseline.error)) return [];
   const prior = priorResults;
   const current = normalizeCandidateLineBaseline(
     root,
-    rawBaselineAt(root, candidate),
+    rawBaselineAt(root, candidate, authorityCache),
     parents,
     (file) => snapshotText(root, candidate, file),
+    authorityCache,
   );
   if (current.error) throw new LineAuthorityError(current.error);
   const match = sourceMatchers(cfg.sourceExtensions);
@@ -326,7 +406,7 @@ export function lineCeilingChanges(
   const changes: LineCeilingChange[] = [];
 
   for (const file of files) {
-    if (!governed(file, cfg)) continue;
+    if (!governedSourceFile(file, cfg)) continue;
     const candidateCeiling = effectiveLineCeiling(current, file, cap(file));
     const parentCeilings = prior.map((baseline) => effectiveLineCeiling(baseline, file, cap(file)));
     if (!parentCeilings.every((ceiling) => candidateCeiling < ceiling)) continue;
@@ -420,5 +500,5 @@ export function tightenLineBaseline(
       tightened = true;
     }
   }
-  return { files, lineCountVersion: grandfathered.lineCountVersion, tightened };
+  return { files, lineCountVersion: CURRENT_LINE_COUNT_VERSION, tightened };
 }

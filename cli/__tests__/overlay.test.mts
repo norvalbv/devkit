@@ -274,9 +274,9 @@ describe('overlay (local-only) install', () => {
     ).not.toThrow();
 
     // OURS-EXTENDS-THEIRS: local configs extend the repo's committed ones
-    expect(readFileSync(join(root, 'eslint.config.devkit.mjs'), 'utf8')).toContain(
-      "import repoConfig from './eslint.config.mjs'",
-    );
+    const eslintOverlay = readFileSync(join(root, 'eslint.config.devkit.mjs'), 'utf8');
+    expect(eslintOverlay).toContain("import repoConfig from './eslint.config.mjs'");
+    expect(eslintOverlay.match(/skipComments: true/g)).toHaveLength(2);
     expect(JSON.parse(readFileSync(join(root, 'biome.devkit.jsonc'), 'utf8')).extends).toEqual([
       './biome.jsonc',
       './.devkit/biome/react.jsonc',

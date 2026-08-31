@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Ratchet inline max-lines disables and raw-line debt: existing giants are grandfathered, but their
-// ceilings can only shrink (split a file or delete its disable).
+// Ratchet inline max-lines disables and governed-line debt: existing giants are grandfathered, but
+// their ceilings can only shrink (split a file or delete its disable).
 import {
   type Dirent,
   existsSync,
@@ -26,13 +26,16 @@ import {
   mergeBaseRef,
   pullRequestScope,
   stagedSet,
+  treeTextAtRef,
 } from './git-index.mts';
 import { freezeLinesBaseline, type LinesFreezeMode } from './size-lines-freeze.mts';
 import {
+  countGovernedFileLines,
+  CURRENT_LINE_COUNT_VERSION,
+  decodeLineBaseline,
   lineBaselineForGate,
   lineCountsAtRef,
   lineViolationReport,
-  measureLines,
   tightenLineBaseline,
 } from './size-line-authority.mts';
 import { LINES_BASELINE, SIZE_SKIP_DIRS } from './size-policy.mts';
@@ -41,7 +44,7 @@ import { runPreflightCli } from './size-preflight.mts';
 // The impl-file predicate bundle sourceMatchers() returns (isSource/isTest/isBarrel).
 type SourceMatchers = ReturnType<typeof sourceMatchers>;
 
-// A source file over the raw-line cap: relative path + its line count.
+// A source file over the governed-line cap: relative path + its line count.
 interface OversizedFile {
   file: string;
   lines: number;
@@ -137,13 +140,13 @@ export function countOversized(
   const over: OversizedFile[] = [];
   for (const f of files) {
     const cap = m.isTest(f) ? testCap : sourceCap;
-    const measured = measureLines(readFileSync(join(root, f), 'utf8'));
-    if (cap > 0 && measured.lines > cap) over.push({ file: f, lines: measured.lines });
+    const lines = countGovernedFileLines(readFileSync(join(root, f), 'utf8'), f);
+    if (cap > 0 && lines > cap) over.push({ file: f, lines });
   }
   return over.sort((a, b) => a.file.localeCompare(b.file));
 }
 
-// Grandfather the current over-cap source files into the raw-line baseline (size-lines.json).
+// Grandfather the current over-cap source files into the governed-line baseline (size-lines.json).
 // Automatic onboarding stays shrink-only; the explicit CLI refresh may raise a ceiling, but names
 // every increase so legitimate main-branch drift can be reconciled without a silent laundering path.
 // Writes ONLY the line baseline and never touches the disable-count baseline (size.json). Returns
@@ -156,16 +159,16 @@ export function freezeLines(root = process.cwd(), mode: LinesFreezeMode = 'shrin
 
 // ── line-growth onboarding + upgrade back-fill ─────────────────────────────────────────────────
 
-// The default raw-line cap written when the block is enabled. Fixed — a consumer tunes it by
+// The default governed-line cap written when the block is enabled. Fixed — a consumer tunes it by
 // hand-editing guard.config.json (setMaxLines preserves an existing positive value).
 export const LINE_CAP = 500;
 export const TEST_LINE_CAP = 2000;
 
 // The //-comment sibling written next to `maxLines` (guard.config.json keeps guidance in "//" keys).
 const MAXLINES_DOC =
-  'Raw line cap per source file (guard-size ratchet enforces it; existing giants grandfathered shrink-only). 0 = off. Per-FUNCTION caps need a parser — not yet.';
+  'Governed line cap per source file: comment-only lines are excluded; blank and mixed code/comment lines count (guard-size ratchet enforces it; existing giants grandfathered shrink-only). 0 = off.';
 const MAXTESTLINES_DOC =
-  'Loose raw line cap per test file; existing oversized tests are grandfathered shrink-only. 0 = off.';
+  'Loose governed line cap per test file; comment-only lines are excluded; existing oversized tests are grandfathered shrink-only. 0 = off.';
 
 /** Does guard.config.json explicitly configure both line caps, including 0 = off? */
 export function hasLineCap(cwd: string): boolean {
@@ -286,12 +289,22 @@ function runLinesGate(
   // Tighten only the committing files' ceilings; every other recorded count is preserved as-is,
   // so a concurrent agent's uncommitted shrink is never locked in.
   if (!candidate) return;
+  const candidateBaselineText =
+    treeTextAtRef(root, candidate, LINES_BASELINE) ??
+    treeTextAtRef(root, candidate, LEGACY_LINES_BASELINE) ??
+    readRatchetBaseline(root, LINES_BASELINE, LEGACY_LINES_BASELINE)?.contents ??
+    null;
+  const candidateBaseline = decodeLineBaseline(candidateBaselineText, candidate);
+  const needsMetricMigration = candidateBaseline.lineCountVersion !== CURRENT_LINE_COUNT_VERSION;
+  const migrationVerifiable =
+    !needsMetricMigration ||
+    Object.keys(candidateBaseline.files).every((file) => grandfathered.files[file] !== undefined);
   const {
     files: next,
     lineCountVersion,
     tightened,
   } = tightenLineBaseline(root, candidate, staged, grandfathered, cap);
-  if (tightened) {
+  if (migrationVerifiable && (tightened || needsMetricMigration)) {
     if (Object.keys(next).length === 0) {
       // Last grandfathered giant healed → the baseline is now empty. Delete it (an empty file is
       // not kept as a sentinel) and stage the removal so it rides this commit.
@@ -305,7 +318,11 @@ function runLinesGate(
         `${JSON.stringify({ lineCountVersion, maxLines: cfg.maxLines, maxTestLines: cfg.maxTestLines, files: next }, null, 2)}\n`,
         { stage: true },
       );
-      console.log(`✓ line debt tightened — ${LINES_BASELINE} lowered & staged.`);
+      console.log(
+        tightened
+          ? `✓ line debt tightened — ${LINES_BASELINE} lowered & staged.`
+          : `✓ line debt metric migrated — ${LINES_BASELINE} updated & staged.`,
+      );
     }
   }
 }
@@ -462,7 +479,7 @@ function runCli(cmd: string): void {
       const over = freezeLines(root, 'refresh');
       console.log(
         over > 0
-          ? `✓ ${LINES_BASELINE}: ${over} oversized file(s) grandfathered`
+          ? `✓ ${LINES_BASELINE}: ${over} oversized file(s) recorded`
           : `✓ ${LINES_BASELINE}: no oversized files — no baseline written`,
       );
     }

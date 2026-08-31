@@ -9,8 +9,9 @@ export const CONVENTIONS_GATE_HASH_INPUTS = Object.freeze([
   'gate-engine/review/evidence/staged-git.mts',
   'gate-engine/review/evidence/conventions.mts',
   'gate-engine/review/evidence/line-counts.mts',
-  // line-counts delegates its semantics to this shared ratchet authority.
+  // line-counts delegates its semantics to the shared ratchet authority and counter.
   'gate-engine/ratchets/size-line-authority.mts',
+  'gate-engine/ratchets/size-line-count.mts',
   // Owns VERDICT_LINE_RE, whose match index decides where the evidence slice ends, and the shared
   // line-ending normalizer both parsers run first: an edit here changes what the gate parses.
   'gate-engine/review/contracts/response.mts',

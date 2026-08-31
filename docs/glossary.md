@@ -25,7 +25,8 @@ The jargon you'll meet in devkit's help, prompts, and gate output — in one pla
 - **ratchet** — a gate that only allows a metric to **shrink**, never grow:
   - **fanout** (`guard-fanout`) — caps the number of impl files in one folder (`fanoutCap`). Over the cap →
     split the folder into cohesive kebab-named subfolders.
-  - **size** (`guard-size`) — the count of `eslint-disable max-lines` may only go down.
+  - **size** (`guard-size`) — per-file non-comment physical-line ceilings and the count of
+    `eslint-disable max-lines` may only go down. Blank and mixed code/comment lines still count.
 - **baseline** — a snapshot of pre-existing violations (`.devkit/baselines/*`) that are grandfathered
   in. Automatic init/upgrade never re-snapshots an adopted repo. After auditing legitimate drift, an
   explicit `guard-size freeze` / `guard-fanout freeze` refreshes it and names every raised ceiling.

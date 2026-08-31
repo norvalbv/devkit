@@ -84,7 +84,7 @@ e.g. devkit's `gate-engine/`, whose top-level folders are its sub-engines.)
 | flat file at a `lib/` root rejected | `lib/` is folder-only | put it in a registered domain folder |
 | "folder not allowed" under `lib/` | domain not registered | add it to `libDomains`, then regenerate |
 | new file in a frozen dir rejected | `frozenDirs` one-way door | put it in the live home instead |
-| `max-lines` / "size debt may only shrink" | over cap, or a new disable | **split the file** — don't add a disable |
+| `max-lines` / "size debt may only shrink" | over the non-comment line cap, or a new disable | **split executable code** — comment-only lines do not consume the cap; don't add a disable |
 | "Folder fan-out exceeded" | > cap impl files in one folder | split into cohesive kebab subfolders |
 | import across a wall rejected | a `structure.walls` boundary | route through the allowed surface (a barrel, a bridge) |
 
@@ -122,11 +122,13 @@ No single command covers everything — the walls split across two mechanisms:
 | Wall | In `eslint` (`bun run lint`)? | Where it fires |
 |------|------------------------------|----------------|
 | Placement, domain, frozen-dir, import walls | ✅ yes | eslint (generated rule) |
-| Size **cap** (`max-lines`) | ✅ yes | eslint |
+| Size **cap** (`max-lines`) | ✅ yes | eslint; comment-only lines excluded |
+| Per-file line **ratchet** | ❌ no | `guard-size` at pre-commit; same comment-excluded metric |
 | Size-disable **ratchet** (count gate) | ❌ no | `gate-engine/ratchets/*` at pre-commit |
 | Fan-out **ratchet** | ❌ no | `gate-engine/ratchets/*` at pre-commit |
 
-The ratchet gates fire via husky (and a **CI mirror** — `--no-verify` is bypassable, so a load-bearing
+Both size paths count blank and mixed code/comment lines but exclude lexer-recognized comment-only
+lines. The ratchet gates fire via husky (and a **CI mirror** — `--no-verify` is bypassable, so a load-bearing
 gate must run on the server too). A `gate` that finds *growth* exits 1 and blocks the commit (split,
 don't disable); one whose last grandfathered entry *heals* in the commit self-deletes the baseline.
 A missing baseline means "no grandfathered debt": a **governed** repo (one with `guard.config.json` —

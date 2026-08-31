@@ -157,7 +157,7 @@ export const DEFAULTS = Object.freeze({
   decisionsDir: 'docs/decisions',
   // Max non-test impl files per folder (any depth) before the fanout ratchet trips.
   fanoutCap: 12,
-  // Max lines per source file before the size ratchet flags it (raw line count, all lines). 0 = OFF
+  // Max non-comment physical lines per source file before the size ratchet flags it. 0 = OFF
   // (opt-in). When set, size is enforced by the ratchet directly — no eslint max-lines rule needed,
   // so the structure-only eslint shim governs ANY stack. Existing over-cap files are grandfathered
   // shrink-only in .devkit/baselines/size-lines.json. (Per-FUNCTION caps need a parser → not here yet.)
@@ -471,7 +471,7 @@ const TEST_INFIX = /\.(test|spec)\./;
  * so the ratchets are language-agnostic instead of hardcoding `.ts`/`.tsx`. Each returns a predicate:
  * `isSource(name)` true for an impl file; `isTest(name)` for its test variant (`.test.`/`.spec.`);
  * `isBarrel(name)` for an `index` barrel. Fan-out and disable debt use non-test implementation
- * files; the raw-line ratchet also uses `isTest` to apply its separate test ceiling.
+ * files; the line ratchet also uses `isTest` to apply its separate test ceiling.
  *
  * @param extensions bare extensions, no dot (e.g. `['ts','tsx']`)
  */

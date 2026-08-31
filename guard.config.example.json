@@ -10,10 +10,10 @@
   "//sourceExtensions": "Source extensions the ratchets count. Default: ['ts','tsx']. A JS/MJS codebase sets ['mjs','js']. Tests (*.test.<ext> / *.spec.<ext>) are excluded from impl fan-out but included when maxTestLines is enabled.",
   "sourceExtensions": ["ts", "tsx"],
 
-  "//maxLines": "Raw line cap for implementation files. Existing oversized files are grandfathered shrink-only. 0 = off.",
+  "//maxLines": "Non-comment physical line cap for implementation files. Blank and mixed code/comment lines count. Existing oversized files are grandfathered shrink-only. 0 = off.",
   "maxLines": 500,
 
-  "//maxTestLines": "Looser raw line cap for test files. Existing oversized tests are grandfathered shrink-only into the same size-lines.json baseline. 0 = off.",
+  "//maxTestLines": "Looser non-comment physical line cap for test files. Blank and mixed code/comment lines count. Existing oversized tests are grandfathered shrink-only into the same size-lines.json baseline. 0 = off.",
   "maxTestLines": 2000,
 
   "//decisionsDir": "Append-only decision-log dir (guard-decisions CLI + smell gate target). Default: 'docs/decisions'.",

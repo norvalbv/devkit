@@ -1,18 +1,14 @@
 #!/usr/bin/env node
-// Ratchet inline max-lines disables and raw-line debt: existing giants are grandfathered, but their
-// ceilings can only shrink (split a file or delete its disable).
-//
-//   bunx guard-size freeze   # re-count + write the consumer's baseline
-//   bunx guard-size gate     # fail if counts grew (pre-commit)
-//
+// Ratchet inline max-lines disables and governed-line debt: existing giants are grandfathered, but
+// their ceilings can only shrink (split a file or delete its disable).
 import { existsSync, readdirSync, readFileSync, realpathSync, writeFileSync, } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { CONFIG_FILENAME, resolveGuardConfig, sourceMatchers } from '../config.mjs';
 import { LEGACY_LINES_BASELINE, LEGACY_SIZE_BASELINE, readRatchetBaseline, removeRatchetBaseline, SIZE_BASELINE, writeRatchetBaseline, } from './baseline-paths.mjs';
-import { hasStagedFiles, indexTreeRef, pullRequestScope, stagedSet } from './git-index.mjs';
+import { hasStagedFiles, indexTreeRef, mergeBaseRef, pullRequestScope, stagedSet, treeTextAtRef, } from './git-index.mjs';
 import { freezeLinesBaseline } from './size-lines-freeze.mjs';
-import { lineBaselineForGate, lineCountsAtRef, lineViolationReport, tightenLineBaseline, } from './size-line-authority.mjs';
+import { countGovernedFileLines, CURRENT_LINE_COUNT_VERSION, decodeLineBaseline, lineBaselineForGate, lineCountsAtRef, lineViolationReport, tightenLineBaseline, } from './size-line-authority.mjs';
 import { LINES_BASELINE, SIZE_SKIP_DIRS } from './size-policy.mjs';
 import { runPreflightCli } from './size-preflight.mjs';
 const BASELINE = SIZE_BASELINE;
@@ -69,7 +65,6 @@ export function countDisables(root = process.cwd(), scanRoots) {
     const fnDisables = Object.values(perFile).reduce((s, c) => s + c.fn, 0);
     return { fileDisables, fnDisables, perFile, scannedFiles: files.length };
 }
-// Raw-line caps: implementation files use maxLines; tests use the looser maxTestLines.
 export function countOversized(root = process.cwd(), scanRoots, maxLines, match, maxTestLines) {
     const cfg = resolveGuardConfig(root);
     const sourceCap = maxLines ?? cfg.maxLines;
@@ -81,13 +76,13 @@ export function countOversized(root = process.cwd(), scanRoots, maxLines, match,
     const over = [];
     for (const f of files) {
         const cap = m.isTest(f) ? testCap : sourceCap;
-        const lines = readFileSync(join(root, f), 'utf8').split('\n').length;
+        const lines = countGovernedFileLines(readFileSync(join(root, f), 'utf8'), f);
         if (cap > 0 && lines > cap)
             over.push({ file: f, lines });
     }
     return over.sort((a, b) => a.file.localeCompare(b.file));
 }
-// Grandfather the current over-cap source files into the raw-line baseline (size-lines.json).
+// Grandfather the current over-cap source files into the governed-line baseline (size-lines.json).
 // Automatic onboarding stays shrink-only; the explicit CLI refresh may raise a ceiling, but names
 // every increase so legitimate main-branch drift can be reconciled without a silent laundering path.
 // Writes ONLY the line baseline and never touches the disable-count baseline (size.json). Returns
@@ -99,13 +94,13 @@ export function freezeLines(root = process.cwd(), mode = 'shrink-only') {
     return freezeLinesBaseline(root, cfg, countOversized(root), mode);
 }
 // ── line-growth onboarding + upgrade back-fill ─────────────────────────────────────────────────
-// The default raw-line cap written when the block is enabled. Fixed — a consumer tunes it by
+// The default governed-line cap written when the block is enabled. Fixed — a consumer tunes it by
 // hand-editing guard.config.json (setMaxLines preserves an existing positive value).
 export const LINE_CAP = 500;
 export const TEST_LINE_CAP = 2000;
 // The //-comment sibling written next to `maxLines` (guard.config.json keeps guidance in "//" keys).
-const MAXLINES_DOC = 'Raw line cap per source file (guard-size ratchet enforces it; existing giants grandfathered shrink-only). 0 = off. Per-FUNCTION caps need a parser — not yet.';
-const MAXTESTLINES_DOC = 'Loose raw line cap per test file; existing oversized tests are grandfathered shrink-only. 0 = off.';
+const MAXLINES_DOC = 'Governed line cap per source file: comment-only lines are excluded; blank and mixed code/comment lines count (guard-size ratchet enforces it; existing giants grandfathered shrink-only). 0 = off.';
+const MAXTESTLINES_DOC = 'Loose governed line cap per test file; comment-only lines are excluded; existing oversized tests are grandfathered shrink-only. 0 = off.';
 /** Does guard.config.json explicitly configure both line caps, including 0 = off? */
 export function hasLineCap(cwd) {
     const cfgPath = join(cwd, 'guard.config.json');
@@ -188,7 +183,10 @@ function runLinesGate(root, cfg, ciScope) {
     // A PR supplies an exact base scope; local commits use the index; audits use the whole tree.
     const selected = ciScope ?? (inCommit ? staged : null);
     const candidate = ciScope ? 'HEAD' : inCommit ? indexTreeRef(root) : null;
-    const grandfathered = lineBaselineForGate(root, candidate);
+    const prBase = ciScope ? process.env.GUARD_RATCHET_BASE : undefined;
+    const prParent = prBase ? mergeBaseRef(root, prBase) : null;
+    const parents = prBase ? (prParent ? [prParent] : []) : undefined;
+    const grandfathered = lineBaselineForGate(root, candidate, parents);
     const scoped = candidate && selected
         ? lineCountsAtRef(root, candidate, selected, cfg)
         : selected
@@ -198,7 +196,8 @@ function runLinesGate(root, cfg, ciScope) {
     const { error, lines: report } = lineViolationReport(root, cfg, scoped, cap, grandfathered, {
         candidate,
         inCommit,
-        prBase: ciScope ? process.env.GUARD_RATCHET_BASE : undefined,
+        parents,
+        prBase,
     });
     if (error) {
         console.error(error);
@@ -215,8 +214,16 @@ function runLinesGate(root, cfg, ciScope) {
     // so a concurrent agent's uncommitted shrink is never locked in.
     if (!candidate)
         return;
-    const { files: next, tightened } = tightenLineBaseline(root, candidate, staged, grandfathered, cap);
-    if (tightened) {
+    const candidateBaselineText = treeTextAtRef(root, candidate, LINES_BASELINE) ??
+        treeTextAtRef(root, candidate, LEGACY_LINES_BASELINE) ??
+        readRatchetBaseline(root, LINES_BASELINE, LEGACY_LINES_BASELINE)?.contents ??
+        null;
+    const candidateBaseline = decodeLineBaseline(candidateBaselineText, candidate);
+    const needsMetricMigration = candidateBaseline.lineCountVersion !== CURRENT_LINE_COUNT_VERSION;
+    const migrationVerifiable = !needsMetricMigration ||
+        Object.keys(candidateBaseline.files).every((file) => grandfathered.files[file] !== undefined);
+    const { files: next, lineCountVersion, tightened, } = tightenLineBaseline(root, candidate, staged, grandfathered, cap);
+    if (migrationVerifiable && (tightened || needsMetricMigration)) {
         if (Object.keys(next).length === 0) {
             // Last grandfathered giant healed → the baseline is now empty. Delete it (an empty file is
             // not kept as a sentinel) and stage the removal so it rides this commit.
@@ -224,8 +231,10 @@ function runLinesGate(root, cfg, ciScope) {
             console.log(`✓ line debt cleared — ${LINES_BASELINE} removed & staged.`);
         }
         else {
-            writeRatchetBaseline(root, LINES_BASELINE, LEGACY_LINES_BASELINE, `${JSON.stringify({ maxLines: cfg.maxLines, maxTestLines: cfg.maxTestLines, files: next }, null, 2)}\n`, { stage: true });
-            console.log(`✓ line debt tightened — ${LINES_BASELINE} lowered & staged.`);
+            writeRatchetBaseline(root, LINES_BASELINE, LEGACY_LINES_BASELINE, `${JSON.stringify({ lineCountVersion, maxLines: cfg.maxLines, maxTestLines: cfg.maxTestLines, files: next }, null, 2)}\n`, { stage: true });
+            console.log(tightened
+                ? `✓ line debt tightened — ${LINES_BASELINE} lowered & staged.`
+                : `✓ line debt metric migrated — ${LINES_BASELINE} updated & staged.`);
         }
     }
 }
@@ -342,7 +351,7 @@ function runCli(cmd) {
         if (cfg.maxLines || cfg.maxTestLines) {
             const over = freezeLines(root, 'refresh');
             console.log(over > 0
-                ? `✓ ${LINES_BASELINE}: ${over} oversized file(s) grandfathered`
+                ? `✓ ${LINES_BASELINE}: ${over} oversized file(s) recorded`
                 : `✓ ${LINES_BASELINE}: no oversized files — no baseline written`);
         }
         process.exit(0);

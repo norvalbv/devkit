@@ -5,14 +5,14 @@ import { resolveGuardConfig, sourceMatchers } from '../config.mts';
 import { LEGACY_LINES_BASELINE, readRatchetBaseline } from './baseline-paths.mts';
 import { stagedSet, treeTextAtRef } from './git-index.mts';
 import {
+  countGovernedFileLines,
   decodeLineBaseline,
   type DecodedLineBaseline,
   effectiveLineCeiling,
-  measureLines,
   normalizeCandidateLineBaseline,
-  normalizeLineBaseline,
+  normalizeLineBaselineAtRef,
 } from './size-line-authority.mts';
-import { LINES_BASELINE, SIZE_SKIP_DIRS } from './size-policy.mts';
+import { governedSourceFile, LINES_BASELINE } from './size-policy.mts';
 
 interface LinesPreflightRow {
   file: string;
@@ -22,23 +22,33 @@ interface LinesPreflightRow {
   localCeiling: number;
 }
 
+interface RefLinesBaseline {
+  baseline: DecodedLineBaseline | null;
+  snapshot: string;
+}
+
 function readLinesBaseline(contents: string | null, label: string): DecodedLineBaseline {
   const decoded = decodeLineBaseline(contents, label);
   if (decoded.error) throw new Error(decoded.error);
   return decoded;
 }
 
-function readLinesBaselineAtRef(root: string, ref: string): DecodedLineBaseline | null {
-  execFileSync('git', ['rev-parse', '--verify', `${ref}^{commit}`], {
+function readLinesBaselineAtRef(root: string, ref: string): RefLinesBaseline {
+  const snapshot = execFileSync('git', ['rev-parse', '--verify', `${ref}^{commit}`], {
     cwd: root,
+    encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'ignore'],
-  });
+  }).trim();
   const text =
-    treeTextAtRef(root, ref, LINES_BASELINE) ?? treeTextAtRef(root, ref, LEGACY_LINES_BASELINE);
-  if (text === null) return null;
-  return normalizeLineBaseline(readLinesBaseline(text, ref), (file) =>
-    treeTextAtRef(root, ref, file),
-  );
+    treeTextAtRef(root, snapshot, LINES_BASELINE) ??
+    treeTextAtRef(root, snapshot, LEGACY_LINES_BASELINE);
+  return {
+    baseline:
+      text === null
+        ? null
+        : normalizeLineBaselineAtRef(root, snapshot, readLinesBaseline(text, snapshot)),
+    snapshot,
+  };
 }
 
 function workingText(root: string, file: string): string | null {
@@ -54,16 +64,7 @@ function sourcePaths(
   cfg: ReturnType<typeof resolveGuardConfig>,
   selected: string[],
 ): string[] {
-  const match = sourceMatchers(cfg.sourceExtensions);
-  return selected.filter(
-    (file) =>
-      existsSync(join(root, file)) &&
-      match.isSource(file) &&
-      !file.split('/').some((part) => SIZE_SKIP_DIRS.has(part)) &&
-      cfg.scanRoots.some(
-        (scanRoot: string) => file === scanRoot || file.startsWith(`${scanRoot}/`),
-      ),
-  );
+  return selected.filter((file) => existsSync(join(root, file)) && governedSourceFile(file, cfg));
 }
 
 // Compare the caller's current bytes with the raw-line baseline from the exact ref a ship will use.
@@ -84,13 +85,18 @@ export function preflightLines(root: string, ref: string, requested: string[] = 
     return 2;
   }
   let committed: DecodedLineBaseline | null;
+  let baseSnapshot: string;
   try {
-    committed = readLinesBaselineAtRef(root, ref);
+    const resolved = readLinesBaselineAtRef(root, ref);
+    committed = resolved.baseline;
+    baseSnapshot = resolved.snapshot;
   } catch (error) {
     console.error(`guard-size preflight unavailable at ${ref}: ${String(error)}`);
     return 2;
   }
-  local = normalizeCandidateLineBaseline(root, local, [ref], (file) => workingText(root, file));
+  local = normalizeCandidateLineBaseline(root, local, [baseSnapshot], (file) =>
+    workingText(root, file),
+  );
   const match = sourceMatchers(cfg.sourceExtensions);
   const cap = (file: string) => (match.isTest(file) ? cfg.maxTestLines : cfg.maxLines);
   const selected = requested.length > 0 ? requested : [...(stagedSet(root) ?? [])];
@@ -113,14 +119,14 @@ export function preflightLines(root: string, ref: string, requested: string[] = 
   let rows: LinesPreflightRow[];
   try {
     rows = files.map((file) => {
-      const measured = measureLines(readFileSync(join(root, file), 'utf8'));
+      const lines = countGovernedFileLines(readFileSync(join(root, file), 'utf8'), file);
       const ceiling = effectiveLineCeiling(baseline, file, cap(file));
       const localCeiling = effectiveLineCeiling(local, file, cap(file));
       return {
         file,
-        lines: measured.lines,
+        lines,
         ceiling,
-        headroom: ceiling - measured.lines,
+        headroom: ceiling - lines,
         localCeiling,
       };
     });

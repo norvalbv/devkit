@@ -86,7 +86,8 @@ or, from the husky ratchet:
 size debt may only shrink …                                   # a NEW eslint-disable max-lines
 ```
 
-**Cause:** file/function over the hard cap, OR you added an `eslint-disable max-lines`.
+**Cause:** file/function over the hard cap, OR you added an `eslint-disable max-lines`. Comment-only
+lines do not consume the cap; blank lines and lines containing both code and comments still do.
 **Fix: SPLIT — never add a disable.** The size-disable ratchet blocks new disables monotonically, so
 suppressing it is not an option. Extract cohesive pieces into sibling files (or a kebab subfolder if
 you'd cross the fan-out cap → row 5). After shrinking, optionally lock in the lower count:
@@ -95,7 +96,7 @@ you'd cross the fan-out cap → row 5). After shrinking, optionally lock in the 
 guard-size freeze
 ```
 
-The raw-line ratchet can also report:
+The comment-excluded line ratchet can also report:
 
 ```text
 src/legacy.ts: ceiling lowered 100 → 80 via .devkit/baselines/size-lines.json

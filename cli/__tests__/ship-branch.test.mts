@@ -177,7 +177,11 @@ describe('ship-branch.sh — --base <branch>', () => {
     writeFileSync(join(dir, 'src/hot.ts'), Array(60).fill('const x = 1;').join('\n'));
     writeFileSync(
       join(dir, '.devkit/baselines/size-lines.json'),
-      JSON.stringify({ maxLines: 50, files: { 'src/hot.ts': 60 } }),
+      JSON.stringify({
+        lineCountVersion: 3,
+        maxLines: 50,
+        files: { 'src/hot.ts': 60 },
+      }),
     );
     git(['add', 'guard.config.json', 'src/hot.ts', '.devkit/baselines/size-lines.json']);
     git(['commit', '-q', '-m', 'size baseline']);
@@ -187,7 +191,11 @@ describe('ship-branch.sh — --base <branch>', () => {
     writeFileSync(join(dir, 'src/hot.ts'), Array(70).fill('const x = 1;').join('\n'));
     writeFileSync(
       join(dir, '.devkit/baselines/size-lines.json'),
-      JSON.stringify({ maxLines: 50, files: { 'src/hot.ts': 80 } }),
+      JSON.stringify({
+        lineCountVersion: 3,
+        maxLines: 50,
+        files: { 'src/hot.ts': 80 },
+      }),
     );
     const r = spawnSync(
       '/bin/bash',
@@ -1248,7 +1256,11 @@ describe('reship.sh (ship --pr) — overlay-mode gate chain', () => {
     writeFileSync(join(dir, 'src/hot.ts'), Array(60).fill('const x = 1;').join('\n'));
     writeFileSync(
       join(dir, '.devkit/baselines/size-lines.json'),
-      JSON.stringify({ maxLines: 50, files: { 'src/hot.ts': 60 } }),
+      JSON.stringify({
+        lineCountVersion: 3,
+        maxLines: 50,
+        files: { 'src/hot.ts': 60 },
+      }),
     );
     git(['add', 'guard.config.json', 'src/hot.ts', '.devkit/baselines/size-lines.json']);
     git(['commit', '-q', '-m', 'size baseline']);
@@ -1256,7 +1268,11 @@ describe('reship.sh (ship --pr) — overlay-mode gate chain', () => {
     writeFileSync(join(dir, 'src/hot.ts'), Array(70).fill('const x = 1;').join('\n'));
     writeFileSync(
       join(dir, '.devkit/baselines/size-lines.json'),
-      JSON.stringify({ maxLines: 50, files: { 'src/hot.ts': 80 } }),
+      JSON.stringify({
+        lineCountVersion: 3,
+        maxLines: 50,
+        files: { 'src/hot.ts': 80 },
+      }),
     );
 
     const r = spawnSync('/bin/bash', [reshipScript, 'pr-open', 't', 'src/hot.ts'], {

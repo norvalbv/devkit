@@ -2,10 +2,11 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { changedSetSince, stagedSet } from '../git-index.mts';
+import { changedSetSince, lineBaselineParents, stagedSet } from '../git-index.mts';
 import { countDisables, countOversized, freezeLines } from '../size-disable.mts';
+import { countGovernedLines } from '../size-line-authority.mts';
 
 const SCRIPT = join(dirname(fileURLToPath(import.meta.url)), '..', 'size-disable.mts');
 
@@ -248,10 +249,56 @@ describe('CLI freeze/gate contract (what a pre-commit hook relies on)', () => {
   });
 });
 
-describe('raw-line cap (the maxLines gate — size owned by the ratchet, not eslint)', () => {
+describe('comment-excluded line cap (the maxLines gate — file size owned by the ratchet)', () => {
   const run = (root, cmd) =>
     spawnSync(process.execPath, [SCRIPT, cmd], { cwd: root, encoding: 'utf8' });
   const big = (n) => Array(n).fill('const x = 1;').join('\n'); // n lines
+
+  it('pins HEAD and every octopus MERGE_HEAD before baseline authority reads begin', () => {
+    const root = makeRoot();
+    gitInit(root);
+    const commits: string[] = [];
+    for (let index = 0; index < 3; index += 1) {
+      execFileSync('git', ['commit', '--allow-empty', '-qm', `commit ${index}`], { cwd: root });
+      commits.push(
+        execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(),
+      );
+    }
+    const gitDir = execFileSync('git', ['rev-parse', '--absolute-git-dir'], {
+      cwd: root,
+      encoding: 'utf8',
+    }).trim();
+    writeFileSync(join(gitDir, 'MERGE_HEAD'), `${commits[0]}\n${commits[1]}\n`);
+
+    expect(lineBaselineParents(root)).toEqual([commits[2], commits[0], commits[1]]);
+  });
+
+  it.each([
+    ['empty source', '', 0],
+    ['terminal newline', 'const value = 1;\n', 1],
+    ['CRLF comment paragraph', '// one\r\n// two\r\nconst value = 1;\r\n', 1],
+    ['multiline block comment', '/* one\n * two\n */\nconst value = 1;', 1],
+    ['adjacent comments', '/* one */ /* two */', 0],
+    ['blank between comments', '// one\n\n// two', 1],
+    ['structural residue', '/* docs */;', 1],
+    ['comment-looking string', 'const value = "// not a comment";', 1],
+  ])('counts %s consistently', (_label, source, expected) => {
+    expect(countGovernedLines(source, 'ts')).toBe(expected);
+  });
+
+  it(
+    'counts a comment-heavy source without rescanning every token for every line',
+    { timeout: 10_000 },
+    () => {
+      const source = Array.from({ length: 50_000 }, (_, index) => `// explanation ${index}`).join(
+        '\n',
+      );
+      const started = Date.now();
+
+      expect(countGovernedLines(source, 'ts')).toBe(0);
+      expect(Date.now() - started).toBeLessThan(2_500);
+    },
+  );
 
   it('countOversized flags source files over the cap; tests + small files exempt', () => {
     const root = makeRoot();
@@ -296,6 +343,59 @@ describe('raw-line cap (the maxLines gate — size owned by the ratchet, not esl
     expect(countOversized(root)).toEqual([]);
   });
 
+  it('does not charge standalone TypeScript comment paragraphs to the file budget', () => {
+    const root = makeRoot();
+    writeConfig(root, { scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 4 });
+    write(
+      root,
+      'src/documented.ts',
+      [
+        'export const one = 1;',
+        'export const two = 2;',
+        '// This invariant is intentionally documented across three lines.',
+        '// The comment firewall reviews the paragraph independently.',
+        '// Keeping it must not consume executable-code budget.',
+        'export const three = 3;',
+        'export const four = 4;',
+      ].join('\n'),
+    );
+
+    expect(countOversized(root)).toEqual([]);
+  });
+
+  it('still charges blank lines and lines containing code plus a comment', () => {
+    const root = makeRoot();
+    writeConfig(root, { scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 3 });
+    write(
+      root,
+      'src/blank.ts',
+      ['export const one = 1;', '', '', 'export const two = 2;'].join('\n'),
+    );
+    write(
+      root,
+      'src/inline.ts',
+      [
+        'export const one = 1; // one',
+        'export const two = 2; // two',
+        'export const three = 3; // three',
+        'export const four = 4; // four',
+      ].join('\n'),
+    );
+
+    expect(countOversized(root)).toEqual([
+      { file: 'src/blank.ts', lines: 4 },
+      { file: 'src/inline.ts', lines: 4 },
+    ]);
+  });
+
+  it('keeps physical-line counting for source extensions without a comment adapter', () => {
+    const root = makeRoot();
+    writeConfig(root, { scanRoots: ['src'], sourceExtensions: ['py'], maxLines: 3 });
+    write(root, 'src/documented.py', ['value = 1', '# one', '# two', 'other = 2'].join('\n'));
+
+    expect(countOversized(root)).toEqual([{ file: 'src/documented.py', lines: 4 }]);
+  });
+
   it('freeze grandfathers current over-cap files; gate passes; a NEW over-cap file fails', () => {
     const root = makeRoot();
     writeConfig(root, { scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 50 });
@@ -323,7 +423,7 @@ describe('raw-line cap (the maxLines gate — size owned by the ratchet, not esl
     const baseline = JSON.parse(
       readFileSync(join(root, '.devkit/baselines/size-lines.json'), 'utf8'),
     );
-    expect(baseline.lineCountVersion).toBe(2);
+    expect(baseline.lineCountVersion).toBe(3);
     expect(baseline.files['src/legacy.ts']).toBe(80);
   });
 
@@ -433,6 +533,7 @@ describe('raw-line cap (the maxLines gate — size owned by the ratchet, not esl
 
   it('reads pre-migration line and disable baselines from the legacy directory', () => {
     const root = makeRoot();
+    gitInit(root);
     writeConfig(root, { scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 50 });
     write(root, 'src/legacy.ts', `/* eslint-disable max-lines */\n${big(79)}`);
     write(
@@ -445,16 +546,19 @@ describe('raw-line cap (the maxLines gate — size owned by the ratchet, not esl
       'eslint/baselines/size-lines.json',
       JSON.stringify({ maxLines: 50, files: { 'src/legacy.ts': 80 } }),
     );
+    gitAdd(root, '.');
+    execFileSync('git', ['commit', '-qm', 'legacy baseline'], { cwd: root });
 
     expect(run(root, 'gate').status).toBe(0);
     write(root, 'src/legacy.ts', `/* eslint-disable max-lines */\n${big(89)}`);
     const result = run(root, 'gate');
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain('src/legacy.ts: 90 lines (max 80)');
+    expect(result.stderr).toContain('src/legacy.ts: 89 lines (max 79)');
   });
 
   it('reads legacy baselines and canonicalizes them on the next freeze', () => {
     const root = makeRoot();
+    gitInit(root);
     writeConfig(root, { scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 50 });
     write(
       root,
@@ -471,6 +575,8 @@ describe('raw-line cap (the maxLines gate — size owned by the ratchet, not esl
       'eslint/baselines/size-lines.json',
       JSON.stringify({ maxLines: 50, files: { 'src/legacy.ts': 80 } }),
     );
+    gitAdd(root, '.');
+    execFileSync('git', ['commit', '-qm', 'legacy baseline'], { cwd: root });
 
     const result = run(root, 'freeze');
 
@@ -480,11 +586,12 @@ describe('raw-line cap (the maxLines gate — size owned by the ratchet, not esl
         'src/legacy.ts'
       ].file,
     ).toBe(1);
-    expect(
-      JSON.parse(readFileSync(join(root, '.devkit/baselines/size-lines.json'), 'utf8')).files[
-        'src/legacy.ts'
-      ],
-    ).toBe(90);
+    const lineBaseline = JSON.parse(
+      readFileSync(join(root, '.devkit/baselines/size-lines.json'), 'utf8'),
+    );
+    expect(lineBaseline.files['src/legacy.ts']).toBe(78);
+    expect(lineBaseline.lineCountVersion).toBe(3);
+    expect(result.stdout).not.toContain('grew since the last freeze');
     expect(() => readFileSync(join(root, 'eslint/baselines/size.json'))).toThrow();
     expect(() => readFileSync(join(root, 'eslint/baselines/size-lines.json'))).toThrow();
   });
@@ -498,6 +605,261 @@ describe('raw-line cap (the maxLines gate — size owned by the ratchet, not esl
     const r = run(root, 'gate');
     expect(r.status).toBe(1);
     expect(r.stderr).toContain('src/legacy.ts: 100 lines (max 80)');
+  });
+
+  it('does not let a legacy raw baseline hide executable growth behind removed comments', () => {
+    const root = makeRoot();
+    gitInit(root);
+    writeConfig(root, { scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 5 });
+    write(
+      root,
+      'src/legacy.ts',
+      [
+        ...Array.from({ length: 6 }, (_, index) => `export const before${index} = ${index};`),
+        '// one',
+        '// two',
+        '// three',
+        '// four',
+      ].join('\n'),
+    );
+    write(
+      root,
+      '.devkit/baselines/size-lines.json',
+      JSON.stringify({ maxLines: 5, files: { 'src/legacy.ts': 10 } }),
+    );
+    gitAdd(root, '.');
+    execFileSync('git', ['commit', '-qm', 'legacy raw baseline'], { cwd: root });
+    write(
+      root,
+      'src/legacy.ts',
+      [
+        ...Array.from({ length: 7 }, (_, index) => `export const after${index} = ${index};`),
+        '// one',
+        '// two',
+      ].join('\n'),
+    );
+    write(
+      root,
+      '.devkit/baselines/size-lines.json',
+      JSON.stringify({
+        lineCountVersion: 3,
+        maxLines: 5,
+        files: { 'src/legacy.ts': 7 },
+      }),
+    );
+    gitAdd(root, 'src/legacy.ts', '.devkit/baselines/size-lines.json');
+
+    const result = run(root, 'gate');
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('src/legacy.ts: 7 lines (max 6)');
+  });
+
+  it('keeps legacy conversion shrink-only in worktree and post-commit audits', () => {
+    const root = makeRoot();
+    gitInit(root);
+    writeConfig(root, { scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 5 });
+    write(
+      root,
+      'src/legacy.ts',
+      [
+        ...Array.from({ length: 6 }, (_, index) => `export const before${index} = ${index};`),
+        '// one',
+        '// two',
+        '// three',
+        '// four',
+      ].join('\n'),
+    );
+    write(
+      root,
+      '.devkit/baselines/size-lines.json',
+      JSON.stringify({ maxLines: 5, files: { 'src/legacy.ts': 10 } }),
+    );
+    gitAdd(root, '.');
+    execFileSync('git', ['commit', '-qm', 'legacy raw baseline'], { cwd: root });
+    write(
+      root,
+      'src/legacy.ts',
+      [
+        ...Array.from({ length: 7 }, (_, index) => `export const after${index} = ${index};`),
+        '// one',
+        '// two',
+        '// three',
+      ].join('\n'),
+    );
+
+    const worktreeAudit = run(root, 'gate');
+    expect(worktreeAudit.status).toBe(1);
+    expect(worktreeAudit.stderr).toContain('src/legacy.ts: 7 lines (max 6)');
+
+    gitAdd(root, 'src/legacy.ts');
+    execFileSync('git', ['commit', '-qm', 'bypassed growth'], { cwd: root });
+    const committedAudit = run(root, 'gate');
+    expect(committedAudit.status).toBe(1);
+    expect(committedAudit.stderr).toContain('src/legacy.ts: 7 lines (max 6)');
+
+    expect(freezeLines(root)).toBe(1);
+    const baseline = JSON.parse(
+      readFileSync(join(root, '.devkit/baselines/size-lines.json'), 'utf8'),
+    );
+    expect(baseline.files['src/legacy.ts']).toBe(6);
+    expect(baseline.lineCountVersion).toBe(3);
+  });
+
+  it.each([
+    { label: 'lowers', nextStored: 9, expectedCeiling: 5 },
+    { label: 'raises', nextStored: 11, expectedCeiling: 6 },
+  ])(
+    'keeps post-commit conversion anchored when a bypass $label the legacy ceiling',
+    ({ nextStored, expectedCeiling }) => {
+      const root = makeRoot();
+      gitInit(root);
+      writeConfig(root, { scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 5 });
+      write(
+        root,
+        'src/legacy.ts',
+        [
+          ...Array.from({ length: 6 }, (_, index) => `export const before${index} = ${index};`),
+          '// one',
+          '// two',
+          '// three',
+          '// four',
+        ].join('\n'),
+      );
+      write(
+        root,
+        '.devkit/baselines/size-lines.json',
+        JSON.stringify({
+          lineCountVersion: 2,
+          maxLines: 5,
+          files: { 'src/legacy.ts': 10 },
+        }),
+      );
+      gitAdd(root, '.');
+      execFileSync('git', ['commit', '-qm', 'legacy logical baseline'], { cwd: root });
+
+      write(
+        root,
+        'src/legacy.ts',
+        [
+          ...Array.from({ length: 7 }, (_, index) => `export const after${index} = ${index};`),
+          '// one',
+          '// two',
+        ].join('\n'),
+      );
+      write(
+        root,
+        '.devkit/baselines/size-lines.json',
+        JSON.stringify({
+          lineCountVersion: 2,
+          maxLines: 5,
+          files: { 'src/legacy.ts': nextStored },
+        }),
+      );
+      gitAdd(root, 'src/legacy.ts', '.devkit/baselines/size-lines.json');
+      execFileSync('git', ['commit', '-qm', 'bypassed growth and legacy ceiling edit'], {
+        cwd: root,
+      });
+
+      const result = run(root, 'gate');
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(`src/legacy.ts: 7 lines (max ${expectedCeiling})`);
+
+      const shallow = makeRoot();
+      execFileSync('git', ['clone', '-q', '--depth', '1', pathToFileURL(root).href, shallow]);
+      expect(
+        execFileSync('git', ['rev-parse', '--is-shallow-repository'], {
+          cwd: shallow,
+          encoding: 'utf8',
+        }).trim(),
+      ).toBe('true');
+      const shallowResult = run(shallow, 'gate');
+      expect(shallowResult.status).toBe(1);
+      expect(shallowResult.stderr).toContain('src/legacy.ts: 7 lines (max 5)');
+    },
+  );
+
+  it('keeps an explicit refresh shrink-only while converting a legacy raw ceiling', () => {
+    const root = makeRoot();
+    gitInit(root);
+    writeConfig(root, { scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 5 });
+    write(
+      root,
+      'src/legacy.ts',
+      [
+        ...Array.from({ length: 6 }, (_, index) => `export const before${index} = ${index};`),
+        '// one',
+        '// two',
+        '// three',
+        '// four',
+      ].join('\n'),
+    );
+    write(
+      root,
+      '.devkit/baselines/size-lines.json',
+      JSON.stringify({ maxLines: 5, files: { 'src/legacy.ts': 10 } }),
+    );
+    gitAdd(root, '.');
+    execFileSync('git', ['commit', '-qm', 'legacy raw baseline'], { cwd: root });
+    write(
+      root,
+      'src/legacy.ts',
+      [
+        ...Array.from({ length: 7 }, (_, index) => `export const after${index} = ${index};`),
+        '// one',
+        '// two',
+      ].join('\n'),
+    );
+
+    const result = run(root, 'freeze');
+
+    expect(result.status, result.stderr).toBe(0);
+    const baseline = JSON.parse(
+      readFileSync(join(root, '.devkit/baselines/size-lines.json'), 'utf8'),
+    );
+    expect(baseline.files['src/legacy.ts']).toBe(6);
+    expect(baseline.lineCountVersion).toBe(3);
+    expect(result.stdout).toContain('legacy ceiling raise(s) deferred');
+  });
+
+  it('converts a shrinking legacy raw baseline entry to the comment-excluded metric', () => {
+    const root = makeRoot();
+    gitInit(root);
+    writeConfig(root, { scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 5 });
+    write(
+      root,
+      'src/legacy.ts',
+      [
+        ...Array.from({ length: 6 }, (_, index) => `export const before${index} = ${index};`),
+        '// one',
+        '// two',
+        '// three',
+        '// four',
+      ].join('\n'),
+    );
+    write(
+      root,
+      '.devkit/baselines/size-lines.json',
+      JSON.stringify({ maxLines: 5, files: { 'src/legacy.ts': 10 } }),
+    );
+    gitAdd(root, '.');
+    execFileSync('git', ['commit', '-qm', 'legacy raw baseline'], { cwd: root });
+    write(
+      root,
+      'src/legacy.ts',
+      [
+        ...Array.from({ length: 5 }, (_, index) => `export const after${index} = ${index};`),
+        '// one',
+        '// two',
+        '// three',
+        '// four',
+      ].join('\n'),
+    );
+    gitAdd(root, 'src/legacy.ts');
+
+    expect(run(root, 'gate').status).toBe(0);
+    expect(() => readFileSync(join(root, '.devkit/baselines/size-lines.json'), 'utf8')).toThrow();
   });
 
   it('grandfathers an oversized test and blocks growth past its recorded ceiling', () => {
@@ -941,7 +1303,11 @@ describe('raw-line cap (the maxLines gate — size owned by the ratchet, not esl
       write(
         root,
         '.devkit/baselines/size-lines.json',
-        JSON.stringify({ maxLines: 50, files: { 'src/legacy.ts': previous } }),
+        JSON.stringify({
+          lineCountVersion: 3,
+          maxLines: 50,
+          files: { 'src/legacy.ts': previous },
+        }),
       );
       gitAdd(root, '-A');
       execFileSync('git', ['commit', '-qm', 'base'], { cwd: root });
@@ -952,7 +1318,11 @@ describe('raw-line cap (the maxLines gate — size owned by the ratchet, not esl
       write(
         root,
         '.devkit/baselines/size-lines.json',
-        JSON.stringify({ maxLines: 50, files: { 'src/legacy.ts': current } }),
+        JSON.stringify({
+          lineCountVersion: 3,
+          maxLines: 50,
+          files: { 'src/legacy.ts': current },
+        }),
       );
       gitAdd(root, '.devkit/baselines/size-lines.json');
       expect(run(root, 'gate').status).toBe(0);
@@ -1234,13 +1604,104 @@ describe('raw-line cap (the maxLines gate — size owned by the ratchet, not esl
       readFileSync(join(root, '.devkit/baselines/size-lines.json'), 'utf8'),
     );
     expect(frozen).toMatchObject({
-      lineCountVersion: 2,
+      lineCountVersion: 3,
       files: { 'src/legacy.ts': 80 },
     });
     gitAdd(root, '.devkit/baselines/size-lines.json');
     const afterFreeze = run(root, 'gate');
     expect(afterFreeze.status).toBe(1);
     expect(afterFreeze.stderr).toContain('src/legacy.ts: 81 lines (max 80)');
+  });
+
+  it('uses a stricter current-version parent when a merge resolves to a legacy baseline', () => {
+    const root = makeRoot();
+    gitInit(root);
+    writeConfig(root, { scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 50 });
+    write(root, 'src/legacy.ts', big(70));
+    write(
+      root,
+      '.devkit/baselines/size-lines.json',
+      JSON.stringify({ maxLines: 50, files: { 'src/legacy.ts': 100 } }),
+    );
+    gitAdd(root, '-A');
+    execFileSync('git', ['commit', '-qm', 'legacy base'], { cwd: root });
+
+    execFileSync('git', ['switch', '-qc', 'feature'], { cwd: root });
+    write(root, 'feature.txt', 'feature\n');
+    gitAdd(root, 'feature.txt');
+    execFileSync('git', ['commit', '-qm', 'feature'], { cwd: root });
+
+    execFileSync('git', ['switch', '-q', 'main'], { cwd: root });
+    write(
+      root,
+      '.devkit/baselines/size-lines.json',
+      JSON.stringify({
+        lineCountVersion: 3,
+        maxLines: 50,
+        files: { 'src/legacy.ts': 60 },
+      }),
+    );
+    gitAdd(root, '.devkit/baselines/size-lines.json');
+    execFileSync('git', ['commit', '-qm', 'migrate to stricter current ceiling'], { cwd: root });
+
+    execFileSync('git', ['switch', '-q', 'feature'], { cwd: root });
+    execFileSync('git', ['merge', '--no-commit', '--no-ff', 'main'], { cwd: root });
+    write(
+      root,
+      '.devkit/baselines/size-lines.json',
+      JSON.stringify({ maxLines: 50, files: { 'src/legacy.ts': 100 } }),
+    );
+    gitAdd(root, '.devkit/baselines/size-lines.json');
+
+    const result = run(root, 'gate');
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('src/legacy.ts: 70 lines (max 60)');
+  });
+
+  it('preserves a legacy ceiling when descendants add only comment lines', () => {
+    const root = makeRoot();
+    gitInit(root);
+    writeConfig(root, { scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 5 });
+    const source = [...Array(6).fill('const x = 1;'), ...Array(4).fill('// explanation')].join(
+      '\n',
+    );
+    write(root, 'src/legacy.ts', source);
+    write(
+      root,
+      '.devkit/baselines/size-lines.json',
+      JSON.stringify({ lineCountVersion: 2, files: { 'src/legacy.ts': 10 } }),
+    );
+    gitAdd(root, '-A');
+    execFileSync('git', ['commit', '-qm', 'legacy baseline'], { cwd: root });
+    execFileSync('git', ['commit', '--allow-empty', '-qm', 'legacy descendant'], { cwd: root });
+    const shallow = makeRoot();
+    execFileSync('git', ['clone', '-q', '--depth', '1', pathToFileURL(root).href, shallow]);
+    write(shallow, 'src/unrelated.ts', 'export {};\n');
+    gitAdd(shallow, 'src/unrelated.ts');
+    const shallowGate = run(shallow, 'gate');
+    expect(shallowGate.status, shallowGate.stderr).toBe(0);
+    const preserved = JSON.parse(
+      readFileSync(join(shallow, '.devkit/baselines/size-lines.json'), 'utf8'),
+    );
+    expect(preserved.lineCountVersion).toBe(2);
+
+    write(root, 'src/legacy.ts', `${source}\n// more context\n// still context`);
+    gitAdd(root, 'src/legacy.ts');
+    expect(run(root, 'gate').status).toBe(0);
+    const migrated = JSON.parse(
+      readFileSync(join(root, '.devkit/baselines/size-lines.json'), 'utf8'),
+    );
+    expect(migrated).toMatchObject({ lineCountVersion: 3, files: { 'src/legacy.ts': 6 } });
+    execFileSync('git', ['commit', '-qm', 'document source'], { cwd: root });
+
+    const audit = run(root, 'gate');
+    expect(audit.status, audit.stderr).toBe(0);
+    expect(freezeLines(root)).toBe(1);
+    const frozen = JSON.parse(
+      readFileSync(join(root, '.devkit/baselines/size-lines.json'), 'utf8'),
+    );
+    expect(frozen).toMatchObject({ lineCountVersion: 3, files: { 'src/legacy.ts': 6 } });
   });
 
   it('pull-request CI fails unavailable when its supplied base cannot be resolved', () => {
@@ -1266,7 +1727,11 @@ describe('raw-line cap (the maxLines gate — size owned by the ratchet, not esl
     write(
       root,
       '.devkit/baselines/size-lines.json',
-      JSON.stringify({ maxLines: 50, files: { 'src/legacy.ts': 60 } }),
+      JSON.stringify({
+        lineCountVersion: 3,
+        maxLines: 50,
+        files: { 'src/legacy.ts': 60 },
+      }),
     );
     expect(freezeLines(root)).toBe(1);
     const baseline = JSON.parse(
@@ -1298,7 +1763,11 @@ describe('raw-line cap (the maxLines gate — size owned by the ratchet, not esl
     write(
       root,
       '.devkit/baselines/size-lines.json',
-      JSON.stringify({ maxLines: 50, files: { 'src/legacy.ts': 60 } }),
+      JSON.stringify({
+        lineCountVersion: 3,
+        maxLines: 50,
+        files: { 'src/legacy.ts': 60 },
+      }),
     );
 
     const result = run(root, 'freeze');
@@ -1324,7 +1793,7 @@ describe('raw-line cap (the maxLines gate — size owned by the ratchet, not esl
     expect(freezeLines(root)).toBe(1);
     const lines = JSON.parse(readFileSync(join(root, '.devkit/baselines/size-lines.json'), 'utf8'));
     expect(lines).toEqual({
-      lineCountVersion: 2,
+      lineCountVersion: 3,
       maxLines: 50,
       maxTestLines: 0,
       files: { 'src/legacy.ts': 80 },

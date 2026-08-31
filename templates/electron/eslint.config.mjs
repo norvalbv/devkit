@@ -751,10 +751,10 @@ export default [
     },
     linterOptions: { reportUnusedDisableDirectives: 'off' },
     rules: {
-      'max-lines': ['error', { max: 500, skipBlankLines: false, skipComments: false }],
+      'max-lines': ['error', { max: 500, skipBlankLines: false, skipComments: true }],
       'max-lines-per-function': [
         'error',
-        { max: 200, skipBlankLines: false, skipComments: false, IIFEs: true },
+        { max: 200, skipBlankLines: false, skipComments: true, IIFEs: true },
       ],
     },
   },
@@ -773,7 +773,7 @@ export default [
     rules: {
       'max-lines-per-function': [
         'error',
-        { max: 300, skipBlankLines: false, skipComments: false, IIFEs: true },
+        { max: 300, skipBlankLines: false, skipComments: true, IIFEs: true },
       ],
     },
   },
@@ -794,7 +794,7 @@ export default [
     },
     linterOptions: { reportUnusedDisableDirectives: 'off' },
     rules: {
-      'max-lines': ['error', { max: 2000, skipBlankLines: false, skipComments: false }],
+      'max-lines': ['error', { max: 2000, skipBlankLines: false, skipComments: true }],
     },
   },
 ];
