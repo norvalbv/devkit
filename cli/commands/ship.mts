@@ -6,7 +6,20 @@
  * manual lane runs the identical command in a plain terminal.
  */
 import { delimiter, dirname } from 'node:path';
+import { reportShipRuntimeProvenance } from '../lib/ship/runtime-provenance.mts';
 import { runManagedPackagedScript } from '../lib/ship/run-packaged-script.mts';
+
+export interface ShipDependencies {
+  reportRuntimeProvenance: typeof reportShipRuntimeProvenance;
+  runManagedScript: (
+    ...args: Parameters<typeof runManagedPackagedScript>
+  ) => number | Promise<number>;
+}
+
+const DEFAULT_DEPENDENCIES: ShipDependencies = {
+  reportRuntimeProvenance: reportShipRuntimeProvenance,
+  runManagedScript: runManagedPackagedScript,
+};
 
 export const meta = {
   name: 'ship',
@@ -88,11 +101,16 @@ A commit that never lands auto-deletes the empty branch. Every blocked attempt r
 invocation — retry with \`devkit ship --resume <branch>\` instead of re-typing the command.`,
 };
 
-export default function ship(args: string[], cwd: string): number | Promise<number> {
+export default function ship(
+  args: string[],
+  cwd: string,
+  dependencies: ShipDependencies = DEFAULT_DEPENDENCIES,
+): number | Promise<number> {
   if (args.length === 0) {
     console.log(meta.help); // no args is a usage error (`--help` is intercepted in index.mjs)
     return 1;
   }
+  dependencies.reportRuntimeProvenance(cwd);
   // `--pr` (before any `--` terminator, so a dash-leading file path can't misroute) selects the
   // re-push flow: add the changes to an existing PR's branch (ff-push) instead of a new PR.
   const sep = args.indexOf('--');
@@ -114,5 +132,9 @@ export default function ship(args: string[], cwd: string): number | Promise<numb
     ...process.env,
     PATH: [dirname(process.execPath), process.env.PATH].filter(Boolean).join(delimiter),
   };
-  return runManagedPackagedScript(`${mode}.sh`, args, { command: 'devkit ship', cwd, env });
+  return dependencies.runManagedScript(`${mode}.sh`, args, {
+    command: 'devkit ship',
+    cwd,
+    env,
+  });
 }
