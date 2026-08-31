@@ -281,37 +281,3 @@ export function initializeCommitGuardChecklist(cwd, reviewer, assetRoot, env = p
     if (!Array.isArray(files) || files.length === 0)
         throw new Error('commit-guard checklist initialization produced no staged files');
 }
-/** Review-mode packaged assets make a missing checklist an execution-contract error, not a sync gap. */
-export async function enforceChecklistContract(selection, initial, cwd, assetRoot, retry) {
-    // A skill-less reviewer (no stateFile) has no artifact to verify — its PASS is trusted
-    // directly, the same trust level completeness.mts already uses for its own straight verdict;
-    // its substitute anti-hallucination mechanism is the AC's own quote-both-or-stay-silent
-    // contract, enforced by the brief, not an artifact this gate can independently check.
-    if (initial.status !== 'pass' || !selection.reviewer.stateFile)
-        return initial;
-    let result = initial;
-    const initialState = readChecklistState(cwd, selection.reviewer);
-    let hole = verifyChecklist(initialState, 'PASS');
-    if (hole && assetRoot) {
-        console.error(`guard-review: ${selection.reviewer.name} — checklist contract not satisfied; retrying once (${hole})`);
-        cleanupChecklistState(cwd, selection.reviewer);
-        result = await retry(hole);
-        if (initial.transcript && result.transcript)
-            result.transcript = `${initial.transcript}\n\n───── CHECKLIST-CONTRACT RETRY ─────\n${result.transcript}`;
-        if (result.status === 'pass') {
-            hole = verifyChecklist(readChecklistState(cwd, selection.reviewer), 'PASS');
-            if (hole) {
-                result.status = 'error';
-                result.reason = `reviewer checklist contract failed after one retry — ${hole}`;
-            }
-        }
-    }
-    else if (hole) {
-        result.status = 'inconclusive';
-        result.reason = hole;
-        const items = initialState?.items ?? initialState?.files;
-        result.inconclusiveCause =
-            !Array.isArray(items) || items.length === 0 ? 'sync' : 'response-contract';
-    }
-    return result;
-}

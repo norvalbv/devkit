@@ -6,9 +6,13 @@
  * concurrent, a judge returned its verdict without engaging the workflow and its retry succeeded
  * only because a sibling had drained; at 10 judges, first attempts AND inline retries all failed.
  * The recovery retry therefore runs AFTER the wave, serially — the empirically-clean condition —
- * with the SAME one-attempt-per-reviewer budget the inline retry had. REVIEW-ONLY, unchanged from
- * the inline retry it replaces (review-gate-in-chain 2026-07-16: commit/ship never had a
- * checklist retry and keep none; their voided PASSes stay inconclusive).
+ * with the SAME one-attempt-per-reviewer budget the inline retry had.
+ *
+ * Scope, WIDENED by sc-2088: every STRICT path (ship, reship, review), not review alone. The
+ * review-only bound was inherited from the inline retry rather than justified, and it left ship
+ * failing closed over a judge that skipped its checklist while the gate's own remedy told the
+ * operator to perform the retry by hand. Plain `git commit` still schedules none — it has no gate
+ * supervisor to bound a serial phase, and it already fails open at exit 2.
  *
  * `settleReviewOutcome` is the ONE code path that checkpoints, records progress, holds lens
  * parts, and emits telemetry — the first wave and the deferred phase both go through it, so the
@@ -79,6 +83,9 @@ export function settleReviewOutcome(ctx, t, outcome, durationMs, retried = false
         // all (missing brief / engine error), keeping the field always present for consumers.
         model: res.model ?? ctx.firstModel,
         reason: res.reason,
+        // Machine cause, so a consumer never parses the human-readable reason (gate-verdict-attribution).
+        // JSON.stringify drops it when absent, which is exactly the pass/fail case.
+        inconclusive_cause: res.inconclusiveCause,
         secs,
         // A recovered outcome stays measurable (gate-telemetry-self-describing): without this flag
         // the fix would erase the field rate of the very failure mode it schedules around. NEVER in
@@ -99,6 +106,29 @@ export function settleReviewOutcome(ctx, t, outcome, durationMs, retried = false
 // Never START a deferred cascade the ceiling is about to kill — a killed ship converges anyway
 // (nothing checkpointed), but a named budget skip is honest where a 124 kill is opaque.
 const MIN_RECOVERY_BUDGET_MS = 60_000;
+// Held back from the judge's cap so the settle that follows it (cache write, transcript, telemetry)
+// still lands inside the ceiling. A judge capped to the WHOLE remainder would finish exactly as the
+// supervisor fires and lose the verdict it just paid for.
+const RECOVERY_SETTLE_MARGIN_MS = 15_000;
+/**
+ * Milliseconds left before the gate chain is killed.
+ *
+ * The supervisor's absolute deadline wins whenever it is present (sc-2088). The fallback — the
+ * duration minus THIS gate's own elapsed time — is only correct when guard-review is the whole
+ * chain, which it never is under ship: gate-supervisor.mts wraps the entire `git commit`, so the
+ * deterministic prefix and decisions cascade have already spent budget that `gateStartMs` cannot
+ * see. Left as the fallback for the benches and direct invocations, which run no supervisor.
+ *
+ * The 3600 default matches run-gates-with-capture.sh and is the RULED value:
+ * ship-gates-converge-not-restart records its own Ruling text of '1800s' as stale (2026-08-05 note,
+ * recovering the evidence behind 0d759d4). Do not reconcile one literal to the other.
+ */
+function recoveryBudgetMs(gateStartMs) {
+    const deadline = Number(process.env.DEVKIT_GATE_DEADLINE_MS);
+    if (Number.isFinite(deadline) && deadline > 0)
+        return deadline - Date.now();
+    return Number(process.env.SHIP_COMMIT_TIMEOUT ?? 3600) * 1000 - (Date.now() - gateStartMs);
+}
 /**
  * Re-run each parked cascade SERIALLY (the whole point: one judge in flight), settle it through
  * the shared path with `retried` marked, and replace its slot in `results`. One attempt per
@@ -107,9 +137,8 @@ const MIN_RECOVERY_BUDGET_MS = 60_000;
  * outage retry would triple the worst-case cost of a phase that runs against the same ceiling).
  */
 export async function runDeferredRecoveries(parked, results, ctx, runOne, gateStartMs) {
-    const ceilingMs = Number(process.env.SHIP_COMMIT_TIMEOUT ?? 3600) * 1000;
     for (const p of parked) {
-        const remaining = ceilingMs - (Date.now() - gateStartMs);
+        const remaining = recoveryBudgetMs(gateStartMs);
         if (remaining < MIN_RECOVERY_BUDGET_MS) {
             const skipped = {
                 name: p.task.sel.reviewer.name,
@@ -126,7 +155,7 @@ export async function runDeferredRecoveries(parked, results, ctx, runOne, gateSt
         }
         console.error(`guard-review: ${p.task.sel.reviewer.name} — checklist contract not satisfied under the concurrent wave; retrying solo (${p.reason})`);
         const t0 = Date.now();
-        const res = await runOne(p.task, p.reason);
+        const res = await runOne(p.task, p.reason, remaining - RECOVERY_SETTLE_MARGIN_MS);
         results[p.index] = settleReviewOutcome(ctx, p.task, res, Date.now() - t0, true);
     }
 }

@@ -84,6 +84,10 @@ const ENV_KEYS = [
   // The completeness sticky key is scoped to the shipping branch, so a developer running the suite
   // DURING a ship (which exports this) would otherwise key verdicts to that ship's branch.
   'DEVKIT_SHIP_BRANCH',
+  // The deferred recovery phase's budget. A developer running the suite inside a real ship inherits
+  // the supervisor's live deadline, which would starve the recovery tests of budget.
+  'SHIP_COMMIT_TIMEOUT',
+  'DEVKIT_GATE_DEADLINE_MS',
 ];
 const saved = {};
 beforeEach(() => {
@@ -2280,121 +2284,5 @@ describe('guard-review scan — cache status matches the gate planner (sc-1473)'
     expect(skipped.status, skipped.stderr).toBe(0);
     expect(skipped.stdout).not.toContain('correctness-reviewer');
     expect(skipped.stdout).toContain('api-security-reviewer [cached PASS]');
-  });
-});
-
-// sc-1476: checklist-contract recovery is DEFERRED out of the contended wave (review-only —
-// commit/ship never had a retry and keep none). Haiku compliance degrades under concurrent judge
-// load; the solo post-wave attempt is the empirically-clean condition these tests pin.
-describe('runReviewGate — deferred checklist recovery (sc-1476)', () => {
-  const reviewEnv = (repo: string) => {
-    const assets = reviewAssets();
-    process.env.DEVKIT_RUN_MODE = 'review';
-    process.env.DEVKIT_REVIEW_ASSET_ROOT = assets;
-    process.env.GUARD_REVIEW_CONCURRENCY = '3';
-    process.env.DEVKIT_GATE_EVENTS = join(repo, 'events.jsonl');
-    process.env.DEVKIT_SHIP_ID = 'ship-deferred-recovery';
-    process.env.DEVKIT_REVIEW_PROGRESS = join(repo, 'progress.json');
-  };
-  const events = (repo: string) =>
-    readFileSync(join(repo, 'events.jsonl'), 'utf8')
-      .trim()
-      .split('\n')
-      .map((l) => JSON.parse(l));
-
-  it('a contention-voided PASS recovers SOLO after the wave, marked retried', async () => {
-    const repo = consumerRepo({ backend: true });
-    reviewEnv(repo);
-    let inflight = 0;
-    const attempts = new Map<string, number>();
-    const calls: { label: string; solo: boolean; completedNow: string[] }[] = [];
-    const exec = mkExec(async ({ label }) => {
-      inflight++;
-      try {
-        await new Promise((r) => setTimeout(r, 20)); // force the wave to overlap
-        const solo = inflight === 1; // sampled MID-RUN: was any sibling judging alongside?
-        // Non-compliance is pinned to the ATTEMPT, not to sampled overlap: the tail of a wave can
-        // legitimately hold one task in flight, and gating on `solo` would let that task comply
-        // first time and flake the assertions below. `solo` is still SAMPLED and asserted — it is
-        // the thing under test (the deferred phase runs serially), just not the trigger.
-        const attempt = (attempts.get(label) ?? 0) + 1;
-        attempts.set(label, attempt);
-        let completedNow: string[] = [];
-        try {
-          completedNow = JSON.parse(readFileSync(join(repo, 'progress.json'), 'utf8')).completed;
-        } catch {}
-        calls.push({ label, solo, completedNow });
-        if (attempt > 1) writeArtifact(repo, label); // compliant only on the post-wave attempt
-        return 'VERDICT: PASS';
-      } finally {
-        inflight--;
-      }
-    });
-    expect(await runReviewGate(repo, { exec })).toBe(0);
-    const rows = events(repo).filter((e) => e.type === 'review_result');
-    // api-security ran in the first (contended) wave: parked, recovered solo, marked retried.
-    const api = rows.find((e) => e.reviewer === 'api-security-reviewer');
-    expect(api?.status).toBe('pass');
-    expect(api?.retried).toBe(true);
-    expect(api?.retry_phase).toBe('deferred');
-    const apiCalls = calls.filter((c) => c.label === 'review:api-security-reviewer');
-    expect(apiCalls).toHaveLength(2); // one wave attempt + ONE deferred attempt
-    expect(apiCalls[1].solo).toBe(true); // the recovery ran with no sibling in flight
-    // Progress honesty: at the moment the deferred attempt ran, the reviewer was NOT yet
-    // completed — a kill mid-recovery must still name it unfinished (ship convergence).
-    expect(apiCalls[1].completedNow).not.toContain('api-security-reviewer');
-    // Every retried row recovered to a clean PASS; nothing stayed voided.
-    expect(rows.every((e) => e.status === 'pass')).toBe(true);
-  });
-
-  it('the commit/ship path gains NO deferral: one judge run, inconclusive, fail-open', async () => {
-    const repo = consumerRepo({ backend: true });
-    // Stated, not inherited: the commit/ship lane is defined by the ABSENCE of the review-mode
-    // keys, so pin them here rather than leaning on suite cleanup or test order for the contrast.
-    delete process.env.DEVKIT_RUN_MODE;
-    delete process.env.DEVKIT_REVIEW_ASSET_ROOT;
-    delete process.env.DEVKIT_REVIEW_PROGRESS;
-    const exec = mkExec(async () => 'VERDICT: PASS'); // never writes an artifact
-    expect(await runReviewGate(repo, { exec })).toBe(2);
-    const apiCalls = exec.mock.calls.filter((c) => c[0].label === 'review:api-security-reviewer');
-    expect(apiCalls).toHaveLength(1); // the review-only retry must never leak into commits/ships
-  });
-
-  it('a deferred lens part still lands in ONE merged review_result carrying all four groups', async () => {
-    delete process.env.GUARD_CORRECTNESS_SPLIT; // the shipped four-way default
-    const repo = consumerRepo({ backend: true });
-    reviewEnv(repo);
-    const failLens = 'state-transitions';
-    let targetCalls = 0;
-    const exec = mkExec(async ({ label, args }) => {
-      writeArtifact(repo, label);
-      const groups: readonly (readonly string[])[] = FOUR_WAY_LENS_GROUPS;
-      const group = groups.find((g) => args[1].includes(g[0]));
-      if (label === 'review:correctness-reviewer' && group) {
-        const isTarget = group[0] === failLens;
-        if (isTarget) targetCalls++;
-        // The target group withholds its artifact on the FIRST (contended-wave) attempt only.
-        if (!isTarget || targetCalls > 1) {
-          writeFileSync(
-            join(repo, `.claude/.correctness-review-${lensGroupId(group)}.json`),
-            JSON.stringify({
-              items: [{ name: group[0], category: 'X', status: 'pass', issues: [] }],
-            }),
-          );
-        }
-      }
-      return 'VERDICT: PASS';
-    });
-    expect(await runReviewGate(repo, { exec })).toBe(0);
-    const rows = events(repo).filter(
-      (e) => e.type === 'review_result' && e.reviewer === 'correctness-reviewer',
-    );
-    expect(rows).toHaveLength(1); // gate-verdict-attribution: ONE row however the parts settled
-    expect(rows[0].lens_parts).toHaveLength(FOUR_WAY_LENS_GROUPS.length);
-    const parts = rows[0].lens_parts as { lens: string; retried?: boolean; status: string }[];
-    expect(parts.find((p) => p.lens === failLens)?.retried).toBe(true);
-    expect(parts.every((p) => p.status === 'pass')).toBe(true);
-    expect(rows[0].retried).toBe(true);
-    expect(targetCalls).toBe(2);
   });
 });
