@@ -14,10 +14,10 @@
 # gates actually run instead of failing open.
 #
 # QA stays in the shared tree — the worktree exists only for the commit instant
-# and is removed on exit. Scope is explicit paths; never auto-detect, because in a
-# shared tree your files are indistinguishable from parallel work.
+# and is removed on exit. Dirty-tree scope stays explicit; --from-branch is the opt-in
+# exception because committed Git objects provide an ownership boundary.
 #
-# Usage:   ship-branch.sh <branch> "<title>" [--dry-gates] [--base <b>] [--body-file <f>] [--link <d>]... [--] <path...>
+# Usage:   ship-branch.sh <branch> "<title>" [--dry-gates] [--base <b>] [--from-branch] [--body-file <f>] [--link <d>]... [--] <path...>
 #          # PR body via stdin, --body or --body-file; bare positional paths (no --) are accepted.
 # Retry:   ship-branch.sh --resume <branch> [--body-file <f>] [--] <extra-path...>
 #          # replays the invocation recorded by the previous attempt (ship-intent.mts)
@@ -43,6 +43,13 @@ unset DEVKIT_MANAGED_SIGNAL_ROOT
 # ordering review-target.sh uses. An explicit GIT_SSH_COMMAND stays the caller's.
 export GIT_TERMINAL_PROMPT=0
 export GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -o BatchMode=yes}"
+
+# Bound branch-source advertisement/fetch before the already-bounded gate runner starts. The shared
+# supervisor terminates the complete Git/helper process group on expiry (portable on macOS/Linux).
+bounded_remote_git() {
+  node "$SCRIPT_DIR/review/process/gate-supervisor.mts" \
+    "${DEVKIT_REMOTE_TIMEOUT_SECONDS:-60}" -- git "$@"
+}
 
 # `--resume <branch>` replays the invocation the previous attempt recorded (ship-intent.mts). A
 # gate block deletes the ephemeral worktree AND branch, so before the manifest existed every retry
@@ -80,6 +87,7 @@ DRY_GATES=0        # exact ship staging + deterministic/comment gates; no commit
 BODY_SET=0         # --body given? else --body-file, else stdin (back-compat)
 BODY_FILE_SET=0    # --body-file <path>: author the body ONCE in a file; survives every retry
 BASE_FLAG=""       # --base <branch>? else base off this checkout's HEAD/current branch
+FROM_BRANCH=0      # derive a frozen committed path set from origin/<base>..HEAD
 QAVIS_PUBLISH=1     # passed staged evidence is published after the PR exists; explicit opt-out only
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -96,6 +104,9 @@ while [ "$#" -gt 0 ]; do
     --dry-gates)
       [ "$RESUME" -eq 0 ] || { echo "--dry-gates cannot be combined with --resume" >&2; exit 1; }
       DRY_GATES=1; shift ;;
+    --from-branch)
+      [ "$RESUME" -eq 0 ] || { echo "--resume replays the recorded source mode — omit --from-branch" >&2; exit 1; }
+      FROM_BRANCH=1; shift ;;
     --no-qavis-publish) QAVIS_PUBLISH=0; shift ;;
     --resume) echo "--resume must come FIRST: devkit ship --resume <branch> [--] <extra-path...>" >&2; exit 1 ;;
     --) shift; while [ "$#" -gt 0 ]; do PATHS+=("$1"); shift; done; break ;;
@@ -126,8 +137,9 @@ if [ "$RESUME" -eq 1 ]; then
   while IFS= read -r -d '' si_field; do SI_FIELDS+=("$si_field"); done < "$SI_OUT"
   rm -f "$SI_OUT"
   # Field order is ship-intent.mts's emitFields contract:
-  #   mode, title, base, noQavisPublish, createdAt, generation, nlinks, <links...>, body, <paths...>
-  [ "${#SI_FIELDS[@]}" -ge 9 ] || { echo "recorded invocation is malformed — run the full devkit ship command" >&2; exit 1; }
+  #   mode, sourceMode, title, base, noQavisPublish, updatePrBody, createdAt, generation,
+  #   sourceAttemptId, nlinks, <links...>, body, <paths...>. New-ship ignores updatePrBody.
+  [ "${#SI_FIELDS[@]}" -ge 12 ] || { echo "recorded invocation is malformed — run the full devkit ship command" >&2; exit 1; }
   SI_MODE=${SI_FIELDS[0]}
   if [ "$SI_MODE" = "reship" ]; then
     # The blocked attempt was a `--pr` re-push; hand over so the agent needn't remember which form
@@ -137,15 +149,22 @@ if [ "$RESUME" -eq 1 ]; then
     DEVKIT_SHIP_RESUME_DISPATCHED=1 exec bash "$SCRIPT_DIR/reship.sh" --resume "$BR" ${RESUME_ARGS[@]+"${RESUME_ARGS[@]}"}
   fi
   [ "$SI_MODE" = "ship" ] || { echo "recorded invocation has unrecognised mode '$SI_MODE' — run the full devkit ship command" >&2; exit 1; }
-  TITLE=${SI_FIELDS[1]}
-  BASE_FLAG=${SI_FIELDS[2]}
-  [ "${SI_FIELDS[3]}" != "1" ] || QAVIS_PUBLISH=0
-  RESUME_CREATED=${SI_FIELDS[4]}
-  RESUME_GENERATION=${SI_FIELDS[5]}
-  SI_NLINKS=${SI_FIELDS[6]}
+  SI_SOURCE_MODE=${SI_FIELDS[1]}
+  case "$SI_SOURCE_MODE" in
+    explicit) FROM_BRANCH=0 ;;
+    branch) FROM_BRANCH=1 ;;
+    *) echo "recorded invocation has unrecognised source mode '$SI_SOURCE_MODE' — run the full devkit ship command" >&2; exit 1 ;;
+  esac
+  TITLE=${SI_FIELDS[2]}
+  BASE_FLAG=${SI_FIELDS[3]}
+  [ "${SI_FIELDS[4]}" != "1" ] || QAVIS_PUBLISH=0
+  RESUME_CREATED=${SI_FIELDS[6]}
+  RESUME_GENERATION=${SI_FIELDS[7]}
+  RESUME_SOURCE_ATTEMPT_ID=${SI_FIELDS[8]}
+  SI_NLINKS=${SI_FIELDS[9]}
   case "$SI_NLINKS" in *[!0-9]*|'') echo "recorded invocation is malformed (nlinks '$SI_NLINKS')" >&2; exit 1 ;; esac
-  si_i=7
-  si_body_at=$((7 + SI_NLINKS))
+  si_i=10
+  si_body_at=$((10 + SI_NLINKS))
   [ "${#SI_FIELDS[@]}" -gt $((si_body_at + 1)) ] || { echo "recorded invocation is malformed (missing body/paths)" >&2; exit 1; }
   while [ "$si_i" -lt "$si_body_at" ]; do LINK_EXTRA+=("${SI_FIELDS[$si_i]}"); si_i=$((si_i + 1)); done
   RESUME_BODY=${SI_FIELDS[$si_body_at]}
@@ -156,6 +175,10 @@ if [ "$RESUME" -eq 1 ]; then
   # RESUME_EXTRA_PATHS: only what THIS retry explicitly briefed beyond the record — the sole set a
   # losing re-record may donate to a newer invocation (its stale recorded list must never leak in).
   RESUME_EXTRA_PATHS=()
+  if [ "$FROM_BRANCH" -eq 1 ] && [ "${#PATHS[@]}" -gt 0 ]; then
+    echo "--from-branch resume has frozen path membership and refuses extra paths; run a fresh full --from-branch invocation to derive a new committed set" >&2
+    exit 1
+  fi
   for p in ${PATHS[@]+"${PATHS[@]}"}; do
     si_dup=0
     for q in "${SI_PATHS[@]}"; do [ "$q" = "$p" ] && { si_dup=1; break; }; done
@@ -167,17 +190,29 @@ if [ "$RESUME" -eq 1 ]; then
   echo "Resuming recorded invocation for $BR: \"$TITLE\" — ${#PATHS[@]} paths, body $(printf '%s' "$RESUME_BODY" | wc -c | tr -d ' ') bytes, recorded $RESUME_CREATED" >&2
 fi
 
-[ "${#PATHS[@]}" -gt 0 ] || { echo "no paths given" >&2; exit 1; }
+[ "$FROM_BRANCH" -eq 0 ] || [ -n "$BASE_FLAG" ] || { echo "--from-branch requires --base <remote-branch>" >&2; exit 1; }
+if [ "$RESUME" -eq 0 ] && [ "$FROM_BRANCH" -eq 1 ] && [ "${#PATHS[@]}" -gt 0 ]; then
+  echo "--from-branch derives its path set and cannot be combined with explicit paths" >&2
+  exit 1
+fi
+[ "$FROM_BRANCH" -eq 1 ] || [ "${#PATHS[@]}" -gt 0 ] || { echo "no paths given" >&2; exit 1; }
+if [ "$FROM_BRANCH" -eq 1 ]; then
+  # The mode constructs its own root-anchored literal selectors. Ambient Git pathspec modes either
+  # reinterpret those magic prefixes as plain text or conflict with them, so they are not inputs.
+  unset GIT_LITERAL_PATHSPECS GIT_GLOB_PATHSPECS GIT_NOGLOB_PATHSPECS GIT_ICASE_PATHSPECS
+fi
 # Files only: `git diff/ls-files -- <dir>` recurses and would sweep in a parallel
 # agent's edits under that directory, defeating the per-file isolation. (A deleted
 # file is not a dir, so it still passes — deletions are valid pathspecs.)
-for p in "${PATHS[@]}"; do
-  [ -d "$p" ] && {
-    echo "directory path not allowed (pass individual files): $p" >&2
-    echo "  list its tracked files: git ls-files -- \"$p\"" >&2
-    exit 1
-  }
-done
+if [ "$FROM_BRANCH" -eq 0 ]; then
+  for p in "${PATHS[@]}"; do
+    [ -d "$p" ] && {
+      echo "directory path not allowed (pass individual files): $p" >&2
+      echo "  list its tracked files: git ls-files -- \"$p\"" >&2
+      exit 1
+    }
+  done
+fi
 
 # Assemble extra symlinks; prepare-gate-worktree.sh adds the universal base.
 LINK_DIRS=()
@@ -213,6 +248,11 @@ if git show-ref --verify -q "refs/heads/$BR"; then
   fi
   LOCAL_BRANCH_EXISTS=1
 fi
+if [ -n "$LOCAL_BRANCH_EXISTS" ] && [ "$FROM_BRANCH" -eq 1 ] && [ "$RESUME" -eq 0 ]; then
+  echo "branch already exists: $BR" >&2
+  echo "  a fresh --from-branch invocation cannot adopt a prior receipt; use devkit ship --resume '$BR' to replay its recorded v3 branch source, or choose a new branch name" >&2
+  exit 1
+fi
 if [ -z "${SHIP_DRY_RUN:-}" ] && [ "$DRY_GATES" -eq 0 ] && ! command -v gh >/dev/null 2>&1; then
   echo "gh not installed (needed to open the PR)" >&2; exit 1
 fi
@@ -223,7 +263,7 @@ if [ -z "${SHIP_DRY_RUN:-}" ] && [ "$DRY_GATES" -eq 0 ]; then
   set +e
   # Fully-qualified, NOT a bare `$BR`: a bare pattern tail-matches on path segments, so shipping `x`
   # would read `refs/heads/feat/x` as "this branch already exists" and refuse a legitimate name.
-  git ls-remote --exit-code --heads origin "refs/heads/$BR" >/dev/null 2>&1
+  bounded_remote_git ls-remote --exit-code --heads origin "refs/heads/$BR" >/dev/null 2>&1
   remote_check=$?
   set -e
   # ls-remote exits 2 for "no matching ref" but ALSO non-zero on auth/network error — only exit 2
@@ -293,7 +333,62 @@ fi
 # The commit the ephemeral worktree is cut from — and therefore what the gates judge and what the PR
 # diffs against. Resolved AFTER the seam above: --base needs the network, and the seam promises no
 # side effects. Nothing between there and here reads $BASE.
-if [ -n "$BASE_FLAG" ]; then
+SOURCE_HEAD=""
+if [ "$FROM_BRANCH" -eq 1 ]; then
+  # A post-commit receipt resume publishes the immutable gated OID, so the caller's current HEAD is
+  # not an input. Pre-commit/new runs pin it before the network step and never chase a moving HEAD.
+  [ -n "$LOCAL_BRANCH_EXISTS" ] || SOURCE_HEAD=$(git -C "$ROOT" rev-parse HEAD)
+
+  # Pin the advertised branch OID, then fetch its objects without a destination or FETCH_HEAD. This
+  # uses the normal fetch transport (including HTTPS remote helpers) while creating no ref that can
+  # survive SIGKILL. A force-update between the two calls can make the advertised object unavailable;
+  # one retry obtains a new coherent advertisement rather than guessing.
+  BASE_ADVERTISEMENT=$(mktemp "${TMPDIR:-/tmp}/ship-base-advertisement.XXXXXX")
+  BASE=""
+  base_attempt=0
+  while [ "$base_attempt" -lt 2 ] && [ -z "$BASE" ]; do
+    base_attempt=$((base_attempt + 1))
+    set +e
+    bounded_remote_git -C "$ROOT" ls-remote --exit-code --heads origin "refs/heads/$BASE_REF" > "$BASE_ADVERTISEMENT" 2>/dev/null
+    base_advertise_status=$?
+    set -e
+    case "$base_advertise_status" in
+      0) ;;
+      2) rm -f "$BASE_ADVERTISEMENT"
+         echo "--base: no branch origin/$BASE_REF (a PR base must be a remote branch — not a sha or a tag)" >&2
+         exit 1 ;;
+      *) rm -f "$BASE_ADVERTISEMENT"
+         echo "--from-branch: could not verify origin/$BASE_REF (ls-remote exit $base_advertise_status)" >&2
+         exit 1 ;;
+    esac
+    advertised_oid=""
+    advertised_ref=""
+    advertised_extra=""
+    advertised_lines=0
+    while read -r candidate_oid candidate_ref candidate_extra; do
+      advertised_lines=$((advertised_lines + 1))
+      advertised_oid=$candidate_oid
+      advertised_ref=$candidate_ref
+      advertised_extra=$candidate_extra
+    done < "$BASE_ADVERTISEMENT"
+    if [ "$advertised_lines" -ne 1 ] || [ "$advertised_ref" != "refs/heads/$BASE_REF" ] || [ -n "$advertised_extra" ]; then
+      rm -f "$BASE_ADVERTISEMENT"
+      echo "--from-branch: origin/$BASE_REF returned an invalid advertised identity; refusing to guess" >&2
+      exit 1
+    fi
+    bounded_remote_git -C "$ROOT" fetch -q --no-tags --no-write-fetch-head --refmap= origin "refs/heads/$BASE_REF" 2>/dev/null || {
+      rm -f "$BASE_ADVERTISEMENT"
+      echo "--from-branch: could not fetch the advertised origin/$BASE_REF commit" >&2
+      exit 1
+    }
+    if git -C "$ROOT" cat-file -e "$advertised_oid^{commit}" 2>/dev/null; then BASE=$advertised_oid; fi
+  done
+  rm -f "$BASE_ADVERTISEMENT"
+  [ -n "$BASE" ] || {
+    echo "--from-branch: origin/$BASE_REF moved incompatibly during both pin attempts; retry" >&2
+    exit 1
+  }
+elif [ -n "$BASE_FLAG" ]; then
   # origin's tip, not the local copy: in a shared parallel-agent checkout the local base branch is
   # routinely stale, and a worktree cut from a stale base makes the gates judge code GitHub will never
   # merge into. (The PR DIFF would still be right — GitHub diffs from the merge-base — so this buys
@@ -310,16 +405,118 @@ else
   BASE=$(git rev-parse HEAD)   # pin once: shared HEAD may advance mid-run
 fi
 
-# devkit self-host only: inspect the CALLER tree before the ephemeral worktree hides ignored,
-# unbriefed dist artifacts. Installed consumer copies run the same helper, which no-ops unless the
-# caller package is @norvalbv/devkit. Prefer source beside this script, then packaged .mjs.
-DIST_INTEGRITY="$SCRIPT_DIR/dist-integrity.mts"
-[ -f "$DIST_INTEGRITY" ] || DIST_INTEGRITY="$SCRIPT_DIR/dist-integrity.mjs"
-node "$DIST_INTEGRITY" --root "$ROOT" --base "$BASE" -- "${PATHS[@]}"
+if [ "$FROM_BRANCH" -eq 1 ]; then
+  if [ -z "$LOCAL_BRANCH_EXISTS" ]; then
+    set +e
+    git -C "$ROOT" merge-base --is-ancestor "$BASE" "$SOURCE_HEAD" >/dev/null 2>&1
+    ancestry_status=$?
+    set -e
+    case "$ancestry_status" in
+      0) ;;
+      1) echo "--from-branch: origin/$BASE_REF (${BASE:0:7}) is not an ancestor of HEAD (${SOURCE_HEAD:0:7}); rebase/merge the base, or deepen a shallow checkout, then retry" >&2; exit 1 ;;
+      *) echo "--from-branch: could not verify ancestry (git exit $ancestry_status); fetch/deepen the repository and retry" >&2; exit 1 ;;
+    esac
+
+    if [ "$RESUME" -eq 0 ]; then
+      BRANCH_PATHS_FILE=$(mktemp "${TMPDIR:-/tmp}/ship-branch-paths.XXXXXX")
+      if ! git -C "$ROOT" diff --name-only --no-renames -z "$BASE" "$SOURCE_HEAD" -- \
+        | node "$SHIP_INTENT" validate-paths > "$BRANCH_PATHS_FILE"; then
+        rm -f "$BRANCH_PATHS_FILE"
+        exit 1
+      fi
+      while IFS= read -r -d '' branch_path; do PATHS+=("$branch_path"); done < "$BRANCH_PATHS_FILE"
+      rm -f "$BRANCH_PATHS_FILE"
+    fi
+  fi
+  [ "${#PATHS[@]}" -gt 0 ] || {
+    echo "--from-branch: origin/$BASE_REF and HEAD have no committed path differences" >&2
+    exit 1
+  }
+
+  # Raw PATHS are the storage/display identity. Only Git selectors receive this separately audited,
+  # root-anchored literal representation, so names such as '*.txt' and ':(exclude)*' stay filenames.
+  GIT_PATHS=()
+  for p in "${PATHS[@]}"; do GIT_PATHS+=(":(top,literal)$p"); done
+
+  if [ -z "$LOCAL_BRANCH_EXISTS" ]; then
+    # `literal` prevents wildcard/magic reinterpretation but a literal that is now a DIRECTORY still
+    # recursively selects descendants. Prove Git's actual BASE..HEAD selection is a subset of the
+    # frozen identities before any overlay check or staging can absorb a newly committed child.
+    BRANCH_MEMBERS_FILE=$(mktemp "${TMPDIR:-/tmp}/ship-branch-members.XXXXXX")
+    BRANCH_SELECTED_FILE=$(mktemp "${TMPDIR:-/tmp}/ship-branch-selected.XXXXXX")
+    printf '%s\0' "${PATHS[@]}" > "$BRANCH_MEMBERS_FILE"
+    git -C "$ROOT" diff --name-only --no-renames -z "$BASE" "$SOURCE_HEAD" -- "${GIT_PATHS[@]}" > "$BRANCH_SELECTED_FILE"
+    if ! node "$SHIP_INTENT" validate-membership --members-file "$BRANCH_MEMBERS_FILE" < "$BRANCH_SELECTED_FILE"; then
+      rm -f "$BRANCH_MEMBERS_FILE" "$BRANCH_SELECTED_FILE"
+      exit 1
+    fi
+    rm -f "$BRANCH_SELECTED_FILE"
+
+    GITLINKS_FILE=$(mktemp "${TMPDIR:-/tmp}/ship-branch-gitlinks.XXXXXX")
+    : > "$GITLINKS_FILE"
+    git -C "$ROOT" ls-tree -r -z "$BASE" -- "${GIT_PATHS[@]}" >> "$GITLINKS_FILE"
+    git -C "$ROOT" ls-tree -r -z "$SOURCE_HEAD" -- "${GIT_PATHS[@]}" >> "$GITLINKS_FILE"
+    GITLINK_PATHS=()
+    while IFS= read -r -d '' tree_entry; do
+      tree_meta=${tree_entry%%$'\t'*}
+      [ "${tree_meta%% *}" = "160000" ] || continue
+      tree_path=${tree_entry#*$'\t'}
+      gitlink_seen=0
+      for p in ${GITLINK_PATHS[@]+"${GITLINK_PATHS[@]}"}; do [ "$p" = "$tree_path" ] && { gitlink_seen=1; break; }; done
+      [ "$gitlink_seen" -eq 1 ] || GITLINK_PATHS+=("$tree_path")
+    done < "$GITLINKS_FILE"
+    rm -f "$GITLINKS_FILE"
+    if [ "${#GITLINK_PATHS[@]}" -gt 0 ]; then
+      echo "--from-branch does not ship changed gitlink/submodule entries:" >&2
+      for p in "${GITLINK_PATHS[@]}"; do printf '  %q\n' "$p" >&2; done
+      rm -f "$BRANCH_MEMBERS_FILE"
+      exit 1
+    fi
+    # Every member came from `git diff --name-only`, so it identifies a leaf entry in BASE, HEAD,
+    # or both. Do not reject a member merely because it is a directory in the current checkout: a
+    # valid file -> directory transition yields both the deleted file `foo` and added `foo/bar`.
+
+    INDEX_OVERLAYS=$(mktemp "${TMPDIR:-/tmp}/ship-branch-index.XXXXXX")
+    WORKTREE_OVERLAYS=$(mktemp "${TMPDIR:-/tmp}/ship-branch-worktree.XXXXXX")
+    UNTRACKED_OVERLAYS=$(mktemp "${TMPDIR:-/tmp}/ship-branch-untracked.XXXXXX")
+    IGNORED_OVERLAYS=$(mktemp "${TMPDIR:-/tmp}/ship-branch-ignored.XXXXXX")
+    git -C "$ROOT" diff --cached --name-only -z "$SOURCE_HEAD" -- "${GIT_PATHS[@]}" \
+      | node "$SHIP_INTENT" filter-membership --members-file "$BRANCH_MEMBERS_FILE" > "$INDEX_OVERLAYS"
+    git -C "$ROOT" diff --name-only -z -- "${GIT_PATHS[@]}" \
+      | node "$SHIP_INTENT" filter-membership --members-file "$BRANCH_MEMBERS_FILE" > "$WORKTREE_OVERLAYS"
+    git -C "$ROOT" ls-files -o --exclude-standard -z -- "${GIT_PATHS[@]}" \
+      | node "$SHIP_INTENT" filter-membership --members-file "$BRANCH_MEMBERS_FILE" > "$UNTRACKED_OVERLAYS"
+    git -C "$ROOT" ls-files -o -i --exclude-standard -z -- "${GIT_PATHS[@]}" \
+      | node "$SHIP_INTENT" filter-membership --members-file "$BRANCH_MEMBERS_FILE" > "$IGNORED_OVERLAYS"
+    if [ -s "$INDEX_OVERLAYS" ] || [ -s "$WORKTREE_OVERLAYS" ] || [ -s "$UNTRACKED_OVERLAYS" ] || [ -s "$IGNORED_OVERLAYS" ]; then
+      echo "--from-branch refuses uncommitted overlays on --from-branch paths; commit or remove these exact overlays:" >&2
+      for overlay_pair in \
+        "$INDEX_OVERLAYS:index" "$WORKTREE_OVERLAYS:worktree" \
+        "$UNTRACKED_OVERLAYS:untracked" "$IGNORED_OVERLAYS:ignored"; do
+        overlay_file=${overlay_pair%:*}; overlay_kind=${overlay_pair##*:}
+        while IFS= read -r -d '' p; do printf '  %q (%s)\n' "$p" "$overlay_kind" >&2; done < "$overlay_file"
+      done
+      rm -f "$BRANCH_MEMBERS_FILE" "$INDEX_OVERLAYS" "$WORKTREE_OVERLAYS" "$UNTRACKED_OVERLAYS" "$IGNORED_OVERLAYS"
+      exit 1
+    fi
+    rm -f "$BRANCH_MEMBERS_FILE" "$INDEX_OVERLAYS" "$WORKTREE_OVERLAYS" "$UNTRACKED_OVERLAYS" "$IGNORED_OVERLAYS"
+    CURRENT_HEAD=$(git -C "$ROOT" rev-parse HEAD)
+    [ "$CURRENT_HEAD" = "$SOURCE_HEAD" ] || {
+      echo "--from-branch: HEAD moved while the committed snapshot was prepared (${SOURCE_HEAD:0:7} -> ${CURRENT_HEAD:0:7}); retry" >&2
+      exit 1
+    }
+    echo "--from-branch: ${#PATHS[@]} committed path(s), origin/$BASE_REF ${BASE:0:7} -> HEAD ${SOURCE_HEAD:0:7}" >&2
+    for p in "${PATHS[@]}"; do printf '  %q\n' "$p" >&2; done
+  fi
+else
+  GIT_PATHS=("${PATHS[@]}")
+fi
 
 # Preview the raw-line ratchet against the exact base baseline BEFORE creating the worktree.
 . "$SCRIPT_DIR/prepare-gate-worktree.sh"
-ship_size_preflight "$ROOT" "$BASE" "${PATHS[@]}"
+if [ "$FROM_BRANCH" -eq 0 ] || [ -z "$LOCAL_BRANCH_EXISTS" ]; then
+  ship_size_preflight "$ROOT" "$BASE" "${PATHS[@]}"
+fi
 
 # Nothing to commit → say so NOW. Staging (below) has exactly three inputs: the tracked diff vs
 # BASE, the untracked files in scope, and the untracked-but-IGNORED files in scope (a briefed path
@@ -335,9 +532,9 @@ ship_size_preflight "$ROOT" "$BASE" "${PATHS[@]}"
 # false abort. Says "no changes in" rather than "identical to": a misspelled path also lands here
 # (`git diff --quiet -- nonexistent` exits 0), and the wording stays true for it.
 if [ -z "$LOCAL_BRANCH_EXISTS" ] &&
-   git -C "$ROOT" diff --quiet "$BASE" -- "${PATHS[@]}" &&
-   [ -z "$(git -C "$ROOT" ls-files -o --exclude-standard -- "${PATHS[@]}")" ] &&
-   [ -z "$(git -C "$ROOT" ls-files -o -i --exclude-standard -- "${PATHS[@]}")" ]; then
+   git -C "$ROOT" diff --quiet "$BASE" ${SOURCE_HEAD:+"$SOURCE_HEAD"} -- "${GIT_PATHS[@]}" &&
+   [ -z "$(git -C "$ROOT" ls-files -o --exclude-standard -- "${GIT_PATHS[@]}")" ] &&
+   [ -z "$(git -C "$ROOT" ls-files -o -i --exclude-standard -- "${GIT_PATHS[@]}")" ]; then
   echo "nothing to commit: no changes in ${PATHS[*]} vs $BASE_REF (${BASE:0:7})" >&2
   if [ -n "$BASE_FLAG" ]; then
     # --base already answers "your work is committed elsewhere" — the remaining causes are a base that
@@ -350,8 +547,6 @@ if [ -z "$LOCAL_BRANCH_EXISTS" ] &&
 fi
 
 WT="${TMPDIR:-/tmp}/devkit-ship-${BR//\//-}-$$"
-PATCH=$(mktemp "${TMPDIR:-/tmp}/ship.XXXXXX")
-STAGED_STATE=$(mktemp "${TMPDIR:-/tmp}/ship-staged.XXXXXX")
 # Body: --body "<text>" wins (explicit, no temp file); then --body-file (authored once, survives
 # every retry); then — on --resume — the recorded body, with stdin never consulted (a re-run heredoc
 # does not survive a wrapper, and a closed stdin reads as a silently EMPTY body); else stdin
@@ -387,24 +582,58 @@ export DEVKIT_SHIP_ID="${DEVKIT_SHIP_ID:-$(uuidgen 2>/dev/null || echo "${BR//\/
 export DEVKIT_SHIP_REPO="$(devkit_repo_identity "$ROOT")" DEVKIT_SHIP_BRANCH="$BR"
 export DEVKIT_SHIP_RESUMED=$RESUME
 SHIP_INTENT_GENERATION=""
+SHIP_SOURCE_ATTEMPT_ID=
+export DEVKIT_SHIP_INTENT_RECORDED=0
 if [ "$DRY_GATES" -eq 0 ]; then
   SHIP_INTENT_ARGS=(write --root "$ROOT" --branch "$BR" --mode ship --title "$TITLE")
+  [ "$FROM_BRANCH" -eq 0 ] || SHIP_INTENT_ARGS+=(--source-mode branch)
   [ -z "$BASE_FLAG" ] || SHIP_INTENT_ARGS+=(--base "$BASE_FLAG")
   for d in ${LINK_EXTRA[@]+"${LINK_EXTRA[@]}"}; do SHIP_INTENT_ARGS+=(--link "$d"); done
   [ "$QAVIS_PUBLISH" -eq 1 ] || SHIP_INTENT_ARGS+=(--no-qavis-publish)
   if [ "$RESUME" -eq 1 ]; then
-    SHIP_INTENT_ARGS+=(--resumed --merge-paths --expect-generation "$RESUME_GENERATION")
-    for p in ${RESUME_EXTRA_PATHS[@]+"${RESUME_EXTRA_PATHS[@]}"}; do SHIP_INTENT_ARGS+=(--donate "$p"); done
+    SHIP_INTENT_ARGS+=(--resumed --expect-generation "$RESUME_GENERATION")
+    if [ "$FROM_BRANCH" -eq 0 ]; then
+      SHIP_INTENT_ARGS+=(--merge-paths)
+      for p in ${RESUME_EXTRA_PATHS[@]+"${RESUME_EXTRA_PATHS[@]}"}; do SHIP_INTENT_ARGS+=(--donate "$p"); done
+    elif [ -n "$LOCAL_BRANCH_EXISTS" ]; then
+      # A preserved branch+receipt retry keeps the source owner that receipt binds. A pre-commit
+      # retry has no local ship branch and intentionally refreshes bytes from current HEAD.
+      SHIP_INTENT_ARGS+=(--source-attempt-id "$RESUME_SOURCE_ATTEMPT_ID")
+    else
+      SHIP_SOURCE_ATTEMPT_ID=$(uuidgen 2>/dev/null || echo "$DEVKIT_SHIP_ID-source-$$-$RANDOM")
+      SHIP_INTENT_ARGS+=(--source-attempt-id "$SHIP_SOURCE_ATTEMPT_ID")
+    fi
   fi
+fi
+
+record_ship_intent() {
+  [ "$DRY_GATES" -eq 0 ] || return 0
   # Capture the record's ownership token (write prints a per-attempt random generation): success may delete ONLY the
   # record this attempt wrote — a concurrent attempt's newer record must survive for ITS --resume.
   SHIP_INTENT_GENERATION=$(printf '%s' "$BODY" | node "$SHIP_INTENT" "${SHIP_INTENT_ARGS[@]}" -- "${PATHS[@]}") \
     || { SHIP_INTENT_GENERATION=""; echo "ship: invocation not recorded — the retry needs the full command (non-fatal)" >&2; }
-fi
-# Exported flag (not the token itself) so the SUBPROCESS gate runner's timeout banner can tell a
-# recorded attempt (--resume works) from an unrecorded one (--resume would refuse by name).
-export DEVKIT_SHIP_INTENT_RECORDED=$([ -n "$SHIP_INTENT_GENERATION" ] && echo 1 || echo 0)
+  [ -n "$SHIP_INTENT_GENERATION" ] || SHIP_SOURCE_ATTEMPT_ID=
+  # Exported flag (not the token itself) so the SUBPROCESS gate runner's timeout banner can tell a
+  # recorded attempt (--resume works) from an unrecorded one (--resume would refuse by name).
+  export DEVKIT_SHIP_INTENT_RECORDED=$([ -n "$SHIP_INTENT_GENERATION" ] && echo 1 || echo 0)
+  if [ "$FROM_BRANCH" -eq 1 ] && [ -n "$SHIP_INTENT_GENERATION" ]; then
+    if [ -z "$SHIP_SOURCE_ATTEMPT_ID" ]; then
+      if [ "$RESUME" -eq 1 ] && [ -n "$LOCAL_BRANCH_EXISTS" ]; then SHIP_SOURCE_ATTEMPT_ID=$RESUME_SOURCE_ATTEMPT_ID
+      else SHIP_SOURCE_ATTEMPT_ID=$SHIP_INTENT_GENERATION
+      fi
+    fi
+  fi
+}
 
+# A preserved-commit resume must win its intent CAS before the receipt/source-owner comparison
+# below. Fresh attempts wait for atomic branch creation instead, so a losing creator never records.
+[ -z "$LOCAL_BRANCH_EXISTS" ] || record_ship_intent
+
+DIST_INTEGRITY="$SCRIPT_DIR/dist-integrity.mts"
+[ -f "$DIST_INTEGRITY" ] || DIST_INTEGRITY="$SCRIPT_DIR/dist-integrity.mjs"
+
+PATCH=$(mktemp "${TMPDIR:-/tmp}/ship.XXXXXX")
+STAGED_STATE=$(mktemp "${TMPDIR:-/tmp}/ship-staged.XXXXXX")
 SHIP_RUN_MODE=live
 [ -z "${SHIP_DRY_RUN:-}" ] || SHIP_RUN_MODE=dry
 [ "$DRY_GATES" -eq 0 ] || SHIP_RUN_MODE=dry-gates
@@ -415,6 +644,8 @@ RECOVERY_PATHS_ALL=
 RECOVERY_PATHS_CALLER=
 RECOVERY_PATHS_SCOPED=
 RECOVERY_RECEIPT_REF="refs/devkit/ship-receipts/$BR"
+RECOVERY_RECEIPT_INTENT_REF="refs/devkit/ship-receipt-intents/$BR"
+RECOVERY_RECEIPT_INTENT_BLOB=
 # Sibling of the receipt, pinned in the same place at the same instant: a blob holding the
 # NUL-delimited paths this ship's own gate chain added beyond the brief (sc-2089). The receipt proves
 # the commit was gated; this proves which parts of it the caller did not ask for but devkit wrote.
@@ -476,11 +707,23 @@ trap cleanup EXIT
 . "$SCRIPT_DIR/review/process/gate-signal-handoff.sh"
 gate_signal_handoff_init
 
+# This integrity boundary is caller-root-only and must run before any worktree/branch creation. A
+# failure is still resumable: record the invocation after the read-only check fails, then exit.
+set +e
+node "$DIST_INTEGRITY" --root "$ROOT" --base "$BASE" -- "${PATHS[@]}"
+DIST_INTEGRITY_STATUS=$?
+set -e
+if [ "$DIST_INTEGRITY_STATUS" -ne 0 ]; then
+  [ "$DEVKIT_SHIP_INTENT_RECORDED" -eq 1 ] || record_ship_intent
+  exit "$DIST_INTEGRITY_STATUS"
+fi
+
 if [ -n "$LOCAL_BRANCH_EXISTS" ]; then
   # Resume only when the existing branch proves it is the exact output this invocation would have
-  # produced: one commit on this base, the same message, no out-of-scope paths, and a tree rebuilt
-  # from the caller's CURRENT scoped files that is byte-for-byte identical. The temporary index makes
-  # that last check include tracked, untracked and ignored files without touching the caller's index.
+  # produced: one commit on this base, the same message, and no out-of-scope paths. Explicit-path
+  # retries also rebuild a tree from the caller's CURRENT scoped files byte-for-byte. Branch-source
+  # retries intentionally do not: their v3 intent already froze the path membership, and the receipt
+  # proves the preserved commit is the already-gated snapshot to publish even when a gate formatted it.
   RECOVERY_REASON=
   RECOVERY_HINTS=()   # optional indented lines printed between the reason and the closing advice
   # The preflight above may already know WHY this branch exists (a killed ship left it). That is the
@@ -545,6 +788,20 @@ if [ -n "$LOCAL_BRANCH_EXISTS" ]; then
   if [ -z "$RECOVERY_REASON" ] && [ "$RECOVERY_RECEIPT" != "$RECOVERY_COMMIT" ]; then
     RECOVERY_REASON="it has no matching prior-ship gate receipt"
   fi
+  if [ -z "$RECOVERY_REASON" ] && [ "$FROM_BRANCH" -eq 1 ]; then
+    # A branch-source receipt belongs to one source attempt, not merely to a branch name and
+    # commit message. Two full attempts can both pass the absent-branch preflight before either one
+    # creates it; the newer intent must never publish the older attempt's gated bytes. The sibling
+    # blob is updated atomically with the receipt below and names the stable source attempt id this
+    # resume successfully re-recorded. Its separate generation still rotates for record CAS/cleanup;
+    # a lost CAS leaves SHIP_SOURCE_ATTEMPT_ID empty and must refuse rather than trust stale read data.
+    RECOVERY_RECEIPT_INTENT_BLOB=$(git rev-parse -q --verify "$RECOVERY_RECEIPT_INTENT_REF^{blob}" 2>/dev/null || true)
+    RECOVERY_RECEIPT_SOURCE_ATTEMPT_ID=
+    [ -z "$RECOVERY_RECEIPT_INTENT_BLOB" ] || RECOVERY_RECEIPT_SOURCE_ATTEMPT_ID=$(git cat-file blob "$RECOVERY_RECEIPT_INTENT_BLOB" 2>/dev/null || true)
+    if [ -z "$SHIP_SOURCE_ATTEMPT_ID" ] || [ "$RECOVERY_RECEIPT_SOURCE_ATTEMPT_ID" != "$SHIP_SOURCE_ATTEMPT_ID" ]; then
+      RECOVERY_REASON="its gate receipt belongs to a different recorded branch-source attempt"
+    fi
+  fi
 
   # The paths ship's OWN gate chain added to this commit beyond the brief, recorded beside the
   # receipt the instant the commit landed (ship_record_gate_adds). A ratchet gate stages a lowered
@@ -560,7 +817,7 @@ if [ -n "$LOCAL_BRANCH_EXISTS" ]; then
     RECOVERY_GATE_ADDS_BLOB=$(git rev-parse -q --verify "$RECOVERY_GATE_ADDS_REF^{blob}" 2>/dev/null || true)
     if [ -n "$RECOVERY_GATE_ADDS_BLOB" ]; then
       while IFS= read -r -d '' gate_path; do
-        GATE_ADD_EXCLUDE+=(":(exclude,literal)$gate_path")
+        GATE_ADD_EXCLUDE+=(":(top,exclude,literal)$gate_path")
       done < <(git cat-file blob "$RECOVERY_GATE_ADDS_BLOB")
     fi
   fi
@@ -578,15 +835,15 @@ if [ -n "$LOCAL_BRANCH_EXISTS" ]; then
   # IS the PR's diff. Guarded as a whole because a failed parent-count check leaves RECOVERY_PARENT
   # empty, and a bare `git diff ""` would abort under -e before the reason is ever printed.
   if [ -z "$RECOVERY_REASON" ]; then
-    git diff --name-only --no-renames -z "$RECOVERY_PARENT" "$RECOVERY_COMMIT" -- > "$RECOVERY_PATHS_ALL"
+    git -C "$ROOT" diff --name-only --no-renames -z "$RECOVERY_PARENT" "$RECOVERY_COMMIT" -- > "$RECOVERY_PATHS_ALL"
     # Both sides drop the gate-authored paths, so what remains on each is the CALLER's half of the
     # commit. Equality then states exactly "this brief names everything in the commit that the gates
     # did not write themselves" — the same claim as `changed \ briefed ⊆ record`, expressed in git's
     # own pathspec algebra so it stays NUL-exact instead of going through a sort/comm round trip.
-    git diff --name-only --no-renames -z "$RECOVERY_PARENT" "$RECOVERY_COMMIT" \
+    git -C "$ROOT" diff --name-only --no-renames -z "$RECOVERY_PARENT" "$RECOVERY_COMMIT" \
       -- ${GATE_ADD_EXCLUDE[@]+"${GATE_ADD_EXCLUDE[@]}"} > "$RECOVERY_PATHS_CALLER"
-    git diff --name-only --no-renames -z "$RECOVERY_PARENT" "$RECOVERY_COMMIT" \
-      -- "${PATHS[@]}" ${GATE_ADD_EXCLUDE[@]+"${GATE_ADD_EXCLUDE[@]}"} > "$RECOVERY_PATHS_SCOPED"
+    git -C "$ROOT" diff --name-only --no-renames -z "$RECOVERY_PARENT" "$RECOVERY_COMMIT" \
+      -- "${GIT_PATHS[@]}" ${GATE_ADD_EXCLUDE[@]+"${GATE_ADD_EXCLUDE[@]}"} > "$RECOVERY_PATHS_SCOPED"
     # Emptiness stays on the UNFILTERED set: a brief consisting solely of a path a gate also touches
     # is a legitimate ship (a manual baseline burn-down), and testing the filtered set would refuse
     # it with a reason that is not true.
@@ -618,7 +875,13 @@ if [ -n "$LOCAL_BRANCH_EXISTS" ]; then
     fi
   fi
 
-  if [ -z "$RECOVERY_REASON" ]; then
+  if [ -z "$RECOVERY_REASON" ] && [ "$FROM_BRANCH" -eq 1 ]; then
+    # A receipt means this exact commit already passed the gates. Reconstructing it from SOURCE_HEAD
+    # would deadlock whenever a gate formatted one of the frozen paths inside the ship worktree: those
+    # bytes never reach the caller's branch. Resume the receipt's immutable OID; only a PRE-COMMIT
+    # retry (where no preserved branch exists yet) refreshes bytes from the caller's current HEAD.
+    :
+  elif [ -z "$RECOVERY_REASON" ]; then
     RECOVERY_INDEX=$(mktemp "${TMPDIR:-/tmp}/ship-recovery-index.XXXXXX")
     rm -f "$RECOVERY_INDEX" # read-tree must create it; an empty file is not a valid index
     GIT_INDEX_FILE="$RECOVERY_INDEX" git -C "$ROOT" read-tree "$RECOVERY_COMMIT"
@@ -715,17 +978,22 @@ else
     git worktree add -q -b "$BR" "$WT" "$BASE" >&2
     ship_run_record_begin "$WT" "$BR" "$BASE" 1 "$SHIP_RUN_MODE"
   fi
+  # The atomic branch/worktree claim comes before the intent write: only its winner may own the
+  # resumable record. Dist integrity already passed against the caller root before this claim.
+  record_ship_intent
 
-  # Tracked edits (modify + delete, binary-safe) -> worktree index.
-  git -C "$ROOT" diff "$BASE" --binary -- "${PATHS[@]}" > "$PATCH"
+  # Tracked edits (modify + delete, binary-safe) -> worktree index. Branch mode reads only the
+  # pinned commit pair; explicit mode keeps the historical BASE-to-working-tree behavior.
+  git -C "$ROOT" diff "$BASE" ${SOURCE_HEAD:+"$SOURCE_HEAD"} --binary -- "${GIT_PATHS[@]}" > "$PATCH"
   [ -s "$PATCH" ] && git -C "$WT" apply --index "$PATCH"
 
-# Untracked new files in scope -> copy + stage.
-  git -C "$ROOT" ls-files -o --exclude-standard -- "${PATHS[@]}" | while IFS= read -r f; do
-    mkdir -p "$WT/$(dirname "$f")"
-    cp -Pp "$ROOT/$f" "$WT/$f"   # -P: keep a symlink a symlink; -p: preserve mode (the +x bit) regardless of umask
-    git -C "$WT" add -- "$f"
-  done
+  if [ "$FROM_BRANCH" -eq 0 ]; then
+    # Untracked new files in explicit scope -> copy + stage.
+    git -C "$ROOT" ls-files -o --exclude-standard -- "${PATHS[@]}" | while IFS= read -r f; do
+      mkdir -p "$WT/$(dirname "$f")"
+      cp -Pp "$ROOT/$f" "$WT/$f"   # -P: keep a symlink a symlink; -p: preserve mode (the +x bit) regardless of umask
+      git -C "$WT" add -- "$f"
+    done
 
 # ...and the untracked files git IGNORES. `ls-files -o --exclude-standard` omits them BY DESIGN, so
 # a NEW file under a gitignored-but-force-tracked tree fell through both passes: the tracked-diff
@@ -739,12 +1007,13 @@ else
   # MISSED, never to overrule one it expressed. Without the guard, deleting a tracked file whose
   # gitignored copy is back on disk (a regenerable cache — sc-1489's receipt) silently re-adds it and
   # the deletion can never land, however many times it is shipped.
-  git -C "$ROOT" ls-files -o -i --exclude-standard -- "${PATHS[@]}" | while IFS= read -r f; do
-    git -C "$WT" diff --cached --quiet --diff-filter=D -- "$f" || continue
-    mkdir -p "$WT/$(dirname "$f")"
-    cp -Pp "$ROOT/$f" "$WT/$f"
-    git -C "$WT" add -f -- "$f"
-  done
+    git -C "$ROOT" ls-files -o -i --exclude-standard -- "${PATHS[@]}" | while IFS= read -r f; do
+      git -C "$WT" diff --cached --quiet --diff-filter=D -- "$f" || continue
+      mkdir -p "$WT/$(dirname "$f")"
+      cp -Pp "$ROOT/$f" "$WT/$f"
+      git -C "$WT" add -f -- "$f"
+    done
+  fi
 
 # Snapshot the index the instant staging finishes — the two assertions below hold the gate chain to
 # it. See assert-staged-set.sh for the clobber this defends against.
@@ -806,13 +1075,33 @@ else
     # failing closed in that case. A later retry may skip gates only when this ref names its exact tip.
     case "$COMMIT_STATUS" in
       0|124|129|130|131|137|143)
-        git update-ref "$RECOVERY_RECEIPT_REF" "$SHIP_COMMIT"
+        RECEIPT_WRITTEN=0
+        if [ "$FROM_BRANCH" -eq 1 ]; then
+          if [ -n "$SHIP_SOURCE_ATTEMPT_ID" ]; then
+            RECOVERY_RECEIPT_INTENT_BLOB=$(printf '%s' "$SHIP_SOURCE_ATTEMPT_ID" | git -C "$ROOT" hash-object -w --stdin)
+            # One ref transaction prevents a crash or competing attempt from leaving a receipt for
+            # one commit paired with another source attempt's ownership token.
+            git -C "$ROOT" update-ref --stdin <<EOF
+start
+update $RECOVERY_RECEIPT_REF $SHIP_COMMIT
+update $RECOVERY_RECEIPT_INTENT_REF $RECOVERY_RECEIPT_INTENT_BLOB
+prepare
+commit
+EOF
+            RECEIPT_WRITTEN=1
+          else
+            echo "ship: branch-source gate receipt not recorded because this attempt did not own a recorded invocation; an interrupted run cannot be resumed" >&2
+          fi
+        else
+          git update-ref "$RECOVERY_RECEIPT_REF" "$SHIP_COMMIT"
+          RECEIPT_WRITTEN=1
+        fi
         # Pin what the gate chain added beyond the brief, so a retry can resume a commit its OWN
         # gates widened instead of refusing it as out-of-scope (sc-2089). Written only where the
         # receipt is, so a record can never authorise a commit that has no receipt. Best effort by
         # design: every failure path here leaves the retry on the strict comparison, which is the
         # safe direction, and none of them may cost a ship that has already passed every gate.
-        if ship_record_gate_adds "$WT" "$BASE" "$STAGED_STATE" "$GATE_ADDS_FILE"; then
+        if [ "$RECEIPT_WRITTEN" -eq 1 ] && ship_record_gate_adds "$WT" "$BASE" "$STAGED_STATE" "$GATE_ADDS_FILE"; then
           GATE_ADDS_BLOB=$(git -C "$ROOT" hash-object -w --stdin < "$GATE_ADDS_FILE" 2>/dev/null || true)
           if [ -n "$GATE_ADDS_BLOB" ]; then
             git update-ref "$RECOVERY_GATE_ADDS_REF" "$GATE_ADDS_BLOB"
@@ -903,8 +1192,11 @@ fi
 # `gh pr view <branch>` rather than from this field. The recovery hint below normally re-prints this
 # same base and diverges only when it has actually left origin, saying so when it does (sc-2261).
 RMW="$SCRIPT_DIR/reconcile-manifest-write.mts"; [ -f "$RMW" ] || RMW="$SCRIPT_DIR/reconcile-manifest-write.mjs"
+RMW_PATH_MODE=()
+[ "$FROM_BRANCH" -eq 0 ] || RMW_PATH_MODE+=(--literal-paths)
 node "$RMW" \
-  --root "$ROOT" --git-root "$WT" --branch "$BR" --repo "$REPO" --base-ref "$BASE_REF" --base-sha "${RECOVERY_PARENT:-$BASE}" --pr "$PR_NUM" -- "${PATHS[@]}" \
+  --root "$ROOT" --git-root "$WT" --branch "$BR" --repo "$REPO" --base-ref "$BASE_REF" --base-sha "${RECOVERY_PARENT:-$BASE}" --tip-sha "${RECOVERY_COMMIT:-$SHIP_COMMIT}" --pr "$PR_NUM" \
+  ${RMW_PATH_MODE[@]+"${RMW_PATH_MODE[@]}"} -- "${PATHS[@]}" \
   || echo "ship-branch: reconcile manifest not recorded (non-fatal)" >&2
 
 # The push landed, so the recorded invocation is spent — a later ship reusing this branch name must
@@ -969,6 +1261,7 @@ else
   git branch -D "$BR" 2>/dev/null || true
 fi
 git update-ref -d "$RECOVERY_RECEIPT_REF" "${RECOVERY_COMMIT:-${SHIP_COMMIT:-}}" 2>/dev/null || true
+[ -z "$RECOVERY_RECEIPT_INTENT_BLOB" ] || git update-ref -d "$RECOVERY_RECEIPT_INTENT_REF" "$RECOVERY_RECEIPT_INTENT_BLOB" 2>/dev/null || true
 # No compare-and-delete for the sibling record: the receipt uses one because it names a COMMIT a
 # concurrent actor could legitimately advance, whereas this blob is devkit-private, rewritten whole
 # on every ship to this branch, and worthless once the commit it describes is published.

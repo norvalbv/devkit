@@ -55,8 +55,14 @@ function repo() {
   return { root, g, base: g('rev-parse', 'HEAD') };
 }
 
-const write = (root, base, args) =>
-  spawnSync(
+const write = (root, base, args, env = GENV) => {
+  const literalArgs = args.includes('--literal-paths')
+    ? [
+        '--tip-sha',
+        execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8', env }).trim(),
+      ]
+    : [];
+  return spawnSync(
     process.execPath,
     [
       WRITER,
@@ -70,13 +76,15 @@ const write = (root, base, args) =>
       'release',
       '--base-sha',
       base,
+      ...literalArgs,
       ...args,
     ],
     {
       encoding: 'utf8',
-      env: GENV,
+      env,
     },
   );
+};
 
 const readManifest = (root) =>
   JSON.parse(readFileSync(join(root, '.devkit', 'reconcile-manifest.json'), 'utf8'));
@@ -118,6 +126,124 @@ describe('reconcile-manifest-write — classifies shipped paths', () => {
       mode: '100644',
       blobSha: g('rev-parse', `${base}:old.ts`),
     });
+  });
+
+  it('classifies a concrete deleted filename literally even when it resembles pathspec magic', () => {
+    const { root, g } = repo();
+    const magic = ':(exclude)*';
+    writeFileSync(join(root, magic), 'literal filename\n');
+    g('--literal-pathspecs', 'add', '--', magic);
+    g('commit', '-q', '-m', 'add magic-looking filename');
+    const base = g('rev-parse', 'HEAD');
+    const blob = g('rev-parse', `${base}:${magic}`);
+    rmSync(join(root, magic));
+    g('--literal-pathspecs', 'add', '-A', '--', magic);
+    g('commit', '-q', '-m', 'delete magic-looking filename');
+
+    const r = write(root, base, ['--pr', '7', '--literal-paths', '--', magic], {
+      ...GENV,
+      GIT_GLOB_PATHSPECS: '1',
+    });
+    expect(r.status, r.stderr).toBe(0);
+    expect(readManifest(root).branches['feat/x'].paths).toContainEqual({
+      path: magic,
+      op: 'delete',
+      mode: '100644',
+      blobSha: blob,
+    });
+  });
+
+  it('records both sides of a committed file-to-directory transition in literal branch mode', () => {
+    const { root, g } = repo();
+    writeFileSync(join(root, 'shape'), 'old file\n');
+    g('--literal-pathspecs', 'add', '--', 'shape');
+    g('commit', '-q', '-m', 'base file');
+    const base = g('rev-parse', 'HEAD');
+    const oldBlob = g('rev-parse', `${base}:shape`);
+    rmSync(join(root, 'shape'));
+    mkdirSync(join(root, 'shape'));
+    writeFileSync(join(root, 'shape/child.txt'), 'new child\n');
+    g('--literal-pathspecs', 'add', '-A', '--', 'shape', 'shape/child.txt');
+    g('commit', '-q', '-m', 'replace file with directory');
+
+    const r = write(root, base, ['--pr', '7', '--literal-paths', '--', 'shape', 'shape/child.txt']);
+    expect(r.status, r.stderr).toBe(0);
+    const by = Object.fromEntries(
+      readManifest(root).branches['feat/x'].paths.map((p) => [p.path, p]),
+    );
+    expect(by['shape']).toMatchObject({ op: 'delete', mode: '100644', blobSha: oldBlob });
+    expect(by['shape/child.txt']).toMatchObject({
+      op: 'add',
+      mode: '100644',
+      blobSha: g('rev-parse', 'HEAD:shape/child.txt'),
+    });
+  });
+
+  it('omits a frozen path whose final blob and mode equal the pinned base', () => {
+    const { root, g, base } = repo();
+    writeFileSync(join(root, 'added.ts'), 'added\n');
+    g('add', 'added.ts');
+    g('commit', '-q', '-m', 'add one path while another returns to base');
+
+    const r = write(root, base, ['--pr', '7', '--literal-paths', '--', 'foo.ts', 'added.ts']);
+    expect(r.status, r.stderr).toBe(0);
+    expect(readManifest(root).branches['feat/x'].paths).toEqual([
+      {
+        path: 'added.ts',
+        op: 'add',
+        mode: '100644',
+        blobSha: g('rev-parse', 'HEAD:added.ts'),
+      },
+    ]);
+  });
+
+  it('classifies literal paths from the pinned shipped commit after HEAD advances', () => {
+    const { root, g, base } = repo();
+    writeFileSync(join(root, 'foo.ts'), 'SHIPPED\n');
+    g('add', 'foo.ts');
+    g('commit', '-q', '-m', 'shipped commit');
+    const shipped = g('rev-parse', 'HEAD');
+    const shippedBlob = g('rev-parse', `${shipped}:foo.ts`);
+    writeFileSync(join(root, 'foo.ts'), 'LATER\n');
+    g('add', 'foo.ts');
+    g('commit', '-q', '-m', 'concurrent branch advance');
+
+    expect(
+      recordShip(
+        {
+          root,
+          branch: 'feat/pinned',
+          repo: 'acme/app',
+          baseRef: 'release',
+          baseSha: base,
+          tipSha: shipped,
+          pr: '7',
+          literalPaths: true,
+        },
+        ['foo.ts'],
+      ),
+    ).toBe(0);
+    expect(readManifest(root).branches['feat/pinned'].paths[0].blobSha).toBe(shippedBlob);
+  });
+
+  it('refuses false deletions when the pinned tip tree cannot be read', () => {
+    const { root, base } = repo();
+    expect(
+      recordShip(
+        {
+          root,
+          branch: 'feat/missing-tip',
+          repo: 'acme/app',
+          baseRef: 'release',
+          baseSha: base,
+          tipSha: '0000000000000000000000000000000000000001',
+          pr: '7',
+          literalPaths: true,
+        },
+        ['foo.ts'],
+      ),
+    ).toBe(1);
+    expect(existsSync(join(root, '.devkit', 'reconcile-manifest.json'))).toBe(false);
   });
 
   it('an empty --pr records prNumber: null', () => {
@@ -280,7 +406,7 @@ describe('recordShip — direct (unit coverage of the core)', () => {
   });
 });
 
-describe('parseArgs — --merge is a valueless boolean', () => {
+describe('parseArgs — manifest mode flags are valueless booleans', () => {
   it('does not consume the trailing -- as its value (paths survive)', () => {
     const { flags, paths } = parseArgs(['--branch', 'b', '--merge', '--', 'a.ts', 'b.ts']);
     expect(flags.merge).toBe(true);
@@ -290,6 +416,11 @@ describe('parseArgs — --merge is a valueless boolean', () => {
   it('absent --merge leaves flags.merge undefined', () => {
     const { flags } = parseArgs(['--branch', 'b', '--', 'a.ts']);
     expect(flags.merge).toBeUndefined();
+  });
+  it('--literal-paths does not consume the trailing separator', () => {
+    const { flags, paths } = parseArgs(['--literal-paths', '--', ':(exclude)*']);
+    expect(flags['literal-paths']).toBe(true);
+    expect(paths).toEqual([':(exclude)*']);
   });
 });
 

@@ -19,6 +19,12 @@ import {
   relIntentPath,
   writeIntent,
 } from './ship-intent.mts';
+import {
+  filterMembershipStream,
+  membershipStreamError,
+  pathStreamError,
+  sourceMembershipRef,
+} from './ship-intent-codec.mts';
 
 const cliPath = fileURLToPath(new URL('./ship-intent.mts', import.meta.url));
 const GIT_ENV = { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' };
@@ -76,6 +82,7 @@ describe('ship-intent write/read round trip', () => {
     expect(Buffer.from(r.intent.bodyB64, 'base64').equals(body)).toBe(true);
     expect(r.intent).toMatchObject({
       mode: 'ship',
+      sourceMode: 'explicit',
       title: 'ship it',
       base: 'main',
       links: ['idx', 'graph'],
@@ -84,6 +91,249 @@ describe('ship-intent write/read round trip', () => {
       paths: ['a.txt', '--dash-leading', 'b dir/c.txt'],
       repo: 'acme/app',
     });
+  });
+
+  it('writes branch-source records as version 3 while explicit records use version 2', () => {
+    const branchOpts = base({ sourceMode: 'branch', base: 'work' });
+    expect(writeIntent(branchOpts, ['one.txt', 'two.txt'])).toBe(0);
+    const stored = JSON.parse(
+      readFileSync(join(branchOpts.root, relIntentPath(branchOpts.branch)), 'utf8'),
+    );
+    expect(stored).toMatchObject({ version: 3, sourceMode: 'branch' });
+    expect(stored.sourceAttemptId).toBe(stored.generation);
+    const membershipRef = sourceMembershipRef(branchOpts.branch, stored.sourceAttemptId);
+    const initialMembership = execFileSync(
+      'git',
+      ['-C', branchOpts.root, 'rev-parse', membershipRef],
+      { encoding: 'utf8' },
+    ).trim();
+    const branchRead = readIntent(branchOpts.root, branchOpts.branch);
+    if ('reason' in branchRead) throw new Error(branchRead.reason);
+    expect(branchRead.intent).toMatchObject({ version: 3, sourceMode: 'branch' });
+
+    expect(
+      writeIntent(
+        {
+          ...branchOpts,
+          resumed: true,
+          expectGeneration: stored.generation,
+          sourceAttemptId: stored.sourceAttemptId,
+        },
+        ['one.txt', 'two.txt'],
+      ),
+    ).toBe(0);
+    const resumed = JSON.parse(
+      readFileSync(join(branchOpts.root, relIntentPath(branchOpts.branch)), 'utf8'),
+    );
+    expect(resumed.sourceAttemptId).toBe(stored.sourceAttemptId);
+    expect(resumed.generation).not.toBe(stored.generation);
+    expect(
+      execFileSync('git', ['-C', branchOpts.root, 'rev-parse', membershipRef], {
+        encoding: 'utf8',
+      }).trim(),
+    ).toBe(initialMembership);
+    expect(
+      writeIntent(
+        {
+          ...branchOpts,
+          resumed: true,
+          expectGeneration: resumed.generation,
+          sourceAttemptId: resumed.sourceAttemptId,
+        },
+        ['changed.txt'],
+      ),
+    ).toBe(1);
+    const unchanged = readIntent(branchOpts.root, branchOpts.branch);
+    if ('reason' in unchanged) throw new Error(unchanged.reason);
+    expect(unchanged.intent.generation).toBe(resumed.generation);
+
+    const nextAttempt = 'pre-commit-retry-attempt';
+    expect(
+      writeIntent(
+        {
+          ...branchOpts,
+          resumed: true,
+          expectGeneration: resumed.generation,
+          sourceAttemptId: nextAttempt,
+        },
+        ['one.txt', 'two.txt'],
+      ),
+    ).toBe(0);
+    const rotated = readIntent(branchOpts.root, branchOpts.branch);
+    if ('reason' in rotated) throw new Error(rotated.reason);
+    expect(rotated.intent.sourceAttemptId).toBe(nextAttempt);
+    expect(rotated.intent.generation).not.toBe(resumed.generation);
+    expect(() =>
+      execFileSync('git', ['-C', branchOpts.root, 'rev-parse', '--verify', membershipRef], {
+        stdio: 'ignore',
+      }),
+    ).toThrow();
+
+    const explicitOpts = base();
+    expect(writeIntent(explicitOpts, ['p.txt'])).toBe(0);
+    const legacy = readIntent(explicitOpts.root, explicitOpts.branch);
+    if ('reason' in legacy) throw new Error(legacy.reason);
+    expect(legacy.intent).toMatchObject({ version: 2, sourceMode: 'explicit' });
+  });
+
+  it('refuses merge/donation semantics for a frozen branch-source record', () => {
+    const branchOpts = base({
+      sourceMode: 'branch',
+      base: 'work',
+      mergePaths: true,
+      donatePaths: ['later.txt'],
+    });
+    expect(writeIntent(branchOpts, ['one.txt'])).toBe(1);
+    expect(existsSync(join(branchOpts.root, relIntentPath(branchOpts.branch)))).toBe(false);
+  });
+
+  it('requires a non-empty base when writing or reading a version-3 branch source', () => {
+    const missingBase = base({ sourceMode: 'branch' });
+    expect(writeIntent(missingBase, ['one.txt'])).toBe(1);
+
+    const valid = base({ sourceMode: 'branch', base: 'work' });
+    expect(writeIntent(valid, ['one.txt'])).toBe(0);
+    const file = join(valid.root, relIntentPath(valid.branch));
+    const stored = JSON.parse(readFileSync(file, 'utf8'));
+    stored.base = null;
+    writeFileSync(file, JSON.stringify(stored));
+    const read = readIntent(valid.root, valid.branch);
+    expect('reason' in read ? read.reason : '').toContain('has no valid base');
+  });
+
+  it('requires the stable source-attempt identity when reading a version-3 branch source', () => {
+    const valid = base({ sourceMode: 'branch', base: 'work' });
+    expect(writeIntent(valid, ['one.txt'])).toBe(0);
+    const file = join(valid.root, relIntentPath(valid.branch));
+    const stored = JSON.parse(readFileSync(file, 'utf8'));
+    delete stored.sourceAttemptId;
+    writeFileSync(file, JSON.stringify(stored));
+    const read = readIntent(valid.root, valid.branch);
+    expect('reason' in read ? read.reason : '').toContain('source attempt id');
+  });
+
+  it('refuses to mint a replacement source identity for a malformed branch resume', () => {
+    const valid = base({ sourceMode: 'branch', base: 'work' });
+    expect(writeIntent(valid, ['one.txt'])).toBe(0);
+    const before = readIntent(valid.root, valid.branch);
+    if ('reason' in before) throw new Error(before.reason);
+    expect(
+      writeIntent(
+        {
+          ...valid,
+          resumed: true,
+          expectGeneration: before.intent.generation,
+          sourceAttemptId: '',
+        },
+        ['one.txt'],
+      ),
+    ).toBe(1);
+    const after = readIntent(valid.root, valid.branch);
+    if ('reason' in after) throw new Error(after.reason);
+    expect(after.intent.generation).toBe(before.intent.generation);
+  });
+
+  it('rolls back a new membership ref when persisting its replacement intent fails', () => {
+    const valid = base({ sourceMode: 'branch', base: 'work' });
+    expect(writeIntent(valid, ['one.txt'])).toBe(0);
+    const before = readIntent(valid.root, valid.branch);
+    if ('reason' in before) throw new Error(before.reason);
+    const file = join(valid.root, relIntentPath(valid.branch));
+    mkdirSync(`${file}.${process.pid}.tmp`);
+    const failedAttempt = 'failed-persist-attempt';
+    expect(
+      writeIntent(
+        {
+          ...valid,
+          resumed: true,
+          expectGeneration: before.intent.generation,
+          sourceAttemptId: failedAttempt,
+        },
+        ['one.txt'],
+      ),
+    ).toBe(1);
+    const after = readIntent(valid.root, valid.branch);
+    if ('reason' in after) throw new Error(after.reason);
+    expect(after.intent.generation).toBe(before.intent.generation);
+    expect(() =>
+      execFileSync(
+        'git',
+        [
+          '-C',
+          valid.root,
+          'rev-parse',
+          '--verify',
+          sourceMembershipRef(valid.branch, failedAttempt),
+        ],
+        { stdio: 'ignore' },
+      ),
+    ).toThrow();
+  });
+
+  it('deleting one branch cannot prune a slash-descendant branch membership', () => {
+    const first = base({ branch: 'foo', sourceMode: 'branch', base: 'work' });
+    const second = { ...first, branch: 'foo/bar' };
+    expect(writeIntent(first, ['one.txt'])).toBe(0);
+    expect(writeIntent(second, ['two.txt'])).toBe(0);
+    const firstRead = readIntent(first.root, first.branch);
+    const secondRead = readIntent(second.root, second.branch);
+    if ('reason' in firstRead) throw new Error(firstRead.reason);
+    if ('reason' in secondRead) throw new Error(secondRead.reason);
+    expect(deleteIntent(first.root, first.branch, firstRead.intent.generation)).toBe(0);
+    const survivor = readIntent(second.root, second.branch);
+    if ('reason' in survivor) throw new Error(survivor.reason);
+    expect(survivor.intent.generation).toBe(secondRead.intent.generation);
+  });
+
+  it('refuses a branch-source path list that no longer matches its private Git binding', () => {
+    const valid = base({ sourceMode: 'branch', base: 'work' });
+    expect(writeIntent(valid, ['one.txt'])).toBe(0);
+    const file = join(valid.root, relIntentPath(valid.branch));
+    const stored = JSON.parse(readFileSync(file, 'utf8'));
+    stored.paths.push('widened.txt');
+    writeFileSync(file, JSON.stringify(stored));
+    const read = readIntent(valid.root, valid.branch);
+    expect('reason' in read ? read.reason : '').toContain(
+      'frozen membership failed its Git binding',
+    );
+  });
+
+  it('rejects invalid UTF-8 in a raw Git pathname stream before argv/JSON transport', () => {
+    expect(pathStreamError(Buffer.from([0x66, 0x6f, 0x6f, 0]))).toBeNull();
+    expect(pathStreamError(Buffer.from([0xff, 0]))).toContain('non-UTF-8');
+    expect(pathStreamError(Buffer.from('not NUL terminated'))).toContain('NUL-terminated');
+  });
+
+  it('drains a validated NUL path stream larger than Node stdout buffering', () => {
+    const raw = Buffer.from(
+      Array.from({ length: 20_000 }, (_, i) => `p${String(i).padStart(6, '0')}\0`).join(''),
+    );
+    const out = execFileSync('node', [cliPath, 'validate-paths'], {
+      input: raw,
+      maxBuffer: raw.length * 2,
+    });
+    expect(Buffer.isBuffer(out)).toBe(true);
+    expect(out.equals(raw)).toBe(true);
+  });
+
+  it('refuses Git selections that recurse beyond frozen concrete membership', () => {
+    const nul = (...paths: string[]) => Buffer.from(`${paths.join('\0')}\0`);
+    expect(membershipStreamError(nul('shape', 'shape/child.txt'), nul('shape'))).toContain(
+      'unrecorded path "shape/child.txt"',
+    );
+    expect(
+      membershipStreamError(nul('shape', 'shape/child.txt'), nul('shape', 'shape/child.txt')),
+    ).toBeNull();
+    const filtered = filterMembershipStream(
+      nul('shape', 'shape/child.txt', 'shape/unrelated.txt'),
+      nul('shape', 'shape/child.txt'),
+    );
+    if ('reason' in filtered) throw new Error(filtered.reason);
+    expect(filtered.raw.equals(nul('shape', 'shape/child.txt'))).toBe(true);
+    const invalidUnrelated = Buffer.concat([Buffer.from('shape\0shape/'), Buffer.from([0xff, 0])]);
+    const rawFiltered = filterMembershipStream(invalidUnrelated, nul('shape'));
+    if ('reason' in rawFiltered) throw new Error(rawFiltered.reason);
+    expect(rawFiltered.raw.equals(nul('shape'))).toBe(true);
   });
 
   it('a branch with long slash-separated components still gets a writable filename', () => {
@@ -446,18 +696,21 @@ describe('ship-intent CLI protocol', () => {
     const out = execFileSync('node', [cliPath, 'read', '--root', root, '--branch', 'feat/x']);
     const fields = out.toString('utf8').split('\0');
     expect(fields.pop()).toBe(''); // every field NUL-terminated, so the split leaves one empty tail
-    // mode, title, base, noQavisPublish, updatePrBody, createdAt, generation, nlinks, <links>, body, <paths...>
+    // mode, sourceMode, title, base, noQavisPublish, updatePrBody, createdAt, generation,
+    // sourceAttemptId, nlinks, <links>, body, <paths...>
     expect(fields[0]).toBe('ship');
-    expect(fields[1]).toBe('t');
-    expect(fields[2]).toBe('main');
-    expect(fields[3]).toBe('0');
-    expect(fields[4]).toBe('1');
-    expect(Number.isFinite(Date.parse(fields[5]))).toBe(true);
-    expect(fields[6]).toMatch(/^[0-9a-f-]{36}$/);
-    expect(fields[7]).toBe('1');
-    expect(fields[8]).toBe('idx');
-    expect(fields[9]).toBe('body line\n');
-    expect(fields.slice(10)).toEqual(['p.txt', 'q dir/r.txt']);
+    expect(fields[1]).toBe('explicit');
+    expect(fields[2]).toBe('t');
+    expect(fields[3]).toBe('main');
+    expect(fields[4]).toBe('0');
+    expect(fields[5]).toBe('1');
+    expect(Number.isFinite(Date.parse(fields[6]))).toBe(true);
+    expect(fields[7]).toMatch(/^[0-9a-f-]{36}$/);
+    expect(fields[8]).toBe('');
+    expect(fields[9]).toBe('1');
+    expect(fields[10]).toBe('idx');
+    expect(fields[11]).toBe('body line\n');
+    expect(fields.slice(12)).toEqual(['p.txt', 'q dir/r.txt']);
 
     execFileSync('node', [cliPath, 'delete', '--root', root, '--branch', 'feat/x']);
     expect(existsSync(join(root, relIntentPath('feat/x')))).toBe(false);
@@ -499,6 +752,7 @@ describe('ship-intent CLI protocol', () => {
     expect(ev).toMatchObject({
       type: 'ship_intent',
       mode: 'ship',
+      source_mode: 'explicit',
       ship_id: 'test-ship-1',
       resumed: true,
       body_bytes: 9,
@@ -507,6 +761,45 @@ describe('ship-intent CLI protocol', () => {
     });
     expect(ev.command).toBe('devkit ship feat/x \'ship "it"\' -- p.txt'); // shell-quoted, replayable
     expect(ev.devkit_version).toBeTruthy(); // enveloped — the first source-stamped event of a ship
+  });
+
+  it('renders branch-source telemetry without reinterpreting derived paths as explicit input', () => {
+    const root = seedRepo();
+    const sink = join(root, 'events.jsonl');
+    const run = (resumed: boolean, sourceAttemptId?: string) =>
+      execFileSync(
+        'node',
+        [
+          cliPath,
+          'write',
+          '--root',
+          root,
+          '--branch',
+          'feat/x',
+          '--mode',
+          'ship',
+          '--source-mode',
+          'branch',
+          '--title',
+          'ship it',
+          '--base',
+          'work',
+          ...(resumed ? ['--resumed', '--source-attempt-id', sourceAttemptId!] : []),
+          '--',
+          'derived.txt',
+        ],
+        { input: '', env: { ...process.env, DEVKIT_GATE_EVENTS: sink } },
+      );
+    const sourceAttemptId = run(false).toString().trim();
+    run(true, sourceAttemptId);
+    const events = readFileSync(sink, 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    expect(events[0]).toMatchObject({ source_mode: 'branch', path_count: 1, resumed: false });
+    expect(events[0].command).toBe("devkit ship feat/x 'ship it' --base work --from-branch");
+    expect(events[0].command).not.toContain('derived.txt');
+    expect(events[1].command).toBe('devkit ship --resume feat/x');
   });
 
   it('the event redacts credential shapes from pr_body/command; body_bytes stays the raw length', () => {

@@ -1,6 +1,6 @@
 import { emitGateEvent } from '../../../gate-engine/judge/gate-events.mts';
 import { redactSecrets, shQuote } from './redact-secrets.mts';
-import type { ShipIntent } from './ship-intent.mts';
+import type { ShipIntent } from './ship-intent-codec.mts';
 
 /**
  * The node-side attempt event. `command` is the replayable invocation (paths included — the
@@ -11,23 +11,31 @@ import type { ShipIntent } from './ship-intent.mts';
  * calling write. Best-effort by emitGateEvent's own contract.
  */
 export function emitShipIntentEvent(intent: ShipIntent, resumed: boolean): void {
+  const sourceMode = intent.sourceMode ?? 'explicit';
   const flagParts = [
     ...(intent.mode === 'reship' ? ['--pr'] : []),
     ...(intent.base ? ['--base', intent.base] : []),
+    ...(sourceMode === 'branch' ? ['--from-branch'] : []),
     ...intent.links.flatMap((d) => ['--link', d]),
     ...(intent.noQavisPublish ? ['--no-qavis-publish'] : []),
   ];
   const body = Buffer.from(intent.bodyB64, 'base64');
+  const commandParts =
+    sourceMode === 'branch' && resumed
+      ? ['devkit', 'ship', '--resume', intent.branch]
+      : [
+          'devkit',
+          'ship',
+          intent.branch,
+          intent.title,
+          ...flagParts,
+          ...(sourceMode === 'explicit' ? ['--', ...intent.paths] : []),
+        ];
   emitGateEvent({
     type: 'ship_intent',
     mode: intent.mode,
-    command: redactSecrets(
-      [
-        'devkit',
-        'ship',
-        ...[intent.branch, intent.title, ...flagParts, '--', ...intent.paths].map(shQuote),
-      ].join(' '),
-    ),
+    source_mode: sourceMode,
+    command: redactSecrets(commandParts.map(shQuote).join(' ')),
     pr_body: redactSecrets(body.toString('utf8')),
     body_bytes: body.length,
     path_count: intent.paths.length,

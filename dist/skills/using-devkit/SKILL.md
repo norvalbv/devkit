@@ -40,11 +40,13 @@ devkit command.
 | You want to prove ship's exact base/path brief and deterministic gates before paying for the full reviewer chain | `devkit ship <branch> "<title>" --dry-gates [--base <base>] -- <paths>` | It reuses ship's ephemeral staging, projected runtime/config/coverage, formatter, deterministic/structure/extra gates, and changed-comment firewall, but creates no branch, commit, push, or PR. The comment firewall may still invoke its configured judge. |
 | You need to preview a hot file's real line ceiling before shipping | `guard-size preflight --base origin/<branch> -- <paths>` | It reads `size-lines.json` from the requested base, prints current lines / effective cap / headroom, and names any stale working-tree baseline. `devkit ship` runs the same preflight automatically before creating its gate worktree. |
 | The PR must target a branch **other than the one you're on** — e.g. your work is already committed on a source branch and the base is a different one | `devkit ship <branch> "<title>" --base <base-branch> -- <paths>` (branch + title FIRST — see Rules) | plain `ship` bases on this checkout's HEAD, where those paths are already identical, so it stages nothing and aborts `nothing to commit`; `--base` diffs your **working tree** against `origin/<base-branch>` and targets the PR there — no checkout, no worktree juggling |
+| Your source branch contains a **large committed multi-commit change** and manually reproducing its complete path list is error-prone | `devkit ship <new-branch> "<title>" --base <base-branch> --from-branch` | this opt-in mode pins `origin/<base-branch>` and `HEAD`, proves ancestry, derives the literal committed path set, and refuses any uncommitted overlay on those paths. Explicit paths remain the default for dirty work because ownership cannot be inferred safely in a shared checkout. |
 | You're in a **linked worktree, already on a branch**, and need a PR | `devkit ship <new-branch> "<title>" --base <base> -- <paths>` | you don't need — and must not create — another branch: `ship` makes the PR branch itself. An unrelated existing branch is rejected; only the exact local commit with a gate receipt from a prior post-commit failure can resume. |
 | You already ran `git switch -c <branch>` and now want to ship **that same branch** — ship says it *is checked out in THIS worktree* | `git branch -m <branch> <the-name-ship-prints>`, then re-run ship **with `--base <branch-on-origin>`**. Ship prints both commands, filled in — run them verbatim | `ship` CREATES the branch, so it cannot already be checked out here. It tells you to RENAME, never to delete: a rename cannot lose a commit however the refs change under it, and it carries this worktree onto the new name without touching a file (a `git switch` can refuse when your uncommitted work collides with the base). HEAD then sits on a branch origin does not have, which is why the re-run must name `--base`. Never `git worktree remove --force` the tree you are running in. Drop the renamed branch once the PR is open |
 | Ship refuses with **`base '<x>' is not on origin`** | `devkit ship <branch> "<title>" --base <branch-on-origin> -- <paths>` | the PR base defaults to the branch this checkout is on, and a provisioned worktree's scratch branch exists only locally — GitHub cannot open a PR against it. Ship now refuses **before** it pushes, so nothing is left on origin to clean up |
 | Ship reports the branch **already exists on origin** (an open PR uses it) | `devkit ship <branch> "<title>" --pr -- <paths>` | picking a new name orphans the existing PR; `--pr` fast-forwards a new commit onto that branch instead |
-| A ship was **blocked or timed out** and you are about to re-type the command | `devkit ship --resume <branch>` — a fix that ADDS a file: `devkit ship --resume <branch> -- <new-path>` | every attempt records its invocation (title, base, body, links, paths); `--resume` replays it byte-identically, so cached verdicts and a preserved landed commit still converge. Re-typing a multi-KB heredoc across 20–70 attempts is pure token burn, and one typo forfeits the landed-commit resume |
+| An existing PR conflicts after its base moved, and you have **already resolved it locally** | First rebase/merge the actual PR base, then `devkit ship <branch> "<title>" --pr --base <actual-pr-base> -- <every-old-pr-path...>` | devkit gates one replacement commit and rewrites only under an exact head-OID lease. It publishes the caller-prepared resolution; it does not perform the rebase or merge. |
+| A ship was **blocked or timed out** and you are about to re-type the command | `devkit ship --resume <branch>` — in explicit-path mode only, a fix that ADDS a file: `devkit ship --resume <branch> -- <new-path>` | every attempt records its invocation (title, base, body, links, paths); `--resume` replays it byte-identically, so cached verdicts and a preserved landed commit still converge. Branch-source membership stays frozen; start a fresh full `--from-branch` invocation to include another committed path. Re-typing a multi-KB heredoc across 20–70 attempts is pure token burn, and one typo forfeits the landed-commit resume |
 | The PR body is **long** and the ship may take several attempts | write it to a file once, then `devkit ship <branch> "<title>" --body-file <file> -- <paths>` | a heredoc does not survive a retry through a wrapper (its stdin reads as a silently EMPTY body); the file and the recorded invocation both do |
 | `devkit doctor` reports **config drift** (`biome.jsonc`/`tsconfig.json`/husky `DRIFT`/`MISSING`) | `devkit doctor --fix` | hand-editing re-introduces the same drift on the next sync; `--fix` re-runs the recorded init idempotently |
 | `devkit doctor` reports **skills/agents drift** (synced copy ≠ manifest) | `devkit sync-skills` / `devkit sync-agents` | editing `.claude/.cursor` copies by hand just re-drifts; `devkit sync` is **not a command** |
@@ -65,12 +67,25 @@ devkit command.
 - **Ship CREATES the positional `<branch>`; do not create it yourself.** An unrelated local branch or
   any branch on origin is rejected. The sole local exception is an exact commit preserved by a prior
   post-commit ship failure: an identical retry verifies its ship-owned gate receipt, base, message,
-  paths, and current scoped tree before resuming push + PR creation. Already sitting on some *other* branch is fine and normal:
+  and paths; explicit mode also rebuilds the current scoped tree, while a v3 branch-source resume
+  publishes its already-gated immutable commit. Already sitting on some *other* branch is fine and normal:
   ship reads file **content** from your working tree, so uncommitted work ships correctly without a
   single commit of your own.
+- **`--from-branch` owns only committed bytes.** It requires `--base`, accepts no explicit paths on
+  the full invocation, and is unavailable with `--pr`. Rebase or merge the current remote base first;
+  a divergent/ahead base, changed submodule gitlink, non-UTF-8 path, or staged/unstaged/untracked/
+  ignored overlay on any derived path is a refusal. Unrelated dirty paths are deliberately ignored.
+  A blocked attempt resumes with the ordinary `devkit ship --resume <branch>` form and frozen path
+  membership. Before a commit lands, those paths refresh from the then-current `HEAD`; after a gate
+  receipt proves a commit landed, resume publishes that already-gated immutable OID instead. Later
+  HEAD fixes therefore need a new ship branch and fresh full `--from-branch` invocation. Extra resume
+  paths are refused for the same reason.
 - **`branch already exists` → ship to a different name; on ORIGIN → `--pr`.** Do not detach HEAD,
   delete the branch, or switch to the base branch to free the name. In a linked worktree all three
   fail (`already used by worktree at …`) and none of them is necessary.
+- **A `--pr` re-ship changes the existing PR description only with explicit `--body` or
+  `--body-file`.** Omitting both preserves it; piped stdin remains commit-only. Use `--body ""` to
+  clear the description deliberately.
 - **`another ship for <branch> is still running` → wait or stop that run; never force-remove it.**
   Ship reclaims the worktree and branch a KILLED ship left behind automatically, so a refusal means
   it proved the owner is alive. When the message says the shell is gone but the gate tree survives,
@@ -100,9 +115,11 @@ devkit command.
   replays the recorded title/base/body/paths byte-identically, which is exactly what the caches and
   the landed-commit resume verify against. If the commit landed before a timeout surfaced, the retry
   verifies its gate receipt and publishes that preserved commit without re-running gates; it never
-  adopts a merely same-named or hand-made commit. A fix that ADDS a file rides the retry as a trailing
-  path (`--resume <branch> -- <new-path>`); changing branch/title/base means running the full command,
-  which re-records. If the blocked attempt WARNED that it could not record the invocation (the intent
+  adopts a merely same-named or hand-made commit. In explicit-path mode, a fix that ADDS a file rides
+  the retry as a trailing path (`--resume <branch> -- <new-path>`). Branch-source mode refuses extra
+  resume paths because membership is frozen; use a fresh full `--from-branch` command for a new set.
+  Changing branch/title/base means running the full command, which re-records. If the blocked attempt
+  WARNED that it could not record the invocation (the intent
   file is not gitignored — a managed .gitignore predating this feature), `--resume` will refuse: run
   `devkit doctor --fix` to restore the ignore line, then the full command once — recording resumes
   from that attempt. Do not answer a real finding with a bypass (`--no-verify`, `GUARD_NO_REVIEW`) —

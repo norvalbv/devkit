@@ -230,7 +230,7 @@ ship_record_gate_adds() {
     return 1
   fi
   while IFS= read -r -d '' path; do
-    exclude+=(":(exclude,literal)$path")
+    exclude+=(":(top,exclude,literal)$path")
   done < "$briefed"
   rm -f "$briefed"
   # `literal` is load-bearing: without it a briefed path containing a glob character would exclude
