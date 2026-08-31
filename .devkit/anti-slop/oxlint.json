@@ -36,7 +36,9 @@
         "anti-slop/no-unknown-type-aliases": "off",
         "anti-slop/no-unsafe-dictionary-type": "off",
         "anti-slop/no-widen-then-assert": "off",
-        "anti-slop/require-safety-comment-for-type-assertion": "off"
+        "anti-slop/require-safety-comment-for-type-assertion": "off",
+        "anti-slop/no-unsafe-external-record-access": "off",
+        "anti-slop/no-unsafe-external-record-enumeration": "off"
       }
     }
   ],
@@ -55,6 +57,8 @@
     "anti-slop/no-unknown-type-aliases": "error",
     "anti-slop/no-unsafe-dictionary-type": "error",
     "anti-slop/no-widen-then-assert": "error",
-    "anti-slop/require-safety-comment-for-type-assertion": "error"
+    "anti-slop/require-safety-comment-for-type-assertion": "error",
+    "anti-slop/no-unsafe-external-record-access": "error",
+    "anti-slop/no-unsafe-external-record-enumeration": "error"
   }
 }

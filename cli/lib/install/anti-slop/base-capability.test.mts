@@ -1,9 +1,10 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import {
   existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  rmdirSync,
   rmSync,
   statSync,
   utimesSync,
@@ -16,12 +17,18 @@ import antiSlop from '../../../commands/oxc/anti-slop.mts';
 import { digest } from '../../fs-helpers.mts';
 import { syncOxcCapability } from '../oxc/lifecycle.mts';
 import { adoptManagedCapability } from './base-capability.mts';
+import { baselineFromGroups, writeBaseline } from './baseline.mts';
 import {
   gitBaselineEnvelope,
   withBaseAntiSlopSnapshot,
   withStableGitIndex,
 } from './git-snapshot.mts';
-import { ANTI_SLOP_BASELINE_REL, ANTI_SLOP_UPSTREAM } from './constants.mts';
+import { type GitLockReleaseOperations, resolveRef } from './git-index-lock.mts';
+import {
+  ANTI_SLOP_BASELINE_REL,
+  ANTI_SLOP_UPSTREAM,
+  antiSlopBaselineMigrationId,
+} from './constants.mts';
 import { syncAntiSlopCapability } from './lifecycle.mts';
 import { collectAntiSlopGroups } from './runner.mts';
 
@@ -37,6 +44,11 @@ const FINDING_SOURCE = 'export function widen(value: object) {\n  return value;\
 const OXC_BASE_REL = '.devkit/oxc/oxlint.base.json';
 const OXC_MANIFEST_REL = '.devkit/oxc/manifest.json';
 const ANTI_SLOP_CONFIG_REL = '.devkit/anti-slop/oxlint.json';
+const ANTI_SLOP_MANIFEST_REL = '.devkit/anti-slop/manifest.json';
+const EXTERNAL_RECORD_RULE_IDS = [
+  'anti-slop/no-unsafe-external-record-access',
+  'anti-slop/no-unsafe-external-record-enumeration',
+];
 // Two identical inner lines collapse to ONE fingerprint with count 2 — partial forgiveness.
 const REPEATED_FINDING_SOURCE = [
   'function first() {',
@@ -65,6 +77,34 @@ let err: string[] = [];
 
 function git(cwd: string, args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
+}
+
+function withFailingGitProbe<T>(probe: 'resolve-ref' | 'symbolic-head', action: () => T): T {
+  const delegatePath = process.env.PATH;
+  if (!delegatePath) throw new Error('test requires PATH to locate Git');
+  const shimDirectory = mkdtempSync(join(tmpdir(), 'devkit-anti-slop-git-shim-'));
+  roots.push(shimDirectory);
+  const failure =
+    probe === 'resolve-ref'
+      ? 'if [ "$1" = "rev-parse" ] && [ "$2" = "--verify" ]; then exit 2; fi'
+      : 'if [ "$1" = "symbolic-ref" ]; then exit 2; fi';
+  writeFileSync(
+    join(shimDirectory, 'git'),
+    ['#!/bin/sh', failure, 'PATH="$DEVKIT_TEST_GIT_PATH"', 'export PATH', 'exec git "$@"', ''].join(
+      '\n',
+    ),
+    { mode: 0o755 },
+  );
+  const previousDelegatePath = process.env.DEVKIT_TEST_GIT_PATH;
+  process.env.DEVKIT_TEST_GIT_PATH = delegatePath;
+  process.env.PATH = `${shimDirectory}:${delegatePath}`;
+  try {
+    return action();
+  } finally {
+    process.env.PATH = delegatePath;
+    if (previousDelegatePath === undefined) delete process.env.DEVKIT_TEST_GIT_PATH;
+    else process.env.DEVKIT_TEST_GIT_PATH = previousDelegatePath;
+  }
 }
 
 function commit(cwd: string, message: string): void {
@@ -125,6 +165,45 @@ function restore(cwd: string, bytes: Map<string, string>): void {
   for (const [rel, content] of bytes) writeFileSync(join(cwd, rel), content);
 }
 
+function writeManagedAntiSlopConfig(cwd: string, config: string): void {
+  writeFileSync(join(cwd, ANTI_SLOP_CONFIG_REL), config);
+  const manifestPath = join(cwd, ANTI_SLOP_MANIFEST_REL);
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+  manifest.configDigest = digest(config);
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+}
+
+function writeDisabledExternalRecordConfig(cwd: string, currentConfig: string): void {
+  const previous = JSON.parse(currentConfig);
+  previous.rules['anti-slop/no-unsafe-external-record-access'] = 'off';
+  previous.rules['anti-slop/no-unsafe-external-record-enumeration'] = 'off';
+  writeManagedAntiSlopConfig(cwd, `${JSON.stringify(previous, null, 2)}\n`);
+}
+
+function writePublishedV059AntiSlopConfig(cwd: string, currentConfig: string): void {
+  const previous = JSON.parse(currentConfig);
+  previous.jsPlugins[0].specifier = './plugin/index.js';
+  delete previous.rules['anti-slop/no-unsafe-external-record-access'];
+  delete previous.rules['anti-slop/no-unsafe-external-record-enumeration'];
+  delete previous.overrides[0].rules['anti-slop/no-unsafe-external-record-access'];
+  delete previous.overrides[0].rules['anti-slop/no-unsafe-external-record-enumeration'];
+  const config = `${JSON.stringify(previous, null, 2)}\n`;
+  writeFileSync(join(cwd, ANTI_SLOP_CONFIG_REL), config);
+  const manifestPath = join(cwd, ANTI_SLOP_MANIFEST_REL);
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+  delete manifest.devkitVersion;
+  manifest.ruleIds = manifest.ruleIds.filter(
+    (ruleId: string) => !EXTERNAL_RECORD_RULE_IDS.includes(ruleId),
+  );
+  manifest.configDigest = digest(config);
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+}
+
+function managedMigrationReceipt(cwd: string): string {
+  const manifest = JSON.parse(readFileSync(join(cwd, ANTI_SLOP_MANIFEST_REL), 'utf8'));
+  return antiSlopBaselineMigrationId(manifest.devkitVersion, manifest.configDigest);
+}
+
 beforeEach(() => {
   out = [];
   err = [];
@@ -171,6 +250,276 @@ describe('adoptManagedCapability', () => {
 });
 
 describe('staged anti-slop check across a capability upgrade', () => {
+  it('lets unscoped create --force replace an invalid baseline', () => {
+    const cwd = installedRepository();
+    writeFileSync(join(cwd, ANTI_SLOP_BASELINE_REL), '{}\n');
+
+    const status = antiSlop(['create', '--force'], cwd);
+
+    expect(status).toBe(0);
+    expect(JSON.parse(readFileSync(join(cwd, ANTI_SLOP_BASELINE_REL), 'utf8'))).toMatchObject({
+      schemaVersion: 1,
+      upstreamCommit: ANTI_SLOP_UPSTREAM,
+    });
+  });
+
+  it('accepts baseline entries only for rules newly activated by the managed capability', () => {
+    const cwd = installedRepository();
+    const configPath = join(cwd, ANTI_SLOP_CONFIG_REL);
+    const currentConfig = readFileSync(configPath, 'utf8');
+    const manifestPath = join(cwd, ANTI_SLOP_MANIFEST_REL);
+    const currentManifest = readFileSync(manifestPath, 'utf8');
+    writePublishedV059AntiSlopConfig(cwd, currentConfig);
+    commit(cwd, 'base before the external-record access rule was enabled');
+
+    writeFileSync(configPath, currentConfig);
+    writeFileSync(manifestPath, currentManifest);
+    writeFileSync(
+      join(cwd, 'src', 'file.ts'),
+      'const parsed = JSON.parse(raw); parsed["constructor"];\n',
+    );
+    const adopted = baselineFromGroups(collectAntiSlopGroups(cwd, []));
+    adopted.migrationReceipts = [managedMigrationReceipt(cwd)];
+    writeBaseline(cwd, adopted);
+    git(cwd, ['add', '-A']);
+
+    const status = antiSlop(['check', '--staged'], cwd);
+
+    expect(out.join('\n')).toContain(
+      'accepted 1 baseline finding(s) for newly activated rule(s): anti-slop/no-unsafe-external-record-access',
+    );
+    expect(err.join('\n')).not.toContain('BASELINE-GROWTH');
+    expect(status).toBe(0);
+  });
+
+  it('does not forgive omitted debt from a newly activated rule as inherited base debt', () => {
+    const cwd = installedRepository();
+    const configPath = join(cwd, ANTI_SLOP_CONFIG_REL);
+    const currentConfig = readFileSync(configPath, 'utf8');
+    const manifestPath = join(cwd, ANTI_SLOP_MANIFEST_REL);
+    const currentManifest = readFileSync(manifestPath, 'utf8');
+    writePublishedV059AntiSlopConfig(cwd, currentConfig);
+    writeFileSync(
+      join(cwd, 'src', 'file.ts'),
+      'const parsed = JSON.parse(raw); parsed["constructor"];\n',
+    );
+    commit(cwd, 'published base carrying debt for a not-yet-present rule');
+
+    writeFileSync(configPath, currentConfig);
+    writeFileSync(manifestPath, currentManifest);
+    const receiptOnly = baselineFromGroups([]);
+    receiptOnly.migrationReceipts = [managedMigrationReceipt(cwd)];
+    writeBaseline(cwd, receiptOnly);
+    git(cwd, ['add', '-A']);
+
+    const status = antiSlop(['check', '--staged'], cwd);
+
+    expect(out.join('\n')).toContain(
+      'ERROR anti-slop/no-unsafe-external-record-access src/file.ts',
+    );
+    expect(out.join('\n')).not.toContain(
+      'base allowance forgave 1 inherited finding(s) across 1 rule(s): anti-slop/no-unsafe-external-record-access',
+    );
+    expect(status).toBe(1);
+  });
+
+  it('rejects omitted activation debt outside a scoped --base report', () => {
+    const cwd = installedRepository();
+    const configPath = join(cwd, ANTI_SLOP_CONFIG_REL);
+    const currentConfig = readFileSync(configPath, 'utf8');
+    const manifestPath = join(cwd, ANTI_SLOP_MANIFEST_REL);
+    const currentManifest = readFileSync(manifestPath, 'utf8');
+    writePublishedV059AntiSlopConfig(cwd, currentConfig);
+    writeFileSync(
+      join(cwd, 'src', 'unscoped.ts'),
+      'const parsed = JSON.parse(raw); parsed["constructor"];\n',
+    );
+    writeFileSync(join(cwd, 'src', 'changed.ts'), CLEAN_SOURCE);
+    commit(cwd, 'published base carrying unscoped debt for a not-yet-present rule');
+
+    writeFileSync(configPath, currentConfig);
+    writeFileSync(manifestPath, currentManifest);
+    const receiptOnly = baselineFromGroups([]);
+    receiptOnly.migrationReceipts = [managedMigrationReceipt(cwd)];
+    writeBaseline(cwd, receiptOnly);
+    git(cwd, ['add', '-A']);
+
+    const status = antiSlop(['check', '--base', 'HEAD', '--', 'src/changed.ts'], cwd);
+
+    expect(out.join('\n')).toContain(
+      'ERROR anti-slop/no-unsafe-external-record-access src/unscoped.ts',
+    );
+    expect(err.join('\n')).toContain(
+      'newly activated error finding(s) must be fixed or recorded in the release baseline',
+    );
+    expect(status).toBe(1);
+  });
+
+  it('offers rename adoption before judging newly activated debt at its new path', () => {
+    const cwd = installedRepository();
+    const configPath = join(cwd, ANTI_SLOP_CONFIG_REL);
+    const currentConfig = readFileSync(configPath, 'utf8');
+    const manifestPath = join(cwd, ANTI_SLOP_MANIFEST_REL);
+    const currentManifest = readFileSync(manifestPath, 'utf8');
+    writePublishedV059AntiSlopConfig(cwd, currentConfig);
+    writeFileSync(
+      join(cwd, 'src', 'file.ts'),
+      'const parsed = JSON.parse(raw); parsed["constructor"];\n',
+    );
+    commit(cwd, 'published base carrying debt at its original path');
+
+    writeFileSync(configPath, currentConfig);
+    writeFileSync(manifestPath, currentManifest);
+    const adopted = baselineFromGroups(collectAntiSlopGroups(cwd, []));
+    adopted.migrationReceipts = [managedMigrationReceipt(cwd)];
+    writeBaseline(cwd, adopted);
+    git(cwd, ['mv', 'src/file.ts', 'src/moved.ts']);
+    git(cwd, ['add', '-A']);
+
+    expect(antiSlop(['check', '--staged'], cwd)).toBe(1);
+    expect(err.join('\n')).toContain(
+      'BASELINE-RENAME anti-slop/no-unsafe-external-record-access src/file.ts -> src/moved.ts',
+    );
+    expect(err.join('\n')).not.toContain(
+      'newly activated error finding(s) must be fixed or recorded in the release baseline',
+    );
+
+    expect(antiSlop(['adopt-renames'], cwd)).toBe(0);
+    git(cwd, ['add', ANTI_SLOP_BASELINE_REL]);
+    out = [];
+    err = [];
+    expect(antiSlop(['check', '--staged'], cwd)).toBe(0);
+  });
+
+  it('validates full migration evidence while reporting a scoped --base check', () => {
+    const cwd = installedRepository();
+    const configPath = join(cwd, ANTI_SLOP_CONFIG_REL);
+    const currentConfig = readFileSync(configPath, 'utf8');
+    writeDisabledExternalRecordConfig(cwd, currentConfig);
+    writeFileSync(
+      join(cwd, 'src', 'unscoped.ts'),
+      'const parsed = JSON.parse(raw); parsed["constructor"];\n',
+    );
+    writeFileSync(join(cwd, 'src', 'changed.ts'), CLEAN_SOURCE);
+    commit(cwd, 'base before a scoped external-record activation check');
+
+    writeManagedAntiSlopConfig(cwd, currentConfig);
+    const adopted = baselineFromGroups(collectAntiSlopGroups(cwd, []));
+    adopted.migrationReceipts = [managedMigrationReceipt(cwd)];
+    writeBaseline(cwd, adopted);
+    git(cwd, ['add', '-A']);
+
+    expect(antiSlop(['check', '--base', 'HEAD', '--', 'src/changed.ts'], cwd)).toBe(0);
+    expect(out.join('\n')).toContain(
+      'accepted 1 baseline finding(s) for newly activated rule(s): anti-slop/no-unsafe-external-record-access',
+    );
+    expect(err.join('\n')).not.toContain('BASELINE-GROWTH');
+
+    out = [];
+    err = [];
+    writeFileSync(join(cwd, 'src', 'unscoped.ts'), CLEAN_SOURCE);
+    git(cwd, ['add', 'src/unscoped.ts']);
+
+    expect(antiSlop(['check', '--base', 'HEAD', '--', 'src/changed.ts'], cwd)).toBe(1);
+    expect(err.join('\n')).toContain(
+      'BASELINE-GROWTH anti-slop/no-unsafe-external-record-access src/unscoped.ts',
+    );
+  });
+
+  it('rejects newly activated baseline debt that is absent from the candidate scan', () => {
+    const cwd = installedRepository();
+    const configPath = join(cwd, ANTI_SLOP_CONFIG_REL);
+    const currentConfig = readFileSync(configPath, 'utf8');
+    writeDisabledExternalRecordConfig(cwd, currentConfig);
+    commit(cwd, 'base before the external-record access rule was enabled');
+
+    writeManagedAntiSlopConfig(cwd, currentConfig);
+    writeFileSync(
+      join(cwd, 'src', 'file.ts'),
+      'const parsed = JSON.parse(raw); parsed["constructor"];\n',
+    );
+    const fabricated = baselineFromGroups(collectAntiSlopGroups(cwd, []));
+    fabricated.migrationReceipts = [managedMigrationReceipt(cwd)];
+    writeBaseline(cwd, fabricated);
+    writeFileSync(join(cwd, 'src', 'file.ts'), CLEAN_SOURCE);
+    git(cwd, ['add', '-A']);
+
+    const status = antiSlop(['check', '--staged'], cwd);
+
+    expect(err.join('\n')).toContain(
+      'BASELINE-GROWTH anti-slop/no-unsafe-external-record-access src/file.ts',
+    );
+    expect(status).toBe(1);
+  });
+
+  it('requires a release-bound receipt for a zero-finding rule activation', () => {
+    const cwd = installedRepository();
+    const configPath = join(cwd, ANTI_SLOP_CONFIG_REL);
+    const currentConfig = readFileSync(configPath, 'utf8');
+    writeDisabledExternalRecordConfig(cwd, currentConfig);
+    commit(cwd, 'base before a zero-debt activation');
+
+    writeManagedAntiSlopConfig(cwd, currentConfig);
+    git(cwd, ['add', '-A']);
+
+    const missing = antiSlop(['check', '--staged'], cwd);
+    expect(err.join('\n')).toContain('BASELINE-MIGRATION-RECEIPT');
+    expect(missing).toBe(1);
+
+    const baseline = baselineFromGroups([]);
+    baseline.migrationReceipts = [managedMigrationReceipt(cwd)];
+    writeBaseline(cwd, baseline);
+    git(cwd, ['add', '-A']);
+    err = [];
+
+    expect(antiSlop(['check', '--staged'], cwd)).toBe(0);
+  });
+
+  it('rejects a receipt staged before the managed config that issued it', () => {
+    const cwd = installedRepository();
+    const targetReceipt = managedMigrationReceipt(cwd);
+    const configPath = join(cwd, ANTI_SLOP_CONFIG_REL);
+    writeDisabledExternalRecordConfig(cwd, readFileSync(configPath, 'utf8'));
+    commit(cwd, 'base before the managed activation');
+
+    const premature = baselineFromGroups([]);
+    premature.migrationReceipts = [targetReceipt];
+    writeBaseline(cwd, premature);
+    git(cwd, ['add', '-A']);
+
+    expect(antiSlop(['check', '--staged'], cwd)).toBe(1);
+    expect(err.join('\n')).toContain(`${targetReceipt} does not match candidate capability`);
+  });
+
+  it('accepts receipt recovery when the matching managed config is already active', () => {
+    const cwd = installedRepository();
+    const receipt = managedMigrationReceipt(cwd);
+    commit(cwd, 'base with active managed config but no receipt');
+    const recovered = baselineFromGroups([]);
+    recovered.migrationReceipts = [receipt];
+    writeBaseline(cwd, recovered);
+    git(cwd, ['add', '-A']);
+
+    expect(antiSlop(['check', '--staged'], cwd)).toBe(0);
+  });
+
+  it('rejects removal of a completed rule-migration receipt', () => {
+    const cwd = installedRepository();
+    writeBaseline(cwd, {
+      ...baselineFromGroups([]),
+      migrationReceipts: ['migration-access'],
+    });
+    commit(cwd, 'base with a completed zero-debt migration');
+
+    writeBaseline(cwd, baselineFromGroups([]));
+    git(cwd, ['add', '-A']);
+
+    const status = antiSlop(['check', '--staged'], cwd);
+
+    expect(err.join('\n')).toContain('BASELINE-MIGRATION-RECEIPT migration-access removed');
+    expect(status).toBe(1);
+  });
+
   it('reports the new finding instead of a stale managed-state error', () => {
     const cwd = installedRepository();
     const current = currentManagedBytes(cwd);
@@ -332,6 +681,37 @@ describe('anti-slop rename adoption', () => {
     expect(wrote).toBe(false);
   });
 
+  it('distinguishes a missing Git ref from an operational resolution failure', () => {
+    const cwd = installedRepository();
+    commit(cwd, 'establish base');
+
+    expect(resolveRef(cwd, 'refs/heads/absent')).toBeNull();
+    expect(() => withFailingGitProbe('resolve-ref', () => resolveRef(cwd, 'HEAD'))).toThrow(
+      'could not resolve Git ref HEAD safely',
+    );
+  });
+
+  it('fails closed when symbolic HEAD verification errors during a same-OID ref transition', () => {
+    const cwd = installedRepository();
+    commit(cwd, 'establish base');
+    const branch = git(cwd, ['symbolic-ref', 'HEAD']);
+    git(cwd, ['checkout', '--detach', '-q']);
+    git(cwd, ['mv', 'src/file.ts', 'src/moved.ts']);
+    const { candidateTree, headOid, headRef } = gitBaselineEnvelope(cwd, 'HEAD');
+    expect(headRef).toBeNull();
+    git(cwd, ['symbolic-ref', 'HEAD', branch]);
+    let wrote = false;
+
+    expect(() =>
+      withFailingGitProbe('symbolic-head', () =>
+        withStableGitIndex(cwd, { oid: headOid, symbolicRef: headRef }, null, candidateTree, () => {
+          wrote = true;
+        }),
+      ),
+    ).toThrow('could not determine symbolic Git HEAD safely');
+    expect(wrote).toBe(false);
+  });
+
   it('refuses to write after HEAD switches to a same-tree branch', () => {
     const cwd = installedRepository();
     commit(cwd, 'establish base');
@@ -401,6 +781,177 @@ describe('anti-slop rename adoption', () => {
       withStableGitIndex(cwd, { oid: headOid, symbolicRef: headRef }, null, candidateTree, () => 0),
     ).toThrow(`Git lock is busy at ${indexLock}`);
     expect(readFileSync(indexLock, 'utf8')).toBe(foreign);
+  });
+
+  it('does not delete a replacement Git lock that appears during release', () => {
+    const cwd = installedRepository();
+    commit(cwd, 'establish base');
+    git(cwd, ['mv', 'src/file.ts', 'src/moved.ts']);
+    const { candidateTree, headOid, headRef } = gitBaselineEnvelope(cwd, 'HEAD');
+    const indexLock = `${git(cwd, ['rev-parse', '--path-format=absolute', '--git-path', 'index'])}.lock`;
+    const foreign = 'foreign-owner';
+    const releaseOperations: GitLockReleaseOperations = {
+      removeToken: (path) => rmSync(path, { force: true }),
+      removeDirectory: (path) => {
+        if (path !== indexLock) {
+          rmdirSync(path);
+          return;
+        }
+        rmdirSync(path);
+        writeFileSync(path, foreign);
+        rmdirSync(path);
+      },
+    };
+
+    withStableGitIndex(
+      cwd,
+      { oid: headOid, symbolicRef: headRef },
+      null,
+      candidateTree,
+      () => undefined,
+      releaseOperations,
+    );
+
+    expect(readFileSync(indexLock, 'utf8')).toBe(foreign);
+  });
+
+  it('retries a transient Git lock release without losing ownership', () => {
+    const cwd = installedRepository();
+    commit(cwd, 'establish base');
+    git(cwd, ['mv', 'src/file.ts', 'src/moved.ts']);
+    const { candidateTree, headOid, headRef } = gitBaselineEnvelope(cwd, 'HEAD');
+    const indexLock = `${git(cwd, ['rev-parse', '--path-format=absolute', '--git-path', 'index'])}.lock`;
+    let failedOnce = false;
+    const releaseOperations: GitLockReleaseOperations = {
+      removeToken: (path) => rmSync(path, { force: true }),
+      removeDirectory: (path) => {
+        if (path === indexLock && !failedOnce) {
+          failedOnce = true;
+          throw Object.assign(new Error('transient Git lock release'), { code: 'EBUSY' });
+        }
+        rmdirSync(path);
+      },
+    };
+
+    expect(() =>
+      withStableGitIndex(
+        cwd,
+        { oid: headOid, symbolicRef: headRef },
+        null,
+        candidateTree,
+        () => undefined,
+        releaseOperations,
+      ),
+    ).not.toThrow();
+    expect(failedOnce).toBe(true);
+    expect(existsSync(indexLock)).toBe(false);
+  });
+
+  it('restores signal handling when Git lock release retries are exhausted', () => {
+    const cwd = installedRepository();
+    commit(cwd, 'establish base');
+    git(cwd, ['mv', 'src/file.ts', 'src/moved.ts']);
+    const { candidateTree, headOid, headRef } = gitBaselineEnvelope(cwd, 'HEAD');
+    const indexLock = `${git(cwd, ['rev-parse', '--path-format=absolute', '--git-path', 'index'])}.lock`;
+    const exitListenersBefore = new Set(process.listeners('exit'));
+    const sigintListenersBefore = process.listenerCount('SIGINT');
+    const sigtermListenersBefore = process.listenerCount('SIGTERM');
+    let releaseBlocked = true;
+    const releaseOperations: GitLockReleaseOperations = {
+      removeToken: (path) => rmSync(path, { force: true }),
+      removeDirectory: (path) => {
+        if (path === indexLock && releaseBlocked) {
+          throw Object.assign(new Error('persistent Git lock release failure'), { code: 'EBUSY' });
+        }
+        rmdirSync(path);
+      },
+    };
+
+    expect(() =>
+      withStableGitIndex(
+        cwd,
+        { oid: headOid, symbolicRef: headRef },
+        null,
+        candidateTree,
+        () => undefined,
+        releaseOperations,
+      ),
+    ).toThrow('persistent Git lock release failure');
+    expect(process.listenerCount('SIGINT')).toBe(sigintListenersBefore);
+    expect(process.listenerCount('SIGTERM')).toBe(sigtermListenersBefore);
+    expect(existsSync(indexLock)).toBe(true);
+
+    const retainedExitListeners = process
+      .listeners('exit')
+      .filter((listener) => !exitListenersBefore.has(listener));
+    expect(retainedExitListeners).toHaveLength(1);
+    releaseBlocked = false;
+    for (const listener of retainedExitListeners) {
+      listener(0);
+      process.removeListener('exit', listener);
+    }
+    expect(existsSync(indexLock)).toBe(false);
+    expect(process.listeners('exit')).toEqual([...exitListenersBefore]);
+  });
+
+  it('keeps Git locks held when another signal listener lets the protected action resume', () => {
+    const cwd = installedRepository();
+    commit(cwd, 'establish base');
+    git(cwd, ['mv', 'src/file.ts', 'src/moved.ts']);
+    const { candidateTree, headOid, headRef } = gitBaselineEnvelope(cwd, 'HEAD');
+    const indexLock = `${git(cwd, ['rev-parse', '--path-format=absolute', '--git-path', 'index'])}.lock`;
+    const peerListener = vi.fn();
+    process.once('SIGINT', peerListener);
+    const kill = vi.spyOn(process, 'kill').mockReturnValue(true);
+    const nativeRemoveListener = process.removeListener.bind(process);
+    let removedSignalHandlerWhileLocked = false;
+    vi.spyOn(process, 'removeListener').mockImplementation((event, listener) => {
+      if (
+        (event === 'SIGINT' || event === 'SIGTERM') &&
+        peerListener.mock.calls.length > 0 &&
+        existsSync(indexLock)
+      ) {
+        removedSignalHandlerWhileLocked = true;
+      }
+      return nativeRemoveListener(event, listener);
+    });
+
+    try {
+      expect(
+        withStableGitIndex(cwd, { oid: headOid, symbolicRef: headRef }, null, candidateTree, () => {
+          process.emit('SIGINT');
+          return existsSync(indexLock);
+        }),
+      ).toBe(true);
+      expect(peerListener).toHaveBeenCalledOnce();
+      expect(kill).toHaveBeenCalledWith(process.pid, 'SIGINT');
+      expect(removedSignalHandlerWhileLocked).toBe(false);
+      expect(existsSync(indexLock)).toBe(false);
+    } finally {
+      process.removeListener('SIGINT', peerListener);
+    }
+  });
+
+  it('releases Git locks before re-raising a terminating signal', () => {
+    const cwd = installedRepository();
+    commit(cwd, 'establish base');
+    git(cwd, ['mv', 'src/file.ts', 'src/moved.ts']);
+    const { candidateTree, headOid, headRef } = gitBaselineEnvelope(cwd, 'HEAD');
+    const indexLock = `${git(cwd, ['rev-parse', '--path-format=absolute', '--git-path', 'index'])}.lock`;
+    const moduleUrl = new URL('./git-index-lock.mts', import.meta.url).href;
+    const script = [
+      `import { withStableGitIndex } from ${JSON.stringify(moduleUrl)};`,
+      `withStableGitIndex(${JSON.stringify(cwd)}, ${JSON.stringify({ oid: headOid, symbolicRef: headRef })}, null, ${JSON.stringify(candidateTree)}, () => {`,
+      `  process.emit('SIGINT');`,
+      `});`,
+    ].join('\n');
+
+    const child = spawnSync(process.execPath, ['--input-type=module', '--eval', script], {
+      encoding: 'utf8',
+    });
+
+    expect(child.signal, child.stderr).toBe('SIGINT');
+    expect(existsSync(indexLock)).toBe(false);
   });
 
   it('migrates only package-relative staged renames and leaves a no-op baseline untouched', () => {

@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  adoptBaselineRuleFindings,
   baselineFromGroups,
   baselineIncreases,
   compareBaseline,
   migrateBaselineRenames,
   pruneBaseline,
+  removedBaselineMigrationReceipts,
 } from './baseline.mts';
 import type { FindingGroup } from './diagnostics.mts';
 
@@ -60,6 +62,79 @@ describe('anti-slop shrink-only baseline', () => {
     expect(baselineIncreases(base, smaller)).toEqual([]);
     expect(baselineIncreases(base, larger)).toEqual([
       expect.objectContaining({ additionalCount: 1, count: 3 }),
+    ]);
+  });
+
+  it('adopts findings only for wholly new rules and preserves existing debt byte-for-byte', () => {
+    const baseline = baselineFromGroups([group('a', 2)]);
+    const existing = structuredClone(baseline.entries);
+
+    const next = adoptBaselineRuleFindings(
+      baseline,
+      [group('a', 9), group('b', 3), group('c', 1)],
+      new Set(['anti-slop/rule-a', 'anti-slop/rule-b']),
+      'migration-a-b',
+    );
+
+    expect(next.entries.filter((entry) => entry.ruleId === 'anti-slop/rule-a')).toEqual(existing);
+    expect(next.entries).toContainEqual(
+      expect.objectContaining({ ruleId: 'anti-slop/rule-b', count: 3 }),
+    );
+    expect(next.entries).not.toContainEqual(
+      expect.objectContaining({ ruleId: 'anti-slop/rule-c' }),
+    );
+  });
+
+  it('records zero-finding migrations so a retry cannot adopt later violations', () => {
+    const activatedRuleIds = new Set(['anti-slop/rule-b']);
+    const migrated = adoptBaselineRuleFindings(
+      baselineFromGroups([]),
+      [],
+      activatedRuleIds,
+      'migration-b',
+    );
+
+    expect(migrated.migrationReceipts).toEqual(['migration-b']);
+    expect(
+      adoptBaselineRuleFindings(migrated, [group('b', 1)], activatedRuleIds, 'migration-b').entries,
+    ).toEqual([]);
+  });
+
+  it('treats completed migration receipts as append-only', () => {
+    const base = { ...baselineFromGroups([]), migrationReceipts: ['migration-b'] };
+
+    expect(removedBaselineMigrationReceipts(base, baselineFromGroups([]))).toEqual(['migration-b']);
+    expect(
+      removedBaselineMigrationReceipts(base, {
+        ...baselineFromGroups([]),
+        migrationReceipts: ['migration-b', 'migration-c'],
+      }),
+    ).toEqual([]);
+  });
+
+  it('permits baseline growth only for observed findings from newly activated rules', () => {
+    const base = migrateBaselineRenames(baselineFromGroups([group('a', 2)]), new Map());
+    const [existing] = base.entries;
+    const [introducedEntry] = baselineFromGroups([group('b', 4)]).entries;
+    if (!existing || !introducedEntry) throw new Error('expected baseline entries');
+    const candidate = { ...base, entries: [{ ...existing, count: 3 }, introducedEntry] };
+    const activatedRuleIds = new Set(['anti-slop/rule-a', 'anti-slop/rule-b']);
+
+    expect(
+      baselineIncreases(base, candidate, new Map(), activatedRuleIds, [group('b', 4)]),
+    ).toEqual([expect.objectContaining({ ruleId: 'anti-slop/rule-a', additionalCount: 1 })]);
+  });
+
+  it('rejects fabricated or inflated debt for a newly activated rule', () => {
+    const base = baselineFromGroups([]);
+    const candidate = baselineFromGroups([group('b', 4), group('c', 1)]);
+    const activatedRuleIds = new Set(['anti-slop/rule-b', 'anti-slop/rule-c']);
+
+    expect(
+      baselineIncreases(base, candidate, new Map(), activatedRuleIds, [group('b', 1)]),
+    ).toEqual([
+      expect.objectContaining({ ruleId: 'anti-slop/rule-b', additionalCount: 3 }),
+      expect.objectContaining({ ruleId: 'anti-slop/rule-c', additionalCount: 1 }),
     ]);
   });
 

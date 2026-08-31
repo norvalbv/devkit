@@ -5,5 +5,8 @@
 - Vendored: 2026-08-16
 - License: MIT (see `LICENSE`)
 
-`src/` is copied from the upstream production source at the pinned commit. Devkit compiles it
-unchanged and installs a self-contained `@oxlint/plugins@1.78.0` runtime beside the emitted plugin.
+The 15 rule implementations under `src/rules/` and their helpers under `src/shared/` are copied
+unchanged from the upstream production source at the pinned commit. `src/index.ts` is Devkit's
+composition seam: it registers those byte-pinned rules together with separately named,
+default-error extensions under `src/devkit/`. Devkit installs the composed plugin with a
+self-contained `@oxlint/plugins@1.78.0` runtime.
