@@ -107,11 +107,6 @@ function validateAmendment(
   if (working.entries.length <= head.entries.length) {
     throw new Error('newest entry is already committed; append a new entry instead');
   }
-  if (working.entries.length !== head.entries.length + 1) {
-    throw new Error(
-      'more than one entry is absent from HEAD; only the newest draft may be amended',
-    );
-  }
   for (let index = 0; index < head.entries.length; index += 1) {
     if (
       working.entries[index].kind !== head.entries[index].kind ||
@@ -150,7 +145,7 @@ function regenerateIndex(paths: DecisionPaths) {
   writeFileAtomic(paths.indexPath, renderIndex(rows));
 }
 
-/** Replace the single newest draft entry after proving all earlier history equals HEAD. */
+/** Replace the single newest draft entry after proving committed history equals HEAD. */
 export function amendDecision(slug: string, options: AddOptions, paths: DecisionPaths) {
   const modeCount =
     Number(Boolean(options.isTarget)) +
@@ -183,10 +178,10 @@ export function amendDecision(slug: string, options: AddOptions, paths: Decision
   const kind = options.isTarget ? 'target' : 'note';
   const { workingParsed, latest } = validateAmendment(current, committed, kind);
   const date = latest.text.match(ENTRY_DATE_RE)?.[1] ?? today();
+  const priorTarget = currentTarget(workingParsed.body.slice(0, latest.start));
   if (
     options.isTarget &&
-    committed &&
-    currentTarget(parseDecision(committed).body) &&
+    priorTarget &&
     // Trimmed, matching the add-path guard: whitespace is not an evidence-state change.
     !options.evidenceChange?.trim()
   ) {
