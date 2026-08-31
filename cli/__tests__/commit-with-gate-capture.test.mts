@@ -64,7 +64,14 @@ function fixture(withHooks: boolean) {
   return { root, wt, base };
 }
 
-function runCommit(root: string, wt: string, base: string, hideHookProof = false) {
+function runCommit(
+  root: string,
+  wt: string,
+  base: string,
+  hideHookProof = false,
+  dryGates = false,
+  inheritedDryGates = '',
+) {
   const telemetry = join(root, 'telemetry', 'gate-events.jsonl');
   const script = `
 set -e
@@ -74,6 +81,11 @@ if [ "$6" = hide-proof ]; then
     if [ "$1" = -qF ] && [[ "$2" = devkit-ship-hook-start:* ]]; then return 1; fi
     command grep "$@"
   }
+fi
+if [ "$7" = dry-gates ]; then
+  export DEVKIT_SHIP_MODE=dry-gates DEVKIT_SHIP_DRY_GATES=1
+elif [ -n "$8" ]; then
+  export DEVKIT_SHIP_MODE=reship DEVKIT_SHIP_DRY_GATES="$8"
 fi
 export DEVKIT_GATE_EVENTS="$2"
 export DEVKIT_SHIP_BASE_SHA="$3"
@@ -93,6 +105,8 @@ commit_with_gate_capture "$4" "$5" feat/sc1537 "test title" "test body"
       wt,
       root,
       hideHookProof ? 'hide-proof' : '',
+      dryGates ? 'dry-gates' : '',
+      inheritedDryGates,
     ],
     {
       cwd: root,
@@ -125,6 +139,31 @@ describe('commit_with_gate_capture — executable hook proof', () => {
     expect(git(wt, 'rev-parse', 'HEAD')).not.toBe(base);
     expect(readdirSync(wt).some((name) => name.startsWith('.devkit-ship-hooks.'))).toBe(false);
   });
+
+  it('dry-gates runs pre-commit without running commit-msg or creating a commit', () => {
+    const { root, wt, base } = fixture(true);
+
+    const result = runCommit(root, wt, base, false, true);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stderr).toContain('REAL_PRE_COMMIT_RAN');
+    expect(result.stderr).not.toContain('REAL_COMMIT_MSG_RAN');
+    expect(git(wt, 'rev-parse', 'HEAD')).toBe(base);
+    expect(existsSync(join(root, 'telemetry/gate-events.jsonl'))).toBe(false);
+  });
+
+  for (const inherited of ['0', '1']) {
+    it(`does not let an inherited dry-gates=${inherited} switch a reship-mode commit`, () => {
+      const { root, wt, base } = fixture(true);
+
+      const result = runCommit(root, wt, base, false, false, inherited);
+
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stderr).toContain('REAL_PRE_COMMIT_RAN');
+      expect(result.stderr).toContain('REAL_COMMIT_MSG_RAN');
+      expect(git(wt, 'rev-parse', 'HEAD')).not.toBe(base);
+    });
+  }
 
   it('fails closed before committing when no executable pre-commit hook resolves', () => {
     const { root, wt, base } = fixture(false);

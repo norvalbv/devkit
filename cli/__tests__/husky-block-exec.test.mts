@@ -194,6 +194,20 @@ describe('assembled hook execution (stubbed bins, sh -e)', () => {
     expect(r.calls).toContain('guard-review --gate');
   });
 
+  it('dry-gates remembers deterministic failure, runs comments, and skips expensive gates', () => {
+    const r = runHook({
+      DET_RC: '1',
+      DEVKIT_RUN_MODE: 'dry-gates',
+      DEVKIT_REVIEW_GUARDS: 'comments',
+    });
+    expect(r.status).toBe(1);
+    expect(r.calls).toContain('guard-deterministic');
+    expect(r.calls).toContain('guard-comments gate');
+    expect(r.calls).not.toContain('guard-decisions');
+    expect(r.calls).not.toContain('guard-review');
+    expect(r.calls).not.toContain('guard-qavis-advisory');
+  });
+
   it('reviewer-only profile reaches the reviewer and stays green when deterministic selects none', () => {
     const r = runHook({ DEVKIT_RUN_MODE: 'review', DEVKIT_REVIEW_GUARDS: 'review' });
     expect(r.status).toBe(0);
