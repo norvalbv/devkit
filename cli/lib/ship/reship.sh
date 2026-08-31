@@ -364,12 +364,6 @@ else
   BASE=$(git rev-parse FETCH_HEAD)
 fi
 
-# Match new-ship: run against the caller checkout before the detached worktree hides ignored,
-# unbriefed dist artifacts. The helper no-ops for every consumer repo.
-DIST_INTEGRITY="$SCRIPT_DIR/dist-integrity.mts"
-[ -f "$DIST_INTEGRITY" ] || DIST_INTEGRITY="$SCRIPT_DIR/dist-integrity.mjs"
-node "$DIST_INTEGRITY" --root "$ROOT" --base "$BASE" -- "${PATHS[@]}"
-
 # Re-pushes pay the same gate cost and can inherit the same stale checkout baseline as new ships.
 . "$SCRIPT_DIR/prepare-gate-worktree.sh"
 . "$SCRIPT_DIR/ship-run-record.sh"
@@ -387,7 +381,6 @@ ship_reclaim_orphan_worktrees "$PWD" "$BR" reship || exit 1
 ship_size_preflight "$ROOT" "$BASE" "${PATHS[@]}"
 
 WT="${TMPDIR:-/tmp}/devkit-reship-${BR//\//-}-$$"
-STAGED_STATE=$(mktemp "${TMPDIR:-/tmp}/reship-staged.XXXXXX")
 # Body: --body "<text>" wins (explicit, no temp file); then --body-file; then — on --resume — the
 # recorded body with stdin never consulted; else the same bounded stdin contract as new-ship so an
 # inherited, open-but-idle background-task pipe cannot block re-ship forever.
@@ -429,6 +422,14 @@ SHIP_INTENT_GENERATION=$(printf '%s' "$BODY" | node "$SHIP_INTENT" "${SHIP_INTEN
 # for an attempt that was never recorded.
 export DEVKIT_SHIP_INTENT_RECORDED=$([ -n "$SHIP_INTENT_GENERATION" ] && echo 1 || echo 0)
 
+# Match new-ship: run against the caller checkout after recording so an omitted artifact can ride
+# `--resume <branch> -- <artifact>`, but before the detached worktree hides ignored dist output.
+# The helper remains a no-op for every consumer repo.
+DIST_INTEGRITY="$SCRIPT_DIR/dist-integrity.mts"
+[ -f "$DIST_INTEGRITY" ] || DIST_INTEGRITY="$SCRIPT_DIR/dist-integrity.mjs"
+node "$DIST_INTEGRITY" --root "$ROOT" --base "$BASE" -- "${PATHS[@]}"
+
+STAGED_STATE=$(mktemp "${TMPDIR:-/tmp}/reship-staged.XXXXXX")
 KEEP_WT=  # set by a staged-set abort: the clobbered index IS the evidence, so never reclaim it
 cleanup() {
   rewrite_publish_lock_release
