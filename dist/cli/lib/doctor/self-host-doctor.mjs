@@ -3,12 +3,12 @@
  * rather than package-local `guard-*`, so it is compared against the generator directly instead of going
  * through the CheckResult pipeline. Split out of doctor.mts, which is at its line budget.
  */
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { printQavisAdvisoryHealth } from './qavis-health.mjs';
 import { detectGitRoot } from '../detect-git-root.mjs';
-import { extractGuardBlock } from '../husky/husky-block.mjs';
-import { buildSelfHostBlock, installSelfHostHook, SELF_HOST_EXTRAS, SELF_HOST_STRUCTURE_CMD, selfHostSelection, } from '../husky/self-host.mjs';
+import { selfHostHookParity } from '../husky/hook-parity.mjs';
+import { installSelfHostHook, selfHostSelection } from '../husky/self-host.mjs';
 import { checkAdhdSkill } from '../install/adhd-skill.mjs';
 import { readBaseline } from '../install/anti-slop/baseline.mjs';
 import { checkAntiSlopCapability, syncAntiSlopCapability, } from '../install/anti-slop/lifecycle.mjs';
@@ -51,13 +51,14 @@ export async function runSelfHostDoctor(cwd, cfg, fix) {
     if (baselineResult.status !== 'OK' && baselineResult.remediation)
         console.log(`      → ${baselineResult.remediation}`);
     let hookOk = false;
-    if (!existsSync(hookPath)) {
+    // Built from `cfg.components` — the same selection `--fix` installs — so a fix is guaranteed to
+    // reach parity rather than re-reporting drift against a selection nobody writes.
+    const parity = selfHostHookParity(cwd, { components: cfg.components });
+    if (parity.status === 'missing') {
         console.log('  ✗ .husky/pre-commit MISSING — run `devkit init` (self-host)');
     }
     else {
-        const currentBlock = extractGuardBlock(readFileSync(hookPath, 'utf8'), pkgRel);
-        const expectedBlock = buildSelfHostBlock({ ...selection, structureCmd: SELF_HOST_STRUCTURE_CMD, extras: SELF_HOST_EXTRAS }, pkgRel, cwd);
-        if (currentBlock !== null && currentBlock.trim() === expectedBlock.trim()) {
+        if (parity.status === 'ok') {
             hookOk = true;
             console.log('  ✓ .husky/pre-commit in sync with the generator');
         }

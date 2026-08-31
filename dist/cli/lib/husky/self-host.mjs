@@ -37,6 +37,16 @@ export const SELF_HOST_STRUCTURE_CMD = 'bun run lint:structure';
 export const SELF_HOST_EXTRAS = [
     { label: 'lint', cmd: 'bun run lint' },
     { label: 'anti-slop', cmd: 'node cli/index.mts anti-slop check --staged' },
+    // sc-2198. Both are pure content comparisons — no spawn, no tmp dir, no model call — and both
+    // already ran, in the 11-minute pre-push suite, which is where they caught a generator edit that
+    // had been sitting on main for five hours. Running them here makes the author who breaks parity
+    // the one who pays, instead of the next person to push. Two labels, not one: runDeterministic
+    // attributes gate_result per label, so a merged label makes a blocked commit unattributable.
+    // Self-host only: a consumer generates their hook from THEIR devkit version, so comparing it
+    // against this generator is meaningless, and `guard-decisions integrity` already ships as a bin
+    // for consumers who want the whole-corpus check.
+    { label: 'hook-parity', cmd: 'node cli/lib/husky/hook-parity.mts --gate' },
+    { label: 'decisions-integrity', cmd: 'node gate-engine/decisions/cli.mts integrity --staged' },
     { label: 'benchmarks', cmd: 'bun run benchmarks:check -- --mode staged' },
 ];
 // The hand hook ended with an ADVISORY fallow audit (dead-code / duplication / complexity on the

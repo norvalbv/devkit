@@ -39,6 +39,16 @@ export const INTEGRITY_CHECK_IDS = [
     'retarget-missing-evidence-change',
     'note-amends-unresolvable',
 ];
+/**
+ * The identity of a finding, at the granularity the finding itself reports at.
+ *
+ * Keyed on the BLOCK, not just (slug, check): retarget-missing-evidence-change reports per Target
+ * block, so a coarser key would be broader than the finding it names — grandfathering one historical
+ * block would silently swallow every future regression on the same axis. Shared by the save-quality
+ * bench's known-exception set and by the staged pre-commit gate's HEAD diff, which must agree about
+ * what "the same finding" means or a pre-existing finding would read as new.
+ */
+export const integrityFindingKey = (f) => `${f.slug}:${f.check}:${f.block ?? ''}`;
 const H1_RE = /^\s*#\s+(.+?)\s*$/m;
 // Matches a "Target · <date>" heading at ANY depth — used to find both well-formed (depth 2) blocks
 // and the misplaced-depth defect (depth 1 or 3+) with one pattern, so the two checks can never disagree

@@ -30,6 +30,7 @@ import {
   PACKAGE_BIN_DIR_FRAGMENT,
   replaceGuardBlock,
 } from '../lib/husky/husky-block.mts';
+import { selfHostHookParity } from '../lib/husky/hook-parity.mts';
 import { DK_NO_GIT_ENV_HELPER } from '../lib/husky/review-fragments.mts';
 import {
   buildSelfHostBlock,
@@ -384,17 +385,36 @@ describe('test timeout policy', () => {
   });
 });
 
+// A `--extra` command runs with failOpen2:false, so a path typo is exit 127 and blocks EVERY
+// commit until someone reads the aggregated report closely enough to spot it. That is the loudest
+// false-block mode these gates could introduce, and this is the cheapest possible guard against it.
+describe('self-host --extra commands are runnable', () => {
+  it('every `node <path>` extra points at a file that exists', () => {
+    const missing = SELF_HOST_EXTRAS.filter((extra) => {
+      const [bin, arg] = extra.cmd.split(/\s+/);
+      return bin === 'node' && arg !== undefined && !existsSync(join(ROOT, arg));
+    }).map((extra) => `${extra.label}: ${extra.cmd}`);
+    expect(missing, 'a `--extra` whose script is absent exits 127 and blocks every commit').toEqual(
+      [],
+    );
+  });
+});
+
 // THE drift guarantee. A generator change that isn't regenerated into the committed hook, or a
 // hand-edit of the hook, fails here — CI won't go green until the hook is regenerated.
 describe('committed hook parity', () => {
+  // Read and compare both happen INSIDE `it`, for the same reason the agent-asset parity below
+  // does it: a throw in the describe body is a file-level collection error that would take the
+  // sibling guarantee down with it.
   it('.husky/pre-commit guard block === the current generator output', () => {
-    const hookPath = join(ROOT, '.husky', 'pre-commit');
-    expect(existsSync(hookPath), '.husky/pre-commit must exist (self-host `devkit init`)').toBe(
-      true,
+    const parity = selfHostHookParity(ROOT);
+    expect(parity.status, '.husky/pre-commit must exist (self-host `devkit init`)').not.toBe(
+      'missing',
     );
-    const currentBlock = extractGuardBlock(readFileSync(hookPath, 'utf8'), '');
-    const expectedBlock = buildSelfHostBlock(HOOK_SEL, '', ROOT);
-    expect(currentBlock?.trim()).toBe(expectedBlock.trim());
+    // Asserted as STRINGS, not on `status`: the string diff vitest renders here is what makes a
+    // drift failure diagnosable — a bare `expect(status).toBe('ok')` would say only that something
+    // differs, which is exactly the report that got read as flake in sc-2198.
+    expect(parity.currentBlock?.trim()).toBe(parity.expectedBlock.trim());
   });
 });
 

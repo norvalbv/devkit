@@ -18,6 +18,8 @@ afterEach(() => {
   delete process.env.GUARD_NO_COVERAGE;
   delete process.env.GUARD_STRUCTURE_OK;
   delete process.env.GUARD_NO_STRUCTURE;
+  delete process.env.GUARD_HOOK_PARITY_OK;
+  delete process.env.GUARD_DECISIONS_INTEGRITY_OK;
   // Both spellings: envVar() accepts the FRINK_ alias, and `devkit ship` exports strict envs that a
   // pre-push vitest inherits — a leak that would silently flip every fail-open assertion below.
   delete process.env.GUARD_DETERMINISTIC_STRICT;
@@ -451,6 +453,27 @@ describe('prefixCacheScope', () => {
     expect(prefixCacheScope('custom')).toBe('custom');
   });
 
+  // Same anti-laundering property, for the self-host `--extra` gates (sc-2198). These live outside
+  // the DETERMINISTIC registry, so nothing else would have salted them.
+  it.each(['GUARD_HOOK_PARITY_OK', 'GUARD_DECISIONS_INTEGRITY_OK'])(
+    '%s salts the scope away from a clean run',
+    (key) => {
+      const cleanDefault = prefixCacheScope();
+      process.env[key] = '1';
+      expect(prefixCacheScope()).not.toBe(cleanDefault);
+      expect(prefixCacheScope()).toContain('-bypassed');
+    },
+  );
+
+  it('gives each combination of extra bypasses its own key, order-independently', () => {
+    process.env.GUARD_HOOK_PARITY_OK = '1';
+    const one = prefixCacheScope();
+    process.env.GUARD_DECISIONS_INTEGRITY_OK = '1';
+    const both = prefixCacheScope();
+    expect(both).not.toBe(one);
+    // Sorted, so exporting the two flags in either order lands on the same key.
+    expect(both).toBe('devkit-guards:DECISIONS_INTEGRITY_OK+HOOK_PARITY_OK-bypassed');
+  });
   it.each(['GUARD_STRUCTURE_OK', 'GUARD_NO_STRUCTURE'])(
     '%s salts the scope away from a normal structure run',
     (key) => {

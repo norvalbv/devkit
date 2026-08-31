@@ -42,7 +42,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { coverageBypassed, deterministicStrict, structureBypassed } from '../config.mts';
+import { coverageBypassed, deterministicStrict, envFlag, structureBypassed } from '../config.mts';
 import { emitGateBypass, emitGateEvent, finishGateTiming } from '../judge/gate-events.mts';
 import { prefixEntry, recordPrefix } from '../prefix-cache/prefix-cache.mts';
 
@@ -184,6 +184,11 @@ export function selectedIds(cwd: string): string[] {
   }
 }
 
+// Bypass flags owned by `--extra` gates rather than by the registry. A bypassed run must not record
+// a key a later un-bypassed run of the same tree would hit — the same anti-laundering property the
+// coverage and structure salts below exist for.
+const EXTRA_BYPASS_SUFFIXES = ['HOOK_PARITY_OK', 'DECISIONS_INTEGRITY_OK'] as const;
+
 export function prefixCacheScope(scope?: string, effectiveIds?: string[]): string | undefined {
   const reviewMode = process.env.DEVKIT_RUN_MODE === 'review';
   const mergeBase = process.env.DEVKIT_REVIEW_MERGE_BASE;
@@ -222,9 +227,15 @@ export function prefixCacheScope(scope?: string, effectiveIds?: string[]): strin
   // Structure commands are arbitrary (`guard-structure`, Electron's eslint invocation, devkit's
   // own package script), so the bypass lives at this orchestrator layer. Keep its cache namespace
   // apart from a normal run for the same anti-laundering reason as coverage above.
-  return structureBypassed()
+  const structureBase = structureBypassed()
     ? `${coverageBase ?? 'devkit-guards'}:structure-bypassed`
     : coverageBase;
+  // Same hazard once more, for the self-host `--extra` gates. Sorted and joined so two runs that
+  // bypass the same set share a key regardless of the order the flags were exported in.
+  const extraBypassed = EXTRA_BYPASS_SUFFIXES.filter(envFlag).sort();
+  return extraBypassed.length
+    ? `${structureBase ?? 'devkit-guards'}:${extraBypassed.join('+')}-bypassed`
+    : structureBase;
 }
 
 // Run one gate as a subprocess; return its exit code (0 on success). stdio inherited so the gate's

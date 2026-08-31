@@ -69,6 +69,10 @@ specific conditions under which that control is appropriate:
 - `GUARD_COVERAGE_OK=1` — assert the base-branch coverage condition documented by `using-devkit`.
 - `GUARD_QAVIS_OK=1` — ship this change without the advised visual QA;
   `GUARD_NO_QAVIS_ADVISORY=1` disables the advisory entirely.
+- `GUARD_HOOK_PARITY_OK=1` — assert that `.husky/pre-commit` drift predates your change (Devkit's
+  own repo only; the gate is already advisory when no hook-generator input is staged).
+- `GUARD_DECISIONS_INTEGRITY_OK=1` — assert that a NEW structural finding on a decision record in
+  this change is wrong (Devkit's own repo only; findings already present at HEAD never block).
 
 Consumers may retain legacy aliases, but Devkit's printed `GUARD_*` spelling is canonical. A
 consumer can also have hand-authored gates outside the `devkit-guards` block; use that repository's
