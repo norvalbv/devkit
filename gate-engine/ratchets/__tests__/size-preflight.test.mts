@@ -113,6 +113,46 @@ describe('guard-size base-aware preflight', () => {
     expect(result.stdout).toContain('src/legacy.ts: 55 lines; max 60; headroom 5');
   });
 
+  it('reports a newline-terminated file at the exact cap without a phantom line', () => {
+    const root = makeRoot();
+    write(
+      root,
+      'guard.config.json',
+      JSON.stringify({ scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 50 }),
+    );
+    write(root, 'src/exact.ts', `${big(50)}\n`);
+    execFileSync('git', ['add', '.'], { cwd: root });
+    execFileSync('git', ['commit', '-qm', 'base'], { cwd: root });
+
+    const result = run(root, 'preflight', '--base', 'HEAD', '--', 'src/exact.ts');
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain('src/exact.ts: 50 lines; max 50; headroom 0');
+  });
+
+  it('anchors legacy baseline conversion to the base ref before checking EOF-shape growth', () => {
+    const root = makeRoot();
+    write(
+      root,
+      'guard.config.json',
+      JSON.stringify({ scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 50 }),
+    );
+    write(root, 'src/legacy.ts', `${big(80)}\n`);
+    write(
+      root,
+      '.devkit/baselines/size-lines.json',
+      JSON.stringify({ maxLines: 50, files: { 'src/legacy.ts': 81 } }),
+    );
+    execFileSync('git', ['add', '.'], { cwd: root });
+    execFileSync('git', ['commit', '-qm', 'legacy split-count baseline'], { cwd: root });
+    write(root, 'src/legacy.ts', big(81));
+
+    const result = run(root, 'preflight', '--base', 'HEAD', '--', 'src/legacy.ts');
+
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain('src/legacy.ts: 81 lines; max 80; headroom -1');
+  });
+
   it('ignores files governed by a disabled zero cap', () => {
     const root = makeRoot();
     write(
