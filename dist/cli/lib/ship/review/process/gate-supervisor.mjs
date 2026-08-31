@@ -360,7 +360,7 @@ export function superviseGateCommand(timeoutMs, command, inspectProcesses = read
                 return;
             ownershipTimer = undefined;
             try {
-                inspectOwnedProcesses(inspectionFailure !== undefined);
+                inspectOwnedProcesses(childDone || inspectionFailure !== undefined);
             }
             catch (cause) {
                 beginForcedCleanup(1, cause);
