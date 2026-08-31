@@ -126,8 +126,9 @@ if [ "$RESUME" -eq 1 ]; then
   while IFS= read -r -d '' si_field; do SI_FIELDS+=("$si_field"); done < "$SI_OUT"
   rm -f "$SI_OUT"
   # Field order is ship-intent.mts's emitFields contract:
-  #   mode, title, base, noQavisPublish, createdAt, generation, nlinks, <links...>, body, <paths...>
-  [ "${#SI_FIELDS[@]}" -ge 9 ] || { echo "recorded invocation is malformed — run the full devkit ship command" >&2; exit 1; }
+  #   mode, title, base, noQavisPublish, updatePrBody, createdAt, generation, nlinks,
+  #   <links...>, body, <paths...>. New-ship ignores updatePrBody; only reship consumes it.
+  [ "${#SI_FIELDS[@]}" -ge 10 ] || { echo "recorded invocation is malformed — run the full devkit ship command" >&2; exit 1; }
   SI_MODE=${SI_FIELDS[0]}
   if [ "$SI_MODE" = "reship" ]; then
     # The blocked attempt was a `--pr` re-push; hand over so the agent needn't remember which form
@@ -140,12 +141,12 @@ if [ "$RESUME" -eq 1 ]; then
   TITLE=${SI_FIELDS[1]}
   BASE_FLAG=${SI_FIELDS[2]}
   [ "${SI_FIELDS[3]}" != "1" ] || QAVIS_PUBLISH=0
-  RESUME_CREATED=${SI_FIELDS[4]}
-  RESUME_GENERATION=${SI_FIELDS[5]}
-  SI_NLINKS=${SI_FIELDS[6]}
+  RESUME_CREATED=${SI_FIELDS[5]}
+  RESUME_GENERATION=${SI_FIELDS[6]}
+  SI_NLINKS=${SI_FIELDS[7]}
   case "$SI_NLINKS" in *[!0-9]*|'') echo "recorded invocation is malformed (nlinks '$SI_NLINKS')" >&2; exit 1 ;; esac
-  si_i=7
-  si_body_at=$((7 + SI_NLINKS))
+  si_i=8
+  si_body_at=$((8 + SI_NLINKS))
   [ "${#SI_FIELDS[@]}" -gt $((si_body_at + 1)) ] || { echo "recorded invocation is malformed (missing body/paths)" >&2; exit 1; }
   while [ "$si_i" -lt "$si_body_at" ]; do LINK_EXTRA+=("${SI_FIELDS[$si_i]}"); si_i=$((si_i + 1)); done
   RESUME_BODY=${SI_FIELDS[$si_body_at]}
