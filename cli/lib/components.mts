@@ -73,6 +73,7 @@ export function normalizeReviewProfile(
 
 /** Stacks whose structure rules are compiled from guard.config.json by devkit itself. */
 export const CONFIG_DRIVEN_STRUCTURE = new Set(['react-app', 'component-lib']);
+export const STRUCTURE_STACKS = new Set(['electron', 'react-app', 'component-lib']);
 
 /** The structure-lint command emitted by init and checked by doctor/review preflight. */
 export function structureCmdFor(_stack: string): string {
@@ -233,13 +234,6 @@ export type ComponentToggleId = {
   [K in keyof Selection]: Selection[K] extends boolean ? K : never;
 }[keyof Selection];
 
-/**
- * The all-recommended selection: every component on, every guard on. This is the EXACT
- * behaviour of `--yes` (and of a non-TTY run), preserving the pre-wizard default.
- * `structure` is recommended-on but only *applies* when the stack has a template — the
- * apply layer no-ops it otherwise (see init.mts `isStructure`). `fallow` is the one
- * recommended-OFF component (heavier third-party tool) — opt-in even under --yes.
- */
 export function defaultSelection(): Selection {
   return {
     biome: true,

@@ -33,7 +33,7 @@ bunx devkit init
 bunx devkit doctor
 ```
 
-`devkit init` detects the current stack, lets you choose components and gates, writes the selected assets, and records that selection in `.devkit/config.json`. Fresh installs target Claude, Codex, and Cursor; pass `--no-claude`, `--no-codex`, or `--no-cursor` to narrow the set. Existing installs keep their recorded provider selection during sync, upgrade, and repair. Use `--yes` for defaults or `--dry-run` to preview.
+`devkit init` detects the current stack, lets you choose components and gates, writes the selected assets, and records that selection in `.devkit/config.json`. Fresh installs target Claude, Codex, and Cursor; pass `--no-claude`, `--no-codex`, or `--no-cursor` to narrow the set. A fresh `init --yes` uses recommended defaults; a re-run preserves the recorded selection except for explicitly supplied flags. Sync, upgrade, and repair also keep the recorded provider selection. Use `--dry-run` to preview.
 
 When optional project hooks are selected for Codex, open `/hooks` once to review and trust their exact definitions. Codex skips new or changed project hooks until that trust review is complete.
 
