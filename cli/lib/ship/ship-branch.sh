@@ -310,13 +310,6 @@ else
   BASE=$(git rev-parse HEAD)   # pin once: shared HEAD may advance mid-run
 fi
 
-# devkit self-host only: inspect the CALLER tree before the ephemeral worktree hides ignored,
-# unbriefed dist artifacts. Installed consumer copies run the same helper, which no-ops unless the
-# caller package is @norvalbv/devkit. Prefer source beside this script, then packaged .mjs.
-DIST_INTEGRITY="$SCRIPT_DIR/dist-integrity.mts"
-[ -f "$DIST_INTEGRITY" ] || DIST_INTEGRITY="$SCRIPT_DIR/dist-integrity.mjs"
-node "$DIST_INTEGRITY" --root "$ROOT" --base "$BASE" -- "${PATHS[@]}"
-
 # Preview the raw-line ratchet against the exact base baseline BEFORE creating the worktree.
 . "$SCRIPT_DIR/prepare-gate-worktree.sh"
 ship_size_preflight "$ROOT" "$BASE" "${PATHS[@]}"
@@ -350,8 +343,6 @@ if [ -z "$LOCAL_BRANCH_EXISTS" ] &&
 fi
 
 WT="${TMPDIR:-/tmp}/devkit-ship-${BR//\//-}-$$"
-PATCH=$(mktemp "${TMPDIR:-/tmp}/ship.XXXXXX")
-STAGED_STATE=$(mktemp "${TMPDIR:-/tmp}/ship-staged.XXXXXX")
 # Body: --body "<text>" wins (explicit, no temp file); then --body-file (authored once, survives
 # every retry); then — on --resume — the recorded body, with stdin never consulted (a re-run heredoc
 # does not survive a wrapper, and a closed stdin reads as a silently EMPTY body); else stdin
@@ -405,6 +396,15 @@ fi
 # recorded attempt (--resume works) from an unrecorded one (--resume would refuse by name).
 export DEVKIT_SHIP_INTENT_RECORDED=$([ -n "$SHIP_INTENT_GENERATION" ] && echo 1 || echo 0)
 
+# Devkit self-host only: inspect the CALLER tree after recording so an omitted artifact can ride
+# `--resume <branch> -- <artifact>`, but before a worktree can hide ignored, unbriefed dist output.
+# Installed consumer copies no-op unless the caller package is @norvalbv/devkit.
+DIST_INTEGRITY="$SCRIPT_DIR/dist-integrity.mts"
+[ -f "$DIST_INTEGRITY" ] || DIST_INTEGRITY="$SCRIPT_DIR/dist-integrity.mjs"
+node "$DIST_INTEGRITY" --root "$ROOT" --base "$BASE" -- "${PATHS[@]}"
+
+PATCH=$(mktemp "${TMPDIR:-/tmp}/ship.XXXXXX")
+STAGED_STATE=$(mktemp "${TMPDIR:-/tmp}/ship-staged.XXXXXX")
 SHIP_RUN_MODE=live
 [ -z "${SHIP_DRY_RUN:-}" ] || SHIP_RUN_MODE=dry
 [ "$DRY_GATES" -eq 0 ] || SHIP_RUN_MODE=dry-gates
