@@ -32,6 +32,7 @@ export function parseFlags(args) {
         searchCode: false,
         adhd: false,
         priorArtGate: false,
+        baseDrift: false,
         standalone: false,
         overlay: false,
         baselinesOnly: false,
@@ -66,6 +67,8 @@ export function parseFlags(args) {
             flags.adhd = true;
         else if (a === '--prior-art-gate')
             flags.priorArtGate = true;
+        else if (a === '--base-drift')
+            flags.baseDrift = true;
         else if (a === '--standalone')
             flags.standalone = true;
         else if (a === '--overlay')
@@ -141,6 +144,10 @@ export function selectionFromFlags(flags, recorded) {
         sel.priorArtGate = true;
     if (flags.no.has('prior-art-gate'))
         sel.priorArtGate = false;
+    if (flags.baseDrift)
+        sel.baseDrift = true;
+    if (flags.no.has('base-drift'))
+        sel.baseDrift = false;
     // Preserve recorded providers on a re-run; a fresh base still contains every default provider.
     sel.agentTargets = sel.agentTargets.filter((target) => !flags.no.has(target));
     // The gate's registrations are Claude-only: recording it enabled with no claude surface would

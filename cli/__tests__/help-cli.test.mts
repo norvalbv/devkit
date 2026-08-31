@@ -11,7 +11,15 @@ describe('devkit help surface', () => {
   it('`--help` lists every command (derived from meta)', () => {
     const r = run(['--help']);
     expect(r.status).toBe(0);
-    for (const name of ['init', 'doctor', 'ship', 'review', 'reconcile', 'guard-branch']) {
+    for (const name of [
+      'init',
+      'doctor',
+      'ship',
+      'review',
+      'reconcile',
+      'guard-branch',
+      'base-status',
+    ]) {
       expect(r.stdout).toContain(`devkit ${name}`);
     }
   });

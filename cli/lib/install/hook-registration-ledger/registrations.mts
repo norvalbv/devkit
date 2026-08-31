@@ -106,6 +106,29 @@ export const HOOK_REGISTRATIONS: Record<string, HookRegistration[]> = {
   // PostToolUse-on-Task, NOT SubagentStop — that capture path stays dead code per
   // docs/decisions/prior-art-before-plan.md. No cursorEvent: Cursor has no ExitPlanMode/Task, so
   // nativeProjection skips Cursor entirely.
+  // Base-drift advisories (sc-2297). SessionStart carries the whole-repo picture at the moment an
+  // agent forms its mental model — the loss this prevents is booked at READ time, hours before any
+  // gate runs. PreToolUse narrows to the exact file being written. Both are advisory: they emit
+  // additionalContext and never a permissionDecision.
+  //
+  // Only the pre-edit half projects to Cursor: Cursor has no SessionStart equivalent, and
+  // nativeProjection returns null per-registration, so the session hook is simply skipped there.
+  baseDrift: [
+    {
+      registrationId: 'base-drift:session-start',
+      event: 'SessionStart',
+      matcher: 'startup|resume|clear|compact',
+      command: 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/base-drift-session.mjs"',
+    },
+    {
+      registrationId: 'base-drift:pre-edit',
+      event: 'PreToolUse',
+      matcher: 'Edit|Write|MultiEdit',
+      command: 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/base-drift-brief.mjs"',
+      cursorEvent: 'preToolUse',
+      cursorMatcher: 'Write',
+    },
+  ],
   priorArtGate: [
     {
       registrationId: 'prior-art-gate:pre-plan',

@@ -120,6 +120,7 @@ function selectionFlags(sel) {
         ['searchCode', '--search-code'],
         ['adhd', '--adhd'],
         ['priorArtGate', '--prior-art-gate'],
+        ['baseDrift', '--base-drift'],
         ['antiSlop', '--anti-slop'],
     ])
         if (sel[id])

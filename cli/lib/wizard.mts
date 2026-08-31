@@ -42,6 +42,7 @@ const AGENT_SURFACE_COMPONENTS = [
   'agentHooks',
   'searchSteering',
   'priorArtGate',
+  'baseDrift',
 ];
 
 const AGENT_SURFACE_SETS: Record<string, string[]> = {
@@ -106,6 +107,16 @@ const PRIOR_ART_GATE_OPTION = {
   id: 'priorArtGate',
   label: 'prior-art gate',
   hint: 'deny-once hook: plans must run (or explicitly skip) step-0 prior-art (off by default)',
+};
+
+// base-drift: same opt-in shape, and out of COMPONENTS for a different reason — it is the first
+// devkit pre-edit surface that reaches the NETWORK, fetching one ref from the consumer's own
+// remote. That is an obligation nobody should acquire without ticking a box, however advisory the
+// output is.
+const BASE_DRIFT_OPTION = {
+  id: 'baseDrift',
+  label: 'base-drift advisories',
+  hint: 'warns when origin/<base> moved a file you are about to edit; fetches from your remote (off by default)',
 };
 
 // The line-growth block rides the guards multiselect as this pseudo-id, then is split back into
@@ -232,6 +243,7 @@ export async function runWizard({
         componentOption(FALLOW_OPTION),
         componentOption(ADHD_OPTION),
         componentOption(PRIOR_ART_GATE_OPTION),
+        componentOption(BASE_DRIFT_OPTION),
       ],
       initialValues: [
         ...choices.filter((c) => c.recommended).map((c) => c.id),
@@ -247,6 +259,7 @@ export async function runWizard({
     selection.adhd = chosen.has('adhd');
     // Overlay syncs hooks too (same delivery as agentHooks), so the gate works here unchanged.
     selection.priorArtGate = chosen.has('priorArtGate');
+    selection.baseDrift = chosen.has('baseDrift');
     selection.husky = true; // overlay's local hook is the delivery mechanism — always on
   } else {
     const componentChoices = COMPONENT_OPTIONS.filter((c) => c.id !== 'structure' || structAvail);
@@ -258,6 +271,7 @@ export async function runWizard({
         componentOption(SEARCHCODE_OPTION),
         componentOption(ADHD_OPTION),
         componentOption(PRIOR_ART_GATE_OPTION),
+        componentOption(BASE_DRIFT_OPTION),
         componentOption(ANTI_SLOP_OPTION),
       ],
       initialValues: [
@@ -273,6 +287,7 @@ export async function runWizard({
     selection.searchCode = chosen.has('search-code');
     selection.adhd = chosen.has('adhd');
     selection.priorArtGate = chosen.has('priorArtGate');
+    selection.baseDrift = chosen.has('baseDrift');
     selection.antiSlop = chosen.has('antiSlop');
     if (!structAvail) selection.structure = false;
   }
@@ -425,6 +440,7 @@ function summarize(
       `${on('fallow')} fallow gate (chained into the local hook; global install if missing, else skipped)`,
       `${on('adhd')} ${ADHD_OPTION.label}`,
       `${on('priorArtGate')} ${PRIOR_ART_GATE_OPTION.label}`,
+      `${on('baseDrift')} ${BASE_DRIFT_OPTION.label}`,
     ].join('\n');
   }
   const lines = COMPONENTS.filter((c) => !(c.id === 'structure' && !structureAvailable)).map(
@@ -438,6 +454,7 @@ function summarize(
   lines.push(`${selection.searchCode ? '✓' : '·'} ${SEARCHCODE_OPTION.label}`);
   lines.push(`${selection.adhd ? '✓' : '·'} ${ADHD_OPTION.label}`);
   lines.push(`${selection.priorArtGate ? '✓' : '·'} ${PRIOR_ART_GATE_OPTION.label}`);
+  lines.push(`${selection.baseDrift ? '✓' : '·'} ${BASE_DRIFT_OPTION.label}`);
   lines.push(`${selection.antiSlop ? '✓' : '·'} ${ANTI_SLOP_OPTION.label}`);
   lines.push(`${selection.lineGrowth ? '✓' : '·'} line-growth block`);
   if (AGENT_SURFACE_COMPONENTS.some((id) => selection[id])) {

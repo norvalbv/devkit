@@ -28,6 +28,7 @@ const SCRIPT_OWNING_COMPONENTS = [
   'fallow',
   'adhd',
   'priorArtGate',
+  'baseDrift',
 ] as const;
 
 /** A selection with exactly ONE component on — notably agentHooks OFF for every other component. */
@@ -37,6 +38,7 @@ const only = (component: string) => ({
   fallow: component === 'fallow',
   adhd: component === 'adhd',
   priorArtGate: component === 'priorArtGate',
+  baseDrift: component === 'baseDrift',
 });
 
 /** The hook-dir script a registration command invokes, or null for an engine-bin command. */
@@ -62,6 +64,7 @@ describe('hook registrations resolve to installable scripts', () => {
       fallow: true,
       adhd: true,
       priorArtGate: true,
+      baseDrift: true,
     });
     const dangling = Object.values(HOOK_REGISTRATIONS)
       .flat()
@@ -71,7 +74,13 @@ describe('hook registrations resolve to installable scripts', () => {
   });
 
   it('binds both decisions scripts to the guard, not to the agentHooks bundle', () => {
-    const base = { agentHooks: false, fallow: false, adhd: false, priorArtGate: false };
+    const base = {
+      agentHooks: false,
+      fallow: false,
+      adhd: false,
+      priorArtGate: false,
+      baseDrift: false,
+    };
     const owned = [DECISION_EDIT_HOOK, DECISION_SCOPE_BRIEF_HOOK];
     // Selecting the guard is sufficient — the brief must not need the agent-hook bundle.
     expect(hookScriptsFor({ ...base, decisions: true }).sort()).toEqual([...owned].sort());

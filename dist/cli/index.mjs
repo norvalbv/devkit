@@ -43,6 +43,7 @@ const COMMANDS = {
     ship: () => import('./commands/ship.mjs'),
     review: () => import('./commands/review.mjs'),
     'guard-branch': () => import('./commands/guard-branch.mjs'),
+    'base-status': () => import('./commands/base-drift/base-status.mjs'),
     'coverage-run': () => import('./commands/coverage/run.mjs'),
     'test-report-run': () => import('./commands/baseline/test-report-run.mjs'),
     'baseline-status': () => import('./commands/baseline/status.mjs'),
@@ -50,6 +51,7 @@ const COMMANDS = {
 // The subcommands that shell out to git — they get a friendly missing-git preflight (require-git).
 const GIT_COMMANDS = new Set([
     'baseline-status',
+    'base-status',
     'ship',
     'review',
     'move',

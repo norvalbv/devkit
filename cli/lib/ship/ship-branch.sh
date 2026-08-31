@@ -401,6 +401,25 @@ elif [ -n "$BASE_FLAG" ]; then
     exit 1
   }
   BASE=$(git rev-parse FETCH_HEAD)
+
+  # Which of the paths being shipped ALSO moved on the base since this branch diverged (sc-2297).
+  # ADVISORY — it prints and never blocks. Git merges these three-way, so a same-region overwrite
+  # surfaces as a conflict at merge; a block here would instead fire on every legitimate concurrent
+  # edit of a shared file in a parallel-agent repo, which is the ignorable-signal failure this whole
+  # feature exists to end. What it CAN catch is the case a clean merge hides: a path hand-edited
+  # after reading a stale local copy.
+  #
+  # Only on the --base arm. The default arm sets BASE from local HEAD with no fetch, and it is
+  # unreachable from a provisioned worktree anyway — the ls-remote probe above already refuses any
+  # branch that is not on origin, which every worktree scratch branch is.
+  #
+  # --exit-zero plus `|| true` so a drift verdict (exit 3) and any failure to compute one are both
+  # incapable of failing the ship: the same fail-open polarity ship_size_preflight uses.
+  BASE_DRIFT="$SCRIPT_DIR/base-drift/cli.mts"
+  [ -f "$BASE_DRIFT" ] || BASE_DRIFT="$SCRIPT_DIR/base-drift/cli.mjs"
+  if [ -f "$BASE_DRIFT" ]; then
+    node "$BASE_DRIFT" --root "$ROOT" --base "$BASE_REF" --ship --exit-zero -- "${PATHS[@]}" || true
+  fi
 else
   BASE=$(git rev-parse HEAD)   # pin once: shared HEAD may advance mid-run
 fi

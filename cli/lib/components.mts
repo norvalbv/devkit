@@ -210,6 +210,14 @@ export interface Selection {
    * a repo must choose (carve-out ruled in docs/decisions/devkit-gates-repo-not-harness.md).
    */
   priorArtGate: boolean;
+
+  /**
+   * The base-drift advisories (agents-hooks/base-drift-session.mjs + base-drift-brief.mjs): tell an
+   * agent that origin/<base> moved a file it is about to read or write, so a conclusion drawn from
+   * a stale local copy is caught while it can still be corrected. Advisory only — it emits context,
+   * never a permission decision, and never rebases anything.
+   */
+  baseDrift: boolean;
   agentTargets: string[];
   guards: string[];
 }
@@ -226,6 +234,7 @@ export const RECORDED_COMPONENT_IDS = [
   'structure',
   'adhd',
   'priorArtGate',
+  'baseDrift',
   'antiSlop',
 ] as const satisfies readonly (keyof Selection)[];
 
@@ -234,6 +243,7 @@ export type ComponentToggleId = {
   [K in keyof Selection]: Selection[K] extends boolean ? K : never;
 }[keyof Selection];
 
+/** What `--yes` and a non-TTY run select. Per-field exceptions are noted at each field. */
 export function defaultSelection(): Selection {
   return {
     biome: true,
@@ -256,6 +266,9 @@ export function defaultSelection(): Selection {
     adhd: false,
     // Denies harness tool calls — never arrives uninvited. See Selection.priorArtGate.
     priorArtGate: false,
+    // Fetches from the consumer's remote on the pre-edit path — never arrives uninvited.
+    // See Selection.baseDrift.
+    baseDrift: false,
     agentTargets: [...FRESH_DEFAULT_AGENT_PROVIDERS],
     guards: [...RECOMMENDED_GUARD_IDS],
   };
@@ -398,6 +411,14 @@ export const OPTIONAL_COMPONENTS: OptionalComponent[] = [
     hint: 'deny-once PreToolUse gate: plans must run (or explicitly skip) step-0 prior-art',
     flag: '--prior-art-gate',
     since: '0.51.0',
+  },
+  {
+    id: 'baseDrift',
+    kind: 'hook',
+    label: 'base-drift advisories',
+    hint: 'warns when origin/<base> moved a file you are about to edit (fetches from your remote)',
+    flag: '--base-drift',
+    since: '0.59.0',
   },
   {
     id: 'antiSlop',
