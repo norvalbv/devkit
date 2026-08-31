@@ -72,6 +72,9 @@ devkit command.
 - **`branch already exists` → ship to a different name; on ORIGIN → `--pr`.** Do not detach HEAD,
   delete the branch, or switch to the base branch to free the name. In a linked worktree all three
   fail (`already used by worktree at …`) and none of them is necessary.
+- **A `--pr` re-ship changes the existing PR description only with explicit `--body` or
+  `--body-file`.** Omitting both preserves it; piped stdin remains commit-only. Use `--body ""` to
+  clear the description deliberately.
 - **`another ship for <branch> is still running` → wait or stop that run; never force-remove it.**
   Ship reclaims the worktree and branch a KILLED ship left behind automatically, so a refusal means
   it proved the owner is alive. When the message says the shell is gone but the gate tree survives,

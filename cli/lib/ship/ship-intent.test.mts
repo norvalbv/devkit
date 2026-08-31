@@ -12,7 +12,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
-import { deleteIntent, readIntent, relIntentPath, writeIntent } from './ship-intent.mts';
+import {
+  deleteIntent,
+  ownsIntentGeneration,
+  readIntent,
+  relIntentPath,
+  writeIntent,
+} from './ship-intent.mts';
 
 const cliPath = fileURLToPath(new URL('./ship-intent.mts', import.meta.url));
 const GIT_ENV = { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' };
@@ -40,6 +46,7 @@ const base = (opts: Partial<Parameters<typeof writeIntent>[0]> = {}) => ({
   title: 'ship it',
   links: [],
   noQavisPublish: false,
+  updatePrBody: false,
   resumed: false,
   mergePaths: false,
   body: Buffer.from('pr body\n'),
@@ -55,10 +62,17 @@ describe('ship-intent write/read round trip', () => {
       Buffer.from([0xff, 0xfe]),
       Buffer.from('tail\n\n'),
     ]);
-    const opts = base({ body, links: ['idx', 'graph'], base: 'main', noQavisPublish: true });
+    const opts = base({
+      body,
+      links: ['idx', 'graph'],
+      base: 'main',
+      noQavisPublish: true,
+      updatePrBody: true,
+    });
     expect(writeIntent(opts, ['a.txt', '--dash-leading', 'b dir/c.txt'])).toBe(0);
     const r = readIntent(opts.root, 'feat/x');
     if ('reason' in r) throw new Error(r.reason);
+    expect(r.intent.version).toBe(2);
     expect(Buffer.from(r.intent.bodyB64, 'base64').equals(body)).toBe(true);
     expect(r.intent).toMatchObject({
       mode: 'ship',
@@ -66,6 +80,7 @@ describe('ship-intent write/read round trip', () => {
       base: 'main',
       links: ['idx', 'graph'],
       noQavisPublish: true,
+      updatePrBody: true,
       paths: ['a.txt', '--dash-leading', 'b dir/c.txt'],
       repo: 'acme/app',
     });
@@ -89,6 +104,7 @@ describe('ship-intent write/read round trip', () => {
     if ('reason' in r) throw new Error(r.reason);
     expect(r.intent.bodyB64).toBe('');
     expect(r.intent.base).toBeNull();
+    expect(r.intent.updatePrBody).toBe(false);
   });
 
   it('writes mode 600 and overwrites in place (the newer record wins)', () => {
@@ -357,6 +373,38 @@ describe('ship-intent read refusals — each names its cause', () => {
     expect(reasonOf(opts.root, 'feat/x')).toContain('malformed (links)');
   });
 
+  it('reads legacy v1 as preserve-only and requires a valid updatePrBody in v2', () => {
+    const opts = base({ updatePrBody: true });
+    writeIntent(opts, ['p.txt']);
+    const file = join(opts.root, relIntentPath('feat/x'));
+    const j = JSON.parse(readFileSync(file, 'utf8'));
+    j.version = 1;
+    delete j.updatePrBody;
+    writeFileSync(file, JSON.stringify(j));
+    const legacy = readIntent(opts.root, 'feat/x');
+    if ('reason' in legacy) throw new Error(legacy.reason);
+    expect(legacy.intent.updatePrBody).toBe(false);
+
+    j.version = 2;
+    writeFileSync(file, JSON.stringify(j));
+    expect(reasonOf(opts.root, 'feat/x')).toContain('malformed (updatePrBody)');
+
+    j.updatePrBody = 'true';
+    writeFileSync(file, JSON.stringify(j));
+    expect(reasonOf(opts.root, 'feat/x')).toContain('malformed (updatePrBody)');
+  });
+
+  it('proves only the generation that still owns the on-disk intent', () => {
+    const opts = base();
+    writeIntent(opts, ['p.txt']);
+    const r = readIntent(opts.root, 'feat/x');
+    if ('reason' in r) throw new Error(r.reason);
+    expect(ownsIntentGeneration(opts.root, 'feat/x', r.intent.generation)).toBe(true);
+    expect(ownsIntentGeneration(opts.root, 'feat/x', 'superseded')).toBe(false);
+    deleteIntent(opts.root, 'feat/x', r.intent.generation);
+    expect(ownsIntentGeneration(opts.root, 'feat/x', r.intent.generation)).toBe(false);
+  });
+
   it('torn/unparseable record', () => {
     const opts = base();
     writeIntent(opts, ['p.txt']);
@@ -385,6 +433,7 @@ describe('ship-intent CLI protocol', () => {
         'main',
         '--link',
         'idx',
+        '--update-pr-body',
         '--',
         'p.txt',
         'q dir/r.txt',
@@ -397,17 +446,18 @@ describe('ship-intent CLI protocol', () => {
     const out = execFileSync('node', [cliPath, 'read', '--root', root, '--branch', 'feat/x']);
     const fields = out.toString('utf8').split('\0');
     expect(fields.pop()).toBe(''); // every field NUL-terminated, so the split leaves one empty tail
-    // mode, title, base, noQavisPublish, createdAt, generation, nlinks, <links>, body, <paths...>
+    // mode, title, base, noQavisPublish, updatePrBody, createdAt, generation, nlinks, <links>, body, <paths...>
     expect(fields[0]).toBe('ship');
     expect(fields[1]).toBe('t');
     expect(fields[2]).toBe('main');
     expect(fields[3]).toBe('0');
-    expect(Number.isFinite(Date.parse(fields[4]))).toBe(true);
-    expect(fields[5]).toMatch(/^[0-9a-f-]{36}$/);
-    expect(fields[6]).toBe('1');
-    expect(fields[7]).toBe('idx');
-    expect(fields[8]).toBe('body line\n');
-    expect(fields.slice(9)).toEqual(['p.txt', 'q dir/r.txt']);
+    expect(fields[4]).toBe('1');
+    expect(Number.isFinite(Date.parse(fields[5]))).toBe(true);
+    expect(fields[6]).toMatch(/^[0-9a-f-]{36}$/);
+    expect(fields[7]).toBe('1');
+    expect(fields[8]).toBe('idx');
+    expect(fields[9]).toBe('body line\n');
+    expect(fields.slice(10)).toEqual(['p.txt', 'q dir/r.txt']);
 
     execFileSync('node', [cliPath, 'delete', '--root', root, '--branch', 'feat/x']);
     expect(existsSync(join(root, relIntentPath('feat/x')))).toBe(false);
