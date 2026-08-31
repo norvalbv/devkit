@@ -21,6 +21,8 @@ describe('devkit help surface', () => {
     expect(r.status).toBe(0);
     expect(r.stdout).toMatch(/devkit ship —/);
     expect(r.stdout).toMatch(/SHIP_DRY_RUN/);
+    expect(r.stdout).toContain('--dry-gates');
+    expect(r.stdout).toMatch(/Never leaves a local branch or commit/);
   });
 
   it('`<command> --help` works for every command generically', () => {

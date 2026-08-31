@@ -63,7 +63,7 @@ fi
 # /devkit:commit-terminal
 
 __dk_gate_selected() {
-    [ "${DEVKIT_RUN_MODE:-}" != "review" ] && return 0
+    case "${DEVKIT_RUN_MODE:-}" in review|dry-gates) ;; *) return 0 ;; esac
     __dk_review_guards=$(printf '%s' "${DEVKIT_REVIEW_GUARDS:-}" | sed         -e 's/[[:space:]]*,[[:space:]]*/,/g'         -e 's/^[[:space:]]*//'         -e 's/[[:space:]]*$//')
     case ",${__dk_review_guards}," in
         *,"$1",*) return 0 ;;
@@ -132,7 +132,7 @@ __dk_gate_deterministic() {
     dk_det_rc=0
     __dk_no_git_env "$@" || dk_det_rc=$?
     [ "$dk_det_rc" -eq 0 ] && return 0
-    [ "${DEVKIT_RUN_MODE:-}" = "review" ] || exit 1
+    case "${DEVKIT_RUN_MODE:-}" in review|dry-gates) ;; *) exit 1 ;; esac
     dk_review_det_failed=1
 }
 
