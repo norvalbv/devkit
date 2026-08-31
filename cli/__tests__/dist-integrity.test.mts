@@ -151,6 +151,78 @@ describe('inspectDistIntegrity', () => {
     ]);
   });
 
+  it('reports the full physical closure behind an untracked generated artifact', async () => {
+    const { base, root } = repo();
+    mkdirSync(join(root, 'dist/cli'));
+    writeFileSync(join(root, 'dist/cli/new.mjs'), "import './middle.mjs';\n");
+    writeFileSync(join(root, 'dist/cli/middle.mjs'), "import './leaf.mjs';\n");
+    writeFileSync(join(root, 'dist/cli/leaf.mjs'), 'export const leaf = true;\n');
+
+    const report = await inspectDistIntegrity(root, base, ['cli/new.mts']);
+
+    expect(report.untracked).toEqual([
+      'dist/cli/leaf.mjs',
+      'dist/cli/middle.mjs',
+      'dist/cli/new.mjs',
+    ]);
+    expect(report.unresolved).toEqual([
+      {
+        importer: 'dist/cli/middle.mjs',
+        specifier: './leaf.mjs',
+        target: 'dist/cli/leaf.mjs',
+      },
+      {
+        importer: 'dist/cli/new.mjs',
+        specifier: './middle.mjs',
+        target: 'dist/cli/middle.mjs',
+      },
+    ]);
+  });
+
+  it('terminates when reachable untracked artifacts import each other', async () => {
+    const { base, root } = repo();
+    mkdirSync(join(root, 'dist/cli'));
+    writeFileSync(join(root, 'dist/cli/new.mjs'), "import './peer.mjs';\n");
+    writeFileSync(join(root, 'dist/cli/peer.mjs'), "import './new.mjs';\n");
+
+    const report = await inspectDistIntegrity(root, base, ['cli/new.mts']);
+
+    expect(report.untracked).toEqual(['dist/cli/new.mjs', 'dist/cli/peer.mjs']);
+    expect(report.unresolved).toHaveLength(2);
+  });
+
+  it('does not expand the graph through an explicitly deleted artifact', async () => {
+    const { base, root } = repo();
+    mkdirSync(join(root, 'dist/cli'));
+    writeFileSync(join(root, 'dist/index.mjs'), "import './cli/unused.mjs';\n");
+    writeFileSync(join(root, 'dist/cli/unused.mjs'), 'export const unused = true;\n');
+    git(root, 'rm', '-q', '--cached', 'dist/index.mjs');
+
+    const report = await inspectDistIntegrity(root, base, ['dist/index.mjs']);
+
+    expect(report.untracked).toEqual(['dist/index.mjs']);
+    expect(report.unresolved).toEqual([]);
+  });
+
+  it('does not traverse through a physical module outside dist', async () => {
+    const { base, root } = repo();
+    mkdirSync(join(root, 'dist/cli'));
+    writeFileSync(join(root, 'dist/cli/new.mjs'), "import '../../outside.mjs';\n");
+    writeFileSync(join(root, 'outside.mjs'), "import './outside-child.mjs';\n");
+    writeFileSync(join(root, 'outside-child.mjs'), 'export const child = true;\n');
+
+    const report = await inspectDistIntegrity(root, base, ['cli/new.mts']);
+
+    expect(report.untracked).toEqual(['dist/cli/new.mjs']);
+    expect(report.unresolved).toEqual([
+      {
+        importer: 'dist/cli/new.mjs',
+        specifier: '../../outside.mjs',
+        target: 'outside.mjs',
+      },
+    ]);
+  });
+
   it('resolves a briefed untracked artifact against an already-tracked import', async () => {
     const { base, root } = repo();
     mkdirSync(join(root, 'dist/cli'));
