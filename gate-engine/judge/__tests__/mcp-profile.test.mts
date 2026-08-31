@@ -83,6 +83,7 @@ describe('judge MCP profiles', () => {
       registryPath: registry,
       projectRoots: [repo],
       temporaryRoot: root,
+      allowedTools: 'Read',
     });
     const configPath = prepared.args[1];
     const config: ParsedRegistry = JSON.parse(readFileSync(configPath, 'utf8'));
@@ -95,6 +96,13 @@ describe('judge MCP profiles', () => {
     expect(statSync(path.dirname(configPath)).mode & 0o777).toBe(0o700);
     expect(statSync(configPath).mode & 0o777).toBe(0o600);
     expect(prepared.args.join(' ')).not.toContain('TOKEN_FILE');
+    expect(prepared.capabilityFingerprint).toBe(
+      judgeMcpCapabilityFingerprint(profile, 'Read', {
+        cwd: repo,
+        registryPath: registry,
+        projectRoots: [repo],
+      }),
+    );
     prepared.cleanup();
     expect(() => statSync(configPath)).toThrow();
   });

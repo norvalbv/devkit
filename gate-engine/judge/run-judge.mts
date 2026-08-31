@@ -28,6 +28,7 @@ import {
   judgeBinFor,
   type JudgeCli,
   judgeCliFor,
+  parseClaudeArgv,
   parseCodexUsage,
   unwrapCodexResult,
 } from './codex/result.mts';
@@ -197,6 +198,8 @@ interface ExecJudgeOpts {
   transcript?: boolean;
   /** Strict MCP profile. Omitted means a pure/internal judge with no MCP servers. */
   mcpProfile?: JudgeMcpProfile;
+  /** Observes the exact, secret-safe MCP capability identity prepared for this spawn. */
+  onMcpPrepared?: (capabilityFingerprint: string) => void;
   /** Tool-equipped but write-free judge: pin the codex path to the read-only sandbox (see
    * judgeCliFor). Required for any codex judge on a gate without staged-tree tamper detection. */
   codexReadOnly?: boolean;
@@ -210,6 +213,10 @@ interface ExecJudgeOpts {
 function modelFromArgs(args: string[]): string | null {
   const i = args.indexOf('--model');
   return i !== -1 && i + 1 < args.length ? args[i + 1] : null;
+}
+
+function allowedToolsFromArgs(args: string[]): string {
+  return parseClaudeArgv(args).allowedTools?.join(',') ?? '';
 }
 
 export interface RecordAgentRunOpts {
@@ -353,8 +360,10 @@ export function execJudge(opts: ExecJudgeOpts): string | null {
   const mcp = prepareJudgeMcpProfile(opts.mcpProfile ?? { kind: 'none' }, {
     cwd: cwd ?? process.cwd(),
     env,
+    allowedTools: allowedToolsFromArgs(args),
   });
   try {
+    opts.onMcpPrepared?.(mcp.capabilityFingerprint);
     // Inside the try on purpose: an argv a codex model cannot express (no prompt) surfaces as ONE
     // outage warning carrying the translation error, keeping this function's never-throws contract.
     const cli = spawnFor(args, mcp, opts.codexReadOnly === true);
@@ -416,6 +425,7 @@ export function execJudgeAsync(opts: ExecJudgeOpts): Promise<string | null> {
   const mcp = prepareJudgeMcpProfile(opts.mcpProfile ?? { kind: 'none' }, {
     cwd: cwd ?? process.cwd(),
     env,
+    allowedTools: allowedToolsFromArgs(args),
   });
   return new Promise((resolve) => {
     // Shared outage path — a callback error AND a synchronous throw from execFile() itself (e.g. an
@@ -435,6 +445,7 @@ export function execJudgeAsync(opts: ExecJudgeOpts): Promise<string | null> {
       resolve(null);
     };
     try {
+      opts.onMcpPrepared?.(mcp.capabilityFingerprint);
       // See the sync twin: routing inside the try keeps the never-rejects contract when argv
       // translation itself throws.
       const cli = spawnFor(args, mcp, opts.codexReadOnly === true);

@@ -166,13 +166,18 @@ describe('judge_exec telemetry', () => {
 
   it('async success emits ok exactly once', async () => {
     fakeClaude('echo SKIP');
+    let preparedFingerprint = '';
     const out = await execJudgeAsync({
       label: 'sentry-advisory',
       args: ['-p', '--model', 'haiku', 'x'],
       input: 'y',
       timeout: 30000,
+      onMcpPrepared: (fingerprint) => {
+        preparedFingerprint = fingerprint;
+      },
     });
     expect(out?.trim()).toBe('SKIP');
+    expect(preparedFingerprint).toMatch(/^[a-f0-9]{64}$/);
     const evs = events().filter((e) => e.type === 'judge_exec');
     expect(evs).toHaveLength(1);
     expect(evs[0].outcome).toBe('ok');

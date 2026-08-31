@@ -30,6 +30,12 @@ export function cleanupReviewFixtures(): void {
   }
 }
 
+export function messageFile(repo: string, message: string): string {
+  const file = join(repo, '.git', 'COMMIT_EDITMSG_TEST');
+  writeFileSync(file, message);
+  return file;
+}
+
 // sc-2107/sc-2054 made gpt-5.6-sol @ chunk:400 the config-resolvable DEFAULT. The fixture suite stubs CLAUDE-shaped judges (plain-text verdicts, --model argv),
 // so every fixture gate run pins the claude-era knobs unconditionally — ambient env must never
 // leak in. Codex-shaped judging is covered at the judge layer; resolution by the config tests.

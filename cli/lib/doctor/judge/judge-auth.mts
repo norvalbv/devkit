@@ -8,19 +8,11 @@
  * logged-out signal in the OUTPUT becomes a row — exit codes are ignored entirely (a logged-out
  * codex exits non-zero WITH its signal); a timeout, a missing binary, or output carrying no
  * recognisable signal is "unknown" and silent.
- *
- * The claude runtime is probed whenever review is selected regardless of the configured trio — the
- * completeness judge is pinned to a claude model, so every review install needs claude auth even
- * when all three configured models are codex-family.
  */
 
 import { spawnSync } from 'node:child_process';
-import {
-  correctnessModel,
-  resolveEscalationModel,
-  resolveReviewModel,
-} from '../../../../gate-engine/review/reviewers.mts';
 import { type CheckResult, check } from '../check-result.mts';
+import { type JudgeModelConfig, requiredJudgeProviders } from './judge-family.mts';
 
 export const JUDGE_AUTH_CHECK = 'judge auth';
 
@@ -72,13 +64,13 @@ export function codexLoggedOut(exec: ProbeExec = runProbe): boolean {
 }
 
 export function judgeAuthResult(
-  cfg: { review: { model: string; escalationModel: string; correctnessModel: string } },
+  cfg: JudgeModelConfig,
   exec: ProbeExec = runProbe,
 ): CheckResult | null {
-  const models = [resolveReviewModel(cfg), resolveEscalationModel(cfg), correctnessModel(cfg)];
+  const providers = requiredJudgeProviders(cfg);
   const dead: string[] = [];
-  if (models.some((m) => m.startsWith('gpt-')) && codexLoggedOut(exec)) dead.push('codex');
-  if (claudeLoggedOut(exec)) dead.push('claude');
+  if (providers.has('codex') && codexLoggedOut(exec)) dead.push('codex');
+  if (providers.has('claude') && claudeLoggedOut(exec)) dead.push('claude');
   if (dead.length === 0) return null;
   return check(
     JUDGE_AUTH_CHECK,

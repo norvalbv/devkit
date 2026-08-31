@@ -7,6 +7,7 @@ import {
   checkGuardConfig,
   codexRuntimeResult,
 } from '../lib/doctor/guard-config-checks.mts';
+import { CLAUDE_RUNTIME_CHECK } from '../lib/doctor/judge/judge-family.mts';
 
 // sc-2107: a gpt-* judge model with no resolvable codex binary is an undetected fail-open (every
 // reviewer inconclusive, gate exit 2, nothing reviewed). This check gives it a doctor signal.
@@ -134,5 +135,24 @@ describe('checkGuardConfig — the codex runtime check is scoped to the review g
     process.env.PATH = '/nonexistent-codex-scope';
     const results = await checkGuardConfig(repo(), false, false, true);
     expect(results.find((r) => r.name === CODEX_RUNTIME_CHECK)?.status).toBe('DRIFT');
+    expect(results.find((r) => r.name === CLAUDE_RUNTIME_CHECK)).toBeUndefined();
+  });
+
+  it('requires only Claude for an all-Claude family', async () => {
+    process.env.GUARD_REVIEW_MODEL = 'haiku';
+    process.env.GUARD_REVIEW_ESCALATION_MODEL = 'opus';
+    process.env.GUARD_CORRECTNESS_MODEL = 'sonnet';
+    process.env.PATH = '/nonexistent-claude-scope';
+    const results = await checkGuardConfig(repo(), false, false, true);
+    expect(results.find((r) => r.name === CODEX_RUNTIME_CHECK)).toBeUndefined();
+    expect(results.find((r) => r.name === CLAUDE_RUNTIME_CHECK)?.status).toBe('DRIFT');
+  });
+
+  it('requires both providers for a deliberately mixed family', async () => {
+    process.env.GUARD_REVIEW_MODEL = 'haiku';
+    process.env.PATH = '/nonexistent-mixed-scope';
+    const results = await checkGuardConfig(repo(), false, false, true);
+    expect(results.find((r) => r.name === CODEX_RUNTIME_CHECK)?.status).toBe('DRIFT');
+    expect(results.find((r) => r.name === CLAUDE_RUNTIME_CHECK)?.status).toBe('DRIFT');
   });
 });
