@@ -975,6 +975,121 @@ describe('draft amendments', () => {
     expect(readFileSync(join(dir, 'INDEX.md'), 'utf8')).toBe(beforeIndex);
   });
 
+  it('surgically amends the newest of two uncommitted notes', () => {
+    run(target('axis'));
+    commitAll();
+    expect(run(['add', 'axis', '--note', 'first draft note']).status).toBe(0);
+    expect(run(['add', 'axis', '--note', 'second draft has the wrong fact']).status).toBe(0);
+    const file = join(dir, 'axis.md');
+    const before = readFileSync(file, 'utf8');
+    const beforeIndex = readFileSync(join(dir, 'INDEX.md'), 'utf8');
+
+    const amended = run([
+      'amend',
+      'axis',
+      '--note-replace',
+      'the wrong fact',
+      'the corrected fact',
+    ]);
+
+    expect(amended.status, amended.stderr).toBe(0);
+    expect(readFileSync(file, 'utf8')).toBe(before.replace('the wrong fact', 'the corrected fact'));
+    expect(readFileSync(join(dir, 'INDEX.md'), 'utf8')).toBe(beforeIndex);
+  });
+
+  it('replaces only the newest of three uncommitted notes', () => {
+    run(target('axis'));
+    commitAll();
+    expect(run(['add', 'axis', '--note', 'first draft note']).status).toBe(0);
+    expect(run(['add', 'axis', '--note', 'second draft note']).status).toBe(0);
+    expect(run(['add', 'axis', '--note', 'third draft note']).status).toBe(0);
+    const file = join(dir, 'axis.md');
+    const before = readFileSync(file, 'utf8');
+    const beforeIndex = readFileSync(join(dir, 'INDEX.md'), 'utf8');
+
+    const amended = run(['amend', 'axis', '--note', 'corrected third draft note']);
+
+    expect(amended.status, amended.stderr).toBe(0);
+    expect(readFileSync(file, 'utf8')).toBe(
+      before.replace('third draft note', 'corrected third draft note'),
+    );
+    expect(readFileSync(join(dir, 'INDEX.md'), 'utf8')).toBe(beforeIndex);
+  });
+
+  it('amends a newest draft Target after another uncommitted entry', () => {
+    run(target('axis'));
+    commitAll();
+    expect(run(['add', 'axis', '--note', 'earlier draft note']).status).toBe(0);
+    expect(
+      run(['add', 'axis', '--target', ...reqFlags('second'), '--evidence-change', 'new benchmark'])
+        .status,
+    ).toBe(0);
+
+    const amended = run([
+      'amend',
+      'axis',
+      '--target',
+      ...reqFlags('final'),
+      '--evidence-change',
+      'corrected benchmark',
+    ]);
+
+    expect(amended.status, amended.stderr).toBe(0);
+    const md = readFileSync(join(dir, 'axis.md'), 'utf8');
+    expect(md).toContain('earlier draft note');
+    expect(md).toContain('**Ruling:** final-ruling');
+    expect(md).not.toContain('**Ruling:** second-ruling');
+    expect(readFileSync(join(dir, 'INDEX.md'), 'utf8')).toContain('final-ruling');
+  });
+
+  it('requires evidence change for a later Target on an entirely uncommitted axis', () => {
+    run(target('axis'));
+    expect(
+      run(['add', 'axis', '--target', ...reqFlags('second'), '--evidence-change', 'new benchmark'])
+        .status,
+    ).toBe(0);
+    const file = join(dir, 'axis.md');
+    const index = join(dir, 'INDEX.md');
+    const beforeFile = readFileSync(file, 'utf8');
+    const beforeIndex = readFileSync(index, 'utf8');
+
+    const blocked = run(['amend', 'axis', '--target', ...reqFlags('final')]);
+
+    expect(blocked.status).toBe(1);
+    expect(blocked.stderr).toContain('requires --evidence-change');
+    expect(readFileSync(file, 'utf8')).toBe(beforeFile);
+    expect(readFileSync(index, 'utf8')).toBe(beforeIndex);
+
+    const amended = run([
+      'amend',
+      'axis',
+      '--target',
+      ...reqFlags('final'),
+      '--evidence-change',
+      'corrected benchmark',
+    ]);
+    expect(amended.status, amended.stderr).toBe(0);
+    const md = readFileSync(file, 'utf8');
+    expect(md).toContain('**Ruling:** axis-ruling');
+    expect(md).toContain('**Ruling:** final-ruling');
+    expect(md).not.toContain('**Ruling:** second-ruling');
+    expect(readFileSync(index, 'utf8')).toContain('final-ruling');
+  });
+
+  it('amends the newest entry on an entirely uncommitted axis', () => {
+    run(target('axis'));
+    expect(run(['add', 'axis', '--note', 'draft note with wrong fact']).status).toBe(0);
+    const file = join(dir, 'axis.md');
+    const before = readFileSync(file, 'utf8');
+    const beforeIndex = readFileSync(join(dir, 'INDEX.md'), 'utf8');
+
+    const amended = run(['amend', 'axis', '--note-replace', 'wrong fact', 'correct fact']);
+
+    expect(amended.status, amended.stderr).toBe(0);
+    expect(readFileSync(file, 'utf8')).toBe(before.replace('wrong fact', 'correct fact'));
+    expect(readFileSync(join(dir, 'INDEX.md'), 'utf8')).toBe(beforeIndex);
+  });
+
   it('refuses a missing or ambiguous note substring atomically', () => {
     run(target('axis'));
     commitAll();
