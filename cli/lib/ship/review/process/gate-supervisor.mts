@@ -367,7 +367,7 @@ export function superviseGateCommand(
       if (finished || forcedStatus !== undefined) return;
       ownershipTimer = undefined;
       try {
-        inspectOwnedProcesses(inspectionFailure !== undefined);
+        inspectOwnedProcesses(childDone || inspectionFailure !== undefined);
       } catch (cause) {
         beginForcedCleanup(1, cause);
         return;

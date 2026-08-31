@@ -47,11 +47,13 @@ const COMMANDS = {
     'coverage-run': () => import('./commands/coverage/run.mjs'),
     'test-report-run': () => import('./commands/baseline/test-report-run.mjs'),
     'baseline-status': () => import('./commands/baseline/status.mjs'),
+    'prove-regression': () => import('./commands/baseline/prove-regression.mjs'),
 };
 // The subcommands that shell out to git — they get a friendly missing-git preflight (require-git).
 const GIT_COMMANDS = new Set([
     'baseline-status',
     'base-status',
+    'prove-regression',
     'ship',
     'review',
     'move',
@@ -116,7 +118,9 @@ async function main() {
     // Oxc has one extra verb level, so `devkit oxc lint --help` / `fmt --help` belong to the pinned
     // tool; bare `devkit oxc --help` still describes Devkit's wrapper.
     const oxcToolHelp = cmd === 'oxc' && ['lint', 'fmt', 'format'].includes(cmdArgs[0] ?? '');
-    if (!oxcToolHelp && (cmdArgs.includes('--help') || cmdArgs.includes('-h'))) {
+    const commandBoundary = cmdArgs.indexOf('--');
+    const devkitArgs = commandBoundary === -1 ? cmdArgs : cmdArgs.slice(0, commandBoundary);
+    if (!oxcToolHelp && (devkitArgs.includes('--help') || devkitArgs.includes('-h'))) {
         console.log(renderCommandHelp((await loader()).meta));
         process.exit(0);
     }

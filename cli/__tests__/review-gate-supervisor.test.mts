@@ -557,6 +557,56 @@ describe('review gate supervisor', () => {
     }
   });
 
+  it('keeps discovering token-owned descendants after the command leader exits', async () => {
+    const relayPid = 2_000_000_000;
+    const grandchildPid = relayPid + 1;
+    let preflightSeen = false;
+    let relayReturned = false;
+    let grandchildReturned = false;
+    let grandchildOwned = false;
+    const inspect = (ownershipMarker?: string) => {
+      const table = new Map<number, InspectedProcess>();
+      if (ownershipMarker && !preflightSeen) {
+        preflightSeen = true;
+        return table;
+      }
+      if (!relayReturned && ownershipMarker) {
+        relayReturned = true;
+        table.set(relayPid, {
+          pid: relayPid,
+          parentPid: 1,
+          groupId: relayPid,
+          identity: 'intermediate-before-second-detach',
+          ownershipToken: true,
+        });
+        return table;
+      }
+      if (!relayReturned || grandchildReturned) return table;
+      grandchildReturned = true;
+      grandchildOwned = Boolean(ownershipMarker);
+      table.set(grandchildPid, {
+        pid: grandchildPid,
+        parentPid: 1,
+        groupId: grandchildPid,
+        identity: 'orphan-after-second-detach',
+        ownershipToken: grandchildOwned,
+      });
+      return table;
+    };
+
+    await expect(
+      superviseGateCommand(
+        30_000,
+        [process.execPath, '-e', 'process.exit(0)'],
+        inspect,
+        'a'.repeat(64),
+      ),
+    ).resolves.toBe(0);
+    expect(relayReturned).toBe(true);
+    expect(grandchildReturned).toBe(true);
+    expect(grandchildOwned).toBe(true);
+  });
+
   // macOS returns EPERM — not ESRCH — from kill(-pgid, sig) while it is still reaping that group's
   // members. The liveness probe already tolerated that window; a REAL signal landing in it threw, and
   // the throw settles the supervisor at 1. Latent while only `devkit review` was supervised; once ship
