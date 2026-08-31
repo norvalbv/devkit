@@ -7,9 +7,7 @@
       "kind": "agent",
       "lifecycle": "shipped",
       "evidence": "evidence-only",
-      "suiteIds": [
-        "reviewer-api-security"
-      ],
+      "suiteIds": ["reviewer-api-security"],
       "canonical": "agents/api-security-reviewer.md"
     },
     {
@@ -18,9 +16,7 @@
       "kind": "agent",
       "lifecycle": "shipped",
       "evidence": "evidence-only",
-      "suiteIds": [
-        "reviewer-backend-performance"
-      ],
+      "suiteIds": ["reviewer-backend-performance"],
       "canonical": "agents/backend-performance-reviewer.md"
     },
     {
@@ -29,9 +25,7 @@
       "kind": "agent",
       "lifecycle": "shipped",
       "evidence": "evidence-only",
-      "suiteIds": [
-        "commit-guard-retrieval"
-      ],
+      "suiteIds": ["commit-guard-retrieval"],
       "canonical": "agents/commit-guard.md"
     },
     {
@@ -40,9 +34,7 @@
       "kind": "agent",
       "lifecycle": "shipped",
       "evidence": "accepted",
-      "suiteIds": [
-        "conventions"
-      ],
+      "suiteIds": ["conventions"],
       "canonical": "agents/conventions-reviewer.md"
     },
     {
@@ -51,9 +43,7 @@
       "kind": "agent",
       "lifecycle": "shipped",
       "evidence": "evidence-only",
-      "suiteIds": [
-        "reviewer-correctness"
-      ],
+      "suiteIds": ["reviewer-correctness"],
       "canonical": "agents/correctness-reviewer.md"
     },
     {
@@ -62,9 +52,7 @@
       "kind": "agent",
       "lifecycle": "shipped",
       "evidence": "accepted",
-      "suiteIds": [
-        "completeness"
-      ],
+      "suiteIds": ["completeness"],
       "canonical": "agents/feature-completeness-reviewer.md"
     },
     {
@@ -73,9 +61,7 @@
       "kind": "agent",
       "lifecycle": "shipped",
       "evidence": "accepted",
-      "suiteIds": [
-        "critique"
-      ],
+      "suiteIds": ["critique"],
       "canonical": "agents/feature-critique.md"
     },
     {
@@ -102,9 +88,7 @@
       "kind": "agent",
       "lifecycle": "shipped",
       "evidence": "evidence-only",
-      "suiteIds": [
-        "reviewer-frontend-performance"
-      ],
+      "suiteIds": ["reviewer-frontend-performance"],
       "canonical": "agents/frontend-performance-reviewer.md"
     },
     {
@@ -113,9 +97,7 @@
       "kind": "agent",
       "lifecycle": "shipped",
       "evidence": "evidence-only",
-      "suiteIds": [
-        "reviewer-frontend-security"
-      ],
+      "suiteIds": ["reviewer-frontend-security"],
       "canonical": "agents/frontend-security-reviewer.md"
     },
     {
@@ -124,9 +106,7 @@
       "kind": "agent",
       "lifecycle": "experimental",
       "evidence": "evidence-only",
-      "suiteIds": [
-        "prior-art"
-      ],
+      "suiteIds": ["prior-art"],
       "canonical": "agents/prior-art.md"
     },
     {
@@ -144,9 +124,7 @@
       "kind": "bin",
       "lifecycle": "shipped",
       "evidence": "evidence-only",
-      "suiteIds": [
-        "co-occurrence"
-      ],
+      "suiteIds": ["co-occurrence"],
       "canonical": "package.json#bin:guard-clone"
     },
     {
@@ -155,9 +133,7 @@
       "kind": "bin",
       "lifecycle": "shipped",
       "evidence": "evidence-only",
-      "suiteIds": [
-        "comment-firewall"
-      ],
+      "suiteIds": ["comment-firewall"],
       "canonical": "package.json#bin:guard-comments"
     },
     {
@@ -175,11 +151,7 @@
       "kind": "bin",
       "lifecycle": "shipped",
       "evidence": "evidence-only",
-      "suiteIds": [
-        "decisions",
-        "decisions-recall",
-        "decisions-save-quality"
-      ],
+      "suiteIds": ["decisions", "decisions-recall", "decisions-save-quality"],
       "canonical": "package.json#bin:guard-decisions"
     },
     {
@@ -197,9 +169,7 @@
       "kind": "bin",
       "lifecycle": "shipped",
       "evidence": "evidence-only",
-      "suiteIds": [
-        "co-occurrence"
-      ],
+      "suiteIds": ["co-occurrence"],
       "canonical": "package.json#bin:guard-dup"
     },
     {
@@ -235,9 +205,7 @@
       "kind": "bin",
       "lifecycle": "shipped",
       "evidence": "external-required",
-      "suiteIds": [
-        "qavis"
-      ],
+      "suiteIds": ["qavis"],
       "canonical": "package.json#bin:guard-qavis-advisory"
     },
     {
@@ -263,9 +231,7 @@
       "kind": "bin",
       "lifecycle": "shipped",
       "evidence": "evidence-only",
-      "suiteIds": [
-        "sentry"
-      ],
+      "suiteIds": ["sentry"],
       "canonical": "package.json#bin:guard-sentry"
     },
     {
@@ -292,9 +258,7 @@
       "kind": "reviewer",
       "lifecycle": "shipped",
       "evidence": "evidence-only",
-      "suiteIds": [
-        "reviewer-api-security"
-      ],
+      "suiteIds": ["reviewer-api-security"],
       "canonical": "REVIEWERS:api-security-reviewer"
     },
     {
@@ -303,9 +267,7 @@
       "kind": "reviewer",
       "lifecycle": "shipped",
       "evidence": "evidence-only",
-      "suiteIds": [
-        "reviewer-backend-performance"
-      ],
+      "suiteIds": ["reviewer-backend-performance"],
       "canonical": "REVIEWERS:backend-performance-reviewer"
     },
     {
@@ -314,9 +276,7 @@
       "kind": "reviewer",
       "lifecycle": "shipped",
       "evidence": "evidence-only",
-      "suiteIds": [
-        "reviewer-frontend-security"
-      ],
+      "suiteIds": ["reviewer-frontend-security"],
       "canonical": "REVIEWERS:frontend-security-reviewer"
     },
     {
@@ -325,9 +285,7 @@
       "kind": "reviewer",
       "lifecycle": "shipped",
       "evidence": "evidence-only",
-      "suiteIds": [
-        "reviewer-frontend-performance"
-      ],
+      "suiteIds": ["reviewer-frontend-performance"],
       "canonical": "REVIEWERS:frontend-performance-reviewer"
     },
     {
@@ -336,9 +294,7 @@
       "kind": "reviewer",
       "lifecycle": "shipped",
       "evidence": "evidence-only",
-      "suiteIds": [
-        "commit-guard-retrieval"
-      ],
+      "suiteIds": ["commit-guard-retrieval"],
       "canonical": "REVIEWERS:commit-guard"
     },
     {
@@ -347,9 +303,7 @@
       "kind": "reviewer",
       "lifecycle": "shipped",
       "evidence": "evidence-only",
-      "suiteIds": [
-        "reviewer-correctness"
-      ],
+      "suiteIds": ["reviewer-correctness"],
       "canonical": "REVIEWERS:correctness-reviewer"
     },
     {
@@ -358,9 +312,7 @@
       "kind": "reviewer",
       "lifecycle": "shipped",
       "evidence": "accepted",
-      "suiteIds": [
-        "conventions"
-      ],
+      "suiteIds": ["conventions"],
       "canonical": "REVIEWERS:conventions-reviewer"
     },
     {
@@ -369,9 +321,7 @@
       "kind": "judge",
       "lifecycle": "shipped",
       "evidence": "accepted",
-      "suiteIds": [
-        "critique"
-      ]
+      "suiteIds": ["critique"]
     },
     {
       "id": "judge-completeness",
@@ -379,9 +329,7 @@
       "kind": "judge",
       "lifecycle": "shipped",
       "evidence": "accepted",
-      "suiteIds": [
-        "completeness"
-      ]
+      "suiteIds": ["completeness"]
     },
     {
       "id": "judge-comment-firewall",
@@ -389,9 +337,7 @@
       "kind": "judge",
       "lifecycle": "shipped",
       "evidence": "evidence-only",
-      "suiteIds": [
-        "comment-firewall"
-      ]
+      "suiteIds": ["comment-firewall"]
     },
     {
       "id": "judge-decisions",
@@ -399,9 +345,7 @@
       "kind": "judge",
       "lifecycle": "shipped",
       "evidence": "evidence-only",
-      "suiteIds": [
-        "decisions"
-      ]
+      "suiteIds": ["decisions"]
     },
     {
       "id": "judge-sentry",
@@ -409,9 +353,7 @@
       "kind": "judge",
       "lifecycle": "shipped",
       "evidence": "evidence-only",
-      "suiteIds": [
-        "sentry"
-      ]
+      "suiteIds": ["sentry"]
     },
     {
       "id": "judge-qavis",
@@ -419,9 +361,7 @@
       "kind": "judge",
       "lifecycle": "shipped",
       "evidence": "external-required",
-      "suiteIds": [
-        "qavis"
-      ],
+      "suiteIds": ["qavis"],
       "externalUrl": "https://github.com/norvalbv/qavis"
     },
     {
@@ -430,9 +370,7 @@
       "kind": "benchmark",
       "lifecycle": "experimental",
       "evidence": "none",
-      "suiteIds": [
-        "decisions-recall"
-      ]
+      "suiteIds": ["decisions-recall"]
     },
     {
       "id": "benchmark-decisions-save-quality",
@@ -440,9 +378,7 @@
       "kind": "benchmark",
       "lifecycle": "experimental",
       "evidence": "none",
-      "suiteIds": [
-        "decisions-save-quality"
-      ]
+      "suiteIds": ["decisions-save-quality"]
     },
     {
       "id": "benchmark-search-tool",
@@ -450,9 +386,7 @@
       "kind": "benchmark",
       "lifecycle": "experimental",
       "evidence": "evidence-only",
-      "suiteIds": [
-        "search-tool"
-      ]
+      "suiteIds": ["search-tool"]
     },
     {
       "id": "benchmark-edge-cases",
@@ -460,9 +394,7 @@
       "kind": "benchmark",
       "lifecycle": "no-ship",
       "evidence": "accepted",
-      "suiteIds": [
-        "edge-cases"
-      ]
+      "suiteIds": ["edge-cases"]
     }
   ],
   "suites": [
@@ -470,21 +402,14 @@
       "id": "prior-art",
       "label": "Prior-art validation",
       "adapter": "prior-art",
-      "subjectIds": [
-        "agent-prior-art"
-      ],
+      "subjectIds": ["agent-prior-art"],
       "runner": "gate-engine/prior-art/eval/bench.mts",
       "baseline": "gate-engine/prior-art/eval/results.baseline.json",
       "lifecycle": "experimental",
       "acceptance": "K=3 full intrinsic tier, matcher K=3, zero outages",
       "hashes": {
-        "implementation": [
-          "agents/prior-art.md",
-          "skills/prior-art/**"
-        ],
-        "corpus": [
-          "gate-engine/prior-art/eval/cases-*.jsonl"
-        ],
+        "implementation": ["agents/prior-art.md", "skills/prior-art/**"],
+        "corpus": ["gate-engine/prior-art/eval/cases-*.jsonl"],
         "scorer": [
           "gate-engine/prior-art/eval/matcher.mts",
           "gate-engine/prior-art/response-contract.mts",
@@ -502,22 +427,14 @@
       "id": "critique",
       "label": "Feature critique",
       "adapter": "critique",
-      "subjectIds": [
-        "agent-feature-critique",
-        "judge-feature-critique"
-      ],
+      "subjectIds": ["agent-feature-critique", "judge-feature-critique"],
       "runner": "gate-engine/critique/eval/bench.mts",
       "baseline": "gate-engine/critique/eval/results.baseline.json",
       "lifecycle": "shipped",
       "acceptance": "K=3 full tier, matcher K=3, zero outages",
       "hashes": {
-        "implementation": [
-          "agents/feature-critique.md",
-          "skills/feature-critique/**"
-        ],
-        "corpus": [
-          "gate-engine/critique/eval/cases-*.jsonl"
-        ],
+        "implementation": ["agents/feature-critique.md", "skills/feature-critique/**"],
+        "corpus": ["gate-engine/critique/eval/cases-*.jsonl"],
         "scorer": [
           "gate-engine/critique/eval/matcher.mts",
           "gate-engine/judge/matcher-core.mts",
@@ -541,22 +458,32 @@
       "runner": "gate-engine/review/eval/bench.mts",
       "baseline": "gate-engine/review/eval/results.baseline.json",
       "lifecycle": "shipped",
-      "acceptance": "Full matcher tier, K=3, zero outages",
+      "acceptance": "Full matcher tier, K=3, reviewer model consistent in observed argv, gap recall >= 0.70, false-flag rate <= 0.25, independent current-run matcher audit kappa >= 0.70 with no missing slots, zero outages",
       "hashes": {
         "implementation": [
           "agents/feature-completeness-reviewer.md",
-          "gate-engine/review/completeness.mts"
+          "gate-engine/config.mts",
+          "gate-engine/judge/codex/result.mts",
+          "gate-engine/judge/run-judge.mts",
+          "gate-engine/review/completeness.mts",
+          "gate-engine/review/reviewers.mts"
         ],
-        "corpus": [
-          "gate-engine/review/eval/cases-completeness.jsonl"
-        ],
+        "corpus": ["gate-engine/review/eval/cases-completeness.jsonl"],
         "scorer": [
-          "gate-engine/review/eval/matcher.mts",
           "gate-engine/judge/matcher-core.mts",
-          "gate-engine/review/eval/matcher-audit.labels.jsonl"
+          "gate-engine/review/eval/baseline-audit.mts",
+          "gate-engine/review/eval/matcher.mts",
+          "gate-engine/review/eval/matcher-audit.labels.jsonl",
+          "gate-engine/review/eval/scoring.mts"
         ],
         "runner": [
-          "gate-engine/review/eval/bench.mts"
+          "gate-engine/review/eval/bench.mts",
+          "gate-engine/review/eval/benchmark-config.mts",
+          "gate-engine/review/eval/benchmark-identity.mts",
+          "gate-engine/review/eval/case-runner.mts",
+          "gate-engine/review/eval/cases.mts",
+          "gate-engine/review/eval/checkpoint.mts",
+          "gate-engine/review/eval/module-closure-hash.mts"
         ]
       }
     },
@@ -574,21 +501,14 @@
       "lifecycle": "shipped",
       "acceptance": "Full matcher tier, K=3, zero outages",
       "hashes": {
-        "implementation": [
-          "agents/conventions-reviewer.md",
-          "gate-engine/review/reviewers.mts"
-        ],
-        "corpus": [
-          "gate-engine/review/eval/conventions/cases-conventions.jsonl"
-        ],
+        "implementation": ["agents/conventions-reviewer.md", "gate-engine/review/reviewers.mts"],
+        "corpus": ["gate-engine/review/eval/conventions/cases-conventions.jsonl"],
         "scorer": [
           "gate-engine/review/eval/conventions/matcher.mts",
           "gate-engine/judge/matcher-core.mts",
           "gate-engine/review/eval/conventions/matcher-audit-conventions.labels.jsonl"
         ],
-        "runner": [
-          "gate-engine/review/eval/conventions/bench.mts"
-        ]
+        "runner": ["gate-engine/review/eval/conventions/bench.mts"]
       }
     },
     {
@@ -601,9 +521,7 @@
         "bin-guard-review"
       ],
       "runner": "gate-engine/review/eval/reviewers/bench.mts",
-      "sections": [
-        "api-security-reviewer"
-      ],
+      "sections": ["api-security-reviewer"],
       "lifecycle": "shipped",
       "acceptance": "Complete model/cascade cohort with zero outages and suite-local floors",
       "hashes": {
@@ -613,15 +531,9 @@
           "agents/api-security-reviewer.md",
           "skills/api-security/**"
         ],
-        "corpus": [
-          "gate-engine/review/eval/reviewers/cases-api-security.jsonl"
-        ],
-        "scorer": [
-          "gate-engine/review/eval/reviewers/bench.mts"
-        ],
-        "runner": [
-          "gate-engine/review/eval/reviewers/bench.mts"
-        ]
+        "corpus": ["gate-engine/review/eval/reviewers/cases-api-security.jsonl"],
+        "scorer": ["gate-engine/review/eval/reviewers/bench.mts"],
+        "runner": ["gate-engine/review/eval/reviewers/bench.mts"]
       }
     },
     {
@@ -634,9 +546,7 @@
         "bin-guard-review"
       ],
       "runner": "gate-engine/review/eval/reviewers/bench.mts",
-      "sections": [
-        "backend-performance-reviewer"
-      ],
+      "sections": ["backend-performance-reviewer"],
       "lifecycle": "shipped",
       "acceptance": "Complete model/cascade cohort with zero outages and suite-local floors",
       "hashes": {
@@ -646,15 +556,9 @@
           "agents/backend-performance-reviewer.md",
           "skills/backend-performance/**"
         ],
-        "corpus": [
-          "gate-engine/review/eval/reviewers/cases-backend-performance.jsonl"
-        ],
-        "scorer": [
-          "gate-engine/review/eval/reviewers/bench.mts"
-        ],
-        "runner": [
-          "gate-engine/review/eval/reviewers/bench.mts"
-        ]
+        "corpus": ["gate-engine/review/eval/reviewers/cases-backend-performance.jsonl"],
+        "scorer": ["gate-engine/review/eval/reviewers/bench.mts"],
+        "runner": ["gate-engine/review/eval/reviewers/bench.mts"]
       }
     },
     {
@@ -667,9 +571,7 @@
         "bin-guard-review"
       ],
       "runner": "gate-engine/review/eval/reviewers/bench.mts",
-      "sections": [
-        "frontend-security-reviewer"
-      ],
+      "sections": ["frontend-security-reviewer"],
       "lifecycle": "shipped",
       "acceptance": "Complete model/cascade cohort with zero outages and suite-local floors",
       "hashes": {
@@ -679,15 +581,9 @@
           "agents/frontend-security-reviewer.md",
           "skills/frontend-security/**"
         ],
-        "corpus": [
-          "gate-engine/review/eval/reviewers/cases-frontend-security.jsonl"
-        ],
-        "scorer": [
-          "gate-engine/review/eval/reviewers/bench.mts"
-        ],
-        "runner": [
-          "gate-engine/review/eval/reviewers/bench.mts"
-        ]
+        "corpus": ["gate-engine/review/eval/reviewers/cases-frontend-security.jsonl"],
+        "scorer": ["gate-engine/review/eval/reviewers/bench.mts"],
+        "runner": ["gate-engine/review/eval/reviewers/bench.mts"]
       }
     },
     {
@@ -700,9 +596,7 @@
         "bin-guard-review"
       ],
       "runner": "gate-engine/review/eval/reviewers/bench.mts",
-      "sections": [
-        "frontend-performance-reviewer"
-      ],
+      "sections": ["frontend-performance-reviewer"],
       "lifecycle": "shipped",
       "acceptance": "Complete model/cascade cohort with zero outages and suite-local floors",
       "hashes": {
@@ -712,15 +606,9 @@
           "agents/frontend-performance-reviewer.md",
           "skills/frontend-performance/**"
         ],
-        "corpus": [
-          "gate-engine/review/eval/reviewers/cases-frontend-performance.jsonl"
-        ],
-        "scorer": [
-          "gate-engine/review/eval/reviewers/bench.mts"
-        ],
-        "runner": [
-          "gate-engine/review/eval/reviewers/bench.mts"
-        ]
+        "corpus": ["gate-engine/review/eval/reviewers/cases-frontend-performance.jsonl"],
+        "scorer": ["gate-engine/review/eval/reviewers/bench.mts"],
+        "runner": ["gate-engine/review/eval/reviewers/bench.mts"]
       }
     },
     {
@@ -733,9 +621,7 @@
         "bin-guard-review"
       ],
       "runner": "gate-engine/review/eval/reviewers/bench.mts",
-      "sections": [
-        "correctness-reviewer"
-      ],
+      "sections": ["correctness-reviewer"],
       "lifecycle": "shipped",
       "acceptance": "Complete model/cascade cohort with zero outages and suite-local floors",
       "hashes": {
@@ -745,38 +631,23 @@
           "agents/correctness-reviewer.md",
           "skills/correctness/**"
         ],
-        "corpus": [
-          "gate-engine/review/eval/reviewers/cases-correctness.jsonl"
-        ],
-        "scorer": [
-          "gate-engine/review/eval/reviewers/bench.mts"
-        ],
-        "runner": [
-          "gate-engine/review/eval/reviewers/bench.mts"
-        ]
+        "corpus": ["gate-engine/review/eval/reviewers/cases-correctness.jsonl"],
+        "scorer": ["gate-engine/review/eval/reviewers/bench.mts"],
+        "runner": ["gate-engine/review/eval/reviewers/bench.mts"]
       }
     },
     {
       "id": "comment-firewall",
       "label": "Changed-comment paragraph rationale review",
       "adapter": "reviewer",
-      "subjectIds": [
-        "judge-comment-firewall",
-        "bin-guard-comments"
-      ],
+      "subjectIds": ["judge-comment-firewall", "bin-guard-comments"],
       "runner": "gate-engine/comment-firewall/eval/run.mts",
       "lifecycle": "shipped",
       "acceptance": "At least 90% accuracy and 100% approval precision on the focused exception corpus",
       "hashes": {
-        "implementation": [
-          "gate-engine/comment-firewall/*.mts"
-        ],
-        "corpus": [
-          "gate-engine/comment-firewall/eval/corpus.json"
-        ],
-        "scorer": [
-          "gate-engine/comment-firewall/eval/run.mts"
-        ],
+        "implementation": ["gate-engine/comment-firewall/*.mts"],
+        "corpus": ["gate-engine/comment-firewall/eval/corpus.json"],
+        "scorer": ["gate-engine/comment-firewall/eval/run.mts"],
         "runner": [
           "gate-engine/comment-firewall/eval/run.mts",
           "gate-engine/comment-firewall/judge.mts"
@@ -787,10 +658,7 @@
       "id": "decisions",
       "label": "Decision governance",
       "adapter": "decisions",
-      "subjectIds": [
-        "judge-decisions",
-        "bin-guard-decisions"
-      ],
+      "subjectIds": ["judge-decisions", "bin-guard-decisions"],
       "runner": "gate-engine/decisions/eval/bench.mts",
       "lifecycle": "shipped",
       "acceptance": "K=3 detect/depth, K=1 alignment with stable baseline-discordant retry, zero outages and suite hard floors",
@@ -800,9 +668,7 @@
           "gate-engine/decisions/check-alignment.mts",
           "gate-engine/decisions/depth-judge.mts"
         ],
-        "corpus": [
-          "gate-engine/decisions/eval/cases-*.jsonl"
-        ],
+        "corpus": ["gate-engine/decisions/eval/cases-*.jsonl"],
         "scorer": [
           "gate-engine/decisions/eval/bench.mts",
           "gate-engine/decisions/eval/acceptance.mts",
@@ -826,51 +692,29 @@
       "id": "sentry",
       "label": "Sentry capture judge",
       "adapter": "sentry",
-      "subjectIds": [
-        "judge-sentry",
-        "bin-guard-sentry"
-      ],
+      "subjectIds": ["judge-sentry", "bin-guard-sentry"],
       "runner": "gate-engine/sentry/eval/bench.mts",
       "lifecycle": "shipped",
       "acceptance": "Complete persisted precision/recall/F1 cell, zero outages",
       "hashes": {
-        "implementation": [
-          "gate-engine/sentry/check-sentry.mts"
-        ],
-        "corpus": [
-          "gate-engine/sentry/eval/cases.jsonl"
-        ],
-        "scorer": [
-          "gate-engine/sentry/eval/bench.mts"
-        ],
-        "runner": [
-          "gate-engine/sentry/eval/bench.mts"
-        ]
+        "implementation": ["gate-engine/sentry/check-sentry.mts"],
+        "corpus": ["gate-engine/sentry/eval/cases.jsonl"],
+        "scorer": ["gate-engine/sentry/eval/bench.mts"],
+        "runner": ["gate-engine/sentry/eval/bench.mts"]
       }
     },
     {
       "id": "edge-cases",
       "label": "Edge-case autonomy",
       "adapter": "edge-cases",
-      "subjectIds": [
-        "benchmark-edge-cases"
-      ],
+      "subjectIds": ["benchmark-edge-cases"],
       "lifecycle": "no-ship",
       "acceptance": "Pre-registered full analysis with robust no-ship decision",
       "hashes": {
-        "implementation": [
-          "gate-engine/edge-cases/eval/prompts.mts"
-        ],
-        "corpus": [
-          "gate-engine/edge-cases/eval/cases.jsonl"
-        ],
-        "scorer": [
-          "gate-engine/edge-cases/eval/lib/**",
-          "gate-engine/edge-cases/eval/counts.mts"
-        ],
-        "runner": [
-          "gate-engine/edge-cases/eval/bench.mts"
-        ]
+        "implementation": ["gate-engine/edge-cases/eval/prompts.mts"],
+        "corpus": ["gate-engine/edge-cases/eval/cases.jsonl"],
+        "scorer": ["gate-engine/edge-cases/eval/lib/**", "gate-engine/edge-cases/eval/counts.mts"],
+        "runner": ["gate-engine/edge-cases/eval/bench.mts"]
       }
     },
     {
@@ -878,10 +722,7 @@
       "label": "Decision-log retrieval recall",
       "adapter": "deterministic",
       "baseline": "gate-engine/decisions/eval/recall/results.baseline.json",
-      "subjectIds": [
-        "benchmark-decisions-recall",
-        "bin-guard-decisions"
-      ],
+      "subjectIds": ["benchmark-decisions-recall", "bin-guard-decisions"],
       "runner": "gate-engine/decisions/eval/recall/bench.mts",
       "lifecycle": "experimental",
       "acceptance": "Deterministic set-arithmetic scoring, zero LLM calls; seed corpus only until gold cases are harvested from a real corpus",
@@ -894,9 +735,7 @@
           "gate-engine/decisions/eval/recall/cases-retrieval.jsonl",
           "gate-engine/decisions/eval/recall/corpus/**"
         ],
-        "scorer": [
-          "gate-engine/decisions/eval/recall/scoring.mts"
-        ],
+        "scorer": ["gate-engine/decisions/eval/recall/scoring.mts"],
         "runner": [
           "gate-engine/decisions/eval/recall/bench.mts",
           "gate-engine/decisions/eval/recall/scoring.mts",
@@ -909,10 +748,7 @@
       "label": "Decision-log save quality",
       "adapter": "deterministic",
       "baseline": "gate-engine/decisions/eval/save-quality/results.baseline.json",
-      "subjectIds": [
-        "benchmark-decisions-save-quality",
-        "bin-guard-decisions"
-      ],
+      "subjectIds": ["benchmark-decisions-save-quality", "bin-guard-decisions"],
       "runner": "gate-engine/decisions/eval/save-quality/bench.mts",
       "lifecycle": "experimental",
       "acceptance": "Deterministic structural checks, zero LLM calls; perturbation recall must clear the 80% floor before FPR@R80 is read, and the real corpus must produce no finding beyond the one named historical exception",
@@ -925,9 +761,7 @@
           "gate-engine/decisions/eval/save-quality/cases-save.jsonl",
           "gate-engine/decisions/eval/save-quality/corpus/**"
         ],
-        "scorer": [
-          "gate-engine/decisions/eval/save-quality/scoring.mts"
-        ],
+        "scorer": ["gate-engine/decisions/eval/save-quality/scoring.mts"],
         "runner": [
           "gate-engine/decisions/eval/save-quality/bench.mts",
           "gate-engine/decisions/eval/save-quality/scoring.mts",
@@ -939,68 +773,41 @@
       "id": "search-tool",
       "label": "Semantic search retrieval",
       "adapter": "reviewer",
-      "subjectIds": [
-        "benchmark-search-tool"
-      ],
+      "subjectIds": ["benchmark-search-tool"],
       "runner": "gate-engine/search-tool/eval/eval.mts",
       "lifecycle": "experimental",
       "acceptance": "Evidence-only retrieval study",
       "hashes": {
-        "implementation": [
-          "gate-engine/search-tool/**"
-        ],
-        "corpus": [
-          "gate-engine/search-tool/eval/queries.json"
-        ],
-        "scorer": [
-          "gate-engine/search-tool/eval/eval.mts"
-        ],
-        "runner": [
-          "gate-engine/search-tool/eval/eval.mts"
-        ]
+        "implementation": ["gate-engine/search-tool/**"],
+        "corpus": ["gate-engine/search-tool/eval/queries.json"],
+        "scorer": ["gate-engine/search-tool/eval/eval.mts"],
+        "runner": ["gate-engine/search-tool/eval/eval.mts"]
       }
     },
     {
       "id": "co-occurrence",
       "label": "Duplication matcher",
       "adapter": "reviewer",
-      "subjectIds": [
-        "bin-guard-dup",
-        "bin-guard-clone"
-      ],
+      "subjectIds": ["bin-guard-dup", "bin-guard-clone"],
       "runner": "gate-engine/co-occurrence/matcher.mts",
       "lifecycle": "shipped",
       "acceptance": "Deterministic fixture benchmark",
       "hashes": {
-        "implementation": [
-          "gate-engine/co-occurrence/**"
-        ],
-        "corpus": [
-          "gate-engine/co-occurrence/fixtures/**"
-        ],
-        "scorer": [
-          "gate-engine/co-occurrence/matcher.mts"
-        ],
-        "runner": [
-          "gate-engine/co-occurrence/matcher.mts"
-        ]
+        "implementation": ["gate-engine/co-occurrence/**"],
+        "corpus": ["gate-engine/co-occurrence/fixtures/**"],
+        "scorer": ["gate-engine/co-occurrence/matcher.mts"],
+        "runner": ["gate-engine/co-occurrence/matcher.mts"]
       }
     },
     {
       "id": "commit-guard-retrieval",
       "label": "Commit-guard retrieval",
       "adapter": "reviewer",
-      "subjectIds": [
-        "agent-commit-guard",
-        "reviewer-commit-guard"
-      ],
+      "subjectIds": ["agent-commit-guard", "reviewer-commit-guard"],
       "lifecycle": "shipped",
       "acceptance": "Evidence-only until a persisted suite exists",
       "hashes": {
-        "implementation": [
-          "agents/commit-guard.md",
-          "skills/commit-guard/**"
-        ],
+        "implementation": ["agents/commit-guard.md", "skills/commit-guard/**"],
         "corpus": [],
         "scorer": [],
         "runner": []
@@ -1010,16 +817,11 @@
       "id": "qavis",
       "label": "qavis visual QA",
       "adapter": "reviewer",
-      "subjectIds": [
-        "judge-qavis",
-        "bin-guard-qavis-advisory"
-      ],
+      "subjectIds": ["judge-qavis", "bin-guard-qavis-advisory"],
       "lifecycle": "shipped",
       "acceptance": "External evidence required",
       "hashes": {
-        "implementation": [
-          "gate-engine/qavis-advisory/**"
-        ],
+        "implementation": ["gate-engine/qavis-advisory/**"],
         "corpus": [],
         "scorer": [],
         "runner": []

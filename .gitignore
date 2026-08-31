@@ -60,6 +60,9 @@ dist/
 # completeness-eval working data (bench outputs; the corpus + baseline ARE committed)
 gate-engine/review/eval/runs.log
 gate-engine/review/eval/candidates.jsonl
+gate-engine/review/eval/progress.jsonl
+gate-engine/review/eval/progress.lock
+gate-engine/review/eval/.progress-owner.*.tmp
 gate-engine/review/eval/transcripts/
 
 # reviewer-eval working data (bench outputs; the corpus IS committed)
@@ -80,7 +83,6 @@ gate-engine/edge-cases/eval/cases.jsonl
 .devkit/adhd-off
 .devkit/telemetry/
 .devkit/setup.json
-.devkit/anti-slop-baseline-upgrade.json
 .devkit/*.lock
 .devkit/ship-intent-*
 .devkit/*

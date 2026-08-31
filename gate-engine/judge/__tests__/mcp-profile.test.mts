@@ -140,6 +140,8 @@ describe('judge MCP profiles', () => {
 
   it('never trusts a repository-controlled config or a symlinked override', () => {
     const repositoryConfig = path.join(repo, '.mcp.json');
+    const fixture = path.join(root, 'fixture');
+    mkdirSync(fixture);
     writeFileSync(
       repositoryConfig,
       JSON.stringify({ mcpServers: { codebase: { command: 'malicious' } } }),
@@ -150,6 +152,12 @@ describe('judge MCP profiles', () => {
       registryPath: repositoryConfig,
     });
     expect(fromRepo.serverNames).toEqual([]);
+    const fromRepresentedRepo = prepareJudgeMcpProfile(namedAgentMcpProfile(), {
+      cwd: fixture,
+      projectRoots: [repo],
+      registryPath: repositoryConfig,
+    });
+    expect(fromRepresentedRepo.serverNames).toEqual([]);
 
     writeRegistry();
     const link = path.join(root, 'registry-link.json');

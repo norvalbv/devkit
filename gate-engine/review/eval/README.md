@@ -7,8 +7,8 @@ reviewer brief is a measured delta instead of a vibe. Design record:
 
 The bench drives `runCompleteness()` **from the gate** through its injectable-exec seam, with a spy
 that delegates to the real judge runner: prompt construction, Target loading (`scopedTargets`), the
-stdin evidence extraction (per-file caps + OMITTED accounting, sc-1060), argv, the opus model and
-the isolation flags all run inside the gate — bench and
+stdin evidence extraction (per-file caps + OMITTED accounting, sc-1060), exact configured
+strong-review model, and isolation flags all run inside the gate — bench and
 gate cannot drift. Each corpus row materialises as a disposable git repo (base committed, staged in
 the index, decoy Targets as real `docs/decisions/*.md` files) and the agentic judge investigates
 that world, never the host repo.
@@ -25,15 +25,15 @@ is no confusion matrix to read off. The unit of truth is the **slot**:
 An LLM **matcher** (`matcher.mts`) maps emitted findings onto slots with one **forced-choice
 question per slot** ("does any numbered finding identify the SAME underlying gap — yes (which) or
 no?"), never one holistic list-to-list call — per-item decomposition measurably beats holistic
-judging (TICK, arXiv:2410.10934). Findings no slot claims are *spurious* (directional signal only —
+judging (TICK, arXiv:2410.10934). Findings no slot claims are _spurious_ (directional signal only —
 gold is not exhaustive, so an unmatched finding is not provably wrong; the decoy set is the measured
 precision instrument).
 
-| headline | formula | why that metric | gate |
-|---|---|---|---|
-| **gap recall** | hit gold / all gold | a missed gap is what the reviewer exists to prevent | **hard floor 0.70** |
-| **false-flag rate** | flagged decoys / all decoys | decoys flagged / recorded decisions re-litigated erode trust in every future review | **hard ceiling 0.25** |
-| severity calibration | exact want×got over hit gold | build-breakers must rank CRITICAL, nits must not | warn tier |
+| headline             | formula                      | why that metric                                                                     | gate                  |
+| -------------------- | ---------------------------- | ----------------------------------------------------------------------------------- | --------------------- |
+| **gap recall**       | hit gold / all gold          | a missed gap is what the reviewer exists to prevent                                 | **hard floor 0.70**   |
+| **false-flag rate**  | flagged decoys / all decoys  | decoys flagged / recorded decisions re-litigated erode trust in every future review | **hard ceiling 0.25** |
+| severity calibration | exact want×got over hit gold | build-breakers must rank CRITICAL, nits must not                                    | warn tier             |
 
 The recorded-decision subset of false-flags prints as its own line — over-flagging recorded
 decisions is this reviewer's characteristic failure.
@@ -42,34 +42,41 @@ decisions is this reviewer's characteristic failure.
 
 ```bash
 node bench.mts                 # full run: reviewer + matcher, headline metrics
-node bench.mts --baseline      # write results.baseline.json (committed here)
+node bench.mts --baseline      # audit current findings, then atomically write the accepted baseline
 node bench.mts --fail          # exit 1 on floor breach / significant stable case flips
 node bench.mts --dev           # prompt-iteration tier: holdout rows excluded
 node bench.mts --only <id>     # id-prefix subset (iteration; logged to runs.log)
-node bench.mts coverage        # corpus coverage matrix — zero claude calls
+node bench.mts coverage        # corpus coverage matrix — zero judge calls
 node bench.mts matcher-audit   # matcher agreement vs committed labels (percent + Cohen's κ)
 node mine-cases.mts            # scan local session logs → candidates.jsonl (gitignored)
 ```
 
 Exit `0` = ran (no regression under `--fail`) · `1` = regression (with `--fail`) · `2` = could not
 run. Sweeps: `BENCH_MATCH_MODEL=haiku|sonnet` (matcher, default haiku) · `BENCH_MATCH_RUNS=1|3`
-(matcher votes, default 3). **The reviewer has no model sweep on purpose** — the gate hardcodes
-opus (the gap-finder gets the strongest model or it isn't worth running) and the bench runs the
-gate, not a copy.
+(matcher votes, default 3). **The reviewer has no bench-only model sweep** — the bench runs the
+gate's configured strong-review model (default `gpt-5.6-sol`; a Claude-family escalation resolves
+`opus`) rather than measuring a configuration the gate cannot run.
 
 ## The matcher is an instrument, and instruments get calibrated
 
 - **K-vote**: each slot question is asked `BENCH_MATCH_RUNS` (default 3) times through a bounded
   pool (4 in flight — an unbounded slot storm gets judges SIGTERM'd under machine contention, the
   sc-1048/sc-1049 failure class, which would read as fake outages). Non-unanimous slots are
-  **unstable** and never count as regression evidence. K same-family votes reduce *variance*, not
+  **unstable** and never count as regression evidence. K same-family votes reduce _variance_, not
   family bias (arXiv:2502.01534) — which is why the audit exists.
-- **Audit** (`matcher-audit`): runs record per-case transcripts (gitignored `transcripts/`); a held
+- **Baseline audit** (`--baseline`): after the recall/false-flag floors pass, a separate invocation
+  of the configured strong model re-derives every matcher-judged slot assignment from the exact
+  current findings. Publication requires κ ≥ 0.7 against the primary matcher, no missing audit
+  slots, exact model/input/capability identities, and zero outages. This prevents an old `F<n>`
+  label from silently referring to a different finding after the reviewer model or ordering changes.
+- **Legacy diagnostic audit** (`matcher-audit`): runs record per-case transcripts (gitignored
+  `transcripts/`); a held
   sample of slot assignments is independently labelled (committed `matcher-audit.labels.jsonl` —
   authored by an adversarial model pass in a fresh context that re-derives each assignment from the
   matcher rubric, SAFE-style with disagreement adjudication; a model-authored audit is a documented
   limitation, spot-check it in review). The command prints **percent agreement + Cohen's κ** — κ,
   not raw agreement, because most slots are NONE and an always-NONE matcher "agrees" by chance.
+  These labels are bound to the Opus transcript identity and are refused for another reviewer model.
   **Policy: κ < 0.7 → the matcher is not trusted; fix `matcher.mts` before reading headlines.**
 - **matcherHash**: `matcher.mts` is hashed into the baseline alongside the gate hash — a matcher
   edit invalidates comparisons exactly like a gate edit (addition over decisions-eval, where the
@@ -81,16 +88,17 @@ gate, not a copy.
 ## Statistical honesty — verbatim the house standard (decisions-eval)
 
 Every headline ships raw counts + a Wilson 95% interval; `--fail` never gates on aggregate deltas.
-Order of evaluation: comparability preconditions (config + gateHash + matcherHash + corpusHash
-mismatch, or any outage → comparison SKIPPED with a message, never lied about) → hard floors →
-the paired **flip table** under a mid-p McNemar test (p < 0.05), stable flips only, plus an MDE
-line stating what this corpus cannot resolve.
+Order of evaluation: hard floors first (they fail regardless of comparability) → comparability
+preconditions (config + capability + gateHash + matcherHash + corpusHash mismatch, or any outage →
+paired comparison SKIPPED with a message, never lied about) → the paired **flip table** under a
+mid-p McNemar test (p < 0.05), stable flips only, plus an MDE line stating what this corpus cannot
+resolve.
 
 **The flip gate clusters by CASE, not slot.** Slots within one case share a single reviewer
 transcript and are positively correlated; slot-level pairing would be anti-conservative (Miller,
 arXiv:2411.00640 — cluster by item source). The slot-level flip table still prints for diagnosis.
-A case is *stable-flipped* only when a re-run confirms it 2-of-2 (the alignment convention):
-reviewer rows are the expensive class (agentic opus, 1–6 min each), so the reviewer runs **K=1**
+A case is _stable-flipped_ only when a re-run confirms it 2-of-2 (the alignment convention):
+reviewer rows are the expensive class (agentic strong model, 1–6 min each), so the reviewer runs **K=1**
 even at baseline tier and only baseline-discordant cases re-run once — the matcher takes the K=3
 budget instead. This is the same cost split decisions-eval applies to its alignment rows; the
 ticket's literal "BENCH_RUNS=3 majority vote" applies there to rows ~10× cheaper than these.
@@ -101,18 +109,31 @@ them, baseline/gate runs include them (the exam keeps questions you didn't pract
 
 ## Corpus (`cases-completeness.jsonl`) — dataset card
 
-30 rows · ~34 gold slots · ~26 decoys. One JSON object per line:
+31 rows · 35 gold slots · 27 decoys. One JSON object per line:
 
 ```json
-{ "id": "…", "category": "…", "difficulty": "clear|borderline|adversarial",
-  "provenance": "authored|mined|adapted", "note": "<why the labels are right — mandatory>",
-  "variantOf": null, "variantKind": "invariance|directional|null", "holdout": false,
+{
+  "id": "…",
+  "category": "…",
+  "difficulty": "clear|borderline|adversarial",
+  "provenance": "authored|mined|adapted",
+  "note": "<why the labels are right — mandatory>",
+  "variantOf": null,
+  "variantKind": "invariance|directional|null",
+  "holdout": false,
   "message": "<commit message — the gate's intent signal>",
-  "repo": { "base": {"path": "content"}, "staged": {"path": "content-or-null"} },
-  "gold":   [{ "id": "g1", "severity": "IMPORTANT", "desc": "…", "paths": ["…"] }],
-  "decoys": [{ "id": "d1", "kind": "recorded-decision|out-of-scope|working-as-intended",
-               "targetSlug": "…", "desc": "…" }],
-  "expectedVerdict": "PASS|FAIL" }
+  "repo": { "base": { "path": "content" }, "staged": { "path": "content-or-null" } },
+  "gold": [{ "id": "g1", "severity": "IMPORTANT", "desc": "…", "paths": ["…"] }],
+  "decoys": [
+    {
+      "id": "d1",
+      "kind": "recorded-decision|out-of-scope|working-as-intended",
+      "targetSlug": "…",
+      "desc": "…"
+    }
+  ],
+  "expectedVerdict": "PASS|FAIL"
+}
 ```
 
 - `gold[].paths` are matcher hints, not string-match keys. `expectedVerdict` is informational only
@@ -143,7 +164,7 @@ them, baseline/gate runs include them (the exam keeps questions you didn't pract
 
 ## Cost + outage policy
 
-A budget derived from per-row costs prints before any token is spent: 30 reviewer rows × 60–360s
+A budget derived from per-row costs prints before any token is spent: 31 reviewer rows × 60–360s
 (the gate's own timeout ceiling) + ~60 slots × K=3 matcher ÷ pool 4 → realistic full tier
 **~1.5–3.5 h**, worst case higher; plus one case re-run per baseline-discordant case. Iterate with
 `--dev --only <id>`; the full tier is the only tier whose numbers count.
@@ -167,14 +188,14 @@ didn't run" must not read as "the reviewer passed".
   this convention.
 - **Case-level flip gate** (decisions gates per-row): a decisions row IS one judgement; here a case
   bundles correlated slots, so the case is the honest pairing unit.
-- **No `BENCH_MODEL` sweep**: the gate hardcodes opus; adding a bench-only knob would measure a
-  configuration the gate never runs.
+- **No `BENCH_MODEL` sweep**: the gate resolves the strong-review model from normal configuration;
+  adding a separate benchmark-only model knob would measure a configuration the gate never runs.
 
 Relationship to `scripts/agent-benchmarks/`: complements, not supersedes — that trap-set exercises
-the *interactive* feature-critique surface with keyword checks; this bench measures the *gate* path
+the _interactive_ feature-critique surface with keyword checks; this bench measures the _gate_ path
 with finding-level truth.
 
-## Matcher audit status (2026-07-06, baseline run over the v2 corpus)
+## Legacy committed-label audit status (2026-07-06, Opus baseline run over the v2 corpus)
 
 All 53 matcher-judged slots (27 cases with ≥1 finding; zero-finding cases are deterministic and
 carry no matcher decision) were independently labelled blind — the labelers saw findings + slot
@@ -189,7 +210,7 @@ descriptions, never the matcher's assignments — and adjudicated SAFE-style:
   assignment from the matcher rubric) — the documented limitation of a claude-only harness;
   spot-check `matcher-audit.labels.jsonl` (each line carries its `why`) in review.
 
-Baseline headline numbers (committed `results.baseline.json`): gap recall 25/34 = 0.74
-[0.57, 0.85] · false-flag 1/26 = 0.04 [0.01, 0.19] · recorded decisions re-litigated 1/14 ·
-severity calibration 0.68 exact, dominated by IMPORTANT→CRITICAL inflation (×7) — the reviewer
+Baseline headline numbers (committed `results.baseline.json`): gap recall 25/35 = 0.71
+[0.55, 0.84] · false-flag 2/27 = 0.07 [0.02, 0.23] · recorded decisions re-litigated 1/14 ·
+severity calibration 0.76 exact, dominated by IMPORTANT→CRITICAL inflation (×5) — the reviewer
 over-escalates mid-tier gaps; that is the first prompt fix this bench should measure.

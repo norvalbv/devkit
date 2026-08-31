@@ -62,29 +62,57 @@ export function voteSlot(trials) {
     }
     return { match: Number(winner), stable: sorted.length === 1, outage: false };
 }
+function reusableOutcome(resumeOutcomes, slot, findingCount) {
+    const matches = resumeOutcomes.filter((outcome) => outcome.slotId === slot.slotId && outcome.kind === slot.kind);
+    if (matches.length !== 1)
+        return undefined;
+    const [outcome] = matches;
+    if (outcome.outage !== false ||
+        !Number.isInteger(outcome.match) ||
+        outcome.match < 0 ||
+        outcome.match > findingCount)
+        return undefined;
+    return {
+        slotId: slot.slotId,
+        kind: slot.kind,
+        match: outcome.match,
+        stable: outcome.stable,
+        outage: false,
+    };
+}
 /**
  * Ask every slot's pre-built question against `findingCount` numbered findings. Zero findings
  * short-circuits deterministically (all gold missed, all decoys clean) — no claude call. Each
  * trial retries once on a dark/unparseable reply before voting NULL.
  */
-export async function runSlotQuestions(slots, findingCount, { model = 'haiku', runs = 3, concurrency = 4, exec = execJudgeAsync, cwd, labelPrefix = 'matcher', } = {}) {
-    if (findingCount === 0)
-        return slots.map(({ slotId, kind }) => ({
-            slotId,
-            kind,
-            match: 0,
-            stable: true,
-            outage: false,
-        }));
+export async function runSlotQuestions(slots, findingCount, { model = 'haiku', runs = 3, concurrency = 4, exec = execJudgeAsync, cwd, labelPrefix = 'matcher', resumeOutcomes = [], onSlotComplete, } = {}) {
+    const outcomes = slots.map((slot) => reusableOutcome(resumeOutcomes, slot, findingCount));
+    if (findingCount === 0) {
+        return slots.map(({ slotId, kind }, si) => {
+            const resumed = outcomes[si];
+            if (resumed)
+                return resumed;
+            const outcome = {
+                slotId,
+                kind,
+                match: 0,
+                stable: true,
+                outage: false,
+            };
+            onSlotComplete?.(outcome);
+            return outcome;
+        });
+    }
     // One work item per (slot, trial) so the pool bounds TOTAL concurrent claude calls, not slots.
     const trials = slots.map(() => []);
-    const work = slots.flatMap((_, si) => Array.from({ length: runs }, () => ({ si })));
+    const work = slots.flatMap((_, si) => outcomes[si] ? [] : Array.from({ length: runs }, () => ({ si })));
     await mapPool(work, concurrency, async ({ si }) => {
         const ask = () => exec({
             label: `${labelPrefix}:matcher:${slots[si].slotId}`,
             args: ['-p', slots[si].prompt, '--model', model, ...JUDGE_READ_ONLY, ...JUDGE_ISOLATION],
             timeout: MATCH_TIMEOUT_MS,
             cwd,
+            codexReadOnly: true,
         });
         let raw = await ask();
         let parsed = raw === null ? null : parseSlotReply(raw, findingCount);
@@ -93,8 +121,21 @@ export async function runSlotQuestions(slots, findingCount, { model = 'haiku', r
             parsed = raw === null ? null : parseSlotReply(raw, findingCount);
         }
         trials[si].push(parsed);
+        if (trials[si].length === runs) {
+            const outcome = {
+                slotId: slots[si].slotId,
+                kind: slots[si].kind,
+                ...voteSlot(trials[si]),
+            };
+            outcomes[si] = outcome;
+            onSlotComplete?.(outcome);
+        }
     });
-    return slots.map(({ slotId, kind }, si) => ({ slotId, kind, ...voteSlot(trials[si]) }));
+    return outcomes.map((outcome) => {
+        if (!outcome)
+            throw new Error('matcher slot completed without an outcome');
+        return outcome;
+    });
 }
 /**
  * Cohen's kappa between two label sequences (the matcher-audit agreement stat). Chance-corrected

@@ -83,3 +83,7 @@ export function isJsonObject(value: JsonValue | undefined): value is JsonObject 
 export function isJsonString(value: JsonValue | undefined): value is string {
   return Object.prototype.toString.call(value) === '[object String]';
 }
+
+export function isJsonInteger(value: JsonValue | undefined): value is number {
+  return Number.isInteger(value);
+}
