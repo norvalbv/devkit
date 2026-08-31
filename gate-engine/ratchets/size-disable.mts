@@ -1,10 +1,6 @@
 #!/usr/bin/env node
 // Ratchet inline max-lines disables and raw-line debt: existing giants are grandfathered, but their
 // ceilings can only shrink (split a file or delete its disable).
-//
-//   bunx guard-size freeze   # re-count + write the consumer's baseline
-//   bunx guard-size gate     # fail if counts grew (pre-commit)
-//
 import {
   type Dirent,
   existsSync,
@@ -24,12 +20,19 @@ import {
   SIZE_BASELINE,
   writeRatchetBaseline,
 } from './baseline-paths.mts';
-import { hasStagedFiles, indexTreeRef, pullRequestScope, stagedSet } from './git-index.mts';
+import {
+  hasStagedFiles,
+  indexTreeRef,
+  mergeBaseRef,
+  pullRequestScope,
+  stagedSet,
+} from './git-index.mts';
 import { freezeLinesBaseline, type LinesFreezeMode } from './size-lines-freeze.mts';
 import {
   lineBaselineForGate,
   lineCountsAtRef,
   lineViolationReport,
+  measureLines,
   tightenLineBaseline,
 } from './size-line-authority.mts';
 import { LINES_BASELINE, SIZE_SKIP_DIRS } from './size-policy.mts';
@@ -116,7 +119,6 @@ export function countDisables(root = process.cwd(), scanRoots?: string[]) {
   return { fileDisables, fnDisables, perFile, scannedFiles: files.length };
 }
 
-// Raw-line caps: implementation files use maxLines; tests use the looser maxTestLines.
 export function countOversized(
   root = process.cwd(),
   scanRoots?: string[],
@@ -135,8 +137,8 @@ export function countOversized(
   const over: OversizedFile[] = [];
   for (const f of files) {
     const cap = m.isTest(f) ? testCap : sourceCap;
-    const lines = readFileSync(join(root, f), 'utf8').split('\n').length;
-    if (cap > 0 && lines > cap) over.push({ file: f, lines });
+    const measured = measureLines(readFileSync(join(root, f), 'utf8'));
+    if (cap > 0 && measured.lines > cap) over.push({ file: f, lines: measured.lines });
   }
   return over.sort((a, b) => a.file.localeCompare(b.file));
 }
@@ -254,7 +256,10 @@ function runLinesGate(
   // A PR supplies an exact base scope; local commits use the index; audits use the whole tree.
   const selected = ciScope ?? (inCommit ? staged : null);
   const candidate = ciScope ? 'HEAD' : inCommit ? indexTreeRef(root) : null;
-  const grandfathered = lineBaselineForGate(root, candidate);
+  const prBase = ciScope ? process.env.GUARD_RATCHET_BASE : undefined;
+  const prParent = prBase ? mergeBaseRef(root, prBase) : null;
+  const parents = prBase ? (prParent ? [prParent] : []) : undefined;
+  const grandfathered = lineBaselineForGate(root, candidate, parents);
   const scoped =
     candidate && selected
       ? lineCountsAtRef(root, candidate, selected, cfg)
@@ -265,7 +270,8 @@ function runLinesGate(
   const { error, lines: report } = lineViolationReport(root, cfg, scoped, cap, grandfathered, {
     candidate,
     inCommit,
-    prBase: ciScope ? process.env.GUARD_RATCHET_BASE : undefined,
+    parents,
+    prBase,
   });
   if (error) {
     console.error(error);
@@ -280,13 +286,11 @@ function runLinesGate(
   // Tighten only the committing files' ceilings; every other recorded count is preserved as-is,
   // so a concurrent agent's uncommitted shrink is never locked in.
   if (!candidate) return;
-  const { files: next, tightened } = tightenLineBaseline(
-    root,
-    candidate,
-    staged,
-    grandfathered,
-    cap,
-  );
+  const {
+    files: next,
+    lineCountVersion,
+    tightened,
+  } = tightenLineBaseline(root, candidate, staged, grandfathered, cap);
   if (tightened) {
     if (Object.keys(next).length === 0) {
       // Last grandfathered giant healed → the baseline is now empty. Delete it (an empty file is
@@ -298,7 +302,7 @@ function runLinesGate(
         root,
         LINES_BASELINE,
         LEGACY_LINES_BASELINE,
-        `${JSON.stringify({ maxLines: cfg.maxLines, maxTestLines: cfg.maxTestLines, files: next }, null, 2)}\n`,
+        `${JSON.stringify({ lineCountVersion, maxLines: cfg.maxLines, maxTestLines: cfg.maxTestLines, files: next }, null, 2)}\n`,
         { stage: true },
       );
       console.log(`✓ line debt tightened — ${LINES_BASELINE} lowered & staged.`);

@@ -1,12 +1,17 @@
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { resolveGuardConfig } from '../config.mts';
 import { sourceMatchers } from '../config.mts';
 import { LEGACY_LINES_BASELINE, LINES_BASELINE, readRatchetBaseline } from './baseline-paths.mts';
 import { mergeBaseRef, treeTextAtRef } from './git-index.mts';
 import { SIZE_SKIP_DIRS } from './size-policy.mts';
 
-interface LinesBaseline {
+export type LineCountVersion = 1 | 2;
+
+export interface LinesBaseline {
   files: Record<string, number>;
+  lineCountVersion: LineCountVersion;
 }
 
 export interface DecodedLineBaseline extends LinesBaseline {
@@ -24,6 +29,7 @@ export interface LineViolationResult {
 
 export interface LineTightening {
   files: Record<string, number>;
+  lineCountVersion: LineCountVersion;
   tightened: boolean;
 }
 
@@ -44,14 +50,68 @@ export interface LineCount {
   lines: number;
 }
 
+export interface LineMeasure {
+  legacyLines: number;
+  lines: number;
+}
+
+export const CURRENT_LINE_COUNT_VERSION = 2;
+
+const LINE_SEPARATOR_RE = /\r\n|\r|\n/;
+const TRAILING_SEPARATOR_RE = /[\r\n]$/;
+
+/** Count source lines without treating a trailing line separator as an extra empty line. */
+export function measureLines(contents: string): LineMeasure {
+  if (contents === '') return { legacyLines: 1, lines: 0 };
+  const separators = contents.split(LINE_SEPARATOR_RE).length - 1;
+  return {
+    legacyLines: contents.split('\n').length,
+    lines: TRAILING_SEPARATOR_RE.test(contents) ? separators : separators + 1,
+  };
+}
+
+export function countLines(contents: string): number {
+  return measureLines(contents).lines;
+}
+
+/** Convert an unversioned split-count baseline once, using the immutable source bytes that
+ * produced it. Callers choose the matching worktree/index/ref boundary. */
+export function normalizeLineBaseline(
+  baseline: DecodedLineBaseline,
+  contentsForFile: (file: string) => string | null,
+): DecodedLineBaseline {
+  if (baseline.lineCountVersion === CURRENT_LINE_COUNT_VERSION) return baseline;
+  const files: Record<string, number> = {};
+  for (const [file, stored] of Object.entries(baseline.files)) {
+    const contents = contentsForFile(file);
+    // A missing producer blob means stale grandfathering, not permission for a reintroduced file.
+    if (contents === null) continue;
+    const measured = measureLines(contents);
+    files[file] = stored - (measured.legacyLines - measured.lines);
+  }
+  return { ...baseline, files, lineCountVersion: CURRENT_LINE_COUNT_VERSION };
+}
+
 function parseBaseline(contents: string | null, label: string): LinesBaseline {
-  if (contents === null) return { files: {} };
-  let parsed: { files?: Record<string, number> } | null;
+  if (contents === null) return { files: {}, lineCountVersion: CURRENT_LINE_COUNT_VERSION };
+  let parsed: {
+    files?: Record<string, number>;
+    lineCountVersion?: number;
+  } | null;
   try {
     // SAFETY: the parsed files representation is decoded into a fresh numeric map below.
-    parsed = JSON.parse(contents) as { files?: Record<string, number> } | null;
+    parsed = JSON.parse(contents) as {
+      files?: Record<string, number>;
+      lineCountVersion?: number;
+    } | null;
   } catch {
     throw new LineAuthorityError(`guard-size: invalid line baseline JSON in ${label}`);
+  }
+  const lineCountVersion = parsed?.lineCountVersion ?? 1;
+  if (lineCountVersion !== 1 && lineCountVersion !== CURRENT_LINE_COUNT_VERSION) {
+    throw new LineAuthorityError(
+      `guard-size: unsupported line count version ${lineCountVersion} in ${label}`,
+    );
   }
   const files = parsed?.files ?? {};
   if (!files || Object(files) !== files || Array.isArray(files)) {
@@ -64,7 +124,7 @@ function parseBaseline(contents: string | null, label: string): LinesBaseline {
     }
     decoded[file] = ceiling;
   }
-  return { files: decoded };
+  return { files: decoded, lineCountVersion };
 }
 
 export function decodeLineBaseline(contents: string | null, label: string): DecodedLineBaseline {
@@ -72,17 +132,21 @@ export function decodeLineBaseline(contents: string | null, label: string): Deco
     return { ...parseBaseline(contents, label), error: null };
   } catch (error) {
     if (!(error instanceof LineAuthorityError)) throw error;
-    return { error: error.message, files: {} };
+    return {
+      error: error.message,
+      files: {},
+      lineCountVersion: CURRENT_LINE_COUNT_VERSION,
+    };
   }
 }
 
-export function lineBaselineFilesOrExit(
+export function lineBaselineOrExit(
   contents: string | null,
   label: string,
   prefix = '',
-): Record<string, number> {
+): DecodedLineBaseline {
   const decoded = decodeLineBaseline(contents, label);
-  if (!decoded.error) return decoded.files;
+  if (!decoded.error) return decoded;
   console.error(prefix ? `${prefix}: ${decoded.error}` : decoded.error);
   process.exit(2);
 }
@@ -91,33 +155,88 @@ function snapshotText(root: string, snapshot: Snapshot, relativePath: string): s
   return treeTextAtRef(root, snapshot, relativePath);
 }
 
-function baselineAt(root: string, snapshot: Snapshot): SnapshotLineBaseline {
+function workingText(root: string, relativePath: string): string | null {
+  try {
+    return readFileSync(join(root, relativePath), 'utf8');
+  } catch {
+    return null;
+  }
+}
+
+function rawBaselineAt(root: string, snapshot: Snapshot): SnapshotLineBaseline {
   const contents =
     snapshotText(root, snapshot, LINES_BASELINE) ??
     snapshotText(root, snapshot, LEGACY_LINES_BASELINE);
   return { ...decodeLineBaseline(contents, snapshot), present: contents !== null };
 }
 
+function baselineAt(root: string, snapshot: Snapshot): SnapshotLineBaseline {
+  const raw = rawBaselineAt(root, snapshot);
+  return {
+    ...normalizeLineBaseline(raw, (file) => snapshotText(root, snapshot, file)),
+    present: raw.present,
+  };
+}
+
+/** Normalize a candidate v1 entry only when it matches a parent entry, taking the strictest
+ * logical ceiling when multiple merge parents could have supplied it. */
+export function normalizeCandidateLineBaseline(
+  root: string,
+  baseline: DecodedLineBaseline,
+  parents: Snapshot[],
+  candidateContents: (file: string) => string | null,
+): DecodedLineBaseline {
+  if (baseline.lineCountVersion === CURRENT_LINE_COUNT_VERSION) return baseline;
+  const parentBaselines = parents.map((parent) => ({ parent, raw: rawBaselineAt(root, parent) }));
+  const files: Record<string, number> = {};
+  for (const [file, stored] of Object.entries(baseline.files)) {
+    const matchingParents = parentBaselines.filter(
+      ({ raw }) =>
+        !raw.error && raw.present && raw.lineCountVersion === 1 && raw.files[file] === stored,
+    );
+    const inheritedCeilings = matchingParents.flatMap(({ parent }) => {
+      const contents = snapshotText(root, parent, file);
+      if (contents === null) return [];
+      const measured = measureLines(contents);
+      return [stored - (measured.legacyLines - measured.lines)];
+    });
+    if (matchingParents.length > 0) {
+      if (inheritedCeilings.length > 0) files[file] = Math.min(...inheritedCeilings);
+      continue;
+    }
+    const contents = candidateContents(file);
+    if (contents === null) continue;
+    const measured = measureLines(contents);
+    files[file] = stored - (measured.legacyLines - measured.lines);
+  }
+  return { ...baseline, files, lineCountVersion: CURRENT_LINE_COUNT_VERSION };
+}
+
 export function lineBaselineForGate(
   root: string,
   candidate: Snapshot | null,
-): Record<string, number> {
+  parents: Snapshot[] = lineBaselineParents(root),
+): DecodedLineBaseline {
   if (candidate) {
-    const decoded = baselineAt(root, candidate);
+    const raw = rawBaselineAt(root, candidate);
+    const decoded = normalizeCandidateLineBaseline(root, raw, parents, (file) =>
+      snapshotText(root, candidate, file),
+    );
     if (decoded.error) {
       console.error(decoded.error);
       process.exit(2);
     }
-    if (decoded.present) return decoded.files;
+    if (raw.present) return decoded;
   }
   const baseline = readRatchetBaseline(root, LINES_BASELINE, LEGACY_LINES_BASELINE);
-  return lineBaselineFilesOrExit(
+  const decoded = lineBaselineOrExit(
     baseline?.contents ?? null,
     baseline?.relativePath ?? LINES_BASELINE,
   );
+  return normalizeCandidateLineBaseline(root, decoded, parents, (file) => workingText(root, file));
 }
 
-function mergeParents(root: string): string[] {
+export function lineBaselineParents(root: string): string[] {
   try {
     execFileSync('git', ['rev-parse', '--verify', 'MERGE_HEAD^{commit}'], {
       cwd: root,
@@ -145,7 +264,11 @@ function governed(file: string, cfg: GuardConfig): boolean {
 
 function sourceLines(root: string, snapshot: Snapshot, file: string): number | null {
   const contents = snapshotText(root, snapshot, file);
-  return contents === null ? null : contents.split('\n').length;
+  return contents === null ? null : countLines(contents);
+}
+
+export function effectiveLineCeiling(baseline: LinesBaseline, file: string, cap: number): number {
+  return Math.max(cap, baseline.files[file] ?? 0);
 }
 
 export function lineCountsAtRef(
@@ -166,19 +289,37 @@ export function lineCountsAtRef(
 export function lineCeilingChanges(
   root: string,
   cfg: GuardConfig,
-  { candidate, inCommit, prBase }: { candidate: Snapshot; inCommit: boolean; prBase?: string },
+  {
+    candidate,
+    inCommit,
+    parents: suppliedParents,
+    prBase,
+  }: {
+    candidate: Snapshot;
+    inCommit: boolean;
+    parents?: Snapshot[];
+    prBase?: string;
+  },
 ): LineCeilingChange[] {
   if (!prBase && !inCommit) return [];
-  const prParent = prBase ? mergeBaseRef(root, prBase) : null;
-  if (prBase && !prParent) {
+  const prParent = prBase && suppliedParents === undefined ? mergeBaseRef(root, prBase) : null;
+  if (prBase && suppliedParents === undefined && !prParent) {
     throw new LineAuthorityError(`guard-size: pull-request merge base is unavailable: ${prBase}`);
   }
-  const parents = prParent ? [prParent] : mergeParents(root);
-  const current = baselineAt(root, candidate);
-  if (current.error) throw new LineAuthorityError(current.error);
+  if (prBase && suppliedParents?.length === 0) {
+    throw new LineAuthorityError(`guard-size: pull-request merge base is unavailable: ${prBase}`);
+  }
+  const parents = suppliedParents ?? (prParent ? [prParent] : lineBaselineParents(root));
   const priorResults = parents.map((parent) => baselineAt(root, parent));
   if (priorResults.some((baseline) => baseline.error)) return [];
   const prior = priorResults;
+  const current = normalizeCandidateLineBaseline(
+    root,
+    rawBaselineAt(root, candidate),
+    parents,
+    (file) => snapshotText(root, candidate, file),
+  );
+  if (current.error) throw new LineAuthorityError(current.error);
   const match = sourceMatchers(cfg.sourceExtensions);
   const cap = (file: string) => (match.isTest(file) ? cfg.maxTestLines : cfg.maxLines);
   const files = new Set(prior.flatMap((baseline) => Object.keys(baseline.files)));
@@ -186,8 +327,8 @@ export function lineCeilingChanges(
 
   for (const file of files) {
     if (!governed(file, cfg)) continue;
-    const candidateCeiling = Math.max(cap(file), current.files[file] ?? 0);
-    const parentCeilings = prior.map((baseline) => Math.max(cap(file), baseline.files[file] ?? 0));
+    const candidateCeiling = effectiveLineCeiling(current, file, cap(file));
+    const parentCeilings = prior.map((baseline) => effectiveLineCeiling(baseline, file, cap(file)));
     if (!parentCeilings.every((ceiling) => candidateCeiling < ceiling)) continue;
     const lines = sourceLines(root, candidate, file);
     if (lines === null) continue;
@@ -207,8 +348,13 @@ export function lineViolationReport(
   cfg: GuardConfig,
   scoped: LineCount[],
   cap: (file: string) => number,
-  grandfathered: Record<string, number>,
-  scope: { candidate: Snapshot | null; inCommit: boolean; prBase?: string },
+  grandfathered: DecodedLineBaseline,
+  scope: {
+    candidate: Snapshot | null;
+    inCommit: boolean;
+    parents?: Snapshot[];
+    prBase?: string;
+  },
 ): LineViolationResult {
   let changes: LineCeilingChange[];
   try {
@@ -227,8 +373,8 @@ export function lineViolationReport(
     scoped
       .filter(
         (entry) =>
-          (cap(entry.file) > 0 || grandfathered[entry.file] !== undefined) &&
-          entry.lines > Math.max(cap(entry.file), grandfathered[entry.file] ?? 0),
+          (cap(entry.file) > 0 || grandfathered.files[entry.file] !== undefined) &&
+          entry.lines > effectiveLineCeiling(grandfathered, entry.file, cap(entry.file)),
       )
       .map((entry) => [entry.file, entry]),
   );
@@ -246,7 +392,7 @@ export function lineViolationReport(
       );
     }
     report.push(
-      `   ${entry.file}: ${entry.lines} lines (max ${lowered?.current ?? Math.max(cap(entry.file), grandfathered[entry.file] ?? 0)})`,
+      `   ${entry.file}: ${entry.lines} lines (max ${lowered?.current ?? effectiveLineCeiling(grandfathered, entry.file, cap(entry.file))})`,
     );
   }
   return { error: null, lines: report };
@@ -256,21 +402,23 @@ export function tightenLineBaseline(
   root: string,
   snapshot: Snapshot,
   staged: Iterable<string>,
-  grandfathered: Record<string, number>,
+  grandfathered: DecodedLineBaseline,
   cap: (file: string) => number,
 ): LineTightening {
-  const files = { ...grandfathered };
+  const files = { ...grandfathered.files };
   let tightened = false;
   for (const file of staged) {
-    if (!(file in grandfathered)) continue;
+    if (!(file in grandfathered.files)) continue;
     const lines = sourceLines(root, snapshot, file);
     if (lines === null || lines <= cap(file)) {
       delete files[file];
       tightened = true;
-    } else if (lines < grandfathered[file]) {
+      continue;
+    }
+    if (lines < grandfathered.files[file]) {
       files[file] = lines;
       tightened = true;
     }
   }
-  return { files, tightened };
+  return { files, lineCountVersion: grandfathered.lineCountVersion, tightened };
 }

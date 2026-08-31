@@ -1,21 +1,10 @@
 /** Post-change line counts for the conventions reviewer's prompt (sc-2181): the reviewer has no
  * Bash, so the count is supplied rather than derived. */
 
+import { countLines } from '../../ratchets/size-line-authority.mts';
 import { indexFile } from './staged-git.mts';
 
-// LF, CRLF and lone CR all separate lines; a CR-only blob is still text git will happily stage.
-const LINE_SEPARATOR_RE = /\r\n|\r|\n/;
-const TRAILING_SEPARATOR_RE = /[\r\n]$/;
-
-/** Lines as a CLAUDE.md rule saying "500 lines" means them: empty content is 0, a trailing newline
- * terminates the last line rather than starting a new one, and an unterminated last line still
- * counts. Equals `wc -l` for newline-terminated content and is one higher without it, because
- * `wc -l` counts newline characters rather than lines. */
-export function countLines(content: string): number {
-  if (content === '') return 0;
-  const separators = content.split(LINE_SEPARATOR_RE).length - 1;
-  return TRAILING_SEPARATOR_RE.test(content) ? separators : separators + 1;
-}
+export { countLines };
 
 // One reviewed file's post-change size, or null when the index has no stage-0 blob for it (deleted,
 // renamed away, or unmerged) — an absent count is never rendered as zero.
