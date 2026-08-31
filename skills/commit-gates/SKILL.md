@@ -59,6 +59,9 @@ specific conditions under which that control is appropriate:
 
 - `GUARD_NO_LOG=1` — bypass a decision judgment for a confirmed non-decision.
 - `GUARD_NO_REVIEW=1` — skip the blocking domain reviewer gate.
+- `GUARD_REVIEW_SKIP=<reviewer>` — skip only that named reviewer when the user has explicitly
+  accepted a confirmed finding as a false positive or residual; every other reviewer still runs.
+  Re-run normally after a fix so the reviewer verifies it.
 - `GUARD_NO_COMPLETENESS=1` — skip completeness; `GUARD_COMPLETENESS_HARD=0` only softens it.
 - `GUARD_NO_SENTRY_JUDGE=1` — skip the Sentry commit-message judge.
 - `GUARD_COVERAGE_OK=1` — assert the base-branch coverage condition documented by `using-devkit`.

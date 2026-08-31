@@ -148,7 +148,15 @@ describe('runWaive', () => {
     const cwd = repo();
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
     expect(runWaive(['api-security-reviewer', 'a1b2c3d4e5f6', RATIONALE], cwd)).toBe(2);
-    expect(err.mock.calls.flat().join('\n')).toContain('cascade reviewer');
+    const out = err.mock.calls.flat().join('\n');
+    expect(out).toContain('cascade reviewer');
+    expect(out).toContain('Fix the confirmed finding');
+    expect(out).toContain("user's explicit OK");
+    expect(out).toContain('env GUARD_REVIEW_SKIP=api-security-reviewer <retry command>');
+    expect(out).not.toContain('export GUARD_REVIEW_SKIP');
+    expect(out).toContain('skips only api-security-reviewer; every other reviewer still runs');
+    expect(out).toContain('GUARD_NO_REVIEW=1 skips the entire review gate');
+    expect(loadOverrides(cwd)).toEqual({});
   });
 
   it('refuses an itemId that is not a 12-hex fingerprint', () => {
