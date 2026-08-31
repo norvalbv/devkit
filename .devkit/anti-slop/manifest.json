@@ -1,5 +1,6 @@
 {
   "schemaVersion": 1,
+  "devkitVersion": "0.59.0",
   "upstreamCommit": "446268e5d15baa968eaec669ff65358d36ae6259",
   "pluginApiVersion": "1.78.0",
   "ruleIds": [
@@ -17,10 +18,12 @@
     "anti-slop/no-unknown-type-aliases",
     "anti-slop/no-unsafe-dictionary-type",
     "anti-slop/no-widen-then-assert",
-    "anti-slop/require-safety-comment-for-type-assertion"
+    "anti-slop/require-safety-comment-for-type-assertion",
+    "anti-slop/no-unsafe-external-record-access",
+    "anti-slop/no-unsafe-external-record-enumeration"
   ],
-  "pluginDigest": "890d1ae533a85b859e7bd09c6af46175a9af47facd2d969fd723182567149ba2",
-  "configDigest": "042d879db74dbd032183a444d88d1e2c9fafd904913cde3649410df7b6d31018",
+  "pluginDigest": "3c49f57cf2331f4e195a23919381e9d4fef8d7c6557b998e9ac17deaffb0cebd",
+  "configDigest": "50ad2d1deb51ce96445be08275533d8e502efe9dc9788b2148709cc06a1525da",
   "probeDigest": "bf2c2181804ac4004aed98aa41133e080068be9b2e9bf9d47a459ce75c6cdb87",
   "probeConfigDigest": "b9bfbd93519b843df6bd175b91f5742bb67be649cac5c82492621e5a7bbd7604"
 }

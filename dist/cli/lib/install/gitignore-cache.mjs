@@ -28,6 +28,7 @@ export const DEVKIT_CACHE_IGNORES = [
     '.devkit/reconcile-manifest.json',
     '.devkit/telemetry/',
     '.devkit/setup.json',
+    '.devkit/anti-slop-baseline-upgrade.json',
     '.devkit/*.lock',
     // Not a cache — a LOCAL preference (adhd-session-start.mjs reads it as the durable off switch).
     // Ignored for the same reason the caches are: committing it would impose one reader's output

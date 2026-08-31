@@ -80,6 +80,7 @@ gate-engine/edge-cases/eval/cases.jsonl
 .devkit/adhd-off
 .devkit/telemetry/
 .devkit/setup.json
+.devkit/anti-slop-baseline-upgrade.json
 .devkit/*.lock
 .devkit/ship-intent-*
 .devkit/*

@@ -15,6 +15,8 @@ import { noUnknownTypeAliasesRule } from "./rules/no-unknown-type-aliases.ts";
 import { noUnsafeDictionaryTypeRule } from "./rules/no-unsafe-dictionary-type.ts";
 import { noWidenThenAssertRule } from "./rules/no-widen-then-assert.ts";
 import { requireSafetyCommentForTypeAssertionRule } from "./rules/require-safety-comment-for-type-assertion.ts";
+import { noUnsafeExternalRecordAccessRule } from "./devkit/rules/no-unsafe-external-record-access.ts";
+import { noUnsafeExternalRecordEnumerationRule } from "./devkit/rules/no-unsafe-external-record-enumeration.ts";
 
 /** Generic Oxlint rules that reject low-evidence and low-signal implementation patterns. */
 const antiSlopPlugin = eslintCompatPlugin({
@@ -35,6 +37,8 @@ const antiSlopPlugin = eslintCompatPlugin({
 		"no-unknown-type-aliases": noUnknownTypeAliasesRule,
 		"no-widen-then-assert": noWidenThenAssertRule,
 		"require-safety-comment-for-type-assertion": requireSafetyCommentForTypeAssertionRule,
+		"no-unsafe-external-record-access": noUnsafeExternalRecordAccessRule,
+		"no-unsafe-external-record-enumeration": noUnsafeExternalRecordEnumerationRule,
 	},
 });
 

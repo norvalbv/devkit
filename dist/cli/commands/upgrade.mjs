@@ -25,6 +25,8 @@ import { packageDir, readJson } from '../lib/fs-helpers.mjs';
 import { selfHostSelection } from '../lib/husky/self-host.mjs';
 import { resolveExistingAgentProviders } from '../lib/install/agent-assets/agent-providers.mjs';
 import { adoptAgentAssetCollisions } from '../lib/install/agent-assets/agent-surfaces.mjs';
+import { adoptActivatedAntiSlopFindings, captureAntiSlopBaselineActivation, } from '../lib/install/anti-slop/managed-state.mjs';
+import { collectAntiSlopGroups } from '../lib/install/anti-slop/runner.mjs';
 import { offerLineGrowth, offerNewGates, offerOptionalComponents, overlayOwnsLineGrowth, } from '../lib/install/upgrade-offers.mjs';
 import doctor from './doctor.mjs';
 import { applyInit } from './init.mjs';
@@ -91,21 +93,29 @@ export default async function upgrade(args, cwd) {
     // Regenerate the source hook + re-sync assets from the current generator, then verify — the whole
     // point is that `devkit upgrade` keeps the dogfood hook in lockstep with the generator, for free.
     if (cfg.selfHost) {
+        const selection = { ...selfHostSelection(cfg.components), agentTargets };
+        const previousAntiSlopRuleIds = selection.antiSlop
+            ? captureAntiSlopBaselineActivation(cwd, dryRun, true)
+            : null;
         console.log(`devkit upgrade${dryRun ? ' (dry-run — nothing written)' : ''} — self-host (source-mode dogfood), stack=${stack}\n`);
         console.log('Regenerating the source hook + re-syncing assets from the current generator.');
         await applyInit(cwd, {
             stack,
-            selection: { ...selfHostSelection(cfg.components), agentTargets },
+            selection,
             selfHost: true,
             disabledGuards: cfg.components?.disabledGuards,
             force,
             dryRun,
             regenStructureBaselines: false,
         });
+        const baselineReady = !selection.antiSlop ||
+            adoptActivatedAntiSlopFindings(cwd, previousAntiSlopRuleIds, dryRun, () => collectAntiSlopGroups(cwd, []));
         if (dryRun) {
             console.log('\nDry-run complete — nothing written.');
             return 0;
         }
+        if (!baselineReady)
+            return 1;
         console.log('\nverify\n');
         return doctor([], cwd);
     }
@@ -305,6 +315,9 @@ export default async function upgrade(args, cwd) {
     // forward). regenStructureBaselines:false → an existing structure baseline is kept, never
     // re-snapshotted (no debt laundering).
     console.log('\n4. broad refresh (skills / agents / agent-hooks / husky / guards)');
+    const previousAntiSlopRuleIds = sel.antiSlop
+        ? captureAntiSlopBaselineActivation(cwd, dryRun, true)
+        : null;
     await applyInit(cwd, {
         stack,
         selection: sel,
@@ -316,6 +329,8 @@ export default async function upgrade(args, cwd) {
         undecided,
         disabledGuards,
     });
+    const baselineReady = !sel.antiSlop ||
+        adoptActivatedAntiSlopFindings(cwd, previousAntiSlopRuleIds, dryRun, () => collectAntiSlopGroups(cwd, []));
     // ── 5. --force asset adoption (assets only — never configs) ─────────────────
     // --force is driven by the `override` OPT (args only carry --dry-run). Re-syncs the selected
     // surfaces adopting consumer-authored same-named collisions; tuned biome/tsconfig are untouched.
@@ -328,6 +343,8 @@ export default async function upgrade(args, cwd) {
         console.log('\nDry-run complete — nothing written. Re-run without --dry-run to apply.');
         return 0;
     }
+    if (!baselineReady)
+        return 1;
     console.log('\n6. verify\n');
     return doctor([], cwd);
 }

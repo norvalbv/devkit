@@ -456,6 +456,23 @@ describe('e2e: packed anti-slop capability', () => {
       originalBaseline,
     );
     expect(fx.run('devkit', ['anti-slop', 'check', 'legacy.ts', 'held.ts']).status).toBe(0);
+    writeFileSync(
+      join(fx.repoDir, 'external-record-access.ts'),
+      'const parsed = JSON.parse(raw); parsed["constructor"];\n',
+    );
+    writeFileSync(
+      join(fx.repoDir, 'external-record-enumeration.ts'),
+      'Object.entries(JSON.parse(raw));\n',
+    );
+    const extensionCheck = fx.run('devkit', [
+      'anti-slop',
+      'check',
+      'external-record-access.ts',
+      'external-record-enumeration.ts',
+    ]);
+    expect(extensionCheck.status, out(extensionCheck)).toBe(1);
+    expect(out(extensionCheck)).toContain('anti-slop/no-unsafe-external-record-access');
+    expect(out(extensionCheck)).toContain('anti-slop/no-unsafe-external-record-enumeration');
     const scopedExisting = fx.run('devkit', ['anti-slop', 'check', 'legacy.ts']);
     expect(scopedExisting.status, out(scopedExisting)).toBe(0);
     expect(out(scopedExisting)).toContain('0 ready to prune');

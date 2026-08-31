@@ -3,10 +3,11 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { withLock } from '../../lib/atomic-write.mjs';
-import { AntiSlopCapabilityError } from '../../lib/install/anti-slop/base-capability.mjs';
-import { baselineFromGroups, baselineIncreases, compareBaseline, migrateBaselineRenames, pruneBaseline, readBaseline, writeBaseline, } from '../../lib/install/anti-slop/baseline.mjs';
+import { adoptBaselineRuleFindings, baselineFromGroups, compareBaseline, migrateBaselineRenames, pruneBaseline, readBaseline, writeBaseline, } from '../../lib/install/anti-slop/baseline.mjs';
+import { checkBaselineEnvelope, inheritedBaseAllowance, printNewAntiSlopFindings, reportInheritedForgiveness, } from '../../lib/install/anti-slop/baseline-envelope.mjs';
 import { ANTI_SLOP_BASELINE_LOCK_REL, ANTI_SLOP_BASELINE_REL, } from '../../lib/install/anti-slop/constants.mjs';
-import { gitBaselineEnvelope, withBaseAntiSlopSnapshot, withStableGitIndex, withStagedAntiSlopSnapshot, } from '../../lib/install/anti-slop/git-snapshot.mjs';
+import { gitBaselineEnvelope, withStableGitIndex, withStagedAntiSlopSnapshot, } from '../../lib/install/anti-slop/git-snapshot.mjs';
+import { clearPendingAntiSlopBaselineActivation, readInstalledAntiSlopBaselineMigrationId, readPendingAntiSlopBaselineActivation, } from '../../lib/install/anti-slop/managed-state.mjs';
 import { collectAntiSlopGroups, resolveAntiSlopScope, } from '../../lib/install/anti-slop/runner.mjs';
 export const meta = {
     name: 'anti-slop',
@@ -44,13 +45,6 @@ function capabilityReady(cwd) {
     console.error('anti-slop: not installed — run `devkit init --anti-slop`');
     return false;
 }
-function printNew(groups) {
-    for (const group of groups) {
-        const tag = group.severity === 'error' ? 'ERROR' : 'WARN';
-        console.log(`${tag} ${group.ruleId} ${group.file}:${group.line}:${group.column} (+${group.additionalCount})`);
-        console.log(`      ${group.diagnostic}`);
-    }
-}
 function create(cwd, args, force, confirmBaselineRemovals) {
     if (!capabilityReady(cwd))
         return 2;
@@ -78,10 +72,17 @@ function create(cwd, args, force, confirmBaselineRemovals) {
             }
         }
         const groups = collectAntiSlopGroups(cwd, args);
+        const pending = readPendingAntiSlopBaselineActivation(cwd);
+        const consumablePending = pending?.migrationId === readInstalledAntiSlopBaselineMigrationId(cwd) ? pending : null;
+        const migrated = consumablePending !== null
+            ? adoptBaselineRuleFindings(existing ?? baselineFromGroups([]), wholeRepository ? groups : collectAntiSlopGroups(cwd, []), consumablePending.activatedRuleIds, consumablePending.migrationId)
+            : (existing ?? baselineFromGroups([]));
         const next = baselineFromGroups(groups);
-        if (existing && !wholeRepository) {
+        if (migrated.migrationReceipts)
+            next.migrationReceipts = migrated.migrationReceipts;
+        if (!wholeRepository) {
             next.entries = [
-                ...existing.entries.filter((entry) => !scope.includes(entry.file)),
+                ...migrated.entries.filter((entry) => !scope.includes(entry.file)),
                 ...next.entries,
             ].sort((a, b) => a.fingerprint.localeCompare(b.fingerprint));
         }
@@ -103,6 +104,12 @@ function create(cwd, args, force, confirmBaselineRemovals) {
             }
         }
         writeBaseline(cwd, next);
+        if (consumablePending !== null) {
+            clearPendingAntiSlopBaselineActivation(cwd, consumablePending.migrationId);
+        }
+        else if (pending !== null) {
+            console.log(`anti-slop: preserved pending release transition until its matching managed capability is installed`);
+        }
         console.log(`anti-slop: created ${ANTI_SLOP_BASELINE_REL} with ${count(next.entries)} finding(s) in ${next.entries.length} fingerprint(s)`);
         return 0;
     });
@@ -138,96 +145,10 @@ function adoptRenames(cwd, baseRef = 'HEAD', requireRenames = false) {
         });
     });
 }
-function checkBaselineEnvelope(candidate, envelope, baseRef) {
-    if (!envelope?.base)
-        return 0; // one-time bootstrap: the base commit has no baseline
-    const staleRenames = candidate.entries.flatMap((entry) => {
-        const nextFile = envelope.renames.get(entry.file);
-        return nextFile ? [{ ...entry, nextFile }] : [];
-    });
-    if (staleRenames.length > 0) {
-        for (const entry of staleRenames) {
-            console.error(`BASELINE-RENAME ${entry.ruleId} ${entry.file} -> ${entry.nextFile} (${entry.count} adopted finding(s))`);
-        }
-        const remedy = baseRef
-            ? `devkit anti-slop adopt-renames --base ${baseRef}`
-            : 'devkit anti-slop adopt-renames';
-        console.error(`anti-slop: FAIL — persist renamed debt with \`${remedy}\`, then stage the baseline`);
-        return 1;
-    }
-    const increases = baselineIncreases(envelope.base, candidate, envelope.renames);
-    if (increases.length === 0)
-        return 0;
-    for (const entry of increases) {
-        console.error(`BASELINE-GROWTH ${entry.ruleId} ${entry.file} (+${entry.additionalCount} adopted finding(s))`);
-    }
-    console.error('anti-slop: FAIL — the committed baseline may only shrink; fix the finding instead of adopting it');
-    return 1;
-}
-/** Name what the allowance forgave: it is transient, so silence would hide adopted debt. */
-function reportInheritedForgiveness(before, after) {
-    // Keyed by fingerprint, the baseline's own identity: a location key collides when one rule
-    // reports two messages at one span.
-    const remaining = new Map(after.map((group) => [group.fingerprint, group.additionalCount]));
-    const perRule = new Map();
-    for (const group of before) {
-        const forgiven = group.additionalCount - (remaining.get(group.fingerprint) ?? 0);
-        if (forgiven > 0)
-            perRule.set(group.ruleId, (perRule.get(group.ruleId) ?? 0) + forgiven);
-    }
-    if (perRule.size === 0)
-        return;
-    const total = [...perRule.values()].reduce((sum, count) => sum + count, 0);
-    const rules = [...perRule.keys()].sort((a, b) => a.localeCompare(b));
-    console.log(`anti-slop: base allowance forgave ${total} inherited finding(s) across ${rules.length} rule(s): ${rules.join(', ')}`);
-}
-function inheritedBaseAllowance(cwd, capabilityCwd, selected, candidateGroups, envelope) {
-    if (!envelope?.base || !envelope.baseTree)
-        return selected;
-    const candidateNew = compareBaseline(selected, candidateGroups).newGroups;
-    if (candidateNew.length === 0)
-        return selected;
-    const reverseRenames = new Map([...envelope.renames].map(([basePath, candidatePath]) => [candidatePath, basePath]));
-    const basePaths = [
-        ...new Set(candidateNew.flatMap((group) => envelope.introducedPaths.has(group.file)
-            ? []
-            : [reverseRenames.get(group.file) ?? group.file])),
-    ];
-    return withBaseAntiSlopSnapshot(envelope.baseCheckoutCwd ?? cwd, capabilityCwd ?? cwd, envelope.baseTree, basePaths, (snapshot) => {
-        if (snapshot.paths.length === 0)
-            return selected;
-        let baseGroups;
-        try {
-            baseGroups = collectAntiSlopGroups(snapshot.cwd, snapshot.paths);
-        }
-        catch (error) {
-            // Residual failure is the base tree's own consumer state. Skipping the allowance blames
-            // MORE, never less, so degrade loudly instead of hiding the finding (sc-2084).
-            if (!(error instanceof AntiSlopCapabilityError))
-                throw error;
-            console.error(`anti-slop: inherited base allowance skipped — ${error.issue}; inherited findings may be reported as new`);
-            return selected;
-        }
-        const inherited = migrateBaselineRenames(baselineFromGroups(baseGroups), envelope.renames);
-        const entries = new Map(selected.entries.map((entry) => [entry.fingerprint, entry]));
-        for (const entry of inherited.entries) {
-            const committed = entries.get(entry.fingerprint);
-            if (!committed || entry.count > committed.count)
-                entries.set(entry.fingerprint, entry);
-        }
-        return {
-            ...selected,
-            entries: [...entries.values()].sort((a, b) => a.fingerprint.localeCompare(b.fingerprint)),
-        };
-    });
-}
 function check(cwd, args, envelope = null, baseRef) {
     const baseline = baselineOrExplain(cwd);
     if (!baseline)
         return 2;
-    const envelopeStatus = checkBaselineEnvelope(baseline, envelope, baseRef);
-    if (envelopeStatus !== 0)
-        return envelopeStatus;
     const scope = resolveAntiSlopScope(cwd, args);
     const selected = {
         ...baseline,
@@ -239,10 +160,16 @@ function check(cwd, args, envelope = null, baseRef) {
         ? mkdtempSync(join(tmpdir(), 'devkit-anti-slop-capability-'))
         : null;
     try {
-        const candidateGroups = collectAntiSlopGroups(cwd, args, pin ?? undefined);
+        const envelopeGroups = collectAntiSlopGroups(cwd, envelope?.activatedRuleIds.size ? [] : args, pin ?? undefined);
+        const candidateGroups = envelope?.activatedRuleIds.size
+            ? envelopeGroups.filter((group) => scope.includes(group.file))
+            : envelopeGroups;
+        const envelopeStatus = checkBaselineEnvelope(baseline, envelope, envelopeGroups, baseRef);
+        if (envelopeStatus !== 0)
+            return envelopeStatus;
         const allowance = inheritedBaseAllowance(cwd, pin, selected, candidateGroups, envelope);
         const comparison = compareBaseline(allowance, candidateGroups);
-        printNew(comparison.newGroups);
+        printNewAntiSlopFindings(comparison.newGroups);
         reportInheritedForgiveness(compareBaseline(selected, candidateGroups).newGroups, comparison.newGroups);
         const errors = comparison.newGroups.filter((group) => group.severity === 'error');
         const warnings = comparison.newGroups.filter((group) => group.severity === 'warning');
@@ -289,7 +216,7 @@ function prune(cwd, args) {
             entries: baseline.entries.filter((entry) => scope.includes(entry.file)),
         };
         const comparison = compareBaseline(selected, groups);
-        printNew(comparison.newGroups);
+        printNewAntiSlopFindings(comparison.newGroups);
         if (comparison.newGroups.some((group) => group.severity === 'error')) {
             console.error('anti-slop: prune refused — new error finding(s) exist; baseline unchanged');
             return 1;

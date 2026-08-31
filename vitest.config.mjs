@@ -1,6 +1,7 @@
 import { defineConfig } from 'vitest/config';
 
 const TEST_INCLUDE = [
+  'anti-slop/**/*.test.mts',
   'gate-engine/**/*.test.mts',
   'cli/**/*.test.mts',
   'e2e/lib/**/*.unit.test.mts',
