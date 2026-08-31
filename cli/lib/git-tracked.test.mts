@@ -34,4 +34,26 @@ describe('tracked path checks', () => {
     expect(() => isTracked(cwd, 'anything')).toThrow();
     expect(() => trackedPathPredicate(cwd)).toThrow();
   });
+
+  it('preserves alternate-index semantics for shared tracked-path callers', () => {
+    const cwd = root();
+    execFileSync('git', ['init', '-q'], { cwd });
+    writeFileSync(join(cwd, 'real.txt'), 'real');
+    writeFileSync(join(cwd, 'alternate.txt'), 'alternate');
+    execFileSync('git', ['add', 'real.txt'], { cwd });
+    const alternateIndex = join(cwd, 'alternate-index');
+    const env = { ...process.env, GIT_INDEX_FILE: alternateIndex };
+    execFileSync('git', ['read-tree', '--empty'], { cwd, env });
+    execFileSync('git', ['add', 'alternate.txt'], { cwd, env });
+    const previousIndex = process.env.GIT_INDEX_FILE;
+    process.env.GIT_INDEX_FILE = alternateIndex;
+    try {
+      const snapshot = trackedPathPredicate(cwd);
+      expect(snapshot('alternate.txt')).toBe(true);
+      expect(snapshot('real.txt')).toBe(false);
+    } finally {
+      if (previousIndex === undefined) delete process.env.GIT_INDEX_FILE;
+      else process.env.GIT_INDEX_FILE = previousIndex;
+    }
+  });
 });
