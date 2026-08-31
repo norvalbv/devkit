@@ -29,7 +29,7 @@ if [ "$ddrc" -eq 1 ]; then
     exit 1
 elif [ "$ddrc" -eq 3 ]; then
     echo "   guard-decisions: judge unavailable — strict ship mode failed closed."
-    echo "   Check \\\`claude\\\` CLI auth/quota, then re-run devkit ship (cleared judgements are cached)."
+    echo "   Follow the judge CLI remedy printed above, then re-run devkit ship (cleared judgements are cached)."
     exit 1
 elif [ "$ddrc" -ne 0 ] && [ "$ddrc" -ne 2 ]; then
     echo "   guard-decisions: unexpected exit $ddrc — blocking the commit."
@@ -41,8 +41,8 @@ fi
 echo "🔍 Reviewer gate (headless domain judges)..."
 # Ship path only (sc-1442 message file present): start the completeness judge NOW, in parallel
 # with the reviewer fleet, instead of serially at commit-msg. Its confident PASS lands in the
-# shared verdict store, so the commit-msg gate re-judges it as a cache hit — the serial ~4min of
-# opus overlaps the fleet instead of following it. Interactive commits (no message yet) are
+# shared verdict store, so the commit-msg gate re-judges it as a cache hit — the deep completeness
+# judgement overlaps the fleet instead of following it. Interactive commits (no message yet) are
 # unchanged. Lifetime is scoped to this hook: the judge is either wait'ed on or killed AND reaped
 # below — nothing outlives the hook to hold git's output pipe open. Review mode is excluded — it
 # exports the SAME env as its reviewer intent file (review-target.sh), but completeness is a
@@ -98,7 +98,7 @@ elif [ "$crc" -eq 4 ]; then
     exit 1
 elif [ "$crc" -eq 3 ]; then
     echo "   guard-review completeness: judge unavailable — strict ship mode failed closed."
-    echo "   Check \\\`claude\\\` CLI auth/quota, then re-run devkit ship (cleared judgements are cached)."
+    echo "   Follow the judge CLI remedy printed above, then re-run devkit ship (cleared judgements are cached)."
     exit 1
 fi
 # rrc 0 = pass/cached/nothing-to-do, rrc 2 = inconclusive (non-strict fail-open) → continue.

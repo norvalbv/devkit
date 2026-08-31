@@ -21,6 +21,7 @@ import {
   buildFullHook,
   buildGuardBlock,
   buildOverlayHook,
+  buildStandaloneBlock,
   findPreambleEnd,
   hasFragment,
   removeFragment,
@@ -100,6 +101,19 @@ describe('buildGuardBlock', () => {
     expect(block).toContain('__dk_gate_selected decisions');
     expect(block).toContain('__dk_gate_selected review');
     expect(block).toContain('DEVKIT_REVIEW_GUARDS');
+  });
+
+  it('keeps generated outage guidance and completeness comments provider-neutral', () => {
+    const generated = [
+      buildGuardBlock({ guards: ['decisions', 'review'] }),
+      buildStandaloneBlock({ guards: ['decisions', 'review'] }),
+      buildCommitMsgBlock({ guards: ['review'] }) ?? '',
+    ];
+    for (const text of generated) {
+      expect(text).toContain('Follow the judge CLI remedy printed above');
+      expect(text).not.toMatch(/check [`]?claude/i);
+      expect(text).not.toContain('opus overlaps');
+    }
   });
 
   it('omits the biome step when biome is deselected', () => {

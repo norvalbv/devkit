@@ -41,6 +41,9 @@ const codexTrio = {
 const claudeTrio = {
   review: { model: 'haiku', escalationModel: 'opus', correctnessModel: 'sonnet' },
 };
+const mixedTrio = {
+  review: { model: 'haiku', escalationModel: 'gpt-5.6-sol', correctnessModel: 'gpt-5.6-sol' },
+};
 
 const exec =
   (byBin: Record<string, ProbeOutput | null>): ProbeExec =>
@@ -84,25 +87,20 @@ describe('positive-evidence probes', () => {
 });
 
 describe('judgeAuthResult', () => {
-  it('silent when every reachable runtime is logged in', () => {
-    expect(judgeAuthResult(codexTrio, exec({ codex: CODEX_IN, claude: CLAUDE_IN }))).toBeNull();
+  it('an all-Codex family ignores Claude auth', () => {
+    expect(judgeAuthResult(codexTrio, exec({ codex: CODEX_IN, claude: CLAUDE_OUT }))).toBeNull();
   });
 
-  it('a logged-out claude is a finding even on an all-codex trio — completeness is claude-pinned', () => {
-    const r = judgeAuthResult(codexTrio, exec({ codex: CODEX_IN, claude: CLAUDE_OUT }));
-    expect(r?.name).toBe(JUDGE_AUTH_CHECK);
-    expect(r?.status).toBe('DRIFT');
-    expect(r?.advisory).toBe(true); // reported, never gates the exit
-    expect(r?.detail).toContain('claude');
-  });
-
-  it('codex auth is only probed when a resolved model routes there', () => {
+  it('an all-Claude family ignores Codex auth', () => {
     const r = judgeAuthResult(claudeTrio, exec({ codex: CODEX_OUT, claude: CLAUDE_IN }));
     expect(r).toBeNull();
   });
 
-  it('both dark → one row naming both, remedies for each', () => {
-    const r = judgeAuthResult(codexTrio, exec({ codex: CODEX_OUT, claude: CLAUDE_OUT }));
+  it('a mixed family probes both; both dark → one row naming both and both remedies', () => {
+    const r = judgeAuthResult(mixedTrio, exec({ codex: CODEX_OUT, claude: CLAUDE_OUT }));
+    expect(r?.name).toBe(JUDGE_AUTH_CHECK);
+    expect(r?.status).toBe('DRIFT');
+    expect(r?.advisory).toBe(true); // reported, never gates the exit
     expect(r?.detail).toContain('codex + claude');
     expect(r?.remediation).toContain('codex login');
     expect(r?.remediation).toContain('claude');
@@ -112,5 +110,11 @@ describe('judgeAuthResult', () => {
     process.env.GUARD_REVIEW_MODEL = 'gpt-5.6-terra@high';
     const r = judgeAuthResult(claudeTrio, exec({ codex: CODEX_OUT, claude: CLAUDE_IN }));
     expect(r?.detail).toContain('codex');
+  });
+
+  it('the escalation env controls completeness and can introduce the Claude provider', () => {
+    process.env.GUARD_REVIEW_ESCALATION_MODEL = 'opus';
+    const r = judgeAuthResult(codexTrio, exec({ codex: CODEX_IN, claude: CLAUDE_OUT }));
+    expect(r?.detail).toContain('claude');
   });
 });

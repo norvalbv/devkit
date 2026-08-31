@@ -12,6 +12,7 @@ import {
   explicitFamilyKeys,
   FAMILY_PROVENANCE_KEY,
   familyStaleResult,
+  requiredJudgeProviders,
 } from '../lib/doctor/judge/judge-family.mts';
 
 const envKeys = [
@@ -192,19 +193,39 @@ describe('binResolvable', () => {
 });
 
 describe('claudeRuntimeResult', () => {
-  it('DRIFTs (gating) when no claude resolves — the completeness judge is claude-pinned', () => {
+  it('is silent on the shipped all-Codex family when no claude resolves', () => {
     const repo = repoWith(TEMPLATE_CONFIG);
     process.env.PATH = binDir('codex');
-    const r = claudeRuntimeResult(repo);
-    expect(r?.status).toBe('DRIFT');
-    expect(r?.advisory).toBeFalsy();
-    expect(r?.detail).toContain('completeness');
+    const cfg = resolveGuardConfig(repo);
+    expect(requiredJudgeProviders(cfg)).toEqual(new Set(['codex']));
+    expect(claudeRuntimeResult(cfg, repo)).toBeNull();
   });
 
-  it('silent when claude resolves', () => {
-    const repo = repoWith(TEMPLATE_CONFIG);
-    process.env.PATH = binDir('claude');
-    expect(claudeRuntimeResult(repo)).toBeNull();
+  it('DRIFTs (gating) when an all-Claude family has no claude runtime', () => {
+    const repo = repoWith({
+      ...TEMPLATE_CONFIG,
+      review: { ...TEMPLATE_CONFIG.review, ...CLAUDE_FAMILY_SET },
+    });
+    process.env.PATH = binDir('codex');
+    const cfg = resolveGuardConfig(repo);
+    expect(requiredJudgeProviders(cfg)).toEqual(new Set(['claude']));
+    const r = claudeRuntimeResult(cfg, repo);
+    expect(r?.status).toBe('DRIFT');
+    expect(r?.advisory).toBeFalsy();
+    expect(r?.detail).toContain('claude CLI');
+  });
+
+  it('requires both providers for an intentional mixed family', () => {
+    const repo = repoWith({
+      ...TEMPLATE_CONFIG,
+      review: { ...TEMPLATE_CONFIG.review, model: 'haiku' },
+    });
+    process.env.PATH = binDir('codex');
+    const cfg = resolveGuardConfig(repo);
+    expect(requiredJudgeProviders(cfg)).toEqual(new Set(['claude', 'codex']));
+    expect(claudeRuntimeResult(cfg, repo)?.status).toBe('DRIFT');
+    process.env.PATH = binDir('claude', 'codex');
+    expect(claudeRuntimeResult(cfg, repo)).toBeNull();
   });
 });
 

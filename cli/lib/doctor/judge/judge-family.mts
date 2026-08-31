@@ -29,6 +29,12 @@ import {
   writeSync,
 } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
+import { isCodexModel } from '../../../../gate-engine/judge/codex/result.mts';
+import {
+  correctnessModel,
+  resolveEscalationModel,
+  resolveReviewModel,
+} from '../../../../gate-engine/review/reviewers.mts';
 import { readJson } from '../../fs-helpers.mts';
 import { type CheckResult, check } from '../check-result.mts';
 
@@ -88,6 +94,22 @@ interface RawReview {
 }
 interface RawGuardFile {
   review?: RawReview;
+}
+
+export interface JudgeModelConfig {
+  review: { model: string; escalationModel: string; correctnessModel: string };
+}
+
+export type JudgeProvider = 'codex' | 'claude';
+
+export function resolvedJudgeModels(cfg: JudgeModelConfig): string[] {
+  return [resolveReviewModel(cfg), resolveEscalationModel(cfg), correctnessModel(cfg)];
+}
+
+export function requiredJudgeProviders(cfg: JudgeModelConfig): Set<JudgeProvider> {
+  return new Set(
+    resolvedJudgeModels(cfg).map((model) => (isCodexModel(model) ? 'codex' : 'claude')),
+  );
 }
 
 function rawReview(cwd: string): RawReview | null {
@@ -237,16 +259,14 @@ export function bindClaudeFamily(cwd: string): boolean {
   }
 }
 
-/** The review fleet is wider than the configured trio: the completeness judge is pinned to a
- * claude model, so a codex-only machine passes every model-derived check and then fails closed on
- * the LAST ship gate. Real drift, named before the ship. */
-export function claudeRuntimeResult(cwd: string): CheckResult | null {
+export function claudeRuntimeResult(cfg: JudgeModelConfig, cwd: string): CheckResult | null {
+  if (!requiredJudgeProviders(cfg).has('claude')) return null;
   if (binResolvable('claude', cwd)) return null;
   return check(
     CLAUDE_RUNTIME_CHECK,
     'DRIFT',
-    'the completeness judge is pinned to a claude model, but no claude binary resolves (PATH) — every strict ship fails closed on the final gate',
-    'install the claude CLI; the completeness judge always runs on it regardless of review.model',
+    'an effective judge model routes through the claude CLI, but no claude binary resolves (PATH) — affected judges are unavailable and strict ships fail closed',
+    'install the claude CLI, or override the Claude-family review.model / review.escalationModel / review.correctnessModel in guard.config.json',
   );
 }
 

@@ -55,6 +55,8 @@ export interface PreparedJudgeMcpProfile {
   /** The selected server definitions themselves — the codex path translates these into
    * `-c mcp_servers.*` config (sc-2054) instead of the claude --mcp-config flags in `args`. */
   servers: McpServers;
+  /** Secret-safe identity of the exact server definitions prepared for this spawn. */
+  capabilityFingerprint: string;
   cleanup: () => void;
 }
 
@@ -64,6 +66,8 @@ export interface PrepareJudgeMcpOptions {
   registryPath?: string;
   projectRoots?: readonly string[];
   temporaryRoot?: string;
+  /** Exact caller tool grants; included in the prepared capability identity when supplied. */
+  allowedTools?: string;
 }
 
 function warnOnce(key: string, message: string): void {
@@ -228,18 +232,26 @@ export function judgeMcpCapabilityFingerprint(
           projectCandidates(options.cwd, env, options.projectRoots),
         )
       : {};
+  return capabilityFingerprint(profile, allowedTools, registryPath ?? requested, servers);
+}
+
+function capabilityFingerprint(
+  profile: JudgeMcpProfile,
+  allowedTools: string,
+  registryPath: string,
+  servers: McpServers,
+): string {
   return createHash('sha256')
-    .update(
-      JSON.stringify({ allowedTools, profile, registryPath: registryPath ?? requested, servers }),
-    )
+    .update(JSON.stringify({ allowedTools, profile, registryPath, servers }))
     .digest('hex');
 }
 
-function emptyProfile(): PreparedJudgeMcpProfile {
+function emptyProfile(capabilityFingerprint: string): PreparedJudgeMcpProfile {
   return {
     args: ['--mcp-config', EMPTY_MCP_CONFIG, '--strict-mcp-config'],
     serverNames: [],
     servers: {},
+    capabilityFingerprint,
     cleanup: () => {},
   };
 }
@@ -248,7 +260,9 @@ export function prepareJudgeMcpProfile(
   profile: JudgeMcpProfile,
   options: PrepareJudgeMcpOptions,
 ): PreparedJudgeMcpProfile {
-  if (profile.kind === 'none') return emptyProfile();
+  const allowedTools = options.allowedTools ?? '';
+  if (profile.kind === 'none')
+    return emptyProfile(judgeMcpCapabilityFingerprint(profile, allowedTools, options));
 
   const env = options.env ?? process.env;
   const explicit = options.registryPath !== undefined || env[REGISTRY_ENV] !== undefined;
@@ -260,7 +274,7 @@ export function prepareJudgeMcpProfile(
       `registry:${requested}`,
       `guard-review: trusted MCP registry unavailable at ${requested} — named agents continue with strict-empty MCP isolation`,
     );
-    return emptyProfile();
+    return emptyProfile(capabilityFingerprint(profile, allowedTools, requested, {}));
   }
   const registry = readRegistry(registryPath);
   if (!registry) {
@@ -268,7 +282,7 @@ export function prepareJudgeMcpProfile(
       `registry-json:${registryPath}`,
       'guard-review: trusted MCP registry is unreadable — named agents continue with strict-empty MCP isolation',
     );
-    return emptyProfile();
+    return emptyProfile(capabilityFingerprint(profile, allowedTools, registryPath, {}));
   }
 
   const roots = projectCandidates(options.cwd, env, options.projectRoots);
@@ -280,7 +294,8 @@ export function prepareJudgeMcpProfile(
       `missing:${registryPath}:${missing.join(',')}`,
       `guard-review: named-agent MCP profile missing ${missing.join(', ')} — continuing with the configured subset under strict isolation`,
     );
-  if (present.length === 0) return emptyProfile();
+  if (present.length === 0)
+    return emptyProfile(capabilityFingerprint(profile, allowedTools, registryPath, {}));
 
   let directory: string | null = null;
   try {
@@ -297,6 +312,7 @@ export function prepareJudgeMcpProfile(
       args: ['--mcp-config', file, '--strict-mcp-config'],
       serverNames: present,
       servers,
+      capabilityFingerprint: capabilityFingerprint(profile, allowedTools, registryPath, servers),
       cleanup: () => rmSync(privateDirectory, { recursive: true, force: true }),
     };
   } catch {
@@ -305,6 +321,6 @@ export function prepareJudgeMcpProfile(
       'temporary-config',
       'guard-review: private MCP profile file could not be created — named agents continue with strict-empty MCP isolation',
     );
-    return emptyProfile();
+    return emptyProfile(capabilityFingerprint(profile, allowedTools, registryPath, {}));
   }
 }

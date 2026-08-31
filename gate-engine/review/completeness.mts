@@ -9,9 +9,6 @@
  * evidence that hardened the sentry gate). GUARD_COMPLETENESS_HARD=0 softens a one-off commit
  * back to advisory — env only, deliberately NO guard.config.json key: a standing config soften
  * would be a per-repo policy no consumer wants and an agent-stageable file could self-serve.
- * Straight opus, no cascade (user ruling: the gap-finder gets the strongest model or it isn't
- * worth running).
- *
  * Step 0 is done FOR the agent: the governing Targets load in-process via scopedTargets() (same
  * package — no PATH round-trip) and render exactly like the consumer's prep-critique block.
  *
@@ -23,9 +20,7 @@
  * skipped).
  *
  * A confident PASS is cached in the review gate's own store (.devkit/review-cache.json) on every
- * byte the judge read, so a ship retry after an unrelated failure skips this judge instead of
- * re-spending opus on an unchanged judgement — the convergence contract the domain reviewers
- * already honoured (docs/decisions/ship-gates-converge-not-restart.md).
+ * byte the judge read.
  *
  * Knobs: GUARD_NO_COMPLETENESS=1 skip · GUARD_COMPLETENESS_HARD=0 soften · cfg.noLlm skip.
  */
@@ -33,8 +28,9 @@
 import { execSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { envBool, envFlag, resolveGuardConfig } from '../config.mts';
+import { envBool, envFlag, resolveGuardConfig, type GuardConfig } from '../config.mts';
 import { scopedTargets } from '../decisions/scoped-targets.mts';
+import { judgeBinForModel } from '../judge/codex/result.mts';
 import { renderTargets } from './evidence/targets-block.mts';
 
 export { renderTargets, type TargetBlock } from './evidence/targets-block.mts';
@@ -50,17 +46,33 @@ import { reportGateInfraFailure } from '../judge/odb-probe.mts';
 import { DEEP_JUDGE_TIMEOUT_MS, execJudgeAsync, strictRemedy } from '../judge/run-judge.mts';
 import { loadCache, savePasses } from './cache.mts';
 import { buildCappedDiffEvidence } from './diff-evidence.mts';
-import { cacheKey, parseReviewVerdict, stripFrontmatter } from './reviewers.mts';
+import {
+  cacheKey,
+  parseReviewVerdict,
+  resolveEscalationModel,
+  stripFrontmatter,
+} from './reviewers.mts';
 
 const AGENT_NAME = 'feature-completeness-reviewer';
 const TOOLS = 'Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(git status:*)';
+
+/** The exact judge capabilities shared by cache identity, execution, and the benchmark. */
+export function completenessJudgeSetup(cfg: GuardConfig, cwd = process.cwd()) {
+  const mcpProfile = namedAgentMcpProfile();
+  const allowedTools = withNamedAgentMcpTools(TOOLS, cfg.indexPath ? cfg.searchTool : '');
+  return {
+    allowedTools,
+    mcpProfile,
+    capabilityFingerprint: judgeMcpCapabilityFingerprint(mcpProfile, allowedTools, { cwd }),
+  };
+}
 
 // Trailing whitespace + blank-run normalisation, mirroring git's `--cleanup=whitespace` (the mode
 // a `-m`/`-F` commit gets). The gate is now judged from TWO message sources that must produce the
 // SAME cache key: the sc-1442 ship temp file at pre-commit (raw composed message) and git's
 // cleaned COMMIT_EDITMSG at commit-msg. Without this, a message with a trailing space or a double
 // blank line keys differently per hook and the pre-commit prewarm's cached PASS silently misses —
-// re-paying the full opus judgement the prewarm existed to avoid.
+// re-paying the full strong-model judgement the prewarm existed to avoid.
 const TRAILING_WS_RE = /[ \t]+$/gm;
 const BLANK_RUN_RE = /\n{3,}/g;
 export function normalizeCommitMessage(raw: string): string {
@@ -132,14 +144,15 @@ export async function runCompleteness(
   let prompt: string;
   let diff: string;
   let allowedTools = withNamedAgentMcpTools(TOOLS);
-  const mcpProfile = namedAgentMcpProfile();
+  let mcpProfile = namedAgentMcpProfile();
   let capabilityFingerprint = '';
   let stickyKey = '';
+  let model = '';
   try {
     const cfg = resolveGuardConfig(cwd);
     if (cfg.noLlm) return finish(0);
-    allowedTools = withNamedAgentMcpTools(TOOLS, cfg.indexPath ? cfg.searchTool : '');
-    capabilityFingerprint = judgeMcpCapabilityFingerprint(mcpProfile, allowedTools, { cwd });
+    model = resolveEscalationModel(cfg);
+    ({ allowedTools, mcpProfile, capabilityFingerprint } = completenessJudgeSetup(cfg, cwd));
     const message = normalizeCommitMessage(
       readFileSync(path.isAbsolute(msgFile) ? msgFile : path.resolve(cwd, msgFile), 'utf8'),
     );
@@ -170,7 +183,7 @@ export async function runCompleteness(
     stickyKey = cacheKey(
       'completeness-intent',
       `${verdictBranch(cwd)}\u0000${message}`,
-      `${body}\u0000${capabilityFingerprint}`,
+      `${body}\u0000${capabilityFingerprint}\u0000${model}`,
     );
     const sticky = loadCache(cwd)[stickyKey];
     if (sticky) {
@@ -206,7 +219,7 @@ export async function runCompleteness(
     prompt = wrapCompleteness(body, message, files, renderTargets(targets));
   } catch (e: unknown) {
     // sc-1366: distinguish an unreadable staged object from an inconclusive judge before the exit
-    // code turns it into "judge unavailable — check `claude` CLI auth/quota".
+    // code turns it into a misleading judge-auth outage.
     const st = envFlag('AI_STRICT');
     const lbl = 'guard-review: completeness';
     return finish(
@@ -216,33 +229,48 @@ export async function runCompleteness(
 
   // PASS cache, same store and shape as the domain reviewers (.devkit/review-cache.json): an
   // identical judgement never re-runs. Without it this gate was the ONE thing a ship retry always
-  // re-paid — ~7 minutes of opus, from scratch, every attempt, while all seven reviewers reported
-  // `cached PASS` (sc-1227). Convergence is the recorded contract
+  // re-paid — a full strong-model judgement, from scratch, every attempt, while all seven reviewers
+  // reported `cached PASS` (sc-1227). Convergence is the recorded contract
   // (docs/decisions/ship-gates-converge-not-restart.md), and completeness was outside it.
   // Key = every byte the judge reads: the prompt (message, governing Targets, brief) plus the
   // capped stdin evidence. An amended message or a re-staged hunk therefore MISSES and re-judges.
-  const key = cacheKey('completeness', diff, `${prompt}\u0000${capabilityFingerprint}`);
+  const key = cacheKey(
+    'completeness',
+    diff,
+    `${prompt}\u0000${capabilityFingerprint}\u0000${model}`,
+  );
   const hit = loadCache(cwd)[key];
   if (hit) {
     console.error('guard-review: completeness — cached PASS (identical judgement)');
-    // The most expensive entry in this store (~7min of opus): its hit rate is the one that pays.
+    // The most expensive entry in this store: its hit rate is the one that pays.
     const cachedDuration = typeof hit.duration_ms === 'number' ? hit.duration_ms : undefined;
     emitCacheHit('review:completeness', hit.model, cachedDuration);
     return finish(0, 'full', cachedDuration);
   }
 
   let outage: 'timeout' | 'transient' | 'empty' | undefined;
+  let observedCapabilityFingerprint: string | undefined;
   const raw = await exec({
     label: 'review:completeness',
-    args: ['-p', prompt, '--model', 'opus', ...JUDGE_ISOLATION, '--allowedTools', allowedTools],
+    args: ['-p', prompt, '--model', model, ...JUDGE_ISOLATION, '--allowedTools', allowedTools],
     input: diff,
     timeout: DEEP_JUDGE_TIMEOUT_MS,
     cwd,
     mcpProfile,
+    codexReadOnly: true,
+    onMcpPrepared: (fingerprint) => {
+      observedCapabilityFingerprint = fingerprint;
+    },
     onOutage: (kind) => {
       outage = kind;
     },
   });
+  if (observedCapabilityFingerprint && observedCapabilityFingerprint !== capabilityFingerprint) {
+    console.error(
+      'guard-review: completeness SKIPPED (MCP capabilities changed while preparing the judge) — rerun with a stable trusted MCP registry.',
+    );
+    return finish(envFlag('AI_STRICT') ? 3 : 2);
+  }
   if (raw === null) {
     // Outage/timeout (execJudgeAsync already warned). Under strict ship the skip must be an EXIT
     // CODE, not a stderr line — a headless shipping agent only reliably sees the code.
@@ -252,7 +280,7 @@ export async function runCompleteness(
       const timedOut = outage === 'timeout';
       console.error(
         `guard-review: completeness SKIPPED (${timedOut ? 'judge timed out' : 'judge outage'}) — strict ship mode fails closed.\n` +
-          `   Remedy: ${strictRemedy(timedOut ? 'timeout' : 'outage')} (an earned PASS is cached).`,
+          `   Remedy: ${strictRemedy(timedOut ? 'timeout' : 'outage', judgeBinForModel(model))} (an earned PASS is cached).`,
       );
       return finish(3);
     }
@@ -265,7 +293,7 @@ export async function runCompleteness(
   if (verdict === 'PASS') {
     const meta = {
       at: new Date().toISOString(),
-      model: 'opus',
+      model,
       duration_ms: Date.now() - startedAt,
     };
     // Both identities: the exact byte key (any caller, any order) and the branch+message sticky

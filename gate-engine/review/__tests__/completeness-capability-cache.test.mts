@@ -3,15 +3,17 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { runCompleteness } from '../completeness.mts';
+import { resolveGuardConfig } from '../../config.mts';
+import { completenessJudgeSetup, runCompleteness } from '../completeness.mts';
 import {
   cleanupReviewFixtures,
   consumerRepo,
+  messageFile,
   mkExec,
   trackReviewFixtureDir,
 } from './run-review-fixtures.mts';
 
-const ENV_KEYS = ['DEVKIT_JUDGE_MCP_CONFIG', 'DEVKIT_SHIP_BRANCH'] as const;
+const ENV_KEYS = ['DEVKIT_JUDGE_MCP_CONFIG', 'DEVKIT_SHIP_BRANCH', 'GUARD_AI_STRICT'] as const;
 const saved: Record<string, string | undefined> = {};
 
 beforeEach(() => {
@@ -28,12 +30,6 @@ afterEach(() => {
     else process.env[key] = saved[key];
   }
 });
-
-function messageFile(repo: string, message: string): string {
-  const file = join(repo, '.git', 'COMMIT_EDITMSG_TEST');
-  writeFileSync(file, message);
-  return file;
-}
 
 function writeTrustedRegistry(file: string, version: string): void {
   writeFileSync(
@@ -79,5 +75,30 @@ describe('runCompleteness capability cache partition', () => {
       0,
     );
     expect(exec).toHaveBeenCalledTimes(3);
+  });
+
+  it('does not cache a PASS prepared with capabilities different from its planned identity', async () => {
+    const repo = consumerRepo({ backend: true });
+    const configRoot = trackReviewFixtureDir(mkdtempSync(join(tmpdir(), 'completeness-mcp-race-')));
+    const registry = join(configRoot, 'claude.json');
+    process.env.DEVKIT_JUDGE_MCP_CONFIG = registry;
+    writeTrustedRegistry(registry, 'planned-v1');
+    const message = messageFile(repo, 'feat: capability race');
+
+    expect(
+      await runCompleteness(message, repo, {
+        exec: async (options) => {
+          writeTrustedRegistry(registry, 'prepared-v2-with-different-definition');
+          options.onMcpPrepared?.(
+            completenessJudgeSetup(resolveGuardConfig(repo), repo).capabilityFingerprint,
+          );
+          return 'VERDICT: PASS';
+        },
+      }),
+    ).toBe(2);
+
+    const stableExec = mkExec(async () => 'VERDICT: PASS');
+    expect(await runCompleteness(message, repo, { exec: stableExec })).toBe(0);
+    expect(stableExec).toHaveBeenCalledTimes(1);
   });
 });
