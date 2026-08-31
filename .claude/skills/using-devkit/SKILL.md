@@ -104,8 +104,10 @@ devkit command.
   which re-records. If the blocked attempt WARNED that it could not record the invocation (the intent
   file is not gitignored — a managed .gitignore predating this feature), `--resume` will refuse: run
   `devkit doctor --fix` to restore the ignore line, then the full command once — recording resumes
-  from that attempt. Do not respond to a block by bypassing gates (`--no-verify`, `GUARD_NO_REVIEW`) —
-  that defeats the ship.
+  from that attempt. Do not answer a real finding with a bypass (`--no-verify`, `GUARD_NO_REVIEW`) —
+  that defeats the ship. A cascade-confirmed reviewer may print `GUARD_REVIEW_SKIP=<reviewer>`; fix
+  first, and use it only when the user has explicitly accepted a false positive or residual. It skips
+  only the named reviewer, so every other reviewer still runs.
 - **Ship-message rules — structure the message for the gates; length is yours.**
   - The **subject line** is what retrieves the governing decision Targets — make it the change's real
     intent, not a mechanical file list.

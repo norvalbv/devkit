@@ -1026,7 +1026,6 @@ describe('runReviewGate — cascade + exit contract', () => {
       return 'VERDICT: PASS';
     });
     expect(await runReviewGate(repo, { exec })).toBe(1);
-    // exactly one call for correctness (no :escalate), and it ran on its pinned sonnet
     const corrCalls = exec.mock.calls.filter(([o]) =>
       o.label.startsWith('review:correctness-reviewer'),
     );
@@ -1036,8 +1035,8 @@ describe('runReviewGate — cascade + exit contract', () => {
       false,
     );
     expect(err.mock.calls.flat().join('\n')).toContain('CAS clobber');
+    expect(err.mock.calls.flat().join('\n')).not.toMatch(/GUARD_REVIEW_SKIP|GUARD_NO_REVIEW/);
   });
-
   it('first-pass FAIL → opus confirm → exit 1 with the reviewer named; FAIL is never cached', async () => {
     const repo = consumerRepo({ backend: true });
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -1049,13 +1048,14 @@ describe('runReviewGate — cascade + exit contract', () => {
     });
     expect(await runReviewGate(repo, { exec })).toBe(1);
     const out = err.mock.calls.flat().join('\n');
-    expect(out).toContain('api-security-reviewer FAILED');
-    // the judge's full findings are echoed — a block whose evidence was discarded is undebuggable
-    expect(out).toContain('raw SQL concat');
-    // the four passers are cached; the failer is not
+    const findingAt = out.lastIndexOf('raw SQL concat');
+    const skipAt = out.indexOf('GUARD_REVIEW_SKIP=api-security-reviewer');
+    expect([findingAt >= 0, skipAt > findingAt]).toEqual([true, true]);
+    expect(out).toMatch(/api-security-reviewer FAILED[\s\S]*user's explicit OK/);
+    expect(out).toContain('GUARD_NO_REVIEW=1 skips the entire review gate');
+    expect(out.match(/GUARD_REVIEW_SKIP=api-security-reviewer/g)).toHaveLength(1);
     expect(Object.keys(loadCache(repo)).length).toBe(4);
   });
-
   it('GUARD_REVIEW_SKIP surgically drops a named reviewer (and says so); the rest still run', async () => {
     const repo = consumerRepo({ backend: true });
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
