@@ -12,7 +12,8 @@ import { gitCached } from '../evidence/staged-git.mjs';
 import { lensGroupId } from '../lens/groups.mjs';
 import { applyOverrideValve } from '../overrides.mjs';
 import { allowedToolsFor, escalatePrompt, hasChecklist, resolveEscalationModel, resolveReviewModel, wrapConventionsPrompt, wrapPrompt, } from '../reviewers.mjs';
-import { agentBody, cleanupChecklistState, enforceChecklistContract, initializeCommitGuardChecklist, readChecklistState, withStagedFiles, } from '../runtime.mjs';
+import { enforceChecklistContract } from '../contracts/checklist.mjs';
+import { agentBody, cleanupChecklistState, initializeCommitGuardChecklist, readChecklistState, withStagedFiles, } from '../runtime.mjs';
 import { consumerChecklistAssetRoot } from './consumer-assets.mjs';
 /** Run one reviewer with checklist verification, override handling, and cleanup. */
 export async function runCascade(sel, opts) {
@@ -22,15 +23,21 @@ export async function runCascade(sel, opts) {
     try {
         initializeCommitGuardChecklist(cwd, sel.reviewer, checklistRoot, opts.judgeEnv);
         let res = await cascadeVerdict(sel, opts, checklistRoot);
-        res = await enforceChecklistContract(sel, res, cwd, opts.assetRoot, async (reason) => {
+        res = await enforceChecklistContract(sel, res, cwd, opts.recovery !== undefined, async (reason) => {
             if (opts.recovery === 'defer')
                 return { ...res, status: 'inconclusive', reason, retryable: reason };
-            if (opts.recovery === 'final')
-                return {
-                    ...res,
-                    status: 'error',
-                    reason: `reviewer checklist contract failed after one retry — ${reason}`,
-                };
+            // Exhausted recovery: review blocks at exit 1, ship stays inconclusive at exit 3. 'error'
+            // on ship would render as an escalation-confirmed reviewer FAIL — a verdict claim about a
+            // diff no judge ever finished reading. `assetRoot` is set only by review mode.
+            if (opts.recovery === 'final') {
+                const exhausted = `reviewer checklist contract failed after one retry — ${reason}`;
+                const terminal = opts.assetRoot
+                    ? { ...res, status: 'error', reason: exhausted }
+                    : { ...res, status: 'inconclusive', inconclusiveCause: undefined, reason: exhausted };
+                return terminal;
+            }
+            // Unreachable from the three direct callers (the reviewer/conventions/scale benches): they
+            // schedule no recovery, so enforceChecklistContract never invokes this callback at all.
             throw new Error(`checklist recovery has no scheduling mode — ${reason}`);
         });
         const disposition = applyOverrideValve(sel, res, cwd, {
@@ -44,7 +51,13 @@ export async function runCascade(sel, opts) {
         cleanupChecklistState(cwd, sel.reviewer);
     }
 }
-async function cascadeVerdict({ reviewer, files }, { cwd, cfg, exec = execJudgeAsync, firstModel = resolveReviewModel(cfg), escalationModel = resolveEscalationModel(cfg), retryFirst = false, assetRoot, judgeEnv, checklistRecoveryReason, promptExtras, }, checklistRoot) {
+async function cascadeVerdict({ reviewer, files }, { cwd, cfg, exec = execJudgeAsync, firstModel = resolveReviewModel(cfg), escalationModel = resolveEscalationModel(cfg), retryFirst = false, assetRoot, judgeEnv, checklistRecoveryReason, promptExtras, judgeTimeoutMs, }, checklistRoot) {
+    // ONE budget for the whole cascade, not one per judge: an unpinned reviewer runs a first pass AND
+    // an escalation, so a per-judge cap would let the pair run to twice the ceiling it was given.
+    const cascadeDeadline = judgeTimeoutMs === undefined ? null : Date.now() + judgeTimeoutMs;
+    const budgetLeft = () => cascadeDeadline === null
+        ? DEEP_JUDGE_TIMEOUT_MS
+        : Math.max(0, Math.min(DEEP_JUDGE_TIMEOUT_MS, cascadeDeadline - Date.now()));
     const env = withStagedFiles(judgeEnv ?? process.env, reviewer, files);
     const body = agentBody(cwd, cfg, reviewer.name, assetRoot);
     if (body === null)
@@ -88,7 +101,7 @@ async function cascadeVerdict({ reviewer, files }, { cwd, cfg, exec = execJudgeA
         label: `review:${reviewer.name}`,
         args: args(prompt, passModel),
         input,
-        timeout: DEEP_JUDGE_TIMEOUT_MS,
+        timeout: budgetLeft(),
         cwd,
         transcript: false,
         mcpProfile,
@@ -219,7 +232,7 @@ async function cascadeVerdict({ reviewer, files }, { cwd, cfg, exec = execJudgeA
         label: `review:${reviewer.name}:escalate`,
         args: args(escalatePrompt(prompt, first), escalationModel),
         input,
-        timeout: DEEP_JUDGE_TIMEOUT_MS,
+        timeout: budgetLeft(),
         cwd,
         transcript: false,
         mcpProfile,
