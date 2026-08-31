@@ -31,10 +31,8 @@ export const DK_NO_GIT_ENV_HELPER = `__dk_no_git_env() {
  */
 export const DK_NO_GIT_ENV_INLINE = `env ${GIT_ENV_VARS.map((name) => `-u ${name}`).join(' ')}`;
 
-// Review mode has its own positive guard allowlist. Normal commit/ship runs select everything in
-// the generated hook; review runs only ids named by DEVKIT_REVIEW_GUARDS.
 export const DK_GATE_SELECTED_HELPER = `__dk_gate_selected() {
-    [ "\${DEVKIT_RUN_MODE:-}" != "review" ] && return 0
+    case "\${DEVKIT_RUN_MODE:-}" in review|dry-gates) ;; *) return 0 ;; esac
     __dk_review_guards=$(printf '%s' "\${DEVKIT_REVIEW_GUARDS:-}" | sed \
         -e 's/[[:space:]]*,[[:space:]]*/,/g' \
         -e 's/^[[:space:]]*//' \

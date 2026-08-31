@@ -13,13 +13,13 @@ import { GUARD_FRAGMENTS } from './ai-guard-fragments.mjs';
 import { buildCommitTerminalFragment } from './commit-terminal.mjs';
 import { markEnd, markStart } from './husky.mjs';
 import { DK_HOOK_HELPERS, DK_REVIEW_BASELINE_HELPER, selectedFragment, } from './review-fragments.mjs';
-// Commit/ship exits on failure; review remembers it. The OR-test stays safe under `sh -e`.
+// Commit/ship exits on failure; diagnostic modes remember it so every diagnostic runs (safe under `sh -e`).
 const DK_DETERMINISTIC_GATE_HELPER = `dk_review_det_failed=0
 __dk_gate_deterministic() {
     dk_det_rc=0
     __dk_no_git_env "$@" || dk_det_rc=$?
     [ "$dk_det_rc" -eq 0 ] && return 0
-    [ "\${DEVKIT_RUN_MODE:-}" = "review" ] || exit 1
+    case "\${DEVKIT_RUN_MODE:-}" in review|dry-gates) ;; *) exit 1 ;; esac
     dk_review_det_failed=1
 }`;
 export const PACKAGE_BIN_DIR_FRAGMENT = '__dk_package_bin_dir="$(bun pm bin)"';
@@ -38,7 +38,7 @@ __dk_gate_deterministic "$__dk_package_bin_dir/guard-deterministic" --hook "\${D
 # /devkit:deterministic`;
 // Guard run order: the deterministic orchestrator first (one aggregated report), AI gates last so
 // a doomed commit never pays for a judge. Explicit lists — never rely on object-key order.
-const DETERMINISTIC_GUARD_IDS = ['size', 'fanout', 'dup', 'clone'];
+const DETERMINISTIC_GUARD_IDS = ['size', 'fanout', 'dup', 'clone', 'coverage'];
 const AI_GUARD_IDS = ['comments', 'decisions', 'review'];
 // qavis-advisory runs last with its own 0/3 exit contract; routing and pass receipts live in qavis.
 // This wrapper stays fail-open when qavis/the bin is absent, matching the fallow precedent.

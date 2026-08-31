@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Shared by ship-branch.sh (new-ship) and reship.sh (--pr): run the worktree commit so the pre-commit
-# gate output is BOTH streamed to the caller AND captured to a per-branch log, while preserving the
+# gate output is BOTH streamed to the caller AND captured to a gate log, while preserving the
 # commit's real exit code.
 #
 # Why: git routes every hook's stdout+stderr to the commit command's STDERR, interleaved with ship
@@ -41,8 +41,13 @@
 # Usage:  commit_with_gate_capture <worktree> <root> <branch> <title> <body>
 commit_with_gate_capture() {
   local wt="$1" root="$2" br="$3" title="$4" body="$5"
-  local log="$root/.devkit/last-ship-gates-${br//\//-}.log"
-  local progress="$root/.devkit/review-progress-${br//\//-}.json"
+  local ship_dry_gates=0
+  if [ "${DEVKIT_SHIP_MODE:-}" = dry-gates ] && [ "${DEVKIT_SHIP_DRY_GATES:-}" = 1 ]; then
+    ship_dry_gates=1
+  fi
+  local branch_safe="${br//\//-}"
+  local log="$root/.devkit/last-ship-gates-$branch_safe.log"
+  local progress="$root/.devkit/review-progress-$branch_safe.json"
   . "$(dirname "${BASH_SOURCE[0]}")/run-gates-with-capture.sh"
   . "$(dirname "${BASH_SOURCE[0]}")/telemetry.sh"
   . "$(dirname "${BASH_SOURCE[0]}")/prepare-gate-worktree.sh"
@@ -66,10 +71,6 @@ commit_with_gate_capture() {
   # telemetry sink interleaves two repos' runs with no way to separate them (sc-1239).
   export DEVKIT_SHIP_REPO="$repo_name" DEVKIT_SHIP_BRANCH="$br"
 
-  # Per-SHIP gate log the collector reads for the drill-down + fail-classification. The per-branch
-  # $log (in the repo) is OVERWRITTEN by the next ship, so it can't back a historical drill-down; a
-  # durable per-ship copy lives beside the sink and its path (log_path) rides both telemetry lines so
-  # the reader can find it (an in-flight ship's row serves it once the file exists).
   local ship_logs_dir; ship_logs_dir="$(dirname "$DEVKIT_GATE_EVENTS")/logs"
   # Sanitise the id for the FILENAME ONLY — an env-supplied DEVKIT_SHIP_ID must never escape the dir
   # via `/` or `..` (a path traversal into `tee`). The JSON below keeps the ORIGINAL id for correlation.
@@ -78,6 +79,25 @@ commit_with_gate_capture() {
   [ -n "$ship_id_safe" ] || ship_id_safe="ship"
   local ship_log="$ship_logs_dir/${ship_id_safe}.log"
   mkdir -p "$ship_logs_dir" 2>/dev/null || true
+  if [ "$ship_dry_gates" -eq 1 ]; then
+    local dry_log_candidate="" dry_log_attempt=0
+    mkdir -p "$root/.devkit" 2>/dev/null || true
+    while [ "$dry_log_attempt" -lt 10 ]; do
+      dry_log_attempt=$((dry_log_attempt + 1))
+      dry_log_candidate="$root/.devkit/last-ship-gates-$branch_safe-dry-$ship_id_safe-$RANDOM.log"
+      if (set -C; : > "$dry_log_candidate") 2>/dev/null; then
+        log="$dry_log_candidate"
+        break
+      fi
+    done
+    if [ -z "$dry_log_candidate" ] || [ "$log" != "$dry_log_candidate" ]; then
+      echo "ship: could not allocate an isolated dry-gates capture log" >&2
+      return 1
+    fi
+    local dry_log_suffix="${dry_log_candidate##*-}"
+    dry_log_suffix="${dry_log_suffix%.log}"
+    progress="$root/.devkit/review-progress-$branch_safe-dry-$ship_id_safe-$dry_log_suffix.json"
+  fi
 
   # Start the attempt before hook resolution so a fail-closed setup error still has a terminal
   # ship_result row instead of disappearing from telemetry.
@@ -88,15 +108,15 @@ commit_with_gate_capture() {
   dur_start=$(date +%s)
   resumed_json=false; [ "${DEVKIT_SHIP_RESUMED:-0}" = "1" ] && resumed_json=true
   body_bytes=$(printf '%s' "$body" | wc -c | tr -d ' ')
-  printf '{"type":"ship_attempt","ship_id":"%s","repo":"%s","branch":"%s","devkit_version":"%s","mode":"%s","resumed":%s,"body_bytes":%d,"log_path":"%s","ts":"%s"}\n' \
-    "$(devkit_json_escape "$DEVKIT_SHIP_ID")" "$(devkit_json_escape "$repo_name")" "$(devkit_json_escape "$br")" \
-    "$(devkit_json_escape "$DEVKIT_TELEMETRY_VERSION")" \
-    "$(devkit_json_escape "${DEVKIT_SHIP_MODE:-ship}")" "$resumed_json" "$body_bytes" \
-    "$(devkit_json_escape "$ship_log")" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    >> "$DEVKIT_GATE_EVENTS" 2>/dev/null || true
+  if [ "$ship_dry_gates" -eq 0 ]; then
+    printf '{"type":"ship_attempt","ship_id":"%s","repo":"%s","branch":"%s","devkit_version":"%s","mode":"%s","resumed":%s,"body_bytes":%d,"log_path":"%s","ts":"%s"}\n' \
+      "$(devkit_json_escape "$DEVKIT_SHIP_ID")" "$(devkit_json_escape "$repo_name")" "$(devkit_json_escape "$br")" \
+      "$(devkit_json_escape "$DEVKIT_TELEMETRY_VERSION")" \
+      "$(devkit_json_escape "${DEVKIT_SHIP_MODE:-ship}")" "$resumed_json" "$body_bytes" \
+      "$(devkit_json_escape "$ship_log")" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      >> "$DEVKIT_GATE_EVENTS" 2>/dev/null || true
+  fi
 
-  # $log is a REUSED per-branch path ("last-ship-gates-*"), so this attempt starts from empty even
-  # when hook setup fails before run_gates_with_capture gets a chance to own the log.
   mkdir -p "$(dirname "$log")" 2>/dev/null || true
   : > "$log" 2>/dev/null || true
   local rc=0 hook_setup_failed=0 hook_setup_error="" ship_hook_dir=""
@@ -173,13 +193,16 @@ SHIP_HOOK_WRAPPER
   # gate's placeholder, never a blocked ship. The gate keeps the message OUT of every reviewer
   # cache key, so a reship retry with an amended message still reuses cached PASSes.
   local msgf=""
-  msgf=$(mktemp "${TMPDIR:-/tmp}/devkit-ship-msg.XXXXXX" 2>/dev/null) || msgf=""
-  if [ -n "$msgf" ]; then
-    if printf '%s\n\n%s\n' "$title" "$body" > "$msgf" 2>/dev/null; then
-      export DEVKIT_COMMIT_MSG_FILE="$msgf"
-    else
-      rm -f -- "$msgf" 2>/dev/null || true
-      msgf=""
+  unset DEVKIT_COMMIT_MSG_FILE
+  if [ "$ship_dry_gates" -eq 0 ]; then
+    msgf=$(mktemp "${TMPDIR:-/tmp}/devkit-ship-msg.XXXXXX" 2>/dev/null) || msgf=""
+    if [ -n "$msgf" ]; then
+      if printf '%s\n\n%s\n' "$title" "$body" > "$msgf" 2>/dev/null; then
+        export DEVKIT_COMMIT_MSG_FILE="$msgf"
+      else
+        rm -f -- "$msgf" 2>/dev/null || true
+        msgf=""
+      fi
     fi
   fi
 
@@ -190,9 +213,15 @@ SHIP_HOOK_WRAPPER
     # caller-root capture path to the gate so the printed justify command remains usable after the
     # failed empty worktree is reclaimed. The value is evidence location, never an approval token.
     unset DEVKIT_SHIP_GATE_LOG
-    DEVKIT_SHIP_GATE_LOG="$log" DEVKIT_GATE_ARCHIVE_LOG="$ship_log" \
-      run_gates_with_capture "$wt" "$root" ship "$log" "$progress" -- \
-      git -C "$wt" ${hookcfg[@]+"${hookcfg[@]}"} commit -m "$title" -m "$body" || rc=$?
+    if [ "$ship_dry_gates" -eq 1 ]; then
+      DEVKIT_SHIP_GATE_LOG="$log" DEVKIT_GATE_ARCHIVE_LOG="$ship_log" \
+        run_gates_with_capture "$wt" "$root" ship "$log" "$progress" -- \
+        git -C "$wt" ${hookcfg[@]+"${hookcfg[@]}"} hook run pre-commit || rc=$?
+    else
+      DEVKIT_SHIP_GATE_LOG="$log" DEVKIT_GATE_ARCHIVE_LOG="$ship_log" \
+        run_gates_with_capture "$wt" "$root" ship "$log" "$progress" -- \
+        git -C "$wt" ${hookcfg[@]+"${hookcfg[@]}"} commit -m "$title" -m "$body" || rc=$?
+    fi
   fi
 
   local ship_hook_proved=0
@@ -211,7 +240,7 @@ SHIP_HOOK_WRAPPER
   # records the actual failed ship rather than a success that callers will never publish.
   local ship_abort_reported=0 blocked_override=""
   if [ "$rc" -eq 0 ] && [ "$ship_hook_proved" -ne 1 ]; then
-    git -C "$wt" reset --soft HEAD~1 2>/dev/null || true
+    [ "$ship_dry_gates" -eq 1 ] || git -C "$wt" reset --soft HEAD~1 2>/dev/null || true
     {
       echo "⚠️  ship: NO pre-commit execution proof was captured — ship aborted; nothing pushed"
       echo "    Expected marker: $ship_hook_marker. Full log: $log"
@@ -222,7 +251,7 @@ SHIP_HOOK_WRAPPER
   elif [ "$rc" -eq 0 ] && [ -x "$root/.devkit/hooks/pre-commit" ] \
      && grep -q 'devkit-gates: chain start' "$root/.devkit/hooks/pre-commit" \
      && ! grep -q 'devkit-gates: chain start' "$log"; then
-    git -C "$wt" reset --soft HEAD~1 2>/dev/null || true
+    [ "$ship_dry_gates" -eq 1 ] || git -C "$wt" reset --soft HEAD~1 2>/dev/null || true
     {
       echo "⚠️  ship: NO gate output captured — overlay hook chain appears to have no-op'd"
       echo "    (expected .devkit/hooks/pre-commit to run). Ship aborted; nothing pushed. Log: $log"
@@ -284,11 +313,13 @@ SHIP_HOOK_WRAPPER
   elif grep -qE 'guard-review: .* (FAILED|INCONCLUSIVE)' "$log" 2>/dev/null; then blocked_json='"review"'; timed_out=false
   else blocked_json='"unknown"'; timed_out=false
   fi
-  printf '{"type":"ship_result","ship_id":"%s","repo":"%s","branch":"%s","devkit_version":"%s","exit_code":%d,"timed_out":%s,"blocked_gate":%s,"duration_s":%d,"log_path":"%s","ts":"%s"}\n' \
-    "$(devkit_json_escape "$DEVKIT_SHIP_ID")" "$(devkit_json_escape "$repo_name")" "$(devkit_json_escape "$br")" \
-    "$(devkit_json_escape "$DEVKIT_TELEMETRY_VERSION")" "$rc" "$timed_out" "$blocked_json" \
-    "$(( $(date +%s) - dur_start ))" "$(devkit_json_escape "$ship_log")" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    >> "$DEVKIT_GATE_EVENTS" 2>/dev/null || true
+  if [ "$ship_dry_gates" -eq 0 ]; then
+    printf '{"type":"ship_result","ship_id":"%s","repo":"%s","branch":"%s","devkit_version":"%s","exit_code":%d,"timed_out":%s,"blocked_gate":%s,"duration_s":%d,"log_path":"%s","ts":"%s"}\n' \
+      "$(devkit_json_escape "$DEVKIT_SHIP_ID")" "$(devkit_json_escape "$repo_name")" "$(devkit_json_escape "$br")" \
+      "$(devkit_json_escape "$DEVKIT_TELEMETRY_VERSION")" "$rc" "$timed_out" "$blocked_json" \
+      "$(( $(date +%s) - dur_start ))" "$(devkit_json_escape "$ship_log")" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      >> "$DEVKIT_GATE_EVENTS" 2>/dev/null || true
+  fi
 
   if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
     : # run_gates_with_capture already emitted the attributed timeout + retry guidance

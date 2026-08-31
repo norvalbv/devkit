@@ -118,6 +118,12 @@ describe('buildGuardBlock', () => {
     expect(block).not.toContain('$__dk_package_bin_dir/guard-decisions');
   });
 
+  it('emits the deterministic orchestrator when coverage is the only selected guard', () => {
+    const block = buildGuardBlock({ biome: false, guards: ['coverage'] });
+    expect(block).toContain('guard-deterministic');
+    expect(block).toContain('# devkit:review-deterministic-finalizer');
+  });
+
   it('emits NO deterministic line when only AI guards are selected', () => {
     const block = buildGuardBlock({ biome: false, guards: ['decisions'] });
     expect(block).not.toContain('guard-deterministic');

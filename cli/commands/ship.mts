@@ -14,7 +14,7 @@ export const meta = {
   help: `devkit ship — commit <path...> onto a new branch + open a PR without moving HEAD.
 
 Usage:
-  devkit ship <branch> "<title>" [--base <b>] [--body "<text>"] [--body-file <f>] [--link <d>]... [--] <path...>
+  devkit ship <branch> "<title>" [--dry-gates] [--base <b>] [--body "<text>"] [--body-file <f>] [--link <d>]... [--] <path...>
   devkit ship --resume <branch> [--body-file <f>] [--] <extra-path...>
                           bare positional paths (no --) are accepted.
 
@@ -46,6 +46,12 @@ Usage:
                       judge, while an unchanged one replays its cached PASS. Works for both a blocked
                       new ship and a blocked --pr re-push (the record knows which it was). A pushed
                       ship deletes its record; a stale (>6h) or foreign record is refused by name.
+  --dry-gates         Rehearse the exact ship base + explicit path staging in an ephemeral worktree.
+                      Runs the formatter, configured deterministic/structure/extra gates, and the
+                      changed-comment firewall; skips decisions, Qavis, domain/completeness review,
+                      commit, push, and PR creation. The comment firewall may invoke its configured
+                      judge. With --base, refreshes and uses the current origin tip just like ship.
+                      Never leaves a local branch or commit. Cannot be combined with --resume.
   --link <d>          Extra gitignored gate-dep dir to symlink into the worktree (repeatable;
                       the base .husky/_ + node_modules are always linked).
   --no-qavis-publish  Skip the post-push step that hands a passed staged Qavis result to qavis for
@@ -75,7 +81,8 @@ Env:
                       not cause. The gate logs a loud BYPASSED line, records telemetry, and keeps
                       every other deterministic gate active. Prefer exporting it on its own line.
 
-Exits 0 on PR opened (or committed under SHIP_DRY_RUN), 1 on any preflight/git/gh error. A commit
+Exits 0 on PR opened, committed under SHIP_DRY_RUN, or a passing --dry-gates rehearsal; 1 on any
+preflight/git/gh/gate error. A commit
 that lands but fails to push KEEPS the branch; an identical retry verifies and resumes that commit.
 A commit that never lands auto-deletes the empty branch. Every blocked attempt records its
 invocation — retry with \`devkit ship --resume <branch>\` instead of re-typing the command.`,

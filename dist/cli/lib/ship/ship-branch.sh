@@ -17,11 +17,12 @@
 # and is removed on exit. Scope is explicit paths; never auto-detect, because in a
 # shared tree your files are indistinguishable from parallel work.
 #
-# Usage:   ship-branch.sh <branch> "<title>" [--base <b>] [--body-file <f>] [--link <d>]... [--] <path...>
+# Usage:   ship-branch.sh <branch> "<title>" [--dry-gates] [--base <b>] [--body-file <f>] [--link <d>]... [--] <path...>
 #          # PR body via stdin, --body or --body-file; bare positional paths (no --) are accepted.
 # Retry:   ship-branch.sh --resume <branch> [--body-file <f>] [--] <extra-path...>
 #          # replays the invocation recorded by the previous attempt (ship-intent.mts)
 # Preview: SHIP_DRY_RUN=1 ship-branch.sh ...   # local commit, no push/PR
+# Rehearse: ship-branch.sh ... --dry-gates     # exact ship staging + selected pre-commit gates only
 set -euo pipefail
 
 # Hoisted above the orphan preflight below, which runs before anything else this script sources.
@@ -75,6 +76,7 @@ fi
 # that is not a known flag is also a path — preserving the old `<branch> <title> <path...>` form.
 LINK_EXTRA=()      # extra symlink dirs beyond the universal base
 PATHS=()
+DRY_GATES=0        # exact ship staging + deterministic/comment gates; no commit, branch, push or PR
 BODY_SET=0         # --body given? else --body-file, else stdin (back-compat)
 BODY_FILE_SET=0    # --body-file <path>: author the body ONCE in a file; survives every retry
 BASE_FLAG=""       # --base <branch>? else base off this checkout's HEAD/current branch
@@ -91,6 +93,9 @@ while [ "$#" -gt 0 ]; do
       LINK_EXTRA+=("${2:?--link requires a directory}"); shift 2 ;;
     --body) BODY_FLAG="${2:?--body requires text}"; BODY_SET=1; shift 2 ;;
     --body-file) BODY_FILE_FLAG="${2:?--body-file requires a path}"; BODY_FILE_SET=1; shift 2 ;;
+    --dry-gates)
+      [ "$RESUME" -eq 0 ] || { echo "--dry-gates cannot be combined with --resume" >&2; exit 1; }
+      DRY_GATES=1; shift ;;
     --no-qavis-publish) QAVIS_PUBLISH=0; shift ;;
     --resume) echo "--resume must come FIRST: devkit ship --resume <branch> [--] <extra-path...>" >&2; exit 1 ;;
     --) shift; while [ "$#" -gt 0 ]; do PATHS+=("$1"); shift; done; break ;;
@@ -203,18 +208,18 @@ PREFLIGHT_SELF=   # set when the branch's holder is THIS worktree; changes the c
 # so they retain the strict new-branch precondition.
 LOCAL_BRANCH_EXISTS=
 if git show-ref --verify -q "refs/heads/$BR"; then
-  if [ -n "${SHIP_DRY_RUN:-}" ]; then
+  if [ -n "${SHIP_DRY_RUN:-}" ] || [ "$DRY_GATES" -eq 1 ]; then
     echo "branch already exists: $BR" >&2; exit 1
   fi
   LOCAL_BRANCH_EXISTS=1
 fi
-if [ -z "${SHIP_DRY_RUN:-}" ] && ! command -v gh >/dev/null 2>&1; then
+if [ -z "${SHIP_DRY_RUN:-}" ] && [ "$DRY_GATES" -eq 0 ] && ! command -v gh >/dev/null 2>&1; then
   echo "gh not installed (needed to open the PR)" >&2; exit 1
 fi
 # Also reject an existing REMOTE branch — otherwise `push -u` fast-forwards onto it,
 # silently appending this commit to someone else's branch/PR. (Skipped under dry-run:
 # no push happens, and it avoids a network round-trip.)
-if [ -z "${SHIP_DRY_RUN:-}" ]; then
+if [ -z "${SHIP_DRY_RUN:-}" ] && [ "$DRY_GATES" -eq 0 ]; then
   set +e
   # Fully-qualified, NOT a bare `$BR`: a bare pattern tail-matches on path segments, so shipping `x`
   # would read `refs/heads/feat/x` as "this branch already exists" and refuse a legitimate name.
@@ -267,9 +272,10 @@ REPO=$(git remote get-url origin | sed -E 's#^.*github\.com[^:/]*[:/]##; s#\.git
 # Placement: after the resolve-only seam (which promises no network) and before the worktree, the
 # commit and the push. NOT before every side effect — ship_reclaim_orphan_worktrees above may already
 # have reclaimed an abandoned worktree, and it must stay first for the reason given at its call site.
-# Dry runs skip it: they never push, and the fake/unreachable origin they usually carry makes the
-# probe meaningless — same trade-off as the $BR probe above.
-if [ -z "$BASE_FLAG" ] && [ -z "${SHIP_DRY_RUN:-}" ]; then
+# Dry runs and dry-gates rehearsals skip it: they never push, and the fake/unreachable origin they
+# usually carry makes the probe meaningless — same trade-off as the $BR probe above. An explicit
+# --base still fetches origin's current tip below because that changes the content being rehearsed.
+if [ -z "$BASE_FLAG" ] && [ -z "${SHIP_DRY_RUN:-}" ] && [ "$DRY_GATES" -eq 0 ]; then
   set +e
   git ls-remote --exit-code --heads origin "refs/heads/$BASE_REF" >/dev/null 2>&1
   base_check=$?
@@ -353,7 +359,8 @@ STAGED_STATE=$(mktemp "${TMPDIR:-/tmp}/ship-staged.XXXXXX")
 # so an inherited, open-but-idle background-task pipe fails loud instead of blocking forever.
 # Nothing is created yet, so aborting is clean.
 . "$SCRIPT_DIR/read-stdin-body.sh"
-if [ "$BODY_SET" -eq 1 ]; then BODY="$BODY_FLAG"
+if [ "$DRY_GATES" -eq 1 ]; then BODY=""
+elif [ "$BODY_SET" -eq 1 ]; then BODY="$BODY_FLAG"
 elif [ "$BODY_FILE_SET" -eq 1 ]; then
   [ -f "$BODY_FILE_FLAG" ] || { echo "--body-file: no such file: $BODY_FILE_FLAG" >&2; exit 1; }
   # cat + sentinel, never $(<file): command substitution strips EVERY trailing newline, silently
@@ -379,23 +386,28 @@ exec 0</dev/null
 export DEVKIT_SHIP_ID="${DEVKIT_SHIP_ID:-$(uuidgen 2>/dev/null || echo "${BR//\//-}-$$-$(date +%s)")}"
 export DEVKIT_SHIP_REPO="$(devkit_repo_identity "$ROOT")" DEVKIT_SHIP_BRANCH="$BR"
 export DEVKIT_SHIP_RESUMED=$RESUME
-SHIP_INTENT_ARGS=(write --root "$ROOT" --branch "$BR" --mode ship --title "$TITLE")
-[ -z "$BASE_FLAG" ] || SHIP_INTENT_ARGS+=(--base "$BASE_FLAG")
-for d in ${LINK_EXTRA[@]+"${LINK_EXTRA[@]}"}; do SHIP_INTENT_ARGS+=(--link "$d"); done
-[ "$QAVIS_PUBLISH" -eq 1 ] || SHIP_INTENT_ARGS+=(--no-qavis-publish)
-if [ "$RESUME" -eq 1 ]; then
-  SHIP_INTENT_ARGS+=(--resumed --merge-paths --expect-generation "$RESUME_GENERATION")
-  for p in ${RESUME_EXTRA_PATHS[@]+"${RESUME_EXTRA_PATHS[@]}"}; do SHIP_INTENT_ARGS+=(--donate "$p"); done
+SHIP_INTENT_GENERATION=""
+if [ "$DRY_GATES" -eq 0 ]; then
+  SHIP_INTENT_ARGS=(write --root "$ROOT" --branch "$BR" --mode ship --title "$TITLE")
+  [ -z "$BASE_FLAG" ] || SHIP_INTENT_ARGS+=(--base "$BASE_FLAG")
+  for d in ${LINK_EXTRA[@]+"${LINK_EXTRA[@]}"}; do SHIP_INTENT_ARGS+=(--link "$d"); done
+  [ "$QAVIS_PUBLISH" -eq 1 ] || SHIP_INTENT_ARGS+=(--no-qavis-publish)
+  if [ "$RESUME" -eq 1 ]; then
+    SHIP_INTENT_ARGS+=(--resumed --merge-paths --expect-generation "$RESUME_GENERATION")
+    for p in ${RESUME_EXTRA_PATHS[@]+"${RESUME_EXTRA_PATHS[@]}"}; do SHIP_INTENT_ARGS+=(--donate "$p"); done
+  fi
+  # Capture the record's ownership token (write prints a per-attempt random generation): success may delete ONLY the
+  # record this attempt wrote — a concurrent attempt's newer record must survive for ITS --resume.
+  SHIP_INTENT_GENERATION=$(printf '%s' "$BODY" | node "$SHIP_INTENT" "${SHIP_INTENT_ARGS[@]}" -- "${PATHS[@]}") \
+    || { SHIP_INTENT_GENERATION=""; echo "ship: invocation not recorded — the retry needs the full command (non-fatal)" >&2; }
 fi
-# Capture the record's ownership token (write prints a per-attempt random generation): success may delete ONLY the
-# record this attempt wrote — a concurrent attempt's newer record must survive for ITS --resume.
-SHIP_INTENT_GENERATION=$(printf '%s' "$BODY" | node "$SHIP_INTENT" "${SHIP_INTENT_ARGS[@]}" -- "${PATHS[@]}") \
-  || { SHIP_INTENT_GENERATION=""; echo "ship: invocation not recorded — the retry needs the full command (non-fatal)" >&2; }
 # Exported flag (not the token itself) so the SUBPROCESS gate runner's timeout banner can tell a
 # recorded attempt (--resume works) from an unrecorded one (--resume would refuse by name).
 export DEVKIT_SHIP_INTENT_RECORDED=$([ -n "$SHIP_INTENT_GENERATION" ] && echo 1 || echo 0)
 
-SHIP_RUN_MODE=live; [ -z "${SHIP_DRY_RUN:-}" ] || SHIP_RUN_MODE=dry
+SHIP_RUN_MODE=live
+[ -z "${SHIP_DRY_RUN:-}" ] || SHIP_RUN_MODE=dry
+[ "$DRY_GATES" -eq 0 ] || SHIP_RUN_MODE=dry-gates
 KEEP_WT=  # set by a staged-set abort: the clobbered index IS the evidence, so never reclaim it
 RECOVERY_INDEX=
 RECOVERY_PARENT=  # the preserved commit's OWN parent: what its diff and manifest anchor on, since $BASE may have advanced since it was cut
@@ -415,6 +427,15 @@ cleanup() {
   [ -z "$RECOVERY_PATHS_ALL" ] || rm -f "$RECOVERY_PATHS_ALL"
   [ -z "$RECOVERY_PATHS_CALLER" ] || rm -f "$RECOVERY_PATHS_CALLER"
   [ -z "$RECOVERY_PATHS_SCOPED" ] || rm -f "$RECOVERY_PATHS_SCOPED"
+  if [ "$DRY_GATES" -eq 1 ]; then
+    if ! git -C "$WT" rev-parse --git-dir >/dev/null 2>&1; then return; fi
+    if ! git worktree remove --force --force "$WT" 2>/dev/null; then
+      echo "ship: dry-gates could not remove its ephemeral worktree: $WT" >&2
+      trap - EXIT
+      exit 1
+    fi
+    return
+  fi
   # A staged-set invariant fired. Removing the worktree would destroy the only copy of the bad index
   # and leave nothing to diagnose from, so hand it to the operator instead (worktree AND branch).
   if [ -n "$KEEP_WT" ]; then
@@ -686,9 +707,14 @@ if [ -n "$LOCAL_BRANCH_EXISTS" ]; then
   # is registered but unattributable.
   ship_run_record_begin "$WT" "$BR" "$RECOVERY_COMMIT" 0 "$SHIP_RUN_MODE"
 else
-  BRANCH_CREATED=1
-  git worktree add -q -b "$BR" "$WT" "$BASE" >&2
-  ship_run_record_begin "$WT" "$BR" "$BASE" 1 "$SHIP_RUN_MODE"
+  if [ "$DRY_GATES" -eq 1 ]; then
+    git worktree add -q --detach "$WT" "$BASE" >&2
+    ship_run_record_begin "$WT" "$BR" "$BASE" 0 "$SHIP_RUN_MODE"
+  else
+    BRANCH_CREATED=1
+    git worktree add -q -b "$BR" "$WT" "$BASE" >&2
+    ship_run_record_begin "$WT" "$BR" "$BASE" 1 "$SHIP_RUN_MODE"
+  fi
 
   # Tracked edits (modify + delete, binary-safe) -> worktree index.
   git -C "$ROOT" diff "$BASE" --binary -- "${PATHS[@]}" > "$PATCH"
@@ -738,15 +764,27 @@ else
   . "$(dirname "${BASH_SOURCE[0]}")/link-gate-configs.sh"
   link_untracked_gate_configs "$WT" "$ROOT"
 
-# Commit inside the worktree (hook gates run HERE). Capture + surface the gate output so the shipping
-# agent reliably sees the verdicts — git buries them on the commit's stderr. See commit-with-gate-capture.sh.
+# Commit inside the worktree (or invoke its pre-commit hook for --dry-gates). Capture + surface the
+# gate output so the shipping agent reliably sees the verdicts — git buries them on stderr. See
+# commit-with-gate-capture.sh.
   . "$(dirname "${BASH_SOURCE[0]}")/commit-with-gate-capture.sh"
 # The commit the worktree was cut from — lets in-chain gates (fallow) diff against IT, not their own
 # main-autodetect. Unconditional (not just under --base): even the default case is more precise than
 # a gate auto-detecting main, for any branch that isn't a fresh cut off main (DK-5).
   export DEVKIT_SHIP_BASE_SHA="$BASE"
-  export DEVKIT_SHIP_MODE=ship   # tags the ship_attempt telemetry (new-ship vs reship retry)
-  export DEVKIT_RUN_MODE=ship    # never inherit a caller's review allowlist into a real ship
+  if [ "$DRY_GATES" -eq 1 ]; then
+    export DEVKIT_SHIP_MODE=dry-gates
+    export DEVKIT_RUN_MODE=dry-gates
+    export DEVKIT_REVIEW_GUARDS=comments
+    export DEVKIT_SHIP_DRY_GATES=1
+    echo "🧪 Ship dry gates: exact base/path staging; running formatter, configured deterministic/structure/extra gates, and comment firewall." >&2
+    echo "   Skipping decision, Qavis, domain reviewer, completeness, commit, push, and PR creation." >&2
+    echo "   The comment firewall may still invoke its configured judge for a changed comment." >&2
+  else
+    export DEVKIT_SHIP_MODE=ship   # tags the ship_attempt telemetry (new-ship vs reship retry)
+    export DEVKIT_RUN_MODE=ship    # never inherit a caller's review allowlist into a real ship
+    unset DEVKIT_SHIP_DRY_GATES
+  fi
 # Preflight: nothing since staging is allowed to have touched the index. Cheap, and it fails BEFORE
 # the operator pays for a multi-minute gate chain.
   ship_assert_staged_unchanged "$WT" "$STAGED_STATE" || { ship_run_keep "staged set changed before the commit"; exit 1; }
@@ -788,6 +826,11 @@ else
   GATE_SIGNAL_DEFER_EXIT=
   [ "$REQUESTED_SIGNAL_STATUS" -eq 0 ] || exit "$REQUESTED_SIGNAL_STATUS"
   [ "$COMMIT_STATUS" -eq 0 ] || exit "$COMMIT_STATUS"
+fi
+
+if [ "$DRY_GATES" -eq 1 ]; then
+  echo "✓ Ship dry gates passed; no commit, branch, push, or PR was kept." >&2
+  exit 0
 fi
 
 if [ -n "${SHIP_DRY_RUN:-}" ]; then
