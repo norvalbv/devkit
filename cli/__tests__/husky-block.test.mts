@@ -138,6 +138,13 @@ describe('buildGuardBlock', () => {
     expect(block).toContain('# devkit:review-deterministic-finalizer');
   });
 
+  it('emits the deterministic orchestrator when anti-slop is the only selected policy', () => {
+    const block = buildGuardBlock({ biome: false, guards: [], antiSlop: true });
+    expect(block).toContain('guard-deterministic');
+    expect(block).toContain('# devkit:review-deterministic-finalizer');
+    expect(block).not.toContain('guard-review');
+  });
+
   it('emits NO deterministic line when only AI guards are selected', () => {
     const block = buildGuardBlock({ biome: false, guards: ['decisions'] });
     expect(block).not.toContain('guard-deterministic');
