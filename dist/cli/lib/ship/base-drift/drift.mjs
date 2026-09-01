@@ -7,7 +7,10 @@ import { gitRunner, line, ok } from './git-run.mjs';
 import { resolveBase } from './resolve-base.mjs';
 function snapshotPath(commonDir, base, head, tip, tmp) {
     const { dir } = markerPathsFor(commonDir, base, tmp);
-    const key = createHash('sha256').update(`${commonDir}\0${base}\0${head}\0${tip}`).digest('hex').slice(0, 16);
+    const key = createHash('sha256')
+        .update(`${commonDir}\0${base}\0${head}\0${tip}`)
+        .digest('hex')
+        .slice(0, 16);
     return join(dir, `${key}.snapshot.json`);
 }
 function readSnapshot(path) {
