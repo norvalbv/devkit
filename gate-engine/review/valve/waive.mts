@@ -54,7 +54,18 @@ const PLACEHOLDER_RATIONALES = new Set([
 ]);
 
 const USAGE =
-  'Usage: guard-review waive <reviewer>[:<lens>] <itemId> "<rationale>" | guard-review waive --list';
+  'Usage: guard-review waive <reviewer>[:<lens>] <itemId> [--base <sha>] "<rationale>" | ' +
+  'guard-review waive --list';
+
+/** The base is copied from what the gate printed, never resolved here: this runs in the agent's own
+ * worktree, so a locally-derived base would record a falsehood (sc-2480). */
+function takeBaseFlag(rest: string[]) {
+  const i = rest.indexOf('--base');
+  if (i === -1) return { rest, baseSha: null, bad: false };
+  const value = rest[i + 1]?.trim() ?? '';
+  if (!/^[0-9a-f]{7,40}$/.test(value)) return { rest, baseSha: null, bad: true };
+  return { rest: [...rest.slice(0, i), ...rest.slice(i + 2)], baseSha: value, bad: false };
+}
 
 /** Best-effort git identity for the audit trail: user.name, then user.email, then $USER — never
  * throws. `run` is injectable so tests never depend on the executing machine's real git identity. */
@@ -104,7 +115,8 @@ function listWaives(cwd: string): number {
   for (const [fp, e] of entries) {
     const who = e.author ?? (typeof e.by === 'string' ? e.by : 'unknown');
     console.log(
-      `[${fp}] ${e.reviewer ?? '?'}:${e.lens ?? '(finding)'} — by ${who}${e.at ? ` at ${e.at}` : ''}`,
+      `[${fp}] ${e.reviewer ?? '?'}:${e.lens ?? '(finding)'} — by ${who}${e.at ? ` at ${e.at}` : ''}` +
+        (e.baseSha ? ` · judged against ${e.baseSha.slice(0, 12)}` : ' · base unrecorded'),
     );
     console.log(`    ${e.rationale}`);
   }
@@ -120,7 +132,12 @@ export function runWaive(
   resolveAuthor: (cwd: string) => string = resolveWaiveAuthor,
 ): number {
   if (rest[0] === '--list') return listWaives(cwd);
-  const [target, itemId, ...rationaleParts] = rest;
+  const flag = takeBaseFlag(rest);
+  if (flag.bad) {
+    console.error('guard-review: waive — --base needs the base sha the FAIL output printed');
+    return 2;
+  }
+  const [target, itemId, ...rationaleParts] = flag.rest;
   const rationale = rationaleParts.join(' ').trim();
   if (!target || !itemId || !rationale) {
     console.error(USAGE);
@@ -172,9 +189,13 @@ export function runWaive(
       at: new Date().toISOString(),
       by: 'cli',
     };
+    if (flag.baseSha) entry.baseSha = flag.baseSha;
     store[itemId] = entry;
     persist(cwd, store);
-    return prior?.rationale !== rationale ? entry.at : null;
+    // A changed BASE is a new fact about an existing waiver, not a no-op: without an event the
+    // ledger keeps only the first tree the finding was ever judged against (sc-2480).
+    const changed = prior?.rationale !== rationale || prior?.baseSha !== entry.baseSha;
+    return changed ? entry.at : null;
   });
   if (recordedAt)
     emitGateEvent({
@@ -185,6 +206,7 @@ export function runWaive(
       rationale: rationale.slice(0, WAIVER_RATIONALE_EVENT_CAP),
       recorded_at: recordedAt,
       by: 'cli',
+      base_sha: flag.baseSha,
     });
   console.error(`guard-review: waived ${reviewer}:${lens} [${itemId}] — ${rationale}`);
   return 0;

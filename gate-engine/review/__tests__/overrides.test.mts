@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,6 +10,7 @@ import {
   loadOverrides,
   reconcile,
 } from '../overrides.mts';
+import { resetReviewBaseContext } from '../evidence/base-context.mts';
 
 const dirs: string[] = [];
 const repo = () => {
@@ -256,5 +258,97 @@ describe('fingerprint across a sentry-additive restage', () => {
     expect(fingerprint('correctness-reviewer', 'concurrency-races', d1)).not.toBe(
       fingerprint('correctness-reviewer', 'concurrency-races', d3),
     );
+  });
+});
+
+describe('waiver base provenance (sc-2480)', () => {
+  const gitIn = (cwd: string, args: string[]): string =>
+    execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
+  const commitIn = (cwd: string, message: string): string => {
+    writeFileSync(join(cwd, 'f.ts'), `export const n = "${message}";\n`);
+    gitIn(cwd, ['add', '-A']);
+    gitIn(cwd, [
+      '-c',
+      'user.email=devkit@example.test',
+      '-c',
+      'user.name=Devkit Test',
+      'commit',
+      '-qm',
+      message,
+    ]);
+    return gitIn(cwd, ['rev-parse', 'HEAD']);
+  };
+  const DIFF = 'diff --git a/f.ts b/f.ts';
+  const LENS = 'concurrency-races';
+
+  afterEach(() => resetReviewBaseContext());
+
+  it('stamps the env write-through with the tree the finding was judged against', () => {
+    const cwd = repo();
+    gitIn(cwd, ['init', '-q']);
+    const head = commitIn(cwd, 'one');
+    const fp = fingerprint('correctness-reviewer', LENS, DIFF);
+    reconcile(cwd, 'correctness-reviewer', [LENS], DIFF, NOW, {
+      [`OVERRIDE_${fp}_RATIONALE`]: 'the shard lock the fixture omits makes this safe',
+    });
+    expect(loadOverrides(cwd)[fp].baseSha).toBe(head);
+  });
+
+  it('does not carry a STALE base forward when the same fingerprint is re-waived', () => {
+    const cwd = repo();
+    gitIn(cwd, ['init', '-q']);
+    const first = commitIn(cwd, 'one');
+    const fp = fingerprint('correctness-reviewer', LENS, DIFF);
+    const env = (rationale: string) => ({ [`OVERRIDE_${fp}_RATIONALE`]: rationale });
+    reconcile(cwd, 'correctness-reviewer', [LENS], DIFF, NOW, env('first recorded rationale here'));
+    resetReviewBaseContext();
+    const second = commitIn(cwd, 'two');
+    expect(second).not.toBe(first);
+    reconcile(
+      cwd,
+      'correctness-reviewer',
+      [LENS],
+      DIFF,
+      NOW,
+      env('a different rationale entirely'),
+    );
+    expect(loadOverrides(cwd)[fp].baseSha).toBe(second);
+  });
+
+  it('names the base in the copyable waive command', () => {
+    const note = blockingNote(
+      'correctness-reviewer',
+      [{ lens: LENS, fp: 'a1b2c3d4e5f6' }],
+      'a'.repeat(40),
+    );
+    expect(note).toContain('--base aaaaaaaaaaaa');
+    expect(
+      blockingNote('correctness-reviewer', [{ lens: LENS, fp: 'a1b2c3d4e5f6' }]),
+    ).not.toContain('--base');
+  });
+});
+
+describe('waiver base refresh when only the base moved (reviewer finding)', () => {
+  const gitIn = (cwd: string, args: string[]): string =>
+    execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
+  const commitIn = (cwd: string, message: string): string => {
+    writeFileSync(join(cwd, 'f.ts'), `export const n = "${message}";\n`);
+    gitIn(cwd, ['add', '-A']);
+    gitIn(cwd, ['-c', 'user.email=d@e.test', '-c', 'user.name=D', 'commit', '-qm', message]);
+    return gitIn(cwd, ['rev-parse', 'HEAD']);
+  };
+  afterEach(() => resetReviewBaseContext());
+
+  it('refreshes the recorded base when the rationale is UNCHANGED but the tree moved', () => {
+    const cwd = repo();
+    gitIn(cwd, ['init', '-q']);
+    commitIn(cwd, 'one');
+    const fp = fingerprint('correctness-reviewer', 'races', 'DIFF');
+    const env = { [`OVERRIDE_${fp}_RATIONALE`]: 'one stable rationale, reused verbatim' };
+    reconcile(cwd, 'correctness-reviewer', ['races'], 'DIFF', NOW, env);
+    resetReviewBaseContext();
+    const second = commitIn(cwd, 'two');
+    reconcile(cwd, 'correctness-reviewer', ['races'], 'DIFF', NOW, env);
+    expect(loadOverrides(cwd)[fp].baseSha).toBe(second);
   });
 });

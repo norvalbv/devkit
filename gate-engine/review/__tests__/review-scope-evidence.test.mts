@@ -6,15 +6,24 @@ import { diffLineCounts } from '../evidence/scope.mts';
 import { runReviewGate } from '../run-review.mts';
 import { cleanupReviewFixtures, consumerRepo, passWithArtifact } from './run-review-fixtures.mts';
 
-const envKeys = ['DEVKIT_GATE_EVENTS', 'DEVKIT_SHIP_ID'] as const;
+// The base-provenance vars belong here too: these tests run INSIDE `devkit ship`, which exports
+// them, and an inherited one relabels the fixture's base and rewrites what a row records.
+const envKeys = [
+  'DEVKIT_GATE_EVENTS',
+  'DEVKIT_SHIP_ID',
+  'DEVKIT_SHIP_BASE_SHA',
+  'DEVKIT_SHIP_SOURCE_HEAD',
+  'DEVKIT_REVIEW_MERGE_BASE',
+] as const;
 const savedEnv: Partial<Record<(typeof envKeys)[number], string | undefined>> = {};
+let err: ReturnType<typeof vi.spyOn>;
 
 beforeEach(() => {
   for (const key of envKeys) {
     savedEnv[key] = process.env[key];
     delete process.env[key];
   }
-  vi.spyOn(console, 'error').mockImplementation(() => {});
+  err = vi.spyOn(console, 'error').mockImplementation(() => {});
 });
 
 afterEach(() => {
@@ -48,6 +57,16 @@ describe('review_scope evidence-cap accounting', () => {
     // A staged-new-files fixture is pure additions: real line counts ride every scope row.
     expect(backend.insertions).toBeGreaterThan(0);
     expect(backend.deletions).toBe(0);
+  });
+
+  // sc-2480: the row already says WHICH bytes were judged; without the base it cannot say what
+  // they were judged against, so a finding is not re-resolvable from the sink afterwards.
+  it('records the base the diff was computed against', async () => {
+    const repo = consumerRepo({ backend: true });
+    const head = execSync('git rev-parse HEAD', { cwd: repo, encoding: 'utf8' }).trim();
+    const { scope } = await scopeRows(repo, 'ship-scope-base-sha');
+    expect(scope.length).toBeGreaterThan(0);
+    for (const row of scope) expect(row.base_sha).toBe(head);
   });
 
   it('says how much of a byte-heavy diff the judge could actually see', async () => {
@@ -122,5 +141,18 @@ describe('diffLineCounts', () => {
 
   it('an empty diff counts zero both ways', () => {
     expect(diffLineCounts('')).toEqual({ insertions: 0, deletions: 0 });
+  });
+});
+
+describe('the reviewed base is stated on a passing run', () => {
+  it('prints it once, naming this tree HEAD as the local base', async () => {
+    const repo = consumerRepo({ backend: true });
+    const head = execSync('git rev-parse HEAD', { cwd: repo, encoding: 'utf8' }).trim();
+    await runReviewGate(repo, { exec: passWithArtifact(repo) });
+    const printed = err.mock.calls.map((c) => String(c[0]));
+    const provenance = printed.filter((l) => l.includes('reviewed against'));
+    expect(provenance).toHaveLength(1);
+    expect(provenance[0]).toContain(head.slice(0, 12));
+    expect(provenance[0]).toContain('local HEAD');
   });
 });
