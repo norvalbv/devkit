@@ -122,6 +122,12 @@ function seedReceipt(): void {
  */
 function run(opts: { errexit?: boolean; path?: string; helpTimeoutS?: string } = {}) {
   const prelude = opts.errexit === false ? '' : 'set -euo pipefail; ';
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    PATH: opts.path ?? `${bin}:${process.env.PATH}`,
+    QAVIS_HELPER: helper,
+  };
+  if (opts.helpTimeoutS) env.QAVIS_HELP_TIMEOUT_S = opts.helpTimeoutS;
   return spawnSync(
     '/bin/bash',
     [
@@ -133,15 +139,7 @@ function run(opts: { errexit?: boolean; path?: string; helpTimeoutS?: string } =
       'base',
       'head',
     ],
-    {
-      encoding: 'utf8',
-      env: {
-        ...process.env,
-        PATH: opts.path ?? `${bin}:${process.env.PATH}`,
-        QAVIS_HELPER: helper,
-        ...(opts.helpTimeoutS ? { QAVIS_HELP_TIMEOUT_S: opts.helpTimeoutS } : {}),
-      },
-    },
+    { encoding: 'utf8', env },
   );
 }
 
