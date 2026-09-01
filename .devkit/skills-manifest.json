@@ -1,8 +1,8 @@
 {
   "schemaVersion": 2,
   "kind": "skills",
-  "devkitRef": "v0.59.0",
-  "generatedAt": "2026-08-31T15:23:28.109Z",
+  "devkitRef": "v0.60.0",
+  "generatedAt": "2026-09-01T14:12:07.317Z",
   "files": {
     "_devkit/checklist-store.mjs": "c8a6a01fe75bd570953ccc88e3b99b8ac365bb249c4b1db2ce0c32a589c52193",
     "_devkit/review-roots.d.mts": "384d95945ccf04f994d805e78a5507835321ee5bcbd46acbf216c77385238c9e",
