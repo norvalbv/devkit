@@ -531,7 +531,34 @@ else
   GIT_PATHS=("${PATHS[@]}")
 fi
 
+# Where the staging patch is ANCHORED, and which briefed paths cannot be three-way merged. See
+# patch-anchor.sh for the full reasoning; the short version is that --base re-resolves BASE to
+# origin's current tip while the caller's tree was cut at an older ancestor, so a BASE-anchored diff
+# stages a REVERT of everything the base landed in between (sc-2451).
+#
+# --from-branch is skipped outright: it diffs a pinned COMMIT PAIR whose ancestry was already proven
+# above, so its merge base IS BASE and the classification would be pure cost. Everywhere else
+# ship_patch_base echoes BASE unchanged unless the base genuinely moved under this checkout, which
+# keeps the default arm and every in-sync ship byte-identical to before.
+. "$SCRIPT_DIR/patch-anchor.sh"
+WHOLE_POSITIVES=()
+WHOLE_SELECTORS=()
+WHOLE_EXCLUDES=()
+PATCH_BASE=$BASE
+if [ "$FROM_BRANCH" -eq 0 ]; then
+  PATCH_BASE=$(ship_patch_base "$ROOT" "$BASE")
+  if [ "$PATCH_BASE" != "$BASE" ]; then
+    ship_classify_whole_file "$ROOT" "$BASE" "$PATCH_BASE" -- "${GIT_PATHS[@]}"
+    echo "ship: origin/$BASE_REF moved to ${BASE:0:7} since this checkout forked at ${PATCH_BASE:0:7} — staging is anchored at the fork point and three-way merged." >&2
+    ship_warn_whole_file_drift "$ROOT" "$BASE" "$PATCH_BASE" "$BASE_REF"
+  fi
+fi
+
 # Preview the raw-line ratchet against the exact base baseline BEFORE creating the worktree.
+# NOTE: this measures the CALLER's files against BASE, while a fork-point-anchored ship commits the
+# three-way MERGE of those files with the base — so when PATCH_BASE differs the preview can UNDER-count
+# a file the base grew. It fails CLOSED (the authoritative in-worktree ratchet still runs and still
+# blocks), and it is already --exit-zero advisory, so the imprecision is accepted rather than chased.
 . "$SCRIPT_DIR/prepare-gate-worktree.sh"
 if [ "$FROM_BRANCH" -eq 0 ] || [ -z "$LOCAL_BRANCH_EXISTS" ]; then
   ship_size_preflight "$ROOT" "$BASE" "${PATHS[@]}"
@@ -544,18 +571,30 @@ fi
 # being our own gate symlinks), whereupon the EXIT trap force-deletes the branch it just made and
 # prints a bare "Deleted branch … (was …)" on stdout. The operator pays a multi-minute gate run for a
 # cryptic failure. reship.sh's "no changes vs origin/$BR" guard already covers the re-push flow; here
-# is its new-ship twin, hoisted ahead of the worktree so nothing is created to churn. Mirrors the two
-# staging commands exactly (same BASE, same enumerations, same pathspec) so the guard cannot
-# disagree with what staging will do. A git ERROR (non-zero but not "differences found") reads as
+# is its new-ship twin, hoisted ahead of the worktree so nothing is created to churn. Mirrors ALL
+# staging commands exactly — the fork-point-anchored three-way arm over the text pathspec, the
+# BASE-anchored whole-file arm over its carve-out, and both enumerations — so the guard cannot
+# disagree with what staging will do. It is still not SUFFICIENT once the anchorings differ: a
+# fork-point patch can be non-empty here and yet collapse to an empty index when the base has since
+# landed byte-identical content, which is why the post-staging emptiness check below exists as its
+# second half. A git ERROR (non-zero but not "differences found") reads as
 # "has changes" and falls through to the old behaviour — fail toward the status quo, never toward a
 # false abort. Says "no changes in" rather than "identical to": a misspelled path also lands here
 # (`git diff --quiet -- nonexistent` exits 0), and the wording stays true for it.
 if [ -z "$LOCAL_BRANCH_EXISTS" ] &&
-   git -C "$ROOT" diff --quiet "$BASE" ${SOURCE_HEAD:+"$SOURCE_HEAD"} -- "${GIT_PATHS[@]}" &&
+   git -C "$ROOT" diff --quiet "$PATCH_BASE" ${SOURCE_HEAD:+"$SOURCE_HEAD"} -- \
+     "${GIT_PATHS[@]}" ${WHOLE_EXCLUDES[@]+"${WHOLE_EXCLUDES[@]}"} &&
+   { [ "${#WHOLE_SELECTORS[@]}" -eq 0 ] ||
+     git -C "$ROOT" diff --quiet "$BASE" ${SOURCE_HEAD:+"$SOURCE_HEAD"} -- "${WHOLE_SELECTORS[@]}"; } &&
    [ -z "$(git -C "$ROOT" ls-files -o --exclude-standard -- "${GIT_PATHS[@]}")" ] &&
    [ -z "$(git -C "$ROOT" ls-files -o -i --exclude-standard -- "${GIT_PATHS[@]}")" ]; then
   echo "nothing to commit: no changes in ${PATHS[*]} vs $BASE_REF (${BASE:0:7})" >&2
-  if [ -n "$BASE_FLAG" ]; then
+  if [ -n "$BASE_FLAG" ] && [ "$PATCH_BASE" != "$BASE" ]; then
+    # "identical on origin/<base>" would be FALSE here: what was compared is the FORK POINT, because
+    # that is what staging compares. Saying otherwise sends an operator whose --base is entirely
+    # correct off to inspect a base state ship never looked at.
+    echo "these paths are unchanged since this checkout forked from origin/$BASE_REF at ${PATCH_BASE:0:7} (origin/$BASE_REF has since moved to ${BASE:0:7}) — wrong --base, or a misspelled path?" >&2
+  elif [ -n "$BASE_FLAG" ]; then
     # --base already answers "your work is committed elsewhere" — the remaining causes are a base that
     # already has this content, or a typo. Never re-suggest checking out: not doing so is the point.
     echo "these paths are already identical on origin/$BASE_REF — wrong --base, or a misspelled path?" >&2
@@ -652,6 +691,11 @@ DIST_INTEGRITY="$SCRIPT_DIR/dist-integrity.mts"
 [ -f "$DIST_INTEGRITY" ] || DIST_INTEGRITY="$SCRIPT_DIR/dist-integrity.mjs"
 
 PATCH=$(mktemp "${TMPDIR:-/tmp}/ship.XXXXXX")
+# Captured stderr of the three-way apply. `--3way` narrates "Applied patch to 'x' cleanly." for every
+# path it had to merge — routine once the fork-point anchoring engages — so its stderr is held back
+# and only surfaced on failure, where git has already named each offending path better than a
+# reconstruction could.
+APPLY_ERR=$(mktemp "${TMPDIR:-/tmp}/ship-apply-err.XXXXXX")
 STAGED_STATE=$(mktemp "${TMPDIR:-/tmp}/ship-staged.XXXXXX")
 SHIP_RUN_MODE=live
 [ -z "${SHIP_DRY_RUN:-}" ] || SHIP_RUN_MODE=dry
@@ -672,7 +716,7 @@ RECOVERY_GATE_ADDS_REF="refs/devkit/ship-gate-adds/$BR"
 GATE_ADDS_FILE=$(mktemp "${TMPDIR:-/tmp}/ship-gate-adds.XXXXXX")
 BRANCH_CREATED= # only this invocation's branch may be auto-deleted on an empty/failed commit
 cleanup() {
-  rm -f "$PATCH" "$STAGED_STATE" "$GATE_ADDS_FILE"
+  rm -f "$PATCH" "$APPLY_ERR" "$STAGED_STATE" "$GATE_ADDS_FILE"
   [ -z "$RECOVERY_INDEX" ] || rm -f "$RECOVERY_INDEX"
   [ -z "$RECOVERY_PATHS_ALL" ] || rm -f "$RECOVERY_PATHS_ALL"
   [ -z "$RECOVERY_PATHS_CALLER" ] || rm -f "$RECOVERY_PATHS_CALLER"
@@ -956,6 +1000,14 @@ if [ -n "$LOCAL_BRANCH_EXISTS" ]; then
       fi
       RECOVERY_HINTS+=("differing paths ($RECOVERY_DRIFT_N): $RECOVERY_DRIFT_LIST")
       RECOVERY_HINTS+=("a pre-commit formatter rewrites and re-stages inside the ship worktree, so its commit can differ from your tree — see it with: git diff $BR -- <path>")
+      # The second reason a correct commit legitimately differs from $ROOT, and the one this resume
+      # check cannot distinguish: when the base moved under this checkout, the preserved commit holds
+      # a three-way MERGE of the caller's edits with the base, while $ROOT holds the caller's raw
+      # bytes. The refusal is fail-closed and stays — re-deriving the merge here would mean rebuilding
+      # the recovery tree through the same staging path — but it must not read as unexplained drift.
+      if [ "$PATCH_BASE" != "$BASE" ]; then
+        RECOVERY_HINTS+=("origin/$BASE_REF moved since this checkout forked (${PATCH_BASE:0:7} -> ${BASE:0:7}), so the preserved commit carries a three-way MERGE of your edits with the base — it is EXPECTED to differ from your raw files; compare with: git diff $BR -- <path>")
+      fi
     fi
   fi
 
@@ -1002,17 +1054,118 @@ else
   record_ship_intent
 
   # Tracked edits (modify + delete, binary-safe) -> worktree index. Branch mode reads only the
-  # pinned commit pair; explicit mode keeps the historical BASE-to-working-tree behavior.
-  git -C "$ROOT" diff "$BASE" ${SOURCE_HEAD:+"$SOURCE_HEAD"} --binary -- "${GIT_PATHS[@]}" > "$PATCH"
-  [ -s "$PATCH" ] && git -C "$WT" apply --index "$PATCH"
+  # pinned commit pair; explicit mode keeps the historical BASE-to-working-tree behavior whenever the
+  # base has not moved under this checkout, and anchors at the fork point when it has.
+  if [ "$PATCH_BASE" = "$BASE" ]; then
+    git -C "$ROOT" diff "$BASE" ${SOURCE_HEAD:+"$SOURCE_HEAD"} --binary -- "${GIT_PATHS[@]}" > "$PATCH"
+    if [ -s "$PATCH" ]; then git -C "$WT" apply --index "$PATCH"; fi
+  else
+    # WHOLE-FILE ARM FIRST. It is unconditional, so running it second could overwrite a three-way
+    # merge result if a path ever landed in both sets. Every classified path goes through it, and it
+    # decides each one from a single content read — see ship_stage_whole_file for why a probe-then-diff
+    # pair is unsafe against the shared checkout this reads.
+    if [ "${#WHOLE_POSITIVES[@]}" -gt 0 ]; then
+      ship_stage_whole_file "$ROOT" "$WT" "$PATCH_BASE" "${WHOLE_POSITIVES[@]}"
+    fi
+
+    # TEXT ARM. The three-way set is expressed by SUBTRACTION from the caller's own pathspec rather
+    # than as a rebuilt file list: the positive side then cannot degenerate to "all paths", and a path
+    # the classification enumeration missed still reaches this arm — failing toward including the
+    # caller's work rather than dropping it. An all-carve-out brief simply yields an empty patch.
+    git -C "$ROOT" diff "$PATCH_BASE" --binary -- \
+      "${GIT_PATHS[@]}" ${WHOLE_EXCLUDES[@]+"${WHOLE_EXCLUDES[@]}"} > "$PATCH"
+    if [ -s "$PATCH" ] && ! git -C "$WT" apply --index --3way "$PATCH" 2> "$APPLY_ERR"; then
+      # `git apply` is ATOMIC: the structural failure below stages nothing at all, and the conflict
+      # failure leaves stages 1/2/3 that make ship_record_staged_state's write-tree fatal 128. Either
+      # way there is nothing to salvage and nothing to gate, so abort HERE — before the snapshot, and
+      # long before the multi-minute gate chain the operator would otherwise pay for.
+      cat "$APPLY_ERR" >&2
+
+      # (a) Same-region overlap. UNMERGED index entries are the unambiguous, locale-independent
+      # marker: `git apply --3way` writes stages 1/2/3 exactly when its merge produced conflict hunks.
+      # `ls-files -u` names precisely the paths that failed, which is narrower and more actionable
+      # than the base-drift overlap set (every path that moved, merged or not).
+      APPLY_CONFLICTS=$(git -C "$WT" diff --name-only --diff-filter=U 2>/dev/null || true)
+      if [ -n "$APPLY_CONFLICTS" ]; then
+        echo "ship: origin/$BASE_REF and your working tree changed the same region of:" >&2
+        while IFS= read -r p; do [ -n "$p" ] && printf '  %q\n' "$p" >&2; done <<< "$APPLY_CONFLICTS"
+        echo "  ship cannot resolve this for you — the merge has to happen where you can see both sides." >&2
+      fi
+
+      # (b) Structural: the base DELETED or RETYPED a briefed path out from under the patch. Git
+      # reports this as "does not exist in index", then falls back to direct application and fails the
+      # whole patch WITHOUT leaving any unmerged entry — so (a) would name nothing. That string is
+      # translatable, so the condition is recomputed from the trees instead. --no-renames turns a
+      # base-side rename into the D+A pair this filter sees; T catches file->symlink and
+      # file->directory transitions, which break application the same way.
+      # Intersected with what the CALLER actually changed. The base-side D/T set alone also contains
+      # paths the caller never touched — the base simply deleted them — and naming those would tell an
+      # operator their edits target a file they never edited, sending them to inspect the wrong path
+      # while the real conflict goes unmentioned.
+      APPLY_VANISHED=
+      while IFS= read -r p; do
+        [ -n "$p" ] || continue
+        git -C "$ROOT" diff --quiet "$PATCH_BASE" -- ":(top,literal)$p" 2>/dev/null && continue
+        APPLY_VANISHED="${APPLY_VANISHED}${p}"$'\n'
+      done <<< "$(git -C "$ROOT" diff --name-only --no-renames --diff-filter=DT \
+        "$PATCH_BASE" "$BASE" -- "${GIT_PATHS[@]}" ${WHOLE_EXCLUDES[@]+"${WHOLE_EXCLUDES[@]}"} 2>/dev/null || true)"
+      if [ -n "$APPLY_VANISHED" ]; then
+        echo "ship: origin/$BASE_REF has deleted or retyped briefed path(s) since ${PATCH_BASE:0:7}:" >&2
+        while IFS= read -r p; do [ -n "$p" ] && printf '  %q\n' "$p" >&2; done <<< "$APPLY_VANISHED"
+        echo "  your edits target a file the base no longer has — decide whether the deletion or your" >&2
+        echo "  edit wins before shipping." >&2
+      fi
+
+      # No shallow PRE-probe, deliberately: when the fork-point blobs are absent git falls back to
+      # DIRECT application of the same fork-point-anchored patch, which is still correct (that patch
+      # carries no deletion hunk for base-only work), so only merge tolerance is lost. Re-anchoring at
+      # BASE to dodge this would silently re-stage the sc-2451 revert on every ship in such a repo —
+      # fail-open on a DIAGNOSTIC is ship_size_preflight's rule, fail-open on the PAYLOAD is the bug.
+      if [ "$(git -C "$ROOT" rev-parse --is-shallow-repository 2>/dev/null || echo false)" = "true" ]; then
+        echo "  (shallow clone: three-way merge data may be missing — \`git fetch --unshallow\` can turn some of these into clean merges)" >&2
+      fi
+      echo "  Merge or rebase origin/$BASE_REF into this checkout, then retry the same command." >&2
+      exit 1
+    fi
+  fi
 
   if [ "$FROM_BRANCH" -eq 0 ]; then
     # Untracked new files in explicit scope -> copy + stage.
-    git -C "$ROOT" ls-files -o --exclude-standard -- "${PATHS[@]}" | while IFS= read -r f; do
+    #
+    # MATERIALISED, then read in the PARENT shell. `ls-files | while read` runs the body in a
+    # SUBSHELL, where the abort below would set an exit status nobody reads and staging would sail
+    # straight on. Same temp-file idiom as the branch-paths and gitlink enumerations above; preferred
+    # over `done < <(...)`, which loses the enumerator's own failure to set -e.
+    UNTRACKED_FILE=$(mktemp "${TMPDIR:-/tmp}/ship-untracked.XXXXXX")
+    git -C "$ROOT" ls-files -o --exclude-standard -- "${PATHS[@]}" > "$UNTRACKED_FILE"
+    UNTRACKED_CLOBBER=()
+    while IFS= read -r f; do
+      # A path untracked HERE can still be TRACKED at the refreshed base: the base ADDED it after this
+      # checkout forked. Copying wholesale would silently replace the base's version — the untracked
+      # twin of sc-2451, and invisible to the patch arm above because the fork point has no such path
+      # at all. Only checked when the base actually moved, so the default arm stays byte-identical.
+      #
       mkdir -p "$WT/$(dirname "$f")"
       cp -Pp "$ROOT/$f" "$WT/$f"   # -P: keep a symlink a symlink; -p: preserve mode (the +x bit) regardless of umask
+      # Checked AFTER the copy, and against the COPY. A path untracked here can still be TRACKED at
+      # the refreshed base — the base added it after this checkout forked — and copying wholesale
+      # would silently replace the base's version, the untracked twin of sc-2451. Validating the
+      # caller's file and then copying it would be two reads of a SHARED checkout a parallel agent may
+      # be editing, so what got copied need not be what was approved; the worktree copy is private, so
+      # hashing THAT closes the window. Mode and content both, because a regular file whose bytes
+      # equal a symlink's target would otherwise convert the entry's type unreviewed.
+      if [ "$PATCH_BASE" != "$BASE" ] &&
+        git -C "$WT" cat-file -e "$BASE:$f" 2>/dev/null &&
+        ! ship_untracked_matches_base "$WT" "$BASE" "$f"; then
+        UNTRACKED_CLOBBER+=("$f")
+        continue
+      fi
       git -C "$WT" add -- "$f"
-    done
+    done < "$UNTRACKED_FILE"
+    rm -f "$UNTRACKED_FILE"
+    # Both untracked passes accumulate into UNTRACKED_CLOBBER and are reported together below, so an
+    # operator whose ignored and non-ignored paths both collide fixes them in one pass rather than
+    # discovering the second only after clearing the first.
 
 # ...and the untracked files git IGNORES. `ls-files -o --exclude-standard` omits them BY DESIGN, so
 # a NEW file under a gitignored-but-force-tracked tree fell through both passes: the tracked-diff
@@ -1026,12 +1179,62 @@ else
   # MISSED, never to overrule one it expressed. Without the guard, deleting a tracked file whose
   # gitignored copy is back on disk (a regenerable cache — sc-1489's receipt) silently re-adds it and
   # the deletion can never land, however many times it is shipped.
-    git -C "$ROOT" ls-files -o -i --exclude-standard -- "${PATHS[@]}" | while IFS= read -r f; do
+  # The deletion the guard reads is now anchored where staging is: sc-1489's shape (the caller deletes
+  # a file tracked at their OWN fork point) still emits it and is unaffected, but a path the base
+  # added after the fork has no deletion to express, so it is force-added here as a new file.
+    IGNORED_FILE=$(mktemp "${TMPDIR:-/tmp}/ship-ignored.XXXXXX")
+    git -C "$ROOT" ls-files -o -i --exclude-standard -- "${PATHS[@]}" > "$IGNORED_FILE"
+    while IFS= read -r f; do
       git -C "$WT" diff --cached --quiet --diff-filter=D -- "$f" || continue
       mkdir -p "$WT/$(dirname "$f")"
       cp -Pp "$ROOT/$f" "$WT/$f"
+      # The same base-clobber check the ordinary untracked pass runs, for the same reason: `-f` makes
+      # this pass FORCE the add, so a path the base added after the fork — ignored and untracked in
+      # this stale checkout, which is exactly devkit's own `dist/` shape — would otherwise replace the
+      # base's version with no merge and no diff to review. Materialised to a temp file and read in
+      # the parent shell so the abort is not swallowed by a pipeline subshell.
+      if [ "$PATCH_BASE" != "$BASE" ] &&
+        git -C "$WT" cat-file -e "$BASE:$f" 2>/dev/null &&
+        ! ship_untracked_matches_base "$WT" "$BASE" "$f"; then
+        UNTRACKED_CLOBBER+=("$f")
+        continue
+      fi
       git -C "$WT" add -f -- "$f"
-    done
+    done < "$IGNORED_FILE"
+    rm -f "$IGNORED_FILE"
+    if [ "${#UNTRACKED_CLOBBER[@]}" -gt 0 ]; then
+      echo "ship: origin/$BASE_REF already tracks these briefed path(s) with different content, but they are untracked in this checkout:" >&2
+      for p in "${UNTRACKED_CLOBBER[@]}"; do printf '  %q\n' "$p" >&2; done
+      echo "  shipping them would replace the base's version wholesale, with no merge and no diff to review." >&2
+      echo "  Merge origin/$BASE_REF into this checkout so git can reconcile them, then retry." >&2
+      exit 1
+    fi
+  fi
+
+# Second half of the nothing-to-commit guard, at the only other point where the answer is knowable.
+# That guard proves the caller's tree DIFFERS from the fork point. Once the two anchorings differ that
+# is no longer sufficient to prove the ship CONTAINS anything: a fork-point patch applies cleanly and
+# stages NOTHING when origin/$BASE_REF has since landed byte-identical content (a cherry-pick, or a
+# sibling agent shipping the same change first). Without this the operator pays the whole gate chain
+# to reach git's cryptic "nothing added to commit but untracked files present" — where the untracked
+# files it names are our OWN gate symlinks — and the EXIT trap then deletes the branch underneath them.
+#
+# Placed AFTER both untracked passes, which can legitimately be the sole payload, and BEFORE
+# ship_record_staged_state, whose write-tree succeeds on an empty index and would let this slide past.
+# Only the total case is spoken for: a partially collapsed ship is correct, and leaves a non-empty
+# index that never reaches here.
+  if git -C "$WT" diff --cached --quiet; then
+    if [ "$PATCH_BASE" != "$BASE" ]; then
+      echo "nothing to commit: origin/$BASE_REF (${BASE:0:7}) already contains every briefed change" >&2
+      echo "  your tree differs from where this checkout forked (${PATCH_BASE:0:7}), but $BASE_REF has since" >&2
+      echo "  landed identical content for ${PATHS[*]} — there is nothing left for this PR to carry." >&2
+    else
+      # Anchorings agree, so the pre-worktree guard has already proven a difference exists and the
+      # patch stages exactly what it expresses — this is unreachable by the sc-2451 route. Kept as a
+      # backstop with honest wording rather than repeating a claim about the base that was not tested.
+      echo "nothing to commit: staging ${PATHS[*]} vs $BASE_REF (${BASE:0:7}) produced an empty index" >&2
+    fi
+    exit 1
   fi
 
 # Snapshot the index the instant staging finishes — the two assertions below hold the gate chain to
