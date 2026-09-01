@@ -597,7 +597,6 @@ describe('runReviewGate — cascade + exit contract', () => {
       false,
     );
   });
-
   // An empty `review.frontendRoots` drops both frontend reviewers via selectReviewers' trailing
   // `.filter(files.length > 0)` — the shipped templates/generic default on a frontend repo. It used
   // to be entirely silent; these pin that it never is again.

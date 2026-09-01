@@ -19,6 +19,7 @@ import { envFlag, type GuardConfig } from '../../config.mts';
 import { emitGateEvent } from '../../judge/gate-events.mts';
 import { saveTranscript } from '../../judge/transcript-store.mts';
 import { measureDiffEvidenceCap } from '../diff-evidence.mts';
+import { reviewBaseContext } from './base-context.mts';
 import {
   declaredRoots,
   hasChecklist,
@@ -184,6 +185,8 @@ export function emitReviewScope(
   // Targets tier loaded. Without these the epic's "reviewers with intent vs blind" field
   // comparison cannot be computed from the sink.
   contextFields: { commit_msg: boolean; targets_via: 'scope' | 'scope+semantic' } | null = null,
+  // The tree the diff was computed against — without it a finding is not re-resolvable from the sink.
+  cwd: string = process.cwd(),
 ): void {
   const files = [...sel.files].sort();
   const inline = JSON.stringify(files);
@@ -209,6 +212,7 @@ export function emitReviewScope(
     // second source of truth the gate cannot import and would have to sync-test.
     has_checklist: hasChecklist(sel.reviewer),
     cached,
+    base_sha: reviewBaseContext(cwd).baseSha,
     ...(contextFields ?? {}),
   });
 }

@@ -1,3 +1,4 @@
+import { execSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -117,5 +118,42 @@ describe('multi-finding FAIL report', () => {
     const out = err.mock.calls.flat().join('\n');
     expect(out).toContain('api-security-reviewer: 12 finding(s):'); // …yet the block still prints
     expect(out).toContain('lens-00 · src/main/f0.ts:1');
+  });
+});
+
+// sc-2480: an agent scrolls to the findings and stops. The base has to be ABOVE them, and it has to
+// be there exactly once no matter how many reviewers ran or how many lens parts one of them failed.
+describe('the reviewed base precedes the findings', () => {
+  it('prints the provenance line before the first FAIL block, exactly once', async () => {
+    const repo = consumerRepo({ backend: true, frontend: true });
+    const head = execSync('git rev-parse HEAD', { cwd: repo, encoding: 'utf8' }).trim();
+    const exec = mkExec(async ({ label }) => {
+      if (label.startsWith('review:api-security-reviewer')) {
+        writeFileSync(
+          join(repo, '.claude', '.api-security-review.json'),
+          JSON.stringify({
+            items: [
+              {
+                name: 'injection',
+                category: 'A',
+                status: 'fail',
+                issues: ['interpolated SQL at src/main/db.ts:12'],
+              },
+            ],
+          }),
+        );
+        return 'bad\nVERDICT: FAIL — findings recorded';
+      }
+      writeArtifact(repo, label);
+      return 'VERDICT: PASS';
+    });
+    expect(await runReviewGate(repo, { exec })).toBe(1);
+    const printed = err.mock.calls.map((c) => String(c[0]));
+    const provenance = printed.filter((l) => l.includes('reviewed against'));
+    expect(provenance).toHaveLength(1);
+    expect(provenance[0]).toContain(head.slice(0, 12));
+    const at = printed.findIndex((l) => l.includes('reviewed against'));
+    const firstFinding = printed.findIndex((l) => l.includes('finding(s)'));
+    expect(firstFinding).toBeGreaterThan(at);
   });
 });

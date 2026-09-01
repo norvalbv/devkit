@@ -166,6 +166,9 @@ LINK_DIRS=()
 [ "${#LINK_EXTRA[@]}" -gt 0 ] && LINK_DIRS+=("${LINK_EXTRA[@]}")
 
 ROOT=$(git rev-parse --show-toplevel)
+# Pinned before any staging: in a shared parallel-agent checkout $ROOT can gain a commit mid-run, and
+# a later read would name a tree the caller never read (sc-2480). Empty when unreadable.
+CALLER_HEAD=$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || true)
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REWRITE_REMOTE_SUPERVISOR="$SCRIPT_DIR/review/process/gate-supervisor.mts"
 [ -f "$REWRITE_REMOTE_SUPERVISOR" ] || REWRITE_REMOTE_SUPERVISOR="$SCRIPT_DIR/review/process/gate-supervisor.mjs"
@@ -762,6 +765,7 @@ else
 # The pinned parent the worktree was cut from — the PR tip for an append, or the PR base for a
 # rewrite — lets in-chain gates (fallow) diff against it rather than their own main-autodetect.
 export DEVKIT_SHIP_BASE_SHA="$BASE"
+export DEVKIT_SHIP_SOURCE_HEAD="$CALLER_HEAD"   # pinned above, before staging (sc-2480)
 export DEVKIT_SHIP_MODE=reship   # tags the ship_attempt telemetry (retry onto an existing branch)
 export DEVKIT_RUN_MODE=ship      # never inherit a caller's review allowlist into a real ship
 # Preflight before the multi-minute chain, then prove the commit still holds the briefed work before

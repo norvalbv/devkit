@@ -7,7 +7,7 @@
  *   guard-review completeness --gate <msg-file>  feature-completeness judge (commit-msg, warn-only)
  *   guard-review scan                            reviewer→files mapping + cache status (no judges)
  *   guard-review clear-cache                     drop cached PASS verdicts
- *   guard-review waive <reviewer>[:<lens>] <id> "<why>"   record an override (see valve/waive.mts)
+ *   guard-review waive <reviewer>[:<lens>] <id> [--base <sha>] "<why>"  record an override
  *   guard-review waive --list                    show active waives
  *   guard-review transcript <ref>                print a persisted agent transcript by its ref
  *   guard-review record-agent <label>            record one Task-dispatched agent run (stdin)
@@ -192,7 +192,7 @@ async function run(argv: string[]): Promise<number> {
   if (cmd === 'record-agent' && rest[0]) return recordAgent(rest[0], rest.slice(1));
   console.error(
     'Usage: guard-review --gate | completeness --gate <msg-file> | scan | clear-cache | ' +
-      'waive <reviewer>[:<lens>] <id> "<why>" | waive --list | transcript <ref> | ' +
+      'waive <reviewer>[:<lens>] <id> [--base <sha>] "<why>" | waive --list | transcript <ref> | ' +
       'record-agent <label> [--model <m>] [--duration-ms <n>] ' +
       '[--disposition followed|overridden|unverified] [--reason "<why>"] ' +
       '[--input-tokens <n>] [--output-tokens <n>] [--cache-creation <n>] [--cache-read <n>] ' +

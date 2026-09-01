@@ -11,7 +11,7 @@
     "gate-engine/decisions/detect.mts": 542,
     "gate-engine/decisions/eval/bench.mts": 833,
     "gate-engine/edge-cases/eval/lib/sources.mts": 570,
-    "gate-engine/review/__tests__/run-review.test.mts": 2288,
+    "gate-engine/review/__tests__/run-review.test.mts": 2287,
     "gate-engine/review/eval/bench.mts": 678,
     "gate-engine/review/eval/conventions/bench.mts": 939,
     "gate-engine/review/eval/reviewers/bench.mts": 880

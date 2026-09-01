@@ -346,6 +346,20 @@ printf 'REVIEW_INTENT_OK\\n'
     expect(combinedOutput(result)).toContain('REVIEW_INTENT_OK');
   });
 
+  it('scrubs an inherited DEVKIT_SHIP_SOURCE_HEAD before the inner chain', () => {
+    const action = `
+test -z "\${DEVKIT_SHIP_SOURCE_HEAD:-}" || exit 85
+printf 'REVIEW_NO_SOURCE_HEAD_OK\\n'
+`;
+    const target = fixture(action);
+    addCommittedChange(target);
+    const result = runReview(target, [], {
+      env: { ...target.env, DEVKIT_SHIP_SOURCE_HEAD: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef' },
+    });
+    expect(result.status, combinedOutput(result)).toBe(0);
+    expect(combinedOutput(result)).toContain('REVIEW_NO_SOURCE_HEAD_OK');
+  });
+
   it('an empty reviewed range leaves the intent var unset and the review completes (sc-1442)', () => {
     const action = `
 test -z "\${DEVKIT_COMMIT_MSG_FILE:-}" || exit 84
