@@ -61,6 +61,8 @@ const GATE_SUFFIX_RE = /\(.*\)$/;
 // stays reserved for a gate whose exit 2 was never an opt-out (an `--extra` command's fatal config
 // error): both are could-not-run for telemetry, but only this one is an opt-out we chose to reject.
 const COULD_NOT_RUN = '(could-not-run)';
+/** The blocked_gate token the ship script publishes for this whole chain (see the emits below). */
+const DETERMINISTIC_FAMILY = 'deterministic';
 // 127 is the shell's "command not found", so the gate's own binary never resolved — a dependency
 // problem, not a lint finding. Naming it matters because the raw text ("biome: command not found")
 // sends the reader after the linter: under `devkit ship` the gates run in an ephemeral worktree whose
@@ -377,6 +379,7 @@ export function runDeterministic(cwd = process.cwd(), opts: RunDeterministicOpts
       emitGateEvent({
         type: 'gate_result',
         gate: label.replace(GUARD_PREFIX_RE, '').replace(GATE_SUFFIX_RE, ''),
+        family: DETERMINISTIC_FAMILY,
         status: 'could_not_run',
         detail: `${label}(opted-out)`,
       });
@@ -400,6 +403,11 @@ export function runDeterministic(cwd = process.cwd(), opts: RunDeterministicOpts
       emitGateEvent({
         type: 'gate_result',
         gate: label.replace(GUARD_PREFIX_RE, '').replace(GATE_SUFFIX_RE, ''),
+        // This chain reports PER GATE (`fanout`, `anti-slop`), one level finer than the
+        // blocked_gate vocabulary the ship script publishes, which names the family. Without the
+        // family a reader cannot join the two, and the ship terminus digest reported the very gate
+        // that stopped the run as "did NOT block this run" (sc-2488).
+        family: DETERMINISTIC_FAMILY,
         status:
           label.includes('(unexpected:') || label.includes(COULD_NOT_RUN)
             ? 'could_not_run'
