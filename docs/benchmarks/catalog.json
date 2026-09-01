@@ -919,7 +919,9 @@
       "hashes": {
         "implementation": [
           "gate-engine/decisions/integrity/checks.mts",
-          "gate-engine/decisions/integrity/scan.mts"
+          "gate-engine/decisions/integrity/scan.mts",
+          "gate-engine/decisions/decision-format.mts",
+          "gate-engine/decisions/recall/markdown.mts"
         ],
         "corpus": [
           "gate-engine/decisions/eval/save-quality/cases-save.jsonl",
