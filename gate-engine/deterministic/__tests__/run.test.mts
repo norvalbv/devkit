@@ -366,6 +366,27 @@ describe('parseOpts — the argv tokenizer the real hook depends on', () => {
 });
 
 describe('selectedIds', () => {
+  // sc-2483 follow-through: .devkit/config.json is external JSON, so every layer is read as an own
+  // property — an inherited `components`/`guards`/`antiSlop` must never change the gate set.
+  it('ignores inherited properties at every layer of the config', () => {
+    const proto = Object.prototype;
+    Object.defineProperty(proto, 'components', {
+      value: { antiSlop: true, guards: ['size'] },
+      configurable: true,
+    });
+    Object.defineProperty(proto, 'antiSlop', { value: true, configurable: true });
+    Object.defineProperty(proto, 'guards', { value: ['size'], configurable: true });
+    try {
+      expect(selectedIds(repo(null))).toEqual(['size', 'fanout', 'dup', 'clone']);
+      expect(selectedIds(repo(['clone']))).toEqual(['clone']);
+      expect(selectedIds(repo([], false))).toEqual([]);
+    } finally {
+      delete proto.components;
+      delete proto.antiSlop;
+      delete proto.guards;
+    }
+  });
+
   it('intersects components.guards with the deterministic set in fixed order, dropping AI ids', () => {
     const d = repo(['clone', 'size', 'review', 'decisions']); // review/decisions are AI (fail-fast)
     expect(selectedIds(d)).toEqual(['size', 'clone']);

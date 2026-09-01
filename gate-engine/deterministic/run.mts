@@ -43,6 +43,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { parseJsonObject } from '../config-json.mts';
 import { coverageBypassed, deterministicStrict, envFlag, structureBypassed } from '../config.mts';
 import { emitGateBypass, emitGateEvent, finishGateTiming } from '../judge/gate-events.mts';
 import { prefixEntry, recordPrefix } from '../prefix-cache/prefix-cache.mts';
@@ -71,6 +72,24 @@ const DETERMINISTIC_FAMILY = 'deterministic';
 const NOT_FOUND_RE = /\(unexpected:127\)/;
 const OBJECT_ID = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
 
+interface RawDevkitComponents {
+  guards?: string[];
+  antiSlop?: boolean;
+}
+interface RawDevkitConfig {
+  components?: RawDevkitComponents;
+}
+type ConfigComponent = Exclude<keyof RawDevkitComponents, 'guards'>;
+const ANTI_SLOP_COMPONENT: ConfigComponent = 'antiSlop';
+
+/** `components.<name> === true`, guarded so an inherited Object.prototype member never counts. */
+function componentEnabled(
+  components: RawDevkitComponents | undefined,
+  name: ConfigComponent,
+): boolean {
+  return components !== undefined && Object.hasOwn(components, name) && components[name] === true;
+}
+
 // The deterministic guard set, in fixed registry order. Each runs as `node <path> <args>` — a sibling
 // module under gate-engine, so it resolves the same way in every install mode. Their exit contract is
 // the invariant this orchestrator preserves: 0 clean, 1 violation, 2 fail-open (could-not-run).
@@ -97,7 +116,7 @@ export const DETERMINISTIC = [
     module: '../../cli/index.mjs',
     args: ['anti-slop', 'check', '--staged'],
     optIn: true,
-    configComponent: 'antiSlop',
+    configComponent: ANTI_SLOP_COMPONENT,
     failOpen2: false,
   },
 ];
@@ -189,12 +208,19 @@ export function selectedIds(cwd: string): string[] {
   const cfgPath = path.join(cwd, '.devkit', 'config.json');
   if (!existsSync(cfgPath)) return DEFAULT_IDS;
   try {
-    const components = JSON.parse(readFileSync(cfgPath, 'utf8'))?.components;
-    const guards = Array.isArray(components?.guards) ? components.guards : DEFAULT_IDS;
+    const parsed = parseJsonObject<RawDevkitConfig>(readFileSync(cfgPath, 'utf8'), cfgPath);
+    // Own properties only, at every layer: a polluted Object.prototype must never opt a gate in or out.
+    const components = Object.hasOwn(parsed, 'components') ? parsed.components : undefined;
+    const guards =
+      components !== undefined &&
+      Object.hasOwn(components, 'guards') &&
+      Array.isArray(components.guards)
+        ? components.guards
+        : DEFAULT_IDS;
     const selectedGuards = new Set(guards);
     return DETERMINISTIC.filter((gate) => {
       const component = 'configComponent' in gate ? gate.configComponent : undefined;
-      return component ? components?.[component] === true : selectedGuards.has(gate.id);
+      return component ? componentEnabled(components, component) : selectedGuards.has(gate.id);
     }).map((gate) => gate.id);
   } catch {
     return DEFAULT_IDS;
