@@ -19,3 +19,4 @@ created: 2026-08-30
 **Scope:** cli/lib/ship/base-drift/**,agents-hooks/base-drift-*.mjs,cli/commands/base-status.mts,cli/lib/ship/ship-branch.sh
 **Category:** ship-pipeline
 **Source:** shortcut · sc-2297
+- 2026-09-01 — Rejected(a)'s premise — 'git merges these three-way, so a same-region overwrite already surfaces as a conflict at merge' — did not hold for devkit ship itself: ship re-cuts caller content ONTO the refreshed base, so the merge git would have three-way-merged never happens and the revert lands as an ordinary descendant commit (sc-2451). ship-patch-anchored-at-fork-point restores that premise at APPLY time. The rejection of a PATH-OVERLAP block stands unchanged: the new abort is hunk-level, and a base edit and a caller edit in different regions of one file still merge cleanly and never block.
