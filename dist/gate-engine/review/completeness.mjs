@@ -43,13 +43,16 @@ import { cacheKey, parseReviewVerdict, resolveEscalationModel, stripFrontmatter,
 const AGENT_NAME = 'feature-completeness-reviewer';
 const TOOLS = 'Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(git status:*)';
 /** The exact judge capabilities shared by cache identity, execution, and the benchmark. */
-export function completenessJudgeSetup(cfg, cwd = process.cwd()) {
+export function completenessJudgeSetup(cfg, cwd = process.cwd(), { mcpProjectRoots } = {}) {
     const mcpProfile = namedAgentMcpProfile();
     const allowedTools = withNamedAgentMcpTools(TOOLS, cfg.indexPath ? cfg.searchTool : '');
     return {
         allowedTools,
         mcpProfile,
-        capabilityFingerprint: judgeMcpCapabilityFingerprint(mcpProfile, allowedTools, { cwd }),
+        capabilityFingerprint: judgeMcpCapabilityFingerprint(mcpProfile, allowedTools, {
+            cwd,
+            projectRoots: mcpProjectRoots,
+        }),
     };
 }
 // Trailing whitespace + blank-run normalisation, mirroring git's `--cleanup=whitespace` (the mode
@@ -105,7 +108,7 @@ export function wrapCompleteness(agentBody, message, files, targetsBlock) {
         'FAIL only for a gap that makes the shipped change misleading or operationally unsafe.');
 }
 /** The gate → exit code (see module contract). `exec` injectable for tests. */
-export async function runCompleteness(msgFile, cwd = process.cwd(), { exec = execJudgeAsync } = {}) {
+export async function runCompleteness(msgFile, cwd = process.cwd(), { exec = execJudgeAsync, mcpProjectRoots, } = {}) {
     const startedAt = Date.now();
     const finish = (code, cacheState = 'none', effectiveMs) => finishGateTiming('completeness', startedAt, code, cacheState, effectiveMs);
     if (envFlag('NO_COMPLETENESS')) {
@@ -124,7 +127,9 @@ export async function runCompleteness(msgFile, cwd = process.cwd(), { exec = exe
         if (cfg.noLlm)
             return finish(0);
         model = resolveEscalationModel(cfg);
-        ({ allowedTools, mcpProfile, capabilityFingerprint } = completenessJudgeSetup(cfg, cwd));
+        ({ allowedTools, mcpProfile, capabilityFingerprint } = completenessJudgeSetup(cfg, cwd, {
+            mcpProjectRoots,
+        }));
         const message = normalizeCommitMessage(readFileSync(path.isAbsolute(msgFile) ? msgFile : path.resolve(cwd, msgFile), 'utf8'));
         const files = execSync('git diff --cached --name-only', { cwd, encoding: 'utf8' })
             .split('\n')
@@ -207,6 +212,7 @@ export async function runCompleteness(msgFile, cwd = process.cwd(), { exec = exe
         timeout: DEEP_JUDGE_TIMEOUT_MS,
         cwd,
         mcpProfile,
+        mcpProjectRoots,
         codexReadOnly: true,
         onMcpPrepared: (fingerprint) => {
             observedCapabilityFingerprint = fingerprint;

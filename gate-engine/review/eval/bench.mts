@@ -1,565 +1,132 @@
 #!/usr/bin/env node
 
 /**
- * completeness-eval: accuracy benchmark for the feature-completeness reviewer gate
- * (`guard-review completeness --gate` — ../completeness.mts + agents/feature-completeness-reviewer.md).
+ * completeness-eval: accuracy benchmark for the automated completeness gate.
  *
- * A prompt/model edit to the reviewer brief is unverifiable without a measured check; this scores
- * the EXACT gate path against a labelled corpus so an edit is a delta, not a vibe. The bench calls
- * `runCompleteness()` FROM THE GATE with a spy `exec` that delegates to the real judge runner —
- * prompt construction, Target loading, diff capping, argv, model and isolation flags all run
- * inside the gate; the spy only observes the transcript. Bench and gate cannot drift.
- *
- * THE HARD PART — open-ended output. The reviewer emits a free-text findings list, not a closed
- * label set, so each corpus row carries a GOLD finding-set (gaps that MUST surface, with target
- * severity) and DECOYS (recorded decisions / out-of-scope items it must NOT flag). An audited LLM
- * matcher (matcher.mts) maps emitted findings onto those slots with per-slot forced-choice
- * questions; scoring is recall against gold and flag-rate against decoys — never string equality,
- * never "did it produce output".
- *
- *   node bench.mts                # full run: reviewer + matcher, confusion + headline metrics
- *   node bench.mts --baseline     # write results.baseline.json (committed — corpus is repo-specific)
- *   node bench.mts --fail         # exit 1 on floor breach or significant stable flips vs baseline
- *   node bench.mts --dev          # prompt-iteration tier: holdout rows excluded
- *   node bench.mts --only <id>    # id-prefix subset (iteration; usage lands in runs.log)
- *   node bench.mts coverage       # corpus coverage matrix — zero claude calls
- *   node bench.mts matcher-audit  # matcher agreement vs committed labels (percent + Cohen's κ)
- *
- * Sweeps: BENCH_MATCH_MODEL=haiku|sonnet (matcher; default haiku) · BENCH_MATCH_RUNS=1|3 (matcher
- * votes; default 3). The REVIEWER has no model sweep on purpose: the gate hardcodes opus (user
- * ruling: the gap-finder gets the strongest model or it isn't worth running) and the bench runs
- * the gate, not a copy of it.
- *
- * Headline metrics — one per failure mode (each reviewer failure is different):
- *   gap recall        H/G  — a missed gap is what the reviewer exists to prevent → HARD FLOOR
- *   false-flag rate   FD/D — decoys flagged / recorded decisions re-litigated → HARD CEILING
- *   severity calibration    — of the gaps it caught, were build-breakers CRITICAL? (warn tier)
- * Finding precision (matched/emitted) prints informationally only: gold is not exhaustive, so an
- * unmatched finding is not provably wrong — the decoy set is the measured precision instrument.
- *
- * Statistical honesty (verbatim from decisions-eval, the house standard): every headline ships
- * raw counts + a Wilson 95% interval; --fail gates on hard floors plus the paired flip table vs
- * baseline under a mid-p McNemar test — never aggregate deltas. THE FLIP GATE CLUSTERS BY CASE:
- * slots within one case share a single reviewer transcript and are correlated, so slot-level
- * pairing would be anti-conservative (Miller arXiv:2411.00640 — cluster by item source); the
- * slot-level flip table still prints informationally. Reviewer rows are the expensive class
- * (agentic opus, 1–6 min) so they run K=1 with retry-on-baseline-discordance (the alignment
- * convention — a flip counts only when confirmed 2-of-2); the matcher takes the K=3 vote budget
- * instead. Baselines embed gate-code + agent-brief + matcher + corpus hashes; any mismatch skips
- * the comparison mechanically. Every run appends to runs.log — the anti-Goodhart ledger.
- *
- * Outage policy (alignment-style — rows are too expensive to vaporise a run on a quota blip):
- * a dark reviewer scores the CASE as an outage and continues; a dark matcher slot (after retry)
- * scores the SLOT as an outage; either sets outages>0, which makes --fail skip the comparison.
- * All-outage aborts (exit 2). A gate FREE-SKIP (exec never called: nothing staged, agent md
- * missing, noLlm) is NEVER an outage — it aborts as a fixture bug, because "the gate didn't run"
- * must not read as "the reviewer passed".
- *
- * Exit 0 = ran (no regression under --fail) · 1 = regression (with --fail) · 2 = could not run.
+ * The executable stays intentionally orchestration-only. Corpus/fixture construction, paid case
+ * execution, scoring, identity, and baseline audit live in cohesive sibling modules so the shipped
+ * size ratchet remains an architectural boundary rather than a raised threshold.
  */
 
 import { execFileSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import {
-  appendFileSync,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  realpathSync,
-  writeFileSync,
-} from 'node:fs';
+import { appendFileSync, existsSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { pathToFileURL } from 'node:url';
+import { BenchAbort, cleanBenchEnv } from '../../decisions/eval/bench.mts';
+import { resolveGuardConfig, type GuardConfig } from '../../config.mts';
+import { judgeBinForModel } from '../../judge/codex/result.mts';
+import type { SlotOutcome } from '../../judge/matcher-core.mts';
+import { resolveEscalationModel } from '../reviewers.mts';
 import {
-  BenchAbort,
-  cleanBenchEnv,
-  materializeFixture,
-  mcnemarMidP,
-  parseCasesText,
-  wilson,
-} from '../../decisions/eval/bench.mts';
-import { execJudgeAsync } from '../../judge/run-judge.mts';
-import { runCompleteness } from '../completeness.mts';
-import { parseReviewVerdict } from '../reviewers.mts';
+  type AuditCheckpointValue,
+  completenessAuditInputHash,
+  completenessBaselineEligibility,
+  matcherAudit,
+  reusableAuditCheckpoint,
+  runIndependentMatcherAudit,
+  writeCompletenessBaseline,
+} from './baseline-audit.mts';
 import {
-  type CaseScore,
-  type DecoySlot,
-  type GoldSlot,
-  kappa,
-  parseFindings,
-  runMatcher,
-  SEVERITIES,
-  scoreCase,
-} from './matcher.mts';
+  AGENT_MD,
+  AGENTS_DIR,
+  auditLabelsPath,
+  baselinePath,
+  here,
+  LEGACY_AUDIT_REVIEWER_MODEL,
+  MATCH_CONCURRENCY,
+  MATCH_MODEL,
+  MATCH_RUNS,
+  transcriptPath,
+} from './benchmark-config.mts';
+import {
+  applyRetryEvidence,
+  caseCheckpointIsReusable,
+  type CaseCheckpointValue,
+  type CaseResult,
+  cleanupActiveFixture,
+  type MatcherCheckpointValue,
+  type ReviewerCheckpointValue,
+  consistentReviewerModel,
+  reusableCaseCheckpoint,
+  reusableCaseCheckpointForRow,
+  reusableMatcherCheckpoint,
+  reusableReviewerCheckpoint,
+  runCase,
+} from './case-runner.mts';
+import {
+  acquireCompletenessProgressLock,
+  installProgressLockTerminationHandlers,
+  openCheckpointStore,
+  resetCompletenessProgress,
+} from './checkpoint.mts';
+import {
+  completenessAuditCheckpointIdentity,
+  completenessCaseCheckpointIdentity,
+  completenessCaseInputHash,
+  completenessMatcherCheckpointIdentity,
+  completenessMatcherInputHash,
+  completenessReviewerCheckpointIdentity,
+  gateHash,
+  matcherHash,
+  retryBaselineFingerprint,
+  sha12,
+} from './benchmark-identity.mts';
+import {
+  type CompletenessCase,
+  completenessFixtureCapabilityFingerprint,
+  lintCases,
+  loadCases,
+  materializeCompletenessFixture,
+} from './cases.mts';
+import { parseFindings, SEVERITIES } from './matcher.mts';
+import {
+  type BenchSummary,
+  CEILING_FALSE_FLAG,
+  compareCompleteness,
+  FLOOR_GAP_RECALL,
+  fmtCi,
+  summarize,
+  variantConsistency,
+} from './scoring.mts';
+import { completenessSlotKey } from './variant-consistency.mts';
 
-const here = path.dirname(fileURLToPath(import.meta.url));
-const baselinePath = path.join(here, 'results.baseline.json');
-const casesPath = path.join(here, 'cases-completeness.jsonl');
-const transcriptsDir = path.join(here, 'transcripts');
-const auditLabelsPath = path.join(here, 'matcher-audit.labels.jsonl');
-
-const MATCH_MODEL = process.env.BENCH_MATCH_MODEL ?? 'haiku';
-const MATCH_RUNS = Math.max(1, Number.parseInt(process.env.BENCH_MATCH_RUNS ?? '3', 10) || 3);
-const MATCH_CONCURRENCY = 4; // bounded — a slot storm gets judges SIGTERM'd under contention
-const AGENTS_DIR = path.resolve(here, '../../../agents');
-const AGENT_MD = path.join(AGENTS_DIR, 'feature-completeness-reviewer.md');
-
-// Hard floors on the safety metrics (catastrophic breakage fails regardless of flip statistics).
-// Point estimates, not Wilson bounds — the lower bound is uselessly wide at this n. Set ONCE from
-// the first honest baseline; never retro-tuned to make a red run green.
-export const FLOOR_GAP_RECALL = 0.7;
-export const CEILING_FALSE_FLAG = 0.25;
-
-// ─── Corpus ───────────────────────────────────────────────────────────────────────
-
-export interface CompletenessCase {
-  id: string;
-  category: string;
-  difficulty?: 'clear' | 'borderline' | 'adversarial';
-  provenance?: 'authored' | 'mined' | 'adapted';
-  note: string;
-  variantOf?: string | null;
-  variantKind?: 'invariance' | 'directional' | null;
-  holdout?: boolean;
-  message: string;
-  repo: { base: Record<string, string>; staged: Record<string, string | null> };
-  gold: GoldSlot[];
-  decoys: DecoySlot[];
-  expectedVerdict?: 'PASS' | 'FAIL';
-}
-
-/** Free corpus lint — every defect here would otherwise surface mid-run after paid opus calls.
- * Exported so the unit tests run it over the committed corpus. */
-export function lintCases(rows: CompletenessCase[]): string[] {
-  const errors: string[] = [];
-  const ids = new Set<string>();
-  for (const r of rows) {
-    const at = `row ${r.id ?? '(no id)'}`;
-    if (!r.id) errors.push(`${at}: missing id`);
-    else if (ids.has(r.id)) errors.push(`${at}: duplicate id`);
-    else ids.add(r.id);
-    for (const field of ['category', 'note', 'message'] as const)
-      if (!r[field]) errors.push(`${at}: missing ${field}`);
-    if (!r.repo?.base || !r.repo?.staged) errors.push(`${at}: missing repo.base/staged`);
-    else if (Object.keys(r.repo.staged).length === 0) errors.push(`${at}: nothing staged`);
-    if (!Array.isArray(r.gold) || !Array.isArray(r.decoys))
-      errors.push(`${at}: gold/decoys must be arrays`);
-    const slotIds = new Set<string>();
-    for (const s of [...(r.gold ?? []), ...(r.decoys ?? [])]) {
-      if (slotIds.has(s.id)) errors.push(`${at}: duplicate slot id ${s.id}`);
-      slotIds.add(s.id);
-    }
-    for (const g of r.gold ?? [])
-      if (!SEVERITIES.includes(g.severity)) errors.push(`${at}: gold ${g.id} bad severity`);
-    for (const d of r.decoys ?? []) {
-      if (d.kind === 'recorded-decision') {
-        // The decoy must be BACKED by a Target file the gate will actually load — existence is
-        // not enough: a Target block without a parseable **Scope:** is silently dropped by
-        // loadScopedTargets, and the reviewer would never be tempted. Catch it here, free.
-        const file = `docs/decisions/${d.targetSlug}.md`;
-        if (!d.targetSlug) errors.push(`${at}: decoy ${d.id} recorded-decision needs targetSlug`);
-        else if (!r.repo.base[file]) errors.push(`${at}: decoy ${d.id} — ${file} not in repo.base`);
-      }
-    }
-  }
-  return errors;
-}
-
-function loadCases(): CompletenessCase[] {
-  let rows: CompletenessCase[];
-  try {
-    rows = parseCasesText(readFileSync(casesPath, 'utf8'));
-  } catch (e) {
-    throw new BenchAbort(2, `completeness-eval: cannot read ${path.basename(casesPath)} — ${e}`);
-  }
-  if (!rows.length) throw new BenchAbort(2, 'completeness-eval: corpus is empty');
-  const errors = lintCases(rows);
-  if (errors.length)
-    throw new BenchAbort(2, `completeness-eval: corpus lint failed —\n  ${errors.join('\n  ')}`);
-  return rows;
-}
-
-// ─── Fixture wrapper ──────────────────────────────────────────────────────────────
-
-/**
- * A completeness fixture is an alignment fixture (disposable git repo, base committed, staged in
- * the index) plus: a guard.config.json in BASE pointing review.agentsDir at the REAL agents/ dir
- * (absolute — so an edit to agents/feature-completeness-reviewer.md is exactly what a run
- * measures), and the commit message under .git/ where the judge's git status/diff can't see it.
- * Decoy Targets are ordinary docs/decisions/*.md files in base — the gate's own scopedTargets()
- * reads them directly (no index, no CLI), so the Target-loading path is exercised end-to-end.
- */
-export function materializeCompletenessFixture(row: CompletenessCase, agentsDirAbs = AGENTS_DIR) {
-  const base = {
-    ...row.repo.base,
-    'guard.config.json': `${JSON.stringify({ review: { agentsDir: agentsDirAbs } }, null, 2)}\n`,
-  };
-  const fx = materializeFixture({ repo: { base, staged: row.repo.staged } });
-  const msgFile = path.join(fx.repo, '.git', 'COMMIT_EDITMSG');
-  writeFileSync(msgFile, row.message.endsWith('\n') ? row.message : `${row.message}\n`);
-  return { ...fx, msgFile };
-}
-
-// ─── One case through the exact gate path ─────────────────────────────────────────
-
-interface SpyCapture {
-  called: boolean;
-  args: string[] | null;
-  raw: string | null;
-}
-
-/** Spy exec: delegates to the real judge runner (or a test stub), records what the gate sent and
- * what came back. Drift-proof by construction — the gate builds everything, the spy observes. */
-function spyExec(capture: SpyCapture, delegate: typeof execJudgeAsync): typeof execJudgeAsync {
-  return async (opts) => {
-    capture.called = true;
-    capture.args = opts.args;
-    capture.raw = await delegate(opts);
-    return capture.raw;
-  };
-}
-
-export interface CaseResult {
-  id: string;
-  outage: boolean;
-  score: CaseScore | null;
-  verdict: string | null;
-  exit: number;
-  warnings: string[];
-}
-
-/**
- * Run one corpus row through runCompleteness() and the matcher. Exported with an injectable exec
- * chain so the tests drive it without claude. Throws BenchAbort on fixture bugs (free-skip) —
- * "the gate didn't run" must never score as a pass.
- */
-export async function runCase(
-  row: CompletenessCase,
-  {
-    reviewerExec = execJudgeAsync,
-    matcherExec = execJudgeAsync,
-    matchModel = MATCH_MODEL,
-    matchRuns = MATCH_RUNS,
-    agentsDir = AGENTS_DIR,
-    saveTranscript = true,
-  }: {
-    reviewerExec?: typeof execJudgeAsync;
-    matcherExec?: typeof execJudgeAsync;
-    matchModel?: string;
-    matchRuns?: number;
-    agentsDir?: string;
-    saveTranscript?: boolean;
-  } = {},
-): Promise<CaseResult> {
-  const fx = materializeCompletenessFixture(row, agentsDir);
-  activeCleanup = fx.cleanup;
-  try {
-    if (fx.staged.length === 0)
-      throw new BenchAbort(2, `completeness-eval: fixture bug in ${row.id} — nothing staged`);
-    const capture: SpyCapture = { called: false, args: null, raw: null };
-    // The injectable exec is the seam runCompleteness's own tests use; everything else is the gate.
-    let exit: number;
-    try {
-      exit = await runCompleteness(fx.msgFile, fx.repo, { exec: spyExec(capture, reviewerExec) });
-    } catch (e) {
-      throw new BenchAbort(2, `completeness-eval: gate threw on ${row.id} — ${e}`);
-    }
-    if (!capture.called)
-      throw new BenchAbort(
-        2,
-        `completeness-eval: gate free-skipped ${row.id} (exit ${exit}) — fixture bug, not a pass`,
-      );
-    // Fixture-sanity: every recorded-decision decoy's Target must have reached the prompt. An
-    // unloaded decoy means the reviewer was never tempted and the slot would measure nothing.
-    const prompt = capture.args?.[1] ?? '';
-    for (const d of row.decoys)
-      if (d.kind === 'recorded-decision' && d.targetSlug && !prompt.includes(d.targetSlug))
-        throw new BenchAbort(
-          2,
-          `completeness-eval: fixture bug in ${row.id} — decoy Target ${d.targetSlug} not in the gate prompt (scope mismatch?)`,
-        );
-    if (capture.raw === null)
-      return { id: row.id, outage: true, score: null, verdict: null, exit, warnings: [] };
-
-    const parsed = parseFindings(capture.raw);
-    const outcomes = await runMatcher(row.gold, row.decoys, parsed.findings, {
-      model: matchModel,
-      runs: matchRuns,
-      concurrency: MATCH_CONCURRENCY,
-      exec: matcherExec,
-    });
-    const score = scoreCase(row.gold, row.decoys, parsed.findings, outcomes);
-    const verdict = parseReviewVerdict(capture.raw).verdict;
-    if (saveTranscript) {
-      try {
-        mkdirSync(transcriptsDir, { recursive: true });
-        writeFileSync(
-          path.join(transcriptsDir, `${row.id}.json`),
-          `${JSON.stringify({ id: row.id, findings: parsed.findings, gold: row.gold, decoys: row.decoys, outcomes, verdict, raw: capture.raw }, null, 2)}\n`,
-        );
-      } catch {
-        // Transcripts are audit material, not scoring input — never fail a paid run on them.
-      }
-    }
-    return { id: row.id, outage: false, score, verdict, exit, warnings: parsed.warnings };
-  } finally {
-    activeCleanup = null;
-    fx.cleanup();
-  }
-}
-
-// Best-effort ^C cleanup: the imported materializeFixture keeps its own module-private handle that
-// only the DECISIONS bench's main() registers — this bench must hold its own.
-let activeCleanup: (() => void) | null = null;
-
-// ─── Bench run + metrics ──────────────────────────────────────────────────────────
-
-interface SlotRow {
-  kind: 'gold' | 'decoy';
-  got: string;
-  ok: boolean;
-  stable: boolean;
-  expected: string;
-}
-
-export interface BenchSummary {
-  matchModel: string;
-  matchRuns: number;
-  cases: number;
-  caseOutages: number;
-  slotOutages: number;
-  outages: number;
-  gold: { total: number; hit: number };
-  decoys: { total: number; flagged: number; recorded: { total: number; flagged: number } };
-  findings: { total: number; matched: number; spurious: number };
-  severity: { total: number; exact: number; confusion: Record<string, Record<string, number>> };
-  verdicts: { total: number; correct: number };
-  gapRecall: number;
-  falseFlagRate: number;
-  rows: Record<string, { ok: boolean; stable: boolean }>;
-  slots: Record<string, SlotRow>;
-  gateHash?: string;
-  matcherHash?: string;
-  corpusHash?: string;
-}
-
-const pct = (k: number, n: number) => (n ? k / n : 0);
-const fmtCi = (k: number, n: number) => {
-  const { lo, hi } = wilson(k, n);
-  return `${k}/${n} = ${n ? (k / n).toFixed(2) : '—'} [${lo.toFixed(2)}, ${hi.toFixed(2)}]`;
+export {
+  type AuditCheckpointValue,
+  type BenchSummary,
+  type CaseCheckpointValue,
+  type CaseResult,
+  CEILING_FALSE_FLAG,
+  type CompletenessCase,
+  FLOOR_GAP_RECALL,
+  type MatcherCheckpointValue,
+  type ReviewerCheckpointValue,
+  applyRetryEvidence,
+  completenessAuditCheckpointIdentity,
+  completenessAuditInputHash,
+  completenessBaselineEligibility,
+  completenessCaseCheckpointIdentity,
+  completenessCaseInputHash,
+  completenessFixtureCapabilityFingerprint,
+  completenessMatcherCheckpointIdentity,
+  completenessMatcherInputHash,
+  completenessReviewerCheckpointIdentity,
+  completenessSlotKey,
+  compareCompleteness,
+  consistentReviewerModel,
+  lintCases,
+  matcherAudit,
+  materializeCompletenessFixture,
+  reusableAuditCheckpoint,
+  reusableCaseCheckpoint,
+  reusableCaseCheckpointForRow,
+  reusableMatcherCheckpoint,
+  reusableReviewerCheckpoint,
+  runCase,
+  runIndependentMatcherAudit,
+  summarize,
+  variantConsistency,
+  writeCompletenessBaseline,
 };
-
-/** Aggregate per-case results into the summary. Pure — unit-tested on synthetic results. */
-export function summarize(
-  rows: CompletenessCase[],
-  results: CaseResult[],
-  { matchModel = MATCH_MODEL, matchRuns = MATCH_RUNS } = {},
-): BenchSummary {
-  const s: BenchSummary = {
-    matchModel,
-    matchRuns,
-    cases: results.length,
-    caseOutages: 0,
-    slotOutages: 0,
-    outages: 0,
-    gold: { total: 0, hit: 0 },
-    decoys: { total: 0, flagged: 0, recorded: { total: 0, flagged: 0 } },
-    findings: { total: 0, matched: 0, spurious: 0 },
-    severity: { total: 0, exact: 0, confusion: {} },
-    verdicts: { total: 0, correct: 0 },
-    gapRecall: 0,
-    falseFlagRate: 0,
-    rows: {},
-    slots: {},
-  };
-  const byId = new Map(rows.map((r) => [r.id, r]));
-  for (const res of results) {
-    const row = byId.get(res.id);
-    if (!row) continue;
-    if (res.outage || !res.score) {
-      s.caseOutages += 1;
-      continue;
-    }
-    let caseOk = true;
-    let caseStable = true;
-    for (const slot of res.score.slots) {
-      if (slot.outage) {
-        s.slotOutages += 1;
-        continue; // an unmeasured slot joins no metric — outages>0 already taints the run
-      }
-      const key = `${res.id}::${slot.slotId}`;
-      s.slots[key] = {
-        kind: slot.kind,
-        got: slot.got,
-        ok: slot.ok,
-        stable: slot.stable,
-        expected: slot.kind === 'gold' ? 'hit' : 'clean',
-      };
-      caseOk &&= slot.ok;
-      caseStable &&= slot.stable;
-      if (slot.kind === 'gold') {
-        s.gold.total += 1;
-        if (slot.ok) s.gold.hit += 1;
-      } else {
-        s.decoys.total += 1;
-        const decoy = row.decoys.find((d) => d.id === slot.slotId);
-        const flagged = !slot.ok;
-        if (flagged) s.decoys.flagged += 1;
-        if (decoy?.kind === 'recorded-decision') {
-          s.decoys.recorded.total += 1;
-          if (flagged) s.decoys.recorded.flagged += 1;
-        }
-      }
-    }
-    s.rows[res.id] = { ok: caseOk, stable: caseStable };
-    s.findings.total += res.score.findingCount;
-    s.findings.spurious += res.score.spurious.length;
-    s.findings.matched += res.score.findingCount - res.score.spurious.length;
-    for (const p of res.score.severity) {
-      s.severity.total += 1;
-      if (p.expected === p.got) s.severity.exact += 1;
-      s.severity.confusion[p.expected] ??= {};
-      s.severity.confusion[p.expected][p.got] = (s.severity.confusion[p.expected][p.got] ?? 0) + 1;
-    }
-    if (row.expectedVerdict) {
-      s.verdicts.total += 1;
-      // A null verdict reads as PASS — the gate's own fail-open interpretation.
-      if ((res.verdict ?? 'PASS') === row.expectedVerdict) s.verdicts.correct += 1;
-    }
-  }
-  s.outages = s.caseOutages + s.slotOutages;
-  s.gapRecall = pct(s.gold.hit, s.gold.total);
-  s.falseFlagRate = pct(s.decoys.flagged, s.decoys.total);
-  return s;
-}
-
-/** Metamorphic groups: invariance variants must land the same per-slot outcome pattern. */
-export function variantConsistency(rows: CompletenessCase[], summary: BenchSummary) {
-  const groups: Record<string, Set<string>> = {};
-  for (const r of rows) {
-    if (!r.variantOf || r.variantKind === 'directional') continue;
-    groups[r.variantOf] ??= new Set([r.variantOf]);
-    groups[r.variantOf].add(r.id);
-  }
-  const ids = Object.keys(groups);
-  if (!ids.length) return null;
-  const pattern = (caseId: string) =>
-    Object.entries(summary.slots)
-      .filter(([k]) => k.startsWith(`${caseId}::`))
-      .map(([k, v]) => `${k.split('::')[1]}=${v.got}`)
-      .sort()
-      .join(',');
-  let consistent = 0;
-  const broken: string[] = [];
-  for (const g of ids) {
-    const patterns = new Set([...groups[g]].map(pattern).filter((p) => p !== ''));
-    if (patterns.size <= 1) consistent += 1;
-    else broken.push(g);
-  }
-  return { consistent, total: ids.length, broken };
-}
-
-// ─── Baseline comparison — floors + case-level flip gate ──────────────────────────
-
-/**
- * Statistically honest at small n, decisions-eval order of evaluation: (1) comparability
- * preconditions (config, gateHash, matcherHash, corpusHash, outages) skip rather than lie;
- * (2) hard floors on the safety metrics; (3) the paired CASE-level flip table under mid-p
- * McNemar, stable flips only; (4) informational deltas + slot-level flips + the MDE line.
- */
-export function compareCompleteness(summary: BenchSummary, base: BenchSummary | undefined) {
-  if (!base) return { regressed: false, lines: ['  no baseline — skipped'] };
-  const skip = (why: string) => ({
-    regressed: false,
-    lines: [`  ${why} — regenerate with --baseline; comparison skipped`],
-  });
-  for (const k of ['matchModel', 'matchRuns'] as const)
-    if (summary[k] !== base[k]) return skip(`baseline config differs (${k})`);
-  if (base.gateHash && summary.gateHash && base.gateHash !== summary.gateHash)
-    return skip('gate code / agent brief changed since the baseline');
-  if (base.matcherHash && summary.matcherHash && base.matcherHash !== summary.matcherHash)
-    return skip('matcher changed since the baseline');
-  if (base.corpusHash && summary.corpusHash && base.corpusHash !== summary.corpusHash)
-    return skip('corpus changed since the baseline');
-  if (summary.outages > 0) return skip(`${summary.outages} outage(s) this run — score is suspect`);
-
-  const lines: string[] = [];
-  let regressed = false;
-  const signed = (n: number) => `${n > 0 ? '+' : ''}${n.toFixed(3)}`;
-  lines.push(`  gap recall Δ ${signed(summary.gapRecall - base.gapRecall)}  (informational)`);
-  lines.push(
-    `  false-flag rate Δ ${signed(summary.falseFlagRate - base.falseFlagRate)}  (informational)`,
-  );
-
-  if (summary.gapRecall < FLOOR_GAP_RECALL) {
-    regressed = true;
-    lines.push(
-      `  FLOOR BREACH — gap recall ${summary.gapRecall.toFixed(2)} < ${FLOOR_GAP_RECALL} (catastrophic; fails regardless of flip statistics)`,
-    );
-  }
-  if (summary.falseFlagRate > CEILING_FALSE_FLAG) {
-    regressed = true;
-    lines.push(
-      `  CEILING BREACH — false-flag rate ${summary.falseFlagRate.toFixed(2)} > ${CEILING_FALSE_FLAG} (catastrophic; fails regardless of flip statistics)`,
-    );
-  }
-
-  // The gate: CASE-level flips (slots within a case share one transcript — clustered unit).
-  const b: string[] = [];
-  const c: string[] = [];
-  const unstable: string[] = [];
-  for (const [id, cur] of Object.entries(summary.rows)) {
-    const prev = base.rows?.[id];
-    if (!prev) continue;
-    if (prev.ok && !cur.ok) (cur.stable ? b : unstable).push(id);
-    else if (!prev.ok && cur.ok) c.push(id);
-  }
-  const midP = mcnemarMidP(b.length, c.length);
-  if (b.length + c.length > 0) {
-    const n = Object.keys(summary.rows).length;
-    const mde = 2.802 * Math.sqrt((b.length + c.length) / n / n);
-    lines.push(
-      `  case flips vs baseline — regressed [${b.join(', ') || '—'}] improved [${c.join(', ') || '—'}] (mid-p ${midP.toFixed(3)})`,
-    );
-    lines.push(
-      `  this bench cannot distinguish deltas below ~${(mde * 100).toFixed(0)}pp from judge noise at n=${n} cases`,
-    );
-  }
-  if (unstable.length)
-    lines.push(
-      `  unstable cases (unconfirmed flips — instability, not regression): [${unstable.join(', ')}]`,
-    );
-  // Slot-level flips print informationally — finer-grained diagnosis, never the gate.
-  const slotB = Object.entries(summary.slots)
-    .filter(([k, cur]) => base.slots?.[k]?.ok && !cur.ok && cur.stable)
-    .map(([k]) => k);
-  const slotC = Object.entries(summary.slots)
-    .filter(([k, cur]) => base.slots?.[k] && !base.slots[k].ok && cur.ok)
-    .map(([k]) => k);
-  if (slotB.length + slotC.length > 0)
-    lines.push(
-      `  slot flips (informational) — regressed [${slotB.join(', ') || '—'}] improved [${slotC.join(', ') || '—'}]`,
-    );
-  if (midP < 0.05 && b.length > c.length) {
-    regressed = true;
-    lines.push(
-      `  REGRESSION — one-directional case flips are significant (mid-p ${midP.toFixed(3)} < 0.05)`,
-    );
-  }
-  return { regressed, lines };
-}
-
-// ─── Hashes, ledger, estimate, coverage ───────────────────────────────────────────
-
-const sha12 = (s: string) => createHash('sha256').update(s).digest('hex').slice(0, 12);
-const SELF_EXT = import.meta.url.endsWith('.mts') ? '.mts' : '.mjs';
-// The agent brief IS gate code here — the prompt is what a run measures.
-const gateHash = () =>
-  sha12(
-    readFileSync(path.join(here, `../completeness${SELF_EXT}`), 'utf8') +
-      readFileSync(AGENT_MD, 'utf8'),
-  );
-const matcherHash = () => sha12(readFileSync(path.join(here, `matcher${SELF_EXT}`), 'utf8'));
 
 function appendLedger(entry: object) {
   try {
@@ -569,28 +136,44 @@ function appendLedger(entry: object) {
   }
 }
 
-function preflightClaude() {
+function preflightJudge(role: 'reviewer' | 'matcher', model: string) {
+  const bin = judgeBinForModel(model);
   try {
-    execFileSync('claude', ['--version'], { encoding: 'utf8', timeout: 30000 });
+    execFileSync(bin, ['--version'], { encoding: 'utf8', timeout: 30000 });
   } catch {
-    throw new BenchAbort(2, 'completeness-eval: `claude` CLI not available — cannot benchmark');
+    throw new BenchAbort(
+      2,
+      `completeness-eval: ${role} model ${model} requires \`${bin}\`, but that CLI is not available`,
+    );
   }
 }
 
-/** Budget from per-row costs (house convention), printed BEFORE any token is spent. */
-function printEstimate(rows: CompletenessCase[], matchRuns: number) {
-  const slots = rows.reduce((n, r) => n + r.gold.length + r.decoys.length, 0);
-  const revLo = rows.length * 60;
-  const revHi = rows.length * 360; // OBSERVED spread, not the cap (that would print ~5× the spend)
-  const matcher = Math.round((slots * matchRuns * 15) / MATCH_CONCURRENCY);
+function configuredReviewerModel(config: GuardConfig): string {
+  return resolveEscalationModel(config);
+}
+
+/** Budget from remaining paid work, printed BEFORE any token is spent. */
+function printEstimate(
+  reviewerCalls: number,
+  matcherSlots: number,
+  matchRuns: number,
+  remainingAuditSlots = 0,
+) {
+  const revLo = reviewerCalls * 60;
+  const revHi = reviewerCalls * 360; // OBSERVED spread, not the cap (that would print ~5× the spend)
+  const matcher = Math.round((matcherSlots * matchRuns * 15) / MATCH_CONCURRENCY);
+  const audit = Math.round((remainingAuditSlots * 15) / MATCH_CONCURRENCY);
   console.log(
-    `completeness-eval: budget ≈ ${Math.round((revLo + matcher) / 60)}–${Math.round((revHi + matcher) / 60)} min  ` +
-      `(${rows.length} reviewer rows × 60–360s · ${slots} slots × K=${matchRuns} matcher ÷ pool ${MATCH_CONCURRENCY}` +
+    `completeness-eval: budget ≈ ${Math.round((revLo + matcher + audit) / 60)}–${Math.round((revHi + matcher + audit) / 60)} min  ` +
+      `(${reviewerCalls} remaining reviewer calls × 60–360s · ${matcherSlots} remaining slots × K=${matchRuns} matcher ÷ pool ${MATCH_CONCURRENCY}` +
+      (remainingAuditSlots
+        ? ` · ${remainingAuditSlots} remaining current slots × K=1 independent audit ÷ pool ${MATCH_CONCURRENCY}`
+        : '') +
       ' · + one case re-run per baseline-discordant case)',
   );
 }
 
-/** Coverage matrix (zero claude calls). Cells a category cannot populate are n/a, not debt:
+/** Coverage matrix (zero judge calls). Cells a category cannot populate are n/a, not debt:
  * clean-complete rows have gold:[] by construction, so their severity cells are structural. */
 function printCoverage(rows: CompletenessCase[]) {
   console.log(`── completeness (${rows.length} rows) ──`);
@@ -637,51 +220,18 @@ function printCoverage(rows: CompletenessCase[]) {
   if (unset) console.log(`  COVERAGE DEBT: ${unset} row(s) missing a difficulty tag`);
 }
 
-// ─── Matcher audit ────────────────────────────────────────────────────────────────
-
-/**
- * Join committed audit labels ({caseId, slotId, match: "F<n>"|"NONE"}) against the latest run's
- * transcripts and print percent agreement + Cohen's κ. κ, not raw agreement, is the trust stat:
- * most slots are NONE, and a matcher that always says NONE "agrees" often by chance. Policy:
- * κ < 0.7 → the matcher is not trusted; fix matcher.mts before reading headline metrics.
- */
-export function matcherAudit(
-  labelsText: string,
-  readTranscript: (caseId: string) => { outcomes: { slotId: string; match: number }[] } | null,
-) {
-  const labels = parseCasesText(labelsText) as { caseId: string; slotId: string; match: string }[];
-  if (!labels.length) throw new BenchAbort(2, 'completeness-eval: no audit labels');
-  const a: string[] = [];
-  const b: string[] = [];
-  const missing: string[] = [];
-  for (const l of labels) {
-    const t = readTranscript(l.caseId);
-    const o = t?.outcomes.find((x) => x.slotId === l.slotId);
-    if (!o) {
-      missing.push(`${l.caseId}::${l.slotId}`);
-      continue;
-    }
-    a.push(l.match.toUpperCase());
-    b.push(o.match === 0 ? 'NONE' : `F${o.match}`);
-  }
-  const agree = a.filter((x, i) => x === b[i]).length;
-  return { n: a.length, agree, kappa: kappa(a, b), missing };
-}
-
-// ─── Orchestration ────────────────────────────────────────────────────────────────
-
 async function main(argv: string[]) {
   const args = new Set(argv);
   const writeBaseline = args.has('--baseline');
   const failOnRegression = args.has('--fail');
   const devOnly = args.has('--dev');
+  const fresh = args.has('--fresh');
   const onlyIdx = argv.indexOf('--only');
   const only = onlyIdx !== -1 ? argv[onlyIdx + 1] : null;
 
-  process.on('SIGINT', () => {
-    activeCleanup?.();
-    process.exit(130);
-  });
+  // Capture the consumer's effective file/env configuration before benchmark hygiene strips
+  // GUARD_*/FRINK_* from the synthetic repositories and judge processes.
+  const consumerConfig = resolveGuardConfig(process.cwd());
   const stripped = cleanBenchEnv();
   // cleanBenchEnv covers GUARD_*/FRINK_* + the six repo-corruption GIT vars; these two reshape
   // fixture `git init/commit` through global config and must go too.
@@ -706,10 +256,14 @@ async function main(argv: string[]) {
         2,
         `completeness-eval: no ${path.basename(auditLabelsPath)} — label a held sample first`,
       );
-    const res = matcherAudit(readFileSync(auditLabelsPath, 'utf8'), (caseId) => {
-      const f = path.join(transcriptsDir, `${caseId}.json`);
-      return existsSync(f) ? JSON.parse(readFileSync(f, 'utf8')) : null;
-    });
+    const res = matcherAudit(
+      readFileSync(auditLabelsPath, 'utf8'),
+      (caseId) => {
+        const f = transcriptPath(caseId);
+        return existsSync(f) ? JSON.parse(readFileSync(f, 'utf8')) : null;
+      },
+      LEGACY_AUDIT_REVIEWER_MODEL,
+    );
     console.log(
       `matcher-audit: agreement ${fmtCi(res.agree, res.n)} · Cohen's κ ${res.kappa.toFixed(3)}`,
     );
@@ -739,36 +293,251 @@ async function main(argv: string[]) {
   if (only) rows = rows.filter((r) => r.id.startsWith(only));
   if (!rows.length) throw new BenchAbort(2, 'completeness-eval: no rows after filtering');
 
-  preflightClaude();
+  const releaseProgressLock = acquireCompletenessProgressLock();
+  installProgressLockTerminationHandlers(releaseProgressLock, cleanupActiveFixture);
+
+  if (consumerConfig.noLlm)
+    throw new BenchAbort(2, 'completeness-eval: noLlm is enabled — the gate cannot be measured');
+  const expectedReviewerModel = configuredReviewerModel(consumerConfig);
+  preflightJudge('reviewer', expectedReviewerModel);
+  preflightJudge('matcher', MATCH_MODEL);
   if (!existsSync(AGENT_MD))
     throw new BenchAbort(2, `completeness-eval: ${AGENT_MD} missing — nothing to measure`);
-  printEstimate(rows, MATCH_RUNS);
+  if (fresh) {
+    resetCompletenessProgress();
+    console.log('completeness-eval: cleared durable progress (--fresh)');
+  }
 
-  const gh = gateHash();
+  const expectedMcpCapabilityFingerprint = completenessFixtureCapabilityFingerprint(
+    rows[0],
+    AGENTS_DIR,
+    consumerConfig,
+  );
+  const gh = gateHash(expectedMcpCapabilityFingerprint);
   const mh = matcherHash();
+  const corpusHash = sha12(JSON.stringify(rows));
   const baseline: { completeness?: BenchSummary } = existsSync(baselinePath)
     ? JSON.parse(readFileSync(baselinePath, 'utf8'))
     : {};
-  const retryAgainst = baseline.completeness ?? null;
+  const retryAgainst =
+    baseline.completeness?.reviewerModel === expectedReviewerModel &&
+    baseline.completeness.mcpCapabilityFingerprint === expectedMcpCapabilityFingerprint &&
+    baseline.completeness.matchModel === MATCH_MODEL &&
+    baseline.completeness.matchRuns === MATCH_RUNS &&
+    baseline.completeness.gateHash === gh &&
+    baseline.completeness.matcherHash === mh &&
+    baseline.completeness.corpusHash === corpusHash
+      ? baseline.completeness
+      : null;
+
+  const caseCheckpoint = openCheckpointStore<CaseCheckpointValue>({
+    kind: 'case',
+    identity: completenessCaseCheckpointIdentity({
+      reviewerModel: expectedReviewerModel,
+      mcpCapabilityFingerprint: expectedMcpCapabilityFingerprint,
+      retryBaselineHash: retryBaselineFingerprint(retryAgainst),
+      noLlm: consumerConfig.noLlm,
+    }),
+    decode: (value) => reusableCaseCheckpoint(value, expectedReviewerModel),
+    accept: (value) => caseCheckpointIsReusable(value, expectedReviewerModel),
+  });
+  const reviewerCheckpoint = openCheckpointStore<ReviewerCheckpointValue>({
+    kind: 'reviewer',
+    identity: completenessReviewerCheckpointIdentity(
+      expectedReviewerModel,
+      expectedMcpCapabilityFingerprint,
+      consumerConfig.noLlm,
+    ),
+    decode: (value) =>
+      reusableReviewerCheckpoint(value, expectedReviewerModel, expectedMcpCapabilityFingerprint),
+  });
+  const matcherCheckpoint = openCheckpointStore<MatcherCheckpointValue>({
+    kind: 'matcher',
+    identity: completenessMatcherCheckpointIdentity(),
+    decode: reusableMatcherCheckpoint,
+    accept: (value) => !value.outcome.outage,
+  });
+  const auditCheckpoint = openCheckpointStore<AuditCheckpointValue>({
+    kind: 'audit',
+    identity: completenessAuditCheckpointIdentity(
+      expectedReviewerModel,
+      expectedMcpCapabilityFingerprint,
+    ),
+    decode: reusableAuditCheckpoint,
+    accept: (value) => !value.outcome.outage,
+  });
+  const savedById = new Map<string, CaseCheckpointValue>();
+  for (const row of rows) {
+    const saved = caseCheckpoint.take(
+      row.id,
+      completenessCaseInputHash(row, expectedMcpCapabilityFingerprint),
+    );
+    if (reusableCaseCheckpointForRow(saved, row, expectedReviewerModel))
+      savedById.set(row.id, saved);
+  }
+  const needsRetry = (row: CompletenessCase, result: CaseResult): boolean => {
+    const prior = retryAgainst?.rows?.[row.id];
+    if (!prior || result.outage || !result.score) return false;
+    const caseOk = result.score.slots.every((slot) => slot.outage || slot.ok);
+    return caseOk !== prior.ok;
+  };
+  type ReviewerPhase = 'primary' | 'retry';
+  const reviewerPhaseKey = (row: CompletenessCase, phase: ReviewerPhase) => `${row.id}::${phase}`;
+  const savedReviewer = (row: CompletenessCase, phase: ReviewerPhase) =>
+    reviewerCheckpoint.take(
+      reviewerPhaseKey(row, phase),
+      completenessCaseInputHash(row, expectedMcpCapabilityFingerprint),
+    );
+  const runCheckpointedCase = (
+    row: CompletenessCase,
+    phase: ReviewerPhase,
+    saveTranscript = true,
+  ) => {
+    const inputHash = completenessCaseInputHash(row, expectedMcpCapabilityFingerprint);
+    const key = reviewerPhaseKey(row, phase);
+    return runCase(row, {
+      saveTranscript,
+      reviewerResume: reviewerCheckpoint.take(key, inputHash),
+      onReviewerComplete: (value) => reviewerCheckpoint.record(key, inputHash, value),
+      matcherCheckpoint,
+      expectedCapabilityFingerprint: expectedMcpCapabilityFingerprint,
+      consumerConfig,
+    });
+  };
+  const expectedSlots = (row: CompletenessCase) => [
+    ...row.gold.map((slot) => ({ id: slot.id, kind: 'gold' as const })),
+    ...row.decoys.map((slot) => ({ id: slot.id, kind: 'decoy' as const })),
+  ];
+  const outcomeMatches = (
+    outcome: SlotOutcome | undefined,
+    expected: { id: string; kind: 'gold' | 'decoy' },
+    findingCount: number,
+  ) =>
+    outcome?.slotId === expected.id &&
+    outcome.kind === expected.kind &&
+    !outcome.outage &&
+    Number.isInteger(outcome.match) &&
+    outcome.match >= 0 &&
+    outcome.match <= findingCount;
+  const matcherWorkRemaining = (
+    row: CompletenessCase,
+    reviewer: ReviewerCheckpointValue | undefined,
+  ) => {
+    const slots = expectedSlots(row);
+    if (!reviewer) return slots.length;
+    const findings = parseFindings(reviewer.raw).findings;
+    if (!findings.length) return 0;
+    const inputHash = completenessMatcherInputHash(row, findings);
+    return slots.filter((slot) => {
+      const saved = matcherCheckpoint.take(completenessSlotKey(row.id, slot.id), inputHash);
+      return !outcomeMatches(saved?.outcome, slot, findings.length);
+    }).length;
+  };
+  let remainingReviewerCalls = 0;
+  let remainingMatcherSlots = 0;
+  const savedMatcherSlotKeys = new Set<string>();
+  for (const row of rows) {
+    const saved = savedById.get(row.id);
+    if (!saved) {
+      const reviewer = savedReviewer(row, 'primary');
+      if (!reviewer) remainingReviewerCalls += 1;
+      remainingMatcherSlots += matcherWorkRemaining(row, reviewer);
+    } else if (!saved.retryComplete && needsRetry(row, saved.result)) {
+      const reviewer = savedReviewer(row, 'retry');
+      if (!reviewer) remainingReviewerCalls += 1;
+      remainingMatcherSlots += matcherWorkRemaining(row, reviewer);
+    }
+    for (const phase of ['primary', 'retry'] as const) {
+      const reviewer = savedReviewer(row, phase);
+      if (!reviewer) continue;
+      const findings = parseFindings(reviewer.raw).findings;
+      const inputHash = completenessMatcherInputHash(row, findings);
+      for (const slot of expectedSlots(row)) {
+        const matcherSaved = matcherCheckpoint.take(
+          completenessSlotKey(row.id, slot.id),
+          inputHash,
+        );
+        if (outcomeMatches(matcherSaved?.outcome, slot, findings.length))
+          savedMatcherSlotKeys.add(JSON.stringify([row.id, slot.id, inputHash]));
+      }
+    }
+  }
+  let remainingAuditSlots = 0;
+  let savedAuditSlots = 0;
+  if (writeBaseline) {
+    for (const row of rows) {
+      const saved = savedById.get(row.id);
+      const total = row.gold.length + row.decoys.length;
+      if (!saved?.result.findings) {
+        remainingAuditSlots += total;
+        continue;
+      }
+      const inputHash = completenessAuditInputHash(row, saved.result);
+      remainingAuditSlots += expectedSlots(row).filter((slot) => {
+        const key = completenessSlotKey(row.id, slot.id);
+        const savedAudit = auditCheckpoint.take(key, inputHash);
+        const prefixed = { ...slot, id: key };
+        const matches = outcomeMatches(
+          savedAudit?.outcome,
+          prefixed,
+          saved.result.findings!.length,
+        );
+        if (matches) savedAuditSlots += 1;
+        return !matches;
+      }).length;
+    }
+  }
+  const savedReviewerCount = rows.reduce(
+    (count, row) =>
+      count +
+      Number(Boolean(savedReviewer(row, 'primary'))) +
+      Number(Boolean(savedReviewer(row, 'retry'))),
+    0,
+  );
+  if (savedById.size || savedReviewerCount || savedMatcherSlotKeys.size || savedAuditSlots)
+    console.log(
+      `completeness-eval: durable progress — ${savedById.size}/${rows.length} complete case(s), ${savedReviewerCount} reviewer response(s), ${savedMatcherSlotKeys.size} matcher slot(s), ${savedAuditSlots} audit slot(s)`,
+    );
+  printEstimate(remainingReviewerCalls, remainingMatcherSlots, MATCH_RUNS, remainingAuditSlots);
 
   const results: CaseResult[] = [];
+  const observedReviewerRuns: CaseResult[] = [];
+  let retryCaseOutages = 0;
+  let retrySlotOutages = 0;
   for (const row of rows) {
-    const res = await runCase(row);
+    const inputHash = completenessCaseInputHash(row, expectedMcpCapabilityFingerprint);
+    const saved = savedById.get(row.id);
+    const res = saved?.result ?? (await runCheckpointedCase(row, 'primary'));
+    observedReviewerRuns.push(res);
     // Alignment convention: a case whose outcome disagrees with the baseline re-runs ONCE.
     // 1-of-2 disagreement = instability (never a counted flip); 2-of-2 = a real flip.
-    if (!res.outage && res.score && retryAgainst?.rows?.[row.id]) {
-      const caseOk = res.score.slots.every((sl) => sl.outage || sl.ok);
-      if (caseOk !== retryAgainst.rows[row.id].ok) {
-        console.log(`  ${row.id.padEnd(34)} …disagrees with baseline — retrying once`);
-        const res2 = await runCase(row, { saveTranscript: false });
-        if (!res2.outage && res2.score) {
-          const byId = new Map(res2.score.slots.map((sl) => [sl.slotId, sl]));
-          for (const sl of res.score.slots) {
-            const again = byId.get(sl.slotId);
-            if (again && again.ok !== sl.ok) sl.stable = false; // unconfirmed → instability
-          }
-        }
-      }
+    const retryRequired = needsRetry(row, res);
+    if (
+      !saved &&
+      caseCheckpointIsReusable(
+        { result: res, retryComplete: !retryRequired },
+        expectedReviewerModel,
+      )
+    )
+      caseCheckpoint.record(row.id, inputHash, { result: res, retryComplete: !retryRequired });
+    if (retryRequired && !saved?.retryComplete) {
+      // Persist the paid primary before the retry. A kill during the retry resumes from this phase
+      // boundary instead of paying for the primary reviewer and matcher a second time.
+      if (caseCheckpointIsReusable({ result: res, retryComplete: false }, expectedReviewerModel))
+        caseCheckpoint.record(row.id, inputHash, { result: res, retryComplete: false });
+      console.log(`  ${row.id.padEnd(34)} …disagrees with baseline — retrying once`);
+      const res2 = await runCheckpointedCase(row, 'retry', false);
+      observedReviewerRuns.push(res2);
+      const retryEvidence = applyRetryEvidence(res, res2);
+      retryCaseOutages += retryEvidence.caseOutages;
+      retrySlotOutages += retryEvidence.slotOutages;
+      if (
+        retryEvidence.caseOutages === 0 &&
+        retryEvidence.slotOutages === 0 &&
+        res2.reviewerModel === expectedReviewerModel &&
+        caseCheckpointIsReusable({ result: res, retryComplete: true }, expectedReviewerModel)
+      )
+        caseCheckpoint.record(row.id, inputHash, { result: res, retryComplete: true });
     }
     results.push(res);
     if (res.outage) console.log(`  ${row.id.padEnd(34)} OUTAGE (reviewer dark — row excluded)`);
@@ -781,20 +550,45 @@ async function main(argv: string[]) {
       const ok = hits === goldN && flagged === 0;
       console.log(
         `  ${row.id.padEnd(34)} ${ok ? 'OK  ' : 'FAIL'}  gold ${hits}/${goldN} · decoys flagged ${flagged}/${decoyN} · spurious ${sc.spurious.length}` +
-          (res.warnings.length ? `  (${res.warnings.join('; ')})` : ''),
+          (res.warnings.length ? `  (${res.warnings.join('; ')})` : '') +
+          (saved ? '  (checkpoint)' : ''),
       );
     }
   }
   if (results.length && results.every((r) => r.outage))
     throw new BenchAbort(2, 'completeness-eval: every case was an outage');
 
-  const s = summarize(rows, results);
+  const reviewerModel = consistentReviewerModel(observedReviewerRuns);
+  if (reviewerModel !== expectedReviewerModel)
+    throw new BenchAbort(
+      2,
+      `completeness-eval: reviewer preflight selected ${expectedReviewerModel}, but judge argv used ${reviewerModel}`,
+    );
+  const s = summarize(rows, results, { reviewerModel });
+  s.mcpCapabilityFingerprint = expectedMcpCapabilityFingerprint;
+  s.caseOutages += retryCaseOutages;
+  s.slotOutages += retrySlotOutages;
+  s.outages = s.caseOutages + s.slotOutages;
   s.gateHash = gh;
   s.matcherHash = mh;
-  s.corpusHash = sha12(JSON.stringify(rows));
+  s.corpusHash = corpusHash;
+  const floorsPass = s.gapRecall >= FLOOR_GAP_RECALL && s.falseFlagRate <= CEILING_FALSE_FLAG;
+  if (writeBaseline && s.outages === 0 && floorsPass) {
+    const audit = await runIndependentMatcherAudit(rows, results, {
+      model: reviewerModel,
+      checkpoint: auditCheckpoint,
+    });
+    s.matcherAudit = {
+      model: audit.model,
+      n: audit.n,
+      agree: audit.agree,
+      kappa: audit.kappa,
+      missing: audit.missing.length,
+    };
+  }
 
   console.log(
-    `\ncompleteness: ${results.length} case(s)  [matcher=${s.matchModel} K=${s.matchRuns} · reviewer=opus K=1]`,
+    `\ncompleteness: ${results.length} case(s)  [matcher=${s.matchModel} K=${s.matchRuns} · reviewer=${s.reviewerModel} K=1]`,
   );
   console.log(
     `  headline: gap recall ${fmtCi(s.gold.hit, s.gold.total)}  (floor ${FLOOR_GAP_RECALL})`,
@@ -826,6 +620,11 @@ async function main(argv: string[]) {
     console.log(
       `  outages: ${s.caseOutages} case(s) + ${s.slotOutages} slot(s) — score is suspect, rerun before trusting`,
     );
+  if (s.matcherAudit)
+    console.log(
+      `  matcher audit: agreement ${fmtCi(s.matcherAudit.agree, s.matcherAudit.n)} · Cohen's κ ${s.matcherAudit.kappa.toFixed(3)}` +
+        (s.matcherAudit.missing ? ` · missing ${s.matcherAudit.missing}` : ''),
+    );
   const vc = variantConsistency(rows, s);
   if (vc)
     console.log(
@@ -838,6 +637,8 @@ async function main(argv: string[]) {
   appendLedger({
     ts: new Date().toISOString(),
     args: [...args],
+    reviewerModel: s.reviewerModel,
+    mcpCapabilityFingerprint: s.mcpCapabilityFingerprint,
     matchModel: s.matchModel,
     matchRuns: s.matchRuns,
     gateHash: gh,
@@ -847,12 +648,12 @@ async function main(argv: string[]) {
     gapRecall: Number(s.gapRecall.toFixed(3)),
     falseFlagRate: Number(s.falseFlagRate.toFixed(3)),
     outages: s.outages,
+    matcherAudit: s.matcherAudit,
     regressed,
   });
 
   if (writeBaseline) {
-    baseline.completeness = s;
-    writeFileSync(baselinePath, `${JSON.stringify(baseline, null, 2)}\n`);
+    writeCompletenessBaseline(baselinePath, baseline, s);
     console.log(`\nwrote baseline → ${path.relative(process.cwd(), baselinePath)}`);
   }
   if (failOnRegression && regressed) {
