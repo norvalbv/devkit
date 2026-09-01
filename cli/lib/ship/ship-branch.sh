@@ -47,8 +47,10 @@ export GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -o BatchMode=yes}"
 # Bound branch-source advertisement/fetch before the already-bounded gate runner starts. The shared
 # supervisor terminates the complete Git/helper process group on expiry (portable on macOS/Linux).
 bounded_remote_git() {
-  node "$SCRIPT_DIR/review/process/gate-supervisor.mts" \
-    "${DEVKIT_REMOTE_TIMEOUT_SECONDS:-60}" -- git "$@"
+  # .mts in source, built .mjs in an installed consumer (the gate-config-paths dual-ext idiom).
+  local supervisor="$SCRIPT_DIR/review/process/gate-supervisor.mts"
+  [ -f "$supervisor" ] || supervisor="$SCRIPT_DIR/review/process/gate-supervisor.mjs"
+  node "$supervisor" "${DEVKIT_REMOTE_TIMEOUT_SECONDS:-60}" -- git "$@"
 }
 
 # `--resume <branch>` replays the invocation the previous attempt recorded (ship-intent.mts). A
