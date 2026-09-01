@@ -93,12 +93,16 @@ export function seedShipRepo({ hookBody = 'exit 0', origin = 'git@github.com:acm
     execFileSync('git', args, { cwd: dir, env, encoding: 'utf8', ...opts });
   mkdirSync(join(dir, '.husky'), { recursive: true });
   writeFileSync(join(dir, '.husky/.keep'), '');
+  // `devkit init` writes this line. ship-intent refuses to record an invocation whose file is not
+  // ignored, and since sc-2414 an explicit `--pr` publication requires that record — so a fixture
+  // without it exercises the refusal, not the path under test.
+  writeFileSync(join(dir, '.gitignore'), '.devkit/ship-intent-*\n');
   for (const a of [
     ['init', '-q', '-b', 'work'],
     ['config', 'user.email', 'a@b.c'],
     ['config', 'user.name', 'a'],
     ['config', 'commit.gpgsign', 'false'],
-    ['add', '.husky/.keep'],
+    ['add', '.husky/.keep', '.gitignore'],
     ['commit', '-q', '-m', 'base'],
     ['config', 'core.hooksPath', '.husky/_'],
     ['remote', 'add', 'origin', origin],

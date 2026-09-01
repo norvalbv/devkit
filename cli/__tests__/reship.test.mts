@@ -562,14 +562,20 @@ describe('reship — explicit bodies refresh the existing PR (sc-2414)', () => {
       dir,
       { ...env, GATE_PAUSE_MARKER: oldPaused, GATE_PAUSE_RELEASE: oldRelease },
     );
-    const oldDeadline = Date.now() + 5000;
+    // A busy machine can take far longer than 5s to reach the hook, and the old deadline branch
+    // released the publisher BEFORE the superseding write below — so the run under test finished
+    // unsuperseded and `not.toBe(0)` failed on a scheduling artifact rather than a real defect.
+    const oldDeadline = Date.now() + 60000;
     while (!existsSync(oldPaused) && oldRun.child.exitCode === null && Date.now() < oldDeadline)
       await new Promise((resolve) => setTimeout(resolve, 20));
     if (!existsSync(oldPaused)) {
       writeFileSync(oldRelease, 'deadline elapsed\n');
       const early = await oldRun.completed;
-      expect(existsSync(oldPaused), early.stderr).toBe(true);
+      expect.fail(`old publisher never parked in its gates: ${early.stderr}`);
     }
+    // Parked, not finished: a publisher that already exited cannot observe the supersession, and
+    // asserting against it below would report a refusal failure that never had a window to occur.
+    expect(oldRun.child.exitCode, 'old publisher exited before it could be superseded').toBeNull();
 
     const superseding = spawnSync(
       'node',
