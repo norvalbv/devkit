@@ -30,10 +30,6 @@ const fill = (root, dir, n, prefix = 'file') => {
 
 const writeConfig = (root, cfg) =>
   writeFileSync(join(root, 'guard.config.json'), JSON.stringify(cfg));
-const write = (root, rel, content) => {
-  mkdirSync(join(root, dirname(rel)), { recursive: true });
-  writeFileSync(join(root, rel), content);
-};
 const gitInit = (root) => {
   execFileSync('git', ['init', '-q'], { cwd: root });
   execFileSync('git', ['config', 'user.email', 't@t.t'], { cwd: root });
@@ -139,28 +135,6 @@ describe('CLI freeze/gate contract', () => {
     const frozen = JSON.parse(readFileSync(join(root, '.devkit/baselines/fanout.json'), 'utf8'));
     expect(frozen.dirs['src/pile']).toBe(20);
     expect(run(root, 'gate').status).toBe(0);
-  });
-
-  it('reads a legacy fan-out baseline and canonicalizes it on the next freeze', () => {
-    const root = makeRoot();
-    writeConfig(root, {});
-    fill(root, 'src/pile', 20);
-    write(
-      root,
-      'eslint/baselines/fanout.json',
-      JSON.stringify({ cap: FANOUT_CAP, dirs: { 'src/pile': 20 } }),
-    );
-
-    expect(run(root, 'gate').status).toBe(0);
-    fill(root, 'src/pile', 21);
-    const result = run(root, 'gate');
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain('src/pile: 21 files (allowed 20)');
-
-    expect(run(root, 'freeze').status).toBe(0);
-    const canonical = JSON.parse(readFileSync(join(root, '.devkit/baselines/fanout.json'), 'utf8'));
-    expect(canonical.dirs['src/pile']).toBe(21);
-    expect(() => readFileSync(join(root, 'eslint/baselines/fanout.json'))).toThrow();
   });
 
   it('writes the baseline under the CONSUMER cwd, not the package dir (W-3)', () => {

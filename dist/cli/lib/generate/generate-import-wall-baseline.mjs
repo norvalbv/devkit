@@ -189,7 +189,6 @@ export function generateImportWallBaseline(cwd = process.cwd(), opts = {}) {
     const { entries, classCounts } = computeImportWallBaseline(cwd, opts);
     const exportName = opts.walls?.exportName ?? DEFAULT_WALLS.exportName;
     const out = join(cwd, OUT);
-    const legacy = join(cwd, LEGACY_IMPORT_WALL_BASELINE);
     if (!opts.dryRun) {
         if (entries.length > 0) {
             mkdirSync(dirname(out), { recursive: true });
@@ -200,7 +199,8 @@ export function generateImportWallBaseline(cwd = process.cwd(), opts = {}) {
             // (the eslint loader returns [] on absence, so enforcement is unchanged).
             rmSync(out, { force: true });
         }
-        rmSync(legacy, { force: true });
+        // A surviving retired copy would be migrated back by the next init/upgrade (sc-2256).
+        rmSync(join(cwd, LEGACY_IMPORT_WALL_BASELINE), { force: true });
     }
     log(`  ${opts.dryRun ? '[dry-run] ' : '✓ '}${OUT}: ${entries.length} grandfathered file(s)`);
     for (const [w, n] of Object.entries(classCounts).sort())

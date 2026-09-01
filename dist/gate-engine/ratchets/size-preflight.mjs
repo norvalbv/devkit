@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { resolveGuardConfig, sourceMatchers } from '../config.mjs';
-import { LEGACY_LINES_BASELINE, readRatchetBaseline } from './baseline-paths.mjs';
+import { readRatchetBaseline } from './baseline-paths.mjs';
 import { stagedSet, treeTextAtRef } from './git-index.mjs';
 import { decodeLineBaseline, effectiveLineCeiling, measureLines, normalizeCandidateLineBaseline, normalizeLineBaseline, } from './size-line-authority.mjs';
 import { LINES_BASELINE, SIZE_SKIP_DIRS } from './size-policy.mjs';
@@ -17,7 +17,7 @@ function readLinesBaselineAtRef(root, ref) {
         cwd: root,
         stdio: ['ignore', 'pipe', 'ignore'],
     });
-    const text = treeTextAtRef(root, ref, LINES_BASELINE) ?? treeTextAtRef(root, ref, LEGACY_LINES_BASELINE);
+    const text = treeTextAtRef(root, ref, LINES_BASELINE);
     if (text === null)
         return null;
     return normalizeLineBaseline(readLinesBaseline(text, ref), (file) => treeTextAtRef(root, ref, file));
@@ -46,7 +46,7 @@ export function preflightLines(root, ref, requested = []) {
         cfg = resolveGuardConfig(root);
         if (!cfg.maxLines && !cfg.maxTestLines)
             return 0;
-        const localBaseline = readRatchetBaseline(root, LINES_BASELINE, LEGACY_LINES_BASELINE);
+        const localBaseline = readRatchetBaseline(root, LINES_BASELINE);
         local = readLinesBaseline(localBaseline?.contents ?? null, localBaseline?.relativePath ?? LINES_BASELINE);
     }
     catch (error) {
@@ -65,7 +65,7 @@ export function preflightLines(root, ref, requested = []) {
     const match = sourceMatchers(cfg.sourceExtensions);
     const cap = (file) => (match.isTest(file) ? cfg.maxTestLines : cfg.maxLines);
     const selected = requested.length > 0 ? requested : [...(stagedSet(root) ?? [])];
-    const baselineIncluded = selected.some((file) => file === LINES_BASELINE || file === LEGACY_LINES_BASELINE);
+    const baselineIncluded = selected.some((file) => file === LINES_BASELINE);
     const files = sourcePaths(root, cfg, selected).filter((file) => cap(file) > 0);
     if (files.length === 0) {
         if (requested.length === 0) {
