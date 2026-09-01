@@ -87,8 +87,19 @@ case "$tool" in
             sleep 30 &
             wait $!
         fi
+        # COMP_FIRST: the ordering the narration tests depend on — this judge REACHES ITS VERDICT
+        # before the fleet blocks, so the hook reaps an already-exited child (status = COMP_RC)
+        # rather than killing one mid-judgement (status 143). Without the sentinel the two race,
+        # and the test passes or fails on scheduler luck.
+        [ -n "\${COMP_FIRST:-}" ] && echo done > "$HOME/comp-exited"
         exit \${COMP_RC:-0};;
-      *) [ -n "\${COMP_SLOW_TERM:-}" ] && sleep 0.1; exit \${REVIEW_RC:-0};;
+      *)
+        if [ -n "\${COMP_FIRST:-}" ]; then
+            i=0
+            while [ ! -f "$HOME/comp-exited" ] && [ "$i" -lt 200 ]; do sleep 0.05; i=$((i+1)); done
+            sleep 0.2
+        fi
+        [ -n "\${COMP_SLOW_TERM:-}" ] && sleep 0.1; exit \${REVIEW_RC:-0};;
     esac;;
   *) exit 0;;
 esac
@@ -450,7 +461,51 @@ describe('parallel completeness prewarm (ship message file present)', () => {
     const r = runHook({ REVIEW_RC: '1', COMP_RC: '1' }, undefined, { shipMsg: true });
     expect(r.status).toBe(1);
     expect(r.stdout).toContain('escalation-confirmed');
+    // The completeness verdict must not BLOCK here — the fleet already owns this exit.
     expect(r.stdout).not.toContain('Confirmed completeness gap');
+  });
+
+  it("a completeness finding the fleet overtook is NARRATED, below the fleet's own remediation", () => {
+    const r = runHook({ REVIEW_RC: '1', COMP_RC: '1', COMP_FIRST: '1' }, undefined, {
+      shipMsg: true,
+    });
+    expect(r.status).toBe(1); // still the fleet's verdict — narration cannot change it
+    expect(r.stdout).toContain('the completeness judge had ALREADY recorded a');
+    // Below, not above: a tail-based read is the whole point.
+    expect(r.stdout.indexOf('ALREADY recorded')).toBeGreaterThan(
+      r.stdout.indexOf('escalation-confirmed'),
+    );
+  });
+
+  it('narrates nothing for a completeness exit the reader cannot act on (3 = judge unavailable)', () => {
+    // COMP_FIRST so this proves 3 is DELIBERATELY ignored, not that the judge happened to be
+    // killed before reaching a verdict — the two are indistinguishable without the ordering.
+    const r = runHook({ REVIEW_RC: '1', COMP_RC: '3', COMP_FIRST: '1' }, undefined, {
+      shipMsg: true,
+    });
+    expect(r.status).toBe(1);
+    expect(r.stdout).toContain('escalation-confirmed');
+    expect(r.stdout).not.toContain('ALREADY recorded');
+  });
+
+  it('narrates nothing when the fleet passes — the crc dispatch owns that path unchanged', () => {
+    const r = runHook({ COMP_RC: '1' }, undefined, { shipMsg: true });
+    expect(r.status).toBe(1);
+    expect(r.stdout).toContain('Confirmed completeness gap');
+    expect(r.stdout).not.toContain('ALREADY recorded');
+  });
+
+  // The fragment is POSIX sh, and the narration adds a shell FUNCTION plus a `|| var=$?` capture
+  // inside an errexit'd hook. Debian/Ubuntu run these under dash, where a bashism is a hard error
+  // rather than a warning — prove it there instead of assuming.
+  it.runIf(hasDash)('dash (Debian/Ubuntu /bin/sh): the finding still surfaces', () => {
+    const r = runHook({ REVIEW_RC: '1', COMP_RC: '1', COMP_FIRST: '1' }, undefined, {
+      shipMsg: true,
+      shell: '/bin/dash',
+    });
+    expect(r.status).toBe(1);
+    expect(r.stdout).toContain('escalation-confirmed');
+    expect(r.stdout).toContain('ALREADY recorded');
   });
 
   it('review mode does NOT prewarm — it exports the same env for its reviewer intent file', () => {
@@ -478,6 +533,9 @@ describe('parallel completeness prewarm (ship message file present)', () => {
     expect(existsSync(join(r.home, 'comp-running'))).toBe(true); // the judge really did start
     // Written only by the TERM handler, after a delay: present iff the hook waited for it.
     expect(existsSync(join(r.home, 'comp-reaped'))).toBe(true);
+    // 143 is a judge killed MID-judgement: it reached no verdict, so there is nothing honest to
+    // report. A fabricated one is worse than silence.
+    expect(r.stdout).not.toContain('ALREADY recorded');
   });
 
   it('the fleet failing CLOSED (exit 3) also kills and reaps — every block path, not just exit 1', () => {

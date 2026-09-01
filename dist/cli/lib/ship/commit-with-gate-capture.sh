@@ -411,5 +411,26 @@ SHIP_HOOK_WRAPPER
         fi ;;
     esac
   fi
+
+  # sc-2488. ONE call site, below every terminal arm above, so a tail-based read — the read the
+  # `--resume` line invites — sees the gates that found something but did NOT stop this run. The
+  # parallel completeness judge is the case that motivated it: the fleet blocks first, the hook
+  # reaps the judge, and its finding stays buried mid-log until a later round rediscovers it.
+  #
+  # Deliberately NOT repeated per arm: review-gate-in-chain's sc-1465 note replaced exactly that
+  # shape after 37 of 40 exit sites had silently missed the terminal line. This function has one
+  # return, so one call before it covers all five arms and cannot be missed by a sixth.
+  #
+  # Narration only, per blocking-gates-narrate-attribution-never-depend-on-it: it runs after $rc is
+  # final, holds no exit, is errexit-suppressed, and prints nothing on every unhappy path (the
+  # reader contains its own failures and emits an empty string). The command GROUP fixes the
+  # redirection order — the inner 2>/dev/null discards the reader's own stderr, the group's stdout
+  # becomes ship stderr, and a ship's stdout stays reserved for the PR URL.
+  local digest_reader
+  digest_reader="$(dirname "${BASH_SOURCE[0]}")/digest/gate-digest.mts"
+  [ -f "$digest_reader" ] || digest_reader="$(dirname "${BASH_SOURCE[0]}")/digest/gate-digest.mjs"
+  if [ -f "$digest_reader" ]; then
+    { node "$digest_reader" digest "${DEVKIT_GATE_EVENTS:-}" "${DEVKIT_SHIP_ID:-}" "$log" 2>/dev/null || true; } >&2
+  fi
   return "$rc"
 }
