@@ -34,6 +34,7 @@ vi.mock('../commands/doctor.mts', () => ({ default: vi.fn(async () => 0) }));
 import update, { fetchLatestTag } from '../commands/update.mts';
 import { applyInit } from '../commands/init.mts';
 import upgrade from '../commands/upgrade.mts';
+import { ANTI_SLOP_BASELINE_REL, ANTI_SLOP_UPSTREAM } from '../lib/install/anti-slop/constants.mts';
 
 const REF = 'git+https://github.com/norvalbv/devkit.git';
 const made: string[] = [];
@@ -112,6 +113,13 @@ describe('upgrade version step — converge in one pass vs re-run (Option B)', (
     config.selfHost = true;
     config.components.disabledGuards = ['comments', 'review'];
     writeFileSync(configPath, JSON.stringify(config));
+    // applyInit is mocked to a no-op here, so nothing creates the anti-slop baseline the real
+    // one writes. selfHostSelection forces `antiSlop: true`, and since sc-2308 the self-host
+    // path adopts activated findings into that baseline — absent, upgrade refuses with exit 1.
+    writeFileSync(
+      join(dir, ANTI_SLOP_BASELINE_REL),
+      `${JSON.stringify({ schemaVersion: 1, upstreamCommit: ANTI_SLOP_UPSTREAM, entries: [] })}\n`,
+    );
     silence();
 
     expect(await upgrade([], dir)).toBe(0);

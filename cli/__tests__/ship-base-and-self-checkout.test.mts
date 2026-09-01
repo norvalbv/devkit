@@ -12,6 +12,7 @@ import {
   GIT_ENV,
   localBranchExists,
   manifestOf,
+  publishEnvFor,
   remoteBranchExists,
   reshipScript,
   scriptPath,
@@ -503,6 +504,10 @@ describe('ship-branch.sh — edge cases around the self-checkout remedy (sc-2261
     const { dir, env, git } = seedReshipRepo();
     git(['switch', '-q', 'pr-open'], { stdio: 'ignore' });
     writeFileSync(join(dir, 'note.txt'), 'hello\n');
+    // Since sc-2414 an explicit `--pr` re-ship resolves the open PR and rewrites its body, so the
+    // run needs a `gh` on PATH; without one it exits 1 before reaching the remediation advice
+    // this test is about.
+    const { publishEnv } = publishEnvFor(dir, env);
 
     const r = spawnSync(
       '/bin/bash',
@@ -510,7 +515,7 @@ describe('ship-branch.sh — edge cases around the self-checkout remedy (sc-2261
       {
         cwd: dir,
         encoding: 'utf8',
-        env,
+        env: publishEnv,
       },
     );
 
