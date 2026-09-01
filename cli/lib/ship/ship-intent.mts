@@ -17,6 +17,8 @@ import {
   cleanupReplacedSourceMembership,
   emitFields,
   handlePathCodecCommand,
+  originRepo,
+  provenBool,
   provenString,
   provenStrings,
   sourceMembershipMatches,
@@ -25,7 +27,6 @@ import {
   type StoredIntent,
 } from './ship-intent-codec.mts';
 import { withLock } from '../atomic-write.mts';
-import { git } from '../reconcile.mts';
 
 const LEGACY_EXPLICIT_SCHEMA_VERSION = 1;
 const EXPLICIT_SCHEMA_VERSION = 2;
@@ -38,14 +39,6 @@ const MAX_AGE_MS = 6 * 60 * 60 * 1000;
 // is a misdated record, refused by the two-sided age check.
 const FUTURE_SKEW_MS = 5 * 60 * 1000;
 
-/** owner/repo derived from origin, or '' — mirrors ship-branch.sh's REPO sed so the two agree. */
-function originRepo(root: string): string {
-  const url = git(root, ['remote', 'get-url', 'origin']);
-  if (!url) return '';
-  const m = url.match(/github\.com[^:/]*[:/](.+?)(?:\.git)?$/);
-  return m ? m[1] : '';
-}
-
 /** The raw-branch hash separates sanitized-name collisions; readIntent's raw branch equality is
  * the final guarantee that a copied or colliding file never replays another branch's invocation. */
 export const relIntentPath = (branch: string) => {
@@ -54,6 +47,10 @@ export const relIntentPath = (branch: string) => {
 };
 
 const intentFile = (root: string, branch: string) => path.join(root, relIntentPath(branch));
+
+/** The one refusal wording for a record field that failed its shape check. */
+const malformedField = (f: string) =>
+  `recorded invocation is malformed (${f}) — run the full command, which re-records`;
 
 /** Write this attempt's manifest; refuse non-fatally when its path is not ignored. */
 export function writeIntent(
@@ -67,6 +64,7 @@ export function writeIntent(
     links: string[];
     noQavisPublish: boolean;
     updatePrBody: boolean;
+    draft: boolean;
     resumed: boolean;
     mergePaths: boolean;
     /** The generation this attempt READ before deciding to re-record. When the on-disk record has
@@ -118,6 +116,7 @@ export function writeIntent(
     paths,
     noQavisPublish: opts.noQavisPublish,
     updatePrBody: opts.updatePrBody,
+    draft: opts.draft,
     bodyB64: opts.body.toString('base64'),
     repo: originRepo(opts.root),
     createdAt: new Date().toISOString(),
@@ -372,19 +371,18 @@ export function readIntent(
     return {
       reason: `recorded invocation's body is corrupt (${file}) — run the full command, which re-records`,
     };
-  // Strictly true or false, else refuse: an `=== true` coercion would read a tampered record's
-  // 'true' STRING as false and silently flip an external publish preference on replay.
-  const noQavisPublish = r.noQavisPublish;
-  if (noQavisPublish !== true && noQavisPublish !== false)
-    return {
-      reason: `recorded invocation is malformed (noQavisPublish) — run the full command, which re-records`,
-    };
-  // V1 is preserve-only. V2+ require this side-effect bit, so older binaries reject new records.
-  const updatePrBody = storedVersion === LEGACY_EXPLICIT_SCHEMA_VERSION ? false : r.updatePrBody;
-  if (updatePrBody !== true && updatePrBody !== false)
-    return {
-      reason: `recorded invocation is malformed (updatePrBody) — run the full command, which re-records`,
-    };
+  // Each defaults to what an OLDER record implies, then is strict-checked by provenBool (see its
+  // coercion note); one at a time so each narrows to boolean without an assertion. V1 is
+  // preserve-only for updatePrBody. `draft` post-dates all three versions, so an ABSENT bit means
+  // false (a ready PR) — refusing would strand an in-flight blocked ship mid---resume. Only
+  // `undefined` is absence: `?? false` would also swallow a PRESENT null and publish ready.
+  const legacy = storedVersion === LEGACY_EXPLICIT_SCHEMA_VERSION;
+  const noQavisPublish = provenBool(r.noQavisPublish);
+  if (noQavisPublish === null) return { reason: malformedField('noQavisPublish') };
+  const updatePrBody = provenBool(legacy ? false : r.updatePrBody);
+  if (updatePrBody === null) return { reason: malformedField('updatePrBody') };
+  const draft = provenBool(r.draft === undefined ? false : r.draft);
+  if (draft === null) return { reason: malformedField('draft') };
   const generation = provenString(r.generation);
   if (!generation)
     return {
@@ -428,6 +426,7 @@ export function readIntent(
     paths,
     noQavisPublish,
     updatePrBody,
+    draft,
     bodyB64,
     repo,
     createdAt,
@@ -461,6 +460,7 @@ function main(): number {
         links,
         noQavisPublish: booleans.has('no-qavis-publish'),
         updatePrBody: booleans.has('update-pr-body'),
+        draft: booleans.has('draft'),
         resumed: booleans.has('resumed'),
         mergePaths: booleans.has('merge-paths'),
         expectGeneration: values.get('expect-generation'),

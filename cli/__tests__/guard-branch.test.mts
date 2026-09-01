@@ -195,6 +195,24 @@ describe('protected-branch-guard — denies on a protected branch', () => {
     const r = run('git commit -m "t"', dir, 'q');
     expect(r).toContain("scripts/git/ship-branch.sh 'agent/t-q' 't' --link .search-code -- 'a.ts'");
   });
+
+  it('keeps --draft out of the --pr suggestion while keeping it for a new ship', () => {
+    // `command` is required: shipConfig ignores extraArgs unless it is a string.
+    const config = {
+      ship: { command: 'devkit ship', extraArgs: ['--draft', '--link', '.search-code'] },
+    };
+    const newShip = run('git commit -m "t"', repoOn('main', { staged: ['a.ts'], config }), 'q');
+    expect(newShip).toContain("--draft --link .search-code -- 'a.ts'");
+
+    const rePush = run(
+      'git commit --pr feat/open -m "t"',
+      repoOn('main', { staged: ['a.ts'], config }),
+      'q',
+    );
+    expect(rePush).toContain('--pr ');
+    expect(rePush).toContain('--link .search-code');
+    expect(rePush).not.toContain('--draft');
+  });
 });
 
 describe('protected-branch-guard — fix-it denies (un-translatable commits)', () => {

@@ -1,4 +1,5 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -6,6 +7,7 @@ import { relIntentPath } from '../lib/ship/ship-intent.mts';
 import { testExecFileSync as execFileSync, testSpawnSync as spawnSync } from './_helpers.mts';
 import {
   createPreservedCommit,
+  ghStub,
   installHook,
   localBranchExists,
   publishEnvFor,
@@ -158,6 +160,40 @@ describe('ship --resume: record on block, replay on retry', () => {
     expect(r.stderr).toContain('full devkit ship command');
   });
 
+  it('a gate-blocked --draft ship still opens a DRAFT when replayed by --resume', () => {
+    const { dir, env, git } = seedResumableRepo({ hookBody: 'exit 1' });
+    writeFileSync(join(dir, 'note.txt'), 'hello\n');
+
+    const blocked = runShip(dir, env, [
+      'feat/draft-resume',
+      'draft me',
+      '--draft',
+      '--',
+      'note.txt',
+    ]);
+    expect(blocked.status, blocked.stderr).not.toBe(0);
+    // The bit is on disk, not merely in the blocked process's memory.
+    const record = JSON.parse(readFileSync(intentFileOf(dir, 'feat/draft-resume'), 'utf8'));
+    expect(record.draft).toBe(true);
+
+    installHook(dir, 'exit 0'); // the operator fixed the cause
+    const log = join(mkdtempSync(join(tmpdir(), 'gh-argv-')), 'argv.txt');
+    const stubBin = ghStub(
+      `printf '%s\\n' "$*" >> '${log}'; echo https://github.com/acme/app/pull/42`,
+    );
+    const resumed = runShip(dir, env, ['--resume', 'feat/draft-resume'], {
+      extraEnv: { PATH: `${stubBin}:${env.PATH ?? process.env.PATH ?? ''}` },
+    });
+
+    expect(resumed.status, resumed.stderr).toBe(0);
+    const create = readFileSync(log, 'utf8')
+      .split('\n')
+      .find((l) => l.startsWith('pr create'));
+    expect(create, `no 'pr create' in gh argv log:\n${readFileSync(log, 'utf8')}`).toBeTruthy();
+    expect(create).toContain('--draft');
+    git(['worktree', 'prune']);
+  });
+
   it('reship --resume with no delta releases the spent record instead of stranding it', () => {
     const { dir, env, git } = seedResumableRepo();
     writeFileSync(join(dir, 'note.txt'), 'hello\n');
@@ -266,6 +302,30 @@ describe('ship --resume: overrides and refusals', () => {
     });
     expect(looped.status).not.toBe(0);
     expect(looped.stderr).toContain('dispatched in a loop');
+
+    // --ready must SURVIVE that hand-off. The parser sees it before the record reveals the mode, so
+    // rejecting at parse time would make `--resume <reship-branch> --ready` unreachable.
+    const ready = runShip(dir, env, ['--resume', 'feat/xmode', '--ready']);
+    expect(ready.status).not.toBe(0);
+    expect(ready.stderr).toContain('no remote branch origin/feat/xmode'); // reached reship.sh
+    expect(ready.stderr).not.toContain('--ready applies to --pr');
+  });
+
+  // The other half: a recorded NEW ship never dispatches away, and there --ready has nothing to mark
+  // ready — so the deferred flag must be answered once the mode is known.
+  it('refuses --ready under --resume when the record is a new ship', () => {
+    const { dir, env } = seedResumableRepo({ hookBody: 'exit 1' });
+    writeFileSync(join(dir, 'note.txt'), 'hello\n');
+    const blocked = runShip(dir, env, ['feat/ready-on-ship', 'x', '--', 'note.txt'], {
+      input: 'b\n',
+      extraEnv: { SHIP_DRY_RUN: '1' },
+    });
+    expect(blocked.status).not.toBe(0);
+
+    const r = runShip(dir, env, ['--resume', 'feat/ready-on-ship', '--ready']);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain('--ready applies to --pr');
+    expect(r.stderr).toContain('is a new ship');
   });
 
   it('rejects --base/--link/title changes under --resume, and a misplaced --resume', () => {

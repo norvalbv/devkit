@@ -74,7 +74,7 @@ if [ "$RESUME" -eq 1 ]; then
     'ship --resume <branch> [--body-file <f>] [--] <extra-path...>'
 else
   ship_assert_positional_args "$BR" "$TITLE" \
-    'ship <branch> "<title>" [--base <b>] [--body "<text>"] [--body-file <f>] [--link <d>]... [--] <path...>'
+    'ship <branch> "<title>" [--base <b>] [--body "<text>"] [--body-file <f>] [--draft] [--link <d>]... [--] <path...>'
 fi
 
 # Arg grammar: branch + title are the first two positionals (above). The rest is a mix of
@@ -89,6 +89,8 @@ BODY_FILE_SET=0    # --body-file <path>: author the body ONCE in a file; survive
 BASE_FLAG=""       # --base <branch>? else base off this checkout's HEAD/current branch
 FROM_BRANCH=0      # derive a frozen committed path set from origin/<base>..HEAD
 QAVIS_PUBLISH=1     # passed staged evidence is published after the PR exists; explicit opt-out only
+DRAFT=0            # --draft opens the PR as a draft; default stays ready-for-review
+RESUME_READY=0     # --ready seen under --resume, before the record reveals ship-vs-reship mode
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --base)
@@ -108,6 +110,22 @@ while [ "$#" -gt 0 ]; do
       [ "$RESUME" -eq 0 ] || { echo "--resume replays the recorded source mode — omit --from-branch" >&2; exit 1; }
       FROM_BRANCH=1; shift ;;
     --no-qavis-publish) QAVIS_PUBLISH=0; shift ;;
+    --draft)
+      # Allowed under --resume, unlike --base/--link: those change WHAT is shipped, this only changes
+      # how the PR is published. The resume restore below can only turn draft ON (same polarity as
+      # QAVIS_PUBLISH), so a recorded draft replays as one, and an explicit --draft on the retry can
+      # additionally upgrade a recorded NON-draft — which is then re-recorded for the next resume.
+      # There is deliberately no --no-draft: once the PR exists, `gh pr ready` owns that direction.
+      DRAFT=1; shift ;;
+    --ready)
+      # Under --resume the MODE is not known yet: a recorded reship arrives here first and execs into
+      # reship.sh below, which does accept --ready. Rejecting at parse time would kill that hand-off
+      # before the record is ever read. So defer — RESUME_READY is re-checked once the mode is known.
+      [ "$RESUME" -eq 0 ] || { RESUME_READY=1; shift; continue; }
+      # A new ship is ready-for-review already, so --ready here is either a --pr command missing its
+      # mode flag or a misunderstanding. ship.mts rejects it earlier with the same guidance; this arm
+      # is the backstop for a direct script invocation (tests, recovery hints).
+      echo "--ready applies to --pr (marking an existing draft PR ready) — a new ship opens a ready PR by default; use --draft to open a draft" >&2; exit 1 ;;
     --resume) echo "--resume must come FIRST: devkit ship --resume <branch> [--] <extra-path...>" >&2; exit 1 ;;
     --) shift; while [ "$#" -gt 0 ]; do PATHS+=("$1"); shift; done; break ;;
     -*) echo "unknown flag: $1 (pass a dash-leading file path after --)" >&2; exit 1 ;;
@@ -137,9 +155,10 @@ if [ "$RESUME" -eq 1 ]; then
   while IFS= read -r -d '' si_field; do SI_FIELDS+=("$si_field"); done < "$SI_OUT"
   rm -f "$SI_OUT"
   # Field order is ship-intent.mts's emitFields contract:
-  #   mode, sourceMode, title, base, noQavisPublish, updatePrBody, createdAt, generation,
+  #   mode, sourceMode, title, base, noQavisPublish, updatePrBody, draft, createdAt, generation,
   #   sourceAttemptId, nlinks, <links...>, body, <paths...>. New-ship ignores updatePrBody.
-  [ "${#SI_FIELDS[@]}" -ge 12 ] || { echo "recorded invocation is malformed — run the full devkit ship command" >&2; exit 1; }
+  # The indices below are POSITIONAL: reship.sh:106 decodes the same stream and must move in lockstep.
+  [ "${#SI_FIELDS[@]}" -ge 13 ] || { echo "recorded invocation is malformed — run the full devkit ship command" >&2; exit 1; }
   SI_MODE=${SI_FIELDS[0]}
   if [ "$SI_MODE" = "reship" ]; then
     # The blocked attempt was a `--pr` re-push; hand over so the agent needn't remember which form
@@ -149,6 +168,9 @@ if [ "$RESUME" -eq 1 ]; then
     DEVKIT_SHIP_RESUME_DISPATCHED=1 exec bash "$SCRIPT_DIR/reship.sh" --resume "$BR" ${RESUME_ARGS[@]+"${RESUME_ARGS[@]}"}
   fi
   [ "$SI_MODE" = "ship" ] || { echo "recorded invocation has unrecognised mode '$SI_MODE' — run the full devkit ship command" >&2; exit 1; }
+  # The reship hand-off is above, so reaching here proves the record is a NEW ship — the one mode
+  # where --ready has nothing to mark ready. Now the deferred flag can be answered.
+  [ "$RESUME_READY" -eq 0 ] || { echo "--ready applies to --pr; the recorded invocation for $BR is a new ship, which opens a ready PR by default" >&2; exit 1; }
   SI_SOURCE_MODE=${SI_FIELDS[1]}
   case "$SI_SOURCE_MODE" in
     explicit) FROM_BRANCH=0 ;;
@@ -158,13 +180,17 @@ if [ "$RESUME" -eq 1 ]; then
   TITLE=${SI_FIELDS[2]}
   BASE_FLAG=${SI_FIELDS[3]}
   [ "${SI_FIELDS[4]}" != "1" ] || QAVIS_PUBLISH=0
-  RESUME_CREATED=${SI_FIELDS[6]}
-  RESUME_GENERATION=${SI_FIELDS[7]}
-  RESUME_SOURCE_ATTEMPT_ID=${SI_FIELDS[8]}
-  SI_NLINKS=${SI_FIELDS[9]}
+  # Field 6 is draft. Restoring it is load-bearing: --resume replays a gate-blocked ship all the way
+  # through `gh pr create`, so dropping the bit here would silently open a READY PR from an
+  # invocation the operator asked to be a draft.
+  [ "${SI_FIELDS[6]}" != "1" ] || DRAFT=1
+  RESUME_CREATED=${SI_FIELDS[7]}
+  RESUME_GENERATION=${SI_FIELDS[8]}
+  RESUME_SOURCE_ATTEMPT_ID=${SI_FIELDS[9]}
+  SI_NLINKS=${SI_FIELDS[10]}
   case "$SI_NLINKS" in *[!0-9]*|'') echo "recorded invocation is malformed (nlinks '$SI_NLINKS')" >&2; exit 1 ;; esac
-  si_i=10
-  si_body_at=$((10 + SI_NLINKS))
+  si_i=11
+  si_body_at=$((11 + SI_NLINKS))
   [ "${#SI_FIELDS[@]}" -gt $((si_body_at + 1)) ] || { echo "recorded invocation is malformed (missing body/paths)" >&2; exit 1; }
   while [ "$si_i" -lt "$si_body_at" ]; do LINK_EXTRA+=("${SI_FIELDS[$si_i]}"); si_i=$((si_i + 1)); done
   RESUME_BODY=${SI_FIELDS[$si_body_at]}
@@ -648,6 +674,7 @@ if [ "$DRY_GATES" -eq 0 ]; then
   [ -z "$BASE_FLAG" ] || SHIP_INTENT_ARGS+=(--base "$BASE_FLAG")
   for d in ${LINK_EXTRA[@]+"${LINK_EXTRA[@]}"}; do SHIP_INTENT_ARGS+=(--link "$d"); done
   [ "$QAVIS_PUBLISH" -eq 1 ] || SHIP_INTENT_ARGS+=(--no-qavis-publish)
+  [ "$DRAFT" -eq 0 ] || SHIP_INTENT_ARGS+=(--draft)
   if [ "$RESUME" -eq 1 ]; then
     SHIP_INTENT_ARGS+=(--resumed --expect-generation "$RESUME_GENERATION")
     if [ "$FROM_BRANCH" -eq 0 ]; then
@@ -1367,7 +1394,12 @@ fi
 # transient GraphQL error), so the merged work later lingers as stale local copies. Capture the
 # failure instead of exiting; record the branch first, then surface the failure afterward.
 PR_CREATE_FAILED=
-PR_URL=$( cd "$WT" && gh pr create --repo "$REPO" --base "$BASE_REF" --head "$BR" --title "$TITLE" --body "$BODY" ) || PR_CREATE_FAILED=1
+# --draft only when asked. An ARRAY with the empty-safe expansion used throughout this file, not an
+# interpolated string: the bash 3.2 floor makes a bare "${arr[@]}" on an empty array an
+# unbound-variable error under `set -u`, and a plain "$VAR" would pass an empty argument to gh.
+PR_DRAFT_ARGS=()
+[ "$DRAFT" -eq 0 ] || PR_DRAFT_ARGS=(--draft)
+PR_URL=$( cd "$WT" && gh pr create --repo "$REPO" --base "$BASE_REF" --head "$BR" --title "$TITLE" --body "$BODY" ${PR_DRAFT_ARGS[@]+"${PR_DRAFT_ARGS[@]}"} ) || PR_CREATE_FAILED=1
 PR_NUM=""
 if [ -z "$PR_CREATE_FAILED" ]; then
   echo "$PR_URL"   # surface the PR URL (we captured gh's stdout to recover the PR number below)
@@ -1433,6 +1465,10 @@ node "$RMW" \
 if [ -n "$PR_CREATE_FAILED" ]; then
   echo "push OK but PR create failed — branch is pushed AND recorded for reconcile." >&2
   echo "Open the PR by hand (reconcile cleans the branch once it merges):" >&2
+  # The hint is copy-pasted verbatim, so it has to preserve draft-ness — handing back a bare
+  # `gh pr create` after a `--draft` ship would quietly publish a ready PR.
+  PR_HINT_DRAFT=""
+  [ "$DRAFT" -eq 0 ] || PR_HINT_DRAFT=" --draft"
   # sc-2261's original defect was re-printing a base that could never work. The cure is NOT to
   # substitute one unconditionally: `gh pr create` fails for plenty of reasons that have nothing to do
   # with the base (an API outage, a permissions problem), and swapping a deliberately chosen
@@ -1449,7 +1485,7 @@ if [ -n "$PR_CREATE_FAILED" ]; then
   if [ "$hint_base_check" -ne 2 ]; then
     # Present, or unverifiable. Either way the base is not shown to be the cause, so hand the command
     # back verbatim rather than substituting on a guess.
-    echo "  gh pr create --repo $(ship_shell_quote "$REPO") --base $(ship_shell_quote "$BASE_REF") --head $(ship_shell_quote "$BR")" >&2
+    echo "  gh pr create --repo $(ship_shell_quote "$REPO") --base $(ship_shell_quote "$BASE_REF") --head $(ship_shell_quote "$BR")${PR_HINT_DRAFT}" >&2
     if [ "$hint_base_check" -eq 0 ]; then
       echo "  ('$BASE_REF' is on origin, so the base is not the cause — see gh's error above.)" >&2
     else
@@ -1459,7 +1495,7 @@ if [ -n "$PR_CREATE_FAILED" ]; then
     # The base is genuinely gone (deleted between the preflight and now). Only here may the hint name
     # a different one, and only one that is known to exist.
     PR_HINT_BASE=$(ship_origin_head_branch) || PR_HINT_BASE=
-    echo "  gh pr create --repo $(ship_shell_quote "$REPO") --base $(ship_shell_quote "${PR_HINT_BASE:-<branch-on-origin>}") --head $(ship_shell_quote "$BR")" >&2
+    echo "  gh pr create --repo $(ship_shell_quote "$REPO") --base $(ship_shell_quote "${PR_HINT_BASE:-<branch-on-origin>}") --head $(ship_shell_quote "$BR")${PR_HINT_DRAFT}" >&2
     if [ -n "$PR_HINT_BASE" ]; then
       echo "  ('$BASE_REF' is no longer on origin; '$PR_HINT_BASE' is origin's default branch.)" >&2
     else

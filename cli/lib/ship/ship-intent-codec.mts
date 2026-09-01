@@ -3,6 +3,7 @@ import { isUtf8 } from 'node:buffer';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { git } from '../reconcile.mts';
 import { fail, parseArgs } from './ship-intent-args.mts';
 
 export interface ShipIntent {
@@ -17,6 +18,8 @@ export interface ShipIntent {
   paths: string[];
   noQavisPublish: boolean;
   updatePrBody: boolean;
+  /** `--draft`: open the PR as a draft. New-ship only; a reship's PR already exists. */
+  draft: boolean;
   bodyB64: string;
   repo: string;
   createdAt: string;
@@ -37,6 +40,7 @@ export interface StoredIntent {
   paths?: string[];
   noQavisPublish?: boolean;
   updatePrBody?: boolean;
+  draft?: boolean;
   bodyB64?: string;
   repo?: string;
   createdAt?: string;
@@ -204,6 +208,23 @@ export function provenString(v: string | null | undefined): string | null {
   return v != null && String(v) === v && !v.includes('\0') ? v : null;
 }
 
+/** owner/repo derived from origin, or '' — mirrors ship-branch.sh's REPO sed so the two agree. */
+export function originRepo(root: string): string {
+  const url = git(root, ['remote', 'get-url', 'origin']);
+  if (!url) return '';
+  const m = url.match(/github\.com[^:/]*[:/](.+?)(?:\.git)?$/);
+  return m ? m[1] : '';
+}
+
+/**
+ * The value when it really is a boolean primitive, else null. Strictness is the point: an
+ * `=== true` coercion would read a tampered record's 'true' STRING as false and silently flip a
+ * recorded side-effect preference (publish, draft) on replay.
+ */
+export function provenBool(v: boolean | null | undefined): boolean | null {
+  return v === true || v === false ? v : null;
+}
+
 /** Every element a proven string primitive → the array; anything else → null. */
 export function provenStrings(v: string[] | undefined): string[] | null {
   if (!Array.isArray(v)) return null;
@@ -220,6 +241,7 @@ export function emitFields(intent: ShipIntent): void {
     intent.base ?? '',
     intent.noQavisPublish ? '1' : '0',
     intent.updatePrBody ? '1' : '0',
+    intent.draft ? '1' : '0',
     intent.createdAt,
     intent.generation,
     intent.sourceAttemptId ?? '',

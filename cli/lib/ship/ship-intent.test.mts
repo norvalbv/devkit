@@ -53,6 +53,7 @@ const base = (opts: Partial<Parameters<typeof writeIntent>[0]> = {}) => ({
   links: [],
   noQavisPublish: false,
   updatePrBody: false,
+  draft: false,
   resumed: false,
   mergePaths: false,
   body: Buffer.from('pr body\n'),
@@ -450,6 +451,38 @@ describe('ship-intent read refusals — each names its cause', () => {
     expect(reasonOf(opts.root, 'feat/x')).toContain('noQavisPublish');
   });
 
+  // `draft` post-dates all three schema versions, so every record written before --draft existed
+  // lacks the key. Absent must read as false, NOT malformed: refusing would strand an in-flight
+  // blocked ship, denying it the --resume the block told the operator to run.
+  it('a record predating --draft still reads, defaulting draft to false', () => {
+    const opts = base();
+    writeIntent(opts, ['p.txt']);
+    const file = join(opts.root, relIntentPath('feat/x'));
+    const j = JSON.parse(readFileSync(file, 'utf8'));
+    delete j.draft;
+    writeFileSync(file, JSON.stringify(j));
+    const result = readIntent(opts.root, 'feat/x');
+    expect(
+      'intent' in result,
+      `legacy record must still resume, got: ${reasonOf(opts.root, 'feat/x')}`,
+    ).toBe(true);
+    expect(result.intent.draft).toBe(false);
+  });
+
+  // A PRESENT value is still strict-checked — the same coercion trap noQavisPublish guards against.
+  it.each([['true'], [null], [0], [1]])(
+    'a non-boolean draft (%p) refuses instead of coercing to false',
+    (tampered) => {
+      const opts = base({ draft: true });
+      writeIntent(opts, ['p.txt']);
+      const file = join(opts.root, relIntentPath('feat/x'));
+      const j = JSON.parse(readFileSync(file, 'utf8'));
+      j.draft = tampered;
+      writeFileSync(file, JSON.stringify(j));
+      expect(reasonOf(opts.root, 'feat/x')).toContain('draft');
+    },
+  );
+
   it('a delete that cannot take the lock keeps the record AND reports failure', () => {
     const opts = base();
     writeIntent(opts, ['p.txt']);
@@ -696,7 +729,7 @@ describe('ship-intent CLI protocol', () => {
     const out = execFileSync('node', [cliPath, 'read', '--root', root, '--branch', 'feat/x']);
     const fields = out.toString('utf8').split('\0');
     expect(fields.pop()).toBe(''); // every field NUL-terminated, so the split leaves one empty tail
-    // mode, sourceMode, title, base, noQavisPublish, updatePrBody, createdAt, generation,
+    // mode, sourceMode, title, base, noQavisPublish, updatePrBody, draft, createdAt, generation,
     // sourceAttemptId, nlinks, <links>, body, <paths...>
     expect(fields[0]).toBe('ship');
     expect(fields[1]).toBe('explicit');
@@ -704,13 +737,14 @@ describe('ship-intent CLI protocol', () => {
     expect(fields[3]).toBe('main');
     expect(fields[4]).toBe('0');
     expect(fields[5]).toBe('1');
-    expect(Number.isFinite(Date.parse(fields[6]))).toBe(true);
-    expect(fields[7]).toMatch(/^[0-9a-f-]{36}$/);
-    expect(fields[8]).toBe('');
-    expect(fields[9]).toBe('1');
-    expect(fields[10]).toBe('idx');
-    expect(fields[11]).toBe('body line\n');
-    expect(fields.slice(12)).toEqual(['p.txt', 'q dir/r.txt']);
+    expect(fields[6]).toBe('0'); // draft: not requested here
+    expect(Number.isFinite(Date.parse(fields[7]))).toBe(true);
+    expect(fields[8]).toMatch(/^[0-9a-f-]{36}$/);
+    expect(fields[9]).toBe('');
+    expect(fields[10]).toBe('1');
+    expect(fields[11]).toBe('idx');
+    expect(fields[12]).toBe('body line\n');
+    expect(fields.slice(13)).toEqual(['p.txt', 'q dir/r.txt']);
 
     execFileSync('node', [cliPath, 'delete', '--root', root, '--branch', 'feat/x']);
     expect(existsSync(join(root, relIntentPath('feat/x')))).toBe(false);
