@@ -1,8 +1,12 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { loadImportWallExempt, makeBaselineLoaders } from '../load-baseline.mts';
+import {
+  isTransientModuleAbsence,
+  loadImportWallExempt,
+  makeBaselineLoaders,
+} from '../load-baseline.mts';
 
 const roots: string[] = [];
 
@@ -24,18 +28,12 @@ afterEach(() => {
 });
 
 describe('makeBaselineLoaders', () => {
-  it('prefers canonical Devkit state over legacy ESLint storage', async () => {
+  it('loads canonical Devkit baseline and exempt state', async () => {
     const root = makeRoot();
-    write(root, 'eslint/baselines/ui.mjs', 'export const uiStructureBaseline = ["legacy.ts"]\n');
     write(
       root,
       '.devkit/baselines/structure/ui.mjs',
       'export const uiStructureBaseline = ["canonical.ts"]\n',
-    );
-    write(
-      root,
-      'eslint/baselines/exempt.mjs',
-      'export const structureExempt = { ui: ["legacy-exempt.ts"] }\n',
     );
     write(
       root,
@@ -46,20 +44,6 @@ describe('makeBaselineLoaders', () => {
     const loaders = makeBaselineLoaders(root);
     expect(await loaders.loadBaseline('ui')).toEqual(['canonical.ts']);
     expect(await loaders.loadExempt('ui')).toEqual(['canonical-exempt.ts']);
-  });
-
-  it('reads legacy modules until upgrade migrates them', async () => {
-    const root = makeRoot();
-    write(root, 'eslint/baselines/ui.mjs', 'export const uiStructureBaseline = ["legacy.ts"]\n');
-    write(
-      root,
-      'eslint/baselines/exempt.mjs',
-      'export const structureExempt = { ui: ["legacy-exempt.ts"] }\n',
-    );
-
-    const loaders = makeBaselineLoaders(root);
-    expect(await loaders.loadBaseline('ui')).toEqual(['legacy.ts']);
-    expect(await loaders.loadExempt('ui')).toEqual(['legacy-exempt.ts']);
   });
 });
 
@@ -73,5 +57,78 @@ describe('loadImportWallExempt', () => {
     write(root, '.devkit/structure/exempt.mjs', 'export const importWallExempt = [\n');
 
     await expect(loadImportWallExempt(root)).rejects.toThrow();
+  });
+});
+
+describe('isTransientModuleAbsence — the regeneration unlink→rewrite race classifier', () => {
+  const seeded = () => {
+    const root = makeRoot();
+    write(root, '.devkit/baselines/structure/ui.mjs', 'export const uiStructureBaseline = []\n');
+    return { root, file: join(root, '.devkit/baselines/structure/ui.mjs') };
+  };
+
+  it("classifies this module's own ERR_MODULE_NOT_FOUND/ENOENT as the transient unlink", () => {
+    const { file } = seeded();
+    for (const code of ['ERR_MODULE_NOT_FOUND', 'ENOENT']) {
+      const absence = Object.assign(new Error(`Cannot find module '${file}'`), { code });
+      expect(isTransientModuleAbsence(absence, file)).toBe(true);
+    }
+  });
+
+  it('a file that is absent right now is transient regardless of the reported module', () => {
+    const { root } = seeded();
+    const gone = join(root, '.devkit/baselines/structure/removed.mjs');
+    const nested = Object.assign(
+      new Error(`Cannot find module '/repo/other.mjs' imported from '${gone}'`),
+      { code: 'ERR_MODULE_NOT_FOUND' },
+    );
+    expect(isTransientModuleAbsence(nested, gone)).toBe(true);
+  });
+
+  it("keeps a consumer's stable failures loud: a nested break in a present module, syntax errors", () => {
+    const { file } = seeded();
+    const nested = Object.assign(
+      new Error(`Cannot find module '/repo/other.mjs' imported from '${file}'`),
+      { code: 'ERR_MODULE_NOT_FOUND' },
+    );
+    expect(isTransientModuleAbsence(nested, file)).toBe(false);
+    expect(isTransientModuleAbsence(new SyntaxError('Unexpected end of input'), file)).toBe(false);
+  });
+
+  it('matches through a symlinked root segment (Node reports the real path)', () => {
+    const { root } = seeded();
+    const linkedRoot = join(makeRoot(), 'via-link');
+    symlinkSync(root, linkedRoot);
+    const viaLink = join(linkedRoot, '.devkit/baselines/structure/ui.mjs');
+    const absence = Object.assign(
+      new Error(
+        `Cannot find module '${realpathSync(join(root, '.devkit/baselines/structure/ui.mjs'))}'`,
+      ),
+      { code: 'ERR_MODULE_NOT_FOUND' },
+    );
+    expect(isTransientModuleAbsence(absence, viaLink)).toBe(true);
+  });
+
+  it('a module recreated during the retry window is loaded, not misclassified as stable', async () => {
+    const root = makeRoot();
+    const target = join(root, '.devkit/baselines/structure/ui.mjs');
+    write(
+      root,
+      '.devkit/baselines/structure/ui.mjs',
+      'export const uiStructureBaseline = ["a.ts"]\n',
+    );
+    // Simulate the writer's unlink→rewrite landing inside the loader's bounded probes.
+    const rewrite = (async () => {
+      rmSync(target);
+      await new Promise((settle) => setTimeout(settle, 2));
+      write(
+        root,
+        '.devkit/baselines/structure/ui.mjs',
+        'export const uiStructureBaseline = ["b.ts"]\n',
+      );
+    })();
+    const loaded = await makeBaselineLoaders(root).loadBaseline('ui');
+    await rewrite;
+    expect(loaded).toEqual(['b.ts']);
   });
 });

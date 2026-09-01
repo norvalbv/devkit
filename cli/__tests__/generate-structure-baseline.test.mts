@@ -150,12 +150,15 @@ describe('generateStructureBaselines — multi-tree', () => {
   it('writes NO baseline for a clean tree, and deletes a stale one (no empty .mjs left)', async () => {
     const root = tmpRepo();
     write(root, 'src/renderer/components/Button/index.tsx'); // valid → 0 violators
-    // Pre-seed a stale (empty) baseline as an older devkit would have written.
-    write(root, 'eslint/baselines/renderer.mjs', 'export const rendererStructureBaseline = [];\n');
+    // Pre-seed a stale (empty) baseline as an earlier generation run would have written.
     const rendererBaseline = join(root, '.devkit', 'baselines', 'structure', 'renderer.mjs');
+    write(
+      root,
+      '.devkit/baselines/structure/renderer.mjs',
+      'export const rendererStructureBaseline = [];\n',
+    );
     await generateStructureBaselines(root, {});
     expect(existsSync(rendererBaseline)).toBe(false); // stale empty baseline deleted, none re-written
-    expect(existsSync(join(root, 'eslint/baselines/renderer.mjs'))).toBe(false);
   });
 });
 

@@ -5,7 +5,7 @@ import { existsSync, readdirSync, readFileSync, realpathSync, writeFileSync, } f
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { CONFIG_FILENAME, resolveGuardConfig, sourceMatchers } from '../config.mjs';
-import { LEGACY_LINES_BASELINE, LEGACY_SIZE_BASELINE, readRatchetBaseline, removeRatchetBaseline, SIZE_BASELINE, writeRatchetBaseline, } from './baseline-paths.mjs';
+import { readRatchetBaseline, removeRatchetBaseline, SIZE_BASELINE, writeRatchetBaseline, } from './baseline-paths.mjs';
 import { hasStagedFiles, indexTreeRef, mergeBaseRef, pullRequestScope, stagedSet, } from './git-index.mjs';
 import { freezeLinesBaseline } from './size-lines-freeze.mjs';
 import { lineBaselineForGate, lineCountsAtRef, lineViolationReport, measureLines, tightenLineBaseline, } from './size-line-authority.mjs';
@@ -219,11 +219,11 @@ function runLinesGate(root, cfg, ciScope) {
         if (Object.keys(next).length === 0) {
             // Last grandfathered giant healed → the baseline is now empty. Delete it (an empty file is
             // not kept as a sentinel) and stage the removal so it rides this commit.
-            removeRatchetBaseline(root, LINES_BASELINE, LEGACY_LINES_BASELINE, { stage: true });
+            removeRatchetBaseline(root, LINES_BASELINE, { stage: true });
             console.log(`✓ line debt cleared — ${LINES_BASELINE} removed & staged.`);
         }
         else {
-            writeRatchetBaseline(root, LINES_BASELINE, LEGACY_LINES_BASELINE, `${JSON.stringify({ lineCountVersion, maxLines: cfg.maxLines, maxTestLines: cfg.maxTestLines, files: next }, null, 2)}\n`, { stage: true });
+            writeRatchetBaseline(root, LINES_BASELINE, `${JSON.stringify({ lineCountVersion, maxLines: cfg.maxLines, maxTestLines: cfg.maxTestLines, files: next }, null, 2)}\n`, { stage: true });
             console.log(`✓ line debt tightened — ${LINES_BASELINE} lowered & staged.`);
         }
     }
@@ -303,11 +303,13 @@ function runDisableGate(root, baselineContents, current, ciScope) {
     if (!changed)
         return;
     if (Object.keys(next).length === 0) {
-        removeRatchetBaseline(root, SIZE_BASELINE, LEGACY_SIZE_BASELINE, { stage: true });
+        removeRatchetBaseline(root, SIZE_BASELINE, { stage: true });
         console.log(`✓ size debt cleared — ${SIZE_BASELINE} removed & staged.`);
     }
     else {
-        writeRatchetBaseline(root, SIZE_BASELINE, LEGACY_SIZE_BASELINE, `${JSON.stringify({ files: next }, null, 2)}\n`, { stage: true });
+        writeRatchetBaseline(root, SIZE_BASELINE, `${JSON.stringify({ files: next }, null, 2)}\n`, {
+            stage: true,
+        });
         console.log(`✓ size debt tightened — ${SIZE_BASELINE} lowered & staged.`);
     }
 }
@@ -318,7 +320,7 @@ function runCli(cmd) {
     const cfg = resolveGuardConfig(root);
     const current = countDisables(root);
     // Read after the tree walk rather than holding a potentially stale snapshot across the full scan.
-    const baseline = readRatchetBaseline(root, BASELINE, LEGACY_SIZE_BASELINE);
+    const baseline = readRatchetBaseline(root, BASELINE);
     if (cmd === 'freeze') {
         // Per-file map. Shrink-only: min against the prior per-file count so a --no-verify growth can't be
         // laundered back in. A pre-per-file (or missing) baseline has no per-file prior → this first freeze
@@ -330,12 +332,12 @@ function runCli(cmd) {
             files[f] = p ? { file: Math.min(p.file, c.file), fn: Math.min(p.fn, c.fn) } : c;
         }
         if (Object.keys(files).length > 0) {
-            writeRatchetBaseline(root, SIZE_BASELINE, LEGACY_SIZE_BASELINE, `${JSON.stringify({ files }, null, 2)}\n`);
+            writeRatchetBaseline(root, SIZE_BASELINE, `${JSON.stringify({ files }, null, 2)}\n`);
             console.log(`✓ ${SIZE_BASELINE}: frozen max-lines disables for ${Object.keys(files).length} file(s) (from ${current.scannedFiles} source files)`);
         }
         else {
             // No disables anywhere → no debt to grandfather. Don't write an empty baseline; delete a stale one.
-            removeRatchetBaseline(root, SIZE_BASELINE, LEGACY_SIZE_BASELINE);
+            removeRatchetBaseline(root, SIZE_BASELINE);
             console.log(`✓ ${SIZE_BASELINE}: no max-lines disables (${current.scannedFiles} source files) — no baseline written`);
         }
         if (cfg.maxLines || cfg.maxTestLines) {

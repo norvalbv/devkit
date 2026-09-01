@@ -431,64 +431,6 @@ describe('raw-line cap (the maxLines gate — size owned by the ratchet, not esl
     expect(result.stderr).toContain('src/legacy.ts: 81 lines (max 50)');
   });
 
-  it('reads pre-migration line and disable baselines from the legacy directory', () => {
-    const root = makeRoot();
-    writeConfig(root, { scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 50 });
-    write(root, 'src/legacy.ts', `/* eslint-disable max-lines */\n${big(79)}`);
-    write(
-      root,
-      'eslint/baselines/size.json',
-      JSON.stringify({ files: { 'src/legacy.ts': { file: 1, fn: 0 } } }),
-    );
-    write(
-      root,
-      'eslint/baselines/size-lines.json',
-      JSON.stringify({ maxLines: 50, files: { 'src/legacy.ts': 80 } }),
-    );
-
-    expect(run(root, 'gate').status).toBe(0);
-    write(root, 'src/legacy.ts', `/* eslint-disable max-lines */\n${big(89)}`);
-    const result = run(root, 'gate');
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain('src/legacy.ts: 90 lines (max 80)');
-  });
-
-  it('reads legacy baselines and canonicalizes them on the next freeze', () => {
-    const root = makeRoot();
-    writeConfig(root, { scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 50 });
-    write(
-      root,
-      'src/legacy.ts',
-      `/* eslint-disable max-lines */\n/* eslint-disable max-lines */\n${big(88)}`,
-    );
-    write(
-      root,
-      'eslint/baselines/size.json',
-      JSON.stringify({ files: { 'src/legacy.ts': { file: 1, fn: 0 } } }),
-    );
-    write(
-      root,
-      'eslint/baselines/size-lines.json',
-      JSON.stringify({ maxLines: 50, files: { 'src/legacy.ts': 80 } }),
-    );
-
-    const result = run(root, 'freeze');
-
-    expect(result.status, result.stderr).toBe(0);
-    expect(
-      JSON.parse(readFileSync(join(root, '.devkit/baselines/size.json'), 'utf8')).files[
-        'src/legacy.ts'
-      ].file,
-    ).toBe(1);
-    expect(
-      JSON.parse(readFileSync(join(root, '.devkit/baselines/size-lines.json'), 'utf8')).files[
-        'src/legacy.ts'
-      ],
-    ).toBe(90);
-    expect(() => readFileSync(join(root, 'eslint/baselines/size.json'))).toThrow();
-    expect(() => readFileSync(join(root, 'eslint/baselines/size-lines.json'))).toThrow();
-  });
-
   it('a grandfathered file that GROWS past its recorded ceiling fails (the ratchet)', () => {
     const root = makeRoot();
     writeConfig(root, { scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 50 });

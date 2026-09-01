@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { resolveGuardConfig } from '../config.mts';
 import { sourceMatchers } from '../config.mts';
-import { LEGACY_LINES_BASELINE, LINES_BASELINE, readRatchetBaseline } from './baseline-paths.mts';
+import { LINES_BASELINE, readRatchetBaseline } from './baseline-paths.mts';
 import { mergeBaseRef, treeTextAtRef } from './git-index.mts';
 import { SIZE_SKIP_DIRS } from './size-policy.mts';
 
@@ -164,9 +164,7 @@ function workingText(root: string, relativePath: string): string | null {
 }
 
 function rawBaselineAt(root: string, snapshot: Snapshot): SnapshotLineBaseline {
-  const contents =
-    snapshotText(root, snapshot, LINES_BASELINE) ??
-    snapshotText(root, snapshot, LEGACY_LINES_BASELINE);
+  const contents = snapshotText(root, snapshot, LINES_BASELINE);
   return { ...decodeLineBaseline(contents, snapshot), present: contents !== null };
 }
 
@@ -228,7 +226,7 @@ export function lineBaselineForGate(
     }
     if (raw.present) return decoded;
   }
-  const baseline = readRatchetBaseline(root, LINES_BASELINE, LEGACY_LINES_BASELINE);
+  const baseline = readRatchetBaseline(root, LINES_BASELINE);
   const decoded = lineBaselineOrExit(
     baseline?.contents ?? null,
     baseline?.relativePath ?? LINES_BASELINE,

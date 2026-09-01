@@ -21,7 +21,7 @@ import { existsSync, readdirSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { CONFIG_FILENAME, resolveGuardConfig, sourceMatchers } from '../config.mjs';
-import { FANOUT_BASELINE, LEGACY_FANOUT_BASELINE, readRatchetBaseline, removeRatchetBaseline, writeRatchetBaseline, } from './baseline-paths.mjs';
+import { FANOUT_BASELINE, readRatchetBaseline, removeRatchetBaseline, writeRatchetBaseline, } from './baseline-paths.mjs';
 import { hasStagedFiles, indexFiles, treeFilesAtRef } from './git-index.mjs';
 // Per-repo STATE, resolved against the consumer cwd (never __dirname).
 const BASELINE = FANOUT_BASELINE;
@@ -109,7 +109,7 @@ function runCli(cmd) {
     const cap = cfg.fanoutCap;
     const offenders = overCap(countFanout(root), cap);
     if (cmd === 'freeze') {
-        const baseline = readRatchetBaseline(root, BASELINE, LEGACY_FANOUT_BASELINE);
+        const baseline = readRatchetBaseline(root, BASELINE);
         if (Object.keys(offenders).length > 0) {
             // Read the OUTGOING baseline before clobbering it, so the refresh can name what it is newly
             // grandfathering. Deliberately NOT shrink-only, matching an explicit guard-size refresh:
@@ -120,7 +120,7 @@ function runCli(cmd) {
                 ? (JSON.parse(baseline.contents).dirs ?? {})
                 : {};
             const out = { cap, dirs: offenders };
-            writeRatchetBaseline(root, FANOUT_BASELINE, LEGACY_FANOUT_BASELINE, `${JSON.stringify(out, null, 2)}\n`);
+            writeRatchetBaseline(root, FANOUT_BASELINE, `${JSON.stringify(out, null, 2)}\n`);
             console.log(`✓ ${FANOUT_BASELINE}: cap ${cap}, ${Object.keys(offenders).length} over-cap folder(s) grandfathered`);
             const rose = Object.entries(offenders).filter(([dir, n]) => n > (prior[dir] ?? cap));
             if (rose.length > 0) {
@@ -132,7 +132,7 @@ function runCli(cmd) {
         else {
             // No folder over cap → no debt to grandfather. Don't write an empty baseline; delete a stale one.
             // The cap is enforced from guard.config.json, so an absent baseline still gates new fan-out.
-            removeRatchetBaseline(root, FANOUT_BASELINE, LEGACY_FANOUT_BASELINE);
+            removeRatchetBaseline(root, FANOUT_BASELINE);
             console.log(`✓ ${FANOUT_BASELINE}: no folder over cap ${cap} — no baseline written`);
         }
         process.exit(0);
@@ -145,7 +145,7 @@ function runCli(cmd) {
         const inCommit = indexCounts !== null && hasStagedFiles(root);
         const headCounts = inCommit ? (countFanoutFrom(root, treeFilesAtRef(root, 'HEAD')) ?? {}) : {};
         const over = inCommit ? overCap(indexCounts, cap) : offenders;
-        const baseline = readRatchetBaseline(root, BASELINE, LEGACY_FANOUT_BASELINE);
+        const baseline = readRatchetBaseline(root, BASELINE);
         const hasBaseline = baseline !== null;
         // Missing baseline = no grandfathered over-cap folders. Enforce the config cap whenever the repo
         // is governed (guard.config.json present — devkit's own repo, CI, any adopted consumer); only an
@@ -189,7 +189,7 @@ function runCli(cmd) {
             Object.keys(frozen.dirs).length > 0 &&
             Object.keys(over).length === 0 &&
             hasStagedFiles(root)) {
-            removeRatchetBaseline(root, FANOUT_BASELINE, LEGACY_FANOUT_BASELINE, { stage: true });
+            removeRatchetBaseline(root, FANOUT_BASELINE, { stage: true });
             console.log(`✓ fan-out debt cleared — ${FANOUT_BASELINE} removed & staged.`);
             process.exit(0);
         }

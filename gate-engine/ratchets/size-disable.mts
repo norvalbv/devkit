@@ -13,8 +13,6 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { CONFIG_FILENAME, resolveGuardConfig, sourceMatchers } from '../config.mts';
 import {
-  LEGACY_LINES_BASELINE,
-  LEGACY_SIZE_BASELINE,
   readRatchetBaseline,
   removeRatchetBaseline,
   SIZE_BASELINE,
@@ -295,13 +293,12 @@ function runLinesGate(
     if (Object.keys(next).length === 0) {
       // Last grandfathered giant healed → the baseline is now empty. Delete it (an empty file is
       // not kept as a sentinel) and stage the removal so it rides this commit.
-      removeRatchetBaseline(root, LINES_BASELINE, LEGACY_LINES_BASELINE, { stage: true });
+      removeRatchetBaseline(root, LINES_BASELINE, { stage: true });
       console.log(`✓ line debt cleared — ${LINES_BASELINE} removed & staged.`);
     } else {
       writeRatchetBaseline(
         root,
         LINES_BASELINE,
-        LEGACY_LINES_BASELINE,
         `${JSON.stringify({ lineCountVersion, maxLines: cfg.maxLines, maxTestLines: cfg.maxTestLines, files: next }, null, 2)}\n`,
         { stage: true },
       );
@@ -408,16 +405,12 @@ function runDisableGate(
   }
   if (!changed) return;
   if (Object.keys(next).length === 0) {
-    removeRatchetBaseline(root, SIZE_BASELINE, LEGACY_SIZE_BASELINE, { stage: true });
+    removeRatchetBaseline(root, SIZE_BASELINE, { stage: true });
     console.log(`✓ size debt cleared — ${SIZE_BASELINE} removed & staged.`);
   } else {
-    writeRatchetBaseline(
-      root,
-      SIZE_BASELINE,
-      LEGACY_SIZE_BASELINE,
-      `${JSON.stringify({ files: next }, null, 2)}\n`,
-      { stage: true },
-    );
+    writeRatchetBaseline(root, SIZE_BASELINE, `${JSON.stringify({ files: next }, null, 2)}\n`, {
+      stage: true,
+    });
     console.log(`✓ size debt tightened — ${SIZE_BASELINE} lowered & staged.`);
   }
 }
@@ -429,7 +422,7 @@ function runCli(cmd: string): void {
   const cfg = resolveGuardConfig(root);
   const current = countDisables(root);
   // Read after the tree walk rather than holding a potentially stale snapshot across the full scan.
-  const baseline = readRatchetBaseline(root, BASELINE, LEGACY_SIZE_BASELINE);
+  const baseline = readRatchetBaseline(root, BASELINE);
 
   if (cmd === 'freeze') {
     // Per-file map. Shrink-only: min against the prior per-file count so a --no-verify growth can't be
@@ -442,18 +435,13 @@ function runCli(cmd: string): void {
       files[f] = p ? { file: Math.min(p.file, c.file), fn: Math.min(p.fn, c.fn) } : c;
     }
     if (Object.keys(files).length > 0) {
-      writeRatchetBaseline(
-        root,
-        SIZE_BASELINE,
-        LEGACY_SIZE_BASELINE,
-        `${JSON.stringify({ files }, null, 2)}\n`,
-      );
+      writeRatchetBaseline(root, SIZE_BASELINE, `${JSON.stringify({ files }, null, 2)}\n`);
       console.log(
         `✓ ${SIZE_BASELINE}: frozen max-lines disables for ${Object.keys(files).length} file(s) (from ${current.scannedFiles} source files)`,
       );
     } else {
       // No disables anywhere → no debt to grandfather. Don't write an empty baseline; delete a stale one.
-      removeRatchetBaseline(root, SIZE_BASELINE, LEGACY_SIZE_BASELINE);
+      removeRatchetBaseline(root, SIZE_BASELINE);
       console.log(
         `✓ ${SIZE_BASELINE}: no max-lines disables (${current.scannedFiles} source files) — no baseline written`,
       );

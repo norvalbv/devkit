@@ -1,15 +1,11 @@
 import {
-  closeSync,
   existsSync,
-  ftruncateSync,
   linkSync,
   mkdirSync,
-  openSync,
   readFileSync,
   readdirSync,
   rmSync,
   writeFileSync,
-  writeSync,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
@@ -23,21 +19,38 @@ import {
 export const FANOUT_BASELINE = '.devkit/baselines/fanout.json';
 export const LINES_BASELINE = '.devkit/baselines/size-lines.json';
 export const SIZE_BASELINE = '.devkit/baselines/size.json';
-export const LEGACY_FANOUT_BASELINE = 'eslint/baselines/fanout.json';
-export const LEGACY_LINES_BASELINE = 'eslint/baselines/size-lines.json';
-export const LEGACY_SIZE_BASELINE = 'eslint/baselines/size.json';
 export const IMPORT_WALL_BASELINE = '.devkit/baselines/imports.mjs';
 export const STRUCTURE_BASELINE_DIR = '.devkit/baselines/structure';
 export const STRUCTURE_EXEMPT = '.devkit/structure/exempt.mjs';
+// The legacy ESLint-owned generation is retired (sc-2256): gates neither read nor write these
+// names. They survive only so init/upgrade migration can move a straggler repo's debt across.
+const LEGACY_FANOUT_BASELINE = 'eslint/baselines/fanout.json';
+const LEGACY_LINES_BASELINE = 'eslint/baselines/size-lines.json';
+const LEGACY_SIZE_BASELINE = 'eslint/baselines/size.json';
 export const LEGACY_IMPORT_WALL_BASELINE = 'eslint/baselines/imports.mjs';
 export const LEGACY_STRUCTURE_BASELINE_DIR = 'eslint/baselines';
-export const LEGACY_STRUCTURE_EXEMPT = 'eslint/baselines/exempt.mjs';
+const LEGACY_STRUCTURE_EXEMPT = 'eslint/baselines/exempt.mjs';
 
 const LEGACY_RATCHET_BASELINES = [
   { from: LEGACY_FANOUT_BASELINE, to: FANOUT_BASELINE },
   { from: LEGACY_LINES_BASELINE, to: LINES_BASELINE },
   { from: LEGACY_SIZE_BASELINE, to: SIZE_BASELINE },
 ] as const;
+
+const LEGACY_BY_CANONICAL = new Map<string, string>(
+  LEGACY_RATCHET_BASELINES.map(({ from, to }) => [to, from]),
+);
+
+// A straggler repo can still hold a retired legacy copy. Leaving it behind lets the next
+// init/upgrade migration resurrect debt a gate just cleared or tightened, so every canonical
+// write/clear also deletes the retired name. This is disposal of a retired pathname, not a write
+// through it — no current generation reads eslint/baselines (sc-2256).
+function discardRetiredCopy(root: string, canonical: string, stage: boolean): void {
+  const legacy = LEGACY_BY_CANONICAL.get(canonical);
+  if (!legacy) return;
+  rmSync(join(root, legacy), { force: true });
+  if (stage) stageBaseline(root, legacy);
+}
 
 function legacyDevkitBaselines(root: string) {
   const legacyDir = join(root, LEGACY_STRUCTURE_BASELINE_DIR);
@@ -89,29 +102,9 @@ function canCopyAfterLinkFailure(error: NodeJS.ErrnoException): boolean {
 
 type BaselineLink = (existingPath: string, newPath: string) => void;
 type BaselineCreate = (path: string, contents: Buffer) => void;
-type BaselineOpenExisting = (path: string) => number;
 
 function createBaselineExclusively(path: string, contents: Buffer): void {
   writeFileSync(path, contents, { flag: 'wx' });
-}
-
-function openBaselineExisting(path: string): number {
-  return openSync(path, 'r+');
-}
-
-function rewriteOpenBaseline(descriptor: number, contents: string): void {
-  const bytes = Buffer.from(contents);
-  try {
-    let offset = 0;
-    while (offset < bytes.length) {
-      const written = writeSync(descriptor, bytes, offset, bytes.length - offset, offset);
-      if (written === 0) throw new Error('Devkit ratchet baseline write made no progress.');
-      offset += written;
-    }
-    ftruncateSync(descriptor, bytes.length);
-  } finally {
-    closeSync(descriptor);
-  }
 }
 
 export interface RatchetBaselineMigration {
@@ -160,30 +153,18 @@ function concurrentBaselineCreateSettled(
   return false;
 }
 
-/** Read debt across a concurrent legacy→canonical move without observing a false missing state. */
-export function readRatchetBaseline(
-  root: string,
-  canonical: string,
-  legacy: string,
-): ReadRatchetBaseline | null {
-  const read = (relativePath: string): ReadRatchetBaseline | null => {
-    const bytes = readExisting(join(root, relativePath));
-    return bytes ? { contents: bytes.toString('utf8'), relativePath } : null;
-  };
-  return read(canonical) ?? read(legacy) ?? read(canonical);
+/** Read the canonical debt ceiling; the legacy generation is retired (sc-2256). */
+export function readRatchetBaseline(root: string, canonical: string): ReadRatchetBaseline | null {
+  const bytes = readExisting(join(root, canonical));
+  return bytes ? { contents: bytes.toString('utf8'), relativePath: canonical } : null;
 }
 
-/** Persist current debt canonically; removing the legacy copy makes a concurrent migration safe. */
+/** Persist the current debt ceiling canonically. */
 export function writeRatchetBaseline(
   root: string,
   canonical: string,
-  legacy: string,
   contents: string,
-  {
-    stage = false,
-    link = linkSync,
-    openExisting = openBaselineExisting,
-  }: { stage?: boolean; link?: BaselineLink; openExisting?: BaselineOpenExisting } = {},
+  { stage = false }: { stage?: boolean } = {},
 ): void {
   const overlay = (() => {
     if (process.env.DEVKIT_OVERLAY === '1') return true;
@@ -202,68 +183,26 @@ export function writeRatchetBaseline(
   })();
   if (!overlay) assertBaselineTrackable(root, canonical);
   const canonicalFile = join(root, canonical);
-  const legacyFile = join(root, legacy);
   mkdirSync(dirname(canonicalFile), { recursive: true });
-  if (hasStableBaselineConflict(canonicalFile, legacyFile)) {
-    throw new Error(
-      `Devkit ratchet baseline write stopped: ${legacy} and ${canonical} contain different debt ceilings.`,
-    );
-  }
-  const canonicalBytes = readExisting(canonicalFile);
-  const legacyBytes = readExisting(legacyFile);
-  if (canonicalBytes === null && legacyBytes !== null) {
-    let legacyDescriptor: number | null;
-    try {
-      // Bind the write to an existing inode so a completed migration cannot be followed by a stale
-      // path-based write recreating the legacy name as a second, divergent file.
-      legacyDescriptor = openExisting(legacyFile);
-    } catch (error) {
-      // SAFETY: openExisting() follows Node's filesystem contract and reports ErrnoException.code.
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-      legacyDescriptor = null;
-    }
-    if (legacyDescriptor === null) {
-      writeFileSync(canonicalFile, contents);
-    } else {
-      // A simultaneous migration hard-links this open inode, so the canonical name receives the
-      // complete rewrite even if the migrator removes the legacy pathname before this process runs.
-      rewriteOpenBaseline(legacyDescriptor, contents);
-      try {
-        link(legacyFile, canonicalFile);
-      } catch (error) {
-        const concurrentCanonical = readExisting(canonicalFile);
-        if (concurrentCanonical === null) {
-          // SAFETY: link() follows Node's filesystem contract and reports failures as ErrnoException.
-          const linkFailure = error as NodeJS.ErrnoException;
-          if (!canCopyAfterLinkFailure(linkFailure)) throw error;
-          // Copying the shared legacy path can capture a peer's bytes. Persist this writer's payload.
-          writeFileSync(canonicalFile, contents);
-        } else writeFileSync(canonicalFile, contents);
-      }
-    }
-  } else {
-    writeFileSync(canonicalFile, contents);
-  }
-  rmSync(legacyFile, { force: true });
-  if (stage) {
-    stageBaseline(root, canonical);
-    stageBaseline(root, legacy);
-  }
+  writeFileSync(canonicalFile, contents);
+  // Canonical is staged before the retired copy is discarded, so an interruption between the two
+  // steps leaves the index carrying the new debt rather than a deletion without its replacement.
+  if (stage) stageBaseline(root, canonical);
+  discardRetiredCopy(root, canonical, stage);
 }
 
-/** Clear debt from both storage generations so migration cannot preserve a stale copy. */
+/** Clear the debt ceiling from the canonical name and any stale retired copy. */
 export function removeRatchetBaseline(
   root: string,
   canonical: string,
-  legacy: string,
   { stage = false }: { stage?: boolean } = {},
 ): void {
+  // The retired copy goes first: a migration observing (legacy present, canonical absent) would
+  // hard-link the stale debt back into the canonical name. With the legacy name gone before
+  // canonical, either interleaving converges on cleared debt.
+  discardRetiredCopy(root, canonical, stage);
   rmSync(join(root, canonical), { force: true });
-  rmSync(join(root, legacy), { force: true });
-  if (stage) {
-    stageBaseline(root, canonical);
-    stageBaseline(root, legacy);
-  }
+  if (stage) stageBaseline(root, canonical);
 }
 
 function readExisting(path: string): Buffer | null {

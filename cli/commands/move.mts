@@ -32,10 +32,7 @@ import {
 } from 'node:fs';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { Node, Project, type SourceFile, SyntaxKind, ts } from 'ts-morph';
-import {
-  LEGACY_STRUCTURE_BASELINE_DIR,
-  STRUCTURE_BASELINE_DIR,
-} from '../../gate-engine/ratchets/baseline-paths.mts';
+import { STRUCTURE_BASELINE_DIR } from '../../gate-engine/ratchets/baseline-paths.mts';
 import { resolveBaselineRoots } from '../lib/generate/generate-structure-baseline.mts';
 import {
   assertMovedSource,
@@ -236,16 +233,13 @@ function specifierHandles(sf: SourceFile): SpecifierHandle[] {
 /** Drop moved files' OLD paths from the structure baselines (surgical — no regen). */
 function pruneBaselines(cwd: string, oldRelPaths: string[], dryRun: boolean): number {
   const canonicalDir = join(cwd, STRUCTURE_BASELINE_DIR);
-  const legacyDir = join(cwd, LEGACY_STRUCTURE_BASELINE_DIR);
-  if (!existsSync(canonicalDir) && !existsSync(legacyDir)) return 0;
+  if (!existsSync(canonicalDir)) return 0;
   // structureRoot prefixes → baseline file, resolved from guard.config.json so the prune
   // follows whatever roots the baseline writer used (config trees or the electron default).
   const ROOTS = resolveBaselineRoots(cwd);
   let removed = 0;
   for (const [prefix, file] of ROOTS) {
-    const canonical = join(canonicalDir, file);
-    const legacy = join(legacyDir, file);
-    const abs = existsSync(canonical) ? canonical : legacy;
+    const abs = join(canonicalDir, file);
     if (!existsSync(abs)) continue;
     const keys = oldRelPaths.filter((p) => p.startsWith(prefix)).map((p) => p.slice(prefix.length));
     if (!keys.length) continue;

@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { sourceMatchers } from '../config.mjs';
-import { LEGACY_LINES_BASELINE, LINES_BASELINE, readRatchetBaseline } from './baseline-paths.mjs';
+import { LINES_BASELINE, readRatchetBaseline } from './baseline-paths.mjs';
 import { mergeBaseRef, treeTextAtRef } from './git-index.mjs';
 import { SIZE_SKIP_DIRS } from './size-policy.mjs';
 class LineAuthorityError extends Error {
@@ -100,8 +100,7 @@ function workingText(root, relativePath) {
     }
 }
 function rawBaselineAt(root, snapshot) {
-    const contents = snapshotText(root, snapshot, LINES_BASELINE) ??
-        snapshotText(root, snapshot, LEGACY_LINES_BASELINE);
+    const contents = snapshotText(root, snapshot, LINES_BASELINE);
     return { ...decodeLineBaseline(contents, snapshot), present: contents !== null };
 }
 function baselineAt(root, snapshot) {
@@ -151,7 +150,7 @@ export function lineBaselineForGate(root, candidate, parents = lineBaselineParen
         if (raw.present)
             return decoded;
     }
-    const baseline = readRatchetBaseline(root, LINES_BASELINE, LEGACY_LINES_BASELINE);
+    const baseline = readRatchetBaseline(root, LINES_BASELINE);
     const decoded = lineBaselineOrExit(baseline?.contents ?? null, baseline?.relativePath ?? LINES_BASELINE);
     return normalizeCandidateLineBaseline(root, decoded, parents, (file) => workingText(root, file));
 }

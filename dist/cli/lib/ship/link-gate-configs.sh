@@ -144,7 +144,6 @@ link_untracked_gate_configs() {
   # ship-gates-converge-not-restart (2026-07-07) already records this link as a dependency: the
   # prefix-cache fingerprint folds in the baseline files and needs real state here. Each file is a
   # candidate so a tracked freeze cannot hide an untracked sibling from the gate worktree.
-  # Legacy eslint/baselines files are added individually below until every consumer has migrated.
   # Config-driven paths (indexPath / allowlistPath) from the resolver. .mts in source, built .mjs in an
   # installed consumer (the reconcile-manifest-write.mts dual-ext idiom). A resolver failure (unparseable
   # guard.config.json → resolveGuardConfig throws) is non-fatal: warn, keep the hardcoded set, and let
@@ -187,14 +186,6 @@ link_untracked_gate_configs() {
       rel=${baseline#"$candidate_source_root"/}
       candidates+=("$rel")
     done
-  done
-  # Legacy overlay baselines remain readable until init/upgrade migrates them. Project each local
-  # file independently; never pull an atomic directory (or a stale primary-checkout fallback) over
-  # canonical .devkit state in the shipping checkout.
-  for baseline in "$root"/eslint/baselines/*.json "$root"/eslint/baselines/*.mjs; do
-    [ -e "$baseline" ] || continue
-    rel=${baseline#"$root"/}
-    candidates+=("$rel")
   done
   if is_review_projection_purpose "$purpose"; then
     IFS= read -r -d '' index_rel < <(node "$emitter" "$root" indexPath --null 2>/dev/null) || index_rel=

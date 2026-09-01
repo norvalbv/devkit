@@ -16,10 +16,7 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { confirm, isCancel, multiselect } from '@clack/prompts';
-import {
-  LEGACY_LINES_BASELINE,
-  LINES_BASELINE,
-} from '../../../gate-engine/ratchets/baseline-paths.mts';
+import { LINES_BASELINE } from '../../../gate-engine/ratchets/baseline-paths.mts';
 import {
   enableLineGrowth,
   hasLineCap,
@@ -118,7 +115,7 @@ export async function offerNewGates(
 
 // The files enabling the block writes: the cap lands in guard.config.json, and the freeze that
 // grandfathers the current giants writes (or clears) the lines baseline.
-const LINE_GROWTH_FILES = ['guard.config.json', LINES_BASELINE, LEGACY_LINES_BASELINE];
+const LINE_GROWTH_FILES = ['guard.config.json', LINES_BASELINE];
 
 // `.git/info/exclude` hides untracked files only, so overlay must skip anything git already tracks.
 export function overlayOwnsLineGrowth(cwd: string): boolean {
