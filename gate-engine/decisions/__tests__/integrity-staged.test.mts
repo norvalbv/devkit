@@ -35,9 +35,14 @@ function git(root: string, ...args: string[]): string {
   return execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
 }
 
+// Carries **Vision-fit:** and **Source:** because renderTarget emits both on EVERY block, and
+// target-missing-required-field reads their absence as proof a non-CLI writer produced the record.
+// A fixture standing in for CLI output has to be shaped like CLI output, or every test here fails
+// on a defect it never meant to introduce.
 const target = (date: string, headline: string, evidenceChange = false) =>
   `## Target · ${date} — ${headline}\n\n` +
-  '**Context:** c\n**Ruling:** r\n**Consequences:**\n- Positive: p\n' +
+  '**Context:** c\n**Ruling:** r\n**Consequences:**\n- Positive: p\n- Negative: n\n' +
+  '**Vision-fit:** n/a\n' +
   (evidenceChange ? '**Evidence-change:** what changed\n' : '') +
   '**Source:** collab\n';
 
@@ -140,6 +145,38 @@ describe('judgeStagedIntegrity', () => {
     expect(blocked.map((f) => f.block)).toEqual(['2026-03-01']);
     // The older one is still reported, just not as this change's fault.
     expect(verdict.preexisting.map((f) => f.block)).toEqual(['2026-02-01']);
+  });
+
+  describe('target-missing-required-field through the staged gate', () => {
+    const stripVisionFit = (block: string) => block.replace(/\*\*Vision-fit:\*\* n\/a\n/, '');
+
+    it('blocks when THIS change introduces a block missing a required field', () => {
+      const root = seed({
+        [`${D}/a.md`]: record('a', '2026-01-01', [target('2026-01-01', 'one')]),
+        [`${D}/INDEX.md`]: index([['a', '2026-01-01']]),
+      });
+      stage(root, {
+        [`${D}/a.md`]: record('a', '2026-01-01', [stripVisionFit(target('2026-01-01', 'one'))]),
+      });
+      const verdict = judgeStagedIntegrity(root);
+      expect(verdict.code).toBe(1);
+      expect(verdict.blocking.map((f) => f.check)).toContain('target-missing-required-field');
+    });
+
+    it('stays advisory when the damaged block already exists at HEAD', () => {
+      const damaged = stripVisionFit(target('2026-01-01', 'one'));
+      const root = seed({
+        [`${D}/a.md`]: record('a', '2026-01-01', [damaged]),
+        [`${D}/INDEX.md`]: index([['a', '2026-01-01']]),
+      });
+      stage(root, {
+        [`${D}/a.md`]: `${record('a', '2026-01-01', [damaged])}\n- 2026-02-01 — an unrelated convergence note.\n`,
+      });
+      const verdict = judgeStagedIntegrity(root);
+      expect(verdict.blocking).toEqual([]);
+      expect(verdict.preexisting.map((f) => f.check)).toContain('target-missing-required-field');
+      expect(verdict.code).toBe(0);
+    });
   });
 
   it('scopes a slug whose INDEX row changed even when the record itself is untouched', () => {

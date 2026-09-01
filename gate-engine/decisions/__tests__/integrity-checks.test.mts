@@ -13,7 +13,9 @@ import {
   integrityFindingKey,
   checkRetargetEvidenceChange,
   checkTargetHeadingDepth,
+  checkTargetRequiredFields,
 } from '../integrity/checks.mts';
+import { currentTarget, parseTargetFields } from '../decision-format.mts';
 import { MUTATIONS } from '../integrity/perturb.mts';
 import { runIntegrity, scanCorpus } from '../integrity/scan.mts';
 
@@ -172,6 +174,240 @@ describe('checkDuplicateFieldText', () => {
     expect(findings[0].check).toBe('duplicate-field-text');
     expect(findings[0].detail).toContain('ruling');
     expect(findings[0].detail).toContain('negative');
+  });
+});
+
+function formatterIndentedAxis(slug: string): AxisDoc {
+  return {
+    slug,
+    fm: { slug, created: '2026-01-01' },
+    body:
+      `\n# ${slug}\n\n` +
+      `## Target · 2026-01-05 — a ruling a formatter reindented\n\n` +
+      `**Context:** a forcing failure that made the status quo untenable.\n` +
+      `**Ruling:** the mechanism actually chosen, spelled out in full.\n` +
+      `**Consequences:**\n\n` +
+      `- Positive: the value this protects, described concretely.\n` +
+      `- Negative: the cost knowingly paid, described concretely.\n` +
+      `  **Vision-fit:** n/a — internal tooling.\n` +
+      `  **Scope:** gate-engine/review/**\n` +
+      `  **Source:** manual\n`,
+  };
+}
+
+describe('indented Target fields (a markdown formatter nested them under the Consequences list)', () => {
+  it('recovers every field, so a formatted record parses identically to an unformatted one', () => {
+    const target = currentTarget(formatterIndentedAxis('formatted-axis').body);
+    expect(Object.keys(target?.fields ?? {})).toEqual([
+      'context',
+      'ruling',
+      'consequences',
+      'vision-fit',
+      'scope',
+      'source',
+    ]);
+  });
+
+  it('still reads **Scope:**, which is what arms the alignment gate', () => {
+    expect(currentTarget(formatterIndentedAxis('formatted-axis').body)?.scope).toBe(
+      'gate-engine/review/**',
+    );
+  });
+
+  it('clears every structural check — a formatted record is not a damaged one', () => {
+    const axis = formatterIndentedAxis('formatted-axis');
+    const row = { slug: 'formatted-axis', ruling: 'r', why: 'w', updated: '2026-01-05' };
+    expect(checkAxis(axis, row)).toEqual([]);
+  });
+
+  it('does not read an indented field out of a dated NOTE', () => {
+    const axis = retargetedAxis(
+      '- 2026-02-02 — a convergence note whose continuation was reflowed.\n' +
+        '  **Evidence-change:** this text belongs to the NOTE, not to the Target.\n',
+    );
+    const findings = checkRetargetEvidenceChange(axis);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].check).toBe('retarget-missing-evidence-change');
+  });
+
+  it('excludes a note whose date carries a parenthetical ref, not just the bare `date —` shape', () => {
+    const axis = retargetedAxis(
+      '- 2026-02-02 (sc-2473) — a note whose date is followed by a story ref.\n' +
+        '  **Evidence-change:** this text belongs to the NOTE, not to the Target.\n',
+    );
+    expect(checkRetargetEvidenceChange(axis)).toHaveLength(1);
+  });
+});
+
+describe('parseTargetFields — the shapes a real checkout actually hands it', () => {
+  it('reads a field a formatter indented with two spaces', () => {
+    expect(parseTargetFields('  **Scope:** src/a/**')).toEqual({ scope: 'src/a/**' });
+  });
+
+  it('reads a field indented four spaces or with a tab', () => {
+    // Formatters disagree: prettier emits two spaces, a `useTabs` config emits a tab, and a
+    // four-space list-content indent is ordinary CommonMark. All three are the same intent.
+    expect(parseTargetFields('    **Scope:** src/a/**')).toEqual({ scope: 'src/a/**' });
+    expect(parseTargetFields('\t**Scope:** src/a/**')).toEqual({ scope: 'src/a/**' });
+  });
+
+  it('reads a field line that ends in CRLF', () => {
+    // A Windows clone with git's default core.autocrlf=true has CRLF in the working tree, and this
+    // repo ships no .gitattributes to normalise it. The value must not depend on the line ending.
+    expect(parseTargetFields('**Scope:** src/a/**\r')).toEqual({ scope: 'src/a/**' });
+    expect(parseTargetFields('  **Scope:** src/a/**\r')).toEqual({ scope: 'src/a/**' });
+  });
+
+  it('keeps a field with an empty value DISTINCT from an absent one', () => {
+    // `''` and `undefined` are read differently downstream: every check tests `?.trim()`, so an
+    // empty value fires and an absent key is a missing field. Collapsing them would hide one.
+    expect(parseTargetFields('**Scope:**')).toEqual({ scope: '' });
+    expect(parseTargetFields('  **Scope:**   \r')).toEqual({ scope: '' });
+  });
+});
+
+describe('a CRLF checkout parses identically to an LF one', () => {
+  // The whole read path shares one line-splitting convention, so a line-ending defect is never
+  // confined to one field — it takes Scope (the alignment gate's arming) and Ruling with it.
+  const crlf = (body: string) => body.replace(/\n/g, '\r\n');
+
+  it('recovers every field, and Scope with them', () => {
+    const body = crlf(cleanBody('my-axis', { extra: '**Scope:** src/a/**\n' }));
+    const target = currentTarget(body);
+    expect(target?.scope).toBe('src/a/**');
+    expect(target?.fields['vision-fit']).toBeTruthy();
+  });
+
+  it('does not make every Target block look like a damaged one', () => {
+    // Without this, the integrity gate fires on every block of every axis on Windows — a gate that
+    // blocks every commit is as broken as one that blocks none.
+    const axis = cleanAxis('my-axis');
+    expect(checkTargetRequiredFields({ ...axis, body: crlf(axis.body) })).toEqual([]);
+  });
+
+  it('still reads the Consequences bullets', () => {
+    const axis = cleanAxis('my-axis');
+    expect(checkAxis({ ...axis, body: crlf(axis.body) }, undefined)).toEqual([]);
+  });
+});
+
+describe('checkTargetRequiredFields', () => {
+  it('is silent on a well-formed axis', () => {
+    expect(checkTargetRequiredFields(cleanAxis('my-axis'))).toEqual([]);
+  });
+
+  it('fires when a block loses **Vision-fit:** — break and restore', () => {
+    const clean = cleanAxis('my-axis');
+    expect(checkTargetRequiredFields(clean)).toEqual([]); // restored state: clean
+
+    const broken: AxisDoc = {
+      ...clean,
+      body: clean.body.replace(/\n\*\*Vision-fit:\*\*[^\n]*/, ''),
+    };
+    const findings = checkTargetRequiredFields(broken);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].check).toBe('target-missing-required-field');
+    expect(findings[0].detail).toContain('vision-fit');
+
+    expect(checkTargetRequiredFields(clean)).toEqual([]); // original object untouched
+  });
+
+  it('fires when a block loses **Source:**', () => {
+    const clean = cleanAxis('my-axis');
+    const broken: AxisDoc = { ...clean, body: clean.body.replace(/\n\*\*Source:\*\*[^\n]*/, '') };
+    expect(checkTargetRequiredFields(broken)[0].detail).toContain('source');
+  });
+
+  it('names both fields in one finding when a block loses both', () => {
+    const clean = cleanAxis('my-axis');
+    const broken: AxisDoc = {
+      ...clean,
+      body: clean.body.replace(/\n\*\*(Vision-fit|Source):\*\*[^\n]*/g, ''),
+    };
+    const findings = checkTargetRequiredFields(broken);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].detail).toContain('vision-fit');
+    expect(findings[0].detail).toContain('source');
+  });
+
+  it('flags the FIRST Target block — the position retarget-missing-evidence-change exempts', () => {
+    // The real corpus case sat at index 0, which is precisely why the existing suite never saw it.
+    const axis = retargetedAxis('**Evidence-change:** what shifted.\n');
+    const broken: AxisDoc = {
+      ...axis,
+      body: axis.body.replace(/\n\*\*Vision-fit:\*\*[^\n]*/, ''),
+    };
+    const findings = checkTargetRequiredFields(broken);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].block).toBe('2026-01-05');
+  });
+
+  it('reports per block, so an allowlist can except one block and not the whole axis', () => {
+    const clean = cleanAxis('my-axis');
+    const broken: AxisDoc = {
+      ...clean,
+      body: clean.body.replace(/\n\*\*Vision-fit:\*\*[^\n]*/, ''),
+    };
+    expect(checkTargetRequiredFields(broken)[0].block).toBe('2026-01-05');
+  });
+
+  it('never fires on a legacy `## <date> —` block, which predates both fields', () => {
+    const axis: AxisDoc = {
+      slug: 'legacy-axis',
+      fm: { slug: 'legacy-axis', created: '2025-01-01' },
+      body:
+        '\n# legacy-axis\n\n## 2025-06-01 — a ruling from the old schema\n\n' +
+        'Prose rationale, with no Target fields at all.\n',
+    };
+    expect(checkTargetRequiredFields(axis)).toEqual([]);
+  });
+
+  it('is silent on an axis with no Target block at all', () => {
+    const axis: AxisDoc = {
+      slug: 'empty-axis',
+      fm: { slug: 'empty-axis', created: '2026-01-01' },
+      body: '\n# empty-axis\n\nA stub with no ruling yet.\n',
+    };
+    expect(checkTargetRequiredFields(axis)).toEqual([]);
+  });
+
+  it('fires on a whitespace-only value, which reads as present but carries nothing', () => {
+    const clean = cleanAxis('my-axis');
+    const hollow: AxisDoc = {
+      ...clean,
+      body: clean.body.replace(/\n\*\*Vision-fit:\*\*[^\n]*/, '\n**Vision-fit:**    '),
+    };
+    expect(checkTargetRequiredFields(hollow)).toHaveLength(1);
+  });
+
+  it('is NOT satisfied by a field the notes carry rather than the ruling', () => {
+    // The note guard in its sharpest form. Without it a convergence note whose continuation was
+    // reflowed hands the block a Source it does not have, and the check reports the record clean.
+    const clean = cleanAxis('my-axis');
+    const broken: AxisDoc = {
+      ...clean,
+      body: `${clean.body.replace(/\n\*\*Source:\*\*[^\n]*/, '')}- 2026-01-06 (sc-1) — a note.\n  **Source:** manual\n`,
+    };
+    const findings = checkTargetRequiredFields(broken);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].detail).toContain('source');
+  });
+
+  it('reports two same-dated damaged blocks separately rather than collapsing them', () => {
+    const clean = cleanAxis('my-axis');
+    const oneBlock = clean.body.slice(clean.body.indexOf('## Target'));
+    const damaged = oneBlock.replace(/\n\*\*Vision-fit:\*\*[^\n]*/, '');
+    const axis: AxisDoc = { ...clean, body: `\n# my-axis\n\n${damaged}\n${damaged}` };
+    const findings = checkTargetRequiredFields(axis);
+    expect(findings).toHaveLength(2);
+    expect(findings.map((f) => f.block)).toEqual(['2026-01-05', '2026-01-05']);
+  });
+
+  it('leaves a misdepth `### Target` heading to its own check instead of double-reporting', () => {
+    const clean = cleanAxis('my-axis');
+    const axis: AxisDoc = { ...clean, body: clean.body.replace('## Target', '### Target') };
+    expect(checkTargetRequiredFields(axis)).toEqual([]);
+    expect(checkAxis(axis, undefined).map((f) => f.check)).toEqual(['target-heading-depth']);
   });
 });
 
