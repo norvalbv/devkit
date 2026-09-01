@@ -262,6 +262,36 @@ describe('supersession (recall/supersession.mts)', () => {
     expect(parseSupersedesId('not an id')).toBeNull();
   });
 
+  describe('a dated note cannot supply a Target field', () => {
+    const withNote = (noteFirstLine: string) =>
+      `\n# ax\n\n## Target · 2026-01-05 — r\n\n` +
+      `**Context:** c\n**Ruling:** r\n**Consequences:**\n` +
+      `- Positive: p\n- Negative: n\n` +
+      `**Vision-fit:** v\n**Source:** manual\n` +
+      `${noteFirstLine}\n  **Supersedes:** target:1999-01-01\n`;
+
+    it('ignores an indented **Supersedes:** continuation under a `date —` note', () => {
+      const [block] = allTargetBlocks(withNote('- 2026-01-06 — a convergence note'));
+      expect(block.supersedes).toBeNull();
+      expect(block.ruling).toBe('r');
+    });
+
+    it('ignores it under a note whose date carries a parenthetical ref', () => {
+      const [block] = allTargetBlocks(withNote('- 2026-01-06 (sc-1214) — a note with a story ref'));
+      expect(block.supersedes).toBeNull();
+    });
+
+    it('still reads a REAL Supersedes the Target itself declares', () => {
+      const body =
+        `\n# ax\n\n## Target · 2026-01-05 — r\n\n` +
+        `**Context:** c\n**Ruling:** r\n**Consequences:**\n` +
+        `- Positive: p\n- Negative: n\n` +
+        `**Supersedes:** target:2026-01-01\n**Vision-fit:** v\n**Source:** manual\n` +
+        `- 2026-01-06 — a convergence note\n`;
+      expect(allTargetBlocks(body)[0].supersedes).toBe('target:2026-01-01');
+    });
+  });
+
   it('allTargetBlocks returns EVERY Target block, not just the last (currentTarget stays last-only)', () => {
     write(
       'axis.md',
