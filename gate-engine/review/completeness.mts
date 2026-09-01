@@ -57,13 +57,20 @@ const AGENT_NAME = 'feature-completeness-reviewer';
 const TOOLS = 'Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(git status:*)';
 
 /** The exact judge capabilities shared by cache identity, execution, and the benchmark. */
-export function completenessJudgeSetup(cfg: GuardConfig, cwd = process.cwd()) {
+export function completenessJudgeSetup(
+  cfg: GuardConfig,
+  cwd = process.cwd(),
+  { mcpProjectRoots }: { mcpProjectRoots?: readonly string[] } = {},
+) {
   const mcpProfile = namedAgentMcpProfile();
   const allowedTools = withNamedAgentMcpTools(TOOLS, cfg.indexPath ? cfg.searchTool : '');
   return {
     allowedTools,
     mcpProfile,
-    capabilityFingerprint: judgeMcpCapabilityFingerprint(mcpProfile, allowedTools, { cwd }),
+    capabilityFingerprint: judgeMcpCapabilityFingerprint(mcpProfile, allowedTools, {
+      cwd,
+      projectRoots: mcpProjectRoots,
+    }),
   };
 }
 
@@ -132,7 +139,10 @@ export function wrapCompleteness(
 export async function runCompleteness(
   msgFile: string,
   cwd = process.cwd(),
-  { exec = execJudgeAsync }: { exec?: typeof execJudgeAsync } = {},
+  {
+    exec = execJudgeAsync,
+    mcpProjectRoots,
+  }: { exec?: typeof execJudgeAsync; mcpProjectRoots?: readonly string[] } = {},
 ): Promise<number> {
   const startedAt = Date.now();
   const finish = (code: number, cacheState: 'none' | 'full' = 'none', effectiveMs?: number) =>
@@ -152,7 +162,9 @@ export async function runCompleteness(
     const cfg = resolveGuardConfig(cwd);
     if (cfg.noLlm) return finish(0);
     model = resolveEscalationModel(cfg);
-    ({ allowedTools, mcpProfile, capabilityFingerprint } = completenessJudgeSetup(cfg, cwd));
+    ({ allowedTools, mcpProfile, capabilityFingerprint } = completenessJudgeSetup(cfg, cwd, {
+      mcpProjectRoots,
+    }));
     const message = normalizeCommitMessage(
       readFileSync(path.isAbsolute(msgFile) ? msgFile : path.resolve(cwd, msgFile), 'utf8'),
     );
@@ -257,6 +269,7 @@ export async function runCompleteness(
     timeout: DEEP_JUDGE_TIMEOUT_MS,
     cwd,
     mcpProfile,
+    mcpProjectRoots,
     codexReadOnly: true,
     onMcpPrepared: (fingerprint) => {
       observedCapabilityFingerprint = fingerprint;

@@ -200,12 +200,11 @@ interface ExecJudgeOpts {
   mcpProfile?: JudgeMcpProfile;
   /** Observes the exact, secret-safe MCP capability identity prepared for this spawn. */
   onMcpPrepared?: (capabilityFingerprint: string) => void;
-  /** Tool-equipped but write-free judge: pin the codex path to the read-only sandbox (see
-   * judgeCliFor). Required for any codex judge on a gate without staged-tree tamper detection. */
+  /** Trusted-registry project roots; isolated fixtures supply the consumer root they represent. */
+  mcpProjectRoots?: readonly string[];
+  /** Tool-equipped, write-free Codex judge; required without staged-tree tamper detection. */
   codexReadOnly?: boolean;
-  /** Which lens group of a split reviewer this invocation judges. Rides the judge_exec event so
-   * per-lens spend is attributable — every lens part shares one judge LABEL by design (the label
-   * is the reviewer identity the caches and the warehouse key on), which made lens cost invisible. */
+  /** Split-reviewer lens group for judge_exec spend attribution; all parts share one judge label. */
   lens?: string;
 }
 
@@ -361,6 +360,7 @@ export function execJudge(opts: ExecJudgeOpts): string | null {
     cwd: cwd ?? process.cwd(),
     env,
     allowedTools: allowedToolsFromArgs(args),
+    projectRoots: opts.mcpProjectRoots,
   });
   try {
     opts.onMcpPrepared?.(mcp.capabilityFingerprint);
@@ -426,6 +426,7 @@ export function execJudgeAsync(opts: ExecJudgeOpts): Promise<string | null> {
     cwd: cwd ?? process.cwd(),
     env,
     allowedTools: allowedToolsFromArgs(args),
+    projectRoots: opts.mcpProjectRoots,
   });
   return new Promise((resolve) => {
     // Shared outage path — a callback error AND a synchronous throw from execFile() itself (e.g. an

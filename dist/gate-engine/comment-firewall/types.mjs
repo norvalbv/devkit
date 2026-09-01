@@ -7,3 +7,6 @@ export function isJsonObject(value) {
 export function isJsonString(value) {
     return Object.prototype.toString.call(value) === '[object String]';
 }
+export function isJsonInteger(value) {
+    return Number.isInteger(value);
+}

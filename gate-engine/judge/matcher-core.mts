@@ -47,6 +47,12 @@ export interface MatcherOptions {
   /** Distinguishes each bench's judge calls in the label a caller sees (e.g. `completeness-eval`,
    * `critique-eval`, `conventions-eval`) — the full label is `${labelPrefix}:matcher:${slotId}`. */
   labelPrefix?: string;
+  /** Safe, previously completed slots. A value is reused only when its identity and result are
+   * valid for the current question set; everything else is re-run. */
+  resumeOutcomes?: readonly SlotOutcome[];
+  /** Synchronous durability seam, called as soon as a newly computed slot is complete. Reused
+   * outcomes do not fire it. */
+  onSlotComplete?: (outcome: SlotOutcome) => void;
 }
 
 /** Tiny bounded-concurrency map — dep-free, order-preserving. */
@@ -107,6 +113,32 @@ export function voteSlot(trials: (number | null)[]): {
   return { match: Number(winner), stable: sorted.length === 1, outage: false };
 }
 
+function reusableOutcome(
+  resumeOutcomes: readonly SlotOutcome[],
+  slot: SlotQuestion,
+  findingCount: number,
+): SlotOutcome | undefined {
+  const matches = resumeOutcomes.filter(
+    (outcome) => outcome.slotId === slot.slotId && outcome.kind === slot.kind,
+  );
+  if (matches.length !== 1) return undefined;
+  const [outcome] = matches;
+  if (
+    outcome.outage !== false ||
+    !Number.isInteger(outcome.match) ||
+    outcome.match < 0 ||
+    outcome.match > findingCount
+  )
+    return undefined;
+  return {
+    slotId: slot.slotId,
+    kind: slot.kind,
+    match: outcome.match,
+    stable: outcome.stable,
+    outage: false,
+  };
+}
+
 /**
  * Ask every slot's pre-built question against `findingCount` numbered findings. Zero findings
  * short-circuits deterministically (all gold missed, all decoys clean) — no claude call. Each
@@ -122,21 +154,33 @@ export async function runSlotQuestions(
     exec = execJudgeAsync,
     cwd,
     labelPrefix = 'matcher',
+    resumeOutcomes = [],
+    onSlotComplete,
   }: MatcherOptions = {},
 ): Promise<SlotOutcome[]> {
-  if (findingCount === 0)
-    return slots.map(({ slotId, kind }) => ({
-      slotId,
-      kind,
-      match: 0,
-      stable: true,
-      outage: false,
-    }));
+  const outcomes: (SlotOutcome | undefined)[] = slots.map((slot) =>
+    reusableOutcome(resumeOutcomes, slot, findingCount),
+  );
+  if (findingCount === 0) {
+    return slots.map(({ slotId, kind }, si) => {
+      const resumed = outcomes[si];
+      if (resumed) return resumed;
+      const outcome: SlotOutcome = {
+        slotId,
+        kind,
+        match: 0,
+        stable: true,
+        outage: false,
+      };
+      onSlotComplete?.(outcome);
+      return outcome;
+    });
+  }
 
   // One work item per (slot, trial) so the pool bounds TOTAL concurrent claude calls, not slots.
   const trials: (number | null)[][] = slots.map(() => []);
   const work: { si: number }[] = slots.flatMap((_, si) =>
-    Array.from({ length: runs }, () => ({ si })),
+    outcomes[si] ? [] : Array.from({ length: runs }, () => ({ si })),
   );
   await mapPool(work, concurrency, async ({ si }) => {
     const ask = () =>
@@ -145,6 +189,7 @@ export async function runSlotQuestions(
         args: ['-p', slots[si].prompt, '--model', model, ...JUDGE_READ_ONLY, ...JUDGE_ISOLATION],
         timeout: MATCH_TIMEOUT_MS,
         cwd,
+        codexReadOnly: true,
       });
     let raw = await ask();
     let parsed = raw === null ? null : parseSlotReply(raw, findingCount);
@@ -153,8 +198,20 @@ export async function runSlotQuestions(
       parsed = raw === null ? null : parseSlotReply(raw, findingCount);
     }
     trials[si].push(parsed);
+    if (trials[si].length === runs) {
+      const outcome: SlotOutcome = {
+        slotId: slots[si].slotId,
+        kind: slots[si].kind,
+        ...voteSlot(trials[si]),
+      };
+      outcomes[si] = outcome;
+      onSlotComplete?.(outcome);
+    }
   });
-  return slots.map(({ slotId, kind }, si) => ({ slotId, kind, ...voteSlot(trials[si]) }));
+  return outcomes.map((outcome) => {
+    if (!outcome) throw new Error('matcher slot completed without an outcome');
+    return outcome;
+  });
 }
 
 /**

@@ -229,6 +229,7 @@ export function execJudge(opts) {
         cwd: cwd ?? process.cwd(),
         env,
         allowedTools: allowedToolsFromArgs(args),
+        projectRoots: opts.mcpProjectRoots,
     });
     try {
         opts.onMcpPrepared?.(mcp.capabilityFingerprint);
@@ -295,6 +296,7 @@ export function execJudgeAsync(opts) {
         cwd: cwd ?? process.cwd(),
         env,
         allowedTools: allowedToolsFromArgs(args),
+        projectRoots: opts.mcpProjectRoots,
     });
     return new Promise((resolve) => {
         // Shared outage path — a callback error AND a synchronous throw from execFile() itself (e.g. an

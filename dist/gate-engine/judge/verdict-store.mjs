@@ -20,10 +20,11 @@
  * a failed write (or an unacquirable lock) is swallowed (the verdict stands for this run, it
  * just isn't remembered) — degraded toward re-review, never a false PASS.
  */
-import { execFileSync, execSync } from 'node:child_process';
+import { execSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmdirSync, unlinkSync, writeFileSync, } from 'node:fs';
 import path from 'node:path';
+import { isProcessId, processOwnerIsProvablyGone as ownerIsProvablyGone, processStartIdentity, } from './process/identity.mjs';
 import { retainNewest } from './store-retention.mjs';
 const MAX_ENTRIES = 400; // sc-1907: a chunked attempt writes 3/chunk+1 keys (≤73 at the backstop); attempts sharing a plan share keys
 const MAX_STORE_SIZE = 4 * 1024 * 1024;
@@ -247,25 +248,7 @@ export function replaceEntries(file, entries) {
 export function clearEntries(file) {
     return replaceEntries(file, {});
 }
-function psProcessStart(pid) {
-    try {
-        const value = execFileSync('ps', ['-o', 'lstart=', '-p', String(pid)], {
-            encoding: 'utf8',
-            env: { ...process.env, LANG: 'C', LC_ALL: 'C', TZ: 'UTC0' },
-            maxBuffer: 1_024,
-            stdio: ['ignore', 'pipe', 'ignore'],
-            timeout: 1_000,
-        })
-            .trim()
-            .replace(/\s+/g, ' ');
-        return value || null;
-    }
-    catch {
-        return null;
-    }
-}
-const ownProcessStart = psProcessStart(process.pid)?.replace(/^/, 'ps:') ??
-    `node:${Math.round(Date.now() - process.uptime() * 1_000)}`;
+const ownProcessStart = processStartIdentity();
 function lockOwner(lockDir) {
     try {
         const ownerPath = path.join(lockDir, LOCK_OWNER_FILE);
@@ -274,8 +257,7 @@ function lockOwner(lockDir) {
             return null;
         const value = JSON.parse(readFileSync(ownerPath, 'utf8'));
         if (typeof value.pid !== 'number' ||
-            !Number.isSafeInteger(value.pid) ||
-            value.pid <= 0 ||
+            !isProcessId(value.pid) ||
             typeof value.fenced !== 'boolean' ||
             typeof value.processStart !== 'string' ||
             !PROCESS_START.test(value.processStart) ||
@@ -299,23 +281,6 @@ function sameOwner(left, right) {
     return (left?.pid === right.pid &&
         left.processStart === right.processStart &&
         left.token === right.token);
-}
-function processIsAlive(pid) {
-    try {
-        process.kill(pid, 0);
-        return true;
-    }
-    catch (cause) {
-        return !errorCode(cause, 'ESRCH');
-    }
-}
-function ownerIsProvablyGone(owner) {
-    if (!processIsAlive(owner.pid))
-        return true;
-    if (!owner.processStart.startsWith('ps:'))
-        return false;
-    const observedStart = psProcessStart(owner.pid);
-    return observedStart !== null && `ps:${observedStart}` !== owner.processStart;
 }
 function removeClaimedLock(lockDir) {
     try {

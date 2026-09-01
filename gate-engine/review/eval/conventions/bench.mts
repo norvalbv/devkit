@@ -95,7 +95,15 @@ import { parseReviewVerdict, REVIEWERS, selectReviewers } from '../../reviewers.
 import { runCascade } from '../../run-review.mts';
 import { parseConventionFindings } from '../../evidence/conventions.mts';
 import { CONVENTIONS_GATE_HASH_INPUTS, CONVENTIONS_MATCHER_HASH_INPUTS } from './hash-inputs.mts';
-import { blockingAuthorityByGoldSlot, variantConsistency } from './metrics.mts';
+import {
+  accumulateFindingMetrics,
+  accumulateVerdictMetric,
+  blockingAuthorityByGoldSlot,
+  finalizeOpenEndedSummary,
+  measuredCaseMetrics,
+  openEndedSummary,
+  variantConsistency,
+} from './metrics.mts';
 import {
   type CaseScore,
   type DecoySlot,
@@ -452,53 +460,18 @@ export function summarize(
   { matchModel = MATCH_MODEL, matchRuns = MATCH_RUNS } = {},
 ): BenchSummary {
   const s: BenchSummary = {
+    ...openEndedSummary(results.length),
     matchModel,
     matchRuns,
-    cases: results.length,
-    caseOutages: 0,
-    slotOutages: 0,
-    outages: 0,
-    gold: { total: 0, hit: 0 },
     decoys: { total: 0, flagged: 0, byKind: {} },
-    findings: { total: 0, matched: 0, spurious: 0 },
     blockingGold: { total: 0, hit: 0 },
-    verdicts: { total: 0, correct: 0 },
-    gapRecall: 0,
     blockingAuthorityRecall: 0,
-    falseFlagRate: 0,
-    rows: {},
-    slots: {},
   };
-  const byId = new Map(rows.map((r) => [r.id, r]));
-  for (const res of results) {
-    const row = byId.get(res.id);
-    if (!row) continue;
-    if (res.outage || !res.score) {
-      s.caseOutages += 1;
-      continue;
-    }
-    let caseOk = true;
-    let caseStable = true;
-    for (const slot of res.score.slots) {
-      if (slot.outage) {
-        s.slotOutages += 1;
-        continue; // an unmeasured slot joins no metric — outages>0 already taints the run
-      }
-      const key = `${res.id}::${slot.slotId}`;
-      s.slots[key] = {
-        kind: slot.kind,
-        got: slot.got,
-        ok: slot.ok,
-        stable: slot.stable,
-        expected: slot.kind === 'gold' ? 'hit' : 'clean',
-      };
-      caseOk &&= slot.ok;
-      caseStable &&= slot.stable;
+  for (const { row, result, score, slots } of measuredCaseMetrics(rows, results, s)) {
+    for (const slot of slots) {
       if (slot.kind === 'gold') {
-        s.gold.total += 1;
-        if (slot.ok) s.gold.hit += 1;
         s.blockingGold.total += 1;
-        if (res.blockingAuthority[slot.slotId]) s.blockingGold.hit += 1;
+        if (result.blockingAuthority[slot.slotId]) s.blockingGold.hit += 1;
       } else {
         s.decoys.total += 1;
         const decoy = row.decoys.find((d) => d.id === slot.slotId);
@@ -510,34 +483,14 @@ export function summarize(
         if (flagged) s.decoys.byKind[kind].flagged += 1;
       }
     }
-    s.rows[res.id] = { ok: caseOk, stable: caseStable };
-    s.findings.total += res.score.findingCount;
-    s.findings.spurious += res.score.spurious.length;
-    s.findings.matched += res.score.findingCount - res.score.spurious.length;
-    if (row.expectedVerdict) {
-      s.verdicts.total += 1;
-      // A null verdict reads as PASS — the gate's own fail-open interpretation (parseReviewVerdict
-      // returns null on no VERDICT line, and runReviewGate never blocks on a null-verdict PASS path
-      // the same way completeness-eval's convention treats it for its own informational metric).
-      if ((res.verdict ?? 'PASS') === row.expectedVerdict) s.verdicts.correct += 1;
-    }
+    accumulateFindingMetrics(score, s);
+    accumulateVerdictMetric(row.expectedVerdict, result.verdict, s);
   }
-  s.outages = s.caseOutages + s.slotOutages;
-  s.gapRecall = pct(s.gold.hit, s.gold.total);
+  finalizeOpenEndedSummary(s);
   s.blockingAuthorityRecall = pct(s.blockingGold.hit, s.blockingGold.total);
-  s.falseFlagRate = pct(s.decoys.flagged, s.decoys.total);
   return s;
 }
 
-/**
- * Metamorphic groups: invariance variants must land the same per-slot outcome pattern.
- *
- * Pattern by KIND+ORDINAL (`gold[0]`, `decoy[1]`, …), NOT by literal slot id: a cosmetic variant
- * row deliberately uses its OWN descriptive slot id (a different offending file/rule is the whole
- * point of varying the surface details), so comparing by id would read every variant pair as
- * "broken" even when the actual outcome is perfectly consistent — ordinal position within the
- * row's own gold/decoy arrays is the stable axis a variant pair actually shares.
- */
 // ─── Baseline comparison — floors + case-level flip gate ──────────────────────────
 
 /**

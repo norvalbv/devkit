@@ -81,7 +81,12 @@ function isInside(root: string, candidate: string): boolean {
   return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
 }
 
-function trustedRegistryPath(requested: string, cwd: string, explicit: boolean): string | null {
+function trustedRegistryPath(
+  requested: string,
+  cwd: string,
+  explicit: boolean,
+  projectRoots: readonly string[] = [],
+): string | null {
   try {
     if (!path.isAbsolute(requested)) return null;
     const entry = lstatSync(requested);
@@ -90,8 +95,8 @@ function trustedRegistryPath(requested: string, cwd: string, explicit: boolean):
     if (processUid !== undefined && entry.uid !== processUid) return null;
     if ((entry.mode & 0o022) !== 0) return null;
     const canonical = realpathSync(requested);
-    const canonicalCwd = realpathSync(cwd);
-    if (explicit && isInside(canonicalCwd, canonical)) return null;
+    if (explicit && [cwd, ...projectRoots].some((root) => isInside(realpathSync(root), canonical)))
+      return null;
     return canonical;
   } catch {
     return null;
@@ -222,7 +227,7 @@ export function judgeMcpCapabilityFingerprint(
   const explicit = options.registryPath !== undefined || env[REGISTRY_ENV] !== undefined;
   const requested =
     options.registryPath ?? env[REGISTRY_ENV] ?? path.join(homedir(), '.claude.json');
-  const registryPath = trustedRegistryPath(requested, options.cwd, explicit);
+  const registryPath = trustedRegistryPath(requested, options.cwd, explicit, options.projectRoots);
   const registry = registryPath ? readRegistry(registryPath) : null;
   const servers =
     profile.kind === 'named-agent' && registry
@@ -268,7 +273,7 @@ export function prepareJudgeMcpProfile(
   const explicit = options.registryPath !== undefined || env[REGISTRY_ENV] !== undefined;
   const requested =
     options.registryPath ?? env[REGISTRY_ENV] ?? path.join(homedir(), '.claude.json');
-  const registryPath = trustedRegistryPath(requested, options.cwd, explicit);
+  const registryPath = trustedRegistryPath(requested, options.cwd, explicit, options.projectRoots);
   if (!registryPath) {
     warnOnce(
       `registry:${requested}`,

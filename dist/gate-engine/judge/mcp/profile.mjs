@@ -23,7 +23,7 @@ function isInside(root, candidate) {
     const rel = path.relative(root, candidate);
     return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
 }
-function trustedRegistryPath(requested, cwd, explicit) {
+function trustedRegistryPath(requested, cwd, explicit, projectRoots = []) {
     try {
         if (!path.isAbsolute(requested))
             return null;
@@ -36,8 +36,7 @@ function trustedRegistryPath(requested, cwd, explicit) {
         if ((entry.mode & 0o022) !== 0)
             return null;
         const canonical = realpathSync(requested);
-        const canonicalCwd = realpathSync(cwd);
-        if (explicit && isInside(canonicalCwd, canonical))
+        if (explicit && [cwd, ...projectRoots].some((root) => isInside(realpathSync(root), canonical)))
             return null;
         return canonical;
     }
@@ -157,7 +156,7 @@ export function judgeMcpCapabilityFingerprint(profile, allowedTools, options) {
     const env = options.env ?? process.env;
     const explicit = options.registryPath !== undefined || env[REGISTRY_ENV] !== undefined;
     const requested = options.registryPath ?? env[REGISTRY_ENV] ?? path.join(homedir(), '.claude.json');
-    const registryPath = trustedRegistryPath(requested, options.cwd, explicit);
+    const registryPath = trustedRegistryPath(requested, options.cwd, explicit, options.projectRoots);
     const registry = registryPath ? readRegistry(registryPath) : null;
     const servers = profile.kind === 'named-agent' && registry
         ? selectedServers(registry, profile.serverNames, projectCandidates(options.cwd, env, options.projectRoots))
@@ -185,7 +184,7 @@ export function prepareJudgeMcpProfile(profile, options) {
     const env = options.env ?? process.env;
     const explicit = options.registryPath !== undefined || env[REGISTRY_ENV] !== undefined;
     const requested = options.registryPath ?? env[REGISTRY_ENV] ?? path.join(homedir(), '.claude.json');
-    const registryPath = trustedRegistryPath(requested, options.cwd, explicit);
+    const registryPath = trustedRegistryPath(requested, options.cwd, explicit, options.projectRoots);
     if (!registryPath) {
         warnOnce(`registry:${requested}`, `guard-review: trusted MCP registry unavailable at ${requested} — named agents continue with strict-empty MCP isolation`);
         return emptyProfile(capabilityFingerprint(profile, allowedTools, requested, {}));
