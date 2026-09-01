@@ -6,9 +6,6 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   FANOUT_BASELINE,
-  LEGACY_FANOUT_BASELINE,
-  LEGACY_LINES_BASELINE,
-  LEGACY_SIZE_BASELINE,
   LINES_BASELINE,
   readRatchetBaseline,
   SIZE_BASELINE,
@@ -118,9 +115,9 @@ function checkSearchToolBins(): CheckResult {
 
 function checkBaselines(cwd: string): CheckResult {
   const present = [
-    ['fanout', readRatchetBaseline(cwd, FANOUT_BASELINE, LEGACY_FANOUT_BASELINE)],
-    ['size', readRatchetBaseline(cwd, SIZE_BASELINE, LEGACY_SIZE_BASELINE)],
-    ['line-growth', readRatchetBaseline(cwd, LINES_BASELINE, LEGACY_LINES_BASELINE)],
+    ['fanout', readRatchetBaseline(cwd, FANOUT_BASELINE)],
+    ['size', readRatchetBaseline(cwd, SIZE_BASELINE)],
+    ['line-growth', readRatchetBaseline(cwd, LINES_BASELINE)],
   ].flatMap(([name, baseline]) => (baseline ? [name] : []));
   // A ratchet baseline holds ONLY grandfathered debt and is cut once at init. An absent one means
   // "no debt — cap enforced from guard.config.json", which is healthy, not drift. So this is purely

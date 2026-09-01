@@ -1,11 +1,11 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { sourceMatchers } from '../config.mjs';
-import { LEGACY_LINES_BASELINE, readRatchetBaseline, removeRatchetBaseline, writeRatchetBaseline, } from './baseline-paths.mjs';
+import { readRatchetBaseline, removeRatchetBaseline, writeRatchetBaseline, } from './baseline-paths.mjs';
 import { LINES_BASELINE } from './size-policy.mjs';
 import { CURRENT_LINE_COUNT_VERSION, lineBaselineParents, lineBaselineOrExit, normalizeCandidateLineBaseline, } from './size-line-authority.mjs';
 export function freezeLinesBaseline(root, config, oversized, mode) {
-    const baseline = readRatchetBaseline(root, LINES_BASELINE, LEGACY_LINES_BASELINE);
+    const baseline = readRatchetBaseline(root, LINES_BASELINE);
     const decodedPrevious = lineBaselineOrExit(baseline?.contents ?? null, baseline?.relativePath ?? LINES_BASELINE, 'guard-size freeze unavailable');
     const previous = normalizeCandidateLineBaseline(root, decodedPrevious, lineBaselineParents(root), (file) => {
         try {
@@ -37,7 +37,7 @@ export function freezeLinesBaseline(root, config, oversized, mode) {
         ];
     }));
     if (Object.keys(files).length > 0) {
-        writeRatchetBaseline(root, LINES_BASELINE, LEGACY_LINES_BASELINE, `${JSON.stringify({
+        writeRatchetBaseline(root, LINES_BASELINE, `${JSON.stringify({
             lineCountVersion: CURRENT_LINE_COUNT_VERSION,
             maxLines: config.maxLines,
             maxTestLines: config.maxTestLines,
@@ -45,7 +45,7 @@ export function freezeLinesBaseline(root, config, oversized, mode) {
         }, null, 2)}\n`);
     }
     else {
-        removeRatchetBaseline(root, LINES_BASELINE, LEGACY_LINES_BASELINE);
+        removeRatchetBaseline(root, LINES_BASELINE);
     }
     if (raised.length > 0) {
         console.log(`  ⚠ ${raised.length} file(s) grew since the last freeze:`);

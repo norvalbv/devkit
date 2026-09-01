@@ -487,13 +487,13 @@ describe('doctor — selection-aware', () => {
       'baselines: OK — grandfathered debt: fanout + size + line-growth',
     );
 
+    // The retired legacy generation (sc-2256) is invisible to doctor: seeding eslint/baselines
+    // instead of canonical state must not report grandfathered debt.
     rmSync(join(root, '.devkit', 'baselines'), { recursive: true });
     mkdirSync(join(root, 'eslint', 'baselines'), { recursive: true });
-    writeFileSync(join(root, 'eslint', 'baselines', 'fanout.json'), '{"cap":12,"dirs":{}}\n');
-    writeFileSync(join(root, 'eslint', 'baselines', 'size.json'), '{"files":{}}\n');
     writeFileSync(join(root, 'eslint', 'baselines', 'size-lines.json'), '{"files":{}}\n');
     expect(devkit(root, 'doctor').stdout).toContain(
-      'baselines: OK — grandfathered debt: fanout + size + line-growth',
+      'baselines: OK — no grandfathered debt (enforced from config)',
     );
   });
 
