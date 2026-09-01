@@ -36,7 +36,6 @@ import { buildFullHook, buildGuardBlock, extractGuardBlock, PACKAGE_BIN_DIR_FRAG
 export const SELF_HOST_STRUCTURE_CMD = 'bun run lint:structure';
 export const SELF_HOST_EXTRAS = [
     { label: 'lint', cmd: 'bun run lint' },
-    { label: 'anti-slop', cmd: 'node cli/index.mts anti-slop check --staged' },
     // sc-2198. Both are pure content comparisons — no spawn, no tmp dir, no model call — and both
     // already ran, in the 11-minute pre-push suite, which is where they caught a generator edit that
     // had been sitting on main for five hours. Running them here makes the author who breaks parity

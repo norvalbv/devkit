@@ -26,7 +26,7 @@
  * Zero LLM calls, zero network, pure string/AST work over already-loaded text — cheap enough to run
  * on every commit touching docs/decisions/**.
  */
-import { parseTargetFields } from '../decision-format.mjs';
+import { NOTE_BULLET_RE, parseTargetFields } from '../decision-format.mjs';
 import { sections } from '../recall/markdown.mjs';
 import { validateAxisAmends } from '../recall/note-relations.mjs';
 export const INTEGRITY_CHECK_IDS = [
@@ -38,6 +38,7 @@ export const INTEGRITY_CHECK_IDS = [
     'duplicate-field-text',
     'retarget-missing-evidence-change',
     'note-amends-unresolvable',
+    'target-missing-required-field',
 ];
 /**
  * The identity of a finding, at the granularity the finding itself reports at.
@@ -54,8 +55,12 @@ const H1_RE = /^\s*#\s+(.+?)\s*$/m;
 // and the misplaced-depth defect (depth 1 or 3+) with one pattern, so the two checks can never disagree
 // about what counts as "a Target heading".
 const ANY_DEPTH_TARGET_RE = /^#{1,6}\s*Target\s*·\s*(\d{4}-\d{2}-\d{2})/;
-const POSITIVE_BULLET_RE = /^-\s*Positive:\s*(.+)$/;
-const NEGATIVE_BULLET_RE = /^-\s*Negative:\s*(.+)$/;
+// `\r?$` for the same reason TARGET_FIELD_RE carries it: these run per line after a split on `\n`,
+// so a CRLF checkout leaves a `\r` that `(.+)` cannot match and `$` cannot look past. The bullet
+// would read as absent, and duplicate-field-text — whose whole job is comparing this text against
+// the prose fields — would quietly compare nothing and report the record clean.
+const POSITIVE_BULLET_RE = /^-\s*Positive:\s*(.+?)\r?$/;
+const NEGATIVE_BULLET_RE = /^-\s*Negative:\s*(.+?)\r?$/;
 // A field this short (an "n/a", "manual", a bare date) legitimately repeats across unrelated fields —
 // flagging those would misfire on ordinary terse-but-honest records. Only prose long enough to be a
 // real copy-paste is in scope; see decision-scope-drift-detected-not-assumed.md's own "must not fire
@@ -88,7 +93,16 @@ function realTargetBlocks(body) {
         .filter((s) => s.depth === 2)
         .map((s) => {
         const date = s.heading.trim().match(ANY_DEPTH_TARGET_RE)?.[1] ?? '';
-        const fields = parseTargetFields(`${s.prose}\n${s.items.join('\n')}`);
+        // Notes are excluded from the FIELD text, not from the block. sections() returns the
+        // Consequences bullets and the dated notes in one undifferentiated `items` array (it does no
+        // classification), and the ruling's fields ride in as a lazy continuation of the last
+        // Consequences bullet — so the fields can only be read by scanning items. Now that
+        // TARGET_FIELD_RE tolerates indentation, an indented continuation line of a NOTE that opens
+        // with bold text would read as a Target-level field and could satisfy a check the block does
+        // not actually satisfy. currentTarget avoids this by stopping at the first note bullet; this
+        // is the same boundary, applied where the item array has already flattened it away.
+        const fieldItems = s.items.filter((i) => !NOTE_BULLET_RE.test(i.split('\n')[0]));
+        const fields = parseTargetFields(`${s.prose}\n${fieldItems.join('\n')}`);
         const positive = s.items.map((i) => i.split('\n')[0]).find((l) => POSITIVE_BULLET_RE.test(l));
         const negative = s.items.map((i) => i.split('\n')[0]).find((l) => NEGATIVE_BULLET_RE.test(l));
         return {
@@ -205,6 +219,39 @@ export function checkRetargetEvidenceChange(axis) {
     });
     return out;
 }
+/** Emitted unconditionally by renderTarget for EVERY Target block, so their absence is proof the
+ * block did not come from the CLI. Deliberately just these two: every other field is conditional on
+ * a flag, and Context/Ruling/Consequences already sit in `prose` where no list-nesting can reach
+ * them — these two are the first fields to ride in as a lazy continuation, and so the first to be
+ * lost when a block's shape degrades. */
+const REQUIRED_TARGET_FIELDS = ['vision-fit', 'source'];
+/** #9 — every Target block must carry the fields renderTarget always writes.
+ *
+ * The read-time backstop for a block whose fields became UNREADABLE rather than absent. #7 covers
+ * the same class for Evidence-change but skips block index 0, and every other check keys on
+ * identity or cross-file linkage — so a first Target whose whole field tail was swallowed by a list
+ * item passed the entire suite silently, taking its `**Scope:**` (and with it the alignment gate's
+ * arming) along with it. That is the exact defect measured on this corpus: 1/88 blocks before
+ * TARGET_FIELD_RE learned to tolerate indentation, 0/88 after, which is the fire rate the six
+ * shape checks already sit at.
+ *
+ * Per BLOCK, never per axis, and with no index-0 exemption: the case that motivated it was a first
+ * Target, and an axis-level count would have laundered it behind its healthy siblings. */
+export function checkTargetRequiredFields(axis) {
+    const out = [];
+    for (const block of realTargetBlocks(axis.body)) {
+        const missing = REQUIRED_TARGET_FIELDS.filter((f) => !block.fields[f]?.trim());
+        if (missing.length === 0)
+            continue;
+        out.push({
+            check: 'target-missing-required-field',
+            slug: axis.slug,
+            block: block.date,
+            detail: `Target block dated ${block.date} is missing ${missing.map((f) => `**${f}**`).join(', ')} — the CLI writes these on every block, so the block's field lines are absent or unreadable`,
+        });
+    }
+    return out;
+}
 /** #1 — the INDEX.md row's `Updated` date must not be older than the axis file's own last Target
  * date. Under compliant use `add --target`/`amend --target` regenerate both together, so a mismatch
  * means something wrote the axis file without going through the index-upserting path. */
@@ -245,6 +292,7 @@ export function checkAxis(axis, indexRow, foreignNoteIds = new Map()) {
         ...checkH1Slug(axis),
         ...checkTargetHeadingDepth(axis),
         ...checkDuplicateFieldText(axis),
+        ...checkTargetRequiredFields(axis),
         ...checkRetargetEvidenceChange(axis),
         ...checkNoteAmends(axis, foreignNoteIds),
         ...checkIndexStale(axis, indexRow),

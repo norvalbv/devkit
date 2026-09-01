@@ -15,7 +15,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { resolveFromCwd, resolveGuardConfig } from '../../config.mjs';
-import { parseDecision, parseTargetFields } from '../decision-format.mjs';
+import { NOTE_BULLET_RE, parseDecision, parseTargetFields } from '../decision-format.mjs';
 import { sections } from './markdown.mjs';
 // id syntax retrieval.mts already mints for a block: `target:<date>` (modern) or `entry:<date>`
 // (legacy `## <date> —` schema, still 49 of 86 blocks in the real corpus). A `slug#` qualifier is
@@ -55,10 +55,12 @@ export function allTargetBlocks(body) {
             continue;
         // Everything renderTarget writes AFTER the Consequences bullets (Vision-fit, Scope, Supersedes,
         // Source, …) has no blank line before it, so CommonMark treats it as a LAZY CONTINUATION of the
-        // list's last item, not new prose — section.prose never sees it, only section.items does. Safe
-        // to scan every item alongside prose: a real dated note (`- <date> — …`) never matches
-        // `**Field:**`, so this can't misread a note's text as a field.
-        const fields = parseTargetFields(`${section.prose}\n${section.items.join('\n')}`);
+        // list's last item, not new prose — section.prose never sees it, only section.items does. The
+        // note bullets are dropped first: a note's own FIRST line never matches `**Field:**`, but its
+        // continuation lines can now that TARGET_FIELD_RE tolerates indentation, and a note continuation
+        // read as `**Supersedes:**` would mint a bogus reverse edge marking a live ruling superseded.
+        const fieldItems = section.items.filter((i) => !NOTE_BULLET_RE.test(i.split('\n')[0]));
+        const fields = parseTargetFields(`${section.prose}\n${fieldItems.join('\n')}`);
         const nth = (seenDates.get(m[1]) ?? 0) + 1;
         seenDates.set(m[1], nth);
         out.push({

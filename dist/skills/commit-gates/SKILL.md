@@ -38,7 +38,12 @@ command. Do not pre-run every gate or replace the managed chain with a hand-writ
   gate.
 - **Reviewer and completeness gates** name a concrete defect or missing required work. Fix the
   finding and re-run. An unavailable judge and a confident rejection have different exit semantics;
-  preserve that distinction instead of treating every nonzero result as a code defect.
+  preserve that distinction instead of treating every nonzero result as a code defect. To dispute a
+  finding, resolve it against the base sha `guard-review` printed (`reviewed against <sha>`), not
+  against local `HEAD` — under `devkit ship` the reviewers judged a worktree cut from the remote
+  base, so `git show HEAD:<file>`, `grep` and `git diff --stat` in your own checkout can all agree
+  with each other and still describe a different tree. Waive on evidence read from the reviewed
+  base, and pass the `--base` the block note prints so the record says which tree you checked.
 - **Sentry gate** judges commit-message intent for newly introduced runtime error classes. Add the
   capture on the named surface, or surface a disputed verdict to the user before any bypass.
 - **Qavis advisory** can recommend visual QA but does not turn a non-UI change into UI work.

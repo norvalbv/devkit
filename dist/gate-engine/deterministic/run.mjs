@@ -6,7 +6,8 @@
  * empty and passed real failures as GREEN. The hook now calls this ONE bin, which:
  *   1. runs the deterministic-prefix check — on a cached all-green staged tree (ship only) it SKIPS
  *      every gate;
- *   2. else runs each SELECTED deterministic guard (size, fanout, dup, clone) as a subprocess,
+ *   2. else runs each SELECTED deterministic guard (size, fanout, dup, clone, coverage, anti-slop)
+ *      as a subprocess,
  *      capturing its exit code and applying the shared TRICHOTOMY — 1 = real failure (accumulate),
  *      2 = could-not-run (fail-open, continue), any other non-zero = unexpected (accumulate, named);
  *   3. NAMES every gate that opted out, on a green run as loudly as on a red one — a fail-open gate
@@ -41,6 +42,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { parseJsonObject } from '../config-json.mjs';
 import { coverageBypassed, deterministicStrict, envFlag, structureBypassed } from '../config.mjs';
 import { emitGateBypass, emitGateEvent, finishGateTiming } from '../judge/gate-events.mjs';
 import { prefixEntry, recordPrefix } from '../prefix-cache/prefix-cache.mjs';
@@ -66,6 +68,11 @@ const DETERMINISTIC_FAMILY = 'deterministic';
 // exactly this (sc-1243). Worded for any layout — a repo may legitimately have no node_modules.
 const NOT_FOUND_RE = /\(unexpected:127\)/;
 const OBJECT_ID = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
+const ANTI_SLOP_COMPONENT = 'antiSlop';
+/** `components.<name> === true`, guarded so an inherited Object.prototype member never counts. */
+function componentEnabled(components, name) {
+    return components !== undefined && Object.hasOwn(components, name) && components[name] === true;
+}
 // The deterministic guard set, in fixed registry order. Each runs as `node <path> <args>` — a sibling
 // module under gate-engine, so it resolves the same way in every install mode. Their exit contract is
 // the invariant this orchestrator preserves: 0 clean, 1 violation, 2 fail-open (could-not-run).
@@ -87,8 +94,17 @@ export const DETERMINISTIC = [
     // selects it (an unadopted/CI repo must not fail hard on a coverage artifact it never asked for).
     // Fail-CLOSED once selected: no 2 (fail-open) path — absent data exits 1.
     { id: 'coverage', module: '../coverage/run.mjs', args: ['gate'], optIn: true },
+    {
+        id: 'anti-slop',
+        module: '../../cli/index.mjs',
+        args: ['anti-slop', 'check', '--staged'],
+        optIn: true,
+        configComponent: ANTI_SLOP_COMPONENT,
+        failOpen2: false,
+    },
 ];
 const ALL_IDS = DETERMINISTIC.map((g) => g.id);
+const GUARD_COMPONENT_IDS = DETERMINISTIC.filter((g) => !('configComponent' in g)).map((g) => g.id);
 // The set the missing/unreadable-config fallback runs: every guard EXCEPT the opt-in ones. `--only`
 // and an explicit components.guards selection can still run opt-in guards (they're in ALL_IDS).
 const DEFAULT_IDS = DETERMINISTIC.filter((g) => !('optIn' in g && g.optIn)).map((g) => g.id);
@@ -101,7 +117,8 @@ function reviewIds() {
         .split(',')
         .map((guard) => guard.trim())
         .filter(Boolean);
-    return canonicalIds(configured);
+    const selected = new Set(configured);
+    return GUARD_COMPONENT_IDS.filter((id) => selected.has(id));
 }
 // Split a `--structure` / `--extra` command string into argv tokens. Hoisted (perf: no per-call
 // regex compile).
@@ -145,10 +162,19 @@ export function selectedIds(cwd) {
     if (!existsSync(cfgPath))
         return DEFAULT_IDS;
     try {
-        const guards = JSON.parse(readFileSync(cfgPath, 'utf8'))?.components?.guards;
-        if (!Array.isArray(guards))
-            return DEFAULT_IDS;
-        return ALL_IDS.filter((id) => guards.includes(id));
+        const parsed = parseJsonObject(readFileSync(cfgPath, 'utf8'), cfgPath);
+        // Own properties only, at every layer: a polluted Object.prototype must never opt a gate in or out.
+        const components = Object.hasOwn(parsed, 'components') ? parsed.components : undefined;
+        const guards = components !== undefined &&
+            Object.hasOwn(components, 'guards') &&
+            Array.isArray(components.guards)
+            ? components.guards
+            : DEFAULT_IDS;
+        const selectedGuards = new Set(guards);
+        return DETERMINISTIC.filter((gate) => {
+            const component = 'configComponent' in gate ? gate.configComponent : undefined;
+            return component ? componentEnabled(components, component) : selectedGuards.has(gate.id);
+        }).map((gate) => gate.id);
     }
     catch {
         return DEFAULT_IDS;
@@ -296,7 +322,7 @@ export function runDeterministic(cwd = process.cwd(), opts = {}) {
         const gates = DETERMINISTIC.filter((g) => ids.has(g.id)).map((g) => ({
             label: `guard-${g.id}`,
             argv: ['node', path.resolve(HERE, g.module.replace(MJS_EXT_RE, SELF_EXT)), ...g.args],
-            failOpen2: true,
+            failOpen2: !('failOpen2' in g) || g.failOpen2 !== false,
         }));
         for (const x of opts.extra ?? [])
             gates.push(commandGate(x.label, x.cmd));

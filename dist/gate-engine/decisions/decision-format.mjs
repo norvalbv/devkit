@@ -9,8 +9,42 @@ const INDEX_SEPARATOR_RE = /^\|[\s:|-]+\|$/;
 const INDEX_SLUG_RE = /^\[([^\]]+)\]/;
 const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/;
 const TARGET_HEAD_RE = /^## Target · /;
-const TARGET_FIELD_RE = /^\*\*([^:]+):\*\*\s*(.*)$/;
-const NOTE_BULLET_RE = /^-\s+\d{4}-\d{2}-\d{2}\b/;
+// Leading indentation is TOLERATED, not merely allowed. renderTarget writes Vision-fit onward with
+// no blank line after the last Consequences bullet, so CommonMark folds those lines into that list
+// item as a lazy continuation — and any markdown formatter that round-trips the AST (prettier,
+// dprint) re-emits them indented under the bullet. sections() slices an item by node offsets and
+// trims only its outer edges, so that interior indentation reaches here intact. A column-0 anchor
+// therefore dropped every field after Consequences SILENTLY: no finding, no warning, just a Scope
+// that stopped arming the alignment gate. Consumers format their own markdown and devkit does not
+// own their toolchain (W-3), so the parser absorbs the shape rather than the renderer fighting it.
+// `[ \t]` not `\s`: `\s` matches `\n`, which would let one field's value swallow the next line if
+// this is ever applied to joined text rather than line-by-line.
+//
+// The trailing `\r?` is load-bearing, not decoration. Callers split on `\n`, so on a CRLF checkout
+// every line arrives with a dangling `\r`; `.` never matches `\r` and this regex carries no `m`
+// flag, so `$` could only match at end-of-string and the whole line failed — dropping every field
+// that HAD a value while `**Consequences:**` and friends still parsed, because `\s*` ate the `\r`
+// where the value was empty. Windows clones get CRLF by default (core.autocrlf=true) and this repo
+// ships no .gitattributes, so the effect there was total: Scope unread on every axis, so the
+// alignment gate armed nothing, and every Target block looked damaged to the integrity checks.
+// Same failure family as the indentation one above — a field line the reader cannot see is
+// indistinguishable from a field that was never written.
+const TARGET_FIELD_RE = /^[ \t]*\*\*([^:]+):\*\*\s*(.*)\r?$/;
+/**
+ * Where a Target block's field text ENDS — the dated note bullet that opens the convergence log.
+ *
+ * Exported because the field rule and its boundary have to travel together. `currentTarget` breaks
+ * on this positionally; the two callers that hand `parseTargetFields` a FLATTENED item array
+ * (integrity's realTargetBlocks, recall's allTargetBlocks) have already lost that position and must
+ * filter on it instead. One predicate, so the three readers cannot disagree about where a ruling
+ * stops and its notes begin.
+ *
+ * Deliberately looser than note-relations.mts's NOTE_LINE_RE, which additionally demands ` — ` right
+ * after the date: `- 2026-07-25 (sc-1214) — …` in coverage-gate.md is a real note that NOTE_LINE_RE
+ * does not match. A boundary that under-matches is worse than useless here — it readmits exactly the
+ * bullets it was added to exclude.
+ */
+export const NOTE_BULLET_RE = /^-\s+\d{4}-\d{2}-\d{2}\b/;
 const TITLE_CUT_RE = /\. |\.$| — |; /;
 const MARKDOWN_TABLE_BREAK_RE = /\s*[|\n\r]+\s*/g;
 export function hasTargetFields(options) {
