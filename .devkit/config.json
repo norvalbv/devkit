@@ -1,6 +1,6 @@
 {
   "stack": "node-service",
-  "devkitRef": "v0.58.0",
+  "devkitRef": "v0.60.0",
   "initVersion": 2,
   "pkgRel": "",
   "standalone": false,
@@ -20,6 +20,7 @@
     "lineGrowth": true,
     "adhd": true,
     "priorArtGate": false,
+    "baseDrift": false,
     "agentTargets": [
       "claude",
       "cursor"
