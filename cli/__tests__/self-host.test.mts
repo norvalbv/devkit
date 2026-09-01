@@ -161,7 +161,7 @@ describe('buildSelfHostHook', () => {
     expect(hook).toContain('node gate-engine/review/cli.mts --gate');
     expect(hook).toContain('node gate-engine/decisions/cli.mts detect --gate');
     expect(hook).toContain('--extra "lint=bun run lint"');
-    expect(hook).toContain('--extra "anti-slop=node cli/index.mts anti-slop check --staged"');
+    expect(hook).not.toContain('--extra "anti-slop=');
     expect(hook).toContain('--extra "benchmarks=bun run benchmarks:check -- --mode staged"');
     expect(hook).toContain('--structure "bun run lint:structure"');
     expect(hook).toContain('node_modules/.bin/oxfmt --threads 1 --write');

@@ -9,7 +9,8 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { buildFullHook, buildOverlayHook, buildStandaloneHook } from '../lib/husky/husky-block.mts';
 
@@ -22,6 +23,7 @@ import { buildFullHook, buildOverlayHook, buildStandaloneHook } from '../lib/hus
 // diagnostics run, AI gates stay fail-fast, and it all survives dash + a hook path with spaces.
 
 const homes = [];
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 afterEach(() => {
   while (homes.length) rmSync(homes.pop(), { recursive: true, force: true });
 });
@@ -43,6 +45,7 @@ function runHook(
     pkgRel = '',
     missingBins = [],
     missingLocalBins = [],
+    realDeterministic = false,
   } = {},
 ) {
   const home = mkdtempSync(join(tmpdir(), dirPrefix));
@@ -107,6 +110,36 @@ esac
   }
   for (const name of missingBins) rmSync(join(bin, name), { force: true });
   for (const name of missingLocalBins) rmSync(join(packageBin, name), { force: true });
+
+  if (realDeterministic) {
+    const runner = join(ROOT, 'gate-engine', 'deterministic', 'run.mts');
+    const nodeShim = `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} "$@"\n`;
+    const runnerShim = `#!/bin/sh\necho "guard-deterministic $*" >> "$HOME/calls.log"\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(runner)} "$@"\n`;
+    writeFileSync(join(bin, 'node'), nodeShim);
+    chmodSync(join(bin, 'node'), 0o755);
+    for (const target of [
+      join(bin, 'guard-deterministic'),
+      join(packageBin, 'guard-deterministic'),
+    ]) {
+      writeFileSync(target, runnerShim);
+      chmodSync(target, 0o755);
+    }
+
+    const repo = pkgRel ? join(home, pkgRel) : home;
+    mkdirSync(join(repo, '.devkit'), { recursive: true });
+    writeFileSync(
+      join(repo, '.devkit', 'config.json'),
+      `${JSON.stringify({ components: { guards: [], antiSlop: true } })}\n`,
+    );
+    execFileSync('git', ['init', '-q'], { cwd: repo });
+    execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: repo });
+    execFileSync('git', ['config', 'user.name', 'Test'], { cwd: repo });
+    execFileSync('git', ['add', '.devkit/config.json'], { cwd: repo });
+    execFileSync('git', ['commit', '-q', '-m', 'base'], { cwd: repo });
+    mkdirSync(join(repo, 'src'), { recursive: true });
+    writeFileSync(join(repo, 'src', 'finding.ts'), 'export const value: unknown = 1;\n');
+    execFileSync('git', ['add', 'src/finding.ts'], { cwd: repo });
+  }
 
   // Overlay review always runs its merge-base lint diagnostic after the selected guards. Give the
   // generated helper a minimal packaged-runtime shape and a node stub that records the call.
@@ -182,6 +215,20 @@ describe('assembled hook execution (stubbed bins, sh -e)', () => {
     expect(r.calls).not.toContain('guard-decisions');
     expect(r.calls).not.toContain('guard-review');
   });
+
+  it.each(['package', 'standalone'])(
+    '%s anti-slop-only selection runs the real deterministic gate before review',
+    (builder) => {
+      const r = runHook(
+        {},
+        { biome: false, guards: ['review'], antiSlop: true },
+        { builder, realDeterministic: true, dirPrefix: 'dk hook exec with spaces ' },
+      );
+      expect(r.status).toBe(1);
+      expect(r.calls).toContain('guard-deterministic');
+      expect(r.calls).not.toContain('guard-review');
+    },
+  );
 
   it('review remembers deterministic failure, runs the selected reviewer, then returns 1', () => {
     const r = runHook({

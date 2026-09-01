@@ -102,6 +102,15 @@ const DEPRIVED: Deprivation[] = [
     expected: 1,
   },
   {
+    id: 'anti-slop',
+    bin: 'devkit',
+    args: ['anti-slop', 'check', '--staged'],
+    because: 'the opted-in managed plugin and explicit shrink-only baseline are both absent',
+    config: true,
+    speaks: true,
+    expected: 2,
+  },
+  {
     id: 'structure',
     bin: 'guard-structure',
     args: ['gate'],
@@ -134,7 +143,10 @@ describe('no gate reports clean without evaluating', () => {
     mkdirSync(join(fixture.repoDir, 'src'), { recursive: true });
     writeFileSync(join(fixture.repoDir, 'src', 'thing.ts'), 'export const value = 1;\n');
     if (row.config) {
-      writeFileSync(join(fixture.repoDir, 'guard.config.json'), JSON.stringify({ scanRoots: ['src'] }));
+      writeFileSync(
+        join(fixture.repoDir, 'guard.config.json'),
+        JSON.stringify({ scanRoots: ['src'] }),
+      );
     }
     fixture.git('add', '--all');
 
