@@ -47,8 +47,10 @@ export GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -o BatchMode=yes}"
 # Bound branch-source advertisement/fetch before the already-bounded gate runner starts. The shared
 # supervisor terminates the complete Git/helper process group on expiry (portable on macOS/Linux).
 bounded_remote_git() {
-  node "$SCRIPT_DIR/review/process/gate-supervisor.mts" \
-    "${DEVKIT_REMOTE_TIMEOUT_SECONDS:-60}" -- git "$@"
+  # .mts in source, built .mjs in an installed consumer (the gate-config-paths dual-ext idiom).
+  local supervisor="$SCRIPT_DIR/review/process/gate-supervisor.mts"
+  [ -f "$supervisor" ] || supervisor="$SCRIPT_DIR/review/process/gate-supervisor.mjs"
+  node "$supervisor" "${DEVKIT_REMOTE_TIMEOUT_SECONDS:-60}" -- git "$@"
 }
 
 # `--resume <branch>` replays the invocation the previous attempt recorded (ship-intent.mts). A
@@ -334,6 +336,10 @@ fi
 # diffs against. Resolved AFTER the seam above: --base needs the network, and the seam promises no
 # side effects. Nothing between there and here reads $BASE.
 SOURCE_HEAD=""
+# The CALLER's worktree HEAD, pinned HERE rather than beside the export below: in a shared
+# parallel-agent checkout $ROOT can gain a commit between staging and the gates, which would name a
+# tree the caller never read (sc-2480). Empty when unreadable; the gate then reports no divergence.
+CALLER_HEAD=$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || true)
 if [ "$FROM_BRANCH" -eq 1 ]; then
   # A post-commit receipt resume publishes the immutable gated OID, so the caller's current HEAD is
   # not an input. Pre-commit/new runs pin it before the network step and never chase a moving HEAD.
@@ -1263,6 +1269,8 @@ else
 # main-autodetect. Unconditional (not just under --base): even the default case is more precise than
 # a gate auto-detecting main, for any branch that isn't a fresh cut off main (DK-5).
   export DEVKIT_SHIP_BASE_SHA="$BASE"
+# Pinned far above, before staging — see CALLER_HEAD.
+  export DEVKIT_SHIP_SOURCE_HEAD="$CALLER_HEAD"
   if [ "$DRY_GATES" -eq 1 ]; then
     export DEVKIT_SHIP_MODE=dry-gates
     export DEVKIT_RUN_MODE=dry-gates

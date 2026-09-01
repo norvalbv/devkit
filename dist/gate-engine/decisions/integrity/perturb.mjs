@@ -26,6 +26,11 @@ const NEGATIVE_LINE_RE = /^-\s*Negative:\s*.+$/m;
 const EVIDENCE_CHANGE_RE_G = /\n\*\*Evidence-change:\*\*[^\n]*/g;
 /** The `**Amends:** <id>` prefix of a tagged note, without its trailing prose. */
 const AMENDS_ID_RE = /\*\*Amends:\*\*\s*\S+/;
+// Leading `[ \t]*` so this finds the line whether or not a markdown formatter has already indented
+// it under the Consequences bullet — the parser reads both shapes now, so the mutation must be able
+// to remove either one. Non-global: the FIRST Target's Vision-fit is the one to strip, because an
+// index-0 block is exactly the position #7's early return leaves uncovered.
+const VISION_FIT_LINE_RE = /\n[ \t]*\*\*Vision-fit:\*\*[^\n]*/;
 function targetDates(body) {
     return [...body.matchAll(TARGET_DATE_RE)].map((m) => m[1]);
 }
@@ -128,6 +133,23 @@ export function mutateBreakNoteAmends(f) {
         axis: { ...f.axis, body: f.axis.body.replace(AMENDS_ID_RE, '**Amends:** note:1999-01-01') },
     };
 }
+/** #9 — strip a Target block's `**Vision-fit:**`, the field renderTarget writes unconditionally.
+ *
+ * Removal rather than indentation, though indentation is what produced the real corpus case: the
+ * parser now READS an indented field, so indenting one is no longer a defect and a mutation that
+ * applied it would trip nothing. What survives the fix is the narrower failure the fix cannot
+ * reach — a field line that is genuinely gone, from a block a non-CLI writer truncated or a merge
+ * mangled. Targets the FIRST block on purpose: #7 exempts index 0, so that position is the one the
+ * suite was blind at. */
+export function mutateMissingRequiredField(f) {
+    if (!VISION_FIT_LINE_RE.test(f.axis.body))
+        throw new Error('fixture has no **Vision-fit:** line — nothing to remove for target-missing-required-field ' +
+            '(it is already the defect this mutation creates)');
+    return {
+        indexRow: f.indexRow,
+        axis: { ...f.axis, body: f.axis.body.replace(VISION_FIT_LINE_RE, '') },
+    };
+}
 /** Every mutation, keyed by the check id it is designed to trip — one name-to-function map so a test
  * or the bench can drive "apply the mutation for check X" generically. */
 export const MUTATIONS = {
@@ -139,4 +161,5 @@ export const MUTATIONS = {
     'duplicate-field-text': mutateDuplicateFieldText,
     'retarget-missing-evidence-change': mutateMissingEvidenceChange,
     'note-amends-unresolvable': mutateBreakNoteAmends,
+    'target-missing-required-field': mutateMissingRequiredField,
 };
