@@ -1,11 +1,14 @@
 import { detectChangedComments } from './detect.mts';
+import { emptyInventory } from './inventory.mts';
+import { emitCommentBudget } from './telemetry.mts';
 import type { CommentFinding, DetectionResult } from './types.mts';
 
 interface FirewallDeps {
   detect: (cwd: string) => DetectionResult;
+  emit: typeof emitCommentBudget;
 }
 
-const defaults: FirewallDeps = { detect: detectChangedComments };
+const defaults: FirewallDeps = { detect: detectChangedComments, emit: emitCommentBudget };
 
 function findingLocation(finding: CommentFinding): string {
   return `${finding.path}:${finding.startLine}${
@@ -44,6 +47,7 @@ export function runCommentFirewall(
     console.error(
       `guard-comments: comment evidence unreadable — ${cause instanceof Error ? cause.message : cause}`,
     );
+    deps.emit('unreadable', emptyInventory(), []);
     return 4;
   }
   if (detection.unsupported.length > 0) {
@@ -54,9 +58,14 @@ export function runCommentFirewall(
     console.error(
       'Add an explicit lexer adapter or exclude that extension from sourceExtensions; no regex fallback was used.',
     );
+    deps.emit('unsupported', detection.inventory, detection.findings);
     return 4;
   }
-  if (detection.findings.length === 0) return 0;
+  if (detection.findings.length === 0) {
+    deps.emit('pass', detection.inventory, []);
+    return 0;
+  }
   printBlock(detection.findings);
+  deps.emit('block', detection.inventory, detection.findings);
   return 1;
 }
