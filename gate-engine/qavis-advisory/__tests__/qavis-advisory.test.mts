@@ -196,6 +196,10 @@ describe('the printed remedy runs where the operator is', () => {
   it('on a plain commit it is the index-relative form', () => {
     runQavisAdvisory('/r', advise);
     expect(stderr()).toContain('Run:  qavis qa --staged --route vision --repo .');
+    expect(stderr()).toContain(
+      "Waive: qavis waive --staged --reason '<why the named gap is accepted>' --repo .",
+    );
+    expect(stderr()).not.toContain('GUARD_QAVIS_OK');
     expect(stderr()).not.toContain('devkit ship --resume');
   });
 
@@ -210,6 +214,10 @@ describe('the printed remedy runs where the operator is', () => {
     expect(stderr()).toContain(
       `Run:  git -C ${root} add -- './src/renderer/App.tsx' $'./docs/it\\'s:a\\x0ab.md' && qavis qa --staged --route vision --repo ${root}`,
     );
+    // The waiver stages the SAME shipped set first, so it attests the gated content, not a stray index.
+    expect(stderr()).toContain(
+      `Waive: git -C ${root} add -- './src/renderer/App.tsx' $'./docs/it\\'s:a\\x0ab.md' && qavis waive --staged --reason '<why the named gap is accepted>' --repo ${root}`,
+    );
     expect(stderr()).not.toContain('restore --staged -- .'); // never clears the caller's own staging
     expect(stderr()).toContain("then: devkit ship --resume 'me/sc-1/$(thing)'");
     expect(stderr()).toContain('note: the receipt attests the staged set');
@@ -221,6 +229,7 @@ describe('the printed remedy runs where the operator is', () => {
     process.env.DEVKIT_SHIP_BASE_SHA = 'abc123';
     runQavisAdvisory('/wt', advise);
     expect(stderr()).toContain("Run:  qavis qa --diff 'abc123' --route vision --repo '/repo'");
+    expect(stderr()).not.toContain('qavis waive'); // waive is --staged only; a committed range has no local waiver
     expect(stderr()).not.toContain('git -C');
   });
 
@@ -283,7 +292,7 @@ describe('the printed remedy runs where the operator is', () => {
     expect(stderr()).toContain('no receipt minted there can attest it');
     expect(stderr()).toContain('DEVKIT_SHIP_QA=1 devkit ship --resume');
     expect(stderr()).toContain(`qavis qa --pr <n> --annotate description --repo '${root}'`);
-    expect(stderr()).toContain('GUARD_QAVIS_OK=1');
+    expect(stderr()).not.toContain('GUARD_QAVIS_OK'); // the remedy routes to a receipt or a waiver, never the bypass
   });
 
   it('quotes a non-UTF-8 filename byte for byte (ANSI-C form) instead of re-encoding it', () => {
@@ -297,6 +306,9 @@ describe('the printed remedy runs where the operator is', () => {
     process.env.DEVKIT_SHIP_ROOT = '/repo';
     runQavisAdvisory('/wt', advise);
     expect(stderr()).toContain("Run:  qavis qa --staged --route vision --repo '/repo'");
+    expect(stderr()).toContain(
+      "Waive: qavis waive --staged --reason '<why the named gap is accepted>' --repo '/repo'",
+    );
     expect(stderr()).not.toContain('git -C');
   });
 

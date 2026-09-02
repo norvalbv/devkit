@@ -270,9 +270,6 @@ export function runQavisAdvisory(cwd: string = process.cwd(), deps: AdvisoryDeps
     console.error(
       `   or, after this ship opens the PR:  qavis qa --pr <n> --annotate description --repo ${root}    (a pass publishes to the PR)`,
     );
-    console.error(
-      "   Land now: export GUARD_QAVIS_OK=1 with the repo owner's per-change OK (recorded as a bypass), or disable with GUARD_NO_QAVIS_ADVISORY=1.",
-    );
     return envFlag('AI_STRICT') ? 3 : 0;
   }
   console.error(`   Run:  ${qaRemedy(mode)}    (a pass writes a receipt that clears this)`);
@@ -287,7 +284,14 @@ export function runQavisAdvisory(cwd: string = process.cwd(), deps: AdvisoryDeps
       );
     }
   }
-  console.error('   Skip: export GUARD_QAVIS_OK=1, or disable with GUARD_NO_QAVIS_ADVISORY=1.');
+  // The remedy never names GUARD_QAVIS_OK: the audited exit for an accepted gap is `qavis waive`,
+  // which binds the reason to this staged tree. `waive` only knows `--staged`, so a committed
+  // range (`--diff`) has no local waiver — its receipt comes from the run above or from the PR.
+  const waive = waiveRemedy(mode);
+  if (waive)
+    console.error(
+      `   Waive: ${waive}    (after an uncertain verdict; audited, bound to this staged tree)`,
+    );
   return envFlag('AI_STRICT') ? 3 : 0; // ship blocks; a normal commit is advisory-only
 }
 
@@ -352,12 +356,27 @@ function qaRemedy(mode: ShipMode): string {
     const base = process.env.DEVKIT_SHIP_BASE_SHA ?? '<base>';
     return `qavis qa --diff ${shellQuote(base)} --route vision --repo ${at}`;
   }
+  return `${stagePrefix(at)}qavis qa --staged --route vision --repo ${at}`;
+}
+
+/** The waiver attests the SAME staged set as the qa line, so it carries the same staging prefix;
+ *  a committed range has no `--staged` tree to waive and gets none. */
+function waiveRemedy(mode: ShipMode): string | undefined {
+  const reason = "--reason '<why the named gap is accepted>'";
+  const root = process.env.DEVKIT_SHIP_ROOT;
+  if (mode === 'commit' || !root) return `qavis waive --staged ${reason} --repo .`;
+  if (mode !== 'staged') return undefined;
+  const at = shellQuote(root);
+  return `${stagePrefix(at)}qavis waive --staged ${reason} --repo ${at}`;
+}
+
+/** `git add` of exactly the shipped paths in ROOT, or nothing when none were recorded. */
+function stagePrefix(at: string): string {
   const paths = decodeShipPaths(process.env.DEVKIT_SHIP_PATHS);
   // `./` on every path: git reads a bare leading `:` as pathspec magic (`:(glob)`, `:/`), and the
   // shipped paths are repo-relative file paths, never pathspecs.
   const staged = paths.map((p) => shellQuoteBytes(Buffer.concat([Buffer.from('./'), p])));
-  const stage = paths.length ? `git -C ${at} add -- ${staged.join(' ')} && ` : '';
-  return `${stage}qavis qa --staged --route vision --repo ${at}`;
+  return paths.length ? `git -C ${at} add -- ${staged.join(' ')} && ` : '';
 }
 
 /** DEVKIT_SHIP_PATHS is `:`-joined base64 of the RAW path bytes (ship-branch.sh), so a newline, a
