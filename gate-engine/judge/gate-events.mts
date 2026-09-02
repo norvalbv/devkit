@@ -110,14 +110,15 @@ export function emitGateInfraFailure(ev: Record<string, unknown> & { gate: strin
  * clean is what Ruling (3) of gate-telemetry-self-describing forbids inventing. (coverage's
  * pre-existing `status: 'bypassed'` row keeps its shape for continuity and gains the same field.)
  */
-export function emitGateBypass(gate: string, flag: string): void {
-  emitGateEvent({
+export function emitGateBypass(gate: string, flag: string, reason?: string): void {
+  const event = {
     type: 'gate_result',
     gate,
     status: 'could_not_run',
     bypass: flag,
     detail: `${gate}(bypassed:${flag})`,
-  });
+  };
+  emitGateEvent(reason === undefined ? event : { ...event, reason });
 }
 
 export function emitGateEvent(ev: Record<string, unknown>): void {

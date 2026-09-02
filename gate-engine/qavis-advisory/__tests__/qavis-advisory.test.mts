@@ -10,11 +10,21 @@ import {
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { parseJsonObject } from '../../config-json.mts';
 import { type AdvisoryDeps, qavisOnPath, type RouteResult, runQavisAdvisory } from '../check.mts';
+
+interface BypassEvent {
+  bypass?: string;
+  reason?: string;
+  status?: string;
+}
 
 const ENV_KEYS = [
   'GUARD_AI_STRICT',
   'GUARD_QAVIS_OK',
+  'GUARD_QAVIS_OK_REASON',
+  'DEVKIT_GATE_EVENTS',
+  'DEVKIT_NO_TELEMETRY',
   'GUARD_NO_QAVIS_ADVISORY',
   'DEVKIT_SHIP_ROOT',
   'DEVKIT_SHIP_PATHS',
@@ -116,9 +126,10 @@ process.exit(2);
     expect(runQavisAdvisory(repo, { hasRecipe: () => true })).toBe(0);
   });
 
-  it('GUARD_QAVIS_OK short-circuits ADVISE under strict → 0, never shells qavis', () => {
+  it('GUARD_QAVIS_OK (with its reason) short-circuits ADVISE under strict → 0, never shells qavis', () => {
     process.env.GUARD_AI_STRICT = '1';
     process.env.GUARD_QAVIS_OK = '1';
+    process.env.GUARD_QAVIS_OK_REASON = 'owner OK';
     const route = vi.fn((): RouteResult => ({ verdict: 'ADVISE' }));
     expect(runQavisAdvisory('/r', { hasRecipe: () => true, route })).toBe(0);
     expect(route).not.toHaveBeenCalled();
@@ -414,5 +425,96 @@ describe('the printed remedy runs where the operator is', () => {
     expect(runQavisAdvisory('/wt', advise)).toBe(3);
     expect(stderr()).not.toContain('qavis qa --diff');
     expect(stderr()).toContain('no receipt minted there can attest it');
+  });
+});
+
+describe('GUARD_QAVIS_OK under a strict ship needs a recorded reason', () => {
+  it('without GUARD_QAVIS_OK_REASON the bypass is ignored: the advisory runs and still blocks', () => {
+    process.env.GUARD_AI_STRICT = '1';
+    process.env.GUARD_QAVIS_OK = '1';
+    expect(runQavisAdvisory('/r', advise)).toBe(3);
+    expect(stderr()).toContain('GUARD_QAVIS_OK ignored');
+    expect(stderr()).toContain("GUARD_QAVIS_OK_REASON='why this change ships without QA'");
+  });
+
+  it('with a reason the bypass lands, and the reason rides on the recorded bypass event', () => {
+    const sink = path.join(
+      mkdtempSync(path.join(tmpdir(), 'qavis-advisory-events-')),
+      'events.jsonl',
+    );
+    process.env.DEVKIT_GATE_EVENTS = sink;
+    delete process.env.DEVKIT_NO_TELEMETRY;
+    process.env.GUARD_AI_STRICT = '1';
+    process.env.GUARD_QAVIS_OK = '1';
+    process.env.GUARD_QAVIS_OK_REASON = 'copy-only change; owner OK in #12';
+    const route = vi.fn((): RouteResult => ({ verdict: 'ADVISE' }));
+    expect(runQavisAdvisory('/r', { hasRecipe: () => true, route })).toBe(0);
+    expect(route).not.toHaveBeenCalled();
+    const events = readFileSync(sink, 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => parseJsonObject<BypassEvent>(l, 'gate event'));
+    const bypass = events.find((e) => e.bypass === 'GUARD_QAVIS_OK');
+    expect(bypass?.reason).toBe('copy-only change; owner OK in #12');
+    expect(bypass?.status).toBe('could_not_run');
+  });
+
+  it('a plain (non-strict) commit keeps the reason-less bypass, and records no reason even when one is set', () => {
+    const sink = path.join(
+      mkdtempSync(path.join(tmpdir(), 'qavis-advisory-events-')),
+      'events.jsonl',
+    );
+    process.env.DEVKIT_GATE_EVENTS = sink;
+    delete process.env.DEVKIT_NO_TELEMETRY;
+    process.env.GUARD_QAVIS_OK = '1';
+    process.env.GUARD_QAVIS_OK_REASON = 'ignored outside strict';
+    expect(runQavisAdvisory('/r', advise)).toBe(0);
+    expect(stderr()).not.toContain('ignored');
+    const events = readFileSync(sink, 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => parseJsonObject<BypassEvent>(l, 'gate event'));
+    expect(events.find((e) => e.bypass === 'GUARD_QAVIS_OK')?.reason).toBeUndefined();
+  });
+  it('the drifted "Land now" remedy names the reason variable under strict, and only there', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'qavis-advisory-drift2-'));
+    execFileSync('git', ['init', '-q', root]);
+    execFileSync('git', [
+      '-C',
+      root,
+      '-c',
+      'user.name=t',
+      '-c',
+      'user.email=t@t',
+      'commit',
+      '-q',
+      '--allow-empty',
+      '-m',
+      'one',
+    ]);
+    process.env.DEVKIT_SHIP_ROOT = root;
+    process.env.DEVKIT_SHIP_BASE_SHA = '0'.repeat(40); // a base this checkout is not on → drifted
+    runQavisAdvisory('/wt', advise);
+    expect(stderr()).toContain('Land now: export GUARD_QAVIS_OK=1 with');
+    expect(stderr()).not.toContain('GUARD_QAVIS_OK_REASON');
+    vi.mocked(console.error).mockClear();
+    process.env.GUARD_AI_STRICT = '1';
+    runQavisAdvisory('/wt', advise);
+    expect(stderr()).toContain(
+      "Land now: export GUARD_QAVIS_OK=1 GUARD_QAVIS_OK_REASON='why this change ships without QA'",
+    );
+  });
+
+  it('the printed Skip remedy names the reason variable under strict, and only there', () => {
+    process.env.GUARD_AI_STRICT = '1';
+    runQavisAdvisory('/r', advise);
+    expect(stderr()).toContain(
+      "Skip: export GUARD_QAVIS_OK=1 GUARD_QAVIS_OK_REASON='why this change ships without QA'",
+    );
+    vi.mocked(console.error).mockClear();
+    delete process.env.GUARD_AI_STRICT;
+    runQavisAdvisory('/r', advise);
+    expect(stderr()).toContain('Skip: export GUARD_QAVIS_OK=1, or disable');
+    expect(stderr()).not.toContain('GUARD_QAVIS_OK_REASON');
   });
 });

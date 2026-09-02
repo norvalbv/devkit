@@ -72,7 +72,8 @@ specific conditions under which that control is appropriate:
 - `GUARD_NO_COMPLETENESS=1` — skip completeness; `GUARD_COMPLETENESS_HARD=0` only softens it.
 - `GUARD_NO_SENTRY_JUDGE=1` — skip the Sentry commit-message judge.
 - `GUARD_COVERAGE_OK=1` — assert the base-branch coverage condition documented by `using-devkit`.
-- `GUARD_QAVIS_OK=1` — ship this change without the advised visual QA;
+- `GUARD_QAVIS_OK=1` — ship this change without the advised visual QA; under a strict ship only
+  together with `GUARD_QAVIS_OK_REASON='why this change ships without QA'` (recorded with the bypass);
   `GUARD_NO_QAVIS_ADVISORY=1` disables the advisory entirely.
 - `GUARD_HOOK_PARITY_OK=1` — assert that `.husky/pre-commit` drift predates your change (Devkit's
   own repo only; the gate is already advisory when no hook-generator input is staged).

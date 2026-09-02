@@ -20,7 +20,8 @@
  * still exits 0 in every one of those cases; it just says so. A repo WITHOUT `.qavis/recipe.json`
  * stays entirely silent: devkit never asserted qavis was expected there.
  *
- * Overrides: GUARD_NO_QAVIS_ADVISORY=1 disables · GUARD_QAVIS_OK=1 ships this change without QA.
+ * Overrides: GUARD_NO_QAVIS_ADVISORY=1 disables · GUARD_QAVIS_OK=1 ships this change without QA
+ * (under a strict ship only together with GUARD_QAVIS_OK_REASON='…', recorded in the bypass event).
  * (Both must be EXPORTED to survive the ship subprocess chain — an inline prefix can be stripped.)
  */
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -192,6 +193,12 @@ function keepSelfRunReceipt(cwd: string): void {
   }
 }
 
+/** The bypass as the gate will accept it HERE: the reason is a strict-ship requirement only. */
+const bypassFlags = (): string =>
+  envFlag('AI_STRICT')
+    ? "GUARD_QAVIS_OK=1 GUARD_QAVIS_OK_REASON='why this change ships without QA' (recorded)"
+    : 'GUARD_QAVIS_OK=1';
+
 const qaOptIn = (): boolean => /^(1|true|yes)$/i.test(process.env.DEVKIT_SHIP_QA ?? '');
 
 function defaultRoute(cwd: string): RouteResult {
@@ -225,8 +232,17 @@ export function runQavisAdvisory(cwd: string = process.cwd(), deps: AdvisoryDeps
   // GUARD_QAVIS_OK is a per-run bypass, NO_QAVIS_ADVISORY a standing disable — recorded under
   // their own flag names because before this the advisory's bypasses emitted nothing at all.
   if (envFlag('QAVIS_OK')) {
-    emitGateBypass('qavis-advisory', 'GUARD_QAVIS_OK');
-    return 0;
+    const reason = process.env.GUARD_QAVIS_OK_REASON?.trim();
+    const strict = envFlag('AI_STRICT');
+    if (reason || !strict) {
+      // The reason is a strict-ship contract; a plain commit's bypass stays reasonless in telemetry.
+      emitGateBypass('qavis-advisory', 'GUARD_QAVIS_OK', strict ? reason : undefined);
+      return 0;
+    }
+    // A strict ship's bypass is the one that lands unreviewed UI; it must say why, on the record.
+    console.error(
+      "qavis-advisory: GUARD_QAVIS_OK ignored — under a strict ship the bypass needs GUARD_QAVIS_OK_REASON='why this change ships without QA' (recorded with the bypass).",
+    );
   }
   if (envFlag('NO_QAVIS_ADVISORY')) {
     emitGateBypass('qavis-advisory', 'GUARD_NO_QAVIS_ADVISORY');
@@ -271,7 +287,7 @@ export function runQavisAdvisory(cwd: string = process.cwd(), deps: AdvisoryDeps
       `   or, after this ship opens the PR:  qavis qa --pr <n> --annotate description --repo ${root}    (a pass publishes to the PR)`,
     );
     console.error(
-      "   Land now: export GUARD_QAVIS_OK=1 with the repo owner's per-change OK (recorded as a bypass), or disable with GUARD_NO_QAVIS_ADVISORY=1.",
+      `   Land now: export ${bypassFlags()} with the repo owner's per-change OK (recorded as a bypass), or disable with GUARD_NO_QAVIS_ADVISORY=1.`,
     );
     return envFlag('AI_STRICT') ? 3 : 0;
   }
@@ -287,7 +303,7 @@ export function runQavisAdvisory(cwd: string = process.cwd(), deps: AdvisoryDeps
       );
     }
   }
-  console.error('   Skip: export GUARD_QAVIS_OK=1, or disable with GUARD_NO_QAVIS_ADVISORY=1.');
+  console.error(`   Skip: export ${bypassFlags()}, or disable with GUARD_NO_QAVIS_ADVISORY=1.`);
   return envFlag('AI_STRICT') ? 3 : 0; // ship blocks; a normal commit is advisory-only
 }
 
