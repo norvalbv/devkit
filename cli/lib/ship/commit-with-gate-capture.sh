@@ -209,16 +209,12 @@ SHIP_HOOK_WRAPPER
   if [ "$hook_setup_failed" -eq 1 ]; then
     printf '%s\n' "$hook_setup_error" | tee -a "$log" "$ship_log" >&2
   else
-    # The comment firewall can find a remediation ID only in this isolated worktree. Hand its exact,
-    # caller-root capture path to the gate so the printed justify command remains usable after the
-    # failed empty worktree is reclaimed. The value is evidence location, never an approval token.
-    unset DEVKIT_SHIP_GATE_LOG
     if [ "$ship_dry_gates" -eq 1 ]; then
-      DEVKIT_SHIP_GATE_LOG="$log" DEVKIT_GATE_ARCHIVE_LOG="$ship_log" \
+      DEVKIT_GATE_ARCHIVE_LOG="$ship_log" \
         run_gates_with_capture "$wt" "$root" ship "$log" "$progress" -- \
         git -C "$wt" ${hookcfg[@]+"${hookcfg[@]}"} hook run pre-commit || rc=$?
     else
-      DEVKIT_SHIP_GATE_LOG="$log" DEVKIT_GATE_ARCHIVE_LOG="$ship_log" \
+      DEVKIT_GATE_ARCHIVE_LOG="$ship_log" \
         run_gates_with_capture "$wt" "$root" ship "$log" "$progress" -- \
         git -C "$wt" ${hookcfg[@]+"${hookcfg[@]}"} commit -m "$title" -m "$body" || rc=$?
     fi
@@ -310,6 +306,7 @@ SHIP_HOOK_WRAPPER
   elif [ "$staged_missing" -eq 1 ]; then blocked_json='"staged_objects_missing"'; timed_out=false
   elif grep -q '✗ deterministic gates failed' "$log" 2>/dev/null; then blocked_json='"deterministic"'; timed_out=false
   elif grep -q 'decision smells:' "$log" 2>/dev/null; then blocked_json='"decisions"'; timed_out=false
+  elif grep -q 'guard-comments: .* need a decision' "$log" 2>/dev/null; then blocked_json='"comments"'; timed_out=false
   elif grep -qE 'guard-review: .* (FAILED|INCONCLUSIVE)' "$log" 2>/dev/null; then blocked_json='"review"'; timed_out=false
   else blocked_json='"unknown"'; timed_out=false
   fi

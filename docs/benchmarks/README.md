@@ -90,7 +90,6 @@ Committed evidence rejects raw prompts, transcripts, absolute paths, email addre
 | Frontend security reviewer | shipped | accepted | stale | coverage | ? unknown | first-pass FAIL recall: 11/11 (100.0%) · first-pass clean pass: 7/8 (87.5%) · block recall: 10/11 (90.9%) · clean pass: 8/8 (100.0%) |
 | Frontend performance reviewer | shipped | accepted | stale | coverage | ? unknown | first-pass FAIL recall: 10/11 (90.9%) · first-pass clean pass: 7/8 (87.5%) · block recall: 10/11 (90.9%) · clean pass: 7/8 (87.5%) |
 | Correctness reviewer | shipped | accepted | stale | coverage | ↕ mixed | first-pass FAIL recall: 56/69 (81.2%) · first-pass clean pass: 49/59 (83.1%) |
-| Changed-comment paragraph rationale review | shipped | evidence-only | unknown | — | ? unknown | No accepted local checkpoint |
 | Decision governance | shipped | evidence-only | unknown | quality | ↑ improved | Detect accuracy: 45/49 (91.8%) · DECISION recall: 8/9 (88.9%) |
 | Sentry capture judge | shipped | evidence-only | unknown | quality | ↑ improved | Commit-message F1: 56/100 (56.0%) · Focused-diff F1: 87/100 (87.0%) |
 | Edge-case autonomy | no-ship | accepted | stale | no-ship | ? unknown | Judge-free ceiling: 51.2% · Pre-registered target: 35.0% |
@@ -119,7 +118,7 @@ Committed evidence rejects raw prompts, transcripts, absolute paths, email addre
 | Prior-art agent | agent | experimental | evidence-only | prior-art |
 | devkit CLI | bin | shipped | none | — |
 | Clone gate | bin | shipped | evidence-only | co-occurrence |
-| Changed-comment paragraph firewall | bin | shipped | evidence-only | comment-firewall |
+| Changed-comment paragraph budget gate | bin | shipped | none | — |
 | Coverage gate | bin | shipped | none | — |
 | Decisions gate | bin | shipped | evidence-only | decisions, decisions-recall, decisions-save-quality |
 | Deterministic orchestrator | bin | shipped | none | — |
@@ -141,7 +140,6 @@ Committed evidence rejects raw prompts, transcripts, absolute paths, email addre
 | Conventions reviewer | reviewer | shipped | accepted | conventions |
 | Feature critique judge | judge | shipped | accepted | critique |
 | Completeness judge | judge | shipped | accepted | completeness |
-| Changed-comment paragraph rationale judge | judge | shipped | evidence-only | comment-firewall |
 | Decision detect/alignment/depth judges | judge | shipped | evidence-only | decisions |
 | Sentry commit-message judge | judge | shipped | evidence-only | sentry |
 | qavis visual QA | judge | shipped | external-required | qavis |
