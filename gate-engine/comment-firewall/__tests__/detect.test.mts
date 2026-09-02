@@ -188,6 +188,78 @@ describe('detectChangedComments', () => {
     expect(findings[0]?.anchor).toMatch(/^[0-9a-f]{12}$/);
   });
 
+  it('records a paragraph shortened by deletion alone, at its current size and anchor', () => {
+    const root = fixture();
+    const tail = 'const d = 4;\nconst e = 5;\n';
+    writeFileSync(path.join(root, 'src/a.ts'), `const anchor = 1;\n// a\n// b\n// c\n${tail}`);
+    git(root, ['add', 'src/a.ts']);
+    const [over] = detectChangedComments(root).findings;
+    commitAll(root, 'over budget');
+
+    writeFileSync(path.join(root, 'src/a.ts'), `const anchor = 1;\n// a\n// c\n${tail}`);
+    git(root, ['add', 'src/a.ts']);
+    const shortened = detectChangedComments(root);
+    expect(shortened.findings).toEqual([]);
+    expect(shortened.inventory.paragraphs).toEqual({ one: 0, two: 1, over: 0 });
+    expect(shortened.inventory.touched).toEqual([{ anchor: over?.anchor, textLines: 2 }]);
+  });
+
+  it('records a block comment shortened by deleting a bare continuation line', () => {
+    const root = fixture();
+    writeFileSync(path.join(root, 'src/a.ts'), '/* first\n   second\n   third */\nconst x = 1;\n');
+    commitAll(root, 'base');
+    writeFileSync(path.join(root, 'src/a.ts'), '/* first\n   third */\nconst x = 1;\n');
+    git(root, ['add', 'src/a.ts']);
+    const { findings, inventory } = detectChangedComments(root);
+    expect(findings).toEqual([]);
+    expect(inventory.touched.map((item) => item.textLines)).toEqual([2]);
+  });
+
+  it('does not count a paragraph as touched when only adjacent code is deleted', () => {
+    const root = fixture();
+    writeFileSync(
+      path.join(root, 'src/a.ts'),
+      '// a\n// b\n// c\nconst removed = 1;\nconst kept = 2;\n',
+    );
+    commitAll(root, 'base');
+    writeFileSync(path.join(root, 'src/a.ts'), '// a\n// b\n// c\nconst kept = 2;\n');
+    git(root, ['add', 'src/a.ts']);
+    const { findings, inventory } = detectChangedComments(root);
+    expect(findings).toEqual([]);
+    expect(inventory.touched).toEqual([]);
+    expect(inventory.paragraphs).toEqual({ one: 0, two: 0, over: 0 });
+  });
+
+  it('does not count a paragraph as touched when the paragraph above it is deleted', () => {
+    const root = fixture();
+    writeFileSync(
+      path.join(root, 'src/a.ts'),
+      '// gone one\n// gone two\n\n// a\n// b\n// c\nconst x = 1;\n',
+    );
+    commitAll(root, 'base');
+    writeFileSync(path.join(root, 'src/a.ts'), '// a\n// b\n// c\nconst x = 1;\n');
+    git(root, ['add', 'src/a.ts']);
+    const { findings, inventory } = detectChangedComments(root);
+    expect(findings).toEqual([]);
+    expect(inventory.touched).toEqual([]);
+  });
+
+  it('attributes a deleted last line to its own paragraph, not the one that follows it', () => {
+    const root = fixture();
+    writeFileSync(
+      path.join(root, 'src/a.ts'),
+      '// a\n// b\n// c\nconst y = 0;\n// d\n// e\n// f\nconst x = 1;\n',
+    );
+    commitAll(root, 'base');
+    writeFileSync(
+      path.join(root, 'src/a.ts'),
+      '// a\n// b\nconst y = 0;\n// d\n// e\n// f\nconst x = 1;\n',
+    );
+    git(root, ['add', 'src/a.ts']);
+    const { inventory } = detectChangedComments(root);
+    expect(inventory.touched.map((item) => item.textLines)).toEqual([2]);
+  });
+
   it('gives paragraphs above identical trailing code in one file distinct anchors', () => {
     const root = fixture();
     const fn = (name: string): string =>

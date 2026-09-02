@@ -16,16 +16,21 @@ import {
   anchorFor,
   changedTextLineCount,
   emptyInventory,
+  hunkIntersects,
+  hunkTouches,
   recordParagraph,
+  textLineCount,
 } from './inventory.mts';
+import { commentTouchLines, type PatchHunk, parsePatchHunks } from './patch.mts';
 import type { CommentFinding, CommentInventory, DetectionResult } from './types.mts';
+
+export { parsePatchHunks } from './patch.mts';
 
 export const COMMENT_ADAPTER_VERSION = 'typescript-scanner-v2';
 export const COMMENT_FINDING_POLICY = 'changed-comment-paragraph-v6';
 const SUPPORTED_EXTENSIONS = new Set(['js', 'jsx', 'ts', 'tsx', 'mjs', 'cjs', 'mts', 'cts']);
 const MAX_GIT_OUTPUT = 16 * 1024 * 1024;
 const CONTEXT_LINES = 4;
-const HUNK_HEADER = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/;
 const LEADING_DOT_SLASH = /^\.\//;
 const TRAILING_SLASH = /\/$/;
 const TRAILING_CARRIAGE_RETURN = /\r$/;
@@ -36,13 +41,6 @@ const LINE_COMMENT_PREFIX = /^\s*\/\/[/!]?[ \t]?/;
 const BLOCK_COMMENT_PREFIX = /^\s*\/\*+!?[ \t]?/;
 const BLOCK_COMMENT_SUFFIX = /[ \t]*\*\/[ \t]*$/;
 const BLOCK_COMMENT_CONTINUATION = /^\s*\*[ \t]?/;
-
-interface PatchHunk {
-  newStart: number;
-  newCount: number;
-  addedLines: Set<number>;
-  text: string;
-}
 
 export interface CommentToken {
   kind: 'line' | 'block';
@@ -136,40 +134,6 @@ function patch(cwd: string, file: string, ref?: string): string {
   return git(cwd, args);
 }
 
-export function parsePatchHunks(diff: string): PatchHunk[] {
-  const hunks: PatchHunk[] = [];
-  let current: PatchHunk | null = null;
-  let newLine = 0;
-  for (const raw of diff.split('\n')) {
-    if (raw.startsWith('diff --git ')) {
-      current = null;
-      continue;
-    }
-    const header = raw.match(HUNK_HEADER);
-    if (header) {
-      current = {
-        newStart: Number(header[1]),
-        newCount: header[2] === undefined ? 1 : Number(header[2]),
-        addedLines: new Set(),
-        text: raw,
-      };
-      newLine = current.newStart;
-      hunks.push(current);
-      continue;
-    }
-    if (!current) continue;
-    current.text += `\n${raw}`;
-    /* File headers precede hunks; within a hunk `+++value` is source beginning with `++`. */
-    if (raw.startsWith('+')) {
-      current.addedLines.add(newLine);
-      newLine += 1;
-    } else if (!raw.startsWith('\\') && !raw.startsWith('-')) {
-      newLine += 1;
-    }
-  }
-  return hunks;
-}
-
 function lineStarts(source: string): number[] {
   const starts = [0];
   for (let i = 0; i < source.length; i++) if (source.charCodeAt(i) === 10) starts.push(i + 1);
@@ -241,6 +205,21 @@ function stagedBlob(cwd: string, file: string): string {
   return git(cwd, ['show', `:${repoPath}`]);
 }
 
+/** Every line of `ref`'s version of the file that lies inside a comment token; empty when absent. */
+function commentLinesAt(cwd: string, file: string, extension: string, ref: string): Set<number> {
+  const lines = new Set<number>();
+  let source: string;
+  try {
+    source = git(cwd, ['show', `${ref}:${gitPrefix(cwd)}${file}`]);
+  } catch {
+    return lines;
+  }
+  for (const token of scanCommentTokens(source, extension)) {
+    for (let line = token.startLine; line <= token.endLine; line += 1) lines.add(line);
+  }
+  return lines;
+}
+
 function normalizedRoot(cwd: string, root: string): string {
   const rel = path.isAbsolute(root) ? path.relative(cwd, root) : root;
   const posix = rel
@@ -262,13 +241,6 @@ function contextFor(source: string, token: CommentToken): string {
   return lines.slice(from, to).join('\n').slice(0, 8_000);
 }
 
-function hunkIntersects(hunk: PatchHunk, token: CommentToken): boolean {
-  for (const line of hunk.addedLines) {
-    if (line >= token.startLine && line <= token.endLine) return true;
-  }
-  return false;
-}
-
 function meaningfulLine(line: string): string {
   return line
     .replace(TRAILING_CARRIAGE_RETURN, '')
@@ -277,10 +249,6 @@ function meaningfulLine(line: string): string {
     .replace(BLOCK_COMMENT_SUFFIX, '')
     .replace(BLOCK_COMMENT_CONTINUATION, '')
     .trim();
-}
-
-function addedLineSet(hunks: PatchHunk[]): Set<number> {
-  return new Set(hunks.flatMap((hunk) => [...hunk.addedLines]));
 }
 
 /** Gap lines between grouped tokens are kept in `text`, so `startLine + index` stays a source line. */
@@ -369,13 +337,14 @@ function changedParagraphs(
   source: string,
   extension: string,
   hunks: PatchHunk[],
+  touchLines: ReadonlySet<number>,
   inventory: CommentInventory,
 ): ChangedParagraph[] {
   const lines = source.split('\n');
   const isBlank = (line: number): boolean => (lines[line - 1] ?? '').trim() === '';
   const tokens = scanCommentTokens(source, extension);
   const paragraphs = paragraphCommentTokens(tokens, isBlank);
-  const addedLines = addedLineSet(hunks);
+  const addedLines = new Set(hunks.flatMap((hunk) => [...hunk.addedLines]));
   for (const token of tokens) {
     if (!token.standalone && hunks.some((hunk) => hunkIntersects(hunk, token))) {
       inventory.trailingAdded += 1;
@@ -396,11 +365,10 @@ function changedParagraphs(
     const context = anchorContext(lines, token);
     const contextOrdinal = contexts.get(context) ?? 0;
     contexts.set(context, contextOrdinal + 1);
-    if (!hunks.some((hunk) => hunkIntersects(hunk, token))) continue;
+    if (!hunks.some((hunk) => hunkTouches(hunk, token, touchLines))) continue;
     const textLines = changedTextLineCount(token, addedLines, meaningfulLine);
-    if (textLines === 0) continue;
     const anchor = anchorFor(file, context, contextOrdinal);
-    recordParagraph(inventory, { anchor, textLines });
+    recordParagraph(inventory, { anchor, textLines: textLineCount(token, meaningfulLine) });
     if (textLines >= 3) {
       const twin = (totals.get(key) ?? 0) > 1 ? { ordinal } : null;
       changed.push({ token, twin, anchor, textLines });
@@ -468,18 +436,25 @@ export function detectChangedComments(cwd = process.cwd()): DetectionResult {
     inventory.files += 1;
     const first = parsePatchHunks(patch(cwd, file));
     let effective = first;
+    let touchLines = commentTouchLines(first, commentLinesAt(cwd, file, extension, 'HEAD'));
     try {
       const second = parsePatchHunks(patch(cwd, file, 'MERGE_HEAD'));
       const secondLines = new Set(second.flatMap((hunk) => [...hunk.addedLines]));
+      const secondTouch = commentTouchLines(
+        second,
+        commentLinesAt(cwd, file, extension, 'MERGE_HEAD'),
+      );
       effective = first.map((hunk) => ({
         ...hunk,
         addedLines: new Set([...hunk.addedLines].filter((line) => secondLines.has(line))),
       }));
+      touchLines = new Set([...touchLines].filter((line) => secondTouch.has(line)));
     } catch {
       // Ordinary commit: the first-parent staged patch is the complete attribution set.
     }
     const source = stagedBlob(cwd, file);
-    for (const paragraph of changedParagraphs(file, source, extension, effective, inventory)) {
+    const paragraphs = changedParagraphs(file, source, extension, effective, touchLines, inventory);
+    for (const paragraph of paragraphs) {
       findings.push(findingFor(file, extension, source, paragraph, effective));
     }
   }

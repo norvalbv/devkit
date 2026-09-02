@@ -1,5 +1,6 @@
 import { emitGateEvent } from '../judge/gate-events.mts';
 import { EVENT_BUDGET } from '../judge/odb-probe.mts';
+import { runEnvelope } from '../judge/run-context.mts';
 import type { CommentFinding, CommentInventory } from './types.mts';
 
 export const COMMENT_BUDGET_EVENT = 'comment_budget';
@@ -33,7 +34,9 @@ export interface CommentBudgetEvent {
   truncated?: true;
 }
 
-/** Room left for the envelope (repo, branch, ship_id, ts) that emitGateEvent appends afterwards. */
+/** odb-probe's EVENT_BUDGET is a payload bound with ~2KB left for the envelope under the 4KB
+ * atomic append; the whole written line is bounded here directly, with a little slack for `\n`. */
+const LINE_BUDGET = EVENT_BUDGET * 2 - 128;
 const PAYLOAD_BUDGET = EVENT_BUDGET - 320;
 
 function bytes(value: string): number {
@@ -81,13 +84,14 @@ export function commentBudgetEvent(
   status: CommentBudgetStatus,
   inventory: CommentInventory,
   findings: CommentFinding[],
+  budget = PAYLOAD_BUDGET,
 ): CommentBudgetEvent {
-  const maxItems = Math.ceil(PAYLOAD_BUDGET / 30);
+  const maxItems = Math.ceil(Math.max(budget, 0) / 30);
   let keepFindings = Math.min(findings.length, maxItems);
   let keepTouched = Math.min(inventory.touched.length, maxItems);
   for (;;) {
     const event = build(status, inventory, findings, keepFindings, keepTouched);
-    if (bytes(JSON.stringify(event)) <= PAYLOAD_BUDGET) return event;
+    if (bytes(JSON.stringify(event)) <= budget) return event;
     if (keepTouched > 0) keepTouched -= 1;
     else if (keepFindings > 0) keepFindings -= 1;
     else {
@@ -100,10 +104,17 @@ export function commentBudgetEvent(
   }
 }
 
+/** The line emitGateEvent writes is payload + envelope + ts; measure the envelope it will append
+ * so the WHOLE record, not just the payload, stays under the atomic-append line budget. */
 export function emitCommentBudget(
   status: CommentBudgetStatus,
   inventory: CommentInventory,
   findings: CommentFinding[],
 ): void {
-  emitGateEvent({ ...commentBudgetEvent(status, inventory, findings) });
+  const envelope = bytes(JSON.stringify({ ...runEnvelope(), ts: new Date().toISOString() }));
+  const event = commentBudgetEvent(status, inventory, findings, LINE_BUDGET - envelope);
+  // The envelope is not ours to cap; when even the floor event cannot fit beside it, a missing
+  // event beats a torn line in the shared sink.
+  if (bytes(JSON.stringify(event)) + envelope > LINE_BUDGET) return;
+  emitGateEvent({ ...event });
 }

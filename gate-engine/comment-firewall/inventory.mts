@@ -1,8 +1,30 @@
 import { createHash } from 'node:crypto';
 import type { CommentToken } from './detect.mts';
+import type { PatchHunk } from './patch.mts';
 import type { CommentInventory, TouchedParagraph } from './types.mts';
 
 const ANCHOR_LINES = 2;
+
+export function hunkIntersects(hunk: PatchHunk, token: CommentToken): boolean {
+  for (const line of hunk.addedLines) {
+    if (line >= token.startLine && line <= token.endLine) return true;
+  }
+  return false;
+}
+
+/** Added lines inside the paragraph, or a surviving line of it that a deleted comment line was
+ * contiguous with — so deleting a neighbouring paragraph or code line never touches this one. */
+export function hunkTouches(
+  hunk: PatchHunk,
+  token: CommentToken,
+  touchLines: ReadonlySet<number>,
+): boolean {
+  if (hunkIntersects(hunk, token)) return true;
+  for (const line of touchLines) {
+    if (line >= token.startLine && line <= token.endLine) return true;
+  }
+  return false;
+}
 
 export function emptyInventory(): CommentInventory {
   return {
@@ -23,6 +45,11 @@ export function changedTextLineCount(
   return token.text.split('\n').filter((line, index) => {
     return addedLines.has(token.startLine + index) && Boolean(meaningful(line));
   }).length;
+}
+
+/** Every line of the paragraph that carries text — its current size, whichever lines changed. */
+export function textLineCount(token: CommentToken, meaningful: (line: string) => string): number {
+  return token.text.split('\n').filter((line) => Boolean(meaningful(line))).length;
 }
 
 /** The code a paragraph sits on: the previous non-blank line and the next two. Identical contexts

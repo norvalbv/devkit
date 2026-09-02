@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -91,6 +91,34 @@ describe('commentBudgetEvent', () => {
 });
 
 describe('emitCommentBudget', () => {
+  it('keeps the WHOLE written line under the 4KB atomic-append bound, envelope included', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'comment-budget-'));
+    const sink = path.join(dir, 'events.jsonl');
+    vi.stubEnv('DEVKIT_GATE_EVENTS', sink);
+    vi.stubEnv('DEVKIT_SHIP_ID', 'ship-long');
+    vi.stubEnv('DEVKIT_SHIP_BRANCH', `feature/${'x'.repeat(900)}`);
+    vi.stubEnv('DEVKIT_SHIP_REPO', 'r'.repeat(300));
+    const findings = Array.from({ length: 120 }, (_, index) => finding(index));
+    emitCommentBudget('block', inventory(120), findings);
+    const line = readFileSync(sink, 'utf8').trimEnd();
+    expect(Buffer.byteLength(line, 'utf8')).toBeLessThanOrEqual(EVENT_BUDGET * 2 - 128);
+    const event = JSON.parse(line);
+    expect(event.branch).toHaveLength(908);
+    expect(event.findings.length).toBeGreaterThan(0);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('writes nothing rather than a torn line when the envelope alone exceeds the bound', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'comment-budget-'));
+    const sink = path.join(dir, 'events.jsonl');
+    vi.stubEnv('DEVKIT_GATE_EVENTS', sink);
+    vi.stubEnv('DEVKIT_SHIP_ID', 'ship-huge');
+    vi.stubEnv('DEVKIT_SHIP_BRANCH', 'x'.repeat(4000));
+    emitCommentBudget('pass', emptyInventory(), []);
+    expect(existsSync(sink)).toBe(false);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
   it('appends one enveloped JSON line to the configured sink', () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'comment-budget-'));
     const sink = path.join(dir, 'events.jsonl');
