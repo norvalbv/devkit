@@ -43,6 +43,10 @@ import { checkCommitMsgHook, commitMsgGuards } from '../lib/husky/commit-msg-blo
 import { extractGuardBlock } from '../lib/husky/husky-block.mts';
 import { checkAdhdSkill } from '../lib/install/adhd-skill.mts';
 import {
+  checkDevkitCacheGitignore,
+  repairDevkitCacheGitignore,
+} from '../lib/install/gitignore-cache.mts';
+import {
   resolveExistingAgentProviders,
   SUPPORTED_AGENT_PROVIDERS,
 } from '../lib/install/agent-assets/agent-providers.mts';
@@ -235,6 +239,8 @@ function applyFix(
     );
   }
 
+  repairDevkitCacheGitignore(cwd, results);
+
   // MISSING template files / husky drift → init for the recorded selection (idempotent).
   const OXC_CHECKS = new Set([
     'Oxc manifest',
@@ -345,6 +351,7 @@ async function collectResults(
 
   const results = [configResult];
   if (sel.husky) results.push(...hookChecks(cwd, sel.guards ?? []));
+  results.push(checkDevkitCacheGitignore(cwd));
   if (sel.husky && commitMsgGuards(sel.guards ?? []).length)
     results.push(checkCommitMsgHook(cwd, sel.guards ?? []));
   // biome and tsconfig differ only by filename and expected pointer.
