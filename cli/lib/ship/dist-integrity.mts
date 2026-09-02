@@ -13,7 +13,8 @@ import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-interface UnresolvedImport {
+/** One relative-import edge: who imports, what they wrote, and where it resolves in the repo. */
+export interface ImportEdge {
   importer: string;
   specifier: string;
   target: string;
@@ -21,7 +22,7 @@ interface UnresolvedImport {
 
 export interface DistIntegrityReport {
   active: boolean;
-  unresolved: UnresolvedImport[];
+  unresolved: ImportEdge[];
   unbriefed: string[];
   untracked: string[];
   /** Files the lexer could not parse, so their imports are unverified. Blocks, like the rest. */
@@ -100,6 +101,36 @@ function generatedPath(briefedPath: string): string | undefined {
 }
 
 /**
+ * Relative-import edges of ONE emitted module. `undefined` means unparseable — a hole every caller
+ * must fail on. Shared so the preflight and the tracked-dist test cannot disagree about an edge.
+ */
+export async function moduleImportEdges(
+  root: string,
+  importer: string,
+  source: string,
+): Promise<ImportEdge[] | undefined> {
+  // This dependency is dev-only and intentionally loaded only for devkit self-hosting. Installed
+  // consumer copies short-circuit before any caller reaches here and never need it at runtime.
+  const { init, parse } = await import('es-module-lexer');
+  await init;
+  let imports: ReturnType<typeof parse>[0];
+  try {
+    [imports] = parse(source, importer);
+  } catch {
+    return undefined;
+  }
+  const edges: ImportEdge[] = [];
+  for (const item of imports) {
+    // `n` is populated for static and string-literal dynamic imports. It is undefined for
+    // expressions/templates such as import(`./${name}.mjs`), which cannot be resolved here.
+    const specifier = item.n;
+    if (!specifier?.startsWith('.')) continue;
+    edges.push({ importer, specifier, target: importTarget(root, importer, specifier) });
+  }
+  return edges;
+}
+
+/**
  * Inspect the caller's physical dist tree, Git index, and ship briefing.
  * `base` is the commit the ship worktree would be cut from.
  */
@@ -133,12 +164,7 @@ export async function inspectDistIntegrity(
     [...briefed].map(generatedPath).filter((file): file is string => file !== undefined),
   );
 
-  // This dependency is dev-only and intentionally loaded only for devkit self-hosting. Installed
-  // consumer copies execute the no-op return above and never need es-module-lexer at runtime.
-  const { init, parse } = await import('es-module-lexer');
-  await init;
-
-  const unresolved: UnresolvedImport[] = [];
+  const unresolved: ImportEdge[] = [];
   const unlexable: string[] = [];
   const queue = [...required].filter((file) => file.endsWith('.mjs')).sort();
   const queued = new Set(queue);
@@ -153,24 +179,14 @@ export async function inspectDistIntegrity(
     // module so one report names the whole omitted closure. A deleted artifact is deliberately not
     // a discovery root: its dependencies are leaving with it, not candidates to add back.
     if (deleted.has(importer) || !physicalSet.has(importer) || !existsSync(absolute)) continue;
-    let imports: ReturnType<typeof parse>[0];
-    try {
-      [imports] = parse(readFileSync(absolute, 'utf8'), importer);
-    } catch {
-      // An unparseable file is a HOLE in the check, not a pass: its imports go unverified, which is
-      // indistinguishable from it having a broken one. So this still blocks — it is caught only to
-      // name the file and finish the queue. Letting it reach main()'s catch instead aborts the whole
-      // preflight with a message naming nothing, on the release path, where copy-dist-assets output
-      // under dist/templates and dist/skills now reaches the lexer without passing through tsc.
+    const edges = await moduleImportEdges(root, importer, readFileSync(absolute, 'utf8'));
+    if (edges === undefined) {
+      // Recorded, not thrown: it still blocks via `unlexable`, and finishing the queue lets one
+      // report name the file instead of main()'s catch aborting with a message naming nothing.
       unlexable.push(importer);
       continue;
     }
-    for (const item of imports) {
-      // `n` is populated for static and string-literal dynamic imports. It is undefined for
-      // expressions/templates such as import(`./${name}.mjs`), which cannot be resolved here.
-      const specifier = item.n;
-      if (!specifier?.startsWith('.')) continue;
-      const target = importTarget(root, importer, specifier);
+    for (const { specifier, target } of edges) {
       required.add(target);
       if (!willShip(target) || !existsSync(path.join(root, target))) {
         unresolved.push({ importer, specifier, target });
