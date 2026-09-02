@@ -75,9 +75,9 @@ Usage:
                       refused by name.
   --dry-gates         Rehearse the exact ship base + selected source staging in an ephemeral worktree.
                       Runs the formatter, configured deterministic/structure/extra gates, and the
-                      changed-comment firewall; skips decisions, Qavis, domain/completeness review,
-                      commit, push, and PR creation. The comment firewall may invoke its configured
-                      judge. With --base, refreshes and uses the current origin tip just like ship.
+                      deterministic comment budget gate; skips decisions, Qavis, domain/completeness
+                      review, commit, push, and PR creation. With --base, refreshes and uses the
+                      current origin tip just like ship.
                       Never leaves a local branch or commit. Cannot be combined with --resume.
   --link <d>          Extra gitignored gate-dep dir to symlink into the worktree (repeatable;
                       the base .husky/_ + node_modules are always linked).

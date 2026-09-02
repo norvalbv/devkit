@@ -14,7 +14,7 @@ import { gitPrefix } from '../ratchets/git-index.mts';
 import type { CommentFinding, DetectionResult } from './types.mts';
 
 export const COMMENT_ADAPTER_VERSION = 'typescript-scanner-v2';
-export const COMMENT_FINDING_POLICY = 'changed-comment-paragraph-v5';
+export const COMMENT_FINDING_POLICY = 'changed-comment-paragraph-v6';
 const SUPPORTED_EXTENSIONS = new Set(['js', 'jsx', 'ts', 'tsx', 'mjs', 'cjs', 'mts', 'cts']);
 const MAX_GIT_OUTPUT = 16 * 1024 * 1024;
 const CONTEXT_LINES = 4;
@@ -281,7 +281,27 @@ function requiresChallenge(token: CommentToken, hunks: PatchHunk[]): boolean {
   return changedTextLines.length >= 3;
 }
 
-export function paragraphCommentTokens(tokens: CommentToken[]): CommentToken[] {
+/** Gap lines between grouped tokens are kept in `text`, so `startLine + index` stays a source line. */
+function joinRun(run: CommentToken[]): string {
+  let text = '';
+  let previousEnd = 0;
+  for (const token of run) {
+    text +=
+      previousEnd === 0 ? token.text : `${'\n'.repeat(token.startLine - previousEnd)}${token.text}`;
+    previousEnd = token.endLine;
+  }
+  return text;
+}
+
+function onlyBlankBetween(from: number, to: number, isBlank: (line: number) => boolean): boolean {
+  for (let line = from + 1; line < to; line += 1) if (!isBlank(line)) return false;
+  return true;
+}
+
+export function paragraphCommentTokens(
+  tokens: CommentToken[],
+  isBlank: (line: number) => boolean = () => false,
+): CommentToken[] {
   const paragraphs: CommentToken[] = [];
   let run: CommentToken[] = [];
   const flushRun = (): void => {
@@ -293,7 +313,7 @@ export function paragraphCommentTokens(tokens: CommentToken[]): CommentToken[] {
           kind: first.kind,
           startLine: first.startLine,
           endLine: last.endLine,
-          text: run.map((token) => token.text).join('\n'),
+          text: joinRun(run),
           standalone: true,
         };
         paragraphs.push(paragraph);
@@ -306,7 +326,11 @@ export function paragraphCommentTokens(tokens: CommentToken[]): CommentToken[] {
     const groupable = token.kind === 'line' || token.startLine === token.endLine;
     if (token.standalone && groupable) {
       const previous = run.at(-1);
-      if (previous && (token.kind !== previous.kind || token.startLine !== previous.endLine + 1)) {
+      if (
+        previous &&
+        (token.kind !== previous.kind ||
+          !onlyBlankBetween(previous.endLine, token.startLine, isBlank))
+      ) {
         flushRun();
       }
       run.push(token);
@@ -333,7 +357,7 @@ interface ChangedParagraph {
 }
 
 /** Null when the text is unique in the file; twins keep a position-sensitive key so a pasted
- * copy cannot inherit the rationale its twin earned. */
+ * copy never shares its twin's identity. */
 type TwinDiscriminator = { ordinal: number } | null;
 
 function changedParagraphs(
@@ -341,7 +365,9 @@ function changedParagraphs(
   extension: string,
   hunks: PatchHunk[],
 ): ChangedParagraph[] {
-  const paragraphs = paragraphCommentTokens(scanCommentTokens(source, extension));
+  const lines = source.split('\n');
+  const isBlank = (line: number): boolean => (lines[line - 1] ?? '').trim() === '';
+  const paragraphs = paragraphCommentTokens(scanCommentTokens(source, extension), isBlank);
   const totals = new Map<string, number>();
   for (const token of paragraphs) {
     const key = normalizeComment(token.text);
