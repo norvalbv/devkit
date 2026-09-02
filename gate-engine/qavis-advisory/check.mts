@@ -23,8 +23,16 @@
  * Overrides: GUARD_NO_QAVIS_ADVISORY=1 disables · GUARD_QAVIS_OK=1 ships this change without QA.
  * (Both must be EXPORTED to survive the ship subprocess chain — an inline prefix can be stripped.)
  */
-import { execFileSync } from 'node:child_process';
-import { accessSync, constants, existsSync, statSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import {
+  accessSync,
+  constants,
+  copyFileSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  statSync,
+} from 'node:fs';
 import path from 'node:path';
 import { envFlag } from '../config.mts';
 import { emitGateBypass } from '../judge/gate-events.mts';
@@ -127,6 +135,7 @@ export function qavisSupportsPublish(cwd = process.cwd()): boolean | null {
 
 /** A qavis repo advertises how to launch its app here; absent ⇒ nothing for qavis to QA. */
 export const QAVIS_RECIPE = path.join('.qavis', 'recipe.json');
+const QAVIS_RECEIPT = path.join('.qavis', 'receipt.json');
 
 /**
  * The outcome of asking qavis to route the staged tree. The null arm carries `skip` — the human
@@ -139,7 +148,51 @@ export interface AdvisoryDeps {
   /** `qavis route --staged --gate` → its verdict, or why the advisory couldn't run. */
   route?: (cwd: string) => RouteResult;
   hasRecipe?: (cwd: string) => boolean;
+  /** `qavis qa --staged --route vision --repo <cwd>` → its exit code (DEVKIT_SHIP_QA self-run). */
+  qa?: (cwd: string) => number;
 }
+
+/** The self-run: qavis drives THIS staged tree, with its output streamed to the operator. */
+function defaultQa(cwd: string): number {
+  const r = spawnSync('qavis', ['qa', '--staged', '--route', 'vision', '--repo', cwd], {
+    stdio: 'inherit',
+  });
+  return r.status ?? 1;
+}
+
+/** Fail-open, never silently: a recipe is present, so this repo EXPECTS qavis; the mute is the remedy. */
+function failOpen(skip: string | undefined): number {
+  console.error(`qavis-advisory: skipped — ${skip}.`);
+  console.error(
+    `   (${QAVIS_RECIPE} is present, so this repo expects it; mute with GUARD_NO_QAVIS_ADVISORY=1.)`,
+  );
+  return 0;
+}
+
+/** Ship links a caller receipt only when one EXISTS: without the link, copy the self-run's back. */
+function keepSelfRunReceipt(cwd: string): void {
+  const root = process.env.DEVKIT_SHIP_ROOT;
+  if (!root) return;
+  const mine = path.join(cwd, QAVIS_RECEIPT);
+  try {
+    if (lstatSync(mine).isSymbolicLink()) return;
+  } catch {
+    return; // the run wrote no receipt
+  }
+  try {
+    mkdirSync(path.join(root, path.dirname(QAVIS_RECEIPT)), { recursive: true });
+    // COPYFILE_EXCL: a receipt the caller minted meanwhile is theirs and newer — never overwrite it.
+    copyFileSync(mine, path.join(root, QAVIS_RECEIPT), constants.COPYFILE_EXCL);
+  } catch (error: unknown) {
+    // Advisory, so never an exit code: the receipt still clears THIS run from the worktree.
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(
+      `qavis-advisory: could not copy the receipt back to ${root} (${message}); it stays in the gate worktree, so a later --resume will re-ask.`,
+    );
+  }
+}
+
+const qaOptIn = (): boolean => /^(1|true|yes)$/i.test(process.env.DEVKIT_SHIP_QA ?? '');
 
 function defaultRoute(cwd: string): RouteResult {
   let out: string;
@@ -179,23 +232,139 @@ export function runQavisAdvisory(cwd: string = process.cwd(), deps: AdvisoryDeps
     emitGateBypass('qavis-advisory', 'GUARD_NO_QAVIS_ADVISORY');
     return 0;
   }
-  const result = (deps.route ?? defaultRoute)(cwd);
-  if (result.verdict === null) {
-    // Fail-open, but never silently: this repo ships a recipe, so it EXPECTS qavis. Printed on a
-    // plain commit and under a strict ship alike — the advisory's own failure never costs an exit
-    // code, so the line is the only signal there is. The mute is the remedy for every skip reason.
-    console.error(`qavis-advisory: skipped — ${result.skip}.`);
-    console.error(
-      `   (${QAVIS_RECIPE} is present, so this repo expects it; mute with GUARD_NO_QAVIS_ADVISORY=1.)`,
-    );
-    return 0;
-  }
+  const route = deps.route ?? defaultRoute;
+  const result = route(cwd);
+  if (result.verdict === null) return failOpen(result.skip);
   if (result.verdict !== 'ADVISE') return 0; // SILENT → continue
+  // DEVKIT_SHIP_QA=1: QA the tree the gate evaluates (this one) instead of naming it, then re-ask.
+  if (qaOptIn()) {
+    console.error(
+      `qavis-advisory: DEVKIT_SHIP_QA is set — running qavis on this staged tree (${cwd})…`,
+    );
+    const code = (deps.qa ?? defaultQa)(cwd);
+    keepSelfRunReceipt(cwd);
+    const again = route(cwd);
+    if (again.verdict === null) return failOpen(again.skip);
+    if (again.verdict === 'SILENT') {
+      console.error('qavis-advisory: cleared by the qavis result recorded on this tree.');
+      return 0;
+    }
+    console.error(
+      `qavis-advisory: qavis exited ${code} and this tree is still not covered — read its reason above.`,
+    );
+  }
   // qavis printed its own reason to stderr; add the remedy + the exit-code decision.
   console.error('qavis-advisory: UI-affecting change with no qavis QA on this staged tree.');
-  console.error(
-    '   Run:  qavis qa --staged --route vision --repo .    (a pass writes a receipt that clears this)',
-  );
+  const mode = shipMode();
+  if (mode === 'drifted') {
+    // No local command can attest this tree: the gate evaluates a three-way merge onto a base this
+    // checkout does not contain. Say so, and name the two honest exits.
+    const root = shellQuote(process.env.DEVKIT_SHIP_ROOT ?? '.');
+    console.error(
+      '   This checkout forked before the base moved (or ships onto another base / an existing PR tip): the gate tree is one your checkout does not contain, so no receipt minted there can attest it.',
+    );
+    const branch = process.env.DEVKIT_SHIP_BRANCH;
+    console.error(
+      `   Run:  DEVKIT_SHIP_QA=1 devkit ship --resume ${branch ? shellQuote(branch) : '<branch>'}    (qavis then drives the gate tree itself; a pass clears this)`,
+    );
+    console.error(
+      `   or, after this ship opens the PR:  qavis qa --pr <n> --annotate description --repo ${root}    (a pass publishes to the PR)`,
+    );
+    console.error(
+      "   Land now: export GUARD_QAVIS_OK=1 with the repo owner's per-change OK (recorded as a bypass), or disable with GUARD_NO_QAVIS_ADVISORY=1.",
+    );
+    return envFlag('AI_STRICT') ? 3 : 0;
+  }
+  console.error(`   Run:  ${qaRemedy(mode)}    (a pass writes a receipt that clears this)`);
+  if (mode !== 'commit') {
+    const branch = process.env.DEVKIT_SHIP_BRANCH;
+    console.error(
+      `   then: devkit ship --resume ${branch ? shellQuote(branch) : '<branch>'}    (the receipt in your checkout is linked into the gate worktree)`,
+    );
+    if (mode === 'staged') {
+      console.error(
+        '   note: the receipt attests the staged set — if unrelated paths are already staged, unstage those first (git restore --staged -- <path>), or the gate will name them',
+      );
+    }
+  }
   console.error('   Skip: export GUARD_QAVIS_OK=1, or disable with GUARD_NO_QAVIS_ADVISORY=1.');
   return envFlag('AI_STRICT') ? 3 : 0; // ship blocks; a normal commit is advisory-only
+}
+
+/** Single-quote a shell word (paths here routinely carry spaces). */
+const shellQuote = (word: string): string => `'${word.replace(/'/g, "'\\''")}'`;
+
+/** Byte-exact shell quoting: printable ASCII single-quoted, anything else ANSI-C `$'\xHH…'`. */
+function shellQuoteBytes(bytes: Buffer): string {
+  const printable = bytes.every((b) => b >= 0x20 && b <= 0x7e && b !== 0x27);
+  if (printable) return shellQuote(bytes.toString('latin1'));
+  let out = "$'";
+  for (const b of bytes) {
+    if (b === 0x27) out += "\\'";
+    else if (b === 0x5c) out += '\\\\';
+    else if (b >= 0x20 && b <= 0x7e) out += String.fromCharCode(b);
+    else out += `\\x${b.toString(16).padStart(2, '0')}`;
+  }
+  return `${out}'`;
+}
+
+/**
+ * Which remedy can actually produce a receipt the gate will accept:
+ * - `commit`: a plain `git commit` — the caller's own index IS the gated tree.
+ * - `staged`: `devkit ship` from a checkout whose HEAD is the ship base — the gate tree is that HEAD
+ *   plus the caller's working-tree content for the shipped paths, so staging those paths in the
+ *   caller's checkout and QAing there attests the same blobs.
+ * - `committed`: `--from-branch` — the shipped content is the committed range origin/base..HEAD, so
+ *   the receipt must key on that range (`--diff`), not on an index that has nothing staged.
+ * - `drifted`: the checkout forked before origin/base moved (or ships onto another base) — the gate
+ *   tree is a three-way merge the caller's checkout does not contain, so NO local command is
+ *   printed; the advisory names the pushed-head run and the recorded bypass instead.
+ */
+type ShipMode = 'commit' | 'staged' | 'committed' | 'drifted';
+
+function shipMode(): ShipMode {
+  const root = process.env.DEVKIT_SHIP_ROOT;
+  if (!root) return 'commit';
+  // A remedy can only attest the tree ship took: the caller's HEAD must still be the one ship
+  // pinned — the source head for a committed range, the base for a staged one.
+  const pinned =
+    process.env.DEVKIT_SHIP_FROM_BRANCH === '1'
+      ? process.env.DEVKIT_SHIP_SOURCE_HEAD
+      : process.env.DEVKIT_SHIP_BASE_SHA;
+  const local = process.env.DEVKIT_SHIP_FROM_BRANCH === '1' ? 'committed' : 'staged';
+  if (!pinned) return local;
+  try {
+    const head = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], {
+      encoding: 'utf8',
+    }).trim();
+    return head === pinned ? local : 'drifted';
+  } catch {
+    return local;
+  }
+}
+
+/** The remedy runs WHERE THE OPERATOR IS and stages only the shipped paths — never `git add -A`. */
+function qaRemedy(mode: ShipMode): string {
+  const root = process.env.DEVKIT_SHIP_ROOT;
+  if (mode === 'commit' || !root) return 'qavis qa --staged --route vision --repo .';
+  const at = shellQuote(root);
+  if (mode === 'committed') {
+    const base = process.env.DEVKIT_SHIP_BASE_SHA ?? '<base>';
+    return `qavis qa --diff ${shellQuote(base)} --route vision --repo ${at}`;
+  }
+  const paths = decodeShipPaths(process.env.DEVKIT_SHIP_PATHS);
+  // `./` on every path: git reads a bare leading `:` as pathspec magic (`:(glob)`, `:/`), and the
+  // shipped paths are repo-relative file paths, never pathspecs.
+  const staged = paths.map((p) => shellQuoteBytes(Buffer.concat([Buffer.from('./'), p])));
+  const stage = paths.length ? `git -C ${at} add -- ${staged.join(' ')} && ` : '';
+  return `${stage}qavis qa --staged --route vision --repo ${at}`;
+}
+
+/** DEVKIT_SHIP_PATHS is `:`-joined base64 of the RAW path bytes (ship-branch.sh), so a newline, a
+ *  colon or a non-UTF-8 byte in a filename survives the env round trip untouched. */
+function decodeShipPaths(encoded: string | undefined): Buffer[] {
+  return (encoded ?? '')
+    .split(':')
+    .filter(Boolean)
+    .map((b64) => Buffer.from(b64, 'base64'));
 }
