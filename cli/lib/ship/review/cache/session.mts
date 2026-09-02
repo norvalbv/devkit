@@ -23,7 +23,6 @@ export const REVIEW_CACHE_STORE_NAMES = [
   'decisions-verdict-cache.json',
   'prefix-cache.json',
   'sentry-verdict-cache.json',
-  'comment-firewall-receipts.json',
 ] as const;
 
 export type ReviewCacheStoreName = (typeof REVIEW_CACHE_STORE_NAMES)[number];
@@ -81,7 +80,7 @@ function stableEntries(file: string): {
   return fail(`cache store changed repeatedly during capture: ${file}`);
 }
 
-/** Copy the three approved persistent stores into a private run root and capture reset fences. */
+/** Copy the approved persistent stores into a private run root and capture reset fences. */
 export function prepareReviewCacheSession(
   persistentRoot: string,
   privateRoot: string,

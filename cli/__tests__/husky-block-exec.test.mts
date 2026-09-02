@@ -408,13 +408,15 @@ describe('assembled hook execution (stubbed bins, sh -e)', () => {
     expect(r.calls).not.toContain('guard-review');
   });
 
-  it('guard-comments distinguishes fail-open outage from strict/unreadable evidence', () => {
+  it('guard-comments blocks on every non-zero exit — there is no fail-open outage code', () => {
     const r = runHook({ COMMENTS_RC: '2' });
-    expect(r.status).toBe(0);
-    expect(r.calls).toContain('guard-decisions');
-    expect(r.calls).toContain('guard-review');
+    expect(r.status).toBe(1);
+    expect(r.stdout).toContain('unexpected exit 2');
+    expect(r.calls).not.toContain('guard-decisions');
     expect(runHook({ COMMENTS_RC: '3' }).status).toBe(1);
-    expect(runHook({ COMMENTS_RC: '4' }).status).toBe(1);
+    const unreadable = runHook({ COMMENTS_RC: '4' });
+    expect(unreadable.status).toBe(1);
+    expect(unreadable.stdout).toContain('NOT a rejection');
   });
 });
 

@@ -129,11 +129,11 @@
     },
     {
       "id": "bin-guard-comments",
-      "label": "Changed-comment paragraph firewall",
+      "label": "Changed-comment paragraph budget gate",
       "kind": "bin",
       "lifecycle": "shipped",
-      "evidence": "evidence-only",
-      "suiteIds": ["comment-firewall"],
+      "evidence": "none",
+      "suiteIds": [],
       "canonical": "package.json#bin:guard-comments"
     },
     {
@@ -330,14 +330,6 @@
       "lifecycle": "shipped",
       "evidence": "accepted",
       "suiteIds": ["completeness"]
-    },
-    {
-      "id": "judge-comment-firewall",
-      "label": "Changed-comment paragraph rationale judge",
-      "kind": "judge",
-      "lifecycle": "shipped",
-      "evidence": "evidence-only",
-      "suiteIds": ["comment-firewall"]
     },
     {
       "id": "judge-decisions",
@@ -637,24 +629,6 @@
       }
     },
     {
-      "id": "comment-firewall",
-      "label": "Changed-comment paragraph rationale review",
-      "adapter": "reviewer",
-      "subjectIds": ["judge-comment-firewall", "bin-guard-comments"],
-      "runner": "gate-engine/comment-firewall/eval/run.mts",
-      "lifecycle": "shipped",
-      "acceptance": "At least 90% accuracy and 100% approval precision on the focused exception corpus",
-      "hashes": {
-        "implementation": ["gate-engine/comment-firewall/*.mts"],
-        "corpus": ["gate-engine/comment-firewall/eval/corpus.json"],
-        "scorer": ["gate-engine/comment-firewall/eval/run.mts"],
-        "runner": [
-          "gate-engine/comment-firewall/eval/run.mts",
-          "gate-engine/comment-firewall/judge.mts"
-        ]
-      }
-    },
-    {
       "id": "decisions",
       "label": "Decision governance",
       "adapter": "decisions",
@@ -833,7 +807,6 @@
   "singletonJudges": [
     "judge-feature-critique",
     "judge-completeness",
-    "judge-comment-firewall",
     "judge-decisions",
     "judge-sentry",
     "judge-qavis",

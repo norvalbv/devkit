@@ -15,7 +15,6 @@ node_modules
 .devkit/review-runs/
 .devkit/last-ship-gates-*.log
 .devkit/reconcile-manifest.json
-.devkit/comment-firewall-receipts.json
 # `devkit test-report-run` output: one directory per run, uploaded as CI artifacts.
 # per-run summaries `devkit baseline-status` caches after fetching them, keyed <runId>-<attempt>
 .devkit/baseline-status/

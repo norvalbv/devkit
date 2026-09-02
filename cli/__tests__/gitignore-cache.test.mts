@@ -34,7 +34,7 @@ afterEach(() => {
 describe('ensureDevkitCacheGitignore', () => {
   it('manages the review run directory without ignoring tracked devkit state', () => {
     expect(DEVKIT_CACHE_IGNORES).toContain('.devkit/review-runs/');
-    expect(DEVKIT_CACHE_IGNORES).toContain('.devkit/comment-firewall-receipts.json');
+    expect(DEVKIT_CACHE_IGNORES).not.toContain('.devkit/comment-firewall-receipts.json');
     expect(DEVKIT_CACHE_IGNORES).toContain('.devkit/anti-slop-baseline-upgrade.json');
     expect(DEVKIT_CACHE_IGNORES).not.toContain('.devkit/comment-firewall-rationales.json');
     expect(DEVKIT_TRACKED_UNIGNORES).not.toContain('!.devkit/comment-firewall-rationales.json');
@@ -123,13 +123,16 @@ describe('ensureDevkitCacheGitignore', () => {
     }
   });
 
-  it('removes the obsolete tracked-rationale exception during upgrade', () => {
+  it('removes the obsolete comment-firewall rationale and receipt lines during upgrade', () => {
     const d = tmp();
-    writeFileSync(join(d, '.gitignore'), '!.devkit/comment-firewall-rationales.json\n');
-    ensureDevkitCacheGitignore(d, false);
-    expect(readFileSync(join(d, '.gitignore'), 'utf8')).not.toContain(
-      '!.devkit/comment-firewall-rationales.json',
+    writeFileSync(
+      join(d, '.gitignore'),
+      '!.devkit/comment-firewall-rationales.json\n.devkit/comment-firewall-receipts.json\n',
     );
+    ensureDevkitCacheGitignore(d, false);
+    const gi = readFileSync(join(d, '.gitignore'), 'utf8');
+    expect(gi).not.toContain('!.devkit/comment-firewall-rationales.json');
+    expect(gi).not.toContain('.devkit/comment-firewall-receipts.json');
   });
 
   it('dry-run writes nothing', () => {

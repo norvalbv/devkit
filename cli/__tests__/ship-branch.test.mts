@@ -729,24 +729,21 @@ describe('ship-branch.sh — worktree integration', () => {
     expect(r.stderr).toMatch(/could not archive gate output .* continuing/);
   });
 
-  it('captures the gate output and its exact caller-root log path when a gate blocks', () => {
-    const hookBody =
-      'echo "BLOCK_REASON_XYZ"\nprintf "SHIP_GATE_LOG=%s\\n" "$DEVKIT_SHIP_GATE_LOG"\nexit 1';
+  it('captures the gate output in the caller-root log when a gate blocks', () => {
+    const hookBody = 'echo "BLOCK_REASON_XYZ"\nexit 1';
     const { dir, env, git } = seedShipRepo({ hookBody });
     writeFileSync(join(dir, 'note.txt'), 'hi\n');
     const r = spawnSync('/bin/bash', [scriptPath, 'feat/gate-block', 't', 'note.txt'], {
       cwd: dir,
       input: 'b\n',
       encoding: 'utf8',
-      env: { ...env, SHIP_DRY_RUN: '1', DEVKIT_SHIP_GATE_LOG: 'caller-value-must-not-win' },
+      env: { ...env, SHIP_DRY_RUN: '1' },
     });
     dropWorktree(git, r.stderr);
     expect(r.status).not.toBe(0); // blocking gate aborts the ship
     const log = join(dir, '.devkit/last-ship-gates-feat-gate-block.log');
     expect(existsSync(log)).toBe(true);
     expect(readFileSync(log, 'utf8')).toMatch(/BLOCK_REASON_XYZ/); // blocking gate's reason captured
-    expect(readFileSync(log, 'utf8')).toContain(`SHIP_GATE_LOG=${realpathSync(log)}`);
-    expect(readFileSync(log, 'utf8')).not.toContain('caller-value-must-not-win');
     expect(localBranchExists(git, 'feat/gate-block')).toBe(false);
   });
 

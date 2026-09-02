@@ -70,61 +70,25 @@ which ships **no structure preset**. Set it explicitly: `devkit init --stack rea
   `structure-governance` skill.
 - **size** — you added an `eslint-disable max-lines`; the count may only shrink. Refactor instead.
 - **decisions / dup / clone / comments** — see each gate's message; it names the offending file and
-  the fix. For `guard-comments`, remove the explanatory workaround or run the printed
-  `guard-comments justify <id> "<specific rationale>"` command. The rationale is local evidence,
-  not a bypass: an independent reviewer must still approve it.
+  the fix. For `guard-comments`, shorten the paragraph to two lines or move the explanation into
+  code, tests, or a decision record; there is no waiver.
 
 ## `guard-comments` blocked an added or modified comment paragraph
 
-The gate challenges standalone staged JS/TS-family comment paragraphs when the staged change adds
-or modifies at least three non-structural text lines. One- and two-line changes, inline comments,
-untouched comments, deletions, and pure renames pass automatically. Long license or generated
-headers are reviewed like any other paragraph; keywords never bypass the gate. Prefer fixing the
-implementation and deleting workaround narration. When a
-paragraph carries a durable constraint that code, types, assertions, or tests cannot express, use
-the exact finding ID printed by the gate:
+The gate is deterministic. It blocks any standalone JS/TS-family comment paragraph where the staged
+change adds or modifies three or more non-structural text lines; comment groups separated only by
+blank lines count as one paragraph. One- and two-line changes, inline comments after code, untouched
+comments, deletions, and pure renames pass automatically. Keywords, license headers, and JSDoc tags
+never exempt a paragraph.
 
-    guard-comments justify <finding-id> "why this constraint must remain"
-    guard-comments justify <finding-id> "why temporary debt is unavoidable and what removes it" --ticket SC-123
+Shorten the paragraph to at most two lines, or move the information into code, types, a test
+name/assertion, or a decision record (`guard-decisions`). There is no rationale, waiver, or reviewer.
+Exit 4 means the staged evidence was unreadable or a configured language has no lexer adapter; that
+is not a rejection, so follow the printed remedy.
 
-When `devkit ship` finds a comment only after applying your scoped changes to the requested current
-base, its failed-worktree cleanup removes the staged context that produced that ID. Use the exact
-`--from-ship-log` command printed by that ship attempt. It validates the unresolved finding against
-the retained caller-root gate log before recording the same pending evidence in shared Git-local
-state; it does not approve the rationale, and the next ship still runs the independent reviewer.
-
-A finding ID identifies the comment, not its position: it is derived from the file path and the
-comment text with indentation and line endings normalised. Editing code above or beside a justified
-paragraph no longer re-keys it, so the rationale survives the edit and the independent reviewer
-re-runs against the fresh code. Changing the comment text still produces a new ID and a new decision.
-Byte-identical paragraphs in one file are the exception: text alone cannot tell them apart, so they
-keep a position-sensitive ID. Editing near one of them re-keys it, and a pasted copy is always
-challenged on its own rather than inheriting the rationale its twin earned.
-
-When the gate blocks for missing evidence it now names the store it consulted, for example
-`Evidence store: /repo/.git/devkit/comment-firewall-rationales.json — 0 recorded rationales`. If you
-have just run `justify` successfully and the gate still reports zero, the two commands resolved
-different stores; the line tells you which file the gate actually read. A `file does not exist` state
-is reported distinctly from a store that loaded no entries.
-
-The most common cause is a managed-review environment leaking into an interactive shell. With
-`DEVKIT_RUN_MODE=review` and `DEVKIT_REVIEW_DATA_ROOT` set, `justify` records into the private review
-data root, where `guard-comments list` and `guard-comments gate` still see it through the overlay but
-`devkit ship` never does. `justify` now warns when that happens and prints both paths; unset those
-variables and re-run it outside managed review.
-
-The command records pending evidence under the repository's local Git metadata, so it is shared by
-linked worktrees but never committed. If two worktrees encounter the same finding ID, they may share
-identical evidence; conflicting rationale text is rejected instead of silently overwriting either
-author. Legacy tracked rationale files are recovered from the pre-change Git blob and merged once per
-worktree; after upgrading, commit the generated file's deletion. Managed review reads shared evidence
-but redirects mutations into its private review-data root. One Haiku request reviews every pending
-paragraph in the gate run and returns a decision per finding. Exit 2 means the reviewer is temporarily unavailable in the
-ordinary fail-open policy; exit 3 means the same outage under strict policy; exit 4 means local
-evidence, configured language support, or receipt persistence is unsafe, so the commit stays
-blocked. Each entry records its owning worktree, so `justify` never prunes and `guard-comments
-prune` removes only obsolete entries owned by the calling worktree. Other linked worktrees and
-entries created after the prune snapshot remain intact.
+Older installs may still hold `.devkit/comment-firewall-receipts.json` and
+`<git-common-dir>/devkit/comment-firewall-rationales.json` from the retired rationale flow. Nothing
+reads them; both are safe to delete.
 
 ## The dup gate names a symbol my file doesn't define (extract refactor blocked)
 

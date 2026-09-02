@@ -1288,9 +1288,8 @@ else
     export DEVKIT_RUN_MODE=dry-gates
     export DEVKIT_REVIEW_GUARDS=comments
     export DEVKIT_SHIP_DRY_GATES=1
-    echo "🧪 Ship dry gates: exact base/path staging; running formatter, configured deterministic/structure/extra gates, and comment firewall." >&2
+    echo "🧪 Ship dry gates: exact base/path staging; running formatter, configured deterministic/structure/extra gates, and the comment budget gate." >&2
     echo "   Skipping decision, Qavis, domain reviewer, completeness, commit, push, and PR creation." >&2
-    echo "   The comment firewall may still invoke its configured judge for a changed comment." >&2
   else
     export DEVKIT_SHIP_MODE=ship   # tags the ship_attempt telemetry (new-ship vs reship retry)
     export DEVKIT_RUN_MODE=ship    # never inherit a caller's review allowlist into a real ship

@@ -32,7 +32,6 @@ export const DEVKIT_CACHE_IGNORES = [
   '.devkit/decisions-verdict-cache.json',
   '.devkit/review-cache.json',
   '.devkit/sentry-verdict-cache.json',
-  '.devkit/comment-firewall-receipts.json',
   '.devkit/review-progress-*.json',
   '.devkit/review-runs/',
   '.devkit/last-ship-gates-*.log',
@@ -76,7 +75,10 @@ export const DEVKIT_TRACKED_UNIGNORES = [
   '!.devkit/vendored-skills/**',
 ];
 const DEVKIT_LOCAL_STATE_IGNORE = '.devkit/*';
-const LEGACY_GITIGNORE_LINES = ['!.devkit/comment-firewall-rationales.json'];
+const LEGACY_GITIGNORE_LINES = [
+  '!.devkit/comment-firewall-rationales.json',
+  '.devkit/comment-firewall-receipts.json',
+];
 
 const DEVKIT_GITIGNORE_LINES = [
   ...DEVKIT_CACHE_IGNORES,

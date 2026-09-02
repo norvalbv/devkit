@@ -28,11 +28,10 @@ command. Do not pre-run every gate or replace the managed chain with a hand-writ
   clone, and coverage checks. Follow the printed repair. Existing ratchet debt may shrink; do not
   re-freeze it merely to admit a new violation. A missing or inherited coverage artifact may use the
   documented one-run `GUARD_COVERAGE_OK=1` assertion only when the change did not cause the shortfall.
-- **Comment firewall** (`guard-comments`) challenges added or modified supported-language comment
-  paragraphs. Prefer removing workaround narration or expressing the constraint in code, types,
-  assertions, or tests. If prose is genuinely necessary, run the exact printed
-  `guard-comments justify <finding-id> "<specific rationale>"` command; an independent reviewer must
-  still approve it.
+- **Comment budget** (`guard-comments`) blocks any added or modified standalone comment paragraph
+  with three or more text lines. Shorten it to at most two lines, or move the information into
+  code, types, a test name/assertion, or a decision record (`guard-decisions`). There is no
+  rationale, waiver, or reviewer; a paragraph-long explanation belongs in docs, not in code.
 - **Decision gate** requires an architectural target only when the change crosses that bar. Use the
   `decisions` skill for a real decision; do not create an ADR for a routine fix merely to clear the
   gate.
@@ -48,16 +47,13 @@ command. Do not pre-run every gate or replace the managed chain with a hand-writ
   capture on the named surface, or surface a disputed verdict to the user before any bypass.
 - **Qavis advisory** can recommend visual QA but does not turn a non-UI change into UI work.
 
-## Comment-firewall evidence
+## Comment budget
 
-The rationale store lives in Git-local metadata rather than the commit. Linked worktrees can read
-shared evidence, while ownership metadata prevents one worktree from pruning another's entry. If a
-ship worktree disappeared after reporting a finding, use the exact `--from-ship-log` command printed
-by the failed ship; it validates the finding against the retained log and does not pre-approve it.
-
-There is no blanket comment-firewall bypass. Reviewer outage, unreadable staged evidence, and an
-unapproved rationale are separate outcomes; follow the gate's printed remediation for the actual
-one.
+The gate is deterministic: it counts the added or modified text lines of each standalone comment
+paragraph, treating comment groups separated only by blank lines as one paragraph. One- and
+two-line changes, inline comments after code, untouched comments, deletions, and pure renames pass.
+There is no bypass. Exit 4 (unreadable staged evidence or an unsupported language) is not a
+rejection; follow the printed remedy for that outcome.
 
 ## Canonical one-run controls
 
