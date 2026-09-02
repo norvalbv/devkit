@@ -25,8 +25,7 @@ const PREPARE_SCRIPT =
 // derives its project root from its OWN resolved module path — which realpaths out of a checkout
 // whose node_modules is a symlink (every ship/agent worktree), silently disabling both walls there.
 // Same invocation shape as gate-engine/structure/run.mts, which owns the staged path.
-const ELECTRON_STRUCTURE_SCRIPT =
-  'node --preserve-symlinks node_modules/eslint/bin/eslint.js src';
+const ELECTRON_STRUCTURE_SCRIPT = 'node --preserve-symlinks node_modules/eslint/bin/eslint.js src';
 
 // Reason: the branches ARE the per-component devDep/script manifest: each `...(sel.x ? {...} : {})` spread names exactly which deps+scripts a component owns; flattening scatters this single source-of-truth table that remove() mirrors
 // fallow-ignore-next-line complexity
