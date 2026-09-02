@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { runCommentCli } from '../cli.mts';
 import { runCommentFirewall } from '../gate.mts';
+import { emptyInventory } from '../inventory.mts';
 import type { CommentFinding, DetectionResult } from '../types.mts';
 
 const finding: CommentFinding = {
@@ -15,11 +16,19 @@ const finding: CommentFinding = {
     '// The wire format uses UTF-16 code units.\n// A surrogate pair advances by two.\n// Byte slicing corrupts later messages.',
   context: 'const width = input.length;',
   relevantDiff: '@@ -1 +1,4 @@\n+// The wire format uses UTF-16 code units.',
+  anchor: '0123456789ab',
+  textLines: 3,
 };
 const second: CommentFinding = { ...finding, id: 'b1c2d3e4f5a6', path: 'src/b.ts', endLine: 2 };
 const detection = (findings: CommentFinding[] = [finding]): DetectionResult => ({
   findings,
   unsupported: [],
+  inventory: {
+    ...emptyInventory(),
+    files: 1,
+    paragraphs: { one: 0, two: 0, over: findings.length },
+    touched: findings.map((item) => ({ anchor: item.anchor, textLines: item.textLines })),
+  },
 });
 
 afterEach(() => {
@@ -84,10 +93,44 @@ describe('runCommentFirewall', () => {
     const output = capture();
     expect(
       runCommentFirewall('/repo', {
-        detect: () => ({ findings: [], unsupported: [{ extension: 'py', path: 'src/a.py' }] }),
+        detect: () => ({
+          findings: [],
+          unsupported: [{ extension: 'py', path: 'src/a.py' }],
+          inventory: emptyInventory(),
+        }),
       }),
     ).toBe(4);
     expect(output()).toContain('.py — src/a.py');
+  });
+
+  it.each([
+    ['pass', () => detection([]), 0, 0],
+    ['block', () => detection([finding, second]), 1, 2],
+    [
+      'unsupported',
+      () => ({
+        findings: [],
+        unsupported: [{ extension: 'py', path: 'src/a.py' }],
+        inventory: emptyInventory(),
+      }),
+      4,
+      0,
+    ],
+    [
+      'unreadable',
+      () => {
+        throw new Error('index locked');
+      },
+      4,
+      0,
+    ],
+  ])('emits one %s comment-budget event per run', (status, detect, exit, findingCount) => {
+    capture();
+    const emit = vi.fn();
+    expect(runCommentFirewall('/repo', { detect, emit })).toBe(exit);
+    expect(emit).toHaveBeenCalledTimes(1);
+    expect(emit.mock.calls[0]?.[0]).toBe(status);
+    expect(emit.mock.calls[0]?.[2]).toHaveLength(findingCount);
   });
 });
 

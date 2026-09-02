@@ -11,7 +11,14 @@ import path from 'node:path';
 import { ts } from 'ts-morph';
 import { resolveGuardConfig, sourceMatchers } from '../config.mts';
 import { gitPrefix } from '../ratchets/git-index.mts';
-import type { CommentFinding, DetectionResult } from './types.mts';
+import {
+  anchorContext,
+  anchorFor,
+  changedTextLineCount,
+  emptyInventory,
+  recordParagraph,
+} from './inventory.mts';
+import type { CommentFinding, CommentInventory, DetectionResult } from './types.mts';
 
 export const COMMENT_ADAPTER_VERSION = 'typescript-scanner-v2';
 export const COMMENT_FINDING_POLICY = 'changed-comment-paragraph-v6';
@@ -272,13 +279,8 @@ function meaningfulLine(line: string): string {
     .trim();
 }
 
-function requiresChallenge(token: CommentToken, hunks: PatchHunk[]): boolean {
-  const addedLines = new Set(hunks.flatMap((hunk) => [...hunk.addedLines]));
-  const changedTextLines = token.text.split('\n').filter((line, index) => {
-    const sourceLine = token.startLine + index;
-    return addedLines.has(sourceLine) && Boolean(meaningfulLine(line));
-  });
-  return changedTextLines.length >= 3;
+function addedLineSet(hunks: PatchHunk[]): Set<number> {
+  return new Set(hunks.flatMap((hunk) => [...hunk.addedLines]));
 }
 
 /** Gap lines between grouped tokens are kept in `text`, so `startLine + index` stays a source line. */
@@ -354,6 +356,8 @@ function normalizeComment(text: string): string {
 interface ChangedParagraph {
   token: CommentToken;
   twin: TwinDiscriminator;
+  anchor: string;
+  textLines: number;
 }
 
 /** Null when the text is unique in the file; twins keep a position-sensitive key so a pasted
@@ -361,26 +365,45 @@ interface ChangedParagraph {
 type TwinDiscriminator = { ordinal: number } | null;
 
 function changedParagraphs(
+  file: string,
   source: string,
   extension: string,
   hunks: PatchHunk[],
+  inventory: CommentInventory,
 ): ChangedParagraph[] {
   const lines = source.split('\n');
   const isBlank = (line: number): boolean => (lines[line - 1] ?? '').trim() === '';
-  const paragraphs = paragraphCommentTokens(scanCommentTokens(source, extension), isBlank);
+  const tokens = scanCommentTokens(source, extension);
+  const paragraphs = paragraphCommentTokens(tokens, isBlank);
+  const addedLines = addedLineSet(hunks);
+  for (const token of tokens) {
+    if (!token.standalone && hunks.some((hunk) => hunkIntersects(hunk, token))) {
+      inventory.trailingAdded += 1;
+    }
+  }
   const totals = new Map<string, number>();
   for (const token of paragraphs) {
     const key = normalizeComment(token.text);
     totals.set(key, (totals.get(key) ?? 0) + 1);
   }
   const seen = new Map<string, number>();
+  const contexts = new Map<string, number>();
   const changed: ChangedParagraph[] = [];
   for (const token of paragraphs) {
     const key = normalizeComment(token.text);
     const ordinal = seen.get(key) ?? 0;
     seen.set(key, ordinal + 1);
-    if (hunks.some((hunk) => hunkIntersects(hunk, token)) && requiresChallenge(token, hunks)) {
-      changed.push({ token, twin: (totals.get(key) ?? 0) > 1 ? { ordinal } : null });
+    const context = anchorContext(lines, token);
+    const contextOrdinal = contexts.get(context) ?? 0;
+    contexts.set(context, contextOrdinal + 1);
+    if (!hunks.some((hunk) => hunkIntersects(hunk, token))) continue;
+    const textLines = changedTextLineCount(token, addedLines, meaningfulLine);
+    if (textLines === 0) continue;
+    const anchor = anchorFor(file, context, contextOrdinal);
+    recordParagraph(inventory, { anchor, textLines });
+    if (textLines >= 3) {
+      const twin = (totals.get(key) ?? 0) > 1 ? { ordinal } : null;
+      changed.push({ token, twin, anchor, textLines });
     }
   }
   return changed;
@@ -390,10 +413,10 @@ function findingFor(
   file: string,
   extension: string,
   source: string,
-  token: CommentToken,
+  paragraph: ChangedParagraph,
   hunks: PatchHunk[],
-  twin: TwinDiscriminator,
 ): CommentFinding {
+  const { token, twin, anchor, textLines } = paragraph;
   const relevantDiff = hunks
     .filter((hunk) => hunkIntersects(hunk, token))
     .map((hunk) => hunk.text)
@@ -420,6 +443,8 @@ function findingFor(
     comment: token.text,
     context,
     relevantDiff,
+    anchor,
+    textLines,
   };
 }
 
@@ -429,6 +454,10 @@ export function detectChangedComments(cwd = process.cwd()): DetectionResult {
   const isConfiguredSource = sourceMatchers(cfg.sourceExtensions).isSource;
   const findings: CommentFinding[] = [];
   const unsupported: DetectionResult['unsupported'] = [];
+  const inventory = emptyInventory();
+  const decisionsDir = normalizedRoot(cwd, cfg.decisionsDir);
+  inventory.decisionsStaged =
+    decisionsDir !== '' && [...stagedPaths(cwd)].some((file) => insideRoots(file, [decisionsDir]));
   for (const file of changedPaths(cwd).sort()) {
     if (!insideRoots(file, roots) || !isConfiguredSource(file)) continue;
     const extension = path.extname(file).slice(1).toLowerCase();
@@ -436,6 +465,7 @@ export function detectChangedComments(cwd = process.cwd()): DetectionResult {
       unsupported.push({ extension, path: file });
       continue;
     }
+    inventory.files += 1;
     const first = parsePatchHunks(patch(cwd, file));
     let effective = first;
     try {
@@ -449,9 +479,9 @@ export function detectChangedComments(cwd = process.cwd()): DetectionResult {
       // Ordinary commit: the first-parent staged patch is the complete attribution set.
     }
     const source = stagedBlob(cwd, file);
-    for (const { token, twin } of changedParagraphs(source, extension, effective)) {
-      findings.push(findingFor(file, extension, source, token, effective, twin));
+    for (const paragraph of changedParagraphs(file, source, extension, effective, inventory)) {
+      findings.push(findingFor(file, extension, source, paragraph, effective));
     }
   }
-  return { findings, unsupported };
+  return { findings, unsupported, inventory };
 }

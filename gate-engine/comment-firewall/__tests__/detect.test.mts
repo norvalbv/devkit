@@ -157,6 +157,68 @@ describe('detectChangedComments', () => {
     ]);
   });
 
+  it('inventories every touched comment by text-line bucket plus trailing comments', () => {
+    const root = fixture();
+    writeFileSync(
+      path.join(root, 'src/a.ts'),
+      [
+        '// one-line note',
+        'const a = 1;',
+        '// two-line note first',
+        '// two-line note second',
+        'const b = 2; // trailing one',
+        'const c = 3; // trailing two',
+        '// over one',
+        '// over two',
+        '// over three',
+        'const d = 4;',
+        '',
+      ].join('\n'),
+    );
+    git(root, ['add', '.']);
+    const { findings, inventory } = detectChangedComments(root);
+    expect(inventory).toMatchObject({
+      files: 1,
+      paragraphs: { one: 1, two: 1, over: 1 },
+      trailingAdded: 2,
+      decisionsStaged: false,
+    });
+    expect(inventory.touched.map((item) => item.textLines)).toEqual([1, 2, 3]);
+    expect(findings[0]).toMatchObject({ textLines: 3, anchor: inventory.touched[2]?.anchor });
+    expect(findings[0]?.anchor).toMatch(/^[0-9a-f]{12}$/);
+  });
+
+  it('gives paragraphs above identical trailing code in one file distinct anchors', () => {
+    const root = fixture();
+    const fn = (name: string): string =>
+      `function ${name}() {\n  // a\n  // b\n  // c\n  return null;\n}\n`;
+    writeFileSync(path.join(root, 'src/a.ts'), `${fn('first')}${fn('second')}`);
+    git(root, ['add', '.']);
+    const { findings, inventory } = detectChangedComments(root);
+    expect(findings).toHaveLength(2);
+    expect(findings[0]?.anchor).not.toBe(findings[1]?.anchor);
+    expect(new Set(inventory.touched.map((item) => item.anchor)).size).toBe(2);
+  });
+
+  it('keeps the anchor when a paragraph is shortened over the same code, and flags decisions', () => {
+    const root = fixture();
+    writeFileSync(path.join(root, 'src/a.ts'), 'const anchor = 1;\n');
+    commitAll(root, 'base');
+    const tail = 'const d = 4;\nconst e = 5;\n';
+    writeFileSync(path.join(root, 'src/a.ts'), `const anchor = 1;\n// a\n// b\n// c\n${tail}`);
+    git(root, ['add', 'src/a.ts']);
+    const [over] = detectChangedComments(root).findings;
+
+    writeFileSync(path.join(root, 'src/a.ts'), `const anchor = 1;\n// a\n// b\n${tail}`);
+    mkdirSync(path.join(root, 'docs/decisions'), { recursive: true });
+    writeFileSync(path.join(root, 'docs/decisions/why.md'), '# why\n');
+    git(root, ['add', '.']);
+    const shortened = detectChangedComments(root);
+    expect(shortened.findings).toEqual([]);
+    expect(shortened.inventory.decisionsStaged).toBe(true);
+    expect(shortened.inventory.touched).toEqual([{ anchor: over?.anchor, textLines: 2 }]);
+  });
+
   it('merges comment groups separated only by blank lines into one paragraph', () => {
     const root = fixture();
     writeFileSync(

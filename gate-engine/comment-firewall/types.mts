@@ -9,11 +9,29 @@ export interface CommentFinding {
   comment: string;
   context: string;
   relevantDiff: string;
+  /** Hash of the code the paragraph sits on; stable when the comment shrinks or disappears. */
+  anchor: string;
+  textLines: number;
+}
+
+export interface TouchedParagraph {
+  anchor: string;
+  textLines: number;
+}
+
+/** Shape of every added/modified comment in the staged change, budget-relevant or not. */
+export interface CommentInventory {
+  files: number;
+  paragraphs: { one: number; two: number; over: number };
+  trailingAdded: number;
+  decisionsStaged: boolean;
+  touched: TouchedParagraph[];
 }
 
 export interface DetectionResult {
   findings: CommentFinding[];
   unsupported: Array<{ extension: string; path: string }>;
+  inventory: CommentInventory;
 }
 
 export type JsonValue = null | boolean | number | string | JsonValue[] | JsonObject;
