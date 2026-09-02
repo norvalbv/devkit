@@ -644,6 +644,18 @@ exec 0</dev/null
 . "$SCRIPT_DIR/repo-identity.sh"
 export DEVKIT_SHIP_ID="${DEVKIT_SHIP_ID:-$(uuidgen 2>/dev/null || echo "${BR//\//-}-$$-$(date +%s)")}"
 export DEVKIT_SHIP_REPO="$(devkit_repo_identity "$ROOT")" DEVKIT_SHIP_BRANCH="$BR"
+# The caller's checkout and the exact shipped paths, for gates that must tell the operator what to
+# run OUTSIDE the ephemeral worktree (qavis-advisory: `qavis qa --staged` must see these staged in
+# ROOT, where the receipt it writes is linked back into the gate worktree — sc-2487).
+export DEVKIT_SHIP_ROOT="$ROOT"
+export DEVKIT_SHIP_FROM_BRANCH="$FROM_BRANCH"
+# Each path base64-encoded and ':'-joined: env values cannot carry NUL, and a newline or colon in a
+# valid filename must survive the round trip into the printed remedy.
+DEVKIT_SHIP_PATHS=""
+for __dk_p in ${PATHS[@]+"${PATHS[@]}"}; do
+  DEVKIT_SHIP_PATHS="${DEVKIT_SHIP_PATHS}$(printf '%s' "$__dk_p" | base64 | tr -d '\n'):"
+done
+export DEVKIT_SHIP_PATHS
 export DEVKIT_SHIP_RESUMED=$RESUME
 SHIP_INTENT_GENERATION=""
 SHIP_SOURCE_ATTEMPT_ID=
