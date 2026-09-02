@@ -10,8 +10,9 @@
  * Run by `bun run build` after tsc. Idempotent.
  */
 import { cpSync, existsSync, readdirSync, rmSync } from 'node:fs';
-import { dirname, join, relative } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { ROOT_DIRS, shippedTreeFiles } from './shipped-assets.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const dist = join(root, 'dist');
@@ -20,16 +21,6 @@ if (!existsSync(join(dist, 'cli')) || !existsSync(join(dist, 'gate-engine'))) {
   process.exit(1);
 }
 
-// Whole root asset dirs + files consumed via packageDir() / the exports map.
-const ROOT_DIRS = [
-  'biome',
-  'tsconfig',
-  'oxc',
-  'templates',
-  'skills',
-  'agents',
-  'agents-hooks',
-];
 const ROOT_FILES = ['package.json', 'README.md'];
 for (const d of ROOT_DIRS) {
   // These are mirrors, not overlays. Clear the destination first so renamed or removed templates
@@ -50,14 +41,6 @@ for (const entry of readdirSync(join(dist, 'anti-slop', 'src'), {
 // Non-TS files that live UNDER cli/ or gate-engine/ (the .sh ship scripts, config .json) — mirror
 // each to its dist/ path. tsc never emits these. Skip tests + eval (dev-only, not shipped-run).
 const COPY_EXT = /\.(sh|json|jsonc)$/;
-for (const tree of ['cli', 'gate-engine']) {
-  for (const entry of readdirSync(join(root, tree), { recursive: true, withFileTypes: true })) {
-    if (!entry.isFile() || !COPY_EXT.test(entry.name)) continue;
-    const abs = join(entry.parentPath, entry.name);
-    const rel = relative(root, abs);
-    if (rel.includes('__tests__') || rel.includes(`${'eval'}/`) || rel.includes('/eval/')) continue;
-    cpSync(abs, join(dist, rel));
-  }
-}
+for (const rel of shippedTreeFiles(root, COPY_EXT)) cpSync(join(root, rel), join(dist, rel));
 
 console.log('copy-dist-assets: dist/ is now a self-contained package.');
