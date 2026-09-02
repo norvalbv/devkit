@@ -2379,14 +2379,6 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/no-conditional-empty-object-spread",
-      "file": "cli/lib/install/package-json.mts",
-      "diagnostic": "This conditional spread hides property omission behind an empty object. Build the object in separate statements and add the property only when present.",
-      "context": "...(electronPreset ? { 'lint:structure': 'eslint src' } : {}),",
-      "fingerprint": "36da93e872ef12dabf301e066e693fed1305c691994417cab5bbd94209a77652",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/no-unsafe-dictionary-type",
       "file": "cli/__tests__/_helpers.mts",
       "diagnostic": "This dictionary's unknown value type gives callers no concrete value contract. Use an owner/schema-derived value type; parse external payloads before insertion.",
@@ -3920,6 +3912,14 @@
       "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
       "context": "typeof current === 'object' && current !== null ? current.rowHash : current;",
       "fingerprint": "5820098b62a1f54660bbdc89350e1f03019aaa55e747ba17863f41a2d34bed03",
+      "count": 1
+    },
+    {
+      "ruleId": "anti-slop/no-conditional-empty-object-spread",
+      "file": "cli/lib/install/package-json.mts",
+      "diagnostic": "This conditional spread hides property omission behind an empty object. Build the object in separate statements and add the property only when present.",
+      "context": "...(electronPreset ? { 'lint:structure': ELECTRON_STRUCTURE_SCRIPT } : {}),",
+      "fingerprint": "582166902ad30d97bec3f6f05598cd8c24ea99c4664f07fb2db417c1993b1aac",
       "count": 1
     },
     {
