@@ -9,6 +9,11 @@ import { readJson } from '../fs-helpers.mjs';
 // always finds it (sync-hook-runner). Guarded: a partial/production install must not fail just
 // because the gate tool isn't resolvable.
 const PREPARE_SCRIPT = 'husky && (command -v devkit >/dev/null 2>&1 && devkit sync-hook-runner || true)';
+// The repo-wide structure sweep. The `.bin` shim cannot carry node flags, and the structure plugin
+// derives its project root from its OWN resolved module path — which realpaths out of a checkout
+// whose node_modules is a symlink (every ship/agent worktree), silently disabling both walls there.
+// Same invocation shape as gate-engine/structure/run.mts, which owns the staged path.
+const ELECTRON_STRUCTURE_SCRIPT = 'node --preserve-symlinks node_modules/eslint/bin/eslint.js src';
 // Reason: the branches ARE the per-component devDep/script manifest: each `...(sel.x ? {...} : {})` spread names exactly which deps+scripts a component owns; flattening scatters this single source-of-truth table that remove() mirrors
 // fallow-ignore-next-line complexity
 export function patchPackageJson(cwd, devkitRef, repoUrl, sel, isStructure, dryRun, stack) {
@@ -41,7 +46,7 @@ export function patchPackageJson(cwd, devkitRef, repoUrl, sel, isStructure, dryR
         ...(sel.guards?.includes('fanout') || sel.guards?.includes('size')
             ? { 'guard:freeze': 'guard-fanout freeze && guard-size freeze' }
             : {}),
-        ...(electronPreset ? { 'lint:structure': 'eslint src' } : {}),
+        ...(electronPreset ? { 'lint:structure': ELECTRON_STRUCTURE_SCRIPT } : {}),
     };
     pkg.devDependencies = pkg.devDependencies ?? {};
     pkg.scripts = pkg.scripts ?? {};
