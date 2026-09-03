@@ -6,11 +6,11 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ReviewerSelection } from '../../../../reviewers.mts';
 import {
-  type CheckpointRow,
   estimateUsd,
   isTerminal,
   openLensCheckpoint,
   planLensTasks,
+  type CheckpointRow,
 } from '../lens-run.mts';
 
 const dirs: string[] = [];

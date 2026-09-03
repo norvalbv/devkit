@@ -10,7 +10,14 @@ import { appendFileSync, existsSync, readFileSync, readdirSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execJudgeAsync } from '../../../../judge/run-judge.mts';
-import { extractLocations, linesMatch, readArchivedDiff, resolveToStaged } from './labels.mts';
+import {
+  extractLocations,
+  linesMatch,
+  readArchivedDiff,
+  resolvedLocations,
+  resolveToStaged,
+  type ResultsFile,
+} from './labels.mts';
 import { identityByPath, postImagePathOf } from '../../../lens/chunk.mts';
 import { splitDiffByFile } from '../../../../judge/diff-focus.mts';
 import { silenceBenchTelemetry } from './bench-args.mts';
@@ -32,17 +39,6 @@ interface Extra {
   file: string;
   line: number | null;
   text: string;
-}
-
-interface ResultsFile {
-  diff: string;
-  labels: Array<{ file: string; line: number | null }>;
-  rows: Array<{
-    arm: string;
-    model?: string;
-    status?: string;
-    issues: Array<{ lens: string; text: string }>;
-  }>;
 }
 
 const verified = new Map<string, { real: boolean }>();
@@ -106,12 +102,8 @@ for (const f of readdirSync(OUT)
       // complement of score()'s any-location hit rule, via the same shared predicate.
       const locs = extractLocations(issue.text);
       if (locs.length === 0 || locs.some((l) => isLabel(l.file, l.line))) continue;
-      // Key and verify on RESOLVED locations only — the raw first regex match can be a
-      // pseudo-file ("i.e."/"e.g."), colliding distinct issues onto one dedup key. A finding
-      // with no location resolvable against the diff has nothing verifiable and is skipped.
-      const resolved = locs
-        .map((l) => ({ file: resolveToStaged(l.file, stagedPaths), line: l.line }))
-        .filter((l): l is { file: string; line: number | null } => l.file !== undefined);
+      // A finding with no location resolvable against the diff has nothing verifiable — skipped.
+      const resolved = resolvedLocations(issue.text, stagedPaths);
       if (resolved.length === 0) continue;
       const [first] = resolved;
       const line = first.line;

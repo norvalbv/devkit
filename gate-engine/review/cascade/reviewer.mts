@@ -58,6 +58,8 @@ export interface CascadeOpts {
    * sets it to the budget actually left, so a judge started near the ceiling dies with its own
    * named timeout instead of the supervisor's opaque 124. */
   judgeTimeoutMs?: number;
+  /** Also attach the off-wire full-text vector (`itemsFull`) — a bench that banks findings. */
+  fullItems?: boolean;
 }
 
 /** Run one reviewer with checklist verification, override handling, and cleanup. */
@@ -98,7 +100,7 @@ export async function runCascade(
       readState: () => readChecklistState(cwd, sel.reviewer),
       stagedDiff: () => gitCached(cwd, [], sel.files),
     });
-    attachItems(res, readChecklistState(cwd, sel.reviewer), disposition);
+    attachItems(res, readChecklistState(cwd, sel.reviewer), disposition, { full: opts.fullItems });
     return res;
   } finally {
     cleanupChecklistState(cwd, sel.reviewer);

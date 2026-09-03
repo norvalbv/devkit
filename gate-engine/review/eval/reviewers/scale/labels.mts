@@ -194,3 +194,26 @@ export function mineLabels(opts: {
 export function gzipText(text: string): Buffer {
   return gzipSync(Buffer.from(text, 'utf8'));
 }
+
+/** A scale-bench results file (written tmp+rename by scale-bench.mts). */
+export interface ResultsFile {
+  diff: string;
+  labels: Array<{ file: string; line: number | null }>;
+  rows: Array<{
+    arm: string;
+    model?: string;
+    status?: string;
+    issues: Array<{ lens: string; text: string }>;
+  }>;
+}
+
+/** The issue's mentioned locations RESOLVED against the staged set — the raw first regex match can
+ * be a pseudo-file ("i.e."/"e.g."), so keys and verdicts are built on resolved locations only. */
+export function resolvedLocations(
+  text: string,
+  stagedPaths: readonly string[],
+): Array<{ file: string; line: number | null }> {
+  return extractLocations(text)
+    .map((l) => ({ file: resolveToStaged(l.file, stagedPaths), line: l.line }))
+    .filter((l): l is { file: string; line: number | null } => l.file !== undefined);
+}

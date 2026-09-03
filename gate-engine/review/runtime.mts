@@ -172,6 +172,9 @@ export interface ReviewOutcome {
   /** Sidecar ref holding the full vector when inlining it would breach the event byte budget. Set
    * INSTEAD of `items`, never alongside it. */
   itemsRef?: string;
+  /** Off-wire copy of the vector with full issue text, for a bench that banks findings (sc-2493).
+   * Present only when the cascade was asked for it; never serialized onto an event. */
+  itemsFull?: Array<{ lens: string; status: string; issues: string[] }>;
   /** The model that actually ran the first pass (Reviewer.model pin, else the cascade default).
    * Absent only when no judge ran (missing brief). Telemetry/cache must report THIS, never the
    * global default — a sonnet-pinned reviewer's verdict labeled 'haiku' sends readers of the
