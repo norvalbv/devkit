@@ -482,6 +482,7 @@ describe('ship-branch.sh — --from-branch committed scope (sc-2352)', () => {
           links: [],
           noQavisPublish: false,
           updatePrBody: false,
+          draft: false,
           resumed: false,
           mergePaths: false,
           body: Buffer.alloc(0),

@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "kind": "skills",
   "devkitRef": "v0.62.0",
-  "generatedAt": "2026-09-03T08:50:26.523Z",
+  "generatedAt": "2026-09-03T11:23:16.620Z",
   "files": {
     "_devkit/checklist-store.mjs": "c8a6a01fe75bd570953ccc88e3b99b8ac365bb249c4b1db2ce0c32a589c52193",
     "_devkit/review-roots.d.mts": "384d95945ccf04f994d805e78a5507835321ee5bcbd46acbf216c77385238c9e",
@@ -36,7 +36,7 @@
     "upstream-sync/SKILL.md": "1007c8377ac15393dcc9db5384d80bd38487c85aa465921ae0b49ba5a91bad70",
     "upstream-sync/scripts/sync.mjs": "218aa7ad7e96f280f281a38f99919f2ce55eace902ed95b1119a0099ddbb3c76",
     "upstream-sync/scripts/verify-merge.mjs": "afb2977ab8b7a96fac2e93e29a68ae432508ba7e63d03c580fcf03229fcd0676",
-    "using-devkit/SKILL.md": "7db97cb71fe753fb642c5e36448c4dcea61dc52413b3ac8143e22aaef6d456e9"
+    "using-devkit/SKILL.md": "f45d16c5e764590c84ef3c3ffe93533f08b29c6de0707000c901addf5e9aa91a"
   },
   "providers": {
     "claude": {
@@ -73,7 +73,7 @@
         "upstream-sync/SKILL.md": "1007c8377ac15393dcc9db5384d80bd38487c85aa465921ae0b49ba5a91bad70",
         "upstream-sync/scripts/sync.mjs": "218aa7ad7e96f280f281a38f99919f2ce55eace902ed95b1119a0099ddbb3c76",
         "upstream-sync/scripts/verify-merge.mjs": "afb2977ab8b7a96fac2e93e29a68ae432508ba7e63d03c580fcf03229fcd0676",
-        "using-devkit/SKILL.md": "7db97cb71fe753fb642c5e36448c4dcea61dc52413b3ac8143e22aaef6d456e9"
+        "using-devkit/SKILL.md": "f45d16c5e764590c84ef3c3ffe93533f08b29c6de0707000c901addf5e9aa91a"
       }
     },
     "cursor": {
@@ -110,7 +110,7 @@
         "upstream-sync/SKILL.md": "1007c8377ac15393dcc9db5384d80bd38487c85aa465921ae0b49ba5a91bad70",
         "upstream-sync/scripts/sync.mjs": "218aa7ad7e96f280f281a38f99919f2ce55eace902ed95b1119a0099ddbb3c76",
         "upstream-sync/scripts/verify-merge.mjs": "afb2977ab8b7a96fac2e93e29a68ae432508ba7e63d03c580fcf03229fcd0676",
-        "using-devkit/SKILL.md": "7db97cb71fe753fb642c5e36448c4dcea61dc52413b3ac8143e22aaef6d456e9"
+        "using-devkit/SKILL.md": "f45d16c5e764590c84ef3c3ffe93533f08b29c6de0707000c901addf5e9aa91a"
       }
     }
   }

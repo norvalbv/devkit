@@ -403,7 +403,14 @@ export function decide(input, cwd, rand) {
         return `${head}\nStage the files you mean first (\`git add <files>\`), then commit — the guard reads the staged set as the ship scope.`;
     }
     const pathArgs = paths.map(q).join(' ');
-    const extras = cfg.extraArgs.length ? `${cfg.extraArgs.join(' ')} ` : '';
+    const joinExtras = (args) => (args.length ? `${args.join(' ')} ` : '');
+    const extras = joinExtras(cfg.extraArgs);
+    // `ship.extraArgs: ["--draft"]` is the documented way to make a repo's ships default to draft, but
+    // draft-ness is set when a PR is CREATED — ship rejects `--draft` alongside `--pr`. Splicing the
+    // same extras into both suggestions would therefore hand agents a re-push command that always
+    // fails. New-ship-only flags are dropped from the --pr form rather than disabling the config.
+    const NEW_SHIP_ONLY = new Set(['--draft']);
+    const prExtras = joinExtras(cfg.extraArgs.filter((a) => !NEW_SHIP_ONLY.has(a)));
     // A multi-`-m` body is passed via `--body '<body>'` so the agent copy-pastes ONE clean command
     // (no stdin pipe, no temp file) and the body lands on the PR. q() single-quotes it so embedded
     // newlines / quotes / % / $ survive the paste; ship's --body takes precedence over stdin.
@@ -411,7 +418,7 @@ export function decide(input, cwd, rand) {
     let ship;
     let note;
     if (intent.prBranch) {
-        ship = `${cfg.command} ${q(intent.prBranch)} ${q(intent.title)} --pr ${bodyArg}${extras}-- ${pathArgs}`;
+        ship = `${cfg.command} ${q(intent.prBranch)} ${q(intent.title)} --pr ${bodyArg}${prExtras}-- ${pathArgs}`;
         note = `Adds these changes to the existing PR on \`${intent.prBranch}\` (fast-forward, never --force).`;
     }
     else {

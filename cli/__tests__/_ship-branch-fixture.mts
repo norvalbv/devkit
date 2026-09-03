@@ -351,3 +351,85 @@ export function remoteBranchExists(bare, br) {
     return false;
   }
 }
+
+/** A GitHub-shaped append reship with real local Git transport and a recording gh boundary. */
+export function bodyUpdateRepo({ hookBody = 'exit 0' } = {}) {
+  const bare = mkdtempSync(join(tmpdir(), 'reship-body-bare-'));
+  const dir = mkdtempSync(join(tmpdir(), 'reship-body-wt-'));
+  const stubBin = mkdtempSync(join(tmpdir(), 'reship-body-bin-'));
+  const ghLog = join(stubBin, 'gh.log');
+  const ghBody = join(stubBin, 'gh.body');
+  const realGit = execFileSync('/bin/sh', ['-c', 'command -v git'], {
+    encoding: 'utf8',
+  }).trim();
+  dirs.push(bare, dir, stubBin);
+  const env = { ...process.env, ...GIT_ENV };
+  const g = (a, o = {}) =>
+    execFileSync('git', ['-C', dir, ...a], { env, encoding: 'utf8', ...o }).trim();
+  execFileSync('git', ['init', '-q', '--bare', bare], { env });
+  g(['init', '-q', '-b', 'work']);
+  g(['config', 'user.email', 'a@b.c']);
+  g(['config', 'user.name', 'a']);
+  g(['config', 'commit.gpgsign', 'false']);
+  g(['remote', 'add', 'origin', 'git@github.com:acme/app.git']);
+  g(['config', `url.${bare}.insteadOf`, 'git@github.com:acme/app.git']);
+  mkdirSync(join(dir, '.husky/_'), { recursive: true });
+  writeFileSync(join(dir, '.husky/.keep'), '');
+  writeFileSync(join(dir, '.gitignore'), '.devkit/\n');
+  writeFileSync(join(dir, 'a.ts'), 'v1\n');
+  g(['add', '.gitignore', '.husky/.keep', 'a.ts']);
+  g(['commit', '-q', '-m', 'first']);
+  g(['push', '-q', 'origin', 'HEAD:feat/pr']);
+  g(['config', 'core.hooksPath', '.husky/_']);
+  writeFileSync(join(dir, '.husky/_/pre-commit'), `#!/bin/sh\n${hookBody}\n`);
+  chmodSync(join(dir, '.husky/_/pre-commit'), 0o755);
+  writeFileSync(
+    join(stubBin, 'gh'),
+    [
+      '#!/bin/sh',
+      'printf \'%s\\n\' "$*" >> "$GH_LOG"',
+      'if [ "$1" = pr ] && [ "$2" = view ]; then',
+      '  [ "${GH_VIEW_STATUS:-0}" -eq 0 ] || exit "$GH_VIEW_STATUS"',
+      "  printf '%s\\n' 'https://github.com/acme/app/pull/7'",
+      '  exit 0',
+      'fi',
+      'if [ "$1" = pr ] && [ "$2" = ready ]; then',
+      '  exit "${GH_READY_STATUS:-0}"',
+      'fi',
+      'if [ "$1" = pr ] && [ "$2" = edit ]; then',
+      '  if [ "${GH_EDIT_KILL_PARENT:-0}" -eq 1 ]; then kill -9 "$PPID"; exit 9; fi',
+      '  cat > "$GH_BODY"',
+      '  if [ -n "${GH_INTENT_LOCK:-}" ]; then',
+      '    mkdir -p "$GH_INTENT_LOCK"',
+      '    printf \'%s:held\' "$PPID" > "$GH_INTENT_LOCK/holder"',
+      '  fi',
+      '  exit "${GH_EDIT_STATUS:-0}"',
+      'fi',
+      'exit 1',
+      '',
+    ].join('\n'),
+  );
+  chmodSync(join(stubBin, 'gh'), 0o755);
+  writeFileSync(
+    join(stubBin, 'git'),
+    [
+      '#!/bin/sh',
+      'if [ "${FAIL_AFTER_PUSH:-0}" -eq 1 ]; then',
+      '  case " $* " in',
+      `    *' push origin HEAD:feat/pr '*) '${realGit}' "$@" || exit $?; exit 9 ;;`,
+      '  esac',
+      'fi',
+      `exec '${realGit}' "$@"`,
+      '',
+    ].join('\n'),
+  );
+  chmodSync(join(stubBin, 'git'), 0o755);
+  return {
+    bare,
+    dir,
+    env: { PATH: `${stubBin}:${process.env.PATH}`, GH_LOG: ghLog, GH_BODY: ghBody },
+    g,
+    ghLog,
+    ghBody,
+  };
+}

@@ -21,6 +21,7 @@ import {
   processAlive,
   testSpawnSync as spawnSync,
 } from './_helpers.mts';
+import { bodyUpdateRepo } from './_ship-branch-fixture.mts';
 
 // `devkit ship --pr <branch>` (re-push): adds the current changes to an EXISTING PR's branch as a
 // new commit on top of origin/<branch> (copy-not-patch), fast-forward push (never --force). Hermetic
@@ -221,85 +222,6 @@ function rewriteRepo({ extraPath = false, rename = false, objectFormat = 'sha1' 
     mainTip,
     oldPrTip,
     stubBin,
-    ghLog,
-    ghBody,
-  };
-}
-
-/** A GitHub-shaped append reship with real local Git transport and a recording gh boundary. */
-function bodyUpdateRepo({ hookBody = 'exit 0' } = {}) {
-  const bare = mkdtempSync(join(tmpdir(), 'reship-body-bare-'));
-  const dir = mkdtempSync(join(tmpdir(), 'reship-body-wt-'));
-  const stubBin = mkdtempSync(join(tmpdir(), 'reship-body-bin-'));
-  const ghLog = join(stubBin, 'gh.log');
-  const ghBody = join(stubBin, 'gh.body');
-  const realGit = execFileSync('/bin/sh', ['-c', 'command -v git'], {
-    encoding: 'utf8',
-  }).trim();
-  dirs.push(bare, dir, stubBin);
-  const env = { ...process.env, ...GENV };
-  const g = (a, o = {}) =>
-    execFileSync('git', ['-C', dir, ...a], { env, encoding: 'utf8', ...o }).trim();
-  execFileSync('git', ['init', '-q', '--bare', bare], { env });
-  g(['init', '-q', '-b', 'work']);
-  g(['config', 'user.email', 'a@b.c']);
-  g(['config', 'user.name', 'a']);
-  g(['config', 'commit.gpgsign', 'false']);
-  g(['remote', 'add', 'origin', 'git@github.com:acme/app.git']);
-  g(['config', `url.${bare}.insteadOf`, 'git@github.com:acme/app.git']);
-  mkdirSync(join(dir, '.husky/_'), { recursive: true });
-  writeFileSync(join(dir, '.husky/.keep'), '');
-  writeFileSync(join(dir, '.gitignore'), '.devkit/\n');
-  writeFileSync(join(dir, 'a.ts'), 'v1\n');
-  g(['add', '.gitignore', '.husky/.keep', 'a.ts']);
-  g(['commit', '-q', '-m', 'first']);
-  g(['push', '-q', 'origin', 'HEAD:feat/pr']);
-  g(['config', 'core.hooksPath', '.husky/_']);
-  writeFileSync(join(dir, '.husky/_/pre-commit'), `#!/bin/sh\n${hookBody}\n`);
-  chmodSync(join(dir, '.husky/_/pre-commit'), 0o755);
-  writeFileSync(
-    join(stubBin, 'gh'),
-    [
-      '#!/bin/sh',
-      'printf \'%s\\n\' "$*" >> "$GH_LOG"',
-      'if [ "$1" = pr ] && [ "$2" = view ]; then',
-      '  [ "${GH_VIEW_STATUS:-0}" -eq 0 ] || exit "$GH_VIEW_STATUS"',
-      "  printf '%s\\n' 'https://github.com/acme/app/pull/7'",
-      '  exit 0',
-      'fi',
-      'if [ "$1" = pr ] && [ "$2" = edit ]; then',
-      '  if [ "${GH_EDIT_KILL_PARENT:-0}" -eq 1 ]; then kill -9 "$PPID"; exit 9; fi',
-      '  cat > "$GH_BODY"',
-      '  if [ -n "${GH_INTENT_LOCK:-}" ]; then',
-      '    mkdir -p "$GH_INTENT_LOCK"',
-      '    printf \'%s:held\' "$PPID" > "$GH_INTENT_LOCK/holder"',
-      '  fi',
-      '  exit "${GH_EDIT_STATUS:-0}"',
-      'fi',
-      'exit 1',
-      '',
-    ].join('\n'),
-  );
-  chmodSync(join(stubBin, 'gh'), 0o755);
-  writeFileSync(
-    join(stubBin, 'git'),
-    [
-      '#!/bin/sh',
-      'if [ "${FAIL_AFTER_PUSH:-0}" -eq 1 ]; then',
-      '  case " $* " in',
-      `    *' push origin HEAD:feat/pr '*) '${realGit}' "$@" || exit $?; exit 9 ;;`,
-      '  esac',
-      'fi',
-      `exec '${realGit}' "$@"`,
-      '',
-    ].join('\n'),
-  );
-  chmodSync(join(stubBin, 'git'), 0o755);
-  return {
-    bare,
-    dir,
-    env: { PATH: `${stubBin}:${process.env.PATH}`, GH_LOG: ghLog, GH_BODY: ghBody },
-    g,
     ghLog,
     ghBody,
   };
@@ -737,6 +659,134 @@ describe('reship — explicit bodies refresh the existing PR (sc-2414)', () => {
     expect(after).not.toBe(before);
     expect(r.stderr).toContain('PR body was not updated');
     expect(r.stderr).toContain('could not resolve the open PR');
+  });
+});
+
+// `--ready` closes the open-draft → iterate → mark-ready loop without leaving devkit. It runs LAST,
+// after the push and the reconcile record are durable, so a gh failure can never cost landed work.
+describe('reship — --ready marks the PR ready for review', () => {
+  it('re-pushes and calls gh pr ready with the resolved PR number', () => {
+    const { bare, dir, env, g, ghLog } = bodyUpdateRepo();
+    const before = g(['--git-dir', bare, 'rev-parse', 'refs/heads/feat/pr']);
+    writeFileSync(join(dir, 'a.ts'), 'v2\n');
+
+    const r = run(
+      ['feat/pr', 'add v2', '--pr', '--ready', '--no-qavis-publish', '--', 'a.ts'],
+      dir,
+      env,
+    );
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(g(['--git-dir', bare, 'rev-parse', 'refs/heads/feat/pr'])).not.toBe(before); // push landed
+    // Resolved from the PR URL gh view returned, not the branch name.
+    expect(readFileSync(ghLog, 'utf8')).toMatch(/^pr ready 7 --repo acme\/app$/m);
+    expect(r.stdout).toContain('https://github.com/acme/app/pull/7');
+  });
+
+  // Without --ready nothing may touch the PR's draft state.
+  it('does not call gh pr ready when the flag is absent', () => {
+    const { dir, env, ghLog } = bodyUpdateRepo();
+    writeFileSync(join(dir, 'a.ts'), 'v2\n');
+
+    const r = run(['feat/pr', 'add v2', '--pr', '--no-qavis-publish', '--', 'a.ts'], dir, env);
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(readFileSync(ghLog, 'utf8')).not.toContain('pr ready');
+  });
+
+  // The commit is already remote when the flip runs. A failure must be LOUD and non-zero (the
+  // requested state change did not happen) yet must never be reported as a lost push.
+  it('surfaces a failed flip with a copy-pasteable remedy, without unwinding the push', () => {
+    const { bare, dir, env, g } = bodyUpdateRepo();
+    const before = g(['--git-dir', bare, 'rev-parse', 'refs/heads/feat/pr']);
+    writeFileSync(join(dir, 'a.ts'), 'v2\n');
+
+    const r = run(
+      ['feat/pr', 'add v2', '--pr', '--ready', '--no-qavis-publish', '--', 'a.ts'],
+      dir,
+      {
+        ...env,
+        GH_READY_STATUS: '3',
+      },
+    );
+
+    expect(r.status).not.toBe(0);
+    expect(g(['--git-dir', bare, 'rev-parse', 'refs/heads/feat/pr'])).not.toBe(before); // push KEPT
+    expect(r.stderr).toContain('marking the PR ready FAILED');
+    expect(r.stderr).toContain('the commit IS on origin/feat/pr');
+    expect(r.stderr).toMatch(/gh pr ready '7' --repo 'acme\/app'/);
+    expect(r.stdout).toContain('https://github.com/acme/app/pull/7'); // the PR URL is still the truth
+  });
+
+  // No resolvable PR means --ready had nothing to act on. Reporting plain success there would claim
+  // a state change that never happened.
+  it('refuses to report success when --ready cannot resolve the PR', () => {
+    const { dir, env } = bodyUpdateRepo();
+    writeFileSync(join(dir, 'a.ts'), 'v2\n');
+
+    const r = run(
+      ['feat/pr', 'add v2', '--pr', '--ready', '--no-qavis-publish', '--', 'a.ts'],
+      dir,
+      {
+        ...env,
+        GH_VIEW_STATUS: '7', // gh pr view fails → no PR_URL
+      },
+    );
+
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain('--ready could not resolve the PR');
+    expect(r.stderr).toMatch(/gh pr ready 'feat\/pr'/);
+  });
+
+  it('still marks the PR ready on a body-only run that exits before the normal tail', () => {
+    const { dir, env, ghLog, ghBody } = bodyUpdateRepo();
+    // a.ts is left byte-identical to origin/feat/pr → no delta, so only the body can change.
+    const r = run(
+      [
+        'feat/pr',
+        'same content',
+        '--pr',
+        '--body',
+        'fresh body',
+        '--ready',
+        '--no-qavis-publish',
+        '--',
+        'a.ts',
+      ],
+      dir,
+      env,
+    );
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(readFileSync(ghBody, 'utf8')).toBe('fresh body'); // the body-only path did run
+    expect(readFileSync(ghLog, 'utf8')).toMatch(/^pr ready 7 --repo acme\/app$/m);
+  });
+
+  it('converges when the same --ready command is re-run after a transient flip failure', () => {
+    const { bare, dir, env, g, ghLog } = bodyUpdateRepo();
+    const before = g(['--git-dir', bare, 'rev-parse', 'refs/heads/feat/pr']);
+    writeFileSync(join(dir, 'a.ts'), 'v2\n');
+    const argv = ['feat/pr', 'add v2', '--pr', '--ready', '--no-qavis-publish', '--', 'a.ts'];
+
+    const first = run(argv, dir, { ...env, GH_READY_STATUS: '3' }); // push lands, flip fails
+    expect(first.status).not.toBe(0);
+    expect(g(['--git-dir', bare, 'rev-parse', 'refs/heads/feat/pr'])).not.toBe(before);
+
+    const retry = run(argv, dir, env); // same command; now there is no delta left to push
+    expect(retry.status, retry.stderr).toBe(0);
+    expect(retry.stderr).toContain('marked the PR ready');
+    expect(readFileSync(ghLog, 'utf8')).toMatch(/^pr ready 7 --repo acme\/app$/m);
+  });
+
+  it('rejects --draft, naming gh pr ready --undo', () => {
+    const { dir } = repo();
+    const r = run(['feat/open', 't', '--pr', '--draft', '--', 'a.ts'], dir, {
+      SHIP_RESOLVE_ONLY: '1',
+    });
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain('--draft applies to a NEW ship');
+    expect(r.stderr).toContain('gh pr ready --undo feat/open');
+    expect(r.stderr).not.toContain('unknown flag');
   });
 });
 

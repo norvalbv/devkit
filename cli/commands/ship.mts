@@ -27,7 +27,8 @@ export const meta = {
   help: `devkit ship — commit <path...> onto a new branch + open a PR without moving HEAD.
 
 Usage:
-  devkit ship <branch> "<title>" [--dry-gates] [--base <b>] [--from-branch] [--body "<text>"] [--body-file <f>] [--link <d>]... [--] <path...>
+  devkit ship <branch> "<title>" [--dry-gates] [--base <b>] [--from-branch] [--body "<text>"] [--body-file <f>] [--draft] [--link <d>]... [--] <path...>
+  devkit ship --pr <branch> "<title>" [--ready] [--body "<text>"] [--link <d>]... [--] <path...>
   devkit ship --resume <branch> [--body-file <f>] [--] <extra-path...>
                           bare positional paths (no --) are accepted.
 
@@ -73,6 +74,19 @@ Usage:
                       both a blocked new ship and a blocked --pr re-push (the record knows which it
                       was). A pushed ship deletes its record; a stale (>6h) or foreign record is
                       refused by name.
+  --draft             Open the PR as a DRAFT instead of ready-for-review. New ships only — a --pr
+                      re-push targets a PR that already exists (convert one back with
+                      \`gh pr ready --undo <branch>\`). Recorded with the invocation, so a
+                      gate-blocked draft ship still opens a draft when replayed by --resume. To make
+                      every guard-suggested ship in a repo a draft, set .devkit/config.json →
+                      { "ship": { "command": "devkit ship", "extraArgs": ["--draft"] } } — the
+                      "command" key is required, or extraArgs is ignored. The guard drops --draft
+                      from its --pr suggestions, where it does not apply.
+  --ready             With --pr only: after the re-push lands, mark the PR ready for review — the
+                      end of an open-draft → iterate → mark-ready loop. Runs last, so a failure here
+                      never costs the pushed commit; it reports the exact \`gh pr ready\` to re-run.
+                      Idempotent on a PR that is already ready. NOT replayed by --resume: it is a
+                      one-shot state change on the PR, not a property of the invocation.
   --dry-gates         Rehearse the exact ship base + selected source staging in an ephemeral worktree.
                       Runs the formatter, configured deterministic/structure/extra gates, and the
                       deterministic comment budget gate; skips decisions, Qavis, domain/completeness
@@ -134,6 +148,8 @@ export default function ship(
   // `--pr` (before any `--` terminator, so a dash-leading file path can't misroute) selects the
   // re-push flow: add the changes to an existing PR's branch (ff-push) instead of a new PR.
   const routeFlags = new Set<string>();
+  // Both scripts accept `--resume` in LEADING position only, so this is the whole test for it.
+  const resuming = args[0] === '--resume';
   const valueFlags = new Set(['--base', '--body', '--body-file', '--link']);
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -144,10 +160,31 @@ export default function ship(
     // Only an unconsumed `--` terminates option scanning. A value-taking flag may legitimately use
     // that spelling as opaque body text, in which case a later mode flag still controls routing.
     if (arg === '--') break;
-    if (arg === '--pr' || arg === '--from-branch') routeFlags.add(arg);
+    if (arg === '--pr' || arg === '--from-branch' || arg === '--draft' || arg === '--ready')
+      routeFlags.add(arg);
   }
   if (routeFlags.has('--pr') && routeFlags.has('--from-branch')) {
     console.error('--from-branch is only valid for a new ship and cannot be combined with --pr');
+    return 1;
+  }
+  // Draft-ness is decided when the PR is CREATED, so --draft belongs to a new ship only. Caught here
+  // rather than in bash so the message names the real remedy instead of "unknown flag".
+  if (routeFlags.has('--pr') && routeFlags.has('--draft')) {
+    console.error(
+      '--draft applies to a NEW ship (opening the PR); a --pr re-push targets a PR that already exists.',
+    );
+    console.error('  To convert that PR back to a draft: gh pr ready --undo <branch>');
+    return 1;
+  }
+  // The mirror case: a new ship is ready-for-review already, so --ready without --pr is either a
+  // forgotten mode flag or a misreading of --draft. `--resume` is exempt: it takes its mode from the
+  // RECORD, not argv, so a recorded reship legitimately carries no --pr here — rejecting it would
+  // make `devkit ship --resume <branch> --ready` unreachable even though reship.sh accepts it.
+  if (!resuming && !routeFlags.has('--pr') && routeFlags.has('--ready')) {
+    console.error(
+      '--ready marks an EXISTING PR ready and requires --pr; a new ship opens a ready PR by default.',
+    );
+    console.error('  To open a draft instead, use --draft.');
     return 1;
   }
   const mode = routeFlags.has('--pr') ? 'reship' : 'ship-branch';

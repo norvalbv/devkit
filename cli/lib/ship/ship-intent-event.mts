@@ -18,6 +18,9 @@ export function emitShipIntentEvent(intent: ShipIntent, resumed: boolean): void 
     ...(sourceMode === 'branch' ? ['--from-branch'] : []),
     ...intent.links.flatMap((d) => ['--link', d]),
     ...(intent.noQavisPublish ? ['--no-qavis-publish'] : []),
+    // `command` is documented as the REPLAYABLE invocation, so the draft bit has to appear here —
+    // without it the recorded command replays as a ready PR.
+    ...(intent.draft ? ['--draft'] : []),
   ];
   const body = Buffer.from(intent.bodyB64, 'base64');
   const commandParts =

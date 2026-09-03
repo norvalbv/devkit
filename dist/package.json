@@ -65,6 +65,7 @@
     "lint:anti-slop": "node cli/index.mts anti-slop check",
     "lint:structure": "eslint cli gate-engine",
     "benchmarks:check": "bun gate-engine/eval/cli.mts check",
+    "benchmarks:corpus": "bun gate-engine/review/eval/reviewers/corpus/corpus-lint.mts",
     "benchmarks:render": "bun gate-engine/eval/cli.mts render",
     "benchmarks:typecheck": "node ./node_modules/@typescript/native/bin/tsc -p gate-engine/eval/tsconfig.json --noEmit",
     "search-eval:check": "node gate-engine/search-tool/eval/eval.mts --fail",

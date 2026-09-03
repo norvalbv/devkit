@@ -32,6 +32,8 @@ describe('devkit help surface', () => {
     expect(r.stdout).toMatch(/SHIP_DRY_RUN/);
     expect(r.stdout).toContain('--dry-gates');
     expect(r.stdout).toContain('--from-branch');
+    expect(r.stdout).toContain('--draft');
+    expect(r.stdout).toContain('--ready');
     expect(r.stdout).toMatch(/Never leaves a local branch or commit/);
   });
 
@@ -39,6 +41,38 @@ describe('devkit help surface', () => {
     const r = run(['ship', 'feat/x', 't', '--pr', '--base', 'main', '--from-branch']);
     expect(r.status).toBe(1);
     expect(r.stderr).toContain('--from-branch is only valid for a new ship');
+  });
+
+  it('rejects --draft with --pr, naming the convert-back remedy', () => {
+    const r = run(['ship', '--pr', 'feat/x', 't', '--draft', '--', 'note.txt']);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('--draft applies to a NEW ship');
+    expect(r.stderr).toContain('gh pr ready --undo');
+  });
+
+  it('allows --ready under --resume, where the record supplies the mode', () => {
+    const r = run(['ship', '--resume', 'feat/never-shipped', '--ready']);
+    expect(r.stderr).not.toContain('--ready marks an EXISTING PR ready and requires --pr');
+  });
+
+  it('rejects --ready without --pr, pointing at --draft', () => {
+    const r = run(['ship', 'feat/x', 't', '--ready', '--', 'note.txt']);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('--ready marks an EXISTING PR ready and requires --pr');
+    expect(r.stderr).toContain('--draft');
+    expect(r.stderr).not.toContain('unknown flag');
+  });
+
+  // Same trap the --from-branch case guards: a --body VALUE spelled like a mode flag must stay
+  // opaque text, not trip the new cross-flag rejections.
+  it('does not reinterpret a body value that resembles --draft/--ready as a flag', () => {
+    const r = run(['ship', '--pr', 'feat/x', 't', '--body', '--draft', '--', 'note.txt'], {
+      ...process.env,
+      SHIP_RESOLVE_ONLY: '1',
+    });
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout).toContain('BR=feat/x');
+    expect(r.stderr).not.toContain('--draft applies to a NEW ship');
   });
 
   it('does not reinterpret a body value that resembles --from-branch as a mode flag', () => {
