@@ -56,6 +56,7 @@ export * from './stats.mts';
 import { benchGateHash, buildAssets, corpusHash, loadRows, rowHashes } from './corpus.mts';
 import { loadAgainstFile, loadProgress, progressFile, RETRYABLE, salvageMap } from './progress.mts';
 import {
+  VERDICT_INJECTION_RE,
   buildCompareReport,
   extractCommentLines,
   fmtCi,
@@ -64,7 +65,7 @@ import {
   rowChanged,
   rowUnchanged,
   subcause,
-  VERDICT_INJECTION_RE,
+  summarize,
   wordsOf,
 } from './stats.mts';
 
@@ -257,57 +258,7 @@ export async function runRow(row, { model = MODEL, cascade = CASCADE, exec } = {
   }
 }
 
-// ─── Summary ──────────────────────────────────────────────────────────────────────
-
-const count = (rows, pred) => rows.filter(pred).length;
-
-/** Aggregate scored rows → the metric block for one scope (a reviewer, or pooled). */
-export function summarize(results, { cascade = CASCADE } = {}) {
-  const gold = results.filter((r) => r.expected === 'FAIL');
-  const decoys = results.filter((r) => r.expected === 'PASS');
-  const blocked = gold.filter((r) => r.okFinal);
-  const reasons = {};
-  for (const r of blocked)
-    if (r.reasonClass) reasons[r.reasonClass] = (reasons[r.reasonClass] ?? 0) + 1;
-  const inconclusive = {};
-  for (const r of results)
-    if (r.subcause) inconclusive[r.subcause] = (inconclusive[r.subcause] ?? 0) + 1;
-  const liveEscalations = results.filter((r) => r.escalateLive);
-  // Gold rows the FIRST pass already caught, then the opus escalation flipped to a pass:
-  // overturns are opus taking back a correct first FAIL. Decoy rows the first pass wrongly
-  // failed, then opus rescued: rescues are opus fixing a first-pass false-block. Both only mean
-  // something once a cascade actually ran, so they're cascade-only like blockRecall/cleanPass.
-  const goldFirstFail = gold.filter((r) => r.firstVerdict === 'FAIL');
-  const decoyFirstFail = decoys.filter((r) => r.firstVerdict === 'FAIL');
-  return {
-    rows: results.length,
-    gold: gold.length,
-    decoys: decoys.length,
-    firstFailRecall: { k: count(gold, (r) => r.firstVerdict === 'FAIL'), n: gold.length },
-    firstCleanPass: { k: count(decoys, (r) => r.firstVerdict === 'PASS'), n: decoys.length },
-    ...(cascade
-      ? {
-          blockRecall: { k: blocked.length, n: gold.length },
-          cleanPass: { k: count(decoys, (r) => r.okFinal), n: decoys.length },
-          overturnRate: {
-            k: count(goldFirstFail, (r) => !r.okFinal && r.escalateLive),
-            n: goldFirstFail.length,
-          },
-          rescueRate: { k: count(decoyFirstFail, (r) => r.okFinal), n: decoyFirstFail.length },
-        }
-      : {}),
-    escalations: liveEscalations.length,
-    escalateMeanSecs: liveEscalations.length
-      ? Math.round(
-          liveEscalations.reduce((s, r) => s + r.ms.escalate, 0) / liveEscalations.length / 1000,
-        )
-      : 0,
-    reasons,
-    inconclusive,
-  };
-}
-
-// printSummary now lives in stats.mts alongside fmtCi (formatting-only, pure).
+// summarize (metrics for one scope) and printSummary live in stats.mts (pure; size ratchet).
 
 // ─── Baseline / compare ───────────────────────────────────────────────────────────
 
@@ -798,6 +749,11 @@ async function runBench(targets, { dev, only, writeBaseline, failMode, fresh, ag
               finalStatus: r.finalStatus,
               rowHash: r.rowHash,
               behaviorHash: r.behaviorHash,
+              // sc-2498: pair identity, holdout and right-reason attribution survive into the
+              // checkpoint so pair-consistency and reason audits are recomputable from disk.
+              caseId: r.caseId,
+              holdout: r.holdout,
+              reasonClass: r.reasonClass,
             },
           ]),
         ),
