@@ -1484,7 +1484,7 @@ describe('reship — exports DEVKIT_SHIP_BASE_SHA (DK-5)', () => {
       g(a, { stdio: 'ignore' });
     writeFileSync(
       join(dir, '.husky/_/pre-commit'),
-      '#!/bin/sh\necho "HOOK_BASE=$DEVKIT_SHIP_BASE_SHA"\nexit 0\n',
+      '#!/bin/sh\necho "HOOK_BASE=$DEVKIT_SHIP_BASE_SHA"\necho "HOOK_SRC=$DEVKIT_SHIP_SOURCE_HEAD"\nexit 0\n',
     );
     chmodSync(join(dir, '.husky/_/pre-commit'), 0o755);
     writeFileSync(join(dir, 'a.ts'), 'v1\n');
@@ -1501,9 +1501,11 @@ describe('reship — exports DEVKIT_SHIP_BASE_SHA (DK-5)', () => {
     const wt = WT_RE.exec(r.stderr)?.[1];
     try {
       expect(r.status, r.stderr).toBe(0);
-      expect(readFileSync(join(dir, '.devkit/last-ship-gates-feat-pr.log'), 'utf8')).toContain(
-        `HOOK_BASE=${prTip}`,
-      );
+      const log = readFileSync(join(dir, '.devkit/last-ship-gates-feat-pr.log'), 'utf8');
+      expect(log).toContain(`HOOK_BASE=${prTip}`);
+      // sc-2480: the caller's own HEAD travels alongside the base, so guard-review can name the
+      // paths that moved between them. Here it is the local tip, NOT the fetched PR tip.
+      expect(log).toContain(`HOOK_SRC=${g(['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()}`);
     } finally {
       if (wt) g(['worktree', 'remove', '--force', wt], { stdio: 'ignore' });
     }

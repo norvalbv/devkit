@@ -56,15 +56,18 @@ export * from './stats.mts';
 import { benchGateHash, buildAssets, corpusHash, loadRows, rowHashes } from './corpus.mts';
 import { loadAgainstFile, loadProgress, progressFile, RETRYABLE, salvageMap } from './progress.mts';
 import {
+  VERDICT_INJECTION_RE,
   buildCompareReport,
   extractCommentLines,
+  firstPassMeanLines,
   fmtCi,
   jaccard,
   printSummary,
   rowChanged,
   rowUnchanged,
+  runBannerLines,
   subcause,
-  VERDICT_INJECTION_RE,
+  summarize,
   wordsOf,
 } from './stats.mts';
 
@@ -162,6 +165,29 @@ export function makeSpyExec(capture, { reviewer, cascade, delegate = execJudgeAs
  * Reason attribution (expected-FAIL rows that finally failed): the authoritative artifact is the
  * FAILING pass's snapshot (escalation's when it ran live, else the first pass's).
  */
+/** A result for a row the cascade never scored (not selected, paused, engine error): same shape as
+ * scoreRow's, every verdict field empty, so summaries and checkpoints need no special case. */
+export function unscoredResult(row, finalStatus, subcause) {
+  return {
+    id: row.id,
+    reviewer: row.reviewer,
+    expected: row.expected,
+    holdout: !!row.holdout,
+    caseId: row.caseId ?? null,
+    variantOf: row.variantOf ?? null,
+    ...rowHashes(row),
+    firstVerdict: null,
+    okFirst: false,
+    finalStatus,
+    okFinal: false,
+    escalated: false,
+    escalateLive: false,
+    reasonClass: null,
+    subcause,
+    ms: { first: 0, escalate: 0 },
+  };
+}
+
 export function scoreRow(row, capture, cas) {
   // filter+merge, not find: a split arm captures one entry PER LENS GROUP under the same label.
   const pick = (l) => mergeLensCaptures(capture.filter((c) => c.label === l));
@@ -195,6 +221,7 @@ export function scoreRow(row, capture, cas) {
     expected: row.expected,
     holdout: !!row.holdout,
     caseId: row.caseId ?? null,
+    variantOf: row.variantOf ?? null,
     ...rowHashes(row),
     firstVerdict,
     okFirst,
@@ -229,23 +256,7 @@ export async function runRow(row, { model = MODEL, cascade = CASCADE, exec } = {
     const sel = selectReviewers(fx.staged, cfg).find((s) => s.reviewer.name === row.reviewer);
     if (!sel)
       // Selection itself is under test: a row whose staged files don't reach its reviewer is wrong.
-      return {
-        id: row.id,
-        reviewer: row.reviewer,
-        expected: row.expected,
-        holdout: !!row.holdout,
-        caseId: row.caseId ?? null,
-        ...rowHashes(row),
-        firstVerdict: null,
-        okFirst: false,
-        finalStatus: 'not-selected',
-        okFinal: false,
-        escalated: false,
-        escalateLive: false,
-        reasonClass: null,
-        subcause: 'not-selected',
-        ms: { first: 0, escalate: 0 },
-      };
+      return unscoredResult(row, 'not-selected', 'not-selected');
     const capture = [];
     const spy = (r) => makeSpyExec(capture, { reviewer: r, cascade, delegate: exec });
     const cas = await runReviewerCascade(sel, (s) =>
@@ -257,57 +268,7 @@ export async function runRow(row, { model = MODEL, cascade = CASCADE, exec } = {
   }
 }
 
-// ─── Summary ──────────────────────────────────────────────────────────────────────
-
-const count = (rows, pred) => rows.filter(pred).length;
-
-/** Aggregate scored rows → the metric block for one scope (a reviewer, or pooled). */
-export function summarize(results, { cascade = CASCADE } = {}) {
-  const gold = results.filter((r) => r.expected === 'FAIL');
-  const decoys = results.filter((r) => r.expected === 'PASS');
-  const blocked = gold.filter((r) => r.okFinal);
-  const reasons = {};
-  for (const r of blocked)
-    if (r.reasonClass) reasons[r.reasonClass] = (reasons[r.reasonClass] ?? 0) + 1;
-  const inconclusive = {};
-  for (const r of results)
-    if (r.subcause) inconclusive[r.subcause] = (inconclusive[r.subcause] ?? 0) + 1;
-  const liveEscalations = results.filter((r) => r.escalateLive);
-  // Gold rows the FIRST pass already caught, then the opus escalation flipped to a pass:
-  // overturns are opus taking back a correct first FAIL. Decoy rows the first pass wrongly
-  // failed, then opus rescued: rescues are opus fixing a first-pass false-block. Both only mean
-  // something once a cascade actually ran, so they're cascade-only like blockRecall/cleanPass.
-  const goldFirstFail = gold.filter((r) => r.firstVerdict === 'FAIL');
-  const decoyFirstFail = decoys.filter((r) => r.firstVerdict === 'FAIL');
-  return {
-    rows: results.length,
-    gold: gold.length,
-    decoys: decoys.length,
-    firstFailRecall: { k: count(gold, (r) => r.firstVerdict === 'FAIL'), n: gold.length },
-    firstCleanPass: { k: count(decoys, (r) => r.firstVerdict === 'PASS'), n: decoys.length },
-    ...(cascade
-      ? {
-          blockRecall: { k: blocked.length, n: gold.length },
-          cleanPass: { k: count(decoys, (r) => r.okFinal), n: decoys.length },
-          overturnRate: {
-            k: count(goldFirstFail, (r) => !r.okFinal && r.escalateLive),
-            n: goldFirstFail.length,
-          },
-          rescueRate: { k: count(decoyFirstFail, (r) => r.okFinal), n: decoyFirstFail.length },
-        }
-      : {}),
-    escalations: liveEscalations.length,
-    escalateMeanSecs: liveEscalations.length
-      ? Math.round(
-          liveEscalations.reduce((s, r) => s + r.ms.escalate, 0) / liveEscalations.length / 1000,
-        )
-      : 0,
-    reasons,
-    inconclusive,
-  };
-}
-
-// printSummary now lives in stats.mts alongside fmtCi (formatting-only, pure).
+// summarize (metrics for one scope) and printSummary live in stats.mts (pure; size ratchet).
 
 // ─── Baseline / compare ───────────────────────────────────────────────────────────
 
@@ -531,34 +492,16 @@ async function runBench(targets, { dev, only, writeBaseline, failMode, fresh, ag
   const totalRows = plan.reduce((s, p) => s + p.rows.length, 0);
   if (totalRows === 0) throw new BenchAbort(2, 'reviewer-eval: no rows selected');
   const progress = loadProgress(MODEL, CASCADE);
-  const goldRows = plan.reduce((s, p) => s + p.rows.filter((r) => r.expected === 'FAIL').length, 0);
-  // Only NON-pinned reviewers escalate (and only when the cascade is on) — a pinned reviewer
-  // (correctness) runs single-pass regardless of BENCH_CASCADE.
-  const estEscalations = CASCADE
-    ? plan.reduce(
-        (s, p) =>
-          s +
-          (p.reviewer.model
-            ? 0
-            : p.rows.filter((r) => r.expected === 'FAIL').length +
-              Math.round(p.rows.filter((r) => r.expected === 'PASS').length * 0.15)),
-        0,
-      )
-    : 0;
-  const estMins = Math.round(
-    (totalRows * (EST_FIRST_SECS[MODEL] ?? EST_FIRST_SECS.sonnet) +
-      estEscalations * EST_ESCALATE_SECS) /
-      60 /
-      CONCURRENCY,
-  );
-  const allPinned = plan.every((p) => p.reviewer.model);
-  const modelLabel = allPinned ? [...new Set(plan.map((p) => p.reviewer.model))].join('/') : MODEL;
-  const cascadeLabel = allPinned ? 'single-pass' : CASCADE ? 'on' : 'off';
-  console.log(
-    `reviewer-eval: ${totalRows} rows (${goldRows} gold) · model ${modelLabel} · cascade ${cascadeLabel} · ` +
-      `concurrency ${CONCURRENCY} · est ≈ ${estMins} min wall-clock${dev ? ' · --dev (holdouts excluded)' : ''}` +
-      `${progress.length ? ` · resuming (${progress.length} checkpointed row(s) on disk)` : ''}`,
-  );
+  for (const line of runBannerLines(plan, {
+    model: MODEL,
+    cascade: CASCADE,
+    concurrency: CONCURRENCY,
+    dev,
+    resuming: progress.length,
+    table: EST_FIRST_SECS,
+    escalateSecs: EST_ESCALATE_SECS,
+  }))
+    console.log(line);
 
   // Pause-on-drained-pool: after OUTAGE_TRIP consecutive judge outages, stop STARTING rows —
   // every completed row is already checkpointed, so the same command resumes after an account
@@ -583,6 +526,9 @@ async function runBench(targets, { dev, only, writeBaseline, failMode, fresh, ag
       cascade: effCascade(reviewer),
       gateHash: benchGateHash(reviewer),
       corpusHash: corpusHash(reviewer),
+      // The bench calls the cascade per lens group directly and never plans chunks, so every
+      // checkpoint is an UNCHUNKED measurement; recorded so the reader can tell (sc-2494 AC4).
+      chunkLoc: null,
     };
     const salvage = salvageMap(progress, reviewer.name, meta, rows);
     console.log(
@@ -594,24 +540,7 @@ async function runBench(targets, { dev, only, writeBaseline, failMode, fresh, ag
         console.log(`  ${row.id.padEnd(36)} SALVAGED (checkpoint)`);
         return saved;
       }
-      if (paused)
-        return {
-          id: row.id,
-          reviewer: row.reviewer,
-          expected: row.expected,
-          holdout: !!row.holdout,
-          caseId: row.caseId ?? null,
-          ...rowHashes(row),
-          firstVerdict: null,
-          okFirst: false,
-          finalStatus: 'paused-skipped',
-          okFinal: false,
-          escalated: false,
-          escalateLive: false,
-          reasonClass: null,
-          subcause: 'paused',
-          ms: { first: 0, escalate: 0 },
-        };
+      if (paused) return unscoredResult(row, 'paused-skipped', 'paused');
       let res: Awaited<ReturnType<typeof runRow>>;
       try {
         res = await runRow(row);
@@ -622,23 +551,7 @@ async function runBench(targets, { dev, only, writeBaseline, failMode, fresh, ag
         );
       } catch (e) {
         console.error(`  ${row.id}: engine error — ${e?.message ?? e}`);
-        res = {
-          id: row.id,
-          reviewer: row.reviewer,
-          expected: row.expected,
-          holdout: !!row.holdout,
-          caseId: row.caseId ?? null,
-          ...rowHashes(row),
-          firstVerdict: null,
-          okFirst: false,
-          finalStatus: 'engine-error',
-          okFinal: false,
-          escalated: false,
-          escalateLive: false,
-          reasonClass: null,
-          subcause: 'engine-error',
-          ms: { first: 0, escalate: 0 },
-        };
+        res = unscoredResult(row, 'engine-error', 'engine-error');
       }
       appendFileSync(
         progressFile(MODEL, CASCADE),
@@ -722,6 +635,12 @@ async function runBench(targets, { dev, only, writeBaseline, failMode, fresh, ag
     );
   }
 
+  for (const line of firstPassMeanLines(
+    perReviewer.map(({ reviewer, results }) => ({ model: effModel(reviewer), results })),
+    EST_FIRST_SECS,
+  ))
+    console.log(line);
+
   // ── Floors + flips (--fail) / A/B directional compare (--against) ──
   // In A/B mode floors + the flip table PRINT for context but never set the exit — an A/B is
   // informational, the accept/revert decision is the caller's.
@@ -798,6 +717,12 @@ async function runBench(targets, { dev, only, writeBaseline, failMode, fresh, ag
               finalStatus: r.finalStatus,
               rowHash: r.rowHash,
               behaviorHash: r.behaviorHash,
+              // sc-2498: pair identity, holdout and right-reason attribution survive into the
+              // checkpoint so pair-consistency and reason audits are recomputable from disk.
+              caseId: r.caseId,
+              variantOf: r.variantOf ?? null,
+              holdout: r.holdout,
+              reasonClass: r.reasonClass,
             },
           ]),
         ),

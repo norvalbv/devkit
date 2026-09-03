@@ -47,8 +47,10 @@ export GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -o BatchMode=yes}"
 # Bound branch-source advertisement/fetch before the already-bounded gate runner starts. The shared
 # supervisor terminates the complete Git/helper process group on expiry (portable on macOS/Linux).
 bounded_remote_git() {
-  node "$SCRIPT_DIR/review/process/gate-supervisor.mts" \
-    "${DEVKIT_REMOTE_TIMEOUT_SECONDS:-60}" -- git "$@"
+  # .mts in source, built .mjs in an installed consumer (the gate-config-paths dual-ext idiom).
+  local supervisor="$SCRIPT_DIR/review/process/gate-supervisor.mts"
+  [ -f "$supervisor" ] || supervisor="$SCRIPT_DIR/review/process/gate-supervisor.mjs"
+  node "$supervisor" "${DEVKIT_REMOTE_TIMEOUT_SECONDS:-60}" -- git "$@"
 }
 
 # `--resume <branch>` replays the invocation the previous attempt recorded (ship-intent.mts). A
@@ -360,6 +362,10 @@ fi
 # diffs against. Resolved AFTER the seam above: --base needs the network, and the seam promises no
 # side effects. Nothing between there and here reads $BASE.
 SOURCE_HEAD=""
+# The CALLER's worktree HEAD, pinned HERE rather than beside the export below: in a shared
+# parallel-agent checkout $ROOT can gain a commit between staging and the gates, which would name a
+# tree the caller never read (sc-2480). Empty when unreadable; the gate then reports no divergence.
+CALLER_HEAD=$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || true)
 if [ "$FROM_BRANCH" -eq 1 ]; then
   # A post-commit receipt resume publishes the immutable gated OID, so the caller's current HEAD is
   # not an input. Pre-commit/new runs pin it before the network step and never chase a moving HEAD.
@@ -664,6 +670,18 @@ exec 0</dev/null
 . "$SCRIPT_DIR/repo-identity.sh"
 export DEVKIT_SHIP_ID="${DEVKIT_SHIP_ID:-$(uuidgen 2>/dev/null || echo "${BR//\//-}-$$-$(date +%s)")}"
 export DEVKIT_SHIP_REPO="$(devkit_repo_identity "$ROOT")" DEVKIT_SHIP_BRANCH="$BR"
+# The caller's checkout and the exact shipped paths, for gates that must tell the operator what to
+# run OUTSIDE the ephemeral worktree (qavis-advisory: `qavis qa --staged` must see these staged in
+# ROOT, where the receipt it writes is linked back into the gate worktree — sc-2487).
+export DEVKIT_SHIP_ROOT="$ROOT"
+export DEVKIT_SHIP_FROM_BRANCH="$FROM_BRANCH"
+# Each path base64-encoded and ':'-joined: env values cannot carry NUL, and a newline or colon in a
+# valid filename must survive the round trip into the printed remedy.
+DEVKIT_SHIP_PATHS=""
+for __dk_p in ${PATHS[@]+"${PATHS[@]}"}; do
+  DEVKIT_SHIP_PATHS="${DEVKIT_SHIP_PATHS}$(printf '%s' "$__dk_p" | base64 | tr -d '\n'):"
+done
+export DEVKIT_SHIP_PATHS
 export DEVKIT_SHIP_RESUMED=$RESUME
 SHIP_INTENT_GENERATION=""
 SHIP_SOURCE_ATTEMPT_ID=
@@ -1290,14 +1308,15 @@ else
 # main-autodetect. Unconditional (not just under --base): even the default case is more precise than
 # a gate auto-detecting main, for any branch that isn't a fresh cut off main (DK-5).
   export DEVKIT_SHIP_BASE_SHA="$BASE"
+# Pinned far above, before staging — see CALLER_HEAD.
+  export DEVKIT_SHIP_SOURCE_HEAD="$CALLER_HEAD"
   if [ "$DRY_GATES" -eq 1 ]; then
     export DEVKIT_SHIP_MODE=dry-gates
     export DEVKIT_RUN_MODE=dry-gates
     export DEVKIT_REVIEW_GUARDS=comments
     export DEVKIT_SHIP_DRY_GATES=1
-    echo "🧪 Ship dry gates: exact base/path staging; running formatter, configured deterministic/structure/extra gates, and comment firewall." >&2
+    echo "🧪 Ship dry gates: exact base/path staging; running formatter, configured deterministic/structure/extra gates, and the comment budget gate." >&2
     echo "   Skipping decision, Qavis, domain reviewer, completeness, commit, push, and PR creation." >&2
-    echo "   The comment firewall may still invoke its configured judge for a changed comment." >&2
   else
     export DEVKIT_SHIP_MODE=ship   # tags the ship_attempt telemetry (new-ship vs reship retry)
     export DEVKIT_RUN_MODE=ship    # never inherit a caller's review allowlist into a real ship

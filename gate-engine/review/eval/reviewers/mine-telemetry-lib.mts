@@ -114,14 +114,25 @@ export function findNextOutcome(shipsForBranch, failShipId, reviewer, statusOf) 
   for (let i = failIdx + 1; i < chain.length; i += 1) {
     const candidate = chain[i];
     const status = statusOf(candidate.ship_id, reviewer);
-    if (status === 'pass') return { kind: 'fixed', nextShipId: candidate.ship_id };
+    if (status === 'pass')
+      return { kind: 'fixed', nextShipId: candidate.ship_id, rule: 'reviewer-pass' };
     if (status === 'fail') continue; // still broken — keep scanning
     // status is undefined (reviewer absent from this ship's commit_reviews rows)
-    if (candidate.exit_code === 0) return { kind: 'fixed', nextShipId: candidate.ship_id };
+    if (candidate.exit_code === 0)
+      return { kind: 'fixed', nextShipId: candidate.ship_id, rule: 'absence-exit0' };
     // absent and not clean — no signal, keep scanning
   }
-  return { kind: 'no-fix-found', nextShipId: null };
+  return { kind: 'no-fix-found', nextShipId: null, rule: null };
 }
+
+/** The four label rules a fail→fix candidate is minted under, strongest first; stamped as `labelRule`
+ * (sc-2497) so noise reports per tier. Documentation-only on a row: outside BEHAVIOR_FIELDS. */
+export const LABEL_RULES = Object.freeze([
+  'lens-pass',
+  'reviewer-pass',
+  'absence-exit0',
+  'fallback',
+]);
 
 /**
  * Lens-specific variant of findNextOutcome. `statusOf` is reviewer-level (as above);
@@ -151,19 +162,22 @@ export function findNextLensOutcome(
   for (let i = failIdx + 1; i < chain.length; i += 1) {
     const candidate = chain[i];
     const lensStatus = lensStatusOf(candidate.ship_id, reviewer, lens);
-    if (lensStatus === 'pass') return { kind: 'fixed', nextShipId: candidate.ship_id };
+    if (lensStatus === 'pass')
+      return { kind: 'fixed', nextShipId: candidate.ship_id, rule: 'lens-pass' };
     if (lensStatus === 'fail') continue; // this specific lens still broken — keep scanning
     // lensStatus undefined — no lens-level row for this lens on this candidate ship. Fall back
     // to the reviewer-level signal, but only trust it in the directions that don't require
     // assuming this lens's specific fate:
     const status = statusOf(candidate.ship_id, reviewer);
-    if (status === 'pass') return { kind: 'fixed', nextShipId: candidate.ship_id };
+    if (status === 'pass')
+      return { kind: 'fixed', nextShipId: candidate.ship_id, rule: 'reviewer-pass' };
     if (status === 'fail') continue; // reviewer still failing overall on SOME lens — could be a
     // different lens than this one; not evidence this lens resolved, keep scanning.
-    if (candidate.exit_code === 0) return { kind: 'fixed', nextShipId: candidate.ship_id };
+    if (candidate.exit_code === 0)
+      return { kind: 'fixed', nextShipId: candidate.ship_id, rule: 'absence-exit0' };
     // reviewer absent and not clean — no signal, keep scanning
   }
-  return { kind: 'no-fix-found', nextShipId: null };
+  return { kind: 'no-fix-found', nextShipId: null, rule: null };
 }
 
 /** Decide which lens rows a reviewer-level FAIL mints fail→fix candidates for.
@@ -295,9 +309,15 @@ export function buildFailFixCandidate({
   nextBytesAvailable,
   nextDiffPayload,
   tsFix,
+  labelRule,
 }) {
   return {
     kind: 'fail-fix',
+    // sc-2497 stamps: labelRule (LABEL_RULES); sameDiffGuardArmable = both hashes known, so the
+    // override guard could have fired; evidenceShrunk = fail side archived, fix side not.
+    labelRule: LABEL_RULES.includes(labelRule) ? labelRule : 'fallback',
+    sameDiffGuardArmable: !!diffSha256 && !!nextDiffSha256,
+    evidenceShrunk: !!bytesAvailable && !nextBytesAvailable,
     url: telemetryUrl('fail-fix', shipId, reviewer, lens),
     shipId,
     repo,

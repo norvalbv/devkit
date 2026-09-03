@@ -355,6 +355,11 @@ describe('init — zero consumer deps (config-driven structure)', () => {
     const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
     expect(pkg.devDependencies.eslint).toBeDefined();
     expect(pkg.devDependencies['@typescript-eslint/parser']).toBeDefined();
+    // The repo-wide sweep (`bun run lint`, CI, agents-hooks/lint-check.sh) is a CONSUMER-run eslint,
+    // so it carries the flag itself; the staged gate's own invocation cannot cover it.
+    expect(pkg.scripts['lint:structure']).toBe(
+      'node --preserve-symlinks node_modules/eslint/bin/eslint.js src',
+    );
     const hook = readFileSync(join(root, '.husky/pre-commit'), 'utf8');
     expect(hook).toContain('--structure "guard-structure staged"');
   });
@@ -487,13 +492,13 @@ describe('doctor — selection-aware', () => {
       'baselines: OK — grandfathered debt: fanout + size + line-growth',
     );
 
+    // The retired legacy generation (sc-2256) is invisible to doctor: seeding eslint/baselines
+    // instead of canonical state must not report grandfathered debt.
     rmSync(join(root, '.devkit', 'baselines'), { recursive: true });
     mkdirSync(join(root, 'eslint', 'baselines'), { recursive: true });
-    writeFileSync(join(root, 'eslint', 'baselines', 'fanout.json'), '{"cap":12,"dirs":{}}\n');
-    writeFileSync(join(root, 'eslint', 'baselines', 'size.json'), '{"files":{}}\n');
     writeFileSync(join(root, 'eslint', 'baselines', 'size-lines.json'), '{"files":{}}\n');
     expect(devkit(root, 'doctor').stdout).toContain(
-      'baselines: OK — grandfathered debt: fanout + size + line-growth',
+      'baselines: OK — no grandfathered debt (enforced from config)',
     );
   });
 

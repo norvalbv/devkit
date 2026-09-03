@@ -19,6 +19,7 @@ import { envFlag } from '../../config.mjs';
 import { emitGateEvent } from '../../judge/gate-events.mjs';
 import { saveTranscript } from '../../judge/transcript-store.mjs';
 import { measureDiffEvidenceCap } from '../diff-evidence.mjs';
+import { reviewBaseContext } from './base-context.mjs';
 import { declaredRoots, hasChecklist, REVIEWERS, underRoot, } from '../reviewers.mjs';
 const sha256 = (text) => createHash('sha256').update(text).digest('hex');
 export function emitReviewSkipped(reviewer, reason) {
@@ -132,7 +133,9 @@ export function emitReviewScope(sel, diffText, promptIdentity, cached,
 // sc-1442: bounded per-run context facts — did the prompt carry a commit message, and which
 // Targets tier loaded. Without these the epic's "reviewers with intent vs blind" field
 // comparison cannot be computed from the sink.
-contextFields = null) {
+contextFields = null, 
+// The tree the diff was computed against — without it a finding is not re-resolvable from the sink.
+cwd = process.cwd()) {
     const files = [...sel.files].sort();
     const inline = JSON.stringify(files);
     const spilled = inline.length > SCOPE_FILES_INLINE_BUDGET
@@ -156,6 +159,7 @@ contextFields = null) {
         // second source of truth the gate cannot import and would have to sync-test.
         has_checklist: hasChecklist(sel.reviewer),
         cached,
+        base_sha: reviewBaseContext(cwd).baseSha,
         ...(contextFields ?? {}),
     });
 }

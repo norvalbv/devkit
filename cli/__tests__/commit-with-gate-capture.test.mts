@@ -29,9 +29,13 @@ function git(cwd: string, ...args: string[]) {
   return execFileSync('git', args, { cwd, env: gitEnv, encoding: 'utf8' }).trim();
 }
 
-function fixture(withHooks: boolean) {
-  const root = mkdtempSync(join(tmpdir(), 'ship-hook-proof-root-'));
-  const wt = mkdtempSync(join(tmpdir(), 'ship-hook-proof-wt-'));
+function fixture(
+  withHooks: boolean,
+  preCommitBody = "echo 'REAL_PRE_COMMIT_RAN' >&2\n",
+  prefix = 'ship-hook-proof-',
+) {
+  const root = mkdtempSync(join(tmpdir(), `${prefix}root-`));
+  const wt = mkdtempSync(join(tmpdir(), `${prefix}wt-`));
   rmSync(wt, { recursive: true, force: true });
   created.push(root, wt);
 
@@ -49,7 +53,7 @@ function fixture(withHooks: boolean) {
     );
     writeFileSync(join(root, '.husky/_/pre-commit'), huskyShim);
     writeFileSync(join(root, '.husky/_/commit-msg'), huskyShim);
-    writeFileSync(join(root, '.husky/pre-commit'), "echo 'REAL_PRE_COMMIT_RAN' >&2\n");
+    writeFileSync(join(root, '.husky/pre-commit'), preCommitBody);
     writeFileSync(join(root, '.husky/commit-msg'), 'echo "REAL_COMMIT_MSG_RAN:$1" >&2\n');
     chmodSync(join(root, '.husky/_/h'), 0o755);
     chmodSync(join(root, '.husky/_/pre-commit'), 0o755);
@@ -183,6 +187,98 @@ describe('commit_with_gate_capture — executable hook proof', () => {
       type: 'ship_result',
       exit_code: 1,
       blocked_gate: 'hook_setup',
+    });
+  });
+
+  const emit = (
+    row: { type: string } & Partial<
+      Record<'reviewer' | 'gate' | 'family' | 'status' | 'reason' | 'detail', string>
+    >,
+  ) =>
+    `printf '%s\\n' '${JSON.stringify({ ship_id: 'sc1537-test', ...row })}' >> "$DEVKIT_GATE_EVENTS"\n`;
+  const BLOCKED_HOOK =
+    "echo 'REAL_PRE_COMMIT_RAN' >&2\n" +
+    emit({
+      type: 'review_result',
+      reviewer: 'correctness',
+      status: 'fail',
+      reason: 'double-charge',
+    }) +
+    emit({
+      type: 'gate_result',
+      gate: 'completeness',
+      family: 'review',
+      status: 'fail',
+      detail: 'no start gate',
+    }) +
+    "echo 'guard-review: correctness — FAILED' >&2\n" +
+    'exit 1\n';
+
+  it('ends with a digest that names the non-blocking finding, BELOW the retry line', () => {
+    const { root, wt, base } = fixture(true, BLOCKED_HOOK);
+
+    const result = runCommit(root, wt, base);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('Retry after fixing');
+    expect(result.stderr).toContain('✗ review:correctness — BLOCKED this run');
+    expect(result.stderr).toContain('⚠ completeness — finding recorded, did NOT block');
+    // The whole point: a reader who sees only the tail still sees it.
+    expect(result.stderr.indexOf('Gate findings this run')).toBeGreaterThan(
+      result.stderr.indexOf('Retry after fixing'),
+    );
+    expect(result.stderr).toContain(join(root, '.devkit/last-ship-gates-feat-sc1537.log'));
+  });
+
+  it('stays silent, and leaves the exit code alone, when the sink holds nothing to report', () => {
+    const { root, wt, base } = fixture(true, "echo 'REAL_PRE_COMMIT_RAN' >&2\nexit 1\n");
+
+    const result = runCommit(root, wt, base);
+
+    expect(result.status).not.toBe(0); // the gate's verdict, never the digest's
+    expect(result.stderr).toContain('Retry after fixing');
+    expect(result.stderr).not.toContain('Gate findings this run');
+  });
+
+  it('renders under a repo path containing a space', () => {
+    const { root, wt, base } = fixture(true, BLOCKED_HOOK, 'ship hook proof ');
+
+    expect(root).toContain(' ');
+    const result = runCommit(root, wt, base);
+
+    expect(result.stderr).toContain('✗ review:correctness — BLOCKED this run');
+    expect(result.stderr).toContain(join(root, '.devkit/last-ship-gates-feat-sc1537.log'));
+  });
+
+  it('a green ship gains no digest line — the existing banner already says it passed', () => {
+    const { root, wt, base } = fixture(true);
+
+    const result = runCommit(root, wt, base);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stderr).toContain('pre-commit gates ran in the ship worktree');
+    expect(result.stderr).not.toContain('Gate findings this run');
+  });
+
+  it('classifies a comment-budget block as the comments gate in the ship envelope', () => {
+    const { root, wt, base } = fixture(
+      true,
+      "echo 'REAL_PRE_COMMIT_RAN' >&2\n" +
+        "echo 'guard-comments: 1 added/modified comment paragraph need a decision.' >&2\n" +
+        'exit 1\n',
+    );
+
+    const result = runCommit(root, wt, base);
+
+    expect(result.status).not.toBe(0);
+    const events = readFileSync(join(root, 'telemetry/gate-events.jsonl'), 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    expect(events.at(-1)).toMatchObject({
+      type: 'ship_result',
+      exit_code: 1,
+      blocked_gate: 'comments',
     });
   });
 

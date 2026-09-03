@@ -1,0 +1,65 @@
+import { createHash } from 'node:crypto';
+const ANCHOR_LINES = 2;
+export function hunkIntersects(hunk, token) {
+    for (const line of hunk.addedLines) {
+        if (line >= token.startLine && line <= token.endLine)
+            return true;
+    }
+    return false;
+}
+/** Added lines inside the paragraph, or a surviving line of it that a deleted comment line was
+ * contiguous with — so deleting a neighbouring paragraph or code line never touches this one. */
+export function hunkTouches(hunk, token, touchLines) {
+    if (hunkIntersects(hunk, token))
+        return true;
+    for (const line of touchLines) {
+        if (line >= token.startLine && line <= token.endLine)
+            return true;
+    }
+    return false;
+}
+export function emptyInventory() {
+    return {
+        files: 0,
+        paragraphs: { one: 0, two: 0, over: 0 },
+        trailingAdded: 0,
+        decisionsStaged: false,
+        touched: [],
+    };
+}
+/** Count the paragraph's added/modified lines that carry text once comment syntax is stripped. */
+export function changedTextLineCount(token, addedLines, meaningful) {
+    return token.text.split('\n').filter((line, index) => {
+        return addedLines.has(token.startLine + index) && Boolean(meaningful(line));
+    }).length;
+}
+/** Every line of the paragraph that carries text — its current size, whichever lines changed. */
+export function textLineCount(token, meaningful) {
+    return token.text.split('\n').filter((line) => Boolean(meaningful(line))).length;
+}
+/** The code a paragraph sits on: the previous non-blank line and the next two. Identical contexts
+ * in one file (two functions both ending `return null; }`) are told apart by an ordinal. */
+export function anchorContext(lines, token) {
+    const following = [];
+    for (let index = token.endLine; index < lines.length && following.length < ANCHOR_LINES; index++) {
+        const line = (lines[index] ?? '').trim();
+        if (line)
+            following.push(line);
+    }
+    let before = '';
+    for (let index = token.startLine - 2; index >= 0 && !before; index--) {
+        before = (lines[index] ?? '').trim();
+    }
+    return JSON.stringify({ before, following });
+}
+export function anchorFor(file, context, ordinal) {
+    return createHash('sha256')
+        .update(JSON.stringify({ file, context, ordinal }))
+        .digest('hex')
+        .slice(0, 12);
+}
+export function recordParagraph(inventory, touched) {
+    const bucket = touched.textLines >= 3 ? 'over' : touched.textLines === 2 ? 'two' : 'one';
+    inventory.paragraphs[bucket] += 1;
+    inventory.touched.push(touched);
+}

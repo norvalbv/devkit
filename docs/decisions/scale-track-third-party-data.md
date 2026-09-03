@@ -18,3 +18,4 @@ created: 2026-08-23
 **Category:** benchmarking
 **Source:** manual
 - 2026-08-24 — Heading reading clarified (PR #439 review, comment 3844485116): in the 2026-08-23 target, the whitelist (counts, lens names, anonymized ids, hashes) is the OBJECT of 'may COMMIT' and devkit is the destination — i.e. 'may commit only counts, names, anonymized ids, and hashes to devkit'. The generated heading itself is append-only and re-targets only on an evidence-state change, so it is annotated here rather than reworded.
+- 2026-09-02 — **Scope:** gate-engine/review/eval/reviewers/scale/**,gate-engine/review/lens/chunk.mts,gate-engine/review/eval/reviewers/external/**,docs/benchmarks/external/** — external/ (Martian + CodeRabbit lens-hole probes) materializes third-party checkouts and reads third-party findings under the same counts-only committed-artifact rule; the alignment gate must arm on that directory and on the committed docs/benchmarks/external/ tables

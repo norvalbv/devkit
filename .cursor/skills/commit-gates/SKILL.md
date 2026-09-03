@@ -28,31 +28,32 @@ command. Do not pre-run every gate or replace the managed chain with a hand-writ
   clone, and coverage checks. Follow the printed repair. Existing ratchet debt may shrink; do not
   re-freeze it merely to admit a new violation. A missing or inherited coverage artifact may use the
   documented one-run `GUARD_COVERAGE_OK=1` assertion only when the change did not cause the shortfall.
-- **Comment firewall** (`guard-comments`) challenges added or modified supported-language comment
-  paragraphs. Prefer removing workaround narration or expressing the constraint in code, types,
-  assertions, or tests. If prose is genuinely necessary, run the exact printed
-  `guard-comments justify <finding-id> "<specific rationale>"` command; an independent reviewer must
-  still approve it.
+- **Comment budget** (`guard-comments`) blocks any added or modified standalone comment paragraph
+  with three or more text lines. Shorten it to at most two lines, or move the information into
+  code, types, a test name/assertion, or a decision record (`guard-decisions`). There is no
+  rationale, waiver, or reviewer; a paragraph-long explanation belongs in docs, not in code.
 - **Decision gate** requires an architectural target only when the change crosses that bar. Use the
   `decisions` skill for a real decision; do not create an ADR for a routine fix merely to clear the
   gate.
 - **Reviewer and completeness gates** name a concrete defect or missing required work. Fix the
   finding and re-run. An unavailable judge and a confident rejection have different exit semantics;
-  preserve that distinction instead of treating every nonzero result as a code defect.
+  preserve that distinction instead of treating every nonzero result as a code defect. To dispute a
+  finding, resolve it against the base sha `guard-review` printed (`reviewed against <sha>`), not
+  against local `HEAD` — under `devkit ship` the reviewers judged a worktree cut from the remote
+  base, so `git show HEAD:<file>`, `grep` and `git diff --stat` in your own checkout can all agree
+  with each other and still describe a different tree. Waive on evidence read from the reviewed
+  base, and pass the `--base` the block note prints so the record says which tree you checked.
 - **Sentry gate** judges commit-message intent for newly introduced runtime error classes. Add the
   capture on the named surface, or surface a disputed verdict to the user before any bypass.
 - **Qavis advisory** can recommend visual QA but does not turn a non-UI change into UI work.
 
-## Comment-firewall evidence
+## Comment budget
 
-The rationale store lives in Git-local metadata rather than the commit. Linked worktrees can read
-shared evidence, while ownership metadata prevents one worktree from pruning another's entry. If a
-ship worktree disappeared after reporting a finding, use the exact `--from-ship-log` command printed
-by the failed ship; it validates the finding against the retained log and does not pre-approve it.
-
-There is no blanket comment-firewall bypass. Reviewer outage, unreadable staged evidence, and an
-unapproved rationale are separate outcomes; follow the gate's printed remediation for the actual
-one.
+The gate is deterministic: it counts the added or modified text lines of each standalone comment
+paragraph, treating comment groups separated only by blank lines as one paragraph. One- and
+two-line changes, inline comments after code, untouched comments, deletions, and pure renames pass.
+There is no bypass. Exit 4 (unreadable staged evidence or an unsupported language) is not a
+rejection; follow the printed remedy for that outcome.
 
 ## Canonical one-run controls
 
@@ -67,8 +68,10 @@ specific conditions under which that control is appropriate:
 - `GUARD_NO_COMPLETENESS=1` — skip completeness; `GUARD_COMPLETENESS_HARD=0` only softens it.
 - `GUARD_NO_SENTRY_JUDGE=1` — skip the Sentry commit-message judge.
 - `GUARD_COVERAGE_OK=1` — assert the base-branch coverage condition documented by `using-devkit`.
-- `GUARD_QAVIS_OK=1` — ship this change without the advised visual QA;
-  `GUARD_NO_QAVIS_ADVISORY=1` disables the advisory entirely.
+- `GUARD_QAVIS_OK=1` — ship this change without the advised visual QA. Prefer the audited path the
+  advisory prints: `qavis qa`, then `qavis waive --staged --reason '…'` when the verdict is uncertain
+  and the gap is accepted, so the reason is bound to the tree. `GUARD_NO_QAVIS_ADVISORY=1` disables
+  the advisory entirely.
 - `GUARD_HOOK_PARITY_OK=1` — assert that `.husky/pre-commit` drift predates your change (Devkit's
   own repo only; the gate is already advisory when no hook-generator input is staged).
 - `GUARD_DECISIONS_INTEGRITY_OK=1` — assert that a NEW structural finding on a decision record in

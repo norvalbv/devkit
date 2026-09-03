@@ -1,8 +1,8 @@
 {
   "schemaVersion": 2,
   "kind": "skills",
-  "devkitRef": "v0.60.0",
-  "generatedAt": "2026-09-01T17:59:02.276Z",
+  "devkitRef": "v0.62.0",
+  "generatedAt": "2026-09-03T11:23:16.620Z",
   "files": {
     "_devkit/checklist-store.mjs": "c8a6a01fe75bd570953ccc88e3b99b8ac365bb249c4b1db2ce0c32a589c52193",
     "_devkit/review-roots.d.mts": "384d95945ccf04f994d805e78a5507835321ee5bcbd46acbf216c77385238c9e",
@@ -12,7 +12,7 @@
     "backend-performance/SKILL.md": "5ff0858b34ffc91d677976dd279f27714d934aa5062f0a3f6b38088e7bd10ddb",
     "backend-performance/scripts/checklist.mjs": "23b506a7f2d5d0f68723d75fe381b611574b727fd672f7cc5fe223127d86513c",
     "brainstorming/SKILL.md": "1c25870729d5cb4ba17682a2ef251f6902a715d69aee0f20c4f548ea2715be5e",
-    "commit-gates/SKILL.md": "b2e7ddd22b296b62e4a69e920d7a6cd64c5e980f7c336c537298751134268e1d",
+    "commit-gates/SKILL.md": "5e3c73740e390012fa9d0bb0abac3a44f300c15f460ce6a3894aeb9e04b9df80",
     "commit-guard/SKILL.md": "9de61de311b5101c31d11713bb45da2ff787fa1349231ee5d6a7860f28fc4a5f",
     "commit-guard/references/co-occurrence.md": "0225034aeb87a8be80d59e4121aa67a99129f6ee8388a9605e0db484e7d767d4",
     "commit-guard/scripts/checklist.mjs": "dc57c1f1407a0fe7503ebe72e30e9167b29bdf1154ab44e68de82b6d558770e1",
@@ -36,7 +36,7 @@
     "upstream-sync/SKILL.md": "1007c8377ac15393dcc9db5384d80bd38487c85aa465921ae0b49ba5a91bad70",
     "upstream-sync/scripts/sync.mjs": "218aa7ad7e96f280f281a38f99919f2ce55eace902ed95b1119a0099ddbb3c76",
     "upstream-sync/scripts/verify-merge.mjs": "afb2977ab8b7a96fac2e93e29a68ae432508ba7e63d03c580fcf03229fcd0676",
-    "using-devkit/SKILL.md": "0baf387accb72acaea57ba9a3d61b981a496b8dbb04abd4df204fda09dea3566"
+    "using-devkit/SKILL.md": "f45d16c5e764590c84ef3c3ffe93533f08b29c6de0707000c901addf5e9aa91a"
   },
   "providers": {
     "claude": {
@@ -49,7 +49,7 @@
         "backend-performance/SKILL.md": "5ff0858b34ffc91d677976dd279f27714d934aa5062f0a3f6b38088e7bd10ddb",
         "backend-performance/scripts/checklist.mjs": "23b506a7f2d5d0f68723d75fe381b611574b727fd672f7cc5fe223127d86513c",
         "brainstorming/SKILL.md": "1c25870729d5cb4ba17682a2ef251f6902a715d69aee0f20c4f548ea2715be5e",
-        "commit-gates/SKILL.md": "b2e7ddd22b296b62e4a69e920d7a6cd64c5e980f7c336c537298751134268e1d",
+        "commit-gates/SKILL.md": "5e3c73740e390012fa9d0bb0abac3a44f300c15f460ce6a3894aeb9e04b9df80",
         "commit-guard/SKILL.md": "9de61de311b5101c31d11713bb45da2ff787fa1349231ee5d6a7860f28fc4a5f",
         "commit-guard/references/co-occurrence.md": "0225034aeb87a8be80d59e4121aa67a99129f6ee8388a9605e0db484e7d767d4",
         "commit-guard/scripts/checklist.mjs": "dc57c1f1407a0fe7503ebe72e30e9167b29bdf1154ab44e68de82b6d558770e1",
@@ -73,7 +73,7 @@
         "upstream-sync/SKILL.md": "1007c8377ac15393dcc9db5384d80bd38487c85aa465921ae0b49ba5a91bad70",
         "upstream-sync/scripts/sync.mjs": "218aa7ad7e96f280f281a38f99919f2ce55eace902ed95b1119a0099ddbb3c76",
         "upstream-sync/scripts/verify-merge.mjs": "afb2977ab8b7a96fac2e93e29a68ae432508ba7e63d03c580fcf03229fcd0676",
-        "using-devkit/SKILL.md": "0baf387accb72acaea57ba9a3d61b981a496b8dbb04abd4df204fda09dea3566"
+        "using-devkit/SKILL.md": "f45d16c5e764590c84ef3c3ffe93533f08b29c6de0707000c901addf5e9aa91a"
       }
     },
     "cursor": {
@@ -86,7 +86,7 @@
         "backend-performance/SKILL.md": "5ff0858b34ffc91d677976dd279f27714d934aa5062f0a3f6b38088e7bd10ddb",
         "backend-performance/scripts/checklist.mjs": "23b506a7f2d5d0f68723d75fe381b611574b727fd672f7cc5fe223127d86513c",
         "brainstorming/SKILL.md": "1c25870729d5cb4ba17682a2ef251f6902a715d69aee0f20c4f548ea2715be5e",
-        "commit-gates/SKILL.md": "b2e7ddd22b296b62e4a69e920d7a6cd64c5e980f7c336c537298751134268e1d",
+        "commit-gates/SKILL.md": "5e3c73740e390012fa9d0bb0abac3a44f300c15f460ce6a3894aeb9e04b9df80",
         "commit-guard/SKILL.md": "9de61de311b5101c31d11713bb45da2ff787fa1349231ee5d6a7860f28fc4a5f",
         "commit-guard/references/co-occurrence.md": "0225034aeb87a8be80d59e4121aa67a99129f6ee8388a9605e0db484e7d767d4",
         "commit-guard/scripts/checklist.mjs": "dc57c1f1407a0fe7503ebe72e30e9167b29bdf1154ab44e68de82b6d558770e1",
@@ -110,7 +110,7 @@
         "upstream-sync/SKILL.md": "1007c8377ac15393dcc9db5384d80bd38487c85aa465921ae0b49ba5a91bad70",
         "upstream-sync/scripts/sync.mjs": "218aa7ad7e96f280f281a38f99919f2ce55eace902ed95b1119a0099ddbb3c76",
         "upstream-sync/scripts/verify-merge.mjs": "afb2977ab8b7a96fac2e93e29a68ae432508ba7e63d03c580fcf03229fcd0676",
-        "using-devkit/SKILL.md": "0baf387accb72acaea57ba9a3d61b981a496b8dbb04abd4df204fda09dea3566"
+        "using-devkit/SKILL.md": "f45d16c5e764590c84ef3c3ffe93533f08b29c6de0707000c901addf5e9aa91a"
       }
     }
   }

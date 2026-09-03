@@ -138,7 +138,7 @@ describe('mine-telemetry-lib: findNextOutcome', () => {
 
   it('scans past consecutive fails to find the eventual pass (does not stop at the very next ship)', () => {
     const statusOf = (shipId) => ({ s2: 'fail', s3: 'fail', s4: 'pass' })[shipId];
-    expect(findNextOutcome(chain, 's1', 'correctness-reviewer', statusOf)).toEqual({
+    expect(findNextOutcome(chain, 's1', 'correctness-reviewer', statusOf)).toMatchObject({
       kind: 'fixed',
       nextShipId: 's4',
     });
@@ -146,7 +146,7 @@ describe('mine-telemetry-lib: findNextOutcome', () => {
 
   it('stops immediately when the very next ship already passes', () => {
     const statusOf = (shipId) => ({ s2: 'pass' })[shipId];
-    expect(findNextOutcome(chain, 's1', 'correctness-reviewer', statusOf)).toEqual({
+    expect(findNextOutcome(chain, 's1', 'correctness-reviewer', statusOf)).toMatchObject({
       kind: 'fixed',
       nextShipId: 's2',
     });
@@ -154,7 +154,7 @@ describe('mine-telemetry-lib: findNextOutcome', () => {
 
   it('treats an absent reviewer on a clean ship as fixed-by-absence', () => {
     const statusOf = () => undefined; // reviewer never appears again
-    expect(findNextOutcome(chain, 's3', 'correctness-reviewer', statusOf)).toEqual({
+    expect(findNextOutcome(chain, 's3', 'correctness-reviewer', statusOf)).toMatchObject({
       kind: 'fixed',
       nextShipId: 's4',
     });
@@ -167,7 +167,7 @@ describe('mine-telemetry-lib: findNextOutcome', () => {
       { ship_id: 's3', exit_code: 0 }, // absent + clean → fixed-by-absence
     ];
     const statusOf = () => undefined;
-    expect(findNextOutcome(blockedChain, 's1', 'r', statusOf)).toEqual({
+    expect(findNextOutcome(blockedChain, 's1', 'r', statusOf)).toMatchObject({
       kind: 'fixed',
       nextShipId: 's3',
     });
@@ -175,7 +175,7 @@ describe('mine-telemetry-lib: findNextOutcome', () => {
 
   it('returns no-fix-found when the chain ends without a pass', () => {
     const statusOf = () => 'fail';
-    expect(findNextOutcome(chain, 's1', 'correctness-reviewer', statusOf)).toEqual({
+    expect(findNextOutcome(chain, 's1', 'correctness-reviewer', statusOf)).toMatchObject({
       kind: 'no-fix-found',
       nextShipId: null,
     });
@@ -183,20 +183,22 @@ describe('mine-telemetry-lib: findNextOutcome', () => {
 
   it('returns no-fix-found when the fail ship is the last in its chain (branch abandonment)', () => {
     const statusOf = () => undefined;
-    expect(findNextOutcome(chain, 's4', 'correctness-reviewer', statusOf)).toEqual({
+    expect(findNextOutcome(chain, 's4', 'correctness-reviewer', statusOf)).toMatchObject({
       kind: 'no-fix-found',
       nextShipId: null,
     });
   });
 
   it('returns no-fix-found when the anchor ship is not found in the chain', () => {
-    expect(findNextOutcome(chain, 'does-not-exist', 'r', () => 'pass')).toEqual({
+    expect(findNextOutcome(chain, 'does-not-exist', 'r', () => 'pass')).toMatchObject({
       kind: 'no-fix-found',
       nextShipId: null,
     });
   });
 });
 
+// Outcome objects also carry the sc-2497 `rule` stamp (covered in reviewers/__tests__/row-value.test.mts);
+// these assert the kind/nextShipId semantics only.
 describe('mine-telemetry-lib: findNextLensOutcome', () => {
   // Reproduces the reported blocker: a reviewer FAILs the same ship on TWO distinct lenses, and
   // only one of them actually gets fixed by the next ship. A reviewer-level scan (findNextOutcome)
@@ -211,7 +213,7 @@ describe('mine-telemetry-lib: findNextLensOutcome', () => {
     const lensStatusOf = (shipId, reviewer, lens) =>
       ({ 's2::r::lens-a': 'pass' })[`${shipId}::${reviewer}::${lens}`];
     const statusOf = () => 'pass';
-    expect(findNextLensOutcome(chain, 's1', 'r', 'lens-a', statusOf, lensStatusOf)).toEqual({
+    expect(findNextLensOutcome(chain, 's1', 'r', 'lens-a', statusOf, lensStatusOf)).toMatchObject({
       kind: 'fixed',
       nextShipId: 's2',
     });
@@ -225,7 +227,9 @@ describe('mine-telemetry-lib: findNextLensOutcome', () => {
     const lensStatusOf = (shipId, reviewer, lens) =>
       ({ 's2::r::lens-b': 'fail' })[`${shipId}::${reviewer}::${lens}`]; // ...but lens-b itself still fails
     const statusOf = () => 'pass';
-    expect(findNextLensOutcome(failingChain, 's1', 'r', 'lens-b', statusOf, lensStatusOf)).toEqual({
+    expect(
+      findNextLensOutcome(failingChain, 's1', 'r', 'lens-b', statusOf, lensStatusOf),
+    ).toMatchObject({
       kind: 'no-fix-found',
       nextShipId: null,
     });
@@ -234,7 +238,7 @@ describe('mine-telemetry-lib: findNextLensOutcome', () => {
   it('falls back to reviewer-level pass when the candidate ship has no lens-level row for this lens', () => {
     const lensStatusOf = () => undefined; // no lens breakdown recorded on the candidate ship
     const statusOf = () => 'pass';
-    expect(findNextLensOutcome(chain, 's1', 'r', 'lens-b', statusOf, lensStatusOf)).toEqual({
+    expect(findNextLensOutcome(chain, 's1', 'r', 'lens-b', statusOf, lensStatusOf)).toMatchObject({
       kind: 'fixed',
       nextShipId: 's2',
     });
@@ -249,7 +253,9 @@ describe('mine-telemetry-lib: findNextLensOutcome', () => {
     ];
     const lensStatusOf = (shipId) => ({ s3: 'pass' })[shipId] && 'pass';
     const statusOf = (shipId) => ({ s2: 'fail', s3: 'pass' })[shipId];
-    expect(findNextLensOutcome(longerChain, 's1', 'r', 'lens-b', statusOf, lensStatusOf)).toEqual({
+    expect(
+      findNextLensOutcome(longerChain, 's1', 'r', 'lens-b', statusOf, lensStatusOf),
+    ).toMatchObject({
       kind: 'fixed',
       nextShipId: 's3',
     });
@@ -265,7 +271,7 @@ describe('mine-telemetry-lib: findNextLensOutcome', () => {
         () => 'pass',
         () => 'pass',
       ),
-    ).toEqual({ kind: 'no-fix-found', nextShipId: null });
+    ).toMatchObject({ kind: 'no-fix-found', nextShipId: null });
   });
 });
 

@@ -138,7 +138,7 @@ __dk_gate_deterministic() {
 
 # devkit:deterministic
 echo "🚧 Deterministic gates (aggregated)..."
-__dk_gate_deterministic node gate-engine/deterministic/run.mts --hook "${DK_HOOK_PATH:-$0}" --structure "bun run lint:structure" --extra "lint=bun run lint" --extra "anti-slop=node cli/index.mts anti-slop check --staged" --extra "hook-parity=node cli/lib/husky/hook-parity.mts --gate" --extra "decisions-integrity=node gate-engine/decisions/cli.mts integrity --staged" --extra "benchmarks=bun run benchmarks:check -- --mode staged"
+__dk_gate_deterministic node gate-engine/deterministic/run.mts --hook "${DK_HOOK_PATH:-$0}" --structure "bun run lint:structure" --extra "lint=bun run lint" --extra "hook-parity=node cli/lib/husky/hook-parity.mts --gate" --extra "decisions-integrity=node gate-engine/decisions/cli.mts integrity --staged" --extra "benchmarks=bun run benchmarks:check -- --mode staged" --extra "corpus-lint=bun run benchmarks:corpus"
 # /devkit:deterministic
 
 if __dk_gate_selected comments; then
@@ -151,15 +151,11 @@ if [ "$ccrc" -eq 1 ]; then
 elif [ "$ccrc" -eq 4 ]; then
     echo "   guard-comments: NOT a rejection — staged comment evidence is unreadable or unsupported."
     exit 1
-elif [ "$ccrc" -eq 3 ]; then
-    echo "   guard-comments: reviewer produced no verdict — strict ship mode failed closed."
-    echo "   Follow the remedy printed above, then re-run devkit ship (approved comments are cached)."
-    exit 1
-elif [ "$ccrc" -ne 0 ] && [ "$ccrc" -ne 2 ]; then
+elif [ "$ccrc" -ne 0 ]; then
     echo "   guard-comments: unexpected exit $ccrc — blocking the commit."
     exit 1
 fi
-# ccrc 0 = clean/approved/cached, 1 = unresolved/rejected, 2 = ordinary fail-open outage.
+# ccrc 0 = clean, 1 = paragraph over the 2-line budget, 4 = unreadable/unsupported evidence; anything else blocks.
 # /devkit:guard-comments
 fi
 
@@ -206,6 +202,23 @@ fi
 rrc=0
 __dk_no_git_env node gate-engine/review/cli.mts --gate || rrc=$?
 crc=0
+# sc-2488. The reaped judge's status, kept STRICTLY apart from $crc. $crc drives the live dispatch
+# below, whose arms exit; routing an observation into it would turn narration into a second
+# blocking authority the moment those arms are reordered — which
+# blocking-gates-narrate-attribution-never-depend-on-it forbids. This variable is read only by the
+# printer, which contains no exit.
+comp_observed_rc=0
+# The judge runs in PARALLEL, so when the fleet blocks first its finding is written mid-log and the
+# run then ends with the fleet's remediation and the --resume line. An agent reading the tail — the
+# documented next step — misses it and rediscovers it rounds later. Only a CONFIRMED finding (1) is
+# worth a line here: an unavailable judge (3) or an unreadable staged set (4) tells a reader nothing
+# they can act on before the retry that re-judges anyway.
+__dk_comp_observed() {
+    [ "$comp_observed_rc" -eq 1 ] || return 0
+    echo "   ⚠ ALSO, not the reason this run stopped: the completeness judge had ALREADY recorded a"
+    echo "     finding when the fleet blocked. Read it above before retrying — it is the most"
+    echo "     expensive kind to rediscover, and nothing else will remind you."
+}
 if [ -n "$comp_pid" ]; then
     if [ "$rrc" -eq 0 ] || [ "$rrc" -eq 2 ]; then
         wait "$comp_pid" || crc=$?
@@ -216,22 +229,31 @@ if [ -n "$comp_pid" ]; then
         # ship capture pipeline only unblocks once every copy of that write-end is closed. A hook
         # that returns while a signalled child is still winding down leaves the reader waiting on
         # a pipe nobody will write to again — the exact hang commit-with-gate-capture.sh's R3
-        # supervisor exists to bound. Both lines are status-tested (|| true) because a reaped
-        # job's status IS the signal (143), and under sh -e an untested non-zero would abort the
-        # hook here, before it reports its own verdict below.
+        # supervisor exists to bound. Both lines are status-tested because a reaped job's status
+        # IS the signal (143), and under sh -e an untested non-zero would abort the hook here,
+        # before it reports its own verdict below.
+        #
+        # The wait KEEPS that status now (sc-2488) instead of discarding it. It is genuinely
+        # available: when the judge had already exited, the kill fails harmlessly and wait returns
+        # the judge's own code; only a judge killed MID-judgement reads 143, and that one reached no
+        # verdict, so __dk_comp_observed stays silent for it. A fabricated verdict is worse than
+        # none.
         kill "$comp_pid" 2>/dev/null || true
-        wait "$comp_pid" 2>/dev/null || true
+        wait "$comp_pid" 2>/dev/null || comp_observed_rc=$?
     fi
 fi
 if [ "$rrc" -eq 1 ]; then
     echo "   A reviewer FAILED (escalation-confirmed). Fix the findings above, then re-run."
+    __dk_comp_observed
     exit 1
 elif [ "$rrc" -eq 3 ]; then
     echo "   guard-review: judge unavailable after retry — strict ship mode failed closed."
     echo "   Check the judge CLI auth/quota named above, then re-run devkit ship (completed verdicts are cached)."
+    __dk_comp_observed
     exit 1
 elif [ "$rrc" -ne 0 ] && [ "$rrc" -ne 2 ]; then
     echo "   guard-review: unexpected exit $rrc — blocking the commit."
+    __dk_comp_observed
     exit 1
 fi
 # Same exit contract as the commit-msg fragment (commit-msg-block.mts) — a completeness verdict

@@ -38,6 +38,7 @@ import { execJudgeAsync, strictRemedy } from '../judge/run-judge.mjs';
 import { loadCache } from './cache.mjs';
 import { runCascade } from './cascade/reviewer.mjs';
 import { RESPONSE_CONTRACT_REMEDY } from './contracts/response.mjs';
+import { baseProvenanceLines, primeReviewBaseContext } from './evidence/base-context.mjs';
 import { loadReviewerContext } from './evidence/commit-message.mjs';
 import { responseContractFor } from './contracts/registry.mjs';
 import { renderFindingsBlockForParts } from './evidence/findings.mjs';
@@ -131,6 +132,9 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
             if (before !== null && tree !== null && headHash(cwd) === before) {
                 preJudgeTree = tree;
                 preJudgeHead = before;
+                // Pin the provenance to THIS head: every later reader (scope rows, block notes) must name
+                // the tree the evidence below was read from, not one re-read after a concurrent commit.
+                primeReviewBaseContext(cwd, before.startsWith('unborn:') ? null : before);
                 break;
             }
         }
@@ -205,8 +209,11 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
     // no torn plan): planReviewWork's own default would re-read the launcher's guard.config.json.
     const plan = planReviewWork(selected, diffs, cache, targetSalts, cacheKey, resolveLensGroups(), resolveChunkCap(process.env.GUARD_CORRECTNESS_CHUNK, cfg.review.correctnessChunkLoc));
     for (const s of plan.scope)
-        emitReviewScope(s.sel, s.diff, promptIdentity(s.sel), s.cached, ctx.scopeFields);
+        emitReviewScope(s.sel, s.diff, promptIdentity(s.sel), s.cached, ctx.scopeFields, cwd);
     for (const line of plan.cachedLines)
+        console.error(line);
+    // Before any verdict AND before the fully-cached early return below (sc-2480).
+    for (const line of baseProvenanceLines(cwd, selected.flatMap((s) => s.files)))
         console.error(line);
     for (const c of plan.fullyCached) {
         timing.cacheHit(c.name, c.duration);

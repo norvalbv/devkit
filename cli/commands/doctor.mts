@@ -6,9 +6,6 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   FANOUT_BASELINE,
-  LEGACY_FANOUT_BASELINE,
-  LEGACY_LINES_BASELINE,
-  LEGACY_SIZE_BASELINE,
   LINES_BASELINE,
   readRatchetBaseline,
   SIZE_BASELINE,
@@ -45,6 +42,10 @@ import { packageDir, readJson } from '../lib/fs-helpers.mts';
 import { checkCommitMsgHook, commitMsgGuards } from '../lib/husky/commit-msg-block.mts';
 import { extractGuardBlock } from '../lib/husky/husky-block.mts';
 import { checkAdhdSkill } from '../lib/install/adhd-skill.mts';
+import {
+  checkDevkitCacheGitignore,
+  repairDevkitCacheGitignore,
+} from '../lib/install/gitignore-cache.mts';
 import {
   resolveExistingAgentProviders,
   SUPPORTED_AGENT_PROVIDERS,
@@ -118,9 +119,9 @@ function checkSearchToolBins(): CheckResult {
 
 function checkBaselines(cwd: string): CheckResult {
   const present = [
-    ['fanout', readRatchetBaseline(cwd, FANOUT_BASELINE, LEGACY_FANOUT_BASELINE)],
-    ['size', readRatchetBaseline(cwd, SIZE_BASELINE, LEGACY_SIZE_BASELINE)],
-    ['line-growth', readRatchetBaseline(cwd, LINES_BASELINE, LEGACY_LINES_BASELINE)],
+    ['fanout', readRatchetBaseline(cwd, FANOUT_BASELINE)],
+    ['size', readRatchetBaseline(cwd, SIZE_BASELINE)],
+    ['line-growth', readRatchetBaseline(cwd, LINES_BASELINE)],
   ].flatMap(([name, baseline]) => (baseline ? [name] : []));
   // A ratchet baseline holds ONLY grandfathered debt and is cut once at init. An absent one means
   // "no debt — cap enforced from guard.config.json", which is healthy, not drift. So this is purely
@@ -238,6 +239,8 @@ function applyFix(
     );
   }
 
+  repairDevkitCacheGitignore(cwd, results);
+
   // MISSING template files / husky drift → init for the recorded selection (idempotent).
   const OXC_CHECKS = new Set([
     'Oxc manifest',
@@ -348,6 +351,7 @@ async function collectResults(
 
   const results = [configResult];
   if (sel.husky) results.push(...hookChecks(cwd, sel.guards ?? []));
+  results.push(checkDevkitCacheGitignore(cwd));
   if (sel.husky && commitMsgGuards(sel.guards ?? []).length)
     results.push(checkCommitMsgHook(cwd, sel.guards ?? []));
   // biome and tsconfig differ only by filename and expected pointer.

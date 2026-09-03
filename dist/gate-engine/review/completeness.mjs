@@ -32,7 +32,7 @@ import { scopedTargets } from '../decisions/scoped-targets.mjs';
 import { judgeBinForModel } from '../judge/codex/result.mjs';
 import { renderTargets } from './evidence/targets-block.mjs';
 export { renderTargets } from './evidence/targets-block.mjs';
-import { emitCacheHit, emitGateBypass, finishGateTiming } from '../judge/gate-events.mjs';
+import { emitCacheHit, emitGateBypass, emitGateEvent, emitGateInfraFailure, finishGateTiming, } from '../judge/gate-events.mjs';
 import { JUDGE_ISOLATION } from '../judge/judge-isolation.mjs';
 import { judgeMcpCapabilityFingerprint, namedAgentMcpProfile, withNamedAgentMcpTools, } from '../judge/mcp/profile.mjs';
 import { reportGateInfraFailure } from '../judge/odb-probe.mjs';
@@ -43,13 +43,16 @@ import { cacheKey, parseReviewVerdict, resolveEscalationModel, stripFrontmatter,
 const AGENT_NAME = 'feature-completeness-reviewer';
 const TOOLS = 'Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(git status:*)';
 /** The exact judge capabilities shared by cache identity, execution, and the benchmark. */
-export function completenessJudgeSetup(cfg, cwd = process.cwd()) {
+export function completenessJudgeSetup(cfg, cwd = process.cwd(), { mcpProjectRoots } = {}) {
     const mcpProfile = namedAgentMcpProfile();
     const allowedTools = withNamedAgentMcpTools(TOOLS, cfg.indexPath ? cfg.searchTool : '');
     return {
         allowedTools,
         mcpProfile,
-        capabilityFingerprint: judgeMcpCapabilityFingerprint(mcpProfile, allowedTools, { cwd }),
+        capabilityFingerprint: judgeMcpCapabilityFingerprint(mcpProfile, allowedTools, {
+            cwd,
+            projectRoots: mcpProjectRoots,
+        }),
     };
 }
 // Trailing whitespace + blank-run normalisation, mirroring git's `--cleanup=whitespace` (the mode
@@ -104,10 +107,40 @@ export function wrapCompleteness(agentBody, message, files, targetsBlock) {
         'VERDICT: PASS | FAIL — <one-line reason>\n' +
         'FAIL only for a gap that makes the shipped change misleading or operationally unsafe.');
 }
+/** Ceiling on model-supplied verdict prose, so one event stays a sub-4KB atomic append. */
+const DETAIL_CAP = 500;
 /** The gate → exit code (see module contract). `exec` injectable for tests. */
-export async function runCompleteness(msgFile, cwd = process.cwd(), { exec = execJudgeAsync } = {}) {
+export async function runCompleteness(msgFile, cwd = process.cwd(), { exec = execJudgeAsync, mcpProjectRoots, } = {}) {
     const startedAt = Date.now();
     const finish = (code, cacheState = 'none', effectiveMs) => finishGateTiming('completeness', startedAt, code, cacheState, effectiveMs);
+    // gate-telemetry-self-describing Ruling (2) — "every judgement outcome emits, INCLUDING the
+    // non-outcomes" — was unmet here: this gate emitted only a gate_timing row, so a confident FAIL
+    // and a PASS were indistinguishable in the stream. That is the same blindness that loses the
+    // finding at the ship terminus (sc-2488): the judge runs in PARALLEL with the reviewer fleet, so
+    // when the fleet blocks first the hook reaps this judge and its verdict reaches no reader.
+    //
+    // gate_result, NOT the reviewer-shaped review_result: gate-verdict-attribution obliges a
+    // review_result to carry review_scope, prompt_identity and the checklist artifact vector, and
+    // this gate is not a fleet reviewer and produces none of them — a row without them is
+    // structurally incomplete rather than merely terse. The decisions judge sets the precedent that
+    // an LLM verdict rides gate_result. `family` names the blocked_gate token the ship script
+    // publishes for this gate's chain, which is what lets a reader join the two vocabularies.
+    const emitVerdict = (status, detail) => emitGateEvent({
+        type: 'gate_result',
+        gate: 'completeness',
+        family: 'review',
+        status,
+        model,
+        secs: Math.round((Date.now() - startedAt) / 1000),
+        // BOUNDED, because `detail` is model-supplied prose of no fixed length. The sink's
+        // tear-freedom rests on each event being ONE sub-4KB O_APPEND write (gate-events.mts), so an
+        // unbounded verdict line would corrupt a CONCURRENT judge's row, not merely its own — and
+        // this gate runs in parallel with the reviewer fleet by design.
+        detail: detail.slice(0, DETAIL_CAP),
+    });
+    // A gate that could not reach a verdict produced no outcome, so it takes its OWN event type
+    // rather than a status on gate_result — the 2026-08-05 note's ruling, for its stated reason.
+    const emitNoRun = (cause) => emitGateInfraFailure({ gate: 'completeness', family: 'review', cause, model });
     if (envFlag('NO_COMPLETENESS')) {
         emitGateBypass('completeness', 'GUARD_NO_COMPLETENESS');
         return finish(0);
@@ -124,7 +157,9 @@ export async function runCompleteness(msgFile, cwd = process.cwd(), { exec = exe
         if (cfg.noLlm)
             return finish(0);
         model = resolveEscalationModel(cfg);
-        ({ allowedTools, mcpProfile, capabilityFingerprint } = completenessJudgeSetup(cfg, cwd));
+        ({ allowedTools, mcpProfile, capabilityFingerprint } = completenessJudgeSetup(cfg, cwd, {
+            mcpProjectRoots,
+        }));
         const message = normalizeCommitMessage(readFileSync(path.isAbsolute(msgFile) ? msgFile : path.resolve(cwd, msgFile), 'utf8'));
         const files = execSync('git diff --cached --name-only', { cwd, encoding: 'utf8' })
             .split('\n')
@@ -207,6 +242,7 @@ export async function runCompleteness(msgFile, cwd = process.cwd(), { exec = exe
         timeout: DEEP_JUDGE_TIMEOUT_MS,
         cwd,
         mcpProfile,
+        mcpProjectRoots,
         codexReadOnly: true,
         onMcpPrepared: (fingerprint) => {
             observedCapabilityFingerprint = fingerprint;
@@ -216,10 +252,17 @@ export async function runCompleteness(msgFile, cwd = process.cwd(), { exec = exe
         },
     });
     if (observedCapabilityFingerprint && observedCapabilityFingerprint !== capabilityFingerprint) {
+        emitNoRun('mcp_capabilities_changed');
         console.error('guard-review: completeness SKIPPED (MCP capabilities changed while preparing the judge) — rerun with a stable trusted MCP registry.');
         return finish(envFlag('AI_STRICT') ? 3 : 2);
     }
     if (raw === null) {
+        // Emitted ONCE, above the strict/fail-open split: the judgement did not happen either way, and
+        // the machine cause is what a reader needs — not which exit code this run's strictness chose.
+        // The judge's OWN cause, never a collapsed one: 'empty' is a healthy judge returning a
+        // response that broke its contract, and reporting it as an outage sends a reader to check auth
+        // and quota on a CLI that answered fine.
+        emitNoRun(outage ?? 'outage');
         // Outage/timeout (execJudgeAsync already warned). Under strict ship the skip must be an EXIT
         // CODE, not a stderr line — a headless shipping agent only reliably sees the code.
         if (envFlag('AI_STRICT')) {
@@ -246,8 +289,19 @@ export async function runCompleteness(msgFile, cwd = process.cwd(), { exec = exe
         // key that lets a ship retry with a reshaped diff skip this judge (see the lookup above).
         savePasses(cwd, stickyKey ? { [key]: meta, [stickyKey]: meta } : { [key]: meta });
     }
-    if (verdict !== 'FAIL')
+    if (verdict === 'PASS') {
+        emitVerdict('pass', reason || 'no gap found');
         return finish(0);
+    }
+    if (verdict !== 'FAIL') {
+        // A response carrying no parseable verdict is a HEALTHY judge breaking its contract, so it is
+        // a non-run rather than a verdict — the same distinction the outage arm draws above.
+        emitNoRun('response_contract');
+        return finish(0);
+    }
+    // Above the hard/soft split below: a GUARD_COMPLETENESS_HARD=0 soften still MADE this finding,
+    // and a run that exits 0 on it is exactly the run whose reader has nothing else to go on.
+    emitVerdict('fail', reason || 'see transcript');
     console.error(`guard-review: completeness finding — ${reason || 'see transcript'}`);
     console.error(raw.trim());
     // Hard unless explicitly softened for this one commit (GUARD_COMPLETENESS_HARD=0); unset → block.

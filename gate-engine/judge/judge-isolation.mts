@@ -71,7 +71,7 @@ export function withoutGitEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.Proc
 
 /**
  * The light judge model — the shipped default for the former-haiku gate judges (the cascade
- * first pass, conventions, comment-firewall, sentry, decision-alignment/smell/depth). A
+ * first pass, conventions, sentry, decision-alignment/smell/depth). A
  * `model@effort` spec: judges run `--ignore-user-config`, so argv is the only effort channel —
  * the codex adapter splits the suffix into `-c model_reasoning_effort`. ONE constant so a family
  * flip is one edit; per-install overrides ride guard.config.json review.model / GUARD_* envs.

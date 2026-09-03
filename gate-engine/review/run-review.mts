@@ -39,6 +39,7 @@ import { execJudgeAsync, strictRemedy } from '../judge/run-judge.mts';
 import { loadCache } from './cache.mts';
 import { type CascadeResult, runCascade } from './cascade/reviewer.mts';
 import { RESPONSE_CONTRACT_REMEDY } from './contracts/response.mts';
+import { baseProvenanceLines, primeReviewBaseContext } from './evidence/base-context.mts';
 import { loadReviewerContext } from './evidence/commit-message.mts';
 import { responseContractFor } from './contracts/registry.mts';
 import { renderFindingsBlockForParts } from './evidence/findings.mts';
@@ -165,6 +166,9 @@ export async function runReviewGate(
       if (before !== null && tree !== null && headHash(cwd) === before) {
         preJudgeTree = tree;
         preJudgeHead = before;
+        // Pin the provenance to THIS head: every later reader (scope rows, block notes) must name
+        // the tree the evidence below was read from, not one re-read after a concurrent commit.
+        primeReviewBaseContext(cwd, before.startsWith('unborn:') ? null : before);
         break;
       }
     }
@@ -266,8 +270,14 @@ export async function runReviewGate(
     resolveChunkCap(process.env.GUARD_CORRECTNESS_CHUNK, cfg.review.correctnessChunkLoc),
   );
   for (const s of plan.scope)
-    emitReviewScope(s.sel, s.diff, promptIdentity(s.sel), s.cached, ctx.scopeFields);
+    emitReviewScope(s.sel, s.diff, promptIdentity(s.sel), s.cached, ctx.scopeFields, cwd);
   for (const line of plan.cachedLines) console.error(line);
+  // Before any verdict AND before the fully-cached early return below (sc-2480).
+  for (const line of baseProvenanceLines(
+    cwd,
+    selected.flatMap((s) => s.files),
+  ))
+    console.error(line);
   for (const c of plan.fullyCached) {
     timing.cacheHit(c.name, c.duration);
     emitCacheHit(`review:${c.name}`, c.model as string, c.duration);

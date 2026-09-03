@@ -142,7 +142,6 @@ describe('gateConfigFingerprint — stability (or the cache is useless)', () => 
       symlinkSync(join(root, 'guard.config.json'), join(wt, 'guard.config.json'));
       mkdirSync(join(wt, '.devkit'), { recursive: true });
       symlinkSync(join(root, '.devkit', 'baselines'), join(wt, '.devkit', 'baselines'));
-      mkdirSync(join(wt, 'eslint'), { recursive: true });
       mkdirSync(join(wt, '.search-code'), { recursive: true });
       symlinkSync(join(root, '.search-code', 'index.db'), join(wt, '.search-code', 'index.db'));
       return wt;

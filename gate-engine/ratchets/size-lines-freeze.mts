@@ -2,7 +2,6 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { sourceMatchers } from '../config.mts';
 import {
-  LEGACY_LINES_BASELINE,
   readRatchetBaseline,
   removeRatchetBaseline,
   writeRatchetBaseline,
@@ -34,7 +33,7 @@ export function freezeLinesBaseline(
   oversized: OversizedFile[],
   mode: LinesFreezeMode,
 ): number {
-  const baseline = readRatchetBaseline(root, LINES_BASELINE, LEGACY_LINES_BASELINE);
+  const baseline = readRatchetBaseline(root, LINES_BASELINE);
   const decodedPrevious = lineBaselineOrExit(
     baseline?.contents ?? null,
     baseline?.relativePath ?? LINES_BASELINE,
@@ -82,7 +81,6 @@ export function freezeLinesBaseline(
     writeRatchetBaseline(
       root,
       LINES_BASELINE,
-      LEGACY_LINES_BASELINE,
       `${JSON.stringify(
         {
           lineCountVersion: CURRENT_LINE_COUNT_VERSION,
@@ -95,7 +93,7 @@ export function freezeLinesBaseline(
       )}\n`,
     );
   } else {
-    removeRatchetBaseline(root, LINES_BASELINE, LEGACY_LINES_BASELINE);
+    removeRatchetBaseline(root, LINES_BASELINE);
   }
   if (raised.length > 0) {
     console.log(`  ⚠ ${raised.length} file(s) grew since the last freeze:`);

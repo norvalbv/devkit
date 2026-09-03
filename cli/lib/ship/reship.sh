@@ -178,6 +178,9 @@ LINK_DIRS=()
 [ "${#LINK_EXTRA[@]}" -gt 0 ] && LINK_DIRS+=("${LINK_EXTRA[@]}")
 
 ROOT=$(git rev-parse --show-toplevel)
+# Pinned before any staging: in a shared parallel-agent checkout $ROOT can gain a commit mid-run, and
+# a later read would name a tree the caller never read (sc-2480). Empty when unreadable.
+CALLER_HEAD=$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || true)
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REWRITE_REMOTE_SUPERVISOR="$SCRIPT_DIR/review/process/gate-supervisor.mts"
 [ -f "$REWRITE_REMOTE_SUPERVISOR" ] || REWRITE_REMOTE_SUPERVISOR="$SCRIPT_DIR/review/process/gate-supervisor.mjs"
@@ -513,6 +516,18 @@ exec 0</dev/null
 . "$SCRIPT_DIR/repo-identity.sh"
 export DEVKIT_SHIP_ID="${DEVKIT_SHIP_ID:-$(uuidgen 2>/dev/null || echo "${BR//\//-}-$$-$(date +%s)")}"
 export DEVKIT_SHIP_REPO="$(devkit_repo_identity "$ROOT")" DEVKIT_SHIP_BRANCH="$BR"
+# The caller's checkout and the exact shipped paths, for gates that must tell the operator what to
+# run OUTSIDE the ephemeral worktree (qavis-advisory: `qavis qa --staged` must see these staged in
+# ROOT, where the receipt it writes is linked back into the gate worktree — sc-2487).
+export DEVKIT_SHIP_ROOT="$ROOT"
+export DEVKIT_SHIP_FROM_BRANCH="${FROM_BRANCH:-0}"
+# Each path base64-encoded and ':'-joined: env values cannot carry NUL, and a newline or colon in a
+# valid filename must survive the round trip into the printed remedy.
+DEVKIT_SHIP_PATHS=""
+for __dk_p in ${PATHS[@]+"${PATHS[@]}"}; do
+  DEVKIT_SHIP_PATHS="${DEVKIT_SHIP_PATHS}$(printf '%s' "$__dk_p" | base64 | tr -d '\n'):"
+done
+export DEVKIT_SHIP_PATHS
 export DEVKIT_SHIP_RESUMED=$RESUME
 SHIP_INTENT_ARGS=(write --root "$ROOT" --branch "$BR" --mode reship --title "$TITLE")
 [ "$REWRITE" -eq 0 ] || SHIP_INTENT_ARGS+=(--base "$BASE_REF")
@@ -819,6 +834,7 @@ else
 # The pinned parent the worktree was cut from — the PR tip for an append, or the PR base for a
 # rewrite — lets in-chain gates (fallow) diff against it rather than their own main-autodetect.
 export DEVKIT_SHIP_BASE_SHA="$BASE"
+export DEVKIT_SHIP_SOURCE_HEAD="$CALLER_HEAD"   # pinned above, before staging (sc-2480)
 export DEVKIT_SHIP_MODE=reship   # tags the ship_attempt telemetry (retry onto an existing branch)
 export DEVKIT_RUN_MODE=ship      # never inherit a caller's review allowlist into a real ship
 # Preflight before the multi-minute chain, then prove the commit still holds the briefed work before

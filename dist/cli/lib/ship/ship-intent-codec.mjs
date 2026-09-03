@@ -1,6 +1,6 @@
 /** Persisted intent shapes and binary-safe field/path codecs used by the ship-intent boundary. */
 import { isUtf8 } from 'node:buffer';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { git } from '../reconcile.mjs';
@@ -17,14 +17,15 @@ export function sourceMembershipOid(root, membership, write = false) {
 }
 export function bindSourceMembership(root, branch, membership) {
     const oid = sourceMembershipOid(root, membership, true);
-    execFileSync('git', [
-        '-C',
-        root,
-        'update-ref',
-        sourceMembershipRef(branch, membership.sourceAttemptId),
-        oid,
-        '0000000000000000000000000000000000000000',
-    ], { stdio: 'ignore' });
+    const ref = sourceMembershipRef(branch, membership.sourceAttemptId);
+    const bound = spawnSync('git', ['-C', root, 'update-ref', '--stdin'], {
+        input: `create ${ref} ${oid}\n`,
+        encoding: 'utf8',
+    });
+    if (bound.error)
+        throw bound.error;
+    if (bound.status !== 0)
+        throw new Error(`source-membership ref ${ref} could not be bound: ${bound.stderr.trim() || `git update-ref exited ${bound.status}`}`);
     return oid;
 }
 export function unbindSourceMembership(root, branch, membership) {

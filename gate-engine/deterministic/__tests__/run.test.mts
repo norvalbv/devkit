@@ -28,13 +28,22 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-// A repo whose .devkit/config.json selects `guards`. Pass null for no config (missing-config path).
-function repo(guards) {
+// A repo whose .devkit/config.json selects `guards` and, independently, anti-slop. Pass null with
+// no antiSlop value for the missing-config path.
+function repo(guards, antiSlop) {
   const d = mkdtempSync(join(tmpdir(), 'guard-det-'));
   dirs.push(d);
-  if (guards) {
+  if (guards || antiSlop !== undefined) {
     mkdirSync(join(d, '.devkit'), { recursive: true });
-    writeFileSync(join(d, '.devkit', 'config.json'), JSON.stringify({ components: { guards } }));
+    writeFileSync(
+      join(d, '.devkit', 'config.json'),
+      JSON.stringify({
+        components: {
+          guards: guards ?? undefined,
+          antiSlop,
+        },
+      }),
+    );
   }
   return d;
 }
@@ -111,6 +120,29 @@ describe('runDeterministic — aggregation + trichotomy', () => {
     const exec = mkExec({});
     expect(runDeterministic(repo(null), { exec })).toBe(0);
     expect(exec).toHaveBeenCalledTimes(4);
+  });
+
+  it('an opted-in anti-slop exit 2 is a HARD failure and prevents a false-green prefix', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exec = mkExec({ 'cli/index.mts': 2 });
+    expect(runDeterministic(repo([], true), { exec })).toBe(1);
+    expect(err.mock.calls.flat().join('\n')).toContain(
+      'deterministic gates failed: guard-anti-slop(unexpected:2)',
+    );
+    expect(exec).toHaveBeenCalledWith(
+      'node',
+      [expect.stringContaining('cli/index.mts'), 'anti-slop', 'check', '--staged'],
+      expect.anything(),
+    );
+  });
+
+  it('aggregates anti-slop with another deterministic failure in the same run', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exec = mkExec({ 'size-disable': 1, 'cli/index.mts': 1 });
+    expect(runDeterministic(repo(['size'], true), { exec })).toBe(1);
+    expect(err.mock.calls.flat().join('\n')).toContain(
+      'deterministic gates failed: guard-size guard-anti-slop',
+    );
   });
 });
 
@@ -334,6 +366,27 @@ describe('parseOpts — the argv tokenizer the real hook depends on', () => {
 });
 
 describe('selectedIds', () => {
+  // sc-2483 follow-through: .devkit/config.json is external JSON, so every layer is read as an own
+  // property — an inherited `components`/`guards`/`antiSlop` must never change the gate set.
+  it('ignores inherited properties at every layer of the config', () => {
+    const proto = Object.prototype;
+    Object.defineProperty(proto, 'components', {
+      value: { antiSlop: true, guards: ['size'] },
+      configurable: true,
+    });
+    Object.defineProperty(proto, 'antiSlop', { value: true, configurable: true });
+    Object.defineProperty(proto, 'guards', { value: ['size'], configurable: true });
+    try {
+      expect(selectedIds(repo(null))).toEqual(['size', 'fanout', 'dup', 'clone']);
+      expect(selectedIds(repo(['clone']))).toEqual(['clone']);
+      expect(selectedIds(repo([], false))).toEqual([]);
+    } finally {
+      delete proto.components;
+      delete proto.antiSlop;
+      delete proto.guards;
+    }
+  });
+
   it('intersects components.guards with the deterministic set in fixed order, dropping AI ids', () => {
     const d = repo(['clone', 'size', 'review', 'decisions']); // review/decisions are AI (fail-fast)
     expect(selectedIds(d)).toEqual(['size', 'clone']);
@@ -347,10 +400,23 @@ describe('selectedIds', () => {
     expect(selectedIds(repo(null))).toEqual(['size', 'fanout', 'dup', 'clone']);
   });
 
+  it('selects anti-slop only from its explicit component bit, never components.guards', () => {
+    expect(selectedIds(repo([], true))).toEqual(['anti-slop']);
+    expect(selectedIds(repo(['anti-slop'], false))).toEqual([]);
+    expect(selectedIds(repo(['anti-slop']))).toEqual([]);
+  });
+
+  it('keeps anti-slop out of missing and unreadable config fallbacks', () => {
+    expect(selectedIds(repo(null))).not.toContain('anti-slop');
+    const d = repo([], true);
+    writeFileSync(join(d, '.devkit', 'config.json'), '{ nope');
+    expect(selectedIds(d)).toEqual(['size', 'fanout', 'dup', 'clone']);
+  });
+
   it('uses the explicit review allowlist instead of components.guards in review mode', () => {
-    const d = repo(['size', 'fanout', 'dup', 'clone']);
+    const d = repo(['size', 'fanout', 'dup', 'clone'], true);
     process.env.DEVKIT_RUN_MODE = 'review';
-    process.env.DEVKIT_REVIEW_GUARDS = ' clone, size ,decisions ';
+    process.env.DEVKIT_REVIEW_GUARDS = ' clone, size ,decisions, anti-slop ';
     expect(selectedIds(d)).toEqual(['size', 'clone']);
     process.env.DEVKIT_REVIEW_GUARDS = '';
     expect(selectedIds(d)).toEqual([]);

@@ -12,33 +12,76 @@ var __rewriteRelativeImportExtension = (this && this.__rewriteRelativeImportExte
     }
     return path;
 };
-import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, realpathSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { LEGACY_STRUCTURE_BASELINE_DIR, LEGACY_STRUCTURE_EXEMPT, STRUCTURE_BASELINE_DIR, STRUCTURE_EXEMPT, } from '../ratchets/baseline-paths.mjs';
-async function importAcrossMigration(root, canonical, legacy) {
-    const canonicalFile = join(root, canonical);
-    const legacyFile = join(root, legacy);
-    for (const file of [canonicalFile, legacyFile, canonicalFile]) {
-        if (!existsSync(file))
-            continue;
-        try {
-            // SAFETY: baseline modules are Devkit-generated or match the documented exemption template;
-            // consumers are validated at the string-array read sites below.
-            return (await import(__rewriteRelativeImportExtension(pathToFileURL(file).href)));
+import { STRUCTURE_BASELINE_DIR, STRUCTURE_EXEMPT } from '../ratchets/baseline-paths.mjs';
+async function importBaselineModule(root, relative) {
+    // Absolute from the start: Node reports load failures by absolute pathname, and the transient-
+    // absence classifier compares against this value, so a relative root must not reach it.
+    const file = resolve(root, relative);
+    // A concurrent regeneration rewrites this module as unlink→write. Probe across that window —
+    // wherever the unlink lands relative to the existence check and import() — so a mid-rewrite read
+    // cannot transiently report debt as empty. Failures are classified by KIND, not by re-probing:
+    // this module's own absence is the transient the loop absorbs, while any other load error (a
+    // syntax error, a missing import inside the module) belongs to the consumer and fails loud.
+    // Every terminal outcome is decided by the FINAL attempt's own observation: a module still
+    // present but unloadable after the window fails loud, and stable absence means no debt.
+    for (let attempt = 0;; attempt += 1) {
+        const finalAttempt = attempt === 2;
+        if (existsSync(file)) {
+            try {
+                // SAFETY: baseline modules are Devkit-generated or match the documented exemption template;
+                // consumers are validated at the string-array read sites below.
+                return (await import(__rewriteRelativeImportExtension(pathToFileURL(file).href)));
+            }
+            catch (error) {
+                if (!(error instanceof Error) || !isTransientModuleAbsence(error, file))
+                    throw error;
+                if (finalAttempt)
+                    throw error;
+            }
         }
-        catch (error) {
-            // A migration may remove the selected legacy name between existsSync and import(). Retry the
-            // canonical name; a stable syntax/load error still belongs to the consumer and must fail loud.
-            if (existsSync(file))
-                throw error;
+        else if (finalAttempt) {
+            return null;
         }
+        await new Promise((settle) => setTimeout(settle, 5));
     }
-    return null;
 }
-/** Load permanent import-wall exception patterns across the storage migration. */
+/** True only when the load failure IS this module's own absence (the unlink of a rewrite). */
+export function isTransientModuleAbsence(error, file) {
+    // SAFETY: Node module-load failures carry ErrnoException.code/path; absent fields fail the check.
+    const { code, path } = error;
+    if (code !== 'ERR_MODULE_NOT_FOUND' && code !== 'ENOENT')
+        return false;
+    // A file that is absent RIGHT NOW is mid-rewrite regardless of what the message names —
+    // retrying is correct even if the not-found module was a nested import, because the next probe
+    // re-observes this file directly.
+    if (!existsSync(file))
+        return true;
+    // Node reports the real path, so a symlinked segment in `file` must not defeat the comparison.
+    // The MISSING module opens the message; "imported from" later may name this file when a
+    // consumer's own import inside the module is broken — that stays loud. Literal prefix
+    // comparison keeps paths with quotes or regex metacharacters exact.
+    for (const candidate of moduleNameCandidates(file)) {
+        if (path === candidate)
+            return true;
+        if (error.message.startsWith(`Cannot find module '${candidate}'`))
+            return true;
+    }
+    return false;
+}
+function moduleNameCandidates(file) {
+    try {
+        return [file, realpathSync(file)];
+    }
+    catch {
+        return [file];
+    }
+}
+/** Load permanent import-wall exception patterns. */
 export async function loadImportWallExempt(root) {
-    const mod = await importAcrossMigration(root, STRUCTURE_EXEMPT, LEGACY_STRUCTURE_EXEMPT);
+    const mod = await importBaselineModule(root, STRUCTURE_EXEMPT);
     const entries = mod?.importWallExempt ?? [];
     return new Set(entries.map(({ pattern }) => pattern));
 }
@@ -47,9 +90,8 @@ export async function loadImportWallExempt(root) {
  * @returns {{loadBaseline:(name:string)=>Promise<string[]>, loadExempt:(name:string)=>Promise<string[]>}}
  */
 export function makeBaselineLoaders(root) {
-    // Canonical Devkit-owned debt first; legacy ESLint storage remains readable through migration.
     const loadBaseline = async (name) => {
-        const mod = await importAcrossMigration(root, `${STRUCTURE_BASELINE_DIR}/${name}.mjs`, `${LEGACY_STRUCTURE_BASELINE_DIR}/${name}.mjs`);
+        const mod = await importBaselineModule(root, `${STRUCTURE_BASELINE_DIR}/${name}.mjs`);
         if (!mod)
             return [];
         // A baseline module exports one string[] (the grandfather list); read it at the dynamic-import boundary.
@@ -58,7 +100,7 @@ export function makeBaselineLoaders(root) {
     };
     // Permanent hand-edited exemptions are policy, separate from generated debt.
     const loadExempt = async (name) => {
-        const mod = await importAcrossMigration(root, STRUCTURE_EXEMPT, LEGACY_STRUCTURE_EXEMPT);
+        const mod = await importBaselineModule(root, STRUCTURE_EXEMPT);
         if (!mod)
             return [];
         return mod.structureExempt?.[name] ?? [];

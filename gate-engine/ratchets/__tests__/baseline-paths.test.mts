@@ -2,9 +2,9 @@ import { execFileSync, spawn } from 'node:child_process';
 import {
   existsSync,
   linkSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
-  openSync,
   readFileSync,
   rmSync,
   symlinkSync,
@@ -16,15 +16,18 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   FANOUT_BASELINE,
   IMPORT_WALL_BASELINE,
-  LEGACY_LINES_BASELINE,
   LINES_BASELINE,
   migrateRatchetBaselines,
   readRatchetBaseline,
+  removeRatchetBaseline,
   SIZE_BASELINE,
   STRUCTURE_BASELINE_DIR,
   STRUCTURE_EXEMPT,
   writeRatchetBaseline,
 } from '../baseline-paths.mts';
+
+// Retired legacy pathname, still recognised by init/upgrade migration (sc-2256).
+const LEGACY_LINES_BASELINE = 'eslint/baselines/size-lines.json';
 
 let roots: string[] = [];
 
@@ -101,17 +104,90 @@ describe('ratchet baseline paths', () => {
     ]);
   });
 
-  it('writes canonical state unless a legacy baseline actually exists', () => {
+  it('reads only the canonical baseline (the legacy generation is retired)', () => {
     const root = makeRoot();
-    expect(readRatchetBaseline(root, LINES_BASELINE, LEGACY_LINES_BASELINE)).toBeNull();
-    write(root, LEGACY_LINES_BASELINE, '{"files":{}}\n');
-    expect(readRatchetBaseline(root, LINES_BASELINE, LEGACY_LINES_BASELINE)?.relativePath).toBe(
-      LEGACY_LINES_BASELINE,
-    );
+    expect(readRatchetBaseline(root, LINES_BASELINE)).toBeNull();
+    write(root, 'eslint/baselines/size-lines.json', '{"files":{}}\n');
+    expect(readRatchetBaseline(root, LINES_BASELINE)).toBeNull();
     write(root, LINES_BASELINE, '{"files":{}}\n');
-    expect(readRatchetBaseline(root, LINES_BASELINE, LEGACY_LINES_BASELINE)?.relativePath).toBe(
-      LINES_BASELINE,
+    expect(readRatchetBaseline(root, LINES_BASELINE)?.relativePath).toBe(LINES_BASELINE);
+  });
+
+  it('a canonical write or clear discards a stale retired copy so migration cannot resurrect it', () => {
+    const root = makeRoot();
+    write(root, '.devkit/config.json', '{"overlay":true}\n');
+    write(root, LEGACY_LINES_BASELINE, '{"files":{"src/legacy.ts":80}}\n');
+
+    writeRatchetBaseline(root, LINES_BASELINE, '{"files":{"src/legacy.ts":70}}\n');
+    expect(existsSync(join(root, LEGACY_LINES_BASELINE))).toBe(false);
+    expect(migrateRatchetBaselines(root, { dryRun: true })).toEqual([]);
+
+    write(root, LEGACY_LINES_BASELINE, '{"files":{"src/legacy.ts":80}}\n');
+    removeRatchetBaseline(root, LINES_BASELINE);
+    expect(existsSync(join(root, LEGACY_LINES_BASELINE))).toBe(false);
+    expect(migrateRatchetBaselines(root, { dryRun: true })).toEqual([]);
+  });
+
+  it('spares a TRACKED retired copy on an overlay install, leaving it for the next full install', () => {
+    const root = makeRoot();
+    execFileSync('git', ['init', '-q'], { cwd: root });
+    write(root, '.devkit/config.json', '{"overlay":true}\n');
+    write(root, LEGACY_LINES_BASELINE, '{"files":{"src/legacy.ts":80}}\n');
+    execFileSync('git', ['add', '--', LEGACY_LINES_BASELINE], { cwd: root });
+
+    // Overlay hides its files through .git/info/exclude, which cannot hide a deletion: removing a
+    // tracked path would dirty the very tree an overlay install promises not to touch.
+    removeRatchetBaseline(root, LINES_BASELINE);
+    expect(readFileSync(join(root, LEGACY_LINES_BASELINE), 'utf8')).toBe(
+      '{"files":{"src/legacy.ts":80}}\n',
     );
+    expect(existsSync(join(root, LINES_BASELINE))).toBe(false);
+    // The committed ceiling outlives the overlay's local clear, so a later full install adopts it.
+    expect(migrateRatchetBaselines(root, { dryRun: true })).toEqual([
+      { from: LEGACY_LINES_BASELINE, kind: 'moved', to: LINES_BASELINE },
+    ]);
+
+    // A local overlay write cannot silently overwrite it either: divergent ceilings stop migration.
+    writeRatchetBaseline(root, LINES_BASELINE, '{"files":{"src/legacy.ts":70}}\n');
+    expect(existsSync(join(root, LEGACY_LINES_BASELINE))).toBe(true);
+    expect(() => migrateRatchetBaselines(root)).toThrow(/different contents/);
+  });
+
+  it('an overlay write spares a tracked retired copy still hard-linked by an interrupted migration', () => {
+    const root = makeRoot();
+    execFileSync('git', ['init', '-q'], { cwd: root });
+    write(root, '.devkit/config.json', '{"overlay":true}\n');
+    write(root, LEGACY_LINES_BASELINE, '{"files":{"src/legacy.ts":80}}\n');
+    execFileSync('git', ['add', '--', LEGACY_LINES_BASELINE], { cwd: root });
+    // migrateRatchetBaselines links canonical to legacy before unlinking legacy; an interrupt
+    // between the two leaves both names on one inode, which a truncating write would rewrite.
+    mkdirSync(join(root, '.devkit/baselines'), { recursive: true });
+    linkSync(join(root, LEGACY_LINES_BASELINE), join(root, LINES_BASELINE));
+
+    writeRatchetBaseline(root, LINES_BASELINE, '{"files":{"src/legacy.ts":70}}\n');
+
+    expect(readFileSync(join(root, LEGACY_LINES_BASELINE), 'utf8')).toBe(
+      '{"files":{"src/legacy.ts":80}}\n',
+    );
+    expect(readFileSync(join(root, LINES_BASELINE), 'utf8')).toBe(
+      '{"files":{"src/legacy.ts":70}}\n',
+    );
+  });
+
+  it('writes through a per-file baseline symlink the ship worktree projects', () => {
+    const root = makeRoot();
+    const primary = makeRoot();
+    const real = join(primary, 'size-lines.json');
+    writeFileSync(real, '{"files":{"src/a.ts":9}}\n');
+    mkdirSync(join(root, '.devkit/baselines'), { recursive: true });
+    // link-gate-configs.sh projects each baseline as its OWN symlink, and the write has to reach
+    // the primary checkout's file (git-index.mts) rather than replace the link.
+    symlinkSync(real, join(root, LINES_BASELINE));
+
+    writeRatchetBaseline(root, LINES_BASELINE, '{"files":{"src/a.ts":7}}\n');
+
+    expect(lstatSync(join(root, LINES_BASELINE)).isSymbolicLink()).toBe(true);
+    expect(readFileSync(real, 'utf8')).toBe('{"files":{"src/a.ts":7}}\n');
   });
 
   it('moves legacy ratchets byte-for-byte and is idempotent', () => {
@@ -214,21 +290,14 @@ describe('ratchet baseline paths', () => {
     ).toBe('');
   });
 
-  it('stops a package gate write before deleting legacy debt when canonical is ignored', () => {
+  it('stops a package gate write when the canonical baseline is ignored', () => {
     const root = makeRoot();
     execFileSync('git', ['init', '-q'], { cwd: root });
     write(root, '.gitignore', '.devkit/\n');
-    write(root, LEGACY_LINES_BASELINE, '{"files":{"src/legacy.ts":80}}\n');
 
     expect(() =>
-      writeRatchetBaseline(
-        root,
-        LINES_BASELINE,
-        LEGACY_LINES_BASELINE,
-        '{"files":{"src/legacy.ts":70}}\n',
-      ),
+      writeRatchetBaseline(root, LINES_BASELINE, '{"files":{"src/legacy.ts":70}}\n'),
     ).toThrow(`${LINES_BASELINE} is ignored by Git`);
-    expect(existsSync(join(root, LEGACY_LINES_BASELINE))).toBe(true);
     expect(existsSync(join(root, LINES_BASELINE))).toBe(false);
   });
 
@@ -237,97 +306,10 @@ describe('ratchet baseline paths', () => {
     execFileSync('git', ['init', '-q'], { cwd: root });
     write(root, '.gitignore', '.devkit/\n');
     write(root, '.devkit/config.json', '{"overlay":true}\n');
-    write(root, LEGACY_LINES_BASELINE, '{"files":{"src/legacy.ts":80}}\n');
 
-    writeRatchetBaseline(
-      root,
-      LINES_BASELINE,
-      LEGACY_LINES_BASELINE,
-      '{"files":{"src/legacy.ts":70}}\n',
-    );
+    writeRatchetBaseline(root, LINES_BASELINE, '{"files":{"src/legacy.ts":70}}\n');
 
     expect(readFileSync(join(root, LINES_BASELINE), 'utf8')).toContain('70');
-    expect(existsSync(join(root, LEGACY_LINES_BASELINE))).toBe(false);
-  });
-
-  it('copies a gate write when a cross-device hard link is unavailable', () => {
-    const root = makeRoot();
-    write(root, LEGACY_LINES_BASELINE, '{"files":{"src/legacy.ts":80}}\n');
-    writeRatchetBaseline(
-      root,
-      LINES_BASELINE,
-      LEGACY_LINES_BASELINE,
-      '{"files":{"src/legacy.ts":70}}\n',
-      { link: denyHardLink('EXDEV') },
-    );
-
-    expect(readFileSync(join(root, LINES_BASELINE), 'utf8')).toContain('70');
-    expect(existsSync(join(root, LEGACY_LINES_BASELINE))).toBe(false);
-  });
-
-  it("persists the writer's payload when a peer changes legacy state before fallback", () => {
-    const root = makeRoot();
-    const tightened = '{"files":{"src/legacy.ts":70}}\n';
-    write(root, LEGACY_LINES_BASELINE, '{"files":{"src/legacy.ts":80}}\n');
-    writeRatchetBaseline(root, LINES_BASELINE, LEGACY_LINES_BASELINE, tightened, {
-      link: replaceLegacyThenDeny('{"files":{"src/legacy.ts":60}}\n'),
-    });
-    expect(readFileSync(join(root, LINES_BASELINE), 'utf8')).toBe(tightened);
-  });
-
-  it('keeps the write bound to legacy debt when migration removes its pathname', () => {
-    const root = makeRoot();
-    const prior = '{"files":{"src/legacy.ts":8000}}\n';
-    const tightened = '{"files":{"src/legacy.ts":70}}\n';
-    const canonicalFile = join(root, LINES_BASELINE);
-    let migrationRan = false;
-    let observedSplitDebt = false;
-    write(root, LEGACY_LINES_BASELINE, prior);
-
-    writeRatchetBaseline(root, LINES_BASELINE, LEGACY_LINES_BASELINE, tightened, {
-      openExisting: (legacyFile) => {
-        const descriptor = openSync(legacyFile, 'r+');
-        linkSync(legacyFile, canonicalFile);
-        rmSync(legacyFile);
-        migrationRan = true;
-        return descriptor;
-      },
-      link: (legacyFile, destination) => {
-        if (existsSync(legacyFile) && existsSync(destination)) {
-          observedSplitDebt =
-            readFileSync(legacyFile, 'utf8') !== readFileSync(destination, 'utf8');
-        }
-        linkSync(legacyFile, destination);
-      },
-    });
-
-    expect(migrationRan).toBe(true);
-    expect(observedSplitDebt).toBe(false);
-    expect(readFileSync(canonicalFile, 'utf8')).toBe(tightened);
-    expect(existsSync(join(root, LEGACY_LINES_BASELINE))).toBe(false);
-  });
-
-  it('does not hide a non-ENOENT failure opening legacy debt', () => {
-    const root = makeRoot();
-    const prior = '{"files":{"src/legacy.ts":80}}\n';
-    const openError = Object.assign(new Error('legacy baseline is unreadable'), { code: 'EACCES' });
-    write(root, LEGACY_LINES_BASELINE, prior);
-
-    expect(() =>
-      writeRatchetBaseline(
-        root,
-        LINES_BASELINE,
-        LEGACY_LINES_BASELINE,
-        '{"files":{"src/legacy.ts":70}}\n',
-        {
-          openExisting: () => {
-            throw openError;
-          },
-        },
-      ),
-    ).toThrow(openError);
-    expect(readFileSync(join(root, LEGACY_LINES_BASELINE), 'utf8')).toBe(prior);
-    expect(existsSync(join(root, LINES_BASELINE))).toBe(false);
   });
 
   it('copies legacy debt during migration when hard links are not permitted', () => {
@@ -393,13 +375,9 @@ describe('ratchet baseline paths', () => {
     mkdirSync(join(root, '.devkit'), { recursive: true });
     symlinkSync(linked, join(root, '.devkit/baselines'));
 
-    writeRatchetBaseline(
-      root,
-      LINES_BASELINE,
-      LEGACY_LINES_BASELINE,
-      '{"files":{"src/legacy.ts":70}}\n',
-      { stage: true },
-    );
+    writeRatchetBaseline(root, LINES_BASELINE, '{"files":{"src/legacy.ts":70}}\n', {
+      stage: true,
+    });
 
     expect(readFileSync(join(linked, 'size-lines.json'), 'utf8')).toContain('70');
   });
@@ -456,37 +434,6 @@ describe('ratchet baseline paths', () => {
 
     expect(results).toEqual(Array.from({ length: 8 }, () => ({ code: 0, stderr: '' })));
     expect(readFileSync(join(root, LINES_BASELINE), 'utf8')).toBe(bytes);
-    expect(existsSync(join(root, LEGACY_LINES_BASELINE))).toBe(false);
-  });
-
-  it('converges when a gate write races migration', async () => {
-    const root = makeRoot();
-    const prior = '{"files":{"src/legacy.ts":80}}\n';
-    const tightened = '{"files":{"src/legacy.ts":70}}\n';
-    write(root, LEGACY_LINES_BASELINE, prior);
-    write(
-      root,
-      'race.mjs',
-      `import { migrateRatchetBaselines, writeRatchetBaseline, LINES_BASELINE, LEGACY_LINES_BASELINE } from ${JSON.stringify(new URL('../baseline-paths.mts', import.meta.url).href)};\nif (process.argv[3] === 'write') writeRatchetBaseline(process.argv[2], LINES_BASELINE, LEGACY_LINES_BASELINE, ${JSON.stringify(tightened)}); else migrateRatchetBaselines(process.argv[2]);\n`,
-    );
-    const run = (mode: 'migrate' | 'write') =>
-      new Promise<{ code: number | null; stderr: string }>((resolve) => {
-        const child = spawn(process.execPath, [join(root, 'race.mjs'), root, mode], { cwd: root });
-        let stderr = '';
-        child.stderr.setEncoding('utf8');
-        child.stderr.on('data', (chunk: string) => {
-          stderr += chunk;
-        });
-        child.on('close', (code) => resolve({ code, stderr }));
-      });
-
-    const results = await Promise.all([
-      ...Array.from({ length: 4 }, () => run('migrate')),
-      ...Array.from({ length: 4 }, () => run('write')),
-    ]);
-
-    expect(results).toEqual(Array.from({ length: 8 }, () => ({ code: 0, stderr: '' })));
-    expect(readFileSync(join(root, LINES_BASELINE), 'utf8')).toBe(tightened);
     expect(existsSync(join(root, LEGACY_LINES_BASELINE))).toBe(false);
   });
 

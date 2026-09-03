@@ -99,11 +99,12 @@ const HOOK_PREAMBLE = `#!/bin/sh
 ${PATH_SETUP}
 `;
 // Emit the deterministic orchestrator only when it has something to run: a selected
-// deterministic guard (the bin re-reads the selection from .devkit/config.json at commit time)
-// or a structure command joined via --structure.
+// deterministic guard / anti-slop component (the bin re-reads the selection from
+// .devkit/config.json at commit time), or a structure command joined via --structure.
 function wantsDeterministic(selection) {
-    return (DETERMINISTIC_GUARD_IDS.some((id) => selection.guards?.includes(id)) ||
-        Boolean(selection.structureCmd));
+    if (selection.antiSlop || selection.structureCmd)
+        return true;
+    return DETERMINISTIC_GUARD_IDS.some((id) => selection.guards?.includes(id));
 }
 /**
  * Build the `# devkit-guards` marker block (inclusive of markers) from a selection.

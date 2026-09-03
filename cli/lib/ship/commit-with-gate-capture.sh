@@ -209,16 +209,12 @@ SHIP_HOOK_WRAPPER
   if [ "$hook_setup_failed" -eq 1 ]; then
     printf '%s\n' "$hook_setup_error" | tee -a "$log" "$ship_log" >&2
   else
-    # The comment firewall can find a remediation ID only in this isolated worktree. Hand its exact,
-    # caller-root capture path to the gate so the printed justify command remains usable after the
-    # failed empty worktree is reclaimed. The value is evidence location, never an approval token.
-    unset DEVKIT_SHIP_GATE_LOG
     if [ "$ship_dry_gates" -eq 1 ]; then
-      DEVKIT_SHIP_GATE_LOG="$log" DEVKIT_GATE_ARCHIVE_LOG="$ship_log" \
+      DEVKIT_GATE_ARCHIVE_LOG="$ship_log" \
         run_gates_with_capture "$wt" "$root" ship "$log" "$progress" -- \
         git -C "$wt" ${hookcfg[@]+"${hookcfg[@]}"} hook run pre-commit || rc=$?
     else
-      DEVKIT_SHIP_GATE_LOG="$log" DEVKIT_GATE_ARCHIVE_LOG="$ship_log" \
+      DEVKIT_GATE_ARCHIVE_LOG="$ship_log" \
         run_gates_with_capture "$wt" "$root" ship "$log" "$progress" -- \
         git -C "$wt" ${hookcfg[@]+"${hookcfg[@]}"} commit -m "$title" -m "$body" || rc=$?
     fi
@@ -310,6 +306,7 @@ SHIP_HOOK_WRAPPER
   elif [ "$staged_missing" -eq 1 ]; then blocked_json='"staged_objects_missing"'; timed_out=false
   elif grep -q '✗ deterministic gates failed' "$log" 2>/dev/null; then blocked_json='"deterministic"'; timed_out=false
   elif grep -q 'decision smells:' "$log" 2>/dev/null; then blocked_json='"decisions"'; timed_out=false
+  elif grep -q 'guard-comments: .* need a decision' "$log" 2>/dev/null; then blocked_json='"comments"'; timed_out=false
   elif grep -qE 'guard-review: .* (FAILED|INCONCLUSIVE)' "$log" 2>/dev/null; then blocked_json='"review"'; timed_out=false
   else blocked_json='"unknown"'; timed_out=false
   fi
@@ -410,6 +407,27 @@ SHIP_HOOK_WRAPPER
           } >&2
         fi ;;
     esac
+  fi
+
+  # sc-2488. ONE call site, below every terminal arm above, so a tail-based read — the read the
+  # `--resume` line invites — sees the gates that found something but did NOT stop this run. The
+  # parallel completeness judge is the case that motivated it: the fleet blocks first, the hook
+  # reaps the judge, and its finding stays buried mid-log until a later round rediscovers it.
+  #
+  # Deliberately NOT repeated per arm: review-gate-in-chain's sc-1465 note replaced exactly that
+  # shape after 37 of 40 exit sites had silently missed the terminal line. This function has one
+  # return, so one call before it covers all five arms and cannot be missed by a sixth.
+  #
+  # Narration only, per blocking-gates-narrate-attribution-never-depend-on-it: it runs after $rc is
+  # final, holds no exit, is errexit-suppressed, and prints nothing on every unhappy path (the
+  # reader contains its own failures and emits an empty string). The command GROUP fixes the
+  # redirection order — the inner 2>/dev/null discards the reader's own stderr, the group's stdout
+  # becomes ship stderr, and a ship's stdout stays reserved for the PR URL.
+  local digest_reader
+  digest_reader="$(dirname "${BASH_SOURCE[0]}")/digest/gate-digest.mts"
+  [ -f "$digest_reader" ] || digest_reader="$(dirname "${BASH_SOURCE[0]}")/digest/gate-digest.mjs"
+  if [ -f "$digest_reader" ]; then
+    { node "$digest_reader" digest "${DEVKIT_GATE_EVENTS:-}" "${DEVKIT_SHIP_ID:-}" "$log" 2>/dev/null || true; } >&2
   fi
   return "$rc"
 }

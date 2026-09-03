@@ -20,6 +20,7 @@ import {
   writeIntent,
 } from './ship-intent.mts';
 import {
+  bindSourceMembership,
   filterMembershipStream,
   membershipStreamError,
   pathStreamError,
@@ -33,11 +34,19 @@ afterAll(() => {
   for (const d of dirs) rmSync(d, { recursive: true, force: true });
 });
 
+type ObjectFormat = 'sha1' | 'sha256';
+interface SeedOpts {
+  ignored?: boolean;
+  objectFormat?: ObjectFormat;
+}
+
 /** A repo whose .gitignore covers the manifest — the write guard's happy path. */
-function seedRepo({ ignored = true } = {}) {
+function seedRepo({ ignored = true, objectFormat = 'sha1' }: SeedOpts = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'ship-intent-'));
   dirs.push(dir);
-  execFileSync('git', ['init', '-q', dir], { env: { ...process.env, ...GIT_ENV } });
+  execFileSync('git', ['init', '-q', `--object-format=${objectFormat}`, dir], {
+    env: { ...process.env, ...GIT_ENV },
+  });
   execFileSync('git', ['-C', dir, 'remote', 'add', 'origin', 'git@github.com:acme/app.git'], {
     env: { ...process.env, ...GIT_ENV },
   });
@@ -45,8 +54,8 @@ function seedRepo({ ignored = true } = {}) {
   return dir;
 }
 
-const base = (opts: Partial<Parameters<typeof writeIntent>[0]> = {}) => ({
-  root: seedRepo(),
+const base = (opts: Partial<Parameters<typeof writeIntent>[0]> = {}, seed: SeedOpts = {}) => ({
+  root: seedRepo(seed),
   branch: 'feat/x',
   mode: 'ship',
   title: 'ship it',
@@ -376,6 +385,132 @@ describe('ship-intent write/read round trip', () => {
     expect(existsSync(join(opts.root, relIntentPath('feat/x')))).toBe(false);
   });
 });
+
+describe.each(['sha1', 'sha256'] as const)(
+  'branch-source membership is object-format agnostic (%s)',
+  (objectFormat) => {
+    const seed = { objectFormat };
+    const oidWidth = objectFormat === 'sha256' ? 64 : 40;
+    const revParse = (root: string, ref: string) =>
+      execFileSync('git', ['-C', root, 'rev-parse', ref], { encoding: 'utf8' }).trim();
+
+    it('binds a fresh membership, and the ref carries the repository oid width', () => {
+      const opts = base({ sourceMode: 'branch', base: 'work' }, seed);
+      // Prove the fixture is what it claims: a threading slip would silently run both arms on sha1.
+      expect(
+        execFileSync('git', ['-C', opts.root, 'rev-parse', '--show-object-format'], {
+          encoding: 'utf8',
+        }).trim(),
+      ).toBe(objectFormat);
+
+      expect(writeIntent(opts, ['one.txt'])).toBe(0);
+      const stored = JSON.parse(readFileSync(join(opts.root, relIntentPath(opts.branch)), 'utf8'));
+      expect(
+        revParse(opts.root, sourceMembershipRef(opts.branch, stored.sourceAttemptId)),
+      ).toHaveLength(oidWidth);
+    });
+
+    it('refuses a second bind of the same attempt, naming the ref and the git reason', () => {
+      const opts = base({ sourceMode: 'branch', base: 'work' }, seed);
+      expect(writeIntent(opts, ['one.txt'])).toBe(0);
+      const stored = JSON.parse(readFileSync(join(opts.root, relIntentPath(opts.branch)), 'utf8'));
+      const membership = { sourceAttemptId: stored.sourceAttemptId, paths: ['one.txt'] };
+      const ref = sourceMembershipRef(opts.branch, stored.sourceAttemptId);
+      const bound = revParse(opts.root, ref);
+
+      // Rebinding is refused whether or not the membership is identical, and the error names the
+      // ref: `create` must never be relaxed to `update`, or frozen membership stops being frozen.
+      expect(() => bindSourceMembership(opts.root, opts.branch, membership)).toThrow(ref);
+      expect(() =>
+        bindSourceMembership(opts.root, opts.branch, { ...membership, paths: ['widened.txt'] }),
+      ).toThrow(ref);
+      expect(revParse(opts.root, ref)).toBe(bound);
+
+      let refused = '';
+      try {
+        bindSourceMembership(opts.root, opts.branch, membership);
+      } catch (e) {
+        refused = e instanceof Error ? e.message : String(e);
+      }
+      expect(refused).toContain(ref);
+      expect(refused).toContain('reference already exists');
+      expect(refused).not.toContain('Command failed');
+    });
+
+    it('holds the binding across a resume and rotates it on a new attempt', () => {
+      const opts = base({ sourceMode: 'branch', base: 'work' }, seed);
+      expect(writeIntent(opts, ['one.txt'])).toBe(0);
+      const stored = JSON.parse(readFileSync(join(opts.root, relIntentPath(opts.branch)), 'utf8'));
+      const ref = sourceMembershipRef(opts.branch, stored.sourceAttemptId);
+      const bound = revParse(opts.root, ref);
+
+      expect(
+        writeIntent(
+          {
+            ...opts,
+            resumed: true,
+            expectGeneration: stored.generation,
+            sourceAttemptId: stored.sourceAttemptId,
+          },
+          ['one.txt'],
+        ),
+      ).toBe(0);
+      expect(revParse(opts.root, ref)).toBe(bound);
+
+      const resumed = JSON.parse(readFileSync(join(opts.root, relIntentPath(opts.branch)), 'utf8'));
+      expect(
+        writeIntent(
+          {
+            ...opts,
+            resumed: true,
+            expectGeneration: resumed.generation,
+            sourceAttemptId: 'rotated-attempt',
+          },
+          ['two.txt'],
+        ),
+      ).toBe(0);
+      expect(revParse(opts.root, sourceMembershipRef(opts.branch, 'rotated-attempt'))).toHaveLength(
+        oidWidth,
+      );
+      expect(() =>
+        execFileSync('git', ['-C', opts.root, 'rev-parse', '--verify', ref], { stdio: 'ignore' }),
+      ).toThrow();
+    });
+
+    it('hashes a quote-bearing branch name into one plain hex token for the --stdin protocol', () => {
+      const branch = 'feat/"quoted\\odd[1]';
+      const opts = base({ branch, sourceMode: 'branch', base: 'work' }, seed);
+      expect(writeIntent(opts, ['one.txt'])).toBe(0);
+      const stored = JSON.parse(readFileSync(join(opts.root, relIntentPath(branch)), 'utf8'));
+      const ref = sourceMembershipRef(branch, stored.sourceAttemptId);
+
+      expect(ref).toMatch(/^refs\/devkit\/ship-source-memberships\/[0-9a-f]{64}\/[0-9a-f]{64}$/);
+      expect(
+        execFileSync('git', ['-C', opts.root, 'for-each-ref', '--format=%(refname)', ref], {
+          encoding: 'utf8',
+        }).trim(),
+      ).toBe(ref);
+      expect(revParse(opts.root, ref)).toHaveLength(oidWidth);
+    });
+
+    it('surfaces a colliding attempt id through writeIntent without disturbing the record', () => {
+      const opts = base({ sourceMode: 'branch', base: 'work' }, seed);
+      const collide = { ...opts, sourceAttemptId: 'shared-attempt' };
+      expect(writeIntent(collide, ['one.txt'])).toBe(0);
+      const before = readIntent(opts.root, opts.branch);
+      if ('reason' in before) throw new Error(before.reason);
+      const ref = sourceMembershipRef(opts.branch, 'shared-attempt');
+      const bound = revParse(opts.root, ref);
+
+      expect(writeIntent(collide, ['two.txt'])).toBe(1);
+      const after = readIntent(opts.root, opts.branch);
+      if ('reason' in after) throw new Error(after.reason);
+      expect(after.intent.generation).toBe(before.intent.generation);
+      expect(after.intent.paths).toEqual(['one.txt']);
+      expect(revParse(opts.root, ref)).toBe(bound);
+    });
+  },
+);
 
 describe('ship-intent read refusals — each names its cause', () => {
   const reasonOf = (root: string, branch: string, nowMs?: number) => {

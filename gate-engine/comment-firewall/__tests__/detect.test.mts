@@ -5,7 +5,6 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { detectChangedComments, parsePatchHunks, scanCommentTokens } from '../detect.mts';
 import { runCommentFirewall } from '../gate.mts';
-import { receiptKey } from '../judge.mts';
 
 const roots: string[] = [];
 afterEach(() => {
@@ -156,6 +155,176 @@ describe('detectChangedComments', () => {
     expect(detectChangedComments(root).findings.map((item) => item.comment)).toEqual([
       '// new first\n// new second\n// new third',
     ]);
+  });
+
+  it('inventories every touched comment by text-line bucket plus trailing comments', () => {
+    const root = fixture();
+    writeFileSync(
+      path.join(root, 'src/a.ts'),
+      [
+        '// one-line note',
+        'const a = 1;',
+        '// two-line note first',
+        '// two-line note second',
+        'const b = 2; // trailing one',
+        'const c = 3; // trailing two',
+        '// over one',
+        '// over two',
+        '// over three',
+        'const d = 4;',
+        '',
+      ].join('\n'),
+    );
+    git(root, ['add', '.']);
+    const { findings, inventory } = detectChangedComments(root);
+    expect(inventory).toMatchObject({
+      files: 1,
+      paragraphs: { one: 1, two: 1, over: 1 },
+      trailingAdded: 2,
+      decisionsStaged: false,
+    });
+    expect(inventory.touched.map((item) => item.textLines)).toEqual([1, 2, 3]);
+    expect(findings[0]).toMatchObject({ textLines: 3, anchor: inventory.touched[2]?.anchor });
+    expect(findings[0]?.anchor).toMatch(/^[0-9a-f]{12}$/);
+  });
+
+  it('records a paragraph shortened by deletion alone, at its current size and anchor', () => {
+    const root = fixture();
+    const tail = 'const d = 4;\nconst e = 5;\n';
+    writeFileSync(path.join(root, 'src/a.ts'), `const anchor = 1;\n// a\n// b\n// c\n${tail}`);
+    git(root, ['add', 'src/a.ts']);
+    const [over] = detectChangedComments(root).findings;
+    commitAll(root, 'over budget');
+
+    writeFileSync(path.join(root, 'src/a.ts'), `const anchor = 1;\n// a\n// c\n${tail}`);
+    git(root, ['add', 'src/a.ts']);
+    const shortened = detectChangedComments(root);
+    expect(shortened.findings).toEqual([]);
+    expect(shortened.inventory.paragraphs).toEqual({ one: 0, two: 1, over: 0 });
+    expect(shortened.inventory.touched).toEqual([{ anchor: over?.anchor, textLines: 2 }]);
+  });
+
+  it('records a block comment shortened by deleting a bare continuation line', () => {
+    const root = fixture();
+    writeFileSync(path.join(root, 'src/a.ts'), '/* first\n   second\n   third */\nconst x = 1;\n');
+    commitAll(root, 'base');
+    writeFileSync(path.join(root, 'src/a.ts'), '/* first\n   third */\nconst x = 1;\n');
+    git(root, ['add', 'src/a.ts']);
+    const { findings, inventory } = detectChangedComments(root);
+    expect(findings).toEqual([]);
+    expect(inventory.touched.map((item) => item.textLines)).toEqual([2]);
+  });
+
+  it('does not count a paragraph as touched when only adjacent code is deleted', () => {
+    const root = fixture();
+    writeFileSync(
+      path.join(root, 'src/a.ts'),
+      '// a\n// b\n// c\nconst removed = 1;\nconst kept = 2;\n',
+    );
+    commitAll(root, 'base');
+    writeFileSync(path.join(root, 'src/a.ts'), '// a\n// b\n// c\nconst kept = 2;\n');
+    git(root, ['add', 'src/a.ts']);
+    const { findings, inventory } = detectChangedComments(root);
+    expect(findings).toEqual([]);
+    expect(inventory.touched).toEqual([]);
+    expect(inventory.paragraphs).toEqual({ one: 0, two: 0, over: 0 });
+  });
+
+  it('does not count a paragraph as touched when the paragraph above it is deleted', () => {
+    const root = fixture();
+    writeFileSync(
+      path.join(root, 'src/a.ts'),
+      '// gone one\n// gone two\n\n// a\n// b\n// c\nconst x = 1;\n',
+    );
+    commitAll(root, 'base');
+    writeFileSync(path.join(root, 'src/a.ts'), '// a\n// b\n// c\nconst x = 1;\n');
+    git(root, ['add', 'src/a.ts']);
+    const { findings, inventory } = detectChangedComments(root);
+    expect(findings).toEqual([]);
+    expect(inventory.touched).toEqual([]);
+  });
+
+  it('attributes a deleted last line to its own paragraph, not the one that follows it', () => {
+    const root = fixture();
+    writeFileSync(
+      path.join(root, 'src/a.ts'),
+      '// a\n// b\n// c\nconst y = 0;\n// d\n// e\n// f\nconst x = 1;\n',
+    );
+    commitAll(root, 'base');
+    writeFileSync(
+      path.join(root, 'src/a.ts'),
+      '// a\n// b\nconst y = 0;\n// d\n// e\n// f\nconst x = 1;\n',
+    );
+    git(root, ['add', 'src/a.ts']);
+    const { inventory } = detectChangedComments(root);
+    expect(inventory.touched.map((item) => item.textLines)).toEqual([2]);
+  });
+
+  it('gives paragraphs above identical trailing code in one file distinct anchors', () => {
+    const root = fixture();
+    const fn = (name: string): string =>
+      `function ${name}() {\n  // a\n  // b\n  // c\n  return null;\n}\n`;
+    writeFileSync(path.join(root, 'src/a.ts'), `${fn('first')}${fn('second')}`);
+    git(root, ['add', '.']);
+    const { findings, inventory } = detectChangedComments(root);
+    expect(findings).toHaveLength(2);
+    expect(findings[0]?.anchor).not.toBe(findings[1]?.anchor);
+    expect(new Set(inventory.touched.map((item) => item.anchor)).size).toBe(2);
+  });
+
+  it('keeps the anchor when a paragraph is shortened over the same code, and flags decisions', () => {
+    const root = fixture();
+    writeFileSync(path.join(root, 'src/a.ts'), 'const anchor = 1;\n');
+    commitAll(root, 'base');
+    const tail = 'const d = 4;\nconst e = 5;\n';
+    writeFileSync(path.join(root, 'src/a.ts'), `const anchor = 1;\n// a\n// b\n// c\n${tail}`);
+    git(root, ['add', 'src/a.ts']);
+    const [over] = detectChangedComments(root).findings;
+
+    writeFileSync(path.join(root, 'src/a.ts'), `const anchor = 1;\n// a\n// b\n${tail}`);
+    mkdirSync(path.join(root, 'docs/decisions'), { recursive: true });
+    writeFileSync(path.join(root, 'docs/decisions/why.md'), '# why\n');
+    git(root, ['add', '.']);
+    const shortened = detectChangedComments(root);
+    expect(shortened.findings).toEqual([]);
+    expect(shortened.inventory.decisionsStaged).toBe(true);
+    expect(shortened.inventory.touched).toEqual([{ anchor: over?.anchor, textLines: 2 }]);
+  });
+
+  it('merges comment groups separated only by blank lines into one paragraph', () => {
+    const root = fixture();
+    writeFileSync(
+      path.join(root, 'src/a.ts'),
+      '// first half one\n// first half two\n\n\n// second half one\n// second half two\nconst x = 1;\n',
+    );
+    git(root, ['add', '.']);
+    const [paragraph] = detectChangedComments(root).findings;
+    expect(paragraph).toMatchObject({ startLine: 1, endLine: 6 });
+    expect(paragraph?.comment).toBe(
+      '// first half one\n// first half two\n\n\n// second half one\n// second half two',
+    );
+  });
+
+  it('keeps comment groups separated by code as distinct two-line notes', () => {
+    const root = fixture();
+    writeFileSync(
+      path.join(root, 'src/a.ts'),
+      '// first half one\n// first half two\nconst y = 0;\n// second half one\n// second half two\nconst x = 1;\n',
+    );
+    git(root, ['add', '.']);
+    expect(detectChangedComments(root).findings).toEqual([]);
+  });
+
+  it('does not count an untouched header across a blank line toward a new two-line note', () => {
+    const root = fixture();
+    writeFileSync(path.join(root, 'src/a.ts'), '// header one\n// header two\n\nconst x = 1;\n');
+    commitAll(root, 'base');
+    writeFileSync(
+      path.join(root, 'src/a.ts'),
+      '// header one\n// header two\n\n// new note one\n// new note two\nconst x = 1;\n',
+    );
+    git(root, ['add', 'src/a.ts']);
+    expect(detectChangedComments(root).findings).toEqual([]);
   });
 
   it('does not sweep an untouched two-line note into an adjacent one-line addition', () => {
@@ -450,7 +619,7 @@ describe('finding id identity semantics', () => {
     expect(second?.id).not.toBe(first?.id);
   });
 
-  it("never lets a byte-identical copy pasted above inherit its twin's rationale", () => {
+  it("never lets a byte-identical copy pasted above inherit its twin's identity", () => {
     const root = repoWith('const anchor = 1;\n');
     const [original] = stageAndDetect(root, `const anchor = 1;\n${TWIN}\n`);
     commitAll(root, 'justified paragraph');
@@ -462,50 +631,45 @@ describe('finding id identity semantics', () => {
   });
 });
 
-describe('gate outcome after an unrelated line shift', () => {
+describe('gate outcome with legacy waiver evidence on disk', () => {
   const PARAGRAPH = [
     '// Offsets in this protocol are UTF-16 code units, not bytes.',
     '// A surrogate pair therefore advances the cursor by two.',
     '// Byte-based slicing corrupts every message past the first.',
   ].join('\n');
-  const RATIONALE = {
-    rationale: 'The external protocol defines offsets in UTF-16 code units, unlike byte length.',
-    at: '2026-08-15T00:00:00.000Z',
-  };
 
-  it('reuses a persisted PASS without review after a distant line shift', () => {
+  it('blocks even when a rationale entry and a PASS receipt exist for the finding', () => {
     const root = fixture();
-    const base = Array.from({ length: 24 }, (_, index) => `const base${index} = ${index};`);
-    writeFileSync(path.join(root, 'src/a.ts'), `${base.join('\n')}\n`);
+    writeFileSync(path.join(root, 'src/a.ts'), 'const anchor = 1;\n');
     commitAll(root, 'base');
-
-    const body = (extra: string[]): string =>
-      [...extra, ...base.slice(0, 12), PARAGRAPH, ...base.slice(12), ''].join('\n');
-    writeFileSync(path.join(root, 'src/a.ts'), body([]));
+    writeFileSync(path.join(root, 'src/a.ts'), `const anchor = 1;\n${PARAGRAPH}\n`);
     git(root, ['add', 'src/a.ts']);
-    const initial = detectChangedComments(root).findings[0];
-    const justified = initial?.id ?? '';
-    expect(justified).toMatch(/^[0-9a-f]{12}$/);
-    if (!initial) throw new Error('expected the initial comment finding');
-    const receipt = receiptKey(initial, RATIONALE, 'haiku');
+    const id = detectChangedComments(root).findings[0]?.id ?? '';
+    expect(id).toMatch(/^[0-9a-f]{12}$/);
 
-    writeFileSync(path.join(root, 'src/a.ts'), body(['const inserted = 0;']));
-    git(root, ['add', 'src/a.ts']);
+    const gitDir = git(root, ['rev-parse', '--git-common-dir']).trim();
+    mkdirSync(path.join(root, gitDir, 'devkit'), { recursive: true });
+    writeFileSync(
+      path.join(root, gitDir, 'devkit/comment-firewall-rationales.json'),
+      JSON.stringify({
+        version: 1,
+        entries: { [id]: { rationale: 'A durable protocol invariant.', at: '2026-08-15' } },
+      }),
+    );
+    mkdirSync(path.join(root, '.devkit'), { recursive: true });
+    writeFileSync(
+      path.join(root, '.devkit/comment-firewall-receipts.json'),
+      JSON.stringify({ version: 1, entries: { legacy: { verdict: 'PASS', findingId: id } } }),
+    );
 
     vi.spyOn(console, 'error').mockImplementation(() => {});
-    const judge = vi.fn();
-    const exit = runCommentFirewall(root, {
-      loadRationales: () => ({ version: 1, entries: { [justified]: RATIONALE } }),
-      loadReceipts: () => ({ [receipt]: { verdict: 'PASS' } }),
-      saveReceipt: () => true,
-      judge,
-      model: () => 'haiku',
-      now: () => '2026-08-24T00:00:00.000Z',
-      strict: () => false,
-    });
+    const exit = runCommentFirewall(root);
+    const output = vi.mocked(console.error).mock.calls.flat().join('\n');
     vi.restoreAllMocks();
 
-    expect(judge).not.toHaveBeenCalled();
-    expect(exit).toBe(0);
+    expect(exit).toBe(1);
+    expect(output).toContain(`[${id}] src/a.ts:2-4`);
+    expect(output).toContain('Shorten it to at most 2 lines');
+    expect(output).not.toContain('justify');
   });
 });

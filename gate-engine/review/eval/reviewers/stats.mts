@@ -7,6 +7,7 @@
  */
 
 import { mcnemarMidP, wilson } from '../../../decisions/eval/bench.mts';
+import { groupByPair } from './corpus/twins.mts';
 
 export const fmtCi = (k, n) => {
   const { lo, hi } = wilson(k, n);
@@ -182,4 +183,178 @@ export function rowChanged(baseRow, row) {
   if (baseRow.behaviorHash !== undefined && row.behaviorHash !== undefined)
     return row.behaviorHash !== baseRow.behaviorHash;
   return row.rowHash !== baseRow.rowHash;
+}
+
+// ─── Summary (moved from bench.mts) ──────────────────────────────────────────────────────────────────────
+
+const count = (rows, pred) => rows.filter(pred).length;
+
+/** Aggregate scored rows → the metric block for one scope (a reviewer, or pooled). */
+export function summarize(results, { cascade } = {}) {
+  const gold = results.filter((r) => r.expected === 'FAIL');
+  const decoys = results.filter((r) => r.expected === 'PASS');
+  const blocked = gold.filter((r) => r.okFinal);
+  const reasons = {};
+  for (const r of blocked)
+    if (r.reasonClass) reasons[r.reasonClass] = (reasons[r.reasonClass] ?? 0) + 1;
+  const inconclusive = {};
+  for (const r of results)
+    if (r.subcause) inconclusive[r.subcause] = (inconclusive[r.subcause] ?? 0) + 1;
+  const liveEscalations = results.filter((r) => r.escalateLive);
+  // overturns: escalation took back a correct first FAIL; rescues: escalation fixed a first-pass
+  // false-block. Both are cascade-only, like blockRecall/cleanPass.
+  const goldFirstFail = gold.filter((r) => r.firstVerdict === 'FAIL');
+  const decoyFirstFail = decoys.filter((r) => r.firstVerdict === 'FAIL');
+  // Cascade-only metrics mean nothing when no cascade ran; absent, not zeroed.
+  const cascadeMetrics = cascade
+    ? {
+        blockRecall: { k: blocked.length, n: gold.length },
+        cleanPass: { k: count(decoys, (r) => r.okFinal), n: decoys.length },
+        overturnRate: {
+          k: count(goldFirstFail, (r) => !r.okFinal && r.escalateLive),
+          n: goldFirstFail.length,
+        },
+        rescueRate: { k: count(decoyFirstFail, (r) => r.okFinal), n: decoyFirstFail.length },
+      }
+    : {};
+  return {
+    rows: results.length,
+    gold: gold.length,
+    decoys: decoys.length,
+    firstFailRecall: { k: count(gold, (r) => r.firstVerdict === 'FAIL'), n: gold.length },
+    firstCleanPass: { k: count(decoys, (r) => r.firstVerdict === 'PASS'), n: decoys.length },
+    ...cascadeMetrics,
+    // sc-2498: a caseId pair (one gold, one decoy) is consistent only when BOTH are correct;
+    // always ≤ the marginal, and the gap is what the marginal hides.
+    pairConsistency: pairConsistency(results, { cascade }),
+    escalations: liveEscalations.length,
+    escalateMeanSecs: liveEscalations.length
+      ? Math.round(
+          liveEscalations.reduce((s, r) => s + r.ms.escalate, 0) / liveEscalations.length / 1000,
+        )
+      : 0,
+    reasons,
+    inconclusive,
+  };
+}
+
+/** Pair-level contrast consistency over the same pair relation holdout uses (groupByPair): a gold+decoy
+ * group is consistent when both are ok (okFinal under a cascade). Singletons/malformed reported. */
+export function pairConsistency(results, { cascade } = {}) {
+  const ok = (r) => (cascade ? r.okFinal : r.okFirst);
+  // Grouping is keyed on row id (a variantOf target has no link of its own), so only rows that
+  // carry one are grouped; an id-less record is a singleton by definition.
+  const withId = results.filter((r) => !!r.id);
+  let k = 0;
+  let n = 0;
+  let singletons = results.length - withId.length;
+  let malformed = 0;
+  for (const g of groupByPair(withId).values()) {
+    if (g.length === 1) {
+      singletons += 1;
+      continue;
+    }
+    const gold = g.filter((r) => r.expected === 'FAIL');
+    const decoy = g.filter((r) => r.expected === 'PASS');
+    if (g.length !== 2 || gold.length !== 1 || decoy.length !== 1) {
+      malformed += 1;
+      continue;
+    }
+    n += 1;
+    if (ok(gold[0]) && ok(decoy[0])) k += 1;
+  }
+  return { k, n, singletons, malformedGroups: malformed };
+}
+
+/** Budget for the run banner, priced per EFFECTIVE model. A model with no table entry is returned
+ * under `unpriced` (its rows excluded) rather than silently costed as the default. */
+export function estimateMinutes(
+  plan,
+  { estEscalations = 0, escalateSecs = 0, concurrency = 1, table },
+) {
+  const unpriced = new Set();
+  let secs = 0;
+  let unpricedRows = 0;
+  for (const { model, rows } of plan) {
+    const per = table[model];
+    if (per === undefined) {
+      unpriced.add(model);
+      unpricedRows += rows;
+      continue;
+    }
+    secs += rows * per;
+  }
+  secs += estEscalations * escalateSecs;
+  return {
+    minutes: Math.round(secs / 60 / Math.max(1, concurrency)),
+    unpriced: [...unpriced].sort(),
+    unpricedRows,
+  };
+}
+
+/** Measured mean first-pass seconds per effective model over rows that actually ran (ms.first > 0):
+ * the number a probe yields for a model the budget table does not price. */
+export function firstPassMeanSecs(perModel) {
+  const acc = new Map();
+  for (const { model, results } of perModel)
+    for (const r of results) {
+      const ms = r?.ms?.first ?? 0;
+      if (ms <= 0) continue;
+      const a = acc.get(model) ?? { sum: 0, n: 0 };
+      a.sum += ms;
+      a.n += 1;
+      acc.set(model, a);
+    }
+  return new Map([...acc].map(([model, a]) => [model, Math.round(a.sum / a.n / 1000)]));
+}
+
+/** One banner line per effective model with its measured first-pass mean, flagged when the model
+ * is missing from the budget table (the number to add to it). */
+export function firstPassMeanLines(perModel, table) {
+  return [...firstPassMeanSecs(perModel)].map(
+    ([model, secs]) =>
+      `measured first-pass mean ${model}: ${secs}s${table[model] === undefined ? ' (unpriced in EST_FIRST_SECS — add it)' : ''}`,
+  );
+}
+
+/** Only NON-pinned reviewers escalate (and only under a cascade): a pinned reviewer runs single-pass. */
+export function estimateEscalations(plan, cascade) {
+  if (!cascade) return 0;
+  return plan.reduce(
+    (s, p) =>
+      s +
+      (p.reviewer.model
+        ? 0
+        : p.rows.filter((r) => r.expected === 'FAIL').length +
+          Math.round(p.rows.filter((r) => r.expected === 'PASS').length * 0.15)),
+    0,
+  );
+}
+
+/** The run banner: rows, model, cascade, and a budget priced per EFFECTIVE model — a pin with no
+ * table entry is named as unpriced rather than silently costed as the default (sc-2494 probe-first). */
+export function runBannerLines(
+  plan,
+  { model, cascade, concurrency, dev, resuming, table, escalateSecs },
+) {
+  const effModel = (r) => r.model ?? model;
+  const totalRows = plan.reduce((s, p) => s + p.rows.length, 0);
+  const goldRows = plan.reduce((s, p) => s + p.rows.filter((r) => r.expected === 'FAIL').length, 0);
+  const budget = estimateMinutes(
+    plan.map((p) => ({ model: effModel(p.reviewer), rows: p.rows.length })),
+    { estEscalations: estimateEscalations(plan, cascade), escalateSecs, concurrency, table },
+  );
+  const allPinned = plan.every((p) => p.reviewer.model);
+  const modelLabel = allPinned ? [...new Set(plan.map((p) => p.reviewer.model))].join('/') : model;
+  const cascadeLabel = allPinned ? 'single-pass' : cascade ? 'on' : 'off';
+  const lines = [
+    `reviewer-eval: ${totalRows} rows (${goldRows} gold) · model ${modelLabel} · cascade ${cascadeLabel} · ` +
+      `concurrency ${concurrency} · est ≈ ${budget.minutes} min wall-clock${dev ? ' · --dev (holdouts excluded)' : ''}` +
+      `${resuming ? ` · resuming (${resuming} checkpointed row(s) on disk)` : ''}`,
+  ];
+  if (budget.unpriced.length)
+    lines.push(
+      `reviewer-eval: no cost entry for ${budget.unpriced.join(', ')} — estimate excludes ${budget.unpricedRows} row(s); the run prints the measured first-pass mean per model at the end (probe before bench).`,
+    );
+  return lines;
 }

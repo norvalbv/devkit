@@ -302,3 +302,109 @@ describe('waiver_created telemetry', () => {
     ]);
   });
 });
+
+describe('waive base provenance (sc-2480)', () => {
+  const FP = 'a1b2c3d4e5f6';
+  const BASE = '31884c2b7f0e4a19c5d6b8f2a3e7c9d1b4f6a802';
+
+  it('records the base it was HANDED, never one derived from its own worktree', () => {
+    const cwd = repo();
+    expect(
+      runWaive(['correctness-reviewer:races', FP, '--base', BASE, RATIONALE], cwd, fixedAuthor),
+    ).toBe(0);
+    expect(loadOverrides(cwd)[FP].baseSha).toBe(BASE);
+    expect(waiverEvents()[0].base_sha).toBe(BASE);
+  });
+
+  it('records NO base when none was supplied — an unprovable base is worse than none', () => {
+    const cwd = repo();
+    expect(runWaive(['correctness-reviewer:races', FP, RATIONALE], cwd, fixedAuthor)).toBe(0);
+    expect(loadOverrides(cwd)[FP].baseSha).toBeUndefined();
+    expect(waiverEvents()[0].base_sha).toBeNull();
+  });
+
+  it('refuses a --base that is not a sha rather than recording a guess', () => {
+    const cwd = repo();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(
+      runWaive(['correctness-reviewer:races', FP, '--base', 'main', RATIONALE], cwd, fixedAuthor),
+    ).toBe(2);
+    expect(loadOverrides(cwd)[FP]).toBeUndefined();
+  });
+
+  it('keeps the rationale intact when --base precedes it', () => {
+    const cwd = repo();
+    runWaive(['correctness-reviewer:races', FP, '--base', BASE, RATIONALE], cwd, fixedAuthor);
+    expect(loadOverrides(cwd)[FP].rationale).toBe(RATIONALE);
+  });
+});
+
+describe('waive --base parsing shapes (sc-2480)', () => {
+  const FP = 'a1b2c3d4e5f6';
+  const BASE = '31884c2b7f0e4a19c5d6b8f2a3e7c9d1b4f6a802';
+
+  it('accepts --base before the positional arguments', () => {
+    const cwd = repo();
+    expect(
+      runWaive(['--base', BASE, 'correctness-reviewer:races', FP, RATIONALE], cwd, fixedAuthor),
+    ).toBe(0);
+    expect(loadOverrides(cwd)[FP].baseSha).toBe(BASE);
+    expect(loadOverrides(cwd)[FP].rationale).toBe(RATIONALE);
+  });
+
+  // blockingNote prints an abbreviated sha; the CLI must take exactly what it printed.
+  it('accepts the 12-hex short sha the block note actually prints', () => {
+    const cwd = repo();
+    expect(
+      runWaive(
+        ['correctness-reviewer:races', FP, '--base', BASE.slice(0, 12), RATIONALE],
+        cwd,
+        fixedAuthor,
+      ),
+    ).toBe(0);
+    expect(loadOverrides(cwd)[FP].baseSha).toBe(BASE.slice(0, 12));
+  });
+
+  // A rationale is one quoted argv element, so its text can never be mistaken for the flag.
+  it('leaves a rationale that merely mentions --base untouched', () => {
+    const cwd = repo();
+    const mentions = 'the --base flag is irrelevant; the shard lock makes this safe';
+    expect(runWaive(['correctness-reviewer:races', FP, mentions], cwd, fixedAuthor)).toBe(0);
+    expect(loadOverrides(cwd)[FP].rationale).toBe(mentions);
+    expect(loadOverrides(cwd)[FP].baseSha).toBeUndefined();
+  });
+
+  it('refuses a trailing --base with no value rather than swallowing the rationale', () => {
+    const cwd = repo();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(
+      runWaive(['correctness-reviewer:races', FP, RATIONALE, '--base'], cwd, fixedAuthor),
+    ).toBe(2);
+    expect(loadOverrides(cwd)[FP]).toBeUndefined();
+  });
+});
+
+describe('waive re-records changed provenance (reviewer finding)', () => {
+  const FP = 'a1b2c3d4e5f6';
+  const A = '31884c2b7f0e4a19c5d6b8f2a3e7c9d1b4f6a802';
+  const B = '0e7d8722ec23c3e2fafbbb5f14da102d8b7c120b';
+
+  it('emits an event when the SAME rationale is re-waived against a different base', () => {
+    const cwd = repo();
+    runWaive(['correctness-reviewer:races', FP, '--base', A, RATIONALE], cwd, fixedAuthor);
+    expect(
+      runWaive(['correctness-reviewer:races', FP, '--base', B, RATIONALE], cwd, fixedAuthor),
+    ).toBe(0);
+    expect(loadOverrides(cwd)[FP].baseSha).toBe(B);
+    const events = waiverEvents();
+    expect(events).toHaveLength(2);
+    expect(events[1].base_sha).toBe(B);
+  });
+
+  it('stays idempotent when nothing at all changed', () => {
+    const cwd = repo();
+    runWaive(['correctness-reviewer:races', FP, '--base', A, RATIONALE], cwd, fixedAuthor);
+    runWaive(['correctness-reviewer:races', FP, '--base', A, RATIONALE], cwd, fixedAuthor);
+    expect(waiverEvents()).toHaveLength(1);
+  });
+});

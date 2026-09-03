@@ -432,7 +432,6 @@ export function installOverlay(cwd, sel, stack, force, dryRun) {
         `${LOCAL_HOOKS}/`, // .devkit/hooks at the git root
         `${pfx}.devkit/`, // the package's .devkit (config + vendored biome)
         `${pfx}guard.config.json`,
-        `${pfx}eslint/baselines/`,
     ]);
     if (pkgRel)
         console.log(`  monorepo: package "${pkgRel}" — hook + git-ignore at the git root`);
