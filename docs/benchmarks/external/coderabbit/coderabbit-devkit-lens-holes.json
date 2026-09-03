@@ -1,0 +1,155 @@
+{
+  "generatedAt": "2026-09-03T00:19:56.595Z",
+  "since": "2026-07-27",
+  "repoAlias": "devkit",
+  "triage": {
+    "model": "haiku",
+    "rubric": "v1"
+  },
+  "source": "coderabbit:devkit",
+  "findings": 268,
+  "partition": {
+    "Data Integrity & Integration": {
+      "not-reviewed": 18,
+      "matched": 10,
+      "not-in-scope": 15,
+      "in-evidence-unmatched": 26,
+      "evidence-uncertain": 3
+    },
+    "Functional Correctness": {
+      "not-reviewed": 23,
+      "in-evidence-unmatched": 36,
+      "not-in-scope": 23,
+      "matched": 15,
+      "evidence-uncertain": 4
+    },
+    "Stability & Availability": {
+      "not-in-scope": 4,
+      "in-evidence-unmatched": 13,
+      "matched": 9,
+      "not-reviewed": 3,
+      "evidence-uncertain": 1
+    },
+    "Maintainability & Code Quality": {
+      "in-evidence-unmatched": 8,
+      "not-in-scope": 34,
+      "not-reviewed": 5,
+      "matched": 2,
+      "evidence-uncertain": 5
+    },
+    "Security & Privacy": {
+      "in-evidence-unmatched": 4,
+      "not-in-scope": 3,
+      "matched": 1,
+      "not-reviewed": 1
+    },
+    "Performance & Scalability": {
+      "in-evidence-unmatched": 1,
+      "matched": 1
+    }
+  },
+  "matchedByLens": {
+    "Data Integrity & Integration": {
+      "error-and-edge-classification": 3,
+      "concurrency-races": 3,
+      "writer-reader-contracts": 3,
+      "state-transitions": 1
+    },
+    "Functional Correctness": {
+      "writer-reader-contracts": 9,
+      "error-and-edge-classification": 2,
+      "state-transitions": 4
+    },
+    "Stability & Availability": {
+      "error-and-edge-classification": 1,
+      "writer-reader-contracts": 1,
+      "concurrency-races": 4,
+      "state-transitions": 3
+    },
+    "Security & Privacy": {
+      "writer-reader-contracts": 1
+    },
+    "Performance & Scalability": {
+      "writer-reader-contracts": 1
+    },
+    "Maintainability & Code Quality": {
+      "error-and-edge-classification": 1,
+      "writer-reader-contracts": 1
+    }
+  },
+  "unmatchedByTriage": {
+    "Functional Correctness": {
+      "none": 1,
+      "state-transitions": 6,
+      "writer-reader-contracts": 9,
+      "error-and-edge-classification": 15,
+      "untriaged": 4,
+      "concurrency-races": 1
+    },
+    "Maintainability & Code Quality": {
+      "none": 4,
+      "untriaged": 1,
+      "writer-reader-contracts": 3
+    },
+    "Stability & Availability": {
+      "writer-reader-contracts": 1,
+      "error-and-edge-classification": 6,
+      "concurrency-races": 1,
+      "untriaged": 3,
+      "state-transitions": 2
+    },
+    "Data Integrity & Integration": {
+      "writer-reader-contracts": 5,
+      "untriaged": 8,
+      "concurrency-races": 1,
+      "state-transitions": 7,
+      "error-and-edge-classification": 5
+    },
+    "Security & Privacy": {
+      "untriaged": 3,
+      "state-transitions": 1
+    },
+    "Performance & Scalability": {
+      "none": 1
+    }
+  },
+  "eligibility": [
+    {
+      "category": "Data Integrity & Integration",
+      "catchable": 36,
+      "unmatched": 26,
+      "eligible": true
+    },
+    {
+      "category": "Functional Correctness",
+      "catchable": 51,
+      "unmatched": 36,
+      "eligible": true
+    },
+    {
+      "category": "Maintainability & Code Quality",
+      "catchable": 10,
+      "unmatched": 8,
+      "eligible": true
+    },
+    {
+      "category": "Performance & Scalability",
+      "catchable": 2,
+      "unmatched": 1,
+      "eligible": false
+    },
+    {
+      "category": "Security & Privacy",
+      "catchable": 5,
+      "unmatched": 4,
+      "eligible": false
+    },
+    {
+      "category": "Stability & Availability",
+      "catchable": 22,
+      "unmatched": 13,
+      "eligible": true
+    }
+  ],
+  "minDenominator": 8
+}
