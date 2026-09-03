@@ -1,0 +1,142 @@
+{
+  "generatedAt": "2026-09-03T00:20:03.589Z",
+  "since": "2026-07-27",
+  "repoAlias": "frink",
+  "triage": {
+    "model": "haiku",
+    "rubric": "v1"
+  },
+  "source": "coderabbit:frink",
+  "findings": 171,
+  "partition": {
+    "Functional Correctness": {
+      "not-reviewed": 7,
+      "in-evidence-unmatched": 23,
+      "not-in-scope": 19,
+      "matched": 3
+    },
+    "Maintainability & Code Quality": {
+      "not-in-scope": 32,
+      "in-evidence-unmatched": 15,
+      "not-reviewed": 6,
+      "matched": 1
+    },
+    "Security & Privacy": {
+      "in-evidence-unmatched": 11,
+      "not-in-scope": 4,
+      "not-reviewed": 1
+    },
+    "Stability & Availability": {
+      "in-evidence-unmatched": 18,
+      "not-in-scope": 4,
+      "matched": 2
+    },
+    "Data Integrity & Integration": {
+      "in-evidence-unmatched": 13,
+      "matched": 3,
+      "not-in-scope": 6,
+      "not-reviewed": 1
+    },
+    "Performance & Scalability": {
+      "in-evidence-unmatched": 1,
+      "matched": 1
+    }
+  },
+  "matchedByLens": {
+    "Performance & Scalability": {
+      "writer-reader-contracts": 1
+    },
+    "Data Integrity & Integration": {
+      "concurrency-races": 2,
+      "state-transitions": 1
+    },
+    "Functional Correctness": {
+      "writer-reader-contracts": 1,
+      "concurrency-races": 1,
+      "error-and-edge-classification": 1
+    },
+    "Stability & Availability": {
+      "state-transitions": 2
+    },
+    "Maintainability & Code Quality": {
+      "error-and-edge-classification": 1
+    }
+  },
+  "unmatchedByTriage": {
+    "Functional Correctness": {
+      "untriaged": 14,
+      "writer-reader-contracts": 4,
+      "error-and-edge-classification": 3,
+      "none": 1,
+      "state-transitions": 1
+    },
+    "Security & Privacy": {
+      "untriaged": 5,
+      "state-transitions": 2,
+      "none": 2,
+      "writer-reader-contracts": 1,
+      "error-and-edge-classification": 1
+    },
+    "Stability & Availability": {
+      "untriaged": 8,
+      "state-transitions": 6,
+      "writer-reader-contracts": 1,
+      "none": 1,
+      "concurrency-races": 1,
+      "error-and-edge-classification": 1
+    },
+    "Data Integrity & Integration": {
+      "untriaged": 6,
+      "concurrency-races": 1,
+      "state-transitions": 4,
+      "writer-reader-contracts": 2
+    },
+    "Performance & Scalability": {
+      "untriaged": 1
+    },
+    "Maintainability & Code Quality": {
+      "none": 12,
+      "writer-reader-contracts": 1,
+      "state-transitions": 2
+    }
+  },
+  "eligibility": [
+    {
+      "category": "Data Integrity & Integration",
+      "catchable": 16,
+      "unmatched": 13,
+      "eligible": true
+    },
+    {
+      "category": "Functional Correctness",
+      "catchable": 26,
+      "unmatched": 23,
+      "eligible": true
+    },
+    {
+      "category": "Maintainability & Code Quality",
+      "catchable": 16,
+      "unmatched": 15,
+      "eligible": true
+    },
+    {
+      "category": "Performance & Scalability",
+      "catchable": 2,
+      "unmatched": 1,
+      "eligible": false
+    },
+    {
+      "category": "Security & Privacy",
+      "catchable": 11,
+      "unmatched": 11,
+      "eligible": true
+    },
+    {
+      "category": "Stability & Availability",
+      "catchable": 20,
+      "unmatched": 18,
+      "eligible": true
+    }
+  ],
+  "minDenominator": 8
+}

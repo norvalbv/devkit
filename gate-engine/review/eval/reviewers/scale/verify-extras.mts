@@ -13,12 +13,10 @@ import { execJudgeAsync } from '../../../../judge/run-judge.mts';
 import { extractLocations, linesMatch, readArchivedDiff, resolveToStaged } from './labels.mts';
 import { identityByPath, postImagePathOf } from '../../../lens/chunk.mts';
 import { splitDiffByFile } from '../../../../judge/diff-focus.mts';
+import { silenceBenchTelemetry } from './bench-args.mts';
 
 // The bench is not a gate run: silence the telemetry sink for the verifier's judge calls too.
-process.env.DEVKIT_NO_TELEMETRY = '1';
-delete process.env.DEVKIT_GATE_EVENTS;
-delete process.env.DEVKIT_SHIP_ID;
-delete process.env.DEVKIT_RUN_MODE;
+silenceBenchTelemetry();
 
 const OUT =
   process.argv[2] ??

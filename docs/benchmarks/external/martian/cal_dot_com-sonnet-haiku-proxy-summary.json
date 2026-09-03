@@ -1,0 +1,182 @@
+{
+  "generatedAt": "2026-09-03T00:00:37.944Z",
+  "repo": "cal_dot_com",
+  "tool": "devkit-correctness",
+  "reviewerModel": "sonnet",
+  "judgedPrs": 10,
+  "unjudgedPrs": [],
+  "goldensTotal": 41,
+  "goldens": 41,
+  "prMergeYears": {
+    "2023": 6,
+    "2024": 2,
+    "2025": 2
+  },
+  "scores": {
+    "strict": {
+      "tp": 18,
+      "fp": 17,
+      "fn": 17,
+      "precision": 0.5142857142857142,
+      "recall": 0.5142857142857142,
+      "f1": 0.5142857142857142,
+      "f2": 0.5142857142857142
+    },
+    "core": {
+      "tp": 18,
+      "fp": 17,
+      "fn": 19,
+      "precision": 0.5142857142857142,
+      "recall": 0.4864864864864865,
+      "f1": 0.5,
+      "f2": 0.49180327868852464
+    },
+    "all": {
+      "tp": 18,
+      "fp": 17,
+      "fn": 23,
+      "precision": 0.5142857142857142,
+      "recall": 0.43902439024390244,
+      "f1": 0.4736842105263158,
+      "f2": 0.4522613065326633
+    }
+  },
+  "lensHoles": {
+    "source": "martian:cal_dot_com@sonnet",
+    "findings": 41,
+    "partition": {
+      "speculative": {
+        "in-evidence-unmatched": 2
+      },
+      "concurrency": {
+        "matched": 4
+      },
+      "style": {
+        "in-evidence-unmatched": 2
+      },
+      "doc_defect": {
+        "in-evidence-unmatched": 1
+      },
+      "bug": {
+        "matched": 10,
+        "in-evidence-unmatched": 13
+      },
+      "perf": {
+        "in-evidence-unmatched": 1
+      },
+      "api": {
+        "in-evidence-unmatched": 3,
+        "matched": 1
+      },
+      "data": {
+        "matched": 2,
+        "in-evidence-unmatched": 1
+      },
+      "security": {
+        "matched": 1
+      }
+    },
+    "matchedByLens": {
+      "concurrency": {
+        "state-transitions": 2,
+        "concurrency-races": 2
+      },
+      "bug": {
+        "error-and-edge-classification": 7,
+        "writer-reader-contracts": 2,
+        "state-transitions": 1
+      },
+      "data": {
+        "state-transitions": 2
+      },
+      "api": {
+        "writer-reader-contracts": 1
+      },
+      "security": {
+        "error-and-edge-classification": 1
+      }
+    },
+    "unmatchedByTriage": {
+      "speculative": {
+        "untriaged": 2
+      },
+      "style": {
+        "untriaged": 2
+      },
+      "doc_defect": {
+        "untriaged": 1
+      },
+      "perf": {
+        "untriaged": 1
+      },
+      "bug": {
+        "untriaged": 13
+      },
+      "api": {
+        "untriaged": 3
+      },
+      "data": {
+        "untriaged": 1
+      }
+    },
+    "eligibility": [
+      {
+        "category": "api",
+        "catchable": 4,
+        "unmatched": 3,
+        "eligible": false
+      },
+      {
+        "category": "bug",
+        "catchable": 23,
+        "unmatched": 13,
+        "eligible": true
+      },
+      {
+        "category": "concurrency",
+        "catchable": 4,
+        "unmatched": 0,
+        "eligible": false
+      },
+      {
+        "category": "data",
+        "catchable": 3,
+        "unmatched": 1,
+        "eligible": false
+      },
+      {
+        "category": "doc_defect",
+        "catchable": 1,
+        "unmatched": 1,
+        "eligible": false
+      },
+      {
+        "category": "perf",
+        "catchable": 1,
+        "unmatched": 1,
+        "eligible": false
+      },
+      {
+        "category": "security",
+        "catchable": 1,
+        "unmatched": 0,
+        "eligible": false
+      },
+      {
+        "category": "speculative",
+        "catchable": 2,
+        "unmatched": 2,
+        "eligible": false
+      },
+      {
+        "category": "style",
+        "catchable": 2,
+        "unmatched": 2,
+        "eligible": false
+      }
+    ],
+    "minDenominator": 8
+  },
+  "comparability": "NOT comparable to the published leaderboard: Martian methodology \u00a79 (no standardized harness; published tools reviewed full forked repositories). Contamination inflates recall on 2023 PRs, which shrinks apparent holes.",
+  "judge": "haiku (LOCAL PROXY: Martian JUDGE_PROMPT verbatim, no step2 extraction / step2.5 dedup) \u2014 superseded by a real step3 run"
+}

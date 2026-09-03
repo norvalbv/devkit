@@ -84,9 +84,9 @@ function acquireLock(lock: string): LockAcquisition {
  * own single-writer lock: a live run's worktree is skipped (never force-removed mid-judge), and
  * holding the lock through the removal closes the check-then-delete race with a materialize()
  * that starts concurrently. */
-export function cleanMaterialized(): void {
-  if (!existsSync(RESEARCH_ROOT)) return;
-  for (const entry of readdirSync(RESEARCH_ROOT, { withFileTypes: true })) {
+export function cleanMaterialized(root: string = RESEARCH_ROOT): void {
+  if (!existsSync(root)) return;
+  for (const entry of readdirSync(root, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
     if (entry.name.includes('.lock')) {
       // A bare `<wt>.lock` whose worktree is already gone is reaped through the same atomic
@@ -94,7 +94,7 @@ export function cleanMaterialized(): void {
       // staging/aside dirs are another process's transient acquire state — never touch them; a
       // crashed one leaks only a one-file dir.
       if (entry.name.endsWith('.lock')) {
-        const orphan = path.join(RESEARCH_ROOT, entry.name);
+        const orphan = path.join(root, entry.name);
         if (!existsSync(orphan.slice(0, -'.lock'.length))) {
           try {
             const acq = acquireLock(orphan);
@@ -106,7 +106,7 @@ export function cleanMaterialized(): void {
       }
       continue;
     }
-    const wt = path.join(RESEARCH_ROOT, entry.name);
+    const wt = path.join(root, entry.name);
     let acq: LockAcquisition;
     try {
       acq = acquireLock(`${wt}.lock`);
@@ -150,9 +150,9 @@ export function cleanMaterialized(): void {
   }
 }
 
-function ensureResearchRoot(): void {
-  mkdirSync(RESEARCH_ROOT, { recursive: true, mode: 0o700 });
-  chmodSync(RESEARCH_ROOT, 0o700);
+function ensureResearchRoot(root: string): void {
+  mkdirSync(root, { recursive: true, mode: 0o700 });
+  chmodSync(root, 0o700);
 }
 
 export interface Materialized {
@@ -166,6 +166,9 @@ export interface MaterializeOpts {
   diffSha: string;
   attemptTs: string;
   diffText: string;
+  /** Private home for the worktree + raw patch; defaults to the scale-bench research root. An
+   * external-PR bench keeps its checkouts under its own 0700 root so `--clean` scopes correctly. */
+  researchRoot?: string;
 }
 
 const git = (cwd: string, args: string[]): string =>
@@ -220,8 +223,9 @@ function candidateCommits(o: MaterializeOpts): string[] {
 }
 
 export function materialize(o: MaterializeOpts): Materialized {
-  ensureResearchRoot();
-  const wt = path.join(RESEARCH_ROOT, `scale-probe-${o.diffSha.slice(0, 12)}`);
+  const root = o.researchRoot ?? RESEARCH_ROOT;
+  ensureResearchRoot(root);
+  const wt = path.join(root, `scale-probe-${o.diffSha.slice(0, 12)}`);
   const marker = path.join(wt, '.scale-probe-base');
   const lock = `${wt}.lock`;
   // Single-writer lock held for the caller's whole run — see acquireLock(). The marker fast-path
@@ -236,7 +240,7 @@ export function materialize(o: MaterializeOpts): Materialized {
       console.error(`materialize: reusing worktree at ${wt} (base ${base.slice(0, 12)})`);
       return { wt, base };
     }
-    return materializeLocked(o, wt, marker);
+    return materializeLocked(o, wt, marker, root);
   } catch (e) {
     release();
     process.removeListener('exit', release);
@@ -244,10 +248,15 @@ export function materialize(o: MaterializeOpts): Materialized {
   }
 }
 
-function materializeLocked(o: MaterializeOpts, wt: string, marker: string): Materialized {
+function materializeLocked(
+  o: MaterializeOpts,
+  wt: string,
+  marker: string,
+  root: string,
+): Materialized {
   const candidates = candidateCommits(o);
   if (candidates.length === 0) throw new Error('no candidate commits in the time window');
-  const patch = path.join(RESEARCH_ROOT, `scale-probe-${o.diffSha.slice(0, 12)}.patch`);
+  const patch = path.join(root, `scale-probe-${o.diffSha.slice(0, 12)}.patch`);
   writeFileSync(patch, o.diffText, { mode: 0o600 });
   if (!existsSync(wt)) {
     try {
