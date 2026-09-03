@@ -283,7 +283,7 @@ function main() {
       // multi-lens FAIL is independently scanned for ITS OWN pass, not stamped with one shared
       // reviewer-level verdict (see findNextLensOutcome's docstring in mine-telemetry-lib.mts).
       // Falls back to the reviewer-level scan only when there's no lens breakdown at all.
-      const { kind, nextShipId } =
+      const { kind, nextShipId, rule } =
         lens !== null
           ? findNextLensOutcome(chain, fr.ship_id, fr.reviewer, lens, statusOf, lensStatusOf)
           : findNextOutcome(chain, fr.ship_id, fr.reviewer, statusOf);
@@ -307,6 +307,7 @@ function main() {
           branch: ship.branch,
           reviewer: fr.reviewer,
           lens,
+          labelRule: rule,
           tsFail: ship.ts_start,
           diffSha256,
           bytesAvailable: archived.bytesAvailable,

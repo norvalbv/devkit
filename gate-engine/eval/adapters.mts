@@ -2,37 +2,14 @@ import {
   DECISIONS_ACCEPTANCE,
   selectAlignmentContradiction,
 } from '../decisions/eval/acceptance.mts';
-import { wilsonScoreInterval } from './statistics.mts';
+import { ratio, REVIEWER_LABEL_NOISE_FLOOR, wilson } from './metric-ratio.mts';
+export { wilson };
 import { parseDeterministic as parseDeterministicBaseline } from './suite-adapters/deterministic.mts';
 import { parsePriorArtBaseline } from './suite-adapters/prior-art.mts';
 import type { MetricObservation, ParsedBaseline } from './types.mts';
 
 // biome-ignore lint/suspicious/noExplicitAny: adapters intentionally normalize heterogeneous, suite-owned JSON shapes.
 type Json = Record<string, any>;
-function ratio(
-  id: string,
-  label: string,
-  numerator: number,
-  denominator: number,
-  direction: 'higher' | 'lower' = 'higher',
-  extra: Partial<MetricObservation> = {},
-): MetricObservation {
-  if (!Number.isFinite(denominator) || denominator <= 0)
-    throw new Error(`Metric ${id} requires a positive denominator`);
-  return {
-    id,
-    label,
-    numerator,
-    denominator,
-    value: numerator / denominator,
-    unit: 'ratio',
-    direction,
-    inferenceUnit: 'row',
-    interval: wilson(numerator, denominator),
-    ...extra,
-  };
-}
-
 function scalar(
   id: string,
   label: string,
@@ -42,11 +19,6 @@ function scalar(
   extra: Partial<MetricObservation> = {},
 ): MetricObservation {
   return { id, label, value, direction, unit, inferenceUnit: 'run', ...extra };
-}
-
-export function wilson(successes: number, total: number): MetricObservation['interval'] {
-  const { lower, upper } = wilsonScoreInterval(successes, total);
-  return { method: 'wilson-95', lower, upper };
 }
 
 function rows(value: Json): Record<string, unknown> {
@@ -185,6 +157,9 @@ export function parseReviewer(input: Json): ParsedBaseline {
       tally(summary.decoys) ?? tally(summary.cleanPass) ?? tally(summary.endToEnd?.decoys);
     const firstFail = summary.firstFailRecall;
     const firstClean = summary.firstCleanPass;
+    const pairs = tally(summary.pairConsistency);
+    // sc-2496: every reviewer ratio carries the measured label-noise floor (see metric-ratio.mts).
+    const noise = { noiseFloor: REVIEWER_LABEL_NOISE_FLOOR };
     const cascade = value.cascade === true || key.endsWith('@cascade-on');
     const model = String(value.model ?? key.split('@').at(-2) ?? 'unknown');
     const cohortKey = `${model}@${cascade ? 'cascade-on' : 'cascade-off'}`;
@@ -203,6 +178,8 @@ export function parseReviewer(input: Json): ParsedBaseline {
           `${key} first-pass FAIL recall`,
           firstFail.k,
           firstFail.n,
+          'higher',
+          noise,
         ),
       );
       cohort.firstFail.k += Number(firstFail.k);
@@ -216,22 +193,41 @@ export function parseReviewer(input: Json): ParsedBaseline {
           `${key} first-pass clean pass`,
           firstClean.k,
           firstClean.n,
+          'higher',
+          noise,
         ),
       );
       sectionMetrics += 1;
     }
     if (gold) {
-      metrics.push(ratio(`${key}:block-recall`, `${key} block recall`, gold.k, gold.n));
+      metrics.push(
+        ratio(`${key}:block-recall`, `${key} block recall`, gold.k, gold.n, 'higher', noise),
+      );
       cohort.blockRecall.k += gold.k;
       cohort.blockRecall.n += gold.n;
       sectionMetrics += 1;
     }
     if (decoy) {
-      metrics.push(ratio(`${key}:clean-pass`, `${key} clean pass`, decoy.k, decoy.n));
+      metrics.push(
+        ratio(`${key}:clean-pass`, `${key} clean pass`, decoy.k, decoy.n, 'higher', noise),
+      );
       cohort.cleanPass.k += decoy.k;
       cohort.cleanPass.n += decoy.n;
       sectionMetrics += 1;
     }
+    // sc-2498: pair-level contrast consistency (both members of a minimal pair correct). Not
+    // counted toward section completeness — older baselines carry no pairs.
+    if (pairs && pairs.n > 0)
+      metrics.push(
+        ratio(
+          `${key}:pair-consistency`,
+          `${key} pair consistency`,
+          pairs.k,
+          pairs.n,
+          'higher',
+          noise,
+        ),
+      );
     cohorts.set(cohortKey, cohort);
     if (sectionMetrics >= 2) completeSections += 1;
     outages +=

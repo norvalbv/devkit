@@ -7,6 +7,7 @@
  */
 
 import { mcnemarMidP, wilson } from '../../../decisions/eval/bench.mts';
+import { groupByPair } from './corpus/twins.mts';
 
 export const fmtCi = (k, n) => {
   const { lo, hi } = wilson(k, n);
@@ -182,4 +183,85 @@ export function rowChanged(baseRow, row) {
   if (baseRow.behaviorHash !== undefined && row.behaviorHash !== undefined)
     return row.behaviorHash !== baseRow.behaviorHash;
   return row.rowHash !== baseRow.rowHash;
+}
+
+// ─── Summary (moved from bench.mts) ──────────────────────────────────────────────────────────────────────
+
+const count = (rows, pred) => rows.filter(pred).length;
+
+/** Aggregate scored rows → the metric block for one scope (a reviewer, or pooled). */
+export function summarize(results, { cascade } = {}) {
+  const gold = results.filter((r) => r.expected === 'FAIL');
+  const decoys = results.filter((r) => r.expected === 'PASS');
+  const blocked = gold.filter((r) => r.okFinal);
+  const reasons = {};
+  for (const r of blocked)
+    if (r.reasonClass) reasons[r.reasonClass] = (reasons[r.reasonClass] ?? 0) + 1;
+  const inconclusive = {};
+  for (const r of results)
+    if (r.subcause) inconclusive[r.subcause] = (inconclusive[r.subcause] ?? 0) + 1;
+  const liveEscalations = results.filter((r) => r.escalateLive);
+  // overturns: escalation took back a correct first FAIL; rescues: escalation fixed a first-pass
+  // false-block. Both are cascade-only, like blockRecall/cleanPass.
+  const goldFirstFail = gold.filter((r) => r.firstVerdict === 'FAIL');
+  const decoyFirstFail = decoys.filter((r) => r.firstVerdict === 'FAIL');
+  // Cascade-only metrics mean nothing when no cascade ran; absent, not zeroed.
+  const cascadeMetrics = cascade
+    ? {
+        blockRecall: { k: blocked.length, n: gold.length },
+        cleanPass: { k: count(decoys, (r) => r.okFinal), n: decoys.length },
+        overturnRate: {
+          k: count(goldFirstFail, (r) => !r.okFinal && r.escalateLive),
+          n: goldFirstFail.length,
+        },
+        rescueRate: { k: count(decoyFirstFail, (r) => r.okFinal), n: decoyFirstFail.length },
+      }
+    : {};
+  return {
+    rows: results.length,
+    gold: gold.length,
+    decoys: decoys.length,
+    firstFailRecall: { k: count(gold, (r) => r.firstVerdict === 'FAIL'), n: gold.length },
+    firstCleanPass: { k: count(decoys, (r) => r.firstVerdict === 'PASS'), n: decoys.length },
+    ...cascadeMetrics,
+    // sc-2498: a caseId pair (one gold, one decoy) is consistent only when BOTH are correct;
+    // always ≤ the marginal, and the gap is what the marginal hides.
+    pairConsistency: pairConsistency(results, { cascade }),
+    escalations: liveEscalations.length,
+    escalateMeanSecs: liveEscalations.length
+      ? Math.round(
+          liveEscalations.reduce((s, r) => s + r.ms.escalate, 0) / liveEscalations.length / 1000,
+        )
+      : 0,
+    reasons,
+    inconclusive,
+  };
+}
+
+/** Pair-level contrast consistency over the same pair relation holdout uses (groupByPair): a gold+decoy
+ * group is consistent when both are ok (okFinal under a cascade). Singletons/malformed reported. */
+export function pairConsistency(results, { cascade } = {}) {
+  const ok = (r) => (cascade ? r.okFinal : r.okFirst);
+  // Grouping is keyed on row id (a variantOf target has no link of its own), so only rows that
+  // carry one are grouped; an id-less record is a singleton by definition.
+  const withId = results.filter((r) => !!r.id);
+  let k = 0;
+  let n = 0;
+  let singletons = results.length - withId.length;
+  let malformed = 0;
+  for (const g of groupByPair(withId).values()) {
+    if (g.length === 1) {
+      singletons += 1;
+      continue;
+    }
+    const gold = g.filter((r) => r.expected === 'FAIL');
+    const decoy = g.filter((r) => r.expected === 'PASS');
+    if (g.length !== 2 || gold.length !== 1 || decoy.length !== 1) {
+      malformed += 1;
+      continue;
+    }
+    n += 1;
+    if (ok(gold[0]) && ok(decoy[0])) k += 1;
+  }
+  return { k, n, singletons, malformedGroups: malformed };
 }

@@ -62,6 +62,9 @@ export function lintRows(rows, reviewerName) {
   for (const row of rows) {
     const where = `${reviewerName}/${row.id ?? '<no id>'}`;
     if (!row.id || seen.has(row.id)) throw new BenchAbort(2, `duplicate/missing id: ${where}`);
+    // Checkpoint row keys are `<sectionKey>:<id>` and the section key may contain ':' — the id
+    // must not, or the seam is ambiguous (corpus/audit.mts splits on the last ':').
+    if (row.id.includes(':')) throw new BenchAbort(2, `${where}: id must not contain ':'`);
     seen.add(row.id);
     if (!row.note)
       throw new BenchAbort(2, `${where}: every row needs a note (why the label is right)`);
@@ -86,10 +89,28 @@ export function lintRows(rows, reviewerName) {
   return rows;
 }
 
+/** The ≥3-holdout-per-class floor, checked at load (finalize only enforces it on --append; 3 of 5
+ * suites drift under it). Warning by default; DEVKIT_HOLDOUT_FLOOR_STRICT=1 refuses (re-baseline epoch). */
+export function holdoutFloorShortfalls(rows, floor = 3) {
+  const out = [];
+  for (const expected of ['FAIL', 'PASS']) {
+    const n = rows.filter((r) => r.expected === expected && r.holdout).length;
+    if (rows.some((r) => r.expected === expected) && n < floor)
+      out.push(`${expected}: ${n} holdout row(s), floor ${floor}`);
+  }
+  return out;
+}
+
 export function loadRows(reviewer, { dev = false, only = null } = {}) {
   const file = casesFile(reviewer);
   if (!existsSync(file)) throw new BenchAbort(2, `reviewer-eval: missing ${path.basename(file)}`);
   let rows = lintRows(parseCasesText(readFileSync(file, 'utf8')), reviewer.name);
+  const short = holdoutFloorShortfalls(rows);
+  if (short.length) {
+    const msg = `${reviewer.name}: holdout floor not met — ${short.join('; ')}`;
+    if (process.env.DEVKIT_HOLDOUT_FLOOR_STRICT === '1') throw new BenchAbort(2, msg);
+    console.error(`reviewer-eval: WARNING ${msg}`);
+  }
   if (dev) rows = rows.filter((r) => !r.holdout);
   if (only) rows = rows.filter((r) => r.id.startsWith(only));
   return rows;
