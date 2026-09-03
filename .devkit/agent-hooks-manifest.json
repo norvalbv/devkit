@@ -2,12 +2,13 @@
   "schemaVersion": 2,
   "kind": "hooks",
   "devkitRef": "v0.62.0",
-  "generatedAt": "2026-09-03T08:50:26.546Z",
+  "generatedAt": "2026-09-03T20:23:23.491Z",
   "files": {
     "adhd-prompt-anchor.mjs": "002e1ee4dd7f10ccef97babb57b7cf0e01c76433a18b4c8be4aa04ab89288504",
     "adhd-session-start.mjs": "b5257348cb11fe85742178f43bbde30a94d7b58cb8f67281e060c875bbe8bc80",
     "decision-edit-guard.mjs": "041da116c296a2104f181c285e2cb40343d5e0e20c6265417f734079e16c494d",
-    "decision-scope-brief.mjs": "794e3b20d80b5d2cd0cc572a072b9d32553865cfa4a4d5389070060488b60016"
+    "decision-scope-brief.mjs": "794e3b20d80b5d2cd0cc572a072b9d32553865cfa4a4d5389070060488b60016",
+    "prior-art-gate.mjs": "cd203ac92117e29b1f08ec301fc3c799278e8939e79299f9a01902b4a5981a53"
   },
   "providers": {
     "claude": {
@@ -15,7 +16,8 @@
         "adhd-prompt-anchor.mjs": "002e1ee4dd7f10ccef97babb57b7cf0e01c76433a18b4c8be4aa04ab89288504",
         "adhd-session-start.mjs": "b5257348cb11fe85742178f43bbde30a94d7b58cb8f67281e060c875bbe8bc80",
         "decision-edit-guard.mjs": "041da116c296a2104f181c285e2cb40343d5e0e20c6265417f734079e16c494d",
-        "decision-scope-brief.mjs": "794e3b20d80b5d2cd0cc572a072b9d32553865cfa4a4d5389070060488b60016"
+        "decision-scope-brief.mjs": "794e3b20d80b5d2cd0cc572a072b9d32553865cfa4a4d5389070060488b60016",
+        "prior-art-gate.mjs": "cd203ac92117e29b1f08ec301fc3c799278e8939e79299f9a01902b4a5981a53"
       }
     },
     "cursor": {
@@ -23,7 +25,8 @@
         "adhd-prompt-anchor.mjs": "002e1ee4dd7f10ccef97babb57b7cf0e01c76433a18b4c8be4aa04ab89288504",
         "adhd-session-start.mjs": "b5257348cb11fe85742178f43bbde30a94d7b58cb8f67281e060c875bbe8bc80",
         "decision-edit-guard.mjs": "041da116c296a2104f181c285e2cb40343d5e0e20c6265417f734079e16c494d",
-        "decision-scope-brief.mjs": "794e3b20d80b5d2cd0cc572a072b9d32553865cfa4a4d5389070060488b60016"
+        "decision-scope-brief.mjs": "794e3b20d80b5d2cd0cc572a072b9d32553865cfa4a4d5389070060488b60016",
+        "prior-art-gate.mjs": "cd203ac92117e29b1f08ec301fc3c799278e8939e79299f9a01902b4a5981a53"
       }
     }
   }

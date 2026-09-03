@@ -51,6 +51,30 @@
       }
     },
     {
+      "registrationId": "prior-art-gate:post-task",
+      "ownerId": "priorArtGate",
+      "provider": "claude",
+      "installScope": "shared",
+      "destinationRel": ".claude/settings.json",
+      "native": {
+        "event": "PostToolUse",
+        "matcher": "Task|Agent",
+        "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/prior-art-gate.mjs\""
+      }
+    },
+    {
+      "registrationId": "prior-art-gate:pre-plan",
+      "ownerId": "priorArtGate",
+      "provider": "claude",
+      "installScope": "shared",
+      "destinationRel": ".claude/settings.json",
+      "native": {
+        "event": "PreToolUse",
+        "matcher": "ExitPlanMode|Task|Agent",
+        "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/prior-art-gate.mjs\""
+      }
+    },
+    {
       "registrationId": "decisions:pre-edit",
       "ownerId": "decisions",
       "provider": "cursor",
