@@ -12,7 +12,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { waitForPath } from '../../../__tests__/_helpers.mts';
-import { checkOxcCapability, removeOxcCapability, syncOxcCapability } from './lifecycle.mts';
+import {
+  checkOxcCapability,
+  OVERLAY_ENTRY_REL,
+  OXLINT_CONFIGS,
+  removeOxcCapability,
+  resolveOxlintEntryConfig,
+  syncOxcCapability,
+} from './lifecycle.mts';
 
 // Hang detector for the holder process's boot, NOT a cold-start budget. Matches waitForPath's own
 // default and review-gate-supervisor.test.mts's WAIT_MS; nothing asserts how long the boot takes.
@@ -289,5 +296,117 @@ describe('Oxc capability lifecycle', () => {
     expect(existsSync(join(root, '.oxlintrc.json'))).toBe(true);
     expect(existsSync(join(root, '.oxfmtrc.json'))).toBe(true);
     expect(existsSync(join(root, '.devkit/oxc'))).toBe(false);
+  });
+});
+
+// The overlay contract is "writes nothing git can see". Everything below defends it at the WRITER,
+// where it breaks silently: a root config devkit creates on a repair path is a committable stray.
+describe('Oxc capability lifecycle — overlay geometry', () => {
+  const overlayRoot = (): string => {
+    const root = tempRoot();
+    mkdirSync(join(root, '.devkit'), { recursive: true });
+    writeFileSync(join(root, '.devkit/config.json'), `${JSON.stringify({ overlay: true })}\n`);
+    return root;
+  };
+
+  it('writes a git-excluded root entry config and no consumer-owned starter', () => {
+    const root = overlayRoot();
+    syncOxcCapability(root, { overlay: true });
+
+    expect(existsSync(join(root, OVERLAY_ENTRY_REL))).toBe(true);
+    expect(JSON.parse(readFileSync(join(root, OVERLAY_ENTRY_REL), 'utf8'))).toEqual({
+      extends: ['./.devkit/oxc/oxlint.base.json'],
+    });
+    for (const name of OXLINT_CONFIGS) expect(existsSync(join(root, name))).toBe(false);
+    expect(existsSync(join(root, '.oxfmtrc.json'))).toBe(false);
+    expect(resolveOxlintEntryConfig(root)).toBe(OVERLAY_ENTRY_REL);
+  });
+
+  // The entry config MUST stay at the package root: oxlint resolves `overrides[].files` globs
+  // against the ENTRY config's directory, and the runtime probe cannot catch a shift in that base.
+  it('keeps the entry config at the package root (its directory is the override glob base)', () => {
+    expect(OVERLAY_ENTRY_REL).not.toContain('/');
+    expect(OXLINT_CONFIGS).not.toContain(OVERLAY_ENTRY_REL);
+  });
+
+  it('infers overlay from the repository marker when no manifest survives to stamp it', () => {
+    const root = overlayRoot();
+    syncOxcCapability(root, { overlay: true });
+    // Exactly the state `checkOxcCapability` reports as "manifest MISSING" and doctor --fix repairs.
+    rmSync(join(root, '.devkit/oxc/manifest.json'));
+    rmSync(join(root, OVERLAY_ENTRY_REL));
+
+    syncOxcCapability(root);
+
+    expect(existsSync(join(root, OVERLAY_ENTRY_REL))).toBe(true);
+    for (const name of OXLINT_CONFIGS) expect(existsSync(join(root, name))).toBe(false);
+  });
+
+  it('refuses a discovery-named root config in an overlay repo whatever the caller claims', () => {
+    const root = overlayRoot();
+    // No stamp, no marker-derived default, and the caller actively asserts package mode — the
+    // belt-and-braces guard is the only thing between this and a visible stray.
+    expect(() => syncOxcCapability(root, { overlay: false })).toThrow(/overlay install/u);
+    for (const name of OXLINT_CONFIGS) expect(existsSync(join(root, name))).toBe(false);
+  });
+
+  // init's package path runs BEFORE step 9 rewrites `.devkit/config.json`, so a stale `overlay:
+  // true` is still on disk here and the writer's marker fallback would take the OVERLAY branch.
+  it('refuses rather than silently writing overlay geometry when a stale marker disagrees', () => {
+    const root = overlayRoot();
+    expect(() => syncOxcCapability(root, { antiSlop: false, overlay: false })).toThrow(
+      /devkit clean/u,
+    );
+    expect(existsSync(join(root, '.devkit/oxc/manifest.json'))).toBe(false);
+    for (const name of OXLINT_CONFIGS) expect(existsSync(join(root, name))).toBe(false);
+  });
+
+  it('keeps the overlay geometry across a flagless re-sync via the manifest stamp', () => {
+    const root = tempRoot(); // no marker at all — only the stamp can carry the mode here
+    syncOxcCapability(root, { overlay: true });
+    rmSync(join(root, OVERLAY_ENTRY_REL));
+
+    syncOxcCapability(root);
+
+    expect(existsSync(join(root, OVERLAY_ENTRY_REL))).toBe(true);
+    for (const name of OXLINT_CONFIGS) expect(existsSync(join(root, name))).toBe(false);
+  });
+
+  it('removes the entry config it created, and keeps a customized one', () => {
+    const root = overlayRoot();
+    syncOxcCapability(root, { overlay: true });
+    removeOxcCapability(root);
+    expect(existsSync(join(root, OVERLAY_ENTRY_REL))).toBe(false);
+
+    syncOxcCapability(root, { overlay: true });
+    writeFileSync(
+      join(root, OVERLAY_ENTRY_REL),
+      `${JSON.stringify({ extends: ['./.devkit/oxc/oxlint.base.json'], rules: { eqeqeq: 'off' } })}\n`,
+    );
+    removeOxcCapability(root);
+    expect(existsSync(join(root, OVERLAY_ENTRY_REL))).toBe(true);
+  });
+
+  it('reports no entry config in package mode, so the lint keeps using discovery', () => {
+    const root = tempRoot();
+    syncOxcCapability(root);
+    expect(resolveOxlintEntryConfig(root)).toBeNull();
+    expect(existsSync(join(root, OVERLAY_ENTRY_REL))).toBe(false);
+  });
+
+  // Guards the dry-run arm, which used to take a shorter positional list and silently dropped
+  // everything after `antiSlop`, so the preview described a different install than the real one.
+  it('narrates the overlay plan on a dry run instead of the package one', () => {
+    const root = overlayRoot();
+    const lines: string[] = [];
+    vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      lines.push(args.map(String).join(' '));
+    });
+
+    syncOxcCapability(root, { overlay: true, dryRun: true });
+
+    expect(lines.join('\n')).toContain(OVERLAY_ENTRY_REL);
+    expect(lines.join('\n')).not.toContain('preserve existing root configs');
+    expect(existsSync(join(root, OVERLAY_ENTRY_REL))).toBe(false);
   });
 });

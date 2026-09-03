@@ -1097,6 +1097,63 @@ describe('overlay (local-only) install', () => {
     expect(sel.agentHooks).toBe(true);
     expect(sel.fallow).toBe(true);
   });
+
+  // anti-slop needs nothing from the consumer, so it is an ordinary opt-in rather than a component
+  // that cannot work without the package — see oxc-toolchain-migration.
+  it('applyOverlayConstraints: antiSlop is a pass-through opt-in, not forced off', () => {
+    expect(applyOverlayConstraints({ ...defaultSelection(), antiSlop: true }).antiSlop).toBe(true);
+    expect(applyOverlayConstraints({ ...defaultSelection(), antiSlop: false }).antiSlop).toBe(
+      false,
+    );
+  });
+});
+
+// Overlay's contract is "nothing git can see"; these cover the two paths that break it quietly — an
+// already-TRACKED capability, and a consumer Oxlint config an overlay `-c` would stop honouring.
+describe('overlay anti-slop — refusals that keep the tree clean', () => {
+  const porcelain = (root: string) =>
+    execFileSync('git', ['status', '--porcelain'], { cwd: root, encoding: 'utf8' });
+
+  it('refuses when git already tracks an anti-slop path, and writes nothing', async () => {
+    const root = workRepo();
+    const git = (...a: string[]) => execFileSync('git', a, { cwd: root });
+    writeFileSync(join(root, '.anti-slop-baseline.json'), '{"schemaVersion":1,"entries":[]}\n');
+    git('add', '-f', '.anti-slop-baseline.json');
+    git('commit', '-qm', 'tracked baseline');
+
+    await applyInit(root, {
+      stack: 'generic',
+      selection: applyOverlayConstraints({ ...defaultSelection(), antiSlop: true }),
+      overlay: true,
+      devkitRef: 'v0.0.0-test',
+    });
+
+    expect(readCfgComponents(root).antiSlop).toBe(false);
+    expect(existsSync(join(root, 'oxlint.devkit.json'))).toBe(false);
+    expect(existsSync(join(root, '.devkit', 'anti-slop', 'manifest.json'))).toBe(false);
+    expect(porcelain(root)).toBe('');
+  });
+
+  it('refuses when the repo owns its own Oxlint config, rather than silently overriding it', async () => {
+    const root = workRepo();
+    const git = (...a: string[]) => execFileSync('git', a, { cwd: root });
+    writeFileSync(join(root, '.oxlintrc.json'), '{ "rules": { "eqeqeq": "error" } }\n');
+    git('add', '-A');
+    git('commit', '-qm', 'consumer oxlint config');
+
+    await applyInit(root, {
+      stack: 'generic',
+      selection: applyOverlayConstraints({ ...defaultSelection(), antiSlop: true }),
+      overlay: true,
+      devkitRef: 'v0.0.0-test',
+    });
+
+    expect(readCfgComponents(root).antiSlop).toBe(false);
+    expect(existsSync(join(root, 'oxlint.devkit.json'))).toBe(false);
+    // The consumer's own config survives byte for byte.
+    expect(readFileSync(join(root, '.oxlintrc.json'), 'utf8')).toContain('"eqeqeq": "error"');
+    expect(porcelain(root)).toBe('');
+  });
 });
 
 // `devkit update` re-pins the CLI but never regenerates the git-ignored .devkit/hooks/pre-commit, so an

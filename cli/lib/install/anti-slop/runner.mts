@@ -3,6 +3,7 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, realpathSync, statSync } from 'node:fs';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
+import { resolveOxlintEntryConfig } from '../oxc/lifecycle.mts';
 import { resolveOxcRuntime } from '../oxc/runtime.mts';
 import {
   adoptManagedCapability,
@@ -31,8 +32,10 @@ export function resolveAntiSlopScope(cwd: string, args: readonly string[]): Anti
   const paths = args.filter((arg) => arg !== '--');
   const option = options.find((arg) => arg.startsWith('-'));
   if (option) {
+    // Deliberately does not name a config file: which one governs depends on the install mode, and
+    // in overlay the consumer's root config is not read at all.
     throw new Error(
-      `anti-slop operations accept repository paths, not Oxlint option ${option}; configure rules in .oxlintrc.json`,
+      `anti-slop operations accept repository paths, not Oxlint option ${option}; configure rules in the repository's Oxlint config`,
     );
   }
   const requested = paths.length > 0 ? paths : ['.'];
@@ -67,8 +70,8 @@ export function resolveAntiSlopScope(cwd: string, args: readonly string[]): Anti
 }
 
 /**
- * Run the installed capability under the repository's combined Oxlint config. `pinCapabilityTo`
- * copies the capability THIS lint used, under the same lock, so a later step cannot judge another.
+ * Run the installed capability under the repository's combined Oxlint config — or devkit's own
+ * git-excluded entry config in overlay. `pinCapabilityTo` copies the capability THIS lint used.
  */
 export function collectAntiSlopGroups(
   cwd: string,
@@ -90,10 +93,14 @@ function collectAntiSlopGroupsUnlocked(cwd: string, args: readonly string[]): Fi
   if (issue) throw new AntiSlopCapabilityError(issue);
   const scope = resolveAntiSlopScope(cwd, args);
   const runtime = resolveOxcRuntime('lint');
+  // Resolved from the managed manifest, which travels into a snapshot cwd with the capability — so
+  // this works identically in the repository and in the `mkdtemp` extraction of the Git index.
+  const entry = resolveOxlintEntryConfig(cwd);
   const result = spawnSync(
     process.execPath,
     [
       runtime.binPath,
+      ...(entry ? ['--config', entry] : []),
       '--format',
       'json',
       '--no-error-on-unmatched-pattern',

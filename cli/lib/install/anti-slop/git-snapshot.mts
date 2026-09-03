@@ -1,7 +1,7 @@
 /** Exact Git-index materialization and base-commit baseline evidence for anti-slop gates. */
 
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { adoptManagedCapability } from './base-capability.mts';
@@ -289,12 +289,13 @@ export function withBaseAntiSlopSnapshot<T>(
 }
 
 /**
- * Run an action against the exact candidate index, never the mutable working tree. Unrelated
- * package/repository changes are ignored; config or baseline changes force a complete package scan.
+ * Run an action against the exact candidate index, never the mutable working tree. `overlay` adds
+ * the git-excluded capability and baseline; opt-in, never default — see oxc-toolchain-migration.
  */
 export function withStagedAntiSlopSnapshot<T>(
   cwd: string,
   action: (snapshot: StagedAntiSlopSnapshot) => T,
+  { overlay = false }: { overlay?: boolean } = {},
 ): T {
   const repo = layout(cwd);
   const candidateTree = git(repo.root, ['write-tree']);
@@ -331,8 +332,16 @@ export function withStagedAntiSlopSnapshot<T>(
   const temp = mkdtempSync(join(tmpdir(), 'devkit-anti-slop-index-'));
   try {
     extractTree(repo.root, candidateTree, temp);
+    const snapshotCwd = join(temp, repo.prefix);
+    if (overlay) {
+      adoptManagedCapability(cwd, snapshotCwd);
+      // Copied separately, NOT via MANAGED_RELS: `adoptManagedCapability` also runs for the BASE
+      // snapshot, where overwriting its committed baseline would destroy the comparison.
+      const baseline = join(cwd, ANTI_SLOP_BASELINE_REL);
+      if (existsSync(baseline)) cpSync(baseline, join(snapshotCwd, ANTI_SLOP_BASELINE_REL));
+    }
     return action({
-      cwd: join(temp, repo.prefix),
+      cwd: snapshotCwd,
       paths,
       changedFiles,
       fullScan,

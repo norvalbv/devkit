@@ -253,6 +253,36 @@ export function saveFallowBaselines({ cwd, dryRun }: FallowCommandOptions = {}):
   return { ok };
 }
 
+/**
+ * Resolve fallow for an OVERLAY install: detect → install-if-missing → save baselines so a legacy
+ * repo's debt is grandfathered. Returns whether to wire the gate; fail-open — abort, never block.
+ */
+export function resolveOverlayFallow(cwd: string, dryRun: boolean): boolean {
+  if (dryRun) {
+    console.log('  [dry-run] fallow: detect → install-if-missing → save baselines → gate in hook');
+    return true;
+  }
+  const det = detectFallow({ cwd });
+  if (det.available) {
+    console.log(`  ✓ fallow present (${det.version})`);
+  } else {
+    console.log('  ! fallow not found — attempting a global install (bun → npm → cargo)...');
+    const r = installFallow({ cwd });
+    if (!r.ok) {
+      console.log(
+        '  ! fallow not installed — skipping the fallow gate (install it above, re-run).',
+      );
+      return false;
+    }
+    console.log(`  ✓ ${r.message}`);
+  }
+  const saved = saveFallowBaselines({ cwd });
+  console.log(
+    `  ${saved.ok ? '✓ saved' : '! some'} fallow baselines → fallow-baselines/ (grandfather debt)`,
+  );
+  return true;
+}
+
 // CLI smoke entry: `node install-fallow.mjs [detect|install|gate|baselines]`. Helps verify
 // the helper by hand without the wizard.
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {

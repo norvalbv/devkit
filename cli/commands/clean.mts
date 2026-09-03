@@ -22,11 +22,12 @@ import {
   resolveExistingAgentProviders,
   SUPPORTED_AGENT_PROVIDERS,
 } from '../lib/install/agent-assets/agent-providers.mts';
+import { ANTI_SLOP_BASELINE_REL } from '../lib/install/anti-slop/constants.mts';
 import { removeAntiSlopCapability } from '../lib/install/anti-slop/lifecycle.mts';
 import { pruneDevkitCacheGitignore, withGitignoreLock } from '../lib/install/gitignore-cache.mts';
 import { removeHookRegistrations, removeHookScripts } from '../lib/install/install-hooks.mts';
 import { removeSearchCode } from '../lib/install/install-search-code.mts';
-import { removeOxcCapability } from '../lib/install/oxc/lifecycle.mts';
+import { OVERLAY_ENTRY_REL, removeOxcCapability } from '../lib/install/oxc/lifecycle.mts';
 import { removeHealAlias } from '../lib/overlay.mts';
 import { removeGlobalHook } from '../lib/overlay-global-hook.mts';
 import { removeAgents, removeSkills } from '../lib/sync-manifest.mts';
@@ -167,6 +168,10 @@ function cleanOverlayStrays(cwd: string, gitRoot: string, dryRun: boolean): void
   rmUntracked('guard.config.json', 'guard.config.json');
   rmUntracked('biome.devkit.jsonc', 'biome.devkit.jsonc');
   rmUntracked('eslint.config.devkit.mjs', 'eslint.config.devkit.mjs');
+  // Both are hidden ONLY by .git/info/exclude, which pruneGitExclude removes below — so leaving
+  // either behind does not merely litter, it makes it newly VISIBLE to git.
+  rmUntracked(OVERLAY_ENTRY_REL, OVERLAY_ENTRY_REL);
+  rmUntracked(ANTI_SLOP_BASELINE_REL, ANTI_SLOP_BASELINE_REL);
   rmUntracked('eslint/baselines', 'eslint/baselines/');
   rm(join(cwd, 'fallow-baselines'), 'fallow-baselines/', dryRun);
   cleanUntrackedDevkitState(gitRoot, dryRun);
@@ -237,6 +242,10 @@ function cleanOverlay(cwd: string, cfg: DevkitConfig, dryRun: boolean): void {
   rm(join(cwd, 'guard.config.json'), 'guard.config.json', dryRun);
   rm(join(cwd, 'biome.devkit.jsonc'), 'biome.devkit.jsonc', dryRun);
   rm(join(cwd, 'eslint.config.devkit.mjs'), 'eslint.config.devkit.mjs', dryRun);
+  rm(join(cwd, OVERLAY_ENTRY_REL), OVERLAY_ENTRY_REL, dryRun);
+  // An overlay baseline is per-clone and shared with nobody, unlike the committed debt record
+  // package mode retains, so leaving it behind only exposes it once the exclude block is pruned.
+  rm(join(cwd, ANTI_SLOP_BASELINE_REL), ANTI_SLOP_BASELINE_REL, dryRun);
   rm(join(cwd, 'eslint', 'baselines'), 'eslint/baselines/', dryRun);
   // fallow: devkit saved the grandfather baselines in overlay (fallow-baselines/). The .fallow/ cache
   // is fallow's own — left in place, like package-mode clean leaves fallow's files.

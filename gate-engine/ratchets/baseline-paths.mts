@@ -11,6 +11,7 @@ import {
 } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
+import { overlayInstall } from '../overlay-mode.mts';
 import {
   assertBaselineTrackable,
   indexTracksBaseline,
@@ -53,20 +54,6 @@ function discardRetiredCopy(root: string, canonical: string, stage: boolean): vo
   if (overlayInstall(root) && indexTracksBaseline(root, legacy)) return;
   rmSync(join(root, legacy), { force: true });
   if (stage) stageBaseline(root, legacy);
-}
-
-/** Is this root a local-only overlay install (env flag, or the marker init writes)? */
-function overlayInstall(root: string): boolean {
-  if (process.env.DEVKIT_OVERLAY === '1') return true;
-  try {
-    // SAFETY: init owns this local JSON marker; strict equality treats absent values as false.
-    const config = JSON.parse(readFileSync(join(root, '.devkit/config.json'), 'utf8')) as {
-      overlay?: boolean;
-    };
-    return config.overlay === true;
-  } catch {
-    return false;
-  }
 }
 
 function legacyDevkitBaselines(root: string) {

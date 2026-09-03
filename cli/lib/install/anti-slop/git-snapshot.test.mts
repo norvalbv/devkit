@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -92,6 +92,45 @@ describe('anti-slop staged Git snapshot', () => {
       expect(readFileSync(join(snapshot.cwd, 'src', 'file.ts'), 'utf8')).toContain('"staged"');
       expect(snapshot.base?.entries).toEqual([]);
     });
+  });
+
+  // The DEFAULT must judge the exact index and nothing else; adopting the working-tree capability
+  // would break that SILENTLY (`bytesOk` still passes), so assert the negative.
+  it('does not inject the working-tree capability into the snapshot by default', () => {
+    const root = repository();
+    mkdirSync(join(root, '.devkit', 'anti-slop'), { recursive: true });
+    writeFileSync(join(root, '.devkit', 'anti-slop', 'marker.json'), '{"from":"working tree"}\n');
+    writeFileSync(join(root, 'oxlint.devkit.json'), '{"from":"working tree"}\n');
+    writeFileSync(join(root, 'src', 'file.ts'), 'export const value = "staged";\n');
+    git(root, ['add', 'src/file.ts']);
+
+    withStagedAntiSlopSnapshot(root, (snapshot) => {
+      expect(existsSync(join(snapshot.cwd, '.devkit', 'anti-slop', 'marker.json'))).toBe(false);
+      expect(existsSync(join(snapshot.cwd, 'oxlint.devkit.json'))).toBe(false);
+    });
+  });
+
+  it('injects the git-excluded capability and baseline when told the install is an overlay', () => {
+    const root = repository();
+    mkdirSync(join(root, '.devkit', 'anti-slop'), { recursive: true });
+    mkdirSync(join(root, '.devkit', 'oxc'), { recursive: true });
+    writeFileSync(join(root, '.devkit', 'anti-slop', 'marker.json'), '{"from":"overlay"}\n');
+    writeFileSync(join(root, '.devkit', 'oxc', 'marker.json'), '{"from":"overlay"}\n');
+    writeFileSync(join(root, 'oxlint.devkit.json'), '{"from":"overlay"}\n');
+    writeFileSync(join(root, 'src', 'file.ts'), 'export const value = "staged";\n');
+    git(root, ['add', 'src/file.ts']);
+
+    withStagedAntiSlopSnapshot(
+      root,
+      (snapshot) => {
+        expect(existsSync(join(snapshot.cwd, '.devkit', 'anti-slop', 'marker.json'))).toBe(true);
+        expect(existsSync(join(snapshot.cwd, '.devkit', 'oxc', 'marker.json'))).toBe(true);
+        expect(existsSync(join(snapshot.cwd, 'oxlint.devkit.json'))).toBe(true);
+        // The baseline has to arrive too, or `baselineOrExplain` exits 2 and the gate BLOCKS.
+        expect(existsSync(join(snapshot.cwd, '.anti-slop-baseline.json'))).toBe(true);
+      },
+      { overlay: true },
+    );
   });
 
   it('forces a full scan for baseline, root config, or managed capability changes', () => {

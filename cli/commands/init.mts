@@ -667,7 +667,7 @@ function applyOverlay(cwd: string, plan: InitPlan, pkgRel: string, devkitRef: st
   console.log(
     '  invisible to git (.git/info/exclude); extends the repo; edits nothing committed\n',
   );
-  const { origHooksPath, fallowWired } = installOverlay(cwd, selection, stack, force, dryRun);
+  const wired = installOverlay(cwd, selection, stack, force, dryRun);
   const ownsLineGrowth = upgradeOffers.overlayOwnsLineGrowth(cwd);
   upgradeOffers.applyOverlayMaxLines(cwd, selection, repoAdopted(cwd), ownsLineGrowth, dryRun);
   if (selection.guards?.includes('fanout') || selection.guards?.includes('size')) {
@@ -686,9 +686,8 @@ function applyOverlay(cwd: string, plan: InitPlan, pkgRel: string, devkitRef: st
     );
     installGlobalHook({ dryRun });
   }
-  // Record what was actually wired so clean/doctor are selection-aware. fallow reflects the ACTUAL
-  // outcome (fallowWired) — an aborted install (no binary) records false. dropUndecided keeps an
-  // un-asked optional component absent, exactly as the package writer does.
+  // Recorded so clean/doctor are selection-aware; fallow and antiSlop carry the ACTUAL outcome, so
+  // an aborted install records false and stays in step with the rendered hook.
   const overlayComponents = dropUndecided(
     {
       biome: Boolean(selection.biome),
@@ -697,8 +696,8 @@ function applyOverlay(cwd: string, plan: InitPlan, pkgRel: string, devkitRef: st
       agents: Boolean(selection.agents),
       agentHooks: Boolean(selection.agentHooks),
       searchSteering: false, // never wired in overlay (no resolvable bin without the package)
-      fallow: fallowWired,
-      antiSlop: false,
+      fallow: wired.fallowWired,
+      antiSlop: wired.antiSlopWired,
       lineGrowth: Boolean(selection.lineGrowth),
       adhd: Boolean(selection.adhd),
       priorArtGate: Boolean(selection.priorArtGate),
@@ -720,7 +719,7 @@ function applyOverlay(cwd: string, plan: InitPlan, pkgRel: string, devkitRef: st
           initVersion: INIT_VERSION,
           overlay: true,
           pkgRel,
-          origHooksPath, // what core.hooksPath was before — `devkit clean` restores it
+          origHooksPath: wired.origHooksPath, // what core.hooksPath was before — `devkit clean` restores it
           globalCommitGate, // opt-in machine-global init.sh shim wired (so doctor can report it)
           components: overlayComponents,
           review,
@@ -916,8 +915,9 @@ export async function applyInit(cwd: string, plan: InitPlan) {
   }
   // Oxc repository state is core in every tracked install mode. Anti-slop remains the optional
   // policy layer and selects the extended managed base; overlay returned before this apply path.
-  if (selection.antiSlop) antiSlopLifecycle.syncAntiSlopCapability(cwd, { dryRun });
-  else oxcLifecycle.syncOxcCapability(cwd, { dryRun, antiSlop: false });
+  // `overlay: false` ASSERTED: the on-disk marker is still stale here (step 9 rewrites it below).
+  if (selection.antiSlop) antiSlopLifecycle.syncAntiSlopCapability(cwd, { dryRun, overlay: false });
+  else oxcLifecycle.syncOxcCapability(cwd, { dryRun, antiSlop: false, overlay: false });
 
   // The vendored i-have-adhd skill, into devkit's own tree rather than the agent skills dirs — so it
   // no longer depends on the `skills` component. Called unconditionally: a false selection reclaims a
@@ -1088,7 +1088,6 @@ export default async function run(args: string[], cwd: string) {
     ({ selection, disabledGuards, undecided } = initFlags.resolveFlagSelection(cwd, args, flags));
   }
 
-  antiSlopLifecycle.warnIfAntiSlopUnavailable(mode, flags.antiSlop);
   if (mode === 'overlay') selection = applyOverlayConstraints(selection);
   if (!selfHost && !interactive) {
     const reviewPlan = reviewPlanFromFlags(flags, selection);
