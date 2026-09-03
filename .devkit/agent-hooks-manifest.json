@@ -1,8 +1,8 @@
 {
   "schemaVersion": 2,
   "kind": "hooks",
-  "devkitRef": "v0.61.0",
-  "generatedAt": "2026-09-01T23:51:29.833Z",
+  "devkitRef": "v0.62.0",
+  "generatedAt": "2026-09-03T08:50:26.546Z",
   "files": {
     "adhd-prompt-anchor.mjs": "002e1ee4dd7f10ccef97babb57b7cf0e01c76433a18b4c8be4aa04ab89288504",
     "adhd-session-start.mjs": "b5257348cb11fe85742178f43bbde30a94d7b58cb8f67281e060c875bbe8bc80",
