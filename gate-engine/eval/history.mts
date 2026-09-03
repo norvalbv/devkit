@@ -9,7 +9,7 @@ import {
   isRecord,
   privacyErrors,
 } from './schema.mts';
-import type { RepositorySource } from './source.mts';
+import { commitDate, gitOutput, headCommit, type RepositorySource } from './source.mts';
 import type { BenchmarkEvent, CheckpointEnvelope } from './types.mts';
 
 export const HISTORY_PATH = 'docs/benchmarks/history.jsonl';
@@ -124,6 +124,29 @@ export function publicationErrors(event: BenchmarkEvent, checkpoint: CheckpointE
   privacyErrors(event, event.id || '<missing>', errors);
   privacyErrors(checkpoint, 'checkpoint', errors);
   return errors;
+}
+
+export const COMMITTED_PROVENANCE = 'committed sanitized checkpoint';
+export const STAGED_PROVENANCE =
+  'staged sanitized checkpoint; sourceCommit is the parent commit the index was staged over';
+
+/** Mint the three provenance fields publicationErrors above pairs, so one place decides what a
+ * publication claims about the bytes it measured. */
+export function eventProvenance(root: string, tree: string, recordedAtOverride?: string) {
+  const staged = tree === 'STAGED';
+  // STAGED and WORKTREE both measure a tree that is not itself a commit, so they name the commit
+  // they sit over; schema.mts requires 40 hex either way.
+  const sourceCommit =
+    staged || tree === 'WORKTREE' ? headCommit(root) : gitOutput(root, ['rev-parse', tree]).trim();
+  // Wall clock, not HEAD's committer date: a branch cut from an older main would otherwise record an
+  // event that predates the one it supersedes, and latestRecordedEvent would keep the stale one.
+  const recordedAtInput =
+    recordedAtOverride ?? (staged ? new Date().toISOString() : commitDate(root, sourceCommit));
+  return {
+    sourceCommit,
+    recordedAt: new Date(recordedAtInput).toISOString(),
+    source: staged ? STAGED_PROVENANCE : COMMITTED_PROVENANCE,
+  };
 }
 
 export function validateHistory(source: RepositorySource): string[] {

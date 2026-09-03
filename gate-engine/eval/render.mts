@@ -336,14 +336,17 @@ ${rows.join('\n')}
 </svg>\n`;
 }
 
+/** `host` supplies the marker files these outputs are spliced into; it defaults to `source` and only
+ * differs when hashes must come from the index while unstaged prose outside the markers survives. */
 export function generatedOutputs(
   source: RepositorySource,
   catalog: BenchmarkCatalog,
   events: BenchmarkEvent[],
+  host: RepositorySource = source,
 ): Record<string, string> {
   const views = suiteViews(catalog, events, source);
-  const root = source.read('README.md');
-  const detail = source.read('docs/benchmarks/README.md');
+  const root = host.read('README.md');
+  const detail = host.read('docs/benchmarks/README.md');
   if (root === null || detail === null) throw new Error('README marker files are missing');
   return {
     'README.md': replaceMarker(root, ROOT_START, ROOT_END, rootBlock(catalog, views)),

@@ -44,8 +44,29 @@ Hand-written records that sit beside the ledger; each number in them names its p
 
 ## Contributor workflow
 
+When a suite's registered `results.baseline.json` moves, its checkpoint and accepted event must land
+in the SAME commit as the new baseline — that is what the staged gate checks. Publish from the Git
+index so the published bytes are the bytes being committed:
+
 ```bash
-# Publish an adapter-accepted baseline and regenerate views
+# 1. re-run the suite, then stage the change together with the baseline it moved
+git add gate-engine/judge/matcher-core.mts gate-engine/critique/eval/results.baseline.json
+
+# 2. publish from the index; this is the LAST staging step for source files
+bun gate-engine/eval/cli.mts publish --suite critique --tree STAGED \
+  --change-type methodology-reset --note "measured prompt revision"
+
+# 3. stage publish's own outputs, then commit all of it at once
+git add docs/benchmarks/history.jsonl docs/benchmarks/checkpoints/<sha256>.json \
+  README.md docs/benchmarks/README.md docs/benchmarks/assets/dashboard-*.svg
+```
+
+Staging further source changes after publishing moves a suite hash and flips its freshness, which
+reports `Generated output is stale`. Re-render from the index with
+`bun run benchmarks:render -- --tree STAGED` and re-stage; never publish a second time for it.
+
+```bash
+# Publish an adapter-accepted baseline from a committed tree and regenerate views
 bun gate-engine/eval/cli.mts publish --suite critique --tree HEAD \
   --change-type quality --assessment improved --note "measured prompt revision"
 
@@ -68,9 +89,9 @@ bun gate-engine/eval/cli.mts backfill --since 2026-07-01
 bun gate-engine/eval/cli.mts reconcile left.jsonl right.jsonl --output merged.jsonl
 ```
 
-`publish` derives assessment from adapter metrics, their MDE/noise floors, and shared-row flips. The optional `--assessment` value is an assertion: publication fails if it contradicts that derived result. Publishing defaults to a committed Git tree; `--tree WORKTREE` is only accepted when the entire working tree is clean, so its commit provenance cannot describe uncommitted bytes.
+`publish` derives assessment from adapter metrics, their MDE/noise floors, and shared-row flips. The optional `--assessment` value is an assertion: publication fails if it contradicts that derived result. Publishing defaults to a committed Git tree. `--tree STAGED` publishes the Git index, so the published bytes are the bytes being committed; it refuses an unmerged index, an empty one, and a `history.jsonl` or checkpoint that differs between index and working tree, and its `sourceCommit` names the parent commit the index was staged over. `--tree WORKTREE` is only accepted when the entire working tree is clean, so its commit provenance cannot describe uncommitted bytes; it stays the route for a gitignored baseline, which can never be staged and never dirties the tree.
 
-`publish`, `render`, and `check` are deterministic and make no network or LLM calls. Corrections become authoritative generated-view inputs through `supersedes`, while both the original and corrective event bytes remain in the ledger.
+`publish`, `render`, and `check` are deterministic and make no network or LLM calls, except that `--tree STAGED` stamps wall-clock capture time — pass `--recorded-at` to pin it. Corrections become authoritative generated-view inputs through `supersedes`, while both the original and corrective event bytes remain in the ledger.
 
 ## Privacy boundary
 
