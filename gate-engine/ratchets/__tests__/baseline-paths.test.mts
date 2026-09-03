@@ -126,6 +126,31 @@ describe('ratchet baseline paths', () => {
     expect(migrateRatchetBaselines(root, { dryRun: true })).toEqual([]);
   });
 
+  it('spares a TRACKED retired copy on an overlay install, leaving it for the next full install', () => {
+    const root = makeRoot();
+    execFileSync('git', ['init', '-q'], { cwd: root });
+    write(root, '.devkit/config.json', '{"overlay":true}\n');
+    write(root, LEGACY_LINES_BASELINE, '{"files":{"src/legacy.ts":80}}\n');
+    execFileSync('git', ['add', '--', LEGACY_LINES_BASELINE], { cwd: root });
+
+    // Overlay hides its files through .git/info/exclude, which cannot hide a deletion: removing a
+    // tracked path would dirty the very tree an overlay install promises not to touch.
+    removeRatchetBaseline(root, LINES_BASELINE);
+    expect(readFileSync(join(root, LEGACY_LINES_BASELINE), 'utf8')).toBe(
+      '{"files":{"src/legacy.ts":80}}\n',
+    );
+    expect(existsSync(join(root, LINES_BASELINE))).toBe(false);
+    // The committed ceiling outlives the overlay's local clear, so a later full install adopts it.
+    expect(migrateRatchetBaselines(root, { dryRun: true })).toEqual([
+      { from: LEGACY_LINES_BASELINE, kind: 'moved', to: LINES_BASELINE },
+    ]);
+
+    // A local overlay write cannot silently overwrite it either: divergent ceilings stop migration.
+    writeRatchetBaseline(root, LINES_BASELINE, '{"files":{"src/legacy.ts":70}}\n');
+    expect(existsSync(join(root, LEGACY_LINES_BASELINE))).toBe(true);
+    expect(() => migrateRatchetBaselines(root)).toThrow(/different contents/);
+  });
+
   it('moves legacy ratchets byte-for-byte and is idempotent', () => {
     const root = makeRoot();
     const bytes = '{"files":{"src/legacy.ts":731}}\n';
