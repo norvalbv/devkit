@@ -67,7 +67,7 @@ if [ "$RESUME" -eq 1 ]; then
     'ship --resume <branch> [--body-file <f>] [--] <extra-path...>'
 else
   ship_assert_positional_args "$BR" "$TITLE" \
-    'ship --pr <branch> "<title>" [--body "<text>"] [--body-file <f>] [--link <d>]... [--] <path...>'
+    'ship --pr <branch> "<title>" [--body "<text>"] [--body-file <f>] [--ready] [--link <d>]... [--] <path...>'
 fi
 
 LINK_EXTRA=()
@@ -77,6 +77,7 @@ BODY_SET=0         # --body given? else --body-file, else stdin (back-compat)
 BODY_FILE_SET=0    # --body-file <path>: author the body once in a file; survives every retry
 UPDATE_PR_BODY=0   # explicit body flag? Refresh the existing PR too; recorded across --resume
 QAVIS_PUBLISH=1    # suppresses only the post-push description write, never the staged gate
+READY=0            # --ready marks the PR ready-for-review after the push lands
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --pr) shift ;;                                                   # mode flag (already routed here) — ignore
@@ -89,6 +90,15 @@ while [ "$#" -gt 0 ]; do
     --body) BODY_FLAG="${2?--body requires text}"; BODY_SET=1; UPDATE_PR_BODY=1; shift 2 ;;
     --body-file) BODY_FILE_FLAG="${2:?--body-file requires a path}"; BODY_FILE_SET=1; UPDATE_PR_BODY=1; shift 2 ;;
     --no-qavis-publish) QAVIS_PUBLISH=0; shift ;;
+    --ready)
+      # Deliberately NOT recorded across --resume: unlike the body/base, this is a one-shot state
+      # transition on the PR, not a property of the invocation. A retry of a blocked re-push should
+      # not silently re-publish a PR the operator may have put back into draft in the meantime.
+      READY=1; shift ;;
+    --draft)
+      # The PR already exists here, so there is nothing to open as a draft. Name the actual remedy
+      # rather than falling through to the generic unknown-flag error.
+      echo "--draft applies to a NEW ship (opening the PR); this PR already exists. To convert it back to a draft: gh pr ready --undo $BR" >&2; exit 1 ;;
     --resume) echo "--resume must come FIRST: devkit ship --resume <branch> [--] <extra-path...>" >&2; exit 1 ;;
     --) shift; while [ "$#" -gt 0 ]; do PATHS+=("$1"); shift; done; break ;;
     -*) echo "unknown flag: $1 (pass a dash-leading file path after --)" >&2; exit 1 ;;
@@ -116,9 +126,11 @@ if [ "$RESUME" -eq 1 ]; then
   SI_FIELDS=()
   while IFS= read -r -d '' si_field; do SI_FIELDS+=("$si_field"); done < "$SI_OUT"
   rm -f "$SI_OUT"
-  # ship-intent.mts field order: mode, sourceMode, title, base, qavis, updatePrBody, createdAt,
-  # generation, sourceAttemptId (empty for this explicit mode), nlinks, links..., body, paths...
-  [ "${#SI_FIELDS[@]}" -ge 12 ] || { echo "recorded invocation is malformed — run the full devkit ship --pr command" >&2; exit 1; }
+  # ship-intent.mts field order: mode, sourceMode, title, base, qavis, updatePrBody, draft,
+  # createdAt, generation, sourceAttemptId (empty for this explicit mode), nlinks, links..., body,
+  # paths... Field 6 (draft) is new-ship-only — read past it here, but keep these POSITIONAL indices
+  # in lockstep with ship-branch.sh:139, which decodes the same stream.
+  [ "${#SI_FIELDS[@]}" -ge 13 ] || { echo "recorded invocation is malformed — run the full devkit ship --pr command" >&2; exit 1; }
   SI_MODE=${SI_FIELDS[0]}
   if [ "$SI_MODE" = "ship" ]; then
     # The blocked attempt was a NEW ship; hand over. Positive match + one-shot marker — an
@@ -132,12 +144,12 @@ if [ "$RESUME" -eq 1 ]; then
   BASE_FLAG=${SI_FIELDS[3]}
   [ "${SI_FIELDS[4]}" != "1" ] || QAVIS_PUBLISH=0
   [ "${SI_FIELDS[5]}" != "1" ] || UPDATE_PR_BODY=1
-  RESUME_CREATED=${SI_FIELDS[6]}
-  RESUME_GENERATION=${SI_FIELDS[7]}
-  SI_NLINKS=${SI_FIELDS[9]}
+  RESUME_CREATED=${SI_FIELDS[7]}
+  RESUME_GENERATION=${SI_FIELDS[8]}
+  SI_NLINKS=${SI_FIELDS[10]}
   case "$SI_NLINKS" in *[!0-9]*|'') echo "recorded invocation is malformed (nlinks '$SI_NLINKS')" >&2; exit 1 ;; esac
-  si_i=10
-  si_body_at=$((10 + SI_NLINKS))
+  si_i=11
+  si_body_at=$((11 + SI_NLINKS))
   [ "${#SI_FIELDS[@]}" -gt $((si_body_at + 1)) ] || { echo "recorded invocation is malformed (missing body/paths)" >&2; exit 1; }
   while [ "$si_i" -lt "$si_body_at" ]; do LINK_EXTRA+=("${SI_FIELDS[$si_i]}"); si_i=$((si_i + 1)); done
   RESUME_BODY=${SI_FIELDS[$si_body_at]}
@@ -305,6 +317,37 @@ publish_requested_pr_body() {
 body_receipt_delete() {
   [ -z "$BODY_RECEIPT_REF" ] || git update-ref -d "$BODY_RECEIPT_REF" 2>/dev/null || true
   [ -z "$BODY_PAYLOAD_REF" ] || git update-ref -d "$BODY_PAYLOAD_REF" 2>/dev/null || true
+}
+
+# --ready: mark the PR ready for review. A FUNCTION, not an inline block, because this script has
+# several terminating paths that exit 0 (a body-only update, a resume whose content is already
+# remote) — and an early exit that reported success while silently skipping a requested flip would
+# leave the operator believing a draft PR had been published. Every such path calls this.
+#
+# Always runs after the work is durable, so a gh failure can never cost a landed commit. gh's own
+# contract makes it idempotent (an already-ready PR warns and exits 0). $1 is the PR number when one
+# was resolved — exact even for fork PRs or duplicate branch names — else empty to fall back to $BR.
+# Returns non-zero iff the flip was requested and did not happen.
+reship_mark_ready() {
+  [ "$READY" -eq 1 ] || return 0
+  local pr_ref=${1:-}
+  # Callers reached before PR_NUM is parsed pass empty; recover the number from the resolved URL so
+  # they are not misreported as "could not resolve" when a PR is plainly in hand.
+  if [ -z "$pr_ref" ] && [ -n "${PR_URL:-}" ]; then
+    pr_ref=${PR_URL##*/}
+    [[ "$pr_ref" =~ ^[0-9]+$ ]] || pr_ref=""
+  fi
+  if [ -z "$pr_ref" ]; then
+    echo "--ready could not resolve the PR (the gh pr view above failed)." >&2
+    echo "Mark it ready by hand once gh is reachable:" >&2
+    echo "  gh pr ready '$BR' --repo '$REPO'" >&2
+    return 1
+  fi
+  gh pr ready "$pr_ref" --repo "$REPO" && return 0
+  echo "marking the PR ready FAILED — the commit IS on origin/$BR." >&2
+  echo "Mark it ready by hand:" >&2
+  echo "  gh pr ready '$pr_ref' --repo '$REPO'" >&2
+  return 1
 }
 
 # A killed rewrite can leave either half of its pre-push proof while origin still names the old
@@ -669,6 +712,17 @@ if git -C "$WT" diff --cached --quiet; then
     echo "DRY: no commit delta; skipped the recorded PR-body update and kept its intent for a real run." >&2
     exit 0
   fi
+  # --ready is a state change on the PR, not on the push, so an empty delta does not excuse skipping
+  # it. Done ONCE here rather than per exit arm below, and deliberately BEFORE the record is
+  # released: every no-delta arm then attempts it, and a transient gh failure leaves the record
+  # intact so the identical retry converges instead of finding nothing left to resume. PR_URL is
+  # resolved first — several arms reach here without it, and the helper needs a PR to act on.
+  NO_DELTA_READY=0
+  if [ "$READY" -eq 1 ]; then
+    [ -n "${PR_URL:-}" ] || PR_URL=$(gh pr view "$BR" --repo "$REPO" --json url -q .url 2>/dev/null) || PR_URL=""
+    reship_mark_ready "${PR_NUM:-}" || exit 1
+    NO_DELTA_READY=1
+  fi
   # An empty delta means everything recorded is already on origin/$BR, so the record has nothing
   # left to resume — release it either way, or every retry re-reports "no changes" until it goes
   # stale (6h; the classic cause is a prior attempt killed after its push but before its release).
@@ -709,6 +763,9 @@ if git -C "$WT" diff --cached --quiet; then
   else
     echo "no changes vs origin/$BR — nothing to re-push; $SI_NOTE" >&2
   fi
+  # An empty delta is normally an error — the caller asked to push something and there was nothing.
+  # But if the flip above ran, the requested end state IS now reality, so the retry has converged.
+  [ "$NO_DELTA_READY" -eq 0 ] || { echo "marked the PR ready; there was nothing left to re-push" >&2; exit 0; }
   exit 1
 fi
 
@@ -983,7 +1040,18 @@ if [ -n "$PR_URL" ]; then
     . "$SCRIPT_DIR/publish-qavis.sh"
     publish_qavis_receipt "$ROOT" "$PR_NUM" "$BASE" "$SHIP_COMMIT"
   fi
+  # Flip out of draft LAST, once the commit, the reconcile record and any body publication are all
+  # durable — a gh failure here can never cost work that already landed.
+  READY_STATUS=0
+  reship_mark_ready "${PR_NUM:-}" || READY_STATUS=1
   echo "$PR_URL"
+  # Non-zero only after the URL is printed: the re-push succeeded, the requested flip did not.
+  [ "$READY_STATUS" -eq 0 ] || exit 1
 else
+  if [ "$READY" -eq 1 ]; then
+    echo "re-pushed to origin/$BR, but the requested --ready flip did not happen." >&2
+    reship_mark_ready "" || true
+    exit 1
+  fi
   echo "re-pushed to origin/$BR"
 fi
