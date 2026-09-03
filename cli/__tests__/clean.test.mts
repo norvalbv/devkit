@@ -154,4 +154,24 @@ describe('clean (overlay mode) — anti-slop root files', () => {
     // The untracked sibling is still removed — the guard is per-path, not a blanket bail-out.
     expect(existsSync(join(root, 'oxlint.devkit.json'))).toBe(false);
   });
+
+  // The root-file guard is worthless if the recursive `.devkit/` removal above it runs first.
+  it('declines to delete a tracked file inside .devkit/, and still clears the rest', () => {
+    const root = overlayRepo();
+    const git = (...a: string[]) => execFileSync('git', a, { cwd: root, stdio: 'ignore' });
+    expect(
+      devkit(root, 'init', '--overlay', '--stack', 'generic', '--yes', '--anti-slop').status,
+    ).toBe(0);
+    git('add', '-f', '.devkit/anti-slop/manifest.json');
+    git('commit', '-qm', 'track the anti-slop manifest', '--no-verify');
+
+    const result = devkit(root, 'clean', '--yes');
+
+    expect(result.status).toBe(0);
+    expect(existsSync(join(root, '.devkit/anti-slop/manifest.json'))).toBe(true);
+    expect(result.stdout).toContain('kept tracked .devkit/anti-slop/manifest.json');
+    // Untracked siblings under the same tree still go — the walk is per-path, not all-or-nothing.
+    expect(existsSync(join(root, '.devkit/oxc'))).toBe(false);
+    expect(existsSync(join(root, '.devkit/config.json'))).toBe(false);
+  });
 });

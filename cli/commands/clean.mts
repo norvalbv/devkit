@@ -70,6 +70,14 @@ function rm(path: string, label: string, dryRun: boolean): void {
   if (!dryRun) rmSync(path, { recursive: true, force: true });
 }
 
+// A tracked path devkit declines to delete, named with the remedy: a silent survivor makes the next
+// `devkit init` refuse for a reason the user cannot see.
+function announceTracked(rel: string): void {
+  console.log(
+    `  • kept tracked ${rel} — run \`git rm --cached ${rel}\` and commit to allow a re-install`,
+  );
+}
+
 /**
  * Remove a cwd-relative overlay path only if git does not track it — devkit does not own this repo,
  * and a survivor is recoverable where deleted committed content is not. Prints every skip's remedy.
@@ -81,10 +89,7 @@ function rmUntrackedIn(cwd: string, gitRoot: string, dryRun: boolean) {
       rm(join(cwd, rel), label, dryRun);
       return;
     }
-    if (!existsSync(join(cwd, rel))) return;
-    console.log(
-      `  • kept tracked ${pfx}${rel} — run \`git rm --cached ${pfx}${rel}\` and commit to allow a re-install`,
-    );
+    if (existsSync(join(cwd, rel))) announceTracked(`${pfx}${rel}`);
   };
 }
 
@@ -148,7 +153,7 @@ function hasOverlayStrays(gitRoot: string): boolean {
   return false;
 }
 
-function cleanUntrackedDevkitState(gitRoot: string, dryRun: boolean): void {
+function cleanUntrackedDevkitState(gitRoot: string, dryRun: boolean, root = '.devkit'): void {
   const tracked = trackedPathPredicate(gitRoot);
   const visit = (rel: string): void => {
     const absolute = join(gitRoot, rel);
@@ -161,9 +166,10 @@ function cleanUntrackedDevkitState(gitRoot: string, dryRun: boolean): void {
       const child = `${rel}/${entry.name}`;
       if (entry.isDirectory() && tracked(child)) visit(child);
       else if (!tracked(child)) rm(join(gitRoot, child), child, dryRun);
+      else announceTracked(child);
     }
   };
-  visit('.devkit');
+  visit(root);
 }
 
 // Best-effort overlay teardown for a repo with NO config (orphaned / partial clean). Every step is
@@ -252,8 +258,11 @@ function cleanOverlay(cwd: string, cfg: DevkitConfig, dryRun: boolean): void {
     });
     removeEmptyOverlaySettings(gitRoot, dryRun);
   }
-  rm(join(gitRoot, '.devkit'), '.devkit/ (git-root hooks)', dryRun);
-  rm(join(cwd, '.devkit'), `${cwd === gitRoot ? '' : 'package '}.devkit/`, dryRun);
+  // Tracked-aware like every removal below it: a blunt recursive rm here destroyed a force-added
+  // `.devkit/anti-slop/manifest.json` one line ABOVE the guard that exists for exactly that case.
+  cleanUntrackedDevkitState(gitRoot, dryRun);
+  if (cwd !== gitRoot)
+    cleanUntrackedDevkitState(gitRoot, dryRun, `${relative(gitRoot, cwd)}/.devkit`);
   // All five, not just the two newest: a recorded overlay proves devkit wrote these, not that the
   // user never `git add -f`'d one since. `cleanOverlayStrays` already holds this convention.
   const rmUntracked = rmUntrackedIn(cwd, gitRoot, dryRun);
