@@ -153,3 +153,18 @@ export function planChunkedParts(
     facts: { count: packed.chunks.length, capBytes: effectiveCap, planHash },
   };
 }
+
+/** Would production chunk this selection's diff? The plan facts when yes, null when the diff sits
+ * under the trigger — the bench uses it to refuse a row it can only judge un-chunked. */
+export function chunkPlanFacts(
+  sel: ReviewerSelection,
+  diffText: string,
+  groups: readonly (readonly string[])[],
+  capLoc: number,
+): ChunkedPlan['facts'] | null {
+  const keyOf = (name: string, diff: string, salt: string): string => `${name}|${diff}|${salt}`;
+  return (
+    planChunkedParts(sel, diffText, diffCacheIdentity(diffText), '', keyOf, groups, capLoc)
+      ?.facts ?? null
+  );
+}
