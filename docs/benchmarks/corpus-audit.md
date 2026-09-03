@@ -49,8 +49,13 @@ What the numbers mean and do not mean:
   `corr-sync-source-target-divergence` — no caller passes a custom root and the 3-arg call is now a
   compile error; `corr-pr26-cover-the-restart-interrupted-flow` — nothing writes `restartRunId`;
   `corr-decoy-tight-anchor-classifier` — the diff adds a `\d{3}` requirement the note never defends).
-  Those 6 are not evidence about the reviewer and must be relabelled or repaired before they count;
-  repair is a corpus edit and lands inside the re-baseline's epoch break (sc-2494), not before.
+  Those 6 were repaired on 2026-09-03 inside sc-2494's epoch break, each by the minimal edit the
+  adjudication named: the broadcast decoy drops the retry-killing `q.sent` guard and ships `queue.ts`;
+  the classifier decoy drops the undefended `\d{3}` narrowing; the schema decoy adds
+  `required: ['choices']`; the retry gold's base now resets `startMode` so the diff introduces the
+  dead state; the sync gold gains `cli.ts`, the caller that threads a custom root; the restart gold
+  gains `resume.ts`, the writer that leaves `flowRunId` null (its decoy sibling gets the same file so
+  the extra file is not a gold-only tell). Their rowHash changed, so the re-baseline measures them fresh.
 - **never measured 44** is the cheapest gap: those rows have cost judge time zero and carry no
   evidence either way; the re-baseline measures them.
 - **pairs straddling 25** is why holdout scored easier than dev. `finalize.mts` now assigns
