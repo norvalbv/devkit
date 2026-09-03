@@ -4,10 +4,12 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  realpathSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import {
   assertBaselineTrackable,
@@ -168,6 +170,34 @@ function concurrentBaselineCreateSettled(
   return false;
 }
 
+let replaceCounter = 0;
+
+/** Replace canonical by rename: a truncating write would rewrite the inode a hard-linked retired
+ * copy still shares, changing a tracked path this install must not touch. */
+function replaceCanonical(canonicalFile: string, contents: string): void {
+  // Ship projects .devkit/baselines into its worktree as a symlink whose write must reach the real
+  // root file (git-index.mts), so rename beside the RESOLVED target instead of over the link.
+  const target = resolvedTarget(canonicalFile);
+  replaceCounter += 1;
+  const temp = `${target}.devkit-${process.pid}-${replaceCounter}`;
+  try {
+    writeFileSync(temp, contents);
+    renameSync(temp, target);
+  } catch (error) {
+    rmSync(temp, { force: true });
+    throw error;
+  }
+}
+
+/** The real path a canonical name resolves to; the name itself when nothing exists there yet. */
+function resolvedTarget(canonicalFile: string): string {
+  try {
+    return realpathSync(canonicalFile);
+  } catch {
+    return join(realpathSync(dirname(canonicalFile)), basename(canonicalFile));
+  }
+}
+
 /** Read the canonical debt ceiling; the legacy generation is retired (sc-2256). */
 export function readRatchetBaseline(root: string, canonical: string): ReadRatchetBaseline | null {
   const bytes = readExisting(join(root, canonical));
@@ -184,7 +214,7 @@ export function writeRatchetBaseline(
   if (!overlayInstall(root)) assertBaselineTrackable(root, canonical);
   const canonicalFile = join(root, canonical);
   mkdirSync(dirname(canonicalFile), { recursive: true });
-  writeFileSync(canonicalFile, contents);
+  replaceCanonical(canonicalFile, contents);
   // Canonical is staged before the retired copy is discarded, so an interruption between the two
   // steps leaves the index carrying the new debt rather than a deletion without its replacement.
   if (stage) stageBaseline(root, canonical);
