@@ -46,12 +46,14 @@ What the numbers mean and do not mean:
 ## What changed alongside the audit
 
 - `finalize --check` refuses a proposal that is an unrelated near-twin of an existing row and
-  prints the coverage cell (suite × lens × difficulty) the row would fill.
+  prints the coverage cell (suite × lens × difficulty) the row would fill; `--append` applies the
+  same rule to the post-overlay batch, so nothing enters the corpus that `--check` would refuse.
 - `loadRows` warns when a suite is under the ≥3-holdout-per-class floor
   (`DEVKIT_HOLDOUT_FLOOR_STRICT=1` refuses); `corpus/corpus-lint.mts` runs the structural lint in the
   pre-commit benchmark stage.
-- Checkpoint rows carry `caseId`, `holdout` and `reasonClass`; `summarize()` publishes
-  `pairConsistency` and the tracker emits `<arm>:pair-consistency` beside the marginal.
+- Checkpoint rows carry `caseId`, `variantOf`, `holdout` and `reasonClass`; `summarize()` publishes
+  `pairConsistency` (grouped over both links, the same relation holdout uses) and the tracker emits
+  `<arm>:pair-consistency` beside the marginal.
 - Every reviewer ratio carries `noiseFloor: 0.139` (the Wilson upper bound of the 2 / 48 blind
   relabel), so `metricAssessment` reads a sub-floor delta as `flat` instead of a win.
 - Mined fail→fix candidates carry `labelRule` (lens-pass · reviewer-pass · absence-exit0 ·

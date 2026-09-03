@@ -7,6 +7,7 @@
  */
 
 import { mcnemarMidP, wilson } from '../../../decisions/eval/bench.mts';
+import { groupByPair } from './corpus/twins.mts';
 
 export const fmtCi = (k, n) => {
   const { lo, hi } = wilson(k, n);
@@ -237,30 +238,30 @@ export function summarize(results, { cascade } = {}) {
   };
 }
 
-/** Pair-level contrast consistency: caseId groups of exactly one gold + one decoy, consistent when both
- * are ok (okFinal under a cascade, else okFirst). Singletons and malformed groups reported, never averaged. */
+/** Pair-level contrast consistency over the same pair relation holdout uses (groupByPair): a gold+decoy
+ * group is consistent when both are ok (okFinal under a cascade). Singletons/malformed reported. */
 export function pairConsistency(results, { cascade } = {}) {
   const ok = (r) => (cascade ? r.okFinal : r.okFirst);
-  const groups = new Map();
-  for (const r of results) {
-    if (!r.caseId) continue;
-    if (!groups.has(r.caseId)) groups.set(r.caseId, []);
-    groups.get(r.caseId).push(r);
-  }
+  // Grouping is keyed on row id (a variantOf target has no link of its own), so only rows that
+  // carry one are grouped; an id-less record is a singleton by definition.
+  const withId = results.filter((r) => !!r.id);
   let k = 0;
   let n = 0;
+  let singletons = results.length - withId.length;
   let malformed = 0;
-  let malformedRows = 0;
-  for (const g of groups.values()) {
+  for (const g of groupByPair(withId).values()) {
+    if (g.length === 1) {
+      singletons += 1;
+      continue;
+    }
     const gold = g.filter((r) => r.expected === 'FAIL');
     const decoy = g.filter((r) => r.expected === 'PASS');
     if (g.length !== 2 || gold.length !== 1 || decoy.length !== 1) {
       malformed += 1;
-      malformedRows += g.length;
       continue;
     }
     n += 1;
     if (ok(gold[0]) && ok(decoy[0])) k += 1;
   }
-  return { k, n, singletons: results.length - n * 2 - malformedRows, malformedGroups: malformed };
+  return { k, n, singletons, malformedGroups: malformed };
 }

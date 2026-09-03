@@ -163,6 +163,29 @@ export function makeSpyExec(capture, { reviewer, cascade, delegate = execJudgeAs
  * Reason attribution (expected-FAIL rows that finally failed): the authoritative artifact is the
  * FAILING pass's snapshot (escalation's when it ran live, else the first pass's).
  */
+/** A result for a row the cascade never scored (not selected, paused, engine error): same shape as
+ * scoreRow's, every verdict field empty, so summaries and checkpoints need no special case. */
+export function unscoredResult(row, finalStatus, subcause) {
+  return {
+    id: row.id,
+    reviewer: row.reviewer,
+    expected: row.expected,
+    holdout: !!row.holdout,
+    caseId: row.caseId ?? null,
+    variantOf: row.variantOf ?? null,
+    ...rowHashes(row),
+    firstVerdict: null,
+    okFirst: false,
+    finalStatus,
+    okFinal: false,
+    escalated: false,
+    escalateLive: false,
+    reasonClass: null,
+    subcause,
+    ms: { first: 0, escalate: 0 },
+  };
+}
+
 export function scoreRow(row, capture, cas) {
   // filter+merge, not find: a split arm captures one entry PER LENS GROUP under the same label.
   const pick = (l) => mergeLensCaptures(capture.filter((c) => c.label === l));
@@ -196,6 +219,7 @@ export function scoreRow(row, capture, cas) {
     expected: row.expected,
     holdout: !!row.holdout,
     caseId: row.caseId ?? null,
+    variantOf: row.variantOf ?? null,
     ...rowHashes(row),
     firstVerdict,
     okFirst,
@@ -230,23 +254,7 @@ export async function runRow(row, { model = MODEL, cascade = CASCADE, exec } = {
     const sel = selectReviewers(fx.staged, cfg).find((s) => s.reviewer.name === row.reviewer);
     if (!sel)
       // Selection itself is under test: a row whose staged files don't reach its reviewer is wrong.
-      return {
-        id: row.id,
-        reviewer: row.reviewer,
-        expected: row.expected,
-        holdout: !!row.holdout,
-        caseId: row.caseId ?? null,
-        ...rowHashes(row),
-        firstVerdict: null,
-        okFirst: false,
-        finalStatus: 'not-selected',
-        okFinal: false,
-        escalated: false,
-        escalateLive: false,
-        reasonClass: null,
-        subcause: 'not-selected',
-        ms: { first: 0, escalate: 0 },
-      };
+      return unscoredResult(row, 'not-selected', 'not-selected');
     const capture = [];
     const spy = (r) => makeSpyExec(capture, { reviewer: r, cascade, delegate: exec });
     const cas = await runReviewerCascade(sel, (s) =>
@@ -545,24 +553,7 @@ async function runBench(targets, { dev, only, writeBaseline, failMode, fresh, ag
         console.log(`  ${row.id.padEnd(36)} SALVAGED (checkpoint)`);
         return saved;
       }
-      if (paused)
-        return {
-          id: row.id,
-          reviewer: row.reviewer,
-          expected: row.expected,
-          holdout: !!row.holdout,
-          caseId: row.caseId ?? null,
-          ...rowHashes(row),
-          firstVerdict: null,
-          okFirst: false,
-          finalStatus: 'paused-skipped',
-          okFinal: false,
-          escalated: false,
-          escalateLive: false,
-          reasonClass: null,
-          subcause: 'paused',
-          ms: { first: 0, escalate: 0 },
-        };
+      if (paused) return unscoredResult(row, 'paused-skipped', 'paused');
       let res: Awaited<ReturnType<typeof runRow>>;
       try {
         res = await runRow(row);
@@ -573,23 +564,7 @@ async function runBench(targets, { dev, only, writeBaseline, failMode, fresh, ag
         );
       } catch (e) {
         console.error(`  ${row.id}: engine error — ${e?.message ?? e}`);
-        res = {
-          id: row.id,
-          reviewer: row.reviewer,
-          expected: row.expected,
-          holdout: !!row.holdout,
-          caseId: row.caseId ?? null,
-          ...rowHashes(row),
-          firstVerdict: null,
-          okFirst: false,
-          finalStatus: 'engine-error',
-          okFinal: false,
-          escalated: false,
-          escalateLive: false,
-          reasonClass: null,
-          subcause: 'engine-error',
-          ms: { first: 0, escalate: 0 },
-        };
+        res = unscoredResult(row, 'engine-error', 'engine-error');
       }
       appendFileSync(
         progressFile(MODEL, CASCADE),
@@ -752,6 +727,7 @@ async function runBench(targets, { dev, only, writeBaseline, failMode, fresh, ag
               // sc-2498: pair identity, holdout and right-reason attribution survive into the
               // checkpoint so pair-consistency and reason audits are recomputable from disk.
               caseId: r.caseId,
+              variantOf: r.variantOf ?? null,
               holdout: r.holdout,
               reasonClass: r.reasonClass,
             },

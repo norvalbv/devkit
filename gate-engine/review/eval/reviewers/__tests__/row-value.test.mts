@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import { auditSuite } from '../corpus/audit.mts';
 import { holdoutFloorShortfalls, lintRows } from '../corpus.mts';
-import { assignHoldout } from '../finalize.mts';
+import { assignHoldout, unrelatedTwinProblems } from '../finalize.mts';
 import {
   buildFailFixCandidate,
   findNextLensOutcome,
@@ -89,6 +89,23 @@ describe('pairConsistency', () => {
     ];
     expect(pairConsistency(results)).toEqual({ k: 1, n: 2, singletons: 1, malformedGroups: 1 });
   });
+  it('groups a variantOf-only pair the same way holdout does, and leaves unlinked rows singletons', () => {
+    const results = [
+      { ...r('g1', undefined, 'FAIL', true), variantOf: undefined },
+      { ...r('d1', undefined, 'PASS', true), variantOf: 'g1' },
+      { ...r('g2', undefined, 'FAIL', false), variantOf: undefined },
+      { ...r('d2', undefined, 'PASS', true), variantOf: 'g2' },
+      { ...r('lone', undefined, 'FAIL', true), variantOf: 'not-in-this-run' },
+      {
+        expected: 'PASS',
+        okFirst: true,
+        okFinal: true,
+        escalateLive: false,
+        ms: { first: 0, escalate: 0 },
+      },
+    ];
+    expect(pairConsistency(results)).toEqual({ k: 1, n: 2, singletons: 2, malformedGroups: 0 });
+  });
   it('uses okFinal under a cascade and lands in summarize beside the marginal', () => {
     const results = [r('g1', 'c1', 'FAIL', true, false), r('d1', 'c1', 'PASS', true, true)];
     expect(pairConsistency(results, { cascade: true }).k).toBe(0);
@@ -136,6 +153,33 @@ describe('assignHoldout by caseId group', () => {
     assignHoldout(rows);
     expect(rows[0].holdout).toBe(rows[1].holdout);
     expect(rows[0].holdout).not.toBe(rows[2].holdout);
+  });
+});
+
+describe('unrelatedTwinProblems (the --check / --append admission rule)', () => {
+  const existing = [
+    { id: 'g1', expected: 'FAIL', caseId: 'c1', holdout: true, repo: fixture(CODE) },
+    { id: 'd1', expected: 'PASS', caseId: 'c1', holdout: false, repo: fixture(`${CODE} // fixed`) },
+  ];
+  it('refuses an unlinked copy of an existing row and admits the same row once it is linked', () => {
+    const copy = { id: 'g2', expected: 'FAIL', repo: fixture(`${CODE} // copy`) };
+    const refused = unrelatedTwinProblems([copy], existing);
+    expect(
+      refused.map((m) => m.match(/^g2: near-twin of existing row (\w+) /)?.[1]).sort(),
+    ).toEqual(['d1', 'g1']);
+    expect(unrelatedTwinProblems([{ ...copy, variantOf: 'g1' }], existing)).toEqual([]);
+  });
+  it('refuses two unlinked near-twins inside the same batch, naming the sibling as a batch row', () => {
+    const batch = [
+      { id: 'n1', expected: 'FAIL', repo: fixture(`${CODE} // one`) },
+      { id: 'n2', expected: 'PASS', repo: fixture(`${CODE} // two`) },
+    ];
+    const other = [
+      { id: 'far', expected: 'PASS', repo: fixture('nothing alike in here at all today') },
+    ];
+    const refused = unrelatedTwinProblems(batch, other);
+    expect(refused).toHaveLength(1);
+    expect(refused[0]).toMatch(/near-twin of batch row/);
   });
 });
 
@@ -299,5 +343,32 @@ describe('auditSuite', () => {
     });
     expect(a.holdout.FAIL.meetsFloor).toBe(false);
     expect(a.nearTwins.unrelated).toBe(0);
+  });
+  it("ignores another reviewer's observations of the same row id (ids are unique per corpus only)", () => {
+    const reviewer = { name: 'api-security-reviewer' };
+    const rows = [
+      {
+        id: 'shared-id',
+        expected: 'FAIL',
+        expectItems: ['auth'],
+        repo: fixture('one two three four five six'),
+      },
+    ];
+    const obs = new Map([
+      [
+        'shared-id',
+        [
+          { ok: false, arm: 'correctness-reviewer@sonnet@cascade-off' },
+          { ok: false, arm: 'correctness-reviewer@sonnet@cascade-off' },
+          { ok: true, arm: 'api-security-reviewer@haiku@cascade-on' },
+        ],
+      ],
+    ]);
+    const a = auditSuite(reviewer, rows, obs);
+    expect(a.alwaysWrong).toEqual([]);
+    expect(a.multiObserved).toBe(0);
+    expect(a.neverMeasured).toEqual([]);
+    expect(a.measuredArms).toEqual(['api-security-reviewer@haiku@cascade-on']);
+    expect(auditSuite({ name: 'api-security' }, rows, obs).neverMeasured).toEqual(['shared-id']);
   });
 });

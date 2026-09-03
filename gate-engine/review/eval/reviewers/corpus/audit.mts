@@ -47,8 +47,14 @@ export function loadObservations(dir = CHECKPOINTS) {
   return byRow;
 }
 
+/** True when a checkpoint section key belongs to this reviewer (`<name>` or `<name>@…`). */
+export const armOfReviewer = (arm, reviewer) =>
+  arm === reviewer.name || arm.startsWith(`${reviewer.name}@`);
+
 export function auditSuite(reviewer, rows, observations, { threshold = 0.5 } = {}) {
-  const obsOf = (id) => observations.get(id) ?? [];
+  // lintRows keeps ids unique only WITHIN a corpus; another reviewer's checkpoint may carry the
+  // same id, so an observation counts here only when its arm belongs to the audited reviewer.
+  const obsOf = (id) => (observations.get(id) ?? []).filter((o) => armOfReviewer(o.arm, reviewer));
   const neverMeasured = rows.filter((r) => obsOf(r.id).length === 0).map((r) => r.id);
   const multi = rows.filter((r) => obsOf(r.id).length >= 2);
   const constantCorrect = multi.filter((r) => obsOf(r.id).every((o) => o.ok)).map((r) => r.id);
@@ -56,7 +62,7 @@ export function auditSuite(reviewer, rows, observations, { threshold = 0.5 } = {
   const flipped = multi
     .filter((r) => obsOf(r.id).some((o) => o.ok) && obsOf(r.id).some((o) => !o.ok))
     .map((r) => r.id);
-  const arms = new Set([...observations.values()].flat().map((o) => o.arm));
+  const arms = new Set(rows.flatMap((r) => obsOf(r.id).map((o) => o.arm)));
   const golds = rows.filter((r) => r.expected === 'FAIL');
   const perLens = {};
   for (const r of golds)
@@ -93,7 +99,7 @@ export function auditSuite(reviewer, rows, observations, { threshold = 0.5 } = {
     rows: rows.length,
     gold: golds.length,
     decoy: rows.length - golds.length,
-    measuredArms: [...arms].filter((a) => a.startsWith(reviewer.name)).sort(),
+    measuredArms: [...arms].sort(),
     neverMeasured,
     multiObserved: multi.length,
     constantCorrect,

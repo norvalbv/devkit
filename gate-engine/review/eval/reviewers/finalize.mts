@@ -77,6 +77,18 @@ function leakScan(row) {
   return hits;
 }
 
+/** The near-twin admission rule (one message per refused candidate vs existing or batch rows),
+ * shared by --check and --append so the append path cannot admit what --check would refuse. */
+export function unrelatedTwinProblems(candidates, existing, { threshold = 0.5 } = {}) {
+  const ids = new Set(candidates.map((r) => r.id));
+  return unrelatedTwins(nearTwins([...existing, ...candidates], { threshold }))
+    .filter((t) => ids.has(t.a) || ids.has(t.b))
+    .map((t) => {
+      const [mine, other] = ids.has(t.a) ? [t.a, t.b] : [t.b, t.a];
+      return `${mine}: near-twin of ${ids.has(other) ? 'batch' : 'existing'} row ${other} (Jaccard ${t.similarity}) with no caseId/variantOf link — an unlabelled copy leaks across the holdout boundary; link it as a minimal pair or drop it`;
+    });
+}
+
 function checkProposal(file) {
   const row = readProposal(file);
   const problems = [];
@@ -103,13 +115,7 @@ function checkProposal(file) {
     if (problems.length === 0) {
       const target = BENCH_REVIEWERS.find((r) => r.name === row.reviewer);
       const existing = target ? loadRows(target) : [];
-      const twins = unrelatedTwins(nearTwins([...existing, row])).filter(
-        (t) => t.a === row.id || t.b === row.id,
-      );
-      for (const t of twins)
-        problems.push(
-          `near-twin of existing row ${t.a === row.id ? t.b : t.a} (Jaccard ${t.similarity}) with no caseId/variantOf link — an unlabelled copy leaks across the holdout boundary; link it as a minimal pair or drop it`,
-        );
+      problems.push(...unrelatedTwinProblems([row], existing));
       const cell = `${row.reviewer} × ${row.expected === 'FAIL' ? (row.expectItems ?? []).join('+') : 'decoy'} × ${row.difficulty ?? 'unlabelled'}`;
       const same = existing.filter(
         (r) =>
@@ -362,6 +368,15 @@ function appendSuite(suite, max) {
         `finalize: ${row.id} fixture content references a private-repo identifier in: ${leaks.join(', ')} — fix the proposal (or overlay) before appending`,
       );
   }
+
+  // And the admission rule: --append is where a row actually enters the corpus, and the overlay
+  // may be what added (or removed) the pair link, so the twin check runs on the post-overlay rows.
+  const twinProblems = unrelatedTwinProblems(fresh, existingRows);
+  if (twinProblems.length)
+    throw new BenchAbort(
+      2,
+      `finalize: refused by the near-twin rule —\n  ${twinProblems.join('\n  ')}`,
+    );
 
   assignHoldout(fresh, existingRows);
 
