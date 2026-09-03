@@ -39,6 +39,7 @@ import { resolveGuardConfig } from '../../../config.mts';
 import { BenchAbort, cleanBenchEnv, materializeFixture } from '../../../decisions/eval/bench.mts';
 import { execJudgeAsync } from '../../../judge/run-judge.mts';
 import { lensArmSuffix, mergeLensCaptures, runReviewerCascade } from '../../lens/split.mts';
+import { BENCH_CHUNK_LOC, chunkRefusal, preflightChunkRefusals } from './corpus/chunk-guard.mts';
 import {
   checklistScript,
   parseReviewVerdict,
@@ -165,8 +166,7 @@ export function makeSpyExec(capture, { reviewer, cascade, delegate = execJudgeAs
  * Reason attribution (expected-FAIL rows that finally failed): the authoritative artifact is the
  * FAILING pass's snapshot (escalation's when it ran live, else the first pass's).
  */
-/** A result for a row the cascade never scored (not selected, paused, engine error): same shape as
- * scoreRow's, every verdict field empty, so summaries and checkpoints need no special case. */
+/** A row the cascade never scored (not selected, paused, engine error): scoreRow's shape, verdicts empty. */
 export function unscoredResult(row, finalStatus, subcause) {
   return {
     id: row.id,
@@ -403,6 +403,8 @@ export function validateRow(row) {
     const cfg = resolveGuardConfig(fx.repo);
     const sel = selectReviewers(fx.staged, cfg).find((s) => s.reviewer.name === row.reviewer);
     if (!sel) problems.push('selectReviewers does not fire the target reviewer');
+    const refusal = sel ? chunkRefusal(row, sel, fx.repo) : null;
+    if (refusal) problems.push(refusal);
     execFileSync('node', [checklistScript(reviewer), 'generate'], {
       cwd: fx.repo,
       encoding: 'utf8',
@@ -491,6 +493,9 @@ async function runBench(targets, { dev, only, writeBaseline, failMode, fresh, ag
   const plan = targets.map((reviewer) => ({ reviewer, rows: loadRows(reviewer, { dev, only }) }));
   const totalRows = plan.reduce((s, p) => s + p.rows.length, 0);
   if (totalRows === 0) throw new BenchAbort(2, 'reviewer-eval: no rows selected');
+  const refusals = preflightChunkRefusals(plan.flatMap((p) => p.rows)); // before any judge runs
+  if (refusals.length)
+    throw new BenchAbort(2, `reviewer-eval: refused —\n  ${refusals.join('\n  ')}`);
   const progress = loadProgress(MODEL, CASCADE);
   for (const line of runBannerLines(plan, {
     model: MODEL,
@@ -526,9 +531,7 @@ async function runBench(targets, { dev, only, writeBaseline, failMode, fresh, ag
       cascade: effCascade(reviewer),
       gateHash: benchGateHash(reviewer),
       corpusHash: corpusHash(reviewer),
-      // The bench calls the cascade per lens group directly and never plans chunks, so every
-      // checkpoint is an UNCHUNKED measurement; recorded so the reader can tell (sc-2494 AC4).
-      chunkLoc: null,
+      chunkLoc: BENCH_CHUNK_LOC, // sc-2494 AC4: the cap every row was measured under (guard refuses others)
     };
     const salvage = salvageMap(progress, reviewer.name, meta, rows);
     console.log(
@@ -635,11 +638,8 @@ async function runBench(targets, { dev, only, writeBaseline, failMode, fresh, ag
     );
   }
 
-  for (const line of firstPassMeanLines(
-    perReviewer.map(({ reviewer, results }) => ({ model: effModel(reviewer), results })),
-    EST_FIRST_SECS,
-  ))
-    console.log(line);
+  const perModel = perReviewer.map((p) => ({ model: effModel(p.reviewer), results: p.results }));
+  for (const line of firstPassMeanLines(perModel, EST_FIRST_SECS)) console.log(line);
 
   // ── Floors + flips (--fail) / A/B directional compare (--against) ──
   // In A/B mode floors + the flip table PRINT for context but never set the exit — an A/B is
@@ -717,8 +717,7 @@ async function runBench(targets, { dev, only, writeBaseline, failMode, fresh, ag
               finalStatus: r.finalStatus,
               rowHash: r.rowHash,
               behaviorHash: r.behaviorHash,
-              // sc-2498: pair identity, holdout and right-reason attribution survive into the
-              // checkpoint so pair-consistency and reason audits are recomputable from disk.
+              // sc-2498: pair identity, holdout and reason attribution are recomputable from disk.
               caseId: r.caseId,
               variantOf: r.variantOf ?? null,
               holdout: r.holdout,
