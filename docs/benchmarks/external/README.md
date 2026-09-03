@@ -101,8 +101,11 @@ bar, so per the ruling the triage column is reported (the `unmatchedByTriage` ta
 stamped rubric v1) but does **not** count toward the lens rule. The confusions are almost all
 between adjacent lenses (writer-reader ↔ state-transitions, none → error-and-edge), not between a
 lens and `none` — evidence that the boundaries between existing lenses are fuzzy, not that a class
-is missing. Rubric v2 adds explicit tie-breaks (`triage-lens.mts`, `RUBRIC_TIE_BREAKS`) and is
-run as a second labelling round; its kappa is recorded when it lands.
+is missing. Rubric v2 adds explicit tie-breaks (`triage-lens.mts`, `RUBRIC_TIE_BREAKS`); run as a
+second labelling round (2026-09-03) it scored **worse** against the same hand labels: devkit n=61,
+agreement 0.53, **kappa 0.36**; frink n=32, agreement 0.53, **kappa 0.42**. Two rounds under the
+bar, both with adjacent-lens confusions, are read as the boundary fuzziness being real; no third
+rubric is planned before the prompt-bullet A/B.
 
 ## Martian Code Review Bench probe (confirmatory) — `external/martian-bench.mts`
 
