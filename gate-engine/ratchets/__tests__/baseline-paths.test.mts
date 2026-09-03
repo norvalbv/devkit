@@ -1,6 +1,8 @@
 import { execFileSync, spawn } from 'node:child_process';
 import {
   existsSync,
+  linkSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -124,6 +126,68 @@ describe('ratchet baseline paths', () => {
     removeRatchetBaseline(root, LINES_BASELINE);
     expect(existsSync(join(root, LEGACY_LINES_BASELINE))).toBe(false);
     expect(migrateRatchetBaselines(root, { dryRun: true })).toEqual([]);
+  });
+
+  it('spares a TRACKED retired copy on an overlay install, leaving it for the next full install', () => {
+    const root = makeRoot();
+    execFileSync('git', ['init', '-q'], { cwd: root });
+    write(root, '.devkit/config.json', '{"overlay":true}\n');
+    write(root, LEGACY_LINES_BASELINE, '{"files":{"src/legacy.ts":80}}\n');
+    execFileSync('git', ['add', '--', LEGACY_LINES_BASELINE], { cwd: root });
+
+    // Overlay hides its files through .git/info/exclude, which cannot hide a deletion: removing a
+    // tracked path would dirty the very tree an overlay install promises not to touch.
+    removeRatchetBaseline(root, LINES_BASELINE);
+    expect(readFileSync(join(root, LEGACY_LINES_BASELINE), 'utf8')).toBe(
+      '{"files":{"src/legacy.ts":80}}\n',
+    );
+    expect(existsSync(join(root, LINES_BASELINE))).toBe(false);
+    // The committed ceiling outlives the overlay's local clear, so a later full install adopts it.
+    expect(migrateRatchetBaselines(root, { dryRun: true })).toEqual([
+      { from: LEGACY_LINES_BASELINE, kind: 'moved', to: LINES_BASELINE },
+    ]);
+
+    // A local overlay write cannot silently overwrite it either: divergent ceilings stop migration.
+    writeRatchetBaseline(root, LINES_BASELINE, '{"files":{"src/legacy.ts":70}}\n');
+    expect(existsSync(join(root, LEGACY_LINES_BASELINE))).toBe(true);
+    expect(() => migrateRatchetBaselines(root)).toThrow(/different contents/);
+  });
+
+  it('an overlay write spares a tracked retired copy still hard-linked by an interrupted migration', () => {
+    const root = makeRoot();
+    execFileSync('git', ['init', '-q'], { cwd: root });
+    write(root, '.devkit/config.json', '{"overlay":true}\n');
+    write(root, LEGACY_LINES_BASELINE, '{"files":{"src/legacy.ts":80}}\n');
+    execFileSync('git', ['add', '--', LEGACY_LINES_BASELINE], { cwd: root });
+    // migrateRatchetBaselines links canonical to legacy before unlinking legacy; an interrupt
+    // between the two leaves both names on one inode, which a truncating write would rewrite.
+    mkdirSync(join(root, '.devkit/baselines'), { recursive: true });
+    linkSync(join(root, LEGACY_LINES_BASELINE), join(root, LINES_BASELINE));
+
+    writeRatchetBaseline(root, LINES_BASELINE, '{"files":{"src/legacy.ts":70}}\n');
+
+    expect(readFileSync(join(root, LEGACY_LINES_BASELINE), 'utf8')).toBe(
+      '{"files":{"src/legacy.ts":80}}\n',
+    );
+    expect(readFileSync(join(root, LINES_BASELINE), 'utf8')).toBe(
+      '{"files":{"src/legacy.ts":70}}\n',
+    );
+  });
+
+  it('writes through a per-file baseline symlink the ship worktree projects', () => {
+    const root = makeRoot();
+    const primary = makeRoot();
+    const real = join(primary, 'size-lines.json');
+    writeFileSync(real, '{"files":{"src/a.ts":9}}\n');
+    mkdirSync(join(root, '.devkit/baselines'), { recursive: true });
+    // link-gate-configs.sh projects each baseline as its OWN symlink, and the write has to reach
+    // the primary checkout's file (git-index.mts) rather than replace the link.
+    symlinkSync(real, join(root, LINES_BASELINE));
+
+    writeRatchetBaseline(root, LINES_BASELINE, '{"files":{"src/a.ts":7}}\n');
+
+    expect(lstatSync(join(root, LINES_BASELINE)).isSymbolicLink()).toBe(true);
+    expect(readFileSync(real, 'utf8')).toBe('{"files":{"src/a.ts":7}}\n');
   });
 
   it('moves legacy ratchets byte-for-byte and is idempotent', () => {
