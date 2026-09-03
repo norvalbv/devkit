@@ -9,15 +9,11 @@ if [ "$ccrc" -eq 1 ]; then
 elif [ "$ccrc" -eq 4 ]; then
     echo "   guard-comments: NOT a rejection — staged comment evidence is unreadable or unsupported."
     exit 1
-elif [ "$ccrc" -eq 3 ]; then
-    echo "   guard-comments: reviewer produced no verdict — strict ship mode failed closed."
-    echo "   Follow the remedy printed above, then re-run devkit ship (approved comments are cached)."
-    exit 1
-elif [ "$ccrc" -ne 0 ] && [ "$ccrc" -ne 2 ]; then
+elif [ "$ccrc" -ne 0 ]; then
     echo "   guard-comments: unexpected exit $ccrc — blocking the commit."
     exit 1
 fi
-# ccrc 0 = clean/approved/cached, 1 = unresolved/rejected, 2 = ordinary fail-open outage.
+# ccrc 0 = clean, 1 = paragraph over the 2-line budget, 4 = unreadable/unsupported evidence; anything else blocks.
 # /devkit:guard-comments`,
     decisions: `# devkit:guard-decisions
 echo "🧭 Decision-log gate..."
