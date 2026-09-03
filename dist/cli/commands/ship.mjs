@@ -78,6 +78,21 @@ Usage:
                       never costs the pushed commit; it reports the exact \`gh pr ready\` to re-run.
                       Idempotent on a PR that is already ready. NOT replayed by --resume: it is a
                       one-shot state change on the PR, not a property of the invocation.
+  --wait-ci           After the PR is open and every artifact is durable, poll its GitHub checks and
+                      end with ONE verdict line on stderr: \`ship: ci-outcome=<passed|failed|
+                      cancelled|no-checks|timed-out|unavailable> pr=<n> …\`. Progress prints only when
+                      the tally changes, plus a liveness line each minute. Polls ALL checks, not just
+                      the branch-protection required ones — a repo without branch protection reports
+                      an EMPTY required set, which would render a red PR green.
+                      The verdict NEVER reaches the exit code: a red PR is not a failed ship, and an
+                      agent reading non-zero would retry --resume against a record the push deleted.
+                      Grep the line, or read the ship_ci telemetry row. Valid for a new ship and for
+                      --pr. NOT replayed by --resume: it observes a PR that already exists rather
+                      than describing what shipped, so re-request it on the retry.
+  --wait-ci-timeout <s>  Bound for --wait-ci, 60..7200, default 900. The floor exists because below
+                      it a "this repo has no checks" verdict is unreachable and would surface as a
+                      timeout instead. A terminal result is confirmed over ~30s before it is
+                      reported, so a workflow_run-chained job that registers late cannot be missed.
   --dry-gates         Rehearse the exact ship base + selected source staging in an ephemeral worktree.
                       Runs the formatter, configured deterministic/structure/extra gates, and the
                       deterministic comment budget gate; skips decisions, Qavis, domain/completeness
@@ -120,7 +135,9 @@ Env:
                       without any flag; this is for a NEW finding you believe is wrong.
 
 Exits 0 on PR opened, committed under SHIP_DRY_RUN, or a passing --dry-gates rehearsal; 1 on any
-preflight/git/gh/gate error. A commit
+preflight/git/gh/gate error. A --wait-ci verdict never changes that — a red or timed-out CI still
+exits 0, because the PR opened. The one exception is a SIGNAL during the wait: ship exits 130/143
+even though the PR is open, so the wait announces the PR URL before it starts. A commit
 that lands but fails to push KEEPS the branch; an identical retry verifies and resumes that commit.
 A commit that never lands auto-deletes the empty branch. Every blocked attempt records its
 invocation — retry with \`devkit ship --resume <branch>\` instead of re-typing the command.`,
@@ -136,7 +153,9 @@ export default function ship(args, cwd, dependencies = DEFAULT_DEPENDENCIES) {
     const routeFlags = new Set();
     // Both scripts accept `--resume` in LEADING position only, so this is the whole test for it.
     const resuming = args[0] === '--resume';
-    const valueFlags = new Set(['--base', '--body', '--body-file', '--link']);
+    // --wait-ci-timeout takes a value, so it MUST be listed: an unlisted value-taking flag leaves its
+    // argument in the scan, and `--wait-ci-timeout --pr` would then route a new ship to reship.sh.
+    const valueFlags = new Set(['--base', '--body', '--body-file', '--link', '--wait-ci-timeout']);
     for (let i = 0; i < args.length; i++) {
         const arg = args[i];
         if (valueFlags.has(arg)) {

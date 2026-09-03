@@ -28,6 +28,7 @@ const GIT_INTEGRATION_TESTS = [
   'cli/__tests__/ship-draft.test.mts',
   'cli/__tests__/ship-manifest.test.mts',
   'cli/__tests__/ship-run-record.test.mts',
+  'cli/__tests__/ship-wait-ci.test.mts',
   'cli/__tests__/test-subprocess.test.mts',
   'gate-engine/decisions/__tests__/integrity-staged.test.mts',
   'gate-engine/ratchets/__tests__/git-index.test.mts',

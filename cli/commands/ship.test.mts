@@ -39,6 +39,13 @@ describe('devkit ship dispatcher provenance', () => {
   it.each([
     ['new ship', ['feat/runtime', 'ship it', 'note.txt'], 'ship-branch.sh'],
     ['reship', ['feat/runtime', 'ship it', '--pr', 'note.txt'], 'reship.sh'],
+    // --wait-ci-timeout takes a value, so `--pr` here is that value, not a mode flag. An unlisted
+    // value-taking flag would route this new ship to reship.sh.
+    [
+      'new ship whose --wait-ci-timeout swallowed a mode-flag-shaped value',
+      ['feat/runtime', 'ship it', '--wait-ci', '--wait-ci-timeout', '--pr', 'note.txt'],
+      'ship-branch.sh',
+    ],
   ])('reports once before dispatching a %s', async (_label, args, script) => {
     const test = harness();
 
