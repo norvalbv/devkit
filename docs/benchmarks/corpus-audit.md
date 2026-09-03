@@ -37,6 +37,20 @@ What the numbers mean and do not mean:
   `corr-pr21-fail-closed-when-the-remote-pair`, `corr-pr26-cover-the-restart-interrupted-flow`,
   `corr-pr26-keep-the-mcp-inputschema-in-pair`, `corr-pr48-cn-ts-src`. Only opening each row's
   fixture and note settles whether the label or the reviewer is wrong (methodology item 19).
+- **always-wrong, adjudicated 2026-09-03** (methodology item 19, every fixture opened and diffed):
+  only 3 of the 9 are sound rows scoring a true reviewer error — `corr-pr200-ref-mutated-during-render-move`
+  (render-body ref write, missed), `corr-pr48-cn-ts-src` (`cn` last-wins drops `rounded-full`, missed)
+  and `corr-pr21-fail-closed-when-the-remote-pair` (exit-status 2 handling is right; over-flagged on a
+  `checkout -b`-before-check wart). The other 6 are the corpus's fault: 2 decoys are **label-wrong**
+  (`corr-decoy-targeted-broadcast` — the new `q.sent` guard sits ahead of the retry path and kills the
+  retry it protects; `corr-pr26-keep-the-mcp-inputschema-in-pair` — the schema's `items` omits
+  `required: ['choices']`, so discovery still admits what the parser rejects) and 4 fixtures are
+  **defective** (`corr-retry-stuck-unclaimable` — the staged change is a comment, the defect is in base;
+  `corr-sync-source-target-divergence` — no caller passes a custom root and the 3-arg call is now a
+  compile error; `corr-pr26-cover-the-restart-interrupted-flow` — nothing writes `restartRunId`;
+  `corr-decoy-tight-anchor-classifier` — the diff adds a `\d{3}` requirement the note never defends).
+  Those 6 are not evidence about the reviewer and must be relabelled or repaired before they count;
+  repair is a corpus edit and lands inside the re-baseline's epoch break (sc-2494), not before.
 - **never measured 44** is the cheapest gap: those rows have cost judge time zero and carry no
   evidence either way; the re-baseline measures them.
 - **pairs straddling 25** is why holdout scored easier than dev. `finalize.mts` now assigns
