@@ -38,6 +38,7 @@ import { fileURLToPath } from 'node:url';
 import { BenchAbort, parseCasesText } from '../../../decisions/eval/bench.mts';
 import { BENCH_REVIEWERS, validateRow } from './bench.mts';
 import { casesFile, lintRows, loadRows } from './corpus.mts';
+import { groupByPair, nearTwins, unrelatedTwins } from './corpus/twins.mts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const RAW_DIR = path.join(here, 'raw');
@@ -76,6 +77,18 @@ function leakScan(row) {
   return hits;
 }
 
+/** The near-twin admission rule (one message per refused candidate vs existing or batch rows),
+ * shared by --check and --append so the append path cannot admit what --check would refuse. */
+export function unrelatedTwinProblems(candidates, existing, { threshold = 0.5 } = {}) {
+  const ids = new Set(candidates.map((r) => r.id));
+  return unrelatedTwins(nearTwins([...existing, ...candidates], { threshold }))
+    .filter((t) => ids.has(t.a) || ids.has(t.b))
+    .map((t) => {
+      const [mine, other] = ids.has(t.a) ? [t.a, t.b] : [t.b, t.a];
+      return `${mine}: near-twin of ${ids.has(other) ? 'batch' : 'existing'} row ${other} (Jaccard ${t.similarity}) with no caseId/variantOf link — an unlabelled copy leaks across the holdout boundary; link it as a minimal pair or drop it`;
+    });
+}
+
 function checkProposal(file) {
   const row = readProposal(file);
   const problems = [];
@@ -96,6 +109,24 @@ function checkProposal(file) {
       const { problems: vProblems, warnings: vWarnings } = validateRow(row);
       problems.push(...vProblems);
       warnings.push(...vWarnings);
+    }
+    // Admission by coverage need (corpus-rows-admitted-by-coverage-cell): refuse an unrelated
+    // near-twin of an existing row; print the coverage cell the row would fill.
+    if (problems.length === 0) {
+      const target = BENCH_REVIEWERS.find((r) => r.name === row.reviewer);
+      const existing = target ? loadRows(target) : [];
+      problems.push(...unrelatedTwinProblems([row], existing));
+      const cell = `${row.reviewer} × ${row.expected === 'FAIL' ? (row.expectItems ?? []).join('+') : 'decoy'} × ${row.difficulty ?? 'unlabelled'}`;
+      const same = existing.filter(
+        (r) =>
+          r.expected === row.expected &&
+          (r.difficulty ?? 'unlabelled') === (row.difficulty ?? 'unlabelled') &&
+          (row.expected !== 'FAIL' ||
+            (r.expectItems ?? []).join('+') === (row.expectItems ?? []).join('+')),
+      ).length;
+      warnings.push(
+        `  coverage cell ${cell}: ${same} existing row(s) — this row makes ${same + 1}`,
+      );
     }
   }
 
@@ -154,20 +185,27 @@ function reorderRow(row) {
   return out;
 }
 
-/** expected PASS rows DEFAULT to dev (holdout: false — decoys are starved there); expected FAIL
- * rows alternate true/false in sorted-id order, so re-running the same batch is stable. The
- * ≥3-holdout-per-class floor outranks the dev-bias: enforceHoldoutFloor may flip the minimal
- * number of PASS rows back to holdout when the class would otherwise fall short (only PASS rows
- * can satisfy the PASS-class floor), and reports every flip. */
-function assignHoldout(rows) {
-  const byExpected = { FAIL: [], PASS: [] };
-  for (const r of rows) (byExpected[r.expected] ?? byExpected.FAIL).push(r);
-  for (const bucket of Object.values(byExpected))
-    bucket.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-  for (const r of byExpected.PASS) r.holdout = false;
-  byExpected.FAIL.forEach((r, i) => {
-    r.holdout = i % 2 === 0;
-  });
+/** Holdout per pair GROUP (caseId ∪ variantOf), never per row — a split pair puts a near-copy of a
+ * holdout row in dev (sc-2495). Gold groups alternate in sorted order; decoy-only groups default to dev. */
+export function assignHoldout(rows, existingRows = []) {
+  // Group over batch + corpus together: a batch row linked to a row already IN the corpus inherits
+  // that member's holdout (the corpus side is fixed); only groups with no corpus member alternate.
+  const existingIds = new Set(existingRows.map((r) => r.id));
+  const groups = groupByPair([...existingRows, ...rows]);
+  let i = 0;
+  for (const [, g] of [...groups.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
+    const fresh = g.filter((r) => !existingIds.has(r.id));
+    if (fresh.length === 0) continue;
+    const anchor = g.find((r) => existingIds.has(r.id));
+    if (anchor) {
+      for (const r of fresh) r.holdout = !!anchor.holdout;
+      continue;
+    }
+    const hasGold = g.some((r) => r.expected === 'FAIL');
+    const holdout = hasGold ? i % 2 === 0 : false;
+    if (hasGold) i += 1;
+    for (const r of fresh) r.holdout = holdout;
+  }
 }
 
 /** Groups rows by caseId (own id when absent — an unclustered row is its own one-row group),
@@ -204,19 +242,23 @@ function packByMax(rows, max) {
  * flips the minimal number of ACCEPTED rows (deterministic, sorted by id) to holdout:true when a
  * class would otherwise fall short, and reports every flip. */
 function enforceHoldoutFloor(existingRows, acceptedRows) {
+  // Flips whole pair GROUPS (never a lone member), smallest group key first, until the class floor
+  // holds; a group anchored to a corpus row inherited its holdout and is never flipped.
   const flipped = [];
+  const existingIds = new Set(existingRows.map((r) => r.id));
+  const groups = [...groupByPair([...existingRows, ...acceptedRows]).entries()]
+    .filter(([, g]) => !g.some((r) => existingIds.has(r.id)))
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
   for (const expected of ['FAIL', 'PASS']) {
-    const have = [...existingRows, ...acceptedRows].filter(
-      (r) => r.expected === expected && r.holdout,
-    ).length;
-    if (have >= 3) continue;
-    const need = 3 - have;
-    const candidates = acceptedRows
-      .filter((r) => r.expected === expected && !r.holdout)
-      .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-    for (const r of candidates.slice(0, need)) {
-      r.holdout = true;
-      flipped.push(r.id);
+    const count = () =>
+      [...existingRows, ...acceptedRows].filter((r) => r.expected === expected && r.holdout).length;
+    for (const [, g] of groups) {
+      if (count() >= 3) break;
+      if (!g.some((r) => r.expected === expected && !r.holdout)) continue;
+      for (const r of g) {
+        if (!r.holdout) flipped.push(r.id);
+        r.holdout = true;
+      }
     }
   }
   return flipped;
@@ -327,7 +369,16 @@ function appendSuite(suite, max) {
       );
   }
 
-  assignHoldout(fresh);
+  // And the admission rule: --append is where a row actually enters the corpus, and the overlay
+  // may be what added (or removed) the pair link, so the twin check runs on the post-overlay rows.
+  const twinProblems = unrelatedTwinProblems(fresh, existingRows);
+  if (twinProblems.length)
+    throw new BenchAbort(
+      2,
+      `finalize: refused by the near-twin rule —\n  ${twinProblems.join('\n  ')}`,
+    );
+
+  assignHoldout(fresh, existingRows);
 
   const { accepted, deferred } = packByMax(fresh, max);
   if (accepted.length === 0) {
