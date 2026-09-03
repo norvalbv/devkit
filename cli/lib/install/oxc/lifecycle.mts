@@ -124,10 +124,16 @@ function candidates(cwd: string, names: string[]): string[] {
  * resolved from the manifest so no stray root file can redirect a lint, and a snapshot cwd works.
  */
 export function resolveOxlintEntryConfig(cwd: string): string | null {
-  // Compared against the one filename devkit ever writes, rather than accepting whatever the field
-  // holds: a manifest naming some other path must not be able to redirect a lint's whole ruleset.
-  if (readManifest(cwd)?.overlayEntryConfig !== OVERLAY_ENTRY_REL) return null;
+  if (!isOverlayManifest(readManifest(cwd))) return null;
   return existsSync(join(cwd, OVERLAY_ENTRY_REL)) ? OVERLAY_ENTRY_REL : null;
+}
+
+/**
+ * The read-side mode stamp, as ONE predicate every reader shares. Compared against the only filename
+ * devkit writes, so a manifest naming another path cannot redirect a lint's whole ruleset.
+ */
+function isOverlayManifest(manifest: OxcManifest | null): boolean {
+  return manifest?.overlayEntryConfig === OVERLAY_ENTRY_REL;
 }
 
 /**
@@ -149,20 +155,30 @@ function assertNoConfigCollisions(cwd: string): void {
   }
 }
 
-/**
- * Preflight for a dependent capability. Pass `publish` when the caller is about to MUTATE its own
- * managed tree: anti-slop replaces its tree before the Oxc writer ever runs, so a runner refused
- * only downstream would leave older-shaped state stranded if the process died before the rollback.
- * `pinRoot` judges a different tree than the one written — ship publishes into a worktree (sc-2099).
- */
-export function assertOxcCapabilityReady(cwd: string, publish?: { pinRoot?: string }): void {
-  if (publish) assertRunnerMayWrite(publish.pinRoot ?? cwd);
+/** Everything the preflight branches on. `publish` is explicit so no call site reaches it by arity. */
+interface ReadyOptions {
+  /**
+   * The caller is about to MUTATE its own managed tree — anti-slop replaces its tree before the Oxc
+   * writer runs, so a refusal only downstream can strand older-shaped state.
+   */
+  publish?: boolean;
+  /** Judge a different tree than the one written — ship publishes into a worktree (sc-2099). */
+  pinRoot?: string;
+  /** The install is an overlay: it owns no consumer root config, so collisions are not its business. */
+  overlay?: boolean;
+}
+
+/** Preflight for a dependent capability; refuses before any managed byte moves. */
+export function assertOxcCapabilityReady(cwd: string, opts: ReadyOptions = {}): void {
+  if (opts.publish) assertRunnerMayWrite(opts.pinRoot ?? cwd);
   const lint = probeOxcRuntime('lint');
   const fmt = probeOxcRuntime('fmt');
   if (!lint.ok || !fmt.ok || !lint.runtime || !fmt.runtime) {
     throw new Error(`bundled Oxc runtime unavailable: ${lint.detail}; ${fmt.detail}`);
   }
-  assertNoConfigCollisions(cwd);
+  // Mirrors the writer's own `if (!overlay)`. Caller-passed, not inferred: on a first overlay init
+  // the marker is written after `installOverlay`, so inference resolves false when it is true.
+  if (!opts.overlay) assertNoConfigCollisions(cwd);
 }
 
 // Name the devkit that produced the bytes, so a stale digest distinguishes "the content drifted"
@@ -410,11 +426,32 @@ export function checkOxcCapability(cwd: string): CheckResult[] {
         'run `devkit doctor --fix`',
         true,
       );
+  return [runtime, base, ...configRows(cwd, manifest)];
+}
+
+/**
+ * Mode-dependent config rows. Overlay owns one root file and adopts none, so package-mode ownership
+ * questions invert: no phantom oxfmt row, and instead a check for a consumer config `-c` shadows.
+ */
+function configRows(cwd: string, manifest: OxcManifest): CheckResult[] {
+  if (!isOverlayManifest(manifest)) {
+    return [
+      configCheck(cwd, 'oxlint', manifest.configs.oxlint, OXLINT_CONFIGS),
+      configCheck(cwd, 'oxfmt', manifest.configs.oxfmt, OXFMT_CONFIGS),
+    ];
+  }
+  const consumer = candidates(cwd, OXLINT_CONFIGS);
   return [
-    runtime,
-    base,
-    configCheck(cwd, 'oxlint', manifest.configs.oxlint, OXLINT_CONFIGS),
-    configCheck(cwd, 'oxfmt', manifest.configs.oxfmt, OXFMT_CONFIGS),
+    configCheck(cwd, 'oxlint', manifest.configs.oxlint, [OVERLAY_ENTRY_REL]),
+    consumer.length > 0
+      ? check(
+          'oxlint discovery',
+          'DRIFT',
+          `this repo now owns ${consumer.join(', ')}, which the overlay gate never reads (\`-c ${OVERLAY_ENTRY_REL}\` replaces discovery)`,
+          'remove it, or run `devkit clean` and reinstall in package mode',
+        )
+      : check('oxlint discovery', 'OK', 'no consumer Oxlint config is being shadowed'),
+    check('oxfmt config', 'OK', 'not owned in overlay (devkit writes no formatter config here)'),
   ];
 }
 

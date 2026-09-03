@@ -11,6 +11,7 @@ import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { overlayInstall } from '../../../../gate-engine/overlay-mode.mts';
 import { waitForPath } from '../../../__tests__/_helpers.mts';
 import {
   checkOxcCapability,
@@ -342,6 +343,17 @@ describe('Oxc capability lifecycle — overlay geometry', () => {
     for (const name of OXLINT_CONFIGS) expect(existsSync(join(root, name))).toBe(false);
   });
 
+  // The converse of the marker-inference case above: a review projection links the capability but
+  // not `.devkit/config.json`, so the marker is absent exactly where the capability is present.
+  it('resolves overlay from the manifest stamp when no repository marker travelled with it', () => {
+    const root = overlayRoot();
+    syncOxcCapability(root, { overlay: true });
+    rmSync(join(root, '.devkit/config.json'));
+
+    expect(overlayInstall(root)).toBe(false);
+    expect(resolveOxlintEntryConfig(root)).toBe(OVERLAY_ENTRY_REL);
+  });
+
   it('refuses a discovery-named root config in an overlay repo whatever the caller claims', () => {
     const root = overlayRoot();
     // No stamp, no marker-derived default, and the caller actively asserts package mode — the
@@ -408,5 +420,43 @@ describe('Oxc capability lifecycle — overlay geometry', () => {
     expect(lines.join('\n')).toContain(OVERLAY_ENTRY_REL);
     expect(lines.join('\n')).not.toContain('preserve existing root configs');
     expect(existsSync(join(root, OVERLAY_ENTRY_REL))).toBe(false);
+  });
+
+  // Overlay records `.oxfmtrc.json` as a path it never writes; MISSING+fixable there is a row no
+  // repair can clear, so `doctor --fix` re-syncs the whole capability forever.
+  it('reports no unfixable oxfmt row on an overlay install', () => {
+    const root = overlayRoot();
+    syncOxcCapability(root, { overlay: true });
+
+    const rows = checkOxcCapability(root);
+    expect(rows.filter((r) => r.fixable && r.status !== 'OK')).toEqual([]);
+    expect(rows.find((r) => r.name === 'oxfmt config')).toMatchObject({ status: 'OK' });
+  });
+
+  // Package mode must keep the opposite behaviour: there a vanished config IS repairable, because
+  // `ownershipFor` writes a fresh starter when no candidate is found.
+  it('still reports a package-mode oxfmt config as fixable when it vanishes', () => {
+    const root = tempRoot();
+    syncOxcCapability(root, {});
+    rmSync(join(root, '.oxfmtrc.json'));
+
+    expect(checkOxcCapability(root)).toContainEqual(
+      expect.objectContaining({ name: 'oxfmt config', status: 'MISSING', fixable: true }),
+    );
+  });
+
+  // `-c` REPLACES discovery, so a consumer config created after install is silently unread — and
+  // `configCheck`'s name list excludes the entry config, so no collision fires to catch it.
+  it('names a consumer Oxlint config that appears after an overlay install', () => {
+    const root = overlayRoot();
+    syncOxcCapability(root, { overlay: true });
+    expect(checkOxcCapability(root).every((r) => r.status === 'OK')).toBe(true);
+
+    writeFileSync(join(root, '.oxlintrc.json'), '{ "rules": {} }\n');
+
+    const drift = checkOxcCapability(root).find((r) => r.status === 'DRIFT');
+    expect(drift?.detail).toContain('.oxlintrc.json');
+    // Not fixable: devkit will not delete a config the consumer owns.
+    expect(drift?.fixable).toBeFalsy();
   });
 });

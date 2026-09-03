@@ -89,3 +89,69 @@ describe('clean (package mode)', () => {
     expect(readFileSync(exclude, 'utf8')).not.toContain('devkit overlay');
   });
 });
+
+// Overlay's footprint is exclude LINES plus untracked files; clean must reverse both halves, or a
+// later user file at that path stays silently invisible to git.
+describe('clean (overlay mode) — anti-slop root files', () => {
+  const overlayRepo = () => {
+    const root = tmpRepo();
+    const git = (...a: string[]) => execFileSync('git', a, { cwd: root, stdio: 'ignore' });
+    git('init');
+    git('config', 'user.email', 't@t.t');
+    git('config', 'user.name', 't');
+    writeFileSync(join(root, 'package.json'), '{ "name": "work" }\n');
+    git('add', '-A');
+    git('commit', '-qm', 'init');
+    return root;
+  };
+  const exclude = (root: string) => readFileSync(join(root, '.git/info/exclude'), 'utf8');
+
+  it('prunes the entry-config and baseline exclude lines, not just the files', () => {
+    const root = overlayRepo();
+    expect(
+      devkit(root, 'init', '--overlay', '--stack', 'generic', '--yes', '--anti-slop').status,
+    ).toBe(0);
+    expect(exclude(root)).toContain('oxlint.devkit.json');
+    expect(exclude(root)).toContain('.anti-slop-baseline.json');
+
+    expect(devkit(root, 'clean', '--yes').status).toBe(0);
+
+    expect(existsSync(join(root, 'oxlint.devkit.json'))).toBe(false);
+    expect(existsSync(join(root, '.anti-slop-baseline.json'))).toBe(false);
+    // The regression: the files went but their lines stayed, so a later user file at either path
+    // would have been hidden from `git status` by an exclude block nothing owned any more.
+    expect(exclude(root)).not.toContain('oxlint.devkit.json');
+    expect(exclude(root)).not.toContain('.anti-slop-baseline.json');
+    writeFileSync(join(root, 'oxlint.devkit.json'), '{}\n');
+    writeFileSync(join(root, '.anti-slop-baseline.json'), '{}\n');
+    const porcelain = execFileSync('git', ['status', '--porcelain'], {
+      cwd: root,
+      encoding: 'utf8',
+    });
+    expect(porcelain).toContain('oxlint.devkit.json');
+    expect(porcelain).toContain('.anti-slop-baseline.json');
+  });
+
+  it('declines to delete a tracked overlay file and names the untracking remedy', () => {
+    const root = overlayRepo();
+    const git = (...a: string[]) => execFileSync('git', a, { cwd: root, stdio: 'ignore' });
+    expect(
+      devkit(root, 'init', '--overlay', '--stack', 'generic', '--yes', '--anti-slop').status,
+    ).toBe(0);
+    // The user force-adds it AFTER install, so the install-time refusal never saw it. devkit does
+    // not own this repo: deleting committed content it cannot restore is the unrecoverable move.
+    git('add', '-f', '.anti-slop-baseline.json');
+    // --no-verify: overlay just pointed core.hooksPath at its own gate chain, which is not what
+    // this test is about.
+    git('commit', '-qm', 'track the baseline', '--no-verify');
+
+    const result = devkit(root, 'clean', '--yes');
+
+    expect(result.status).toBe(0);
+    expect(existsSync(join(root, '.anti-slop-baseline.json'))).toBe(true);
+    expect(result.stdout).toContain('kept tracked .anti-slop-baseline.json');
+    expect(result.stdout).toContain('git rm --cached .anti-slop-baseline.json');
+    // The untracked sibling is still removed — the guard is per-path, not a blanket bail-out.
+    expect(existsSync(join(root, 'oxlint.devkit.json'))).toBe(false);
+  });
+});

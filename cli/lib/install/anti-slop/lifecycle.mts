@@ -203,7 +203,7 @@ function syncUnlocked(cwd: string, dryRun: boolean): ManagedReplacement | null {
 export function syncAntiSlopCapability(cwd: string, opts: SyncOptions = {}): void {
   const { dryRun = false, pinRoot, overlay } = opts;
   if (dryRun) {
-    assertOxcCapabilityReady(cwd);
+    assertOxcCapabilityReady(cwd, { overlay });
     syncUnlocked(cwd, true);
     syncOxcCapability(cwd, { dryRun: true, antiSlop: true, overlay });
     return;
@@ -211,7 +211,7 @@ export function syncAntiSlopCapability(cwd: string, opts: SyncOptions = {}): voi
   mkdirSync(join(cwd, '.devkit'), { recursive: true });
   withLock(join(cwd, ANTI_SLOP_BASELINE_LOCK_REL), () => {
     withLock(join(cwd, ANTI_SLOP_LOCK_REL), () => {
-      assertOxcCapabilityReady(cwd, { pinRoot });
+      assertOxcCapabilityReady(cwd, { publish: true, pinRoot, overlay });
       captureAntiSlopBaselineActivationUnlocked(cwd, false);
       const replacement = syncUnlocked(cwd, false);
       if (!replacement) throw new Error('anti-slop managed replacement was not prepared');
@@ -454,8 +454,11 @@ function checkAntiSlopCapabilityUnlocked(cwd: string): CheckResult[] {
   ];
 }
 
-/** Remove only managed plugin bytes. The repository baseline is consumer debt data and is kept. */
-export function removeAntiSlopCapability(cwd: string, dryRun = false): void {
+/**
+ * Remove only managed plugin bytes; the baseline is consumer debt data and is kept. `overlay` comes
+ * from the caller — this re-sync rewrites the root geometry, and inference fails in the repair state.
+ */
+export function removeAntiSlopCapability(cwd: string, dryRun = false, overlay?: boolean): void {
   const managed = join(cwd, ANTI_SLOP_MANAGED_REL);
   if (!existsSync(managed)) return;
   if (dryRun) {
@@ -463,7 +466,8 @@ export function removeAntiSlopCapability(cwd: string, dryRun = false): void {
     return;
   }
   withLock(join(cwd, ANTI_SLOP_LOCK_REL), () => {
-    if (existsSync(join(cwd, '.devkit', 'oxc'))) syncOxcCapability(cwd, { antiSlop: false });
+    if (existsSync(join(cwd, '.devkit', 'oxc')))
+      syncOxcCapability(cwd, { antiSlop: false, overlay });
     rmSync(managed, { recursive: true, force: true });
   });
   console.log(`  ✓ removed ${ANTI_SLOP_MANAGED_REL}/ (kept baseline)`);

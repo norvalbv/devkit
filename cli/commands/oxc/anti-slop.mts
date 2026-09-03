@@ -3,7 +3,6 @@
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { overlayInstall } from '../../../gate-engine/overlay-mode.mts';
 import { withLock } from '../../lib/atomic-write.mts';
 import {
   overlayBaseRefusal,
@@ -44,6 +43,7 @@ import {
   collectAntiSlopGroups,
   resolveAntiSlopScope,
 } from '../../lib/install/anti-slop/runner.mts';
+import { resolveOxlintEntryConfig } from '../../lib/install/oxc/lifecycle.mts';
 
 export const meta = {
   name: 'anti-slop',
@@ -430,7 +430,9 @@ export default function run(args: string[], cwd: string): number {
     console.error('anti-slop: --staged uses the complete Git index and accepts no paths or --base');
     return 2;
   }
-  const overlay = overlayInstall(cwd);
+  // The manifest STAMP, not the repository marker: `.devkit/config.json` is absent from every review
+  // projection, so a marker read drops the capability from the snapshot exactly where it exists.
+  const overlay = resolveOxlintEntryConfig(cwd) !== null;
   const refusal = overlay ? overlayBaseRefusal(operation, baseRef !== undefined) : null;
   if (refusal) {
     console.error(refusal);

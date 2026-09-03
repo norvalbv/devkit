@@ -4,7 +4,6 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { createAntiSlopBaseline } from '../../../../commands/oxc/anti-slop.mts';
 import { trackedPathPredicate } from '../../../git-tracked.mts';
-import { addToGitExclude } from '../../overlay-excludes.mts';
 import { OVERLAY_ENTRY_REL, OXLINT_CONFIGS } from '../../oxc/lifecycle.mts';
 import { ANTI_SLOP_BASELINE_REL, ANTI_SLOP_MANIFEST_REL } from '../constants.mts';
 import { removeAntiSlopCapability, syncAntiSlopCapability } from '../lifecycle.mts';
@@ -30,7 +29,7 @@ interface OverlayAntiSlopWiring {
 function abandon(cwd: string, reason: string): false {
   console.log(`  ! anti-slop ${reason} — skipping the gate.`);
   try {
-    removeAntiSlopCapability(cwd, false);
+    removeAntiSlopCapability(cwd, false, true);
   } catch {
     // Preserve the original failure; doctor reports and repairs any residual managed state.
   }
@@ -38,8 +37,8 @@ function abandon(cwd: string, reason: string): false {
 }
 
 /**
- * Install-or-reclaim plus the exclude entries the caller must add, in one step: excluded before the
- * install writes them, and deselection handled here since `applyOverlay` precedes `applyRemovals`.
+ * RETURNS its exclude entries for `installOverlay`'s one authoritative reconcile, never writing them
+ * here — a second call naming only these two paths would prune every agent line it omits.
  */
 export function wireOverlayAntiSlop(
   cwd: string,
@@ -51,15 +50,10 @@ export function wireOverlayAntiSlop(
   let wired = false;
   if (sel.antiSlop) {
     console.log('  anti-slop (vendored Oxlint rules + per-clone baseline)');
-    addToGitExclude(
-      gitRoot,
-      [`${pfx}${OVERLAY_ENTRY_REL}`, `${pfx}${ANTI_SLOP_BASELINE_REL}`],
-      dryRun,
-    );
     wired = resolveOverlayAntiSlop(cwd, gitRoot, pfx, dryRun);
   } else if (existsSync(join(cwd, ANTI_SLOP_MANIFEST_REL))) {
     console.log('  anti-slop (deselected — reclaiming)');
-    removeAntiSlopCapability(cwd, dryRun);
+    removeAntiSlopCapability(cwd, dryRun, true);
   }
   const excludes = [OVERLAY_ENTRY_REL, ANTI_SLOP_BASELINE_REL]
     .filter((rel) => wired || existsSync(join(cwd, rel)))
@@ -87,8 +81,10 @@ export function resolveOverlayAntiSlop(
     console.log(
       `  ! anti-slop skipped — git already TRACKS ${tracked.join(', ')}; an overlay cannot hide a tracked path.`,
     );
+    // NOT `devkit clean`: it now declines to delete a tracked path (and prints why), so naming it
+    // here would point at a command that cannot perform the fix. Untracking is the only remedy.
     console.log(
-      '    Remove the package-mode install first (`devkit clean`, or `git rm -r --cached <paths>` and commit).',
+      `    Untrack them first: \`git rm -r --cached ${tracked.map((rel) => `${pfx}${rel}`).join(' ')}\` and commit.`,
     );
     return false;
   }

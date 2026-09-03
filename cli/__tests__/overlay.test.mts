@@ -17,6 +17,7 @@ import update, { fetchLatestTag } from '../commands/update.mts';
 import upgrade from '../commands/upgrade.mts';
 import { applyOverlayConstraints, defaultSelection } from '../lib/components.mts';
 import { isTracked } from '../lib/git-tracked.mts';
+import { wireOverlayAntiSlop } from '../lib/install/anti-slop/overlay/install.mts';
 import { HEAL_ALIAS_CMD, syncOverlayHook } from '../lib/overlay.mts';
 import { removeSkills } from '../lib/sync-manifest.mts';
 import { rootRegistry, testExecFileSync } from './_helpers.mts';
@@ -1152,6 +1153,57 @@ describe('overlay anti-slop — refusals that keep the tree clean', () => {
     expect(existsSync(join(root, 'oxlint.devkit.json'))).toBe(false);
     // The consumer's own config survives byte for byte.
     expect(readFileSync(join(root, '.oxlintrc.json'), 'utf8')).toContain('"eqeqeq": "error"');
+    expect(porcelain(root)).toBe('');
+  });
+
+  // The damage is a WINDOW — the caller's later reconcile restores what a partial one pruned — so an
+  // end-state assertion cannot see it. Asserted at the seam: this writes no exclude line at all.
+  it('wireOverlayAntiSlop returns its excludes and never reconciles the exclude file itself', () => {
+    const root = workRepo();
+    const git = (...a: string[]) => execFileSync('git', a, { cwd: root });
+    writeFileSync(join(root, '.anti-slop-baseline.json'), '{"schemaVersion":1,"entries":[]}\n');
+    git('add', '-f', '.anti-slop-baseline.json');
+    git('commit', '-qm', 'tracked baseline');
+
+    const excludePath = join(root, '.git', 'info', 'exclude');
+    mkdirSync(join(root, '.git', 'info'), { recursive: true });
+    const seeded = [
+      '# devkit overlay (local-only) — not committed',
+      '.claude/skills/',
+      '.claude/agents/',
+      '.devkit/skills-manifest.json',
+      '',
+    ].join('\n');
+    writeFileSync(excludePath, seeded);
+
+    const wiring = wireOverlayAntiSlop(root, root, '', { antiSlop: true }, false);
+
+    expect(wiring.wired).toBe(false);
+    // Byte-for-byte: the agent half is the caller's to reconcile, and nothing here may touch it.
+    expect(readFileSync(excludePath, 'utf8')).toBe(seeded);
+    // The paths still come back for the caller's one authoritative call — here none, nothing wired.
+    expect(wiring.excludes).toEqual(['.anti-slop-baseline.json']);
+  });
+
+  // The writer skips assertNoConfigCollisions under overlay because it neither reads nor writes a
+  // consumer root config; the PREFLIGHT has to agree or a second oxfmt config aborts the install.
+  it('installs despite two consumer Oxfmt configs — overlay owns neither', async () => {
+    const root = workRepo();
+    const git = (...a: string[]) => execFileSync('git', a, { cwd: root });
+    writeFileSync(join(root, '.oxfmtrc.json'), '{ "indentWidth": 2 }\n');
+    writeFileSync(join(root, 'oxfmt.config.mts'), 'export default { indentWidth: 2 };\n');
+    git('add', '-A');
+    git('commit', '-qm', 'two oxfmt configs');
+
+    await applyInit(root, {
+      stack: 'generic',
+      selection: applyOverlayConstraints({ ...defaultSelection(), antiSlop: true }),
+      overlay: true,
+      devkitRef: 'v0.0.0-test',
+    });
+
+    expect(readCfgComponents(root).antiSlop).toBe(true);
+    expect(existsSync(join(root, 'oxlint.devkit.json'))).toBe(true);
     expect(porcelain(root)).toBe('');
   });
 });

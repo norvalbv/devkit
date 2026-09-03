@@ -117,6 +117,10 @@ describe('anti-slop staged Git snapshot', () => {
     writeFileSync(join(root, '.devkit', 'anti-slop', 'marker.json'), '{"from":"overlay"}\n');
     writeFileSync(join(root, '.devkit', 'oxc', 'marker.json'), '{"from":"overlay"}\n');
     writeFileSync(join(root, 'oxlint.devkit.json'), '{"from":"overlay"}\n');
+    // `repository()` COMMITTED a baseline, so an existence check would pass even if nothing copied.
+    // Distinct working-tree bytes are the only assertion that proves the cpSync actually ran.
+    const workingTreeBaseline = `${JSON.stringify({ version: 1, findings: { 'src/file.ts': 7 } })}\n`;
+    writeFileSync(join(root, '.anti-slop-baseline.json'), workingTreeBaseline);
     writeFileSync(join(root, 'src', 'file.ts'), 'export const value = "staged";\n');
     git(root, ['add', 'src/file.ts']);
 
@@ -126,8 +130,11 @@ describe('anti-slop staged Git snapshot', () => {
         expect(existsSync(join(snapshot.cwd, '.devkit', 'anti-slop', 'marker.json'))).toBe(true);
         expect(existsSync(join(snapshot.cwd, '.devkit', 'oxc', 'marker.json'))).toBe(true);
         expect(existsSync(join(snapshot.cwd, 'oxlint.devkit.json'))).toBe(true);
-        // The baseline has to arrive too, or `baselineOrExplain` exits 2 and the gate BLOCKS.
-        expect(existsSync(join(snapshot.cwd, '.anti-slop-baseline.json'))).toBe(true);
+        // The baseline has to arrive too, or `baselineOrExplain` exits 2 and the gate BLOCKS — and
+        // it must be the WORKING-TREE one, not the committed bytes the extraction already carries.
+        expect(readFileSync(join(snapshot.cwd, '.anti-slop-baseline.json'), 'utf8')).toBe(
+          workingTreeBaseline,
+        );
       },
       { overlay: true },
     );
