@@ -1,7 +1,7 @@
 /** sc-2493: adjudication script for the banked differential-replay findings — extras (no telemetry
  * label) deduped on (diff12, lens, file, line//10) across models AND arms, tiered by model family. */
 
-// Usage: `report [--banks a,b] [--adjudications f]` · `sample --n 40 --seed 7 [--min 3] --out dir`.
+// Usage: `report [--banks a,b] [--adjudications f] [--by who]` · `sample --n 40 --seed 7 [--min 3] --out dir`.
 // Adjudications JSONL: {key, verdict: 'REAL'|'NOT'|'UNSURE', by, at, note?}; haiku proxy never counted.
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
@@ -134,14 +134,16 @@ export function collectExtras(
 }
 
 /** Hand verdicts, last write per key wins; a row with an unknown verdict value is ignored. */
-export function readVerdicts(file: string): Map<string, Verdict> {
+export function readVerdicts(file: string, by?: string): Map<string, Verdict> {
   if (!existsSync(file)) return new Map();
   // SAFETY: the verdict field is checked against the closed set before a row is kept.
   const rows = readFileSync(file, 'utf8')
     .split('\n')
     .filter((l) => l.trim())
     .map((l) => JSON.parse(l) as Verdict)
-    .filter((v) => v.key && ['REAL', 'NOT', 'UNSURE'].includes(v.verdict));
+    .filter((v) => v.key && ['REAL', 'NOT', 'UNSURE'].includes(v.verdict))
+    // A tier is measured per judge: `--by owner` reads only hand verdicts, never AI-assisted ones.
+    .filter((v) => by === undefined || v.by === by);
   return new Map(rows.map((v) => [v.key, v]));
 }
 
@@ -249,10 +251,10 @@ function main(): void {
   const verdictFile = arg('adjudications') ?? path.join(RESEARCH, 'adjudications.jsonl');
   const { extras, skipped } = collectExtras(banks);
   for (const s of skipped) console.error(`extras-adjudicate: skipped ${s}`);
-  const verdicts = readVerdicts(verdictFile);
+  const verdicts = readVerdicts(verdictFile, arg('by'));
   if (cmd === 'report') {
     console.log(
-      `banks ${banks.length} · distinct extras ${extras.length} · hand verdicts on file ${verdicts.size} (${path.basename(verdictFile)})`,
+      `banks ${banks.length} · distinct extras ${extras.length} · verdicts on file ${verdicts.size} (${path.basename(verdictFile)}${arg('by') ? `, by=${arg('by')}` : ''})`,
     );
     for (const r of reportTiers(extras, verdicts))
       console.log(

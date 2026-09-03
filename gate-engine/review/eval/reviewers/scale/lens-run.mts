@@ -251,11 +251,12 @@ export async function runLensWave(o: RunLensWaveOpts): Promise<CheckpointRow[]> 
             GUARD_REVIEW_MAX_ISSUES_PER_LENS: o.issueCap,
           },
           recovery: 'final',
+          fullItems: true, // bank the full finding text (sc-2493: 525/531 banked texts were stubs)
         },
       );
-      // items spills to an itemsRef sidecar past the event byte budget — a verbose FAIL must
-      // not checkpoint as issues:[] (that would score as a clean miss).
-      let items = res.items;
+      // itemsFull is the off-wire full-text vector; fall back to the event copy, then its sidecar
+      // (a verbose FAIL must not checkpoint as issues:[] — that would score as a clean miss).
+      let items = res.itemsFull ?? res.items;
       if (!items && res.itemsRef) {
         try {
           const raw = readTranscript(res.itemsRef);
@@ -275,7 +276,7 @@ export async function runLensWave(o: RunLensWaveOpts): Promise<CheckpointRow[]> 
         status: res.status,
         reason: (res.reason ?? '').slice(0, 400),
         issues: (items ?? []).flatMap((it) =>
-          (it.issues ?? []).map((text) => ({ lens: it.lens, text: String(text).slice(0, 300) })),
+          (it.issues ?? []).map((text) => ({ lens: it.lens, text: String(text) })),
         ),
         ms: Date.now() - started,
         at: new Date().toISOString(),

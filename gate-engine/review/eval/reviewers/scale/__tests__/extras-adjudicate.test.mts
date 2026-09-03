@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   collectExtras,
   hunkFor,
+  readVerdicts,
   reportTiers,
   stratifiedSample,
   tierOf,
@@ -141,6 +142,28 @@ describe('reportTiers', () => {
     expect(r.all).toMatchObject({ extras: 4, judged: 3, real: 1, not: 1, unsure: 1 });
     expect(r.all.precision?.value).toBe(0.5);
     expect(r.all.precision?.lower).toBeLessThan(0.5);
+  });
+});
+
+describe('readVerdicts', () => {
+  it('keeps the last row per key, drops unknown verdict values, and filters by judge', () => {
+    const root = mkdtempSync(join(tmpdir(), 'verdicts-'));
+    dirs.push(root);
+    const f = join(root, 'adjudications.jsonl');
+    writeFileSync(
+      f,
+      [
+        { key: 'k1', verdict: 'NOT', by: 'owner' },
+        { key: 'k1', verdict: 'REAL', by: 'owner' },
+        { key: 'k2', verdict: 'REAL', by: 'opus-agent' },
+        { key: 'k3', verdict: 'MAYBE', by: 'owner' },
+      ]
+        .map((r) => JSON.stringify(r))
+        .join('\n'),
+    );
+    expect([...readVerdicts(f).keys()]).toEqual(['k1', 'k2']);
+    expect(readVerdicts(f).get('k1')?.verdict).toBe('REAL');
+    expect([...readVerdicts(f, 'owner').keys()]).toEqual(['k1']);
   });
 });
 
