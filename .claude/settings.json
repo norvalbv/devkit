@@ -18,6 +18,15 @@
             "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/decision-scope-brief.mjs\""
           }
         ]
+      },
+      {
+        "matcher": "ExitPlanMode|Task|Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/prior-art-gate.mjs\""
+          }
+        ]
       }
     ],
     "UserPromptSubmit": [
@@ -38,6 +47,17 @@
           {
             "type": "command",
             "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/adhd-session-start.mjs\""
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Task|Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/prior-art-gate.mjs\""
           }
         ]
       }

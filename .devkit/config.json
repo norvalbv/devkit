@@ -19,7 +19,7 @@
     "searchCode": false,
     "lineGrowth": true,
     "adhd": true,
-    "priorArtGate": false,
+    "priorArtGate": true,
     "baseDrift": false,
     "agentTargets": [
       "claude",
