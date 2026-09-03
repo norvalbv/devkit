@@ -1,5 +1,5 @@
-import { existsSync, linkSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync, } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { existsSync, linkSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, writeFileSync, } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { assertBaselineTrackable, indexTracksBaseline, stageBaselineMigration, stageBaseline, } from './git-index.mjs';
 export const FANOUT_BASELINE = '.devkit/baselines/fanout.json';
@@ -22,17 +22,32 @@ const LEGACY_RATCHET_BASELINES = [
     { from: LEGACY_SIZE_BASELINE, to: SIZE_BASELINE },
 ];
 const LEGACY_BY_CANONICAL = new Map(LEGACY_RATCHET_BASELINES.map(({ from, to }) => [to, from]));
-// A straggler repo can still hold a retired legacy copy. Leaving it behind lets the next
-// init/upgrade migration resurrect debt a gate just cleared or tightened, so every canonical
-// write/clear also deletes the retired name. This is disposal of a retired pathname, not a write
-// through it — no current generation reads eslint/baselines (sc-2256).
+// A retired copy left behind lets the next init/upgrade migration resurrect debt a gate just
+// cleared, so every canonical write/clear disposes of the retired name THIS install owns (sc-2256).
 function discardRetiredCopy(root, canonical, stage) {
     const legacy = LEGACY_BY_CANONICAL.get(canonical);
     if (!legacy)
         return;
+    // Overlay installs promise not to dirty the tree they land in, and `.git/info/exclude` cannot
+    // hide a deletion: a TRACKED retired copy is the consumer's committed state, so leave it.
+    if (overlayInstall(root) && indexTracksBaseline(root, legacy))
+        return;
     rmSync(join(root, legacy), { force: true });
     if (stage)
         stageBaseline(root, legacy);
+}
+/** Is this root a local-only overlay install (env flag, or the marker init writes)? */
+function overlayInstall(root) {
+    if (process.env.DEVKIT_OVERLAY === '1')
+        return true;
+    try {
+        // SAFETY: init owns this local JSON marker; strict equality treats absent values as false.
+        const config = JSON.parse(readFileSync(join(root, '.devkit/config.json'), 'utf8'));
+        return config.overlay === true;
+    }
+    catch {
+        return false;
+    }
 }
 function legacyDevkitBaselines(root) {
     const legacyDir = join(root, LEGACY_STRUCTURE_BASELINE_DIR);
@@ -110,6 +125,33 @@ function concurrentBaselineCreateSettled(canonicalFile, legacyFile, expected) {
     }
     return false;
 }
+let replaceCounter = 0;
+/** Replace canonical by rename: a truncating write would rewrite the inode a hard-linked retired
+ * copy still shares, changing a tracked path this install must not touch. */
+function replaceCanonical(canonicalFile, contents) {
+    // Ship projects .devkit/baselines into its worktree as a symlink whose write must reach the real
+    // root file (git-index.mts), so rename beside the RESOLVED target instead of over the link.
+    const target = resolvedTarget(canonicalFile);
+    replaceCounter += 1;
+    const temp = `${target}.devkit-${process.pid}-${replaceCounter}`;
+    try {
+        writeFileSync(temp, contents);
+        renameSync(temp, target);
+    }
+    catch (error) {
+        rmSync(temp, { force: true });
+        throw error;
+    }
+}
+/** The real path a canonical name resolves to; the name itself when nothing exists there yet. */
+function resolvedTarget(canonicalFile) {
+    try {
+        return realpathSync(canonicalFile);
+    }
+    catch {
+        return join(realpathSync(dirname(canonicalFile)), basename(canonicalFile));
+    }
+}
 /** Read the canonical debt ceiling; the legacy generation is retired (sc-2256). */
 export function readRatchetBaseline(root, canonical) {
     const bytes = readExisting(join(root, canonical));
@@ -117,22 +159,11 @@ export function readRatchetBaseline(root, canonical) {
 }
 /** Persist the current debt ceiling canonically. */
 export function writeRatchetBaseline(root, canonical, contents, { stage = false } = {}) {
-    const overlay = (() => {
-        if (process.env.DEVKIT_OVERLAY === '1')
-            return true;
-        try {
-            // SAFETY: init owns this local JSON marker; strict equality treats absent values as false.
-            return (JSON.parse(readFileSync(join(root, '.devkit/config.json'), 'utf8')).overlay === true);
-        }
-        catch {
-            return false;
-        }
-    })();
-    if (!overlay)
+    if (!overlayInstall(root))
         assertBaselineTrackable(root, canonical);
     const canonicalFile = join(root, canonical);
     mkdirSync(dirname(canonicalFile), { recursive: true });
-    writeFileSync(canonicalFile, contents);
+    replaceCanonical(canonicalFile, contents);
     // Canonical is staged before the retired copy is discarded, so an interruption between the two
     // steps leaves the index carrying the new debt rather than a deletion without its replacement.
     if (stage)
@@ -141,9 +172,8 @@ export function writeRatchetBaseline(root, canonical, contents, { stage = false 
 }
 /** Clear the debt ceiling from the canonical name and any stale retired copy. */
 export function removeRatchetBaseline(root, canonical, { stage = false } = {}) {
-    // The retired copy goes first: a migration observing (legacy present, canonical absent) would
-    // hard-link the stale debt back into the canonical name. With the legacy name gone before
-    // canonical, either interleaving converges on cleared debt.
+    // The retired copy goes first where THIS install owns it, so migration cannot hard-link stale
+    // debt back. An overlay's tracked copy is exempt above and stays for the next full install.
     discardRetiredCopy(root, canonical, stage);
     rmSync(join(root, canonical), { force: true });
     if (stage)

@@ -14,7 +14,6 @@ export const REVIEW_CACHE_STORE_NAMES = [
     'decisions-verdict-cache.json',
     'prefix-cache.json',
     'sentry-verdict-cache.json',
-    'comment-firewall-receipts.json',
 ];
 function physicalRoot(requestedPath, label) {
     if (!requestedPath || requestedPath.includes('\0'))
@@ -57,7 +56,7 @@ function stableEntries(file) {
     }
     return fail(`cache store changed repeatedly during capture: ${file}`);
 }
-/** Copy the three approved persistent stores into a private run root and capture reset fences. */
+/** Copy the approved persistent stores into a private run root and capture reset fences. */
 export function prepareReviewCacheSession(persistentRoot, privateRoot) {
     const [persistent, privateData] = cacheRoots(persistentRoot, privateRoot);
     return REVIEW_CACHE_STORE_NAMES.map((name) => {

@@ -11,12 +11,14 @@ import path from 'node:path';
 import { ts } from 'ts-morph';
 import { resolveGuardConfig, sourceMatchers } from '../config.mjs';
 import { gitPrefix } from '../ratchets/git-index.mjs';
+import { anchorContext, anchorFor, changedTextLineCount, emptyInventory, hunkIntersects, hunkTouches, recordParagraph, textLineCount, } from './inventory.mjs';
+import { commentTouchLines, parsePatchHunks } from './patch.mjs';
+export { parsePatchHunks } from './patch.mjs';
 export const COMMENT_ADAPTER_VERSION = 'typescript-scanner-v2';
-export const COMMENT_FINDING_POLICY = 'changed-comment-paragraph-v5';
+export const COMMENT_FINDING_POLICY = 'changed-comment-paragraph-v6';
 const SUPPORTED_EXTENSIONS = new Set(['js', 'jsx', 'ts', 'tsx', 'mjs', 'cjs', 'mts', 'cts']);
 const MAX_GIT_OUTPUT = 16 * 1024 * 1024;
 const CONTEXT_LINES = 4;
-const HUNK_HEADER = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/;
 const LEADING_DOT_SLASH = /^\.\//;
 const TRAILING_SLASH = /\/$/;
 const TRAILING_CARRIAGE_RETURN = /\r$/;
@@ -106,41 +108,6 @@ function patch(cwd, file, ref) {
     args.push('--', file);
     return git(cwd, args);
 }
-export function parsePatchHunks(diff) {
-    const hunks = [];
-    let current = null;
-    let newLine = 0;
-    for (const raw of diff.split('\n')) {
-        if (raw.startsWith('diff --git ')) {
-            current = null;
-            continue;
-        }
-        const header = raw.match(HUNK_HEADER);
-        if (header) {
-            current = {
-                newStart: Number(header[1]),
-                newCount: header[2] === undefined ? 1 : Number(header[2]),
-                addedLines: new Set(),
-                text: raw,
-            };
-            newLine = current.newStart;
-            hunks.push(current);
-            continue;
-        }
-        if (!current)
-            continue;
-        current.text += `\n${raw}`;
-        /* File headers precede hunks; within a hunk `+++value` is source beginning with `++`. */
-        if (raw.startsWith('+')) {
-            current.addedLines.add(newLine);
-            newLine += 1;
-        }
-        else if (!raw.startsWith('\\') && !raw.startsWith('-')) {
-            newLine += 1;
-        }
-    }
-    return hunks;
-}
 function lineStarts(source) {
     const starts = [0];
     for (let i = 0; i < source.length; i++)
@@ -206,6 +173,22 @@ function stagedBlob(cwd, file) {
     const repoPath = `${gitPrefix(cwd)}${file}`;
     return git(cwd, ['show', `:${repoPath}`]);
 }
+/** Every line of `ref`'s version of the file that lies inside a comment token; empty when absent. */
+function commentLinesAt(cwd, file, extension, ref) {
+    const lines = new Set();
+    let source;
+    try {
+        source = git(cwd, ['show', `${ref}:${gitPrefix(cwd)}${file}`]);
+    }
+    catch {
+        return lines;
+    }
+    for (const token of scanCommentTokens(source, extension)) {
+        for (let line = token.startLine; line <= token.endLine; line += 1)
+            lines.add(line);
+    }
+    return lines;
+}
 function normalizedRoot(cwd, root) {
     const rel = path.isAbsolute(root) ? path.relative(cwd, root) : root;
     const posix = rel
@@ -224,13 +207,6 @@ function contextFor(source, token) {
     const to = Math.min(lines.length, token.endLine + CONTEXT_LINES);
     return lines.slice(from, to).join('\n').slice(0, 8_000);
 }
-function hunkIntersects(hunk, token) {
-    for (const line of hunk.addedLines) {
-        if (line >= token.startLine && line <= token.endLine)
-            return true;
-    }
-    return false;
-}
 function meaningfulLine(line) {
     return line
         .replace(TRAILING_CARRIAGE_RETURN, '')
@@ -240,15 +216,24 @@ function meaningfulLine(line) {
         .replace(BLOCK_COMMENT_CONTINUATION, '')
         .trim();
 }
-function requiresChallenge(token, hunks) {
-    const addedLines = new Set(hunks.flatMap((hunk) => [...hunk.addedLines]));
-    const changedTextLines = token.text.split('\n').filter((line, index) => {
-        const sourceLine = token.startLine + index;
-        return addedLines.has(sourceLine) && Boolean(meaningfulLine(line));
-    });
-    return changedTextLines.length >= 3;
+/** Gap lines between grouped tokens are kept in `text`, so `startLine + index` stays a source line. */
+function joinRun(run) {
+    let text = '';
+    let previousEnd = 0;
+    for (const token of run) {
+        text +=
+            previousEnd === 0 ? token.text : `${'\n'.repeat(token.startLine - previousEnd)}${token.text}`;
+        previousEnd = token.endLine;
+    }
+    return text;
 }
-export function paragraphCommentTokens(tokens) {
+function onlyBlankBetween(from, to, isBlank) {
+    for (let line = from + 1; line < to; line += 1)
+        if (!isBlank(line))
+            return false;
+    return true;
+}
+export function paragraphCommentTokens(tokens, isBlank = () => false) {
     const paragraphs = [];
     let run = [];
     const flushRun = () => {
@@ -260,7 +245,7 @@ export function paragraphCommentTokens(tokens) {
                     kind: first.kind,
                     startLine: first.startLine,
                     endLine: last.endLine,
-                    text: run.map((token) => token.text).join('\n'),
+                    text: joinRun(run),
                     standalone: true,
                 };
                 paragraphs.push(paragraph);
@@ -272,7 +257,9 @@ export function paragraphCommentTokens(tokens) {
         const groupable = token.kind === 'line' || token.startLine === token.endLine;
         if (token.standalone && groupable) {
             const previous = run.at(-1);
-            if (previous && (token.kind !== previous.kind || token.startLine !== previous.endLine + 1)) {
+            if (previous &&
+                (token.kind !== previous.kind ||
+                    !onlyBlankBetween(previous.endLine, token.startLine, isBlank))) {
                 flushRun();
             }
             run.push(token);
@@ -292,26 +279,46 @@ function normalizeComment(text) {
         .map((line) => line.replace(TRAILING_BLANKS, '').replace(LEADING_BLANKS, ''))
         .join('\n');
 }
-function changedParagraphs(source, extension, hunks) {
-    const paragraphs = paragraphCommentTokens(scanCommentTokens(source, extension));
+function changedParagraphs(file, source, extension, hunks, touchLines, inventory) {
+    const lines = source.split('\n');
+    const isBlank = (line) => (lines[line - 1] ?? '').trim() === '';
+    const tokens = scanCommentTokens(source, extension);
+    const paragraphs = paragraphCommentTokens(tokens, isBlank);
+    const addedLines = new Set(hunks.flatMap((hunk) => [...hunk.addedLines]));
+    for (const token of tokens) {
+        if (!token.standalone && hunks.some((hunk) => hunkIntersects(hunk, token))) {
+            inventory.trailingAdded += 1;
+        }
+    }
     const totals = new Map();
     for (const token of paragraphs) {
         const key = normalizeComment(token.text);
         totals.set(key, (totals.get(key) ?? 0) + 1);
     }
     const seen = new Map();
+    const contexts = new Map();
     const changed = [];
     for (const token of paragraphs) {
         const key = normalizeComment(token.text);
         const ordinal = seen.get(key) ?? 0;
         seen.set(key, ordinal + 1);
-        if (hunks.some((hunk) => hunkIntersects(hunk, token)) && requiresChallenge(token, hunks)) {
-            changed.push({ token, twin: (totals.get(key) ?? 0) > 1 ? { ordinal } : null });
+        const context = anchorContext(lines, token);
+        const contextOrdinal = contexts.get(context) ?? 0;
+        contexts.set(context, contextOrdinal + 1);
+        if (!hunks.some((hunk) => hunkTouches(hunk, token, touchLines)))
+            continue;
+        const textLines = changedTextLineCount(token, addedLines, meaningfulLine);
+        const anchor = anchorFor(file, context, contextOrdinal);
+        recordParagraph(inventory, { anchor, textLines: textLineCount(token, meaningfulLine) });
+        if (textLines >= 3) {
+            const twin = (totals.get(key) ?? 0) > 1 ? { ordinal } : null;
+            changed.push({ token, twin, anchor, textLines });
         }
     }
     return changed;
 }
-function findingFor(file, extension, source, token, hunks, twin) {
+function findingFor(file, extension, source, paragraph, hunks) {
+    const { token, twin, anchor, textLines } = paragraph;
     const relevantDiff = hunks
         .filter((hunk) => hunkIntersects(hunk, token))
         .map((hunk) => hunk.text)
@@ -336,6 +343,8 @@ function findingFor(file, extension, source, token, hunks, twin) {
         comment: token.text,
         context,
         relevantDiff,
+        anchor,
+        textLines,
     };
 }
 export function detectChangedComments(cwd = process.cwd()) {
@@ -344,6 +353,10 @@ export function detectChangedComments(cwd = process.cwd()) {
     const isConfiguredSource = sourceMatchers(cfg.sourceExtensions).isSource;
     const findings = [];
     const unsupported = [];
+    const inventory = emptyInventory();
+    const decisionsDir = normalizedRoot(cwd, cfg.decisionsDir);
+    inventory.decisionsStaged =
+        decisionsDir !== '' && [...stagedPaths(cwd)].some((file) => insideRoots(file, [decisionsDir]));
     for (const file of changedPaths(cwd).sort()) {
         if (!insideRoots(file, roots) || !isConfiguredSource(file))
             continue;
@@ -352,23 +365,28 @@ export function detectChangedComments(cwd = process.cwd()) {
             unsupported.push({ extension, path: file });
             continue;
         }
+        inventory.files += 1;
         const first = parsePatchHunks(patch(cwd, file));
         let effective = first;
+        let touchLines = commentTouchLines(first, commentLinesAt(cwd, file, extension, 'HEAD'));
         try {
             const second = parsePatchHunks(patch(cwd, file, 'MERGE_HEAD'));
             const secondLines = new Set(second.flatMap((hunk) => [...hunk.addedLines]));
+            const secondTouch = commentTouchLines(second, commentLinesAt(cwd, file, extension, 'MERGE_HEAD'));
             effective = first.map((hunk) => ({
                 ...hunk,
                 addedLines: new Set([...hunk.addedLines].filter((line) => secondLines.has(line))),
             }));
+            touchLines = new Set([...touchLines].filter((line) => secondTouch.has(line)));
         }
         catch {
             // Ordinary commit: the first-parent staged patch is the complete attribution set.
         }
         const source = stagedBlob(cwd, file);
-        for (const { token, twin } of changedParagraphs(source, extension, effective)) {
-            findings.push(findingFor(file, extension, source, token, effective, twin));
+        const paragraphs = changedParagraphs(file, source, extension, effective, touchLines, inventory);
+        for (const paragraph of paragraphs) {
+            findings.push(findingFor(file, extension, source, paragraph, effective));
         }
     }
-    return { findings, unsupported };
+    return { findings, unsupported, inventory };
 }

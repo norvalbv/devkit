@@ -19,7 +19,7 @@ import { removeCommitMsgBlock } from '../lib/husky/commit-msg-block.mjs';
 import { removeGuardBlock } from '../lib/husky/husky-block.mjs';
 import { resolveExistingAgentProviders, SUPPORTED_AGENT_PROVIDERS, } from '../lib/install/agent-assets/agent-providers.mjs';
 import { removeAntiSlopCapability } from '../lib/install/anti-slop/lifecycle.mjs';
-import { pruneDevkitCacheGitignore } from '../lib/install/gitignore-cache.mjs';
+import { pruneDevkitCacheGitignore, withGitignoreLock } from '../lib/install/gitignore-cache.mjs';
 import { removeHookRegistrations, removeHookScripts } from '../lib/install/install-hooks.mjs';
 import { removeSearchCode } from '../lib/install/install-search-code.mjs';
 import { removeOxcCapability } from '../lib/install/oxc/lifecycle.mjs';
@@ -270,14 +270,19 @@ function pruneGitignoreLine(root, line, dryRun) {
     const giPath = join(root, '.gitignore');
     if (!existsSync(giPath))
         return;
-    const raw = readFileSync(giPath, 'utf8');
-    const lines = raw.split('\n');
-    const kept = lines.filter((l) => l.trim() !== line);
-    if (kept.length === lines.length)
-        return;
-    console.log(`  ${dryRun ? '[dry-run] remove' : '✓ removed'} ${line} from .gitignore`);
-    if (!dryRun)
-        writeFileSync(giPath, kept.join('\n'));
+    const prune = () => {
+        const lines = readFileSync(giPath, 'utf8').split('\n');
+        const kept = lines.filter((l) => l.trim() !== line);
+        if (kept.length === lines.length)
+            return;
+        console.log(`  ${dryRun ? '[dry-run] remove' : '✓ removed'} ${line} from .gitignore`);
+        if (!dryRun)
+            writeFileSync(giPath, kept.join('\n'));
+    };
+    if (dryRun)
+        prune();
+    else
+        withGitignoreLock(root, prune);
 }
 // Reason: flat uninstall orchestration: sequential remove/prune steps each gated by an `if (exists/extends/component)` guard, near-zero nesting; high branch COUNT (one per devkit-created artifact: husky block, skills, agents, hooks, configs, fallow/search-code components), each trivial
 // fallow-ignore-next-line complexity

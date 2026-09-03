@@ -644,6 +644,18 @@ exec 0</dev/null
 . "$SCRIPT_DIR/repo-identity.sh"
 export DEVKIT_SHIP_ID="${DEVKIT_SHIP_ID:-$(uuidgen 2>/dev/null || echo "${BR//\//-}-$$-$(date +%s)")}"
 export DEVKIT_SHIP_REPO="$(devkit_repo_identity "$ROOT")" DEVKIT_SHIP_BRANCH="$BR"
+# The caller's checkout and the exact shipped paths, for gates that must tell the operator what to
+# run OUTSIDE the ephemeral worktree (qavis-advisory: `qavis qa --staged` must see these staged in
+# ROOT, where the receipt it writes is linked back into the gate worktree — sc-2487).
+export DEVKIT_SHIP_ROOT="$ROOT"
+export DEVKIT_SHIP_FROM_BRANCH="$FROM_BRANCH"
+# Each path base64-encoded and ':'-joined: env values cannot carry NUL, and a newline or colon in a
+# valid filename must survive the round trip into the printed remedy.
+DEVKIT_SHIP_PATHS=""
+for __dk_p in ${PATHS[@]+"${PATHS[@]}"}; do
+  DEVKIT_SHIP_PATHS="${DEVKIT_SHIP_PATHS}$(printf '%s' "$__dk_p" | base64 | tr -d '\n'):"
+done
+export DEVKIT_SHIP_PATHS
 export DEVKIT_SHIP_RESUMED=$RESUME
 SHIP_INTENT_GENERATION=""
 SHIP_SOURCE_ATTEMPT_ID=
@@ -1276,9 +1288,8 @@ else
     export DEVKIT_RUN_MODE=dry-gates
     export DEVKIT_REVIEW_GUARDS=comments
     export DEVKIT_SHIP_DRY_GATES=1
-    echo "🧪 Ship dry gates: exact base/path staging; running formatter, configured deterministic/structure/extra gates, and comment firewall." >&2
+    echo "🧪 Ship dry gates: exact base/path staging; running formatter, configured deterministic/structure/extra gates, and the comment budget gate." >&2
     echo "   Skipping decision, Qavis, domain reviewer, completeness, commit, push, and PR creation." >&2
-    echo "   The comment firewall may still invoke its configured judge for a changed comment." >&2
   else
     export DEVKIT_SHIP_MODE=ship   # tags the ship_attempt telemetry (new-ship vs reship retry)
     export DEVKIT_RUN_MODE=ship    # never inherit a caller's review allowlist into a real ship
