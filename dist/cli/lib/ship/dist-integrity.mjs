@@ -81,6 +81,33 @@ function generatedPath(briefedPath) {
         : `dist/${normalized}`;
 }
 /**
+ * Relative-import edges of ONE emitted module. `undefined` means unparseable — a hole every caller
+ * must fail on. Shared so the preflight and the tracked-dist test cannot disagree about an edge.
+ */
+export async function moduleImportEdges(root, importer, source) {
+    // This dependency is dev-only and intentionally loaded only for devkit self-hosting. Installed
+    // consumer copies short-circuit before any caller reaches here and never need it at runtime.
+    const { init, parse } = await import('es-module-lexer');
+    await init;
+    let imports;
+    try {
+        [imports] = parse(source, importer);
+    }
+    catch {
+        return undefined;
+    }
+    const edges = [];
+    for (const item of imports) {
+        // `n` is populated for static and string-literal dynamic imports. It is undefined for
+        // expressions/templates such as import(`./${name}.mjs`), which cannot be resolved here.
+        const specifier = item.n;
+        if (!specifier?.startsWith('.'))
+            continue;
+        edges.push({ importer, specifier, target: importTarget(root, importer, specifier) });
+    }
+    return edges;
+}
+/**
  * Inspect the caller's physical dist tree, Git index, and ship briefing.
  * `base` is the commit the ship worktree would be cut from.
  */
@@ -105,10 +132,6 @@ export async function inspectDistIntegrity(root, base, briefedPaths) {
     // Shared checkouts can contain another agent's generated output. Seed the scan from this ship's
     // explicit source/dist paths, then follow only their reachable physical dist import graph.
     const required = new Set([...briefed].map(generatedPath).filter((file) => file !== undefined));
-    // This dependency is dev-only and intentionally loaded only for devkit self-hosting. Installed
-    // consumer copies execute the no-op return above and never need es-module-lexer at runtime.
-    const { init, parse } = await import('es-module-lexer');
-    await init;
     const unresolved = [];
     const unlexable = [];
     const queue = [...required].filter((file) => file.endsWith('.mjs')).sort();
@@ -126,26 +149,14 @@ export async function inspectDistIntegrity(root, base, briefedPaths) {
         // a discovery root: its dependencies are leaving with it, not candidates to add back.
         if (deleted.has(importer) || !physicalSet.has(importer) || !existsSync(absolute))
             continue;
-        let imports;
-        try {
-            [imports] = parse(readFileSync(absolute, 'utf8'), importer);
-        }
-        catch {
-            // An unparseable file is a HOLE in the check, not a pass: its imports go unverified, which is
-            // indistinguishable from it having a broken one. So this still blocks — it is caught only to
-            // name the file and finish the queue. Letting it reach main()'s catch instead aborts the whole
-            // preflight with a message naming nothing, on the release path, where copy-dist-assets output
-            // under dist/templates and dist/skills now reaches the lexer without passing through tsc.
+        const edges = await moduleImportEdges(root, importer, readFileSync(absolute, 'utf8'));
+        if (edges === undefined) {
+            // Recorded, not thrown: it still blocks via `unlexable`, and finishing the queue lets one
+            // report name the file instead of main()'s catch aborting with a message naming nothing.
             unlexable.push(importer);
             continue;
         }
-        for (const item of imports) {
-            // `n` is populated for static and string-literal dynamic imports. It is undefined for
-            // expressions/templates such as import(`./${name}.mjs`), which cannot be resolved here.
-            const specifier = item.n;
-            if (!specifier?.startsWith('.'))
-                continue;
-            const target = importTarget(root, importer, specifier);
+        for (const { specifier, target } of edges) {
             required.add(target);
             if (!willShip(target) || !existsSync(path.join(root, target))) {
                 unresolved.push({ importer, specifier, target });

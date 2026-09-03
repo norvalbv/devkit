@@ -21,6 +21,7 @@ import { packageDir, readJson } from '../lib/fs-helpers.mjs';
 import { checkCommitMsgHook, commitMsgGuards } from '../lib/husky/commit-msg-block.mjs';
 import { extractGuardBlock } from '../lib/husky/husky-block.mjs';
 import { checkAdhdSkill } from '../lib/install/adhd-skill.mjs';
+import { checkDevkitCacheGitignore, repairDevkitCacheGitignore, } from '../lib/install/gitignore-cache.mjs';
 import { resolveExistingAgentProviders, SUPPORTED_AGENT_PROVIDERS, } from '../lib/install/agent-assets/agent-providers.mjs';
 import { checkAntiSlopCapability, syncAntiSlopCapability, } from '../lib/install/anti-slop/lifecycle.mjs';
 import { selectedHookAssets } from '../lib/install/hook-registration-ledger/selection.mjs';
@@ -155,6 +156,7 @@ function applyFix(cwd, results, sel, stack, standalone) {
     if (codexRow?.fixable && codexRow.status !== 'OK' && bindClaudeFamily(cwd)) {
         console.log('  ✓ bound the claude judge family (haiku/opus/sonnet, chunking off) into guard.config.json');
     }
+    repairDevkitCacheGitignore(cwd, results);
     // MISSING template files / husky drift → init for the recorded selection (idempotent).
     const OXC_CHECKS = new Set([
         'Oxc manifest',
@@ -249,6 +251,7 @@ async function collectResults(cwd, cfg, configResult) {
     const results = [configResult];
     if (sel.husky)
         results.push(...hookChecks(cwd, sel.guards ?? []));
+    results.push(checkDevkitCacheGitignore(cwd));
     if (sel.husky && commitMsgGuards(sel.guards ?? []).length)
         results.push(checkCommitMsgHook(cwd, sel.guards ?? []));
     // biome and tsconfig differ only by filename and expected pointer.

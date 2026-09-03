@@ -116,7 +116,7 @@ export const GUARD_OPTIONS = [
     {
         id: 'comments',
         label: 'comments',
-        hint: 'challenge changed comments; explicit rationale gets independent Haiku review',
+        hint: 'block added/modified standalone comment paragraphs over 2 lines (deterministic, no model)',
     },
     { id: 'decisions', label: 'decisions', hint: 'architectural-decision log gate' },
     {
