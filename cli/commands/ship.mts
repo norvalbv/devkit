@@ -23,6 +23,7 @@ const DEFAULT_DEPENDENCIES: ShipDependencies = {
 
 export const meta = {
   name: 'ship',
+  agentFacing: true,
   summary: 'Commit files onto a new branch + open a PR without moving HEAD.',
   help: `devkit ship — commit <path...> onto a new branch + open a PR without moving HEAD.
 
