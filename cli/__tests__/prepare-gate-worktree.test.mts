@@ -333,3 +333,69 @@ describe('prepare_gate_worktree — the worktree must have a hook chain git will
     expect(r.status, `stderr: ${r.stderr}`).toBe(0);
   });
 });
+
+/** The judge preflight is ADVISORY and may never stop a ship. Both call sites invoke it BARE under
+ *  `set -euo pipefail`, so the tolerated-exit mapping has to live INSIDE the function. */
+describe('ship_judge_preflight — advisory, and errexit-safe by construction', () => {
+  /** Source the real function and call it exactly as ship-branch.sh does: bare, under set -e. */
+  const callUnderErrexit = (root: string, extraEnv: Record<string, string> = {}) =>
+    spawnSync(
+      'bash',
+      [
+        '-c',
+        `set -euo pipefail
+. ${JSON.stringify(scriptPath)}
+ship_judge_preflight ${JSON.stringify(root)}
+echo "SURVIVED:$?"`,
+      ],
+      { encoding: 'utf8', env: { ...process.env, ...GIT_ENV, ...extraEnv } },
+    );
+
+  it('says nothing at all when the reviewer gate is not selected', () => {
+    const root = mkdtempSync(join(tmpdir(), 'jp-noreview-'));
+    dirs.push(root);
+    mkdirSync(join(root, '.devkit'), { recursive: true });
+    writeFileSync(
+      join(root, '.devkit/config.json'),
+      JSON.stringify({ components: { guards: ['size', 'dup'] } }),
+    );
+
+    const r = callUnderErrexit(root);
+
+    expect(r.stdout).toContain('SURVIVED:0');
+    expect(r.stderr).not.toContain('guard-judge preflight');
+  });
+
+  it('survives a root the tool cannot even read — a broken check never aborts a ship', () => {
+    const r = callUnderErrexit(join(tmpdir(), 'jp-does-not-exist-xyz'));
+
+    // The bare call did not trip errexit, and the ship is told the gates still decide.
+    expect(r.stdout).toContain('SURVIVED:0');
+    expect(r.stderr).toContain('the reviewer gate still decides');
+  });
+
+  it('survives an unresolvable judge binary rather than reporting a ship failure', () => {
+    const root = mkdtempSync(join(tmpdir(), 'jp-nobin-'));
+    dirs.push(root);
+    mkdirSync(join(root, '.devkit'), { recursive: true });
+    writeFileSync(
+      join(root, '.devkit/config.json'),
+      JSON.stringify({ components: { guards: ['review'] } }),
+    );
+    writeFileSync(
+      join(root, 'guard.config.json'),
+      JSON.stringify({
+        review: {
+          model: 'gpt-5.6-sol',
+          escalationModel: 'gpt-5.6-sol',
+          correctnessModel: 'gpt-5.6-sol',
+        },
+      }),
+    );
+
+    const r = callUnderErrexit(root, { GUARD_CODEX_BIN: join(tmpdir(), 'no-such-codex-xyz') });
+
+    expect(r.stdout).toContain('SURVIVED:0');
+    expect(r.stderr).toContain('not installed or not on PATH');
+  });
+});

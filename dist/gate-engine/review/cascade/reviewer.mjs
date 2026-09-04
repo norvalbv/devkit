@@ -15,6 +15,29 @@ import { allowedToolsFor, escalatePrompt, hasChecklist, resolveEscalationModel, 
 import { enforceChecklistContract } from '../contracts/checklist.mjs';
 import { agentBody, cleanupChecklistState, initializeCommitGuardChecklist, readChecklistState, withStagedFiles, } from '../runtime.mjs';
 import { consumerChecklistAssetRoot } from './consumer-assets.mjs';
+/** Reason + machine cause for an inconclusive outcome, both naming what the PROVIDER said: a usage
+ *  lock collapsed into "judge outage" sends the reader to the one remedy that cannot work. */
+function outageReason(outage, pass = 'judge') {
+    const subject = pass === 'escalation' ? 'escalation' : 'judge';
+    if (outage?.kind === 'timeout')
+        return `${subject} timed out`;
+    if (outage?.kind === 'rate-limited')
+        return `${subject} hit the provider usage limit`;
+    if (outage?.kind === 'unauthenticated')
+        return `${subject} CLI is not authenticated`;
+    if (outage?.kind === 'absent')
+        return `${subject} CLI is not installed`;
+    return `${subject} outage`;
+}
+/** The machine cause `strictRemedy` branches on. Only the two whose remedies genuinely differ are
+ *  split out; absent/unauthenticated share the auth/quota remedy, which is right for both. */
+function outageCause(outage) {
+    if (outage?.kind === 'timeout')
+        return 'timeout';
+    if (outage?.kind === 'rate-limited')
+        return 'rate-limited';
+    return 'outage';
+}
 /** Run one reviewer with checklist verification, override handling, and cleanup. */
 export async function runCascade(sel, opts) {
     const { cwd } = opts;
@@ -44,7 +67,7 @@ export async function runCascade(sel, opts) {
             readState: () => readChecklistState(cwd, sel.reviewer),
             stagedDiff: () => gitCached(cwd, [], sel.files),
         });
-        attachItems(res, readChecklistState(cwd, sel.reviewer), disposition);
+        attachItems(res, readChecklistState(cwd, sel.reviewer), disposition, { full: opts.fullItems });
         return res;
     }
     finally {
@@ -107,29 +130,35 @@ async function cascadeVerdict({ reviewer, files }, { cwd, cfg, exec = execJudgeA
         mcpProfile,
         env,
         lens,
-        onOutage: (kind) => {
-            firstOutage = kind;
+        onOutage: (outage) => {
+            firstOutage = outage;
         },
     };
     let first = await exec(firstOpts);
     let initialRetryUsed = false;
-    if (first === null && retryFirst && firstOutage !== 'timeout') {
+    // `permanent`, not `!== 'timeout'`: a usage lock cannot clear inside a retry, and re-spawning it
+    // cost EIGHT wasted judge calls per ship for six days. A timeout stays permanent as before.
+    if (first === null && retryFirst && !firstOutage?.permanent) {
         initialRetryUsed = true;
-        console.error(`guard-review: ${reviewer.name}: judge run failed (${firstOutage ?? 'transient'}), retrying once…`);
+        console.error(`guard-review: ${reviewer.name}: judge run failed (${firstOutage?.kind ?? 'transient'}), retrying once…`);
         cleanupChecklistState(cwd, reviewer);
         initializeCommitGuardChecklist(cwd, reviewer, checklistRoot, judgeEnv);
         first = await exec(firstOpts);
     }
-    if (first === null)
-        return {
+    if (first === null) {
+        const outcome = {
             name: reviewer.name,
             status: 'inconclusive',
-            reason: firstOutage === 'timeout' ? 'judge timed out' : 'judge outage',
-            inconclusiveCause: firstOutage === 'timeout' ? 'timeout' : 'outage',
+            reason: outageReason(firstOutage),
+            inconclusiveCause: outageCause(firstOutage),
             outageBin: judgeBinForModel(passModel),
             escalated: false,
             model: passModel,
         };
+        if (firstOutage?.resetsAt !== undefined)
+            outcome.outageResetsAt = firstOutage.resetsAt;
+        return outcome;
+    }
     let firstVerdict = parseReviewVerdict(first);
     if (firstVerdict.verdict === 'PASS')
         return {
@@ -160,21 +189,25 @@ async function cascadeVerdict({ reviewer, files }, { cwd, cfg, exec = execJudgeA
                 const retried = await exec({
                     ...firstOpts,
                     args: args(`${prompt}\n\n${responseContract.retryInstruction}`, passModel),
-                    onOutage: (kind) => {
-                        contractRetryOutage = kind;
+                    onOutage: (outage) => {
+                        contractRetryOutage = outage;
                     },
                 });
-                if (retried === null)
-                    return {
+                if (retried === null) {
+                    const outcome = {
                         name: reviewer.name,
                         status: 'inconclusive',
-                        reason: contractRetryOutage === 'timeout' ? 'judge timed out' : 'judge outage',
-                        inconclusiveCause: contractRetryOutage === 'timeout' ? 'timeout' : 'outage',
+                        reason: outageReason(contractRetryOutage),
+                        inconclusiveCause: outageCause(contractRetryOutage),
                         outageBin: judgeBinForModel(passModel),
                         escalated: false,
                         model: passModel,
                         transcript: first,
                     };
+                    if (contractRetryOutage?.resetsAt !== undefined)
+                        outcome.outageResetsAt = contractRetryOutage.resetsAt;
+                    return outcome;
+                }
                 if (retried !== null) {
                     first = retried;
                     firstVerdict = parseReviewVerdict(first);
@@ -238,21 +271,25 @@ async function cascadeVerdict({ reviewer, files }, { cwd, cfg, exec = execJudgeA
         mcpProfile,
         env,
         lens,
-        onOutage: (kind) => {
-            secondOutage = kind;
+        onOutage: (outage) => {
+            secondOutage = outage;
         },
     });
-    if (second === null)
-        return {
+    if (second === null) {
+        const outcome = {
             name: reviewer.name,
             status: 'inconclusive',
-            reason: secondOutage === 'timeout' ? 'escalation timed out' : 'escalation outage',
-            inconclusiveCause: secondOutage === 'timeout' ? 'timeout' : 'outage',
+            reason: outageReason(secondOutage, 'escalation'),
+            inconclusiveCause: outageCause(secondOutage),
             outageBin: judgeBinForModel(escalationModel),
             escalated: true,
             model: passModel,
             transcript: first,
         };
+        if (secondOutage?.resetsAt !== undefined)
+            outcome.outageResetsAt = secondOutage.resetsAt;
+        return outcome;
+    }
     const finalVerdict = parseReviewVerdict(second);
     if (finalVerdict.verdict === 'FAIL' &&
         responseContract &&
