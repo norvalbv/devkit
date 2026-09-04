@@ -47,6 +47,7 @@ import {
   selectReviewers,
 } from '../../reviewers.mts';
 import { runCascade } from '../../run-review.mts';
+import { gateJudgeEnv } from '../../runtime.mts';
 
 // Corpus + fixture-asset layer, checkpoint/salvage/baseline IO, and flip-table statistics (split
 // out to keep this file within its size ratchet).
@@ -259,8 +260,10 @@ export async function runRow(row, { model = MODEL, cascade = CASCADE, exec } = {
       return unscoredResult(row, 'not-selected', 'not-selected');
     const capture = [];
     const spy = (r) => makeSpyExec(capture, { reviewer: r, cascade, delegate: exec });
+    // gateJudgeEnv = DEVKIT_CHECKLIST_KEEP=1, else the script deletes an all-pass artifact (sc-1438).
+    const opts = { cwd: fx.repo, cfg, firstModel: model, judgeEnv: gateJudgeEnv(false, cfg) };
     const cas = await runReviewerCascade(sel, (s) =>
-      runCascade(s, { cwd: fx.repo, cfg, exec: spy(s.reviewer), firstModel: model }),
+      runCascade(s, { ...opts, exec: spy(s.reviewer) }),
     );
     return scoreRow(row, capture, cas);
   } finally {
@@ -268,16 +271,13 @@ export async function runRow(row, { model = MODEL, cascade = CASCADE, exec } = {
   }
 }
 
-// summarize (metrics for one scope) and printSummary live in stats.mts (pure; size ratchet).
-
 // ─── Baseline / compare ───────────────────────────────────────────────────────────
 
 const sectionKey = (reviewerName, model, cascade) =>
   `${reviewerName}@${model}@${cascade ? 'cascade-on' : 'cascade-off'}${lensArmSuffix(reviewerName)}`;
 
-// A model-pinned reviewer (correctness) runs single-pass at its pinned model regardless of
-// BENCH_MODEL / BENCH_CASCADE — the gate ignores both for it. Report and key it by that reality so
-// its section, metrics, and baseline reflect what actually ran, not the swept knobs.
+// A model-pinned reviewer (correctness) runs single-pass at its pin regardless of BENCH_MODEL /
+// BENCH_CASCADE; report and key it by what actually ran, not the swept knobs.
 const effModel = (reviewer) => reviewer.model ?? MODEL;
 const effCascade = (reviewer) => (reviewer.model ? false : CASCADE);
 
