@@ -49,6 +49,7 @@ import {
   withNamedAgentMcpTools,
 } from '../judge/mcp/profile.mts';
 import { reportGateInfraFailure } from '../judge/odb-probe.mts';
+import type { JudgeOutage } from '../judge/outage/classify.mts';
 import { DEEP_JUDGE_TIMEOUT_MS, execJudgeAsync, strictRemedy } from '../judge/run-judge.mts';
 import { loadCache, savePasses } from './cache.mts';
 import { buildCappedDiffEvidence } from './diff-evidence.mts';
@@ -145,6 +146,24 @@ export function wrapCompleteness(
 const DETAIL_CAP = 500;
 
 /** The gate → exit code (see module contract). `exec` injectable for tests. */
+/** The causes this gate reports — the subset of `strictRemedy`'s union it can actually produce. */
+type CompletenessCause = 'timeout' | 'rate-limited' | 'outage';
+
+/** The gate's own SKIP wording, one entry per cause. Exhaustive by TYPE, not by convention: a new
+ *  cause cannot reach the remedy without also gaining a name here. */
+const SKIP_WORDING = {
+  timeout: 'judge timed out',
+  'rate-limited': 'judge hit the provider usage limit',
+  outage: 'judge outage',
+} satisfies Record<CompletenessCause, string>;
+
+/** Collapse the judge's outage kind to the cause `strictRemedy` branches on. */
+function completenessCause(outage: JudgeOutage | undefined): CompletenessCause {
+  if (outage?.kind === 'timeout') return 'timeout';
+  if (outage?.kind === 'rate-limited') return 'rate-limited';
+  return 'outage';
+}
+
 export async function runCompleteness(
   msgFile: string,
   cwd = process.cwd(),
@@ -299,7 +318,7 @@ export async function runCompleteness(
     return finish(0, 'full', cachedDuration);
   }
 
-  let outage: 'timeout' | 'transient' | 'empty' | undefined;
+  let outage: JudgeOutage | undefined;
   let observedCapabilityFingerprint: string | undefined;
   const raw = await exec({
     label: 'review:completeness',
@@ -330,16 +349,17 @@ export async function runCompleteness(
     // The judge's OWN cause, never a collapsed one: 'empty' is a healthy judge returning a
     // response that broke its contract, and reporting it as an outage sends a reader to check auth
     // and quota on a CLI that answered fine.
-    emitNoRun(outage ?? 'outage');
+    emitNoRun(outage?.kind ?? 'outage');
     // Outage/timeout (execJudgeAsync already warned). Under strict ship the skip must be an EXIT
     // CODE, not a stderr line — a headless shipping agent only reliably sees the code.
     if (envFlag('AI_STRICT')) {
-      // Name the CAUSE: a cap kill is the gate's own contention kill, and the auth/quota remedy
-      // sends the operator chasing a phantom problem on a healthy CLI (sc-1227).
-      const timedOut = outage === 'timeout';
+      // Name the CAUSE: a cap kill is not auth/quota (sc-1227), and a usage lock is its mirror —
+      // CLI fine, account locked, generic remedy says re-run for a wait it never mentions.
+      const cause = completenessCause(outage);
+      const named = SKIP_WORDING[cause];
       console.error(
-        `guard-review: completeness SKIPPED (${timedOut ? 'judge timed out' : 'judge outage'}) — strict ship mode fails closed.\n` +
-          `   Remedy: ${strictRemedy(timedOut ? 'timeout' : 'outage', judgeBinForModel(model))} (an earned PASS is cached).`,
+        `guard-review: completeness SKIPPED (${named}) — strict ship mode fails closed.\n` +
+          `   Remedy: ${strictRemedy(cause, judgeBinForModel(model), outage?.resetsAt)} (an earned PASS is cached).`,
       );
       return finish(3);
     }

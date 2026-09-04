@@ -402,7 +402,9 @@ export async function runReviewGate(
     // Producers carry the machine cause; human-readable reasons are never parsed as an API.
     const cause = r.inconclusiveCause ?? 'outage';
     const remedy =
-      cause === 'response-contract' ? RESPONSE_CONTRACT_REMEDY : strictRemedy(cause, r.outageBin);
+      cause === 'response-contract'
+        ? RESPONSE_CONTRACT_REMEDY
+        : strictRemedy(cause, r.outageBin, r.outageResetsAt);
     console.error(
       strict
         ? `guard-review: ${r.name} INCONCLUSIVE (${r.reason}) — strict ship mode fails closed.\n` +

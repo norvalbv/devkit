@@ -1,6 +1,13 @@
 /** Shared reviewer response primitives. Domain-specific evidence contracts depend on this module. */
 
-export type ReviewInconclusiveCause = 'timeout' | 'sync' | 'response-contract' | 'outage';
+/** `rate-limited` is split out of `outage` because its remedy inverts the generic one: re-running
+ *  is exactly what cannot succeed until the provider's window resets (sc-2538). */
+export type ReviewInconclusiveCause =
+  | 'timeout'
+  | 'sync'
+  | 'response-contract'
+  | 'outage'
+  | 'rate-limited';
 
 /** A parsed VERDICT line: the token (null when absent) plus its markdown-stripped reason. */
 export interface ReviewVerdict {

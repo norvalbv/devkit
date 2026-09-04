@@ -150,6 +150,9 @@ export interface ReviewOutcome {
   /** Binary of the SPAWN that went dark; an engine-error rejection, where the failing pass is
    * unknowable, carries the backtick-joined candidate set exactly as the remedy renders it. */
   outageBin?: string;
+  /** Epoch ms the provider said its limit clears, when it named one — so the fail-closed remedy can
+   * say how long the wait is instead of telling the operator to re-run into the same wall. */
+  outageResetsAt?: number;
   transcript?: string;
   /** Structured acknowledgement records for findings suppressed by the override valve. Present on
    * both all-waived PASS and mixed waived+blocking FAIL outcomes. */

@@ -15,13 +15,13 @@
 // Argv order is load-bearing: `--disallowedTools` is VARIADIC — anything after it is swallowed as
 // a tool name, so the positional prompt sits BEFORE the tool flags and tool flags go LAST.
 
-import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CLAUDE_RESULT_ARGS, unwrapClaudeResult } from '../../judge/claude-result.mts';
 import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from '../../judge/judge-isolation.mts';
+import type { JudgeOutage } from '../../judge/outage/classify.mts';
 import { execJudgeAsync } from '../../judge/run-judge.mts';
-import { stripFrontmatter } from '../../review/reviewers.mts';
+import { type AgentSource, loadAgentSource } from '../../review/reviewers.mts';
 import { PRIOR_ART_LEG_NAMES, type PriorArtLegName } from '../response-contract.mts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -80,22 +80,11 @@ export function buildBenchmarkDirective(fixture: LegsFixture): string {
   ].join('\n');
 }
 
-export interface AgentSource {
-  /** Frontmatter-stripped agent body — what production makes the subagent's system prompt. */
-  body: string;
-  /** The md's frontmatter `model:` (the production model), overridable via BENCH_MODEL. */
-  model: string;
-  /** Raw file content — hashed into the baseline as agentHash. */
-  raw: string;
-}
-
-const FRONTMATTER_MODEL_RE = /^model:\s*(\S+)\s*$/m;
+export type { AgentSource } from '../../review/reviewers.mts';
 
 /** Read the agent from SOURCE. Throws if unreadable — a bench without its subject cannot run. */
 export function loadAgent(): AgentSource {
-  const raw = readFileSync(AGENT_MD_PATH, 'utf8');
-  const model = process.env.BENCH_MODEL ?? raw.match(FRONTMATTER_MODEL_RE)?.[1] ?? 'opus';
-  return { body: stripFrontmatter(raw), model, raw };
+  return loadAgentSource(AGENT_MD_PATH);
 }
 
 export function buildIntrinsicArgs(
@@ -127,7 +116,7 @@ export interface RunAgentOpts {
   prompt: string;
   fixture: LegsFixture;
   exec?: typeof execJudgeAsync;
-  onOutage?: (kind: 'timeout' | 'transient' | 'empty') => void;
+  onOutage?: (outage: JudgeOutage) => void;
 }
 
 export async function runIntrinsic({
