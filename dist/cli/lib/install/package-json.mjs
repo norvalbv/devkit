@@ -14,6 +14,32 @@ const PREPARE_SCRIPT = 'husky && (command -v devkit >/dev/null 2>&1 && devkit sy
 // whose node_modules is a symlink (every ship/agent worktree), silently disabling both walls there.
 // Same invocation shape as gate-engine/structure/run.mts, which owns the staged path.
 const ELECTRON_STRUCTURE_SCRIPT = 'node --preserve-symlinks node_modules/eslint/bin/eslint.js src';
+/** Leading major of a dependency range, tolerating `npm:` aliases (`npm:typescript@7.0.2` -> 7). */
+function declaredMajor(range) {
+    const version = range.slice(range.lastIndexOf('@') + 1);
+    return Number(/^\D*(\d+)/.exec(version)?.[1] ?? 0);
+}
+/**
+ * The structure lane parses SYNTAX only — imports, names, file/function size — never types, so
+ * either parser serves it. Which one a consumer CAN run is decided by its compiler:
+ * @typescript-eslint/parser reads the TypeScript JavaScript compiler API, and TypeScript 7 ships
+ * none, so a TS7 consumer gets the Babel parser instead.
+ *
+ * Keyed on the DECLARED range because init runs before the consumer installs. A repo holding TS7
+ * beside a TS6 library (the documented side-by-side arrangement) declares TS6 here and keeps the
+ * TypeScript parser, which is correct — that repo's parser still resolves a compiler API.
+ */
+export function structureParserDeps(pkg) {
+    const declared = pkg.devDependencies?.typescript ?? pkg.dependencies?.typescript ?? '';
+    if (declaredMajor(declared) < 7)
+        return { '@typescript-eslint/parser': '^8.0.0' };
+    return {
+        '@babel/core': '^8.0.0',
+        '@babel/eslint-parser': '^8.0.0',
+        '@babel/plugin-syntax-jsx': '^8.0.0',
+        '@babel/preset-typescript': '^8.0.0',
+    };
+}
 // Reason: the branches ARE the per-component devDep/script manifest: each `...(sel.x ? {...} : {})` spread names exactly which deps+scripts a component owns; flattening scatters this single source-of-truth table that remove() mirrors
 // fallow-ignore-next-line complexity
 export function patchPackageJson(cwd, devkitRef, repoUrl, sel, isStructure, dryRun, stack) {
@@ -34,9 +60,9 @@ export function patchPackageJson(cwd, devkitRef, repoUrl, sel, isStructure, dryR
         ...(sel.husky ? { husky: '^9.1.7' } : {}),
         ...(electronPreset
             ? {
+                ...structureParserDeps(pkg),
                 eslint: '^10.0.0',
                 'eslint-plugin-project-structure': '^3.14.3',
-                '@typescript-eslint/parser': '^8.0.0',
             }
             : {}),
     };

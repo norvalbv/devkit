@@ -307,6 +307,10 @@ describe('init — zero consumer deps (config-driven structure)', () => {
     const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
     for (const dep of [
       'jscpd',
+      '@babel/core',
+      '@babel/eslint-parser',
+      '@babel/plugin-syntax-jsx',
+      '@babel/preset-typescript',
       'eslint',
       'eslint-plugin-project-structure',
       '@typescript-eslint/parser',
@@ -344,17 +348,18 @@ describe('init — zero consumer deps (config-driven structure)', () => {
     expect(pkg.devDependencies['@norvalbv/devkit'].startsWith(`${override}#`)).toBe(true);
   });
 
-  it('electron package mode KEEPS eslint/parser/plugin + preserves worktree symlinks', () => {
+  it('electron on TypeScript 6 keeps the TypeScript parser + preserves worktree symlinks', () => {
     const root = tmpRepo({
       name: 'fx',
       version: '0',
       type: 'module',
-      devDependencies: { electron: '^30' },
+      devDependencies: { electron: '^30', typescript: '^6.0.3' },
     });
     devkit(root, 'init', '--stack', 'electron', '--yes');
     const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
     expect(pkg.devDependencies.eslint).toBeDefined();
     expect(pkg.devDependencies['@typescript-eslint/parser']).toBeDefined();
+    expect(pkg.devDependencies['@babel/eslint-parser']).toBeUndefined();
     // The repo-wide sweep (`bun run lint`, CI, agents-hooks/lint-check.sh) is a CONSUMER-run eslint,
     // so it carries the flag itself; the staged gate's own invocation cannot cover it.
     expect(pkg.scripts['lint:structure']).toBe(
@@ -362,6 +367,59 @@ describe('init — zero consumer deps (config-driven structure)', () => {
     );
     const hook = readFileSync(join(root, '.husky/pre-commit'), 'utf8');
     expect(hook).toContain('--structure "guard-structure staged"');
+  });
+
+  it('electron on TypeScript 7 gets the Babel parser, since TS7 ships no compiler API', () => {
+    const root = tmpRepo({
+      name: 'fx',
+      version: '0',
+      type: 'module',
+      devDependencies: { electron: '^30', typescript: '7.0.2' },
+    });
+    devkit(root, 'init', '--stack', 'electron', '--yes');
+    const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+    expect(pkg.devDependencies['@babel/core']).toBeDefined();
+    expect(pkg.devDependencies['@babel/eslint-parser']).toBeDefined();
+    expect(pkg.devDependencies['@babel/plugin-syntax-jsx']).toBeDefined();
+    expect(pkg.devDependencies['@babel/preset-typescript']).toBeDefined();
+    expect(pkg.devDependencies['@typescript-eslint/parser']).toBeUndefined();
+  });
+
+  it('a TypeScript 7 alias beside a TypeScript 6 library keeps the TypeScript parser', () => {
+    // The documented side-by-side arrangement: TS7 supplies the `tsc` binary under an alias while
+    // the canonical `typescript` stays TS6 and keeps serving the compiler API the parser reads.
+    const root = tmpRepo({
+      name: 'fx',
+      version: '0',
+      type: 'module',
+      devDependencies: {
+        electron: '^30',
+        '@typescript/native': 'npm:typescript@7.0.2',
+        typescript: '^6.0.3',
+      },
+    });
+    devkit(root, 'init', '--stack', 'electron', '--yes');
+    const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+    expect(pkg.devDependencies['@typescript-eslint/parser']).toBeDefined();
+    expect(pkg.devDependencies['@babel/eslint-parser']).toBeUndefined();
+  });
+
+  it('never strips a parser the consumer already declared', () => {
+    // init adds what the stack needs; removing a package the consumer chose is `devkit clean`'s job.
+    const root = tmpRepo({
+      name: 'fx',
+      version: '0',
+      type: 'module',
+      devDependencies: {
+        electron: '^30',
+        typescript: '7.0.2',
+        '@typescript-eslint/parser': '^8.0.0',
+      },
+    });
+    devkit(root, 'init', '--stack', 'electron', '--yes');
+    const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+    expect(pkg.devDependencies['@typescript-eslint/parser']).toBe('^8.0.0');
+    expect(pkg.devDependencies['@babel/eslint-parser']).toBeDefined();
   });
 });
 
@@ -414,6 +472,24 @@ describe('init — per-component flag selection', () => {
 });
 
 describe('init — removal (deselected + present)', () => {
+  it('preserves a consumer-owned Babel core when Electron structure is removed', () => {
+    const root = tmpRepo({
+      name: 'fx',
+      version: '0',
+      type: 'module',
+      devDependencies: { electron: '^30', '@babel/core': '^8.0.1' },
+    });
+    devkit(root, 'init', '--stack', 'electron', '--yes');
+
+    devkit(root, 'init', '--stack', 'electron', '--yes', '--no-structure', '--remove-deselected');
+
+    const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+    expect(pkg.devDependencies['@babel/core']).toBe('^8.0.1');
+    expect(pkg.devDependencies['@babel/eslint-parser']).toBeUndefined();
+    expect(pkg.devDependencies['@babel/plugin-syntax-jsx']).toBeUndefined();
+    expect(pkg.devDependencies['@babel/preset-typescript']).toBeUndefined();
+  });
+
   it('biome present then deselected with --remove-deselected → biome.jsonc gone, others intact', () => {
     const root = tmpRepo();
     devkit(root, 'init', '--stack', 'generic', '--yes');
