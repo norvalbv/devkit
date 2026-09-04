@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 /** Report the judges' provider before the deterministic chain is paid (sc-2538). ADVISORY — never
  *  blocks, reports per MODEL. Why: docs/decisions/judge-outage-classified-not-blocked.md. */
-import { join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { realpathSync } from 'node:fs';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { resolveGuardConfig } from '../../../../gate-engine/config.mts';
 import { readCodexRateLimits } from '../../../../gate-engine/judge/codex/rate-limits.mts';
 import { isCodexModel, judgeBinForModel } from '../../../../gate-engine/judge/codex/result.mts';
@@ -184,8 +185,9 @@ async function main(argv: string[]): Promise<number> {
 }
 
 // Entry only when this file IS the entry point: a substring test on argv[1] would also fire for
-// this module's own test file, and the body below calls process.exit().
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// this module's own test file, and the body below calls process.exit(). realpathSync, not resolve —
+// a bin shim is a symlink, and cli/__tests__/bin-run-as-main.test.mts enforces that repo-wide.
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   main(process.argv.slice(2))
     // Nothing this module can hit is worth failing a ship over — an unexpected throw is the same
     // "could not run" as a timeout, and the shell maps 2 to a warn.
