@@ -9,6 +9,7 @@
  * generator, never the data.
  */
 
+import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { normalizeReviewRoots } from '../../skills/_devkit/review-roots.mjs';
 import type { GuardConfig } from '../config.mts';
@@ -266,6 +267,26 @@ export function allowedToolsFor(
 export function stripFrontmatter(md: string): string {
   const m = String(md).match(FRONTMATTER_RE);
   return m ? md.slice(m[0].length) : String(md);
+}
+
+/** The three facts an agent BENCH needs about the agent it is benching. */
+export interface AgentSource {
+  /** Frontmatter-stripped agent body — what production makes the subagent's system prompt. */
+  body: string;
+  /** The md's frontmatter `model:` (the production model), overridable via BENCH_MODEL. */
+  model: string;
+  /** Raw file content — hashed into the baseline as agentHash. */
+  raw: string;
+}
+
+const FRONTMATTER_MODEL_RE = /^model:\s*(\S+)\s*$/m;
+
+/** Read a benched agent from SOURCE; throws if unreadable. Beside stripFrontmatter because the
+ *  prior-art and critique harnesses each carried a byte-identical private copy. */
+export function loadAgentSource(mdPath: string): AgentSource {
+  const raw = readFileSync(mdPath, 'utf8');
+  const model = process.env.BENCH_MODEL ?? raw.match(FRONTMATTER_MODEL_RE)?.[1] ?? 'opus';
+  return { body: stripFrontmatter(raw), model, raw };
 }
 
 /** Prompt-only context riding beside a brief (sc-1441/sc-1442): the governing-Targets block and

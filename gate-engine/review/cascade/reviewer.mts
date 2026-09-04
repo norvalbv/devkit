@@ -2,10 +2,11 @@ import type { GuardConfig } from '../../config.mts';
 import { judgeBinForModel } from '../../judge/codex/result.mts';
 import { JUDGE_ISOLATION } from '../../judge/judge-isolation.mts';
 import { namedAgentMcpProfile } from '../../judge/mcp/profile.mts';
+import type { JudgeOutage } from '../../judge/outage/classify.mts';
 import { DEEP_JUDGE_TIMEOUT_MS, execJudgeAsync } from '../../judge/run-judge.mts';
 import { renderGoverningClaudeMd } from '../claude-md.mts';
 import { renderStagedLineCounts } from '../evidence/line-counts.mts';
-import { parseReviewVerdict } from '../contracts/response.mts';
+import { type ReviewInconclusiveCause, parseReviewVerdict } from '../contracts/response.mts';
 import { buildCappedDiffEvidence } from '../diff-evidence.mts';
 import { responseContractFor } from '../contracts/registry.mts';
 import { attachItems } from '../evidence/items.mts';
@@ -36,6 +37,28 @@ import { consumerChecklistAssetRoot } from './consumer-assets.mts';
 
 /** One reviewer cascade outcome, including its persisted transcript when a judge ran. */
 export type CascadeResult = ReviewOutcome;
+
+/** Reason + machine cause for an inconclusive outcome, both naming what the PROVIDER said: a usage
+ *  lock collapsed into "judge outage" sends the reader to the one remedy that cannot work. */
+function outageReason(
+  outage: JudgeOutage | undefined,
+  pass: 'judge' | 'escalation' = 'judge',
+): string {
+  const subject = pass === 'escalation' ? 'escalation' : 'judge';
+  if (outage?.kind === 'timeout') return `${subject} timed out`;
+  if (outage?.kind === 'rate-limited') return `${subject} hit the provider usage limit`;
+  if (outage?.kind === 'unauthenticated') return `${subject} CLI is not authenticated`;
+  if (outage?.kind === 'absent') return `${subject} CLI is not installed`;
+  return `${subject} outage`;
+}
+
+/** The machine cause `strictRemedy` branches on. Only the two whose remedies genuinely differ are
+ *  split out; absent/unauthenticated share the auth/quota remedy, which is right for both. */
+function outageCause(outage: JudgeOutage | undefined): ReviewInconclusiveCause {
+  if (outage?.kind === 'timeout') return 'timeout';
+  if (outage?.kind === 'rate-limited') return 'rate-limited';
+  return 'outage';
+}
 
 /** Orchestration inputs threaded through one reviewer's cascade. */
 export interface CascadeOpts {
@@ -177,7 +200,7 @@ async function cascadeVerdict(
   // Per-lens spend attribution: every split part deliberately shares one judge LABEL (the reviewer
   // identity the caches and warehouse key on), so the lens rides the judge_exec event as its own field.
   const lens = reviewer.lens?.length ? lensGroupId(reviewer.lens) : undefined;
-  let firstOutage: 'timeout' | 'transient' | 'empty' | undefined;
+  let firstOutage: JudgeOutage | undefined;
   const firstOpts = {
     label: `review:${reviewer.name}`,
     args: args(prompt, passModel),
@@ -188,31 +211,36 @@ async function cascadeVerdict(
     mcpProfile,
     env,
     lens,
-    onOutage: (kind: 'timeout' | 'transient' | 'empty') => {
-      firstOutage = kind;
+    onOutage: (outage: JudgeOutage) => {
+      firstOutage = outage;
     },
   };
   let first = await exec(firstOpts);
   let initialRetryUsed = false;
-  if (first === null && retryFirst && firstOutage !== 'timeout') {
+  // `permanent`, not `!== 'timeout'`: a usage lock cannot clear inside a retry, and re-spawning it
+  // cost EIGHT wasted judge calls per ship for six days. A timeout stays permanent as before.
+  if (first === null && retryFirst && !firstOutage?.permanent) {
     initialRetryUsed = true;
     console.error(
-      `guard-review: ${reviewer.name}: judge run failed (${firstOutage ?? 'transient'}), retrying once…`,
+      `guard-review: ${reviewer.name}: judge run failed (${firstOutage?.kind ?? 'transient'}), retrying once…`,
     );
     cleanupChecklistState(cwd, reviewer);
     initializeCommitGuardChecklist(cwd, reviewer, checklistRoot, judgeEnv);
     first = await exec(firstOpts);
   }
-  if (first === null)
-    return {
+  if (first === null) {
+    const outcome: ReviewOutcome = {
       name: reviewer.name,
       status: 'inconclusive',
-      reason: firstOutage === 'timeout' ? 'judge timed out' : 'judge outage',
-      inconclusiveCause: firstOutage === 'timeout' ? 'timeout' : 'outage',
+      reason: outageReason(firstOutage),
+      inconclusiveCause: outageCause(firstOutage),
       outageBin: judgeBinForModel(passModel),
       escalated: false,
       model: passModel,
     };
+    if (firstOutage?.resetsAt !== undefined) outcome.outageResetsAt = firstOutage.resetsAt;
+    return outcome;
+  }
   let firstVerdict = parseReviewVerdict(first);
   if (firstVerdict.verdict === 'PASS')
     return {
@@ -241,25 +269,29 @@ async function cascadeVerdict(
         console.error(
           `guard-review: ${reviewer.name}: FAIL did not satisfy its response contract, retrying once…`,
         );
-        let contractRetryOutage: 'timeout' | 'transient' | 'empty' | undefined;
+        let contractRetryOutage: JudgeOutage | undefined;
         const retried = await exec({
           ...firstOpts,
           args: args(`${prompt}\n\n${responseContract.retryInstruction}`, passModel),
-          onOutage: (kind: 'timeout' | 'transient' | 'empty') => {
-            contractRetryOutage = kind;
+          onOutage: (outage: JudgeOutage) => {
+            contractRetryOutage = outage;
           },
         });
-        if (retried === null)
-          return {
+        if (retried === null) {
+          const outcome: ReviewOutcome = {
             name: reviewer.name,
             status: 'inconclusive',
-            reason: contractRetryOutage === 'timeout' ? 'judge timed out' : 'judge outage',
-            inconclusiveCause: contractRetryOutage === 'timeout' ? 'timeout' : 'outage',
+            reason: outageReason(contractRetryOutage),
+            inconclusiveCause: outageCause(contractRetryOutage),
             outageBin: judgeBinForModel(passModel),
             escalated: false,
             model: passModel,
             transcript: first,
           };
+          if (contractRetryOutage?.resetsAt !== undefined)
+            outcome.outageResetsAt = contractRetryOutage.resetsAt;
+          return outcome;
+        }
         if (retried !== null) {
           first = retried;
           firstVerdict = parseReviewVerdict(first);
@@ -312,7 +344,7 @@ async function cascadeVerdict(
       transcript: first,
     };
   }
-  let secondOutage: 'timeout' | 'transient' | 'empty' | undefined;
+  let secondOutage: JudgeOutage | undefined;
   const second = await exec({
     label: `review:${reviewer.name}:escalate`,
     args: args(escalatePrompt(prompt, first), escalationModel),
@@ -323,21 +355,24 @@ async function cascadeVerdict(
     mcpProfile,
     env,
     lens,
-    onOutage: (kind: 'timeout' | 'transient' | 'empty') => {
-      secondOutage = kind;
+    onOutage: (outage: JudgeOutage) => {
+      secondOutage = outage;
     },
   });
-  if (second === null)
-    return {
+  if (second === null) {
+    const outcome: ReviewOutcome = {
       name: reviewer.name,
       status: 'inconclusive',
-      reason: secondOutage === 'timeout' ? 'escalation timed out' : 'escalation outage',
-      inconclusiveCause: secondOutage === 'timeout' ? 'timeout' : 'outage',
+      reason: outageReason(secondOutage, 'escalation'),
+      inconclusiveCause: outageCause(secondOutage),
       outageBin: judgeBinForModel(escalationModel),
       escalated: true,
       model: passModel,
       transcript: first,
     };
+    if (secondOutage?.resetsAt !== undefined) outcome.outageResetsAt = secondOutage.resetsAt;
+    return outcome;
+  }
   const finalVerdict = parseReviewVerdict(second);
   if (
     finalVerdict.verdict === 'FAIL' &&

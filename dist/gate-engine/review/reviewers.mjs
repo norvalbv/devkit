@@ -8,6 +8,7 @@
  * (guard.config.json `review.backendRoots` / `review.frontendRoots` / `scanRoots`) — ship the
  * generator, never the data.
  */
+import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { normalizeReviewRoots } from '../../skills/_devkit/review-roots.mjs';
 import { devkitVersion } from '../devkit-version.mjs';
@@ -196,6 +197,14 @@ export function allowedToolsFor(reviewer, cfg, assetRoot = '.claude') {
 export function stripFrontmatter(md) {
     const m = String(md).match(FRONTMATTER_RE);
     return m ? md.slice(m[0].length) : String(md);
+}
+const FRONTMATTER_MODEL_RE = /^model:\s*(\S+)\s*$/m;
+/** Read a benched agent from SOURCE; throws if unreadable. Beside stripFrontmatter because the
+ *  prior-art and critique harnesses each carried a byte-identical private copy. */
+export function loadAgentSource(mdPath) {
+    const raw = readFileSync(mdPath, 'utf8');
+    const model = process.env.BENCH_MODEL ?? raw.match(FRONTMATTER_MODEL_RE)?.[1] ?? 'opus';
+    return { body: stripFrontmatter(raw), model, raw };
 }
 /**
  * Wrap an interactive reviewer brief for headless gate use. The same Devkit-owned .md serves both

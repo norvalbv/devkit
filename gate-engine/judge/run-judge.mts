@@ -39,19 +39,19 @@ import {
   type PreparedJudgeMcpProfile,
   prepareJudgeMcpProfile,
 } from './mcp/profile.mts';
+import {
+  classifyJudgeOutage,
+  type JudgeError,
+  type JudgeOutage,
+  type JudgeOutageKind,
+} from './outage/classify.mts';
+import { unavailableMessage, warnNoOutput } from './outage/wording.mts';
+
 import { composeTranscript, saveTranscriptUnique } from './transcript-store.mts';
 
-// The error thrown/handed back by a `claude` spawn — a Node exec error augmented with these fields.
-// External data (a thrown value / execFile callback error), so read it through `judgeErr` below.
-interface JudgeError {
-  code?: string;
-  status?: number | null;
-  message?: string;
-  killed?: boolean;
-  signal?: string;
-  /** execFileSync attaches the child's partial stdout to the throw (utf8 → string here). */
-  stdout?: string;
-}
+// Re-exported so the gates that already import their remedy wording from here keep ONE import path,
+// while the wording itself lives beside the classifier that decides it.
+export { strictRemedy, unavailableMessage } from './outage/wording.mts';
 
 // Narrow an unknown thrown value to the JudgeError shape; a non-object (or null) reads as {} so every
 // field access is undefined — matching the original `e?.field` optional-chaining behaviour exactly.
@@ -59,47 +59,20 @@ function judgeErr(e: unknown): JudgeError {
   return e && typeof e === 'object' ? (e as JudgeError) : {};
 }
 
-// The two dark-judge warning shapes, shared by the sync and async runners so the outage stays
-// visible with ONE wording (and the twin catch blocks don't diverge or trip the dup gate).
-// Both name the BINARY that went dark: "check claude auth" on a codex outage sends the operator
-// to the wrong subscription entirely.
-function warnNoOutput(label: string, bin: string): void {
-  // Ran (exit 0) but emitted nothing — a soft outage the parser would silently read as "no
-  // verdict". Surface it so this variant of a dark judge is not silent either.
-  console.error(`⚠️  ${label}: ${bin} judge returned no output — judgement skipped`);
-}
-
-// A timeout KILL (SIGTERM at the N-second cap) is the gate's OWN contention kill, not auth/quota — so
-// it must NOT read as "offline/quota/absent". That label sent an operator chasing a phantom quota
-// problem on a healthy subscription (sc-1049); "offline/quota/absent" is reserved for a genuine outage
-// (ENOENT / 401 / non-zero exit). Pure fn (not the console.error wrapper) so the wording is unit-
-// testable without spawning `claude`. Retrying a timeout is a separate concern (sc-1048), so this
-// stays outage-only — no "will retry" claim the code doesn't honor.
-export function unavailableMessage(
-  label: string,
+/** ONE classification per failed spawn, so the sync and async paths cannot disagree. The double
+ *  classify keeps the wording a pure function of the error, hence unit-testable. */
+function reportOutage(
+  opts: ExecJudgeOpts,
   e: JudgeError,
-  timeout?: number,
-  bin: string = 'claude',
-): string {
-  if (isJudgeTimeout(e)) {
-    // `> 0` too, not just finite — a 0ms cap would render a nonsense "after 0s".
-    const secs =
-      timeout != null && Number.isFinite(timeout) && timeout > 0
-        ? `after ${Math.round(timeout / 1000)}s `
-        : '';
-    return `⚠️  ${label}: ${bin} judge timed out ${secs}(machine contention?) — judgement skipped`;
-  }
-  const reason = e.code ?? (e.status != null ? `exit ${e.status}` : (e.message ?? 'unknown'));
-  return `⚠️  ${label}: ${bin} judge unavailable (${reason}; offline/quota/absent) — judgement skipped`;
-}
-
-function warnUnavailable(
-  label: string,
-  e: JudgeError,
-  timeout: number | undefined,
   bin: string,
-): void {
-  console.error(unavailableMessage(label, e, timeout, bin));
+  startedAt: number,
+  usage?: JudgeUsage | null,
+): JudgeOutage {
+  const outage = classifyJudgeOutage(e);
+  console.error(unavailableMessage(opts.label, e, opts.timeout, bin));
+  emitJudgeExec(opts, outage.kind, startedAt, undefined, usage, outage.detail);
+  opts.onOutage?.(outage);
+  return outage;
 }
 
 /**
@@ -125,61 +98,8 @@ function warnUnavailable(
  */
 export const DEEP_JUDGE_TIMEOUT_MS = 1800000;
 
-/**
- * The remedy line a fail-closed (strict/ship) gate prints when a judge produced no verdict. ONE
- * wording seam for every gate (sc-1227) — completeness, the review cascade and decision-alignment
- * each hand-rolled their own copy, and the copies drifted.
- *
- * The CAUSE decides the remedy, and getting that wrong costs real operator time:
- * - `timeout` — the gate's OWN contention kill at the cap. Sending the operator to auth/quota here
- *   is a dead end on a demonstrably healthy CLI (sc-1227, the same misdiagnosis sc-1049 fixed for
- *   the warning line). The levers that actually work are re-running, getting out from under the
- *   600s agent-tool cap, and shrinking the commit.
- * - `sync` — a missing brief/checklist artifact: an un-synced consumer, not an outage.
- * - `outage` — a genuine dark judge (ENOENT / 401 / non-zero exit): auth/quota is the right place.
- *
- * Each caller appends its own cached-verdict clause — what a retry re-uses differs per gate.
- */
-export function strictRemedy(cause: 'timeout' | 'sync' | 'outage', bin = 'claude'): string {
-  if (cause === 'timeout')
-    return (
-      'the judge hit its time cap — this is NOT an auth/quota problem. Re-run `devkit ship`; run ' +
-      'it in a real terminal or a detached ship so the 600s agent tool cap cannot kill it early; ' +
-      'or stage a smaller commit, which judges faster'
-    );
-  if (cause === 'sync')
-    return (
-      'run `devkit sync-agents && devkit sync-skills` so the briefs + checklist scripts are ' +
-      'present, then re-run devkit ship'
-    );
-  return `check \`${bin}\` CLI auth/quota, then re-run devkit ship`;
-}
-
-// execFile's `timeout` fires by KILLING the child (SIGKILL, sc-1317 — SIGTERM alone let a child that
-// traps/ignores it survive past the cap), which marks the error `killed`. That kill — not ENOENT /
-// quota / a non-zero exit — is the one outage a retry can't fix: the re-run would burn the same
-// budget again. Callers that retry use this to skip a timeout. `killed` is set regardless of which
-// signal did it, so it's checked first; `err.signal === 'SIGTERM'` is a defensive fallback from
-// before the SIGKILL switch, kept in case a platform ever reports the pre-kill signal instead of
-// `killed`. (ETIMEDOUT covers the rare platform that reports a code instead of either.)
-function isJudgeTimeout(e: unknown): boolean {
-  const err = judgeErr(e);
-  return err.killed === true || err.signal === 'SIGTERM' || err.code === 'ETIMEDOUT';
-}
-
-/**
- * Run one `claude` judge invocation. Returns raw stdout on success, or `null` (after emitting ONE
- * stderr warning) when the judge could not run — a throw (ENOENT / non-zero exit / timeout) or an
- * empty/whitespace stdout (ran but said nothing). A judge that runs and returns real text — including
- * a clean verdict — returns that text and warns nothing; verdict parsing stays in the caller.
- *
- * The optional `onOutage(kind)` callback fires on failure with the OUTAGE KIND — 'timeout' (the
- * execFile timeout killed it), 'transient' (ENOENT / quota / non-zero exit), or 'empty' — so a caller
- * can retry selectively (a timeout is not worth re-running; a transient/empty flake can be).
- *
- * @param {{ label: string, args: string[], input?: string, timeout: number, cwd?: string, onOutage?: (kind: 'timeout'|'transient'|'empty') => void }} opts
- * @returns {string|null}
- */
+/** Run one judge invocation: raw stdout, or null after ONE stderr warning when it could not run.
+ *  `onOutage` fires with the classified outage, whose `permanent` flag is the retry predicate. */
 // Options for both execJudge and its async twin. onOutage is optional — most callers don't retry.
 // Transcripts are collected BY DEFAULT (the ledger's whole point is that judgements stay
 // inspectable without any caller remembering to ask); `transcript: false` opts out — for gates
@@ -194,7 +114,8 @@ interface ExecJudgeOpts {
   timeout: number;
   cwd?: string;
   env?: NodeJS.ProcessEnv;
-  onOutage?: (kind: 'timeout' | 'transient' | 'empty') => void;
+  /** Fires once per failed spawn with the CLASSIFIED outage — `permanent` is the retry predicate. */
+  onOutage?: (outage: JudgeOutage) => void;
   transcript?: boolean;
   /** Strict MCP profile. Omitted means a pure/internal judge with no MCP servers. */
   mcpProfile?: JudgeMcpProfile;
@@ -233,7 +154,7 @@ export interface RecordAgentRunOpts {
    * inferring from the missing `transcript_ref` (which gate-telemetry-self-describing rules out)
    * and silently inflating the label's success rate.
    */
-  outcome?: 'ok' | 'timeout' | 'transient' | 'empty';
+  outcome?: 'ok' | JudgeOutageKind;
   /** Omitted entirely from the event when unknown, rather than emitted as a misleading 0. */
   durationMs?: number;
   transcript?: boolean;
@@ -288,15 +209,22 @@ export function recordAgentRun(opts: RecordAgentRunOpts): string | null {
  */
 function emitJudgeExec(
   opts: ExecJudgeOpts,
-  outcome: 'ok' | 'timeout' | 'transient' | 'empty',
+  outcome: 'ok' | JudgeOutageKind,
   startedAt: number,
   output?: string,
   usage?: JudgeUsage | null,
+  /** The provider's own failure sentence, so the ledger records WHY, not just that it failed. */
+  outageDetail?: string,
 ): void {
   // Omitted entirely when unreadable — see parseJudgeUsage on why a zero-filled row is worse
   // than an absent one.
-  const extra: Partial<JudgeUsage> & { lens?: string } = usage ? { ...usage } : {};
+  const extra: Partial<JudgeUsage> & { lens?: string; outage_detail?: string } = usage
+    ? { ...usage }
+    : {};
   if (opts.lens !== undefined) extra.lens = opts.lens;
+  // The sc-2538 evidence sat in a stderr line nobody kept. On the ledger it is queryable: the
+  // dashboard can answer "which outage, and until when" without re-running the ship.
+  if (outageDetail !== undefined) extra.outage_detail = outageDetail;
   recordAgentRun({
     label: opts.label,
     output,
@@ -379,29 +307,36 @@ export function execJudge(opts: ExecJudgeOpts): string | null {
       // SIGTERM alone can be trapped/ignored by the child, leaving the cap best-effort instead of a
       // guarantee (sc-1317) — SIGKILL cannot be caught, so the timeout always actually terminates.
       killSignal: 'SIGKILL',
-      stdio: ['pipe', 'pipe', 'ignore'],
+      // stderr was DISCARDED, throwing away the one channel a claude quota message arrives on.
+      // Nothing was ever displayed from it, so piping it changes no output.
+      stdio: ['pipe', 'pipe', 'pipe'],
+      // REQUIRED by the line above: stderr now counts against maxBuffer, so the 1 MB default would
+      // turn a chatty-but-healthy judge into an ENOBUFS failure. 10 MB matches the async twin.
+      maxBuffer: 10 * 1024 * 1024,
     });
     if (!out || !String(out).trim()) {
       warnNoOutput(label, judgeBinFor(args));
       emitJudgeExec(opts, 'empty', startedAt);
-      onOutage?.('empty');
+      onOutage?.({ kind: 'empty', permanent: false });
       return null;
     }
     const parsed = readJudgeOutput(String(out), cli);
     if ('failure' in parsed) {
-      // The stream itself reported the turn failed (exit 0 notwithstanding) — an outage, retryable.
-      warnUnavailable(label, new Error(parsed.failure), timeout, cli.bin);
-      emitJudgeExec(opts, 'transient', startedAt, undefined, parsed.usage);
-      onOutage?.('transient');
+      // The stream reported the turn failed (exit 0 notwithstanding). This was hardcoded
+      // `transient` while HOLDING the message that proves a usage lock is not transient.
+      reportOutage(opts, { providerFailure: parsed.failure }, cli.bin, startedAt, parsed.usage);
       return null;
     }
     emitJudgeExec(opts, 'ok', startedAt, parsed.text, parsed.usage);
     return parsed.text;
   } catch (e) {
-    warnUnavailable(label, judgeErr(e), timeout, judgeBinFor(args));
-    const kind = isJudgeTimeout(e) ? 'timeout' : 'transient';
-    emitJudgeExec(opts, kind, startedAt, undefined, salvageUsage(judgeErr(e).stdout, args));
-    onOutage?.(kind);
+    reportOutage(
+      opts,
+      judgeErr(e),
+      judgeBinFor(args),
+      startedAt,
+      salvageUsage(judgeErr(e).stdout, args),
+    );
     return null;
   } finally {
     mcp.cleanup();
@@ -416,7 +351,7 @@ export function execJudge(opts: ExecJudgeOpts): string | null {
  * evidence (diffstat) goes to the child's stdin by hand. maxBuffer is explicit — an investigating
  * judge's transcript (tool output included) can exceed the 1 MB default.
  *
- * @param {{ label: string, args: string[], input?: string, timeout: number, cwd?: string, onOutage?: (kind: 'timeout'|'transient'|'empty') => void }} opts
+ * @param {{ label: string, args: string[], input?: string, timeout: number, cwd?: string, onOutage?: (outage: JudgeOutage) => void }} opts
  * @returns {Promise<string|null>}
  */
 export function execJudgeAsync(opts: ExecJudgeOpts): Promise<string | null> {
@@ -437,12 +372,16 @@ export function execJudgeAsync(opts: ExecJudgeOpts): Promise<string | null> {
     // already had this same guard via its enclosing try/catch.
     const fail = (err: JudgeError, stdout?: string) => {
       mcp.cleanup();
-      warnUnavailable(label, err, timeout, judgeBinFor(args));
-      const kind = isJudgeTimeout(err) ? 'timeout' : 'transient';
       // The callback's own stdout wins (execFile hands it beside the error); the throw-attached
       // copy covers the synchronous-throw path.
-      emitJudgeExec(opts, kind, startedAt, undefined, salvageUsage(stdout ?? err.stdout, args));
-      onOutage?.(kind);
+      const streams = stdout ?? err.stdout;
+      reportOutage(
+        opts,
+        { ...err, stdout: streams },
+        judgeBinFor(args),
+        startedAt,
+        salvageUsage(streams, args),
+      );
       resolve(null);
     };
     try {
@@ -463,25 +402,34 @@ export function execJudgeAsync(opts: ExecJudgeOpts): Promise<string | null> {
           killSignal: 'SIGKILL',
           maxBuffer: 10 * 1024 * 1024,
         },
-        (err, stdout) => {
+        // The third parameter was omitted, silently dropping stderr — the channel a claude-family
+        // quota message arrives on (sc-2538). The sync twin's `stdio` change is this one's mirror.
+        (err, stdout, stderr) => {
           if (err) {
-            fail(judgeErr(err), stdout ? String(stdout) : undefined);
+            fail(
+              { ...judgeErr(err), stderr: stderr ? String(stderr) : undefined },
+              stdout ? String(stdout) : undefined,
+            );
             return;
           }
           mcp.cleanup();
           if (!stdout || !String(stdout).trim()) {
             warnNoOutput(label, judgeBinFor(args));
             emitJudgeExec(opts, 'empty', startedAt);
-            onOutage?.('empty');
+            onOutage?.({ kind: 'empty', permanent: false });
             resolve(null);
             return;
           }
           const parsed = readJudgeOutput(String(stdout), cli);
           if ('failure' in parsed) {
-            // See the sync twin: a stream-reported failed turn is an outage, retryable.
-            warnUnavailable(label, new Error(parsed.failure), timeout, cli.bin);
-            emitJudgeExec(opts, 'transient', startedAt, undefined, parsed.usage);
-            onOutage?.('transient');
+            // See the sync twin: a stream-reported failed turn is classified, not assumed.
+            reportOutage(
+              opts,
+              { providerFailure: parsed.failure },
+              cli.bin,
+              startedAt,
+              parsed.usage,
+            );
             resolve(null);
             return;
           }

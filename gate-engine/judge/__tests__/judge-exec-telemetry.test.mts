@@ -133,7 +133,9 @@ describe('judge_exec telemetry', () => {
     expect(stored).toContain('OUT');
   });
 
-  it('spawn failure (no claude on PATH) emits a transient outage event, still returns null', () => {
+  // sc-2538: a missing binary is `absent`, not `transient` — it is also PERMANENT, so the review
+  // cascade stops paying a second spawn to rediscover that the CLI is still not installed.
+  it('spawn failure (no claude on PATH) emits an ABSENT outage event, still returns null', () => {
     process.env.PATH = dir; // no claude anywhere on this PATH
     const out = execJudge({
       label: 'vision',
@@ -143,7 +145,7 @@ describe('judge_exec telemetry', () => {
     });
     expect(out).toBeNull();
     const [ev] = events();
-    expect(ev).toMatchObject({ type: 'judge_exec', judge: 'vision', outcome: 'transient' });
+    expect(ev).toMatchObject({ type: 'judge_exec', judge: 'vision', outcome: 'absent' });
     expect(ev.transcript_ref).toBeUndefined();
   });
 
@@ -528,7 +530,7 @@ describe('judge spend capture', () => {
     process.env.PATH = ''; // spawn ENOENTs deterministically
     await execJudgeAsync({ label: 'review:x', args: ['-p', 'q'], timeout: 20_000 });
     const event = events()[0];
-    expect(event).toMatchObject({ outcome: 'transient' });
+    expect(event).toMatchObject({ outcome: 'absent' });
     expect(event).not.toHaveProperty('cost_usd');
   });
 });
@@ -577,6 +579,8 @@ describe('judge_exec usage on failure outcomes', () => {
     expect(ev).toMatchObject({ outcome: 'transient', input_tokens: 111, output_tokens: 22 });
   });
 
+  // The stream's own `turn.failed` message is now CLASSIFIED rather than assumed transient — this
+  // fixture's "usage limit reached" is the exact wording the sc-2538 outage produced.
   it('codex: a failed turn whose stream carries turn.completed still books its usage', async () => {
     const bin = path.join(dir, 'bin');
     mkdirSync(bin, { recursive: true });
@@ -602,7 +606,7 @@ describe('judge_exec usage on failure outcomes', () => {
     const [ev] = events();
     // Codex semantics: input minus cached; output folds reasoning in; subscription billing.
     expect(ev).toMatchObject({
-      outcome: 'transient',
+      outcome: 'rate-limited',
       input_tokens: 60,
       output_tokens: 50,
       cache_read: 40,

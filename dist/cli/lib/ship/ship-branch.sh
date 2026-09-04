@@ -605,6 +605,11 @@ fi
 if [ "$FROM_BRANCH" -eq 0 ] || [ -z "$LOCAL_BRANCH_EXISTS" ]; then
   ship_size_preflight "$ROOT" "$BASE" "${PATHS[@]}"
 fi
+# Unconditional, unlike the size preview above: judge reachability does not depend on the staged
+# scope, and --dry-gates skips the reviewer gate entirely so it skips this too.
+if [ "$DRY_GATES" -eq 0 ]; then
+  ship_judge_preflight "$ROOT"
+fi
 
 # Nothing to commit → say so NOW. Staging (below) has exactly three inputs: the tracked diff vs
 # BASE, the untracked files in scope, and the untracked-but-IGNORED files in scope (a briefed path

@@ -435,6 +435,33 @@ prepare_gate_worktree() {
   fi
 }
 
+# Report whether the configured judges' provider will answer, BEFORE the deterministic chain is paid
+# (sc-2538: a six-day quota lock was discovered only after the whole chain ran green and 16 judge
+# spawns failed). ADVISORY ONLY — it never returns non-zero, because guard-review can legitimately
+# exit 0 with ZERO judge spawns when every reviewer is a cache hit, so a dark provider does not imply
+# a doomed ship (docs/decisions/ship-gates-converge-not-restart.md). Every tolerated code is mapped
+# to 0 INSIDE this function: the call site is bare under `set -euo pipefail`, and
+# docs/decisions/fail-open-needs-an-errexit-safe-call.md records what happens when it is not.
+ship_judge_preflight() {
+  local root=${1:?root} tool rc
+  local script_dir
+  script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+  tool="$script_dir/preflight/judge.mts"
+  [ -f "$tool" ] || tool="$script_dir/preflight/judge.mjs"
+  # A package built without this tool is not a reason to say anything at all.
+  [ -f "$tool" ] || return 0
+  if (cd "$root" && node "$tool" "$root"); then
+    rc=0
+  else
+    rc=$?
+  fi
+  # 0 = reported, 2 = could not run, anything else = a defect in a check that may never block a ship.
+  case "$rc" in
+    0 | 2) return 0 ;;
+    *) echo "⚠️  ship: judge preflight failed unexpectedly (exit $rc) — continuing; the reviewer gate still decides" >&2; return 0 ;;
+  esac
+}
+
 # Preview the raw-line ratchet before creating a gate worktree. Exit 2 means the optional preview is
 # unavailable; the authoritative worktree gate still runs. Exit 1 is a proven size violation.
 ship_size_preflight() {

@@ -190,7 +190,7 @@ describe('conventions evidence completeness', () => {
       .fn()
       .mockResolvedValueOnce('VERDICT: FAIL — incomplete evidence')
       .mockImplementationOnce(async (opts) => {
-        opts.onOutage?.('transient');
+        opts.onOutage?.({ kind: 'transient', permanent: false });
         return null;
       });
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -228,7 +228,7 @@ describe('conventions evidence completeness', () => {
     const exec = vi
       .fn()
       .mockImplementationOnce(async (opts) => {
-        opts.onOutage?.('transient');
+        opts.onOutage?.({ kind: 'transient', permanent: false });
         return null;
       })
       .mockResolvedValueOnce('VERDICT: FAIL — incomplete evidence');

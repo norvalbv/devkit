@@ -1566,7 +1566,7 @@ describe('runReviewGate — strict ship mode (GUARD_AI_STRICT)', () => {
     // A judge KILLED by its execFile timeout: null result + a 'timeout' outage signal — unlike the
     // transient/empty flakes above, which DO earn the one retry.
     const exec = mkExec(async (opts) => {
-      opts.onOutage?.('timeout');
+      opts.onOutage?.({ kind: 'timeout', permanent: true });
       return null;
     });
     expect(await runReviewGate(repo, { exec })).toBe(3);
@@ -1604,7 +1604,7 @@ describe('runReviewGate — strict ship mode (GUARD_AI_STRICT)', () => {
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
     process.env.GUARD_AI_STRICT = '1';
     const exec = mkExec(async (opts) => {
-      opts.onOutage?.('timeout');
+      opts.onOutage?.({ kind: 'timeout', permanent: true });
       return null;
     });
     expect(await runReviewGate(repo, { exec })).toBe(3);
@@ -1620,7 +1620,7 @@ describe('runReviewGate — strict ship mode (GUARD_AI_STRICT)', () => {
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
     process.env.GUARD_AI_STRICT = '1';
     const exec = mkExec(async (opts) => {
-      opts.onOutage?.('transient');
+      opts.onOutage?.({ kind: 'transient', permanent: false });
       return null;
     });
     expect(await runReviewGate(repo, { exec })).toBe(3);
@@ -1923,7 +1923,7 @@ describe('runCompleteness — hard-by-default commit-msg gate', () => {
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
     process.env.GUARD_AI_STRICT = '1';
     const exec = mkExec(async (opts) => {
-      opts.onOutage?.('timeout');
+      opts.onOutage?.({ kind: 'timeout', permanent: true });
       return null;
     });
     expect(await runCompleteness(msg(repo, 'feat: x'), repo, { exec })).toBe(3);

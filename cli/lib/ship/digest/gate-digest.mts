@@ -236,7 +236,8 @@ export function summarise(events: GateEvent[], shipId: string): DigestRow[] {
       attributable.push({
         gate,
         family: e.family ?? gate,
-        // `cause` is where this event names WHY (timeout / empty / transient / response_contract).
+        // `cause` is where this event names WHY (timeout / empty / transient / absent /
+        // unauthenticated / rate-limited / response_contract — see classifyJudgeOutage).
         // Reading only `detail` collapsed every one of them to "could not run" and threw away the
         // field that decides whether an operator checks quota or simply re-runs.
         detail: oneLine(e.detail) || oneLine(e.cause) || 'could not run',

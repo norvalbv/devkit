@@ -104,7 +104,7 @@ describe('completeness verdict telemetry', () => {
     process.env.GUARD_AI_STRICT = '1';
     const repo = consumerRepo({ backend: true });
     const exec = mkExec(async (opts) => {
-      opts.onOutage?.('timeout');
+      opts.onOutage?.({ kind: 'timeout', permanent: true });
       return null;
     });
 
@@ -122,7 +122,7 @@ describe('completeness verdict telemetry', () => {
     // sends a reader to check auth and quota on a CLI that answered fine.
     const repo = consumerRepo({ backend: true });
     const exec = mkExec(async (opts) => {
-      opts.onOutage?.('empty');
+      opts.onOutage?.({ kind: 'empty', permanent: false });
       return null;
     });
 
@@ -133,7 +133,7 @@ describe('completeness verdict telemetry', () => {
   it('distinguishes a transient outage from a timeout by cause, not by exit code', async () => {
     const repo = consumerRepo({ backend: true });
     const exec = mkExec(async (opts) => {
-      opts.onOutage?.('transient');
+      opts.onOutage?.({ kind: 'transient', permanent: false });
       return null;
     });
 

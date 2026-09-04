@@ -24,13 +24,13 @@
 // them (including a positional prompt) is swallowed as a tool name (see check-alignment.mts:205).
 // The positional prompt therefore sits BEFORE the tool flags, and tool flags go LAST.
 
-import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CLAUDE_RESULT_ARGS, unwrapClaudeResult } from '../../judge/claude-result.mts';
 import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from '../../judge/judge-isolation.mts';
+import type { JudgeOutage } from '../../judge/outage/classify.mts';
 import { execJudgeAsync } from '../../judge/run-judge.mts';
-import { stripFrontmatter } from '../../review/reviewers.mts';
+import { type AgentSource, loadAgentSource } from '../../review/reviewers.mts';
 import { firstDuplicateJsonKey } from '../json-duplicate-keys.mts';
 import {
   PLAN_CRITIQUE_FRAME_METAS,
@@ -70,22 +70,13 @@ export const BENCHMARK_DIRECTIVE = [
   '',
 ].join('\n');
 
-export interface CriticSource {
-  /** Frontmatter-stripped agent body — what production makes the subagent's system prompt. */
-  body: string;
-  /** The md's frontmatter `model:` (the production model), overridable via BENCH_MODEL. */
-  model: string;
-  /** Raw file content — hashed into the baseline as agentHash. */
-  raw: string;
-}
-
-const FRONTMATTER_MODEL_RE = /^model:\s*(\S+)\s*$/m;
+/** The critique bench's view of its subject. Structurally the shared AgentSource; the alias keeps
+ * this harness's own vocabulary at its call sites. */
+export type CriticSource = AgentSource;
 
 /** Read the agent from SOURCE. Throws if unreadable — a bench without its subject cannot run. */
 export function loadCritic(): CriticSource {
-  const raw = readFileSync(AGENT_MD_PATH, 'utf8');
-  const model = process.env.BENCH_MODEL ?? raw.match(FRONTMATTER_MODEL_RE)?.[1] ?? 'opus';
-  return { body: stripFrontmatter(raw), model, raw };
+  return loadAgentSource(AGENT_MD_PATH);
 }
 
 // ─── Argv builders (pure — unit-tested for the variadic-swallow ordering) ─────────
@@ -128,7 +119,7 @@ export interface RunCriticOpts {
   /** Workflow: the materialized fixture repo. */
   fixtureDir?: string;
   exec?: typeof execJudgeAsync;
-  onOutage?: (kind: 'timeout' | 'transient' | 'empty') => void;
+  onOutage?: (outage: JudgeOutage) => void;
 }
 
 export interface WorkflowRunOutput {
