@@ -548,7 +548,7 @@ describe('parallel completeness prewarm (ship message file present)', () => {
   });
 });
 
-describe('biome-format re-stage step (real git)', () => {
+describe('format re-stage step (real git)', () => {
   // The re-stage step runs `git add` on files it just re-read from `git diff --cached` — for a
   // release commit that force-added a gitignored `dist/` (`git add -f dist`), a plain `git add`
   // on those same paths refuses ("ignored by gitignore", non-zero exit), and `sh -e` aborts the
@@ -561,12 +561,15 @@ describe('biome-format re-stage step (real git)', () => {
     execFileSync('git', ['config', 'user.email', 'a@b.c'], { cwd: repo });
     execFileSync('git', ['config', 'user.name', 'a'], { cwd: repo });
     writeFileSync(join(repo, '.gitignore'), 'dist\n');
-    execFileSync('git', ['add', '.gitignore'], { cwd: repo });
+    // The step runs biome only where a biome CONFIG exists, so the default fixture is a repo that
+    // genuinely formats with biome.
+    writeFileSync(join(repo, 'biome.jsonc'), '{}\n');
+    execFileSync('git', ['add', '.gitignore', 'biome.jsonc'], { cwd: repo });
     execFileSync('git', ['commit', '-q', '-m', 'init'], { cwd: repo });
     return repo;
   }
 
-  function runInRepo(repo) {
+  function runInRepo(repo, { biome = '#!/bin/sh\nexit 0\n' } = {}) {
     const home = mkdtempSync(join(tmpdir(), 'dk-hook-git-home-'));
     homes.push(home);
     const bin = join(home, '.bun', 'bin');
@@ -575,8 +578,10 @@ describe('biome-format re-stage step (real git)', () => {
     mkdirSync(packageBin, { recursive: true });
     writeFileSync(join(bin, 'bun'), '#!/bin/sh\nprintf \'%s\\n\' "$PWD/node_modules/.bin"\n');
     chmodSync(join(bin, 'bun'), 0o755);
-    writeFileSync(join(packageBin, 'biome'), '#!/bin/sh\nexit 0\n');
-    chmodSync(join(packageBin, 'biome'), 0o755);
+    if (biome !== null) {
+      writeFileSync(join(packageBin, 'biome'), biome);
+      chmodSync(join(packageBin, 'biome'), 0o755);
+    }
     const hookPath = join(home, 'pre-commit');
     writeFileSync(hookPath, buildFullHook({ biome: true, guards: [] }));
     try {
@@ -607,6 +612,119 @@ describe('biome-format re-stage step (real git)', () => {
       encoding: 'utf8',
     });
     expect(staged).toContain('dist/out.mjs');
+  });
+
+  // sc-2524. Every branch announces itself: "matched nothing", "all excluded" and "no formatter on
+  // disk" previously all printed nothing, so the step's silence read as a clean format.
+  describe('outcome reporting', () => {
+    function stageFile(repo, name, body = 'const a  =  1\n') {
+      writeFileSync(join(repo, name), body);
+      execFileSync('git', ['add', name], { cwd: repo });
+    }
+
+    // Records argv, so "ONE path or two?" is answered by what the formatter received.
+    const ARGV_STUB =
+      '#!/bin/sh\nfor a in "$@"; do echo "ARG[$a]" >> "$PWD/argv.log"; done\nexit 0\n';
+    const argvOf = (repo) => readFileSync(join(repo, 'argv.log'), 'utf8');
+
+    // The opt-out the config gate restores: a repo that never asked devkit to rewrite its bytes
+    // must not have them rewritten, and must be told the step stood down rather than staying silent.
+    it('formats nothing and says so when the repo has no biome config', () => {
+      const repo = initRepo();
+      rmSync(join(repo, 'biome.jsonc'));
+      execFileSync('git', ['rm', '-q', '--cached', 'biome.jsonc'], { cwd: repo });
+      stageFile(repo, 'a.mts');
+      const r = runInRepo(repo, { biome: ARGV_STUB });
+      expect(r.status, r.stdout).toBe(0);
+      expect(r.stdout).toContain('🎨 No biome config here');
+      expect(existsSync(join(repo, 'argv.log'))).toBe(false); // biome was never invoked
+    });
+
+    it('reports that nothing matched when no staged path is formattable', () => {
+      const repo = initRepo();
+      stageFile(repo, 'notes.txt', 'hello\n');
+      const r = runInRepo(repo);
+      expect(r.status).toBe(0);
+      expect(r.stdout).toContain('🎨 biome: no staged formattable path');
+    });
+
+    it('names the paths it skipped when every eligible one carries unstaged edits', () => {
+      const repo = initRepo();
+      stageFile(repo, 'a.mts');
+      writeFileSync(join(repo, 'a.mts'), 'const a = 2\n'); // dirty AFTER staging
+      const r = runInRepo(repo);
+      expect(r.status).toBe(0);
+      expect(r.stdout).toContain('every eligible path also carries unstaged edits');
+      expect(r.stdout).toContain('a.mts');
+      // Indented so the listed path never looks like a stage anchor to ship's log scraper.
+      expect(r.stdout).not.toMatch(/^a\.mts$/m);
+    });
+
+    // The PARTIAL case is the one that bites: "formatted 3" over a staged set of 5 reads as a
+    // clean pass while two unformatted files ride into the commit.
+    it('names the skipped paths when only SOME eligible ones carry unstaged edits', () => {
+      const repo = initRepo();
+      stageFile(repo, 'clean.mts');
+      stageFile(repo, 'dirty.mts');
+      writeFileSync(join(repo, 'dirty.mts'), 'const b = 9\n'); // dirty AFTER staging
+      const r = runInRepo(repo);
+      expect(r.status).toBe(0);
+      expect(r.stdout).toContain('dirty.mts');
+      expect(r.stdout).toContain('🎨 biome formatted and re-staged 1 staged file(s).');
+    });
+
+    // `echo | xargs` splits on whitespace: the formatter gets two paths that do not exist and
+    // `git add` fatals on the pathspec, which `sh -e` turns into a failed commit.
+    it('passes a staged path containing a space as ONE argument, and still re-stages it', () => {
+      const repo = initRepo();
+      stageFile(repo, 'my file.mts');
+      const r = runInRepo(repo, { biome: ARGV_STUB });
+      expect(r.status, r.stdout).toBe(0);
+      expect(argvOf(repo)).toContain('ARG[my file.mts]');
+      expect(argvOf(repo)).not.toContain('ARG[my]');
+      expect(r.stdout).not.toContain('did not match any files');
+    });
+
+    // git quotes non-ASCII paths without `-z`: `café.mts` arrives as "caf\303\251.mts", trailing
+    // quote included, so the extension filter never matches and the file is silently skipped.
+    it('formats a staged path with non-ASCII characters, which git quotes by default', () => {
+      const repo = initRepo();
+      stageFile(repo, 'café.mts');
+      const r = runInRepo(repo, { biome: ARGV_STUB });
+      expect(r.status, r.stdout).toBe(0);
+      expect(r.stdout).toContain('🎨 biome formatted and re-staged 1 staged file(s).');
+      expect(argvOf(repo)).toContain('ARG[café.mts]');
+    });
+
+    it('reports the formatted count on success', () => {
+      const repo = initRepo();
+      stageFile(repo, 'a.mts');
+      stageFile(repo, 'b.cts');
+      const r = runInRepo(repo);
+      expect(r.status).toBe(0);
+      expect(r.stdout).toContain('🎨 biome formatted and re-staged 2 staged file(s).');
+    });
+
+    it('reports a missing Oxfmt and lets the commit continue', () => {
+      const repo = initRepo();
+      stageFile(repo, 'a.mts');
+      const r = runInRepo(repo, { biome: null });
+      expect(r.status).toBe(0); // best-effort: a formatter outage is never a commit outage
+      expect(r.stdout).toContain('biome is not installed at');
+      expect(r.stdout).toContain('left UNFORMATTED');
+    });
+
+    // Not presented as Oxfmt's exit code: xargs collapses 1-125 into one status of its own (1 on
+    // BSD, 123 on GNU), so "Oxfmt exited 3" would be a lie on both platforms.
+    it("reports a failing Oxfmt without blocking the commit, and does not misattribute xargs' code", () => {
+      const repo = initRepo();
+      stageFile(repo, 'a.mts');
+      const r = runInRepo(repo, { biome: '#!/bin/sh\nexit 3\n' });
+      expect(r.status).toBe(0);
+      expect(r.stdout).toContain('🎨 biome failed over 1 staged file(s)');
+      expect(r.stdout).toContain('may be UNFORMATTED');
+      expect(r.stdout).not.toContain('biome exited 3');
+    });
   });
 });
 

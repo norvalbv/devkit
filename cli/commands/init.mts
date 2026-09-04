@@ -516,8 +516,8 @@ function removeBiome(cwd: string, dryRun: boolean) {
   const pkgRemoved = removeFromPkg(cwd, BIOME_DEV_DEPS, BIOME_SCRIPTS, dryRun);
   if (pkgRemoved.length)
     console.log(`  ${dryRun ? '[dry-run]' : '✓'} package.json: -${pkgRemoved.join(', -')}`);
-  // Drop the biome-format step from the husky block.
-  removeHuskyPiece(cwd, 'biome-format', dryRun);
+  // The format step is the biome component's, so removing biome removes it — the consumer's opt-out.
+  removeHuskyPiece(cwd, '', 'biome-format', dryRun);
 }
 
 // Remove ONLY the devkit `extends` from tsconfig — never delete a tsconfig with user content.
@@ -574,24 +574,13 @@ function removeHusky(hookRoot: string, pkgRel: string, dryRun: boolean) {
 
 // Remove a single fragment (one guard, or the biome step) from THIS package's block. Scoped via
 // extract→removeFragment→replace so a shared sentinel in another package's block is untouched.
-// `id` is typed `string | boolean` because removeBiome calls this with only 3 args, so `dryRun`
-// (a boolean) lands in the `id` slot — a pre-existing arg-order quirk this conversion preserves
-// (that call passes pkgRel='biome-format', which matches no block, so extractGuardBlock returns null
-// and it no-ops before `id` is ever read). Hence the trailing dryRun is optional.
-function removeHuskyPiece(
-  hookRoot: string,
-  pkgRel: string,
-  id: string | boolean,
-  dryRun?: boolean,
-) {
+function removeHuskyPiece(hookRoot: string, pkgRel: string, id: string, dryRun?: boolean) {
   const hookPath = join(hookRoot, '.husky', 'pre-commit');
   if (!existsSync(hookPath)) return false;
   const content = readFileSync(hookPath, 'utf8');
   const block = extractGuardBlock(content, pkgRel);
   if (!block) return false;
-  // Reached only via applyRemovals (id is always a string there); the boolean-in-id quirk above
-  // returns null at the block check, so this cast is erased over an already-string value.
-  const { content: newBlock, removed } = removeFragment(block, id as string);
+  const { content: newBlock, removed } = removeFragment(block, id);
   if (!removed) return false;
   if (dryRun) {
     console.log(`  [dry-run] remove ${id} from .husky/pre-commit`);

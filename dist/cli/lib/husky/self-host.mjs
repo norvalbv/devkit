@@ -24,15 +24,9 @@ import { defaultSelection, RECOMMENDED_GUARD_IDS } from '../components.mjs';
 import { readJson } from '../fs-helpers.mjs';
 import { markEnd } from './husky.mjs';
 import { buildFullHook, buildGuardBlock, extractGuardBlock, PACKAGE_BIN_DIR_FRAGMENT, REVIEW_DETERMINISTIC_FINALIZER, replaceGuardBlock, } from './husky-block.mjs';
-// devkit's own structure-lint command (package.json `lint:structure` = `eslint cli gate-engine`)
-// and its hard Biome lint/assist gate (`lint` disables Biome's formatter explicitly — Biome exits 0 when
-// every diagnostic is warn-severity, so without that flag the gate PRINTS its findings into the log
-// and passes the commit anyway). The hard-lint is folded into the deterministic orchestrator via
-// `--extra` (any non-zero blocks); both run via real devDeps
-// (eslint/biome). Formatting is the one self-host-only rewrite beyond guard bins: Devkit has proven
-// its pinned Oxfmt output over its own authored scope, while consumer hooks stay on Biome until each
-// consumer completes the same parity exercise. Together with the advisory fallow fragment
-// below, the self-host hook preserves every gate the pre-self-host hand hook ran AND adds review + dup/clone.
+import { FORMAT_EXTENSION_FILTER, FORMAT_FAILURE_REPORT, FORMAT_TOOL_SETUP, } from './format-fragment.mjs';
+// Structure-lint and the hard Biome lint/assist gate fold into the deterministic orchestrator via
+// `--extra`. Self-host-only for formatting: its SCOPE (proven allowlist) and hard FAILURE POLICY.
 export const SELF_HOST_STRUCTURE_CMD = 'bun run lint:structure';
 export const SELF_HOST_EXTRAS = [
     { label: 'lint', cmd: 'bun run lint' },
@@ -84,15 +78,19 @@ if [ "\${DEVKIT_RUN_MODE:-}" != "review" ]; then
 fi
 # /devkit:self-host-skill-projection-advisory`;
 // Matches the package-local `guard-<x>` bins the generator emits. `guard-qavis-advisory` (double hyphen) is
-// covered by `[a-z-]+`. The formatter has its own exact rewrite below so consumer output is not
-// affected by the self-host-only Oxfmt adoption.
+// covered by `[a-z-]+`. The formatter bin gets its own exact rewrite below, because
+// PACKAGE_BIN_DIR_FRAGMENT is stripped here and `$__dk_package_bin_dir` would expand to ''.
 const PACKAGE_GUARD_RE = /"\$__dk_package_bin_dir\/(guard-[a-z-]+)"/g;
-const PACKAGE_BIOME_FORMAT_RE = /"\$__dk_package_bin_dir\/biome" format --write\b/g;
-const BIOME_FORMAT_COMMENT_RE = /Format staged files with biome/g;
-const BIOME_FORMAT_EXTENSIONS = '\\.(tsx?|jsx?|css|json|jsonc|mjs)$';
-const BIOME_FORMAT_FILTER = `grep -E '${BIOME_FORMAT_EXTENSIONS}'`;
-const SELF_HOST_OXFMT_BEST_EFFORT = 'node_modules/.bin/oxfmt --threads 1 --write 2>/dev/null || true';
-const SELF_HOST_OXFMT_HARD = 'node_modules/.bin/oxfmt --threads 1 --write || exit 1';
+// Devkit formats with Oxfmt unconditionally, so the consumer's config detection is replaced
+// outright rather than left to resolve — no dead biome arm reaches Devkit's own hook.
+const SELF_HOST_TOOL_SETUP = `    FMT_TOOL=Oxfmt; FMT_BIN=node_modules/.bin/oxfmt
+    __dk_fmt_run() { xargs -0 node_modules/.bin/oxfmt --threads 1 --write; }`;
+// Swapping the WHOLE report branch (not appending `|| exit 1`) also drops the 127 message, the
+// fragment's only other `$__dk_package_bin_dir` mention; the rewritten hook must contain none.
+const SELF_HOST_FORMAT_FAILURE = `        if [ "$FMT_RC" -ne 0 ]; then
+            echo "🎨 Oxfmt failed over $FMT_N staged file(s) (xargs exit $FMT_RC) — blocking: devkit formats its own staged set hard." >&2
+            exit 1
+        fi`;
 // Keep the staged hook on the same authored-file boundary as package.json's format scripts. A
 // broad extension-only filter would let Oxfmt rewrite evidence, fixtures, vendored sources, or
 // generated output that the adopted 558-file parity experiment never selected.
@@ -124,14 +122,13 @@ export function toSelfHost(hookText, cwd) {
     return (hookText
         .replace(`${PACKAGE_BIN_DIR_FRAGMENT}\n\n`, '')
         .replace(PACKAGE_GUARD_RE, (_m, bin) => `node ${sourceBinFor(cwd, bin)}`)
-        .replace(PACKAGE_BIOME_FORMAT_RE, 'node_modules/.bin/oxfmt --threads 1 --write')
-        .replace(BIOME_FORMAT_COMMENT_RE, 'Format staged files with Oxfmt')
-        // Formatting is a hard self-host responsibility now that Biome lint runs with formatting off.
-        // Generic consumer hooks retain their existing best-effort Biome behavior.
-        .replace(SELF_HOST_OXFMT_BEST_EFFORT, SELF_HOST_OXFMT_HARD)
-        // A replacement callback keeps the regex's terminal `$'` literal; replacement strings treat
+        // Three rewrites, one per genuine self-host difference: bin path, failure policy, scope.
+        // Each search string is a generator constant, so it matches the emitted bytes by construction.
+        .replace(FORMAT_TOOL_SETUP, () => SELF_HOST_TOOL_SETUP)
+        .replace(FORMAT_FAILURE_REPORT, () => SELF_HOST_FORMAT_FAILURE)
+        // A replacement callback keeps the filter's terminal `$'` literal; replacement strings treat
         // `$'` as the special token for the unmatched suffix.
-        .replace(BIOME_FORMAT_FILTER, () => SELF_HOST_FORMAT_FILTER));
+        .replace(FORMAT_EXTENSION_FILTER, () => SELF_HOST_FORMAT_FILTER));
 }
 /**
  * The canonical devkit-dogfood selection: every recommended component + guard, PLUS `review` (the

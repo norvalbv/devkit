@@ -24,6 +24,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { projectionDrift } from '../lib/install/agent-assets/projection-parity.mts';
+import { FORMAT_TOOL_SETUP } from '../lib/husky/format-fragment.mts';
 import {
   buildFullHook,
   extractGuardBlock,
@@ -72,22 +73,32 @@ describe('self-host bin rewrite', () => {
     expect(() => sourceBinFor(ROOT, 'guard-nope')).toThrow(/no bin/);
   });
 
-  it('toSelfHost rewrites source gates and the self-host formatter without changing consumers', () => {
+  it('toSelfHost re-points source gates and the formatter bin off the package bin dir', () => {
     const input = `${PACKAGE_BIN_DIR_FRAGMENT}\n\n"$__dk_package_bin_dir/guard-review" --gate
-"$__dk_package_bin_dir/biome" format --write
+${FORMAT_TOOL_SETUP}
 "$__dk_package_bin_dir/guard-deterministic" --hook x`;
     const out = toSelfHost(input, ROOT);
     expect(out).toContain('node gate-engine/review/cli.mts --gate');
     expect(out).toContain('node gate-engine/deterministic/run.mts --hook x');
     expect(out).toContain('node_modules/.bin/oxfmt --threads 1 --write');
     expect(out).not.toContain('bun pm bin');
+    // The bin-dir fragment is stripped, so any surviving mention would expand to '' at runtime.
     expect(out).not.toContain('$__dk_package_bin_dir');
   });
 
-  it('leaves the generic consumer hook on Biome until that repository proves parity', () => {
+  // sc-2524: a consumer hook runs biome only where a biome CONFIG exists; self-host pins Oxfmt, so
+  // neither the biome invocation nor the config probe survives into devkit's own hook.
+  it('gates the consumer biome step on a biome config, and pins Oxfmt in self-host', () => {
     const hook = buildFullHook({ biome: true, guards: [] });
+    expect(hook).toContain('if [ ! -f biome.json ] && [ ! -f biome.jsonc ]; then');
     expect(hook).toContain('"$__dk_package_bin_dir/biome" format --write');
     expect(hook).not.toContain('node_modules/.bin/oxfmt');
+    const selfHost = buildSelfHostHook(HOOK_SEL, '', ROOT);
+    expect(selfHost).toContain('node_modules/.bin/oxfmt --threads 1 --write');
+    // The self-host FILTER legitimately names biome.jsonc (devkit formats its own preset files);
+    // what must not survive is a biome INVOCATION or the consumer's config probe.
+    expect(selfHost).not.toContain('format --write');
+    expect(selfHost).not.toContain('-f biome.json');
   });
 });
 
@@ -167,10 +178,11 @@ describe('buildSelfHostHook', () => {
     expect(hook).toContain('node_modules/.bin/oxfmt --threads 1 --write');
     expect(hook).toContain('(cli|gate-engine)/');
     expect(hook).toContain('skills/.*\\.mjs');
-    expect(hook).toContain('node_modules/.bin/oxfmt --threads 1 --write || exit 1');
-    expect(hook).not.toContain('oxfmt --threads 1 --write 2>/dev/null || true');
-    expect(hook).not.toContain("grep -E '\\.(tsx?|jsx?|css|json|jsonc|mjs|mts)$'");
-    expect(hook).not.toContain('$__dk_package_bin_dir/biome');
+    expect(hook).toContain('blocking: devkit formats its own staged set hard');
+    // The consumer's best-effort report must not survive into the hard self-host hook.
+    expect(hook).not.toContain('this commit continues');
+    expect(hook).not.toContain("grep -E '\\.(tsx?|jsx?|mts|cts|mjs|css|jsonc?)$'");
+    expect(hook).not.toContain('$__dk_package_bin_dir/oxfmt');
     expect(hook).not.toContain('$__dk_package_bin_dir/guard-');
     expect(hook).not.toContain('@norvalbv/devkit');
   });
