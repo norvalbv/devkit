@@ -227,6 +227,24 @@ if [ "$RESUME" -eq 1 ]; then
   # One line naming what is being replayed, BEFORE the multi-minute gate chain — a stale-but-valid
   # record must be visible here, not after the run.
   echo "Resuming recorded invocation for $BR: \"$TITLE\" — ${#PATHS[@]} paths, body $(printf '%s' "$RESUME_BODY" | wc -c | tr -d ' ') bytes, recorded $RESUME_CREATED" >&2
+  # Then the brief ITSELF, one path per line. A count cannot answer the question a contradicting gate
+  # raises — "did the gate read my copy of this file, or the base's?" — and the answer is exactly this
+  # list: the gate worktree is cut from the base, so every path NOT here is judged at its base content
+  # (sc-2299). `%q` keeps a path holding a space or a newline on one line. Paths THIS retry briefed
+  # beyond the record are marked, so the union is legible rather than implied.
+  #
+  # Explicit mode only. A --from-branch resume prints the same frozen array at its derivation site
+  # below (the `--from-branch: N committed path(s)` block), and RESUME skips re-derivation, so an
+  # unconditional listing here would print one identical set twice — which reads as two different ones.
+  if [ "$FROM_BRANCH" -eq 0 ]; then
+    for p in "${PATHS[@]}"; do
+      si_extra=
+      for q in ${RESUME_EXTRA_PATHS[@]+"${RESUME_EXTRA_PATHS[@]}"}; do [ "$q" = "$p" ] && { si_extra=1; break; }; done
+      if [ -n "$si_extra" ]; then printf '  + %q   (briefed by this retry)\n' "$p" >&2
+      else printf '    %q\n' "$p" >&2
+      fi
+    done
+  fi
 fi
 
 [ "$FROM_BRANCH" -eq 0 ] || [ -n "$BASE_FLAG" ] || { echo "--from-branch requires --base <remote-branch>" >&2; exit 1; }
@@ -578,6 +596,12 @@ if [ "$FROM_BRANCH" -eq 1 ]; then
       exit 1
     }
     echo "--from-branch: ${#PATHS[@]} committed path(s), origin/$BASE_REF ${BASE:0:7} -> HEAD ${SOURCE_HEAD:0:7}" >&2
+    for p in "${PATHS[@]}"; do printf '  %q\n' "$p" >&2; done
+  else
+    # A preserved branch+receipt resume skips the whole derivation above, and with it that listing —
+    # so this is the ONE place branch-source membership gets named on that path (sc-2299). Same
+    # rendering, and the resume banner deliberately stays silent in branch mode so it prints once.
+    echo "--from-branch: ${#PATHS[@]} frozen committed path(s) replayed from the recorded invocation" >&2
     for p in "${PATHS[@]}"; do printf '  %q\n' "$p" >&2; done
   fi
 else

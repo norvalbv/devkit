@@ -429,5 +429,51 @@ SHIP_HOOK_WRAPPER
   if [ -f "$digest_reader" ]; then
     { node "$digest_reader" digest "${DEVKIT_GATE_EVENTS:-}" "${DEVKIT_SHIP_ID:-}" "$log" 2>/dev/null || true; } >&2
   fi
+
+  # sc-2299. The path brief again, next to the verdict. The resume banner already printed it in FULL,
+  # but a blocked ship is read by tailing (the digest note above says so), minutes and often megabytes
+  # of gate output later — and the question a contradicting finding raises is which files the gates
+  # actually had. The second line is the invariant that answers it: the worktree is cut from the base
+  # (prepare-gate-worktree.sh), so anything unbriefed was judged at ITS base content, which is how a
+  # clone gate reports a duplication against a table you already moved.
+  #
+  # Capped at 5 like the other in-diagnostic hints (ship-branch.sh's unbriefed-paths line) — the full
+  # list is one scrollback away and repeating 32 lines under a verdict buries the verdict. Reaches
+  # ship's stderr, NOT $log: only the supervised chain is tee'd there, and $log was truncated above.
+  #
+  # Narration only, exactly like the digest: $rc is already final, nothing here exits, and the whole
+  # group is errexit-suppressed, so a failure inside it can never change a verdict.
+  #
+  # Gated on the blocked_gate classifier above rather than on `rc != 0`, which is broader than the
+  # claim: a hook-setup failure, a 124/137 timeout, a clobbered HEAD and unreadable staged objects
+  # all exit non-zero WITHOUT a gate having judged anything, and "the gates judged" would misreport
+  # every one of them. These four are the ATTRIBUTED gate verdicts, and each implies rc != 0 (rc == 0
+  # short-circuits to null above), so no separate status check is needed. "unknown" is excluded on
+  # purpose: it is the classifier's catch-all, so it also covers a commit-msg hook failing after the
+  # gates passed, and a line that says "the gates judged" must not be printed on a maybe.
+  case "$blocked_json" in
+    '"deterministic"'|'"decisions"'|'"comments"'|'"review"')
+    {
+      local brief_n=0 brief_list="" brief_p brief_base
+      brief_base="${BASE:-}"
+      for brief_p in ${PATHS[@]+"${PATHS[@]}"}; do
+        brief_n=$((brief_n + 1))
+        [ "$brief_n" -gt 5 ] || brief_list="${brief_list:+$brief_list }$(printf '%q' "$brief_p")"
+      done
+      [ "$brief_n" -le 5 ] || brief_list="$brief_list (+$((brief_n - 5)) more)"
+      if [ "$brief_n" -gt 0 ]; then
+        echo "ship: the gates judged $brief_n briefed path(s): $brief_list"
+        echo "      every OTHER file in the gate worktree is at base ${brief_base:0:7} — a finding naming one of those read the BASE copy, not yours."
+        # Only a RESUME has a full listing above to point at, and only it needs one — a first
+        # attempt's brief is the argv the caller just typed. Deliberately no `.devkit/ship-intent-*`
+        # glob as a fallback: one record exists PER BRANCH, and parallel agents shipping different
+        # branches from one checkout is devkit's normal case, so a wildcard would concatenate
+        # another branch's paths into the answer this line exists to make trustworthy.
+        [ "${DEVKIT_SHIP_RESUMED:-0}" != "1" ] ||
+          echo "      Full brief: the 'Resuming recorded invocation' listing above."
+      fi
+    } >&2 || true
+    ;;
+  esac
   return "$rc"
 }
