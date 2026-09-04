@@ -5,6 +5,7 @@ import { runManagedPackagedScript } from '../lib/ship/run-packaged-script.mts';
 
 export const meta = {
   name: 'review',
+  agentFacing: true,
   summary: 'Review a trusted checkout without committing or changing it.',
   help: `devkit review — run the configured pre-commit chain against a trusted checkout.
 

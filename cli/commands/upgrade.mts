@@ -44,6 +44,7 @@ import update, { cmpSemver, DEP, fetchLatestTag, needsRerun, repinPackageJson } 
 
 export const meta = {
   name: 'upgrade',
+  agentFacing: true,
   summary: 'Fully reconcile this repo to the installed devkit (one idempotent pass).',
   help: `devkit upgrade — bring a consumer repo fully up to the installed devkit in one command.
 

@@ -56,6 +56,11 @@ function listFlag(args: string[], name: string): string[] | undefined {
 
 export const meta = {
   name: 'sync-hooks',
+  agentFacing: false,
+  notRoutedBecause:
+    'A slice devkit upgrade composes from the recorded component selection, and devkit doctor ' +
+    '--fix repairs. Both are routed; reaching for the slice by hand re-adds surfaces the ' +
+    'consumer deselected.',
   summary: 'Copy devkit agent-hook scripts into selected providers (registration-free).',
   help: `devkit sync-hooks — copy devkit's agent-hook scripts into Claude, Codex, and Cursor and
 write .devkit/agent-hooks-manifest.json (sha256 per file) so doctor can tell which side drifted.

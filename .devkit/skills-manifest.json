@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "kind": "skills",
   "devkitRef": "v0.63.0",
-  "generatedAt": "2026-09-14T22:55:37.127Z",
+  "generatedAt": "2026-09-15T09:55:26.501Z",
   "files": {
     "_devkit/checklist-store.mjs": "c8a6a01fe75bd570953ccc88e3b99b8ac365bb249c4b1db2ce0c32a589c52193",
     "_devkit/review-roots.d.mts": "384d95945ccf04f994d805e78a5507835321ee5bcbd46acbf216c77385238c9e",
@@ -18,7 +18,7 @@
     "commit-guard/scripts/checklist.mjs": "dc57c1f1407a0fe7503ebe72e30e9167b29bdf1154ab44e68de82b6d558770e1",
     "correctness/SKILL.md": "d26708b78352a24582528bb6a69cafe9e6a1b566ede7ce85971a70c7f8f3231f",
     "correctness/scripts/checklist.mjs": "e1151b249ea5e749460a1441484c44b7bcf245cf18053ffec43693064e01ac5c",
-    "decisions/SKILL.md": "4efeb02a6f0f0ae0b4b7a86e2945a63ce2b0dff84d9c1dff6cf266067e7a8972",
+    "decisions/SKILL.md": "e390ab2f600039c53cc686aec07c802012bc29ae44842a26968eb18af161fe9a",
     "dup-detection/SKILL.md": "74a4964795bbb27ce2bda0e13b91da00f04a01a989bcbf6149d10ff9c3688a4c",
     "feature-critique/SKILL.md": "0a595267e6dab2fad6e571b3861da4964ccff934d50ac9efaf137a23d3a8efef",
     "frontend-accessibility/SKILL.md": "d950e1ddc87ec9a090936f05447d2298b25fb5e12e315345d2d9c02912c513a9",
@@ -32,11 +32,11 @@
     "structure-governance/SKILL.md": "80a1fa4ba4d7e089b8a79698a7d7428682944d535a1a3823bae9ba93f09dfd51",
     "structure-governance/references/fixing-lint-errors.md": "8f279b5a748151a3b3324b17227d7404c9db4d9e2c1f6b5a5cdb64938f73bc17",
     "structure-governance/references/walls.md": "6abf951adaf7aa71d1d0827bcddc2e9fdc517e622f86c40aa1ffde6deb4e5ecb",
-    "testing/SKILL.md": "095d285889138dff9ed94ce616bf51e6ff4a60b2325abef53505aee1f97a0c69",
+    "testing/SKILL.md": "c1b06258a1650f030a193796ac655dedfd04a53c1c7cf7cff0dccd8900cd2568",
     "upstream-sync/SKILL.md": "1007c8377ac15393dcc9db5384d80bd38487c85aa465921ae0b49ba5a91bad70",
     "upstream-sync/scripts/sync.mjs": "218aa7ad7e96f280f281a38f99919f2ce55eace902ed95b1119a0099ddbb3c76",
     "upstream-sync/scripts/verify-merge.mjs": "afb2977ab8b7a96fac2e93e29a68ae432508ba7e63d03c580fcf03229fcd0676",
-    "using-devkit/SKILL.md": "baccd98da8c4c3611eaeb7e532735cc3ee221a46b04e1af47c18bf9f7c256a07"
+    "using-devkit/SKILL.md": "c7332f3dd96f5d3c1ca3ba3852d3a4455cf685958acd83238cbf4041f82128ea"
   },
   "providers": {
     "claude": {
@@ -55,7 +55,7 @@
         "commit-guard/scripts/checklist.mjs": "dc57c1f1407a0fe7503ebe72e30e9167b29bdf1154ab44e68de82b6d558770e1",
         "correctness/SKILL.md": "d26708b78352a24582528bb6a69cafe9e6a1b566ede7ce85971a70c7f8f3231f",
         "correctness/scripts/checklist.mjs": "e1151b249ea5e749460a1441484c44b7bcf245cf18053ffec43693064e01ac5c",
-        "decisions/SKILL.md": "4efeb02a6f0f0ae0b4b7a86e2945a63ce2b0dff84d9c1dff6cf266067e7a8972",
+        "decisions/SKILL.md": "e390ab2f600039c53cc686aec07c802012bc29ae44842a26968eb18af161fe9a",
         "dup-detection/SKILL.md": "74a4964795bbb27ce2bda0e13b91da00f04a01a989bcbf6149d10ff9c3688a4c",
         "feature-critique/SKILL.md": "0a595267e6dab2fad6e571b3861da4964ccff934d50ac9efaf137a23d3a8efef",
         "frontend-accessibility/SKILL.md": "d950e1ddc87ec9a090936f05447d2298b25fb5e12e315345d2d9c02912c513a9",
@@ -69,11 +69,11 @@
         "structure-governance/SKILL.md": "80a1fa4ba4d7e089b8a79698a7d7428682944d535a1a3823bae9ba93f09dfd51",
         "structure-governance/references/fixing-lint-errors.md": "8f279b5a748151a3b3324b17227d7404c9db4d9e2c1f6b5a5cdb64938f73bc17",
         "structure-governance/references/walls.md": "6abf951adaf7aa71d1d0827bcddc2e9fdc517e622f86c40aa1ffde6deb4e5ecb",
-        "testing/SKILL.md": "095d285889138dff9ed94ce616bf51e6ff4a60b2325abef53505aee1f97a0c69",
+        "testing/SKILL.md": "c1b06258a1650f030a193796ac655dedfd04a53c1c7cf7cff0dccd8900cd2568",
         "upstream-sync/SKILL.md": "1007c8377ac15393dcc9db5384d80bd38487c85aa465921ae0b49ba5a91bad70",
         "upstream-sync/scripts/sync.mjs": "218aa7ad7e96f280f281a38f99919f2ce55eace902ed95b1119a0099ddbb3c76",
         "upstream-sync/scripts/verify-merge.mjs": "afb2977ab8b7a96fac2e93e29a68ae432508ba7e63d03c580fcf03229fcd0676",
-        "using-devkit/SKILL.md": "baccd98da8c4c3611eaeb7e532735cc3ee221a46b04e1af47c18bf9f7c256a07"
+        "using-devkit/SKILL.md": "c7332f3dd96f5d3c1ca3ba3852d3a4455cf685958acd83238cbf4041f82128ea"
       }
     },
     "cursor": {
@@ -92,7 +92,7 @@
         "commit-guard/scripts/checklist.mjs": "dc57c1f1407a0fe7503ebe72e30e9167b29bdf1154ab44e68de82b6d558770e1",
         "correctness/SKILL.md": "d26708b78352a24582528bb6a69cafe9e6a1b566ede7ce85971a70c7f8f3231f",
         "correctness/scripts/checklist.mjs": "e1151b249ea5e749460a1441484c44b7bcf245cf18053ffec43693064e01ac5c",
-        "decisions/SKILL.md": "4efeb02a6f0f0ae0b4b7a86e2945a63ce2b0dff84d9c1dff6cf266067e7a8972",
+        "decisions/SKILL.md": "e390ab2f600039c53cc686aec07c802012bc29ae44842a26968eb18af161fe9a",
         "dup-detection/SKILL.md": "74a4964795bbb27ce2bda0e13b91da00f04a01a989bcbf6149d10ff9c3688a4c",
         "feature-critique/SKILL.md": "0a595267e6dab2fad6e571b3861da4964ccff934d50ac9efaf137a23d3a8efef",
         "frontend-accessibility/SKILL.md": "d950e1ddc87ec9a090936f05447d2298b25fb5e12e315345d2d9c02912c513a9",
@@ -106,11 +106,11 @@
         "structure-governance/SKILL.md": "80a1fa4ba4d7e089b8a79698a7d7428682944d535a1a3823bae9ba93f09dfd51",
         "structure-governance/references/fixing-lint-errors.md": "8f279b5a748151a3b3324b17227d7404c9db4d9e2c1f6b5a5cdb64938f73bc17",
         "structure-governance/references/walls.md": "6abf951adaf7aa71d1d0827bcddc2e9fdc517e622f86c40aa1ffde6deb4e5ecb",
-        "testing/SKILL.md": "095d285889138dff9ed94ce616bf51e6ff4a60b2325abef53505aee1f97a0c69",
+        "testing/SKILL.md": "c1b06258a1650f030a193796ac655dedfd04a53c1c7cf7cff0dccd8900cd2568",
         "upstream-sync/SKILL.md": "1007c8377ac15393dcc9db5384d80bd38487c85aa465921ae0b49ba5a91bad70",
         "upstream-sync/scripts/sync.mjs": "218aa7ad7e96f280f281a38f99919f2ce55eace902ed95b1119a0099ddbb3c76",
         "upstream-sync/scripts/verify-merge.mjs": "afb2977ab8b7a96fac2e93e29a68ae432508ba7e63d03c580fcf03229fcd0676",
-        "using-devkit/SKILL.md": "baccd98da8c4c3611eaeb7e532735cc3ee221a46b04e1af47c18bf9f7c256a07"
+        "using-devkit/SKILL.md": "c7332f3dd96f5d3c1ca3ba3852d3a4455cf685958acd83238cbf4041f82128ea"
       }
     }
   }

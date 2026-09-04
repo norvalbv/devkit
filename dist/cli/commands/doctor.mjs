@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { FANOUT_BASELINE, LINES_BASELINE, readRatchetBaseline, SIZE_BASELINE, } from '../../gate-engine/ratchets/baseline-paths.mjs';
 import { RECOMMENDED_GUARD_IDS, structureCmdFor } from '../lib/components.mjs';
 import { detectGitRoot } from '../lib/detect-git-root.mjs';
-import { checkAgentAssets, checkRegistrations } from '../lib/doctor/asset-checks.mjs';
+import { checkAgentAssets, checkRegisteredHookTargets, checkRegistrations, } from '../lib/doctor/asset-checks.mjs';
 import { check } from '../lib/doctor/check-result.mjs';
 import { checkExtends, EXTENDS_REPAIRABLE, expectedExtends, repairExtends, } from '../lib/doctor/extends-checks.mjs';
 import { checkGuardConfig, judgeGuardsOf, CODEX_RUNTIME_CHECK, SEARCH_INDEX_CHECK, } from '../lib/doctor/guard-config-checks.mjs';
@@ -47,15 +47,6 @@ function checkStructureLint(cwd, stack) {
         return check('structure-lint', 'DRIFT', `no \`--structure "${expectedCmd}"\` on the guard-deterministic line`, 'run `devkit init --force` to enable it', true);
     }
     return check('structure-lint', 'OK', `runs \`${expectedCmd}\``);
-}
-// searchSteering: the guard + counter engine bins are present in the installed package.
-function checkSearchToolBins() {
-    const dir = join(packageDir(), 'gate-engine', 'search-tool');
-    const missing = [`search-tool-guard${SELF_EXT}`, `search-tool-counter${SELF_EXT}`].filter((f) => !existsSync(join(dir, f)));
-    if (missing.length) {
-        return check('search-steering bins', 'MISSING', `engine bin(s) absent: ${missing.join(', ')}`, 'reinstall @norvalbv/devkit');
-    }
-    return check('search-steering bins', 'OK', 'guard + counter present');
 }
 function checkBaselines(cwd) {
     const present = [
@@ -274,8 +265,8 @@ async function collectResults(cwd, cfg, configResult) {
         results.push(checkAgentAssets(cwd, 'hooks', surfaces, { expected: hooks.scripts }));
     if (sel.adhd)
         results.push(checkAdhdSkill(cwd));
-    if (sel.searchSteering)
-        results.push(checkSearchToolBins());
+    if (hooks.components.length)
+        results.push(checkRegisteredHookTargets(cwd, hooks.components));
     results.push(...checkOxcCapability(cwd));
     if (sel.antiSlop)
         results.push(...checkAntiSlopCapability(cwd));
@@ -299,6 +290,7 @@ async function collectResults(cwd, cfg, configResult) {
 // fallow-ignore-next-line complexity
 export const meta = {
     name: 'doctor',
+    agentFacing: true,
     summary: 'Diagnose drift for the installed component set (read-only).',
     help: `devkit doctor — diagnose drift for the installed component set (read-only).
 

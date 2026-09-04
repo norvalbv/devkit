@@ -4,6 +4,7 @@ import { packageDir } from '../lib/fs-helpers.mjs';
 import { runManagedPackagedScript } from '../lib/ship/run-packaged-script.mjs';
 export const meta = {
     name: 'review',
+    agentFacing: true,
     summary: 'Review a trusted checkout without committing or changing it.',
     help: `devkit review — run the configured pre-commit chain against a trusted checkout.
 
@@ -46,6 +47,7 @@ const INHERITED_RUN_CONTEXT = new Set([
     'DEVKIT_COMMIT_MSG_FILE', // stale ship intent must not leak in; review-target.sh synthesizes its own
     'DEVKIT_GATE_ARCHIVE_LOG',
     'DEVKIT_GATE_EVENTS',
+    'DEVKIT_GATE_LOG',
     'DEVKIT_RUN_MODE',
     'GUARD_DECISIONS_DIR',
 ]);

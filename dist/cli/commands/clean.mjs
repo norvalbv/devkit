@@ -18,11 +18,12 @@ import { isTracked, trackedPathPredicate } from '../lib/git-tracked.mjs';
 import { removeCommitMsgBlock } from '../lib/husky/commit-msg-block.mjs';
 import { removeGuardBlock } from '../lib/husky/husky-block.mjs';
 import { resolveExistingAgentProviders, SUPPORTED_AGENT_PROVIDERS, } from '../lib/install/agent-assets/agent-providers.mjs';
+import { ANTI_SLOP_BASELINE_REL } from '../lib/install/anti-slop/constants.mjs';
 import { removeAntiSlopCapability } from '../lib/install/anti-slop/lifecycle.mjs';
 import { pruneDevkitCacheGitignore, withGitignoreLock } from '../lib/install/gitignore-cache.mjs';
 import { removeHookRegistrations, removeHookScripts } from '../lib/install/install-hooks.mjs';
 import { removeSearchCode } from '../lib/install/install-search-code.mjs';
-import { removeOxcCapability } from '../lib/install/oxc/lifecycle.mjs';
+import { OVERLAY_ENTRY_REL, removeOxcCapability } from '../lib/install/oxc/lifecycle.mjs';
 import { removeHealAlias } from '../lib/overlay.mjs';
 import { removeGlobalHook } from '../lib/overlay-global-hook.mjs';
 import { removeAgents, removeSkills } from '../lib/sync-manifest.mjs';
@@ -32,6 +33,26 @@ function rm(path, label, dryRun) {
     console.log(`  ${dryRun ? '[dry-run] remove' : '✓ removed'} ${label}`);
     if (!dryRun)
         rmSync(path, { recursive: true, force: true });
+}
+// A tracked path devkit declines to delete, named with the remedy: a silent survivor makes the next
+// `devkit init` refuse for a reason the user cannot see.
+function announceTracked(rel) {
+    console.log(`  • kept tracked ${rel} — run \`git rm --cached ${rel}\` and commit to allow a re-install`);
+}
+/**
+ * Remove a cwd-relative overlay path only if git does not track it — devkit does not own this repo,
+ * and a survivor is recoverable where deleted committed content is not. Prints every skip's remedy.
+ */
+function rmUntrackedIn(cwd, gitRoot, dryRun) {
+    const pfx = cwd === gitRoot ? '' : `${relative(gitRoot, cwd)}/`;
+    return (rel, label) => {
+        if (!isTracked(gitRoot, `${pfx}${rel}`)) {
+            rm(join(cwd, rel), label, dryRun);
+            return;
+        }
+        if (existsSync(join(cwd, rel)))
+            announceTracked(`${pfx}${rel}`);
+    };
 }
 // A biome/tsconfig is devkit-created only if it still extends devkit (the package subpath, the
 // vendored .devkit/ base, or an overlay sibling) — never remove a config the user owns.
@@ -48,7 +69,7 @@ function extendsDevkit(path) {
 // Drop devkit's lines (+ its header) from .git/info/exclude, leaving the user's own ignores. The
 // agent-half + fallow lines (added when overlay grew past the lint/guard set) are prefix-tolerant
 // (`(.*\/)?`) so a monorepo `pkgRel/`-scoped entry is pruned too — a miss orphans the line.
-const DEVKIT_EXCLUDE_LINE = /^(# devkit overlay|\.devkit\/|.*\/\.devkit\/|.*guard\.config\.json|.*biome\.devkit\.jsonc|.*eslint\.config\.devkit\.mjs|.*eslint\/baselines\/|(.*\/)?\.claude\/(skills|agents|hooks)\/|(.*\/)?\.agents\/skills\/|(.*\/)?\.codex\/(agents|hooks)\/|(.*\/)?\.(cursor|codex)\/hooks\.json|(.*\/)?\.cursor\/(skills|agents|hooks)\/|(.*\/)?\.claude\/settings\.local\.json|(.*\/)?\.fallow\/|(.*\/)?fallow-baselines\/)/;
+const DEVKIT_EXCLUDE_LINE = /^(# devkit overlay|\.devkit\/|.*\/\.devkit\/|.*guard\.config\.json|.*biome\.devkit\.jsonc|.*eslint\.config\.devkit\.mjs|.*eslint\/baselines\/|(.*\/)?\.claude\/(skills|agents|hooks)\/|(.*\/)?\.agents\/skills\/|(.*\/)?\.codex\/(agents|hooks)\/|(.*\/)?\.(cursor|codex)\/hooks\.json|(.*\/)?\.cursor\/(skills|agents|hooks)\/|(.*\/)?\.claude\/settings\.local\.json|(.*\/)?\.fallow\/|(.*\/)?fallow-baselines\/|(.*\/)?oxlint\.devkit\.json$|(.*\/)?\.anti-slop-baseline\.json$)/;
 const BLANK_RUN_RE = /\n{3,}/g;
 const LEADING_BLANKS_RE = /^\n+/;
 function pruneGitExclude(gitRoot, dryRun) {
@@ -91,7 +112,7 @@ function hasOverlayStrays(gitRoot) {
     }
     return false;
 }
-function cleanUntrackedDevkitState(gitRoot, dryRun) {
+function cleanUntrackedDevkitState(gitRoot, dryRun, root = '.devkit') {
     const tracked = trackedPathPredicate(gitRoot);
     const visit = (rel) => {
         const absolute = join(gitRoot, rel);
@@ -107,9 +128,11 @@ function cleanUntrackedDevkitState(gitRoot, dryRun) {
                 visit(child);
             else if (!tracked(child))
                 rm(join(gitRoot, child), child, dryRun);
+            else
+                announceTracked(child);
         }
     };
-    visit('.devkit');
+    visit(root);
 }
 // Best-effort overlay teardown for a repo with NO config (orphaned / partial clean). Every step is
 // tracked-safe + no-ops when its artifact is absent, so it's safe to run unconditionally once strays
@@ -124,14 +147,14 @@ function cleanOverlayStrays(cwd, gitRoot, dryRun) {
     removeHookScripts(gitRoot, { dryRun, targets, skipTracked });
     removeHookRegistrations(gitRoot, { dryRun, targets, overlay: true });
     removeEmptyOverlaySettings(gitRoot, dryRun);
-    const pfx = cwd === gitRoot ? '' : `${relative(gitRoot, cwd)}/`;
-    const rmUntracked = (rel, label) => {
-        if (!isTracked(gitRoot, `${pfx}${rel}`))
-            rm(join(cwd, rel), label, dryRun);
-    };
+    const rmUntracked = rmUntrackedIn(cwd, gitRoot, dryRun);
     rmUntracked('guard.config.json', 'guard.config.json');
     rmUntracked('biome.devkit.jsonc', 'biome.devkit.jsonc');
     rmUntracked('eslint.config.devkit.mjs', 'eslint.config.devkit.mjs');
+    // Both are hidden ONLY by .git/info/exclude, which pruneGitExclude removes below — so leaving
+    // either behind does not merely litter, it makes it newly VISIBLE to git.
+    rmUntracked(OVERLAY_ENTRY_REL, OVERLAY_ENTRY_REL);
+    rmUntracked(ANTI_SLOP_BASELINE_REL, ANTI_SLOP_BASELINE_REL);
     rmUntracked('eslint/baselines', 'eslint/baselines/');
     rm(join(cwd, 'fallow-baselines'), 'fallow-baselines/', dryRun);
     cleanUntrackedDevkitState(gitRoot, dryRun);
@@ -198,11 +221,21 @@ function cleanOverlay(cwd, cfg, dryRun) {
         });
         removeEmptyOverlaySettings(gitRoot, dryRun);
     }
-    rm(join(gitRoot, '.devkit'), '.devkit/ (git-root hooks)', dryRun);
-    rm(join(cwd, '.devkit'), `${cwd === gitRoot ? '' : 'package '}.devkit/`, dryRun);
-    rm(join(cwd, 'guard.config.json'), 'guard.config.json', dryRun);
-    rm(join(cwd, 'biome.devkit.jsonc'), 'biome.devkit.jsonc', dryRun);
-    rm(join(cwd, 'eslint.config.devkit.mjs'), 'eslint.config.devkit.mjs', dryRun);
+    // Tracked-aware like every removal below it: a blunt recursive rm here destroyed a force-added
+    // `.devkit/anti-slop/manifest.json` one line ABOVE the guard that exists for exactly that case.
+    cleanUntrackedDevkitState(gitRoot, dryRun);
+    if (cwd !== gitRoot)
+        cleanUntrackedDevkitState(gitRoot, dryRun, `${relative(gitRoot, cwd)}/.devkit`);
+    // All five, not just the two newest: a recorded overlay proves devkit wrote these, not that the
+    // user never `git add -f`'d one since. `cleanOverlayStrays` already holds this convention.
+    const rmUntracked = rmUntrackedIn(cwd, gitRoot, dryRun);
+    rmUntracked('guard.config.json', 'guard.config.json');
+    rmUntracked('biome.devkit.jsonc', 'biome.devkit.jsonc');
+    rmUntracked('eslint.config.devkit.mjs', 'eslint.config.devkit.mjs');
+    rmUntracked(OVERLAY_ENTRY_REL, OVERLAY_ENTRY_REL);
+    // An overlay baseline is per-clone and shared with nobody, unlike the committed debt record
+    // package mode retains, so leaving it behind only exposes it once the exclude block is pruned.
+    rmUntracked(ANTI_SLOP_BASELINE_REL, ANTI_SLOP_BASELINE_REL);
     rm(join(cwd, 'eslint', 'baselines'), 'eslint/baselines/', dryRun);
     // fallow: devkit saved the grandfather baselines in overlay (fallow-baselines/). The .fallow/ cache
     // is fallow's own — left in place, like package-mode clean leaves fallow's files.
@@ -336,7 +369,7 @@ function cleanPackage(cwd, cfg, dryRun) {
     if (existsSync(join(cwd, '.devkit', 'oxc', 'manifest.json')))
         removeOxcCapability(cwd, dryRun);
     if (cfg.components?.antiSlop || existsSync(join(cwd, '.devkit', 'anti-slop', 'manifest.json')))
-        removeAntiSlopCapability(cwd, dryRun);
+        removeAntiSlopCapability(cwd, dryRun, false);
     // Regenerated gate caches: init adds these .gitignore lines on every package/standalone install
     // (the gate engine writes them regardless of components), so reverse them unconditionally.
     pruneDevkitCacheGitignore(cwd, dryRun);
@@ -346,6 +379,7 @@ function cleanPackage(cwd, cfg, dryRun) {
 }
 export const meta = {
     name: 'clean',
+    agentFacing: true,
     summary: 'Uninstall devkit — reverse init for the recorded mode.',
     help: `devkit clean — uninstall devkit (reverse init for the recorded mode).
 
