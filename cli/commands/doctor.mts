@@ -398,6 +398,7 @@ async function collectResults(
 // fallow-ignore-next-line complexity
 export const meta = {
   name: 'doctor',
+  agentFacing: true,
   summary: 'Diagnose drift for the installed component set (read-only).',
   help: `devkit doctor — diagnose drift for the installed component set (read-only).
 

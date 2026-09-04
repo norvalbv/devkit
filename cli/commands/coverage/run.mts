@@ -10,6 +10,10 @@ import { produceCoverage } from '../../../gate-engine/coverage/produce.mts';
 
 export const meta = {
   name: 'coverage-run',
+  agentFacing: false,
+  notRoutedBecause:
+    "Wired ONCE as the consumer's own test:run:coverage script; the coverage gate consumes" +
+    "the artifact it leaves behind. An agent runs the repo's own test script, not this.",
   summary: 'Run vitest with coverage in an isolated reports dir (parallel-agent safe).',
   help: `devkit coverage-run — run the test suite with coverage without racing a sibling agent.
 

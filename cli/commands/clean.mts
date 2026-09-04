@@ -382,6 +382,7 @@ function cleanPackage(cwd: string, cfg: DevkitConfig, dryRun: boolean): void {
 
 export const meta = {
   name: 'clean',
+  agentFacing: true,
   summary: 'Uninstall devkit — reverse init for the recorded mode.',
   help: `devkit clean — uninstall devkit (reverse init for the recorded mode).
 

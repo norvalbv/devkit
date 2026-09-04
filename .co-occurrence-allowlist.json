@@ -21,6 +21,17 @@
       "rangeA": "181-210",
       "rangeB": "226-242",
       "similarity": 0.8637
+    },
+    {
+      "symbolA": "reconcile",
+      "fileA": "cli/commands/reconcile.mts",
+      "symbolB": "reconcilePath",
+      "fileB": "cli/lib/reconcile.mts",
+      "description": "False positive, verified by reading both ranges. reconcile() is the CLI entrypoint — parses flags, asserts the git top-level, loads the ship manifest, maps branches and renders text/JSON. reconcilePath() decides restore/delete/warn for ONE path by comparing upstream/worktree/index blobs. They share no logic; the matcher scored shared reconcile-domain vocabulary (mainRepo, apply, warning) and a common guarded-early-return shape. Surfaced now only because sc-2361 added a one-line agentFacing field to the commands file, putting a pre-existing latent pair into the staged set.",
+      "date": "2026-09-04",
+      "rangeA": "215-284",
+      "rangeB": "248-289",
+      "similarity": 0.8342
     }
   ],
   "clones": [
