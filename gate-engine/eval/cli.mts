@@ -9,6 +9,7 @@ import type { LockedAppend } from './history.mts';
 import {
   activeEvents,
   checkpointArtifact,
+  eventProvenance,
   HISTORY_PATH,
   immutableErrors,
   latestRecordedEvent,
@@ -21,7 +22,13 @@ import {
   writeAtomically,
 } from './history.mts';
 import { generatedOutputs, writeGeneratedOutputs } from './render.mts';
-import { gitOutput, repositorySource, suiteHashes } from './source.mts';
+import {
+  assertIndexUnchanged,
+  readPublishBaseline,
+  publishSnapshot,
+  repositorySource,
+  suiteHashes,
+} from './source.mts';
 import type {
   Assessment,
   BenchmarkEvent,
@@ -37,7 +44,6 @@ const cwd = process.cwd();
 const command = process.argv[2];
 const argv = process.argv.slice(3);
 const ALL_ZERO_RE = /^0+$/;
-const UNTRACKED_PUBLISH_LOCK_STATUS = '?? docs/benchmarks/.publish.lock';
 
 function options(args: string[]) {
   return parseArgs({
@@ -69,7 +75,12 @@ function fail(errors: string[]): never {
 }
 
 function trackerMode(values: ReturnType<typeof options>['values']): TrackerMode {
-  const mode = (values.mode ?? (values.tree ? 'tree' : 'working')) as TrackerMode;
+  // `--tree STAGED|WORKTREE` names a snapshot rather than a ref, so it must not reach `git ls-tree`.
+  const named =
+    values.tree === 'STAGED' ? 'staged' : values.tree === 'WORKTREE' ? 'working' : 'tree';
+  // SAFETY: `--mode` is unvalidated CLI input; the membership check on the next line rejects every
+  // value that is not a TrackerMode before it reaches a caller.
+  const mode = (values.mode ?? (values.tree ? named : 'working')) as TrackerMode;
   if (!['working', 'staged', 'tree'].includes(mode)) throw new Error(`Unknown mode: ${mode}`);
   return mode;
 }
@@ -299,39 +310,25 @@ export function parsePublishBaseline(
   return baseline;
 }
 
-export function assertCleanPublishWorktree(root: string): void {
-  const dirty = gitOutput(root, ['status', '--porcelain=v1', '--untracked-files=all'])
-    .split('\n')
-    .filter((line) => line && line !== UNTRACKED_PUBLISH_LOCK_STATUS);
-  if (dirty.length) {
-    throw new Error(
-      `WORKTREE publication requires a completely clean working tree:\n${dirty.join('\n')}`,
-    );
-  }
-}
-
-function publishLocked(args: string[], append: LockedAppend): void {
+export function publishLocked(root: string, args: string[], append: LockedAppend): void {
   const parsed = options(args);
   const suiteId = parsed.values.suite;
   if (!suiteId) throw new Error('publish requires --suite <id>');
   const tree = parsed.values.tree ?? 'HEAD';
-  if (tree === 'WORKTREE') assertCleanPublishWorktree(cwd);
-  const source = repositorySource(
-    cwd,
-    tree === 'WORKTREE' ? 'working' : 'tree',
-    tree === 'WORKTREE' ? undefined : tree,
-  );
-  const working = repositorySource(cwd, 'working');
-  const catalog = loadCatalog(working);
-  const existingErrors = [...validateCatalog(working, catalog), ...validateHistory(working)];
+  const { source, identity } = publishSnapshot(root, tree);
+  const working = repositorySource(root, 'working');
+  // STAGED publishes the bytes the commit will carry, so the catalog, ledger and predecessors it
+  // reasons from are the staged ones too; only the write side below stays on the worktree.
+  const ledger = tree === 'STAGED' ? source : working;
+  const catalog = loadCatalog(ledger);
+  const existingErrors = [...validateCatalog(ledger, catalog), ...validateHistory(ledger)];
   if (existingErrors.length)
     throw new Error(`Refusing to publish into an invalid tracker:\n${existingErrors.join('\n')}`);
   const suite = catalog.suites.find((candidate) => candidate.id === suiteId);
   if (!suite) throw new Error(`Unknown suite: ${suiteId}`);
   const baselinePath = parsed.values.baseline ?? suite.baseline;
   if (!baselinePath) throw new Error(`Suite ${suiteId} has no baseline path; pass --baseline`);
-  const raw = source.read(baselinePath);
-  if (!raw) throw new Error(`Missing baseline ${baselinePath} at ${tree}`);
+  const raw = readPublishBaseline(source, root, tree, baselinePath);
   const baseline = parsePublishBaseline(suiteId, suite.adapter, raw, suite.sections);
   const requestedChangeType =
     parsed.values['change-type'] ?? (suite.lifecycle === 'no-ship' ? 'no-ship' : 'quality');
@@ -344,7 +341,7 @@ function publishLocked(args: string[], append: LockedAppend): void {
     !(ASSESSMENTS as readonly string[]).includes(requestedAssessment)
   )
     throw new Error(`Invalid assessment: ${requestedAssessment}`);
-  const history = parseHistory(working).map(({ event }) => event);
+  const history = parseHistory(ledger).map(({ event }) => event);
   const superseded = parsed.values.supersedes
     ? history.find((event) => event.id === parsed.values.supersedes)
     : undefined;
@@ -357,7 +354,7 @@ function publishLocked(args: string[], append: LockedAppend): void {
     : defaultPredecessor(history, suiteId);
   if (parsed.values.predecessor && !predecessor)
     throw new Error(`Unknown active predecessor event: ${parsed.values.predecessor}`);
-  const predecessorCheckpoint = readCheckpoint(working, predecessor);
+  const predecessorCheckpoint = readCheckpoint(ledger, predecessor);
   const hashes = suiteHashes(source, suite.hashes);
   if (
     predecessor?.hashes &&
@@ -397,14 +394,11 @@ function publishLocked(args: string[], append: LockedAppend): void {
     throw new Error(
       `Assessment ${requestedAssessment} contradicts adapter-derived assessment ${assessment}`,
     );
-  const sourceCommit =
-    tree === 'WORKTREE'
-      ? gitOutput(cwd, ['rev-parse', 'HEAD']).trim()
-      : gitOutput(cwd, ['rev-parse', tree]).trim();
-  const recordedAtInput =
-    parsed.values['recorded-at'] ??
-    gitOutput(cwd, ['show', '-s', '--format=%cI', sourceCommit]).trim();
-  const recordedAt = new Date(recordedAtInput).toISOString();
+  const {
+    sourceCommit,
+    recordedAt,
+    source: provenanceSource,
+  } = eventProvenance(root, tree, parsed.values['recorded-at']);
   const envelope: CheckpointEnvelope = {
     schemaVersion: 1,
     suiteId,
@@ -430,7 +424,7 @@ function publishLocked(args: string[], append: LockedAppend): void {
     freshness: 'current',
     changeType,
     assessment,
-    provenance: { tier: 'accepted', source: 'committed sanitized checkpoint', sourceCommit },
+    provenance: { tier: 'accepted', source: provenanceSource, sourceCommit },
     hashes: envelope.hashes,
     checkpoint: { sha256: checkpoint.sha256, path: checkpoint.path },
     metrics: baseline.metrics,
@@ -440,26 +434,32 @@ function publishLocked(args: string[], append: LockedAppend): void {
   };
   const validation = publicationErrors(event, envelope);
   if (validation.length) throw new Error(validation.join('\n'));
+  assertIndexUnchanged(root, identity);
   append(event, checkpoint);
-  const refreshed = repositorySource(cwd, 'working');
-  writeGeneratedOutputs(cwd, generatedOutputs(refreshed, catalog, [...history, event]));
+  const refreshed = repositorySource(root, 'working');
+  const views = tree === 'STAGED' ? source : refreshed;
+  writeGeneratedOutputs(root, generatedOutputs(views, catalog, [...history, event], refreshed));
   console.log(`benchmark-tracker: published ${event.id}`);
 }
 
 function publish(args: string[]): void {
-  withPublishLock(cwd, (append) => publishLocked(args, append));
+  withPublishLock(cwd, (append) => publishLocked(cwd, args, append));
 }
 
-function renderLocked(): void {
-  const source = repositorySource(cwd, 'working');
+function renderLocked(args: string[]): void {
+  const parsed = options(args);
+  const source = sourceFrom(parsed.values);
+  // The marker hosts stay on the worktree even when the views are computed from the index, so a
+  // re-render after a staged publication cannot discard unstaged prose around them.
+  const working = repositorySource(cwd, 'working');
   const catalog = loadCatalog(source);
   const events = parseHistory(source).map(({ event }) => event);
-  writeGeneratedOutputs(cwd, generatedOutputs(source, catalog, events));
+  writeGeneratedOutputs(cwd, generatedOutputs(source, catalog, events, working));
   console.log('benchmark-tracker: rendered README dashboards and SVGs');
 }
 
-function render(): void {
-  withPublishLock(cwd, () => renderLocked());
+function render(args: string[]): void {
+  withPublishLock(cwd, () => renderLocked(args));
 }
 
 export function reconcileLedgers(root: string, inputs: string[], output: string): void {
@@ -486,7 +486,7 @@ if (import.meta.main) {
   try {
     if (command === 'check') check(argv);
     else if (command === 'publish') publish(argv);
-    else if (command === 'render') render();
+    else if (command === 'render') render(argv);
     else if (command === 'backfill') {
       const parsed = options(argv);
       backfill(cwd, parsed.values.since, parsed.values['local-log']);
