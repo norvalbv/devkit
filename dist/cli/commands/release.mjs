@@ -58,6 +58,9 @@ export function remoteTagExists(tag, cwd) {
 }
 export const meta = {
     name: 'release',
+    agentFacing: false,
+    notRoutedBecause: 'MAINTAINER-ONLY, run by a human inside the devkit repo itself. Not a consumer-repo verb ' +
+        'at all, so no consumer-facing skill should route to it.',
     summary: 'MAINTAINER-ONLY: bump version, test, and open a release PR.',
     help: `devkit release — MAINTAINER-ONLY (run inside the devkit repo): bump version, test, build, and open a release PR.
 

@@ -162,6 +162,7 @@ export function detectAgentConflicts(root, targets = AGENT_TARGETS) {
 }
 export const meta = {
     name: 'sync-agents',
+    agentFacing: true,
     summary: 'Copy review/testing agents into selected agent providers.',
     help: `devkit sync-agents — copy devkit's review/testing agents into Claude, Codex, and Cursor.
 

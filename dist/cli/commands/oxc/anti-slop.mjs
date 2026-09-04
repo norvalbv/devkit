@@ -11,6 +11,10 @@ import { clearPendingAntiSlopBaselineActivation, readInstalledAntiSlopBaselineMi
 import { collectAntiSlopGroups, resolveAntiSlopScope, } from '../../lib/install/anti-slop/runner.mjs';
 export const meta = {
     name: 'anti-slop',
+    agentFacing: false,
+    notRoutedBecause: 'Baseline-aware lint gate invoked by the wired lint:anti-slop script and by the commit ' +
+        'chain. A blocked agent follows the repair the gate prints, which skills/commit-gates ' +
+        'routes.',
     summary: 'Check vendored anti-slop rules with an explicit shrink-only baseline.',
     help: `devkit anti-slop — baseline-aware checks for Devkit's vendored Oxlint plugin.
 

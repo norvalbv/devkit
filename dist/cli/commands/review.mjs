@@ -4,6 +4,7 @@ import { packageDir } from '../lib/fs-helpers.mjs';
 import { runManagedPackagedScript } from '../lib/ship/run-packaged-script.mjs';
 export const meta = {
     name: 'review',
+    agentFacing: true,
     summary: 'Review a trusted checkout without committing or changing it.',
     help: `devkit review — run the configured pre-commit chain against a trusted checkout.
 
