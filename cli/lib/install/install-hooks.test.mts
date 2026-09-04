@@ -135,8 +135,14 @@ describe('installHookRegistrations', () => {
     installHookRegistrations(root, ['searchSteering']);
     const cmds = claudeCommands(root);
     expect(cmds).toHaveLength(2);
-    expect(cmds.some((c) => c.includes('search-tool-guard.mts'))).toBe(true);
-    expect(cmds.some((c) => c.includes('search-tool-counter.mts'))).toBe(true);
+    // dist/, unconditionally: this string is handed to the CONSUMER's shell, where only the built
+    // .mjs exists (package.json files: ["dist"]) and where Node refuses to type-strip a .mts at all.
+    expect(cmds).toContain(
+      'node "$CLAUDE_PROJECT_DIR"/node_modules/@norvalbv/devkit/dist/gate-engine/search-tool/search-tool-guard.mjs',
+    );
+    expect(cmds).toContain(
+      'node "$CLAUDE_PROJECT_DIR"/node_modules/@norvalbv/devkit/dist/gate-engine/search-tool/search-tool-counter.mjs',
+    );
     // Cursor mirror maps Bash PreToolUse→beforeShellExecution, PostToolUse→afterShellExecution.
     const cur = cursor(root).hooks;
     expect(cur.beforeShellExecution).toHaveLength(1);
@@ -654,5 +660,257 @@ describe('syncHookScripts --only / --targets', () => {
     expect(
       kind === 'directory' ? lstatSync(oldHook).isDirectory() : lstatSync(oldHook).isSymbolicLink(),
     ).toBe(true);
+  });
+});
+
+/** A bare command change is not a no-op for existing consumers — the stale ledger row goes
+ * `untrusted` and installHookRegistrations THROWS. These cover the pipeline slot, not the function. */
+describe('superseded hook commands', () => {
+  const DISTLESS = ['/dist/gate-engine/', '/gate-engine/'];
+  const RELS = ['.claude/settings.json', '.codex/hooks.json', '.cursor/hooks.json'];
+  const downgrade = (text) => text.replaceAll(DISTLESS[0], DISTLESS[1]);
+
+  /** Install the CURRENT registrations, then rewind the document and/or ledger to the prior form. */
+  function seed(root, { document = 'legacy', manifest = 'legacy' } = {}) {
+    installHookRegistrations(root, ['searchSteering']);
+    if (document === 'legacy')
+      for (const rel of RELS)
+        writeFileSync(join(root, rel), downgrade(readFileSync(join(root, rel), 'utf8')));
+    if (manifest === 'legacy')
+      writeFileSync(ledgerPath(root), downgrade(readFileSync(ledgerPath(root), 'utf8')));
+  }
+  const allCommands = (root) => RELS.map((rel) => readFileSync(join(root, rel), 'utf8')).join('\n');
+  const ledgerCommands = (root) => ledger(root).entries.map((e) => e.native.command);
+
+  it('state A — converges when the ledger and all three documents hold the prior spelling', () => {
+    const root = tmpRepo();
+    seed(root);
+    expect(allCommands(root)).toContain('/gate-engine/search-tool/');
+    expect(allCommands(root)).not.toContain('/dist/gate-engine/');
+
+    expect(() => installHookRegistrations(root, ['searchSteering'])).not.toThrow();
+
+    const text = allCommands(root);
+    expect(text).not.toMatch(/devkit\/gate-engine\/search-tool/);
+    expect(claudeCommands(root).filter((c) => c.includes('search-tool-guard.mjs'))).toHaveLength(1);
+    for (const command of ledgerCommands(root)) expect(command).toContain('/dist/gate-engine/');
+    expect(checkHookRegistrations(root, ['searchSteering']).ok).toBe(true);
+  });
+
+  it('is the guard on the migration itself: emptying the table reinstates the throw', () => {
+    // A stale row the table does not name is exactly what an emptied table produces, so this needs
+    // no mocking: delete SUPERSEDED_HOOK_COMMANDS and state A goes red instead of shipping green.
+    const root = tmpRepo();
+    seed(root);
+    const stored = ledger(root);
+    stored.entries = stored.entries.map((e) => ({
+      ...e,
+      native: { ...e.native, command: `${e.native.command}--unknown` },
+    }));
+    writeFileSync(ledgerPath(root), JSON.stringify(stored, null, 2));
+    expect(() => installHookRegistrations(root, ['searchSteering'])).toThrow(
+      /hook registration conflicts require resolution/,
+    );
+  });
+
+  it('state B — a hand-patched document converges without being rewritten', () => {
+    const fresh = tmpRepo();
+    installHookRegistrations(fresh, ['searchSteering']);
+    const expected = RELS.map((rel) => readFileSync(join(fresh, rel), 'utf8'));
+
+    const root = tmpRepo();
+    seed(root, { document: 'current' });
+    expect(() => installHookRegistrations(root, ['searchSteering'])).not.toThrow();
+
+    // Byte-identical: collapsing documentChanged into ledgerChanged would reformat these for nothing.
+    RELS.forEach((rel, i) => expect(readFileSync(join(root, rel), 'utf8')).toBe(expected[i]));
+    for (const command of ledgerCommands(root)) expect(command).toContain('/dist/gate-engine/');
+  });
+
+  it('leaves a consumer-owned look-alike command alone when no ledger vouches for it', () => {
+    const root = tmpRepo();
+    seed(root);
+    rmSync(ledgerPath(root));
+    installHookRegistrations(root, ['searchSteering'], { targets: ['claude'] });
+    const cmds = claudeCommands(root);
+    expect(cmds.some((c) => c.includes('/gate-engine/search-tool/search-tool-guard.mjs'))).toBe(
+      true,
+    );
+    expect(
+      cmds.some((c) => c.includes('/dist/gate-engine/search-tool/search-tool-guard.mjs')),
+    ).toBe(true);
+  });
+
+  it('migrates before the scope transfer, so an overlay switch still converges', () => {
+    const root = tmpRepo();
+    execFileSync('git', ['init'], { cwd: root, stdio: 'ignore' });
+    seed(root);
+    expect(() =>
+      installHookRegistrations(root, ['searchSteering'], { targets: ['codex'], overlay: true }),
+    ).not.toThrow();
+    for (const entry of ledger(root).entries.filter((e) => e.provider === 'codex')) {
+      expect(entry.installScope).toBe('overlay');
+      expect(entry.native.command).toContain('/dist/gate-engine/');
+    }
+  });
+
+  it('migrates before the removal pass, so deselecting searchSteering strands nothing', () => {
+    const root = tmpRepo();
+    seed(root);
+    expect(() => installHookRegistrations(root, ['agentHooks'])).not.toThrow();
+    expect(allCommands(root)).not.toContain('gate-engine/search-tool');
+    expect(ledger(root).entries.some((e) => e.ownerId === 'searchSteering')).toBe(false);
+  });
+
+  it('removeHookRegistrations strips the prior spelling from every document', () => {
+    // In this path removed.changed is false (the migration already took the string out), so the
+    // write only happens if legacy.documentChanged is threaded into the plan.
+    const root = tmpRepo();
+    seed(root);
+    writeFileSync(
+      join(root, '.claude', 'settings.json'),
+      (() => {
+        const doc = claude(root);
+        doc.hooks.PreToolUse[0].hooks.push({ type: 'command', command: 'echo mine' });
+        return JSON.stringify(doc, null, 2);
+      })(),
+    );
+
+    removeHookRegistrations(root);
+
+    expect(allCommands(root)).not.toContain('gate-engine/search-tool');
+    expect(claudeCommands(root)).toContain('echo mine');
+    expect(existsSync(ledgerPath(root))).toBe(false);
+  });
+
+  it('migrates the .mts prior spelling a source-context devkit wrote', () => {
+    // The fleet holds TWO prior spellings, and downgrade() only produces .mjs — without this the
+    // .mts half of SUPERSEDED_HOOK_COMMANDS is unit-projected but never actually migrated.
+    const root = tmpRepo();
+    seed(root);
+    const toMts = (text) =>
+      text.replaceAll(
+        /gate-engine\/search-tool\/(search-tool-(?:guard|counter))\.mjs/g,
+        'gate-engine/search-tool/$1.mts',
+      );
+    for (const rel of RELS)
+      writeFileSync(join(root, rel), toMts(readFileSync(join(root, rel), 'utf8')));
+    writeFileSync(ledgerPath(root), toMts(readFileSync(ledgerPath(root), 'utf8')));
+    expect(allCommands(root)).toContain('search-tool-guard.mts');
+
+    expect(() => installHookRegistrations(root, ['searchSteering'])).not.toThrow();
+
+    expect(allCommands(root)).not.toContain('.mts');
+    expect(claudeCommands(root).filter((c) => c.includes('search-tool-guard'))).toHaveLength(1);
+    for (const command of ledgerCommands(root)) expect(command).toContain('/dist/gate-engine/');
+  });
+
+  it('migrates only the targeted provider, leaving the others reconcilable later', () => {
+    // `devkit init --targets claude` is an ordinary shape. The untargeted providers keep their prior
+    // spelling in BOTH document and ledger, and that mixed ledger must not make the next pass throw.
+    const root = tmpRepo();
+    seed(root);
+    expect(() =>
+      installHookRegistrations(root, ['searchSteering'], { targets: ['claude'] }),
+    ).not.toThrow();
+    expect(readFileSync(join(root, '.claude/settings.json'), 'utf8')).toContain(
+      '/dist/gate-engine/',
+    );
+    for (const rel of ['.codex/hooks.json', '.cursor/hooks.json'])
+      expect(readFileSync(join(root, rel), 'utf8')).not.toContain('/dist/gate-engine/');
+    expect(ledgerCommands(root).filter((c) => c.includes('/dist/'))).toHaveLength(2);
+
+    expect(() => installHookRegistrations(root, ['searchSteering'])).not.toThrow();
+    for (const command of ledgerCommands(root)) expect(command).toContain('/dist/gate-engine/');
+  });
+
+  it('converges a codex row recorded under the other install scope', () => {
+    // codex/cursor share ONE destinationRel across scopes, so an overlay-recorded row surfaces in a
+    // shared pass. Migration must precede transferHookRegistrationScope, which is blind to it.
+    const root = tmpRepo();
+    execFileSync('git', ['init'], { cwd: root, stdio: 'ignore' });
+    installHookRegistrations(root, ['searchSteering'], { targets: ['codex'], overlay: true });
+    const rel = '.codex/hooks.json';
+    writeFileSync(join(root, rel), downgrade(readFileSync(join(root, rel), 'utf8')));
+    writeFileSync(ledgerPath(root), downgrade(readFileSync(ledgerPath(root), 'utf8')));
+
+    expect(() =>
+      installHookRegistrations(root, ['searchSteering'], { targets: ['codex'] }),
+    ).not.toThrow();
+
+    expect(readFileSync(join(root, rel), 'utf8')).not.toContain('devkit/gate-engine');
+    for (const entry of ledger(root).entries) {
+      expect(entry.installScope).toBe('shared');
+      expect(entry.native.command).toContain('/dist/gate-engine/');
+    }
+  });
+
+  it('converges the Claude overlay surface, which is a different destination file', () => {
+    // Claude alone splits by scope: .claude/settings.local.json, its own destinationRel and so its
+    // own ledger row. A shared-only migration would leave every overlay consumer throwing.
+    const root = tmpRepo();
+    execFileSync('git', ['init'], { cwd: root, stdio: 'ignore' });
+    installHookRegistrations(root, ['searchSteering'], { targets: ['claude'], overlay: true });
+    const rel = '.claude/settings.local.json';
+    writeFileSync(join(root, rel), downgrade(readFileSync(join(root, rel), 'utf8')));
+    writeFileSync(ledgerPath(root), downgrade(readFileSync(ledgerPath(root), 'utf8')));
+
+    expect(() =>
+      installHookRegistrations(root, ['searchSteering'], { targets: ['claude'], overlay: true }),
+    ).not.toThrow();
+
+    const text = readFileSync(join(root, rel), 'utf8');
+    expect(text).not.toContain('devkit/gate-engine/search-tool');
+    expect(text).toContain('/dist/gate-engine/search-tool/search-tool-guard.mjs');
+    expect(
+      checkHookRegistrations(root, ['searchSteering'], { targets: ['claude'], overlay: true }).ok,
+    ).toBe(true);
+  });
+
+  it('converges a document holding the prior spelling twice', () => {
+    // A merge resolution can leave devkit's own command duplicated. Both are devkit's and one row
+    // owns them, so the pass must land on exactly one — not strip one and re-add beside the other.
+    const root = tmpRepo();
+    seed(root);
+    const doc = claude(root);
+    const group = doc.hooks.PreToolUse.find((g) => g.matcher === 'Bash');
+    group.hooks.push({ ...group.hooks[0] });
+    writeFileSync(join(root, '.claude/settings.json'), JSON.stringify(doc, null, 2));
+
+    expect(() => installHookRegistrations(root, ['searchSteering'])).not.toThrow();
+
+    expect(claudeCommands(root).filter((c) => c.includes('search-tool-guard'))).toHaveLength(1);
+  });
+
+  it('reports without a ledger file at all, rather than throwing', () => {
+    // check used to pass a possibly-null ledger and now passes reconciled entries; the empty case
+    // must stay equivalent, and an absent ledger is normal for a never-registered repo.
+    const root = tmpRepo();
+    seed(root);
+    rmSync(ledgerPath(root));
+    const result = checkHookRegistrations(root, ['searchSteering']);
+    expect(result.ok).toBe(false);
+    expect(result.missing.some((m) => m.endsWith(':superseded-registration'))).toBe(false);
+    expect(existsSync(ledgerPath(root))).toBe(false);
+  });
+
+  it('doctor names the supersession instead of crying tampering', () => {
+    const root = tmpRepo();
+    seed(root);
+    const stateA = checkHookRegistrations(root, ['searchSteering']);
+    expect(stateA.ok).toBe(false);
+    expect(stateA.missing).toContain('claude:superseded-registration');
+    expect(stateA.missing.some((m) => m.endsWith(':untrusted-ledger'))).toBe(false);
+
+    const patched = tmpRepo();
+    seed(patched, { document: 'current' });
+    const stateB = checkHookRegistrations(patched, ['searchSteering']);
+    expect(stateB.ok).toBe(false);
+    expect(stateB.missing).toEqual(
+      expect.arrayContaining(['claude:superseded-registration', 'codex:superseded-registration']),
+    );
+
+    installHookRegistrations(root, ['searchSteering']);
+    expect(checkHookRegistrations(root, ['searchSteering']).ok).toBe(true);
   });
 });

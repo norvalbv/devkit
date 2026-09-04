@@ -5,6 +5,7 @@ import { readJson } from '../../fs-helpers.mts';
 import { isTracked } from '../../git-tracked.mts';
 import { isSafeAgentAssetPath } from '../agent-asset-manifest/lifecycle.mts';
 import { type AgentProvider, LEGACY_AGENT_PROVIDERS } from '../agent-assets/agent-providers.mts';
+import { dataRecord } from './plain-data.mts';
 import {
   encodeHookRegistrationLedger,
   HOOK_REGISTRATION_LEDGER_REL,
@@ -17,7 +18,6 @@ import {
   projectHookRegistrations,
   writeHookRegistrationLedger,
 } from './lifecycle.mts';
-import { dataRecord } from './plain-data.mts';
 
 export interface HookRegistrationOptions {
   dryRun?: boolean;
@@ -56,23 +56,28 @@ const RETIRED_COMMANDS: Partial<Record<string, Partial<Record<AgentProvider, rea
     },
   };
 
-/**
- * Reclaim exact commands written by pre-ledger releases after their live registration disappears.
- * The exact retired command is itself the ownership proof: pre-ledger configs can contain one even
- * when their later component selection never recorded its owner (sc-1321). Keep the component-id
- * parameter for caller compatibility, but do not let a deselected component strand its old command.
- */
-export function stripRetiredRegistrations(
+/** One handler a ledger row proves devkit wrote: its command AND where the row says it sits. */
+export interface OwnedHandler {
+  event: string;
+  matcher: string | null;
+  command: string;
+}
+
+/** Reclaim what a previous devkit release wrote here. RETIRED_COMMANDS accepts the literal anywhere
+ * (a pre-ledger config names no location, sc-1321); `owned` stays inside the event its row names. */
+export function stripReclaimedCommands(
   document: unknown,
-  _componentIds: readonly string[],
   provider: AgentProvider,
-): { document: unknown; changed: boolean } {
+  owned: readonly OwnedHandler[] = [],
+) {
   const commands = new Set(
     Object.values(RETIRED_COMMANDS).flatMap(
       (commandsByProvider) => commandsByProvider?.[provider] ?? [],
     ),
   );
-  if (!commands.size || provider === 'codex') return { document, changed: false };
+  // The old `provider === 'codex'` clause was unreachable (no codex arm, so `!commands.size` won),
+  // and codex DOES need the superseded arm.
+  if (!commands.size && !owned.length) return { document, changed: false };
   const root = dataRecord(document);
   const hooks = dataRecord(root?.hooks);
   if (!root || !hooks) return { document, changed: false };
@@ -81,9 +86,15 @@ export function stripRetiredRegistrations(
   for (const [event, rawList] of Object.entries(hooks)) {
     if (!Array.isArray(rawList)) continue;
     if (provider === 'cursor') {
-      const list = rawList.filter(
-        (entry) => !commands.has(String(dataRecord(entry)?.command ?? '')),
-      );
+      const list = rawList.filter((entry) => {
+        const item = dataRecord(entry);
+        const command = String(item?.command ?? '');
+        // Cursor keeps a FLAT list per event, so the event alone locates a handler.
+        return (
+          !commands.has(command) &&
+          !owned.some((handler) => handler.event === event && handler.command === command)
+        );
+      });
       if (list.length === rawList.length) continue;
       changed = true;
       if (list.length) nextHooks[event] = list;
@@ -99,9 +110,21 @@ export function stripRetiredRegistrations(
         list.push(rawGroup);
         continue;
       }
-      const kept = handlers.filter(
-        (handler) => !commands.has(String(dataRecord(handler)?.command ?? '')),
-      );
+      const kept = handlers.filter((entry) => {
+        const command = String(dataRecord(entry)?.command ?? '');
+        return (
+          !commands.has(command) &&
+          !owned.some(
+            (handler) =>
+              handler.event === event &&
+              handler.command === command &&
+              // Mirrors lifecycle.mts matcherGroup: null means the group carries no `matcher` key.
+              (handler.matcher === null
+                ? !Object.hasOwn(group, 'matcher')
+                : group.matcher === handler.matcher),
+          )
+        );
+      });
       if (kept.length === handlers.length) {
         list.push(rawGroup);
         continue;
