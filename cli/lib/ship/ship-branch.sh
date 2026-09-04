@@ -93,6 +93,9 @@ FROM_BRANCH=0      # derive a frozen committed path set from origin/<base>..HEAD
 QAVIS_PUBLISH=1     # passed staged evidence is published after the PR exists; explicit opt-out only
 DRAFT=0            # --draft opens the PR as a draft; default stays ready-for-review
 RESUME_READY=0     # --ready seen under --resume, before the record reveals ship-vs-reship mode
+WAIT_CI=0          # --wait-ci polls the PR's checks after everything else is durable
+WAIT_CI_TIMEOUT=900
+WAIT_CI_TIMEOUT_SET=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --base)
@@ -128,6 +131,12 @@ while [ "$#" -gt 0 ]; do
       # mode flag or a misunderstanding. ship.mts rejects it earlier with the same guidance; this arm
       # is the backstop for a direct script invocation (tests, recovery hints).
       echo "--ready applies to --pr (marking an existing draft PR ready) — a new ship opens a ready PR by default; use --draft to open a draft" >&2; exit 1 ;;
+    --wait-ci)
+      # No --resume guard, unlike --base/--link: this changes nothing about WHAT ships. It is also
+      # not recorded, so a resume that wants the wait re-passes the flag (decision record).
+      WAIT_CI=1; shift ;;
+    --wait-ci-timeout)
+      WAIT_CI_TIMEOUT="${2:?--wait-ci-timeout requires seconds}"; WAIT_CI_TIMEOUT_SET=1; shift 2 ;;
     --resume) echo "--resume must come FIRST: devkit ship --resume <branch> [--] <extra-path...>" >&2; exit 1 ;;
     --) shift; while [ "$#" -gt 0 ]; do PATHS+=("$1"); shift; done; break ;;
     -*) echo "unknown flag: $1 (pass a dash-leading file path after --)" >&2; exit 1 ;;
@@ -137,6 +146,8 @@ done
 # Two body sources cannot both win, and silently preferring one would make the OTHER the operator's
 # unnoticed dead argument — refuse instead.
 [ "$BODY_SET" -eq 0 ] || [ "$BODY_FILE_SET" -eq 0 ] || { echo "--body and --body-file are mutually exclusive" >&2; exit 1; }
+. "$SCRIPT_DIR/wait-ci/args.sh"
+ship_validate_wait_ci "$WAIT_CI" "$WAIT_CI_TIMEOUT" "$WAIT_CI_TIMEOUT_SET" "$DRY_GATES" || exit 1
 
 # Hoisted above the --resume load (which needs it); everything below the worktree ceremony reads it.
 ROOT=$(git rev-parse --show-toplevel)
@@ -707,6 +718,8 @@ if [ "$DRY_GATES" -eq 0 ]; then
   [ -z "$BASE_FLAG" ] || SHIP_INTENT_ARGS+=(--base "$BASE_FLAG")
   for d in ${LINK_EXTRA[@]+"${LINK_EXTRA[@]}"}; do SHIP_INTENT_ARGS+=(--link "$d"); done
   [ "$QAVIS_PUBLISH" -eq 1 ] || SHIP_INTENT_ARGS+=(--no-qavis-publish)
+  # Any boolean added here must ALSO join the allowlist in ship-intent-args.mts:16-22, or its
+  # `--flag` is treated as value-taking and silently eats the next argv entry.
   [ "$DRAFT" -eq 0 ] || SHIP_INTENT_ARGS+=(--draft)
   if [ "$RESUME" -eq 1 ]; then
     SHIP_INTENT_ARGS+=(--resumed --expect-generation "$RESUME_GENERATION")
@@ -1408,6 +1421,7 @@ fi
 if [ -n "${SHIP_DRY_RUN:-}" ]; then
   echo "DRY: committed locally on $BR, skipped push + PR." >&2
   git -C "$WT" show --stat --oneline HEAD >&2
+  [ "$WAIT_CI" -eq 0 ] || ship_wait_ci_not_run "" dry-run-opened-no-pr
   exit 0
 fi
 
@@ -1440,6 +1454,12 @@ if [ -z "$PR_CREATE_FAILED" ]; then
   # The PR number is the trailing path segment of the URL gh just printed (one gh call, not two).
   PR_NUM=${PR_URL##*/}
   [[ "$PR_NUM" =~ ^[0-9]+$ ]] || PR_NUM=""
+  # Name the quiet one-shot for anyone who did NOT ask for --wait-ci. sc-2394 was reported after an
+  # agent reached for `gh run watch`, which needs a run id and redraws the whole job every 3s.
+  if [ "$WAIT_CI" -eq 0 ] && [ -n "$PR_NUM" ]; then
+    echo "  checks so far: gh pr checks $PR_NUM --repo $REPO --json bucket,name,state,link" >&2
+    echo "  or wait for a bounded verdict next time: devkit ship … --wait-ci" >&2
+  fi
   # Telemetry: tie this ship's id to the PR it opened, so the usage tracker links a ship row to its
   # PR directly (no gh-by-branch lookup needed). ship_result already fired during the gate chain —
   # before the PR existed — so this is a separate line the collector upserts onto the ship. Reuses
@@ -1497,6 +1517,7 @@ node "$RMW" \
 # PR-create failed but the push + manifest record both landed: the branch is recoverable AND known to
 # reconcile. Tell the operator how to open the PR by hand; reconcile cleans the branch once it merges.
 if [ -n "$PR_CREATE_FAILED" ]; then
+  [ "$WAIT_CI" -eq 0 ] || ship_wait_ci_not_run "" pr-create-failed
   echo "push OK but PR create failed — branch is pushed AND recorded for reconcile." >&2
   echo "Open the PR by hand (reconcile cleans the branch once it merges):" >&2
   # The hint is copy-pasted verbatim, so it has to preserve draft-ness — handing back a bare
@@ -1558,3 +1579,7 @@ git update-ref -d "$RECOVERY_RECEIPT_REF" "${RECOVERY_COMMIT:-${SHIP_COMMIT:-}}"
 # concurrent actor could legitimately advance, whereas this blob is devkit-private, rewritten whole
 # on every ship to this branch, and worthless once the commit it describes is published.
 git update-ref -d "$RECOVERY_GATE_ADDS_REF" 2>/dev/null || true
+
+# --wait-ci runs LAST: the push, PR, manifest, intent release and worktree/branch cleanup above are
+# all durable, so a wait that is killed, times out or reports red cannot cost this ship.
+[ "$WAIT_CI" -eq 0 ] || ship_run_wait_ci "$PR_NUM" "$REPO" "$WAIT_CI_TIMEOUT" "$PR_URL"

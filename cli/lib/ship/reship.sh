@@ -78,6 +78,9 @@ BODY_FILE_SET=0    # --body-file <path>: author the body once in a file; survive
 UPDATE_PR_BODY=0   # explicit body flag? Refresh the existing PR too; recorded across --resume
 QAVIS_PUBLISH=1    # suppresses only the post-push description write, never the staged gate
 READY=0            # --ready marks the PR ready-for-review after the push lands
+WAIT_CI=0          # --wait-ci polls the PR's checks after the re-push is durable
+WAIT_CI_TIMEOUT=900
+WAIT_CI_TIMEOUT_SET=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --pr) shift ;;                                                   # mode flag (already routed here) — ignore
@@ -99,6 +102,9 @@ while [ "$#" -gt 0 ]; do
       # The PR already exists here, so there is nothing to open as a draft. Name the actual remedy
       # rather than falling through to the generic unknown-flag error.
       echo "--draft applies to a NEW ship (opening the PR); this PR already exists. To convert it back to a draft: gh pr ready --undo $BR" >&2; exit 1 ;;
+    --wait-ci) WAIT_CI=1; shift ;;
+    --wait-ci-timeout)
+      WAIT_CI_TIMEOUT="${2:?--wait-ci-timeout requires seconds}"; WAIT_CI_TIMEOUT_SET=1; shift 2 ;;
     --resume) echo "--resume must come FIRST: devkit ship --resume <branch> [--] <extra-path...>" >&2; exit 1 ;;
     --) shift; while [ "$#" -gt 0 ]; do PATHS+=("$1"); shift; done; break ;;
     -*) echo "unknown flag: $1 (pass a dash-leading file path after --)" >&2; exit 1 ;;
@@ -106,6 +112,8 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 [ "$BODY_SET" -eq 0 ] || [ "$BODY_FILE_SET" -eq 0 ] || { echo "--body and --body-file are mutually exclusive" >&2; exit 1; }
+. "$(dirname "${BASH_SOURCE[0]}")/wait-ci/args.sh"
+ship_validate_wait_ci "$WAIT_CI" "$WAIT_CI_TIMEOUT" "$WAIT_CI_TIMEOUT_SET" || exit 1
 BODY_RECEIPT_PREFIX=refs/devkit/reship-body-receipts
 BODY_PAYLOAD_PREFIX=refs/devkit/reship-body-payloads
 BODY_RECEIPT_REF=
@@ -593,6 +601,14 @@ cleanup() {
   git worktree remove --force "$WT" 2>/dev/null || true
 }
 trap cleanup EXIT
+# Drop the ephemeral worktree BEFORE a long wait. Its run record is what ship_reclaim_orphan_worktrees
+# matches on, so holding it across the poll refuses a concurrent same-branch ship for the whole bound
+# — ship-branch.sh already removes its worktree ahead of the wait for exactly this reason.
+reship_release_worktree_for_wait() {
+  [ -z "$KEEP_WT" ] || return 0
+  [ -n "${WT:-}" ] || return 0
+  git worktree remove --force "$WT" 2>/dev/null || true
+}
 # Match new-ship: a signal delivered only to this public shell is handed to the active gate
 # supervisor, and cleanup waits until its complete reviewer tree is reaped (sc-1538).
 . "$SCRIPT_DIR/review/process/gate-signal-handoff.sh"
@@ -654,6 +670,7 @@ if [ "$REWRITE" -eq 1 ] && [ "$UPDATE_PR_BODY" -eq 1 ] && [ "$RESUME" -eq 1 ] &&
 fi
 if [ "$REWRITE_ALREADY_PUBLISHED" -eq 1 ] && [ -n "${SHIP_DRY_RUN:-}" ]; then
   echo "DRY: gated rewrite ${EXPECTED_REMOTE:0:7} is already on origin/$BR; skipped reconcile + the recorded PR-body update and kept its intent for a real run." >&2
+  [ "$WAIT_CI" -eq 0 ] || ship_wait_ci_not_run "" dry-run-opened-no-pr
   exit 0
 fi
 if [ "$REWRITE" -eq 1 ] && [ "${#MISSING_SCOPE[@]}" -gt 0 ] && [ "$REWRITE_ALREADY_PUBLISHED" -eq 0 ]; then
@@ -712,6 +729,7 @@ if git -C "$WT" diff --cached --quiet; then
   fi
   if [ "$RESUME" -eq 1 ] && [ "$UPDATE_PR_BODY" -eq 1 ] && [ -n "${SHIP_DRY_RUN:-}" ]; then
     echo "DRY: no commit delta; skipped the recorded PR-body update and kept its intent for a real run." >&2
+    [ "$WAIT_CI" -eq 0 ] || ship_wait_ci_not_run "" dry-run-opened-no-pr
     exit 0
   fi
   # --ready is a state change on the PR, not on the push, so an empty delta does not excuse skipping
@@ -738,6 +756,31 @@ if git -C "$WT" diff --cached --quiet; then
     SI_NOTE="released the record"
   else
     SI_NOTE="the record was NOT released this run (see any warning above); it expires on its own in 6h"
+  fi
+  # The wait polls for up to WAIT_CI_TIMEOUT, so it runs OUTSIDE the publish mutex: holding that
+  # lock across it would reject a concurrent same-branch --pr for minutes over a ~1s mutation.
+  rewrite_publish_lock_release
+  # A body update that FAILED is not something to poll checks about — the push path says so at the
+  # matching site below, and reporting a green verdict before exiting 1 contradicts it.
+  if [ "$WAIT_CI" -eq 1 ] && [ "$BODY_ONLY_UPDATE" -eq 1 ] && [ "$BODY_UPDATE_STATUS" -ne 0 ]; then
+    ship_wait_ci_not_run "${PR_NUM:-}" pr-body-publication-failed
+    exit "$BODY_UPDATE_STATUS"
+  fi
+  # An empty delta does not excuse skipping a requested wait — the PR exists and its checks are what
+  # was asked about. Only on the arms that converge; the rest is the "nothing to push" error.
+  if [ "$WAIT_CI" -eq 1 ]; then
+    if [ "$RESUME" -eq 1 ] || [ "$NO_DELTA_READY" -eq 1 ] || [ "$BODY_ONLY_UPDATE" -eq 1 ]; then
+      reship_release_worktree_for_wait
+      [ -n "${PR_URL:-}" ] || PR_URL=$(gh pr view "$BR" --repo "$REPO" --json url -q .url 2>/dev/null) || PR_URL=""
+      [ -n "${PR_NUM:-}" ] || PR_NUM=${PR_URL##*/}
+      if [[ "${PR_NUM:-}" =~ ^[0-9]+$ ]]; then
+        ship_run_wait_ci "$PR_NUM" "$REPO" "$WAIT_CI_TIMEOUT" "$PR_URL"
+      else
+        ship_wait_ci_not_run "" pr-number-unresolved
+      fi
+    else
+      ship_wait_ci_not_run "${PR_NUM:-}" nothing-was-pushed
+    fi
   fi
   if [ "$BODY_ONLY_UPDATE" -eq 1 ]; then
     [ "$BODY_UPDATE_STATUS" -eq 0 ] || exit "$BODY_UPDATE_STATUS"
@@ -859,6 +902,7 @@ if [ -n "${SHIP_DRY_RUN:-}" ]; then
   rewrite_ref_cleanup
   trap - EXIT  # keep the worktree for inspection
   echo "DRY: worktree kept at $WT. Remove with: git worktree remove --force '$WT'" >&2
+  [ "$WAIT_CI" -eq 0 ] || ship_wait_ci_not_run "" dry-run-opened-no-pr
   exit 0
 fi
 
@@ -1032,7 +1076,10 @@ if [ "$UPDATE_PR_BODY" -eq 1 ]; then
     fi
   fi
   body_receipt_delete
-  [ "$BODY_UPDATE_STATUS" -eq 0 ] || exit "$BODY_UPDATE_STATUS"
+  if [ "$BODY_UPDATE_STATUS" -ne 0 ]; then
+    [ "$WAIT_CI" -eq 0 ] || ship_wait_ci_not_run "${PR_NUM:-}" pr-body-publication-failed
+    exit "$BODY_UPDATE_STATUS"
+  fi
 fi
 rewrite_publish_lock_release
 
@@ -1047,13 +1094,28 @@ if [ -n "$PR_URL" ]; then
   READY_STATUS=0
   reship_mark_ready "${PR_NUM:-}" || READY_STATUS=1
   echo "$PR_URL"
+  # The wait comes after the ready flip so it observes the check set that flip triggers — but a
+  # FAILED flip skips it: the operator has an actionable remedy above, and burying it under up to two
+  # hours of polling on a PR that is in the wrong state helps nobody.
+  if [ "$WAIT_CI" -eq 1 ]; then
+    if [ "$READY_STATUS" -ne 0 ]; then
+      ship_wait_ci_not_run "${PR_NUM:-}" ready-flip-failed
+    elif [[ "$PR_NUM" =~ ^[0-9]+$ ]]; then
+      reship_release_worktree_for_wait
+      ship_run_wait_ci "$PR_NUM" "$REPO" "$WAIT_CI_TIMEOUT" "$PR_URL"
+    else
+      ship_wait_ci_not_run "" pr-number-unresolved
+    fi
+  fi
   # Non-zero only after the URL is printed: the re-push succeeded, the requested flip did not.
   [ "$READY_STATUS" -eq 0 ] || exit 1
 else
   if [ "$READY" -eq 1 ]; then
     echo "re-pushed to origin/$BR, but the requested --ready flip did not happen." >&2
     reship_mark_ready "" || true
+    [ "$WAIT_CI" -eq 0 ] || ship_wait_ci_not_run "" ready-flip-failed
     exit 1
   fi
+  [ "$WAIT_CI" -eq 0 ] || ship_wait_ci_not_run "" pr-url-unresolved
   echo "re-pushed to origin/$BR"
 fi

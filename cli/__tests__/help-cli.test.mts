@@ -34,7 +34,17 @@ describe('devkit help surface', () => {
     expect(r.stdout).toContain('--from-branch');
     expect(r.stdout).toContain('--draft');
     expect(r.stdout).toContain('--ready');
+    expect(r.stdout).toContain('--wait-ci');
     expect(r.stdout).toMatch(/Never leaves a local branch or commit/);
+  });
+
+  it('documents the --wait-ci contract an agent has to act on', () => {
+    const r = run(['help', 'ship']);
+    expect(r.stdout).toContain('ci-outcome=');
+    // The two properties a caller gets wrong: a red PR is not a failed ship, and the flag does not
+    // survive a --resume.
+    expect(r.stdout).toMatch(/NEVER reaches the exit code/);
+    expect(r.stdout).toMatch(/NOT replayed by --resume/);
   });
 
   it('rejects --from-branch with --pr at the dispatcher boundary', () => {

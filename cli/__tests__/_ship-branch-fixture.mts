@@ -396,6 +396,12 @@ export function bodyUpdateRepo({ hookBody = 'exit 0' } = {}) {
       'if [ "$1" = pr ] && [ "$2" = ready ]; then',
       '  exit "${GH_READY_STATUS:-0}"',
       'fi',
+      // Only --wait-ci reaches this; without GH_CHECKS_JSON it falls through to the exit 1 below,
+      // which every other caller already sees.
+      'if [ "$1" = pr ] && [ "$2" = checks ] && [ -n "${GH_CHECKS_JSON:-}" ]; then',
+      '  printf \'%s\' "$GH_CHECKS_JSON"',
+      '  exit 0',
+      'fi',
       'if [ "$1" = pr ] && [ "$2" = edit ]; then',
       '  if [ "${GH_EDIT_KILL_PARENT:-0}" -eq 1 ]; then kill -9 "$PPID"; exit 9; fi',
       '  cat > "$GH_BODY"',
