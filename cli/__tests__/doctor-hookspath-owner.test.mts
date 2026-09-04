@@ -11,7 +11,7 @@
  * which hook body ran, because "the config key is empty" is not the claim the story makes.
  */
 
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -19,7 +19,7 @@ import { collectResults } from '../commands/doctor.mts';
 import syncHookRunner, { replacePin } from '../commands/sync/sync-hook-runner.mts';
 import { replaceableHooksPathPin } from '../lib/doctor/hook-checks.mts';
 import { runSelfHostDoctor } from '../lib/doctor/self-host-doctor.mts';
-import { rootRegistry } from './_helpers.mts';
+import { rootRegistry, testSpawnSync } from './_helpers.mts';
 
 const { mkTmp, cleanup } = rootRegistry();
 afterEach(cleanup);
@@ -106,7 +106,9 @@ async function ownerCheck(root: string, cfg: typeof HUSKY_CFG = HUSKY_CFG) {
 function commitAndReadHook(wt: string, name: string): string {
   writeFileSync(join(wt, `${name}.txt`), 'x');
   git(wt, 'add', '-A');
-  const done = spawnSync('git', ['-C', wt, 'commit', '-m', name], { encoding: 'utf8' });
+  // Supervised: this commit EXECUTES a hook, so it is a process tree rather than a leaf git call.
+  // See docs/decisions/suite-hangs-bound-at-the-spawn-site.md (sc-2393).
+  const done = testSpawnSync('git', ['-C', wt, 'commit', '-m', name], { encoding: 'utf8' });
   return `${done.stdout ?? ''}${done.stderr ?? ''}`;
 }
 
