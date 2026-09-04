@@ -115,7 +115,8 @@ as its own field. Counting `**Tradeoff:**` labels reports 0/29 and is wrong — 
 7. **ranx cross-check** — validate our hand-computed IR metrics against a TREC-validated implementation.
 8. **Publish** — `bun gate-engine/eval/cli.mts publish --suite decisions --baseline
    gate-engine/decisions/eval/results.baseline.json --tree WORKTREE`, then `bun run benchmarks:render`.
-   Requires a completely clean tree, so run it from a fresh checkout at `main`.
+   That baseline is gitignored, so it cannot be staged and `--tree STAGED` refuses it; being ignored,
+   it also leaves the tree clean, so run this from a fresh checkout at `main`.
 
 ---
 
@@ -153,8 +154,9 @@ node gate-engine/decisions/eval/bench.mts all --baseline   # resumable; re-run t
   has no `SUPERSEDED` state — both need `eval/recall/scoring.mts` updated in lockstep.
 - **AC5 (ship the `check-alignment` hook fragment)** was flagged in the plan and remains unbuilt.
 - **The judge baseline is not published to the dashboard.** `results.baseline.json` exists locally
-  and is gitignored by design ("no baseline ships; each consumer generates theirs"). Publishing needs
-  a completely clean tree: `bun gate-engine/eval/cli.mts publish --suite decisions --baseline
+  and is gitignored by design ("no baseline ships; each consumer generates theirs"). Because it is
+  ignored it can never be staged, so this one publishes from a clean tree: `bun
+  gate-engine/eval/cli.mts publish --suite decisions --baseline
   gate-engine/decisions/eval/results.baseline.json --tree WORKTREE`, then `bun run benchmarks:render`.
 
 ### How to read any number in this document

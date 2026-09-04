@@ -6,10 +6,10 @@ import { describe, expect, it } from 'vitest';
 import { baselinePublicationErrors, loadCatalog, validateCatalog } from '../catalog.mts';
 import {
   aggregateMetricAssessment,
-  assertCleanPublishWorktree,
   comparisons,
   defaultPredecessor,
   metricAssessment,
+  publishLocked,
   reconcileLedgers,
   withCheckConsistency,
 } from '../cli.mts';
@@ -17,17 +17,32 @@ import {
   activeEvents,
   appendPublishedEvent,
   canonicalJson,
+  COMMITTED_PROVENANCE,
   eventLine,
   immutableErrors,
   latestRecordedEvent,
+  publicationErrors,
+  STAGED_PROVENANCE,
   validateHistory,
   withPublishLock,
 } from '../history.mts';
 import { generatedOutputs, latestEvents, replaceMarker } from '../render.mts';
 import type { RepositorySource } from '../source.mts';
-import { repositorySource } from '../source.mts';
-import type { BenchmarkEvent, MetricObservation } from '../types.mts';
-import { trackerFixture as fixture, memory, readableSnapshot } from './tracker-fixtures.mts';
+import {
+  assertCleanPublishWorktree,
+  assertIndexUnchanged,
+  repositorySource,
+  stagedIndexIdentity,
+} from '../source.mts';
+import type { BenchmarkEvent, CheckpointEnvelope, MetricObservation } from '../types.mts';
+import {
+  deterministicBaseline,
+  FIXTURE_COMMIT_DATE,
+  trackerFixture as fixture,
+  memory,
+  readableSnapshot,
+  stagedRepo,
+} from './tracker-fixtures.mts';
 
 const ROOT = join(import.meta.dirname, '..', '..', '..');
 
@@ -563,5 +578,372 @@ describe('catalog and generated views', () => {
     expect(readme.split('\n').find((line) => line.startsWith('| Feature critique '))).toContain(
       'Gold finding recall',
     );
+  });
+});
+
+function readCheckpointFile(root: string, path: string): CheckpointEnvelope {
+  return JSON.parse(readFileSync(join(root, path), 'utf8'));
+}
+
+describe('publishing from the Git index', () => {
+  const publishInRepo = (root: string, args: string[]): BenchmarkEvent => {
+    let published: BenchmarkEvent | undefined;
+    withPublishLock(root, (append) =>
+      publishLocked(root, args, (event, checkpoint) => {
+        published = event;
+        append(event, checkpoint);
+      }),
+    );
+    if (!published) throw new Error('publish returned no event');
+    return published;
+  };
+  const staged = (suite: string) => ['--suite', suite, '--tree', 'STAGED'];
+  const cli = (root: string, args: string[]) =>
+    execFileSync('bun', [join(ROOT, 'gate-engine/eval/cli.mts'), ...args], {
+      cwd: root,
+      encoding: 'utf8',
+    });
+
+  it('publishes the staged bytes, not the worktree and not HEAD', () => {
+    const repo = stagedRepo();
+    try {
+      repo.write('alpha/results.baseline.json', deterministicBaseline(8));
+      repo.git('add', 'alpha/results.baseline.json');
+      repo.write('alpha/results.baseline.json', deterministicBaseline(7));
+      const event = publishInRepo(repo.root, staged('alpha'));
+      expect(event.metrics[0]?.value).toBe(0.8);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it('reads the catalog from the index, so a staged-only suite can publish', () => {
+    const repo = stagedRepo();
+    try {
+      const catalog = JSON.parse(
+        readFileSync(join(repo.root, 'docs/benchmarks/catalog.json'), 'utf8'),
+      );
+      catalog.subjects.push({
+        id: 'subject-beta',
+        label: 'Subject beta',
+        kind: 'benchmark',
+        lifecycle: 'experimental',
+        evidence: 'accepted',
+        suiteIds: ['beta'],
+      });
+      catalog.suites.push({
+        ...catalog.suites[0],
+        id: 'beta',
+        label: 'Suite beta',
+        subjectIds: ['subject-beta'],
+        baseline: 'beta/results.baseline.json',
+        hashes: {
+          implementation: ['beta/impl.mts'],
+          corpus: ['beta/cases-*.jsonl'],
+          scorer: ['shared/scoring.mts'],
+          runner: ['beta/runner.mts'],
+        },
+      });
+      repo.write('docs/benchmarks/catalog.json', `${JSON.stringify(catalog, null, 2)}\n`);
+      repo.write('beta/impl.mts', 'export const impl = 2;\n');
+      repo.write('beta/runner.mts', 'export const runner = 2;\n');
+      repo.write('beta/cases-1.jsonl', '{"id":"case-1"}\n');
+      repo.write('beta/results.baseline.json', deterministicBaseline(6));
+      repo.git('add', '-A');
+      const event = publishInRepo(repo.root, staged('beta'));
+      expect(event.suiteId).toBe('beta');
+      expect(event.metrics[0]?.value).toBe(0.6);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it('names the parent commit as provenance and says so in the event', () => {
+    const repo = stagedRepo();
+    try {
+      repo.write('alpha/results.baseline.json', deterministicBaseline(8));
+      repo.git('add', '-A');
+      const event = publishInRepo(repo.root, staged('alpha'));
+      expect(event.provenance.sourceCommit).toBe(repo.head());
+      expect(event.provenance.sourceCommit).toMatch(/^[a-f0-9]{40}$/);
+      expect(event.provenance.source).toBe(STAGED_PROVENANCE);
+      const envelope = readCheckpointFile(repo.root, event.checkpoint?.path ?? '');
+      expect(publicationErrors(event, envelope)).toEqual([]);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it('stamps wall-clock capture time unless --recorded-at pins it', () => {
+    const repo = stagedRepo();
+    try {
+      repo.write('alpha/results.baseline.json', deterministicBaseline(8));
+      repo.git('add', '-A');
+      const event = publishInRepo(repo.root, staged('alpha'));
+      expect(Date.parse(event.recordedAt)).toBeGreaterThan(Date.parse(FIXTURE_COMMIT_DATE));
+      expect(Math.abs(Date.now() - Date.parse(event.recordedAt))).toBeLessThan(60_000);
+
+      repo.git('add', '-A');
+      repo.write('alpha/results.baseline.json', deterministicBaseline(7));
+      repo.git('add', '-A');
+      const pinned = publishInRepo(repo.root, [
+        ...staged('alpha'),
+        '--recorded-at',
+        '2026-05-06T07:08:09Z',
+      ]);
+      expect(pinned.recordedAt).toBe('2026-05-06T07:08:09.000Z');
+      const envelope = readCheckpointFile(repo.root, pinned.checkpoint?.path ?? '');
+      expect(envelope.capturedAt).toBe(pinned.recordedAt);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it('names the git add remedy when the requested baseline is not staged', () => {
+    const repo = stagedRepo();
+    try {
+      repo.write('alpha/extra.baseline.json', deterministicBaseline(8));
+      repo.write('alpha/impl.mts', 'export const impl = 2;\n');
+      repo.git('add', 'alpha/impl.mts');
+      expect(() =>
+        publishInRepo(repo.root, [...staged('alpha'), '--baseline', 'alpha/extra.baseline.json']),
+      ).toThrow(/stage it with: git add alpha\/extra\.baseline\.json/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it('refuses when nothing is staged', () => {
+    const repo = stagedRepo();
+    try {
+      expect(() => publishInRepo(repo.root, staged('alpha'))).toThrow(/Nothing is staged/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it('refuses an unmerged index by naming the conflict', () => {
+    const repo = stagedRepo();
+    try {
+      repo.git('checkout', '-q', '-b', 'side');
+      repo.write('alpha/results.baseline.json', deterministicBaseline(8));
+      repo.git('commit', '-qam', 'side');
+      repo.git('checkout', '-q', 'main');
+      repo.write('alpha/results.baseline.json', deterministicBaseline(7));
+      repo.git('commit', '-qam', 'main');
+      try {
+        repo.git('merge', 'side');
+      } catch {
+        // The conflict is the point of the fixture; git exits non-zero when it leaves stages behind.
+      }
+      expect(() => publishInRepo(repo.root, staged('alpha'))).toThrow(
+        /unmerged paths:[\s\S]*alpha\/results\.baseline\.json/,
+      );
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it('refuses a ledger the index does not carry, and accepts it once staged', () => {
+    const repo = stagedRepo(['alpha', 'beta']);
+    try {
+      repo.write('alpha/results.baseline.json', deterministicBaseline(8));
+      repo.write('beta/results.baseline.json', deterministicBaseline(7));
+      repo.git('add', '-A');
+      publishInRepo(repo.root, staged('alpha'));
+      expect(() => publishInRepo(repo.root, staged('beta'))).toThrow(/ledger to match the index/);
+      repo.git('add', '-A');
+      expect(publishInRepo(repo.root, staged('beta')).suiteId).toBe('beta');
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it('tracks the index identity so a concurrent stage cannot be published silently', () => {
+    const repo = stagedRepo();
+    try {
+      repo.write('alpha/results.baseline.json', deterministicBaseline(8));
+      repo.git('add', '-A');
+      const first = stagedIndexIdentity(repo.root);
+      expect(stagedIndexIdentity(repo.root)).toBe(first);
+      repo.write('alpha/impl.mts', 'export const impl = 3;\n');
+      repo.git('add', '-A');
+      expect(stagedIndexIdentity(repo.root)).not.toBe(first);
+      expect(() => assertIndexUnchanged(repo.root, first)).toThrow(
+        /index changed during publication/,
+      );
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it('leaves committed-tree and clean-worktree publication unchanged', () => {
+    const repo = stagedRepo();
+    try {
+      const fromTree = publishInRepo(repo.root, ['--suite', 'alpha', '--tree', 'HEAD']);
+      expect(fromTree.provenance.source).toBe(COMMITTED_PROVENANCE);
+      expect(fromTree.recordedAt).toBe(new Date(FIXTURE_COMMIT_DATE).toISOString());
+      expect(fromTree.provenance.sourceCommit).toBe(repo.head());
+      expect(() => publishInRepo(repo.root, ['--suite', 'alpha', '--tree', 'WORKTREE'])).toThrow(
+        /completely clean working tree/,
+      );
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it('passes the staged check end to end, with no bypass, then the committed tree', () => {
+    const repo = stagedRepo(['alpha', 'beta']);
+    try {
+      // A repository whose generated views have never been rendered is stale before any of this;
+      // render once so the sequence below starts from the state a real checkout is in.
+      cli(repo.root, ['render']);
+      repo.git('add', '-A');
+      repo.git('commit', '-qm', 'render views');
+
+      // First acceptance for both suites, each published from the index and staged with its outputs.
+      repo.write('alpha/results.baseline.json', deterministicBaseline(8));
+      repo.git('add', '-A');
+      cli(repo.root, ['publish', '--suite', 'alpha', '--tree', 'STAGED']);
+      repo.git('add', '-A');
+      repo.write('beta/results.baseline.json', deterministicBaseline(6));
+      repo.git('add', '-A');
+      cli(repo.root, ['publish', '--suite', 'beta', '--tree', 'STAGED']);
+      repo.git('add', '-A');
+      expect(cli(repo.root, ['check', '--mode', 'staged'])).toContain('PASS');
+      repo.git('commit', '-qm', 'accept both suites');
+
+      // sc-2457 itself: a tracked accepted baseline moves, and the staged gate blocks it until the
+      // publication that explains it is staged in the same commit.
+      repo.write('alpha/results.baseline.json', deterministicBaseline(9));
+      repo.git('add', '-A');
+      expect(() => cli(repo.root, ['check', '--mode', 'staged'])).toThrow(
+        /Accepted baseline changed without publication/,
+      );
+      cli(repo.root, ['publish', '--suite', 'alpha', '--tree', 'STAGED']);
+      repo.git('add', '-A');
+      expect(cli(repo.root, ['check', '--mode', 'staged'])).toContain('PASS');
+      repo.git('commit', '-qm', 'republish alpha');
+      expect(cli(repo.root, ['check', '--mode', 'tree', '--tree', 'HEAD'])).toContain('PASS');
+
+      // Staging more source after publishing moves a suite hash; the remedy is a re-render from the
+      // same index the gate reads, never a second publication.
+      repo.write('alpha/impl.mts', 'export const impl = 4;\n');
+      repo.git('add', '-A');
+      expect(() => cli(repo.root, ['check', '--mode', 'staged'])).toThrow(
+        /Generated output is stale/,
+      );
+      cli(repo.root, ['render', '--tree', 'STAGED']);
+      repo.git('add', '-A');
+      expect(cli(repo.root, ['check', '--mode', 'staged'])).toContain('PASS');
+    } finally {
+      repo.cleanup();
+    }
+  });
+});
+
+describe('index publication edge cases', () => {
+  const publishInRepo = (root: string, args: string[]): BenchmarkEvent => {
+    let published: BenchmarkEvent | undefined;
+    withPublishLock(root, (append) =>
+      publishLocked(root, args, (event, checkpoint) => {
+        published = event;
+        append(event, checkpoint);
+      }),
+    );
+    if (!published) throw new Error('publish returned no event');
+    return published;
+  };
+
+  it('still publishes from a clean worktree, the path STAGED did not replace', () => {
+    const repo = stagedRepo();
+    try {
+      const event = publishInRepo(repo.root, ['--suite', 'alpha', '--tree', 'WORKTREE']);
+      expect(event.provenance.sourceCommit).toBe(repo.head());
+      expect(event.provenance.source).toBe(COMMITTED_PROVENANCE);
+      expect(event.recordedAt).toBe(new Date(FIXTURE_COMMIT_DATE).toISOString());
+      expect(event.metrics[0]?.value).toBe(0.9);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it('keeps unstaged prose outside the markers when it rewrites the views', () => {
+    const repo = stagedRepo();
+    try {
+      repo.write(
+        'README.md',
+        '# fixture\n\nUNSTAGED PROSE\n\n<!-- benchmark-dashboard:start -->\n<!-- benchmark-dashboard:end -->\n\nTRAILING PROSE\n',
+      );
+      repo.write('alpha/results.baseline.json', deterministicBaseline(8));
+      repo.git('add', 'alpha/results.baseline.json');
+      publishInRepo(repo.root, ['--suite', 'alpha', '--tree', 'STAGED']);
+      const readme = readFileSync(join(repo.root, 'README.md'), 'utf8');
+      expect(readme).toContain('UNSTAGED PROSE');
+      expect(readme).toContain('TRAILING PROSE');
+      expect(readme).toContain('Suite alpha');
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it('sends a gitignored baseline to WORKTREE instead of telling it to stage the unstageable', () => {
+    const repo = stagedRepo();
+    try {
+      repo.write('.gitignore', 'alpha/local.baseline.json\n');
+      repo.write('alpha/local.baseline.json', deterministicBaseline(8));
+      repo.git('add', '.gitignore');
+      expect(() =>
+        publishInRepo(repo.root, [
+          '--suite',
+          'alpha',
+          '--tree',
+          'STAGED',
+          '--baseline',
+          'alpha/local.baseline.json',
+        ]),
+      ).toThrow(/gitignored[\s\S]*--tree WORKTREE/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it('lets a retry past the untracked checkpoint an aborted publish left behind', () => {
+    const repo = stagedRepo();
+    try {
+      repo.write('docs/benchmarks/checkpoints/abandoned.json', '{}\n');
+      repo.write('alpha/results.baseline.json', deterministicBaseline(8));
+      repo.git('add', 'alpha/results.baseline.json');
+      expect(publishInRepo(repo.root, ['--suite', 'alpha', '--tree', 'STAGED']).suiteId).toBe(
+        'alpha',
+      );
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it('does not read re-staged identical content as a changed index', () => {
+    const repo = stagedRepo();
+    try {
+      repo.write('alpha/results.baseline.json', deterministicBaseline(8));
+      repo.git('add', '-A');
+      const identity = stagedIndexIdentity(repo.root);
+      repo.write('alpha/results.baseline.json', deterministicBaseline(8));
+      repo.git('add', '-A');
+      expect(() => assertIndexUnchanged(repo.root, identity)).not.toThrow();
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it('names an unborn HEAD rather than failing inside git', () => {
+    const repo = stagedRepo(['alpha'], { commit: false });
+    try {
+      expect(() => publishInRepo(repo.root, ['--suite', 'alpha', '--tree', 'STAGED'])).toThrow(
+        /requires at least one commit/,
+      );
+    } finally {
+      repo.cleanup();
+    }
   });
 });
