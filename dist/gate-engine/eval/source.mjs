@@ -195,3 +195,81 @@ export function repoRelative(cwd, path) {
 export function gitOutput(cwd, args, allowFailure = false) {
     return git(cwd, args, allowFailure);
 }
+// `:/` anchors both pathspecs at the repository root, so the refusals below cannot silently match
+// nothing when the publisher is invoked from a subdirectory.
+const LEDGER_PATHSPECS = [':/docs/benchmarks/history.jsonl', ':/docs/benchmarks/checkpoints'];
+/** The commit an index is staged over. `rev-parse HEAD` on an unborn branch is a fatal that would
+ * otherwise reach the caller as raw git noise. */
+export function headCommit(root) {
+    const head = git(root, ['rev-parse', 'HEAD'], true).trim();
+    if (!head)
+        throw new Error('Publication requires at least one commit: HEAD is unborn');
+    return head;
+}
+export function commitDate(root, commit) {
+    return git(root, ['show', '-s', '--format=%cI', commit]).trim();
+}
+/** Content identity of the whole index: mode, object, stage and path per entry. Read-only, unlike
+ * `write-tree`, which mints objects no publication ever commits. */
+export function stagedIndexIdentity(root) {
+    const listing = git(root, ['ls-files', '--stage', '-z'], false, 'staged');
+    return `sha256:${createHash('sha256').update(listing).digest('hex')}`;
+}
+/** Refuse an index a publication cannot read honestly, naming the remedy for each case. */
+export function assertPublishableIndex(root) {
+    // An unmerged path is listed once per stage and `git show :<path>` cannot resolve it, so without
+    // this the publisher dies inside a git fatal instead of naming the conflict.
+    const unmerged = listingPaths(splitNul(git(root, ['ls-files', '--unmerged', '-z'], false, 'staged')), () => true);
+    if (unmerged.length) {
+        throw new Error(`STAGED publication requires a resolved index; unmerged paths:\n${unmerged.join('\n')}`);
+    }
+    if (!splitNul(git(root, ['diff', '--cached', '--name-only', '-z'], false, 'staged')).length) {
+        throw new Error('Nothing is staged: --tree STAGED publishes the Git index, which currently matches HEAD');
+    }
+    // Load-bearing: appendPublishedEventUnlocked reads and writes history.jsonl in the WORKTREE, so an
+    // index that disagrees with those bytes would append onto a ledger it never measured.
+    const ledger = splitNul(git(root, ['diff', '--name-only', '-z', '--', ...LEDGER_PATHSPECS], false, 'staged'));
+    if (ledger.length) {
+        throw new Error(`STAGED publication requires the ledger to match the index; unstaged:\n${ledger.join('\n')}`);
+    }
+}
+/** The publish lock does not serialize a concurrent `git add`, so a torn read would otherwise mint a
+ * permanently wrong immutable event. */
+export function assertIndexUnchanged(root, identity) {
+    if (identity && identity !== stagedIndexIdentity(root))
+        throw new Error('The Git index changed during publication; re-stage and re-run publish');
+}
+const UNTRACKED_PUBLISH_LOCK_STATUS = '?? docs/benchmarks/.publish.lock';
+export function assertCleanPublishWorktree(root) {
+    const dirty = gitOutput(root, ['status', '--porcelain=v1', '--untracked-files=all'])
+        .split('\n')
+        .filter((line) => line && line !== UNTRACKED_PUBLISH_LOCK_STATUS);
+    if (dirty.length) {
+        throw new Error(`WORKTREE publication requires a completely clean working tree:\n${dirty.join('\n')}`);
+    }
+}
+/** Read the baseline a publication measures, refusing with the remedy that fits the snapshot. A
+ * gitignored file can never be staged, so `git add` is the wrong advice to hand back for one. */
+export function readPublishBaseline(source, root, tree, path) {
+    const raw = source.read(path);
+    if (raw)
+        return raw;
+    if (tree !== 'STAGED')
+        throw new Error(`Missing baseline ${path} at ${tree}`);
+    const ignored = git(root, ['check-ignore', '--', path], true).trim();
+    throw new Error(ignored
+        ? `Missing baseline ${path} at the index; it is gitignored, so publish it with --tree WORKTREE`
+        : `Missing baseline ${path} at the index; stage it with: git add ${path}`);
+}
+/** Map publish's `--tree` vocabulary onto a snapshot, so one place owns which token reads what. The
+ * identity is empty outside STAGED, where it pins the index the event is computed from. */
+export function publishSnapshot(cwd, tree) {
+    if (tree === 'WORKTREE') {
+        assertCleanPublishWorktree(cwd);
+        return { source: repositorySource(cwd, 'working'), identity: '' };
+    }
+    if (tree !== 'STAGED')
+        return { source: repositorySource(cwd, 'tree', tree), identity: '' };
+    assertPublishableIndex(cwd);
+    return { source: repositorySource(cwd, 'staged'), identity: stagedIndexIdentity(cwd) };
+}

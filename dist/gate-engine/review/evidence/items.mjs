@@ -14,6 +14,9 @@ import { saveTranscriptUnique } from '../../judge/transcript-store.mjs';
 // Non-passing items sort FIRST so any truncation can never keep the passes and drop the findings.
 const ITEM_CAP = 40;
 const ISSUE_CHARS = 200;
+/** Chars kept per issue on `itemsFull`, the off-wire copy a bench banks (sc-2493): a bound against
+ * runaway output only, never a budget. */
+const ISSUE_CHARS_FULL = 4000;
 // Mirrored by skills/_devkit/checklist-store.mjs (consumer asset, cannot import this module):
 // both read GUARD_REVIEW_MAX_ISSUES_PER_LENS with the same default and clamp.
 export function issuesPerLensCap() {
@@ -96,7 +99,7 @@ function tally(items) {
  * deletes it. Leaves `items` absent when there was no artifact — "no artifact" is a different fact
  * from "an artifact with zero failures", and a consumer needs to tell them apart.
  */
-export function attachItems(res, state, disposition) {
+export function attachItems(res, state, disposition, opts = {}) {
     // Domain reviewers key on items[] (one per checklist lens); commit-guard keys on files[] (one per
     // reviewed file, identified by `path`). Same precedence verifyChecklist uses — reading only items[]
     // would label every commit-guard entry '(finding)'.
@@ -127,6 +130,16 @@ export function attachItems(res, state, disposition) {
                 : {}),
         };
     });
+    // The off-wire copy for a bench: same lenses and caps as `capped`, issue text at ISSUE_CHARS_FULL.
+    // Never inlined and never spilled — it rides no event, so the byte budget below does not see it.
+    if (opts.full)
+        res.itemsFull = ordered.slice(0, ITEM_CAP).map((it) => ({
+            lens: String(it.name ?? it.path ?? '(finding)').slice(0, LENS_CHARS),
+            status: String(it.status),
+            issues: (it.issues ?? [])
+                .slice(0, issuesPerLensCap())
+                .map((issue) => String(issue).slice(0, ISSUE_CHARS_FULL)),
+        }));
     // The tally is always inline: it is the cheap answer to "did these lenses fire", and it must
     // survive a spill.
     res.itemTally = tally(capped);
