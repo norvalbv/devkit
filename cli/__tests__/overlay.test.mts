@@ -19,7 +19,14 @@ import { applyOverlayConstraints, defaultSelection } from '../lib/components.mts
 import { isTracked } from '../lib/git-tracked.mts';
 import { HEAL_ALIAS_CMD, syncOverlayHook } from '../lib/overlay.mts';
 import { removeSkills } from '../lib/sync-manifest.mts';
-import { rootRegistry } from './_helpers.mts';
+import { rootRegistry, testExecFileSync } from './_helpers.mts';
+
+/** Verbs that DISPATCH A HOOK here: `commit`, and the `ci` heal alias, which re-pins hooksPath and
+ *  then commits. Both are process trees; every other git verb is a leaf and stays raw. */
+const HOOK_DISPATCHING_GIT_VERBS = new Set(['commit', 'ci']);
+/** See suite-hangs-bound-at-the-spawn-site: `workRepo` installs a real `.husky/pre-commit`. */
+const gitVerb = (args: string[]) =>
+  HOOK_DISPATCHING_GIT_VERBS.has(args[0]) ? testExecFileSync : execFileSync;
 
 // A full overlay selection with the opt-ins (agentHooks + fallow) ON — what the wizard produces
 // when the user checks everything. applyInit consumes an already-resolved selection directly, so we
@@ -54,7 +61,7 @@ const { mkTmp, cleanup } = rootRegistry();
 // A work repo that already has a committed husky hook + flat eslint + biome (the team's).
 function workRepo() {
   const root = mkTmp('overlay-');
-  const git = (...a) => execFileSync('git', a, { cwd: root });
+  const git = (...a) => gitVerb(a)('git', a, { cwd: root });
   git('init', '-q');
   git('config', 'user.email', 't@t.t');
   git('config', 'user.name', 't');
@@ -157,7 +164,7 @@ describe('overlay (local-only) install', () => {
     const root = workRepo();
     writeFileSync(join(root, 'guard.config.json'), '{ "scanRoots": ["src"] }\n');
     execFileSync('git', ['add', 'guard.config.json'], { cwd: root });
-    execFileSync('git', ['commit', '-qm', 'team guard config'], { cwd: root });
+    testExecFileSync('git', ['commit', '-qm', 'team guard config'], { cwd: root });
 
     await applyInit(root, {
       stack: 'react-app',
@@ -179,7 +186,7 @@ describe('overlay (local-only) install', () => {
     const root = workRepo();
     writeFileSync(join(root, 'guard.config.json'), '{ "scanRoots": ["src"] }\n');
     execFileSync('git', ['add', 'guard.config.json'], { cwd: root });
-    execFileSync('git', ['commit', '-qm', 'team guard config'], { cwd: root });
+    testExecFileSync('git', ['commit', '-qm', 'team guard config'], { cwd: root });
 
     await applyInit(root, {
       stack: 'react-app',
@@ -203,13 +210,13 @@ describe('overlay (local-only) install', () => {
     // First run with a tracked config: no cap written, key absent.
     writeFileSync(join(root, 'guard.config.json'), '{ "scanRoots": ["src"] }\n');
     execFileSync('git', ['add', 'guard.config.json'], { cwd: root });
-    execFileSync('git', ['commit', '-qm', 'team guard config'], { cwd: root });
+    testExecFileSync('git', ['commit', '-qm', 'team guard config'], { cwd: root });
     await applyInit(root, opts);
     expect('lineGrowth' in readCfgComponents(root)).toBe(false);
 
     // The team untracks it, but the repo is now adopted so the write is deferred to `devkit upgrade`.
     execFileSync('git', ['rm', '--cached', '-q', 'guard.config.json'], { cwd: root });
-    execFileSync('git', ['commit', '-qm', 'untrack guard config'], { cwd: root });
+    testExecFileSync('git', ['commit', '-qm', 'untrack guard config'], { cwd: root });
     await applyInit(root, opts);
 
     expect(
@@ -294,7 +301,7 @@ describe('overlay (local-only) install', () => {
   it('monorepo subdir: hook + .git/info/exclude live at the git ROOT, not the package', async () => {
     // git root with the app in a subdir (the case that ENOENT'd: .git is above cwd).
     const root = mkTmp('overlay-mono-');
-    const git = (...a) => execFileSync('git', a, { cwd: root });
+    const git = (...a) => gitVerb(a)('git', a, { cwd: root });
     git('init', '-q');
     git('config', 'user.email', 't@t.t');
     git('config', 'user.name', 't');
@@ -346,7 +353,7 @@ describe('overlay (local-only) install', () => {
 
   it('preserves ALL the repo hooks (pass-through wrappers), not just pre-commit', async () => {
     const root = mkTmp('overlay-hooks-');
-    const git = (...a) => execFileSync('git', a, { cwd: root });
+    const git = (...a) => gitVerb(a)('git', a, { cwd: root });
     git('init', '-q');
     git('config', 'user.email', 't@t.t');
     git('config', 'user.name', 't');
@@ -455,7 +462,7 @@ describe('overlay (local-only) install', () => {
     process.env.GIT_CONFIG_GLOBAL = join(mkTmp('ghome-'), '.gitconfig');
     try {
       const root = workRepo();
-      const git = (...a) => execFileSync('git', a, { cwd: root, encoding: 'utf8' });
+      const git = (...a) => gitVerb(a)('git', a, { cwd: root, encoding: 'utf8' });
       await applyInit(root, {
         stack: 'react-app',
         selection: defaultSelection(),
@@ -513,7 +520,7 @@ describe('overlay (local-only) install', () => {
     process.env.GIT_CONFIG_GLOBAL = join(mkTmp('ghome-'), '.gitconfig');
     try {
       const root = workRepo();
-      const git = (...a) => execFileSync('git', a, { cwd: root, encoding: 'utf8' });
+      const git = (...a) => gitVerb(a)('git', a, { cwd: root, encoding: 'utf8' });
       git('config', '--global', 'alias.ci', 'commit -v');
 
       await applyInit(root, {
@@ -598,7 +605,9 @@ describe('overlay (local-only) install', () => {
 
     // The EXPLICIT re-cut path (`guard-size freeze`) is how a later cap is grandfathered.
     const script = join(process.cwd(), 'gate-engine', 'ratchets', 'size-disable.mts');
-    execFileSync(process.execPath, [script, 'freeze'], { cwd: root });
+    // Supervised: a ratchet walks the tree and can spawn git, so a wedge here blocks the vitest
+    // worker thread and defeats testTimeout (sc-2393). The leaf `git`/`sh -n` calls stay raw.
+    testExecFileSync(process.execPath, [script, 'freeze'], { cwd: root });
     expect(existsSync(linesBaseline)).toBe(true);
   });
 
@@ -741,7 +750,7 @@ describe('overlay (local-only) install', () => {
 
   it('never edits or cleans tracked Cursor/Codex hook files', async () => {
     const root = mkTmp('overlay-cursor-');
-    const git = (...a) => execFileSync('git', a, { cwd: root });
+    const git = (...a) => gitVerb(a)('git', a, { cwd: root });
     git('init', '-q');
     git('config', 'user.email', 't@t.t');
     git('config', 'user.name', 't');
@@ -816,7 +825,7 @@ describe('overlay (local-only) install', () => {
 
   it('skips a git-TRACKED skill dir (no clobber), syncs the rest', async () => {
     const root = mkTmp('overlay-trackedskill-');
-    const git = (...a) => execFileSync('git', a, { cwd: root });
+    const git = (...a) => gitVerb(a)('git', a, { cwd: root });
     git('init', '-q');
     git('config', 'user.email', 't@t.t');
     git('config', 'user.name', 't');
@@ -960,7 +969,7 @@ describe('overlay (local-only) install', () => {
 
   it('isTracked: true for a committed file, false for an untracked one', () => {
     const root = mkTmp('istracked-');
-    const git = (...a) => execFileSync('git', a, { cwd: root });
+    const git = (...a) => gitVerb(a)('git', a, { cwd: root });
     git('init', '-q');
     git('config', 'user.email', 't@t.t');
     git('config', 'user.name', 't');
@@ -1019,7 +1028,7 @@ describe('overlay (local-only) install', () => {
 
   it('clean NEVER deletes a git-tracked skill dir (the user’s own, not a devkit stray)', () => {
     const root = mkTmp('clean-tracked-');
-    const git = (...a) => execFileSync('git', a, { cwd: root });
+    const git = (...a) => gitVerb(a)('git', a, { cwd: root });
     git('init', '-q');
     git('config', 'user.email', 't@t.t');
     git('config', 'user.name', 't');
@@ -1044,7 +1053,7 @@ describe('overlay (local-only) install', () => {
     mkdirSync(join(root, '.devkit', 'baselines'), { recursive: true });
     writeFileSync(join(root, '.devkit', 'baselines', 'size-lines.json'), '{"files":{}}\n');
     execFileSync('git', ['add', '-f', '.devkit/baselines/size-lines.json'], { cwd: root });
-    execFileSync('git', ['commit', '-qm', 'track baseline'], { cwd: root });
+    testExecFileSync('git', ['commit', '-qm', 'track baseline'], { cwd: root });
     mkdirSync(join(root, '.devkit', 'hooks'), { recursive: true });
     writeFileSync(join(root, '.devkit', 'hooks', 'pre-commit'), '#!/bin/sh\n');
     writeFileSync(join(root, '.devkit', 'review-cache.json'), '{}\n');

@@ -235,6 +235,15 @@ export function superviseGateCommand(
   }
   const executable = command[0];
   if (!executable) return Promise.reject(new Error('gate-supervisor requires a command'));
+  // setTimeout clamps past MAX_TIMEOUT_MS to 1ms, inverting a huge deadline into an instant 124.
+  // timeoutMilliseconds() guards the CLI path; this is the same guard for the programmatic one.
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 || timeoutMs > MAX_TIMEOUT_MS) {
+    return Promise.reject(
+      new Error(
+        `gate-supervisor deadline must be a positive number of ms no greater than ${MAX_TIMEOUT_MS}, got ${timeoutMs}`,
+      ),
+    );
+  }
   const ownershipToken = seededOwnershipToken ?? randomBytes(32).toString('hex');
   if (!OWNERSHIP_TOKEN_PATTERN.test(ownershipToken)) {
     return Promise.reject(new Error('gate-supervisor received an invalid private ownership token'));

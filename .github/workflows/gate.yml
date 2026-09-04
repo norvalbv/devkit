@@ -63,7 +63,19 @@ jobs:
           BENCHMARK_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: bun run benchmarks:check -- --mode tree --tree HEAD --base "$BENCHMARK_BASE"
 
+      # STEP-level, deliberately, not job-level (sc-2393). A job timeout cancels the job, which puts
+      # the two `if: always()` uploads below at the mercy of cancellation semantics; a step bound
+      # leaves the job alive so a wedged run still publishes whatever per-file record exists and
+      # `devkit baseline-status` keeps answering. Vitest has no run-level deadline of its own and no
+      # open request for one, so an external bound is the only place this can live; without it the
+      # job inherited GitHub's 6-hour default. Sized as a HANG detector and nothing else, from the
+      # measured spread rather than a guess: this step ran 24m40s-31m56s across the six runs before
+      # sc-2393 (33835847680, 33835531417, 33833431176, 33824241686, 33808990242, 33775305022), so
+      # 90 leaves ~2.8x over the observed max. A bound that a healthy run can reach IS the flake it
+      # was meant to catch — raise it if a legitimate run ever approaches it, and never lower it to
+      # make a slow run fail faster.
       - name: Tests
+        timeout-minutes: 90
         run: bun run test:run:report
 
       # Uploaded on RED runs too — a red run is precisely the one `devkit baseline-status` exists to
