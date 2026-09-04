@@ -77,6 +77,10 @@
     "build": "node ./node_modules/@typescript/native/bin/tsc -p tsconfig.build.json && node scripts/copy-dist-assets.mjs"
   },
   "devDependencies": {
+    "@babel/core": "^8.0.0",
+    "@babel/eslint-parser": "^8.0.0",
+    "@babel/plugin-syntax-jsx": "^8.0.0",
+    "@babel/preset-typescript": "^8.0.0",
     "@types/node": "^25.9.3",
     "@typescript-eslint/parser": "^8.0.0",
     "@typescript/native": "npm:typescript@7.0.2",

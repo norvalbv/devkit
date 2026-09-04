@@ -618,12 +618,11 @@ function removeStructure(cwd: string, prevConfig: DevkitConfig | null, dryRun: b
     console.log(`  ${dryRun ? '[dry-run] delete' : '✓ deleted'} ${relativePath}`);
     if (!dryRun) rmSync(target, { recursive: true, force: true });
   }
-  const pkgRemoved = removeFromPkg(
-    cwd,
-    ['eslint', 'eslint-plugin-project-structure', '@typescript-eslint/parser'],
-    ['lint:structure'],
-    dryRun,
-  );
+  const structureDeps =
+    '@babel/eslint-parser @babel/plugin-syntax-jsx @babel/preset-typescript eslint eslint-plugin-project-structure @typescript-eslint/parser'.split(
+      ' ',
+    );
+  const pkgRemoved = removeFromPkg(cwd, structureDeps, ['lint:structure'], dryRun);
   if (pkgRemoved.length) {
     console.log(`  ${dryRun ? '[dry-run]' : '✓'} package.json: -${pkgRemoved.join(', -')}`);
   }

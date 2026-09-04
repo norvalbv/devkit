@@ -4,7 +4,7 @@
 // for the config-driven migration (docs/design/structure/06-universal-collapse.md, Stage 3).
 // fallow-ignore-file code-duplication
 // @ts-nocheck — emitted config file: it imports peer-installed tools (eslint-plugin-project-
-// structure, @typescript-eslint/parser) that live in the CONSUMER repo, not in devkit. TS in
+// structure, and whichever ESLint parser this repo installed) that live in the CONSUMER repo, not in devkit. TS in
 // the devkit repo can't resolve them; eslint configs aren't type-checked anyway.
 // ESLint config — scoped narrowly to the project-structure plugin (folder
 // hierarchy + file naming + import walls + file/function size). Biome handles
@@ -26,9 +26,9 @@
 // therefore loads + lints clean BOTH on a bare repo AND post-init.
 
 import { existsSync, readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import tsParser from '@typescript-eslint/parser';
 import {
   createFolderStructure,
   createIndependentModules,
@@ -45,6 +45,44 @@ import {
 // Reason: electron and react-app are SEPARATE shipped eslint templates, each a standalone file copied into a consumer repo (no devkit import to share a base) - intentional per-stack duplication
 // fallow-ignore-next-line code-duplication
 const HERE = dirname(fileURLToPath(import.meta.url));
+
+// The structure lane parses SYNTAX only — imports, names, file/function size — never types, so
+// either parser serves it. Which one this repo can RUN is decided by its compiler:
+// @typescript-eslint/parser reads the TypeScript JavaScript compiler API, and TypeScript 7 ships
+// none — its entry point exports the version string alone. So the test is whether that API is
+// THERE, not whether the parser is installed: a repo can hold both packages (init never strips one
+// it did not add), and under TypeScript 7 the parser would load and then die reading the missing
+// API. `devkit init` installs the matching set; this picks the one that can actually run.
+const require = createRequire(import.meta.url);
+
+function tryRequire(id) {
+  try {
+    return require(id);
+  } catch {
+    return null;
+  }
+}
+
+function resolveStructureParser() {
+  const tsParser = tryRequire('@typescript-eslint/parser');
+  if (tsParser && typeof tryRequire('typescript')?.createSourceFile === 'function') {
+    return [tsParser, { ecmaFeatures: { jsx: true }, sourceType: 'module' }];
+  }
+  return [
+    require('@babel/eslint-parser'),
+    {
+      requireConfigFile: false,
+      babelOptions: {
+        presets: [['@babel/preset-typescript', { ignoreExtensions: true }]],
+        overrides: [{ test: /\.tsx$/, plugins: ['@babel/plugin-syntax-jsx'] }],
+      },
+      ecmaFeatures: { jsx: true },
+      sourceType: 'module',
+    },
+  ];
+}
+
+const [sourceParser, sourceParserOptions] = resolveStructureParser();
 
 // Reason: atomic baseline relocation can briefly expose either path; the bounded retry preserves
 // one loader contract without duplicating fallback logic across every baseline consumer.
@@ -664,8 +702,8 @@ export default [
     ignores: ['**/*.{test,spec}.{ts,tsx}', '**/__tests__/**'],
     plugins: { 'project-structure': projectStructurePlugin },
     languageOptions: {
-      parser: tsParser,
-      parserOptions: { ecmaFeatures: { jsx: true }, sourceType: 'module' },
+      parser: sourceParser,
+      parserOptions: sourceParserOptions,
     },
     rules: { 'project-structure/independent-modules': ['error', importWalls] },
   },
@@ -675,8 +713,8 @@ export default [
     files: ['src/renderer/**/*.{ts,tsx}'],
     ignores: ['**/*.{test,spec}.{ts,tsx}', '**/__tests__/**'],
     languageOptions: {
-      parser: tsParser,
-      parserOptions: { ecmaFeatures: { jsx: true }, sourceType: 'module' },
+      parser: sourceParser,
+      parserOptions: sourceParserOptions,
     },
     linterOptions: { reportUnusedDisableDirectives: 'off' },
     rules: {
@@ -737,8 +775,8 @@ export default [
     files: ['src/**/*.{ts,tsx}', 'socket-server/**/*.ts', 'vercel-serverless/**/*.ts'],
     ignores: ['**/*.{test,spec}.{ts,tsx}'],
     languageOptions: {
-      parser: tsParser,
-      parserOptions: { ecmaFeatures: { jsx: true }, sourceType: 'module' },
+      parser: sourceParser,
+      parserOptions: sourceParserOptions,
     },
     plugins: {
       'react-hooks': legacyDisableStub(['exhaustive-deps', 'rules-of-hooks']),
@@ -766,8 +804,8 @@ export default [
     files: ['src/**/*.tsx', 'socket-server/**/*.tsx', 'vercel-serverless/**/*.tsx'],
     ignores: ['**/*.{test,spec}.tsx'],
     languageOptions: {
-      parser: tsParser,
-      parserOptions: { ecmaFeatures: { jsx: true }, sourceType: 'module' },
+      parser: sourceParser,
+      parserOptions: sourceParserOptions,
     },
     linterOptions: { reportUnusedDisableDirectives: 'off' },
     rules: {
@@ -780,8 +818,8 @@ export default [
   {
     files: ['**/*.{test,spec}.{ts,tsx}'],
     languageOptions: {
-      parser: tsParser,
-      parserOptions: { ecmaFeatures: { jsx: true }, sourceType: 'module' },
+      parser: sourceParser,
+      parserOptions: sourceParserOptions,
     },
     plugins: {
       'react-hooks': legacyDisableStub(['exhaustive-deps', 'rules-of-hooks']),
