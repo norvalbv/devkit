@@ -34,6 +34,7 @@ const GENV = { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' };
 const BR_RE = /BR=(.*)/;
 const REPO_RE = /REPO=(.*)/;
 const WT_RE = /worktree kept at (.+?)\. Remove/;
+const PAUSE_MARKER_HANG_DEADLINE_MS = 60_000;
 const dirs = [];
 afterAll(() => {
   for (const d of dirs) rmSync(d, { recursive: true, force: true });
@@ -487,7 +488,7 @@ describe('reship — explicit bodies refresh the existing PR (sc-2414)', () => {
     // A busy machine can take far longer than 5s to reach the hook, and the old deadline branch
     // released the publisher BEFORE the superseding write below — so the run under test finished
     // unsuperseded and `not.toBe(0)` failed on a scheduling artifact rather than a real defect.
-    const oldDeadline = Date.now() + 60000;
+    const oldDeadline = Date.now() + PAUSE_MARKER_HANG_DEADLINE_MS;
     while (!existsSync(oldPaused) && oldRun.child.exitCode === null && Date.now() < oldDeadline)
       await new Promise((resolve) => setTimeout(resolve, 20));
     if (!existsSync(oldPaused)) {
@@ -1109,7 +1110,9 @@ describe('reship --base — replace a conflicted PR from a caller-prepared snaps
     ).toBe('');
   });
 
-  it('serializes recovery publication against a fresh intent that starts concurrently', async () => {
+  // The marker is written after reship.sh registers its worktree and run record (:600/:604), so a
+  // parked recovery is already an established holder when the competitor starts.
+  it('refuses a fresh publisher while a recovery still holds the branch worktree', async () => {
     const { bare, dir, env, g, ghBody } = rewriteRepo();
     const interrupted = run(
       [
@@ -1144,7 +1147,7 @@ describe('reship --base — replace a conflicted PR from a caller-prepared snaps
       GH_EDIT_PAUSE_MARKER: paused,
       GH_EDIT_PAUSE_RELEASE: release,
     });
-    const pauseDeadline = Date.now() + 5000;
+    const pauseDeadline = Date.now() + PAUSE_MARKER_HANG_DEADLINE_MS;
     while (!existsSync(paused) && recovery.child.exitCode === null && Date.now() < pauseDeadline)
       await new Promise((resolve) => setTimeout(resolve, 20));
     if (!existsSync(paused)) {
@@ -1171,21 +1174,25 @@ describe('reship --base — replace a conflicted PR from a caller-prepared snaps
       dir,
       { ...env, PR_HEAD_OID: accepted },
     );
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    // This test is the only writer of the release file, so the recovery stays parked for the
+    // competitor's whole life; the competitor ends itself at the preflight (reship.sh:490).
+    const superseding = await fresh.completed;
     const gateRanBeforeRelease = existsSync(gateLog);
-    const freshExitedBeforeRelease = fresh.child.exitCode !== null;
     writeFileSync(release, 'go\n');
     const recovered = await recovery.completed;
-    const superseding = await fresh.completed;
-    expect(gateRanBeforeRelease, 'fresh invocation must wait before replacing the intent').toBe(
-      false,
-    );
-    expect(freshExitedBeforeRelease, superseding.stderr).toBe(false);
+    expect(superseding.status, superseding.stderr).toBe(1);
+    expect(superseding.stderr).toContain('another ship for feat/pr is still running');
+    expect(gateRanBeforeRelease, 'the refused run must not reach its gates').toBe(false);
     expect(recovered.status, recovered.stderr).toBe(0);
     expect(readFileSync(ghBody, 'utf8')).toBe('old body');
-    expect(superseding.status).not.toBe(0);
-    expect(readFileSync(gateLog, 'utf8')).toBe('fresh-ran\n');
     expect(g(['--git-dir', bare, 'rev-parse', 'refs/heads/feat/pr'])).toBe(accepted);
+    expect(
+      g([
+        'for-each-ref',
+        '--format=%(refname)',
+        `refs/devkit/reship-body-receipts/feat/pr/${accepted}`,
+      ]),
+    ).toBe('');
   });
 
   it('refuses before gates when the brief omits any path changed by the old PR', () => {
