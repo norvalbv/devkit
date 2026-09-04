@@ -84,7 +84,8 @@ export function renderEditAdvisory(report: BaseDriftReport): string {
     .join('\n\n');
 }
 
-/** ship: advisory only. Never blocks — see docs/decisions/base-drift-surfaced-at-read-time.md. */
+/** ship: advisory only. This print never blocks and never predicts staging's verdict, which it is
+ * too pure to see — docs/decisions/base-drift-surfaced-at-read-time.md (sc-2297, sc-2451, sc-2664). */
 export function renderShipNotice(report: BaseDriftReport): string {
   if (report.silent !== null)
     return report.silent === 'unresolvable'
@@ -94,7 +95,7 @@ export function renderShipNotice(report: BaseDriftReport): string {
   return [
     `⚠️  devkit ship: ${report.overlap.length} shipped path(s) also changed on origin/${base} since this branch diverged.`,
     listing(report),
-    '  Shipping is not blocked: git merges these three-way, so a same-region conflict surfaces at merge.',
+    '  Not a verdict on this ship: whether your edits still apply over these is decided at staging.',
     '  Check any of these you hand-edited after reading a local copy.',
   ]
     .filter(Boolean)

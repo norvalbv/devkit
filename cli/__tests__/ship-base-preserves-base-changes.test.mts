@@ -167,6 +167,12 @@ describe('ship --base: newer same-file base changes survive a stale caller patch
     expect(r.status).toBe(1);
     expect(r.stderr).toContain('changed the same region of');
     expect(r.stderr).toContain('f.txt');
+    // The base-drift advisory printed to this same stderr, just above the abort. It must not
+    // contradict it — that self-contradiction inside one run cost two ship rounds (sc-2664).
+    expect(r.stderr).not.toMatch(/not blocked/i);
+    // The negative only bites if the advisory fired at all; pin the wiring positively.
+    expect(r.stderr).toContain('devkit ship:');
+    expect(r.stderr).toContain('decided at staging');
     expect(existsSync(mark)).toBe(false); // the gate chain never ran
     expect(localBranchExists(git, 'feat/clash')).toBe(false);
     expect(remoteBranchExists(bare, 'feat/clash')).toBe(false);

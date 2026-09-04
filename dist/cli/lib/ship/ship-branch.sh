@@ -435,11 +435,21 @@ elif [ -n "$BASE_FLAG" ]; then
   BASE=$(git rev-parse FETCH_HEAD)
 
   # Which of the paths being shipped ALSO moved on the base since this branch diverged (sc-2297).
-  # ADVISORY — it prints and never blocks. Git merges these three-way, so a same-region overwrite
-  # surfaces as a conflict at merge; a block here would instead fire on every legitimate concurrent
-  # edit of a shared file in a parallel-agent repo, which is the ignorable-signal failure this whole
-  # feature exists to end. What it CAN catch is the case a clean merge hides: a path hand-edited
-  # after reading a stale local copy.
+  # ADVISORY — it prints, it never blocks, and it is not a prediction of whether this ship survives.
+  # A PATH-overlap block here is refused twice (base-drift-surfaced-at-read-time Rejected(a) and its
+  # 2026-09-01 note): it would fire on every legitimate concurrent edit of a shared file in a
+  # parallel-agent repo, which is the ignorable-signal failure this whole feature exists to end.
+  #
+  # The verdict is HUNK-level and is taken later, at staging. Since sc-2451 the patch is anchored at
+  # the fork point and applied with `git apply --index --3way` (below); when the base and the working
+  # tree changed the same REGION of a briefed path, that aborts THIS ship before the gate chain and
+  # prints the authoritative message there. Do NOT restate that here as a guarantee: two arms reach
+  # staging without ever conflicting — patch-anchor.sh keeps binary/symlink/gitlink paths on
+  # BASE-anchored whole-file staging, and a shallow clone degrades --3way to direct application.
+  # This print sees none of that, so it names where the outcome is decided and claims nothing more.
+  #
+  # What the advisory CAN catch, and staging cannot, is the case a CLEAN apply hides: a path
+  # hand-edited after reading a stale local copy, where both sides merge and the revert is silent.
   #
   # Only on the --base arm. The default arm sets BASE from local HEAD with no fetch, and it is
   # unreachable from a provisioned worktree anyway — the ls-remote probe above already refuses any
