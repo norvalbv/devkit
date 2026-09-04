@@ -3,7 +3,7 @@
   "maxLines": 500,
   "maxTestLines": 2000,
   "files": {
-    "cli/commands/init.mts": 1154,
+    "cli/commands/init.mts": 1143,
     "cli/lib/generate/generate-structure-baseline.mts": 867,
     "cli/lib/overlay.mts": 556,
     "gate-engine/co-occurrence/matcher.mts": 539,

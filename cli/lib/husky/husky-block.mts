@@ -1,10 +1,10 @@
 /**
  * Assemble the `# devkit-guards` pre-commit block from a component selection, and
- * surgically remove individual pieces (a single guard, the biome-format step, the whole
+ * surgically remove individual pieces (a single guard, the format step, the whole
  * block) without disturbing the consumer's own hook lines outside the markers.
  *
  * The block is COMPOSED from fragments rather than copied from a static template so that
- * `devkit init` can emit exactly the selected guards + the biome step, and the removal
+ * `devkit init` can emit exactly the selected guards + the format step, and the removal
  * path can drop one guard while leaving the rest. Each fragment is delimited by per-piece
  * `# devkit:<id>` / `# /devkit:<id>` sentinels so removal is an exact slice, never a
  * brittle regex against shell prose.
@@ -12,6 +12,7 @@
 
 import { GUARD_FRAGMENTS } from './ai-guard-fragments.mts';
 import { buildCommitTerminalFragment } from './commit-terminal.mts';
+import { FORMAT_FRAGMENT } from './format-fragment.mts';
 import { markEnd, markStart } from './husky.mts';
 import {
   DK_HOOK_HELPERS,
@@ -20,10 +21,8 @@ import {
 } from './review-fragments.mts';
 
 /**
- * The block-builder's view of a component selection: whether the biome format step is wanted,
- * the guard ids to emit, and the resolved structure-lint command (absent when structure is off).
- * A superset of every builder's needs — each function reads only the fields relevant to it (the
- * full {@link import('../components.mts').Selection} plus a `structureCmd` satisfies it).
+ * A superset of every builder's needs; each reads only its own fields. `biome` keeps owning whether
+ * the format step is emitted at all — the opt-out — while the step itself checks for a biome CONFIG.
  */
 interface HookSelection {
   biome?: boolean;
@@ -33,7 +32,7 @@ interface HookSelection {
   // Extra arbitrary hard gates folded into the deterministic orchestrator via `--extra "label=cmd"`
   // (any non-zero blocks). Empty/undefined for a normal consumer → no `--extra` emitted, so the
   // fragment is byte-identical to before. Self-host seeds `[{label:'lint',cmd:'bun run lint'}]` to
-  // preserve devkit's own hard `biome check .` commit gate.
+  // preserve devkit's own hard lint commit gate.
   extras?: Array<{ label: string; cmd: string }>;
 }
 
@@ -83,25 +82,6 @@ const standaloneQavisLines = `if command -v guard-qavis-advisory >/dev/null 2>&1
     qarc=0; __dk_no_git_env guard-qavis-advisory --gate || qarc=$?
     [ "$qarc" -eq 3 ] && exit 1
 fi`;
-// The biome format-staged-files step (only when the `biome` component is selected).
-const BIOME_FRAGMENT = `# devkit:biome-format
-# Format staged files with biome, then re-stage exactly those (scoped — never a blanket
-# \`git add -u\`, which would sweep unrelated working-tree changes into the commit). Only
-# re-add files with NO unstaged edits, so partially-staged files commit exactly as staged.
-STAGED_FMT=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\\.(tsx?|jsx?|css|json|jsonc|mjs)$' || true)
-if [ -n "$STAGED_FMT" ]; then
-    UNSTAGED_FMT_FILE=$(mktemp)
-    git diff --name-only | sort -u >"$UNSTAGED_FMT_FILE"
-    FMT_SAFE=$(printf '%s\\n' "$STAGED_FMT" | grep -Fxvf "$UNSTAGED_FMT_FILE" || true)
-    rm -f "$UNSTAGED_FMT_FILE"
-    if [ -n "$FMT_SAFE" ]; then
-        echo "🎨 Formatting staged files..."
-        echo "$FMT_SAFE" | xargs "$__dk_package_bin_dir/biome" format --write 2>/dev/null || true
-        echo "$FMT_SAFE" | xargs git add -f
-    fi
-fi
-# /devkit:biome-format`;
-
 // Inject user bins before gates when a GUI client's minimal PATH omits bun/bunx.
 export const PATH_SETUP = `# GUI git clients launch with a minimal PATH that omits user bin dirs, so \`bun\`/\`bunx\`
 # can go missing → the hook fails. Prepend the standard user install locations.
@@ -141,13 +121,8 @@ function wantsDeterministic(selection: HookSelection): boolean {
 }
 
 /**
- * Build the `# devkit-guards` marker block (inclusive of markers) from a selection.
- * Order: biome format → guard-deterministic (prefix check → selected guards + structure →
- * aggregated report → prefix record, all inside the bin) → AI guards (fail-fast).
- * biome runs BEFORE the orchestrator on purpose: the cache key hashes the post-format index.
- *
- * In a monorepo `pkgRel` scopes markers and gates to a failing subshell. Biome remains root-only
- * because package-relative `git add` paths would be wrong. `structureCmd` is stack-resolved.
+ * Order: format (first — the prefix-cache key hashes the post-format index) →
+ * guard-deterministic → AI guards. `pkgRel` scopes a monorepo block to a failing subshell.
  */
 export function buildGuardBlock(selection: HookSelection, pkgRel = ''): string {
   const handoff = selection.guards?.some((id) => id === 'review' || id === 'sentry') ?? false;
@@ -159,7 +134,7 @@ export function buildGuardBlock(selection: HookSelection, pkgRel = ''): string {
     DK_REVIEW_BASELINE_HELPER,
   ];
   // First so a first-gate block still records the run's terminal (the trap covers every exit path).
-  if (!pkgRel && selection.biome) pieces.push(BIOME_FRAGMENT);
+  if (!pkgRel && selection.biome) pieces.push(FORMAT_FRAGMENT);
   if (deterministic)
     pieces.push(
       DK_DETERMINISTIC_GATE_HELPER,

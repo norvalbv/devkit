@@ -399,8 +399,8 @@ function removeBiome(cwd, dryRun) {
     const pkgRemoved = removeFromPkg(cwd, BIOME_DEV_DEPS, BIOME_SCRIPTS, dryRun);
     if (pkgRemoved.length)
         console.log(`  ${dryRun ? '[dry-run]' : '✓'} package.json: -${pkgRemoved.join(', -')}`);
-    // Drop the biome-format step from the husky block.
-    removeHuskyPiece(cwd, 'biome-format', dryRun);
+    // The format step is the biome component's, so removing biome removes it — the consumer's opt-out.
+    removeHuskyPiece(cwd, '', 'biome-format', dryRun);
 }
 // Remove ONLY the devkit `extends` from tsconfig — never delete a tsconfig with user content.
 // Reason: the branches ARE the safe-strip decision tiers: unparseable → bail, no-devkit-extends → bail, array-extends → filter, scalar-extends → delete; each guard exists to NEVER delete a tsconfig devkit didn't author
@@ -456,10 +456,6 @@ function removeHusky(hookRoot, pkgRel, dryRun) {
 }
 // Remove a single fragment (one guard, or the biome step) from THIS package's block. Scoped via
 // extract→removeFragment→replace so a shared sentinel in another package's block is untouched.
-// `id` is typed `string | boolean` because removeBiome calls this with only 3 args, so `dryRun`
-// (a boolean) lands in the `id` slot — a pre-existing arg-order quirk this conversion preserves
-// (that call passes pkgRel='biome-format', which matches no block, so extractGuardBlock returns null
-// and it no-ops before `id` is ever read). Hence the trailing dryRun is optional.
 function removeHuskyPiece(hookRoot, pkgRel, id, dryRun) {
     const hookPath = join(hookRoot, '.husky', 'pre-commit');
     if (!existsSync(hookPath))
@@ -468,8 +464,6 @@ function removeHuskyPiece(hookRoot, pkgRel, id, dryRun) {
     const block = extractGuardBlock(content, pkgRel);
     if (!block)
         return false;
-    // Reached only via applyRemovals (id is always a string there); the boolean-in-id quirk above
-    // returns null at the block check, so this cast is erased over an already-string value.
     const { content: newBlock, removed } = removeFragment(block, id);
     if (!removed)
         return false;

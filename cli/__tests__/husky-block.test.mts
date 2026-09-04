@@ -82,11 +82,14 @@ exit 1
 `;
 
 describe('buildGuardBlock', () => {
-  it('includes the biome step, the deterministic orchestrator, and the AI guards when fully selected', () => {
+  it('includes the format step, the deterministic orchestrator, and the AI guards when fully selected', () => {
     const block = buildGuardBlock(ALL);
     expect(block).toContain('# >>> devkit-guards >>>');
     expect(block).toContain('# <<< devkit-guards <<<');
     expect(block).toContain('# devkit:biome-format');
+    // sc-2524: biome runs only where a biome CONFIG proves the repo actually formats with it.
+    expect(block).toContain('if [ ! -f biome.json ] && [ ! -f biome.jsonc ]; then');
+    expect(block).toContain('"$__dk_package_bin_dir/biome" format --write');
     expect(block).toContain('__dk_package_bin_dir="$(bun pm bin)"');
     // Deterministic guards (size/fanout/dup/clone) run through the ONE orchestrator, not per-guard.
     expect(block).toContain('"$__dk_package_bin_dir/guard-deterministic" --hook');
@@ -116,14 +119,24 @@ describe('buildGuardBlock', () => {
     }
   });
 
-  it('omits the biome step when biome is deselected', () => {
+  it('omits the format step when biome is deselected — that selection is the opt-out', () => {
     const block = buildGuardBlock({ biome: false, guards: [...GUARD_IDS] });
     expect(block).not.toContain('# devkit:biome-format');
     expect(block).not.toContain('biome format');
   });
 
+  it('never emits the format step inside a monorepo package block', () => {
+    // A package-relative `git add` path from the subshell would be wrong.
+    expect(buildGuardBlock(ALL, 'packages/api')).not.toContain('# devkit:biome-format');
+  });
+
+  it('formats .mts/.cts sources, which the pre-sc-2524 extension filter silently skipped', () => {
+    const block = buildGuardBlock({ biome: true, guards: [] });
+    expect(block).toContain("grep -E '\\.(tsx?|jsx?|mts|cts|mjs|css|jsonc?)$'");
+  });
+
   it('emits ONE deterministic command for any selected deterministic guard through the mode policy', () => {
-    const block = buildGuardBlock({ biome: true, guards: ['fanout', 'size'] });
+    const block = buildGuardBlock({ guards: ['fanout', 'size'] });
     const lines = block.split('\n').filter((l) => l.includes('guard-deterministic'));
     expect(lines).toHaveLength(1);
     expect(lines[0]).toContain('__dk_gate_deterministic');
@@ -133,20 +146,20 @@ describe('buildGuardBlock', () => {
   });
 
   it('emits the deterministic orchestrator when coverage is the only selected guard', () => {
-    const block = buildGuardBlock({ biome: false, guards: ['coverage'] });
+    const block = buildGuardBlock({ guards: ['coverage'] });
     expect(block).toContain('guard-deterministic');
     expect(block).toContain('# devkit:review-deterministic-finalizer');
   });
 
   it('emits the deterministic orchestrator when anti-slop is the only selected policy', () => {
-    const block = buildGuardBlock({ biome: false, guards: [], antiSlop: true });
+    const block = buildGuardBlock({ guards: [], antiSlop: true });
     expect(block).toContain('guard-deterministic');
     expect(block).toContain('# devkit:review-deterministic-finalizer');
     expect(block).not.toContain('guard-review');
   });
 
   it('emits NO deterministic line when only AI guards are selected', () => {
-    const block = buildGuardBlock({ biome: false, guards: ['decisions'] });
+    const block = buildGuardBlock({ guards: ['decisions'] });
     expect(block).not.toContain('guard-deterministic');
     expect(block).toContain('"$__dk_package_bin_dir/guard-decisions"');
   });
@@ -214,7 +227,7 @@ describe('removeFragment', () => {
   });
 
   it('is a no-op (removed:false) when the fragment is absent', () => {
-    const hook = buildFullHook({ biome: false, guards: ['fanout'] });
+    const hook = buildFullHook({ guards: ['fanout'] });
     expect(removeFragment(hook, 'guard-clone').removed).toBe(false);
   });
 });
@@ -278,7 +291,7 @@ describe('replaceGuardBlock — relocate after the preamble (reachability)', () 
   });
   it('swaps content on re-run (markers present) without duplicating', () => {
     const once = replaceGuardBlock(FRINK_HOOK, buildGuardBlock(ALL));
-    const next = replaceGuardBlock(once, buildGuardBlock({ biome: true, guards: ['decisions'] }));
+    const next = replaceGuardBlock(once, buildGuardBlock({ guards: ['decisions'] }));
     expect(next).toContain('$__dk_package_bin_dir/guard-decisions');
     expect(next).not.toContain('guard-deterministic'); // only an AI guard now → no det line
     expect((next.match(/# >>> devkit-guards/g) || []).length).toBe(1);
@@ -308,10 +321,10 @@ describe('deterministic orchestrator policy is fail-closed', () => {
 
 describe('hasFragment', () => {
   it('detects the deterministic + AI sentinels', () => {
-    const det = buildFullHook({ biome: true, guards: ['dup'] });
+    const det = buildFullHook({ guards: ['dup'] });
     expect(hasFragment(det, 'deterministic')).toBe(true);
     expect(hasFragment(det, 'guard-decisions')).toBe(false);
-    const ai = buildFullHook({ biome: false, guards: ['decisions'] });
+    const ai = buildFullHook({ guards: ['decisions'] });
     expect(hasFragment(ai, 'guard-decisions')).toBe(true);
     expect(hasFragment(ai, 'deterministic')).toBe(false);
   });
@@ -332,7 +345,7 @@ describe('assembled hook is set -e-safe', () => {
     chmodSync(join(bin, 'bun'), 0o755);
     installGateStubs(packageBin, PRE_COMMIT_GATE_BINS, {}, stubExit);
     const hookPath = join(home, 'pre-commit');
-    writeFileSync(hookPath, buildFullHook({ biome: false, guards: [...GUARD_IDS] }));
+    writeFileSync(hookPath, buildFullHook({ guards: [...GUARD_IDS] }));
     try {
       execFileSync('sh', ['-e', hookPath], {
         env: { ...process.env, HOME: home, PATH: '/usr/bin:/bin' },
@@ -377,7 +390,7 @@ describe('exit 4 renders as an object-database fault, never as a verdict', () =>
     chmodSync(join(bin, 'bun'), 0o755);
     installGateStubs(packageBin, PRE_COMMIT_GATE_BINS, codes);
     const hookPath = join(home, 'pre-commit');
-    writeFileSync(hookPath, buildFullHook({ biome: false, guards: [...GUARD_IDS] }));
+    writeFileSync(hookPath, buildFullHook({ guards: [...GUARD_IDS] }));
     try {
       const out = execFileSync('sh', ['-e', hookPath], {
         env: { ...process.env, HOME: home, PATH: '/usr/bin:/bin' },

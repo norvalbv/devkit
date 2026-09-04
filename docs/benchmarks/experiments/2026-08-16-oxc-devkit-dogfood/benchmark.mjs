@@ -165,7 +165,8 @@ function commitFixture(root) {
 
 function extractFormatFragment(root, outputPath) {
   const hook = readFileSync(join(root, '.husky', 'pre-commit'), 'utf8');
-  const fragment = hook.match(/# devkit:biome-format[\s\S]*?# \/devkit:biome-format/)?.[0];
+  // Matches both sentinels: the archived CONTROL_REF hook predates the sc-2524 rename to `format`.
+  const fragment = hook.match(/# devkit:(?:biome-)?format[\s\S]*?# \/devkit:(?:biome-)?format/)?.[0];
   if (!fragment) throw new Error(`formatter fragment missing from ${root}/.husky/pre-commit`);
   writeFileSync(outputPath, `${fragment}\n`);
 }
