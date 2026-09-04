@@ -1,11 +1,15 @@
 /**
- * The tracked dist import closure, asserted over the COMMITTED tree rather than the ship path
- * cli/lib/ship/dist-integrity.mts guards — see docs/decisions/typescript-source-prebuilt-mjs.md.
+ * The tracked dist dependency closure — ESM imports AND shell `source` edges — over the COMMITTED
+ * tree, not the ship path dist-integrity.mts guards. docs/decisions/typescript-source-prebuilt-mjs.md.
  */
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { type ImportEdge, moduleImportEdges } from '../lib/ship/dist-integrity.mts';
+import {
+  type ImportEdge,
+  moduleImportEdges,
+  shellSourceEdges,
+} from '../lib/ship/dist-integrity.mts';
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
 
@@ -47,5 +51,34 @@ describe('tracked dist import closure', () => {
     // A closure of zero would satisfy the assertion above vacuously — a renamed dist/ or a pathspec
     // that stopped matching would then read as green forever. Pin that the walk actually ran.
     expect(modules.length).toBeGreaterThan(100);
+  });
+
+  it('resolves every shell source target to another tracked file', async () => {
+    const tracked = git(['ls-files', '--cached', '-z', '--', 'dist']).split('\0').filter(Boolean);
+    if (tracked.length === 0) return;
+
+    const trackedSet = new Set(tracked);
+    // agents-hooks included: narrowing to dist/cli would make one file broad for .mjs and narrow
+    // for .sh, and diverge from the preflight, where a briefed dist/ path seeds the queue as-is.
+    const scripts = tracked.filter((file) => file.endsWith('.sh'));
+    const unreadable: string[] = [];
+    const gaps: ImportEdge[] = [];
+    let edgeCount = 0;
+    for (const file of scripts) {
+      const edges = await shellSourceEdges(file, indexBlob(file));
+      // An unresolvable source target is a hole, not a pass — the ESM verdict, applied to shell.
+      if (edges === undefined) {
+        unreadable.push(file);
+        continue;
+      }
+      edgeCount += edges.length;
+      for (const edge of edges) if (!trackedSet.has(edge.target)) gaps.push(edge);
+    }
+
+    expect({ unreadable, gaps }).toEqual({ unreadable: [], gaps: [] });
+    // Two pins: a broken extractor returns [] for every file, which the assertion above reads as
+    // green forever. The file count alone misses that — the EDGE count is the one that bites.
+    expect(scripts.length).toBeGreaterThan(30);
+    expect(edgeCount).toBeGreaterThan(40);
   });
 });

@@ -380,7 +380,7 @@ describe('printDistIntegrityFailure', () => {
 
     expect(code).toBe(1);
     expect(lines.join('\n')).toContain('preflight failed');
-    expect(lines.join('\n')).toContain('imports are unchecked');
+    expect(lines.join('\n')).toContain('dependencies are unchecked');
     expect(lines.join('\n')).toContain('dist/asset.mjs');
   });
 

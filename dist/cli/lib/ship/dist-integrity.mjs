@@ -11,6 +11,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { assignedNames, ownDirVars, scanShellScript } from '../doctor/hook-gate-scan.mjs';
 const CLEAN_REPORT = {
     active: false,
     unresolved: [],
@@ -107,6 +108,79 @@ export async function moduleImportEdges(root, importer, source) {
     }
     return edges;
 }
+/** The literal inline spelling of "my own directory", used without a variable. */
+const SCRIPT_DIR_LITERAL = '$(dirname "${BASH_SOURCE[0]}")';
+/** A leading underscore is real here — review/submodules.sh uses `_REVIEW_SUBMODULE_LIB_DIR`. */
+const VAR_EXPANSION = /^\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?$/;
+/** Rooted outside the package tree: a real runtime dependency, but never on a dist artifact. */
+const EXTERNAL_ROOT = /^\$\{?(?:HOME|TMPDIR|XDG_[A-Z_]+)\}?$/;
+const BARE_VAR = /^\$[A-Za-z_][A-Za-z0-9_]*/;
+/** `$( )` and `${ }` nest, so a scan to the FIRST closer takes the wrong span for `$(x "$(y)")`. */
+function expansionEnd(operand) {
+    const open = operand[1];
+    if (open !== '(' && open !== '{') {
+        return operand.startsWith('$') ? (BARE_VAR.exec(operand)?.[0].length ?? -1) : -1;
+    }
+    const close = open === '(' ? ')' : '}';
+    let depth = 0;
+    for (let i = 1; i < operand.length; i++) {
+        if (operand[i] === open)
+            depth++;
+        else if (operand[i] === close && --depth === 0)
+            return i + 1;
+    }
+    return -1;
+}
+function unwrapQuotes(operand) {
+    const quoted = operand.startsWith('"') && operand.length > 1 && operand.endsWith('"');
+    return quoted ? operand.slice(1, -1) : operand;
+}
+/** Repo path, `null` when deliberately outside the dist closure, `undefined` when opaque. */
+function shellTarget(importer, operand, dirVars, assigned) {
+    const bare = unwrapQuotes(operand);
+    // An absolute system path (`. /etc/os-release`) is a real dependency, never a dist artifact.
+    if (bare.startsWith('/'))
+        return null;
+    const end = expansionEnd(bare);
+    if (end === -1)
+        return undefined;
+    const expansion = bare.slice(0, end);
+    const tail = bare.slice(end);
+    if (!tail.startsWith('/'))
+        return undefined;
+    const named = VAR_EXPANSION.exec(expansion);
+    if (!(named ? dirVars.has(named[1]) : expansion === SCRIPT_DIR_LITERAL)) {
+        // External root only for a name this script never assigns: a reassigned `HOME` is not $HOME,
+        // whatever it now holds, so it cannot be waved through as living outside the package.
+        const inherited = named === null || !assigned.has(named[1]);
+        return inherited && EXTERNAL_ROOT.test(expansion) ? null : undefined;
+    }
+    // Returned even when it climbs out of dist/: `willShip` then names the exact edge, which is
+    // what an .mjs import above dist already gets. The requeue guard keeps the WALK inside dist.
+    return path.posix.normalize(path.posix.join(path.posix.dirname(importer), tail));
+}
+/**
+ * Shell `source` edges of ONE shipped script — moduleImportEdges' shape and its `undefined` =
+ * unverified = BLOCKS contract. See docs/decisions/typescript-source-prebuilt-mjs.md (sc-2522).
+ */
+export async function shellSourceEdges(importer, source) {
+    // Dev-only in the same sense as es-module-lexer above: consumers short-circuit before this runs.
+    const { parse } = await import('unbash');
+    const scan = scanShellScript(source, parse);
+    if (scan === undefined)
+        return undefined;
+    const edges = [];
+    for (const { text, at } of scan.operands) {
+        // Only the nearest preceding assignment counts: `DIR=<own>; DIR=/tmp; . "$DIR/x"` is untrusted.
+        const target = shellTarget(importer, text, ownDirVars(scan, at), assignedNames(scan));
+        if (target === null)
+            continue;
+        if (target === undefined)
+            return undefined;
+        edges.push({ importer, specifier: text, target });
+    }
+    return edges;
+}
 /**
  * Inspect the caller's physical dist tree, Git index, and ship briefing.
  * `base` is the commit the ship worktree would be cut from.
@@ -134,7 +208,8 @@ export async function inspectDistIntegrity(root, base, briefedPaths) {
     const required = new Set([...briefed].map(generatedPath).filter((file) => file !== undefined));
     const unresolved = [];
     const unlexable = [];
-    const queue = [...required].filter((file) => file.endsWith('.mjs')).sort();
+    const walkable = (file) => file.endsWith('.mjs') || file.endsWith('.sh');
+    const queue = [...required].filter(walkable).sort();
     const queued = new Set(queue);
     const parsed = new Set();
     let queueIndex = 0;
@@ -149,7 +224,10 @@ export async function inspectDistIntegrity(root, base, briefedPaths) {
         // a discovery root: its dependencies are leaving with it, not candidates to add back.
         if (deleted.has(importer) || !physicalSet.has(importer) || !existsSync(absolute))
             continue;
-        const edges = await moduleImportEdges(root, importer, readFileSync(absolute, 'utf8'));
+        const text = readFileSync(absolute, 'utf8');
+        const edges = importer.endsWith('.sh')
+            ? await shellSourceEdges(importer, text)
+            : await moduleImportEdges(root, importer, text);
         if (edges === undefined) {
             // Recorded, not thrown: it still blocks via `unlexable`, and finishing the queue lets one
             // report name the file instead of main()'s catch aborting with a message naming nothing.
@@ -161,7 +239,10 @@ export async function inspectDistIntegrity(root, base, briefedPaths) {
             if (!willShip(target) || !existsSync(path.join(root, target))) {
                 unresolved.push({ importer, specifier, target });
             }
-            if (target.endsWith('.mjs') &&
+            if (
+            // Shell walks transitively too: ship-branch.sh -> review/worktrees.sh -> its own siblings.
+            // Omitting .sh here would report the first hop of a new chain and stop.
+            walkable(target) &&
                 physicalSet.has(target) &&
                 !deleted.has(target) &&
                 !queued.has(target)) {
@@ -193,7 +274,7 @@ export function printDistIntegrityFailure(report) {
         return 0;
     console.error('✗ devkit ship: dist integrity preflight failed.');
     if (report.unlexable.length > 0) {
-        console.error('  Generated dist artifacts could not be parsed, so their imports are unchecked:');
+        console.error('  Generated dist artifacts could not be read, so their dependencies are unchecked:');
         for (const file of report.unlexable)
             console.error(`    ${file}`);
     }
@@ -210,7 +291,7 @@ export function printDistIntegrityFailure(report) {
             console.error(`    ${file}`);
     }
     if (report.unresolved.length > 0) {
-        console.error('  Relative imports do not resolve to tracked dist files:');
+        console.error('  Relative imports and shell source targets do not resolve to tracked dist files:');
         for (const item of report.unresolved) {
             console.error(`    ${item.importer}: ${item.specifier} -> ${item.target}`);
         }
