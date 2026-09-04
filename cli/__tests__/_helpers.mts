@@ -26,7 +26,8 @@ import { fileURLToPath } from 'node:url';
 export const CLI = join(dirname(fileURLToPath(import.meta.url)), '..', 'index.mts');
 const TEST_SUBPROCESS = fileURLToPath(new URL('./test-subprocess.mts', import.meta.url));
 export const TEST_SUBPROCESS_TIMEOUT_MS = 90_000;
-const TEST_SUBPROCESS_CLEANUP_MS = 30_000;
+/** Exported alongside the deadline so test-subprocess.test.mts can pin the resolved outer budget. */
+export const TEST_SUBPROCESS_CLEANUP_MS = 30_000;
 const EPHEMERAL_SHIP_WORKTREE_RE = /devkit-(?:re)?ship-/;
 
 function commandCall(

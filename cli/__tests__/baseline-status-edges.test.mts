@@ -477,6 +477,26 @@ describe('wiring', () => {
     // `if-no-files-found: ignore` treats an empty match as success.
     expect(uploads.match(/include-hidden-files: true/g)).toHaveLength(2);
   });
+
+  // A cancelled job is where `if: always()` stops being a guarantee, so the bound and the uploads
+  // above are one mechanism. See docs/decisions/suite-hangs-bound-at-the-spawn-site.md (sc-2393).
+  it('bounds the test step itself, never the job that carries the uploads', () => {
+    const gate = readFileSync(
+      join(import.meta.dirname, '..', '..', '.github/workflows/gate.yml'),
+      'utf8',
+    );
+
+    const testsStep = gate.slice(gate.indexOf('- name: Tests'));
+    const step = testsStep.slice(0, testsStep.indexOf('- name: Upload'));
+    expect(step, 'the Tests step must carry its own timeout-minutes').toMatch(
+      /^\s+timeout-minutes: \d+$/m,
+    );
+    // Anchored at the job's indentation: 6 spaces is a step key, fewer is a job key.
+    expect(
+      gate.match(/^ {0,5}timeout-minutes:/m),
+      'timeout-minutes at job level would put the if: always() uploads at the mercy of cancellation',
+    ).toBeNull();
+  });
 });
 
 describe('artifact validation and transient failures (correctness-reviewer findings)', () => {

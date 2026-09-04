@@ -15,7 +15,7 @@ import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { normalizeSelection, type Selection } from '../lib/components.mts';
 import { buildFullHook } from '../lib/husky/husky-block.mts';
-import { CLI, rootRegistry } from './_helpers.mts';
+import { CLI, rootRegistry, testSpawnSync } from './_helpers.mts';
 
 const { cleanup, mkTmp } = rootRegistry();
 afterEach(cleanup);
@@ -177,9 +177,19 @@ function addCommittedChange(target: Fixture): void {
 function runReview(
   target: Fixture,
   args: string[] = [],
-  options: { cwd?: string; env?: NodeJS.ProcessEnv; timeout?: number } = {},
+  options: {
+    cwd?: string;
+    env?: NodeJS.ProcessEnv;
+    timeout?: number;
+    /** The named 124-sentinel carve-out in suite-hangs-bound-at-the-spawn-site: the supervisor
+     *  also reports 124, so wrapping such a test gives its assertion two sources. */
+    supervised?: boolean;
+  } = {},
 ): SpawnSyncReturns<string> {
-  return spawnSync(process.execPath, [CLI, 'review', ...args], {
+  // Supervised by default: node's `timeout:` signals the direct child only, never the gate tree.
+  // See docs/decisions/suite-hangs-bound-at-the-spawn-site.md (sc-2393).
+  const run = options.supervised === false ? spawnSync : testSpawnSync;
+  return run(process.execPath, [CLI, 'review', ...args], {
     cwd: options.cwd ?? target.root,
     encoding: 'utf8',
     env: options.env ?? target.env,
@@ -559,6 +569,8 @@ exec ${JSON.stringify(REAL_GIT)} "$@"
     const result = runReview(target, [], {
       env: { ...target.env, SHIP_COMMIT_TIMEOUT: '1' },
       timeout: 75_000,
+      // Unsupervised: the 124 below must come from the CLI's 1s ceiling and nowhere else.
+      supervised: false,
     });
 
     expect(result.signal, combinedOutput(result)).toBeNull();

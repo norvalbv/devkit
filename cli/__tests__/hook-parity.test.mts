@@ -5,7 +5,7 @@
  * `devkit review` surfaces them to a user mid-run, so a refactor that quietly reworded them is a
  * user-visible change, not an internal one.
  */
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import {
   copyFileSync,
   existsSync,
@@ -34,6 +34,7 @@ import {
   SELF_HOST_STRUCTURE_CMD,
   selfHostSelection,
 } from '../lib/husky/self-host.mts';
+import { testSpawnSync } from './_helpers.mts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const HOOK_SEL = {
@@ -434,8 +435,14 @@ describe('judgeHookParity — isolation and degraded inputs', () => {
 // its catch-all, which an in-process call never reaches.
 describe('hook-parity --gate as the hook actually spawns it', () => {
   const GATE = join(ROOT, 'cli', 'lib', 'husky', 'hook-parity.mts');
+  // Supervised: a real gate is a process tree, and a raw sync spawn of one blocks the worker
+  // thread. See docs/decisions/suite-hangs-bound-at-the-spawn-site.md (sc-2393).
   const spawnGate = (cwd: string, env: Record<string, string> = {}) =>
-    spawnSync('node', [GATE, '--gate'], { cwd, encoding: 'utf8', env: { ...process.env, ...env } });
+    testSpawnSync('node', [GATE, '--gate'], {
+      cwd,
+      encoding: 'utf8',
+      env: { ...process.env, ...env },
+    });
 
   it('exits 0 through the real process when the hook is in parity', () => {
     const { root } = seedGitRoot();

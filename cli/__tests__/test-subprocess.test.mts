@@ -1,10 +1,13 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { superviseGateCommand } from '../lib/ship/review/process/gate-supervisor.mts';
 import {
   processAlive,
   rootRegistry,
   supervisedCommand,
+  TEST_SUBPROCESS_CLEANUP_MS,
+  TEST_SUBPROCESS_TIMEOUT_MS,
   testExecFileSync,
   testSpawnSync,
 } from './_helpers.mts';
@@ -115,5 +118,99 @@ describe('supervised synchronous test subprocesses', () => {
     // have reported the reap as passing. This line is what makes the next one mean anything.
     expect(childPid).toBeGreaterThan(1);
     expect(processAlive(childPid)).toBe(false);
+  });
+
+  // A bare 124 says something timed out, not which command, so the argv must survive into the
+  // throw. See docs/decisions/suite-hangs-bound-at-the-spawn-site.md (sc-2393).
+  it('names the blocked command in the timeout it throws', () => {
+    const root = mkTmp('test-subprocess-');
+    const childPidFile = join(root, 'child.pid');
+
+    let thrown: unknown;
+    try {
+      testExecFileSync('/bin/sh', ['-c', LEADER_SCRIPT, LEADER_ARGV0, childPidFile], {
+        encoding: 'utf8',
+        timeout: REAP_DEADLINE_MS,
+      });
+    } catch (cause) {
+      thrown = cause;
+    }
+
+    expect(thrown, 'a wedged command must not resolve as success').toBeDefined();
+    expect(thrown).toMatchObject({ status: 124 });
+    const message = thrown instanceof Error ? thrown.message : String(thrown);
+    expect(message, 'the reader must be able to identify the wedged command').toContain(
+      LEADER_ARGV0,
+    );
+  });
+});
+
+// Contracts the call sites moved onto this boundary depend on, none of which was pinned before.
+// See docs/decisions/suite-hangs-bound-at-the-spawn-site.md (sc-2393).
+describe('option passthrough the supervised call sites depend on', () => {
+  it('forwards stdin to the supervised command, not to the supervisor', () => {
+    const result = testSpawnSync(
+      process.execPath,
+      ['-e', 'process.stdout.write(require("node:fs").readFileSync(0, "utf8").toUpperCase())'],
+      { encoding: 'utf8', input: 'refs/heads/main\n' },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('REFS/HEADS/MAIN\n');
+  });
+
+  it('runs the supervised command in the requested cwd', () => {
+    const root = realpathSync(mkTmp('test-subprocess-cwd-'));
+    const result = testSpawnSync(process.execPath, ['-e', 'process.stdout.write(process.cwd())'], {
+      cwd: root,
+      encoding: 'utf8',
+    });
+
+    // Not merely "not the supervisor's cwd": a fixture that silently ran in devkit's OWN checkout
+    // is the hazard vitest.setup.mjs already strips GIT_DIR to prevent, so pin the exact directory.
+    expect(result.stdout).toBe(root);
+    expect(result.stdout).not.toBe(process.cwd());
+  });
+
+  it("reaches the supervised command with the caller's env, not the runner's", () => {
+    const result = testSpawnSync(
+      process.execPath,
+      ['-e', 'process.stdout.write(String(process.env.DEVKIT_ENV_PROBE))'],
+      { encoding: 'utf8', env: { ...process.env, DEVKIT_ENV_PROBE: 'from-the-caller' } },
+    );
+
+    expect(result.stdout).toBe('from-the-caller');
+    expect(process.env.DEVKIT_ENV_PROBE, 'the probe must not leak into the runner').toBeUndefined();
+  });
+
+  it.each([
+    { label: 'zero', timeout: 0 },
+    { label: 'negative', timeout: -1 },
+  ])('falls back to the default deadline for a $label timeout', ({ timeout }) => {
+    // Asserted on the argv, where the resolved deadline is observable without waiting 90s.
+    const { args, options } = supervisedCommand('true', [], { timeout });
+
+    expect(args).toContain(String(TEST_SUBPROCESS_TIMEOUT_MS));
+    expect(options.timeout).toBe(TEST_SUBPROCESS_TIMEOUT_MS + TEST_SUBPROCESS_CLEANUP_MS);
+  });
+
+  // setTimeout clamps past 2^31-1 ms to 1ms, which inverted a huge deadline into an instant 124.
+  // See docs/decisions/suite-hangs-bound-at-the-spawn-site.md (sc-2393).
+  it.each([
+    { label: 'MAX_SAFE_INTEGER', timeout: Number.MAX_SAFE_INTEGER },
+    { label: 'one past the 32-bit timer ceiling', timeout: 2_147_483_648 },
+  ])(
+    'refuses a $label deadline instead of inverting it into an instant 124',
+    async ({ timeout }) => {
+      await expect(superviseGateCommand(timeout, ['/bin/sh', '-c', 'exit 0'])).rejects.toThrow(
+        /deadline/i,
+      );
+    },
+  );
+
+  // The cap is INCLUSIVE: regression-proof.mts supervises with exactly this number, so a `>=`
+  // would refuse the one production caller sitting on the boundary.
+  it('accepts a deadline exactly at the 32-bit timer ceiling', async () => {
+    await expect(superviseGateCommand(2_147_483_647, ['/bin/sh', '-c', 'exit 0'])).resolves.toBe(0);
   });
 });

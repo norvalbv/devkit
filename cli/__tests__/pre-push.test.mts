@@ -1,4 +1,4 @@
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import {
   chmodSync,
   copyFileSync,
@@ -14,6 +14,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
+import { testSpawnSync } from './_helpers.mts';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const PRE_PUSH_HOOK = join(REPO_ROOT, '.husky/pre-push');
@@ -91,7 +92,9 @@ function runPrePush(
   input: string,
   extraEnv: Record<string, string> = {},
 ) {
-  return spawnSync('sh', ['-e', PRE_PUSH_HOOK, 'origin', 'fixture://origin'], {
+  // Supervised: this runs the REAL validation script and its gate-chain process tree. See
+  // docs/decisions/suite-hangs-bound-at-the-spawn-site.md (sc-2393).
+  return testSpawnSync('sh', ['-e', PRE_PUSH_HOOK, 'origin', 'fixture://origin'], {
     cwd: root,
     encoding: 'utf8',
     env: {
