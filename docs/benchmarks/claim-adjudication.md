@@ -132,6 +132,11 @@ Raw inputs, labels, source paths and claim text stay in private research storage
 sanitized counts, hashes, lens names and anonymized identifiers under the scale-track data ruling.
 The study informs measurement; it does not automatically change the configured model or gate policy.
 
+The [reporting-family audit](reporting-family-audit-2026-09-05.md) applies this distinction to
+PR598's static bug/repair cases. It preserves all 12 occurrences, demonstrates a credited lens
+diagnosis that does not identify the target defect, and leaves unsupported repair contracts
+unresolved. It is exposed offline evidence, not qualified claim precision.
+
 The [5 September 2026 complete-claim replay](experiments/2026-09-05-sol-claims/README.md)
 preserves the original blinded assessment separately from post-label comparison and semantic
 grouping, including protocol failures, unresolved attribution and reconstruction limits.
