@@ -131,3 +131,7 @@ This is reviewer-level simulation; other commit gates can still block the ship.
 Raw inputs, labels, source paths and claim text stay in private research storage. Commit only
 sanitized counts, hashes, lens names and anonymized identifiers under the scale-track data ruling.
 The study informs measurement; it does not automatically change the configured model or gate policy.
+
+The [5 September 2026 complete-claim replay](experiments/2026-09-05-sol-claims/README.md)
+preserves the original blinded assessment separately from post-label comparison and semantic
+grouping, including protocol failures, unresolved attribution and reconstruction limits.

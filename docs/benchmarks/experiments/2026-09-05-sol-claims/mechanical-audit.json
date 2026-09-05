@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "kind": "illustrative-mechanical-checks",
+  "selectedClaims": 2,
+  "selection": "Lexicographically first successful occurrence in each of two prescribed inputs; selection recorded before detailed inspection, after aggregate phase-one outcomes were known.",
+  "independentCalibration": false,
+  "humanTruthLabels": false,
+  "nativeJudgmentsModified": false,
+  "execution": "Verified source modules executed with in-memory boundary substitutes; full application and production-frequency claims are outside this check.",
+  "checks": [
+    {
+      "case": "A",
+      "result": "MECHANISM_REPRODUCED_WITH_BOUNDARY_SUBSTITUTES",
+      "observation": "A watcher can miss continuation creation before its baseline and emit an incorrect corrective message. Reversing that ordering prevents the message.",
+      "limitation": "The real database, poller and full lifecycle were not executed."
+    },
+    {
+      "case": "B",
+      "result": "PARTIAL_CONDITIONAL_SUPPORT",
+      "observation": "An earlier acknowledgement can clear a newer local intent; a subsequent send can then fall back to persisted state.",
+      "limitation": "Send resolution and intent persistence share a mutex. The isolated execution does not establish whether the adverse request ordering is reachable through the real application."
+    }
+  ],
+  "interpretation": "These checks illustrate evidence quality and limits. They do not estimate adjudicator precision or establish human ground truth. Observed examples are exposed regression candidates, not unseen holdouts.",
+  "privateEvidenceSha256": {
+    "selection.private.json": "0461f77f096d23093d0d505da2b4798dedc009ee4bbda954d1f3ed0df9003e63",
+    "evidence.private.json": "7ff8dd99dde7b92afe3597b695102d4460b39db540154a1321b5b76dd73f0b02",
+    "artifact-receipt.private.json": "d8bc2631e6a9403469778f4a94df3ec9fca9e91f4a5bb51ec544c2f41f58ba8d"
+  }
+}
