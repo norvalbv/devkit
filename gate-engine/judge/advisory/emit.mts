@@ -86,7 +86,10 @@ function readReport(text: string): FallowAudit {
   }
   // The verdict must be one devkit KNOWS, not merely present: interpreting an object would put
   // `verdict=[object Object]` at the terminus as though it were real attribution.
-  return VERDICTS.includes(report.verdict ?? '') ? report : {};
+  if (!VERDICTS.includes(report.verdict ?? '')) return {};
+  // `?? {}` covers a literal `attribution: null`, which the parameter default cannot: a default
+  // fires only on undefined, so null would reach the counter reads and throw inside the hook.
+  return { verdict: report.verdict, attribution: report.attribution ?? {} };
 }
 
 /** The verdicts fallow emits and this module can interpret; anything else is an unreadable report. */

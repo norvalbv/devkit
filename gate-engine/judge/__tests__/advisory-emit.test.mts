@@ -208,6 +208,12 @@ describe('degraded and boundary inputs', () => {
     // unreadable report, because the verdict alone still answers "was this audit clean".
     expect(summariseFallowAudit('{"verdict":"pass","attribution":"none"}')?.token).toBe('clean');
     expect(summariseFallowAudit('{"verdict":"pass","attribution":[]}')?.token).toBe('clean');
+    // A literal null is the one the parameter default cannot catch — defaults fire on undefined
+    // only, so an unnormalised null reaches the counter reads and throws inside a commit hook.
+    expect(summariseFallowAudit('{"verdict":"pass","attribution":null}')?.token).toBe('clean');
+    expect(summariseFallowAudit('{"verdict":"fail","attribution":null}')?.detail).toBe(
+      'verdict=fail — read the fallow section of the log',
+    );
   });
 
   it('keeps printing the human report when telemetry is switched off', () => {
