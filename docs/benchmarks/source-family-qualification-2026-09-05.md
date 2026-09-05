@@ -1,5 +1,7 @@
 # Source-family qualification (sc-2843)
 
+[Source-control decision history](../decisions/benchmarks-grow-from-telemetry.md) records why a targeted repair can remain ineligible as a clean counterpart.
+
 **Reject `case-002` as a clean counterpart.** Its narrow command repair works, but the unchanged
 surrounding implementation retains a reproduced correctness defect. Both members of `family-001`
 remain `target-controlled`, exposed development evidence. Zero clean pairs or corpus rows are
@@ -145,3 +147,6 @@ or exclude its remaining blockers and retain the same exposed-family identity. T
 not add state/retry, race/lifetime or parsing family coverage, supply a holdout, or unblock sc-2832's
 measured history comparison. Adapter work can proceed independently; measurement needs qualified,
 frozen cases first.
+
+The [sc-2851 input adapter](review-history-adapter.md) implements deterministic chronology and
+per-task history preparation while these qualification prerequisites remain open.

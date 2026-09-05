@@ -1,5 +1,7 @@
 # Source-family census (sc-2002)
 
+[Source-control decision history](../decisions/benchmarks-grow-from-telemetry.md) and [native-coverage interpretation](../decisions/correctness-chunking-ships-dark.md) govern these diagnostic receipts.
+
 This delivery adds an opt-in, zero-judge census around the existing production planner. It records
 which required source lines are initially supplied to each task, independently of whether a
 candidate's bug or repair label is established. It does not change reviewer prompts, scoring,

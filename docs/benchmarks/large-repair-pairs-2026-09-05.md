@@ -1,5 +1,7 @@
 # Executable repair pairs and native chunking (sc-2500)
 
+[Admission decision history](../decisions/corpus-rows-admitted-by-coverage-cell.md) records this coverage expansion and its later reporting-family qualification; [claim measurement](../decisions/reviewer-claim-measurement.md) distinguishes verdicts from target diagnoses.
+
 The benchmark now executes the same lens/chunk plan as production. Six repaired siblings extend
 existing mined defect rows; the number of defect rows stays at 75. This changes coverage and the
 measurement method. The Sol model pin remains unchanged.
