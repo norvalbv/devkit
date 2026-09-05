@@ -18,14 +18,16 @@
  * which event). It carries no consumer-specific paths beyond $CLAUDE_PROJECT_DIR.
  */
 
-const PKG = 'node_modules/@norvalbv/devkit';
-// devkit's own engine bins are compiled .mjs in an installed consumer (dist) but .mts in devkit's
-// own repo (dev/tests, Node strips types). Derive the extension from THIS module so the generated
-// hook commands point at the file that actually exists in each context.
-const SELF_EXT = import.meta.url.endsWith('.mts') ? '.mts' : '.mjs';
+export const PKG = 'node_modules/@norvalbv/devkit';
+
+/** Anchored at the CONSUMER's node_modules, so it carries dist/ and is never .mts — see the
+ * 2026-09-04 note in docs/decisions/typescript-source-prebuilt-mjs.md. Frozen; pinned by its test. */
+const SEARCH_TOOL_GUARD_REL = 'dist/gate-engine/search-tool/search-tool-guard.mjs';
+const SEARCH_TOOL_COUNTER_REL = 'dist/gate-engine/search-tool/search-tool-counter.mjs';
+const engineCommand = (scriptRel: string) => `node "$CLAUDE_PROJECT_DIR"/${PKG}/${scriptRel}`;
 
 // One registry entry: a Claude hook event + matcher + the shell command it wires (see the header).
-interface HookRegistration {
+export interface HookRegistration {
   registrationId: string;
   event: string;
   matcher: string;
@@ -33,7 +35,37 @@ interface HookRegistration {
   /** Cursor can expose the same capability under a different native event/matcher pair. */
   cursorEvent?: string;
   cursorMatcher?: string;
+  /** Package-relative target of a command that runs a file inside the installed package, carried as
+   * data so doctor resolves it without parsing shell. Absent = a consumer-anchored .claude/hooks script. */
+  scriptRel?: string;
 }
+
+/** A command this registry USED to emit for a still-live registration, in SOURCE form. Ruled in
+ * docs/decisions/hook-command-supersession.md; a GONE registration is RETIRED_COMMANDS instead. */
+export interface SupersededHookCommand {
+  /** must still exist in HOOK_REGISTRATIONS — legacy-commands.mts throws otherwise */
+  registrationId: string;
+  command: string;
+  /** devkit version that first shipped the current spelling */
+  since: string;
+}
+
+export const SUPERSEDED_HOOK_COMMANDS: readonly SupersededHookCommand[] = [
+  // sc-2563: the pre-dist path resolved to nothing in a packaged consumer. Both prior SELF_EXT
+  // spellings are listed — a packaged install wrote .mjs, a source-context run wrote .mts.
+  ...(['.mjs', '.mts'] as const).flatMap((ext) => [
+    {
+      registrationId: 'search-steering:pre-bash',
+      command: `node "$CLAUDE_PROJECT_DIR"/${PKG}/gate-engine/search-tool/search-tool-guard${ext}`,
+      since: '0.64.0',
+    },
+    {
+      registrationId: 'search-steering:post-bash',
+      command: `node "$CLAUDE_PROJECT_DIR"/${PKG}/gate-engine/search-tool/search-tool-counter${ext}`,
+      since: '0.64.0',
+    },
+  ]),
+];
 
 /** Registrations grouped by the selectable component id (components.mjs) that owns them. */
 export const HOOK_REGISTRATIONS: Record<string, HookRegistration[]> = {
@@ -68,13 +100,15 @@ export const HOOK_REGISTRATIONS: Record<string, HookRegistration[]> = {
       registrationId: 'search-steering:pre-bash',
       event: 'PreToolUse',
       matcher: 'Bash',
-      command: `node "$CLAUDE_PROJECT_DIR"/${PKG}/gate-engine/search-tool/search-tool-guard${SELF_EXT}`,
+      command: engineCommand(SEARCH_TOOL_GUARD_REL),
+      scriptRel: SEARCH_TOOL_GUARD_REL,
     },
     {
       registrationId: 'search-steering:post-bash',
       event: 'PostToolUse',
       matcher: 'Bash',
-      command: `node "$CLAUDE_PROJECT_DIR"/${PKG}/gate-engine/search-tool/search-tool-counter${SELF_EXT}`,
+      command: engineCommand(SEARCH_TOOL_COUNTER_REL),
+      scriptRel: SEARCH_TOOL_COUNTER_REL,
     },
   ],
   // The i-have-adhd output style is ALWAYS-ON by selection: the skill sets

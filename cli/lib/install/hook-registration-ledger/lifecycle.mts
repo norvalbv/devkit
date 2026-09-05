@@ -43,7 +43,7 @@ function cursorCommand(command: string): string {
     .trim();
 }
 
-function nativeProjection(
+export function nativeProjection(
   provider: AgentProvider,
   registration: {
     event: string;

@@ -12,7 +12,11 @@ import {
 } from '../../gate-engine/ratchets/baseline-paths.mts';
 import { RECOMMENDED_GUARD_IDS, type Selection, structureCmdFor } from '../lib/components.mts';
 import { detectGitRoot } from '../lib/detect-git-root.mts';
-import { checkAgentAssets, checkRegistrations } from '../lib/doctor/asset-checks.mts';
+import {
+  checkAgentAssets,
+  checkRegisteredHookTargets,
+  checkRegistrations,
+} from '../lib/doctor/asset-checks.mts';
 import { type CheckResult, check } from '../lib/doctor/check-result.mts';
 import {
   checkExtends,
@@ -98,23 +102,6 @@ function checkStructureLint(cwd: string, stack: string): CheckResult {
     );
   }
   return check('structure-lint', 'OK', `runs \`${expectedCmd}\``);
-}
-
-// searchSteering: the guard + counter engine bins are present in the installed package.
-function checkSearchToolBins(): CheckResult {
-  const dir = join(packageDir(), 'gate-engine', 'search-tool');
-  const missing = [`search-tool-guard${SELF_EXT}`, `search-tool-counter${SELF_EXT}`].filter(
-    (f) => !existsSync(join(dir, f)),
-  );
-  if (missing.length) {
-    return check(
-      'search-steering bins',
-      'MISSING',
-      `engine bin(s) absent: ${missing.join(', ')}`,
-      'reinstall @norvalbv/devkit',
-    );
-  }
-  return check('search-steering bins', 'OK', 'guard + counter present');
 }
 
 function checkBaselines(cwd: string): CheckResult {
@@ -376,7 +363,7 @@ async function collectResults(
   if (hooks.scripts.length && surfaces.length)
     results.push(checkAgentAssets(cwd, 'hooks', surfaces, { expected: hooks.scripts }));
   if (sel.adhd) results.push(checkAdhdSkill(cwd));
-  if (sel.searchSteering) results.push(checkSearchToolBins());
+  if (hooks.components.length) results.push(checkRegisteredHookTargets(cwd, hooks.components));
   results.push(...checkOxcCapability(cwd));
   if (sel.antiSlop) results.push(...checkAntiSlopCapability(cwd));
   if (surfaces.length) results.push(checkRegistrations(cwd, hooks.components, surfaces));
