@@ -383,3 +383,135 @@ describe('readShipEvents', () => {
     expect(readShipEvents(file, SHIP)).toHaveLength(3);
   });
 });
+
+/**
+ * sc-2526. These assert the RENDERED line, not merely that a row was emitted: a row this digest
+ * silently dropped would satisfy an emission-only test while the finding stayed just as invisible.
+ */
+describe('advisory_result', () => {
+  const advisory = (gate: string, status: string, detail: string) =>
+    ev({ type: 'advisory_result', gate, status, detail });
+
+  it('names a finding below the banner on a GREEN ship, marked non-blocking', () => {
+    const rows = summarise(
+      [
+        ev({ type: 'ship_attempt' }),
+        advisory('fallow-advisory', 'finding', 'verdict=warn · 1 duplication introduced'),
+        ev({ type: 'ship_result', exit_code: 0, blocked_gate: null }),
+      ],
+      SHIP,
+    );
+    expect(rows).toEqual([
+      {
+        gate: 'fallow-advisory',
+        state: 'finding',
+        blocking: false,
+        detail: 'verdict=warn · 1 duplication introduced',
+      },
+    ]);
+    expect(render(rows)).toContain('⚠ fallow-advisory — finding recorded, did NOT block this run');
+  });
+
+  it('can never be rendered as the blocker, even when the run failed unattributably', () => {
+    // 'unknown' blocked_gate is the arm that turns every ATTRIBUTABLE row's blocking to null
+    // ("finding recorded" with no claim either way). An advisory is knowable on every run.
+    const rows = summarise(
+      [
+        ev({ type: 'ship_attempt' }),
+        ev({ type: 'gate_result', gate: 'deterministic', status: 'fail', detail: 'guard-size' }),
+        advisory('fallow-advisory', 'finding', 'verdict=fail · 3 complexity introduced'),
+        ev({ type: 'ship_result', exit_code: 1, blocked_gate: 'unknown' }),
+      ],
+      SHIP,
+    );
+    expect(rows.find((r) => r.gate === 'deterministic')?.blocking).toBeNull();
+    expect(rows.find((r) => r.gate === 'fallow-advisory')?.blocking).toBe(false);
+    const text = render(rows);
+    expect(text).toContain('⚠ fallow-advisory');
+    expect(text).not.toContain('fallow-advisory — BLOCKED');
+  });
+
+  it('renders a could_not_run advisory as a gate that verified nothing', () => {
+    const rows = summarise(
+      [advisory('fallow-advisory', 'could_not_run', 'fallow is not on PATH'), shipResult(null)],
+      SHIP,
+    );
+    expect(rows[0].state).toBe('could-not-run');
+    expect(render(rows)).toContain('· fallow-advisory — fallow is not on PATH');
+  });
+
+  it('stays silent when the advisories had nothing to say — sc-2488s rule', () => {
+    expect(render(summarise([ev({ type: 'ship_attempt' }), shipResult(null)], SHIP))).toBe('');
+  });
+
+  it('dedupes a repeated advisory but keeps a second, different one', () => {
+    const rows = summarise(
+      [
+        advisory('fallow-advisory', 'finding', 'first'),
+        advisory('fallow-advisory', 'finding', 'again'),
+        advisory('skill-projection', 'finding', '2 projection drift finding(s)'),
+        shipResult(null),
+      ],
+      SHIP,
+    );
+    expect(rows.map((r) => r.gate)).toEqual(['fallow-advisory', 'skill-projection']);
+  });
+});
+
+describe('advisory_result — attempt scoping and crowding', () => {
+  const advisory = (gate: string, status: string, detail: string) =>
+    ev({ type: 'advisory_result', gate, status, detail });
+
+  it('drops an advisory left by a PRIOR attempt that reused this ship id', () => {
+    // DEVKIT_SHIP_ID is inherited across --resume attempts, so one id spans runs in a per-machine
+    // sink. Replaying a previous round's finding would send an agent to re-fix what it just fixed.
+    const rows = summarise(
+      [
+        ev({ type: 'ship_attempt' }),
+        advisory('fallow-advisory', 'finding', 'the round already fixed'),
+        ev({ type: 'ship_result', blocked_gate: 'review', exit_code: 1 }),
+        ev({ type: 'ship_attempt' }),
+        advisory('fallow-advisory', 'finding', 'this round'),
+        ev({ type: 'ship_result', exit_code: 0, blocked_gate: null }),
+      ],
+      SHIP,
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].detail).toBe('this round');
+  });
+
+  it('keeps a finding and a could_not_run for the SAME gate — they are different facts', () => {
+    // fallow can report on one advisory while the skill-projection check cannot run, and a single
+    // gate can legitimately do both across a retried stage. Collapsing them would hide the weaker.
+    const rows = summarise(
+      [
+        advisory('fallow-advisory', 'finding', 'verdict=fail'),
+        advisory('fallow-advisory', 'could_not_run', 'report unreadable'),
+        shipResult(null),
+      ],
+      SHIP,
+    );
+    expect(rows.map((r) => r.state)).toEqual(['finding', 'could-not-run']);
+  });
+
+  it('tells the reader when a crowded run pushed the advisory past the printed cap', () => {
+    // Advisories render after the attributable rows, so past the cap the advisory is cut first.
+    // Acceptable ONLY because the overflow line says so; silently dropping it restores the bug.
+    const many = Array.from({ length: 10 }, (_, i) =>
+      ev({ type: 'gate_result', gate: `guard-${i}`, status: 'fail', detail: 'failed' }),
+    );
+    const text = render(
+      summarise(
+        [
+          ev({ type: 'ship_attempt' }),
+          ...many,
+          advisory('fallow-advisory', 'finding', 'verdict=fail · 3 complexity introduced'),
+          ev({ type: 'ship_result', blocked_gate: 'deterministic', exit_code: 1 }),
+        ],
+        SHIP,
+      ),
+    );
+    expect(text).toContain('more finding(s) — all of them are in the log');
+    expect(text).toContain('Gate findings this run (11)');
+  });
+});

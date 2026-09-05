@@ -27,6 +27,8 @@ import { projectionDrift } from '../lib/install/agent-assets/projection-parity.m
 import { FORMAT_TOOL_SETUP } from '../lib/husky/format-fragment.mts';
 import {
   buildFullHook,
+  buildOverlayHook,
+  buildStandaloneHook,
   extractGuardBlock,
   PACKAGE_BIN_DIR_FRAGMENT,
   replaceGuardBlock,
@@ -60,6 +62,83 @@ const HOOK_SEL = {
   structureCmd: SELF_HOST_STRUCTURE_CMD,
   extras: SELF_HOST_EXTRAS,
 };
+
+/**
+ * Runs the fallow advisory fragment for real, against a stub `fallow` and a per-test telemetry sink.
+ * DEVKIT_GATE_EVENTS and DEVKIT_SHIP_ID below are pinned deliberately — see their own comments.
+ */
+function runFallowFragment(
+  hook: string,
+  {
+    stub = true,
+    mktempFails = false,
+    stubExit = 0,
+  }: { stub?: boolean; mktempFails?: boolean; stubExit?: number } = {},
+) {
+  const fragment = extractGuardBlock(hook, '')?.match(
+    /# devkit:fallow-advisory[\s\S]*?# \/devkit:fallow-advisory/,
+  )?.[0];
+  expect(fragment).toBeDefined();
+  const binDir = mkdtempSync(join(tmpdir(), 'fallow-stub-'));
+  // A CLOSED PATH — binDir plus the system dirs, never the developer's. `stub: false` has to mean
+  // fallow is genuinely unreachable, and this machine has a real fallow on PATH that would answer.
+  symlinkSync(process.execPath, join(binDir, 'node'));
+  const log = join(binDir, 'invocations');
+  const sink = join(binDir, 'gate-events.jsonl');
+  if (mktempFails) {
+    // Shadows the system mktemp on the closed PATH. Real trigger: an unset, unwritable or full
+    // TMPDIR — ordinary in a constrained CI container or a sandboxed runner.
+    const path = join(binDir, 'mktemp');
+    writeFileSync(path, '#!/bin/sh\nexit 1\n');
+    chmodSync(path, 0o755);
+  }
+  if (stub) {
+    const path = join(binDir, 'fallow');
+    // Invocations go to a FILE, not stdout: the JSON pass is /dev/null'd, so stdout only ever
+    // witnesses the conditional human report. The mktemp path is masked to keep assertions stable.
+    writeFileSync(
+      path,
+      [
+        '#!/bin/sh',
+        // biome-ignore lint/suspicious/noTemplateCurlyInString: shell ${VAR:-default}, not a JS template
+        'echo "$(echo "$*" | sed -E "s#(--output-file )[^ ]+#\\1<tmp>#") GIT_DIR:${GIT_DIR:-unset}" >> "$FALLOW_STUB_LOG"',
+        'echo "fallow report"',
+        'dk_out=""; dk_prev=""',
+        'for dk_a in "$@"; do [ "$dk_prev" = "--output-file" ] && dk_out="$dk_a"; dk_prev="$dk_a"; done',
+        '[ -n "$dk_out" ] && printf %s "$FALLOW_STUB_JSON" > "$dk_out"',
+        `exit ${stubExit}`,
+      ].join('\n'),
+    );
+    chmodSync(path, 0o755);
+  }
+  // The review arm calls a helper the surrounding block would normally define; stub it to a no-op
+  // so the fragment under test is the only thing being exercised.
+  const script = `${DK_NO_GIT_ENV_HELPER}\n__dk_review_baseline_gate() { return 0; }\n${fragment}`;
+  return (extra: Record<string, string>, json = '{"verdict":"pass"}') => {
+    writeFileSync(sink, '');
+    writeFileSync(log, '');
+    const stdout = execFileSync('sh', ['-c', script], {
+      encoding: 'utf8',
+      cwd: ROOT,
+      env: {
+        PATH: `${binDir}:/usr/bin:/bin`,
+        DEVKIT_GATE_EVENTS: sink, // else homedir() resolves via getpwuid and this writes the dev's live sink
+        DEVKIT_SHIP_ID: 'ship-fallow-test', // else runEnvelope derives a commit id via `git write-tree`
+        FALLOW_STUB_JSON: json,
+        FALLOW_STUB_LOG: log,
+        ...extra,
+      },
+    });
+    const lines = (file: string) => readFileSync(file, 'utf8').split('\n').filter(Boolean);
+    const invocations = lines(log);
+    return {
+      stdout,
+      events: lines(sink).map((line) => JSON.parse(line)),
+      invocations,
+      audits: invocations.length,
+    };
+  };
+}
 
 describe('self-host bin rewrite', () => {
   it('sourceBinFor maps a guard bin to its source .mts (derived from package.json bin)', () => {
@@ -297,9 +376,12 @@ describe('buildSelfHostHook', () => {
 
   it('preserves the advisory fallow-audit gate INSIDE the block (never blocks, survives re-run)', () => {
     const hook = buildSelfHostHook(HOOK_SEL, '', ROOT);
+    // Every arm is `|| true`-guarded: the audit, the emitter, and the conditional human re-run.
+    // An advisory that could exit non-zero would be a blocking gate wearing the wrong label.
     expect(hook).toContain(
-      'command -v fallow >/dev/null 2>&1 && __dk_no_git_env fallow audit $FALLOW_BASE_ARGS || true',
+      '[ "$DK_FALLOW_STATE" = "clean" ] || __dk_no_git_env fallow audit $FALLOW_BASE_ARGS || true',
     );
+    expect(hook).toContain('advisory/emit.mts fallow-advisory --absent >/dev/null 2>&1 || true');
     // Inside the devkit-guards block: after the start marker, before the end marker — so
     // replaceGuardBlock preserves it on a re-run and the parity/doctor check covers it.
     expect(hook.indexOf('fallow audit')).toBeGreaterThan(hook.indexOf('>>> devkit-guards'));
@@ -319,30 +401,116 @@ describe('buildSelfHostHook', () => {
     const hook = buildSelfHostHook(HOOK_SEL, '', ROOT);
     expect(hook).toContain(`[ -n "\${DEVKIT_SHIP_BASE_SHA:-}" ]`);
     expect(hook).toContain('FALLOW_BASE_ARGS="--base $DEVKIT_SHIP_BASE_SHA"');
-    const fragment = extractGuardBlock(hook, '')?.match(
-      /# devkit:fallow-advisory[\s\S]*?# \/devkit:fallow-advisory/,
-    )?.[0];
-    expect(fragment).toBeDefined();
-    // A REAL stub on PATH, not a shell function: the gate runs through `env` (the git-env scrub),
-    // which execs a binary and cannot see shell functions.
-    const binDir = mkdtempSync(join(tmpdir(), 'fallow-stub-'));
-    const stub = join(binDir, 'fallow');
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: shell ${VAR:-default}, not a JS template
-    writeFileSync(stub, '#!/bin/sh\necho "FALLOW_ARGS:$*"\necho "GIT_DIR:${GIT_DIR:-unset}"\n');
-    chmodSync(stub, 0o755);
-    const script = `${DK_NO_GIT_ENV_HELPER}\n${fragment}`;
-    const run = (extra) =>
-      execFileSync('sh', ['-c', script], {
-        encoding: 'utf8',
-        env: { PATH: `${binDir}:${process.env.PATH}`, ...extra },
-      });
+    const run = runFallowFragment(hook);
 
-    expect(run({}).split('\n')[0]).toBe('FALLOW_ARGS:audit');
-    expect(run({ DEVKIT_SHIP_BASE_SHA: 'deadbeef' }).split('\n')[0]).toBe(
-      'FALLOW_ARGS:audit --base deadbeef',
+    expect(run({}).invocations[0]).toBe('audit --format json --output-file <tmp> GIT_DIR:unset');
+    expect(run({ DEVKIT_SHIP_BASE_SHA: 'deadbeef' }).invocations[0]).toBe(
+      'audit --base deadbeef --format json --output-file <tmp> GIT_DIR:unset',
     );
     // The scrub itself: git's linked-worktree hook env must not reach fallow's worktree machinery.
-    expect(run({ GIT_DIR: '/repo/.git/worktrees/devkit-ship-x' })).toContain('GIT_DIR:unset');
+    expect(run({ GIT_DIR: '/repo/.git/worktrees/devkit-ship-x' }).invocations[0]).toContain(
+      'GIT_DIR:unset',
+    );
+  });
+
+  // sc-2526: the row must come from the VERDICT, never the exit code — fallow returns 0 on a
+  // `warn` while still reporting the finding.
+  it('emits an advisory row from fallow VERDICT, not its exit code, and re-runs for the human report only when non-clean', () => {
+    const run = runFallowFragment(buildSelfHostHook(HOOK_SEL, '', ROOT));
+
+    const clean = run({}, '{"verdict":"pass","attribution":{"complexity_introduced":0}}');
+    expect(clean.events).toEqual([]); // sc-2488's silence rule: nothing to report, nothing printed
+    expect(clean.audits).toBe(1); // the JSON pass only — a clean commit still pays for one audit
+
+    const warn = run({}, '{"verdict":"warn","attribution":{"duplication_introduced":1}}');
+    expect(warn.audits).toBe(2); // JSON pass, then the human report the reader is pointed at
+    expect(warn.events).toHaveLength(1);
+    expect(warn.events[0]).toMatchObject({
+      type: 'advisory_result',
+      gate: 'fallow-advisory',
+      status: 'finding',
+      ship_id: 'ship-fallow-test',
+    });
+    expect(warn.events[0].detail).toContain('1 duplication introduced');
+    // No `family`: the digest's isBlocking() matches on it, and a stage holding no exit must never
+    // be renderable as the gate that stopped the run.
+    expect(warn.events[0].family).toBeUndefined();
+
+    const unreadable = run({}, 'not json at all');
+    expect(unreadable.audits).toBe(2); // cannot tell → print the report; never swallow a finding
+    expect(unreadable.events[0]).toMatchObject({ status: 'could_not_run' });
+  });
+
+  it('names the advisory as having verified NOTHING when fallow is absent, and stays silent in review mode', () => {
+    const hook = buildSelfHostHook(HOOK_SEL, '', ROOT);
+
+    const absent = runFallowFragment(hook, { stub: false })({});
+    expect(absent.audits).toBe(0);
+    expect(absent.events).toHaveLength(1);
+    expect(absent.events[0]).toMatchObject({
+      gate: 'fallow-advisory',
+      status: 'could_not_run',
+    });
+    expect(absent.events[0].detail).toContain('not on PATH');
+
+    // A range review is not a pending commit: it takes the baseline arm and emits nothing at all.
+    const review = runFallowFragment(hook)({ DEVKIT_RUN_MODE: 'review' });
+    expect(review.events).toEqual([]);
+    expect(review.audits).toBe(0);
+  });
+
+  // Losing the scratch file loses the ROW while the prose still prints, silently restoring the
+  // pre-sc-2526 shape. mktemp fails for ordinary reasons: an unset, unwritable or full TMPDIR.
+  it('still names the advisory when the scratch file cannot be created, instead of reverting to prose-only', () => {
+    const run = runFallowFragment(buildSelfHostHook(HOOK_SEL, '', ROOT), { mktempFails: true });
+    const result = run({}, '{"verdict":"fail","attribution":{"complexity_introduced":2}}');
+
+    expect(result.events).toHaveLength(1);
+    expect(result.events[0]).toMatchObject({
+      gate: 'fallow-advisory',
+      status: 'could_not_run',
+    });
+    // The human report is still printed: a lost verdict must make the hook say MORE, not less.
+    expect(result.audits).toBe(1);
+  });
+
+  // The shell must hand the emitter the audit's exit code, or a clean report from a failed audit
+  // is believed. fallow exits non-zero for a FAIL verdict, so only clean-plus-failure contradicts.
+  it('refuses a clean verdict when the audit itself exited non-zero', () => {
+    const run = runFallowFragment(buildSelfHostHook(HOOK_SEL, '', ROOT), { stubExit: 1 });
+    const result = run({}, '{"verdict":"pass"}');
+    expect(result.events).toHaveLength(1);
+    expect(result.events[0]).toMatchObject({ status: 'could_not_run' });
+    expect(result.audits).toBe(2); // and the human report runs, because the state is not `clean`
+  });
+
+  // mktemp creates the file BEFORE fallow writes it, so a fallow that dies mid-audit leaves zero
+  // bytes behind — indistinguishable from a clean audit unless this arm says otherwise.
+  it('treats a zero-byte report as unreadable, not as a clean audit', () => {
+    const result = runFallowFragment(buildSelfHostHook(HOOK_SEL, '', ROOT))({}, '');
+    expect(result.events).toHaveLength(1);
+    expect(result.events[0]).toMatchObject({
+      gate: 'fallow-advisory',
+      status: 'could_not_run',
+    });
+    expect(result.audits).toBe(2); // and the human report still runs
+  });
+
+  // W-3: the emitter path is inside DEVKIT'S OWN tree. A consumer has no gate-engine/, and the
+  // call is `|| true`, so a leak would fail SILENTLY and kill the advisory in every installed repo.
+  it('never leaks the devkit-relative advisory emitter into a consumer hook, which would fail silently there', () => {
+    const consumerHooks = [
+      buildFullHook({ biome: true, guards: ['review', 'decisions'] }),
+      buildStandaloneHook({ guards: ['review', 'decisions'] }),
+      // The overlay with fallow ON is the closest a consumer gets: it runs fallow inline too, but
+      // through the BLOCKING wrapper, which needs no emitter because its findings stop the run.
+      buildOverlayHook({ guards: ['review'] }, '.husky/pre-commit', '', { fallow: true }),
+    ];
+    for (const hook of consumerHooks) {
+      expect(hook).not.toContain('advisory/emit.mts');
+      expect(hook).not.toContain('devkit:fallow-advisory');
+      expect(hook).not.toContain('node gate-engine/');
+    }
   });
 
   it('is idempotent through replaceGuardBlock — re-applying the block keeps the fallow fragment intact', () => {
