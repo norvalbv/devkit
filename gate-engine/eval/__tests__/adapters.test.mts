@@ -14,6 +14,8 @@ import {
   wilson,
 } from '../adapters.mts';
 
+import { reviewerPairMetrics } from '../metric-ratio.mts';
+
 const ROOT = join(import.meta.dirname, '..', '..', '..');
 
 function json(path: string) {
@@ -325,4 +327,19 @@ describe('benchmark adapters', () => {
     baseline.critique.recall.total = 0;
     expect(() => parseCritique(baseline)).toThrow(/positive denominator/);
   });
+});
+
+it('reports shared repair edges descriptively and uncertainty over whole paired families', () => {
+  const [edge, family] = reviewerPairMetrics('test', { k: 4, n: 6, families: 5, familyK: 3 });
+  expect(edge.interval).toBeUndefined();
+  expect(edge.inferenceUnit).toBe('repair-edge');
+  expect(edge.value).toBe(4 / 6);
+  expect(edge.noiseFloor).toBe(0.139);
+  expect(family).toMatchObject({
+    numerator: 3,
+    denominator: 5,
+    inferenceUnit: 'family',
+    interval: { method: 'wilson-95' },
+  });
+  expect(reviewerPairMetrics('old', { k: 21, n: 50 })[0].interval?.method).toBe('wilson-95');
 });

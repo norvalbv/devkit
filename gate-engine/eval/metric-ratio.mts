@@ -37,3 +37,31 @@ export function ratio(
     ...extra,
   };
 }
+
+/** Repair edges sharing context are descriptive; uncertainty belongs to whole paired families. */
+export function reviewerPairMetrics(
+  key: string,
+  pairs: { k: number; n: number; families?: number; familyK?: number },
+): MetricObservation[] {
+  const clustered = pairs.families !== undefined && pairs.families < pairs.n;
+  const noise = { noiseFloor: REVIEWER_LABEL_NOISE_FLOOR };
+  const result = [
+    ratio(`${key}:pair-consistency`, `${key} pair consistency`, pairs.k, pairs.n, 'higher', {
+      ...noise,
+      inferenceUnit: 'repair-edge',
+    }),
+  ];
+  if (clustered) delete result[0].interval;
+  if (pairs.families && pairs.familyK !== undefined)
+    result.push(
+      ratio(
+        `${key}:family-consistency`,
+        `${key} paired families entirely correct`,
+        pairs.familyK,
+        pairs.families,
+        'higher',
+        { ...noise, inferenceUnit: 'family' },
+      ),
+    );
+  return result;
+}

@@ -46,6 +46,9 @@ export async function runCascade(sel, opts) {
     try {
         initializeCommitGuardChecklist(cwd, sel.reviewer, checklistRoot, opts.judgeEnv);
         let res = await cascadeVerdict(sel, opts, checklistRoot);
+        // Recovery below only schedules/classifies; it deletes this attempt's artifact without
+        // running another judge. Keep its exact private evidence for the resulting inconclusive row.
+        const captureState = opts.fullItems ? readChecklistState(cwd, sel.reviewer) : null;
         res = await enforceChecklistContract(sel, res, cwd, opts.recovery !== undefined, async (reason) => {
             if (opts.recovery === 'defer')
                 return { ...res, status: 'inconclusive', reason, retryable: reason };
@@ -67,7 +70,9 @@ export async function runCascade(sel, opts) {
             readState: () => readChecklistState(cwd, sel.reviewer),
             stagedDiff: () => gitCached(cwd, [], sel.files),
         });
-        attachItems(res, readChecklistState(cwd, sel.reviewer), disposition, { full: opts.fullItems });
+        attachItems(res, readChecklistState(cwd, sel.reviewer) ?? captureState, disposition, {
+            full: opts.fullItems,
+        });
         return res;
     }
     finally {

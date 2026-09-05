@@ -231,6 +231,16 @@ describe('mergeLensCaptures', () => {
     expect(mergeLensCaptures([fail, pass])?.out).toContain('FAIL');
   });
 
+  it.each([
+    'Discussion: VERDICT: FAIL is quoted\nVERDICT: PASS',
+    'VERDICT: FAIL — preliminary\nRe-reading…\nVERDICT: PASS',
+  ])('uses the canonical final verdict when merging: %s', (out) => {
+    const revised = { ...pass, out };
+    expect(mergeLensCaptures([revised, fail])?.out).toBe(fail.out);
+    expect(mergeLensCaptures([fail, revised])?.out).toBe(fail.out);
+    expect(mergeLensCaptures([pass, revised])?.out).toBe(pass.out);
+  });
+
   it('unions the groups’ checklist items so right-reason attribution sees every failed lens', () => {
     const merged = mergeLensCaptures([
       { ...pass, snapshot: { items: [{ name: 'concurrency-races', status: 'pass' }] } },

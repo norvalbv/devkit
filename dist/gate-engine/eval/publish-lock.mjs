@@ -290,6 +290,26 @@ export function withFileLock(lockPath, operation, action, options = {}) {
         releaseOwnedFile(lockPath, lock);
     }
 }
+/** Hold one process owner until the asynchronous action settles, including explicit process exit. */
+export async function withFileLockAsync(lockPath, operation, action, options = {}) {
+    if (options.createParent !== false)
+        mkdirSync(dirname(lockPath), { recursive: true });
+    const lock = acquireFileLock(lockPath, operation);
+    const release = () => releaseOwnedFile(lockPath, lock);
+    // Signal handling belongs to the action: it may need to reap children before settling.
+    process.once('exit', release);
+    try {
+        return await action();
+    }
+    finally {
+        try {
+            release();
+        }
+        finally {
+            process.removeListener('exit', release);
+        }
+    }
+}
 export function withPublishFileLock(lockPath, action) {
     return withFileLock(lockPath, 'benchmark publish', action);
 }

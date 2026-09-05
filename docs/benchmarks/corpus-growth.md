@@ -33,10 +33,10 @@ Each stage, concretely (all paths under `gate-engine/review/eval/reviewers/` unl
 | capture | `gate-engine/review/evidence/diff-archive.mts` | On every reviewer FAIL in the real gate, archives the exact staged diff bytes to `<telemetry>/diffs/<diff_sha256>.diff.gz` — content-addressed, fail-open, 8 MiB cap. Bench runs can never trigger it. Join key = the `diff_sha256` already on the `review_scope` event. |
 | mine | `mine-bots.mts` | Sweeps bot PR comments via `gh api` (+ GraphQL thread resolution). Labels each candidate: `outcome` (fixed / rebutted / unresolved) + `outcomeEvidence` (addressed-marker › bot-withdrawal › resolved+line-touched › human-rebuttal › outdated-only) + `scopeConfirmed` via the collector join (`commit_ships.pr_number` → `commit_review_scope.files_json`). Writes `candidates.jsonl` (gitignored, merged by url). |
 | propose | `propose/propose.mts --suite <s> --max N` (bot-mined) · `propose/propose-telemetry.mts [--max N]` (gate telemetry — no PR/commit anchor, diff bytes ride in the rows, evidence-tier sort) | Deterministic triage: hard drops (unresolved, no commit anchor, no line info, outdated-only, truncated hunk, already-in-corpus), category+path routing to the five suites, priority sort, base-content fetch pinned to `?ref=<originalCommitId>` (observation-instant inputs — item 13). Output: `raw/queue-<suite>.jsonl`. |
-| adapt | agents (workflow) | Each queue entry becomes an ANONYMIZED minimal fixture (1–2 files, ≤25 lines, generic identifiers — devkit is public) + **a minimal-pair decoy per gold** (real fix applied, `variantOf`, shared `caseId`). Rebutted threads become standalone PASS decoys. Every proposal self-validates via `finalize.mts --check` before it counts. |
+| adapt | agents (workflow) | Each queue entry becomes an ANONYMIZED executable fixture (normally 1–2 files, ≤25 lines; larger coherent contexts are admitted when controls prove the label and `bench.mts plan` confirms native chunk coverage; generic identifiers — devkit is public) + **a minimal-pair decoy per gold** (real fix applied, `variantOf`, shared `caseId`). Rebutted threads become standalone PASS decoys. Every proposal self-validates via `finalize.mts --check` before it counts. |
 | finalize | `finalize.mts --check / --append` | `--check`: structural lint → real-fixture `validateRow` → private-repo leak scan. `--append`: exclusive stale-aware lock, audit-overlay application, pre-append lint + leak scan. Holdout and `--max` preserve whole groups in the transitive union of `caseId` and `variantOf`, including links through existing rows. New bridges between conflicting existing assignments refuse. The final partition and ≥3-holdout-per-class floor are checked before writing (floor promotions reported). Proposals in `raw/` are IMMUTABLE — audit edits only via `raw/audit-overlay.jsonl` `{ref, set}` lines (item 5). |
 | validate | `bench.mts validate [reviewer]` | 0 LLM calls. Real fixture materialization, expectItems vs the real checklist, reasonPattern must compile (hard fail), comment-leakage warnings (non-fatal). |
-| bench | `bench.mts run <reviewer> [--baseline]` | Drives the REAL `runCascade`. The shipped correctness configuration is Sol single-pass; domain reviewers use Terra high first-pass with Sol escalation. Set `BENCH_MODEL` and `BENCH_CASCADE` explicitly for the suite. Progress checkpoints per row support resuming an interrupted run. Use `--baseline` to retain completed row evidence and `--fresh` for a partition reset. |
+| bench | `bench.mts run <reviewer> [--baseline]` | Drives the REAL `runCascade`. The shipped correctness configuration is Sol single-pass; domain reviewers use Terra high first-pass with Sol escalation. Set `BENCH_MODEL` and `BENCH_CASCADE` explicitly for the suite. Native lens/chunk tasks checkpoint independently inside each row, including quality misses; incomplete tasks alone rerun on resume. `bench.mts plan <reviewer>` gives a zero-judge census; planning and standalone execution are isolated from production telemetry. Use `--baseline` to retain completed row evidence and `--fresh` for a partition reset. |
 | publish | `gate-engine/eval/cli.mts publish --suite reviewer-<x> --tree WORKTREE --baseline ... --change-type coverage` | Corpus growth publishes as `coverage`; partition repairs use `methodology-reset` with `assessment:unknown`. A changed corpus cannot claim `quality`. Acceptance: zero outages + floors. WORKTREE, not STAGED: these baselines are gitignored, so they can never be staged — and being ignored, they do not make the tree dirty either. Commit the corpus first, then publish from a clean tree. |
 
 `bun finalize.mts --check raw/proposals/foo.json` checks one anonymized proposal without judge calls;
@@ -45,6 +45,28 @@ hard failures exit 1 and leakage warnings remain advisory. `bun finalize.mts --a
 existing ids and appends one JSON line per admitted row in the corpus's key order. Both raw inputs
 remain immutable and gitignored. Full mined comments and source content must be distilled into
 generic identifiers in `repo.base`/`repo.staged` before entering the public corpus.
+
+### Executable repairs and large contexts (sc-2500)
+
+Grow repair siblings of existing golds before admitting more gold. Execute the invariant against
+base, buggy postimage and repaired postimage, with assertions outside judge-visible files. Repair
+must preserve a nonempty selected diff. All imports and reached consumers must resolve. A staged
+context must be coherent working code, not repeated padding; unchanged context or one oversized
+file does not establish chunk coverage. Record actual identity bytes, chunk count and native task
+count at the shipped cap. Validate the derived lens/chunk checklist artifacts as well as selection.
+
+Shared reporting context makes the two large repair pairs one holdout family. Pair consistency
+counts explicit PASS-to-FAIL `variantOf` edges; legacy two-member `caseId` pairs remain supported.
+Edges in a shared family are descriptive: their independent-binomial interval is omitted, and a
+separate whole-family consistency metric carries the uncertainty. Exposed regression fixtures are
+not fresh unseen evaluation data. Executable controls do not replace the 13.9% label-noise bound.
+
+Freeze runner, scorer, corpus and effective execution condition before probing or remeasuring.
+Changing cap, split, model, cascade, runner or planner invalidates checkpoint reuse. Preserve every
+quality miss; do not use `--fail` or `--against` for the single new baseline because those commands
+perform quality-dependent stability reruns. An error or malformed response in any task makes the
+row ineligible for baseline even when the production merge returns FAIL from another task.
+Only the measured suite becomes current; shared-runner changes leave other suites' evidence stale.
 
 ### Why appending rows is safe (the row-set hash)
 
