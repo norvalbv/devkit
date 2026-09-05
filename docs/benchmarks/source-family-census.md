@@ -35,6 +35,10 @@ not the paired repair. This proves that specific compatibility invariant, not th
 bugs. The original base is anchored by the archived ship log and checked against the archived patch;
 patch applicability alone is insufficient provenance.
 
+The subsequent [sc-2843 qualification](source-family-qualification-2026-09-05.md) rejects this
+particular narrow repair as clean after reproducing a separate residual defect. The historical
+receipt below remains unchanged; its target-controlled status still applies.
+
 ## What the census measures
 
 Private manifests bind the complete declared family universe, original base and diff hashes,

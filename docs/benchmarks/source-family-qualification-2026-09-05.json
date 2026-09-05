@@ -1,0 +1,255 @@
+{
+  "version": 1,
+  "mode": "source-family-qualification",
+  "family": "family-001",
+  "exposure": "exposed-development",
+  "outcome": "reject-current-repair-as-clean",
+  "qualificationRetained": "target-controlled",
+  "qualifiedCleanPairs": 0,
+  "admittedRows": 0,
+  "judgeCalls": 0,
+  "claimPopulations": {
+    "later-truncated-candidates": {
+      "source-supported": 14,
+      "unresolved": 3,
+      "not-present-in-original": 6,
+      "not-introduced-here": 3
+    },
+    "original-correctness-log": {
+      "unresolved": 6,
+      "test-only": 1,
+      "source-supported": 8,
+      "contradicted-in-original": 1,
+      "partially-supported": 1
+    },
+    "other-original-reviewers-log": {
+      "source-supported": 4,
+      "partially-supported": 2,
+      "test-only": 1
+    }
+  },
+  "retainedOccurrences": 50,
+  "mechanismGroups": 27,
+  "originalChecklistAvailable": false,
+  "originalLogReportedCorrectnessFindings": 17,
+  "originalLogRetainedCorrectnessStatements": 17,
+  "ledgerIsScoredJudgments": false,
+  "receipts": {
+    "original-ship.private.log": "b7060bbf048679cd1fe0bfd69bbf86a1599937cfbec5078426a37ee25184af0e",
+    "original-telemetry.private.json": "031ee20254caa6108f03e5db0625357e2e99c3b48c55896f6343916d05946d1c",
+    "original-claims.private.json": "732febe9d3b8e2271e88fc89289062b60c6dfe1028182e373d81f766162d6853",
+    "other-claims.private.json": "66ac963576d6afd693ac4ecebe36038a3d7ed6aedc6bc6ca0b873f3f56f62506",
+    "later-labels.private.json": "89e93b49f77632e7c76cd191b06e23ef34223bedf1fa364fbbd3710e33f4385d",
+    "hook-claim-audit.private.md": "f4229bf489e1351c84d377b1dd977a3f1748fddd32d3f9f012423a1e1356d7de",
+    "root-claim-audit.private.md": "bfeed814f1c0ebafc41ecc3233b6708519339547c080a4ded6174ba5365e26ac",
+    "claim-dispositions.private.json": "d27e470a15ebadc3f26bad74aa0d631f33b58e4dc49f5d01863481f5f90cf2aa",
+    "run-controls.mjs": "b3c13497b43d5252db24cad64910fd3e611739d002e72dcf0fde85fa56ca5840",
+    "controls-XYz1zN/report.private.json": "a89320f3ce566a13a2c16e86aff183614015c2f3bd3dec5a8339ca056910b0f1",
+    "assessment.private.json": "25bd2340f8a1af0b38497d752253264626c17ebb1cf8adfe4fed00d9d9d29399",
+    "manifest.private.json": "3c974e0531d992a9217cab5d99f1544dfa1f4c202b754c45f3b0e08d4b01311b",
+    "prior-art.json": "9ffe21fc0c2ff9aa24ff1edb8e6fa91188b881749acedab9912f79cf986ed893",
+    "plan-critique.json": "18556fb1993010213312bd08e355cb6ca6ff429b831b6416c8515142ccaad8cd"
+  },
+  "controls": {
+    "baseline": {
+      "sourceSha": "56319814dcbd42f6a67a9efe3132ee7f628c9d1f",
+      "commandExitCodes": [
+        0,
+        0
+      ],
+      "residualControl": "not-applicable-module-absent"
+    },
+    "members": [
+      {
+        "id": "case-001",
+        "commandExitCodes": [
+          1,
+          1
+        ],
+        "healthyExitCodes": [
+          0,
+          0
+        ],
+        "failedRefreshExitCodes": [
+          4,
+          0,
+          4
+        ],
+        "failedRefreshWarningPresent": [
+          true,
+          false,
+          true
+        ],
+        "deterministicBoundaries": {
+          "successfulCache": true,
+          "failedCache": true,
+          "forcedRetry": true,
+          "expiryRetry": true,
+          "inFlightWitness": true
+        }
+      },
+      {
+        "id": "case-002",
+        "commandExitCodes": [
+          0,
+          0
+        ],
+        "healthyExitCodes": [
+          0,
+          0
+        ],
+        "failedRefreshExitCodes": [
+          4,
+          0,
+          4
+        ],
+        "failedRefreshWarningPresent": [
+          true,
+          false,
+          true
+        ],
+        "deterministicBoundaries": {
+          "successfulCache": true,
+          "failedCache": true,
+          "forcedRetry": true,
+          "expiryRetry": true,
+          "inFlightWitness": true
+        }
+      }
+    ]
+  },
+  "censuses": [
+    {
+      "case": "case-001",
+      "role": "bug",
+      "qualification": "target-controlled",
+      "manifestSha256": "021ed943ed94fb5467a826a88609fb24d10698b01a55bfc0a1f76775522108e9",
+      "implementationSha256": "991ed22dea56",
+      "dependenciesSha256": "582b34fb609e937346dc404a39d0fba3bcfbb21288bb649121d43916e9f9c17b",
+      "runtime": "v24.19.0",
+      "source": {
+        "repoAlias": "repo-001",
+        "baseSha": "56319814dcbd42f6a67a9efe3132ee7f628c9d1f",
+        "diffSha256": "8e219d665b106734066aa9f947846ed9085403e91c065105eb42e95220643d9b",
+        "provenanceSha256": "5a96f104f353fb940ef20245aad9b625abf614e19243cf8510221fb3d80358dc"
+      },
+      "evidence": {
+        "requirementSha256": "6a4a99b6f7a4f6557dfe65b4cc9759bdb38d421fdacddb037eed6fe4f1e3e5df",
+        "controlSha256": "a89320f3ce566a13a2c16e86aff183614015c2f3bd3dec5a8339ca056910b0f1",
+        "assessmentSha256": "25bd2340f8a1af0b38497d752253264626c17ebb1cf8adfe4fed00d9d9d29399"
+      },
+      "condition": {
+        "cap": 400,
+        "groups": [
+          [
+            "state-transitions"
+          ],
+          [
+            "concurrency-races"
+          ],
+          [
+            "error-and-edge-classification"
+          ],
+          [
+            "writer-reader-contracts"
+          ]
+        ],
+        "configSha256": "55afded219500e7a571f06f953c78cf8617f59af3b8d60b3b945f51821782f5a",
+        "configSourceSha256": "a2ed292dd266f990e0511e73bfc6af34c1966d205be7c916195436ae623ecbf6",
+        "model": "gpt-5.6-sol",
+        "judgeCalls": 0
+      },
+      "facts": {
+        "identityBytes": 140753,
+        "chunkCount": 11,
+        "taskCount": 34,
+        "cap": 400,
+        "groups": [
+          [
+            "state-transitions"
+          ],
+          [
+            "concurrency-races"
+          ],
+          [
+            "error-and-edge-classification"
+          ],
+          [
+            "writer-reader-contracts"
+          ]
+        ],
+        "planHash": "806cf2b91e4778c0ec12abb921af402769969fe88e3d5586d6a980c018bf9972",
+        "stagedTreeSha": "da63a5491fd5fe4634594e9f67e01668cadc2dd0",
+        "sourceChangedFiles": 36,
+        "selectedFiles": 36
+      },
+      "reportSha256": "5f168e77509dfeedbd4c0a5bcfd854df58939a7941b3e1ba6ab58bce8c3c41e6"
+    },
+    {
+      "case": "case-002",
+      "role": "repair",
+      "qualification": "target-controlled",
+      "manifestSha256": "021ed943ed94fb5467a826a88609fb24d10698b01a55bfc0a1f76775522108e9",
+      "implementationSha256": "991ed22dea56",
+      "dependenciesSha256": "582b34fb609e937346dc404a39d0fba3bcfbb21288bb649121d43916e9f9c17b",
+      "runtime": "v24.19.0",
+      "source": {
+        "repoAlias": "repo-001",
+        "baseSha": "56319814dcbd42f6a67a9efe3132ee7f628c9d1f",
+        "diffSha256": "c1f4768a5b99282e9a8e7cec43871eea99eb75e625d2d0283175614607c78520",
+        "provenanceSha256": "5a96f104f353fb940ef20245aad9b625abf614e19243cf8510221fb3d80358dc"
+      },
+      "evidence": {
+        "requirementSha256": "6a4a99b6f7a4f6557dfe65b4cc9759bdb38d421fdacddb037eed6fe4f1e3e5df",
+        "controlSha256": "a89320f3ce566a13a2c16e86aff183614015c2f3bd3dec5a8339ca056910b0f1",
+        "assessmentSha256": "25bd2340f8a1af0b38497d752253264626c17ebb1cf8adfe4fed00d9d9d29399"
+      },
+      "condition": {
+        "cap": 400,
+        "groups": [
+          [
+            "state-transitions"
+          ],
+          [
+            "concurrency-races"
+          ],
+          [
+            "error-and-edge-classification"
+          ],
+          [
+            "writer-reader-contracts"
+          ]
+        ],
+        "configSha256": "96e1025696157d810f0014562fe2474a121965c72a7c117e074a1c6a1ccf71ad",
+        "configSourceSha256": "a2ed292dd266f990e0511e73bfc6af34c1966d205be7c916195436ae623ecbf6",
+        "model": "gpt-5.6-sol",
+        "judgeCalls": 0
+      },
+      "facts": {
+        "identityBytes": 140582,
+        "chunkCount": 11,
+        "taskCount": 34,
+        "cap": 400,
+        "groups": [
+          [
+            "state-transitions"
+          ],
+          [
+            "concurrency-races"
+          ],
+          [
+            "error-and-edge-classification"
+          ],
+          [
+            "writer-reader-contracts"
+          ]
+        ],
+        "planHash": "16c8b9488a9367c8184f34055d19c8f19a6b14b8b9bae198854d10c631a8518b",
+        "stagedTreeSha": "38312e9571e58e41418b5cb4afd7e56c76c18772",
+        "sourceChangedFiles": 36,
+        "selectedFiles": 36
+      },
+      "reportSha256": "2456e457674629aebfa7a456e289612b7cfa8eccc2f464dd63c5fb7710e4de7a"
+    }
+  ]
+}
