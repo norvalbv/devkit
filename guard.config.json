@@ -73,7 +73,12 @@
         "name": "gate-engine",
         "root": "gate-engine",
         "sourceExtensions": ["mts"],
-        "entryAllowlist": ["config-json.mts", "config.mts", "devkit-version.mts"],
+        "entryAllowlist": [
+          "config-json.mts",
+          "config.mts",
+          "devkit-version.mts",
+          "overlay-mode.mts"
+        ],
         "ignoredDirs": ["eval"],
         "libDomains": {
           "@root": [

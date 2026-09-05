@@ -1592,8 +1592,12 @@ describe('ship-branch.sh — untracked/gitignored gate configs are linked into t
       '.devkit/baselines/size.json',
       '.devkit/baselines/imports.mjs',
       '.devkit/structure/exempt.mjs',
+      '.devkit/oxc',
+      '.devkit/anti-slop',
       'eslint.config.devkit.mjs',
       'biome.devkit.jsonc',
+      'oxlint.devkit.json',
+      '.anti-slop-baseline.json',
       '.qavis/receipt.json',
     ]);
   });

@@ -21,6 +21,7 @@ import { digest, packageDir } from '../../fs-helpers.mts';
 import {
   assertOxcCapabilityReady,
   oxcBaseCapabilityIssue,
+  resolveOxlintEntryConfig,
   syncOxcCapability,
 } from '../oxc/lifecycle.mts';
 import { resolveOxcRuntime } from '../oxc/runtime.mts';
@@ -51,6 +52,8 @@ interface SyncOptions {
   dryRun?: boolean;
   /** Judge the runner against this root, not `cwd` — ship publishes into a worktree (sc-2099). */
   pinRoot?: string;
+  /** Forwarded to the Oxc writer so it lays down the git-excluded overlay geometry. */
+  overlay?: boolean;
 }
 
 interface ManagedReplacement {
@@ -136,14 +139,6 @@ function makePluginApiTrackable(plugin: string, apiSource: string): void {
   cpSync(apiSource, join(plugin, 'oxlint-plugins-api'), { recursive: true });
 }
 
-/** Explain why an explicit request cannot activate in a non-repository mode. */
-export function warnIfAntiSlopUnavailable(mode: string, requested: boolean): void {
-  if (!requested || mode !== 'overlay') return;
-  console.warn(
-    `devkit init --${mode}: --anti-slop is unavailable because it requires the tracked Oxc capability; skipping it.`,
-  );
-}
-
 function syncUnlocked(cwd: string, dryRun: boolean): ManagedReplacement | null {
   const source = antiSlopPluginSource();
   const apiSource = pluginApiSource();
@@ -206,22 +201,22 @@ function syncUnlocked(cwd: string, dryRun: boolean): ManagedReplacement | null {
 
 /** Install/upgrade the managed plugin without fetching or changing a consumer dependency stack. */
 export function syncAntiSlopCapability(cwd: string, opts: SyncOptions = {}): void {
-  const { dryRun = false, pinRoot } = opts;
+  const { dryRun = false, pinRoot, overlay } = opts;
   if (dryRun) {
-    assertOxcCapabilityReady(cwd);
+    assertOxcCapabilityReady(cwd, { overlay });
     syncUnlocked(cwd, true);
-    syncOxcCapability(cwd, { dryRun: true, antiSlop: true });
+    syncOxcCapability(cwd, { dryRun: true, antiSlop: true, overlay });
     return;
   }
   mkdirSync(join(cwd, '.devkit'), { recursive: true });
   withLock(join(cwd, ANTI_SLOP_BASELINE_LOCK_REL), () => {
     withLock(join(cwd, ANTI_SLOP_LOCK_REL), () => {
-      assertOxcCapabilityReady(cwd, { pinRoot });
+      assertOxcCapabilityReady(cwd, { publish: true, pinRoot, overlay });
       captureAntiSlopBaselineActivationUnlocked(cwd, false);
       const replacement = syncUnlocked(cwd, false);
       if (!replacement) throw new Error('anti-slop managed replacement was not prepared');
       try {
-        syncOxcCapability(cwd, { antiSlop: true, pinRoot });
+        syncOxcCapability(cwd, { antiSlop: true, pinRoot, overlay });
         replacement.commit();
         console.log(
           `  ✓ anti-slop: ${replacement.manifest.ruleIds.length} rules @ ${replacement.manifest.upstreamCommit.slice(0, 12)}`,
@@ -232,7 +227,7 @@ export function syncAntiSlopCapability(cwd: string, opts: SyncOptions = {}): voi
           const restored =
             existsSync(join(cwd, ANTI_SLOP_MANIFEST_REL)) &&
             existsSync(join(cwd, ANTI_SLOP_CONFIG_REL));
-          syncOxcCapability(cwd, { antiSlop: restored, pinRoot });
+          syncOxcCapability(cwd, { antiSlop: restored, pinRoot, overlay });
         } catch {
           // Preserve the original sync failure; doctor can repair any residual managed Oxc drift.
         }
@@ -259,10 +254,14 @@ function probeIntegration(cwd: string): { ok: boolean; detail: string } {
   let result: SpawnSyncReturns<string>;
   try {
     writeFileAtomic(probePath, PROBE_SOURCE);
+    // The same `-c` the lint run uses, so the probe proves the chain that will actually judge the
+    // repository — under overlay the consumer's own config is never discovered.
+    const entry = resolveOxlintEntryConfig(cwd);
     result = spawnSync(
       process.execPath,
       [
         runtime.binPath,
+        ...(entry ? ['--config', entry] : []),
         '--format',
         'json',
         '--no-ignore',
@@ -455,8 +454,11 @@ function checkAntiSlopCapabilityUnlocked(cwd: string): CheckResult[] {
   ];
 }
 
-/** Remove only managed plugin bytes. The repository baseline is consumer debt data and is kept. */
-export function removeAntiSlopCapability(cwd: string, dryRun = false): void {
+/**
+ * Remove only managed plugin bytes; the baseline is consumer debt data and is kept. `overlay` comes
+ * from the caller — this re-sync rewrites the root geometry, and inference fails in the repair state.
+ */
+export function removeAntiSlopCapability(cwd: string, dryRun = false, overlay?: boolean): void {
   const managed = join(cwd, ANTI_SLOP_MANAGED_REL);
   if (!existsSync(managed)) return;
   if (dryRun) {
@@ -464,7 +466,8 @@ export function removeAntiSlopCapability(cwd: string, dryRun = false): void {
     return;
   }
   withLock(join(cwd, ANTI_SLOP_LOCK_REL), () => {
-    if (existsSync(join(cwd, '.devkit', 'oxc'))) syncOxcCapability(cwd, { antiSlop: false });
+    if (existsSync(join(cwd, '.devkit', 'oxc')))
+      syncOxcCapability(cwd, { antiSlop: false, overlay });
     rmSync(managed, { recursive: true, force: true });
   });
   console.log(`  ✓ removed ${ANTI_SLOP_MANAGED_REL}/ (kept baseline)`);

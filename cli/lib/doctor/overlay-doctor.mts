@@ -12,7 +12,13 @@ import { join } from 'node:path';
 import type { Selection } from '../components.mts';
 import { detectGitRoot } from '../detect-git-root.mts';
 import { resolveExistingAgentProviders } from '../install/agent-assets/agent-providers.mts';
+import { ANTI_SLOP_BASELINE_REL } from '../install/anti-slop/constants.mts';
+import {
+  checkAntiSlopCapability,
+  syncAntiSlopCapability,
+} from '../install/anti-slop/lifecycle.mts';
 import { selectedHookAssets } from '../install/hook-registration-ledger/selection.mts';
+import { checkOxcCapability } from '../install/oxc/lifecycle.mts';
 import { HEAL_ALIAS_NAME, isHealAlias, syncOverlayHook } from '../overlay.mts';
 import { globalHookInstalled, globalInitPath } from '../overlay-global-hook.mts';
 import { checkAgentAssets, checkRegistrations } from './asset-checks.mts';
@@ -123,6 +129,40 @@ export async function runOverlayDoctor(
       );
     console.log(
       `  ${wired ? '✓' : '·'} fallow gate: ${wired ? 'wired in the local hook' : 'not wired'}`,
+    );
+  }
+  // Overlay short-circuits before collectResults, so without these rows its git-excluded managed
+  // state is undiagnosable. Gated on the recorded selection: the check spawns a real oxlint probe.
+  if (sel.antiSlop) {
+    let oxc = checkOxcCapability(cwd);
+    let antiSlop = checkAntiSlopCapability(cwd);
+    // `overlay: true` is explicit rather than inferred: the state most needing repair, a missing or
+    // corrupt manifest, is exactly the one where no stamp survives to infer it from.
+    if (fix && [...oxc, ...antiSlop].some((r) => r.fixable && r.status !== 'OK')) {
+      try {
+        syncAntiSlopCapability(cwd, { overlay: true });
+        oxc = checkOxcCapability(cwd);
+        antiSlop = checkAntiSlopCapability(cwd);
+      } catch (error: unknown) {
+        console.log(
+          `  ⚠ anti-slop capability could not be repaired: ${error instanceof Error ? error.message.split('\n')[0] : String(error)}`,
+        );
+      }
+    }
+    for (const r of oxc) advise(r);
+    for (const r of antiSlop) advise(r);
+    // The gate declares failOpen2:false, so an absent baseline BLOCKS rather than skips. The second
+    // line names the weaker contract, per gate-opt-out-is-visible-and-detectable.
+    const baseline = existsSync(join(cwd, ANTI_SLOP_BASELINE_REL));
+    console.log(
+      `  ${baseline ? '✓' : '·'} anti-slop baseline: ${
+        baseline
+          ? `${ANTI_SLOP_BASELINE_REL} (per-clone, git-ignored)`
+          : `${ANTI_SLOP_BASELINE_REL} MISSING — the gate blocks until \`devkit anti-slop create\` runs`
+      }`,
+    );
+    console.log(
+      '    overlay contract: blocks NEW findings against your local baseline; no committed base, so no shrink-only ratchet, rename receipts, or CI monotonicity',
     );
   }
   // A stale hook is unhealthy (exit 1) so CI/agents notice; --fix having just regenerated it heals this run.

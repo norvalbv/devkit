@@ -3,11 +3,15 @@
 import { cpSync, existsSync, mkdirSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { withLock } from '../../atomic-write.mts';
+import { OVERLAY_ENTRY_REL } from '../oxc/lifecycle.mts';
 import { ANTI_SLOP_MANAGED_REL } from './constants.mts';
 import { withAntiSlopCapabilityLock } from './lifecycle.mts';
 
-/** Tracked managed state, so the state any `git archive` of a tree carries. */
-const MANAGED_RELS = ['.devkit/oxc', ANTI_SLOP_MANAGED_REL];
+/**
+ * The paths that must travel together for a tree to be judgeable — git-excluded in overlay, so a
+ * snapshot must be handed them, entry config included because the snapshot's manifest names it.
+ */
+const MANAGED_RELS = ['.devkit/oxc', ANTI_SLOP_MANAGED_REL, OVERLAY_ENTRY_REL];
 const OXC_LOCK_REL = '.devkit/oxc.lock';
 
 /**
