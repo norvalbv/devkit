@@ -24,6 +24,7 @@ const GIT_INTEGRATION_TESTS = [
   'cli/__tests__/review.test.mts',
   'cli/__tests__/review-base-inference.test.mts',
   'cli/__tests__/review-gate-supervisor.test.mts',
+  'cli/__tests__/ship-base-ancestry.test.mts',
   'cli/__tests__/ship-branch-resume.test.mts',
   'cli/__tests__/ship-branch.test.mts',
   'cli/__tests__/ship-draft.test.mts',

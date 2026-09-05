@@ -341,6 +341,13 @@ REPO=$(git remote get-url origin | sed -E 's#^.*github\.com[^:/]*[:/]##; s#\.git
 # fork-repo-resolution bug run hermetically. Never set in normal use.
 [ -n "${SHIP_RESOLVE_ONLY:-}" ] && { printf 'BASE_REF=%s\nREPO=%s\n' "$BASE_REF" "$REPO"; exit 0; }
 
+# The CALLER's worktree HEAD, pinned BEFORE the first thing that reasons about it: in a shared
+# parallel-agent checkout $ROOT can be switched or reset mid-run, and both the base hint below and
+# the relatedness refusal further down would then answer about a sibling's line. It also names the
+# tree the gates judge (sc-2480). Empty when unreadable, and every consumer treats that as "cannot
+# tell" rather than substituting a live read.
+CALLER_HEAD=$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || true)
+
 # The DEFAULT base gets the same proof --base has always had (below): that it is a BRANCH ON ORIGIN.
 # Without this the only thing that ever checked was `gh pr create` — AFTER the gates, the commit and
 # the push — so shipping from a local-only branch (a provisioned worktree's scratch branch, a branch
@@ -363,7 +370,7 @@ if [ -z "$BASE_FLAG" ] && [ -z "${SHIP_DRY_RUN:-}" ] && [ "$DRY_GATES" -eq 0 ]; 
     0) ;; # the PR base exists on origin → gh pr create can use it
     2) echo "base '$BASE_REF' is not on origin; pass --base <branch>" >&2
        echo "  a PR base must be a branch that exists on the remote, and this checkout is on one that is not." >&2
-       ship_suggest_base "$REPO" >&2
+       ship_suggest_base "$REPO" "$ROOT" "$CALLER_HEAD" >&2
        exit 1 ;;   # ship_suggest_base quotes its own copyable half — branch names are not safe literals
     *) echo "could not verify base '$BASE_REF' (ls-remote exit $base_check) — refusing to push" >&2; exit 1 ;;
   esac
@@ -373,10 +380,6 @@ fi
 # diffs against. Resolved AFTER the seam above: --base needs the network, and the seam promises no
 # side effects. Nothing between there and here reads $BASE.
 SOURCE_HEAD=""
-# The CALLER's worktree HEAD, pinned HERE rather than beside the export below: in a shared
-# parallel-agent checkout $ROOT can gain a commit between staging and the gates, which would name a
-# tree the caller never read (sc-2480). Empty when unreadable; the gate then reports no divergence.
-CALLER_HEAD=$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || true)
 if [ "$FROM_BRANCH" -eq 1 ]; then
   # A post-commit receipt resume publishes the immutable gated OID, so the caller's current HEAD is
   # not an input. Pre-commit/new runs pin it before the network step and never chase a moving HEAD.
@@ -444,6 +447,25 @@ elif [ -n "$BASE_FLAG" ]; then
     exit 1
   }
   BASE=$(git rev-parse FETCH_HEAD)
+
+  # Is this base RELATED to the work at all — does it contain the commit this checkout is built on?
+  # BLOCKING, and deliberately a different question from the advisory below it (sc-2357). Drift asks
+  # "has the base MOVED, and does what moved overlap these paths"; a moved base is a normal, shippable
+  # state, which is why that stays advisory. This asks whether the base was ever this work's base. A
+  # base from another line makes the ephemeral worktree — cut from $BASE below — a tree the change
+  # was never written against, so every gate downstream judges the wrong thing and says so
+  # convincingly: ratchet ceilings from one line against sources from another, clones that exist only
+  # across the two.
+  #
+  # Placed before the drift advisory, the staging patch and the worktree: the whole value is that it
+  # costs one message instead of a gate chain. Fail-open on every "cannot tell" — the refusal only
+  # fires on a positive containment answer of NO.
+  # CALLER_HEAD, not a fresh HEAD read: a sibling agent can switch or reset this shared checkout
+  # mid-run, and the verdict has to be about the commit this ship is actually shipping. An UNREADABLE
+  # head is not a licence to judge a live one — the check is skipped, like every other cannot-tell.
+  if [ -n "$CALLER_HEAD" ]; then
+    ship_base_contains_branch_point "$ROOT" "$BASE_REF" "$BASE" "$CALLER_HEAD" || exit 1
+  fi
 
   # Which of the paths being shipped ALSO moved on the base since this branch diverged (sc-2297).
   # ADVISORY — it prints, it never blocks, and it is not a prediction of whether this ship survives.
@@ -1549,7 +1571,7 @@ if [ -n "$PR_CREATE_FAILED" ]; then
   else
     # The base is genuinely gone (deleted between the preflight and now). Only here may the hint name
     # a different one, and only one that is known to exist.
-    PR_HINT_BASE=$(ship_origin_head_branch) || PR_HINT_BASE=
+    PR_HINT_BASE=$(ship_origin_head_branch "$ROOT") || PR_HINT_BASE=
     echo "  gh pr create --repo $(ship_shell_quote "$REPO") --base $(ship_shell_quote "${PR_HINT_BASE:-<branch-on-origin>}") --head $(ship_shell_quote "$BR")${PR_HINT_DRAFT}" >&2
     if [ -n "$PR_HINT_BASE" ]; then
       echo "  ('$BASE_REF' is no longer on origin; '$PR_HINT_BASE' is origin's default branch.)" >&2

@@ -362,7 +362,9 @@ describe('ship --base: fork-point anchoring edge cases (sc-2451)', () => {
     ogit(['push', '-q', '-f', bare, 'unrelated:base']);
     writeFileSync(join(dir, 'f.txt'), TEN_LINES.replace('l1\n', 'l1-CALLER\n'));
 
-    const r = ship(dir, env, 'feat/orphan', ['f.txt']);
+    // GUARD_SHIP_BASE_OK: an unrelated base is exactly what sc-2357's relatedness check refuses, and
+    // this test needs one to reach the staging fallback under test. The hatch is the audited way in.
+    const r = ship(dir, env, 'feat/orphan', ['f.txt'], { GUARD_SHIP_BASE_OK: '1' });
     dropWorktree(git, r.stderr);
 
     expect(r.status, r.stderr).toBe(0);

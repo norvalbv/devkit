@@ -45,6 +45,17 @@ export function indexTracksBaseline(root, rel) {
     });
     return result.status === 0;
 }
+/**
+ * Causes for "ignored by Git" that exist only inside a ship gate, where the tree is the PR base and
+ * the plain `devkit init/upgrade` remedy misleads (sc-2357). Ship-gated: this runs in every consumer.
+ */
+function shipBaseCauses() {
+    if (!process.env.DEVKIT_SHIP_BASE_SHA)
+        return '';
+    return (' This gate tree is the PR base, not your checkout, so two other causes are possible:' +
+        ' the base predates the .gitignore baseline exceptions (check that --base names the line your' +
+        ' work is built on), or this is an overlay install where .devkit is hidden via .git/info/exclude.');
+}
 /** Stop before migration writes when Git would refuse to track the canonical debt file. */
 export function assertBaselineTrackable(root, rel) {
     if (!isGitWorktree(root))
@@ -64,7 +75,7 @@ export function assertBaselineTrackable(root, rel) {
     if (result.status === 1)
         return;
     if (result.status === 0) {
-        throw new Error(`Devkit ratchet baseline migration stopped: ${rel} is ignored by Git. Run devkit init/upgrade to restore the .devkit baseline exceptions, then rerun.`);
+        throw new Error(`Devkit ratchet baseline migration stopped: ${rel} is ignored by Git. Run devkit init/upgrade to restore the .devkit baseline exceptions, then rerun.${shipBaseCauses()}`);
     }
     throw new Error(`Devkit ratchet baseline migration stopped: Git could not verify that ${rel} is trackable.`);
 }

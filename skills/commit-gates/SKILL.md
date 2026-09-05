@@ -72,6 +72,10 @@ specific conditions under which that control is appropriate:
   advisory prints: `qavis qa`, then `qavis waive --staged --reason '…'` when the verdict is uncertain
   and the gap is accepted, so the reason is bound to the tree. `GUARD_NO_QAVIS_ADVISORY=1` disables
   the advisory entirely.
+- `GUARD_SHIP_BASE_OK=1` — ship into a `--base` that does not contain this work's branch point.
+  Prefer the base the refusal names: the gate worktree is cut from the base, so overriding makes
+  guard-size, guard-clone and structure judge a tree your change was never written against, and
+  their findings will look real. Use it only for a deliberate cross-line PR.
 - `GUARD_HOOK_PARITY_OK=1` — assert that `.husky/pre-commit` drift predates your change (Devkit's
   own repo only; the gate is already advisory when no hook-generator input is staged).
 - `GUARD_DECISIONS_INTEGRITY_OK=1` — assert that a NEW structural finding on a decision record in

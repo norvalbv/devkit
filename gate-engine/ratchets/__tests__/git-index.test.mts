@@ -10,7 +10,7 @@ import { mkdtempSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { stagedTouchedSet } from '../git-index.mts';
+import { assertBaselineTrackable, stagedTouchedSet } from '../git-index.mts';
 
 const cleanup: string[] = [];
 afterEach(() => {
@@ -98,5 +98,51 @@ describe('stagedTouchedSet', () => {
     // The resolution differs from both parents; the cleanly-inherited file differs only from HEAD.
     expect(touched).toContain('kept.txt');
     expect(touched).not.toContain('side-only.txt');
+  });
+});
+
+/**
+ * sc-2357 — inside a ship gate the tree is the PR BASE, so a base predating the .gitignore baseline
+ * exceptions throws this for a file the caller's own checkout tracks, and the plain remedy misleads.
+ */
+describe('assertBaselineTrackable — naming base selection, but only inside a ship', () => {
+  function ignoredBaselineRepo(): string {
+    const root = seed();
+    writeFileSync(join(root, '.gitignore'), '.devkit/\n');
+    git(root, 'add', '-A');
+    git(root, 'commit', '-qm', 'ignore .devkit, as a base predating the exceptions does');
+    return root;
+  }
+
+  const throwing = (root: string): string => {
+    try {
+      assertBaselineTrackable(root, '.devkit/baselines/size-lines.json');
+    } catch (error) {
+      // Narrowed rather than asserted: a non-Error throw would otherwise read as an empty message
+      // and every assertion below would pass against nothing.
+      return error instanceof Error ? error.message : String(error);
+    }
+    return '';
+  };
+
+  it('keeps the plain wording when no ship exported a base', () => {
+    delete process.env.DEVKIT_SHIP_BASE_SHA;
+    const message = throwing(ignoredBaselineRepo());
+
+    expect(message).toContain('is ignored by Git. Run devkit init/upgrade');
+    expect(message).not.toContain('--base');
+  });
+
+  it('names both ship-only causes when a ship exported a base', () => {
+    process.env.DEVKIT_SHIP_BASE_SHA = 'a'.repeat(40);
+    try {
+      const message = throwing(ignoredBaselineRepo());
+
+      expect(message).toContain('This gate tree is the PR base, not your checkout');
+      expect(message).toContain('--base names the line your work is built on');
+      expect(message).toContain('.git/info/exclude'); // the overlay cause, which a base change cannot fix
+    } finally {
+      delete process.env.DEVKIT_SHIP_BASE_SHA;
+    }
   });
 });

@@ -37,6 +37,15 @@ function gitStub(failPattern, exitCode, armedBy) {
   return stubBin;
 }
 
+/**
+ * Orphan HEAD so ship_suggest_base's ANCESTOR tier cannot answer and the origin-default tier is the
+ * one under test — since sc-2357 split them, a plain `switch -c` off `work` answers ancestor-first.
+ */
+function cutFromNothing(git, branch = 'local-only') {
+  git(['checkout', '-q', '--orphan', branch], { stdio: 'ignore' });
+  git(['commit', '-q', '-m', 'unrelated root'], { stdio: 'ignore' });
+}
+
 describe('ship-branch.sh — the PR base must be a branch on origin (sc-2261)', () => {
   it('refuses a local-only default base BEFORE the worktree, the commit or the push', () => {
     const { dir, env, git, bare } = seedShipRepoLocalRemote();
@@ -65,9 +74,9 @@ describe('ship-branch.sh — the PR base must be a branch on origin (sc-2261)', 
     expect(git(['rev-parse', 'HEAD']).trim()).toBe(headBefore);
   });
 
-  it('prints the full refusal (not git’s exit 128) when origin’s default branch cannot be resolved', () => {
+  it('prints the full refusal (not git’s exit 128) when NO base can be resolved', () => {
     const { dir, env, git } = seedShipRepoLocalRemote();
-    git(['switch', '-q', '-c', 'local-only'], { stdio: 'ignore' });
+    cutFromNothing(git);
     writeFileSync(join(dir, 'note.txt'), 'hello\n');
 
     const r = spawnSync('/bin/bash', [scriptPath, 'feat/x', 't', '--body', 'b', '--', 'note.txt'], {
@@ -86,7 +95,7 @@ describe('ship-branch.sh — the PR base must be a branch on origin (sc-2261)', 
     execFileSync('git', ['-C', bare, 'symbolic-ref', 'HEAD', 'refs/heads/work'], {
       env: { ...process.env, ...GIT_ENV },
     });
-    git(['switch', '-q', '-c', 'local-only'], { stdio: 'ignore' });
+    cutFromNothing(git);
     writeFileSync(join(dir, 'note.txt'), 'hello\n');
 
     const r = spawnSync('/bin/bash', [scriptPath, 'feat/x', 't', '--body', 'b', '--', 'note.txt'], {
@@ -97,6 +106,35 @@ describe('ship-branch.sh — the PR base must be a branch on origin (sc-2261)', 
 
     expect(r.status, r.stderr).not.toBe(0);
     expect(r.stderr).toMatch(/origin's default branch is 'work' — pass --base 'work'/);
+  });
+
+  it('offers the branch the work sits on OVER origin’s default (sc-2357)', () => {
+    // The hint that manufactured the incident: this branch is not on origin — every provisioned
+    // worktree — and origin's default is a branch the work is not built on.
+    const { dir, env, git, bare } = seedShipRepoLocalRemote();
+    git(['push', '-q', 'origin', 'work:release'], { stdio: 'ignore' });
+    git(['checkout', '-q', '--orphan', 'unrelated-default'], { stdio: 'ignore' });
+    git(['commit', '-q', '-m', 'unrelated default'], { stdio: 'ignore' });
+    git(['push', '-q', 'origin', 'unrelated-default:unrelated-default'], { stdio: 'ignore' });
+    git(['checkout', '-q', 'work'], { stdio: 'ignore' });
+    execFileSync('git', ['-C', bare, 'symbolic-ref', 'HEAD', 'refs/heads/unrelated-default'], {
+      env: { ...process.env, ...GIT_ENV },
+    });
+    git(['switch', '-q', '-c', 'local-only'], { stdio: 'ignore' });
+    writeFileSync(join(dir, 'note.txt'), 'hello\n');
+
+    const r = spawnSync('/bin/bash', [scriptPath, 'feat/x', 't', '--body', 'b', '--', 'note.txt'], {
+      cwd: dir,
+      encoding: 'utf8',
+      env,
+    });
+
+    expect(r.status, r.stderr).not.toBe(0);
+    expect(r.stderr).toMatch(/the branch this work sits on top of is '(work|release)'/);
+    expect(r.stderr).not.toMatch(/unrelated-default/);
+    // The sc-2261 invariant, now derived rather than structural: whichever tier answers, it is never
+    // the base that just failed. A remedy that re-proposes it is what turned a ship into a loop.
+    expect(r.stderr).not.toMatch(/--base 'local-only'/);
   });
 
   it('fails CLOSED when the base probe errors rather than answering "absent"', () => {
@@ -430,7 +468,9 @@ describe('ship-branch.sh — edge cases around the base preflight (sc-2261)', ()
     execFileSync('git', ['-C', bare, 'symbolic-ref', 'HEAD', 'refs/heads/release/1.0'], {
       env: { ...process.env, ...GIT_ENV },
     });
-    git(['switch', '-q', '-c', 'local-only'], { stdio: 'ignore' });
+    // Orphaned so the ancestor tier stays out of it: what is under test here is the `ls-remote
+    // --symref` parse of a SLASHED name, which only the origin-default tier performs.
+    cutFromNothing(git);
     writeFileSync(join(dir, 'note.txt'), 'hello\n');
 
     const r = spawnSync('/bin/bash', [scriptPath, 'feat/x', 't', '--body', 'b', '--', 'note.txt'], {
