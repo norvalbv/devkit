@@ -18,6 +18,9 @@ import { closeSync, fstatSync, openSync, readSync } from 'node:fs';
  * one degrades a single line rather than the run. `family` is the coarse gate group a row belongs
  * to when its own `gate` is finer than the blocked_gate vocabulary (the deterministic chain reports
  * per-gate: `fanout`, `anti-slop`).
+ *
+ * `advisory_result` is the one row type here that can never be the blocker: it comes from a stage
+ * that holds no exit, so it is read for `gate`/`status`/`detail` and never for attribution.
  */
 export interface GateEvent {
   type?: string;
@@ -199,6 +202,9 @@ export function summarise(events: GateEvent[], shipId: string): DigestRow[] {
   // hard-coding these rows non-blocking misattributes the run to whatever else it found.
   const attributable: Attributable[] = [];
   const cached: DigestRow[] = [];
+  // Held OUT of attributable[], not merely marked non-blocking: a stage holding no exit is then
+  // structurally ineligible for isBlocking(), whatever family token it carries.
+  const advisory: DigestRow[] = [];
   for (const e of mine) {
     if (e.type === 'review_result' && e.status === 'fail') {
       const reviewer = e.reviewer ?? 'unknown';
@@ -243,6 +249,15 @@ export function summarise(events: GateEvent[], shipId: string): DigestRow[] {
         detail: oneLine(e.detail) || oneLine(e.cause) || 'could not run',
         state: 'could-not-run',
       });
+    } else if (e.type === 'advisory_result') {
+      // A stage that CANNOT block (the self-host fallow audit, the skill-projection check): its
+      // findings used to exist only as prose printed above the success banner (sc-2526).
+      advisory.push({
+        gate: e.gate ?? 'unknown',
+        state: e.status === 'could_not_run' ? 'could-not-run' : 'finding',
+        blocking: false,
+        detail: oneLine(e.detail),
+      });
     } else if (e.type === 'cache_hit') {
       cached.push({ gate: e.judge ?? 'unknown', state: 'cached', blocking: false, detail: '' });
     }
@@ -252,6 +267,12 @@ export function summarise(events: GateEvent[], shipId: string): DigestRow[] {
   const unique = attributable.filter(
     (a) => !seen.has(`${a.state}:${a.gate}`) && seen.add(`${a.state}:${a.gate}`) !== undefined,
   );
+  const advisorySeen = new Set<string>();
+  const uniqueAdvisory = advisory.filter(
+    (a) =>
+      !advisorySeen.has(`${a.state}:${a.gate}`) &&
+      advisorySeen.add(`${a.state}:${a.gate}`) !== undefined,
+  );
   return [
     ...unique.map((a) => ({
       gate: a.gate,
@@ -259,6 +280,9 @@ export function summarise(events: GateEvent[], shipId: string): DigestRow[] {
       blocking: unattributed ? null : isBlocking(a, blocked, unique),
       detail: a.detail,
     })),
+    // NOT passed through the `unattributed` null-blocking arm: that arm exists for a run whose
+    // blocker is unknowable, and an advisory's non-blocking status is knowable on every run.
+    ...uniqueAdvisory,
     ...cached,
   ];
 }

@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { emitAdvisoryResult } from '../../../gate-engine/judge/advisory/emit.mts';
 import { walk } from '../../commands/sync/sync-skills.mts';
 import { type SkillSelection } from '../components.mts';
 import { readJson } from '../fs-helpers.mts';
@@ -93,14 +94,32 @@ function parseRoot(args: string[]): string {
   return args[index + 1];
 }
 
+/**
+ * Same channel as the fallow advisory (sc-2526), and silent when the projection is intact. Lives
+ * here, not in the pure printer several tests call directly, so no telemetry fires on those.
+ */
+function emitProjectionAdvisory(report: SkillProjectionIntegrityReport): void {
+  if (!report.active || report.findings.length === 0) return;
+  emitAdvisoryResult(
+    'skill-projection',
+    'finding',
+    `${report.findings.length} projection drift finding(s) — read the skill-projection section of the log`,
+  );
+}
+
 function main(): void {
   try {
-    process.exitCode = printSkillProjectionWarning(
-      inspectSkillProjectionIntegrity(parseRoot(process.argv.slice(2))),
-    );
+    const report = inspectSkillProjectionIntegrity(parseRoot(process.argv.slice(2)));
+    process.exitCode = printSkillProjectionWarning(report);
+    emitProjectionAdvisory(report);
   } catch (error) {
     console.error(
       `⚠ devkit self-host: skill projection integrity check unavailable (advisory) — ${error instanceof Error ? error.message : String(error)}`,
+    );
+    emitAdvisoryResult(
+      'skill-projection',
+      'could_not_run',
+      'skill projection integrity check unavailable — the advisory verified nothing',
     );
     process.exitCode = 0;
   }

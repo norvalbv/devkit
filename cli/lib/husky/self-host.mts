@@ -67,6 +67,9 @@ export const SELF_HOST_EXTRAS: Array<{ label: string; cmd: string }> = [
 // out-of-block line gets mis-absorbed into the preamble by replaceGuardBlock's findPreambleEnd on a
 // re-run (splitting the comment from its command), and being in-block means the parity/doctor check
 // covers it too.
+//
+// It stays LAST deliberately (sc-2526): the CHANNEL, not the position, is what made its findings
+// unreadable. Reasoning and the rejected move in fallow-gate-owned-by-fallow.
 const FALLOW_FRAGMENT = `# devkit:fallow-advisory
 # fallow audit — dead-code / duplication / complexity on the changed set; advisory, never blocks.
 if [ "\${DEVKIT_RUN_MODE:-}" = "review" ]; then
@@ -75,9 +78,32 @@ else
     # Pin ships to their exact worktree base (DK-5); plain commits retain Fallow's base discovery.
     FALLOW_BASE_ARGS=""
     [ -n "\${DEVKIT_SHIP_BASE_SHA:-}" ] && FALLOW_BASE_ARGS="--base $DEVKIT_SHIP_BASE_SHA"
-    # __dk_no_git_env: fallow's audit base-snapshot is itself a git worktree, and it has clobbered a
-    # ship worktree before (see commit-with-gate-capture.sh's worktree_head_clobbered banner).
-    command -v fallow >/dev/null 2>&1 && __dk_no_git_env fallow audit $FALLOW_BASE_ARGS || true
+    if command -v fallow >/dev/null 2>&1; then
+        # The JSON pass ALWAYS runs: it carries fallow's own verdict and introduced counters, which
+        # the exit code does not — a duplication-only changeset returns verdict=warn and EXIT 0
+        # while still reporting the clone group. The HUMAN report re-runs only when that verdict is
+        # non-clean, so a clean commit still pays for one audit. fallow 3.10.0 offers no single-run
+        # tee: --output-file REPLACES stdout, and --sarif-file is a no-op on \`audit\`.
+        DK_FALLOW_JSON="$(mktemp)" || DK_FALLOW_JSON=""
+        DK_FALLOW_RC=0
+        if [ -n "$DK_FALLOW_JSON" ]; then
+            # __dk_no_git_env: fallow's audit base-snapshot is itself a git worktree, and it has
+            # clobbered a ship worktree before (see commit-with-gate-capture.sh's
+            # worktree_head_clobbered banner).
+            __dk_no_git_env fallow audit $FALLOW_BASE_ARGS --format json --output-file "$DK_FALLOW_JSON" >/dev/null 2>&1 || DK_FALLOW_RC=$?
+        fi
+        # Runs even when mktemp failed (an unset, unwritable or full TMPDIR), and is handed the exit
+        # code so a clean verdict from a FAILED audit is refused rather than believed.
+        DK_FALLOW_STATE="$(node gate-engine/judge/advisory/emit.mts fallow-advisory "$DK_FALLOW_JSON" "$DK_FALLOW_RC" 2>/dev/null || echo unreadable)"
+        rm -f "$DK_FALLOW_JSON" 2>/dev/null || true
+        # Anything but a clean verdict prints the report. A crashed emitter lands here too, so a
+        # broken narrator makes the hook say MORE rather than swallow a finding.
+        [ "$DK_FALLOW_STATE" = "clean" ] || __dk_no_git_env fallow audit $FALLOW_BASE_ARGS || true
+    else
+        # A gate that verified NOTHING must not read like a gate that found nothing
+        # (gate-opt-out-is-visible-and-detectable).
+        node gate-engine/judge/advisory/emit.mts fallow-advisory --absent >/dev/null 2>&1 || true
+    fi
 fi
 # /devkit:fallow-advisory`;
 
