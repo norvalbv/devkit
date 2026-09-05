@@ -71,7 +71,7 @@ import {
 } from './decision-format.mts';
 import { warnNearestAxes } from './dedupe.mts';
 import { runDrift } from './drift.mts';
-import { assertFullNotJson, printFull, printRanked } from './recall/full-print.mts';
+import { assertFullNotJson, printFull, printRanked, renderSpine } from './recall/full-print.mts';
 import { noteTextWithRelation } from './recall/note-relations.mts';
 import { type RankResult, rankAxes as rankAxesIn, reindexAll } from './recall/retrieval.mts';
 
@@ -242,12 +242,12 @@ function addNote(slug: string, o: AddOptions, p: Paths) {
 }
 
 export function cmdList(cwd = process.cwd()) {
-  const p = paths(cwd);
-  if (!existsSync(p.indexPath)) {
+  const spine = renderSpine(paths(cwd));
+  if (spine === null) {
     console.log('No decisions recorded.');
     return;
   }
-  process.stdout.write(readFileSync(p.indexPath, 'utf8'));
+  process.stdout.write(spine);
 }
 
 export function cmdShow(slug: string, cwd = process.cwd()) {
