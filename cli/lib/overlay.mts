@@ -24,8 +24,9 @@ import { packageDir, readJson, writeIfAbsent } from './fs-helpers.mts';
 import { trackedPathPredicate } from './git-tracked.mts';
 import { buildOverlayHook, buildPassthroughHook } from './husky/husky-block.mts';
 import { ADHD_SKILL_DIR, syncAdhdSkill } from './install/adhd-skill.mts';
+import { wireOverlayAntiSlop } from './install/anti-slop/overlay/install.mts';
 import { selectedHookAssets } from './install/hook-registration-ledger/selection.mts';
-import { detectFallow, installFallow, saveFallowBaselines } from './install/install-fallow.mts';
+import { resolveOverlayFallow } from './install/install-fallow.mts';
 import {
   installHookRegistrations,
   removeHookRegistrations,
@@ -361,37 +362,6 @@ export function syncOverlayHook(
   return { missing, drift };
 }
 
-// Resolve fallow for an overlay install: detect → (warn + global install if missing) → save
-// baselines so `fallow audit` only blocks on NEW issues (a legacy repo's existing debt is
-// grandfathered — else the gate fail-CLOSES on the very first commit). Returns whether the fallow
-// gate should be wired into the hook. Fail-open: if fallow can't be installed, ABORT the component
-// (no gate, no baselines) rather than wire a gate that can't run — never block the user.
-function resolveOverlayFallow(cwd: string, dryRun: boolean) {
-  if (dryRun) {
-    console.log('  [dry-run] fallow: detect → install-if-missing → save baselines → gate in hook');
-    return true;
-  }
-  const det = detectFallow({ cwd });
-  if (det.available) {
-    console.log(`  ✓ fallow present (${det.version})`);
-  } else {
-    console.log('  ! fallow not found — attempting a global install (bun → npm → cargo)...');
-    const r = installFallow({ cwd });
-    if (!r.ok) {
-      console.log(
-        '  ! fallow not installed — skipping the fallow gate (install it above, re-run).',
-      );
-      return false;
-    }
-    console.log(`  ✓ ${r.message}`);
-  }
-  const saved = saveFallowBaselines({ cwd });
-  console.log(
-    `  ${saved.ok ? '✓ saved' : '! some'} fallow baselines → fallow-baselines/ (grandfather debt)`,
-  );
-  return true;
-}
-
 // Sync the agent-half (skills + agents + agentHooks) into the git root's selected surfaces, skipping
 // any path git already TRACKS (C2 — exclude can't hide a tracked file), and return the git-root-
 // relative paths to hide via .git/info/exclude (derived from each sync's returned manifest, so a
@@ -531,9 +501,15 @@ export function installOverlay(
     }
   }
 
+  // Same shape as fallow: resolved before the hook renders, since the gate fragment is keyed on the
+  // selection. Owns its own excludes and its own deselection — see wireOverlayAntiSlop.
+  const antiSlop = wireOverlayAntiSlop(cwd, gitRoot, pfx, sel, dryRun);
+  for (const rel of antiSlop.excludes) excludes.add(rel);
+
   // local hook (core.hooksPath override) at the git root + chain + pass-through of all hooks.
   console.log('  local hook');
-  installOverlayHook(gitRoot, pkgRel, sel, origHooksPath, dryRun, fallowWired);
+  const hookSel = { ...sel, antiSlop: antiSlop.wired };
+  installOverlayHook(gitRoot, pkgRel, hookSel, origHooksPath, dryRun, fallowWired);
 
   // Per-clone alias restores this repo-wide hook path after husky reclaims it.
   installHealAlias(gitRoot, dryRun);
@@ -552,5 +528,5 @@ export function installOverlay(
   addToGitExclude(gitRoot, [...excludes], dryRun);
 
   // Cleanup restores the original hook path and only removes components recorded as wired.
-  return { origHooksPath, fallowWired };
+  return { origHooksPath, fallowWired, antiSlopWired: antiSlop.wired };
 }

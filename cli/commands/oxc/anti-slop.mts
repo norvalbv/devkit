@@ -5,6 +5,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { withLock } from '../../lib/atomic-write.mts';
 import {
+  overlayBaseRefusal,
+  reportOverlayContract,
+} from '../../lib/install/anti-slop/overlay/contract.mts';
+import {
   type AntiSlopBaseline,
   adoptBaselineRuleFindings,
   baselineFromGroups,
@@ -39,6 +43,7 @@ import {
   collectAntiSlopGroups,
   resolveAntiSlopScope,
 } from '../../lib/install/anti-slop/runner.mts';
+import { resolveOxlintEntryConfig } from '../../lib/install/oxc/lifecycle.mts';
 
 export const meta = {
   name: 'anti-slop',
@@ -47,6 +52,7 @@ export const meta = {
 
 Usage:
   devkit anti-slop create [--force] [paths...]   Explicitly snapshot current findings
+  devkit anti-slop adopt-activation              Adopt only a newly activated rule's inherited debt
   devkit anti-slop adopt-renames                 Persist debt across staged Git renames
   devkit anti-slop adopt-renames --base <ref>    Persist debt across committed Git renames
   devkit anti-slop check [paths...]              Check working-tree findings (read-only)
@@ -58,7 +64,11 @@ Usage:
 Configure per-rule off/warn/error and scoped overrides in the repository Oxlint config. Paths default
 to the repository root. Check and inspect never write. Create refuses an existing baseline unless
 --force is explicit; a whole-repository replacement that removes debt from existing files also requires
---confirm-baseline-removals. Prune refuses to write while new error-severity findings exist.`,
+--confirm-baseline-removals. Prune refuses to write while new error-severity findings exist.
+
+In an OVERLAY install the baseline is per-clone and git-ignored, so no committed tree carries one to
+compare against: --base and adopt-renames are unavailable there, and adopt-activation is how a devkit
+release's newly activated rules are adopted without re-snapshotting unrelated debt.`,
 };
 
 function baselineOrExplain(cwd: string): AntiSlopBaseline | null {
@@ -81,7 +91,11 @@ function capabilityReady(cwd: string): boolean {
   return false;
 }
 
-function create(
+/**
+ * Exported so an overlay install adopts existing debt through the SAME path the CLI verb uses,
+ * including the pending release-activation consumption below. Overlay can never re-snapshot.
+ */
+export function createAntiSlopBaseline(
   cwd: string,
   args: string[],
   force: boolean,
@@ -163,6 +177,43 @@ function create(
     }
     console.log(
       `anti-slop: created ${ANTI_SLOP_BASELINE_REL} with ${count(next.entries)} finding(s) in ${next.entries.length} fingerprint(s)`,
+    );
+    return 0;
+  });
+}
+
+/**
+ * Adopt ONLY the pre-existing findings of rules a devkit release just activated, leaving all other
+ * fingerprint counts untouched — overlay's sole non-laundering route; see oxc-toolchain-migration.
+ */
+function adoptActivation(cwd: string): number {
+  if (!capabilityReady(cwd)) return 2;
+  return withLock(join(cwd, ANTI_SLOP_BASELINE_LOCK_REL), () => {
+    const existing = baselineOrExplain(cwd);
+    if (!existing) return 2;
+    const pending = readPendingAntiSlopBaselineActivation(cwd);
+    if (!pending) {
+      console.log('anti-slop: no pending rule activation to adopt');
+      return 0;
+    }
+    const installed = readInstalledAntiSlopBaselineMigrationId(cwd);
+    if (pending.migrationId !== installed) {
+      console.error(
+        `anti-slop: pending activation ${pending.migrationId} does not match the installed capability (${installed ?? 'none'}); run \`devkit doctor --fix\` first`,
+      );
+      return 2;
+    }
+    const groups = collectAntiSlopGroups(cwd, []);
+    const next = adoptBaselineRuleFindings(
+      existing,
+      groups,
+      pending.activatedRuleIds,
+      pending.migrationId,
+    );
+    writeBaseline(cwd, next);
+    clearPendingAntiSlopBaselineActivation(cwd, pending.migrationId);
+    console.log(
+      `anti-slop: adopted ${pending.activatedRuleIds.size} newly activated rule(s) into ${ANTI_SLOP_BASELINE_REL} — ${count(next.entries)} finding(s) in ${next.entries.length} fingerprint(s)`,
     );
     return 0;
   });
@@ -255,11 +306,15 @@ function check(
       console.error(
         `anti-slop: FAIL — ${errors.reduce((sum, group) => sum + group.additionalCount, 0)} new error finding(s); baseline unchanged`,
       );
+      // Reported on the FAIL path too: a committer reading a block needs the same standing about
+      // what this gate does not enforce — no committed base means no rename forgiveness.
+      reportOverlayContract(cwd);
       return 1;
     }
     console.log(
       `anti-slop: PASS — ${comparison.currentCount} current finding(s), ${comparison.resolvedCount} ready to prune${warnings.length ? `, ${warnings.length} warning fingerprint(s)` : ''}`,
     );
+    reportOverlayContract(cwd);
     return 0;
   } finally {
     if (pin) rmSync(pin, { recursive: true, force: true });
@@ -375,7 +430,23 @@ export default function run(args: string[], cwd: string): number {
     console.error('anti-slop: --staged uses the complete Git index and accepts no paths or --base');
     return 2;
   }
-  if (operation === 'create') return create(cwd, paths, force, confirmBaselineRemovals);
+  // The manifest STAMP, not the repository marker: `.devkit/config.json` is absent from every review
+  // projection, so a marker read drops the capability from the snapshot exactly where it exists.
+  const overlay = resolveOxlintEntryConfig(cwd) !== null;
+  const refusal = overlay ? overlayBaseRefusal(operation, baseRef !== undefined) : null;
+  if (refusal) {
+    console.error(refusal);
+    return 2;
+  }
+  if (operation === 'create')
+    return createAntiSlopBaseline(cwd, paths, force, confirmBaselineRemovals);
+  if (operation === 'adopt-activation') {
+    if (paths.length > 0 || force) {
+      console.error('anti-slop adopt-activation accepts no flags or paths');
+      return 2;
+    }
+    return adoptActivation(cwd);
+  }
   if (operation === 'adopt-renames') {
     if (paths.length > 0) {
       console.error('anti-slop adopt-renames accepts no flags or paths');
@@ -384,13 +455,18 @@ export default function run(args: string[], cwd: string): number {
     return adoptRenames(cwd, baseRef ?? 'HEAD', baseRef !== undefined);
   }
   if (operation === 'check' && staged) {
-    return withStagedAntiSlopSnapshot(cwd, (snapshot) => {
-      if (snapshot.skipped) {
-        console.log('anti-slop: PASS — no relevant staged files or configuration changes');
-        return 0;
-      }
-      return check(snapshot.cwd, snapshot.paths, snapshot);
-    });
+    return withStagedAntiSlopSnapshot(
+      cwd,
+      (snapshot) => {
+        if (snapshot.skipped) {
+          console.log('anti-slop: PASS — no relevant staged files or configuration changes');
+          reportOverlayContract(snapshot.cwd);
+          return 0;
+        }
+        return check(snapshot.cwd, snapshot.paths, snapshot);
+      },
+      { overlay },
+    );
   }
   if (operation === 'check') {
     const envelope = baseRef ? gitBaselineEnvelope(cwd, baseRef) : null;
@@ -404,6 +480,8 @@ export default function run(args: string[], cwd: string): number {
     return inspect(cwd, json);
   }
   if (operation === 'prune') return prune(cwd, paths);
-  console.error('devkit anti-slop: expected create, adopt-renames, check, inspect, or prune');
+  console.error(
+    'devkit anti-slop: expected create, adopt-activation, adopt-renames, check, inspect, or prune',
+  );
   return 2;
 }

@@ -275,15 +275,8 @@ export function defaultSelection(): Selection {
 }
 
 /**
- * Enforce the OVERLAY invariants on a selection (from the wizard OR the --yes/flag path), so the
- * SAME constraints apply whichever way overlay was resolved. The viable choices — skills, agents,
- * agentHooks, biome, fallow, guards, agentTargets — pass through UNTOUCHED (overlay offers the same
- * opt-in choices as package for those). Forced: the local hook is always on; the components that
- * can't work without the package are off — `tsconfig`/`structure` (need package/plugin resolution),
- * `searchSteering` (its hooks reference node_modules/@norvalbv/devkit), `search-code` (referenced
- * external engine, not wired in overlay).
- *
- * @param sel a resolved selection (from selectionFromFlags or the wizard)
+ * Enforce the OVERLAY invariants, however overlay was resolved: the components forced off below
+ * cannot work without the package, and every other choice passes through as in package mode.
  */
 export function applyOverlayConstraints(sel: Selection): Selection {
   return {
@@ -292,7 +285,6 @@ export function applyOverlayConstraints(sel: Selection): Selection {
     structure: false,
     searchSteering: false,
     searchCode: false,
-    antiSlop: false,
     husky: true,
   };
 }
@@ -424,7 +416,7 @@ export const OPTIONAL_COMPONENTS: OptionalComponent[] = [
     id: 'antiSlop',
     kind: 'tool',
     label: 'anti-slop',
-    hint: '15 vendored rules over core Oxlint + explicit shrink-only baseline',
+    hint: '17 vendored rules over core Oxlint + explicit shrink-only baseline',
     flag: '--anti-slop',
     since: '0.52.0',
   },
