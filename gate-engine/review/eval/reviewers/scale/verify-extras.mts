@@ -1,6 +1,6 @@
 /**
- * Cheap noise gauge for the scale probe: every DEDUPED extra finding (a prediction matching no
- * telemetry label) is judged ONCE by a haiku verifier that sees the finding text plus the file's
+ * Historical location/proximity noise proxy: every DEDUPED finding outside nearby telemetry-label
+ * locations is judged ONCE by a haiku verifier that sees the finding text plus the file's
  * own diff hunk, answering REAL or NOT. This is a precision PROXY (guardrail 1 of
  * pre-registration-scale-chunk.md), not ground truth. Appends verdicts to <out>/verify.jsonl
  * (checkpointed by finding key); prints per-(model, arm) verified-precision. Local only — never
@@ -219,5 +219,5 @@ for (const e of extras) {
   byArm.set(k, s);
 }
 for (const [k, s] of [...byArm.entries()].sort()) {
-  console.error(`VERIFIED-PRECISION ${k}: ${s.real}/${s.n}`);
+  console.error(`HISTORICAL-LOCATION-PROXY-PRECISION ${k}: ${s.real}/${s.n}`);
 }
