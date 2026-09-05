@@ -34,8 +34,11 @@ export function executionHash({
 }
 
 /** Same planner and scoped selections as production, with an explicitly inert telemetry emitter. */
-export function planFixture(sel, cwd, { cap = BENCH_CHUNK_LOC, groups = BENCH_LENS_GROUPS } = {}) {
-  const diff = gitCached(cwd, [], sel.files);
+export function planFixture(
+  sel,
+  cwd,
+  { cap = BENCH_CHUNK_LOC, groups = BENCH_LENS_GROUPS, diff = gitCached(cwd, [], sel.files) } = {},
+) {
   const { tasks } = planReviewWork(
     [sel],
     [diff],
