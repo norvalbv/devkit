@@ -145,3 +145,6 @@ or exclude its remaining blockers and retain the same exposed-family identity. T
 not add state/retry, race/lifetime or parsing family coverage, supply a holdout, or unblock sc-2832's
 measured history comparison. Adapter work can proceed independently; measurement needs qualified,
 frozen cases first.
+
+The [sc-2851 input adapter](review-history-adapter.md) implements deterministic chronology and
+per-task history preparation while these qualification prerequisites remain open.
