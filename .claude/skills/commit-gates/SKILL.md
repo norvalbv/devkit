@@ -19,7 +19,17 @@ command. Do not pre-run every gate or replace the managed chain with a hand-writ
    stages and `--resume` replays the
    recorded invocation byte-identically, so restarting with different flags or a re-typed body
    usually wastes work and can discard useful evidence.
-3. Treat a bypass as an explicit operator decision. Never use `--no-verify`, silently disable a
+3. **Check which files the gates actually had.** A ship's gate worktree is cut from the base, so
+   every path NOT in the ship's brief is judged at its **base** content — that is how a clone gate
+   reports a duplication against a symbol you already moved, or a drift in a file that verifies clean
+   locally. A blocked ship prints the brief twice: in full under `Resuming recorded invocation …`
+   before the gates run, and capped under the verdict (`ship: the gates judged N briefed path(s) …`).
+   The record itself is `jq -r '.paths[]' .devkit/ship-intent-<branch>-<hash>.json` — one file per
+   branch, so read YOUR branch's rather than globbing (parallel agents leave several). The effective
+   set is that recorded list UNION any path the retry added, and patch anchoring shapes the content
+   further. If a finding names a file absent from the brief, brief it on the retry
+   (`--resume <branch> -- <path>`) instead of chasing the finding.
+4. Treat a bypass as an explicit operator decision. Never use `--no-verify`, silently disable a
    selected guard, freeze a baseline to absorb new debt, or invent an environment variable.
 
 ## Managed gate families

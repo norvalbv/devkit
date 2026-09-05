@@ -321,6 +321,9 @@ describe('ship-branch.sh — --from-branch committed scope (sc-2352)', () => {
       readFileSync(join(dir, relIntentPath('feat/resume-branch')), 'utf8'),
     );
     expect(refreshedIntent.sourceAttemptId).not.toBe(firstSourceAttemptId);
+    // sc-2299: frozen membership is listed ONCE — the resume banner stays silent in branch mode
+    // because the derivation below it already prints the identical (four-figure-capable) array.
+    expect(resumed.stderr.match(/^\s+note\.txt$/gm) ?? []).toHaveLength(1);
     dropWorktree(git, resumed.stderr);
   });
 
@@ -411,6 +414,10 @@ describe('ship-branch.sh — --from-branch committed scope (sc-2352)', () => {
       preserved,
     );
     expect(readFileSync(hookCount, 'utf8').trim().split('\n')).toHaveLength(1);
+    // sc-2299: this resume SKIPS the derivation block, so its `else` arm is the only place the
+    // frozen membership is ever named on this path — and it must still name it exactly once.
+    expect(resumed.stderr).toContain('--from-branch: 1 frozen committed path(s) replayed');
+    expect(resumed.stderr.match(/^\s+note\.txt$/gm) ?? []).toHaveLength(1);
     expect(
       git(['for-each-ref', '--format=%(refname)', 'refs/devkit/ship-source-memberships']).trim(),
     ).toBe('');
