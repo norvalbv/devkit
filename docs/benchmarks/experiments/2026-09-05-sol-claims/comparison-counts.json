@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "phase1Judgments": 56,
+  "compositeJudgments": 56,
+  "capturedOccurrences": 57,
+  "unadjudicatedOccurrences": 1,
+  "postLabelAuthoredRevisions": 0,
+  "changedDimensions": {
+    "truth": 0,
+    "changeScope": 0,
+    "charterScope": 0,
+    "contextBasis": 0
+  },
+  "comparedLabelRelations": {
+    "SAME_DEFECT": 7,
+    "DISTINCT": 0,
+    "PARTIAL_OVERLAP": 9,
+    "UNSURE": 24,
+    "NOT_COMPARED": 16
+  },
+  "labelComparisonBasis": {
+    "FULL_DEFECT_EVIDENCE": 0,
+    "CAPPED_CONTEXT": 40
+  },
+  "interpretation": "Phase-one factual report uses immutable blinded judgments. Composite report includes separately logged factual revisions after label exposure and semantic label/group annotations. These are distinct analysis stages."
+}

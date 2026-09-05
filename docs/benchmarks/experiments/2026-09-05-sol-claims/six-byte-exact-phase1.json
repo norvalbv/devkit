@@ -1,0 +1,195 @@
+{
+  "schemaVersion": 1,
+  "cohort": "historical-FAIL-selected-replay",
+  "interpretation": "Conditional on historical FAIL-selected replay inputs; not production precision or repeat-block frequency. Extras are not false positives. Captured-only bounds exclude tasks with unknown claim counts.",
+  "inventoryHash": "4af4d3972e777c2971797858090ac9361aef498f1476b9a9f35feab203ca2eca",
+  "adjudication": {
+    "eligibility": "Human or known cross-family AI judgments with verified context can qualify precision and parent attribution. Same-family and unknown-family AI judgments remain unresolved; all raw judgments remain recorded.",
+    "primaryTerminalBasisCounts": {
+      "HUMAN": 0,
+      "CROSS_FAMILY": 53,
+      "SAME_FAMILY": 0,
+      "UNKNOWN_FAMILY": 0,
+      "UNADJUDICATED": 0
+    },
+    "judgmentSetHash": "2eb98103a3bb57a315ed187886c1f74ad15713873d145ebaee41aaa22a927ede",
+    "tiers": {
+      "AI": 53,
+      "HUMAN": 0,
+      "HUMAN_WITH_AI": 0
+    },
+    "primaryTerminalTiers": {
+      "AI": 53,
+      "HUMAN": 0,
+      "HUMAN_WITH_AI": 0
+    }
+  },
+  "diffHashes": [
+    "032d886019d372296aa86749ef79a71b964379c7a6c1eb90fac1868b5de04e73",
+    "0aa63cf864b568fd7d6806fb8d1e86974a00277d85a33e6f22eba3608937babd",
+    "2e0713a80df2c0dca2b3790cb293b2bba9adf49804845a0cfacc681bb5086abd",
+    "3f1389b9293c21cb3d1ec17387e18427baed8360275f754c6073a35927d0e5aa",
+    "63a1f928f40ab03882c1f408f32eb9cdfe0b865cfdaf3ae79e3d3cf7e4b76568",
+    "fe31a21e54fcbc48dbd552494408b94d9f0d362a58e85ae0dc98fa56112ee793"
+  ],
+  "counts": {
+    "tasks": 120,
+    "terminalTasks": 120,
+    "capturedOccurrences": 53,
+    "primaryTerminalOccurrences": 53,
+    "nonterminalOccurrences": 0,
+    "copiedTasks": 0,
+    "missingUnknownClaimTasks": 0,
+    "terminalMissingUnknownClaimTasks": 0,
+    "exactCaptureTasks": 120,
+    "coverageCompleteTasks": 120,
+    "coverageIncompleteTasks": 0,
+    "coverageUnknownTasks": 0,
+    "coverageSkippedTasks": 0,
+    "unparentedTasks": 0
+  },
+  "factualPrecision": {
+    "valid": 44,
+    "invalid": 9,
+    "unresolved": 0,
+    "captured": 53,
+    "resolvedPrecision": 0.8301886792452831,
+    "resolvedCoverage": 1,
+    "bounds": [
+      0.8301886792452831,
+      0.8301886792452831
+    ]
+  },
+  "introducedInCharterPrecision": {
+    "valid": 43,
+    "invalid": 10,
+    "unresolved": 0,
+    "captured": 53,
+    "resolvedPrecision": 0.8113207547169812,
+    "resolvedCoverage": 1,
+    "bounds": [
+      0.8113207547169812,
+      0.8113207547169812
+    ]
+  },
+  "recordedDimensionCounts": {
+    "population": "primary-terminal-captured-occurrences",
+    "truth": {
+      "REAL": 44,
+      "NOT": 9,
+      "UNSURE": 0,
+      "UNADJUDICATED": 0
+    },
+    "changeScope": {
+      "INTRODUCED": 44,
+      "PRE_EXISTING": 1,
+      "NOT_APPLICABLE": 8,
+      "UNSURE": 0,
+      "UNADJUDICATED": 0
+    },
+    "charterScope": {
+      "IN_CHARTER": 50,
+      "OUT_OF_CHARTER": 0,
+      "NOT_APPLICABLE": 3,
+      "UNSURE": 0,
+      "UNADJUDICATED": 0
+    },
+    "contextBasis": {
+      "PROVEN_ORIGINAL_INPUT": 0,
+      "RECONSTRUCTED_FROM_VERIFIED_BASE": 53,
+      "PATCH_APPLICATION_ONLY": 0,
+      "UNVERIFIED": 0,
+      "UNADJUDICATED": 0
+    }
+  },
+  "repeatedInvalidBurden": {
+    "invalidOccurrences": 10,
+    "adjudicatedSemanticGroups": 0,
+    "ungroupedInvalidOccurrences": 10,
+    "repeatedInvalidOccurrences": 0
+  },
+  "semanticRelationCounts": {
+    "SAME_DEFECT": 0,
+    "DISTINCT": 0,
+    "PARTIAL_OVERLAP": 0,
+    "UNSURE": 0,
+    "NOT_COMPARED": 53
+  },
+  "parents": {
+    "total": 6,
+    "categories": {
+      "known-only": 0,
+      "extra-only": 0,
+      "both": 0,
+      "unresolved": 6,
+      "not-blocked": 0
+    },
+    "removingExtrasClears": 0,
+    "invalidOnlyBlocks": 0,
+    "invalidOnlyUnresolved": 0,
+    "results": [
+      {
+        "idHash": "7fc52af088bfa33aa89054a3fdef44f7d95ca271e950312db68a3b4f6c82c575",
+        "status": "fail",
+        "category": "unresolved",
+        "removingExtrasClearsParent": null,
+        "invalidOnly": false,
+        "completeRoster": true,
+        "supersededTasks": 0,
+        "ambiguousRetryTasks": 0
+      },
+      {
+        "idHash": "18a737ba02e034d1382abdd033fe72405d1bdd0a3f7a8e9a5a092ef0e1b3f375",
+        "status": "fail",
+        "category": "unresolved",
+        "removingExtrasClearsParent": null,
+        "invalidOnly": false,
+        "completeRoster": true,
+        "supersededTasks": 0,
+        "ambiguousRetryTasks": 0
+      },
+      {
+        "idHash": "ac4c97800cd29c73082e17a8c050e56a93719903542bceb961ca703ee7d40f2f",
+        "status": "fail",
+        "category": "unresolved",
+        "removingExtrasClearsParent": null,
+        "invalidOnly": false,
+        "completeRoster": true,
+        "supersededTasks": 0,
+        "ambiguousRetryTasks": 0
+      },
+      {
+        "idHash": "56f6ad4a86ea2fcf14d6619bc38b32253bcbd5fccfe8f6fb47ff859c87268c07",
+        "status": "fail",
+        "category": "unresolved",
+        "removingExtrasClearsParent": null,
+        "invalidOnly": false,
+        "completeRoster": true,
+        "supersededTasks": 0,
+        "ambiguousRetryTasks": 0
+      },
+      {
+        "idHash": "24f0576d20e9c85932699781d58d0902029c125d09d5cb55db5d533bd1147e6d",
+        "status": "fail",
+        "category": "unresolved",
+        "removingExtrasClearsParent": null,
+        "invalidOnly": false,
+        "completeRoster": true,
+        "supersededTasks": 0,
+        "ambiguousRetryTasks": 0
+      },
+      {
+        "idHash": "ef30e24ff65313e0f2c3598a40d9e7a14f166aae726753c42de73ab00700147d",
+        "status": "fail",
+        "category": "unresolved",
+        "removingExtrasClearsParent": null,
+        "invalidOnly": false,
+        "completeRoster": true,
+        "supersededTasks": 0,
+        "ambiguousRetryTasks": 0
+      }
+    ]
+  },
+  "completenessErrors": {},
+  "uncertainty": "Descriptive occurrence counts and unresolved-label bounds; no independent-occurrence confidence interval. Any sampling interval must cluster by source diff or episode."
+}

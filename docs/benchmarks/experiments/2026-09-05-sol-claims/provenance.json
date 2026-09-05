@@ -1,0 +1,478 @@
+{
+  "schemaVersion": 1,
+  "study": "2026-09-05-sol-complete-claims",
+  "implementationCommit": "12d9a3b49922fa83c80a9eb16494fb88ff0cbd07",
+  "baseCommit": "ae578fa06a38cea68bbe6b3bc547c1f81e5fa38f",
+  "runtime": {
+    "node": "24.19.0",
+    "bun": "1.3.1"
+  },
+  "condition": {
+    "model": "gpt-5.6-sol",
+    "arm": "chunk:400",
+    "producerIssueCap": 3,
+    "effort": "native default; not independently measured"
+  },
+  "cohort": "historical-FAIL-selected-replay",
+  "originalObservationStateProven": false,
+  "counts": {
+    "inputs": 7,
+    "tasks": 130,
+    "occurrences": 57,
+    "labels": 107,
+    "allProvisionalBindings": 107,
+    "skippedManifestInputs": 1,
+    "censusErrors": 0
+  },
+  "outcomes": {
+    "fail": 47,
+    "pass": 83
+  },
+  "captureExactTasks": 130,
+  "completeCoverageTasks": 130,
+  "qualityReruns": 0,
+  "historicalLabels": {
+    "total": 107,
+    "cappedContext": 107,
+    "approvedCompleteSupplements": 0
+  },
+  "phase1": {
+    "attributedJobs": 56,
+    "actualRootModels": [
+      "claude-sonnet-5"
+    ],
+    "fullUsageModels": [
+      "claude-haiku-4-5-20251001",
+      "claude-sonnet-5"
+    ],
+    "protocolFailedOccurrences": 1,
+    "protocolFailureRerun": false,
+    "unresolvedProtocolReason": "Original native envelope lacked unambiguous author metadata; raw UNSURE output retained privately.",
+    "receiptSha256": [
+      "7728b537f91585a9d25d57a691fdf17ce6c1dbc6585eb9659a7bcc0d9e9c72a9",
+      "e2b8d727c4dd29157bec4dacd3ebe951813aa7e90051a3ad84121a239d900eed",
+      "1e24c10be83e0c649e07ccce7ee38500f7b58adae070fdb2e77160248918d8bc",
+      "d910346a2f31cd90ac7ece9e607b7f634d3198b8f6bd7b4f220a0a74a94653d2",
+      "887d85ef04a183da8517b60c56993c77117959b0e62d33098e8d8f8c24f2adce",
+      "38f8e9caf3315c5f99614a7f673a44c0f4e701cc5f4966a97f4721afae1d52c7",
+      "085990d3f4f49e136721435f0435ae8a7a266c46f554e25cafe7881f12b2311f",
+      "1c1e8f30525a491e8e8dafa217d73f35752741b68ae639ae4fef0c8d74d9634f",
+      "d373588973681e3873151816445e244ed9be989313c366ccd849e628bd87814c",
+      "a6b3a1b5e0a8df78bf49ce589c91f5fb0dbdb676f1e4646e90b10dab4fbaea74",
+      "1abeaae624a32a97830cffc3a88c510e6a50d9cf34a59a56ec2a13384569640f",
+      "f39163354665c18551d3e76aa9098feb1aef4d344af3f522b7eef651cafa5aaa",
+      "ed8f10c54bbac5e767cdabe5071c26445fa17386c393a313126153f16ea927a9",
+      "a4d38a0ab9d4d63bb4b49b7b2ef76b7cc00dd337bb7982cbfab835feb1a837c3",
+      "8afc7f60797251afc4ef8acc99928f0bf5893fbf274afda973ebdd53c726699d",
+      "71a16bb059302992e370cb9f81c03749c18049d776525441cb721b8d81e0157d",
+      "fa673e685c022233ecbf6e0009b2566c9682e7f6c97c7b27ee6a04583dbfd00e",
+      "475d6446eda259548632070620be442bf9ff1c83f0641b3c85860e3bd06284de",
+      "6357b5e0f80a0f08ff79028a78121b7bf95443e7981cc8b888e06593ea3a119d",
+      "7bafdb6fa001e3445b64defd70de029c652fb34f1e03cc0ece154033c385706e",
+      "45b6bf05874c681e11dc41fe3eab8ecda86106d59bb7b86032198be9582fc778",
+      "99a60157a81acc6e445b08d4f8f66d241968381a453a14e20780d95bc7d8dbe2",
+      "0919871944ffb73514ecb07877b259642204ff42b33b6b17a0a083abd544bcc3",
+      "da908911ccfa2683e0a8fed34d18ab3dd53d47bfae8fed676c889d652b5d107a",
+      "7446183ab1d74f7aba2f9b100a2f60237bff78ab4eed0a61b83c4e7df884a170",
+      "b42e3b8bfdc6e6de962b4a98bb02971aa09768f6e49a6b90d1071ce2f40df469",
+      "07c9300cfb2b02fc53bbe1a3b23a833b6a6b7a0ef8ffd864d5c3f32054e33554",
+      "6473e00f710a64bb7ead3479e121c46b73966ba0fe99f357ce222de45b229f8d",
+      "421be8d310d1bfa263ca52d254600815e4a2bcaeb72ae622a290fb99a441607c",
+      "cd5ec2cc69164ab66e203fe5a9b1dc495339d669981c06997ecbf3e002c6d316",
+      "c6a889f0e696c88553de1a1225f389fe2b9f34cf81d9fd35b0c252c3dea487c4",
+      "d1213c9a62860ee80027ed35e70cc5f10d40b5a073c71950cffa0d84e8af3bf0",
+      "dea5fc0a28d2c34ccdab0a6209980d45f40f45754139c67f3300b68bf143a3a7",
+      "0659774833790efef13e825cb4bf79256716da2d7c3865947b8d5f488c627fa1",
+      "b265e4b5788500303146f63f1483a6b2a43d19118c82e8e1498d4a091e88cb9a",
+      "4448368f0ccb39f6c4a572c4b67f09d281fb1e0368dc70072162de124f0090d4",
+      "074835bdf239a7658d93dc4217161e30fea4f3aa7d91eaf753e5d2ab1718c6bc",
+      "12bb7a37fbe311c43c7304591c91130d28421bf45e99cd61af982bfa646229ff",
+      "27f7ace5650a21219c51615ee8e09748ae63acc95d93721b2950c2070a60fa7d",
+      "87ee696446b3dd66abad574185df0011483413b45f4b52ad56ff493ad36c9897",
+      "7ff26ee27798215480d9b6b69842a24ff2960045c055b838c721666998d57a31",
+      "7819fc5ce43a56d034615262903545071aeb6445d6cb1b18a72d36770fc0d874",
+      "e39675bba067c2140f6793d106c81d67344e1b2be1bc54441aeb1f415f9cf1db",
+      "687c275a39a292dfc6704dd4517a97547f3ac98e62954f87159b8ccaa3d0c6c1",
+      "51b75a86dcf261c320842b23c935a6a36acc950b1397d889dcf3d1f3cc3121e9",
+      "9008d9e54b8cd9715348cb9c9a55fa8c233a6a0944fe31ebd209731c31754a3f",
+      "293fd2b4a92e2147f7d1f341c40ced1c370fe3ad7bdd7bae845c754ab3406560",
+      "582700dcff7ebcef127b8db9a3ebbcb5b42675c56b45536a1b9375c82987ef89",
+      "2c57bec2c52c5d0d3e166b24720c7a96dd0a89e1a3b7b6e8c2f99b6f4118c985",
+      "c039af04db209227074d9c7d45e362c9042b4403b3dc0ec8bfa83171260da2e0",
+      "4e9aae75a973526a3cc5ffdc1ad7f4c40a59c7dcfc3ae448a7d04c1e334d02da",
+      "5c5734c4a1652fc38395dcd6d0ea845d010ba249ff747f06e1718b89b8e2d86f",
+      "bcf9c95224845746b5afc2e93ff84164c468c7c00223525328e186f27ca21440",
+      "dee000c5149f92912aaff8e41b901ae9112d070f7af517a8c10a0bedb0d08304",
+      "c49cedfc8ce6aca6c6faed89c5e640bdf2132e7b452130654ba8e36b6fcd9ac7",
+      "821141c17437f13ef2bdbe4731fbbe55a9c039853cdd033a1819e597b3deaff1"
+    ]
+  },
+  "hashes": {
+    "canonicalManifest": "487822600e099c8821be3b0e175c4b2f67c8e96175c201151aa5c37a4660ed80",
+    "replayLauncher": "d6756dd66c6feff5f367c68c478dafa638f456c18882e3a0bbdb17c0c571dea2",
+    "launcherManifest": "7d3a3fb4c860534a6e3c4c3328cf350e18ab7ab447d51261b5423b525adf7424",
+    "launcherState": "d27ed1684f75831bb4db60fe60691573aa4d6a7b537696b7142affa560a06be1",
+    "checkpoint": "ccdb864ff99399d7ae949f3f6f19a50c11fcd80d15b4e6b3b7138fc0fe5f6ae4",
+    "census": "9da2600833b1ba96189d2c3140d3553a49f45a015ae24077556d468642b53040",
+    "finalCensusAudit": "cfb3f08376ebf53c98e9626c4d28760c2a01773e4f2069399309392fd79a9316",
+    "adjudicationHelper": "165652b011d246211fa4456fc74da9b94ee307a1f29c4518927feb56f678c20d",
+    "phase1BatchHelper": "f2e396128ae12f17dadf2493565fd0fac13624dbed843e1983914a567a7050ba",
+    "phase2Helper": "6bdc6bdb58ccb35ebae84b61999090e878599e81ff2fa3785c384c71be4d0f56",
+    "phase1FinalAudit": "ecb8673acfd462df1dc111d9b935a5a892b27bfb06f68c7236af490f4b7f069d",
+    "successfulJobList": "cea70c38dcc981e0b46affa9acf8cfb8d60377a6dca32f0d7b02af8ec00ece1b",
+    "localTestLog": "016096cd54314b47ff2f19aff4c268474021abecdb7e4bc8ecf5bca4370116fd",
+    "ciBaseComparison": "e70f0fd1f49738d83c5edc7e95138f82b18523a788e1751afee04bdb1e4212a8",
+    "partialComparisonHelper": "5e9ecd7fdb9a130f8c8c73154ab70fc93d39724efd2fa7f02eade209e16f8c4a",
+    "partialComparisonValidation": "f41b0e5c5edc94462c6ca3bc6c3b009aaefbe3313b7db48a748413f39a3698fb",
+    "groupingOmissionHelper": "a4a47ececaae14ade3efa8cf6ad6be05ea3220c47c22c2cd7fd12ee1b88d260f",
+    "groupingOmissionValidation": "ac6a4fd88024d32d2229de3019c1020eeab2bb4552dff9d5bc36b76deb65cd43",
+    "finalAssemblyReceipt": "9822fd094a654b9fa6e7986f7f83a2e7d571f5e1e17cf847293574a6404aa844",
+    "finalAssembly": "8295e0d8f2839eaaff1b769a7597476718497cd492bb700d7825d7e5c1b5e3ee",
+    "finalCompositeJudgments": "79180b10542a8bf4154ffe90d652e0d9453f4f7306d803f95a24290547b80dbf",
+    "finalFieldProvenance": "2ec7ef74c5ac85c5fbfc018a5c0bcfe23fc16c73b465dd2c6a81a2f0c4827dc0",
+    "finalRevisions": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+    "finalReportHelper": "4d8a750e3919a1b7e46ae37660dca2c14f2944f4fb3cd7678a03fc1f97544e6e",
+    "finalReportsReceipt": "bdfd4ea2acad8aac1843f02b646fffde85cbb31893a5be69e2376ffdeb861ed8"
+  },
+  "inputs": [
+    {
+      "diffSha256": "032d886019d372296aa86749ef79a71b964379c7a6c1eb90fac1868b5de04e73",
+      "tasks": 10,
+      "occurrences": 3,
+      "labels": 21,
+      "stagedByteExact": true
+    },
+    {
+      "diffSha256": "0aa63cf864b568fd7d6806fb8d1e86974a00277d85a33e6f22eba3608937babd",
+      "tasks": 19,
+      "occurrences": 3,
+      "labels": 29,
+      "stagedByteExact": true
+    },
+    {
+      "diffSha256": "2e0713a80df2c0dca2b3790cb293b2bba9adf49804845a0cfacc681bb5086abd",
+      "tasks": 61,
+      "occurrences": 21,
+      "labels": 12,
+      "stagedByteExact": true
+    },
+    {
+      "diffSha256": "3f1389b9293c21cb3d1ec17387e18427baed8360275f754c6073a35927d0e5aa",
+      "tasks": 7,
+      "occurrences": 5,
+      "labels": 5,
+      "stagedByteExact": true
+    },
+    {
+      "diffSha256": "63a1f928f40ab03882c1f408f32eb9cdfe0b865cfdaf3ae79e3d3cf7e4b76568",
+      "tasks": 16,
+      "occurrences": 12,
+      "labels": 20,
+      "stagedByteExact": true
+    },
+    {
+      "diffSha256": "6e42021c793d9b9f9f1ad51195a3986c029faf1569dae0aaf5337e628cea112e",
+      "tasks": 10,
+      "occurrences": 4,
+      "labels": 5,
+      "stagedByteExact": false
+    },
+    {
+      "diffSha256": "fe31a21e54fcbc48dbd552494408b94d9f0d362a58e85ae0dc98fa56112ee793",
+      "tasks": 7,
+      "occurrences": 9,
+      "labels": 15,
+      "stagedByteExact": true
+    }
+  ],
+  "validation": {
+    "localTests": {
+      "passed": 6479,
+      "skipped": 14,
+      "failed": 0
+    },
+    "headCiRun": 33952755799,
+    "exactBaseCiRun": 33875075343,
+    "ciFailedTests": 19,
+    "sameFailureIdentitiesAndPrimarySymptomsAsBase": true
+  },
+  "phase2": {
+    "comparisonBatches": 11,
+    "acceptedComparisonBatches": 9,
+    "protocolFailedComparisonBatches": 2,
+    "acceptedComparisonOccurrences": 40,
+    "protocolFailedComparisonOccurrences": 16,
+    "wholeFailedBatchesPreserved": true,
+    "selectivelyAcceptedFailedRows": 0,
+    "labelIdRepairs": 0,
+    "comparisonReruns": 0,
+    "revisionCandidatesAcrossAllNativeBatches": 0,
+    "acceptedFactualRevisions": 0,
+    "originalPhase1FactualFieldsAndAuthorsPreserved": 56,
+    "actualRootModels": [
+      "claude-sonnet-5"
+    ],
+    "fullUsageModels": [
+      "claude-haiku-4-5-20251001",
+      "claude-sonnet-5"
+    ],
+    "labelComparisonBasis": {
+      "FULL_DEFECT_EVIDENCE": 0,
+      "CAPPED_CONTEXT": 40
+    },
+    "batches": [
+      {
+        "index": 0,
+        "status": "accepted",
+        "representatives": 3,
+        "occurrences": 3,
+        "revisionCandidates": 0,
+        "actualRootModel": "claude-sonnet-5",
+        "fullUsageModels": [
+          "claude-haiku-4-5-20251001",
+          "claude-sonnet-5"
+        ],
+        "nativeSha256": "38ba6cf014a8dd12f78c2eb0926d9d3694ff0676b3c4cc81969e3e555a6702fb",
+        "executionSha256": "0f7b5d2db010cb54d6e2aa4b571f2d2244f3a8be25cb75a5e78e5e8786ea1a8c",
+        "receiptSha256": "5b3ff773b5b3d0dcebf54b3efce4bffa6c0ea1f9b4c263081b90559c4a8b84bb"
+      },
+      {
+        "index": 1,
+        "status": "accepted",
+        "representatives": 3,
+        "occurrences": 3,
+        "revisionCandidates": 0,
+        "actualRootModel": "claude-sonnet-5",
+        "fullUsageModels": [
+          "claude-haiku-4-5-20251001",
+          "claude-sonnet-5"
+        ],
+        "nativeSha256": "fc86034dcc5718fb346215fd35db5ec729f72482b4f17fae4326892eab7620d8",
+        "executionSha256": "49c8f30450fe815a2151344cde0e8c9325b01bd1cebcdcc94ad64978de8544ab",
+        "receiptSha256": "37064428e118b0bf1cc837602e6552edb837928b9089658eac8f72138b782044"
+      },
+      {
+        "index": 2,
+        "status": "accepted",
+        "representatives": 8,
+        "occurrences": 8,
+        "revisionCandidates": 0,
+        "actualRootModel": "claude-sonnet-5",
+        "fullUsageModels": [
+          "claude-haiku-4-5-20251001",
+          "claude-sonnet-5"
+        ],
+        "nativeSha256": "82745ac7205e672dbad16bea44806ef528b2b6ae65529b2cf1639a988cb7ccbb",
+        "executionSha256": "1a82813096d7aca974ac0643a61b9d50178a48a458661da21a893625fcaf54a4",
+        "receiptSha256": "7231a80d37d96c7cf626bbf0656cc71fe8c7eab9f1ed84aaa0758a4f397a140b"
+      },
+      {
+        "index": 3,
+        "status": "protocol-failed",
+        "representatives": 8,
+        "occurrences": 8,
+        "revisionCandidates": 0,
+        "actualRootModel": "claude-sonnet-5",
+        "fullUsageModels": [
+          "claude-haiku-4-5-20251001",
+          "claude-sonnet-5"
+        ],
+        "nativeSha256": "337b83c7552ee9ba05d9a0ae0b73575cf0c60210bc9e248dc7bfa1bcc04bed37",
+        "executionSha256": "c27f6f172f97c3fbeeedf2d49b444f51e3983c6da0a7ce31d2a8de5f6eedb547",
+        "failureReceiptSha256": "bac2ec7c88f323d8941a757c09fd0bb921a4c6e30c5512575015f59c7150ed21"
+      },
+      {
+        "index": 4,
+        "status": "accepted",
+        "representatives": 5,
+        "occurrences": 5,
+        "revisionCandidates": 0,
+        "actualRootModel": "claude-sonnet-5",
+        "fullUsageModels": [
+          "claude-haiku-4-5-20251001",
+          "claude-sonnet-5"
+        ],
+        "nativeSha256": "a8eebb9b997889d71b5f3da2ae6c930ccdda929aa0d98a0f524fd57c9ab86a3f",
+        "executionSha256": "8e1a303eb83e13f9322daf959ce9720ab71452952b876bf92c1aa16a9e31a6d3",
+        "receiptSha256": "7a3811cce0f15285313fa3c7b1c1f02c316f24e1eab081f58bebd9404cc7401e"
+      },
+      {
+        "index": 5,
+        "status": "accepted",
+        "representatives": 5,
+        "occurrences": 5,
+        "revisionCandidates": 0,
+        "actualRootModel": "claude-sonnet-5",
+        "fullUsageModels": [
+          "claude-haiku-4-5-20251001",
+          "claude-sonnet-5"
+        ],
+        "nativeSha256": "bd70781e7bc1692ea190d60efcf603ddeea238a50e7a2d05749385eeb9fa2911",
+        "executionSha256": "c371c43350dae2bc2e2782ac7478d577f319cb2e25cf1c80cd203d816a87e4e0",
+        "receiptSha256": "56c853ef82e14f7a53e79a8431c8ae09d82534662e75059edde87bdb9e8896e3"
+      },
+      {
+        "index": 6,
+        "status": "protocol-failed",
+        "representatives": 8,
+        "occurrences": 8,
+        "revisionCandidates": 0,
+        "actualRootModel": "claude-sonnet-5",
+        "fullUsageModels": [
+          "claude-haiku-4-5-20251001",
+          "claude-sonnet-5"
+        ],
+        "nativeSha256": "2a726225fd4002e79f43e75aae291d980a62fdccdc70aea82262f8a986c7d81c",
+        "executionSha256": "37a2632ad2356eec1f7ac3c4186c33b87059e0740297e376a593143f84d27398",
+        "failureReceiptSha256": "29b2120ae9c7ea9647c56ba1216cc195f50ad0daf94f066c2df7af62126cd451"
+      },
+      {
+        "index": 7,
+        "status": "accepted",
+        "representatives": 4,
+        "occurrences": 4,
+        "revisionCandidates": 0,
+        "actualRootModel": "claude-sonnet-5",
+        "fullUsageModels": [
+          "claude-haiku-4-5-20251001",
+          "claude-sonnet-5"
+        ],
+        "nativeSha256": "d8fac41f3940ff8bbe61b469bb503638a14ece0eed9c9cf6059f2c8f5ca35252",
+        "executionSha256": "bd729e43bd87e8c09ebc95b419105d97a54cf776d07d37e6f83bb27bd3858021",
+        "receiptSha256": "b06d72781fd5b8272c28bbf80635a5dd03c99ded242c71761360075646db591e"
+      },
+      {
+        "index": 8,
+        "status": "accepted",
+        "representatives": 3,
+        "occurrences": 3,
+        "revisionCandidates": 0,
+        "actualRootModel": "claude-sonnet-5",
+        "fullUsageModels": [
+          "claude-haiku-4-5-20251001",
+          "claude-sonnet-5"
+        ],
+        "nativeSha256": "3955afc3b4851352dac6ae4965069c5ff7e333a22d1a7b72e57d28f9cb81cfda",
+        "executionSha256": "2ab680fcccb8e86b5d2b35ede91d001391362d341f44bc0a6d90e94af4acfe2c",
+        "receiptSha256": "69b3a4477f266331dac1018eeccb07ba6874b022df389d3051c67e19dd7d9399"
+      },
+      {
+        "index": 9,
+        "status": "accepted",
+        "representatives": 8,
+        "occurrences": 8,
+        "revisionCandidates": 0,
+        "actualRootModel": "claude-sonnet-5",
+        "fullUsageModels": [
+          "claude-haiku-4-5-20251001",
+          "claude-sonnet-5"
+        ],
+        "nativeSha256": "c468c566b8d229d2be0457292e3c3b6b8ea878fbc188d5e32d7f1fda317e5635",
+        "executionSha256": "e90c2defdc3e8c0caaa3f5f34e74a4dbde0832b5d0b9b034d31b5f92c9252597",
+        "receiptSha256": "91f9220b0a5954e209091caf5a92e78fd14ac5d3c8a13e637e63beb2198e747f"
+      },
+      {
+        "index": 10,
+        "status": "accepted",
+        "representatives": 1,
+        "occurrences": 1,
+        "revisionCandidates": 0,
+        "actualRootModel": "claude-sonnet-5",
+        "fullUsageModels": [
+          "claude-haiku-4-5-20251001",
+          "claude-sonnet-5"
+        ],
+        "nativeSha256": "258f2309d73d4c5d4478d0891c16ea67fc1cc86faf2ac9fb3198cdcbd30a0a3c",
+        "executionSha256": "8600d00607e0a744903e85053de4588bb0f420f26d2c08e3c1391472b582f156",
+        "receiptSha256": "9200c4ce25150a9918ad36a91e927360616f05dbccb8d35ab5891f02d985343e"
+      }
+    ],
+    "grouping": {
+      "nativeCalls": 1,
+      "actualRootModel": "claude-sonnet-5",
+      "fullUsageModels": [
+        "claude-haiku-4-5-20251001",
+        "claude-sonnet-5"
+      ],
+      "expectedRepresentatives": 56,
+      "nativeAssignedRepresentatives": 55,
+      "nativeGroups": 42,
+      "nativeExplicitUnresolvedRepresentatives": 0,
+      "hostUnassignedRepresentatives": 1,
+      "originalCompletePartitionValidation": "rejected-for-omission",
+      "adapterPolicy": "Only pure omission is accepted as partial coverage; duplicate or unknown IDs and other malformed fields are rejected.",
+      "returnedMembershipAndEvidencePreserved": true,
+      "hostOmissionAttributedToAi": false,
+      "normalizedObjectAttributedToAi": false,
+      "reruns": 0,
+      "nativeSha256": "7f1b56e054dc983c989af71ebebf81ae0c5d46ee2520f44850efebb6732d8153",
+      "executionSha256": "617e1ba6b07d2e2817f0c2f90c16f2dffeba16d0e38c73e51ee77459139a63ba",
+      "originalParsedOutputSha256": "4adf2d5ae0f768fa95edfa3688d514f115193e026c86b54140101d8dbbe66289",
+      "truthDiscordance": {
+        "nativeGroups": 1,
+        "nativeGroupIndex": 10,
+        "indexBase": 0,
+        "representatives": 2,
+        "sameReconstructedInput": true,
+        "inputSha256": "63a1f928f40ab03882c1f408f32eb9cdfe0b865cfdaf3ae79e3d3cf7e4b76568",
+        "mechanismTopic": "task restoration",
+        "phase1TruthCounts": {
+          "REAL": 1,
+          "NOT": 1
+        },
+        "reconciled": false,
+        "interpretation": "Native grouping identifies one alleged mechanism but does not resolve conflicting phase-one reachability assessments.",
+        "privateEvidenceSha256": "1342b5747971caacfaa450ee0012e8ada6b6003c7886197dac9181cadece9126"
+      }
+    },
+    "compositeLabelRelationCounts": {
+      "SAME_DEFECT": 7,
+      "DISTINCT": 0,
+      "PARTIAL_OVERLAP": 9,
+      "UNSURE": 24,
+      "NOT_COMPARED": 16
+    }
+  },
+  "finalReports": {
+    "status": "SEPARATE_BLINDED_AND_POST_LABEL_REPORTS",
+    "blindedPhase1ReportedSeparately": true,
+    "originalUnassessedOccurrences": 1,
+    "capturedOccurrences": 57,
+    "assessedOccurrences": 56,
+    "outputSha256": {
+      "blindedPhase1": "f9dc65a4cd774ca3ce9edd43a2db1c79296cd4b6ddf391cac56b94c6a903ca23",
+      "postLabelComposite": "bc0cdb7edb0a3e4b4fa38679726842a7f3d3e8c2c879698c08edd4fc1ae64799",
+      "sixByteExactBlindedPhase1": "284cadcc91c05b140063bbbc7485ba1d1e9a2e3fe782512ae2fd772c48f5b0ce",
+      "sixByteExactPostLabelComposite": "00dd778baeb86f023f2325a2e91763ddadf83259adce0ffe39b03679bf8a317d",
+      "comparisonCounts": "c2fc639286dca4b6ca0de6f089cb837eae67944a2fb9c16e38087b6d70c5dbd1"
+    }
+  },
+  "offlineValidation": {
+    "comparisonRecoveryTestsPassed": 7,
+    "groupingOmissionTestsPassed": 5,
+    "frozenReportValidator": "passed",
+    "nativePhase1JudgmentsValidated": 56,
+    "compositeJudgmentsValidated": 56,
+    "modelCallsByAdaptersAndReportGenerator": 0
+  },
+  "publicationBaseCi": {
+    "commit": "14224dd5864010e4942029a0f9b88665ed29eadc",
+    "run": 33958787422,
+    "status": "completed",
+    "conclusion": "failure",
+    "tests": {
+      "passed": 6506,
+      "failed": 19,
+      "skipped": 5
+    },
+    "comparisonRuns": {
+      "frozenImplementationHead": 33952755799,
+      "frozenImplementationBase": 33875075343
+    },
+    "newFailureIdentities": 0,
+    "missingFailureIdentities": 0,
+    "samePrimarySymptomsAfterGeneratedOidNormalization": true,
+    "comparisonEvidenceSha256": "81e5fdd09632466ba7ecb7fc8f20159bce470b7d6b75a72902b83d238b327f42",
+    "scope": "Exact merged publication base; distinct from frozen implementation local validation."
+  }
+}
