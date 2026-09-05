@@ -1,5 +1,7 @@
 # Correctness re-baseline on the shipped gpt-5.6-sol pin — 2026-09-04 (sc-2494)
 
+[Admission decision history](../decisions/corpus-rows-admitted-by-coverage-cell.md) preserves the original rebaseline and its later qualifications; [precision history](../decisions/correctness-reviewer-precision.md) distinguishes these labelled-fixture results from subsequent claim assessments.
+
 The published correctness numbers described sonnet. This run re-measures the reviewer on the pin
 production has actually run since 2026-08-26.
 

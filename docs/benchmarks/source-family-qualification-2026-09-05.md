@@ -1,5 +1,7 @@
 # Source-family qualification (sc-2843)
 
+[Source-control decision history](../decisions/benchmarks-grow-from-telemetry.md) records why a targeted repair can remain ineligible as a clean counterpart.
+
 **Reject `case-002` as a clean counterpart.** Its narrow command repair works, but the unchanged
 surrounding implementation retains a reproduced correctness defect. Both members of `family-001`
 remain `target-controlled`, exposed development evidence. Zero clean pairs or corpus rows are

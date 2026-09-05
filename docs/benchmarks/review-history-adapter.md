@@ -1,5 +1,7 @@
 # Deterministic review-history inputs (sc-2851)
 
+[History-experiment decision](../decisions/reviewer-history-experiments.md) records the rationale, alternatives and limits of this preparation.
+
 This is the input-preparation step of sc-2832, not an executed model comparison. It builds benchmark
 packets for current-only review and review with the same arm's earlier findings. Synthetic tests
 validate isolation and native evidence parity. They are not new gold cases, and no production
