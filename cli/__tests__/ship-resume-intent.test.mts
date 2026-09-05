@@ -18,6 +18,10 @@ import {
 
 const intentCli = fileURLToPath(new URL('../lib/ship/ship-intent.mts', import.meta.url));
 
+/** A hook that blocks the way a real gate does: the brief keys on the ATTRIBUTED blocked_gate, so
+ *  a bare `exit 1` classifies as "unknown" and deliberately prints nothing. */
+const GATE_FAIL_HOOK = "echo '\u2717 deterministic gates failed'\nexit 1";
+
 /** seedShipRepoLocalRemote plus the one line every resume test needs: the manifest's own ignore
  *  (ship-intent write refuses to record a stageable copy of the PR body). */
 function seedResumableRepo(opts = {}) {
@@ -91,6 +95,176 @@ describe('ship --resume: record on block, replay on retry', () => {
     // ...and the record now carries the union, so the NEXT resume replays both.
     const record = JSON.parse(readFileSync(intentFileOf(dir, 'feat/add-path'), 'utf8'));
     expect(record.paths.sort()).toEqual(['extra.txt', 'note.txt']);
+  });
+
+  // sc-2299: the banner's path COUNT could not answer "did the gate read my copy of this file?" —
+  // the listing is the answer, because anything absent from it is judged at its base content.
+  it('the resume banner lists every briefed path, marking the ones this retry added', () => {
+    const { dir, env, git } = seedResumableRepo({ hookBody: 'exit 1' });
+    writeFileSync(join(dir, 'note.txt'), 'hello\n');
+    writeFileSync(join(dir, 'with space.txt'), 'spaced\n'); // %q must keep it on ONE line
+    const blocked = runShip(dir, env, ['feat/listed', 'x', '--', 'note.txt', 'with space.txt'], {
+      input: 'b\n',
+      extraEnv: { SHIP_DRY_RUN: '1' },
+    });
+    expect(blocked.status).not.toBe(0);
+
+    installHook(dir, 'exit 0');
+    writeFileSync(join(dir, 'extra.txt'), 'the remedy\n');
+    const resumed = runShip(dir, env, ['--resume', 'feat/listed', '--', 'extra.txt'], {
+      extraEnv: { SHIP_DRY_RUN: '1' },
+    });
+    expect(resumed.status, resumed.stderr).toBe(0);
+
+    const lines = resumed.stderr.split('\n');
+    const at = lines.findIndex((l) => l.includes('Resuming recorded invocation for feat/listed'));
+    expect(at).toBeGreaterThanOrEqual(0);
+    expect(lines[at]).toContain('3 paths'); // the union: 2 recorded + 1 briefed by the retry
+    // The listing is exactly the lines that follow the banner, one path each, count matching.
+    const listed = [];
+    for (let i = at + 1; i < lines.length && /^ {2,4}[+ ]/.test(lines[i]); i += 1)
+      listed.push(lines[i]);
+    expect(listed).toEqual([
+      '    note.txt',
+      '    with\\ space.txt', // %q quoting, still one line
+      '  + extra.txt   (briefed by this retry)',
+    ]);
+    git(['worktree', 'prune']);
+  });
+
+  // The same brief, restated under the verdict: a blocked ship is read by tailing, far below the
+  // banner. The second line is the invariant that explains a finding naming an UNBRIEFED file.
+  it('a gate block restates the brief and names the base every other file is read at', () => {
+    const { dir, env, git } = seedResumableRepo({ hookBody: GATE_FAIL_HOOK });
+    writeFileSync(join(dir, 'note.txt'), 'hello\n');
+    const baseShort = git(['rev-parse', '--short=7', 'HEAD']).trim();
+
+    const blocked = runShip(dir, env, ['feat/brief-on-block', 'x', '--', 'note.txt'], {
+      input: 'b\n',
+      extraEnv: { SHIP_DRY_RUN: '1' },
+    });
+    expect(blocked.status).not.toBe(0);
+    expect(blocked.stderr).toContain('ship: the gates judged 1 briefed path(s): note.txt');
+    expect(blocked.stderr).toContain(
+      `every OTHER file in the gate worktree is at base ${baseShort}`,
+    );
+    // An INITIAL ship has no listing to point at, and a ship-intent glob would splice a parallel
+    // agent's branch paths into the very answer this line exists to make trustworthy.
+    expect(blocked.stderr).not.toContain('Full brief');
+    expect(blocked.stderr).not.toContain('ship-intent-*');
+    git(['worktree', 'prune']);
+  });
+
+  // The classifier's catch-all also covers a commit-msg hook failing AFTER the gates passed, so an
+  // unattributed non-zero exit must not be narrated as a gate verdict on the brief.
+  it('an unattributed hook failure prints no gate brief', () => {
+    const { dir, env, git } = seedResumableRepo({ hookBody: 'exit 1' });
+    writeFileSync(join(dir, 'note.txt'), 'hello\n');
+    const blocked = runShip(dir, env, ['feat/unattributed', 'x', '--', 'note.txt'], {
+      input: 'b\n',
+      extraEnv: { SHIP_DRY_RUN: '1' },
+    });
+    expect(blocked.status).not.toBe(0);
+    expect(blocked.stderr).not.toContain('the gates judged');
+    git(['worktree', 'prune']);
+  });
+
+  // A non-zero exit is not proof a gate judged anything: a killed chain exits 124 with no verdict,
+  // so the brief must stay silent rather than misreport the timeout as one.
+  it('a timed-out gate chain prints no gate brief, because no gate returned a verdict', () => {
+    const { dir, env, git } = seedResumableRepo();
+    writeFileSync(join(dir, 'note.txt'), 'hello\n');
+    installHook(dir, 'sleep 30 &');
+
+    const blocked = runShip(dir, env, ['feat/timeout-brief', 'x', '--', 'note.txt'], {
+      input: 'b\n',
+      extraEnv: { SHIP_DRY_RUN: '1', SHIP_COMMIT_TIMEOUT: '15' },
+    });
+    expect(blocked.status).toBe(124);
+    expect(blocked.stderr).not.toContain('the gates judged');
+    expect(blocked.stderr).not.toContain('is at base');
+    git(['worktree', 'prune']);
+  });
+
+  // The positive half of the pointer: a RESUME does have a listing above, so it may point at one.
+  it('only a resumed gate block points at the full listing above it', () => {
+    const { dir, env, git } = seedResumableRepo({ hookBody: GATE_FAIL_HOOK });
+    writeFileSync(join(dir, 'note.txt'), 'hello\n');
+    const first = runShip(dir, env, ['feat/brief-pointer', 'x', '--', 'note.txt'], {
+      input: 'b\n',
+      extraEnv: { SHIP_DRY_RUN: '1' },
+    });
+    expect(first.status).not.toBe(0);
+    expect(first.stderr).not.toContain('Full brief');
+
+    // Same hook, so it blocks again — this time with a record, and therefore with a listing.
+    const resumed = runShip(dir, env, ['--resume', 'feat/brief-pointer'], {
+      extraEnv: { SHIP_DRY_RUN: '1' },
+    });
+    expect(resumed.status).not.toBe(0);
+    expect(resumed.stderr).toContain(
+      "Full brief: the 'Resuming recorded invocation' listing above.",
+    );
+    expect(resumed.stderr).not.toContain('ship-intent-*');
+    git(['worktree', 'prune']);
+  });
+
+  // The cap is the one arithmetic in the terminus, and 5 is its boundary on both sides.
+  it('the gate-block brief caps at five paths and counts the remainder exactly', () => {
+    const { dir, env, git } = seedResumableRepo({ hookBody: GATE_FAIL_HOOK });
+    const six = ['p1.txt', 'p2.txt', 'p3.txt', 'p4.txt', 'p5.txt', 'p6.txt'];
+    for (const f of six) writeFileSync(join(dir, f), `${f}\n`);
+
+    const over = runShip(dir, env, ['feat/cap-over', 'x', '--', ...six], {
+      input: 'b\n',
+      extraEnv: { SHIP_DRY_RUN: '1' },
+    });
+    expect(over.status).not.toBe(0);
+    expect(over.stderr).toContain(
+      'ship: the gates judged 6 briefed path(s): p1.txt p2.txt p3.txt p4.txt p5.txt (+1 more)',
+    );
+    expect(over.stderr).not.toContain('p6.txt (+'); // the 6th is counted, never listed
+
+    // Exactly at the cap: all five listed, no remainder clause at all.
+    const at = runShip(dir, env, ['feat/cap-at', 'x', '--', ...six.slice(0, 5)], {
+      input: 'b\n',
+      extraEnv: { SHIP_DRY_RUN: '1' },
+    });
+    expect(at.status).not.toBe(0);
+    expect(at.stderr).toContain(
+      'ship: the gates judged 5 briefed path(s): p1.txt p2.txt p3.txt p4.txt p5.txt',
+    );
+    expect(at.stderr).not.toMatch(/more\)/);
+    git(['worktree', 'prune']);
+  });
+
+  // A retry that adds nothing is the COMMON resume, and it must mark nothing.
+  it('a resume with no extra paths lists them all and marks none', () => {
+    const { dir, env, git } = seedResumableRepo({ hookBody: 'exit 1' });
+    writeFileSync(join(dir, 'note.txt'), 'hello\n');
+    writeFileSync(join(dir, 'second.txt'), 'more\n');
+    const blocked = runShip(dir, env, ['feat/no-extras', 'x', '--', 'note.txt', 'second.txt'], {
+      input: 'b\n',
+      extraEnv: { SHIP_DRY_RUN: '1' },
+    });
+    expect(blocked.status).not.toBe(0);
+
+    installHook(dir, 'exit 0');
+    const resumed = runShip(dir, env, ['--resume', 'feat/no-extras'], {
+      extraEnv: { SHIP_DRY_RUN: '1' },
+    });
+    expect(resumed.status, resumed.stderr).toBe(0);
+
+    const lines = resumed.stderr.split('\n');
+    const at = lines.findIndex((l) =>
+      l.includes('Resuming recorded invocation for feat/no-extras'),
+    );
+    const listed = [];
+    for (let i = at + 1; i < lines.length && /^ {2,4}[+ ]/.test(lines[i]); i += 1)
+      listed.push(lines[i]);
+    expect(listed.sort()).toEqual(['    note.txt', '    second.txt']);
+    expect(lines[at]).toContain('2 paths'); // the listing and the count agree
+    git(['worktree', 'prune']);
   });
 
   it('--resume rides the landed-commit resume path: receipt verified, zero gate re-runs, published', () => {

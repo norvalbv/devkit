@@ -162,6 +162,9 @@ if [ "$RESUME" -eq 1 ]; then
   while [ "$si_i" -lt "$si_body_at" ]; do LINK_EXTRA+=("${SI_FIELDS[$si_i]}"); si_i=$((si_i + 1)); done
   RESUME_BODY=${SI_FIELDS[$si_body_at]}
   SI_PATHS=("${SI_FIELDS[@]:$((si_body_at + 1))}")
+  # Kept unmerged: rewrite mode canonicalises spellings below, and deciding what is NEW to this
+  # retry has to be re-answered against the recorded set once both sides are canonical.
+  SI_RECORDED=("${SI_PATHS[@]}")
   # Only what THIS retry explicitly briefed may be donated on a lost re-record (see ship-branch.sh).
   RESUME_EXTRA_PATHS=()
   for p in ${PATHS[@]+"${PATHS[@]}"}; do
@@ -170,7 +173,6 @@ if [ "$RESUME" -eq 1 ]; then
     [ "$si_dup" -eq 1 ] || { SI_PATHS+=("$p"); RESUME_EXTRA_PATHS+=("$p"); }
   done
   PATHS=("${SI_PATHS[@]}")
-  echo "Resuming recorded invocation for $BR (--pr): \"$TITLE\" — ${#PATHS[@]} paths, body $(printf '%s' "$RESUME_BODY" | wc -c | tr -d ' ') bytes, recorded $RESUME_CREATED" >&2
 fi
 
 [ "${#PATHS[@]}" -gt 0 ] || { echo "no paths given" >&2; exit 1; }
@@ -217,6 +219,37 @@ if [ -n "$BASE_FLAG" ]; then
     [ "$rewrite_duplicate" -eq 1 ] || REWRITE_PATHS+=("$p")
   done
   PATHS=("${REWRITE_PATHS[@]}")
+  # "New to this retry" is re-decided here, against the canonical recorded set: a retry that
+  # re-spells a RECORDED path (`./a.ts` for `a.ts`) contributes nothing, and marking it as an
+  # addition would misdescribe the brief in the other direction.
+  REWRITE_RECORDED=()
+  for p in ${SI_RECORDED[@]+"${SI_RECORDED[@]}"}; do
+    while [ "${p#./}" != "$p" ]; do p=${p#./}; done
+    REWRITE_RECORDED+=("$p")
+  done
+  RESUME_EXTRA_PATHS=()
+  for p in "${PATHS[@]}"; do
+    rewrite_known=0
+    for q in ${REWRITE_RECORDED[@]+"${REWRITE_RECORDED[@]}"}; do
+      [ "$q" = "$p" ] && { rewrite_known=1; break; }
+    done
+    [ "$rewrite_known" -eq 1 ] || RESUME_EXTRA_PATHS+=("$p")
+  done
+fi
+
+# Announced AFTER the rewrite canonicalisation above, never before it: that pass strips `./` and
+# dedupes, so a brief printed earlier would name a count and a path set the gates never receive —
+# the exact misdescription this listing exists to prevent (sc-2299). Still far ahead of the gate
+# chain, so a stale-but-valid record is visible before the multi-minute wait, not after it.
+if [ "$RESUME" -eq 1 ]; then
+  echo "Resuming recorded invocation for $BR (--pr): \"$TITLE\" — ${#PATHS[@]} paths, body $(printf '%s' "$RESUME_BODY" | wc -c | tr -d ' ') bytes, recorded $RESUME_CREATED" >&2
+  for p in "${PATHS[@]}"; do
+    si_extra=
+    for q in ${RESUME_EXTRA_PATHS[@]+"${RESUME_EXTRA_PATHS[@]}"}; do [ "$q" = "$p" ] && { si_extra=1; break; }; done
+    if [ -n "$si_extra" ]; then printf '  + %q   (briefed by this retry)\n' "$p" >&2
+    else printf '    %q\n' "$p" >&2
+    fi
+  done
 fi
 
 # Test seam: print the resolved target + repo, then exit BEFORE any side effect (no fetch / push).

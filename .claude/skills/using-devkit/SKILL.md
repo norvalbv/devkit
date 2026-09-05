@@ -121,7 +121,11 @@ devkit command.
   adopts a merely same-named or hand-made commit. In explicit-path mode, a fix that ADDS a file rides
   the retry as a trailing path (`--resume <branch> -- <new-path>`). Branch-source mode refuses extra
   resume paths because membership is frozen; use a fresh full `--from-branch` command for a new set.
-  Changing branch/title/base means running the full command, which re-records. If the blocked attempt
+  Both the resume banner and a gate block print the briefed paths, so the input the gates judged is
+  never a guess; the record itself is `jq -r '.paths[]' .devkit/ship-intent-<branch>-<hash>.json`,
+  one file per branch — read the one for yours, not a glob.
+  Anything absent from that brief is judged at its BASE content, because the gate worktree is cut
+  from the base. Changing branch/title/base means running the full command, which re-records. If the blocked attempt
   WARNED that it could not record the invocation (the intent
   file is not gitignored — a managed .gitignore predating this feature), `--resume` will refuse: run
   `devkit doctor --fix` to restore the ignore line, then the full command once — recording resumes

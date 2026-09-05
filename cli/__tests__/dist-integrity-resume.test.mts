@@ -153,6 +153,10 @@ describe('ship dist-integrity resume', () => {
     try {
       expect(retry.status, retry.stderr).toBe(0);
       expect(retry.stderr).toContain(`Resuming recorded invocation for ${branch} (--pr)`);
+      // sc-2299: reship lists the brief the same way ship does — recorded plain, this retry's
+      // addition marked — so the input the gates judge is legible before they run.
+      expect(retry.stderr).toContain('    cli/new.mts');
+      expect(retry.stderr).toContain('  + dist/cli/new.mjs   (briefed by this retry)');
       intent(root, branch, 'reship', ['cli/new.mts', 'dist/cli/new.mjs']);
     } finally {
       cleanDryRun(root, retry.stderr);
