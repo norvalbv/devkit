@@ -1,0 +1,6 @@
+{
+  "extends": "../../../../../../tsconfig.json",
+  "compilerOptions": { "noEmit": true },
+  "include": ["./manifest.mts", "./visibility.mts"],
+  "exclude": ["./__tests__"]
+}
