@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { parseIndex, renderIndex } from '../decision-format.mts';
 
 // cli.mts (not decisions.mts) is the real `guard-decisions` bin — `categories` is dispatched there
 // (see cli.mts's `run`), so this exercises the ACTUAL entrypoint a user invokes, not an internal fn.
@@ -384,5 +385,149 @@ describe('retrieval unavailable — failure shapes and the contract other caller
     const r = runWithoutParser(['query', 'anything']);
 
     expect(r.stderr).toContain('1 axis, ALPHABETICAL');
+  });
+});
+
+// Fixtures write axis FILES by hand, not through `add`: the sc-2332 bug only exists for a corpus
+// the CLI did not write row-by-row. See decision-retrieval-candidate-set for why list reads them.
+const axisFile = (slug: string, o: { context?: string; note?: string; target?: string } = {}) =>
+  `---\nslug: ${slug}\ncreated: 2026-01-01\n---\n\n# ${slug}\n\n` +
+  `## Target · ${o.target ?? '2026-01-01'} — ${slug} title\n\n` +
+  `**Context:** ${o.context ?? `${slug} broke`}\n` +
+  `**Ruling:** ${slug}-ruling\n` +
+  '**Consequences:**\n- Positive: value\n**Tradeoff:** cost\n**Vision-fit:** n/a\n' +
+  (o.note ? `${o.note}\n` : '');
+
+const indexRow = (slug: string) => ({
+  slug,
+  ruling: `${slug}-ruling`,
+  why: `${slug} broke`,
+  updated: '2026-01-01',
+});
+
+/** The rendered spine, read back through the format's own parser. */
+const listRows = () => {
+  const r = run(['list']);
+  expect(r.status, r.stderr).toBe(0);
+  return { rows: parseIndex(r.stdout), stdout: r.stdout };
+};
+
+describe('guard-decisions list (directory-sourced spine, sc-2332)', () => {
+  it('lists every axis file when no INDEX.md exists at all', () => {
+    writeFileSync(join(dir, 'alpha.md'), axisFile('alpha'));
+    writeFileSync(join(dir, 'beta.md'), axisFile('beta'));
+
+    const { rows, stdout } = listRows();
+    expect(rows.map((row) => row.slug)).toEqual(['alpha', 'beta']);
+    expect(stdout).not.toContain('No decisions recorded.');
+    // The deterministic, backend-free cross-check — `categories` already read the directory.
+    expect(run(['categories']).stdout).toContain('# uncategorised (2)');
+  });
+
+  it('lists an axis the INDEX.md spine omits', () => {
+    writeFileSync(join(dir, 'alpha.md'), axisFile('alpha'));
+    writeFileSync(join(dir, 'beta.md'), axisFile('beta'));
+    writeFileSync(join(dir, 'INDEX.md'), renderIndex([indexRow('alpha')]));
+
+    expect(listRows().rows.map((row) => row.slug)).toEqual(['alpha', 'beta']);
+  });
+
+  it('omits an INDEX row whose axis file is gone (drift is doctor’s business)', () => {
+    writeFileSync(join(dir, 'alpha.md'), axisFile('alpha'));
+    writeFileSync(join(dir, 'INDEX.md'), renderIndex([indexRow('alpha'), indexRow('gone')]));
+
+    expect(listRows().rows.map((row) => row.slug)).toEqual(['alpha']);
+  });
+
+  // amend's regenerateIndex drops an axis with no parseable Target and no prior INDEX row. A `list`
+  // built on that precedent would hide exactly the legacy-schema axis a real consumer still carries.
+  it('keeps a Target-less legacy axis as a well-formed row', () => {
+    writeFileSync(
+      join(dir, 'legacy.md'),
+      '---\nslug: legacy\ncreated: 2026-01-01\n---\n\n# legacy\n\n## Ruling · 2026-01-02\n\nbody\n',
+    );
+
+    const { rows } = listRows();
+    expect(rows.map((row) => row.slug)).toEqual(['legacy']);
+    expect(rows[0].ruling).toBe('');
+  });
+
+  // loadAxisRows is a RETRIEVAL shape: `why` is the axis's whole Context. The INDEX writers clamp it
+  // through whyHook, so rendering the rows raw would blow the spine open on every row.
+  it('clamps the why cell to a hook, as the INDEX writers do', () => {
+    writeFileSync(join(dir, 'alpha.md'), axisFile('alpha', { context: 'x'.repeat(200) }));
+
+    const why = listRows().rows[0].why;
+    expect(why.length).toBeLessThanOrEqual(70);
+    expect(why.endsWith('…')).toBe(true);
+  });
+
+  // retrieval's `updated` is the last date anywhere in the body; INDEX records the Target's own.
+  it('dates a row by its Target, not by a later note', () => {
+    writeFileSync(
+      join(dir, 'alpha.md'),
+      axisFile('alpha', { note: '- 2026-06-01 — later convergence note', target: '2026-01-01' }),
+    );
+
+    expect(listRows().rows[0].updated).toBe('2026-01-01');
+  });
+
+  // The other branch of that narrowing: liveRulingId is `entry:<date>`, not `target:<date>`.
+  it('dates a legacy dated-heading row by its entry, not by a later note', () => {
+    writeFileSync(
+      join(dir, 'legacy-dated.md'),
+      '---\nslug: legacy-dated\ncreated: 2026-01-01\n---\n\n# legacy-dated\n\n' +
+        '## 2026-01-02 — legacy entry\n\n**Ruling:** the legacy ruling\n\n' +
+        '- 2026-08-08 — a much later note\n',
+    );
+
+    const { rows } = listRows();
+    expect(rows[0].ruling).toBe('the legacy ruling');
+    expect(rows[0].updated).toBe('2026-01-02');
+  });
+
+  // Cells used to be sanitized at WRITE time inside `add`; arbitrary file prose reaches the table
+  // now, and a leaked pipe shifts every following cell — one axis's why becomes another's updated.
+  it('survives a ruling and context carrying table-breaking characters', () => {
+    writeFileSync(
+      join(dir, 'piped.md'),
+      axisFile('piped', { context: 'cells | with pipes' }).replace(
+        '**Ruling:** piped-ruling',
+        '**Ruling:** choose A | not B | and never C',
+      ),
+    );
+
+    const { rows, stdout } = listRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].slug).toBe('piped');
+    expect(rows[0].ruling).toBe('choose A not B and never C');
+    expect(rows[0].why).toBe('cells with pipes');
+    // Four cells means four separators — a leaked pipe would silently make it five.
+    const row = stdout.split('\n').find((line) => line.startsWith('| [piped]'));
+    expect(row?.match(/\|/g)).toHaveLength(5);
+  });
+
+  // A half-created axis (touched, never written) must not take the whole command down with it — one
+  // unparseable file among many would otherwise turn a working log into a stack trace.
+  it('renders an empty axis file as a blank row instead of throwing', () => {
+    writeFileSync(join(dir, 'empty.md'), '');
+    writeFileSync(join(dir, 'alpha.md'), axisFile('alpha'));
+
+    const { rows } = listRows();
+    expect(rows.map((row) => row.slug)).toEqual(['alpha', 'empty']);
+    expect(rows[1]).toMatchObject({ ruling: '', updated: '', why: '' });
+  });
+});
+
+// `list` parses markdown now, so sc-2692's outage contract is load-bearing here: "could not run"
+// and "nothing is decided" are the exact pair sc-2332 was filed about.
+describe('guard-decisions list under a broken bundle', () => {
+  it('names the outage and never claims the log is empty', () => {
+    writeFileSync(join(dir, 'alpha.md'), axisFile('alpha'));
+    const r = runWithoutParser(['list']);
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('decision engine UNAVAILABLE');
+    expect(r.stdout).not.toContain('No decisions recorded.');
   });
 });
