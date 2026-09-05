@@ -1,15 +1,35 @@
 /** Locks the two contracts that keep old checkpoints loading: the key format (chunk tasks keyed on
  * file membership, whole-diff on -1) and torn-line tolerance plus identity-gated reuse. */
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import os from 'node:os';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { resolveGuardConfig } from '../../../../../config.mts';
+import type { runCascade } from '../../../../cascade/reviewer.mts';
+import { attachItems } from '../../../../evidence/items.mts';
+import { REVIEWERS } from '../../../../reviewers.mts';
+import type { ReviewOutcome } from '../../../../runtime.mts';
+import type { ResultsFile } from '../labels.mts';
+import { researchOutputDirectory } from '../materialize.mts';
 import type { ReviewerSelection } from '../../../../reviewers.mts';
 import {
   estimateUsd,
   isTerminal,
   openLensCheckpoint,
   planLensTasks,
+  runLensWave,
+  syncReviewAssets,
+  outcomeCapture,
   type CheckpointRow,
 } from '../lens-run.mts';
 
@@ -17,6 +37,143 @@ const dirs: string[] = [];
 afterEach(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
   delete process.env.GUARD_CORRECTNESS_SPLIT;
+  vi.restoreAllMocks();
+});
+
+function privateOutput(): string {
+  const home = realpathSync(mkdtempSync(join(tmpdir(), 'lens-private-')));
+  dirs.push(home);
+  vi.spyOn(os, 'homedir').mockReturnValue(home);
+  return researchOutputDirectory(join(home, '.devkit', 'research', 'run'));
+}
+
+it('rejects a linked asset ancestor before replacing any projection or touching the link target', () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'lens-projection-')));
+  dirs.push(root);
+  const wt = join(root, 'worktree');
+  const outside = join(root, 'outside');
+  const brief = join(wt, '.claude', 'agents', 'correctness-reviewer.md');
+  mkdirSync(join(wt, '.claude', 'agents'), { recursive: true });
+  mkdirSync(outside);
+  writeFileSync(brief, 'unchanged brief');
+  writeFileSync(join(outside, 'sentinel.txt'), 'untouched target');
+  symlinkSync(outside, join(wt, '.claude', 'skills'), 'dir');
+  const source = join(import.meta.dirname, '../../../../../..');
+  expect(() => syncReviewAssets(source, wt)).toThrow('projection ancestor');
+  expect(readFileSync(brief, 'utf8')).toBe('unchanged brief');
+  expect(readFileSync(join(outside, 'sentinel.txt'), 'utf8')).toBe('untouched target');
+});
+
+describe('banked terminal capture', () => {
+  const result = (extra: Partial<ReviewOutcome> = {}): ReviewOutcome => ({
+    name: 'correctness-reviewer',
+    status: 'fail',
+    reason: 'finding',
+    escalated: false,
+    ...extra,
+  });
+  it('labels event and legacy full vectors as capped fallback and unreadable sidecars as missing', () => {
+    const item = { lens: 'state-transitions', status: 'fail', issues: ['a capped finding'] };
+    expect(outcomeCapture(result({ items: [item] }))).toEqual({
+      version: 1,
+      provenance: 'capped-fallback',
+      items: [{ ...item, itemIndex: 0 }],
+    });
+    expect(outcomeCapture(result({ itemsFull: [{ ...item, itemIndex: 4 }] })).provenance).toBe(
+      'capped-fallback',
+    );
+    expect(
+      outcomeCapture(result({ itemsRef: 'items.txt' }), () => JSON.stringify([item])).provenance,
+    ).toBe('capped-fallback');
+    for (const text of [null, '{unreadable', JSON.stringify([{ ...item, issues: [{}] }])]) {
+      expect(outcomeCapture(result({ itemsRef: 'items.txt' }), () => text).provenance).toBe(
+        'missing-invalid',
+      );
+    }
+    expect(outcomeCapture(result())).toEqual({
+      version: 1,
+      provenance: 'missing-invalid',
+      items: [],
+    });
+  });
+  it('round trips exact claims and scope, with a stable full parent roster across resume and distinct fresh namespaces', async () => {
+    const dir = privateOutput();
+    const reviewer = REVIEWERS.find((r) => r.name === 'correctness-reviewer')!;
+    const selection = { reviewer, files: ['src/a.ts', 'src/b.ts'] };
+    const tasks = planLensTasks({ arm: 'whole', sel: selection, diffText: diff, keyPrefix: 'd' });
+    const text = `${'full evidence '.repeat(400)}CLAIM-TAIL`;
+    let firstAttempt = true;
+    const executeCascade = vi.fn<typeof runCascade>(async (task) => {
+      const res = result();
+      const lens = task.reviewer.lens?.[0] ?? '';
+      if (firstAttempt && lens === tasks[3].group[0]) res.status = 'inconclusive';
+      attachItems(
+        res,
+        {
+          items: [
+            { name: lens, status: 'fail', issues: [text, 'second issue'] },
+            { name: 'pending-sibling', status: 'pending' },
+          ],
+        },
+        new Map([[lens, 'blocking']]),
+        { full: true },
+      );
+      return res;
+    });
+    const opts = {
+      tasks,
+      sel: selection,
+      wt: dir,
+      cfg: resolveGuardConfig(dir),
+      model: 'test-model',
+      issueCap: '3',
+      identity: 'conditions',
+      diffSha: 'd',
+      base: 'base-sha',
+      measurementNamespace: dir,
+      log: () => {},
+      concurrency: 1,
+    };
+    const file = join(dir, 'checkpoint.jsonl');
+    const rows = await runLensWave({ ...opts, ckpt: openLensCheckpoint(file) }, executeCascade);
+    expect(rows).toHaveLength(4);
+    expect(rows.every((r) => r.capture?.provenance === 'exact-checklist')).toBe(true);
+    expect(rows[0].issues).toEqual([
+      { lens: tasks[0].group[0], text },
+      { lens: tasks[0].group[0], text: 'second issue' },
+    ]);
+    expect(rows[0].capture?.items[1]).toMatchObject({ itemIndex: 1, status: 'pending' });
+    expect(rows[0].scope).toEqual({ lenses: [...tasks[0].group], files: tasks[0].files });
+    expect(rows[0].parentReplay?.expectedTaskKeys).toEqual(tasks.map((t) => t.key).sort());
+    expect(new Set(rows.map((r) => r.parentReplay?.id)).size).toBe(1);
+    firstAttempt = false;
+    const resumed = await runLensWave({ ...opts, ckpt: openLensCheckpoint(file) }, executeCascade);
+    expect(resumed.slice(0, 3)).toEqual(rows.slice(0, 3));
+    expect(rows[3].status).toBe('inconclusive');
+    expect(resumed[3].status).toBe('fail');
+    expect(resumed[3].parentReplay).toEqual(rows[3].parentReplay);
+    expect(executeCascade).toHaveBeenCalledTimes(5);
+    const fresh = await runLensWave(
+      {
+        ...opts,
+        measurementNamespace: join(dir, 'fresh'),
+        ckpt: openLensCheckpoint(join(dir, 'fresh.jsonl')),
+      },
+      executeCascade,
+    );
+    expect(fresh[0].parentReplay?.id).not.toBe(rows[0].parentReplay?.id);
+    // SAFETY: this exercises the writer/reader bank contract after JSON serialization.
+    const bank = JSON.parse(JSON.stringify({ diff: 'd', base: 'base-sha', rows })) as ResultsFile;
+    expect(bank.rows[0]).toMatchObject({
+      key: tasks[0].key,
+      identity: 'conditions',
+      base: 'base-sha',
+      at: rows[0].at,
+      capture: rows[0].capture,
+      scope: rows[0].scope,
+      parentReplay: rows[0].parentReplay,
+    });
+  });
 });
 
 const diff = [
@@ -80,9 +237,52 @@ describe('planLensTasks', () => {
 });
 
 describe('openLensCheckpoint', () => {
+  it('confines full claims to private research and refuses symlink escapes', () => {
+    const directory = privateOutput();
+    const outside = join(os.homedir(), 'outside');
+    mkdirSync(outside);
+    expect(() => openLensCheckpoint(join(outside, 'checkpoint.jsonl'))).toThrow(
+      /under ~\/\.devkit\/research/,
+    );
+    symlinkSync(outside, join(directory, 'escape'));
+    expect(() => openLensCheckpoint(join(directory, 'escape', 'checkpoint.jsonl'))).toThrow(
+      /symlink/,
+    );
+    const target = join(outside, 'untouched.jsonl');
+    writeFileSync(target, 'private sentinel');
+    symlinkSync(target, join(directory, 'checkpoint.jsonl'));
+    expect(() => openLensCheckpoint(join(directory, 'checkpoint.jsonl'))).toThrow(/symlink/);
+    expect(readFileSync(target, 'utf8')).toBe('private sentinel');
+  });
+  it('writes owner-only claims and rejects a checkpoint symlink introduced after opening', () => {
+    const directory = privateOutput();
+    const file = join(directory, 'checkpoint.jsonl');
+    const ckpt = openLensCheckpoint(file);
+    const row: CheckpointRow = {
+      key: 'private',
+      diff: 'd',
+      arm: 'whole',
+      chunk: -1,
+      group: 'g',
+      status: 'fail',
+      reason: '',
+      issues: [{ lens: 'g', text: 'complete claim' }],
+      ms: 1,
+      at: 't',
+    };
+    ckpt.checkpoint(row);
+    expect(statSync(directory).mode & 0o777).toBe(0o700);
+    expect(statSync(file).mode & 0o777).toBe(0o600);
+    const target = join(os.homedir(), 'untouched.jsonl');
+    writeFileSync(target, 'sentinel');
+    rmSync(file);
+    symlinkSync(target, file);
+    expect(() => ckpt.checkpoint({ ...row, key: 'rejected' })).toThrow();
+    expect(ckpt.done.has('rejected')).toBe(false);
+    expect(readFileSync(target, 'utf8')).toBe('sentinel');
+  });
   it('loads rows, skips a torn trailing line, and gates reuse on identity', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'lens-run-'));
-    dirs.push(dir);
+    const dir = privateOutput();
     const file = join(dir, 'checkpoint.jsonl');
     const row = (key: string, status: string, identity?: string) =>
       JSON.stringify({

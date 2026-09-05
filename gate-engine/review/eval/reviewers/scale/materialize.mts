@@ -11,18 +11,23 @@
  */
 import {
   chmodSync,
+  copyFileSync,
   existsSync,
-  mkdirSync,
+  lstatSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   renameSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
+import { managedPath } from '../../../../critique/immutable-file.mts';
+import { assertDiffSha256 } from './labels.mts';
 
 /** Private, mode-0700 home for materialized third-party checkouts and their raw patches — see
  * the module doc comment and `docs/decisions/scale-track-third-party-data.md`. */
@@ -150,9 +155,21 @@ export function cleanMaterialized(root: string = RESEARCH_ROOT): void {
   }
 }
 
-function ensureResearchRoot(root: string): void {
-  mkdirSync(root, { recursive: true, mode: 0o700 });
-  chmodSync(root, 0o700);
+/** Raw replay evidence is confined to private research directories, including symlink ancestry. */
+export function researchOutputDirectory(directory: string): string {
+  const home = realpathSync(os.homedir());
+  const root = path.join(home, '.devkit', 'research');
+  const relative = path.relative(root, path.resolve(directory));
+  if (
+    !relative ||
+    relative === '..' ||
+    relative.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relative)
+  )
+    throw new Error('raw replay output requires a directory under ~/.devkit/research');
+  const resolved = managedPath(home, ['.devkit', 'research', ...relative.split(path.sep)], true);
+  if (!resolved) throw new Error('private research output directory is absent');
+  return resolved;
 }
 
 export interface Materialized {
@@ -169,10 +186,121 @@ export interface MaterializeOpts {
   /** Private home for the worktree + raw patch; defaults to the scale-bench research root. An
    * external-PR bench keeps its checkouts under its own 0700 root so `--clean` scopes correctly. */
   researchRoot?: string;
+  reviewAssetsRoot?: string;
+}
+
+/** These destinations are the complete review-asset projection used by the native scale runner. */
+export function reviewAssetProjections(devkitRoot: string, wt: string) {
+  return [
+    {
+      source: path.join(devkitRoot, 'agents', 'correctness-reviewer.md'),
+      destination: path.join(wt, '.claude', 'agents', 'correctness-reviewer.md'),
+      recursive: false,
+    },
+    ...['correctness', '_devkit'].map((name) => ({
+      source: path.join(devkitRoot, 'skills', name),
+      destination: path.join(wt, '.claude', 'skills', name),
+      recursive: true,
+    })),
+  ];
+}
+
+function matchesProjectedAsset(devkitRoot: string, wt: string, name: string): boolean {
+  const actual = path.resolve(wt, name);
+  return reviewAssetProjections(devkitRoot, wt).some((projection) => {
+    const relative = path.relative(projection.destination, actual);
+    if (
+      relative !== '' &&
+      (!projection.recursive ||
+        relative === '..' ||
+        relative.startsWith(`..${path.sep}`) ||
+        path.isAbsolute(relative))
+    )
+      return false;
+    const expected = path.resolve(projection.source, relative);
+    const actualStat = lstatSync(actual, { throwIfNoEntry: false });
+    const expectedStat = lstatSync(expected, { throwIfNoEntry: false });
+    if (!actualStat || !expectedStat) return !actualStat && !expectedStat;
+    return (
+      actualStat.isFile() &&
+      expectedStat.isFile() &&
+      realpathSync(actual) === actual &&
+      realpathSync(expected) === expected &&
+      (actualStat.mode & 0o111) === (expectedStat.mode & 0o111) &&
+      readFileSync(actual).equals(readFileSync(expected))
+    );
+  });
 }
 
 const git = (cwd: string, args: string[]): string =>
   execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+
+function validateCached(o: MaterializeOpts, wt: string, base: string): void {
+  const inspect = (cwd: string, args: string[], index?: string, input?: string): string =>
+    execFileSync('git', args, {
+      cwd,
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024,
+      input,
+      env: {
+        ...process.env,
+        GIT_DIR: undefined,
+        GIT_COMMON_DIR: undefined,
+        GIT_WORK_TREE: undefined,
+        GIT_INDEX_FILE: index,
+        GIT_OPTIONAL_LOCKS: '0',
+      },
+    });
+  let scratch: string | undefined;
+  try {
+    const recordedRepo = readFileSync(path.join(wt, '.scale-probe-repo'), 'utf8').trim();
+    if (realpathSync(recordedRepo) !== realpathSync(o.repo))
+      throw new Error('source repository marker does not match the requested repository');
+    const commonDir = (repo: string) =>
+      realpathSync(
+        inspect(repo, ['rev-parse', '--path-format=absolute', '--git-common-dir']).trim(),
+      );
+    if (commonDir(wt) !== commonDir(o.repo))
+      throw new Error('cached worktree belongs to a different Git common directory');
+    if (
+      inspect(wt, ['rev-parse', '--verify', '--end-of-options', `${base}^{commit}`]).trim() !==
+        base ||
+      inspect(wt, ['rev-parse', '--verify', 'HEAD']).trim() !== base
+    )
+      throw new Error('base marker must be the full commit identity of cached HEAD');
+    scratch = mkdtempSync(path.join(wt, '.scale-identity-'));
+    chmodSync(scratch, 0o700);
+    const expectedIndex = path.join(scratch, 'expected-index');
+    inspect(wt, ['read-tree', base], expectedIndex);
+    inspect(wt, ['apply', '--cached'], expectedIndex, o.diffText);
+    const expectedTree = inspect(wt, ['write-tree'], expectedIndex).trim();
+    const capturedIndex = path.join(scratch, 'captured-index');
+    copyFileSync(
+      inspect(wt, ['rev-parse', '--path-format=absolute', '--git-path', 'index']).trim(),
+      capturedIndex,
+    );
+    if (inspect(wt, ['write-tree'], capturedIndex).trim() !== expectedTree)
+      throw new Error('cached index does not reproduce the requested diff on its recorded base');
+    const tracked = inspect(wt, ['ls-files', '-z'], capturedIndex);
+    for (const flag of ['--no-assume-unchanged', '--no-skip-worktree'])
+      inspect(wt, ['update-index', flag, '-z', '--stdin'], capturedIndex, tracked);
+    const changed = inspect(wt, ['diff-files', '--name-only', '-z'], capturedIndex)
+      .split('\0')
+      .filter(Boolean);
+    for (const name of changed)
+      if (!o.reviewAssetsRoot || !matchesProjectedAsset(o.reviewAssetsRoot, wt, name))
+        throw new Error(
+          'cached working-tree change is not an exact intended review-asset projection',
+        );
+  } catch (cause) {
+    throw new Error(
+      `materialize: cached context identity validation failed for ${wt}; use a fresh research root`,
+      { cause },
+    );
+  } finally {
+    if (scratch) rmSync(scratch, { recursive: true, force: true });
+  }
+}
 
 function resolveRef(o: MaterializeOpts): string {
   for (const ref of [o.branch, `origin/${o.branch}`]) {
@@ -223,8 +351,8 @@ function candidateCommits(o: MaterializeOpts): string[] {
 }
 
 export function materialize(o: MaterializeOpts): Materialized {
-  const root = o.researchRoot ?? RESEARCH_ROOT;
-  ensureResearchRoot(root);
+  assertDiffSha256(o.diffSha);
+  const root = researchOutputDirectory(o.researchRoot ?? RESEARCH_ROOT);
   const wt = path.join(root, `scale-probe-${o.diffSha.slice(0, 12)}`);
   const marker = path.join(wt, '.scale-probe-base');
   const lock = `${wt}.lock`;
@@ -237,6 +365,7 @@ export function materialize(o: MaterializeOpts): Materialized {
   try {
     if (existsSync(marker)) {
       const base = readFileSync(marker, 'utf8').trim();
+      validateCached(o, wt, base);
       console.error(`materialize: reusing worktree at ${wt} (base ${base.slice(0, 12)})`);
       return { wt, base };
     }
@@ -284,8 +413,14 @@ function materializeLocked(
       }
       git(wt, ['apply', patch]);
       git(wt, ['add', '-A']);
-      writeFileSync(marker, `${sha}\n`);
-      writeFileSync(path.join(wt, '.scale-probe-repo'), `${o.repo}\n`);
+      writeFileSync(path.join(wt, '.scale-probe-repo'), `${o.repo}\n`, { mode: 0o600 });
+      const pendingMarker = `${marker}.pending-${randomUUID()}`;
+      try {
+        writeFileSync(pendingMarker, `${sha}\n`, { mode: 0o600, flag: 'wx' });
+        renameSync(pendingMarker, marker);
+      } finally {
+        rmSync(pendingMarker, { force: true });
+      }
       console.error(`materialize: diff applies at ${sha.slice(0, 12)} (${wt})`);
       return { wt, base: sha };
     }

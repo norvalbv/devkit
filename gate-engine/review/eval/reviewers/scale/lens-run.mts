@@ -1,18 +1,47 @@
 /** The reusable half of scale-bench (assets, task planning, checkpoint, bounded run loop) so an
  * external-PR bench drives the identical loop without the telemetry-DB coupling. Bench-only. */
 import { createHash } from 'node:crypto';
-import { appendFileSync, cpSync, existsSync, readdirSync, readFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  closeSync,
+  constants,
+  cpSync,
+  existsSync,
+  fstatSync,
+  lstatSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+} from 'node:fs';
 import path from 'node:path';
+import { z } from 'zod';
+import { readPrivateFile } from '../../../../critique/immutable-file.mts';
+import { researchOutputDirectory, reviewAssetProjections } from './materialize.mts';
 import { execJudgeAsync } from '../../../../judge/run-judge.mts';
 import { readTranscript } from '../../../../judge/transcript-store.mts';
 import type { GuardConfig } from '../../../../config.mts';
 import { runCascade } from '../../../cascade/reviewer.mts';
+import { reviewCaptureItemSchema } from '../../../evidence/items.mts';
 import { identityBytesByPath, packDiffIntoChunks } from '../../../lens/chunk.mts';
 import { deriveLensReviewer, lensGroupId, resolveLensGroups } from '../../../lens/split.mts';
 import type { ChecklistReviewer, ReviewerSelection } from '../../../reviewers.mts';
-import { gateJudgeEnv, withStagedFiles } from '../../../runtime.mts';
+import {
+  gateJudgeEnv,
+  withStagedFiles,
+  type ReviewCapture,
+  type ReviewOutcome,
+} from '../../../runtime.mts';
 
 // ── checkpoint ───────────────────────────────────────────────────────────────────────────────────
+export interface LensTaskScope {
+  lenses: string[];
+  files: string[];
+}
+export interface ParentReplay {
+  id: string;
+  expectedTaskKeys: string[];
+}
 export interface CheckpointRow {
   key: string;
   diff: string;
@@ -29,6 +58,10 @@ export interface CheckpointRow {
   /** sha256-12 of {base, assetsSha, issueCap}. Absent on legacy rows (reusable only for whole-diff
    * tasks); present-but-mismatched rows are segregated and re-driven. */
   identity?: string;
+  base?: string;
+  capture?: ReviewCapture;
+  scope?: LensTaskScope;
+  parentReplay?: ParentReplay;
 }
 
 /** Only a real verdict is terminal: 'error'/'inconclusive' rows (a flaky judge, a killed run)
@@ -49,13 +82,17 @@ export interface LensCheckpoint {
 }
 
 export function openLensCheckpoint(ckptPath: string): LensCheckpoint {
+  const directory = researchOutputDirectory(path.dirname(ckptPath));
+  const filename = path.basename(ckptPath);
+  const checkpointPath = path.join(directory, filename);
   const done = new Map<string, CheckpointRow>();
   let tornLines = 0;
   // A kill mid-append can leave the file without a trailing newline; the next append must not
   // glue its row onto that torn fragment (which would tear the NEW row too).
   let needsNewline = false;
-  if (existsSync(ckptPath)) {
-    const raw = readFileSync(ckptPath, 'utf8');
+  const existing = readPrivateFile(directory, filename);
+  if (existing !== null) {
+    const raw = existing.toString('utf8');
     needsNewline = raw.length > 0 && !raw.endsWith('\n');
     for (const line of raw.trim().split('\n'))
       if (line.trim()) {
@@ -72,7 +109,23 @@ export function openLensCheckpoint(ckptPath: string): LensCheckpoint {
     done,
     tornLines,
     checkpoint: (row) => {
-      appendFileSync(ckptPath, `${needsNewline ? '\n' : ''}${JSON.stringify(row)}\n`);
+      if (researchOutputDirectory(directory) !== directory)
+        throw new Error('private research output directory changed');
+      const descriptor = openSync(
+        checkpointPath,
+        constants.O_WRONLY |
+          constants.O_APPEND |
+          constants.O_CREAT |
+          constants.O_NOFOLLOW |
+          constants.O_NONBLOCK,
+        0o600,
+      );
+      try {
+        if (!fstatSync(descriptor).isFile()) throw new Error('checkpoint must be a regular file');
+        appendFileSync(descriptor, `${needsNewline ? '\n' : ''}${JSON.stringify(row)}\n`);
+      } finally {
+        closeSync(descriptor);
+      }
       needsNewline = false;
       done.set(row.key, row);
     },
@@ -87,20 +140,26 @@ export function openLensCheckpoint(ckptPath: string): LensCheckpoint {
 /** Project the staged brief + skills into the worktree. Mandatory: agentBody reads
  * `<wt>/.claude/agents/<name>.md` and the judge's Bash prefix is the checklist script. */
 export function syncReviewAssets(devkitRoot: string, wt: string): void {
-  cpSync(
-    path.join(devkitRoot, 'agents', 'correctness-reviewer.md'),
-    path.join(wt, '.claude', 'agents', 'correctness-reviewer.md'),
-  );
-  cpSync(
-    path.join(devkitRoot, 'skills', 'correctness'),
-    path.join(wt, '.claude', 'skills', 'correctness'),
-    { recursive: true },
-  );
-  cpSync(
-    path.join(devkitRoot, 'skills', '_devkit'),
-    path.join(wt, '.claude', 'skills', '_devkit'),
-    { recursive: true },
-  );
+  const root = path.resolve(wt);
+  const projections = reviewAssetProjections(devkitRoot, root);
+  for (const { source, destination, recursive } of projections) {
+    const stat = lstatSync(source);
+    if (recursive ? !stat.isDirectory() : !stat.isFile())
+      throw new Error('review asset source must be a regular file or directory');
+    for (
+      let ancestor = path.dirname(destination);
+      ancestor !== root;
+      ancestor = path.dirname(ancestor)
+    ) {
+      const ancestorStat = lstatSync(ancestor, { throwIfNoEntry: false });
+      if (ancestorStat && !ancestorStat.isDirectory())
+        throw new Error('review asset projection ancestor must be a real directory');
+    }
+  }
+  for (const { source, destination, recursive } of projections) {
+    rmSync(destination, { recursive, force: true });
+    cpSync(source, destination, { recursive });
+  }
 }
 
 /** Hash EVERY projected review asset — the brief AND both skills dirs — since all of them shape
@@ -211,6 +270,9 @@ export interface RunLensWaveOpts {
   issueCap: string;
   identity: string;
   diffSha: string;
+  base?: string;
+  /** A fresh private output directory identifies one measurement; stable across checkpoint resume. */
+  measurementNamespace?: string;
   ckpt: LensCheckpoint;
   log?: (line: string) => void;
   /** Max judges in flight within one chunk wave (default 2). Each judge is a full CLI process;
@@ -218,9 +280,80 @@ export interface RunLensWaveOpts {
   concurrency?: number;
 }
 
+/** Legacy full/event/sidecar copies are inspectable, but never promoted to exact evidence. */
+export function outcomeCapture(
+  res: ReviewOutcome,
+  readSidecar: (ref: string) => string | null = readTranscript,
+): ReviewCapture {
+  if (res.capture) return res.capture;
+  const capture: ReviewCapture = {
+    version: 1,
+    provenance: 'missing-invalid',
+    items: [],
+    artifact: res.itemArtifact,
+  };
+  let items: unknown = res.itemsFull ?? res.items;
+  if (!items && res.itemsRef) {
+    try {
+      const raw = readSidecar(res.itemsRef);
+      items = raw ? JSON.parse(raw) : undefined;
+    } catch {
+      return capture;
+    }
+  }
+  if (!Array.isArray(items)) return capture;
+  let valid = true;
+  for (const [itemIndex, it] of items.entries()) {
+    const item = legacyCaptureItemSchema.safeParse(it);
+    if (!item.success) {
+      valid = false;
+      continue;
+    }
+    capture.items.push({
+      itemIndex: item.data.itemIndex ?? itemIndex,
+      lens: item.data.lens,
+      status: item.data.status,
+      issues: item.data.issues ?? [],
+      disposition: item.data.disposition,
+    });
+  }
+  if (valid) capture.provenance = 'capped-fallback';
+  return capture;
+}
+
+const legacyCaptureItemSchema = reviewCaptureItemSchema.extend({
+  itemIndex: z.number().int().nonnegative().optional(),
+  issues: z.array(z.string()).optional(),
+  rationale: z.string().optional(),
+});
+
+function parentReplay(o: RunLensWaveOpts, arm: string): ParentReplay | undefined {
+  if (!o.measurementNamespace) return undefined;
+  const expectedTaskKeys = o.tasks
+    .filter((t) => t.arm === arm)
+    .map((t) => t.key)
+    .sort();
+  const id = createHash('sha256')
+    .update(
+      JSON.stringify({
+        namespace: path.resolve(o.measurementNamespace),
+        diff: o.diffSha,
+        model: o.model,
+        arm,
+        identity: o.identity,
+        expectedTaskKeys,
+      }),
+    )
+    .digest('hex');
+  return { id, expectedTaskKeys };
+}
+
 /** Drive every not-yet-checkpointed task of ONE arm: chunks sequentially, at most `concurrency`
  * lenses in flight. Each verdict checkpoints as it lands; returns every row of the arm. */
-export async function runLensWave(o: RunLensWaveOpts): Promise<CheckpointRow[]> {
+export async function runLensWave(
+  o: RunLensWaveOpts,
+  executeCascade: typeof runCascade = runCascade,
+): Promise<CheckpointRow[]> {
   const log = o.log ?? ((line: string) => console.error(line));
   const chunksInOrder = [...new Set(o.tasks.map((t) => t.chunk))];
   const limit = Math.max(1, o.concurrency ?? 2);
@@ -237,7 +370,7 @@ export async function runLensWave(o: RunLensWaveOpts): Promise<CheckpointRow[]> 
         // SAFETY: spread of a ChecklistReviewer with only its model overridden keeps the shape.
         derived = Object.freeze({ ...derived, model: o.model }) as ChecklistReviewer;
       const started = Date.now();
-      const res = await runCascade(
+      const res = await executeCascade(
         { reviewer: derived, files: t.files },
         {
           cwd: o.wt,
@@ -254,18 +387,7 @@ export async function runLensWave(o: RunLensWaveOpts): Promise<CheckpointRow[]> 
           fullItems: true, // bank the full finding text (sc-2493: 525/531 banked texts were stubs)
         },
       );
-      // itemsFull is the off-wire full-text vector; fall back to the event copy, then its sidecar
-      // (a verbose FAIL must not checkpoint as issues:[] — that would score as a clean miss).
-      let items = res.itemsFull ?? res.items;
-      if (!items && res.itemsRef) {
-        try {
-          const raw = readTranscript(res.itemsRef);
-          // SAFETY: the sidecar is written by attachItems as JSON.stringify of the capped items.
-          items = raw ? (JSON.parse(raw) as NonNullable<typeof res.items>) : undefined;
-        } catch {
-          items = undefined;
-        }
-      }
+      const capture = outcomeCapture(res);
       o.ckpt.checkpoint({
         key: t.key,
         diff: o.diffSha,
@@ -275,12 +397,14 @@ export async function runLensWave(o: RunLensWaveOpts): Promise<CheckpointRow[]> 
         group: lensGroupId(t.group),
         status: res.status,
         reason: (res.reason ?? '').slice(0, 400),
-        issues: (items ?? []).flatMap((it) =>
-          (it.issues ?? []).map((text) => ({ lens: it.lens, text: String(text) })),
-        ),
+        issues: capture.items.flatMap((it) => it.issues.map((text) => ({ lens: it.lens, text }))),
         ms: Date.now() - started,
         at: new Date().toISOString(),
         identity: o.identity,
+        base: o.base,
+        capture,
+        scope: { lenses: [...t.group], files: [...t.files] },
+        parentReplay: parentReplay(o, t.arm),
       });
       log(`  done ${t.key} → ${res.status} (${((Date.now() - started) / 1000) | 0}s)`);
     };
