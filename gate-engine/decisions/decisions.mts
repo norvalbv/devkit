@@ -276,7 +276,7 @@ export async function rankAxes(text: string, k = 5, cwd = process.cwd()): Promis
  * mode is otherwise unmeasurable — `state` for abstention, `score`/`margin` for rank quality,
  * `liveRulingId` for which block answered.
  *
- * `state` declares only the two states retrieval can currently REACH. A third, `SUPERSEDED`, belongs
+ * `state` declares only reachable states; UNAVAILABLE is cli.mts's. A fourth, `SUPERSEDED`, belongs
  * here the moment the format records supersession, and is deliberately NOT declared before then: an
  * enum member no code path can produce is a dead state, and this repo's own correctness reviewer
  * treats those as defects rather than forward-compatibility.
@@ -286,8 +286,8 @@ export async function rankAxes(text: string, k = 5, cwd = process.cwd()): Promis
  * set; null means "no threshold", never "threshold of zero".
  */
 export interface QueryEnvelope {
-  state: 'RULED' | 'NO_RULING';
-  source: RankResult['source'];
+  state: 'RULED' | 'NO_RULING' | 'UNAVAILABLE';
+  source: RankResult['source'] | 'unavailable';
   tau: number | null;
   margin: number | null;
   rows: {
