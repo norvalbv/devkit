@@ -12,6 +12,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BenchAbort, parseCasesText } from '../../../decisions/eval/bench.mts';
 import { checklistScript } from '../../reviewers.mts';
+import { groupByPair } from './corpus/twins.mts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 // gate-engine/review/eval/reviewers → repo root is four levels up.
@@ -40,6 +41,7 @@ export const casesFile = (reviewer) => path.join(here, `cases-${reviewer.skill}.
 const ROW_ENUMS = {
   expected: ['FAIL', 'PASS'],
   difficulty: ['clear', 'borderline', 'adversarial'],
+  holdout: [true, false],
   // 'known-answer' = adapted from an external ground truth (GHSA fix commit — sc-1408):
   // the only provenance whose golds support ABSOLUTE recall claims (methodology item 17).
   provenance: ['authored', 'mined', 'adapted', 'known-answer'],
@@ -73,6 +75,7 @@ export function lintRows(rows, reviewerName) {
         throw new BenchAbort(2, `${where}: ${field}=${row[field]} not in ${allowed.join('|')}`);
     if (row.caseId !== undefined && typeof row.caseId !== 'string')
       throw new BenchAbort(2, `${where}: caseId must be a string`);
+    if (row.caseId === '') throw new BenchAbort(2, `${where}: caseId must be a non-empty string`);
     if (row.sourcePr !== undefined && typeof row.sourcePr !== 'number')
       throw new BenchAbort(2, `${where}: sourcePr must be a number`);
     if (!row.expected) throw new BenchAbort(2, `${where}: missing expected`);
@@ -84,6 +87,18 @@ export function lintRows(rows, reviewerName) {
       throw new BenchAbort(
         2,
         `${where}: reviewer=${row.reviewer} but lives in ${reviewerName}'s file`,
+      );
+  }
+  return rows;
+}
+
+/** Validate finalized partitions separately from proposals whose holdout is assigned on admission. */
+export function assertHoldoutGroups(rows, reviewerName) {
+  for (const [key, group] of groupByPair(rows)) {
+    if (group.some((row) => !!row.holdout !== !!group[0].holdout))
+      throw new BenchAbort(
+        2,
+        `${reviewerName}: pair group ${key} straddles the holdout boundary — ${group.map((row) => `${row.id}=${!!row.holdout}`).join(', ')}`,
       );
   }
   return rows;
@@ -101,10 +116,19 @@ export function holdoutFloorShortfalls(rows, floor = 3) {
   return out;
 }
 
-export function loadRows(reviewer, { dev = false, only = null } = {}) {
-  const file = casesFile(reviewer);
-  if (!existsSync(file)) throw new BenchAbort(2, `reviewer-eval: missing ${path.basename(file)}`);
-  let rows = lintRows(parseCasesText(readFileSync(file, 'utf8')), reviewer.name);
+/** Audits must be able to inspect structurally valid rows whose partition the benchmark refuses. */
+export function readCorpusRows(reviewer, corpusFile = casesFile(reviewer)) {
+  if (!existsSync(corpusFile))
+    throw new BenchAbort(2, `reviewer-eval: missing ${path.basename(corpusFile)}`);
+  return lintRows(parseCasesText(readFileSync(corpusFile, 'utf8')), reviewer.name);
+}
+
+export function loadRows(
+  reviewer,
+  { dev = false, only = null, corpusFile = casesFile(reviewer) } = {},
+) {
+  let rows = readCorpusRows(reviewer, corpusFile);
+  assertHoldoutGroups(rows, reviewer.name);
   const short = holdoutFloorShortfalls(rows);
   if (short.length) {
     const msg = `${reviewer.name}: holdout floor not met — ${short.join('; ')}`;

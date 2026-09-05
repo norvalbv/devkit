@@ -77,3 +77,35 @@ What the numbers mean and do not mean:
   relabel), so `metricAssessment` reads a sub-floor delta as `flat` instead of a win.
 - Mined fail→fix candidates carry `labelRule` (lens-pass · reviewer-pass · absence-exit0 ·
   fallback), `sameDiffGuardArmable` and `evidenceShrunk`, so noise is reportable per tier.
+
+## 2026-09-05 partition repair (sc-2723)
+
+The persisted corpora still contained 25 correctness and 8 API-security pair groups split between
+dev and holdout. Each straddling group has one gold row. Its existing assignment is preserved and
+only its repaired sibling moves, so all 33 edits change `holdout` alone. Row order, fixture bytes,
+labels and behavior hashes remain unchanged. No gold row is moved or added.
+
+| suite | split groups before → after | moved decoys | holdout gold before → after | holdout decoys before → after |
+|---|---:|---:|---:|---:|
+| correctness | 25 → 0 | 25 | 37 → 37 | 20 → 33 |
+| api-security | 8 → 0 | 8 | 9 → 9 | 3 → 9 |
+
+Correctness holdout decoys by difficulty (`clear / borderline / adversarial`) change from
+`10 / 7 / 3` to `14 / 16 / 3`; API-security changes from `0 / 2 / 1` to `4 / 3 / 2`.
+The other three reviewer corpora already have zero straddling groups and are unchanged. Their
+pre-existing holdout-floor warnings remain separate from group integrity.
+
+Full-corpus loading and `corpus-lint` now reject mixed assignments across the transitive union of
+`caseId` and `variantOf`, before any dev/prefix filtering. Proposal metadata remains provisional
+until admission. Append validates the final existing-plus-accepted partition before writing,
+refuses a new bridge between opposite existing partitions, and packs whole connected groups even
+when their connection passes through an existing row. The read-only audit can still inspect and
+report a broken partition without admitting it to a benchmark.
+
+This is a partition epoch break, not a reviewer quality improvement. The 33 moved rows have new
+strict row hashes, and both affected corpus hashes change. Behavior hashes alone cannot establish
+comparable dev/holdout measurements across the repair. Historical checkpoints remain immutable;
+fresh measurements use `--fresh --baseline` and are published as `methodology-reset`, after the
+harness changes are frozen. A prior checkpoint projected onto these flags is not a fresh run.
+Reassignment also cannot make previously inspected examples unseen: final confirmation of a tuned
+reviewer still needs new held-out incident families.
