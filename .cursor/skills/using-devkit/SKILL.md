@@ -1,6 +1,6 @@
 ---
 name: using-devkit
-description: Use when working in a repo that has devkit installed and you are about to run a git or maintenance command — a commit was denied on a protected branch, `devkit doctor` reports drift, you need to relocate/rename source files, refresh a shared checkout after your PR merged, uninstall devkit, or update it — and you must pick the right devkit command instead of a hand-rolled git workflow.
+description: Use when working in a repo that has devkit installed and you are about to run a git or maintenance command — a commit was denied on a protected branch, `devkit doctor` reports drift, you need to relocate/rename source files, refresh a shared checkout after your PR merged, uninstall devkit, or update it, or you want the reviewer gate's findings before opening a PR because you are on a protected branch or holding work that must not be committed — and you must pick the right devkit command instead of a hand-rolled git workflow.
 ---
 
 # Using devkit
@@ -38,6 +38,8 @@ devkit command.
 |---|---|---|
 | A commit was **denied on a protected branch**, or you're on `main`/`master` and need to land a change | `devkit ship <branch> "<title>" -- <paths>` | `git switch -c` + commit + push **moves the shared checkout's HEAD**, disturbing parallel agents; `ship` commits in an ephemeral worktree and opens a PR without moving HEAD |
 | You want to prove ship's exact base/path brief and deterministic gates before paying for the full reviewer chain | `devkit ship <branch> "<title>" --dry-gates [--base <base>] -- <paths>` | It reuses ship's ephemeral staging, projected runtime/config/coverage, formatter, deterministic/structure/extra gates, and the deterministic comment budget gate, but creates no branch, commit, push, or PR. |
+| You're on a **protected branch**, or holding work that must not be committed, and you want the **reviewer fleet's** findings before opening a PR | `devkit review [--base <ref>]` | on a feature branch an ordinary `git commit` already runs the same fleet — `review` is the lane for when no commit is available. It runs the deterministic gates, the decisions gates and the reviewers, but **not** the completeness judge (a commit gate, excluded from a range review) and not sentry; it creates no branch, commit, push or PR, and logs to `.devkit/review-runs/<run-id>.log`. It reviews `merge-base..HEAD` **plus your whole dirty tree**, where `ship` reviews only the briefed paths — so findings are a superset and some will never gate. A green review is early signal, never a ship guarantee, and `ship` re-pays every judge |
+| Your long-running work may be **stale** — did `origin/<base>` move under you, and does it collide with *your* paths? | `devkit base-status [--base <branch>] [--json] [-- <paths>]` | it fetches the base (TTL-cached across sibling worktrees, so parallel agents don't each re-fetch), then reports only the base-side changes overlapping the paths you name — exit 3 is DRIFT, exit 4 is *could not determine*. A hand-rolled `git log origin/<base>` answers from refs of unknown age and leaves you to intersect the file list yourself; exit 4 is deliberately not 0 because a green computed from stale refs is the false confidence this command exists to prevent |
 | You need to preview a hot file's real line ceiling before shipping | `guard-size preflight --base origin/<branch> -- <paths>` | It reads `size-lines.json` from the requested base, prints current lines / effective cap / headroom, and names any stale working-tree baseline. `devkit ship` runs the same preflight automatically before creating its gate worktree. |
 | The PR must target a branch **other than the one you're on** — e.g. your work is already committed on a source branch and the base is a different one | `devkit ship <branch> "<title>" --base <base-branch> -- <paths>` (branch + title FIRST — see Rules) | plain `ship` bases on this checkout's HEAD, where those paths are already identical, so it stages nothing and aborts `nothing to commit`; `--base` diffs your **working tree** against `origin/<base-branch>` and targets the PR there — no checkout, no worktree juggling |
 | Your source branch contains a **large committed multi-commit change** and manually reproducing its complete path list is error-prone | `devkit ship <new-branch> "<title>" --base <base-branch> --from-branch` | this opt-in mode pins `origin/<base-branch>` and `HEAD`, proves ancestry, derives the literal committed path set, and refuses any uncommitted overlay on those paths. Explicit paths remain the default for dirty work because ownership cannot be inferred safely in a shared checkout. |
@@ -108,6 +110,19 @@ devkit command.
   and returns the exact `devkit ship …` to run — run that.
 - **On a shared checkout, never move HEAD** (`switch`/`checkout`/`pull`/`reset`). Use `ship` to commit
   and `reconcile` to refresh.
+- **Three lanes, three jobs — pick by what you can afford to be wrong about.** `devkit ship
+  --dry-gates` is the fast deterministic preflight (no reviewers). `devkit review` is the full local
+  chain including the reviewer fleet, publishing nothing. `devkit ship` is the publication step. Three
+  things decide between them. On a feature branch, **an ordinary `git commit` already runs the same
+  reviewer fleet** — so just commit; `devkit review` earns its cost only when no commit is available
+  (a protected branch, or work that must not land). After a ship BLOCKS, use `--resume`, never
+  `review`: resume replays every checkpointed PASS, while review keeps its verdicts in a separate
+  checkout-external store that the retry cannot read, so it re-pays the whole fleet and saves the
+  ship nothing. And `devkit review` pays the same fan-out as ship, so run it in the BACKGROUND too
+  (`SHIP_COMMIT_TIMEOUT` defaults to 3600s and `DEVKIT_PREFLIGHT_TIMEOUT` defaults off the same knob,
+  making the worst case 2× it). Review needs the husky component installed; an overlay consumer needs
+  a one-time `devkit init --overlay --review` in that checkout first; and its per-run
+  `review trusted targets only` warning is expected when the target is your own repo.
 - **Run `devkit ship` in the BACKGROUND** (`run_in_background`), never as a foreground tool call: the
   gate chain's worst case (AI reviewer cascades) exceeds the 10-minute foreground Bash cap, which kills
   the ship mid-gates as exit 143 with no banner. Poll the shell output for the per-reviewer heartbeat

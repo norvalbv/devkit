@@ -834,11 +834,9 @@ function printReferencedSteps() {
     console.log('      GUARD_INDEX_PATH=<path/to/index.db>  (or indexPath in guard.config.json).');
     console.log('      Without it the duplication gate fails open (clone + ratchet gates still run).');
 }
-function structureAvailableFor(stack) {
-    return STRUCTURE_STACKS.has(stack);
-}
 export const meta = {
     name: 'init',
+    agentFacing: true,
     summary: 'Wire this repo onto devkit (interactive wizard; idempotent).',
     help: INIT_HELP,
 };
@@ -869,7 +867,7 @@ export default async function run(args, cwd) {
             console.error('devkit init --baselines-only: unsupported in overlay/standalone mode (no structure preset).');
             return 1;
         }
-        if (!structureAvailableFor(stack)) {
+        if (!STRUCTURE_STACKS.has(stack)) {
             console.error(`devkit init --baselines-only: no structure-lint preset for stack "${stack}".`);
             return 1;
         }
@@ -893,7 +891,7 @@ export default async function run(args, cwd) {
         const result = await runWizard({
             detectedStack,
             detectedMode,
-            structureAvailable: structureAvailableFor(detectedStack),
+            structureAvailable: STRUCTURE_STACKS.has(detectedStack),
             installed,
             existingReview: readJson(join(cwd, '.devkit', 'config.json'))
                 ?.review,
@@ -932,7 +930,7 @@ export default async function run(args, cwd) {
     }
     // Self-host runs structure via `bun run lint:structure` (eslint), not a template preset, so skip
     // the "no preset → disable structure" flip (which would otherwise print a misleading notice).
-    if (!selfHost && !structureAvailableFor(stack) && selection.structure) {
+    if (!selfHost && !STRUCTURE_STACKS.has(stack) && selection.structure) {
         selection.structure = false; // no template for this stack — silently skip (noted below)
         if (stack !== 'generic') {
             console.log(`devkit init: no structure-lint preset for stack "${stack}" yet — skipping it.`);

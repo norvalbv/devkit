@@ -2,6 +2,7 @@ import { proveRegression } from '../../lib/baseline-status/regression-proof.mts'
 
 export const meta = {
   name: 'prove-regression',
+  agentFacing: true,
   summary: 'Capture the same test command at explicit red and green refs without editing checkout.',
   help: `devkit prove-regression — capture attributable red/green execution evidence.
 

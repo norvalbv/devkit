@@ -40,6 +40,14 @@ Read the runner's summary line (labelled examples: vitest `Test Files … Tests 
 - An error says why the run could not start (missing dependency, bad config, unreadable path) → **failed**. Re-running changes nothing; fix what it names.
 - Neither — output just stops, or the process was killed (`Terminated`, `Killed`, exit 130/137/143) → **inconclusive, not failed**. It reached no verdict and names nothing, so any conclusion drawn from it is invented. Re-run before reporting a regression.
 
+**Before you attribute a red run to your change**, check whether it was red already. In a repo with
+devkit installed, `devkit baseline-status --file <path> --json` answers from the per-file test-report
+artifact CI uploads, not from log scraping — a CI log interleaves failures from nested runs, so
+grepping it cannot prove a file passed. It reports `passed` / `failed` / `skipped` / `excluded` /
+`absent` / `unknown` separately, and reports the whole run's status apart from the test step's,
+because those two differ constantly. A file that is already failing on the default branch is not
+yours to fix; say so instead of burning fix cycles on it.
+
 ## Fixing failures — max 2 cycles
 
 When the suite fails:
@@ -80,6 +88,11 @@ Making these changes is fixing a broken test, not weakening a real one — the t
 When judging whether a change is adequately tested, ask:
 
 - Is the new/changed behaviour exercised by at least one test?
-- Does a bug fix have a regression test that would have caught the original bug?
+- Does a bug fix have a regression test that would have caught the original bug? Asserting that it
+  *would* have is cheap and usually wrong. When the claim has to hold up — a reported regression, a
+  fix someone will re-litigate — `devkit prove-regression --red <ref> --green <ref> -- <test command>`
+  runs the same argv at both refs in two disposable clones and records the exits. Land a test-only
+  red commit first, then the fix. It captures execution evidence; it does not prove the red failure
+  had the cause you claim, so read the retained red output before publishing it.
 - Are the meaningful edge cases (empty, boundary, error) covered, not just the happy path?
 - Do the tests assert on observable behaviour, not implementation detail that will break on any refactor?

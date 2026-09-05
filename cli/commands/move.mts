@@ -259,6 +259,7 @@ function pruneBaselines(cwd: string, oldRelPaths: string[], dryRun: boolean): nu
 
 export const meta = {
   name: 'move',
+  agentFacing: true,
   summary: 'Relocate source files + rewrite every reference.',
   help: `devkit move — relocate source files + rewrite EVERY reference to the new path.
 
