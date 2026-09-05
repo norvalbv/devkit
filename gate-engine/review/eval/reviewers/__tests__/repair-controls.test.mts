@@ -5,6 +5,7 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { scoreRow } from '../corpus/row.mts';
 
 const rows = readFileSync(new URL('../cases-correctness.jsonl', import.meta.url), 'utf8')
   .trim()
@@ -128,6 +129,64 @@ const reportControl = `const { runReport } = await import('./src/report/command.
  console.log(JSON.stringify({ names: Object.keys(all.reports), summary: all.reports.size.summary.firstCleanPass, families: all.reports.fanout.families, tally: all.reports.fanout.tally, drift: all.reports.structure.drift, check: all.reports.structure.checks[0].regressed, empty: empty.exitCode, typo: typo.exitCode, timing: mixed.reports.size.timing, legacyDrift: legacy.reports.structure.drift, invalid: invalid.map(result => result.exitCode) }));`;
 
 describe('sc-2500 executable repair controls', () => {
+  it('separates expected-lens blocking from diagnosis of the classifier target (sc-2831)', () => {
+    const gold = rows.find((r) => r.id === 'corr-asymmetric-flip-classifier');
+    const repair = rows.find((r) => r.id === `${gold.id}-repaired`);
+    const file = 'src/bench/classify-flip.ts';
+    const probe = `const { classifyFlip } = await import('./src/bench/classify-flip.ts');
+      console.log(JSON.stringify({
+        other: classifyFlip([{ lost: 0, gained: 1, prevOk: true, curOk: false }]),
+        target: classifyFlip([
+          { lost: 1, gained: 0, prevOk: true, curOk: true },
+          { lost: 0, gained: 1, prevOk: true, curOk: true }
+        ])
+      }));`;
+    for (const [files, improvements] of [
+      [gold.repo.base, 1],
+      [{ ...gold.repo.base, ...gold.repo.staged }, 0],
+      [{ ...repair.repo.base, ...repair.repo.staged }, 1],
+    ])
+      expect(exercise(files, probe)).toEqual({
+        other: { regressions: 0, improvements: 1 },
+        target: { regressions: 1, improvements },
+      });
+
+    const source = gold.repo.staged[file];
+    expect(source.split('r.prevOk !== r.curOk')).toHaveLength(2);
+    const counterfactual = source.replace(
+      'r.prevOk !== r.curOk',
+      'r.prevOk === false && r.curOk === true',
+    );
+    expect(
+      exercise({ ...gold.repo.base, ...gold.repo.staged, [file]: counterfactual }, probe),
+    ).toEqual({
+      other: { regressions: 0, improvements: 0 },
+      target: { regressions: 1, improvements: 0 },
+    });
+
+    const proxy = scoreRow(
+      gold,
+      [
+        {
+          label: `review:${gold.reviewer}`,
+          out: 'VERDICT: FAIL',
+          ms: 0,
+          snapshot: {
+            items: [
+              {
+                name: gold.expectItems[0],
+                status: 'fail',
+                issues: ['Other classification concern'],
+              },
+            ],
+          },
+        },
+      ],
+      { status: 'fail' },
+    );
+    expect(proxy).toMatchObject({ okFirst: true, okFinal: true, reasonClass: 'right-item' });
+  });
+
   it('JSON repair preserves the base behavior; the terminal-status race predates both diffs', () => {
     const gold = rows.find((r) => r.id === ids[3]);
     const repair = rows.find((r) => r.id === `${ids[3]}-repaired`);
