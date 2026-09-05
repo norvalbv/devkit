@@ -1,0 +1,113 @@
+{
+  "schemaVersion": 1,
+  "kind": "production-attribution-identifiability",
+  "recordedAt": "2026-09-05T04:34:32.334190+00:00",
+  "source": "collector read-only transaction",
+  "latestShipAtSnapshot": "2026-09-05T04:14:39Z",
+  "cohort": "Recorded correctness-review outcome events joined to ships and reviewer scope. Executed subset requires scope.cached=0; cached and unknown flags remain explicit. This is observational, not a randomized model contrast.",
+  "timeBasis": "ship ts_start, UTC; lower inclusive, upper exclusive",
+  "windows": {
+    "pre": [
+      "2026-08-17",
+      "2026-08-26"
+    ],
+    "post": [
+      "2026-08-26",
+      "2026-09-05"
+    ]
+  },
+  "historicalBankDiffs": [
+    "032d886019d372296aa86749ef79a71b964379c7a6c1eb90fac1868b5de04e73",
+    "0aa63cf864b568fd7d6806fb8d1e86974a00277d85a33e6f22eba3608937babd",
+    "2e0713a80df2c0dca2b3790cb293b2bba9adf49804845a0cfacc681bb5086abd",
+    "3f1389b9293c21cb3d1ec17387e18427baed8360275f754c6073a35927d0e5aa",
+    "63a1f928f40ab03882c1f408f32eb9cdfe0b865cfdaf3ae79e3d3cf7e4b76568",
+    "6e42021c793d9b9f9f1ad51195a3986c029faf1569dae0aaf5337e628cea112e",
+    "fe31a21e54fcbc48dbd552494408b94d9f0d362a58e85ae0dc98fa56112ee793"
+  ],
+  "historicalBankCount": 7,
+  "rows": [
+    {
+      "period": "post",
+      "model": "gpt-5.6-sol",
+      "review_events": 1208,
+      "review_ships": 1208,
+      "fails": 849,
+      "passes": 323,
+      "inconclusive": 36,
+      "errors": 0,
+      "missing_diff_identity": 0,
+      "bank_matches": 0,
+      "recorded_cached": 2,
+      "executed_review_events": 1206,
+      "executed_fails": 849,
+      "unknown_cache_status": 0
+    },
+    {
+      "period": "post",
+      "model": "sonnet",
+      "review_events": 119,
+      "review_ships": 119,
+      "fails": 57,
+      "passes": 62,
+      "inconclusive": 0,
+      "errors": 0,
+      "missing_diff_identity": 0,
+      "bank_matches": 0,
+      "recorded_cached": 6,
+      "executed_review_events": 113,
+      "executed_fails": 57,
+      "unknown_cache_status": 0
+    },
+    {
+      "period": "pre",
+      "model": "gpt-5.6-sol",
+      "review_events": 12,
+      "review_ships": 12,
+      "fails": 8,
+      "passes": 4,
+      "inconclusive": 0,
+      "errors": 0,
+      "missing_diff_identity": 0,
+      "bank_matches": 0,
+      "recorded_cached": 0,
+      "executed_review_events": 12,
+      "executed_fails": 8,
+      "unknown_cache_status": 0
+    },
+    {
+      "period": "pre",
+      "model": "sonnet",
+      "review_events": 504,
+      "review_ships": 504,
+      "fails": 264,
+      "passes": 206,
+      "inconclusive": 34,
+      "errors": 0,
+      "missing_diff_identity": 0,
+      "bank_matches": 1,
+      "recorded_cached": 49,
+      "executed_review_events": 455,
+      "executed_fails": 264,
+      "unknown_cache_status": 0
+    }
+  ],
+  "postFlipBankMatches": 0,
+  "postFlipAttributionCoverage": 0,
+  "fractionFailRateRiseDueToExtras": null,
+  "identifiability": "not-estimable",
+  "reason": "None of the post-flip review inputs matches the seven historical bank diffs. Complete claims from this bank cannot partition production post-flip FAIL events into labelled-defect and extra causes.",
+  "limitations": [
+    "Extras can be valid defects; extra is not a false-positive label.",
+    "The pre/post and model cohorts differ in machine, workload, chunking and selection.",
+    "An extra plus a labelled blocker does not imply that removing the extra clears the review.",
+    "A representative post-flip input cohort with complete parent-task evidence and semantic claim/label adjudication is required for attribution."
+  ],
+  "query": "SELECT CASE WHEN s.ts_start < :flip THEN 'pre' ELSE 'post' END period,\n r.model, count(*) review_events, count(DISTINCT r.ship_id) review_ships,\n sum(r.status='fail') fails, sum(r.status='pass') passes,\n sum(r.status='inconclusive') inconclusive, sum(r.status='error') errors,\n sum(sc.diff_sha256 IS NULL) missing_diff_identity,\n sum(sc.diff_sha256 IN (SELECT value FROM json_each(:diffs))) bank_matches,\n sum(sc.cached=1) recorded_cached, sum(sc.cached=0) executed_review_events,\n sum(sc.cached=0 AND r.status='fail') executed_fails,\n sum(sc.cached IS NULL) unknown_cache_status\nFROM commit_reviews r JOIN commit_ships s USING(ship_id)\nLEFT JOIN commit_review_scope sc ON sc.ship_id=r.ship_id AND sc.reviewer=r.reviewer\nWHERE r.reviewer='correctness-reviewer'\n AND r.model IN ('sonnet','gpt-5.6-sol')\n AND s.ts_start>=:start AND s.ts_start<:end\nGROUP BY period,r.model ORDER BY period,r.model",
+  "queryParameters": {
+    "start": "2026-08-17",
+    "flip": "2026-08-26",
+    "end": "2026-09-05",
+    "diffs": "[\"032d886019d372296aa86749ef79a71b964379c7a6c1eb90fac1868b5de04e73\", \"0aa63cf864b568fd7d6806fb8d1e86974a00277d85a33e6f22eba3608937babd\", \"2e0713a80df2c0dca2b3790cb293b2bba9adf49804845a0cfacc681bb5086abd\", \"3f1389b9293c21cb3d1ec17387e18427baed8360275f754c6073a35927d0e5aa\", \"63a1f928f40ab03882c1f408f32eb9cdfe0b865cfdaf3ae79e3d3cf7e4b76568\", \"6e42021c793d9b9f9f1ad51195a3986c029faf1569dae0aaf5337e628cea112e\", \"fe31a21e54fcbc48dbd552494408b94d9f0d362a58e85ae0dc98fa56112ee793\"]"
+  }
+}

@@ -1,5 +1,5 @@
-/** sc-2493: adjudication script for the banked differential-replay findings — extras (no telemetry
- * label) deduped on (diff12, lens, file, line//10) across models AND arms, tiered by model family. */
+/** Historical location/proximity proxy; claim-cli.mts measures exact occurrence precision.
+ * Deduplication here uses (diff12, lens, file, line//10), not semantic defect identity. */
 
 // Usage: `report [--banks a,b] [--adjudications f] [--by who]` · `sample --n 40 --seed 7 [--min 3] --out dir`.
 // Adjudications JSONL: {key, verdict: 'REAL'|'NOT'|'UNSURE', by, at, note?}; haiku proxy never counted.
@@ -260,8 +260,8 @@ function main(): void {
       console.log(
         `  ${r.tier.padEnd(13)} extras ${String(r.extras).padStart(4)} · judged ${r.judged} (REAL ${r.real} / NOT ${r.not} / UNSURE ${r.unsure})` +
           (r.precision
-            ? ` · precision ${r.precision.value.toFixed(2)} [${r.precision.lower.toFixed(2)}, ${r.precision.upper.toFixed(2)}]`
-            : ' · precision n/a'),
+            ? ` · historical location-proxy precision ${r.precision.value.toFixed(2)} [${r.precision.lower.toFixed(2)}, ${r.precision.upper.toFixed(2)}] (legacy interval)`
+            : ' · historical location-proxy precision n/a'),
       );
     const byLens = new Map<string, number>();
     for (const e of extras) byLens.set(e.lens, (byLens.get(e.lens) ?? 0) + 1);

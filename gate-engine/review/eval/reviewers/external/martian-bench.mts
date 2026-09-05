@@ -189,6 +189,7 @@ for (const g of selected) {
     attemptTs: meta.created_at,
     diffText,
     researchRoot: path.join(RESEARCH, 'worktrees'),
+    reviewAssetsRoot: devkitRoot,
   });
   syncReviewAssets(devkitRoot, wt);
 

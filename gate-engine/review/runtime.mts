@@ -139,6 +139,20 @@ export interface ReviewItem {
   rationale?: string;
 }
 
+/** Private terminal artifact snapshot; original positions and strings never ride the event. */
+export interface ReviewCaptureItem extends Omit<ReviewItem, 'issues' | 'rationale'> {
+  itemIndex: number;
+  issues: string[];
+}
+
+export interface ReviewCapture {
+  version: 1;
+  provenance: 'exact-checklist' | 'capped-fallback' | 'missing-invalid';
+  artifact?: 'items' | 'files';
+  skipped?: string;
+  items: ReviewCaptureItem[];
+}
+
 export interface ReviewOutcome {
   name: string;
   status: 'pass' | 'fail' | 'inconclusive' | 'error';
@@ -177,7 +191,9 @@ export interface ReviewOutcome {
   itemsRef?: string;
   /** Off-wire copy of the vector with full issue text, for a bench that banks findings (sc-2493).
    * Present only when the cascade was asked for it; never serialized onto an event. */
-  itemsFull?: Array<{ lens: string; status: string; issues: string[] }>;
+  itemsFull?: Array<ReviewItem & { issues: string[]; itemIndex?: number }>;
+  /** Versioned private capture, including empty and missing artifacts; opt-in with itemsFull. */
+  capture?: ReviewCapture;
   /** The model that actually ran the first pass (Reviewer.model pin, else the cascade default).
    * Absent only when no judge ran (missing brief). Telemetry/cache must report THIS, never the
    * global default — a sonnet-pinned reviewer's verdict labeled 'haiku' sends readers of the

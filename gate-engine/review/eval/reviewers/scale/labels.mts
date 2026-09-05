@@ -9,13 +9,13 @@
  */
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { readFileSync } from 'node:fs';
 import { identityByPath } from '../../../lens/chunk.mts';
 import { assertMergedParentRows } from '../warehouse-guards.mts';
+import type { CheckpointRow } from './lens-run.mts';
 
 export interface ScaleLabel {
   lens: string;
@@ -61,18 +61,50 @@ export function linesMatch(a: number | null, b: number | null): boolean {
   return a === null || b === null || Math.abs(a - b) <= 10;
 }
 
+export function assertDiffSha256(value: string): void {
+  if (!/^[a-f0-9]{64}$/.test(value))
+    throw new Error('diff must be a 64-character lowercase SHA-256');
+}
+
 export function archivedDiffPath(sha256: string): string {
+  assertDiffSha256(sha256);
   return path.join(os.homedir(), '.devkit', 'telemetry', 'diffs', `${sha256}.diff.gz`);
 }
 
-export function readArchivedDiff(sha256: string): string | null {
-  const p = archivedDiffPath(sha256);
-  if (!existsSync(p)) return null;
+export type ArchivedDiffEvidence =
+  | { text: string; error?: never }
+  | { text: null; error: 'missing-diff' | 'unreadable-diff-archive' | 'invalid-diff-archive' };
+
+export function readArchivedDiffEvidence(sha256: string): ArchivedDiffEvidence {
+  let archive: string;
   try {
-    return gunzipSync(readFileSync(p)).toString('utf8');
+    archive = archivedDiffPath(sha256);
   } catch {
-    return null;
+    return { text: null, error: 'invalid-diff-archive' };
   }
+  let bytes: Buffer;
+  try {
+    bytes = readFileSync(archive);
+  } catch (error) {
+    return {
+      text: null,
+      error:
+        error instanceof Error && 'code' in error && error.code === 'ENOENT'
+          ? 'missing-diff'
+          : 'unreadable-diff-archive',
+    };
+  }
+  try {
+    return {
+      text: new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(gunzipSync(bytes)),
+    };
+  } catch {
+    return { text: null, error: 'invalid-diff-archive' };
+  }
+}
+
+export function readArchivedDiff(sha256: string): string | null {
+  return readArchivedDiffEvidence(sha256).text;
 }
 
 interface LensRow {
@@ -196,15 +228,14 @@ export function gzipText(text: string): Buffer {
 }
 
 /** A scale-bench results file (written tmp+rename by scale-bench.mts). */
+export type ResultsRow = Pick<CheckpointRow, 'arm' | 'issues'> & Partial<CheckpointRow>;
 export interface ResultsFile {
   diff: string;
-  labels: Array<{ file: string; line: number | null }>;
-  rows: Array<{
-    arm: string;
-    model?: string;
-    status?: string;
-    issues: Array<{ lens: string; text: string }>;
-  }>;
+  base?: string;
+  arms?: string[];
+  model?: string;
+  labels: Array<Pick<ScaleLabel, 'file' | 'line'> & Partial<ScaleLabel>>;
+  rows: ResultsRow[];
 }
 
 /** The issue's mentioned locations RESOLVED against the staged set — the raw first regex match can
