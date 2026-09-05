@@ -56,8 +56,9 @@ import {
   publishPlan,
   release,
   skipProvider,
-  stripRetiredRegistrations,
+  stripReclaimedCommands,
 } from './hook-registration-ledger/install-support.mts';
+import { reconcileLegacyHookCommands } from './hook-registration-ledger/legacy-commands.mts';
 import {
   checkProjectedHookRegistrations,
   installProjectedHookRegistrations,
@@ -320,7 +321,6 @@ export function installHookRegistrations(
   }: HookRegistrationOptions = {},
 ): { wrote: string[] } {
   const scope: HookInstallScope = overlay ? 'overlay' : 'shared';
-  const reconciliationIds = [...new Set([...componentIds, ...(legacyOwnedComponentIds ?? [])])];
   return withAgentAssetLifecycleLock(root, dryRun, () => {
     const initial = readHookRegistrationLedger(root) ?? ledgerOf();
     let entries = [...initial.entries];
@@ -331,8 +331,10 @@ export function installHookRegistrations(
       const rel = hookRegistrationDestination(provider, scope);
       if (skipProvider(root, provider, rel, overlay)) continue;
       let document = providerDocument(root, provider, rel);
-      const retired = stripRetiredRegistrations(document, reconciliationIds, provider);
+      const legacy = reconcileLegacyHookCommands(entries, provider, rel);
+      const retired = stripReclaimedCommands(document, provider, legacy.stripped);
       document = retired.document;
+      entries = legacy.entries;
       entries = adoptExactLegacy(entries, document, legacyOwnedComponentIds, provider, scope);
       entries = transferHookRegistrationScope(entries, provider, scope);
       const removed = removeLedgerAuthorizedHookRegistrations(
@@ -363,7 +365,11 @@ export function installHookRegistrations(
         rel,
         document: installed.document,
         changed: retired.changed || removed.changed || installed.changed,
-        report: retired.changed || removed.changed || installed.ownershipEntries.length > 0,
+        report:
+          retired.changed ||
+          legacy.ledgerChanged ||
+          removed.changed ||
+          installed.ownershipEntries.length > 0,
       };
       published = publishPlan(root, plan, entries, published, dryRun);
       if (plan.report) wrote.push(plan.rel);
@@ -400,7 +406,6 @@ export function removeHookRegistrations(
   }: HookRegistrationOptions = {},
 ): void {
   const scope: HookInstallScope = overlay ? 'overlay' : 'shared';
-  const reconciliationIds = legacyOwnedComponentIds ?? Object.keys(HOOK_REGISTRATIONS);
   withAgentAssetLifecycleLock(root, dryRun, () => {
     const storedLedger = readHookRegistrationLedger(root);
     if (!storedLedger && !legacyOwnedComponentIds) {
@@ -415,8 +420,10 @@ export function removeHookRegistrations(
       const rel = hookRegistrationDestination(provider, scope);
       if (skipProvider(root, provider, rel, overlay)) continue;
       let document = providerDocument(root, provider, rel);
-      const retired = stripRetiredRegistrations(document, reconciliationIds, provider);
+      const legacy = reconcileLegacyHookCommands(entries, provider, rel);
+      const retired = stripReclaimedCommands(document, provider, legacy.stripped);
       document = retired.document;
+      entries = legacy.entries;
       entries = adoptExactLegacy(entries, document, legacyOwnedComponentIds, provider, scope);
       entries = transferHookRegistrationScope(entries, provider, scope);
       const removed = removeLedgerAuthorizedHookRegistrations(
@@ -458,19 +465,17 @@ export function checkHookRegistrations(
       continue;
     }
     const document = providerDocument(root, provider, rel);
-    if (stripRetiredRegistrations(document, componentIds, provider).changed)
+    // Reconcile the ledger, but evaluate the ORIGINAL document below — reporting only the ledger
+    // half would hide a settings.json still naming a hook script that does not exist.
+    const legacy = reconcileLegacyHookCommands(ledger?.entries ?? [], provider, rel);
+    if (stripReclaimedCommands(document, provider).changed)
       missing.push(`${provider}:retired-registration`);
+    if (legacy.ledgerChanged) missing.push(`${provider}:superseded-registration`);
     const effectiveLedger = legacyOwnedComponentIds?.length
       ? ledgerOf(
-          adoptExactLegacy(
-            [...(ledger?.entries ?? [])],
-            document,
-            legacyOwnedComponentIds,
-            provider,
-            scope,
-          ),
+          adoptExactLegacy(legacy.entries, document, legacyOwnedComponentIds, provider, scope),
         )
-      : ledger;
+      : ledgerOf(legacy.entries);
     const result = checkProjectedHookRegistrations(
       document,
       projectHookRegistrations(componentIds, [provider], scope),

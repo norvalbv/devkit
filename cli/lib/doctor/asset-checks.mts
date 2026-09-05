@@ -18,6 +18,7 @@ import { packageDir, readJson, sha256 } from '../fs-helpers.mts';
 import { isSafeAgentAssetPath } from '../install/agent-asset-manifest/lifecycle.mts';
 import { readAgentAssetManifest } from '../install/agent-asset-manifest/reader.mts';
 import { agentAssetDir, projectedAssetRel } from '../install/agent-assets/agent-assets.mts';
+import { PKG, registrationsFor } from '../install/hook-registration-ledger/registrations.mts';
 import type { AgentAssetKind, AgentProvider } from '../install/agent-assets/agent-providers.mts';
 import { checkHookRegistrations } from '../install/install-hooks.mts';
 import { bundledNames } from '../sync-manifest.mts';
@@ -345,4 +346,23 @@ export function checkRegistrations(
     'run `devkit init` to re-register',
     true,
   );
+}
+
+/** Resolve on disk the target of every hook command devkit REGISTERS, from `scriptRel` data rather
+ * than shell text. The check this replaces went through packageDir(), already inside dist/. */
+export function checkRegisteredHookTargets(cwd: string, componentIds: string[]): CheckResult {
+  const { gitRoot } = detectGitRoot(cwd);
+  const missing = registrationsFor(componentIds).flatMap((registration) =>
+    registration.scriptRel && !existsSync(join(gitRoot, PKG, registration.scriptRel))
+      ? [`${registration.registrationId} → ${registration.scriptRel}`]
+      : [],
+  );
+  if (missing.length)
+    return check(
+      'registered hook targets',
+      'MISSING',
+      `registered hook script(s) absent: ${missing.join(', ')}`,
+      'reinstall @norvalbv/devkit, then run `devkit init` to refresh the registrations',
+    );
+  return check('registered hook targets', 'OK', 'every registered hook script resolves');
 }
