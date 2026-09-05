@@ -23,6 +23,7 @@ production path, and its output (`candidates.jsonl`) is gitignored.
 
 ```bash
 node bench.mts validate [reviewer]      # 0 LLM calls — corpus linter (run before any spend)
+node bench.mts plan [reviewer]          # 0 LLM calls — native chunk/task census
 node bench.mts coverage                 # 0 LLM calls — catalog + per-lens gold counts + difficulty
 node bench.mts run [reviewer|all] [--dev] [--only <idPrefix>] [--baseline] [--fail]
 node bench.mts run <reviewer> --against <before.json>   # A/B a prompt edit (directional; §A/B below)
@@ -32,14 +33,17 @@ Knobs: `BENCH_MODEL` (first-pass model, default `sonnet` = production) · `BENCH
 (short-circuit the opus escalation: first-pass metrics only, zero opus spend) ·
 `BENCH_CONCURRENCY` (default 2, the gate's own judge-contention default).
 
-**Checkpoint/resume (rate-limit safe).** Every completed row is appended to
-`progress-<model>-<cascade>.jsonl` the moment it lands. Re-running the **same command**
-auto-resumes: a row checkpointed under the same (model, cascade, gateHash) AND an unchanged
-per-row `rowHash` is salvaged instead of re-run; outage/engine-error rows always re-run; `--fresh` discards the
-checkpoint. After 3 consecutive judge outages (drained credit pool / rate limit) the run pauses
-itself — completed rows are safe, partial numbers are labelled PARTIAL and never gate or become
-a baseline — switch accounts and re-run the same command. The checkpoint file is deleted when a
-run completes.
+**Checkpoint/resume.** Each completed native task and row enters an ignored progress ledger.
+The same command reuses matching completed tasks, including quality misses; it retries only
+incomplete execution. Effective model, escalation, cap, lens arm and runner/planner identity must
+match. Three consecutive outage/error rows pause the run, and incomplete results cannot become a
+baseline. `--fresh` explicitly discards the active ledger. Successful runs archive raw task attempts
+privately as `progress-…-completed-<uuid>.jsonl`, separate from the next run's resume ledger.
+
+The sc-2500 executable repair baseline uses the shipped Sol pin, a frozen native plan and one
+correctness-only measurement without `--fail` or `--against`. See the current
+[corpus growth workflow](../../../../../docs/benchmarks/corpus-growth.md) for epoch, holdout and
+label-noise rules. The examples below describe historical model-sweep experiments.
 
 The standard workflow — **iterate on haiku, spend on sonnet/opus only at the end** (any
 expensive-model numbers collected before an agent edit are invalidated by the gateHash change,

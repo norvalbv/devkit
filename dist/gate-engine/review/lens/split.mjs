@@ -42,6 +42,7 @@ import { emitReviewChunkPlan } from '../evidence/chunk-plan.mjs';
 import { emitGateEvent } from '../../judge/gate-events.mjs';
 import { composeTranscript, saveTranscript } from '../../judge/transcript-store.mjs';
 import { itemFields, mergeItemVectors } from '../evidence/items.mjs';
+import { parseReviewVerdict } from '../contracts/response.mjs';
 /**
  * The mandatory-checklist paragraph of a judge prompt.
  *
@@ -175,7 +176,7 @@ export function holdLensPart(parts, reviewer, part, label) {
  * Exactly ONE scope row per reviewer regardless of fan-out (gate-verdict-attribution pairs it with
  * one review_result), and a reviewer counts as a cache HIT only when EVERY one of its groups was.
  */
-export function planReviewWork(selected, diffs, cache, salts, keyOf, groups = resolveLensGroups(), chunkCap = resolveChunkCap()) {
+export function planReviewWork(selected, diffs, cache, salts, keyOf, groups = resolveLensGroups(), chunkCap = resolveChunkCap(), emitChunkPlan = emitReviewChunkPlan) {
     const tasks = [];
     const scope = [];
     const fullyCached = [];
@@ -198,7 +199,7 @@ export function planReviewWork(selected, diffs, cache, salts, keyOf, groups = re
             ? planChunkedParts(sel, diffs[i], idText, salt, keyOf, split, chunkCap)
             : null;
         if (chunked)
-            emitReviewChunkPlan(name, {
+            emitChunkPlan(name, {
                 count: chunked.facts.count,
                 capBytes: chunked.facts.capBytes,
                 planHash: chunked.facts.planHash,
@@ -282,8 +283,6 @@ export async function runReviewerCascade(sel, run, groups = resolveLensGroups())
         ? runLensCascades(sel, groups, run)
         : run(sel);
 }
-// Tolerates the same markdown dressing around the verdict token that parseReviewVerdict allows.
-const CAPTURE_FAIL_RE = /VERDICT:\s*\**\s*FAIL\b/i;
 /**
  * Merge the per-group spy captures a split arm produces into the ONE entry bench scoring expects.
  *
@@ -297,7 +296,7 @@ const CAPTURE_FAIL_RE = /VERDICT:\s*\**\s*FAIL\b/i;
 export function mergeLensCaptures(entries) {
     if (entries.length < 2)
         return entries[0];
-    const failing = entries.find((e) => CAPTURE_FAIL_RE.test(String(e.out ?? '')));
+    const failing = entries.find((e) => parseReviewVerdict(String(e.out ?? '')).verdict === 'FAIL');
     const items = entries.flatMap((e) => {
         const snap = e.snapshot;
         return Array.isArray(snap?.items) ? snap.items : [];

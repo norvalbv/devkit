@@ -238,32 +238,58 @@ export function summarize(results, { cascade } = {}) {
   };
 }
 
-/** Pair-level contrast consistency over the same pair relation holdout uses (groupByPair): a gold+decoy
- * group is consistent when both are ok (okFinal under a cascade). Singletons/malformed reported. */
+/** Count explicit repair edges inside whole holdout families; preserve legacy two-member pairs.
+ * Unmatched or malformed members remain visible. Correlated edges carry no binomial interval. */
 export function pairConsistency(results, { cascade } = {}) {
   const ok = (r) => (cascade ? r.okFinal : r.okFirst);
-  // Grouping is keyed on row id (a variantOf target has no link of its own), so only rows that
-  // carry one are grouped; an id-less record is a singleton by definition.
   const withId = results.filter((r) => !!r.id);
-  let k = 0;
-  let n = 0;
+  let k = 0,
+    n = 0,
+    families = 0,
+    familyK = 0,
+    malformed = 0;
   let singletons = results.length - withId.length;
-  let malformed = 0;
   for (const g of groupByPair(withId).values()) {
     if (g.length === 1) {
       singletons += 1;
+      if (g[0].expected === 'PASS' && g[0].variantOf) malformed += 1;
       continue;
     }
     const gold = g.filter((r) => r.expected === 'FAIL');
     const decoy = g.filter((r) => r.expected === 'PASS');
-    if (g.length !== 2 || gold.length !== 1 || decoy.length !== 1) {
+    let edges = decoy
+      .filter((r) => r.variantOf)
+      .map((r) => [g.find((x) => x.id === r.variantOf), r]);
+    if (!g.some((r) => r.variantOf) && g.length === 2 && gold.length === 1 && decoy.length === 1)
+      edges = [[gold[0], decoy[0]]];
+    const valid = edges.filter(([a]) => a?.expected === 'FAIL');
+    const used = new Set(valid.flat().map((r) => r.id));
+    if (
+      gold.some((r) => decoy.some((d) => d.id === r.variantOf)) ||
+      valid.length !== edges.length ||
+      used.size !== g.length ||
+      new Set(g.map((r) => r.id)).size !== g.length
+    )
       malformed += 1;
-      continue;
+    if (valid.length) {
+      families += 1;
+      if (used.size === g.length && g.every(ok)) familyK += 1;
     }
-    n += 1;
-    if (ok(gold[0]) && ok(decoy[0])) k += 1;
+    for (const [a, b] of valid) {
+      n += 1;
+      if (ok(a) && ok(b)) k += 1;
+    }
   }
-  return { k, n, singletons, malformedGroups: malformed };
+  return { k, n, families, familyK, singletons, malformedGroups: malformed };
+}
+
+export function assertRepairFamilies(rows) {
+  const ids = new Set(rows.map((r) => r.id));
+  const dangling = rows.find((r) => r.variantOf && !ids.has(r.variantOf));
+  if (dangling) throw new Error(`${dangling.id}: dangling variantOf ${dangling.variantOf}`);
+  const { malformedGroups } = pairConsistency(rows);
+  if (malformedGroups)
+    throw new Error(`corpus has ${malformedGroups} malformed or unmatched repair families`);
 }
 
 /** Budget for the run banner, priced per EFFECTIVE model. A model with no table entry is returned

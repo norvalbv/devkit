@@ -2,7 +2,7 @@ import {
   DECISIONS_ACCEPTANCE,
   selectAlignmentContradiction,
 } from '../decisions/eval/acceptance.mts';
-import { ratio, REVIEWER_LABEL_NOISE_FLOOR, wilson } from './metric-ratio.mts';
+import { ratio, reviewerPairMetrics, REVIEWER_LABEL_NOISE_FLOOR, wilson } from './metric-ratio.mts';
 export { wilson };
 import { parseDeterministic as parseDeterministicBaseline } from './suite-adapters/deterministic.mts';
 import { parsePriorArtBaseline } from './suite-adapters/prior-art.mts';
@@ -219,14 +219,11 @@ export function parseReviewer(input: Json): ParsedBaseline {
     // counted toward section completeness — older baselines carry no pairs.
     if (pairs && pairs.n > 0)
       metrics.push(
-        ratio(
-          `${key}:pair-consistency`,
-          `${key} pair consistency`,
-          pairs.k,
-          pairs.n,
-          'higher',
-          noise,
-        ),
+        ...reviewerPairMetrics(key, {
+          ...pairs,
+          families: summary.pairConsistency.families,
+          familyK: summary.pairConsistency.familyK,
+        }),
       );
     cohorts.set(cohortKey, cohort);
     if (sectionMetrics >= 2) completeSections += 1;

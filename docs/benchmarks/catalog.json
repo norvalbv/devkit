@@ -524,8 +524,21 @@
           "skills/api-security/**"
         ],
         "corpus": ["gate-engine/review/eval/reviewers/cases-api-security.jsonl"],
-        "scorer": ["gate-engine/review/eval/reviewers/bench.mts"],
-        "runner": ["gate-engine/review/eval/reviewers/bench.mts"]
+        "scorer": [
+          "gate-engine/review/eval/reviewers/bench.mts",
+          "gate-engine/review/eval/reviewers/stats.mts",
+          "gate-engine/eval/adapters.mts",
+          "gate-engine/eval/metric-ratio.mts"
+        ],
+        "runner": [
+          "gate-engine/review/eval/reviewers/bench.mts",
+          "gate-engine/review/eval/reviewers/corpus.mts",
+          "gate-engine/review/eval/reviewers/progress.mts",
+          "gate-engine/review/eval/reviewers/corpus/row.mts",
+          "gate-engine/review/eval/reviewers/corpus/chunk-guard.mts",
+          "gate-engine/review/lens/*.mts",
+          "gate-engine/review/cascade/reviewer.mts"
+        ]
       }
     },
     {
@@ -549,8 +562,21 @@
           "skills/backend-performance/**"
         ],
         "corpus": ["gate-engine/review/eval/reviewers/cases-backend-performance.jsonl"],
-        "scorer": ["gate-engine/review/eval/reviewers/bench.mts"],
-        "runner": ["gate-engine/review/eval/reviewers/bench.mts"]
+        "scorer": [
+          "gate-engine/review/eval/reviewers/bench.mts",
+          "gate-engine/review/eval/reviewers/stats.mts",
+          "gate-engine/eval/adapters.mts",
+          "gate-engine/eval/metric-ratio.mts"
+        ],
+        "runner": [
+          "gate-engine/review/eval/reviewers/bench.mts",
+          "gate-engine/review/eval/reviewers/corpus.mts",
+          "gate-engine/review/eval/reviewers/progress.mts",
+          "gate-engine/review/eval/reviewers/corpus/row.mts",
+          "gate-engine/review/eval/reviewers/corpus/chunk-guard.mts",
+          "gate-engine/review/lens/*.mts",
+          "gate-engine/review/cascade/reviewer.mts"
+        ]
       }
     },
     {
@@ -574,8 +600,21 @@
           "skills/frontend-security/**"
         ],
         "corpus": ["gate-engine/review/eval/reviewers/cases-frontend-security.jsonl"],
-        "scorer": ["gate-engine/review/eval/reviewers/bench.mts"],
-        "runner": ["gate-engine/review/eval/reviewers/bench.mts"]
+        "scorer": [
+          "gate-engine/review/eval/reviewers/bench.mts",
+          "gate-engine/review/eval/reviewers/stats.mts",
+          "gate-engine/eval/adapters.mts",
+          "gate-engine/eval/metric-ratio.mts"
+        ],
+        "runner": [
+          "gate-engine/review/eval/reviewers/bench.mts",
+          "gate-engine/review/eval/reviewers/corpus.mts",
+          "gate-engine/review/eval/reviewers/progress.mts",
+          "gate-engine/review/eval/reviewers/corpus/row.mts",
+          "gate-engine/review/eval/reviewers/corpus/chunk-guard.mts",
+          "gate-engine/review/lens/*.mts",
+          "gate-engine/review/cascade/reviewer.mts"
+        ]
       }
     },
     {
@@ -599,8 +638,21 @@
           "skills/frontend-performance/**"
         ],
         "corpus": ["gate-engine/review/eval/reviewers/cases-frontend-performance.jsonl"],
-        "scorer": ["gate-engine/review/eval/reviewers/bench.mts"],
-        "runner": ["gate-engine/review/eval/reviewers/bench.mts"]
+        "scorer": [
+          "gate-engine/review/eval/reviewers/bench.mts",
+          "gate-engine/review/eval/reviewers/stats.mts",
+          "gate-engine/eval/adapters.mts",
+          "gate-engine/eval/metric-ratio.mts"
+        ],
+        "runner": [
+          "gate-engine/review/eval/reviewers/bench.mts",
+          "gate-engine/review/eval/reviewers/corpus.mts",
+          "gate-engine/review/eval/reviewers/progress.mts",
+          "gate-engine/review/eval/reviewers/corpus/row.mts",
+          "gate-engine/review/eval/reviewers/corpus/chunk-guard.mts",
+          "gate-engine/review/lens/*.mts",
+          "gate-engine/review/cascade/reviewer.mts"
+        ]
       }
     },
     {
@@ -624,8 +676,21 @@
           "skills/correctness/**"
         ],
         "corpus": ["gate-engine/review/eval/reviewers/cases-correctness.jsonl"],
-        "scorer": ["gate-engine/review/eval/reviewers/bench.mts"],
-        "runner": ["gate-engine/review/eval/reviewers/bench.mts"]
+        "scorer": [
+          "gate-engine/review/eval/reviewers/bench.mts",
+          "gate-engine/review/eval/reviewers/stats.mts",
+          "gate-engine/eval/adapters.mts",
+          "gate-engine/eval/metric-ratio.mts"
+        ],
+        "runner": [
+          "gate-engine/review/eval/reviewers/bench.mts",
+          "gate-engine/review/eval/reviewers/corpus.mts",
+          "gate-engine/review/eval/reviewers/progress.mts",
+          "gate-engine/review/eval/reviewers/corpus/row.mts",
+          "gate-engine/review/eval/reviewers/corpus/chunk-guard.mts",
+          "gate-engine/review/lens/*.mts",
+          "gate-engine/review/cascade/reviewer.mts"
+        ]
       }
     },
     {

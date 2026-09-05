@@ -37,28 +37,47 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { resolveGuardConfig } from '../../../config.mts';
 import { BenchAbort, cleanBenchEnv, materializeFixture } from '../../../decisions/eval/bench.mts';
-import { execJudgeAsync } from '../../../judge/run-judge.mts';
-import { lensArmSuffix, mergeLensCaptures, runReviewerCascade } from '../../lens/split.mts';
-import { BENCH_CHUNK_LOC, chunkRefusal, preflightChunkRefusals } from './corpus/chunk-guard.mts';
+import { lensArmSuffix } from '../../lens/split.mts';
 import {
-  checklistScript,
-  parseReviewVerdict,
-  REVIEWERS,
-  selectReviewers,
-} from '../../reviewers.mts';
-import { runCascade } from '../../run-review.mts';
-import { gateJudgeEnv } from '../../runtime.mts';
+  BENCH_CHUNK_LOC,
+  BENCH_LENS_GROUPS,
+  executionHash,
+  isolateBenchTelemetry,
+  planFixture,
+  preflightPlans,
+} from './corpus/chunk-guard.mts';
+import { checklistScript, selectReviewers } from '../../reviewers.mts';
+import { gateJudgeEnv, withStagedFiles } from '../../runtime.mts';
 
 // Corpus + fixture-asset layer, checkpoint/salvage/baseline IO, and flip-table statistics (split
 // out to keep this file within its size ratchet).
 export * from './corpus.mts';
 export * from './progress.mts';
 export * from './stats.mts';
+export * from './corpus/row.mts';
+import { runRow, unscoredResult } from './corpus/row.mts';
 
-import { benchGateHash, buildAssets, corpusHash, loadRows, rowHashes } from './corpus.mts';
-import { loadAgainstFile, loadProgress, progressFile, RETRYABLE, salvageMap } from './progress.mts';
+import {
+  BENCH_REVIEWERS,
+  benchGateHash,
+  buildAssets,
+  corpusHash,
+  loadRows,
+  rowHashes,
+} from './corpus.mts';
+import {
+  archiveProgress,
+  loadAgainstFile,
+  loadProgress,
+  progressFile,
+  RETRYABLE,
+  salvageMap,
+  taskSalvage,
+  withBenchmarkRun,
+} from './progress.mts';
 import {
   VERDICT_INJECTION_RE,
+  assertRepairFamilies,
   buildCompareReport,
   extractCommentLines,
   firstPassMeanLines,
@@ -68,7 +87,6 @@ import {
   rowChanged,
   rowUnchanged,
   runBannerLines,
-  subcause,
   summarize,
   wordsOf,
 } from './stats.mts';
@@ -78,7 +96,8 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '../../../..');
 
 const MODEL = process.env.BENCH_MODEL ?? 'sonnet';
-process.env.GUARD_REVIEW_ESCALATION_MODEL = process.env.BENCH_ESCALATE_MODEL ?? 'opus'; // pinned — sectionKey/meta record only the first-pass model; an ambient escalator would blend conditions
+const ESCALATION_MODEL = process.env.BENCH_ESCALATE_MODEL ?? 'opus';
+process.env.GUARD_REVIEW_ESCALATION_MODEL = ESCALATION_MODEL; // pinned — sectionKey/meta record only the first-pass model; an ambient escalator would blend conditions
 const CASCADE = (process.env.BENCH_CASCADE ?? 'on') !== 'off';
 const CONCURRENCY = Math.max(1, Number.parseInt(process.env.BENCH_CONCURRENCY ?? '2', 10) || 2);
 
@@ -87,13 +106,6 @@ const RUNS_LOG = path.join(here, 'runs.log');
 
 // Consecutive judge outages before a run pauses itself (see pause-on-drained-pool below).
 const OUTAGE_TRIP = 3;
-
-/** The reviewers this bench covers — the 4 domain reviewers. commit-guard is deferred: its
- * allowlist appends the consumer's semantic-search MCP tool, which cannot resolve inside a bare
- * fixture repo. A future correctness reviewer joins by adding its cases file here. */
-export const BENCH_REVIEWERS = REVIEWERS.filter(
-  (r) => r.domain === 'backend' || r.domain === 'frontend' || r.domain === 'all',
-);
 
 // Per-pass wall-clock estimates (seconds) for the budget line. Checklist ≈ 4–10 tool turns on top of diff reading; escalation reruns the whole workflow on the escalator.
 const EST_FIRST_SECS = { haiku: 70, sonnet: 135, opus: 270 };
@@ -124,157 +136,10 @@ function preflightClaude() {
   }
 }
 
-// ─── Spy exec ─────────────────────────────────────────────────────────────────────
-
-/**
- * Wrap execJudgeAsync: capture each pass's raw output + duration + a snapshot of the checklist
- * state-file artifact taken IMMEDIATELY after the judge subprocess resolves — runCascade deletes
- * the artifact when it returns, and the escalation pass regenerates it, so per-pass snapshots are
- * the only honest record. With cascade=false an escalate call is short-circuited to a synthetic
- * FAIL (zero opus spend; end-to-end metrics are suppressed for such runs).
- */
-export function makeSpyExec(capture, { reviewer, cascade, delegate = execJudgeAsync }) {
-  return async (opts) => {
-    const isEscalate = opts.label.endsWith(':escalate');
-    if (isEscalate && !cascade) {
-      capture.push({
-        label: opts.label,
-        out: 'VERDICT: FAIL — cascade disabled (bench)',
-        ms: 0,
-        snapshot: null,
-        synthetic: true,
-      });
-      return 'VERDICT: FAIL — cascade disabled (bench)';
-    }
-    const t0 = Date.now();
-    const out = await delegate(opts);
-    let snapshot = null;
-    try {
-      snapshot = JSON.parse(readFileSync(path.resolve(opts.cwd, reviewer.stateFile), 'utf8'));
-    } catch {
-      /* missing/corrupt artifact = null snapshot; scoring buckets it */
-    }
-    capture.push({ label: opts.label, out, ms: Date.now() - t0, snapshot });
-    return out;
-  };
-}
-
-// ─── Row scoring ──────────────────────────────────────────────────────────────────
-// subcause/VERDICT_INJECTION_RE (pure regex classifiers) now live in stats.mts.
-
-/**
- * Deterministic adjudication of one cascade against its row label.
- * Reason attribution (expected-FAIL rows that finally failed): the authoritative artifact is the
- * FAILING pass's snapshot (escalation's when it ran live, else the first pass's).
- */
-/** A row the cascade never scored (not selected, paused, engine error): scoreRow's shape, verdicts empty. */
-export function unscoredResult(row, finalStatus, subcause) {
-  return {
-    id: row.id,
-    reviewer: row.reviewer,
-    expected: row.expected,
-    holdout: !!row.holdout,
-    caseId: row.caseId ?? null,
-    variantOf: row.variantOf ?? null,
-    ...rowHashes(row),
-    firstVerdict: null,
-    okFirst: false,
-    finalStatus,
-    okFinal: false,
-    escalated: false,
-    escalateLive: false,
-    reasonClass: null,
-    subcause,
-    ms: { first: 0, escalate: 0 },
-  };
-}
-
-export function scoreRow(row, capture, cas) {
-  // filter+merge, not find: a split arm captures one entry PER LENS GROUP under the same label.
-  const pick = (l) => mergeLensCaptures(capture.filter((c) => c.label === l));
-  const first = pick(`review:${row.reviewer}`);
-  const esc = pick(`review:${row.reviewer}:escalate`);
-  const firstVerdict = first?.out ? parseReviewVerdict(first.out).verdict : null;
-  const okFirst = firstVerdict === row.expected;
-  const okFinal = cas.status === (row.expected === 'FAIL' ? 'fail' : 'pass');
-  let reasonClass = null;
-  if (row.expected === 'FAIL' && cas.status === 'fail') {
-    const snap = (esc && !esc.synthetic ? esc.snapshot : null) ?? first?.snapshot ?? null;
-    const items = Array.isArray(snap?.items) ? snap.items : [];
-    const failedItems = items.filter((i) => i.status === 'fail').map((i) => i.name);
-    const want = row.expectItems ?? [];
-    if (want.length > 0 && want.every((n) => failedItems.includes(n))) reasonClass = 'right-item';
-    else {
-      const text = [
-        ...items.flatMap((i) => i.issues ?? []),
-        cas.reason ?? '',
-        esc?.out ?? '',
-        first?.out ?? '',
-      ].join('\n');
-      if (row.reasonPattern && new RegExp(row.reasonPattern, 'i').test(text))
-        reasonClass = 'pattern-only';
-      else reasonClass = failedItems.length === 0 ? 'fail-unattributed' : 'unattributed';
-    }
-  }
-  return {
-    id: row.id,
-    reviewer: row.reviewer,
-    expected: row.expected,
-    holdout: !!row.holdout,
-    caseId: row.caseId ?? null,
-    variantOf: row.variantOf ?? null,
-    ...rowHashes(row),
-    firstVerdict,
-    okFirst,
-    finalStatus: cas.status,
-    okFinal,
-    escalated: !!cas.escalated,
-    escalateLive: !!esc && !esc.synthetic,
-    reasonClass,
-    subcause: cas.status === 'inconclusive' ? subcause(cas.reason) : null,
-    ms: { first: first?.ms ?? 0, escalate: esc?.ms ?? 0 },
-  };
-}
-
-// ─── Row runner ───────────────────────────────────────────────────────────────────
-
-/**
- * Materialize one row's fixture (gate assets + row base committed, row.staged in the index), run
- * the real cascade with the spy exec, and score it. Row files may not collide with asset paths.
- */
-export async function runRow(row, { model = MODEL, cascade = CASCADE, exec } = {}) {
-  const reviewer = BENCH_REVIEWERS.find((r) => r.name === row.reviewer);
-  if (!reviewer) throw new BenchAbort(2, `${row.id}: unknown reviewer ${row.reviewer}`);
-  const assets = buildAssets(reviewer);
-  for (const key of Object.keys(assets))
-    if (row.repo.base[key] !== undefined || row.repo.staged[key] !== undefined)
-      throw new BenchAbort(2, `${row.id}: row must not define gate asset path ${key}`);
-  const fx = materializeFixture({
-    repo: { base: { ...row.repo.base, ...assets }, staged: row.repo.staged },
-  });
-  try {
-    const cfg = resolveGuardConfig(fx.repo);
-    const sel = selectReviewers(fx.staged, cfg).find((s) => s.reviewer.name === row.reviewer);
-    if (!sel)
-      // Selection itself is under test: a row whose staged files don't reach its reviewer is wrong.
-      return unscoredResult(row, 'not-selected', 'not-selected');
-    const capture = [];
-    const spy = (r) => makeSpyExec(capture, { reviewer: r, cascade, delegate: exec });
-    // gateJudgeEnv = DEVKIT_CHECKLIST_KEEP=1, else the script deletes an all-pass artifact (sc-1438).
-    const opts = { cwd: fx.repo, cfg, firstModel: model, judgeEnv: gateJudgeEnv(false, cfg) };
-    const cas = await runReviewerCascade(sel, (s) =>
-      runCascade(s, { ...opts, exec: spy(s.reviewer) }),
-    );
-    return scoreRow(row, capture, cas);
-  } finally {
-    fx.cleanup();
-  }
-}
-
 // ─── Baseline / compare ───────────────────────────────────────────────────────────
 
 const sectionKey = (reviewerName, model, cascade) =>
-  `${reviewerName}@${model}@${cascade ? 'cascade-on' : 'cascade-off'}${lensArmSuffix(reviewerName)}`;
+  `${reviewerName}@${model}@${cascade ? 'cascade-on' : 'cascade-off'}${lensArmSuffix(reviewerName, BENCH_LENS_GROUPS)}`;
 
 // A model-pinned reviewer (correctness) runs single-pass at its pin regardless of BENCH_MODEL /
 // BENCH_CASCADE; report and key it by what actually ran, not the swept knobs.
@@ -311,6 +176,8 @@ export function compareReviewer(name, nowRows, nowMeta, base, { crossGate = fals
     return {
       skipped: `gate code / brief / checklist changed (${key}) — regenerate with --baseline`,
     };
+  if (!crossGate && nowMeta.executionHash && section.executionHash !== nowMeta.executionHash)
+    return { skipped: 'native execution condition changed — regenerate with --baseline' };
   const baseRows = section.rows ?? {};
   const nowById = new Map(nowRows.map((r) => [r.id, r]));
   const nowIds = [...nowById.keys()];
@@ -403,20 +270,22 @@ export function validateRow(row) {
     const cfg = resolveGuardConfig(fx.repo);
     const sel = selectReviewers(fx.staged, cfg).find((s) => s.reviewer.name === row.reviewer);
     if (!sel) problems.push('selectReviewers does not fire the target reviewer');
-    const refusal = sel ? chunkRefusal(row, sel, fx.repo) : null;
-    if (refusal) problems.push(refusal);
-    execFileSync('node', [checklistScript(reviewer), 'generate'], {
-      cwd: fx.repo,
-      encoding: 'utf8',
-    });
-    let names = [];
-    try {
-      const state = JSON.parse(readFileSync(path.join(fx.repo, reviewer.stateFile), 'utf8'));
-      names = (state.items ?? []).map((i) => i.name);
-      itemCount = names.length;
-    } catch {
-      problems.push('checklist generate left no readable artifact');
+    const names = [];
+    for (const task of sel ? planFixture(sel, fx.repo).tasks : []) {
+      const r = task.sel.reviewer;
+      execFileSync('node', [checklistScript(r), ...r.cmds.gen.split(' ')], {
+        cwd: fx.repo,
+        encoding: 'utf8',
+        env: withStagedFiles({ ...process.env, ...gateJudgeEnv(false, cfg) }, r, task.sel.files),
+      });
+      try {
+        const state = JSON.parse(readFileSync(path.join(fx.repo, r.stateFile), 'utf8'));
+        names.push(...(state.items ?? []).map((i) => i.name));
+      } catch {
+        problems.push(`checklist generate left no readable artifact: ${r.stateFile}`);
+      }
     }
+    itemCount = names.length;
     for (const want of row.expectItems ?? [])
       if (!names.includes(want))
         problems.push(`expectItems: ${want} not in generated [${names.join(', ')}]`);
@@ -430,6 +299,7 @@ function validate({ dev = false, targets = [...BENCH_REVIEWERS] } = {}) {
   cleanBenchEnv();
   let bad = 0;
   for (const reviewer of targets) {
+    assertRepairFamilies(loadRows(reviewer));
     const rows = loadRows(reviewer, { dev });
     console.log(`\n${reviewer.name} — ${rows.length} rows`);
     for (const row of rows) {
@@ -485,17 +355,22 @@ function coverage() {
 
 async function runBench(targets, { dev, only, writeBaseline, failMode, fresh, against }) {
   cleanBenchEnv();
+  process.env.GUARD_REVIEW_ESCALATION_MODEL = ESCALATION_MODEL;
   const abMode = !!against;
   if (abMode && writeBaseline)
     throw new BenchAbort(2, 'reviewer-eval: --against is a read-only A/B; drop --baseline');
   preflightClaude();
   if (fresh) rmSync(progressFile(MODEL, CASCADE), { force: true });
-  const plan = targets.map((reviewer) => ({ reviewer, rows: loadRows(reviewer, { dev, only }) }));
+  const plan = targets.map((reviewer) => {
+    assertRepairFamilies(loadRows(reviewer));
+    return { reviewer, rows: loadRows(reviewer, { dev, only }) };
+  });
   const totalRows = plan.reduce((s, p) => s + p.rows.length, 0);
   if (totalRows === 0) throw new BenchAbort(2, 'reviewer-eval: no rows selected');
-  const refusals = preflightChunkRefusals(plan.flatMap((p) => p.rows)); // before any judge runs
-  if (refusals.length)
-    throw new BenchAbort(2, `reviewer-eval: refused —\n  ${refusals.join('\n  ')}`);
+  const census = preflightPlans(plan.flatMap((p) => p.rows));
+  console.log(
+    `native execution: ${census.reduce((n, p) => n + p.taskCount, 0)} first-pass tasks; ${census.filter((p) => p.chunkCount > 1).length} chunked rows; cap=${BENCH_CHUNK_LOC ?? 'off'}`,
+  );
   const progress = loadProgress(MODEL, CASCADE);
   for (const line of runBannerLines(plan, {
     model: MODEL,
@@ -531,8 +406,11 @@ async function runBench(targets, { dev, only, writeBaseline, failMode, fresh, ag
       cascade: effCascade(reviewer),
       gateHash: benchGateHash(reviewer),
       corpusHash: corpusHash(reviewer),
-      chunkLoc: BENCH_CHUNK_LOC, // sc-2494 AC4: the cap every row was measured under (guard refuses others)
+      chunkLoc: BENCH_CHUNK_LOC,
+      lensGroups: BENCH_LENS_GROUPS,
+      escalationModel: ESCALATION_MODEL,
     };
+    meta.executionHash = executionHash({ ...meta, escalationModel: ESCALATION_MODEL });
     const salvage = salvageMap(progress, reviewer.name, meta, rows);
     console.log(
       `\n── ${reviewer.name} (${rows.length} rows${salvage.size ? `, ${salvage.size} salvaged` : ''}) ──`,
@@ -546,7 +424,14 @@ async function runBench(targets, { dev, only, writeBaseline, failMode, fresh, ag
       if (paused) return unscoredResult(row, 'paused-skipped', 'paused');
       let res: Awaited<ReturnType<typeof runRow>>;
       try {
-        res = await runRow(row);
+        res = await runRow(row, {
+          savedTasks: taskSalvage(progress, row, meta.executionHash),
+          onTask: (task) =>
+            appendFileSync(
+              progressFile(MODEL, CASCADE),
+              `${JSON.stringify({ kind: 'task', executionHash: meta.executionHash, ...rowHashes(row), task })}\n`,
+            ),
+        });
         const ok = CASCADE ? res.okFinal : res.okFirst;
         console.log(
           `  ${row.id.padEnd(36)} ${ok ? 'OK  ' : 'MISS'}  first=${res.firstVerdict ?? '∅'} final=${res.finalStatus}` +
@@ -558,7 +443,7 @@ async function runBench(targets, { dev, only, writeBaseline, failMode, fresh, ag
       }
       appendFileSync(
         progressFile(MODEL, CASCADE),
-        `${JSON.stringify({ reviewer: reviewer.name, gateHash: meta.gateHash, ...rowHashes(row), res })}\n`,
+        `${JSON.stringify({ reviewer: reviewer.name, gateHash: meta.gateHash, executionHash: meta.executionHash, ...rowHashes(row), res })}\n`,
       );
       if (RETRYABLE.has(res.subcause)) {
         consecutiveOutages += 1;
@@ -581,7 +466,12 @@ async function runBench(targets, { dev, only, writeBaseline, failMode, fresh, ag
     // A/B mode. corpusHash is deliberately NOT checked: it is a row-SET hash that changes on any
     // corpus growth, which would defeat row-level pairing — each row pairs individually below via
     // `rowHash`, mirroring compareReviewer.
-    if ((failMode || abMode) && section && (abMode || section.gateHash === meta.gateHash)) {
+    if (
+      (failMode || abMode) &&
+      section &&
+      (abMode ||
+        (section.gateHash === meta.gateHash && section.executionHash === meta.executionHash))
+    ) {
       for (const res of results) {
         const baseRow = section.rows?.[res.id];
         // A hand-edited/replaced row is not the same fixture — skip it rather than pairing
@@ -694,7 +584,10 @@ async function runBench(targets, { dev, only, writeBaseline, failMode, fresh, ag
     if (only)
       throw new BenchAbort(2, 'reviewer-eval: refusing --baseline with --only (partial corpus)');
     const outages = allResults.filter(
-      (r) => r.subcause === 'outage' || r.subcause === 'engine-error',
+      (r) =>
+        r.subcause === 'outage' ||
+        r.subcause === 'engine-error' ||
+        r.finalStatus === 'not-selected',
     ).length;
     if (outages > 0)
       throw new BenchAbort(
@@ -722,6 +615,7 @@ async function runBench(targets, { dev, only, writeBaseline, failMode, fresh, ag
               variantOf: r.variantOf ?? null,
               holdout: r.holdout,
               reasonClass: r.reasonClass,
+              execution: r.execution,
             },
           ]),
         ),
@@ -732,9 +626,8 @@ async function runBench(targets, { dev, only, writeBaseline, failMode, fresh, ag
     console.log(`\nbaseline written → ${path.basename(BASELINE_FILE)}`);
   }
 
-  // Run completed → the checkpoint file has served its purpose (keeping it would salvage stale
-  // results into a future run only until the next gate/corpus edit, but clean is clean).
-  rmSync(progressFile(MODEL, CASCADE), { force: true });
+  const archive = archiveProgress(MODEL, CASCADE);
+  if (archive) console.log(`task evidence retained → ${path.basename(archive)}`);
 
   // ── Ledger ──
   appendFileSync(
@@ -762,6 +655,7 @@ const invokedDirectly =
   process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 
 if (invokedDirectly) {
+  isolateBenchTelemetry();
   const argv = process.argv.slice(2);
   const flags = new Set(argv.filter((a) => a.startsWith('--')));
   const onlyIdx = argv.indexOf('--only');
@@ -771,7 +665,9 @@ if (invokedDirectly) {
   const positional = argv.filter(
     (a, i) => !a.startsWith('--') && argv[i - 1] !== '--only' && argv[i - 1] !== '--against',
   );
-  const cmd = ['run', 'validate', 'coverage'].includes(positional[0]) ? positional[0] : 'run';
+  const cmd = ['run', 'validate', 'coverage', 'plan'].includes(positional[0])
+    ? positional[0]
+    : 'run';
   const target = positional.find((p) => p !== cmd);
   const targets =
     target && target !== 'all'
@@ -784,15 +680,25 @@ if (invokedDirectly) {
   try {
     if (cmd === 'validate') validate({ dev: flags.has('--dev'), targets });
     else if (cmd === 'coverage') coverage();
+    else if (cmd === 'plan')
+      console.log(
+        JSON.stringify(
+          preflightPlans(targets.flatMap((r) => loadRows(r, { dev: flags.has('--dev'), only }))),
+          null,
+          2,
+        ),
+      );
     else {
-      await runBench(targets, {
-        dev: flags.has('--dev'),
-        only,
-        against,
-        writeBaseline: flags.has('--baseline'),
-        failMode: flags.has('--fail'),
-        fresh: flags.has('--fresh'),
-      });
+      await withBenchmarkRun(() =>
+        runBench(targets, {
+          dev: flags.has('--dev'),
+          only,
+          against,
+          writeBaseline: flags.has('--baseline'),
+          failMode: flags.has('--fail'),
+          fresh: flags.has('--fresh'),
+        }),
+      );
     }
   } catch (e) {
     if (e instanceof BenchAbort) {

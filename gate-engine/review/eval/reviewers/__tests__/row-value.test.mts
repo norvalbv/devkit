@@ -10,7 +10,7 @@ import {
   findNextOutcome,
   LABEL_RULES,
 } from '../mine-telemetry-lib.mts';
-import { pairConsistency, summarize } from '../stats.mts';
+import { assertRepairFamilies, pairConsistency, summarize } from '../stats.mts';
 import { jaccard, nearTwins, shingles, unrelatedTwins } from '../corpus/twins.mts';
 
 const fixture = (text: string) => ({
@@ -87,7 +87,14 @@ describe('pairConsistency', () => {
       r('x1', 'c3', 'FAIL', true),
       r('x2', 'c3', 'FAIL', true),
     ];
-    expect(pairConsistency(results)).toEqual({ k: 1, n: 2, singletons: 1, malformedGroups: 1 });
+    expect(pairConsistency(results)).toEqual({
+      k: 1,
+      n: 2,
+      families: 2,
+      familyK: 1,
+      singletons: 1,
+      malformedGroups: 1,
+    });
   });
   it('groups a variantOf-only pair the same way holdout does, and leaves unlinked rows singletons', () => {
     const results = [
@@ -104,7 +111,50 @@ describe('pairConsistency', () => {
         ms: { first: 0, escalate: 0 },
       },
     ];
-    expect(pairConsistency(results)).toEqual({ k: 1, n: 2, singletons: 2, malformedGroups: 0 });
+    expect(pairConsistency(results)).toEqual({
+      k: 1,
+      n: 2,
+      families: 2,
+      familyK: 1,
+      singletons: 2,
+      malformedGroups: 0,
+    });
+  });
+  it('counts explicit repairs within a shared family and exposes malformed links', () => {
+    const rows = [
+      r('g1', 'shared', 'FAIL', true),
+      r('g2', 'shared', 'FAIL', true),
+      { ...r('d1', 'shared', 'PASS', true), variantOf: 'g1' },
+      { ...r('d2', 'shared', 'PASS', false), variantOf: 'g2' },
+    ];
+    expect(pairConsistency(rows)).toEqual({
+      k: 1,
+      n: 2,
+      families: 1,
+      familyK: 0,
+      singletons: 0,
+      malformedGroups: 0,
+    });
+    expect(
+      pairConsistency([...rows.slice(0, 3), { ...rows[3], variantOf: 'd1' }]).malformedGroups,
+    ).toBe(1);
+    expect(() =>
+      assertRepairFamilies([...rows.slice(0, 3), { ...rows[3], variantOf: 'd1' }]),
+    ).toThrow(/malformed or unmatched/);
+    expect(() => assertRepairFamilies(rows)).not.toThrow();
+    expect(() => assertRepairFamilies([{ ...rows[0], variantOf: 'missing' }])).toThrow(
+      /dangling variantOf missing/,
+    );
+    expect(() =>
+      assertRepairFamilies([
+        { ...rows[0], variantOf: 'd1' },
+        { ...rows[2], variantOf: null },
+      ]),
+    ).toThrow(/malformed/);
+    expect(() => assertRepairFamilies([{ ...rows[0], variantOf: 'd1' }, rows[2]])).toThrow(
+      /malformed/,
+    );
+    expect(pairConsistency([{ ...rows[2], variantOf: 'missing' }]).malformedGroups).toBe(1);
   });
   it('uses okFinal under a cascade and lands in summarize beside the marginal', () => {
     const results = [r('g1', 'c1', 'FAIL', true, false), r('d1', 'c1', 'PASS', true, true)];
@@ -112,7 +162,14 @@ describe('pairConsistency', () => {
     expect(pairConsistency(results, { cascade: false }).k).toBe(1);
     const s = summarize(results, { cascade: false });
     expect(s.firstFailRecall).toEqual({ k: 1, n: 1 });
-    expect(s.pairConsistency).toEqual({ k: 1, n: 1, singletons: 0, malformedGroups: 0 });
+    expect(s.pairConsistency).toEqual({
+      k: 1,
+      n: 1,
+      families: 1,
+      familyK: 1,
+      singletons: 0,
+      malformedGroups: 0,
+    });
   });
 });
 
