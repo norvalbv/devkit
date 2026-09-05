@@ -1,5 +1,7 @@
 # Reviewer holdout partition reset — 5 September 2026
 
+[Admission decision history](../decisions/corpus-rows-admitted-by-coverage-cell.md) records why the family partition repair creates a new measurement epoch.
+
 This is the fresh measurement required by [sc-2723](https://app.shortcut.com/benordlabs/story/2723).
 It establishes a new partition epoch; it does not establish a reviewer-quality improvement.
 

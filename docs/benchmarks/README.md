@@ -33,6 +33,23 @@ Metric observations retain their stable ID, direction, unit, raw numerator/denom
 
 Each suite adapter owns its acceptance semantics. LLM suites can require K=3 and zero outages; deterministic, external, and no-ship studies use different contracts. The renderer never invents a universal significance rule.
 
+## Decision rationale and history
+
+The [benchmark evidence decision](../decisions/benchmark-evidence-append-only.md) contains the
+retrospective PR595–603 map and the boundary for reusing this work in other agents. Detailed
+commands, measurements and receipts stay here; durable choices and their tradeoffs live in decisions.
+
+| Question | Governing record |
+| --- | --- |
+| What makes a source case and its repair admissible? | [Telemetry and source controls](../decisions/benchmarks-grow-from-telemetry.md), [coverage and family admission](../decisions/corpus-rows-admitted-by-coverage-cell.md) |
+| Did a block identify the intended bug, and were repeated findings valid? | [Claim measurement](../decisions/reviewer-claim-measurement.md), [precision constraints](../decisions/correctness-reviewer-precision.md) |
+| What evidence did each native task receive? | [Chunking and its measurement limits](../decisions/correctness-chunking-ships-dark.md) |
+| What must a comparison with review history preserve? | [History experiments](../decisions/reviewer-history-experiments.md) |
+| Which evidence can be committed publicly? | [Third-party data boundary](../decisions/scale-track-third-party-data.md) |
+
+The retrospective notes preserve the earlier conclusions and later corrections. They do not
+turn exposed cases into unseen evidence, qualify unresolved repairs, or claim a history benefit.
+
 ## Findings and research records
 
 Hand-written records that sit beside the ledger; each number in them names its population, `n`, and query.

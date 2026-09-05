@@ -1,5 +1,7 @@
 # Reporting-family claim audit — 5 September 2026 (sc-2831)
 
+[Claim-measurement decision](../decisions/reviewer-claim-measurement.md) records the rationale for this audit; [admission history](../decisions/corpus-rows-admitted-by-coverage-cell.md) preserves its qualification of the earlier pair results.
+
 The [PR598 measurement](large-repair-pairs-2026-09-05.md) blocked both large bug cases and both
 large repaired cases. This audit establishes target detection for the selector case but not the
 classifier case. All four repair-side claims remain unresolved. No repaired-case false-positive

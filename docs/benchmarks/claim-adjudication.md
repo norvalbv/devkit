@@ -1,5 +1,7 @@
 # Adjudicating complete reviewer claims
 
+[Claim-measurement decision](../decisions/reviewer-claim-measurement.md) records why factual truth, target diagnosis and repeated-alarm burden are separate.
+
 The scale benchmark's location score measures whether a finding mentions a labelled location.
 It does not establish that the finding is true, describes the labelled defect, or would justify
 blocking a review. Historical `extras-adjudicate` and `verify-extras` outputs remain location
