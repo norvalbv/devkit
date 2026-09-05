@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { testExecFileSync as execFileSync } from './_helpers.mts';
+import { testExecFileSync as execFileSync, testSpawnSync as spawnSync } from './_helpers.mts';
 import { dirs, GIT_ENV, scriptPath } from './_ship-branch-fixture.mts';
 
 const lib = dirname(scriptPath);
@@ -139,6 +139,50 @@ describe('origin-base.sh — ship_origin_base_candidate (default, else an ancest
     git(['symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/work']);
 
     expect(resolverOf('ship_origin_base_candidate', dir)).not.toBe('HEAD');
+  });
+});
+
+/**
+ * The ancestor tier alone. Returns the exit code beside the output: "no answer" is exit 1 with empty
+ * stdout, and swallowing the code would let a CRASH pass as that same valid result.
+ */
+function ancestorOf(repo) {
+  const r = spawnSync(
+    '/bin/bash',
+    [
+      '-c',
+      `set -euo pipefail\n. "${lib}/origin-base.sh"\nship_origin_ancestor_branch ${JSON.stringify(repo)}`,
+    ],
+    { cwd: repo, encoding: 'utf8', env: { ...process.env, ...GIT_ENV } },
+  );
+  return { status: r.status, out: (r.stdout ?? '').trim() };
+}
+
+describe('origin-base.sh — ship_origin_ancestor_branch (tier 1 only, with its oid)', () => {
+  it('answers the nearest ancestor as "<oid> <name>"', () => {
+    const { dir, git } = seedRepo();
+    git(['push', '-q', 'origin', 'work:work']);
+
+    expect(ancestorOf(dir)).toEqual({
+      status: 0,
+      out: `${git(['rev-parse', 'HEAD']).trim()} work`,
+    });
+  });
+
+  it('answers NOTHING where ship_origin_base_candidate falls through to the default', () => {
+    // The candidate's fall-through answers "what could I switch to", not "what is this work built
+    // on": that branch has no branch point here, so ancestry against it compares the wrong commit.
+    const { dir, git } = seedRepo();
+    git(['push', '-q', 'origin', 'work:main']);
+    git(['checkout', '-q', '--orphan', 'solo']);
+    writeFileSync(join(dir, 'solo.txt'), 'x\n');
+    git(['add', 'solo.txt']);
+    git(['commit', '-q', '-m', 'unrelated root']);
+
+    // Exit 1 with empty stdout is the documented "no answer"; any other code is a defect wearing
+    // the same clothes, which is why the status is asserted rather than discarded.
+    expect(ancestorOf(dir)).toEqual({ status: 1, out: '' });
+    expect(resolverOf('ship_origin_base_candidate', dir)).toBe('main');
   });
 });
 
