@@ -1,0 +1,218 @@
+{
+  "version": 1,
+  "mode": "zero-judge-source-census",
+  "manifestSha256": "cf4922988ac3a62ebf0e3e1acddb0c9f17483a2cf937275fb56090f16609f8de",
+  "implementationSha256": "991ed22dea56",
+  "dependenciesSha256": "582b34fb609e937346dc404a39d0fba3bcfbb21288bb649121d43916e9f9c17b",
+  "runtime": "v24.19.0",
+  "condition": {
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "error-and-edge-classification"
+      ],
+      [
+        "writer-reader-contracts"
+      ]
+    ],
+    "configSha256": "96e1025696157d810f0014562fe2474a121965c72a7c117e074a1c6a1ccf71ad",
+    "configSourceSha256": "a2ed292dd266f990e0511e73bfc6af34c1966d205be7c916195436ae623ecbf6",
+    "model": "gpt-5.6-sol",
+    "judgeCalls": 0
+  },
+  "scan": {
+    "archivedScopedDiffs": 780,
+    "candidateLabelledDiffs": 577,
+    "investigatedFamilies": 4,
+    "selectedDiagnosticFamilies": 1,
+    "qualifiedCleanPairs": 0,
+    "admittedRows": 0,
+    "judgeCalls": 0
+  },
+  "cases": [
+    {
+      "id": "case-001",
+      "family": "family-001",
+      "role": "bug",
+      "exposure": "exposed-development",
+      "qualification": "target-controlled",
+      "source": {
+        "repoAlias": "repo-001",
+        "baseSha": "56319814dcbd42f6a67a9efe3132ee7f628c9d1f",
+        "diffSha256": "8e219d665b106734066aa9f947846ed9085403e91c065105eb42e95220643d9b",
+        "provenanceSha256": "5a96f104f353fb940ef20245aad9b625abf614e19243cf8510221fb3d80358dc"
+      },
+      "evidence": {
+        "requirementSha256": "6a4a99b6f7a4f6557dfe65b4cc9759bdb38d421fdacddb037eed6fe4f1e3e5df",
+        "controlSha256": "baedc79515dabe985f420237c1dc239dbbfcdc9fbb9802aeccc4b53996470946",
+        "assessmentSha256": "bd73a73440fe153467ff90a377d7eda1203b2b0a4a35f92fa3e67c0bfd7b5b5d"
+      },
+      "facts": {
+        "identityBytes": 140753,
+        "chunkCount": 11,
+        "taskCount": 34,
+        "cap": 400,
+        "groups": [
+          [
+            "state-transitions"
+          ],
+          [
+            "concurrency-races"
+          ],
+          [
+            "error-and-edge-classification"
+          ],
+          [
+            "writer-reader-contracts"
+          ]
+        ],
+        "planHash": "806cf2b91e4778c0ec12abb921af402769969fe88e3d5586d6a980c018bf9972",
+        "stagedTreeSha": "da63a5491fd5fe4634594e9f67e01668cadc2dd0",
+        "sourceChangedFiles": 36,
+        "selectedFiles": 36
+      },
+      "censusSha256": "076041d6ab9574cfee6227c72108356e1e2e9e302f7b74568eb27561ccfb3d11",
+      "coverage": [
+        {
+          "lens": "state-transitions",
+          "target": false,
+          "tasks": 11,
+          "requiredSpanOccurrences": 33,
+          "initialSupply": {
+            "out-of-scope": 32,
+            "partial": 1
+          },
+          "retrieval": "not-observed-zero-judge"
+        },
+        {
+          "lens": "concurrency-races",
+          "target": false,
+          "tasks": 11,
+          "requiredSpanOccurrences": 33,
+          "initialSupply": {
+            "out-of-scope": 32,
+            "partial": 1
+          },
+          "retrieval": "not-observed-zero-judge"
+        },
+        {
+          "lens": "error-and-edge-classification",
+          "target": false,
+          "tasks": 11,
+          "requiredSpanOccurrences": 33,
+          "initialSupply": {
+            "out-of-scope": 32,
+            "partial": 1
+          },
+          "retrieval": "not-observed-zero-judge"
+        },
+        {
+          "lens": "writer-reader-contracts",
+          "target": true,
+          "tasks": 1,
+          "requiredSpanOccurrences": 3,
+          "initialSupply": {
+            "out-of-scope": 2,
+            "partial": 1
+          },
+          "retrieval": "not-observed-zero-judge"
+        }
+      ]
+    },
+    {
+      "id": "case-002",
+      "family": "family-001",
+      "role": "repair",
+      "exposure": "exposed-development",
+      "qualification": "target-controlled",
+      "source": {
+        "repoAlias": "repo-001",
+        "baseSha": "56319814dcbd42f6a67a9efe3132ee7f628c9d1f",
+        "diffSha256": "c1f4768a5b99282e9a8e7cec43871eea99eb75e625d2d0283175614607c78520",
+        "provenanceSha256": "5a96f104f353fb940ef20245aad9b625abf614e19243cf8510221fb3d80358dc"
+      },
+      "evidence": {
+        "requirementSha256": "6a4a99b6f7a4f6557dfe65b4cc9759bdb38d421fdacddb037eed6fe4f1e3e5df",
+        "controlSha256": "baedc79515dabe985f420237c1dc239dbbfcdc9fbb9802aeccc4b53996470946",
+        "assessmentSha256": "bd73a73440fe153467ff90a377d7eda1203b2b0a4a35f92fa3e67c0bfd7b5b5d"
+      },
+      "facts": {
+        "identityBytes": 140582,
+        "chunkCount": 11,
+        "taskCount": 34,
+        "cap": 400,
+        "groups": [
+          [
+            "state-transitions"
+          ],
+          [
+            "concurrency-races"
+          ],
+          [
+            "error-and-edge-classification"
+          ],
+          [
+            "writer-reader-contracts"
+          ]
+        ],
+        "planHash": "16c8b9488a9367c8184f34055d19c8f19a6b14b8b9bae198854d10c631a8518b",
+        "stagedTreeSha": "38312e9571e58e41418b5cb4afd7e56c76c18772",
+        "sourceChangedFiles": 36,
+        "selectedFiles": 36
+      },
+      "censusSha256": "0f63c7fb881ce93040313524cf6d6d565174c6c3953e36aa23e114ec84bacfb7",
+      "coverage": [
+        {
+          "lens": "state-transitions",
+          "target": false,
+          "tasks": 11,
+          "requiredSpanOccurrences": 33,
+          "initialSupply": {
+            "out-of-scope": 32,
+            "partial": 1
+          },
+          "retrieval": "not-observed-zero-judge"
+        },
+        {
+          "lens": "concurrency-races",
+          "target": false,
+          "tasks": 11,
+          "requiredSpanOccurrences": 33,
+          "initialSupply": {
+            "out-of-scope": 32,
+            "partial": 1
+          },
+          "retrieval": "not-observed-zero-judge"
+        },
+        {
+          "lens": "error-and-edge-classification",
+          "target": false,
+          "tasks": 11,
+          "requiredSpanOccurrences": 33,
+          "initialSupply": {
+            "out-of-scope": 32,
+            "partial": 1
+          },
+          "retrieval": "not-observed-zero-judge"
+        },
+        {
+          "lens": "writer-reader-contracts",
+          "target": true,
+          "tasks": 1,
+          "requiredSpanOccurrences": 3,
+          "initialSupply": {
+            "out-of-scope": 2,
+            "partial": 1
+          },
+          "retrieval": "not-observed-zero-judge"
+        }
+      ]
+    }
+  ]
+}
