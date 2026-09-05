@@ -5,7 +5,7 @@
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { loadRows } from '../corpus.mts';
+import { readCorpusRows } from '../corpus.mts';
 import { REVIEWERS } from '../../../reviewers.mts';
 import { groupByPair, nearTwins, unrelatedTwins } from './twins.mts';
 
@@ -170,7 +170,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.a
     if (only && suite !== only && reviewer.name !== only) continue;
     let rows;
     try {
-      rows = loadRows(reviewer);
+      rows = readCorpusRows(reviewer);
     } catch {
       continue; // reviewers without a corpus file (commit-guard, conventions, completeness)
     }

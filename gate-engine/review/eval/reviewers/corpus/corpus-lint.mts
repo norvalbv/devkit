@@ -5,7 +5,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { BenchAbort, parseCasesText } from '../../../../decisions/eval/bench.mts';
 import { REVIEWERS } from '../../../reviewers.mts';
-import { casesFile, holdoutFloorShortfalls, lintRows } from '../corpus.mts';
+import { assertHoldoutGroups, casesFile, holdoutFloorShortfalls, lintRows } from '../corpus.mts';
 
 let problems = 0;
 let rows = 0;
@@ -14,6 +14,7 @@ for (const reviewer of REVIEWERS) {
   if (!existsSync(file)) continue;
   try {
     const parsed = lintRows(parseCasesText(readFileSync(file, 'utf8')), reviewer.name);
+    assertHoldoutGroups(parsed, reviewer.name);
     rows += parsed.length;
     const short = holdoutFloorShortfalls(parsed);
     if (short.length) {

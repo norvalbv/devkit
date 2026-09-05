@@ -34,10 +34,17 @@ Each stage, concretely (all paths under `gate-engine/review/eval/reviewers/` unl
 | mine | `mine-bots.mts` | Sweeps bot PR comments via `gh api` (+ GraphQL thread resolution). Labels each candidate: `outcome` (fixed / rebutted / unresolved) + `outcomeEvidence` (addressed-marker › bot-withdrawal › resolved+line-touched › human-rebuttal › outdated-only) + `scopeConfirmed` via the collector join (`commit_ships.pr_number` → `commit_review_scope.files_json`). Writes `candidates.jsonl` (gitignored, merged by url). |
 | propose | `propose/propose.mts --suite <s> --max N` (bot-mined) · `propose/propose-telemetry.mts [--max N]` (gate telemetry — no PR/commit anchor, diff bytes ride in the rows, evidence-tier sort) | Deterministic triage: hard drops (unresolved, no commit anchor, no line info, outdated-only, truncated hunk, already-in-corpus), category+path routing to the five suites, priority sort, base-content fetch pinned to `?ref=<originalCommitId>` (observation-instant inputs — item 13). Output: `raw/queue-<suite>.jsonl`. |
 | adapt | agents (workflow) | Each queue entry becomes an ANONYMIZED minimal fixture (1–2 files, ≤25 lines, generic identifiers — devkit is public) + **a minimal-pair decoy per gold** (real fix applied, `variantOf`, shared `caseId`). Rebutted threads become standalone PASS decoys. Every proposal self-validates via `finalize.mts --check` before it counts. |
-| finalize | `finalize.mts --check / --append` | `--check`: structural lint → real-fixture `validateRow` → private-repo leak scan. `--append`: exclusive stale-aware lock, audit-overlay application, pre-append lint + leak scan, deterministic holdout (PASS→dev bias; ≥3-holdout floor outranks it, flips reported), caseId groups never split. Proposals in `raw/` are IMMUTABLE — audit edits only via `raw/audit-overlay.jsonl` `{ref, set}` lines (item 5). |
+| finalize | `finalize.mts --check / --append` | `--check`: structural lint → real-fixture `validateRow` → private-repo leak scan. `--append`: exclusive stale-aware lock, audit-overlay application, pre-append lint + leak scan. Holdout and `--max` preserve whole groups in the transitive union of `caseId` and `variantOf`, including links through existing rows. New bridges between conflicting existing assignments refuse. The final partition and ≥3-holdout-per-class floor are checked before writing (floor promotions reported). Proposals in `raw/` are IMMUTABLE — audit edits only via `raw/audit-overlay.jsonl` `{ref, set}` lines (item 5). |
 | validate | `bench.mts validate [reviewer]` | 0 LLM calls. Real fixture materialization, expectItems vs the real checklist, reasonPattern must compile (hard fail), comment-leakage warnings (non-fatal). |
-| bench | `bench.mts run <reviewer> [--baseline]` | Drives the REAL `runCascade` — bench and gate cannot drift. Correctness is pinned sonnet single-pass; domain reviewers run `BENCH_MODEL` first-pass with opus escalation (cascade). Progress checkpoints per row; salvage is per-row (`rowHash`), so re-runs are cheap. |
-| publish | `gate-engine/eval/cli.mts publish --suite reviewer-<x> --tree WORKTREE --baseline ... --change-type coverage` | Corpus changes MUST publish as `coverage` (the hash guard blocks `quality`). Acceptance: zero outages + floors. WORKTREE, not STAGED: these baselines are gitignored, so they can never be staged — and being ignored, they do not make the tree dirty either. Commit the corpus first, then publish from a clean tree. |
+| bench | `bench.mts run <reviewer> [--baseline]` | Drives the REAL `runCascade`. The shipped correctness configuration is Sol single-pass; domain reviewers use Terra high first-pass with Sol escalation. Set `BENCH_MODEL` and `BENCH_CASCADE` explicitly for the suite. Progress checkpoints per row support resuming an interrupted run. Use `--baseline` to retain completed row evidence and `--fresh` for a partition reset. |
+| publish | `gate-engine/eval/cli.mts publish --suite reviewer-<x> --tree WORKTREE --baseline ... --change-type coverage` | Corpus growth publishes as `coverage`; partition repairs use `methodology-reset` with `assessment:unknown`. A changed corpus cannot claim `quality`. Acceptance: zero outages + floors. WORKTREE, not STAGED: these baselines are gitignored, so they can never be staged — and being ignored, they do not make the tree dirty either. Commit the corpus first, then publish from a clean tree. |
+
+`bun finalize.mts --check raw/proposals/foo.json` checks one anonymized proposal without judge calls;
+hard failures exit 1 and leakage warnings remain advisory. `bun finalize.mts --append --suite <s>
+[--max N]` reads that suite's proposals and applies `raw/audit-overlay.jsonl` corrections. It skips
+existing ids and appends one JSON line per admitted row in the corpus's key order. Both raw inputs
+remain immutable and gitignored. Full mined comments and source content must be distilled into
+generic identifiers in `repo.base`/`repo.staged` before entering the public corpus.
 
 ### Why appending rows is safe (the row-set hash)
 
@@ -67,6 +74,9 @@ runner); freshness goes stale exactly when one moves.
 
 - **Corpus batch merged** → `validate` immediately (free) → re-bench that suite → publish
   `--change-type coverage`. Incremental cost ≈ the new rows only (per-row salvage).
+- **Holdout partition repaired** → fresh full measurements of the affected suites with
+  `--fresh --baseline` → publish `methodology-reset`. Preserve old checkpoints; changed row hashes
+  declare the partition break rather than forcing old results into the new split.
 - **Reviewer prompt/skill/model edit** → A/B with `--against <before.json>` BEFORE landing it
   (gold-only + decoy-only + clustered-by-case flip tables; `--against` works across a deliberate
   gateHash change) → publish `quality` after. The publish hash guard enforces this ordering.

@@ -1,0 +1,628 @@
+{
+  "formatVersion": 1,
+  "kind": "reviewer-experiment",
+  "suite": "reviewer-api-security",
+  "sourceCommit": "27541a7ed6529cf09b9d32abcd3f4be0f91a0363",
+  "sourceStatus": "clean",
+  "recordedAt": "2026-09-05T03:00:07.641Z",
+  "changeType": "methodology-reset",
+  "assessment": "unknown",
+  "acceptance": {
+    "accepted": false,
+    "reason": "Complete run with zero outages; final clean pass 14/21 is below the 0.85 floor.",
+    "floors": {
+      "blockRecall": 0.75,
+      "cleanPass": 0.85
+    }
+  },
+  "nativeBaselineSha256": "cfaf2de8c714646c213181839dfe754b0f1c94ec205a7a0c40220c339762ad1d",
+  "configuration": {
+    "model": "gpt-5.6-terra@high",
+    "cascade": true,
+    "escalationModel": "gpt-5.6-sol",
+    "chunkLoc": 400,
+    "concurrency": 2,
+    "dev": false,
+    "codebaseToolProfile": "unavailable",
+    "isolation": "strict"
+  },
+  "gateHash": "b7d783872f68",
+  "corpusHash": "f8cc4cb69b26",
+  "metrics": {
+    "rows": 44,
+    "gold": 23,
+    "decoys": 21,
+    "firstFailRecall": {
+      "k": 21,
+      "n": 23
+    },
+    "firstCleanPass": {
+      "k": 13,
+      "n": 21
+    },
+    "blockRecall": {
+      "k": 20,
+      "n": 23
+    },
+    "cleanPass": {
+      "k": 14,
+      "n": 21
+    },
+    "overturnRate": {
+      "k": 1,
+      "n": 21
+    },
+    "rescueRate": {
+      "k": 1,
+      "n": 8
+    },
+    "pairConsistency": {
+      "k": 7,
+      "n": 16,
+      "singletons": 12,
+      "malformedGroups": 0
+    },
+    "escalations": 29,
+    "escalateMeanSecs": 27,
+    "reasons": {
+      "right-item": 20
+    },
+    "inconclusive": {}
+  },
+  "slices": {
+    "holdoutGold": {
+      "k": 8,
+      "n": 9
+    },
+    "holdoutClean": {
+      "k": 5,
+      "n": 9
+    },
+    "repairedClean": {
+      "k": 9,
+      "n": 16
+    },
+    "standaloneClean": {
+      "k": 5,
+      "n": 5
+    },
+    "pairConsistency": {
+      "k": 7,
+      "n": 16
+    }
+  },
+  "calls": {
+    "firstPasses": 44,
+    "liveEscalations": 29
+  },
+  "rows": {
+    "apisec-authed-route-clean": {
+      "expected": "PASS",
+      "okFirst": true,
+      "okFinal": true,
+      "finalStatus": "pass",
+      "rowHash": "4d678971469e",
+      "behaviorHash": "00dc0c77ee2a",
+      "caseId": null,
+      "variantOf": null,
+      "holdout": false,
+      "reasonClass": null
+    },
+    "apisec-cmd-escape-missing-parens": {
+      "expected": "FAIL",
+      "okFirst": true,
+      "okFinal": true,
+      "finalStatus": "fail",
+      "rowHash": "85a3fe180857",
+      "behaviorHash": "836b3db780bc",
+      "caseId": "apisec-cmd-escape-missing-parens",
+      "variantOf": null,
+      "holdout": true,
+      "reasonClass": "right-item"
+    },
+    "apisec-cmd-escape-missing-parens-pair": {
+      "expected": "PASS",
+      "okFirst": true,
+      "okFinal": true,
+      "finalStatus": "pass",
+      "rowHash": "0df264478776",
+      "behaviorHash": "cd4833303215",
+      "caseId": "apisec-cmd-escape-missing-parens",
+      "variantOf": "apisec-cmd-escape-missing-parens",
+      "holdout": true,
+      "reasonClass": null
+    },
+    "apisec-command-injection": {
+      "expected": "FAIL",
+      "okFirst": true,
+      "okFinal": true,
+      "finalStatus": "fail",
+      "rowHash": "93ab9387e00a",
+      "behaviorHash": "6a9b38284c00",
+      "caseId": null,
+      "variantOf": null,
+      "holdout": false,
+      "reasonClass": "right-item"
+    },
+    "apisec-endpoint-auth": {
+      "expected": "FAIL",
+      "okFirst": true,
+      "okFinal": true,
+      "finalStatus": "fail",
+      "rowHash": "3f25e1d1796f",
+      "behaviorHash": "ba894c5d3da3",
+      "caseId": null,
+      "variantOf": null,
+      "holdout": false,
+      "reasonClass": "right-item"
+    },
+    "apisec-error-leak": {
+      "expected": "FAIL",
+      "okFirst": true,
+      "okFinal": true,
+      "finalStatus": "fail",
+      "rowHash": "30522c70fcc6",
+      "behaviorHash": "8d199c68dab4",
+      "caseId": null,
+      "variantOf": null,
+      "holdout": false,
+      "reasonClass": "right-item"
+    },
+    "apisec-idor-lookup": {
+      "expected": "FAIL",
+      "okFirst": true,
+      "okFinal": true,
+      "finalStatus": "fail",
+      "rowHash": "09744cd995be",
+      "behaviorHash": "c8446b38b307",
+      "caseId": null,
+      "variantOf": null,
+      "holdout": false,
+      "reasonClass": "right-item"
+    },
+    "apisec-json-escaped-secret-leak": {
+      "expected": "FAIL",
+      "okFirst": true,
+      "okFinal": true,
+      "finalStatus": "fail",
+      "rowHash": "c5801be36c6e",
+      "behaviorHash": "a7677603a852",
+      "caseId": "apisec-json-escaped-secret-leak",
+      "variantOf": null,
+      "holdout": true,
+      "reasonClass": "right-item"
+    },
+    "apisec-json-escaped-secret-leak-fixed": {
+      "expected": "PASS",
+      "okFirst": false,
+      "okFinal": false,
+      "finalStatus": "fail",
+      "rowHash": "53684139dc99",
+      "behaviorHash": "b01c4d3189d5",
+      "caseId": "apisec-json-escaped-secret-leak",
+      "variantOf": "apisec-json-escaped-secret-leak",
+      "holdout": true,
+      "reasonClass": null
+    },
+    "apisec-json-stringify-quote-insufficient": {
+      "expected": "FAIL",
+      "okFirst": true,
+      "okFinal": true,
+      "finalStatus": "fail",
+      "rowHash": "e8c7c3a72a3d",
+      "behaviorHash": "de6d6b549dbf",
+      "caseId": "apisec-json-stringify-quote-insufficient",
+      "variantOf": null,
+      "holdout": false,
+      "reasonClass": "right-item"
+    },
+    "apisec-json-stringify-quote-insufficient-fixed": {
+      "expected": "PASS",
+      "okFirst": false,
+      "okFinal": false,
+      "finalStatus": "fail",
+      "rowHash": "1ad43d3fe537",
+      "behaviorHash": "6068140afb53",
+      "caseId": "apisec-json-stringify-quote-insufficient",
+      "variantOf": "apisec-json-stringify-quote-insufficient",
+      "holdout": false,
+      "reasonClass": null
+    },
+    "apisec-jwt-unrestricted": {
+      "expected": "FAIL",
+      "okFirst": true,
+      "okFinal": true,
+      "finalStatus": "fail",
+      "rowHash": "b99591917da5",
+      "behaviorHash": "cb90d618cc2f",
+      "caseId": null,
+      "variantOf": null,
+      "holdout": false,
+      "reasonClass": "right-item"
+    },
+    "apisec-jwt-verify-clean": {
+      "expected": "PASS",
+      "okFirst": true,
+      "okFinal": true,
+      "finalStatus": "pass",
+      "rowHash": "ef5cb12b56a2",
+      "behaviorHash": "52033591bb4b",
+      "caseId": null,
+      "variantOf": null,
+      "holdout": false,
+      "reasonClass": null
+    },
+    "apisec-log-credentials": {
+      "expected": "FAIL",
+      "okFirst": true,
+      "okFinal": true,
+      "finalStatus": "fail",
+      "rowHash": "08dc812afbcc",
+      "behaviorHash": "d7eff8466781",
+      "caseId": null,
+      "variantOf": null,
+      "holdout": true,
+      "reasonClass": "right-item"
+    },
+    "apisec-malformed-policy-silent-bypass": {
+      "expected": "FAIL",
+      "okFirst": true,
+      "okFinal": true,
+      "finalStatus": "fail",
+      "rowHash": "b7484a8e787c",
+      "behaviorHash": "e4096fe96cc9",
+      "caseId": "apisec-malformed-policy-silent-bypass",
+      "variantOf": null,
+      "holdout": true,
+      "reasonClass": "right-item"
+    },
+    "apisec-malformed-policy-silent-bypass-fixed": {
+      "expected": "PASS",
+      "okFirst": false,
+      "okFinal": false,
+      "finalStatus": "fail",
+      "rowHash": "5707664f004f",
+      "behaviorHash": "7229fed4c197",
+      "caseId": "apisec-malformed-policy-silent-bypass",
+      "variantOf": "apisec-malformed-policy-silent-bypass",
+      "holdout": true,
+      "reasonClass": null
+    },
+    "apisec-masked-pipe-failure-approval": {
+      "expected": "FAIL",
+      "okFirst": false,
+      "okFinal": false,
+      "finalStatus": "pass",
+      "rowHash": "49fe0fb2007c",
+      "behaviorHash": "d95cca7ac506",
+      "caseId": "apisec-masked-pipe-failure-approval",
+      "variantOf": null,
+      "holdout": false,
+      "reasonClass": null
+    },
+    "apisec-masked-pipe-failure-approval-fixed": {
+      "expected": "PASS",
+      "okFirst": false,
+      "okFinal": false,
+      "finalStatus": "fail",
+      "rowHash": "78034cfb0845",
+      "behaviorHash": "078ea2a5f5ae",
+      "caseId": "apisec-masked-pipe-failure-approval",
+      "variantOf": "apisec-masked-pipe-failure-approval",
+      "holdout": false,
+      "reasonClass": null
+    },
+    "apisec-mass-assignment": {
+      "expected": "FAIL",
+      "okFirst": true,
+      "okFinal": true,
+      "finalStatus": "fail",
+      "rowHash": "c5c318dfe7d5",
+      "behaviorHash": "3a1af0155e1d",
+      "caseId": null,
+      "variantOf": null,
+      "holdout": false,
+      "reasonClass": "right-item"
+    },
+    "apisec-orm-literal-filter-injection": {
+      "expected": "FAIL",
+      "okFirst": true,
+      "okFinal": true,
+      "finalStatus": "fail",
+      "rowHash": "1b2d6fc90263",
+      "behaviorHash": "8dac626b65aa",
+      "caseId": "apisec-orm-literal-filter-injection",
+      "variantOf": null,
+      "holdout": false,
+      "reasonClass": "right-item"
+    },
+    "apisec-orm-literal-filter-injection-pair": {
+      "expected": "PASS",
+      "okFirst": true,
+      "okFinal": true,
+      "finalStatus": "pass",
+      "rowHash": "5628b49d0b52",
+      "behaviorHash": "fb4d18a44c29",
+      "caseId": "apisec-orm-literal-filter-injection",
+      "variantOf": "apisec-orm-literal-filter-injection",
+      "holdout": false,
+      "reasonClass": null
+    },
+    "apisec-orm-search-clean": {
+      "expected": "PASS",
+      "okFirst": true,
+      "okFinal": true,
+      "finalStatus": "pass",
+      "rowHash": "771cc70e4d9b",
+      "behaviorHash": "feb9c54b9563",
+      "caseId": null,
+      "variantOf": null,
+      "holdout": false,
+      "reasonClass": null
+    },
+    "apisec-predictable-key-math-random": {
+      "expected": "FAIL",
+      "okFirst": true,
+      "okFinal": true,
+      "finalStatus": "fail",
+      "rowHash": "5e8a872ba902",
+      "behaviorHash": "f859540735ec",
+      "caseId": "apisec-predictable-key-math-random",
+      "variantOf": null,
+      "holdout": true,
+      "reasonClass": "right-item"
+    },
+    "apisec-predictable-key-math-random-pair": {
+      "expected": "PASS",
+      "okFirst": true,
+      "okFinal": true,
+      "finalStatus": "pass",
+      "rowHash": "a5716b908ee0",
+      "behaviorHash": "648d5b907c88",
+      "caseId": "apisec-predictable-key-math-random",
+      "variantOf": "apisec-predictable-key-math-random",
+      "holdout": true,
+      "reasonClass": null
+    },
+    "apisec-proto-pollution-patch-path": {
+      "expected": "FAIL",
+      "okFirst": true,
+      "okFinal": true,
+      "finalStatus": "fail",
+      "rowHash": "91e04d767298",
+      "behaviorHash": "fdb38d4e5500",
+      "caseId": "apisec-proto-pollution-patch-path",
+      "variantOf": null,
+      "holdout": false,
+      "reasonClass": "right-item"
+    },
+    "apisec-proto-pollution-patch-path-pair": {
+      "expected": "PASS",
+      "okFirst": true,
+      "okFinal": true,
+      "finalStatus": "pass",
+      "rowHash": "a313709ba74e",
+      "behaviorHash": "d4ce0125d7af",
+      "caseId": "apisec-proto-pollution-patch-path",
+      "variantOf": "apisec-proto-pollution-patch-path",
+      "holdout": false,
+      "reasonClass": null
+    },
+    "apisec-quote-only-escape-breakout": {
+      "expected": "FAIL",
+      "okFirst": false,
+      "okFinal": false,
+      "finalStatus": "pass",
+      "rowHash": "5f2010009340",
+      "behaviorHash": "47a5ada0cf49",
+      "caseId": "apisec-quote-only-escape-breakout",
+      "variantOf": null,
+      "holdout": true,
+      "reasonClass": null
+    },
+    "apisec-quote-only-escape-breakout-pair": {
+      "expected": "PASS",
+      "okFirst": true,
+      "okFinal": true,
+      "finalStatus": "pass",
+      "rowHash": "fd40341a13a2",
+      "behaviorHash": "efab9860ecc8",
+      "caseId": "apisec-quote-only-escape-breakout",
+      "variantOf": "apisec-quote-only-escape-breakout",
+      "holdout": true,
+      "reasonClass": null
+    },
+    "apisec-redirect-credential-forward": {
+      "expected": "FAIL",
+      "okFirst": true,
+      "okFinal": true,
+      "finalStatus": "fail",
+      "rowHash": "3b872adfdbd2",
+      "behaviorHash": "b6e6e2ace5c6",
+      "caseId": "apisec-redirect-credential-forward",
+      "variantOf": null,
+      "holdout": false,
+      "reasonClass": "right-item"
+    },
+    "apisec-redirect-credential-forward-pair": {
+      "expected": "PASS",
+      "okFirst": true,
+      "okFinal": true,
+      "finalStatus": "pass",
+      "rowHash": "42a635b0c2ed",
+      "behaviorHash": "24f6348afd04",
+      "caseId": "apisec-redirect-credential-forward",
+      "variantOf": "apisec-redirect-credential-forward",
+      "holdout": false,
+      "reasonClass": null
+    },
+    "apisec-safe-path-nearmiss": {
+      "expected": "PASS",
+      "okFirst": true,
+      "okFinal": true,
+      "finalStatus": "pass",
+      "rowHash": "32b681b76ad7",
+      "behaviorHash": "44533df1c4f6",
+      "caseId": null,
+      "variantOf": null,
+      "holdout": true,
+      "reasonClass": null
+    },
+    "apisec-shell-roots-injection": {
+      "expected": "FAIL",
+      "okFirst": true,
+      "okFinal": true,
+      "finalStatus": "fail",
+      "rowHash": "6c4cab5a369c",
+      "behaviorHash": "740bdc0f3c2d",
+      "caseId": "apisec-shell-roots-injection",
+      "variantOf": null,
+      "holdout": true,
+      "reasonClass": "right-item"
+    },
+    "apisec-shell-roots-injection-fixed": {
+      "expected": "PASS",
+      "okFirst": false,
+      "okFinal": false,
+      "finalStatus": "fail",
+      "rowHash": "90eed7ef5d7f",
+      "behaviorHash": "ffec5239ec9b",
+      "caseId": "apisec-shell-roots-injection",
+      "variantOf": "apisec-shell-roots-injection",
+      "holdout": true,
+      "reasonClass": null
+    },
+    "apisec-sql-injection": {
+      "expected": "FAIL",
+      "okFirst": true,
+      "okFinal": true,
+      "finalStatus": "fail",
+      "rowHash": "7c793620b544",
+      "behaviorHash": "484711b39c3e",
+      "caseId": null,
+      "variantOf": null,
+      "holdout": false,
+      "reasonClass": "right-item"
+    },
+    "apisec-sql-injection-fixed": {
+      "expected": "PASS",
+      "okFirst": true,
+      "okFinal": true,
+      "finalStatus": "pass",
+      "rowHash": "f1197f562d90",
+      "behaviorHash": "dd2770cf1fe1",
+      "caseId": null,
+      "variantOf": "apisec-sql-injection",
+      "holdout": false,
+      "reasonClass": null
+    },
+    "apisec-sso-email-link-unverified": {
+      "expected": "FAIL",
+      "okFirst": true,
+      "okFinal": true,
+      "finalStatus": "fail",
+      "rowHash": "a83d432ab74e",
+      "behaviorHash": "08e19a67a47b",
+      "caseId": "apisec-sso-email-link-unverified",
+      "variantOf": null,
+      "holdout": true,
+      "reasonClass": "right-item"
+    },
+    "apisec-sso-email-link-unverified-pair": {
+      "expected": "PASS",
+      "okFirst": true,
+      "okFinal": true,
+      "finalStatus": "pass",
+      "rowHash": "ec2c144e1714",
+      "behaviorHash": "20f1c1072ac1",
+      "caseId": "apisec-sso-email-link-unverified",
+      "variantOf": "apisec-sso-email-link-unverified",
+      "holdout": true,
+      "reasonClass": null
+    },
+    "apisec-supply-chain-age-gate-disabled": {
+      "expected": "FAIL",
+      "okFirst": true,
+      "okFinal": false,
+      "finalStatus": "pass",
+      "rowHash": "2bdf35ddd388",
+      "behaviorHash": "1914eae4b592",
+      "caseId": "apisec-supply-chain-age-gate-disabled",
+      "variantOf": null,
+      "holdout": false,
+      "reasonClass": null
+    },
+    "apisec-supply-chain-age-gate-disabled-fixed": {
+      "expected": "PASS",
+      "okFirst": false,
+      "okFinal": true,
+      "finalStatus": "pass",
+      "rowHash": "f70fcc785fda",
+      "behaviorHash": "68c193691ce4",
+      "caseId": "apisec-supply-chain-age-gate-disabled",
+      "variantOf": "apisec-supply-chain-age-gate-disabled",
+      "holdout": false,
+      "reasonClass": null
+    },
+    "apisec-tagged-sql-nearmiss": {
+      "expected": "PASS",
+      "okFirst": true,
+      "okFinal": true,
+      "finalStatus": "pass",
+      "rowHash": "0b039ea5591f",
+      "behaviorHash": "6e8da5627934",
+      "caseId": null,
+      "variantOf": null,
+      "holdout": false,
+      "reasonClass": null
+    },
+    "apisec-unescaped-filename-exec": {
+      "expected": "FAIL",
+      "okFirst": true,
+      "okFinal": true,
+      "finalStatus": "fail",
+      "rowHash": "4a8e8b7ff8be",
+      "behaviorHash": "711ab663bf47",
+      "caseId": "apisec-unescaped-filename-exec",
+      "variantOf": null,
+      "holdout": true,
+      "reasonClass": "right-item"
+    },
+    "apisec-unescaped-filename-exec-fixed": {
+      "expected": "PASS",
+      "okFirst": false,
+      "okFinal": false,
+      "finalStatus": "fail",
+      "rowHash": "68e0b347c2b3",
+      "behaviorHash": "d1706ebc0a22",
+      "caseId": "apisec-unescaped-filename-exec",
+      "variantOf": "apisec-unescaped-filename-exec",
+      "holdout": true,
+      "reasonClass": null
+    },
+    "apisec-unquoted-scope-list-injection": {
+      "expected": "FAIL",
+      "okFirst": true,
+      "okFinal": true,
+      "finalStatus": "fail",
+      "rowHash": "d56acb9909da",
+      "behaviorHash": "3895cfa36b1c",
+      "caseId": "apisec-unquoted-scope-list-injection",
+      "variantOf": null,
+      "holdout": false,
+      "reasonClass": "right-item"
+    },
+    "apisec-unquoted-scope-list-injection-fixed": {
+      "expected": "PASS",
+      "okFirst": false,
+      "okFinal": false,
+      "finalStatus": "fail",
+      "rowHash": "144b8686ee58",
+      "behaviorHash": "7772e9d5fe56",
+      "caseId": "apisec-unquoted-scope-list-injection",
+      "variantOf": "apisec-unquoted-scope-list-injection",
+      "holdout": false,
+      "reasonClass": null
+    }
+  }
+}
