@@ -460,11 +460,13 @@ describe('runRow end-to-end (fake judge, real fixture + gate)', () => {
     expect(exec).toHaveBeenCalledTimes(1);
   });
 
-  it('PASS without a checklist artifact is voided to inconclusive (checklist-void)', async () => {
+  it('PASS without a checklist artifact is inconclusive and cannot become baseline evidence', async () => {
     const exec = fakeJudge({ first: { out: 'VERDICT: PASS' } }); // no artifact written
     const res = await runRow(decoyRow(), { model: 'sonnet', cascade: true, exec });
     expect(res.finalStatus).toBe('inconclusive');
-    expect(res.subcause).toBe('checklist-void');
+    expect(res.subcause).toBe('engine-error');
+    expect(res.execution.complete).toBe(false);
+    expect(res.firstVerdict).toBeNull();
     expect(res.okFinal).toBe(false);
   });
 

@@ -11,8 +11,12 @@ import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BenchAbort, parseCasesText } from '../../../decisions/eval/bench.mts';
-import { checklistScript } from '../../reviewers.mts';
+import { checklistScript, REVIEWERS } from '../../reviewers.mts';
 import { groupByPair } from './corpus/twins.mts';
+
+export const BENCH_REVIEWERS = REVIEWERS.filter(
+  (r) => r.domain === 'backend' || r.domain === 'frontend' || r.domain === 'all',
+);
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 // gate-engine/review/eval/reviewers → repo root is four levels up.
@@ -180,6 +184,18 @@ export function benchGateHash(reviewer) {
   return sha12(
     [
       readFileSync(path.join(repoRoot, 'gate-engine/review/run-review.mts'), 'utf8'),
+      ...[
+        'eval/reviewers/bench.mts',
+        'eval/reviewers/corpus/row.mts',
+        'eval/reviewers/stats.mts',
+        'eval/reviewers/progress.mts',
+        'eval/reviewers/corpus/chunk-guard.mts',
+        'lens/split.mts',
+        'lens/groups.mts',
+        'lens/chunk-tasks.mts',
+        'lens/chunk.mts',
+        'cascade/reviewer.mts',
+      ].map((file) => readFileSync(path.join(repoRoot, 'gate-engine/review', file), 'utf8')),
       readFileSync(path.join(repoRoot, 'gate-engine/review/reviewers.mts'), 'utf8'),
       readFileSync(path.join(repoRoot, 'gate-engine/review/runtime.mts'), 'utf8'),
       // sc-1442: these supply judge-visible bytes (Targets framing, the advisory message wrapper,

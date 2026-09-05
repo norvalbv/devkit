@@ -52,6 +52,7 @@ import { emitGateEvent } from '../../judge/gate-events.mts';
 import { composeTranscript, saveTranscript } from '../../judge/transcript-store.mts';
 import { itemFields, mergeItemVectors } from '../evidence/items.mts';
 import type { ChecklistReviewer, ReviewerSelection } from '../reviewers.mts';
+import { parseReviewVerdict } from '../contracts/response.mts';
 
 /**
  * The mandatory-checklist paragraph of a judge prompt.
@@ -263,6 +264,7 @@ export function planReviewWork(
   keyOf: (name: string, diff: string, salt: string) => string,
   groups = resolveLensGroups(),
   chunkCap = resolveChunkCap(),
+  emitChunkPlan: typeof emitReviewChunkPlan = emitReviewChunkPlan,
 ): {
   tasks: ReviewTask[];
   scope: { sel: ReviewerSelection; diff: string; cached: boolean }[];
@@ -293,7 +295,7 @@ export function planReviewWork(
         ? planChunkedParts(sel, diffs[i], idText, salt, keyOf, split, chunkCap)
         : null;
     if (chunked)
-      emitReviewChunkPlan(
+      emitChunkPlan(
         name,
         {
           count: chunked.facts.count,
@@ -403,9 +405,6 @@ type SpyCapture = {
   synthetic?: boolean;
 };
 
-// Tolerates the same markdown dressing around the verdict token that parseReviewVerdict allows.
-const CAPTURE_FAIL_RE = /VERDICT:\s*\**\s*FAIL\b/i;
-
 /**
  * Merge the per-group spy captures a split arm produces into the ONE entry bench scoring expects.
  *
@@ -418,7 +417,7 @@ const CAPTURE_FAIL_RE = /VERDICT:\s*\**\s*FAIL\b/i;
  */
 export function mergeLensCaptures(entries: readonly SpyCapture[]): SpyCapture | undefined {
   if (entries.length < 2) return entries[0];
-  const failing = entries.find((e) => CAPTURE_FAIL_RE.test(String(e.out ?? '')));
+  const failing = entries.find((e) => parseReviewVerdict(String(e.out ?? '')).verdict === 'FAIL');
   const items = entries.flatMap((e) => {
     const snap = e.snapshot as { items?: unknown[] } | null;
     return Array.isArray(snap?.items) ? snap.items : [];

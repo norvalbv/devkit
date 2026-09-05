@@ -7,13 +7,15 @@
  * "before" snapshot loader for A/B comparisons.
  */
 
-import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { createHash, randomUUID } from 'node:crypto';
+import { chmodSync, existsSync, readFileSync, renameSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { withFileLockAsync } from '../../../eval/publish-lock.mts';
 import { BenchAbort, parseCasesText } from '../../../decisions/eval/bench.mts';
 import { lensArmSuffix } from '../../lens/split.mts';
 import { behaviorRowHash, rowHash } from './corpus.mts';
+import { BENCH_LENS_GROUPS } from './corpus/chunk-guard.mts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -32,7 +34,7 @@ export const progressFile = (model, cascade) => {
   // would salvage its rows straight into the split arm and score one arm's judgments as the
   // other's — silently, on precisely the rows the A/B exists to compare. The gate's cache key
   // already guards the same contamination; this is the bench's half of it.
-  const suffix = lensArmSuffix('correctness-reviewer');
+  const suffix = lensArmSuffix('correctness-reviewer', BENCH_LENS_GROUPS);
   const arm = suffix
     ? `-split${createHash('sha256').update(suffix).digest('hex').slice(0, 8)}`
     : '';
@@ -59,14 +61,19 @@ export function salvageMap(progress, reviewerName, meta, rows) {
     progress
       .filter(
         (p) =>
+          p.kind !== 'task' &&
           p.reviewer === reviewerName &&
+          p.executionHash === meta.executionHash &&
           p.gateHash === meta.gateHash &&
           (p.behaviorHash !== undefined
             ? p.behaviorHash === currentBehaviorHash.get(p.res.id)
             : p.rowHash === currentRowHash.get(p.res.id)) &&
           !RETRYABLE.has(p.res.subcause),
       )
-      .map((p) => [p.res.id, p.res]),
+      .map((p) => {
+        const row = rows.find((r) => r.id === p.res.id);
+        return [p.res.id, { ...p.res, ...rowHashesForResume(row) }];
+      }),
   );
 }
 
@@ -78,4 +85,44 @@ export function loadAgainstFile(p) {
   } catch (e) {
     throw new BenchAbort(2, `reviewer-eval: --against file unreadable (${p}): ${e?.message ?? e}`);
   }
+}
+
+// Label/partition metadata is refreshed even when unchanged behavior permits reuse.
+function rowHashesForResume(row) {
+  return {
+    rowHash: rowHash(row),
+    behaviorHash: behaviorRowHash(row),
+    caseId: row.caseId ?? null,
+    variantOf: row.variantOf ?? null,
+    holdout: !!row.holdout,
+  };
+}
+
+export function taskSalvage(progress, row, identity) {
+  return new Map(
+    progress
+      .filter(
+        (p) =>
+          p.kind === 'task' &&
+          p.executionHash === identity &&
+          p.rowHash === rowHash(row) &&
+          p.task.complete,
+      )
+      .map((p) => [p.task.key, p.task]),
+  );
+}
+
+/** Retain raw task attempts privately after success while clearing the active resume ledger. */
+export function archiveProgress(model, cascade) {
+  const active = progressFile(model, cascade);
+  if (!existsSync(active)) return null;
+  const archived = active.replace(/\.jsonl$/, `-completed-${randomUUID()}.jsonl`);
+  renameSync(active, archived);
+  chmodSync(archived, 0o600);
+  return archived;
+}
+
+/** Own the entire shared baseline/ledger lifecycle, including --fresh and final archival. */
+export function withBenchmarkRun(action, lockPath = path.join(here, 'raw', 'reviewer-bench.lock')) {
+  return withFileLockAsync(lockPath, 'reviewer benchmark', action);
 }
