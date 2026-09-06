@@ -260,12 +260,14 @@ describe('commit_with_gate_capture — executable hook proof', () => {
     expect(result.stderr).not.toContain('Gate findings this run');
   });
 
-  it('classifies a comment-budget block as the comments gate in the ship envelope', () => {
+  it.each([
+    ['guard-comments: 1 added/modified comment paragraph need a decision.', 'comments'],
+    ['qavis-advisory: strict gate blocked', 'qavis-advisory'],
+    ['qavis-advisory: UI-affecting change with no qavis QA on this staged tree.', 'unknown'],
+  ])('attributes terminal hook output %s to %s', (message, blockedGate) => {
     const { root, wt, base } = fixture(
       true,
-      "echo 'REAL_PRE_COMMIT_RAN' >&2\n" +
-        "echo 'guard-comments: 1 added/modified comment paragraph need a decision.' >&2\n" +
-        'exit 1\n',
+      `echo 'REAL_PRE_COMMIT_RAN' >&2\necho '${message}' >&2\nexit 1\n`,
     );
 
     const result = runCommit(root, wt, base);
@@ -278,7 +280,7 @@ describe('commit_with_gate_capture — executable hook proof', () => {
     expect(events.at(-1)).toMatchObject({
       type: 'ship_result',
       exit_code: 1,
-      blocked_gate: 'comments',
+      blocked_gate: blockedGate,
     });
   });
 
