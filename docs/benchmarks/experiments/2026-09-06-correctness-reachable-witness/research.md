@@ -20,3 +20,9 @@ These sources motivate an experiment. None measures the effect of this prompt on
 ## Falsifiable local hypothesis
 
 The intervention is one additional same-pass step: connect a proposed failure to a reachable post-change path using source and language semantics. Keep model, context availability, lenses and existing verdict policy fixed. The risk is that extra tracing costs time or makes the reviewer miss valid edge cases. Four exposed pairs can reveal regressions; they cannot establish the proposed mechanism's benefit. Resolve direct caller controls and freeze independent confirmation before promotion.
+
+## V2: comparison before confidence
+
+The amended experiment also assesses [promptfoo and GEPA](tooling.md), and follows the existing [lens-hole decision](../../../decisions/correctness-lens-hole-instrument.md). The local record already requires demonstrated eligible misses and a nearest-lens amendment comparison before adding a fifth category. The recorded adjacent-lens attribution disagreement is a reason to measure boundaries and unique valid findings, not a new proof that four lenses are optimal.
+
+The strengthened proposal prepares P's shared instruction, L's conditional-rule bundle and C's selected source delivery. Only B/P/L on the eight existing source-backed rows can produce scores. Authored examples and all of C are unscored exploration: they cannot rank candidates, measure a deployable retriever or authenticate historical source assumptions. Direct scored comparisons still require source qualification under the existing corpus-origin ruling.

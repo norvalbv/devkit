@@ -24,3 +24,17 @@ The cohort contains four structural pairs from three original PRs. Stored `caseI
 These pairs cover state visibility, an actual asynchronous clobber, lock ownership and parsing preservation. They do not recreate the motivating synchronous editor/send contract or component reuse/lifetime dispute. They are guardrails for the candidate, not a direct test of that hypothesis. No new illustrative example has been inserted into the corpus or prompt.
 
 The large `corr-only-selector-silent-drop` / `corr-asymmetric-flip-classifier` reporting family and sc-2866's typed-reply source family remain excluded because qualification is unresolved. Their exclusion is fixed before running anything, not selected after observing candidate results.
+
+## V2 additions: unscored mechanism probes
+
+[draft-cases.json](draft-cases.json) contains seven **unscored source examples**, not new native corpus rows or proposed gold. They have no expected verdict. Their inert programs and anticipated observations explain the authored mechanisms; execution cannot create the missing source provenance. The [source-anchoring ruling](../../../decisions/benchmarks-grow-from-telemetry.md) still applies. No probe was executed or admitted.
+
+| Probe family | Authored scenario | What its program explores |
+| --- | --- | --- |
+| `draft-sync-send` | A submit closure captures empty text during construction versus reading it after the action's synchronous editor write. | Whether two action calls send the current values. This is a plain JS model, not a source reconstruction of an editor incident. |
+| `draft-callback-ownership` | A deferred read uses mutable state in a shared controller; an alternative captures the topic, while a derivative host creates a controller per post. | The destinations delivered after two posts and a deferred queue drain. This does not establish React lifecycle or cancellation behavior. |
+| `draft-ignored-delete` | An explicit idempotent caller accepts repeated/absent keys; one implementation throws on false while another intentionally ignores the result. | The return, error and resulting cache contents. The declared contract is visible ordinary source, not an inferred production requirement. |
+
+All probes are exposed, newly authored exploration. The callback topology derivative stays grouped with its family. C supplies only [exact unchanged source packets](context-packets.json) for these probes; its outcomes are unscored and cannot rank a candidate. Control programs and anticipated outcomes are never sent to the reviewer.
+
+To score these mechanisms, qualify independent observed source cases first; passing an invented program's check cannot supply that anchor. The eight original rows remain the only scored guardrails, and historical REAL/NOT disputes remain unresolved.

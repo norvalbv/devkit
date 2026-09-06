@@ -1,21 +1,13 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "ticket": 2872,
-  "status": "prepared-not-run",
+  "status": "preparation-frozen-scored-guardrails-unscored-probes",
   "executionAuthorized": false,
   "productionPromotion": false,
   "sourceRevision": "9b08577aa2bf9297443b5b592380a0ee03eea5dc",
   "researchAsOf": "2026-09-06",
-  "hypothesis": "Same-pass grounding of a proposed failing scenario in reachable source behavior may reduce unsupported claims without losing target diagnoses.",
-  "measurableByThisCohort": "Exposed regression behavior only; not direct lifetime/send-guard mechanism benefit.",
-  "candidate": {
-    "artifact": "agent.patch",
-    "target": "agents/correctness-reviewer.md",
-    "patchSha256": "c122d1824f36c60286eaa176892aa224f365cb2f5b07c40d5b90da8f05c31f64",
-    "beforeSha256": "8c96f896be0859f9089444ee6a41de7ff0d8cf1a5abeece4f819b4a173351d94",
-    "afterSha256": "375fd3234356997d31510f4480587b62826ddceaaee73cdbed914c3241181bf9",
-    "applied": false
-  },
+  "hypothesis": "Prepare competing prompt interventions with scored source-backed guardrails and separate unscored source-delivery/mechanism exploration.",
+  "measurableByThisCohort": "Only the eight original source-backed guardrails may contribute benchmark metrics. The seven authored probes and all of C are unscored, cannot rank candidates and cannot establish mechanism improvement.",
   "sourceFilesSha256": {
     "agents/correctness-reviewer.md": "8c96f896be0859f9089444ee6a41de7ff0d8cf1a5abeece4f819b4a173351d94",
     "skills/correctness/SKILL.md": "d26708b78352a24582528bb6a69cafe9e6a1b566ede7ce85971a70c7f8f3231f",
@@ -130,21 +122,24 @@
     "corr-json-string-result-dropped"
   ],
   "futureExecution": {
-    "status": "requires-explicit-user-authorization",
+    "status": "blocked-until-permission-and-native-parity",
     "roundOrder": [
       [
-        "baseline",
-        "candidate"
+        "B",
+        "P",
+        "L",
+        "C"
       ],
       [
-        "candidate",
-        "baseline"
+        "C",
+        "L",
+        "P",
+        "B"
       ]
     ],
-    "rowExecutionsPlanned": 32,
     "nativeTaskCount": null,
     "nativeTaskCountStatus": "census-not-run",
-    "isolation": "one fresh checkout per arm/round/family; 16 total; candidate.patch only in candidate checkouts",
+    "isolation": "fresh isolated arm checkout and per-round/per-row evidence namespace; no native checkpoint or external cache reuse",
     "environment": {
       "BENCH_MODEL": "gpt-5.6-sol",
       "BENCH_CASCADE": "off",
@@ -152,15 +147,7 @@
       "GUARD_CORRECTNESS_CHUNK": "400",
       "GUARD_CORRECTNESS_SPLIT": "state-transitions|concurrency-races|writer-reader-contracts|error-and-edge-classification"
     },
-    "argvTemplate": [
-      "node",
-      "gate-engine/review/eval/reviewers/bench.mts",
-      "run",
-      "correctness-reviewer",
-      "--only",
-      "<exact-family-prefix>",
-      "--fresh"
-    ],
+    "argvTemplate": null,
     "forbiddenFlags": [
       "--dev",
       "--against",
@@ -169,16 +156,154 @@
     ],
     "manualQualityRetries": 0,
     "manualExecutionRetries": 0,
-    "failurePolicy": "Preserve and report every failed/paused/incomplete attempt; no completion or success inferred. Any later recovery is a separately declared phase."
+    "failurePolicy": "Preserve and report every failed/paused/incomplete attempt; no completion or success inferred. Any later recovery is a separately declared phase.",
+    "rosterMeaning": "Two rounds: B/P/L each eight scored guardrail rows (48); B/P/L/C each seven unscored probes (56). These partitions must never be pooled.",
+    "entrypoint": "native runRow for source-backed guardrails only; native planner/cascade/task-capture seams without scoreRow for unscored probes; adapter not implemented",
+    "legacyCliTemplateStatus": "No command in this PR executes the mixed v2 plan. Probes have no expected verdict and must never be passed to runRow or a corpus scorer.",
+    "totalExecutionsPlanned": 104,
+    "scoredRowExecutionsPlanned": 48,
+    "unscoredProbeExecutionsPlanned": 56
   },
   "measurements": null,
   "admissionChanges": 0,
   "limitations": [
     "Four structural pairs, three source PRs; not four independent production incidents.",
     "Historical holdout flags do not confer unseen status after exposure.",
-    "No direct lifecycle/send-guard control in this cohort.",
     "No fresh executable control result or native census.",
     "Source model pin and effective metadata must be verified before interpreting a future result.",
-    "No production promotion from this guardrail cohort regardless of outcome."
-  ]
+    "No production promotion from this guardrail cohort regardless of outcome.",
+    "L is a two-rule bundle; component effects are not isolated.",
+    "Seven authored probes have no gold provenance: no scores, precision/recall, candidate ranking or promotion from them.",
+    "C applies only to unscored probes; there is no scored context comparison in this preparation.",
+    "Control success cannot supply the missing independent source anchor.",
+    "Native scored/unscored adapter paths remain unimplemented and unvalidated."
+  ],
+  "supersedes": {
+    "prHead": "f85fadca130633635166c3896062a51cca26932f",
+    "oldRowExecutionsPlanned": 32,
+    "reason": "Replace the onecandidate plan with alternatives; authored mechanism examples are unscored under benchmarks-grow-from-telemetry."
+  },
+  "arms": [
+    {
+      "id": "B",
+      "name": "baseline",
+      "patch": null
+    },
+    {
+      "id": "P",
+      "name": "shared-reachability-guidance",
+      "artifact": "agent.patch",
+      "target": "agents/correctness-reviewer.md",
+      "patchSha256": "c122d1824f36c60286eaa176892aa224f365cb2f5b07c40d5b90da8f05c31f64",
+      "beforeSha256": "8c96f896be0859f9089444ee6a41de7ff0d8cf1a5abeece4f819b4a173351d94",
+      "afterSha256": "375fd3234356997d31510f4480587b62826ddceaaee73cdbed914c3241181bf9",
+      "applied": false
+    },
+    {
+      "id": "L",
+      "name": "conditional-lens-rule-bundle",
+      "artifact": "lens-rules.patch",
+      "patchSha256": "506c1f88ef515702ba624699e3bc041a8112947baace783b2df8537bb7a26a4d",
+      "sourceChanges": [
+        {
+          "path": "agents/correctness-reviewer.md",
+          "beforeSha256": "8c96f896be0859f9089444ee6a41de7ff0d8cf1a5abeece4f819b4a173351d94",
+          "afterSha256": "a307d19f4f8b6ff5faf7c1286c3f73b17c234bb42d7e6912f31052a8949403fe"
+        },
+        {
+          "path": "skills/correctness/SKILL.md",
+          "beforeSha256": "d26708b78352a24582528bb6a69cafe9e6a1b566ede7ce85971a70c7f8f3231f",
+          "afterSha256": "606340669f363e49d3c66e74f271580e772a1cf6be4892c3ef8404d5872fb4ff"
+        }
+      ],
+      "applied": false,
+      "limitation": "CAS and ignored-return changes are one bundle; no isolated component effect claimed."
+    },
+    {
+      "id": "C",
+      "name": "provided-source-context",
+      "patch": null,
+      "artifact": "context-packets.json",
+      "sha256": "525ed0a0ba049918d72e005213a92ae959ae6a06801c29652e5d20b69b368d23",
+      "adapterImplemented": false,
+      "appliesTo": "seven unscored probes only",
+      "limitation": "Qualitative source-delivery exploration only; no context-effect metric or candidate selection."
+    }
+  ],
+  "executionReadiness": {
+    "ready": false,
+    "requirements": [
+      "Explicit user permission for benchmark, fixture and probe execution",
+      "Validate existing source-backed controls and freeze their scored manifest",
+      "Inspect exploratory control observations without converting probes to gold; no scoring or optimizer objective for probes",
+      "Implement and validate separate native scored and unscored adapter paths, with hard rejection if probes reach a scorer",
+      "Verify exact prompt/source/context/capability identity and fresh capture",
+      "Acquire independently source-anchored direct cases under existing admission rules before a scored mechanism or context comparison"
+    ]
+  },
+  "exploratoryProbes": {
+    "artifact": "draft-cases.json",
+    "sha256": "4171fdd0c71cfb9d84365e5af685f9138dd4d6a6b1ef98fa058c02d590761e91",
+    "probes": [
+      {
+        "id": "draft-sync-send",
+        "familyId": "draft-sync-send",
+        "variant": "bug",
+        "probeSha256": "d2218d3c49ac5cbbec7b5e580f5ba10622800c3cd735cd3a9d59757812c7e34a",
+        "hashDefinition": "UTF-8 JSON sorted keys, compact separators, ensure_ascii=false",
+        "scoring": "forbidden-unanchored-probe"
+      },
+      {
+        "id": "draft-sync-send-repair",
+        "familyId": "draft-sync-send",
+        "variant": "repair",
+        "probeSha256": "7b2984bdc76528dd741ec7b6e75c9d694c01e219fb89e1904d7884904a269d1a",
+        "hashDefinition": "UTF-8 JSON sorted keys, compact separators, ensure_ascii=false",
+        "scoring": "forbidden-unanchored-probe"
+      },
+      {
+        "id": "draft-callback-ownership",
+        "familyId": "draft-callback-ownership",
+        "variant": "bug",
+        "probeSha256": "85d8f5ec054a7f30e0d87733e17a739cdedc53d064af54316ffd7a65d5687f89",
+        "hashDefinition": "UTF-8 JSON sorted keys, compact separators, ensure_ascii=false",
+        "scoring": "forbidden-unanchored-probe"
+      },
+      {
+        "id": "draft-callback-ownership-repair",
+        "familyId": "draft-callback-ownership",
+        "variant": "repair",
+        "probeSha256": "1d0b7d832434195586ab80d5efe962f2b4cbd7acce38f913d5b5adad16f95d85",
+        "hashDefinition": "UTF-8 JSON sorted keys, compact separators, ensure_ascii=false",
+        "scoring": "forbidden-unanchored-probe"
+      },
+      {
+        "id": "draft-callback-ownership-decoy",
+        "familyId": "draft-callback-ownership",
+        "variant": "decoy",
+        "probeSha256": "b10213397cc4c4b785f783bf43abc6ae9ff0a511eab8fe416f60e9204078c0b8",
+        "hashDefinition": "UTF-8 JSON sorted keys, compact separators, ensure_ascii=false",
+        "scoring": "forbidden-unanchored-probe"
+      },
+      {
+        "id": "draft-ignored-delete",
+        "familyId": "draft-ignored-delete",
+        "variant": "bug",
+        "probeSha256": "7bbb8312ed6d977054cbe1b15a89f33553d3f8653bec13b805c232280f3876e0",
+        "hashDefinition": "UTF-8 JSON sorted keys, compact separators, ensure_ascii=false",
+        "scoring": "forbidden-unanchored-probe"
+      },
+      {
+        "id": "draft-ignored-delete-repair",
+        "familyId": "draft-ignored-delete",
+        "variant": "repair",
+        "probeSha256": "50c521ce44d284462f5f823b1bc05541d3a07839071875f728a12b91a1ce6540",
+        "hashDefinition": "UTF-8 JSON sorted keys, compact separators, ensure_ascii=false",
+        "scoring": "forbidden-unanchored-probe"
+      }
+    ],
+    "admitted": false,
+    "controlsExecuted": false,
+    "benchmarkScoresPermitted": false
+  }
 }
