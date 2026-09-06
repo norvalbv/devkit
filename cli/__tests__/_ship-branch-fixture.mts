@@ -1,3 +1,4 @@
+import { execFileSync as execSetupSync } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -55,7 +56,12 @@ export function buildAndRun(
   const dir = mkdtempSync(join(tmpdir(), 'shipres-'));
   dirs.push(dir);
   const git = (args) =>
-    execFileSync('git', args, { cwd: dir, stdio: 'ignore', env: { ...process.env, ...GIT_ENV } });
+    execSetupSync('git', args, {
+      cwd: dir,
+      stdio: 'ignore',
+      env: { ...process.env, ...GIT_ENV },
+      timeout: 90_000,
+    });
   git(['init', '-q', '-b', branch]);
   git(['config', 'user.email', 'a@b.c']);
   git(['config', 'user.name', 'a']);
@@ -107,7 +113,7 @@ export function seedShipRepo({ hookBody = 'exit 0', origin = 'git@github.com:acm
     ['config', 'core.hooksPath', '.husky/_'],
     ['remote', 'add', 'origin', origin],
   ])
-    git(a, { stdio: 'ignore' });
+    execSetupSync('git', a, { cwd: dir, env, stdio: 'ignore', timeout: 90_000 });
   mkdirSync(join(dir, '.husky/_'), { recursive: true });
   writeFileSync(join(dir, '.husky/_/pre-commit'), `#!/bin/sh\n${hookBody}\n`);
   chmodSync(join(dir, '.husky/_/pre-commit'), 0o755);
