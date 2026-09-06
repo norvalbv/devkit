@@ -1,0 +1,17 @@
+--- a/agents/correctness-reviewer.md
++++ b/agents/correctness-reviewer.md
+@@ -31,6 +31,14 @@
+ - A finding must name the concrete failing interleaving or input — "actor B runs between A's
+   read and write, then X", or "input `{\"error\":…}` matches the anchor and misclassifies".
+   No vague "could be racy".
++- Ground each proposed FAIL in a reachable post-change path. Follow the relevant caller or
++  exported contract through earlier mutations and guards to the claimed wrong result. For a
++  race or delayed callback, identify the actors and shared state or instance lifetime that
++  permit the schedule; source and language semantics can establish this without a test.
++  Do not invent a caller state, input contract, or additional actor solely to make a suspicious
++  pattern fail. Read the specific counterparty needed to resolve a load-bearing assumption,
++  within the existing time budget. Missing context remains uncertainty, not evidence that the
++  code is clean. Keep the existing introduced-defect bar and adversarial PASS check.
+ - Skip node_modules and generated files. Tests and docs in the supplied chunk are IN SCOPE for
+   concrete defects in logic, fixtures, assertions, commands, configuration, or documented
+   contracts; test adequacy and prose quality remain outside this reviewer's charter.

@@ -1,0 +1,184 @@
+{
+  "schemaVersion": 1,
+  "ticket": 2872,
+  "status": "prepared-not-run",
+  "executionAuthorized": false,
+  "productionPromotion": false,
+  "sourceRevision": "9b08577aa2bf9297443b5b592380a0ee03eea5dc",
+  "researchAsOf": "2026-09-06",
+  "hypothesis": "Same-pass grounding of a proposed failing scenario in reachable source behavior may reduce unsupported claims without losing target diagnoses.",
+  "measurableByThisCohort": "Exposed regression behavior only; not direct lifetime/send-guard mechanism benefit.",
+  "candidate": {
+    "artifact": "agent.patch",
+    "target": "agents/correctness-reviewer.md",
+    "patchSha256": "c122d1824f36c60286eaa176892aa224f365cb2f5b07c40d5b90da8f05c31f64",
+    "beforeSha256": "8c96f896be0859f9089444ee6a41de7ff0d8cf1a5abeece4f819b4a173351d94",
+    "afterSha256": "375fd3234356997d31510f4480587b62826ddceaaee73cdbed914c3241181bf9",
+    "applied": false
+  },
+  "sourceFilesSha256": {
+    "agents/correctness-reviewer.md": "8c96f896be0859f9089444ee6a41de7ff0d8cf1a5abeece4f819b4a173351d94",
+    "skills/correctness/SKILL.md": "d26708b78352a24582528bb6a69cafe9e6a1b566ede7ce85971a70c7f8f3231f",
+    "skills/correctness/scripts/checklist.mjs": "e1151b249ea5e749460a1441484c44b7bcf245cf18053ffec43693064e01ac5c",
+    "skills/_devkit/review-roots.mjs": "dda5d77f78f4e9e9aed70eb2c83f70e764907deff72d91b67c0f91d88772fadc",
+    "skills/_devkit/checklist-store.mjs": "c8a6a01fe75bd570953ccc88e3b99b8ac365bb249c4b1db2ce0c32a589c52193",
+    "gate-engine/review/eval/reviewers/cases-correctness.jsonl": "fbc2afd974944cc094d957f6b8c29153349be4a0f90f54c9df26a23c64497a15",
+    "gate-engine/review/eval/reviewers/bench.mts": "fd97e690c9a955f3a5e2498e168b48433ab7894eeddea22fb65399147795ba30",
+    "gate-engine/review/eval/reviewers/corpus.mts": "5823a36dcf0adaadbdba2081e30980e1ac10535583f5f4da98c56783190be68c",
+    "gate-engine/review/eval/reviewers/progress.mts": "0241389f8d2a02b5c3b4f1f78ae33ba98e4b8d5c513655cafdd38d36f0dbf3b7",
+    "gate-engine/review/eval/reviewers/corpus/row.mts": "dcfcb6d448610f52c381d274f3f087b449f2d9c96f81059eb524013bda010213",
+    "gate-engine/review/eval/reviewers/corpus/chunk-guard.mts": "19e39391797f93949e27ce8ad9049a266a217eb9f9cd36efab60ab89a46f7110",
+    "gate-engine/review/eval/reviewers/__tests__/repair-controls.test.mts": "6cbf0c25c6f0a97b00babe556834a57dbe4eb20c73285e3150b346e8a1c1ebe5",
+    "gate-engine/review/reviewers.mts": "3c2c653bcaa368396158d69863846b1b4ae29e0b71d62d7023bfb6b8a68510cb",
+    "gate-engine/review/run-review.mts": "043b810e52d3b877b47abb80a1ffed6b328987d69e93598a6ac56598ebb47dcd",
+    "guard.config.json": "dd13ca3f8f96adea6f2e3179d26bce0da18c19e6cfb9088928a9ec70e86afa52"
+  },
+  "cohort": [
+    {
+      "id": "corr-retry-stuck-unclaimable",
+      "caseId": "corr-retry-stuck-unclaimable",
+      "variantOf": null,
+      "storedHoldout": true,
+      "use": "exposed-development-guardrail",
+      "expected": "FAIL",
+      "rawLineSha256": "688b6bd9bdd625dc55abeb757c9df8a9420f0bfce9dfd1ddba6e09c517951e6b",
+      "hashDefinition": "exact UTF-8 JSONL row including trailing LF",
+      "controlStatus": "existing-control-read; not-executed-for-this-ticket"
+    },
+    {
+      "id": "corr-retry-stuck-unclaimable-repaired",
+      "caseId": "corr-retry-stuck-unclaimable",
+      "variantOf": "corr-retry-stuck-unclaimable",
+      "storedHoldout": true,
+      "use": "exposed-development-guardrail",
+      "expected": "PASS",
+      "rawLineSha256": "68c41245ee5300a9279cd4aef62faefe1a39b0e7444c5db039153ce1bc93491e",
+      "hashDefinition": "exact UTF-8 JSONL row including trailing LF",
+      "controlStatus": "existing-control-read; not-executed-for-this-ticket"
+    },
+    {
+      "id": "corr-read-then-write-clobber-terminal",
+      "caseId": "corr-read-then-write-clobber-terminal",
+      "variantOf": null,
+      "storedHoldout": false,
+      "use": "exposed-development-guardrail",
+      "expected": "FAIL",
+      "rawLineSha256": "ef8085f338ea35d5117ccf833017f763adb665094a9719ecd0da86d90f66a5ff",
+      "hashDefinition": "exact UTF-8 JSONL row including trailing LF",
+      "controlStatus": "existing-control-read; not-executed-for-this-ticket"
+    },
+    {
+      "id": "corr-read-then-write-clobber-terminal-repaired",
+      "caseId": "corr-read-then-write-clobber-terminal",
+      "variantOf": "corr-read-then-write-clobber-terminal",
+      "storedHoldout": false,
+      "use": "exposed-development-guardrail",
+      "expected": "PASS",
+      "rawLineSha256": "0b949288ae9ca321b5294a0011e069b36e22bce4fcb0a50a5d09d87aa1ed8926",
+      "hashDefinition": "exact UTF-8 JSONL row including trailing LF",
+      "controlStatus": "existing-control-read; not-executed-for-this-ticket"
+    },
+    {
+      "id": "corr-lock-timeout-runs-unlocked",
+      "caseId": "corr-lock-timeout-runs-unlocked",
+      "variantOf": null,
+      "storedHoldout": true,
+      "use": "exposed-development-guardrail",
+      "expected": "FAIL",
+      "rawLineSha256": "0313969a6834baa4690070a789ce92c232919e72727a51260062941c434da0b3",
+      "hashDefinition": "exact UTF-8 JSONL row including trailing LF",
+      "controlStatus": "existing-control-read; not-executed-for-this-ticket"
+    },
+    {
+      "id": "corr-lock-timeout-runs-unlocked-repaired",
+      "caseId": "corr-lock-timeout-runs-unlocked",
+      "variantOf": "corr-lock-timeout-runs-unlocked",
+      "storedHoldout": true,
+      "use": "exposed-development-guardrail",
+      "expected": "PASS",
+      "rawLineSha256": "ad8f553e6ee150d08abdbb7652b3fea214c9436a3fb8dda1c1973dd6f9642355",
+      "hashDefinition": "exact UTF-8 JSONL row including trailing LF",
+      "controlStatus": "existing-control-read; not-executed-for-this-ticket"
+    },
+    {
+      "id": "corr-json-string-result-dropped",
+      "caseId": "corr-json-string-result-dropped",
+      "variantOf": null,
+      "storedHoldout": true,
+      "use": "exposed-development-guardrail",
+      "expected": "FAIL",
+      "rawLineSha256": "bdb6743b638fff74796b15fed03931c888c96f16710a713afdc2d885132c5d25",
+      "hashDefinition": "exact UTF-8 JSONL row including trailing LF",
+      "controlStatus": "existing-control-read; not-executed-for-this-ticket"
+    },
+    {
+      "id": "corr-json-string-result-dropped-repaired",
+      "caseId": "corr-json-string-result-dropped",
+      "variantOf": "corr-json-string-result-dropped",
+      "storedHoldout": true,
+      "use": "exposed-development-guardrail",
+      "expected": "PASS",
+      "rawLineSha256": "c644d5f1c2bb6d0d75ee15ae90743f8e47f7c1bac9f02f2f3728a67cf219de86",
+      "hashDefinition": "exact UTF-8 JSONL row including trailing LF",
+      "controlStatus": "existing-control-read; not-executed-for-this-ticket"
+    }
+  ],
+  "families": [
+    "corr-retry-stuck-unclaimable",
+    "corr-read-then-write-clobber-terminal",
+    "corr-lock-timeout-runs-unlocked",
+    "corr-json-string-result-dropped"
+  ],
+  "futureExecution": {
+    "status": "requires-explicit-user-authorization",
+    "roundOrder": [
+      [
+        "baseline",
+        "candidate"
+      ],
+      [
+        "candidate",
+        "baseline"
+      ]
+    ],
+    "rowExecutionsPlanned": 32,
+    "nativeTaskCount": null,
+    "nativeTaskCountStatus": "census-not-run",
+    "isolation": "one fresh checkout per arm/round/family; 16 total; candidate.patch only in candidate checkouts",
+    "environment": {
+      "BENCH_MODEL": "gpt-5.6-sol",
+      "BENCH_CASCADE": "off",
+      "BENCH_CONCURRENCY": "1",
+      "GUARD_CORRECTNESS_CHUNK": "400",
+      "GUARD_CORRECTNESS_SPLIT": "state-transitions|concurrency-races|writer-reader-contracts|error-and-edge-classification"
+    },
+    "argvTemplate": [
+      "node",
+      "gate-engine/review/eval/reviewers/bench.mts",
+      "run",
+      "correctness-reviewer",
+      "--only",
+      "<exact-family-prefix>",
+      "--fresh"
+    ],
+    "forbiddenFlags": [
+      "--dev",
+      "--against",
+      "--fail",
+      "--baseline"
+    ],
+    "manualQualityRetries": 0,
+    "manualExecutionRetries": 0,
+    "failurePolicy": "Preserve and report every failed/paused/incomplete attempt; no completion or success inferred. Any later recovery is a separately declared phase."
+  },
+  "measurements": null,
+  "admissionChanges": 0,
+  "limitations": [
+    "Four structural pairs, three source PRs; not four independent production incidents.",
+    "Historical holdout flags do not confer unseen status after exposure.",
+    "No direct lifecycle/send-guard control in this cohort.",
+    "No fresh executable control result or native census.",
+    "Source model pin and effective metadata must be verified before interpreting a future result.",
+    "No production promotion from this guardrail cohort regardless of outcome."
+  ]
+}
