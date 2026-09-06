@@ -1,0 +1,99 @@
+{
+  "metrics": [
+    {
+      "id": "cpu-ratio",
+      "label": "Fixture CPU candidate/baseline",
+      "direction": "lower",
+      "value": 0.1903974827683182
+    },
+    {
+      "id": "wall-ratio",
+      "label": "Fixture elapsed candidate/baseline",
+      "direction": "lower",
+      "value": 0.31365446430399985
+    }
+  ],
+  "floorsMet": true,
+  "rows": {
+    "baseline-1": {
+      "sample": 1,
+      "mode": "baseline",
+      "wallMs": 651.0522090247832,
+      "cpuMs": 739.7069999999999,
+      "supervisorStarts": 8
+    },
+    "candidate-1": {
+      "sample": 1,
+      "mode": "candidate",
+      "wallMs": 250.41412501013838,
+      "cpuMs": 155.50300000000007,
+      "supervisorStarts": 0
+    },
+    "candidate-2": {
+      "sample": 2,
+      "mode": "candidate",
+      "wallMs": 231.70491700875573,
+      "cpuMs": 143.53000000000014,
+      "supervisorStarts": 0
+    },
+    "baseline-2": {
+      "sample": 2,
+      "mode": "baseline",
+      "wallMs": 738.726667012088,
+      "cpuMs": 753.8440000000004,
+      "supervisorStarts": 8
+    },
+    "baseline-3": {
+      "sample": 3,
+      "mode": "baseline",
+      "wallMs": 679.9602920073085,
+      "cpuMs": 728.0169999999999,
+      "supervisorStarts": 8
+    },
+    "candidate-3": {
+      "sample": 3,
+      "mode": "candidate",
+      "wallMs": 128.54054098716006,
+      "cpuMs": 102.60800000000003,
+      "supervisorStarts": 0
+    },
+    "candidate-4": {
+      "sample": 4,
+      "mode": "candidate",
+      "wallMs": 129.891457996564,
+      "cpuMs": 108.45400000000005,
+      "supervisorStarts": 0
+    },
+    "baseline-4": {
+      "sample": 4,
+      "mode": "baseline",
+      "wallMs": 1279.029958997853,
+      "cpuMs": 927.0620000000002,
+      "supervisorStarts": 8
+    },
+    "baseline-5": {
+      "sample": 5,
+      "mode": "baseline",
+      "wallMs": 1482.6068750116974,
+      "cpuMs": 1120.5749999999996,
+      "supervisorStarts": 8
+    },
+    "candidate-5": {
+      "sample": 5,
+      "mode": "candidate",
+      "wallMs": 290.0990420021117,
+      "cpuMs": 192.53900000000002,
+      "supervisorStarts": 0
+    },
+    "method": {
+      "baseCommit": "9b08577aa2bf9297443b5b592380a0ee03eea5dc",
+      "nodeVersion": "v22.20.0",
+      "vitestVersion": "4.1.10",
+      "scope": "Git initialization only; no Vitest startup, hook installation, assertions or cleanup timed",
+      "repositoryStateSha256": "a942fc4debc005bf21bb75c8c6b17cb956ffe6cf438d707a1a3cc42ae2512d84",
+      "repositoryStateMatchedEveryRun": true,
+      "cpuMeasurement": "resource.getrusage(RUSAGE_CHILDREN): child user + system CPU",
+      "candidateSetupSha256": "cfbafb39025fba595bcfaba2637dc8aa5de67a146c0cf5e2746cf73aa00452b9"
+    }
+  }
+}

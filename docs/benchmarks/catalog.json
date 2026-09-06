@@ -387,6 +387,14 @@
       "lifecycle": "no-ship",
       "evidence": "accepted",
       "suiteIds": ["edge-cases"]
+    },
+    {
+      "id": "benchmark-vitest-fixture",
+      "label": "Vitest ship fixture setup",
+      "kind": "benchmark",
+      "lifecycle": "experimental",
+      "evidence": "accepted",
+      "suiteIds": ["vitest-fixture-setup"]
     }
   ],
   "suites": [
@@ -866,6 +874,25 @@
         "corpus": [],
         "scorer": [],
         "runner": []
+      }
+    },
+    {
+      "id": "vitest-fixture-setup",
+      "label": "Ship fixture setup cost",
+      "adapter": "deterministic",
+      "subjectIds": ["benchmark-vitest-fixture"],
+      "runner": "docs/benchmarks/vitest-fixture-benchmark.py",
+      "baseline": "docs/benchmarks/vitest-fixture-results.json",
+      "lifecycle": "experimental",
+      "acceptance": "Five alternating pairs, identical repository state, candidate child CPU below baseline in every pair. Fixture phase only; no whole-suite claim.",
+      "hashes": {
+        "implementation": [
+          "cli/__tests__/_ship-branch-fixture.mts",
+          "cli/__tests__/test-subprocess.mts"
+        ],
+        "corpus": ["docs/benchmarks/vitest-fixture-benchmark.py"],
+        "scorer": ["docs/benchmarks/vitest-fixture-benchmark.py"],
+        "runner": ["docs/benchmarks/vitest-fixture-benchmark.py"]
       }
     }
   ],

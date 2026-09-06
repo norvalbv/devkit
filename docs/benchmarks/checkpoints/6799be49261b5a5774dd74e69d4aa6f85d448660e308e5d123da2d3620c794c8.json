@@ -1,0 +1,125 @@
+{
+  "acceptance": {
+    "accepted": true,
+    "reason": "Deterministic suite: declared floors met, with per-case evidence"
+  },
+  "adapter": "deterministic",
+  "capturedAt": "2026-09-06T01:35:28.147Z",
+  "comparisons": [
+    {
+      "method": "adapter comparability contract",
+      "note": "Corpus or scoring contract changed",
+      "predecessorEventId": "evt-2026-09-06-vitest-fixture-setup-cc109de23d59",
+      "verdict": "not-comparable"
+    }
+  ],
+  "hashes": {
+    "corpus": "sha256:2b07cab4fd6878a16da32eecba427d3af8694d78c9ba6c54694300107493f8eb",
+    "implementation": "sha256:868638c46a2a303667698f74868980e635f63e665f7fad453b63a8fd3261d247",
+    "runner": "sha256:2b07cab4fd6878a16da32eecba427d3af8694d78c9ba6c54694300107493f8eb",
+    "scorer": "sha256:2b07cab4fd6878a16da32eecba427d3af8694d78c9ba6c54694300107493f8eb"
+  },
+  "metrics": [
+    {
+      "direction": "lower",
+      "id": "cpu-ratio",
+      "inferenceUnit": "case",
+      "label": "Fixture CPU candidate/baseline",
+      "unit": "ratio",
+      "value": 0.1903974827683182
+    },
+    {
+      "direction": "lower",
+      "id": "wall-ratio",
+      "inferenceUnit": "case",
+      "label": "Fixture elapsed candidate/baseline",
+      "unit": "ratio",
+      "value": 0.31365446430399985
+    }
+  ],
+  "rows": {
+    "baseline-1": {
+      "cpuMs": 739.7069999999999,
+      "mode": "baseline",
+      "sample": 1,
+      "supervisorStarts": 8,
+      "wallMs": 651.0522090247832
+    },
+    "baseline-2": {
+      "cpuMs": 753.8440000000004,
+      "mode": "baseline",
+      "sample": 2,
+      "supervisorStarts": 8,
+      "wallMs": 738.726667012088
+    },
+    "baseline-3": {
+      "cpuMs": 728.0169999999999,
+      "mode": "baseline",
+      "sample": 3,
+      "supervisorStarts": 8,
+      "wallMs": 679.9602920073085
+    },
+    "baseline-4": {
+      "cpuMs": 927.0620000000002,
+      "mode": "baseline",
+      "sample": 4,
+      "supervisorStarts": 8,
+      "wallMs": 1279.029958997853
+    },
+    "baseline-5": {
+      "cpuMs": 1120.5749999999996,
+      "mode": "baseline",
+      "sample": 5,
+      "supervisorStarts": 8,
+      "wallMs": 1482.6068750116974
+    },
+    "candidate-1": {
+      "cpuMs": 155.50300000000007,
+      "mode": "candidate",
+      "sample": 1,
+      "supervisorStarts": 0,
+      "wallMs": 250.41412501013838
+    },
+    "candidate-2": {
+      "cpuMs": 143.53000000000014,
+      "mode": "candidate",
+      "sample": 2,
+      "supervisorStarts": 0,
+      "wallMs": 231.70491700875573
+    },
+    "candidate-3": {
+      "cpuMs": 102.60800000000003,
+      "mode": "candidate",
+      "sample": 3,
+      "supervisorStarts": 0,
+      "wallMs": 128.54054098716006
+    },
+    "candidate-4": {
+      "cpuMs": 108.45400000000005,
+      "mode": "candidate",
+      "sample": 4,
+      "supervisorStarts": 0,
+      "wallMs": 129.891457996564
+    },
+    "candidate-5": {
+      "cpuMs": 192.53900000000002,
+      "mode": "candidate",
+      "sample": 5,
+      "supervisorStarts": 0,
+      "wallMs": 290.0990420021117
+    },
+    "method": {
+      "baseCommit": "9b08577aa2bf9297443b5b592380a0ee03eea5dc",
+      "candidateSetupSha256": "cfbafb39025fba595bcfaba2637dc8aa5de67a146c0cf5e2746cf73aa00452b9",
+      "cpuMeasurement": "resource.getrusage(RUSAGE_CHILDREN): child user + system CPU",
+      "nodeVersion": "v22.20.0",
+      "repositoryStateMatchedEveryRun": true,
+      "repositoryStateSha256": "a942fc4debc005bf21bb75c8c6b17cb956ffe6cf438d707a1a3cc42ae2512d84",
+      "scope": "Git initialization only; no Vitest startup, hook installation, assertions or cleanup timed",
+      "vitestVersion": "4.1.10"
+    }
+  },
+  "schemaVersion": 1,
+  "sourceCommit": "c8e47fd55bb8ee243c48021fc102fa21e997cf6b",
+  "suiteId": "vitest-fixture-setup"
+}
