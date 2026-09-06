@@ -1,0 +1,279 @@
+{
+  "schemaVersion": 1,
+  "status": "unscored-exploratory-probes",
+  "historicalClaimResolution": false,
+  "provenance": "Authored mechanism examples inspired by historical failure themes and current lens wording; not production source reconstructions.",
+  "controls": {
+    "draft-sync-send": {
+      "program": "const { createAction } = await import('./src/actions.js');\nconst messages = []; const action = createAction(text => messages.push(text));\nconst returns = [action('hello'), action('world')];\nconsole.log(JSON.stringify({messages, returns}));\n",
+      "invariant": "Each non-empty action call sends its current editor value once.",
+      "status": "not-executed",
+      "programSha256": "de117c0ab46cd8c400ae5b1a256bde289279980db3474d44bfbbfbb92bf8d0b7",
+      "anticipatedBase": {
+        "messages": [
+          "hello",
+          "world"
+        ],
+        "returns": [
+          true,
+          true
+        ]
+      },
+      "anticipatedBug": {
+        "messages": [],
+        "returns": [
+          false,
+          false
+        ]
+      },
+      "anticipatedRepair": {
+        "messages": [
+          "hello",
+          "world"
+        ],
+        "returns": [
+          true,
+          true
+        ]
+      },
+      "interpretation": "Anticipated observations for exploring authored code; agreement cannot establish source provenance, benchmark gold, a candidate score or promotion."
+    },
+    "draft-callback-ownership": {
+      "program": "const { createHost } = await import('./src/host.js');\nconst pending = []; const messages = [];\nconst host = createHost(fn => pending.push(fn), (topic, text) => messages.push([topic, text]));\nhost.post('one', 'first'); host.post('two', 'second');\nfor (const fn of pending) fn();\nconsole.log(JSON.stringify(messages));\n",
+      "invariant": "Deferred posts retain the destination supplied to their own post call.",
+      "status": "not-executed",
+      "programSha256": "b06640e29531c0e67f05fc22ddaa68266e850808898adf00ad745b14d5d38073",
+      "anticipatedBase": [
+        [
+          "one",
+          "first"
+        ],
+        [
+          "two",
+          "second"
+        ]
+      ],
+      "anticipatedBug": [
+        [
+          "two",
+          "first"
+        ],
+        [
+          "two",
+          "second"
+        ]
+      ],
+      "anticipatedRepair": [
+        [
+          "one",
+          "first"
+        ],
+        [
+          "two",
+          "second"
+        ]
+      ],
+      "anticipatedDecoy": [
+        [
+          "one",
+          "first"
+        ],
+        [
+          "two",
+          "second"
+        ]
+      ],
+      "interpretation": "Anticipated observations for exploring authored code; agreement cannot establish source provenance, benchmark gold, a candidate score or promotion."
+    },
+    "draft-ignored-delete": {
+      "program": "const { invalidate } = await import('./src/invalidate.js');\nconst cache = new Map([['present', 1]]); let returned = null, error = null;\ntry { returned = invalidate(cache, ['present', 'present', 'absent']); }\ncatch (e) { error = e.message; }\nconsole.log(JSON.stringify({returned, error, size: cache.size}));\n",
+      "invariant": "Invalidation accepts repeated and absent keys.",
+      "status": "not-executed",
+      "programSha256": "dde4607460bea7335033748d101dfae0e7ad1482fd49326c2995fa9491bcf468",
+      "anticipatedBase": {
+        "returned": true,
+        "error": null,
+        "size": 0
+      },
+      "anticipatedBug": {
+        "returned": null,
+        "error": "missing entry",
+        "size": 0
+      },
+      "anticipatedRepair": {
+        "returned": true,
+        "error": null,
+        "size": 0
+      },
+      "interpretation": "Anticipated observations for exploring authored code; agreement cannot establish source provenance, benchmark gold, a candidate score or promotion."
+    }
+  },
+  "probes": [
+    {
+      "probe": {
+        "id": "draft-sync-send",
+        "familyId": "draft-sync-send",
+        "repo": {
+          "base": {
+            "src/editor.js": "export function createEditor() {\n  let text = '';\n  return { getText: () => text, setText(value) { text = value; } };\n}\n",
+            "src/actions.js": "import { createEditor } from './editor.js';\nimport { makeSubmit } from './submit.js';\nexport function createAction(send) {\n  const editor = createEditor();\n  const submit = makeSubmit(editor, send);\n  return text => { editor.setText(text); return submit(); };\n}\n",
+            "src/submit.js": "export function makeSubmit(editor, send) {\n  return () => { const text = editor.getText(); send(text); return true; };\n}\n",
+            "package.json": "{\"type\":\"module\"}\n"
+          },
+          "staged": {
+            "src/submit.js": "export function makeSubmit(editor, send) {\n  const text = editor.getText();\n  return () => { if (text.trim() === '') return false; send(text); return true; };\n}\n"
+          }
+        }
+      },
+      "variant": "bug",
+      "scoring": "forbidden-unanchored-probe",
+      "controlId": "draft-sync-send",
+      "illustrationKey": "anticipatedBug",
+      "contextFiles": [
+        "src/editor.js",
+        "src/actions.js"
+      ]
+    },
+    {
+      "probe": {
+        "id": "draft-sync-send-repair",
+        "familyId": "draft-sync-send",
+        "repo": {
+          "base": {
+            "src/editor.js": "export function createEditor() {\n  let text = '';\n  return { getText: () => text, setText(value) { text = value; } };\n}\n",
+            "src/actions.js": "import { createEditor } from './editor.js';\nimport { makeSubmit } from './submit.js';\nexport function createAction(send) {\n  const editor = createEditor();\n  const submit = makeSubmit(editor, send);\n  return text => { editor.setText(text); return submit(); };\n}\n",
+            "src/submit.js": "export function makeSubmit(editor, send) {\n  return () => { const text = editor.getText(); send(text); return true; };\n}\n",
+            "package.json": "{\"type\":\"module\"}\n"
+          },
+          "staged": {
+            "src/submit.js": "export function makeSubmit(editor, send) {\n  return () => { const text = editor.getText(); if (text.trim() === '') return false; send(text); return true; };\n}\n"
+          }
+        }
+      },
+      "variant": "repair",
+      "scoring": "forbidden-unanchored-probe",
+      "controlId": "draft-sync-send",
+      "illustrationKey": "anticipatedRepair",
+      "contextFiles": [
+        "src/editor.js",
+        "src/actions.js"
+      ]
+    },
+    {
+      "probe": {
+        "id": "draft-callback-ownership",
+        "familyId": "draft-callback-ownership",
+        "repo": {
+          "base": {
+            "src/controller.js": "export function createController(schedule, deliver) {\n  let topic = '';\n  return {\n    select(next) { topic = next; },\n    queue(text) { const selected = topic; schedule(() => deliver(selected, text)); }\n  };\n}\n",
+            "src/host.js": "import { createController } from './controller.js';\n// Each post must deliver to the topic supplied at that call, even if later posts precede delivery.\nexport function createHost(schedule, deliver) {\n  const controller = createController(schedule, deliver);\n  return { post(topic, text) { controller.select(topic); controller.queue(text); } };\n}\n",
+            "package.json": "{\"type\":\"module\"}\n"
+          },
+          "staged": {
+            "src/controller.js": "export function createController(schedule, deliver) {\n  let topic = '';\n  return {\n    select(next) { topic = next; },\n    queue(message) { schedule(() => deliver(topic, message)); }\n  };\n}\n"
+          }
+        }
+      },
+      "variant": "bug",
+      "scoring": "forbidden-unanchored-probe",
+      "controlId": "draft-callback-ownership",
+      "illustrationKey": "anticipatedBug",
+      "contextFiles": [
+        "src/host.js"
+      ]
+    },
+    {
+      "probe": {
+        "id": "draft-callback-ownership-repair",
+        "familyId": "draft-callback-ownership",
+        "repo": {
+          "base": {
+            "src/controller.js": "export function createController(schedule, deliver) {\n  let topic = '';\n  return {\n    select(next) { topic = next; },\n    queue(text) { const selected = topic; schedule(() => deliver(selected, text)); }\n  };\n}\n",
+            "src/host.js": "import { createController } from './controller.js';\n// Each post must deliver to the topic supplied at that call, even if later posts precede delivery.\nexport function createHost(schedule, deliver) {\n  const controller = createController(schedule, deliver);\n  return { post(topic, text) { controller.select(topic); controller.queue(text); } };\n}\n",
+            "package.json": "{\"type\":\"module\"}\n"
+          },
+          "staged": {
+            "src/controller.js": "export function createController(schedule, deliver) {\n  let topic = '';\n  return {\n    select(next) { topic = next; },\n    queue(message) { const selected = topic; schedule(() => deliver(selected, message)); }\n  };\n}\n"
+          }
+        }
+      },
+      "variant": "repair",
+      "scoring": "forbidden-unanchored-probe",
+      "controlId": "draft-callback-ownership",
+      "illustrationKey": "anticipatedRepair",
+      "contextFiles": [
+        "src/host.js"
+      ]
+    },
+    {
+      "probe": {
+        "id": "draft-callback-ownership-decoy",
+        "familyId": "draft-callback-ownership",
+        "repo": {
+          "base": {
+            "src/controller.js": "export function createController(schedule, deliver) {\n  let topic = '';\n  return {\n    select(next) { topic = next; },\n    queue(text) { const selected = topic; schedule(() => deliver(selected, text)); }\n  };\n}\n",
+            "src/host.js": "import { createController } from './controller.js';\n// Each post must deliver to the topic supplied at that call, even if later posts precede delivery.\nexport function createHost(schedule, deliver) {\n  return { post(topic, text) {\n    const controller = createController(schedule, deliver);\n    controller.select(topic); controller.queue(text);\n  } };\n}\n",
+            "package.json": "{\"type\":\"module\"}\n"
+          },
+          "staged": {
+            "src/controller.js": "export function createController(schedule, deliver) {\n  let topic = '';\n  return {\n    select(next) { topic = next; },\n    queue(message) { schedule(() => deliver(topic, message)); }\n  };\n}\n"
+          }
+        }
+      },
+      "variant": "decoy",
+      "scoring": "forbidden-unanchored-probe",
+      "controlId": "draft-callback-ownership",
+      "illustrationKey": "anticipatedDecoy",
+      "contextFiles": [
+        "src/host.js"
+      ]
+    },
+    {
+      "probe": {
+        "id": "draft-ignored-delete",
+        "familyId": "draft-ignored-delete",
+        "repo": {
+          "base": {
+            "src/evict.js": "export function evict(cache, key) { cache.delete(key); }\n",
+            "src/invalidate.js": "import { evict } from './evict.js';\n// Repeated and already-absent keys are accepted: invalidation is idempotent.\nexport function invalidate(cache, keys) {\n  for (const key of keys) evict(cache, key);\n  return keys.every(key => !cache.has(key));\n}\n",
+            "package.json": "{\"type\":\"module\"}\n"
+          },
+          "staged": {
+            "src/evict.js": "export function evict(cache, entry) {\n  const deleted = cache.delete(entry);\n  if (!deleted) throw new Error('missing entry');\n}\n"
+          }
+        }
+      },
+      "variant": "bug",
+      "scoring": "forbidden-unanchored-probe",
+      "controlId": "draft-ignored-delete",
+      "illustrationKey": "anticipatedBug",
+      "contextFiles": [
+        "src/invalidate.js"
+      ]
+    },
+    {
+      "probe": {
+        "id": "draft-ignored-delete-repair",
+        "familyId": "draft-ignored-delete",
+        "repo": {
+          "base": {
+            "src/evict.js": "export function evict(cache, key) { cache.delete(key); }\n",
+            "src/invalidate.js": "import { evict } from './evict.js';\n// Repeated and already-absent keys are accepted: invalidation is idempotent.\nexport function invalidate(cache, keys) {\n  for (const key of keys) evict(cache, key);\n  return keys.every(key => !cache.has(key));\n}\n",
+            "package.json": "{\"type\":\"module\"}\n"
+          },
+          "staged": {
+            "src/evict.js": "export function evict(cache, entry) {\n  const deleted = cache.delete(entry);\n}\n"
+          }
+        }
+      },
+      "variant": "repair",
+      "scoring": "forbidden-unanchored-probe",
+      "controlId": "draft-ignored-delete",
+      "illustrationKey": "anticipatedRepair",
+      "contextFiles": [
+        "src/invalidate.js"
+      ]
+    }
+  ],
+  "benchmarkAdmission": "forbidden-without-independent-source-anchoring; control success alone is insufficient"
+}

@@ -1,0 +1,99 @@
+{
+  "schemaVersion": 1,
+  "status": "prepared-not-injected",
+  "interpretation": "unscored oracle-selected source delivery exploration, not a scored context benchmark",
+  "packets": [
+    {
+      "files": [
+        {
+          "path": "src/editor.js",
+          "sha256": "4bb7733457c14a771e396647e0718c04e809b2daff20e9da72037f5b291a6597"
+        },
+        {
+          "path": "src/actions.js",
+          "sha256": "256be42a4af8a2cd72a39977b6ab336c2ae58238522466148abdd32de03234b5"
+        }
+      ],
+      "text": "Supplemental source context (unchanged files; not part of the staged diff):\n\nFILE: src/editor.js\nexport function createEditor() {\n  let text = '';\n  return { getText: () => text, setText(value) { text = value; } };\n}\n\nFILE: src/actions.js\nimport { createEditor } from './editor.js';\nimport { makeSubmit } from './submit.js';\nexport function createAction(send) {\n  const editor = createEditor();\n  const submit = makeSubmit(editor, send);\n  return text => { editor.setText(text); return submit(); };\n}\n",
+      "sha256": "0003acf292bd226a5f034d15c9e0d81ed5d471000c191848c12d3a5191e65c00",
+      "selection": "manually-selected-complete-unchanged-files",
+      "probeId": "draft-sync-send"
+    },
+    {
+      "files": [
+        {
+          "path": "src/editor.js",
+          "sha256": "4bb7733457c14a771e396647e0718c04e809b2daff20e9da72037f5b291a6597"
+        },
+        {
+          "path": "src/actions.js",
+          "sha256": "256be42a4af8a2cd72a39977b6ab336c2ae58238522466148abdd32de03234b5"
+        }
+      ],
+      "text": "Supplemental source context (unchanged files; not part of the staged diff):\n\nFILE: src/editor.js\nexport function createEditor() {\n  let text = '';\n  return { getText: () => text, setText(value) { text = value; } };\n}\n\nFILE: src/actions.js\nimport { createEditor } from './editor.js';\nimport { makeSubmit } from './submit.js';\nexport function createAction(send) {\n  const editor = createEditor();\n  const submit = makeSubmit(editor, send);\n  return text => { editor.setText(text); return submit(); };\n}\n",
+      "sha256": "0003acf292bd226a5f034d15c9e0d81ed5d471000c191848c12d3a5191e65c00",
+      "selection": "manually-selected-complete-unchanged-files",
+      "probeId": "draft-sync-send-repair"
+    },
+    {
+      "files": [
+        {
+          "path": "src/host.js",
+          "sha256": "490e112056e7c05fe314989fc514ce34399f0df8ddd7a6467928820b6a3ee1ce"
+        }
+      ],
+      "text": "Supplemental source context (unchanged files; not part of the staged diff):\n\nFILE: src/host.js\nimport { createController } from './controller.js';\n// Each post must deliver to the topic supplied at that call, even if later posts precede delivery.\nexport function createHost(schedule, deliver) {\n  const controller = createController(schedule, deliver);\n  return { post(topic, text) { controller.select(topic); controller.queue(text); } };\n}\n",
+      "sha256": "00989b3558a90ff1e9f6ed9a568556ff2e14cde6222928e6f59bddf8b0845213",
+      "selection": "manually-selected-complete-unchanged-files",
+      "probeId": "draft-callback-ownership"
+    },
+    {
+      "files": [
+        {
+          "path": "src/host.js",
+          "sha256": "490e112056e7c05fe314989fc514ce34399f0df8ddd7a6467928820b6a3ee1ce"
+        }
+      ],
+      "text": "Supplemental source context (unchanged files; not part of the staged diff):\n\nFILE: src/host.js\nimport { createController } from './controller.js';\n// Each post must deliver to the topic supplied at that call, even if later posts precede delivery.\nexport function createHost(schedule, deliver) {\n  const controller = createController(schedule, deliver);\n  return { post(topic, text) { controller.select(topic); controller.queue(text); } };\n}\n",
+      "sha256": "00989b3558a90ff1e9f6ed9a568556ff2e14cde6222928e6f59bddf8b0845213",
+      "selection": "manually-selected-complete-unchanged-files",
+      "probeId": "draft-callback-ownership-repair"
+    },
+    {
+      "files": [
+        {
+          "path": "src/host.js",
+          "sha256": "81b742d99e48ae979bfa7fb651f873edbccde80276115f83b1933d5c65a81d9b"
+        }
+      ],
+      "text": "Supplemental source context (unchanged files; not part of the staged diff):\n\nFILE: src/host.js\nimport { createController } from './controller.js';\n// Each post must deliver to the topic supplied at that call, even if later posts precede delivery.\nexport function createHost(schedule, deliver) {\n  return { post(topic, text) {\n    const controller = createController(schedule, deliver);\n    controller.select(topic); controller.queue(text);\n  } };\n}\n",
+      "sha256": "19645ee4bf6d393f9280fee205c9098450da036f1f5667b353f3e6b2f5058567",
+      "selection": "manually-selected-complete-unchanged-files",
+      "probeId": "draft-callback-ownership-decoy"
+    },
+    {
+      "files": [
+        {
+          "path": "src/invalidate.js",
+          "sha256": "442b247acc76c1309ff7f0f73c5b8bf731f9343a8fd1ff7f9a5880885a6548fc"
+        }
+      ],
+      "text": "Supplemental source context (unchanged files; not part of the staged diff):\n\nFILE: src/invalidate.js\nimport { evict } from './evict.js';\n// Repeated and already-absent keys are accepted: invalidation is idempotent.\nexport function invalidate(cache, keys) {\n  for (const key of keys) evict(cache, key);\n  return keys.every(key => !cache.has(key));\n}\n",
+      "sha256": "303b7c1cd15b99859d37dc57ca9acfbf96a3e6874eb18f588e46f374c71f6bb3",
+      "selection": "manually-selected-complete-unchanged-files",
+      "probeId": "draft-ignored-delete"
+    },
+    {
+      "files": [
+        {
+          "path": "src/invalidate.js",
+          "sha256": "442b247acc76c1309ff7f0f73c5b8bf731f9343a8fd1ff7f9a5880885a6548fc"
+        }
+      ],
+      "text": "Supplemental source context (unchanged files; not part of the staged diff):\n\nFILE: src/invalidate.js\nimport { evict } from './evict.js';\n// Repeated and already-absent keys are accepted: invalidation is idempotent.\nexport function invalidate(cache, keys) {\n  for (const key of keys) evict(cache, key);\n  return keys.every(key => !cache.has(key));\n}\n",
+      "sha256": "303b7c1cd15b99859d37dc57ca9acfbf96a3e6874eb18f588e46f374c71f6bb3",
+      "selection": "manually-selected-complete-unchanged-files",
+      "probeId": "draft-ignored-delete-repair"
+    }
+  ]
+}

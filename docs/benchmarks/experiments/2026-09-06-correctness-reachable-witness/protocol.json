@@ -1,0 +1,309 @@
+{
+  "schemaVersion": 2,
+  "ticket": 2872,
+  "status": "preparation-frozen-scored-guardrails-unscored-probes",
+  "executionAuthorized": false,
+  "productionPromotion": false,
+  "sourceRevision": "9b08577aa2bf9297443b5b592380a0ee03eea5dc",
+  "researchAsOf": "2026-09-06",
+  "hypothesis": "Prepare competing prompt interventions with scored source-backed guardrails and separate unscored source-delivery/mechanism exploration.",
+  "measurableByThisCohort": "Only the eight original source-backed guardrails may contribute benchmark metrics. The seven authored probes and all of C are unscored, cannot rank candidates and cannot establish mechanism improvement.",
+  "sourceFilesSha256": {
+    "agents/correctness-reviewer.md": "8c96f896be0859f9089444ee6a41de7ff0d8cf1a5abeece4f819b4a173351d94",
+    "skills/correctness/SKILL.md": "d26708b78352a24582528bb6a69cafe9e6a1b566ede7ce85971a70c7f8f3231f",
+    "skills/correctness/scripts/checklist.mjs": "e1151b249ea5e749460a1441484c44b7bcf245cf18053ffec43693064e01ac5c",
+    "skills/_devkit/review-roots.mjs": "dda5d77f78f4e9e9aed70eb2c83f70e764907deff72d91b67c0f91d88772fadc",
+    "skills/_devkit/checklist-store.mjs": "c8a6a01fe75bd570953ccc88e3b99b8ac365bb249c4b1db2ce0c32a589c52193",
+    "gate-engine/review/eval/reviewers/cases-correctness.jsonl": "fbc2afd974944cc094d957f6b8c29153349be4a0f90f54c9df26a23c64497a15",
+    "gate-engine/review/eval/reviewers/bench.mts": "fd97e690c9a955f3a5e2498e168b48433ab7894eeddea22fb65399147795ba30",
+    "gate-engine/review/eval/reviewers/corpus.mts": "5823a36dcf0adaadbdba2081e30980e1ac10535583f5f4da98c56783190be68c",
+    "gate-engine/review/eval/reviewers/progress.mts": "0241389f8d2a02b5c3b4f1f78ae33ba98e4b8d5c513655cafdd38d36f0dbf3b7",
+    "gate-engine/review/eval/reviewers/corpus/row.mts": "dcfcb6d448610f52c381d274f3f087b449f2d9c96f81059eb524013bda010213",
+    "gate-engine/review/eval/reviewers/corpus/chunk-guard.mts": "19e39391797f93949e27ce8ad9049a266a217eb9f9cd36efab60ab89a46f7110",
+    "gate-engine/review/eval/reviewers/__tests__/repair-controls.test.mts": "6cbf0c25c6f0a97b00babe556834a57dbe4eb20c73285e3150b346e8a1c1ebe5",
+    "gate-engine/review/reviewers.mts": "3c2c653bcaa368396158d69863846b1b4ae29e0b71d62d7023bfb6b8a68510cb",
+    "gate-engine/review/run-review.mts": "043b810e52d3b877b47abb80a1ffed6b328987d69e93598a6ac56598ebb47dcd",
+    "guard.config.json": "dd13ca3f8f96adea6f2e3179d26bce0da18c19e6cfb9088928a9ec70e86afa52"
+  },
+  "cohort": [
+    {
+      "id": "corr-retry-stuck-unclaimable",
+      "caseId": "corr-retry-stuck-unclaimable",
+      "variantOf": null,
+      "storedHoldout": true,
+      "use": "exposed-development-guardrail",
+      "expected": "FAIL",
+      "rawLineSha256": "688b6bd9bdd625dc55abeb757c9df8a9420f0bfce9dfd1ddba6e09c517951e6b",
+      "hashDefinition": "exact UTF-8 JSONL row including trailing LF",
+      "controlStatus": "existing-control-read; not-executed-for-this-ticket"
+    },
+    {
+      "id": "corr-retry-stuck-unclaimable-repaired",
+      "caseId": "corr-retry-stuck-unclaimable",
+      "variantOf": "corr-retry-stuck-unclaimable",
+      "storedHoldout": true,
+      "use": "exposed-development-guardrail",
+      "expected": "PASS",
+      "rawLineSha256": "68c41245ee5300a9279cd4aef62faefe1a39b0e7444c5db039153ce1bc93491e",
+      "hashDefinition": "exact UTF-8 JSONL row including trailing LF",
+      "controlStatus": "existing-control-read; not-executed-for-this-ticket"
+    },
+    {
+      "id": "corr-read-then-write-clobber-terminal",
+      "caseId": "corr-read-then-write-clobber-terminal",
+      "variantOf": null,
+      "storedHoldout": false,
+      "use": "exposed-development-guardrail",
+      "expected": "FAIL",
+      "rawLineSha256": "ef8085f338ea35d5117ccf833017f763adb665094a9719ecd0da86d90f66a5ff",
+      "hashDefinition": "exact UTF-8 JSONL row including trailing LF",
+      "controlStatus": "existing-control-read; not-executed-for-this-ticket"
+    },
+    {
+      "id": "corr-read-then-write-clobber-terminal-repaired",
+      "caseId": "corr-read-then-write-clobber-terminal",
+      "variantOf": "corr-read-then-write-clobber-terminal",
+      "storedHoldout": false,
+      "use": "exposed-development-guardrail",
+      "expected": "PASS",
+      "rawLineSha256": "0b949288ae9ca321b5294a0011e069b36e22bce4fcb0a50a5d09d87aa1ed8926",
+      "hashDefinition": "exact UTF-8 JSONL row including trailing LF",
+      "controlStatus": "existing-control-read; not-executed-for-this-ticket"
+    },
+    {
+      "id": "corr-lock-timeout-runs-unlocked",
+      "caseId": "corr-lock-timeout-runs-unlocked",
+      "variantOf": null,
+      "storedHoldout": true,
+      "use": "exposed-development-guardrail",
+      "expected": "FAIL",
+      "rawLineSha256": "0313969a6834baa4690070a789ce92c232919e72727a51260062941c434da0b3",
+      "hashDefinition": "exact UTF-8 JSONL row including trailing LF",
+      "controlStatus": "existing-control-read; not-executed-for-this-ticket"
+    },
+    {
+      "id": "corr-lock-timeout-runs-unlocked-repaired",
+      "caseId": "corr-lock-timeout-runs-unlocked",
+      "variantOf": "corr-lock-timeout-runs-unlocked",
+      "storedHoldout": true,
+      "use": "exposed-development-guardrail",
+      "expected": "PASS",
+      "rawLineSha256": "ad8f553e6ee150d08abdbb7652b3fea214c9436a3fb8dda1c1973dd6f9642355",
+      "hashDefinition": "exact UTF-8 JSONL row including trailing LF",
+      "controlStatus": "existing-control-read; not-executed-for-this-ticket"
+    },
+    {
+      "id": "corr-json-string-result-dropped",
+      "caseId": "corr-json-string-result-dropped",
+      "variantOf": null,
+      "storedHoldout": true,
+      "use": "exposed-development-guardrail",
+      "expected": "FAIL",
+      "rawLineSha256": "bdb6743b638fff74796b15fed03931c888c96f16710a713afdc2d885132c5d25",
+      "hashDefinition": "exact UTF-8 JSONL row including trailing LF",
+      "controlStatus": "existing-control-read; not-executed-for-this-ticket"
+    },
+    {
+      "id": "corr-json-string-result-dropped-repaired",
+      "caseId": "corr-json-string-result-dropped",
+      "variantOf": "corr-json-string-result-dropped",
+      "storedHoldout": true,
+      "use": "exposed-development-guardrail",
+      "expected": "PASS",
+      "rawLineSha256": "c644d5f1c2bb6d0d75ee15ae90743f8e47f7c1bac9f02f2f3728a67cf219de86",
+      "hashDefinition": "exact UTF-8 JSONL row including trailing LF",
+      "controlStatus": "existing-control-read; not-executed-for-this-ticket"
+    }
+  ],
+  "families": [
+    "corr-retry-stuck-unclaimable",
+    "corr-read-then-write-clobber-terminal",
+    "corr-lock-timeout-runs-unlocked",
+    "corr-json-string-result-dropped"
+  ],
+  "futureExecution": {
+    "status": "blocked-until-permission-and-native-parity",
+    "roundOrder": [
+      [
+        "B",
+        "P",
+        "L",
+        "C"
+      ],
+      [
+        "C",
+        "L",
+        "P",
+        "B"
+      ]
+    ],
+    "nativeTaskCount": null,
+    "nativeTaskCountStatus": "census-not-run",
+    "isolation": "fresh isolated arm checkout and per-round/per-row evidence namespace; no native checkpoint or external cache reuse",
+    "environment": {
+      "BENCH_MODEL": "gpt-5.6-sol",
+      "BENCH_CASCADE": "off",
+      "BENCH_CONCURRENCY": "1",
+      "GUARD_CORRECTNESS_CHUNK": "400",
+      "GUARD_CORRECTNESS_SPLIT": "state-transitions|concurrency-races|writer-reader-contracts|error-and-edge-classification"
+    },
+    "argvTemplate": null,
+    "forbiddenFlags": [
+      "--dev",
+      "--against",
+      "--fail",
+      "--baseline"
+    ],
+    "manualQualityRetries": 0,
+    "manualExecutionRetries": 0,
+    "failurePolicy": "Preserve and report every failed/paused/incomplete attempt; no completion or success inferred. Any later recovery is a separately declared phase.",
+    "rosterMeaning": "Two rounds: B/P/L each eight scored guardrail rows (48); B/P/L/C each seven unscored probes (56). These partitions must never be pooled.",
+    "entrypoint": "native runRow for source-backed guardrails only; native planner/cascade/task-capture seams without scoreRow for unscored probes; adapter not implemented",
+    "legacyCliTemplateStatus": "No command in this PR executes the mixed v2 plan. Probes have no expected verdict and must never be passed to runRow or a corpus scorer.",
+    "totalExecutionsPlanned": 104,
+    "scoredRowExecutionsPlanned": 48,
+    "unscoredProbeExecutionsPlanned": 56
+  },
+  "measurements": null,
+  "admissionChanges": 0,
+  "limitations": [
+    "Four structural pairs, three source PRs; not four independent production incidents.",
+    "Historical holdout flags do not confer unseen status after exposure.",
+    "No fresh executable control result or native census.",
+    "Source model pin and effective metadata must be verified before interpreting a future result.",
+    "No production promotion from this guardrail cohort regardless of outcome.",
+    "L is a two-rule bundle; component effects are not isolated.",
+    "Seven authored probes have no gold provenance: no scores, precision/recall, candidate ranking or promotion from them.",
+    "C applies only to unscored probes; there is no scored context comparison in this preparation.",
+    "Control success cannot supply the missing independent source anchor.",
+    "Native scored/unscored adapter paths remain unimplemented and unvalidated."
+  ],
+  "supersedes": {
+    "prHead": "f85fadca130633635166c3896062a51cca26932f",
+    "oldRowExecutionsPlanned": 32,
+    "reason": "Replace the onecandidate plan with alternatives; authored mechanism examples are unscored under benchmarks-grow-from-telemetry."
+  },
+  "arms": [
+    {
+      "id": "B",
+      "name": "baseline",
+      "patch": null
+    },
+    {
+      "id": "P",
+      "name": "shared-reachability-guidance",
+      "artifact": "agent.patch",
+      "target": "agents/correctness-reviewer.md",
+      "patchSha256": "c122d1824f36c60286eaa176892aa224f365cb2f5b07c40d5b90da8f05c31f64",
+      "beforeSha256": "8c96f896be0859f9089444ee6a41de7ff0d8cf1a5abeece4f819b4a173351d94",
+      "afterSha256": "375fd3234356997d31510f4480587b62826ddceaaee73cdbed914c3241181bf9",
+      "applied": false
+    },
+    {
+      "id": "L",
+      "name": "conditional-lens-rule-bundle",
+      "artifact": "lens-rules.patch",
+      "patchSha256": "506c1f88ef515702ba624699e3bc041a8112947baace783b2df8537bb7a26a4d",
+      "sourceChanges": [
+        {
+          "path": "agents/correctness-reviewer.md",
+          "beforeSha256": "8c96f896be0859f9089444ee6a41de7ff0d8cf1a5abeece4f819b4a173351d94",
+          "afterSha256": "a307d19f4f8b6ff5faf7c1286c3f73b17c234bb42d7e6912f31052a8949403fe"
+        },
+        {
+          "path": "skills/correctness/SKILL.md",
+          "beforeSha256": "d26708b78352a24582528bb6a69cafe9e6a1b566ede7ce85971a70c7f8f3231f",
+          "afterSha256": "606340669f363e49d3c66e74f271580e772a1cf6be4892c3ef8404d5872fb4ff"
+        }
+      ],
+      "applied": false,
+      "limitation": "CAS and ignored-return changes are one bundle; no isolated component effect claimed."
+    },
+    {
+      "id": "C",
+      "name": "provided-source-context",
+      "patch": null,
+      "artifact": "context-packets.json",
+      "sha256": "525ed0a0ba049918d72e005213a92ae959ae6a06801c29652e5d20b69b368d23",
+      "adapterImplemented": false,
+      "appliesTo": "seven unscored probes only",
+      "limitation": "Qualitative source-delivery exploration only; no context-effect metric or candidate selection."
+    }
+  ],
+  "executionReadiness": {
+    "ready": false,
+    "requirements": [
+      "Explicit user permission for benchmark, fixture and probe execution",
+      "Validate existing source-backed controls and freeze their scored manifest",
+      "Inspect exploratory control observations without converting probes to gold; no scoring or optimizer objective for probes",
+      "Implement and validate separate native scored and unscored adapter paths, with hard rejection if probes reach a scorer",
+      "Verify exact prompt/source/context/capability identity and fresh capture",
+      "Acquire independently source-anchored direct cases under existing admission rules before a scored mechanism or context comparison"
+    ]
+  },
+  "exploratoryProbes": {
+    "artifact": "draft-cases.json",
+    "sha256": "4171fdd0c71cfb9d84365e5af685f9138dd4d6a6b1ef98fa058c02d590761e91",
+    "probes": [
+      {
+        "id": "draft-sync-send",
+        "familyId": "draft-sync-send",
+        "variant": "bug",
+        "probeSha256": "d2218d3c49ac5cbbec7b5e580f5ba10622800c3cd735cd3a9d59757812c7e34a",
+        "hashDefinition": "UTF-8 JSON sorted keys, compact separators, ensure_ascii=false",
+        "scoring": "forbidden-unanchored-probe"
+      },
+      {
+        "id": "draft-sync-send-repair",
+        "familyId": "draft-sync-send",
+        "variant": "repair",
+        "probeSha256": "7b2984bdc76528dd741ec7b6e75c9d694c01e219fb89e1904d7884904a269d1a",
+        "hashDefinition": "UTF-8 JSON sorted keys, compact separators, ensure_ascii=false",
+        "scoring": "forbidden-unanchored-probe"
+      },
+      {
+        "id": "draft-callback-ownership",
+        "familyId": "draft-callback-ownership",
+        "variant": "bug",
+        "probeSha256": "85d8f5ec054a7f30e0d87733e17a739cdedc53d064af54316ffd7a65d5687f89",
+        "hashDefinition": "UTF-8 JSON sorted keys, compact separators, ensure_ascii=false",
+        "scoring": "forbidden-unanchored-probe"
+      },
+      {
+        "id": "draft-callback-ownership-repair",
+        "familyId": "draft-callback-ownership",
+        "variant": "repair",
+        "probeSha256": "1d0b7d832434195586ab80d5efe962f2b4cbd7acce38f913d5b5adad16f95d85",
+        "hashDefinition": "UTF-8 JSON sorted keys, compact separators, ensure_ascii=false",
+        "scoring": "forbidden-unanchored-probe"
+      },
+      {
+        "id": "draft-callback-ownership-decoy",
+        "familyId": "draft-callback-ownership",
+        "variant": "decoy",
+        "probeSha256": "b10213397cc4c4b785f783bf43abc6ae9ff0a511eab8fe416f60e9204078c0b8",
+        "hashDefinition": "UTF-8 JSON sorted keys, compact separators, ensure_ascii=false",
+        "scoring": "forbidden-unanchored-probe"
+      },
+      {
+        "id": "draft-ignored-delete",
+        "familyId": "draft-ignored-delete",
+        "variant": "bug",
+        "probeSha256": "7bbb8312ed6d977054cbe1b15a89f33553d3f8653bec13b805c232280f3876e0",
+        "hashDefinition": "UTF-8 JSON sorted keys, compact separators, ensure_ascii=false",
+        "scoring": "forbidden-unanchored-probe"
+      },
+      {
+        "id": "draft-ignored-delete-repair",
+        "familyId": "draft-ignored-delete",
+        "variant": "repair",
+        "probeSha256": "50c521ce44d284462f5f823b1bc05541d3a07839071875f728a12b91a1ce6540",
+        "hashDefinition": "UTF-8 JSON sorted keys, compact separators, ensure_ascii=false",
+        "scoring": "forbidden-unanchored-probe"
+      }
+    ],
+    "admitted": false,
+    "controlsExecuted": false,
+    "benchmarkScoresPermitted": false
+  }
+}

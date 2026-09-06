@@ -1,0 +1,55 @@
+--- a/agents/correctness-reviewer.md
++++ b/agents/correctness-reviewer.md
+@@ -99,17 +99,20 @@
+ ### Correctness checks by category (exactly these four items — each is one pass over the diff):
+ 
+ **State, Recovery & Failure Modes** (`state-transitions`):
+-- Every status/state write: is there a compare-and-set / expected-state guard
+-  (`expectStatuses`, WHERE status = …), or can a concurrent writer clobber it? Check the CALL
+-  SITE, not just the helper: a helper that SUPPORTS an expected-state option is unguarded at
+-  every call site that doesn't pass it.
++- For each status/state write, establish whether another actor can update the same state
++  before this write. If that schedule can overwrite a newer result, check the call site's
++  conditional update, transaction, serialization or ownership protection. A helper supporting
++  an expected-state option does not prove that a caller uses it; absence of that option alone
++  does not prove a race. Name the competing writer and the incorrect resulting state.
+ - Does the written state remain VISIBLE to every consumer? For EACH status literal the diff
+   writes: grep every query/poller that selects that table, and list ALL of its predicates —
+   a row can match on status yet be excluded by ANOTHER predicate (a mode flag, a JSON field, a
+   machine filter). Verify the written row satisfies every predicate of at least one claiming
+   query; do not assert visibility from the status column alone.
+-- A discarded return value (a boolean/Result ignored) is a finding: the caller proceeds as if
+-  the operation succeeded when it resolved `false`.
++- For an ignored boolean/Result, trace what the caller does next and what the return means.
++  Report a defect when an allowed failure result makes that continuation compute the wrong
++  result or get stuck. Ignoring a result is not itself a defect when the caller's contract
++  permits the resulting state, including an operation whose desired effect already holds.
+ - Retry/resume paths: can they land in a state no recovery sweep re-drives? A "transient"
+   condition marked permanently (e.g. near-expiry flagged as needs-reauth forever)?
+ - ORDER before a guard: when a state write / resource open happens BEFORE a guarded operation
+--- a/skills/correctness/SKILL.md
++++ b/skills/correctness/SKILL.md
+@@ -47,8 +47,10 @@
+ 
+ ## State & Data Integrity
+ 
+-- Every status/state write needs a compare-and-set or expected-state guard (`expectStatuses`,
+-  `WHERE status IN (…)`) — an unconditional update lets a concurrent path clobber a real result.
++- For each status/state write, identify a competing writer and a permitted schedule that
++  could clobber a newer result. Check protection at the actual call site: a conditional write,
++  transaction, serialization or exclusive ownership may prevent it. A missing compare-and-set
++  option alone does not establish a defect; identify the resulting incorrect state.
+ - Trace each written state to EVERY consumer: pollers, filters, queries. A writer that sets a
+   state a reader filters out creates a permanently stuck row.
+ 
+@@ -87,7 +89,9 @@
+ 
+ ## Recovery & Failure Modes
+ 
+-- A discarded return value is a finding — the caller proceeds as if the operation succeeded:
++- An ignored result is a finding when an allowed failure makes the caller's continuation
++  compute the wrong result or get stuck. First establish the return's meaning and the caller's
++  required behavior; an already-satisfied operation can legitimately ignore its result.
+ 
+ ```typescript
+ // BAD: resumeFailedFlowInPlace returns false on every precondition miss — silently dropped
