@@ -289,7 +289,7 @@ SHIP_HOOK_WRAPPER
   # Ship result telemetry — the outcome + a coarse blocked_gate tag derived from the captured log
   # (the per-gate/per-reviewer events carry the precise cause). Chain order is deterministic →
   # decisions → review, and each hook step is `|| exit`, so exactly one gate blocks; grep in that
-  # order attributes it. qavis is advisory (never blocks a ship) so it is not a blocked_gate value.
+  # order attributes it. Qavis emits a distinct marker only when its strict requirement blocks.
   local blocked_json timed_out
   if [ -n "$blocked_override" ]; then blocked_json=$blocked_override; timed_out=false
   elif [ "$hook_setup_failed" -eq 1 ]; then blocked_json='"hook_setup"'; timed_out=false
@@ -307,6 +307,7 @@ SHIP_HOOK_WRAPPER
   elif grep -q '✗ deterministic gates failed' "$log" 2>/dev/null; then blocked_json='"deterministic"'; timed_out=false
   elif grep -q 'decision smells:' "$log" 2>/dev/null; then blocked_json='"decisions"'; timed_out=false
   elif grep -q 'guard-comments: .* need a decision' "$log" 2>/dev/null; then blocked_json='"comments"'; timed_out=false
+  elif grep -q '^qavis-advisory: strict gate blocked$' "$log" 2>/dev/null; then blocked_json='"qavis-advisory"'; timed_out=false
   elif grep -qE 'guard-review: .* (FAILED|INCONCLUSIVE)' "$log" 2>/dev/null; then blocked_json='"review"'; timed_out=false
   else blocked_json='"unknown"'; timed_out=false
   fi
