@@ -35,7 +35,8 @@ import {
 } from 'node:fs';
 import path from 'node:path';
 import { envFlag } from '../config.mts';
-import { emitGateBypass } from '../judge/gate-events.mts';
+import { emitGateBypass, finishGateTiming } from '../judge/gate-events.mts';
+import { finishQavis } from './telemetry.mts';
 
 /**
  * Is the qavis CLI resolvable on PATH? `devkit doctor` asks this to report a dead advisory gate
@@ -216,6 +217,8 @@ function defaultRoute(cwd: string): RouteResult {
 }
 
 export function runQavisAdvisory(cwd: string = process.cwd(), deps: AdvisoryDeps = {}): number {
+  const startedAt = Date.now();
+  let qaExitCode: number | undefined;
   const hasRecipe = deps.hasRecipe ?? ((c) => existsSync(path.join(c, QAVIS_RECIPE)));
   // Not a qavis repo (or qavis not installed by this committer) → nothing to advise. This is also the
   // zero-weight path for every non-qavis consumer: the gate returns before shelling anything —
@@ -226,28 +229,31 @@ export function runQavisAdvisory(cwd: string = process.cwd(), deps: AdvisoryDeps
   // their own flag names because before this the advisory's bypasses emitted nothing at all.
   if (envFlag('QAVIS_OK')) {
     emitGateBypass('qavis-advisory', 'GUARD_QAVIS_OK');
-    return 0;
+    return finishGateTiming('qavis-advisory', startedAt, 0);
   }
   if (envFlag('NO_QAVIS_ADVISORY')) {
     emitGateBypass('qavis-advisory', 'GUARD_NO_QAVIS_ADVISORY');
-    return 0;
+    return finishGateTiming('qavis-advisory', startedAt, 0);
   }
   const route = deps.route ?? defaultRoute;
   const result = route(cwd);
-  if (result.verdict === null) return failOpen(result.skip);
-  if (result.verdict !== 'ADVISE') return 0; // SILENT → continue
+  if (result.verdict === null)
+    return finishQavis(startedAt, 'unavailable', failOpen(result.skip), undefined, result.skip);
+  if (result.verdict !== 'ADVISE') return finishQavis(startedAt, 'silent', 0);
   // DEVKIT_SHIP_QA=1: QA the tree the gate evaluates (this one) instead of naming it, then re-ask.
   if (qaOptIn()) {
     console.error(
       `qavis-advisory: DEVKIT_SHIP_QA is set — running qavis on this staged tree (${cwd})…`,
     );
     const code = (deps.qa ?? defaultQa)(cwd);
+    qaExitCode = code;
     keepSelfRunReceipt(cwd);
     const again = route(cwd);
-    if (again.verdict === null) return failOpen(again.skip);
+    if (again.verdict === null)
+      return finishQavis(startedAt, 'unavailable', failOpen(again.skip), code, again.skip);
     if (again.verdict === 'SILENT') {
       console.error('qavis-advisory: cleared by the qavis result recorded on this tree.');
-      return 0;
+      return finishQavis(startedAt, 'self_run_cleared', 0, code);
     }
     console.error(
       `qavis-advisory: qavis exited ${code} and this tree is still not covered — read its reason above.`,
@@ -270,7 +276,7 @@ export function runQavisAdvisory(cwd: string = process.cwd(), deps: AdvisoryDeps
     console.error(
       `   or, after this ship opens the PR:  qavis qa --pr <n> --annotate description --repo ${root}    (a pass publishes to the PR)`,
     );
-    return envFlag('AI_STRICT') ? 3 : 0;
+    return finishQavis(startedAt, 'required', envFlag('AI_STRICT') ? 3 : 0, qaExitCode);
   }
   console.error(`   Run:  ${qaRemedy(mode)}    (a pass writes a receipt that clears this)`);
   if (mode !== 'commit') {
@@ -292,7 +298,7 @@ export function runQavisAdvisory(cwd: string = process.cwd(), deps: AdvisoryDeps
     console.error(
       `   Waive: ${waive}    (after an uncertain verdict; audited, bound to this staged tree)`,
     );
-  return envFlag('AI_STRICT') ? 3 : 0; // ship blocks; a normal commit is advisory-only
+  return finishQavis(startedAt, 'required', envFlag('AI_STRICT') ? 3 : 0, qaExitCode);
 }
 
 /** Single-quote a shell word (paths here routinely carry spaces). */

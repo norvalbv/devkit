@@ -73,7 +73,11 @@ describe('gate bypass telemetry', () => {
     delete process.env.GUARD_QAVIS_OK;
     process.env.GUARD_NO_QAVIS_ADVISORY = '1';
     expect(runQavisAdvisory(dir)).toBe(0);
-    expect(events().map((e) => e.bypass)).toEqual(['GUARD_QAVIS_OK', 'GUARD_NO_QAVIS_ADVISORY']);
+    expect(
+      events()
+        .filter((e) => e.bypass)
+        .map((e) => e.bypass),
+    ).toEqual(['GUARD_QAVIS_OK', 'GUARD_NO_QAVIS_ADVISORY']);
   });
 
   it('a qavis flag in a repo WITHOUT a recipe records no phantom bypass', () => {
