@@ -3,14 +3,16 @@ import {
   mkdtempSync,
   mkdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
+import os, { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { runProbe, runRow, scoreRow } from '../../corpus/row.mts';
+import { researchOutputDirectory } from '../../scale/materialize.mts';
 import {
   GROUPS,
   MODEL,
@@ -274,8 +276,12 @@ it('rejects changed preparation artifacts before any judge can start', () => {
   }
 });
 it('refuses an existing evidence directory and preserves its original registration', () => {
-  const parent = mkdtempSync(path.join(homedir(), '.devkit', 'research', 'comparison-test-'));
+  const fixtureHome = realpathSync(mkdtempSync(path.join(tmpdir(), 'comparison-home-')));
+  const homedir = vi.spyOn(os, 'homedir').mockReturnValue(fixtureHome);
   try {
+    const parent = researchOutputDirectory(
+      path.join(fixtureHome, '.devkit', 'research', 'comparison'),
+    );
     const output = path.join(parent, 'run'),
       evidence = openEvidence(output);
     evidence.document('registration.private.json', { original: true });
@@ -285,7 +291,8 @@ it('refuses an existing evidence directory and preserves its original registrati
       JSON.parse(readFileSync(path.join(output, 'registration.private.json'), 'utf8')),
     ).toEqual({ original: true });
   } finally {
-    rmSync(parent, { recursive: true, force: true });
+    homedir.mockRestore();
+    rmSync(fixtureHome, { recursive: true, force: true });
   }
 });
 it('preserves planned bug and repair denominators when nothing completes', () => {
