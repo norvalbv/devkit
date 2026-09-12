@@ -1,6 +1,7 @@
 // @ts-nocheck — BENCH-ONLY; one fixture's native execution, captures and scoring.
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { z } from 'zod';
 import { resolveGuardConfig } from '../../../../config.mts';
 import { BenchAbort, materializeFixture } from '../../../../decisions/eval/bench.mts';
 import { execJudgeAsync } from '../../../../judge/run-judge.mts';
@@ -66,6 +67,7 @@ export function unscoredResult(row, finalStatus, subcause) {
 }
 
 export function scoreRow(row, capture, cas) {
+  assertScoredRow(row);
   // filter+merge, not find: a split arm captures one entry PER LENS GROUP under the same label.
   const pick = (l) => mergeLensCaptures(capture.filter((c) => c.label === l));
   const first = pick(`review:${row.reviewer}`);
@@ -115,7 +117,7 @@ export function scoreRow(row, capture, cas) {
 // ─── Row runner ───────────────────────────────────────────────────────────────────
 
 /** Materialize, execute and clean up one labeled fixture using the native task plan. */
-export async function runRow(
+export async function executeFixture(
   row,
   {
     model = MODEL,
@@ -125,11 +127,22 @@ export async function runRow(
     groups = BENCH_LENS_GROUPS,
     savedTasks,
     onTask,
+    reviewerName = row.reviewer,
+    assetOverrides = {},
+    fullItems = false,
+    judgeTimeoutMs,
   } = {},
 ) {
-  const reviewer = BENCH_REVIEWERS.find((r) => r.name === row.reviewer);
+  const reviewer = BENCH_REVIEWERS.find((r) => r.name === reviewerName);
   if (!reviewer) throw new BenchAbort(2, `${row.id}: unknown reviewer ${row.reviewer}`);
   const assets = buildAssets(reviewer);
+  for (const [key, value] of Object.entries(
+    z.record(z.string(), z.string()).parse(assetOverrides),
+  )) {
+    if (!(key in assets) || key === 'guard.config.json')
+      throw new BenchAbort(2, `invalid experimental asset override: ${key}`);
+    assets[key] = value;
+  }
   for (const key of Object.keys(assets))
     if (row.repo.base[key] !== undefined || row.repo.staged[key] !== undefined)
       throw new BenchAbort(2, `${row.id}: row must not define gate asset path ${key}`);
@@ -138,12 +151,19 @@ export async function runRow(
   });
   try {
     const cfg = resolveGuardConfig(fx.repo);
-    const sel = selectReviewers(fx.staged, cfg).find((s) => s.reviewer.name === row.reviewer);
+    const sel = selectReviewers(fx.staged, cfg).find((s) => s.reviewer.name === reviewerName);
     if (!sel)
       // Selection itself is under test: a row whose staged files don't reach its reviewer is wrong.
-      return unscoredResult(row, 'not-selected', 'not-selected');
+      return { selected: false };
     const plan = planFixture(sel, fx.repo, { cap, groups });
-    const opts = { cwd: fx.repo, cfg, firstModel: model, judgeEnv: gateJudgeEnv(false, cfg) };
+    const opts = {
+      cwd: fx.repo,
+      cfg,
+      firstModel: model,
+      judgeEnv: gateJudgeEnv(false, cfg),
+      fullItems,
+      judgeTimeoutMs,
+    };
     const measured = await executePlan(
       plan,
       async (task) => {
@@ -152,27 +172,14 @@ export async function runRow(
         try {
           return { res: await runCascade(task.sel, { ...opts, exec: spy }), capture };
         } catch (error) {
-          return { res: { name: row.reviewer, status: 'error', reason: String(error) }, capture };
+          return { res: { name: reviewerName, status: 'error', reason: String(error) }, capture };
         }
       },
       { saved: savedTasks, onTask },
     );
-    const result = scoreRow(row, measured.capture, measured.cas);
-    // Production keeps its worst-status merge; measurement separately refuses missing tasks.
-    if (!measured.complete)
-      Object.assign(result, {
-        firstVerdict: null,
-        okFirst: false,
-        okFinal: false,
-        subcause: measured.parts.some(
-          (part) =>
-            part.res.status === 'inconclusive' && subcause(part.res.reason ?? '') === 'outage',
-        )
-          ? 'outage'
-          : 'engine-error',
-      });
     return {
-      ...result,
+      selected: true,
+      measured,
       execution: {
         ...plan.facts,
         complete: measured.complete,
@@ -193,4 +200,58 @@ export async function runRow(
   } finally {
     fx.cleanup();
   }
+}
+
+/** Reject exploratory source definitions before scoring or launching a labeled review. */
+function assertScoredRow(row) {
+  if (!row || row.probe || row.scoring || !['PASS', 'FAIL'].includes(row.expected) || !row.reviewer)
+    throw new BenchAbort(2, 'scored execution requires a labeled corpus row; probes are forbidden');
+}
+
+/** Existing labeled-row API; execution remains shared with exploratory reviews. */
+export async function runRow(row, options = {}) {
+  assertScoredRow(row);
+  const execution = await executeFixture(row, options);
+  if (!execution.selected) return unscoredResult(row, 'not-selected', 'not-selected');
+  const { measured } = execution;
+  const result = scoreRow(row, measured.capture, measured.cas);
+  if (!measured.complete)
+    Object.assign(result, {
+      firstVerdict: null,
+      okFirst: false,
+      okFinal: false,
+      subcause: measured.parts.some(
+        (part) =>
+          part.res.status === 'inconclusive' && subcause(part.res.reason ?? '') === 'outage',
+      )
+        ? 'outage'
+        : 'engine-error',
+    });
+  return { ...result, execution: execution.execution };
+}
+
+/** No gold labels, scorer, quality metrics or cache salvage for authored probes. */
+export async function runProbe(probe, options = {}) {
+  if (
+    !probe ||
+    Object.keys(probe).some((key) => !['id', 'familyId', 'repo'].includes(key)) ||
+    !probe.familyId ||
+    !probe.repo
+  )
+    throw new BenchAbort(
+      2,
+      'probe requires only id, familyId and repo; scoring metadata is forbidden',
+    );
+  if (options.savedTasks) throw new BenchAbort(2, 'probe checkpoint salvage is forbidden');
+  const execution = await executeFixture(probe, {
+    ...options,
+    reviewerName: 'correctness-reviewer',
+  });
+  return {
+    id: probe.id,
+    scoring: 'forbidden-unanchored-probe',
+    selected: execution.selected,
+    status: execution.selected ? execution.measured.cas.status : 'not-selected',
+    execution: execution.execution ?? null,
+  };
 }
