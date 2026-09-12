@@ -136,12 +136,11 @@ export async function executeFixture(
   const reviewer = BENCH_REVIEWERS.find((r) => r.name === reviewerName);
   if (!reviewer) throw new BenchAbort(2, `${row.id}: unknown reviewer ${row.reviewer}`);
   const assets = buildAssets(reviewer);
-  for (const [key, value] of Object.entries(
-    z.record(z.string(), z.string()).parse(assetOverrides),
-  )) {
-    if (!(key in assets) || key === 'guard.config.json')
+  const overrides = z.record(z.string(), z.string()).parse(assetOverrides);
+  for (const key of Object.keys(assetOverrides)) {
+    if (!Object.hasOwn(assets, key) || key === 'guard.config.json')
       throw new BenchAbort(2, `invalid experimental asset override: ${key}`);
-    assets[key] = value;
+    assets[key] = overrides[key];
   }
   for (const key of Object.keys(assets))
     if (row.repo.base[key] !== undefined || row.repo.staged[key] !== undefined)
@@ -235,7 +234,9 @@ export async function runProbe(probe, options = {}) {
   if (
     !probe ||
     Object.keys(probe).some((key) => !['id', 'familyId', 'repo'].includes(key)) ||
-    !probe.familyId ||
+    ['id', 'familyId', 'repo'].some((key) => !Object.hasOwn(probe, key)) ||
+    !z.object({ id: z.string().trim().min(1), familyId: z.string().trim().min(1) }).safeParse(probe)
+      .success ||
     !probe.repo
   )
     throw new BenchAbort(

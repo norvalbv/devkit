@@ -29,6 +29,30 @@ const fail = async () => 'VERDICT: FAIL — controlled test finding';
 const budget = { maxCalls: 8, maxElapsedMs: 60_000, judgeTimeoutMs: 30_000 };
 
 describe('native execution and scoring boundary', () => {
+  it('rejects inherited asset names before calling the judge', async () => {
+    const exec = vi.fn(fail);
+    for (const key of ['constructor', 'toString', '__proto__']) {
+      await expect(
+        runRow(row, { exec, assetOverrides: { [key]: 'unknown asset' } }),
+      ).rejects.toThrow(/asset/);
+    }
+    expect(exec).not.toHaveBeenCalled();
+  });
+  it('rejects absent, blank or non-string probe identities before dispatch', async () => {
+    const exec = vi.fn(fail);
+    for (const field of ['id', 'familyId']) {
+      for (const value of [undefined, '', '  ', 123])
+        await expect(runProbe({ ...probe, [field]: value }, { exec })).rejects.toThrow(
+          /requires only id/,
+        );
+    }
+    for (const field of ['id', 'familyId', 'repo']) {
+      const inherited = Object.assign(Object.create({ [field]: probe[field] }), probe);
+      delete inherited[field];
+      await expect(runProbe(inherited, { exec })).rejects.toThrow(/requires only id/);
+    }
+    expect(exec).not.toHaveBeenCalled();
+  });
   it('retains ordinary scoring and complete native task captures', async () => {
     const tasks = [];
     const result = await runRow(row, {
