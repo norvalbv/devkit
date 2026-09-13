@@ -1,0 +1,296 @@
+[
+  {
+    "id": "corr-eslint-prefer-template-clean",
+    "observations": 56,
+    "sourceAdaptationAgrees": true,
+    "repairFailed": 0
+  },
+  {
+    "id": "corr-eslint-arrow-spacing-clean",
+    "observations": 168,
+    "sourceAdaptationAgrees": true,
+    "repairFailed": 0
+  },
+  {
+    "id": "corr-eslint-comma-dangle-clean",
+    "observations": 264,
+    "sourceAdaptationAgrees": true,
+    "repairFailed": 0
+  },
+  {
+    "id": "corr-eslint-max-statements-per-line-clean",
+    "observations": 388,
+    "sourceAdaptationAgrees": true,
+    "repairFailed": 0
+  },
+  {
+    "id": "corr-eslint-sort-vars-clean",
+    "observations": 196,
+    "sourceAdaptationAgrees": true,
+    "repairFailed": 0
+  },
+  {
+    "id": "corr-eslint-brace-style-clean",
+    "observations": 412,
+    "sourceAdaptationAgrees": true,
+    "repairFailed": 0
+  },
+  {
+    "id": "corr-eslint-arrow-parens-clean",
+    "observations": 196,
+    "sourceAdaptationAgrees": true,
+    "repairFailed": 0
+  },
+  {
+    "id": "corr-eslint-no-useless-rename-clean",
+    "observations": 336,
+    "sourceAdaptationAgrees": true,
+    "repairFailed": 0
+  },
+  {
+    "id": "corr-eslint-no-multiple-empty-lines-clean",
+    "observations": 160,
+    "sourceAdaptationAgrees": true,
+    "repairFailed": 0
+  },
+  {
+    "id": "corr-eslint-no-magic-numbers-clean",
+    "observations": 116,
+    "sourceAdaptationAgrees": true,
+    "repairFailed": 0
+  },
+  {
+    "id": "corr-eslint-operator-assignment-clean",
+    "observations": 316,
+    "sourceAdaptationAgrees": true,
+    "repairFailed": 0
+  },
+  {
+    "id": "corr-eslint-func-style-clean",
+    "observations": 60,
+    "sourceAdaptationAgrees": true,
+    "repairFailed": 0
+  },
+  {
+    "id": "corr-eslint-consistent-this-clean",
+    "observations": 92,
+    "sourceAdaptationAgrees": true,
+    "repairFailed": 0
+  },
+  {
+    "id": "corr-eslint-no-sequences-clean",
+    "observations": 88,
+    "sourceAdaptationAgrees": true,
+    "repairFailed": 0
+  },
+  {
+    "id": "corr-eslint-spaced-comment-clean",
+    "observations": 176,
+    "sourceAdaptationAgrees": true,
+    "repairFailed": 0
+  },
+  {
+    "id": "corr-eslint-prefer-destructuring-clean",
+    "observations": 96,
+    "sourceAdaptationAgrees": true,
+    "repairFailed": 0
+  },
+  {
+    "id": "corr-eslint-quotes-clean",
+    "observations": 168,
+    "sourceAdaptationAgrees": true,
+    "repairFailed": 0
+  },
+  {
+    "id": "corr-eslint-func-call-spacing-clean",
+    "observations": 424,
+    "sourceAdaptationAgrees": true,
+    "repairFailed": 0
+  },
+  {
+    "id": "corr-eslint-space-infix-ops-clean",
+    "observations": 188,
+    "sourceAdaptationAgrees": true,
+    "repairFailed": 0
+  },
+  {
+    "id": "corr-eslint-object-curly-spacing-clean",
+    "observations": 308,
+    "sourceAdaptationAgrees": true,
+    "repairFailed": 0
+  },
+  {
+    "id": "corr-eslint-no-unused-vars-clean",
+    "observations": 96,
+    "sourceAdaptationAgrees": true,
+    "repairFailed": 0
+  },
+  {
+    "id": "corr-eslint-no-loop-func-clean",
+    "observations": 188,
+    "sourceAdaptationAgrees": true,
+    "repairFailed": 0
+  },
+  {
+    "id": "corr-eslint-valid-typeof-clean",
+    "observations": 180,
+    "sourceAdaptationAgrees": true,
+    "repairFailed": 0
+  },
+  {
+    "id": "corr-eslint-id-length-clean",
+    "observations": 256,
+    "sourceAdaptationAgrees": true,
+    "repairFailed": 0
+  },
+  {
+    "id": "corr-eslint-no-empty-clean",
+    "observations": 52,
+    "sourceAdaptationAgrees": true,
+    "repairFailed": 0
+  },
+  {
+    "id": "corr-eslint-no-cond-assign-clean",
+    "observations": 140,
+    "sourceAdaptationAgrees": true,
+    "repairFailed": 0
+  },
+  {
+    "id": "corr-eslint-no-unused-expressions-clean",
+    "observations": 188,
+    "sourceAdaptationAgrees": true,
+    "repairFailed": 0
+  },
+  {
+    "id": "corr-eslint-no-spaced-func-clean",
+    "observations": 112,
+    "sourceAdaptationAgrees": true,
+    "repairFailed": 0
+  },
+  {
+    "id": "corr-eslint-no-useless-computed-key-clean",
+    "observations": 56,
+    "sourceAdaptationAgrees": true,
+    "repairFailed": 0
+  },
+  {
+    "id": "corr-eslint-init-declarations-clean",
+    "observations": 144,
+    "sourceAdaptationAgrees": true,
+    "repairFailed": 0
+  },
+  {
+    "id": "corr-eslint-generator-star-spacing-clean",
+    "observations": 676,
+    "sourceAdaptationAgrees": true,
+    "repairFailed": 0
+  },
+  {
+    "id": "corr-eslint-prefer-arrow-callback-clean",
+    "observations": 72,
+    "sourceAdaptationAgrees": true,
+    "repairFailed": 0
+  },
+  {
+    "id": "corr-eslint-no-shadow-clean",
+    "observations": 60,
+    "sourceAdaptationAgrees": true,
+    "repairFailed": 0
+  },
+  {
+    "id": "corr-eslint-line-comment-position-clean",
+    "observations": 136,
+    "sourceAdaptationAgrees": true,
+    "repairFailed": 0
+  },
+  {
+    "id": "corr-eslint-no-fallthrough-clean",
+    "observations": 84,
+    "sourceAdaptationAgrees": true,
+    "repairFailed": 0
+  },
+  {
+    "id": "corr-eslint-unicode-bom-clean",
+    "observations": 28,
+    "sourceAdaptationAgrees": true,
+    "repairFailed": 0
+  },
+  {
+    "id": "corr-eslint-no-implied-eval-clean",
+    "observations": 116,
+    "sourceAdaptationAgrees": true,
+    "repairFailed": 0
+  },
+  {
+    "id": "corr-eslint-newline-per-chained-call-clean",
+    "observations": 72,
+    "sourceAdaptationAgrees": true,
+    "repairFailed": 0
+  },
+  {
+    "id": "corr-eslint-func-names-clean",
+    "observations": 108,
+    "sourceAdaptationAgrees": true,
+    "repairFailed": 0
+  },
+  {
+    "id": "corr-eslint-no-lone-blocks-clean",
+    "observations": 112,
+    "sourceAdaptationAgrees": true,
+    "repairFailed": 0
+  },
+  {
+    "id": "corr-eslint-no-extra-semi-clean",
+    "observations": 152,
+    "sourceAdaptationAgrees": true,
+    "repairFailed": 0
+  },
+  {
+    "id": "corr-eslint-no-constant-condition-clean",
+    "observations": 348,
+    "sourceAdaptationAgrees": true,
+    "repairFailed": 0
+  },
+  {
+    "id": "corr-eslint-newline-before-return-clean",
+    "observations": 292,
+    "sourceAdaptationAgrees": true,
+    "repairFailed": 0
+  },
+  {
+    "id": "corr-eslint-object-shorthand-clean",
+    "observations": 336,
+    "sourceAdaptationAgrees": true,
+    "repairFailed": 0
+  },
+  {
+    "id": "corr-eslint-no-return-assign-clean",
+    "observations": 76,
+    "sourceAdaptationAgrees": true,
+    "repairFailed": 0
+  },
+  {
+    "id": "corr-eslint-no-await-in-loop-clean",
+    "observations": 108,
+    "sourceAdaptationAgrees": true,
+    "repairFailed": 0
+  },
+  {
+    "id": "corr-eslint-use-isnan-clean",
+    "observations": 120,
+    "sourceAdaptationAgrees": true,
+    "repairFailed": 0
+  },
+  {
+    "id": "corr-eslint-nonblock-statement-body-position-clean",
+    "observations": 192,
+    "sourceAdaptationAgrees": true,
+    "repairFailed": 0
+  },
+  {
+    "id": "corr-eslint-lines-around-comment-clean",
+    "observations": 104,
+    "sourceAdaptationAgrees": true,
+    "repairFailed": 0
+  }
+]

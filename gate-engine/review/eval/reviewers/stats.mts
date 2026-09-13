@@ -238,8 +238,8 @@ export function summarize(results, { cascade } = {}) {
   };
 }
 
-/** Count explicit repair edges inside whole holdout families; preserve legacy two-member pairs.
- * Unmatched or malformed members remain visible. Correlated edges carry no binomial interval. */
+/** Count repair edges inside source families; preserve legacy two-member pairs.
+ * Standalone family members remain outside the pair denominator. Correlated edges carry no CI. */
 export function pairConsistency(results, { cascade } = {}) {
   const ok = (r) => (cascade ? r.okFinal : r.okFirst);
   const withId = results.filter((r) => !!r.id);
@@ -267,13 +267,13 @@ export function pairConsistency(results, { cascade } = {}) {
     if (
       gold.some((r) => decoy.some((d) => d.id === r.variantOf)) ||
       valid.length !== edges.length ||
-      used.size !== g.length ||
       new Set(g.map((r) => r.id)).size !== g.length
     )
       malformed += 1;
+    singletons += g.length - used.size;
     if (valid.length) {
       families += 1;
-      if (used.size === g.length && g.every(ok)) familyK += 1;
+      if (g.every(ok)) familyK += 1;
     }
     for (const [a, b] of valid) {
       n += 1;

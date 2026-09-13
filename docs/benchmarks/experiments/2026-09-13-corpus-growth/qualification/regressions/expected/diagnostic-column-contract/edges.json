@@ -1,0 +1,1244 @@
+{
+  "rule": "max-len",
+  "scenarios": 11,
+  "observations": 66,
+  "records": [
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "zero length",
+      "code": "var a;",
+      "options": [
+        0,
+        4
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 0.",
+          "line": 1,
+          "column": 1
+        }
+      ],
+      "parserFatal": false,
+      "validLocations": true,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "zero tab width",
+      "code": "\tvar a;",
+      "options": [
+        6,
+        0
+      ],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "validLocations": true,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "ordinary limits",
+      "code": "var a;\nvar longName;",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Line 2 exceeds the maximum line length of 10.",
+          "line": 1,
+          "column": 1
+        }
+      ],
+      "parserFatal": false,
+      "validLocations": true,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "astral string",
+      "code": "var a=\"\ud83d\ude00\ud83d\ude00\";",
+      "options": [
+        8,
+        4
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 8.",
+          "line": 1,
+          "column": 1
+        }
+      ],
+      "parserFatal": false,
+      "validLocations": true,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "unicode line separator",
+      "code": "var a;\u2028var longName;",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 10.",
+          "line": 1,
+          "column": 1
+        }
+      ],
+      "parserFatal": false,
+      "validLocations": true,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "carriage return",
+      "code": "var a;\rvar longName;",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 10.",
+          "line": 1,
+          "column": 1
+        }
+      ],
+      "parserFatal": false,
+      "validLocations": true,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "trailing whitespace",
+      "code": "var a;       ",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 1,
+      "messages": [],
+      "parserFatal": false,
+      "validLocations": true,
+      "clean": false
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "comment line",
+      "code": "/* a very long comment */",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 10.",
+          "line": 1,
+          "column": 26
+        }
+      ],
+      "parserFatal": false,
+      "validLocations": true,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "comment leading newline",
+      "code": "\n// a long comment here",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Line 2 exceeds the maximum line length of 10.",
+          "line": 2,
+          "column": 23
+        }
+      ],
+      "parserFatal": false,
+      "validLocations": true,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "empty zero",
+      "code": "",
+      "options": [
+        0,
+        0
+      ],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "validLocations": true,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "no options default",
+      "code": "var a;",
+      "options": [],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "validLocations": true,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "zero length",
+      "code": "var a;",
+      "options": [
+        0,
+        4
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 0.",
+          "line": 1,
+          "column": 1
+        }
+      ],
+      "parserFatal": false,
+      "validLocations": true,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "zero tab width",
+      "code": "\tvar a;",
+      "options": [
+        6,
+        0
+      ],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "validLocations": true,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "ordinary limits",
+      "code": "var a;\nvar longName;",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Line 2 exceeds the maximum line length of 10.",
+          "line": 1,
+          "column": 1
+        }
+      ],
+      "parserFatal": false,
+      "validLocations": true,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "astral string",
+      "code": "var a=\"\ud83d\ude00\ud83d\ude00\";",
+      "options": [
+        8,
+        4
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 8.",
+          "line": 1,
+          "column": 1
+        }
+      ],
+      "parserFatal": false,
+      "validLocations": true,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "unicode line separator",
+      "code": "var a;\u2028var longName;",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 10.",
+          "line": 1,
+          "column": 1
+        }
+      ],
+      "parserFatal": false,
+      "validLocations": true,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "carriage return",
+      "code": "var a;\rvar longName;",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 10.",
+          "line": 1,
+          "column": 1
+        }
+      ],
+      "parserFatal": false,
+      "validLocations": true,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "trailing whitespace",
+      "code": "var a;       ",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 1,
+      "messages": [],
+      "parserFatal": false,
+      "validLocations": true,
+      "clean": false
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "comment line",
+      "code": "/* a very long comment */",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 10.",
+          "line": 1,
+          "column": 26
+        }
+      ],
+      "parserFatal": false,
+      "validLocations": true,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "comment leading newline",
+      "code": "\n// a long comment here",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Line 2 exceeds the maximum line length of 10.",
+          "line": 2,
+          "column": 23
+        }
+      ],
+      "parserFatal": false,
+      "validLocations": true,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "empty zero",
+      "code": "",
+      "options": [
+        0,
+        0
+      ],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "validLocations": true,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "no options default",
+      "code": "var a;",
+      "options": [],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "validLocations": true,
+      "clean": true
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "zero length",
+      "code": "var a;",
+      "options": [
+        0,
+        4
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 0.",
+          "line": 1,
+          "column": null
+        }
+      ],
+      "parserFatal": false,
+      "validLocations": false,
+      "clean": false
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "zero tab width",
+      "code": "\tvar a;",
+      "options": [
+        6,
+        0
+      ],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "validLocations": true,
+      "clean": true
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "ordinary limits",
+      "code": "var a;\nvar longName;",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Line 2 exceeds the maximum line length of 10.",
+          "line": 2,
+          "column": null
+        }
+      ],
+      "parserFatal": false,
+      "validLocations": false,
+      "clean": false
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "astral string",
+      "code": "var a=\"\ud83d\ude00\ud83d\ude00\";",
+      "options": [
+        8,
+        4
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 8.",
+          "line": 1,
+          "column": null
+        }
+      ],
+      "parserFatal": false,
+      "validLocations": false,
+      "clean": false
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "unicode line separator",
+      "code": "var a;\u2028var longName;",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 10.",
+          "line": 1,
+          "column": null
+        }
+      ],
+      "parserFatal": false,
+      "validLocations": false,
+      "clean": false
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "carriage return",
+      "code": "var a;\rvar longName;",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 10.",
+          "line": 1,
+          "column": null
+        }
+      ],
+      "parserFatal": false,
+      "validLocations": false,
+      "clean": false
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "trailing whitespace",
+      "code": "var a;       ",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 1,
+      "messages": [],
+      "parserFatal": false,
+      "validLocations": true,
+      "clean": false
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "comment line",
+      "code": "/* a very long comment */",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 10.",
+          "line": 1,
+          "column": null
+        }
+      ],
+      "parserFatal": false,
+      "validLocations": false,
+      "clean": false
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "comment leading newline",
+      "code": "\n// a long comment here",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Line 2 exceeds the maximum line length of 10.",
+          "line": 2,
+          "column": null
+        }
+      ],
+      "parserFatal": false,
+      "validLocations": false,
+      "clean": false
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "empty zero",
+      "code": "",
+      "options": [
+        0,
+        0
+      ],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "validLocations": true,
+      "clean": true
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "no options default",
+      "code": "var a;",
+      "options": [],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "validLocations": true,
+      "clean": true
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "zero length",
+      "code": "var a;",
+      "options": [
+        0,
+        4
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 0.",
+          "line": 1,
+          "column": null
+        }
+      ],
+      "parserFatal": false,
+      "validLocations": false,
+      "clean": false
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "zero tab width",
+      "code": "\tvar a;",
+      "options": [
+        6,
+        0
+      ],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "validLocations": true,
+      "clean": true
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "ordinary limits",
+      "code": "var a;\nvar longName;",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Line 2 exceeds the maximum line length of 10.",
+          "line": 2,
+          "column": null
+        }
+      ],
+      "parserFatal": false,
+      "validLocations": false,
+      "clean": false
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "astral string",
+      "code": "var a=\"\ud83d\ude00\ud83d\ude00\";",
+      "options": [
+        8,
+        4
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 8.",
+          "line": 1,
+          "column": null
+        }
+      ],
+      "parserFatal": false,
+      "validLocations": false,
+      "clean": false
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "unicode line separator",
+      "code": "var a;\u2028var longName;",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 10.",
+          "line": 1,
+          "column": null
+        }
+      ],
+      "parserFatal": false,
+      "validLocations": false,
+      "clean": false
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "carriage return",
+      "code": "var a;\rvar longName;",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 10.",
+          "line": 1,
+          "column": null
+        }
+      ],
+      "parserFatal": false,
+      "validLocations": false,
+      "clean": false
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "trailing whitespace",
+      "code": "var a;       ",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 1,
+      "messages": [],
+      "parserFatal": false,
+      "validLocations": true,
+      "clean": false
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "comment line",
+      "code": "/* a very long comment */",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 10.",
+          "line": 1,
+          "column": null
+        }
+      ],
+      "parserFatal": false,
+      "validLocations": false,
+      "clean": false
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "comment leading newline",
+      "code": "\n// a long comment here",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Line 2 exceeds the maximum line length of 10.",
+          "line": 2,
+          "column": null
+        }
+      ],
+      "parserFatal": false,
+      "validLocations": false,
+      "clean": false
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "empty zero",
+      "code": "",
+      "options": [
+        0,
+        0
+      ],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "validLocations": true,
+      "clean": true
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "no options default",
+      "code": "var a;",
+      "options": [],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "validLocations": true,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "zero length",
+      "code": "var a;",
+      "options": [
+        0,
+        4
+      ],
+      "expectedCount": 1,
+      "messages": [],
+      "parserFatal": false,
+      "validLocations": true,
+      "clean": false
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "zero tab width",
+      "code": "\tvar a;",
+      "options": [
+        6,
+        0
+      ],
+      "expectedCount": 0,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 6.",
+          "line": 1,
+          "column": 1
+        }
+      ],
+      "parserFatal": false,
+      "validLocations": true,
+      "clean": false
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "ordinary limits",
+      "code": "var a;\nvar longName;",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Line 2 exceeds the maximum line length of 10.",
+          "line": 2,
+          "column": 1
+        }
+      ],
+      "parserFatal": false,
+      "validLocations": true,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "astral string",
+      "code": "var a=\"\ud83d\ude00\ud83d\ude00\";",
+      "options": [
+        8,
+        4
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 8.",
+          "line": 1,
+          "column": 1
+        }
+      ],
+      "parserFatal": false,
+      "validLocations": true,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "unicode line separator",
+      "code": "var a;\u2028var longName;",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Line 2 exceeds the maximum line length of 10.",
+          "line": 2,
+          "column": 1
+        }
+      ],
+      "parserFatal": false,
+      "validLocations": true,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "carriage return",
+      "code": "var a;\rvar longName;",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Line 2 exceeds the maximum line length of 10.",
+          "line": 2,
+          "column": 1
+        }
+      ],
+      "parserFatal": false,
+      "validLocations": true,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "trailing whitespace",
+      "code": "var a;       ",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 10.",
+          "line": 1,
+          "column": 1
+        }
+      ],
+      "parserFatal": false,
+      "validLocations": true,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "comment line",
+      "code": "/* a very long comment */",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 10.",
+          "line": 1,
+          "column": 1
+        }
+      ],
+      "parserFatal": false,
+      "validLocations": true,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "comment leading newline",
+      "code": "\n// a long comment here",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Line 2 exceeds the maximum line length of 10.",
+          "line": 2,
+          "column": 1
+        }
+      ],
+      "parserFatal": false,
+      "validLocations": true,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "empty zero",
+      "code": "",
+      "options": [
+        0,
+        0
+      ],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "validLocations": true,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "no options default",
+      "code": "var a;",
+      "options": [],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "validLocations": true,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "zero length",
+      "code": "var a;",
+      "options": [
+        0,
+        4
+      ],
+      "expectedCount": 1,
+      "messages": [],
+      "parserFatal": false,
+      "validLocations": true,
+      "clean": false
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "zero tab width",
+      "code": "\tvar a;",
+      "options": [
+        6,
+        0
+      ],
+      "expectedCount": 0,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 6.",
+          "line": 1,
+          "column": 1
+        }
+      ],
+      "parserFatal": false,
+      "validLocations": true,
+      "clean": false
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "ordinary limits",
+      "code": "var a;\nvar longName;",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Line 2 exceeds the maximum line length of 10.",
+          "line": 2,
+          "column": 1
+        }
+      ],
+      "parserFatal": false,
+      "validLocations": true,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "astral string",
+      "code": "var a=\"\ud83d\ude00\ud83d\ude00\";",
+      "options": [
+        8,
+        4
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 8.",
+          "line": 1,
+          "column": 1
+        }
+      ],
+      "parserFatal": false,
+      "validLocations": true,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "unicode line separator",
+      "code": "var a;\u2028var longName;",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Line 2 exceeds the maximum line length of 10.",
+          "line": 2,
+          "column": 1
+        }
+      ],
+      "parserFatal": false,
+      "validLocations": true,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "carriage return",
+      "code": "var a;\rvar longName;",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Line 2 exceeds the maximum line length of 10.",
+          "line": 2,
+          "column": 1
+        }
+      ],
+      "parserFatal": false,
+      "validLocations": true,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "trailing whitespace",
+      "code": "var a;       ",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 10.",
+          "line": 1,
+          "column": 1
+        }
+      ],
+      "parserFatal": false,
+      "validLocations": true,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "comment line",
+      "code": "/* a very long comment */",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 10.",
+          "line": 1,
+          "column": 1
+        }
+      ],
+      "parserFatal": false,
+      "validLocations": true,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "comment leading newline",
+      "code": "\n// a long comment here",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Line 2 exceeds the maximum line length of 10.",
+          "line": 2,
+          "column": 1
+        }
+      ],
+      "parserFatal": false,
+      "validLocations": true,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "empty zero",
+      "code": "",
+      "options": [
+        0,
+        0
+      ],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "validLocations": true,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "no options default",
+      "code": "var a;",
+      "options": [],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "validLocations": true,
+      "clean": true
+    }
+  ],
+  "mismatches": []
+}

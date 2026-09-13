@@ -1,0 +1,1109 @@
+{
+  "schemaVersion": 1,
+  "cases": [
+    {
+      "group": "mongoose",
+      "number": 2,
+      "initialProposalId": "corr-unregistered-population-model-clean",
+      "canonicalCorpusId": "corr-unregistered-population-model-clean",
+      "edgeControl": "mongoose-population-edge-controls.cjs",
+      "edgeExpected": {
+        "base": [
+          {
+            "name": "ad hoc empty []",
+            "error": {
+              "name": "Error",
+              "message": "Population: unable to determine model name for `ref`"
+            }
+          },
+          {
+            "name": "ad hoc empty [{}]",
+            "error": {
+              "name": "Error",
+              "message": "Population: unable to determine model name for `ref`"
+            }
+          },
+          {
+            "name": "ad hoc empty [{\"ref\":null}]",
+            "error": {
+              "name": "Error",
+              "message": "Population: unable to determine model name for `ref`"
+            }
+          },
+          {
+            "name": "ad hoc empty [{}]",
+            "error": {
+              "name": "Error",
+              "message": "Population: unable to determine model name for `ref`"
+            }
+          },
+          {
+            "name": "explicit model unknown",
+            "error": {
+              "name": "MissingSchemaError",
+              "message": "Schema hasn't been registered for model \"missing-model\".\nUse mongoose.model(name, schema)"
+            }
+          },
+          {
+            "name": "explicit model wins",
+            "value": {
+              "name": "child"
+            }
+          }
+        ],
+        "repair": [
+          {
+            "name": "ad hoc empty []",
+            "value": {
+              "docs": [],
+              "queries": 0
+            }
+          },
+          {
+            "name": "ad hoc empty [{}]",
+            "value": {
+              "docs": [
+                {}
+              ],
+              "queries": 0
+            }
+          },
+          {
+            "name": "ad hoc empty [{\"ref\":null}]",
+            "value": {
+              "docs": [
+                {
+                  "ref": null
+                }
+              ],
+              "queries": 0
+            }
+          },
+          {
+            "name": "ad hoc empty [{}]",
+            "value": {
+              "docs": [
+                {}
+              ],
+              "queries": 0
+            }
+          },
+          {
+            "name": "explicit model unknown",
+            "error": {
+              "name": "MissingSchemaError",
+              "message": "Schema hasn't been registered for model \"missing-model\".\nUse mongoose.model(name, schema)"
+            }
+          },
+          {
+            "name": "explicit model wins",
+            "value": {
+              "name": "child"
+            }
+          }
+        ]
+      },
+      "fixtureHashes": {
+        "base": {
+          "src/lib/model.js": "148f6602d1d7bb2a6e31078476882482ce4ec0bc03a6e94a75677693ac1fdee7",
+          "package.json": "c3ab123c91ad2751ae7d880344f99a8774b82e0033db50d473958e3d1e8417b2"
+        },
+        "repair": {
+          "src/lib/model.js": "5b29dadb927048e4d30ccfe65c2a0577fa7a00c5d13834428e05dc15fd030e01",
+          "package.json": "c3ab123c91ad2751ae7d880344f99a8774b82e0033db50d473958e3d1e8417b2"
+        }
+      },
+      "expectedLabel": "PASS",
+      "sourceRegressionDisclosure": null,
+      "caseId": "corr-source-mongoose-document-context",
+      "corpusPointer": {
+        "file": "gate-engine/review/eval/reviewers/cases-correctness.jsonl",
+        "id": "corr-unregistered-population-model-clean"
+      }
+    },
+    {
+      "group": "mongoose",
+      "number": 4,
+      "initialProposalId": "corr-populated-query-lean-mode-clean",
+      "canonicalCorpusId": "corr-populated-query-lean-mode-clean",
+      "edgeControl": "mongoose-population-edge-controls.cjs",
+      "edgeExpected": {
+        "base": [
+          {
+            "name": "reuse populate options lean true then false find",
+            "value": {
+              "first": {
+                "parent": false,
+                "child": true
+              },
+              "second": {
+                "parent": true,
+                "child": true
+              }
+            }
+          },
+          {
+            "name": "reuse populate options lean true then false findOne",
+            "value": {
+              "first": {
+                "parent": false,
+                "child": true
+              },
+              "second": {
+                "parent": true,
+                "child": true
+              }
+            }
+          },
+          {
+            "name": "explicit child lean false",
+            "value": {
+              "parent": false,
+              "child": true
+            }
+          },
+          {
+            "name": "explicit child lean true",
+            "value": {
+              "parent": false,
+              "child": false
+            }
+          }
+        ],
+        "repair": [
+          {
+            "name": "reuse populate options lean true then false find",
+            "value": {
+              "first": {
+                "parent": false,
+                "child": false
+              },
+              "second": {
+                "parent": true,
+                "child": true
+              },
+              "populationLean": true
+            }
+          },
+          {
+            "name": "reuse populate options lean true then false findOne",
+            "value": {
+              "first": {
+                "parent": false,
+                "child": false
+              },
+              "second": {
+                "parent": true,
+                "child": true
+              },
+              "populationLean": true
+            }
+          },
+          {
+            "name": "explicit child lean false",
+            "value": {
+              "parent": false,
+              "child": false
+            }
+          },
+          {
+            "name": "explicit child lean true",
+            "value": {
+              "parent": false,
+              "child": false
+            }
+          }
+        ]
+      },
+      "fixtureHashes": {
+        "base": {
+          "src/lib/query.js": "f2b5d98861e75d0be228ef083d1bd0103ac1f1112264f55f465f890e87dfaffa",
+          "package.json": "fe2aecef82e3ee37877f7ef6a6342995210c90b3831a77d5b2c50f3750d531a4"
+        },
+        "repair": {
+          "src/lib/query.js": "4ef0384c246e8883e9b71d5e9cf3222b76b47a3a267e78c38d0cde6f63b6cfe3",
+          "package.json": "fe2aecef82e3ee37877f7ef6a6342995210c90b3831a77d5b2c50f3750d531a4"
+        }
+      },
+      "expectedLabel": "PASS",
+      "sourceRegressionDisclosure": null,
+      "caseId": "corr-source-query-projection-slice",
+      "corpusPointer": {
+        "file": "gate-engine/review/eval/reviewers/cases-correctness.jsonl",
+        "id": "corr-populated-query-lean-mode-clean"
+      }
+    },
+    {
+      "group": "mongoose",
+      "number": 7,
+      "initialProposalId": "corr-atomic-query-population-clean",
+      "canonicalCorpusId": "corr-atomic-query-population-clean",
+      "edgeControl": "mongoose-population-edge-controls.cjs",
+      "edgeExpected": {
+        "base": [
+          {
+            "name": "findOneAndUpdate missing",
+            "value": {
+              "missing": true,
+              "name": null
+            }
+          },
+          {
+            "name": "findOneAndUpdate error",
+            "error": {
+              "name": "Error",
+              "message": "write failed"
+            }
+          },
+          {
+            "name": "findOneAndUpdate document",
+            "value": {
+              "missing": false
+            }
+          },
+          {
+            "name": "findOneAndRemove missing",
+            "value": {
+              "missing": true,
+              "name": null
+            }
+          },
+          {
+            "name": "findOneAndRemove error",
+            "error": {
+              "name": "Error",
+              "message": "write failed"
+            }
+          },
+          {
+            "name": "findOneAndRemove document",
+            "value": {
+              "missing": false
+            }
+          },
+          {
+            "name": "atomic without populate retained",
+            "value": {
+              "name": "saved",
+              "doc": true
+            }
+          }
+        ],
+        "repair": [
+          {
+            "name": "findOneAndUpdate missing",
+            "value": {
+              "missing": true,
+              "name": null
+            }
+          },
+          {
+            "name": "findOneAndUpdate error",
+            "error": {
+              "name": "Error",
+              "message": "write failed"
+            }
+          },
+          {
+            "name": "findOneAndUpdate document",
+            "error": {
+              "name": "Error",
+              "message": "population unavailable"
+            }
+          },
+          {
+            "name": "findOneAndRemove missing",
+            "value": {
+              "missing": true,
+              "name": null
+            }
+          },
+          {
+            "name": "findOneAndRemove error",
+            "error": {
+              "name": "Error",
+              "message": "write failed"
+            }
+          },
+          {
+            "name": "findOneAndRemove document",
+            "error": {
+              "name": "Error",
+              "message": "population unavailable"
+            }
+          },
+          {
+            "name": "atomic without populate retained",
+            "value": {
+              "name": "saved",
+              "doc": true
+            }
+          }
+        ]
+      },
+      "fixtureHashes": {
+        "base": {
+          "src/lib/query.js": "263ecea5978947cb37872a42f8ab60007c0a7dda5a86ba1dc99384307361e2f7",
+          "package.json": "387668256e258dcd53d3f28357bc410a6fb92b13e75343428e2439ecd3b03b85"
+        },
+        "repair": {
+          "src/lib/query.js": "1bdbf39db3ee1eb516841cd7f1b186abc1eb9284df437d19676916fac8cd3ccc",
+          "package.json": "387668256e258dcd53d3f28357bc410a6fb92b13e75343428e2439ecd3b03b85"
+        }
+      },
+      "expectedLabel": "PASS",
+      "sourceRegressionDisclosure": null,
+      "caseId": "corr-source-query-projection-slice",
+      "corpusPointer": {
+        "file": "gate-engine/review/eval/reviewers/cases-correctness.jsonl",
+        "id": "corr-atomic-query-population-clean"
+      }
+    },
+    {
+      "group": "mongoose",
+      "number": 13,
+      "initialProposalId": "corr-saved-reference-depopulation-clean",
+      "canonicalCorpusId": "corr-saved-reference-depopulation-clean",
+      "edgeControl": "mongoose-population-edge-controls.cjs",
+      "edgeExpected": {
+        "base": [
+          {
+            "name": "populated update save false",
+            "value": {
+              "delta": [
+                {},
+                {
+                  "$set": {
+                    "ref": "000000000000000000000001"
+                  }
+                }
+              ],
+              "stillDocument": true
+            }
+          },
+          {
+            "name": "populated update save true",
+            "value": {
+              "delta": [
+                {
+                  "__v": 0
+                },
+                {
+                  "$set": {
+                    "ref": [
+                      "000000000000000000000003"
+                    ]
+                  },
+                  "$inc": {
+                    "__v": 1
+                  }
+                }
+              ],
+              "stillDocument": true
+            }
+          },
+          {
+            "name": "ordinary toObject repeated options",
+            "value": {
+              "first": {
+                "_id": "000000000000000000000005",
+                "name": "n"
+              },
+              "second": {
+                "_id": "000000000000000000000005",
+                "name": "n"
+              }
+            }
+          },
+          {
+            "name": "embedded documents save",
+            "value": {
+              "childName": "c",
+              "rootObject": true
+            }
+          }
+        ],
+        "repair": [
+          {
+            "name": "populated update save false",
+            "value": {
+              "delta": [
+                {},
+                {
+                  "$set": {
+                    "ref": "000000000000000000000001"
+                  }
+                }
+              ],
+              "stillDocument": true
+            }
+          },
+          {
+            "name": "populated update save true",
+            "value": {
+              "delta": [
+                {
+                  "__v": 0
+                },
+                {
+                  "$set": {
+                    "ref": [
+                      "000000000000000000000003"
+                    ]
+                  },
+                  "$inc": {
+                    "__v": 1
+                  }
+                }
+              ],
+              "stillDocument": true
+            }
+          },
+          {
+            "name": "ordinary toObject repeated options",
+            "value": {
+              "first": {
+                "_id": "000000000000000000000005",
+                "name": "n"
+              },
+              "second": {
+                "_id": "000000000000000000000005",
+                "name": "n"
+              }
+            }
+          },
+          {
+            "name": "embedded documents save",
+            "value": {
+              "childName": "c",
+              "rootObject": true
+            }
+          }
+        ]
+      },
+      "fixtureHashes": {
+        "base": {
+          "src/lib/document.js": "32eb071eb9a6741218b4315dbf58b3be5cc596e64c89d8aefe6add8fbfbec9d0",
+          "src/lib/model.js": "c8149b45c227dfe8fb4bfdb8e9f225aedf50df5980f0056188fc2d2fe29e3b7e",
+          "package.json": "387668256e258dcd53d3f28357bc410a6fb92b13e75343428e2439ecd3b03b85"
+        },
+        "repair": {
+          "src/lib/document.js": "28603f07cbb09adfdbb90495aac07294a824ca9759a69852b79e80c742d0f5e4",
+          "src/lib/model.js": "52485522b90e9920eb99160922d4b1a6c785635b04dbcd98190186d155c57dab",
+          "package.json": "387668256e258dcd53d3f28357bc410a6fb92b13e75343428e2439ecd3b03b85"
+        }
+      },
+      "expectedLabel": "PASS",
+      "sourceRegressionDisclosure": null,
+      "caseId": "corr-source-mongoose-document-context",
+      "corpusPointer": {
+        "file": "gate-engine/review/eval/reviewers/cases-correctness.jsonl",
+        "id": "corr-saved-reference-depopulation-clean"
+      }
+    },
+    {
+      "group": "mongoose",
+      "number": 14,
+      "initialProposalId": "corr-missing-population-position-clean",
+      "canonicalCorpusId": "corr-missing-population-position-clean",
+      "edgeControl": "mongoose-population-edge-controls.cjs",
+      "edgeExpected": {
+        "base": [
+          {
+            "name": "position missing-first",
+            "value": {
+              "refs": [
+                "child",
+                null,
+                null
+              ]
+            }
+          },
+          {
+            "name": "position null-middle",
+            "value": {
+              "refs": [
+                "child",
+                null,
+                null
+              ]
+            }
+          },
+          {
+            "name": "position empty-array",
+            "value": {
+              "refs": []
+            }
+          },
+          {
+            "name": "position plain-objects",
+            "value": {
+              "refs": [
+                "child",
+                null,
+                null
+              ]
+            }
+          }
+        ],
+        "repair": [
+          {
+            "name": "position missing-first",
+            "value": {
+              "refs": [
+                null,
+                "child",
+                null
+              ]
+            }
+          },
+          {
+            "name": "position null-middle",
+            "value": {
+              "refs": [
+                "child",
+                null,
+                null
+              ]
+            }
+          },
+          {
+            "name": "position empty-array",
+            "value": {
+              "refs": []
+            }
+          },
+          {
+            "name": "position plain-objects",
+            "value": {
+              "refs": [
+                null,
+                "child",
+                null
+              ]
+            }
+          }
+        ]
+      },
+      "fixtureHashes": {
+        "base": {
+          "src/lib/model.js": "52485522b90e9920eb99160922d4b1a6c785635b04dbcd98190186d155c57dab",
+          "package.json": "387668256e258dcd53d3f28357bc410a6fb92b13e75343428e2439ecd3b03b85"
+        },
+        "repair": {
+          "src/lib/model.js": "bf6a1b17f4a50c4c1f1eccf1951971ae3c7127b2886c6a0089c36dbad9568fa8",
+          "package.json": "387668256e258dcd53d3f28357bc410a6fb92b13e75343428e2439ecd3b03b85"
+        }
+      },
+      "expectedLabel": "PASS",
+      "sourceRegressionDisclosure": null,
+      "caseId": "corr-source-mongoose-document-context",
+      "corpusPointer": {
+        "file": "gate-engine/review/eval/reviewers/cases-correctness.jsonl",
+        "id": "corr-missing-population-position-clean"
+      }
+    },
+    {
+      "group": "mongoose",
+      "number": 17,
+      "initialProposalId": "corr-upsert-absent-original-document-clean",
+      "canonicalCorpusId": "corr-upsert-absent-original-document-clean",
+      "edgeControl": "mongoose-population-edge-controls.cjs",
+      "edgeExpected": {
+        "base": [
+          {
+            "name": "atomic result findOneAndUpdate null",
+            "value": {
+              "result": null
+            }
+          },
+          {
+            "name": "atomic result findOneAndUpdate {}",
+            "value": {
+              "result": {}
+            }
+          },
+          {
+            "name": "atomic result findOneAndUpdate {\"_id\":\"a\",\"n\":0}",
+            "value": {
+              "result": {
+                "_id": "a",
+                "n": 0
+              }
+            }
+          },
+          {
+            "name": "atomic result findOneAndRemove null",
+            "value": {
+              "result": null
+            }
+          },
+          {
+            "name": "atomic result findOneAndRemove {}",
+            "value": {
+              "result": {}
+            }
+          },
+          {
+            "name": "atomic result findOneAndRemove {\"_id\":\"a\",\"n\":0}",
+            "value": {
+              "result": {
+                "_id": "a",
+                "n": 0
+              }
+            }
+          },
+          {
+            "name": "atomic driver error",
+            "error": {
+              "name": "Error",
+              "message": "write failed"
+            }
+          }
+        ],
+        "repair": [
+          {
+            "name": "atomic result findOneAndUpdate null",
+            "value": {
+              "result": null
+            }
+          },
+          {
+            "name": "atomic result findOneAndUpdate {}",
+            "value": {
+              "result": null
+            }
+          },
+          {
+            "name": "atomic result findOneAndUpdate {\"_id\":\"a\",\"n\":0}",
+            "value": {
+              "result": {
+                "_id": "a",
+                "n": 0
+              }
+            }
+          },
+          {
+            "name": "atomic result findOneAndRemove null",
+            "value": {
+              "result": null
+            }
+          },
+          {
+            "name": "atomic result findOneAndRemove {}",
+            "value": {
+              "result": null
+            }
+          },
+          {
+            "name": "atomic result findOneAndRemove {\"_id\":\"a\",\"n\":0}",
+            "value": {
+              "result": {
+                "_id": "a",
+                "n": 0
+              }
+            }
+          },
+          {
+            "name": "atomic driver error",
+            "error": {
+              "name": "Error",
+              "message": "write failed"
+            }
+          }
+        ]
+      },
+      "fixtureHashes": {
+        "base": {
+          "src/lib/query.js": "1696941dd3a7eb95242342c3cfe3f25202ebc457190bc48f0f5d1186c4c10ab3",
+          "package.json": "29a887784c75799ca97c7c458158318c8b17abb11c5638e3c88879b7318320e5"
+        },
+        "repair": {
+          "src/lib/query.js": "a392bf86a7c3d454eb90541a72e7ff8798303ae19ff153a04f59c7353a1d9148",
+          "package.json": "29a887784c75799ca97c7c458158318c8b17abb11c5638e3c88879b7318320e5"
+        }
+      },
+      "expectedLabel": "PASS",
+      "sourceRegressionDisclosure": null,
+      "caseId": "corr-source-query-projection-slice",
+      "corpusPointer": {
+        "file": "gate-engine/review/eval/reviewers/cases-correctness.jsonl",
+        "id": "corr-upsert-absent-original-document-clean"
+      }
+    },
+    {
+      "group": "mongoose",
+      "number": 18,
+      "initialProposalId": "corr-population-limit-scaling-clean",
+      "canonicalCorpusId": "corr-reused-population-limit-compounds",
+      "edgeControl": "mongoose-population-edge-controls.cjs",
+      "edgeExpected": {
+        "base": [
+          {
+            "name": "reuse population limit 1",
+            "value": {
+              "queryLimits": [
+                2,
+                2
+              ],
+              "callerLimit": 2
+            }
+          },
+          {
+            "name": "reuse population limit 2",
+            "value": {
+              "queryLimits": [
+                2,
+                2
+              ],
+              "callerLimit": 2
+            }
+          },
+          {
+            "name": "reuse population limit 3",
+            "value": {
+              "queryLimits": [
+                2,
+                2
+              ],
+              "callerLimit": 2
+            }
+          },
+          {
+            "name": "same query repeated limit",
+            "value": {
+              "queryLimits": [
+                2,
+                2
+              ]
+            }
+          },
+          {
+            "name": "zero unlimited retained",
+            "value": {
+              "limit": 0
+            }
+          }
+        ],
+        "repair": [
+          {
+            "name": "reuse population limit 1",
+            "value": {
+              "queryLimits": [
+                2,
+                2
+              ],
+              "callerLimit": 2
+            }
+          },
+          {
+            "name": "reuse population limit 2",
+            "value": {
+              "queryLimits": [
+                4,
+                8
+              ],
+              "callerLimit": 8
+            }
+          },
+          {
+            "name": "reuse population limit 3",
+            "value": {
+              "queryLimits": [
+                6,
+                18
+              ],
+              "callerLimit": 18
+            }
+          },
+          {
+            "name": "same query repeated limit",
+            "value": {
+              "queryLimits": [
+                4,
+                8
+              ]
+            }
+          },
+          {
+            "name": "zero unlimited retained",
+            "value": {
+              "limit": 0
+            }
+          }
+        ]
+      },
+      "fixtureHashes": {
+        "base": {
+          "src/lib/model.js": "62b6187fa724f0871891c57eafbdbb7497e2258c234318631f2c0dd9f64118fb",
+          "package.json": "b205a1e21886e0236ec38404aed5ad8fa4ed0876c5ad9b51ed9f323e4bcdf7b8"
+        },
+        "repair": {
+          "src/lib/model.js": "4083c187658d2d09db2e07f8aa6599e539f58e3681c58334d786f99d37b137ff",
+          "package.json": "b205a1e21886e0236ec38404aed5ad8fa4ed0876c5ad9b51ed9f323e4bcdf7b8"
+        }
+      },
+      "expectedLabel": "FAIL",
+      "sourceRegressionDisclosure": "New failure is agent-verified source regression evidence, not the BugsJS label.",
+      "caseId": "corr-source-mongoose-document-context",
+      "corpusPointer": {
+        "file": "gate-engine/review/eval/reviewers/cases-correctness.jsonl",
+        "id": "corr-reused-population-limit-compounds"
+      }
+    },
+    {
+      "group": "mongoose",
+      "number": 23,
+      "initialProposalId": "corr-population-projection-preservation-clean",
+      "canonicalCorpusId": "corr-population-projection-token-prefix",
+      "edgeControl": "mongoose-population-edge-controls.cjs",
+      "edgeExpected": {
+        "base": [
+          {
+            "name": "projection title -_id",
+            "value": {
+              "outputId": null
+            }
+          },
+          {
+            "name": "projection -_identity",
+            "value": {
+              "outputId": null
+            }
+          },
+          {
+            "name": "projection title -_identity",
+            "value": {
+              "outputId": null
+            }
+          },
+          {
+            "name": "projection -body -_id",
+            "value": {
+              "outputId": null
+            }
+          },
+          {
+            "name": "projection title\t-_id\n-body",
+            "value": {
+              "outputId": null
+            }
+          },
+          {
+            "name": "projection -_id -_identity",
+            "value": {
+              "outputId": null
+            }
+          }
+        ],
+        "repair": [
+          {
+            "name": "projection title -_id",
+            "value": {
+              "fields": {
+                "title": 1
+              },
+              "outputId": null
+            }
+          },
+          {
+            "name": "projection -_identity",
+            "value": {
+              "fields": {
+                "entity": 1
+              },
+              "outputId": null
+            }
+          },
+          {
+            "name": "projection title -_identity",
+            "value": {
+              "fields": {
+                "entity": 1,
+                "title": 1
+              },
+              "outputId": null
+            }
+          },
+          {
+            "name": "projection -body -_id",
+            "value": {
+              "fields": {
+                "body": 0
+              },
+              "outputId": null
+            }
+          },
+          {
+            "name": "projection title\t-_id\n-body",
+            "value": {
+              "fields": {
+                "body": 0,
+                "title": 1
+              },
+              "outputId": null
+            }
+          },
+          {
+            "name": "projection -_id -_identity",
+            "value": {
+              "fields": {
+                "entity": 1
+              },
+              "outputId": null
+            }
+          }
+        ]
+      },
+      "fixtureHashes": {
+        "base": {
+          "src/lib/model.js": "53a5d9e6aa829a44cda923a5aa4fb9b3da9a7898de137bcb21dfcb43df088702",
+          "package.json": "a0f04f33f95836418c9b3c29ac8f16c36170637edae9ce8589e294460d189b08"
+        },
+        "repair": {
+          "src/lib/model.js": "2b2659e048e5ad493a4854f49d90920b5a82faa948fc3bc9f0bc5b1e2096ec87",
+          "package.json": "a0f04f33f95836418c9b3c29ac8f16c36170637edae9ce8589e294460d189b08"
+        }
+      },
+      "expectedLabel": "FAIL",
+      "sourceRegressionDisclosure": "New failure is agent-verified source regression evidence, not the BugsJS label.",
+      "caseId": "corr-source-mongoose-document-context",
+      "corpusPointer": {
+        "file": "gate-engine/review/eval/reviewers/cases-correctness.jsonl",
+        "id": "corr-population-projection-token-prefix"
+      }
+    },
+    {
+      "group": "mongoose",
+      "number": 24,
+      "initialProposalId": "corr-repopulation-identifier-cache-clean",
+      "canonicalCorpusId": "corr-repopulation-error-loses-documents",
+      "edgeControl": "mongoose-population-edge-controls.cjs",
+      "edgeExpected": {
+        "base": [
+          {
+            "name": "repopulate in flight/error array false fail false",
+            "value": {
+              "beforeDocument": true,
+              "duringDocument": true,
+              "afterDocument": false,
+              "duringId": "000000000000000000000001",
+              "error": null
+            }
+          },
+          {
+            "name": "repopulate in flight/error array false fail true",
+            "value": {
+              "beforeDocument": true,
+              "duringDocument": true,
+              "afterDocument": true,
+              "duringId": "000000000000000000000003",
+              "error": "lookup unavailable"
+            }
+          },
+          {
+            "name": "repopulate in flight/error array true fail false",
+            "value": {
+              "beforeDocument": true,
+              "duringDocument": true,
+              "afterDocument": true,
+              "duringId": "000000000000000000000005",
+              "error": null
+            }
+          },
+          {
+            "name": "repopulate in flight/error array true fail true",
+            "value": {
+              "beforeDocument": true,
+              "duringDocument": true,
+              "afterDocument": true,
+              "duringId": "000000000000000000000007",
+              "error": "lookup unavailable"
+            }
+          },
+          {
+            "name": "fresh identifiers and duplicate list retained",
+            "value": {
+              "names": [
+                "child",
+                "child"
+              ]
+            }
+          }
+        ],
+        "repair": [
+          {
+            "name": "repopulate in flight/error array false fail false",
+            "value": {
+              "beforeDocument": true,
+              "duringDocument": true,
+              "afterDocument": true,
+              "duringId": "000000000000000000000001",
+              "error": null
+            }
+          },
+          {
+            "name": "repopulate in flight/error array false fail true",
+            "value": {
+              "beforeDocument": true,
+              "duringDocument": true,
+              "afterDocument": true,
+              "duringId": "000000000000000000000003",
+              "error": "lookup unavailable"
+            }
+          },
+          {
+            "name": "repopulate in flight/error array true fail false",
+            "value": {
+              "beforeDocument": true,
+              "duringDocument": false,
+              "afterDocument": true,
+              "duringId": "000000000000000000000005",
+              "error": null
+            }
+          },
+          {
+            "name": "repopulate in flight/error array true fail true",
+            "value": {
+              "beforeDocument": true,
+              "duringDocument": false,
+              "afterDocument": false,
+              "duringId": "000000000000000000000007",
+              "error": "lookup unavailable"
+            }
+          },
+          {
+            "name": "fresh identifiers and duplicate list retained",
+            "value": {
+              "names": [
+                "child",
+                "child"
+              ]
+            }
+          }
+        ]
+      },
+      "fixtureHashes": {
+        "base": {
+          "src/lib/model.js": "928ba79f560c4c463f9463c0beba9ea7cf9b780f4b4c51d0c8c1ee7ea0a89560",
+          "package.json": "80e95df247d19335899b4925bad9d2d02eb68865c3628eda303ec0cd2e56ddaf"
+        },
+        "repair": {
+          "src/lib/model.js": "61dae0645391298ec9890eef2cfa7ddf1fcce45c402be90f313d58cabd2863f3",
+          "package.json": "80e95df247d19335899b4925bad9d2d02eb68865c3628eda303ec0cd2e56ddaf"
+        }
+      },
+      "expectedLabel": "FAIL",
+      "sourceRegressionDisclosure": "New failure is agent-verified source regression evidence, not the BugsJS label.",
+      "caseId": "corr-source-mongoose-document-context",
+      "corpusPointer": {
+        "file": "gate-engine/review/eval/reviewers/cases-correctness.jsonl",
+        "id": "corr-repopulation-error-loses-documents"
+      }
+    }
+  ],
+  "interface": "node mongoose-population-edge-controls.cjs NUMBER CASE_DIRECTORY STAGE OUTPUT_JSON",
+  "pathNormalization": "No path-valued observations in this subset. Existing runtime normalize_edges recursively replaces the disposable case directory and drops stack; no semantic values are dropped.",
+  "canonicalBindingsPendingAdmission": false,
+  "corpusSha256": "fa62708388345fcf776bad30811a9aa8641b68d00219b104ff19dec29caf4b9e"
+}

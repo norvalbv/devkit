@@ -1,0 +1,375 @@
+[
+  {
+    "library": "mongoose",
+    "number": 2,
+    "upstreamFix": "c671672a908e4e3ae693e499e7f9fe649aa41db7",
+    "upstreamParent": "d5d34382c980d94a11d20e08ee3b9abee8a7f8b5",
+    "subject": "partial revert of eca2607",
+    "sourceFiles": [
+      {
+        "stage": "base",
+        "path": "lib/model.js",
+        "sha256": "75640cb9f5127f008a588ac34efc91e49d7f443e65693775320020fabff11230",
+        "datasetMatches": true,
+        "upstreamMatches": true,
+        "upstreamSha256": "75640cb9f5127f008a588ac34efc91e49d7f443e65693775320020fabff11230",
+        "adaptedSha256": "148f6602d1d7bb2a6e31078476882482ce4ec0bc03a6e94a75677693ac1fdee7",
+        "receiptMatches": true,
+        "proposalMatches": true
+      },
+      {
+        "stage": "repair",
+        "path": "lib/model.js",
+        "sha256": "c4e3c083cfed312b5c5e0f69a4c7ff6b8b5a9dfb69b0a08b56977c29a8f78f80",
+        "datasetMatches": true,
+        "upstreamMatches": true,
+        "upstreamSha256": "c4e3c083cfed312b5c5e0f69a4c7ff6b8b5a9dfb69b0a08b56977c29a8f78f80",
+        "adaptedSha256": "5b29dadb927048e4d30ccfe65c2a0577fa7a00c5d13834428e05dc15fd030e01",
+        "receiptMatches": true,
+        "proposalMatches": true
+      }
+    ],
+    "proposalSha256": "308b915654a9dc1f630a403c95510de1569891c91de47f5c2ce112cb9a95ca40",
+    "caseId": "corr-source-mongoose-document-context",
+    "runtime": {
+      "version": "3.6.0rc0",
+      "runtimeId": "a4398ebdfd6599e0",
+      "lockSha256": "85a777bb1099f2f6be03eec46c10a867b79fc40451e7f2803656c24393b8d2b7",
+      "nodeModulesSymlink": "locks/mongoose/a4398ebdfd6599e0/node_modules"
+    }
+  },
+  {
+    "library": "mongoose",
+    "number": 4,
+    "upstreamFix": "c5527ba0f84a7fa13bc6a4368f715db0253cc916",
+    "upstreamParent": "129bc78d81df30189269e42a8586cd42b443aeb6",
+    "subject": "fixed; lean population",
+    "sourceFiles": [
+      {
+        "stage": "base",
+        "path": "lib/query.js",
+        "sha256": "bd3ab0d5ceef740ee37fc6b81c443ec18cb55622be2e7210d2453fa66f0457ff",
+        "datasetMatches": true,
+        "upstreamMatches": true,
+        "upstreamSha256": "bd3ab0d5ceef740ee37fc6b81c443ec18cb55622be2e7210d2453fa66f0457ff",
+        "adaptedSha256": "f2b5d98861e75d0be228ef083d1bd0103ac1f1112264f55f465f890e87dfaffa",
+        "receiptMatches": true,
+        "proposalMatches": true
+      },
+      {
+        "stage": "repair",
+        "path": "lib/query.js",
+        "sha256": "f698ade0fbf9f2c09f3ff06b4ef5d9db0a30c5e044b3eda53cf0b53bc97f3979",
+        "datasetMatches": true,
+        "upstreamMatches": true,
+        "upstreamSha256": "f698ade0fbf9f2c09f3ff06b4ef5d9db0a30c5e044b3eda53cf0b53bc97f3979",
+        "adaptedSha256": "4ef0384c246e8883e9b71d5e9cf3222b76b47a3a267e78c38d0cde6f63b6cfe3",
+        "receiptMatches": true,
+        "proposalMatches": true
+      }
+    ],
+    "proposalSha256": "27b283f4dc1426fb3ad5ab0d1d09e8327cbd7ae3ca93e480e159b353449b15c9",
+    "caseId": "corr-source-query-projection-slice",
+    "runtime": {
+      "version": "3.6.0rc0",
+      "runtimeId": "a2f71681e72ce009",
+      "lockSha256": "ef0d8f8ca7130066a8addeb8ea8507523d4c643d1007c6b64424bb17fe287ad4",
+      "nodeModulesSymlink": "locks/mongoose/a2f71681e72ce009/node_modules"
+    }
+  },
+  {
+    "library": "mongoose",
+    "number": 7,
+    "upstreamFix": "b7688c2e5b0eb00858256aa677fb9d703c249055",
+    "upstreamParent": "2f111f9f25217c6747fb9790bf265010a43a5a72",
+    "subject": "added; populate support to findAndModify varients",
+    "sourceFiles": [
+      {
+        "stage": "base",
+        "path": "lib/query.js",
+        "sha256": "c4fc93a1c1ee3456575957f5a81aed3f696dce34eb6265f110fd99c57cb4ff66",
+        "datasetMatches": true,
+        "upstreamMatches": true,
+        "upstreamSha256": "c4fc93a1c1ee3456575957f5a81aed3f696dce34eb6265f110fd99c57cb4ff66",
+        "adaptedSha256": "263ecea5978947cb37872a42f8ab60007c0a7dda5a86ba1dc99384307361e2f7",
+        "receiptMatches": true,
+        "proposalMatches": true
+      },
+      {
+        "stage": "repair",
+        "path": "lib/query.js",
+        "sha256": "2383f6026db15ccfcdd9458bfa32222b71f51a2552030091b385db73c52b31ec",
+        "datasetMatches": true,
+        "upstreamMatches": true,
+        "upstreamSha256": "2383f6026db15ccfcdd9458bfa32222b71f51a2552030091b385db73c52b31ec",
+        "adaptedSha256": "1bdbf39db3ee1eb516841cd7f1b186abc1eb9284df437d19676916fac8cd3ccc",
+        "receiptMatches": true,
+        "proposalMatches": true
+      }
+    ],
+    "proposalSha256": "c5edffa2269c20b2fb1750f1353e5f2486addb01aa7c2fac384682dd34097cd3",
+    "caseId": "corr-source-query-projection-slice",
+    "runtime": {
+      "version": "3.6.1-pre",
+      "runtimeId": "9d85b7f1fcd9acd6",
+      "lockSha256": "eb0b911a3150f0e821f614f62910cb11090674a006983d1b8b148a7981767cc1",
+      "nodeModulesSymlink": "locks/mongoose/9d85b7f1fcd9acd6/node_modules"
+    }
+  },
+  {
+    "library": "mongoose",
+    "number": 13,
+    "upstreamFix": "a48c4054f38a7a11d968ffb44f7760abb9117ffa",
+    "upstreamParent": "57e8bf6da4b8b346cb8d064ee7dce3248fba7787",
+    "subject": "fixed; saving populated new docs",
+    "sourceFiles": [
+      {
+        "stage": "base",
+        "path": "lib/document.js",
+        "sha256": "7aec112205d8a6fc6c473ad3750118ea719026a0a43a9baf9f0b29251a1d5bbf",
+        "datasetMatches": true,
+        "upstreamMatches": true,
+        "upstreamSha256": "7aec112205d8a6fc6c473ad3750118ea719026a0a43a9baf9f0b29251a1d5bbf",
+        "adaptedSha256": "32eb071eb9a6741218b4315dbf58b3be5cc596e64c89d8aefe6add8fbfbec9d0",
+        "receiptMatches": true,
+        "proposalMatches": true
+      },
+      {
+        "stage": "base",
+        "path": "lib/model.js",
+        "sha256": "f3e8d090d698783aefafdb9173cb2478d9551ba7c7b9be97cf4a9004d99331ef",
+        "datasetMatches": true,
+        "upstreamMatches": true,
+        "upstreamSha256": "f3e8d090d698783aefafdb9173cb2478d9551ba7c7b9be97cf4a9004d99331ef",
+        "adaptedSha256": "c8149b45c227dfe8fb4bfdb8e9f225aedf50df5980f0056188fc2d2fe29e3b7e",
+        "receiptMatches": true,
+        "proposalMatches": true
+      },
+      {
+        "stage": "repair",
+        "path": "lib/document.js",
+        "sha256": "c741958f154dfa24c8b1d830e95580d1d703038827eb75354b3d17b427bdadd9",
+        "datasetMatches": true,
+        "upstreamMatches": true,
+        "upstreamSha256": "c741958f154dfa24c8b1d830e95580d1d703038827eb75354b3d17b427bdadd9",
+        "adaptedSha256": "28603f07cbb09adfdbb90495aac07294a824ca9759a69852b79e80c742d0f5e4",
+        "receiptMatches": true,
+        "proposalMatches": true
+      },
+      {
+        "stage": "repair",
+        "path": "lib/model.js",
+        "sha256": "7bac721885ea7819b8d6700992a35a7d9e28dd3884f0d1591a52df1c0d1a0769",
+        "datasetMatches": true,
+        "upstreamMatches": true,
+        "upstreamSha256": "7bac721885ea7819b8d6700992a35a7d9e28dd3884f0d1591a52df1c0d1a0769",
+        "adaptedSha256": "52485522b90e9920eb99160922d4b1a6c785635b04dbcd98190186d155c57dab",
+        "receiptMatches": true,
+        "proposalMatches": true
+      }
+    ],
+    "proposalSha256": "9f94a6294158ee2310d80cda983ce643114320c85e47bffddd49ce7c59e814a7",
+    "caseId": "corr-source-mongoose-document-context",
+    "runtime": {
+      "version": "3.6.5-pre",
+      "runtimeId": "9d85b7f1fcd9acd6",
+      "lockSha256": "eb0b911a3150f0e821f614f62910cb11090674a006983d1b8b148a7981767cc1",
+      "nodeModulesSymlink": "locks/mongoose/9d85b7f1fcd9acd6/node_modules"
+    }
+  },
+  {
+    "library": "mongoose",
+    "number": 14,
+    "upstreamFix": "0ab96d1645417e41a61c36ce7985f8ff3036c736",
+    "upstreamParent": "d305cd7070cb8172caf8d280607e6dea14643e31",
+    "subject": "fixed; population regression #1444",
+    "sourceFiles": [
+      {
+        "stage": "base",
+        "path": "lib/model.js",
+        "sha256": "7bac721885ea7819b8d6700992a35a7d9e28dd3884f0d1591a52df1c0d1a0769",
+        "datasetMatches": true,
+        "upstreamMatches": true,
+        "upstreamSha256": "7bac721885ea7819b8d6700992a35a7d9e28dd3884f0d1591a52df1c0d1a0769",
+        "adaptedSha256": "52485522b90e9920eb99160922d4b1a6c785635b04dbcd98190186d155c57dab",
+        "receiptMatches": true,
+        "proposalMatches": true
+      },
+      {
+        "stage": "repair",
+        "path": "lib/model.js",
+        "sha256": "dfbad9eb0191f833bb448e0ed5920d28124e1b70060b2f9e4f3bfe187b35af6f",
+        "datasetMatches": true,
+        "upstreamMatches": true,
+        "upstreamSha256": "dfbad9eb0191f833bb448e0ed5920d28124e1b70060b2f9e4f3bfe187b35af6f",
+        "adaptedSha256": "bf6a1b17f4a50c4c1f1eccf1951971ae3c7127b2886c6a0089c36dbad9568fa8",
+        "receiptMatches": true,
+        "proposalMatches": true
+      }
+    ],
+    "proposalSha256": "534c55a86b61f591b6eb63e97a1be6d126a36acc1263023114406e588f41aae0",
+    "caseId": "corr-source-mongoose-document-context",
+    "runtime": {
+      "version": "3.6.5-pre",
+      "runtimeId": "9d85b7f1fcd9acd6",
+      "lockSha256": "eb0b911a3150f0e821f614f62910cb11090674a006983d1b8b148a7981767cc1",
+      "nodeModulesSymlink": "locks/mongoose/9d85b7f1fcd9acd6/node_modules"
+    }
+  },
+  {
+    "library": "mongoose",
+    "number": 17,
+    "upstreamFix": "3b863e15a716ab2fda43945e47da9e4333d40bb4",
+    "upstreamParent": "a5e6a1f6a9ed3a5ec4c4b551218caefdd2488faa",
+    "subject": "fixed issue with findOneAndUpdate not returning null on upserts",
+    "sourceFiles": [
+      {
+        "stage": "base",
+        "path": "lib/query.js",
+        "sha256": "dbbb6e9c4716117c00b6a9d8034d7a5ec6df7db13bd93ecc3ac31e6779810e34",
+        "datasetMatches": true,
+        "upstreamMatches": true,
+        "upstreamSha256": "dbbb6e9c4716117c00b6a9d8034d7a5ec6df7db13bd93ecc3ac31e6779810e34",
+        "adaptedSha256": "1696941dd3a7eb95242342c3cfe3f25202ebc457190bc48f0f5d1186c4c10ab3",
+        "receiptMatches": true,
+        "proposalMatches": true
+      },
+      {
+        "stage": "repair",
+        "path": "lib/query.js",
+        "sha256": "fc9571c26c072401f0192847f18e9ca1ba397d94604aab9ac6a5ba1ad80d8e2e",
+        "datasetMatches": true,
+        "upstreamMatches": true,
+        "upstreamSha256": "fc9571c26c072401f0192847f18e9ca1ba397d94604aab9ac6a5ba1ad80d8e2e",
+        "adaptedSha256": "a392bf86a7c3d454eb90541a72e7ff8798303ae19ff153a04f59c7353a1d9148",
+        "receiptMatches": true,
+        "proposalMatches": true
+      }
+    ],
+    "proposalSha256": "7d6c2708cf6d1f607252793dc3976c1f6540a9f358e1b38f45224da8f93f08b0",
+    "caseId": "corr-source-query-projection-slice",
+    "runtime": {
+      "version": "3.7.0-pre",
+      "runtimeId": "ba8e8e22bac956b5",
+      "lockSha256": "3ac40c3221a43d434bd41178eefa777b09e3ee8c2a5ea46a157815e4f94e7f57",
+      "nodeModulesSymlink": "locks/mongoose/ba8e8e22bac956b5/node_modules"
+    }
+  },
+  {
+    "library": "mongoose",
+    "number": 18,
+    "upstreamFix": "21e128669f7f48d33985a1d0115cc7d54ac98baf",
+    "upstreamParent": "e6ed84b6a3358d85c5672f3543cc260b2f1083fc",
+    "subject": "Limit applies to individual items on population",
+    "sourceFiles": [
+      {
+        "stage": "base",
+        "path": "lib/model.js",
+        "sha256": "0caa33f27180aa8b60bcba7ac9653581f6cb4aa1715ae0fe6267794557a820f0",
+        "datasetMatches": true,
+        "upstreamMatches": true,
+        "upstreamSha256": "0caa33f27180aa8b60bcba7ac9653581f6cb4aa1715ae0fe6267794557a820f0",
+        "adaptedSha256": "62b6187fa724f0871891c57eafbdbb7497e2258c234318631f2c0dd9f64118fb",
+        "receiptMatches": true,
+        "proposalMatches": true
+      },
+      {
+        "stage": "repair",
+        "path": "lib/model.js",
+        "sha256": "dd0bbc728cc5d567607c131e2ab5e2012ecf88de549315c7a359588209b936f4",
+        "datasetMatches": true,
+        "upstreamMatches": false,
+        "upstreamSha256": "96e369121cbaadc4f2320cbd840871f1263c7a1a0eabf05585e04e9892f510a2",
+        "adaptedSha256": "4083c187658d2d09db2e07f8aa6599e539f58e3681c58334d786f99d37b137ff",
+        "receiptMatches": true,
+        "proposalMatches": true
+      }
+    ],
+    "proposalSha256": "20274ac7468a7415945ceb8b708b1013deb31932f18f416feb4adb2da99f326c",
+    "caseId": "corr-source-mongoose-document-context",
+    "runtime": {
+      "version": "3.7.1-pre",
+      "runtimeId": "2cb617778e9e7f83",
+      "lockSha256": "0431dc948051f4df0732ba7bb33325a0a30ba862b545182fc4fe6146025a0241",
+      "nodeModulesSymlink": "locks/mongoose/2cb617778e9e7f83/node_modules"
+    }
+  },
+  {
+    "library": "mongoose",
+    "number": 23,
+    "upstreamFix": "a830651eeef2fb0b7c525e488745ec69a91e453b",
+    "upstreamParent": "72eb91f59517f98eea967166d93b251c26a94ca8",
+    "subject": "fixed; population field selection w/ strings",
+    "sourceFiles": [
+      {
+        "stage": "base",
+        "path": "lib/model.js",
+        "sha256": "603b232999045adb72cded3737e4b451f2bfc43221f2f82a6f77c5b1637c4cd6",
+        "datasetMatches": true,
+        "upstreamMatches": true,
+        "upstreamSha256": "603b232999045adb72cded3737e4b451f2bfc43221f2f82a6f77c5b1637c4cd6",
+        "adaptedSha256": "53a5d9e6aa829a44cda923a5aa4fb9b3da9a7898de137bcb21dfcb43df088702",
+        "receiptMatches": true,
+        "proposalMatches": true
+      },
+      {
+        "stage": "repair",
+        "path": "lib/model.js",
+        "sha256": "14b3030a0493c562c2956a7cd58d810ea69f0734046e8fbdb9ebb3c62303cbfc",
+        "datasetMatches": true,
+        "upstreamMatches": true,
+        "upstreamSha256": "14b3030a0493c562c2956a7cd58d810ea69f0734046e8fbdb9ebb3c62303cbfc",
+        "adaptedSha256": "2b2659e048e5ad493a4854f49d90920b5a82faa948fc3bc9f0bc5b1e2096ec87",
+        "receiptMatches": true,
+        "proposalMatches": true
+      }
+    ],
+    "proposalSha256": "7f0578da002dec6b597498fb8f36c1f14b4b56efaa89f1b796bb7987a6cceedd",
+    "caseId": "corr-source-mongoose-document-context",
+    "runtime": {
+      "version": "3.7.4-pre",
+      "runtimeId": "c31d54c8f1304010",
+      "lockSha256": "363313812b63e3b4f9b2ea0fdd2fa31602d82270b2f1ea6c7201b357213bf9d8",
+      "nodeModulesSymlink": "locks/mongoose/c31d54c8f1304010/node_modules"
+    }
+  },
+  {
+    "library": "mongoose",
+    "number": 24,
+    "upstreamFix": "5fdf81555763337be08dce9fcab9986ebdfc2373",
+    "upstreamParent": "e12edaa50d662fc9ee606a8db5b9dc17dc95eea5",
+    "subject": "fixed; repopulating modified populated paths",
+    "sourceFiles": [
+      {
+        "stage": "base",
+        "path": "lib/model.js",
+        "sha256": "d739731a3de1752c34e07eb3de9dbb2a68684336a3bddfdc6f0f8712f2e72fc4",
+        "datasetMatches": true,
+        "upstreamMatches": true,
+        "upstreamSha256": "d739731a3de1752c34e07eb3de9dbb2a68684336a3bddfdc6f0f8712f2e72fc4",
+        "adaptedSha256": "928ba79f560c4c463f9463c0beba9ea7cf9b780f4b4c51d0c8c1ee7ea0a89560",
+        "receiptMatches": true,
+        "proposalMatches": true
+      },
+      {
+        "stage": "repair",
+        "path": "lib/model.js",
+        "sha256": "41482b1ec2334316372299bf0f27fde829c1e9df5594ad897607ef5b59ab917d",
+        "datasetMatches": true,
+        "upstreamMatches": false,
+        "upstreamSha256": "5bcc7bdc67f6c3b88b0cfdce8197e53faee44af4873661893141df24b5007e9d",
+        "adaptedSha256": "61dae0645391298ec9890eef2cfa7ddf1fcce45c402be90f313d58cabd2863f3",
+        "receiptMatches": true,
+        "proposalMatches": true
+      }
+    ],
+    "proposalSha256": "4a6c649b31398e4376e29c42eff1e36cac2ba7e750d6148755b6b39ffb9689d6",
+    "caseId": "corr-source-mongoose-document-context",
+    "runtime": {
+      "version": "3.7.4-pre",
+      "runtimeId": "6fcb8107e3fa35e0",
+      "lockSha256": "89c5366f6a8486d7ccdaa7b911331d8578027e75cf5a7948ddc5100cb3ea836c",
+      "nodeModulesSymlink": "locks/mongoose/6fcb8107e3fa35e0/node_modules"
+    }
+  }
+]

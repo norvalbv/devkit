@@ -1,0 +1,2144 @@
+{
+  "rule": "camelcase",
+  "scenarios": 20,
+  "observations": 120,
+  "records": [
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "alias default snake always",
+      "code": "const {camelCase: snake_case = 1} = obj;",
+      "options": [
+        {
+          "properties": "always"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 19
+        }
+      ],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "alias default edge always",
+      "code": "const {camelCase: _edge = 1} = obj;",
+      "options": [
+        {
+          "properties": "always"
+        }
+      ],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "nested alias default always",
+      "code": "const {a: {b: snake_case = 1}} = obj;",
+      "options": [
+        {
+          "properties": "always"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 15
+        }
+      ],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "array default snake always",
+      "code": "const [snake_case = 1] = arr;",
+      "options": [
+        {
+          "properties": "always"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 8
+        }
+      ],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "parameter alias default always",
+      "code": "function f({a: snake_case=1}) {}",
+      "options": [
+        {
+          "properties": "always"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 16
+        }
+      ],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "shorthand underscore always",
+      "code": "const {_edge=1} = obj;",
+      "options": [
+        {
+          "properties": "always"
+        }
+      ],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "shorthand snake always",
+      "code": "const {snake_case=1} = obj;",
+      "options": [
+        {
+          "properties": "always"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 8
+        }
+      ],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "computed alias default always",
+      "code": "const {[key]: snake_case=1}=obj;",
+      "options": [
+        {
+          "properties": "always"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 15
+        }
+      ],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "imports edge always",
+      "code": "import {snake_case as _edge} from \"x\";",
+      "options": [
+        {
+          "properties": "always"
+        }
+      ],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "uppercase binding always",
+      "code": "const {UPPER_CASE = 1} = obj;",
+      "options": [
+        {
+          "properties": "always"
+        }
+      ],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "alias default snake never",
+      "code": "const {camelCase: snake_case = 1} = obj;",
+      "options": [
+        {
+          "properties": "never"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 19
+        }
+      ],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "alias default edge never",
+      "code": "const {camelCase: _edge = 1} = obj;",
+      "options": [
+        {
+          "properties": "never"
+        }
+      ],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "nested alias default never",
+      "code": "const {a: {b: snake_case = 1}} = obj;",
+      "options": [
+        {
+          "properties": "never"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 15
+        }
+      ],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "array default snake never",
+      "code": "const [snake_case = 1] = arr;",
+      "options": [
+        {
+          "properties": "never"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 8
+        }
+      ],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "parameter alias default never",
+      "code": "function f({a: snake_case=1}) {}",
+      "options": [
+        {
+          "properties": "never"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 16
+        }
+      ],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "shorthand underscore never",
+      "code": "const {_edge=1} = obj;",
+      "options": [
+        {
+          "properties": "never"
+        }
+      ],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "shorthand snake never",
+      "code": "const {snake_case=1} = obj;",
+      "options": [
+        {
+          "properties": "never"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 8
+        }
+      ],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "computed alias default never",
+      "code": "const {[key]: snake_case=1}=obj;",
+      "options": [
+        {
+          "properties": "never"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 15
+        }
+      ],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "imports edge never",
+      "code": "import {snake_case as _edge} from \"x\";",
+      "options": [
+        {
+          "properties": "never"
+        }
+      ],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "uppercase binding never",
+      "code": "const {UPPER_CASE = 1} = obj;",
+      "options": [
+        {
+          "properties": "never"
+        }
+      ],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "alias default snake always",
+      "code": "const {camelCase: snake_case = 1} = obj;",
+      "options": [
+        {
+          "properties": "always"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 19
+        }
+      ],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "alias default edge always",
+      "code": "const {camelCase: _edge = 1} = obj;",
+      "options": [
+        {
+          "properties": "always"
+        }
+      ],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "nested alias default always",
+      "code": "const {a: {b: snake_case = 1}} = obj;",
+      "options": [
+        {
+          "properties": "always"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 15
+        }
+      ],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "array default snake always",
+      "code": "const [snake_case = 1] = arr;",
+      "options": [
+        {
+          "properties": "always"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 8
+        }
+      ],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "parameter alias default always",
+      "code": "function f({a: snake_case=1}) {}",
+      "options": [
+        {
+          "properties": "always"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 16
+        }
+      ],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "shorthand underscore always",
+      "code": "const {_edge=1} = obj;",
+      "options": [
+        {
+          "properties": "always"
+        }
+      ],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "shorthand snake always",
+      "code": "const {snake_case=1} = obj;",
+      "options": [
+        {
+          "properties": "always"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 8
+        }
+      ],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "computed alias default always",
+      "code": "const {[key]: snake_case=1}=obj;",
+      "options": [
+        {
+          "properties": "always"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 15
+        }
+      ],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "imports edge always",
+      "code": "import {snake_case as _edge} from \"x\";",
+      "options": [
+        {
+          "properties": "always"
+        }
+      ],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "uppercase binding always",
+      "code": "const {UPPER_CASE = 1} = obj;",
+      "options": [
+        {
+          "properties": "always"
+        }
+      ],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "alias default snake never",
+      "code": "const {camelCase: snake_case = 1} = obj;",
+      "options": [
+        {
+          "properties": "never"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 19
+        }
+      ],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "alias default edge never",
+      "code": "const {camelCase: _edge = 1} = obj;",
+      "options": [
+        {
+          "properties": "never"
+        }
+      ],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "nested alias default never",
+      "code": "const {a: {b: snake_case = 1}} = obj;",
+      "options": [
+        {
+          "properties": "never"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 15
+        }
+      ],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "array default snake never",
+      "code": "const [snake_case = 1] = arr;",
+      "options": [
+        {
+          "properties": "never"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 8
+        }
+      ],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "parameter alias default never",
+      "code": "function f({a: snake_case=1}) {}",
+      "options": [
+        {
+          "properties": "never"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 16
+        }
+      ],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "shorthand underscore never",
+      "code": "const {_edge=1} = obj;",
+      "options": [
+        {
+          "properties": "never"
+        }
+      ],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "shorthand snake never",
+      "code": "const {snake_case=1} = obj;",
+      "options": [
+        {
+          "properties": "never"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 8
+        }
+      ],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "computed alias default never",
+      "code": "const {[key]: snake_case=1}=obj;",
+      "options": [
+        {
+          "properties": "never"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 15
+        }
+      ],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "imports edge never",
+      "code": "import {snake_case as _edge} from \"x\";",
+      "options": [
+        {
+          "properties": "never"
+        }
+      ],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "uppercase binding never",
+      "code": "const {UPPER_CASE = 1} = obj;",
+      "options": [
+        {
+          "properties": "never"
+        }
+      ],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "alias default snake always",
+      "code": "const {camelCase: snake_case = 1} = obj;",
+      "options": [
+        {
+          "properties": "always"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 19
+        }
+      ],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "alias default edge always",
+      "code": "const {camelCase: _edge = 1} = obj;",
+      "options": [
+        {
+          "properties": "always"
+        }
+      ],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "nested alias default always",
+      "code": "const {a: {b: snake_case = 1}} = obj;",
+      "options": [
+        {
+          "properties": "always"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 15
+        }
+      ],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "array default snake always",
+      "code": "const [snake_case = 1] = arr;",
+      "options": [
+        {
+          "properties": "always"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 8
+        }
+      ],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "parameter alias default always",
+      "code": "function f({a: snake_case=1}) {}",
+      "options": [
+        {
+          "properties": "always"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 16
+        }
+      ],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "shorthand underscore always",
+      "code": "const {_edge=1} = obj;",
+      "options": [
+        {
+          "properties": "always"
+        }
+      ],
+      "expectedCount": 0,
+      "messages": [
+        {
+          "message": "Identifier '_edge' is not in camel case.",
+          "line": 1,
+          "column": 8
+        }
+      ],
+      "parserFatal": false,
+      "clean": false
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "shorthand snake always",
+      "code": "const {snake_case=1} = obj;",
+      "options": [
+        {
+          "properties": "always"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 8
+        }
+      ],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "computed alias default always",
+      "code": "const {[key]: snake_case=1}=obj;",
+      "options": [
+        {
+          "properties": "always"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 15
+        }
+      ],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "imports edge always",
+      "code": "import {snake_case as _edge} from \"x\";",
+      "options": [
+        {
+          "properties": "always"
+        }
+      ],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "uppercase binding always",
+      "code": "const {UPPER_CASE = 1} = obj;",
+      "options": [
+        {
+          "properties": "always"
+        }
+      ],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "alias default snake never",
+      "code": "const {camelCase: snake_case = 1} = obj;",
+      "options": [
+        {
+          "properties": "never"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [],
+      "parserFatal": false,
+      "clean": false
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "alias default edge never",
+      "code": "const {camelCase: _edge = 1} = obj;",
+      "options": [
+        {
+          "properties": "never"
+        }
+      ],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "nested alias default never",
+      "code": "const {a: {b: snake_case = 1}} = obj;",
+      "options": [
+        {
+          "properties": "never"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [],
+      "parserFatal": false,
+      "clean": false
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "array default snake never",
+      "code": "const [snake_case = 1] = arr;",
+      "options": [
+        {
+          "properties": "never"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [],
+      "parserFatal": false,
+      "clean": false
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "parameter alias default never",
+      "code": "function f({a: snake_case=1}) {}",
+      "options": [
+        {
+          "properties": "never"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [],
+      "parserFatal": false,
+      "clean": false
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "shorthand underscore never",
+      "code": "const {_edge=1} = obj;",
+      "options": [
+        {
+          "properties": "never"
+        }
+      ],
+      "expectedCount": 0,
+      "messages": [
+        {
+          "message": "Identifier '_edge' is not in camel case.",
+          "line": 1,
+          "column": 8
+        }
+      ],
+      "parserFatal": false,
+      "clean": false
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "shorthand snake never",
+      "code": "const {snake_case=1} = obj;",
+      "options": [
+        {
+          "properties": "never"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 8
+        }
+      ],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "computed alias default never",
+      "code": "const {[key]: snake_case=1}=obj;",
+      "options": [
+        {
+          "properties": "never"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [],
+      "parserFatal": false,
+      "clean": false
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "imports edge never",
+      "code": "import {snake_case as _edge} from \"x\";",
+      "options": [
+        {
+          "properties": "never"
+        }
+      ],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "uppercase binding never",
+      "code": "const {UPPER_CASE = 1} = obj;",
+      "options": [
+        {
+          "properties": "never"
+        }
+      ],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "alias default snake always",
+      "code": "const {camelCase: snake_case = 1} = obj;",
+      "options": [
+        {
+          "properties": "always"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 19
+        }
+      ],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "alias default edge always",
+      "code": "const {camelCase: _edge = 1} = obj;",
+      "options": [
+        {
+          "properties": "always"
+        }
+      ],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "nested alias default always",
+      "code": "const {a: {b: snake_case = 1}} = obj;",
+      "options": [
+        {
+          "properties": "always"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 15
+        }
+      ],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "array default snake always",
+      "code": "const [snake_case = 1] = arr;",
+      "options": [
+        {
+          "properties": "always"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 8
+        }
+      ],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "parameter alias default always",
+      "code": "function f({a: snake_case=1}) {}",
+      "options": [
+        {
+          "properties": "always"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 16
+        }
+      ],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "shorthand underscore always",
+      "code": "const {_edge=1} = obj;",
+      "options": [
+        {
+          "properties": "always"
+        }
+      ],
+      "expectedCount": 0,
+      "messages": [
+        {
+          "message": "Identifier '_edge' is not in camel case.",
+          "line": 1,
+          "column": 8
+        }
+      ],
+      "parserFatal": false,
+      "clean": false
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "shorthand snake always",
+      "code": "const {snake_case=1} = obj;",
+      "options": [
+        {
+          "properties": "always"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 8
+        }
+      ],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "computed alias default always",
+      "code": "const {[key]: snake_case=1}=obj;",
+      "options": [
+        {
+          "properties": "always"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 15
+        }
+      ],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "imports edge always",
+      "code": "import {snake_case as _edge} from \"x\";",
+      "options": [
+        {
+          "properties": "always"
+        }
+      ],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "uppercase binding always",
+      "code": "const {UPPER_CASE = 1} = obj;",
+      "options": [
+        {
+          "properties": "always"
+        }
+      ],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "alias default snake never",
+      "code": "const {camelCase: snake_case = 1} = obj;",
+      "options": [
+        {
+          "properties": "never"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [],
+      "parserFatal": false,
+      "clean": false
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "alias default edge never",
+      "code": "const {camelCase: _edge = 1} = obj;",
+      "options": [
+        {
+          "properties": "never"
+        }
+      ],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "nested alias default never",
+      "code": "const {a: {b: snake_case = 1}} = obj;",
+      "options": [
+        {
+          "properties": "never"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [],
+      "parserFatal": false,
+      "clean": false
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "array default snake never",
+      "code": "const [snake_case = 1] = arr;",
+      "options": [
+        {
+          "properties": "never"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [],
+      "parserFatal": false,
+      "clean": false
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "parameter alias default never",
+      "code": "function f({a: snake_case=1}) {}",
+      "options": [
+        {
+          "properties": "never"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [],
+      "parserFatal": false,
+      "clean": false
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "shorthand underscore never",
+      "code": "const {_edge=1} = obj;",
+      "options": [
+        {
+          "properties": "never"
+        }
+      ],
+      "expectedCount": 0,
+      "messages": [
+        {
+          "message": "Identifier '_edge' is not in camel case.",
+          "line": 1,
+          "column": 8
+        }
+      ],
+      "parserFatal": false,
+      "clean": false
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "shorthand snake never",
+      "code": "const {snake_case=1} = obj;",
+      "options": [
+        {
+          "properties": "never"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 8
+        }
+      ],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "computed alias default never",
+      "code": "const {[key]: snake_case=1}=obj;",
+      "options": [
+        {
+          "properties": "never"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [],
+      "parserFatal": false,
+      "clean": false
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "imports edge never",
+      "code": "import {snake_case as _edge} from \"x\";",
+      "options": [
+        {
+          "properties": "never"
+        }
+      ],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "uppercase binding never",
+      "code": "const {UPPER_CASE = 1} = obj;",
+      "options": [
+        {
+          "properties": "never"
+        }
+      ],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "alias default snake always",
+      "code": "const {camelCase: snake_case = 1} = obj;",
+      "options": [
+        {
+          "properties": "always"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 19
+        }
+      ],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "alias default edge always",
+      "code": "const {camelCase: _edge = 1} = obj;",
+      "options": [
+        {
+          "properties": "always"
+        }
+      ],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "nested alias default always",
+      "code": "const {a: {b: snake_case = 1}} = obj;",
+      "options": [
+        {
+          "properties": "always"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 15
+        }
+      ],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "array default snake always",
+      "code": "const [snake_case = 1] = arr;",
+      "options": [
+        {
+          "properties": "always"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 8
+        }
+      ],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "parameter alias default always",
+      "code": "function f({a: snake_case=1}) {}",
+      "options": [
+        {
+          "properties": "always"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 16
+        }
+      ],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "shorthand underscore always",
+      "code": "const {_edge=1} = obj;",
+      "options": [
+        {
+          "properties": "always"
+        }
+      ],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "shorthand snake always",
+      "code": "const {snake_case=1} = obj;",
+      "options": [
+        {
+          "properties": "always"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 8
+        }
+      ],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "computed alias default always",
+      "code": "const {[key]: snake_case=1}=obj;",
+      "options": [
+        {
+          "properties": "always"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 15
+        }
+      ],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "imports edge always",
+      "code": "import {snake_case as _edge} from \"x\";",
+      "options": [
+        {
+          "properties": "always"
+        }
+      ],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "uppercase binding always",
+      "code": "const {UPPER_CASE = 1} = obj;",
+      "options": [
+        {
+          "properties": "always"
+        }
+      ],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "alias default snake never",
+      "code": "const {camelCase: snake_case = 1} = obj;",
+      "options": [
+        {
+          "properties": "never"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [],
+      "parserFatal": false,
+      "clean": false
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "alias default edge never",
+      "code": "const {camelCase: _edge = 1} = obj;",
+      "options": [
+        {
+          "properties": "never"
+        }
+      ],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "nested alias default never",
+      "code": "const {a: {b: snake_case = 1}} = obj;",
+      "options": [
+        {
+          "properties": "never"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [],
+      "parserFatal": false,
+      "clean": false
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "array default snake never",
+      "code": "const [snake_case = 1] = arr;",
+      "options": [
+        {
+          "properties": "never"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [],
+      "parserFatal": false,
+      "clean": false
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "parameter alias default never",
+      "code": "function f({a: snake_case=1}) {}",
+      "options": [
+        {
+          "properties": "never"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [],
+      "parserFatal": false,
+      "clean": false
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "shorthand underscore never",
+      "code": "const {_edge=1} = obj;",
+      "options": [
+        {
+          "properties": "never"
+        }
+      ],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "shorthand snake never",
+      "code": "const {snake_case=1} = obj;",
+      "options": [
+        {
+          "properties": "never"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 8
+        }
+      ],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "computed alias default never",
+      "code": "const {[key]: snake_case=1}=obj;",
+      "options": [
+        {
+          "properties": "never"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [],
+      "parserFatal": false,
+      "clean": false
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "imports edge never",
+      "code": "import {snake_case as _edge} from \"x\";",
+      "options": [
+        {
+          "properties": "never"
+        }
+      ],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "uppercase binding never",
+      "code": "const {UPPER_CASE = 1} = obj;",
+      "options": [
+        {
+          "properties": "never"
+        }
+      ],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "alias default snake always",
+      "code": "const {camelCase: snake_case = 1} = obj;",
+      "options": [
+        {
+          "properties": "always"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 19
+        }
+      ],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "alias default edge always",
+      "code": "const {camelCase: _edge = 1} = obj;",
+      "options": [
+        {
+          "properties": "always"
+        }
+      ],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "nested alias default always",
+      "code": "const {a: {b: snake_case = 1}} = obj;",
+      "options": [
+        {
+          "properties": "always"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 15
+        }
+      ],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "array default snake always",
+      "code": "const [snake_case = 1] = arr;",
+      "options": [
+        {
+          "properties": "always"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 8
+        }
+      ],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "parameter alias default always",
+      "code": "function f({a: snake_case=1}) {}",
+      "options": [
+        {
+          "properties": "always"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 16
+        }
+      ],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "shorthand underscore always",
+      "code": "const {_edge=1} = obj;",
+      "options": [
+        {
+          "properties": "always"
+        }
+      ],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "shorthand snake always",
+      "code": "const {snake_case=1} = obj;",
+      "options": [
+        {
+          "properties": "always"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 8
+        }
+      ],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "computed alias default always",
+      "code": "const {[key]: snake_case=1}=obj;",
+      "options": [
+        {
+          "properties": "always"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 15
+        }
+      ],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "imports edge always",
+      "code": "import {snake_case as _edge} from \"x\";",
+      "options": [
+        {
+          "properties": "always"
+        }
+      ],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "uppercase binding always",
+      "code": "const {UPPER_CASE = 1} = obj;",
+      "options": [
+        {
+          "properties": "always"
+        }
+      ],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "alias default snake never",
+      "code": "const {camelCase: snake_case = 1} = obj;",
+      "options": [
+        {
+          "properties": "never"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [],
+      "parserFatal": false,
+      "clean": false
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "alias default edge never",
+      "code": "const {camelCase: _edge = 1} = obj;",
+      "options": [
+        {
+          "properties": "never"
+        }
+      ],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "nested alias default never",
+      "code": "const {a: {b: snake_case = 1}} = obj;",
+      "options": [
+        {
+          "properties": "never"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [],
+      "parserFatal": false,
+      "clean": false
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "array default snake never",
+      "code": "const [snake_case = 1] = arr;",
+      "options": [
+        {
+          "properties": "never"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [],
+      "parserFatal": false,
+      "clean": false
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "parameter alias default never",
+      "code": "function f({a: snake_case=1}) {}",
+      "options": [
+        {
+          "properties": "never"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [],
+      "parserFatal": false,
+      "clean": false
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "shorthand underscore never",
+      "code": "const {_edge=1} = obj;",
+      "options": [
+        {
+          "properties": "never"
+        }
+      ],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "shorthand snake never",
+      "code": "const {snake_case=1} = obj;",
+      "options": [
+        {
+          "properties": "never"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 8
+        }
+      ],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "computed alias default never",
+      "code": "const {[key]: snake_case=1}=obj;",
+      "options": [
+        {
+          "properties": "never"
+        }
+      ],
+      "expectedCount": 1,
+      "messages": [],
+      "parserFatal": false,
+      "clean": false
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "imports edge never",
+      "code": "import {snake_case as _edge} from \"x\";",
+      "options": [
+        {
+          "properties": "never"
+        }
+      ],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "uppercase binding never",
+      "code": "const {UPPER_CASE = 1} = obj;",
+      "options": [
+        {
+          "properties": "never"
+        }
+      ],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    }
+  ],
+  "mismatches": []
+}

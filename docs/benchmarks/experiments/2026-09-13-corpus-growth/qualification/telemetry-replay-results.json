@@ -1,0 +1,52 @@
+{
+  "mode": "adaptation-only",
+  "families": 9,
+  "observations": 237,
+  "summaries": [
+    {
+      "id": "corr-abandoned-browser-launch-link",
+      "observations": 15,
+      "expectedBugFailures": 1
+    },
+    {
+      "id": "corr-failed-audio-cooldown",
+      "observations": 15,
+      "expectedBugFailures": 2
+    },
+    {
+      "id": "corr-command-block-argument-boundary",
+      "observations": 42,
+      "expectedBugFailures": 3
+    },
+    {
+      "id": "corr-empty-home-override",
+      "observations": 21,
+      "expectedBugFailures": 2
+    },
+    {
+      "id": "corr-query-punctuation-routing",
+      "observations": 27,
+      "expectedBugFailures": 1
+    },
+    {
+      "id": "corr-delete-reserved-prefix-recovery",
+      "observations": 45,
+      "expectedBugFailures": 2
+    },
+    {
+      "id": "corr-reply-draft-expiration",
+      "observations": 24,
+      "expectedBugFailures": 2
+    },
+    {
+      "id": "corr-unparsed-import-graph",
+      "observations": 24,
+      "expectedBugFailures": 1
+    },
+    {
+      "id": "corr-deleted-branch-attribution",
+      "observations": 24,
+      "expectedBugFailures": 1
+    }
+  ]
+}

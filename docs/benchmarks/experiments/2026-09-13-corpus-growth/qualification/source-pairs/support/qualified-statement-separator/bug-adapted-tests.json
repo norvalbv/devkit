@@ -1,0 +1,1084 @@
+{
+  "observations": [
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "var x = 5;"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "var x =5, y;"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "foo();"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "x = foo();"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "setTimeout(function() {foo = \"bar\"; });"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "setTimeout(function() {foo = \"bar\";});"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "for (var a in b){}"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "for (var i;;){}"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "if (true) {}\n;[global, extended].forEach(function(){});"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "throw new Error('foo');"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "throw new Error('foo')"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "var x = 5"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "var x =5, y"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "foo()"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "debugger"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "for (var a in b){}"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "for (var i;;){}"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "x = foo()"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "if (true) {}\n;[global, extended].forEach(function(){})"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "(function bar() {})\n;(function foo(){})"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        ";/foo/.test('bar')"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        ";+5"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        ";-foo()"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "a++\nb++"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "a++; b++"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "for (let thing of {}) {\n  console.log(thing);\n}"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "do{}while(true)"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "do{}while(true);"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "if (foo) { bar() }"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "if (foo) { bar(); baz() }"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "class A { a() {} b() {} }"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "var A = class { a() {} b() {} };"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "import theDefault, { named1, named2 } from 'src/mylib';"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "import theDefault, { named1, named2 } from 'src/mylib'"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "export * from 'foo';"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "export { foo } from 'foo';"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "export { foo };"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "export var foo;"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "export function foo () { }"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "export function* foo () { }"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "export class Foo { }"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "export let foo;"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "export const FOO = 42;"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "export default function() { }"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "export default function* () { }"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "export default class { }"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "export default foo || bar;"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "export default (foo) => foo.bar();"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "export default foo = 42;"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "export default foo += 42;"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "export * from 'foo'"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "export { foo } from 'foo'"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "export { foo }"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "export var foo"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "export function foo () { }"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "export function* foo () { }"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "export class Foo { }"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "export let foo"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "export const FOO = 42"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "export default function() { }"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "export default function* () { }"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "export default class { }"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "export default foo || bar"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "export default (foo) => foo.bar()"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "export default foo = 42"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "export default foo += 42"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "++\nfoo;"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "var a = b;\n+ c"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "var a = b;\n/foo/.test(c)"
+      ],
+      "pass": false,
+      "message": "Should have no errors but had 1: [\n  {\n    ruleId: 'semi',\n    severity: 1,\n    message: 'Extra semicolon.',\n    line: 1,\n    column: 10,\n    nodeType: 'VariableDeclaration',\n    source: 'var a = b;',\n    fix: { range: [Array], text: '' }\n  }\n]",
+      "name": "AssertionError"
+    },
+    {
+      "identity": [
+        "semi",
+        "valid",
+        "var a = b;\n`foo`"
+      ],
+      "pass": false,
+      "message": "Should have no errors but had 1: [\n  {\n    ruleId: 'semi',\n    severity: 1,\n    message: 'Extra semicolon.',\n    line: 1,\n    column: 10,\n    nodeType: 'VariableDeclaration',\n    source: 'var a = b;',\n    fix: { range: [Array], text: '' }\n  }\n]",
+      "name": "AssertionError"
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "import * as utils from './utils'"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "import { square, diag } from 'lib'"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "import { default as foo } from 'lib'"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "import 'src/mylib'"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "import theDefault, { named1, named2 } from 'src/mylib'"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "function foo() { return [] }"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "while(true) { break }"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "while(true) { continue }"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "let x = 5"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "var x = 5"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "var x = 5, y"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "debugger"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "foo()"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "var x = 5, y"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "for (var a in b) var i "
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "for (;;){var i}"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "for (;;) var i "
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "for (var j;;) {var i}"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "var foo = {\n bar: baz\n}"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "var foo\nvar bar;"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "throw new Error('foo')"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "do{}while(true)"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "throw new Error('foo');"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "function foo() { return []; }"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "while(true) { break; }"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "while(true) { continue; }"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "let x = 5;"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "var x = 5;"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "var x = 5, y;"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "debugger;"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "foo();"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "var x = 5, y;"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "for (var a in b) var i; "
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "for (;;){var i;}"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "for (;;) var i; "
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "for (var j;;) {var i;}"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "var foo = {\n bar: baz\n};"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "import theDefault, { named1, named2 } from 'src/mylib';"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "do{}while(true);"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "if (foo) { bar()\n }"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "if (foo) {\n bar() }"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "if (foo) {\n bar(); baz() }"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "if (foo) { bar(); }"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "export * from 'foo'"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "export { foo } from 'foo'"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "export { foo }"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "export var foo"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "export let foo"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "export const FOO = 42"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "export default foo || bar"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "export default (foo) => foo.bar()"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "export default foo = 42"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "export default foo += 42"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "export * from 'foo';"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "export { foo } from 'foo';"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "export { foo };"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "export var foo;"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "export let foo;"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "export const FOO = 42;"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "export default foo || bar;"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "export default (foo) => foo.bar();"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "export default foo = 42;"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "export default foo += 42;"
+      ],
+      "pass": true
+    },
+    {
+      "identity": [
+        "semi",
+        "invalid",
+        "a;\n++b"
+      ],
+      "pass": true
+    }
+  ],
+  "unsupported": [],
+  "fatal": null,
+  "total": 134,
+  "failed": 2
+}

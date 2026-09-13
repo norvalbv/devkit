@@ -1,0 +1,1491 @@
+{
+  "runtime": "v24.19.0",
+  "observations": [
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "regexp next line invalid without separator",
+      "code": "var value = 1;\n/abc/.test(\"abc\")",
+      "options": [
+        "never"
+      ],
+      "messages": [],
+      "fixed": "var value = 1;\n/abc/.test(\"abc\")",
+      "parseErrors": []
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "regexp valid division changes value",
+      "code": "var a = 2, z = 1, i = {test:function(){return 2}};\nvar value = 12;\n/[a-z]/i.test(\"A\")",
+      "options": [
+        "never"
+      ],
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "line": 1,
+          "column": 50,
+          "fix": {
+            "range": [
+              49,
+              50
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "var a = 2, z = 1, i = {test:function(){return 2}}\nvar value = 12;\n/[a-z]/i.test(\"A\")",
+      "parseErrors": [],
+      "before": {
+        "value": 12
+      },
+      "after": {
+        "value": 12
+      }
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "line comment before regexp",
+      "code": "var value = 1;\n// guard\n/[a]/.test(\"a\")",
+      "options": [
+        "never"
+      ],
+      "messages": [],
+      "fixed": "var value = 1;\n// guard\n/[a]/.test(\"a\")",
+      "parseErrors": []
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "block comment before regexp",
+      "code": "var value = 1;\n/* guard */ /[a]/.test(\"a\")",
+      "options": [
+        "never"
+      ],
+      "messages": [],
+      "fixed": "var value = 1;\n/* guard */ /[a]/.test(\"a\")",
+      "parseErrors": []
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "CRLF regexp boundary",
+      "code": "var value = 1;\r\n/x/.test(\"x\")",
+      "options": [
+        "never"
+      ],
+      "messages": [],
+      "fixed": "var value = 1;\r\n/x/.test(\"x\")",
+      "parseErrors": []
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "Unicode line separator",
+      "code": "var value = 1;\u2028/x/.test(\"x\")",
+      "options": [
+        "never"
+      ],
+      "messages": [],
+      "fixed": "var value = 1;\u2028/x/.test(\"x\")",
+      "parseErrors": []
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "increment after declaration",
+      "code": "var value = 1;\n++value",
+      "options": [
+        "never"
+      ],
+      "messages": [],
+      "fixed": "var value = 1;\n++value",
+      "parseErrors": []
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "decrement after declaration",
+      "code": "var value = 2;\n--value",
+      "options": [
+        "never"
+      ],
+      "messages": [],
+      "fixed": "var value = 2;\n--value",
+      "parseErrors": []
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "template next statement",
+      "code": "var value = 1;\n`template`",
+      "options": [
+        "never"
+      ],
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "line": 1,
+          "column": 14,
+          "fix": {
+            "range": [
+              13,
+              14
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "var value = 1\n`template`",
+      "parseErrors": []
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "string with internal plus is separate statement",
+      "code": "call();\n\"a+b\"",
+      "options": [
+        "never"
+      ],
+      "messages": [],
+      "fixed": "call();\n\"a+b\"",
+      "parseErrors": []
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "one-line block option",
+      "code": "function f(){ return 1; }",
+      "options": [
+        "always",
+        {
+          "omitLastInOneLineBlock": true
+        }
+      ],
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "line": 1,
+          "column": 23,
+          "fix": {
+            "range": [
+              22,
+              23
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "function f(){ return 1 }",
+      "parseErrors": []
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "export named separator",
+      "code": "export const value = 1;\n/abc/.test(\"abc\")",
+      "options": [
+        "never"
+      ],
+      "messages": [],
+      "fixed": "export const value = 1;\n/abc/.test(\"abc\")",
+      "parseErrors": []
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "regexp next line invalid without separator",
+      "code": "var value = 1;\n/abc/.test(\"abc\")",
+      "options": [
+        "never"
+      ],
+      "messages": [],
+      "fixed": "var value = 1;\n/abc/.test(\"abc\")",
+      "parseErrors": []
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "regexp valid division changes value",
+      "code": "var a = 2, z = 1, i = {test:function(){return 2}};\nvar value = 12;\n/[a-z]/i.test(\"A\")",
+      "options": [
+        "never"
+      ],
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "line": 1,
+          "column": 50,
+          "fix": {
+            "range": [
+              49,
+              50
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "var a = 2, z = 1, i = {test:function(){return 2}}\nvar value = 12;\n/[a-z]/i.test(\"A\")",
+      "parseErrors": [],
+      "before": {
+        "value": 12
+      },
+      "after": {
+        "value": 12
+      }
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "line comment before regexp",
+      "code": "var value = 1;\n// guard\n/[a]/.test(\"a\")",
+      "options": [
+        "never"
+      ],
+      "messages": [],
+      "fixed": "var value = 1;\n// guard\n/[a]/.test(\"a\")",
+      "parseErrors": []
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "block comment before regexp",
+      "code": "var value = 1;\n/* guard */ /[a]/.test(\"a\")",
+      "options": [
+        "never"
+      ],
+      "messages": [],
+      "fixed": "var value = 1;\n/* guard */ /[a]/.test(\"a\")",
+      "parseErrors": []
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "CRLF regexp boundary",
+      "code": "var value = 1;\r\n/x/.test(\"x\")",
+      "options": [
+        "never"
+      ],
+      "messages": [],
+      "fixed": "var value = 1;\r\n/x/.test(\"x\")",
+      "parseErrors": []
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "Unicode line separator",
+      "code": "var value = 1;\u2028/x/.test(\"x\")",
+      "options": [
+        "never"
+      ],
+      "messages": [],
+      "fixed": "var value = 1;\u2028/x/.test(\"x\")",
+      "parseErrors": []
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "increment after declaration",
+      "code": "var value = 1;\n++value",
+      "options": [
+        "never"
+      ],
+      "messages": [],
+      "fixed": "var value = 1;\n++value",
+      "parseErrors": []
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "decrement after declaration",
+      "code": "var value = 2;\n--value",
+      "options": [
+        "never"
+      ],
+      "messages": [],
+      "fixed": "var value = 2;\n--value",
+      "parseErrors": []
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "template next statement",
+      "code": "var value = 1;\n`template`",
+      "options": [
+        "never"
+      ],
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "line": 1,
+          "column": 14,
+          "fix": {
+            "range": [
+              13,
+              14
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "var value = 1\n`template`",
+      "parseErrors": []
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "string with internal plus is separate statement",
+      "code": "call();\n\"a+b\"",
+      "options": [
+        "never"
+      ],
+      "messages": [],
+      "fixed": "call();\n\"a+b\"",
+      "parseErrors": []
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "one-line block option",
+      "code": "function f(){ return 1; }",
+      "options": [
+        "always",
+        {
+          "omitLastInOneLineBlock": true
+        }
+      ],
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "line": 1,
+          "column": 23,
+          "fix": {
+            "range": [
+              22,
+              23
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "function f(){ return 1 }",
+      "parseErrors": []
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "export named separator",
+      "code": "export const value = 1;\n/abc/.test(\"abc\")",
+      "options": [
+        "never"
+      ],
+      "messages": [],
+      "fixed": "export const value = 1;\n/abc/.test(\"abc\")",
+      "parseErrors": []
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "regexp next line invalid without separator",
+      "code": "var value = 1;\n/abc/.test(\"abc\")",
+      "options": [
+        "never"
+      ],
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "line": 1,
+          "column": 14,
+          "fix": {
+            "range": [
+              13,
+              14
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "var value = 1\n/abc/.test(\"abc\")",
+      "parseErrors": [
+        "Parsing error: Unexpected token ."
+      ]
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "regexp valid division changes value",
+      "code": "var a = 2, z = 1, i = {test:function(){return 2}};\nvar value = 12;\n/[a-z]/i.test(\"A\")",
+      "options": [
+        "never"
+      ],
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "line": 1,
+          "column": 50,
+          "fix": {
+            "range": [
+              49,
+              50
+            ],
+            "text": ""
+          }
+        },
+        {
+          "message": "Extra semicolon.",
+          "line": 2,
+          "column": 15,
+          "fix": {
+            "range": [
+              65,
+              66
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "var a = 2, z = 1, i = {test:function(){return 2}}\nvar value = 12\n/[a-z]/i.test(\"A\")",
+      "parseErrors": [],
+      "before": {
+        "value": 12
+      },
+      "after": {
+        "value": 6
+      }
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "line comment before regexp",
+      "code": "var value = 1;\n// guard\n/[a]/.test(\"a\")",
+      "options": [
+        "never"
+      ],
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "line": 1,
+          "column": 14,
+          "fix": {
+            "range": [
+              13,
+              14
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "var value = 1\n// guard\n/[a]/.test(\"a\")",
+      "parseErrors": [
+        "Parsing error: Unexpected token ."
+      ]
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "block comment before regexp",
+      "code": "var value = 1;\n/* guard */ /[a]/.test(\"a\")",
+      "options": [
+        "never"
+      ],
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "line": 1,
+          "column": 14,
+          "fix": {
+            "range": [
+              13,
+              14
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "var value = 1\n/* guard */ /[a]/.test(\"a\")",
+      "parseErrors": [
+        "Parsing error: Unexpected token ."
+      ]
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "CRLF regexp boundary",
+      "code": "var value = 1;\r\n/x/.test(\"x\")",
+      "options": [
+        "never"
+      ],
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "line": 1,
+          "column": 14,
+          "fix": {
+            "range": [
+              13,
+              14
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "var value = 1\r\n/x/.test(\"x\")",
+      "parseErrors": [
+        "Parsing error: Unexpected token ."
+      ]
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "Unicode line separator",
+      "code": "var value = 1;\u2028/x/.test(\"x\")",
+      "options": [
+        "never"
+      ],
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "line": 1,
+          "column": 14,
+          "fix": {
+            "range": [
+              13,
+              14
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "var value = 1\u2028/x/.test(\"x\")",
+      "parseErrors": [
+        "Parsing error: Unexpected token ."
+      ]
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "increment after declaration",
+      "code": "var value = 1;\n++value",
+      "options": [
+        "never"
+      ],
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "line": 1,
+          "column": 14,
+          "fix": {
+            "range": [
+              13,
+              14
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "var value = 1\n++value",
+      "parseErrors": []
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "decrement after declaration",
+      "code": "var value = 2;\n--value",
+      "options": [
+        "never"
+      ],
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "line": 1,
+          "column": 14,
+          "fix": {
+            "range": [
+              13,
+              14
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "var value = 2\n--value",
+      "parseErrors": []
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "template next statement",
+      "code": "var value = 1;\n`template`",
+      "options": [
+        "never"
+      ],
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "line": 1,
+          "column": 14,
+          "fix": {
+            "range": [
+              13,
+              14
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "var value = 1\n`template`",
+      "parseErrors": []
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "string with internal plus is separate statement",
+      "code": "call();\n\"a+b\"",
+      "options": [
+        "never"
+      ],
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "line": 1,
+          "column": 7,
+          "fix": {
+            "range": [
+              6,
+              7
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "call()\n\"a+b\"",
+      "parseErrors": []
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "one-line block option",
+      "code": "function f(){ return 1; }",
+      "options": [
+        "always",
+        {
+          "omitLastInOneLineBlock": true
+        }
+      ],
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "line": 1,
+          "column": 23,
+          "fix": {
+            "range": [
+              22,
+              23
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "function f(){ return 1 }",
+      "parseErrors": []
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "export named separator",
+      "code": "export const value = 1;\n/abc/.test(\"abc\")",
+      "options": [
+        "never"
+      ],
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "line": 1,
+          "column": 23,
+          "fix": {
+            "range": [
+              22,
+              23
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "export const value = 1\n/abc/.test(\"abc\")",
+      "parseErrors": [
+        "Parsing error: Unexpected token ."
+      ]
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "regexp next line invalid without separator",
+      "code": "var value = 1;\n/abc/.test(\"abc\")",
+      "options": [
+        "never"
+      ],
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "line": 1,
+          "column": 14,
+          "fix": {
+            "range": [
+              13,
+              14
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "var value = 1\n/abc/.test(\"abc\")",
+      "parseErrors": [
+        "Parsing error: Unexpected token ."
+      ]
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "regexp valid division changes value",
+      "code": "var a = 2, z = 1, i = {test:function(){return 2}};\nvar value = 12;\n/[a-z]/i.test(\"A\")",
+      "options": [
+        "never"
+      ],
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "line": 1,
+          "column": 50,
+          "fix": {
+            "range": [
+              49,
+              50
+            ],
+            "text": ""
+          }
+        },
+        {
+          "message": "Extra semicolon.",
+          "line": 2,
+          "column": 15,
+          "fix": {
+            "range": [
+              65,
+              66
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "var a = 2, z = 1, i = {test:function(){return 2}}\nvar value = 12\n/[a-z]/i.test(\"A\")",
+      "parseErrors": [],
+      "before": {
+        "value": 12
+      },
+      "after": {
+        "value": 6
+      }
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "line comment before regexp",
+      "code": "var value = 1;\n// guard\n/[a]/.test(\"a\")",
+      "options": [
+        "never"
+      ],
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "line": 1,
+          "column": 14,
+          "fix": {
+            "range": [
+              13,
+              14
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "var value = 1\n// guard\n/[a]/.test(\"a\")",
+      "parseErrors": [
+        "Parsing error: Unexpected token ."
+      ]
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "block comment before regexp",
+      "code": "var value = 1;\n/* guard */ /[a]/.test(\"a\")",
+      "options": [
+        "never"
+      ],
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "line": 1,
+          "column": 14,
+          "fix": {
+            "range": [
+              13,
+              14
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "var value = 1\n/* guard */ /[a]/.test(\"a\")",
+      "parseErrors": [
+        "Parsing error: Unexpected token ."
+      ]
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "CRLF regexp boundary",
+      "code": "var value = 1;\r\n/x/.test(\"x\")",
+      "options": [
+        "never"
+      ],
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "line": 1,
+          "column": 14,
+          "fix": {
+            "range": [
+              13,
+              14
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "var value = 1\r\n/x/.test(\"x\")",
+      "parseErrors": [
+        "Parsing error: Unexpected token ."
+      ]
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "Unicode line separator",
+      "code": "var value = 1;\u2028/x/.test(\"x\")",
+      "options": [
+        "never"
+      ],
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "line": 1,
+          "column": 14,
+          "fix": {
+            "range": [
+              13,
+              14
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "var value = 1\u2028/x/.test(\"x\")",
+      "parseErrors": [
+        "Parsing error: Unexpected token ."
+      ]
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "increment after declaration",
+      "code": "var value = 1;\n++value",
+      "options": [
+        "never"
+      ],
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "line": 1,
+          "column": 14,
+          "fix": {
+            "range": [
+              13,
+              14
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "var value = 1\n++value",
+      "parseErrors": []
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "decrement after declaration",
+      "code": "var value = 2;\n--value",
+      "options": [
+        "never"
+      ],
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "line": 1,
+          "column": 14,
+          "fix": {
+            "range": [
+              13,
+              14
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "var value = 2\n--value",
+      "parseErrors": []
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "template next statement",
+      "code": "var value = 1;\n`template`",
+      "options": [
+        "never"
+      ],
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "line": 1,
+          "column": 14,
+          "fix": {
+            "range": [
+              13,
+              14
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "var value = 1\n`template`",
+      "parseErrors": []
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "string with internal plus is separate statement",
+      "code": "call();\n\"a+b\"",
+      "options": [
+        "never"
+      ],
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "line": 1,
+          "column": 7,
+          "fix": {
+            "range": [
+              6,
+              7
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "call()\n\"a+b\"",
+      "parseErrors": []
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "one-line block option",
+      "code": "function f(){ return 1; }",
+      "options": [
+        "always",
+        {
+          "omitLastInOneLineBlock": true
+        }
+      ],
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "line": 1,
+          "column": 23,
+          "fix": {
+            "range": [
+              22,
+              23
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "function f(){ return 1 }",
+      "parseErrors": []
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "export named separator",
+      "code": "export const value = 1;\n/abc/.test(\"abc\")",
+      "options": [
+        "never"
+      ],
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "line": 1,
+          "column": 23,
+          "fix": {
+            "range": [
+              22,
+              23
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "export const value = 1\n/abc/.test(\"abc\")",
+      "parseErrors": [
+        "Parsing error: Unexpected token ."
+      ]
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "regexp next line invalid without separator",
+      "code": "var value = 1;\n/abc/.test(\"abc\")",
+      "options": [
+        "never"
+      ],
+      "messages": [],
+      "fixed": "var value = 1;\n/abc/.test(\"abc\")",
+      "parseErrors": []
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "regexp valid division changes value",
+      "code": "var a = 2, z = 1, i = {test:function(){return 2}};\nvar value = 12;\n/[a-z]/i.test(\"A\")",
+      "options": [
+        "never"
+      ],
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "line": 1,
+          "column": 50,
+          "fix": {
+            "range": [
+              49,
+              50
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "var a = 2, z = 1, i = {test:function(){return 2}}\nvar value = 12;\n/[a-z]/i.test(\"A\")",
+      "parseErrors": [],
+      "before": {
+        "value": 12
+      },
+      "after": {
+        "value": 12
+      }
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "line comment before regexp",
+      "code": "var value = 1;\n// guard\n/[a]/.test(\"a\")",
+      "options": [
+        "never"
+      ],
+      "messages": [],
+      "fixed": "var value = 1;\n// guard\n/[a]/.test(\"a\")",
+      "parseErrors": []
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "block comment before regexp",
+      "code": "var value = 1;\n/* guard */ /[a]/.test(\"a\")",
+      "options": [
+        "never"
+      ],
+      "messages": [],
+      "fixed": "var value = 1;\n/* guard */ /[a]/.test(\"a\")",
+      "parseErrors": []
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "CRLF regexp boundary",
+      "code": "var value = 1;\r\n/x/.test(\"x\")",
+      "options": [
+        "never"
+      ],
+      "messages": [],
+      "fixed": "var value = 1;\r\n/x/.test(\"x\")",
+      "parseErrors": []
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "Unicode line separator",
+      "code": "var value = 1;\u2028/x/.test(\"x\")",
+      "options": [
+        "never"
+      ],
+      "messages": [],
+      "fixed": "var value = 1;\u2028/x/.test(\"x\")",
+      "parseErrors": []
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "increment after declaration",
+      "code": "var value = 1;\n++value",
+      "options": [
+        "never"
+      ],
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "line": 1,
+          "column": 14,
+          "fix": {
+            "range": [
+              13,
+              14
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "var value = 1\n++value",
+      "parseErrors": []
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "decrement after declaration",
+      "code": "var value = 2;\n--value",
+      "options": [
+        "never"
+      ],
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "line": 1,
+          "column": 14,
+          "fix": {
+            "range": [
+              13,
+              14
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "var value = 2\n--value",
+      "parseErrors": []
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "template next statement",
+      "code": "var value = 1;\n`template`",
+      "options": [
+        "never"
+      ],
+      "messages": [],
+      "fixed": "var value = 1;\n`template`",
+      "parseErrors": []
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "string with internal plus is separate statement",
+      "code": "call();\n\"a+b\"",
+      "options": [
+        "never"
+      ],
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "line": 1,
+          "column": 7,
+          "fix": {
+            "range": [
+              6,
+              7
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "call()\n\"a+b\"",
+      "parseErrors": []
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "one-line block option",
+      "code": "function f(){ return 1; }",
+      "options": [
+        "always",
+        {
+          "omitLastInOneLineBlock": true
+        }
+      ],
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "line": 1,
+          "column": 23,
+          "fix": {
+            "range": [
+              22,
+              23
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "function f(){ return 1 }",
+      "parseErrors": []
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "export named separator",
+      "code": "export const value = 1;\n/abc/.test(\"abc\")",
+      "options": [
+        "never"
+      ],
+      "messages": [],
+      "fixed": "export const value = 1;\n/abc/.test(\"abc\")",
+      "parseErrors": []
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "regexp next line invalid without separator",
+      "code": "var value = 1;\n/abc/.test(\"abc\")",
+      "options": [
+        "never"
+      ],
+      "messages": [],
+      "fixed": "var value = 1;\n/abc/.test(\"abc\")",
+      "parseErrors": []
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "regexp valid division changes value",
+      "code": "var a = 2, z = 1, i = {test:function(){return 2}};\nvar value = 12;\n/[a-z]/i.test(\"A\")",
+      "options": [
+        "never"
+      ],
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "line": 1,
+          "column": 50,
+          "fix": {
+            "range": [
+              49,
+              50
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "var a = 2, z = 1, i = {test:function(){return 2}}\nvar value = 12;\n/[a-z]/i.test(\"A\")",
+      "parseErrors": [],
+      "before": {
+        "value": 12
+      },
+      "after": {
+        "value": 12
+      }
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "line comment before regexp",
+      "code": "var value = 1;\n// guard\n/[a]/.test(\"a\")",
+      "options": [
+        "never"
+      ],
+      "messages": [],
+      "fixed": "var value = 1;\n// guard\n/[a]/.test(\"a\")",
+      "parseErrors": []
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "block comment before regexp",
+      "code": "var value = 1;\n/* guard */ /[a]/.test(\"a\")",
+      "options": [
+        "never"
+      ],
+      "messages": [],
+      "fixed": "var value = 1;\n/* guard */ /[a]/.test(\"a\")",
+      "parseErrors": []
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "CRLF regexp boundary",
+      "code": "var value = 1;\r\n/x/.test(\"x\")",
+      "options": [
+        "never"
+      ],
+      "messages": [],
+      "fixed": "var value = 1;\r\n/x/.test(\"x\")",
+      "parseErrors": []
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "Unicode line separator",
+      "code": "var value = 1;\u2028/x/.test(\"x\")",
+      "options": [
+        "never"
+      ],
+      "messages": [],
+      "fixed": "var value = 1;\u2028/x/.test(\"x\")",
+      "parseErrors": []
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "increment after declaration",
+      "code": "var value = 1;\n++value",
+      "options": [
+        "never"
+      ],
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "line": 1,
+          "column": 14,
+          "fix": {
+            "range": [
+              13,
+              14
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "var value = 1\n++value",
+      "parseErrors": []
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "decrement after declaration",
+      "code": "var value = 2;\n--value",
+      "options": [
+        "never"
+      ],
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "line": 1,
+          "column": 14,
+          "fix": {
+            "range": [
+              13,
+              14
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "var value = 2\n--value",
+      "parseErrors": []
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "template next statement",
+      "code": "var value = 1;\n`template`",
+      "options": [
+        "never"
+      ],
+      "messages": [],
+      "fixed": "var value = 1;\n`template`",
+      "parseErrors": []
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "string with internal plus is separate statement",
+      "code": "call();\n\"a+b\"",
+      "options": [
+        "never"
+      ],
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "line": 1,
+          "column": 7,
+          "fix": {
+            "range": [
+              6,
+              7
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "call()\n\"a+b\"",
+      "parseErrors": []
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "one-line block option",
+      "code": "function f(){ return 1; }",
+      "options": [
+        "always",
+        {
+          "omitLastInOneLineBlock": true
+        }
+      ],
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "line": 1,
+          "column": 23,
+          "fix": {
+            "range": [
+              22,
+              23
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "function f(){ return 1 }",
+      "parseErrors": []
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "export named separator",
+      "code": "export const value = 1;\n/abc/.test(\"abc\")",
+      "options": [
+        "never"
+      ],
+      "messages": [],
+      "fixed": "export const value = 1;\n/abc/.test(\"abc\")",
+      "parseErrors": []
+    }
+  ]
+}

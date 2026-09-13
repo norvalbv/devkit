@@ -1,0 +1,228 @@
+[
+  {
+    "library": "mongoose",
+    "number": 2,
+    "stage": "base",
+    "file": "lib/model.js",
+    "wholeBodyASTEqual": true
+  },
+  {
+    "library": "mongoose",
+    "number": 2,
+    "stage": "repair",
+    "file": "lib/model.js",
+    "wholeBodyASTEqual": true
+  },
+  {
+    "library": "mongoose",
+    "number": 4,
+    "stage": "base",
+    "file": "lib/query.js",
+    "wholeBodyASTEqual": true
+  },
+  {
+    "library": "mongoose",
+    "number": 4,
+    "stage": "repair",
+    "file": "lib/query.js",
+    "wholeBodyASTEqual": true
+  },
+  {
+    "library": "mongoose",
+    "number": 7,
+    "stage": "base",
+    "file": "lib/query.js",
+    "wholeBodyASTEqual": true
+  },
+  {
+    "library": "mongoose",
+    "number": 7,
+    "stage": "repair",
+    "file": "lib/query.js",
+    "wholeBodyASTEqual": true
+  },
+  {
+    "library": "mongoose",
+    "number": 13,
+    "stage": "base",
+    "file": "lib/document.js",
+    "wholeBodyASTEqual": true
+  },
+  {
+    "library": "mongoose",
+    "number": 13,
+    "stage": "base",
+    "file": "lib/model.js",
+    "wholeBodyASTEqual": true
+  },
+  {
+    "library": "mongoose",
+    "number": 13,
+    "stage": "repair",
+    "file": "lib/document.js",
+    "wholeBodyASTEqual": true
+  },
+  {
+    "library": "mongoose",
+    "number": 13,
+    "stage": "repair",
+    "file": "lib/model.js",
+    "wholeBodyASTEqual": true
+  },
+  {
+    "library": "mongoose",
+    "number": 14,
+    "stage": "base",
+    "file": "lib/model.js",
+    "wholeBodyASTEqual": true
+  },
+  {
+    "library": "mongoose",
+    "number": 14,
+    "stage": "repair",
+    "file": "lib/model.js",
+    "wholeBodyASTEqual": true
+  },
+  {
+    "library": "mongoose",
+    "number": 17,
+    "stage": "base",
+    "file": "lib/query.js",
+    "wholeBodyASTEqual": true
+  },
+  {
+    "library": "mongoose",
+    "number": 17,
+    "stage": "repair",
+    "file": "lib/query.js",
+    "wholeBodyASTEqual": true
+  },
+  {
+    "library": "mongoose",
+    "number": 18,
+    "stage": "base",
+    "file": "lib/model.js",
+    "wholeBodyASTEqual": true
+  },
+  {
+    "library": "mongoose",
+    "number": 18,
+    "stage": "repair",
+    "file": "lib/model.js",
+    "wholeBodyASTEqual": true,
+    "upstreamASTEqual": true
+  },
+  {
+    "library": "mongoose",
+    "number": 23,
+    "stage": "base",
+    "file": "lib/model.js",
+    "wholeBodyASTEqual": true
+  },
+  {
+    "library": "mongoose",
+    "number": 23,
+    "stage": "repair",
+    "file": "lib/model.js",
+    "wholeBodyASTEqual": true
+  },
+  {
+    "library": "mongoose",
+    "number": 24,
+    "stage": "base",
+    "file": "lib/model.js",
+    "wholeBodyASTEqual": true
+  },
+  {
+    "library": "mongoose",
+    "number": 24,
+    "stage": "repair",
+    "file": "lib/model.js",
+    "wholeBodyASTEqual": true,
+    "upstreamASTEqual": true
+  },
+  {
+    "library": "eslint",
+    "name": "destructured-edge-underscores",
+    "stage": "parent",
+    "file": "camelcase",
+    "wholeBodyASTEqual": true
+  },
+  {
+    "library": "eslint",
+    "name": "destructured-edge-underscores",
+    "stage": "bug",
+    "file": "camelcase",
+    "wholeBodyASTEqual": true
+  },
+  {
+    "library": "eslint",
+    "name": "destructured-edge-underscores",
+    "stage": "repair",
+    "file": "camelcase",
+    "wholeBodyASTEqual": true
+  },
+  {
+    "library": "eslint",
+    "name": "comment-adjacent-fix-ranges",
+    "stage": "parent",
+    "file": "padded-blocks",
+    "wholeBodyASTEqual": true
+  },
+  {
+    "library": "eslint",
+    "name": "comment-adjacent-fix-ranges",
+    "stage": "bug",
+    "file": "padded-blocks",
+    "wholeBodyASTEqual": true
+  },
+  {
+    "library": "eslint",
+    "name": "comment-adjacent-fix-ranges",
+    "stage": "repair",
+    "file": "padded-blocks",
+    "wholeBodyASTEqual": true
+  },
+  {
+    "library": "eslint",
+    "name": "diagnostic-column-contract",
+    "stage": "parent",
+    "file": "max-len",
+    "wholeBodyASTEqual": true
+  },
+  {
+    "library": "eslint",
+    "name": "diagnostic-column-contract",
+    "stage": "bug",
+    "file": "max-len",
+    "wholeBodyASTEqual": true
+  },
+  {
+    "library": "eslint",
+    "name": "diagnostic-column-contract",
+    "stage": "repair",
+    "file": "max-len",
+    "wholeBodyASTEqual": true
+  },
+  {
+    "library": "eslint",
+    "name": "empty-super-argument-traversal",
+    "stage": "parent",
+    "file": "no-useless-constructor",
+    "wholeBodyASTEqual": true
+  },
+  {
+    "library": "eslint",
+    "name": "empty-super-argument-traversal",
+    "stage": "bug",
+    "file": "no-useless-constructor",
+    "wholeBodyASTEqual": true
+  },
+  {
+    "library": "eslint",
+    "name": "empty-super-argument-traversal",
+    "stage": "repair",
+    "file": "no-useless-constructor",
+    "wholeBodyASTEqual": true
+  }
+]

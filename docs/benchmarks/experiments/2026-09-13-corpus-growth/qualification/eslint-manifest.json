@@ -1,0 +1,2702 @@
+{
+  "schemaVersion": 1,
+  "sourceRepository": "https://github.com/BugsJS/eslint.git",
+  "runtime": "Node v24.19.0",
+  "cases": [
+    {
+      "tag": "Bug-3-fix",
+      "bug": "263b7782438899240548d0020cf9a49c2bbe2b5c",
+      "fix": "b6052e52d113b1b7a6924a6ecee7754d55c135bc",
+      "rule": "lib/rules/prefer-template.js",
+      "test": "tests/lib/rules/prefer-template.js",
+      "version": "1.2.1",
+      "archiveSha256": "8c3bb6e567a49797e5c09fcc21c9b8c6c498d7e200803a242246ff22b63f7da8",
+      "testFixtureArchiveSha256": "5bbdf4afd7aba44288220bab124db486f205d0717a96d919651ab672478aa0ac",
+      "sourceTestSha256": "8e9eab63e0a482c62b143ecbc4fec41445cf3c72b41cf168a06eaf50528af1e3",
+      "originalFix": "03c25bb9c8927a016ea5803dfe3e39b51ceddfa8",
+      "sourceHashes": {
+        "base": "978d92aaf910d808b1ae6c95d008e9da1d78e19c2b649ea9f18324e072cd7bcb",
+        "repair": "b2faa6e12744e751e0169c3e546d28b82e3d2dc56ce24c979fb181431efa14a6"
+      },
+      "number": 3,
+      "id": "corr-eslint-prefer-template-clean",
+      "caseId": "corr-source-eslint-prefer-template",
+      "testRef": "ee2d65a5da14c3c9ef6cd8092731230c1ab3f590",
+      "runtime": "locks/eslint/e48c33e04c86074f",
+      "lockSha256": "57ddf4aee610cf8e94cd65cc6a176b4ffb9a0e8d8a5409e251aca28a5577e488",
+      "publishedStages": {
+        "base": {
+          "total": 14,
+          "failed": 3,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair": {
+          "total": 14,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        },
+        "base-adapted": {
+          "total": 14,
+          "failed": 3,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair-adapted": {
+          "total": 14,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        }
+      },
+      "adaptedHashes": {
+        "base": "3de53ade8c39e525cf10e33fe7be23f5d642bf05ba7345f1aba20dd12b681b10",
+        "repair": "15a9db754761a254e1c036999f7aaa6e048e6f2faa10a45416d389c0cf51c014"
+      },
+      "licenses": [
+        "licenses/eslint-9b8270febdcc.txt"
+      ]
+    },
+    {
+      "tag": "Bug-6-fix",
+      "bug": "cec65e3f57f47e46b142719bbf0a85c89e3275e6",
+      "fix": "4e30181d1ae21283c85dc91fd75abd5e26042717",
+      "rule": "lib/rules/arrow-spacing.js",
+      "test": "tests/lib/rules/arrow-spacing.js",
+      "version": "3.4.0",
+      "archiveSha256": "06bb43499a42943c19951f5023a15e24c836aaccffc269bb15ff4f37f4b91206",
+      "testFixtureArchiveSha256": "1c48c675553c354d1b123c4608cf9d9bd3ee70629f8646f865833a542fdc8856",
+      "sourceTestSha256": "8a5313821b758f00e9fd2c25146307bc0662f189abee9d216a931a17d9661d35",
+      "originalFix": "08fa538bbc130937635dd32cc85d9a26b3b90f0c",
+      "sourceHashes": {
+        "base": "40747bd6f3682ffd14146cf2c72b34206ec6fe07459102a8864b273ebe8764d2",
+        "repair": "9eb939ad9b10cb32852f7d12319a1fd004bfea3bf0f715ec05644172ab68d2a4"
+      },
+      "number": 6,
+      "id": "corr-eslint-arrow-spacing-clean",
+      "caseId": "corr-source-eslint-arrow-spacing",
+      "testRef": "44d83b1ed34078e5b54059f8d1d080769dd09de1",
+      "runtime": "locks/eslint/537e29783b428d3b",
+      "lockSha256": "41ee1a35fa66a58ae7b3e561b3d0911a975fb9f0b8c040801c94f6f7481aad51",
+      "publishedStages": {
+        "base": {
+          "total": 42,
+          "failed": 2,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair": {
+          "total": 42,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        },
+        "base-adapted": {
+          "total": 42,
+          "failed": 2,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair-adapted": {
+          "total": 42,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        }
+      },
+      "adaptedHashes": {
+        "base": "d940796ad560d058b9e122fc51f2af8c564779a88db51e54bbe28e351877b6fe",
+        "repair": "299680384337e65b8c23d0cf9f9aa8be6b7fdbe0bb7d6956c883f916359e459b"
+      },
+      "licenses": [
+        "licenses/eslint-ddb12c093973.txt"
+      ]
+    },
+    {
+      "tag": "Bug-7-fix",
+      "bug": "311295c6f8867b83263a9fe8744809b0c56b8c28",
+      "fix": "404554bee690fdeaec2d0a76492b76a64e39132c",
+      "rule": "lib/rules/comma-dangle.js",
+      "test": "tests/lib/rules/comma-dangle.js",
+      "version": "0.23.0",
+      "archiveSha256": "7eac62076308e960560401280385c796500515f847357115ab1fd7cf760690c1",
+      "testFixtureArchiveSha256": "c9aff00cfe6b02dfb3266c2be3a5344a2418c269a9cd02da525bf0f55b72473e",
+      "sourceTestSha256": "879731bfa2ddca66e56395e2af49932fe8c845a7e0829475540fdeedd4626460",
+      "originalFix": "09594ef29673c206641d291ff5d0f45c6e03716b",
+      "sourceHashes": {
+        "base": "e7239a2989af980db3b54db2bbf2ad5c54b6afe2dc7072c26f52d5b191b4b31c",
+        "repair": "781edebbfd16694e743e9972acf4e6938ffb6f3965bdf1f789d315df06f8d944"
+      },
+      "number": 7,
+      "id": "corr-eslint-comma-dangle-clean",
+      "caseId": "corr-source-eslint-comma-dangle",
+      "testRef": "3ed1eb273d18022a86bdb7c83a3c97c191fb3cd8",
+      "runtime": "locks/eslint/b4c9caccfe22cb5b",
+      "lockSha256": "1c2c30315f283ca846fb15685a6b04ed9480a36bee9417eff0e8ff4760515229",
+      "publishedStages": {
+        "base": {
+          "total": 66,
+          "failed": 7,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair": {
+          "total": 66,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        },
+        "base-adapted": {
+          "total": 66,
+          "failed": 7,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair-adapted": {
+          "total": 66,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        }
+      },
+      "adaptedHashes": {
+        "base": "d847fce98ef0e293037fce359d13ebe77b35afc05cb2fe1e299a88255ea7c12c",
+        "repair": "c6c1a2370b3a276e042eb3a945367a6afab9b4c0767d222e2c23d1ed79141817"
+      },
+      "licenses": [
+        "licenses/eslint-9b8270febdcc.txt"
+      ]
+    },
+    {
+      "tag": "Bug-14-fix",
+      "bug": "03beb27ee80ef5e1c58936888d66cde41fc03d15",
+      "fix": "75c0da5244b344e769efafddf42fb7bc8335c537",
+      "rule": "lib/rules/max-statements-per-line.js",
+      "test": "tests/lib/rules/max-statements-per-line.js",
+      "version": "2.11.0",
+      "archiveSha256": "9daf7faa59310472558799d8c0a066bf86464505c986e209a92aa31ef552cd92",
+      "testFixtureArchiveSha256": "760625cea8b7029c4b9db0b90fa204fe3b5904b2b5de4bebcafdfdba84199974",
+      "sourceTestSha256": "3fd54a7e6cd4e6b2efb94539c02764efabcbb2ab4043b0dfe5e6da683007baf5",
+      "originalFix": "113c1a878446e1f4c37984484bdfed936f2f4225",
+      "sourceHashes": {
+        "base": "59e1dc9fa2fef58bb521205d4db4f2d13a7383de02c61876eef8c62dd4671162",
+        "repair": "e99be5af8de51567726cc14cee8e713242f942a449732b7b92920cebc89c4402"
+      },
+      "number": 14,
+      "id": "corr-eslint-max-statements-per-line-clean",
+      "caseId": "corr-source-eslint-max-statements-per-line",
+      "testRef": "967d81342a3791364dcec08b7abfb5a436e6e0fc",
+      "runtime": "locks/eslint/5593a58754f3f86b",
+      "lockSha256": "42a119ab20adac7a2783dce04464bd86898d64656415cd5641a02d78a7024e9a",
+      "publishedStages": {
+        "base": {
+          "total": 97,
+          "failed": 3,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair": {
+          "total": 97,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        },
+        "base-adapted": {
+          "total": 97,
+          "failed": 3,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair-adapted": {
+          "total": 97,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        }
+      },
+      "adaptedHashes": {
+        "base": "03c56df50a3db539ed4eb593f4dba35177fccfe5aad04b257bafcc38f0780eed",
+        "repair": "c11badf624f9bb886b980fca2674c916d43f30af393b670c4d9e8fd069ef442a"
+      },
+      "licenses": [
+        "licenses/eslint-ddb12c093973.txt"
+      ]
+    },
+    {
+      "tag": "Bug-20-fix",
+      "bug": "133f4895d833fa44987c11e818526aab03b3b3d4",
+      "fix": "43d55a044becf21d98b32c4ed1eddec33f9197b0",
+      "rule": "lib/rules/sort-vars.js",
+      "test": "tests/lib/rules/sort-vars.js",
+      "version": "3.17.1",
+      "archiveSha256": "ad4017b3716b6fed6efc38c134641deee3f9bebef31739afb542a373986ae330",
+      "testFixtureArchiveSha256": "80b0e20e673965b3e3506ad9e6c525b59d658e29faaa9d74c141cd07b805cb12",
+      "sourceTestSha256": "e30513867b7cdda70005c09a11fbcf56e8c6fd79d455b1996d7473963b423e1d",
+      "originalFix": "13eead9fc9809acfecf4838536c7392c72d974e3",
+      "sourceHashes": {
+        "base": "0bb4a2b5d122fa8cc2555cea1480f922a852b75d6e0455b7d6177a6a6884bbd8",
+        "repair": "b8be4397de0143093f40af55ee66c7e29950fe301f5f3fc66b23a62f88a715c1"
+      },
+      "number": 20,
+      "id": "corr-eslint-sort-vars-clean",
+      "caseId": "corr-source-eslint-sort-vars",
+      "testRef": "aec6f4f8ebc0e0f6c15662e8fe5f98fe8ca51522",
+      "runtime": "locks/eslint/123e8fe4bc6c200b",
+      "lockSha256": "ccffaab120f87891b2a25fe8ae91b08a30c5e9eb66ef9a33de4e03183d22abbb",
+      "publishedStages": {
+        "base": {
+          "total": 49,
+          "failed": 2,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair": {
+          "total": 49,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        },
+        "base-adapted": {
+          "total": 49,
+          "failed": 2,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair-adapted": {
+          "total": 49,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        }
+      },
+      "adaptedHashes": {
+        "base": "ba0dfb2ecabf7b2d3e22b782b91207b471eb9f1400cd24f02906d0f8a65614b9",
+        "repair": "d738aabdccd4dce6637aa5143d123833f30ebc4d3fb6abf12593ced862cbcdec"
+      },
+      "licenses": [
+        "licenses/eslint-24f36230f107.txt"
+      ]
+    },
+    {
+      "tag": "Bug-25-fix",
+      "bug": "fce191708b698d7c72e7b24db4495d5a6cf565c7",
+      "fix": "0f644f3e2791373827cb7812d2c45df128036322",
+      "rule": "lib/rules/brace-style.js",
+      "test": "tests/lib/rules/brace-style.js",
+      "version": "2.4.0",
+      "archiveSha256": "72c66a9a797faceabb47f89b77bc8c47058517d6c44a1a6d02c5dbe360e61808",
+      "testFixtureArchiveSha256": "c89288100175e37eed91c145372d954136b6f5328ce6ab7886f410e66b64c339",
+      "sourceTestSha256": "827a9a4ff743423ace8e5006bf2cce6e5447b18a74351be5c38ab158c164ab5a",
+      "originalFix": "167a03a8bb33575b161e702ae2a24bef09e5a08d",
+      "sourceHashes": {
+        "base": "910e11b73a1c99dc11ac5f4eac07c97d366cff8d6525addfff20e680cd9c3a73",
+        "repair": "40a5c5c964be703f7a038569dbcee4f1a98861a9ab846190d75a719680eaf129"
+      },
+      "number": 25,
+      "id": "corr-eslint-brace-style-clean",
+      "caseId": "corr-source-eslint-brace-style",
+      "testRef": "a2c257d97af31947da9a4394fb33839b82a78b98",
+      "runtime": "locks/eslint/ea63ba41a7f96aab",
+      "lockSha256": "14108f0bbf183d75f6b1eb4b3b450b19fe39d536777e9a7afbc689a897d84975",
+      "publishedStages": {
+        "base": {
+          "total": 103,
+          "failed": 5,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair": {
+          "total": 103,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        },
+        "base-adapted": {
+          "total": 103,
+          "failed": 5,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair-adapted": {
+          "total": 103,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        }
+      },
+      "adaptedHashes": {
+        "base": "2e30037b6a4067a3c67fa90e0011231dcda27f713ca1a373d910bf0ff8522113",
+        "repair": "f9755974856a82958ba7685cdc9d3eeea2115fd574c736a8c7e582e5700bf874"
+      },
+      "licenses": [
+        "licenses/eslint-9b8270febdcc.txt"
+      ]
+    },
+    {
+      "tag": "Bug-26-fix",
+      "bug": "2d10657cae4207fdf96d78411a28bff85ad04153",
+      "fix": "18f9f2242d953b0410593faddba0ba436b944755",
+      "rule": "lib/rules/arrow-parens.js",
+      "test": "tests/lib/rules/arrow-parens.js",
+      "version": "3.5.0",
+      "archiveSha256": "08c43abe034af178459cb704804dec86f8af514dece465fea36c5a4891310061",
+      "testFixtureArchiveSha256": "53bb1a16dfd7ee163dc7598ac043b95439331073935c822ec065ca5fff6286e3",
+      "sourceTestSha256": "bcc71c08590f04a3253437497ccb012e4fd4fb2603c1b2f8d11b504b3a0c3106",
+      "originalFix": "16bb8027756859dd72012c140d49c46c7764b4e9",
+      "sourceHashes": {
+        "base": "0f8cfca7423684270236d7e876f49a996f1f65e6d2233bcaf91cc61bdf82ae86",
+        "repair": "bbe3e308728be981261c3d2c7ab010fff07535d6dfcd36870e9eef9c651a8947"
+      },
+      "number": 26,
+      "id": "corr-eslint-arrow-parens-clean",
+      "caseId": "corr-source-eslint-arrow-parens",
+      "testRef": "6df648ebe57fc03c912a93007189ebadbf202663",
+      "runtime": "locks/eslint/0c9d1d633a221cdf",
+      "lockSha256": "6ac4a7538969621589650d69c2e0e848aea308c5348276bb7338123d7056dc14",
+      "publishedStages": {
+        "base": {
+          "total": 49,
+          "failed": 8,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair": {
+          "total": 49,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        },
+        "base-adapted": {
+          "total": 49,
+          "failed": 8,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair-adapted": {
+          "total": 49,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        }
+      },
+      "adaptedHashes": {
+        "base": "c33a5f3740ec455374353f94dbd26673a521acd8b3f94aa618f8ea4a2b5bb126",
+        "repair": "22f9a90cdda11e46f4419feda99d559456d6a7297050eae02e0307fdf59f9e05"
+      },
+      "licenses": [
+        "licenses/eslint-ddb12c093973.txt"
+      ]
+    },
+    {
+      "tag": "Bug-27-fix",
+      "bug": "0a7936dc1b4bc0a01a654b2eaa7d788c367f5a05",
+      "fix": "4433acd118ec3c90268b6f104bba1ae4ec64e957",
+      "rule": "lib/rules/no-useless-rename.js",
+      "test": "tests/lib/rules/no-useless-rename.js",
+      "version": "2.13.1",
+      "archiveSha256": "a7df546ff9cb68cc7d9baaf3012ef2ed7126aabef336ce886a12f12ce0b2ecf1",
+      "testFixtureArchiveSha256": "06524bed3dd10c390d29e295d6d91804ec7bc6620def5e3ffa8a841ae787466e",
+      "sourceTestSha256": "62a5fc617bfbdbe3a9b00ac08fd20ebe9275c5e393f200ea62a20d88aca70ec0",
+      "originalFix": "18663d4911f24ddd5b39c3a1c3c064f57d2a096f",
+      "sourceHashes": {
+        "base": "b4cecbe5d87e56d8d017af839347ade1d257d11aa45cddd1f74647dcf9107969",
+        "repair": "dcd0734ee5f46454671ae9c0b3962a4236c8362a15cde8c569a2c962686b5937"
+      },
+      "number": 27,
+      "id": "corr-eslint-no-useless-rename-clean",
+      "caseId": "corr-source-eslint-no-useless-rename",
+      "testRef": "bf945f0b86c0a8d2c9b942a34644de2f215a3f65",
+      "runtime": "locks/eslint/04189ea1e9f2f36c",
+      "lockSha256": "46e017bca8685bae9b60cbdf6076ca8a12747d3aca567961cb774be01ef04539",
+      "publishedStages": {
+        "base": {
+          "total": 84,
+          "failed": 1,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair": {
+          "total": 84,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        },
+        "base-adapted": {
+          "total": 84,
+          "failed": 1,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair-adapted": {
+          "total": 84,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        }
+      },
+      "adaptedHashes": {
+        "base": "0209b60bcdb7ec31796d94e0ea22996deed1f6830a6eca0d0fcdce1b23395ad7",
+        "repair": "d20fe146ae5195a64e06440f84ec21d822591f373723b78103da0bdde80f1180"
+      },
+      "licenses": [
+        "licenses/eslint-ddb12c093973.txt"
+      ]
+    },
+    {
+      "tag": "Bug-30-fix",
+      "bug": "414206cdec53f4967f56ee23ac0c1eb45b31846a",
+      "fix": "de75d4f125e6b8f2e852df34bc18ac8424923bd5",
+      "rule": "lib/rules/no-multiple-empty-lines.js",
+      "test": "tests/lib/rules/no-multiple-empty-lines.js",
+      "version": "2.13.0",
+      "archiveSha256": "584ac125c11d062688c3b219a3e5138df4fd4fc68d58398765b57e3fe884e321",
+      "testFixtureArchiveSha256": "681f3bdd2a7718e7982ee464cb9d3786d8b49a1dcbdd984e62e23c4f5b76d7a3",
+      "sourceTestSha256": "96b7adce51c961aced9b5cd921a92a20c13fa6d78f7e48668055eb436c53d149",
+      "originalFix": "1e185b95a3c7ea0f0df77cbdb82c47d958834254",
+      "sourceHashes": {
+        "base": "c43de7ca6999454d69d3ba2e25521523582d0ff2c5e70d2bb4a673f733672faa",
+        "repair": "2557ab84f7350e8f2c94340039a554dc992460b3cb2bed46e450e0848726c2a7"
+      },
+      "number": 30,
+      "id": "corr-eslint-no-multiple-empty-lines-clean",
+      "caseId": "corr-source-eslint-no-multiple-empty-lines",
+      "testRef": "6d314abfa908e784aa49e8b5ecf614fc1031bafc",
+      "runtime": "locks/eslint/04189ea1e9f2f36c",
+      "lockSha256": "46e017bca8685bae9b60cbdf6076ca8a12747d3aca567961cb774be01ef04539",
+      "publishedStages": {
+        "base": {
+          "total": 40,
+          "failed": 1,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair": {
+          "total": 40,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        },
+        "base-adapted": {
+          "total": 40,
+          "failed": 1,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair-adapted": {
+          "total": 40,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        }
+      },
+      "adaptedHashes": {
+        "base": "2ecef7ff33861aebe3a240df9c85a9784e9ee0342c07b832d5c7f66af3e2f253",
+        "repair": "a826af7902aa4b5521dc7cb1fa0367f0b5454dcd96a4db47f077b85ce4724fd7"
+      },
+      "licenses": [
+        "licenses/eslint-ddb12c093973.txt"
+      ]
+    },
+    {
+      "tag": "Bug-36-fix",
+      "bug": "be29599c6e12175c5a48e117526bd204bf82fda5",
+      "fix": "4c83ddd4902f21b36178a4dc05b96143625cf686",
+      "rule": "lib/rules/no-magic-numbers.js",
+      "test": "tests/lib/rules/no-magic-numbers.js",
+      "version": "3.4.0",
+      "archiveSha256": "bd7115809a55671586500672986614ee52e9438f3f508e3e2d0e90a6a69ee8f0",
+      "testFixtureArchiveSha256": "96f0a8c47e96909938d379ac434dea3e2029ecfa02c603aac14213195d1bbc6d",
+      "sourceTestSha256": "1fbe88a6baf41955d956bbb92d97205c3fd5ec1cbc16ff898a2009f2ee6c2892",
+      "originalFix": "22c7e09c167a98da07ec6968e2b57d4c2cba345e",
+      "sourceHashes": {
+        "base": "08027d6a396f9a12b194e339826a4fd9633d0202938564ada9e5d1a72bba1f04",
+        "repair": "91e2ebb1e0811acc8e8d54cf058888bee4f158a5ca7477b678dcfc3f34905e72"
+      },
+      "number": 36,
+      "id": "corr-eslint-no-magic-numbers-clean",
+      "caseId": "corr-source-eslint-no-magic-numbers",
+      "testRef": "a9c74e87616ad2fb11ce4c9818befdb05972f685",
+      "runtime": "locks/eslint/537e29783b428d3b",
+      "lockSha256": "41ee1a35fa66a58ae7b3e561b3d0911a975fb9f0b8c040801c94f6f7481aad51",
+      "publishedStages": {
+        "base": {
+          "total": 29,
+          "failed": 1,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair": {
+          "total": 29,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        },
+        "base-adapted": {
+          "total": 29,
+          "failed": 1,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair-adapted": {
+          "total": 29,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        }
+      },
+      "adaptedHashes": {
+        "base": "a62d64af2da291105e2c5e5750457ab59d2ee4e51f95fca926327c8ca80fb9eb",
+        "repair": "93ae87b9c6682dda2a33f67a5492c0a1087c5158082a56c2765e90fe3b17e6cf"
+      },
+      "licenses": [
+        "licenses/eslint-ddb12c093973.txt"
+      ]
+    },
+    {
+      "tag": "Bug-50-fix",
+      "bug": "7521cd5b085894013036086ae9f1833f0c269878",
+      "fix": "0463e7931d5299ae5dcc1997728b513d676a56cb",
+      "rule": "lib/rules/operator-assignment.js",
+      "test": "tests/lib/rules/operator-assignment.js",
+      "version": "3.18.0",
+      "archiveSha256": "3d7a6d5edea029f3d7920ddf2ad4de60adf4836a86b178644f14cc2a75278683",
+      "testFixtureArchiveSha256": "f8d9ff1c448d0ac1a26784d5454527a8e333d7d34c195d5cc473c05d761af227",
+      "sourceTestSha256": "12cabc68a9c778a6f8918180e0580f9afd4ff04bd4fd3ab1adc7c666fd3ef959",
+      "originalFix": "2f144cad2a38e5d3048f90cd6d3cd699166ca3ae",
+      "sourceHashes": {
+        "base": "9744b6fd97f1a80133357d8ce8e445af5666390c33a6e83b528bcb5912ff97fe",
+        "repair": "7815f977ca585a34b3fab33982bb55606c038f4e2293562cc4dc51ced72468f5"
+      },
+      "number": 50,
+      "id": "corr-eslint-operator-assignment-clean",
+      "caseId": "corr-source-eslint-operator-assignment",
+      "testRef": "7acde71368297d2c3e002ecb2a2af3d48d79c119",
+      "runtime": "locks/eslint/78f25525bad82922",
+      "lockSha256": "353c810742767d1f7e73359599f664afb50c85693b32d7706a236c5fd0bc6629",
+      "publishedStages": {
+        "base": {
+          "total": 79,
+          "failed": 1,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair": {
+          "total": 79,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        },
+        "base-adapted": {
+          "total": 79,
+          "failed": 1,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair-adapted": {
+          "total": 79,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        }
+      },
+      "adaptedHashes": {
+        "base": "00a07a9a17eaef153e3fb4554390829e29d6b9578f3b437ed2805530f09c9402",
+        "repair": "81fe2cf1d8d68886d84689d52da46d9b6e962e53a2149a7dc21b0d66a14e96ad"
+      },
+      "licenses": [
+        "licenses/eslint-24f36230f107.txt"
+      ]
+    },
+    {
+      "tag": "Bug-52-fix",
+      "bug": "1867addebe0212641c675f2a420025b49cff04c4",
+      "fix": "6ccab4d76513e8d601075430cacdd4ad34e046ec",
+      "rule": "lib/rules/func-style.js",
+      "test": "tests/lib/rules/func-style.js",
+      "version": "1.5.0",
+      "archiveSha256": "e7902b7304512c91360de8a6c2d7ed2536ee552fdbd8eb67f5fea90c94371a2e",
+      "testFixtureArchiveSha256": "e0bfb295977f06b8679e8bfc16f8e2811d1c2c9879cc88f0759b330721a409a6",
+      "sourceTestSha256": "1f1a1c773bc0be1254b146d8ada884b292da632a972fe3edf1ce10e215eaa6ce",
+      "originalFix": "2f4aa261f08e6f2b7931d48948ab07e5e3131ee6",
+      "sourceHashes": {
+        "base": "f50ed7df7067c921855f7c3ef3f3370dac959fa2ac3e3cc8462fed22c12ceaa5",
+        "repair": "71fd0d218e3616e1f83a0dc3651a8d0579211cfebc3143d25bbc8d3b5a8ace64"
+      },
+      "number": 52,
+      "id": "corr-eslint-func-style-clean",
+      "caseId": "corr-source-eslint-func-style",
+      "testRef": "95768c544f870fcfe71763849239203e0d79e3d2",
+      "runtime": "locks/eslint/097f027cee4b5834",
+      "lockSha256": "9bf1b3e34d8fb958f8022d265852f8e0bd2360ad23946607f48ef5eb589959e8",
+      "publishedStages": {
+        "base": {
+          "total": 15,
+          "failed": 1,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair": {
+          "total": 15,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        },
+        "base-adapted": {
+          "total": 15,
+          "failed": 1,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair-adapted": {
+          "total": 15,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        }
+      },
+      "adaptedHashes": {
+        "base": "5956bbcec685c0a2fa95f57d281f944c428ad25833346648f7b196adac8afa5f",
+        "repair": "996d1d07cef9ba587ee605f32f8da7b7a4e5ee0ebb35ccd8f652167a93c89149"
+      },
+      "licenses": [
+        "licenses/eslint-9b8270febdcc.txt"
+      ]
+    },
+    {
+      "tag": "Bug-59-fix",
+      "bug": "03597442ee486e4174d32300945e0291ce087c34",
+      "fix": "524df8b028857f292aab3c416b88f1f62f8beb42",
+      "rule": "lib/rules/consistent-this.js",
+      "test": "tests/lib/rules/consistent-this.js",
+      "version": "0.21.2",
+      "archiveSha256": "4ca80fab2a5f66c8db34c18ab033627ce303f44f9a1f521a11c70d8e9b85adb4",
+      "testFixtureArchiveSha256": "8ec8527f5d09e85db4aac050ecce89db3b6f1d34f96e752f4b30e3707561063e",
+      "sourceTestSha256": "d37689f34986b637fd1e32645f894de42ba3dc5dcfb9723e4d9e17e34338167b",
+      "originalFix": "32b0cde5a10867230d22862584ca461221049218",
+      "sourceHashes": {
+        "base": "bf3ef8bdef6f1c716a9cd30dd1a06756f6d2c1819ca6e69d6237a398bbccfa59",
+        "repair": "156b0d14a9d3480d18745b5b155652ea483c77e9ff9cd3040212640679c9ced0"
+      },
+      "number": 59,
+      "id": "corr-eslint-consistent-this-clean",
+      "caseId": "corr-source-eslint-consistent-this",
+      "testRef": "0cd3eb8f84005109263349c178735a65085d383a",
+      "runtime": "locks/eslint/d33573fd0bf81b7e",
+      "lockSha256": "70b63bbccc4f062b3134d5ccd915aa4e9edbe21f93645a582f7bab8974ce3317",
+      "publishedStages": {
+        "base": {
+          "total": 23,
+          "failed": 2,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair": {
+          "total": 23,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        },
+        "base-adapted": {
+          "total": 23,
+          "failed": 2,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair-adapted": {
+          "total": 23,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        }
+      },
+      "adaptedHashes": {
+        "base": "711bdd84eb716f3e6660413ecb911101caf94a49cd76f3db339d290aa45bac8e",
+        "repair": "3d3a3a47261358839b20c6cadd5f2e862edb8e6bff24af979d73d5843778ebb9"
+      },
+      "licenses": [
+        "licenses/eslint-9b8270febdcc.txt"
+      ]
+    },
+    {
+      "tag": "Bug-66-fix",
+      "bug": "8e960642b914314abd2ea4478584b53ebe88132e",
+      "fix": "c777510f31574035ee77f7b534079007290826be",
+      "rule": "lib/rules/no-sequences.js",
+      "test": "tests/lib/rules/no-sequences.js",
+      "version": "2.9.0",
+      "archiveSha256": "bcecdcdd03c716828407cc3feb0b90e3af845b356346980908e1aa2224f0b9ca",
+      "testFixtureArchiveSha256": "3baf8d7190f31939a764dd336f6ca4873e40a58f5e3668529f4fea6819b527d2",
+      "sourceTestSha256": "bc159862a8a76e6fd51fa1a2c8965dbfd5012aa5ea80bd98237e23041d1b0a86",
+      "originalFix": "388d6f812d46f8ea255020d466d57c3c59b32cf2",
+      "sourceHashes": {
+        "base": "b09db9e4c1ef534f4cd3c5c75d64b832f34bc1806a69a1026380b75cf5698604",
+        "repair": "bc6ad227897a728f3f6ca87f44f8a47bdf3958fcbd4ff7e83b9c92a697ca871c"
+      },
+      "number": 66,
+      "id": "corr-eslint-no-sequences-clean",
+      "caseId": "corr-source-eslint-explicit-parentheses-context",
+      "testRef": "cdbf371406a41122b0e6808fbbde118120b1601c",
+      "runtime": "locks/eslint/9aa6a6d488cfdb21",
+      "lockSha256": "e3148f520295ecfd24fc99321101d7140d8db8a4aca768adab439d3df2db7631",
+      "publishedStages": {
+        "base": {
+          "total": 22,
+          "failed": 1,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair": {
+          "total": 22,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        },
+        "base-adapted": {
+          "total": 22,
+          "failed": 1,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair-adapted": {
+          "total": 22,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        }
+      },
+      "adaptedHashes": {
+        "base": "b39985b3935e322f4eeafe51e978bcf18534c6473422a0e14bab479c09654e7b",
+        "repair": "4f2809121ca214cec6d561f4d6462c39e655397eecc00debd7496d3062b6f695"
+      },
+      "licenses": [
+        "licenses/eslint-ddb12c093973.txt"
+      ]
+    },
+    {
+      "tag": "Bug-68-fix",
+      "bug": "ee9d7c519f9cca5acd5bf461deee16a66afe06c5",
+      "fix": "ec8c799b6ea494ec1d03d47a4c8eac5100613096",
+      "rule": "lib/rules/spaced-comment.js",
+      "test": "tests/lib/rules/spaced-comment.js",
+      "version": "0.23.0",
+      "archiveSha256": "eb98bf266738508d7b561214aabad5041d1b3eca5d307447c8b88366877747c8",
+      "testFixtureArchiveSha256": "849060e2990ba3ead062d4522d76fe127f3ce76cf2644319ee6a9450c727c187",
+      "sourceTestSha256": "3cc40ac8bfa034e8706317c27cd4d02afdb09254b5bbf75c6cb57f57c69a59d5",
+      "originalFix": "39a908d7ffd574871d3648862ae50c1a94245bdc",
+      "sourceHashes": {
+        "base": "94b2d10e65d37dcf5b5f581abfd312ad89aa9c65c593db6db27b4ecb13147a31",
+        "repair": "983ac7b44300ff8a6457a09279d20169b4866729e0700dd4e8a013b4a33beb05"
+      },
+      "number": 68,
+      "id": "corr-eslint-spaced-comment-clean",
+      "caseId": "corr-source-eslint-spaced-comment",
+      "testRef": "7ff3b7804b97393b9c65eeec774b1405b1d6d52c",
+      "runtime": "locks/eslint/b4c9caccfe22cb5b",
+      "lockSha256": "1c2c30315f283ca846fb15685a6b04ed9480a36bee9417eff0e8ff4760515229",
+      "publishedStages": {
+        "base": {
+          "total": 44,
+          "failed": 2,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair": {
+          "total": 44,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        },
+        "base-adapted": {
+          "total": 44,
+          "failed": 2,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair-adapted": {
+          "total": 44,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        }
+      },
+      "adaptedHashes": {
+        "base": "7f0c8326edc8f961544001a4c4a373cff4887e033ab3d9e923317ca5e86d181e",
+        "repair": "9446be20f2ce66413e72dd13899b05ff1fb658d8815af9bbd6bd043351ff1a42"
+      },
+      "licenses": [
+        "licenses/eslint-9b8270febdcc.txt"
+      ]
+    },
+    {
+      "tag": "Bug-77-fix",
+      "bug": "f90462efe568d83f3bf66544c06dd0529c80b49c",
+      "fix": "0b4282e55e66ef126ae1e3e4edbcade03d6d8a33",
+      "rule": "lib/rules/prefer-destructuring.js",
+      "test": "tests/lib/rules/prefer-destructuring.js",
+      "version": "3.13.0",
+      "archiveSha256": "7e1dc31d4774977dfb22bc3317c799c5e62e50e75d1c1d4e5f86f20cc641dc58",
+      "testFixtureArchiveSha256": "c2d1e26d7b4b20a10f6c3bf9509a1762ca6b903036edc2f4bb359d9554a08695",
+      "sourceTestSha256": "7a8628bc0cab2a46d556f044974f1564d347e1ecc5a72656af7b7e43523e7756",
+      "originalFix": "3fc4e3f7a5e0d04950490ed8af08dfba0b270ecc",
+      "sourceHashes": {
+        "base": "a58c2938e2da9a16c1b331131292bf5e6c406ec7cd86a9b9871b9d5291ff39f2",
+        "repair": "0b7b6bd8fe1d73a467bea879d6adf17bcb67d5cdefa5583e227a9038fc066277"
+      },
+      "number": 77,
+      "id": "corr-eslint-prefer-destructuring-clean",
+      "caseId": "corr-source-eslint-prefer-destructuring",
+      "testRef": "f03ee80bc4f92d524cf947d28923107bcc08b83d",
+      "runtime": "locks/eslint/7bc31d7da087050c",
+      "lockSha256": "d83cc6934a13f8804c368fb579e9dfedee5236dc57d938adfc43e4dcdffefd55",
+      "publishedStages": {
+        "base": {
+          "total": 24,
+          "failed": 2,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair": {
+          "total": 24,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        },
+        "base-adapted": {
+          "total": 24,
+          "failed": 2,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair-adapted": {
+          "total": 24,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        }
+      },
+      "adaptedHashes": {
+        "base": "d872d8d0eff103ce2e2c75a51bcb1f9c5783b0f83186316fd4e51ab9970a359b",
+        "repair": "dda48d55c22e4b1260d78f2cce4cf2383c59087eb58bf46d0cce091a4eea7fd0"
+      },
+      "licenses": [
+        "licenses/eslint-24f36230f107.txt"
+      ]
+    },
+    {
+      "tag": "Bug-81-fix",
+      "bug": "2f36f92e1c8d7000252f905c0a90764ff06e7249",
+      "fix": "36de5dae1efc1dabdb687e4274fc262773b4bffe",
+      "rule": "lib/rules/quotes.js",
+      "test": "tests/lib/rules/quotes.js",
+      "version": "1.0.0-rc-3",
+      "archiveSha256": "6c13c4731dd33e510446650861128e9226f40fd894c6c46e9736ae0709fdaad0",
+      "testFixtureArchiveSha256": "37ba069d7de7056fb8543c0b34eca1601c359938c8b8085f20ebc417d45fb061",
+      "sourceTestSha256": "f7b8b7601c44e3092ccadbf1e70d27df57df457ccac4bba7b72068ffc8f65c04",
+      "originalFix": "40eda5957d52ccad8070db86a3e2aa983e2fc0f8",
+      "sourceHashes": {
+        "base": "db63c08ceb2ef5340e7474801980de674ae80a77f953666f459ce9a5b395000f",
+        "repair": "e83c7b1e0cd3b8773370ed04cafd8ed71d8856af627f5a27a4a4b625045d178b"
+      },
+      "number": 81,
+      "id": "corr-eslint-quotes-clean",
+      "caseId": "corr-source-eslint-quotes",
+      "testRef": "0cc5c9c09c325008056cad8e81988ff86fde9bf5",
+      "runtime": "locks/eslint/b4a9ba42dca30a33",
+      "lockSha256": "6c6639c1a4f36f147f350f5ebef25c11ae8da325b9205b740e5499ef1a954bee",
+      "publishedStages": {
+        "base": {
+          "total": 42,
+          "failed": 4,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair": {
+          "total": 42,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        },
+        "base-adapted": {
+          "total": 42,
+          "failed": 4,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair-adapted": {
+          "total": 42,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        }
+      },
+      "adaptedHashes": {
+        "base": "9770f05447a2f98eb2962635b0235f3bd3f48574322e34a077c71843bf59cab1",
+        "repair": "600c31ef22325b31be36eeb694aff2e149db1ec87e09f2e17097d6869bbc5d27"
+      },
+      "licenses": [
+        "licenses/eslint-9b8270febdcc.txt"
+      ]
+    },
+    {
+      "tag": "Bug-86-fix",
+      "bug": "6e61070a682538af5bbaa7c9bd5e284f05720350",
+      "fix": "38cf0cbc43f46a8cfa991679965d241541a9a9c0",
+      "rule": "lib/rules/func-call-spacing.js",
+      "test": "tests/lib/rules/func-call-spacing.js",
+      "version": "3.12.2",
+      "archiveSha256": "d20600bd5100ad4ab481f5c37845a614a1dbadc01605892e492b367010323da6",
+      "testFixtureArchiveSha256": "b17b2475faadae29a532fa775dea8b8461151ad42c58035aa3d3b8d748e14b99",
+      "sourceTestSha256": "4d5392be69fe06f5c0653bae8ac5a262e836e3ac2989ff852f380fc72142997f",
+      "originalFix": "428fbdfea7836ecb159cd690104ff06657cb0d33",
+      "sourceHashes": {
+        "base": "c90029b22832a61103ac3552bc8ef441bfe33eeea2653660e4b84a8132a3dd95",
+        "repair": "c2152501761a60d206b12172b2eacc8d5e606cca8a3cae264e23d65d263793e3"
+      },
+      "number": 86,
+      "id": "corr-eslint-func-call-spacing-clean",
+      "caseId": "corr-source-eslint-call-spacing-lineage",
+      "testRef": "5a9b63a852305c46f739424f4dba2aa0d8fc9a8b",
+      "runtime": "locks/eslint/7bc31d7da087050c",
+      "lockSha256": "d83cc6934a13f8804c368fb579e9dfedee5236dc57d938adfc43e4dcdffefd55",
+      "publishedStages": {
+        "base": {
+          "total": 106,
+          "failed": 4,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair": {
+          "total": 106,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        },
+        "base-adapted": {
+          "total": 106,
+          "failed": 4,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair-adapted": {
+          "total": 106,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        }
+      },
+      "adaptedHashes": {
+        "base": "7685e6eff626b446b23c5eec5712988961a7115972a7bee3f4bdab213337ea98",
+        "repair": "38e0fc3e8db4c01bb2d545a0c75fa7b3a670f0a983fb6d0037553ce30deba82e"
+      },
+      "licenses": [
+        "licenses/eslint-24f36230f107.txt"
+      ]
+    },
+    {
+      "tag": "Bug-94-fix",
+      "bug": "3e6131eaaa3f9f96263e05dd0bed741a88bdfa1c",
+      "fix": "6ccb2931c779282ffc531d2c75c48c8fbca5ba3b",
+      "rule": "lib/rules/space-infix-ops.js",
+      "test": "tests/lib/rules/space-infix-ops.js",
+      "version": "3.9.1",
+      "archiveSha256": "45910970027b3fa09ed1f789ac711ef3445393c817a8d0bd43611999835484f0",
+      "testFixtureArchiveSha256": "7236c4046956aa37dd7fac866178f894c269e654f239af84c8dd878f1bbdba90",
+      "sourceTestSha256": "be476c1e678398cd1c2bf3f7399ad4cdd41988e0258c7bf900e294418d97a107",
+      "originalFix": "5003b1cf6f37c1a89e8dedf446576ab892579173",
+      "sourceHashes": {
+        "base": "dfce4d7d58c8700ae62ed3367ec12809f4ffb2baa07048bdbb01292b3e2ac9c4",
+        "repair": "07d3b31729e371e452998fbe61c59a872fde0c739fa2780da2ec35e1f1f459f9"
+      },
+      "number": 94,
+      "id": "corr-eslint-space-infix-ops-clean",
+      "caseId": "corr-source-eslint-space-infix-ops",
+      "testRef": "ffe66720dc785ef180279e55d69c6fe81ee9dcb7",
+      "runtime": "locks/eslint/ea2ab2f790066192",
+      "lockSha256": "6e65add9f27e0951e9d2fa6413d0e5d70c05325e068ca54e8495f576eaf53848",
+      "publishedStages": {
+        "base": {
+          "total": 47,
+          "failed": 2,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair": {
+          "total": 47,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        },
+        "base-adapted": {
+          "total": 47,
+          "failed": 2,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair-adapted": {
+          "total": 47,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        }
+      },
+      "adaptedHashes": {
+        "base": "fc4712d1035f75c4ac21999313743673e00a128cc4f3278d5d797f7064f63be8",
+        "repair": "2f9326bd8855ae327aa6c4ddd18621087281282efe97c6e3158a6be200c4b12c"
+      },
+      "licenses": [
+        "licenses/eslint-24f36230f107.txt"
+      ]
+    },
+    {
+      "tag": "Bug-109-fix",
+      "bug": "49c84cdb0b94d9ffc6dd250aa09d5644acb5f6ee",
+      "fix": "d174a126311c74c715f48818b7b925d484b0f8de",
+      "rule": "lib/rules/object-curly-spacing.js",
+      "test": "tests/lib/rules/object-curly-spacing.js",
+      "version": "0.23.0",
+      "archiveSha256": "14da33630bd1a0388bed047ba02ea6c8952df1e7bc237546048f45dcf8465497",
+      "testFixtureArchiveSha256": "498b7c37095fdad52bdbe088b59018aaa64343792b5e2e040f03db458f539779",
+      "sourceTestSha256": "45b0d4530325a72e07911c7a1c48afc2d2358ea60570a40388418ac657108ee6",
+      "originalFix": "5e019531febbff7ef1508c0331d0621d2f3cc601",
+      "sourceHashes": {
+        "base": "f8c6e94f25870d4ae9ddd02b176108adc06c7264afd978ec46c38285327daa70",
+        "repair": "8e0d11a83b23016ad3ed581026031e43e57a8fad3dceae389ad65c6f1b7050b2"
+      },
+      "number": 109,
+      "id": "corr-eslint-object-curly-spacing-clean",
+      "caseId": "corr-source-eslint-object-curly-spacing",
+      "testRef": "3ef7b5ab7abff59ec40425997b8e6369e2b747f6",
+      "runtime": "locks/eslint/b4c9caccfe22cb5b",
+      "lockSha256": "1c2c30315f283ca846fb15685a6b04ed9480a36bee9417eff0e8ff4760515229",
+      "publishedStages": {
+        "base": {
+          "total": 77,
+          "failed": 6,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair": {
+          "total": 77,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        },
+        "base-adapted": {
+          "total": 77,
+          "failed": 6,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair-adapted": {
+          "total": 77,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        }
+      },
+      "adaptedHashes": {
+        "base": "4829b61fac9b724c5a832d67ef11743f3d9633dbfab1189ffedf88b738af376c",
+        "repair": "a4ea389a92bbf988446f66fe03ed534a0bf39b4297dfb226bc42c7e90699c560"
+      },
+      "licenses": [
+        "licenses/eslint-9b8270febdcc.txt"
+      ]
+    },
+    {
+      "tag": "Bug-113-fix",
+      "bug": "c00f3f6dd342dd03b23278fd742601aa72747775",
+      "fix": "d4695ad00c909e4b2a965a1e2b23c1e49c744b7e",
+      "rule": "lib/rules/no-unused-vars.js",
+      "test": "tests/lib/rules/no-unused-vars.js",
+      "version": "0.2.0",
+      "archiveSha256": "0173c31e9ccdc6553feb466762f779a471f0e3ce7d5bdd03afd2f47c0ef822af",
+      "testFixtureArchiveSha256": "bbf02aa93082af1a8e6b052d5cafca62725b4a67b9478ed9b9bd64daf3d1cddb",
+      "sourceTestSha256": "77d3c3ba7379d503e862e29ef2e62285924bb607d97dee8c040311508c6d906f",
+      "originalFix": "62be675bde9917d4e8d6d64774dc6fdf24070aa4",
+      "sourceHashes": {
+        "base": "7a604633bb3dc23f4f034493de82a4d7d16b55b8bc5bdcd3e43459759bfb3078",
+        "repair": "1f36e83407004e1ddda37fbcb864dab03f124021291d5d9d74333f22f820a818"
+      },
+      "number": 113,
+      "id": "corr-eslint-no-unused-vars-clean",
+      "caseId": "corr-source-eslint-no-unused-vars",
+      "testRef": "e4fd70c07022eb79382f1dc4c56c6b26a03d97d6",
+      "runtime": "locks/eslint/9465c4a7c38ffb24",
+      "lockSha256": "383381ee50605f7fc09be408896331f494c9d397b0bb03e4dc3f5138bb884e7d",
+      "publishedStages": {
+        "base": {
+          "total": 24,
+          "failed": 1,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair": {
+          "total": 24,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        },
+        "base-adapted": {
+          "total": 24,
+          "failed": 1,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair-adapted": {
+          "total": 24,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        }
+      },
+      "adaptedHashes": {
+        "base": "e30155cef407323416e7a5a30f69a1c9f204a2c14e3811e7dd0f226a0aafc997",
+        "repair": "2d32f0241c1c126cf2da91eafea8e674f6cf59afcc4c8e9e8f008ff4072a5d56"
+      },
+      "licenses": [
+        "licenses/eslint-9b8270febdcc.txt"
+      ]
+    },
+    {
+      "tag": "Bug-116-fix",
+      "bug": "d311a6229353e2b4e11c3339a6caed689c50e3e2",
+      "fix": "3624c0bfe724ee2db8688bdb1a5f3c81bc03970c",
+      "rule": "lib/rules/no-loop-func.js",
+      "test": "tests/lib/rules/no-loop-func.js",
+      "version": "2.9.0",
+      "archiveSha256": "4a78ac3688b4939f82a8f64bf1def67873e2a704ff9ce61d36b6bc0c4ea4b4d5",
+      "testFixtureArchiveSha256": "649f40cb201a16bd421e69a0182103d8a59dba8c5c518fab5916601479ea8e9d",
+      "sourceTestSha256": "2e4322f9e7e3d501178e9cc77569aa7e9df36cadc116cf00d35374b1bac8dc52",
+      "originalFix": "67916b9bde7a2790490a44d0191a5983bc9351d0",
+      "sourceHashes": {
+        "base": "ae70fdc41e63a82e758c63e0ad8b41ba2a5489838bcaf5b9ba47a8ad0a73bcba",
+        "repair": "7d69542805fca68c0ff85a808476658baa2a88c021456f4387eccf59f27a5000"
+      },
+      "number": 116,
+      "id": "corr-eslint-no-loop-func-clean",
+      "caseId": "corr-source-eslint-no-loop-func",
+      "testRef": "486f747004ad39b4a9ef8b2d67258c1f1c389fca",
+      "runtime": "locks/eslint/9aa6a6d488cfdb21",
+      "lockSha256": "e3148f520295ecfd24fc99321101d7140d8db8a4aca768adab439d3df2db7631",
+      "publishedStages": {
+        "base": {
+          "total": 47,
+          "failed": 1,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair": {
+          "total": 47,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        },
+        "base-adapted": {
+          "total": 47,
+          "failed": 1,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair-adapted": {
+          "total": 47,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        }
+      },
+      "adaptedHashes": {
+        "base": "99831e610c13f3345c9fd0c655317daf05f5c07fb9449a1a4befa6558396ad6d",
+        "repair": "4af675d3dc1f807c569f52d1e5218910bea36f3061e4886a961ae2d86c24fe0e"
+      },
+      "licenses": [
+        "licenses/eslint-ddb12c093973.txt"
+      ]
+    },
+    {
+      "tag": "Bug-120-fix",
+      "bug": "710f205372fa20aa4c998940ccf48d461f6a8b93",
+      "fix": "4ee4a68903ff64f38ec810b24f2d1c13e0d71fd8",
+      "rule": "lib/rules/valid-typeof.js",
+      "test": "tests/lib/rules/valid-typeof.js",
+      "version": "3.5.0",
+      "archiveSha256": "5d3bdc41cd4b304932ced9f4de678738b6b620cf44153847ae654989baf78733",
+      "testFixtureArchiveSha256": "d052ee6c53845709028c736faba235262679e82464a3d78ca0506d9058500ecc",
+      "sourceTestSha256": "af6c9c0581cfd0fb409e1bdf98e6da92e8489c2e7d8d660a299c0b5a16616f59",
+      "originalFix": "6ae660b97abac5761c0f93cc25173e48e356bbc3",
+      "sourceHashes": {
+        "base": "297b64f8f03cf65e4de600a070ba35193ed248c45d74c50d83f1e91f0d1973cb",
+        "repair": "0dfe3a0ce20af8d2718170f7eb63cba4a23078558ac80e99f2a046085f9e4160"
+      },
+      "number": 120,
+      "id": "corr-eslint-valid-typeof-clean",
+      "caseId": "corr-source-eslint-valid-typeof",
+      "testRef": "cf99110e573c36c9a8e88a8d312671b3ee150bcd",
+      "runtime": "locks/eslint/537e29783b428d3b",
+      "lockSha256": "41ee1a35fa66a58ae7b3e561b3d0911a975fb9f0b8c040801c94f6f7481aad51",
+      "publishedStages": {
+        "base": {
+          "total": 45,
+          "failed": 1,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair": {
+          "total": 45,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        },
+        "base-adapted": {
+          "total": 45,
+          "failed": 1,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair-adapted": {
+          "total": 45,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        }
+      },
+      "adaptedHashes": {
+        "base": "45396aac9f57c256310f1179714856333ea3fd69004afbccc3c410ec91d1bde1",
+        "repair": "d0ebfd29fdc17240f3dc6ef4c4453ea0e0e0d9dd83413173b97a3da3d108c636"
+      },
+      "licenses": [
+        "licenses/eslint-ddb12c093973.txt"
+      ]
+    },
+    {
+      "tag": "Bug-122-fix",
+      "bug": "957fe088d015458f5c8c568160a56de132eb4196",
+      "fix": "02e9ca102c852e7befc7efb2158861623f866481",
+      "rule": "lib/rules/id-length.js",
+      "test": "tests/lib/rules/id-length.js",
+      "version": "1.9.0",
+      "archiveSha256": "e3bf332ac373beb8a1bc8f4e85c8dea298fbe1a07cf8b2ab8e36a0509fad7b34",
+      "testFixtureArchiveSha256": "86ba9280d0e34b76dddbb5e6d6f0ec6143660a00e6bbdf3045c38d2d292fea36",
+      "sourceTestSha256": "851286b4bfa8d36b6259ce96b256f35c75b0651c68d4e72c8a9d151aa4aa6826",
+      "originalFix": "6d59e0ebeb74c7cb52f0e62ebe4b17a67436bf65",
+      "sourceHashes": {
+        "base": "3fee0527646a0d1de00226f4c2f2fd47404acecd35d4c1f7c13fb3ef66109da6",
+        "repair": "7d3e46526239f80717d27cb016d99c83bbf667ecaadec469f8dff9073d112ba8"
+      },
+      "number": 122,
+      "id": "corr-eslint-id-length-clean",
+      "caseId": "corr-source-eslint-id-length",
+      "testRef": "35d53b57dcf78de2e1e1eb82919fa993540139f2",
+      "runtime": "locks/eslint/acac5e8ed963da69",
+      "lockSha256": "da1a1df426969329f0f1997b3ea7c9845fa700795de104cc8a7fd84f331348d1",
+      "publishedStages": {
+        "base": {
+          "total": 64,
+          "failed": 2,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair": {
+          "total": 64,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        },
+        "base-adapted": {
+          "total": 64,
+          "failed": 2,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair-adapted": {
+          "total": 64,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        }
+      },
+      "adaptedHashes": {
+        "base": "1aab04775fe3b59713311922c08fe8618256e335e74afe74c0f19719d0e49da0",
+        "repair": "1661c1f7439c57464f6d75a503cd28a224486c0784e0f42066b1b10b9674848d"
+      },
+      "licenses": [
+        "licenses/eslint-9b8270febdcc.txt"
+      ]
+    },
+    {
+      "tag": "Bug-131-fix",
+      "bug": "c00f3f6dd342dd03b23278fd742601aa72747775",
+      "fix": "e60f91817cf9c425502a1377bd9ef53eef27268b",
+      "rule": "lib/rules/no-empty.js",
+      "test": "tests/lib/rules/no-empty.js",
+      "version": "0.2.0",
+      "archiveSha256": "0173c31e9ccdc6553feb466762f779a471f0e3ce7d5bdd03afd2f47c0ef822af",
+      "testFixtureArchiveSha256": "1a641924d3f62aed788fc031f2b70b707d5d2158bd543dffcb21519033559f8a",
+      "sourceTestSha256": "91154df869586ddb3fa9cf4f0f9203134cfc9f9ca5b9ad9c23afe9fa5ab09860",
+      "originalFix": "737228956dea1d7fe0f7d158c74a856334f8dd01",
+      "sourceHashes": {
+        "base": "93720e40f6bf3afe67aedd0e5079ad11d7287d03ef401f5226112dd61096b790",
+        "repair": "d19db0110ea61171b5a454c324891787da657edd96ba866fdcc3dea5494ddf81"
+      },
+      "number": 131,
+      "id": "corr-eslint-no-empty-clean",
+      "caseId": "corr-source-eslint-no-empty",
+      "testRef": "972c2b1ab5a6d26d7d314dd38b3a6c5a6767a33f",
+      "runtime": "locks/eslint/9465c4a7c38ffb24",
+      "lockSha256": "383381ee50605f7fc09be408896331f494c9d397b0bb03e4dc3f5138bb884e7d",
+      "publishedStages": {
+        "base": {
+          "total": 13,
+          "failed": 2,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair": {
+          "total": 13,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        },
+        "base-adapted": {
+          "total": 13,
+          "failed": 2,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair-adapted": {
+          "total": 13,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        }
+      },
+      "adaptedHashes": {
+        "base": "cef610194931a3766b0f34876bbdef840e069a79a812054d85123318f124cb51",
+        "repair": "380774186fb274f2212894127b3d3fd11588f0f8c59fb64e933ebe920a97e030"
+      },
+      "licenses": [
+        "licenses/eslint-9b8270febdcc.txt"
+      ]
+    },
+    {
+      "tag": "Bug-142-fix",
+      "bug": "45389f9999c7e18e94e01e25640b0230afa6a3e9",
+      "fix": "6f8536825add3ed98af450c44a76e02b90d8f91f",
+      "rule": "lib/rules/no-cond-assign.js",
+      "test": "tests/lib/rules/no-cond-assign.js",
+      "version": "1.6.0",
+      "archiveSha256": "4318cb359591be4b54d2f950b29e3706914b15ea3588a784a0c6bb05bcb1e1c6",
+      "testFixtureArchiveSha256": "37e827edf4f49bac991c05776e21a0512404ca9d2209aca275955c8e95e49904",
+      "sourceTestSha256": "da721325b9f32197680d57f3758281f3edbe2ef39b5c5f54fd27767c45f22019",
+      "originalFix": "781785ec24deb2826fcd5579f4e75f6b35e945d0",
+      "sourceHashes": {
+        "base": "fbd1dde41039802df3d2914af5b2ef7e269ae36f9a7a69b6432031f5296818f6",
+        "repair": "853ddf75ba7fd7748e3caed45b1ccfb2d1916992d0423e812290ddd4aa69c4f7"
+      },
+      "number": 142,
+      "id": "corr-eslint-no-cond-assign-clean",
+      "caseId": "corr-source-eslint-explicit-parentheses-context",
+      "testRef": "8ca5eadefd1048cb1da6542733b9d0ac815ae4e7",
+      "runtime": "locks/eslint/c35f8de3204fad42",
+      "lockSha256": "6b8ee0bbfcc66482ee6063507baef5684f15c878f398bda2846c81a4ee42c33b",
+      "publishedStages": {
+        "base": {
+          "total": 35,
+          "failed": 1,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair": {
+          "total": 35,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        },
+        "base-adapted": {
+          "total": 35,
+          "failed": 1,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair-adapted": {
+          "total": 35,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        }
+      },
+      "adaptedHashes": {
+        "base": "c6163b651b1cd1f53721a744a6256b66fb28037b369b7cf31bb3c7281f314370",
+        "repair": "33219c5871e25092bf04f40124673e191f46ee362804b9d3923599e3902d96ed"
+      },
+      "licenses": [
+        "licenses/eslint-9b8270febdcc.txt"
+      ]
+    },
+    {
+      "tag": "Bug-150-fix",
+      "bug": "16bb8027756859dd72012c140d49c46c7764b4e9",
+      "fix": "8082d255825cd54be005a74c096b354164b7d326",
+      "rule": "lib/rules/no-unused-expressions.js",
+      "test": "tests/lib/rules/no-unused-expressions.js",
+      "version": "3.5.0",
+      "archiveSha256": "faf78cfde9383952103e641cc5c15682959cc8650c5f8f0667b405a62a39d2ee",
+      "testFixtureArchiveSha256": "6fd0415dae6dbbe21364d0758cb5508072b6225882429c4e9e5c519d46019677",
+      "sourceTestSha256": "2ed02f30989b1b90287b31ea8ba6d942c0c2b899f1c44f98937a1626e8cadbd0",
+      "originalFix": "7ea3e4ba09f1ef5857f17dc80313a1fd68dbbea5",
+      "sourceHashes": {
+        "base": "594b7c9d75bb093b5a01484c5b48862ccfd25e0209c306c721a00707f8593523",
+        "repair": "14bd235faf9f1266a41eb4a7782c5aa2f96dae43c5669e0a85e7af6847f92547"
+      },
+      "number": 150,
+      "id": "corr-eslint-no-unused-expressions-clean",
+      "caseId": "corr-source-eslint-no-unused-expressions",
+      "testRef": "451564624b4fceb3d80fc1e715b2f3c43579a79a",
+      "runtime": "locks/eslint/0c9d1d633a221cdf",
+      "lockSha256": "6ac4a7538969621589650d69c2e0e848aea308c5348276bb7338123d7056dc14",
+      "publishedStages": {
+        "base": {
+          "total": 47,
+          "failed": 4,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair": {
+          "total": 47,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        },
+        "base-adapted": {
+          "total": 47,
+          "failed": 4,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair-adapted": {
+          "total": 47,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        }
+      },
+      "adaptedHashes": {
+        "base": "3507eb0108735dcecb21d2df10dfe0a58285b67bb76ecd5eff8cdc60d1525a51",
+        "repair": "79f5a5aae452c139dc79d41d89cd7c56bf9f53562f7dddfbdd59c61fe8f94888"
+      },
+      "licenses": [
+        "licenses/eslint-ddb12c093973.txt"
+      ]
+    },
+    {
+      "tag": "Bug-156-fix",
+      "bug": "ff21d3387eef839fe89e45a9793cfde39d47effd",
+      "fix": "729ff1804daee1c70ac76e878f879d2b89227c25",
+      "rule": "lib/rules/no-spaced-func.js",
+      "test": "tests/lib/rules/no-spaced-func.js",
+      "version": "1.10.1",
+      "archiveSha256": "7585cf20e7b232236b7f869bc626cda3c75ec42bfcff9eecf04b5a289bd4c1a9",
+      "testFixtureArchiveSha256": "4299ae8d58ec5b2c6ce4cf0280992fabce9b5143ccea0991e753073188288f3d",
+      "sourceTestSha256": "c542e1199cda92ec59c52f17e4c023ae0a7997ff300d5ff55df2afdfcfdc8370",
+      "originalFix": "828f4cb39d8c6b175e26a924f1f49f29abffda22",
+      "sourceHashes": {
+        "base": "c7065989859efba0e9f6406efafccc47c1a4a184e611b819ad55f69bc40e47e8",
+        "repair": "c6e87a3fc6f6ced3ec9975d2be105de93c12dce5577d31ac92eeb8b4a24aaf54"
+      },
+      "number": 156,
+      "id": "corr-eslint-no-spaced-func-clean",
+      "caseId": "corr-source-eslint-call-spacing-lineage",
+      "testRef": "fc32274dc0f641cb44cd2aa596555b9a03ac7222",
+      "runtime": "locks/eslint/c23a85bbc872222b",
+      "lockSha256": "2079791669f5f140d643cd7be88a78e8194c4058cc4d095233d0b85c03dd257f",
+      "publishedStages": {
+        "base": {
+          "total": 28,
+          "failed": 1,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair": {
+          "total": 28,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        },
+        "base-adapted": {
+          "total": 28,
+          "failed": 1,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair-adapted": {
+          "total": 28,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        }
+      },
+      "adaptedHashes": {
+        "base": "fa104e3a1d68c0fd24974b0880b4dc36148ced3d5060a402094dded7126a65cc",
+        "repair": "8f9fee39dc0c51083f3e18cee0555235ada658e65c3405d655fdbf5a1ed9934f"
+      },
+      "licenses": [
+        "licenses/eslint-9b8270febdcc.txt"
+      ]
+    },
+    {
+      "tag": "Bug-166-fix",
+      "bug": "c835e193f0e0ad586b0044eff5ba6bbdae775454",
+      "fix": "ece96fffb026a9a4d1b7c70bcf0fe39a2dfedc4c",
+      "rule": "lib/rules/no-useless-computed-key.js",
+      "test": "tests/lib/rules/no-useless-computed-key.js",
+      "version": "3.13.1",
+      "archiveSha256": "b52ed4a2bec6f91c322abff532201895c9bf4e98145ebf7896f6e8f05b6f4200",
+      "testFixtureArchiveSha256": "da86ecb6d316f123fdf7336b13ddb95843b371570434863cd17e9334bc3b663f",
+      "sourceTestSha256": "e85ff875abf607058447041e35209cef58875545344560ec6b29ffeb8fc08bb4",
+      "originalFix": "8ac3518fed0a2b9b7729dc2ab0b09d6fac0617d8",
+      "sourceHashes": {
+        "base": "ef7cfbc876c0f61017a7da662384a4ed24b91eca1300f73c878890998e1ea0a0",
+        "repair": "bf89d410fb8f6733f3f0dbd8baf61663135dcfebe6426d0accaf6cfb85b09e8b"
+      },
+      "number": 166,
+      "id": "corr-eslint-no-useless-computed-key-clean",
+      "caseId": "corr-source-eslint-no-useless-computed-key",
+      "testRef": "4b39bc333189746dc4c3a62b36e1d564ff8346ff",
+      "runtime": "locks/eslint/7bc31d7da087050c",
+      "lockSha256": "d83cc6934a13f8804c368fb579e9dfedee5236dc57d938adfc43e4dcdffefd55",
+      "publishedStages": {
+        "base": {
+          "total": 14,
+          "failed": 1,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair": {
+          "total": 14,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        },
+        "base-adapted": {
+          "total": 14,
+          "failed": 1,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair-adapted": {
+          "total": 14,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        }
+      },
+      "adaptedHashes": {
+        "base": "f0c22a740b7b3ce4e5c2813b18ed8bb6362b51155a4e776a7ae472306f226fda",
+        "repair": "a712b36afe4fad08a9f78d39b2a9935259cbae12dc2cfd061f45f9d4c1518fcc"
+      },
+      "licenses": [
+        "licenses/eslint-24f36230f107.txt"
+      ]
+    },
+    {
+      "tag": "Bug-190-fix",
+      "bug": "2f36f92e1c8d7000252f905c0a90764ff06e7249",
+      "fix": "e100017fef43bc4fa134dc259bd9e5c01f986415",
+      "rule": "lib/rules/init-declarations.js",
+      "test": "tests/lib/rules/init-declarations.js",
+      "version": "1.0.0-rc-3",
+      "archiveSha256": "6c13c4731dd33e510446650861128e9226f40fd894c6c46e9736ae0709fdaad0",
+      "testFixtureArchiveSha256": "7e084b22e0a695a8acd428e44400ac79c0273bee7182963b0570d166772df362",
+      "sourceTestSha256": "edf05b98f291f8a0d684d48d0270e21830efb672dd96a0600d77d538632c9597",
+      "originalFix": "9f9dfed5e705b8398809f1e243beb142afc96deb",
+      "sourceHashes": {
+        "base": "3efe48d6658856640cd3ac5656964b1bb86509cd40711d4c95155d8a8032d5b3",
+        "repair": "6ffa3fc3a6b510be91764e593706ff14eee3da1d161df87717eec406c70a961d"
+      },
+      "number": 190,
+      "id": "corr-eslint-init-declarations-clean",
+      "caseId": "corr-source-eslint-init-declarations",
+      "testRef": "975edc3921159e075d91b6faded69de5d51b2d7e",
+      "runtime": "locks/eslint/b4a9ba42dca30a33",
+      "lockSha256": "6c6639c1a4f36f147f350f5ebef25c11ae8da325b9205b740e5499ef1a954bee",
+      "publishedStages": {
+        "base": {
+          "total": 36,
+          "failed": 3,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair": {
+          "total": 36,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        },
+        "base-adapted": {
+          "total": 36,
+          "failed": 3,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair-adapted": {
+          "total": 36,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        }
+      },
+      "adaptedHashes": {
+        "base": "1359c23addd65bc8a15df35a552d9014bef0e9a0aef95b0bb423fb1af034fc8a",
+        "repair": "4926219139ea9244c89b57e50fc8f3dd3c86808c6dc7982d678bce0dfc16b5fe"
+      },
+      "licenses": [
+        "licenses/eslint-9b8270febdcc.txt"
+      ]
+    },
+    {
+      "tag": "Bug-191-fix",
+      "bug": "6f2edba7019f8f185f59e0cbffbb0fed94f6a319",
+      "fix": "83f583ae52e675f12ed9ff553127502ff088776e",
+      "rule": "lib/rules/generator-star-spacing.js",
+      "test": "tests/lib/rules/generator-star-spacing.js",
+      "version": "2.10.2",
+      "archiveSha256": "14e32eb9edb0772ea2068b8d9020ce4612e2da402fe17b776e6fec1acffa827d",
+      "testFixtureArchiveSha256": "3dfd037b1927c3bd4a2e61b3968777f63ba7a5f72b42e3df41398f4511f2012a",
+      "sourceTestSha256": "9ce34b311ae5bffd582d1e078bd159589773c3c09a384fbdc4307e8e37e5de7c",
+      "originalFix": "9fce04e76dcbae96445e9f6868947aba07d0d662",
+      "sourceHashes": {
+        "base": "12175a75fd151bac84caad5706e74d8b8cf6fb297d95958e3156623ad64d5302",
+        "repair": "71bb10436de0361f24b7ef8a042e2b68cd89eb36fbae7534520cabcff086d138"
+      },
+      "number": 191,
+      "id": "corr-eslint-generator-star-spacing-clean",
+      "caseId": "corr-source-eslint-generator-star-spacing",
+      "testRef": "25f6ae650df46c9d23e04f4fcc6e4514f5b02bad",
+      "runtime": "locks/eslint/9aa6a6d488cfdb21",
+      "lockSha256": "e3148f520295ecfd24fc99321101d7140d8db8a4aca768adab439d3df2db7631",
+      "publishedStages": {
+        "base": {
+          "total": 169,
+          "failed": 18,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair": {
+          "total": 169,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        },
+        "base-adapted": {
+          "total": 169,
+          "failed": 18,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair-adapted": {
+          "total": 169,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        }
+      },
+      "adaptedHashes": {
+        "base": "720b057987b047eaed58f9b6a08cc9f50b2af68a1b9926f18211a780bfcaefc2",
+        "repair": "0454e924a68ad34b876ba873ebf37b4198cd12177b7dc6ecb3af09cd27512855"
+      },
+      "licenses": [
+        "licenses/eslint-ddb12c093973.txt"
+      ]
+    },
+    {
+      "tag": "Bug-210-fix",
+      "bug": "ee5ead278b71380891e6ce8ba4471743b7bac898",
+      "fix": "acd641736b1339ba552d8b2c0b035e6314d6f1b0",
+      "rule": "lib/rules/prefer-arrow-callback.js",
+      "test": "tests/lib/rules/prefer-arrow-callback.js",
+      "version": "1.2.0",
+      "archiveSha256": "0da48c018645b5ed17044d48d5197f53ea5d190b28c0b2f75564439158653752",
+      "testFixtureArchiveSha256": "2241def3fdd232fe15958efc5c7c135448baa38184f023ac7d8b2be5c57601cc",
+      "sourceTestSha256": "5c41c0e022ca3e823719a08a75ea204f6420a9b839a90427a36d9dee94dd5978",
+      "originalFix": "ad4cebc3894b0115b27bb72ecedbd53e7962fb6b",
+      "sourceHashes": {
+        "base": "00513611d19cae731facf3e7f055c6a0fd6c9c9ab9ec7bc18400c2f1232d762f",
+        "repair": "3c52af9a0a95e732605e009fbdcdba24c596cbbe375aaeeb46cf2426d2e1dca1"
+      },
+      "number": 210,
+      "id": "corr-eslint-prefer-arrow-callback-clean",
+      "caseId": "corr-source-eslint-recursive-function-context",
+      "testRef": "3a1742cc2a1689746d697376d8ce1dc9625ebc4c",
+      "runtime": "locks/eslint/a17141f473be673e",
+      "lockSha256": "e98a301434f44c2d242bdf193f4c694f642cbd9167d0408259a904804879b534",
+      "publishedStages": {
+        "base": {
+          "total": 18,
+          "failed": 1,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair": {
+          "total": 18,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        },
+        "base-adapted": {
+          "total": 18,
+          "failed": 1,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair-adapted": {
+          "total": 18,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        }
+      },
+      "adaptedHashes": {
+        "base": "b641dbfc1465f7665b2295005052ed32960e340efeb66d2f881b98b22e74a6e9",
+        "repair": "2f95cce2d58363a0c0f11f13598e608062d10aa728fce9269b649062a73a542f"
+      },
+      "licenses": [
+        "licenses/eslint-9b8270febdcc.txt"
+      ]
+    },
+    {
+      "tag": "Bug-214-fix",
+      "bug": "e51d864f0e4f620e1c0afdaee31902fae60a1476",
+      "fix": "93fa6be44969b58643d4b22fc3443987fc9e0f4c",
+      "rule": "lib/rules/no-shadow.js",
+      "test": "tests/lib/rules/no-shadow.js",
+      "version": "0.21.1",
+      "archiveSha256": "05432b4fad28f2d5505ac82ea24751964605b8952738275198028acdf97ae7a1",
+      "testFixtureArchiveSha256": "ac610be6769fcb172acc9dd643c6407aa15b892d9bb279c4bcbf97eaed71c382",
+      "sourceTestSha256": "853bcd97766aafaad72e3597ecd828ed16ce5b77d9e95db1bcd5be8e5d8715ab",
+      "originalFix": "aee436061ab4781fbff878c60a19836bbd9019b2",
+      "sourceHashes": {
+        "base": "970a87a41ff578854a6f0671cb8168c96f7076cececeeef97b83d99cee3c9e2f",
+        "repair": "3d7849ab76fd92e26d5502bb9a91f7d0eecd253760bf88ae374763e2a5237e15"
+      },
+      "number": 214,
+      "id": "corr-eslint-no-shadow-clean",
+      "caseId": "corr-source-eslint-no-shadow",
+      "testRef": "dc8446c701be0f7046617ed2b093ea84f9daebc4",
+      "runtime": "locks/eslint/98272999bf7149e2",
+      "lockSha256": "9607fc7bfd058c4c6d943ca1696191a975174415248a25ca26b6f5204df0044a",
+      "publishedStages": {
+        "base": {
+          "total": 15,
+          "failed": 2,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair": {
+          "total": 15,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        },
+        "base-adapted": {
+          "total": 15,
+          "failed": 2,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair-adapted": {
+          "total": 15,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        }
+      },
+      "adaptedHashes": {
+        "base": "53366a29826cc70cec81f1dad2390a17cd0e36c9045b59a22323d05c81493824",
+        "repair": "40ef8cd6c91c8f3fdfd9ff7295997418409980457a17d00113c7c57ee03356f7"
+      },
+      "licenses": [
+        "licenses/eslint-9b8270febdcc.txt"
+      ]
+    },
+    {
+      "tag": "Bug-217-fix",
+      "bug": "1738b2eebfa5024c69f815366183103188ff7344",
+      "fix": "0b4d96fa4e676c7c33ca0d2c00acd1b0e2b4a8f7",
+      "rule": "lib/rules/line-comment-position.js",
+      "test": "tests/lib/rules/line-comment-position.js",
+      "version": "3.5.0",
+      "archiveSha256": "a8b16ac00913ac2bcacd4aca8a7e0f188b4a5756e20b8692c8444ab5f2050966",
+      "testFixtureArchiveSha256": "a1a0b99928f2e8b72725aa8def75a73312ee1479b2697afccc80844a9af0e413",
+      "sourceTestSha256": "106d21f8e5a57c1febf89b4c136e9aed3ce4a73508188780a3f90033b0d9c172",
+      "originalFix": "afd132a10782fb8a6f1fe35ef39604940baf79c0",
+      "sourceHashes": {
+        "base": "5d01ab7d5925a492ac8b47bbd0eac6526d8d4df2a83ff5e132e1902bd678dfd5",
+        "repair": "44e19279ec6151e37c146d6f9897814901c6021bf3d956a215a309f2aa91894b"
+      },
+      "number": 217,
+      "id": "corr-eslint-line-comment-position-clean",
+      "caseId": "corr-source-eslint-line-comment-position",
+      "testRef": "4ad3164004a2611219e00b609abf511171f31ed2",
+      "runtime": "locks/eslint/537e29783b428d3b",
+      "lockSha256": "41ee1a35fa66a58ae7b3e561b3d0911a975fb9f0b8c040801c94f6f7481aad51",
+      "publishedStages": {
+        "base": {
+          "total": 34,
+          "failed": 1,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair": {
+          "total": 34,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        },
+        "base-adapted": {
+          "total": 34,
+          "failed": 1,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair-adapted": {
+          "total": 34,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        }
+      },
+      "adaptedHashes": {
+        "base": "cf45afaca38ee84102ef22c536d5e28cf11aed687bbdee8328555d7a4797009d",
+        "repair": "304d04e63a45bc42885038612067c9dcb3acc71ef3d8b35edaab0bc8e751da6f"
+      },
+      "licenses": [
+        "licenses/eslint-ddb12c093973.txt"
+      ]
+    },
+    {
+      "tag": "Bug-227-fix",
+      "bug": "6c5f2062e8d207a84c0cb8080e65018bc7da6166",
+      "fix": "67feae962f66509527b7976cda5398cd8d0c1339",
+      "rule": "lib/rules/no-fallthrough.js",
+      "test": "tests/lib/rules/no-fallthrough.js",
+      "version": "0.8.2",
+      "archiveSha256": "cdd523bca1fc980d12bff197bff009ed082a64564e1edee6abd7c59eba16747c",
+      "testFixtureArchiveSha256": "2b102e29c03d600417f798a390cf698927ad87095cbf42e9d1bd65e74b38fd0d",
+      "sourceTestSha256": "1fe88ce7736e5861c226ebfc08b40955f3202b7ae5daff6d1504197bacc27358",
+      "originalFix": "b8793d9cdba4b1e77e0e5aaa9e565aa735ac1d42",
+      "sourceHashes": {
+        "base": "c00872e5df0310d240dc574619e1ff1d34f70a05584a524833438a1956678c83",
+        "repair": "b2ca9563e1477fb2b3781292e13d44fc43a0a7eae35f554e8b4a0d25d1cd8f9e"
+      },
+      "number": 227,
+      "id": "corr-eslint-no-fallthrough-clean",
+      "caseId": "corr-source-eslint-no-fallthrough",
+      "testRef": "eb0f8ee3a4bc339797681b5e608a2d83a12c7342",
+      "runtime": "locks/eslint/aa048443490312d9",
+      "lockSha256": "2f04ae57b492da71e04cd71e197223da5951bb28e5d89f868829b5abbf3383c9",
+      "publishedStages": {
+        "base": {
+          "total": 21,
+          "failed": 1,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair": {
+          "total": 21,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        },
+        "base-adapted": {
+          "total": 21,
+          "failed": 1,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair-adapted": {
+          "total": 21,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        }
+      },
+      "adaptedHashes": {
+        "base": "a12426040bc13af6ec3f8e7cda48891bed27ab1b2470fe625c9e487b63fc7d12",
+        "repair": "e5546215cf657ca6eebbdb5686079727e7a6321c5f7224ca577aad4ca023c31a"
+      },
+      "licenses": [
+        "licenses/eslint-9b8270febdcc.txt"
+      ]
+    },
+    {
+      "tag": "Bug-243-fix",
+      "bug": "55ac30235afa25fb0f19b3bde62b948a055eacfa",
+      "fix": "b2c3922ce9214f2659e3ed4b2e02c9c0d28d702d",
+      "rule": "lib/rules/unicode-bom.js",
+      "test": "tests/lib/rules/unicode-bom.js",
+      "version": "3.15.0",
+      "archiveSha256": "91efc93b1eafd40996719505c8ab1565fb53032a5d74461fa21d155b250391e4",
+      "testFixtureArchiveSha256": "cda6558ae29b994d6701df09d613d94e8a95c710b40489d6d4bdcd7197d30f72",
+      "sourceTestSha256": "836702f88444446a1051db94728bc0f9b995465a6694900739120d182165ade5",
+      "originalFix": "c53e03417a9710f6be69937b328585b90e1c16b3",
+      "sourceHashes": {
+        "base": "58bc73ff08b0cbd52ee72553d516e5d95183bc69cd798d06fcbbbd2bc7c5fa2d",
+        "repair": "d14afaeb5b006584782cd0ae84b83b0ecf68f06b35a98135815d5c6736c40b8f"
+      },
+      "number": 243,
+      "id": "corr-eslint-unicode-bom-clean",
+      "caseId": "corr-source-eslint-unicode-bom",
+      "testRef": "845b797a4741f5f5d2e8c4ab9f8d9b34531490ee",
+      "runtime": "locks/eslint/752f7ea15cb33eea",
+      "lockSha256": "601f4b315d6e2733b5b34676a5816a226f43d7baa9f91847fac5494c55bb1d8c",
+      "publishedStages": {
+        "base": {
+          "total": 7,
+          "failed": 1,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair": {
+          "total": 7,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        },
+        "base-adapted": {
+          "total": 7,
+          "failed": 1,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair-adapted": {
+          "total": 7,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        }
+      },
+      "adaptedHashes": {
+        "base": "22ddb29af7e05b8079804081345ee55367c088dcaaf24d91ed44a2a351c6bae8",
+        "repair": "d81f7a2871d654f115217e050736c4e74e897d44bf1ea70fbf0e7c5e4f7664c6"
+      },
+      "licenses": [
+        "licenses/eslint-24f36230f107.txt"
+      ]
+    },
+    {
+      "tag": "Bug-244-fix",
+      "bug": "00dd96c6fd4065c8a947f25d37d60155e502da00",
+      "fix": "79f38311001db7612a3aec9743fbe1d5351356ff",
+      "rule": "lib/rules/no-implied-eval.js",
+      "test": "tests/lib/rules/no-implied-eval.js",
+      "version": "3.12.2",
+      "archiveSha256": "ed191fa4bd9fffdcc3812d904a1a8fb0ef63b55424c9c82c44d7214ddbf5c95c",
+      "testFixtureArchiveSha256": "0eff1cd1e6790b0a1ca12a2adf40ed6c2f0507d91acef19900e12644b7d602e8",
+      "sourceTestSha256": "3808f7556c997a4c77f61f73fb712ea35f7660c444b38b1d298315cdf13ada69",
+      "originalFix": "c5c3b21257f1307a8f627c3488874a2f5214e79a",
+      "sourceHashes": {
+        "base": "0712599c0b06cb1d43c03a010c81266d53d2cd4b979323b1d5efe6c4fd977b78",
+        "repair": "2cc74d2639d7249ccbfcaa08f169564a701c3d2850c03ef5aa6f078d0c1e2d45"
+      },
+      "number": 244,
+      "id": "corr-eslint-no-implied-eval-clean",
+      "caseId": "corr-source-eslint-no-implied-eval",
+      "testRef": "e9ec6b3c4d62d5903341322036c211965ac8fbb6",
+      "runtime": "locks/eslint/7bc31d7da087050c",
+      "lockSha256": "d83cc6934a13f8804c368fb579e9dfedee5236dc57d938adfc43e4dcdffefd55",
+      "publishedStages": {
+        "base": {
+          "total": 29,
+          "failed": 1,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair": {
+          "total": 29,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        },
+        "base-adapted": {
+          "total": 29,
+          "failed": 1,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair-adapted": {
+          "total": 29,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        }
+      },
+      "adaptedHashes": {
+        "base": "6a0e7888e9ed96874f5034fa7861a52413e03748bbdf5b985f339d5f6a66791d",
+        "repair": "5e9ded9516b0aa5a38ec037b14ee314bc4f46f3c28ef24b1490775a609654a69"
+      },
+      "licenses": [
+        "licenses/eslint-24f36230f107.txt"
+      ]
+    },
+    {
+      "tag": "Bug-251-fix",
+      "bug": "cb1c91a336e338a84ce5ceaaa8fe4b07444c49cc",
+      "fix": "1efbc26e37005ad8025b2cca7ca548826aa49c70",
+      "rule": "lib/rules/newline-per-chained-call.js",
+      "test": "tests/lib/rules/newline-per-chained-call.js",
+      "version": "2.0.0",
+      "archiveSha256": "bc0aa591496fa29dcbf1bf0f4b96f3b3ab4966be3f77285216e74f7345acf4d8",
+      "testFixtureArchiveSha256": "0caef3e0204eddd3355488f4274cc4bff1794f7040d5c205e7b117994ee20568",
+      "sourceTestSha256": "85ad345a7c699cfb8b7984883ef6c7a52ad7ed3fb856131f092ab466c71a9ba8",
+      "originalFix": "c9c34ea7ecc13d1f90e728c0cccb97bdf96aa5a6",
+      "sourceHashes": {
+        "base": "12a0920de4fa2babf8b80162154525f249dbeb8a275e33844974cdf924bad2bf",
+        "repair": "abfe0c60269ab66261cfef41204d699905106363eab1dfbd4aa480fcd88e1c63"
+      },
+      "number": 251,
+      "id": "corr-eslint-newline-per-chained-call-clean",
+      "caseId": "corr-source-eslint-newline-per-chained-call",
+      "testRef": "7670d7e74495f31911ff34ac01c94f9de212a0f6",
+      "runtime": "locks/eslint/1b9f66d3433a5f97",
+      "lockSha256": "2a459c24af191df1e476ed1a3d42f6935a341dcb7f6382e288210ad67d618715",
+      "publishedStages": {
+        "base": {
+          "total": 18,
+          "failed": 2,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair": {
+          "total": 18,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        },
+        "base-adapted": {
+          "total": 18,
+          "failed": 2,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair-adapted": {
+          "total": 18,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        }
+      },
+      "adaptedHashes": {
+        "base": "992d992e9289d908c7f87313a11b43d16a5e0b7bb1d754a20283cc8cde7ab4da",
+        "repair": "c4ba1629c844e647516061f2c5c9bccb76c2e45cd5c2b05398b09bab5af07c1b"
+      },
+      "licenses": [
+        "licenses/eslint-9b8270febdcc.txt"
+      ]
+    },
+    {
+      "tag": "Bug-257-fix",
+      "bug": "3f206dd1074842fe4554bd50091b234475560ba6",
+      "fix": "f420a353ceb032bf8652f681a928c45435da1b50",
+      "rule": "lib/rules/func-names.js",
+      "test": "tests/lib/rules/func-names.js",
+      "version": "3.1.0",
+      "archiveSha256": "01cfbb74e1ecc0b666797d9c1e359ac221c26b71e2d37417dbf060bc518ffb2a",
+      "testFixtureArchiveSha256": "7a231091ff4e3a4434d2d9d7191745b30f2240b64c029624efe740c4bc57b7b4",
+      "sourceTestSha256": "69e9ef545c511e6ad6f8bfba9dfb389c2df5d2d1a2cda2ad1b3074f885d7cdba",
+      "originalFix": "cb90359d965e4a18284f58992e8ea75580ae21ed",
+      "sourceHashes": {
+        "base": "7ecbcc2e12e530384e78a8fbc1cd5629bb40a5ea17b4aadda33d0e54f6b7e666",
+        "repair": "4b2fb4ff426009d97a52b351373a2f84a8e301b9e0fc948458bc217b3e663873"
+      },
+      "number": 257,
+      "id": "corr-eslint-func-names-clean",
+      "caseId": "corr-source-eslint-recursive-function-context",
+      "testRef": "4a38aa0070206299566782378b00ecae9982a70a",
+      "runtime": "locks/eslint/3ae62e71320d861d",
+      "lockSha256": "a9ffda7ee88fd48b00ec19779c206b9cf018c911a4d3084dcf384a1db28ebc25",
+      "publishedStages": {
+        "base": {
+          "total": 27,
+          "failed": 1,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair": {
+          "total": 27,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        },
+        "base-adapted": {
+          "total": 27,
+          "failed": 1,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair-adapted": {
+          "total": 27,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        }
+      },
+      "adaptedHashes": {
+        "base": "843113a9ff54562efb48ecb2f6bd4ccaf90856704808931087fd3bc4df099b0c",
+        "repair": "9a4769cd40782cc19138c65ef6a686d80fdd7f77cf912775d09dd41f6b4c5186"
+      },
+      "licenses": [
+        "licenses/eslint-ddb12c093973.txt"
+      ]
+    },
+    {
+      "tag": "Bug-263-fix",
+      "bug": "290fb1f82bdad5fbc06307c467449c1b9b82ed31",
+      "fix": "3e4f7d61a3cba4c75090ae9b28098fe8d1ef2f14",
+      "rule": "lib/rules/no-lone-blocks.js",
+      "test": "tests/lib/rules/no-lone-blocks.js",
+      "version": "3.15.0",
+      "archiveSha256": "d381603f89009a8e3d5344d60ca25e7455ff331fb8dc73a2bb39c3b071948e62",
+      "testFixtureArchiveSha256": "87e658884f0efbbe802768085f1de0f1cefc729cca710548bf2b3876832e4e1b",
+      "sourceTestSha256": "2739e37a5f142db475b76c1318ccd7905c5a72f1cb71ab67030e0c3d47970f09",
+      "originalFix": "cfb65c5ce3810ddba9455000712ef812589e2860",
+      "sourceHashes": {
+        "base": "e7cd499d5f9c07710e35d777b70c08fba66089b44456f159bb9920cbd4d9ba7f",
+        "repair": "36ebb7a4ceba20e817d72790115054f5091886b9f9131adac55f05a128f51f49"
+      },
+      "number": 263,
+      "id": "corr-eslint-no-lone-blocks-clean",
+      "caseId": "corr-source-eslint-no-lone-blocks",
+      "testRef": "dcd373910b236048289fae2cf29d70de63eb9217",
+      "runtime": "locks/eslint/752f7ea15cb33eea",
+      "lockSha256": "601f4b315d6e2733b5b34676a5816a226f43d7baa9f91847fac5494c55bb1d8c",
+      "publishedStages": {
+        "base": {
+          "total": 28,
+          "failed": 2,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair": {
+          "total": 28,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        },
+        "base-adapted": {
+          "total": 28,
+          "failed": 2,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair-adapted": {
+          "total": 28,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        }
+      },
+      "adaptedHashes": {
+        "base": "e0c8eec4ca1bd65dbff79e8ff60f21a3fb64f76fa9cda073fdb0854095236996",
+        "repair": "f284447cb97900ac199e6e427c17ebb1d58608d22a3db780523bf6fcee4b4c21"
+      },
+      "licenses": [
+        "licenses/eslint-24f36230f107.txt"
+      ]
+    },
+    {
+      "tag": "Bug-264-fix",
+      "bug": "6b08cfc75c49c9873cdf3e1676e1092bfd2a8d65",
+      "fix": "959f24f9db6838a0b1e8b6ac51958b49550b2b18",
+      "rule": "lib/rules/no-extra-semi.js",
+      "test": "tests/lib/rules/no-extra-semi.js",
+      "version": "2.12.0",
+      "archiveSha256": "c98611fb10cf17cedcda156f0c6e1a8a1735169ae5aa83a2d457819a595695d6",
+      "testFixtureArchiveSha256": "f1568374aac41a55f099edf55bc9658534b66fbf9654049d0aed5c09cb0ba565",
+      "sourceTestSha256": "8d4e7d927705d68fd5b800a081d2d4c921f22cb768cecd2d9d7b23e831a92441",
+      "originalFix": "cfdd5249dd0b1f18239bf6ee6af17e8dd578366a",
+      "sourceHashes": {
+        "base": "ce7c76f504422833eddefeb7940d36a41e7049c48fbdf913d48e58a19e7c1dd7",
+        "repair": "1bf924edfe9256ec9887061b02e2727e6de7532d2ae74e3e239833488d58a2e2"
+      },
+      "number": 264,
+      "id": "corr-eslint-no-extra-semi-clean",
+      "caseId": "corr-source-eslint-no-extra-semi",
+      "testRef": "9a9328df9e6d17b1e421851750285e0f4c529d8a",
+      "runtime": "locks/eslint/2eda3afc32de813f",
+      "lockSha256": "adf9d33c265704e2f4b7789d22d51d965e5e9427aa0b490f1c2692e7af783e2d",
+      "publishedStages": {
+        "base": {
+          "total": 38,
+          "failed": 8,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair": {
+          "total": 38,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        },
+        "base-adapted": {
+          "total": 38,
+          "failed": 8,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair-adapted": {
+          "total": 38,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        }
+      },
+      "adaptedHashes": {
+        "base": "9008b9ec62b394b45d9964099e97a84c3d27232fedd476227179c3b742c6258a",
+        "repair": "dea3a95c140f5424148ed9eb1f057bb6e4d6a596994276211219f0f55a7eba53"
+      },
+      "licenses": [
+        "licenses/eslint-ddb12c093973.txt"
+      ]
+    },
+    {
+      "tag": "Bug-305-fix",
+      "bug": "da77eb4bfd42cf84bfcd8c490811152a533055f2",
+      "fix": "dedae45bc03c800adf77e449aa8fba037f17a173",
+      "rule": "lib/rules/no-constant-condition.js",
+      "test": "tests/lib/rules/no-constant-condition.js",
+      "version": "4.9.0",
+      "archiveSha256": "af69fa0934f193656c61cb4f2799c65f0794c9fd36c27f1a5becc4cadc93e82d",
+      "testFixtureArchiveSha256": "d956987abdf56cb2cd5a1cb590a83240b464c5e9898e6a5b414a70e3affa9364",
+      "sourceTestSha256": "3eddf463d6d85c8ceda462b150d159538a0e5352f50b69977990d5a3ea675206",
+      "originalFix": "eb8cfb1cc738753a1e8175926f5ea240fcf51b07",
+      "sourceHashes": {
+        "base": "9df4020d7a651dd94dd7f7373db29026b9220a95490caef1416d7d270cf6bd78",
+        "repair": "1cc6a560e5a283b83f043bd54c23bb1bc6ef98a4c74ce9e430b1248b120da726"
+      },
+      "number": 305,
+      "id": "corr-eslint-no-constant-condition-clean",
+      "caseId": "corr-source-eslint-no-constant-condition",
+      "testRef": "ad38c1c522772e8bca342f266cd3b0aa2ee64feb",
+      "runtime": "locks/eslint/aa04ab3dbb55033c",
+      "lockSha256": "1924617a7ea4893dcf0920e9ee71e620ea6e64f8a6004005a4b235bbf7fa19c7",
+      "publishedStages": {
+        "base": {
+          "total": 87,
+          "failed": 47,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair": {
+          "total": 87,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        },
+        "base-adapted": {
+          "total": 87,
+          "failed": 47,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair-adapted": {
+          "total": 87,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        }
+      },
+      "adaptedHashes": {
+        "base": "8342142eb5a387c84554ba543584f1d68c14289e532da7dc7707b64f33163fdd",
+        "repair": "bc58710109b697ccf67036ca3aa5e38e80462102b14fd42d58e1c191d0ec0465"
+      },
+      "licenses": [
+        "licenses/eslint-db83f2ede67f.txt"
+      ]
+    },
+    {
+      "tag": "Bug-308-fix",
+      "bug": "d4f55268edb762d77bcde4ce7b3c71868ed08a1a",
+      "fix": "48b2473b67eea8ce98cc7bb91f85de3a8cc39ce5",
+      "rule": "lib/rules/newline-before-return.js",
+      "test": "tests/lib/rules/newline-before-return.js",
+      "version": "2.10.2",
+      "archiveSha256": "dedfd533df33b962b6539a1db7ced1480d8f3c964ee5e82c88be726700694f37",
+      "testFixtureArchiveSha256": "2207a287ecea961d02578cd5fc378eca0ab1a809e65492df898f1304b9c9c2ec",
+      "sourceTestSha256": "b6e602f413f77579be36339b9d4ed5d795718c1565aa9c6ff2af787e83c97dd1",
+      "originalFix": "ee0cd5871b69c15e023d3f8b893761b5cc246d34",
+      "sourceHashes": {
+        "base": "6d24f02263a8d789fd55b616ddca845d9afb387d30ab6387349558ae11cd633b",
+        "repair": "fea1725a530cd6b375929b01fa7196bb94adb186006003605ff64ae2a3cc910b"
+      },
+      "number": 308,
+      "id": "corr-eslint-newline-before-return-clean",
+      "caseId": "corr-source-eslint-newline-before-return",
+      "testRef": "7b19a4e6db0845e36869cfbcab6eadd058cf1ec1",
+      "runtime": "locks/eslint/5593a58754f3f86b",
+      "lockSha256": "42a119ab20adac7a2783dce04464bd86898d64656415cd5641a02d78a7024e9a",
+      "publishedStages": {
+        "base": {
+          "total": 73,
+          "failed": 5,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair": {
+          "total": 73,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        },
+        "base-adapted": {
+          "total": 73,
+          "failed": 5,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair-adapted": {
+          "total": 73,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        }
+      },
+      "adaptedHashes": {
+        "base": "54bffbcc966d9c9205719099bb2b16f4b76cabdb289f601e8d299ac890e97de8",
+        "repair": "1a8047170aeef09552f8b041a0dfb352277a6f66d243daa02b265e4d79c757e7"
+      },
+      "licenses": [
+        "licenses/eslint-ddb12c093973.txt"
+      ]
+    },
+    {
+      "tag": "Bug-309-fix",
+      "bug": "cd1b0574f1af79d189259f4e1a255230d24b37ee",
+      "fix": "d456ed94b29f794116c51de37faf44a2453ea1a8",
+      "rule": "lib/rules/object-shorthand.js",
+      "test": "tests/lib/rules/object-shorthand.js",
+      "version": "2.9.0",
+      "archiveSha256": "890f21978c0665c1350d3489ec51f04169b4dfcb82d905670329b14cfe4c4d5f",
+      "testFixtureArchiveSha256": "e58eac907544424adf03da96cc7dd75459bd509b75921a39bb6ffe8564d2d722",
+      "sourceTestSha256": "1b3736977839dd32dc951e1c7fc1e933de7d9132ddb90819b957a64a3bb5d7bf",
+      "originalFix": "ef8cbffe79c61c5813dfad5716929c4c31759d0c",
+      "sourceHashes": {
+        "base": "2b3ed21c4ed1094b9b5ff783035ee46f5f38062e8676b470e183ea3e51ffd172",
+        "repair": "634a626dc711b6a208bacb9856d47cf275570c9cb8f31a84d6603f47befa1d34"
+      },
+      "number": 309,
+      "id": "corr-eslint-object-shorthand-clean",
+      "caseId": "corr-source-eslint-object-shorthand",
+      "testRef": "abbeab56e73c175d2c808ab3f241049c36c4b79b",
+      "runtime": "locks/eslint/9aa6a6d488cfdb21",
+      "lockSha256": "e3148f520295ecfd24fc99321101d7140d8db8a4aca768adab439d3df2db7631",
+      "publishedStages": {
+        "base": {
+          "total": 84,
+          "failed": 1,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair": {
+          "total": 84,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        },
+        "base-adapted": {
+          "total": 84,
+          "failed": 1,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair-adapted": {
+          "total": 84,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        }
+      },
+      "adaptedHashes": {
+        "base": "1adbc34b01f0e9ff38eb9fee25cdf686e6d77e5ce97615dbb8c2ed6b42300667",
+        "repair": "ad2d0cbf0109fa2df207fb35a96f1c0d32d1c766d694b1831eb61205a16952a0"
+      },
+      "licenses": [
+        "licenses/eslint-ddb12c093973.txt"
+      ]
+    },
+    {
+      "tag": "Bug-314-fix",
+      "bug": "8b78697f1c2f20fda8a4ec53819be76be3de2193",
+      "fix": "e7da0ba8de64300d1daed2a1f9404b511972a25d",
+      "rule": "lib/rules/no-return-assign.js",
+      "test": "tests/lib/rules/no-return-assign.js",
+      "version": "2.10.0",
+      "archiveSha256": "2ce8e97605b21617317e5a545198846aed06493fbaf429e7b07b4e7063d24103",
+      "testFixtureArchiveSha256": "6778841159607f7090e1111df19c2841eda8e63542d648e4b0a8c47eeaa6a7f1",
+      "sourceTestSha256": "1c8baf2918b8309ea323aff4ded61d957ac0c754fae637c879c29fe17ec0bc4f",
+      "originalFix": "f33e49ffbc7414b747b3345489ca90c004762821",
+      "sourceHashes": {
+        "base": "43dfdd17a7be3acdaedf2753f8a18d989245a89ca16c5630fa6444862938062f",
+        "repair": "b71962ef09409cb861fa514193e30ecd7103d3cb6953d383c9b73c01635b9523"
+      },
+      "number": 314,
+      "id": "corr-eslint-no-return-assign-clean",
+      "caseId": "corr-source-eslint-explicit-parentheses-context",
+      "testRef": "6642aeb0a48814b7718716e5c6554b6e3dff2f45",
+      "runtime": "locks/eslint/9aa6a6d488cfdb21",
+      "lockSha256": "e3148f520295ecfd24fc99321101d7140d8db8a4aca768adab439d3df2db7631",
+      "publishedStages": {
+        "base": {
+          "total": 19,
+          "failed": 1,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair": {
+          "total": 19,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        },
+        "base-adapted": {
+          "total": 19,
+          "failed": 1,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair-adapted": {
+          "total": 19,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        }
+      },
+      "adaptedHashes": {
+        "base": "74297dfb863b6f0573802ce0ba4a4dc5a975edb97ab6e5f1cc318df3cabd9e9b",
+        "repair": "71adc7c43679d613b10c806f99008440f131dd57802ea8a567450135e9ef2d66"
+      },
+      "licenses": [
+        "licenses/eslint-ddb12c093973.txt"
+      ]
+    },
+    {
+      "tag": "Bug-315-fix",
+      "bug": "3e9936371df8235c1dfe5f7d58fad4632e45e975",
+      "fix": "7debeb21011e32691a7185d6631b596115dd3bb3",
+      "rule": "lib/rules/no-await-in-loop.js",
+      "test": "tests/lib/rules/no-await-in-loop.js",
+      "version": "4.18.0",
+      "archiveSha256": "bcc2f1afccef8bf763ffaf7cca84521eb52c048044601f0c08097fdd057949f3",
+      "testFixtureArchiveSha256": "11893897186cd4ac1faf102abc37427b7558fcceb99951399d66537d50d27992",
+      "sourceTestSha256": "63ee079fa5d566558fb688c63dc12cd44c436ee6af4939c23b4b812bcc4036b8",
+      "originalFix": "f417506198d2ab8deca1e6127c164cef882d356f",
+      "sourceHashes": {
+        "base": "d588c5ce4efe7a13fa8bd69675234ad615058ba5dee3d07a238b26818cc71de3",
+        "repair": "d8cb0ebd22fe588d754c993fe42634fdb2d9bd0b4d726cb3cd1f87bf4821d2b8"
+      },
+      "number": 315,
+      "id": "corr-eslint-no-await-in-loop-clean",
+      "caseId": "corr-source-eslint-no-await-in-loop",
+      "testRef": "8001779f51b070ef22eba77624521d0e5ac0c43a",
+      "runtime": "locks/eslint/2df81fe8602bb92c",
+      "lockSha256": "6f4ee7bbe90d07f9e68aa782503cc4233cf810142b7f4e28ffbcc1a0fb948a7b",
+      "publishedStages": {
+        "base": {
+          "total": 27,
+          "failed": 11,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair": {
+          "total": 27,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        },
+        "base-adapted": {
+          "total": 27,
+          "failed": 11,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair-adapted": {
+          "total": 27,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        }
+      },
+      "adaptedHashes": {
+        "base": "a1b2f5cf39605e8bbb13dafb59ab8d0aa32f6bb387d1efe9c15ae83e1b40569d",
+        "repair": "6f1f2ff6eeb819bd99ee6779353700ba0df996500359ec79af858272db600e45"
+      },
+      "licenses": [
+        "licenses/eslint-db83f2ede67f.txt"
+      ]
+    },
+    {
+      "tag": "Bug-318-fix",
+      "bug": "59e12db5963cb8a4a34d669cff28f83dd71bf3d6",
+      "fix": "8f60470f54c3d9ee5bf94a70b8aeea0738a1bc02",
+      "rule": "lib/rules/use-isnan.js",
+      "test": "tests/lib/rules/use-isnan.js",
+      "version": "0.10.0",
+      "archiveSha256": "9e52e300a6bf96dd5a7d7def9c1bff64ec450ec834c18798cfd591347b8a59a5",
+      "testFixtureArchiveSha256": "0c1c433eecebe68d60c9c7a80cec36f2cad7db851921ac446bf3c83caaf44ced",
+      "sourceTestSha256": "ffa35e76043f3c1372fff661919f1782d2b3bb58e6165da888c7f4f50a37f713",
+      "originalFix": "f5679a94b22fbfd1e11f7659b0e6471fc7c51eca",
+      "sourceHashes": {
+        "base": "5c15f35f5c49bef5faddcdbd11b7ec3aba0d907ca69d42db463307022600306f",
+        "repair": "ecf042ec9a0b61a17d1d13ac27dfbee017bd24de1a6b35f5cc3ce9395494ef4a"
+      },
+      "number": 318,
+      "id": "corr-eslint-use-isnan-clean",
+      "caseId": "corr-source-eslint-use-isnan",
+      "testRef": "2a0afa0355aa9c443e442fa848bea28ae1f34740",
+      "runtime": "locks/eslint/b75665c88f08fd0c",
+      "lockSha256": "5d5c4fb92026a571557052934b17eb17a525f0daed0e7f2c7336212ef8fdba38",
+      "publishedStages": {
+        "base": {
+          "total": 30,
+          "failed": 8,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair": {
+          "total": 30,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        },
+        "base-adapted": {
+          "total": 30,
+          "failed": 8,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair-adapted": {
+          "total": 30,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        }
+      },
+      "adaptedHashes": {
+        "base": "56d6e399b4a62c279f5d53032eebab80efc4ac806316b29d4520db8dc895d219",
+        "repair": "658076ad75a5d240fc34fea60ca356969c6451e7338b51a6f35a03677b290ef1"
+      },
+      "licenses": [
+        "licenses/eslint-9b8270febdcc.txt"
+      ]
+    },
+    {
+      "tag": "Bug-321-fix",
+      "bug": "41e3d9ce08b1a7f1f97d878a439b0143d19c7084",
+      "fix": "f88161251fd2aca880ee055868329e1601a699a2",
+      "rule": "lib/rules/nonblock-statement-body-position.js",
+      "test": "tests/lib/rules/nonblock-statement-body-position.js",
+      "version": "3.17.0",
+      "archiveSha256": "b569268ab559a7163ac28672b9d9d6fdc960cd9336323db70aac10b807d740a2",
+      "testFixtureArchiveSha256": "81c3b94da27eeae986e5d368ae16b1664c723d3d48c1ae6b2c64cfc56745d117",
+      "sourceTestSha256": "9a917d58f0950d8b5d963ab3034cca03189a2ac618338794a8af7eeeaeb7a0bb",
+      "originalFix": "f713f11793f910d5a8356bba8d21ee5b0a0f5408",
+      "sourceHashes": {
+        "base": "a8feb8d016ef009775b3160106812ff86dd666fda691f40d32c4bf3a0c088431",
+        "repair": "8ccde4672527805b63dfa42c70581c9c27bbe85dfaa8b7936a1cdc52568168f1"
+      },
+      "number": 321,
+      "id": "corr-eslint-nonblock-statement-body-position-clean",
+      "caseId": "corr-source-eslint-nonblock-statement-body-position",
+      "testRef": "31262a21c4693a79a392ee37a0a9bd9f1e901113",
+      "runtime": "locks/eslint/752f7ea15cb33eea",
+      "lockSha256": "601f4b315d6e2733b5b34676a5816a226f43d7baa9f91847fac5494c55bb1d8c",
+      "publishedStages": {
+        "base": {
+          "total": 48,
+          "failed": 1,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair": {
+          "total": 48,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        },
+        "base-adapted": {
+          "total": 48,
+          "failed": 1,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair-adapted": {
+          "total": 48,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        }
+      },
+      "adaptedHashes": {
+        "base": "6d8372a9ec73f496de945bff88c8d69d146784198686d0b217013cfe9f2a23ea",
+        "repair": "a2e087b8cd40fdb45de88d7ef5a3d6197133be61a8ac34979ea43afac4dd84f7"
+      },
+      "licenses": [
+        "licenses/eslint-24f36230f107.txt"
+      ]
+    },
+    {
+      "tag": "Bug-328-fix",
+      "bug": "c6718f2d6ff84b09e0c349921d748ca06c1355c7",
+      "fix": "0c338e86b6e4a07c3139df2c44a87c81d38e25c2",
+      "rule": "lib/rules/lines-around-comment.js",
+      "test": "tests/lib/rules/lines-around-comment.js",
+      "version": "0.22.1",
+      "archiveSha256": "9802883459a24c81cfb1ad3f375cb6259d5b9cd3362f4c21329c70882506f164",
+      "testFixtureArchiveSha256": "c68f4da1c54d266c83a37d12f929302c4d4dd84251bb02c74b96883276f47151",
+      "sourceTestSha256": "0e3fbcc397a93d6b267f43f1d1a42c32b07508a82057edbc894812f01ad11e2d",
+      "originalFix": "fae4be834dfa220f635cf8cdf04de5ec1abea848",
+      "sourceHashes": {
+        "base": "824313599de60d2ec3fc8f064905a9b44c05ca4bb31739fc3d5ec2b89a9e471f",
+        "repair": "67efaed70da3213fb56511dc54018474da17a921110ecb7915b10d6bd4012597"
+      },
+      "number": 328,
+      "id": "corr-eslint-lines-around-comment-clean",
+      "caseId": "corr-source-eslint-lines-around-comment",
+      "testRef": "371561e4bd3c28ea556f81201b565c0c020b8d74",
+      "runtime": "locks/eslint/8a6dd56de9fcfec9",
+      "lockSha256": "4c82abcc567bd408ae223011fce7cf2061f3fbc363e1eb3d8f2351ea5234005f",
+      "publishedStages": {
+        "base": {
+          "total": 26,
+          "failed": 2,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair": {
+          "total": 26,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        },
+        "base-adapted": {
+          "total": 26,
+          "failed": 2,
+          "fatal": null,
+          "unsupported": []
+        },
+        "repair-adapted": {
+          "total": 26,
+          "failed": 0,
+          "fatal": null,
+          "unsupported": []
+        }
+      },
+      "adaptedHashes": {
+        "base": "bbecd141403a36ecc1f9c23c353c83310937b04ff0787e0360e300ea858bcf15",
+        "repair": "043f838e79244b21cb6238ef243cee1731a216922d92a1954905be7a8b2a2f73"
+      },
+      "licenses": [
+        "licenses/eslint-9b8270febdcc.txt"
+      ]
+    }
+  ]
+}
