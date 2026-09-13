@@ -1,0 +1,92 @@
+{
+  "schemaVersion": 1,
+  "kind": "source-qualification-comparison-preparation",
+  "ticket": 3144,
+  "status": "blocked-confirmation-and-native-registration",
+  "executionReady": false,
+  "productionPromotion": false,
+  "question": "Does caller-source delivery or reachability/lens guidance improve detection of the introduced lost retry while accepting its scoped repair?",
+  "sourceRevision": "7ac50cdda59e958bbbb402179c3ea36623f07847",
+  "cohort": {
+    "path": "vue-proposals.json",
+    "sha256": "7debcaa9d63af7d9d3b1e5a3b4bd6c79c3dbb028cb2b73b410add4c57f83561e",
+    "ids": ["corr-async-view-unmounted-retry", "corr-async-view-unmounted-retry-repaired"],
+    "family": "corr-async-view-unmounted-retry",
+    "role": "exposed-development",
+    "provenance": "adapted; not known-answer absolute recall"
+  },
+  "confirmation": {
+    "source": "https://github.com/TanStack/query/pull/11172",
+    "role": "reserved before treatment outputs; qualification-exposed",
+    "status": "not-ready",
+    "missing": [
+      "Establish passing base or explicitly justified derived baseline",
+      "Adapt and audit both pair members",
+      "Freeze exact rows, controls and hashes before development execution"
+    ]
+  },
+  "arms": {
+    "B": "Unmodified native baseline",
+    "P": {
+      "patch": "../2026-09-06-correctness-reachable-witness/agent.patch",
+      "sha256": "c122d1824f36c60286eaa176892aa224f365cb2f5b07c40d5b90da8f05c31f64"
+    },
+    "L": {
+      "patch": "../2026-09-06-correctness-reachable-witness/lens-rules.patch",
+      "sha256": "506c1f88ef515702ba624699e3bc041a8112947baace783b2df8537bb7a26a4d",
+      "limitation": "Two-rule bundle, not isolated effects"
+    },
+    "C": {
+      "baseline": "B",
+      "packet": {
+        "files": [
+          {
+            "path": "src/view-host.mjs",
+            "sha256": "3b16aaae8b088dc54faf7abdda3b039e1d6571e4c8174e5515d053df1c0bb45e"
+          }
+        ],
+        "text": "Supplemental source context (unchanged files; not part of the staged diff):\n\nFILE: src/view-host.mjs\n// A definition is reused; each mount owns a separate instance and setup state.\nexport function mountView(definition, onError) {\n  const instance = { isUnmounted: false, onError };\n  const render = definition.setup(instance);\n  return {\n    unmount() { instance.isUnmounted = true; },\n    read() { const view = render(); return view ? view() : null; },\n  };\n}\n",
+        "sha256": "43ec7be7eb90855f2acc6219168ab1856046b18fec48fe49ea885ab9e018ad7c"
+      },
+      "delivery": "Exact unchanged caller bytes; same source available through native tools in every arm; no expected labels or control results."
+    }
+  },
+  "schedule": {
+    "rounds": [
+      ["B", "P", "L", "C"],
+      ["C", "L", "P", "B"]
+    ],
+    "withinArm": ["corr-async-view-unmounted-retry", "corr-async-view-unmounted-retry-repaired"],
+    "rowExecutions": 16,
+    "nativeTasksPerRow": 4,
+    "plannedLensTasks": 64,
+    "model": "gpt-5.6-sol",
+    "chunkCap": 400,
+    "groups": [
+      ["state-transitions"],
+      ["concurrency-races"],
+      ["writer-reader-contracts"],
+      ["error-and-edge-classification"]
+    ],
+    "cascade": "off",
+    "concurrency": 1,
+    "manualQualityRetries": 0,
+    "manualExecutionRetries": 0,
+    "nativeTechnicalAttempts": "Retain native attempts separately; 64 is planned lens tasks, not an API-call ceiling. Freeze resolved retry/timeout bounds in the executable registration before starting.",
+    "failurePolicy": "Retain every quality miss/error/incomplete cell; no selective reruns."
+  },
+  "reporting": [
+    "Scope results to this one adapted development family; no general precision/recall claim",
+    "Audit actual target diagnosis plus every extra claim, not only verdict/regex agreement",
+    "Keep correlated sibling and repeated outputs visible; no independent-sample confidence claim",
+    "No production promotion from this family"
+  ],
+  "readinessRequirements": [
+    "Complete confirmation qualification and freeze its family before any development outputs",
+    "Review new native comparison registration; current loader accepts only frozen PR605 protocol",
+    "Coordinate any corpus admission with historical corpus pin preservation and explicit exposed-family selection",
+    "Validate C packet isolation and native scored execution parity for this new roster",
+    "Pin effective assets, model capabilities, timeout, technical attempt ceiling and all executable artifacts"
+  ],
+  "executionCommand": null
+}

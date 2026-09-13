@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "definition": "SHA-256 of exact UTF-8 file bytes; evidence consistency only, not provenance truth. Self excluded.",
+  "files": [
+    {
+      "path": "README.md",
+      "sha256": "d11b05bd3bdfe5cfa4c0ad7dd52e908ce92676336257ccccb594592dfca615e6"
+    },
+    {
+      "path": "VUE-LICENSE.txt",
+      "sha256": "49190d1f742dd61e47fe816df4963e5186a2a62100d9122f9883a60ea32973ac"
+    },
+    {
+      "path": "comparison-plan.json",
+      "sha256": "0cb26ce87fa065011811dc9bfc743dd8edf9b766cd2bcb21c385b645c84a2179"
+    },
+    {
+      "path": "controls.mjs",
+      "sha256": "0e9b8ab3fd90fa841eb12afce37176474fa0efaf885772118e866a28adf0677c"
+    },
+    {
+      "path": "qualification.json",
+      "sha256": "c8ca66eec9b1bca116c6ade115bfb92b0f0e2b669dab41793c76c41cbebb4b8b"
+    },
+    {
+      "path": "vue-proposals.json",
+      "sha256": "7debcaa9d63af7d9d3b1e5a3b4bd6c79c3dbb028cb2b73b410add4c57f83561e"
+    },
+    {
+      "path": "vue-recovery.spec.ts.txt",
+      "sha256": "bfbf401c9d76b975823243e7e272d0e3e32f97dd3826fdb0193b447ba28a4c82"
+    }
+  ]
+}
