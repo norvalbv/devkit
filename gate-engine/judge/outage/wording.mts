@@ -1,6 +1,7 @@
 /** How a classified outage reads to the operator, and what it tells them to do next. Split from
  *  classify.mts so the decision stays separable from its phrasing; all pure, so all unit-testable. */
 import { classifyJudgeOutage, formatResetDelta, type JudgeError } from './classify.mts';
+import { familyOverrideRemedy } from './family-override.mts';
 
 // Shared by both runners so the twin catch blocks cannot diverge. Both name the BINARY that went
 // dark: "check claude auth" on a codex outage sends the operator to the wrong subscription.
@@ -71,10 +72,13 @@ export function strictRemedy(
     // subscription and puts its verdicts outside the model-keyed cache salt (review-gate-in-chain).
     return (
       `\`${bin}\` reports its usage limit reached — re-running cannot succeed ${window}. Either ` +
-      'wait it out, or move the judges to another family: `devkit doctor --fix` binds the claude ' +
-      'family when codex is unresolvable, or set GUARD_REVIEW_MODEL / ' +
-      'GUARD_REVIEW_ESCALATION_MODEL / GUARD_CORRECTNESS_MODEL to claude-family ids for this run'
+      `wait it out, or ${familyOverrideRemedy(bin)}`
     );
   }
-  return `check \`${bin}\` CLI auth/quota, then re-run devkit ship`;
+  // The generic cause covers a MISSING and an unauthenticated binary alike, and a missing one is the
+  // single state `devkit doctor --fix` can bind — so the redirect belongs here too, after the check.
+  return (
+    `check \`${bin}\` CLI auth/quota, then re-run devkit ship. If that CLI is absent, or the ` +
+    `account stays dark longer than the ship can wait, ${familyOverrideRemedy(bin)}`
+  );
 }

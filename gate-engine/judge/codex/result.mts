@@ -369,6 +369,17 @@ export function judgeBinForModel(model: string | null): string {
   return isCodexModel(model) ? codexBin() : 'claude';
 }
 
+/** Which provider a bin judgeBinForModel produced belongs to, or null for a compound or foreign one. */
+// The bin is an executable PATH once GUARD_CODEX_BIN is set, so "is it codex" compares against the
+// same resolution that produced it rather than against the literal word.
+export function judgeProviderOfBin(bin: string): 'codex' | 'claude' | null {
+  const codex = codexBin();
+  // GUARD_CODEX_BIN=claude makes both routes print the same name, so that bin names neither provider.
+  if (bin === codex && bin === 'claude') return null;
+  if (bin === 'claude') return 'claude';
+  return bin === codex ? 'codex' : null;
+}
+
 /** The verdict text: the LAST completed `agent_message` in the JSONL stream, or null when none
  * parses — the spawn layer then falls back to the raw bytes, same fail-safe as the claude path. */
 export function unwrapCodexResult(raw: string | null): string | null {

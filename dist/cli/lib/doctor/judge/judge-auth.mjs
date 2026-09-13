@@ -11,7 +11,7 @@
  */
 import { spawnSync } from 'node:child_process';
 import { check } from '../check-result.mjs';
-import { requiredJudgeProviders } from './judge-family.mjs';
+import { requiredJudgeProviders, } from './judge-family.mjs';
 export const JUDGE_AUTH_CHECK = 'judge auth';
 const PROBE_TIMEOUT_MS = 5000;
 const runProbe = (bin, args) => {
@@ -54,8 +54,8 @@ export function codexLoggedOut(exec = runProbe) {
         return false;
     return /^\s*not logged in\s*\.?\s*$/im.test(`${r.stdout}\n${r.stderr}`);
 }
-export function judgeAuthResult(cfg, exec = runProbe) {
-    const providers = requiredJudgeProviders(cfg);
+export function judgeAuthResult(cfg, exec = runProbe, guards) {
+    const providers = requiredJudgeProviders(cfg, guards);
     const dead = [];
     if (providers.has('codex') && codexLoggedOut(exec))
         dead.push('codex');

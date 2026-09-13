@@ -2,23 +2,25 @@
 /** Report the judges' provider before the deterministic chain is paid (sc-2538). ADVISORY — never
  *  blocks, reports per MODEL. Why: docs/decisions/judge-outage-classified-not-blocked.md. */
 import { realpathSync } from 'node:fs';
-import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { resolveGuardConfig } from '../../../../gate-engine/config.mts';
 import { readCodexRateLimits } from '../../../../gate-engine/judge/codex/rate-limits.mts';
 import { isCodexModel, judgeBinForModel } from '../../../../gate-engine/judge/codex/result.mts';
 import { formatResetDelta } from '../../../../gate-engine/judge/outage/classify.mts';
+import { familyOverrideRemedy } from '../../../../gate-engine/judge/outage/family-override.mts';
 import { claudeLoggedOut, codexLoggedOut } from '../../doctor/judge/judge-auth.mts';
-import { binResolvable, resolvedJudgeModels } from '../../doctor/judge/judge-family.mts';
-import { readJson } from '../../fs-helpers.mts';
-
-/** The three roles, in the order a cascade reaches them, for a report that reads like the run. */
-const ROLES = ['review', 'escalation', 'correctness'] as const;
+import {
+  binResolvable,
+  type JudgeGuards,
+  type JudgeRole,
+  recordedJudgeGuards,
+  resolvedJudgeRoles,
+} from '../../doctor/judge/judge-family.mts';
 
 type Reachability = 'ok' | 'absent' | 'unauthenticated' | 'rate-limited' | 'unknown';
 
 interface ModelStatus {
-  role: (typeof ROLES)[number];
+  role: JudgeRole;
   model: string;
   bin: string;
   state: Reachability;
@@ -30,25 +32,14 @@ interface ModelStatus {
   windowMins?: number;
 }
 
-interface DevkitConfig {
-  components?: { guards?: string[] };
+/** Which judge-spawning guards are selected? A repo that runs no judges must be byte-identical to
+ *  before. Mirrors the `reviewSelected` gating in cli/lib/doctor/guard-config-checks.mts. */
+export function selectedJudgeGuards(root: string): JudgeGuards {
+  // An unreadable record is not evidence either way; silence is the advisory-safe reading here.
+  return recordedJudgeGuards(root) ?? { review: false, sentry: false };
 }
 
-/** Is the reviewer gate even selected? A repo that runs no judges must be byte-identical to
- *  before. Mirrors the `reviewSelected` gating in cli/lib/doctor/guard-config-checks.mts. */
-export function reviewGuardSelected(root: string): boolean {
-  try {
-    return (
-      readJson<DevkitConfig>(join(root, '.devkit', 'config.json'))?.components?.guards?.includes(
-        'review',
-      ) === true
-    );
-  } catch {
-    // An unparseable or absent recorded selection is not evidence either way. Staying silent is the
-    // advisory-safe reading: this check may never be the reason anything changes.
-    return false;
-  }
-}
+export const reviewGuardSelected = (root: string): boolean => selectedJudgeGuards(root).review;
 
 export interface PreflightDeps {
   resolvable: (name: 'codex' | 'claude', cwd: string) => boolean;
@@ -69,9 +60,11 @@ const DEFAULT_DEPS: PreflightDeps = {
 export async function judgeReachability(
   root: string,
   deps: PreflightDeps = DEFAULT_DEPS,
+  guards: JudgeGuards = { review: true, sentry: false },
 ): Promise<ModelStatus[]> {
   const cfg = resolveGuardConfig(root);
-  const models = resolvedJudgeModels(cfg);
+  const roles = resolvedJudgeRoles(cfg, guards);
+  const models = roles.map((r) => r.model);
   const statuses: ModelStatus[] = [];
 
   // Resolved once per provider, not per model: three roles on one subscription share one answer,
@@ -85,9 +78,9 @@ export async function judgeReachability(
   const claudePresent = claudeNeeded && deps.resolvable('claude', root);
   const claudeDark = claudePresent && deps.claudeOut();
 
-  for (const [i, model] of models.entries()) {
+  for (const { role, model } of roles) {
     const bin = judgeBinForModel(model);
-    const status: ModelStatus = { role: ROLES[i], model, bin, state: 'unknown' };
+    const status: ModelStatus = { role, model, bin, state: 'unknown' };
     if (isCodexModel(model)) {
       if (!codexPresent) status.state = 'absent';
       else if (codexDark) status.state = 'unauthenticated';
@@ -164,10 +157,11 @@ export function renderPreflight(statuses: ModelStatus[], now: number = Date.now(
     );
   // Naming the override, never taking it: a runtime cross-family swap moves spend to an unwatched
   // subscription and puts its verdicts outside the model-keyed cache salt (review-gate-in-chain).
+  const dark = [...new Set(blocked.map((s) => s.bin))];
   lines.push(
-    '   To ship inside this window, move the judges to another family: `devkit doctor --fix` ' +
-      'binds the claude family when codex is unresolvable, or set GUARD_REVIEW_MODEL / ' +
-      'GUARD_REVIEW_ESCALATION_MODEL / GUARD_CORRECTNESS_MODEL to claude-family ids for this run.',
+    dark.length > 1
+      ? '   Both judge CLIs are dark, so no family move helps — install or authenticate one of them.'
+      : `   To ship inside this window, ${familyOverrideRemedy(dark[0] ?? 'codex')}.`,
   );
   return lines;
 }
@@ -178,8 +172,9 @@ async function main(argv: string[]): Promise<number> {
     console.error('usage: ship preflight judge <consumer-root>');
     return 2;
   }
-  if (!reviewGuardSelected(root)) return 0;
-  const statuses = await judgeReachability(root);
+  const guards = selectedJudgeGuards(root);
+  if (!guards.review && !guards.sentry) return 0;
+  const statuses = await judgeReachability(root, DEFAULT_DEPS, guards);
   for (const line of renderPreflight(statuses)) console.error(line);
   return 0;
 }

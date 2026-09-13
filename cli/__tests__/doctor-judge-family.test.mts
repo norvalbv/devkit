@@ -1,4 +1,4 @@
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -9,9 +9,12 @@ import {
   CLAUDE_FAMILY_SET,
   claudeBindable,
   claudeRuntimeResult,
+  activeModelEnvOverrides,
   explicitFamilyKeys,
   FAMILY_PROVENANCE_KEY,
+  FAMILY_PROVENANCE_TEXT,
   familyStaleResult,
+  recordedJudgeGuards,
   requiredJudgeProviders,
 } from '../lib/doctor/judge/judge-family.mts';
 
@@ -23,6 +26,8 @@ const envKeys = [
   'GUARD_REVIEW_ESCALATION_MODEL',
   'GUARD_CORRECTNESS_MODEL',
   'GUARD_CORRECTNESS_CHUNK',
+  'GUARD_SENTRY_MODEL',
+  'FRINK_SENTRY_MODEL',
 ] as const;
 const savedEnv: Partial<Record<(typeof envKeys)[number], string | undefined>> = {};
 const roots: string[] = [];
@@ -77,6 +82,11 @@ type FixtureConfig = Omit<typeof TEMPLATE_CONFIG, 'review'> & {
       '//judgeFamily': string;
     }>;
 };
+
+function recordGuards(repo: string, guards: string[]): void {
+  mkdirSync(join(repo, '.devkit'), { recursive: true });
+  writeFileSync(join(repo, '.devkit', 'config.json'), JSON.stringify({ components: { guards } }));
+}
 
 function repoWith(config: FixtureConfig): string {
   const d = tmp();
@@ -164,6 +174,15 @@ describe('bindClaudeFamily', () => {
     expect(bindClaudeFamily(repo)).toBe(false);
   });
 
+  // The operator docs tell you to remove a bind only when the marker holds doctor's EXACT text; a
+  // paraphrase there sends the reader comparing against a string doctor never writes.
+  it('both operator docs quote the provenance marker verbatim', () => {
+    for (const doc of ['docs/troubleshooting.md', 'skills/commit-gates/SKILL.md'])
+      expect(readFileSync(join(__dirname, '..', '..', doc), 'utf8')).toContain(
+        FAMILY_PROVENANCE_TEXT,
+      );
+  });
+
   it('the claude set matches the documented claude-era example values', () => {
     const example = JSON.parse(
       readFileSync(join(__dirname, '..', '..', 'guard.config.example.json'), 'utf8'),
@@ -226,6 +245,117 @@ describe('claudeRuntimeResult', () => {
     expect(claudeRuntimeResult(cfg, repo)?.status).toBe('DRIFT');
     process.env.PATH = binDir('claude', 'codex');
     expect(claudeRuntimeResult(cfg, repo)).toBeNull();
+  });
+});
+
+// sc-2689: the sentry judge selects a real model but sat outside the resolved set, so a pin at a
+// provider with no runtime was reported by nothing.
+describe('the sentry judge counts as a required provider', () => {
+  it('a claude sentry pin over an all-Codex family newly requires claude', () => {
+    const repo = repoWith(TEMPLATE_CONFIG);
+    process.env.PATH = binDir('codex');
+    expect(requiredJudgeProviders(resolveGuardConfig(repo))).toEqual(new Set(['codex']));
+    process.env.GUARD_SENTRY_MODEL = 'haiku';
+    expect(requiredJudgeProviders(resolveGuardConfig(repo))).toEqual(new Set(['codex', 'claude']));
+    expect(claudeRuntimeResult(resolveGuardConfig(repo), repo)?.status).toBe('DRIFT');
+  });
+
+  it('a blank sentry pin requires nothing new — it is unset, not a claude selection', () => {
+    const repo = repoWith(TEMPLATE_CONFIG);
+    process.env.PATH = binDir('codex');
+    process.env.GUARD_SENTRY_MODEL = '  ';
+    expect(requiredJudgeProviders(resolveGuardConfig(repo))).toEqual(new Set(['codex']));
+    expect(claudeRuntimeResult(resolveGuardConfig(repo), repo)).toBeNull();
+  });
+});
+
+// The deliberate boundary (sc-2689): GUARD_SENTRY_MODEL shadows NONE of the four keys the binder
+// writes, so refusing a bind under it would disable a repair that works.
+describe('which envs may refuse a bind', () => {
+  it('a family env blocks the bind and is named; the sentry env does neither', () => {
+    const repo = repoWith(TEMPLATE_CONFIG);
+    process.env.PATH = binDir('claude');
+    expect(claudeBindable(repo)).toBe(true);
+    expect(activeModelEnvOverrides()).toEqual([]);
+
+    process.env.GUARD_SENTRY_MODEL = 'haiku';
+    expect(activeModelEnvOverrides()).toEqual([]);
+    expect(claudeBindable(repo)).toBe(true);
+
+    process.env.GUARD_CORRECTNESS_MODEL = 'sonnet';
+    expect(activeModelEnvOverrides()).toEqual(['GUARD_CORRECTNESS_MODEL']);
+    expect(claudeBindable(repo)).toBe(false);
+  });
+
+  // The completeness judge caught this on sc-2689's own ship: a CODEX sentry pin survives the bind,
+  // so "bound" would be a partial move that still fails the strict ship closed.
+  it('a codex sentry pin refuses the bind and is named — it would stay on the dark provider', () => {
+    const repo = repoWith(TEMPLATE_CONFIG);
+    process.env.PATH = binDir('claude');
+    process.env.GUARD_SENTRY_MODEL = 'gpt-5.6-sol';
+    expect(activeModelEnvOverrides()).toEqual(['GUARD_SENTRY_MODEL']);
+    expect(claudeBindable(repo)).toBe(false);
+    expect(bindClaudeFamily(repo)).toBe(false);
+    delete process.env.GUARD_SENTRY_MODEL;
+    process.env.FRINK_SENTRY_MODEL = 'gpt-5.6-terra@high';
+    expect(activeModelEnvOverrides()).toEqual(['FRINK_SENTRY_MODEL']);
+    // A blank GUARD_ does not shadow the FRINK_ value that actually pins the judge — name that one.
+    process.env.GUARD_SENTRY_MODEL = '';
+    expect(activeModelEnvOverrides()).toEqual(['FRINK_SENTRY_MODEL']);
+  });
+
+  // sc-2689's ship gates: an env for a judge the install never spawns must not block a working repair.
+  it('refusal follows the installed judges — an env for a judge that never runs blocks nothing', () => {
+    const repo = repoWith(TEMPLATE_CONFIG);
+    process.env.PATH = binDir('claude');
+
+    recordGuards(repo, ['review']);
+    process.env.GUARD_SENTRY_MODEL = 'gpt-5.6-sol';
+    expect(activeModelEnvOverrides({ review: true, sentry: false })).toEqual([]);
+    expect(claudeBindable(repo)).toBe(true);
+    delete process.env.GUARD_SENTRY_MODEL;
+
+    recordGuards(repo, ['sentry']);
+    process.env.GUARD_CORRECTNESS_MODEL = 'gpt-5.6-sol';
+    expect(claudeBindable(repo)).toBe(true);
+    // The sentry judge falls back to review.model, so that pin still shadows a sentry-only bind.
+    process.env.GUARD_REVIEW_MODEL = 'gpt-5.6-sol';
+    expect(activeModelEnvOverrides({ review: false, sentry: true })).toEqual([
+      'GUARD_REVIEW_MODEL',
+    ]);
+    expect(claudeBindable(repo)).toBe(false);
+    expect(bindClaudeFamily(repo)).toBe(false);
+  });
+
+  // The writer owns every precondition: it re-reads the selection at write time, so a selection that
+  // changes after a caller's snapshot (a concurrent init) is the one the bind obeys.
+  it('the writer reads the recorded selection itself — never a stale caller snapshot', () => {
+    const repo = repoWith(TEMPLATE_CONFIG);
+    process.env.PATH = binDir('claude');
+    process.env.GUARD_SENTRY_MODEL = 'gpt-5.6-sol';
+    recordGuards(repo, ['review']);
+    expect(claudeBindable(repo)).toBe(true);
+    recordGuards(repo, ['review', 'sentry']);
+    expect(claudeBindable(repo)).toBe(false);
+    expect(bindClaudeFamily(repo)).toBe(false);
+  });
+
+  it('an unreadable selection refuses as though every judge were installed', () => {
+    const repo = repoWith(TEMPLATE_CONFIG);
+    process.env.PATH = binDir('claude');
+    process.env.GUARD_SENTRY_MODEL = 'gpt-5.6-sol';
+    mkdirSync(join(repo, '.devkit'), { recursive: true });
+    writeFileSync(join(repo, '.devkit', 'config.json'), '{ not json');
+    expect(recordedJudgeGuards(repo)).toBeNull();
+    expect(claudeBindable(repo)).toBe(false);
+  });
+
+  it('a whitespace-only family env is not an override — it pins nothing, so it blocks nothing', () => {
+    const repo = repoWith(TEMPLATE_CONFIG);
+    process.env.PATH = binDir('claude');
+    process.env.GUARD_REVIEW_MODEL = '   ';
+    expect(activeModelEnvOverrides()).toEqual([]);
+    expect(claudeBindable(repo)).toBe(true);
   });
 });
 

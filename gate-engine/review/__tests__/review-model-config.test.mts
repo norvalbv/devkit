@@ -1,14 +1,18 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { resolveGuardConfig, resolveGuardConfigJson } from '../../config.mts';
+import { CLAUDE_FAMILY_SET, JUDGE_MODEL_ENVS } from '../../judge/outage/family-override.mts';
 import { reviewerTargetSalts } from '../evidence/targets-block.mts';
 import {
   correctnessModel,
   resolveEscalationModel,
   resolveReviewModel,
+  resolveSentryModel,
+  REVIEWERS,
   selectReviewers,
+  sentryModelOverride,
 } from '../reviewers.mts';
 
 // sc-2107/sc-2054: the judge knobs resolve env > guard.config.json > package defaults (the
@@ -21,6 +25,9 @@ const envKeys = [
   'FRINK_REVIEW_MODEL',
   'GUARD_REVIEW_ESCALATION_MODEL',
   'GUARD_CORRECTNESS_MODEL',
+  'GUARD_CORRECTNESS_CHUNK',
+  'GUARD_SENTRY_MODEL',
+  'FRINK_SENTRY_MODEL',
 ] as const;
 const savedEnv: Partial<Record<(typeof envKeys)[number], string | undefined>> = {};
 const roots: string[] = [];
@@ -46,6 +53,8 @@ interface ReviewConfigFile {
     escalationModel?: string;
     correctnessModel?: string;
     correctnessChunkLoc?: number;
+    backendRoots?: string[];
+    frontendRoots?: string[];
     paths?: { include?: string[]; exclude?: string[] };
   };
 }
@@ -184,5 +193,107 @@ describe('the judging model is part of verdict-cache identity (sc-2053)', () => 
       expect(a.get(name)).toBe(b.get(name));
       expect(a.get(name)).not.toContain('escalate:');
     }
+  });
+});
+
+// sc-2689: the operator who set the two knobs devkit printed got a PARTIAL move and a ship that
+// still failed closed. These pin that the published set is COMPLETE and stays that way.
+describe('the published knob set moves every judge — and no knob can hide from it', () => {
+  const ALL = { backendRoots: ['src'], frontendRoots: ['web'] };
+  const staged = ['src/a.ts', 'web/b.tsx'];
+  const isCodex = (m: string) => m.startsWith('gpt-');
+
+  it('the fixture really selects every reviewer — otherwise the sweep below proves nothing', () => {
+    expect(selectReviewers(staged, cfgIn({ review: ALL })).length).toBe(REVIEWERS.length);
+  });
+
+  it('with the claude family set, no judge — cascade, pinned or sentry — resolves a gpt-* model', () => {
+    const cfg = cfgIn({ review: { ...ALL, ...CLAUDE_FAMILY_SET } });
+    expect(isCodex(resolveReviewModel(cfg))).toBe(false);
+    expect(isCodex(resolveEscalationModel(cfg))).toBe(false);
+    expect(isCodex(correctnessModel(cfg))).toBe(false);
+    expect(isCodex(resolveSentryModel(cfg))).toBe(false);
+    expect(cfg.review.correctnessChunkLoc).toBe(0);
+    for (const s of selectReviewers(staged, cfg))
+      if (s.reviewer.model) expect(isCodex(s.reviewer.model)).toBe(false);
+  });
+
+  // Fails when a future reviewer carries a static `model` that selectReviewers forgets to
+  // re-resolve: it lands in `pinned` but never in `rewritten`.
+  it('every statically-pinned reviewer is re-resolved by selectReviewers', () => {
+    const cfg = cfgIn({
+      review: { ...ALL, model: 'haiku', escalationModel: 'opus', correctnessModel: 'sonnet' },
+    });
+    const shipped = new Map(REVIEWERS.map((r) => [r.name, r.model]));
+    const pinned = new Set(REVIEWERS.filter((r) => r.model !== undefined).map((r) => r.name));
+    const rewritten = new Set(
+      selectReviewers(staged, cfg)
+        .filter(
+          (s) =>
+            s.reviewer.model !== undefined && s.reviewer.model !== shipped.get(s.reviewer.name),
+        )
+        .map((s) => s.reviewer.name),
+    );
+    expect(rewritten).toEqual(pinned);
+  });
+
+  // The ratchet: a new envModel()/envVar() model knob anywhere in the engine fails here until it
+  // joins the table the remedy, the doctor and the docs all render from.
+  it('every model env the engine reads is published in JUDGE_MODEL_ENVS', () => {
+    const src = ['../reviewers.mts', '../../sentry/check-sentry.mts', '../lens/chunk-tasks.mts']
+      .map((p) => readFileSync(new URL(p, import.meta.url), 'utf8'))
+      .join('\n');
+    const names = new Set<string>();
+    for (const m of src.matchAll(/envModel\(['"]([A-Z_]+)['"]\)/g)) names.add(m[1]);
+    for (const m of src.matchAll(/envVar\(['"]([A-Z_]+)['"]\)/g)) names.add(`GUARD_${m[1]}`);
+    for (const m of src.matchAll(/process\.env\.(GUARD_[A-Z_]+)/g)) names.add(m[1]);
+    const knobs = [...names].filter((n) => /MODEL|CHUNK/.test(n));
+    expect(knobs.length).toBeGreaterThan(0);
+    for (const n of knobs) expect(JUDGE_MODEL_ENVS).toContain(n);
+  });
+});
+
+// The sentry judge is the one model knob with no config key of its own, so its blank/alias
+// behaviour has to match the other three rather than being rediscovered per call site.
+describe('the sentry judge resolves like its three siblings', () => {
+  const cfg = () => cfgIn({ review: { model: 'haiku' } });
+
+  it('unset, it follows review.model — one family move carries it (sc-2190)', () => {
+    expect(sentryModelOverride()).toBeUndefined();
+    expect(resolveSentryModel(cfg())).toBe('haiku');
+    process.env.GUARD_REVIEW_MODEL = 'opus';
+    expect(resolveSentryModel(cfg())).toBe('opus');
+  });
+
+  it('set, it overrides review.model', () => {
+    process.env.GUARD_SENTRY_MODEL = 'gpt-5.6-sol';
+    expect(sentryModelOverride()).toBe('gpt-5.6-sol');
+    expect(resolveSentryModel(cfg())).toBe('gpt-5.6-sol');
+  });
+
+  // The same rule the other three keep: a blank env is UNSET, not a pin. Without it the sentry
+  // spawn receives `--model ''` and the doctor reports a role whose model is the empty string.
+  it('a blank or whitespace value is unset, never a pin — a blank --model must be unreachable', () => {
+    process.env.GUARD_SENTRY_MODEL = '';
+    expect(sentryModelOverride()).toBeUndefined();
+    expect(resolveSentryModel(cfg())).toBe('haiku');
+    process.env.GUARD_SENTRY_MODEL = '   ';
+    expect(sentryModelOverride()).toBeUndefined();
+    expect(resolveSentryModel(cfg())).toBe('haiku');
+  });
+
+  // The chain resolveReviewModel keeps: a blank GUARD_ falls through to FRINK_, never shadows it.
+  it('a blank GUARD_ value falls through to the FRINK_ alias rather than hiding it', () => {
+    process.env.GUARD_SENTRY_MODEL = '  ';
+    process.env.FRINK_SENTRY_MODEL = 'sonnet';
+    expect(sentryModelOverride()).toBe('sonnet');
+    expect(resolveSentryModel(cfg())).toBe('sonnet');
+  });
+
+  it('honours the FRINK_ alias, and GUARD_ wins when both are set', () => {
+    process.env.FRINK_SENTRY_MODEL = 'sonnet';
+    expect(resolveSentryModel(cfg())).toBe('sonnet');
+    process.env.GUARD_SENTRY_MODEL = 'opus';
+    expect(resolveSentryModel(cfg())).toBe('opus');
   });
 });

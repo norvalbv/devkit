@@ -90,7 +90,10 @@ describe('runCompleteness — a rate-limited judge', () => {
     const out = err.mock.calls.flat().join('\n');
     expect(out).toContain('SKIPPED (judge hit the provider usage limit)');
     expect(out).toMatch(/for another \d+d/);
-    expect(out).toContain('devkit doctor --fix');
+    // The fixture pins the CLAUDE family, so the lever is the codex direction — and `doctor --fix`
+    // is deliberately absent from it: the binder only ever writes claude, never back to codex.
+    expect(out).toContain('unset GUARD_REVIEW_MODEL');
+    expect(out).toContain('the packaged codex family');
     expect(out).not.toContain('CLI auth/quota, then re-run devkit ship');
   });
 });
