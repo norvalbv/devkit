@@ -40,7 +40,9 @@ function repo(pkg: Record<string, unknown>, review: ReviewRoots | null) {
 }
 
 const topologyRow = async (root: string) =>
-  (await checkGuardConfig(root, false, false)).find((r) => r.name === REVIEW_TOPOLOGY_CHECK);
+  (await checkGuardConfig(root, false, false, { review: false, sentry: false })).find(
+    (r) => r.name === REVIEW_TOPOLOGY_CHECK,
+  );
 
 const REACT = { dependencies: { react: '^19.0.0' } };
 const ELECTRON = { dependencies: { electron: '^30.0.0' } };
@@ -117,7 +119,10 @@ describe('the topology row inside checkGuardConfig', () => {
   });
 
   it('never double-reports what the validity check already owns', async () => {
-    const missing = await checkGuardConfig(repo(REACT, null), false, false);
+    const missing = await checkGuardConfig(repo(REACT, null), false, false, {
+      review: false,
+      sentry: false,
+    });
     expect(missing.map((r) => r.name)).toEqual(['guard.config.json']);
     const corrupt = repo(REACT, roots([], []));
     writeFileSync(join(corrupt, 'guard.config.json'), '{ not json');

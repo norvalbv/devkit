@@ -72,11 +72,11 @@ import { emitGateBypass, emitGateEvent } from '../judge/gate-events.mjs';
 import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from '../judge/judge-isolation.mjs';
 import { reportGateInfraFailure } from '../judge/odb-probe.mjs';
 import { execJudge } from '../judge/run-judge.mjs';
-import { resolveReviewModel } from '../review/reviewers.mjs';
+import { resolveSentryModel } from '../review/reviewers.mjs';
 import { buildEvidence, degradeCause, renderInventory } from './evidence.mjs';
 import { judgeSentryWithCache } from './verdict-cache.mjs';
 const CWD = process.cwd();
-const modelSpec = () => envVar('SENTRY_MODEL') ?? resolveReviewModel(resolveGuardConfig(CWD));
+const modelSpec = () => resolveSentryModel(resolveGuardConfig(CWD));
 /** Confidence contract: a run that can BLOCK votes a 3-sample majority; warn-only spends 1. A positive *_SENTRY_SAMPLES always wins (unset/invalid → the default). */
 export function resolveSamples(hard) {
     const env = Number(envVar('SENTRY_SAMPLES') ?? '');

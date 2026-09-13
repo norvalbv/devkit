@@ -9,7 +9,7 @@ import { detectGitRoot } from '../lib/detect-git-root.mjs';
 import { checkAgentAssets, checkRegistrations } from '../lib/doctor/asset-checks.mjs';
 import { check } from '../lib/doctor/check-result.mjs';
 import { checkExtends, EXTENDS_REPAIRABLE, expectedExtends, repairExtends, } from '../lib/doctor/extends-checks.mjs';
-import { checkGuardConfig, CODEX_RUNTIME_CHECK, SEARCH_INDEX_CHECK, } from '../lib/doctor/guard-config-checks.mjs';
+import { checkGuardConfig, judgeGuardsOf, CODEX_RUNTIME_CHECK, SEARCH_INDEX_CHECK, } from '../lib/doctor/guard-config-checks.mjs';
 import { bindClaudeFamily } from '../lib/doctor/judge/judge-family.mjs';
 import { printQavisAdvisoryHealth } from '../lib/doctor/qavis-health.mjs';
 import { hookChecks } from '../lib/doctor/hook-checks.mjs';
@@ -262,7 +262,7 @@ async function collectResults(cwd, cfg, configResult) {
         if (on)
             results.push(checkExtends(cwd, file, want, 'extends', overrides.has(file)));
     if (sel.guards?.length || sel.structure)
-        results.push(...(await checkGuardConfig(cwd, sel.guards?.includes('dup') === true, sel.searchCode === true, sel.guards?.includes('review') === true)));
+        results.push(...(await checkGuardConfig(cwd, sel.guards?.includes('dup') === true, sel.searchCode === true, judgeGuardsOf(sel.guards))));
     if (sel.structure && sel.husky)
         results.push(checkStructureLint(cwd, stack));
     const hooks = selectedHookAssets(sel);

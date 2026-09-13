@@ -91,6 +91,58 @@ specific conditions under which that control is appropriate:
 - `GUARD_DECISIONS_INTEGRITY_OK=1` — assert that a NEW structural finding on a decision record in
   this change is wrong (Devkit's own repo only; findings already present at HEAD never block).
 
+## Judge outage: re-targeting, not bypassing
+
+A judge that cannot run is not a finding. Under `devkit ship` a dark provider fails the gate closed
+with exit 3, and the printed remedy names the CLI that went dark and why: missing, logged out, or a
+usage limit with the wait it carries. Re-running clears none of those.
+
+The lever is moving every judge away from the CLI the remedy names. It skips nothing — the same
+reviewers still run, judged elsewhere — so it is not a `GUARD_NO_*` bypass and does not need the
+authorization those require. Run it in the shell the ship runs in.
+
+`codex` dark — all four knobs, never a subset, plus any sentry pin:
+
+```
+export GUARD_REVIEW_MODEL=haiku GUARD_REVIEW_ESCALATION_MODEL=opus \
+  GUARD_CORRECTNESS_MODEL=sonnet GUARD_CORRECTNESS_CHUNK=off
+unset GUARD_SENTRY_MODEL FRINK_SENTRY_MODEL
+devkit ship --resume <branch>
+```
+
+`claude` dark — back to the packaged codex family (also the way back once a codex outage clears):
+
+```
+unset GUARD_REVIEW_MODEL FRINK_REVIEW_MODEL GUARD_REVIEW_ESCALATION_MODEL \
+  GUARD_CORRECTNESS_MODEL GUARD_CORRECTNESS_CHUNK GUARD_SENTRY_MODEL FRINK_SENTRY_MODEL
+```
+
+If `guard.config.json` carries `review["//judgeFamily"]` equal to exactly this string, a doctor bind
+is in force:
+
+```
+claude family bound by devkit doctor --fix (codex binary was unresolvable). Explicit edits and GUARD_* envs win; delete these four keys to return to package defaults.
+```
+
+Unsetting alone leaves that bind in place: delete that key plus `model`, `escalationModel`, `correctnessModel` and
+`correctnessChunkLoc` by hand, commit, then `devkit ship --resume <branch>`. Any other value there is
+an operator's note, and those keys are operator-owned — leave them.
+
+A remedy naming both (`` `codex` or `claude` ``) means one judge spans both families and either may be
+dark; find which with `devkit doctor` before moving anything.
+
+- Export or unset; never prefix the command. A command-rewriting shell hook can strip an inline
+  `VAR=x devkit ship`, the same rule that governs `SHIP_COMMIT_TIMEOUT`.
+- All four, because the correctness chunk cap is benched for `gpt-5.6-sol` only; a three-knob move
+  runs the correctness reviewer at a cap never measured for it.
+- A sentry pin under either spelling stays where it points until cleared, so both blocks unset it;
+  doctor will not bind while one pins codex.
+- `devkit doctor --fix` writes the same four keys into `guard.config.json`, which a ship reads from
+  the base commit — so that route needs the file committed first, and it only ever binds toward
+  Claude. The claude-dark step above says how to remove that bind by hand.
+- Either route re-judges everything: a cached PASS is keyed on the model that earned it. Claude's
+  remaining headroom cannot be queried, so nothing warns before it runs out.
+
 Consumers may retain legacy aliases, but Devkit's printed `GUARD_*` spelling is canonical. A
 consumer can also have hand-authored gates outside the `devkit-guards` block; use that repository's
 own documentation for those rather than assuming a Devkit bypass applies.

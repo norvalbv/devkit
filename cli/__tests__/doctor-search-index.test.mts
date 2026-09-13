@@ -154,7 +154,7 @@ describe('doctor — the silence cases (a false positive here punishes every con
     const { root } = repo();
     writeIndex(root);
     process.env.GUARD_INDEX_PATH = join(root, '.search-code', 'index.db');
-    const results = await checkGuardConfig(root, true, false);
+    const results = await checkGuardConfig(root, true, false, { review: false, sentry: false });
     expect(results.find((r) => r.name === CHECK)?.status).toBe('OK');
   });
 });
@@ -233,7 +233,7 @@ describe('doctor — a config that does not parse', () => {
     writeFileSync(join(root, 'guard.config.json'), '{ "scanRoots": [oops');
     mkdirSync(join(root, '.search-code'), { recursive: true });
     writeFileSync(join(root, '.search-code', 'index.db'), 'stub');
-    const results = await checkGuardConfig(root, true, false);
+    const results = await checkGuardConfig(root, true, false, { review: false, sentry: false });
     expect(results).toHaveLength(1);
     expect(results[0]).toMatchObject({ name: 'guard.config.json', status: 'DRIFT' });
     expect(results.find((r) => r.name === CHECK)).toBeUndefined();

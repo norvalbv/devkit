@@ -26,6 +26,7 @@ import {
 } from '../lib/doctor/extends-checks.mts';
 import {
   checkGuardConfig,
+  judgeGuardsOf,
   CODEX_RUNTIME_CHECK,
   SEARCH_INDEX_CHECK,
 } from '../lib/doctor/guard-config-checks.mts';
@@ -353,7 +354,7 @@ async function collectResults(
         cwd,
         sel.guards?.includes('dup') === true,
         sel.searchCode === true,
-        sel.guards?.includes('review') === true,
+        judgeGuardsOf(sel.guards),
       )),
     );
   if (sel.structure && sel.husky) results.push(checkStructureLint(cwd, stack));

@@ -12,7 +12,11 @@
 
 import { spawnSync } from 'node:child_process';
 import { type CheckResult, check } from '../check-result.mts';
-import { type JudgeModelConfig, requiredJudgeProviders } from './judge-family.mts';
+import {
+  type JudgeGuards,
+  type JudgeModelConfig,
+  requiredJudgeProviders,
+} from './judge-family.mts';
 
 export const JUDGE_AUTH_CHECK = 'judge auth';
 
@@ -66,8 +70,9 @@ export function codexLoggedOut(exec: ProbeExec = runProbe): boolean {
 export function judgeAuthResult(
   cfg: JudgeModelConfig,
   exec: ProbeExec = runProbe,
+  guards?: JudgeGuards,
 ): CheckResult | null {
-  const providers = requiredJudgeProviders(cfg);
+  const providers = requiredJudgeProviders(cfg, guards);
   const dead: string[] = [];
   if (providers.has('codex') && codexLoggedOut(exec)) dead.push('codex');
   if (providers.has('claude') && claudeLoggedOut(exec)) dead.push('claude');

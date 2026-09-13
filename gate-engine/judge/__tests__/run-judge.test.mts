@@ -1,5 +1,24 @@
-import { describe, expect, it } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import {
+  claudeFamilyEnvLine,
+  familyOverrideRemedy,
+  JUDGE_MODEL_ENVS,
+  judgeEnvUnsetLine,
+} from '../outage/family-override.mts';
 import { strictRemedy, unavailableMessage } from '../run-judge.mts';
+
+// A developer who pins a codex build exports GUARD_CODEX_BIN, which turns the bare word "codex" into
+// an unknown bin; isolate it so every remedy assertion below reads the same resolution.
+let savedCodexBin: string | undefined;
+beforeEach(() => {
+  savedCodexBin = process.env.GUARD_CODEX_BIN;
+  delete process.env.GUARD_CODEX_BIN;
+});
+afterEach(() => {
+  if (savedCodexBin === undefined) delete process.env.GUARD_CODEX_BIN;
+  else process.env.GUARD_CODEX_BIN = savedCodexBin;
+});
 
 // sc-1049: a 143/SIGTERM timeout-kill is the gate's OWN contention kill, NOT auth/quota. It must not
 // read as "offline/quota/absent" (that label sent an operator chasing a phantom quota problem on a
@@ -115,8 +134,20 @@ describe('strictRemedy', () => {
     expect(strictRemedy('sync')).not.toContain('auth/quota');
   });
 
-  it('a genuine outage KEEPS the auth/quota remedy — that cause really is auth/quota', () => {
-    expect(strictRemedy('outage')).toBe('check `claude` CLI auth/quota, then re-run devkit ship');
+  it('a genuine outage LEADS with the auth/quota remedy — that cause really is auth/quota', () => {
+    expect(
+      strictRemedy('outage').startsWith('check `claude` CLI auth/quota, then re-run devkit ship'),
+    ).toBe(true);
+  });
+
+  // The generic cause also covers an ABSENT binary — the one state doctor --fix can bind — so the
+  // escape hatch has to be reachable from here, not only from the rate-limited arm.
+  it('a genuine outage also names the escape hatch, in full', () => {
+    const r = strictRemedy('outage', 'codex');
+    expect(r).toContain('GUARD_REVIEW_MODEL=haiku');
+    expect(r).toContain('GUARD_CORRECTNESS_CHUNK=off');
+    expect(r).toContain('devkit doctor --fix');
+    expect(r).toContain('cached PASS is discarded');
   });
 
   // The remedy that sc-2538's operator was given for six days was "re-run devkit ship", which could
@@ -135,10 +166,100 @@ describe('strictRemedy', () => {
     expect(r).not.toContain('then re-run devkit ship');
   });
 
-  it('an outage remedy names the binary that went dark — codex outages must not say claude', () => {
+  // The DIAGNOSIS half must name only the dark binary: "check claude auth" on a codex outage sends
+  // the operator to the wrong subscription. The redirect half may name the other family, never to authenticate.
+  it('an outage remedy names the binary that went dark — codex outages must not send you to claude auth', () => {
     const r = strictRemedy('outage', 'codex');
-    expect(r).toBe('check `codex` CLI auth/quota, then re-run devkit ship');
-    expect(r).not.toContain('claude');
+    const diagnosis = r.slice(0, r.indexOf(familyOverrideRemedy('codex')));
+    expect(diagnosis).toContain('check `codex` CLI auth/quota, then re-run devkit ship');
+    expect(diagnosis).not.toContain('claude');
+    expect(r).not.toContain('check `claude`');
+    expect(r).not.toContain('claude CLI auth');
+  });
+
+  // run-review builds a COMPOUND bin when one judge's two models span both families. Either may be
+  // the dark one, so offering EITHER family could send the operator straight into the outage.
+  it('a compound dark bin names no family move — either provider may be the dark one', () => {
+    const r = strictRemedy('outage', 'codex` or `claude');
+    expect(r).toContain('no family move is safe yet');
+    expect(r).not.toContain('move the judges to the claude family');
+    expect(r).not.toContain('the packaged codex family');
+    expect(r).not.toContain('GUARD_REVIEW_MODEL=haiku');
+  });
+
+  // Both directions must move a PINNED sentry judge too, or following the remedy is a partial move.
+  it('each direction tells the operator to move a pinned sentry judge as well', () => {
+    expect(familyOverrideRemedy('claude')).toContain('GUARD_SENTRY_MODEL FRINK_SENTRY_MODEL');
+    // Unsetting alone reveals a doctor-bound claude family in guard.config.json: both steps, not either.
+    expect(familyOverrideRemedy('claude')).toContain('AND delete any review.model');
+    expect(familyOverrideRemedy('codex')).toContain('unset GUARD_SENTRY_MODEL FRINK_SENTRY_MODEL');
+  });
+
+  // A remedy is only a remedy if it RUNS. `env` lists exported variables alone, so a bare
+  // `VAR=x` line — set in the shell, invisible to `devkit ship` — fails here exactly as it does in use.
+  it('the printed export and unset commands really set and clear every knob in a child shell', () => {
+    const runEnv = (cmd: string, seed: Record<string, string> = {}) =>
+      execFileSync('sh', ['-c', `${cmd} && env`], {
+        encoding: 'utf8',
+        env: { PATH: process.env.PATH ?? '/usr/bin:/bin', ...seed },
+      }).split('\n');
+    // Seed a sentry pin under BOTH spellings: one printed command has to move that judge as well.
+    const set = runEnv(claudeFamilyEnvLine(), {
+      GUARD_SENTRY_MODEL: 'gpt-5.6-sol',
+      FRINK_SENTRY_MODEL: 'gpt-5.6-sol',
+    });
+    expect(set.some((l) => /^(GUARD|FRINK)_SENTRY_MODEL=/.test(l))).toBe(false);
+    for (const pair of [
+      'GUARD_REVIEW_MODEL=haiku',
+      'GUARD_REVIEW_ESCALATION_MODEL=opus',
+      'GUARD_CORRECTNESS_MODEL=sonnet',
+      'GUARD_CORRECTNESS_CHUNK=off',
+    ])
+      expect(set).toContain(pair);
+    const pinned = Object.fromEntries(JUDGE_MODEL_ENVS.map((k) => [k, 'gpt-5.6-sol']));
+    const cleared = runEnv(judgeEnvUnsetLine(), pinned);
+    for (const k of JUDGE_MODEL_ENVS)
+      expect(cleared.some((l) => l.startsWith(`${k}=`))).toBe(false);
+    // The remedy prints these exact commands, not a paraphrase of them.
+    expect(familyOverrideRemedy('codex')).toContain(`\`${claudeFamilyEnvLine()}\``);
+    expect(familyOverrideRemedy('claude')).toContain(`\`${judgeEnvUnsetLine()}\``);
+  });
+
+  // With GUARD_CODEX_BIN set the dark bin is a PATH, not the word "codex". Reading that as unknown
+  // withheld the four-knob hatch from exactly the operators who pinned a codex build.
+  it('a GUARD_CODEX_BIN path still reads as codex — its outage offers the claude move', () => {
+    process.env.GUARD_CODEX_BIN = '/opt/codex-0.151/bin/codex';
+    const pinned = '/opt/codex-0.151/bin/codex';
+    expect(familyOverrideRemedy(pinned)).toContain('move the judges to the claude family');
+    expect(strictRemedy('rate-limited', pinned)).toContain(claudeFamilyEnvLine());
+    // Once pinned, the bare word no longer names the codex build the gate would spawn.
+    expect(familyOverrideRemedy('codex')).toContain('no family move is safe yet');
+    expect(familyOverrideRemedy(`${pinned}\` or \`claude`)).toContain('no family move is safe yet');
+  });
+
+  // GUARD_CODEX_BIN=claude gives a codex judge the bin `claude` too, so that bin cannot say which is dark.
+  it('a codex bin pinned to the literal name claude is ambiguous, never read as the claude route', () => {
+    process.env.GUARD_CODEX_BIN = 'claude';
+    expect(familyOverrideRemedy('claude')).toContain('no family move is safe yet');
+  });
+
+  it('each direction fires only on its exact bin; anything else offers no move', () => {
+    expect(familyOverrideRemedy('claude')).toContain('the packaged codex family');
+    expect(familyOverrideRemedy('codex')).toContain('move the judges to the claude family');
+    for (const unknown of ['claude-code', 'CODEX', ''])
+      expect(familyOverrideRemedy(unknown)).toContain('no family move is safe yet');
+  });
+
+  // Never a subset: a three-knob move runs the correctness reviewer at a cap benched for sol only.
+  it('the claude direction always names all four knobs together', () => {
+    const r = familyOverrideRemedy('codex');
+    for (const knob of [
+      'GUARD_REVIEW_MODEL=haiku',
+      'GUARD_REVIEW_ESCALATION_MODEL=opus',
+      'GUARD_CORRECTNESS_MODEL=sonnet',
+      'GUARD_CORRECTNESS_CHUNK=off',
+    ])
+      expect(r).toContain(knob);
   });
 
   it('every cause yields a distinct remedy — no two gates can print the same wrong line', () => {

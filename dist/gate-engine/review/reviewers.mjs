@@ -165,6 +165,17 @@ export function correctnessModel(cfg) {
 export function resolveReviewModel(cfg) {
     return envModel('GUARD_REVIEW_MODEL') ?? envModel('FRINK_REVIEW_MODEL') ?? cfg.review.model;
 }
+/** The sentry judge's own override, or undefined. It has no config key: unset, the judge resolves
+ *  review.model, so one family move already carries it (sc-2190). */
+// The same chain resolveReviewModel uses: a blank GUARD_ value falls through to FRINK_ rather than
+// shadowing it, and a blank everywhere is unset — never a --model '' for the spawn.
+export function sentryModelOverride() {
+    return envModel('GUARD_SENTRY_MODEL') ?? envModel('FRINK_SENTRY_MODEL');
+}
+/** env > review.model — the sentry judge's effective model. */
+export function resolveSentryModel(cfg) {
+    return sentryModelOverride() ?? resolveReviewModel(cfg);
+}
 /** env > guard.config.json > shipped default — the model that re-investigates an UNPINNED
  * reviewer's first-pass FAIL (confirm or overturn; its verdict is final). Config-owned since the
  * 2026-08-27 ruling: it was a hardcoded 'opus', which put every codex-family FAIL on Anthropic

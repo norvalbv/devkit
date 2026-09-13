@@ -31,9 +31,15 @@ import {
 import { basename, join, resolve } from 'node:path';
 import { isCodexModel } from '../../../../gate-engine/judge/codex/result.mts';
 import {
+  CLAUDE_FAMILY_SET,
+  FAMILY_ENV_KEYS,
+} from '../../../../gate-engine/judge/outage/family-override.mts';
+import {
   correctnessModel,
   resolveEscalationModel,
   resolveReviewModel,
+  resolveSentryModel,
+  sentryModelOverride,
 } from '../../../../gate-engine/review/reviewers.mts';
 import { readJson } from '../../fs-helpers.mts';
 import { type CheckResult, check } from '../check-result.mts';
@@ -44,14 +50,9 @@ export const FAMILY_PROVENANCE_KEY = '//judgeFamily';
 export const FAMILY_PROVENANCE_TEXT =
   'claude family bound by devkit doctor --fix (codex binary was unresolvable). Explicit edits and GUARD_* envs win; delete these four keys to return to package defaults.';
 
-/** The complete claude family set — matches guard.config.example.json's documented claude-era
- * values, chunking off included (cap 400 is benched for gpt-5.6-sol, not sonnet). */
-export const CLAUDE_FAMILY_SET = {
-  model: 'haiku',
-  escalationModel: 'opus',
-  correctnessModel: 'sonnet',
-  correctnessChunkLoc: 0,
-} as const;
+/** Re-exported, never re-declared: the remedy wording renders the same set, and gate-engine cannot
+ *  import cli, so the definition lives there and the binder reads it from one place. */
+export { CLAUDE_FAMILY_SET };
 
 const FAMILY_KEYS = [
   'model',
@@ -102,13 +103,72 @@ export interface JudgeModelConfig {
 
 export type JudgeProvider = 'codex' | 'claude';
 
-export function resolvedJudgeModels(cfg: JudgeModelConfig): string[] {
-  return [resolveReviewModel(cfg), resolveEscalationModel(cfg), correctnessModel(cfg)];
+export type JudgeRole = 'review' | 'escalation' | 'correctness' | 'sentry';
+export interface ResolvedJudgeModel {
+  role: JudgeRole;
+  model: string;
 }
 
-export function requiredJudgeProviders(cfg: JudgeModelConfig): Set<JudgeProvider> {
+/** Which judge-spawning guards an install runs. Doctor callers pass none and get both. */
+export interface JudgeGuards {
+  review: boolean;
+  sentry: boolean;
+}
+
+const ALL_JUDGES: JudgeGuards = Object.freeze({ review: true, sentry: true });
+
+/** The judge-spawning guards a selection runs — review and sentry both spawn judges. */
+export const judgeGuardsOf = (guards: readonly string[] | undefined): JudgeGuards => ({
+  review: guards?.includes('review') === true,
+  sentry: guards?.includes('sentry') === true,
+});
+
+interface RecordedSelection {
+  components?: { guards?: string[] };
+}
+
+/** The judge guards `.devkit/config.json` records, or null when there is no readable record. */
+export function recordedJudgeGuards(cwd: string): JudgeGuards | null {
+  try {
+    const guards = readJson<RecordedSelection>(join(cwd, '.devkit', 'config.json'))?.components
+      ?.guards;
+    return guards ? judgeGuardsOf(guards) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The judging models the selected guards spawn, each carrying its ROLE, in cascade order. */
+// Beside the review gate an unset sentry judge resolves review.model and would restate that row;
+// on a sentry-only install it is the one judge that runs, so it always earns a row there.
+export function resolvedJudgeRoles(
+  cfg: JudgeModelConfig,
+  guards: JudgeGuards = ALL_JUDGES,
+): ResolvedJudgeModel[] {
+  const roles: ResolvedJudgeModel[] = guards.review
+    ? [
+        { role: 'review', model: resolveReviewModel(cfg) },
+        { role: 'escalation', model: resolveEscalationModel(cfg) },
+        { role: 'correctness', model: correctnessModel(cfg) },
+      ]
+    : [];
+  if (!guards.sentry) return roles;
+  const pinned = sentryModelOverride();
+  if (pinned !== undefined) roles.push({ role: 'sentry', model: pinned });
+  else if (!guards.review) roles.push({ role: 'sentry', model: resolveSentryModel(cfg) });
+  return roles;
+}
+
+export function resolvedJudgeModels(cfg: JudgeModelConfig, guards?: JudgeGuards): string[] {
+  return resolvedJudgeRoles(cfg, guards).map((r) => r.model);
+}
+
+export function requiredJudgeProviders(
+  cfg: JudgeModelConfig,
+  guards?: JudgeGuards,
+): Set<JudgeProvider> {
   return new Set(
-    resolvedJudgeModels(cfg).map((model) => (isCodexModel(model) ? 'codex' : 'claude')),
+    resolvedJudgeModels(cfg, guards).map((model) => (isCodexModel(model) ? 'codex' : 'claude')),
   );
 }
 
@@ -134,18 +194,29 @@ export function explicitFamilyKeys(cwd: string): string[] {
   }
 }
 
-const MODEL_ENVS = [
-  'GUARD_REVIEW_MODEL',
-  'FRINK_REVIEW_MODEL',
-  'GUARD_REVIEW_ESCALATION_MODEL',
-  'GUARD_CORRECTNESS_MODEL',
-  'GUARD_CORRECTNESS_CHUNK',
-] as const;
+/** WHICH envs would leave an INSTALLED judge behind after a bind — a boolean cannot explain it. */
+// An env for a judge the install never spawns blocks nothing. The review.model pair also matters to a
+// sentry-only install, since that judge falls back to it; a codex sentry pin refuses, a claude one not.
+export function activeModelEnvOverrides(guards: JudgeGuards = ALL_JUDGES): string[] {
+  const relevant = FAMILY_ENV_KEYS.filter(
+    (k) => guards.review || (guards.sentry && k.key === 'model'),
+  );
+  const shadowing = relevant
+    .flatMap((k) => (k.alias ? [k.env, k.alias] : [k.env]))
+    .filter((k) => Boolean(process.env[k]?.trim()));
+  const sentry = guards.sentry ? sentryModelOverride() : undefined;
+  if (sentry === undefined || !isCodexModel(sentry)) return shadowing;
+  // Mirrors sentryModelOverride: a blank GUARD_ falls through, so FRINK_ supplied it then.
+  const source = process.env.GUARD_SENTRY_MODEL?.trim()
+    ? 'GUARD_SENTRY_MODEL'
+    : 'FRINK_SENTRY_MODEL';
+  return [...shadowing, source];
+}
 
 /** Env overrides outrank anything devkit writes, so a bind under one repairs nothing: the DRIFT is
  * driven by the env-resolved model and the written keys would sit inert beneath it. */
-export function modelEnvOverridesActive(): boolean {
-  return MODEL_ENVS.some((k) => Boolean(process.env[k]?.trim()));
+export function modelEnvOverridesActive(guards: JudgeGuards = ALL_JUDGES): boolean {
+  return activeModelEnvOverrides(guards).length > 0;
 }
 
 // The provenance key counts as claimed too: an operator note under it would silently shadow the
@@ -161,14 +232,26 @@ const familyKeysAbsent = (review: RawReview): boolean => {
 /** Can `doctor --fix` bind the claude family here? Owns EVERY precondition, codex included —
  * callers hold no facts the writer trusts. */
 export function claudeBindable(cwd: string): boolean {
-  if (binResolvable('codex', cwd) || !binResolvable('claude', cwd) || modelEnvOverridesActive())
+  // The selection is read HERE, not passed in: a concurrent init could change it after a caller's
+  // snapshot, and an unreadable record refuses as though every judge were installed.
+  const guards = recordedJudgeGuards(cwd) ?? ALL_JUDGES;
+  if (
+    binResolvable('codex', cwd) ||
+    !binResolvable('claude', cwd) ||
+    modelEnvOverridesActive(guards)
+  )
     return false;
   const review = rawReview(cwd);
   return review !== null && familyKeysAbsent(review);
 }
 
 export function bindClaudeFamily(cwd: string): boolean {
-  if (binResolvable('codex', cwd) || !binResolvable('claude', cwd) || modelEnvOverridesActive())
+  const guards = recordedJudgeGuards(cwd) ?? ALL_JUDGES;
+  if (
+    binResolvable('codex', cwd) ||
+    !binResolvable('claude', cwd) ||
+    modelEnvOverridesActive(guards)
+  )
     return false;
   const path = join(cwd, 'guard.config.json');
   // Writer exclusion: an atomically-created lockfile (`wx`) carrying this binder's OWNERSHIP TOKEN.
@@ -236,7 +319,11 @@ export function bindClaudeFamily(cwd: string): boolean {
     // takeover means we lost), and the file must be byte-identical to the parsed snapshot (a
     // writer outside the lock protocol — a hand editor — wins). The residual compare→rename span
     // is the narrowest the filesystem allows without a lock every writer honors.
-    if (!ownsLock() || readFileSync(path, 'utf8') !== snapshot) return false;
+    // The selection is re-read in the same span: an init that enabled another judge since the entry
+    // check would otherwise let this bind report a move that leaves that judge on the dark provider.
+    const reread = recordedJudgeGuards(cwd) ?? ALL_JUDGES;
+    if (!ownsLock() || readFileSync(path, 'utf8') !== snapshot || modelEnvOverridesActive(reread))
+      return false;
     renameSync(tmp, path);
     return true;
   } catch {
@@ -259,8 +346,12 @@ export function bindClaudeFamily(cwd: string): boolean {
   }
 }
 
-export function claudeRuntimeResult(cfg: JudgeModelConfig, cwd: string): CheckResult | null {
-  if (!requiredJudgeProviders(cfg).has('claude')) return null;
+export function claudeRuntimeResult(
+  cfg: JudgeModelConfig,
+  cwd: string,
+  guards?: JudgeGuards,
+): CheckResult | null {
+  if (!requiredJudgeProviders(cfg, guards).has('claude')) return null;
   if (binResolvable('claude', cwd)) return null;
   return check(
     CLAUDE_RUNTIME_CHECK,

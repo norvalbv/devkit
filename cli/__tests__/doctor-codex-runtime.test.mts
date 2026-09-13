@@ -17,6 +17,8 @@ const envKeys = [
   'GUARD_REVIEW_MODEL',
   'GUARD_REVIEW_ESCALATION_MODEL',
   'GUARD_CORRECTNESS_MODEL',
+  'GUARD_SENTRY_MODEL',
+  'FRINK_SENTRY_MODEL',
   'PATH',
 ] as const;
 const savedEnv: Partial<Record<(typeof envKeys)[number], string | undefined>> = {};
@@ -61,6 +63,17 @@ describe('codexRuntimeResult', () => {
     // A GUARD_CODEX_BIN pin pointing at nothing is still unresolvable — and named in the detail.
     process.env.GUARD_CODEX_BIN = '/nonexistent-doctor-codex/codex';
     expect(codexRuntimeResult(cfg('haiku', 'gpt-5.6-terra'))?.detail).toContain('GUARD_CODEX_BIN');
+  });
+
+  // sc-2689: the sentry judge resolves its own knob, so an all-claude config could still route one
+  // judge through codex with nothing reporting it.
+  it('DRIFTs on a codex GUARD_SENTRY_MODEL over an otherwise claude family', () => {
+    process.env.PATH = '/nonexistent-doctor-codex';
+    expect(codexRuntimeResult(cfg('haiku', 'sonnet'))).toBeNull();
+    process.env.GUARD_SENTRY_MODEL = 'gpt-5.6-sol';
+    const res = codexRuntimeResult(cfg('haiku', 'sonnet'));
+    expect(res?.status).toBe('DRIFT');
+    expect(res?.detail).toContain('gpt-5.6-sol');
   });
 
   it('is silent only for an EXECUTABLE codex file — a directory or mode-644 file still DRIFTs', () => {
@@ -126,16 +139,34 @@ describe('checkGuardConfig — the codex runtime check is scoped to the review g
   it('stays silent for a Claude-judged guard like comments, which never reads review.model', async () => {
     process.env.GUARD_REVIEW_MODEL = 'gpt-5.6-sol';
     process.env.PATH = '/nonexistent-codex-scope';
-    const results = await checkGuardConfig(repo(), false, false, false);
+    const results = await checkGuardConfig(repo(), false, false, { review: false, sentry: false });
     expect(results.find((r) => r.name === CODEX_RUNTIME_CHECK)).toBeUndefined();
   });
 
   it('DRIFTs when the review guard IS selected and no codex resolves', async () => {
     process.env.GUARD_REVIEW_MODEL = 'gpt-5.6-sol';
     process.env.PATH = '/nonexistent-codex-scope';
-    const results = await checkGuardConfig(repo(), false, false, true);
+    const results = await checkGuardConfig(repo(), false, false, { review: true, sentry: false });
     expect(results.find((r) => r.name === CODEX_RUNTIME_CHECK)?.status).toBe('DRIFT');
     expect(results.find((r) => r.name === CLAUDE_RUNTIME_CHECK)).toBeUndefined();
+  });
+
+  // sc-2689: a sentry-only install spawns one judge. Gating these checks on the review guard alone
+  // skipped it entirely, so an unreachable provider under that judge went unreported.
+  it('a sentry-only install gets the runtime check for its one judge, and only that judge', async () => {
+    process.env.GUARD_SENTRY_MODEL = 'gpt-5.6-sol';
+    process.env.PATH = '/nonexistent-sentry-scope';
+    const onlySentry = { review: false, sentry: true };
+    const codex = (await checkGuardConfig(repo(), false, false, onlySentry)).find(
+      (r) => r.name === CODEX_RUNTIME_CHECK,
+    );
+    expect(codex?.status).toBe('DRIFT');
+    expect(codex?.detail).toContain('gpt-5.6-sol');
+    // Only the sentry pin is judged: a claude review family it never runs must not add a claude row.
+    process.env.GUARD_SENTRY_MODEL = 'haiku';
+    process.env.GUARD_REVIEW_MODEL = 'gpt-5.6-sol';
+    const rows = await checkGuardConfig(repo(), false, false, onlySentry);
+    expect(rows.find((r) => r.name === CODEX_RUNTIME_CHECK)).toBeUndefined();
   });
 
   it('requires only Claude for an all-Claude family', async () => {
@@ -143,7 +174,7 @@ describe('checkGuardConfig — the codex runtime check is scoped to the review g
     process.env.GUARD_REVIEW_ESCALATION_MODEL = 'opus';
     process.env.GUARD_CORRECTNESS_MODEL = 'sonnet';
     process.env.PATH = '/nonexistent-claude-scope';
-    const results = await checkGuardConfig(repo(), false, false, true);
+    const results = await checkGuardConfig(repo(), false, false, { review: true, sentry: false });
     expect(results.find((r) => r.name === CODEX_RUNTIME_CHECK)).toBeUndefined();
     expect(results.find((r) => r.name === CLAUDE_RUNTIME_CHECK)?.status).toBe('DRIFT');
   });
@@ -151,7 +182,7 @@ describe('checkGuardConfig — the codex runtime check is scoped to the review g
   it('requires both providers for a deliberately mixed family', async () => {
     process.env.GUARD_REVIEW_MODEL = 'haiku';
     process.env.PATH = '/nonexistent-mixed-scope';
-    const results = await checkGuardConfig(repo(), false, false, true);
+    const results = await checkGuardConfig(repo(), false, false, { review: true, sentry: false });
     expect(results.find((r) => r.name === CODEX_RUNTIME_CHECK)?.status).toBe('DRIFT');
     expect(results.find((r) => r.name === CLAUDE_RUNTIME_CHECK)?.status).toBe('DRIFT');
   });
