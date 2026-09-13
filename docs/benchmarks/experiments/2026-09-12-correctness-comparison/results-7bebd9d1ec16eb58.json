@@ -1,0 +1,846 @@
+{
+  "schemaVersion": 1,
+  "lifecycle": "experimental-guardrail-observation",
+  "fullCorpusBaseline": false,
+  "productionPromotion": false,
+  "assemblyScriptSha256": "6d6fa1a52da7fe90ac89451bd1b0c6cd5e3f19421ab893809c067e48bf008658",
+  "sourceCommit": "6c536a00a48d209c5c8296bf4186378c45057078",
+  "subsequentCallerValidationCommit": "f342418dd4a37d887ea45ece19b476138c5efb7e",
+  "subsequentCiTestFixCommit": "d5b47c001fee92883ed4ccb53d75ce984ccdf559",
+  "registeredAt": "2026-09-12T11:43:48.090Z",
+  "identity": {
+    "protocolSha256": "71ddd7fb5412fa53069b6a4845f123d5aa43af28e4bc17f84aae6ac8012a86d5",
+    "runnerSha256": "3c326366a1f7",
+    "lockSha256": "582b34fb609e937346dc404a39d0fba3bcfbb21288bb649121d43916e9f9c17b",
+    "runtime": "v24.19.0",
+    "platform": "darwin",
+    "architecture": "arm64",
+    "historicalSources": {
+      "agents/correctness-reviewer.md": {
+        "prepared": "8c96f896be0859f9089444ee6a41de7ff0d8cf1a5abeece4f819b4a173351d94",
+        "current": "8c96f896be0859f9089444ee6a41de7ff0d8cf1a5abeece4f819b4a173351d94"
+      },
+      "skills/correctness/SKILL.md": {
+        "prepared": "d26708b78352a24582528bb6a69cafe9e6a1b566ede7ce85971a70c7f8f3231f",
+        "current": "d26708b78352a24582528bb6a69cafe9e6a1b566ede7ce85971a70c7f8f3231f"
+      },
+      "skills/correctness/scripts/checklist.mjs": {
+        "prepared": "e1151b249ea5e749460a1441484c44b7bcf245cf18053ffec43693064e01ac5c",
+        "current": "e1151b249ea5e749460a1441484c44b7bcf245cf18053ffec43693064e01ac5c"
+      },
+      "skills/_devkit/review-roots.mjs": {
+        "prepared": "dda5d77f78f4e9e9aed70eb2c83f70e764907deff72d91b67c0f91d88772fadc",
+        "current": "dda5d77f78f4e9e9aed70eb2c83f70e764907deff72d91b67c0f91d88772fadc"
+      },
+      "skills/_devkit/checklist-store.mjs": {
+        "prepared": "c8a6a01fe75bd570953ccc88e3b99b8ac365bb249c4b1db2ce0c32a589c52193",
+        "current": "c8a6a01fe75bd570953ccc88e3b99b8ac365bb249c4b1db2ce0c32a589c52193"
+      },
+      "gate-engine/review/eval/reviewers/cases-correctness.jsonl": {
+        "prepared": "fbc2afd974944cc094d957f6b8c29153349be4a0f90f54c9df26a23c64497a15",
+        "current": "fbc2afd974944cc094d957f6b8c29153349be4a0f90f54c9df26a23c64497a15"
+      },
+      "gate-engine/review/eval/reviewers/bench.mts": {
+        "prepared": "fd97e690c9a955f3a5e2498e168b48433ab7894eeddea22fb65399147795ba30",
+        "current": "fd97e690c9a955f3a5e2498e168b48433ab7894eeddea22fb65399147795ba30"
+      },
+      "gate-engine/review/eval/reviewers/corpus.mts": {
+        "prepared": "5823a36dcf0adaadbdba2081e30980e1ac10535583f5f4da98c56783190be68c",
+        "current": "5823a36dcf0adaadbdba2081e30980e1ac10535583f5f4da98c56783190be68c"
+      },
+      "gate-engine/review/eval/reviewers/progress.mts": {
+        "prepared": "0241389f8d2a02b5c3b4f1f78ae33ba98e4b8d5c513655cafdd38d36f0dbf3b7",
+        "current": "0241389f8d2a02b5c3b4f1f78ae33ba98e4b8d5c513655cafdd38d36f0dbf3b7"
+      },
+      "gate-engine/review/eval/reviewers/corpus/row.mts": {
+        "prepared": "dcfcb6d448610f52c381d274f3f087b449f2d9c96f81059eb524013bda010213",
+        "current": "5262494bea95b6d912a9c79dbf2e5927b43eaaad8ce80cbb361afd7d0ea466ae"
+      },
+      "gate-engine/review/eval/reviewers/corpus/chunk-guard.mts": {
+        "prepared": "19e39391797f93949e27ce8ad9049a266a217eb9f9cd36efab60ab89a46f7110",
+        "current": "19e39391797f93949e27ce8ad9049a266a217eb9f9cd36efab60ab89a46f7110"
+      },
+      "gate-engine/review/eval/reviewers/__tests__/repair-controls.test.mts": {
+        "prepared": "6cbf0c25c6f0a97b00babe556834a57dbe4eb20c73285e3150b346e8a1c1ebe5",
+        "current": "6cbf0c25c6f0a97b00babe556834a57dbe4eb20c73285e3150b346e8a1c1ebe5"
+      },
+      "gate-engine/review/reviewers.mts": {
+        "prepared": "3c2c653bcaa368396158d69863846b1b4ae29e0b71d62d7023bfb6b8a68510cb",
+        "current": "3c2c653bcaa368396158d69863846b1b4ae29e0b71d62d7023bfb6b8a68510cb"
+      },
+      "gate-engine/review/run-review.mts": {
+        "prepared": "043b810e52d3b877b47abb80a1ffed6b328987d69e93598a6ac56598ebb47dcd",
+        "current": "043b810e52d3b877b47abb80a1ffed6b328987d69e93598a6ac56598ebb47dcd"
+      },
+      "guard.config.json": {
+        "prepared": "dd13ca3f8f96adea6f2e3179d26bce0da18c19e6cfb9088928a9ec70e86afa52",
+        "current": "dd13ca3f8f96adea6f2e3179d26bce0da18c19e6cfb9088928a9ec70e86afa52"
+      }
+    },
+    "assets": {
+      "B": "f449dce4eaea4a565ab53c8d3f2ce950b17ec4b6c87c0b03e58a140e049195b5",
+      "C": "f449dce4eaea4a565ab53c8d3f2ce950b17ec4b6c87c0b03e58a140e049195b5",
+      "P": "f0df91b4bdb2c8dd8c9e37abac6b1d9511994816b9ab4a7f73d2c51022f23a96",
+      "L": "414d74cfbced0ae45b7c34aa90498d642156f74d0376897ec8d454a910c657c3"
+    },
+    "packets": {
+      "draft-sync-send": "0003acf292bd226a5f034d15c9e0d81ed5d471000c191848c12d3a5191e65c00",
+      "draft-sync-send-repair": "0003acf292bd226a5f034d15c9e0d81ed5d471000c191848c12d3a5191e65c00",
+      "draft-callback-ownership": "00989b3558a90ff1e9f6ed9a568556ff2e14cde6222928e6f59bddf8b0845213",
+      "draft-callback-ownership-repair": "00989b3558a90ff1e9f6ed9a568556ff2e14cde6222928e6f59bddf8b0845213",
+      "draft-callback-ownership-decoy": "19645ee4bf6d393f9280fee205c9098450da036f1f5667b353f3e6b2f5058567",
+      "draft-ignored-delete": "303b7c1cd15b99859d37dc57ca9acfbf96a3e6874eb18f588e46f374c71f6bb3",
+      "draft-ignored-delete-repair": "303b7c1cd15b99859d37dc57ca9acfbf96a3e6874eb18f588e46f374c71f6bb3"
+    }
+  },
+  "configuration": {
+    "model": "gpt-5.6-sol",
+    "cap": 400,
+    "groups": [
+      ["state-transitions"],
+      ["concurrency-races"],
+      ["writer-reader-contracts"],
+      ["error-and-edge-classification"]
+    ],
+    "cascade": false,
+    "concurrency": 1,
+    "issueCap": 3,
+    "retries": 0,
+    "cacheReuse": false,
+    "budget": {
+      "maxCalls": 192,
+      "maxElapsedMs": 10800000,
+      "judgeTimeoutMs": 600000
+    }
+  },
+  "cohort": {
+    "sourceRows": 8,
+    "structuralPairs": 4,
+    "sourcePRs": 3,
+    "exposure": "all development-exposed; stored holdout flags do not imply unseen",
+    "exploratoryProbesRun": 0,
+    "scoredContextArm": false
+  },
+  "execution": {
+    "planned": 48,
+    "attempted": 48,
+    "complete": 48,
+    "missing": 0,
+    "incomplete": 0,
+    "calls": 192,
+    "elapsedMs": 5111674.188583001,
+    "stopped": null
+  },
+  "capture": {
+    "tasks": 192,
+    "completeTasks": 192,
+    "exactChecklistTasks": 192,
+    "claimOccurrences": 60,
+    "callErrors": 0,
+    "outages": 0,
+    "capabilities": ["63378c6970a4e718ff38d56a0522e0c25c0f159418fba52662b9f4834e73b481"],
+    "rowLensInputGroups": 32,
+    "groupsWithDifferentNativeInputs": 0,
+    "rowArmLensBriefGroups": 96,
+    "briefGroupsChangedBetweenRounds": 0,
+    "rowLensGroupsWithThreeDistinctArmBriefs": 32,
+    "nonBriefArgumentVariants": 1,
+    "usage": null,
+    "usageStatus": "unavailable-through-native-delegate",
+    "fullToolReadTranscript": "unavailable"
+  },
+  "privateEvidenceSha256": {
+    "registration.private.json": "f8da60e50b5e368b456cc97eaaf763cda62210da35071e121b53499e61746c4d",
+    "events.private.jsonl": "a3888dfa8456771ba073d1994aa4de40f0b6c18cce416f3f2c5e2a4e4f20bffb",
+    "report.private.json": "047b14edb719ed49194eea06ea33863e89ccc5039c0bef242aa83b2dc2f0435d"
+  },
+  "verdictProxies": [
+    {
+      "arm": "B",
+      "planned": 16,
+      "complete": 16,
+      "expectedFail": 8,
+      "expectedPass": 8,
+      "matched": 16,
+      "bugBlocked": 8,
+      "repairAccepted": 8
+    },
+    {
+      "arm": "P",
+      "planned": 16,
+      "complete": 16,
+      "expectedFail": 8,
+      "expectedPass": 8,
+      "matched": 16,
+      "bugBlocked": 8,
+      "repairAccepted": 8
+    },
+    {
+      "arm": "L",
+      "planned": 16,
+      "complete": 16,
+      "expectedFail": 8,
+      "expectedPass": 8,
+      "matched": 16,
+      "bugBlocked": 8,
+      "repairAccepted": 8
+    }
+  ],
+  "qualifiedClaimAssessment": {
+    "eligibleAssessedOccurrences": 0,
+    "unresolvedForPrecision": 60,
+    "precision": null,
+    "targetDiagnosisRate": null,
+    "reason": "No independent blinded adjudication in this run; exposed root-agent inspection is diagnostic only."
+  },
+  "lensTotals": [
+    {
+      "arm": "B",
+      "lens": "concurrency-races",
+      "tasks": 16,
+      "complete": 16,
+      "fail": 4,
+      "pass": 12,
+      "claimOccurrences": 4
+    },
+    {
+      "arm": "B",
+      "lens": "error-and-edge-classification",
+      "tasks": 16,
+      "complete": 16,
+      "fail": 2,
+      "pass": 14,
+      "claimOccurrences": 2
+    },
+    {
+      "arm": "B",
+      "lens": "state-transitions",
+      "tasks": 16,
+      "complete": 16,
+      "fail": 8,
+      "pass": 8,
+      "claimOccurrences": 8
+    },
+    {
+      "arm": "B",
+      "lens": "writer-reader-contracts",
+      "tasks": 16,
+      "complete": 16,
+      "fail": 6,
+      "pass": 10,
+      "claimOccurrences": 6
+    },
+    {
+      "arm": "L",
+      "lens": "concurrency-races",
+      "tasks": 16,
+      "complete": 16,
+      "fail": 4,
+      "pass": 12,
+      "claimOccurrences": 4
+    },
+    {
+      "arm": "L",
+      "lens": "error-and-edge-classification",
+      "tasks": 16,
+      "complete": 16,
+      "fail": 2,
+      "pass": 14,
+      "claimOccurrences": 2
+    },
+    {
+      "arm": "L",
+      "lens": "state-transitions",
+      "tasks": 16,
+      "complete": 16,
+      "fail": 8,
+      "pass": 8,
+      "claimOccurrences": 8
+    },
+    {
+      "arm": "L",
+      "lens": "writer-reader-contracts",
+      "tasks": 16,
+      "complete": 16,
+      "fail": 6,
+      "pass": 10,
+      "claimOccurrences": 6
+    },
+    {
+      "arm": "P",
+      "lens": "concurrency-races",
+      "tasks": 16,
+      "complete": 16,
+      "fail": 4,
+      "pass": 12,
+      "claimOccurrences": 4
+    },
+    {
+      "arm": "P",
+      "lens": "error-and-edge-classification",
+      "tasks": 16,
+      "complete": 16,
+      "fail": 2,
+      "pass": 14,
+      "claimOccurrences": 2
+    },
+    {
+      "arm": "P",
+      "lens": "state-transitions",
+      "tasks": 16,
+      "complete": 16,
+      "fail": 8,
+      "pass": 8,
+      "claimOccurrences": 8
+    },
+    {
+      "arm": "P",
+      "lens": "writer-reader-contracts",
+      "tasks": 16,
+      "complete": 16,
+      "fail": 6,
+      "pass": 10,
+      "claimOccurrences": 6
+    }
+  ],
+  "cells": [
+    {
+      "row": "corr-retry-stuck-unclaimable",
+      "arm": "B",
+      "round": 1,
+      "expected": "FAIL",
+      "status": "fail",
+      "complete": true,
+      "verdictMatches": true,
+      "capturedTasks": 4,
+      "claimOccurrences": 2
+    },
+    {
+      "row": "corr-retry-stuck-unclaimable-repaired",
+      "arm": "B",
+      "round": 1,
+      "expected": "PASS",
+      "status": "pass",
+      "complete": true,
+      "verdictMatches": true,
+      "capturedTasks": 4,
+      "claimOccurrences": 0
+    },
+    {
+      "row": "corr-retry-stuck-unclaimable",
+      "arm": "P",
+      "round": 1,
+      "expected": "FAIL",
+      "status": "fail",
+      "complete": true,
+      "verdictMatches": true,
+      "capturedTasks": 4,
+      "claimOccurrences": 2
+    },
+    {
+      "row": "corr-retry-stuck-unclaimable-repaired",
+      "arm": "P",
+      "round": 1,
+      "expected": "PASS",
+      "status": "pass",
+      "complete": true,
+      "verdictMatches": true,
+      "capturedTasks": 4,
+      "claimOccurrences": 0
+    },
+    {
+      "row": "corr-retry-stuck-unclaimable",
+      "arm": "L",
+      "round": 1,
+      "expected": "FAIL",
+      "status": "fail",
+      "complete": true,
+      "verdictMatches": true,
+      "capturedTasks": 4,
+      "claimOccurrences": 2
+    },
+    {
+      "row": "corr-retry-stuck-unclaimable-repaired",
+      "arm": "L",
+      "round": 1,
+      "expected": "PASS",
+      "status": "pass",
+      "complete": true,
+      "verdictMatches": true,
+      "capturedTasks": 4,
+      "claimOccurrences": 0
+    },
+    {
+      "row": "corr-read-then-write-clobber-terminal",
+      "arm": "B",
+      "round": 1,
+      "expected": "FAIL",
+      "status": "fail",
+      "complete": true,
+      "verdictMatches": true,
+      "capturedTasks": 4,
+      "claimOccurrences": 2
+    },
+    {
+      "row": "corr-read-then-write-clobber-terminal-repaired",
+      "arm": "B",
+      "round": 1,
+      "expected": "PASS",
+      "status": "pass",
+      "complete": true,
+      "verdictMatches": true,
+      "capturedTasks": 4,
+      "claimOccurrences": 0
+    },
+    {
+      "row": "corr-read-then-write-clobber-terminal",
+      "arm": "P",
+      "round": 1,
+      "expected": "FAIL",
+      "status": "fail",
+      "complete": true,
+      "verdictMatches": true,
+      "capturedTasks": 4,
+      "claimOccurrences": 2
+    },
+    {
+      "row": "corr-read-then-write-clobber-terminal-repaired",
+      "arm": "P",
+      "round": 1,
+      "expected": "PASS",
+      "status": "pass",
+      "complete": true,
+      "verdictMatches": true,
+      "capturedTasks": 4,
+      "claimOccurrences": 0
+    },
+    {
+      "row": "corr-read-then-write-clobber-terminal",
+      "arm": "L",
+      "round": 1,
+      "expected": "FAIL",
+      "status": "fail",
+      "complete": true,
+      "verdictMatches": true,
+      "capturedTasks": 4,
+      "claimOccurrences": 2
+    },
+    {
+      "row": "corr-read-then-write-clobber-terminal-repaired",
+      "arm": "L",
+      "round": 1,
+      "expected": "PASS",
+      "status": "pass",
+      "complete": true,
+      "verdictMatches": true,
+      "capturedTasks": 4,
+      "claimOccurrences": 0
+    },
+    {
+      "row": "corr-lock-timeout-runs-unlocked",
+      "arm": "B",
+      "round": 1,
+      "expected": "FAIL",
+      "status": "fail",
+      "complete": true,
+      "verdictMatches": true,
+      "capturedTasks": 4,
+      "claimOccurrences": 3
+    },
+    {
+      "row": "corr-lock-timeout-runs-unlocked-repaired",
+      "arm": "B",
+      "round": 1,
+      "expected": "PASS",
+      "status": "pass",
+      "complete": true,
+      "verdictMatches": true,
+      "capturedTasks": 4,
+      "claimOccurrences": 0
+    },
+    {
+      "row": "corr-lock-timeout-runs-unlocked",
+      "arm": "P",
+      "round": 1,
+      "expected": "FAIL",
+      "status": "fail",
+      "complete": true,
+      "verdictMatches": true,
+      "capturedTasks": 4,
+      "claimOccurrences": 3
+    },
+    {
+      "row": "corr-lock-timeout-runs-unlocked-repaired",
+      "arm": "P",
+      "round": 1,
+      "expected": "PASS",
+      "status": "pass",
+      "complete": true,
+      "verdictMatches": true,
+      "capturedTasks": 4,
+      "claimOccurrences": 0
+    },
+    {
+      "row": "corr-lock-timeout-runs-unlocked",
+      "arm": "L",
+      "round": 1,
+      "expected": "FAIL",
+      "status": "fail",
+      "complete": true,
+      "verdictMatches": true,
+      "capturedTasks": 4,
+      "claimOccurrences": 3
+    },
+    {
+      "row": "corr-lock-timeout-runs-unlocked-repaired",
+      "arm": "L",
+      "round": 1,
+      "expected": "PASS",
+      "status": "pass",
+      "complete": true,
+      "verdictMatches": true,
+      "capturedTasks": 4,
+      "claimOccurrences": 0
+    },
+    {
+      "row": "corr-json-string-result-dropped",
+      "arm": "B",
+      "round": 1,
+      "expected": "FAIL",
+      "status": "fail",
+      "complete": true,
+      "verdictMatches": true,
+      "capturedTasks": 4,
+      "claimOccurrences": 3
+    },
+    {
+      "row": "corr-json-string-result-dropped-repaired",
+      "arm": "B",
+      "round": 1,
+      "expected": "PASS",
+      "status": "pass",
+      "complete": true,
+      "verdictMatches": true,
+      "capturedTasks": 4,
+      "claimOccurrences": 0
+    },
+    {
+      "row": "corr-json-string-result-dropped",
+      "arm": "P",
+      "round": 1,
+      "expected": "FAIL",
+      "status": "fail",
+      "complete": true,
+      "verdictMatches": true,
+      "capturedTasks": 4,
+      "claimOccurrences": 3
+    },
+    {
+      "row": "corr-json-string-result-dropped-repaired",
+      "arm": "P",
+      "round": 1,
+      "expected": "PASS",
+      "status": "pass",
+      "complete": true,
+      "verdictMatches": true,
+      "capturedTasks": 4,
+      "claimOccurrences": 0
+    },
+    {
+      "row": "corr-json-string-result-dropped",
+      "arm": "L",
+      "round": 1,
+      "expected": "FAIL",
+      "status": "fail",
+      "complete": true,
+      "verdictMatches": true,
+      "capturedTasks": 4,
+      "claimOccurrences": 3
+    },
+    {
+      "row": "corr-json-string-result-dropped-repaired",
+      "arm": "L",
+      "round": 1,
+      "expected": "PASS",
+      "status": "pass",
+      "complete": true,
+      "verdictMatches": true,
+      "capturedTasks": 4,
+      "claimOccurrences": 0
+    },
+    {
+      "row": "corr-retry-stuck-unclaimable",
+      "arm": "L",
+      "round": 2,
+      "expected": "FAIL",
+      "status": "fail",
+      "complete": true,
+      "verdictMatches": true,
+      "capturedTasks": 4,
+      "claimOccurrences": 2
+    },
+    {
+      "row": "corr-retry-stuck-unclaimable-repaired",
+      "arm": "L",
+      "round": 2,
+      "expected": "PASS",
+      "status": "pass",
+      "complete": true,
+      "verdictMatches": true,
+      "capturedTasks": 4,
+      "claimOccurrences": 0
+    },
+    {
+      "row": "corr-retry-stuck-unclaimable",
+      "arm": "P",
+      "round": 2,
+      "expected": "FAIL",
+      "status": "fail",
+      "complete": true,
+      "verdictMatches": true,
+      "capturedTasks": 4,
+      "claimOccurrences": 2
+    },
+    {
+      "row": "corr-retry-stuck-unclaimable-repaired",
+      "arm": "P",
+      "round": 2,
+      "expected": "PASS",
+      "status": "pass",
+      "complete": true,
+      "verdictMatches": true,
+      "capturedTasks": 4,
+      "claimOccurrences": 0
+    },
+    {
+      "row": "corr-retry-stuck-unclaimable",
+      "arm": "B",
+      "round": 2,
+      "expected": "FAIL",
+      "status": "fail",
+      "complete": true,
+      "verdictMatches": true,
+      "capturedTasks": 4,
+      "claimOccurrences": 2
+    },
+    {
+      "row": "corr-retry-stuck-unclaimable-repaired",
+      "arm": "B",
+      "round": 2,
+      "expected": "PASS",
+      "status": "pass",
+      "complete": true,
+      "verdictMatches": true,
+      "capturedTasks": 4,
+      "claimOccurrences": 0
+    },
+    {
+      "row": "corr-read-then-write-clobber-terminal",
+      "arm": "L",
+      "round": 2,
+      "expected": "FAIL",
+      "status": "fail",
+      "complete": true,
+      "verdictMatches": true,
+      "capturedTasks": 4,
+      "claimOccurrences": 2
+    },
+    {
+      "row": "corr-read-then-write-clobber-terminal-repaired",
+      "arm": "L",
+      "round": 2,
+      "expected": "PASS",
+      "status": "pass",
+      "complete": true,
+      "verdictMatches": true,
+      "capturedTasks": 4,
+      "claimOccurrences": 0
+    },
+    {
+      "row": "corr-read-then-write-clobber-terminal",
+      "arm": "P",
+      "round": 2,
+      "expected": "FAIL",
+      "status": "fail",
+      "complete": true,
+      "verdictMatches": true,
+      "capturedTasks": 4,
+      "claimOccurrences": 2
+    },
+    {
+      "row": "corr-read-then-write-clobber-terminal-repaired",
+      "arm": "P",
+      "round": 2,
+      "expected": "PASS",
+      "status": "pass",
+      "complete": true,
+      "verdictMatches": true,
+      "capturedTasks": 4,
+      "claimOccurrences": 0
+    },
+    {
+      "row": "corr-read-then-write-clobber-terminal",
+      "arm": "B",
+      "round": 2,
+      "expected": "FAIL",
+      "status": "fail",
+      "complete": true,
+      "verdictMatches": true,
+      "capturedTasks": 4,
+      "claimOccurrences": 2
+    },
+    {
+      "row": "corr-read-then-write-clobber-terminal-repaired",
+      "arm": "B",
+      "round": 2,
+      "expected": "PASS",
+      "status": "pass",
+      "complete": true,
+      "verdictMatches": true,
+      "capturedTasks": 4,
+      "claimOccurrences": 0
+    },
+    {
+      "row": "corr-lock-timeout-runs-unlocked",
+      "arm": "L",
+      "round": 2,
+      "expected": "FAIL",
+      "status": "fail",
+      "complete": true,
+      "verdictMatches": true,
+      "capturedTasks": 4,
+      "claimOccurrences": 3
+    },
+    {
+      "row": "corr-lock-timeout-runs-unlocked-repaired",
+      "arm": "L",
+      "round": 2,
+      "expected": "PASS",
+      "status": "pass",
+      "complete": true,
+      "verdictMatches": true,
+      "capturedTasks": 4,
+      "claimOccurrences": 0
+    },
+    {
+      "row": "corr-lock-timeout-runs-unlocked",
+      "arm": "P",
+      "round": 2,
+      "expected": "FAIL",
+      "status": "fail",
+      "complete": true,
+      "verdictMatches": true,
+      "capturedTasks": 4,
+      "claimOccurrences": 3
+    },
+    {
+      "row": "corr-lock-timeout-runs-unlocked-repaired",
+      "arm": "P",
+      "round": 2,
+      "expected": "PASS",
+      "status": "pass",
+      "complete": true,
+      "verdictMatches": true,
+      "capturedTasks": 4,
+      "claimOccurrences": 0
+    },
+    {
+      "row": "corr-lock-timeout-runs-unlocked",
+      "arm": "B",
+      "round": 2,
+      "expected": "FAIL",
+      "status": "fail",
+      "complete": true,
+      "verdictMatches": true,
+      "capturedTasks": 4,
+      "claimOccurrences": 3
+    },
+    {
+      "row": "corr-lock-timeout-runs-unlocked-repaired",
+      "arm": "B",
+      "round": 2,
+      "expected": "PASS",
+      "status": "pass",
+      "complete": true,
+      "verdictMatches": true,
+      "capturedTasks": 4,
+      "claimOccurrences": 0
+    },
+    {
+      "row": "corr-json-string-result-dropped",
+      "arm": "L",
+      "round": 2,
+      "expected": "FAIL",
+      "status": "fail",
+      "complete": true,
+      "verdictMatches": true,
+      "capturedTasks": 4,
+      "claimOccurrences": 3
+    },
+    {
+      "row": "corr-json-string-result-dropped-repaired",
+      "arm": "L",
+      "round": 2,
+      "expected": "PASS",
+      "status": "pass",
+      "complete": true,
+      "verdictMatches": true,
+      "capturedTasks": 4,
+      "claimOccurrences": 0
+    },
+    {
+      "row": "corr-json-string-result-dropped",
+      "arm": "P",
+      "round": 2,
+      "expected": "FAIL",
+      "status": "fail",
+      "complete": true,
+      "verdictMatches": true,
+      "capturedTasks": 4,
+      "claimOccurrences": 3
+    },
+    {
+      "row": "corr-json-string-result-dropped-repaired",
+      "arm": "P",
+      "round": 2,
+      "expected": "PASS",
+      "status": "pass",
+      "complete": true,
+      "verdictMatches": true,
+      "capturedTasks": 4,
+      "claimOccurrences": 0
+    },
+    {
+      "row": "corr-json-string-result-dropped",
+      "arm": "B",
+      "round": 2,
+      "expected": "FAIL",
+      "status": "fail",
+      "complete": true,
+      "verdictMatches": true,
+      "capturedTasks": 4,
+      "claimOccurrences": 3
+    },
+    {
+      "row": "corr-json-string-result-dropped-repaired",
+      "arm": "B",
+      "round": 2,
+      "expected": "PASS",
+      "status": "pass",
+      "complete": true,
+      "verdictMatches": true,
+      "capturedTasks": 4,
+      "claimOccurrences": 0
+    }
+  ],
+  "limitations": [
+    "Expected-verdict agreement is not factual precision or independent target adjudication.",
+    "Four correlated structural pairs from three source PRs are exposed development controls.",
+    "No direct caller/lifetime or scored context comparison is established; authored probes remain unscored and were not run.",
+    "No production prompts, model, lens routing or corpus rows are changed.",
+    "The configured connector subset lacks codebase; a fingerprint does not prove source reads.",
+    "Usage and full tool-read transcripts are unavailable; budgets limit calls/time rather than price.",
+    "Caller validation changed after registration in a separate worktree; this observation remains pinned to the original execution revision.",
+    "This is not a replacement for the full-corpus baseline or independent confirmation."
+  ]
+}

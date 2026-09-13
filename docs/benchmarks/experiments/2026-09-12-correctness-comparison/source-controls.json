@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "sourceFamily": "exposed-composer-draft-family",
+  "sourceOriginalObservationStateProven": false,
+  "controlScriptSha256": "e3311e11727ad14f784d39dec44ee5efc15d69c59250b7a0bbaaefa42e1d465c",
+  "sourceReceiptSha256": "e382fb95410564bf552b986b92fd5b56a6884d33d05fe89b4bc37e1bb3896702",
+  "observations": {
+    "lateCleanupPreservesReplacement": true,
+    "matchingStampClears": true,
+    "ignoredFalseReturnIsExpected": true,
+    "sendResults": [
+      {
+        "view": "before",
+        "attached": false,
+        "passedGuard": false
+      },
+      {
+        "view": "before",
+        "attached": true,
+        "passedGuard": true
+      },
+      {
+        "view": "after",
+        "attached": false,
+        "passedGuard": false
+      },
+      {
+        "view": "after",
+        "attached": true,
+        "passedGuard": true
+      }
+    ]
+  },
+  "qualification": "target-controlled-source-extractions-only",
+  "admittedRows": 0,
+  "limitations": [
+    "LocalStorage uses a single-window synchronous Map double; no cross-window claim is resolved.",
+    "Send control executes the exact before/after guard prefix and actual attachment callback, with explicit synchronous editor and formatting doubles. Full editor DOM implementation and authenticated dispatch are not executed.",
+    "Attachment callback is reconstructed post-source; historical unchanged observation state remains unproven.",
+    "No control makes the entire change clean or validates component lifetime, timestamp uniqueness, persistence errors or all other findings."
+  ]
+}
