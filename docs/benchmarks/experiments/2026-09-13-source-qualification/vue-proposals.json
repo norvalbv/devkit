@@ -1,0 +1,74 @@
+[
+  {
+    "id": "corr-async-view-unmounted-retry",
+    "reviewer": "correctness-reviewer",
+    "difficulty": "borderline",
+    "provenance": "adapted",
+    "source": {
+      "repo": "vuejs/core",
+      "pr": 14911,
+      "url": "https://github.com/vuejs/core/pull/14911"
+    },
+    "caseId": "corr-async-view-unmounted-retry",
+    "holdout": false,
+    "qualification": {
+      "lifecycle": "source-qualified-proposal-not-admitted",
+      "sourceBase": "86ad0764fd9f7b01cef75b4fc941b03419306bf8",
+      "sourceBug": "767d3920905ef15cffe654ed0e9fe352394d5a0e",
+      "sourceRepair": "5300ead57b3c14942d4c155ef5e485d5409e7f02",
+      "exposure": "development-exposed",
+      "controls": "controls.mjs",
+      "scope": "non-Suspense, no timeout/delay UI, no custom loader retry; valid component function",
+      "attribution": "Vue MIT; see VUE-LICENSE.txt"
+    },
+    "expected": "FAIL",
+    "repo": {
+      "base": {
+        "src/async-view.mjs": "export function defineAsyncView(loader) {\n  let pendingRequest = null;\n  let resolvedView;\n  const load = () => {\n    let thisRequest;\n    return pendingRequest || (thisRequest = pendingRequest = loader()\n      .catch(error => { throw error instanceof Error ? error : new Error(String(error)); })\n      .then(view => {\n        if (thisRequest !== pendingRequest && pendingRequest) return pendingRequest;\n        resolvedView = view;\n        return view;\n      }));\n  };\n  return {\n    setup(instance) {\n      if (resolvedView) return () => resolvedView;\n      const loaded = { value: false };\n      const onError = error => {\n        pendingRequest = null;\n        instance.onError(error);\n      };\n      load().then(() => {\n        loaded.value = true;\n      }).catch(error => {\n        onError(error);\n      });\n      return () => loaded.value && resolvedView ? resolvedView : null;\n    },\n  };\n}\n",
+        "src/view-host.mjs": "// A definition is reused; each mount owns a separate instance and setup state.\nexport function mountView(definition, onError) {\n  const instance = { isUnmounted: false, onError };\n  const render = definition.setup(instance);\n  return {\n    unmount() { instance.isUnmounted = true; },\n    read() { const view = render(); return view ? view() : null; },\n  };\n}\n"
+      },
+      "staged": {
+        "src/async-view.mjs": "export function defineAsyncView(loader) {\n  let pendingRequest = null;\n  let resolvedView;\n  const load = () => {\n    let thisRequest;\n    return pendingRequest || (thisRequest = pendingRequest = loader()\n      .catch(error => { throw error instanceof Error ? error : new Error(String(error)); })\n      .then(view => {\n        if (thisRequest !== pendingRequest && pendingRequest) return pendingRequest;\n        resolvedView = view;\n        return view;\n      }));\n  };\n  return {\n    setup(instance) {\n      if (resolvedView) return () => resolvedView;\n      const loaded = { value: false };\n      const onError = error => {\n        pendingRequest = null;\n        instance.onError(error);\n      };\n      load().then(() => {\n        if (instance.isUnmounted) return;\n        loaded.value = true;\n      }).catch(error => {\n        if (instance.isUnmounted) return;\n        onError(error);\n      });\n      return () => loaded.value && resolvedView ? resolvedView : null;\n    },\n  };\n}\n"
+      }
+    },
+    "variantOf": null,
+    "note": "Source-rooted adaptation of Vue PR14911 intermediate/final revisions. An old instance unmounts, its loader rejects, then a new instance reuses the definition. The shared rejected request must be cleared before the per-instance error callback is skipped. The original base retries through onError, although it has a separate pre-existing after-unmount notification. Same source baseline and host for both members; only the shared-cache reset differs between postimages.",
+    "expectItems": ["state-transitions"],
+    "reasonPattern": "retry|remount|pendingRequest|rejected|cache|new.*mount|stuck"
+  },
+  {
+    "id": "corr-async-view-unmounted-retry-repaired",
+    "reviewer": "correctness-reviewer",
+    "difficulty": "borderline",
+    "provenance": "adapted",
+    "source": {
+      "repo": "vuejs/core",
+      "pr": 14911,
+      "url": "https://github.com/vuejs/core/pull/14911"
+    },
+    "caseId": "corr-async-view-unmounted-retry",
+    "holdout": false,
+    "qualification": {
+      "lifecycle": "source-qualified-proposal-not-admitted",
+      "sourceBase": "86ad0764fd9f7b01cef75b4fc941b03419306bf8",
+      "sourceBug": "767d3920905ef15cffe654ed0e9fe352394d5a0e",
+      "sourceRepair": "5300ead57b3c14942d4c155ef5e485d5409e7f02",
+      "exposure": "development-exposed",
+      "controls": "controls.mjs",
+      "scope": "non-Suspense, no timeout/delay UI, no custom loader retry; valid component function",
+      "attribution": "Vue MIT; see VUE-LICENSE.txt"
+    },
+    "expected": "PASS",
+    "repo": {
+      "base": {
+        "src/async-view.mjs": "export function defineAsyncView(loader) {\n  let pendingRequest = null;\n  let resolvedView;\n  const load = () => {\n    let thisRequest;\n    return pendingRequest || (thisRequest = pendingRequest = loader()\n      .catch(error => { throw error instanceof Error ? error : new Error(String(error)); })\n      .then(view => {\n        if (thisRequest !== pendingRequest && pendingRequest) return pendingRequest;\n        resolvedView = view;\n        return view;\n      }));\n  };\n  return {\n    setup(instance) {\n      if (resolvedView) return () => resolvedView;\n      const loaded = { value: false };\n      const onError = error => {\n        pendingRequest = null;\n        instance.onError(error);\n      };\n      load().then(() => {\n        loaded.value = true;\n      }).catch(error => {\n        onError(error);\n      });\n      return () => loaded.value && resolvedView ? resolvedView : null;\n    },\n  };\n}\n",
+        "src/view-host.mjs": "// A definition is reused; each mount owns a separate instance and setup state.\nexport function mountView(definition, onError) {\n  const instance = { isUnmounted: false, onError };\n  const render = definition.setup(instance);\n  return {\n    unmount() { instance.isUnmounted = true; },\n    read() { const view = render(); return view ? view() : null; },\n  };\n}\n"
+      },
+      "staged": {
+        "src/async-view.mjs": "export function defineAsyncView(loader) {\n  let pendingRequest = null;\n  let resolvedView;\n  const load = () => {\n    let thisRequest;\n    return pendingRequest || (thisRequest = pendingRequest = loader()\n      .catch(error => { throw error instanceof Error ? error : new Error(String(error)); })\n      .then(view => {\n        if (thisRequest !== pendingRequest && pendingRequest) return pendingRequest;\n        resolvedView = view;\n        return view;\n      }));\n  };\n  return {\n    setup(instance) {\n      if (resolvedView) return () => resolvedView;\n      const loaded = { value: false };\n      const onError = error => {\n        pendingRequest = null;\n        instance.onError(error);\n      };\n      load().then(() => {\n        if (instance.isUnmounted) return;\n        loaded.value = true;\n      }).catch(error => {\n        if (instance.isUnmounted) {\n          pendingRequest = null;\n          return;\n        }\n        onError(error);\n      });\n      return () => loaded.value && resolvedView ? resolvedView : null;\n    },\n  };\n}\n"
+      }
+    },
+    "variantOf": "corr-async-view-unmounted-retry",
+    "note": "Source-rooted adaptation of Vue PR14911 intermediate/final revisions. An old instance unmounts, its loader rejects, then a new instance reuses the definition. The shared rejected request must be cleared before the per-instance error callback is skipped. The original base retries through onError, although it has a separate pre-existing after-unmount notification. Same source baseline and host for both members; only the shared-cache reset differs between postimages."
+  }
+]

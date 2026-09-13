@@ -1,0 +1,367 @@
+{
+  "schemaVersion": 1,
+  "ticket": 3144,
+  "status": "source-qualified-proposals-not-admitted",
+  "date": "2026-09-13",
+  "sourceRevision": "7ac50cdda59e958bbbb402179c3ea36623f07847",
+  "counts": {
+    "minedCandidates": 2078,
+    "correctnessCandidates": 1422,
+    "mechanismTextMatches": 28,
+    "matchedBranches": 14,
+    "publicSourceFamiliesExecuted": 2,
+    "adaptedFamiliesQualified": 1,
+    "proposalRowsValidated": 2,
+    "corpusRowsAdmitted": 0,
+    "conditionalWriteFamiliesQualified": 0,
+    "confirmationFamiliesReady": 0,
+    "benchmarkModelCalls": 0
+  },
+  "candidateSearch": "Text matches are a triage queue, not verified distinct incidents or an exhaustive audit. Two additional private archived leads were inspected and deferred. Historical composer remains unresolved.",
+  "sourceSelection": {
+    "privateSelectionSha256": "3dde8fc47a475cfef89c44221b9ba266c8cc3ff73b7abecedb661831b7cea4f2",
+    "privateDiscoverySha256": "410d68e4492d55a9bf975bc2d2c5a05f10d05bad44e8beaf7a8367ccf58f4500",
+    "vue": "development-exposed",
+    "tanstack": "reserved confirmation; source-qualified only, no frozen adapted rows or candidate outputs",
+    "exposure": "Public source and tests inspected by investigators; no unseen-source claim. Source authorship/discovery may be AI assisted."
+  },
+  "vue": {
+    "url": "https://github.com/vuejs/core/pull/14911",
+    "base": "86ad0764fd9f7b01cef75b4fc941b03419306bf8",
+    "bug": "767d3920905ef15cffe654ed0e9fe352394d5a0e",
+    "repair": "5300ead57b3c14942d4c155ef5e485d5409e7f02",
+    "mergeParent": "7f76378b0d178a29113ee07d67faa48b637944e8",
+    "sourceFile": "packages/runtime-core/src/apiAsyncComponent.ts",
+    "baseSourceBlob": "e594944718a452ce9681d32c062940a1c7e6bc93",
+    "heldConstantUpstreamTest": "packages/runtime-core/__tests__/apiAsyncComponent.spec.ts at repair revision",
+    "upstreamResults": {
+      "base": {
+        "passed": 22,
+        "failed": 3
+      },
+      "bug": {
+        "passed": 24,
+        "failed": 1
+      },
+      "repair": {
+        "passed": 25,
+        "failed": 0
+      }
+    },
+    "additionalRecoveryControl": {
+      "base": "PASS",
+      "bug": "FAIL: 1 loader request, no rendered component",
+      "repair": "PASS",
+      "assertedPassingInvariant": "2 loader requests and rendered loaded"
+    },
+    "originalBaseCombinedRun": {
+      "passed": 23,
+      "failed": 3,
+      "total": 26
+    },
+    "sourceMapping": {
+      "sharedCache": "pendingRequest and resolvedComp become pendingRequest and resolvedView at definition scope",
+      "caller": "Vue new instance per setup plus reused async definition becomes explicit mountView host",
+      "completion": "ref loaded plus renderer becomes per-instance loaded flag plus read(); actual Vue rendering tested separately",
+      "error": "onError resets shared cache; per-instance unmounted return must preserve that reset"
+    },
+    "omitted": "Suspense/SSR, timeout and delay UI, custom loader retry, full Vue reactivity/renderer, invalid component values",
+    "preexistingDifference": "Original base emits an after-unmount error but can retry. Do not describe all upstream tests as passing at base.",
+    "sourceDisclosure": "Intermediate source commit is Cursor co-authored."
+  },
+  "tanstack": {
+    "url": "https://github.com/TanStack/query/pull/11172",
+    "issue": "https://github.com/TanStack/query/issues/11171",
+    "base": "6e3d521fe54f78624e53c1c6f9cadd678504bee8",
+    "repair": "18c1c1ef94883e781ad36d36f9ea4a043ce4260b",
+    "sourceFile": "packages/query-core/src/mutationObserver.ts",
+    "method": "Fixed upstream tests/config/full source; replace only production mutationObserver.ts with exact parent bytes for negative control; restore afterward.",
+    "results": {
+      "parentProductionOverlay": {
+        "passed": 14,
+        "failed": 2
+      },
+      "repair": {
+        "passed": 16,
+        "failed": 0
+      }
+    },
+    "invariants": [
+      "resubscribe during in-flight mutation",
+      "resubscribe after mutation settled while unsubscribed"
+    ],
+    "missing": [
+      "No proven passing pre-introduction base",
+      "No executed React Activity integration",
+      "No adapted pair or full repair claim audit"
+    ],
+    "sourceDisclosure": "Issue credits Fable 5 discovery and reporter manual verification."
+  },
+  "deferred": [
+    {
+      "candidate": "historical composer/draft family",
+      "reason": "Original unchanged context, full editor/React lifetime and authenticated dispatch unresolved; prior narrow source controls do not imply clean gold.",
+      "next": "Recover those contracts or use another qualified family."
+    },
+    {
+      "candidate": "archived checkpoint lead",
+      "reason": "Failed/next diffs recovered; full caller/storage/observation contract unproved.",
+      "next": "Recover original unchanged context before labeling."
+    },
+    {
+      "candidate": "archived questions lead",
+      "reason": "Failed/next diffs recovered; full caller/storage/observation contract unproved.",
+      "next": "Recover original unchanged context before labeling."
+    },
+    {
+      "candidate": "conditional-write ignored-result cell",
+      "reason": "No source family qualified; queue matches and authored probes cannot fill it.",
+      "next": "Another source-backed incident is needed unless historical context is recovered."
+    }
+  ],
+  "validation": {
+    "nativeIndividualChecks": "Both OK; fixture/privacy/structural/near-twin checks passed.",
+    "coverageCells": {
+      "stateTransitionsBorderlineExisting": 6,
+      "decoyBorderlineExisting": 27
+    },
+    "batch": {
+      "modelCalls": 0,
+      "appendExecuted": false,
+      "problems": [],
+      "holdoutSimulation": [
+        {
+          "id": "corr-async-view-unmounted-retry",
+          "holdout": true
+        },
+        {
+          "id": "corr-async-view-unmounted-retry-repaired",
+          "holdout": true
+        }
+      ],
+      "plans": [
+        {
+          "id": "corr-async-view-unmounted-retry",
+          "reviewer": "correctness-reviewer",
+          "identityBytes": 232,
+          "chunkCount": 0,
+          "taskCount": 4,
+          "cap": 400,
+          "groups": [
+            ["state-transitions"],
+            ["concurrency-races"],
+            ["writer-reader-contracts"],
+            ["error-and-edge-classification"]
+          ],
+          "planHash": "de0c8d2bcc5043a9bbb7ce512bbc59229c8feaa458626ac4a90355aefe5dd698"
+        },
+        {
+          "id": "corr-async-view-unmounted-retry-repaired",
+          "reviewer": "correctness-reviewer",
+          "identityBytes": 290,
+          "chunkCount": 0,
+          "taskCount": 4,
+          "cap": 400,
+          "groups": [
+            ["state-transitions"],
+            ["concurrency-races"],
+            ["writer-reader-contracts"],
+            ["error-and-edge-classification"]
+          ],
+          "planHash": "f22e3ecc0d655ca90f1f4b54af33e777db7fc843deabf80e717f3e9605cfd5b8"
+        }
+      ]
+    },
+    "adaptedControls": {
+      "lifecycle": "source-adaptation-controls",
+      "modelCalls": 0,
+      "scenarios": 12,
+      "results": [
+        {
+          "view": "base",
+          "observed": {
+            "remount": {
+              "attempts": 2,
+              "oldErrors": 1,
+              "rendered": "loaded"
+            },
+            "activeError": {
+              "attempts": 2,
+              "errors": ["active request failed"],
+              "rendered": "retry loaded"
+            },
+            "sharedSuccess": {
+              "attempts": 1,
+              "errors": [],
+              "live": "shared loaded",
+              "later": "shared loaded"
+            },
+            "sharedFailure": {
+              "attempts": 2,
+              "oldErrors": 1,
+              "liveErrors": 1,
+              "rendered": "recovered"
+            }
+          }
+        },
+        {
+          "view": "bug",
+          "observed": {
+            "remount": {
+              "attempts": 1,
+              "oldErrors": 0,
+              "rendered": null
+            },
+            "activeError": {
+              "attempts": 2,
+              "errors": ["active request failed"],
+              "rendered": "retry loaded"
+            },
+            "sharedSuccess": {
+              "attempts": 1,
+              "errors": [],
+              "live": "shared loaded",
+              "later": "shared loaded"
+            },
+            "sharedFailure": {
+              "attempts": 2,
+              "oldErrors": 0,
+              "liveErrors": 1,
+              "rendered": "recovered"
+            }
+          }
+        },
+        {
+          "view": "repair",
+          "observed": {
+            "remount": {
+              "attempts": 2,
+              "oldErrors": 0,
+              "rendered": "loaded"
+            },
+            "activeError": {
+              "attempts": 2,
+              "errors": ["active request failed"],
+              "rendered": "retry loaded"
+            },
+            "sharedSuccess": {
+              "attempts": 1,
+              "errors": [],
+              "live": "shared loaded",
+              "later": "shared loaded"
+            },
+            "sharedFailure": {
+              "attempts": 2,
+              "oldErrors": 0,
+              "liveErrors": 1,
+              "rendered": "recovered"
+            }
+          }
+        }
+      ]
+    },
+    "sourceConformanceReview": "No blocking findings; same-model-family source inspection, not independent gold confirmation."
+  },
+  "runtime": {
+    "node": "v24.19.0",
+    "pnpmActual": "11.19.0",
+    "vuePnpmDeclared": "11.3.0",
+    "tanstackPnpmDeclared": "11.9.0",
+    "vueVitest": "4.1.7",
+    "tanstackVitest": "4.1.2",
+    "install": "Frozen lockfiles, scripts disabled; original source configs retained."
+  },
+  "privateEvidence": {
+    "locationHint": "~/.devkit/research/sc3144-source-qualification-20260913",
+    "receiptSha256": "fdc96dc1c48990c06668ea3eb44109f2223d0101063c820c88ee0c3f33fdc5bc",
+    "logHashes": [
+      {
+        "file": "mining.log",
+        "sha256": "f76062823146f1fe81547851802fb9b3c684f04b3ec25d1215d4a16c5f622a00"
+      },
+      {
+        "file": "tanstack-fixed-tests.log",
+        "sha256": "e9203fd8ed57e7b6d6b0506f063220235fd273350e8720adf7b8f44253817dc4"
+      },
+      {
+        "file": "tanstack-install.log",
+        "sha256": "f7da72e48d59ea6a62411d86a3ea0e3597227e763dbc13858fab78543496d346"
+      },
+      {
+        "file": "tanstack-parent-tests.log",
+        "sha256": "f545cf734d66781c738844c3833e89ab355d192d7b23eaa45b5d5f6e51ae8b62"
+      },
+      {
+        "file": "vue-fixed-tests.log",
+        "sha256": "114c3f91e339850bdb42f45abd34ae994e46dcd5058e93cb220b828031a78033"
+      },
+      {
+        "file": "vue-install.log",
+        "sha256": "5c1f3aadf18225c563c00853b19d33bd65962b5d688d823e962bfba17cd0d9bd"
+      },
+      {
+        "file": "vue-original-install.log",
+        "sha256": "4575c84e6bdacd335ff2badc1f102ca44fdc3af713169d21f957bb67dd7fa26e"
+      },
+      {
+        "file": "vue-original-tests.log",
+        "sha256": "08e64ad74406f5fba53630725f0c2becc1228189dbe12e47b51e1bd9037d37f1"
+      },
+      {
+        "file": "vue-parent-install.log",
+        "sha256": "5faf4da7fd876cbf475517cad8b85ee4d24ae3a07fa9eec6a4d4ba7ed493fd42"
+      },
+      {
+        "file": "vue-parent-recovery.log",
+        "sha256": "a8142134d699dbd87f7806a011099817d5cc47d0f95e82f5ca9398594174c63b"
+      },
+      {
+        "file": "vue-parent-tests-configured.log",
+        "sha256": "315ee2db822806298abeefb0518cc3277d4fd578a14e00f8aa2421220156ac90"
+      },
+      {
+        "file": "vue-parent-tests.log",
+        "sha256": "539183dd5a1880786aab7ec05544746e8a75ac2e5ef567432965aef94b6c9ac4"
+      },
+      {
+        "file": "vue-partial-install.log",
+        "sha256": "de537b8cf07ca89ded1178c843875b3010e6c8fb695affebe273ae2b72f9f20d"
+      },
+      {
+        "file": "vue-partial-recovery.log",
+        "sha256": "1b867023ab4193b60efe61efb52ef5751f64f0fa9443427dc33d25e9073d1d0e"
+      },
+      {
+        "file": "vue-partial-tests-configured.log",
+        "sha256": "dd710f432cf56bd7aa8e8d418cb56117e49f964713a8c0c73cf8dd11f77411c5"
+      },
+      {
+        "file": "vue-partial-tests.log",
+        "sha256": "733c3584844ffb91c32073abb4f18c8c8974d5eea3c03ff2a63af53b24f00e3d"
+      },
+      {
+        "file": "vue-source-recovery.log",
+        "sha256": "84640bc5e024b47ce6fa468ebdad5993385da450758027d6e898d53ed2d8a821"
+      }
+    ]
+  },
+  "research": [
+    {
+      "url": "https://arxiv.org/abs/2607.06065v1",
+      "use": "SWE-Review: inspect reproducer adequacy; failing test alone is not sound adjudication."
+    },
+    {
+      "url": "https://arxiv.org/abs/2603.11078v1",
+      "use": "CR-Bench: retain useful detections and noise separately; no transfer of vendor performance."
+    },
+    {
+      "url": "https://arxiv.org/abs/2504.02605v1",
+      "use": "Multi-SWE-bench: repository/environment-grounded evaluation."
+    },
+    {
+      "url": "https://arxiv.org/abs/2410.03859",
+      "use": "SWE-bench Multimodal: browser/UI behavior is not established by a reduced utility fixture."
+    }
+  ],
+  "priorArtStatus": "INSUFFICIENT_EVIDENCE / followed / unverified: public source/test leads useful; broad search and independent qualification incomplete."
+}

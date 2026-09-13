@@ -1,0 +1,31 @@
+import { defineAsyncComponent, h, nextTick, ref } from '../src'
+import { createApp, nodeOps, serializeInner } from '@vue/runtime-test'
+
+// Separate recovery invariant; the original upstream silence tests remain unchanged.
+test('a new mount retries after the old mount loader rejects', async () => {
+  const requests: Array<{ resolve: (value: any) => void; reject: (error: Error) => void }> = []
+  const errors: unknown[] = []
+  const loader = () => new Promise<any>((resolve, reject) => requests.push({ resolve, reject }))
+  const Widget = defineAsyncComponent({ loader })
+  const show = ref(true)
+  const root = nodeOps.createElement('div')
+  const app = createApp({ render: () => show.value ? h(Widget) : null })
+  app.config.errorHandler = error => errors.push(error)
+  app.mount(root)
+  show.value = false
+  await nextTick()
+  requests[0].reject(new Error('first request failed'))
+  await new Promise(resolve => setTimeout(resolve, 0))
+  const errorsBeforeRemount = errors.length
+  show.value = true
+  await nextTick()
+  await new Promise(resolve => setTimeout(resolve, 0))
+  const requestsAfterRemount = requests.length
+  requests[1]?.resolve(() => 'loaded')
+  await new Promise(resolve => setTimeout(resolve, 0))
+  const rendered = serializeInner(root)
+  console.log('SOURCE_CONTROL ' + JSON.stringify({ requestsAfterRemount, errorsBeforeRemount, errorsAfterRemount: errors.length, rendered }))
+  app.unmount()
+  expect(requestsAfterRemount).toBe(2)
+  expect(rendered).toBe('loaded')
+})
