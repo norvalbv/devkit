@@ -57,6 +57,7 @@ Hand-written records that sit beside the ledger; each number in them names its p
 - [`decisions-findings.md`](decisions-findings.md) — decision-log benchmarks: findings, corrections, open work (sc-1236).
 - [`reviewer-yield-vs-diff-size.md`](reviewer-yield-vs-diff-size.md) — the review gate returns ~1 issue per run above ~1k LOC and the corpus never measures that regime (2026-08-22).
 - [`corpus-growth.md`](corpus-growth.md) — how corpus rows are mined from telemetry and adapted.
+- [`2026-09-13 source qualification`](experiments/2026-09-13-source-qualification/README.md) — actual Vue retry and TanStack resubscription controls; one qualified proposal pair, no corpus admission or new model scores.
 - [`source-family-census.md`](source-family-census.md) — source-qualified candidate families and exact native initial-evidence coverage (zero reviewer calls).
 - [`source-family-qualification-2026-09-06.md`](source-family-qualification-2026-09-06.md) — source-controlled reply extraction and unresolved delivery-boundary qualification (sc-2866).
 - [`correctness-rebaseline-2026-09-04.md`](correctness-rebaseline-2026-09-04.md) — correctness re-baselined on the shipped gpt-5.6-sol pin: recall 0.92, clean-pass 0.60, and the precision loss sits entirely in the fix-pair decoys (sc-2494).
