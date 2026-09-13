@@ -101,7 +101,7 @@ if [ "$rrc" -eq 1 ]; then
     exit 1
 elif [ "$rrc" -eq 3 ]; then
     echo "   guard-review: judge unavailable after retry — strict ship mode failed closed."
-    echo "   Check the judge CLI auth/quota named above, then re-run devkit ship (completed verdicts are cached)."
+    echo "   Check the judge CLI auth/quota named above — or, when a re-run cannot clear it, use the knobs that Remedy names to move the judges (completed verdicts are cached)."
     __dk_comp_observed
     exit 1
 elif [ "$rrc" -ne 0 ] && [ "$rrc" -ne 2 ]; then

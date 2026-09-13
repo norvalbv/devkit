@@ -33,20 +33,29 @@ import {
   staleIndexMessage,
 } from '../../../gate-engine/co-occurrence/index-refresh.mts';
 import { isCodexModel, parseModelSpec } from '../../../gate-engine/judge/codex/result.mts';
+import {
+  claudeFamilyEnvLine,
+  claudeFamilyKeyLine,
+} from '../../../gate-engine/judge/outage/family-override.mts';
 import { REVIEWERS } from '../../../gate-engine/review/reviewers.mts';
 import { detectStack, type Stack } from '../detect-stack.mts';
 import { packageDir, readJson } from '../fs-helpers.mts';
 import { type CheckResult, check } from './check-result.mts';
 import { JUDGE_AUTH_CHECK, judgeAuthResult } from './judge/judge-auth.mts';
 import {
+  activeModelEnvOverrides,
   CLAUDE_RUNTIME_CHECK,
   claudeBindable,
   claudeRuntimeResult,
   explicitFamilyKeys,
   FAMILY_STALE_CHECK,
   familyStaleResult,
+  type JudgeGuards,
+  judgeGuardsOf,
   resolvedJudgeModels,
 } from './judge/judge-family.mts';
+
+export { judgeGuardsOf };
 
 export const SEARCH_INDEX_CHECK = 'search-code index';
 
@@ -194,9 +203,9 @@ export async function checkGuardConfig(
   cwd: string,
   dupSelected: boolean,
   searchCodeSelected: boolean,
-  // Required, never defaulted: a silent false here retires the codex check for a caller that
-  // wanted it. Only the `review` guard reads review.model / review.correctnessModel.
-  reviewSelected: boolean,
+  // Required, never defaulted: a silent false here retires the judge checks for a caller that
+  // wanted them. The review AND sentry guards both spawn judges, so both select these checks.
+  judges: JudgeGuards,
 ): Promise<CheckResult[]> {
   const path = join(cwd, 'guard.config.json');
   if (!existsSync(path)) {
@@ -237,22 +246,31 @@ export async function checkGuardConfig(
   if (dupSelected) results.push(checkSearchIndex(cwd, resolved, searchCodeSelected));
   const topology = reviewTopology(cwd, cfg.review);
   if (topology) results.push(topology);
-  const codex = reviewSelected ? codexRuntimeResult(cfg, cwd) : null;
+  const judging = judges.review || judges.sentry;
+  const codex = judging ? codexRuntimeResult(cfg, cwd, judges) : null;
   if (codex) results.push(codex);
   if (codex && claudeBindable(cwd)) {
     codex.fixable = true;
     codex.remediation +=
-      ' — or `devkit doctor --fix` binds the claude family (haiku/opus/sonnet, chunking off) into guard.config.json';
+      ' — or `devkit doctor --fix` writes that same set for you; a ship reads guard.config.json' +
+      ' from the base commit, so commit it for the bind to reach one';
   } else if (codex) {
+    // Envs first: one outranks anything devkit writes, so naming an explicit key while an env
+    // shadows it would send the operator to edit a file that cannot win.
+    const envs = activeModelEnvOverrides(judges);
     const explicit = explicitFamilyKeys(cwd);
-    if (explicit.length)
+    if (envs.length)
+      codex.remediation +=
+        ` — automatic binding is blocked by ${envs.join(' / ')} in your environment: a bind cannot` +
+        ` move a judge an env pins. Unset them, or point them at the claude family: \`${claudeFamilyEnvLine()}\``;
+    else if (explicit.length)
       codex.remediation += ` — automatic binding is blocked by your explicit review.${explicit.join(' / review.')}`;
   }
-  const claude = reviewSelected ? claudeRuntimeResult(cfg, cwd) : null;
+  const claude = judging ? claudeRuntimeResult(cfg, cwd, judges) : null;
   if (claude) results.push(claude);
-  const stale = reviewSelected ? familyStaleResult(cwd) : null;
+  const stale = judging ? familyStaleResult(cwd) : null;
   if (stale) results.push(stale);
-  const auth = reviewSelected ? judgeAuthResult(cfg) : null;
+  const auth = judging ? judgeAuthResult(cfg, undefined, judges) : null;
   if (auth) results.push(auth);
   return results;
 }
@@ -273,8 +291,9 @@ export function codexRuntimeResult(
   // Relative pins / PATH entries resolve against the CONSUMER repo (where the judge spawns),
   // never the doctor's own process cwd.
   cwd: string = process.cwd(),
+  guards?: JudgeGuards,
 ): CheckResult | null {
-  const models = resolvedJudgeModels(cfg);
+  const models = resolvedJudgeModels(cfg, guards);
   const gpt = [...new Set(models.filter((m) => isCodexModel(m)))];
   // A model spec the spawn layer would mishandle is a config defect the doctor should name now —
   // otherwise every affected judge fails at the next commit. The @effort suffix is codex-only:
@@ -321,7 +340,7 @@ export function codexRuntimeResult(
     CODEX_RUNTIME_CHECK,
     'DRIFT',
     `judge model ${gpt.join(', ')} routes through the codex CLI, but no codex binary resolves (PATH${pinned ? `, GUARD_CODEX_BIN=${pinned}` : ''}) — affected judges are unavailable and strict ships fail closed`,
-    'install codex-cli (or set GUARD_CODEX_BIN), or override review.model / review.escalationModel / review.correctnessModel in guard.config.json',
+    `install codex-cli (or set GUARD_CODEX_BIN), or set the claude family — ${claudeFamilyKeyLine()} — in guard.config.json (and unset GUARD_SENTRY_MODEL / FRINK_SENTRY_MODEL if either pins a codex model)`,
   );
 }
 
@@ -340,7 +359,10 @@ export async function adviseSearchIndex(
   sel: { guards?: string[]; searchCode?: boolean },
 ): Promise<void> {
   if (!sel.guards?.includes('dup')) return;
-  const results = await checkGuardConfig(cwd, true, sel.searchCode === true, false);
+  const results = await checkGuardConfig(cwd, true, sel.searchCode === true, {
+    review: false,
+    sentry: false,
+  });
   const index = results.find((r) => r.name === SEARCH_INDEX_CHECK);
   if (!index) return;
   console.log(`  ${index.status === 'OK' ? '✓' : '⚠'} ${index.name}: ${index.detail}`);
@@ -353,12 +375,7 @@ export async function adviseSearchIndex(
  * needs this one is devkit itself: the sole install whose committed config selects gpt judges.
  */
 export async function adviseCodexRuntime(cwd: string, sel: { guards?: string[] }): Promise<void> {
-  const results = await checkGuardConfig(
-    cwd,
-    false,
-    false,
-    sel.guards?.includes('review') === true,
-  );
+  const results = await checkGuardConfig(cwd, false, false, judgeGuardsOf(sel.guards));
   const ADVISED = new Set([
     CODEX_RUNTIME_CHECK,
     CLAUDE_RUNTIME_CHECK,

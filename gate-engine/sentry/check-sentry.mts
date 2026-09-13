@@ -74,7 +74,7 @@ import { emitGateBypass, emitGateEvent } from '../judge/gate-events.mts';
 import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from '../judge/judge-isolation.mts';
 import { reportGateInfraFailure } from '../judge/odb-probe.mts';
 import { execJudge } from '../judge/run-judge.mts';
-import { resolveReviewModel } from '../review/reviewers.mts';
+import { resolveSentryModel } from '../review/reviewers.mts';
 import { buildEvidence, degradeCause, renderInventory, type SentryEvidence } from './evidence.mts';
 import { judgeSentryWithCache } from './verdict-cache.mts';
 
@@ -98,7 +98,7 @@ interface SentryJudgeOpts {
 }
 
 const CWD = process.cwd();
-const modelSpec = () => envVar('SENTRY_MODEL') ?? resolveReviewModel(resolveGuardConfig(CWD));
+const modelSpec = () => resolveSentryModel(resolveGuardConfig(CWD));
 
 /** Confidence contract: a run that can BLOCK votes a 3-sample majority; warn-only spends 1. A positive *_SENTRY_SAMPLES always wins (unset/invalid → the default). */
 export function resolveSamples(hard: boolean): number {

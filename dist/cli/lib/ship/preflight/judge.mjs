@@ -2,29 +2,21 @@
 /** Report the judges' provider before the deterministic chain is paid (sc-2538). ADVISORY — never
  *  blocks, reports per MODEL. Why: docs/decisions/judge-outage-classified-not-blocked.md. */
 import { realpathSync } from 'node:fs';
-import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { resolveGuardConfig } from '../../../../gate-engine/config.mjs';
 import { readCodexRateLimits } from '../../../../gate-engine/judge/codex/rate-limits.mjs';
 import { isCodexModel, judgeBinForModel } from '../../../../gate-engine/judge/codex/result.mjs';
 import { formatResetDelta } from '../../../../gate-engine/judge/outage/classify.mjs';
+import { familyOverrideRemedy } from '../../../../gate-engine/judge/outage/family-override.mjs';
 import { claudeLoggedOut, codexLoggedOut } from '../../doctor/judge/judge-auth.mjs';
-import { binResolvable, resolvedJudgeModels } from '../../doctor/judge/judge-family.mjs';
-import { readJson } from '../../fs-helpers.mjs';
-/** The three roles, in the order a cascade reaches them, for a report that reads like the run. */
-const ROLES = ['review', 'escalation', 'correctness'];
-/** Is the reviewer gate even selected? A repo that runs no judges must be byte-identical to
+import { binResolvable, recordedJudgeGuards, resolvedJudgeRoles, } from '../../doctor/judge/judge-family.mjs';
+/** Which judge-spawning guards are selected? A repo that runs no judges must be byte-identical to
  *  before. Mirrors the `reviewSelected` gating in cli/lib/doctor/guard-config-checks.mts. */
-export function reviewGuardSelected(root) {
-    try {
-        return (readJson(join(root, '.devkit', 'config.json'))?.components?.guards?.includes('review') === true);
-    }
-    catch {
-        // An unparseable or absent recorded selection is not evidence either way. Staying silent is the
-        // advisory-safe reading: this check may never be the reason anything changes.
-        return false;
-    }
+export function selectedJudgeGuards(root) {
+    // An unreadable record is not evidence either way; silence is the advisory-safe reading here.
+    return recordedJudgeGuards(root) ?? { review: false, sentry: false };
 }
+export const reviewGuardSelected = (root) => selectedJudgeGuards(root).review;
 const DEFAULT_DEPS = {
     resolvable: binResolvable,
     codexOut: () => codexLoggedOut(),
@@ -33,9 +25,10 @@ const DEFAULT_DEPS = {
 };
 /** Classify every resolved judge model, cheapest check first. The rate-limit RPC runs at most ONCE
  *  per report even with three codex roles, because they share one account. */
-export async function judgeReachability(root, deps = DEFAULT_DEPS) {
+export async function judgeReachability(root, deps = DEFAULT_DEPS, guards = { review: true, sentry: false }) {
     const cfg = resolveGuardConfig(root);
-    const models = resolvedJudgeModels(cfg);
+    const roles = resolvedJudgeRoles(cfg, guards);
+    const models = roles.map((r) => r.model);
     const statuses = [];
     // Resolved once per provider, not per model: three roles on one subscription share one answer,
     // and asking three times would triple the latency of the thing meant to save time.
@@ -48,9 +41,9 @@ export async function judgeReachability(root, deps = DEFAULT_DEPS) {
     const claudeNeeded = models.some((m) => !isCodexModel(m));
     const claudePresent = claudeNeeded && deps.resolvable('claude', root);
     const claudeDark = claudePresent && deps.claudeOut();
-    for (const [i, model] of models.entries()) {
+    for (const { role, model } of roles) {
         const bin = judgeBinForModel(model);
-        const status = { role: ROLES[i], model, bin, state: 'unknown' };
+        const status = { role, model, bin, state: 'unknown' };
         if (isCodexModel(model)) {
             if (!codexPresent)
                 status.state = 'absent';
@@ -130,9 +123,10 @@ export function renderPreflight(statuses, now = Date.now()) {
             : `   A usage limit does not clear on its own — re-running will not help for another ${formatResetDelta(reset, now)}.`);
     // Naming the override, never taking it: a runtime cross-family swap moves spend to an unwatched
     // subscription and puts its verdicts outside the model-keyed cache salt (review-gate-in-chain).
-    lines.push('   To ship inside this window, move the judges to another family: `devkit doctor --fix` ' +
-        'binds the claude family when codex is unresolvable, or set GUARD_REVIEW_MODEL / ' +
-        'GUARD_REVIEW_ESCALATION_MODEL / GUARD_CORRECTNESS_MODEL to claude-family ids for this run.');
+    const dark = [...new Set(blocked.map((s) => s.bin))];
+    lines.push(dark.length > 1
+        ? '   Both judge CLIs are dark, so no family move helps — install or authenticate one of them.'
+        : `   To ship inside this window, ${familyOverrideRemedy(dark[0] ?? 'codex')}.`);
     return lines;
 }
 async function main(argv) {
@@ -141,9 +135,10 @@ async function main(argv) {
         console.error('usage: ship preflight judge <consumer-root>');
         return 2;
     }
-    if (!reviewGuardSelected(root))
+    const guards = selectedJudgeGuards(root);
+    if (!guards.review && !guards.sentry)
         return 0;
-    const statuses = await judgeReachability(root);
+    const statuses = await judgeReachability(root, DEFAULT_DEPS, guards);
     for (const line of renderPreflight(statuses))
         console.error(line);
     return 0;

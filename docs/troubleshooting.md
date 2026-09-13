@@ -131,6 +131,63 @@ the completeness judgement, cleared decisions judgements, and the all-green **de
 it was mid-flight in and any reviewers missing a completion heartbeat. For more room per attempt, see
 `SHIP_COMMIT_TIMEOUT` below.
 
+## A gate exited 3: the judge hit a usage limit, or its CLI is missing
+
+Exit 3 is the **exit-3 contract** — the judge could not run, not a finding against your code. The
+message names the CLI that went dark and why: absent, logged out, or a usage limit with the wait it
+carries. Re-running clears none of those, and a multi-day lock outlasts any ship.
+
+Move every judge **away from the CLI the message names**, in the shell the ship runs in.
+
+**`codex` is dark** — move to the claude family. Set all four knobs, never a subset:
+
+```
+export GUARD_REVIEW_MODEL=haiku GUARD_REVIEW_ESCALATION_MODEL=opus \
+  GUARD_CORRECTNESS_MODEL=sonnet GUARD_CORRECTNESS_CHUNK=off
+unset GUARD_SENTRY_MODEL FRINK_SENTRY_MODEL
+devkit ship --resume <branch>
+```
+
+**`claude` is dark** — return to the packaged codex family. Unset every judge env:
+
+```
+unset GUARD_REVIEW_MODEL FRINK_REVIEW_MODEL GUARD_REVIEW_ESCALATION_MODEL \
+  GUARD_CORRECTNESS_MODEL GUARD_CORRECTNESS_CHUNK GUARD_SENTRY_MODEL FRINK_SENTRY_MODEL
+```
+
+Then check `guard.config.json`. If `review["//judgeFamily"]` is exactly this string, the text doctor
+writes:
+
+```
+claude family bound by devkit doctor --fix (codex binary was unresolvable). Explicit edits and GUARD_* envs win; delete these four keys to return to package defaults.
+```
+
+then a doctor bind put the claude family there, and unsetting alone leaves it in force. Delete
+that key and the four keys it names (`model`, `escalationModel`, `correctnessModel`,
+`correctnessChunkLoc`) by hand, then commit the file, because a ship reads it from the base commit.
+Leave the file alone if the marker is absent or holds your own note: those keys are yours. Then
+`devkit ship --resume <branch>`. This is also the way back once a codex outage clears.
+
+**The message names both** (`` `codex` or `claude` ``) — that judge spans both families, so either may
+be the dark one. Find out first with `devkit doctor` or the ship preflight, then use the matching block.
+
+Export or unset in the shell; never prefix the command. An inline `VAR=x devkit ship` can be stripped
+by a command-rewriting shell hook, exactly as with `SHIP_COMMIT_TIMEOUT` below.
+
+- The chunk cap matters: 400 LOC is benched for `gpt-5.6-sol` only, so moving three knobs runs the
+  correctness reviewer at a cap never measured for the model now judging.
+- A sentry pin (`GUARD_SENTRY_MODEL` or `FRINK_SENTRY_MODEL`) stays where it points until cleared, which
+  is why both blocks unset it. `devkit doctor --fix` refuses to bind while one pins codex, rather than
+  reporting a move that left a judge behind.
+- `devkit doctor --fix` writes the same four keys into `guard.config.json` — durable, but it binds
+  only toward Claude, and a ship reads that file **from the base commit**, so commit it first. An
+  exported env needs no commit and works mid-ship.
+- Both routes re-judge every reviewer: a cached PASS is keyed on the model that earned it, so an
+  in-flight converging ship restarts its review wave.
+- Claude publishes no quota query, so nothing can warn you before its headroom runs out.
+
+`devkit doctor` reports the same models per role, and says which env is blocking an automatic bind.
+
 ## A `.devkit/` ship cache looks stale (gates pass when they shouldn't)
 
 The **deterministic-prefix cache** and **checkpointed verdicts** live under `.devkit/`, keyed on the

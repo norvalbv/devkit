@@ -3,7 +3,7 @@
 import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   parseRateLimitsReply,
   readCodexRateLimits,
@@ -13,6 +13,7 @@ import {
   type PreflightDeps,
   renderPreflight,
   reviewGuardSelected,
+  selectedJudgeGuards,
 } from '../lib/ship/preflight/judge.mts';
 
 /** The payload `codex app-server` returned on this machine while the account was locked. */
@@ -26,6 +27,44 @@ const LOCKED_REPLY = JSON.stringify({
       rateLimitReachedType: 'rate_limit_reached',
     },
   },
+});
+
+// The clock when that payload was captured. plausibleReset drops a reset already in the past, so a
+// real-clock run silently lost `resetsAt` once 2026-09-07 passed; pin Date, keep the payload verbatim.
+const CAPTURED_AT = 1788786135000 - 4 * 24 * 60 * 60 * 1000;
+
+// This suite resolves REAL judge models, so a developer's exported knob would otherwise steer the
+// role rows and the model assertions below.
+const ENV_KEYS = [
+  'GUARD_REVIEW_MODEL',
+  'FRINK_REVIEW_MODEL',
+  'GUARD_REVIEW_ESCALATION_MODEL',
+  'GUARD_CORRECTNESS_MODEL',
+  'GUARD_CORRECTNESS_CHUNK',
+  'GUARD_SENTRY_MODEL',
+  'FRINK_SENTRY_MODEL',
+] as const;
+const savedEnv = new Map<string, string | undefined>();
+
+beforeEach(() => {
+  for (const k of ENV_KEYS) {
+    savedEnv.set(k, process.env[k]);
+    delete process.env[k];
+  }
+});
+
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(CAPTURED_AT);
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+  for (const k of ENV_KEYS) {
+    const v = savedEnv.get(k);
+    if (v === undefined) delete process.env[k];
+    else process.env[k] = v;
+  }
 });
 
 function repo(guards: string[], review?: Record<string, string>): string {
@@ -107,6 +146,39 @@ describe('judgeReachability', () => {
     const statuses = await judgeReachability(repo(['review'], CODEX_FAMILY), deps());
     expect(statuses.map((s) => s.role)).toEqual(['review', 'escalation', 'correctness']);
     expect(statuses.map((s) => s.model)).toEqual(['gpt-5.6-terra', 'gpt-5.6-sol', 'gpt-5.6-sol']);
+  });
+
+  // sc-2689: the sentry judge was invisible here, so a codex sentry pin on a claude-bound install
+  // was reported by nothing. It earns a row only when SET — unset it is the review row restated.
+  it('a set GUARD_SENTRY_MODEL becomes its own role; unset it stays folded into review', async () => {
+    const dir = repo(['review'], CODEX_FAMILY);
+    expect((await judgeReachability(dir, deps())).map((s) => s.role)).toEqual([
+      'review',
+      'escalation',
+      'correctness',
+    ]);
+    process.env.GUARD_SENTRY_MODEL = 'haiku';
+    expect((await judgeReachability(dir, deps())).map((s) => s.role)).not.toContain('sentry');
+    const withSentry = await judgeReachability(dir, deps(), { review: true, sentry: true });
+    expect(withSentry.map((s) => s.role)).toEqual([
+      'review',
+      'escalation',
+      'correctness',
+      'sentry',
+    ]);
+    expect(withSentry.at(-1)).toMatchObject({ model: 'haiku', bin: 'claude' });
+  });
+
+  // A sentry-only install spawns exactly one judge. Gating on the review guard alone reported
+  // nothing at all for it, so a dark provider under a blocking sentry run went unannounced.
+  it('a sentry-only install reports its one judge, at the model that judge really resolves', async () => {
+    const dir = repo(['sentry'], CODEX_FAMILY);
+    expect(selectedJudgeGuards(dir)).toEqual({ review: false, sentry: true });
+    const statuses = await judgeReachability(dir, deps(), selectedJudgeGuards(dir));
+    expect(statuses.map((s) => [s.role, s.model])).toEqual([['sentry', 'gpt-5.6-terra']]);
+    process.env.GUARD_SENTRY_MODEL = 'haiku';
+    const pinned = await judgeReachability(dir, deps(), selectedJudgeGuards(dir));
+    expect(pinned.map((s) => [s.role, s.model, s.bin])).toEqual([['sentry', 'haiku', 'claude']]);
   });
 
   it('asks the rate-limit RPC ONCE even with three codex roles — one account, one answer', async () => {
@@ -200,6 +272,33 @@ describe('renderPreflight', () => {
     expect(out).toContain('re-running will not help');
     expect(out).toContain('devkit doctor --fix');
     expect(out).toContain('GUARD_REVIEW_MODEL');
+  });
+
+  // sc-2689: the redirect is only honest when ONE family is dark. With both blocked there is
+  // nowhere to move, and printing a one-direction override would send the operator in a circle.
+  it('says no family move helps when BOTH judge CLIs are dark', () => {
+    const bothDark = [
+      ...locked,
+      {
+        role: 'correctness' as const,
+        model: 'sonnet',
+        bin: 'claude',
+        state: 'unauthenticated' as const,
+      },
+    ];
+    const out = renderPreflight(bothDark, now).join('\n');
+    expect(out).toContain('Both judge CLIs are dark');
+    expect(out).not.toContain('GUARD_REVIEW_MODEL=haiku');
+    expect(out).not.toContain('move the judges to the claude family');
+  });
+
+  it('a claude-only outage offers the CODEX direction, never a move back to claude', () => {
+    const claudeDark = [
+      { role: 'review' as const, model: 'haiku', bin: 'claude', state: 'unauthenticated' as const },
+    ];
+    const out = renderPreflight(claudeDark, now).join('\n');
+    expect(out).toContain('the packaged codex family');
+    expect(out).not.toContain('GUARD_REVIEW_MODEL=haiku');
   });
 
   it('warns that the gates STILL RUN — it is a report, never a decision', () => {
