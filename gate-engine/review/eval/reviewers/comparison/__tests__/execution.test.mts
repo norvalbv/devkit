@@ -1,22 +1,12 @@
-import {
-  cpSync,
-  mkdtempSync,
-  mkdirSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from 'node:fs';
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import os, { tmpdir } from 'node:os';
 import path from 'node:path';
-import { describe, expect, it, vi } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
 import { runProbe, runRow, scoreRow } from '../../corpus/row.mts';
 import { researchOutputDirectory } from '../../scale/materialize.mts';
 import {
   GROUPS,
   MODEL,
-  ROOT,
   PREPARATION,
   loadComparison,
   schedule,
@@ -24,7 +14,10 @@ import {
   sha256,
 } from '../manifest.mts';
 import { census, guardedExec, openEvidence, runComparison, summarizeCells } from '../execute.mts';
-const comparison = loadComparison();
+import { comparisonFixture } from './comparison-fixtures.mts';
+const fixture = comparisonFixture();
+afterAll(fixture.cleanup);
+const comparison = loadComparison(fixture.root);
 const row = comparison.rows[0];
 const probe = comparison.probes[0];
 const fail = async () => 'VERDICT: FAIL — controlled test finding';
@@ -256,13 +249,9 @@ describe('frozen preparation, input and execution budgets', () => {
 });
 
 it('rejects changed preparation artifacts before any judge can start', () => {
-  const root = mkdtempSync(path.join(tmpdir(), 'comparison-pins-'));
+  const { root, cleanup } = comparisonFixture();
   try {
-    for (const name of ['.git', 'gate-engine', 'agents', 'skills', 'guard.config.json'])
-      symlinkSync(path.join(ROOT, name), path.join(root, name));
     const dir = path.join(root, PREPARATION);
-    mkdirSync(path.dirname(dir), { recursive: true });
-    cpSync(path.join(ROOT, PREPARATION), dir, { recursive: true });
     const patch = path.join(dir, 'agent.patch');
     writeFileSync(patch, readFileSync(patch, 'utf8') + '\n');
     expect(() => loadComparison(root)).toThrow(/hash mismatch/);
@@ -272,7 +261,7 @@ it('rejects changed preparation artifacts before any judge can start', () => {
     writeFileSync(protocolPath, JSON.stringify(protocol));
     expect(() => loadComparison(root)).toThrow(/frozen PR605 protocol/);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    cleanup();
   }
 });
 it('refuses an existing evidence directory and preserves its original registration', () => {

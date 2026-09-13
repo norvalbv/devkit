@@ -92,8 +92,8 @@ describe('pairConsistency', () => {
       n: 2,
       families: 2,
       familyK: 1,
-      singletons: 1,
-      malformedGroups: 1,
+      singletons: 3,
+      malformedGroups: 0,
     });
   });
   it('groups a variantOf-only pair the same way holdout does, and leaves unlinked rows singletons', () => {
@@ -170,6 +170,28 @@ describe('pairConsistency', () => {
       singletons: 0,
       malformedGroups: 0,
     });
+  });
+  it('keeps standalone controls in their source family without inventing repair edges', () => {
+    const rows = [
+      r('g1', 'shared', 'FAIL', true),
+      { ...r('d1', 'shared', 'PASS', true), variantOf: 'g1' },
+      r('clean-control', 'shared', 'PASS', false),
+      r('other-bug', 'shared', 'FAIL', true),
+      r('clean-1', 'clean-context', 'PASS', true),
+      r('clean-2', 'clean-context', 'PASS', true),
+    ];
+    expect(() => assertRepairFamilies(rows)).not.toThrow();
+    expect(pairConsistency(rows)).toEqual({
+      k: 1,
+      n: 1,
+      families: 1,
+      familyK: 0,
+      singletons: 4,
+      malformedGroups: 0,
+    });
+    // Standalone failure still prevents claiming that the entire shared family passed.
+    expect(pairConsistency(rows.map((row) => ({ ...row, okFirst: true }))).familyK).toBe(1);
+    expect(summarize(rows).rows).toBe(6);
   });
 });
 

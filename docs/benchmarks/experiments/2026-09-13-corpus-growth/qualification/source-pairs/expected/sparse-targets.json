@@ -1,0 +1,405 @@
+{
+  "runtime": "v24.19.0",
+  "observations": [
+    {
+      "stage": "parent",
+      "kind": "operation",
+      "name": "null only",
+      "pass": true,
+      "value": {
+        "count": 1
+      }
+    },
+    {
+      "stage": "parent",
+      "kind": "operation",
+      "name": "sparse holes",
+      "pass": true,
+      "value": {
+        "count": 1
+      }
+    },
+    {
+      "stage": "parent",
+      "kind": "operation",
+      "name": "empty",
+      "pass": true,
+      "value": {
+        "count": 1
+      }
+    },
+    {
+      "stage": "parent",
+      "kind": "operation",
+      "name": "undefined array",
+      "pass": true,
+      "value": {
+        "count": 1
+      }
+    },
+    {
+      "stage": "parent",
+      "kind": "operation",
+      "name": "multiple child errors collected",
+      "pass": false,
+      "error": {
+        "name": "AssertionError",
+        "message": "The expression evaluated to a falsy value:\n\n  assert(keys.includes('foods.1.name'))\n"
+      }
+    },
+    {
+      "stage": "parent",
+      "kind": "operation",
+      "name": "valid children accepted",
+      "pass": true,
+      "value": {
+        "accepted": true
+      }
+    },
+    {
+      "stage": "parent",
+      "kind": "operation",
+      "name": "async child plus null accepted",
+      "pass": true,
+      "value": {
+        "accepted": true
+      }
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "name": "null only",
+      "pass": true,
+      "value": {
+        "count": 1
+      }
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "name": "sparse holes",
+      "pass": true,
+      "value": {
+        "count": 1
+      }
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "name": "empty",
+      "pass": true,
+      "value": {
+        "count": 1
+      }
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "name": "undefined array",
+      "pass": true,
+      "value": {
+        "count": 1
+      }
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "name": "multiple child errors collected",
+      "pass": false,
+      "error": {
+        "name": "AssertionError",
+        "message": "The expression evaluated to a falsy value:\n\n  assert(keys.includes('foods.1.name'))\n"
+      }
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "name": "valid children accepted",
+      "pass": true,
+      "value": {
+        "accepted": true
+      }
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "name": "async child plus null accepted",
+      "pass": true,
+      "value": {
+        "accepted": true
+      }
+    },
+    {
+      "stage": "bug",
+      "kind": "operation",
+      "name": "null only",
+      "pass": false,
+      "error": {
+        "name": "ReferenceError",
+        "message": "errors is not defined"
+      }
+    },
+    {
+      "stage": "bug",
+      "kind": "operation",
+      "name": "sparse holes",
+      "pass": false,
+      "error": {
+        "name": "ReferenceError",
+        "message": "errors is not defined"
+      }
+    },
+    {
+      "stage": "bug",
+      "kind": "operation",
+      "name": "empty",
+      "pass": true,
+      "value": {
+        "count": 1
+      }
+    },
+    {
+      "stage": "bug",
+      "kind": "operation",
+      "name": "undefined array",
+      "pass": true,
+      "value": {
+        "count": 1
+      }
+    },
+    {
+      "stage": "bug",
+      "kind": "operation",
+      "name": "multiple child errors collected",
+      "pass": true,
+      "value": {
+        "count": 1,
+        "keys": [
+          "foods.0.name",
+          "foods.1.name"
+        ]
+      }
+    },
+    {
+      "stage": "bug",
+      "kind": "operation",
+      "name": "valid children accepted",
+      "pass": true,
+      "value": {
+        "accepted": true
+      }
+    },
+    {
+      "stage": "bug",
+      "kind": "operation",
+      "name": "async child plus null accepted",
+      "pass": true,
+      "value": {
+        "accepted": true
+      }
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "name": "null only",
+      "pass": false,
+      "error": {
+        "name": "ReferenceError",
+        "message": "errors is not defined"
+      }
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "name": "sparse holes",
+      "pass": false,
+      "error": {
+        "name": "ReferenceError",
+        "message": "errors is not defined"
+      }
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "name": "empty",
+      "pass": true,
+      "value": {
+        "count": 1
+      }
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "name": "undefined array",
+      "pass": true,
+      "value": {
+        "count": 1
+      }
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "name": "multiple child errors collected",
+      "pass": true,
+      "value": {
+        "count": 1,
+        "keys": [
+          "foods.0.name",
+          "foods.1.name"
+        ]
+      }
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "name": "valid children accepted",
+      "pass": true,
+      "value": {
+        "accepted": true
+      }
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "name": "async child plus null accepted",
+      "pass": true,
+      "value": {
+        "accepted": true
+      }
+    },
+    {
+      "stage": "repair",
+      "kind": "operation",
+      "name": "null only",
+      "pass": true,
+      "value": {
+        "count": 1
+      }
+    },
+    {
+      "stage": "repair",
+      "kind": "operation",
+      "name": "sparse holes",
+      "pass": true,
+      "value": {
+        "count": 1
+      }
+    },
+    {
+      "stage": "repair",
+      "kind": "operation",
+      "name": "empty",
+      "pass": true,
+      "value": {
+        "count": 1
+      }
+    },
+    {
+      "stage": "repair",
+      "kind": "operation",
+      "name": "undefined array",
+      "pass": true,
+      "value": {
+        "count": 1
+      }
+    },
+    {
+      "stage": "repair",
+      "kind": "operation",
+      "name": "multiple child errors collected",
+      "pass": true,
+      "value": {
+        "count": 1,
+        "keys": [
+          "foods.0.name",
+          "foods.1.name"
+        ]
+      }
+    },
+    {
+      "stage": "repair",
+      "kind": "operation",
+      "name": "valid children accepted",
+      "pass": true,
+      "value": {
+        "accepted": true
+      }
+    },
+    {
+      "stage": "repair",
+      "kind": "operation",
+      "name": "async child plus null accepted",
+      "pass": true,
+      "value": {
+        "accepted": true
+      }
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "name": "null only",
+      "pass": true,
+      "value": {
+        "count": 1
+      }
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "name": "sparse holes",
+      "pass": true,
+      "value": {
+        "count": 1
+      }
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "name": "empty",
+      "pass": true,
+      "value": {
+        "count": 1
+      }
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "name": "undefined array",
+      "pass": true,
+      "value": {
+        "count": 1
+      }
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "name": "multiple child errors collected",
+      "pass": true,
+      "value": {
+        "count": 1,
+        "keys": [
+          "foods.0.name",
+          "foods.1.name"
+        ]
+      }
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "name": "valid children accepted",
+      "pass": true,
+      "value": {
+        "accepted": true
+      }
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "name": "async child plus null accepted",
+      "pass": true,
+      "value": {
+        "accepted": true
+      }
+    }
+  ]
+}

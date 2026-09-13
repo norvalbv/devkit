@@ -1,0 +1,250 @@
+{
+  "fdb03eeae71ed4d337d4fa978b28c0cc422375d76011aac4acd650c48c808752": {
+    "acceptedEncodings": {
+      "start": 4338,
+      "end": 4456
+    },
+    "accepted": {
+      "start": 4879,
+      "end": 4985
+    },
+    "acceptedLanguages": {
+      "start": 5242,
+      "end": 5425
+    },
+    "acceptedCharsets": {
+      "start": 5713,
+      "end": 5895
+    },
+    "protocol": {
+      "start": 8071,
+      "end": 8457
+    },
+    "secure": {
+      "start": 8592,
+      "end": 8640
+    },
+    "ip": {
+      "start": 8849,
+      "end": 8941
+    },
+    "ips": {
+      "start": 9297,
+      "end": 9433
+    },
+    "auth": {
+      "start": 9685,
+      "end": 9882
+    },
+    "subdomains": {
+      "start": 10436,
+      "end": 10604
+    },
+    "path": {
+      "start": 10733,
+      "end": 10777
+    },
+    "host": {
+      "start": 11023,
+      "end": 11433
+    },
+    "fresh": {
+      "start": 11602,
+      "end": 11937
+    },
+    "stale": {
+      "start": 12129,
+      "end": 12164
+    },
+    "xhr": {
+      "start": 12293,
+      "end": 12402
+    }
+  },
+  "049e9cc1b0a282a9ebc6eca057cb35de26f0d2558d265f0a308733ab1edd4033": {
+    "acceptedEncodings": {
+      "start": 4370,
+      "end": 4488
+    },
+    "accepted": {
+      "start": 4911,
+      "end": 5017
+    },
+    "acceptedLanguages": {
+      "start": 5274,
+      "end": 5457
+    },
+    "acceptedCharsets": {
+      "start": 5745,
+      "end": 5927
+    },
+    "protocol": {
+      "start": 8103,
+      "end": 8489
+    },
+    "secure": {
+      "start": 8624,
+      "end": 8672
+    },
+    "ip": {
+      "start": 8881,
+      "end": 8973
+    },
+    "ips": {
+      "start": 9329,
+      "end": 9465
+    },
+    "auth": {
+      "start": 9717,
+      "end": 9914
+    },
+    "subdomains": {
+      "start": 10468,
+      "end": 10667
+    },
+    "path": {
+      "start": 10796,
+      "end": 10840
+    },
+    "host": {
+      "start": 11086,
+      "end": 11496
+    },
+    "fresh": {
+      "start": 11665,
+      "end": 12000
+    },
+    "stale": {
+      "start": 12192,
+      "end": 12227
+    },
+    "xhr": {
+      "start": 12356,
+      "end": 12465
+    }
+  },
+  "def5db832e4cef474d14697b68ee521eff094496f8c7fe06e5b2d1f382a3aead": {
+    "acceptedEncodings": {
+      "start": 4225,
+      "end": 4343
+    },
+    "accepted": {
+      "start": 4766,
+      "end": 4872
+    },
+    "acceptedLanguages": {
+      "start": 5129,
+      "end": 5312
+    },
+    "acceptedCharsets": {
+      "start": 5600,
+      "end": 5782
+    },
+    "protocol": {
+      "start": 7916,
+      "end": 8151
+    },
+    "secure": {
+      "start": 8286,
+      "end": 8334
+    },
+    "ip": {
+      "start": 8506,
+      "end": 8574
+    },
+    "ips": {
+      "start": 8905,
+      "end": 9069
+    },
+    "auth": {
+      "start": 9321,
+      "end": 9710
+    },
+    "subdomains": {
+      "start": 10264,
+      "end": 10404
+    },
+    "path": {
+      "start": 10533,
+      "end": 10577
+    },
+    "host": {
+      "start": 10700,
+      "end": 10903
+    },
+    "fresh": {
+      "start": 11072,
+      "end": 11407
+    },
+    "stale": {
+      "start": 11599,
+      "end": 11634
+    },
+    "xhr": {
+      "start": 11763,
+      "end": 11872
+    }
+  },
+  "61402585a9bb11f7a0aba9cd3999038db4bd71ab5da9724635abb60ce9b53772": {
+    "acceptedEncodings": {
+      "start": 4225,
+      "end": 4343
+    },
+    "accepted": {
+      "start": 4766,
+      "end": 4872
+    },
+    "acceptedLanguages": {
+      "start": 5129,
+      "end": 5312
+    },
+    "acceptedCharsets": {
+      "start": 5600,
+      "end": 5782
+    },
+    "protocol": {
+      "start": 7916,
+      "end": 8151
+    },
+    "secure": {
+      "start": 8286,
+      "end": 8334
+    },
+    "ip": {
+      "start": 8506,
+      "end": 8574
+    },
+    "ips": {
+      "start": 8905,
+      "end": 9069
+    },
+    "auth": {
+      "start": 9321,
+      "end": 9710
+    },
+    "subdomains": {
+      "start": 10264,
+      "end": 10404
+    },
+    "path": {
+      "start": 10533,
+      "end": 10577
+    },
+    "host": {
+      "start": 10700,
+      "end": 11042
+    },
+    "fresh": {
+      "start": 11211,
+      "end": 11546
+    },
+    "stale": {
+      "start": 11738,
+      "end": 11773
+    },
+    "xhr": {
+      "start": 11902,
+      "end": 12011
+    }
+  }
+}

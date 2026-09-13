@@ -1,0 +1,141 @@
+{
+  "baseline": {
+    "status": "complete",
+    "plannedRows": 285,
+    "completedRows": 285,
+    "plannedTasks": 1164,
+    "uniqueRecordedTasks": 1164,
+    "completedTasks": 1164,
+    "recordedTaskAttempts": 1165,
+    "capturedJudgeCalls": 1165,
+    "incompleteTaskAttempts": 1,
+    "technicalResumeInvocations": 1,
+    "capturedJudgeSeconds": 33793.292,
+    "sumInvocationWallSeconds": 5842.7,
+    "ledgerSha256": "bd1ae89b66ade4b55fce65d15b878161e17ad0d8b122bff8b38474bf95b781d3",
+    "byLens": {
+      "concurrency-races": {
+        "recordedTaskAttempts": 293,
+        "capturedJudgeCalls": 293,
+        "capturedSeconds": 7459.228
+      },
+      "error-and-edge-classification": {
+        "recordedTaskAttempts": 294,
+        "capturedJudgeCalls": 294,
+        "capturedSeconds": 9300.996
+      },
+      "state-transitions": {
+        "recordedTaskAttempts": 293,
+        "capturedJudgeCalls": 293,
+        "capturedSeconds": 7954.099
+      },
+      "writer-reader-contracts": {
+        "recordedTaskAttempts": 285,
+        "capturedJudgeCalls": 285,
+        "capturedSeconds": 9078.969
+      }
+    },
+    "invocations": [
+      {
+        "command": [
+          "node",
+          "gate-engine/review/eval/reviewers/bench.mts",
+          "run",
+          "correctness-reviewer",
+          "--baseline",
+          "--fresh"
+        ],
+        "startedAt": 1789323791.3512871,
+        "finishedAt": 1789329544.539722,
+        "elapsedSeconds": 5753.2,
+        "exitCode": 2
+      },
+      {
+        "command": [
+          "node",
+          "gate-engine/review/eval/reviewers/bench.mts",
+          "run",
+          "correctness-reviewer",
+          "--baseline"
+        ],
+        "startedAt": 1789329571.312168,
+        "finishedAt": 1789329660.831022,
+        "elapsedSeconds": 89.5,
+        "exitCode": 0
+      }
+    ],
+    "tokenUsage": null,
+    "dollarCost": null,
+    "unrecordedInFlightCost": null
+  },
+  "candidate": {
+    "status": "stopped-incomplete",
+    "plannedRows": 285,
+    "completedRows": 184,
+    "plannedTasks": 1164,
+    "uniqueRecordedTasks": 769,
+    "completedTasks": 769,
+    "recordedTaskAttempts": 769,
+    "capturedJudgeCalls": 769,
+    "incompleteTaskAttempts": 0,
+    "technicalResumeInvocations": 0,
+    "capturedJudgeSeconds": 24913.071,
+    "sumInvocationWallSeconds": 4254.8,
+    "ledgerSha256": "d0542271d11fb214c20e51df568c35c0425d03d547584a7546e276abde63f454",
+    "byLens": {
+      "concurrency-races": {
+        "recordedTaskAttempts": 195,
+        "capturedJudgeCalls": 195,
+        "capturedSeconds": 5455.927
+      },
+      "error-and-edge-classification": {
+        "recordedTaskAttempts": 192,
+        "capturedJudgeCalls": 192,
+        "capturedSeconds": 6697.603
+      },
+      "state-transitions": {
+        "recordedTaskAttempts": 197,
+        "capturedJudgeCalls": 197,
+        "capturedSeconds": 6271.47
+      },
+      "writer-reader-contracts": {
+        "recordedTaskAttempts": 185,
+        "capturedJudgeCalls": 185,
+        "capturedSeconds": 6488.071
+      }
+    },
+    "invocations": [
+      {
+        "command": [
+          "node",
+          "gate-engine/review/eval/reviewers/bench.mts",
+          "run",
+          "correctness-reviewer",
+          "--baseline",
+          "--fresh"
+        ],
+        "startedAt": 1789329883.077866,
+        "finishedAt": 1789334137.8446028,
+        "elapsedSeconds": 4254.8,
+        "exitCode": -15
+      }
+    ],
+    "tokenUsage": null,
+    "dollarCost": null,
+    "unrecordedInFlightCost": null
+  },
+  "schemaVersion": 1,
+  "interpretation": "Captured calls and elapsed time include recorded incomplete attempts. Six rows ran concurrently. Summed judge time is not wall-clock latency. Initial/final verdicts may differ through charter post-processing. Token and dollar costs and unrecorded in-flight cost are unavailable, not zero. Qualification, preparation and ship review are outside these totals.",
+  "previousAbortedRun": {
+    "scope": "Incomplete historical run; in-flight unrecorded work and token/dollar usage remain unknown. Not mixed into the accepted285-row comparison.",
+    "byExecutionHash": {
+      "2c66708bf0e4e076d21b3e904bc8804c58027bb2ed0501238548621383e92d71": {
+        "recordedRows": 74,
+        "recordedTasks": 313,
+        "completeTaskAttempts": 313,
+        "capturedCalls": 313,
+        "capturedJudgeSeconds": 8787.946
+      }
+    }
+  }
+}

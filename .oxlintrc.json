@@ -3,6 +3,16 @@
     "./.devkit/oxc/oxlint.base.json"
   ],
   "jsPlugins": [],
-  "overrides": [],
+  "overrides": [
+    {
+      "files": ["docs/benchmarks/experiments/2026-09-13-corpus-growth/qualification/**/*.{js,mjs,cjs}"],
+      "rules": {
+        "anti-slop/no-runtime-typeof": "warn",
+        "anti-slop/no-shape-in-symbol-names": "warn",
+        "anti-slop/no-unsafe-external-record-access": "warn",
+        "anti-slop/no-unsafe-external-record-enumeration": "warn"
+      }
+    }
+  ],
   "rules": {}
 }

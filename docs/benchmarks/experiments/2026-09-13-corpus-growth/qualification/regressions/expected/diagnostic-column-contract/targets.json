@@ -1,0 +1,1266 @@
+{
+  "runtime": "v24.19.0",
+  "historicalCore": "1.1.0",
+  "observations": [
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "indented first token later line",
+      "code": "                    var a;\nvar longName;",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 2,
+      "target": true,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 10.",
+          "line": 1,
+          "column": 21,
+          "nodeType": "Program"
+        },
+        {
+          "message": "Line 2 exceeds the maximum line length of 10.",
+          "line": 1,
+          "column": 21,
+          "nodeType": "Program"
+        }
+      ],
+      "fixed": "                    var a;\nvar longName;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "third line diagnostic",
+      "code": "                    var a;\nvar b;\nvar longName;",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 2,
+      "target": true,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 10.",
+          "line": 1,
+          "column": 21,
+          "nodeType": "Program"
+        },
+        {
+          "message": "Line 3 exceeds the maximum line length of 10.",
+          "line": 1,
+          "column": 21,
+          "nodeType": "Program"
+        }
+      ],
+      "fixed": "                    var a;\nvar b;\nvar longName;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "crlf diagnostic",
+      "code": "                    var a;\r\nvar longName;",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 2,
+      "target": true,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 10.",
+          "line": 1,
+          "column": 21,
+          "nodeType": "Program"
+        },
+        {
+          "message": "Line 2 exceeds the maximum line length of 10.",
+          "line": 1,
+          "column": 21,
+          "nodeType": "Program"
+        }
+      ],
+      "fixed": "                    var a;\r\nvar longName;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "short single line",
+      "code": "var a;",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "var a;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "long unindented",
+      "code": "var veryLongName = 1;",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 1,
+      "target": false,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 10.",
+          "line": 1,
+          "column": 1,
+          "nodeType": "Program"
+        }
+      ],
+      "fixed": "var veryLongName = 1;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "multiple lines",
+      "code": "var veryLongName = 1;\nvar anotherName = 2;",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 2,
+      "target": false,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 10.",
+          "line": 1,
+          "column": 1,
+          "nodeType": "Program"
+        },
+        {
+          "message": "Line 2 exceeds the maximum line length of 10.",
+          "line": 1,
+          "column": 1,
+          "nodeType": "Program"
+        }
+      ],
+      "fixed": "var veryLongName = 1;\nvar anotherName = 2;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "empty file",
+      "code": "",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "short tab width",
+      "code": "\tvar a;",
+      "options": [
+        10,
+        1
+      ],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "\tvar a;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "long tab width",
+      "code": "\tvar a;",
+      "options": [
+        7,
+        4
+      ],
+      "expectedCount": 1,
+      "target": false,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 7.",
+          "line": 1,
+          "column": 2,
+          "nodeType": "Program"
+        }
+      ],
+      "fixed": "\tvar a;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "indented first token later line",
+      "code": "                    var a;\nvar longName;",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 2,
+      "target": true,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 10.",
+          "line": 1,
+          "column": 21,
+          "nodeType": "Program"
+        },
+        {
+          "message": "Line 2 exceeds the maximum line length of 10.",
+          "line": 1,
+          "column": 21,
+          "nodeType": "Program"
+        }
+      ],
+      "fixed": "                    var a;\nvar longName;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "third line diagnostic",
+      "code": "                    var a;\nvar b;\nvar longName;",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 2,
+      "target": true,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 10.",
+          "line": 1,
+          "column": 21,
+          "nodeType": "Program"
+        },
+        {
+          "message": "Line 3 exceeds the maximum line length of 10.",
+          "line": 1,
+          "column": 21,
+          "nodeType": "Program"
+        }
+      ],
+      "fixed": "                    var a;\nvar b;\nvar longName;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "crlf diagnostic",
+      "code": "                    var a;\r\nvar longName;",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 2,
+      "target": true,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 10.",
+          "line": 1,
+          "column": 21,
+          "nodeType": "Program"
+        },
+        {
+          "message": "Line 2 exceeds the maximum line length of 10.",
+          "line": 1,
+          "column": 21,
+          "nodeType": "Program"
+        }
+      ],
+      "fixed": "                    var a;\r\nvar longName;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "short single line",
+      "code": "var a;",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "var a;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "long unindented",
+      "code": "var veryLongName = 1;",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 1,
+      "target": false,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 10.",
+          "line": 1,
+          "column": 1,
+          "nodeType": "Program"
+        }
+      ],
+      "fixed": "var veryLongName = 1;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "multiple lines",
+      "code": "var veryLongName = 1;\nvar anotherName = 2;",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 2,
+      "target": false,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 10.",
+          "line": 1,
+          "column": 1,
+          "nodeType": "Program"
+        },
+        {
+          "message": "Line 2 exceeds the maximum line length of 10.",
+          "line": 1,
+          "column": 1,
+          "nodeType": "Program"
+        }
+      ],
+      "fixed": "var veryLongName = 1;\nvar anotherName = 2;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "empty file",
+      "code": "",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "short tab width",
+      "code": "\tvar a;",
+      "options": [
+        10,
+        1
+      ],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "\tvar a;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "long tab width",
+      "code": "\tvar a;",
+      "options": [
+        7,
+        4
+      ],
+      "expectedCount": 1,
+      "target": false,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 7.",
+          "line": 1,
+          "column": 2,
+          "nodeType": "Program"
+        }
+      ],
+      "fixed": "\tvar a;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "indented first token later line",
+      "code": "                    var a;\nvar longName;",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 2,
+      "target": true,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 10.",
+          "line": 1,
+          "column": null,
+          "nodeType": "Program"
+        },
+        {
+          "message": "Line 2 exceeds the maximum line length of 10.",
+          "line": 2,
+          "column": null,
+          "nodeType": "Program"
+        }
+      ],
+      "fixed": "                    var a;\nvar longName;",
+      "parseErrors": [],
+      "safe": false
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "third line diagnostic",
+      "code": "                    var a;\nvar b;\nvar longName;",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 2,
+      "target": true,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 10.",
+          "line": 1,
+          "column": null,
+          "nodeType": "Program"
+        },
+        {
+          "message": "Line 3 exceeds the maximum line length of 10.",
+          "line": 3,
+          "column": null,
+          "nodeType": "Program"
+        }
+      ],
+      "fixed": "                    var a;\nvar b;\nvar longName;",
+      "parseErrors": [],
+      "safe": false
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "crlf diagnostic",
+      "code": "                    var a;\r\nvar longName;",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 2,
+      "target": true,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 10.",
+          "line": 1,
+          "column": null,
+          "nodeType": "Program"
+        },
+        {
+          "message": "Line 2 exceeds the maximum line length of 10.",
+          "line": 2,
+          "column": null,
+          "nodeType": "Program"
+        }
+      ],
+      "fixed": "                    var a;\r\nvar longName;",
+      "parseErrors": [],
+      "safe": false
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "short single line",
+      "code": "var a;",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "var a;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "long unindented",
+      "code": "var veryLongName = 1;",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 1,
+      "target": false,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 10.",
+          "line": 1,
+          "column": null,
+          "nodeType": "Program"
+        }
+      ],
+      "fixed": "var veryLongName = 1;",
+      "parseErrors": [],
+      "safe": false
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "multiple lines",
+      "code": "var veryLongName = 1;\nvar anotherName = 2;",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 2,
+      "target": false,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 10.",
+          "line": 1,
+          "column": null,
+          "nodeType": "Program"
+        },
+        {
+          "message": "Line 2 exceeds the maximum line length of 10.",
+          "line": 2,
+          "column": null,
+          "nodeType": "Program"
+        }
+      ],
+      "fixed": "var veryLongName = 1;\nvar anotherName = 2;",
+      "parseErrors": [],
+      "safe": false
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "empty file",
+      "code": "",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "short tab width",
+      "code": "\tvar a;",
+      "options": [
+        10,
+        1
+      ],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "\tvar a;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "long tab width",
+      "code": "\tvar a;",
+      "options": [
+        7,
+        4
+      ],
+      "expectedCount": 1,
+      "target": false,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 7.",
+          "line": 1,
+          "column": null,
+          "nodeType": "Program"
+        }
+      ],
+      "fixed": "\tvar a;",
+      "parseErrors": [],
+      "safe": false
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "indented first token later line",
+      "code": "                    var a;\nvar longName;",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 2,
+      "target": true,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 10.",
+          "line": 1,
+          "column": null,
+          "nodeType": "Program"
+        },
+        {
+          "message": "Line 2 exceeds the maximum line length of 10.",
+          "line": 2,
+          "column": null,
+          "nodeType": "Program"
+        }
+      ],
+      "fixed": "                    var a;\nvar longName;",
+      "parseErrors": [],
+      "safe": false
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "third line diagnostic",
+      "code": "                    var a;\nvar b;\nvar longName;",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 2,
+      "target": true,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 10.",
+          "line": 1,
+          "column": null,
+          "nodeType": "Program"
+        },
+        {
+          "message": "Line 3 exceeds the maximum line length of 10.",
+          "line": 3,
+          "column": null,
+          "nodeType": "Program"
+        }
+      ],
+      "fixed": "                    var a;\nvar b;\nvar longName;",
+      "parseErrors": [],
+      "safe": false
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "crlf diagnostic",
+      "code": "                    var a;\r\nvar longName;",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 2,
+      "target": true,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 10.",
+          "line": 1,
+          "column": null,
+          "nodeType": "Program"
+        },
+        {
+          "message": "Line 2 exceeds the maximum line length of 10.",
+          "line": 2,
+          "column": null,
+          "nodeType": "Program"
+        }
+      ],
+      "fixed": "                    var a;\r\nvar longName;",
+      "parseErrors": [],
+      "safe": false
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "short single line",
+      "code": "var a;",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "var a;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "long unindented",
+      "code": "var veryLongName = 1;",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 1,
+      "target": false,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 10.",
+          "line": 1,
+          "column": null,
+          "nodeType": "Program"
+        }
+      ],
+      "fixed": "var veryLongName = 1;",
+      "parseErrors": [],
+      "safe": false
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "multiple lines",
+      "code": "var veryLongName = 1;\nvar anotherName = 2;",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 2,
+      "target": false,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 10.",
+          "line": 1,
+          "column": null,
+          "nodeType": "Program"
+        },
+        {
+          "message": "Line 2 exceeds the maximum line length of 10.",
+          "line": 2,
+          "column": null,
+          "nodeType": "Program"
+        }
+      ],
+      "fixed": "var veryLongName = 1;\nvar anotherName = 2;",
+      "parseErrors": [],
+      "safe": false
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "empty file",
+      "code": "",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "short tab width",
+      "code": "\tvar a;",
+      "options": [
+        10,
+        1
+      ],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "\tvar a;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "long tab width",
+      "code": "\tvar a;",
+      "options": [
+        7,
+        4
+      ],
+      "expectedCount": 1,
+      "target": false,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 7.",
+          "line": 1,
+          "column": null,
+          "nodeType": "Program"
+        }
+      ],
+      "fixed": "\tvar a;",
+      "parseErrors": [],
+      "safe": false
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "indented first token later line",
+      "code": "                    var a;\nvar longName;",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 2,
+      "target": true,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 10.",
+          "line": 1,
+          "column": 1,
+          "nodeType": "Program"
+        },
+        {
+          "message": "Line 2 exceeds the maximum line length of 10.",
+          "line": 2,
+          "column": 1,
+          "nodeType": "Program"
+        }
+      ],
+      "fixed": "                    var a;\nvar longName;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "third line diagnostic",
+      "code": "                    var a;\nvar b;\nvar longName;",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 2,
+      "target": true,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 10.",
+          "line": 1,
+          "column": 1,
+          "nodeType": "Program"
+        },
+        {
+          "message": "Line 3 exceeds the maximum line length of 10.",
+          "line": 3,
+          "column": 1,
+          "nodeType": "Program"
+        }
+      ],
+      "fixed": "                    var a;\nvar b;\nvar longName;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "crlf diagnostic",
+      "code": "                    var a;\r\nvar longName;",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 2,
+      "target": true,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 10.",
+          "line": 1,
+          "column": 1,
+          "nodeType": "Program"
+        },
+        {
+          "message": "Line 2 exceeds the maximum line length of 10.",
+          "line": 2,
+          "column": 1,
+          "nodeType": "Program"
+        }
+      ],
+      "fixed": "                    var a;\r\nvar longName;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "short single line",
+      "code": "var a;",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "var a;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "long unindented",
+      "code": "var veryLongName = 1;",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 1,
+      "target": false,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 10.",
+          "line": 1,
+          "column": 1,
+          "nodeType": "Program"
+        }
+      ],
+      "fixed": "var veryLongName = 1;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "multiple lines",
+      "code": "var veryLongName = 1;\nvar anotherName = 2;",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 2,
+      "target": false,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 10.",
+          "line": 1,
+          "column": 1,
+          "nodeType": "Program"
+        },
+        {
+          "message": "Line 2 exceeds the maximum line length of 10.",
+          "line": 2,
+          "column": 1,
+          "nodeType": "Program"
+        }
+      ],
+      "fixed": "var veryLongName = 1;\nvar anotherName = 2;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "empty file",
+      "code": "",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "short tab width",
+      "code": "\tvar a;",
+      "options": [
+        10,
+        1
+      ],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "\tvar a;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "long tab width",
+      "code": "\tvar a;",
+      "options": [
+        7,
+        4
+      ],
+      "expectedCount": 1,
+      "target": false,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 7.",
+          "line": 1,
+          "column": 1,
+          "nodeType": "Program"
+        }
+      ],
+      "fixed": "\tvar a;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "indented first token later line",
+      "code": "                    var a;\nvar longName;",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 2,
+      "target": true,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 10.",
+          "line": 1,
+          "column": 1,
+          "nodeType": "Program"
+        },
+        {
+          "message": "Line 2 exceeds the maximum line length of 10.",
+          "line": 2,
+          "column": 1,
+          "nodeType": "Program"
+        }
+      ],
+      "fixed": "                    var a;\nvar longName;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "third line diagnostic",
+      "code": "                    var a;\nvar b;\nvar longName;",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 2,
+      "target": true,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 10.",
+          "line": 1,
+          "column": 1,
+          "nodeType": "Program"
+        },
+        {
+          "message": "Line 3 exceeds the maximum line length of 10.",
+          "line": 3,
+          "column": 1,
+          "nodeType": "Program"
+        }
+      ],
+      "fixed": "                    var a;\nvar b;\nvar longName;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "crlf diagnostic",
+      "code": "                    var a;\r\nvar longName;",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 2,
+      "target": true,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 10.",
+          "line": 1,
+          "column": 1,
+          "nodeType": "Program"
+        },
+        {
+          "message": "Line 2 exceeds the maximum line length of 10.",
+          "line": 2,
+          "column": 1,
+          "nodeType": "Program"
+        }
+      ],
+      "fixed": "                    var a;\r\nvar longName;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "short single line",
+      "code": "var a;",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "var a;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "long unindented",
+      "code": "var veryLongName = 1;",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 1,
+      "target": false,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 10.",
+          "line": 1,
+          "column": 1,
+          "nodeType": "Program"
+        }
+      ],
+      "fixed": "var veryLongName = 1;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "multiple lines",
+      "code": "var veryLongName = 1;\nvar anotherName = 2;",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 2,
+      "target": false,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 10.",
+          "line": 1,
+          "column": 1,
+          "nodeType": "Program"
+        },
+        {
+          "message": "Line 2 exceeds the maximum line length of 10.",
+          "line": 2,
+          "column": 1,
+          "nodeType": "Program"
+        }
+      ],
+      "fixed": "var veryLongName = 1;\nvar anotherName = 2;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "empty file",
+      "code": "",
+      "options": [
+        10,
+        4
+      ],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "short tab width",
+      "code": "\tvar a;",
+      "options": [
+        10,
+        1
+      ],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "\tvar a;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "long tab width",
+      "code": "\tvar a;",
+      "options": [
+        7,
+        4
+      ],
+      "expectedCount": 1,
+      "target": false,
+      "messages": [
+        {
+          "message": "Line 1 exceeds the maximum line length of 7.",
+          "line": 1,
+          "column": 1,
+          "nodeType": "Program"
+        }
+      ],
+      "fixed": "\tvar a;",
+      "parseErrors": [],
+      "safe": true
+    }
+  ]
+}

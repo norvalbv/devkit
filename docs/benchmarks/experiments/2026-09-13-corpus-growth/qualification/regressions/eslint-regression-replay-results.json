@@ -1,0 +1,131 @@
+{
+  "runtime": "v24.19.0",
+  "corpusSha256": "fa62708388345fcf776bad30811a9aa8641b68d00219b104ff19dec29caf4b9e",
+  "manifestSha256": "5cb9dbe0d77d7f90a11a412bf73123fc5ac9aec5dc70bce9507cc2eac5e24a61",
+  "dynamicReplay": true,
+  "families": [
+    {
+      "family": "destructured-edge-underscores",
+      "coreCommit": "d067ae1f4e985bf7444cae0460aae4ef7d8c5723",
+      "coreArchiveSha256": "cabcc6649f64686d2c7565a830b956a2f463100bef6b72371c138a604e06e7fc",
+      "lockSha256": "484294ed286fe1cc02fb93df9f92a5f92d8399bf8aa617652aed446a2c1f1fac",
+      "corpusBindings": [
+        {
+          "id": "corr-destructured-edge-underscores",
+          "repo": "base",
+          "file": "src/destructured-edge-underscores.js",
+          "sha256": "caf23493f73580ed3a695f3eb21190d93a000f2116dc351448c66df95bda03ea"
+        },
+        {
+          "id": "corr-destructured-edge-underscores",
+          "repo": "staged",
+          "file": "src/destructured-edge-underscores.js",
+          "sha256": "934367394a2469f8f3af3433a36d446fdda295fc3c5b16f3220340e359296fb7"
+        }
+      ],
+      "targetObservations": 60,
+      "independentObservations": 120,
+      "sourceAdaptationComparisons": 90,
+      "sourceAdaptationAgrees": true,
+      "exactExpectedObservationsAgree": true,
+      "eligibleGold": true,
+      "eligibleClean": false,
+      "laterEndpointRole": "target-specific-evidence-only-not-clean-not-paired"
+    },
+    {
+      "family": "comment-adjacent-fix-ranges",
+      "coreCommit": "41e3d9ce08b1a7f1f97d878a439b0143d19c7084",
+      "coreArchiveSha256": "487615600c17d2811f7e941c28db91f32f6337fbc06b7d1c47a5d1f9a13a5696",
+      "lockSha256": "601f4b315d6e2733b5b34676a5816a226f43d7baa9f91847fac5494c55bb1d8c",
+      "corpusBindings": [
+        {
+          "id": "corr-comment-adjacent-fix-ranges",
+          "repo": "base",
+          "file": "src/comment-adjacent-fix-ranges.js",
+          "sha256": "74f1f8a2f0edcde3e887d3ea8caafad21a569c9b3462b794881d1f8196e0a6e7"
+        },
+        {
+          "id": "corr-comment-adjacent-fix-ranges",
+          "repo": "staged",
+          "file": "src/comment-adjacent-fix-ranges.js",
+          "sha256": "195676d5aea393ae723d0c48d20bd30a152760a8ae718feb0a28cf6b09065ae1"
+        },
+        {
+          "id": "corr-comment-adjacent-fix-ranges-repaired",
+          "repo": "staged",
+          "file": "src/comment-adjacent-fix-ranges.js",
+          "sha256": "aac1f36517ad363a8a5a56a006a3e6e57b2b8a4400f9f4dffdeb20ccf69f9c46"
+        }
+      ],
+      "targetObservations": 54,
+      "independentObservations": 294,
+      "sourceAdaptationComparisons": 174,
+      "sourceAdaptationAgrees": true,
+      "exactExpectedObservationsAgree": true,
+      "eligibleGold": true,
+      "eligibleClean": true,
+      "laterEndpointRole": "qualified-clean-sibling"
+    },
+    {
+      "family": "diagnostic-column-contract",
+      "coreCommit": "ccae7eeeb9dcac287ae13aa1a41ea4b4460e5dcd",
+      "coreArchiveSha256": "1925d27decbd32075a13b8142e5f09141d1bae4b8c7d2359f75807c18cdfec53",
+      "lockSha256": "d749372648e301aa62ae30c38e2c9d45e4fd24fe0ed07531af888a6e2ebb57f3",
+      "corpusBindings": [
+        {
+          "id": "corr-diagnostic-column-contract",
+          "repo": "base",
+          "file": "src/diagnostic-column-contract.js",
+          "sha256": "06f852ebf58990b102f96335b7248824cb6aec18d0b4e5d1b66e13fb294583a7"
+        },
+        {
+          "id": "corr-diagnostic-column-contract",
+          "repo": "staged",
+          "file": "src/diagnostic-column-contract.js",
+          "sha256": "69c348de11fb59baf074cec1edef4a8f9354d8e178e6094aa1062354e599aca5"
+        }
+      ],
+      "targetObservations": 54,
+      "independentObservations": 66,
+      "sourceAdaptationComparisons": 60,
+      "sourceAdaptationAgrees": true,
+      "exactExpectedObservationsAgree": true,
+      "eligibleGold": true,
+      "eligibleClean": false,
+      "laterEndpointRole": "target-specific-evidence-only-not-clean-not-paired"
+    },
+    {
+      "family": "empty-super-argument-traversal",
+      "coreCommit": "bdf64007e422da333d5a7f6d7340f651c6bd2b87",
+      "coreArchiveSha256": "0ee0e23d7803786d97d920ca8ead6d1c529b60f1438500d82ec371824d258fe9",
+      "lockSha256": "d5090cba10f91898492ead6ece240aa93ad447974bbaa33e4c0026d298807f3f",
+      "corpusBindings": [
+        {
+          "id": "corr-empty-super-argument-traversal",
+          "repo": "base",
+          "file": "src/empty-super-argument-traversal.js",
+          "sha256": "c9e161003cc42c58fe9e207e6237eabe8d52d01cddbaa09ce0c4ad727a0546a7"
+        },
+        {
+          "id": "corr-empty-super-argument-traversal",
+          "repo": "staged",
+          "file": "src/empty-super-argument-traversal.js",
+          "sha256": "12149203bc08ab19136dcf1c665f15519b332a0dbf240e907659fe4ba16b9c7e"
+        }
+      ],
+      "targetObservations": 72,
+      "independentObservations": 66,
+      "sourceAdaptationComparisons": 69,
+      "sourceAdaptationAgrees": true,
+      "exactExpectedObservationsAgree": true,
+      "eligibleGold": true,
+      "eligibleClean": false,
+      "laterEndpointRole": "target-specific-evidence-only-not-clean-not-paired"
+    }
+  ],
+  "targetObservations": 240,
+  "independentObservations": 546,
+  "sourceAdaptationComparisons": 393,
+  "sourceAdaptationAgrees": true,
+  "exposure": "Source-exposed agent qualification; not a model benchmark or independent human labels."
+}

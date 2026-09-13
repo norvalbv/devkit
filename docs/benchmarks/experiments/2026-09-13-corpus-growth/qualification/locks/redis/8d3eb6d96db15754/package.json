@@ -1,0 +1,7 @@
+{
+  "name": "private-redis-controls",
+  "private": true,
+  "dependencies": {
+    "mocha": "^2.2.5"
+  }
+}

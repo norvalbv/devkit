@@ -1,0 +1,870 @@
+{
+  "rule": "no-useless-constructor",
+  "scenarios": 11,
+  "observations": 66,
+  "records": [
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "unused rest destructuring default",
+      "code": "class A extends B { constructor(...[a=effect()]) {super(...arguments);} }",
+      "options": [],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "rest destructuring forward default",
+      "code": "class A extends B { constructor(...[a=effect()]) {super(a);} }",
+      "options": [],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "unused ordinary argument",
+      "code": "class A extends B { constructor(a) {super();} }",
+      "options": [],
+      "expectedCount": 0,
+      "messages": [
+        {
+          "message": "Useless constructor.",
+          "line": 1,
+          "column": 21
+        }
+      ],
+      "parserFatal": false,
+      "clean": false
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "plain rest arguments",
+      "code": "class A extends B { constructor(...args) {super(...arguments);} }",
+      "options": [],
+      "expectedCount": 1,
+      "messages": [],
+      "parserFatal": false,
+      "clean": false
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "extra argument effect",
+      "code": "class A extends B { constructor(a) {super(a,effect());} }",
+      "options": [],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "super member",
+      "code": "class A extends B { constructor(a) {super.a;} }",
+      "options": [],
+      "expectedCount": 0,
+      "error": {
+        "name": "TypeError",
+        "message": "Cannot read properties of undefined (reading 'type')"
+      },
+      "clean": false
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "constructor nested arrow",
+      "code": "class A extends B { constructor(a) {super(a); const f=()=>a;} }",
+      "options": [],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "derived empty body",
+      "code": "class A extends B { constructor() {} }",
+      "options": [],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "literal superclass",
+      "code": "class A extends null { constructor(a) {super();} }",
+      "options": [],
+      "expectedCount": 0,
+      "messages": [
+        {
+          "message": "Useless constructor.",
+          "line": 1,
+          "column": 24
+        }
+      ],
+      "parserFatal": false,
+      "clean": false
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "rest identity",
+      "code": "class A extends B { constructor(a,...rest) {super(a,...rest);} }",
+      "options": [],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Useless constructor.",
+          "line": 1,
+          "column": 21
+        }
+      ],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "unequal forwarding",
+      "code": "class A extends B { constructor(a,b) {super(a);} }",
+      "options": [],
+      "expectedCount": 0,
+      "messages": [
+        {
+          "message": "Useless constructor.",
+          "line": 1,
+          "column": 21
+        }
+      ],
+      "parserFatal": false,
+      "clean": false
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "unused rest destructuring default",
+      "code": "class A extends B { constructor(...[a=effect()]) {super(...arguments);} }",
+      "options": [],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "rest destructuring forward default",
+      "code": "class A extends B { constructor(...[a=effect()]) {super(a);} }",
+      "options": [],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "unused ordinary argument",
+      "code": "class A extends B { constructor(a) {super();} }",
+      "options": [],
+      "expectedCount": 0,
+      "messages": [
+        {
+          "message": "Useless constructor.",
+          "line": 1,
+          "column": 21
+        }
+      ],
+      "parserFatal": false,
+      "clean": false
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "plain rest arguments",
+      "code": "class A extends B { constructor(...args) {super(...arguments);} }",
+      "options": [],
+      "expectedCount": 1,
+      "messages": [],
+      "parserFatal": false,
+      "clean": false
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "extra argument effect",
+      "code": "class A extends B { constructor(a) {super(a,effect());} }",
+      "options": [],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "super member",
+      "code": "class A extends B { constructor(a) {super.a;} }",
+      "options": [],
+      "expectedCount": 0,
+      "error": {
+        "name": "TypeError",
+        "message": "Cannot read properties of undefined (reading 'type')"
+      },
+      "clean": false
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "constructor nested arrow",
+      "code": "class A extends B { constructor(a) {super(a); const f=()=>a;} }",
+      "options": [],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "derived empty body",
+      "code": "class A extends B { constructor() {} }",
+      "options": [],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "literal superclass",
+      "code": "class A extends null { constructor(a) {super();} }",
+      "options": [],
+      "expectedCount": 0,
+      "messages": [
+        {
+          "message": "Useless constructor.",
+          "line": 1,
+          "column": 24
+        }
+      ],
+      "parserFatal": false,
+      "clean": false
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "rest identity",
+      "code": "class A extends B { constructor(a,...rest) {super(a,...rest);} }",
+      "options": [],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Useless constructor.",
+          "line": 1,
+          "column": 21
+        }
+      ],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "unequal forwarding",
+      "code": "class A extends B { constructor(a,b) {super(a);} }",
+      "options": [],
+      "expectedCount": 0,
+      "messages": [
+        {
+          "message": "Useless constructor.",
+          "line": 1,
+          "column": 21
+        }
+      ],
+      "parserFatal": false,
+      "clean": false
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "unused rest destructuring default",
+      "code": "class A extends B { constructor(...[a=effect()]) {super(...arguments);} }",
+      "options": [],
+      "expectedCount": 0,
+      "messages": [
+        {
+          "message": "Useless constructor.",
+          "line": 1,
+          "column": 21
+        }
+      ],
+      "parserFatal": false,
+      "clean": false
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "rest destructuring forward default",
+      "code": "class A extends B { constructor(...[a=effect()]) {super(a);} }",
+      "options": [],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "unused ordinary argument",
+      "code": "class A extends B { constructor(a) {super();} }",
+      "options": [],
+      "expectedCount": 0,
+      "error": {
+        "name": "TypeError",
+        "message": "Cannot read properties of undefined (reading 'type')"
+      },
+      "clean": false
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "plain rest arguments",
+      "code": "class A extends B { constructor(...args) {super(...arguments);} }",
+      "options": [],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Useless constructor.",
+          "line": 1,
+          "column": 21
+        }
+      ],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "extra argument effect",
+      "code": "class A extends B { constructor(a) {super(a,effect());} }",
+      "options": [],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "super member",
+      "code": "class A extends B { constructor(a) {super.a;} }",
+      "options": [],
+      "expectedCount": 0,
+      "error": {
+        "name": "TypeError",
+        "message": "Cannot read properties of undefined (reading 'type')"
+      },
+      "clean": false
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "constructor nested arrow",
+      "code": "class A extends B { constructor(a) {super(a); const f=()=>a;} }",
+      "options": [],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "derived empty body",
+      "code": "class A extends B { constructor() {} }",
+      "options": [],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "literal superclass",
+      "code": "class A extends null { constructor(a) {super();} }",
+      "options": [],
+      "expectedCount": 0,
+      "error": {
+        "name": "TypeError",
+        "message": "Cannot read properties of undefined (reading 'type')"
+      },
+      "clean": false
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "rest identity",
+      "code": "class A extends B { constructor(a,...rest) {super(a,...rest);} }",
+      "options": [],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Useless constructor.",
+          "line": 1,
+          "column": 21
+        }
+      ],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "unequal forwarding",
+      "code": "class A extends B { constructor(a,b) {super(a);} }",
+      "options": [],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "unused rest destructuring default",
+      "code": "class A extends B { constructor(...[a=effect()]) {super(...arguments);} }",
+      "options": [],
+      "expectedCount": 0,
+      "messages": [
+        {
+          "message": "Useless constructor.",
+          "line": 1,
+          "column": 21
+        }
+      ],
+      "parserFatal": false,
+      "clean": false
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "rest destructuring forward default",
+      "code": "class A extends B { constructor(...[a=effect()]) {super(a);} }",
+      "options": [],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "unused ordinary argument",
+      "code": "class A extends B { constructor(a) {super();} }",
+      "options": [],
+      "expectedCount": 0,
+      "error": {
+        "name": "TypeError",
+        "message": "Cannot read properties of undefined (reading 'type')"
+      },
+      "clean": false
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "plain rest arguments",
+      "code": "class A extends B { constructor(...args) {super(...arguments);} }",
+      "options": [],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Useless constructor.",
+          "line": 1,
+          "column": 21
+        }
+      ],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "extra argument effect",
+      "code": "class A extends B { constructor(a) {super(a,effect());} }",
+      "options": [],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "super member",
+      "code": "class A extends B { constructor(a) {super.a;} }",
+      "options": [],
+      "expectedCount": 0,
+      "error": {
+        "name": "TypeError",
+        "message": "Cannot read properties of undefined (reading 'type')"
+      },
+      "clean": false
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "constructor nested arrow",
+      "code": "class A extends B { constructor(a) {super(a); const f=()=>a;} }",
+      "options": [],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "derived empty body",
+      "code": "class A extends B { constructor() {} }",
+      "options": [],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "literal superclass",
+      "code": "class A extends null { constructor(a) {super();} }",
+      "options": [],
+      "expectedCount": 0,
+      "error": {
+        "name": "TypeError",
+        "message": "Cannot read properties of undefined (reading 'type')"
+      },
+      "clean": false
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "rest identity",
+      "code": "class A extends B { constructor(a,...rest) {super(a,...rest);} }",
+      "options": [],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Useless constructor.",
+          "line": 1,
+          "column": 21
+        }
+      ],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "unequal forwarding",
+      "code": "class A extends B { constructor(a,b) {super(a);} }",
+      "options": [],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "unused rest destructuring default",
+      "code": "class A extends B { constructor(...[a=effect()]) {super(...arguments);} }",
+      "options": [],
+      "expectedCount": 0,
+      "messages": [
+        {
+          "message": "Useless constructor.",
+          "line": 1,
+          "column": 21
+        }
+      ],
+      "parserFatal": false,
+      "clean": false
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "rest destructuring forward default",
+      "code": "class A extends B { constructor(...[a=effect()]) {super(a);} }",
+      "options": [],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "unused ordinary argument",
+      "code": "class A extends B { constructor(a) {super();} }",
+      "options": [],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "plain rest arguments",
+      "code": "class A extends B { constructor(...args) {super(...arguments);} }",
+      "options": [],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Useless constructor.",
+          "line": 1,
+          "column": 21
+        }
+      ],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "extra argument effect",
+      "code": "class A extends B { constructor(a) {super(a,effect());} }",
+      "options": [],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "super member",
+      "code": "class A extends B { constructor(a) {super.a;} }",
+      "options": [],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "constructor nested arrow",
+      "code": "class A extends B { constructor(a) {super(a); const f=()=>a;} }",
+      "options": [],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "derived empty body",
+      "code": "class A extends B { constructor() {} }",
+      "options": [],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "literal superclass",
+      "code": "class A extends null { constructor(a) {super();} }",
+      "options": [],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "rest identity",
+      "code": "class A extends B { constructor(a,...rest) {super(a,...rest);} }",
+      "options": [],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Useless constructor.",
+          "line": 1,
+          "column": 21
+        }
+      ],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "unequal forwarding",
+      "code": "class A extends B { constructor(a,b) {super(a);} }",
+      "options": [],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "unused rest destructuring default",
+      "code": "class A extends B { constructor(...[a=effect()]) {super(...arguments);} }",
+      "options": [],
+      "expectedCount": 0,
+      "messages": [
+        {
+          "message": "Useless constructor.",
+          "line": 1,
+          "column": 21
+        }
+      ],
+      "parserFatal": false,
+      "clean": false
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "rest destructuring forward default",
+      "code": "class A extends B { constructor(...[a=effect()]) {super(a);} }",
+      "options": [],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "unused ordinary argument",
+      "code": "class A extends B { constructor(a) {super();} }",
+      "options": [],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "plain rest arguments",
+      "code": "class A extends B { constructor(...args) {super(...arguments);} }",
+      "options": [],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Useless constructor.",
+          "line": 1,
+          "column": 21
+        }
+      ],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "extra argument effect",
+      "code": "class A extends B { constructor(a) {super(a,effect());} }",
+      "options": [],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "super member",
+      "code": "class A extends B { constructor(a) {super.a;} }",
+      "options": [],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "constructor nested arrow",
+      "code": "class A extends B { constructor(a) {super(a); const f=()=>a;} }",
+      "options": [],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "derived empty body",
+      "code": "class A extends B { constructor() {} }",
+      "options": [],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "literal superclass",
+      "code": "class A extends null { constructor(a) {super();} }",
+      "options": [],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "rest identity",
+      "code": "class A extends B { constructor(a,...rest) {super(a,...rest);} }",
+      "options": [],
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Useless constructor.",
+          "line": 1,
+          "column": 21
+        }
+      ],
+      "parserFatal": false,
+      "clean": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "unequal forwarding",
+      "code": "class A extends B { constructor(a,b) {super(a);} }",
+      "options": [],
+      "expectedCount": 0,
+      "messages": [],
+      "parserFatal": false,
+      "clean": true
+    }
+  ],
+  "mismatches": []
+}

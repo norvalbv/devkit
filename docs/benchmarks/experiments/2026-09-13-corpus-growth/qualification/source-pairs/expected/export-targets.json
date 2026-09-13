@@ -1,0 +1,753 @@
+{
+  "runtime": "v24.19.0",
+  "observations": [
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "export list before variable",
+      "code": "var foo; export {foo}; var bar;",
+      "expectedCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "nodeType": "VariableDeclaration"
+        }
+      ]
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "export alias before variable",
+      "code": "var foo; export {foo as named}; var bar;",
+      "expectedCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "nodeType": "VariableDeclaration"
+        }
+      ]
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "module re-export before variable",
+      "code": "export {name} from \"other\"; var bar;",
+      "expectedCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "nodeType": "VariableDeclaration"
+        }
+      ]
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "default export before variable",
+      "code": "export default function example() {} var bar;",
+      "expectedCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "nodeType": "VariableDeclaration"
+        }
+      ]
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "exported variable retained",
+      "code": "export var foo; var bar;",
+      "expectedCount": 0,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "nodeType": "VariableDeclaration"
+        },
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "nodeType": "VariableDeclaration"
+        }
+      ]
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "regular top variables",
+      "code": "var foo; var bar; export {foo};",
+      "expectedCount": 0,
+      "messages": []
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "later variable violation",
+      "code": "call(); var bar;",
+      "expectedCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "nodeType": "VariableDeclaration"
+        }
+      ]
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "lexical declarations excluded",
+      "code": "export {name} from \"other\"; let bar;",
+      "expectedCount": 0,
+      "messages": []
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "nested function scope",
+      "code": "function run() { var first; call(); var second; }",
+      "expectedCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "nodeType": "VariableDeclaration"
+        }
+      ]
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "imports before variable",
+      "code": "import name from \"other\"; var bar;",
+      "expectedCount": 0,
+      "messages": []
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "empty module",
+      "code": "",
+      "expectedCount": 0,
+      "messages": []
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "export list before variable",
+      "code": "var foo; export {foo}; var bar;",
+      "expectedCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "nodeType": "VariableDeclaration"
+        }
+      ]
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "export alias before variable",
+      "code": "var foo; export {foo as named}; var bar;",
+      "expectedCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "nodeType": "VariableDeclaration"
+        }
+      ]
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "module re-export before variable",
+      "code": "export {name} from \"other\"; var bar;",
+      "expectedCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "nodeType": "VariableDeclaration"
+        }
+      ]
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "default export before variable",
+      "code": "export default function example() {} var bar;",
+      "expectedCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "nodeType": "VariableDeclaration"
+        }
+      ]
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "exported variable retained",
+      "code": "export var foo; var bar;",
+      "expectedCount": 0,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "nodeType": "VariableDeclaration"
+        },
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "nodeType": "VariableDeclaration"
+        }
+      ]
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "regular top variables",
+      "code": "var foo; var bar; export {foo};",
+      "expectedCount": 0,
+      "messages": []
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "later variable violation",
+      "code": "call(); var bar;",
+      "expectedCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "nodeType": "VariableDeclaration"
+        }
+      ]
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "lexical declarations excluded",
+      "code": "export {name} from \"other\"; let bar;",
+      "expectedCount": 0,
+      "messages": []
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "nested function scope",
+      "code": "function run() { var first; call(); var second; }",
+      "expectedCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "nodeType": "VariableDeclaration"
+        }
+      ]
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "imports before variable",
+      "code": "import name from \"other\"; var bar;",
+      "expectedCount": 0,
+      "messages": []
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "empty module",
+      "code": "",
+      "expectedCount": 0,
+      "messages": []
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "export list before variable",
+      "code": "var foo; export {foo}; var bar;",
+      "expectedCount": 1,
+      "error": {
+        "name": "TypeError",
+        "message": "Cannot read properties of null (reading 'type')"
+      }
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "export alias before variable",
+      "code": "var foo; export {foo as named}; var bar;",
+      "expectedCount": 1,
+      "error": {
+        "name": "TypeError",
+        "message": "Cannot read properties of null (reading 'type')"
+      }
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "module re-export before variable",
+      "code": "export {name} from \"other\"; var bar;",
+      "expectedCount": 1,
+      "error": {
+        "name": "TypeError",
+        "message": "Cannot read properties of null (reading 'type')"
+      }
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "default export before variable",
+      "code": "export default function example() {} var bar;",
+      "expectedCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "nodeType": "VariableDeclaration"
+        }
+      ]
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "exported variable retained",
+      "code": "export var foo; var bar;",
+      "expectedCount": 0,
+      "messages": []
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "regular top variables",
+      "code": "var foo; var bar; export {foo};",
+      "expectedCount": 0,
+      "messages": []
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "later variable violation",
+      "code": "call(); var bar;",
+      "expectedCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "nodeType": "VariableDeclaration"
+        }
+      ]
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "lexical declarations excluded",
+      "code": "export {name} from \"other\"; let bar;",
+      "expectedCount": 0,
+      "messages": []
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "nested function scope",
+      "code": "function run() { var first; call(); var second; }",
+      "expectedCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "nodeType": "VariableDeclaration"
+        }
+      ]
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "imports before variable",
+      "code": "import name from \"other\"; var bar;",
+      "expectedCount": 0,
+      "messages": []
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "empty module",
+      "code": "",
+      "expectedCount": 0,
+      "messages": []
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "export list before variable",
+      "code": "var foo; export {foo}; var bar;",
+      "expectedCount": 1,
+      "error": {
+        "name": "TypeError",
+        "message": "Cannot read properties of null (reading 'type')"
+      }
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "export alias before variable",
+      "code": "var foo; export {foo as named}; var bar;",
+      "expectedCount": 1,
+      "error": {
+        "name": "TypeError",
+        "message": "Cannot read properties of null (reading 'type')"
+      }
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "module re-export before variable",
+      "code": "export {name} from \"other\"; var bar;",
+      "expectedCount": 1,
+      "error": {
+        "name": "TypeError",
+        "message": "Cannot read properties of null (reading 'type')"
+      }
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "default export before variable",
+      "code": "export default function example() {} var bar;",
+      "expectedCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "nodeType": "VariableDeclaration"
+        }
+      ]
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "exported variable retained",
+      "code": "export var foo; var bar;",
+      "expectedCount": 0,
+      "messages": []
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "regular top variables",
+      "code": "var foo; var bar; export {foo};",
+      "expectedCount": 0,
+      "messages": []
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "later variable violation",
+      "code": "call(); var bar;",
+      "expectedCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "nodeType": "VariableDeclaration"
+        }
+      ]
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "lexical declarations excluded",
+      "code": "export {name} from \"other\"; let bar;",
+      "expectedCount": 0,
+      "messages": []
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "nested function scope",
+      "code": "function run() { var first; call(); var second; }",
+      "expectedCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "nodeType": "VariableDeclaration"
+        }
+      ]
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "imports before variable",
+      "code": "import name from \"other\"; var bar;",
+      "expectedCount": 0,
+      "messages": []
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "empty module",
+      "code": "",
+      "expectedCount": 0,
+      "messages": []
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "export list before variable",
+      "code": "var foo; export {foo}; var bar;",
+      "expectedCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "nodeType": "VariableDeclaration"
+        }
+      ]
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "export alias before variable",
+      "code": "var foo; export {foo as named}; var bar;",
+      "expectedCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "nodeType": "VariableDeclaration"
+        }
+      ]
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "module re-export before variable",
+      "code": "export {name} from \"other\"; var bar;",
+      "expectedCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "nodeType": "VariableDeclaration"
+        }
+      ]
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "default export before variable",
+      "code": "export default function example() {} var bar;",
+      "expectedCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "nodeType": "VariableDeclaration"
+        }
+      ]
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "exported variable retained",
+      "code": "export var foo; var bar;",
+      "expectedCount": 0,
+      "messages": []
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "regular top variables",
+      "code": "var foo; var bar; export {foo};",
+      "expectedCount": 0,
+      "messages": []
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "later variable violation",
+      "code": "call(); var bar;",
+      "expectedCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "nodeType": "VariableDeclaration"
+        }
+      ]
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "lexical declarations excluded",
+      "code": "export {name} from \"other\"; let bar;",
+      "expectedCount": 0,
+      "messages": []
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "nested function scope",
+      "code": "function run() { var first; call(); var second; }",
+      "expectedCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "nodeType": "VariableDeclaration"
+        }
+      ]
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "imports before variable",
+      "code": "import name from \"other\"; var bar;",
+      "expectedCount": 0,
+      "messages": []
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "empty module",
+      "code": "",
+      "expectedCount": 0,
+      "messages": []
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "export list before variable",
+      "code": "var foo; export {foo}; var bar;",
+      "expectedCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "nodeType": "VariableDeclaration"
+        }
+      ]
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "export alias before variable",
+      "code": "var foo; export {foo as named}; var bar;",
+      "expectedCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "nodeType": "VariableDeclaration"
+        }
+      ]
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "module re-export before variable",
+      "code": "export {name} from \"other\"; var bar;",
+      "expectedCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "nodeType": "VariableDeclaration"
+        }
+      ]
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "default export before variable",
+      "code": "export default function example() {} var bar;",
+      "expectedCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "nodeType": "VariableDeclaration"
+        }
+      ]
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "exported variable retained",
+      "code": "export var foo; var bar;",
+      "expectedCount": 0,
+      "messages": []
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "regular top variables",
+      "code": "var foo; var bar; export {foo};",
+      "expectedCount": 0,
+      "messages": []
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "later variable violation",
+      "code": "call(); var bar;",
+      "expectedCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "nodeType": "VariableDeclaration"
+        }
+      ]
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "lexical declarations excluded",
+      "code": "export {name} from \"other\"; let bar;",
+      "expectedCount": 0,
+      "messages": []
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "nested function scope",
+      "code": "function run() { var first; call(); var second; }",
+      "expectedCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "nodeType": "VariableDeclaration"
+        }
+      ]
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "imports before variable",
+      "code": "import name from \"other\"; var bar;",
+      "expectedCount": 0,
+      "messages": []
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "empty module",
+      "code": "",
+      "expectedCount": 0,
+      "messages": []
+    }
+  ]
+}

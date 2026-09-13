@@ -1,0 +1,8 @@
+{
+  "eventId": "evt-2026-09-13-reviewer-correctness-e609c43fd8b4",
+  "nativeResultSha256": "ad5926b032da206d00a362143254788ed9ef82e960117f91b7016de2d109cefc",
+  "publicResultSha256": "ad5926b032da206d00a362143254788ed9ef82e960117f91b7016de2d109cefc",
+  "protocolSha256": "8647efa79dbab4980798ecd0be23de1856535d9de5298abbf1d335c2ee0eee38",
+  "sourceFilesVerified": 531,
+  "reservedOutcomesInspected": false
+}

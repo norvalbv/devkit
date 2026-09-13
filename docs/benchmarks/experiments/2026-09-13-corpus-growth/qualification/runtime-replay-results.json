@@ -1,0 +1,341 @@
+[
+  {
+    "id": "corr-top-level-version-schema-clean",
+    "observations": 16,
+    "independentObservations": 20,
+    "sourceAdaptationAgrees": true
+  },
+  {
+    "id": "corr-unregistered-population-model-clean",
+    "observations": 12,
+    "independentObservations": 24,
+    "sourceAdaptationAgrees": true
+  },
+  {
+    "id": "corr-nested-array-dirty-collapse-clean",
+    "observations": 16,
+    "independentObservations": 24,
+    "sourceAdaptationAgrees": true
+  },
+  {
+    "id": "corr-populated-query-lean-mode-clean",
+    "observations": 16,
+    "independentObservations": 16,
+    "sourceAdaptationAgrees": true
+  },
+  {
+    "id": "corr-document-array-owner-clean",
+    "observations": 16,
+    "independentObservations": 0,
+    "sourceAdaptationAgrees": true
+  },
+  {
+    "id": "corr-array-definition-ownership-clean",
+    "observations": 12,
+    "independentObservations": 0,
+    "sourceAdaptationAgrees": true
+  },
+  {
+    "id": "corr-atomic-query-population-clean",
+    "observations": 16,
+    "independentObservations": 28,
+    "sourceAdaptationAgrees": true
+  },
+  {
+    "id": "corr-document-update-result-clean",
+    "observations": 8,
+    "independentObservations": 0,
+    "sourceAdaptationAgrees": true
+  },
+  {
+    "id": "corr-array-conversion-options-clean",
+    "observations": 12,
+    "independentObservations": 0,
+    "sourceAdaptationAgrees": true
+  },
+  {
+    "id": "corr-query-projection-slice-clean",
+    "observations": 16,
+    "independentObservations": 0,
+    "sourceAdaptationAgrees": true
+  },
+  {
+    "id": "corr-missing-parent-value-contract-clean",
+    "observations": 20,
+    "independentObservations": 28,
+    "sourceAdaptationAgrees": true
+  },
+  {
+    "id": "corr-saved-reference-depopulation-clean",
+    "observations": 8,
+    "independentObservations": 16,
+    "sourceAdaptationAgrees": true
+  },
+  {
+    "id": "corr-missing-population-position-clean",
+    "observations": 16,
+    "independentObservations": 16,
+    "sourceAdaptationAgrees": true
+  },
+  {
+    "id": "corr-array-regexp-query-options-clean",
+    "observations": 16,
+    "independentObservations": 24,
+    "sourceAdaptationAgrees": true
+  },
+  {
+    "id": "corr-version-save-callback-error-escape",
+    "observations": 16,
+    "independentObservations": 32,
+    "sourceAdaptationAgrees": true
+  },
+  {
+    "id": "corr-upsert-absent-original-document-clean",
+    "observations": 24,
+    "independentObservations": 28,
+    "sourceAdaptationAgrees": true
+  },
+  {
+    "id": "corr-reused-population-limit-compounds",
+    "observations": 12,
+    "independentObservations": 20,
+    "sourceAdaptationAgrees": true
+  },
+  {
+    "id": "corr-positional-reference-schema-clean",
+    "observations": 20,
+    "independentObservations": 28,
+    "sourceAdaptationAgrees": true
+  },
+  {
+    "id": "corr-nested-default-projection-clean",
+    "observations": 12,
+    "independentObservations": 0,
+    "sourceAdaptationAgrees": true
+  },
+  {
+    "id": "corr-delete-query-filter-clean",
+    "observations": 16,
+    "independentObservations": 24,
+    "sourceAdaptationAgrees": true
+  },
+  {
+    "id": "corr-population-projection-token-prefix",
+    "observations": 12,
+    "independentObservations": 24,
+    "sourceAdaptationAgrees": true
+  },
+  {
+    "id": "corr-repopulation-error-loses-documents",
+    "observations": 16,
+    "independentObservations": 20,
+    "sourceAdaptationAgrees": true
+  },
+  {
+    "id": "corr-date-minimization-preservation-clean",
+    "observations": 20,
+    "independentObservations": 28,
+    "sourceAdaptationAgrees": true
+  },
+  {
+    "id": "corr-enum-message-scope-clean",
+    "observations": 12,
+    "independentObservations": 0,
+    "sourceAdaptationAgrees": true
+  },
+  {
+    "id": "corr-child-save-event-payload-clean",
+    "observations": 8,
+    "independentObservations": 0,
+    "sourceAdaptationAgrees": true
+  },
+  {
+    "id": "corr-home-route-classification-clean",
+    "observations": 28,
+    "independentObservations": 0,
+    "sourceAdaptationAgrees": true
+  },
+  {
+    "id": "corr-current-route-root-clean",
+    "observations": 32,
+    "independentObservations": 0,
+    "sourceAdaptationAgrees": true
+  },
+  {
+    "id": "corr-empty-taxonomy-values-clean",
+    "observations": 36,
+    "independentObservations": 0,
+    "sourceAdaptationAgrees": true
+  },
+  {
+    "id": "corr-heading-text-projection-clean",
+    "observations": 20,
+    "independentObservations": 0,
+    "sourceAdaptationAgrees": true
+  },
+  {
+    "id": "corr-relative-social-image-url-clean",
+    "observations": 24,
+    "independentObservations": 0,
+    "sourceAdaptationAgrees": true
+  },
+  {
+    "id": "corr-pagination-page-context-clean",
+    "observations": 16,
+    "independentObservations": 0,
+    "sourceAdaptationAgrees": true
+  },
+  {
+    "id": "corr-pipeline-buffer-preservation-clean",
+    "observations": 48,
+    "independentObservations": 20,
+    "sourceAdaptationAgrees": true
+  },
+  {
+    "id": "corr-optional-client-options-clean",
+    "observations": 20,
+    "independentObservations": 16,
+    "sourceAdaptationAgrees": true
+  },
+  {
+    "id": "corr-subscription-channel-restoration-clean",
+    "observations": 28,
+    "independentObservations": 12,
+    "sourceAdaptationAgrees": true
+  },
+  {
+    "id": "corr-connection-parser-reset-clean",
+    "observations": 16,
+    "independentObservations": 12,
+    "sourceAdaptationAgrees": true
+  },
+  {
+    "id": "corr-transaction-command-callback-clean",
+    "observations": 32,
+    "independentObservations": 28,
+    "sourceAdaptationAgrees": true
+  },
+  {
+    "id": "corr-cli-option-precedence-clean",
+    "observations": 60,
+    "independentObservations": 16,
+    "sourceAdaptationAgrees": true
+  },
+  {
+    "id": "corr-runner-exit-trailer-clean",
+    "observations": 32,
+    "independentObservations": 28,
+    "sourceAdaptationAgrees": true
+  },
+  {
+    "id": "corr-extended-glob-watch-roots",
+    "observations": 64,
+    "independentObservations": 24,
+    "sourceAdaptationAgrees": true
+  },
+  {
+    "id": "corr-processed-content-digest-clean",
+    "observations": 32,
+    "independentObservations": 16,
+    "sourceAdaptationAgrees": true
+  },
+  {
+    "id": "corr-binary-asset-content-corruption",
+    "observations": 76,
+    "independentObservations": 20,
+    "sourceAdaptationAgrees": true
+  },
+  {
+    "id": "corr-server-load-error-exit-clean",
+    "observations": 40,
+    "independentObservations": 16,
+    "sourceAdaptationAgrees": true
+  },
+  {
+    "id": "corr-pending-file-list-serving-clean",
+    "observations": 28,
+    "independentObservations": 8,
+    "sourceAdaptationAgrees": true
+  },
+  {
+    "id": "corr-cached-utf8-byte-ranges",
+    "observations": 68,
+    "independentObservations": 60,
+    "sourceAdaptationAgrees": true
+  },
+  {
+    "id": "corr-live-client-configuration-clean",
+    "observations": 84,
+    "independentObservations": 16,
+    "sourceAdaptationAgrees": true
+  },
+  {
+    "id": "corr-overlapping-pattern-inclusion",
+    "observations": 156,
+    "independentObservations": 16,
+    "sourceAdaptationAgrees": true
+  },
+  {
+    "id": "corr-processed-file-extension-clean",
+    "observations": 16,
+    "independentObservations": 16,
+    "sourceAdaptationAgrees": true
+  },
+  {
+    "id": "corr-initial-file-change-notification-clean",
+    "observations": 148,
+    "independentObservations": 8,
+    "sourceAdaptationAgrees": true,
+    "stablePublishedSourceAdaptationAgrees": true,
+    "independentSourceAdaptationAgrees": true,
+    "timingDisclosure": "Original source debounces notifications with real timers. These three original-version immediate assertions can pass when asynchronous I/O yields long enough. Retain their observed outcomes, exclude only these base assertions from deterministic parity, require exact stable-test outcomes and zero repair failures, and separately verify immediate/burst/reentrant behavior through independent raw-equal controls. No quality-selected retries.",
+    "timingSensitiveBaseObservations": {
+      "base": [
+        {
+          "name": "FileList addFile fires \"file_list_modified\"",
+          "status": "pass",
+          "error": {}
+        },
+        {
+          "name": "FileList changeFile updates mtime and fires \"file_list_modified\"",
+          "status": "pass",
+          "error": {}
+        },
+        {
+          "name": "FileList removeFile removes the file from the list and fires \"file_list_modified\"",
+          "status": "fail",
+          "error": "expected stub to have been called exactly once, but it was called 0 times"
+        }
+      ],
+      "base-adapted": [
+        {
+          "name": "FileList addFile fires \"file_list_modified\"",
+          "status": "pass",
+          "error": {}
+        },
+        {
+          "name": "FileList changeFile updates mtime and fires \"file_list_modified\"",
+          "status": "pass",
+          "error": {}
+        },
+        {
+          "name": "FileList removeFile removes the file from the list and fires \"file_list_modified\"",
+          "status": "fail",
+          "error": "expected stub to have been called exactly once, but it was called 0 times"
+        }
+      ]
+    }
+  },
+  {
+    "id": "corr-parent-traversal-glob-normalization",
+    "observations": 144,
+    "independentObservations": 12,
+    "sourceAdaptationAgrees": true
+  },
+  {
+    "id": "corr-ipv6-own-origin-formatting",
+    "observations": 104,
+    "independentObservations": 28,
+    "sourceAdaptationAgrees": true
+  }
+]

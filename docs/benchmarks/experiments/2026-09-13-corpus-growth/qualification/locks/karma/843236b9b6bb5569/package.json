@@ -1,0 +1,30 @@
+{
+  "name": "private-karma-controls",
+  "private": true,
+  "dependencies": {
+    "di": "~0.0.1",
+    "socket.io": "~0.9.13",
+    "chokidar": "~0.7.0",
+    "glob": "~3.1.21",
+    "minimatch": "~0.2",
+    "http-proxy": "~0.10",
+    "optimist": "~0.3",
+    "coffee-script": "~1.6",
+    "rimraf": "~2.1",
+    "q": "~0.9",
+    "colors": "0.6.0-1",
+    "lodash": "~1.1",
+    "mime": "~1.2",
+    "log4js": "~0.6.3",
+    "useragent": "~2.0.4",
+    "graceful-fs": "~1.2.1",
+    "connect": "~2.8.4",
+    "mocha": "~1.8",
+    "chai": "~1.5",
+    "chai-as-promised": "~3.2",
+    "mocks": "~0.0.10",
+    "sinon": "~1.6",
+    "sinon-chai": "~2.3",
+    "timer-shim": "~0.2"
+  }
+}

@@ -1,0 +1,963 @@
+{
+  "schema": 1,
+  "corpusPath": "gate-engine/review/eval/reviewers/cases-correctness.jsonl",
+  "corpusSha256": "fa62708388345fcf776bad30811a9aa8641b68d00219b104ff19dec29caf4b9e",
+  "supportReplay": "docs/benchmarks/experiments/2026-09-13-corpus-growth/qualification/replay-runtime.py",
+  "nodeVersion": "v24.19.0",
+  "clones": {
+    "express": "https://github.com/BugsJS/express.git",
+    "eslint": "https://github.com/BugsJS/eslint.git",
+    "hessian": "https://github.com/BugsJS/hessian.js.git",
+    "shields": "https://github.com/BugsJS/shields.git",
+    "mongoose": "https://github.com/BugsJS/mongoose.git"
+  },
+  "archives": [
+    {
+      "clone": "express",
+      "ref": "1716e3b067af5acaeeee4165a865e0b670300aee",
+      "paths": [
+        "LICENSE",
+        "index.js",
+        "lib",
+        "package.json"
+      ],
+      "destination": "public-datasets/express-8/base",
+      "sha256": "1ecd5e7e32bdcb88c5e373e3009a7a8a34aba4e3abe784e2ce8dbde52b72c20c",
+      "runtime": "9bbca0a3b840b32e"
+    },
+    {
+      "clone": "express",
+      "ref": "cf41a8f25434bde16ee8606ce12bb699ef9de39e",
+      "paths": [
+        "LICENSE",
+        "index.js",
+        "lib",
+        "package.json"
+      ],
+      "destination": "public-datasets/express-8/bug",
+      "sha256": "dbf226c4208339e6a8825f279954766530dff9e640ce59b839d23d40bfda87b4",
+      "runtime": "9bbca0a3b840b32e"
+    },
+    {
+      "clone": "express",
+      "ref": "e8afebae780c89ba194aed1905a338d6c0c39949",
+      "paths": [
+        "LICENSE",
+        "index.js",
+        "lib",
+        "package.json"
+      ],
+      "destination": "public-datasets/express-8/repair",
+      "sha256": "1311c76adb130c845e452a725351ca84ca4739846176c3142a63d37c18aeba06",
+      "runtime": "fe95f1c143aa787f"
+    },
+    {
+      "clone": "express",
+      "ref": "ababa6ae5b5e2aafa183817f292adcb19fa1c917",
+      "paths": [
+        "LICENSE",
+        "index.js",
+        "lib",
+        "package.json"
+      ],
+      "destination": "public-datasets/express-params/base",
+      "sha256": "5b52a13bbc370c9a72787a0975edf451e6a55b1b09278dd7641394bd0e8fcfb6",
+      "runtime": "756d3fd154d76c2a"
+    },
+    {
+      "clone": "express",
+      "ref": "98d17e2293fe1a1bc55402d7aabbf766d4d2257f",
+      "paths": [
+        "LICENSE",
+        "index.js",
+        "lib",
+        "package.json"
+      ],
+      "destination": "public-datasets/express-params/bug",
+      "sha256": "276df564404f9648fd043dbddd5af4877660f388517b42d0deff5b33caf1dcf2",
+      "runtime": "756d3fd154d76c2a"
+    },
+    {
+      "clone": "express",
+      "ref": "8341317e9b50e71c739ab82fcfb5ec04564ba9d4",
+      "paths": [
+        "LICENSE",
+        "index.js",
+        "lib",
+        "package.json"
+      ],
+      "destination": "public-datasets/express-params/repair",
+      "sha256": "5664f19ad90050c5f89a2abb816bad861fa5e07c95eb681d0bf4d617f1c43876",
+      "runtime": "3288659f954e9321"
+    },
+    {
+      "clone": "hessian",
+      "ref": "68dd5347b54e4702f6a2f43bea862abc784a9f6c",
+      "paths": [
+        "LICENSE",
+        "index.js",
+        "lib",
+        "package.json"
+      ],
+      "destination": "qualified-repair-only/hessian9-base",
+      "sha256": "25b4246f9be7ccb106c14d0d0197e9e1042e91396cbc5bb3c66bb33c5c5154a0",
+      "runtime": "adb63961b3b7787c"
+    },
+    {
+      "clone": "hessian",
+      "ref": "6772d3ca45b437b2a8c5c5d27e4419d46f7ec688",
+      "paths": [
+        "LICENSE",
+        "index.js",
+        "lib",
+        "package.json"
+      ],
+      "destination": "qualified-repair-only/hessian9-repair",
+      "sha256": "bf8cd252b1a7f6eb3a7ebf430871d37907707eeb3a96555529bf8a3ba0942b13",
+      "runtime": "adb63961b3b7787c"
+    },
+    {
+      "clone": "shields",
+      "ref": "7153490ef95e68560987f401f645cd1e3089c33b",
+      "paths": [
+        "LICENSE.md",
+        "lib",
+        "package.json"
+      ],
+      "destination": "public-datasets/shields-cache/base",
+      "sha256": "d8198a7c39b1302967ecb1486bfad69ef4f3e0c8e12b524b0154725fd9aae10d"
+    },
+    {
+      "clone": "shields",
+      "ref": "446d4ce21e1f115b47ab7213e00fd3ea3b400689",
+      "paths": [
+        "LICENSE.md",
+        "lib",
+        "package.json"
+      ],
+      "destination": "public-datasets/shields-cache/bug",
+      "sha256": "9d9a1e76af9b1fde4c9388f2cb647c6362a39931c6f5a6d09ff9ae15790151ed"
+    },
+    {
+      "clone": "shields",
+      "ref": "73472d0be8f570955140c7399d785322aad5b1d7",
+      "paths": [
+        "LICENSE.md",
+        "lib",
+        "package.json"
+      ],
+      "destination": "public-datasets/shields-cache/repair",
+      "sha256": "e5a284d365b99f4f7d3c066fcc43a725931f87e0a5e4d086f0cb999d49fcb108"
+    },
+    {
+      "clone": "eslint",
+      "ref": "cd11ed404debd48862b4ff84ccd9190467081a96",
+      "paths": [
+        "LICENSE",
+        "conf",
+        "lib",
+        "package.json"
+      ],
+      "destination": "qualified-export-declaration/source",
+      "sha256": "065e10ce71a5b7f09912523d9d8ef64dc9bfe7d1e5b1578c0484a9ccd0343d45",
+      "runtime": "5e1930dec28ca3fa",
+      "unchangedHostFilesVerified": 264
+    },
+    {
+      "clone": "eslint",
+      "ref": "651681522d6134bd683862516919362a1b333ab8",
+      "paths": [
+        "LICENSE",
+        "conf",
+        "lib",
+        "package.json"
+      ],
+      "destination": "qualified-statement-separator/source",
+      "sha256": "e71b3c38d234921ac5740b0ca6007082390f7c5f48921ad75088fd810fdf78bf",
+      "runtime": "af3774812a83e411",
+      "unchangedHostFilesVerified": 291
+    },
+    {
+      "clone": "mongoose",
+      "ref": "2b7bd3a5276e2a55f697b7fe025c86c702a11e50",
+      "paths": [
+        "index.js",
+        "lib",
+        "package.json"
+      ],
+      "destination": "qualified-sparse-validation/source",
+      "sha256": "5f7a1c00329354b118bcad5d3f80b620adc25d38c7cef2115bbb5e1a00fd9cc6",
+      "runtime": "7312e9b8ba9910c6",
+      "unchangedHostFilesVerified": 51
+    }
+  ],
+  "runtimes": {
+    "9bbca0a3b840b32e": {
+      "directory": "locks/9bbca0a3b840b32e",
+      "packageSha256": "124ebc40732cb35adab5d8feea4ff3c3056acae023e8acdcf7b02339e05ade95",
+      "lockSha256": "9bbca0a3b840b32e48a9a9b00fd533d361b2f0b36b155e91fa50292500af5f50"
+    },
+    "fe95f1c143aa787f": {
+      "directory": "locks/fe95f1c143aa787f",
+      "packageSha256": "18b1a9a0b6346a848af143bc3dc2d9074cfc6f5348eb8c0dba88a84287fe9489",
+      "lockSha256": "fe95f1c143aa787fea4c42bb7c7102ca193027b07ab5622a46e5fa90d6c930cb"
+    },
+    "756d3fd154d76c2a": {
+      "directory": "locks/756d3fd154d76c2a",
+      "packageSha256": "2f2ccfe9c6156fc52e32aaafb7b406278fc25bb187f54de22d90b285542d0ce5",
+      "lockSha256": "756d3fd154d76c2a8c518cbffb37619036c8ed672be57acad715755a48f951f9"
+    },
+    "3288659f954e9321": {
+      "directory": "locks/3288659f954e9321",
+      "packageSha256": "845718c2a7e56ed8a1537e034f95e9c6b8a2499ec99492971446b4f01b35a34c",
+      "lockSha256": "3288659f954e9321298526ea61a6c0446877927a68f55c9365ec016863c4f8fd"
+    },
+    "adb63961b3b7787c": {
+      "directory": "locks/adb63961b3b7787c",
+      "packageSha256": "183e12ada18e500bfcbb461ba531d8fac01bf3a006cbf3e0e9e707a971af6db1",
+      "lockSha256": "adb63961b3b7787cf34fe413f4aec95454e84ea9454b9ef201db60eaed9c627d"
+    },
+    "c66fcd1e5516cc6e": {
+      "directory": "locks/c66fcd1e5516cc6e",
+      "packageSha256": "ea648f1d1c20ce6242f84261deb2228ebb32546d3773a1e9679beaa2a4cc3035",
+      "lockSha256": "c66fcd1e5516cc6eb70849be19b5ba271dc2c3e75ea56cbeb0c7fcbf2d3d27bd"
+    },
+    "5e1930dec28ca3fa": {
+      "directory": "locks/5e1930dec28ca3fa",
+      "packageSha256": "962f3a54f9123d5aedea010f6b9a15df486fa6cda4d5857886c21ab8699b47a4",
+      "lockSha256": "5e1930dec28ca3fa4390f9db90ffb3ef10052751ed65b29c8a2a61c882ad41b1"
+    },
+    "af3774812a83e411": {
+      "directory": "locks/af3774812a83e411",
+      "packageSha256": "613a12c385268fe042dcc2379488e897506043bebf1111278b50c263f19ab77c",
+      "lockSha256": "af3774812a83e411a0c3de4dea475b24b3ba524b2fcb29dddc83e59d54196c57"
+    },
+    "7312e9b8ba9910c6": {
+      "directory": "locks/7312e9b8ba9910c6",
+      "packageSha256": "a1d58ba1d52ad187bc611a736a1bbcb8e3cd8432c8a2cac4893844fcb6759d81",
+      "lockSha256": "7312e9b8ba9910c6eda94cdeb1e1f3b2f0ea5f176a77ba1c12ad5a376d19344d"
+    }
+  },
+  "sourceFiles": [
+    {
+      "clone": "express",
+      "ref": "d07c06363f00647ab0553ef227b9b65cb4a04ae9",
+      "path": "lib/request.js",
+      "destination": "qualified-repair-only/corr-ip-address-subdomains-clean-base-source.js",
+      "sha256": "fdb03eeae71ed4d337d4fa978b28c0cc422375d76011aac4acd650c48c808752"
+    },
+    {
+      "clone": "express",
+      "ref": "3ac2d5e560eebed8d374728e6cee92da3482fa8e",
+      "path": "lib/request.js",
+      "destination": "qualified-repair-only/corr-ip-address-subdomains-clean-repair-source.js",
+      "sha256": "049e9cc1b0a282a9ebc6eca057cb35de26f0d2558d265f0a308733ab1edd4033"
+    },
+    {
+      "clone": "express",
+      "ref": "d5815922caca984435cbd4d75aeaf12afe73b8cb",
+      "path": "lib/request.js",
+      "destination": "qualified-repair-only/corr-bracketed-host-port-clean-base-source.js",
+      "sha256": "def5db832e4cef474d14697b68ee521eff094496f8c7fe06e5b2d1f382a3aead"
+    },
+    {
+      "clone": "express",
+      "ref": "ac36701865976607edd7a34d895dd9f3e2e70122",
+      "path": "lib/request.js",
+      "destination": "qualified-repair-only/corr-bracketed-host-port-clean-repair-source.js",
+      "sha256": "61402585a9bb11f7a0aba9cd3999038db4bd71ab5da9724635abb60ce9b53772"
+    },
+    {
+      "clone": "eslint",
+      "ref": "e54598abcf97573bddb40238c535cd8f0e3ffdd5",
+      "path": "lib/rules/vars-on-top.js",
+      "destination": "qualified-export-declaration/parent-source.js",
+      "sha256": "89dd679febbd4832a97f31a0ebeae4f26f6d54e2a118d6c9a046ec1aca49ac6f"
+    },
+    {
+      "clone": "eslint",
+      "ref": "ce2accda65f45aaa2f532a3a4e931a35d42d3e42",
+      "path": "lib/rules/vars-on-top.js",
+      "destination": "qualified-export-declaration/bug-source.js",
+      "sha256": "26fdae3f341551a49ef4bd2bf154640f11adf367732609dd89d35f2147f8e930"
+    },
+    {
+      "clone": "eslint",
+      "ref": "d4f55268edb762d77bcde4ce7b3c71868ed08a1a",
+      "path": "lib/rules/vars-on-top.js",
+      "destination": "qualified-export-declaration/repair-source.js",
+      "sha256": "ec07d3a9d8cc96df2c36d47ae7ebd63e5931c7183dea6189711aa1e30fb7fa16"
+    },
+    {
+      "clone": "eslint",
+      "ref": "d4f55268edb762d77bcde4ce7b3c71868ed08a1a",
+      "path": "tests/lib/rules/vars-on-top.js",
+      "destination": "qualified-export-declaration/source/tests/lib/rules/vars-on-top.js",
+      "sha256": "464e5bd3164e765ea23e1f3d78a2bd9082f136abab90bb82d83c3d2a464d5623"
+    },
+    {
+      "clone": "eslint",
+      "ref": "2ffe51636a64e9ae0cd7621a7c61936346025ca0",
+      "path": "lib/rules/semi.js",
+      "destination": "qualified-statement-separator/parent-source.js",
+      "sha256": "624c25dea2dafd333ad74677e069a0ef15609f59ed6db9f908f089bea8aa2e0c"
+    },
+    {
+      "clone": "eslint",
+      "ref": "14183848a1551710dd4a4dc602c5ba10adba502e",
+      "path": "lib/rules/semi.js",
+      "destination": "qualified-statement-separator/bug-source.js",
+      "sha256": "60275490c5bd2df18d5a7565ceabdcfff58fec692debaefaf0e474ae1886a4aa"
+    },
+    {
+      "clone": "eslint",
+      "ref": "6e61070a682538af5bbaa7c9bd5e284f05720350",
+      "path": "lib/rules/semi.js",
+      "destination": "qualified-statement-separator/repair-source.js",
+      "sha256": "c3347cd9cb645419a2e9e445dfba3b4bdbd26cb79c21b3bb1aab0d918e0b0076"
+    },
+    {
+      "clone": "eslint",
+      "ref": "6e61070a682538af5bbaa7c9bd5e284f05720350",
+      "path": "tests/lib/rules/semi.js",
+      "destination": "qualified-statement-separator/source/tests/lib/rules/semi.js",
+      "sha256": "7188faa3506ba49d51ec04c63b7105a22074f82ce529e4776b85c7b769d6214c"
+    },
+    {
+      "clone": "mongoose",
+      "ref": "f3fe51cfe5e31ed58de57fc4fedf057bef504f36",
+      "path": "lib/schema/documentarray.js",
+      "destination": "qualified-sparse-validation/parent-source.js",
+      "sha256": "d1d8e9103bb5e9a6761fd49aaed349667c25183d2eefe4ea34d08372056eac2b"
+    },
+    {
+      "clone": "mongoose",
+      "ref": "66f1ceda22e50071783e8dcd816d467146d043ba",
+      "path": "lib/schema/documentarray.js",
+      "destination": "qualified-sparse-validation/bug-source.js",
+      "sha256": "bc863dd523e1c01b63a9d5b069dd42eb18596c59bdb42e09d00b6b6fd59159cc"
+    },
+    {
+      "clone": "mongoose",
+      "ref": "9408e1d8b1a670f6cdf43a5226828ea3faf2978c",
+      "path": "lib/schema/documentarray.js",
+      "destination": "qualified-sparse-validation/repair-source.js",
+      "sha256": "b5545d17b5aff217d947ede510efc07d9766092c65d1aec6d9c6e9b3afe2b258"
+    }
+  ],
+  "derivedFiles": [
+    {
+      "source": "public-datasets/shields-cache/repair/lib/request-handler.js",
+      "destination": "qualified-cache-resource/agent-derived-source-repair.js",
+      "replace": "const filteredQueryParams = {};",
+      "with": "const filteredQueryParams = Object.create(null);",
+      "sha256": "35d3a58337ab81ee2d7552ae97f813b63ba57cd9c6ab2c7a3fb83f918798fb61"
+    },
+    {
+      "source": "qualified-sparse-validation/parent-source.js",
+      "destination": "qualified-sparse-validation/parent-operation.cjs",
+      "byteSlice": [
+        1772,
+        2531
+      ],
+      "prefix": "module.exports = function ({ SchemaType }) { return ",
+      "suffix": "; };\n",
+      "sha256": "d5ee6d0502ad06901c1b8fca8d41a8b21bb0721cef9197c5448f048e44c15817"
+    },
+    {
+      "source": "qualified-sparse-validation/bug-source.js",
+      "destination": "qualified-sparse-validation/bug-operation.cjs",
+      "byteSlice": [
+        1772,
+        2522
+      ],
+      "prefix": "module.exports = function ({ SchemaType }) { return ",
+      "suffix": "; };\n",
+      "sha256": "d686155be4b48f0c06b1f26f486256e09524dbc2232a77a336267bcb8427ce59"
+    },
+    {
+      "source": "qualified-sparse-validation/repair-source.js",
+      "destination": "qualified-sparse-validation/repair-operation.cjs",
+      "byteSlice": [
+        1777,
+        2478
+      ],
+      "prefix": "module.exports = function ({ SchemaType }) { return ",
+      "suffix": "; };\n",
+      "sha256": "14380ab9b800e7449ed7ba6ec4406367a4aee91d073b70a47ffd49a3e0ba8470"
+    }
+  ],
+  "fixtures": [
+    {
+      "id": "corr-empty-middleware-path",
+      "repo": "base",
+      "file": "src/register-middleware.js",
+      "destination": "qualified-middleware-path/base.mjs",
+      "sha256": "66cf7fcf9568c0d8da5f8353806af3027d1d6cecb9afa2a42dec75871c49a075",
+      "expected": "FAIL"
+    },
+    {
+      "id": "corr-empty-middleware-path",
+      "repo": "staged",
+      "file": "src/register-middleware.js",
+      "destination": "qualified-middleware-path/bug.mjs",
+      "sha256": "2704acb9f9fa1db6062a90add51a219671e5eb2207dcbf9d0e997f14aef6cf3d",
+      "expected": "FAIL"
+    },
+    {
+      "id": "corr-empty-middleware-path-repaired",
+      "repo": "staged",
+      "file": "src/register-middleware.js",
+      "destination": "qualified-middleware-path/repair.mjs",
+      "sha256": "272ba0316a747458b1ea1de2543f4a093a1170c40d3f507380791ba23dcceba8",
+      "expected": "PASS"
+    },
+    {
+      "id": "corr-parameter-cache-loses-outcome",
+      "repo": "base",
+      "file": "src/process-route-parameters.js",
+      "destination": "qualified-parameter-cache/base.mjs",
+      "sha256": "eed46d0192c22530d13c0e67a34d580b4282c59419da44f4ccb415100aa419b9",
+      "expected": "FAIL"
+    },
+    {
+      "id": "corr-parameter-cache-loses-outcome",
+      "repo": "staged",
+      "file": "src/process-route-parameters.js",
+      "destination": "qualified-parameter-cache/bug.mjs",
+      "sha256": "91f18af6f1fcbfeb1730e4a012c1554beaeb78292a39ffee7df6e8a5772d24f5",
+      "expected": "FAIL"
+    },
+    {
+      "id": "corr-parameter-cache-loses-outcome-repaired",
+      "repo": "staged",
+      "file": "src/process-route-parameters.js",
+      "destination": "qualified-parameter-cache/repair.mjs",
+      "sha256": "8d50699a1b0ed767724389d5280039b71a84c722249cff3a02d63b1108a488c7",
+      "expected": "PASS"
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "repo": "base",
+      "file": "src/subdomains.js",
+      "destination": "qualified-repair-only/corr-ip-address-subdomains-clean-base.mjs",
+      "sha256": "82c412d26216f034757e70b35d2944fa52a89b83e13fde5c9ec0e8cbd3a9c606",
+      "expected": "PASS"
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "repo": "staged",
+      "file": "src/subdomains.js",
+      "destination": "qualified-repair-only/corr-ip-address-subdomains-clean-repair.mjs",
+      "sha256": "60c87318a9ecbc218156ed4e8580442f770bd320cb96f03c82e9ab0e94d0a551",
+      "expected": "PASS"
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "repo": "base",
+      "file": "src/request-host.js",
+      "destination": "qualified-repair-only/corr-bracketed-host-port-clean-base.mjs",
+      "sha256": "3a24a3fd96b9c7d4b3a88426906e90624e9fb9a065592aaae44b4e70e8ef1aa5",
+      "expected": "PASS"
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "repo": "staged",
+      "file": "src/request-host.js",
+      "destination": "qualified-repair-only/corr-bracketed-host-port-clean-repair.mjs",
+      "sha256": "5d2c3b35f32522ce5072203138a2c8dda613e7b86e4e90f7b06fce30e4cc574f",
+      "expected": "PASS"
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "repo": "base",
+      "file": "src/read-map-properties.js",
+      "destination": "qualified-repair-only/corr-null-map-key-clean-base.mjs",
+      "sha256": "849fbcc99472b19e06beb07af648e06bdbfebf5840a1e6ae0d642a89deb2f061",
+      "expected": "PASS"
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "repo": "staged",
+      "file": "src/read-map-properties.js",
+      "destination": "qualified-repair-only/corr-null-map-key-clean-repair.mjs",
+      "sha256": "6c3944c2f55e4e829c2243d5d01daf2a7f31b2644c51165dfeb44460b21a88f4",
+      "expected": "PASS"
+    },
+    {
+      "id": "corr-cache-resource-key",
+      "repo": "base",
+      "file": "src/request-handlers.js",
+      "destination": "qualified-cache-resource/base.mjs",
+      "sha256": "b0d6fdd32b5181965f21de9e45a4e2a016503985bb659a795284d747c1881288",
+      "expected": "FAIL"
+    },
+    {
+      "id": "corr-cache-resource-key",
+      "repo": "staged",
+      "file": "src/request-handlers.js",
+      "destination": "qualified-cache-resource/bug.mjs",
+      "sha256": "a8eb52923b4224ff2e49e2f6cac09a979df0e8a4b1d862e078e2f4f99288fcc7",
+      "expected": "FAIL"
+    },
+    {
+      "id": "corr-cache-resource-key-repaired",
+      "repo": "staged",
+      "file": "src/request-handlers.js",
+      "destination": "qualified-cache-resource/repair.mjs",
+      "sha256": "b92470549619a38554454013e590a5f5d5af9bc1859f629d9b8d3dacba32c477",
+      "expected": "PASS"
+    },
+    {
+      "id": "corr-cache-resource-key",
+      "repo": "base",
+      "file": "src/lru-cache.js",
+      "destination": "qualified-cache-resource/lru-cache.js",
+      "sha256": "044db4c2983533583a7ce971e324838560c0c903bdf51062672d6b39098added",
+      "expected": "FAIL"
+    },
+    {
+      "id": "corr-export-list-traversal",
+      "repo": "base",
+      "file": "src/declaration-order.js",
+      "destination": "qualified-export-declaration/parent.js",
+      "sha256": "39a1bc834f1320d3aaac80444363e0a5faf7f067851bde135d9bcf4f503f4ac9",
+      "expected": "FAIL"
+    },
+    {
+      "id": "corr-export-list-traversal",
+      "repo": "staged",
+      "file": "src/declaration-order.js",
+      "destination": "qualified-export-declaration/bug.js",
+      "sha256": "46d992393bd0c0c164d3fc5a074870b7109a81f25480b49f206e09da4e27c27c",
+      "expected": "FAIL"
+    },
+    {
+      "id": "corr-export-list-traversal-repaired",
+      "repo": "staged",
+      "file": "src/declaration-order.js",
+      "destination": "qualified-export-declaration/repair.js",
+      "sha256": "82b5f4abdd1589698130101792f4b00d3c1e318c8ae5e2d19e321cddc89fe71c",
+      "expected": "PASS"
+    },
+    {
+      "id": "corr-statement-separator",
+      "repo": "base",
+      "file": "src/statement-separator.js",
+      "destination": "qualified-statement-separator/parent.js",
+      "sha256": "43b98e884d410b6974c02e3f2f61baac56c2bccbd59cc562b8ecb267803079b7",
+      "expected": "FAIL"
+    },
+    {
+      "id": "corr-statement-separator",
+      "repo": "staged",
+      "file": "src/statement-separator.js",
+      "destination": "qualified-statement-separator/bug.js",
+      "sha256": "79e45ae57dd3535925b673f16efdd1568dc89f2d677e25f153a9df668fa02e0f",
+      "expected": "FAIL"
+    },
+    {
+      "id": "corr-statement-separator-repaired",
+      "repo": "staged",
+      "file": "src/statement-separator.js",
+      "destination": "qualified-statement-separator/repair.js",
+      "sha256": "a833cc4fcbf8ee7c86c555cc64b96792a82220e1674f2bdb7312e7efeaee3368",
+      "expected": "PASS"
+    },
+    {
+      "id": "corr-sparse-document-validation",
+      "repo": "base",
+      "file": "src/validate-document-array.js",
+      "destination": "qualified-sparse-validation/parent-adapted.cjs",
+      "sha256": "bb70fdd6360232ab5ca5e269d824518717777701cd0ac648dfca959f81a86c9d",
+      "expected": "FAIL"
+    },
+    {
+      "id": "corr-sparse-document-validation",
+      "repo": "staged",
+      "file": "src/validate-document-array.js",
+      "destination": "qualified-sparse-validation/bug-adapted.cjs",
+      "sha256": "0a167cc0b6c910ce9e722344259fce58edf05adb0d87e5e9c69937a1b4df57c6",
+      "expected": "FAIL"
+    },
+    {
+      "id": "corr-sparse-document-validation-repaired",
+      "repo": "staged",
+      "file": "src/validate-document-array.js",
+      "destination": "qualified-sparse-validation/repair-adapted.cjs",
+      "sha256": "395ac5cba9acb712f3c8166b47b8ae438e95257e3ce364b99be36a2d013352b4",
+      "expected": "PASS"
+    }
+  ],
+  "staticFiles": [
+    {
+      "bundle": "support/qualified-cache-resource/package.json",
+      "destination": "qualified-cache-resource/package.json",
+      "sha256": "1239d4d885dcad42201a27ed9324f8f0f760b78700d8db9ced39a511cffe7eae"
+    },
+    {
+      "bundle": "support/qualified-cache-resource/upstream-repair.mjs",
+      "destination": "qualified-cache-resource/upstream-repair.mjs",
+      "sha256": "6bf2011d634bb3c1b281304ba3c1f911b22673b823d40cc8631f575c860690c7"
+    },
+    {
+      "bundle": "support/qualified-export-declaration/parent-source-tests.json",
+      "destination": "qualified-export-declaration/parent-source-tests.json",
+      "sha256": "7332be99508d4b4024477bd84c3f28a55e4cb7ecd8d4e805beae312e68a3e5ed"
+    },
+    {
+      "bundle": "support/qualified-export-declaration/parent-adapted-tests.json",
+      "destination": "qualified-export-declaration/parent-adapted-tests.json",
+      "sha256": "7332be99508d4b4024477bd84c3f28a55e4cb7ecd8d4e805beae312e68a3e5ed"
+    },
+    {
+      "bundle": "support/qualified-export-declaration/bug-source-tests.json",
+      "destination": "qualified-export-declaration/bug-source-tests.json",
+      "sha256": "f2f66684ed3d48ecf8a8d08591ff3b12e3d603ac89e94fbb1dd4ab49dea89d63"
+    },
+    {
+      "bundle": "support/qualified-export-declaration/bug-adapted-tests.json",
+      "destination": "qualified-export-declaration/bug-adapted-tests.json",
+      "sha256": "f2f66684ed3d48ecf8a8d08591ff3b12e3d603ac89e94fbb1dd4ab49dea89d63"
+    },
+    {
+      "bundle": "support/qualified-export-declaration/repair-source-tests.json",
+      "destination": "qualified-export-declaration/repair-source-tests.json",
+      "sha256": "46f9d0c3879f95cf5ecc916001501c7aea507c66d31819222f0230cbf0055062"
+    },
+    {
+      "bundle": "support/qualified-export-declaration/repair-adapted-tests.json",
+      "destination": "qualified-export-declaration/repair-adapted-tests.json",
+      "sha256": "46f9d0c3879f95cf5ecc916001501c7aea507c66d31819222f0230cbf0055062"
+    },
+    {
+      "bundle": "support/qualified-statement-separator/parent-source-tests.json",
+      "destination": "qualified-statement-separator/parent-source-tests.json",
+      "sha256": "4139a894c3b78c86f21b5cd6e673d887a392255190d339d4f186b25244e326cb"
+    },
+    {
+      "bundle": "support/qualified-statement-separator/parent-adapted-tests.json",
+      "destination": "qualified-statement-separator/parent-adapted-tests.json",
+      "sha256": "4139a894c3b78c86f21b5cd6e673d887a392255190d339d4f186b25244e326cb"
+    },
+    {
+      "bundle": "support/qualified-statement-separator/bug-source-tests.json",
+      "destination": "qualified-statement-separator/bug-source-tests.json",
+      "sha256": "301e0ce5c6c7205b1971f37a5e213722bd5995faaefbe2262e4d5ad2471116e6"
+    },
+    {
+      "bundle": "support/qualified-statement-separator/bug-adapted-tests.json",
+      "destination": "qualified-statement-separator/bug-adapted-tests.json",
+      "sha256": "301e0ce5c6c7205b1971f37a5e213722bd5995faaefbe2262e4d5ad2471116e6"
+    },
+    {
+      "bundle": "support/qualified-statement-separator/repair-source-tests.json",
+      "destination": "qualified-statement-separator/repair-source-tests.json",
+      "sha256": "f7608f081fcb5fa8c84d109f148e3cf4cbf0ba5a88dbd98baae6ab55cb8d6006"
+    },
+    {
+      "bundle": "support/qualified-statement-separator/repair-adapted-tests.json",
+      "destination": "qualified-statement-separator/repair-adapted-tests.json",
+      "sha256": "f7608f081fcb5fa8c84d109f148e3cf4cbf0ba5a88dbd98baae6ab55cb8d6006"
+    }
+  ],
+  "checks": [
+    {
+      "name": "express-edges",
+      "script": "express-edge-controls.mjs",
+      "output": "public-pair-critique/express-boundary-observations.json",
+      "expected": "expected/express-edges.json",
+      "pairedRecords": true
+    },
+    {
+      "name": "standalone-edges",
+      "script": "standalone-edge-controls.mjs",
+      "output": "public-pair-critique/standalone-repair-observations.json",
+      "expected": "expected/standalone-edges.json",
+      "pairedRecords": true
+    },
+    {
+      "name": "cache-edges",
+      "script": "cache-edge-controls.mjs",
+      "output": "cache-pair-critique/cache-observations.json",
+      "expected": "expected/cache-edges.json",
+      "pairedRecords": true
+    },
+    {
+      "name": "export-edges",
+      "script": "export-edge-controls.cjs",
+      "output": "qualified-export-declaration/independent-controls.json",
+      "expected": "expected/export-edges.json",
+      "pairedRecords": true
+    },
+    {
+      "name": "sparse-edges",
+      "script": "sparse-edge-controls.cjs",
+      "output": "qualified-sparse-validation/independent-controls.json",
+      "expected": "expected/sparse-edges.json",
+      "pairedRecords": true
+    },
+    {
+      "name": "separator-edges",
+      "script": "separator-edge-controls.mjs",
+      "output": "qualified-statement-separator/independent-controls.json",
+      "expected": "expected/separator-edges.json",
+      "pairedRecords": true
+    },
+    {
+      "name": "sparse-targets",
+      "script": "sparse-target-controls.cjs",
+      "output": "qualified-sparse-validation/controls.json",
+      "expected": "expected/sparse-targets.json",
+      "pairedRecords": true
+    },
+    {
+      "name": "middleware-targets",
+      "script": "middleware-target-controls.mjs",
+      "output": "qualified-middleware-path/controls.json",
+      "expected": "expected/middleware-targets.json",
+      "pairedRecords": true
+    },
+    {
+      "name": "parameter-source-targets",
+      "script": "parameter-source-controls.mjs",
+      "output": "public-datasets/express-params-source-observations.json",
+      "expected": "expected/parameter-source-targets.json",
+      "pairedRecords": false
+    },
+    {
+      "name": "parameter-adapted-targets",
+      "script": "parameter-adapted-controls.mjs",
+      "output": "public-datasets/express-params-adapted-observations.json",
+      "expected": "expected/parameter-adapted-targets.json",
+      "pairedRecords": false
+    },
+    {
+      "name": "cache-targets",
+      "script": "cache-target-controls.mjs",
+      "output": "qualified-cache-resource/controls.json",
+      "expected": "expected/cache-targets.json",
+      "pairedRecords": true
+    },
+    {
+      "name": "export-targets",
+      "script": "export-target-controls.cjs",
+      "output": "qualified-export-declaration/controls.json",
+      "expected": "expected/export-targets.json",
+      "pairedRecords": true
+    },
+    {
+      "name": "separator-targets",
+      "script": "separator-target-controls.cjs",
+      "output": "qualified-statement-separator/controls.json",
+      "expected": "expected/separator-targets.json",
+      "pairedRecords": true
+    },
+    {
+      "name": "standalone-targets",
+      "script": "standalone-target-controls.mjs",
+      "output": "qualified-repair-only/controls.json",
+      "expected": "expected/standalone-targets.json",
+      "pairedRecords": true
+    }
+  ],
+  "families": [
+    {
+      "name": "middleware-path",
+      "refs": {
+        "base": "1716e3b067af5acaeeee4165a865e0b670300aee",
+        "bug": "cf41a8f25434bde16ee8606ce12bb699ef9de39e",
+        "repair": "e8afebae780c89ba194aed1905a338d6c0c39949"
+      },
+      "ids": [
+        "corr-empty-middleware-path",
+        "corr-empty-middleware-path-repaired"
+      ],
+      "repairOrigin": "observed upstream",
+      "sourceExposed": true,
+      "lineage": {
+        "originalParentIsIntroducingParent": true,
+        "repairDescendsFromIntroduction": true
+      }
+    },
+    {
+      "name": "parameter-cache",
+      "refs": {
+        "base": "ababa6ae5b5e2aafa183817f292adcb19fa1c917",
+        "bug": "98d17e2293fe1a1bc55402d7aabbf766d4d2257f",
+        "repair": "8341317e9b50e71c739ab82fcfb5ec04564ba9d4"
+      },
+      "ids": [
+        "corr-parameter-cache-loses-outcome",
+        "corr-parameter-cache-loses-outcome-repaired"
+      ],
+      "repairOrigin": "observed upstream",
+      "sourceExposed": true,
+      "lineage": {
+        "originalParentIsIntroducingParent": true,
+        "repairDescendsFromIntroduction": true
+      }
+    },
+    {
+      "name": "corr-ip-address-subdomains-clean",
+      "refs": {
+        "base": "d07c06363f00647ab0553ef227b9b65cb4a04ae9",
+        "repair": "3ac2d5e560eebed8d374728e6cee92da3482fa8e"
+      },
+      "ids": [
+        "corr-ip-address-subdomains-clean"
+      ],
+      "repairOrigin": "published corrective change",
+      "baseRole": "actual buggy fix parent; no pre-introduction pass claim",
+      "sourceExposed": true
+    },
+    {
+      "name": "corr-bracketed-host-port-clean",
+      "refs": {
+        "base": "d5815922caca984435cbd4d75aeaf12afe73b8cb",
+        "repair": "ac36701865976607edd7a34d895dd9f3e2e70122"
+      },
+      "ids": [
+        "corr-bracketed-host-port-clean"
+      ],
+      "repairOrigin": "published corrective change",
+      "baseRole": "actual buggy fix parent; no pre-introduction pass claim",
+      "sourceExposed": true
+    },
+    {
+      "name": "corr-null-map-key-clean",
+      "refs": {
+        "base": "68dd5347b54e4702f6a2f43bea862abc784a9f6c",
+        "repair": "6772d3ca45b437b2a8c5c5d27e4419d46f7ec688"
+      },
+      "ids": [
+        "corr-null-map-key-clean"
+      ],
+      "repairOrigin": "published corrective change",
+      "baseRole": "actual buggy fix parent; no pre-introduction pass claim",
+      "sourceExposed": true
+    },
+    {
+      "name": "cache-resource",
+      "ids": [
+        "corr-cache-resource-key",
+        "corr-cache-resource-key-repaired"
+      ],
+      "refs": {
+        "base": "7153490ef95e68560987f401f645cd1e3089c33b",
+        "bug": "446d4ce21e1f115b47ab7213e00fd3ea3b400689",
+        "repair": "73472d0be8f570955140c7399d785322aad5b1d7"
+      },
+      "repairOrigin": "agent-derived Object.create(null) extension of observed upstream repair",
+      "upstreamRepairRole": "target-only; drops declared __proto__ query, not clean",
+      "sourceExposed": true,
+      "lineage": {
+        "originalParentIsIntroducingParent": true,
+        "repairDescendsFromIntroduction": true
+      }
+    },
+    {
+      "name": "export-declaration",
+      "ids": [
+        "corr-export-list-traversal",
+        "corr-export-list-traversal-repaired"
+      ],
+      "refs": {
+        "parent": "e54598abcf97573bddb40238c535cd8f0e3ffdd5",
+        "bug": "ce2accda65f45aaa2f532a3a4e931a35d42d3e42",
+        "repair": "d4f55268edb762d77bcde4ce7b3c71868ed08a1a"
+      },
+      "coreCommit": "cd11ed404debd48862b4ff84ccd9190467081a96",
+      "repairOrigin": "observed upstream",
+      "sourceExposed": true,
+      "lineage": {
+        "originalParentIsIntroducingParent": true,
+        "repairDescendsFromIntroduction": true
+      }
+    },
+    {
+      "name": "statement-separator",
+      "ids": [
+        "corr-statement-separator",
+        "corr-statement-separator-repaired"
+      ],
+      "refs": {
+        "parent": "2ffe51636a64e9ae0cd7621a7c61936346025ca0",
+        "bug": "14183848a1551710dd4a4dc602c5ba10adba502e",
+        "repair": "6e61070a682538af5bbaa7c9bd5e284f05720350"
+      },
+      "coreCommit": "651681522d6134bd683862516919362a1b333ab8",
+      "repairOrigin": "observed upstream",
+      "sourceExposed": true,
+      "lineage": {
+        "originalParentIsIntroducingParent": true,
+        "repairDescendsFromIntroduction": true
+      }
+    },
+    {
+      "name": "sparse-validation",
+      "ids": [
+        "corr-sparse-document-validation",
+        "corr-sparse-document-validation-repaired"
+      ],
+      "refs": {
+        "parent": "f3fe51cfe5e31ed58de57fc4fedf057bef504f36",
+        "bug": "66f1ceda22e50071783e8dcd816d467146d043ba",
+        "repair": "9408e1d8b1a670f6cdf43a5226828ea3faf2978c"
+      },
+      "coreCommit": "2b7bd3a5276e2a55f697b7fe025c86c702a11e50",
+      "repairOrigin": "observed upstream",
+      "sourceExposed": true,
+      "lineage": {
+        "originalParentIsIntroducingParent": true,
+        "repairDescendsFromIntroduction": true
+      }
+    }
+  ],
+  "repairOnlyProjection": "qualified-repair-only/proposals.json",
+  "runtimeLinks": [
+    {
+      "destination": "public-datasets/shields-cache/runtime",
+      "runtime": "c66fcd1e5516cc6e"
+    }
+  ],
+  "published": [
+    {
+      "qualified": "qualified-export-declaration",
+      "rule": "vars-on-top.js",
+      "stages": [
+        "parent",
+        "bug",
+        "repair"
+      ]
+    },
+    {
+      "qualified": "qualified-statement-separator",
+      "rule": "semi.js",
+      "stages": [
+        "parent",
+        "bug",
+        "repair"
+      ]
+    }
+  ],
+  "runtimeAliases": [
+    {
+      "runtime": "7312e9b8ba9910c6",
+      "link": "node_modules/mongodb/node_modules/mongodb-core",
+      "target": "node_modules/mongodb-core"
+    },
+    {
+      "runtime": "7312e9b8ba9910c6",
+      "link": "node_modules/mongodb-core/node_modules/bson",
+      "target": "node_modules/bson"
+    }
+  ],
+  "sourceModuleIdentities": {
+    "file": "source-module-identities.json",
+    "sha256": "fbb5c4fd8e8130dcb4ebdd87e73673d3cf70ca4963d9ef6784cdb79058e77d09"
+  },
+  "controlScripts": {},
+  "getterSpansSha256": "3ba9c70a9a40da6558005609f0dafb81e4e33d184cb71eb5ec4318b0f634f302",
+  "replaySha256": "dc756940a4c93e51264e81308fd95aaac63666cbc2efc39847aaadcfcf4827a4"
+}

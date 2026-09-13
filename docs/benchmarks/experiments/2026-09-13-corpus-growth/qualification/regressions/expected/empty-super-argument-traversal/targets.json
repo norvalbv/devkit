@@ -1,0 +1,1162 @@
+{
+  "runtime": "v24.19.0",
+  "historicalCore": "2.2.0",
+  "observations": [
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "one unused constructor argument",
+      "code": "class A extends B { constructor(value){super();} }",
+      "options": [],
+      "expectedCount": 0,
+      "target": true,
+      "messages": [
+        {
+          "message": "Useless constructor.",
+          "line": 1,
+          "column": 21,
+          "nodeType": "MethodDefinition"
+        }
+      ],
+      "fixed": "class A extends B { constructor(value){super();} }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "several unused constructor arguments",
+      "code": "class A extends B { constructor(a,b){super();} }",
+      "options": [],
+      "expectedCount": 0,
+      "target": true,
+      "messages": [
+        {
+          "message": "Useless constructor.",
+          "line": 1,
+          "column": 21,
+          "nodeType": "MethodDefinition"
+        }
+      ],
+      "fixed": "class A extends B { constructor(a,b){super();} }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "rest unused constructor argument",
+      "code": "class A extends B { constructor(...args){super();} }",
+      "options": [],
+      "expectedCount": 0,
+      "target": true,
+      "messages": [
+        {
+          "message": "Useless constructor.",
+          "line": 1,
+          "column": 21,
+          "nodeType": "MethodDefinition"
+        }
+      ],
+      "fixed": "class A extends B { constructor(...args){super();} }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "empty forwarding",
+      "code": "class A extends B { constructor(){super();} }",
+      "options": [],
+      "expectedCount": 1,
+      "target": false,
+      "messages": [
+        {
+          "message": "Useless constructor.",
+          "line": 1,
+          "column": 21,
+          "nodeType": "MethodDefinition"
+        }
+      ],
+      "fixed": "class A extends B { constructor(){super();} }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "identifier forwarding",
+      "code": "class A extends B { constructor(a){super(a);} }",
+      "options": [],
+      "expectedCount": 1,
+      "target": false,
+      "messages": [
+        {
+          "message": "Useless constructor.",
+          "line": 1,
+          "column": 21,
+          "nodeType": "MethodDefinition"
+        }
+      ],
+      "fixed": "class A extends B { constructor(a){super(a);} }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "rest forwarding",
+      "code": "class A extends B { constructor(...args){super(...args);} }",
+      "options": [],
+      "expectedCount": 1,
+      "target": false,
+      "messages": [
+        {
+          "message": "Useless constructor.",
+          "line": 1,
+          "column": 21,
+          "nodeType": "MethodDefinition"
+        }
+      ],
+      "fixed": "class A extends B { constructor(...args){super(...args);} }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "arguments forwarding",
+      "code": "class A extends B { constructor(a){super(...arguments);} }",
+      "options": [],
+      "expectedCount": 1,
+      "target": false,
+      "messages": [],
+      "fixed": "class A extends B { constructor(a){super(...arguments);} }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "more super arguments",
+      "code": "class A extends B { constructor(a){super(a,a);} }",
+      "options": [],
+      "expectedCount": 0,
+      "target": false,
+      "error": {
+        "name": "TypeError",
+        "message": "Cannot read properties of undefined (reading 'name')"
+      },
+      "fixed": "class A extends B { constructor(a){super(a,a);} }",
+      "parseErrors": [],
+      "safe": false
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "default effects retained",
+      "code": "class A extends B { constructor(a=effect()){super(a);} }",
+      "options": [],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "class A extends B { constructor(a=effect()){super(a);} }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "destructuring effects retained",
+      "code": "class A extends B { constructor({a}){super(a);} }",
+      "options": [],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "class A extends B { constructor({a}){super(a);} }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "noncall expression",
+      "code": "class A extends B { constructor(a){ super(a); a; } }",
+      "options": [],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "class A extends B { constructor(a){ super(a); a; } }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "ordinary constructor work",
+      "code": "class A { constructor(){this.a=1;} }",
+      "options": [],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "class A { constructor(){this.a=1;} }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "one unused constructor argument",
+      "code": "class A extends B { constructor(value){super();} }",
+      "options": [],
+      "expectedCount": 0,
+      "target": true,
+      "messages": [
+        {
+          "message": "Useless constructor.",
+          "line": 1,
+          "column": 21,
+          "nodeType": "MethodDefinition"
+        }
+      ],
+      "fixed": "class A extends B { constructor(value){super();} }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "several unused constructor arguments",
+      "code": "class A extends B { constructor(a,b){super();} }",
+      "options": [],
+      "expectedCount": 0,
+      "target": true,
+      "messages": [
+        {
+          "message": "Useless constructor.",
+          "line": 1,
+          "column": 21,
+          "nodeType": "MethodDefinition"
+        }
+      ],
+      "fixed": "class A extends B { constructor(a,b){super();} }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "rest unused constructor argument",
+      "code": "class A extends B { constructor(...args){super();} }",
+      "options": [],
+      "expectedCount": 0,
+      "target": true,
+      "messages": [
+        {
+          "message": "Useless constructor.",
+          "line": 1,
+          "column": 21,
+          "nodeType": "MethodDefinition"
+        }
+      ],
+      "fixed": "class A extends B { constructor(...args){super();} }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "empty forwarding",
+      "code": "class A extends B { constructor(){super();} }",
+      "options": [],
+      "expectedCount": 1,
+      "target": false,
+      "messages": [
+        {
+          "message": "Useless constructor.",
+          "line": 1,
+          "column": 21,
+          "nodeType": "MethodDefinition"
+        }
+      ],
+      "fixed": "class A extends B { constructor(){super();} }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "identifier forwarding",
+      "code": "class A extends B { constructor(a){super(a);} }",
+      "options": [],
+      "expectedCount": 1,
+      "target": false,
+      "messages": [
+        {
+          "message": "Useless constructor.",
+          "line": 1,
+          "column": 21,
+          "nodeType": "MethodDefinition"
+        }
+      ],
+      "fixed": "class A extends B { constructor(a){super(a);} }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "rest forwarding",
+      "code": "class A extends B { constructor(...args){super(...args);} }",
+      "options": [],
+      "expectedCount": 1,
+      "target": false,
+      "messages": [
+        {
+          "message": "Useless constructor.",
+          "line": 1,
+          "column": 21,
+          "nodeType": "MethodDefinition"
+        }
+      ],
+      "fixed": "class A extends B { constructor(...args){super(...args);} }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "arguments forwarding",
+      "code": "class A extends B { constructor(a){super(...arguments);} }",
+      "options": [],
+      "expectedCount": 1,
+      "target": false,
+      "messages": [],
+      "fixed": "class A extends B { constructor(a){super(...arguments);} }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "more super arguments",
+      "code": "class A extends B { constructor(a){super(a,a);} }",
+      "options": [],
+      "expectedCount": 0,
+      "target": false,
+      "error": {
+        "name": "TypeError",
+        "message": "Cannot read properties of undefined (reading 'name')"
+      },
+      "fixed": "class A extends B { constructor(a){super(a,a);} }",
+      "parseErrors": [],
+      "safe": false
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "default effects retained",
+      "code": "class A extends B { constructor(a=effect()){super(a);} }",
+      "options": [],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "class A extends B { constructor(a=effect()){super(a);} }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "destructuring effects retained",
+      "code": "class A extends B { constructor({a}){super(a);} }",
+      "options": [],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "class A extends B { constructor({a}){super(a);} }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "noncall expression",
+      "code": "class A extends B { constructor(a){ super(a); a; } }",
+      "options": [],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "class A extends B { constructor(a){ super(a); a; } }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "ordinary constructor work",
+      "code": "class A { constructor(){this.a=1;} }",
+      "options": [],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "class A { constructor(){this.a=1;} }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "one unused constructor argument",
+      "code": "class A extends B { constructor(value){super();} }",
+      "options": [],
+      "expectedCount": 0,
+      "target": true,
+      "error": {
+        "name": "TypeError",
+        "message": "Cannot read properties of undefined (reading 'type')"
+      },
+      "fixed": "class A extends B { constructor(value){super();} }",
+      "parseErrors": [],
+      "safe": false
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "several unused constructor arguments",
+      "code": "class A extends B { constructor(a,b){super();} }",
+      "options": [],
+      "expectedCount": 0,
+      "target": true,
+      "error": {
+        "name": "TypeError",
+        "message": "Cannot read properties of undefined (reading 'type')"
+      },
+      "fixed": "class A extends B { constructor(a,b){super();} }",
+      "parseErrors": [],
+      "safe": false
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "rest unused constructor argument",
+      "code": "class A extends B { constructor(...args){super();} }",
+      "options": [],
+      "expectedCount": 0,
+      "target": true,
+      "error": {
+        "name": "TypeError",
+        "message": "Cannot read properties of undefined (reading 'type')"
+      },
+      "fixed": "class A extends B { constructor(...args){super();} }",
+      "parseErrors": [],
+      "safe": false
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "empty forwarding",
+      "code": "class A extends B { constructor(){super();} }",
+      "options": [],
+      "expectedCount": 1,
+      "target": false,
+      "messages": [
+        {
+          "message": "Useless constructor.",
+          "line": 1,
+          "column": 21,
+          "nodeType": "MethodDefinition"
+        }
+      ],
+      "fixed": "class A extends B { constructor(){super();} }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "identifier forwarding",
+      "code": "class A extends B { constructor(a){super(a);} }",
+      "options": [],
+      "expectedCount": 1,
+      "target": false,
+      "messages": [
+        {
+          "message": "Useless constructor.",
+          "line": 1,
+          "column": 21,
+          "nodeType": "MethodDefinition"
+        }
+      ],
+      "fixed": "class A extends B { constructor(a){super(a);} }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "rest forwarding",
+      "code": "class A extends B { constructor(...args){super(...args);} }",
+      "options": [],
+      "expectedCount": 1,
+      "target": false,
+      "messages": [
+        {
+          "message": "Useless constructor.",
+          "line": 1,
+          "column": 21,
+          "nodeType": "MethodDefinition"
+        }
+      ],
+      "fixed": "class A extends B { constructor(...args){super(...args);} }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "arguments forwarding",
+      "code": "class A extends B { constructor(a){super(...arguments);} }",
+      "options": [],
+      "expectedCount": 1,
+      "target": false,
+      "messages": [
+        {
+          "message": "Useless constructor.",
+          "line": 1,
+          "column": 21,
+          "nodeType": "MethodDefinition"
+        }
+      ],
+      "fixed": "class A extends B { constructor(a){super(...arguments);} }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "more super arguments",
+      "code": "class A extends B { constructor(a){super(a,a);} }",
+      "options": [],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "class A extends B { constructor(a){super(a,a);} }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "default effects retained",
+      "code": "class A extends B { constructor(a=effect()){super(a);} }",
+      "options": [],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "class A extends B { constructor(a=effect()){super(a);} }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "destructuring effects retained",
+      "code": "class A extends B { constructor({a}){super(a);} }",
+      "options": [],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "class A extends B { constructor({a}){super(a);} }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "noncall expression",
+      "code": "class A extends B { constructor(a){ super(a); a; } }",
+      "options": [],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "class A extends B { constructor(a){ super(a); a; } }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "ordinary constructor work",
+      "code": "class A { constructor(){this.a=1;} }",
+      "options": [],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "class A { constructor(){this.a=1;} }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "one unused constructor argument",
+      "code": "class A extends B { constructor(value){super();} }",
+      "options": [],
+      "expectedCount": 0,
+      "target": true,
+      "error": {
+        "name": "TypeError",
+        "message": "Cannot read properties of undefined (reading 'type')"
+      },
+      "fixed": "class A extends B { constructor(value){super();} }",
+      "parseErrors": [],
+      "safe": false
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "several unused constructor arguments",
+      "code": "class A extends B { constructor(a,b){super();} }",
+      "options": [],
+      "expectedCount": 0,
+      "target": true,
+      "error": {
+        "name": "TypeError",
+        "message": "Cannot read properties of undefined (reading 'type')"
+      },
+      "fixed": "class A extends B { constructor(a,b){super();} }",
+      "parseErrors": [],
+      "safe": false
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "rest unused constructor argument",
+      "code": "class A extends B { constructor(...args){super();} }",
+      "options": [],
+      "expectedCount": 0,
+      "target": true,
+      "error": {
+        "name": "TypeError",
+        "message": "Cannot read properties of undefined (reading 'type')"
+      },
+      "fixed": "class A extends B { constructor(...args){super();} }",
+      "parseErrors": [],
+      "safe": false
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "empty forwarding",
+      "code": "class A extends B { constructor(){super();} }",
+      "options": [],
+      "expectedCount": 1,
+      "target": false,
+      "messages": [
+        {
+          "message": "Useless constructor.",
+          "line": 1,
+          "column": 21,
+          "nodeType": "MethodDefinition"
+        }
+      ],
+      "fixed": "class A extends B { constructor(){super();} }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "identifier forwarding",
+      "code": "class A extends B { constructor(a){super(a);} }",
+      "options": [],
+      "expectedCount": 1,
+      "target": false,
+      "messages": [
+        {
+          "message": "Useless constructor.",
+          "line": 1,
+          "column": 21,
+          "nodeType": "MethodDefinition"
+        }
+      ],
+      "fixed": "class A extends B { constructor(a){super(a);} }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "rest forwarding",
+      "code": "class A extends B { constructor(...args){super(...args);} }",
+      "options": [],
+      "expectedCount": 1,
+      "target": false,
+      "messages": [
+        {
+          "message": "Useless constructor.",
+          "line": 1,
+          "column": 21,
+          "nodeType": "MethodDefinition"
+        }
+      ],
+      "fixed": "class A extends B { constructor(...args){super(...args);} }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "arguments forwarding",
+      "code": "class A extends B { constructor(a){super(...arguments);} }",
+      "options": [],
+      "expectedCount": 1,
+      "target": false,
+      "messages": [
+        {
+          "message": "Useless constructor.",
+          "line": 1,
+          "column": 21,
+          "nodeType": "MethodDefinition"
+        }
+      ],
+      "fixed": "class A extends B { constructor(a){super(...arguments);} }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "more super arguments",
+      "code": "class A extends B { constructor(a){super(a,a);} }",
+      "options": [],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "class A extends B { constructor(a){super(a,a);} }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "default effects retained",
+      "code": "class A extends B { constructor(a=effect()){super(a);} }",
+      "options": [],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "class A extends B { constructor(a=effect()){super(a);} }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "destructuring effects retained",
+      "code": "class A extends B { constructor({a}){super(a);} }",
+      "options": [],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "class A extends B { constructor({a}){super(a);} }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "noncall expression",
+      "code": "class A extends B { constructor(a){ super(a); a; } }",
+      "options": [],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "class A extends B { constructor(a){ super(a); a; } }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "ordinary constructor work",
+      "code": "class A { constructor(){this.a=1;} }",
+      "options": [],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "class A { constructor(){this.a=1;} }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "one unused constructor argument",
+      "code": "class A extends B { constructor(value){super();} }",
+      "options": [],
+      "expectedCount": 0,
+      "target": true,
+      "messages": [],
+      "fixed": "class A extends B { constructor(value){super();} }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "several unused constructor arguments",
+      "code": "class A extends B { constructor(a,b){super();} }",
+      "options": [],
+      "expectedCount": 0,
+      "target": true,
+      "messages": [],
+      "fixed": "class A extends B { constructor(a,b){super();} }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "rest unused constructor argument",
+      "code": "class A extends B { constructor(...args){super();} }",
+      "options": [],
+      "expectedCount": 0,
+      "target": true,
+      "messages": [],
+      "fixed": "class A extends B { constructor(...args){super();} }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "empty forwarding",
+      "code": "class A extends B { constructor(){super();} }",
+      "options": [],
+      "expectedCount": 1,
+      "target": false,
+      "messages": [
+        {
+          "message": "Useless constructor.",
+          "line": 1,
+          "column": 21,
+          "nodeType": "MethodDefinition"
+        }
+      ],
+      "fixed": "class A extends B { constructor(){super();} }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "identifier forwarding",
+      "code": "class A extends B { constructor(a){super(a);} }",
+      "options": [],
+      "expectedCount": 1,
+      "target": false,
+      "messages": [
+        {
+          "message": "Useless constructor.",
+          "line": 1,
+          "column": 21,
+          "nodeType": "MethodDefinition"
+        }
+      ],
+      "fixed": "class A extends B { constructor(a){super(a);} }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "rest forwarding",
+      "code": "class A extends B { constructor(...args){super(...args);} }",
+      "options": [],
+      "expectedCount": 1,
+      "target": false,
+      "messages": [
+        {
+          "message": "Useless constructor.",
+          "line": 1,
+          "column": 21,
+          "nodeType": "MethodDefinition"
+        }
+      ],
+      "fixed": "class A extends B { constructor(...args){super(...args);} }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "arguments forwarding",
+      "code": "class A extends B { constructor(a){super(...arguments);} }",
+      "options": [],
+      "expectedCount": 1,
+      "target": false,
+      "messages": [
+        {
+          "message": "Useless constructor.",
+          "line": 1,
+          "column": 21,
+          "nodeType": "MethodDefinition"
+        }
+      ],
+      "fixed": "class A extends B { constructor(a){super(...arguments);} }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "more super arguments",
+      "code": "class A extends B { constructor(a){super(a,a);} }",
+      "options": [],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "class A extends B { constructor(a){super(a,a);} }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "default effects retained",
+      "code": "class A extends B { constructor(a=effect()){super(a);} }",
+      "options": [],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "class A extends B { constructor(a=effect()){super(a);} }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "destructuring effects retained",
+      "code": "class A extends B { constructor({a}){super(a);} }",
+      "options": [],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "class A extends B { constructor({a}){super(a);} }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "noncall expression",
+      "code": "class A extends B { constructor(a){ super(a); a; } }",
+      "options": [],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "class A extends B { constructor(a){ super(a); a; } }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "ordinary constructor work",
+      "code": "class A { constructor(){this.a=1;} }",
+      "options": [],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "class A { constructor(){this.a=1;} }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "one unused constructor argument",
+      "code": "class A extends B { constructor(value){super();} }",
+      "options": [],
+      "expectedCount": 0,
+      "target": true,
+      "messages": [],
+      "fixed": "class A extends B { constructor(value){super();} }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "several unused constructor arguments",
+      "code": "class A extends B { constructor(a,b){super();} }",
+      "options": [],
+      "expectedCount": 0,
+      "target": true,
+      "messages": [],
+      "fixed": "class A extends B { constructor(a,b){super();} }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "rest unused constructor argument",
+      "code": "class A extends B { constructor(...args){super();} }",
+      "options": [],
+      "expectedCount": 0,
+      "target": true,
+      "messages": [],
+      "fixed": "class A extends B { constructor(...args){super();} }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "empty forwarding",
+      "code": "class A extends B { constructor(){super();} }",
+      "options": [],
+      "expectedCount": 1,
+      "target": false,
+      "messages": [
+        {
+          "message": "Useless constructor.",
+          "line": 1,
+          "column": 21,
+          "nodeType": "MethodDefinition"
+        }
+      ],
+      "fixed": "class A extends B { constructor(){super();} }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "identifier forwarding",
+      "code": "class A extends B { constructor(a){super(a);} }",
+      "options": [],
+      "expectedCount": 1,
+      "target": false,
+      "messages": [
+        {
+          "message": "Useless constructor.",
+          "line": 1,
+          "column": 21,
+          "nodeType": "MethodDefinition"
+        }
+      ],
+      "fixed": "class A extends B { constructor(a){super(a);} }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "rest forwarding",
+      "code": "class A extends B { constructor(...args){super(...args);} }",
+      "options": [],
+      "expectedCount": 1,
+      "target": false,
+      "messages": [
+        {
+          "message": "Useless constructor.",
+          "line": 1,
+          "column": 21,
+          "nodeType": "MethodDefinition"
+        }
+      ],
+      "fixed": "class A extends B { constructor(...args){super(...args);} }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "arguments forwarding",
+      "code": "class A extends B { constructor(a){super(...arguments);} }",
+      "options": [],
+      "expectedCount": 1,
+      "target": false,
+      "messages": [
+        {
+          "message": "Useless constructor.",
+          "line": 1,
+          "column": 21,
+          "nodeType": "MethodDefinition"
+        }
+      ],
+      "fixed": "class A extends B { constructor(a){super(...arguments);} }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "more super arguments",
+      "code": "class A extends B { constructor(a){super(a,a);} }",
+      "options": [],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "class A extends B { constructor(a){super(a,a);} }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "default effects retained",
+      "code": "class A extends B { constructor(a=effect()){super(a);} }",
+      "options": [],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "class A extends B { constructor(a=effect()){super(a);} }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "destructuring effects retained",
+      "code": "class A extends B { constructor({a}){super(a);} }",
+      "options": [],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "class A extends B { constructor({a}){super(a);} }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "noncall expression",
+      "code": "class A extends B { constructor(a){ super(a); a; } }",
+      "options": [],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "class A extends B { constructor(a){ super(a); a; } }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "ordinary constructor work",
+      "code": "class A { constructor(){this.a=1;} }",
+      "options": [],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "class A { constructor(){this.a=1;} }",
+      "parseErrors": [],
+      "safe": true
+    }
+  ]
+}
