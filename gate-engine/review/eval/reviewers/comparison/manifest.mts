@@ -68,22 +68,22 @@ export function validatePacket(probe, packet) {
   match(text, packet.sha256, 'packet');
   return text;
 }
-function candidateAssets(root, dir, arm, baseline) {
+const INSTRUCTION_ASSETS = new Map([
+  ['agents/correctness-reviewer.md', '.claude/agents/correctness-reviewer.md'],
+  ['skills/correctness/SKILL.md', '.claude/skills/correctness/SKILL.md'],
+]);
+function candidateAssets(dir, arm, baseline, historicalInstructions) {
   const patch = readFileSync(path.join(dir, arm.artifact));
   match(patch, arm.patchSha256, arm.artifact);
   const changes = arm.sourceChanges ?? [
     { path: arm.target, beforeSha256: arm.beforeSha256, afterSha256: arm.afterSha256 },
   ];
   const temp = mkdtempSync(path.join(tmpdir(), 'comparison-assets-'));
-  const allowed = new Map([
-    ['agents/correctness-reviewer.md', '.claude/agents/correctness-reviewer.md'],
-    ['skills/correctness/SKILL.md', '.claude/skills/correctness/SKILL.md'],
-  ]);
   try {
     for (const change of changes) {
-      if (!allowed.has(change.path))
+      if (!INSTRUCTION_ASSETS.has(change.path))
         throw new Error('candidate path outside reviewer instructions');
-      const source = readFileSync(path.join(root, change.path));
+      const source = baseline[INSTRUCTION_ASSETS.get(change.path)];
       match(source, change.beforeSha256, change.path);
       const dest = path.join(temp, change.path);
       mkdirSync(path.dirname(dest), { recursive: true });
@@ -93,11 +93,11 @@ function candidateAssets(root, dir, arm, baseline) {
     const options = { cwd: temp, input: patch, timeout: 30_000, maxBuffer: 1024 * 1024 };
     execFileSync('git', args, options);
     execFileSync('git', ['apply', '-'], options);
-    const overrides = {};
+    const overrides = { ...historicalInstructions };
     for (const change of changes) {
       const source = readFileSync(path.join(temp, change.path), 'utf8');
       match(source, change.afterSha256, change.path);
-      overrides[allowed.get(change.path)] = source;
+      overrides[INSTRUCTION_ASSETS.get(change.path)] = source;
     }
     return { overrides, sha256: sha256(canonical({ ...baseline, ...overrides })) };
   } finally {
@@ -117,6 +117,7 @@ export function loadComparison(root = ROOT) {
   if (reviewer.model !== MODEL)
     throw new Error('effective correctness model differs from registration');
   const historicalSources = {};
+  const historicalInstructions = {};
   for (const [file, hash] of Object.entries(protocol.sourceFilesSha256)) {
     const old = execFileSync('git', ['show', `${protocol.sourceRevision}:${file}`], {
       cwd: root,
@@ -124,15 +125,21 @@ export function loadComparison(root = ROOT) {
       maxBuffer: 10 * 1024 * 1024,
     });
     match(old, hash, `preparation source ${file}`);
+    const asset = INSTRUCTION_ASSETS.get(file);
+    if (asset) historicalInstructions[asset] = old.toString('utf8');
+    const current = readFileSync(path.join(root, file));
     historicalSources[file] = {
       prepared: hash,
-      current: sha256(readFileSync(path.join(root, file))),
+      current: sha256(current),
     };
+    // Corpus growth may append rows; the frozen experiment still requires every historical byte.
+    if (file.endsWith('cases-correctness.jsonl') && !current.subarray(0, old.length).equals(old))
+      throw new Error(`fixed experiment corpus must preserve its historical prefix: ${file}`);
     if (
       (file.startsWith('agents/') ||
         file.startsWith('skills/') ||
-        file.endsWith('cases-correctness.jsonl') ||
         file === 'gate-engine/review/reviewers.mts') &&
+      !INSTRUCTION_ASSETS.has(file) &&
       historicalSources[file].current !== hash
     )
       throw new Error(`fixed experiment source changed: ${file}`);
@@ -174,15 +181,15 @@ export function loadComparison(root = ROOT) {
   const packets = new Map(packetEntries.map((p) => [p.probeId, p]));
   if (packets.size !== 7 || packetEntries.length !== 7) throw new Error('unexpected packet roster');
   for (const probe of probes) validatePacket(probe, packets.get(probe.id));
-  const baseline = buildAssets(reviewer),
-    base = { overrides: {}, sha256: sha256(canonical(baseline)) };
+  const baseline = { ...buildAssets(reviewer), ...historicalInstructions },
+    base = { overrides: historicalInstructions, sha256: sha256(canonical(baseline)) };
   const assets = { B: base, C: base };
   for (const id of ['P', 'L'])
     assets[id] = candidateAssets(
-      root,
       dir,
       protocol.arms.find((a) => a.id === id),
       baseline,
+      historicalInstructions,
     );
   return {
     rows,

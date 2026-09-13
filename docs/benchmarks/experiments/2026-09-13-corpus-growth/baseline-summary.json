@@ -1,0 +1,256 @@
+{
+  "schemaVersion": 1,
+  "interpretation": "Completed frozen baseline: label agreement, not factual precision. Initial reviewer verdicts and final gate decisions after charter post-processing are separate. The historical 13.9% label-noise reference remains applicable.",
+  "executionHash": "c6873b6f77e95ac1ddbe9ef5ae250c3e6d26b2960bae51cd5e74b2a5ded4e377",
+  "eventId": "evt-2026-09-13-reviewer-correctness-e609c43fd8b4",
+  "scopes": {
+    "all": {
+      "initial": {
+        "rows": 285,
+        "bugLabelFlags": {
+          "k": 102,
+          "n": 105
+        },
+        "cleanLabelAcceptance": {
+          "k": 117,
+          "n": 180
+        },
+        "repairConsistency": {
+          "k": 34,
+          "n": 73,
+          "families": 72,
+          "familyK": 34,
+          "singletons": 139,
+          "malformedGroups": 0
+        },
+        "wholeFamilyAgreement": {
+          "k": 114,
+          "n": 174
+        }
+      },
+      "finalGate": {
+        "rows": 285,
+        "bugLabelFlags": {
+          "k": 101,
+          "n": 105
+        },
+        "cleanLabelAcceptance": {
+          "k": 117,
+          "n": 180
+        },
+        "repairConsistency": {
+          "k": 34,
+          "n": 73,
+          "families": 72,
+          "familyK": 34,
+          "singletons": 139,
+          "malformedGroups": 0
+        },
+        "wholeFamilyAgreement": {
+          "k": 114,
+          "n": 174
+        }
+      }
+    },
+    "original": {
+      "initial": {
+        "rows": 146,
+        "bugLabelFlags": {
+          "k": 73,
+          "n": 75
+        },
+        "cleanLabelAcceptance": {
+          "k": 40,
+          "n": 71
+        },
+        "repairConsistency": {
+          "k": 26,
+          "n": 56,
+          "families": 55,
+          "familyK": 26,
+          "singletons": 34,
+          "malformedGroups": 0
+        },
+        "wholeFamilyAgreement": {
+          "k": 58,
+          "n": 89
+        }
+      },
+      "finalGate": {
+        "rows": 146,
+        "bugLabelFlags": {
+          "k": 73,
+          "n": 75
+        },
+        "cleanLabelAcceptance": {
+          "k": 40,
+          "n": 71
+        },
+        "repairConsistency": {
+          "k": 26,
+          "n": 56,
+          "families": 55,
+          "familyK": 26,
+          "singletons": 34,
+          "malformedGroups": 0
+        },
+        "wholeFamilyAgreement": {
+          "k": 58,
+          "n": 89
+        }
+      }
+    },
+    "additions": {
+      "initial": {
+        "rows": 139,
+        "bugLabelFlags": {
+          "k": 29,
+          "n": 30
+        },
+        "cleanLabelAcceptance": {
+          "k": 77,
+          "n": 109
+        },
+        "repairConsistency": {
+          "k": 8,
+          "n": 17,
+          "families": 17,
+          "familyK": 8,
+          "singletons": 105,
+          "malformedGroups": 0
+        },
+        "wholeFamilyAgreement": {
+          "k": 56,
+          "n": 85
+        }
+      },
+      "finalGate": {
+        "rows": 139,
+        "bugLabelFlags": {
+          "k": 28,
+          "n": 30
+        },
+        "cleanLabelAcceptance": {
+          "k": 77,
+          "n": 109
+        },
+        "repairConsistency": {
+          "k": 8,
+          "n": 17,
+          "families": 17,
+          "familyK": 8,
+          "singletons": 105,
+          "malformedGroups": 0
+        },
+        "wholeFamilyAgreement": {
+          "k": 56,
+          "n": 85
+        }
+      }
+    },
+    "development": {
+      "initial": {
+        "rows": 240,
+        "bugLabelFlags": {
+          "k": 88,
+          "n": 90
+        },
+        "cleanLabelAcceptance": {
+          "k": 94,
+          "n": 150
+        },
+        "repairConsistency": {
+          "k": 30,
+          "n": 66,
+          "families": 65,
+          "familyK": 30,
+          "singletons": 108,
+          "malformedGroups": 0
+        },
+        "wholeFamilyAgreement": {
+          "k": 97,
+          "n": 150
+        }
+      },
+      "finalGate": {
+        "rows": 240,
+        "bugLabelFlags": {
+          "k": 87,
+          "n": 90
+        },
+        "cleanLabelAcceptance": {
+          "k": 94,
+          "n": 150
+        },
+        "repairConsistency": {
+          "k": 30,
+          "n": 66,
+          "families": 65,
+          "familyK": 30,
+          "singletons": 108,
+          "malformedGroups": 0
+        },
+        "wholeFamilyAgreement": {
+          "k": 97,
+          "n": 150
+        }
+      }
+    },
+    "reserved": {
+      "initial": {
+        "rows": 45,
+        "bugLabelFlags": {
+          "k": 14,
+          "n": 15
+        },
+        "cleanLabelAcceptance": {
+          "k": 23,
+          "n": 30
+        },
+        "repairConsistency": {
+          "k": 4,
+          "n": 7,
+          "families": 7,
+          "familyK": 4,
+          "singletons": 31,
+          "malformedGroups": 0
+        },
+        "wholeFamilyAgreement": {
+          "k": 17,
+          "n": 24
+        }
+      },
+      "finalGate": {
+        "rows": 45,
+        "bugLabelFlags": {
+          "k": 14,
+          "n": 15
+        },
+        "cleanLabelAcceptance": {
+          "k": 23,
+          "n": 30
+        },
+        "repairConsistency": {
+          "k": 4,
+          "n": 7,
+          "families": 7,
+          "familyK": 4,
+          "singletons": 31,
+          "malformedGroups": 0
+        },
+        "wholeFamilyAgreement": {
+          "k": 17,
+          "n": 24
+        }
+      }
+    }
+  },
+  "initialFinalDisagreements": [
+    {
+      "id": "corr-population-projection-token-prefix",
+      "expected": "FAIL",
+      "firstVerdict": "FAIL",
+      "finalStatus": "pass"
+    }
+  ]
+}

@@ -1,0 +1,746 @@
+{
+  "runtime": "v24.19.0",
+  "observations": [
+    {
+      "family": "middleware-path",
+      "stage": "base",
+      "scenario": "empty path multiple handlers",
+      "original": {
+        "status": 200,
+        "body": "{\"calls\":[\"first\",\"second\"],\"url\":\"/match/child\"}"
+      },
+      "adapted": {
+        "status": 200,
+        "body": "{\"calls\":[\"first\",\"second\"],\"url\":\"/match/child\"}"
+      },
+      "equal": true
+    },
+    {
+      "family": "middleware-path",
+      "stage": "base",
+      "scenario": "regexp path",
+      "original": {
+        "status": 200,
+        "body": "{\"calls\":[\"first\"],\"url\":\"/match/child\"}"
+      },
+      "adapted": {
+        "status": 200,
+        "body": "{\"calls\":[\"first\"],\"url\":\"/match/child\"}"
+      },
+      "equal": true
+    },
+    {
+      "family": "middleware-path",
+      "stage": "base",
+      "scenario": "array paths",
+      "original": {
+        "status": 200,
+        "body": "{\"calls\":[\"first\"],\"url\":\"/match/child\"}"
+      },
+      "adapted": {
+        "status": 200,
+        "body": "{\"calls\":[\"first\"],\"url\":\"/match/child\"}"
+      },
+      "equal": true
+    },
+    {
+      "family": "middleware-path",
+      "stage": "base",
+      "scenario": "nested arrays with error handler",
+      "original": {
+        "error": {
+          "name": "TypeError",
+          "message": "app.use() requires middleware functions"
+        },
+        "calls": []
+      },
+      "adapted": {
+        "error": {
+          "name": "TypeError",
+          "message": "app.use() requires middleware functions"
+        },
+        "calls": []
+      },
+      "equal": true
+    },
+    {
+      "family": "middleware-path",
+      "stage": "base",
+      "scenario": "mounted app yields to parent",
+      "original": {
+        "status": 200,
+        "body": "{\"calls\":[\"child\",\"parent\"],\"url\":\"/match/child\"}"
+      },
+      "adapted": {
+        "status": 200,
+        "body": "{\"calls\":[\"child\",\"parent\"],\"url\":\"/match/child\"}"
+      },
+      "equal": true
+    },
+    {
+      "family": "middleware-path",
+      "stage": "base",
+      "scenario": "empty path nested arrays",
+      "original": {
+        "status": 200,
+        "body": "{\"calls\":[\"first\",\"second\"],\"url\":\"/match/child\"}"
+      },
+      "adapted": {
+        "status": 200,
+        "body": "{\"calls\":[\"first\",\"second\"],\"url\":\"/match/child\"}"
+      },
+      "equal": true
+    },
+    {
+      "family": "middleware-path",
+      "stage": "base",
+      "scenario": "invalid array element",
+      "original": {
+        "error": {
+          "name": "TypeError",
+          "message": "app.use() requires middleware functions"
+        },
+        "calls": []
+      },
+      "adapted": {
+        "error": {
+          "name": "TypeError",
+          "message": "app.use() requires middleware functions"
+        },
+        "calls": []
+      },
+      "equal": true
+    },
+    {
+      "family": "middleware-path",
+      "stage": "base",
+      "scenario": "no arguments",
+      "original": {
+        "error": {
+          "name": "TypeError",
+          "message": "app.use() requires middleware functions"
+        },
+        "calls": []
+      },
+      "adapted": {
+        "error": {
+          "name": "TypeError",
+          "message": "app.use() requires middleware functions"
+        },
+        "calls": []
+      },
+      "equal": true
+    },
+    {
+      "family": "middleware-path",
+      "stage": "base",
+      "scenario": "falsy nonstring path",
+      "original": {
+        "status": 200,
+        "body": "{\"calls\":[],\"url\":\"/match/child\"}"
+      },
+      "adapted": {
+        "status": 200,
+        "body": "{\"calls\":[],\"url\":\"/match/child\"}"
+      },
+      "equal": true
+    },
+    {
+      "family": "middleware-path",
+      "stage": "bug",
+      "scenario": "empty path multiple handlers",
+      "original": {
+        "error": {
+          "name": "TypeError",
+          "message": "Router.use() requires callback function but got a [object String]"
+        },
+        "calls": []
+      },
+      "adapted": {
+        "error": {
+          "name": "TypeError",
+          "message": "Router.use() requires callback function but got a [object String]"
+        },
+        "calls": []
+      },
+      "equal": true
+    },
+    {
+      "family": "middleware-path",
+      "stage": "bug",
+      "scenario": "regexp path",
+      "original": {
+        "status": 200,
+        "body": "{\"calls\":[\"first\"],\"url\":\"/match/child\"}"
+      },
+      "adapted": {
+        "status": 200,
+        "body": "{\"calls\":[\"first\"],\"url\":\"/match/child\"}"
+      },
+      "equal": true
+    },
+    {
+      "family": "middleware-path",
+      "stage": "bug",
+      "scenario": "array paths",
+      "original": {
+        "status": 200,
+        "body": "{\"calls\":[\"first\"],\"url\":\"/match/child\"}"
+      },
+      "adapted": {
+        "status": 200,
+        "body": "{\"calls\":[\"first\"],\"url\":\"/match/child\"}"
+      },
+      "equal": true
+    },
+    {
+      "family": "middleware-path",
+      "stage": "bug",
+      "scenario": "nested arrays with error handler",
+      "original": {
+        "status": 200,
+        "body": "{\"calls\":[\"expected\"],\"url\":\"/match/child\"}"
+      },
+      "adapted": {
+        "status": 200,
+        "body": "{\"calls\":[\"expected\"],\"url\":\"/match/child\"}"
+      },
+      "equal": true
+    },
+    {
+      "family": "middleware-path",
+      "stage": "bug",
+      "scenario": "mounted app yields to parent",
+      "original": {
+        "status": 200,
+        "body": "{\"calls\":[\"child\",\"parent\"],\"url\":\"/match/child\"}"
+      },
+      "adapted": {
+        "status": 200,
+        "body": "{\"calls\":[\"child\",\"parent\"],\"url\":\"/match/child\"}"
+      },
+      "equal": true
+    },
+    {
+      "family": "middleware-path",
+      "stage": "bug",
+      "scenario": "empty path nested arrays",
+      "original": {
+        "error": {
+          "name": "TypeError",
+          "message": "Router.use() requires callback function but got a [object String]"
+        },
+        "calls": []
+      },
+      "adapted": {
+        "error": {
+          "name": "TypeError",
+          "message": "Router.use() requires callback function but got a [object String]"
+        },
+        "calls": []
+      },
+      "equal": true
+    },
+    {
+      "family": "middleware-path",
+      "stage": "bug",
+      "scenario": "invalid array element",
+      "original": {
+        "error": {
+          "name": "TypeError",
+          "message": "Router.use() requires callback function but got a [object Null]"
+        },
+        "calls": []
+      },
+      "adapted": {
+        "error": {
+          "name": "TypeError",
+          "message": "Router.use() requires callback function but got a [object Null]"
+        },
+        "calls": []
+      },
+      "equal": true
+    },
+    {
+      "family": "middleware-path",
+      "stage": "bug",
+      "scenario": "no arguments",
+      "original": {
+        "error": {
+          "name": "TypeError",
+          "message": "app.use() requires middleware functions"
+        },
+        "calls": []
+      },
+      "adapted": {
+        "error": {
+          "name": "TypeError",
+          "message": "app.use() requires middleware functions"
+        },
+        "calls": []
+      },
+      "equal": true
+    },
+    {
+      "family": "middleware-path",
+      "stage": "bug",
+      "scenario": "falsy nonstring path",
+      "original": {
+        "status": 200,
+        "body": "{\"calls\":[],\"url\":\"/match/child\"}"
+      },
+      "adapted": {
+        "status": 200,
+        "body": "{\"calls\":[],\"url\":\"/match/child\"}"
+      },
+      "equal": true
+    },
+    {
+      "family": "middleware-path",
+      "stage": "repair",
+      "scenario": "empty path multiple handlers",
+      "original": {
+        "status": 200,
+        "body": "{\"calls\":[\"first\",\"second\"],\"url\":\"/match/child\"}"
+      },
+      "adapted": {
+        "status": 200,
+        "body": "{\"calls\":[\"first\",\"second\"],\"url\":\"/match/child\"}"
+      },
+      "equal": true
+    },
+    {
+      "family": "middleware-path",
+      "stage": "repair",
+      "scenario": "regexp path",
+      "original": {
+        "status": 200,
+        "body": "{\"calls\":[\"first\"],\"url\":\"/match/child\"}"
+      },
+      "adapted": {
+        "status": 200,
+        "body": "{\"calls\":[\"first\"],\"url\":\"/match/child\"}"
+      },
+      "equal": true
+    },
+    {
+      "family": "middleware-path",
+      "stage": "repair",
+      "scenario": "array paths",
+      "original": {
+        "status": 200,
+        "body": "{\"calls\":[\"first\"],\"url\":\"/match/child\"}"
+      },
+      "adapted": {
+        "status": 200,
+        "body": "{\"calls\":[\"first\"],\"url\":\"/match/child\"}"
+      },
+      "equal": true
+    },
+    {
+      "family": "middleware-path",
+      "stage": "repair",
+      "scenario": "nested arrays with error handler",
+      "original": {
+        "status": 200,
+        "body": "{\"calls\":[\"expected\"],\"url\":\"/match/child\"}"
+      },
+      "adapted": {
+        "status": 200,
+        "body": "{\"calls\":[\"expected\"],\"url\":\"/match/child\"}"
+      },
+      "equal": true
+    },
+    {
+      "family": "middleware-path",
+      "stage": "repair",
+      "scenario": "mounted app yields to parent",
+      "original": {
+        "status": 200,
+        "body": "{\"calls\":[\"child\",\"parent\"],\"url\":\"/match/child\"}"
+      },
+      "adapted": {
+        "status": 200,
+        "body": "{\"calls\":[\"child\",\"parent\"],\"url\":\"/match/child\"}"
+      },
+      "equal": true
+    },
+    {
+      "family": "middleware-path",
+      "stage": "repair",
+      "scenario": "empty path nested arrays",
+      "original": {
+        "status": 200,
+        "body": "{\"calls\":[\"first\",\"second\"],\"url\":\"/match/child\"}"
+      },
+      "adapted": {
+        "status": 200,
+        "body": "{\"calls\":[\"first\",\"second\"],\"url\":\"/match/child\"}"
+      },
+      "equal": true
+    },
+    {
+      "family": "middleware-path",
+      "stage": "repair",
+      "scenario": "invalid array element",
+      "original": {
+        "error": {
+          "name": "TypeError",
+          "message": "Router.use() requires callback function but got a [object Null]"
+        },
+        "calls": []
+      },
+      "adapted": {
+        "error": {
+          "name": "TypeError",
+          "message": "Router.use() requires callback function but got a [object Null]"
+        },
+        "calls": []
+      },
+      "equal": true
+    },
+    {
+      "family": "middleware-path",
+      "stage": "repair",
+      "scenario": "no arguments",
+      "original": {
+        "error": {
+          "name": "TypeError",
+          "message": "app.use() requires middleware functions"
+        },
+        "calls": []
+      },
+      "adapted": {
+        "error": {
+          "name": "TypeError",
+          "message": "app.use() requires middleware functions"
+        },
+        "calls": []
+      },
+      "equal": true
+    },
+    {
+      "family": "middleware-path",
+      "stage": "repair",
+      "scenario": "falsy nonstring path",
+      "original": {
+        "status": 200,
+        "body": "{\"calls\":[],\"url\":\"/match/child\"}"
+      },
+      "adapted": {
+        "status": 200,
+        "body": "{\"calls\":[],\"url\":\"/match/child\"}"
+      },
+      "equal": true
+    },
+    {
+      "family": "parameter-cache",
+      "stage": "base",
+      "scenario": "multiple asynchronous callbacks",
+      "original": {
+        "status": 200,
+        "body": "{\"id\":\"normalized\",\"calls\":2,\"trace\":[[\"first\",\"value\"],[\"second\",\"value\",\"normalized\"],[\"first\",\"value\"],[\"second\",\"value\",\"normalized\"]]}"
+      },
+      "adapted": {
+        "status": 200,
+        "body": "{\"id\":\"normalized\",\"calls\":2,\"trace\":[[\"first\",\"value\"],[\"second\",\"value\",\"normalized\"],[\"first\",\"value\"],[\"second\",\"value\",\"normalized\"]]}"
+      },
+      "equal": true
+    },
+    {
+      "family": "parameter-cache",
+      "stage": "base",
+      "scenario": "repeated router dispatch",
+      "original": {
+        "status": 200,
+        "body": "{\"calls\":1,\"trace\":[[\"first\",\"value\"],[\"middleware\",\"normalized-1\"]]}"
+      },
+      "adapted": {
+        "status": 200,
+        "body": "{\"calls\":1,\"trace\":[[\"first\",\"value\"],[\"middleware\",\"normalized-1\"]]}"
+      },
+      "equal": true,
+      "parentHarness": {
+        "status": 200,
+        "body": "{\"calls\":1,\"trace\":[[\"first\",\"value\"],[\"middleware\",\"normalized-1\"]]}"
+      },
+      "parentHarnessEqual": true
+    },
+    {
+      "family": "parameter-cache",
+      "stage": "base",
+      "scenario": "skip and changed value",
+      "original": {
+        "status": 200,
+        "body": "{\"id\":\"second\",\"calls\":2,\"trace\":[[\"first\",\"first\"],[\"first\",\"second\"]]}"
+      },
+      "adapted": {
+        "status": 200,
+        "body": "{\"id\":\"second\",\"calls\":2,\"trace\":[[\"first\",\"first\"],[\"first\",\"second\"]]}"
+      },
+      "equal": true
+    },
+    {
+      "family": "parameter-cache",
+      "stage": "base",
+      "scenario": "optional missing parameter",
+      "original": {
+        "status": 200,
+        "body": "{\"calls\":0,\"trace\":[]}"
+      },
+      "adapted": {
+        "status": 200,
+        "body": "{\"calls\":0,\"trace\":[]}"
+      },
+      "equal": true
+    },
+    {
+      "family": "parameter-cache",
+      "stage": "base",
+      "scenario": "duplicate parameter keys",
+      "original": {
+        "status": 200,
+        "body": "{\"id\":\"right\",\"calls\":2,\"trace\":[[\"first\",\"right\"],[\"first\",\"right\"]]}"
+      },
+      "adapted": {
+        "status": 200,
+        "body": "{\"id\":\"right\",\"calls\":2,\"trace\":[[\"first\",\"right\"],[\"first\",\"right\"]]}"
+      },
+      "equal": true
+    },
+    {
+      "family": "parameter-cache",
+      "stage": "base",
+      "scenario": "same value skip",
+      "original": {
+        "status": 200,
+        "body": "{\"literal\":true,\"calls\":2,\"trace\":[[\"first\",\"value\"],[\"first\",\"value\"]]}"
+      },
+      "adapted": {
+        "status": 200,
+        "body": "{\"literal\":true,\"calls\":2,\"trace\":[[\"first\",\"value\"],[\"first\",\"value\"]]}"
+      },
+      "equal": true
+    },
+    {
+      "family": "parameter-cache",
+      "stage": "base",
+      "scenario": "cached ordinary error",
+      "original": {
+        "status": 500,
+        "body": "{\"error\":\"parameter failure\",\"calls\":1,\"trace\":[[\"first\",\"value\"]]}"
+      },
+      "adapted": {
+        "status": 500,
+        "body": "{\"error\":\"parameter failure\",\"calls\":1,\"trace\":[[\"first\",\"value\"]]}"
+      },
+      "equal": true
+    },
+    {
+      "family": "parameter-cache",
+      "stage": "bug",
+      "scenario": "multiple asynchronous callbacks",
+      "original": {
+        "status": 200,
+        "body": "{\"id\":\"value\",\"calls\":1,\"trace\":[[\"first\",\"value\"],[\"second\",\"value\",\"normalized\"]]}"
+      },
+      "adapted": {
+        "status": 200,
+        "body": "{\"id\":\"value\",\"calls\":1,\"trace\":[[\"first\",\"value\"],[\"second\",\"value\",\"normalized\"]]}"
+      },
+      "equal": true
+    },
+    {
+      "family": "parameter-cache",
+      "stage": "bug",
+      "scenario": "repeated router dispatch",
+      "original": {
+        "status": 200,
+        "body": "{\"calls\":1,\"trace\":[[\"first\",\"value\"],[\"middleware\",\"normalized-1\"]]}"
+      },
+      "adapted": {
+        "status": 200,
+        "body": "{\"calls\":1,\"trace\":[[\"first\",\"value\"],[\"middleware\",\"normalized-1\"]]}"
+      },
+      "equal": true,
+      "parentHarness": {
+        "status": 200,
+        "body": "{\"calls\":1,\"trace\":[[\"first\",\"value\"],[\"middleware\",\"normalized-1\"]]}"
+      },
+      "parentHarnessEqual": true
+    },
+    {
+      "family": "parameter-cache",
+      "stage": "bug",
+      "scenario": "skip and changed value",
+      "original": {
+        "status": 200,
+        "body": "{\"id\":\"second\",\"calls\":2,\"trace\":[[\"first\",\"first\"],[\"first\",\"second\"]]}"
+      },
+      "adapted": {
+        "status": 200,
+        "body": "{\"id\":\"second\",\"calls\":2,\"trace\":[[\"first\",\"first\"],[\"first\",\"second\"]]}"
+      },
+      "equal": true
+    },
+    {
+      "family": "parameter-cache",
+      "stage": "bug",
+      "scenario": "optional missing parameter",
+      "original": {
+        "status": 200,
+        "body": "{\"calls\":0,\"trace\":[]}"
+      },
+      "adapted": {
+        "status": 200,
+        "body": "{\"calls\":0,\"trace\":[]}"
+      },
+      "equal": true
+    },
+    {
+      "family": "parameter-cache",
+      "stage": "bug",
+      "scenario": "duplicate parameter keys",
+      "original": {
+        "status": 200,
+        "body": "{\"id\":\"right\",\"calls\":1,\"trace\":[[\"first\",\"right\"]]}"
+      },
+      "adapted": {
+        "status": 200,
+        "body": "{\"id\":\"right\",\"calls\":1,\"trace\":[[\"first\",\"right\"]]}"
+      },
+      "equal": true
+    },
+    {
+      "family": "parameter-cache",
+      "stage": "bug",
+      "scenario": "same value skip",
+      "original": {
+        "status": 200,
+        "body": "{\"id\":\"value\",\"calls\":1,\"trace\":[[\"first\",\"value\"]]}"
+      },
+      "adapted": {
+        "status": 200,
+        "body": "{\"id\":\"value\",\"calls\":1,\"trace\":[[\"first\",\"value\"]]}"
+      },
+      "equal": true
+    },
+    {
+      "family": "parameter-cache",
+      "stage": "bug",
+      "scenario": "cached ordinary error",
+      "original": {
+        "status": 500,
+        "body": "{\"error\":\"parameter failure\",\"calls\":1,\"trace\":[[\"first\",\"value\"]]}"
+      },
+      "adapted": {
+        "status": 500,
+        "body": "{\"error\":\"parameter failure\",\"calls\":1,\"trace\":[[\"first\",\"value\"]]}"
+      },
+      "equal": true
+    },
+    {
+      "family": "parameter-cache",
+      "stage": "repair",
+      "scenario": "multiple asynchronous callbacks",
+      "original": {
+        "status": 200,
+        "body": "{\"id\":\"normalized\",\"calls\":1,\"trace\":[[\"first\",\"value\"],[\"second\",\"value\",\"normalized\"]]}"
+      },
+      "adapted": {
+        "status": 200,
+        "body": "{\"id\":\"normalized\",\"calls\":1,\"trace\":[[\"first\",\"value\"],[\"second\",\"value\",\"normalized\"]]}"
+      },
+      "equal": true
+    },
+    {
+      "family": "parameter-cache",
+      "stage": "repair",
+      "scenario": "repeated router dispatch",
+      "original": {
+        "status": 200,
+        "body": "{\"calls\":2,\"trace\":[[\"first\",\"value\"],[\"middleware\",\"normalized-1\"],[\"first\",\"value\"],[\"middleware\",\"normalized-2\"]]}"
+      },
+      "adapted": {
+        "status": 200,
+        "body": "{\"calls\":2,\"trace\":[[\"first\",\"value\"],[\"middleware\",\"normalized-1\"],[\"first\",\"value\"],[\"middleware\",\"normalized-2\"]]}"
+      },
+      "equal": true,
+      "parentHarness": {
+        "status": 200,
+        "body": "{\"calls\":1,\"trace\":[[\"first\",\"value\"],[\"middleware\",\"normalized-1\"],[\"middleware\",\"normalized-1\"]]}"
+      },
+      "parentHarnessEqual": false
+    },
+    {
+      "family": "parameter-cache",
+      "stage": "repair",
+      "scenario": "skip and changed value",
+      "original": {
+        "status": 200,
+        "body": "{\"id\":\"second\",\"calls\":2,\"trace\":[[\"first\",\"first\"],[\"first\",\"second\"]]}"
+      },
+      "adapted": {
+        "status": 200,
+        "body": "{\"id\":\"second\",\"calls\":2,\"trace\":[[\"first\",\"first\"],[\"first\",\"second\"]]}"
+      },
+      "equal": true
+    },
+    {
+      "family": "parameter-cache",
+      "stage": "repair",
+      "scenario": "optional missing parameter",
+      "original": {
+        "status": 200,
+        "body": "{\"calls\":0,\"trace\":[]}"
+      },
+      "adapted": {
+        "status": 200,
+        "body": "{\"calls\":0,\"trace\":[]}"
+      },
+      "equal": true
+    },
+    {
+      "family": "parameter-cache",
+      "stage": "repair",
+      "scenario": "duplicate parameter keys",
+      "original": {
+        "status": 200,
+        "body": "{\"id\":\"right\",\"calls\":1,\"trace\":[[\"first\",\"right\"]]}"
+      },
+      "adapted": {
+        "status": 200,
+        "body": "{\"id\":\"right\",\"calls\":1,\"trace\":[[\"first\",\"right\"]]}"
+      },
+      "equal": true
+    },
+    {
+      "family": "parameter-cache",
+      "stage": "repair",
+      "scenario": "same value skip",
+      "original": {
+        "status": 200,
+        "body": "{\"literal\":true,\"calls\":1,\"trace\":[[\"first\",\"value\"]]}"
+      },
+      "adapted": {
+        "status": 200,
+        "body": "{\"literal\":true,\"calls\":1,\"trace\":[[\"first\",\"value\"]]}"
+      },
+      "equal": true
+    },
+    {
+      "family": "parameter-cache",
+      "stage": "repair",
+      "scenario": "cached ordinary error",
+      "original": {
+        "status": 500,
+        "body": "{\"error\":\"parameter failure\",\"calls\":1,\"trace\":[[\"first\",\"value\"]]}"
+      },
+      "adapted": {
+        "status": 500,
+        "body": "{\"error\":\"parameter failure\",\"calls\":1,\"trace\":[[\"first\",\"value\"]]}"
+      },
+      "equal": true
+    }
+  ]
+}

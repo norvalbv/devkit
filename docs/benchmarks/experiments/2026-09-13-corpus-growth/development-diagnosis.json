@@ -1,0 +1,49 @@
+{
+  "completedDevelopmentRows": 240,
+  "reservedOutcomesInspected": false,
+  "metrics": {
+    "development": {
+      "FAIL": {
+        "agree": 88,
+        "total": 90
+      },
+      "PASS": {
+        "agree": 94,
+        "total": 150
+      }
+    },
+    "original": {
+      "FAIL": {
+        "agree": 73,
+        "total": 75
+      },
+      "PASS": {
+        "agree": 40,
+        "total": 71
+      }
+    },
+    "newDevelopment": {
+      "FAIL": {
+        "agree": 15,
+        "total": 15
+      },
+      "PASS": {
+        "agree": 54,
+        "total": 79
+      }
+    }
+  },
+  "bugLabelMisses": [
+    "corr-asymmetric-flip-classifier",
+    "corr-pr52-don-t-down-rank-recorded"
+  ],
+  "interpretation": "Development-only label agreement; targeted causal investigations, not independent claim adjudication. Frozen labels and source qualification receipts are unchanged, including plausible adjacent defects and omitted-contract limits. Historical 13.9% label-noise reference retained.",
+  "technicalResume": {
+    "initialTaskAttempts": 1164,
+    "completeTaskIdentitiesAtInitialExit": 1163,
+    "resumeTaskAttempts": 1,
+    "identity": "rowHash + task.key",
+    "note": "Private resume receipt priorCompleteTasks used task.key alone and undercounted reused chunk keys. Native execution and final cost audit use rowHash plus task.key; no complete task was rerun."
+  },
+  "diagnosisPath": "docs/benchmarks/experiments/2026-09-13-corpus-growth/development-diagnosis.md"
+}

@@ -1,0 +1,290 @@
+{
+  "observations": [
+    {
+      "stage": "base",
+      "scenario": "empty path",
+      "result": {
+        "status": 200,
+        "body": "handled"
+      },
+      "sourceEqual": true
+    },
+    {
+      "stage": "base",
+      "scenario": "root path",
+      "result": {
+        "status": 200,
+        "body": "handled"
+      },
+      "sourceEqual": true
+    },
+    {
+      "stage": "base",
+      "scenario": "explicit path",
+      "result": {
+        "status": 200,
+        "body": "handled"
+      },
+      "sourceEqual": true
+    },
+    {
+      "stage": "base",
+      "scenario": "one middleware",
+      "result": {
+        "status": 200,
+        "body": "handled"
+      },
+      "sourceEqual": true
+    },
+    {
+      "stage": "base",
+      "scenario": "array middleware",
+      "result": {
+        "registrationError": "app.use() requires middleware functions"
+      },
+      "sourceEqual": true
+    },
+    {
+      "stage": "base",
+      "scenario": "nested array middleware",
+      "result": {
+        "registrationError": "app.use() requires middleware functions"
+      },
+      "sourceEqual": true
+    },
+    {
+      "stage": "base",
+      "scenario": "empty path array middleware",
+      "result": {
+        "status": 200,
+        "body": "handled"
+      },
+      "sourceEqual": true
+    },
+    {
+      "stage": "base",
+      "scenario": "empty array",
+      "result": {
+        "registrationError": "app.use() requires middleware functions"
+      },
+      "sourceEqual": true
+    },
+    {
+      "stage": "base",
+      "scenario": "absent middleware",
+      "result": {
+        "registrationError": "app.use() requires middleware functions"
+      },
+      "sourceEqual": true
+    },
+    {
+      "stage": "base",
+      "scenario": "mounted app",
+      "result": {
+        "status": 200,
+        "body": "handled"
+      },
+      "sourceEqual": true
+    },
+    {
+      "stage": "base",
+      "scenario": "empty path mounted app",
+      "result": {
+        "status": 200,
+        "body": "handled"
+      },
+      "sourceEqual": true
+    },
+    {
+      "stage": "bug",
+      "scenario": "empty path",
+      "result": {
+        "registrationError": "Router.use() requires callback function but got a [object String]"
+      },
+      "sourceEqual": true
+    },
+    {
+      "stage": "bug",
+      "scenario": "root path",
+      "result": {
+        "status": 200,
+        "body": "handled"
+      },
+      "sourceEqual": true
+    },
+    {
+      "stage": "bug",
+      "scenario": "explicit path",
+      "result": {
+        "status": 200,
+        "body": "handled"
+      },
+      "sourceEqual": true
+    },
+    {
+      "stage": "bug",
+      "scenario": "one middleware",
+      "result": {
+        "status": 200,
+        "body": "handled"
+      },
+      "sourceEqual": true
+    },
+    {
+      "stage": "bug",
+      "scenario": "array middleware",
+      "result": {
+        "status": 200,
+        "body": "handled"
+      },
+      "sourceEqual": true
+    },
+    {
+      "stage": "bug",
+      "scenario": "nested array middleware",
+      "result": {
+        "status": 200,
+        "body": "handled"
+      },
+      "sourceEqual": true
+    },
+    {
+      "stage": "bug",
+      "scenario": "empty path array middleware",
+      "result": {
+        "registrationError": "Router.use() requires callback function but got a [object String]"
+      },
+      "sourceEqual": true
+    },
+    {
+      "stage": "bug",
+      "scenario": "empty array",
+      "result": {
+        "registrationError": "app.use() requires middleware functions"
+      },
+      "sourceEqual": true
+    },
+    {
+      "stage": "bug",
+      "scenario": "absent middleware",
+      "result": {
+        "registrationError": "Router.use() requires callback function but got a [object String]"
+      },
+      "sourceEqual": true
+    },
+    {
+      "stage": "bug",
+      "scenario": "mounted app",
+      "result": {
+        "status": 200,
+        "body": "handled"
+      },
+      "sourceEqual": true
+    },
+    {
+      "stage": "bug",
+      "scenario": "empty path mounted app",
+      "result": {
+        "registrationError": "Router.use() requires callback function but got a [object String]"
+      },
+      "sourceEqual": true
+    },
+    {
+      "stage": "repair",
+      "scenario": "empty path",
+      "result": {
+        "status": 200,
+        "body": "handled"
+      },
+      "sourceEqual": true
+    },
+    {
+      "stage": "repair",
+      "scenario": "root path",
+      "result": {
+        "status": 200,
+        "body": "handled"
+      },
+      "sourceEqual": true
+    },
+    {
+      "stage": "repair",
+      "scenario": "explicit path",
+      "result": {
+        "status": 200,
+        "body": "handled"
+      },
+      "sourceEqual": true
+    },
+    {
+      "stage": "repair",
+      "scenario": "one middleware",
+      "result": {
+        "status": 200,
+        "body": "handled"
+      },
+      "sourceEqual": true
+    },
+    {
+      "stage": "repair",
+      "scenario": "array middleware",
+      "result": {
+        "status": 200,
+        "body": "handled"
+      },
+      "sourceEqual": true
+    },
+    {
+      "stage": "repair",
+      "scenario": "nested array middleware",
+      "result": {
+        "status": 200,
+        "body": "handled"
+      },
+      "sourceEqual": true
+    },
+    {
+      "stage": "repair",
+      "scenario": "empty path array middleware",
+      "result": {
+        "status": 200,
+        "body": "handled"
+      },
+      "sourceEqual": true
+    },
+    {
+      "stage": "repair",
+      "scenario": "empty array",
+      "result": {
+        "registrationError": "app.use() requires middleware functions"
+      },
+      "sourceEqual": true
+    },
+    {
+      "stage": "repair",
+      "scenario": "absent middleware",
+      "result": {
+        "registrationError": "app.use() requires middleware functions"
+      },
+      "sourceEqual": true
+    },
+    {
+      "stage": "repair",
+      "scenario": "mounted app",
+      "result": {
+        "status": 200,
+        "body": "handled"
+      },
+      "sourceEqual": true
+    },
+    {
+      "stage": "repair",
+      "scenario": "empty path mounted app",
+      "result": {
+        "status": 200,
+        "body": "handled"
+      },
+      "sourceEqual": true
+    }
+  ]
+}

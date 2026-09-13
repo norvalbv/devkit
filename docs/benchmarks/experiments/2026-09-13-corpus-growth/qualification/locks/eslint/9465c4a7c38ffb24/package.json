@@ -1,0 +1,13 @@
+{
+  "private": true,
+  "name": "private-eslint-controls",
+  "dependencies": {
+    "optimist": "*",
+    "estraverse": "~1.3.0",
+    "esprima": "*",
+    "escope": "1.0.0",
+    "glob": "~3.2.7",
+    "chai": "~1.8.1",
+    "sinon": "*"
+  }
+}

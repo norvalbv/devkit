@@ -1,0 +1,17 @@
+{
+  "status": "superseded harness correction",
+  "originalFailure": "Historical Mongoose could not resolve mongodb/node_modules/mongodb-core/node_modules/bson after npm ci hoisted its packages.",
+  "correction": "Recreate the two original qualified-runtime module-layout symlinks to the same lock-pinned mongodb-core and bson packages inside disposable work; source and fixture bytes unchanged. Native BSON install remains disabled; source loader uses its genuine JavaScript fallback.",
+  "runtimeAliases": [
+    {
+      "runtime": "7312e9b8ba9910c6",
+      "link": "node_modules/mongodb/node_modules/mongodb-core",
+      "target": "node_modules/mongodb-core"
+    },
+    {
+      "runtime": "7312e9b8ba9910c6",
+      "link": "node_modules/mongodb-core/node_modules/bson",
+      "target": "node_modules/bson"
+    }
+  ]
+}

@@ -1,0 +1,108 @@
+{
+  "schemaVersion": 1,
+  "performedAfterBaselineStarted": true,
+  "reservedOutcomesUsed": false,
+  "labelsChanged": false,
+  "qualificationObservationCountsUnchanged": true,
+  "scope": "Four targeted development-claim controls after the frozen baseline exposed findings. These are agent-selected diagnostic observations, not independent adjudication or additional admissions.",
+  "results": [
+    {
+      "id": "corr-async-view-unmounted-retry-repaired",
+      "file": "src/async-view.mjs",
+      "partition": "development",
+      "observations": {
+        "base": {
+          "sourceSha256": "268bd2522f1a51619e7681af659875708b36b196c48b88e306cc74fb1ecc7144",
+          "observed": {
+            "loaderCallsBeforeLaterMount": 2,
+            "loaderCallsAfterLaterMount": 3
+          }
+        },
+        "staged": {
+          "sourceSha256": "7c05cf166b9e5aad10ca2441a254057d416445e89908cbc07797e2f6cc5537dc",
+          "observed": {
+            "loaderCallsBeforeLaterMount": 2,
+            "loaderCallsAfterLaterMount": 3
+          }
+        }
+      },
+      "interpretation": "The alleged stale-rejection clearing occurs in both versions: the original also clears pendingRequest in onError. This control supports pre-existing causality for this specific claim, not complete safety."
+    },
+    {
+      "id": "corr-empty-middleware-path-repaired",
+      "file": "src/register-middleware.js",
+      "partition": "development",
+      "observations": {
+        "base": {
+          "sourceSha256": "66cf7fcf9568c0d8da5f8353806af3027d1d6cecb9afa2a42dec75871c49a075",
+          "observed": {
+            "routerRegistrations": 0,
+            "error": "app.use() requires middleware functions"
+          }
+        },
+        "staged": {
+          "sourceSha256": "272ba0316a747458b1ea1de2543f4a093a1170c40d3f507380791ba23dcceba8",
+          "observed": {
+            "routerRegistrations": 0,
+            "error": "app.use() requires middleware functions"
+          }
+        }
+      },
+      "interpretation": "Both versions reject the leading-empty nested array. The staged method adds nested-array support, so original failure does not by itself refute a new-feature contract defect. Whether every recursively flattened shape is promised remains a label dispute."
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "file": "src/read-map-properties.js",
+      "partition": "development",
+      "observations": {
+        "base": {
+          "sourceSha256": "849fbcc99472b19e06beb07af648e06bdbfebf5840a1e6ae0d642a89deb2f061",
+          "observed": {
+            "nullKey": {
+              "error": "TypeError"
+            },
+            "stringKeys": [
+              "Symbol(id)"
+            ],
+            "symbolKeys": []
+          }
+        },
+        "staged": {
+          "sourceSha256": "6c3944c2f55e4e829c2243d5d01daf2a7f31b2644c51165dfeb44460b21a88f4",
+          "observed": {
+            "nullKey": {
+              "result": {
+                "null": 1
+              }
+            },
+            "stringKeys": [],
+            "symbolKeys": [
+              "Symbol(id)"
+            ]
+          }
+        }
+      },
+      "interpretation": "Null keys are the verified source repair target, so a change from throw to property does not establish a regression. Symbol behavior differs, but the binary-decoder qualification does not supply symbol keys; the standalone adaptation leaves that source-domain constraint unavailable to the reviewer."
+    },
+    {
+      "id": "corr-failed-audio-cooldown-repaired",
+      "file": "src/notification-sound.js",
+      "partition": "development",
+      "observations": {
+        "base": {
+          "sourceSha256": "d5a8412d71c9b47c5a49e381dae1e61e2f24def9b3f3cc87f477d9cb2b066040",
+          "observed": {
+            "notesAfterWallClockRollback": 4
+          }
+        },
+        "staged": {
+          "sourceSha256": "692270ebc5e7da3d2c8482560645f78c6c9f1f03f5c6f840494caaf0dc650dcc",
+          "observed": {
+            "notesAfterWallClockRollback": 2
+          }
+        }
+      },
+      "interpretation": "The staged cooldown suppresses playback after a backward wall-clock jump while the base plays. This is a plausible adjacent new-feature defect against a real elapsed-time cooldown, beyond the qualification controls; preserve the clean-label dispute."
+    }
+  ]
+}

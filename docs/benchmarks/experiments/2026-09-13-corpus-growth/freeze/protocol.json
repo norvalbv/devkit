@@ -1,0 +1,5043 @@
+{
+  "schemaVersion": 1,
+  "frozenAt": "2026-09-13T18:20:57.317Z",
+  "objective": "Substantial source-verified expansion, current reviewer baseline, then one research-backed candidate and equivalent comparison; no merge.",
+  "baseCommit": "eebeef1891c485c5f5cb0bc9b5b8ecf86adde323",
+  "corpus": {
+    "path": "gate-engine/review/eval/reviewers/cases-correctness.jsonl",
+    "sha256": "fa62708388345fcf776bad30811a9aa8641b68d00219b104ff19dec29caf4b9e",
+    "nativeHash": "da62cdf1698d",
+    "originalRows": 146,
+    "rows": 285,
+    "addedRows": 139,
+    "labels": {
+      "FAIL": 105,
+      "PASS": 180
+    },
+    "newLabels": {
+      "FAIL": 30,
+      "PASS": 109
+    },
+    "families": 174,
+    "newDeclaredFamilies": 85,
+    "explicitRepairEdges": 73,
+    "newRepairEdges": 17,
+    "originalPrefixSha256": "fbc2afd974944cc094d957f6b8c29153349be4a0f90f54c9df26a23c64497a15"
+  },
+  "condition": {
+    "model": "gpt-5.6-sol",
+    "cascade": false,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "escalationModel": "gpt-5.6-sol",
+    "concurrency": 6
+  },
+  "baseline": {
+    "gateHash": "8c71e78bda40",
+    "executionHash": "c6873b6f77e95ac1ddbe9ef5ae250c3e6d26b2960bae51cd5e74b2a5ded4e377",
+    "assetsSha256": "50ac54684e5157831021d2f417459fd8e9b1ad95b06b6589aed33879ecd149b4"
+  },
+  "execution": {
+    "runtime": "v24.19.0",
+    "plannedTasks": 1164,
+    "chunkedRows": 4,
+    "command": "node gate-engine/review/eval/reviewers/bench.mts run correctness-reviewer --baseline --fresh",
+    "retries": "No quality-selected retries, --against, or --fail; resume incomplete technical work only under identical identities. Initial --fresh follows private archival of the aborted ledger.",
+    "budget": "One baseline plus one candidate on this frozen complete cohort; six concurrent rows. No configured Sol dollar estimate is available. Aborted earlier run recorded 28.1 seconds per completed task; 1164 tasks / 6 suggests about 91 minutes before startup, tail and runtime variation. This is a scheduling estimate, not a cost guarantee."
+  },
+  "reserve": {
+    "seed": "sc3152-source-families-v1-2026-09-13",
+    "quotas": {
+      "mixed": 8,
+      "bug": 4,
+      "clean": 12
+    },
+    "familyCount": 24,
+    "rowCount": 45,
+    "labels": {
+      "FAIL": 15,
+      "PASS": 30
+    },
+    "exposure": "All source and qualifications are investigator-exposed. Reviewer outcomes for this reserve remain unread until the candidate implementation, assets and settings are frozen. This is outcome-protected regression confirmation, not source-unseen or independent human ground truth.",
+    "selection": "SHA-256 seeded order within label-composition strata of wholly new families; original146 and the previously development-exposed Vue family are ineligible.",
+    "familyIds": [
+      "corr-binary-asset-content-corruption",
+      "corr-cache-resource-key",
+      "corr-connection-parser-reset-clean",
+      "corr-delete-reserved-prefix-recovery",
+      "corr-deleted-branch-attribution",
+      "corr-destructured-edge-underscores",
+      "corr-diagnostic-column-contract",
+      "corr-empty-home-override",
+      "corr-empty-super-argument-traversal",
+      "corr-eslint-comma-dangle-clean",
+      "corr-eslint-generator-star-spacing-clean",
+      "corr-eslint-id-length-clean",
+      "corr-eslint-max-statements-per-line-clean",
+      "corr-eslint-no-await-in-loop-clean",
+      "corr-eslint-no-cond-assign-clean",
+      "corr-eslint-no-unused-expressions-clean",
+      "corr-eslint-operator-assignment-clean",
+      "corr-eslint-spaced-comment-clean",
+      "corr-eslint-valid-typeof-clean",
+      "corr-export-list-traversal",
+      "corr-extended-glob-watch-roots",
+      "corr-pagination-page-context-clean",
+      "corr-query-punctuation-routing",
+      "corr-statement-separator"
+    ]
+  },
+  "measurement": {
+    "primary": [
+      "bug-label flag rate",
+      "clean-label acceptance rate"
+    ],
+    "secondary": [
+      "explicit repair-edge consistency",
+      "whole-family label agreement",
+      "task/token/time cost"
+    ],
+    "interpretation": "Label agreement, not factual precision; historical13.9% label-noise reference retained. Source-derived labels and correlated families limit inference. No outcome-based relabeling or exclusion.",
+    "decision": "Report every paired transition on the frozen set and reserve; do not trade a bug-detection regression for a cleaner headline. An improvement claim requires improved clean acceptance with no lower observed bug detection, separately disclosed on the reserve. Uncertainty and non-improvement are reportable results."
+  },
+  "rows": [
+    {
+      "id": "corr-discarded-resume-return",
+      "expected": "FAIL",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "ff1b6eaaf1ad",
+      "behaviorHash": "876d7e9cc5f3"
+    },
+    {
+      "id": "corr-retry-stuck-unclaimable",
+      "expected": "FAIL",
+      "caseId": "corr-retry-stuck-unclaimable",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "c2496c87181e",
+      "behaviorHash": "e4119c77bc25"
+    },
+    {
+      "id": "corr-revive-user-cancelled",
+      "expected": "FAIL",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "b2a0d733679e",
+      "behaviorHash": "f6699ce3b5fb"
+    },
+    {
+      "id": "corr-stale-failure-reasons",
+      "expected": "FAIL",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "09f050fde84d",
+      "behaviorHash": "1b44fe090d59"
+    },
+    {
+      "id": "corr-stale-checklist-artifact",
+      "expected": "FAIL",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "e90eb005ef97",
+      "behaviorHash": "79d6053f43a1"
+    },
+    {
+      "id": "corr-reopen-before-cas-strands",
+      "expected": "FAIL",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "918e6e35a29f",
+      "behaviorHash": "de8fe2f090c6"
+    },
+    {
+      "id": "corr-submit-latch-stuck",
+      "expected": "FAIL",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "8183fa0b5781",
+      "behaviorHash": "fbfdc500261f"
+    },
+    {
+      "id": "corr-nearexpiry-permanent-reauth",
+      "expected": "FAIL",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "5cbfcd319951",
+      "behaviorHash": "11d85ea963a2"
+    },
+    {
+      "id": "corr-unguarded-unpark-clobber",
+      "expected": "FAIL",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "868c6ced4079",
+      "behaviorHash": "a2620f6761e3"
+    },
+    {
+      "id": "corr-guarded-result-ignored-mode-flip",
+      "expected": "FAIL",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "5779051bc2d1",
+      "behaviorHash": "cc144a18a2d1"
+    },
+    {
+      "id": "corr-read-then-write-clobber-terminal",
+      "expected": "FAIL",
+      "caseId": "corr-read-then-write-clobber-terminal",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "c291a6d64272",
+      "behaviorHash": "c95059f06ec5"
+    },
+    {
+      "id": "corr-lock-timeout-runs-unlocked",
+      "expected": "FAIL",
+      "caseId": "corr-lock-timeout-runs-unlocked",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "e264657c8332",
+      "behaviorHash": "7e4f4310ad4f"
+    },
+    {
+      "id": "corr-retry-broadcast-double-fire",
+      "expected": "FAIL",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "f55d220196ab",
+      "behaviorHash": "f6bd7c3e49d1"
+    },
+    {
+      "id": "corr-json-string-result-dropped",
+      "expected": "FAIL",
+      "caseId": "corr-json-string-result-dropped",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "f964657fe40f",
+      "behaviorHash": "ee3a134b9b06"
+    },
+    {
+      "id": "corr-group-map-last-write-wins",
+      "expected": "FAIL",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "8884e07c6d1b",
+      "behaviorHash": "9c5ab8aed4f5"
+    },
+    {
+      "id": "corr-sync-source-target-divergence",
+      "expected": "FAIL",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "bc2882f42fdc",
+      "behaviorHash": "1c5d63b4f218"
+    },
+    {
+      "id": "corr-persist-unnormalized-signal",
+      "expected": "FAIL",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "54e6d945cb0f",
+      "behaviorHash": "cbfd1f8cf64a"
+    },
+    {
+      "id": "corr-manifest-unknown-version-wiped",
+      "expected": "FAIL",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "d49452801030",
+      "behaviorHash": "9109c7de43a5"
+    },
+    {
+      "id": "corr-field-validated-wrong-state",
+      "expected": "FAIL",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "ef5656e35718",
+      "behaviorHash": "128a9ae99baf"
+    },
+    {
+      "id": "corr-loose-cmd-classifier-anchor",
+      "expected": "FAIL",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "6396f1f3b278",
+      "behaviorHash": "01f74523b5c8"
+    },
+    {
+      "id": "corr-loose-json-error-classifier",
+      "expected": "FAIL",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "9d6d1a732721",
+      "behaviorHash": "3d68cdfdf228"
+    },
+    {
+      "id": "corr-swallowed-config-parse-bypass",
+      "expected": "FAIL",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "5929d8e219fe",
+      "behaviorHash": "320d35c35356"
+    },
+    {
+      "id": "corr-exit-code-only-one-fails",
+      "expected": "FAIL",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "d145d1ad9a98",
+      "behaviorHash": "8084e39d7724"
+    },
+    {
+      "id": "corr-only-selector-silent-drop",
+      "expected": "FAIL",
+      "caseId": "corr-reporting-command-family",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "39c45a801153",
+      "behaviorHash": "7dd31ff75ba8"
+    },
+    {
+      "id": "corr-execfile-cmd-shim-swallowed",
+      "expected": "FAIL",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "203e6fa03e0e",
+      "behaviorHash": "b64b32ecd591"
+    },
+    {
+      "id": "corr-asymmetric-flip-classifier",
+      "expected": "FAIL",
+      "caseId": "corr-reporting-command-family",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "6efc60d8ce4c",
+      "behaviorHash": "de496a011482"
+    },
+    {
+      "id": "corr-reminder-ignores-plan-mode",
+      "expected": "FAIL",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "71d93cd6e657",
+      "behaviorHash": "36050019f8f6"
+    },
+    {
+      "id": "corr-decoy-cas-guarded-write",
+      "expected": "PASS",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "78f68c681a4b",
+      "behaviorHash": "6dc6849962cc"
+    },
+    {
+      "id": "corr-decoy-conditional-update",
+      "expected": "PASS",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "2bdf6d299d0f",
+      "behaviorHash": "65779486a5b4"
+    },
+    {
+      "id": "corr-decoy-select-for-update",
+      "expected": "PASS",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "14a0f0b1e50a",
+      "behaviorHash": "faeef19060b0"
+    },
+    {
+      "id": "corr-decoy-targeted-broadcast",
+      "expected": "PASS",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "8c6049dbccc5",
+      "behaviorHash": "e81547a4e786"
+    },
+    {
+      "id": "corr-decoy-parses-json-string-result",
+      "expected": "PASS",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "44a17ae0e114",
+      "behaviorHash": "019ba284b3e4"
+    },
+    {
+      "id": "corr-decoy-tight-anchor-classifier",
+      "expected": "PASS",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "1e664897cf7c",
+      "behaviorHash": "cfa2f4880400"
+    },
+    {
+      "id": "corr-decoy-retry-reset-counter",
+      "expected": "PASS",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "d1986643add2",
+      "behaviorHash": "2c97fce5a1e8"
+    },
+    {
+      "id": "corr-decoy-exit-code-fail-closed",
+      "expected": "PASS",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "21bd92d728ef",
+      "behaviorHash": "55eb028509e4"
+    },
+    {
+      "id": "corr-decoy-catch-rethrows",
+      "expected": "PASS",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "e8f30a7b534c",
+      "behaviorHash": "ba88f5dadc60"
+    },
+    {
+      "id": "corr-decoy-return-checked-fails-closed",
+      "expected": "PASS",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "b0212aaba7aa",
+      "behaviorHash": "9342ac44cc7e"
+    },
+    {
+      "id": "corr-decoy-only-validated",
+      "expected": "PASS",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "323fff96a42c",
+      "behaviorHash": "389542eb8682"
+    },
+    {
+      "id": "corr-xdomain-sqli",
+      "expected": "PASS",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "2ddabe1e3884",
+      "behaviorHash": "1219465dd77d"
+    },
+    {
+      "id": "corr-xdomain-nplusone",
+      "expected": "PASS",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "a0bccc3e0faf",
+      "behaviorHash": "f5c26e95ab4c"
+    },
+    {
+      "id": "corr-xdomain-xss",
+      "expected": "PASS",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "5562a8a8edb3",
+      "behaviorHash": "5ae8f0f38b69"
+    },
+    {
+      "id": "corr-xdomain-render",
+      "expected": "PASS",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "a2babcecd2d6",
+      "behaviorHash": "b0a31c7721bb"
+    },
+    {
+      "id": "corr-decoy-reset-failure-reasons",
+      "expected": "PASS",
+      "variantOf": "corr-stale-failure-reasons",
+      "partition": "development",
+      "rowHash": "e9ce4a05e6fa",
+      "behaviorHash": "9d773a74cbc4"
+    },
+    {
+      "id": "corr-decoy-clears-stale-artifact",
+      "expected": "PASS",
+      "variantOf": "corr-stale-checklist-artifact",
+      "partition": "development",
+      "rowHash": "b750875750ba",
+      "behaviorHash": "e3abcc9cdbf7"
+    },
+    {
+      "id": "corr-retry-leaves-stale-error",
+      "expected": "FAIL",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "c05976dd01fd",
+      "behaviorHash": "6f21fa645f2e"
+    },
+    {
+      "id": "corr-decoy-retry-clears-error",
+      "expected": "PASS",
+      "variantOf": "corr-retry-leaves-stale-error",
+      "partition": "development",
+      "rowHash": "c3a89e627c9d",
+      "behaviorHash": "ccc32cefaeaa"
+    },
+    {
+      "id": "corr-empty-recompute-keeps-stale",
+      "expected": "FAIL",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "97ecde7284e1",
+      "behaviorHash": "8cf5f9a2834c"
+    },
+    {
+      "id": "corr-decoy-empty-recompute-clears",
+      "expected": "PASS",
+      "variantOf": "corr-empty-recompute-keeps-stale",
+      "partition": "development",
+      "rowHash": "3bd72383bd3a",
+      "behaviorHash": "8c7c569d238e"
+    },
+    {
+      "id": "corr-early-exit-status-bypassed",
+      "expected": "FAIL",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "bb1655183df9",
+      "behaviorHash": "6bfbb0cc59c9"
+    },
+    {
+      "id": "corr-decoy-early-exit-preserved",
+      "expected": "PASS",
+      "variantOf": "corr-early-exit-status-bypassed",
+      "partition": "development",
+      "rowHash": "26f7ebec3c2c",
+      "behaviorHash": "395d01056ef4"
+    },
+    {
+      "id": "corr-early-exit-loop-break-dropped",
+      "expected": "FAIL",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "0d411082e3fc",
+      "behaviorHash": "36f101b647cc"
+    },
+    {
+      "id": "corr-decoy-loop-break-preserved",
+      "expected": "PASS",
+      "variantOf": "corr-early-exit-loop-break-dropped",
+      "partition": "development",
+      "rowHash": "c2c122dff0af",
+      "behaviorHash": "df377261a742"
+    },
+    {
+      "id": "corr-outage-exit-code-downgraded",
+      "expected": "FAIL",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "8d4201a5cf5d",
+      "behaviorHash": "48973e67e6ac"
+    },
+    {
+      "id": "corr-decoy-outage-exit-preserved",
+      "expected": "PASS",
+      "variantOf": "corr-outage-exit-code-downgraded",
+      "partition": "development",
+      "rowHash": "ab4b076ebb7b",
+      "behaviorHash": "a732cf4f9bb8"
+    },
+    {
+      "id": "corr-worktree-leak-no-finally",
+      "expected": "FAIL",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "844bffb4162b",
+      "behaviorHash": "b3568af55ba4"
+    },
+    {
+      "id": "corr-decoy-worktree-finally",
+      "expected": "PASS",
+      "variantOf": "corr-worktree-leak-no-finally",
+      "partition": "development",
+      "rowHash": "0fd2f6139c79",
+      "behaviorHash": "f8bde5fa6c93"
+    },
+    {
+      "id": "corr-lock-not-released-on-throw",
+      "expected": "FAIL",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "7f9f3d490d13",
+      "behaviorHash": "e93e720c713f"
+    },
+    {
+      "id": "corr-decoy-lock-finally",
+      "expected": "PASS",
+      "variantOf": "corr-lock-not-released-on-throw",
+      "partition": "development",
+      "rowHash": "e11d0cbad3ba",
+      "behaviorHash": "e4141da71b1b"
+    },
+    {
+      "id": "corr-fs-check-then-act-race",
+      "expected": "FAIL",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "e14b7efdc4ba",
+      "behaviorHash": "57deae2e9fe3"
+    },
+    {
+      "id": "corr-decoy-fs-recursive-mkdir",
+      "expected": "PASS",
+      "variantOf": "corr-fs-check-then-act-race",
+      "partition": "development",
+      "rowHash": "1d5dec8d0f2c",
+      "behaviorHash": "b5e9fc9a69da"
+    },
+    {
+      "id": "corr-timer-debounce-double-fire",
+      "expected": "FAIL",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "ee84f73cfeb3",
+      "behaviorHash": "9944f18b1136"
+    },
+    {
+      "id": "corr-decoy-timer-debounce-clears",
+      "expected": "PASS",
+      "variantOf": "corr-timer-debounce-double-fire",
+      "partition": "development",
+      "rowHash": "f6b1ee659889",
+      "behaviorHash": "012cc9bf1452"
+    },
+    {
+      "id": "corr-signature-change-callsite-missed",
+      "expected": "FAIL",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "16d916a93384",
+      "behaviorHash": "c040d752f789"
+    },
+    {
+      "id": "corr-decoy-signature-callsite-updated",
+      "expected": "PASS",
+      "variantOf": "corr-signature-change-callsite-missed",
+      "partition": "development",
+      "rowHash": "900ea58ab8bb",
+      "behaviorHash": "d7c444476e49"
+    },
+    {
+      "id": "corr-broadcast-fanout-no-dedup",
+      "expected": "FAIL",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "47c008601f5a",
+      "behaviorHash": "a2f9edaf9f57"
+    },
+    {
+      "id": "corr-decoy-broadcast-targeted",
+      "expected": "PASS",
+      "variantOf": "corr-broadcast-fanout-no-dedup",
+      "partition": "development",
+      "rowHash": "e938d8dfd98f",
+      "behaviorHash": "39a239330422"
+    },
+    {
+      "id": "corr-pr138-ci-breaking-gate-engine-coverage-pair",
+      "expected": "PASS",
+      "caseId": "corr-pr138-ci-breaking-gate-engine-coverage",
+      "variantOf": "corr-pr138-ci-breaking-gate-engine-coverage",
+      "partition": "development",
+      "rowHash": "7ec28ca4dbc1",
+      "behaviorHash": "3d055011badf"
+    },
+    {
+      "id": "corr-pr138-ci-breaking-gate-engine-coverage",
+      "expected": "FAIL",
+      "caseId": "corr-pr138-ci-breaking-gate-engine-coverage",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "bbaa0d63b28f",
+      "behaviorHash": "833c0189c684"
+    },
+    {
+      "id": "corr-pr172-duplicate-let-spawnoptions-declaration-pair",
+      "expected": "PASS",
+      "caseId": "corr-pr172-duplicate-let-spawnoptions-declaration",
+      "variantOf": "corr-pr172-duplicate-let-spawnoptions-declaration",
+      "partition": "development",
+      "rowHash": "58955fb31aea",
+      "behaviorHash": "403fe2205f4c"
+    },
+    {
+      "id": "corr-pr172-duplicate-let-spawnoptions-declaration",
+      "expected": "FAIL",
+      "caseId": "corr-pr172-duplicate-let-spawnoptions-declaration",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "ec13d67c4497",
+      "behaviorHash": "6813a407800a"
+    },
+    {
+      "id": "corr-pr200-important-pair",
+      "expected": "PASS",
+      "caseId": "corr-pr200-important",
+      "variantOf": "corr-pr200-important",
+      "partition": "development",
+      "rowHash": "e47d52bab012",
+      "behaviorHash": "67f32e5da3ae"
+    },
+    {
+      "id": "corr-pr200-important",
+      "expected": "FAIL",
+      "caseId": "corr-pr200-important",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "5b4be62121e1",
+      "behaviorHash": "4f0cc16c9569"
+    },
+    {
+      "id": "corr-pr200-ref-mutated-during-render-move-pair",
+      "expected": "PASS",
+      "caseId": "corr-pr200-ref-mutated-during-render-move",
+      "variantOf": "corr-pr200-ref-mutated-during-render-move",
+      "partition": "development",
+      "rowHash": "87332a189081",
+      "behaviorHash": "b8b49c26ea59"
+    },
+    {
+      "id": "corr-pr200-ref-mutated-during-render-move",
+      "expected": "FAIL",
+      "caseId": "corr-pr200-ref-mutated-during-render-move",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "7b4f10bd7c1f",
+      "behaviorHash": "b12fa94e59b8"
+    },
+    {
+      "id": "corr-pr21-fail-closed-when-the-remote-pair",
+      "expected": "PASS",
+      "caseId": "corr-pr21-fail-closed-when-the-remote",
+      "variantOf": "corr-pr21-fail-closed-when-the-remote",
+      "partition": "development",
+      "rowHash": "dc8c489e82d1",
+      "behaviorHash": "efd7cd5954fd"
+    },
+    {
+      "id": "corr-pr21-fail-closed-when-the-remote",
+      "expected": "FAIL",
+      "caseId": "corr-pr21-fail-closed-when-the-remote",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "b5efdb08286f",
+      "behaviorHash": "3b6380a1263d"
+    },
+    {
+      "id": "corr-pr21-validate-the-parsed-github-repo-pair",
+      "expected": "PASS",
+      "caseId": "corr-pr21-validate-the-parsed-github-repo",
+      "variantOf": "corr-pr21-validate-the-parsed-github-repo",
+      "partition": "development",
+      "rowHash": "8d5b3f778d2c",
+      "behaviorHash": "19ffb1b75500"
+    },
+    {
+      "id": "corr-pr21-validate-the-parsed-github-repo",
+      "expected": "FAIL",
+      "caseId": "corr-pr21-validate-the-parsed-github-repo",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "22ae6cef1ae3",
+      "behaviorHash": "fc6314b9d7ad"
+    },
+    {
+      "id": "corr-pr26-cover-the-restart-interrupted-flow-pair",
+      "expected": "PASS",
+      "caseId": "corr-pr26-cover-the-restart-interrupted-flow",
+      "variantOf": "corr-pr26-cover-the-restart-interrupted-flow",
+      "partition": "development",
+      "rowHash": "6e0011066ae1",
+      "behaviorHash": "5955a3fda393"
+    },
+    {
+      "id": "corr-pr26-cover-the-restart-interrupted-flow",
+      "expected": "FAIL",
+      "caseId": "corr-pr26-cover-the-restart-interrupted-flow",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "31fa3049d10c",
+      "behaviorHash": "80ebe207e9f4"
+    },
+    {
+      "id": "corr-pr26-keep-the-mcp-inputschema-in-pair",
+      "expected": "PASS",
+      "caseId": "corr-pr26-keep-the-mcp-inputschema-in",
+      "variantOf": "corr-pr26-keep-the-mcp-inputschema-in",
+      "partition": "development",
+      "rowHash": "b67cdbd161b5",
+      "behaviorHash": "83e55866ea9f"
+    },
+    {
+      "id": "corr-pr26-keep-the-mcp-inputschema-in",
+      "expected": "FAIL",
+      "caseId": "corr-pr26-keep-the-mcp-inputschema-in",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "7e174420f714",
+      "behaviorHash": "81a22ed00415"
+    },
+    {
+      "id": "corr-pr38-check-the-full-r2-credential-pair",
+      "expected": "PASS",
+      "caseId": "corr-pr38-check-the-full-r2-credential",
+      "variantOf": "corr-pr38-check-the-full-r2-credential",
+      "partition": "development",
+      "rowHash": "c1cdad902d56",
+      "behaviorHash": "ee1bcf0b31bd"
+    },
+    {
+      "id": "corr-pr38-check-the-full-r2-credential",
+      "expected": "FAIL",
+      "caseId": "corr-pr38-check-the-full-r2-credential",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "3b141c8643d2",
+      "behaviorHash": "9b083dc9ce6e"
+    },
+    {
+      "id": "corr-pr38-require-the-full-azure-signing-pair",
+      "expected": "PASS",
+      "caseId": "corr-pr38-require-the-full-azure-signing",
+      "variantOf": "corr-pr38-require-the-full-azure-signing",
+      "partition": "development",
+      "rowHash": "50cf11f113c3",
+      "behaviorHash": "7d2ebc76c5b9"
+    },
+    {
+      "id": "corr-pr38-require-the-full-azure-signing",
+      "expected": "FAIL",
+      "caseId": "corr-pr38-require-the-full-azure-signing",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "4ea330953efb",
+      "behaviorHash": "03896f763276"
+    },
+    {
+      "id": "corr-pr48-cn-ts-src-pair",
+      "expected": "PASS",
+      "caseId": "corr-pr48-cn-ts-src",
+      "variantOf": "corr-pr48-cn-ts-src",
+      "partition": "development",
+      "rowHash": "2547ee68d38a",
+      "behaviorHash": "8bde3108ce22"
+    },
+    {
+      "id": "corr-pr48-cn-ts-src",
+      "expected": "FAIL",
+      "caseId": "corr-pr48-cn-ts-src",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "58f9cd6e3788",
+      "behaviorHash": "ac1f6a77d79e"
+    },
+    {
+      "id": "corr-pr59-guard-config-json-pair",
+      "expected": "PASS",
+      "caseId": "corr-pr59-guard-config-json",
+      "variantOf": "corr-pr59-guard-config-json",
+      "partition": "development",
+      "rowHash": "1da10c9d3a79",
+      "behaviorHash": "5e02f95f6411"
+    },
+    {
+      "id": "corr-pr59-guard-config-json",
+      "expected": "FAIL",
+      "caseId": "corr-pr59-guard-config-json",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "d27f9cc76bb3",
+      "behaviorHash": "2a1e182ad926"
+    },
+    {
+      "id": "corr-pr1-clear-persisted-checklist-state-before-pair",
+      "expected": "PASS",
+      "caseId": "corr-pr1-clear-persisted-checklist-state-before",
+      "variantOf": "corr-pr1-clear-persisted-checklist-state-before",
+      "partition": "development",
+      "rowHash": "53a16b7540fb",
+      "behaviorHash": "fb56ef47e46f"
+    },
+    {
+      "id": "corr-pr1-clear-persisted-checklist-state-before",
+      "expected": "FAIL",
+      "caseId": "corr-pr1-clear-persisted-checklist-state-before",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "cc618183d930",
+      "behaviorHash": "e220cd5adef8"
+    },
+    {
+      "id": "corr-pr1-preserve-the-guard-exit-code-pair",
+      "expected": "PASS",
+      "caseId": "corr-pr1-preserve-the-guard-exit-code",
+      "variantOf": "corr-pr1-preserve-the-guard-exit-code",
+      "partition": "development",
+      "rowHash": "a67e025ecbd2",
+      "behaviorHash": "aa0861a5c9e4"
+    },
+    {
+      "id": "corr-pr1-preserve-the-guard-exit-code",
+      "expected": "FAIL",
+      "caseId": "corr-pr1-preserve-the-guard-exit-code",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "57cf8af3523a",
+      "behaviorHash": "632620ead36d"
+    },
+    {
+      "id": "corr-pr1-return-exit-3-for-detect-pair",
+      "expected": "PASS",
+      "caseId": "corr-pr1-return-exit-3-for-detect",
+      "variantOf": "corr-pr1-return-exit-3-for-detect",
+      "partition": "development",
+      "rowHash": "3910e53c3309",
+      "behaviorHash": "6362e7661f13"
+    },
+    {
+      "id": "corr-pr1-return-exit-3-for-detect",
+      "expected": "FAIL",
+      "caseId": "corr-pr1-return-exit-3-for-detect",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "533cc72e788a",
+      "behaviorHash": "9b4a1fd71da6"
+    },
+    {
+      "id": "corr-pr23-keep-init-aligned-with-the-pair",
+      "expected": "PASS",
+      "caseId": "corr-pr23-keep-init-aligned-with-the",
+      "variantOf": "corr-pr23-keep-init-aligned-with-the",
+      "partition": "development",
+      "rowHash": "1612e1096721",
+      "behaviorHash": "35fe8344abcf"
+    },
+    {
+      "id": "corr-pr23-keep-init-aligned-with-the",
+      "expected": "FAIL",
+      "caseId": "corr-pr23-keep-init-aligned-with-the",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "fb56e47724c1",
+      "behaviorHash": "2a5d7c6f7402"
+    },
+    {
+      "id": "corr-pr26-block-parked-answer-sends-when-pair",
+      "expected": "PASS",
+      "caseId": "corr-pr26-block-parked-answer-sends-when",
+      "variantOf": "corr-pr26-block-parked-answer-sends-when",
+      "partition": "development",
+      "rowHash": "b3f857ae37a8",
+      "behaviorHash": "00636e352dda"
+    },
+    {
+      "id": "corr-pr26-block-parked-answer-sends-when",
+      "expected": "FAIL",
+      "caseId": "corr-pr26-block-parked-answer-sends-when",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "5d8390cf7224",
+      "behaviorHash": "92c44337c29c"
+    },
+    {
+      "id": "corr-pr26-do-not-let-terminal-signals-pair",
+      "expected": "PASS",
+      "caseId": "corr-pr26-do-not-let-terminal-signals",
+      "variantOf": "corr-pr26-do-not-let-terminal-signals",
+      "partition": "development",
+      "rowHash": "d8e6c3754a03",
+      "behaviorHash": "9eb2369b7d18"
+    },
+    {
+      "id": "corr-pr26-do-not-let-terminal-signals",
+      "expected": "FAIL",
+      "caseId": "corr-pr26-do-not-let-terminal-signals",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "b41cbf30d2f3",
+      "behaviorHash": "bcf542bd0b9b"
+    },
+    {
+      "id": "corr-pr28-include-bun-lock-in-the-pair",
+      "expected": "PASS",
+      "caseId": "corr-pr28-include-bun-lock-in-the",
+      "variantOf": "corr-pr28-include-bun-lock-in-the",
+      "partition": "development",
+      "rowHash": "b611e028a036",
+      "behaviorHash": "7d4f3cbb452f"
+    },
+    {
+      "id": "corr-pr28-include-bun-lock-in-the",
+      "expected": "FAIL",
+      "caseId": "corr-pr28-include-bun-lock-in-the",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "8a183354253f",
+      "behaviorHash": "96bcf7922fb5"
+    },
+    {
+      "id": "corr-pr52-don-t-down-rank-recorded-pair",
+      "expected": "PASS",
+      "caseId": "corr-pr52-don-t-down-rank-recorded",
+      "variantOf": "corr-pr52-don-t-down-rank-recorded",
+      "partition": "development",
+      "rowHash": "de04c83a5690",
+      "behaviorHash": "d608cbe018bb"
+    },
+    {
+      "id": "corr-pr52-don-t-down-rank-recorded",
+      "expected": "FAIL",
+      "caseId": "corr-pr52-don-t-down-rank-recorded",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "70de61675b0d",
+      "behaviorHash": "87a4236d82e8"
+    },
+    {
+      "id": "corr-pr52-use-frink-no-log-in-pair",
+      "expected": "PASS",
+      "caseId": "corr-pr52-use-frink-no-log-in",
+      "variantOf": "corr-pr52-use-frink-no-log-in",
+      "partition": "development",
+      "rowHash": "0f6cb2dc13d0",
+      "behaviorHash": "7426d05f0a39"
+    },
+    {
+      "id": "corr-pr52-use-frink-no-log-in",
+      "expected": "FAIL",
+      "caseId": "corr-pr52-use-frink-no-log-in",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "b3943aeb29aa",
+      "behaviorHash": "15bf35fc798a"
+    },
+    {
+      "id": "corr-pr59-expand-knip-config-detection-pair",
+      "expected": "PASS",
+      "caseId": "corr-pr59-expand-knip-config-detection",
+      "variantOf": "corr-pr59-expand-knip-config-detection",
+      "partition": "development",
+      "rowHash": "8d39787d91a6",
+      "behaviorHash": "32891de706b7"
+    },
+    {
+      "id": "corr-pr59-expand-knip-config-detection",
+      "expected": "FAIL",
+      "caseId": "corr-pr59-expand-knip-config-detection",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "a6f92d68ce06",
+      "behaviorHash": "4cfa91869a55"
+    },
+    {
+      "id": "corr-pr59-use-a-portable-whitespace-class-pair",
+      "expected": "PASS",
+      "caseId": "corr-pr59-use-a-portable-whitespace-class",
+      "variantOf": "corr-pr59-use-a-portable-whitespace-class",
+      "partition": "development",
+      "rowHash": "a45ee13a189d",
+      "behaviorHash": "10478f0d690b"
+    },
+    {
+      "id": "corr-pr59-use-a-portable-whitespace-class",
+      "expected": "FAIL",
+      "caseId": "corr-pr59-use-a-portable-whitespace-class",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "090e2bae3776",
+      "behaviorHash": "b89f134d92e8"
+    },
+    {
+      "id": "corr-pr60-avoid-leaving-the-member-in-pair",
+      "expected": "PASS",
+      "caseId": "corr-pr60-avoid-leaving-the-member-in",
+      "variantOf": "corr-pr60-avoid-leaving-the-member-in",
+      "partition": "development",
+      "rowHash": "1e9cf43a9101",
+      "behaviorHash": "1e937333098d"
+    },
+    {
+      "id": "corr-pr60-avoid-leaving-the-member-in",
+      "expected": "FAIL",
+      "caseId": "corr-pr60-avoid-leaving-the-member-in",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "2c3193a77f66",
+      "behaviorHash": "451857164cca"
+    },
+    {
+      "id": "corr-pr60-make-the-batch-reopen-atomic-pair",
+      "expected": "PASS",
+      "caseId": "corr-pr60-make-the-batch-reopen-atomic",
+      "variantOf": "corr-pr60-make-the-batch-reopen-atomic",
+      "partition": "development",
+      "rowHash": "08e1e3c5a306",
+      "behaviorHash": "536d2fe6f738"
+    },
+    {
+      "id": "corr-pr60-make-the-batch-reopen-atomic",
+      "expected": "FAIL",
+      "caseId": "corr-pr60-make-the-batch-reopen-atomic",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "f00aab1a93a2",
+      "behaviorHash": "5c68c6fb9201"
+    },
+    {
+      "id": "corr-pr60-node-modules-pair",
+      "expected": "PASS",
+      "caseId": "corr-pr60-node-modules",
+      "variantOf": "corr-pr60-node-modules",
+      "partition": "development",
+      "rowHash": "0296839c326d",
+      "behaviorHash": "dbb8d2a029fd"
+    },
+    {
+      "id": "corr-pr60-node-modules",
+      "expected": "FAIL",
+      "caseId": "corr-pr60-node-modules",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "3a7834ffe077",
+      "behaviorHash": "577149330715"
+    },
+    {
+      "id": "corr-pr61-keep-the-carry-on-state-pair",
+      "expected": "PASS",
+      "caseId": "corr-pr61-keep-the-carry-on-state",
+      "variantOf": "corr-pr61-keep-the-carry-on-state",
+      "partition": "development",
+      "rowHash": "559f4ae9ce0c",
+      "behaviorHash": "04581c2ee99f"
+    },
+    {
+      "id": "corr-pr61-keep-the-carry-on-state",
+      "expected": "FAIL",
+      "caseId": "corr-pr61-keep-the-carry-on-state",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "50679e292e64",
+      "behaviorHash": "9ac0b5db2d60"
+    },
+    {
+      "id": "corr-tel-append-uniqueness-check-unlocked-pair",
+      "expected": "PASS",
+      "caseId": "corr-tel-append-unlocked",
+      "variantOf": "corr-tel-append-uniqueness-check-unlocked",
+      "partition": "development",
+      "rowHash": "80eddbab6aa6",
+      "behaviorHash": "021ce7855b95"
+    },
+    {
+      "id": "corr-tel-append-uniqueness-check-unlocked",
+      "expected": "FAIL",
+      "caseId": "corr-tel-append-unlocked",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "bd9feafc5289",
+      "behaviorHash": "a4d052f022e8"
+    },
+    {
+      "id": "corr-tel-floor-flips-assigned-flag-pair",
+      "expected": "PASS",
+      "caseId": "corr-tel-floor-flip",
+      "variantOf": "corr-tel-floor-flips-assigned-flag",
+      "partition": "development",
+      "rowHash": "69caf588fe00",
+      "behaviorHash": "ac61412f3bdc"
+    },
+    {
+      "id": "corr-tel-floor-flips-assigned-flag",
+      "expected": "FAIL",
+      "caseId": "corr-tel-floor-flip",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "2868a4909011",
+      "behaviorHash": "4095b3b60bc2"
+    },
+    {
+      "id": "corr-tel-shared-merge-key-unfiltered-writer-pair",
+      "expected": "PASS",
+      "caseId": "corr-tel-shared-merge-key",
+      "variantOf": "corr-tel-shared-merge-key-unfiltered-writer",
+      "partition": "development",
+      "rowHash": "d713e0c4eb68",
+      "behaviorHash": "0db4485b0c95"
+    },
+    {
+      "id": "corr-tel-shared-merge-key-unfiltered-writer",
+      "expected": "FAIL",
+      "caseId": "corr-tel-shared-merge-key",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "53b1eb901177",
+      "behaviorHash": "7527c41f3314"
+    },
+    {
+      "id": "corr-tel-validate-after-lint-rejected-shape-pair",
+      "expected": "PASS",
+      "caseId": "corr-tel-check-after-lint",
+      "variantOf": "corr-tel-validate-after-lint-rejected-shape",
+      "partition": "development",
+      "rowHash": "96107cfcfdb2",
+      "behaviorHash": "5a9ecd05bf1c"
+    },
+    {
+      "id": "corr-tel-validate-after-lint-rejected-shape",
+      "expected": "FAIL",
+      "caseId": "corr-tel-check-after-lint",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "e52f0a3569fb",
+      "behaviorHash": "1d495b29ddae"
+    },
+    {
+      "id": "corr-tel-banner-ratio-masks-logic-line-pair",
+      "expected": "PASS",
+      "caseId": "corr-tel-banner-ratio",
+      "variantOf": "corr-tel-banner-ratio-masks-logic-line",
+      "partition": "development",
+      "rowHash": "90521bce873d",
+      "behaviorHash": "ff3d2994370d"
+    },
+    {
+      "id": "corr-tel-banner-ratio-masks-logic-line",
+      "expected": "FAIL",
+      "caseId": "corr-tel-banner-ratio",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "446af301278f",
+      "behaviorHash": "a4e9defded5d"
+    },
+    {
+      "id": "corr-tel-banner-stray-line-excusal-pair",
+      "expected": "PASS",
+      "caseId": "corr-tel-banner-stray-excusal",
+      "variantOf": "corr-tel-banner-stray-line-excusal",
+      "partition": "development",
+      "rowHash": "04f23c7a90d0",
+      "behaviorHash": "047ee05ef853"
+    },
+    {
+      "id": "corr-tel-banner-stray-line-excusal",
+      "expected": "FAIL",
+      "caseId": "corr-tel-banner-stray-excusal",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "f71ba264dacd",
+      "behaviorHash": "3600c22f4705"
+    },
+    {
+      "id": "corr-tel-loose-closer-absorbs-statement-pair",
+      "expected": "PASS",
+      "caseId": "corr-tel-header-loose-terminator",
+      "variantOf": "corr-tel-loose-closer-absorbs-statement",
+      "partition": "development",
+      "rowHash": "5fa0a3bb58f0",
+      "behaviorHash": "bfe8646af308"
+    },
+    {
+      "id": "corr-tel-loose-closer-absorbs-statement",
+      "expected": "FAIL",
+      "caseId": "corr-tel-header-loose-terminator",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "adceb3963c6d",
+      "behaviorHash": "67f6f63bec83"
+    },
+    {
+      "id": "corr-tel-person-branch-bot-reply-pair",
+      "expected": "PASS",
+      "caseId": "corr-tel-person-branch-reply",
+      "variantOf": "corr-tel-person-branch-bot-reply",
+      "partition": "development",
+      "rowHash": "c30dbf59c75c",
+      "behaviorHash": "283fa2b7242c"
+    },
+    {
+      "id": "corr-tel-person-branch-bot-reply",
+      "expected": "FAIL",
+      "caseId": "corr-tel-person-branch-reply",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "743b035bf3b5",
+      "behaviorHash": "eae442510f80"
+    },
+    {
+      "id": "corr-tel-scoped-sweep-first-subentry-pair",
+      "expected": "PASS",
+      "caseId": "corr-tel-scoped-first-subentry",
+      "variantOf": "corr-tel-scoped-sweep-first-subentry",
+      "partition": "development",
+      "rowHash": "f68b8be40bf7",
+      "behaviorHash": "21ac9b083f3c"
+    },
+    {
+      "id": "corr-tel-scoped-sweep-first-subentry",
+      "expected": "FAIL",
+      "caseId": "corr-tel-scoped-first-subentry",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "a9c92040ee21",
+      "behaviorHash": "53660521db51"
+    },
+    {
+      "id": "corr-tel-suffix-decl-enters-list-state-pair",
+      "expected": "PASS",
+      "caseId": "corr-tel-load-header-classifier",
+      "variantOf": "corr-tel-suffix-decl-enters-list-state",
+      "partition": "development",
+      "rowHash": "3271b6d815b7",
+      "behaviorHash": "c336528d57a3"
+    },
+    {
+      "id": "corr-tel-suffix-decl-enters-list-state",
+      "expected": "FAIL",
+      "caseId": "corr-tel-load-header-classifier",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "e8f213934cdd",
+      "behaviorHash": "13c53f1b8edb"
+    },
+    {
+      "id": "corr-asymmetric-flip-classifier-repaired",
+      "expected": "PASS",
+      "caseId": "corr-reporting-command-family",
+      "variantOf": "corr-asymmetric-flip-classifier",
+      "partition": "development",
+      "rowHash": "ecb585699b6f",
+      "behaviorHash": "7c318301a92e"
+    },
+    {
+      "id": "corr-json-string-result-dropped-repaired",
+      "expected": "PASS",
+      "caseId": "corr-json-string-result-dropped",
+      "variantOf": "corr-json-string-result-dropped",
+      "partition": "development",
+      "rowHash": "0ad2dcc410fd",
+      "behaviorHash": "cdc2d2344e91"
+    },
+    {
+      "id": "corr-lock-timeout-runs-unlocked-repaired",
+      "expected": "PASS",
+      "caseId": "corr-lock-timeout-runs-unlocked",
+      "variantOf": "corr-lock-timeout-runs-unlocked",
+      "partition": "development",
+      "rowHash": "6c826d286abf",
+      "behaviorHash": "3a0694edda59"
+    },
+    {
+      "id": "corr-only-selector-silent-drop-repaired",
+      "expected": "PASS",
+      "caseId": "corr-reporting-command-family",
+      "variantOf": "corr-only-selector-silent-drop",
+      "partition": "development",
+      "rowHash": "78175de261d1",
+      "behaviorHash": "7c318301a92e"
+    },
+    {
+      "id": "corr-read-then-write-clobber-terminal-repaired",
+      "expected": "PASS",
+      "caseId": "corr-read-then-write-clobber-terminal",
+      "variantOf": "corr-read-then-write-clobber-terminal",
+      "partition": "development",
+      "rowHash": "b7404066c33f",
+      "behaviorHash": "8792b07dad45"
+    },
+    {
+      "id": "corr-retry-stuck-unclaimable-repaired",
+      "expected": "PASS",
+      "caseId": "corr-retry-stuck-unclaimable",
+      "variantOf": "corr-retry-stuck-unclaimable",
+      "partition": "development",
+      "rowHash": "028dc91ba5e2",
+      "behaviorHash": "5402d34ea9a0"
+    },
+    {
+      "id": "corr-async-view-unmounted-retry-repaired",
+      "expected": "PASS",
+      "caseId": "corr-async-view-unmounted-retry",
+      "variantOf": "corr-async-view-unmounted-retry",
+      "partition": "development",
+      "rowHash": "f2e8561c7d7f",
+      "behaviorHash": "b79003c1dc13"
+    },
+    {
+      "id": "corr-async-view-unmounted-retry",
+      "expected": "FAIL",
+      "caseId": "corr-async-view-unmounted-retry",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "ad7a2925c0bc",
+      "behaviorHash": "2443ba1b95f1"
+    },
+    {
+      "id": "corr-abandoned-browser-launch-link-repaired",
+      "expected": "PASS",
+      "caseId": "corr-source-authorization-launch-generation",
+      "variantOf": "corr-abandoned-browser-launch-link",
+      "partition": "development",
+      "rowHash": "193ec76eb80b",
+      "behaviorHash": "57cc10a9abf4"
+    },
+    {
+      "id": "corr-abandoned-browser-launch-link",
+      "expected": "FAIL",
+      "caseId": "corr-source-authorization-launch-generation",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "7cfa78715bda",
+      "behaviorHash": "81aad8da7152"
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-bracketed-request-host",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "44203fc64574",
+      "behaviorHash": "5be57ff1e5dc"
+    },
+    {
+      "id": "corr-command-block-argument-boundary-repaired",
+      "expected": "PASS",
+      "caseId": "corr-source-command-block-expansion",
+      "variantOf": "corr-command-block-argument-boundary",
+      "partition": "development",
+      "rowHash": "e7fa7c3ed4ad",
+      "behaviorHash": "e04c148d949a"
+    },
+    {
+      "id": "corr-command-block-argument-boundary",
+      "expected": "FAIL",
+      "caseId": "corr-source-command-block-expansion",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "97df434356a3",
+      "behaviorHash": "056594fd4ff7"
+    },
+    {
+      "id": "corr-delete-reserved-prefix-recovery-repaired",
+      "expected": "PASS",
+      "caseId": "corr-source-node-delete-reservations",
+      "variantOf": "corr-delete-reserved-prefix-recovery",
+      "partition": "reserved",
+      "rowHash": "a6b85438d3ef",
+      "behaviorHash": "3ff3b2964cde"
+    },
+    {
+      "id": "corr-delete-reserved-prefix-recovery",
+      "expected": "FAIL",
+      "caseId": "corr-source-node-delete-reservations",
+      "variantOf": null,
+      "partition": "reserved",
+      "rowHash": "2a8a798cd5d9",
+      "behaviorHash": "3cf0d3a0ab60"
+    },
+    {
+      "id": "corr-deleted-branch-attribution-repaired",
+      "expected": "PASS",
+      "caseId": "corr-source-push-deletion-attribution",
+      "variantOf": "corr-deleted-branch-attribution",
+      "partition": "reserved",
+      "rowHash": "d24016ea393c",
+      "behaviorHash": "a7f513b13b27"
+    },
+    {
+      "id": "corr-deleted-branch-attribution",
+      "expected": "FAIL",
+      "caseId": "corr-source-push-deletion-attribution",
+      "variantOf": null,
+      "partition": "reserved",
+      "rowHash": "10a0d27f1991",
+      "behaviorHash": "eb03f97b2931"
+    },
+    {
+      "id": "corr-empty-home-override-repaired",
+      "expected": "PASS",
+      "caseId": "corr-source-profile-home-override",
+      "variantOf": "corr-empty-home-override",
+      "partition": "reserved",
+      "rowHash": "da0629e81634",
+      "behaviorHash": "46b4dcd2295c"
+    },
+    {
+      "id": "corr-empty-home-override",
+      "expected": "FAIL",
+      "caseId": "corr-source-profile-home-override",
+      "variantOf": null,
+      "partition": "reserved",
+      "rowHash": "2716edb8433f",
+      "behaviorHash": "de0dbce2a1ce"
+    },
+    {
+      "id": "corr-empty-middleware-path-repaired",
+      "expected": "PASS",
+      "caseId": "corr-source-middleware-argument-disambiguation",
+      "variantOf": "corr-empty-middleware-path",
+      "partition": "development",
+      "rowHash": "d9169ccafe84",
+      "behaviorHash": "e739895b2849"
+    },
+    {
+      "id": "corr-empty-middleware-path",
+      "expected": "FAIL",
+      "caseId": "corr-source-middleware-argument-disambiguation",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "918cf05f72cc",
+      "behaviorHash": "0a4edcb813e9"
+    },
+    {
+      "id": "corr-failed-audio-cooldown-repaired",
+      "expected": "PASS",
+      "caseId": "corr-source-audio-cooldown",
+      "variantOf": "corr-failed-audio-cooldown",
+      "partition": "development",
+      "rowHash": "7d7cd874253e",
+      "behaviorHash": "904c14c94f32"
+    },
+    {
+      "id": "corr-failed-audio-cooldown",
+      "expected": "FAIL",
+      "caseId": "corr-source-audio-cooldown",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "c46bebad572d",
+      "behaviorHash": "ce280f83b86b"
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-ip-subdomain-projection",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "9d76133d61bb",
+      "behaviorHash": "c3f4dfa9c759"
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-binary-dictionary-keys",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "72a6568f49f8",
+      "behaviorHash": "21a3d281f217"
+    },
+    {
+      "id": "corr-parameter-cache-loses-outcome-repaired",
+      "expected": "PASS",
+      "caseId": "corr-source-route-parameter-result-cache",
+      "variantOf": "corr-parameter-cache-loses-outcome",
+      "partition": "development",
+      "rowHash": "74740224060d",
+      "behaviorHash": "5c0fad340702"
+    },
+    {
+      "id": "corr-parameter-cache-loses-outcome",
+      "expected": "FAIL",
+      "caseId": "corr-source-route-parameter-result-cache",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "fff3d7aac2c8",
+      "behaviorHash": "1e866931ac2a"
+    },
+    {
+      "id": "corr-query-punctuation-routing-repaired",
+      "expected": "PASS",
+      "caseId": "corr-source-search-classifier-1359",
+      "variantOf": "corr-query-punctuation-routing",
+      "partition": "reserved",
+      "rowHash": "8c8211cc5c62",
+      "behaviorHash": "0e8bf83de27b"
+    },
+    {
+      "id": "corr-query-punctuation-routing",
+      "expected": "FAIL",
+      "caseId": "corr-source-search-classifier-1359",
+      "variantOf": null,
+      "partition": "reserved",
+      "rowHash": "0de7e40ebf72",
+      "behaviorHash": "4332e930211d"
+    },
+    {
+      "id": "corr-reply-draft-expiration-repaired",
+      "expected": "PASS",
+      "caseId": "corr-source-composer-drafts",
+      "variantOf": "corr-reply-draft-expiration",
+      "partition": "development",
+      "rowHash": "e60653a9a2e0",
+      "behaviorHash": "9f6eb486213b"
+    },
+    {
+      "id": "corr-reply-draft-expiration",
+      "expected": "FAIL",
+      "caseId": "corr-source-composer-drafts",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "1368d218587b",
+      "behaviorHash": "68d74ce1f669"
+    },
+    {
+      "id": "corr-unparsed-import-graph-repaired",
+      "expected": "PASS",
+      "caseId": "corr-source-generated-import-parse-failure",
+      "variantOf": "corr-unparsed-import-graph",
+      "partition": "development",
+      "rowHash": "e7470c321cef",
+      "behaviorHash": "e81244ca4ef8"
+    },
+    {
+      "id": "corr-unparsed-import-graph",
+      "expected": "FAIL",
+      "caseId": "corr-source-generated-import-parse-failure",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "f21d37582d6a",
+      "behaviorHash": "f3810d4afcd6"
+    },
+    {
+      "id": "corr-cache-resource-key-repaired",
+      "expected": "PASS",
+      "caseId": "corr-source-request-cache-resource-identity",
+      "variantOf": "corr-cache-resource-key",
+      "partition": "reserved",
+      "rowHash": "81fa73f14542",
+      "behaviorHash": "470ce8831c09"
+    },
+    {
+      "id": "corr-cache-resource-key",
+      "expected": "FAIL",
+      "caseId": "corr-source-request-cache-resource-identity",
+      "variantOf": null,
+      "partition": "reserved",
+      "rowHash": "7def6c56192f",
+      "behaviorHash": "ff46334e43d3"
+    },
+    {
+      "id": "corr-eslint-arrow-parens-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-eslint-arrow-parens",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "31ff84438981",
+      "behaviorHash": "0d2cf1b4e994"
+    },
+    {
+      "id": "corr-eslint-arrow-spacing-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-eslint-arrow-spacing",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "97ba71be4316",
+      "behaviorHash": "7e24a0cc10df"
+    },
+    {
+      "id": "corr-eslint-brace-style-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-eslint-brace-style",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "36817162ca82",
+      "behaviorHash": "c01a15c86ff8"
+    },
+    {
+      "id": "corr-eslint-comma-dangle-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-eslint-comma-dangle",
+      "variantOf": null,
+      "partition": "reserved",
+      "rowHash": "f305d69b9533",
+      "behaviorHash": "36e0244e2fda"
+    },
+    {
+      "id": "corr-eslint-max-statements-per-line-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-eslint-max-statements-per-line",
+      "variantOf": null,
+      "partition": "reserved",
+      "rowHash": "4848d52a64bb",
+      "behaviorHash": "f2067a64d078"
+    },
+    {
+      "id": "corr-eslint-no-useless-rename-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-eslint-no-useless-rename",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "0617950af3c4",
+      "behaviorHash": "5aab86f88cb4"
+    },
+    {
+      "id": "corr-eslint-prefer-template-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-eslint-prefer-template",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "2242cf3a7bd1",
+      "behaviorHash": "f19ac3b1c38e"
+    },
+    {
+      "id": "corr-eslint-sort-vars-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-eslint-sort-vars",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "56b09561bdbb",
+      "behaviorHash": "53a74883dfe7"
+    },
+    {
+      "id": "corr-array-conversion-options-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-mongoose-documentarray-context",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "819fbb239783",
+      "behaviorHash": "732b5c7d1510"
+    },
+    {
+      "id": "corr-array-definition-ownership-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-array-definition-ownership",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "a16b86301808",
+      "behaviorHash": "970750993f37"
+    },
+    {
+      "id": "corr-child-save-event-payload-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-mongoose-documentarray-context",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "1a57e4ba2d29",
+      "behaviorHash": "3e569e92ad19"
+    },
+    {
+      "id": "corr-document-array-owner-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-mongoose-documentarray-context",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "e0978cf6215b",
+      "behaviorHash": "60057876824e"
+    },
+    {
+      "id": "corr-document-update-result-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-mongoose-document-context",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "2d58fba62af7",
+      "behaviorHash": "18b323e6f467"
+    },
+    {
+      "id": "corr-enum-message-scope-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-enum-message-scope",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "51dbc1b312f5",
+      "behaviorHash": "3d0bf0fbc7dc"
+    },
+    {
+      "id": "corr-export-list-traversal-repaired",
+      "expected": "PASS",
+      "caseId": "corr-source-export-declaration-traversal",
+      "variantOf": "corr-export-list-traversal",
+      "partition": "reserved",
+      "rowHash": "38877034944e",
+      "behaviorHash": "49548fdb7c81"
+    },
+    {
+      "id": "corr-export-list-traversal",
+      "expected": "FAIL",
+      "caseId": "corr-source-export-declaration-traversal",
+      "variantOf": null,
+      "partition": "reserved",
+      "rowHash": "92963f200241",
+      "behaviorHash": "def046a4ebb6"
+    },
+    {
+      "id": "corr-nested-default-projection-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-mongoose-document-context",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "772593702927",
+      "behaviorHash": "8b3676621a37"
+    },
+    {
+      "id": "corr-query-projection-slice-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-query-projection-slice",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "b2a63b188e59",
+      "behaviorHash": "86deda473b55"
+    },
+    {
+      "id": "corr-eslint-consistent-this-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-eslint-consistent-this",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "19b05230e6f8",
+      "behaviorHash": "bb1362c313a5"
+    },
+    {
+      "id": "corr-eslint-func-call-spacing-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-eslint-call-spacing-lineage",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "3b46bbab3d33",
+      "behaviorHash": "c1ecb4672b6f"
+    },
+    {
+      "id": "corr-eslint-func-style-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-eslint-func-style",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "1b55e43c51da",
+      "behaviorHash": "26d53990c22e"
+    },
+    {
+      "id": "corr-eslint-id-length-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-eslint-id-length",
+      "variantOf": null,
+      "partition": "reserved",
+      "rowHash": "536490824558",
+      "behaviorHash": "830e6575b11d"
+    },
+    {
+      "id": "corr-eslint-no-cond-assign-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-eslint-explicit-parentheses-context",
+      "variantOf": null,
+      "partition": "reserved",
+      "rowHash": "77da2fb3a580",
+      "behaviorHash": "d28b2cb875d4"
+    },
+    {
+      "id": "corr-eslint-no-empty-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-eslint-no-empty",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "a83aa591bee6",
+      "behaviorHash": "ad86d81f2cb7"
+    },
+    {
+      "id": "corr-eslint-no-loop-func-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-eslint-no-loop-func",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "b27ecf11c97d",
+      "behaviorHash": "78a4bf0324f7"
+    },
+    {
+      "id": "corr-eslint-no-magic-numbers-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-eslint-no-magic-numbers",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "d48d303c92f3",
+      "behaviorHash": "3ae4feb25356"
+    },
+    {
+      "id": "corr-eslint-no-multiple-empty-lines-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-eslint-no-multiple-empty-lines",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "6feb5a2930f4",
+      "behaviorHash": "97deec17481d"
+    },
+    {
+      "id": "corr-eslint-no-sequences-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-eslint-explicit-parentheses-context",
+      "variantOf": null,
+      "partition": "reserved",
+      "rowHash": "6584ff0ac871",
+      "behaviorHash": "0b008f829651"
+    },
+    {
+      "id": "corr-eslint-no-spaced-func-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-eslint-call-spacing-lineage",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "58c144609ae5",
+      "behaviorHash": "84f0603b3d2b"
+    },
+    {
+      "id": "corr-eslint-no-unused-expressions-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-eslint-no-unused-expressions",
+      "variantOf": null,
+      "partition": "reserved",
+      "rowHash": "d6117e6c9314",
+      "behaviorHash": "e36227d26c97"
+    },
+    {
+      "id": "corr-eslint-no-unused-vars-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-eslint-no-unused-vars",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "451423f4d842",
+      "behaviorHash": "38ad962e1656"
+    },
+    {
+      "id": "corr-eslint-object-curly-spacing-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-eslint-object-curly-spacing",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "9e28f70e6020",
+      "behaviorHash": "024391a0d49c"
+    },
+    {
+      "id": "corr-eslint-operator-assignment-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-eslint-operator-assignment",
+      "variantOf": null,
+      "partition": "reserved",
+      "rowHash": "c8d1a5bbabbe",
+      "behaviorHash": "b3fb5c0b2d25"
+    },
+    {
+      "id": "corr-eslint-prefer-destructuring-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-eslint-prefer-destructuring",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "9505973ee1db",
+      "behaviorHash": "c08dea1e7b49"
+    },
+    {
+      "id": "corr-eslint-quotes-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-eslint-quotes",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "31aae75b0410",
+      "behaviorHash": "af04a4351b04"
+    },
+    {
+      "id": "corr-eslint-space-infix-ops-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-eslint-space-infix-ops",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "811c5ed3e8d8",
+      "behaviorHash": "aac04c3d0a67"
+    },
+    {
+      "id": "corr-eslint-spaced-comment-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-eslint-spaced-comment",
+      "variantOf": null,
+      "partition": "reserved",
+      "rowHash": "c72188768f3d",
+      "behaviorHash": "a7b3195dfa55"
+    },
+    {
+      "id": "corr-eslint-valid-typeof-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-eslint-valid-typeof",
+      "variantOf": null,
+      "partition": "reserved",
+      "rowHash": "e0cfc00a852c",
+      "behaviorHash": "219f6c52c2a3"
+    },
+    {
+      "id": "corr-current-route-root-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-hexo-location-helpers",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "5594c24b270e",
+      "behaviorHash": "8c66bd084a1c"
+    },
+    {
+      "id": "corr-empty-taxonomy-values-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-empty-taxonomy-values",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "35ffebec2244",
+      "behaviorHash": "76ca3123e434"
+    },
+    {
+      "id": "corr-heading-text-projection-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-heading-text-projection",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "de1c50a075c1",
+      "behaviorHash": "ae27cdc1c0be"
+    },
+    {
+      "id": "corr-home-route-classification-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-hexo-location-helpers",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "59434abd6e31",
+      "behaviorHash": "47459b4edcba"
+    },
+    {
+      "id": "corr-pagination-page-context-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-pagination-page-context",
+      "variantOf": null,
+      "partition": "reserved",
+      "rowHash": "11e8d3a42f75",
+      "behaviorHash": "89488b34db5d"
+    },
+    {
+      "id": "corr-relative-social-image-url-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-relative-social-image-url",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "4e7d8d74db20",
+      "behaviorHash": "40b54afdb7db"
+    },
+    {
+      "id": "corr-sparse-document-validation-repaired",
+      "expected": "PASS",
+      "caseId": "corr-source-sparse-document-validation",
+      "variantOf": "corr-sparse-document-validation",
+      "partition": "development",
+      "rowHash": "3dde718d318d",
+      "behaviorHash": "44c2b6d38174"
+    },
+    {
+      "id": "corr-sparse-document-validation",
+      "expected": "FAIL",
+      "caseId": "corr-source-sparse-document-validation",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "0df4f12aa9d1",
+      "behaviorHash": "32ff1235bbed"
+    },
+    {
+      "id": "corr-statement-separator-repaired",
+      "expected": "PASS",
+      "caseId": "corr-source-statement-separator",
+      "variantOf": "corr-statement-separator",
+      "partition": "reserved",
+      "rowHash": "d1ed8fc9b86d",
+      "behaviorHash": "9f772c3b067e"
+    },
+    {
+      "id": "corr-statement-separator",
+      "expected": "FAIL",
+      "caseId": "corr-source-statement-separator",
+      "variantOf": null,
+      "partition": "reserved",
+      "rowHash": "554dc9c5227e",
+      "behaviorHash": "d79cbaff1c8e"
+    },
+    {
+      "id": "corr-eslint-func-names-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-eslint-recursive-function-context",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "67ed6c6e28e6",
+      "behaviorHash": "88ba9934cbb2"
+    },
+    {
+      "id": "corr-eslint-generator-star-spacing-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-eslint-generator-star-spacing",
+      "variantOf": null,
+      "partition": "reserved",
+      "rowHash": "8cf19bbcd5df",
+      "behaviorHash": "5104aaab82d7"
+    },
+    {
+      "id": "corr-eslint-init-declarations-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-eslint-init-declarations",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "a94d078bd67f",
+      "behaviorHash": "cd845d68742b"
+    },
+    {
+      "id": "corr-eslint-line-comment-position-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-eslint-line-comment-position",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "f6ad389366a2",
+      "behaviorHash": "b458e695962d"
+    },
+    {
+      "id": "corr-eslint-lines-around-comment-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-eslint-lines-around-comment",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "11432801cba8",
+      "behaviorHash": "3482764b8264"
+    },
+    {
+      "id": "corr-eslint-newline-before-return-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-eslint-newline-before-return",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "fc235b41c3b8",
+      "behaviorHash": "ad7a95579fb9"
+    },
+    {
+      "id": "corr-eslint-newline-per-chained-call-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-eslint-newline-per-chained-call",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "467fbdb81c3b",
+      "behaviorHash": "3361a1064ec5"
+    },
+    {
+      "id": "corr-eslint-no-await-in-loop-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-eslint-no-await-in-loop",
+      "variantOf": null,
+      "partition": "reserved",
+      "rowHash": "bf3e9c78c2a9",
+      "behaviorHash": "ae51283b47b6"
+    },
+    {
+      "id": "corr-eslint-no-constant-condition-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-eslint-no-constant-condition",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "e20c1e07aaf5",
+      "behaviorHash": "b2b09d68f672"
+    },
+    {
+      "id": "corr-eslint-no-extra-semi-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-eslint-no-extra-semi",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "06d305304dbb",
+      "behaviorHash": "403c8dd45a98"
+    },
+    {
+      "id": "corr-eslint-no-fallthrough-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-eslint-no-fallthrough",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "331518fe0b4f",
+      "behaviorHash": "88ba15c30066"
+    },
+    {
+      "id": "corr-eslint-no-implied-eval-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-eslint-no-implied-eval",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "1391939cbe55",
+      "behaviorHash": "3c522809c1af"
+    },
+    {
+      "id": "corr-eslint-no-lone-blocks-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-eslint-no-lone-blocks",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "b0bacd10542b",
+      "behaviorHash": "12c9c66d575e"
+    },
+    {
+      "id": "corr-eslint-no-return-assign-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-eslint-explicit-parentheses-context",
+      "variantOf": null,
+      "partition": "reserved",
+      "rowHash": "62719de4c8ed",
+      "behaviorHash": "4e600afa9352"
+    },
+    {
+      "id": "corr-eslint-no-shadow-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-eslint-no-shadow",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "1ff8ce030743",
+      "behaviorHash": "a119489a225d"
+    },
+    {
+      "id": "corr-eslint-no-useless-computed-key-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-eslint-no-useless-computed-key",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "88ad8daaa17f",
+      "behaviorHash": "03020a180237"
+    },
+    {
+      "id": "corr-eslint-nonblock-statement-body-position-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-eslint-nonblock-statement-body-position",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "4a5a9e4c9997",
+      "behaviorHash": "340aa7e75370"
+    },
+    {
+      "id": "corr-eslint-object-shorthand-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-eslint-object-shorthand",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "f434dd84b89a",
+      "behaviorHash": "1e7771cec8cf"
+    },
+    {
+      "id": "corr-eslint-prefer-arrow-callback-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-eslint-recursive-function-context",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "faa4aa415402",
+      "behaviorHash": "1e9477ea5ed9"
+    },
+    {
+      "id": "corr-eslint-unicode-bom-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-eslint-unicode-bom",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "691111bdee28",
+      "behaviorHash": "db6c5101c9b6"
+    },
+    {
+      "id": "corr-eslint-use-isnan-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-eslint-use-isnan",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "007904b0e433",
+      "behaviorHash": "7def833241a0"
+    },
+    {
+      "id": "corr-array-regexp-query-options-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-array-definition-ownership",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "eec18cce40bc",
+      "behaviorHash": "c5403ce36f91"
+    },
+    {
+      "id": "corr-binary-asset-content-corruption",
+      "expected": "FAIL",
+      "caseId": "corr-source-karma-asset-pipeline-context",
+      "variantOf": null,
+      "partition": "reserved",
+      "rowHash": "6c9998428e49",
+      "behaviorHash": "6cb6fd687f9e"
+    },
+    {
+      "id": "corr-cached-utf8-byte-ranges",
+      "expected": "FAIL",
+      "caseId": "corr-source-karma-asset-pipeline-context",
+      "variantOf": null,
+      "partition": "reserved",
+      "rowHash": "b73bf0091f9e",
+      "behaviorHash": "402f3e5a3fe2"
+    },
+    {
+      "id": "corr-cli-option-precedence-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-cli-option-precedence",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "d17ed99143b8",
+      "behaviorHash": "20f851937a21"
+    },
+    {
+      "id": "corr-connection-parser-reset-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-redis-client-transaction-context",
+      "variantOf": null,
+      "partition": "reserved",
+      "rowHash": "fb5aa70f413b",
+      "behaviorHash": "0eeca7433647"
+    },
+    {
+      "id": "corr-date-minimization-preservation-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-mongoose-document-context",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "f0cebd3db225",
+      "behaviorHash": "537bbd2e98c5"
+    },
+    {
+      "id": "corr-delete-query-filter-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-mongoose-document-context",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "cd600bd1628c",
+      "behaviorHash": "12c6e5750bab"
+    },
+    {
+      "id": "corr-extended-glob-watch-roots",
+      "expected": "FAIL",
+      "caseId": "corr-source-watch-glob-parentheses",
+      "variantOf": null,
+      "partition": "reserved",
+      "rowHash": "5bd6315284cd",
+      "behaviorHash": "f598f5e1affe"
+    },
+    {
+      "id": "corr-initial-file-change-notification-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-karma-asset-pipeline-context",
+      "variantOf": null,
+      "partition": "reserved",
+      "rowHash": "ff6b1536c2d7",
+      "behaviorHash": "0c70db4ba20e"
+    },
+    {
+      "id": "corr-ipv6-own-origin-formatting",
+      "expected": "FAIL",
+      "caseId": "corr-source-error-url-host-identity",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "4083abf5031c",
+      "behaviorHash": "23ba44aebb25"
+    },
+    {
+      "id": "corr-live-client-configuration-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-karma-asset-pipeline-context",
+      "variantOf": null,
+      "partition": "reserved",
+      "rowHash": "b1541b0b5344",
+      "behaviorHash": "690fea0e735b"
+    },
+    {
+      "id": "corr-missing-parent-value-contract-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-mongoose-document-context",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "c0c522d3fb49",
+      "behaviorHash": "eabea39acef8"
+    },
+    {
+      "id": "corr-nested-array-dirty-collapse-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-mongoose-document-context",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "3a8c85f4b9cd",
+      "behaviorHash": "cf043ae60a5e"
+    },
+    {
+      "id": "corr-optional-client-options-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-redis-client-transaction-context",
+      "variantOf": null,
+      "partition": "reserved",
+      "rowHash": "df7e02c008d9",
+      "behaviorHash": "00a9daad3715"
+    },
+    {
+      "id": "corr-overlapping-pattern-inclusion",
+      "expected": "FAIL",
+      "caseId": "corr-source-karma-asset-pipeline-context",
+      "variantOf": null,
+      "partition": "reserved",
+      "rowHash": "b7e54e9dc52b",
+      "behaviorHash": "41306109046b"
+    },
+    {
+      "id": "corr-parent-traversal-glob-normalization",
+      "expected": "FAIL",
+      "caseId": "corr-source-karma-asset-pipeline-context",
+      "variantOf": null,
+      "partition": "reserved",
+      "rowHash": "9d85e74af6bc",
+      "behaviorHash": "29456487ee99"
+    },
+    {
+      "id": "corr-pending-file-list-serving-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-karma-asset-pipeline-context",
+      "variantOf": null,
+      "partition": "reserved",
+      "rowHash": "5ac1b6b04990",
+      "behaviorHash": "3f5f197152c9"
+    },
+    {
+      "id": "corr-pipeline-buffer-preservation-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-redis-client-transaction-context",
+      "variantOf": null,
+      "partition": "reserved",
+      "rowHash": "1b9ff8323e85",
+      "behaviorHash": "925d6b3b2a6f"
+    },
+    {
+      "id": "corr-positional-reference-schema-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-mongoose-document-context",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "ef700b150b36",
+      "behaviorHash": "3506a6220657"
+    },
+    {
+      "id": "corr-processed-content-digest-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-karma-asset-pipeline-context",
+      "variantOf": null,
+      "partition": "reserved",
+      "rowHash": "578e2d4c9331",
+      "behaviorHash": "1536a7e98512"
+    },
+    {
+      "id": "corr-processed-file-extension-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-karma-asset-pipeline-context",
+      "variantOf": null,
+      "partition": "reserved",
+      "rowHash": "a26fb7941145",
+      "behaviorHash": "da31ae33e616"
+    },
+    {
+      "id": "corr-runner-exit-trailer-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-runner-exit-trailer",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "0047f8aea5ba",
+      "behaviorHash": "3a232bddb187"
+    },
+    {
+      "id": "corr-server-load-error-exit-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-server-load-error-exit",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "e52d18df3d20",
+      "behaviorHash": "7782ec832142"
+    },
+    {
+      "id": "corr-subscription-channel-restoration-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-redis-client-transaction-context",
+      "variantOf": null,
+      "partition": "reserved",
+      "rowHash": "ee7e2f570cd6",
+      "behaviorHash": "645d030a86d5"
+    },
+    {
+      "id": "corr-top-level-version-schema-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-mongoose-document-context",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "b5de96d9d7cc",
+      "behaviorHash": "0ac2be3d63da"
+    },
+    {
+      "id": "corr-transaction-command-callback-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-redis-client-transaction-context",
+      "variantOf": null,
+      "partition": "reserved",
+      "rowHash": "8511d90d8211",
+      "behaviorHash": "31bb2a7f883d"
+    },
+    {
+      "id": "corr-version-save-callback-error-escape",
+      "expected": "FAIL",
+      "caseId": "corr-source-mongoose-document-context",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "2238111ccd05",
+      "behaviorHash": "073867cecc55"
+    },
+    {
+      "id": "corr-atomic-query-population-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-query-projection-slice",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "504730319672",
+      "behaviorHash": "8d08fefff730"
+    },
+    {
+      "id": "corr-comment-adjacent-fix-ranges-repaired",
+      "expected": "PASS",
+      "caseId": "corr-source-eslint-padded-blocks",
+      "variantOf": "corr-comment-adjacent-fix-ranges",
+      "partition": "development",
+      "rowHash": "0faaee0cc246",
+      "behaviorHash": "ea6937d753d1"
+    },
+    {
+      "id": "corr-comment-adjacent-fix-ranges",
+      "expected": "FAIL",
+      "caseId": "corr-source-eslint-padded-blocks",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "cc46f2bb1d71",
+      "behaviorHash": "f56446c33486"
+    },
+    {
+      "id": "corr-destructured-edge-underscores",
+      "expected": "FAIL",
+      "caseId": "corr-source-eslint-camelcase",
+      "variantOf": null,
+      "partition": "reserved",
+      "rowHash": "b66208f68d28",
+      "behaviorHash": "fa09c999ad4f"
+    },
+    {
+      "id": "corr-diagnostic-column-contract",
+      "expected": "FAIL",
+      "caseId": "corr-source-eslint-max-len",
+      "variantOf": null,
+      "partition": "reserved",
+      "rowHash": "341d7b72fca2",
+      "behaviorHash": "31c1a00d03e1"
+    },
+    {
+      "id": "corr-empty-super-argument-traversal",
+      "expected": "FAIL",
+      "caseId": "corr-source-eslint-no-useless-constructor",
+      "variantOf": null,
+      "partition": "reserved",
+      "rowHash": "5a1be8ea71ac",
+      "behaviorHash": "e7efbf6c48d0"
+    },
+    {
+      "id": "corr-missing-population-position-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-mongoose-document-context",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "1594dbe18889",
+      "behaviorHash": "213f6d842492"
+    },
+    {
+      "id": "corr-populated-query-lean-mode-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-query-projection-slice",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "dce4a5d62538",
+      "behaviorHash": "d271f3fe2917"
+    },
+    {
+      "id": "corr-population-projection-token-prefix",
+      "expected": "FAIL",
+      "caseId": "corr-source-mongoose-document-context",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "252360f69bd6",
+      "behaviorHash": "3ac830ea2ec1"
+    },
+    {
+      "id": "corr-repopulation-error-loses-documents",
+      "expected": "FAIL",
+      "caseId": "corr-source-mongoose-document-context",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "3781f9e0d6ec",
+      "behaviorHash": "0c127084b6d1"
+    },
+    {
+      "id": "corr-reused-population-limit-compounds",
+      "expected": "FAIL",
+      "caseId": "corr-source-mongoose-document-context",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "9d084935e937",
+      "behaviorHash": "ab1f9f33ede5"
+    },
+    {
+      "id": "corr-saved-reference-depopulation-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-mongoose-document-context",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "33b62a3db827",
+      "behaviorHash": "2a7f6e5aa4ba"
+    },
+    {
+      "id": "corr-unregistered-population-model-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-mongoose-document-context",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "e0ea17d1f9c4",
+      "behaviorHash": "3517595a9263"
+    },
+    {
+      "id": "corr-upsert-absent-original-document-clean",
+      "expected": "PASS",
+      "caseId": "corr-source-query-projection-slice",
+      "variantOf": null,
+      "partition": "development",
+      "rowHash": "964324626131",
+      "behaviorHash": "6f4753d5ff20"
+    }
+  ],
+  "repairEdges": [
+    {
+      "bug": "corr-stale-failure-reasons",
+      "repair": "corr-decoy-reset-failure-reasons"
+    },
+    {
+      "bug": "corr-stale-checklist-artifact",
+      "repair": "corr-decoy-clears-stale-artifact"
+    },
+    {
+      "bug": "corr-retry-leaves-stale-error",
+      "repair": "corr-decoy-retry-clears-error"
+    },
+    {
+      "bug": "corr-empty-recompute-keeps-stale",
+      "repair": "corr-decoy-empty-recompute-clears"
+    },
+    {
+      "bug": "corr-early-exit-status-bypassed",
+      "repair": "corr-decoy-early-exit-preserved"
+    },
+    {
+      "bug": "corr-early-exit-loop-break-dropped",
+      "repair": "corr-decoy-loop-break-preserved"
+    },
+    {
+      "bug": "corr-outage-exit-code-downgraded",
+      "repair": "corr-decoy-outage-exit-preserved"
+    },
+    {
+      "bug": "corr-worktree-leak-no-finally",
+      "repair": "corr-decoy-worktree-finally"
+    },
+    {
+      "bug": "corr-lock-not-released-on-throw",
+      "repair": "corr-decoy-lock-finally"
+    },
+    {
+      "bug": "corr-fs-check-then-act-race",
+      "repair": "corr-decoy-fs-recursive-mkdir"
+    },
+    {
+      "bug": "corr-timer-debounce-double-fire",
+      "repair": "corr-decoy-timer-debounce-clears"
+    },
+    {
+      "bug": "corr-signature-change-callsite-missed",
+      "repair": "corr-decoy-signature-callsite-updated"
+    },
+    {
+      "bug": "corr-broadcast-fanout-no-dedup",
+      "repair": "corr-decoy-broadcast-targeted"
+    },
+    {
+      "bug": "corr-pr138-ci-breaking-gate-engine-coverage",
+      "repair": "corr-pr138-ci-breaking-gate-engine-coverage-pair"
+    },
+    {
+      "bug": "corr-pr172-duplicate-let-spawnoptions-declaration",
+      "repair": "corr-pr172-duplicate-let-spawnoptions-declaration-pair"
+    },
+    {
+      "bug": "corr-pr200-important",
+      "repair": "corr-pr200-important-pair"
+    },
+    {
+      "bug": "corr-pr200-ref-mutated-during-render-move",
+      "repair": "corr-pr200-ref-mutated-during-render-move-pair"
+    },
+    {
+      "bug": "corr-pr21-fail-closed-when-the-remote",
+      "repair": "corr-pr21-fail-closed-when-the-remote-pair"
+    },
+    {
+      "bug": "corr-pr21-validate-the-parsed-github-repo",
+      "repair": "corr-pr21-validate-the-parsed-github-repo-pair"
+    },
+    {
+      "bug": "corr-pr26-cover-the-restart-interrupted-flow",
+      "repair": "corr-pr26-cover-the-restart-interrupted-flow-pair"
+    },
+    {
+      "bug": "corr-pr26-keep-the-mcp-inputschema-in",
+      "repair": "corr-pr26-keep-the-mcp-inputschema-in-pair"
+    },
+    {
+      "bug": "corr-pr38-check-the-full-r2-credential",
+      "repair": "corr-pr38-check-the-full-r2-credential-pair"
+    },
+    {
+      "bug": "corr-pr38-require-the-full-azure-signing",
+      "repair": "corr-pr38-require-the-full-azure-signing-pair"
+    },
+    {
+      "bug": "corr-pr48-cn-ts-src",
+      "repair": "corr-pr48-cn-ts-src-pair"
+    },
+    {
+      "bug": "corr-pr59-guard-config-json",
+      "repair": "corr-pr59-guard-config-json-pair"
+    },
+    {
+      "bug": "corr-pr1-clear-persisted-checklist-state-before",
+      "repair": "corr-pr1-clear-persisted-checklist-state-before-pair"
+    },
+    {
+      "bug": "corr-pr1-preserve-the-guard-exit-code",
+      "repair": "corr-pr1-preserve-the-guard-exit-code-pair"
+    },
+    {
+      "bug": "corr-pr1-return-exit-3-for-detect",
+      "repair": "corr-pr1-return-exit-3-for-detect-pair"
+    },
+    {
+      "bug": "corr-pr23-keep-init-aligned-with-the",
+      "repair": "corr-pr23-keep-init-aligned-with-the-pair"
+    },
+    {
+      "bug": "corr-pr26-block-parked-answer-sends-when",
+      "repair": "corr-pr26-block-parked-answer-sends-when-pair"
+    },
+    {
+      "bug": "corr-pr26-do-not-let-terminal-signals",
+      "repair": "corr-pr26-do-not-let-terminal-signals-pair"
+    },
+    {
+      "bug": "corr-pr28-include-bun-lock-in-the",
+      "repair": "corr-pr28-include-bun-lock-in-the-pair"
+    },
+    {
+      "bug": "corr-pr52-don-t-down-rank-recorded",
+      "repair": "corr-pr52-don-t-down-rank-recorded-pair"
+    },
+    {
+      "bug": "corr-pr52-use-frink-no-log-in",
+      "repair": "corr-pr52-use-frink-no-log-in-pair"
+    },
+    {
+      "bug": "corr-pr59-expand-knip-config-detection",
+      "repair": "corr-pr59-expand-knip-config-detection-pair"
+    },
+    {
+      "bug": "corr-pr59-use-a-portable-whitespace-class",
+      "repair": "corr-pr59-use-a-portable-whitespace-class-pair"
+    },
+    {
+      "bug": "corr-pr60-avoid-leaving-the-member-in",
+      "repair": "corr-pr60-avoid-leaving-the-member-in-pair"
+    },
+    {
+      "bug": "corr-pr60-make-the-batch-reopen-atomic",
+      "repair": "corr-pr60-make-the-batch-reopen-atomic-pair"
+    },
+    {
+      "bug": "corr-pr60-node-modules",
+      "repair": "corr-pr60-node-modules-pair"
+    },
+    {
+      "bug": "corr-pr61-keep-the-carry-on-state",
+      "repair": "corr-pr61-keep-the-carry-on-state-pair"
+    },
+    {
+      "bug": "corr-tel-append-uniqueness-check-unlocked",
+      "repair": "corr-tel-append-uniqueness-check-unlocked-pair"
+    },
+    {
+      "bug": "corr-tel-floor-flips-assigned-flag",
+      "repair": "corr-tel-floor-flips-assigned-flag-pair"
+    },
+    {
+      "bug": "corr-tel-shared-merge-key-unfiltered-writer",
+      "repair": "corr-tel-shared-merge-key-unfiltered-writer-pair"
+    },
+    {
+      "bug": "corr-tel-validate-after-lint-rejected-shape",
+      "repair": "corr-tel-validate-after-lint-rejected-shape-pair"
+    },
+    {
+      "bug": "corr-tel-banner-ratio-masks-logic-line",
+      "repair": "corr-tel-banner-ratio-masks-logic-line-pair"
+    },
+    {
+      "bug": "corr-tel-banner-stray-line-excusal",
+      "repair": "corr-tel-banner-stray-line-excusal-pair"
+    },
+    {
+      "bug": "corr-tel-loose-closer-absorbs-statement",
+      "repair": "corr-tel-loose-closer-absorbs-statement-pair"
+    },
+    {
+      "bug": "corr-tel-person-branch-bot-reply",
+      "repair": "corr-tel-person-branch-bot-reply-pair"
+    },
+    {
+      "bug": "corr-tel-scoped-sweep-first-subentry",
+      "repair": "corr-tel-scoped-sweep-first-subentry-pair"
+    },
+    {
+      "bug": "corr-tel-suffix-decl-enters-list-state",
+      "repair": "corr-tel-suffix-decl-enters-list-state-pair"
+    },
+    {
+      "bug": "corr-asymmetric-flip-classifier",
+      "repair": "corr-asymmetric-flip-classifier-repaired"
+    },
+    {
+      "bug": "corr-json-string-result-dropped",
+      "repair": "corr-json-string-result-dropped-repaired"
+    },
+    {
+      "bug": "corr-lock-timeout-runs-unlocked",
+      "repair": "corr-lock-timeout-runs-unlocked-repaired"
+    },
+    {
+      "bug": "corr-only-selector-silent-drop",
+      "repair": "corr-only-selector-silent-drop-repaired"
+    },
+    {
+      "bug": "corr-read-then-write-clobber-terminal",
+      "repair": "corr-read-then-write-clobber-terminal-repaired"
+    },
+    {
+      "bug": "corr-retry-stuck-unclaimable",
+      "repair": "corr-retry-stuck-unclaimable-repaired"
+    },
+    {
+      "bug": "corr-async-view-unmounted-retry",
+      "repair": "corr-async-view-unmounted-retry-repaired"
+    },
+    {
+      "bug": "corr-abandoned-browser-launch-link",
+      "repair": "corr-abandoned-browser-launch-link-repaired"
+    },
+    {
+      "bug": "corr-command-block-argument-boundary",
+      "repair": "corr-command-block-argument-boundary-repaired"
+    },
+    {
+      "bug": "corr-delete-reserved-prefix-recovery",
+      "repair": "corr-delete-reserved-prefix-recovery-repaired"
+    },
+    {
+      "bug": "corr-deleted-branch-attribution",
+      "repair": "corr-deleted-branch-attribution-repaired"
+    },
+    {
+      "bug": "corr-empty-home-override",
+      "repair": "corr-empty-home-override-repaired"
+    },
+    {
+      "bug": "corr-empty-middleware-path",
+      "repair": "corr-empty-middleware-path-repaired"
+    },
+    {
+      "bug": "corr-failed-audio-cooldown",
+      "repair": "corr-failed-audio-cooldown-repaired"
+    },
+    {
+      "bug": "corr-parameter-cache-loses-outcome",
+      "repair": "corr-parameter-cache-loses-outcome-repaired"
+    },
+    {
+      "bug": "corr-query-punctuation-routing",
+      "repair": "corr-query-punctuation-routing-repaired"
+    },
+    {
+      "bug": "corr-reply-draft-expiration",
+      "repair": "corr-reply-draft-expiration-repaired"
+    },
+    {
+      "bug": "corr-unparsed-import-graph",
+      "repair": "corr-unparsed-import-graph-repaired"
+    },
+    {
+      "bug": "corr-cache-resource-key",
+      "repair": "corr-cache-resource-key-repaired"
+    },
+    {
+      "bug": "corr-export-list-traversal",
+      "repair": "corr-export-list-traversal-repaired"
+    },
+    {
+      "bug": "corr-sparse-document-validation",
+      "repair": "corr-sparse-document-validation-repaired"
+    },
+    {
+      "bug": "corr-statement-separator",
+      "repair": "corr-statement-separator-repaired"
+    },
+    {
+      "bug": "corr-comment-adjacent-fix-ranges",
+      "repair": "corr-comment-adjacent-fix-ranges-repaired"
+    }
+  ],
+  "sourceFiles": [
+    {
+      "path": "agents/correctness-reviewer.md",
+      "sha256": "8c96f896be0859f9089444ee6a41de7ff0d8cf1a5abeece4f819b4a173351d94"
+    },
+    {
+      "path": "bun.lock",
+      "sha256": "582b34fb609e937346dc404a39d0fba3bcfbb21288bb649121d43916e9f9c17b"
+    },
+    {
+      "path": "gate-engine/co-occurrence/__tests__/allowlist-cli.test.mts",
+      "sha256": "cb0cb8597f811490b31c1848d2b815d8fce241ea4e2d9d348af925b0e126eb1e"
+    },
+    {
+      "path": "gate-engine/co-occurrence/__tests__/allowlist-integration.test.mts",
+      "sha256": "aac1a2530839e38fadb603f5bb979d14150d130fb685cd5e5f05708663e339cb"
+    },
+    {
+      "path": "gate-engine/co-occurrence/__tests__/argv.test.mts",
+      "sha256": "f3fe5b27f73e9279b09ea8a15514bb4ba479b0367038fa1ac37365eec717b960"
+    },
+    {
+      "path": "gate-engine/co-occurrence/__tests__/atomic-write.test.mts",
+      "sha256": "e18572738ec1c5b3c95418136dbdc5b9effb7cc494afaf489528bb13cbe035c1"
+    },
+    {
+      "path": "gate-engine/co-occurrence/__tests__/changed-files.test.mts",
+      "sha256": "b72b5c15eeca7297de43f5073cdb1ea9a3590dcb170b03c2936708d15e8c8614"
+    },
+    {
+      "path": "gate-engine/co-occurrence/__tests__/chunk-index.test.mts",
+      "sha256": "2c91dce867ea0ce24c16adbc8bfd05aee2f9c1fbc236e98e656ad2e11af94e2f"
+    },
+    {
+      "path": "gate-engine/co-occurrence/__tests__/classify.test.mts",
+      "sha256": "9d2671ede78181632a4ff9cfccb6d0d49ce9abf83144ae1d73dd94a75d91ee76"
+    },
+    {
+      "path": "gate-engine/co-occurrence/__tests__/clone-detector.test.mts",
+      "sha256": "f92dbb36ef458e29fdc321eda45a981f019886d3526b92789743d88cedc098bf"
+    },
+    {
+      "path": "gate-engine/co-occurrence/__tests__/index-refresh.test.mts",
+      "sha256": "f88d06a8cc3a5460804bff4f9eb939dd384813b412119bd4410f4d91a8ad1326"
+    },
+    {
+      "path": "gate-engine/co-occurrence/__tests__/matcher.test.mts",
+      "sha256": "cde2c80778424ed403533b93861a3bbf1da75e383bc91fe0b980725e15717972"
+    },
+    {
+      "path": "gate-engine/co-occurrence/__tests__/remedy-contract.test.mts",
+      "sha256": "9893ecc77e1f2adef51c8b8a8610608a6d723bab69dd1d87631e3488b80231bf"
+    },
+    {
+      "path": "gate-engine/co-occurrence/allowlist-cli.mts",
+      "sha256": "a7d25d79253dd4efe38c7de5bdc98dcdb7f9b783a29730e1c8b924464c6c2169"
+    },
+    {
+      "path": "gate-engine/co-occurrence/allowlist-io.mts",
+      "sha256": "ecc523a670d1e0ff84f2262697c75f75f7c6fec1cfb0fe87aab425c43559d904"
+    },
+    {
+      "path": "gate-engine/co-occurrence/argv.mts",
+      "sha256": "36e253e3bd9595d1534f251b84de1c354c494a658c266c0956add54a36eec3ce"
+    },
+    {
+      "path": "gate-engine/co-occurrence/atomic-write.mts",
+      "sha256": "8b3d3fdac0e8200d87130bafb5665031391f834607a0441a51e05119cffca5a6"
+    },
+    {
+      "path": "gate-engine/co-occurrence/changed-files.mts",
+      "sha256": "3d23d7648676ab4261fa809c3482acb3d806e6df04eef060d84aedcbe4b29bf2"
+    },
+    {
+      "path": "gate-engine/co-occurrence/chunk-index.mts",
+      "sha256": "2e9d4937b4f4b14458f6acc2810e49ecc23c0c8364c35327a08940bc86065ea9"
+    },
+    {
+      "path": "gate-engine/co-occurrence/classify.mts",
+      "sha256": "7b56d6b7d0bb178c5ae1125b6fe822cf1c34573c4e7f3e7b0a502b69052d2d40"
+    },
+    {
+      "path": "gate-engine/co-occurrence/clone-detector.mts",
+      "sha256": "72cb3ecf1eb91783b0dc11c57d7fb37bd9e235074369f304474ab1e84842f0ab"
+    },
+    {
+      "path": "gate-engine/co-occurrence/decay.mts",
+      "sha256": "5675df92743eca8b26e1333178d1ff8c21178ab62fac2f4c2c2098326ee2e3ff"
+    },
+    {
+      "path": "gate-engine/co-occurrence/index-refresh.mts",
+      "sha256": "374e777fda435b751059e171ba81c5d9fefe393454543c37f6d4ef4632e1e6e4"
+    },
+    {
+      "path": "gate-engine/co-occurrence/jscpd-bin.mts",
+      "sha256": "b315cfd902db30eedb289368ccce32bc59275cce23fa1bbd75376a9bd68edc9f"
+    },
+    {
+      "path": "gate-engine/co-occurrence/labels.json",
+      "sha256": "0962b1092caf41e656d1109cf3229867f00618c5a5615c90c685add5e39d81f0"
+    },
+    {
+      "path": "gate-engine/co-occurrence/matcher.mts",
+      "sha256": "37d1189c617004ae0a1ab18fba6828a30f03233d2325fa5bf8b6dd08cee53ddb"
+    },
+    {
+      "path": "gate-engine/comment-firewall/__tests__/detect.test.mts",
+      "sha256": "e2a9ba1aeada71fdbc5c92657b76994d86dc58ffe9c2dd05ebe43a8b825a2585"
+    },
+    {
+      "path": "gate-engine/comment-firewall/__tests__/gate.test.mts",
+      "sha256": "3abf559a40a7043cad0d9b7deba659e7a0d4f5c4396bc0fcefba3bba3a2fd872"
+    },
+    {
+      "path": "gate-engine/comment-firewall/__tests__/telemetry.test.mts",
+      "sha256": "679f9325a509e08d2c6b9b38296b9d56eba1ab2bf0e2b41c06a7bb2d93d2a223"
+    },
+    {
+      "path": "gate-engine/comment-firewall/cli.mts",
+      "sha256": "0c7150d940becce8b7441984f84d1f27c2986d5d4191d5853b8246faa954ea84"
+    },
+    {
+      "path": "gate-engine/comment-firewall/detect.mts",
+      "sha256": "0fd8f136bf8767dfecbfff7017a92e7d34f2be3e1f06c48fe67b5c0f04787850"
+    },
+    {
+      "path": "gate-engine/comment-firewall/gate.mts",
+      "sha256": "496dcd828559db032aa29d8b0d12ae8a7cb2bb06bf9f81d815a5dd6490d2b0ff"
+    },
+    {
+      "path": "gate-engine/comment-firewall/inventory.mts",
+      "sha256": "f20b1650d7c101e120ab44645477d048aaca7b46bb53978357d17016c52a1017"
+    },
+    {
+      "path": "gate-engine/comment-firewall/patch.mts",
+      "sha256": "acf4d35cc45c25a79466dfc5363e10e837a88bbf5a38fa3cf6b88360067038a0"
+    },
+    {
+      "path": "gate-engine/comment-firewall/telemetry.mts",
+      "sha256": "ba28c3880508a3c8da13dd2e46bfcae82ef38b4e7cb342841a2e282d76654173"
+    },
+    {
+      "path": "gate-engine/comment-firewall/types.mts",
+      "sha256": "3bcbe186f57a93927c4deb4047166310bc0977f0711781cd5455de702ec81da3"
+    },
+    {
+      "path": "gate-engine/config-json.mts",
+      "sha256": "e6f22e74c721d20d580bfff408a59a29faf3f495bde27ca7013bc1bac8b2ea81"
+    },
+    {
+      "path": "gate-engine/config.mts",
+      "sha256": "62a1965bdcefaace0f31b716a82cb67675272074ce9a205970c1535a1380fc2d"
+    },
+    {
+      "path": "gate-engine/coverage/__tests__/failures.test.mts",
+      "sha256": "e7ba99cb9c56c1aa8f74fdae2fb94b0647369eb977d497a1c743385794ee6101"
+    },
+    {
+      "path": "gate-engine/coverage/__tests__/produce.test.mts",
+      "sha256": "b47335a6cd63ba148d77978c03dc5ce9a8dbcdf32d9b8a12563acbbd94486ad0"
+    },
+    {
+      "path": "gate-engine/coverage/__tests__/run.test.mts",
+      "sha256": "ff4e0aab9793e1ca3b7993b45863fe13b11aa1bef0e0a7c971bc7e3c16a2a5bd"
+    },
+    {
+      "path": "gate-engine/coverage/failures.mts",
+      "sha256": "af1c987364400c24898bf37388950b7e7bc3cc646fea0ae92feb7d1e60296421"
+    },
+    {
+      "path": "gate-engine/coverage/produce.mts",
+      "sha256": "170d19a6011d225d091e1c51f3ba4cea2eb8e3e554b2af4b768b8ff010986dc7"
+    },
+    {
+      "path": "gate-engine/coverage/run.mts",
+      "sha256": "6f4c452157fc8629dfbb1f9a2e0a9e95e9c152ea0ccdaac6f53244165ee014d8"
+    },
+    {
+      "path": "gate-engine/critique/__tests__/capture-normalizer.test.mts",
+      "sha256": "3dd424f547c87cefc7090fe417fab54d324d1b24659e4cd02dfdf07c47501a64"
+    },
+    {
+      "path": "gate-engine/critique/__tests__/eval-bench.test.mts",
+      "sha256": "7e0dd810e0551195d36a8c30cb05330c4bec3219b1658ba0102430ac659a06ff"
+    },
+    {
+      "path": "gate-engine/critique/__tests__/evidence-bindings.test.mts",
+      "sha256": "d356f1cdbeb68cf1035455b75501f260d8963d82aaee7d00fb6e0a507640eaae"
+    },
+    {
+      "path": "gate-engine/critique/__tests__/evidence-capture-store.test.mts",
+      "sha256": "12b161b5780fa83df9c47a0cedcd6d55ccc5b23259d59c053c7761ac75a3930a"
+    },
+    {
+      "path": "gate-engine/critique/__tests__/evidence-lineage.test.mts",
+      "sha256": "eb587e0326b5fd66e1a18abfbddb7698db5db7d511c69f7b2ec8629a7ee90e32"
+    },
+    {
+      "path": "gate-engine/critique/__tests__/evidence-store-fixture.mts",
+      "sha256": "5053493ce7659fca565fab2a1ff32ff9982f300bc47571d067244be7e32480d4"
+    },
+    {
+      "path": "gate-engine/critique/__tests__/evidence-store.test.mts",
+      "sha256": "97adbc89ad291a882dab59f65d1eb450e7e5eeeef582622774ec0608572f98a1"
+    },
+    {
+      "path": "gate-engine/critique/__tests__/evidence-transcript.test.mts",
+      "sha256": "e3f471c3d3267da30e1f2d71f0630fab1fb60b7413894cac74cd8261cb84d0d3"
+    },
+    {
+      "path": "gate-engine/critique/__tests__/feature-critique-guidance.test.mts",
+      "sha256": "0bd4cf8fce91da0c1d5fde65a9cba325aace1b99b94a47caff88157d985af8fb"
+    },
+    {
+      "path": "gate-engine/critique/__tests__/immutable-file.test.mts",
+      "sha256": "597c55dfe41875b05c13d441f235831f7cd068785443e42aedd98a726d0de9a7"
+    },
+    {
+      "path": "gate-engine/critique/__tests__/persistence-lock.test.mts",
+      "sha256": "84e545dc27693f4fbca9ef5f4dea17a091a97d0cc0320be1639c4dba8f4619b7"
+    },
+    {
+      "path": "gate-engine/critique/__tests__/repository-context-fixture.mts",
+      "sha256": "a7ab9068825e2b6c46db66e13ec964cbb81ed9b894711ce85a4f9a1d5f1e4299"
+    },
+    {
+      "path": "gate-engine/critique/__tests__/repository-context.test.mts",
+      "sha256": "83df38c0d9ea207611298069c28cd4c6a5b917b62842bf5a1006b25a61804681"
+    },
+    {
+      "path": "gate-engine/critique/__tests__/response-contract.test.mts",
+      "sha256": "d267dd00ca107ae7aa410ba294f5a4259c805ff8fbe92e9878026bb6de980708"
+    },
+    {
+      "path": "gate-engine/critique/__tests__/response-fixture.mts",
+      "sha256": "16fc6898e3b61d66821c6649fdfd728f1398ed90605ad4e37574be77c274ca77"
+    },
+    {
+      "path": "gate-engine/critique/capture-normalizer.mts",
+      "sha256": "a03e50908103c6b67632fe544ec11563f4e4151a674490ab6cbde56f4d24affd"
+    },
+    {
+      "path": "gate-engine/critique/eval/README.md",
+      "sha256": "65a86b318ee9e6ad41cf3a4f249f7d6675762c01e0a52a5b299bee9881597041"
+    },
+    {
+      "path": "gate-engine/critique/eval/bench.mts",
+      "sha256": "783b7179b2789e6f3e3ffe4588c7a367deed89c2c428342df87d1b1aaa2c3049"
+    },
+    {
+      "path": "gate-engine/critique/eval/cases-critique.jsonl",
+      "sha256": "89f75f1a0067c02d4f87c49de2e1a3842b51813f74dbed8104c4aaf23f6d4916"
+    },
+    {
+      "path": "gate-engine/critique/eval/matcher-audit.jsonl",
+      "sha256": "5f7cef6d85693df8dfd63097d9d8df392767e5f8257d71aec6683ff3b6d3daa3"
+    },
+    {
+      "path": "gate-engine/critique/eval/matcher.mts",
+      "sha256": "eb060ab61fdf63368f3def2d6626e58de375c7fd7a56c5384b38a1da33684787"
+    },
+    {
+      "path": "gate-engine/critique/eval/results.baseline.json",
+      "sha256": "57cc64edb705521c35d0ad31d0527618d7e8faa4940285ea249254bfe9c21360"
+    },
+    {
+      "path": "gate-engine/critique/eval/run-critic.mts",
+      "sha256": "7c5b6f78310585a7eac2b6abb02cd5ea81a3fa879da1372f2c38a2caf1ea5b1b"
+    },
+    {
+      "path": "gate-engine/critique/eval/salvage.mts",
+      "sha256": "3676a9eb26cff5d8ef1ed5d9a8a78cbf56d12eddd21c5f12c92fe6c4c553477f"
+    },
+    {
+      "path": "gate-engine/critique/evidence-bindings.mts",
+      "sha256": "0275fff11d80cbaf93273385dfeec64bf1fe16d70abd8bb9107929098e19589e"
+    },
+    {
+      "path": "gate-engine/critique/evidence-capture-store.mts",
+      "sha256": "44ce73899eea796138164e4d691617cb299a298a66e49dbd534fe91e6f19d08a"
+    },
+    {
+      "path": "gate-engine/critique/evidence-record.mts",
+      "sha256": "9f631e502f5539d813228b6c178d186297b3cab43a77d31045066c19515ab546"
+    },
+    {
+      "path": "gate-engine/critique/evidence-store-internal.mts",
+      "sha256": "3301f68c44ba85ec6b8db12491bb53060dca3f4f0b13a8c31be9c6bf1e828077"
+    },
+    {
+      "path": "gate-engine/critique/evidence-store.mts",
+      "sha256": "9f017a5694a5ceb4708176c3935c3b206b7d3974150c3b8fb31fb5a9c3e1de0b"
+    },
+    {
+      "path": "gate-engine/critique/immutable-file.mts",
+      "sha256": "a0be6d5116112907211f42541d93d570f89459f1f3ffc96c06bff348eeaa4740"
+    },
+    {
+      "path": "gate-engine/critique/json-duplicate-keys.mts",
+      "sha256": "78c969aa5c119f9b77bfae5ba93d57ab955089112ac1969c1c3a601d9622754b"
+    },
+    {
+      "path": "gate-engine/critique/lifecycle/work-quarantine.mts",
+      "sha256": "1a50a8aecccbaa0ae9f9b1a0a21c79e7351e49458ad126894565d9feecf1c767"
+    },
+    {
+      "path": "gate-engine/critique/lifecycle/work-quarantine.test.mts",
+      "sha256": "0f9f7f4b150bbfe60282ff1d01930ea7660428fa13a9bd2e38931edf5c97c599"
+    },
+    {
+      "path": "gate-engine/critique/persistence-lock.mts",
+      "sha256": "7320de321bd00d0cfe34ff320a417918da038d9295f9820e9bbda452a69cd96e"
+    },
+    {
+      "path": "gate-engine/critique/provider-adapters/claude-subagent-stop.mts",
+      "sha256": "56aa5d81dafb1eb2d3624fc00f9dd7c82257bdbac4cd6a2ff64c9a0eb13a3a37"
+    },
+    {
+      "path": "gate-engine/critique/provider-adapters/claude-subagent-stop.test.mts",
+      "sha256": "ce689528fd672c6ec606b6b57c3d5b0af9deaee659eb1e4983df0258d1309d1d"
+    },
+    {
+      "path": "gate-engine/critique/provider-capabilities/plan-evidence.mts",
+      "sha256": "eee831f20f20f42b2efb85ce01421943eab45bf85642bb83bda8ebce391354fe"
+    },
+    {
+      "path": "gate-engine/critique/provider-capabilities/plan-evidence.test.mts",
+      "sha256": "d1163e804d9a5909f40f2944ff8dcd5e977182f635c952fb4f49609fc1eb0660"
+    },
+    {
+      "path": "gate-engine/critique/provider-runtime/claude-subagent-stop.mts",
+      "sha256": "f815ee84ea3ba43420fe3cc8d1fec0827024d690cc127613d3c714e9405bf247"
+    },
+    {
+      "path": "gate-engine/critique/provider-runtime/claude-subagent-stop.test.mts",
+      "sha256": "6eba97207d60671aa82fc582bef620ac6973fb5caea154e23c00616522c3a41e"
+    },
+    {
+      "path": "gate-engine/critique/repository-context.mts",
+      "sha256": "83599c4b6e85cb769d41bd5f852edc018647efa43690f682e19e7e680c42438f"
+    },
+    {
+      "path": "gate-engine/critique/response-contract.mts",
+      "sha256": "747a37635bf88f2706384cbfa1c3d7cb5ca2be0c9b11f2b27abb9d6b63d80f5e"
+    },
+    {
+      "path": "gate-engine/critique/response-status.mts",
+      "sha256": "cfacae080bac37dbb5c0a058625a3640ba984dbb4e939ecc482818a5be75d536"
+    },
+    {
+      "path": "gate-engine/decisions/__tests__/categories.test.mts",
+      "sha256": "bf50af656bebaa26ec0672328297d79a7b2116a2e94cc157dc255d7a457b32de"
+    },
+    {
+      "path": "gate-engine/decisions/__tests__/category-report.test.mts",
+      "sha256": "5cc16088c3306fb7a033a14602806abb4e43bc13f0cbfa4ca006bcdd137f7e0b"
+    },
+    {
+      "path": "gate-engine/decisions/__tests__/check-alignment.test.mts",
+      "sha256": "842f9f42d872a5777c87856604bc49865bd0a8a84a73bf566a951df4c6033238"
+    },
+    {
+      "path": "gate-engine/decisions/__tests__/cli.test.mts",
+      "sha256": "7ba58419e7ab39f8bda3d4a0801d56cbae0c941b4275515bc662c65c97dd553a"
+    },
+    {
+      "path": "gate-engine/decisions/__tests__/consumer-root.test.mts",
+      "sha256": "79a3e322e7bb25e443e7fc897d619113f31f800879a5dfb401bfaead8e514e72"
+    },
+    {
+      "path": "gate-engine/decisions/__tests__/decisions.test.mts",
+      "sha256": "e8e7143ed42ccd8395e35370e02b1784dcff2754ae07d5166b96479eb833ec60"
+    },
+    {
+      "path": "gate-engine/decisions/__tests__/detect.test.mts",
+      "sha256": "cdd1334b570c2ce0a4630bff8d6b1d4ec1d84a3c4c234d2ccc4b0e66ac48db86"
+    },
+    {
+      "path": "gate-engine/decisions/__tests__/drift.test.mts",
+      "sha256": "0eaed2a1ceafde3df7a9c614fdfe387c04a2d1ee476ab39ccf7dc367f47a1c8c"
+    },
+    {
+      "path": "gate-engine/decisions/__tests__/eval-bench.test.mts",
+      "sha256": "0ccbffb24c83c4fe8d3c6f7ad5b2580bd0b130b6d94e692febb0ff00634440a9"
+    },
+    {
+      "path": "gate-engine/decisions/__tests__/eval-checkpoint.test.mts",
+      "sha256": "394d96e26b0eebcf932a34202b3969904adb4df468ef62f3561a706d0fb580d8"
+    },
+    {
+      "path": "gate-engine/decisions/__tests__/git-io.test.mts",
+      "sha256": "082730ce668ad1d9c24f612271c7ff4aa84c5771a5e6e9ca1b153f5f2d00a68f"
+    },
+    {
+      "path": "gate-engine/decisions/__tests__/integrity-bench.test.mts",
+      "sha256": "e8df2ab2998fba474e41a585d977a942a01e8024b85a527eb0be55e1ccd42cf3"
+    },
+    {
+      "path": "gate-engine/decisions/__tests__/integrity-checks.test.mts",
+      "sha256": "a9cb5746fdd53d0dc75a726aa2b263cbfdc0e905e0f94983296d5cecd256a14b"
+    },
+    {
+      "path": "gate-engine/decisions/__tests__/integrity-staged.test.mts",
+      "sha256": "9d329d4560e642439e2a0c50076260d099275400250eb609a599e557e296616c"
+    },
+    {
+      "path": "gate-engine/decisions/__tests__/note-relations.test.mts",
+      "sha256": "339a5bca76553027bf3fddd76a02c4c3108988d9bdc38925e0168b5c3855590d"
+    },
+    {
+      "path": "gate-engine/decisions/__tests__/recall-scoring.test.mts",
+      "sha256": "f61f44775a13b5aed78c8499790922b5e6cdab389079b50915c59ef65343462e"
+    },
+    {
+      "path": "gate-engine/decisions/__tests__/scoped-targets.test.mts",
+      "sha256": "f61acac361df9fa49caa47fe3ed51a37451a0ed27d7c27db3fc8ab8b8c1066a2"
+    },
+    {
+      "path": "gate-engine/decisions/amend.mts",
+      "sha256": "2b27f1d85a4f39b52ede55ccb10b340c42b90e81d14b1967193921cf6bf55ba0"
+    },
+    {
+      "path": "gate-engine/decisions/atomic-write.mts",
+      "sha256": "20a0dad7cbb00d1f6abb467dd2d8025e7d04168ae4e79637fba964135d874f37"
+    },
+    {
+      "path": "gate-engine/decisions/check-alignment.mts",
+      "sha256": "af2ba46b75dcf357342aed4e8fa10d6d540e1eb6526a2d804a82f197e2d11195"
+    },
+    {
+      "path": "gate-engine/decisions/cli.mts",
+      "sha256": "38d1cfc147d72df02632885f8b30b616618c9a2772000e60591d30004091c19f"
+    },
+    {
+      "path": "gate-engine/decisions/decision-format.mts",
+      "sha256": "e15441f407218353d5713e5e3232fc772f7df9e9b2558260397a54d6e4cdc9a7"
+    },
+    {
+      "path": "gate-engine/decisions/decisions.mts",
+      "sha256": "eaa748f68dc100f1960efadad15836f0573b12d7b259f35fd9b7018cdb82efd8"
+    },
+    {
+      "path": "gate-engine/decisions/dedupe.mts",
+      "sha256": "671e5b100391d22f24b494f091fc7d84f4387423b0ac5acde0558791c7e4ecd6"
+    },
+    {
+      "path": "gate-engine/decisions/detect.mts",
+      "sha256": "eeabe0c0f9f5c850dfd390eeee24931ba7452ab4c04e82df9d3dd3a5c892a9e1"
+    },
+    {
+      "path": "gate-engine/decisions/drift.mts",
+      "sha256": "0451858417ed5ceca03544db3fd35baf42d085a1cfdd0cc5fb89e9125855a38e"
+    },
+    {
+      "path": "gate-engine/decisions/eval/README.md",
+      "sha256": "585ae60145472f48747a6164a0a1186bf234d6c39ff49f85a6733df4cb2c79f8"
+    },
+    {
+      "path": "gate-engine/decisions/eval/acceptance.mts",
+      "sha256": "96494eccfcaacbc69bc6c40510cc9791fb5ce7fb8bb29a424f1648c32c2c3172"
+    },
+    {
+      "path": "gate-engine/decisions/eval/bench.mts",
+      "sha256": "1a023462801a1d5d530aade47a1df3154de98d2e61113a860f4b98390885d3ea"
+    },
+    {
+      "path": "gate-engine/decisions/eval/cases-alignment.jsonl",
+      "sha256": "27bb19dc1aeabd07682a557a732c4e9bafa9c863b414fc6f6cfcebfd0bde5185"
+    },
+    {
+      "path": "gate-engine/decisions/eval/cases-depth.jsonl",
+      "sha256": "42a72ead99bb506f0977f0cc6c647f591ed8edea2c2ef501a0cebc3215621618"
+    },
+    {
+      "path": "gate-engine/decisions/eval/cases-detect.jsonl",
+      "sha256": "47691e6590b1c78d58f7185225f7cf6f63bb594893feb3fbf4409efc97ba3685"
+    },
+    {
+      "path": "gate-engine/decisions/eval/cases.mts",
+      "sha256": "b181de11a7a8f56e10412a467068ca8e573b8766a6544fc5309edc770b8bada9"
+    },
+    {
+      "path": "gate-engine/decisions/eval/checkpoint.mts",
+      "sha256": "c60f88928b0cc841e3accebb1f6afb5048b53e16d37da540384c430a4566cdf2"
+    },
+    {
+      "path": "gate-engine/decisions/eval/compare.mts",
+      "sha256": "c2dc42d9c4d61658745f988bcfadcab0de4c36d061a79ff1fd0f813371e788d2"
+    },
+    {
+      "path": "gate-engine/decisions/eval/recall/README.md",
+      "sha256": "69a701caa75a7ac9075b341f7dddf45171d7c31b3aca32169b4bb5e9685e30bc"
+    },
+    {
+      "path": "gate-engine/decisions/eval/recall/bench.mts",
+      "sha256": "528ffcf98f18594dcd630e65c950bc4810a200d89b913f539e4431dfb6be3816"
+    },
+    {
+      "path": "gate-engine/decisions/eval/recall/cases-retrieval.jsonl",
+      "sha256": "867333a99662545dd910ffbea047ea567eee4f02896acddcd370292b1c136163"
+    },
+    {
+      "path": "gate-engine/decisions/eval/recall/corpus/seed/INDEX.md",
+      "sha256": "c53a66139a386fdc9fbf7afa39409d9eb8892f7aca40ace9de7e54a996a83df3"
+    },
+    {
+      "path": "gate-engine/decisions/eval/recall/corpus/seed/alert-ownership.md",
+      "sha256": "f52464e956f8dff702426ad07f20441ee37a6d11b3ea141be692586330f76230"
+    },
+    {
+      "path": "gate-engine/decisions/eval/recall/corpus/seed/artifact-immutability.md",
+      "sha256": "2ad3000c32f310ba403bcb1ce4a2abfce2dac7615a02afa3fe97065b7aa7d645"
+    },
+    {
+      "path": "gate-engine/decisions/eval/recall/corpus/seed/audit-log-delivery.md",
+      "sha256": "466064dea346c5d2a9e45b485789160f8d27a66389e15fe152140cf00ee1e060"
+    },
+    {
+      "path": "gate-engine/decisions/eval/recall/corpus/seed/audit-trail-retention.md",
+      "sha256": "9b8728899e0e71ab632f970a86effbe028aed7fcad321de289725fd6db5aa141"
+    },
+    {
+      "path": "gate-engine/decisions/eval/recall/corpus/seed/backpressure-shedding.md",
+      "sha256": "f593fe6cb1d46838f99de5f9762b355c2e32995d165b249de8ad88589a4771de"
+    },
+    {
+      "path": "gate-engine/decisions/eval/recall/corpus/seed/backup-restore-testing.md",
+      "sha256": "216a82847cede0b4291f57262a0c7e1f250af115ca84dc7f7c342acb0781c6c4"
+    },
+    {
+      "path": "gate-engine/decisions/eval/recall/corpus/seed/cache-invalidation-ownership.md",
+      "sha256": "3d2dfc3b1a7fba7dfe2f036213da3799c967b854cc1d377246386748be86d8df"
+    },
+    {
+      "path": "gate-engine/decisions/eval/recall/corpus/seed/canary-vs-blue-green.md",
+      "sha256": "d0406fc540fefce667a18927f091f22485c0c31747552dddf766043a02a54e29"
+    },
+    {
+      "path": "gate-engine/decisions/eval/recall/corpus/seed/clock-source.md",
+      "sha256": "2612f8e28dfb97618ca22db4e669cd1660789f5e8a5ad427f86f40b049c3eeef"
+    },
+    {
+      "path": "gate-engine/decisions/eval/recall/corpus/seed/config-distribution.md",
+      "sha256": "a545def614f0947e1aeb575c8f0e91ac21639e3184abad907fcc7b0ddb14f184"
+    },
+    {
+      "path": "gate-engine/decisions/eval/recall/corpus/seed/config-rollout-mechanism.md",
+      "sha256": "4d9110efe5c34c5f7fdb0c190419095569afc3b2215a21b5b12374316ccaf585"
+    },
+    {
+      "path": "gate-engine/decisions/eval/recall/corpus/seed/connection-pooling.md",
+      "sha256": "b186999ac7ac04c0a062881898d268786b6306a667887ff94f9734611b7fdc4e"
+    },
+    {
+      "path": "gate-engine/decisions/eval/recall/corpus/seed/dashboard-as-code.md",
+      "sha256": "d3bf8d6fad38240277667b2670db30132b53035169e99720e6c35634e39c8dd8"
+    },
+    {
+      "path": "gate-engine/decisions/eval/recall/corpus/seed/dependency-update-cadence.md",
+      "sha256": "d5e506d4c8ea82b602ac1b8f81252745e3849372292c49b1d24f6d4a6a639349"
+    },
+    {
+      "path": "gate-engine/decisions/eval/recall/corpus/seed/feature-flag-lifecycle.md",
+      "sha256": "3ae804d5cc178e8f636757ca2cbc0b6e160619ac0413ea33accb95859181184c"
+    },
+    {
+      "path": "gate-engine/decisions/eval/recall/corpus/seed/incident-severity-definitions.md",
+      "sha256": "f47b7ae359810b17cf9768fba46bf945770fe8c76b0c8e49fad1aa890a17a8ec"
+    },
+    {
+      "path": "gate-engine/decisions/eval/recall/corpus/seed/least-privilege-defaults.md",
+      "sha256": "1aaad3a2a9a2a6bb8351120117a79f890f8fcdf49cdf925cacf2a0ce981895ec"
+    },
+    {
+      "path": "gate-engine/decisions/eval/recall/corpus/seed/log-level-policy.md",
+      "sha256": "964cc81b2f7d6dbb4e8f9830e970280b3c65334c74a9891b11691f8fef26db8b"
+    },
+    {
+      "path": "gate-engine/decisions/eval/recall/corpus/seed/metric-cardinality-limits.md",
+      "sha256": "6529739798c05ee21ce4368e2fd0a4228be4216addd974254d0478a334a9f8d5"
+    },
+    {
+      "path": "gate-engine/decisions/eval/recall/corpus/seed/payload-size-cap.md",
+      "sha256": "3dfa9357196b3cc10ad577f6fd337adae59536f6d50cdfb6897a5e14f868b890"
+    },
+    {
+      "path": "gate-engine/decisions/eval/recall/corpus/seed/read-replica-routing.md",
+      "sha256": "28b5826bb27d7db4665b7b69df19043997298d2fbe043f9aa8e5a2b47039947e"
+    },
+    {
+      "path": "gate-engine/decisions/eval/recall/corpus/seed/release-approval.md",
+      "sha256": "863c640a444d38af631ca303c5c8af9595ca8e0188cd752e3d6aba205caba932"
+    },
+    {
+      "path": "gate-engine/decisions/eval/recall/corpus/seed/request-timeout-policy.md",
+      "sha256": "98ab38ba48e54885c1a46a2a6b2fbb5305293df91530ae55b9ce1901ca76b0c0"
+    },
+    {
+      "path": "gate-engine/decisions/eval/recall/corpus/seed/retry-budget-ownership.md",
+      "sha256": "3be6d894a29087f0d2b1fe6a39ff4c8a732ebd91517e2f7568ccd35749dad7b9"
+    },
+    {
+      "path": "gate-engine/decisions/eval/recall/corpus/seed/rollback-mechanism.md",
+      "sha256": "69aa0d85e800583973588a93172f70de4496ebc53603e5367c18b50fe5c6c2eb"
+    },
+    {
+      "path": "gate-engine/decisions/eval/recall/corpus/seed/schema-migration-strategy.md",
+      "sha256": "164d7f4f40613e151efdd65fa829bfcfc499dd02a817e4a94d55f63f3a98d55a"
+    },
+    {
+      "path": "gate-engine/decisions/eval/recall/corpus/seed/secret-rotation.md",
+      "sha256": "3de9907715c94e402d65da9ed6a389f1d526c3060b7671e0e48d5dbd71ed73ee"
+    },
+    {
+      "path": "gate-engine/decisions/eval/recall/corpus/seed/service-to-service-auth.md",
+      "sha256": "da84de9eacedd218316cbbf225f746c8b3448b3ea710cda46c6f0e4cdf5e9385"
+    },
+    {
+      "path": "gate-engine/decisions/eval/recall/corpus/seed/session-invalidation.md",
+      "sha256": "972d5dd70fab62c310cc42971aec1c2377b838dcca9d7f2108fce497c37b1e5c"
+    },
+    {
+      "path": "gate-engine/decisions/eval/recall/corpus/seed/session-store.md",
+      "sha256": "b00be8b0096a055c680f56ea634b73af8ab55a02d28dc1a22b7e0bebae3730e7"
+    },
+    {
+      "path": "gate-engine/decisions/eval/recall/corpus/seed/soft-vs-hard-delete.md",
+      "sha256": "a495afe7a7f43de6b9ed7170db0adadb2a2b7ce55fe5ffa82f87e9e68fb89327"
+    },
+    {
+      "path": "gate-engine/decisions/eval/recall/corpus/seed/third-party-token-custody.md",
+      "sha256": "e55b60ff42c6c20f125c07b37650b51659bfb84e1d10183afe181e5f631d303a"
+    },
+    {
+      "path": "gate-engine/decisions/eval/recall/corpus/seed/trace-sampling-decision-point.md",
+      "sha256": "fd4ae73038c18e331341c79ce3342ee136a0b5da88100e75cd808697539407d7"
+    },
+    {
+      "path": "gate-engine/decisions/eval/recall/corpus/seed/trace-sampling-rate.md",
+      "sha256": "ab243bfc6299d59c582b0710f16db4b2d78242363d2932f7cf607a44351c057c"
+    },
+    {
+      "path": "gate-engine/decisions/eval/recall/corpus/seed/version-pinning.md",
+      "sha256": "9e59bd4baabacb4a1386f513363127b712060edee2948adab78e46c7a7b5935e"
+    },
+    {
+      "path": "gate-engine/decisions/eval/recall/results.baseline.json",
+      "sha256": "b390f3b28267ee1700e7c5ed7ab283af139c0b6a387c58ed7f78987234903e1a"
+    },
+    {
+      "path": "gate-engine/decisions/eval/recall/scoring.mts",
+      "sha256": "4947d0703390bc8d251d2ece6cf200fa0b6c444bd87f0e9fe2b6e4f43e3946f8"
+    },
+    {
+      "path": "gate-engine/decisions/eval/report.mts",
+      "sha256": "5aa3f771d1790a510c0d31e5ddd2f7b58a1056cb4553d6172a8fb3bbb76526a4"
+    },
+    {
+      "path": "gate-engine/decisions/eval/save-quality/bench.mts",
+      "sha256": "3861f7564020f09d225e74ba13acc29901cadcdccc0dde1333b71646f28670d7"
+    },
+    {
+      "path": "gate-engine/decisions/eval/save-quality/cases-save.jsonl",
+      "sha256": "2854ef6cc6dcd6c2b3481c80ecf05344f510eb5638eef7e1649bbfb6aaf354fc"
+    },
+    {
+      "path": "gate-engine/decisions/eval/save-quality/corpus/adapted/INDEX.md",
+      "sha256": "f141367201c5a6e3810fcf919d1aaa66307293996ea16a7ab2a74492295ecb6a"
+    },
+    {
+      "path": "gate-engine/decisions/eval/save-quality/corpus/adapted/batch-job-concurrency-cap.md",
+      "sha256": "36c4c00dfd907a19c538c434832da048bd9df24aea2857328cb6846e60d121fd"
+    },
+    {
+      "path": "gate-engine/decisions/eval/save-quality/corpus/adapted/log-retention-window.md",
+      "sha256": "6c5e2e1909612b09e9389398902abf07c6eeeb24c1d492139aa3055cbc797660"
+    },
+    {
+      "path": "gate-engine/decisions/eval/save-quality/corpus/adapted/queue-dead-letter-routing.md",
+      "sha256": "74be38767826de4f287665892d7f36a8fef0a137d5167ec4c77200086c390100"
+    },
+    {
+      "path": "gate-engine/decisions/eval/save-quality/corpus/adapted/tenant-data-isolation.md",
+      "sha256": "684d160aeaa2891207fa0b51108175c8b5ffd06c1bae6a39717aae0876f094c6"
+    },
+    {
+      "path": "gate-engine/decisions/eval/save-quality/corpus/adapted/webhook-retry-policy.md",
+      "sha256": "cd24b2fac681e40b0ea4247c05f8950587a5f8c163b1786b88de7db7fa4a145d"
+    },
+    {
+      "path": "gate-engine/decisions/eval/save-quality/results.baseline.json",
+      "sha256": "556cded8468f48c6044fb9bf1a4315fd4aad66f05a61c9425b09fe59991523b8"
+    },
+    {
+      "path": "gate-engine/decisions/eval/save-quality/scoring.mts",
+      "sha256": "adfb844345f25f10e3a0a19db9db64978a6e75e9259779c5e7b8548d725ed444"
+    },
+    {
+      "path": "gate-engine/decisions/git-io.mts",
+      "sha256": "7be65c003167d8967891e527bf6e8ab8e8f81903c72619168407c13dad2c9768"
+    },
+    {
+      "path": "gate-engine/decisions/integrity/checks.mts",
+      "sha256": "d35a1cad2d32a591878eae14103a7e8ada594e3882bbd1731f30ca113e5740ec"
+    },
+    {
+      "path": "gate-engine/decisions/integrity/perturb.mts",
+      "sha256": "8a20fe70217fba758e9d0910e4ff6457eccf632ef3221f02521462b376766ccd"
+    },
+    {
+      "path": "gate-engine/decisions/integrity/scan.mts",
+      "sha256": "337ce81b31272e4eed5f2a39d307b9cbc0fdc9b45dbd8265950f1474a34dac82"
+    },
+    {
+      "path": "gate-engine/decisions/integrity/staged-gate.mts",
+      "sha256": "8fccacf973908815064693709beb4e6221b7024090c85369d3849be64082c71b"
+    },
+    {
+      "path": "gate-engine/decisions/recall/categories.mts",
+      "sha256": "cf3042a716d49c57a18cbcb30b8c8fd1b37bdbc98110aec8f769a43f18a69bfb"
+    },
+    {
+      "path": "gate-engine/decisions/recall/category-report.mts",
+      "sha256": "796b82dab7a937c62b7905bdac14d3f72c7b96afe337283fc6ef28c2b9ecc45f"
+    },
+    {
+      "path": "gate-engine/decisions/recall/embeddings.mts",
+      "sha256": "4a345e46cfcb08c0d0e30f73017c0354144fd5bb09bdb784ab43859b4d98ca66"
+    },
+    {
+      "path": "gate-engine/decisions/recall/full-print.mts",
+      "sha256": "d001c710440f5609b5abddc9e3e842d0fa3b554cbd3dadc01a620b39c68ec785"
+    },
+    {
+      "path": "gate-engine/decisions/recall/markdown.mts",
+      "sha256": "81ac4ccf7da07e71bd76cf113b042f9bb99d77ca0df7ae20122f89146ec8f583"
+    },
+    {
+      "path": "gate-engine/decisions/recall/note-relations.mts",
+      "sha256": "57cc25976f70f266f4e7bd1b25c2797df9ceff24ca7a10b67fa3f4615753d3da"
+    },
+    {
+      "path": "gate-engine/decisions/recall/qualifiers.mts",
+      "sha256": "4b616376c2e666355926bf31a533637373ece67c243c101ed7c9f6132bacb101"
+    },
+    {
+      "path": "gate-engine/decisions/recall/retrieval.mts",
+      "sha256": "1d15acbeb12cd3229f8791b3feb6ddbaa66021561fe32e4c6297314a63062132"
+    },
+    {
+      "path": "gate-engine/decisions/recall/supersession.mts",
+      "sha256": "9f733ad64048e66031ef6e47758a8dc310a8c05837f80fd87e160bf6e8ac1326"
+    },
+    {
+      "path": "gate-engine/decisions/scoped-targets.mts",
+      "sha256": "ad031f99f12b81b8173902248726dd83b3db1efbc254d40ae8d84be11d891129"
+    },
+    {
+      "path": "gate-engine/decisions/verdict-cache.mts",
+      "sha256": "939232f535a4e7f430411a0e829e6089bca4ba191476ca45ea5818671c7e7c78"
+    },
+    {
+      "path": "gate-engine/deterministic/__tests__/run.test.mts",
+      "sha256": "e7b71dec9d0e082f64f96c25b5f342e752a1b8652721006a645ba4c63b70ef39"
+    },
+    {
+      "path": "gate-engine/deterministic/run.mts",
+      "sha256": "d66d8f1bdc4cff15cef8a24ee9f678f92bd950ac3903eafcc56eae20d6c59930"
+    },
+    {
+      "path": "gate-engine/devkit-version.mts",
+      "sha256": "8f87d504aa3521081eb0985da75523f9b9b417cc0bff7842fa3243603f568d5d"
+    },
+    {
+      "path": "gate-engine/edge-cases/__tests__/cases.test.mts",
+      "sha256": "80b36aa08d2cbceabd9b4572db59e0eb4a0f57461806acef79484daa0b7f6f7b"
+    },
+    {
+      "path": "gate-engine/edge-cases/eval/README.md",
+      "sha256": "5ffdcae15d10b10bcd4e32ebbcae2183ae0973a6f320c0dbb6c725abea67ea8d"
+    },
+    {
+      "path": "gate-engine/edge-cases/eval/finalize.mts",
+      "sha256": "d21664c7295908b2857697a291f269606168825e501f6e0dcdc80b060d2aaf1f"
+    },
+    {
+      "path": "gate-engine/edge-cases/eval/harvest.mts",
+      "sha256": "62d61c3de3c614ea8dc91f56b87364cb635f0e3e5232fe8fa646246c32e907e1"
+    },
+    {
+      "path": "gate-engine/edge-cases/eval/kappa.mts",
+      "sha256": "1b10667add8b625e0137c9675b339fb995971b1893b62e53f9a8dca68a272573"
+    },
+    {
+      "path": "gate-engine/edge-cases/eval/label.mts",
+      "sha256": "e4ffa02c776e75992eca2be0919f4b24d3394333f4f26e926a5fcc15cafe8c63"
+    },
+    {
+      "path": "gate-engine/edge-cases/eval/lib/excerpt.mts",
+      "sha256": "800c08ba88beb1a85a942dac4c7522f16b4e0dc94afe6c517fae9228ca745c1f"
+    },
+    {
+      "path": "gate-engine/edge-cases/eval/lib/match.mts",
+      "sha256": "451ce309d7edeb7124025c3f30aa4647fcd91d43d9e5798d971109d15e4d5b11"
+    },
+    {
+      "path": "gate-engine/edge-cases/eval/lib/schema.mts",
+      "sha256": "830b5ae5177af2c25a7cfcce895d44a49edeb0abeceb7e2f1479ecffcdb26784"
+    },
+    {
+      "path": "gate-engine/edge-cases/eval/lib/scrub.mts",
+      "sha256": "e2dbee8091a393e7f16296875790601e5b17e1c344fddc7ea480c009dca1cb2c"
+    },
+    {
+      "path": "gate-engine/edge-cases/eval/lib/sources.mts",
+      "sha256": "ac1326c9c53a69ce13084059f8e0938339168c912dd590eb06d9da4d16dd79cc"
+    },
+    {
+      "path": "gate-engine/eval/__tests__/adapters.test.mts",
+      "sha256": "3baac90992eb832cff68895fc90f9f2d0976b6aed2355f1330075e0b4f6ba4b8"
+    },
+    {
+      "path": "gate-engine/eval/__tests__/publish-lock.test.mts",
+      "sha256": "ad7de76a0ca6c58787d4caeacecdd1f69dae4e1347f8d32faa63a9eb37275fa1"
+    },
+    {
+      "path": "gate-engine/eval/__tests__/review-fixes.test.mts",
+      "sha256": "51075c48ec07c703266a3f8ce880a2764def365303ed67e38c8d212ae2ca5b9c"
+    },
+    {
+      "path": "gate-engine/eval/__tests__/source.test.mts",
+      "sha256": "b2473b327b0a70ccabb0f81868b6a26760deb8f2f756427ba18218efde75f659"
+    },
+    {
+      "path": "gate-engine/eval/__tests__/tracker-fixtures.mts",
+      "sha256": "c18d7c63884db783c5a83aa545f6cbd3a1e66718028c954ab3024713a5f9d44f"
+    },
+    {
+      "path": "gate-engine/eval/__tests__/tracker.test.mts",
+      "sha256": "0a898a84557471d7b302fab02e324838de52df7d6b65e9f0f487f15a04f0b109"
+    },
+    {
+      "path": "gate-engine/eval/adapters.mts",
+      "sha256": "9a7f48260d247e29a6d2e68b01c5543c092a036d36e85060c6318920144f6977"
+    },
+    {
+      "path": "gate-engine/eval/backfill.mts",
+      "sha256": "33bb4d002ec24f9eff9a985fb0875536f516a94da08d994ecc485b088705b760"
+    },
+    {
+      "path": "gate-engine/eval/catalog.mts",
+      "sha256": "0447e2dc46a061f7ea91be6e252f596e762f1699dd45b3e9dfc0ec39e98865e4"
+    },
+    {
+      "path": "gate-engine/eval/cli.mts",
+      "sha256": "10f6a48d33e03f71420ade116a6b723e689a1f101b1b0799498b5c4a2eb4f124"
+    },
+    {
+      "path": "gate-engine/eval/history.mts",
+      "sha256": "a0faa5eff49444950989d0c50b5dc50791df901889de043df19b7c3cd7a87a22"
+    },
+    {
+      "path": "gate-engine/eval/metric-ratio.mts",
+      "sha256": "10ea432f519a83c0afcc6bf60c482100961da51753506c7c2d99be7789510af2"
+    },
+    {
+      "path": "gate-engine/eval/publish-lock.mts",
+      "sha256": "5d3a6d6ddf08e87c3106be77edf5329ac6a77384fd6e010be32d245ccc5d4a21"
+    },
+    {
+      "path": "gate-engine/eval/render.mts",
+      "sha256": "6c414dd578d631ebb80846406edf465256f33e5d6a2918a0946605b69f777550"
+    },
+    {
+      "path": "gate-engine/eval/schema.mts",
+      "sha256": "6e6e4cce2b640a47a770c37faffe672b4471dc7cc3a652cbf709090df096b179"
+    },
+    {
+      "path": "gate-engine/eval/source.mts",
+      "sha256": "12878a76e316ffe7d653d5fafec5d78ce4b82f7266d4ec7db99c7a243fea5d88"
+    },
+    {
+      "path": "gate-engine/eval/statistics.mts",
+      "sha256": "88df2770602a5cd1a38253d4999ed08ed60c3e5ca4883ac698880e487b2f5d8c"
+    },
+    {
+      "path": "gate-engine/eval/suite-adapters/deterministic.mts",
+      "sha256": "486daa81f4aeb8905d3f684c475b154fbee927b1bc11699130861d3c4b029425"
+    },
+    {
+      "path": "gate-engine/eval/suite-adapters/prior-art.mts",
+      "sha256": "20e9a9488d248d0638f45c0a43dca54c490a76b2b7baf4bd905101d22eda72b8"
+    },
+    {
+      "path": "gate-engine/eval/tsconfig.json",
+      "sha256": "092790059022f62516b2c49030ef916333507e68fd396c90c0a24c9c54cffa33"
+    },
+    {
+      "path": "gate-engine/eval/types.mts",
+      "sha256": "d0c4b0fc6b80fde71f6d93f658094e735acf815a5b540292b722ff8220dd3114"
+    },
+    {
+      "path": "gate-engine/judge/__tests__/advisory-emit.test.mts",
+      "sha256": "3309ea66e2043679964ffdbb8bfb1ccfb76e3fc608bd606e505d2c1a40aa42ab"
+    },
+    {
+      "path": "gate-engine/judge/__tests__/claude-result.test.mts",
+      "sha256": "65ee05a4c6a7a5acaf92cac6fcf046347e66aec806a30c2a5fc806d10b63d087"
+    },
+    {
+      "path": "gate-engine/judge/__tests__/codex-mcp.test.mts",
+      "sha256": "31dc1a5556d1d18704ea51dcc09028a98375d6a1a2441a266b4920eb829fb230"
+    },
+    {
+      "path": "gate-engine/judge/__tests__/codex-result.test.mts",
+      "sha256": "cac80091624ec344896ad8f5c073eecc379f7554f34491c7a720052fb1414b6d"
+    },
+    {
+      "path": "gate-engine/judge/__tests__/diff-focus.test.mts",
+      "sha256": "1b16fe563abdf18b396d7f88a8f175f8501aa00c91a51221f7d7adbaa15ea0c8"
+    },
+    {
+      "path": "gate-engine/judge/__tests__/factory.test.mts",
+      "sha256": "409f2b76766d91061e74628fe69b3c119be05fac2d9a2bd0f944623144229b4b"
+    },
+    {
+      "path": "gate-engine/judge/__tests__/gate-bypass-telemetry.test.mts",
+      "sha256": "07e2564a69560883f59539a731e360d3f4fa6e936472be8ed6706981e8a17f53"
+    },
+    {
+      "path": "gate-engine/judge/__tests__/gate-events.test.mts",
+      "sha256": "1949950b5b030c08fd9a0c6ac5277cf0a2377198c5fa111e489e8e0fc8dd0176"
+    },
+    {
+      "path": "gate-engine/judge/__tests__/judge-exec-telemetry.test.mts",
+      "sha256": "1584199409a36fc19b872817db649cc1cbed9f788d568b2caeee8b187462f80d"
+    },
+    {
+      "path": "gate-engine/judge/__tests__/judge-isolation.test.mts",
+      "sha256": "2a174534d2876ed56263c2f6ebaff42e51520bee994200854c85e67396caddf8"
+    },
+    {
+      "path": "gate-engine/judge/__tests__/matcher-core.test.mts",
+      "sha256": "79eeba7959b01a54cac4b1a3fbae089935cca12ab3d9c95d41cbeddaef648699"
+    },
+    {
+      "path": "gate-engine/judge/__tests__/mcp-profile.test.mts",
+      "sha256": "a532e0dce0f7f698ca5a5b2926b7e364242b13fa0358013dfd647ce686220641"
+    },
+    {
+      "path": "gate-engine/judge/__tests__/odb-probe.test.mts",
+      "sha256": "028eb93891b48b3126724d77b1732eb7b333b35a9074df0c6cb8f6ca5a104361"
+    },
+    {
+      "path": "gate-engine/judge/__tests__/outage.test.mts",
+      "sha256": "de8980c7b06523dad3aeb8e61fb39d6defc78e3671583c6be4336d7de12a8809"
+    },
+    {
+      "path": "gate-engine/judge/__tests__/run-context.test.mts",
+      "sha256": "0c4440d82fd55b12d7c9faa27e38a1e2b025d33a1e4e8b38aa2a81bf8658b9e5"
+    },
+    {
+      "path": "gate-engine/judge/__tests__/run-judge.test.mts",
+      "sha256": "4071b81167fad39be122fbac3fdf93a7e2a98b74fff77a55f3e33f1669935e00"
+    },
+    {
+      "path": "gate-engine/judge/__tests__/store-retention.test.mts",
+      "sha256": "572cc87bb202ab4823630f6702133763a59c5c7011b95a32cd777c49e07eb8f4"
+    },
+    {
+      "path": "gate-engine/judge/__tests__/transcript-store.test.mts",
+      "sha256": "84be1b650cdf53eb941509361858b5f4af8f1c86bd723ea49976cd5658b3cbd6"
+    },
+    {
+      "path": "gate-engine/judge/__tests__/verdict-store.test.mts",
+      "sha256": "15f527a83f3a92c26d6b7dc881f821df6a1513bc6a460dee0c2ee562208dfadf"
+    },
+    {
+      "path": "gate-engine/judge/advisory/emit.mts",
+      "sha256": "6978860b80c7aefe6e2c04e08984b3138ba4de10e1a0d6974d6d19e5c46da798"
+    },
+    {
+      "path": "gate-engine/judge/claude-result.mts",
+      "sha256": "284b97e30bf583925dd11f1f061201b01f6d2b92e6dd402e147852c960906b4d"
+    },
+    {
+      "path": "gate-engine/judge/codex/rate-limits.mts",
+      "sha256": "08375cd3d0a3939df5ab0d79a60a4322b30d2267a523de3059f3b145dbb02ee0"
+    },
+    {
+      "path": "gate-engine/judge/codex/result.mts",
+      "sha256": "06e0279e2de0f1753c50765512ef2f7a522e78c5c182c5d253608ed67e54c5d2"
+    },
+    {
+      "path": "gate-engine/judge/diff-focus.mts",
+      "sha256": "ac5556d286302fac2c6758db33d98e916e59256b46be56d9d3cce6b475d63a6f"
+    },
+    {
+      "path": "gate-engine/judge/factory.mts",
+      "sha256": "fd7f44cc43d8c72c7b75d009ac072991fc1b5214b51f1d1b4d3dad9881a550ad"
+    },
+    {
+      "path": "gate-engine/judge/gate-events.mts",
+      "sha256": "b1cd06a85fb6a1b03fa583b3eb93434a9bd16147babbcd57fa078ecec61399ef"
+    },
+    {
+      "path": "gate-engine/judge/judge-isolation.mts",
+      "sha256": "f0b2372ab5b36ff761b45f43ec5ffc848ac24ea5c5f9bc7ef39e870144619390"
+    },
+    {
+      "path": "gate-engine/judge/matcher-core.mts",
+      "sha256": "a34d98448d81ce5ee95f003f18659c61d0a681df3d14d84fefc6d44381cce469"
+    },
+    {
+      "path": "gate-engine/judge/mcp/profile.mts",
+      "sha256": "99083171f6db326c079b713931f6ce31b6e9eb7302f8554fd4a831fe48ba016c"
+    },
+    {
+      "path": "gate-engine/judge/odb-probe.mts",
+      "sha256": "d45191757d926a097090805068703ab45674cdc3fb0b1c854cf4fa7c295d420d"
+    },
+    {
+      "path": "gate-engine/judge/outage/classify.mts",
+      "sha256": "1e72833e45f5596eee162236a80556edbc233ce16c049e89b7c341a4e72fee56"
+    },
+    {
+      "path": "gate-engine/judge/outage/wording.mts",
+      "sha256": "ff9ceaa2462f00bf81fa3e128153c1aa8e9a0898ee78f7a896eadd2fe37a4862"
+    },
+    {
+      "path": "gate-engine/judge/process/identity.mts",
+      "sha256": "9f6c33cf6d3be0fa8cdb5bbf856c38d0d682c7148dc77e321efe83edf8a3a93f"
+    },
+    {
+      "path": "gate-engine/judge/run-context.mts",
+      "sha256": "ac08cb77a3f83799f19a3f7e2731a109b6df32d29ddbd055397d472f01a80a93"
+    },
+    {
+      "path": "gate-engine/judge/run-judge.mts",
+      "sha256": "3cc6ecde1ff7551408eaa1d53e3a846bf4bd4606cdb731513f3fa9460ace74fd"
+    },
+    {
+      "path": "gate-engine/judge/store-retention.mts",
+      "sha256": "807c08a13b408eb370e9a711f3586ceb60eabf6ef6319e606f43757a2c97d6aa"
+    },
+    {
+      "path": "gate-engine/judge/transcript-store.mts",
+      "sha256": "0b0f46b779e69e2dbc36a289903eeebc352f3cdbd64d2924705dbd4dfb9e3a0f"
+    },
+    {
+      "path": "gate-engine/judge/verdict-store.mts",
+      "sha256": "24223b9625c7db493588cbd683ce54872cbb97e1db111b629b1796cc3e4a88d3"
+    },
+    {
+      "path": "gate-engine/markdown/__tests__/referenced-paths.test.mts",
+      "sha256": "443d70ff17e653360948a74ddd93b749546f7be207d37303a65414226bc1f047"
+    },
+    {
+      "path": "gate-engine/markdown/referenced-paths.mts",
+      "sha256": "9a929ff324320d349cbe7fbc78987fde7b42d39f89bce72301304a08ebe775d2"
+    },
+    {
+      "path": "gate-engine/overlay-mode.mts",
+      "sha256": "2a834b22eeb59be0a28a5992cf1187aa3765ba77d69d09bdb817e4651fff0d44"
+    },
+    {
+      "path": "gate-engine/prefix-cache/__tests__/config-fingerprint.test.mts",
+      "sha256": "2ca236f0952b534b2d9564894cdbfdc4c40c292bbb1de1a11d5eff56e106033b"
+    },
+    {
+      "path": "gate-engine/prefix-cache/__tests__/prefix-cache.test.mts",
+      "sha256": "8e37b561759b6e822549c705310210ab8db4f46e8f4ab76215b0c42b75e74880"
+    },
+    {
+      "path": "gate-engine/prefix-cache/cli.mts",
+      "sha256": "65617ceb196a1cfd43ff53d5ba524e1d95cf0cf0f3945a1d755355550de07aba"
+    },
+    {
+      "path": "gate-engine/prefix-cache/config-fingerprint.mts",
+      "sha256": "f22d884b35b920a1fe60723d097ee95fed80cdee48bda0184da9d1f84c448c8a"
+    },
+    {
+      "path": "gate-engine/prefix-cache/prefix-cache.mts",
+      "sha256": "8d201c7fdaa1b32f36551992bd42c120712fc7fe2e68b8739840628dd76ab972"
+    },
+    {
+      "path": "gate-engine/prior-art/__tests__/eval-bench.test.mts",
+      "sha256": "12137af1bf0150200f975e17ffcafa00c95fd64fedf344305a169bcd640ff658"
+    },
+    {
+      "path": "gate-engine/prior-art/__tests__/response-contract.test.mts",
+      "sha256": "2c345c406322328c2c537936c1f2beccc5440fcc0c0635ccd7970b5d1ce7248f"
+    },
+    {
+      "path": "gate-engine/prior-art/eval/README.md",
+      "sha256": "f88f735d6da8f71b03781b399277ed73b158cdd8641c878d7bf5a18f7d90ea6a"
+    },
+    {
+      "path": "gate-engine/prior-art/eval/bench.mts",
+      "sha256": "fed9889f4177c893a0421a989d5c03ef41342148efc9550cda0759c8ba373de2"
+    },
+    {
+      "path": "gate-engine/prior-art/eval/cases-prior-art.jsonl",
+      "sha256": "f68af20f042cd5922400ee4d3bf8069770fd8c884ac9db2a201796eee98d8287"
+    },
+    {
+      "path": "gate-engine/prior-art/eval/cases.mts",
+      "sha256": "50f7b9dc4a10800cbadd105ec1dad188a58316146dcc6a6bbfcdacf5254fba55"
+    },
+    {
+      "path": "gate-engine/prior-art/eval/matcher.mts",
+      "sha256": "f3ae0b2db1fc1e48cd8d5cda7d0aec784d021bf37b1013f310a7f358e5745081"
+    },
+    {
+      "path": "gate-engine/prior-art/eval/results.baseline.json",
+      "sha256": "c8ca7d02daf9bbf3fc39248f2e7392ac6df2e57b3785c07125228b838016aa3f"
+    },
+    {
+      "path": "gate-engine/prior-art/eval/run-agent.mts",
+      "sha256": "14c355aa2d25aa3a6a24d438f90121a2672b5ef71b269780f55f6a9fd4266b8e"
+    },
+    {
+      "path": "gate-engine/prior-art/response-contract.mts",
+      "sha256": "e5f6bf93fbfe4739e0e3ff76d89dc7bbd90f12c4ac71330e5e242579db6f52b5"
+    },
+    {
+      "path": "gate-engine/prior-art/response-status.mts",
+      "sha256": "dc5a2a40b4587d4ee703253d823a088b529d966b7cd6405c15ed9d56a944348f"
+    },
+    {
+      "path": "gate-engine/qavis-advisory/__tests__/qavis-advisory.test.mts",
+      "sha256": "fd79454d14776982f5c4a34bab17ed22673883dce4a25605936be7ac0545292d"
+    },
+    {
+      "path": "gate-engine/qavis-advisory/__tests__/telemetry.test.mts",
+      "sha256": "b4f3a5566a02fceff4e2666a89b34eb1b427cb0e4771d7bf0c047a3640d327bc"
+    },
+    {
+      "path": "gate-engine/qavis-advisory/check.mts",
+      "sha256": "dc4d3780dc2b1922401924c701f514eb574b9a6812d00d3e076612458e231f6e"
+    },
+    {
+      "path": "gate-engine/qavis-advisory/cli.mts",
+      "sha256": "8da8e94370b70a833562070a29d686b817d36e9aae8c1c15c2837cf20028068b"
+    },
+    {
+      "path": "gate-engine/qavis-advisory/telemetry.mts",
+      "sha256": "ff25450033cd92bbcc57605b7d0abd153b4ef7a86fc67bc0e178c08255f57a7d"
+    },
+    {
+      "path": "gate-engine/ratchets/__tests__/baseline-paths.test.mts",
+      "sha256": "05b361eadf743ce359015319d7ad1458f4abff1de857ed6ca686cd923c190405"
+    },
+    {
+      "path": "gate-engine/ratchets/__tests__/folder-fanout.test.mts",
+      "sha256": "da8d6b55ff5ae9d6112b140d256910d2e8a20d07d0e1c1dffdacf1bcfe6f703f"
+    },
+    {
+      "path": "gate-engine/ratchets/__tests__/git-index.test.mts",
+      "sha256": "d0ce6efe3b4fbe9e7db7c34a7da1316e9455ac668e690c4ad29b7e402d6901d6"
+    },
+    {
+      "path": "gate-engine/ratchets/__tests__/size-disable.test.mts",
+      "sha256": "ef03d6726a69e39a00d4bd2b6490cb6df8f4c7c82200cfe92ba8a2edd6a245bb"
+    },
+    {
+      "path": "gate-engine/ratchets/__tests__/size-preflight.test.mts",
+      "sha256": "75df2351ea504be89834595de198daf356ee49fd6a96d14dd7a6c8e0b364d954"
+    },
+    {
+      "path": "gate-engine/ratchets/baseline-paths.mts",
+      "sha256": "d9e896cc0ae32856c4ba1feddc366f871705d4181c94331f7203f1fe831e786a"
+    },
+    {
+      "path": "gate-engine/ratchets/folder-fanout.mts",
+      "sha256": "4a1ff8c25843879636cddad80373eaffa688f40c70338e1a6acf6a2888b8afc8"
+    },
+    {
+      "path": "gate-engine/ratchets/git-index.mts",
+      "sha256": "e0928a29db04f21ceaf47ee39240a32afcbee82e80f6bbe2b53e3a0bb417e4be"
+    },
+    {
+      "path": "gate-engine/ratchets/size-disable.mts",
+      "sha256": "150e8178e57e77b78d3d9c1b98fa9c695366ef761d951a5372895c8b9f520aeb"
+    },
+    {
+      "path": "gate-engine/ratchets/size-line-authority.mts",
+      "sha256": "1e8860b3eb75982b07573d0dd71e1965a611049152cbb460dca10d4d23658fd5"
+    },
+    {
+      "path": "gate-engine/ratchets/size-lines-freeze.mts",
+      "sha256": "8336d207beaeea3fa2ea84dcce7f5a8333af81b346e0b327690215cf0bc2c8b0"
+    },
+    {
+      "path": "gate-engine/ratchets/size-policy.mts",
+      "sha256": "7953a2c402e100e28b0e175cb22ae3695f2bd81069a50cd914aafa726d18d5b9"
+    },
+    {
+      "path": "gate-engine/ratchets/size-preflight.mts",
+      "sha256": "b1ef144e5977666765a08a5151c84138d5bb803cd47cab6bc64d1c6362968ede"
+    },
+    {
+      "path": "gate-engine/review/__tests__/base-context.test.mts",
+      "sha256": "ae6a288e1d558e08a4d0a46a11abe8f4c2658a65ac5e7951e1fbbb09dcc35699"
+    },
+    {
+      "path": "gate-engine/review/__tests__/baseline-gate.test.mts",
+      "sha256": "62ad89f433b9ca64839bf28372617d3c0f58f946a4070b31ff87de92e35f41f9"
+    },
+    {
+      "path": "gate-engine/review/__tests__/cache.test.mts",
+      "sha256": "5a1295d5345d9203cb8778b3d34fcd914007e0555e382535288fd32ab86a55c2"
+    },
+    {
+      "path": "gate-engine/review/__tests__/checklist-recovery.test.mts",
+      "sha256": "bae3ae9691fac3bb17c5e42958a30dd41c6a17ccaad5eb8f661e975241499f8a"
+    },
+    {
+      "path": "gate-engine/review/__tests__/checklist-store.test.mts",
+      "sha256": "fb4b51340ed725cb24f823686eb25c278cad6cb0488bca764587dcd9f7f2ea6f"
+    },
+    {
+      "path": "gate-engine/review/__tests__/chunk-telemetry.test.mts",
+      "sha256": "0e5e36638c7e99d1feb81842bb3a2d4b97a1d11f7bea193168fece342f55013f"
+    },
+    {
+      "path": "gate-engine/review/__tests__/chunk.test.mts",
+      "sha256": "d0b6341d4888a7c0b787e654fef8182e917de1d161a14b8ac369d3e32d2a21a9"
+    },
+    {
+      "path": "gate-engine/review/__tests__/chunked-plan.test.mts",
+      "sha256": "258fc439abb8fb54eeda493affab8fecae8b828d8a7c21e7f247d80c2cd4296c"
+    },
+    {
+      "path": "gate-engine/review/__tests__/claude-md.test.mts",
+      "sha256": "40b0017a0744167682281680371bc40a979ff0d040974148ce2044a71052d9ab"
+    },
+    {
+      "path": "gate-engine/review/__tests__/commit-message.test.mts",
+      "sha256": "c7da8a3f87c64bdfc6770fba7dcee822b334d94fc1a8e7c2fae55fbbebcc53bb"
+    },
+    {
+      "path": "gate-engine/review/__tests__/completeness-capability-cache.test.mts",
+      "sha256": "f12abd6eb163e5e419860e14a780c9752c765c68889ce6a9929cb5ca2bb261f7"
+    },
+    {
+      "path": "gate-engine/review/__tests__/completeness-model-routing.test.mts",
+      "sha256": "05261a990c226703f9d3584a64d1091e78b1eceb2eed5ad6d1840c47044c43d5"
+    },
+    {
+      "path": "gate-engine/review/__tests__/completeness-verdict-telemetry.test.mts",
+      "sha256": "bb907ded8439c64655b1d72fb045e0a7ad100b78e5e1d49fc11d054d49a6e9f2"
+    },
+    {
+      "path": "gate-engine/review/__tests__/consumer-identity.test.mts",
+      "sha256": "4b2ef4c9878d785b5c61ae16582f590d534fa9b23019e9a66ff2c610d751a38b"
+    },
+    {
+      "path": "gate-engine/review/__tests__/conventions-eval-bench.test.mts",
+      "sha256": "9be9e056c58c1a10b7cec5f4571260e0af921cd9c3a058d314194ba2cd0a35db"
+    },
+    {
+      "path": "gate-engine/review/__tests__/conventions-evidence.test.mts",
+      "sha256": "4168c5e8928d024aa2c50f927e5beedfbeed5659879fdebe842fe01a8f705b5a"
+    },
+    {
+      "path": "gate-engine/review/__tests__/diff-archive.test.mts",
+      "sha256": "ce9d538118a1a499081a0b50edbec278c6b58102fe01e943b0bde58f3e3afeb2"
+    },
+    {
+      "path": "gate-engine/review/__tests__/diff-evidence.test.mts",
+      "sha256": "20007690cefec79190f4dbc0afae91a0ac718a7e057595fd69586cd5ccbab2af"
+    },
+    {
+      "path": "gate-engine/review/__tests__/empty-roots.test.mts",
+      "sha256": "8cb860b99710bb868d2df064d04bd5260aaaec335bf6bf08a712097ea54a2ee8"
+    },
+    {
+      "path": "gate-engine/review/__tests__/eval-bench.test.mts",
+      "sha256": "e5300eb1b0e7edfbe26959737a16ef3a549f5fc3b36df5a89939fa4d5de7ff59"
+    },
+    {
+      "path": "gate-engine/review/__tests__/eval-checkpoint.test.mts",
+      "sha256": "e2026b76a7ccff934809b686e4afd85cc4d8270c2593007abd8f6345f8e1249a"
+    },
+    {
+      "path": "gate-engine/review/__tests__/eval-module-closure-hash.test.mts",
+      "sha256": "dc72baeeca1cad976435309b6232a7d9b40f08ed4187c6690543002dfa4faaf5"
+    },
+    {
+      "path": "gate-engine/review/__tests__/findings.test.mts",
+      "sha256": "f462c8b69540bacee3abfe8ba0a0cbbaa02cf2f652347f554a221b9eb5b9ae18"
+    },
+    {
+      "path": "gate-engine/review/__tests__/items-full.test.mts",
+      "sha256": "226e83555d07706b4a90d5e4c6b489947ab0a15ec1a6e3b81c765bbfdbc190c5"
+    },
+    {
+      "path": "gate-engine/review/__tests__/judge-outage-remedy.test.mts",
+      "sha256": "1217626967d285b7b141922631266c9e193ff81a44a328a74ffe631bd39ed20d"
+    },
+    {
+      "path": "gate-engine/review/__tests__/judge-tamper.test.mts",
+      "sha256": "f9c93c577568252103f85c45cbbbecd1880ab866db52a0ec76c6e62cd868f293"
+    },
+    {
+      "path": "gate-engine/review/__tests__/lens-split.test.mts",
+      "sha256": "bcb3e52550b1af806093948c015eb9d07ee8e81a481ac58e22ae5e2c0356147f"
+    },
+    {
+      "path": "gate-engine/review/__tests__/mine-bots.test.mts",
+      "sha256": "63ec255446c167b3fedfd5ea5295ebb90753625bc4c443bd271220db3e122f9d"
+    },
+    {
+      "path": "gate-engine/review/__tests__/mine-telemetry.test.mts",
+      "sha256": "e430c44fdbec0094ff6e4b5bb10c60fb6821616b62f979f3473800453bfedc77"
+    },
+    {
+      "path": "gate-engine/review/__tests__/multi-finding-report.test.mts",
+      "sha256": "d1a91c0460650f50726310cd3f17a06d979bccf8f74af5d81ceaf6b8867fbbe9"
+    },
+    {
+      "path": "gate-engine/review/__tests__/outage-bin.test.mts",
+      "sha256": "7958b979a908b3c18efbe3465f3dff16971004c6a4a9455533ad3a12b4e344f3"
+    },
+    {
+      "path": "gate-engine/review/__tests__/overrides.test.mts",
+      "sha256": "c6da3b23fef425f0fa959d21f5274961c609a6f276e395283a70012440819d6e"
+    },
+    {
+      "path": "gate-engine/review/__tests__/record-agent-cli.test.mts",
+      "sha256": "3f5fc25f889f087168074a26022e9c7d322fc511295a0832a67114c8750aecb5"
+    },
+    {
+      "path": "gate-engine/review/__tests__/review-model-config.test.mts",
+      "sha256": "664c0294afbb3f54c1b58f88dfa9c1ec87173017976eb65247cc87956aad2de8"
+    },
+    {
+      "path": "gate-engine/review/__tests__/review-roots.test.mts",
+      "sha256": "9f7b644085b653e01f26a8da148b6b3c597733fa4d8349a595b3962c26de63b8"
+    },
+    {
+      "path": "gate-engine/review/__tests__/review-scope-evidence.test.mts",
+      "sha256": "b9d3e3a7fdbdba62ffd0446e92cf309ab61ca1a5ea6fc6914d3884b3bc5e8416"
+    },
+    {
+      "path": "gate-engine/review/__tests__/reviewer-eval.test.mts",
+      "sha256": "0e707211b64b62210155c37ea4bf8a20be228ac787489f4d6ed1da4bf519c9dc"
+    },
+    {
+      "path": "gate-engine/review/__tests__/reviewers.test.mts",
+      "sha256": "7dba00505d4b2042e010fbfb3745257c9de853680973e0f492b1af00503a4466"
+    },
+    {
+      "path": "gate-engine/review/__tests__/run-review-fixtures.mts",
+      "sha256": "60e7de4d00249285cb0c54ef804ea15794600ffc2164a9cedd15710e74d8d373"
+    },
+    {
+      "path": "gate-engine/review/__tests__/run-review.test.mts",
+      "sha256": "6b61ef093ae4fb02928e1c323f2a89206292c77005e414aa1343e06702db4b1e"
+    },
+    {
+      "path": "gate-engine/review/__tests__/staged-git.test.mts",
+      "sha256": "09b6a83d36d2073db87ba60ef125c21e80f885533fe29acbbb325df5a815cded"
+    },
+    {
+      "path": "gate-engine/review/__tests__/targets-block.test.mts",
+      "sha256": "f42571562661ddb2bbf9d4e417497bdb7c148e1cd7bbc5d31654b43b93388c5c"
+    },
+    {
+      "path": "gate-engine/review/__tests__/waive.test.mts",
+      "sha256": "e56fe192d8e44021a50cea23e560b38778b3a5a2b84b86e3e56ec685b585c621"
+    },
+    {
+      "path": "gate-engine/review/baseline-fallow-paths.mts",
+      "sha256": "f0bbab635511103ff335ea213c4f0fdb55ecc2cfbcfab916a47adbeb25ac80bf"
+    },
+    {
+      "path": "gate-engine/review/baseline-gate.mts",
+      "sha256": "7ca3176aed31c8b4834ed692de2d93d5e1a7400f0cbf01c70ecffabc5d1aeeee"
+    },
+    {
+      "path": "gate-engine/review/cache.mts",
+      "sha256": "95aa46e9254d88850e0a1ac373e2b95ae3c4ff729f7c2431e93539bb6fa23ee7"
+    },
+    {
+      "path": "gate-engine/review/cascade/consumer-assets.mts",
+      "sha256": "14eff09c15f42b59e00676b259f7f2d3c7d3702f30600c264e05b02d3f02fb14"
+    },
+    {
+      "path": "gate-engine/review/cascade/reviewer.mts",
+      "sha256": "fcde2325a6db6fdec3871a150be65c0f0fddfa8ab8e4ef6a35eae971f4309836"
+    },
+    {
+      "path": "gate-engine/review/claude-md.mts",
+      "sha256": "68b9dadbc88fce6e5d7654de5266fd12b9fcbc2819a079b901aab160f44502d1"
+    },
+    {
+      "path": "gate-engine/review/cli.mts",
+      "sha256": "381e701669f1097338c16ccaabaa8a678d368ff25bca516c20130701d32b1571"
+    },
+    {
+      "path": "gate-engine/review/completeness.mts",
+      "sha256": "6b230d8a60a228160c5191f43ada74509509c62e01e18546ff8603e1f604d069"
+    },
+    {
+      "path": "gate-engine/review/contracts/checklist.mts",
+      "sha256": "97ff513b69219f19395ebad2a6a4a4cb5abdd4dce5a34275740de025566d838d"
+    },
+    {
+      "path": "gate-engine/review/contracts/registry.mts",
+      "sha256": "6d910d1b6fd3c05d273cdd424f686217c80e729c802be2982acb2f1244e3994a"
+    },
+    {
+      "path": "gate-engine/review/contracts/response.mts",
+      "sha256": "3b4529a05e241bd7ead1ab81879418f1c9daddf207d6b4bbeab989738c892191"
+    },
+    {
+      "path": "gate-engine/review/diff-evidence.mts",
+      "sha256": "1b6bad01ac5d2b47bd7f63e466e411c336595a7d2068265b5b3aa3173b565249"
+    },
+    {
+      "path": "gate-engine/review/eval/README.md",
+      "sha256": "eb39a5de9798ecb8099dcb00aa37490b1396b5651111f08ffd8a2a168cad949f"
+    },
+    {
+      "path": "gate-engine/review/eval/baseline-audit.mts",
+      "sha256": "8ffcc0d11e8909415e7bd3092d2e786ec382569af9cb8bbe170a7c80ab1f0d67"
+    },
+    {
+      "path": "gate-engine/review/eval/bench.mts",
+      "sha256": "6b20ece751acff2b3a5094c1bbe97a98a9fe0bff06994f632f512b007fdd2bac"
+    },
+    {
+      "path": "gate-engine/review/eval/benchmark-config.mts",
+      "sha256": "73ef64203d7d0acdb100ef97fff454229dbf4b7ba5579471bfa06507ea56289d"
+    },
+    {
+      "path": "gate-engine/review/eval/benchmark-identity.mts",
+      "sha256": "9fd3d99ff778e1d9cbae52f5ac3af929b21d904f05690813366308f8b878bca2"
+    },
+    {
+      "path": "gate-engine/review/eval/case-runner.mts",
+      "sha256": "76a4256aa1e057522790d3aac87647c02e359fb14a0d5bc6d20560887fc9468b"
+    },
+    {
+      "path": "gate-engine/review/eval/cases-completeness.jsonl",
+      "sha256": "a1104b340032ec03e31c967be46153a692defcddb10a94b6595a5b49e17e1025"
+    },
+    {
+      "path": "gate-engine/review/eval/cases.mts",
+      "sha256": "208dce69b8654ad769cd667642b0a154de3de89fc7a1a3d061b09520ca827544"
+    },
+    {
+      "path": "gate-engine/review/eval/checkpoint.mts",
+      "sha256": "f9b8fab9abfaf87186ec633dbba146095a9dc53c4c007c021d3191d738fe5692"
+    },
+    {
+      "path": "gate-engine/review/eval/conventions/README.md",
+      "sha256": "8584efd9a7bf2bff248bb28e0f1f954491e64ff27cf23536f47b1b48b581a05f"
+    },
+    {
+      "path": "gate-engine/review/eval/conventions/bench.mts",
+      "sha256": "7bb7f60114b43caedfafd96bd259d0bbeb9a6a2c63d3422d6b8616dc7e656c5e"
+    },
+    {
+      "path": "gate-engine/review/eval/conventions/cases-conventions.jsonl",
+      "sha256": "a9a553d1e54720c67c939d69c4a1522f5234ba34cef2d43ffe54b5660b544fef"
+    },
+    {
+      "path": "gate-engine/review/eval/conventions/hash-inputs.mts",
+      "sha256": "41e93d02795ae636f23087d1146a9ef2cb03a11de30f3d9592a4a477dae3cb15"
+    },
+    {
+      "path": "gate-engine/review/eval/conventions/matcher-audit-conventions.labels.jsonl",
+      "sha256": "55e81c19c4ff7999a1cf6f025dafd148c7958cffd8dcbb4eda28dc9ac06342e3"
+    },
+    {
+      "path": "gate-engine/review/eval/conventions/matcher.mts",
+      "sha256": "9dc6cdc9871b6e5de56ab2fa1135664391fd5ce2e432787c5bf24f0613437c94"
+    },
+    {
+      "path": "gate-engine/review/eval/conventions/metrics.mts",
+      "sha256": "7343fe603c93068f37286ae634d9830d647d677f550b6d68e0b56e11b163f786"
+    },
+    {
+      "path": "gate-engine/review/eval/conventions/results.baseline.json",
+      "sha256": "c513a869752bc848ae691dba310ea6e986cc684b6075b44d9874abe724b041d4"
+    },
+    {
+      "path": "gate-engine/review/eval/matcher-audit.labels.jsonl",
+      "sha256": "1070c981739b890c2b9af788ada07ce43cdfa60d0c9643be64d8b7755c108bc6"
+    },
+    {
+      "path": "gate-engine/review/eval/matcher.mts",
+      "sha256": "f7bac0fe274c167a182dfa0cf9ee40ddd7b6c1ac6be65e0576d8c08c9d145449"
+    },
+    {
+      "path": "gate-engine/review/eval/mine-cases.mts",
+      "sha256": "422550e69805e1b7176d5a22b8b35afb04f4453426a40021aaf57caa6815a401"
+    },
+    {
+      "path": "gate-engine/review/eval/module-closure-hash.mts",
+      "sha256": "91891c5d612eb25e4538e77ffaa8739280ff640295de170621a739b6d01cf9f9"
+    },
+    {
+      "path": "gate-engine/review/eval/results.baseline.json",
+      "sha256": "0297a3c725413c2618e87867f1a36f6a2f0de516f318c0084fa4bad5640b309b"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/README.md",
+      "sha256": "68716d2a8736320fa3bf07a2f78ad5a3203e6ce791d8b72dc1266aa876a021ae"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/__tests__/bench-budget.test.mts",
+      "sha256": "ea9352a75ed6ae86766341cade34240d0c29e9f92c438fe7b806d6d427351059"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/__tests__/bench-judge-env.test.mts",
+      "sha256": "5d548004ec8d464ebba9adc2800b537656d67481950553501321a41bb7a0f610"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/__tests__/chunk-guard.test.mts",
+      "sha256": "ce1c4a843f2ca75a9429651a4cadb7cbe7d9a844630154fc4c3f7f4ce4250d6f"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/__tests__/holdout-groups.test.mts",
+      "sha256": "8ae1823bd5b5eef889e2421b25323ae86f6a3f92f6a5757c12be348ee51d9392"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/__tests__/mine-common.test.mts",
+      "sha256": "34fe35a1439105d79d231f0c759f9ebfc92fa405136574d0c39a8ce13cb82996"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/__tests__/repair-controls.test.mts",
+      "sha256": "6cbf0c25c6f0a97b00babe556834a57dbe4eb20c73285e3150b346e8a1c1ebe5"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/__tests__/row-value.test.mts",
+      "sha256": "25956207daf950d8646c14c7ae664340debe48b65088a0f3e9fe95b668a69bbb"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/__tests__/warehouse-guards.test.mts",
+      "sha256": "4413634854aa2b6820a602503bc3bf3d726847dcbf49a9d8df678445a0b2f5d7"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/__tests__/weekly-mining.test.mts",
+      "sha256": "c8d791d9faeef82aeb88c4cf214567b9e01cf52b7cfd45e125a1789f502d815c"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/bench.mts",
+      "sha256": "fd97e690c9a955f3a5e2498e168b48433ab7894eeddea22fb65399147795ba30"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/cases-api-security.jsonl",
+      "sha256": "f1da286c8faefc964a63c80170db19b2e90c183626629c48f4ee002c1e68bf1c"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/cases-backend-performance.jsonl",
+      "sha256": "9cb6d4528db24d367c7a4d8ed2940503a62f9af748841aee7c0e60dc3f188cb4"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/cases-correctness.jsonl",
+      "sha256": "fa62708388345fcf776bad30811a9aa8641b68d00219b104ff19dec29caf4b9e"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/cases-frontend-performance.jsonl",
+      "sha256": "aced0cb3023ca77e67e9dd4df90dade55fbd71f74281b6f5c40f60501cd02658"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/cases-frontend-security.jsonl",
+      "sha256": "7fb70527a2d1c07ca51fd6a1974b7a561195574239893b7c12f6ce8f5f38d922"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/comparison/__tests__/corpus-growth.test.mts",
+      "sha256": "8fcf54e3b4821cc3761222a7183b64bb579597e63aabc6091a529ce8e746e36a"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/comparison/__tests__/execution.test.mts",
+      "sha256": "3283a129d82f23302c60694df81c27b74930f30c7c45261f39c46b7e4d44daf7"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/comparison/cli.mts",
+      "sha256": "81cb0102adf55a5a5a83e59b344ce2782acab71fcf28208e2d640875704cf952"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/comparison/execute.mts",
+      "sha256": "9bf0ff3455b1282b680908ee2d358421cf84cf4988834d3858e3a0d82c9cff57"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/comparison/manifest.mts",
+      "sha256": "1daa8c7503639bc99cde509f7e85cbb5e2a1ac95ff13a40f07750766b933ace0"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/corpus.mts",
+      "sha256": "5823a36dcf0adaadbdba2081e30980e1ac10535583f5f4da98c56783190be68c"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/corpus/audit.mts",
+      "sha256": "7bea387f966b61beb02294675e52c334be18c986bc16aef895435325252590d0"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/corpus/chunk-guard.mts",
+      "sha256": "19e39391797f93949e27ce8ad9049a266a217eb9f9cd36efab60ab89a46f7110"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/corpus/corpus-lint.mts",
+      "sha256": "1deb1b39e036f38022ab17c1f58fc8e1571581007b84a6a145244d853ad9abd0"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/corpus/row.mts",
+      "sha256": "1605e7dc5c13a5d0b8c3fa73738f96e9b43102900fbd5af59931fa2c919c5ceb"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/corpus/twins.mts",
+      "sha256": "31f4be1fec0fb56f6e517088959d0f439eb52de4e338cb44013127b95d8067a5"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/external/__tests__/committed-artifacts.test.mts",
+      "sha256": "0532732d54ab7763cc167aa6f8b0c3b9dc45ccb95e85080dbec2a4d5f1951325"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/external/__tests__/holes.test.mts",
+      "sha256": "ce4d458ae3be0d591c49ed3d5a47cba9bb902a9a5182db77a697f6c6c9bc81ee"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/external/__tests__/martian-export.test.mts",
+      "sha256": "c2459b57c535d9938b55af37069f00d499729120e5b5edaf2e3362b2d512e53f"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/external/crosstab-coderabbit.mts",
+      "sha256": "2a831b6c3a3149f95a8b3727556c40b7a648130b521381bd9545f4acc6775467"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/external/holes.mts",
+      "sha256": "7120c5a864c0da940f4235b2209839a0b7f78d90d2a03bab761b2ec993c51c40"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/external/martian-bench.mts",
+      "sha256": "d07111505bf17bb5648254f8e16b30b41b867f97617ccc163f5aa573231fb28b"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/external/martian-export.mts",
+      "sha256": "231fa420ad65f0857ce1a7894bfdfaf89001e4b244768260376d44372810f9d6"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/external/martian-merge.mts",
+      "sha256": "9d4fe44c48c0b25256bbb6b98f759221ed5467430ffa90847c30596fb8e99cfa"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/external/martian-prejudge.mts",
+      "sha256": "37390c318905fc4472cc67ea6c94fcad4fe13fa22ad18f9b3e192f6372c9fa79"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/external/martian-report.mts",
+      "sha256": "a0ed43d027e679d18711dc303045c104a28934dbb3a448b70a0dd3bd2d7bb501"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/external/triage-lens.mts",
+      "sha256": "dacbcddea0277051205f5ad8706cf8c2e7eac1e8ab958e8bb1131f1ee61aa1ca"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/finalize.mts",
+      "sha256": "48c069a889e31d1aea1b3ad72f9c0d2d56cdddd7f000416fd96eaed27656a230"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/mine-bots-lib.mts",
+      "sha256": "3b17436d808318c4a3094c6a16671d1d6d9590b36f45d2ab558e2e16e784d1c3"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/mine-bots.mts",
+      "sha256": "e4f015dd8706fcf568876565311ed966b327d378ab4edd39c17c7f28d0300a59"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/mine-common.mts",
+      "sha256": "3c9ac3e4c6770a313851a81ae1c97ca0870f6136e9bd51fff32115b7ce01bf55"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/mine-ghsa.mts",
+      "sha256": "07026f399416d465e7a2a187109abd8e2e84e64e11cf41f440731b8ae5700e00"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/mine-telemetry-lib.mts",
+      "sha256": "f61ee26d6e03f88776eb89b38e465b07fb3c8c422a35497bf5f82c98472a6906"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/mine-telemetry.mts",
+      "sha256": "51286855910329eefe88bb546030685c740be380c5a9db16ec05741a0f128698"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/progress.mts",
+      "sha256": "0241389f8d2a02b5c3b4f1f78ae33ba98e4b8d5c513655cafdd38d36f0dbf3b7"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/propose/propose-common.mts",
+      "sha256": "098e5a116cb06c2c7c15b126e6d76ebe8ca78172298c58018008e843c5216cee"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/propose/propose-ghsa.mts",
+      "sha256": "6072ea5ed9430badab01f6768a3491cb56dc5e5fc5e8d3c45b737d3778589fb8"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/propose/propose-telemetry.mts",
+      "sha256": "5bbd16b5ed3fc617b5f2ca13a103aea875238c3b529477ef19ac2faeeba976c2"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/propose/propose.mts",
+      "sha256": "119e7cf883d71e3a3c4ad673db4e7c70479234b5a1c166e3a4f39835c04f047d"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/propose/weekly-mining.sh",
+      "sha256": "19f5e8a34451dc4c49ba55d91707934389f48c081fde6a344abe49f95c30edf7"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/scale/__tests__/claim-cli.test.mts",
+      "sha256": "34f0b4befb133ed5cf56e2b23823d3bdec2aa6b48b9d010f9d26cd2bb40ff340"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/scale/__tests__/claim-evidence.test.mts",
+      "sha256": "7fb4de60d994f17ec5b6df2987f3d410f68a36ba7df2a5f34f2605533d35c85b"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/scale/__tests__/claim-inventory.test.mts",
+      "sha256": "21ab18a599449e6a8ffd2465f44673803ee882e69d8746d1cf29e6ebffd65bbd"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/scale/__tests__/claim-report.test.mts",
+      "sha256": "b4d2906eb0a6ff748baf4a568f9022024a056776b8d1afec8d5d26627b8d4956"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/scale/__tests__/claim-validation.test.mts",
+      "sha256": "744120ca09ecdb9d429e83b94a73ef9969434b88592fed7d2e43d9b15114ed43"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/scale/__tests__/extras-adjudicate.test.mts",
+      "sha256": "18fdeef6cd25e342788953b97b14b7c76c369c711ccc6206c8d4e844475b82ac"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/scale/__tests__/lens-run.test.mts",
+      "sha256": "e76acc49d6803f43d75181c581bb89032f4f82c8efe96e89c67bc1f278e34a16"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/scale/__tests__/materialize-identity.test.mts",
+      "sha256": "0d431de5e716bea9d0ba650192d0903a4fd22b972061263c1852f9c918fc9dd1"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/scale/__tests__/scale-bench.test.mts",
+      "sha256": "90ed0fe1e86ab5b820338eb5b97cd87d10b7d212acc476ab69c626b94968723d"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/scale/bench-args.mts",
+      "sha256": "04906c1a04313d3877e5427b76748b47b56937234a8cb77d4e2d19966e879f39"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/scale/claim-cli.mts",
+      "sha256": "49cc3cab01211f06cdf0b4048dec631ba5ae5d7539d0fcf4dbb8c7e3364c0a8c"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/scale/claim-inventory.mts",
+      "sha256": "86c9220462c8932462232a1aad5d478999ecf91bca590c79eace4e2cbc17c03d"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/scale/claim-judgments.mts",
+      "sha256": "695c5a88e56cfb4cb6cc2a13a1a6d29a6acd54f4d9f96862c04b838c20d392d9"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/scale/claim-report.mts",
+      "sha256": "b69f1dc066b46d15debaea140728586e650f7ccf25733d63562219c8dbd91f1a"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/scale/corpus/__tests__/census.test.mts",
+      "sha256": "b94ee8c8b2d1830113e5885e550e104b08e84f61e8360ee9ba78089ae9e724c1"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/scale/corpus/__tests__/manifest.test.mts",
+      "sha256": "69376beaaa8056818c7d43f38500bf8f926d71f9679a65c6a97ef6afa23da05d"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/scale/corpus/__tests__/shapes.test.mts",
+      "sha256": "20758940b0a51fe62c53ef425820d5daea3e093b7cb8c45329f27bc8c1a58315"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/scale/corpus/__tests__/visibility.test.mts",
+      "sha256": "9e57e9d833ddf613fdabeb307bd9cd007dbb0fecce7f0fc0f42a46aa0d853eea"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/scale/corpus/census-cli.mts",
+      "sha256": "325854b2e0a05a5b99cc4161b2346613329881a53b0a45f28a9c869c4803b5ca"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/scale/corpus/census-worker.mts",
+      "sha256": "e528a08c229efd53d60c503c97441f1dda503f84038fbe8534437cb8b86a7002"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/scale/corpus/census.mts",
+      "sha256": "91f5e84f380f6a52bb4e98d216a91f03e2a586fd91932611d3993a138a8e589e"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/scale/corpus/manifest.mts",
+      "sha256": "0b87e4bac84e8535de171141f9b20f8ae2986c6bd2701dc16d2299448f429040"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/scale/corpus/tsconfig.json",
+      "sha256": "0dd2a3ae0e2543eaa3d0d645951949065f38b8bd6c40aa4f683c39e5ae3321f4"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/scale/corpus/visibility.mts",
+      "sha256": "7d8887170621c7d2ec9fe4affbb7e0f20ccd91b96deff7162623872a2c1acfd2"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/scale/extras-adjudicate.mts",
+      "sha256": "459da315a592735b43c4b736806cd5ef163cfb894e0330699e99a435025c0ed9"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/scale/history/__tests__/prepare.test.mts",
+      "sha256": "d809f6eeb15a673bef009cf92b31c7f51d5ceadde8cff5980dfb56cabc9f9ca8"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/scale/history/manifest.mts",
+      "sha256": "2dfc20d081478173a26db9b270001045f571574b0b904fc94633cac298786e2a"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/scale/history/prepare.mts",
+      "sha256": "543d43ab4068866e7eb7decef3cc54fefd0fc1bc6ece048e5e5c87913197ebd6"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/scale/history/tsconfig.json",
+      "sha256": "1ef358d579e2751ed296635f494b24006ca4512b983e0c5581f4d1fdb20e12f7"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/scale/labels.mts",
+      "sha256": "11b6ab0030fd83900207ebff15c89b7b1c03370e3929f65f85d569b75816bfeb"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/scale/lens-run.mts",
+      "sha256": "4180b8dc81274d32dfc6593b5401ae6b1b0b394582d2ff6defc71428da7f132f"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/scale/materialize.mts",
+      "sha256": "076ca1d5d613b4322baeb5978925765132e3952904fb015306b28e2778c18fcc"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/scale/scale-bench.mts",
+      "sha256": "85894a3e6ee573d03829d2756dfb1b2d3b3dcd15b43723ec1acf12ccdffae9d5"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/scale/scan-candidates.mts",
+      "sha256": "611e1bb7e0bfe38a80fffe26cbc9a91d8345acf8be303beaf04fee0837443e9e"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/scale/verify-extras.mts",
+      "sha256": "43e75635b989704656be6fce6e4d5409eb9bd862d48a7c7114574d7daa73e993"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/stats.mts",
+      "sha256": "b099f09355a6f7cc44ad4d99f9af19933640f51d898d23dfdd803a2866be8fdf"
+    },
+    {
+      "path": "gate-engine/review/eval/reviewers/warehouse-guards.mts",
+      "sha256": "fc711eeaea93093d51722ef852f61a9dbbe1c145a7d33541c00f58d1357f7a14"
+    },
+    {
+      "path": "gate-engine/review/eval/scoring.mts",
+      "sha256": "af543554767c5bd11425686c3f4d31c7dcd0c0bddc4b5695c521c7e06ee579c4"
+    },
+    {
+      "path": "gate-engine/review/eval/variant-consistency.mts",
+      "sha256": "beba9be61ec7d9c23b1a6c7f7827ba384f092b14843264bfabfe9a0bc41d1d37"
+    },
+    {
+      "path": "gate-engine/review/evidence/base-context.mts",
+      "sha256": "ba0c0e56cb62979cf898f7b1f2670bbf8db3691cbfb4085d8b3ff5257d3b8e63"
+    },
+    {
+      "path": "gate-engine/review/evidence/chunk-plan.mts",
+      "sha256": "260dfc95d1a0269672636b7b42a195117a2138c0db06310bf4c06977e54bb0e7"
+    },
+    {
+      "path": "gate-engine/review/evidence/commit-message.mts",
+      "sha256": "284c9eda4280a28f32c95fac491d220d7f0968c811d9c93768b00fd083d4b587"
+    },
+    {
+      "path": "gate-engine/review/evidence/conventions.mts",
+      "sha256": "03ae619f16afbbb2cdfc53d823fb9f9b729e1a924c129257f3cc90eae170f1da"
+    },
+    {
+      "path": "gate-engine/review/evidence/diff-archive.mts",
+      "sha256": "4400df727217a80d9ddf03eac0d36a573db10e11759c91874a1158fad6388e19"
+    },
+    {
+      "path": "gate-engine/review/evidence/findings.mts",
+      "sha256": "f3bdd567161a61620ae44606db6e5ee404e6cd489bd182f14a66c227d8f4fb61"
+    },
+    {
+      "path": "gate-engine/review/evidence/items.mts",
+      "sha256": "e8f181436287c5ef2e5e49553f131e2f49c37de45dc406ac2c29938bc04c3c35"
+    },
+    {
+      "path": "gate-engine/review/evidence/line-counts.mts",
+      "sha256": "9ea953df59018117966de8571981c3949079629e3363021a7db509bccda4108f"
+    },
+    {
+      "path": "gate-engine/review/evidence/scope.mts",
+      "sha256": "cf497484ff25ba13244454f9c123189e09ca50b49fc0e82e8e6cad84e76f9dd7"
+    },
+    {
+      "path": "gate-engine/review/evidence/staged-git.mts",
+      "sha256": "ad2af01ca5203ea9e7d81d66cefce408f959495ba126bd6507cffaf234ec8797"
+    },
+    {
+      "path": "gate-engine/review/evidence/targets-block.mts",
+      "sha256": "8075b9b66894704b82c6c0b003e6aa75375e7cc7fcdad55aba82f1ef9d616c79"
+    },
+    {
+      "path": "gate-engine/review/lens/chunk-tasks.mts",
+      "sha256": "d1d4895a08fa8bbcbc994721ee256efc43fc402890ed4943c3b7006e3a438e01"
+    },
+    {
+      "path": "gate-engine/review/lens/chunk.mts",
+      "sha256": "a10bf9841b279a528420dffa5c6a0da1db8af200277513ac299b19d62ca0594c"
+    },
+    {
+      "path": "gate-engine/review/lens/groups.mts",
+      "sha256": "485ec9ff536222c9c10ab33eb49088e7551c75fa2d275ac0d46631c0213c2078"
+    },
+    {
+      "path": "gate-engine/review/lens/split.mts",
+      "sha256": "01b127a4ba5b6908e2b82d1348cf087f8b1335ca1e06da0ec86bb98913b21deb"
+    },
+    {
+      "path": "gate-engine/review/overrides.mts",
+      "sha256": "3c491bf9cf4742061eea1a24ef75ed9dd082f1c61258babb1b56b57ee43bafbc"
+    },
+    {
+      "path": "gate-engine/review/progress.mts",
+      "sha256": "79ee0351a8db1bbd1eb2d6913139d6b15c0868b087be005e0022dd341d3a54dc"
+    },
+    {
+      "path": "gate-engine/review/recovery/settle.mts",
+      "sha256": "7bfdb0621da608e666437faffb42dd73dff16ff8e581353976cb0ab0ca97f26e"
+    },
+    {
+      "path": "gate-engine/review/reviewers.mts",
+      "sha256": "3c2c653bcaa368396158d69863846b1b4ae29e0b71d62d7023bfb6b8a68510cb"
+    },
+    {
+      "path": "gate-engine/review/run-review.mts",
+      "sha256": "043b810e52d3b877b47abb80a1ffed6b328987d69e93598a6ac56598ebb47dcd"
+    },
+    {
+      "path": "gate-engine/review/runtime.mts",
+      "sha256": "bc8d742f5b65a19130e88db03b91d524d53f1e6f000cd5e14b90d9f817661c7e"
+    },
+    {
+      "path": "gate-engine/review/scope/policy.mts",
+      "sha256": "c54b997681a23158c40da1c63cc466bf1bbf058072339561cb6976e2d1c26794"
+    },
+    {
+      "path": "gate-engine/review/scope/repository.mts",
+      "sha256": "3aa8057a2d45bfa3989a291c34373dc18debdc5ad562c8f29a216fd69c87aae4"
+    },
+    {
+      "path": "gate-engine/review/telemetry/timing.mts",
+      "sha256": "b3377e4ef4705571e9653b92450c1ed8cb7f69a49126c482065621ecdcad03d4"
+    },
+    {
+      "path": "gate-engine/review/valve/waive.mts",
+      "sha256": "4ffa74389ee97a4bd99ef0a408d1a286b03681646d9ba4b9d445e7d3bf4fe259"
+    },
+    {
+      "path": "gate-engine/search-tool/__tests__/search-tool-hooks.test.mts",
+      "sha256": "d64831a0bbeb763c63b7656c6157e61c19ccd6c82f9c3371202856c65c6e3b4f"
+    },
+    {
+      "path": "gate-engine/search-tool/__tests__/search-tool-lib.test.mts",
+      "sha256": "a765c2fcb2b79463d9da036005c326acc8b663b2a33c8f8e431e6e79f4b2f1d1"
+    },
+    {
+      "path": "gate-engine/search-tool/__tests__/search-tool-shell.test.mts",
+      "sha256": "353c62c8711d50bf220abc42758e6a71aa736db1dce98c98fca6eead856b2701"
+    },
+    {
+      "path": "gate-engine/search-tool/__tests__/search-tool-targets.test.mts",
+      "sha256": "46dda6f89d40a931d749474b1546b0b59b3f08981b7f5faf073e04a0cae83891"
+    },
+    {
+      "path": "gate-engine/search-tool/eval/README.md",
+      "sha256": "0722f725929b1de071e94dac386a008c7a1afd0ee24a5cf6bef563066ce7c6a3"
+    },
+    {
+      "path": "gate-engine/search-tool/eval/eval.mts",
+      "sha256": "6e3e891c42e210b48fed24d72d3e4f83c6d280b6ae04102d113997331aac1b20"
+    },
+    {
+      "path": "gate-engine/search-tool/eval/queries.json",
+      "sha256": "2c6c84cd12a1399b339f664e8e9a0c0881e15056bdbdffeb80f22695639924ea"
+    },
+    {
+      "path": "gate-engine/search-tool/search-tool-counter.mts",
+      "sha256": "29c8a4682016776d9ad428ed38495f4ad2207976ef04deda911f6bc9fab31377"
+    },
+    {
+      "path": "gate-engine/search-tool/search-tool-guard.mts",
+      "sha256": "f0b18319bc5e779fa9ad526eabe4c2fe8d43506d8d9199358d5d09d348fbffcc"
+    },
+    {
+      "path": "gate-engine/search-tool/search-tool-lib.mts",
+      "sha256": "b189d7828feb235554a01899a73fbd17146836ecf90ca032e5bf35214f564f9a"
+    },
+    {
+      "path": "gate-engine/search-tool/search-tool-shell.mts",
+      "sha256": "d7e004dbcaaaa3cd678f2d85159e0765b5bf18159c58960d1bf710bb3291d966"
+    },
+    {
+      "path": "gate-engine/search-tool/tools.mts",
+      "sha256": "5efcb2d8f6727fbb517b56eb81d5516a8d6229cbc380e5cfe6757f72bb4d26df"
+    },
+    {
+      "path": "gate-engine/sentry/__tests__/check-sentry.test.mts",
+      "sha256": "8d981f7fdfe78ec3bc4ceac0dc2d9e0b9ac9bf6d707e9a94605c6cd36e56892f"
+    },
+    {
+      "path": "gate-engine/sentry/__tests__/evidence.test.mts",
+      "sha256": "e605661db9ab109c64d1ebdfb2d4020c9b56c19e22cdd3b5ede07ab52e876f7a"
+    },
+    {
+      "path": "gate-engine/sentry/__tests__/sentry-hard-defaults.test.mts",
+      "sha256": "fd358d3916f74ec2c6f8ff0872fc4805f48de9c59e3e51aadb3d30458ceebf2e"
+    },
+    {
+      "path": "gate-engine/sentry/__tests__/verdict-cache.test.mts",
+      "sha256": "f2e3fe0aa1ec9f2f255478c7fa1585968ca021b01a914f2c4f9a989a14dddfd2"
+    },
+    {
+      "path": "gate-engine/sentry/capture-lexer.mts",
+      "sha256": "49cb9e7914b835e7c1dd26da427c08d48c4714d02797e0e32af83cc33a1211aa"
+    },
+    {
+      "path": "gate-engine/sentry/check-sentry.mts",
+      "sha256": "de424b4758a8283c525901ba6e4ec2bde4548903e5a709e7ee794726ebf86efe"
+    },
+    {
+      "path": "gate-engine/sentry/eval/README.md",
+      "sha256": "825e34c8be7d2eb3e09d31184c70fc450d3a9d394c98aeda3f934e2dc8d122b0"
+    },
+    {
+      "path": "gate-engine/sentry/eval/bench.mts",
+      "sha256": "66bfebd22926c6ebb4fdc3d94ec121daac7fed8130027118698d85ea5afd0abf"
+    },
+    {
+      "path": "gate-engine/sentry/eval/cases.jsonl",
+      "sha256": "82a07f2d49d6b9c9f7f4d3bf73e46e1ccda2f0cb7bf020d7147c7db9dcfaab82"
+    },
+    {
+      "path": "gate-engine/sentry/evidence.mts",
+      "sha256": "c35df5037d1013f36dd84d09bd53563f7dcb571d5bea72b3d24ab96dc4d0187c"
+    },
+    {
+      "path": "gate-engine/sentry/verdict-cache.mts",
+      "sha256": "9ecd96179036e22b7b4266e5a979959f9f666ec01850d6cbacdb2f403ec29c36"
+    },
+    {
+      "path": "gate-engine/structure/__tests__/load-baseline.test.mts",
+      "sha256": "825cfda1e9e174717c9bb8f834af33181817b051b053a71f8adaaf1a3a640bf5"
+    },
+    {
+      "path": "gate-engine/structure/__tests__/run.test.mts",
+      "sha256": "124272f4ddc74d935c3571944c27b77595f58b9000e4cbf6a65d7cc5f4eff175"
+    },
+    {
+      "path": "gate-engine/structure/compile.mts",
+      "sha256": "24ab537a086b39273a84a99d205133931791e442e6fbe43eb15313deebfa59de"
+    },
+    {
+      "path": "gate-engine/structure/eslint-config.mts",
+      "sha256": "a7160996e51ce4c383d378d817940a4e43cb1670ce3f9f654078d3b7faacdf8b"
+    },
+    {
+      "path": "gate-engine/structure/grammar.mts",
+      "sha256": "0dec7aac61d3d3ec99b4938adc903a52a6dc903dc7d9b0f3ccd037c1504312e0"
+    },
+    {
+      "path": "gate-engine/structure/load-baseline.mts",
+      "sha256": "761d9b7e4269423ba2205fce74ae1b989de52e26b483333c2abe152795aec3f7"
+    },
+    {
+      "path": "gate-engine/structure/run.mts",
+      "sha256": "95abe915fa45d1c9d834b01d3f1870594e6e48d5f394a863285be5eff3109535"
+    },
+    {
+      "path": "gate-engine/structure/walk.mts",
+      "sha256": "1a28b675b2a489b5ea2148cf41d364fd2e4034617690e39faad9cb7e8727e35e"
+    },
+    {
+      "path": "gate-engine/vision/eval/runs.log",
+      "sha256": "5626959d6c4480e9ccf43dc745eea797d5ecc3fa61580f90f9f62001d775b8a1"
+    },
+    {
+      "path": "guard.config.json",
+      "sha256": "dd13ca3f8f96adea6f2e3179d26bce0da18c19e6cfb9088928a9ec70e86afa52"
+    },
+    {
+      "path": "package.json",
+      "sha256": "683360d655c68cfd3304d685159e783cc1786e962c7270e3d02f713a5f4d5bb5"
+    },
+    {
+      "path": "skills/_devkit/checklist-store.mjs",
+      "sha256": "c8a6a01fe75bd570953ccc88e3b99b8ac365bb249c4b1db2ce0c32a589c52193"
+    },
+    {
+      "path": "skills/_devkit/review-roots.d.mts",
+      "sha256": "384d95945ccf04f994d805e78a5507835321ee5bcbd46acbf216c77385238c9e"
+    },
+    {
+      "path": "skills/_devkit/review-roots.mjs",
+      "sha256": "dda5d77f78f4e9e9aed70eb2c83f70e764907deff72d91b67c0f91d88772fadc"
+    },
+    {
+      "path": "skills/correctness/SKILL.md",
+      "sha256": "d26708b78352a24582528bb6a69cafe9e6a1b566ede7ce85971a70c7f8f3231f"
+    },
+    {
+      "path": "skills/correctness/scripts/checklist.mjs",
+      "sha256": "e1151b249ea5e749460a1441484c44b7bcf245cf18053ffec43693064e01ac5c"
+    }
+  ]
+}

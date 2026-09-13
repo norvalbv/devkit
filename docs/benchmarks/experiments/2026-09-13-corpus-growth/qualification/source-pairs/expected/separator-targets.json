@@ -1,0 +1,1505 @@
+{
+  "runtime": "v24.19.0",
+  "observations": [
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "regexp statement",
+      "code": "var value = 1;\n/abc/.test(\"abc\")",
+      "expectedCount": 0,
+      "messages": [],
+      "fixed": "var value = 1;\n/abc/.test(\"abc\")",
+      "parseErrors": []
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "regexp character class",
+      "code": "var value = 1;\n/[a-z]/i.test(\"A\")",
+      "expectedCount": 0,
+      "messages": [],
+      "fixed": "var value = 1;\n/[a-z]/i.test(\"A\")",
+      "parseErrors": []
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "regexp with flag",
+      "code": "call();\n/foo/g.test(text)",
+      "expectedCount": 0,
+      "messages": [],
+      "fixed": "call();\n/foo/g.test(text)",
+      "parseErrors": []
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "template statement",
+      "code": "var value = 1;\n`abc`",
+      "expectedCount": 0,
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "nodeType": "VariableDeclaration",
+          "line": 1,
+          "column": 14,
+          "fix": {
+            "range": [
+              13,
+              14
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "var value = 1\n`abc`",
+      "parseErrors": []
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "prefix increment retained",
+      "code": "var value = 1;\n++value",
+      "expectedCount": 1,
+      "messages": [],
+      "fixed": "var value = 1;\n++value",
+      "parseErrors": []
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "prefix decrement retained",
+      "code": "var value = 1;\n--value",
+      "expectedCount": 1,
+      "messages": [],
+      "fixed": "var value = 1;\n--value",
+      "parseErrors": []
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "unary plus continuation",
+      "code": "var value = 1;\n+value",
+      "expectedCount": 0,
+      "messages": [],
+      "fixed": "var value = 1;\n+value",
+      "parseErrors": []
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "unary minus continuation",
+      "code": "var value = 1;\n-value",
+      "expectedCount": 0,
+      "messages": [],
+      "fixed": "var value = 1;\n-value",
+      "parseErrors": []
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "array continuation",
+      "code": "var value = 1;\n[1].forEach(call)",
+      "expectedCount": 0,
+      "messages": [],
+      "fixed": "var value = 1;\n[1].forEach(call)",
+      "parseErrors": []
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "parenthesized continuation",
+      "code": "var value = call;\n(function(){})()",
+      "expectedCount": 0,
+      "messages": [],
+      "fixed": "var value = call;\n(function(){})()",
+      "parseErrors": []
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "ordinary next statement",
+      "code": "var value = 1;\ncall()",
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "nodeType": "VariableDeclaration",
+          "line": 1,
+          "column": 14,
+          "fix": {
+            "range": [
+              13,
+              14
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "var value = 1\ncall()",
+      "parseErrors": []
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "same line separator",
+      "code": "var value = 1; call()",
+      "expectedCount": 0,
+      "messages": [],
+      "fixed": "var value = 1; call()",
+      "parseErrors": []
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "last semicolon",
+      "code": "call();",
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "nodeType": "ExpressionStatement",
+          "line": 1,
+          "column": 7,
+          "fix": {
+            "range": [
+              6,
+              7
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "call()",
+      "parseErrors": []
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "always requires semicolon",
+      "code": "call()",
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Missing semicolon.",
+          "nodeType": "ExpressionStatement",
+          "line": 1,
+          "column": 7,
+          "fix": {
+            "range": [
+              6,
+              6
+            ],
+            "text": ";"
+          }
+        }
+      ],
+      "fixed": "call();",
+      "parseErrors": []
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "for statement dividers",
+      "code": "for(var i=0; i<2; i++) {}",
+      "expectedCount": 0,
+      "messages": [],
+      "fixed": "for(var i=0; i<2; i++) {}",
+      "parseErrors": []
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "comment before regexp",
+      "code": "var value = 1;\n// next\n/foo/.test(text)",
+      "expectedCount": 0,
+      "messages": [],
+      "fixed": "var value = 1;\n// next\n/foo/.test(text)",
+      "parseErrors": []
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "regexp statement",
+      "code": "var value = 1;\n/abc/.test(\"abc\")",
+      "expectedCount": 0,
+      "messages": [],
+      "fixed": "var value = 1;\n/abc/.test(\"abc\")",
+      "parseErrors": []
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "regexp character class",
+      "code": "var value = 1;\n/[a-z]/i.test(\"A\")",
+      "expectedCount": 0,
+      "messages": [],
+      "fixed": "var value = 1;\n/[a-z]/i.test(\"A\")",
+      "parseErrors": []
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "regexp with flag",
+      "code": "call();\n/foo/g.test(text)",
+      "expectedCount": 0,
+      "messages": [],
+      "fixed": "call();\n/foo/g.test(text)",
+      "parseErrors": []
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "template statement",
+      "code": "var value = 1;\n`abc`",
+      "expectedCount": 0,
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "nodeType": "VariableDeclaration",
+          "line": 1,
+          "column": 14,
+          "fix": {
+            "range": [
+              13,
+              14
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "var value = 1\n`abc`",
+      "parseErrors": []
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "prefix increment retained",
+      "code": "var value = 1;\n++value",
+      "expectedCount": 1,
+      "messages": [],
+      "fixed": "var value = 1;\n++value",
+      "parseErrors": []
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "prefix decrement retained",
+      "code": "var value = 1;\n--value",
+      "expectedCount": 1,
+      "messages": [],
+      "fixed": "var value = 1;\n--value",
+      "parseErrors": []
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "unary plus continuation",
+      "code": "var value = 1;\n+value",
+      "expectedCount": 0,
+      "messages": [],
+      "fixed": "var value = 1;\n+value",
+      "parseErrors": []
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "unary minus continuation",
+      "code": "var value = 1;\n-value",
+      "expectedCount": 0,
+      "messages": [],
+      "fixed": "var value = 1;\n-value",
+      "parseErrors": []
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "array continuation",
+      "code": "var value = 1;\n[1].forEach(call)",
+      "expectedCount": 0,
+      "messages": [],
+      "fixed": "var value = 1;\n[1].forEach(call)",
+      "parseErrors": []
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "parenthesized continuation",
+      "code": "var value = call;\n(function(){})()",
+      "expectedCount": 0,
+      "messages": [],
+      "fixed": "var value = call;\n(function(){})()",
+      "parseErrors": []
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "ordinary next statement",
+      "code": "var value = 1;\ncall()",
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "nodeType": "VariableDeclaration",
+          "line": 1,
+          "column": 14,
+          "fix": {
+            "range": [
+              13,
+              14
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "var value = 1\ncall()",
+      "parseErrors": []
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "same line separator",
+      "code": "var value = 1; call()",
+      "expectedCount": 0,
+      "messages": [],
+      "fixed": "var value = 1; call()",
+      "parseErrors": []
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "last semicolon",
+      "code": "call();",
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "nodeType": "ExpressionStatement",
+          "line": 1,
+          "column": 7,
+          "fix": {
+            "range": [
+              6,
+              7
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "call()",
+      "parseErrors": []
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "always requires semicolon",
+      "code": "call()",
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Missing semicolon.",
+          "nodeType": "ExpressionStatement",
+          "line": 1,
+          "column": 7,
+          "fix": {
+            "range": [
+              6,
+              6
+            ],
+            "text": ";"
+          }
+        }
+      ],
+      "fixed": "call();",
+      "parseErrors": []
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "for statement dividers",
+      "code": "for(var i=0; i<2; i++) {}",
+      "expectedCount": 0,
+      "messages": [],
+      "fixed": "for(var i=0; i<2; i++) {}",
+      "parseErrors": []
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "comment before regexp",
+      "code": "var value = 1;\n// next\n/foo/.test(text)",
+      "expectedCount": 0,
+      "messages": [],
+      "fixed": "var value = 1;\n// next\n/foo/.test(text)",
+      "parseErrors": []
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "regexp statement",
+      "code": "var value = 1;\n/abc/.test(\"abc\")",
+      "expectedCount": 0,
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "nodeType": "VariableDeclaration",
+          "line": 1,
+          "column": 14,
+          "fix": {
+            "range": [
+              13,
+              14
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "var value = 1\n/abc/.test(\"abc\")",
+      "parseErrors": [
+        "Parsing error: Unexpected token ."
+      ]
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "regexp character class",
+      "code": "var value = 1;\n/[a-z]/i.test(\"A\")",
+      "expectedCount": 0,
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "nodeType": "VariableDeclaration",
+          "line": 1,
+          "column": 14,
+          "fix": {
+            "range": [
+              13,
+              14
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "var value = 1\n/[a-z]/i.test(\"A\")",
+      "parseErrors": []
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "regexp with flag",
+      "code": "call();\n/foo/g.test(text)",
+      "expectedCount": 0,
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "nodeType": "ExpressionStatement",
+          "line": 1,
+          "column": 7,
+          "fix": {
+            "range": [
+              6,
+              7
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "call()\n/foo/g.test(text)",
+      "parseErrors": []
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "template statement",
+      "code": "var value = 1;\n`abc`",
+      "expectedCount": 0,
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "nodeType": "VariableDeclaration",
+          "line": 1,
+          "column": 14,
+          "fix": {
+            "range": [
+              13,
+              14
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "var value = 1\n`abc`",
+      "parseErrors": []
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "prefix increment retained",
+      "code": "var value = 1;\n++value",
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "nodeType": "VariableDeclaration",
+          "line": 1,
+          "column": 14,
+          "fix": {
+            "range": [
+              13,
+              14
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "var value = 1\n++value",
+      "parseErrors": []
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "prefix decrement retained",
+      "code": "var value = 1;\n--value",
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "nodeType": "VariableDeclaration",
+          "line": 1,
+          "column": 14,
+          "fix": {
+            "range": [
+              13,
+              14
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "var value = 1\n--value",
+      "parseErrors": []
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "unary plus continuation",
+      "code": "var value = 1;\n+value",
+      "expectedCount": 0,
+      "messages": [],
+      "fixed": "var value = 1;\n+value",
+      "parseErrors": []
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "unary minus continuation",
+      "code": "var value = 1;\n-value",
+      "expectedCount": 0,
+      "messages": [],
+      "fixed": "var value = 1;\n-value",
+      "parseErrors": []
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "array continuation",
+      "code": "var value = 1;\n[1].forEach(call)",
+      "expectedCount": 0,
+      "messages": [],
+      "fixed": "var value = 1;\n[1].forEach(call)",
+      "parseErrors": []
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "parenthesized continuation",
+      "code": "var value = call;\n(function(){})()",
+      "expectedCount": 0,
+      "messages": [],
+      "fixed": "var value = call;\n(function(){})()",
+      "parseErrors": []
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "ordinary next statement",
+      "code": "var value = 1;\ncall()",
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "nodeType": "VariableDeclaration",
+          "line": 1,
+          "column": 14,
+          "fix": {
+            "range": [
+              13,
+              14
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "var value = 1\ncall()",
+      "parseErrors": []
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "same line separator",
+      "code": "var value = 1; call()",
+      "expectedCount": 0,
+      "messages": [],
+      "fixed": "var value = 1; call()",
+      "parseErrors": []
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "last semicolon",
+      "code": "call();",
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "nodeType": "ExpressionStatement",
+          "line": 1,
+          "column": 7,
+          "fix": {
+            "range": [
+              6,
+              7
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "call()",
+      "parseErrors": []
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "always requires semicolon",
+      "code": "call()",
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Missing semicolon.",
+          "nodeType": "ExpressionStatement",
+          "line": 1,
+          "column": 7,
+          "fix": {
+            "range": [
+              6,
+              6
+            ],
+            "text": ";"
+          }
+        }
+      ],
+      "fixed": "call();",
+      "parseErrors": []
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "for statement dividers",
+      "code": "for(var i=0; i<2; i++) {}",
+      "expectedCount": 0,
+      "messages": [],
+      "fixed": "for(var i=0; i<2; i++) {}",
+      "parseErrors": []
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "comment before regexp",
+      "code": "var value = 1;\n// next\n/foo/.test(text)",
+      "expectedCount": 0,
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "nodeType": "VariableDeclaration",
+          "line": 1,
+          "column": 14,
+          "fix": {
+            "range": [
+              13,
+              14
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "var value = 1\n// next\n/foo/.test(text)",
+      "parseErrors": [
+        "Parsing error: Unexpected token ."
+      ]
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "regexp statement",
+      "code": "var value = 1;\n/abc/.test(\"abc\")",
+      "expectedCount": 0,
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "nodeType": "VariableDeclaration",
+          "line": 1,
+          "column": 14,
+          "fix": {
+            "range": [
+              13,
+              14
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "var value = 1\n/abc/.test(\"abc\")",
+      "parseErrors": [
+        "Parsing error: Unexpected token ."
+      ]
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "regexp character class",
+      "code": "var value = 1;\n/[a-z]/i.test(\"A\")",
+      "expectedCount": 0,
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "nodeType": "VariableDeclaration",
+          "line": 1,
+          "column": 14,
+          "fix": {
+            "range": [
+              13,
+              14
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "var value = 1\n/[a-z]/i.test(\"A\")",
+      "parseErrors": []
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "regexp with flag",
+      "code": "call();\n/foo/g.test(text)",
+      "expectedCount": 0,
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "nodeType": "ExpressionStatement",
+          "line": 1,
+          "column": 7,
+          "fix": {
+            "range": [
+              6,
+              7
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "call()\n/foo/g.test(text)",
+      "parseErrors": []
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "template statement",
+      "code": "var value = 1;\n`abc`",
+      "expectedCount": 0,
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "nodeType": "VariableDeclaration",
+          "line": 1,
+          "column": 14,
+          "fix": {
+            "range": [
+              13,
+              14
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "var value = 1\n`abc`",
+      "parseErrors": []
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "prefix increment retained",
+      "code": "var value = 1;\n++value",
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "nodeType": "VariableDeclaration",
+          "line": 1,
+          "column": 14,
+          "fix": {
+            "range": [
+              13,
+              14
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "var value = 1\n++value",
+      "parseErrors": []
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "prefix decrement retained",
+      "code": "var value = 1;\n--value",
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "nodeType": "VariableDeclaration",
+          "line": 1,
+          "column": 14,
+          "fix": {
+            "range": [
+              13,
+              14
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "var value = 1\n--value",
+      "parseErrors": []
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "unary plus continuation",
+      "code": "var value = 1;\n+value",
+      "expectedCount": 0,
+      "messages": [],
+      "fixed": "var value = 1;\n+value",
+      "parseErrors": []
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "unary minus continuation",
+      "code": "var value = 1;\n-value",
+      "expectedCount": 0,
+      "messages": [],
+      "fixed": "var value = 1;\n-value",
+      "parseErrors": []
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "array continuation",
+      "code": "var value = 1;\n[1].forEach(call)",
+      "expectedCount": 0,
+      "messages": [],
+      "fixed": "var value = 1;\n[1].forEach(call)",
+      "parseErrors": []
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "parenthesized continuation",
+      "code": "var value = call;\n(function(){})()",
+      "expectedCount": 0,
+      "messages": [],
+      "fixed": "var value = call;\n(function(){})()",
+      "parseErrors": []
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "ordinary next statement",
+      "code": "var value = 1;\ncall()",
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "nodeType": "VariableDeclaration",
+          "line": 1,
+          "column": 14,
+          "fix": {
+            "range": [
+              13,
+              14
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "var value = 1\ncall()",
+      "parseErrors": []
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "same line separator",
+      "code": "var value = 1; call()",
+      "expectedCount": 0,
+      "messages": [],
+      "fixed": "var value = 1; call()",
+      "parseErrors": []
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "last semicolon",
+      "code": "call();",
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "nodeType": "ExpressionStatement",
+          "line": 1,
+          "column": 7,
+          "fix": {
+            "range": [
+              6,
+              7
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "call()",
+      "parseErrors": []
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "always requires semicolon",
+      "code": "call()",
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Missing semicolon.",
+          "nodeType": "ExpressionStatement",
+          "line": 1,
+          "column": 7,
+          "fix": {
+            "range": [
+              6,
+              6
+            ],
+            "text": ";"
+          }
+        }
+      ],
+      "fixed": "call();",
+      "parseErrors": []
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "for statement dividers",
+      "code": "for(var i=0; i<2; i++) {}",
+      "expectedCount": 0,
+      "messages": [],
+      "fixed": "for(var i=0; i<2; i++) {}",
+      "parseErrors": []
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "comment before regexp",
+      "code": "var value = 1;\n// next\n/foo/.test(text)",
+      "expectedCount": 0,
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "nodeType": "VariableDeclaration",
+          "line": 1,
+          "column": 14,
+          "fix": {
+            "range": [
+              13,
+              14
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "var value = 1\n// next\n/foo/.test(text)",
+      "parseErrors": [
+        "Parsing error: Unexpected token ."
+      ]
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "regexp statement",
+      "code": "var value = 1;\n/abc/.test(\"abc\")",
+      "expectedCount": 0,
+      "messages": [],
+      "fixed": "var value = 1;\n/abc/.test(\"abc\")",
+      "parseErrors": []
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "regexp character class",
+      "code": "var value = 1;\n/[a-z]/i.test(\"A\")",
+      "expectedCount": 0,
+      "messages": [],
+      "fixed": "var value = 1;\n/[a-z]/i.test(\"A\")",
+      "parseErrors": []
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "regexp with flag",
+      "code": "call();\n/foo/g.test(text)",
+      "expectedCount": 0,
+      "messages": [],
+      "fixed": "call();\n/foo/g.test(text)",
+      "parseErrors": []
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "template statement",
+      "code": "var value = 1;\n`abc`",
+      "expectedCount": 0,
+      "messages": [],
+      "fixed": "var value = 1;\n`abc`",
+      "parseErrors": []
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "prefix increment retained",
+      "code": "var value = 1;\n++value",
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "nodeType": "VariableDeclaration",
+          "line": 1,
+          "column": 14,
+          "fix": {
+            "range": [
+              13,
+              14
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "var value = 1\n++value",
+      "parseErrors": []
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "prefix decrement retained",
+      "code": "var value = 1;\n--value",
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "nodeType": "VariableDeclaration",
+          "line": 1,
+          "column": 14,
+          "fix": {
+            "range": [
+              13,
+              14
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "var value = 1\n--value",
+      "parseErrors": []
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "unary plus continuation",
+      "code": "var value = 1;\n+value",
+      "expectedCount": 0,
+      "messages": [],
+      "fixed": "var value = 1;\n+value",
+      "parseErrors": []
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "unary minus continuation",
+      "code": "var value = 1;\n-value",
+      "expectedCount": 0,
+      "messages": [],
+      "fixed": "var value = 1;\n-value",
+      "parseErrors": []
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "array continuation",
+      "code": "var value = 1;\n[1].forEach(call)",
+      "expectedCount": 0,
+      "messages": [],
+      "fixed": "var value = 1;\n[1].forEach(call)",
+      "parseErrors": []
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "parenthesized continuation",
+      "code": "var value = call;\n(function(){})()",
+      "expectedCount": 0,
+      "messages": [],
+      "fixed": "var value = call;\n(function(){})()",
+      "parseErrors": []
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "ordinary next statement",
+      "code": "var value = 1;\ncall()",
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "nodeType": "VariableDeclaration",
+          "line": 1,
+          "column": 14,
+          "fix": {
+            "range": [
+              13,
+              14
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "var value = 1\ncall()",
+      "parseErrors": []
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "same line separator",
+      "code": "var value = 1; call()",
+      "expectedCount": 0,
+      "messages": [],
+      "fixed": "var value = 1; call()",
+      "parseErrors": []
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "last semicolon",
+      "code": "call();",
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "nodeType": "ExpressionStatement",
+          "line": 1,
+          "column": 7,
+          "fix": {
+            "range": [
+              6,
+              7
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "call()",
+      "parseErrors": []
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "always requires semicolon",
+      "code": "call()",
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Missing semicolon.",
+          "nodeType": "ExpressionStatement",
+          "line": 1,
+          "column": 7,
+          "fix": {
+            "range": [
+              6,
+              6
+            ],
+            "text": ";"
+          }
+        }
+      ],
+      "fixed": "call();",
+      "parseErrors": []
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "for statement dividers",
+      "code": "for(var i=0; i<2; i++) {}",
+      "expectedCount": 0,
+      "messages": [],
+      "fixed": "for(var i=0; i<2; i++) {}",
+      "parseErrors": []
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "comment before regexp",
+      "code": "var value = 1;\n// next\n/foo/.test(text)",
+      "expectedCount": 0,
+      "messages": [],
+      "fixed": "var value = 1;\n// next\n/foo/.test(text)",
+      "parseErrors": []
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "regexp statement",
+      "code": "var value = 1;\n/abc/.test(\"abc\")",
+      "expectedCount": 0,
+      "messages": [],
+      "fixed": "var value = 1;\n/abc/.test(\"abc\")",
+      "parseErrors": []
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "regexp character class",
+      "code": "var value = 1;\n/[a-z]/i.test(\"A\")",
+      "expectedCount": 0,
+      "messages": [],
+      "fixed": "var value = 1;\n/[a-z]/i.test(\"A\")",
+      "parseErrors": []
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "regexp with flag",
+      "code": "call();\n/foo/g.test(text)",
+      "expectedCount": 0,
+      "messages": [],
+      "fixed": "call();\n/foo/g.test(text)",
+      "parseErrors": []
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "template statement",
+      "code": "var value = 1;\n`abc`",
+      "expectedCount": 0,
+      "messages": [],
+      "fixed": "var value = 1;\n`abc`",
+      "parseErrors": []
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "prefix increment retained",
+      "code": "var value = 1;\n++value",
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "nodeType": "VariableDeclaration",
+          "line": 1,
+          "column": 14,
+          "fix": {
+            "range": [
+              13,
+              14
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "var value = 1\n++value",
+      "parseErrors": []
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "prefix decrement retained",
+      "code": "var value = 1;\n--value",
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "nodeType": "VariableDeclaration",
+          "line": 1,
+          "column": 14,
+          "fix": {
+            "range": [
+              13,
+              14
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "var value = 1\n--value",
+      "parseErrors": []
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "unary plus continuation",
+      "code": "var value = 1;\n+value",
+      "expectedCount": 0,
+      "messages": [],
+      "fixed": "var value = 1;\n+value",
+      "parseErrors": []
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "unary minus continuation",
+      "code": "var value = 1;\n-value",
+      "expectedCount": 0,
+      "messages": [],
+      "fixed": "var value = 1;\n-value",
+      "parseErrors": []
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "array continuation",
+      "code": "var value = 1;\n[1].forEach(call)",
+      "expectedCount": 0,
+      "messages": [],
+      "fixed": "var value = 1;\n[1].forEach(call)",
+      "parseErrors": []
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "parenthesized continuation",
+      "code": "var value = call;\n(function(){})()",
+      "expectedCount": 0,
+      "messages": [],
+      "fixed": "var value = call;\n(function(){})()",
+      "parseErrors": []
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "ordinary next statement",
+      "code": "var value = 1;\ncall()",
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "nodeType": "VariableDeclaration",
+          "line": 1,
+          "column": 14,
+          "fix": {
+            "range": [
+              13,
+              14
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "var value = 1\ncall()",
+      "parseErrors": []
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "same line separator",
+      "code": "var value = 1; call()",
+      "expectedCount": 0,
+      "messages": [],
+      "fixed": "var value = 1; call()",
+      "parseErrors": []
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "last semicolon",
+      "code": "call();",
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Extra semicolon.",
+          "nodeType": "ExpressionStatement",
+          "line": 1,
+          "column": 7,
+          "fix": {
+            "range": [
+              6,
+              7
+            ],
+            "text": ""
+          }
+        }
+      ],
+      "fixed": "call()",
+      "parseErrors": []
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "always requires semicolon",
+      "code": "call()",
+      "expectedCount": 1,
+      "messages": [
+        {
+          "message": "Missing semicolon.",
+          "nodeType": "ExpressionStatement",
+          "line": 1,
+          "column": 7,
+          "fix": {
+            "range": [
+              6,
+              6
+            ],
+            "text": ";"
+          }
+        }
+      ],
+      "fixed": "call();",
+      "parseErrors": []
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "for statement dividers",
+      "code": "for(var i=0; i<2; i++) {}",
+      "expectedCount": 0,
+      "messages": [],
+      "fixed": "for(var i=0; i<2; i++) {}",
+      "parseErrors": []
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "comment before regexp",
+      "code": "var value = 1;\n// next\n/foo/.test(text)",
+      "expectedCount": 0,
+      "messages": [],
+      "fixed": "var value = 1;\n// next\n/foo/.test(text)",
+      "parseErrors": []
+    }
+  ]
+}

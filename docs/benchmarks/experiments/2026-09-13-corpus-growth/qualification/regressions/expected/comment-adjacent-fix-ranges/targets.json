@@ -1,0 +1,1476 @@
+{
+  "runtime": "v24.19.0",
+  "historicalCore": "3.17.0",
+  "observations": [
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "opening inline comment",
+      "code": "function f() { // note\n\n  call();\n}",
+      "options": [
+        "never"
+      ],
+      "expectedCount": 1,
+      "target": true,
+      "messages": [
+        {
+          "message": "Block must not be padded by blank lines.",
+          "line": 1,
+          "column": 14,
+          "nodeType": "BlockStatement",
+          "fix": {
+            "range": [
+              14,
+              15
+            ],
+            "text": "\n"
+          }
+        }
+      ],
+      "fixed": "function f() {\n// note\n\n  call();\n}",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "closing inline comment",
+      "code": "function f() {\n  call();\n\n/* note */ }",
+      "options": [
+        "never"
+      ],
+      "expectedCount": 1,
+      "target": true,
+      "messages": [
+        {
+          "message": "Block must not be padded by blank lines.",
+          "line": 4,
+          "column": 12,
+          "nodeType": "BlockStatement",
+          "fix": {
+            "range": [
+              36,
+              37
+            ],
+            "text": "\n"
+          }
+        }
+      ],
+      "fixed": "function f() {\n  call();\n\n/* note */\n}",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "both inline comments",
+      "code": "function f() { /* first */\n\n  call();\n\n/* last */ }",
+      "options": [
+        "never"
+      ],
+      "expectedCount": 2,
+      "target": true,
+      "messages": [
+        {
+          "message": "Block must not be padded by blank lines.",
+          "line": 1,
+          "column": 14,
+          "nodeType": "BlockStatement",
+          "fix": {
+            "range": [
+              14,
+              15
+            ],
+            "text": "\n"
+          }
+        },
+        {
+          "message": "Block must not be padded by blank lines.",
+          "line": 5,
+          "column": 12,
+          "nodeType": "BlockStatement",
+          "fix": {
+            "range": [
+              49,
+              50
+            ],
+            "text": "\n"
+          }
+        }
+      ],
+      "fixed": "function f() {\n/* first */\n\n  call();\n\n/* last */\n}",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "indented body preserved",
+      "code": "function f() {\n\n  call();\n}",
+      "options": [
+        "never"
+      ],
+      "expectedCount": 1,
+      "target": false,
+      "messages": [
+        {
+          "message": "Block must not be padded by blank lines.",
+          "line": 1,
+          "column": 14,
+          "nodeType": "BlockStatement",
+          "fix": {
+            "range": [
+              14,
+              18
+            ],
+            "text": "\n"
+          }
+        }
+      ],
+      "fixed": "function f() {\ncall();\n}",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "already unpadded",
+      "code": "function f() {\n  call();\n}",
+      "options": [
+        "never"
+      ],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "function f() {\n  call();\n}",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "empty body",
+      "code": "function f() {}",
+      "options": [
+        "never"
+      ],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "function f() {}",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "always padded",
+      "code": "function f() {\n\n  call();\n\n}",
+      "options": [
+        "always"
+      ],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "function f() {\n\n  call();\n\n}",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "always insert",
+      "code": "function f() {\n  call();\n}",
+      "options": [
+        "always"
+      ],
+      "expectedCount": 2,
+      "target": false,
+      "messages": [
+        {
+          "message": "Block must be padded by blank lines.",
+          "line": 1,
+          "column": 14,
+          "nodeType": "BlockStatement",
+          "fix": {
+            "range": [
+              14,
+              14
+            ],
+            "text": "\n"
+          }
+        },
+        {
+          "message": "Block must be padded by blank lines.",
+          "line": 3,
+          "column": 1,
+          "nodeType": "BlockStatement",
+          "fix": {
+            "range": [
+              25,
+              25
+            ],
+            "text": "\n"
+          }
+        }
+      ],
+      "fixed": "function f() {\n\n  call();\n\n}",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "multiline comment",
+      "code": "function f() { /* first\n second */\n\n  call();\n}",
+      "options": [
+        "never"
+      ],
+      "expectedCount": 1,
+      "target": false,
+      "messages": [
+        {
+          "message": "Block must not be padded by blank lines.",
+          "line": 1,
+          "column": 14,
+          "nodeType": "BlockStatement",
+          "fix": {
+            "range": [
+              14,
+              15
+            ],
+            "text": "\n"
+          }
+        }
+      ],
+      "fixed": "function f() {\n/* first\n second */\n\n  call();\n}",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "opening inline comment",
+      "code": "function f() { // note\n\n  call();\n}",
+      "options": [
+        "never"
+      ],
+      "expectedCount": 1,
+      "target": true,
+      "messages": [
+        {
+          "message": "Block must not be padded by blank lines.",
+          "line": 1,
+          "column": 14,
+          "nodeType": "BlockStatement",
+          "fix": {
+            "range": [
+              14,
+              15
+            ],
+            "text": "\n"
+          }
+        }
+      ],
+      "fixed": "function f() {\n// note\n\n  call();\n}",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "closing inline comment",
+      "code": "function f() {\n  call();\n\n/* note */ }",
+      "options": [
+        "never"
+      ],
+      "expectedCount": 1,
+      "target": true,
+      "messages": [
+        {
+          "message": "Block must not be padded by blank lines.",
+          "line": 4,
+          "column": 12,
+          "nodeType": "BlockStatement",
+          "fix": {
+            "range": [
+              36,
+              37
+            ],
+            "text": "\n"
+          }
+        }
+      ],
+      "fixed": "function f() {\n  call();\n\n/* note */\n}",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "both inline comments",
+      "code": "function f() { /* first */\n\n  call();\n\n/* last */ }",
+      "options": [
+        "never"
+      ],
+      "expectedCount": 2,
+      "target": true,
+      "messages": [
+        {
+          "message": "Block must not be padded by blank lines.",
+          "line": 1,
+          "column": 14,
+          "nodeType": "BlockStatement",
+          "fix": {
+            "range": [
+              14,
+              15
+            ],
+            "text": "\n"
+          }
+        },
+        {
+          "message": "Block must not be padded by blank lines.",
+          "line": 5,
+          "column": 12,
+          "nodeType": "BlockStatement",
+          "fix": {
+            "range": [
+              49,
+              50
+            ],
+            "text": "\n"
+          }
+        }
+      ],
+      "fixed": "function f() {\n/* first */\n\n  call();\n\n/* last */\n}",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "indented body preserved",
+      "code": "function f() {\n\n  call();\n}",
+      "options": [
+        "never"
+      ],
+      "expectedCount": 1,
+      "target": false,
+      "messages": [
+        {
+          "message": "Block must not be padded by blank lines.",
+          "line": 1,
+          "column": 14,
+          "nodeType": "BlockStatement",
+          "fix": {
+            "range": [
+              14,
+              18
+            ],
+            "text": "\n"
+          }
+        }
+      ],
+      "fixed": "function f() {\ncall();\n}",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "already unpadded",
+      "code": "function f() {\n  call();\n}",
+      "options": [
+        "never"
+      ],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "function f() {\n  call();\n}",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "empty body",
+      "code": "function f() {}",
+      "options": [
+        "never"
+      ],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "function f() {}",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "always padded",
+      "code": "function f() {\n\n  call();\n\n}",
+      "options": [
+        "always"
+      ],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "function f() {\n\n  call();\n\n}",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "always insert",
+      "code": "function f() {\n  call();\n}",
+      "options": [
+        "always"
+      ],
+      "expectedCount": 2,
+      "target": false,
+      "messages": [
+        {
+          "message": "Block must be padded by blank lines.",
+          "line": 1,
+          "column": 14,
+          "nodeType": "BlockStatement",
+          "fix": {
+            "range": [
+              14,
+              14
+            ],
+            "text": "\n"
+          }
+        },
+        {
+          "message": "Block must be padded by blank lines.",
+          "line": 3,
+          "column": 1,
+          "nodeType": "BlockStatement",
+          "fix": {
+            "range": [
+              25,
+              25
+            ],
+            "text": "\n"
+          }
+        }
+      ],
+      "fixed": "function f() {\n\n  call();\n\n}",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "multiline comment",
+      "code": "function f() { /* first\n second */\n\n  call();\n}",
+      "options": [
+        "never"
+      ],
+      "expectedCount": 1,
+      "target": false,
+      "messages": [
+        {
+          "message": "Block must not be padded by blank lines.",
+          "line": 1,
+          "column": 14,
+          "nodeType": "BlockStatement",
+          "fix": {
+            "range": [
+              14,
+              15
+            ],
+            "text": "\n"
+          }
+        }
+      ],
+      "fixed": "function f() {\n/* first\n second */\n\n  call();\n}",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "opening inline comment",
+      "code": "function f() { // note\n\n  call();\n}",
+      "options": [
+        "never"
+      ],
+      "expectedCount": 1,
+      "target": true,
+      "messages": [
+        {
+          "message": "Block must not be padded by blank lines.",
+          "line": 1,
+          "column": 14,
+          "nodeType": "BlockStatement",
+          "fix": {
+            "range": [
+              14,
+              0
+            ],
+            "text": "\n"
+          }
+        }
+      ],
+      "fixed": "function f() { // note\n\n  call();\n}",
+      "parseErrors": [],
+      "safe": false
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "closing inline comment",
+      "code": "function f() {\n  call();\n\n/* note */ }",
+      "options": [
+        "never"
+      ],
+      "expectedCount": 1,
+      "target": true,
+      "messages": [
+        {
+          "message": "Block must not be padded by blank lines.",
+          "line": 4,
+          "column": 12,
+          "nodeType": "BlockStatement",
+          "fix": {
+            "range": [
+              36,
+              26
+            ],
+            "text": "\n"
+          }
+        }
+      ],
+      "fixed": "function f() {\n  call();\n\n/* note */ }",
+      "parseErrors": [],
+      "safe": false
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "both inline comments",
+      "code": "function f() { /* first */\n\n  call();\n\n/* last */ }",
+      "options": [
+        "never"
+      ],
+      "expectedCount": 2,
+      "target": true,
+      "messages": [
+        {
+          "message": "Block must not be padded by blank lines.",
+          "line": 1,
+          "column": 14,
+          "nodeType": "BlockStatement",
+          "fix": {
+            "range": [
+              14,
+              0
+            ],
+            "text": "\n"
+          }
+        },
+        {
+          "message": "Block must not be padded by blank lines.",
+          "line": 5,
+          "column": 12,
+          "nodeType": "BlockStatement",
+          "fix": {
+            "range": [
+              49,
+              39
+            ],
+            "text": "\n"
+          }
+        }
+      ],
+      "fixed": "function f() { /* first */\n\n  call();\n\n/* last */ }",
+      "parseErrors": [],
+      "safe": false
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "indented body preserved",
+      "code": "function f() {\n\n  call();\n}",
+      "options": [
+        "never"
+      ],
+      "expectedCount": 1,
+      "target": false,
+      "messages": [
+        {
+          "message": "Block must not be padded by blank lines.",
+          "line": 1,
+          "column": 14,
+          "nodeType": "BlockStatement",
+          "fix": {
+            "range": [
+              14,
+              16
+            ],
+            "text": "\n"
+          }
+        }
+      ],
+      "fixed": "function f() {\n  call();\n}",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "already unpadded",
+      "code": "function f() {\n  call();\n}",
+      "options": [
+        "never"
+      ],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "function f() {\n  call();\n}",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "empty body",
+      "code": "function f() {}",
+      "options": [
+        "never"
+      ],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "function f() {}",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "always padded",
+      "code": "function f() {\n\n  call();\n\n}",
+      "options": [
+        "always"
+      ],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "function f() {\n\n  call();\n\n}",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "always insert",
+      "code": "function f() {\n  call();\n}",
+      "options": [
+        "always"
+      ],
+      "expectedCount": 2,
+      "target": false,
+      "messages": [
+        {
+          "message": "Block must be padded by blank lines.",
+          "line": 1,
+          "column": 14,
+          "nodeType": "BlockStatement",
+          "fix": {
+            "range": [
+              14,
+              14
+            ],
+            "text": "\n"
+          }
+        },
+        {
+          "message": "Block must be padded by blank lines.",
+          "line": 3,
+          "column": 1,
+          "nodeType": "BlockStatement",
+          "fix": {
+            "range": [
+              25,
+              25
+            ],
+            "text": "\n"
+          }
+        }
+      ],
+      "fixed": "function f() {\n\n  call();\n\n}",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "multiline comment",
+      "code": "function f() { /* first\n second */\n\n  call();\n}",
+      "options": [
+        "never"
+      ],
+      "expectedCount": 1,
+      "target": false,
+      "messages": [
+        {
+          "message": "Block must not be padded by blank lines.",
+          "line": 1,
+          "column": 14,
+          "nodeType": "BlockStatement",
+          "fix": {
+            "range": [
+              14,
+              0
+            ],
+            "text": "\n"
+          }
+        }
+      ],
+      "fixed": "function f() { /* first\n second */\n\n  call();\n}",
+      "parseErrors": [],
+      "safe": false
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "opening inline comment",
+      "code": "function f() { // note\n\n  call();\n}",
+      "options": [
+        "never"
+      ],
+      "expectedCount": 1,
+      "target": true,
+      "messages": [
+        {
+          "message": "Block must not be padded by blank lines.",
+          "line": 1,
+          "column": 14,
+          "nodeType": "BlockStatement",
+          "fix": {
+            "range": [
+              14,
+              0
+            ],
+            "text": "\n"
+          }
+        }
+      ],
+      "fixed": "function f() { // note\n\n  call();\n}",
+      "parseErrors": [],
+      "safe": false
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "closing inline comment",
+      "code": "function f() {\n  call();\n\n/* note */ }",
+      "options": [
+        "never"
+      ],
+      "expectedCount": 1,
+      "target": true,
+      "messages": [
+        {
+          "message": "Block must not be padded by blank lines.",
+          "line": 4,
+          "column": 12,
+          "nodeType": "BlockStatement",
+          "fix": {
+            "range": [
+              36,
+              26
+            ],
+            "text": "\n"
+          }
+        }
+      ],
+      "fixed": "function f() {\n  call();\n\n/* note */ }",
+      "parseErrors": [],
+      "safe": false
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "both inline comments",
+      "code": "function f() { /* first */\n\n  call();\n\n/* last */ }",
+      "options": [
+        "never"
+      ],
+      "expectedCount": 2,
+      "target": true,
+      "messages": [
+        {
+          "message": "Block must not be padded by blank lines.",
+          "line": 1,
+          "column": 14,
+          "nodeType": "BlockStatement",
+          "fix": {
+            "range": [
+              14,
+              0
+            ],
+            "text": "\n"
+          }
+        },
+        {
+          "message": "Block must not be padded by blank lines.",
+          "line": 5,
+          "column": 12,
+          "nodeType": "BlockStatement",
+          "fix": {
+            "range": [
+              49,
+              39
+            ],
+            "text": "\n"
+          }
+        }
+      ],
+      "fixed": "function f() { /* first */\n\n  call();\n\n/* last */ }",
+      "parseErrors": [],
+      "safe": false
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "indented body preserved",
+      "code": "function f() {\n\n  call();\n}",
+      "options": [
+        "never"
+      ],
+      "expectedCount": 1,
+      "target": false,
+      "messages": [
+        {
+          "message": "Block must not be padded by blank lines.",
+          "line": 1,
+          "column": 14,
+          "nodeType": "BlockStatement",
+          "fix": {
+            "range": [
+              14,
+              16
+            ],
+            "text": "\n"
+          }
+        }
+      ],
+      "fixed": "function f() {\n  call();\n}",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "already unpadded",
+      "code": "function f() {\n  call();\n}",
+      "options": [
+        "never"
+      ],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "function f() {\n  call();\n}",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "empty body",
+      "code": "function f() {}",
+      "options": [
+        "never"
+      ],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "function f() {}",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "always padded",
+      "code": "function f() {\n\n  call();\n\n}",
+      "options": [
+        "always"
+      ],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "function f() {\n\n  call();\n\n}",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "always insert",
+      "code": "function f() {\n  call();\n}",
+      "options": [
+        "always"
+      ],
+      "expectedCount": 2,
+      "target": false,
+      "messages": [
+        {
+          "message": "Block must be padded by blank lines.",
+          "line": 1,
+          "column": 14,
+          "nodeType": "BlockStatement",
+          "fix": {
+            "range": [
+              14,
+              14
+            ],
+            "text": "\n"
+          }
+        },
+        {
+          "message": "Block must be padded by blank lines.",
+          "line": 3,
+          "column": 1,
+          "nodeType": "BlockStatement",
+          "fix": {
+            "range": [
+              25,
+              25
+            ],
+            "text": "\n"
+          }
+        }
+      ],
+      "fixed": "function f() {\n\n  call();\n\n}",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "multiline comment",
+      "code": "function f() { /* first\n second */\n\n  call();\n}",
+      "options": [
+        "never"
+      ],
+      "expectedCount": 1,
+      "target": false,
+      "messages": [
+        {
+          "message": "Block must not be padded by blank lines.",
+          "line": 1,
+          "column": 14,
+          "nodeType": "BlockStatement",
+          "fix": {
+            "range": [
+              14,
+              0
+            ],
+            "text": "\n"
+          }
+        }
+      ],
+      "fixed": "function f() { /* first\n second */\n\n  call();\n}",
+      "parseErrors": [],
+      "safe": false
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "opening inline comment",
+      "code": "function f() { // note\n\n  call();\n}",
+      "options": [
+        "never"
+      ],
+      "expectedCount": 1,
+      "target": true,
+      "messages": [
+        {
+          "message": "Block must not be padded by blank lines.",
+          "line": 1,
+          "column": 16,
+          "nodeType": "BlockStatement",
+          "fix": {
+            "range": [
+              22,
+              24
+            ],
+            "text": "\n"
+          }
+        }
+      ],
+      "fixed": "function f() { // note\n  call();\n}",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "closing inline comment",
+      "code": "function f() {\n  call();\n\n/* note */ }",
+      "options": [
+        "never"
+      ],
+      "expectedCount": 1,
+      "target": true,
+      "messages": [
+        {
+          "message": "Block must not be padded by blank lines.",
+          "line": 4,
+          "column": 10,
+          "nodeType": "BlockStatement",
+          "fix": {
+            "range": [
+              24,
+              26
+            ],
+            "text": "\n"
+          }
+        }
+      ],
+      "fixed": "function f() {\n  call();\n/* note */ }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "both inline comments",
+      "code": "function f() { /* first */\n\n  call();\n\n/* last */ }",
+      "options": [
+        "never"
+      ],
+      "expectedCount": 2,
+      "target": true,
+      "messages": [
+        {
+          "message": "Block must not be padded by blank lines.",
+          "line": 1,
+          "column": 16,
+          "nodeType": "BlockStatement",
+          "fix": {
+            "range": [
+              26,
+              28
+            ],
+            "text": "\n"
+          }
+        },
+        {
+          "message": "Block must not be padded by blank lines.",
+          "line": 5,
+          "column": 10,
+          "nodeType": "BlockStatement",
+          "fix": {
+            "range": [
+              37,
+              39
+            ],
+            "text": "\n"
+          }
+        }
+      ],
+      "fixed": "function f() { /* first */\n  call();\n/* last */ }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "indented body preserved",
+      "code": "function f() {\n\n  call();\n}",
+      "options": [
+        "never"
+      ],
+      "expectedCount": 1,
+      "target": false,
+      "messages": [
+        {
+          "message": "Block must not be padded by blank lines.",
+          "line": 1,
+          "column": 14,
+          "nodeType": "BlockStatement",
+          "fix": {
+            "range": [
+              14,
+              16
+            ],
+            "text": "\n"
+          }
+        }
+      ],
+      "fixed": "function f() {\n  call();\n}",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "already unpadded",
+      "code": "function f() {\n  call();\n}",
+      "options": [
+        "never"
+      ],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "function f() {\n  call();\n}",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "empty body",
+      "code": "function f() {}",
+      "options": [
+        "never"
+      ],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "function f() {}",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "always padded",
+      "code": "function f() {\n\n  call();\n\n}",
+      "options": [
+        "always"
+      ],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "function f() {\n\n  call();\n\n}",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "always insert",
+      "code": "function f() {\n  call();\n}",
+      "options": [
+        "always"
+      ],
+      "expectedCount": 2,
+      "target": false,
+      "messages": [
+        {
+          "message": "Block must be padded by blank lines.",
+          "line": 1,
+          "column": 14,
+          "nodeType": "BlockStatement",
+          "fix": {
+            "range": [
+              14,
+              14
+            ],
+            "text": "\n"
+          }
+        },
+        {
+          "message": "Block must be padded by blank lines.",
+          "line": 3,
+          "column": 1,
+          "nodeType": "BlockStatement",
+          "fix": {
+            "range": [
+              25,
+              25
+            ],
+            "text": "\n"
+          }
+        }
+      ],
+      "fixed": "function f() {\n\n  call();\n\n}",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "multiline comment",
+      "code": "function f() { /* first\n second */\n\n  call();\n}",
+      "options": [
+        "never"
+      ],
+      "expectedCount": 1,
+      "target": false,
+      "messages": [
+        {
+          "message": "Block must not be padded by blank lines.",
+          "line": 1,
+          "column": 16,
+          "nodeType": "BlockStatement",
+          "fix": {
+            "range": [
+              34,
+              36
+            ],
+            "text": "\n"
+          }
+        }
+      ],
+      "fixed": "function f() { /* first\n second */\n  call();\n}",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "opening inline comment",
+      "code": "function f() { // note\n\n  call();\n}",
+      "options": [
+        "never"
+      ],
+      "expectedCount": 1,
+      "target": true,
+      "messages": [
+        {
+          "message": "Block must not be padded by blank lines.",
+          "line": 1,
+          "column": 16,
+          "nodeType": "BlockStatement",
+          "fix": {
+            "range": [
+              22,
+              24
+            ],
+            "text": "\n"
+          }
+        }
+      ],
+      "fixed": "function f() { // note\n  call();\n}",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "closing inline comment",
+      "code": "function f() {\n  call();\n\n/* note */ }",
+      "options": [
+        "never"
+      ],
+      "expectedCount": 1,
+      "target": true,
+      "messages": [
+        {
+          "message": "Block must not be padded by blank lines.",
+          "line": 4,
+          "column": 10,
+          "nodeType": "BlockStatement",
+          "fix": {
+            "range": [
+              24,
+              26
+            ],
+            "text": "\n"
+          }
+        }
+      ],
+      "fixed": "function f() {\n  call();\n/* note */ }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "both inline comments",
+      "code": "function f() { /* first */\n\n  call();\n\n/* last */ }",
+      "options": [
+        "never"
+      ],
+      "expectedCount": 2,
+      "target": true,
+      "messages": [
+        {
+          "message": "Block must not be padded by blank lines.",
+          "line": 1,
+          "column": 16,
+          "nodeType": "BlockStatement",
+          "fix": {
+            "range": [
+              26,
+              28
+            ],
+            "text": "\n"
+          }
+        },
+        {
+          "message": "Block must not be padded by blank lines.",
+          "line": 5,
+          "column": 10,
+          "nodeType": "BlockStatement",
+          "fix": {
+            "range": [
+              37,
+              39
+            ],
+            "text": "\n"
+          }
+        }
+      ],
+      "fixed": "function f() { /* first */\n  call();\n/* last */ }",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "indented body preserved",
+      "code": "function f() {\n\n  call();\n}",
+      "options": [
+        "never"
+      ],
+      "expectedCount": 1,
+      "target": false,
+      "messages": [
+        {
+          "message": "Block must not be padded by blank lines.",
+          "line": 1,
+          "column": 14,
+          "nodeType": "BlockStatement",
+          "fix": {
+            "range": [
+              14,
+              16
+            ],
+            "text": "\n"
+          }
+        }
+      ],
+      "fixed": "function f() {\n  call();\n}",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "already unpadded",
+      "code": "function f() {\n  call();\n}",
+      "options": [
+        "never"
+      ],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "function f() {\n  call();\n}",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "empty body",
+      "code": "function f() {}",
+      "options": [
+        "never"
+      ],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "function f() {}",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "always padded",
+      "code": "function f() {\n\n  call();\n\n}",
+      "options": [
+        "always"
+      ],
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "function f() {\n\n  call();\n\n}",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "always insert",
+      "code": "function f() {\n  call();\n}",
+      "options": [
+        "always"
+      ],
+      "expectedCount": 2,
+      "target": false,
+      "messages": [
+        {
+          "message": "Block must be padded by blank lines.",
+          "line": 1,
+          "column": 14,
+          "nodeType": "BlockStatement",
+          "fix": {
+            "range": [
+              14,
+              14
+            ],
+            "text": "\n"
+          }
+        },
+        {
+          "message": "Block must be padded by blank lines.",
+          "line": 3,
+          "column": 1,
+          "nodeType": "BlockStatement",
+          "fix": {
+            "range": [
+              25,
+              25
+            ],
+            "text": "\n"
+          }
+        }
+      ],
+      "fixed": "function f() {\n\n  call();\n\n}",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "multiline comment",
+      "code": "function f() { /* first\n second */\n\n  call();\n}",
+      "options": [
+        "never"
+      ],
+      "expectedCount": 1,
+      "target": false,
+      "messages": [
+        {
+          "message": "Block must not be padded by blank lines.",
+          "line": 1,
+          "column": 16,
+          "nodeType": "BlockStatement",
+          "fix": {
+            "range": [
+              34,
+              36
+            ],
+            "text": "\n"
+          }
+        }
+      ],
+      "fixed": "function f() { /* first\n second */\n  call();\n}",
+      "parseErrors": [],
+      "safe": true
+    }
+  ]
+}

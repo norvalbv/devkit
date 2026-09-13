@@ -1,0 +1,194 @@
+{
+  "README.md": {
+    "sha256": "76d5a29efe7538119361ed32a3a0b1843e6081bf6e0cf785574f0289e30c8b2d",
+    "bytes": 6362
+  },
+  "ast-conformance.json": {
+    "sha256": "f39987ce96b3713db1aea01dc5edbcc684a11bf469d0451e436ff446a9a7e016",
+    "bytes": 4648
+  },
+  "constructor-effect-control.cjs": {
+    "sha256": "e0382dfd9de4389035693371f53cf25ee2644577f3d794b0ac80c8f4eecda718",
+    "bytes": 612
+  },
+  "constructor-effect-control.json": {
+    "sha256": "362f693e5c9c556409053e0453e4c8ca0e28162810214e8883262a9ed7259104",
+    "bytes": 54
+  },
+  "contract-sources/benchmarks-grow-from-telemetry.md": {
+    "sha256": "f94d7c66b251249114467fa536a09968430ff4626c3da6136936a2de69c02bc9",
+    "bytes": 18414
+  },
+  "contract-sources/camelcase.md": {
+    "sha256": "408ae2e1dff2e6977c384ad14d3867d9c7d2ef89576ab3a14c807df499140802",
+    "bytes": 2815
+  },
+  "contract-sources/corpus-rows-admitted-by-coverage-cell.md": {
+    "sha256": "d87f1b231076a7f91f852e8f2ffd8be5d637cbd34b5f62be74c775a7700264b2",
+    "bytes": 14723
+  },
+  "contract-sources/guard.config.json": {
+    "sha256": "dd13ca3f8f96adea6f2e3179d26bce0da18c19e6cfb9088928a9ec70e86afa52",
+    "bytes": 3675
+  },
+  "contract-sources/max-len.md": {
+    "sha256": "4bc073ff4535b219733035bd1927c8b1aeb01460a5628756bb55197d97b3bae3",
+    "bytes": 1730
+  },
+  "contract-sources/mongoose-18-utils.js": {
+    "sha256": "3caccec18b9cd6189f4666a5a890a2e02b881baa06482503d5ab599d553735d3",
+    "bytes": 14236
+  },
+  "contract-sources/mongoose-23-utils.js": {
+    "sha256": "2ab875af9199693c3983e3b7b1767c1aeb0359e10eb8609daab85be2ad7571b9",
+    "bytes": 14175
+  },
+  "contract-sources/mongoose-24-utils.js": {
+    "sha256": "2ab875af9199693c3983e3b7b1767c1aeb0359e10eb8609daab85be2ad7571b9",
+    "bytes": 14175
+  },
+  "edge-cases.json": {
+    "sha256": "5ca60c7f3b2e43aa7514d2c9bb9f245f6cb0e97196d21b2476be493b16940622",
+    "bytes": 7774
+  },
+  "eslint-regression-edge-controls.cjs": {
+    "sha256": "fe8a297b96d8000a3b6141d5b59dd159ed93dad5eb54492971a5d8cd79d191a1",
+    "bytes": 6752
+  },
+  "eslint-regression-manifest.json": {
+    "sha256": "5cb9dbe0d77d7f90a11a412bf73123fc5ac9aec5dc70bce9507cc2eac5e24a61",
+    "bytes": 19722
+  },
+  "eslint-regression-replay-results.json": {
+    "sha256": "9eb4f7a85ba24ca33bb933a598ac3d75cc355fbedf45e078c5e3912be8729569",
+    "bytes": 5370
+  },
+  "eslint-regression-target-controls.cjs": {
+    "sha256": "6475dfdd55b52a34297d3ce8cb8843111d65ee9b37f11a862dbf691a0dea4293",
+    "bytes": 2191
+  },
+  "eslint-source-identities.json": {
+    "sha256": "96bdfc10da39637a613a2557c0e1671df19a0922fefeef00d3dcb8e485edd5c6",
+    "bytes": 8120
+  },
+  "expected/comment-adjacent-fix-ranges/edges.json": {
+    "sha256": "7a9658abb6677e40d87de0e1661e025f2dd1a5c224b1aafdc3eeb961b95ad778",
+    "bytes": 332158
+  },
+  "expected/comment-adjacent-fix-ranges/targets.json": {
+    "sha256": "acc0a403d12548d38bdda828f3ee8835012dbffef8f63f26db07bed9b23ca83e",
+    "bytes": 34483
+  },
+  "expected/destructured-edge-underscores/edges.json": {
+    "sha256": "f79b02c6c29eea1e0398b021c4a5c3fccdd260d84e759828723cf94a9999d501",
+    "bytes": 48219
+  },
+  "expected/destructured-edge-underscores/targets.json": {
+    "sha256": "d327f70431a2e75629761228698cba49850852132276d1845f39adb052c86edd",
+    "bytes": 23046
+  },
+  "expected/diagnostic-column-contract/edges.json": {
+    "sha256": "3ac05b3329e45ea1453c255d577f709f7e927d2f9eef455eed56167f9f91b589",
+    "bytes": 26587
+  },
+  "expected/diagnostic-column-contract/targets.json": {
+    "sha256": "395d7826b70d70e23b588ee345910261a252e3768e6d06d0a7dd33b52184fdc4",
+    "bytes": 29328
+  },
+  "expected/empty-super-argument-traversal/edges.json": {
+    "sha256": "af58c04fc85e5ca5dc0b93a75ceeb0150854eaede0bfb0499036e1e2161f51ec",
+    "bytes": 22618
+  },
+  "expected/empty-super-argument-traversal/targets.json": {
+    "sha256": "6d6562b90d82a357421bc981209004d6e925f908c1e7d6c1225d828805df828d",
+    "bytes": 32759
+  },
+  "independent-observations.json": {
+    "sha256": "5aabc400253884aa941677b8c83dc74bb0f50b7c59f2e91cce80872038694f05",
+    "bytes": 516269
+  },
+  "licenses/eslint-41e3d9ce08b1.txt": {
+    "sha256": "24f36230f107305b6062889f8fe6f24329852571f3f6aef735ab52ad1afe3212",
+    "bytes": 1101
+  },
+  "licenses/eslint-bdf64007e422.txt": {
+    "sha256": "9b8270febdcc7ee736eafacadb53d7707f8ca38494d9c39844fec119882e93ea",
+    "bytes": 1090
+  },
+  "licenses/eslint-ccae7eeeb9dc.txt": {
+    "sha256": "9b8270febdcc7ee736eafacadb53d7707f8ca38494d9c39844fec119882e93ea",
+    "bytes": 1090
+  },
+  "licenses/eslint-d067ae1f4e98.txt": {
+    "sha256": "db83f2ede67f36cfab1ea0721ea2ee97515863e9a65346881f305e430451cc91",
+    "bytes": 1094
+  },
+  "locks/eslint/4594959d63777744/package-lock.json": {
+    "sha256": "d5090cba10f91898492ead6ece240aa93ad447974bbaa33e4c0026d298807f3f",
+    "bytes": 70598
+  },
+  "locks/eslint/4594959d63777744/package.json": {
+    "sha256": "efe84c716139c87447f287772a9780dd692f13acfeb48002512bc895b071d980",
+    "bytes": 1047
+  },
+  "locks/eslint/6e6886423663885f/package-lock.json": {
+    "sha256": "d749372648e301aa62ae30c38e2c9d45e4fd24fe0ed07531af888a6e2ebb57f3",
+    "bytes": 62729
+  },
+  "locks/eslint/6e6886423663885f/package.json": {
+    "sha256": "b0a94be01f72effb9cf6388073670db0f7ec77f110a0f08d5f9c9023f7b703e8",
+    "bytes": 876
+  },
+  "locks/eslint/752f7ea15cb33eea/package-lock.json": {
+    "sha256": "601f4b315d6e2733b5b34676a5816a226f43d7baa9f91847fac5494c55bb1d8c",
+    "bytes": 71928
+  },
+  "locks/eslint/752f7ea15cb33eea/package.json": {
+    "sha256": "6e996ddc186e79bc53c9148610f17c8289bd468802e5cdb71ffcf8522e698b97",
+    "bytes": 1077
+  },
+  "locks/eslint/b287c2f88638ec7d/package-lock.json": {
+    "sha256": "484294ed286fe1cc02fb93df9f92a5f92d8399bf8aa617652aed446a2c1f1fac",
+    "bytes": 77154
+  },
+  "locks/eslint/b287c2f88638ec7d/package.json": {
+    "sha256": "9664fe26e899402bee706140170b4ede375ab02c9ff6dee564e42de51338b8ca",
+    "bytes": 1181
+  },
+  "mongoose-population-edge-controls.cjs": {
+    "sha256": "e3309b8220f494d392f41e7a479829828f5159b91f8e2ebac32983345e002fe1",
+    "bytes": 9129
+  },
+  "population-edge-manifest.json": {
+    "sha256": "c12d1f8af71c929a4de04e89ed1457b2639ea9ae478eb116737706b645d5e027",
+    "bytes": 32155
+  },
+  "qualification-evidence.json": {
+    "sha256": "353826b1eb1eecf8c29a53405fe4c537528e3e3fdcca0161e517a8331b443c83",
+    "bytes": 45166
+  },
+  "replay-eslint-regressions.py": {
+    "sha256": "117830aee45a39b9c1c9daa39c0c7bd3fa859416cb23b64fe52cefd1cf9e4afe",
+    "bytes": 5766
+  },
+  "source-conformance-report.md": {
+    "sha256": "22a1364c5d9029c64c16dba3c5b1805597ce268707ecd143ec9d3e9c7ba21001",
+    "bytes": 25050
+  },
+  "source-identities.json": {
+    "sha256": "b73074e609a330c37e89f0e1550fa4962a9bedce0732490a11f7b1d4435af365",
+    "bytes": 15558
+  },
+  "target-only/destructured-edge-underscores/repair-adapted.js": {
+    "sha256": "87d3acbfec9c45d724b940d153fb1ddd5255b70bb91d2af53b26c9979bc4dda3",
+    "bytes": 3641
+  },
+  "target-only/diagnostic-column-contract/repair-adapted.js": {
+    "sha256": "3769cf2fdf464e78770b6f1bd9186e684b3c29cfa3f4de8ba4e1290e4af83363",
+    "bytes": 1012
+  },
+  "target-only/empty-super-argument-traversal/repair-adapted.js": {
+    "sha256": "d080a8ad019c1e22840190984031c6d3239ddb2965adb4fa096b5c4d8d56adde",
+    "bytes": 2321
+  }
+}

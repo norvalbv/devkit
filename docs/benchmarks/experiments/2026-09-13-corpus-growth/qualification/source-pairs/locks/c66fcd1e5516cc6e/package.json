@@ -1,0 +1,7 @@
+{
+  "private": true,
+  "name": "private-corpus-controls",
+  "dependencies": {
+    "query-string": "^5.0.0"
+  }
+}

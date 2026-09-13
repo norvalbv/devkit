@@ -1,0 +1,1069 @@
+{
+  "corpusSha256": "fa62708388345fcf776bad30811a9aa8641b68d00219b104ff19dec29caf4b9e",
+  "sourceExposed": true,
+  "humanGroundTruth": false,
+  "qualificationCounts": {
+    "observations": 738,
+    "sourceAdaptationComparisons": 369,
+    "mismatches": 0,
+    "mongooseScenarios": 48,
+    "eslintScenarios": 91
+  },
+  "sourceIdentitySummary": {
+    "sourceEndpointCount": 32,
+    "wholeASTIdentityCount": 32,
+    "exactUpstreamBytes": 30,
+    "sourceDifferences": "Mongoose18 repair one comment capitalization; Mongoose24 repair one blank line. Both whole ASTs equal to original upstream. All parent and ESLint endpoints exact."
+  },
+  "population": [
+    {
+      "number": 2,
+      "corpusId": "corr-unregistered-population-model-clean",
+      "expected": "PASS",
+      "family": "corr-source-mongoose-document-context",
+      "finding": "Eligible: actual missing/ad-hoc/explicit reference model paths, empty inputs, explicit unknown-model error and retained declared reference controls. No new query issued for missing/null paths.",
+      "sourceIdentity": {
+        "library": "mongoose",
+        "number": 2,
+        "upstreamFix": "c671672a908e4e3ae693e499e7f9fe649aa41db7",
+        "upstreamParent": "d5d34382c980d94a11d20e08ee3b9abee8a7f8b5",
+        "subject": "partial revert of eca2607",
+        "sourceFiles": [
+          {
+            "stage": "base",
+            "path": "lib/model.js",
+            "sha256": "75640cb9f5127f008a588ac34efc91e49d7f443e65693775320020fabff11230",
+            "datasetMatches": true,
+            "upstreamMatches": true,
+            "upstreamSha256": "75640cb9f5127f008a588ac34efc91e49d7f443e65693775320020fabff11230",
+            "adaptedSha256": "148f6602d1d7bb2a6e31078476882482ce4ec0bc03a6e94a75677693ac1fdee7",
+            "receiptMatches": true,
+            "proposalMatches": true
+          },
+          {
+            "stage": "repair",
+            "path": "lib/model.js",
+            "sha256": "c4e3c083cfed312b5c5e0f69a4c7ff6b8b5a9dfb69b0a08b56977c29a8f78f80",
+            "datasetMatches": true,
+            "upstreamMatches": true,
+            "upstreamSha256": "c4e3c083cfed312b5c5e0f69a4c7ff6b8b5a9dfb69b0a08b56977c29a8f78f80",
+            "adaptedSha256": "5b29dadb927048e4d30ccfe65c2a0577fa7a00c5d13834428e05dc15fd030e01",
+            "receiptMatches": true,
+            "proposalMatches": true
+          }
+        ],
+        "proposalSha256": "308b915654a9dc1f630a403c95510de1569891c91de47f5c2ce112cb9a95ca40",
+        "caseId": "corr-source-mongoose-document-context",
+        "runtime": {
+          "version": "3.6.0rc0",
+          "runtimeId": "a4398ebdfd6599e0",
+          "lockSha256": "85a777bb1099f2f6be03eec46c10a867b79fc40451e7f2803656c24393b8d2b7"
+        }
+      },
+      "independent": {
+        "scenarios": 6,
+        "observations": 24,
+        "comparisons": 12,
+        "sourceAdaptationEqual": true,
+        "directory": "mongoose/2"
+      },
+      "replayInterface": "Existing public replay-runtime.py with population-edge-manifest.json fields and mongoose-population-edge-controls.cjs"
+    },
+    {
+      "number": 4,
+      "corpusId": "corr-populated-query-lean-mode-clean",
+      "expected": "PASS",
+      "family": "corr-source-query-projection-slice",
+      "finding": "Eligible: actual find/findOne lean inheritance plus fresh queries reusing population options preserve later hydrated behavior. The initial repeated same-query probe exposed an unchanged model-registration error in both source endpoints and is not an introduced finding. Explicit parent lean propagation is the proposed feature, not a contract contradiction.",
+      "sourceIdentity": {
+        "library": "mongoose",
+        "number": 4,
+        "upstreamFix": "c5527ba0f84a7fa13bc6a4368f715db0253cc916",
+        "upstreamParent": "129bc78d81df30189269e42a8586cd42b443aeb6",
+        "subject": "fixed; lean population",
+        "sourceFiles": [
+          {
+            "stage": "base",
+            "path": "lib/query.js",
+            "sha256": "bd3ab0d5ceef740ee37fc6b81c443ec18cb55622be2e7210d2453fa66f0457ff",
+            "datasetMatches": true,
+            "upstreamMatches": true,
+            "upstreamSha256": "bd3ab0d5ceef740ee37fc6b81c443ec18cb55622be2e7210d2453fa66f0457ff",
+            "adaptedSha256": "f2b5d98861e75d0be228ef083d1bd0103ac1f1112264f55f465f890e87dfaffa",
+            "receiptMatches": true,
+            "proposalMatches": true
+          },
+          {
+            "stage": "repair",
+            "path": "lib/query.js",
+            "sha256": "f698ade0fbf9f2c09f3ff06b4ef5d9db0a30c5e044b3eda53cf0b53bc97f3979",
+            "datasetMatches": true,
+            "upstreamMatches": true,
+            "upstreamSha256": "f698ade0fbf9f2c09f3ff06b4ef5d9db0a30c5e044b3eda53cf0b53bc97f3979",
+            "adaptedSha256": "4ef0384c246e8883e9b71d5e9cf3222b76b47a3a267e78c38d0cde6f63b6cfe3",
+            "receiptMatches": true,
+            "proposalMatches": true
+          }
+        ],
+        "proposalSha256": "27b283f4dc1426fb3ad5ab0d1d09e8327cbd7ae3ca93e480e159b353449b15c9",
+        "caseId": "corr-source-query-projection-slice",
+        "runtime": {
+          "version": "3.6.0rc0",
+          "runtimeId": "a2f71681e72ce009",
+          "lockSha256": "ef0d8f8ca7130066a8addeb8ea8507523d4c643d1007c6b64424bb17fe287ad4"
+        }
+      },
+      "independent": {
+        "scenarios": 4,
+        "observations": 16,
+        "comparisons": 8,
+        "sourceAdaptationEqual": true,
+        "directory": "mongoose/4"
+      },
+      "replayInterface": "Existing public replay-runtime.py with population-edge-manifest.json fields and mongoose-population-edge-controls.cjs"
+    },
+    {
+      "number": 7,
+      "corpusId": "corr-atomic-query-population-clean",
+      "expected": "PASS",
+      "family": "corr-source-query-projection-slice",
+      "finding": "Eligible: both atomic methods retain null and driver errors, propagate population lookup errors through callback, and preserve non-populated hydration. Prepared success/lean controls cover new behavior.",
+      "sourceIdentity": {
+        "library": "mongoose",
+        "number": 7,
+        "upstreamFix": "b7688c2e5b0eb00858256aa677fb9d703c249055",
+        "upstreamParent": "2f111f9f25217c6747fb9790bf265010a43a5a72",
+        "subject": "added; populate support to findAndModify varients",
+        "sourceFiles": [
+          {
+            "stage": "base",
+            "path": "lib/query.js",
+            "sha256": "c4fc93a1c1ee3456575957f5a81aed3f696dce34eb6265f110fd99c57cb4ff66",
+            "datasetMatches": true,
+            "upstreamMatches": true,
+            "upstreamSha256": "c4fc93a1c1ee3456575957f5a81aed3f696dce34eb6265f110fd99c57cb4ff66",
+            "adaptedSha256": "263ecea5978947cb37872a42f8ab60007c0a7dda5a86ba1dc99384307361e2f7",
+            "receiptMatches": true,
+            "proposalMatches": true
+          },
+          {
+            "stage": "repair",
+            "path": "lib/query.js",
+            "sha256": "2383f6026db15ccfcdd9458bfa32222b71f51a2552030091b385db73c52b31ec",
+            "datasetMatches": true,
+            "upstreamMatches": true,
+            "upstreamSha256": "2383f6026db15ccfcdd9458bfa32222b71f51a2552030091b385db73c52b31ec",
+            "adaptedSha256": "1bdbf39db3ee1eb516841cd7f1b186abc1eb9284df437d19676916fac8cd3ccc",
+            "receiptMatches": true,
+            "proposalMatches": true
+          }
+        ],
+        "proposalSha256": "c5edffa2269c20b2fb1750f1353e5f2486addb01aa7c2fac384682dd34097cd3",
+        "caseId": "corr-source-query-projection-slice",
+        "runtime": {
+          "version": "3.6.1-pre",
+          "runtimeId": "9d85b7f1fcd9acd6",
+          "lockSha256": "eb0b911a3150f0e821f614f62910cb11090674a006983d1b8b148a7981767cc1"
+        }
+      },
+      "independent": {
+        "scenarios": 7,
+        "observations": 28,
+        "comparisons": 14,
+        "sourceAdaptationEqual": true,
+        "directory": "mongoose/7"
+      },
+      "replayInterface": "Existing public replay-runtime.py with population-edge-manifest.json fields and mongoose-population-edge-controls.cjs"
+    },
+    {
+      "number": 13,
+      "corpusId": "corr-saved-reference-depopulation-clean",
+      "expected": "PASS",
+      "family": "corr-source-mongoose-document-context",
+      "finding": "Eligible: new saves depopulate scalar/array references while preserving top-level objects; independent modified-document delta, repeated ordinary toObject options and embedded-document save controls retain behavior. Complete model/document modules require shared family union.",
+      "sourceIdentity": {
+        "library": "mongoose",
+        "number": 13,
+        "upstreamFix": "a48c4054f38a7a11d968ffb44f7760abb9117ffa",
+        "upstreamParent": "57e8bf6da4b8b346cb8d064ee7dce3248fba7787",
+        "subject": "fixed; saving populated new docs",
+        "sourceFiles": [
+          {
+            "stage": "base",
+            "path": "lib/document.js",
+            "sha256": "7aec112205d8a6fc6c473ad3750118ea719026a0a43a9baf9f0b29251a1d5bbf",
+            "datasetMatches": true,
+            "upstreamMatches": true,
+            "upstreamSha256": "7aec112205d8a6fc6c473ad3750118ea719026a0a43a9baf9f0b29251a1d5bbf",
+            "adaptedSha256": "32eb071eb9a6741218b4315dbf58b3be5cc596e64c89d8aefe6add8fbfbec9d0",
+            "receiptMatches": true,
+            "proposalMatches": true
+          },
+          {
+            "stage": "base",
+            "path": "lib/model.js",
+            "sha256": "f3e8d090d698783aefafdb9173cb2478d9551ba7c7b9be97cf4a9004d99331ef",
+            "datasetMatches": true,
+            "upstreamMatches": true,
+            "upstreamSha256": "f3e8d090d698783aefafdb9173cb2478d9551ba7c7b9be97cf4a9004d99331ef",
+            "adaptedSha256": "c8149b45c227dfe8fb4bfdb8e9f225aedf50df5980f0056188fc2d2fe29e3b7e",
+            "receiptMatches": true,
+            "proposalMatches": true
+          },
+          {
+            "stage": "repair",
+            "path": "lib/document.js",
+            "sha256": "c741958f154dfa24c8b1d830e95580d1d703038827eb75354b3d17b427bdadd9",
+            "datasetMatches": true,
+            "upstreamMatches": true,
+            "upstreamSha256": "c741958f154dfa24c8b1d830e95580d1d703038827eb75354b3d17b427bdadd9",
+            "adaptedSha256": "28603f07cbb09adfdbb90495aac07294a824ca9759a69852b79e80c742d0f5e4",
+            "receiptMatches": true,
+            "proposalMatches": true
+          },
+          {
+            "stage": "repair",
+            "path": "lib/model.js",
+            "sha256": "7bac721885ea7819b8d6700992a35a7d9e28dd3884f0d1591a52df1c0d1a0769",
+            "datasetMatches": true,
+            "upstreamMatches": true,
+            "upstreamSha256": "7bac721885ea7819b8d6700992a35a7d9e28dd3884f0d1591a52df1c0d1a0769",
+            "adaptedSha256": "52485522b90e9920eb99160922d4b1a6c785635b04dbcd98190186d155c57dab",
+            "receiptMatches": true,
+            "proposalMatches": true
+          }
+        ],
+        "proposalSha256": "9f94a6294158ee2310d80cda983ce643114320c85e47bffddd49ce7c59e814a7",
+        "caseId": "corr-source-mongoose-document-context",
+        "runtime": {
+          "version": "3.6.5-pre",
+          "runtimeId": "9d85b7f1fcd9acd6",
+          "lockSha256": "eb0b911a3150f0e821f614f62910cb11090674a006983d1b8b148a7981767cc1"
+        }
+      },
+      "independent": {
+        "scenarios": 4,
+        "observations": 16,
+        "comparisons": 8,
+        "sourceAdaptationEqual": true,
+        "directory": "mongoose/13"
+      },
+      "replayInterface": "Existing public replay-runtime.py with population-edge-manifest.json fields and mongoose-population-edge-controls.cjs"
+    },
+    {
+      "number": 14,
+      "corpusId": "corr-missing-population-position-clean",
+      "expected": "PASS",
+      "family": "corr-source-mongoose-document-context",
+      "finding": "Eligible: missing, null, empty input and plain-object result positions retain index alignment; no query narrowing or receiver assumptions were invented.",
+      "sourceIdentity": {
+        "library": "mongoose",
+        "number": 14,
+        "upstreamFix": "0ab96d1645417e41a61c36ce7985f8ff3036c736",
+        "upstreamParent": "d305cd7070cb8172caf8d280607e6dea14643e31",
+        "subject": "fixed; population regression #1444",
+        "sourceFiles": [
+          {
+            "stage": "base",
+            "path": "lib/model.js",
+            "sha256": "7bac721885ea7819b8d6700992a35a7d9e28dd3884f0d1591a52df1c0d1a0769",
+            "datasetMatches": true,
+            "upstreamMatches": true,
+            "upstreamSha256": "7bac721885ea7819b8d6700992a35a7d9e28dd3884f0d1591a52df1c0d1a0769",
+            "adaptedSha256": "52485522b90e9920eb99160922d4b1a6c785635b04dbcd98190186d155c57dab",
+            "receiptMatches": true,
+            "proposalMatches": true
+          },
+          {
+            "stage": "repair",
+            "path": "lib/model.js",
+            "sha256": "dfbad9eb0191f833bb448e0ed5920d28124e1b70060b2f9e4f3bfe187b35af6f",
+            "datasetMatches": true,
+            "upstreamMatches": true,
+            "upstreamSha256": "dfbad9eb0191f833bb448e0ed5920d28124e1b70060b2f9e4f3bfe187b35af6f",
+            "adaptedSha256": "bf6a1b17f4a50c4c1f1eccf1951971ae3c7127b2886c6a0089c36dbad9568fa8",
+            "receiptMatches": true,
+            "proposalMatches": true
+          }
+        ],
+        "proposalSha256": "534c55a86b61f591b6eb63e97a1be6d126a36acc1263023114406e588f41aae0",
+        "caseId": "corr-source-mongoose-document-context",
+        "runtime": {
+          "version": "3.6.5-pre",
+          "runtimeId": "9d85b7f1fcd9acd6",
+          "lockSha256": "eb0b911a3150f0e821f614f62910cb11090674a006983d1b8b148a7981767cc1"
+        }
+      },
+      "independent": {
+        "scenarios": 4,
+        "observations": 16,
+        "comparisons": 8,
+        "sourceAdaptationEqual": true,
+        "directory": "mongoose/14"
+      },
+      "replayInterface": "Existing public replay-runtime.py with population-edge-manifest.json fields and mongoose-population-edge-controls.cjs"
+    },
+    {
+      "number": 17,
+      "corpusId": "corr-upsert-absent-original-document-clean",
+      "expected": "PASS",
+      "family": "corr-source-query-projection-slice",
+      "finding": "Eligible within historical driver return contract: null/empty result and ordinary falsey document fields, lean result and driver callback error controls. No live MongoDB proof of all projection/upsert return shapes is claimed.",
+      "sourceIdentity": {
+        "library": "mongoose",
+        "number": 17,
+        "upstreamFix": "3b863e15a716ab2fda43945e47da9e4333d40bb4",
+        "upstreamParent": "a5e6a1f6a9ed3a5ec4c4b551218caefdd2488faa",
+        "subject": "fixed issue with findOneAndUpdate not returning null on upserts",
+        "sourceFiles": [
+          {
+            "stage": "base",
+            "path": "lib/query.js",
+            "sha256": "dbbb6e9c4716117c00b6a9d8034d7a5ec6df7db13bd93ecc3ac31e6779810e34",
+            "datasetMatches": true,
+            "upstreamMatches": true,
+            "upstreamSha256": "dbbb6e9c4716117c00b6a9d8034d7a5ec6df7db13bd93ecc3ac31e6779810e34",
+            "adaptedSha256": "1696941dd3a7eb95242342c3cfe3f25202ebc457190bc48f0f5d1186c4c10ab3",
+            "receiptMatches": true,
+            "proposalMatches": true
+          },
+          {
+            "stage": "repair",
+            "path": "lib/query.js",
+            "sha256": "fc9571c26c072401f0192847f18e9ca1ba397d94604aab9ac6a5ba1ad80d8e2e",
+            "datasetMatches": true,
+            "upstreamMatches": true,
+            "upstreamSha256": "fc9571c26c072401f0192847f18e9ca1ba397d94604aab9ac6a5ba1ad80d8e2e",
+            "adaptedSha256": "a392bf86a7c3d454eb90541a72e7ff8798303ae19ff153a04f59c7353a1d9148",
+            "receiptMatches": true,
+            "proposalMatches": true
+          }
+        ],
+        "proposalSha256": "7d6c2708cf6d1f607252793dc3976c1f6540a9f358e1b38f45224da8f93f08b0",
+        "caseId": "corr-source-query-projection-slice",
+        "runtime": {
+          "version": "3.7.0-pre",
+          "runtimeId": "ba8e8e22bac956b5",
+          "lockSha256": "3ac40c3221a43d434bd41178eefa777b09e3ee8c2a5ea46a157815e4f94e7f57"
+        }
+      },
+      "independent": {
+        "scenarios": 7,
+        "observations": 28,
+        "comparisons": 14,
+        "sourceAdaptationEqual": true,
+        "directory": "mongoose/17"
+      },
+      "replayInterface": "Existing public replay-runtime.py with population-edge-manifest.json fields and mongoose-population-edge-controls.cjs"
+    },
+    {
+      "number": 18,
+      "corpusId": "corr-reused-population-limit-compounds",
+      "expected": "FAIL",
+      "family": "corr-source-mongoose-document-context",
+      "finding": "Exclude PASS: reused {limit:2} options for identical two-document calls send limits [4,8], rather than stable scaling. Parent sends [2,2]; three documents send [6,18] after repair. A reused Query reproduces [4,8] too. This is new compounding mutation, separate from the parent feature omission of per-document scaling.",
+      "sourceIdentity": {
+        "library": "mongoose",
+        "number": 18,
+        "upstreamFix": "21e128669f7f48d33985a1d0115cc7d54ac98baf",
+        "upstreamParent": "e6ed84b6a3358d85c5672f3543cc260b2f1083fc",
+        "subject": "Limit applies to individual items on population",
+        "sourceFiles": [
+          {
+            "stage": "base",
+            "path": "lib/model.js",
+            "sha256": "0caa33f27180aa8b60bcba7ac9653581f6cb4aa1715ae0fe6267794557a820f0",
+            "datasetMatches": true,
+            "upstreamMatches": true,
+            "upstreamSha256": "0caa33f27180aa8b60bcba7ac9653581f6cb4aa1715ae0fe6267794557a820f0",
+            "adaptedSha256": "62b6187fa724f0871891c57eafbdbb7497e2258c234318631f2c0dd9f64118fb",
+            "receiptMatches": true,
+            "proposalMatches": true
+          },
+          {
+            "stage": "repair",
+            "path": "lib/model.js",
+            "sha256": "dd0bbc728cc5d567607c131e2ab5e2012ecf88de549315c7a359588209b936f4",
+            "datasetMatches": true,
+            "upstreamMatches": false,
+            "upstreamSha256": "96e369121cbaadc4f2320cbd840871f1263c7a1a0eabf05585e04e9892f510a2",
+            "adaptedSha256": "4083c187658d2d09db2e07f8aa6599e539f58e3681c58334d786f99d37b137ff",
+            "receiptMatches": true,
+            "proposalMatches": true
+          }
+        ],
+        "proposalSha256": "20274ac7468a7415945ceb8b708b1013deb31932f18f416feb4adb2da99f326c",
+        "caseId": "corr-source-mongoose-document-context",
+        "runtime": {
+          "version": "3.7.1-pre",
+          "runtimeId": "2cb617778e9e7f83",
+          "lockSha256": "0431dc948051f4df0732ba7bb33325a0a30ba862b545182fc4fe6146025a0241"
+        }
+      },
+      "independent": {
+        "scenarios": 5,
+        "observations": 20,
+        "comparisons": 10,
+        "sourceAdaptationEqual": true,
+        "directory": "mongoose/18"
+      },
+      "replayInterface": "Existing public replay-runtime.py with population-edge-manifest.json fields and mongoose-population-edge-controls.cjs"
+    },
+    {
+      "number": 23,
+      "corpusId": "corr-population-projection-token-prefix",
+      "expected": "FAIL",
+      "family": "corr-source-mongoose-document-context",
+      "finding": "Exclude PASS: select \"-_identity\" is rewritten to outgoing fields {entity:1}; \"title -_identity\" adds entity:1. Parent supplied no projection here, a pre-existing omission, but did not invent an unrelated inclusion field. New substring replacement treats a field-name prefix as the exact _id token. Evidence is the native outgoing projection contract, not a simulated server result.",
+      "sourceIdentity": {
+        "library": "mongoose",
+        "number": 23,
+        "upstreamFix": "a830651eeef2fb0b7c525e488745ec69a91e453b",
+        "upstreamParent": "72eb91f59517f98eea967166d93b251c26a94ca8",
+        "subject": "fixed; population field selection w/ strings",
+        "sourceFiles": [
+          {
+            "stage": "base",
+            "path": "lib/model.js",
+            "sha256": "603b232999045adb72cded3737e4b451f2bfc43221f2f82a6f77c5b1637c4cd6",
+            "datasetMatches": true,
+            "upstreamMatches": true,
+            "upstreamSha256": "603b232999045adb72cded3737e4b451f2bfc43221f2f82a6f77c5b1637c4cd6",
+            "adaptedSha256": "53a5d9e6aa829a44cda923a5aa4fb9b3da9a7898de137bcb21dfcb43df088702",
+            "receiptMatches": true,
+            "proposalMatches": true
+          },
+          {
+            "stage": "repair",
+            "path": "lib/model.js",
+            "sha256": "14b3030a0493c562c2956a7cd58d810ea69f0734046e8fbdb9ebb3c62303cbfc",
+            "datasetMatches": true,
+            "upstreamMatches": true,
+            "upstreamSha256": "14b3030a0493c562c2956a7cd58d810ea69f0734046e8fbdb9ebb3c62303cbfc",
+            "adaptedSha256": "2b2659e048e5ad493a4854f49d90920b5a82faa948fc3bc9f0bc5b1e2096ec87",
+            "receiptMatches": true,
+            "proposalMatches": true
+          }
+        ],
+        "proposalSha256": "7f0578da002dec6b597498fb8f36c1f14b4b56efaa89f1b796bb7987a6cceedd",
+        "caseId": "corr-source-mongoose-document-context",
+        "runtime": {
+          "version": "3.7.4-pre",
+          "runtimeId": "c31d54c8f1304010",
+          "lockSha256": "363313812b63e3b4f9b2ea0fdd2fa31602d82270b2f1ea6c7201b357213bf9d8"
+        }
+      },
+      "independent": {
+        "scenarios": 6,
+        "observations": 24,
+        "comparisons": 12,
+        "sourceAdaptationEqual": true,
+        "directory": "mongoose/23"
+      },
+      "replayInterface": "Existing public replay-runtime.py with population-edge-manifest.json fields and mongoose-population-edge-controls.cjs"
+    },
+    {
+      "number": 24,
+      "corpusId": "corr-repopulation-error-loses-documents",
+      "expected": "FAIL",
+      "family": "corr-source-mongoose-document-context",
+      "finding": "Exclude PASS: repopulation of a modified reference array converts the live Document entries to ObjectIds before the query finishes. When the real collection callback returns an error, the repaired source leaves the array depopulated; parent retains its Document entries. Scalar and successful repopulation/fresh duplicate-list controls distinguish the affected branch.",
+      "sourceIdentity": {
+        "library": "mongoose",
+        "number": 24,
+        "upstreamFix": "5fdf81555763337be08dce9fcab9986ebdfc2373",
+        "upstreamParent": "e12edaa50d662fc9ee606a8db5b9dc17dc95eea5",
+        "subject": "fixed; repopulating modified populated paths",
+        "sourceFiles": [
+          {
+            "stage": "base",
+            "path": "lib/model.js",
+            "sha256": "d739731a3de1752c34e07eb3de9dbb2a68684336a3bddfdc6f0f8712f2e72fc4",
+            "datasetMatches": true,
+            "upstreamMatches": true,
+            "upstreamSha256": "d739731a3de1752c34e07eb3de9dbb2a68684336a3bddfdc6f0f8712f2e72fc4",
+            "adaptedSha256": "928ba79f560c4c463f9463c0beba9ea7cf9b780f4b4c51d0c8c1ee7ea0a89560",
+            "receiptMatches": true,
+            "proposalMatches": true
+          },
+          {
+            "stage": "repair",
+            "path": "lib/model.js",
+            "sha256": "41482b1ec2334316372299bf0f27fde829c1e9df5594ad897607ef5b59ab917d",
+            "datasetMatches": true,
+            "upstreamMatches": false,
+            "upstreamSha256": "5bcc7bdc67f6c3b88b0cfdce8197e53faee44af4873661893141df24b5007e9d",
+            "adaptedSha256": "61dae0645391298ec9890eef2cfa7ddf1fcce45c402be90f313d58cabd2863f3",
+            "receiptMatches": true,
+            "proposalMatches": true
+          }
+        ],
+        "proposalSha256": "4a6c649b31398e4376e29c42eff1e36cac2ba7e750d6148755b6b39ffb9689d6",
+        "caseId": "corr-source-mongoose-document-context",
+        "runtime": {
+          "version": "3.7.4-pre",
+          "runtimeId": "6fcb8107e3fa35e0",
+          "lockSha256": "89c5366f6a8486d7ccdaa7b911331d8578027e75cf5a7948ddc5100cb3ea836c"
+        }
+      },
+      "independent": {
+        "scenarios": 5,
+        "observations": 20,
+        "comparisons": 10,
+        "sourceAdaptationEqual": true,
+        "directory": "mongoose/24"
+      },
+      "replayInterface": "Existing public replay-runtime.py with population-edge-manifest.json fields and mongoose-population-edge-controls.cjs"
+    }
+  ],
+  "eslint": [
+    {
+      "name": "destructured-edge-underscores",
+      "refs": {
+        "parent": "d067ae1f4e985bf7444cae0460aae4ef7d8c5723",
+        "bug": "256481b04d201dd01dcac5947f9ae018fde5defc",
+        "repair": "d80aa7c87fb35355823576bb96e03f61e36bb986"
+      },
+      "coreCommit": "d067ae1f4e985bf7444cae0460aae4ef7d8c5723",
+      "coreArchiveSha256": "cabcc6649f64686d2c7565a830b956a2f463100bef6b72371c138a604e06e7fc",
+      "runtime": "locks/eslint/b287c2f88638ec7d",
+      "lockSha256": "484294ed286fe1cc02fb93df9f92a5f92d8399bf8aa617652aed446a2c1f1fac",
+      "endpoints": {
+        "parent": {
+          "ref": "d067ae1f4e985bf7444cae0460aae4ef7d8c5723",
+          "sourceSha256": "744fbc2549ccea96c41162310d67373830a9e1adb77f785983081a98697a74c7",
+          "adaptedSha256": "caf23493f73580ed3a695f3eb21190d93a000f2116dc351448c66df95bda03ea",
+          "corpus": {
+            "id": "corr-destructured-edge-underscores",
+            "repo": "base",
+            "file": "src/destructured-edge-underscores.js"
+          }
+        },
+        "bug": {
+          "ref": "256481b04d201dd01dcac5947f9ae018fde5defc",
+          "sourceSha256": "e4847b4f119bf07f982d95ff3306deca4da0f2ba24a28ab384422e4c64502cee",
+          "adaptedSha256": "934367394a2469f8f3af3433a36d446fdda295fc3c5b16f3220340e359296fb7",
+          "corpus": {
+            "id": "corr-destructured-edge-underscores",
+            "repo": "staged",
+            "file": "src/destructured-edge-underscores.js"
+          }
+        },
+        "repair": {
+          "ref": "d80aa7c87fb35355823576bb96e03f61e36bb986",
+          "sourceSha256": "82ef60d999d8de0575f3bce6ea1b99bb6f9c6dab7e4d86ec603b2500f6311dac",
+          "adaptedSha256": "87d3acbfec9c45d724b940d153fb1ddd5255b70bb91d2af53b26c9979bc4dda3",
+          "targetOnlyAdaptation": "target-only/destructured-edge-underscores/repair-adapted.js",
+          "notClean": true
+        }
+      },
+      "finding": "Gold eligible; clean sibling excluded. Edge-underscore destructuring invariant is pass/fail/pass. However, properties:never now skips invalid local bindings with defaults, e.g. const {camelCase: snake_case=1}=obj. Parent reports; bug and later repair do not. The setting excludes property names, not local variable declarations, per original rule docs. Nested, array and parameter defaults reproduce it.",
+      "targetInvariant": {
+        "parent": {
+          "invariantPass": true,
+          "observation": {
+            "stage": "parent",
+            "kind": "source",
+            "scenario": "shorthand underscore always",
+            "code": "const {_edge=1} = obj;",
+            "options": [
+              {
+                "properties": "always"
+              }
+            ],
+            "expectedCount": 0,
+            "messages": [],
+            "parserFatal": false,
+            "clean": true
+          }
+        },
+        "bug": {
+          "invariantPass": false,
+          "observation": {
+            "stage": "bug",
+            "kind": "source",
+            "scenario": "shorthand underscore always",
+            "code": "const {_edge=1} = obj;",
+            "options": [
+              {
+                "properties": "always"
+              }
+            ],
+            "expectedCount": 0,
+            "messages": [
+              {
+                "message": "Identifier '_edge' is not in camel case.",
+                "line": 1,
+                "column": 8
+              }
+            ],
+            "parserFatal": false,
+            "clean": false
+          }
+        },
+        "repair": {
+          "invariantPass": true,
+          "observation": {
+            "stage": "repair",
+            "kind": "source",
+            "scenario": "shorthand underscore always",
+            "code": "const {_edge=1} = obj;",
+            "options": [
+              {
+                "properties": "always"
+              }
+            ],
+            "expectedCount": 0,
+            "messages": [],
+            "parserFatal": false,
+            "clean": true
+          }
+        }
+      },
+      "independent": {
+        "scenarios": 20,
+        "observations": 120,
+        "comparisons": 60,
+        "sourceAdaptationEqual": true
+      },
+      "laterEndpointRole": "target-specific-evidence-only-not-clean-not-paired"
+    },
+    {
+      "name": "comment-adjacent-fix-ranges",
+      "refs": {
+        "parent": "a9d4cb21f6f9d85115a734c3b863a4f2da98fda4",
+        "bug": "3c9ce093b94dbcb04d4395c33983d4cb3b0764ac",
+        "repair": "d02bd1140dc52d5592c1c9d27a0981c95dd68a7f"
+      },
+      "coreCommit": "41e3d9ce08b1a7f1f97d878a439b0143d19c7084",
+      "coreArchiveSha256": "487615600c17d2811f7e941c28db91f32f6337fbc06b7d1c47a5d1f9a13a5696",
+      "runtime": "locks/eslint/752f7ea15cb33eea",
+      "lockSha256": "601f4b315d6e2733b5b34676a5816a226f43d7baa9f91847fac5494c55bb1d8c",
+      "endpoints": {
+        "parent": {
+          "ref": "a9d4cb21f6f9d85115a734c3b863a4f2da98fda4",
+          "sourceSha256": "a8a6d4e1f138f47c07094c4a279c06ead33f6f6d183c3e6f2e2b5a7e1fb19d8d",
+          "adaptedSha256": "74f1f8a2f0edcde3e887d3ea8caafad21a569c9b3462b794881d1f8196e0a6e7",
+          "corpus": {
+            "id": "corr-comment-adjacent-fix-ranges",
+            "repo": "base",
+            "file": "src/comment-adjacent-fix-ranges.js"
+          }
+        },
+        "bug": {
+          "ref": "3c9ce093b94dbcb04d4395c33983d4cb3b0764ac",
+          "sourceSha256": "b51a660603c7a276b53293ea8dbf1c2f8cbdc936b0d22172ea94d1ed1badae1a",
+          "adaptedSha256": "195676d5aea393ae723d0c48d20bd30a152760a8ae718feb0a28cf6b09065ae1",
+          "corpus": {
+            "id": "corr-comment-adjacent-fix-ranges",
+            "repo": "staged",
+            "file": "src/comment-adjacent-fix-ranges.js"
+          }
+        },
+        "repair": {
+          "ref": "d02bd1140dc52d5592c1c9d27a0981c95dd68a7f",
+          "sourceSha256": "7bddb7b334d47f41da8b8f32ef8de6b4cfcd68ad359c8cf8c6d1d4e0d0b5da52",
+          "adaptedSha256": "aac1f36517ad363a8a5a56a006a3e6e57b2b8a4400f9f4dffdeb20ccf69f9c46",
+          "corpus": {
+            "id": "corr-comment-adjacent-fix-ranges-repaired",
+            "repo": "staged",
+            "file": "src/comment-adjacent-fix-ranges.js"
+          }
+        }
+      },
+      "finding": "Both gold and clean sibling eligible. Inline-comment target passes parent, produces reversed fix range in introduction, and is repaired. All 49 independent function/class/switch, always/never, LF/CRLF and line/block/multiple-comment configurations preserve tokens/comments, parse after real fix application and converge with no diagnostics.",
+      "targetInvariant": {
+        "parent": {
+          "invariantPass": true,
+          "observation": {
+            "stage": "parent",
+            "kind": "source",
+            "scenario": "function never line-open \"\\n\"",
+            "code": "function f() { // open\n\n  call();\n}",
+            "options": [
+              "never"
+            ],
+            "messages": [
+              {
+                "message": "Block must not be padded by blank lines.",
+                "line": 1,
+                "column": 14,
+                "fix": {
+                  "range": [
+                    14,
+                    15
+                  ],
+                  "text": "\n"
+                }
+              }
+            ],
+            "parserFatal": false,
+            "rounds": [
+              {
+                "invalidRange": false,
+                "fixed": true,
+                "output": "function f() {\n// open\n\n  call();\n}"
+              },
+              {
+                "invalidRange": false,
+                "fixed": false,
+                "output": "function f() {\n// open\n\n  call();\n}"
+              }
+            ],
+            "fixed": "function f() {\n// open\n\n  call();\n}",
+            "finalMessages": [],
+            "tokensPreserved": true,
+            "clean": true
+          }
+        },
+        "bug": {
+          "invariantPass": false,
+          "observation": {
+            "stage": "bug",
+            "kind": "source",
+            "scenario": "function never line-open \"\\n\"",
+            "code": "function f() { // open\n\n  call();\n}",
+            "options": [
+              "never"
+            ],
+            "messages": [
+              {
+                "message": "Block must not be padded by blank lines.",
+                "line": 1,
+                "column": 14,
+                "fix": {
+                  "range": [
+                    14,
+                    0
+                  ],
+                  "text": "\n"
+                }
+              }
+            ],
+            "parserFatal": false,
+            "rounds": [
+              {
+                "invalidRange": true,
+                "fixed": true,
+                "output": "function f() { // open\n\n  call();\n}"
+              },
+              {
+                "invalidRange": true,
+                "fixed": true,
+                "output": "function f() { // open\n\n  call();\n}"
+              },
+              {
+                "invalidRange": true,
+                "fixed": true,
+                "output": "function f() { // open\n\n  call();\n}"
+              },
+              {
+                "invalidRange": true,
+                "fixed": true,
+                "output": "function f() { // open\n\n  call();\n}"
+              }
+            ],
+            "fixed": "function f() { // open\n\n  call();\n}",
+            "finalMessages": [
+              {
+                "message": "Block must not be padded by blank lines.",
+                "line": 1,
+                "column": 14,
+                "fix": {
+                  "range": [
+                    14,
+                    0
+                  ],
+                  "text": "\n"
+                }
+              }
+            ],
+            "tokensPreserved": true,
+            "clean": false
+          }
+        },
+        "repair": {
+          "invariantPass": true,
+          "observation": {
+            "stage": "repair",
+            "kind": "source",
+            "scenario": "function never line-open \"\\n\"",
+            "code": "function f() { // open\n\n  call();\n}",
+            "options": [
+              "never"
+            ],
+            "messages": [
+              {
+                "message": "Block must not be padded by blank lines.",
+                "line": 1,
+                "column": 16,
+                "fix": {
+                  "range": [
+                    22,
+                    24
+                  ],
+                  "text": "\n"
+                }
+              }
+            ],
+            "parserFatal": false,
+            "rounds": [
+              {
+                "invalidRange": false,
+                "fixed": true,
+                "output": "function f() { // open\n  call();\n}"
+              },
+              {
+                "invalidRange": false,
+                "fixed": false,
+                "output": "function f() { // open\n  call();\n}"
+              }
+            ],
+            "fixed": "function f() { // open\n  call();\n}",
+            "finalMessages": [],
+            "tokensPreserved": true,
+            "clean": true
+          }
+        }
+      },
+      "independent": {
+        "scenarios": 49,
+        "observations": 294,
+        "comparisons": 147,
+        "sourceAdaptationEqual": true
+      },
+      "laterEndpointRole": "qualified-clean-sibling"
+    },
+    {
+      "name": "diagnostic-column-contract",
+      "refs": {
+        "parent": "eb4e0fde81d58688a868470aed21a16893b9ff9d",
+        "bug": "8061f35223fd52b4d9398bd0d9a6c2c96025f365",
+        "repair": "21538bb92a10e4bf25ca34fc80e36e510b9d21c2"
+      },
+      "coreCommit": "ccae7eeeb9dcac287ae13aa1a41ea4b4460e5dcd",
+      "coreArchiveSha256": "1925d27decbd32075a13b8142e5f09141d1bae4b8c7d2359f75807c18cdfec53",
+      "runtime": "locks/eslint/6e6886423663885f",
+      "lockSha256": "d749372648e301aa62ae30c38e2c9d45e4fd24fe0ed07531af888a6e2ebb57f3",
+      "endpoints": {
+        "parent": {
+          "ref": "eb4e0fde81d58688a868470aed21a16893b9ff9d",
+          "sourceSha256": "a3a5bafc70b47985704059562e77df52cc1a30ef561433cb0816c9771e3fed8a",
+          "adaptedSha256": "06f852ebf58990b102f96335b7248824cb6aec18d0b4e5d1b66e13fb294583a7",
+          "corpus": {
+            "id": "corr-diagnostic-column-contract",
+            "repo": "base",
+            "file": "src/diagnostic-column-contract.js"
+          }
+        },
+        "bug": {
+          "ref": "8061f35223fd52b4d9398bd0d9a6c2c96025f365",
+          "sourceSha256": "6432007a0db15a8f9d73a31fb9d7ee7cee8ccf644f63d3df87e643513e8e7b0a",
+          "adaptedSha256": "69c348de11fb59baf074cec1edef4a8f9354d8e178e6094aa1062354e599aca5",
+          "corpus": {
+            "id": "corr-diagnostic-column-contract",
+            "repo": "staged",
+            "file": "src/diagnostic-column-contract.js"
+          }
+        },
+        "repair": {
+          "ref": "21538bb92a10e4bf25ca34fc80e36e510b9d21c2",
+          "sourceSha256": "327371d5c9ba3f5c7c94b00b126ed5b0e09a1259185b6de301166b8515284b3b",
+          "adaptedSha256": "3769cf2fdf464e78770b6f1bd9186e684b3c29cfa3f4de8ba4e1290e4af83363",
+          "targetOnlyAdaptation": "target-only/diagnostic-column-contract/repair-adapted.js",
+          "notClean": true
+        }
+      },
+      "finding": "Gold eligible; clean sibling excluded. Position validity is pass/fail/pass; parent may report the wrong line but has a valid position, explicitly not claimed otherwise. The later repair adds || defaults that disregard configured zero maximum length/tab width. Original docs define these numeric limits and repair schema permits zero. Parent enforces maxLength=0; repaired source silently uses 80.",
+      "targetInvariant": {
+        "parent": {
+          "invariantPass": true,
+          "observation": {
+            "stage": "parent",
+            "kind": "source",
+            "scenario": "ordinary limits",
+            "code": "var a;\nvar longName;",
+            "options": [
+              10,
+              4
+            ],
+            "expectedCount": 1,
+            "messages": [
+              {
+                "message": "Line 2 exceeds the maximum line length of 10.",
+                "line": 1,
+                "column": 1
+              }
+            ],
+            "parserFatal": false,
+            "validLocations": true,
+            "clean": true
+          }
+        },
+        "bug": {
+          "invariantPass": false,
+          "observation": {
+            "stage": "bug",
+            "kind": "source",
+            "scenario": "ordinary limits",
+            "code": "var a;\nvar longName;",
+            "options": [
+              10,
+              4
+            ],
+            "expectedCount": 1,
+            "messages": [
+              {
+                "message": "Line 2 exceeds the maximum line length of 10.",
+                "line": 2,
+                "column": null
+              }
+            ],
+            "parserFatal": false,
+            "validLocations": false,
+            "clean": false
+          }
+        },
+        "repair": {
+          "invariantPass": true,
+          "observation": {
+            "stage": "repair",
+            "kind": "source",
+            "scenario": "ordinary limits",
+            "code": "var a;\nvar longName;",
+            "options": [
+              10,
+              4
+            ],
+            "expectedCount": 1,
+            "messages": [
+              {
+                "message": "Line 2 exceeds the maximum line length of 10.",
+                "line": 2,
+                "column": 1
+              }
+            ],
+            "parserFatal": false,
+            "validLocations": true,
+            "clean": true
+          }
+        }
+      },
+      "independent": {
+        "scenarios": 11,
+        "observations": 66,
+        "comparisons": 33,
+        "sourceAdaptationEqual": true
+      },
+      "laterEndpointRole": "target-specific-evidence-only-not-clean-not-paired"
+    },
+    {
+      "name": "empty-super-argument-traversal",
+      "refs": {
+        "parent": "bdf64007e422da333d5a7f6d7340f651c6bd2b87",
+        "bug": "cf14c71977cb323ff8ea4ed2d683cae7421fc214",
+        "repair": "aefc90c128cd430894651717404cbeb7d00705b5"
+      },
+      "coreCommit": "bdf64007e422da333d5a7f6d7340f651c6bd2b87",
+      "coreArchiveSha256": "0ee0e23d7803786d97d920ca8ead6d1c529b60f1438500d82ec371824d258fe9",
+      "runtime": "locks/eslint/4594959d63777744",
+      "lockSha256": "d5090cba10f91898492ead6ece240aa93ad447974bbaa33e4c0026d298807f3f",
+      "endpoints": {
+        "parent": {
+          "ref": "bdf64007e422da333d5a7f6d7340f651c6bd2b87",
+          "sourceSha256": "0a7080fa826bc685afea3d7d37a0935800e21a49e3f39411d7ad061cdbc345e5",
+          "adaptedSha256": "c9e161003cc42c58fe9e207e6237eabe8d52d01cddbaa09ce0c4ad727a0546a7",
+          "corpus": {
+            "id": "corr-empty-super-argument-traversal",
+            "repo": "base",
+            "file": "src/empty-super-argument-traversal.js"
+          }
+        },
+        "bug": {
+          "ref": "cf14c71977cb323ff8ea4ed2d683cae7421fc214",
+          "sourceSha256": "5a1091eff29d060f5bf3d2254099a8576eba50f2df6557f3e011e3cdbda0a7be",
+          "adaptedSha256": "12149203bc08ab19136dcf1c665f15519b332a0dbf240e907659fe4ba16b9c7e",
+          "corpus": {
+            "id": "corr-empty-super-argument-traversal",
+            "repo": "staged",
+            "file": "src/empty-super-argument-traversal.js"
+          }
+        },
+        "repair": {
+          "ref": "aefc90c128cd430894651717404cbeb7d00705b5",
+          "sourceSha256": "05eab71514b780c4a4a8bbf99c4497a5b0e030747df6c9e5cbce597932f53461",
+          "adaptedSha256": "d080a8ad019c1e22840190984031c6d3239ddb2965adb4fa096b5c4d8d56adde",
+          "targetOnlyAdaptation": "target-only/empty-super-argument-traversal/repair-adapted.js",
+          "notClean": true
+        }
+      },
+      "finding": "Gold eligible; clean sibling excluded. Empty-super traversal does not crash in parent, crashes in introduction and no longer crashes in later repair. Parent overreporting is pre-existing. However, a RestElement wrapping an ArrayPattern default is wrongly called simple: constructor(...[a=effect()]) {super(...arguments)} is newly reported useless. Native execution proves deleting it loses the effect (1\u21920).",
+      "targetInvariant": {
+        "parent": {
+          "invariantPass": true,
+          "observation": {
+            "stage": "parent",
+            "kind": "source",
+            "scenario": "unused ordinary argument",
+            "code": "class A extends B { constructor(a) {super();} }",
+            "options": [],
+            "expectedCount": 0,
+            "messages": [
+              {
+                "message": "Useless constructor.",
+                "line": 1,
+                "column": 21
+              }
+            ],
+            "parserFatal": false,
+            "clean": false
+          }
+        },
+        "bug": {
+          "invariantPass": false,
+          "observation": {
+            "stage": "bug",
+            "kind": "source",
+            "scenario": "unused ordinary argument",
+            "code": "class A extends B { constructor(a) {super();} }",
+            "options": [],
+            "expectedCount": 0,
+            "error": {
+              "name": "TypeError",
+              "message": "Cannot read properties of undefined (reading 'type')"
+            },
+            "clean": false
+          }
+        },
+        "repair": {
+          "invariantPass": true,
+          "observation": {
+            "stage": "repair",
+            "kind": "source",
+            "scenario": "unused ordinary argument",
+            "code": "class A extends B { constructor(a) {super();} }",
+            "options": [],
+            "expectedCount": 0,
+            "messages": [],
+            "parserFatal": false,
+            "clean": true
+          }
+        }
+      },
+      "independent": {
+        "scenarios": 11,
+        "observations": 66,
+        "comparisons": 33,
+        "sourceAdaptationEqual": true
+      },
+      "laterEndpointRole": "target-specific-evidence-only-not-clean-not-paired"
+    }
+  ],
+  "limitations": [
+    "Population uses actual model/schema/query receivers and external collection callbacks; no live database, full server projection/sort/limit or upsert response-shape coverage.",
+    "Only padded-blocks has a clean sibling. Other later ESLint endpoints remain target-specific evidence and cannot enter clean/pair metrics.",
+    "Source/adaptation static hashes and AST checks support identity; dynamic replay is separately recorded.",
+    "Shared population module families remain correlated; native statistics must count only explicit repair endpoints and valid legacy pairs.",
+    "Qualification is agent-verified source regression evidence, not BugsJS human labels for newly found defects."
+  ]
+}

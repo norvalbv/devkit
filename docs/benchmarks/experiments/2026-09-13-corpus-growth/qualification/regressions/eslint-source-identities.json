@@ -1,0 +1,214 @@
+[
+  {
+    "name": "destructured-edge-underscores",
+    "refs": {
+      "parent": "d067ae1f4e985bf7444cae0460aae4ef7d8c5723",
+      "bug": "256481b04d201dd01dcac5947f9ae018fde5defc",
+      "repair": "d80aa7c87fb35355823576bb96e03f61e36bb986",
+      "rule": "camelcase",
+      "runtimeSourceCase": 38,
+      "runtimeVersion": "4.12.1"
+    },
+    "actualParentMatches": true,
+    "repairDescendsFromBug": true,
+    "files": [
+      {
+        "stage": "parent",
+        "ref": "d067ae1f4e985bf7444cae0460aae4ef7d8c5723",
+        "sourceSha256": "744fbc2549ccea96c41162310d67373830a9e1adb77f785983081a98697a74c7",
+        "adaptedSha256": "caf23493f73580ed3a695f3eb21190d93a000f2116dc351448c66df95bda03ea",
+        "upstreamExact": true,
+        "wholeASTEqual": true,
+        "proposalMatches": true
+      },
+      {
+        "stage": "bug",
+        "ref": "256481b04d201dd01dcac5947f9ae018fde5defc",
+        "sourceSha256": "e4847b4f119bf07f982d95ff3306deca4da0f2ba24a28ab384422e4c64502cee",
+        "adaptedSha256": "934367394a2469f8f3af3433a36d446fdda295fc3c5b16f3220340e359296fb7",
+        "upstreamExact": true,
+        "wholeASTEqual": true,
+        "proposalMatches": true
+      },
+      {
+        "stage": "repair",
+        "ref": "d80aa7c87fb35355823576bb96e03f61e36bb986",
+        "sourceSha256": "82ef60d999d8de0575f3bce6ea1b99bb6f9c6dab7e4d86ec603b2500f6311dac",
+        "adaptedSha256": "87d3acbfec9c45d724b940d153fb1ddd5255b70bb91d2af53b26c9979bc4dda3",
+        "upstreamExact": true,
+        "wholeASTEqual": true,
+        "proposalMatches": true
+      }
+    ],
+    "proposalsSha256": "76c50bcb36ea74c8c43ecf6211ad073325435b6cfc57e7e569fc86d998142c02",
+    "nativeIds": [
+      "corr-destructured-edge-underscores",
+      "corr-destructured-edge-underscores-repaired"
+    ],
+    "runtime": {
+      "version": "4.12.1",
+      "nodeModules": "locks/eslint/b287c2f88638ec7d/node_modules",
+      "lockSha256": "484294ed286fe1cc02fb93df9f92a5f92d8399bf8aa617652aed446a2c1f1fac"
+    },
+    "nonemptyCommonBaseDiffs": true
+  },
+  {
+    "name": "comment-adjacent-fix-ranges",
+    "refs": {
+      "parent": "a9d4cb21f6f9d85115a734c3b863a4f2da98fda4",
+      "bug": "3c9ce093b94dbcb04d4395c33983d4cb3b0764ac",
+      "repair": "d02bd1140dc52d5592c1c9d27a0981c95dd68a7f",
+      "rule": "padded-blocks",
+      "runtimeSourceCase": 321,
+      "runtimeVersion": "3.17.0"
+    },
+    "actualParentMatches": true,
+    "repairDescendsFromBug": true,
+    "files": [
+      {
+        "stage": "parent",
+        "ref": "a9d4cb21f6f9d85115a734c3b863a4f2da98fda4",
+        "sourceSha256": "a8a6d4e1f138f47c07094c4a279c06ead33f6f6d183c3e6f2e2b5a7e1fb19d8d",
+        "adaptedSha256": "74f1f8a2f0edcde3e887d3ea8caafad21a569c9b3462b794881d1f8196e0a6e7",
+        "upstreamExact": true,
+        "wholeASTEqual": true,
+        "proposalMatches": true
+      },
+      {
+        "stage": "bug",
+        "ref": "3c9ce093b94dbcb04d4395c33983d4cb3b0764ac",
+        "sourceSha256": "b51a660603c7a276b53293ea8dbf1c2f8cbdc936b0d22172ea94d1ed1badae1a",
+        "adaptedSha256": "195676d5aea393ae723d0c48d20bd30a152760a8ae718feb0a28cf6b09065ae1",
+        "upstreamExact": true,
+        "wholeASTEqual": true,
+        "proposalMatches": true
+      },
+      {
+        "stage": "repair",
+        "ref": "d02bd1140dc52d5592c1c9d27a0981c95dd68a7f",
+        "sourceSha256": "7bddb7b334d47f41da8b8f32ef8de6b4cfcd68ad359c8cf8c6d1d4e0d0b5da52",
+        "adaptedSha256": "aac1f36517ad363a8a5a56a006a3e6e57b2b8a4400f9f4dffdeb20ccf69f9c46",
+        "upstreamExact": true,
+        "wholeASTEqual": true,
+        "proposalMatches": true
+      }
+    ],
+    "proposalsSha256": "ffd63f1b2e1e1df1c0d7af3182b5240443998ea1420e3d3ffc345bcdbf4202f4",
+    "nativeIds": [
+      "corr-comment-adjacent-fix-ranges",
+      "corr-comment-adjacent-fix-ranges-repaired"
+    ],
+    "runtime": {
+      "version": "3.17.0",
+      "nodeModules": "locks/eslint/752f7ea15cb33eea/node_modules",
+      "lockSha256": "601f4b315d6e2733b5b34676a5816a226f43d7baa9f91847fac5494c55bb1d8c"
+    },
+    "nonemptyCommonBaseDiffs": true
+  },
+  {
+    "name": "diagnostic-column-contract",
+    "refs": {
+      "parent": "eb4e0fde81d58688a868470aed21a16893b9ff9d",
+      "bug": "8061f35223fd52b4d9398bd0d9a6c2c96025f365",
+      "repair": "21538bb92a10e4bf25ca34fc80e36e510b9d21c2",
+      "rule": "max-len",
+      "runtimeSourceCase": 28,
+      "runtimeVersion": "1.1.0"
+    },
+    "actualParentMatches": true,
+    "repairDescendsFromBug": true,
+    "files": [
+      {
+        "stage": "parent",
+        "ref": "eb4e0fde81d58688a868470aed21a16893b9ff9d",
+        "sourceSha256": "a3a5bafc70b47985704059562e77df52cc1a30ef561433cb0816c9771e3fed8a",
+        "adaptedSha256": "06f852ebf58990b102f96335b7248824cb6aec18d0b4e5d1b66e13fb294583a7",
+        "upstreamExact": true,
+        "wholeASTEqual": true,
+        "proposalMatches": true
+      },
+      {
+        "stage": "bug",
+        "ref": "8061f35223fd52b4d9398bd0d9a6c2c96025f365",
+        "sourceSha256": "6432007a0db15a8f9d73a31fb9d7ee7cee8ccf644f63d3df87e643513e8e7b0a",
+        "adaptedSha256": "69c348de11fb59baf074cec1edef4a8f9354d8e178e6094aa1062354e599aca5",
+        "upstreamExact": true,
+        "wholeASTEqual": true,
+        "proposalMatches": true
+      },
+      {
+        "stage": "repair",
+        "ref": "21538bb92a10e4bf25ca34fc80e36e510b9d21c2",
+        "sourceSha256": "327371d5c9ba3f5c7c94b00b126ed5b0e09a1259185b6de301166b8515284b3b",
+        "adaptedSha256": "3769cf2fdf464e78770b6f1bd9186e684b3c29cfa3f4de8ba4e1290e4af83363",
+        "upstreamExact": true,
+        "wholeASTEqual": true,
+        "proposalMatches": true
+      }
+    ],
+    "proposalsSha256": "a07815b32988b9034b93c1f6b9a5e98f4b0abc4805aa4dfbb2364fabdd8a551a",
+    "nativeIds": [
+      "corr-diagnostic-column-contract",
+      "corr-diagnostic-column-contract-repaired"
+    ],
+    "runtime": {
+      "version": "1.1.0",
+      "nodeModules": "locks/eslint/6e6886423663885f/node_modules",
+      "lockSha256": "d749372648e301aa62ae30c38e2c9d45e4fd24fe0ed07531af888a6e2ebb57f3"
+    },
+    "nonemptyCommonBaseDiffs": true
+  },
+  {
+    "name": "empty-super-argument-traversal",
+    "refs": {
+      "parent": "bdf64007e422da333d5a7f6d7340f651c6bd2b87",
+      "bug": "cf14c71977cb323ff8ea4ed2d683cae7421fc214",
+      "repair": "aefc90c128cd430894651717404cbeb7d00705b5",
+      "rule": "no-useless-constructor",
+      "runtimeSourceCase": 261,
+      "runtimeVersion": "2.2.0"
+    },
+    "actualParentMatches": true,
+    "repairDescendsFromBug": true,
+    "files": [
+      {
+        "stage": "parent",
+        "ref": "bdf64007e422da333d5a7f6d7340f651c6bd2b87",
+        "sourceSha256": "0a7080fa826bc685afea3d7d37a0935800e21a49e3f39411d7ad061cdbc345e5",
+        "adaptedSha256": "c9e161003cc42c58fe9e207e6237eabe8d52d01cddbaa09ce0c4ad727a0546a7",
+        "upstreamExact": true,
+        "wholeASTEqual": true,
+        "proposalMatches": true
+      },
+      {
+        "stage": "bug",
+        "ref": "cf14c71977cb323ff8ea4ed2d683cae7421fc214",
+        "sourceSha256": "5a1091eff29d060f5bf3d2254099a8576eba50f2df6557f3e011e3cdbda0a7be",
+        "adaptedSha256": "12149203bc08ab19136dcf1c665f15519b332a0dbf240e907659fe4ba16b9c7e",
+        "upstreamExact": true,
+        "wholeASTEqual": true,
+        "proposalMatches": true
+      },
+      {
+        "stage": "repair",
+        "ref": "aefc90c128cd430894651717404cbeb7d00705b5",
+        "sourceSha256": "05eab71514b780c4a4a8bbf99c4497a5b0e030747df6c9e5cbce597932f53461",
+        "adaptedSha256": "d080a8ad019c1e22840190984031c6d3239ddb2965adb4fa096b5c4d8d56adde",
+        "upstreamExact": true,
+        "wholeASTEqual": true,
+        "proposalMatches": true
+      }
+    ],
+    "proposalsSha256": "3732cf510fcbca5df7701183acf6646b7a6b4bd8bc6880640ee3b148d7a5e59d",
+    "nativeIds": [
+      "corr-empty-super-argument-traversal",
+      "corr-empty-super-argument-traversal-repaired"
+    ],
+    "runtime": {
+      "version": "2.2.0",
+      "nodeModules": "locks/eslint/4594959d63777744/node_modules",
+      "lockSha256": "d5090cba10f91898492ead6ece240aa93ad447974bbaa33e4c0026d298807f3f"
+    },
+    "nonemptyCommonBaseDiffs": true
+  }
+]

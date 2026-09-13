@@ -1,0 +1,362 @@
+{
+  "node": "v24.19.0",
+  "corpusSha256": "fa62708388345fcf776bad30811a9aa8641b68d00219b104ff19dec29caf4b9e",
+  "manifestSha256": "b6c2e31595b7eb26c3156d212c00c22b8a6b82d978df92ad270da9d663990408",
+  "dynamicReplay": true,
+  "rows": 15,
+  "sourceContexts": 9,
+  "published": [
+    {
+      "family": "qualified-export-declaration",
+      "stage": "parent",
+      "observations": 100,
+      "failedPerEndpoint": 3,
+      "sourceAdaptationAgrees": true
+    },
+    {
+      "family": "qualified-export-declaration",
+      "stage": "bug",
+      "observations": 100,
+      "failedPerEndpoint": 2,
+      "sourceAdaptationAgrees": true
+    },
+    {
+      "family": "qualified-export-declaration",
+      "stage": "repair",
+      "observations": 100,
+      "failedPerEndpoint": 0,
+      "sourceAdaptationAgrees": true
+    },
+    {
+      "family": "qualified-statement-separator",
+      "stage": "parent",
+      "observations": 268,
+      "failedPerEndpoint": 2,
+      "sourceAdaptationAgrees": true
+    },
+    {
+      "family": "qualified-statement-separator",
+      "stage": "bug",
+      "observations": 268,
+      "failedPerEndpoint": 2,
+      "sourceAdaptationAgrees": true
+    },
+    {
+      "family": "qualified-statement-separator",
+      "stage": "repair",
+      "observations": 268,
+      "failedPerEndpoint": 0,
+      "sourceAdaptationAgrees": true
+    }
+  ],
+  "controls": [
+    {
+      "name": "express-edges",
+      "observations": 96,
+      "sourceAdaptationComparisons": 48,
+      "expectedSha256": "f5b5810fb4a92621202c55e62f56282b2f2a3f7046816e906394280a97d4fdd7",
+      "exactExpectedObservationsAgree": true
+    },
+    {
+      "name": "standalone-edges",
+      "observations": 608,
+      "sourceAdaptationComparisons": 304,
+      "expectedSha256": "369bb8a62c0a4ef2c6c2bf7da7d87f5ac76738e2c3d4ef40787f2a1a64fb0807",
+      "exactExpectedObservationsAgree": true
+    },
+    {
+      "name": "cache-edges",
+      "observations": 144,
+      "sourceAdaptationComparisons": 72,
+      "expectedSha256": "7214b31f18bd725bf4a50ba4f37752325add4b0256e0c4af9aa3b8018be14c4d",
+      "exactExpectedObservationsAgree": true
+    },
+    {
+      "name": "export-edges",
+      "observations": 96,
+      "sourceAdaptationComparisons": 48,
+      "expectedSha256": "03648ce4d7755fdf0f37290371b0c7308644a35539908768bd6ed1d5f76d124e",
+      "exactExpectedObservationsAgree": true
+    },
+    {
+      "name": "sparse-edges",
+      "observations": 48,
+      "sourceAdaptationComparisons": 24,
+      "expectedSha256": "b27638e57ce9f15244d7996ff7cfa000dc573a76950c9249b91c39174e1a2586",
+      "exactExpectedObservationsAgree": true
+    },
+    {
+      "name": "separator-edges",
+      "observations": 72,
+      "sourceAdaptationComparisons": 36,
+      "expectedSha256": "ca5724f5014ac45edead8c0740040077b74043da01c52ff5846c2292efdecb52",
+      "exactExpectedObservationsAgree": true
+    },
+    {
+      "name": "sparse-targets",
+      "observations": 42,
+      "sourceAdaptationComparisons": 21,
+      "expectedSha256": "dd165e3fd7b9bf588f459908ecc6621733ac71b872e428b0720d8ac9dd3afa78",
+      "exactExpectedObservationsAgree": true
+    },
+    {
+      "name": "middleware-targets",
+      "observations": 66,
+      "sourceAdaptationComparisons": 33,
+      "expectedSha256": "8dd94c2186a5010d2e14299e0d89cb4ab9343fe09d14381e314a51ad1ac02566",
+      "exactExpectedObservationsAgree": true
+    },
+    {
+      "name": "parameter-source-targets",
+      "observations": 18,
+      "sourceAdaptationComparisons": 0,
+      "expectedSha256": "426d3616d8075f07b21be01efad6a6b24d01da54c15a917ad8e5b72d2a906dea",
+      "exactExpectedObservationsAgree": true
+    },
+    {
+      "name": "parameter-adapted-targets",
+      "observations": 18,
+      "sourceAdaptationComparisons": 0,
+      "expectedSha256": "426d3616d8075f07b21be01efad6a6b24d01da54c15a917ad8e5b72d2a906dea",
+      "exactExpectedObservationsAgree": true
+    },
+    {
+      "name": "cache-targets",
+      "observations": 56,
+      "sourceAdaptationComparisons": 28,
+      "expectedSha256": "186887b0ae85ef6058dbd95b5c48e8a78a1c15fe7bda42251d9d8358bc94940b",
+      "exactExpectedObservationsAgree": true
+    },
+    {
+      "name": "export-targets",
+      "observations": 66,
+      "sourceAdaptationComparisons": 33,
+      "expectedSha256": "6161ff9cb4cc5dc29fef7be2537fd91dadde930ce538bf521c521b4a0b827dcb",
+      "exactExpectedObservationsAgree": true
+    },
+    {
+      "name": "separator-targets",
+      "observations": 96,
+      "sourceAdaptationComparisons": 48,
+      "expectedSha256": "d390fe73285fa0904c9c042c184c7bc891e4a5a9b8633a47b9ef4f27d94a70f4",
+      "exactExpectedObservationsAgree": true
+    },
+    {
+      "name": "standalone-targets",
+      "observations": 192,
+      "sourceAdaptationComparisons": 96,
+      "expectedSha256": "1629f21b793b696c2720079421bcab3a9c19ce5f9c5c23aea1ce58365c2a5fe0",
+      "exactExpectedObservationsAgree": true
+    }
+  ],
+  "publishedObservations": 1104,
+  "controlObservations": 1618,
+  "sourceAdaptationComparisons": 1361,
+  "allExactExpectedObservationsAgree": true,
+  "npmCiRuntimeLocks": 9,
+  "installScriptsDisabled": true,
+  "corpusBindings": [
+    {
+      "id": "corr-empty-middleware-path",
+      "repo": "base",
+      "file": "src/register-middleware.js",
+      "destination": "qualified-middleware-path/base.mjs",
+      "sha256": "66cf7fcf9568c0d8da5f8353806af3027d1d6cecb9afa2a42dec75871c49a075",
+      "expected": "FAIL"
+    },
+    {
+      "id": "corr-empty-middleware-path",
+      "repo": "staged",
+      "file": "src/register-middleware.js",
+      "destination": "qualified-middleware-path/bug.mjs",
+      "sha256": "2704acb9f9fa1db6062a90add51a219671e5eb2207dcbf9d0e997f14aef6cf3d",
+      "expected": "FAIL"
+    },
+    {
+      "id": "corr-empty-middleware-path-repaired",
+      "repo": "staged",
+      "file": "src/register-middleware.js",
+      "destination": "qualified-middleware-path/repair.mjs",
+      "sha256": "272ba0316a747458b1ea1de2543f4a093a1170c40d3f507380791ba23dcceba8",
+      "expected": "PASS"
+    },
+    {
+      "id": "corr-parameter-cache-loses-outcome",
+      "repo": "base",
+      "file": "src/process-route-parameters.js",
+      "destination": "qualified-parameter-cache/base.mjs",
+      "sha256": "eed46d0192c22530d13c0e67a34d580b4282c59419da44f4ccb415100aa419b9",
+      "expected": "FAIL"
+    },
+    {
+      "id": "corr-parameter-cache-loses-outcome",
+      "repo": "staged",
+      "file": "src/process-route-parameters.js",
+      "destination": "qualified-parameter-cache/bug.mjs",
+      "sha256": "91f18af6f1fcbfeb1730e4a012c1554beaeb78292a39ffee7df6e8a5772d24f5",
+      "expected": "FAIL"
+    },
+    {
+      "id": "corr-parameter-cache-loses-outcome-repaired",
+      "repo": "staged",
+      "file": "src/process-route-parameters.js",
+      "destination": "qualified-parameter-cache/repair.mjs",
+      "sha256": "8d50699a1b0ed767724389d5280039b71a84c722249cff3a02d63b1108a488c7",
+      "expected": "PASS"
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "repo": "base",
+      "file": "src/subdomains.js",
+      "destination": "qualified-repair-only/corr-ip-address-subdomains-clean-base.mjs",
+      "sha256": "82c412d26216f034757e70b35d2944fa52a89b83e13fde5c9ec0e8cbd3a9c606",
+      "expected": "PASS"
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "repo": "staged",
+      "file": "src/subdomains.js",
+      "destination": "qualified-repair-only/corr-ip-address-subdomains-clean-repair.mjs",
+      "sha256": "60c87318a9ecbc218156ed4e8580442f770bd320cb96f03c82e9ab0e94d0a551",
+      "expected": "PASS"
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "repo": "base",
+      "file": "src/request-host.js",
+      "destination": "qualified-repair-only/corr-bracketed-host-port-clean-base.mjs",
+      "sha256": "3a24a3fd96b9c7d4b3a88426906e90624e9fb9a065592aaae44b4e70e8ef1aa5",
+      "expected": "PASS"
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "repo": "staged",
+      "file": "src/request-host.js",
+      "destination": "qualified-repair-only/corr-bracketed-host-port-clean-repair.mjs",
+      "sha256": "5d2c3b35f32522ce5072203138a2c8dda613e7b86e4e90f7b06fce30e4cc574f",
+      "expected": "PASS"
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "repo": "base",
+      "file": "src/read-map-properties.js",
+      "destination": "qualified-repair-only/corr-null-map-key-clean-base.mjs",
+      "sha256": "849fbcc99472b19e06beb07af648e06bdbfebf5840a1e6ae0d642a89deb2f061",
+      "expected": "PASS"
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "repo": "staged",
+      "file": "src/read-map-properties.js",
+      "destination": "qualified-repair-only/corr-null-map-key-clean-repair.mjs",
+      "sha256": "6c3944c2f55e4e829c2243d5d01daf2a7f31b2644c51165dfeb44460b21a88f4",
+      "expected": "PASS"
+    },
+    {
+      "id": "corr-cache-resource-key",
+      "repo": "base",
+      "file": "src/request-handlers.js",
+      "destination": "qualified-cache-resource/base.mjs",
+      "sha256": "b0d6fdd32b5181965f21de9e45a4e2a016503985bb659a795284d747c1881288",
+      "expected": "FAIL"
+    },
+    {
+      "id": "corr-cache-resource-key",
+      "repo": "staged",
+      "file": "src/request-handlers.js",
+      "destination": "qualified-cache-resource/bug.mjs",
+      "sha256": "a8eb52923b4224ff2e49e2f6cac09a979df0e8a4b1d862e078e2f4f99288fcc7",
+      "expected": "FAIL"
+    },
+    {
+      "id": "corr-cache-resource-key-repaired",
+      "repo": "staged",
+      "file": "src/request-handlers.js",
+      "destination": "qualified-cache-resource/repair.mjs",
+      "sha256": "b92470549619a38554454013e590a5f5d5af9bc1859f629d9b8d3dacba32c477",
+      "expected": "PASS"
+    },
+    {
+      "id": "corr-cache-resource-key",
+      "repo": "base",
+      "file": "src/lru-cache.js",
+      "destination": "qualified-cache-resource/lru-cache.js",
+      "sha256": "044db4c2983533583a7ce971e324838560c0c903bdf51062672d6b39098added",
+      "expected": "FAIL"
+    },
+    {
+      "id": "corr-export-list-traversal",
+      "repo": "base",
+      "file": "src/declaration-order.js",
+      "destination": "qualified-export-declaration/parent.js",
+      "sha256": "39a1bc834f1320d3aaac80444363e0a5faf7f067851bde135d9bcf4f503f4ac9",
+      "expected": "FAIL"
+    },
+    {
+      "id": "corr-export-list-traversal",
+      "repo": "staged",
+      "file": "src/declaration-order.js",
+      "destination": "qualified-export-declaration/bug.js",
+      "sha256": "46d992393bd0c0c164d3fc5a074870b7109a81f25480b49f206e09da4e27c27c",
+      "expected": "FAIL"
+    },
+    {
+      "id": "corr-export-list-traversal-repaired",
+      "repo": "staged",
+      "file": "src/declaration-order.js",
+      "destination": "qualified-export-declaration/repair.js",
+      "sha256": "82b5f4abdd1589698130101792f4b00d3c1e318c8ae5e2d19e321cddc89fe71c",
+      "expected": "PASS"
+    },
+    {
+      "id": "corr-statement-separator",
+      "repo": "base",
+      "file": "src/statement-separator.js",
+      "destination": "qualified-statement-separator/parent.js",
+      "sha256": "43b98e884d410b6974c02e3f2f61baac56c2bccbd59cc562b8ecb267803079b7",
+      "expected": "FAIL"
+    },
+    {
+      "id": "corr-statement-separator",
+      "repo": "staged",
+      "file": "src/statement-separator.js",
+      "destination": "qualified-statement-separator/bug.js",
+      "sha256": "79e45ae57dd3535925b673f16efdd1568dc89f2d677e25f153a9df668fa02e0f",
+      "expected": "FAIL"
+    },
+    {
+      "id": "corr-statement-separator-repaired",
+      "repo": "staged",
+      "file": "src/statement-separator.js",
+      "destination": "qualified-statement-separator/repair.js",
+      "sha256": "a833cc4fcbf8ee7c86c555cc64b96792a82220e1674f2bdb7312e7efeaee3368",
+      "expected": "PASS"
+    },
+    {
+      "id": "corr-sparse-document-validation",
+      "repo": "base",
+      "file": "src/validate-document-array.js",
+      "destination": "qualified-sparse-validation/parent-adapted.cjs",
+      "sha256": "bb70fdd6360232ab5ca5e269d824518717777701cd0ac648dfca959f81a86c9d",
+      "expected": "FAIL"
+    },
+    {
+      "id": "corr-sparse-document-validation",
+      "repo": "staged",
+      "file": "src/validate-document-array.js",
+      "destination": "qualified-sparse-validation/bug-adapted.cjs",
+      "sha256": "0a167cc0b6c910ce9e722344259fce58edf05adb0d87e5e9c69937a1b4df57c6",
+      "expected": "FAIL"
+    },
+    {
+      "id": "corr-sparse-document-validation-repaired",
+      "repo": "staged",
+      "file": "src/validate-document-array.js",
+      "destination": "qualified-sparse-validation/repair-adapted.cjs",
+      "sha256": "395ac5cba9acb712f3c8166b47b8ae438e95257e3ce364b99be36a2d013352b4",
+      "expected": "PASS"
+    }
+  ],
+  "derivedRepair": "Shields Object.create(null) extension; upstream endpoint retained only as target-specific comparison",
+  "disclosure": "Source-exposed agent evidence. Dynamic checks establish bounded source/adaptation conformance, not independent human labels, unseen data or global correctness."
+}

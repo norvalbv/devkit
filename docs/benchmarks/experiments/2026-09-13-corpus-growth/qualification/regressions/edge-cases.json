@@ -1,0 +1,209 @@
+{
+  "changeId": "sc3152-population-pairs-source-qualification",
+  "scope": {
+    "frontend": false,
+    "backend": false,
+    "shared": true
+  },
+  "risks": [
+    {
+      "id": "R1",
+      "layer": "shared",
+      "category": "Temporal & Concurrency",
+      "triggers": [
+        "limit-reuse"
+      ],
+      "edgeCases": [
+        {
+          "id": "EC1",
+          "scenario": "Repeat population using the same two-document options with limit 2.",
+          "expected": "Keep the same scaled query limit across identical calls.",
+          "testType": "integration",
+          "coverageStatus": "covered",
+          "coveredBy": [
+            "population-edge-manifest.json#/cases/6/edgeExpected/repair",
+            "mongoose-population-edge-controls.cjs"
+          ],
+          "notes": "Actual original/adapted framework controls agree. Failure evidence excludes the affected clean row; retained normal and callback cases are also recorded."
+        }
+      ]
+    },
+    {
+      "id": "R2",
+      "layer": "shared",
+      "category": "Contract & Boundary Handling",
+      "triggers": [
+        "projection-prefix"
+      ],
+      "edgeCases": [
+        {
+          "id": "EC2",
+          "scenario": "Populate with select -_identity.",
+          "expected": "Never synthesize an inclusion for entity by deleting an _id prefix.",
+          "testType": "integration",
+          "coverageStatus": "covered",
+          "coveredBy": [
+            "population-edge-manifest.json#/cases/7/edgeExpected/repair",
+            "mongoose-population-edge-controls.cjs"
+          ],
+          "notes": "Actual original/adapted framework controls agree. Failure evidence excludes the affected clean row; retained normal and callback cases are also recorded."
+        }
+      ]
+    },
+    {
+      "id": "R3",
+      "layer": "shared",
+      "category": "Recovery & Failure Modes",
+      "triggers": [
+        "repopulate-error"
+      ],
+      "edgeCases": [
+        {
+          "id": "EC3",
+          "scenario": "A populated reference-array repopulation fails after starting its lookup.",
+          "expected": "Retain pre-existing document entries after the callback error.",
+          "testType": "integration",
+          "coverageStatus": "covered",
+          "coveredBy": [
+            "population-edge-manifest.json#/cases/8/edgeExpected/repair",
+            "mongoose-population-edge-controls.cjs"
+          ],
+          "notes": "Actual original/adapted framework controls agree. Failure evidence excludes the affected clean row; retained normal and callback cases are also recorded."
+        }
+      ]
+    },
+    {
+      "id": "R4",
+      "layer": "shared",
+      "category": "Contract & Boundary Handling",
+      "triggers": [
+        "default-alias-policy"
+      ],
+      "edgeCases": [
+        {
+          "id": "EC4",
+          "scenario": "Declare snake_case through a default alias with properties:never.",
+          "expected": "Report invalid local binding while allowing underscored external property names.",
+          "testType": "integration",
+          "coverageStatus": "covered",
+          "coveredBy": [
+            "expected/destructured-edge-underscores/edges.json",
+            "eslint-regression-edge-controls.cjs"
+          ],
+          "notes": "Actual original/adapted framework controls agree. Failure evidence excludes the affected clean row; retained normal and callback cases are also recorded."
+        }
+      ]
+    },
+    {
+      "id": "R5",
+      "layer": "shared",
+      "category": "Contract & Boundary Handling",
+      "triggers": [
+        "zero-configuration"
+      ],
+      "edgeCases": [
+        {
+          "id": "EC5",
+          "scenario": "Set maximum length or tab width to zero.",
+          "expected": "Honor configured numeric zero rather than applying an omitted-option default.",
+          "testType": "integration",
+          "coverageStatus": "covered",
+          "coveredBy": [
+            "expected/diagnostic-column-contract/edges.json",
+            "eslint-regression-edge-controls.cjs"
+          ],
+          "notes": "Actual original/adapted framework controls agree. Failure evidence excludes the affected clean row; retained normal and callback cases are also recorded."
+        }
+      ]
+    },
+    {
+      "id": "R6",
+      "layer": "shared",
+      "category": "State & Data Integrity",
+      "triggers": [
+        "rest-default-effect"
+      ],
+      "edgeCases": [
+        {
+          "id": "EC6",
+          "scenario": "Construct via rest destructuring with a default effect and super(...arguments).",
+          "expected": "Do not classify removal of an effectful constructor as useless.",
+          "testType": "integration",
+          "coverageStatus": "covered",
+          "coveredBy": [
+            "expected/empty-super-argument-traversal/edges.json",
+            "eslint-regression-edge-controls.cjs"
+          ],
+          "notes": "Actual original/adapted framework controls agree. Failure evidence excludes the affected clean row; retained normal and callback cases are also recorded."
+        }
+      ]
+    },
+    {
+      "id": "R7",
+      "layer": "shared",
+      "category": "Recovery & Failure Modes",
+      "triggers": [
+        "comment-fix"
+      ],
+      "edgeCases": [
+        {
+          "id": "EC7",
+          "scenario": "Apply never-padding fixer beside inline and multiline comments.",
+          "expected": "Preserve ordered in-bounds ranges, syntax, comments and tokens; converge.",
+          "testType": "integration",
+          "coverageStatus": "covered",
+          "coveredBy": [
+            "expected/comment-adjacent-fix-ranges/edges.json",
+            "eslint-regression-edge-controls.cjs"
+          ],
+          "notes": "Actual original/adapted framework controls agree. Failure evidence excludes the affected clean row; retained normal and callback cases are also recorded."
+        }
+      ]
+    },
+    {
+      "id": "R8",
+      "layer": "shared",
+      "category": "Recovery & Failure Modes",
+      "triggers": [
+        "query-errors"
+      ],
+      "edgeCases": [
+        {
+          "id": "EC8",
+          "scenario": "Atomic populated query receives driver or population callback error.",
+          "expected": "Return the error through the query callback and preserve absent-document behavior.",
+          "testType": "integration",
+          "coverageStatus": "covered",
+          "coveredBy": [
+            "population-edge-manifest.json#/cases/2/edgeExpected/repair",
+            "mongoose-population-edge-controls.cjs"
+          ],
+          "notes": "Actual original/adapted framework controls agree. Failure evidence excludes the affected clean row; retained normal and callback cases are also recorded."
+        }
+      ]
+    },
+    {
+      "id": "R9",
+      "layer": "shared",
+      "category": "State & Data Integrity",
+      "triggers": [
+        "save-depopulation"
+      ],
+      "edgeCases": [
+        {
+          "id": "EC9",
+          "scenario": "Save a document with populated scalar/array references and embedded documents.",
+          "expected": "Store reference identifiers while preserving root and embedded document objects.",
+          "testType": "integration",
+          "coverageStatus": "covered",
+          "coveredBy": [
+            "population-edge-manifest.json#/cases/3/edgeExpected/repair",
+            "mongoose-population-edge-controls.cjs"
+          ],
+          "notes": "Actual original/adapted framework controls agree. Failure evidence excludes the affected clean row; retained normal and callback cases are also recorded."
+        }
+      ]
+    }
+  ],
+  "notApplicable": "No new UI, permissions or production networking is proposed. Timing coverage is the pending asynchronous population operation, not wall-clock performance."
+}

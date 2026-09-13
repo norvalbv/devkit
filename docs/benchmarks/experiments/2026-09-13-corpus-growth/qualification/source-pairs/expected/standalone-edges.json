@@ -1,0 +1,4919 @@
+{
+  "runtime": "v24.19.0",
+  "observations": [
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "tobi.ferrets.example.com:8080",
+        "offset": 0,
+        "trusted": false,
+        "computedHost": "tobi.ferrets.example.com"
+      },
+      "original": {
+        "value": "[\"com\",\"example\",\"ferrets\",\"tobi\"]"
+      },
+      "actual": {
+        "value": "[\"com\",\"example\",\"ferrets\",\"tobi\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "tobi.ferrets.example.com:8080",
+        "offset": 0,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[\"40\",\"30\",\"20\",\"10\"]"
+      },
+      "actual": {
+        "value": "[\"40\",\"30\",\"20\",\"10\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "tobi.ferrets.example.com:8080",
+        "offset": 1,
+        "trusted": false,
+        "computedHost": "tobi.ferrets.example.com"
+      },
+      "original": {
+        "value": "[\"example\",\"ferrets\",\"tobi\"]"
+      },
+      "actual": {
+        "value": "[\"example\",\"ferrets\",\"tobi\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "tobi.ferrets.example.com:8080",
+        "offset": 1,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[\"30\",\"20\",\"10\"]"
+      },
+      "actual": {
+        "value": "[\"30\",\"20\",\"10\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "tobi.ferrets.example.com:8080",
+        "offset": 2,
+        "trusted": false,
+        "computedHost": "tobi.ferrets.example.com"
+      },
+      "original": {
+        "value": "[\"ferrets\",\"tobi\"]"
+      },
+      "actual": {
+        "value": "[\"ferrets\",\"tobi\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "tobi.ferrets.example.com:8080",
+        "offset": 2,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[\"20\",\"10\"]"
+      },
+      "actual": {
+        "value": "[\"20\",\"10\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "tobi.ferrets.example.com:8080",
+        "offset": 3,
+        "trusted": false,
+        "computedHost": "tobi.ferrets.example.com"
+      },
+      "original": {
+        "value": "[\"tobi\"]"
+      },
+      "actual": {
+        "value": "[\"tobi\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "tobi.ferrets.example.com:8080",
+        "offset": 3,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[\"10\"]"
+      },
+      "actual": {
+        "value": "[\"10\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "tobi.ferrets.example.com:8080",
+        "offset": -1,
+        "trusted": false,
+        "computedHost": "tobi.ferrets.example.com"
+      },
+      "original": {
+        "value": "[\"tobi\"]"
+      },
+      "actual": {
+        "value": "[\"tobi\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "tobi.ferrets.example.com:8080",
+        "offset": -1,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[\"10\"]"
+      },
+      "actual": {
+        "value": "[\"10\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "example.com",
+        "offset": 0,
+        "trusted": false,
+        "computedHost": "example.com"
+      },
+      "original": {
+        "value": "[\"com\",\"example\"]"
+      },
+      "actual": {
+        "value": "[\"com\",\"example\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "example.com",
+        "offset": 0,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[\"40\",\"30\",\"20\",\"10\"]"
+      },
+      "actual": {
+        "value": "[\"40\",\"30\",\"20\",\"10\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "example.com",
+        "offset": 1,
+        "trusted": false,
+        "computedHost": "example.com"
+      },
+      "original": {
+        "value": "[\"example\"]"
+      },
+      "actual": {
+        "value": "[\"example\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "example.com",
+        "offset": 1,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[\"30\",\"20\",\"10\"]"
+      },
+      "actual": {
+        "value": "[\"30\",\"20\",\"10\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "example.com",
+        "offset": 2,
+        "trusted": false,
+        "computedHost": "example.com"
+      },
+      "original": {
+        "value": "[]"
+      },
+      "actual": {
+        "value": "[]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "example.com",
+        "offset": 2,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[\"20\",\"10\"]"
+      },
+      "actual": {
+        "value": "[\"20\",\"10\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "example.com",
+        "offset": 3,
+        "trusted": false,
+        "computedHost": "example.com"
+      },
+      "original": {
+        "value": "[]"
+      },
+      "actual": {
+        "value": "[]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "example.com",
+        "offset": 3,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[\"10\"]"
+      },
+      "actual": {
+        "value": "[\"10\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "example.com",
+        "offset": -1,
+        "trusted": false,
+        "computedHost": "example.com"
+      },
+      "original": {
+        "value": "[\"example\"]"
+      },
+      "actual": {
+        "value": "[\"example\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "example.com",
+        "offset": -1,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[\"10\"]"
+      },
+      "actual": {
+        "value": "[\"10\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "localhost",
+        "offset": 0,
+        "trusted": false,
+        "computedHost": "localhost"
+      },
+      "original": {
+        "value": "[\"localhost\"]"
+      },
+      "actual": {
+        "value": "[\"localhost\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "localhost",
+        "offset": 0,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[\"40\",\"30\",\"20\",\"10\"]"
+      },
+      "actual": {
+        "value": "[\"40\",\"30\",\"20\",\"10\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "localhost",
+        "offset": 1,
+        "trusted": false,
+        "computedHost": "localhost"
+      },
+      "original": {
+        "value": "[]"
+      },
+      "actual": {
+        "value": "[]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "localhost",
+        "offset": 1,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[\"30\",\"20\",\"10\"]"
+      },
+      "actual": {
+        "value": "[\"30\",\"20\",\"10\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "localhost",
+        "offset": 2,
+        "trusted": false,
+        "computedHost": "localhost"
+      },
+      "original": {
+        "value": "[]"
+      },
+      "actual": {
+        "value": "[]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "localhost",
+        "offset": 2,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[\"20\",\"10\"]"
+      },
+      "actual": {
+        "value": "[\"20\",\"10\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "localhost",
+        "offset": 3,
+        "trusted": false,
+        "computedHost": "localhost"
+      },
+      "original": {
+        "value": "[]"
+      },
+      "actual": {
+        "value": "[]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "localhost",
+        "offset": 3,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[\"10\"]"
+      },
+      "actual": {
+        "value": "[\"10\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "localhost",
+        "offset": -1,
+        "trusted": false,
+        "computedHost": "localhost"
+      },
+      "original": {
+        "value": "[\"localhost\"]"
+      },
+      "actual": {
+        "value": "[\"localhost\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "localhost",
+        "offset": -1,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[\"10\"]"
+      },
+      "actual": {
+        "value": "[\"10\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "127.0.0.1:80",
+        "offset": 0,
+        "trusted": false,
+        "computedHost": "127.0.0.1"
+      },
+      "original": {
+        "value": "[\"1\",\"0\",\"0\",\"127\"]"
+      },
+      "actual": {
+        "value": "[\"1\",\"0\",\"0\",\"127\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "127.0.0.1:80",
+        "offset": 0,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[\"40\",\"30\",\"20\",\"10\"]"
+      },
+      "actual": {
+        "value": "[\"40\",\"30\",\"20\",\"10\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "127.0.0.1:80",
+        "offset": 1,
+        "trusted": false,
+        "computedHost": "127.0.0.1"
+      },
+      "original": {
+        "value": "[\"0\",\"0\",\"127\"]"
+      },
+      "actual": {
+        "value": "[\"0\",\"0\",\"127\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "127.0.0.1:80",
+        "offset": 1,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[\"30\",\"20\",\"10\"]"
+      },
+      "actual": {
+        "value": "[\"30\",\"20\",\"10\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "127.0.0.1:80",
+        "offset": 2,
+        "trusted": false,
+        "computedHost": "127.0.0.1"
+      },
+      "original": {
+        "value": "[\"0\",\"127\"]"
+      },
+      "actual": {
+        "value": "[\"0\",\"127\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "127.0.0.1:80",
+        "offset": 2,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[\"20\",\"10\"]"
+      },
+      "actual": {
+        "value": "[\"20\",\"10\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "127.0.0.1:80",
+        "offset": 3,
+        "trusted": false,
+        "computedHost": "127.0.0.1"
+      },
+      "original": {
+        "value": "[\"127\"]"
+      },
+      "actual": {
+        "value": "[\"127\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "127.0.0.1:80",
+        "offset": 3,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[\"10\"]"
+      },
+      "actual": {
+        "value": "[\"10\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "127.0.0.1:80",
+        "offset": -1,
+        "trusted": false,
+        "computedHost": "127.0.0.1"
+      },
+      "original": {
+        "value": "[\"127\"]"
+      },
+      "actual": {
+        "value": "[\"127\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "127.0.0.1:80",
+        "offset": -1,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[\"10\"]"
+      },
+      "actual": {
+        "value": "[\"10\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "[::1]:443",
+        "offset": 0,
+        "trusted": false,
+        "computedHost": "[::1]"
+      },
+      "original": {
+        "value": "[\"[::1]\"]"
+      },
+      "actual": {
+        "value": "[\"[::1]\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "[::1]:443",
+        "offset": 0,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[\"40\",\"30\",\"20\",\"10\"]"
+      },
+      "actual": {
+        "value": "[\"40\",\"30\",\"20\",\"10\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "[::1]:443",
+        "offset": 1,
+        "trusted": false,
+        "computedHost": "[::1]"
+      },
+      "original": {
+        "value": "[]"
+      },
+      "actual": {
+        "value": "[]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "[::1]:443",
+        "offset": 1,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[\"30\",\"20\",\"10\"]"
+      },
+      "actual": {
+        "value": "[\"30\",\"20\",\"10\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "[::1]:443",
+        "offset": 2,
+        "trusted": false,
+        "computedHost": "[::1]"
+      },
+      "original": {
+        "value": "[]"
+      },
+      "actual": {
+        "value": "[]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "[::1]:443",
+        "offset": 2,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[\"20\",\"10\"]"
+      },
+      "actual": {
+        "value": "[\"20\",\"10\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "[::1]:443",
+        "offset": 3,
+        "trusted": false,
+        "computedHost": "[::1]"
+      },
+      "original": {
+        "value": "[]"
+      },
+      "actual": {
+        "value": "[]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "[::1]:443",
+        "offset": 3,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[\"10\"]"
+      },
+      "actual": {
+        "value": "[\"10\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "[::1]:443",
+        "offset": -1,
+        "trusted": false,
+        "computedHost": "[::1]"
+      },
+      "original": {
+        "value": "[\"[::1]\"]"
+      },
+      "actual": {
+        "value": "[\"[::1]\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "[::1]:443",
+        "offset": -1,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[\"10\"]"
+      },
+      "actual": {
+        "value": "[\"10\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "[2001:db8::1]",
+        "offset": 0,
+        "trusted": false,
+        "computedHost": "[2001:db8::1]"
+      },
+      "original": {
+        "value": "[\"[2001:db8::1]\"]"
+      },
+      "actual": {
+        "value": "[\"[2001:db8::1]\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "[2001:db8::1]",
+        "offset": 0,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[\"40\",\"30\",\"20\",\"10\"]"
+      },
+      "actual": {
+        "value": "[\"40\",\"30\",\"20\",\"10\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "[2001:db8::1]",
+        "offset": 1,
+        "trusted": false,
+        "computedHost": "[2001:db8::1]"
+      },
+      "original": {
+        "value": "[]"
+      },
+      "actual": {
+        "value": "[]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "[2001:db8::1]",
+        "offset": 1,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[\"30\",\"20\",\"10\"]"
+      },
+      "actual": {
+        "value": "[\"30\",\"20\",\"10\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "[2001:db8::1]",
+        "offset": 2,
+        "trusted": false,
+        "computedHost": "[2001:db8::1]"
+      },
+      "original": {
+        "value": "[]"
+      },
+      "actual": {
+        "value": "[]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "[2001:db8::1]",
+        "offset": 2,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[\"20\",\"10\"]"
+      },
+      "actual": {
+        "value": "[\"20\",\"10\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "[2001:db8::1]",
+        "offset": 3,
+        "trusted": false,
+        "computedHost": "[2001:db8::1]"
+      },
+      "original": {
+        "value": "[]"
+      },
+      "actual": {
+        "value": "[]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "[2001:db8::1]",
+        "offset": 3,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[\"10\"]"
+      },
+      "actual": {
+        "value": "[\"10\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "[2001:db8::1]",
+        "offset": -1,
+        "trusted": false,
+        "computedHost": "[2001:db8::1]"
+      },
+      "original": {
+        "value": "[\"[2001:db8::1]\"]"
+      },
+      "actual": {
+        "value": "[\"[2001:db8::1]\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "[2001:db8::1]",
+        "offset": -1,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[\"10\"]"
+      },
+      "actual": {
+        "value": "[\"10\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "127.0.0.1.",
+        "offset": 0,
+        "trusted": false,
+        "computedHost": "127.0.0.1."
+      },
+      "original": {
+        "value": "[\"\",\"1\",\"0\",\"0\",\"127\"]"
+      },
+      "actual": {
+        "value": "[\"\",\"1\",\"0\",\"0\",\"127\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "127.0.0.1.",
+        "offset": 0,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[\"40\",\"30\",\"20\",\"10\"]"
+      },
+      "actual": {
+        "value": "[\"40\",\"30\",\"20\",\"10\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "127.0.0.1.",
+        "offset": 1,
+        "trusted": false,
+        "computedHost": "127.0.0.1."
+      },
+      "original": {
+        "value": "[\"1\",\"0\",\"0\",\"127\"]"
+      },
+      "actual": {
+        "value": "[\"1\",\"0\",\"0\",\"127\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "127.0.0.1.",
+        "offset": 1,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[\"30\",\"20\",\"10\"]"
+      },
+      "actual": {
+        "value": "[\"30\",\"20\",\"10\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "127.0.0.1.",
+        "offset": 2,
+        "trusted": false,
+        "computedHost": "127.0.0.1."
+      },
+      "original": {
+        "value": "[\"0\",\"0\",\"127\"]"
+      },
+      "actual": {
+        "value": "[\"0\",\"0\",\"127\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "127.0.0.1.",
+        "offset": 2,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[\"20\",\"10\"]"
+      },
+      "actual": {
+        "value": "[\"20\",\"10\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "127.0.0.1.",
+        "offset": 3,
+        "trusted": false,
+        "computedHost": "127.0.0.1."
+      },
+      "original": {
+        "value": "[\"0\",\"127\"]"
+      },
+      "actual": {
+        "value": "[\"0\",\"127\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "127.0.0.1.",
+        "offset": 3,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[\"10\"]"
+      },
+      "actual": {
+        "value": "[\"10\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "127.0.0.1.",
+        "offset": -1,
+        "trusted": false,
+        "computedHost": "127.0.0.1."
+      },
+      "original": {
+        "value": "[\"127\"]"
+      },
+      "actual": {
+        "value": "[\"127\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "127.0.0.1.",
+        "offset": -1,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[\"10\"]"
+      },
+      "actual": {
+        "value": "[\"10\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "offset": 0,
+        "trusted": false
+      },
+      "original": {
+        "error": {
+          "name": "TypeError",
+          "message": "Cannot read properties of undefined (reading 'split')"
+        }
+      },
+      "actual": {
+        "error": {
+          "name": "TypeError",
+          "message": "Cannot read properties of undefined (reading 'split')"
+        }
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "offset": 0,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[\"40\",\"30\",\"20\",\"10\"]"
+      },
+      "actual": {
+        "value": "[\"40\",\"30\",\"20\",\"10\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "offset": 1,
+        "trusted": false
+      },
+      "original": {
+        "error": {
+          "name": "TypeError",
+          "message": "Cannot read properties of undefined (reading 'split')"
+        }
+      },
+      "actual": {
+        "error": {
+          "name": "TypeError",
+          "message": "Cannot read properties of undefined (reading 'split')"
+        }
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "offset": 1,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[\"30\",\"20\",\"10\"]"
+      },
+      "actual": {
+        "value": "[\"30\",\"20\",\"10\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "offset": 2,
+        "trusted": false
+      },
+      "original": {
+        "error": {
+          "name": "TypeError",
+          "message": "Cannot read properties of undefined (reading 'split')"
+        }
+      },
+      "actual": {
+        "error": {
+          "name": "TypeError",
+          "message": "Cannot read properties of undefined (reading 'split')"
+        }
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "offset": 2,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[\"20\",\"10\"]"
+      },
+      "actual": {
+        "value": "[\"20\",\"10\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "offset": 3,
+        "trusted": false
+      },
+      "original": {
+        "error": {
+          "name": "TypeError",
+          "message": "Cannot read properties of undefined (reading 'split')"
+        }
+      },
+      "actual": {
+        "error": {
+          "name": "TypeError",
+          "message": "Cannot read properties of undefined (reading 'split')"
+        }
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "offset": 3,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[\"10\"]"
+      },
+      "actual": {
+        "value": "[\"10\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "offset": -1,
+        "trusted": false
+      },
+      "original": {
+        "error": {
+          "name": "TypeError",
+          "message": "Cannot read properties of undefined (reading 'split')"
+        }
+      },
+      "actual": {
+        "error": {
+          "name": "TypeError",
+          "message": "Cannot read properties of undefined (reading 'split')"
+        }
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "offset": -1,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[\"10\"]"
+      },
+      "actual": {
+        "value": "[\"10\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "tobi.ferrets.example.com:8080",
+        "offset": 0,
+        "trusted": false,
+        "computedHost": "tobi.ferrets.example.com"
+      },
+      "original": {
+        "value": "[\"com\",\"example\",\"ferrets\",\"tobi\"]"
+      },
+      "actual": {
+        "value": "[\"com\",\"example\",\"ferrets\",\"tobi\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "tobi.ferrets.example.com:8080",
+        "offset": 0,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[\"10.20.30.40\"]"
+      },
+      "actual": {
+        "value": "[\"10.20.30.40\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "tobi.ferrets.example.com:8080",
+        "offset": 1,
+        "trusted": false,
+        "computedHost": "tobi.ferrets.example.com"
+      },
+      "original": {
+        "value": "[\"example\",\"ferrets\",\"tobi\"]"
+      },
+      "actual": {
+        "value": "[\"example\",\"ferrets\",\"tobi\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "tobi.ferrets.example.com:8080",
+        "offset": 1,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[]"
+      },
+      "actual": {
+        "value": "[]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "tobi.ferrets.example.com:8080",
+        "offset": 2,
+        "trusted": false,
+        "computedHost": "tobi.ferrets.example.com"
+      },
+      "original": {
+        "value": "[\"ferrets\",\"tobi\"]"
+      },
+      "actual": {
+        "value": "[\"ferrets\",\"tobi\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "tobi.ferrets.example.com:8080",
+        "offset": 2,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[]"
+      },
+      "actual": {
+        "value": "[]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "tobi.ferrets.example.com:8080",
+        "offset": 3,
+        "trusted": false,
+        "computedHost": "tobi.ferrets.example.com"
+      },
+      "original": {
+        "value": "[\"tobi\"]"
+      },
+      "actual": {
+        "value": "[\"tobi\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "tobi.ferrets.example.com:8080",
+        "offset": 3,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[]"
+      },
+      "actual": {
+        "value": "[]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "tobi.ferrets.example.com:8080",
+        "offset": -1,
+        "trusted": false,
+        "computedHost": "tobi.ferrets.example.com"
+      },
+      "original": {
+        "value": "[\"tobi\"]"
+      },
+      "actual": {
+        "value": "[\"tobi\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "tobi.ferrets.example.com:8080",
+        "offset": -1,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[\"10.20.30.40\"]"
+      },
+      "actual": {
+        "value": "[\"10.20.30.40\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "example.com",
+        "offset": 0,
+        "trusted": false,
+        "computedHost": "example.com"
+      },
+      "original": {
+        "value": "[\"com\",\"example\"]"
+      },
+      "actual": {
+        "value": "[\"com\",\"example\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "example.com",
+        "offset": 0,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[\"10.20.30.40\"]"
+      },
+      "actual": {
+        "value": "[\"10.20.30.40\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "example.com",
+        "offset": 1,
+        "trusted": false,
+        "computedHost": "example.com"
+      },
+      "original": {
+        "value": "[\"example\"]"
+      },
+      "actual": {
+        "value": "[\"example\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "example.com",
+        "offset": 1,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[]"
+      },
+      "actual": {
+        "value": "[]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "example.com",
+        "offset": 2,
+        "trusted": false,
+        "computedHost": "example.com"
+      },
+      "original": {
+        "value": "[]"
+      },
+      "actual": {
+        "value": "[]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "example.com",
+        "offset": 2,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[]"
+      },
+      "actual": {
+        "value": "[]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "example.com",
+        "offset": 3,
+        "trusted": false,
+        "computedHost": "example.com"
+      },
+      "original": {
+        "value": "[]"
+      },
+      "actual": {
+        "value": "[]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "example.com",
+        "offset": 3,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[]"
+      },
+      "actual": {
+        "value": "[]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "example.com",
+        "offset": -1,
+        "trusted": false,
+        "computedHost": "example.com"
+      },
+      "original": {
+        "value": "[\"example\"]"
+      },
+      "actual": {
+        "value": "[\"example\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "example.com",
+        "offset": -1,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[\"10.20.30.40\"]"
+      },
+      "actual": {
+        "value": "[\"10.20.30.40\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "localhost",
+        "offset": 0,
+        "trusted": false,
+        "computedHost": "localhost"
+      },
+      "original": {
+        "value": "[\"localhost\"]"
+      },
+      "actual": {
+        "value": "[\"localhost\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "localhost",
+        "offset": 0,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[\"10.20.30.40\"]"
+      },
+      "actual": {
+        "value": "[\"10.20.30.40\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "localhost",
+        "offset": 1,
+        "trusted": false,
+        "computedHost": "localhost"
+      },
+      "original": {
+        "value": "[]"
+      },
+      "actual": {
+        "value": "[]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "localhost",
+        "offset": 1,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[]"
+      },
+      "actual": {
+        "value": "[]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "localhost",
+        "offset": 2,
+        "trusted": false,
+        "computedHost": "localhost"
+      },
+      "original": {
+        "value": "[]"
+      },
+      "actual": {
+        "value": "[]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "localhost",
+        "offset": 2,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[]"
+      },
+      "actual": {
+        "value": "[]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "localhost",
+        "offset": 3,
+        "trusted": false,
+        "computedHost": "localhost"
+      },
+      "original": {
+        "value": "[]"
+      },
+      "actual": {
+        "value": "[]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "localhost",
+        "offset": 3,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[]"
+      },
+      "actual": {
+        "value": "[]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "localhost",
+        "offset": -1,
+        "trusted": false,
+        "computedHost": "localhost"
+      },
+      "original": {
+        "value": "[\"localhost\"]"
+      },
+      "actual": {
+        "value": "[\"localhost\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "localhost",
+        "offset": -1,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[\"10.20.30.40\"]"
+      },
+      "actual": {
+        "value": "[\"10.20.30.40\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "127.0.0.1:80",
+        "offset": 0,
+        "trusted": false,
+        "computedHost": "127.0.0.1"
+      },
+      "original": {
+        "value": "[\"127.0.0.1\"]"
+      },
+      "actual": {
+        "value": "[\"127.0.0.1\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "127.0.0.1:80",
+        "offset": 0,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[\"10.20.30.40\"]"
+      },
+      "actual": {
+        "value": "[\"10.20.30.40\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "127.0.0.1:80",
+        "offset": 1,
+        "trusted": false,
+        "computedHost": "127.0.0.1"
+      },
+      "original": {
+        "value": "[]"
+      },
+      "actual": {
+        "value": "[]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "127.0.0.1:80",
+        "offset": 1,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[]"
+      },
+      "actual": {
+        "value": "[]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "127.0.0.1:80",
+        "offset": 2,
+        "trusted": false,
+        "computedHost": "127.0.0.1"
+      },
+      "original": {
+        "value": "[]"
+      },
+      "actual": {
+        "value": "[]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "127.0.0.1:80",
+        "offset": 2,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[]"
+      },
+      "actual": {
+        "value": "[]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "127.0.0.1:80",
+        "offset": 3,
+        "trusted": false,
+        "computedHost": "127.0.0.1"
+      },
+      "original": {
+        "value": "[]"
+      },
+      "actual": {
+        "value": "[]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "127.0.0.1:80",
+        "offset": 3,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[]"
+      },
+      "actual": {
+        "value": "[]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "127.0.0.1:80",
+        "offset": -1,
+        "trusted": false,
+        "computedHost": "127.0.0.1"
+      },
+      "original": {
+        "value": "[\"127.0.0.1\"]"
+      },
+      "actual": {
+        "value": "[\"127.0.0.1\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "127.0.0.1:80",
+        "offset": -1,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[\"10.20.30.40\"]"
+      },
+      "actual": {
+        "value": "[\"10.20.30.40\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "[::1]:443",
+        "offset": 0,
+        "trusted": false,
+        "computedHost": "[::1]"
+      },
+      "original": {
+        "value": "[\"[::1]\"]"
+      },
+      "actual": {
+        "value": "[\"[::1]\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "[::1]:443",
+        "offset": 0,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[\"10.20.30.40\"]"
+      },
+      "actual": {
+        "value": "[\"10.20.30.40\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "[::1]:443",
+        "offset": 1,
+        "trusted": false,
+        "computedHost": "[::1]"
+      },
+      "original": {
+        "value": "[]"
+      },
+      "actual": {
+        "value": "[]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "[::1]:443",
+        "offset": 1,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[]"
+      },
+      "actual": {
+        "value": "[]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "[::1]:443",
+        "offset": 2,
+        "trusted": false,
+        "computedHost": "[::1]"
+      },
+      "original": {
+        "value": "[]"
+      },
+      "actual": {
+        "value": "[]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "[::1]:443",
+        "offset": 2,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[]"
+      },
+      "actual": {
+        "value": "[]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "[::1]:443",
+        "offset": 3,
+        "trusted": false,
+        "computedHost": "[::1]"
+      },
+      "original": {
+        "value": "[]"
+      },
+      "actual": {
+        "value": "[]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "[::1]:443",
+        "offset": 3,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[]"
+      },
+      "actual": {
+        "value": "[]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "[::1]:443",
+        "offset": -1,
+        "trusted": false,
+        "computedHost": "[::1]"
+      },
+      "original": {
+        "value": "[\"[::1]\"]"
+      },
+      "actual": {
+        "value": "[\"[::1]\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "[::1]:443",
+        "offset": -1,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[\"10.20.30.40\"]"
+      },
+      "actual": {
+        "value": "[\"10.20.30.40\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "[2001:db8::1]",
+        "offset": 0,
+        "trusted": false,
+        "computedHost": "[2001:db8::1]"
+      },
+      "original": {
+        "value": "[\"[2001:db8::1]\"]"
+      },
+      "actual": {
+        "value": "[\"[2001:db8::1]\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "[2001:db8::1]",
+        "offset": 0,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[\"10.20.30.40\"]"
+      },
+      "actual": {
+        "value": "[\"10.20.30.40\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "[2001:db8::1]",
+        "offset": 1,
+        "trusted": false,
+        "computedHost": "[2001:db8::1]"
+      },
+      "original": {
+        "value": "[]"
+      },
+      "actual": {
+        "value": "[]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "[2001:db8::1]",
+        "offset": 1,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[]"
+      },
+      "actual": {
+        "value": "[]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "[2001:db8::1]",
+        "offset": 2,
+        "trusted": false,
+        "computedHost": "[2001:db8::1]"
+      },
+      "original": {
+        "value": "[]"
+      },
+      "actual": {
+        "value": "[]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "[2001:db8::1]",
+        "offset": 2,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[]"
+      },
+      "actual": {
+        "value": "[]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "[2001:db8::1]",
+        "offset": 3,
+        "trusted": false,
+        "computedHost": "[2001:db8::1]"
+      },
+      "original": {
+        "value": "[]"
+      },
+      "actual": {
+        "value": "[]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "[2001:db8::1]",
+        "offset": 3,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[]"
+      },
+      "actual": {
+        "value": "[]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "[2001:db8::1]",
+        "offset": -1,
+        "trusted": false,
+        "computedHost": "[2001:db8::1]"
+      },
+      "original": {
+        "value": "[\"[2001:db8::1]\"]"
+      },
+      "actual": {
+        "value": "[\"[2001:db8::1]\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "[2001:db8::1]",
+        "offset": -1,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[\"10.20.30.40\"]"
+      },
+      "actual": {
+        "value": "[\"10.20.30.40\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "127.0.0.1.",
+        "offset": 0,
+        "trusted": false,
+        "computedHost": "127.0.0.1."
+      },
+      "original": {
+        "value": "[\"\",\"1\",\"0\",\"0\",\"127\"]"
+      },
+      "actual": {
+        "value": "[\"\",\"1\",\"0\",\"0\",\"127\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "127.0.0.1.",
+        "offset": 0,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[\"10.20.30.40\"]"
+      },
+      "actual": {
+        "value": "[\"10.20.30.40\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "127.0.0.1.",
+        "offset": 1,
+        "trusted": false,
+        "computedHost": "127.0.0.1."
+      },
+      "original": {
+        "value": "[\"1\",\"0\",\"0\",\"127\"]"
+      },
+      "actual": {
+        "value": "[\"1\",\"0\",\"0\",\"127\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "127.0.0.1.",
+        "offset": 1,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[]"
+      },
+      "actual": {
+        "value": "[]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "127.0.0.1.",
+        "offset": 2,
+        "trusted": false,
+        "computedHost": "127.0.0.1."
+      },
+      "original": {
+        "value": "[\"0\",\"0\",\"127\"]"
+      },
+      "actual": {
+        "value": "[\"0\",\"0\",\"127\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "127.0.0.1.",
+        "offset": 2,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[]"
+      },
+      "actual": {
+        "value": "[]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "127.0.0.1.",
+        "offset": 3,
+        "trusted": false,
+        "computedHost": "127.0.0.1."
+      },
+      "original": {
+        "value": "[\"0\",\"127\"]"
+      },
+      "actual": {
+        "value": "[\"0\",\"127\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "127.0.0.1.",
+        "offset": 3,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[]"
+      },
+      "actual": {
+        "value": "[]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "127.0.0.1.",
+        "offset": -1,
+        "trusted": false,
+        "computedHost": "127.0.0.1."
+      },
+      "original": {
+        "value": "[\"127\"]"
+      },
+      "actual": {
+        "value": "[\"127\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "127.0.0.1.",
+        "offset": -1,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[\"10.20.30.40\"]"
+      },
+      "actual": {
+        "value": "[\"10.20.30.40\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "offset": 0,
+        "trusted": false
+      },
+      "original": {
+        "error": {
+          "name": "TypeError",
+          "message": "Cannot read properties of undefined (reading 'split')"
+        }
+      },
+      "actual": {
+        "error": {
+          "name": "TypeError",
+          "message": "Cannot read properties of undefined (reading 'split')"
+        }
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "offset": 0,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[\"10.20.30.40\"]"
+      },
+      "actual": {
+        "value": "[\"10.20.30.40\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "offset": 1,
+        "trusted": false
+      },
+      "original": {
+        "error": {
+          "name": "TypeError",
+          "message": "Cannot read properties of undefined (reading 'split')"
+        }
+      },
+      "actual": {
+        "error": {
+          "name": "TypeError",
+          "message": "Cannot read properties of undefined (reading 'split')"
+        }
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "offset": 1,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[]"
+      },
+      "actual": {
+        "value": "[]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "offset": 2,
+        "trusted": false
+      },
+      "original": {
+        "error": {
+          "name": "TypeError",
+          "message": "Cannot read properties of undefined (reading 'split')"
+        }
+      },
+      "actual": {
+        "error": {
+          "name": "TypeError",
+          "message": "Cannot read properties of undefined (reading 'split')"
+        }
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "offset": 2,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[]"
+      },
+      "actual": {
+        "value": "[]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "offset": 3,
+        "trusted": false
+      },
+      "original": {
+        "error": {
+          "name": "TypeError",
+          "message": "Cannot read properties of undefined (reading 'split')"
+        }
+      },
+      "actual": {
+        "error": {
+          "name": "TypeError",
+          "message": "Cannot read properties of undefined (reading 'split')"
+        }
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "offset": 3,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[]"
+      },
+      "actual": {
+        "value": "[]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "offset": -1,
+        "trusted": false
+      },
+      "original": {
+        "error": {
+          "name": "TypeError",
+          "message": "Cannot read properties of undefined (reading 'split')"
+        }
+      },
+      "actual": {
+        "error": {
+          "name": "TypeError",
+          "message": "Cannot read properties of undefined (reading 'split')"
+        }
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "offset": -1,
+        "trusted": true,
+        "computedHost": "10.20.30.40"
+      },
+      "original": {
+        "value": "[\"10.20.30.40\"]"
+      },
+      "actual": {
+        "value": "[\"10.20.30.40\"]"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "example.com",
+        "trust": false
+      },
+      "original": {
+        "value": "\"example.com\""
+      },
+      "actual": {
+        "value": "\"example.com\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "example.com",
+        "trust": false,
+        "forwarded": "[2001:db8::2]:8443"
+      },
+      "original": {
+        "value": "\"example.com\""
+      },
+      "actual": {
+        "value": "\"example.com\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "example.com",
+        "trust": true
+      },
+      "original": {
+        "value": "\"example.com\""
+      },
+      "actual": {
+        "value": "\"example.com\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "example.com",
+        "trust": true,
+        "forwarded": "[2001:db8::2]:8443"
+      },
+      "original": {
+        "value": "\"[2001\""
+      },
+      "actual": {
+        "value": "\"[2001\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "example.com:443",
+        "trust": false
+      },
+      "original": {
+        "value": "\"example.com\""
+      },
+      "actual": {
+        "value": "\"example.com\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "example.com:443",
+        "trust": false,
+        "forwarded": "[2001:db8::2]:8443"
+      },
+      "original": {
+        "value": "\"example.com\""
+      },
+      "actual": {
+        "value": "\"example.com\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "example.com:443",
+        "trust": true
+      },
+      "original": {
+        "value": "\"example.com\""
+      },
+      "actual": {
+        "value": "\"example.com\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "example.com:443",
+        "trust": true,
+        "forwarded": "[2001:db8::2]:8443"
+      },
+      "original": {
+        "value": "\"[2001\""
+      },
+      "actual": {
+        "value": "\"[2001\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "[::1]",
+        "trust": false
+      },
+      "original": {
+        "value": "\"[\""
+      },
+      "actual": {
+        "value": "\"[\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "[::1]",
+        "trust": false,
+        "forwarded": "[2001:db8::2]:8443"
+      },
+      "original": {
+        "value": "\"[\""
+      },
+      "actual": {
+        "value": "\"[\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "[::1]",
+        "trust": true
+      },
+      "original": {
+        "value": "\"[\""
+      },
+      "actual": {
+        "value": "\"[\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "[::1]",
+        "trust": true,
+        "forwarded": "[2001:db8::2]:8443"
+      },
+      "original": {
+        "value": "\"[2001\""
+      },
+      "actual": {
+        "value": "\"[2001\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "[::1]:443",
+        "trust": false
+      },
+      "original": {
+        "value": "\"[\""
+      },
+      "actual": {
+        "value": "\"[\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "[::1]:443",
+        "trust": false,
+        "forwarded": "[2001:db8::2]:8443"
+      },
+      "original": {
+        "value": "\"[\""
+      },
+      "actual": {
+        "value": "\"[\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "[::1]:443",
+        "trust": true
+      },
+      "original": {
+        "value": "\"[\""
+      },
+      "actual": {
+        "value": "\"[\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "[::1]:443",
+        "trust": true,
+        "forwarded": "[2001:db8::2]:8443"
+      },
+      "original": {
+        "value": "\"[2001\""
+      },
+      "actual": {
+        "value": "\"[2001\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "[2001:db8:1::1]:80",
+        "trust": false
+      },
+      "original": {
+        "value": "\"[2001\""
+      },
+      "actual": {
+        "value": "\"[2001\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "[2001:db8:1::1]:80",
+        "trust": false,
+        "forwarded": "[2001:db8::2]:8443"
+      },
+      "original": {
+        "value": "\"[2001\""
+      },
+      "actual": {
+        "value": "\"[2001\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "[2001:db8:1::1]:80",
+        "trust": true
+      },
+      "original": {
+        "value": "\"[2001\""
+      },
+      "actual": {
+        "value": "\"[2001\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "[2001:db8:1::1]:80",
+        "trust": true,
+        "forwarded": "[2001:db8::2]:8443"
+      },
+      "original": {
+        "value": "\"[2001\""
+      },
+      "actual": {
+        "value": "\"[2001\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "[fe80::1%25eth0]:80",
+        "trust": false
+      },
+      "original": {
+        "value": "\"[fe80\""
+      },
+      "actual": {
+        "value": "\"[fe80\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "[fe80::1%25eth0]:80",
+        "trust": false,
+        "forwarded": "[2001:db8::2]:8443"
+      },
+      "original": {
+        "value": "\"[fe80\""
+      },
+      "actual": {
+        "value": "\"[fe80\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "[fe80::1%25eth0]:80",
+        "trust": true
+      },
+      "original": {
+        "value": "\"[fe80\""
+      },
+      "actual": {
+        "value": "\"[fe80\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "[fe80::1%25eth0]:80",
+        "trust": true,
+        "forwarded": "[2001:db8::2]:8443"
+      },
+      "original": {
+        "value": "\"[2001\""
+      },
+      "actual": {
+        "value": "\"[2001\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "[v1.a:b]:8080",
+        "trust": false
+      },
+      "original": {
+        "value": "\"[v1.a\""
+      },
+      "actual": {
+        "value": "\"[v1.a\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "[v1.a:b]:8080",
+        "trust": false,
+        "forwarded": "[2001:db8::2]:8443"
+      },
+      "original": {
+        "value": "\"[v1.a\""
+      },
+      "actual": {
+        "value": "\"[v1.a\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "[v1.a:b]:8080",
+        "trust": true
+      },
+      "original": {
+        "value": "\"[v1.a\""
+      },
+      "actual": {
+        "value": "\"[v1.a\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "[v1.a:b]:8080",
+        "trust": true,
+        "forwarded": "[2001:db8::2]:8443"
+      },
+      "original": {
+        "value": "\"[2001\""
+      },
+      "actual": {
+        "value": "\"[2001\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "127.0.0.1:80",
+        "trust": false
+      },
+      "original": {
+        "value": "\"127.0.0.1\""
+      },
+      "actual": {
+        "value": "\"127.0.0.1\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "127.0.0.1:80",
+        "trust": false,
+        "forwarded": "[2001:db8::2]:8443"
+      },
+      "original": {
+        "value": "\"127.0.0.1\""
+      },
+      "actual": {
+        "value": "\"127.0.0.1\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "127.0.0.1:80",
+        "trust": true
+      },
+      "original": {
+        "value": "\"127.0.0.1\""
+      },
+      "actual": {
+        "value": "\"127.0.0.1\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "127.0.0.1:80",
+        "trust": true,
+        "forwarded": "[2001:db8::2]:8443"
+      },
+      "original": {
+        "value": "\"[2001\""
+      },
+      "actual": {
+        "value": "\"[2001\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "localhost:0",
+        "trust": false
+      },
+      "original": {
+        "value": "\"localhost\""
+      },
+      "actual": {
+        "value": "\"localhost\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "localhost:0",
+        "trust": false,
+        "forwarded": "[2001:db8::2]:8443"
+      },
+      "original": {
+        "value": "\"localhost\""
+      },
+      "actual": {
+        "value": "\"localhost\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "localhost:0",
+        "trust": true
+      },
+      "original": {
+        "value": "\"localhost\""
+      },
+      "actual": {
+        "value": "\"localhost\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "localhost:0",
+        "trust": true,
+        "forwarded": "[2001:db8::2]:8443"
+      },
+      "original": {
+        "value": "\"[2001\""
+      },
+      "actual": {
+        "value": "\"[2001\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "example.com:",
+        "trust": false
+      },
+      "original": {
+        "value": "\"example.com\""
+      },
+      "actual": {
+        "value": "\"example.com\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "example.com:",
+        "trust": false,
+        "forwarded": "[2001:db8::2]:8443"
+      },
+      "original": {
+        "value": "\"example.com\""
+      },
+      "actual": {
+        "value": "\"example.com\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "example.com:",
+        "trust": true
+      },
+      "original": {
+        "value": "\"example.com\""
+      },
+      "actual": {
+        "value": "\"example.com\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "example.com:",
+        "trust": true,
+        "forwarded": "[2001:db8::2]:8443"
+      },
+      "original": {
+        "value": "\"[2001\""
+      },
+      "actual": {
+        "value": "\"[2001\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "",
+        "trust": false
+      },
+      "original": {},
+      "actual": {},
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "",
+        "trust": false,
+        "forwarded": "[2001:db8::2]:8443"
+      },
+      "original": {},
+      "actual": {},
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "",
+        "trust": true
+      },
+      "original": {},
+      "actual": {},
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "base",
+      "scenario": {
+        "header": "",
+        "trust": true,
+        "forwarded": "[2001:db8::2]:8443"
+      },
+      "original": {
+        "value": "\"[2001\""
+      },
+      "actual": {
+        "value": "\"[2001\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "base",
+      "scenario": {
+        "trust": false
+      },
+      "original": {},
+      "actual": {},
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "base",
+      "scenario": {
+        "trust": false,
+        "forwarded": "[2001:db8::2]:8443"
+      },
+      "original": {},
+      "actual": {},
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "base",
+      "scenario": {
+        "trust": true
+      },
+      "original": {},
+      "actual": {},
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "base",
+      "scenario": {
+        "trust": true,
+        "forwarded": "[2001:db8::2]:8443"
+      },
+      "original": {
+        "value": "\"[2001\""
+      },
+      "actual": {
+        "value": "\"[2001\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "example.com",
+        "trust": false
+      },
+      "original": {
+        "value": "\"example.com\""
+      },
+      "actual": {
+        "value": "\"example.com\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "example.com",
+        "trust": false,
+        "forwarded": "[2001:db8::2]:8443"
+      },
+      "original": {
+        "value": "\"example.com\""
+      },
+      "actual": {
+        "value": "\"example.com\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "example.com",
+        "trust": true
+      },
+      "original": {
+        "value": "\"example.com\""
+      },
+      "actual": {
+        "value": "\"example.com\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "example.com",
+        "trust": true,
+        "forwarded": "[2001:db8::2]:8443"
+      },
+      "original": {
+        "value": "\"[2001:db8::2]\""
+      },
+      "actual": {
+        "value": "\"[2001:db8::2]\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "example.com:443",
+        "trust": false
+      },
+      "original": {
+        "value": "\"example.com\""
+      },
+      "actual": {
+        "value": "\"example.com\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "example.com:443",
+        "trust": false,
+        "forwarded": "[2001:db8::2]:8443"
+      },
+      "original": {
+        "value": "\"example.com\""
+      },
+      "actual": {
+        "value": "\"example.com\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "example.com:443",
+        "trust": true
+      },
+      "original": {
+        "value": "\"example.com\""
+      },
+      "actual": {
+        "value": "\"example.com\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "example.com:443",
+        "trust": true,
+        "forwarded": "[2001:db8::2]:8443"
+      },
+      "original": {
+        "value": "\"[2001:db8::2]\""
+      },
+      "actual": {
+        "value": "\"[2001:db8::2]\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "[::1]",
+        "trust": false
+      },
+      "original": {
+        "value": "\"[::1]\""
+      },
+      "actual": {
+        "value": "\"[::1]\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "[::1]",
+        "trust": false,
+        "forwarded": "[2001:db8::2]:8443"
+      },
+      "original": {
+        "value": "\"[::1]\""
+      },
+      "actual": {
+        "value": "\"[::1]\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "[::1]",
+        "trust": true
+      },
+      "original": {
+        "value": "\"[::1]\""
+      },
+      "actual": {
+        "value": "\"[::1]\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "[::1]",
+        "trust": true,
+        "forwarded": "[2001:db8::2]:8443"
+      },
+      "original": {
+        "value": "\"[2001:db8::2]\""
+      },
+      "actual": {
+        "value": "\"[2001:db8::2]\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "[::1]:443",
+        "trust": false
+      },
+      "original": {
+        "value": "\"[::1]\""
+      },
+      "actual": {
+        "value": "\"[::1]\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "[::1]:443",
+        "trust": false,
+        "forwarded": "[2001:db8::2]:8443"
+      },
+      "original": {
+        "value": "\"[::1]\""
+      },
+      "actual": {
+        "value": "\"[::1]\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "[::1]:443",
+        "trust": true
+      },
+      "original": {
+        "value": "\"[::1]\""
+      },
+      "actual": {
+        "value": "\"[::1]\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "[::1]:443",
+        "trust": true,
+        "forwarded": "[2001:db8::2]:8443"
+      },
+      "original": {
+        "value": "\"[2001:db8::2]\""
+      },
+      "actual": {
+        "value": "\"[2001:db8::2]\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "[2001:db8:1::1]:80",
+        "trust": false
+      },
+      "original": {
+        "value": "\"[2001:db8:1::1]\""
+      },
+      "actual": {
+        "value": "\"[2001:db8:1::1]\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "[2001:db8:1::1]:80",
+        "trust": false,
+        "forwarded": "[2001:db8::2]:8443"
+      },
+      "original": {
+        "value": "\"[2001:db8:1::1]\""
+      },
+      "actual": {
+        "value": "\"[2001:db8:1::1]\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "[2001:db8:1::1]:80",
+        "trust": true
+      },
+      "original": {
+        "value": "\"[2001:db8:1::1]\""
+      },
+      "actual": {
+        "value": "\"[2001:db8:1::1]\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "[2001:db8:1::1]:80",
+        "trust": true,
+        "forwarded": "[2001:db8::2]:8443"
+      },
+      "original": {
+        "value": "\"[2001:db8::2]\""
+      },
+      "actual": {
+        "value": "\"[2001:db8::2]\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "[fe80::1%25eth0]:80",
+        "trust": false
+      },
+      "original": {
+        "value": "\"[fe80::1%25eth0]\""
+      },
+      "actual": {
+        "value": "\"[fe80::1%25eth0]\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "[fe80::1%25eth0]:80",
+        "trust": false,
+        "forwarded": "[2001:db8::2]:8443"
+      },
+      "original": {
+        "value": "\"[fe80::1%25eth0]\""
+      },
+      "actual": {
+        "value": "\"[fe80::1%25eth0]\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "[fe80::1%25eth0]:80",
+        "trust": true
+      },
+      "original": {
+        "value": "\"[fe80::1%25eth0]\""
+      },
+      "actual": {
+        "value": "\"[fe80::1%25eth0]\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "[fe80::1%25eth0]:80",
+        "trust": true,
+        "forwarded": "[2001:db8::2]:8443"
+      },
+      "original": {
+        "value": "\"[2001:db8::2]\""
+      },
+      "actual": {
+        "value": "\"[2001:db8::2]\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "[v1.a:b]:8080",
+        "trust": false
+      },
+      "original": {
+        "value": "\"[v1.a:b]\""
+      },
+      "actual": {
+        "value": "\"[v1.a:b]\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "[v1.a:b]:8080",
+        "trust": false,
+        "forwarded": "[2001:db8::2]:8443"
+      },
+      "original": {
+        "value": "\"[v1.a:b]\""
+      },
+      "actual": {
+        "value": "\"[v1.a:b]\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "[v1.a:b]:8080",
+        "trust": true
+      },
+      "original": {
+        "value": "\"[v1.a:b]\""
+      },
+      "actual": {
+        "value": "\"[v1.a:b]\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "[v1.a:b]:8080",
+        "trust": true,
+        "forwarded": "[2001:db8::2]:8443"
+      },
+      "original": {
+        "value": "\"[2001:db8::2]\""
+      },
+      "actual": {
+        "value": "\"[2001:db8::2]\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "127.0.0.1:80",
+        "trust": false
+      },
+      "original": {
+        "value": "\"127.0.0.1\""
+      },
+      "actual": {
+        "value": "\"127.0.0.1\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "127.0.0.1:80",
+        "trust": false,
+        "forwarded": "[2001:db8::2]:8443"
+      },
+      "original": {
+        "value": "\"127.0.0.1\""
+      },
+      "actual": {
+        "value": "\"127.0.0.1\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "127.0.0.1:80",
+        "trust": true
+      },
+      "original": {
+        "value": "\"127.0.0.1\""
+      },
+      "actual": {
+        "value": "\"127.0.0.1\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "127.0.0.1:80",
+        "trust": true,
+        "forwarded": "[2001:db8::2]:8443"
+      },
+      "original": {
+        "value": "\"[2001:db8::2]\""
+      },
+      "actual": {
+        "value": "\"[2001:db8::2]\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "localhost:0",
+        "trust": false
+      },
+      "original": {
+        "value": "\"localhost\""
+      },
+      "actual": {
+        "value": "\"localhost\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "localhost:0",
+        "trust": false,
+        "forwarded": "[2001:db8::2]:8443"
+      },
+      "original": {
+        "value": "\"localhost\""
+      },
+      "actual": {
+        "value": "\"localhost\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "localhost:0",
+        "trust": true
+      },
+      "original": {
+        "value": "\"localhost\""
+      },
+      "actual": {
+        "value": "\"localhost\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "localhost:0",
+        "trust": true,
+        "forwarded": "[2001:db8::2]:8443"
+      },
+      "original": {
+        "value": "\"[2001:db8::2]\""
+      },
+      "actual": {
+        "value": "\"[2001:db8::2]\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "example.com:",
+        "trust": false
+      },
+      "original": {
+        "value": "\"example.com\""
+      },
+      "actual": {
+        "value": "\"example.com\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "example.com:",
+        "trust": false,
+        "forwarded": "[2001:db8::2]:8443"
+      },
+      "original": {
+        "value": "\"example.com\""
+      },
+      "actual": {
+        "value": "\"example.com\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "example.com:",
+        "trust": true
+      },
+      "original": {
+        "value": "\"example.com\""
+      },
+      "actual": {
+        "value": "\"example.com\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "example.com:",
+        "trust": true,
+        "forwarded": "[2001:db8::2]:8443"
+      },
+      "original": {
+        "value": "\"[2001:db8::2]\""
+      },
+      "actual": {
+        "value": "\"[2001:db8::2]\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "",
+        "trust": false
+      },
+      "original": {},
+      "actual": {},
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "",
+        "trust": false,
+        "forwarded": "[2001:db8::2]:8443"
+      },
+      "original": {},
+      "actual": {},
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "",
+        "trust": true
+      },
+      "original": {},
+      "actual": {},
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "repair",
+      "scenario": {
+        "header": "",
+        "trust": true,
+        "forwarded": "[2001:db8::2]:8443"
+      },
+      "original": {
+        "value": "\"[2001:db8::2]\""
+      },
+      "actual": {
+        "value": "\"[2001:db8::2]\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "repair",
+      "scenario": {
+        "trust": false
+      },
+      "original": {},
+      "actual": {},
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "repair",
+      "scenario": {
+        "trust": false,
+        "forwarded": "[2001:db8::2]:8443"
+      },
+      "original": {},
+      "actual": {},
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "repair",
+      "scenario": {
+        "trust": true
+      },
+      "original": {},
+      "actual": {},
+      "equal": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "repair",
+      "scenario": {
+        "trust": true,
+        "forwarded": "[2001:db8::2]:8443"
+      },
+      "original": {
+        "value": "\"[2001:db8::2]\""
+      },
+      "actual": {
+        "value": "\"[2001:db8::2]\""
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "stage": "base",
+      "scenario": {
+        "className": "",
+        "key": null
+      },
+      "original": {
+        "error": {
+          "name": "TypeError",
+          "message": "Cannot read properties of null (reading 'toString')"
+        }
+      },
+      "actual": {
+        "error": {
+          "name": "TypeError",
+          "message": "Cannot read properties of null (reading 'toString')"
+        }
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "stage": "base",
+      "scenario": {
+        "className": "",
+        "key": false
+      },
+      "original": {
+        "value": "{\"false\":\"value\"}"
+      },
+      "actual": {
+        "value": "{\"false\":\"value\"}"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "stage": "base",
+      "scenario": {
+        "className": "",
+        "key": true
+      },
+      "original": {
+        "value": "{\"true\":\"value\"}"
+      },
+      "actual": {
+        "value": "{\"true\":\"value\"}"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "stage": "base",
+      "scenario": {
+        "className": "",
+        "key": 7
+      },
+      "original": {
+        "value": "{\"7\":\"value\"}"
+      },
+      "actual": {
+        "value": "{\"7\":\"value\"}"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "stage": "base",
+      "scenario": {
+        "className": "",
+        "key": "$map"
+      },
+      "original": {
+        "value": "{\"$map\":\"value\"}"
+      },
+      "actual": {
+        "value": "{\"$map\":\"value\"}"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "stage": "base",
+      "scenario": {
+        "className": "",
+        "key": "constructor"
+      },
+      "original": {
+        "value": "{\"constructor\":\"value\"}"
+      },
+      "actual": {
+        "value": "{\"constructor\":\"value\"}"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "stage": "base",
+      "scenario": {
+        "className": "",
+        "key": "toString"
+      },
+      "original": {
+        "value": "{\"toString\":\"value\"}"
+      },
+      "actual": {
+        "value": "{\"toString\":\"value\"}"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "stage": "base",
+      "scenario": {
+        "className": "",
+        "key": "hasOwnProperty"
+      },
+      "original": {
+        "value": "{\"hasOwnProperty\":\"value\"}"
+      },
+      "actual": {
+        "value": "{\"hasOwnProperty\":\"value\"}"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "stage": "base",
+      "scenario": {
+        "className": "",
+        "key": "__proto__"
+      },
+      "original": {
+        "value": "{}"
+      },
+      "actual": {
+        "value": "{}"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "stage": "base",
+      "scenario": {
+        "className": "",
+        "key": "this$0"
+      },
+      "original": {
+        "value": "{\"this$0\":\"value\"}"
+      },
+      "actual": {
+        "value": "{\"this$0\":\"value\"}"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "stage": "base",
+      "scenario": {
+        "className": "",
+        "key": "ordinary"
+      },
+      "original": {
+        "value": "{\"ordinary\":\"value\"}"
+      },
+      "actual": {
+        "value": "{\"ordinary\":\"value\"}"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "stage": "base",
+      "scenario": {
+        "className": "",
+        "key": ""
+      },
+      "original": {
+        "value": "{\"\":\"value\"}"
+      },
+      "actual": {
+        "value": "{\"\":\"value\"}"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "stage": "base",
+      "scenario": {
+        "className": "java.util.HashMap",
+        "key": null
+      },
+      "original": {
+        "error": {
+          "name": "TypeError",
+          "message": "Cannot read properties of null (reading 'toString')"
+        }
+      },
+      "actual": {
+        "error": {
+          "name": "TypeError",
+          "message": "Cannot read properties of null (reading 'toString')"
+        }
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "stage": "base",
+      "scenario": {
+        "className": "java.util.HashMap",
+        "key": false
+      },
+      "original": {
+        "value": "{\"false\":\"value\"}"
+      },
+      "actual": {
+        "value": "{\"false\":\"value\"}"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "stage": "base",
+      "scenario": {
+        "className": "java.util.HashMap",
+        "key": true
+      },
+      "original": {
+        "value": "{\"true\":\"value\"}"
+      },
+      "actual": {
+        "value": "{\"true\":\"value\"}"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "stage": "base",
+      "scenario": {
+        "className": "java.util.HashMap",
+        "key": 7
+      },
+      "original": {
+        "value": "{\"7\":\"value\"}"
+      },
+      "actual": {
+        "value": "{\"7\":\"value\"}"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "stage": "base",
+      "scenario": {
+        "className": "java.util.HashMap",
+        "key": "$map"
+      },
+      "original": {
+        "value": "{\"$map\":\"value\"}"
+      },
+      "actual": {
+        "value": "{\"$map\":\"value\"}"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "stage": "base",
+      "scenario": {
+        "className": "java.util.HashMap",
+        "key": "constructor"
+      },
+      "original": {
+        "value": "{\"constructor\":\"value\"}"
+      },
+      "actual": {
+        "value": "{\"constructor\":\"value\"}"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "stage": "base",
+      "scenario": {
+        "className": "java.util.HashMap",
+        "key": "toString"
+      },
+      "original": {
+        "value": "{\"toString\":\"value\"}"
+      },
+      "actual": {
+        "value": "{\"toString\":\"value\"}"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "stage": "base",
+      "scenario": {
+        "className": "java.util.HashMap",
+        "key": "hasOwnProperty"
+      },
+      "original": {
+        "value": "{\"hasOwnProperty\":\"value\"}"
+      },
+      "actual": {
+        "value": "{\"hasOwnProperty\":\"value\"}"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "stage": "base",
+      "scenario": {
+        "className": "java.util.HashMap",
+        "key": "__proto__"
+      },
+      "original": {
+        "value": "{}"
+      },
+      "actual": {
+        "value": "{}"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "stage": "base",
+      "scenario": {
+        "className": "java.util.HashMap",
+        "key": "this$0"
+      },
+      "original": {
+        "value": "{\"this$0\":\"value\"}"
+      },
+      "actual": {
+        "value": "{\"this$0\":\"value\"}"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "stage": "base",
+      "scenario": {
+        "className": "java.util.HashMap",
+        "key": "ordinary"
+      },
+      "original": {
+        "value": "{\"ordinary\":\"value\"}"
+      },
+      "actual": {
+        "value": "{\"ordinary\":\"value\"}"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "stage": "base",
+      "scenario": {
+        "className": "java.util.HashMap",
+        "key": ""
+      },
+      "original": {
+        "value": "{\"\":\"value\"}"
+      },
+      "actual": {
+        "value": "{\"\":\"value\"}"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "stage": "repair",
+      "scenario": {
+        "className": "",
+        "key": null
+      },
+      "original": {
+        "value": "{\"null\":\"value\"}"
+      },
+      "actual": {
+        "value": "{\"null\":\"value\"}"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "stage": "repair",
+      "scenario": {
+        "className": "",
+        "key": false
+      },
+      "original": {
+        "value": "{\"false\":\"value\"}"
+      },
+      "actual": {
+        "value": "{\"false\":\"value\"}"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "stage": "repair",
+      "scenario": {
+        "className": "",
+        "key": true
+      },
+      "original": {
+        "value": "{\"true\":\"value\"}"
+      },
+      "actual": {
+        "value": "{\"true\":\"value\"}"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "stage": "repair",
+      "scenario": {
+        "className": "",
+        "key": 7
+      },
+      "original": {
+        "value": "{\"7\":\"value\"}"
+      },
+      "actual": {
+        "value": "{\"7\":\"value\"}"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "stage": "repair",
+      "scenario": {
+        "className": "",
+        "key": "$map"
+      },
+      "original": {
+        "value": "{\"$map\":\"value\"}"
+      },
+      "actual": {
+        "value": "{\"$map\":\"value\"}"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "stage": "repair",
+      "scenario": {
+        "className": "",
+        "key": "constructor"
+      },
+      "original": {
+        "value": "{\"constructor\":\"value\"}"
+      },
+      "actual": {
+        "value": "{\"constructor\":\"value\"}"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "stage": "repair",
+      "scenario": {
+        "className": "",
+        "key": "toString"
+      },
+      "original": {
+        "value": "{\"toString\":\"value\"}"
+      },
+      "actual": {
+        "value": "{\"toString\":\"value\"}"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "stage": "repair",
+      "scenario": {
+        "className": "",
+        "key": "hasOwnProperty"
+      },
+      "original": {
+        "value": "{\"hasOwnProperty\":\"value\"}"
+      },
+      "actual": {
+        "value": "{\"hasOwnProperty\":\"value\"}"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "stage": "repair",
+      "scenario": {
+        "className": "",
+        "key": "__proto__"
+      },
+      "original": {
+        "value": "{}"
+      },
+      "actual": {
+        "value": "{}"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "stage": "repair",
+      "scenario": {
+        "className": "",
+        "key": "this$0"
+      },
+      "original": {
+        "value": "{\"this$0\":\"value\"}"
+      },
+      "actual": {
+        "value": "{\"this$0\":\"value\"}"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "stage": "repair",
+      "scenario": {
+        "className": "",
+        "key": "ordinary"
+      },
+      "original": {
+        "value": "{\"ordinary\":\"value\"}"
+      },
+      "actual": {
+        "value": "{\"ordinary\":\"value\"}"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "stage": "repair",
+      "scenario": {
+        "className": "",
+        "key": ""
+      },
+      "original": {
+        "value": "{\"\":\"value\"}"
+      },
+      "actual": {
+        "value": "{\"\":\"value\"}"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "stage": "repair",
+      "scenario": {
+        "className": "java.util.HashMap",
+        "key": null
+      },
+      "original": {
+        "value": "{\"null\":\"value\"}"
+      },
+      "actual": {
+        "value": "{\"null\":\"value\"}"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "stage": "repair",
+      "scenario": {
+        "className": "java.util.HashMap",
+        "key": false
+      },
+      "original": {
+        "value": "{\"false\":\"value\"}"
+      },
+      "actual": {
+        "value": "{\"false\":\"value\"}"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "stage": "repair",
+      "scenario": {
+        "className": "java.util.HashMap",
+        "key": true
+      },
+      "original": {
+        "value": "{\"true\":\"value\"}"
+      },
+      "actual": {
+        "value": "{\"true\":\"value\"}"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "stage": "repair",
+      "scenario": {
+        "className": "java.util.HashMap",
+        "key": 7
+      },
+      "original": {
+        "value": "{\"7\":\"value\"}"
+      },
+      "actual": {
+        "value": "{\"7\":\"value\"}"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "stage": "repair",
+      "scenario": {
+        "className": "java.util.HashMap",
+        "key": "$map"
+      },
+      "original": {
+        "value": "{\"$map\":\"value\"}"
+      },
+      "actual": {
+        "value": "{\"$map\":\"value\"}"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "stage": "repair",
+      "scenario": {
+        "className": "java.util.HashMap",
+        "key": "constructor"
+      },
+      "original": {
+        "value": "{\"constructor\":\"value\"}"
+      },
+      "actual": {
+        "value": "{\"constructor\":\"value\"}"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "stage": "repair",
+      "scenario": {
+        "className": "java.util.HashMap",
+        "key": "toString"
+      },
+      "original": {
+        "value": "{\"toString\":\"value\"}"
+      },
+      "actual": {
+        "value": "{\"toString\":\"value\"}"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "stage": "repair",
+      "scenario": {
+        "className": "java.util.HashMap",
+        "key": "hasOwnProperty"
+      },
+      "original": {
+        "value": "{\"hasOwnProperty\":\"value\"}"
+      },
+      "actual": {
+        "value": "{\"hasOwnProperty\":\"value\"}"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "stage": "repair",
+      "scenario": {
+        "className": "java.util.HashMap",
+        "key": "__proto__"
+      },
+      "original": {
+        "value": "{}"
+      },
+      "actual": {
+        "value": "{}"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "stage": "repair",
+      "scenario": {
+        "className": "java.util.HashMap",
+        "key": "this$0"
+      },
+      "original": {
+        "value": "{\"this$0\":\"value\"}"
+      },
+      "actual": {
+        "value": "{\"this$0\":\"value\"}"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "stage": "repair",
+      "scenario": {
+        "className": "java.util.HashMap",
+        "key": "ordinary"
+      },
+      "original": {
+        "value": "{\"ordinary\":\"value\"}"
+      },
+      "actual": {
+        "value": "{\"ordinary\":\"value\"}"
+      },
+      "equal": true
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "stage": "repair",
+      "scenario": {
+        "className": "java.util.HashMap",
+        "key": ""
+      },
+      "original": {
+        "value": "{\"\":\"value\"}"
+      },
+      "actual": {
+        "value": "{\"\":\"value\"}"
+      },
+      "equal": true
+    }
+  ]
+}

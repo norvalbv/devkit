@@ -1,0 +1,130 @@
+{
+  "observations": [
+    {
+      "stage": "base",
+      "scenario": "skip same value",
+      "status": 200,
+      "body": "literal-route",
+      "calls": 2
+    },
+    {
+      "stage": "base",
+      "scenario": "restore transformed value",
+      "status": 200,
+      "body": "normalized",
+      "calls": 2
+    },
+    {
+      "stage": "base",
+      "scenario": "deduplicate success",
+      "status": 200,
+      "body": "second-param-route",
+      "calls": 2
+    },
+    {
+      "stage": "base",
+      "scenario": "different skipped value",
+      "status": 200,
+      "body": "second",
+      "calls": 2
+    },
+    {
+      "stage": "base",
+      "scenario": "callback error",
+      "status": 500,
+      "body": "failed",
+      "calls": 1
+    },
+    {
+      "stage": "base",
+      "scenario": "asynchronous skip",
+      "status": 200,
+      "body": "literal-route",
+      "calls": 2
+    },
+    {
+      "stage": "bug",
+      "scenario": "skip same value",
+      "status": 200,
+      "body": "second-param-route",
+      "calls": 1
+    },
+    {
+      "stage": "bug",
+      "scenario": "restore transformed value",
+      "status": 200,
+      "body": "new",
+      "calls": 1
+    },
+    {
+      "stage": "bug",
+      "scenario": "deduplicate success",
+      "status": 200,
+      "body": "second-param-route",
+      "calls": 1
+    },
+    {
+      "stage": "bug",
+      "scenario": "different skipped value",
+      "status": 200,
+      "body": "second",
+      "calls": 2
+    },
+    {
+      "stage": "bug",
+      "scenario": "callback error",
+      "status": 500,
+      "body": "failed",
+      "calls": 1
+    },
+    {
+      "stage": "bug",
+      "scenario": "asynchronous skip",
+      "status": 200,
+      "body": "second-param-route",
+      "calls": 1
+    },
+    {
+      "stage": "repair",
+      "scenario": "skip same value",
+      "status": 200,
+      "body": "literal-route",
+      "calls": 1
+    },
+    {
+      "stage": "repair",
+      "scenario": "restore transformed value",
+      "status": 200,
+      "body": "normalized",
+      "calls": 1
+    },
+    {
+      "stage": "repair",
+      "scenario": "deduplicate success",
+      "status": 200,
+      "body": "second-param-route",
+      "calls": 1
+    },
+    {
+      "stage": "repair",
+      "scenario": "different skipped value",
+      "status": 200,
+      "body": "second",
+      "calls": 2
+    },
+    {
+      "stage": "repair",
+      "scenario": "callback error",
+      "status": 500,
+      "body": "failed",
+      "calls": 1
+    },
+    {
+      "stage": "repair",
+      "scenario": "asynchronous skip",
+      "status": 200,
+      "body": "literal-route",
+      "calls": 1
+    }
+  ]
+}

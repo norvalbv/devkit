@@ -1,0 +1,750 @@
+{
+  "observations": [
+    {
+      "stage": "base",
+      "scenario": "distinct resources",
+      "calls": 2,
+      "results": [
+        {
+          "format": "svg",
+          "data": {
+            "text": [
+              "service",
+              "/a.svg:undefined:undefined"
+            ],
+            "format": "svg"
+          }
+        },
+        {
+          "format": "svg",
+          "data": {
+            "text": [
+              "service",
+              "/b.svg:undefined:undefined"
+            ],
+            "format": "svg"
+          }
+        }
+      ],
+      "sourceEqual": true
+    },
+    {
+      "stage": "base",
+      "scenario": "distinct formats",
+      "calls": 2,
+      "results": [
+        {
+          "format": "svg",
+          "data": {
+            "text": [
+              "service",
+              "/a.svg:undefined:undefined"
+            ],
+            "format": "svg"
+          }
+        },
+        {
+          "format": "json",
+          "data": {
+            "text": [
+              "service",
+              "/a.json:undefined:undefined"
+            ],
+            "format": "json"
+          }
+        }
+      ],
+      "sourceEqual": true
+    },
+    {
+      "stage": "base",
+      "scenario": "repeated resource",
+      "calls": 1,
+      "results": [
+        {
+          "format": "svg",
+          "data": {
+            "text": [
+              "service",
+              "/a.svg:undefined:undefined"
+            ],
+            "format": "svg"
+          }
+        },
+        {
+          "format": "svg",
+          "data": {
+            "text": [
+              "service",
+              "/a.svg:undefined:undefined"
+            ],
+            "format": "svg"
+          }
+        }
+      ],
+      "sourceEqual": true
+    },
+    {
+      "stage": "base",
+      "scenario": "declared query changes",
+      "calls": 1,
+      "results": [
+        {
+          "format": "svg",
+          "data": {
+            "text": [
+              "service",
+              "/a.svg:1:undefined"
+            ],
+            "format": "svg"
+          }
+        },
+        {
+          "format": "svg",
+          "data": {
+            "text": [
+              "service",
+              "/a.svg:1:undefined"
+            ],
+            "format": "svg"
+          }
+        }
+      ],
+      "sourceEqual": true
+    },
+    {
+      "stage": "base",
+      "scenario": "stable query ordering",
+      "calls": 1,
+      "results": [
+        {
+          "format": "svg",
+          "data": {
+            "text": [
+              "service",
+              "/a.svg:undefined:undefined"
+            ],
+            "format": "svg"
+          }
+        },
+        {
+          "format": "svg",
+          "data": {
+            "text": [
+              "service",
+              "/a.svg:undefined:undefined"
+            ],
+            "format": "svg"
+          }
+        }
+      ],
+      "sourceEqual": true
+    },
+    {
+      "stage": "base",
+      "scenario": "expired response",
+      "calls": 2,
+      "results": [
+        {
+          "format": "svg",
+          "data": {
+            "text": [
+              "service",
+              "/a.svg:undefined:undefined"
+            ],
+            "format": "svg"
+          }
+        },
+        {
+          "format": "svg",
+          "data": {
+            "text": [
+              "service",
+              "/a.svg:undefined:undefined"
+            ],
+            "format": "svg"
+          }
+        }
+      ],
+      "sourceEqual": true
+    },
+    {
+      "stage": "base",
+      "scenario": "declared prototype name",
+      "calls": 1,
+      "results": [
+        {
+          "format": "svg",
+          "data": {
+            "text": [
+              "service",
+              "/a.svg:undefined:selected"
+            ],
+            "format": "svg"
+          }
+        }
+      ],
+      "sourceEqual": true
+    },
+    {
+      "stage": "bug",
+      "scenario": "distinct resources",
+      "calls": 1,
+      "results": [
+        {
+          "format": "svg",
+          "data": {
+            "text": [
+              "service",
+              "/a.svg:undefined:undefined"
+            ],
+            "format": "svg"
+          }
+        },
+        {
+          "format": "svg",
+          "data": {
+            "text": [
+              "service",
+              "/a.svg:undefined:undefined"
+            ],
+            "format": "svg"
+          }
+        }
+      ],
+      "sourceEqual": true
+    },
+    {
+      "stage": "bug",
+      "scenario": "distinct formats",
+      "calls": 1,
+      "results": [
+        {
+          "format": "svg",
+          "data": {
+            "text": [
+              "service",
+              "/a.svg:undefined:undefined"
+            ],
+            "format": "svg"
+          }
+        },
+        {
+          "format": "svg",
+          "data": {
+            "text": [
+              "service",
+              "/a.svg:undefined:undefined"
+            ],
+            "format": "svg"
+          }
+        }
+      ],
+      "sourceEqual": true
+    },
+    {
+      "stage": "bug",
+      "scenario": "repeated resource",
+      "calls": 1,
+      "results": [
+        {
+          "format": "svg",
+          "data": {
+            "text": [
+              "service",
+              "/a.svg:undefined:undefined"
+            ],
+            "format": "svg"
+          }
+        },
+        {
+          "format": "svg",
+          "data": {
+            "text": [
+              "service",
+              "/a.svg:undefined:undefined"
+            ],
+            "format": "svg"
+          }
+        }
+      ],
+      "sourceEqual": true
+    },
+    {
+      "stage": "bug",
+      "scenario": "declared query changes",
+      "calls": 2,
+      "results": [
+        {
+          "format": "svg",
+          "data": {
+            "text": [
+              "service",
+              "/a.svg:1:undefined"
+            ],
+            "format": "svg"
+          }
+        },
+        {
+          "format": "svg",
+          "data": {
+            "text": [
+              "service",
+              "/a.svg:2:undefined"
+            ],
+            "format": "svg"
+          }
+        }
+      ],
+      "sourceEqual": true
+    },
+    {
+      "stage": "bug",
+      "scenario": "stable query ordering",
+      "calls": 1,
+      "results": [
+        {
+          "format": "svg",
+          "data": {
+            "text": [
+              "service",
+              "/a.svg:undefined:undefined"
+            ],
+            "format": "svg"
+          }
+        },
+        {
+          "format": "svg",
+          "data": {
+            "text": [
+              "service",
+              "/a.svg:undefined:undefined"
+            ],
+            "format": "svg"
+          }
+        }
+      ],
+      "sourceEqual": true
+    },
+    {
+      "stage": "bug",
+      "scenario": "expired response",
+      "calls": 2,
+      "results": [
+        {
+          "format": "svg",
+          "data": {
+            "text": [
+              "service",
+              "/a.svg:undefined:undefined"
+            ],
+            "format": "svg"
+          }
+        },
+        {
+          "format": "svg",
+          "data": {
+            "text": [
+              "service",
+              "/a.svg:undefined:undefined"
+            ],
+            "format": "svg"
+          }
+        }
+      ],
+      "sourceEqual": true
+    },
+    {
+      "stage": "bug",
+      "scenario": "declared prototype name",
+      "calls": 1,
+      "results": [
+        {
+          "format": "svg",
+          "data": {
+            "text": [
+              "service",
+              "/a.svg:undefined:undefined"
+            ],
+            "format": "svg"
+          }
+        }
+      ],
+      "sourceEqual": true
+    },
+    {
+      "stage": "upstream-repair",
+      "scenario": "distinct resources",
+      "calls": 2,
+      "results": [
+        {
+          "format": "svg",
+          "data": {
+            "text": [
+              "service",
+              "/a.svg:undefined:undefined"
+            ],
+            "format": "svg"
+          }
+        },
+        {
+          "format": "svg",
+          "data": {
+            "text": [
+              "service",
+              "/b.svg:undefined:undefined"
+            ],
+            "format": "svg"
+          }
+        }
+      ],
+      "sourceEqual": true
+    },
+    {
+      "stage": "upstream-repair",
+      "scenario": "distinct formats",
+      "calls": 2,
+      "results": [
+        {
+          "format": "svg",
+          "data": {
+            "text": [
+              "service",
+              "/a.svg:undefined:undefined"
+            ],
+            "format": "svg"
+          }
+        },
+        {
+          "format": "json",
+          "data": {
+            "text": [
+              "service",
+              "/a.json:undefined:undefined"
+            ],
+            "format": "json"
+          }
+        }
+      ],
+      "sourceEqual": true
+    },
+    {
+      "stage": "upstream-repair",
+      "scenario": "repeated resource",
+      "calls": 1,
+      "results": [
+        {
+          "format": "svg",
+          "data": {
+            "text": [
+              "service",
+              "/a.svg:undefined:undefined"
+            ],
+            "format": "svg"
+          }
+        },
+        {
+          "format": "svg",
+          "data": {
+            "text": [
+              "service",
+              "/a.svg:undefined:undefined"
+            ],
+            "format": "svg"
+          }
+        }
+      ],
+      "sourceEqual": true
+    },
+    {
+      "stage": "upstream-repair",
+      "scenario": "declared query changes",
+      "calls": 2,
+      "results": [
+        {
+          "format": "svg",
+          "data": {
+            "text": [
+              "service",
+              "/a.svg:1:undefined"
+            ],
+            "format": "svg"
+          }
+        },
+        {
+          "format": "svg",
+          "data": {
+            "text": [
+              "service",
+              "/a.svg:2:undefined"
+            ],
+            "format": "svg"
+          }
+        }
+      ],
+      "sourceEqual": true
+    },
+    {
+      "stage": "upstream-repair",
+      "scenario": "stable query ordering",
+      "calls": 1,
+      "results": [
+        {
+          "format": "svg",
+          "data": {
+            "text": [
+              "service",
+              "/a.svg:undefined:undefined"
+            ],
+            "format": "svg"
+          }
+        },
+        {
+          "format": "svg",
+          "data": {
+            "text": [
+              "service",
+              "/a.svg:undefined:undefined"
+            ],
+            "format": "svg"
+          }
+        }
+      ],
+      "sourceEqual": true
+    },
+    {
+      "stage": "upstream-repair",
+      "scenario": "expired response",
+      "calls": 2,
+      "results": [
+        {
+          "format": "svg",
+          "data": {
+            "text": [
+              "service",
+              "/a.svg:undefined:undefined"
+            ],
+            "format": "svg"
+          }
+        },
+        {
+          "format": "svg",
+          "data": {
+            "text": [
+              "service",
+              "/a.svg:undefined:undefined"
+            ],
+            "format": "svg"
+          }
+        }
+      ],
+      "sourceEqual": true
+    },
+    {
+      "stage": "upstream-repair",
+      "scenario": "declared prototype name",
+      "calls": 1,
+      "results": [
+        {
+          "format": "svg",
+          "data": {
+            "text": [
+              "service",
+              "/a.svg:undefined:undefined"
+            ],
+            "format": "svg"
+          }
+        }
+      ],
+      "sourceEqual": true
+    },
+    {
+      "stage": "repair",
+      "scenario": "distinct resources",
+      "calls": 2,
+      "results": [
+        {
+          "format": "svg",
+          "data": {
+            "text": [
+              "service",
+              "/a.svg:undefined:undefined"
+            ],
+            "format": "svg"
+          }
+        },
+        {
+          "format": "svg",
+          "data": {
+            "text": [
+              "service",
+              "/b.svg:undefined:undefined"
+            ],
+            "format": "svg"
+          }
+        }
+      ],
+      "sourceEqual": true
+    },
+    {
+      "stage": "repair",
+      "scenario": "distinct formats",
+      "calls": 2,
+      "results": [
+        {
+          "format": "svg",
+          "data": {
+            "text": [
+              "service",
+              "/a.svg:undefined:undefined"
+            ],
+            "format": "svg"
+          }
+        },
+        {
+          "format": "json",
+          "data": {
+            "text": [
+              "service",
+              "/a.json:undefined:undefined"
+            ],
+            "format": "json"
+          }
+        }
+      ],
+      "sourceEqual": true
+    },
+    {
+      "stage": "repair",
+      "scenario": "repeated resource",
+      "calls": 1,
+      "results": [
+        {
+          "format": "svg",
+          "data": {
+            "text": [
+              "service",
+              "/a.svg:undefined:undefined"
+            ],
+            "format": "svg"
+          }
+        },
+        {
+          "format": "svg",
+          "data": {
+            "text": [
+              "service",
+              "/a.svg:undefined:undefined"
+            ],
+            "format": "svg"
+          }
+        }
+      ],
+      "sourceEqual": true
+    },
+    {
+      "stage": "repair",
+      "scenario": "declared query changes",
+      "calls": 2,
+      "results": [
+        {
+          "format": "svg",
+          "data": {
+            "text": [
+              "service",
+              "/a.svg:1:undefined"
+            ],
+            "format": "svg"
+          }
+        },
+        {
+          "format": "svg",
+          "data": {
+            "text": [
+              "service",
+              "/a.svg:2:undefined"
+            ],
+            "format": "svg"
+          }
+        }
+      ],
+      "sourceEqual": true
+    },
+    {
+      "stage": "repair",
+      "scenario": "stable query ordering",
+      "calls": 1,
+      "results": [
+        {
+          "format": "svg",
+          "data": {
+            "text": [
+              "service",
+              "/a.svg:undefined:undefined"
+            ],
+            "format": "svg"
+          }
+        },
+        {
+          "format": "svg",
+          "data": {
+            "text": [
+              "service",
+              "/a.svg:undefined:undefined"
+            ],
+            "format": "svg"
+          }
+        }
+      ],
+      "sourceEqual": true
+    },
+    {
+      "stage": "repair",
+      "scenario": "expired response",
+      "calls": 2,
+      "results": [
+        {
+          "format": "svg",
+          "data": {
+            "text": [
+              "service",
+              "/a.svg:undefined:undefined"
+            ],
+            "format": "svg"
+          }
+        },
+        {
+          "format": "svg",
+          "data": {
+            "text": [
+              "service",
+              "/a.svg:undefined:undefined"
+            ],
+            "format": "svg"
+          }
+        }
+      ],
+      "sourceEqual": true
+    },
+    {
+      "stage": "repair",
+      "scenario": "declared prototype name",
+      "calls": 1,
+      "results": [
+        {
+          "format": "svg",
+          "data": {
+            "text": [
+              "service",
+              "/a.svg:undefined:selected"
+            ],
+            "format": "svg"
+          }
+        }
+      ],
+      "sourceEqual": true
+    }
+  ],
+  "sourceComparisons": 28,
+  "repairOrigin": "Agent-derived extension of observed upstream cache-key repair; restores declared __proto__ query handling as well."
+}

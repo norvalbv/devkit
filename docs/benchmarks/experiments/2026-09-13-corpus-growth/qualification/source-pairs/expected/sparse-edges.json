@@ -1,0 +1,595 @@
+{
+  "runtime": "v24.19.0",
+  "observations": [
+    {
+      "stage": "parent",
+      "kind": "operation",
+      "name": "native array casting [null]",
+      "value": {
+        "calls": 1,
+        "castValues": [
+          "null"
+        ],
+        "error": null
+      }
+    },
+    {
+      "stage": "parent",
+      "kind": "operation",
+      "name": "native array casting [null,null]",
+      "value": {
+        "calls": 1,
+        "castValues": [
+          "null",
+          "null"
+        ],
+        "error": null
+      }
+    },
+    {
+      "stage": "parent",
+      "kind": "operation",
+      "name": "native array casting []",
+      "value": {
+        "calls": 1,
+        "castValues": [],
+        "error": null
+      }
+    },
+    {
+      "stage": "parent",
+      "kind": "operation",
+      "name": "async sparse mixture [{\"name\":\"bad\"},null,{\"name\":\"ok\"}]",
+      "value": {
+        "calls": 1,
+        "error": {
+          "name": "ValidationError",
+          "keys": [
+            "items.0.name"
+          ]
+        }
+      }
+    },
+    {
+      "stage": "parent",
+      "kind": "operation",
+      "name": "async sparse mixture [{\"name\":\"bad\"},{\"name\":\"bad\"},null]",
+      "value": {
+        "calls": 1,
+        "error": {
+          "name": "ValidationError",
+          "keys": [
+            "items.0.name"
+          ]
+        }
+      }
+    },
+    {
+      "stage": "parent",
+      "kind": "operation",
+      "name": "async sparse mixture [null,{\"name\":\"ok\"},null]",
+      "value": {
+        "calls": 1,
+        "error": null
+      }
+    },
+    {
+      "stage": "parent",
+      "kind": "operation",
+      "name": "repeated validation recovers after changed child",
+      "value": {
+        "firstErrorKeys": [
+          "items.0.name"
+        ],
+        "secondError": null
+      }
+    },
+    {
+      "stage": "parent",
+      "kind": "operation",
+      "name": "separate concurrent document invocations",
+      "value": {
+        "counts": [
+          1,
+          1
+        ],
+        "errors": [
+          [
+            "items.0.name"
+          ],
+          null
+        ]
+      }
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "name": "native array casting [null]",
+      "value": {
+        "calls": 1,
+        "castValues": [
+          "null"
+        ],
+        "error": null
+      }
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "name": "native array casting [null,null]",
+      "value": {
+        "calls": 1,
+        "castValues": [
+          "null",
+          "null"
+        ],
+        "error": null
+      }
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "name": "native array casting []",
+      "value": {
+        "calls": 1,
+        "castValues": [],
+        "error": null
+      }
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "name": "async sparse mixture [{\"name\":\"bad\"},null,{\"name\":\"ok\"}]",
+      "value": {
+        "calls": 1,
+        "error": {
+          "name": "ValidationError",
+          "keys": [
+            "items.0.name"
+          ]
+        }
+      }
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "name": "async sparse mixture [{\"name\":\"bad\"},{\"name\":\"bad\"},null]",
+      "value": {
+        "calls": 1,
+        "error": {
+          "name": "ValidationError",
+          "keys": [
+            "items.0.name"
+          ]
+        }
+      }
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "name": "async sparse mixture [null,{\"name\":\"ok\"},null]",
+      "value": {
+        "calls": 1,
+        "error": null
+      }
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "name": "repeated validation recovers after changed child",
+      "value": {
+        "firstErrorKeys": [
+          "items.0.name"
+        ],
+        "secondError": null
+      }
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "name": "separate concurrent document invocations",
+      "value": {
+        "counts": [
+          1,
+          1
+        ],
+        "errors": [
+          [
+            "items.0.name"
+          ],
+          null
+        ]
+      }
+    },
+    {
+      "stage": "bug",
+      "kind": "operation",
+      "name": "native array casting [null]",
+      "error": {
+        "name": "ReferenceError",
+        "message": "errors is not defined"
+      }
+    },
+    {
+      "stage": "bug",
+      "kind": "operation",
+      "name": "native array casting [null,null]",
+      "error": {
+        "name": "ReferenceError",
+        "message": "errors is not defined"
+      }
+    },
+    {
+      "stage": "bug",
+      "kind": "operation",
+      "name": "native array casting []",
+      "value": {
+        "calls": 1,
+        "castValues": [],
+        "error": null
+      }
+    },
+    {
+      "stage": "bug",
+      "kind": "operation",
+      "name": "async sparse mixture [{\"name\":\"bad\"},null,{\"name\":\"ok\"}]",
+      "value": {
+        "calls": 1,
+        "error": {
+          "name": "ValidationError",
+          "keys": [
+            "items.0.name"
+          ]
+        }
+      }
+    },
+    {
+      "stage": "bug",
+      "kind": "operation",
+      "name": "async sparse mixture [{\"name\":\"bad\"},{\"name\":\"bad\"},null]",
+      "value": {
+        "calls": 1,
+        "error": {
+          "name": "ValidationError",
+          "keys": [
+            "items.0.name",
+            "items.1.name"
+          ]
+        }
+      }
+    },
+    {
+      "stage": "bug",
+      "kind": "operation",
+      "name": "async sparse mixture [null,{\"name\":\"ok\"},null]",
+      "value": {
+        "calls": 1,
+        "error": null
+      }
+    },
+    {
+      "stage": "bug",
+      "kind": "operation",
+      "name": "repeated validation recovers after changed child",
+      "value": {
+        "firstErrorKeys": [
+          "items.0.name"
+        ],
+        "secondError": null
+      }
+    },
+    {
+      "stage": "bug",
+      "kind": "operation",
+      "name": "separate concurrent document invocations",
+      "value": {
+        "counts": [
+          1,
+          1
+        ],
+        "errors": [
+          [
+            "items.0.name"
+          ],
+          null
+        ]
+      }
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "name": "native array casting [null]",
+      "error": {
+        "name": "ReferenceError",
+        "message": "errors is not defined"
+      }
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "name": "native array casting [null,null]",
+      "error": {
+        "name": "ReferenceError",
+        "message": "errors is not defined"
+      }
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "name": "native array casting []",
+      "value": {
+        "calls": 1,
+        "castValues": [],
+        "error": null
+      }
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "name": "async sparse mixture [{\"name\":\"bad\"},null,{\"name\":\"ok\"}]",
+      "value": {
+        "calls": 1,
+        "error": {
+          "name": "ValidationError",
+          "keys": [
+            "items.0.name"
+          ]
+        }
+      }
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "name": "async sparse mixture [{\"name\":\"bad\"},{\"name\":\"bad\"},null]",
+      "value": {
+        "calls": 1,
+        "error": {
+          "name": "ValidationError",
+          "keys": [
+            "items.0.name",
+            "items.1.name"
+          ]
+        }
+      }
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "name": "async sparse mixture [null,{\"name\":\"ok\"},null]",
+      "value": {
+        "calls": 1,
+        "error": null
+      }
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "name": "repeated validation recovers after changed child",
+      "value": {
+        "firstErrorKeys": [
+          "items.0.name"
+        ],
+        "secondError": null
+      }
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "name": "separate concurrent document invocations",
+      "value": {
+        "counts": [
+          1,
+          1
+        ],
+        "errors": [
+          [
+            "items.0.name"
+          ],
+          null
+        ]
+      }
+    },
+    {
+      "stage": "repair",
+      "kind": "operation",
+      "name": "native array casting [null]",
+      "value": {
+        "calls": 1,
+        "castValues": [
+          "null"
+        ],
+        "error": null
+      }
+    },
+    {
+      "stage": "repair",
+      "kind": "operation",
+      "name": "native array casting [null,null]",
+      "value": {
+        "calls": 1,
+        "castValues": [
+          "null",
+          "null"
+        ],
+        "error": null
+      }
+    },
+    {
+      "stage": "repair",
+      "kind": "operation",
+      "name": "native array casting []",
+      "value": {
+        "calls": 1,
+        "castValues": [],
+        "error": null
+      }
+    },
+    {
+      "stage": "repair",
+      "kind": "operation",
+      "name": "async sparse mixture [{\"name\":\"bad\"},null,{\"name\":\"ok\"}]",
+      "value": {
+        "calls": 1,
+        "error": {
+          "name": "ValidationError",
+          "keys": [
+            "items.0.name"
+          ]
+        }
+      }
+    },
+    {
+      "stage": "repair",
+      "kind": "operation",
+      "name": "async sparse mixture [{\"name\":\"bad\"},{\"name\":\"bad\"},null]",
+      "value": {
+        "calls": 1,
+        "error": {
+          "name": "ValidationError",
+          "keys": [
+            "items.0.name",
+            "items.1.name"
+          ]
+        }
+      }
+    },
+    {
+      "stage": "repair",
+      "kind": "operation",
+      "name": "async sparse mixture [null,{\"name\":\"ok\"},null]",
+      "value": {
+        "calls": 1,
+        "error": null
+      }
+    },
+    {
+      "stage": "repair",
+      "kind": "operation",
+      "name": "repeated validation recovers after changed child",
+      "value": {
+        "firstErrorKeys": [
+          "items.0.name"
+        ],
+        "secondError": null
+      }
+    },
+    {
+      "stage": "repair",
+      "kind": "operation",
+      "name": "separate concurrent document invocations",
+      "value": {
+        "counts": [
+          1,
+          1
+        ],
+        "errors": [
+          [
+            "items.0.name"
+          ],
+          null
+        ]
+      }
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "name": "native array casting [null]",
+      "value": {
+        "calls": 1,
+        "castValues": [
+          "null"
+        ],
+        "error": null
+      }
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "name": "native array casting [null,null]",
+      "value": {
+        "calls": 1,
+        "castValues": [
+          "null",
+          "null"
+        ],
+        "error": null
+      }
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "name": "native array casting []",
+      "value": {
+        "calls": 1,
+        "castValues": [],
+        "error": null
+      }
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "name": "async sparse mixture [{\"name\":\"bad\"},null,{\"name\":\"ok\"}]",
+      "value": {
+        "calls": 1,
+        "error": {
+          "name": "ValidationError",
+          "keys": [
+            "items.0.name"
+          ]
+        }
+      }
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "name": "async sparse mixture [{\"name\":\"bad\"},{\"name\":\"bad\"},null]",
+      "value": {
+        "calls": 1,
+        "error": {
+          "name": "ValidationError",
+          "keys": [
+            "items.0.name",
+            "items.1.name"
+          ]
+        }
+      }
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "name": "async sparse mixture [null,{\"name\":\"ok\"},null]",
+      "value": {
+        "calls": 1,
+        "error": null
+      }
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "name": "repeated validation recovers after changed child",
+      "value": {
+        "firstErrorKeys": [
+          "items.0.name"
+        ],
+        "secondError": null
+      }
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "name": "separate concurrent document invocations",
+      "value": {
+        "counts": [
+          1,
+          1
+        ],
+        "errors": [
+          [
+            "items.0.name"
+          ],
+          null
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,1040 @@
+{
+  "observations": [
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "host": "a.b.example.com",
+        "offset": 0
+      },
+      "value": [
+        "com",
+        "example",
+        "b",
+        "a"
+      ],
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "host": "a.b.example.com",
+        "offset": 1
+      },
+      "value": [
+        "example",
+        "b",
+        "a"
+      ],
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "host": "a.b.example.com",
+        "offset": 2
+      },
+      "value": [
+        "b",
+        "a"
+      ],
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "host": "a.b.example.com",
+        "offset": 3
+      },
+      "value": [
+        "a"
+      ],
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "host": "example.com",
+        "offset": 0
+      },
+      "value": [
+        "com",
+        "example"
+      ],
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "host": "example.com",
+        "offset": 1
+      },
+      "value": [
+        "example"
+      ],
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "host": "example.com",
+        "offset": 2
+      },
+      "value": [],
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "host": "example.com",
+        "offset": 3
+      },
+      "value": [],
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "host": "localhost",
+        "offset": 0
+      },
+      "value": [
+        "localhost"
+      ],
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "host": "localhost",
+        "offset": 1
+      },
+      "value": [],
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "host": "localhost",
+        "offset": 2
+      },
+      "value": [],
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "host": "localhost",
+        "offset": 3
+      },
+      "value": [],
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "host": "127.0.0.1",
+        "offset": 0
+      },
+      "value": [
+        "1",
+        "0",
+        "0",
+        "127"
+      ],
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "host": "127.0.0.1",
+        "offset": 1
+      },
+      "value": [
+        "0",
+        "0",
+        "127"
+      ],
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "host": "127.0.0.1",
+        "offset": 2
+      },
+      "value": [
+        "0",
+        "127"
+      ],
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "host": "127.0.0.1",
+        "offset": 3
+      },
+      "value": [
+        "127"
+      ],
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "host": "10.20.30.40",
+        "offset": 0
+      },
+      "value": [
+        "40",
+        "30",
+        "20",
+        "10"
+      ],
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "host": "10.20.30.40",
+        "offset": 1
+      },
+      "value": [
+        "30",
+        "20",
+        "10"
+      ],
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "host": "10.20.30.40",
+        "offset": 2
+      },
+      "value": [
+        "20",
+        "10"
+      ],
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "host": "10.20.30.40",
+        "offset": 3
+      },
+      "value": [
+        "10"
+      ],
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "host": "::1",
+        "offset": 0
+      },
+      "value": [
+        "::1"
+      ],
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "host": "::1",
+        "offset": 1
+      },
+      "value": [],
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "host": "::1",
+        "offset": 2
+      },
+      "value": [],
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "host": "::1",
+        "offset": 3
+      },
+      "value": [],
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "host": "2001:db8::1",
+        "offset": 0
+      },
+      "value": [
+        "2001:db8::1"
+      ],
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "host": "2001:db8::1",
+        "offset": 1
+      },
+      "value": [],
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "host": "2001:db8::1",
+        "offset": 2
+      },
+      "value": [],
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "base",
+      "scenario": {
+        "host": "2001:db8::1",
+        "offset": 3
+      },
+      "value": [],
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "host": "a.b.example.com",
+        "offset": 0
+      },
+      "value": [
+        "com",
+        "example",
+        "b",
+        "a"
+      ],
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "host": "a.b.example.com",
+        "offset": 1
+      },
+      "value": [
+        "example",
+        "b",
+        "a"
+      ],
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "host": "a.b.example.com",
+        "offset": 2
+      },
+      "value": [
+        "b",
+        "a"
+      ],
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "host": "a.b.example.com",
+        "offset": 3
+      },
+      "value": [
+        "a"
+      ],
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "host": "example.com",
+        "offset": 0
+      },
+      "value": [
+        "com",
+        "example"
+      ],
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "host": "example.com",
+        "offset": 1
+      },
+      "value": [
+        "example"
+      ],
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "host": "example.com",
+        "offset": 2
+      },
+      "value": [],
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "host": "example.com",
+        "offset": 3
+      },
+      "value": [],
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "host": "localhost",
+        "offset": 0
+      },
+      "value": [
+        "localhost"
+      ],
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "host": "localhost",
+        "offset": 1
+      },
+      "value": [],
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "host": "localhost",
+        "offset": 2
+      },
+      "value": [],
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "host": "localhost",
+        "offset": 3
+      },
+      "value": [],
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "host": "127.0.0.1",
+        "offset": 0
+      },
+      "value": [
+        "127.0.0.1"
+      ],
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "host": "127.0.0.1",
+        "offset": 1
+      },
+      "value": [],
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "host": "127.0.0.1",
+        "offset": 2
+      },
+      "value": [],
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "host": "127.0.0.1",
+        "offset": 3
+      },
+      "value": [],
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "host": "10.20.30.40",
+        "offset": 0
+      },
+      "value": [
+        "10.20.30.40"
+      ],
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "host": "10.20.30.40",
+        "offset": 1
+      },
+      "value": [],
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "host": "10.20.30.40",
+        "offset": 2
+      },
+      "value": [],
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "host": "10.20.30.40",
+        "offset": 3
+      },
+      "value": [],
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "host": "::1",
+        "offset": 0
+      },
+      "value": [
+        "::1"
+      ],
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "host": "::1",
+        "offset": 1
+      },
+      "value": [],
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "host": "::1",
+        "offset": 2
+      },
+      "value": [],
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "host": "::1",
+        "offset": 3
+      },
+      "value": [],
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "host": "2001:db8::1",
+        "offset": 0
+      },
+      "value": [
+        "2001:db8::1"
+      ],
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "host": "2001:db8::1",
+        "offset": 1
+      },
+      "value": [],
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "host": "2001:db8::1",
+        "offset": 2
+      },
+      "value": [],
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "stage": "repair",
+      "scenario": {
+        "host": "2001:db8::1",
+        "offset": 3
+      },
+      "value": [],
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "base",
+      "scenario": {
+        "host": "example.com",
+        "trust": false
+      },
+      "value": "example.com",
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "base",
+      "scenario": {
+        "host": "example.com",
+        "trust": true,
+        "forwarded": "[2001:db8::2]:8443"
+      },
+      "value": "[2001",
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "base",
+      "scenario": {
+        "host": "example.com:8080",
+        "trust": false
+      },
+      "value": "example.com",
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "base",
+      "scenario": {
+        "host": "example.com:8080",
+        "trust": true,
+        "forwarded": "[2001:db8::2]:8443"
+      },
+      "value": "[2001",
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "base",
+      "scenario": {
+        "host": "[::1]",
+        "trust": false
+      },
+      "value": "[",
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "base",
+      "scenario": {
+        "host": "[::1]",
+        "trust": true,
+        "forwarded": "[2001:db8::2]:8443"
+      },
+      "value": "[2001",
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "base",
+      "scenario": {
+        "host": "[::1]:3000",
+        "trust": false
+      },
+      "value": "[",
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "base",
+      "scenario": {
+        "host": "[::1]:3000",
+        "trust": true,
+        "forwarded": "[2001:db8::2]:8443"
+      },
+      "value": "[2001",
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "base",
+      "scenario": {
+        "host": "[2001:db8::1]:443",
+        "trust": false
+      },
+      "value": "[2001",
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "base",
+      "scenario": {
+        "host": "[2001:db8::1]:443",
+        "trust": true,
+        "forwarded": "[2001:db8::2]:8443"
+      },
+      "value": "[2001",
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "base",
+      "scenario": {
+        "host": "localhost:80",
+        "trust": false
+      },
+      "value": "localhost",
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "base",
+      "scenario": {
+        "host": "localhost:80",
+        "trust": true,
+        "forwarded": "[2001:db8::2]:8443"
+      },
+      "value": "[2001",
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "base",
+      "scenario": {
+        "trust": false
+      },
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "base",
+      "scenario": {
+        "trust": true,
+        "forwarded": "[2001:db8::2]:8443"
+      },
+      "value": "[2001",
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "repair",
+      "scenario": {
+        "host": "example.com",
+        "trust": false
+      },
+      "value": "example.com",
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "repair",
+      "scenario": {
+        "host": "example.com",
+        "trust": true,
+        "forwarded": "[2001:db8::2]:8443"
+      },
+      "value": "[2001:db8::2]",
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "repair",
+      "scenario": {
+        "host": "example.com:8080",
+        "trust": false
+      },
+      "value": "example.com",
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "repair",
+      "scenario": {
+        "host": "example.com:8080",
+        "trust": true,
+        "forwarded": "[2001:db8::2]:8443"
+      },
+      "value": "[2001:db8::2]",
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "repair",
+      "scenario": {
+        "host": "[::1]",
+        "trust": false
+      },
+      "value": "[::1]",
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "repair",
+      "scenario": {
+        "host": "[::1]",
+        "trust": true,
+        "forwarded": "[2001:db8::2]:8443"
+      },
+      "value": "[2001:db8::2]",
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "repair",
+      "scenario": {
+        "host": "[::1]:3000",
+        "trust": false
+      },
+      "value": "[::1]",
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "repair",
+      "scenario": {
+        "host": "[::1]:3000",
+        "trust": true,
+        "forwarded": "[2001:db8::2]:8443"
+      },
+      "value": "[2001:db8::2]",
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "repair",
+      "scenario": {
+        "host": "[2001:db8::1]:443",
+        "trust": false
+      },
+      "value": "[2001:db8::1]",
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "repair",
+      "scenario": {
+        "host": "[2001:db8::1]:443",
+        "trust": true,
+        "forwarded": "[2001:db8::2]:8443"
+      },
+      "value": "[2001:db8::2]",
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "repair",
+      "scenario": {
+        "host": "localhost:80",
+        "trust": false
+      },
+      "value": "localhost",
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "repair",
+      "scenario": {
+        "host": "localhost:80",
+        "trust": true,
+        "forwarded": "[2001:db8::2]:8443"
+      },
+      "value": "[2001:db8::2]",
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "repair",
+      "scenario": {
+        "trust": false
+      },
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "stage": "repair",
+      "scenario": {
+        "trust": true,
+        "forwarded": "[2001:db8::2]:8443"
+      },
+      "value": "[2001:db8::2]",
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "stage": "base",
+      "key": null,
+      "error": "TypeError",
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "stage": "base",
+      "key": false,
+      "value": {
+        "false": "value"
+      },
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "stage": "base",
+      "key": true,
+      "value": {
+        "true": "value"
+      },
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "stage": "base",
+      "key": 7,
+      "value": {
+        "7": "value"
+      },
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "stage": "base",
+      "key": "name",
+      "value": {
+        "name": "value"
+      },
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "stage": "base",
+      "key": "",
+      "value": {
+        "": "value"
+      },
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "stage": "repair",
+      "key": null,
+      "value": {
+        "null": "value"
+      },
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "stage": "repair",
+      "key": false,
+      "value": {
+        "false": "value"
+      },
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "stage": "repair",
+      "key": true,
+      "value": {
+        "true": "value"
+      },
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "stage": "repair",
+      "key": 7,
+      "value": {
+        "7": "value"
+      },
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "stage": "repair",
+      "key": "name",
+      "value": {
+        "name": "value"
+      },
+      "sourceEqual": true
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "stage": "repair",
+      "key": "",
+      "value": {
+        "": "value"
+      },
+      "sourceEqual": true
+    }
+  ]
+}

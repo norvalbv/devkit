@@ -1,0 +1,6557 @@
+[
+  {
+    "id": "corr-discarded-resume-return",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 644,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "53257b6c0b70b24b1dc11e60eac5dea7734e8c4b32b69ec38ff447d25d6c4b85"
+  },
+  {
+    "id": "corr-retry-stuck-unclaimable",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 435,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "2e1fc0af576550bcfd20016c9cf9ae1b8fc7f7fecf6885d6b088dd7861acc0fa"
+  },
+  {
+    "id": "corr-revive-user-cancelled",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 773,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "772ebc9aa288ae5fea3cf879b31cdda705e3440563c7d17b1ce68f8ba2db801b"
+  },
+  {
+    "id": "corr-stale-failure-reasons",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 228,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "9cb660a63cbf499732fb896e60c15307fa32baf76fafd8447e8f605b82244e99"
+  },
+  {
+    "id": "corr-stale-checklist-artifact",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 210,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "0de22874291af2821032363bac626d786ae52cef8ff45dbdf195cd10ae35bcf0"
+  },
+  {
+    "id": "corr-reopen-before-cas-strands",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 348,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "0fefa58fcc4c534851a08c9dd1913f92c945d9a522e5f5bf9090adfb950c617a"
+  },
+  {
+    "id": "corr-submit-latch-stuck",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 280,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "e2636cae3b8ac8d9c77c6b4c2852f860b2724e3efdc9a6f5bba600e88c6e6105"
+  },
+  {
+    "id": "corr-nearexpiry-permanent-reauth",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 516,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "faac1a66d83b0967fbf935641f48d0b00aaf92e122367ad23dc1d6f14defff2c"
+  },
+  {
+    "id": "corr-unguarded-unpark-clobber",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 520,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "e34385d9fdb4ab2043cba2d83df7aeab43270fddad4fd4661f152057143288fc"
+  },
+  {
+    "id": "corr-guarded-result-ignored-mode-flip",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 399,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "1d0addb6052bdbfdfc862845244ec189ae95119d781982cbd984f543226173f6"
+  },
+  {
+    "id": "corr-read-then-write-clobber-terminal",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 696,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "0777736fbe7690ac4556f5b65c92c6d3c774f0ca50f9f77895a951854723244c"
+  },
+  {
+    "id": "corr-lock-timeout-runs-unlocked",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 546,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "e8ea80da91c45ac2a0a873c54ecdca6c4823a76f772573c32e34f3b11acf5697"
+  },
+  {
+    "id": "corr-retry-broadcast-double-fire",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 489,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "cc9c27c8bb52b4d86640f78c455f286e229dad6278dbbccd096b35a9339d11a1"
+  },
+  {
+    "id": "corr-json-string-result-dropped",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 930,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "207c62ba6669fd510dca3089dc13f4d3c73c739dd2cf5bb02945c3b6030db65e"
+  },
+  {
+    "id": "corr-group-map-last-write-wins",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 531,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "de6d3f2a48727e38a42e5c30552b7a36b4f819700cc977a1a4b4390c0d15ebed"
+  },
+  {
+    "id": "corr-sync-source-target-divergence",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 674,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "3ec79e3a0f4b9f3cc887d734d180770edb09365800419979913c408a23c1b1a3"
+  },
+  {
+    "id": "corr-persist-unnormalized-signal",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 359,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "0a048b740c23f7c32e54a912ee8a315a42fe31c285f6aa8361367948b376b4dd"
+  },
+  {
+    "id": "corr-manifest-unknown-version-wiped",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 719,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "d592141a27425be95fc25d33dc68b50d6bf80eead557fcf275a9e23012090e57"
+  },
+  {
+    "id": "corr-field-validated-wrong-state",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 786,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "36d2da6254687a42b087a8e78d8e5b3b86cbd16fae093e71d368cd32ac44dcc3"
+  },
+  {
+    "id": "corr-loose-cmd-classifier-anchor",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 681,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "1c622f6933896eef1af022dac7654253f792091e7c696c5e44fb853ab4f6c024"
+  },
+  {
+    "id": "corr-loose-json-error-classifier",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 1002,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "dc68cef734ae38b88977d60b0af643c4dd6d324e30473fa6d66ba621f61fca53"
+  },
+  {
+    "id": "corr-swallowed-config-parse-bypass",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 1007,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "2069592afee6ae4df9d67869341eff65b2e9950df98ea5467bd16b0f5014c7b5"
+  },
+  {
+    "id": "corr-exit-code-only-one-fails",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 548,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "5c57852fc0505f4875c4125605a4644433251be08a97b81fc324c2c966f6bcde"
+  },
+  {
+    "id": "corr-only-selector-silent-drop",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 34552,
+    "chunkCount": 3,
+    "taskCount": 10,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "e8ca3d43f64d828cc537b1f1471e8bd770883f21ecfab35ddc1ffadca2a67b47"
+  },
+  {
+    "id": "corr-execfile-cmd-shim-swallowed",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 671,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "df1847c09b9af87cf2e9b4d2fade56953d6693f9cac74441281385a5220df81e"
+  },
+  {
+    "id": "corr-asymmetric-flip-classifier",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 34290,
+    "chunkCount": 3,
+    "taskCount": 10,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "61d919387b58621b5a776240c254b7343f7aa512dfdef98d2a3c363c3a25c253"
+  },
+  {
+    "id": "corr-reminder-ignores-plan-mode",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 335,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "ae04fb01a1c79070c9e7d0c6608fad172a240d7d09d6550120e11fffea375ac4"
+  },
+  {
+    "id": "corr-decoy-cas-guarded-write",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 523,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "2a11231d12ec17d068cfc1e09b5917e2442397edf94e4391efbb0affc2a7c342"
+  },
+  {
+    "id": "corr-decoy-conditional-update",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 567,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "3625220ef4682687f508ac4608ce405bb97f0cb7a757518ab959f9a8218efc34"
+  },
+  {
+    "id": "corr-decoy-select-for-update",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 602,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "2bdc05bb4ef5584f40c9a0c732c88cd583fd96b6004350568efe6bb45809466c"
+  },
+  {
+    "id": "corr-decoy-targeted-broadcast",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 267,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "e4d8e239cd18a08aaa0c9ba035024c9c9011bb797e814ec1805a98939a3456c2"
+  },
+  {
+    "id": "corr-decoy-parses-json-string-result",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 693,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "46cc214d33cd672c0a3a481d71fcd3d01ec3a343541a26680f9c7be1704d0be1"
+  },
+  {
+    "id": "corr-decoy-tight-anchor-classifier",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 504,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "eefbff48bb0702f516fcbdd91b853f2e7907e85fbd9f234297b2c84216e7e90e"
+  },
+  {
+    "id": "corr-decoy-retry-reset-counter",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 229,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "97429a3ceda5168c2919cf9b0bd714f0e3168194cbbab8ebf8d3820216ceabaa"
+  },
+  {
+    "id": "corr-decoy-exit-code-fail-closed",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 523,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "cc6d038dd5e86763bb77520db6be4c6a6e257ae20f0a4f68f384f8014088df33"
+  },
+  {
+    "id": "corr-decoy-catch-rethrows",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 657,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "3d8437f5f7fd1f6897e954e5b41d1589e40f1c1a5d4ce4cd16c7cd5e91129ee9"
+  },
+  {
+    "id": "corr-decoy-return-checked-fails-closed",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 575,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "ca2ebd9e90f9664b9ef5c5f49553360ecf279829ddb165a270038eb891eec212"
+  },
+  {
+    "id": "corr-decoy-only-validated",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 570,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "b86669a71e02dc67b8474491807776f7781babf226e50e914f1164f9c27ef9aa"
+  },
+  {
+    "id": "corr-xdomain-sqli",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 450,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "8468c77ada137f0d229ead4ed48b545dbca330ee3fb89199ded9769fbb9ab6c4"
+  },
+  {
+    "id": "corr-xdomain-nplusone",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 990,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "e4b4581f96b6ba63e7833a82459fe6fb6dd694a85d5924504912f1e81e244e57"
+  },
+  {
+    "id": "corr-xdomain-xss",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 619,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "28a04d00426c034d26d821433f891b28cfaf8d664f34e9c18b492514cb476b58"
+  },
+  {
+    "id": "corr-xdomain-render",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 1056,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "b179952ec9860ee509d6543c870055276cc53d46e700d45fa87a78e687a34fd2"
+  },
+  {
+    "id": "corr-decoy-reset-failure-reasons",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 319,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "2fb10f8694319e0aa017cc6a1497392d623735f31f28476da2494ece5c54b2f4"
+  },
+  {
+    "id": "corr-decoy-clears-stale-artifact",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 295,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "13cfb60723122c2b904387904cae0f1cca0a0f66f24c30e1ed18a9b9751136e2"
+  },
+  {
+    "id": "corr-retry-leaves-stale-error",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 207,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "156da0de43392cc8f305e032752da0e82296c2d0f06b02d4d2297ff65c87d366"
+  },
+  {
+    "id": "corr-decoy-retry-clears-error",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 305,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "5d9d3e94856b1dfe888f98e7d45ae0f2b2fae2826b43783dee8f3ce142ebc139"
+  },
+  {
+    "id": "corr-empty-recompute-keeps-stale",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 198,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "a491dc4c1f2c7824607e988f8752da2bc3fd8e8e37dc60f3059f69bfc8a221a0"
+  },
+  {
+    "id": "corr-decoy-empty-recompute-clears",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 317,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "10df5deb1b995d1a55264b0349683e6f096fad980df5900368ea19ed82dcd4ab"
+  },
+  {
+    "id": "corr-early-exit-status-bypassed",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 244,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "dfc43969f06f5a186ebe7e5a938f8092caa35a48829d20056ac615c5858d1c39"
+  },
+  {
+    "id": "corr-decoy-early-exit-preserved",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 379,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "d549281f0e0f3c2732463ed5436c05edb5794fe1b1a877e0229c7259911865c2"
+  },
+  {
+    "id": "corr-early-exit-loop-break-dropped",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 193,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "e7fbe3a7fbb01fb3450dfaa84591bd9de302c41a49ea13f1311c0a841035470d"
+  },
+  {
+    "id": "corr-decoy-loop-break-preserved",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 252,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "87d9ffef737b9b856d6778c4a6c9a9a2dd13cd8294500966b84d32ccad80f1fb"
+  },
+  {
+    "id": "corr-outage-exit-code-downgraded",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 300,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "1924d2598e96c04ab3642da89bbe319816ae350d44274bb7569020d30bb3ed0a"
+  },
+  {
+    "id": "corr-decoy-outage-exit-preserved",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 232,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "edba2a721f232bd67c7e58520bc7ebaed04e4182fce607384c7e3c3f9db12c4e"
+  },
+  {
+    "id": "corr-worktree-leak-no-finally",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 364,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "6fda2f8bfdc4ab463dda98d0b2940b8d297d81c92f0b5d0802ffb8284df8d7f8"
+  },
+  {
+    "id": "corr-decoy-worktree-finally",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 314,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "44ece1f820b84a89014149a761b4e402b40bc5c691ace833249288c0a522ac85"
+  },
+  {
+    "id": "corr-lock-not-released-on-throw",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 283,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "f5f15a0b7bfd310d08da91c20a3ede4e328c80366dcec05a9f9fd8d2b2fa8640"
+  },
+  {
+    "id": "corr-decoy-lock-finally",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 283,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "266e2d9c9519d8c8845484bb5cf787bea7f6da06cd55067b96d4b8c4f3eac11e"
+  },
+  {
+    "id": "corr-fs-check-then-act-race",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 186,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "9f18f5b4c1bc53e595f675b2087dbbfabf9dda5eabdfbba4cdc49a1fa17ddd25"
+  },
+  {
+    "id": "corr-decoy-fs-recursive-mkdir",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 241,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "81b8670e5b2b41699c048893e14a8ba329047c75288e480d281f5746e9d1c4f8"
+  },
+  {
+    "id": "corr-timer-debounce-double-fire",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 146,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "4269e833f62fe9408d2fec00d9cf04c7700e56e3fbada383663ea38f1f601c39"
+  },
+  {
+    "id": "corr-decoy-timer-debounce-clears",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 219,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "c6d45ee551646351fc21847803f53f3e1a71e503587f67fd6ee8c0a0825fbb2f"
+  },
+  {
+    "id": "corr-signature-change-callsite-missed",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 245,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "0ca980828076b0952ad11c09cca08fe98ac69d8fb885f718e365f5be58a2e849"
+  },
+  {
+    "id": "corr-decoy-signature-callsite-updated",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 343,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "69d75f828100d1fd0204d157759dafb6a0e4fc6bfbc350a6d9e0ff6dc4fb1138"
+  },
+  {
+    "id": "corr-broadcast-fanout-no-dedup",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 325,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "54c644e5818891deda6b3857df153043fbbbdcbcafb251b03145a67ec3ca4324"
+  },
+  {
+    "id": "corr-decoy-broadcast-targeted",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 395,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "1247cec1b297c595298ea235a19d169d9df3c5a3d4950ed19a1aed364afd4be1"
+  },
+  {
+    "id": "corr-pr138-ci-breaking-gate-engine-coverage-pair",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 764,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "aeef9c023d3fa91d6e050b51555a77fbea5b5b59c714dc2134440e879f917a08"
+  },
+  {
+    "id": "corr-pr138-ci-breaking-gate-engine-coverage",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 420,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "ca009516ca01212568d3e4326ee7e91a917a7852c735665522fd8bedaff1d54b"
+  },
+  {
+    "id": "corr-pr172-duplicate-let-spawnoptions-declaration-pair",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 449,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "9a32e8df6bd6d95276855fb84007540f1f8c6d1fa19c09533802db0d0be5b67d"
+  },
+  {
+    "id": "corr-pr172-duplicate-let-spawnoptions-declaration",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 522,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "9f8272ebdf4c09907fbbf8f377244925f6a56b1c7f2948cd98a2dd792d09e01a"
+  },
+  {
+    "id": "corr-pr200-important-pair",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 418,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "e93ae13edaaa553169a1aca17a335fb056445947d0538f844d5e4323510b7e80"
+  },
+  {
+    "id": "corr-pr200-important",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 393,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "d97a354d9f89c2fe387ac38ad19a6477760fb8b596fcf2f50c9b43e0d886c19d"
+  },
+  {
+    "id": "corr-pr200-ref-mutated-during-render-move-pair",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 1016,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "22dafaba5d76966d4daa04ea892c7b76cf040ba5d1d96004fd17282c9e7c7822"
+  },
+  {
+    "id": "corr-pr200-ref-mutated-during-render-move",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 988,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "5919311b39954dd3bbf9df46c5c0ec571bfa3e1a6276b79d2d333b4d73e4a0cd"
+  },
+  {
+    "id": "corr-pr21-fail-closed-when-the-remote-pair",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 1003,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "299b76b26aacbf713706c1656b9fae1f2ae2cf3f7fa75a241cb085063d85a619"
+  },
+  {
+    "id": "corr-pr21-fail-closed-when-the-remote",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 668,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "526f363f18867982a452fa5e587cef3990364f6f9d4d327b2602f1a9eee3165d"
+  },
+  {
+    "id": "corr-pr21-validate-the-parsed-github-repo-pair",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 1081,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "3136ad4ebf182fae87db0b76d2aee67b97e4f195640eae6bc2a60e07f80f516b"
+  },
+  {
+    "id": "corr-pr21-validate-the-parsed-github-repo",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 905,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "ad892016821c016518079fb699b4adafdebf4e22eac21095977519baf131b263"
+  },
+  {
+    "id": "corr-pr26-cover-the-restart-interrupted-flow-pair",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 512,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "14665bd8ad58ff89722b5e07554eee84c46c54d51c838b61912c91adbb1425ef"
+  },
+  {
+    "id": "corr-pr26-cover-the-restart-interrupted-flow",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 484,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "cb8dd40f6392eb6eeafe4363c989f4c4c8058b1eadc9ac0db01fbbfe039c5a57"
+  },
+  {
+    "id": "corr-pr26-keep-the-mcp-inputschema-in-pair",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 798,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "0b3e9aceedfad0cd10336958f3228762bd453ab27d1bf55e304c49431d0802c1"
+  },
+  {
+    "id": "corr-pr26-keep-the-mcp-inputschema-in",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 718,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "0ab4d78dba9d62a1dbb5fdd4842c995964db105a58b6197a8a3ecb596f750718"
+  },
+  {
+    "id": "corr-pr38-check-the-full-r2-credential-pair",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 723,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "7d1c945c386bf4042ce52c5884831724556b35368b6480ebd993d463460f8e9b"
+  },
+  {
+    "id": "corr-pr38-check-the-full-r2-credential",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 686,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "a92bb8b03421a56d84239d51d08472931e1f28912e7836f984470da64748f239"
+  },
+  {
+    "id": "corr-pr38-require-the-full-azure-signing-pair",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 726,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "ec6eef0d9dba7ceb2a3094aad6f8582f09ec48976d122cdaa59dc9ba11bd9ebc"
+  },
+  {
+    "id": "corr-pr38-require-the-full-azure-signing",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 681,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "12c36587075b9f8daee6d5289096ef97dc172cc0bdeab40637902a88e5f162a6"
+  },
+  {
+    "id": "corr-pr48-cn-ts-src-pair",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 300,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "3d8772a62e48414e6353a1ad5d03479004d9bbf951119f41dd4d9b3a5557ddcc"
+  },
+  {
+    "id": "corr-pr48-cn-ts-src",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 192,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "da12ecd2419ad9437dfa812cad2e1771e3c9b4711434882670fff78c86254304"
+  },
+  {
+    "id": "corr-pr59-guard-config-json-pair",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 1240,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "74ac8952e9a0006f55cc9e6ca481cfa812af1892bae36c1f9fb16f3825259464"
+  },
+  {
+    "id": "corr-pr59-guard-config-json",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 852,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "a452597906f4dade23d4eb08448ce9c1602135da7095e53d8c2d242d0374b11f"
+  },
+  {
+    "id": "corr-pr1-clear-persisted-checklist-state-before-pair",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 878,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "87e9370b6ed8c21c41a15afd5c8227e20c697544d8f301a72b0c65b9030429d1"
+  },
+  {
+    "id": "corr-pr1-clear-persisted-checklist-state-before",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 731,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "6caf184b741e78c0fc4a67801ca5cade3610d0e67f0fbe439f6fe9e77458d2d4"
+  },
+  {
+    "id": "corr-pr1-preserve-the-guard-exit-code-pair",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 807,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "cc3667f1b4cde3e98a373d7c018700b93d3e6bb8ce6ccb355786c53d460dfb9b"
+  },
+  {
+    "id": "corr-pr1-preserve-the-guard-exit-code",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 694,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "f103683702549ac1d4ef1d970f781478d143f43d1e8fd56a3da208bad3bef41d"
+  },
+  {
+    "id": "corr-pr1-return-exit-3-for-detect-pair",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 554,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "45d05fcb98dba7d73c30325a97db3ceb57d1d2b9bea02ca876e9531a809f81c4"
+  },
+  {
+    "id": "corr-pr1-return-exit-3-for-detect",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 527,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "840c2f643a0127c223393d238baf7047ed508ef2dda9eecaf821cc152c4cf537"
+  },
+  {
+    "id": "corr-pr23-keep-init-aligned-with-the-pair",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 581,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "84875c58630f4804c49b2898ca3d60e7aed0aa2684553f479f5c8956ec192fa1"
+  },
+  {
+    "id": "corr-pr23-keep-init-aligned-with-the",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 552,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "5c085ac6c7ea0a2e0b989081afe25c8d193dfac4a9bc573ac37b9fb7ad56a3d1"
+  },
+  {
+    "id": "corr-pr26-block-parked-answer-sends-when-pair",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 474,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "c18371a085895c1640b9b09ee1af001f04fe694ab13a07ac497c75dc2c2bcf46"
+  },
+  {
+    "id": "corr-pr26-block-parked-answer-sends-when",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 395,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "09f2e81d3ac733e3c6b6d9fcb90589b19dfd090b35d0890e564ba22f816c15a8"
+  },
+  {
+    "id": "corr-pr26-do-not-let-terminal-signals-pair",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 629,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "929c0ef38edebe99d067e32f25d025ba824c437d10e92233d99ed6236cfdff88"
+  },
+  {
+    "id": "corr-pr26-do-not-let-terminal-signals",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 496,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "fb3d373799969b0ceaf235cbf9ec7fdeec9a932b1b783201b4493b0221d05f5f"
+  },
+  {
+    "id": "corr-pr28-include-bun-lock-in-the-pair",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 852,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "b24fe1eddcfa9714d0a9e1cef4cb91ffee26c80605c95985fcbfebedda0fe38e"
+  },
+  {
+    "id": "corr-pr28-include-bun-lock-in-the",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 535,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "7436cebfc5763b94442e862bc6df902a74d3c7b62a27fabe40686518493fa147"
+  },
+  {
+    "id": "corr-pr52-don-t-down-rank-recorded-pair",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 512,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "7a4e553b0e9d28f4dc0a17fa5b302e3f525fb0de1826377efa0033f4299370bc"
+  },
+  {
+    "id": "corr-pr52-don-t-down-rank-recorded",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 427,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "749224cdf5b3ad23a2e427ba62b98fd1a842643aff59f1d2abca1693bc1992b2"
+  },
+  {
+    "id": "corr-pr52-use-frink-no-log-in-pair",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 931,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "e16ac37f0a61e750c25c2a1a3cd4be8b4cab664d68dd05ce1da8180aa6778b5c"
+  },
+  {
+    "id": "corr-pr52-use-frink-no-log-in",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 893,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "acca05950ebc2705540450824934de8fd8de6cbe14deef83fc7db48349267238"
+  },
+  {
+    "id": "corr-pr59-expand-knip-config-detection-pair",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 854,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "1291bf972ddaad86efd27368fdcc45a63ad67c5a971c3f174cd4fe38cee6e531"
+  },
+  {
+    "id": "corr-pr59-expand-knip-config-detection",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 523,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "11c7e8f2113d15e2a69eec5c24c0c3093ef6033197df0aae5c1574fc99b38308"
+  },
+  {
+    "id": "corr-pr59-use-a-portable-whitespace-class-pair",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 713,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "7b8efd1f322d545fafa5a388a8b6743c83bc72900d19a77520d5afda4d8f9618"
+  },
+  {
+    "id": "corr-pr59-use-a-portable-whitespace-class",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 659,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "eb8d4aa77fdfa2314dcb4a92423ecdc3b65273c990b22e5b30c0dade4ac58de9"
+  },
+  {
+    "id": "corr-pr60-avoid-leaving-the-member-in-pair",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 1582,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "2fe84657ac6e5e04c57c5c64c3349813e11ad75b4ebc008cdc421d88d8973d42"
+  },
+  {
+    "id": "corr-pr60-avoid-leaving-the-member-in",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 615,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "7003ab43f1aff95c0810fd19f42201cdf1e326e3e76b7491a507f0da6a94ef80"
+  },
+  {
+    "id": "corr-pr60-make-the-batch-reopen-atomic-pair",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 721,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "d1d4224eb6ac02dfb8d03ef667e86819fd3a49caed58cd5a73ff0ee726b7bee6"
+  },
+  {
+    "id": "corr-pr60-make-the-batch-reopen-atomic",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 561,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "3f77a241cbe79881b25b7dd646babdeb4acefc0ea237d12fc4cde6c0d380a0a4"
+  },
+  {
+    "id": "corr-pr60-node-modules-pair",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 251,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "3afa68b4011b9fec810c2d0ad7bec0b0ff4cf00e459900f0e314bf5ba6e62e80"
+  },
+  {
+    "id": "corr-pr60-node-modules",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 336,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "5e2941c233371b234e4b1822f3facbee9fd95551e39f991d73986528e767ea18"
+  },
+  {
+    "id": "corr-pr61-keep-the-carry-on-state-pair",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 756,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "608741729d7ded01638303f928f0d24ee706dcc8804a27b0ca34e42985c7352e"
+  },
+  {
+    "id": "corr-pr61-keep-the-carry-on-state",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 463,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "28b2d75084eab5ffccc796582fd7dacf6d8b4432b4eeb1bdb76cbacf645b899c"
+  },
+  {
+    "id": "corr-tel-append-uniqueness-check-unlocked-pair",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 600,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "50489519396230a22f40af82f833a2a720f14657f325c9a9435f9c42d95166a1"
+  },
+  {
+    "id": "corr-tel-append-uniqueness-check-unlocked",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 300,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "00f9869b1e150c0a5e501d41ee0b9a4beff375bd5118044fd9ce8ab8634e2eba"
+  },
+  {
+    "id": "corr-tel-floor-flips-assigned-flag-pair",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 418,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "30dc100bff319a4ae1e9bf1d7280f338c19a5d0ed1ef7be1a2f3dcbd9f0119d7"
+  },
+  {
+    "id": "corr-tel-floor-flips-assigned-flag",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 434,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "d4e8047921523924ba1d9e3fb2291239b81315e458d0b03275789a8d1e7a96b4"
+  },
+  {
+    "id": "corr-tel-shared-merge-key-unfiltered-writer-pair",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 459,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "2860636231e0357b33462bf71a28cf910111841c06bc4cbe89f8ccabacc5bc29"
+  },
+  {
+    "id": "corr-tel-shared-merge-key-unfiltered-writer",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 279,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "84cff4ca50d29c09ed91c4c98acdaa88b00a8c85108fbc6cf1fd542d7768b510"
+  },
+  {
+    "id": "corr-tel-validate-after-lint-rejected-shape-pair",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 328,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "14c9f7287f0fd1b5222b6c18f1f34682bf89b5529916e33632ed0c7d630699ff"
+  },
+  {
+    "id": "corr-tel-validate-after-lint-rejected-shape",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 285,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "45ea61f11d7f12a0c6df70b5b0ba429c536d269b92f0731e3e354c48b38185b4"
+  },
+  {
+    "id": "corr-tel-banner-ratio-masks-logic-line-pair",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 784,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "e6b210831033c45ac1ad1b92e04722c9140532e4196ee67540e85ad47a23520f"
+  },
+  {
+    "id": "corr-tel-banner-ratio-masks-logic-line",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 890,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "fb8e4a2d9bedbbd815b826fa3f688dc70b04c1f4e6ea1b6366436a9b00626e1c"
+  },
+  {
+    "id": "corr-tel-banner-stray-line-excusal-pair",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 1038,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "3bd66e35d1859068d8eca621e7a52873379feb989b5fa1814493d81ff3eb0328"
+  },
+  {
+    "id": "corr-tel-banner-stray-line-excusal",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 856,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "1d012ae33a49ce57da4ce6a3560648f4f4a7d6151825c34a6fd30510a9e69892"
+  },
+  {
+    "id": "corr-tel-loose-closer-absorbs-statement-pair",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 1201,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "71944b8cd629a8479c9c47b613ae043d8da29d5225f45b38c091af19ab7e0d4d"
+  },
+  {
+    "id": "corr-tel-loose-closer-absorbs-statement",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 1222,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "1474d1434c33371621191fcceae653ca0d38fbc8f638dae4a51076f738836eb7"
+  },
+  {
+    "id": "corr-tel-person-branch-bot-reply-pair",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 711,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "d7e294f730e6e7e4d22c699a425535719ce67f40b0e43a8521d4f6ad2cbc0120"
+  },
+  {
+    "id": "corr-tel-person-branch-bot-reply",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 653,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "f9ab82fd2f66205aeed361edf5a210b1e0ead48029fe0b4dd6c99931327f51af"
+  },
+  {
+    "id": "corr-tel-scoped-sweep-first-subentry-pair",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 636,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "23bea0f2d8c670888fd4041d802b4e8ae9a55674ddfd04c7c8c54e59cc82d6a2"
+  },
+  {
+    "id": "corr-tel-scoped-sweep-first-subentry",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 603,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "4995fefc3a6655d0e9d675bbc1560f5b5f7d18ea78a5412ece634447ca16bd19"
+  },
+  {
+    "id": "corr-tel-suffix-decl-enters-list-state-pair",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 1463,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "aed626e0f9849e3158eda26cdf5c4ea476a83347f3d98b387607c7c0f5cdcdf7"
+  },
+  {
+    "id": "corr-tel-suffix-decl-enters-list-state",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 1443,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "8c9b19689a7af90235c2343e0296f8723e34e9c88526580fcc32dc669e4738e1"
+  },
+  {
+    "id": "corr-asymmetric-flip-classifier-repaired",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 33949,
+    "chunkCount": 3,
+    "taskCount": 10,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "dccfbb1816ff3f2774cc31f7359b9c61eac1918226d032379c36f28a17b3b85a"
+  },
+  {
+    "id": "corr-json-string-result-dropped-repaired",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 598,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "4b59f53f8746c6d8a7f9fa80ef8f8d2102e3989247ffc28fa5216787787a53f8"
+  },
+  {
+    "id": "corr-lock-timeout-runs-unlocked-repaired",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 291,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "39879796fa1abe0fe8ab3d478366039b94922019b8815511a566e055e8a8053a"
+  },
+  {
+    "id": "corr-only-selector-silent-drop-repaired",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 33949,
+    "chunkCount": 3,
+    "taskCount": 10,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "dccfbb1816ff3f2774cc31f7359b9c61eac1918226d032379c36f28a17b3b85a"
+  },
+  {
+    "id": "corr-read-then-write-clobber-terminal-repaired",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 467,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "826d8757ea8bdc4ea1b4813dc4cbda70b60697d9d48fba04eca01b365b05255e"
+  },
+  {
+    "id": "corr-retry-stuck-unclaimable-repaired",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 454,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "28655d2b9d899ea7bda2f30cb454e5f8dcba9e67bfd961c43d13bb8f0fe60ff8"
+  },
+  {
+    "id": "corr-async-view-unmounted-retry-repaired",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 290,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "f22e3ecc0d655ca90f1f4b54af33e777db7fc843deabf80e717f3e9605cfd5b8"
+  },
+  {
+    "id": "corr-async-view-unmounted-retry",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 232,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "de0c8d2bcc5043a9bbb7ce512bbc59229c8feaa458626ac4a90355aefe5dd698"
+  },
+  {
+    "id": "corr-abandoned-browser-launch-link-repaired",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 850,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "b625ebbcc28784535c5a31e8b491c390728fe087b70df384a6804c2cdc125419"
+  },
+  {
+    "id": "corr-abandoned-browser-launch-link",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 803,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "35504d87c1c392c0b01da6bff0f0cde020df888ed7acd4e1bc3484493e12f8bb"
+  },
+  {
+    "id": "corr-bracketed-host-port-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 378,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "f8863b709ed46d28bd6f33154843a030da94f2ef75a48d3dcd9b1dc547e31e5d"
+  },
+  {
+    "id": "corr-command-block-argument-boundary-repaired",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 1689,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "cef61df2d99438cf36c4274c09be0b48fefc9613542a733c9de6ddaa563b41c4"
+  },
+  {
+    "id": "corr-command-block-argument-boundary",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 1622,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "2b40152ba72692fc4945a77bbc3b8c432fdc937e9ac0e16460ab37051474acfc"
+  },
+  {
+    "id": "corr-delete-reserved-prefix-recovery-repaired",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 181,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "95ea29b6ca784bb2a22d635c3112e68a2e5752416f443d5107145c678d4078b4"
+  },
+  {
+    "id": "corr-delete-reserved-prefix-recovery",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 262,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "9c5d16674c3898712ec3fc0efeaca006ad0a0c441a10f4f50d57377f5c13e24f"
+  },
+  {
+    "id": "corr-deleted-branch-attribution-repaired",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 1032,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "e8ac869850a30f5719d5a48e5ef9aae8d678f8b390d6c54766f52df1e33024ed"
+  },
+  {
+    "id": "corr-deleted-branch-attribution",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 1066,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "93398b59b453b23391727acc39dd03e3cccebffd1ddfee068b86a80f47ee5a5c"
+  },
+  {
+    "id": "corr-empty-home-override-repaired",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 563,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "00608d5df8319f4b6e7b56300762b266788c5d5b4528616cee86e95fa01e4ee2"
+  },
+  {
+    "id": "corr-empty-home-override",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 480,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "f2aab1830bfc6095e5638a7151bd06d6cfa9eff2ba7ee4e72731f4845d535688"
+  },
+  {
+    "id": "corr-empty-middleware-path-repaired",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 451,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "ffbff2cad786b0a6d9be55bce01ccc70808d4bd3121e66293e147962fe300feb"
+  },
+  {
+    "id": "corr-empty-middleware-path",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 488,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "12e49bc6d0c1554314b1f0f33476cf4825f9ab4227e8d038e21762c22aaaa73d"
+  },
+  {
+    "id": "corr-failed-audio-cooldown-repaired",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 599,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "6a6882372dbda7cbe0c46f9910ce1e5b26d69b8fb48dcad128e3a73c5799e92d"
+  },
+  {
+    "id": "corr-failed-audio-cooldown",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 415,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "23fc7b809a3c8e0c2754a3e7626f8d52827f959068a5d8160e53b17ecafc42df"
+  },
+  {
+    "id": "corr-ip-address-subdomains-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 270,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "44fcdd7039cc862463fee3df9ecaa745ab81425fb5891ce08b3d99d521ebbf03"
+  },
+  {
+    "id": "corr-null-map-key-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 166,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "981f326250c8ee7947abbf4ee2cb473c5b9d3a9ab1c7b48c9517ca9b39ff9bb8"
+  },
+  {
+    "id": "corr-parameter-cache-loses-outcome-repaired",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 2706,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "3fc325340f2c0d0a20cfbff53ff00e260b3eabedc144631563a1831b829acaa2"
+  },
+  {
+    "id": "corr-parameter-cache-loses-outcome",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 1464,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "7b2b3a3fc429d33b842743c622f4b7cc5d341fbbf3b128f51449e10cb6bd5cdf"
+  },
+  {
+    "id": "corr-query-punctuation-routing-repaired",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 1079,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "119dd2ffd43ef6c49eb642c5e4df9439e7fc0722fe5a63ae76676fadbd9d6d8e"
+  },
+  {
+    "id": "corr-query-punctuation-routing",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 1225,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "188244062776aa8972a4f846f0b562f975856a0ddc8de731c6fb0f3294e7d1c3"
+  },
+  {
+    "id": "corr-reply-draft-expiration-repaired",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 783,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "2816f6503a05722df377b80b6c963de9c1eab8f693b8bc8d286bded200be8ea3"
+  },
+  {
+    "id": "corr-reply-draft-expiration",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 725,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "fae418fdef15e474f83f0a52c1ac166187f7887598de33bdc4418a8332132059"
+  },
+  {
+    "id": "corr-unparsed-import-graph-repaired",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 620,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "ff6ba698a8f19554cd52990ff5dcf531fb9d379a05c0715dbfbc0331495529dd"
+  },
+  {
+    "id": "corr-unparsed-import-graph",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 470,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "ede0c3527eb3eff98c6f15411b33340619fabb0d645f4306bdf74bad8c083470"
+  },
+  {
+    "id": "corr-cache-resource-key-repaired",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 1925,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "0eb5b539eaf5877eb17dd32b7cc5f5195b2b99717225e456fbeb10e772cc9bbb"
+  },
+  {
+    "id": "corr-cache-resource-key",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 1905,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "1fc865c185070a4150531e836df390231528862181ed4cb3bfaee4bde8f60a24"
+  },
+  {
+    "id": "corr-eslint-arrow-parens-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 265,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "5c8f73254f181a2be156a7dbfba058e64a6ee0904dad87da24c0393bdb76c084"
+  },
+  {
+    "id": "corr-eslint-arrow-spacing-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 803,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "5db781df021b47873537181af10e1401ee2aef9ba45e09afc5a8803e2ff2ad02"
+  },
+  {
+    "id": "corr-eslint-brace-style-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 1417,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "4364934e118f10363c3fed7f6635e452a10add9fcbf36f8c5fa3106ff1bd5db0"
+  },
+  {
+    "id": "corr-eslint-comma-dangle-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 846,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "db5f8627650ee5107e5559356c14efa504dad845d058d8ca6ff7899befcbfc5b"
+  },
+  {
+    "id": "corr-eslint-max-statements-per-line-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 400,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "673cbc4ab81990848af23b4b2f58d1327e99aed9ba4e70fdba5bad38e76cc222"
+  },
+  {
+    "id": "corr-eslint-no-useless-rename-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 267,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "0e3cb20e27c1cb781210fc47d010b90b5454bceed95f3d6b86b23e6f82081b8e"
+  },
+  {
+    "id": "corr-eslint-prefer-template-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 357,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "be13ffe0b98e95eb63936c63726060d2546a6b5625284f45108559bb62721e7d"
+  },
+  {
+    "id": "corr-eslint-sort-vars-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 586,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "a76a047a9af23444bf999827774f087cfb9c9c7114adc0a2b079d3643005734f"
+  },
+  {
+    "id": "corr-array-conversion-options-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 327,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "9979ae99f34fea6b4b5bf65df17a538142e6477c257971630ca79511e72b8459"
+  },
+  {
+    "id": "corr-array-definition-ownership-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 418,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "13f05a921ed96b549f679897e45175530fcd54e1e03f65af918af64a788cec16"
+  },
+  {
+    "id": "corr-child-save-event-payload-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 423,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "d245f610ee671d38276ba2290a9582268d54f3c400507a21fa491ff629628bdb"
+  },
+  {
+    "id": "corr-document-array-owner-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 312,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "affce4f41c1384d866612f9ea5513f5c5cfc229041ee1594da747397e66d9da5"
+  },
+  {
+    "id": "corr-document-update-result-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 338,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "647f525cf8776fc890c112a7ffe860bad0b7900625f963e43231711aebf2cdac"
+  },
+  {
+    "id": "corr-enum-message-scope-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 258,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "9f8b664227cb3879e593baf15013b0d5b74b7c17d3153496b329f9804cc0dc2c"
+  },
+  {
+    "id": "corr-export-list-traversal-repaired",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 5012,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "fa194a2742fa3e1a1d1b02b02e1d9e6d497e7b245b825d178f2b28b9f8febd19"
+  },
+  {
+    "id": "corr-export-list-traversal",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 662,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "6e8a47157176b9f7f4e002220a9bcbc075bccc487291f9b135e21dbf0c09f90e"
+  },
+  {
+    "id": "corr-nested-default-projection-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 440,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "2681f1480c49d396e9f94b4663b0053c8cda6bf89f39fdeffbcb2b661dfafb93"
+  },
+  {
+    "id": "corr-query-projection-slice-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 340,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "3fc1315bbd865385b5c528a6776fdef48e20f156f9a22220614b53aeb5bfb703"
+  },
+  {
+    "id": "corr-eslint-consistent-this-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 506,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "f821df6593d76d1642670080a3941db14fbd2eb285ec5fc0231b247ab5b5dbb1"
+  },
+  {
+    "id": "corr-eslint-func-call-spacing-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 448,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "b90db5ec12b56b64e89f8186b7b3da392b5f60614ef519d4ddde409c9fdad8b2"
+  },
+  {
+    "id": "corr-eslint-func-style-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 1770,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "6827a27462c084c74e153b41009b267d78b53fdf4e4231aa2d1e83bef472c3da"
+  },
+  {
+    "id": "corr-eslint-id-length-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 552,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "88609f1b7b29755016770f217edf3ea5b31398680c96525c98d0e98faaacdd66"
+  },
+  {
+    "id": "corr-eslint-no-cond-assign-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 495,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "ac0d842b8cb4406f22c859d7a497f17c963bf1e33fa024b333b754cfcf3039d6"
+  },
+  {
+    "id": "corr-eslint-no-empty-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 328,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "3984ed3bf8857ca9a09dbddc8ae431e1e1488dda2d7099ee3de782b70324a222"
+  },
+  {
+    "id": "corr-eslint-no-loop-func-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 191,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "4931e9985f8235db40cc29dc58ad81e2b2b52426662ca831b580aeda1481f02b"
+  },
+  {
+    "id": "corr-eslint-no-magic-numbers-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 337,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "77896e3c551f18a1e1f489d5869528c75a43ea666cd395c1a3ba8421a2065ab1"
+  },
+  {
+    "id": "corr-eslint-no-multiple-empty-lines-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 771,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "5b41df2fdab2aeb93ad1f62748ea79c484bf2e1f4755473cd231799c1acb05d0"
+  },
+  {
+    "id": "corr-eslint-no-sequences-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 247,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "3550a648ffa166c669626c7f5412cde06d742390831a77fb7333750bd5111379"
+  },
+  {
+    "id": "corr-eslint-no-spaced-func-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 634,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "263d35041bdf835905048763afc6cc70ce7ce421b07d36a748af8b7b9cab4949"
+  },
+  {
+    "id": "corr-eslint-no-unused-expressions-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 349,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "485c30ded4683998ee2a83c7deb9df10a4aade7ebd8ac39d7be5e903939a8ead"
+  },
+  {
+    "id": "corr-eslint-no-unused-vars-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 840,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "b309392e9bcd414ee70044b294684d12bca2b7ede7625b77730112b0ab0470a7"
+  },
+  {
+    "id": "corr-eslint-object-curly-spacing-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 909,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "4b85cf7d685b2b577b03ff904c5486ad30611d539785cfba8b59d97be489f96b"
+  },
+  {
+    "id": "corr-eslint-operator-assignment-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 403,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "1321d73532bd78d32679e129d308bfebe8a96ab011f429f66f69bd18eeb66183"
+  },
+  {
+    "id": "corr-eslint-prefer-destructuring-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 332,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "6cba63ff3d0ebd8a51ee3d2521eaf20f73fceb2b4a480f2868fae7eb302b73fb"
+  },
+  {
+    "id": "corr-eslint-quotes-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 1074,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "72d0afca415ac19d38cf701a69957c9d79a81cff2cf2580795faaf78d714090b"
+  },
+  {
+    "id": "corr-eslint-space-infix-ops-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 264,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "279eb2cce8c01902cc616faefd51a3ad40a83410cc740d76adf9ded158f8443a"
+  },
+  {
+    "id": "corr-eslint-spaced-comment-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 393,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "858a38ce0222b8ead6b48d8a9b3511e1f3a0f9e83986d0eb86244255153d10a8"
+  },
+  {
+    "id": "corr-eslint-valid-typeof-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 660,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "055893d5bd0c5348f806c32ebc8f7398d02dc3b3e99b20240a850e53b743de90"
+  },
+  {
+    "id": "corr-current-route-root-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 668,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "43a6f3e662d5a5a2904d4f5011106de758f3802ea82657cfadee9cce1b708449"
+  },
+  {
+    "id": "corr-empty-taxonomy-values-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 412,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "3ef81b78d6d7cf81cb9e8edcbaf02be9753ca21091c7ff0287561e9fb8aac371"
+  },
+  {
+    "id": "corr-heading-text-projection-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 224,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "2eb0a7650bb5528f61ed6efed451c08a6e1673cf536a478ba5198459ee1769c3"
+  },
+  {
+    "id": "corr-home-route-classification-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 492,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "d30cce8cdab46f098094ea1eb139ad035731184044db6106a2e0199db239f05a"
+  },
+  {
+    "id": "corr-pagination-page-context-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 402,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "649d0218ebd404627608846593db65cb7a010b717fb9f2eaa3a35f7a94cd6498"
+  },
+  {
+    "id": "corr-relative-social-image-url-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 305,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "ff9e5174f24a51b7f22c75f7648f926b0ac03824f462d02c2a547f02dd4db8d9"
+  },
+  {
+    "id": "corr-sparse-document-validation-repaired",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 944,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "2f3f7eb4367e69b8e35f6cb1a986429ab77472d95aa73e9e2c1b5116c4db5f48"
+  },
+  {
+    "id": "corr-sparse-document-validation",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 687,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "f763c9fd224e92300bb26ee1a1e65896e37aedd55c89574e9b6062f496239bc5"
+  },
+  {
+    "id": "corr-statement-separator-repaired",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 454,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "3806efb64a326000383f2d29c9fb8fe5420f4a4f337349651f44530aa295bdb1"
+  },
+  {
+    "id": "corr-statement-separator",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 251,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "646c54574eb98e21049025cacbd9c106f2f8d41441463b085ee30e9c55b125ff"
+  },
+  {
+    "id": "corr-eslint-func-names-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 538,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "0aafe01d0a15d7448769c42428adc1eca69f5c18f082eaf358bb75b14aaa8017"
+  },
+  {
+    "id": "corr-eslint-generator-star-spacing-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 651,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "9c526f5ff29762db597628093262d7c7995fcf9742d3fd9e742fbd77aeac93a8"
+  },
+  {
+    "id": "corr-eslint-init-declarations-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 734,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "583c3c6554c0412a012a98435414e42c123c4eeb5176d25542e28a6467d5f294"
+  },
+  {
+    "id": "corr-eslint-line-comment-position-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 274,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "05454edaec37f49f18e5da531b1029e8b55897bf0426512d68f5b4c7fdc861cc"
+  },
+  {
+    "id": "corr-eslint-lines-around-comment-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 557,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "4108aa67dcb3993df2af7e5733eb2a9334c46e6e676f83f15af5473ed80f744b"
+  },
+  {
+    "id": "corr-eslint-newline-before-return-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 944,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "33ca756d3a16b5abb8c1a05938e88378399ee4a47e7bb866c07458810532f794"
+  },
+  {
+    "id": "corr-eslint-newline-per-chained-call-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 331,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "9f3ecc7cf94ab20cda90822782266278df4162d35556391cacad6e1a93a83c11"
+  },
+  {
+    "id": "corr-eslint-no-await-in-loop-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 216,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "5f00423d98898076bf4a4245be0f7a151e829b4e86bd88d2466027c562f21c9f"
+  },
+  {
+    "id": "corr-eslint-no-constant-condition-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 529,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "e107efc8d2a8eeb7f72a6506e35c8e022f3d69bea38b444e4e183076d54514f8"
+  },
+  {
+    "id": "corr-eslint-no-extra-semi-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 682,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "fde72c43f1f887660a4f51cd93e6eedb68f3702fe98cbb53ddf70f8c8c1a9a1c"
+  },
+  {
+    "id": "corr-eslint-no-fallthrough-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 296,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "e2ecac8d6634ac817c3029a90c3d5e778cc42887b4335359939f81a6c98e39d6"
+  },
+  {
+    "id": "corr-eslint-no-implied-eval-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 272,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "aa3fdee64593c623ba307e4b8fce640658f8f8dc7359b343dfcd7427c80b94cb"
+  },
+  {
+    "id": "corr-eslint-no-lone-blocks-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 1006,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "7cd81aa30a0b8d0af454f9cb0f6bb834e3cec719cd12ccfaee2d52039e4b095d"
+  },
+  {
+    "id": "corr-eslint-no-return-assign-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 359,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "a2d74b4949642ff08b863fc74501e7dba4a2b43ce1e6a41ebcd1d5060bdde427"
+  },
+  {
+    "id": "corr-eslint-no-shadow-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 345,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "20c1d35a56ecec27f3901095f2f3f2061d23e69011689e6f5c4f28638e4b8659"
+  },
+  {
+    "id": "corr-eslint-no-useless-computed-key-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 398,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "ffe7ef2d5a37b8f03dcc69035219e6d44585baf3af108f38a2ffba6f9707aae9"
+  },
+  {
+    "id": "corr-eslint-nonblock-statement-body-position-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 399,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "2f1c6cd0ee2c9687db41ec2dc9ffb9418a4c3ef3a3c3543d9cc97e2c302284a7"
+  },
+  {
+    "id": "corr-eslint-object-shorthand-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 284,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "abfa1dcb3960f70f0d196436bda49e174e2cd4b36df35b8669991b7327bcaa3e"
+  },
+  {
+    "id": "corr-eslint-prefer-arrow-callback-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 836,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "8c3a22e44e3a706fc4c8dd643dde18c035a9eb9ebb43c57c064e49c3aa23ee86"
+  },
+  {
+    "id": "corr-eslint-unicode-bom-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 282,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "a0ad2dc68cc22920f924c078b905ada1d921021a7cc3be50bc5993af29673770"
+  },
+  {
+    "id": "corr-eslint-use-isnan-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 364,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "81b61ad8ffdc6267a457b6a305c9eaec697d221f81a495bd9ae66a448e672038"
+  },
+  {
+    "id": "corr-array-regexp-query-options-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 196,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "e597539504b545f041361b5d7880170c8c71e6decff82d405d87cab9252163a5"
+  },
+  {
+    "id": "corr-binary-asset-content-corruption",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 1264,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "84b3e5c76df2bf90c677c449ee7ec4e6fefefe921ff1771187f788dac5669b15"
+  },
+  {
+    "id": "corr-cached-utf8-byte-ranges",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 2171,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "f3c4ebea5c90ba9336b1793f144203800ab4bc6bbd924cf112be08e109761796"
+  },
+  {
+    "id": "corr-cli-option-precedence-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 427,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "46672f8ba275374709888591c69adbe21d6a4df844996a0c58052767ee561a63"
+  },
+  {
+    "id": "corr-connection-parser-reset-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 245,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "6f7434376cef918f5a257473de023214238913af07033f943d66016c4f89d6aa"
+  },
+  {
+    "id": "corr-date-minimization-preservation-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 290,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "318a83f4f1857174cf32fedfe62a95046fd6c08c121a6d8f89a60fc0367b7370"
+  },
+  {
+    "id": "corr-delete-query-filter-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 271,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "861ae67fbd7abb92dfdd3325da0f8b774520fe71d6eeb04a534ac612b93cae92"
+  },
+  {
+    "id": "corr-extended-glob-watch-roots",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 342,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "72f87313f6d83e8a48b8dfcc3ec084c76dd6453458152697df2416e13a25089d"
+  },
+  {
+    "id": "corr-initial-file-change-notification-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 601,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "35fa8407e4bbad217ac0400e1a8f1676ba85bf1476b8bd580a40310343a14b12"
+  },
+  {
+    "id": "corr-ipv6-own-origin-formatting",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 377,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "2e4711a4e9235a3775aa0be3a33ccf8454e2ef3b1ee65351f719657645992baf"
+  },
+  {
+    "id": "corr-live-client-configuration-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 1848,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "b5baa5c5e503653088464a145bfc9865fb7e40e248f9c59c3e3ab9e331df795b"
+  },
+  {
+    "id": "corr-missing-parent-value-contract-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 699,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "76f931b088c756259df3543eb5e331a3c54aeeeec115a0e0f4029523bbcc571a"
+  },
+  {
+    "id": "corr-nested-array-dirty-collapse-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 369,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "2b89e5fbb6a6e969f430ab61d53965cee8239b5f46f6a10a0ec39caa7f0f8f0c"
+  },
+  {
+    "id": "corr-optional-client-options-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 204,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "ddcc7f6f5e91f7fd0e0d50fc322c52fc10a2ea8369c54d2c1b98785e2034a013"
+  },
+  {
+    "id": "corr-overlapping-pattern-inclusion",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 561,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "35665fcafafaa0fba78456e22a63d5ace6b7359542a742f4e97ef1f53e0d58f4"
+  },
+  {
+    "id": "corr-parent-traversal-glob-normalization",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 336,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "f4bba7c402aa9aa93795cfe19364219a81e5e9960e76057ac40603390fb2f6dc"
+  },
+  {
+    "id": "corr-pending-file-list-serving-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 1098,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "0c117eb1cd58354e06528575e5fba63c745b8f604d06edc1e687f0a4fdeaef02"
+  },
+  {
+    "id": "corr-pipeline-buffer-preservation-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 1951,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "577d55646edef59f25d7a4a1f6457622fd63ac0c5eb933d0503cba8de1e711fa"
+  },
+  {
+    "id": "corr-positional-reference-schema-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 259,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "fed45ccd09db6cf64e0f6f02df0314908007a1104d0eb99e591921ffdbc8e472"
+  },
+  {
+    "id": "corr-processed-content-digest-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 270,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "cba23bc152b20fa40d35ecc22c08a419ca79423eb5a91f467e5b0ae607880a6e"
+  },
+  {
+    "id": "corr-processed-file-extension-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 603,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "d1723d39329914b8a28c1e42659fa85e906d81ccdbe7d76ac0d288a59d0b7b2a"
+  },
+  {
+    "id": "corr-runner-exit-trailer-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 849,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "185034a7dad7a8cd70daf052a29e19b8eb03cda33db6e6a7efb9a0e994c6277c"
+  },
+  {
+    "id": "corr-server-load-error-exit-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 377,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "5c611120770ff5fea3c296ebbbe691749a6114e27e63b762610b7e7870c7c398"
+  },
+  {
+    "id": "corr-subscription-channel-restoration-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 299,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "085b196f08ea2883e4106003ea6ddcfedb61877a0db21d76ecdc54fe60d4e817"
+  },
+  {
+    "id": "corr-top-level-version-schema-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 518,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "ac7a8bcc9ba2272fdec89c6f2c4e60ad1dd17215b5801d77f1ffcc73f52453be"
+  },
+  {
+    "id": "corr-transaction-command-callback-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 199,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "44dabce8b512fdbe18dbeeca8dbb3b53e37b34f423b2f1219dbdb907d32831e8"
+  },
+  {
+    "id": "corr-version-save-callback-error-escape",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 237,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "122fc834fc25f51cbe2a7f558e6424c3ac08deb72d2a13109b4abef3ecf2746b"
+  },
+  {
+    "id": "corr-atomic-query-population-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 832,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "bf562c04ac89b313c5199de49074627bc144c6c1b42912d676d65d73e30d7633"
+  },
+  {
+    "id": "corr-comment-adjacent-fix-ranges-repaired",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 5645,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "1c5ee65e4fb606b6c5baa27907d245c18d0369b812eeac3c8a93236886760adb"
+  },
+  {
+    "id": "corr-comment-adjacent-fix-ranges",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 656,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "e87b18bced765dca4dd4ad076dc458aefa43899dd38298a3cc32630fa087dd79"
+  },
+  {
+    "id": "corr-destructured-edge-underscores",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 2465,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "c20add7de09a0f5a129b1341cf02430fe3910c19d679241b24e4dd055d827bae"
+  },
+  {
+    "id": "corr-diagnostic-column-contract",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 500,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "939e4ddd7986ec3b5bb338070e7a890da3abc5fcd502680fdc97d0a681db6c3f"
+  },
+  {
+    "id": "corr-empty-super-argument-traversal",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 1830,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "1c87182dc92a1bb2c747b84b7c5a6a9149eb2bac74c854364a53fdee96dcaaa1"
+  },
+  {
+    "id": "corr-missing-population-position-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 200,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "174437c58b5a7724bd7a6ef9acee33a490d7b68a6aee1102a434914da729c6cd"
+  },
+  {
+    "id": "corr-populated-query-lean-mode-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 734,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "802ad8d99678d1dd1b4d2585b0d6a21b8be286195ce6d4a514c4be096553bcb5"
+  },
+  {
+    "id": "corr-population-projection-token-prefix",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 228,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "f3ae5d065a418ad3a1fe31359524a364f4a32e814c7d3677ac9cb0ba0e36dcd1"
+  },
+  {
+    "id": "corr-repopulation-error-loses-documents",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 501,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "a3a506207e3f3deb37869dfd1efd77c5d0f597d264afe311cbc48d3b1868424e"
+  },
+  {
+    "id": "corr-reused-population-limit-compounds",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 264,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "12467c4160b1d1f86b231ea8cae354bf8b2ea62bf8e9e6a270e7fef43001dcb3"
+  },
+  {
+    "id": "corr-saved-reference-depopulation-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 766,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "f71a068f760e5274c2797967046eb6ed7636036ad8be0af758be9c4b3a3f43eb"
+  },
+  {
+    "id": "corr-unregistered-population-model-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 465,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "e7a39f90c331d50044cebdc943e0c4f1d6f3c2a91be53b19ae1a08589599c6ad"
+  },
+  {
+    "id": "corr-upsert-absent-original-document-clean",
+    "reviewer": "correctness-reviewer",
+    "identityBytes": 266,
+    "chunkCount": 0,
+    "taskCount": 4,
+    "cap": 400,
+    "groups": [
+      [
+        "state-transitions"
+      ],
+      [
+        "concurrency-races"
+      ],
+      [
+        "writer-reader-contracts"
+      ],
+      [
+        "error-and-edge-classification"
+      ]
+    ],
+    "planHash": "df0d0ca5f41a87301ceef4119169802b3d8a73496f8b3285f1a77bd011ef637d"
+  }
+]

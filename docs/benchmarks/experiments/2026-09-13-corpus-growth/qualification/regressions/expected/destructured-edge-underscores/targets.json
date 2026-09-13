@@ -1,0 +1,926 @@
+{
+  "runtime": "v24.19.0",
+  "historicalCore": "4.12.1",
+  "observations": [
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "leading shorthand",
+      "code": "const {_leading}=obj;",
+      "options": {},
+      "expectedCount": 0,
+      "target": true,
+      "messages": [],
+      "fixed": "const {_leading}=obj;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "trailing shorthand",
+      "code": "const {trailing_}=obj;",
+      "options": {},
+      "expectedCount": 0,
+      "target": true,
+      "messages": [],
+      "fixed": "const {trailing_}=obj;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "leading default",
+      "code": "const {_leading=1}=obj;",
+      "options": {},
+      "expectedCount": 0,
+      "target": true,
+      "messages": [],
+      "fixed": "const {_leading=1}=obj;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "trailing default",
+      "code": "function use({trailing_=1}){}",
+      "options": {},
+      "expectedCount": 0,
+      "target": true,
+      "messages": [],
+      "fixed": "function use({trailing_=1}){}",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "snake alias corrected",
+      "code": "const {snake_case: camelCase}=obj;",
+      "options": {},
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "const {snake_case: camelCase}=obj;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "invalid local retained",
+      "code": "const {camelCase: snake_case}=obj;",
+      "options": {},
+      "expectedCount": 1,
+      "target": false,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 19,
+          "nodeType": "Identifier"
+        }
+      ],
+      "fixed": "const {camelCase: snake_case}=obj;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "snake default retained",
+      "code": "const {snake_case=1}=obj;",
+      "options": {},
+      "expectedCount": 1,
+      "target": false,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 8,
+          "nodeType": "Identifier"
+        }
+      ],
+      "fixed": "const {snake_case=1}=obj;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "ordinary variable",
+      "code": "const camelCase=1;",
+      "options": {},
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "const camelCase=1;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "constant underscore",
+      "code": "const {UPPER_CASE}=obj;",
+      "options": {},
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "const {UPPER_CASE}=obj;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "scenario": "edge underscore property",
+      "code": "obj._leading=1;",
+      "options": {},
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "obj._leading=1;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "leading shorthand",
+      "code": "const {_leading}=obj;",
+      "options": {},
+      "expectedCount": 0,
+      "target": true,
+      "messages": [],
+      "fixed": "const {_leading}=obj;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "trailing shorthand",
+      "code": "const {trailing_}=obj;",
+      "options": {},
+      "expectedCount": 0,
+      "target": true,
+      "messages": [],
+      "fixed": "const {trailing_}=obj;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "leading default",
+      "code": "const {_leading=1}=obj;",
+      "options": {},
+      "expectedCount": 0,
+      "target": true,
+      "messages": [],
+      "fixed": "const {_leading=1}=obj;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "trailing default",
+      "code": "function use({trailing_=1}){}",
+      "options": {},
+      "expectedCount": 0,
+      "target": true,
+      "messages": [],
+      "fixed": "function use({trailing_=1}){}",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "snake alias corrected",
+      "code": "const {snake_case: camelCase}=obj;",
+      "options": {},
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "const {snake_case: camelCase}=obj;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "invalid local retained",
+      "code": "const {camelCase: snake_case}=obj;",
+      "options": {},
+      "expectedCount": 1,
+      "target": false,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 19,
+          "nodeType": "Identifier"
+        }
+      ],
+      "fixed": "const {camelCase: snake_case}=obj;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "snake default retained",
+      "code": "const {snake_case=1}=obj;",
+      "options": {},
+      "expectedCount": 1,
+      "target": false,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 8,
+          "nodeType": "Identifier"
+        }
+      ],
+      "fixed": "const {snake_case=1}=obj;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "ordinary variable",
+      "code": "const camelCase=1;",
+      "options": {},
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "const camelCase=1;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "constant underscore",
+      "code": "const {UPPER_CASE}=obj;",
+      "options": {},
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "const {UPPER_CASE}=obj;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "scenario": "edge underscore property",
+      "code": "obj._leading=1;",
+      "options": {},
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "obj._leading=1;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "leading shorthand",
+      "code": "const {_leading}=obj;",
+      "options": {},
+      "expectedCount": 0,
+      "target": true,
+      "messages": [
+        {
+          "message": "Identifier '_leading' is not in camel case.",
+          "line": 1,
+          "column": 8,
+          "nodeType": "Identifier"
+        }
+      ],
+      "fixed": "const {_leading}=obj;",
+      "parseErrors": [],
+      "safe": false
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "trailing shorthand",
+      "code": "const {trailing_}=obj;",
+      "options": {},
+      "expectedCount": 0,
+      "target": true,
+      "messages": [
+        {
+          "message": "Identifier 'trailing_' is not in camel case.",
+          "line": 1,
+          "column": 8,
+          "nodeType": "Identifier"
+        }
+      ],
+      "fixed": "const {trailing_}=obj;",
+      "parseErrors": [],
+      "safe": false
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "leading default",
+      "code": "const {_leading=1}=obj;",
+      "options": {},
+      "expectedCount": 0,
+      "target": true,
+      "messages": [
+        {
+          "message": "Identifier '_leading' is not in camel case.",
+          "line": 1,
+          "column": 8,
+          "nodeType": "Identifier"
+        }
+      ],
+      "fixed": "const {_leading=1}=obj;",
+      "parseErrors": [],
+      "safe": false
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "trailing default",
+      "code": "function use({trailing_=1}){}",
+      "options": {},
+      "expectedCount": 0,
+      "target": true,
+      "messages": [
+        {
+          "message": "Identifier 'trailing_' is not in camel case.",
+          "line": 1,
+          "column": 15,
+          "nodeType": "Identifier"
+        }
+      ],
+      "fixed": "function use({trailing_=1}){}",
+      "parseErrors": [],
+      "safe": false
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "snake alias corrected",
+      "code": "const {snake_case: camelCase}=obj;",
+      "options": {},
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "const {snake_case: camelCase}=obj;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "invalid local retained",
+      "code": "const {camelCase: snake_case}=obj;",
+      "options": {},
+      "expectedCount": 1,
+      "target": false,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 19,
+          "nodeType": "Identifier"
+        }
+      ],
+      "fixed": "const {camelCase: snake_case}=obj;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "snake default retained",
+      "code": "const {snake_case=1}=obj;",
+      "options": {},
+      "expectedCount": 1,
+      "target": false,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 8,
+          "nodeType": "Identifier"
+        }
+      ],
+      "fixed": "const {snake_case=1}=obj;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "ordinary variable",
+      "code": "const camelCase=1;",
+      "options": {},
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "const camelCase=1;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "constant underscore",
+      "code": "const {UPPER_CASE}=obj;",
+      "options": {},
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "const {UPPER_CASE}=obj;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "scenario": "edge underscore property",
+      "code": "obj._leading=1;",
+      "options": {},
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "obj._leading=1;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "leading shorthand",
+      "code": "const {_leading}=obj;",
+      "options": {},
+      "expectedCount": 0,
+      "target": true,
+      "messages": [
+        {
+          "message": "Identifier '_leading' is not in camel case.",
+          "line": 1,
+          "column": 8,
+          "nodeType": "Identifier"
+        }
+      ],
+      "fixed": "const {_leading}=obj;",
+      "parseErrors": [],
+      "safe": false
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "trailing shorthand",
+      "code": "const {trailing_}=obj;",
+      "options": {},
+      "expectedCount": 0,
+      "target": true,
+      "messages": [
+        {
+          "message": "Identifier 'trailing_' is not in camel case.",
+          "line": 1,
+          "column": 8,
+          "nodeType": "Identifier"
+        }
+      ],
+      "fixed": "const {trailing_}=obj;",
+      "parseErrors": [],
+      "safe": false
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "leading default",
+      "code": "const {_leading=1}=obj;",
+      "options": {},
+      "expectedCount": 0,
+      "target": true,
+      "messages": [
+        {
+          "message": "Identifier '_leading' is not in camel case.",
+          "line": 1,
+          "column": 8,
+          "nodeType": "Identifier"
+        }
+      ],
+      "fixed": "const {_leading=1}=obj;",
+      "parseErrors": [],
+      "safe": false
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "trailing default",
+      "code": "function use({trailing_=1}){}",
+      "options": {},
+      "expectedCount": 0,
+      "target": true,
+      "messages": [
+        {
+          "message": "Identifier 'trailing_' is not in camel case.",
+          "line": 1,
+          "column": 15,
+          "nodeType": "Identifier"
+        }
+      ],
+      "fixed": "function use({trailing_=1}){}",
+      "parseErrors": [],
+      "safe": false
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "snake alias corrected",
+      "code": "const {snake_case: camelCase}=obj;",
+      "options": {},
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "const {snake_case: camelCase}=obj;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "invalid local retained",
+      "code": "const {camelCase: snake_case}=obj;",
+      "options": {},
+      "expectedCount": 1,
+      "target": false,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 19,
+          "nodeType": "Identifier"
+        }
+      ],
+      "fixed": "const {camelCase: snake_case}=obj;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "snake default retained",
+      "code": "const {snake_case=1}=obj;",
+      "options": {},
+      "expectedCount": 1,
+      "target": false,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 8,
+          "nodeType": "Identifier"
+        }
+      ],
+      "fixed": "const {snake_case=1}=obj;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "ordinary variable",
+      "code": "const camelCase=1;",
+      "options": {},
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "const camelCase=1;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "constant underscore",
+      "code": "const {UPPER_CASE}=obj;",
+      "options": {},
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "const {UPPER_CASE}=obj;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "scenario": "edge underscore property",
+      "code": "obj._leading=1;",
+      "options": {},
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "obj._leading=1;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "leading shorthand",
+      "code": "const {_leading}=obj;",
+      "options": {},
+      "expectedCount": 0,
+      "target": true,
+      "messages": [],
+      "fixed": "const {_leading}=obj;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "trailing shorthand",
+      "code": "const {trailing_}=obj;",
+      "options": {},
+      "expectedCount": 0,
+      "target": true,
+      "messages": [],
+      "fixed": "const {trailing_}=obj;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "leading default",
+      "code": "const {_leading=1}=obj;",
+      "options": {},
+      "expectedCount": 0,
+      "target": true,
+      "messages": [],
+      "fixed": "const {_leading=1}=obj;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "trailing default",
+      "code": "function use({trailing_=1}){}",
+      "options": {},
+      "expectedCount": 0,
+      "target": true,
+      "messages": [],
+      "fixed": "function use({trailing_=1}){}",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "snake alias corrected",
+      "code": "const {snake_case: camelCase}=obj;",
+      "options": {},
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "const {snake_case: camelCase}=obj;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "invalid local retained",
+      "code": "const {camelCase: snake_case}=obj;",
+      "options": {},
+      "expectedCount": 1,
+      "target": false,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 19,
+          "nodeType": "Identifier"
+        }
+      ],
+      "fixed": "const {camelCase: snake_case}=obj;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "snake default retained",
+      "code": "const {snake_case=1}=obj;",
+      "options": {},
+      "expectedCount": 1,
+      "target": false,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 8,
+          "nodeType": "Identifier"
+        }
+      ],
+      "fixed": "const {snake_case=1}=obj;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "ordinary variable",
+      "code": "const camelCase=1;",
+      "options": {},
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "const camelCase=1;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "constant underscore",
+      "code": "const {UPPER_CASE}=obj;",
+      "options": {},
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "const {UPPER_CASE}=obj;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "scenario": "edge underscore property",
+      "code": "obj._leading=1;",
+      "options": {},
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "obj._leading=1;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "leading shorthand",
+      "code": "const {_leading}=obj;",
+      "options": {},
+      "expectedCount": 0,
+      "target": true,
+      "messages": [],
+      "fixed": "const {_leading}=obj;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "trailing shorthand",
+      "code": "const {trailing_}=obj;",
+      "options": {},
+      "expectedCount": 0,
+      "target": true,
+      "messages": [],
+      "fixed": "const {trailing_}=obj;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "leading default",
+      "code": "const {_leading=1}=obj;",
+      "options": {},
+      "expectedCount": 0,
+      "target": true,
+      "messages": [],
+      "fixed": "const {_leading=1}=obj;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "trailing default",
+      "code": "function use({trailing_=1}){}",
+      "options": {},
+      "expectedCount": 0,
+      "target": true,
+      "messages": [],
+      "fixed": "function use({trailing_=1}){}",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "snake alias corrected",
+      "code": "const {snake_case: camelCase}=obj;",
+      "options": {},
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "const {snake_case: camelCase}=obj;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "invalid local retained",
+      "code": "const {camelCase: snake_case}=obj;",
+      "options": {},
+      "expectedCount": 1,
+      "target": false,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 19,
+          "nodeType": "Identifier"
+        }
+      ],
+      "fixed": "const {camelCase: snake_case}=obj;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "snake default retained",
+      "code": "const {snake_case=1}=obj;",
+      "options": {},
+      "expectedCount": 1,
+      "target": false,
+      "messages": [
+        {
+          "message": "Identifier 'snake_case' is not in camel case.",
+          "line": 1,
+          "column": 8,
+          "nodeType": "Identifier"
+        }
+      ],
+      "fixed": "const {snake_case=1}=obj;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "ordinary variable",
+      "code": "const camelCase=1;",
+      "options": {},
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "const camelCase=1;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "constant underscore",
+      "code": "const {UPPER_CASE}=obj;",
+      "options": {},
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "const {UPPER_CASE}=obj;",
+      "parseErrors": [],
+      "safe": true
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "scenario": "edge underscore property",
+      "code": "obj._leading=1;",
+      "options": {},
+      "expectedCount": 0,
+      "target": false,
+      "messages": [],
+      "fixed": "obj._leading=1;",
+      "parseErrors": [],
+      "safe": true
+    }
+  ]
+}

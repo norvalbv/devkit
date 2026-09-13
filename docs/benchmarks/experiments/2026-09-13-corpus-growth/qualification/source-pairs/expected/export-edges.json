@@ -1,0 +1,1220 @@
+{
+  "observations": [
+    {
+      "stage": "parent",
+      "kind": "source",
+      "name": "export empty list then var",
+      "code": "export {}; var x;",
+      "expectedRepairCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "line": 1,
+          "column": 12
+        }
+      ]
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "name": "export alias then var",
+      "code": "var x; export { x as y }; var z;",
+      "expectedRepairCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "line": 1,
+          "column": 27
+        }
+      ]
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "name": "reexport then var",
+      "code": "export { x } from \"mod\"; var z;",
+      "expectedRepairCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "line": 1,
+          "column": 26
+        }
+      ]
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "name": "export function then var",
+      "code": "export function f() {} var z;",
+      "expectedRepairCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "line": 1,
+          "column": 24
+        }
+      ]
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "name": "export default expression then var",
+      "code": "export default 1; var z;",
+      "expectedRepairCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "line": 1,
+          "column": 19
+        }
+      ]
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "name": "export class then var",
+      "code": "export class C {} var z;",
+      "expectedRepairCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "line": 1,
+          "column": 19
+        }
+      ]
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "name": "export var at top followed by var",
+      "code": "export var a; var b;",
+      "expectedRepairCount": 0,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "line": 1,
+          "column": 8
+        },
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "line": 1,
+          "column": 15
+        }
+      ]
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "name": "export let at top followed by var",
+      "code": "export let a; var b;",
+      "expectedRepairCount": 0,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "line": 1,
+          "column": 15
+        }
+      ]
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "name": "export var after statement",
+      "code": "work(); export var a;",
+      "expectedRepairCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "line": 1,
+          "column": 16
+        }
+      ]
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "name": "import namespace then exported var",
+      "code": "import * as mod from \"mod\"; export var a;",
+      "expectedRepairCount": 0,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "line": 1,
+          "column": 36
+        }
+      ]
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "name": "directive and import then exported var",
+      "code": "\"use strict\"; import value from \"mod\"; export var a;",
+      "expectedRepairCount": 0,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "line": 1,
+          "column": 47
+        }
+      ]
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "name": "function directive then var",
+      "code": "function f() { \"use strict\"; var x; }",
+      "expectedRepairCount": 0,
+      "messages": []
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "name": "nested lexical block var",
+      "code": "function f() { if (ready) { var x; } }",
+      "expectedRepairCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "line": 1,
+          "column": 29
+        }
+      ]
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "name": "for var declaration",
+      "code": "for (var x = 0; x < 3; x++) {}",
+      "expectedRepairCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "line": 1,
+          "column": 6
+        }
+      ]
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "name": "function top vars after export",
+      "code": "export default function f() { var x; var y; }",
+      "expectedRepairCount": 0,
+      "messages": []
+    },
+    {
+      "stage": "parent",
+      "kind": "source",
+      "name": "same source twice fresh traversal",
+      "code": "export var a; var b;",
+      "expectedRepairCount": 0,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "line": 1,
+          "column": 8
+        },
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "line": 1,
+          "column": 15
+        }
+      ]
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "name": "export empty list then var",
+      "code": "export {}; var x;",
+      "expectedRepairCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "line": 1,
+          "column": 12
+        }
+      ]
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "name": "export alias then var",
+      "code": "var x; export { x as y }; var z;",
+      "expectedRepairCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "line": 1,
+          "column": 27
+        }
+      ]
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "name": "reexport then var",
+      "code": "export { x } from \"mod\"; var z;",
+      "expectedRepairCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "line": 1,
+          "column": 26
+        }
+      ]
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "name": "export function then var",
+      "code": "export function f() {} var z;",
+      "expectedRepairCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "line": 1,
+          "column": 24
+        }
+      ]
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "name": "export default expression then var",
+      "code": "export default 1; var z;",
+      "expectedRepairCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "line": 1,
+          "column": 19
+        }
+      ]
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "name": "export class then var",
+      "code": "export class C {} var z;",
+      "expectedRepairCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "line": 1,
+          "column": 19
+        }
+      ]
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "name": "export var at top followed by var",
+      "code": "export var a; var b;",
+      "expectedRepairCount": 0,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "line": 1,
+          "column": 8
+        },
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "line": 1,
+          "column": 15
+        }
+      ]
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "name": "export let at top followed by var",
+      "code": "export let a; var b;",
+      "expectedRepairCount": 0,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "line": 1,
+          "column": 15
+        }
+      ]
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "name": "export var after statement",
+      "code": "work(); export var a;",
+      "expectedRepairCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "line": 1,
+          "column": 16
+        }
+      ]
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "name": "import namespace then exported var",
+      "code": "import * as mod from \"mod\"; export var a;",
+      "expectedRepairCount": 0,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "line": 1,
+          "column": 36
+        }
+      ]
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "name": "directive and import then exported var",
+      "code": "\"use strict\"; import value from \"mod\"; export var a;",
+      "expectedRepairCount": 0,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "line": 1,
+          "column": 47
+        }
+      ]
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "name": "function directive then var",
+      "code": "function f() { \"use strict\"; var x; }",
+      "expectedRepairCount": 0,
+      "messages": []
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "name": "nested lexical block var",
+      "code": "function f() { if (ready) { var x; } }",
+      "expectedRepairCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "line": 1,
+          "column": 29
+        }
+      ]
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "name": "for var declaration",
+      "code": "for (var x = 0; x < 3; x++) {}",
+      "expectedRepairCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "line": 1,
+          "column": 6
+        }
+      ]
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "name": "function top vars after export",
+      "code": "export default function f() { var x; var y; }",
+      "expectedRepairCount": 0,
+      "messages": []
+    },
+    {
+      "stage": "parent",
+      "kind": "adapted",
+      "name": "same source twice fresh traversal",
+      "code": "export var a; var b;",
+      "expectedRepairCount": 0,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "line": 1,
+          "column": 8
+        },
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "line": 1,
+          "column": 15
+        }
+      ]
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "name": "export empty list then var",
+      "code": "export {}; var x;",
+      "expectedRepairCount": 1,
+      "error": {
+        "name": "TypeError",
+        "message": "Cannot read properties of null (reading 'type')"
+      }
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "name": "export alias then var",
+      "code": "var x; export { x as y }; var z;",
+      "expectedRepairCount": 1,
+      "error": {
+        "name": "TypeError",
+        "message": "Cannot read properties of null (reading 'type')"
+      }
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "name": "reexport then var",
+      "code": "export { x } from \"mod\"; var z;",
+      "expectedRepairCount": 1,
+      "error": {
+        "name": "TypeError",
+        "message": "Cannot read properties of null (reading 'type')"
+      }
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "name": "export function then var",
+      "code": "export function f() {} var z;",
+      "expectedRepairCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "line": 1,
+          "column": 24
+        }
+      ]
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "name": "export default expression then var",
+      "code": "export default 1; var z;",
+      "expectedRepairCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "line": 1,
+          "column": 19
+        }
+      ]
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "name": "export class then var",
+      "code": "export class C {} var z;",
+      "expectedRepairCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "line": 1,
+          "column": 19
+        }
+      ]
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "name": "export var at top followed by var",
+      "code": "export var a; var b;",
+      "expectedRepairCount": 0,
+      "messages": []
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "name": "export let at top followed by var",
+      "code": "export let a; var b;",
+      "expectedRepairCount": 0,
+      "messages": []
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "name": "export var after statement",
+      "code": "work(); export var a;",
+      "expectedRepairCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "line": 1,
+          "column": 9
+        }
+      ]
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "name": "import namespace then exported var",
+      "code": "import * as mod from \"mod\"; export var a;",
+      "expectedRepairCount": 0,
+      "messages": []
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "name": "directive and import then exported var",
+      "code": "\"use strict\"; import value from \"mod\"; export var a;",
+      "expectedRepairCount": 0,
+      "messages": []
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "name": "function directive then var",
+      "code": "function f() { \"use strict\"; var x; }",
+      "expectedRepairCount": 0,
+      "messages": []
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "name": "nested lexical block var",
+      "code": "function f() { if (ready) { var x; } }",
+      "expectedRepairCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "line": 1,
+          "column": 29
+        }
+      ]
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "name": "for var declaration",
+      "code": "for (var x = 0; x < 3; x++) {}",
+      "expectedRepairCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "line": 1,
+          "column": 6
+        }
+      ]
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "name": "function top vars after export",
+      "code": "export default function f() { var x; var y; }",
+      "expectedRepairCount": 0,
+      "messages": []
+    },
+    {
+      "stage": "bug",
+      "kind": "source",
+      "name": "same source twice fresh traversal",
+      "code": "export var a; var b;",
+      "expectedRepairCount": 0,
+      "messages": []
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "name": "export empty list then var",
+      "code": "export {}; var x;",
+      "expectedRepairCount": 1,
+      "error": {
+        "name": "TypeError",
+        "message": "Cannot read properties of null (reading 'type')"
+      }
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "name": "export alias then var",
+      "code": "var x; export { x as y }; var z;",
+      "expectedRepairCount": 1,
+      "error": {
+        "name": "TypeError",
+        "message": "Cannot read properties of null (reading 'type')"
+      }
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "name": "reexport then var",
+      "code": "export { x } from \"mod\"; var z;",
+      "expectedRepairCount": 1,
+      "error": {
+        "name": "TypeError",
+        "message": "Cannot read properties of null (reading 'type')"
+      }
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "name": "export function then var",
+      "code": "export function f() {} var z;",
+      "expectedRepairCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "line": 1,
+          "column": 24
+        }
+      ]
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "name": "export default expression then var",
+      "code": "export default 1; var z;",
+      "expectedRepairCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "line": 1,
+          "column": 19
+        }
+      ]
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "name": "export class then var",
+      "code": "export class C {} var z;",
+      "expectedRepairCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "line": 1,
+          "column": 19
+        }
+      ]
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "name": "export var at top followed by var",
+      "code": "export var a; var b;",
+      "expectedRepairCount": 0,
+      "messages": []
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "name": "export let at top followed by var",
+      "code": "export let a; var b;",
+      "expectedRepairCount": 0,
+      "messages": []
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "name": "export var after statement",
+      "code": "work(); export var a;",
+      "expectedRepairCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "line": 1,
+          "column": 9
+        }
+      ]
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "name": "import namespace then exported var",
+      "code": "import * as mod from \"mod\"; export var a;",
+      "expectedRepairCount": 0,
+      "messages": []
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "name": "directive and import then exported var",
+      "code": "\"use strict\"; import value from \"mod\"; export var a;",
+      "expectedRepairCount": 0,
+      "messages": []
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "name": "function directive then var",
+      "code": "function f() { \"use strict\"; var x; }",
+      "expectedRepairCount": 0,
+      "messages": []
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "name": "nested lexical block var",
+      "code": "function f() { if (ready) { var x; } }",
+      "expectedRepairCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "line": 1,
+          "column": 29
+        }
+      ]
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "name": "for var declaration",
+      "code": "for (var x = 0; x < 3; x++) {}",
+      "expectedRepairCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "line": 1,
+          "column": 6
+        }
+      ]
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "name": "function top vars after export",
+      "code": "export default function f() { var x; var y; }",
+      "expectedRepairCount": 0,
+      "messages": []
+    },
+    {
+      "stage": "bug",
+      "kind": "adapted",
+      "name": "same source twice fresh traversal",
+      "code": "export var a; var b;",
+      "expectedRepairCount": 0,
+      "messages": []
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "name": "export empty list then var",
+      "code": "export {}; var x;",
+      "expectedRepairCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "line": 1,
+          "column": 12
+        }
+      ]
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "name": "export alias then var",
+      "code": "var x; export { x as y }; var z;",
+      "expectedRepairCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "line": 1,
+          "column": 27
+        }
+      ]
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "name": "reexport then var",
+      "code": "export { x } from \"mod\"; var z;",
+      "expectedRepairCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "line": 1,
+          "column": 26
+        }
+      ]
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "name": "export function then var",
+      "code": "export function f() {} var z;",
+      "expectedRepairCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "line": 1,
+          "column": 24
+        }
+      ]
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "name": "export default expression then var",
+      "code": "export default 1; var z;",
+      "expectedRepairCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "line": 1,
+          "column": 19
+        }
+      ]
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "name": "export class then var",
+      "code": "export class C {} var z;",
+      "expectedRepairCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "line": 1,
+          "column": 19
+        }
+      ]
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "name": "export var at top followed by var",
+      "code": "export var a; var b;",
+      "expectedRepairCount": 0,
+      "messages": []
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "name": "export let at top followed by var",
+      "code": "export let a; var b;",
+      "expectedRepairCount": 0,
+      "messages": []
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "name": "export var after statement",
+      "code": "work(); export var a;",
+      "expectedRepairCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "line": 1,
+          "column": 9
+        }
+      ]
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "name": "import namespace then exported var",
+      "code": "import * as mod from \"mod\"; export var a;",
+      "expectedRepairCount": 0,
+      "messages": []
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "name": "directive and import then exported var",
+      "code": "\"use strict\"; import value from \"mod\"; export var a;",
+      "expectedRepairCount": 0,
+      "messages": []
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "name": "function directive then var",
+      "code": "function f() { \"use strict\"; var x; }",
+      "expectedRepairCount": 0,
+      "messages": []
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "name": "nested lexical block var",
+      "code": "function f() { if (ready) { var x; } }",
+      "expectedRepairCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "line": 1,
+          "column": 29
+        }
+      ]
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "name": "for var declaration",
+      "code": "for (var x = 0; x < 3; x++) {}",
+      "expectedRepairCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "line": 1,
+          "column": 6
+        }
+      ]
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "name": "function top vars after export",
+      "code": "export default function f() { var x; var y; }",
+      "expectedRepairCount": 0,
+      "messages": []
+    },
+    {
+      "stage": "repair",
+      "kind": "source",
+      "name": "same source twice fresh traversal",
+      "code": "export var a; var b;",
+      "expectedRepairCount": 0,
+      "messages": []
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "name": "export empty list then var",
+      "code": "export {}; var x;",
+      "expectedRepairCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "line": 1,
+          "column": 12
+        }
+      ]
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "name": "export alias then var",
+      "code": "var x; export { x as y }; var z;",
+      "expectedRepairCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "line": 1,
+          "column": 27
+        }
+      ]
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "name": "reexport then var",
+      "code": "export { x } from \"mod\"; var z;",
+      "expectedRepairCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "line": 1,
+          "column": 26
+        }
+      ]
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "name": "export function then var",
+      "code": "export function f() {} var z;",
+      "expectedRepairCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "line": 1,
+          "column": 24
+        }
+      ]
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "name": "export default expression then var",
+      "code": "export default 1; var z;",
+      "expectedRepairCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "line": 1,
+          "column": 19
+        }
+      ]
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "name": "export class then var",
+      "code": "export class C {} var z;",
+      "expectedRepairCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "line": 1,
+          "column": 19
+        }
+      ]
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "name": "export var at top followed by var",
+      "code": "export var a; var b;",
+      "expectedRepairCount": 0,
+      "messages": []
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "name": "export let at top followed by var",
+      "code": "export let a; var b;",
+      "expectedRepairCount": 0,
+      "messages": []
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "name": "export var after statement",
+      "code": "work(); export var a;",
+      "expectedRepairCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "line": 1,
+          "column": 9
+        }
+      ]
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "name": "import namespace then exported var",
+      "code": "import * as mod from \"mod\"; export var a;",
+      "expectedRepairCount": 0,
+      "messages": []
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "name": "directive and import then exported var",
+      "code": "\"use strict\"; import value from \"mod\"; export var a;",
+      "expectedRepairCount": 0,
+      "messages": []
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "name": "function directive then var",
+      "code": "function f() { \"use strict\"; var x; }",
+      "expectedRepairCount": 0,
+      "messages": []
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "name": "nested lexical block var",
+      "code": "function f() { if (ready) { var x; } }",
+      "expectedRepairCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "line": 1,
+          "column": 29
+        }
+      ]
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "name": "for var declaration",
+      "code": "for (var x = 0; x < 3; x++) {}",
+      "expectedRepairCount": 1,
+      "messages": [
+        {
+          "ruleId": "private-control",
+          "message": "All 'var' declarations must be at the top of the function scope.",
+          "line": 1,
+          "column": 6
+        }
+      ]
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "name": "function top vars after export",
+      "code": "export default function f() { var x; var y; }",
+      "expectedRepairCount": 0,
+      "messages": []
+    },
+    {
+      "stage": "repair",
+      "kind": "adapted",
+      "name": "same source twice fresh traversal",
+      "code": "export var a; var b;",
+      "expectedRepairCount": 0,
+      "messages": []
+    }
+  ]
+}

@@ -1,0 +1,574 @@
+{
+  "schemaVersion": 1,
+  "runtime": "Node24.19.0",
+  "corpusPath": "gate-engine/review/eval/reviewers/cases-correctness.jsonl",
+  "sourceRepository": "https://github.com/BugsJS/eslint.git",
+  "cases": [
+    {
+      "name": "destructured-edge-underscores",
+      "rule": "camelcase",
+      "refs": {
+        "parent": "d067ae1f4e985bf7444cae0460aae4ef7d8c5723",
+        "bug": "256481b04d201dd01dcac5947f9ae018fde5defc",
+        "repair": "d80aa7c87fb35355823576bb96e03f61e36bb986"
+      },
+      "runtimeVersion": "4.12.1",
+      "coreCommit": "d067ae1f4e985bf7444cae0460aae4ef7d8c5723",
+      "coreUpstreamParent": "d067ae1f4e985bf7444cae0460aae4ef7d8c5723",
+      "coreArchivePaths": [
+        "lib",
+        "conf",
+        "package.json",
+        "LICENSE"
+      ],
+      "coreArchiveSha256": "cabcc6649f64686d2c7565a830b956a2f463100bef6b72371c138a604e06e7fc",
+      "runtime": "locks/eslint/b287c2f88638ec7d",
+      "packageSha256": "9664fe26e899402bee706140170b4ede375ab02c9ff6dee564e42de51338b8ca",
+      "lockSha256": "484294ed286fe1cc02fb93df9f92a5f92d8399bf8aa617652aed446a2c1f1fac",
+      "endpoints": {
+        "parent": {
+          "ref": "d067ae1f4e985bf7444cae0460aae4ef7d8c5723",
+          "sourceSha256": "744fbc2549ccea96c41162310d67373830a9e1adb77f785983081a98697a74c7",
+          "adaptedSha256": "caf23493f73580ed3a695f3eb21190d93a000f2116dc351448c66df95bda03ea",
+          "corpus": {
+            "id": "corr-destructured-edge-underscores",
+            "repo": "base",
+            "file": "src/destructured-edge-underscores.js"
+          }
+        },
+        "bug": {
+          "ref": "256481b04d201dd01dcac5947f9ae018fde5defc",
+          "sourceSha256": "e4847b4f119bf07f982d95ff3306deca4da0f2ba24a28ab384422e4c64502cee",
+          "adaptedSha256": "934367394a2469f8f3af3433a36d446fdda295fc3c5b16f3220340e359296fb7",
+          "corpus": {
+            "id": "corr-destructured-edge-underscores",
+            "repo": "staged",
+            "file": "src/destructured-edge-underscores.js"
+          }
+        },
+        "repair": {
+          "ref": "d80aa7c87fb35355823576bb96e03f61e36bb986",
+          "sourceSha256": "82ef60d999d8de0575f3bce6ea1b99bb6f9c6dab7e4d86ec603b2500f6311dac",
+          "adaptedSha256": "87d3acbfec9c45d724b940d153fb1ddd5255b70bb91d2af53b26c9979bc4dda3",
+          "targetOnlyAdaptation": "target-only/destructured-edge-underscores/repair-adapted.js",
+          "notClean": true
+        }
+      },
+      "targetCases": [
+        {
+          "scenario": "leading shorthand",
+          "code": "const {_leading}=obj;",
+          "options": {},
+          "expectedCount": 0,
+          "target": true
+        },
+        {
+          "scenario": "trailing shorthand",
+          "code": "const {trailing_}=obj;",
+          "options": {},
+          "expectedCount": 0,
+          "target": true
+        },
+        {
+          "scenario": "leading default",
+          "code": "const {_leading=1}=obj;",
+          "options": {},
+          "expectedCount": 0,
+          "target": true
+        },
+        {
+          "scenario": "trailing default",
+          "code": "function use({trailing_=1}){}",
+          "options": {},
+          "expectedCount": 0,
+          "target": true
+        },
+        {
+          "scenario": "snake alias corrected",
+          "code": "const {snake_case: camelCase}=obj;",
+          "options": {},
+          "expectedCount": 0,
+          "target": false
+        },
+        {
+          "scenario": "invalid local retained",
+          "code": "const {camelCase: snake_case}=obj;",
+          "options": {},
+          "expectedCount": 1,
+          "target": false
+        },
+        {
+          "scenario": "snake default retained",
+          "code": "const {snake_case=1}=obj;",
+          "options": {},
+          "expectedCount": 1,
+          "target": false
+        },
+        {
+          "scenario": "ordinary variable",
+          "code": "const camelCase=1;",
+          "options": {},
+          "expectedCount": 0,
+          "target": false
+        },
+        {
+          "scenario": "constant underscore",
+          "code": "const {UPPER_CASE}=obj;",
+          "options": {},
+          "expectedCount": 0,
+          "target": false
+        },
+        {
+          "scenario": "edge underscore property",
+          "code": "obj._leading=1;",
+          "options": {},
+          "expectedCount": 0,
+          "target": false
+        }
+      ],
+      "expectedTargets": "expected/destructured-edge-underscores/targets.json",
+      "expectedEdges": "expected/destructured-edge-underscores/edges.json",
+      "license": "licenses/eslint-d067ae1f4e98.txt",
+      "eligibleGold": true,
+      "eligibleClean": false,
+      "laterEndpointRole": "target-specific-evidence-only-not-clean-not-paired"
+    },
+    {
+      "name": "comment-adjacent-fix-ranges",
+      "rule": "padded-blocks",
+      "refs": {
+        "parent": "a9d4cb21f6f9d85115a734c3b863a4f2da98fda4",
+        "bug": "3c9ce093b94dbcb04d4395c33983d4cb3b0764ac",
+        "repair": "d02bd1140dc52d5592c1c9d27a0981c95dd68a7f"
+      },
+      "runtimeVersion": "3.17.0",
+      "coreCommit": "41e3d9ce08b1a7f1f97d878a439b0143d19c7084",
+      "coreUpstreamParent": "41e3d9ce08b1a7f1f97d878a439b0143d19c7084",
+      "coreArchivePaths": [
+        "lib",
+        "conf",
+        "package.json",
+        "LICENSE"
+      ],
+      "coreArchiveSha256": "487615600c17d2811f7e941c28db91f32f6337fbc06b7d1c47a5d1f9a13a5696",
+      "runtime": "locks/eslint/752f7ea15cb33eea",
+      "packageSha256": "6e996ddc186e79bc53c9148610f17c8289bd468802e5cdb71ffcf8522e698b97",
+      "lockSha256": "601f4b315d6e2733b5b34676a5816a226f43d7baa9f91847fac5494c55bb1d8c",
+      "endpoints": {
+        "parent": {
+          "ref": "a9d4cb21f6f9d85115a734c3b863a4f2da98fda4",
+          "sourceSha256": "a8a6d4e1f138f47c07094c4a279c06ead33f6f6d183c3e6f2e2b5a7e1fb19d8d",
+          "adaptedSha256": "74f1f8a2f0edcde3e887d3ea8caafad21a569c9b3462b794881d1f8196e0a6e7",
+          "corpus": {
+            "id": "corr-comment-adjacent-fix-ranges",
+            "repo": "base",
+            "file": "src/comment-adjacent-fix-ranges.js"
+          }
+        },
+        "bug": {
+          "ref": "3c9ce093b94dbcb04d4395c33983d4cb3b0764ac",
+          "sourceSha256": "b51a660603c7a276b53293ea8dbf1c2f8cbdc936b0d22172ea94d1ed1badae1a",
+          "adaptedSha256": "195676d5aea393ae723d0c48d20bd30a152760a8ae718feb0a28cf6b09065ae1",
+          "corpus": {
+            "id": "corr-comment-adjacent-fix-ranges",
+            "repo": "staged",
+            "file": "src/comment-adjacent-fix-ranges.js"
+          }
+        },
+        "repair": {
+          "ref": "d02bd1140dc52d5592c1c9d27a0981c95dd68a7f",
+          "sourceSha256": "7bddb7b334d47f41da8b8f32ef8de6b4cfcd68ad359c8cf8c6d1d4e0d0b5da52",
+          "adaptedSha256": "aac1f36517ad363a8a5a56a006a3e6e57b2b8a4400f9f4dffdeb20ccf69f9c46",
+          "corpus": {
+            "id": "corr-comment-adjacent-fix-ranges-repaired",
+            "repo": "staged",
+            "file": "src/comment-adjacent-fix-ranges.js"
+          }
+        }
+      },
+      "targetCases": [
+        {
+          "scenario": "opening inline comment",
+          "code": "function f() { // note\n\n  call();\n}",
+          "options": [
+            "never"
+          ],
+          "expectedCount": 1,
+          "target": true
+        },
+        {
+          "scenario": "closing inline comment",
+          "code": "function f() {\n  call();\n\n/* note */ }",
+          "options": [
+            "never"
+          ],
+          "expectedCount": 1,
+          "target": true
+        },
+        {
+          "scenario": "both inline comments",
+          "code": "function f() { /* first */\n\n  call();\n\n/* last */ }",
+          "options": [
+            "never"
+          ],
+          "expectedCount": 2,
+          "target": true
+        },
+        {
+          "scenario": "indented body preserved",
+          "code": "function f() {\n\n  call();\n}",
+          "options": [
+            "never"
+          ],
+          "expectedCount": 1,
+          "target": false
+        },
+        {
+          "scenario": "already unpadded",
+          "code": "function f() {\n  call();\n}",
+          "options": [
+            "never"
+          ],
+          "expectedCount": 0,
+          "target": false
+        },
+        {
+          "scenario": "empty body",
+          "code": "function f() {}",
+          "options": [
+            "never"
+          ],
+          "expectedCount": 0,
+          "target": false
+        },
+        {
+          "scenario": "always padded",
+          "code": "function f() {\n\n  call();\n\n}",
+          "options": [
+            "always"
+          ],
+          "expectedCount": 0,
+          "target": false
+        },
+        {
+          "scenario": "always insert",
+          "code": "function f() {\n  call();\n}",
+          "options": [
+            "always"
+          ],
+          "expectedCount": 2,
+          "target": false
+        },
+        {
+          "scenario": "multiline comment",
+          "code": "function f() { /* first\n second */\n\n  call();\n}",
+          "options": [
+            "never"
+          ],
+          "expectedCount": 1,
+          "target": false
+        }
+      ],
+      "expectedTargets": "expected/comment-adjacent-fix-ranges/targets.json",
+      "expectedEdges": "expected/comment-adjacent-fix-ranges/edges.json",
+      "license": "licenses/eslint-41e3d9ce08b1.txt",
+      "eligibleGold": true,
+      "eligibleClean": true,
+      "laterEndpointRole": "qualified-clean-sibling"
+    },
+    {
+      "name": "diagnostic-column-contract",
+      "rule": "max-len",
+      "refs": {
+        "parent": "eb4e0fde81d58688a868470aed21a16893b9ff9d",
+        "bug": "8061f35223fd52b4d9398bd0d9a6c2c96025f365",
+        "repair": "21538bb92a10e4bf25ca34fc80e36e510b9d21c2"
+      },
+      "runtimeVersion": "1.1.0",
+      "coreCommit": "ccae7eeeb9dcac287ae13aa1a41ea4b4460e5dcd",
+      "coreUpstreamParent": "ccae7eeeb9dcac287ae13aa1a41ea4b4460e5dcd",
+      "coreArchivePaths": [
+        "lib",
+        "conf",
+        "package.json",
+        "LICENSE"
+      ],
+      "coreArchiveSha256": "1925d27decbd32075a13b8142e5f09141d1bae4b8c7d2359f75807c18cdfec53",
+      "runtime": "locks/eslint/6e6886423663885f",
+      "packageSha256": "b0a94be01f72effb9cf6388073670db0f7ec77f110a0f08d5f9c9023f7b703e8",
+      "lockSha256": "d749372648e301aa62ae30c38e2c9d45e4fd24fe0ed07531af888a6e2ebb57f3",
+      "endpoints": {
+        "parent": {
+          "ref": "eb4e0fde81d58688a868470aed21a16893b9ff9d",
+          "sourceSha256": "a3a5bafc70b47985704059562e77df52cc1a30ef561433cb0816c9771e3fed8a",
+          "adaptedSha256": "06f852ebf58990b102f96335b7248824cb6aec18d0b4e5d1b66e13fb294583a7",
+          "corpus": {
+            "id": "corr-diagnostic-column-contract",
+            "repo": "base",
+            "file": "src/diagnostic-column-contract.js"
+          }
+        },
+        "bug": {
+          "ref": "8061f35223fd52b4d9398bd0d9a6c2c96025f365",
+          "sourceSha256": "6432007a0db15a8f9d73a31fb9d7ee7cee8ccf644f63d3df87e643513e8e7b0a",
+          "adaptedSha256": "69c348de11fb59baf074cec1edef4a8f9354d8e178e6094aa1062354e599aca5",
+          "corpus": {
+            "id": "corr-diagnostic-column-contract",
+            "repo": "staged",
+            "file": "src/diagnostic-column-contract.js"
+          }
+        },
+        "repair": {
+          "ref": "21538bb92a10e4bf25ca34fc80e36e510b9d21c2",
+          "sourceSha256": "327371d5c9ba3f5c7c94b00b126ed5b0e09a1259185b6de301166b8515284b3b",
+          "adaptedSha256": "3769cf2fdf464e78770b6f1bd9186e684b3c29cfa3f4de8ba4e1290e4af83363",
+          "targetOnlyAdaptation": "target-only/diagnostic-column-contract/repair-adapted.js",
+          "notClean": true
+        }
+      },
+      "targetCases": [
+        {
+          "scenario": "indented first token later line",
+          "code": "                    var a;\nvar longName;",
+          "options": [
+            10,
+            4
+          ],
+          "expectedCount": 2,
+          "target": true
+        },
+        {
+          "scenario": "third line diagnostic",
+          "code": "                    var a;\nvar b;\nvar longName;",
+          "options": [
+            10,
+            4
+          ],
+          "expectedCount": 2,
+          "target": true
+        },
+        {
+          "scenario": "crlf diagnostic",
+          "code": "                    var a;\r\nvar longName;",
+          "options": [
+            10,
+            4
+          ],
+          "expectedCount": 2,
+          "target": true
+        },
+        {
+          "scenario": "short single line",
+          "code": "var a;",
+          "options": [
+            10,
+            4
+          ],
+          "expectedCount": 0,
+          "target": false
+        },
+        {
+          "scenario": "long unindented",
+          "code": "var veryLongName = 1;",
+          "options": [
+            10,
+            4
+          ],
+          "expectedCount": 1,
+          "target": false
+        },
+        {
+          "scenario": "multiple lines",
+          "code": "var veryLongName = 1;\nvar anotherName = 2;",
+          "options": [
+            10,
+            4
+          ],
+          "expectedCount": 2,
+          "target": false
+        },
+        {
+          "scenario": "empty file",
+          "code": "",
+          "options": [
+            10,
+            4
+          ],
+          "expectedCount": 0,
+          "target": false
+        },
+        {
+          "scenario": "short tab width",
+          "code": "\tvar a;",
+          "options": [
+            10,
+            1
+          ],
+          "expectedCount": 0,
+          "target": false
+        },
+        {
+          "scenario": "long tab width",
+          "code": "\tvar a;",
+          "options": [
+            7,
+            4
+          ],
+          "expectedCount": 1,
+          "target": false
+        }
+      ],
+      "expectedTargets": "expected/diagnostic-column-contract/targets.json",
+      "expectedEdges": "expected/diagnostic-column-contract/edges.json",
+      "license": "licenses/eslint-ccae7eeeb9dc.txt",
+      "eligibleGold": true,
+      "eligibleClean": false,
+      "laterEndpointRole": "target-specific-evidence-only-not-clean-not-paired"
+    },
+    {
+      "name": "empty-super-argument-traversal",
+      "rule": "no-useless-constructor",
+      "refs": {
+        "parent": "bdf64007e422da333d5a7f6d7340f651c6bd2b87",
+        "bug": "cf14c71977cb323ff8ea4ed2d683cae7421fc214",
+        "repair": "aefc90c128cd430894651717404cbeb7d00705b5"
+      },
+      "runtimeVersion": "2.2.0",
+      "coreCommit": "bdf64007e422da333d5a7f6d7340f651c6bd2b87",
+      "coreUpstreamParent": "bdf64007e422da333d5a7f6d7340f651c6bd2b87",
+      "coreArchivePaths": [
+        "lib",
+        "conf",
+        "package.json",
+        "LICENSE"
+      ],
+      "coreArchiveSha256": "0ee0e23d7803786d97d920ca8ead6d1c529b60f1438500d82ec371824d258fe9",
+      "runtime": "locks/eslint/4594959d63777744",
+      "packageSha256": "efe84c716139c87447f287772a9780dd692f13acfeb48002512bc895b071d980",
+      "lockSha256": "d5090cba10f91898492ead6ece240aa93ad447974bbaa33e4c0026d298807f3f",
+      "endpoints": {
+        "parent": {
+          "ref": "bdf64007e422da333d5a7f6d7340f651c6bd2b87",
+          "sourceSha256": "0a7080fa826bc685afea3d7d37a0935800e21a49e3f39411d7ad061cdbc345e5",
+          "adaptedSha256": "c9e161003cc42c58fe9e207e6237eabe8d52d01cddbaa09ce0c4ad727a0546a7",
+          "corpus": {
+            "id": "corr-empty-super-argument-traversal",
+            "repo": "base",
+            "file": "src/empty-super-argument-traversal.js"
+          }
+        },
+        "bug": {
+          "ref": "cf14c71977cb323ff8ea4ed2d683cae7421fc214",
+          "sourceSha256": "5a1091eff29d060f5bf3d2254099a8576eba50f2df6557f3e011e3cdbda0a7be",
+          "adaptedSha256": "12149203bc08ab19136dcf1c665f15519b332a0dbf240e907659fe4ba16b9c7e",
+          "corpus": {
+            "id": "corr-empty-super-argument-traversal",
+            "repo": "staged",
+            "file": "src/empty-super-argument-traversal.js"
+          }
+        },
+        "repair": {
+          "ref": "aefc90c128cd430894651717404cbeb7d00705b5",
+          "sourceSha256": "05eab71514b780c4a4a8bbf99c4497a5b0e030747df6c9e5cbce597932f53461",
+          "adaptedSha256": "d080a8ad019c1e22840190984031c6d3239ddb2965adb4fa096b5c4d8d56adde",
+          "targetOnlyAdaptation": "target-only/empty-super-argument-traversal/repair-adapted.js",
+          "notClean": true
+        }
+      },
+      "targetCases": [
+        {
+          "scenario": "one unused constructor argument",
+          "code": "class A extends B { constructor(value){super();} }",
+          "options": [],
+          "expectedCount": 0,
+          "target": true
+        },
+        {
+          "scenario": "several unused constructor arguments",
+          "code": "class A extends B { constructor(a,b){super();} }",
+          "options": [],
+          "expectedCount": 0,
+          "target": true
+        },
+        {
+          "scenario": "rest unused constructor argument",
+          "code": "class A extends B { constructor(...args){super();} }",
+          "options": [],
+          "expectedCount": 0,
+          "target": true
+        },
+        {
+          "scenario": "empty forwarding",
+          "code": "class A extends B { constructor(){super();} }",
+          "options": [],
+          "expectedCount": 1,
+          "target": false
+        },
+        {
+          "scenario": "identifier forwarding",
+          "code": "class A extends B { constructor(a){super(a);} }",
+          "options": [],
+          "expectedCount": 1,
+          "target": false
+        },
+        {
+          "scenario": "rest forwarding",
+          "code": "class A extends B { constructor(...args){super(...args);} }",
+          "options": [],
+          "expectedCount": 1,
+          "target": false
+        },
+        {
+          "scenario": "arguments forwarding",
+          "code": "class A extends B { constructor(a){super(...arguments);} }",
+          "options": [],
+          "expectedCount": 1,
+          "target": false
+        },
+        {
+          "scenario": "more super arguments",
+          "code": "class A extends B { constructor(a){super(a,a);} }",
+          "options": [],
+          "expectedCount": 0,
+          "target": false
+        },
+        {
+          "scenario": "default effects retained",
+          "code": "class A extends B { constructor(a=effect()){super(a);} }",
+          "options": [],
+          "expectedCount": 0,
+          "target": false
+        },
+        {
+          "scenario": "destructuring effects retained",
+          "code": "class A extends B { constructor({a}){super(a);} }",
+          "options": [],
+          "expectedCount": 0,
+          "target": false
+        },
+        {
+          "scenario": "noncall expression",
+          "code": "class A extends B { constructor(a){ super(a); a; } }",
+          "options": [],
+          "expectedCount": 0,
+          "target": false
+        },
+        {
+          "scenario": "ordinary constructor work",
+          "code": "class A { constructor(){this.a=1;} }",
+          "options": [],
+          "expectedCount": 0,
+          "target": false
+        }
+      ],
+      "expectedTargets": "expected/empty-super-argument-traversal/targets.json",
+      "expectedEdges": "expected/empty-super-argument-traversal/edges.json",
+      "license": "licenses/eslint-bdf64007e422.txt",
+      "eligibleGold": true,
+      "eligibleClean": false,
+      "laterEndpointRole": "target-specific-evidence-only-not-clean-not-paired"
+    }
+  ],
+  "corpusSha256": "fa62708388345fcf776bad30811a9aa8641b68d00219b104ff19dec29caf4b9e",
+  "supportReplay": "docs/benchmarks/experiments/2026-09-13-corpus-growth/qualification/replay-runtime.py"
+}
