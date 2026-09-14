@@ -28,6 +28,7 @@ Baseline creation is deliberately never implicit:
 devkit anti-slop create [paths...]          # refuses an existing baseline
 devkit anti-slop create --force [paths...]  # explicit replacement
 devkit anti-slop adopt-renames              # migrate debt across staged Git renames
+devkit anti-slop adopt-relocations          # re-anchor debt moved between existing files
 devkit anti-slop check [paths...]           # read-only; CI/agent-loop gate
 devkit anti-slop check --staged             # exact Git-index snapshot against HEAD
 devkit anti-slop check --base <git-ref>     # full CI scan + baseline monotonicity
@@ -71,7 +72,7 @@ linted. Deleted and unrelated files no-op.
 
 `--staged` compares the candidate baseline with `HEAD`; `--base` compares it with the named CI base.
 Once a base baseline exists, candidate fingerprints and counts may only stay equal or shrink. The
-sole growth exception is baseline entries for rule IDs newly enforced by the candidate managed
+first growth exception is baseline entries for rule IDs newly enforced by the candidate managed
 manifest/config—the commit shape produced by a scoped rule-set upgrade. This covers both a new ID
 and a managed off-to-error transition; existing-rule counts remain shrink-only. A base with no
 baseline is the bootstrap exception. A Git-detected rename of a file with adopted debt
@@ -82,10 +83,31 @@ entries are never linted or pruned. If the rename is already committed and `chec
 reports `BASELINE-RENAME`, run the printed `adopt-renames --base <oid>` remedy, which freezes that
 comparison to an immutable object ID, then stage the baseline. An explicit base with no Git-detected
 rename fails and names the reviewed whole-repository resnapshot fallback; it does not silently
-succeed. A heavily edited move that Git
-does not detect as a rename, or a move across a monorepo package boundary, remains a zero-adoption
-no-op in staged mode. The base debt is migrated in memory only to verify that the persisted count did
-not grow. This keeps the baseline valid after merge; checks never write.
+succeed. The base debt is migrated in memory only to verify that the persisted count did not grow.
+This keeps the baseline valid after merge; checks never write.
+
+The second growth exception is **relocated debt**: declarations moved from one file into another
+while the source still exists (or is deleted), which Git reports as edits rather than a rename.
+`check --staged` and `check --base` print such a finding as
+`RELOCATED <rule> <file>:<line> <- <source>` and summarize `FAIL — X new, Y relocated from
+<sources>` instead of counting it as new. A finding is relocated only when its rule, normalized
+diagnostic, and normalized source line match debt that a modified, renamed, or deleted file provably
+gave up: the source's base baseline entry AND a lint of its base bytes must both carry it, and the
+candidate lint of the source must no longer, so unpruned stale credit is never spendable. Pairing is
+one-to-one in source path order, every candidate source is named, and excess copies stay new. Run the
+printed `devkit anti-slop adopt-relocations` (or its `--base <oid>` form for a committed move), stage
+the baseline, and check again. Adoption moves exactly the paired counts from the source entry to the
+destination, never touches unrelated debt, and is a no-op when re-run before the baseline is staged;
+it refuses while renamed debt still needs `adopt-renames`. The growth check accepts the re-anchored
+baseline only while the source entry actually shrank and the destination does not exceed what its
+lint observed, so editing the baseline by hand while the source finding survives still reports
+`BASELINE-GROWTH`. Fixing a finding in one file while identical new code appears in another within
+the same change is indistinguishable from a move and is accepted as one; the debt count does not
+grow. A move whose source line changed (for example, by gaining `export`), a move across a monorepo
+package boundary, a scoped `check --base -- <paths>` that did not lint the source, an unlintable base
+tree, and a plain `check` without Git evidence all still report the finding as new. In overlay the
+local baseline and `HEAD` bound relocation, and `adopt-relocations --base` is refused like every
+other base comparison.
 
 Occurrences with the same rule, repository-relative file, normalized diagnostic, and normalized
 source line are intentionally fungible and share one counted fingerprint. The ratchet prevents that

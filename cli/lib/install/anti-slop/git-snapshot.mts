@@ -13,6 +13,7 @@ import {
   parseAntiSlopManagedActivationEvidence,
 } from './constants.mts';
 import type { AntiSlopManagedActivationEvidence } from './constants.mts';
+import type { RelocationSource } from './relocations.mts';
 import {
   git,
   type GitLayout,
@@ -54,10 +55,14 @@ export interface GitBaselineEnvelope {
   /** Receipt identity bound to the candidate managed manifest, even without an activation delta. */
   candidateMigrationReceipt: string | null;
   renames: Map<string, string>;
+  /** Modified, deleted, and renamed-to package paths that may have vacated debt to another file. */
+  relocationSources: Map<string, RelocationSource>;
 }
 
 export interface StagedAntiSlopSnapshot extends GitBaselineEnvelope {
   cwd: string;
+  /** The exact `git write-tree` this snapshot materialized, for callers that re-verify it. */
+  candidateTree: string;
   paths: string[];
   changedFiles: string[];
   fullScan: boolean;
@@ -184,15 +189,20 @@ function envelope(
         ),
   );
   const candidateMigrationReceipt = candidateActivation?.baselineMigrationId ?? null;
+  const relocationSources = new Map<string, RelocationSource>();
   for (const change of changes) {
+    const path = packagePath(change.path, repo.prefix);
     if (change.status.startsWith('A') || change.status.startsWith('C')) {
-      const path = packagePath(change.path, repo.prefix);
       if (path !== null) introducedPaths.add(path);
+    }
+    if (path !== null && (change.status.startsWith('M') || change.status.startsWith('D'))) {
+      relocationSources.set(path, { basePath: path, deleted: change.status.startsWith('D') });
     }
     if (!change.status.startsWith('R') || change.oldPath === undefined) continue;
     const oldPath = packagePath(change.oldPath, repo.prefix);
-    const nextPath = packagePath(change.path, repo.prefix);
-    if (oldPath !== null && nextPath !== null) renames.set(oldPath, nextPath);
+    if (oldPath === null || path === null) continue;
+    renames.set(oldPath, path);
+    relocationSources.set(path, { basePath: oldPath, deleted: false });
   }
   return {
     layout: repo,
@@ -204,6 +214,7 @@ function envelope(
     activatedRuleIds,
     candidateMigrationReceipt,
     renames,
+    relocationSources,
   };
 }
 
@@ -225,8 +236,15 @@ export function gitBaselineEnvelope(
   const baseOid = resolveRef(repo.root, baseRef);
   const baseRefName = symbolicFullName(repo.root, baseRef);
   const candidateTree = git(repo.root, ['write-tree']);
-  const { base, baseTree, introducedPaths, activatedRuleIds, candidateMigrationReceipt, renames } =
-    envelope(cwd, baseOid ?? baseRef, candidateTree);
+  const {
+    base,
+    baseTree,
+    introducedPaths,
+    activatedRuleIds,
+    candidateMigrationReceipt,
+    renames,
+    relocationSources,
+  } = envelope(cwd, baseOid ?? baseRef, candidateTree);
   return {
     base,
     baseTree,
@@ -239,6 +257,7 @@ export function gitBaselineEnvelope(
     activatedRuleIds,
     candidateMigrationReceipt,
     renames,
+    relocationSources,
   };
 }
 
@@ -295,11 +314,11 @@ export function withBaseAntiSlopSnapshot<T>(
 export function withStagedAntiSlopSnapshot<T>(
   cwd: string,
   action: (snapshot: StagedAntiSlopSnapshot) => T,
-  { overlay = false }: { overlay?: boolean } = {},
+  { overlay = false, baseRef = 'HEAD' }: { overlay?: boolean; baseRef?: string } = {},
 ): T {
   const repo = layout(cwd);
   const candidateTree = git(repo.root, ['write-tree']);
-  const evidence = envelope(cwd, 'HEAD', candidateTree);
+  const evidence = envelope(cwd, baseRef, candidateTree);
   const packageChanges = evidence.changes.flatMap((change) => {
     const path = packagePath(change.path, repo.prefix);
     return path === null ? [] : [{ ...change, path }];
@@ -326,6 +345,8 @@ export function withStagedAntiSlopSnapshot<T>(
       activatedRuleIds: evidence.activatedRuleIds,
       candidateMigrationReceipt: evidence.candidateMigrationReceipt,
       renames: evidence.renames,
+      relocationSources: evidence.relocationSources,
+      candidateTree,
     });
   }
 
@@ -353,6 +374,8 @@ export function withStagedAntiSlopSnapshot<T>(
       activatedRuleIds: evidence.activatedRuleIds,
       candidateMigrationReceipt: evidence.candidateMigrationReceipt,
       renames: evidence.renames,
+      relocationSources: evidence.relocationSources,
+      candidateTree,
     });
   } finally {
     rmSync(temp, { recursive: true, force: true });
