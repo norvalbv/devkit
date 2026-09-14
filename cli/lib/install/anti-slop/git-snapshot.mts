@@ -98,11 +98,17 @@ function treeForRef(root: string, ref: string): string {
 }
 
 function parseChanges(root: string, baseTree: string, candidateTree: string): GitChange[] {
-  const output = execFileSync(
-    'git',
-    ['diff-tree', '--no-commit-id', '--name-status', '-r', '-z', '-M', baseTree, candidateTree],
-    { cwd: root, encoding: 'utf8', maxBuffer: MAX_GIT_OUTPUT },
+  return parseNameStatus(
+    execFileSync(
+      'git',
+      ['diff-tree', '--no-commit-id', '--name-status', '-r', '-z', '-M', baseTree, candidateTree],
+      { cwd: root, encoding: 'utf8', maxBuffer: MAX_GIT_OUTPUT },
+    ),
   );
+}
+
+/** Parse `--name-status -z` output; rename and copy records carry two paths. */
+function parseNameStatus(output: string): GitChange[] {
   const fields = output.split('\0');
   const changes: GitChange[] = [];
   for (let index = 0; index < fields.length;) {
@@ -123,6 +129,43 @@ function parseChanges(root: string, baseTree: string, candidateTree: string): Gi
 function packagePath(repoPath: string, prefix: string): string | null {
   if (!prefix) return repoPath;
   return repoPath.startsWith(prefix) ? repoPath.slice(prefix.length) : null;
+}
+
+/** Package-relative renames, introduced paths, and relocation sources from Git change records. */
+function packageChanges(
+  changes: readonly GitChange[],
+  prefix: string,
+): Pick<GitBaselineEnvelope, 'renames' | 'introducedPaths' | 'relocationSources'> {
+  const renames = new Map<string, string>();
+  const introducedPaths = new Set<string>();
+  const relocationSources = new Map<string, RelocationSource>();
+  for (const change of changes) {
+    const path = packagePath(change.path, prefix);
+    if (change.status.startsWith('A') || change.status.startsWith('C')) {
+      if (path !== null) introducedPaths.add(path);
+    }
+    if (path !== null && (change.status.startsWith('M') || change.status.startsWith('D'))) {
+      relocationSources.set(path, { basePath: path, deleted: change.status.startsWith('D') });
+    }
+    if (!change.status.startsWith('R') || change.oldPath === undefined) continue;
+    const oldPath = packagePath(change.oldPath, prefix);
+    if (oldPath === null || path === null) continue;
+    renames.set(oldPath, path);
+    relocationSources.set(path, { basePath: oldPath, deleted: false });
+  }
+  return { renames, introducedPaths, relocationSources };
+}
+
+/** Rules the candidate evidence enforces that the base did not; none when either side is unknown. */
+export function activatedRuleIdsBetween(
+  base: AntiSlopManagedActivationEvidence | null,
+  candidate: AntiSlopManagedActivationEvidence | null,
+): Set<string> {
+  return new Set(
+    base === null || candidate === null
+      ? []
+      : [...candidate.activeRuleIds].filter((ruleId) => !base.activeRuleIds.has(ruleId)),
+  );
 }
 
 function fileAtTree(
@@ -177,45 +220,86 @@ function envelope(
   const repo = layout(cwd);
   const baseTree = treeForRef(repo.root, baseRef);
   const changes = parseChanges(repo.root, baseTree, candidateTree);
-  const renames = new Map<string, string>();
-  const introducedPaths = new Set<string>();
-  const baseActivation = activationEvidenceAtTree(repo, baseTree);
   const candidateActivation = activationEvidenceAtTree(repo, candidateTree);
-  const activatedRuleIds = new Set(
-    baseActivation === null || candidateActivation === null
-      ? []
-      : [...candidateActivation.activeRuleIds].filter(
-          (ruleId) => !baseActivation.activeRuleIds.has(ruleId),
-        ),
-  );
-  const candidateMigrationReceipt = candidateActivation?.baselineMigrationId ?? null;
-  const relocationSources = new Map<string, RelocationSource>();
-  for (const change of changes) {
-    const path = packagePath(change.path, repo.prefix);
-    if (change.status.startsWith('A') || change.status.startsWith('C')) {
-      if (path !== null) introducedPaths.add(path);
-    }
-    if (path !== null && (change.status.startsWith('M') || change.status.startsWith('D'))) {
-      relocationSources.set(path, { basePath: path, deleted: change.status.startsWith('D') });
-    }
-    if (!change.status.startsWith('R') || change.oldPath === undefined) continue;
-    const oldPath = packagePath(change.oldPath, repo.prefix);
-    if (oldPath === null || path === null) continue;
-    renames.set(oldPath, path);
-    relocationSources.set(path, { basePath: oldPath, deleted: false });
-  }
   return {
     layout: repo,
     baseTree,
     candidateTree,
     changes,
     base: baselineAtTree(repo, baseTree),
-    introducedPaths,
-    activatedRuleIds,
-    candidateMigrationReceipt,
-    renames,
-    relocationSources,
+    ...packageChanges(changes, repo.prefix),
+    activatedRuleIds: activatedRuleIdsBetween(
+      activationEvidenceAtTree(repo, baseTree),
+      candidateActivation,
+    ),
+    candidateMigrationReceipt: candidateActivation?.baselineMigrationId ?? null,
   };
+}
+
+export type CommittedBaselineProbe =
+  | {
+      kind: 'compare';
+      base: AntiSlopBaseline;
+      envelope: GitBaselineEnvelope;
+      baseActivation: AntiSlopManagedActivationEvidence | null;
+    }
+  | { kind: 'skip'; notice: string | null };
+
+/** A staged file's bytes, or null when the index holds no single merged entry for it. */
+function fileInIndex(layout: GitLayout, relativePath: string): string | null {
+  const shown = spawnSync('git', ['show', `:${layout.prefix}${relativePath}`], {
+    cwd: layout.root,
+    encoding: 'utf8',
+    maxBuffer: MAX_GIT_OUTPUT,
+  });
+  return shown.status === 0 ? shown.stdout : null;
+}
+
+function activationEvidenceInIndex(layout: GitLayout): AntiSlopManagedActivationEvidence | null {
+  const manifest = fileInIndex(layout, ANTI_SLOP_MANIFEST_REL);
+  const config = fileInIndex(layout, ANTI_SLOP_CONFIG_REL);
+  return manifest === null || config === null
+    ? null
+    : parseAntiSlopManagedActivationEvidence(manifest, config);
+}
+
+/** The HEAD envelope `create` must satisfy, read WITHOUT `write-tree` so an unmerged index still
+ * compares; renames and activation come from the index, exactly as the staged gate reads them. */
+export function committedBaselineProbe(cwd: string): CommittedBaselineProbe {
+  const inside = spawnSync('git', ['rev-parse', '--show-toplevel'], { cwd, encoding: 'utf8' });
+  if (inside.status !== 0) return { kind: 'skip', notice: null };
+  try {
+    const repo = layout(cwd);
+    if (resolveRef(repo.root, 'HEAD') === null) return { kind: 'skip', notice: null };
+    const baseTree = treeForRef(repo.root, 'HEAD');
+    const base = baselineAtTree(repo, baseTree);
+    if (base === null) return { kind: 'skip', notice: null };
+    const staged = execFileSync(
+      'git',
+      ['diff-index', '--cached', '--name-status', '-z', '-M', baseTree],
+      { cwd: repo.root, encoding: 'utf8', maxBuffer: MAX_GIT_OUTPUT },
+    );
+    const baseActivation = activationEvidenceAtTree(repo, baseTree);
+    const stagedActivation = activationEvidenceInIndex(repo);
+    return {
+      kind: 'compare',
+      base,
+      baseActivation,
+      envelope: {
+        base,
+        baseTree,
+        ...packageChanges(parseNameStatus(staged), repo.prefix),
+        activatedRuleIds: activatedRuleIdsBetween(baseActivation, stagedActivation),
+        candidateMigrationReceipt: stagedActivation?.baselineMigrationId ?? null,
+      },
+    };
+  } catch (error: unknown) {
+    const detail = error instanceof Error ? error.message.split('\n')[0] : String(error);
+    return {
+      kind: 'skip',
+      notice: `anti-slop: growth not pre-checked (${detail}); the commit gate still enforces the committed baseline`,
+    };
+  }
 }
 
 /** Read the base baseline and exact rename map used by a full-tree CI check. */

@@ -192,7 +192,20 @@ describe('e2e: packed anti-slop capability', () => {
       join(fx.repoDir, 'adopted.ts'),
       'function adopted(value: object) { return value; }\n',
     );
-    expect(fx.run('devkit', ['anti-slop', 'create', '--force']).status).toBe(0);
+    const baselinePath = join(fx.repoDir, '.anti-slop-baseline.json');
+    const committedBaseline = readFileSync(baselinePath, 'utf8');
+    const refusedAdoption = fx.run('devkit', ['anti-slop', 'create', '--force']);
+    expect(refusedAdoption.status, out(refusedAdoption)).toBe(2);
+    expect(out(refusedAdoption)).toContain('BASELINE-GROWTH');
+    expect(out(refusedAdoption)).toContain('the committed baseline may only shrink');
+    expect(readFileSync(baselinePath, 'utf8')).toBe(committedBaseline);
+    // Outside Git create cannot see HEAD and writes the growth, so the gates stay the enforcement
+    // point for a baseline grown where the pre-check could not run.
+    const blind = fx.run('devkit', ['anti-slop', 'create', '--force'], {
+      env: { GIT_DIR: join(fx.repoDir, 'no-such-git-dir') },
+    });
+    expect(blind.status, out(blind)).toBe(0);
+    expect(readFileSync(baselinePath, 'utf8')).not.toBe(committedBaseline);
     expect(fx.git('add', 'adopted.ts', '.anti-slop-baseline.json').status).toBe(0);
     const laundered = fx.run('devkit', ['anti-slop', 'check', '--staged']);
     expect(laundered.status, out(laundered)).toBe(1);

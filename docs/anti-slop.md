@@ -41,7 +41,15 @@ root. Path-scoped prune and forced create preserve every baseline entry outside 
 unscoped `create --force` replaces the complete debt record. If that replacement would remove
 findings from files that still exist, it refuses without
 `--confirm-baseline-removals`, names the removal count and sample paths, and leaves the baseline
-unchanged. The committed baseline is
+unchanged. Create is for bootstrapping and for replacing or shrinking recorded debt, never for
+adopting a new finding: once HEAD commits a baseline, create runs the commit gate's own envelope
+check (receipts, renames, activation, growth, relocation evidence) against the index before writing
+and refuses, with the gate's wording and the baseline unchanged, anything that gate would reject — a
+new file's findings, one more occurrence of an existing fingerprint, or a deleted-and-recreated
+baseline alike. Removal confirmation does not unlock growth. A rule activated on disk but not staged
+is refused with a hint to stage it, as is a move Git has not been shown. With no Git, an unborn
+HEAD, or no committed baseline (bootstrap and overlay installs), create writes as before; an
+unreadable committed baseline writes with a notice that growth was not pre-checked. The committed baseline is
 **.anti-slop-baseline.json**. Check never edits it: existing entries are allowed, a new
 error-severity finding fails, and a new warning-severity finding is reported without failing.
 Prune refuses to write while a new error exists, removes fixed fingerprints, and reduces the
@@ -82,8 +90,9 @@ exact index-vs-HEAD Git rename map and rewrites only the matching path-bearing i
 entries are never linted or pruned. If the rename is already committed and `check --base <ref>`
 reports `BASELINE-RENAME`, run the printed `adopt-renames --base <oid>` remedy, which freezes that
 comparison to an immutable object ID, then stage the baseline. An explicit base with no Git-detected
-rename fails and names the reviewed whole-repository resnapshot fallback; it does not silently
-succeed. The base debt is migrated in memory only to verify that the persisted count did not grow.
+rename fails rather than silently succeeding; the debt at the new path must then be fixed or
+re-anchored by lint-evidenced relocation, because an unevidenced resnapshot there is growth that
+create and both gates refuse. The base debt is migrated in memory only to verify that the persisted count did not grow.
 This keeps the baseline valid after merge; checks never write.
 
 The second growth exception is **relocated debt**: declarations moved from one file into another

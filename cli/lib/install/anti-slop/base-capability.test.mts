@@ -4,6 +4,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  renameSync,
   rmdirSync,
   rmSync,
   statSync,
@@ -26,6 +27,7 @@ import {
 import { type GitLockReleaseOperations, resolveRef } from './git-index-lock.mts';
 import {
   ANTI_SLOP_BASELINE_REL,
+  ANTI_SLOP_BASELINE_UPGRADE_REL,
   ANTI_SLOP_UPSTREAM,
   antiSlopBaselineMigrationId,
 } from './constants.mts';
@@ -1535,5 +1537,345 @@ describe('anti-slop relocation across existing files', () => {
     expect(err.join('\n')).toContain('--base is unavailable in an overlay install');
     expect(antiSlop(['adopt-relocations'], root)).toBe(0);
     expect(antiSlop(['check', '--staged'], root)).toBe(0);
+  });
+});
+
+describe('anti-slop create against a committed baseline', () => {
+  const SHRINK_ONLY =
+    'the committed baseline may only shrink; fix the finding instead of adopting it';
+  const SINGLE_FINDING_SOURCE = [
+    'function first() {',
+    '  const inner = (value: object) => value;',
+    '  return inner;',
+    '}',
+    'export const pair = [first];',
+    '',
+  ].join('\n');
+
+  function baselineBytes(cwd: string): string {
+    return readFileSync(join(cwd, ANTI_SLOP_BASELINE_REL), 'utf8');
+  }
+
+  /** A repository whose HEAD commits one `no-object-parameters` finding in src/file.ts. */
+  function committedDebt(prefix = ''): string {
+    const cwd = installedRepository(prefix);
+    writeFileSync(join(cwd, 'src', 'file.ts'), FINDING_SOURCE);
+    rmSync(join(cwd, ANTI_SLOP_BASELINE_REL));
+    expect(antiSlop(['create'], cwd)).toBe(0);
+    commit(cwd, 'adopt existing debt');
+    out = [];
+    err = [];
+    return cwd;
+  }
+
+  it("refuses a scoped create that adopts a new file's findings and leaves the baseline intact", () => {
+    const cwd = installedRepository();
+    commit(cwd, 'base');
+    const before = baselineBytes(cwd);
+    writeFileSync(join(cwd, 'src', 'new.ts'), FINDING_SOURCE);
+
+    expect(antiSlop(['create', '--force', 'src/new.ts'], cwd)).toBe(2);
+
+    expect(baselineBytes(cwd)).toBe(before);
+    const errors = err.join('\n');
+    expect(errors).toContain(
+      'BASELINE-GROWTH anti-slop/no-object-parameters src/new.ts (+1 adopted finding(s))',
+    );
+    expect(errors).toContain(SHRINK_ONLY);
+    expect(errors).toContain('devkit anti-slop check');
+  });
+
+  it('refuses to launder new debt by deleting the baseline and creating it again', () => {
+    const cwd = committedDebt();
+    writeFileSync(join(cwd, 'src', 'new.ts'), FINDING_SOURCE);
+    rmSync(join(cwd, ANTI_SLOP_BASELINE_REL));
+
+    expect(antiSlop(['create'], cwd)).toBe(2);
+
+    expect(existsSync(join(cwd, ANTI_SLOP_BASELINE_REL))).toBe(false);
+    expect(err.join('\n')).toContain('BASELINE-GROWTH anti-slop/no-object-parameters src/new.ts');
+  });
+
+  it('refuses growth of an existing fingerprint by a single occurrence', () => {
+    const cwd = installedRepository();
+    writeFileSync(join(cwd, 'src', 'file.ts'), SINGLE_FINDING_SOURCE);
+    rmSync(join(cwd, ANTI_SLOP_BASELINE_REL));
+    expect(antiSlop(['create'], cwd)).toBe(0);
+    commit(cwd, 'one occurrence');
+    const before = baselineBytes(cwd);
+    writeFileSync(join(cwd, 'src', 'file.ts'), REPEATED_FINDING_SOURCE);
+
+    expect(antiSlop(['create', '--force', 'src/file.ts'], cwd)).toBe(2);
+
+    expect(baselineBytes(cwd)).toBe(before);
+    expect(err.join('\n')).toContain('src/file.ts (+1 adopted finding(s))');
+  });
+
+  it('writes an equal or shrinking snapshot over a committed baseline', () => {
+    const cwd = committedDebt();
+
+    expect(antiSlop(['create', '--force', 'src/file.ts'], cwd)).toBe(0);
+    writeFileSync(join(cwd, 'src', 'file.ts'), CLEAN_SOURCE);
+    expect(antiSlop(['create', '--force', 'src/file.ts'], cwd)).toBe(0);
+
+    expect(JSON.parse(baselineBytes(cwd)).entries).toEqual([]);
+    expect(err.join('\n')).not.toContain('BASELINE-GROWTH');
+  });
+
+  it('keeps the removal refusal first, and removal confirmation does not unlock growth', () => {
+    const cwd = committedDebt();
+    const before = baselineBytes(cwd);
+    writeFileSync(join(cwd, 'src', 'file.ts'), CLEAN_SOURCE);
+    writeFileSync(join(cwd, 'src', 'new.ts'), FINDING_SOURCE);
+
+    expect(antiSlop(['create', '--force'], cwd)).toBe(2);
+    expect(err.join('\n')).toContain('--confirm-baseline-removals');
+    expect(err.join('\n')).not.toContain('BASELINE-GROWTH');
+
+    err = [];
+    expect(antiSlop(['create', '--force', '--confirm-baseline-removals'], cwd)).toBe(2);
+    expect(err.join('\n')).toContain('BASELINE-GROWTH anti-slop/no-object-parameters src/new.ts');
+    expect(baselineBytes(cwd)).toBe(before);
+  });
+
+  it('carries committed debt across a staged rename whose paths need quoting', () => {
+    const cwd = installedRepository();
+    writeFileSync(join(cwd, 'src', 'legacy name ü.ts'), FINDING_SOURCE);
+    rmSync(join(cwd, ANTI_SLOP_BASELINE_REL));
+    expect(antiSlop(['create'], cwd)).toBe(0);
+    commit(cwd, 'debt at the old path');
+    git(cwd, ['mv', 'src/legacy name ü.ts', 'src/moved näme.ts']);
+
+    expect(antiSlop(['create', '--force'], cwd)).toBe(0);
+
+    expect(
+      JSON.parse(baselineBytes(cwd)).entries.map((entry: { file: string }) => entry.file),
+    ).toEqual(['src/moved näme.ts']);
+    expect(err.join('\n')).not.toContain('BASELINE-GROWTH');
+  });
+
+  it("refuses a scoped create while a staged rename's debt is not yet adopted", () => {
+    const cwd = committedDebt();
+    const before = baselineBytes(cwd);
+    git(cwd, ['mv', 'src/file.ts', 'src/moved.ts']);
+    writeFileSync(join(cwd, 'src', 'other.ts'), CLEAN_SOURCE);
+
+    expect(antiSlop(['create', '--force', 'src/other.ts'], cwd)).toBe(2);
+
+    const errors = err.join('\n');
+    expect(errors).toContain(
+      'BASELINE-RENAME anti-slop/no-object-parameters src/file.ts -> src/moved.ts',
+    );
+    expect(errors).toContain('devkit anti-slop adopt-renames');
+    expect(errors).not.toContain('BASELINE-GROWTH');
+    expect(baselineBytes(cwd)).toBe(before);
+  });
+
+  it('tells an unstaged move to stage the rename instead of only reporting growth', () => {
+    const cwd = committedDebt();
+    renameSync(join(cwd, 'src', 'file.ts'), join(cwd, 'src', 'moved.ts'));
+
+    expect(antiSlop(['create', '--force'], cwd)).toBe(2);
+
+    const errors = err.join('\n');
+    expect(errors).toContain('BASELINE-GROWTH anti-slop/no-object-parameters src/moved.ts');
+    expect(errors).toContain('stage the move');
+  });
+
+  it('judges a package below the repository root against its own committed baseline', () => {
+    const cwd = committedDebt('packages/app');
+    writeFileSync(join(cwd, 'src', 'new.ts'), FINDING_SOURCE);
+
+    expect(antiSlop(['create', '--force', 'src/new.ts'], cwd)).toBe(2);
+    expect(err.join('\n')).toContain('BASELINE-GROWTH anti-slop/no-object-parameters src/new.ts');
+
+    rmSync(join(cwd, 'src', 'new.ts'));
+    git(cwd, ['mv', 'src/file.ts', 'src/moved.ts']);
+    err = [];
+    expect(antiSlop(['create', '--force'], cwd)).toBe(0);
+    expect(err.join('\n')).not.toContain('BASELINE-GROWTH');
+  });
+
+  /** HEAD enforces the published v0.5.9 rules; the working tree activates external-record access. */
+  function externalRecordActivation(): string {
+    const cwd = installedRepository();
+    const configPath = join(cwd, ANTI_SLOP_CONFIG_REL);
+    const currentConfig = readFileSync(configPath, 'utf8');
+    const manifestPath = join(cwd, ANTI_SLOP_MANIFEST_REL);
+    const currentManifest = readFileSync(manifestPath, 'utf8');
+    writePublishedV059AntiSlopConfig(cwd, currentConfig);
+    commit(cwd, 'base before the external-record rules were enabled');
+    writeFileSync(configPath, currentConfig);
+    writeFileSync(manifestPath, currentManifest);
+    writeFileSync(
+      join(cwd, 'src', 'file.ts'),
+      'const parsed = JSON.parse(raw); parsed["constructor"];\n',
+    );
+    return cwd;
+  }
+
+  it('refuses growth for a rule activated on disk but not staged, as the commit gate would', () => {
+    const cwd = externalRecordActivation();
+    const before = baselineBytes(cwd);
+
+    expect(antiSlop(['create', '--force'], cwd)).toBe(2);
+
+    const errors = err.join('\n');
+    expect(errors).toContain(
+      'BASELINE-GROWTH anti-slop/no-unsafe-external-record-access src/file.ts',
+    );
+    expect(errors).toContain('stage .devkit/anti-slop');
+    expect(baselineBytes(cwd)).toBe(before);
+  });
+
+  it('refuses a staged activation whose baseline would lack the release receipt', () => {
+    const cwd = externalRecordActivation();
+    git(cwd, ['add', ANTI_SLOP_CONFIG_REL, ANTI_SLOP_MANIFEST_REL]);
+    const before = baselineBytes(cwd);
+
+    expect(antiSlop(['create', '--force'], cwd)).toBe(2);
+
+    expect(err.join('\n')).toContain(
+      `BASELINE-MIGRATION-RECEIPT ${managedMigrationReceipt(cwd)} missing`,
+    );
+    expect(baselineBytes(cwd)).toBe(before);
+  });
+
+  it('adopts a receipted staged activation the gate accepts, and keeps receipts append-only', () => {
+    const cwd = externalRecordActivation();
+    git(cwd, ['add', ANTI_SLOP_CONFIG_REL, ANTI_SLOP_MANIFEST_REL]);
+    writeFileSync(
+      join(cwd, ANTI_SLOP_BASELINE_UPGRADE_REL),
+      `${JSON.stringify({ schemaVersion: 1, migrationId: managedMigrationReceipt(cwd), activatedRuleIds: EXTERNAL_RECORD_RULE_IDS })}\n`,
+    );
+
+    expect(antiSlop(['create', '--force'], cwd)).toBe(0);
+    git(cwd, ['add', '-A']);
+    expect(antiSlop(['check', '--staged'], cwd)).toBe(0);
+
+    writeFileSync(join(cwd, 'src', 'new.ts'), FINDING_SOURCE);
+    err = [];
+    expect(antiSlop(['create', '--force'], cwd)).toBe(2);
+    const errors = err.join('\n');
+    expect(errors).toContain('BASELINE-GROWTH anti-slop/no-object-parameters src/new.ts');
+    expect(errors).not.toContain('BASELINE-GROWTH anti-slop/no-unsafe-external-record-access');
+
+    rmSync(join(cwd, 'src', 'new.ts'));
+    commit(cwd, 'adopt the release activation');
+    rmSync(join(cwd, ANTI_SLOP_BASELINE_REL));
+    err = [];
+    expect(antiSlop(['create'], cwd)).toBe(2);
+    expect(err.join('\n')).toContain('BASELINE-MIGRATION-RECEIPT');
+    expect(existsSync(join(cwd, ANTI_SLOP_BASELINE_REL))).toBe(false);
+  });
+
+  it('keeps a pending release activation marker when it refuses', () => {
+    const cwd = committedDebt();
+    const marker = join(cwd, ANTI_SLOP_BASELINE_UPGRADE_REL);
+    const pending = `${JSON.stringify(
+      {
+        schemaVersion: 1,
+        migrationId: managedMigrationReceipt(cwd),
+        activatedRuleIds: [EXTERNAL_RECORD_RULE_IDS[0]],
+      },
+      null,
+      2,
+    )}\n`;
+    writeFileSync(marker, pending);
+    writeFileSync(join(cwd, 'src', 'new.ts'), FINDING_SOURCE);
+
+    expect(antiSlop(['create', '--force', 'src/new.ts'], cwd)).toBe(2);
+
+    expect(readFileSync(marker, 'utf8')).toBe(pending);
+  });
+
+  it('still refuses growth while the index holds an unresolved merge conflict', () => {
+    const cwd = installedRepository();
+    commit(cwd, 'base');
+    const trunk = git(cwd, ['rev-parse', '--abbrev-ref', 'HEAD']);
+    git(cwd, ['checkout', '-qb', 'side']);
+    writeFileSync(join(cwd, 'notes.md'), 'side\n');
+    commit(cwd, 'side');
+    git(cwd, ['checkout', '-q', trunk]);
+    writeFileSync(join(cwd, 'notes.md'), 'trunk\n');
+    commit(cwd, 'trunk');
+    spawnSync(
+      'git',
+      ['-c', 'user.name=Devkit test', '-c', 'user.email=devkit@test.invalid', 'merge', 'side'],
+      { cwd, encoding: 'utf8' },
+    );
+    expect(git(cwd, ['diff', '--name-only', '--diff-filter=U'])).toBe('notes.md');
+    writeFileSync(join(cwd, 'src', 'new.ts'), FINDING_SOURCE);
+
+    expect(antiSlop(['create', '--force', 'src/new.ts'], cwd)).toBe(2);
+    expect(err.join('\n')).toContain('BASELINE-GROWTH anti-slop/no-object-parameters src/new.ts');
+  });
+
+  it('writes a bootstrap baseline when HEAD carries none', () => {
+    const cwd = installedRepository();
+    rmSync(join(cwd, ANTI_SLOP_BASELINE_REL));
+    commit(cwd, 'no baseline yet');
+    writeFileSync(join(cwd, 'src', 'new.ts'), FINDING_SOURCE);
+
+    expect(antiSlop(['create'], cwd)).toBe(0);
+    expect(err.join('\n')).toBe('');
+  });
+
+  it('writes before the first commit and outside Git without a notice', () => {
+    const unborn = installedRepository();
+    git(unborn, ['add', '-A']);
+    writeFileSync(join(unborn, 'src', 'new.ts'), FINDING_SOURCE);
+    expect(antiSlop(['create', '--force'], unborn)).toBe(0);
+
+    const detached = installedRepository();
+    rmSync(join(detached, '.git'), { recursive: true, force: true });
+    writeFileSync(join(detached, 'src', 'new.ts'), FINDING_SOURCE);
+    expect(antiSlop(['create', '--force'], detached)).toBe(0);
+
+    expect(err.join('\n')).toBe('');
+  });
+
+  it('writes with a notice when the committed baseline cannot be read', () => {
+    const cwd = installedRepository();
+    writeFileSync(join(cwd, ANTI_SLOP_BASELINE_REL), '{}\n');
+    commit(cwd, 'invalid baseline');
+    writeFileSync(join(cwd, 'src', 'new.ts'), FINDING_SOURCE);
+
+    expect(antiSlop(['create', '--force'], cwd)).toBe(0);
+    expect(err.join('\n')).toContain('growth not pre-checked');
+  });
+
+  it('writes with a notice when Git cannot resolve HEAD safely', () => {
+    const cwd = committedDebt();
+
+    expect(
+      withFailingGitProbe('resolve-ref', () => antiSlop(['create', '--force', 'src/file.ts'], cwd)),
+    ).toBe(0);
+    expect(err.join('\n')).toContain('growth not pre-checked');
+  });
+
+  it('accepts growth the gate credits as a lint-evidenced relocation, and only then', () => {
+    const cwd = installedRepository();
+    const otherSource = 'export const other = "other";\n';
+    rmSync(join(cwd, ANTI_SLOP_BASELINE_REL));
+    writeFileSync(join(cwd, 'src', 'file.ts'), `${CLEAN_SOURCE}${FINDING_SOURCE}`);
+    writeFileSync(join(cwd, 'src', 'other.ts'), otherSource);
+    expect(antiSlop(['create'], cwd)).toBe(0);
+    commit(cwd, 'adopt debt');
+    writeFileSync(join(cwd, 'src', 'file.ts'), CLEAN_SOURCE);
+    writeFileSync(join(cwd, 'src', 'other.ts'), `${otherSource}${FINDING_SOURCE}`);
+    git(cwd, ['add', '-A']);
+    const before = baselineBytes(cwd);
+
+    // Scoped, the source entry survives, so the move is not credited — as in the gate.
+    expect(antiSlop(['create', '--force', 'src/other.ts'], cwd)).toBe(2);
+    expect(err.join('\n')).toContain('BASELINE-GROWTH anti-slop/no-object-parameters src/other.ts');
+    expect(baselineBytes(cwd)).toBe(before);
+
+    err = [];
+    expect(antiSlop(['create', '--force', '--confirm-baseline-removals'], cwd)).toBe(0);
+    expect(out.join('\n')).toContain('accepted 1 relocated baseline finding(s) from src/file.ts');
+    git(cwd, ['add', ANTI_SLOP_BASELINE_REL]);
+    expect(antiSlop(['check', '--staged'], cwd)).toBe(0);
   });
 });

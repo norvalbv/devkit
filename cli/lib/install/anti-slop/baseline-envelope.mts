@@ -1,5 +1,7 @@
 /** Baseline growth, activation migration, and inherited-debt checks for anti-slop gates. */
 
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { AntiSlopCapabilityError } from './base-capability.mts';
 import {
   type AntiSlopBaseline,
@@ -11,7 +13,13 @@ import {
   removedBaselineMigrationReceipts,
 } from './baseline.mts';
 import type { FindingGroup } from './diagnostics.mts';
-import { type GitBaselineEnvelope, withBaseAntiSlopSnapshot } from './git-snapshot.mts';
+import {
+  activatedRuleIdsBetween,
+  committedBaselineProbe,
+  type GitBaselineEnvelope,
+  withBaseAntiSlopSnapshot,
+} from './git-snapshot.mts';
+import { readManagedAntiSlopActivationEvidence } from './managed-state.mts';
 import {
   creditRelocatedGrowth,
   formatSources,
@@ -250,6 +258,48 @@ export function checkBaselineEnvelope(
     'anti-slop: FAIL — the committed baseline may only shrink; fix the finding instead of adopting it',
   );
   return 1;
+}
+
+/**
+ * Refuse, before writing, what the staged and CI gates would reject against HEAD — their own
+ * decision and wording, so `create` cannot produce a baseline that only fails at commit time.
+ */
+export function refuseCommittedGrowth(
+  cwd: string,
+  next: AntiSlopBaseline,
+  allGroups: () => FindingGroup[],
+): boolean {
+  const probe = committedBaselineProbe(cwd);
+  if (probe.kind === 'skip') {
+    if (probe.notice) console.error(probe.notice);
+    return false;
+  }
+  const { envelope } = probe;
+  // A whole-repository lint is needed only when a verdict can depend on it: activation or relocation.
+  const needsLint =
+    envelope.activatedRuleIds.size > 0 ||
+    baselineIncreases(probe.base, next, envelope.renames).length > 0;
+  const relocation = { cwd, capabilityCwd: null, inLintScope: () => needsLint };
+  const groups = needsLint ? allGroups() : [];
+  if (checkBaselineEnvelope(next, envelope, groups, undefined, relocation) === 0) return false;
+  const onDisk = activatedRuleIdsBetween(
+    probe.baseActivation,
+    readManagedAntiSlopActivationEvidence(cwd),
+  );
+  if ([...onDisk].some((ruleId) => !envelope.activatedRuleIds.has(ruleId))) {
+    console.error(
+      'anti-slop: a rule activated on disk is not staged — stage .devkit/anti-slop so the commit carries the activation, then retry',
+    );
+  }
+  if (probe.base.entries.some((entry) => !existsSync(join(cwd, entry.file)))) {
+    console.error(
+      'anti-slop: committed debt names file(s) that no longer exist — if the code moved, stage the move (`git add -A`) so Git detects it, then run `devkit anti-slop adopt-renames` or `devkit anti-slop adopt-relocations`',
+    );
+  }
+  console.error(
+    "anti-slop: create refused — baseline unchanged, because the commit gate would reject it for the reason above; `devkit anti-slop check <paths>` lists findings to fix, or change the rule's severity or scoped override in the repository Oxlint config",
+  );
+  return true;
 }
 
 /** Name what the allowance forgave: it is transient, so silence would hide adopted debt. */

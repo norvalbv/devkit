@@ -101,7 +101,7 @@ export function readAntiSlopManifest(cwd: string): AntiSlopManifest | null {
 }
 
 /** Read a previous install's active managed rules without requiring its pins to match this Devkit. */
-function readManagedAntiSlopActivationEvidence(
+export function readManagedAntiSlopActivationEvidence(
   cwd: string,
 ): AntiSlopManagedActivationEvidence | null {
   const manifestPath = join(cwd, ANTI_SLOP_MANIFEST_REL);

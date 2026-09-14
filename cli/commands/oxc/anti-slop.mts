@@ -21,6 +21,7 @@ import {
   checkBaselineEnvelope,
   inheritedBaseAllowance,
   printNewAntiSlopFindings,
+  refuseCommittedGrowth,
   relocationEvidence,
   reportInheritedForgiveness,
 } from '../../lib/install/anti-slop/baseline-envelope.mts';
@@ -28,6 +29,7 @@ import {
   ANTI_SLOP_BASELINE_LOCK_REL,
   ANTI_SLOP_BASELINE_REL,
 } from '../../lib/install/anti-slop/constants.mts';
+import type { FindingGroup } from '../../lib/install/anti-slop/diagnostics.mts';
 import {
   type GitBaselineEnvelope,
   gitBaselineEnvelope,
@@ -64,7 +66,7 @@ export const meta = {
   help: `devkit anti-slop — baseline-aware checks for Devkit's vendored Oxlint plugin.
 
 Usage:
-  devkit anti-slop create [--force] [paths...]   Explicitly snapshot current findings
+  devkit anti-slop create [--force] [paths...]   Bootstrap, or replace/shrink recorded debt
   devkit anti-slop adopt-activation              Adopt only a newly activated rule's inherited debt
   devkit anti-slop adopt-renames                 Persist debt across staged Git renames
   devkit anti-slop adopt-renames --base <ref>    Persist debt across committed Git renames
@@ -79,7 +81,9 @@ Usage:
 Configure per-rule off/warn/error and scoped overrides in the repository Oxlint config. Paths default
 to the repository root. Check and inspect never write. Create refuses an existing baseline unless
 --force is explicit; a whole-repository replacement that removes debt from existing files also requires
---confirm-baseline-removals. Prune refuses to write while new error-severity findings exist.
+--confirm-baseline-removals. Once a baseline is committed, create refuses any snapshot the commit
+gate would reject against HEAD, so a new finding is fixed, not adopted. Prune refuses to write while
+new error-severity findings exist.
 
 In an OVERLAY install the baseline is per-clone and git-ignored, so no committed tree carries one to
 compare against: --base and adopt-renames are unavailable there, and adopt-activation is how a devkit
@@ -119,6 +123,9 @@ export function createAntiSlopBaseline(
       }
     }
     const groups = collectAntiSlopGroups(cwd, args);
+    let repositoryGroups: FindingGroup[] | undefined;
+    const allGroups = () =>
+      (repositoryGroups ??= wholeRepository ? groups : collectAntiSlopGroups(cwd, []));
     const pending = readPendingAntiSlopBaselineActivation(cwd);
     const consumablePending =
       pending?.migrationId === readInstalledAntiSlopBaselineMigrationId(cwd) ? pending : null;
@@ -126,7 +133,7 @@ export function createAntiSlopBaseline(
       consumablePending !== null
         ? adoptBaselineRuleFindings(
             existing ?? baselineFromGroups([]),
-            wholeRepository ? groups : collectAntiSlopGroups(cwd, []),
+            allGroups(),
             consumablePending.activatedRuleIds,
             consumablePending.migrationId,
           )
@@ -162,6 +169,7 @@ export function createAntiSlopBaseline(
         return 2;
       }
     }
+    if (refuseCommittedGrowth(cwd, next, allGroups)) return 2;
     writeBaseline(cwd, next);
     if (consumablePending !== null) {
       clearPendingAntiSlopBaselineActivation(cwd, consumablePending.migrationId);
