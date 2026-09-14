@@ -130,7 +130,13 @@ describe('diff tier, spawned against a REAL staged diff (sc-1984: authority foll
     chmodSync(fake, 0o755);
     return `${dir}:${process.env.PATH}`;
   };
-  const gate = (repo: string, subject: string, payloadFile?: string, callFile?: string) =>
+  const gate = (
+    repo: string,
+    subject: string,
+    payloadFile?: string,
+    callFile?: string,
+    extraEnv: Record<string, string | undefined> = {},
+  ) =>
     spawnSync('node', [SCRIPT, '--gate', subject], {
       cwd: repo,
       env: {
@@ -147,6 +153,7 @@ describe('diff tier, spawned against a REAL staged diff (sc-1984: authority foll
         DEVKIT_NO_TELEMETRY: '1',
         // Git's per-repo control vars are already stripped by vitest.setup.mjs, so a hook-launched
         // run cannot point these spawns at devkit's own index (see judge-isolation's GIT_ENV_VARS).
+        ...extraEnv,
       },
       encoding: 'utf8',
     });
@@ -209,5 +216,31 @@ describe('diff tier, spawned against a REAL staged diff (sc-1984: authority foll
     expect(r.status).toBe(0);
     expect(r.stderr).toContain('advisory only');
     expect(r.stderr).toContain('no error-handling hunk');
+  });
+
+  it('writes the downgrade to the ship sink — the one row the terminus digest reads it from', () => {
+    // sc-3175: a stderr-only downgrade vanished from the end-of-run summary. The digest consumes this
+    // row by type, judge and cause, so the producer side of that contract is locked here.
+    const sink = join(tmp('sentry-diff-events-'), 'gate-events.jsonl');
+    const r = gate(
+      stagedRepo('export const Badge = () => <span className="x" />;\n'),
+      'fix(ui): badge spacing',
+      undefined,
+      undefined,
+      { DEVKIT_NO_TELEMETRY: undefined, DEVKIT_GATE_EVENTS: sink, DEVKIT_SHIP_ID: 'ship-sentry' },
+    );
+    expect(r.status).toBe(0);
+    const degraded = readFileSync(sink, 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line))
+      .filter((event) => event.type === 'gate_degraded');
+    expect(degraded).toEqual([
+      expect.objectContaining({
+        ship_id: 'ship-sentry',
+        judge: 'sentry-advisory',
+        cause: 'no error-handling hunk was selected from this diff',
+      }),
+    ]);
   });
 });
