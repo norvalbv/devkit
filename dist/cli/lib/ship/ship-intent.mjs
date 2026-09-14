@@ -437,7 +437,7 @@ function main() {
     }
     if (sub === 'delete')
         return deleteIntent(root, branch, values.get('generation'), paths.length > 0 ? paths : undefined);
-    return fail(`unknown subcommand '${String(sub)}' (write|read|owns|delete|validate-paths|validate-membership|filter-membership)`);
+    return fail(`unknown subcommand '${String(sub)}' (write|read|owns|delete|validate-paths|validate-membership|filter-membership|frozen-drift)`);
 }
 // CLI entrypoint only; realpath keeps the guard correct through a symlinked module directory.
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href)

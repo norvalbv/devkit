@@ -538,6 +538,35 @@ if [ "$FROM_BRANCH" -eq 1 ]; then
       fi
       while IFS= read -r -d '' branch_path; do PATHS+=("$branch_path"); done < "$BRANCH_PATHS_FILE"
       rm -f "$BRANCH_PATHS_FILE"
+    else
+      # sc-3178: a pre-commit resume ships only the frozen set, so a path HEAD committed outside it —
+      # typically the module a fix imports — would be judged at its base content by every gate, minutes
+      # later. Frozen membership never widens on --resume (ship-source-scope-ownership), so compare the
+      # sets here, before the gate worktree exists or the invocation is re-recorded, and refuse. The
+      # base is the one just re-fetched, so an upstream change the branch merged is not drift.
+      HEAD_PATHS_FILE=$(mktemp "${TMPDIR:-/tmp}/ship-branch-head-paths.XXXXXX")
+      FROZEN_MEMBERS_FILE=$(mktemp "${TMPDIR:-/tmp}/ship-branch-frozen.XXXXXX")
+      DRIFT_FILE=$(mktemp "${TMPDIR:-/tmp}/ship-branch-drift.XXXXXX")
+      printf '%s\0' "${PATHS[@]}" > "$FROZEN_MEMBERS_FILE"
+      if ! git -C "$ROOT" diff --name-only --no-renames -z "$BASE" "$SOURCE_HEAD" -- \
+          | node "$SHIP_INTENT" validate-paths > "$HEAD_PATHS_FILE" \
+        || ! node "$SHIP_INTENT" frozen-drift --members-file "$FROZEN_MEMBERS_FILE" \
+          < "$HEAD_PATHS_FILE" > "$DRIFT_FILE"; then
+        rm -f "$HEAD_PATHS_FILE" "$FROZEN_MEMBERS_FILE" "$DRIFT_FILE"
+        exit 1
+      fi
+      HEAD_PATH_COUNT=0
+      while IFS= read -r -d '' _; do HEAD_PATH_COUNT=$((HEAD_PATH_COUNT + 1)); done < "$HEAD_PATHS_FILE"
+      DRIFT_PATHS=()
+      while IFS= read -r -d '' drift_path; do DRIFT_PATHS+=("$drift_path"); done < "$DRIFT_FILE"
+      rm -f "$HEAD_PATHS_FILE" "$FROZEN_MEMBERS_FILE" "$DRIFT_FILE"
+      if [ "${#DRIFT_PATHS[@]}" -gt 0 ]; then
+        echo "--from-branch resume: HEAD ${SOURCE_HEAD:0:7} changes ${#DRIFT_PATHS[@]} committed path(s) outside the ${#PATHS[@]} frozen by the recorded invocation:" >&2
+        for p in "${DRIFT_PATHS[@]}"; do printf '  %q\n' "$p" >&2; done
+        echo "frozen membership never widens on --resume; run a fresh full invocation instead (supply the body again):" >&2
+        printf '  devkit ship %q %q --base %q --from-branch --body-file <file>\n' "$BR" "$TITLE" "$BASE_FLAG" >&2
+        exit 1
+      fi
     fi
   fi
   [ "${#PATHS[@]}" -gt 0 ] || {
@@ -617,7 +646,15 @@ if [ "$FROM_BRANCH" -eq 1 ]; then
       echo "--from-branch: HEAD moved while the committed snapshot was prepared (${SOURCE_HEAD:0:7} -> ${CURRENT_HEAD:0:7}); retry" >&2
       exit 1
     }
-    echo "--from-branch: ${#PATHS[@]} committed path(s), origin/$BASE_REF ${BASE:0:7} -> HEAD ${SOURCE_HEAD:0:7}" >&2
+    if [ "$RESUME" -eq 1 ]; then
+      # A resume did not derive these paths from the HEAD it names (sc-3178). HEAD can only have
+      # narrowed the set by here — drift refused above — so a differing count is reported, not refused.
+      head_note=
+      [ "$HEAD_PATH_COUNT" -eq "${#PATHS[@]}" ] || head_note=" (HEAD now derives $HEAD_PATH_COUNT)"
+      echo "--from-branch: ${#PATHS[@]} frozen committed path(s) replayed, origin/$BASE_REF ${BASE:0:7} -> HEAD ${SOURCE_HEAD:0:7}$head_note" >&2
+    else
+      echo "--from-branch: ${#PATHS[@]} committed path(s), origin/$BASE_REF ${BASE:0:7} -> HEAD ${SOURCE_HEAD:0:7}" >&2
+    fi
     for p in "${PATHS[@]}"; do printf '  %q\n' "$p" >&2; done
   else
     # A preserved branch+receipt resume skips the whole derivation above, and with it that listing —

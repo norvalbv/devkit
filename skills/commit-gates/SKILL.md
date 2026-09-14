@@ -14,8 +14,9 @@ command. Do not pre-run every gate or replace the managed chain with a hand-writ
    command prints; a failed ship may include a remediation command that refers to that retained log.
 2. Fix the reported cause, then retry with `devkit ship --resume <branch>` (in explicit-path mode, a
    fix that adds a NEW file rides along as a trailing path: `--resume <branch> -- <new-path>`;
-   committed-branch mode freezes membership and needs a fresh full `--from-branch` invocation for a
-   new path set); a plain commit re-runs the identical commit command. Ship checkpoints successful
+   committed-branch mode freezes membership, refuses a resume whose fix committed a path outside it,
+   and prints the fresh full `--from-branch` invocation to run instead); a plain commit re-runs the
+   identical commit command. Ship checkpoints successful
    stages and `--resume` replays the
    recorded invocation byte-identically, so restarting with different flags or a re-typed body
    usually wastes work and can discard useful evidence.

@@ -170,6 +170,10 @@ export function pathStreamError(raw) {
         return '--from-branch cannot safely represent a non-UTF-8 Git pathname in resume/telemetry';
     return null;
 }
+/** Split a stream `pathStreamError` already accepted into its pathnames. */
+function decodePathStream(raw) {
+    return raw.length === 0 ? [] : raw.toString('utf8').slice(0, -1).split('\0');
+}
 /** Prove Git did not recursively widen a concrete member that became a directory. */
 export function membershipStreamError(selected, members) {
     const selectedReason = pathStreamError(selected);
@@ -178,12 +182,23 @@ export function membershipStreamError(selected, members) {
     const membersReason = pathStreamError(members);
     if (membersReason)
         return `--from-branch recorded membership is invalid: ${membersReason}`;
-    const decode = (raw) => raw.length === 0 ? [] : raw.toString('utf8').slice(0, -1).split('\0');
-    const allowed = new Set(decode(members));
-    for (const p of decode(selected))
+    const allowed = new Set(decodePathStream(members));
+    for (const p of decodePathStream(selected))
         if (!allowed.has(p))
             return `--from-branch frozen path membership would expand to unrecorded path ${JSON.stringify(p)}; run a fresh full --from-branch invocation`;
     return null;
+}
+/** BASE..HEAD paths the frozen branch-source membership lacks, byte-exact (sc-3178). HEAD narrowing
+ *  the set is not drift: a pre-commit resume only refuses paths it would silently leave out. */
+export function frozenDriftStream(selected, members) {
+    const selectedReason = pathStreamError(selected);
+    if (selectedReason)
+        return { reason: selectedReason };
+    const membersReason = pathStreamError(members);
+    if (membersReason)
+        return { reason: `--from-branch recorded membership is invalid: ${membersReason}` };
+    const allowed = new Set(decodePathStream(members));
+    return { outside: decodePathStream(selected).filter((p) => !allowed.has(p)) };
 }
 /** Keep only byte-exact frozen identities from a recursively selected overlay stream. */
 export function filterMembershipStream(selected, members) {
@@ -222,7 +237,7 @@ export function handlePathCodecCommand(sub, rest) {
         process.stdout.write(raw);
         return 0;
     }
-    if (sub !== 'validate-membership' && sub !== 'filter-membership')
+    if (sub !== 'validate-membership' && sub !== 'filter-membership' && sub !== 'frozen-drift')
         return null;
     const { values } = parseArgs(rest);
     const membersFile = values.get('members-file');
@@ -240,6 +255,12 @@ export function handlePathCodecCommand(sub, rest) {
         const reason = membershipStreamError(selected, members);
         if (reason)
             return fail(reason);
+    }
+    else if (sub === 'frozen-drift') {
+        const drift = frozenDriftStream(selected, members);
+        if ('reason' in drift)
+            return fail(drift.reason);
+        process.stdout.write(drift.outside.map((p) => `${p}\0`).join(''));
     }
     else {
         const filtered = filterMembershipStream(selected, members);

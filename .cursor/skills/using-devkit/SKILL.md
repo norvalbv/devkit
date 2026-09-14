@@ -79,10 +79,13 @@ devkit command.
   a divergent/ahead base, changed submodule gitlink, non-UTF-8 path, or staged/unstaged/untracked/
   ignored overlay on any derived path is a refusal. Unrelated dirty paths are deliberately ignored.
   A blocked attempt resumes with the ordinary `devkit ship --resume <branch>` form and frozen path
-  membership. Before a commit lands, those paths refresh from the then-current `HEAD`; after a gate
-  receipt proves a commit landed, resume publishes that already-gated immutable OID instead. Later
-  HEAD fixes therefore need a new ship branch and fresh full `--from-branch` invocation. Extra resume
-  paths are refused for the same reason.
+  membership. Before a commit lands, those paths refresh from the then-current `HEAD`, and a resume
+  whose `HEAD` has committed a path outside the frozen set (a fix that adds a module) is refused
+  before any gate runs: it names those paths and prints the fresh full `--from-branch` command, which
+  may keep the branch name because a pre-commit block leaves no ship branch behind. After a gate
+  receipt proves a commit landed, resume publishes that already-gated immutable OID instead, so later
+  HEAD fixes need a new ship branch and fresh full `--from-branch` invocation. Extra resume paths are
+  refused for the same reason.
 - **`branch already exists` → ship to a different name; on ORIGIN → `--pr`.** Do not detach HEAD,
   delete the branch, or switch to the base branch to free the name. In a linked worktree all three
   fail (`already used by worktree at …`) and none of them is necessary.
@@ -120,7 +123,8 @@ devkit command.
   verifies its gate receipt and publishes that preserved commit without re-running gates; it never
   adopts a merely same-named or hand-made commit. In explicit-path mode, a fix that ADDS a file rides
   the retry as a trailing path (`--resume <branch> -- <new-path>`). Branch-source mode refuses extra
-  resume paths because membership is frozen; use a fresh full `--from-branch` command for a new set.
+  resume paths because membership is frozen, and refuses a resume whose `HEAD` committed a path
+  outside that set; use the fresh full `--from-branch` command it prints for a new set.
   Both the resume banner and a gate block print the briefed paths, so the input the gates judged is
   never a guess; the record itself is `jq -r '.paths[]' .devkit/ship-intent-<branch>-<hash>.json`,
   one file per branch — read the one for yours, not a glob.

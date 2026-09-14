@@ -377,14 +377,21 @@ SHIP_HOOK_WRAPPER
     # rc non-zero, not a hang (124/137): a gate or hook rejected the commit — its output is in $log
     # above. The retry line is the highest-traffic guidance ship prints (every gate block lands
     # here), so it names the short form AND the new-file case: the commonest remedies (a decisions
-    # record, a new test) ADD a path, and --resume merges extra paths into the recorded set.
+    # record, a new test) ADD a path. Explicit-path --resume merges extra paths into the recorded set;
+    # branch-source membership is frozen and refuses them (sc-3178), so that mode names the fresh
+    # invocation instead — the trailing-path form there leads straight into a refusal. Defaulted
+    # because run-gates-with-capture.sh sources this file without the ship's exports.
     # Guarded on the captured ownership token: when this attempt's recording was skipped or failed
     # (no ignore rule, lock contention), advertising --resume would send the retry to a
     # deterministic "no recorded invocation" refusal.
     if [ -n "${SHIP_INTENT_GENERATION:-}" ]; then
       {
         echo "↩️  Retry after fixing: devkit ship --resume $br"
-        echo "   (fix adds a NEW file? include it: devkit ship --resume $br -- <new-path>...; only unfinished work re-runs)"
+        if [ "${DEVKIT_SHIP_FROM_BRANCH:-0}" = 1 ]; then
+          echo "   (fix commits a NEW file? branch-source membership is frozen: run a fresh full devkit ship $br \"<title>\" --base <base> --from-branch invocation instead)"
+        else
+          echo "   (fix adds a NEW file? include it: devkit ship --resume $br -- <new-path>...; only unfinished work re-runs)"
+        fi
       } >&2
     else
       echo "↩️  Retry after fixing: re-run the same devkit ship command (this attempt was NOT recorded, so --resume has nothing to replay)" >&2

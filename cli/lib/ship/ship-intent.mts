@@ -490,7 +490,7 @@ function main(): number {
       paths.length > 0 ? paths : undefined,
     );
   return fail(
-    `unknown subcommand '${String(sub)}' (write|read|owns|delete|validate-paths|validate-membership|filter-membership)`,
+    `unknown subcommand '${String(sub)}' (write|read|owns|delete|validate-paths|validate-membership|filter-membership|frozen-drift)`,
   );
 }
 
