@@ -49,6 +49,29 @@ export function emitCacheHit(judge: string, model?: unknown, durationMs?: unknow
   });
 }
 
+/** A hit on a cache key that does NOT hash the evidence bytes (sc-3175). */
+export interface IntentCacheHit {
+  judge: string;
+  model: string;
+  durationMs: number | undefined;
+  /** Whether the staged diff is the one the cached verdict was judged on. */
+  diffMatches: boolean;
+}
+
+/** cache_hit for completeness's branch+message sticky key, which a reshaped diff can reuse. Same
+ * row and label per Ruling (3); byte-keyed callers keep emitCacheHit, which covers the diff. */
+export function emitIntentCacheHit(hit: IntentCacheHit): void {
+  emitGateEvent({
+    type: 'cache_hit',
+    judge: hit.judge,
+    // JSON.stringify drops an undefined field, so an unknown model or duration is omitted, not blank.
+    model: hit.model || undefined,
+    duration_ms: hit.durationMs === undefined ? undefined : Math.max(0, Math.round(hit.durationMs)),
+    scope: 'intent',
+    diff_matches: hit.diffMatches,
+  });
+}
+
 /** Cache-aware wall-clock summary for one serial or bounded-parallel gate stage. */
 export function emitGateTiming(
   gate: string,

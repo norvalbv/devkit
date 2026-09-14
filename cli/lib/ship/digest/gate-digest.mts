@@ -36,12 +36,17 @@ export interface GateEvent {
   bypass?: string;
   blocked_gate?: string | null;
   exit_code?: number;
+  /** cache_hit only: `intent` marks completeness's branch+message key, which ignores the diff. */
+  scope?: string;
+  /** cache_hit only: false = the cached verdict was judged on a different staged diff (sc-3175). */
+  diff_matches?: boolean;
 }
 
-/** One gate's contribution to this attempt. `gate` is the event's own label, never parsed prose. */
+/** One gate's contribution to this attempt. `gate` is the event's own label, never parsed prose.
+ * `unverified`: a downgraded judge or a PASS judged on an earlier diff. It never blocks. */
 export interface DigestRow {
   gate: string;
-  state: 'finding' | 'cached' | 'could-not-run';
+  state: 'finding' | 'cached' | 'could-not-run' | 'unverified';
   /** true = this stopped the run · false = it did not · null = the run failed unattributably. */
   blocking: boolean | null;
   detail: string;
@@ -205,6 +210,8 @@ export function summarise(events: GateEvent[], shipId: string): DigestRow[] {
   // Held OUT of attributable[], not merely marked non-blocking: a stage holding no exit is then
   // structurally ineligible for isBlocking(), whatever family token it carries.
   const advisory: DigestRow[] = [];
+  // Held out of attributable[] for the same reason: a downgrade or a reused PASS holds no exit.
+  const unverified: DigestRow[] = [];
   for (const e of mine) {
     if (e.type === 'review_result' && e.status === 'fail') {
       const reviewer = e.reviewer ?? 'unknown';
@@ -258,6 +265,24 @@ export function summarise(events: GateEvent[], shipId: string): DigestRow[] {
         blocking: false,
         detail: oneLine(e.detail),
       });
+    } else if (e.type === 'gate_degraded') {
+      // A judge that stripped its own blocking authority (sentry on insufficient capture evidence).
+      // It emits no result row, so before sc-3175 its only trace was a stderr line mid-log.
+      unverified.push({
+        gate: e.judge ?? 'unknown',
+        state: 'unverified',
+        blocking: false,
+        detail: `downgraded to advisory: ${oneLine(e.cause) || 'cause not recorded'} — could not block this commit`,
+      });
+    } else if (e.type === 'cache_hit' && e.diff_matches === false) {
+      // A PASS reused across a reshaped diff. `=== false`, not falsy: a byte-keyed hit carries no
+      // field, and a missing field must keep meaning "this cache key covers the diff".
+      unverified.push({
+        gate: e.judge === `review:${COMPLETENESS}` ? COMPLETENESS : (e.judge ?? 'unknown'),
+        state: 'unverified',
+        blocking: false,
+        detail: 'cached PASS judged an earlier diff — this diff was not re-judged',
+      });
     } else if (e.type === 'cache_hit') {
       cached.push({ gate: e.judge ?? 'unknown', state: 'cached', blocking: false, detail: '' });
     }
@@ -266,12 +291,6 @@ export function summarise(events: GateEvent[], shipId: string): DigestRow[] {
   const seen = new Set<string>();
   const unique = attributable.filter(
     (a) => !seen.has(`${a.state}:${a.gate}`) && seen.add(`${a.state}:${a.gate}`) !== undefined,
-  );
-  const advisorySeen = new Set<string>();
-  const uniqueAdvisory = advisory.filter(
-    (a) =>
-      !advisorySeen.has(`${a.state}:${a.gate}`) &&
-      advisorySeen.add(`${a.state}:${a.gate}`) !== undefined,
   );
   return [
     ...unique.map((a) => ({
@@ -282,19 +301,35 @@ export function summarise(events: GateEvent[], shipId: string): DigestRow[] {
     })),
     // NOT passed through the `unattributed` null-blocking arm: that arm exists for a run whose
     // blocker is unknowable, and an advisory's non-blocking status is knowable on every run.
-    ...uniqueAdvisory,
+    ...firstPerGate(advisory),
+    // Deduped for the same reason: pre-commit and commit-msg can both replay one stale verdict.
+    ...firstPerGate(unverified),
     ...cached,
   ];
+}
+
+/** The first row per state+gate, in event order. */
+function firstPerGate(rows: DigestRow[]): DigestRow[] {
+  const seen = new Set<string>();
+  return rows.filter((r) => {
+    const id = `${r.state}:${r.gate}`;
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
 }
 
 /** Pure: rows → the block printed below the blocking gate's remediation, or '' for silence. */
 export function render(rows: DigestRow[], logPath = ''): string {
   const findings = rows.filter((r) => r.state === 'finding');
   const missing = rows.filter((r) => r.state === 'could-not-run');
-  if (findings.length === 0 && missing.length === 0) return '';
+  const unverified = rows.filter((r) => r.state === 'unverified');
+  // An unverified row alone is reason to speak: it is exactly the green run a reader stops tailing.
+  if (findings.length === 0 && missing.length === 0 && unverified.length === 0) return '';
 
   const cached = rows.filter((r) => r.state === 'cached').length;
-  const out = [`📋 Gate findings this run (${findings.length + missing.length}):`];
+  const total = findings.length + missing.length + unverified.length;
+  const out = [`📋 Gate findings this run (${total}):`];
   for (const r of findings.slice(0, MAX_FINDINGS)) {
     const tail = r.detail ? `: ${r.detail}` : '';
     if (r.blocking === true) out.push(`   ✗ ${r.gate} — BLOCKED this run${tail}`);
@@ -320,6 +355,9 @@ export function render(rows: DigestRow[], logPath = ''): string {
   if (missing.length > MAX_MISSING) {
     out.push(`   … ${missing.length - MAX_MISSING} more gate(s) that could not run`);
   }
+  // Uncapped: at most one row per judge survives the dedupe, and a cut one would be the silent
+  // omission this section exists to end. The same `·` a bypass wears, because it carries that weight.
+  for (const r of unverified) out.push(`   · ${r.gate} — ${r.detail}`);
   if (cached > 0) {
     out.push(`   ✓ ${cached} verdict(s) served from cache — not re-judged, not re-reported`);
   }

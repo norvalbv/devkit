@@ -1,4 +1,4 @@
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import {
   chmodSync,
   existsSync,
@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
+import { testSpawnSync } from './_helpers.mts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const helper = resolve(here, '../lib/ship/commit-with-gate-capture.sh');
@@ -97,7 +98,8 @@ export DEVKIT_SHIP_ID=sc1537-test
 export SHIP_COMMIT_TIMEOUT=10
 commit_with_gate_capture "$4" "$5" feat/sc1537 "test title" "test body"
 `;
-  return spawnSync(
+  // Supervised: this runs the shipped script and dispatches real hooks (suite-hangs-bound-at-the-spawn-site).
+  return testSpawnSync(
     '/bin/bash',
     [
       '-c',
@@ -190,11 +192,8 @@ describe('commit_with_gate_capture — executable hook proof', () => {
     });
   });
 
-  const emit = (
-    row: { type: string } & Partial<
-      Record<'reviewer' | 'gate' | 'family' | 'status' | 'reason' | 'detail', string>
-    >,
-  ) =>
+  // Values must stay free of single quotes: the row is spliced into a single-quoted printf argument.
+  const emit = (row: { type: string } & Record<string, string | boolean>) =>
     `printf '%s\\n' '${JSON.stringify({ ship_id: 'sc1537-test', ...row })}' >> "$DEVKIT_GATE_EVENTS"\n`;
   const BLOCKED_HOOK =
     "echo 'REAL_PRE_COMMIT_RAN' >&2\n" +
@@ -258,6 +257,79 @@ describe('commit_with_gate_capture — executable hook proof', () => {
     expect(result.status, result.stderr).toBe(0);
     expect(result.stderr).toContain('pre-commit gates ran in the ship worktree');
     expect(result.stderr).not.toContain('Gate findings this run');
+  });
+
+  // sc-3175: both retained logs must end with the terminal's block — a reviewer reads them later.
+  const retainedLogs = (root: string) => [
+    join(root, '.devkit/last-ship-gates-feat-sc1537.log'),
+    join(root, 'telemetry/logs/sc1537-test.log'),
+  ];
+  const digestBlock = (stderr: string) => {
+    const lines = stderr.split('\n');
+    const start = lines.findIndex((line) => line.startsWith('📋 Gate findings this run'));
+    const end = lines.findIndex((line, i) => i > start && line.startsWith('   Full log:'));
+    return lines.slice(start, end + 1).join('\n');
+  };
+  const logTail = (file: string, lineCount: number) =>
+    readFileSync(file, 'utf8').trimEnd().split('\n').slice(-lineCount).join('\n');
+
+  it('a green ship that verified less than its diff ends both retained logs with the block', () => {
+    const hook =
+      "echo 'REAL_PRE_COMMIT_RAN' >&2\n" +
+      emit({
+        type: 'gate_result',
+        gate: 'coverage',
+        status: 'bypassed',
+        bypass: 'GUARD_COVERAGE_OK',
+        detail: 'coverage(bypassed:GUARD_COVERAGE_OK)',
+      }) +
+      emit({
+        type: 'gate_degraded',
+        judge: 'sentry-advisory',
+        cause: 'a capture-bearing hunk did not fit the evidence cap',
+      }) +
+      emit({
+        type: 'cache_hit',
+        judge: 'review:completeness',
+        scope: 'intent',
+        diff_matches: false,
+      });
+    const { root, wt, base } = fixture(true, hook);
+
+    const result = runCommit(root, wt, base);
+
+    expect(result.status, result.stderr).toBe(0);
+    const block = digestBlock(result.stderr);
+    expect(block).toContain('Gate findings this run (3)');
+    expect(block.split('\n').filter((line) => line.startsWith('   · '))).toHaveLength(3);
+    for (const log of retainedLogs(root)) {
+      expect(logTail(log, block.split('\n').length), log).toBe(block);
+    }
+  });
+
+  it('a blocked ship ends both retained logs with the block too', () => {
+    const { root, wt, base } = fixture(true, BLOCKED_HOOK);
+
+    const result = runCommit(root, wt, base);
+
+    expect(result.status).not.toBe(0);
+    const block = digestBlock(result.stderr);
+    expect(block).toContain('✗ review:correctness — BLOCKED this run');
+    for (const log of retainedLogs(root)) {
+      expect(logTail(log, block.split('\n').length), log).toBe(block);
+    }
+  });
+
+  it('a silent digest appends nothing to the retained logs', () => {
+    const { root, wt, base } = fixture(true);
+
+    const result = runCommit(root, wt, base);
+
+    expect(result.status, result.stderr).toBe(0);
+    for (const log of retainedLogs(root)) {
+      expect(readFileSync(log, 'utf8')).not.toContain('Gate findings this run');
+      expect(readFileSync(log, 'utf8').endsWith('\n\n')).toBe(false);
+    }
   });
 
   it.each([
