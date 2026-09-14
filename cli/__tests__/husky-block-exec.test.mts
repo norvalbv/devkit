@@ -101,6 +101,7 @@ case "$tool" in
         fi
         [ -n "\${COMP_SLOW_TERM:-}" ] && sleep 0.1; exit \${REVIEW_RC:-0};;
     esac;;
+  guard-sentry) echo "guard-sentry-argc $#" >> "$HOME/calls.log"; exit \${SENTRY_RC:-0};;
   *) exit 0;;
 esac
 `;
@@ -111,6 +112,7 @@ esac
     'guard-decisions',
     'guard-review',
     'guard-qavis-advisory',
+    'guard-sentry',
   ]) {
     writeFileSync(join(bin, name), gateStub);
     chmodSync(join(bin, name), 0o755);
@@ -935,5 +937,116 @@ describe('commit-terminal telemetry (real temp git repo)', () => {
 
   it('DEVKIT_NO_TELEMETRY opts the terminal out with the capture itself', () => {
     expectNoCommitTerminal(runHookInRepo({ DEVKIT_NO_TELEMETRY: '1' }));
+  });
+});
+
+// sc-3012: a judge that can demand an edit must never follow the qavis advisory, whose pass receipt
+// any source fix voids. commit-msg's sentry replays this verdict from cache (check-sentry tests).
+describe('ship: sentry is judged before the qavis advisory', () => {
+  const SHIP = { biome: false, guards: ['review', 'sentry', 'qavis-advisory'] };
+
+  it.each(['package', 'standalone'])(
+    '%s: review → sentry on the ship message → qavis',
+    (builder) => {
+      const r = runHook({}, SHIP, { shipMsg: true, builder, dirPrefix: 'dk hook exec sentry ' });
+      expect(r.status).toBe(0);
+      const review = r.calls.indexOf('guard-review --gate');
+      const sentry = r.calls.indexOf('guard-sentry --gate');
+      expect(review).toBeGreaterThan(-1);
+      expect(review).toBeLessThan(sentry);
+      expect(sentry).toBeLessThan(r.calls.indexOf('guard-qavis-advisory --gate'));
+      expect(r.calls).toContain('ship-msg.txt');
+      expect(r.calls).toContain('guard-sentry-argc 2'); // a temp path with spaces stays ONE argument
+    },
+  );
+
+  it('an interactive commit (no ship message) leaves sentry to commit-msg', () => {
+    const r = runHook({}, SHIP);
+    expect(r.status).toBe(0);
+    expect(r.calls).not.toContain('guard-sentry');
+    expect(r.calls).toContain('guard-qavis-advisory --gate');
+  });
+
+  it('a stale DEVKIT_COMMIT_MSG_FILE whose file is gone never arms it', () => {
+    const r = runHook({ DEVKIT_COMMIT_MSG_FILE: '/nonexistent/devkit-ship-msg.txt' }, SHIP);
+    expect(r.status).toBe(0);
+    expect(r.calls).not.toContain('guard-sentry');
+  });
+
+  it('sentry not selected → pre-commit never calls it, even on a ship', () => {
+    const r = runHook(
+      {},
+      { biome: false, guards: ['review', 'qavis-advisory'] },
+      { shipMsg: true },
+    );
+    expect(r.status).toBe(0);
+    expect(r.calls).not.toContain('guard-sentry');
+  });
+
+  it('a confident MONITOR block (exit 1) stops the hook before the advisory', () => {
+    const r = runHook({ SENTRY_RC: '1' }, SHIP, { shipMsg: true });
+    expect(r.status).toBe(1);
+    expect(r.stdout).toContain('un-monitored runtime error-class');
+    expect(r.calls).not.toContain('guard-qavis-advisory');
+  });
+
+  it('an unreadable staged set (exit 4) blocks without naming a defect, before the advisory', () => {
+    const r = runHook({ SENTRY_RC: '4' }, SHIP, { shipMsg: true });
+    expect(r.status).toBe(1);
+    expect(r.stdout).toContain('NOT a gate rejection');
+    expect(r.stdout).not.toContain('un-monitored runtime error-class');
+    expect(r.calls).not.toContain('guard-qavis-advisory');
+  });
+
+  it('a fail-open sentry (exit 2) continues to the advisory', () => {
+    const r = runHook({ SENTRY_RC: '2' }, SHIP, { shipMsg: true });
+    expect(r.status).toBe(0);
+    expect(r.calls).toContain('guard-qavis-advisory --gate');
+  });
+
+  it('a reviewer FAIL blocks first — sentry is never paid for on a doomed tree', () => {
+    const r = runHook({ REVIEW_RC: '1' }, SHIP, { shipMsg: true });
+    expect(r.status).toBe(1);
+    expect(r.calls).not.toContain('guard-sentry');
+  });
+
+  it('devkit review exports the same message file but never runs the commit judge', () => {
+    const r = runHook(
+      { DEVKIT_RUN_MODE: 'review', DEVKIT_REVIEW_GUARDS: 'review,sentry,qavis-advisory' },
+      SHIP,
+      { shipMsg: true },
+    );
+    expect(r.calls).toContain('guard-review --gate');
+    expect(r.calls).not.toContain('guard-sentry');
+  });
+
+  it('package mode: a missing pinned guard-sentry blocks instead of skipping silently', () => {
+    const r = runHook({}, SHIP, { shipMsg: true, missingLocalBins: ['guard-sentry'] });
+    expect(r.status).toBe(1);
+    expect(r.calls).not.toContain('guard-qavis-advisory');
+  });
+
+  it('standalone: no global guard-sentry is fail-open and the advisory still runs', () => {
+    const r = runHook({}, SHIP, {
+      shipMsg: true,
+      builder: 'standalone',
+      missingBins: ['guard-sentry'],
+    });
+    expect(r.status).toBe(0);
+    expect(r.calls).not.toContain('guard-sentry');
+    expect(r.calls).toContain('guard-qavis-advisory --gate');
+  });
+
+  it('overlay installs no commit-msg judge, so it gains no new blocking sentry gate', () => {
+    const r = runHook({ SENTRY_RC: '1' }, SHIP, { shipMsg: true, builder: 'overlay' });
+    expect(r.status).toBe(0);
+    expect(r.calls).not.toContain('guard-sentry');
+  });
+
+  it('monorepo package block: a sentry block propagates out of the package subshell', () => {
+    const r = runHook({ SENTRY_RC: '1' }, SHIP, { shipMsg: true, pkgRel: 'pkg/a' });
+    expect(r.status).toBe(1);
+    expect(r.calls).toContain('guard-sentry --gate');
+    expect(r.calls).not.toContain('guard-qavis-advisory');
   });
 });

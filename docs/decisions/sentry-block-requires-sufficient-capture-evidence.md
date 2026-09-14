@@ -20,3 +20,4 @@ created: 2026-08-26
 **Scope:** gate-engine/sentry/**
 **Category:** commit-gates
 **Source:** collab · SC-1984
+- 2026-09-14 — sc-3012: cleanMessage now applies git's -m whitespace cleanup (per-line trailing whitespace incl. CR stripped, runs of blank lines collapsed) before the cache key is built, because devkit ship now judges sentry in pre-commit on its raw composed message while commit-msg judges git's cleaned COMMIT_EDITMSG; the two must key identically for the commit-msg run to replay instead of re-voting. Pinned against a real git commit per message shape. Evidence and blocking authority are unchanged.

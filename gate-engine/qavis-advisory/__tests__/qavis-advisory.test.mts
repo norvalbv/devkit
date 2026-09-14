@@ -428,3 +428,48 @@ describe('the printed remedy runs where the operator is', () => {
     expect(stderr()).toContain('no receipt minted there can attest it');
   });
 });
+
+// sc-3012: an agent that QAs before shipping has every judge-forced fix void its receipt. The
+// advisory states the order, and only the order: reaching it is not proof any judge PASSED.
+describe('the ADVISE output states the ship order', () => {
+  it('under ship: an order note ahead of the remedy, plus the self-run alternative', () => {
+    process.env.DEVKIT_SHIP_ROOT = '/repo';
+    process.env.DEVKIT_SHIP_BRANCH = 'me/sc-1';
+    runQavisAdvisory('/wt', advise);
+    const out = stderr();
+    expect(out).toContain('Order:');
+    expect(out.indexOf('Order:')).toBeLessThan(out.indexOf('Run:'));
+    expect(out).toContain("or:   DEVKIT_SHIP_QA=1 devkit ship --resume 'me/sc-1'");
+    // fail-open reviewers (exit 2) and GUARD_NO_REVIEW also reach this line — never claim a pass.
+    expect(out).not.toMatch(/\bpassed\b|cleared by/i);
+  });
+
+  it('a --from-branch ship gets the same order note and self-run alternative', () => {
+    process.env.DEVKIT_SHIP_ROOT = '/repo';
+    process.env.DEVKIT_SHIP_FROM_BRANCH = '1';
+    process.env.DEVKIT_SHIP_BASE_SHA = 'abc123';
+    runQavisAdvisory('/wt', advise);
+    expect(stderr()).toContain('Order:');
+    expect(stderr()).toContain('or:   DEVKIT_SHIP_QA=1 devkit ship --resume <branch>');
+  });
+
+  it('a plain commit has no ship order to state and no ship to resume', () => {
+    runQavisAdvisory('/r', advise);
+    expect(stderr()).not.toContain('Order:');
+    expect(stderr()).not.toContain('DEVKIT_SHIP_QA');
+  });
+
+  it('never tells a DEVKIT_SHIP_QA=1 run whose tree is still uncovered to set DEVKIT_SHIP_QA=1', () => {
+    process.env.DEVKIT_SHIP_ROOT = '/repo';
+    process.env.GUARD_AI_STRICT = '1';
+    process.env.DEVKIT_SHIP_QA = '1';
+    const rc = runQavisAdvisory('/wt', {
+      hasRecipe: () => true,
+      route: () => ({ verdict: 'ADVISE' }),
+      qa: () => 1,
+    });
+    expect(rc).toBe(3);
+    expect(stderr()).toContain('Order:');
+    expect(stderr()).not.toContain('or:   DEVKIT_SHIP_QA=1');
+  });
+});
