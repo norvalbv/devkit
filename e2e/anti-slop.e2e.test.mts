@@ -272,6 +272,52 @@ describe('e2e: packed anti-slop capability', () => {
     expect(renamed.run('devkit', ['anti-slop', 'check', '--base', 'HEAD']).status).toBe(0);
   });
 
+  it('labels debt moved between existing files as relocated and re-anchors only that debt', async () => {
+    const fx = await fixture();
+    const packageArgs = INIT_ARGS.filter((argument) => argument !== '--standalone');
+    expect(fx.run('devkit', packageArgs).status).toBe(0);
+    const moved = 'function moved(value: object) { return value; }\n';
+    writeFileSync(join(fx.repoDir, 'source.ts'), `export const kept = true;\n${moved}`);
+    writeFileSync(join(fx.repoDir, 'destination.ts'), 'export const destination = true;\n');
+    writeFileSync(
+      join(fx.repoDir, 'unrelated.ts'),
+      'function unrelated(value: object) { return value; }\n',
+    );
+    expect(fx.run('devkit', ['anti-slop', 'create']).status).toBe(0);
+    expect(fx.git('add', '-A').status).toBe(0);
+    expect(fx.git('commit', '-qm', 'adopt debt').status).toBe(0);
+    const debt = (value: { entries: Array<{ file: string; count: number }> }, file: string) =>
+      value.entries
+        .filter((entry) => entry.file === file)
+        .reduce((sum, entry) => sum + entry.count, 0);
+    const unrelatedBefore = debt(baseline(fx.repoDir), 'unrelated.ts');
+
+    writeFileSync(join(fx.repoDir, 'source.ts'), 'export const kept = true;\n');
+    writeFileSync(join(fx.repoDir, 'destination.ts'), `export const destination = true;\n${moved}`);
+    expect(fx.git('add', '-A').status).toBe(0);
+    const relocatedCheck = fx.run('devkit', ['anti-slop', 'check', '--staged']);
+    expect(relocatedCheck.status, out(relocatedCheck)).toBe(1);
+    expect(out(relocatedCheck)).toContain('<- source.ts (+1)');
+    expect(out(relocatedCheck)).toContain('FAIL — 0 new, 1 relocated from source.ts');
+
+    const adopted = fx.run('devkit', ['anti-slop', 'adopt-relocations']);
+    expect(adopted.status, out(adopted)).toBe(0);
+    const after = baseline(fx.repoDir);
+    expect([
+      debt(after, 'source.ts'),
+      debt(after, 'destination.ts'),
+      debt(after, 'unrelated.ts'),
+    ]).toEqual([0, 1, unrelatedBefore]);
+    expect(fx.git('add', '.anti-slop-baseline.json').status).toBe(0);
+    const stagedCheck = fx.run('devkit', ['anti-slop', 'check', '--staged']);
+    expect(stagedCheck.status, out(stagedCheck)).toBe(0);
+    const ciCheck = fx.run('devkit', ['anti-slop', 'check', '--base', 'HEAD']);
+    expect(ciCheck.status, out(ciCheck)).toBe(0);
+    expect(fx.git('commit', '-qm', 'move debt with its baseline').status).toBe(0);
+    const committedCheck = fx.run('devkit', ['anti-slop', 'check', '--base', 'HEAD~1']);
+    expect(committedCheck.status, out(committedCheck)).toBe(0);
+  });
+
   it('attributes inherited findings to an already-red CI base without allowing growth', async () => {
     const fx = await fixture();
     const packageArgs = INIT_ARGS.filter((argument) => argument !== '--standalone');

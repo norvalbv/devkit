@@ -210,6 +210,32 @@ describe('anti-slop staged Git snapshot', () => {
     });
   });
 
+  it('names modified, deleted, and renamed-to paths as relocation sources, never introduced ones', () => {
+    const root = repository();
+    writeFileSync(join(root, 'src', 'gone.ts'), 'export const gone = 1;\n');
+    writeFileSync(join(root, 'src', 'kept name.ts'), 'export const kept = 1;\n');
+    git(root, ['add', '-A']);
+    git(root, ['-c', 'user.name=t', '-c', 'user.email=t@test.invalid', 'commit', '-qm', 'more']);
+    writeFileSync(join(root, 'src', 'file.ts'), 'export const value = "edited";\n');
+    git(root, ['rm', '-q', 'src/gone.ts']);
+    git(root, ['mv', 'src/kept name.ts', 'src/renamed name.ts']);
+    writeFileSync(join(root, 'src', 'introduced.ts'), 'export const introduced = 1;\n');
+    git(root, ['add', '-A']);
+    const expected = new Map([
+      ['src/file.ts', { basePath: 'src/file.ts', deleted: false }],
+      ['src/gone.ts', { basePath: 'src/gone.ts', deleted: true }],
+      ['src/renamed name.ts', { basePath: 'src/kept name.ts', deleted: false }],
+    ]);
+
+    expect(gitBaselineEnvelope(root, 'HEAD').relocationSources).toEqual(expected);
+    git(root, ['-c', 'user.name=t', '-c', 'user.email=t@test.invalid', 'commit', '-qm', 'move']);
+    withStagedAntiSlopSnapshot(
+      root,
+      (snapshot) => expect(snapshot.relocationSources).toEqual(expected),
+      { baseRef: 'HEAD~1' },
+    );
+  });
+
   it('materializes selected files from the exact base tree and omits candidate-only paths', () => {
     const root = repository();
     const base = git(root, ['rev-parse', 'HEAD']);
