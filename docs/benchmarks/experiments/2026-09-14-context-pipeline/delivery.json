@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "completedNativeTasks": 1206,
+  "tasksWithSupport": 846,
+  "tasksWithoutSupport": 360,
+  "inputBytes": {
+    "min": 747,
+    "median": 2686,
+    "p95": 16229,
+    "max": 60748,
+    "sum": 5417687
+  },
+  "ownedBytesShown": {
+    "min": 329,
+    "median": 825,
+    "p95": 4039,
+    "max": 34995,
+    "sum": 1667236
+  },
+  "supportBytesShown": {
+    "min": 0,
+    "median": 1340,
+    "p95": 10843,
+    "max": 24418,
+    "sum": 3169357
+  },
+  "supportCharactersShown": {
+    "min": 0,
+    "median": 1340,
+    "p95": 10843,
+    "max": 24000,
+    "sum": 3149643
+  },
+  "interpretation": "Initial source supply from native packet receipts. Counts exclude technically incomplete attempts and include each completed task once. They do not observe later source retrieval, establish missing-context causality or include system/skill tokens."
+}

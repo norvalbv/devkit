@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { buildCappedDiffEvidence } from '../../../../../diff-evidence.mts';
+import { buildEvidencePacket } from '../../../../../evidence/context/packets.mts';
 import { measureSpan, type RequiredSpan } from '../visibility.mts';
 
 const hash = (text: string) => createHash('sha256').update(text).digest('hex');
@@ -47,6 +48,103 @@ const pressure = () =>
   Object.fromEntries(Array.from({ length: 9 }, (_, i) => [`file${i}.ts`, `${'x'.repeat(9000)}\n`]));
 
 describe('required-span initial diff visibility', () => {
+  it('counts supporting source at its actual coordinates, with no credit for inventory text', () => {
+    const content = `first();\n${'x'.repeat(9000)}\nlast();\n`;
+    const source = {
+      base: 'a'.repeat(40),
+      staged: 'b'.repeat(40),
+      files: ['owned.ts', 'last();'],
+      segments: new Map([['owned.ts', [{ path: 'helper.ts', side: 'staged' as const, content }]]]),
+      notes: new Map(),
+      neighbors: new Map(),
+    };
+    const packet = buildEvidencePacket(source, ['owned.ts'], added('owned.ts', 'changed();\n'));
+    const input = {
+      base: {},
+      post: { 'helper.ts': content },
+      selectedFiles: ['owned.ts'],
+      diff: packet.ownedDiff,
+      rendered: packet.input,
+      packet,
+    };
+    expect(measureSpan(span('helper.ts', content, 1, 3), input)).toEqual({
+      status: 'partial',
+      shownLines: 1,
+      totalLines: 3,
+    });
+    expect(measureSpan(span('helper.ts', content, 3), input)).toEqual({
+      status: 'truncated',
+      shownLines: 0,
+      totalLines: 1,
+    });
+    const changed = packet.input.replace('first();', 'forged();');
+    expect(() => measureSpan(span('helper.ts', content), { ...input, rendered: changed })).toThrow(
+      'INVALID_RENDERED_EVIDENCE',
+    );
+  });
+  it('unions owned and enclosing-function source without counting the same line twice', () => {
+    const content = 'first();\nsecond();\n';
+    const diff = added('owned.ts', content);
+    const source = {
+      base: 'a'.repeat(40),
+      staged: 'b'.repeat(40),
+      files: ['owned.ts'],
+      segments: new Map([
+        ['owned.ts', [{ path: 'owned.ts', side: 'function-diff' as const, content: diff }]],
+      ]),
+      notes: new Map(),
+      neighbors: new Map(),
+    };
+    const packet = buildEvidencePacket(source, ['owned.ts'], diff);
+    expect(
+      measureSpan(span('owned.ts', content, 1, 2), {
+        base: {},
+        post: { 'owned.ts': content },
+        selectedFiles: ['owned.ts'],
+        diff,
+        rendered: packet.input,
+        packet,
+      }),
+    ).toEqual({ status: 'supplied', shownLines: 2, totalLines: 2 });
+  });
+  it('preserves native zero-visibility classifications when a packet has no supporting span', () => {
+    const content = 'outside\nnew\n';
+    const diff =
+      'diff --git a/file.ts b/file.ts\n--- a/file.ts\n+++ b/file.ts\n@@ -2 +2 @@\n-old\n+new\n';
+    const input = {
+      base: {},
+      post: { 'file.ts': content, 'other.ts': content },
+      selectedFiles: ['file.ts'],
+      diff,
+      rendered: buildCappedDiffEvidence(diff, ''),
+    };
+    const capped = evidence(pressure());
+    const cases = [
+      { input, required: span('file.ts', content), status: 'not-in-diff' },
+      { input, required: span('other.ts', content), status: 'out-of-scope' },
+      { input: capped, required: span('file0.ts', capped.post['file0.ts']), status: 'truncated' },
+      { input: capped, required: span('file8.ts', capped.post['file8.ts']), status: 'omitted' },
+    ];
+    for (const { input, required, status } of cases) {
+      const packet = buildEvidencePacket(
+        {
+          base: 'a'.repeat(40),
+          staged: 'b'.repeat(40),
+          files: input.selectedFiles,
+          segments: new Map(),
+          notes: new Map(),
+          neighbors: new Map(),
+        },
+        input.selectedFiles,
+        input.diff,
+      );
+      expect(measureSpan(required, { ...input, packet, rendered: packet.input })).toEqual({
+        status,
+        shownLines: 0,
+        totalLines: 1,
+      });
+    }
+  });
   it('keeps an over-8k file intact on the native under-60k fast path', () => {
     const content = `${'é😀'.repeat(4000)}\n++counter;\n`;
     const input = evidence({ 'file.ts': content });

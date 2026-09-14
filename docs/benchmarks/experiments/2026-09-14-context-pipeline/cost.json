@@ -1,0 +1,150 @@
+{
+  "schemaVersion": 1,
+  "baseline": {
+    "status": "complete",
+    "plannedRows": 285,
+    "completedRows": 285,
+    "plannedTasks": 1164,
+    "uniqueRecordedTasks": 1164,
+    "completedTasks": 1164,
+    "recordedTaskAttempts": 1165,
+    "capturedJudgeCalls": 1165,
+    "incompleteTaskAttempts": 1,
+    "technicalResumeInvocations": 1,
+    "capturedJudgeSeconds": 33793.292,
+    "sumInvocationWallSeconds": 5842.7,
+    "ledgerSha256": "bd1ae89b66ade4b55fce65d15b878161e17ad0d8b122bff8b38474bf95b781d3",
+    "byLens": {
+      "concurrency-races": {
+        "recordedTaskAttempts": 293,
+        "capturedJudgeCalls": 293,
+        "capturedSeconds": 7459.228
+      },
+      "error-and-edge-classification": {
+        "recordedTaskAttempts": 294,
+        "capturedJudgeCalls": 294,
+        "capturedSeconds": 9300.996
+      },
+      "state-transitions": {
+        "recordedTaskAttempts": 293,
+        "capturedJudgeCalls": 293,
+        "capturedSeconds": 7954.099
+      },
+      "writer-reader-contracts": {
+        "recordedTaskAttempts": 285,
+        "capturedJudgeCalls": 285,
+        "capturedSeconds": 9078.969
+      }
+    },
+    "invocations": [
+      {
+        "command": [
+          "node",
+          "gate-engine/review/eval/reviewers/bench.mts",
+          "run",
+          "correctness-reviewer",
+          "--baseline",
+          "--fresh"
+        ],
+        "startedAt": 1789323791.3512871,
+        "finishedAt": 1789329544.539722,
+        "elapsedSeconds": 5753.2,
+        "exitCode": 2
+      },
+      {
+        "command": [
+          "node",
+          "gate-engine/review/eval/reviewers/bench.mts",
+          "run",
+          "correctness-reviewer",
+          "--baseline"
+        ],
+        "startedAt": 1789329571.312168,
+        "finishedAt": 1789329660.831022,
+        "elapsedSeconds": 89.5,
+        "exitCode": 0
+      }
+    ],
+    "tokenUsage": null,
+    "dollarCost": null,
+    "unrecordedInFlightCost": null
+  },
+  "candidate": {
+    "status": "complete",
+    "plannedRows": 285,
+    "completedRows": 285,
+    "plannedTasks": 1206,
+    "completedTasks": 1206,
+    "recordedTaskAttempts": 1252,
+    "capturedJudgeCalls": 1212,
+    "incompleteTaskAttempts": 46,
+    "attemptsWithoutDispatch": 40,
+    "technicalResumeInvocations": 1,
+    "capturedJudgeSeconds": 50943.11,
+    "sumInvocationWallSeconds": 8582.266,
+    "delegateSeconds": 50941.91,
+    "byLens": {
+      "concurrency-races": {
+        "taskAttempts": 320,
+        "capturedCalls": 309,
+        "capturedSeconds": 10430.95
+      },
+      "error-and-edge-classification": {
+        "taskAttempts": 323,
+        "capturedCalls": 308,
+        "capturedSeconds": 14506.362
+      },
+      "state-transitions": {
+        "taskAttempts": 319,
+        "capturedCalls": 308,
+        "capturedSeconds": 12104.184
+      },
+      "writer-reader-contracts": {
+        "taskAttempts": 290,
+        "capturedCalls": 287,
+        "capturedSeconds": 13901.614
+      }
+    },
+    "invocations": [
+      {
+        "name": "pipeline-run",
+        "complete": 23,
+        "total": 285,
+        "calls": 112,
+        "stopped": "permanent-provider-outage",
+        "elapsedSeconds": 644.241281084,
+        "startedAt": 1789348017.3663628,
+        "finishedAt": 1789348662.211961,
+        "exitCode": 2
+      },
+      {
+        "name": "pipeline-resume-1",
+        "complete": 285,
+        "total": 285,
+        "reusedRows": 23,
+        "reusedTasks": 106,
+        "calls": 1100,
+        "totalCalls": 1212,
+        "stopped": null,
+        "elapsedSeconds": 7938.024377500001,
+        "priorElapsedSeconds": 644.241281084,
+        "startedAt": 1789374480.494154,
+        "finishedAt": 1789382420.36344,
+        "exitCode": 0
+      }
+    ],
+    "ledgerHashes": [
+      {
+        "invocation": "pipeline-run",
+        "sha256": "a8477fbec67a7c51dcf61897d7b1442c2731dea7b71c6bf56ae6dd41bac1499c"
+      },
+      {
+        "invocation": "pipeline-resume-1",
+        "sha256": "82bf4c853546584007515c2849b3bf7b7d08dd638630f51109cb6bf566cedd68"
+      }
+    ],
+    "tokenUsage": null,
+    "dollarCost": null
+  },
+  "interpretation": "Includes incomplete dispatched attempts. Task records without dispatch are not paid calls. Six rows run concurrently; summed judge time is not wall-clock latency. Token and dollar usage are unavailable, not zero. Source preparation, validation and ship reviews are outside these totals."
+}

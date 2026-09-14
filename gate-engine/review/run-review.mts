@@ -95,6 +95,7 @@ export async function runReviewGate(
   const timing = new ReviewGateTiming();
   let preJudgeTree: string | null | undefined;
   let preJudgeHead: string | null = null;
+  const contexts = new Map<string, PreparedContext>();
   // Judge-integrity choke point (sc-2054): EVERY exit after the snapshot was taken re-verifies
   // the staged tree AND HEAD — pass (0), the all-cache-hit early return, and the fail-open
   // inconclusive exit (2) alike, since 2 still lets a plain commit proceed. Any violation exits 1
@@ -194,6 +195,18 @@ export async function runReviewGate(
     }
     // One domain diff per reviewer (its cache identity): the exact staged bytes in its files.
     diffs = selected.map((s) => gitCached(cwd, [], s.files));
+    if (resolveContextMode()) {
+      if (!preJudgeTree || !preJudgeHead)
+        throw new Error('context preparation requires a captured tree and HEAD');
+      for (const [index, selection] of selected.entries()) {
+        if (selection.reviewer.name !== 'correctness-reviewer') continue;
+        const source = prepareContextSource(cwd, selection.files, {
+          base: preJudgeHead.startsWith('unborn:') ? '' : preJudgeHead,
+          staged: preJudgeTree,
+        });
+        contexts.set(selection.reviewer.name, prepareContext(source, diffs[index]));
+      }
+    }
     // Evidence bracket: the tree must still be the snapshot AFTER the diffs are read, or the
     // judges would review swapped-in bytes while the endpoints agree (the single-swap TOCTOU).
     // A double swap timed inside this bracket is an actor with full repo write access racing
@@ -268,6 +281,8 @@ export async function runReviewGate(
     cacheKey,
     resolveLensGroups(),
     resolveChunkCap(process.env.GUARD_CORRECTNESS_CHUNK, cfg.review.correctnessChunkLoc),
+    undefined,
+    contexts,
   );
   for (const s of plan.scope)
     emitReviewScope(s.sel, s.diff, promptIdentity(s.sel), s.cached, ctx.scopeFields, cwd);
@@ -416,3 +431,5 @@ export async function runReviewGate(
   if (inconclusive.length > 0) return finish(strict ? 3 : 2);
   return finish(0);
 }
+import { prepareContext, type PreparedContext } from './evidence/context/packets.mts';
+import { prepareContextSource, resolveContextMode } from './evidence/context/source.mts';

@@ -680,6 +680,7 @@
         "implementation": [
           "gate-engine/review/run-review.mts",
           "gate-engine/review/reviewers.mts",
+          "gate-engine/review/evidence/context/*.mts",
           "agents/correctness-reviewer.md",
           "skills/correctness/**"
         ],

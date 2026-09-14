@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "executionHash": "2efa55ba600afa0ef4bbe9268a7e852ed57bdfb4d5ef46a858d48b4ab5891b00",
+  "sourceFilesVerified": 975,
+  "candidateNativeResultSha256": "5600495c05fb80b9d64878807f2c3b590e0a58f91111576a77710750d6194145",
+  "candidatePublicResultSha256": "2c84130c2bc10017911dcb04038766ded8ef9352211d63b58ad39f2be05ac1a2",
+  "baselineResultSha256": "ad5926b032da206d00a362143254788ed9ef82e960117f91b7016de2d109cefc",
+  "completedTasksRerun": 0,
+  "ledgerHashes": [
+    {
+      "invocation": "pipeline-run",
+      "sha256": "a8477fbec67a7c51dcf61897d7b1442c2731dea7b71c6bf56ae6dd41bac1499c"
+    },
+    {
+      "invocation": "pipeline-resume-1",
+      "sha256": "82bf4c853546584007515c2849b3bf7b7d08dd638630f51109cb6bf566cedd68"
+    }
+  ]
+}

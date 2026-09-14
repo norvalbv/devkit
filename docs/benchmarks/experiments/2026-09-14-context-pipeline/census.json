@@ -1,0 +1,1753 @@
+{
+  "mode": "bounded-v1",
+  "judgeCalls": 0,
+  "rows": 285,
+  "tasks": 1206,
+  "chunkedRows": 4,
+  "controlTasks": 1164,
+  "privateCensusSha256": "a88aa33066b9b53682ab35f2e2a8e6c0b63c3d6f553a9e9106e8c89d7d6b3eba",
+  "rowsCensus": [
+    {
+      "id": "corr-discarded-resume-return",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-retry-stuck-unclaimable",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-revive-user-cancelled",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-stale-failure-reasons",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-stale-checklist-artifact",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-reopen-before-cas-strands",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-submit-latch-stuck",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-nearexpiry-permanent-reauth",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-unguarded-unpark-clobber",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-guarded-result-ignored-mode-flip",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-read-then-write-clobber-terminal",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-lock-timeout-runs-unlocked",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-retry-broadcast-double-fire",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-json-string-result-dropped",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-group-map-last-write-wins",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-sync-source-target-divergence",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-persist-unnormalized-signal",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-manifest-unknown-version-wiped",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-field-validated-wrong-state",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-loose-cmd-classifier-anchor",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-loose-json-error-classifier",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-swallowed-config-parse-bypass",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-exit-code-only-one-fails",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-only-selector-silent-drop",
+      "chunkCount": 7,
+      "taskCount": 22,
+      "cap": 400
+    },
+    {
+      "id": "corr-execfile-cmd-shim-swallowed",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-asymmetric-flip-classifier",
+      "chunkCount": 7,
+      "taskCount": 22,
+      "cap": 400
+    },
+    {
+      "id": "corr-reminder-ignores-plan-mode",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-decoy-cas-guarded-write",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-decoy-conditional-update",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-decoy-select-for-update",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-decoy-targeted-broadcast",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-decoy-parses-json-string-result",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-decoy-tight-anchor-classifier",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-decoy-retry-reset-counter",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-decoy-exit-code-fail-closed",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-decoy-catch-rethrows",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-decoy-return-checked-fails-closed",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-decoy-only-validated",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-xdomain-sqli",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-xdomain-nplusone",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-xdomain-xss",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-xdomain-render",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-decoy-reset-failure-reasons",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-decoy-clears-stale-artifact",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-retry-leaves-stale-error",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-decoy-retry-clears-error",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-empty-recompute-keeps-stale",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-decoy-empty-recompute-clears",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-early-exit-status-bypassed",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-decoy-early-exit-preserved",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-early-exit-loop-break-dropped",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-decoy-loop-break-preserved",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-outage-exit-code-downgraded",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-decoy-outage-exit-preserved",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-worktree-leak-no-finally",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-decoy-worktree-finally",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-lock-not-released-on-throw",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-decoy-lock-finally",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-fs-check-then-act-race",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-decoy-fs-recursive-mkdir",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-timer-debounce-double-fire",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-decoy-timer-debounce-clears",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-signature-change-callsite-missed",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-decoy-signature-callsite-updated",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-broadcast-fanout-no-dedup",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-decoy-broadcast-targeted",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-pr138-ci-breaking-gate-engine-coverage-pair",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-pr138-ci-breaking-gate-engine-coverage",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-pr172-duplicate-let-spawnoptions-declaration-pair",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-pr172-duplicate-let-spawnoptions-declaration",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-pr200-important-pair",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-pr200-important",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-pr200-ref-mutated-during-render-move-pair",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-pr200-ref-mutated-during-render-move",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-pr21-fail-closed-when-the-remote-pair",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-pr21-fail-closed-when-the-remote",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-pr21-validate-the-parsed-github-repo-pair",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-pr21-validate-the-parsed-github-repo",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-pr26-cover-the-restart-interrupted-flow-pair",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-pr26-cover-the-restart-interrupted-flow",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-pr26-keep-the-mcp-inputschema-in-pair",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-pr26-keep-the-mcp-inputschema-in",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-pr38-check-the-full-r2-credential-pair",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-pr38-check-the-full-r2-credential",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-pr38-require-the-full-azure-signing-pair",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-pr38-require-the-full-azure-signing",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-pr48-cn-ts-src-pair",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-pr48-cn-ts-src",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-pr59-guard-config-json-pair",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-pr59-guard-config-json",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-pr1-clear-persisted-checklist-state-before-pair",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-pr1-clear-persisted-checklist-state-before",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-pr1-preserve-the-guard-exit-code-pair",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-pr1-preserve-the-guard-exit-code",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-pr1-return-exit-3-for-detect-pair",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-pr1-return-exit-3-for-detect",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-pr23-keep-init-aligned-with-the-pair",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-pr23-keep-init-aligned-with-the",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-pr26-block-parked-answer-sends-when-pair",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-pr26-block-parked-answer-sends-when",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-pr26-do-not-let-terminal-signals-pair",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-pr26-do-not-let-terminal-signals",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-pr28-include-bun-lock-in-the-pair",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-pr28-include-bun-lock-in-the",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-pr52-don-t-down-rank-recorded-pair",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-pr52-don-t-down-rank-recorded",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-pr52-use-frink-no-log-in-pair",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-pr52-use-frink-no-log-in",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-pr59-expand-knip-config-detection-pair",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-pr59-expand-knip-config-detection",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-pr59-use-a-portable-whitespace-class-pair",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-pr59-use-a-portable-whitespace-class",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-pr60-avoid-leaving-the-member-in-pair",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-pr60-avoid-leaving-the-member-in",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-pr60-make-the-batch-reopen-atomic-pair",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-pr60-make-the-batch-reopen-atomic",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-pr60-node-modules-pair",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-pr60-node-modules",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-pr61-keep-the-carry-on-state-pair",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-pr61-keep-the-carry-on-state",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-tel-append-uniqueness-check-unlocked-pair",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-tel-append-uniqueness-check-unlocked",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-tel-floor-flips-assigned-flag-pair",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-tel-floor-flips-assigned-flag",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-tel-shared-merge-key-unfiltered-writer-pair",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-tel-shared-merge-key-unfiltered-writer",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-tel-validate-after-lint-rejected-shape-pair",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-tel-validate-after-lint-rejected-shape",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-tel-banner-ratio-masks-logic-line-pair",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-tel-banner-ratio-masks-logic-line",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-tel-banner-stray-line-excusal-pair",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-tel-banner-stray-line-excusal",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-tel-loose-closer-absorbs-statement-pair",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-tel-loose-closer-absorbs-statement",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-tel-person-branch-bot-reply-pair",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-tel-person-branch-bot-reply",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-tel-scoped-sweep-first-subentry-pair",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-tel-scoped-sweep-first-subentry",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-tel-suffix-decl-enters-list-state-pair",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-tel-suffix-decl-enters-list-state",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-asymmetric-flip-classifier-repaired",
+      "chunkCount": 6,
+      "taskCount": 19,
+      "cap": 400
+    },
+    {
+      "id": "corr-json-string-result-dropped-repaired",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-lock-timeout-runs-unlocked-repaired",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-only-selector-silent-drop-repaired",
+      "chunkCount": 6,
+      "taskCount": 19,
+      "cap": 400
+    },
+    {
+      "id": "corr-read-then-write-clobber-terminal-repaired",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-retry-stuck-unclaimable-repaired",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-async-view-unmounted-retry-repaired",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-async-view-unmounted-retry",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-abandoned-browser-launch-link-repaired",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-abandoned-browser-launch-link",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-bracketed-host-port-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-command-block-argument-boundary-repaired",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-command-block-argument-boundary",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-delete-reserved-prefix-recovery-repaired",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-delete-reserved-prefix-recovery",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-deleted-branch-attribution-repaired",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-deleted-branch-attribution",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-empty-home-override-repaired",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-empty-home-override",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-empty-middleware-path-repaired",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-empty-middleware-path",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-failed-audio-cooldown-repaired",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-failed-audio-cooldown",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-parameter-cache-loses-outcome-repaired",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-parameter-cache-loses-outcome",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-query-punctuation-routing-repaired",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-query-punctuation-routing",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-reply-draft-expiration-repaired",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-reply-draft-expiration",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-unparsed-import-graph-repaired",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-unparsed-import-graph",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-cache-resource-key-repaired",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-cache-resource-key",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-eslint-arrow-parens-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-eslint-arrow-spacing-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-eslint-brace-style-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-eslint-comma-dangle-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-eslint-max-statements-per-line-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-eslint-no-useless-rename-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-eslint-prefer-template-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-eslint-sort-vars-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-array-conversion-options-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-array-definition-ownership-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-child-save-event-payload-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-document-array-owner-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-document-update-result-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-enum-message-scope-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-export-list-traversal-repaired",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-export-list-traversal",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-nested-default-projection-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-query-projection-slice-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-eslint-consistent-this-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-eslint-func-call-spacing-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-eslint-func-style-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-eslint-id-length-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-eslint-no-cond-assign-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-eslint-no-empty-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-eslint-no-loop-func-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-eslint-no-magic-numbers-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-eslint-no-multiple-empty-lines-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-eslint-no-sequences-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-eslint-no-spaced-func-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-eslint-no-unused-expressions-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-eslint-no-unused-vars-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-eslint-object-curly-spacing-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-eslint-operator-assignment-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-eslint-prefer-destructuring-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-eslint-quotes-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-eslint-space-infix-ops-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-eslint-spaced-comment-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-eslint-valid-typeof-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-current-route-root-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-empty-taxonomy-values-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-heading-text-projection-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-home-route-classification-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-pagination-page-context-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-relative-social-image-url-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-sparse-document-validation-repaired",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-sparse-document-validation",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-statement-separator-repaired",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-statement-separator",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-eslint-func-names-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-eslint-generator-star-spacing-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-eslint-init-declarations-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-eslint-line-comment-position-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-eslint-lines-around-comment-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-eslint-newline-before-return-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-eslint-newline-per-chained-call-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-eslint-no-await-in-loop-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-eslint-no-constant-condition-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-eslint-no-extra-semi-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-eslint-no-fallthrough-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-eslint-no-implied-eval-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-eslint-no-lone-blocks-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-eslint-no-return-assign-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-eslint-no-shadow-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-eslint-no-useless-computed-key-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-eslint-nonblock-statement-body-position-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-eslint-object-shorthand-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-eslint-prefer-arrow-callback-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-eslint-unicode-bom-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-eslint-use-isnan-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-array-regexp-query-options-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-binary-asset-content-corruption",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-cached-utf8-byte-ranges",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-cli-option-precedence-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-connection-parser-reset-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-date-minimization-preservation-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-delete-query-filter-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-extended-glob-watch-roots",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-initial-file-change-notification-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-ipv6-own-origin-formatting",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-live-client-configuration-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-missing-parent-value-contract-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-nested-array-dirty-collapse-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-optional-client-options-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-overlapping-pattern-inclusion",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-parent-traversal-glob-normalization",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-pending-file-list-serving-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-pipeline-buffer-preservation-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-positional-reference-schema-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-processed-content-digest-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-processed-file-extension-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-runner-exit-trailer-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-server-load-error-exit-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-subscription-channel-restoration-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-top-level-version-schema-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-transaction-command-callback-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-version-save-callback-error-escape",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-atomic-query-population-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-comment-adjacent-fix-ranges-repaired",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-comment-adjacent-fix-ranges",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-destructured-edge-underscores",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-diagnostic-column-contract",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-empty-super-argument-traversal",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-missing-population-position-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-populated-query-lean-mode-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-population-projection-token-prefix",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-repopulation-error-loses-documents",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-reused-population-limit-compounds",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-saved-reference-depopulation-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-unregistered-population-model-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    },
+    {
+      "id": "corr-upsert-absent-original-document-clean",
+      "chunkCount": 0,
+      "taskCount": 4,
+      "cap": 400
+    }
+  ],
+  "sourceDiagnostics": [
+    {
+      "role": "bug",
+      "family": "family-001",
+      "qualification": "target-controlled",
+      "judgeCalls": 0,
+      "tasks": 49,
+      "receiptSha256": "d621aa2cdc2136ae974eef66336d7fa71e3d0212a725e20dc0f29c2b86847442",
+      "bestSuppliedLinesByLens": {
+        "concurrency-races": [24, 0, 0],
+        "error-and-edge-classification": [24, 0, 0],
+        "state-transitions": [24, 0, 0],
+        "writer-reader-contracts": [13, 0, 0]
+      },
+      "requiredLines": [24, 18, 9]
+    },
+    {
+      "role": "repair",
+      "family": "family-001",
+      "qualification": "target-controlled",
+      "judgeCalls": 0,
+      "tasks": 49,
+      "receiptSha256": "fa59c562c6342a04f45787aa7a66f722c7db58b8a504937b1f55f882d30cc122",
+      "bestSuppliedLinesByLens": {
+        "concurrency-races": [24, 0, 0],
+        "error-and-edge-classification": [24, 0, 0],
+        "state-transitions": [24, 0, 0],
+        "writer-reader-contracts": [14, 0, 0]
+      },
+      "requiredLines": [24, 18, 9]
+    }
+  ]
+}

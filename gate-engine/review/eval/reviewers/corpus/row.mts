@@ -10,7 +10,13 @@ import { parseReviewVerdict, selectReviewers } from '../../../reviewers.mts';
 import { runCascade } from '../../../run-review.mts';
 import { gateJudgeEnv } from '../../../runtime.mts';
 import { BENCH_REVIEWERS, buildAssets, rowHashes } from '../corpus.mts';
-import { BENCH_CHUNK_LOC, BENCH_LENS_GROUPS, executePlan, planFixture } from './chunk-guard.mts';
+import {
+  BENCH_CHUNK_LOC,
+  BENCH_LENS_GROUPS,
+  BENCH_CONTEXT_MODE,
+  executePlan,
+  planFixture,
+} from './chunk-guard.mts';
 import { subcause } from '../stats.mts';
 const MODEL = process.env.BENCH_MODEL ?? 'sonnet';
 const CASCADE = (process.env.BENCH_CASCADE ?? 'on') !== 'off';
@@ -125,6 +131,7 @@ export async function executeFixture(
     exec,
     cap = BENCH_CHUNK_LOC,
     groups = BENCH_LENS_GROUPS,
+    contextMode = BENCH_CONTEXT_MODE,
     savedTasks,
     onTask,
     reviewerName = row.reviewer,
@@ -154,7 +161,7 @@ export async function executeFixture(
     if (!sel)
       // Selection itself is under test: a row whose staged files don't reach its reviewer is wrong.
       return { selected: false };
-    const plan = planFixture(sel, fx.repo, { cap, groups });
+    const plan = planFixture(sel, fx.repo, { cap, groups, contextMode });
     const opts = {
       cwd: fx.repo,
       cfg,

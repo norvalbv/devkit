@@ -30,7 +30,7 @@ export function emitReviewChunkPlan(
   plan: ChunkPlanFacts,
   chunks: ChunkPlanEntry[],
 ): void {
-  emitGateEvent({
+  const event = {
     type: 'review_chunk_plan',
     reviewer,
     armed: 1,
@@ -38,5 +38,8 @@ export function emitReviewChunkPlan(
     chunk_cap_bytes: plan.capBytes,
     chunk_plan_hash: plan.planHash,
     chunks,
-  });
+  };
+  if (plan.evidenceMode)
+    Object.assign(event, { evidence_mode: plan.evidenceMode, sizing_unit: plan.sizingUnit });
+  emitGateEvent(event);
 }

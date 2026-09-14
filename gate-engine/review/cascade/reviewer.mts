@@ -1,5 +1,6 @@
 import type { GuardConfig } from '../../config.mts';
 import { judgeBinForModel } from '../../judge/codex/result.mts';
+import { emitGateEvent } from '../../judge/gate-events.mts';
 import { JUDGE_ISOLATION } from '../../judge/judge-isolation.mts';
 import { namedAgentMcpProfile } from '../../judge/mcp/profile.mts';
 import type { JudgeOutage } from '../../judge/outage/classify.mts';
@@ -124,7 +125,7 @@ export async function runCascade(
     );
     const disposition = applyOverrideValve(sel, res, cwd, {
       readState: () => readChecklistState(cwd, sel.reviewer),
-      stagedDiff: () => gitCached(cwd, [], sel.files),
+      stagedDiff: () => sel.evidencePacket?.ownedDiff ?? gitCached(cwd, [], sel.files),
     });
     attachItems(res, readChecklistState(cwd, sel.reviewer) ?? captureState, disposition, {
       full: opts.fullItems,
@@ -136,7 +137,7 @@ export async function runCascade(
 }
 
 async function cascadeVerdict(
-  { reviewer, files }: ReviewerSelection,
+  { reviewer, files, evidencePacket }: ReviewerSelection,
   {
     cwd,
     cfg,
@@ -171,9 +172,11 @@ async function cascadeVerdict(
     };
   // Both forms name every staged file; only the checklist reviewers have the Bash to verify a churn
   // count, so the Bash-less one is given the inventory without it.
-  const inventory = hasChecklist(reviewer)
-    ? gitCached(cwd, ['--stat'], files)
-    : `STAGED FILES (complete inventory):\n${gitCached(cwd, ['--name-only'], files)}`;
+  const inventory = evidencePacket
+    ? ''
+    : hasChecklist(reviewer)
+      ? gitCached(cwd, ['--stat'], files)
+      : `STAGED FILES (complete inventory):\n${gitCached(cwd, ['--name-only'], files)}`;
   const prompt = hasChecklist(reviewer)
     ? wrapPrompt(
         body,
@@ -181,7 +184,9 @@ async function cascadeVerdict(
         files,
         assetRoot,
         checklistRecoveryReason,
-        promptExtras,
+        evidencePacket
+          ? { ...promptExtras, evidenceInstructions: evidencePacket.instructions }
+          : promptExtras,
         checklistRoot,
       )
     : wrapConventionsPrompt(body, files, renderGoverningClaudeMd(cwd, files), {
@@ -189,8 +194,10 @@ async function cascadeVerdict(
         lineCountBlock: renderStagedLineCounts(cwd, files),
       });
   const responseContract = responseContractFor(reviewer.responseContract);
-  const input = buildCappedDiffEvidence(gitCached(cwd, [], files), inventory);
-  const allowedTools = allowedToolsFor(reviewer, cfg, checklistRoot);
+  const input =
+    evidencePacket?.input ?? buildCappedDiffEvidence(gitCached(cwd, [], files), inventory);
+  const allowedTools =
+    allowedToolsFor(reviewer, cfg, checklistRoot) + (evidencePacket ? ',Bash(git show:*)' : '');
   const mcpProfile = namedAgentMcpProfile();
   const args = (promptBody: string, model: string): string[] => [
     '-p',
@@ -205,6 +212,13 @@ async function cascadeVerdict(
   // Per-lens spend attribution: every split part deliberately shares one judge LABEL (the reviewer
   // identity the caches and warehouse key on), so the lens rides the judge_exec event as its own field.
   const lens = reviewer.lens?.length ? lensGroupId(reviewer.lens) : undefined;
+  if (evidencePacket)
+    emitGateEvent({
+      type: 'review_evidence',
+      reviewer: reviewer.name,
+      lens,
+      evidence: evidencePacket.receipt,
+    });
   let firstOutage: JudgeOutage | undefined;
   const firstOpts = {
     label: `review:${reviewer.name}`,

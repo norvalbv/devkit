@@ -24,6 +24,8 @@ import { readTranscript } from '../judge/transcript-store.mts';
 import { clearCache, loadCache } from './cache.mts';
 import { runCompleteness } from './completeness.mts';
 import { gitCached, stagedFiles } from './evidence/staged-git.mts';
+import { prepareContext, type PreparedContext } from './evidence/context/packets.mts';
+import { prepareContextSource, resolveContextMode } from './evidence/context/source.mts';
 import { loadReviewerTargetsBlocks, reviewerTargetSalts } from './evidence/targets-block.mts';
 import { planReviewWork, resolveChunkCap, resolveLensGroups } from './lens/split.mts';
 import { cacheKey, resolveEscalationModel, resolveReviewModel } from './reviewers.mts';
@@ -61,6 +63,13 @@ async function printReviewScan(cwd: string): Promise<void> {
     resolveEscalationModel(cfg),
   );
   const diffs = sels.map((selection) => gitCached(cwd, [], selection.files));
+  const contexts = new Map<string, PreparedContext>();
+  if (resolveContextMode())
+    for (const [index, selection] of sels.entries()) {
+      if (selection.reviewer.name !== 'correctness-reviewer') continue;
+      const source = prepareContextSource(cwd, selection.files);
+      contexts.set(selection.reviewer.name, prepareContext(source, diffs[index]));
+    }
   // Same consumer-cwd chunk resolution as the gate (W-3) — a divergent default here would make
   // scan disagree with the gate's plan on configured installs.
   const plan = planReviewWork(
@@ -71,6 +80,8 @@ async function printReviewScan(cwd: string): Promise<void> {
     cacheKey,
     resolveLensGroups(),
     resolveChunkCap(process.env.GUARD_CORRECTNESS_CHUNK, cfg.review.correctnessChunkLoc),
+    undefined,
+    contexts,
   );
   for (const { sel, cached } of plan.scope) {
     console.log(`${sel.reviewer.name}${cached ? ' [cached PASS]' : ''}: ${sel.files.join(', ')}`);

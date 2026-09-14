@@ -70,6 +70,7 @@ export function hasChecklist(reviewer: Reviewer): reviewer is ChecklistReviewer 
 export interface ReviewerSelection {
   reviewer: Reviewer;
   files: string[];
+  evidencePacket?: import('./evidence/context/packets.mts').EvidencePacket;
 }
 
 /**
@@ -310,6 +311,7 @@ export interface PromptExtras {
   targetsBlock?: string;
   commitMsgBlock?: string;
   lineCountBlock?: string;
+  evidenceInstructions?: string;
 }
 
 /**
@@ -325,7 +327,7 @@ export function wrapPrompt(
   files: string[],
   assetRoot?: string,
   checklistRecoveryReason?: string,
-  { targetsBlock = '', commitMsgBlock = '' }: PromptExtras = {},
+  { targetsBlock = '', commitMsgBlock = '', evidenceInstructions = '' }: PromptExtras = {},
   checklistRoot = assetRoot ?? '.claude',
 ): string {
   const effectiveAssetRoot = checklistRoot;
@@ -340,10 +342,12 @@ export function wrapPrompt(
     'You are running as an automated HEADLESS COMMIT GATE, not an interactive assistant.\n' +
     `Review ONLY the STAGED changes (domain: ${reviewer.domain}). Staged files in scope: ${files.join(', ')}.\n` +
     'Reviewer selection has already been performed. Treat that staged-file list as authoritative; do not re-evaluate the brief trigger conditions or skip because repository configuration has empty roots.\n' +
-    'The file/churn map (--stat) followed by per-file diff evidence is on stdin. Evidence is ' +
-    'capped per file and in total; anything the caps dropped is NAMED inline (OMITTED:/[TRUNCATED:). ' +
-    'INVESTIGATE before judging: run `git diff --cached -- <file>` for the full hunks whenever ' +
-    'evidence was capped or a hunk alone is ambiguous, and Read surrounding code as needed.\n' +
+    (evidenceInstructions
+      ? `Assigned lens(es): ${reviewer.lens?.join(', ') || 'all correctness lenses'}.\n${evidenceInstructions}`
+      : 'The file/churn map (--stat) followed by per-file diff evidence is on stdin. Evidence is ' +
+        'capped per file and in total; anything the caps dropped is NAMED inline (OMITTED:/[TRUNCATED:). ' +
+        'INVESTIGATE before judging: run `git diff --cached -- <file>` for the full hunks whenever ' +
+        'evidence was capped or a hunk alone is ambiguous, and Read surrounding code as needed.\n') +
     // sc-1441: the recorded Targets are what let a reviewer judge a diff against the product's own
     // boundary — the mechanical difference between the completeness gate (which caught a real
     // deny-floor bug by citing its governing Target) and the context-starved domain reviewers
