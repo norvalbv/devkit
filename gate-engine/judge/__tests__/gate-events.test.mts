@@ -5,7 +5,13 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { devkitVersion } from '../../devkit-version.mts';
 import { emitCacheHit, emitGateEvent, emitGateTiming } from '../gate-events.mts';
 
-const SHIP_ENV = ['DEVKIT_GATE_EVENTS', 'DEVKIT_SHIP_ID', 'DEVKIT_SHIP_REPO', 'DEVKIT_SHIP_BRANCH'];
+const SHIP_ENV = [
+  'DEVKIT_GATE_EVENTS',
+  'DEVKIT_SHIP_ID',
+  'DEVKIT_SHIP_REPO',
+  'DEVKIT_SHIP_BRANCH',
+  'CLAUDE_CODE_SESSION_ID',
+];
 
 describe('emitGateEvent', () => {
   // A DEVKIT_SHIP_ID puts every case on the ship path, so the DEVKIT_NO_TELEMETRY default (set to '1'
@@ -68,6 +74,28 @@ describe('emitGateEvent', () => {
     process.env.DEVKIT_GATE_EVENTS = sink;
     emitGateEvent({ type: 'gate_result', gate: 'size', status: 'fail' });
     expect(JSON.parse(readFileSync(sink, 'utf8').trim())).toMatchObject({ repo: '', branch: '' });
+  });
+
+  it("adds the root agent's parent_session_id without clobbering a judge's own session_id", () => {
+    const sink = path.join(dir, 'gate-events.jsonl');
+    process.env.DEVKIT_GATE_EVENTS = sink;
+    process.env.CLAUDE_CODE_SESSION_ID = 'root-1';
+    emitGateEvent({ type: 'judge_exec', judge: 'review:correctness', session_id: 'judge-own' });
+    // The envelope owns the key: an event cannot forge a different parent.
+    emitGateEvent({ type: 'gate_result', gate: 'size', parent_session_id: 'forged' });
+    const [judge, gate] = readFileSync(sink, 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l));
+    expect(judge).toMatchObject({ session_id: 'judge-own', parent_session_id: 'root-1' });
+    expect(gate.parent_session_id).toBe('root-1');
+  });
+
+  it('omits parent_session_id when no agent session launched the run', () => {
+    const sink = path.join(dir, 'gate-events.jsonl');
+    process.env.DEVKIT_GATE_EVENTS = sink;
+    emitGateEvent({ type: 'gate_result', gate: 'size', status: 'pass' });
+    expect(JSON.parse(readFileSync(sink, 'utf8').trim())).not.toHaveProperty('parent_session_id');
   });
 
   it('emitCacheHit rides the judge_exec label, so hit rate needs no join', () => {

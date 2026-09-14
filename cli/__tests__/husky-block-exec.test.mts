@@ -849,6 +849,20 @@ describe('commit-terminal telemetry (real temp git repo)', () => {
     expect(t.ts).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
   });
 
+  it.each([
+    ['hook-sess-1', 'hook-sess-1'],
+    ['', undefined],
+    ['x"y z', undefined],
+  ])(
+    'commit_result parent_session_id for %j (a malformed id never tears the line)',
+    (value, expected) => {
+      const r = runHookInRepo({ CLAUDE_CODE_SESSION_ID: value });
+      expect(r.status).toBe(0);
+      const terminal = r.events.find((e) => e.type === 'commit_result');
+      expect(terminal.parent_session_id).toBe(expected);
+    },
+  );
+
   it('two attempts with identical staged content receive distinct ids', () => {
     const first = runHookInRepo();
     const second = runHookInRepo();

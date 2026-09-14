@@ -54,6 +54,17 @@ export function originatingAgent(): 'claude' | 'codex' | 'unknown' {
   return 'unknown';
 }
 
+const PARENT_SESSION_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+
+/**
+ * The ROOT Claude Code session that caused this run (a Task subagent reports its root's id), or
+ * undefined when absent/malformed — omitted, never '', so no fake session bucket forms downstream.
+ */
+export function parentSessionId(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  const id = env.CLAUDE_CODE_SESSION_ID;
+  return id !== undefined && PARENT_SESSION_ID_RE.test(id) ? id : undefined;
+}
+
 /** The telemetry JSONL sink: the ship's DEVKIT_GATE_EVENTS, else the every-commit default, else none. */
 export function telemetrySink(): string | undefined {
   return (
@@ -171,17 +182,24 @@ export function runId(): string | null {
  * (sc-1239). The ship path exports its own repo/branch (commit-with-gate-capture.sh); absent (an
  * older/hand-set DEVKIT_SHIP_ID) they degrade to '' rather than mislabelling the run.
  */
+interface RunIdentity {
+  source: ReturnType<typeof originatingAgent>;
+  devkit_version: string;
+  parent_session_id?: string;
+}
+
 export function runEnvelope(): Record<string, unknown> {
-  const source = originatingAgent();
-  const runningVersion = devkitVersion();
+  const identity: RunIdentity = { source: originatingAgent(), devkit_version: devkitVersion() };
+  // parent_session_id is envelope-owned; an event's own `session_id` (a judge's session) is distinct.
+  const parent = parentSessionId();
+  if (parent) identity.parent_session_id = parent;
   const ship = process.env.DEVKIT_SHIP_ID;
   if (ship)
     return {
       ship_id: ship,
       repo: process.env.DEVKIT_SHIP_REPO ?? '',
       branch: process.env.DEVKIT_SHIP_BRANCH ?? '',
-      source,
-      devkit_version: runningVersion,
+      ...identity,
     };
   const review = process.env.DEVKIT_REVIEW_ID;
   if (review)
@@ -190,8 +208,7 @@ export function runEnvelope(): Record<string, unknown> {
       run_mode: 'review',
       repo: process.env.DEVKIT_REVIEW_REPO ?? '',
       branch: process.env.DEVKIT_REVIEW_BRANCH ?? '',
-      source,
-      devkit_version: runningVersion,
+      ...identity,
     };
   // An agent invocation has no staged tree to describe, and deriving one would cost a `git
   // write-tree` whose id is precisely what must NOT be shared here. Repo/branch come from plain
@@ -204,8 +221,7 @@ export function runEnvelope(): Record<string, unknown> {
       run_mode: 'agent',
       repo: repoName(top),
       branch: git(['rev-parse', '--abbrev-ref', 'HEAD']) || '',
-      source,
-      devkit_version: runningVersion,
+      ...identity,
     };
   }
   const ctx = telemetryEnabled() ? commitRunContext() : null;
@@ -216,8 +232,7 @@ export function runEnvelope(): Record<string, unknown> {
     commit_tree: ctx.tree,
     repo: ctx.repo,
     branch: ctx.branch,
-    source,
-    devkit_version: runningVersion,
+    ...identity,
   };
 }
 
