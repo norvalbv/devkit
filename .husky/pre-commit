@@ -238,7 +238,7 @@ echo "🔍 Reviewer gate (headless domain judges)..."
 # shared verdict store, so the commit-msg gate re-judges it as a cache hit — the deep completeness
 # judgement overlaps the fleet instead of following it. Interactive commits (no message yet) are
 # unchanged. Lifetime is scoped to this hook: the judge is either wait'ed on or killed AND reaped
-# below — nothing outlives the hook to hold git's output pipe open. Review mode is excluded — it
+# below — nothing outlives the hook to hold git's output pipe open. Review and dry-gates modes are excluded — review
 # exports the SAME env as its reviewer intent file (review-target.sh), but completeness is a
 # commit gate, not part of a range review.
 #
@@ -246,7 +246,7 @@ echo "🔍 Reviewer gate (headless domain judges)..."
 # subshell, which would make $! a wrapper whose death leaves the judge orphaned and running. See
 # review-fragments.mts.
 comp_pid=""
-if [ "${DEVKIT_RUN_MODE:-}" != "review" ] && [ -n "${DEVKIT_COMMIT_MSG_FILE:-}" ] && [ -f "${DEVKIT_COMMIT_MSG_FILE:-}" ]; then
+if [ "${DEVKIT_RUN_MODE:-}" != "review" ] && [ "${DEVKIT_RUN_MODE:-}" != "dry-gates" ] && [ -n "${DEVKIT_COMMIT_MSG_FILE:-}" ] && [ -f "${DEVKIT_COMMIT_MSG_FILE:-}" ]; then
     echo "🧩 Completeness judge started in parallel (ship message known)..."
     env -u GIT_ALTERNATE_OBJECT_DIRECTORIES -u GIT_CONFIG -u GIT_CONFIG_PARAMETERS -u GIT_CONFIG_COUNT -u GIT_OBJECT_DIRECTORY -u GIT_DIR -u GIT_WORK_TREE -u GIT_IMPLICIT_WORK_TREE -u GIT_GRAFT_FILE -u GIT_INDEX_FILE -u GIT_NO_REPLACE_OBJECTS -u GIT_REPLACE_REF_BASE -u GIT_PREFIX -u GIT_SHALLOW_FILE -u GIT_COMMON_DIR -u GIT_GLOB_PATHSPECS -u GIT_NOGLOB_PATHSPECS -u GIT_LITERAL_PATHSPECS -u GIT_ICASE_PATHSPECS node gate-engine/review/cli.mts completeness --gate "$DEVKIT_COMMIT_MSG_FILE" & comp_pid=$!
 fi
