@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "eventId": "evt-2026-09-14-reviewer-correctness-66adb86b2fbe",
+  "changeType": "no-ship",
+  "candidateExecutionHash": "2efa55ba600afa0ef4bbe9268a7e852ed57bdfb4d5ef46a858d48b4ab5891b00",
+  "nativeResultSha256": "5600495c05fb80b9d64878807f2c3b590e0a58f91111576a77710750d6194145",
+  "publicResultSha256": "2c84130c2bc10017911dcb04038766ded8ef9352211d63b58ad39f2be05ac1a2",
+  "sourceFilesVerified": 975,
+  "checkpoint": {
+    "path": "docs/benchmarks/checkpoints/c3f596ff6939ef7a7d09d2a3e85d60fc10577518ad88e5579da8b8252efe327a.json",
+    "sha256": "c3f596ff6939ef7a7d09d2a3e85d60fc10577518ad88e5579da8b8252efe327a"
+  },
+  "measuredBeforeInstructionRestoration": true
+}

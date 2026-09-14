@@ -34,6 +34,7 @@
  */
 
 import { diffCacheIdentity } from '../../judge/diff-focus.mts';
+import { buildEvidencePacket, type PreparedContext } from '../evidence/context/packets.mts';
 import { planChunkedParts, resolveChunkCap } from './chunk-tasks.mts';
 import { deriveLensReviewer, lensGroupId, resolveLensGroups } from './groups.mts';
 // Re-exported so every existing importer's path keeps working after the guard-size split.
@@ -265,6 +266,7 @@ export function planReviewWork(
   groups = resolveLensGroups(),
   chunkCap = resolveChunkCap(),
   emitChunkPlan: typeof emitReviewChunkPlan = emitReviewChunkPlan,
+  contexts: ReadonlyMap<string, PreparedContext> = new Map(),
 ): {
   tasks: ReviewTask[];
   scope: { sel: ReviewerSelection; diff: string; cached: boolean }[];
@@ -283,6 +285,7 @@ export function planReviewWork(
     const sel = selected[i];
     const name = sel.reviewer.name;
     const salt = salts.get(name) ?? '';
+    const evidence = name === 'correctness-reviewer' ? contexts.get(name) : undefined;
     // Keys hash the diff's CACHE IDENTITY (sentry-additive lines normalized out) so a restage whose
     // only delta is the capture the sentry gate demanded keeps every earned PASS. Judges, transcripts
     // and scope rows still get the RAW diffs[i] — only the key input is normalized.
@@ -292,18 +295,9 @@ export function planReviewWork(
     // trigger — both fall through to the un-chunked shape with byte-identical keys.
     const chunked =
       split && chunkCap !== null
-        ? planChunkedParts(sel, diffs[i], idText, salt, keyOf, split, chunkCap)
+        ? planChunkedParts(sel, diffs[i], idText, salt, keyOf, split, chunkCap, evidence)
         : null;
-    if (chunked)
-      emitChunkPlan(
-        name,
-        {
-          count: chunked.facts.count,
-          capBytes: chunked.facts.capBytes,
-          planHash: chunked.facts.planHash,
-        },
-        chunked.planEntries,
-      );
+    if (chunked) emitChunkPlan(name, chunked.facts, chunked.planEntries);
     const parts: ReviewTask[] = chunked
       ? chunked.parts
       : split
@@ -316,6 +310,16 @@ export function planReviewWork(
             base: sel,
           }))
         : [{ sel, key: keyOf(name, idText, salt), diffText: diffs[i], base: sel }];
+    if (evidence)
+      for (const part of parts) {
+        const packet = buildEvidencePacket(evidence.source, part.sel.files, part.diffText);
+        part.sel = { ...part.sel, evidencePacket: packet };
+        part.key = keyOf(
+          name,
+          diffCacheIdentity(part.diffText),
+          `${part.key}|context:${packet.receipt.semanticHash}`,
+        );
+      }
     const allCached = parts.every((p) => Boolean(cache[p.key]));
     scope.push({ sel, diff: diffs[i], cached: allCached });
     if (allCached) {

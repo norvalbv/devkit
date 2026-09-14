@@ -1,0 +1,816 @@
+{
+  "schemaVersion": 1,
+  "scopes": {
+    "all": {
+      "okFirst": {
+        "all": {
+          "rows": 285,
+          "b": 15,
+          "c": 19,
+          "flips": [
+            "corr-asymmetric-flip-classifier ↑",
+            "corr-decoy-conditional-update ↑",
+            "corr-xdomain-nplusone ↑",
+            "corr-xdomain-render ↓",
+            "corr-decoy-lock-finally ↑",
+            "corr-decoy-signature-callsite-updated ↑",
+            "corr-broadcast-fanout-no-dedup ↓",
+            "corr-decoy-broadcast-targeted ↑",
+            "corr-pr200-important-pair ↑",
+            "corr-pr26-keep-the-mcp-inputschema-in-pair ↑",
+            "corr-pr26-block-parked-answer-sends-when-pair ↑",
+            "corr-pr52-don-t-down-rank-recorded-pair ↓",
+            "corr-pr52-use-frink-no-log-in-pair ↑",
+            "corr-pr59-expand-knip-config-detection-pair ↓",
+            "corr-pr59-expand-knip-config-detection ↓",
+            "corr-empty-home-override ↓",
+            "corr-ip-address-subdomains-clean ↓",
+            "corr-null-map-key-clean ↑",
+            "corr-eslint-arrow-parens-clean ↓",
+            "corr-nested-default-projection-clean ↑",
+            "corr-eslint-consistent-this-clean ↓",
+            "corr-eslint-no-empty-clean ↑",
+            "corr-empty-taxonomy-values-clean ↑",
+            "corr-heading-text-projection-clean ↑",
+            "corr-pagination-page-context-clean ↑",
+            "corr-eslint-func-names-clean ↓",
+            "corr-eslint-no-fallthrough-clean ↓",
+            "corr-live-client-configuration-clean ↑",
+            "corr-nested-array-dirty-collapse-clean ↑",
+            "corr-pending-file-list-serving-clean ↑",
+            "corr-pipeline-buffer-preservation-clean ↓",
+            "corr-runner-exit-trailer-clean ↓",
+            "corr-server-load-error-exit-clean ↓",
+            "corr-unregistered-population-model-clean ↓"
+          ],
+          "familyNetVotes": {
+            "b": 12,
+            "c": 16,
+            "p": 0.45825831964612007
+          }
+        },
+        "bugs": {
+          "rows": 105,
+          "b": 3,
+          "c": 1,
+          "flips": [
+            "corr-asymmetric-flip-classifier ↑",
+            "corr-broadcast-fanout-no-dedup ↓",
+            "corr-pr59-expand-knip-config-detection ↓",
+            "corr-empty-home-override ↓"
+          ],
+          "familyNetVotes": {
+            "b": 3,
+            "c": 1,
+            "p": 0.375
+          }
+        },
+        "clean": {
+          "rows": 180,
+          "b": 12,
+          "c": 18,
+          "flips": [
+            "corr-decoy-conditional-update ↑",
+            "corr-xdomain-nplusone ↑",
+            "corr-xdomain-render ↓",
+            "corr-decoy-lock-finally ↑",
+            "corr-decoy-signature-callsite-updated ↑",
+            "corr-decoy-broadcast-targeted ↑",
+            "corr-pr200-important-pair ↑",
+            "corr-pr26-keep-the-mcp-inputschema-in-pair ↑",
+            "corr-pr26-block-parked-answer-sends-when-pair ↑",
+            "corr-pr52-don-t-down-rank-recorded-pair ↓",
+            "corr-pr52-use-frink-no-log-in-pair ↑",
+            "corr-pr59-expand-knip-config-detection-pair ↓",
+            "corr-ip-address-subdomains-clean ↓",
+            "corr-null-map-key-clean ↑",
+            "corr-eslint-arrow-parens-clean ↓",
+            "corr-nested-default-projection-clean ↑",
+            "corr-eslint-consistent-this-clean ↓",
+            "corr-eslint-no-empty-clean ↑",
+            "corr-empty-taxonomy-values-clean ↑",
+            "corr-heading-text-projection-clean ↑",
+            "corr-pagination-page-context-clean ↑",
+            "corr-eslint-func-names-clean ↓",
+            "corr-eslint-no-fallthrough-clean ↓",
+            "corr-live-client-configuration-clean ↑",
+            "corr-nested-array-dirty-collapse-clean ↑",
+            "corr-pending-file-list-serving-clean ↑",
+            "corr-pipeline-buffer-preservation-clean ↓",
+            "corr-runner-exit-trailer-clean ↓",
+            "corr-server-load-error-exit-clean ↓",
+            "corr-unregistered-population-model-clean ↓"
+          ],
+          "familyNetVotes": {
+            "b": 11,
+            "c": 16,
+            "p": 0.34492845088243484
+          }
+        }
+      },
+      "okFinal": {
+        "all": {
+          "rows": 285,
+          "b": 15,
+          "c": 21,
+          "flips": [
+            "corr-asymmetric-flip-classifier ↑",
+            "corr-decoy-conditional-update ↑",
+            "corr-xdomain-nplusone ↑",
+            "corr-xdomain-render ↓",
+            "corr-decoy-lock-finally ↑",
+            "corr-decoy-signature-callsite-updated ↑",
+            "corr-broadcast-fanout-no-dedup ↓",
+            "corr-decoy-broadcast-targeted ↑",
+            "corr-pr200-important-pair ↑",
+            "corr-pr26-keep-the-mcp-inputschema-in-pair ↑",
+            "corr-pr38-check-the-full-r2-credential-pair ↑",
+            "corr-pr26-block-parked-answer-sends-when-pair ↑",
+            "corr-pr52-don-t-down-rank-recorded-pair ↓",
+            "corr-pr52-use-frink-no-log-in-pair ↑",
+            "corr-pr59-expand-knip-config-detection-pair ↓",
+            "corr-pr59-expand-knip-config-detection ↓",
+            "corr-empty-home-override ↓",
+            "corr-ip-address-subdomains-clean ↓",
+            "corr-null-map-key-clean ↑",
+            "corr-eslint-arrow-parens-clean ↓",
+            "corr-nested-default-projection-clean ↑",
+            "corr-eslint-consistent-this-clean ↓",
+            "corr-eslint-no-empty-clean ↑",
+            "corr-empty-taxonomy-values-clean ↑",
+            "corr-heading-text-projection-clean ↑",
+            "corr-pagination-page-context-clean ↑",
+            "corr-eslint-func-names-clean ↓",
+            "corr-eslint-no-fallthrough-clean ↓",
+            "corr-live-client-configuration-clean ↑",
+            "corr-nested-array-dirty-collapse-clean ↑",
+            "corr-pending-file-list-serving-clean ↑",
+            "corr-pipeline-buffer-preservation-clean ↓",
+            "corr-runner-exit-trailer-clean ↓",
+            "corr-server-load-error-exit-clean ↓",
+            "corr-population-projection-token-prefix ↑",
+            "corr-unregistered-population-model-clean ↓"
+          ],
+          "familyNetVotes": {
+            "b": 12,
+            "c": 17,
+            "p": 0.361594608053565
+          }
+        },
+        "bugs": {
+          "rows": 105,
+          "b": 3,
+          "c": 2,
+          "flips": [
+            "corr-asymmetric-flip-classifier ↑",
+            "corr-broadcast-fanout-no-dedup ↓",
+            "corr-pr59-expand-knip-config-detection ↓",
+            "corr-empty-home-override ↓",
+            "corr-population-projection-token-prefix ↑"
+          ],
+          "familyNetVotes": {
+            "b": 3,
+            "c": 2,
+            "p": 0.6875
+          }
+        },
+        "clean": {
+          "rows": 180,
+          "b": 12,
+          "c": 19,
+          "flips": [
+            "corr-decoy-conditional-update ↑",
+            "corr-xdomain-nplusone ↑",
+            "corr-xdomain-render ↓",
+            "corr-decoy-lock-finally ↑",
+            "corr-decoy-signature-callsite-updated ↑",
+            "corr-decoy-broadcast-targeted ↑",
+            "corr-pr200-important-pair ↑",
+            "corr-pr26-keep-the-mcp-inputschema-in-pair ↑",
+            "corr-pr38-check-the-full-r2-credential-pair ↑",
+            "corr-pr26-block-parked-answer-sends-when-pair ↑",
+            "corr-pr52-don-t-down-rank-recorded-pair ↓",
+            "corr-pr52-use-frink-no-log-in-pair ↑",
+            "corr-pr59-expand-knip-config-detection-pair ↓",
+            "corr-ip-address-subdomains-clean ↓",
+            "corr-null-map-key-clean ↑",
+            "corr-eslint-arrow-parens-clean ↓",
+            "corr-nested-default-projection-clean ↑",
+            "corr-eslint-consistent-this-clean ↓",
+            "corr-eslint-no-empty-clean ↑",
+            "corr-empty-taxonomy-values-clean ↑",
+            "corr-heading-text-projection-clean ↑",
+            "corr-pagination-page-context-clean ↑",
+            "corr-eslint-func-names-clean ↓",
+            "corr-eslint-no-fallthrough-clean ↓",
+            "corr-live-client-configuration-clean ↑",
+            "corr-nested-array-dirty-collapse-clean ↑",
+            "corr-pending-file-list-serving-clean ↑",
+            "corr-pipeline-buffer-preservation-clean ↓",
+            "corr-runner-exit-trailer-clean ↓",
+            "corr-server-load-error-exit-clean ↓",
+            "corr-unregistered-population-model-clean ↓"
+          ],
+          "familyNetVotes": {
+            "b": 11,
+            "c": 17,
+            "p": 0.26493089646101
+          }
+        }
+      }
+    },
+    "original": {
+      "okFirst": {
+        "all": {
+          "rows": 146,
+          "b": 5,
+          "c": 10,
+          "flips": [
+            "corr-asymmetric-flip-classifier ↑",
+            "corr-decoy-conditional-update ↑",
+            "corr-xdomain-nplusone ↑",
+            "corr-xdomain-render ↓",
+            "corr-decoy-lock-finally ↑",
+            "corr-decoy-signature-callsite-updated ↑",
+            "corr-broadcast-fanout-no-dedup ↓",
+            "corr-decoy-broadcast-targeted ↑",
+            "corr-pr200-important-pair ↑",
+            "corr-pr26-keep-the-mcp-inputschema-in-pair ↑",
+            "corr-pr26-block-parked-answer-sends-when-pair ↑",
+            "corr-pr52-don-t-down-rank-recorded-pair ↓",
+            "corr-pr52-use-frink-no-log-in-pair ↑",
+            "corr-pr59-expand-knip-config-detection-pair ↓",
+            "corr-pr59-expand-knip-config-detection ↓"
+          ],
+          "familyNetVotes": {
+            "b": 3,
+            "c": 9,
+            "p": 0.09228515625
+          }
+        },
+        "bugs": {
+          "rows": 75,
+          "b": 2,
+          "c": 1,
+          "flips": [
+            "corr-asymmetric-flip-classifier ↑",
+            "corr-broadcast-fanout-no-dedup ↓",
+            "corr-pr59-expand-knip-config-detection ↓"
+          ],
+          "familyNetVotes": {
+            "b": 2,
+            "c": 1,
+            "p": 0.625
+          }
+        },
+        "clean": {
+          "rows": 71,
+          "b": 3,
+          "c": 9,
+          "flips": [
+            "corr-decoy-conditional-update ↑",
+            "corr-xdomain-nplusone ↑",
+            "corr-xdomain-render ↓",
+            "corr-decoy-lock-finally ↑",
+            "corr-decoy-signature-callsite-updated ↑",
+            "corr-decoy-broadcast-targeted ↑",
+            "corr-pr200-important-pair ↑",
+            "corr-pr26-keep-the-mcp-inputschema-in-pair ↑",
+            "corr-pr26-block-parked-answer-sends-when-pair ↑",
+            "corr-pr52-don-t-down-rank-recorded-pair ↓",
+            "corr-pr52-use-frink-no-log-in-pair ↑",
+            "corr-pr59-expand-knip-config-detection-pair ↓"
+          ],
+          "familyNetVotes": {
+            "b": 3,
+            "c": 9,
+            "p": 0.09228515625
+          }
+        }
+      },
+      "okFinal": {
+        "all": {
+          "rows": 146,
+          "b": 5,
+          "c": 11,
+          "flips": [
+            "corr-asymmetric-flip-classifier ↑",
+            "corr-decoy-conditional-update ↑",
+            "corr-xdomain-nplusone ↑",
+            "corr-xdomain-render ↓",
+            "corr-decoy-lock-finally ↑",
+            "corr-decoy-signature-callsite-updated ↑",
+            "corr-broadcast-fanout-no-dedup ↓",
+            "corr-decoy-broadcast-targeted ↑",
+            "corr-pr200-important-pair ↑",
+            "corr-pr26-keep-the-mcp-inputschema-in-pair ↑",
+            "corr-pr38-check-the-full-r2-credential-pair ↑",
+            "corr-pr26-block-parked-answer-sends-when-pair ↑",
+            "corr-pr52-don-t-down-rank-recorded-pair ↓",
+            "corr-pr52-use-frink-no-log-in-pair ↑",
+            "corr-pr59-expand-knip-config-detection-pair ↓",
+            "corr-pr59-expand-knip-config-detection ↓"
+          ],
+          "familyNetVotes": {
+            "b": 3,
+            "c": 10,
+            "p": 0.057373046875
+          }
+        },
+        "bugs": {
+          "rows": 75,
+          "b": 2,
+          "c": 1,
+          "flips": [
+            "corr-asymmetric-flip-classifier ↑",
+            "corr-broadcast-fanout-no-dedup ↓",
+            "corr-pr59-expand-knip-config-detection ↓"
+          ],
+          "familyNetVotes": {
+            "b": 2,
+            "c": 1,
+            "p": 0.625
+          }
+        },
+        "clean": {
+          "rows": 71,
+          "b": 3,
+          "c": 10,
+          "flips": [
+            "corr-decoy-conditional-update ↑",
+            "corr-xdomain-nplusone ↑",
+            "corr-xdomain-render ↓",
+            "corr-decoy-lock-finally ↑",
+            "corr-decoy-signature-callsite-updated ↑",
+            "corr-decoy-broadcast-targeted ↑",
+            "corr-pr200-important-pair ↑",
+            "corr-pr26-keep-the-mcp-inputschema-in-pair ↑",
+            "corr-pr38-check-the-full-r2-credential-pair ↑",
+            "corr-pr26-block-parked-answer-sends-when-pair ↑",
+            "corr-pr52-don-t-down-rank-recorded-pair ↓",
+            "corr-pr52-use-frink-no-log-in-pair ↑",
+            "corr-pr59-expand-knip-config-detection-pair ↓"
+          ],
+          "familyNetVotes": {
+            "b": 3,
+            "c": 10,
+            "p": 0.057373046875
+          }
+        }
+      }
+    },
+    "additions": {
+      "okFirst": {
+        "all": {
+          "rows": 139,
+          "b": 10,
+          "c": 9,
+          "flips": [
+            "corr-empty-home-override ↓",
+            "corr-ip-address-subdomains-clean ↓",
+            "corr-null-map-key-clean ↑",
+            "corr-eslint-arrow-parens-clean ↓",
+            "corr-nested-default-projection-clean ↑",
+            "corr-eslint-consistent-this-clean ↓",
+            "corr-eslint-no-empty-clean ↑",
+            "corr-empty-taxonomy-values-clean ↑",
+            "corr-heading-text-projection-clean ↑",
+            "corr-pagination-page-context-clean ↑",
+            "corr-eslint-func-names-clean ↓",
+            "corr-eslint-no-fallthrough-clean ↓",
+            "corr-live-client-configuration-clean ↑",
+            "corr-nested-array-dirty-collapse-clean ↑",
+            "corr-pending-file-list-serving-clean ↑",
+            "corr-pipeline-buffer-preservation-clean ↓",
+            "corr-runner-exit-trailer-clean ↓",
+            "corr-server-load-error-exit-clean ↓",
+            "corr-unregistered-population-model-clean ↓"
+          ],
+          "familyNetVotes": {
+            "b": 9,
+            "c": 7,
+            "p": 0.629058837890625
+          }
+        },
+        "bugs": {
+          "rows": 30,
+          "b": 1,
+          "c": 0,
+          "flips": [
+            "corr-empty-home-override ↓"
+          ],
+          "familyNetVotes": {
+            "b": 1,
+            "c": 0,
+            "p": 0.5
+          }
+        },
+        "clean": {
+          "rows": 109,
+          "b": 9,
+          "c": 9,
+          "flips": [
+            "corr-ip-address-subdomains-clean ↓",
+            "corr-null-map-key-clean ↑",
+            "corr-eslint-arrow-parens-clean ↓",
+            "corr-nested-default-projection-clean ↑",
+            "corr-eslint-consistent-this-clean ↓",
+            "corr-eslint-no-empty-clean ↑",
+            "corr-empty-taxonomy-values-clean ↑",
+            "corr-heading-text-projection-clean ↑",
+            "corr-pagination-page-context-clean ↑",
+            "corr-eslint-func-names-clean ↓",
+            "corr-eslint-no-fallthrough-clean ↓",
+            "corr-live-client-configuration-clean ↑",
+            "corr-nested-array-dirty-collapse-clean ↑",
+            "corr-pending-file-list-serving-clean ↑",
+            "corr-pipeline-buffer-preservation-clean ↓",
+            "corr-runner-exit-trailer-clean ↓",
+            "corr-server-load-error-exit-clean ↓",
+            "corr-unregistered-population-model-clean ↓"
+          ],
+          "familyNetVotes": {
+            "b": 8,
+            "c": 7,
+            "p": 0.803619384765625
+          }
+        }
+      },
+      "okFinal": {
+        "all": {
+          "rows": 139,
+          "b": 10,
+          "c": 10,
+          "flips": [
+            "corr-empty-home-override ↓",
+            "corr-ip-address-subdomains-clean ↓",
+            "corr-null-map-key-clean ↑",
+            "corr-eslint-arrow-parens-clean ↓",
+            "corr-nested-default-projection-clean ↑",
+            "corr-eslint-consistent-this-clean ↓",
+            "corr-eslint-no-empty-clean ↑",
+            "corr-empty-taxonomy-values-clean ↑",
+            "corr-heading-text-projection-clean ↑",
+            "corr-pagination-page-context-clean ↑",
+            "corr-eslint-func-names-clean ↓",
+            "corr-eslint-no-fallthrough-clean ↓",
+            "corr-live-client-configuration-clean ↑",
+            "corr-nested-array-dirty-collapse-clean ↑",
+            "corr-pending-file-list-serving-clean ↑",
+            "corr-pipeline-buffer-preservation-clean ↓",
+            "corr-runner-exit-trailer-clean ↓",
+            "corr-server-load-error-exit-clean ↓",
+            "corr-population-projection-token-prefix ↑",
+            "corr-unregistered-population-model-clean ↓"
+          ],
+          "familyNetVotes": {
+            "b": 9,
+            "c": 7,
+            "p": 0.629058837890625
+          }
+        },
+        "bugs": {
+          "rows": 30,
+          "b": 1,
+          "c": 1,
+          "flips": [
+            "corr-empty-home-override ↓",
+            "corr-population-projection-token-prefix ↑"
+          ],
+          "familyNetVotes": {
+            "b": 1,
+            "c": 1,
+            "p": 1
+          }
+        },
+        "clean": {
+          "rows": 109,
+          "b": 9,
+          "c": 9,
+          "flips": [
+            "corr-ip-address-subdomains-clean ↓",
+            "corr-null-map-key-clean ↑",
+            "corr-eslint-arrow-parens-clean ↓",
+            "corr-nested-default-projection-clean ↑",
+            "corr-eslint-consistent-this-clean ↓",
+            "corr-eslint-no-empty-clean ↑",
+            "corr-empty-taxonomy-values-clean ↑",
+            "corr-heading-text-projection-clean ↑",
+            "corr-pagination-page-context-clean ↑",
+            "corr-eslint-func-names-clean ↓",
+            "corr-eslint-no-fallthrough-clean ↓",
+            "corr-live-client-configuration-clean ↑",
+            "corr-nested-array-dirty-collapse-clean ↑",
+            "corr-pending-file-list-serving-clean ↑",
+            "corr-pipeline-buffer-preservation-clean ↓",
+            "corr-runner-exit-trailer-clean ↓",
+            "corr-server-load-error-exit-clean ↓",
+            "corr-unregistered-population-model-clean ↓"
+          ],
+          "familyNetVotes": {
+            "b": 8,
+            "c": 7,
+            "p": 0.803619384765625
+          }
+        }
+      }
+    },
+    "development": {
+      "okFirst": {
+        "all": {
+          "rows": 240,
+          "b": 13,
+          "c": 16,
+          "flips": [
+            "corr-asymmetric-flip-classifier ↑",
+            "corr-decoy-conditional-update ↑",
+            "corr-xdomain-nplusone ↑",
+            "corr-xdomain-render ↓",
+            "corr-decoy-lock-finally ↑",
+            "corr-decoy-signature-callsite-updated ↑",
+            "corr-broadcast-fanout-no-dedup ↓",
+            "corr-decoy-broadcast-targeted ↑",
+            "corr-pr200-important-pair ↑",
+            "corr-pr26-keep-the-mcp-inputschema-in-pair ↑",
+            "corr-pr26-block-parked-answer-sends-when-pair ↑",
+            "corr-pr52-don-t-down-rank-recorded-pair ↓",
+            "corr-pr52-use-frink-no-log-in-pair ↑",
+            "corr-pr59-expand-knip-config-detection-pair ↓",
+            "corr-pr59-expand-knip-config-detection ↓",
+            "corr-ip-address-subdomains-clean ↓",
+            "corr-null-map-key-clean ↑",
+            "corr-eslint-arrow-parens-clean ↓",
+            "corr-nested-default-projection-clean ↑",
+            "corr-eslint-consistent-this-clean ↓",
+            "corr-eslint-no-empty-clean ↑",
+            "corr-empty-taxonomy-values-clean ↑",
+            "corr-heading-text-projection-clean ↑",
+            "corr-eslint-func-names-clean ↓",
+            "corr-eslint-no-fallthrough-clean ↓",
+            "corr-nested-array-dirty-collapse-clean ↑",
+            "corr-runner-exit-trailer-clean ↓",
+            "corr-server-load-error-exit-clean ↓",
+            "corr-unregistered-population-model-clean ↓"
+          ],
+          "familyNetVotes": {
+            "b": 10,
+            "c": 14,
+            "p": 0.42435622215270996
+          }
+        },
+        "bugs": {
+          "rows": 90,
+          "b": 2,
+          "c": 1,
+          "flips": [
+            "corr-asymmetric-flip-classifier ↑",
+            "corr-broadcast-fanout-no-dedup ↓",
+            "corr-pr59-expand-knip-config-detection ↓"
+          ],
+          "familyNetVotes": {
+            "b": 2,
+            "c": 1,
+            "p": 0.625
+          }
+        },
+        "clean": {
+          "rows": 150,
+          "b": 11,
+          "c": 15,
+          "flips": [
+            "corr-decoy-conditional-update ↑",
+            "corr-xdomain-nplusone ↑",
+            "corr-xdomain-render ↓",
+            "corr-decoy-lock-finally ↑",
+            "corr-decoy-signature-callsite-updated ↑",
+            "corr-decoy-broadcast-targeted ↑",
+            "corr-pr200-important-pair ↑",
+            "corr-pr26-keep-the-mcp-inputschema-in-pair ↑",
+            "corr-pr26-block-parked-answer-sends-when-pair ↑",
+            "corr-pr52-don-t-down-rank-recorded-pair ↓",
+            "corr-pr52-use-frink-no-log-in-pair ↑",
+            "corr-pr59-expand-knip-config-detection-pair ↓",
+            "corr-ip-address-subdomains-clean ↓",
+            "corr-null-map-key-clean ↑",
+            "corr-eslint-arrow-parens-clean ↓",
+            "corr-nested-default-projection-clean ↑",
+            "corr-eslint-consistent-this-clean ↓",
+            "corr-eslint-no-empty-clean ↑",
+            "corr-empty-taxonomy-values-clean ↑",
+            "corr-heading-text-projection-clean ↑",
+            "corr-eslint-func-names-clean ↓",
+            "corr-eslint-no-fallthrough-clean ↓",
+            "corr-nested-array-dirty-collapse-clean ↑",
+            "corr-runner-exit-trailer-clean ↓",
+            "corr-server-load-error-exit-clean ↓",
+            "corr-unregistered-population-model-clean ↓"
+          ],
+          "familyNetVotes": {
+            "b": 10,
+            "c": 14,
+            "p": 0.42435622215270996
+          }
+        }
+      },
+      "okFinal": {
+        "all": {
+          "rows": 240,
+          "b": 13,
+          "c": 18,
+          "flips": [
+            "corr-asymmetric-flip-classifier ↑",
+            "corr-decoy-conditional-update ↑",
+            "corr-xdomain-nplusone ↑",
+            "corr-xdomain-render ↓",
+            "corr-decoy-lock-finally ↑",
+            "corr-decoy-signature-callsite-updated ↑",
+            "corr-broadcast-fanout-no-dedup ↓",
+            "corr-decoy-broadcast-targeted ↑",
+            "corr-pr200-important-pair ↑",
+            "corr-pr26-keep-the-mcp-inputschema-in-pair ↑",
+            "corr-pr38-check-the-full-r2-credential-pair ↑",
+            "corr-pr26-block-parked-answer-sends-when-pair ↑",
+            "corr-pr52-don-t-down-rank-recorded-pair ↓",
+            "corr-pr52-use-frink-no-log-in-pair ↑",
+            "corr-pr59-expand-knip-config-detection-pair ↓",
+            "corr-pr59-expand-knip-config-detection ↓",
+            "corr-ip-address-subdomains-clean ↓",
+            "corr-null-map-key-clean ↑",
+            "corr-eslint-arrow-parens-clean ↓",
+            "corr-nested-default-projection-clean ↑",
+            "corr-eslint-consistent-this-clean ↓",
+            "corr-eslint-no-empty-clean ↑",
+            "corr-empty-taxonomy-values-clean ↑",
+            "corr-heading-text-projection-clean ↑",
+            "corr-eslint-func-names-clean ↓",
+            "corr-eslint-no-fallthrough-clean ↓",
+            "corr-nested-array-dirty-collapse-clean ↑",
+            "corr-runner-exit-trailer-clean ↓",
+            "corr-server-load-error-exit-clean ↓",
+            "corr-population-projection-token-prefix ↑",
+            "corr-unregistered-population-model-clean ↓"
+          ],
+          "familyNetVotes": {
+            "b": 10,
+            "c": 15,
+            "p": 0.32693958282470703
+          }
+        },
+        "bugs": {
+          "rows": 90,
+          "b": 2,
+          "c": 2,
+          "flips": [
+            "corr-asymmetric-flip-classifier ↑",
+            "corr-broadcast-fanout-no-dedup ↓",
+            "corr-pr59-expand-knip-config-detection ↓",
+            "corr-population-projection-token-prefix ↑"
+          ],
+          "familyNetVotes": {
+            "b": 2,
+            "c": 2,
+            "p": 1
+          }
+        },
+        "clean": {
+          "rows": 150,
+          "b": 11,
+          "c": 16,
+          "flips": [
+            "corr-decoy-conditional-update ↑",
+            "corr-xdomain-nplusone ↑",
+            "corr-xdomain-render ↓",
+            "corr-decoy-lock-finally ↑",
+            "corr-decoy-signature-callsite-updated ↑",
+            "corr-decoy-broadcast-targeted ↑",
+            "corr-pr200-important-pair ↑",
+            "corr-pr26-keep-the-mcp-inputschema-in-pair ↑",
+            "corr-pr38-check-the-full-r2-credential-pair ↑",
+            "corr-pr26-block-parked-answer-sends-when-pair ↑",
+            "corr-pr52-don-t-down-rank-recorded-pair ↓",
+            "corr-pr52-use-frink-no-log-in-pair ↑",
+            "corr-pr59-expand-knip-config-detection-pair ↓",
+            "corr-ip-address-subdomains-clean ↓",
+            "corr-null-map-key-clean ↑",
+            "corr-eslint-arrow-parens-clean ↓",
+            "corr-nested-default-projection-clean ↑",
+            "corr-eslint-consistent-this-clean ↓",
+            "corr-eslint-no-empty-clean ↑",
+            "corr-empty-taxonomy-values-clean ↑",
+            "corr-heading-text-projection-clean ↑",
+            "corr-eslint-func-names-clean ↓",
+            "corr-eslint-no-fallthrough-clean ↓",
+            "corr-nested-array-dirty-collapse-clean ↑",
+            "corr-runner-exit-trailer-clean ↓",
+            "corr-server-load-error-exit-clean ↓",
+            "corr-unregistered-population-model-clean ↓"
+          ],
+          "familyNetVotes": {
+            "b": 10,
+            "c": 15,
+            "p": 0.32693958282470703
+          }
+        }
+      }
+    },
+    "previouslyReserved": {
+      "okFirst": {
+        "all": {
+          "rows": 45,
+          "b": 2,
+          "c": 3,
+          "flips": [
+            "corr-empty-home-override ↓",
+            "corr-pagination-page-context-clean ↑",
+            "corr-live-client-configuration-clean ↑",
+            "corr-pending-file-list-serving-clean ↑",
+            "corr-pipeline-buffer-preservation-clean ↓"
+          ],
+          "familyNetVotes": {
+            "b": 2,
+            "c": 2,
+            "p": 1
+          }
+        },
+        "bugs": {
+          "rows": 15,
+          "b": 1,
+          "c": 0,
+          "flips": [
+            "corr-empty-home-override ↓"
+          ],
+          "familyNetVotes": {
+            "b": 1,
+            "c": 0,
+            "p": 0.5
+          }
+        },
+        "clean": {
+          "rows": 30,
+          "b": 1,
+          "c": 3,
+          "flips": [
+            "corr-pagination-page-context-clean ↑",
+            "corr-live-client-configuration-clean ↑",
+            "corr-pending-file-list-serving-clean ↑",
+            "corr-pipeline-buffer-preservation-clean ↓"
+          ],
+          "familyNetVotes": {
+            "b": 1,
+            "c": 2,
+            "p": 0.625
+          }
+        }
+      },
+      "okFinal": {
+        "all": {
+          "rows": 45,
+          "b": 2,
+          "c": 3,
+          "flips": [
+            "corr-empty-home-override ↓",
+            "corr-pagination-page-context-clean ↑",
+            "corr-live-client-configuration-clean ↑",
+            "corr-pending-file-list-serving-clean ↑",
+            "corr-pipeline-buffer-preservation-clean ↓"
+          ],
+          "familyNetVotes": {
+            "b": 2,
+            "c": 2,
+            "p": 1
+          }
+        },
+        "bugs": {
+          "rows": 15,
+          "b": 1,
+          "c": 0,
+          "flips": [
+            "corr-empty-home-override ↓"
+          ],
+          "familyNetVotes": {
+            "b": 1,
+            "c": 0,
+            "p": 0.5
+          }
+        },
+        "clean": {
+          "rows": 30,
+          "b": 1,
+          "c": 3,
+          "flips": [
+            "corr-pagination-page-context-clean ↑",
+            "corr-live-client-configuration-clean ↑",
+            "corr-pending-file-list-serving-clean ↑",
+            "corr-pipeline-buffer-preservation-clean ↓"
+          ],
+          "familyNetVotes": {
+            "b": 1,
+            "c": 2,
+            "p": 0.625
+          }
+        }
+      }
+    }
+  },
+  "interpretation": "Descriptive paired discordance. Family net votes avoid counting each correlated row as an independent family; mid-p remains exploratory on this exposed corpus and bundled intervention. No outcome-selected retries or exclusions."
+}

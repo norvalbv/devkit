@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { splitDiffByFile } from '../../../../../judge/diff-focus.mts';
 import { buildCappedDiffEvidence } from '../../../../diff-evidence.mts';
 import { postImagePathOf, unquoteGitPath } from '../../../../lens/chunk.mts';
+import type { EvidencePacket } from '../../../../evidence/context/packets.mts';
 
 export interface RequiredSpan {
   file: string;
@@ -18,6 +19,7 @@ interface Evidence {
   selectedFiles: readonly string[];
   diff: string;
   rendered: string;
+  packet?: EvidencePacket;
 }
 
 type Visibility = 'supplied' | 'partial' | 'out-of-scope' | 'not-in-diff' | 'omitted' | 'truncated';
@@ -122,6 +124,11 @@ export function measureSpan(
   totalLines: number;
 } {
   const lines = validatedLines(span, evidence);
+  if (evidence.packet) return measurePacketSpan(span, evidence, lines);
+  return measureDiffSpan(span, evidence, lines);
+}
+
+function measureDiffSpan(span: RequiredSpan, evidence: Evidence, lines: string[]) {
   // The API accepts native evidence only. Its exact canonical suffix excludes arbitrary inventory
   // text, even an inventory containing a copy of a diff or the required source text.
   const body = buildCappedDiffEvidence(evidence.diff, '').slice(1);
@@ -158,4 +165,83 @@ export function measureSpan(
   if (shown.size) return result('partial', shown.size);
   if (!present.size) return result('not-in-diff');
   return result(anyPrefix ? 'truncated' : 'omitted');
+}
+
+/** Same source-coordinate test for an experimental packet. Inventories, notes and duplicated
+ * text at a different coordinate never count; partial trailing source lines do not count. */
+function measurePacketSpan(span: RequiredSpan, evidence: Evidence, lines: string[]) {
+  const packet = evidence.packet!;
+  if (
+    packet.ownedDiff !== evidence.diff ||
+    packet.input !== evidence.rendered ||
+    sha256(packet.input + packet.instructions) !== packet.receipt.payloadHash
+  )
+    throw new Error('INVALID_RENDERED_EVIDENCE');
+  const shown = new Set<number>();
+  let supportPresent = false;
+  let supportPrefix = false;
+  const body = buildCappedDiffEvidence(evidence.diff, '').slice(1);
+  const rendered = splitDiffByFile(body);
+  const includeDiff = (diff: string, prefix: number, supporting = false) => {
+    const file = span.side === 'base' ? basePath(diff) : postImagePathOf(diff);
+    if (file !== span.file) return;
+    for (const [number, line] of coordinates(diff, span.side)) {
+      if (number < span.start || number > span.end) continue;
+      if (line.text !== lines[number - 1]) throw new Error('INVALID_DIFF_EVIDENCE');
+      if (supporting) {
+        supportPresent = true;
+        supportPrefix ||= prefix > 0;
+      }
+      if (line.end <= prefix) shown.add(number);
+    }
+  };
+  splitDiffByFile(evidence.diff).forEach((diff, i) =>
+    includeDiff(diff, prefixLength(diff, rendered[i])),
+  );
+  for (const segment of packet.support) {
+    const prefix = segment.content.slice(0, segment.shownCharacters);
+    if (
+      prefix !==
+      packet.input.slice(segment.inputOffset, segment.inputOffset + segment.shownCharacters)
+    )
+      throw new Error('INVALID_RENDERED_EVIDENCE');
+    if (segment.side === 'function-diff') {
+      includeDiff(segment.content, segment.shownCharacters, true);
+      continue;
+    }
+    if (segment.path !== span.file || (segment.side === 'staged' ? 'post' : 'base') !== span.side)
+      continue;
+    let end = 0;
+    let number = 0;
+    for (const encoded of segment.content.match(/[^\n]*\n|[^\n]+$/g) ?? []) {
+      number++;
+      end += encoded.length;
+      if (number < span.start || number > span.end) continue;
+      const text = encoded.endsWith('\n') ? encoded.slice(0, -1) : encoded;
+      if (text !== lines[number - 1]) throw new Error('INVALID_DIFF_EVIDENCE');
+      supportPresent = true;
+      supportPrefix ||= segment.shownCharacters > 0;
+      if (end <= segment.shownCharacters) shown.add(number);
+    }
+  }
+  const totalLines = span.end - span.start + 1;
+  if (!shown.size && !supportPresent)
+    return measureDiffSpan(
+      span,
+      { ...evidence, rendered: buildCappedDiffEvidence(evidence.diff, '') },
+      lines,
+    );
+  const status: Visibility =
+    shown.size === totalLines
+      ? 'supplied'
+      : shown.size
+        ? 'partial'
+        : supportPrefix
+          ? 'truncated'
+          : 'omitted';
+  return {
+    status,
+    shownLines: shown.size,
+    totalLines,
+  };
 }

@@ -41,6 +41,7 @@ import { lensArmSuffix } from '../../lens/split.mts';
 import {
   BENCH_CHUNK_LOC,
   BENCH_LENS_GROUPS,
+  BENCH_CONDITION,
   executionHash,
   isolateBenchTelemetry,
   planFixture,
@@ -406,8 +407,7 @@ async function runBench(targets, { dev, only, writeBaseline, failMode, fresh, ag
       cascade: effCascade(reviewer),
       gateHash: benchGateHash(reviewer),
       corpusHash: corpusHash(reviewer),
-      chunkLoc: BENCH_CHUNK_LOC,
-      lensGroups: BENCH_LENS_GROUPS,
+      ...BENCH_CONDITION,
       escalationModel: ESCALATION_MODEL,
     };
     meta.executionHash = executionHash({ ...meta, escalationModel: ESCALATION_MODEL });

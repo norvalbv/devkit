@@ -16,6 +16,8 @@ import {
   unquoteGitPath,
 } from './chunk.mts';
 import { deriveLensReviewer, lensGroupId } from './groups.mts';
+import type { PreparedContext } from '../evidence/context/packets.mts';
+import { CONTEXT_MODE } from '../evidence/context/source.mts';
 // Type-only: erased at runtime, so no module cycle with split.mts.
 import type { ReviewTask } from './split.mts';
 
@@ -63,7 +65,7 @@ const MAX_CHUNKS = 24;
 interface ChunkedPlan {
   parts: ReviewTask[];
   planEntries: { index: number; files_sha: string; file_count: number; bytes: number }[];
-  facts: { count: number; capBytes: number; planHash: string };
+  facts: import('./chunk.mts').ChunkPlanFacts;
 }
 
 /**
@@ -81,20 +83,24 @@ export function planChunkedParts(
   keyOf: (name: string, diff: string, salt: string) => string,
   groups: readonly (readonly string[])[],
   capLoc: number,
+  evidence?: PreparedContext,
 ): ChunkedPlan | null {
   const capBytes = capLoc * CHUNK_BYTES_PER_LOC;
-  const bytes = identityBytesByPath(diffText);
+  const bytes = evidence?.bytesByPath ?? identityBytesByPath(diffText);
   let total = 0;
   for (const b of bytes.values()) total += b;
   if (total <= capBytes * CHUNK_TRIGGER_RATIO) return null;
   let effectiveCap = capBytes;
-  let packed = packDiffIntoChunks(sel.files, diffText, effectiveCap);
+  let packed = packDiffIntoChunks(sel.files, diffText, effectiveCap, evidence);
   while (packed.chunks.length > MAX_CHUNKS) {
     effectiveCap *= 2;
-    packed = packDiffIntoChunks(sel.files, diffText, effectiveCap);
+    packed = packDiffIntoChunks(sel.files, diffText, effectiveCap, evidence);
   }
   if (packed.chunks.length < 2) return null;
   const planHash = chunkPlanHash(packed.chunks);
+  const sizing = evidence
+    ? { evidenceMode: CONTEXT_MODE, sizingUnit: 'utf8-source-evidence-bytes' as const }
+    : {};
   const name = sel.reviewer.name;
   const isCross = (g: readonly string[]): boolean => g.includes('writer-reader-contracts');
   const parts: ReviewTask[] = [];
@@ -115,6 +121,7 @@ export function planChunkedParts(
       count: packed.chunks.length,
       capBytes: effectiveCap,
       planHash,
+      ...sizing,
     };
     for (const g of groups) {
       if (isCross(g)) continue;
@@ -150,7 +157,7 @@ export function planChunkedParts(
   return {
     parts,
     planEntries,
-    facts: { count: packed.chunks.length, capBytes: effectiveCap, planHash },
+    facts: { count: packed.chunks.length, capBytes: effectiveCap, planHash, ...sizing },
   };
 }
 

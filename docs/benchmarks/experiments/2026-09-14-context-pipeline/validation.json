@@ -1,0 +1,104 @@
+{
+  "schemaVersion": 1,
+  "testCommand": "npm run test:run -- --reporter=verbose --reporter=json --outputFile.json=<private report>",
+  "testReportSha256": "263c4d60deefef543bd300a2fb966af3326682847c78ce70589f5d691cef16e1",
+  "files": 359,
+  "passed": 6827,
+  "skipped": 14,
+  "failed": 0,
+  "build": "npm run build passed. Three newly introduced context .mjs artifacts are included under the July26 dist rule; ordinary regenerated dist remains for release.",
+  "typecheck": "passed",
+  "oxlint": "passed",
+  "structure": "passed",
+  "diffWhitespace": "passed",
+  "nativeDryGates": "passed, with complexity and generated-projection advisories",
+  "history": "Prior validation found and fixed a stale corpus expectation, instruction projection/resolver drift, and a missing comparison import. One separate test process ended 137 without a summary and remains inconclusive; the final full run above completed successfully.",
+  "commitGuard": {
+    "stagedSourceDiffSha256": "10f30bd9dc622a7912fc71b75825d1e6d5b547258ca744597846c700d279e4a6",
+    "reviewedSourceFiles": 20,
+    "semanticQueries": 23,
+    "newClonePairs": 0,
+    "newSemanticPairs": 0,
+    "coverageLimitation": "Index excludes eval/tests, lacks all three newly added context source modules, and has older bodies for changed production symbols. Search remains best-effort lookup against existing indexed code; matcher preflight is not exhaustive for staged additions.",
+    "evidenceSha256": "f37afef56de233e37fcc812d55a4f3f4b0f329eb4dbec5fe72f13579379b8de9"
+  },
+  "fullSuiteScope": "Frozen candidate implementation and measured candidate instructions, before restoration.",
+  "postRestoration": {
+    "command": "npm run test:run -- cli/__tests__/review-asset-runtime.test.mts gate-engine/review/evidence/context/__tests__/source.test.mts gate-engine/review/evidence/context/__tests__/pipeline.test.mts",
+    "status": "passed",
+    "files": 3,
+    "passed": 31,
+    "failed": 0,
+    "logSha256": "0a5e3a904f88ee18037c714a47b6b4f3642ffa9fa3a3f8ad7f4f5ca4278a1338"
+  },
+  "trackerCheck": "passed after restoration and staged rerender",
+  "shipPreflight": "First attempt correctly required the three new generated modules; included before native resume. No source or benchmark changed.",
+  "deliveryScope": "Source-mode experiment. A release build is required to regenerate existing packaged integrations; this feature PR includes only the three new generated modules required by dist policy.",
+  "postRunDiagnosticFix": {
+    "scope": "Preserve not-in-diff, out-of-scope, truncated and omitted classifications when a required span has zero supplied lines in a packet. This diagnostic fix followed native PR review; frozen run and census artifacts are preserved.",
+    "reviewerExecutionHashWithFrozenInstructions": "2efa55ba600afa0ef4bbe9268a7e852ed57bdfb4d5ef46a858d48b4ab5891b00",
+    "command": "npm run test:run -- gate-engine/review/eval/reviewers/scale/corpus/__tests__/visibility.test.mts gate-engine/review/eval/reviewers/scale/corpus/__tests__/census.test.mts",
+    "files": 2,
+    "passed": 17,
+    "failed": 1,
+    "visibilityTestsPassed": 14,
+    "failure": "Pre-existing concurrent census workers collide on git write-tree index.lock; one exits CENSUS_FAILED. Retained synthetic reproduction confirms the same failure. No retry-to-green or lock deletion applied.",
+    "autonomousReportId": "2c9512d6-7366-48a1-b4dc-2f35fdd2efc8",
+    "logSha256": "8c5b49ccc31d9cf9ec9ab9143139fcf2cd810ac68ba87069abf7a7274b5736d8",
+    "typecheck": "npm run typecheck and npm run benchmarks:typecheck passed",
+    "matcherPreflight": "Zero new candidates; existing semantic index excludes eval/tests.",
+    "commitGuard": {
+      "reviewedSourceFiles": 2,
+      "semanticQueries": 3,
+      "newClonePairs": 0,
+      "newSemanticPairs": 0,
+      "coverageLimitation": "Both files excluded from existing semantic index. Shared diff measurement and existing test helpers reused.",
+      "evidenceSha256": "d7b135af9b9c8dc54f9a90779234462f90750f8bb01fdf1c38c0482df51a6414"
+    }
+  },
+  "postRunProvenanceFix": {
+    "measuredExecutionHash": "2efa55ba600afa0ef4bbe9268a7e852ed57bdfb4d5ef46a858d48b4ab5891b00",
+    "postRunRuntimeWithFrozenInstructionHash": "87021b0f3466da6759e50bf0ab935bc7f4ee92e74be570e7489ffca51a75c5ef",
+    "reason": "Post-run context-mode provenance normalization changes the hashed benchmark planning module. Original frozen result remains historical; this code has not received another model benchmark.",
+    "scope": "Normalize explicit off, 0 and empty context modes consistently in benchmark planning, receipt metadata and execution identity. Enabled behavior is retained.",
+    "command": "npm run test:run -- gate-engine/review/eval/reviewers/__tests__/chunk-guard.test.mts",
+    "passed": 10,
+    "failed": 0,
+    "logSha256": "cd3dbdb2dae47b675f42d80ad1a16abcd8376f653b9b86e7fa25ea62b3eee62d",
+    "matcherPreflight": "Zero new candidates; existing semantic index excludes eval/tests.",
+    "typecheck": "npm run benchmarks:typecheck passed",
+    "commitGuard": {
+      "reviewedSourceFiles": 2,
+      "semanticQueries": 3,
+      "newClonePairs": 0,
+      "newSemanticPairs": 0,
+      "coverageLimitation": "Both files excluded from existing semantic index. Existing context mode resolver and fixture helpers reused.",
+      "evidenceSha256": "20f07cf45baf529e65180309f25e9e0a8b6e6875d7b9592af1d01b2492880ca7"
+    }
+  },
+  "postRunScanFix": {
+    "scope": "Make guard-review scan prepare the same opt-in correctness context passed to the native planner, so cached PASS status matches the gate. Existing scan parity test now runs off and bounded-v1.",
+    "command": "npm run test:run -- gate-engine/review/__tests__/run-review.test.mts",
+    "passed": 119,
+    "failed": 0,
+    "judgeCalls": 0,
+    "logSha256": "d3aeb226db51d1e60414ff543d60b8dfd3c2d0dd8faa94b5ec1dac4cd4b63809",
+    "typecheck": "passed",
+    "matcherPreflight": "Zero new candidates; semantic coverage remains limited.",
+    "commitGuard": {
+      "reviewedSourceFiles": 2,
+      "semanticQueries": 3,
+      "newClonePairs": 0,
+      "newSemanticPairs": 0,
+      "coverageLimitation": "Indexed printReviewScan is stale; tests are unindexed. Scan reuses existing context preparation/planning and the parity test is parameterized.",
+      "evidenceSha256": "12198826b36e17cbc81f8996df8c9600488a4035f37be3f12a52ba05a4d11bdb"
+    }
+  },
+  "nativeFalseFinding": {
+    "id": "d1183f6bd519",
+    "claim": "Captured git diff recovery is absent from the tool allowlist.",
+    "counterevidence": "BASE_TOOLS already grants Bash(git diff:*); allowedToolsFor retains it and the cascade appends git show. A zero-judge runtime assembly probe verified both grants and recovered the captured tree diff.",
+    "waiver": "Recorded locally with this counterevidence. The next gate surfaced a distinct scan-cache mismatch under the same lens identifier; that finding was fixed, not waived.",
+    "proofSha256": "21427806503c0f55ea9e9e828083be48b95dd3b4810437e2a37d80d59d239e23"
+  }
+}

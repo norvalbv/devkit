@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "baseline": {
+    "completeTasks": 1164,
+    "tasksWithParsedItems": 1164,
+    "parsedItemSlots": 1164,
+    "parsedIssueStrings": 349
+  },
+  "candidate": {
+    "completeTasks": 1206,
+    "tasksWithParsedItems": 1206,
+    "parsedItemSlots": 1206,
+    "parsedIssueStrings": 383
+  },
+  "interpretation": "Native parsed item and issue-string counts only. Slots can repeat the same mechanism across lenses, and issue strings may be truncated. No independent claim-validity or factual precision score is inferred."
+}

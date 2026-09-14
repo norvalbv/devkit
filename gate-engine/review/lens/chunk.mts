@@ -100,7 +100,9 @@ export function postImagePathOf(seg: string): string | null {
   // space — which git does NOT quote (core.quotePath quotes controls/non-ASCII, never plain
   // spaces) — silently reintroducing the 0-byte packing defect for such files. The `+++` line's
   // payload is the whole rest of the line.
-  const plus = seg.match(/^\+\+\+ (.+)$/m)?.[1];
+  // Git terminates an unquoted pathname containing spaces with a separator tab. Actual tabs in
+  // a filename are C-quoted, so removing this unquoted terminator preserves those names.
+  const plus = seg.match(/^\+\+\+ (.+)$/m)?.[1]?.replace(/\t$/, '');
   if (plus !== undefined && plus !== '/dev/null') {
     const decoded = unquoteGitPath(plus);
     return decoded.startsWith('b/') ? decoded.slice(2) : decoded;
@@ -155,12 +157,17 @@ export function identityBytesByPath(diffText: string): Map<string, number> {
  * `capBytes` of identity bytes; a single file over the cap gets its own chunk. Deterministic for a
  * given (files, diff) pair, so re-runs and checkpoints agree on chunk indexes.
  */
-export function packDiffIntoChunks(files: string[], diffText: string, capBytes: number): ChunkPlan {
-  const bytesByPath = identityBytesByPath(diffText);
+export function packDiffIntoChunks(
+  files: string[],
+  diffText: string,
+  capBytes: number,
+  evidence?: { bytesByPath: Map<string, number>; order: string[] },
+): ChunkPlan {
+  const bytesByPath = evidence?.bytesByPath ?? identityBytesByPath(diffText);
   const chunks: string[][] = [];
   let current: string[] = [];
   let used = 0;
-  for (const file of [...files].sort()) {
+  for (const file of evidence?.order ?? [...files].sort()) {
     // `files` carries the staged names `git diff --cached --name-only` printed, which quotes the
     // same way the diff body does — decode before lookup so a quoted staged name still finds its
     // identityByPath entry instead of silently packing as 0 bytes.
@@ -184,6 +191,8 @@ export interface ChunkPlanFacts {
   count: number;
   capBytes: number;
   planHash: string;
+  evidenceMode?: string;
+  sizingUnit?: 'utf8-source-evidence-bytes';
 }
 
 /** One judge task's chunk assignment. `filesSha` is sha256-12 of the chunk's file membership

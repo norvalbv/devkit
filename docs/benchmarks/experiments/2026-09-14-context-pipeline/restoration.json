@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "canonicalSource": "HEAD (merged PR611 baseline)",
+  "measuredCandidatePreserved": "candidate-assets.json",
+  "matchesFrozenBaselineAssets": {
+    ".claude/agents/correctness-reviewer.md": "8c96f896be0859f9089444ee6a41de7ff0d8cf1a5abeece4f819b4a173351d94",
+    ".claude/skills/correctness/SKILL.md": "d26708b78352a24582528bb6a69cafe9e6a1b566ede7ce85971a70c7f8f3231f"
+  },
+  "contextDefault": "off",
+  "optInWithRestoredInstructions": "unmeasured combination",
+  "deliveryMode": "Experimental .mts source execution; packaged integrations require a release build.",
+  "postRunProvenanceFix": {
+    "measuredExecutionHash": "2efa55ba600afa0ef4bbe9268a7e852ed57bdfb4d5ef46a858d48b4ab5891b00",
+    "postRunRuntimeWithFrozenInstructionHash": "87021b0f3466da6759e50bf0ab935bc7f4ee92e74be570e7489ffca51a75c5ef",
+    "reason": "Post-run context-mode provenance normalization changes the hashed benchmark planning module. Original frozen result remains historical; this code has not received another model benchmark."
+  }
+}

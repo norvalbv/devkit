@@ -79,12 +79,38 @@ describe('native benchmark planning', () => {
   it('censuses four large rows and validates actual derived checklist artifacts', () => {
     const census = preflightPlans(loadRows(reviewer));
     expect(census.filter((p) => p.chunkCount > 1)).toHaveLength(4);
-    expect(census.reduce((sum, p) => sum + p.taskCount, 0)).toBe(608);
+    // PR611's frozen 285-row corpus: 281 × 4 tasks plus four 10-task rows.
+    expect(census.reduce((sum, p) => sum + p.taskCount, 0)).toBe(1164);
     expect(validateRow(large).problems).toEqual([]);
     expect(validateRow(small).problems).toEqual([]);
     expect(() =>
       preflightPlans([{ ...small, repo: { base: small.repo.base, staged: small.repo.base } }]),
     ).toThrow(/no staged selection/);
+  });
+  it('normalizes disabled context modes consistently in planning and provenance', () => {
+    const fx = materializeFixture({ repo: small.repo });
+    try {
+      const sel = { reviewer, files: fx.staged };
+      const control = planFixture(sel, fx.repo, { contextMode: null });
+      const condition = { gateHash: 'gate', model: 'model', cascade: false, contextMode: null };
+      for (const contextMode of ['off', '0', '']) {
+        const plan = planFixture(sel, fx.repo, { contextMode });
+        expect(plan.facts).toEqual(control.facts);
+        expect(plan.tasks.every((task) => !task.sel.evidencePacket)).toBe(true);
+        expect(executionHash({ ...condition, contextMode })).toBe(executionHash(condition));
+      }
+      const enabled = planFixture(sel, fx.repo, { contextMode: 'bounded-v1' });
+      expect(enabled.facts.contextMode).toBe('bounded-v1');
+      expect(enabled.facts.evidence.every(Boolean)).toBe(true);
+      expect(() => planFixture(sel, fx.repo, { contextMode: 'invalid' })).toThrow(
+        /expected off or bounded-v1/,
+      );
+      expect(() => executionHash({ ...condition, contextMode: 'invalid' })).toThrow(
+        /expected off or bounded-v1/,
+      );
+    } finally {
+      fx.cleanup();
+    }
   });
   it('runs every planned task with the scoped staged-file environment', async () => {
     const envs = [];

@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "executionHash": "2efa55ba600afa0ef4bbe9268a7e852ed57bdfb4d5ef46a858d48b4ab5891b00",
+  "reason": "The native provider reported a usage limit after 112 calls. The user authorized continuation after usage became available again.",
+  "priorResultSha256": "36db10a651682633a34e70db93719ee7833407e60891bdb434f9767f4215a8da",
+  "priorEventsSha256": "a8477fbec67a7c51dcf61897d7b1442c2731dea7b71c6bf56ae6dd41bac1499c",
+  "completeRows": 23,
+  "completeTasks": 106,
+  "remainingTasks": 1100,
+  "budget": {
+    "maxCalls": 1100,
+    "maxElapsedMs": 10155758,
+    "judgeTimeoutMs": 1800000
+  },
+  "priorCalls": 112,
+  "policy": "Reuse all 106 complete tasks and 23 complete rows; run only 1100 unfinished tasks. Six incomplete dispatched attempts add to cumulative attempt cost. Keep original and continuation evidence separately; no completed quality retries.",
+  "status": "complete",
+  "completedRows": 285,
+  "completedUniqueTasks": 1206,
+  "continuationCalls": 1100,
+  "totalCalls": 1212,
+  "completedJudgmentsRerun": 0
+}

@@ -101,13 +101,19 @@ export function censusSource(serialized: string, caseId: string, directory: stri
         throw new Error('POSTIMAGE_MISMATCH');
     }
   }
-  const plan = planFixture(sel, cwd, { cap: 400, groups, diff: frozenDiff([], sel.files) });
+  const plan = planFixture(sel, cwd, {
+    cap: 400,
+    groups,
+    diff: frozenDiff([], sel.files),
+    snapshot: { base: entry.source.baseSha, staged: stagedTreeSha },
+  });
   const tasks = plan.tasks.map((task) => {
     const scoped = frozenDiff([], task.sel.files);
     if (scoped !== task.diffText) throw new Error('TASK_DIFF_CHANGED');
     const inventory = frozenDiff(['--stat'], task.sel.files);
-    const rendered = buildCappedDiffEvidence(scoped, inventory);
-    return {
+    const packet = task.sel.evidencePacket;
+    const rendered = packet?.input ?? buildCappedDiffEvidence(scoped, inventory);
+    const result = {
       taskSha256: sha256(task.key),
       lens: task.group,
       targetLens: task.group === entry.targetLens,
@@ -123,10 +129,19 @@ export function censusSource(serialized: string, caseId: string, directory: stri
       inputBytes: Buffer.byteLength(rendered),
       required: entry.spans.map((span) => ({
         spanSha256: sha256(canonical(span)),
-        ...measureSpan(span, { base, post, selectedFiles: task.sel.files, diff: scoped, rendered }),
+        ...measureSpan(span, {
+          base,
+          post,
+          selectedFiles: task.sel.files,
+          diff: scoped,
+          rendered,
+          packet,
+        }),
         retrieval: 'not-observed-zero-judge',
       })),
     };
+    if (packet) Object.assign(result, { evidence: packet.receipt });
+    return result;
   });
   if (
     git(cwd, ['rev-parse', 'HEAD']).trim() !== entry.source.baseSha ||

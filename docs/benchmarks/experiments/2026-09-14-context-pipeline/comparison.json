@@ -1,0 +1,1077 @@
+{
+  "schemaVersion": 1,
+  "baselineEventId": "evt-2026-09-13-reviewer-correctness-e609c43fd8b4",
+  "baselineExecutionHash": "c6873b6f77e95ac1ddbe9ef5ae250c3e6d26b2960bae51cd5e74b2a5ded4e377",
+  "candidateExecutionHash": "2efa55ba600afa0ef4bbe9268a7e852ed57bdfb4d5ef46a858d48b4ab5891b00",
+  "candidateResultSha256": "5600495c05fb80b9d64878807f2c3b590e0a58f91111576a77710750d6194145",
+  "complete": 285,
+  "total": 285,
+  "incomplete": [],
+  "scopes": {
+    "all": {
+      "initial": {
+        "baseline": {
+          "rows": 285,
+          "bugLabelFlags": {
+            "k": 102,
+            "n": 105
+          },
+          "cleanLabelAcceptance": {
+            "k": 117,
+            "n": 180
+          },
+          "repairConsistency": {
+            "k": 34,
+            "n": 73,
+            "unavailable": 0
+          },
+          "wholeFamilyAgreement": {
+            "k": 114,
+            "n": 174,
+            "unavailable": 0
+          }
+        },
+        "candidate": {
+          "rows": 285,
+          "bugLabelFlags": {
+            "k": 100,
+            "n": 105
+          },
+          "cleanLabelAcceptance": {
+            "k": 123,
+            "n": 180
+          },
+          "repairConsistency": {
+            "k": 38,
+            "n": 73,
+            "unavailable": 0
+          },
+          "wholeFamilyAgreement": {
+            "k": 117,
+            "n": 174,
+            "unavailable": 0
+          }
+        }
+      },
+      "finalGate": {
+        "baseline": {
+          "rows": 285,
+          "bugLabelFlags": {
+            "k": 101,
+            "n": 105
+          },
+          "cleanLabelAcceptance": {
+            "k": 117,
+            "n": 180
+          },
+          "repairConsistency": {
+            "k": 34,
+            "n": 73,
+            "unavailable": 0
+          },
+          "wholeFamilyAgreement": {
+            "k": 114,
+            "n": 174,
+            "unavailable": 0
+          }
+        },
+        "candidate": {
+          "rows": 285,
+          "bugLabelFlags": {
+            "k": 100,
+            "n": 105
+          },
+          "cleanLabelAcceptance": {
+            "k": 124,
+            "n": 180
+          },
+          "repairConsistency": {
+            "k": 39,
+            "n": 73,
+            "unavailable": 0
+          },
+          "wholeFamilyAgreement": {
+            "k": 118,
+            "n": 174,
+            "unavailable": 0
+          }
+        }
+      }
+    },
+    "original": {
+      "initial": {
+        "baseline": {
+          "rows": 146,
+          "bugLabelFlags": {
+            "k": 73,
+            "n": 75
+          },
+          "cleanLabelAcceptance": {
+            "k": 40,
+            "n": 71
+          },
+          "repairConsistency": {
+            "k": 26,
+            "n": 56,
+            "unavailable": 0
+          },
+          "wholeFamilyAgreement": {
+            "k": 58,
+            "n": 89,
+            "unavailable": 0
+          }
+        },
+        "candidate": {
+          "rows": 146,
+          "bugLabelFlags": {
+            "k": 72,
+            "n": 75
+          },
+          "cleanLabelAcceptance": {
+            "k": 46,
+            "n": 71
+          },
+          "repairConsistency": {
+            "k": 31,
+            "n": 56,
+            "unavailable": 0
+          },
+          "wholeFamilyAgreement": {
+            "k": 64,
+            "n": 89,
+            "unavailable": 0
+          }
+        }
+      },
+      "finalGate": {
+        "baseline": {
+          "rows": 146,
+          "bugLabelFlags": {
+            "k": 73,
+            "n": 75
+          },
+          "cleanLabelAcceptance": {
+            "k": 40,
+            "n": 71
+          },
+          "repairConsistency": {
+            "k": 26,
+            "n": 56,
+            "unavailable": 0
+          },
+          "wholeFamilyAgreement": {
+            "k": 58,
+            "n": 89,
+            "unavailable": 0
+          }
+        },
+        "candidate": {
+          "rows": 146,
+          "bugLabelFlags": {
+            "k": 72,
+            "n": 75
+          },
+          "cleanLabelAcceptance": {
+            "k": 47,
+            "n": 71
+          },
+          "repairConsistency": {
+            "k": 32,
+            "n": 56,
+            "unavailable": 0
+          },
+          "wholeFamilyAgreement": {
+            "k": 65,
+            "n": 89,
+            "unavailable": 0
+          }
+        }
+      }
+    },
+    "additions": {
+      "initial": {
+        "baseline": {
+          "rows": 139,
+          "bugLabelFlags": {
+            "k": 29,
+            "n": 30
+          },
+          "cleanLabelAcceptance": {
+            "k": 77,
+            "n": 109
+          },
+          "repairConsistency": {
+            "k": 8,
+            "n": 17,
+            "unavailable": 0
+          },
+          "wholeFamilyAgreement": {
+            "k": 56,
+            "n": 85,
+            "unavailable": 0
+          }
+        },
+        "candidate": {
+          "rows": 139,
+          "bugLabelFlags": {
+            "k": 28,
+            "n": 30
+          },
+          "cleanLabelAcceptance": {
+            "k": 77,
+            "n": 109
+          },
+          "repairConsistency": {
+            "k": 7,
+            "n": 17,
+            "unavailable": 0
+          },
+          "wholeFamilyAgreement": {
+            "k": 53,
+            "n": 85,
+            "unavailable": 0
+          }
+        }
+      },
+      "finalGate": {
+        "baseline": {
+          "rows": 139,
+          "bugLabelFlags": {
+            "k": 28,
+            "n": 30
+          },
+          "cleanLabelAcceptance": {
+            "k": 77,
+            "n": 109
+          },
+          "repairConsistency": {
+            "k": 8,
+            "n": 17,
+            "unavailable": 0
+          },
+          "wholeFamilyAgreement": {
+            "k": 56,
+            "n": 85,
+            "unavailable": 0
+          }
+        },
+        "candidate": {
+          "rows": 139,
+          "bugLabelFlags": {
+            "k": 28,
+            "n": 30
+          },
+          "cleanLabelAcceptance": {
+            "k": 77,
+            "n": 109
+          },
+          "repairConsistency": {
+            "k": 7,
+            "n": 17,
+            "unavailable": 0
+          },
+          "wholeFamilyAgreement": {
+            "k": 53,
+            "n": 85,
+            "unavailable": 0
+          }
+        }
+      }
+    },
+    "development": {
+      "initial": {
+        "baseline": {
+          "rows": 240,
+          "bugLabelFlags": {
+            "k": 88,
+            "n": 90
+          },
+          "cleanLabelAcceptance": {
+            "k": 94,
+            "n": 150
+          },
+          "repairConsistency": {
+            "k": 30,
+            "n": 66,
+            "unavailable": 0
+          },
+          "wholeFamilyAgreement": {
+            "k": 97,
+            "n": 150,
+            "unavailable": 0
+          }
+        },
+        "candidate": {
+          "rows": 240,
+          "bugLabelFlags": {
+            "k": 87,
+            "n": 90
+          },
+          "cleanLabelAcceptance": {
+            "k": 98,
+            "n": 150
+          },
+          "repairConsistency": {
+            "k": 35,
+            "n": 66,
+            "unavailable": 0
+          },
+          "wholeFamilyAgreement": {
+            "k": 100,
+            "n": 150,
+            "unavailable": 0
+          }
+        }
+      },
+      "finalGate": {
+        "baseline": {
+          "rows": 240,
+          "bugLabelFlags": {
+            "k": 87,
+            "n": 90
+          },
+          "cleanLabelAcceptance": {
+            "k": 94,
+            "n": 150
+          },
+          "repairConsistency": {
+            "k": 30,
+            "n": 66,
+            "unavailable": 0
+          },
+          "wholeFamilyAgreement": {
+            "k": 97,
+            "n": 150,
+            "unavailable": 0
+          }
+        },
+        "candidate": {
+          "rows": 240,
+          "bugLabelFlags": {
+            "k": 87,
+            "n": 90
+          },
+          "cleanLabelAcceptance": {
+            "k": 99,
+            "n": 150
+          },
+          "repairConsistency": {
+            "k": 36,
+            "n": 66,
+            "unavailable": 0
+          },
+          "wholeFamilyAgreement": {
+            "k": 101,
+            "n": 150,
+            "unavailable": 0
+          }
+        }
+      }
+    },
+    "previouslyReserved": {
+      "initial": {
+        "baseline": {
+          "rows": 45,
+          "bugLabelFlags": {
+            "k": 14,
+            "n": 15
+          },
+          "cleanLabelAcceptance": {
+            "k": 23,
+            "n": 30
+          },
+          "repairConsistency": {
+            "k": 4,
+            "n": 7,
+            "unavailable": 0
+          },
+          "wholeFamilyAgreement": {
+            "k": 17,
+            "n": 24,
+            "unavailable": 0
+          }
+        },
+        "candidate": {
+          "rows": 45,
+          "bugLabelFlags": {
+            "k": 13,
+            "n": 15
+          },
+          "cleanLabelAcceptance": {
+            "k": 25,
+            "n": 30
+          },
+          "repairConsistency": {
+            "k": 3,
+            "n": 7,
+            "unavailable": 0
+          },
+          "wholeFamilyAgreement": {
+            "k": 17,
+            "n": 24,
+            "unavailable": 0
+          }
+        }
+      },
+      "finalGate": {
+        "baseline": {
+          "rows": 45,
+          "bugLabelFlags": {
+            "k": 14,
+            "n": 15
+          },
+          "cleanLabelAcceptance": {
+            "k": 23,
+            "n": 30
+          },
+          "repairConsistency": {
+            "k": 4,
+            "n": 7,
+            "unavailable": 0
+          },
+          "wholeFamilyAgreement": {
+            "k": 17,
+            "n": 24,
+            "unavailable": 0
+          }
+        },
+        "candidate": {
+          "rows": 45,
+          "bugLabelFlags": {
+            "k": 13,
+            "n": 15
+          },
+          "cleanLabelAcceptance": {
+            "k": 25,
+            "n": 30
+          },
+          "repairConsistency": {
+            "k": 3,
+            "n": 7,
+            "unavailable": 0
+          },
+          "wholeFamilyAgreement": {
+            "k": 17,
+            "n": 24,
+            "unavailable": 0
+          }
+        }
+      }
+    }
+  },
+  "flips": [
+    {
+      "id": "corr-asymmetric-flip-classifier",
+      "expected": "FAIL",
+      "partition": "development",
+      "baseline": {
+        "firstVerdict": "PASS",
+        "finalStatus": "pass",
+        "reasonClass": null
+      },
+      "candidate": {
+        "firstVerdict": "FAIL",
+        "finalStatus": "fail",
+        "reasonClass": "right-item"
+      },
+      "initial": "gain",
+      "finalGate": "gain"
+    },
+    {
+      "id": "corr-decoy-conditional-update",
+      "expected": "PASS",
+      "partition": "development",
+      "baseline": {
+        "firstVerdict": "FAIL",
+        "finalStatus": "fail",
+        "reasonClass": null
+      },
+      "candidate": {
+        "firstVerdict": "PASS",
+        "finalStatus": "pass",
+        "reasonClass": null
+      },
+      "initial": "gain",
+      "finalGate": "gain"
+    },
+    {
+      "id": "corr-xdomain-nplusone",
+      "expected": "PASS",
+      "partition": "development",
+      "baseline": {
+        "firstVerdict": "FAIL",
+        "finalStatus": "fail",
+        "reasonClass": null
+      },
+      "candidate": {
+        "firstVerdict": "PASS",
+        "finalStatus": "pass",
+        "reasonClass": null
+      },
+      "initial": "gain",
+      "finalGate": "gain"
+    },
+    {
+      "id": "corr-xdomain-render",
+      "expected": "PASS",
+      "partition": "development",
+      "baseline": {
+        "firstVerdict": "PASS",
+        "finalStatus": "pass",
+        "reasonClass": null
+      },
+      "candidate": {
+        "firstVerdict": "FAIL",
+        "finalStatus": "fail",
+        "reasonClass": null
+      },
+      "initial": "loss",
+      "finalGate": "loss"
+    },
+    {
+      "id": "corr-decoy-lock-finally",
+      "expected": "PASS",
+      "partition": "development",
+      "baseline": {
+        "firstVerdict": "FAIL",
+        "finalStatus": "fail",
+        "reasonClass": null
+      },
+      "candidate": {
+        "firstVerdict": "PASS",
+        "finalStatus": "pass",
+        "reasonClass": null
+      },
+      "initial": "gain",
+      "finalGate": "gain"
+    },
+    {
+      "id": "corr-decoy-signature-callsite-updated",
+      "expected": "PASS",
+      "partition": "development",
+      "baseline": {
+        "firstVerdict": "FAIL",
+        "finalStatus": "fail",
+        "reasonClass": null
+      },
+      "candidate": {
+        "firstVerdict": "PASS",
+        "finalStatus": "pass",
+        "reasonClass": null
+      },
+      "initial": "gain",
+      "finalGate": "gain"
+    },
+    {
+      "id": "corr-broadcast-fanout-no-dedup",
+      "expected": "FAIL",
+      "partition": "development",
+      "baseline": {
+        "firstVerdict": "FAIL",
+        "finalStatus": "fail",
+        "reasonClass": "right-item"
+      },
+      "candidate": {
+        "firstVerdict": "PASS",
+        "finalStatus": "pass",
+        "reasonClass": null
+      },
+      "initial": "loss",
+      "finalGate": "loss"
+    },
+    {
+      "id": "corr-decoy-broadcast-targeted",
+      "expected": "PASS",
+      "partition": "development",
+      "baseline": {
+        "firstVerdict": "FAIL",
+        "finalStatus": "fail",
+        "reasonClass": null
+      },
+      "candidate": {
+        "firstVerdict": "PASS",
+        "finalStatus": "pass",
+        "reasonClass": null
+      },
+      "initial": "gain",
+      "finalGate": "gain"
+    },
+    {
+      "id": "corr-pr200-important-pair",
+      "expected": "PASS",
+      "partition": "development",
+      "baseline": {
+        "firstVerdict": "FAIL",
+        "finalStatus": "fail",
+        "reasonClass": null
+      },
+      "candidate": {
+        "firstVerdict": "PASS",
+        "finalStatus": "pass",
+        "reasonClass": null
+      },
+      "initial": "gain",
+      "finalGate": "gain"
+    },
+    {
+      "id": "corr-pr26-keep-the-mcp-inputschema-in-pair",
+      "expected": "PASS",
+      "partition": "development",
+      "baseline": {
+        "firstVerdict": "FAIL",
+        "finalStatus": "fail",
+        "reasonClass": null
+      },
+      "candidate": {
+        "firstVerdict": "PASS",
+        "finalStatus": "pass",
+        "reasonClass": null
+      },
+      "initial": "gain",
+      "finalGate": "gain"
+    },
+    {
+      "id": "corr-pr38-check-the-full-r2-credential-pair",
+      "expected": "PASS",
+      "partition": "development",
+      "baseline": {
+        "firstVerdict": "FAIL",
+        "finalStatus": "fail",
+        "reasonClass": null
+      },
+      "candidate": {
+        "firstVerdict": "FAIL",
+        "finalStatus": "pass",
+        "reasonClass": null
+      },
+      "initial": "unchanged",
+      "finalGate": "gain"
+    },
+    {
+      "id": "corr-pr26-block-parked-answer-sends-when-pair",
+      "expected": "PASS",
+      "partition": "development",
+      "baseline": {
+        "firstVerdict": "FAIL",
+        "finalStatus": "fail",
+        "reasonClass": null
+      },
+      "candidate": {
+        "firstVerdict": "PASS",
+        "finalStatus": "pass",
+        "reasonClass": null
+      },
+      "initial": "gain",
+      "finalGate": "gain"
+    },
+    {
+      "id": "corr-pr52-don-t-down-rank-recorded-pair",
+      "expected": "PASS",
+      "partition": "development",
+      "baseline": {
+        "firstVerdict": "PASS",
+        "finalStatus": "pass",
+        "reasonClass": null
+      },
+      "candidate": {
+        "firstVerdict": "FAIL",
+        "finalStatus": "fail",
+        "reasonClass": null
+      },
+      "initial": "loss",
+      "finalGate": "loss"
+    },
+    {
+      "id": "corr-pr52-use-frink-no-log-in-pair",
+      "expected": "PASS",
+      "partition": "development",
+      "baseline": {
+        "firstVerdict": "FAIL",
+        "finalStatus": "fail",
+        "reasonClass": null
+      },
+      "candidate": {
+        "firstVerdict": "PASS",
+        "finalStatus": "pass",
+        "reasonClass": null
+      },
+      "initial": "gain",
+      "finalGate": "gain"
+    },
+    {
+      "id": "corr-pr59-expand-knip-config-detection-pair",
+      "expected": "PASS",
+      "partition": "development",
+      "baseline": {
+        "firstVerdict": "PASS",
+        "finalStatus": "pass",
+        "reasonClass": null
+      },
+      "candidate": {
+        "firstVerdict": "FAIL",
+        "finalStatus": "fail",
+        "reasonClass": null
+      },
+      "initial": "loss",
+      "finalGate": "loss"
+    },
+    {
+      "id": "corr-pr59-expand-knip-config-detection",
+      "expected": "FAIL",
+      "partition": "development",
+      "baseline": {
+        "firstVerdict": "FAIL",
+        "finalStatus": "fail",
+        "reasonClass": "right-item"
+      },
+      "candidate": {
+        "firstVerdict": "PASS",
+        "finalStatus": "pass",
+        "reasonClass": null
+      },
+      "initial": "loss",
+      "finalGate": "loss"
+    },
+    {
+      "id": "corr-empty-home-override",
+      "expected": "FAIL",
+      "partition": "reserved",
+      "baseline": {
+        "firstVerdict": "FAIL",
+        "finalStatus": "fail",
+        "reasonClass": "right-item"
+      },
+      "candidate": {
+        "firstVerdict": "PASS",
+        "finalStatus": "pass",
+        "reasonClass": null
+      },
+      "initial": "loss",
+      "finalGate": "loss"
+    },
+    {
+      "id": "corr-ip-address-subdomains-clean",
+      "expected": "PASS",
+      "partition": "development",
+      "baseline": {
+        "firstVerdict": "PASS",
+        "finalStatus": "pass",
+        "reasonClass": null
+      },
+      "candidate": {
+        "firstVerdict": "FAIL",
+        "finalStatus": "fail",
+        "reasonClass": null
+      },
+      "initial": "loss",
+      "finalGate": "loss"
+    },
+    {
+      "id": "corr-null-map-key-clean",
+      "expected": "PASS",
+      "partition": "development",
+      "baseline": {
+        "firstVerdict": "FAIL",
+        "finalStatus": "fail",
+        "reasonClass": null
+      },
+      "candidate": {
+        "firstVerdict": "PASS",
+        "finalStatus": "pass",
+        "reasonClass": null
+      },
+      "initial": "gain",
+      "finalGate": "gain"
+    },
+    {
+      "id": "corr-eslint-arrow-parens-clean",
+      "expected": "PASS",
+      "partition": "development",
+      "baseline": {
+        "firstVerdict": "PASS",
+        "finalStatus": "pass",
+        "reasonClass": null
+      },
+      "candidate": {
+        "firstVerdict": "FAIL",
+        "finalStatus": "fail",
+        "reasonClass": null
+      },
+      "initial": "loss",
+      "finalGate": "loss"
+    },
+    {
+      "id": "corr-nested-default-projection-clean",
+      "expected": "PASS",
+      "partition": "development",
+      "baseline": {
+        "firstVerdict": "FAIL",
+        "finalStatus": "fail",
+        "reasonClass": null
+      },
+      "candidate": {
+        "firstVerdict": "PASS",
+        "finalStatus": "pass",
+        "reasonClass": null
+      },
+      "initial": "gain",
+      "finalGate": "gain"
+    },
+    {
+      "id": "corr-eslint-consistent-this-clean",
+      "expected": "PASS",
+      "partition": "development",
+      "baseline": {
+        "firstVerdict": "PASS",
+        "finalStatus": "pass",
+        "reasonClass": null
+      },
+      "candidate": {
+        "firstVerdict": "FAIL",
+        "finalStatus": "fail",
+        "reasonClass": null
+      },
+      "initial": "loss",
+      "finalGate": "loss"
+    },
+    {
+      "id": "corr-eslint-no-empty-clean",
+      "expected": "PASS",
+      "partition": "development",
+      "baseline": {
+        "firstVerdict": "FAIL",
+        "finalStatus": "fail",
+        "reasonClass": null
+      },
+      "candidate": {
+        "firstVerdict": "PASS",
+        "finalStatus": "pass",
+        "reasonClass": null
+      },
+      "initial": "gain",
+      "finalGate": "gain"
+    },
+    {
+      "id": "corr-empty-taxonomy-values-clean",
+      "expected": "PASS",
+      "partition": "development",
+      "baseline": {
+        "firstVerdict": "FAIL",
+        "finalStatus": "fail",
+        "reasonClass": null
+      },
+      "candidate": {
+        "firstVerdict": "PASS",
+        "finalStatus": "pass",
+        "reasonClass": null
+      },
+      "initial": "gain",
+      "finalGate": "gain"
+    },
+    {
+      "id": "corr-heading-text-projection-clean",
+      "expected": "PASS",
+      "partition": "development",
+      "baseline": {
+        "firstVerdict": "FAIL",
+        "finalStatus": "fail",
+        "reasonClass": null
+      },
+      "candidate": {
+        "firstVerdict": "PASS",
+        "finalStatus": "pass",
+        "reasonClass": null
+      },
+      "initial": "gain",
+      "finalGate": "gain"
+    },
+    {
+      "id": "corr-pagination-page-context-clean",
+      "expected": "PASS",
+      "partition": "reserved",
+      "baseline": {
+        "firstVerdict": "FAIL",
+        "finalStatus": "fail",
+        "reasonClass": null
+      },
+      "candidate": {
+        "firstVerdict": "PASS",
+        "finalStatus": "pass",
+        "reasonClass": null
+      },
+      "initial": "gain",
+      "finalGate": "gain"
+    },
+    {
+      "id": "corr-eslint-func-names-clean",
+      "expected": "PASS",
+      "partition": "development",
+      "baseline": {
+        "firstVerdict": "PASS",
+        "finalStatus": "pass",
+        "reasonClass": null
+      },
+      "candidate": {
+        "firstVerdict": "FAIL",
+        "finalStatus": "fail",
+        "reasonClass": null
+      },
+      "initial": "loss",
+      "finalGate": "loss"
+    },
+    {
+      "id": "corr-eslint-no-fallthrough-clean",
+      "expected": "PASS",
+      "partition": "development",
+      "baseline": {
+        "firstVerdict": "PASS",
+        "finalStatus": "pass",
+        "reasonClass": null
+      },
+      "candidate": {
+        "firstVerdict": "FAIL",
+        "finalStatus": "fail",
+        "reasonClass": null
+      },
+      "initial": "loss",
+      "finalGate": "loss"
+    },
+    {
+      "id": "corr-live-client-configuration-clean",
+      "expected": "PASS",
+      "partition": "reserved",
+      "baseline": {
+        "firstVerdict": "FAIL",
+        "finalStatus": "fail",
+        "reasonClass": null
+      },
+      "candidate": {
+        "firstVerdict": "PASS",
+        "finalStatus": "pass",
+        "reasonClass": null
+      },
+      "initial": "gain",
+      "finalGate": "gain"
+    },
+    {
+      "id": "corr-nested-array-dirty-collapse-clean",
+      "expected": "PASS",
+      "partition": "development",
+      "baseline": {
+        "firstVerdict": "FAIL",
+        "finalStatus": "fail",
+        "reasonClass": null
+      },
+      "candidate": {
+        "firstVerdict": "PASS",
+        "finalStatus": "pass",
+        "reasonClass": null
+      },
+      "initial": "gain",
+      "finalGate": "gain"
+    },
+    {
+      "id": "corr-pending-file-list-serving-clean",
+      "expected": "PASS",
+      "partition": "reserved",
+      "baseline": {
+        "firstVerdict": "FAIL",
+        "finalStatus": "fail",
+        "reasonClass": null
+      },
+      "candidate": {
+        "firstVerdict": "PASS",
+        "finalStatus": "pass",
+        "reasonClass": null
+      },
+      "initial": "gain",
+      "finalGate": "gain"
+    },
+    {
+      "id": "corr-pipeline-buffer-preservation-clean",
+      "expected": "PASS",
+      "partition": "reserved",
+      "baseline": {
+        "firstVerdict": "PASS",
+        "finalStatus": "pass",
+        "reasonClass": null
+      },
+      "candidate": {
+        "firstVerdict": "FAIL",
+        "finalStatus": "fail",
+        "reasonClass": null
+      },
+      "initial": "loss",
+      "finalGate": "loss"
+    },
+    {
+      "id": "corr-runner-exit-trailer-clean",
+      "expected": "PASS",
+      "partition": "development",
+      "baseline": {
+        "firstVerdict": "PASS",
+        "finalStatus": "pass",
+        "reasonClass": null
+      },
+      "candidate": {
+        "firstVerdict": "FAIL",
+        "finalStatus": "fail",
+        "reasonClass": null
+      },
+      "initial": "loss",
+      "finalGate": "loss"
+    },
+    {
+      "id": "corr-server-load-error-exit-clean",
+      "expected": "PASS",
+      "partition": "development",
+      "baseline": {
+        "firstVerdict": "PASS",
+        "finalStatus": "pass",
+        "reasonClass": null
+      },
+      "candidate": {
+        "firstVerdict": "FAIL",
+        "finalStatus": "fail",
+        "reasonClass": null
+      },
+      "initial": "loss",
+      "finalGate": "loss"
+    },
+    {
+      "id": "corr-population-projection-token-prefix",
+      "expected": "FAIL",
+      "partition": "development",
+      "baseline": {
+        "firstVerdict": "FAIL",
+        "finalStatus": "pass",
+        "reasonClass": null
+      },
+      "candidate": {
+        "firstVerdict": "FAIL",
+        "finalStatus": "fail",
+        "reasonClass": "right-item"
+      },
+      "initial": "unchanged",
+      "finalGate": "gain"
+    },
+    {
+      "id": "corr-unregistered-population-model-clean",
+      "expected": "PASS",
+      "partition": "development",
+      "baseline": {
+        "firstVerdict": "PASS",
+        "finalStatus": "pass",
+        "reasonClass": null
+      },
+      "candidate": {
+        "firstVerdict": "FAIL",
+        "finalStatus": "fail",
+        "reasonClass": null
+      },
+      "initial": "loss",
+      "finalGate": "loss"
+    }
+  ],
+  "interpretation": "Combined instruction/context/packing intervention versus saved baseline; no untouched reserve. Includes merged PR610 runtime/outage changes absent from the baseline runtime; component attribution and large-PR improvement are not established."
+}

@@ -141,7 +141,11 @@ export function measureDiffEvidenceCap(fullDiff: string): DiffEvidenceCap {
 /** Per-file capped diff evidence + explicit omission accounting. `inventory` (the full `--stat`
  * map, or a churn-free `--name-only` list for a reviewer with no Bash to verify churn with — see
  * cascade/reviewer.mts) always rides first, and either form names every file. */
-export function buildCappedDiffEvidence(fullDiff: string, inventory: string): string {
+export function buildCappedDiffEvidence(
+  fullDiff: string,
+  inventory: string,
+  hint = diffHint,
+): string {
   const diff = String(fullDiff);
   if (diff.length <= EVIDENCE_TOTAL_CAP) return `${inventory}\n${diff}`;
   const segments = splitDiffByFile(diff).map((content) => ({
@@ -152,7 +156,7 @@ export function buildCappedDiffEvidence(fullDiff: string, inventory: string): st
     totalCap: EVIDENCE_TOTAL_CAP,
     segmentCap: SEGMENT_CAP,
     omittedListMax: OMITTED_LIST_MAX,
-    hint: diffHint,
+    hint,
     omittedFooterHint: 'the staged-file inventory above lists every file',
   });
   return `${inventory}\n${body}`;
