@@ -147,6 +147,7 @@ function recordAgent(label: string, rest: string[]): number {
     if (Number.isFinite(n) && n >= 0 && (name === 'cost-usd' || Number.isInteger(n)))
       extra[name.replace(/-/g, '_')] = n;
   }
+  // The DISPATCHED agent's own session; the root session rides the envelope as parent_session_id.
   const sessionId = flag('session-id');
   if (sessionId) extra.session_id = sessionId;
   const billing = flag('billing');
@@ -196,7 +197,7 @@ async function run(argv: string[]): Promise<number> {
       'record-agent <label> [--model <m>] [--duration-ms <n>] ' +
       '[--disposition followed|overridden|unverified] [--reason "<why>"] ' +
       '[--input-tokens <n>] [--output-tokens <n>] [--cache-creation <n>] [--cache-read <n>] ' +
-      '[--cost-usd <n>] [--session-id <id>] [--billing subscription]',
+      '[--cost-usd <n>] [--session-id <dispatched-agent-session>] [--billing subscription]',
   );
   return 2;
 }

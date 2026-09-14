@@ -1,3 +1,12 @@
+/** POSIX twin of run-context.mts parentSessionId(), exported so the parity test runs these bytes. */
+export const PARENT_SESSION_SH_FN = `__dk_parent_session() {
+        __dk_s="\${CLAUDE_CODE_SESSION_ID:-}"
+        __dk_a=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789
+        case $__dk_s in ''|[!$__dk_a]*|*[!$__dk_a._-]*) return 0 ;; esac
+        [ "\${#__dk_s}" -le 128 ] || return 0
+        printf ',"parent_session_id":"%s"' "$__dk_s"
+    }`;
+
 /**
  * Build the ordinary-commit telemetry prologue/terminal owned by devkit's pre-commit hook.
  *
@@ -38,6 +47,7 @@ ${
         [ -n "$__dk_r" ] || __dk_r="$(basename "$(git rev-parse --show-toplevel 2>/dev/null)")"
         printf '%s' "$__dk_r"
     }
+    ${PARENT_SESSION_SH_FN}
     __dk_commit_result() {
         [ -n "\${__dk_done:-}" ] && return 0
         __dk_done=1
@@ -48,10 +58,11 @@ ${
         fi
         __dk_events="\${DEVKIT_GATE_EVENTS:-$HOME/.devkit/telemetry/gate-events.jsonl}"
         mkdir -p "$(dirname "$__dk_events")" 2>/dev/null || return 0
-        printf '{"type":"commit_result","ship_id":"%s","commit_tree":"%s","run_mode":"commit","repo":"%s","branch":"%s","exit_code":%d,"duration_s":%d,"ts":"%s"}\\n' \\
+        printf '{"type":"commit_result","ship_id":"%s","commit_tree":"%s","run_mode":"commit","repo":"%s","branch":"%s"%s,"exit_code":%d,"duration_s":%d,"ts":"%s"}\\n' \\
             "$(__dk_esc "$DEVKIT_COMMIT_ID")" "$__dk_tree" \\
             "$(__dk_esc "$(__dk_repo)")" \\
             "$(__dk_esc "$(git rev-parse --abbrev-ref HEAD 2>/dev/null)")" \\
+            "$(__dk_parent_session)" \\
             "\${1:-0}" "$(( $(date +%s) - __dk_t0 ))" \\
             "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$__dk_events" 2>/dev/null || true
         if [ "\${1:-0}" -ne 0 ] && [ -n "\${__dk_commit_state:-}" ]; then

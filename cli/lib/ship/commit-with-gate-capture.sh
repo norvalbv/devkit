@@ -109,9 +109,9 @@ commit_with_gate_capture() {
   resumed_json=false; [ "${DEVKIT_SHIP_RESUMED:-0}" = "1" ] && resumed_json=true
   body_bytes=$(printf '%s' "$body" | wc -c | tr -d ' ')
   if [ "$ship_dry_gates" -eq 0 ]; then
-    printf '{"type":"ship_attempt","ship_id":"%s","repo":"%s","branch":"%s","devkit_version":"%s","mode":"%s","resumed":%s,"body_bytes":%d,"log_path":"%s","ts":"%s"}\n' \
+    printf '{"type":"ship_attempt","ship_id":"%s","repo":"%s","branch":"%s","devkit_version":"%s"%s,"mode":"%s","resumed":%s,"body_bytes":%d,"log_path":"%s","ts":"%s"}\n' \
       "$(devkit_json_escape "$DEVKIT_SHIP_ID")" "$(devkit_json_escape "$repo_name")" "$(devkit_json_escape "$br")" \
-      "$(devkit_json_escape "$DEVKIT_TELEMETRY_VERSION")" \
+      "$(devkit_json_escape "$DEVKIT_TELEMETRY_VERSION")" "$(devkit_parent_session_json)" \
       "$(devkit_json_escape "${DEVKIT_SHIP_MODE:-ship}")" "$resumed_json" "$body_bytes" \
       "$(devkit_json_escape "$ship_log")" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
       >> "$DEVKIT_GATE_EVENTS" 2>/dev/null || true
@@ -312,9 +312,9 @@ SHIP_HOOK_WRAPPER
   else blocked_json='"unknown"'; timed_out=false
   fi
   if [ "$ship_dry_gates" -eq 0 ]; then
-    printf '{"type":"ship_result","ship_id":"%s","repo":"%s","branch":"%s","devkit_version":"%s","exit_code":%d,"timed_out":%s,"blocked_gate":%s,"duration_s":%d,"log_path":"%s","ts":"%s"}\n' \
+    printf '{"type":"ship_result","ship_id":"%s","repo":"%s","branch":"%s","devkit_version":"%s"%s,"exit_code":%d,"timed_out":%s,"blocked_gate":%s,"duration_s":%d,"log_path":"%s","ts":"%s"}\n' \
       "$(devkit_json_escape "$DEVKIT_SHIP_ID")" "$(devkit_json_escape "$repo_name")" "$(devkit_json_escape "$br")" \
-      "$(devkit_json_escape "$DEVKIT_TELEMETRY_VERSION")" "$rc" "$timed_out" "$blocked_json" \
+      "$(devkit_json_escape "$DEVKIT_TELEMETRY_VERSION")" "$(devkit_parent_session_json)" "$rc" "$timed_out" "$blocked_json" \
       "$(( $(date +%s) - dur_start ))" "$(devkit_json_escape "$ship_log")" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
       >> "$DEVKIT_GATE_EVENTS" 2>/dev/null || true
   fi

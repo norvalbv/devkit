@@ -7,6 +7,7 @@ import { devkitVersion } from '../../devkit-version.mts';
 import {
   _resetRunContextForTests,
   originatingAgent,
+  parentSessionId,
   runEnvelope,
   runId,
   telemetryEnabled,
@@ -23,9 +24,11 @@ const ENV = [
   'DEVKIT_SHIP_REPO',
   'DEVKIT_SHIP_BRANCH',
   'DEVKIT_COMMIT_ID',
+  'DEVKIT_AGENT_RUN_ID',
   'DEVKIT_GATE_EVENTS',
   'DEVKIT_NO_TELEMETRY',
   'CLAUDECODE',
+  'CLAUDE_CODE_SESSION_ID',
   'CODEX_HOME',
   'CODEX_CLI_PATH',
   'CODEX_SESSION_ID',
@@ -151,6 +154,7 @@ describe('run-context', () => {
 
   it('off-ship, DEVKIT_NO_TELEMETRY=1: silent — runId null, empty envelope, no default sink', () => {
     process.env.DEVKIT_NO_TELEMETRY = '1';
+    process.env.CLAUDE_CODE_SESSION_ID = 'root-session-1'; // a session id alone never un-silences it
     expect(telemetryEnabled()).toBe(false);
     expect(runId()).toBeNull();
     expect(runEnvelope()).toEqual({});
@@ -226,6 +230,61 @@ describe('run-context', () => {
     _resetRunContextForTests();
     expect(runId()).toBeNull();
     expect(runEnvelope()).toEqual({});
+  });
+
+  describe('parentSessionId (root agent session attribution)', () => {
+    const ROOT = 'd323ae68-c68f-4457-b340-e8a7a0a18e80';
+
+    it('rides every envelope shape: ship, review, agent and commit', () => {
+      process.env.CLAUDE_CODE_SESSION_ID = ROOT;
+      process.env.DEVKIT_SHIP_ID = 'ship-p';
+      expect(runEnvelope()).toEqual({
+        ship_id: 'ship-p',
+        repo: '',
+        branch: '',
+        source: 'unknown',
+        devkit_version: devkitVersion(),
+        parent_session_id: ROOT,
+      });
+      delete process.env.DEVKIT_SHIP_ID;
+      process.env.DEVKIT_REVIEW_ID = 'review-p';
+      expect(runEnvelope()).toMatchObject({ run_mode: 'review', parent_session_id: ROOT });
+      delete process.env.DEVKIT_REVIEW_ID;
+      process.chdir(gitRepo());
+      _resetRunContextForTests();
+      process.env.DEVKIT_AGENT_RUN_ID = 'agent-p';
+      expect(runEnvelope()).toMatchObject({ run_mode: 'agent', parent_session_id: ROOT });
+      delete process.env.DEVKIT_AGENT_RUN_ID;
+      expect(runEnvelope()).toMatchObject({ run_mode: 'commit', parent_session_id: ROOT });
+    });
+
+    it.each([undefined, ''])('omits the key (never writes an empty id) when the var is %j', (v) => {
+      if (v !== undefined) process.env.CLAUDE_CODE_SESSION_ID = v;
+      process.env.DEVKIT_SHIP_ID = 'ship-p';
+      expect(runEnvelope()).not.toHaveProperty('parent_session_id');
+      delete process.env.DEVKIT_SHIP_ID;
+      process.chdir(gitRepo());
+      _resetRunContextForTests();
+      expect(runEnvelope()).not.toHaveProperty('parent_session_id');
+    });
+
+    it.each(['a b', 'x"y', 'id\nx', 'é1', '-lead', '.lead', 'a/b', 'a'.repeat(129)])(
+      'rejects a malformed id %j rather than tearing or bloating the line',
+      (v) => {
+        expect(parentSessionId({ CLAUDE_CODE_SESSION_ID: v })).toBeUndefined();
+      },
+    );
+
+    it.each([ROOT, 'ok.id_1-2', 'a'.repeat(128)])('accepts %j', (v) => {
+      expect(parentSessionId({ CLAUDE_CODE_SESSION_ID: v })).toBe(v);
+    });
+
+    it('stamps Claude only: a Codex thread id alone yields no parent (unverified mapping)', () => {
+      process.env.CODEX_THREAD_ID = '019fa90e-e812-70c2-ae18-9810c06fa762';
+      process.env.DEVKIT_SHIP_ID = 'ship-codex';
+      expect(runEnvelope()).toMatchObject({ source: 'codex' });
+      expect(runEnvelope()).not.toHaveProperty('parent_session_id');
+    });
   });
 
   describe('originatingAgent (source fingerprint)', () => {
