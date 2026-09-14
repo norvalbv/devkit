@@ -7,6 +7,7 @@ import { execFileSync } from 'node:child_process';
 import { appendFileSync, realpathSync } from 'node:fs';
 import { setTimeout as sleepFor } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
+import { parentSessionId } from '../../../../gate-engine/judge/run-context.mts';
 import type { UnknownReason } from '../../baseline-status/gh.mts';
 
 /** The five states gh collapses `state` into. Ordered for stable rendering, not by severity. */
@@ -451,8 +452,10 @@ export function recordCiEvent(result: WaitCiResult, pr: string, env = process.en
     reason: result.unavailableReason ?? null,
     ts: new Date().toISOString(),
   };
+  const parent = parentSessionId(env);
+  const stamped = parent ? { ...row, parent_session_id: parent } : row;
   try {
-    appendFileSync(file, `${JSON.stringify(row)}\n`);
+    appendFileSync(file, `${JSON.stringify(stamped)}\n`);
   } catch {
     // A telemetry miss costs a queryable row, never the ship.
   }

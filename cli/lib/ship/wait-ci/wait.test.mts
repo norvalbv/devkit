@@ -407,6 +407,19 @@ describe('recordCiEvent', () => {
     });
   });
 
+  it('names the root agent session that ran the ship, and omits it when there is none', () => {
+    const file = join(mkdtempSync(join(tmpdir(), 'ci-events-')), 'events.jsonl');
+    const env = { DEVKIT_GATE_EVENTS: file, DEVKIT_SHIP_ID: 'ship-1' };
+    recordCiEvent(result, '514', { ...env, CLAUDE_CODE_SESSION_ID: 'root-1' });
+    recordCiEvent(result, '514', env);
+    const [stamped, bare] = readFileSync(file, 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l));
+    expect(stamped.parent_session_id).toBe('root-1');
+    expect(bare).not.toHaveProperty('parent_session_id');
+  });
+
   it('stays silent when the ship is not collecting telemetry', () => {
     // No throw, no file: a telemetry miss costs a row, never the ship.
     expect(() => recordCiEvent(result, '514', {})).not.toThrow();

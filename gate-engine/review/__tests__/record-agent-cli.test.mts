@@ -176,6 +176,7 @@ describe('record-agent usage flags', () => {
         'api',
       ],
       'the agent verdict',
+      { CLAUDE_CODE_SESSION_ID: 'root-sess-1' },
     );
     expect(r.status).toBe(0);
     const [ev] = events();
@@ -190,7 +191,15 @@ describe('record-agent usage flags', () => {
       cost_usd: 0.42,
       session_id: 'sess-9',
       billing: 'api',
+      // The dispatched agent's session and the root that dispatched it are distinct keys.
+      parent_session_id: 'root-sess-1',
     });
+  });
+
+  it('omits parent_session_id when the root agent session id is empty', () => {
+    const r = runCli(['record-agent', 'prior-art'], 'verdict', { CLAUDE_CODE_SESSION_ID: '' });
+    expect(r.status).toBe(0);
+    expect(events()[0]).not.toHaveProperty('parent_session_id');
   });
 
   it('omits malformed or negative usage values instead of emitting zeros', () => {

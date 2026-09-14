@@ -66,5 +66,7 @@ describe('commit-terminal fragment (sc-2000)', () => {
     expect(fragment).toContain('--git-common-dir');
     // The repo printf arg must route through the helper.
     expect(fragment).toContain('"$(__dk_esc "$(__dk_repo)")"');
+    expect(fragment).toContain('__dk_parent_session()');
+    expect(fragment).toContain('"$(__dk_parent_session)"');
   });
 });

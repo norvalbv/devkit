@@ -635,6 +635,7 @@ describe('ship-branch.sh — worktree integration', () => {
     writeFileSync(join(dir, 'note.txt'), 'hello\n');
     const stubBin = ghStub('echo "https://github.com/acme/app/pull/42"');
     const sink = join(dir, 'events.jsonl');
+    env.CLAUDE_CODE_SESSION_ID = 'parent-1';
 
     const r = spawnSync('/bin/bash', [scriptPath, 'feat/ok', 't', 'note.txt'], {
       cwd: dir,
@@ -651,13 +652,12 @@ describe('ship-branch.sh — worktree integration', () => {
     const attempt = events.find((e) => e.type === 'ship_attempt');
     const resultEvent = events.find((e) => e.type === 'ship_result');
     const prEvent = events.find((e) => e.type === 'ship_pr');
-    expect(attempt.devkit_version).toBe(devkitVersion());
-    expect(resultEvent.devkit_version).toBe(devkitVersion());
     expect(prEvent).toBeTruthy();
     expect(prEvent.pr_url).toBe('https://github.com/acme/app/pull/42');
     expect(prEvent.pr_number).toBe(42); // a bare JSON number, not a string
     expect(prEvent.ship_id).toBe(attempt.ship_id); // same attempt the gate events correlate under
-    expect(prEvent.devkit_version).toBe(devkitVersion());
+    for (const e of [attempt, resultEvent, prEvent])
+      expect(e).toMatchObject({ devkit_version: devkitVersion(), parent_session_id: 'parent-1' });
   });
 
   // A 0-exit `gh pr create` that prints no parseable URL (e.g. it writes the URL to stderr) must NOT be

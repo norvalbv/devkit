@@ -76,6 +76,7 @@ function runCommit(
   hideHookProof = false,
   dryGates = false,
   inheritedDryGates = '',
+  extraEnv: Record<string, string> = {},
 ) {
   const telemetry = join(root, 'telemetry', 'gate-events.jsonl');
   const script = `
@@ -116,7 +117,7 @@ commit_with_gate_capture "$4" "$5" feat/sc1537 "test title" "test body"
     ],
     {
       cwd: root,
-      env: gitEnv,
+      env: { ...gitEnv, ...extraEnv },
       encoding: 'utf8',
     },
   );
@@ -190,6 +191,23 @@ describe('commit_with_gate_capture — executable hook proof', () => {
       exit_code: 1,
       blocked_gate: 'hook_setup',
     });
+  });
+
+  it.each([
+    ['cap-root-1', 'cap-root-1'],
+    ['', undefined],
+    ['bad"id', undefined],
+  ])('ship_attempt/ship_result parent_session_id for %j', (value, expected) => {
+    const { root, wt, base } = fixture(false);
+    runCommit(root, wt, base, false, false, '', { CLAUDE_CODE_SESSION_ID: value });
+    // Parsing every line proves a hostile id can never tear the JSON.
+    const events = readFileSync(join(root, 'telemetry/gate-events.jsonl'), 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    const rows = events.filter((e) => e.type === 'ship_attempt' || e.type === 'ship_result');
+    expect(rows).toHaveLength(2);
+    for (const row of rows) expect(row.parent_session_id).toBe(expected);
   });
 
   // Values must stay free of single quotes: the row is spliced into a single-quoted printf argument.
