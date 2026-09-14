@@ -53,6 +53,12 @@ command. Do not pre-run every gate or replace the managed chain with a hand-writ
   base, so `git show HEAD:<file>`, `grep` and `git diff --stat` in your own checkout can all agree
   with each other and still describe a different tree. Waive on evidence read from the reviewed
   base, and pass the `--base` the block note prints so the record says which tree you checked.
+- **A counterexample stands for a class.** A correctness finding against a matcher, parser,
+  predicate or validator names ONE input the check gets wrong. Before re-shipping, name the property
+  that makes it wrong, list the other inputs that share it (every character that continues a path,
+  not just the `.` quoted), and fix the class: an allowlist or grammar instead of a longer
+  blocklist, or a narrower check on an exact token. Pin the fix with a table-driven test over that
+  class. A second finding of the same shape means the first fix covered an instance, not the class.
 - **Sentry gate** judges commit-message intent for newly introduced runtime error classes. Add the
   capture on the named surface, or surface a disputed verdict to the user before any bypass.
 - **Qavis advisory** can recommend visual QA but does not turn a non-UI change into UI work.

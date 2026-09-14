@@ -8,6 +8,10 @@ const ISSUE_LINE_CHARS = 160;
 const LOCATION_RE =
   /([\w@./-]+\.(?:tsx?|mts|cts|jsx?|mjs|cjs|py|go|rs|java|rb|swift|kt|sh|bash|zsh|sql|css|scss|html|vue|svelte|json|ya?ml|toml|md)):(\d+)\b/i;
 const LINE_BUCKET = 5;
+/** The correctness lens whose single counterexample stands for a class (mirrors CORRECTNESS_LENSES). */
+export const CLASSIFICATION_LENS = 'error-and-edge-classification';
+export const CLASS_FIX_HINT =
+  '  ↳ If a finding names one input to a matcher/parser/predicate/validator, derive why it fails and fix + test the whole class (commit-gates skill).';
 
 export interface FindingsSummary {
   /** One rendered line per distinct blocking finding, capped at FINDINGS_CAP. */
@@ -16,6 +20,8 @@ export interface FindingsSummary {
   total: number;
   /** Issue strings folded into an earlier line (same lens + file + 5-line bucket, or same text). */
   deduped: number;
+  /** Lenses still holding at least one blocking issue, sorted — independent of the line cap. */
+  blockingLenses: string[];
 }
 
 function fingerprint(lens: string, issue: string): string {
@@ -28,6 +34,7 @@ function fingerprint(lens: string, issue: string): string {
 export function summarizeFindings(items: ReviewItem[] | undefined): FindingsSummary {
   const seen = new Set<string>();
   const lines: string[] = [];
+  const blocking = new Set<string>();
   let total = 0;
   let deduped = 0;
   for (const item of items ?? []) {
@@ -40,6 +47,7 @@ export function summarizeFindings(items: ReviewItem[] | undefined): FindingsSumm
     )
       continue;
     for (const issue of item.issues ?? []) {
+      blocking.add(item.lens);
       const key = fingerprint(item.lens, issue);
       if (seen.has(key)) {
         deduped += 1;
@@ -54,16 +62,19 @@ export function summarizeFindings(items: ReviewItem[] | undefined): FindingsSumm
       }
     }
   }
-  return { lines, total, deduped };
+  return { lines, total, deduped, blockingLenses: [...blocking].sort() };
 }
+
+/** Reads a spilled `itemsRef` sidecar; injectable so the spill path is testable without I/O. */
+export type ItemsRefReader = (ref: string) => string | null;
 
 /** `items` spills to an `itemsRef` sidecar past the event byte budget (items.mts) — the block must
  * not vanish on exactly the multi-finding failures it exists for, so read the spill back. */
-function resolveItems(res: ReviewOutcome): ReviewItem[] | undefined {
+function resolveItems(res: ReviewOutcome, readRef: ItemsRefReader): ReviewItem[] | undefined {
   if (res.items) return res.items;
   if (!res.itemsRef) return undefined;
   try {
-    const raw = readTranscript(res.itemsRef);
+    const raw = readRef(res.itemsRef);
     // SAFETY: the sidecar is written by attachItems as JSON.stringify of the capped ReviewItem[].
     return raw ? (JSON.parse(raw) as ReviewItem[]) : undefined;
   } catch {
@@ -73,17 +84,25 @@ function resolveItems(res: ReviewOutcome): ReviewItem[] | undefined {
 
 /** The block printed under a FAILED reviewer's reason — ONE block per reviewer, merged across a
  * split reviewer's failing lens parts so multi-lens failures never fragment or double-count. */
-export function renderFindingsBlockForParts(name: string, parts: ReviewOutcome[]): string {
-  const items = parts.flatMap((part) => resolveItems(part) ?? []);
-  const { lines, total, deduped } = summarizeFindings(items);
+export function renderFindingsBlockForParts(
+  name: string,
+  parts: ReviewOutcome[],
+  readRef: ItemsRefReader = readTranscript,
+): string {
+  const items = parts.flatMap((part) => resolveItems(part, readRef) ?? []);
+  const { lines, total, deduped, blockingLenses } = summarizeFindings(items);
   if (lines.length === 0) return '';
   const folded = deduped > 0 ? `, ${deduped} duplicate(s) folded` : '';
   const more =
     total > lines.length ? `\n  …and ${total - lines.length} more in the transcript` : '';
-  return `${name}: ${total} finding(s)${folded}:\n${lines.join('\n')}${more}`;
+  const hint = blockingLenses.includes(CLASSIFICATION_LENS) ? `\n${CLASS_FIX_HINT}` : '';
+  return `${name}: ${total} finding(s)${folded}:\n${lines.join('\n')}${more}${hint}`;
 }
 
 /** Single-outcome convenience over renderFindingsBlockForParts. */
-export function renderFindingsBlock(res: ReviewOutcome): string {
-  return renderFindingsBlockForParts(res.name, [res]);
+export function renderFindingsBlock(
+  res: ReviewOutcome,
+  readRef: ItemsRefReader = readTranscript,
+): string {
+  return renderFindingsBlockForParts(res.name, [res], readRef);
 }

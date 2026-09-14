@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CLASS_FIX_HINT,
+  CLASSIFICATION_LENS,
   renderFindingsBlock,
   renderFindingsBlockForParts,
   summarizeFindings,
 } from '../evidence/findings.mts';
+import { CORRECTNESS_LENSES } from '../lens/groups.mts';
 import type { ReviewItem, ReviewOutcome } from '../runtime.mts';
 
 const item = (lens: string, issues: string[], over: Partial<ReviewItem> = {}): ReviewItem => ({
@@ -114,5 +117,126 @@ describe('renderFindingsBlock', () => {
     const block = renderFindingsBlock(outcome([item('lens', [...issues, issues[0]])]));
     expect(block).toContain('api-security-reviewer: 14 finding(s), 1 duplicate(s) folded:');
     expect(block).toContain('…and 2 more in the transcript');
+  });
+});
+
+// sc-2740: a classifier counterexample stands for a class; the block says so once, off the same
+// blocking filter the finding lines use, so a waived/dropped lens or a capped line never skews it.
+describe('class-fix hint for classification findings', () => {
+  const countHint = (block: string) => block.split(CLASS_FIX_HINT).length - 1;
+  const correctness = (items: ReviewItem[], over: Partial<ReviewOutcome> = {}): ReviewOutcome => ({
+    name: 'correctness-reviewer',
+    status: 'fail',
+    reason: 'r',
+    escalated: false,
+    items,
+    ...over,
+  });
+
+  it('pins the lens id to the shipped correctness lens vocabulary', () => {
+    expect(CORRECTNESS_LENSES).toContain(CLASSIFICATION_LENS);
+  });
+
+  it('appends the hint exactly once, last, without changing the finding counts', () => {
+    const block = renderFindingsBlock(
+      correctness([
+        item(CLASSIFICATION_LENS, [
+          'input `devkit review.md` matches the verb at cli/a.test.mts:25',
+          'input `devkit review/guide` also matches at cli/b.mts:90',
+        ]),
+      ]),
+    );
+    expect(block).toContain('correctness-reviewer: 2 finding(s):');
+    expect(countHint(block)).toBe(1);
+    expect(block.trimEnd().endsWith(CLASS_FIX_HINT)).toBe(true);
+  });
+
+  it('keeps every hint line within the issue-line width', () => {
+    for (const line of CLASS_FIX_HINT.split('\n')) expect(line.length).toBeLessThanOrEqual(160);
+  });
+
+  it('still hints when the classification finding falls past the 12-line cap', () => {
+    const others = Array.from({ length: 13 }, (_, i) => `race in src/f${i}.ts:${i * 100 + 1}`);
+    const block = renderFindingsBlock(
+      correctness([
+        item('concurrency-races', others),
+        item(CLASSIFICATION_LENS, ['bare `{` anchor misclassifies JSON at src/p.ts:4']),
+      ]),
+    );
+    expect(block).not.toContain(`${CLASSIFICATION_LENS} ·`); // proven past the cap…
+    expect(block).toContain('…and 2 more in the transcript');
+    expect(countHint(block)).toBe(1); // …yet the class hint still reaches the author
+  });
+
+  it.each([
+    ['waived', { disposition: 'waived' as const }],
+    ['out-of-charter-dropped', { disposition: 'dropped_out_of_charter' as const }],
+    ['passing', { status: 'pass' }],
+  ])('omits the hint when the classification lens is %s and another lens blocks', (_, over) => {
+    const block = renderFindingsBlock(
+      correctness([
+        item(CLASSIFICATION_LENS, ['anchor misclassifies at src/p.ts:4'], over),
+        item('state-transitions', ['status clobbered at src/a.ts:12'], { disposition: 'blocking' }),
+      ]),
+    );
+    expect(block).toContain('state-transitions · src/a.ts:12');
+    expect(countHint(block)).toBe(0);
+  });
+
+  it('omits the hint when only non-classification lenses block', () => {
+    const block = renderFindingsBlock(
+      correctness([
+        item('writer-reader-contracts', ['reader drops field at src/r.ts:7']),
+        item('concurrency-races', ['double-fire at src/b.ts:80']),
+      ]),
+    );
+    expect(countHint(block)).toBe(0);
+  });
+
+  it('omits the hint for a lens that merely contains the id as a substring', () => {
+    const block = renderFindingsBlock(
+      correctness([item(`src/${CLASSIFICATION_LENS}.ts`, ['duplicated helper at src/x.ts:3'])]),
+    );
+    expect(countHint(block)).toBe(0);
+  });
+
+  it('prints no orphan hint when the classification lens failed without issue strings', () => {
+    expect(renderFindingsBlock(correctness([item(CLASSIFICATION_LENS, [])]))).toBe('');
+    expect(summarizeFindings([item(CLASSIFICATION_LENS, [])]).blockingLenses).toEqual([]);
+  });
+
+  it('hints once across split lens parts that each block on classification', () => {
+    const block = renderFindingsBlockForParts('correctness-reviewer', [
+      correctness([item(CLASSIFICATION_LENS, ['`.` continues a path at src/p.ts:4'])]),
+      correctness([item(CLASSIFICATION_LENS, ['`\\` continues a path at src/q.ts:90'])]),
+    ]);
+    expect(block).toContain('correctness-reviewer: 2 finding(s):');
+    expect(countHint(block)).toBe(1);
+  });
+
+  it('hints from items spilled to the itemsRef sidecar', () => {
+    const refsRead: string[] = [];
+    const readRef = (ref: string) => {
+      refsRead.push(ref);
+      return JSON.stringify([item(CLASSIFICATION_LENS, ['separator run at src/p.ts:4'])]);
+    };
+    const res = correctness([]);
+    delete res.items;
+    res.itemsRef = 'items-spill';
+    const block = renderFindingsBlock(res, readRef);
+    expect(refsRead).toEqual(['items-spill']);
+    expect(countHint(block)).toBe(1);
+  });
+
+  it('reports blocking lenses sorted and deduplicated, including lines past the cap', () => {
+    const many = Array.from({ length: 12 }, (_, i) => `defect in src/f${i}.ts:${i * 100 + 1}`);
+    const s = summarizeFindings([
+      item('state-transitions', many),
+      item(CLASSIFICATION_LENS, ['a at src/p.ts:4']),
+      item(CLASSIFICATION_LENS, ['b at src/q.ts:40']),
+      item('concurrency-races', ['waived at src/w.ts:1'], { disposition: 'waived' }),
+    ]);
+    expect(s.lines).toHaveLength(12);
+    expect(s.blockingLenses).toEqual([CLASSIFICATION_LENS, 'state-transitions']);
   });
 });
