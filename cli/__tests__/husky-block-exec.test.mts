@@ -998,6 +998,13 @@ describe('ship: sentry is judged before the qavis advisory', () => {
     expect(r.calls).not.toContain('guard-qavis-advisory');
   });
 
+  it('an exit outside the contract (3) blocks before the advisory instead of falling through', () => {
+    const r = runHook({ SENTRY_RC: '3' }, SHIP, { shipMsg: true });
+    expect(r.status).toBe(1);
+    expect(r.stdout).toContain('unexpected exit 3');
+    expect(r.calls).not.toContain('guard-qavis-advisory');
+  });
+
   it('a fail-open sentry (exit 2) continues to the advisory', () => {
     const r = runHook({ SENTRY_RC: '2' }, SHIP, { shipMsg: true });
     expect(r.status).toBe(0);

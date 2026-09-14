@@ -43,5 +43,11 @@ echo "🛰️ Sentry gate (ship: judged before the qavis advisory; commit-msg re
 src=0
 ${invokeJudge(standalone, 'guard-sentry', 'src', '"$DEVKIT_COMMIT_MSG_FILE"')}
 ${SENTRY_ARMS}
+# Pre-commit policy, prewarm only: a code this contract does not define means no verdict was
+# reached, so block rather than fall through to the advisory. commit-msg keeps its continue default.
+if [ "$src" -ne 0 ] && [ "$src" -ne 2 ]; then
+    echo "   guard-sentry: unexpected exit $src — blocking (this step reached no verdict)."
+    exit 1
+fi
 fi
 # /devkit:guard-sentry-prewarm`;
