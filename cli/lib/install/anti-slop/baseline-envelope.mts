@@ -3,6 +3,7 @@
 import { AntiSlopCapabilityError } from './base-capability.mts';
 import {
   type AntiSlopBaseline,
+  type BaselineIncrease,
   baselineFromGroups,
   baselineIncreases,
   compareBaseline,
@@ -11,7 +12,103 @@ import {
 } from './baseline.mts';
 import type { FindingGroup } from './diagnostics.mts';
 import { type GitBaselineEnvelope, withBaseAntiSlopSnapshot } from './git-snapshot.mts';
+import {
+  creditRelocatedGrowth,
+  formatSources,
+  relocationBasePaths,
+  relocationKey,
+  type RelocatedGrowthSplit,
+  type VacatedDebt,
+  vacatedDebt,
+} from './relocations.mts';
 import { collectAntiSlopGroups } from './runner.mts';
+
+/** Where a relocation's evidence is linted, and which candidate files that lint actually covered. */
+export interface RelocationContext {
+  cwd: string;
+  capabilityCwd: string | null;
+  inLintScope: (file: string) => boolean;
+}
+
+/** Debt bound for relocation: the committed base (renames applied), or the local baseline without one. */
+export function relocationBound(
+  envelope: GitBaselineEnvelope,
+  candidate: AntiSlopBaseline,
+): AntiSlopBaseline {
+  return envelope.base ? migrateBaselineRenames(envelope.base, envelope.renames) : candidate;
+}
+
+/**
+ * Lint-evidenced debt that changed files gave up since the base tree, for the given keys. Null when
+ * the base tree cannot be judged; empty when no changed file carries matching debt (no lint runs).
+ */
+export function relocationEvidence(
+  context: RelocationContext,
+  envelope: GitBaselineEnvelope,
+  candidate: AntiSlopBaseline,
+  candidateGroups: readonly FindingGroup[],
+  keys: ReadonlySet<string>,
+): VacatedDebt | null {
+  const empty: VacatedDebt = new Map();
+  if (!envelope.baseTree || keys.size === 0) return empty;
+  const bound = relocationBound(envelope, candidate);
+  // Without a committed base no rename was ever adopted, so a renamed path cannot carry local debt.
+  const sources = envelope.base
+    ? envelope.relocationSources
+    : new Map([...envelope.relocationSources].filter(([path, from]) => from.basePath === path));
+  const basePaths = relocationBasePaths(bound, sources, keys);
+  if (basePaths.length === 0) return empty;
+  return withBaseAntiSlopSnapshot(
+    envelope.baseCheckoutCwd ?? context.cwd,
+    context.capabilityCwd ?? context.cwd,
+    envelope.baseTree,
+    basePaths,
+    (snapshot) => {
+      // An empty path list lints the WHOLE base tree; nothing to measure means nothing vacated.
+      if (snapshot.paths.length === 0) return empty;
+      let baseGroups: FindingGroup[];
+      try {
+        baseGroups = collectAntiSlopGroups(snapshot.cwd, snapshot.paths);
+      } catch (error: unknown) {
+        if (!(error instanceof AntiSlopCapabilityError)) throw error;
+        return null;
+      }
+      const inherited = migrateBaselineRenames(baselineFromGroups(baseGroups), envelope.renames);
+      return vacatedDebt(
+        bound,
+        inherited,
+        candidateGroups,
+        sources,
+        context.inLintScope,
+        envelope.activatedRuleIds,
+      );
+    },
+  );
+}
+
+function splitRelocatedGrowth(
+  increases: readonly BaselineIncrease[],
+  base: AntiSlopBaseline,
+  candidate: AntiSlopBaseline,
+  envelope: GitBaselineEnvelope,
+  candidateGroups: readonly FindingGroup[],
+  relocation: RelocationContext | undefined,
+): RelocatedGrowthSplit {
+  const keys = new Set(increases.map(relocationKey));
+  const vacated = relocation
+    ? relocationEvidence(relocation, envelope, candidate, candidateGroups, keys)
+    : null;
+  if (!relocation || !vacated?.size) return { accepted: [], blocked: [...increases] };
+  const migratedBase = migrateBaselineRenames(base, envelope.renames);
+  return creditRelocatedGrowth(
+    increases,
+    migratedBase,
+    candidate,
+    candidateGroups,
+    vacated,
+    relocation.inLintScope,
+  );
+}
 
 export function printNewAntiSlopFindings(
   groups: ReadonlyArray<FindingGroup & { additionalCount: number }>,
@@ -30,6 +127,7 @@ export function checkBaselineEnvelope(
   envelope: GitBaselineEnvelope | null,
   candidateGroups: readonly FindingGroup[],
   baseRef?: string,
+  relocation?: RelocationContext,
 ): number {
   if (!envelope?.base) return 0; // one-time bootstrap: the base commit has no baseline
   const removedMigrationReceipts = removedBaselineMigrationReceipts(envelope.base, candidate);
@@ -129,7 +227,21 @@ export function checkBaselineEnvelope(
     );
   }
   if (increases.length === 0) return 0;
-  for (const entry of increases) {
+  const { accepted: relocatedGrowth, blocked: grown } = splitRelocatedGrowth(
+    increases,
+    envelope.base,
+    candidate,
+    envelope,
+    candidateGroups,
+    relocation,
+  );
+  if (relocatedGrowth.length > 0) {
+    console.log(
+      `anti-slop: accepted ${relocatedGrowth.reduce((sum, entry) => sum + entry.additionalCount, 0)} relocated baseline finding(s) from ${formatSources(relocatedGrowth.flatMap((entry) => entry.sources))}`,
+    );
+  }
+  if (grown.length === 0) return 0;
+  for (const entry of grown) {
     console.error(
       `BASELINE-GROWTH ${entry.ruleId} ${entry.file} (+${entry.additionalCount} adopted finding(s))`,
     );
