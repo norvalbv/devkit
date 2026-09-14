@@ -22,6 +22,7 @@ import {
 import {
   bindSourceMembership,
   filterMembershipStream,
+  frozenDriftStream,
   membershipStreamError,
   pathStreamError,
   sourceMembershipRef,
@@ -324,6 +325,50 @@ describe('ship-intent write/read round trip', () => {
     });
     expect(Buffer.isBuffer(out)).toBe(true);
     expect(out.equals(raw)).toBe(true);
+  });
+
+  it('names HEAD-derived paths outside frozen membership, and nothing when HEAD only narrows it', () => {
+    const nul = (...paths: string[]) =>
+      Buffer.from(paths.length === 0 ? '' : `${paths.join('\0')}\0`);
+    const outside = (selected: Buffer, members: Buffer) => {
+      const drift = frozenDriftStream(selected, members);
+      if ('reason' in drift) throw new Error(drift.reason);
+      return drift.outside;
+    };
+    // sc-3178: the fix commit ADDS a module the frozen record never saw.
+    expect(outside(nul('note.txt', 'lib/new.ts'), nul('note.txt'))).toEqual(['lib/new.ts']);
+    // Identity, a frozen path reverted to base (HEAD narrows), and an empty HEAD set: nothing outside.
+    expect(outside(nul('a', 'b'), nul('a', 'b'))).toEqual([]);
+    expect(outside(nul('a'), nul('a', 'b'))).toEqual([]);
+    expect(outside(nul(), nul('a'))).toEqual([]);
+    // Byte-exact identities: no glob, directory prefix or case folding may absorb a sibling.
+    expect(
+      outside(nul('*.txt', 'x.txt', 'Note.txt', 'dir/child'), nul('*.txt', 'note.txt', 'dir')),
+    ).toEqual(['x.txt', 'Note.txt', 'dir/child']);
+    expect(outside(nul('line\nbreak', 'with space'), nul('with space'))).toEqual(['line\nbreak']);
+    expect(frozenDriftStream(Buffer.from('a'), nul('a'))).toMatchObject({
+      reason: expect.stringContaining('NUL-terminated'),
+    });
+    expect(frozenDriftStream(Buffer.from([0xff, 0]), nul('a'))).toMatchObject({
+      reason: expect.stringContaining('non-UTF-8'),
+    });
+    expect(frozenDriftStream(nul('a'), Buffer.from([0xff, 0]))).toMatchObject({
+      reason: expect.stringContaining('recorded membership is invalid'),
+    });
+  });
+
+  it('frozen-drift streams the outside paths NUL-delimited and refuses without a members file', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'frozen-drift-'));
+    dirs.push(dir);
+    const members = join(dir, 'members');
+    writeFileSync(members, 'note.txt\0');
+    const out = execFileSync('node', [cliPath, 'frozen-drift', '--members-file', members], {
+      input: Buffer.from('note.txt\0new file.ts\0'),
+    });
+    expect(out.equals(Buffer.from('new file.ts\0'))).toBe(true);
+    expect(() =>
+      execFileSync('node', [cliPath, 'frozen-drift'], { input: '', stdio: 'pipe' }),
+    ).toThrow(/missing --members-file/);
   });
 
   it('refuses Git selections that recurse beyond frozen concrete membership', () => {

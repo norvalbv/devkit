@@ -304,8 +304,8 @@ describe('ship-branch.sh — --from-branch committed scope (sc-2352)', () => {
     expect(widened.stderr).toContain('frozen path membership');
 
     installHook(dir, 'exit 0');
-    writeFileSync(join(dir, 'unrecorded.txt'), 'later committed but not in the frozen brief\n');
-    commit(git, ['unrecorded.txt'], 'later unrelated commit');
+    writeFileSync(join(dir, 'note.txt'), 'fixed after the gate block\n');
+    commit(git, ['note.txt'], 'fix inside the frozen brief');
     const resumed = spawnSync('/bin/bash', [scriptPath, '--resume', 'feat/resume-branch'], {
       cwd: dir,
       input: '',
@@ -317,13 +317,161 @@ describe('ship-branch.sh — --from-branch committed scope (sc-2352)', () => {
     expect(
       git(['diff', '--name-only', 'origin/work', 'feat/resume-branch']).trim().split('\n'),
     ).toEqual(['note.txt']);
+    expect(git(['show', 'feat/resume-branch:note.txt'])).toBe('fixed after the gate block\n');
     const refreshedIntent = JSON.parse(
       readFileSync(join(dir, relIntentPath('feat/resume-branch')), 'utf8'),
     );
     expect(refreshedIntent.sourceAttemptId).not.toBe(firstSourceAttemptId);
+    // sc-3178: a resume names its membership as frozen and replayed — never as derived from the HEAD
+    // it prints — and adds no second count when HEAD derives exactly the frozen set.
+    expect(resumed.stderr).toMatch(
+      /--from-branch: 1 frozen committed path\(s\) replayed, origin\/work [0-9a-f]{7} -> HEAD [0-9a-f]{7}\n/,
+    );
+    expect(resumed.stderr).not.toContain('HEAD now derives');
     // sc-2299: frozen membership is listed ONCE — the resume banner stays silent in branch mode
     // because the derivation below it already prints the identical (four-figure-capable) array.
     expect(resumed.stderr.match(/^\s+note\.txt$/gm) ?? []).toHaveLength(1);
+    dropWorktree(git, resumed.stderr);
+  });
+
+  // sc-3178: a committed path outside the frozen set used to ship silently absent and fail every
+  // reviewer minutes later; the set comparison now refuses before any gate or re-record.
+  it('refuses a pre-commit resume before any gate when HEAD committed paths outside the frozen set', () => {
+    const { dir, env, git } = seedShipRepoLocalRemote();
+    writeFileSync(join(dir, '.git/info/exclude'), '.devkit/\n');
+    writeFileSync(join(dir, 'note.txt'), 'imports ./lib/new-module\n');
+    commit(git, ['note.txt'], 'committed source snapshot');
+    const hookCount = join(dir, 'hook-count');
+    const hookEnv = { ...env, TEST_HOOK_COUNT: hookCount };
+    installHook(dir, 'echo run >> "$TEST_HOOK_COUNT"\nexit 1');
+    expect(runFromBranch(dir, hookEnv, 'feat/drifted').status).not.toBe(0);
+    expect(readFileSync(hookCount, 'utf8').trim().split('\n')).toHaveLength(1);
+    const intentFile = join(dir, relIntentPath('feat/drifted'));
+    const recorded = readFileSync(intentFile);
+
+    mkdirSync(join(dir, 'lib'));
+    writeFileSync(join(dir, 'lib/new-module.ts'), 'export const fix = 1;\n');
+    writeFileSync(join(dir, 'lib/with space.ts'), 'export const other = 2;\n');
+    writeFileSync(join(dir, 'note.txt'), 'imports ./lib/new-module (fixed)\n');
+    git(['add', '--', 'note.txt', 'lib/new-module.ts', 'lib/with space.ts']);
+    git(['-c', 'core.hooksPath=/dev/null', 'commit', '-q', '-m', 'fix adds a module'], {
+      stdio: 'ignore',
+    });
+    const head = git(['rev-parse', '--short=7', 'HEAD']).trim();
+    const resumed = spawnSync('/bin/bash', [scriptPath, '--resume', 'feat/drifted'], {
+      cwd: dir,
+      input: '',
+      encoding: 'utf8',
+      env: { ...hookEnv, SHIP_DRY_RUN: '1' },
+    });
+
+    expect(resumed.status, resumed.stderr).toBe(1);
+    expect(resumed.stderr).toContain(
+      `HEAD ${head} changes 2 committed path(s) outside the 1 frozen by the recorded invocation`,
+    );
+    expect(resumed.stderr).toMatch(/^ {2}lib\/new-module\.ts$/m);
+    expect(resumed.stderr).toMatch(/^ {2}lib\/with\\ space\.ts$/m);
+    expect(resumed.stderr).toContain(
+      'devkit ship feat/drifted ship\\ committed\\ branch\\ scope --base work --from-branch --body-file <file>',
+    );
+    expect(resumed.stderr).not.toContain('committed path(s), origin/work');
+    // Nothing downstream of the comparison ran: no gate, no ship branch, no re-record.
+    expect(readFileSync(hookCount, 'utf8').trim().split('\n')).toHaveLength(1);
+    expect(localBranchExists(git, 'feat/drifted')).toBe(false);
+    expect(readFileSync(intentFile).equals(recorded)).toBe(true);
+  });
+
+  it('refuses a pre-commit resume when HEAD deletes a base path outside the frozen set', () => {
+    const { dir, env, git } = seedShipRepoLocalRemote();
+    writeFileSync(join(dir, '.git/info/exclude'), '.devkit/\n');
+    writeFileSync(join(dir, 'legacy.txt'), 'on the base\n');
+    commit(git, ['legacy.txt'], 'base file');
+    git(['push', '-q', 'origin', 'HEAD:work']);
+    git(['update-ref', 'refs/remotes/origin/work', 'HEAD']);
+    writeFileSync(join(dir, 'note.txt'), 'committed\n');
+    commit(git, ['note.txt'], 'committed source snapshot');
+    installHook(dir, 'exit 1');
+    expect(runFromBranch(dir, env, 'feat/drift-delete').status).not.toBe(0);
+
+    installHook(dir, 'exit 0');
+    git(['rm', '-q', '--', 'legacy.txt']);
+    git(['commit', '-q', '-m', 'delete a base path'], { stdio: 'ignore' });
+    const resumed = spawnSync('/bin/bash', [scriptPath, '--resume', 'feat/drift-delete'], {
+      cwd: dir,
+      input: '',
+      encoding: 'utf8',
+      env: { ...env, SHIP_DRY_RUN: '1' },
+    });
+
+    expect(resumed.status, resumed.stderr).toBe(1);
+    expect(resumed.stderr).toContain('changes 1 committed path(s) outside the 1 frozen');
+    expect(resumed.stderr).toMatch(/^ {2}legacy\.txt$/m);
+    expect(localBranchExists(git, 'feat/drift-delete')).toBe(false);
+  });
+
+  // The inverse must stay a resume: a frozen path reverted to its base bytes NARROWS what HEAD
+  // derives, which widens nothing — so the header reports both counts instead of refusing.
+  it('resumes when HEAD only narrows the frozen set, and reports both counts', () => {
+    const { dir, env, git } = seedShipRepoLocalRemote();
+    writeFileSync(join(dir, '.git/info/exclude'), '.devkit/\n');
+    writeFileSync(join(dir, 'one.txt'), 'one\n');
+    writeFileSync(join(dir, 'two.txt'), 'two\n');
+    commit(git, ['one.txt', 'two.txt'], 'committed source snapshot');
+    installHook(dir, 'exit 1');
+    expect(runFromBranch(dir, env, 'feat/narrowed').status).not.toBe(0);
+
+    installHook(dir, 'exit 0');
+    git(['rm', '-q', '--', 'two.txt']);
+    git(['commit', '-q', '-m', 'drop two.txt again'], { stdio: 'ignore' });
+    const resumed = spawnSync('/bin/bash', [scriptPath, '--resume', 'feat/narrowed'], {
+      cwd: dir,
+      input: '',
+      encoding: 'utf8',
+      env: { ...env, SHIP_DRY_RUN: '1' },
+    });
+
+    expect(resumed.status, resumed.stderr).toBe(0);
+    expect(resumed.stderr).toMatch(
+      /--from-branch: 2 frozen committed path\(s\) replayed, origin\/work [0-9a-f]{7} -> HEAD [0-9a-f]{7} \(HEAD now derives 1\)\n/,
+    );
+    expect(git(['diff', '--name-only', 'origin/work', 'feat/narrowed']).trim().split('\n')).toEqual(
+      ['one.txt'],
+    );
+    dropWorktree(git, resumed.stderr);
+  });
+
+  // Resume re-fetches the base. Subtracting against the RECORDED base instead would report every
+  // upstream path the branch merged as drift, and refuse every resume after a routine base merge.
+  it('compares against the re-fetched base, so a merged upstream change is never reported as drift', () => {
+    const { dir, env, git } = seedShipRepoLocalRemote();
+    writeFileSync(join(dir, '.git/info/exclude'), '.devkit/\n');
+    writeFileSync(join(dir, 'note.txt'), 'committed\n');
+    commit(git, ['note.txt'], 'committed source snapshot');
+    installHook(dir, 'exit 1');
+    expect(runFromBranch(dir, env, 'feat/merged-base').status).not.toBe(0);
+
+    installHook(dir, 'exit 0');
+    const oldBase = git(['rev-parse', 'origin/work']).trim();
+    git(['switch', '-q', '--detach', oldBase]);
+    writeFileSync(join(dir, 'upstream.txt'), 'landed upstream\n');
+    commit(git, ['upstream.txt'], 'upstream change');
+    const upstream = git(['rev-parse', 'HEAD']).trim();
+    git(['push', '-q', 'origin', `${upstream}:work`]);
+    git(['switch', '-q', 'work']);
+    git(['merge', '-q', '--no-edit', upstream], { stdio: 'ignore' });
+    const resumed = spawnSync('/bin/bash', [scriptPath, '--resume', 'feat/merged-base'], {
+      cwd: dir,
+      input: '',
+      encoding: 'utf8',
+      env: { ...env, SHIP_DRY_RUN: '1' },
+    });
+
+    expect(resumed.status, resumed.stderr).toBe(0);
+    expect(resumed.stderr).not.toContain('upstream.txt');
+    expect(resumed.stderr).toContain('--from-branch: 1 frozen committed path(s) replayed');
+    expect(git(['diff', '--name-only', upstream, 'feat/merged-base']).trim().split('\n')).toEqual([
+      'note.txt',
+    ]);
     dropWorktree(git, resumed.stderr);
   });
 
@@ -352,8 +500,9 @@ describe('ship-branch.sh — --from-branch committed scope (sc-2352)', () => {
     });
 
     expect(resumed.status).not.toBe(0);
-    expect(resumed.stderr).toContain('frozen path membership would expand');
-    expect(resumed.stderr).toContain('shape/child.txt');
+    // sc-3178's set comparison runs first and catches the recursive descendant as drift.
+    expect(resumed.stderr).toContain('outside the 1 frozen by the recorded invocation');
+    expect(resumed.stderr).toMatch(/^ {2}shape\/child\.txt$/m);
     expect(localBranchExists(git, 'feat/frozen-df')).toBe(false);
   });
 
@@ -399,6 +548,13 @@ describe('ship-branch.sh — --from-branch committed scope (sc-2352)', () => {
       'base advances between attempts',
     ]).trim();
     git(['push', '-q', 'origin', `${advancedBase}:work`]);
+    // sc-3178: an out-of-set HEAD commit must not trip the drift refusal on the receipt arm, which
+    // publishes the gated OID; hooks are bypassed so the ledger still counts only the gate run.
+    writeFileSync(join(dir, 'later.txt'), 'committed after the gated snapshot\n');
+    git(['add', '--', 'later.txt']);
+    git(['-c', 'core.hooksPath=/dev/null', 'commit', '-q', '-m', 'later out-of-set commit'], {
+      stdio: 'ignore',
+    });
 
     const resumed = spawnSync('/bin/bash', [scriptPath, '--resume', 'feat/from-branch-formatter'], {
       cwd: dir,

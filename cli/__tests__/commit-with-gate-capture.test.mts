@@ -129,6 +129,40 @@ afterEach(() => {
   }
 });
 
+// sc-3178: every gate block lands on this line, so it must name a remedy the source mode accepts —
+// branch-source resume refuses the trailing-path form.
+describe('commit_with_gate_capture — the retry hint matches the recorded source mode', () => {
+  it('branch-source mode points a new committed file at a fresh --from-branch invocation', () => {
+    const { root, wt, base } = fixture(true, 'exit 1\n');
+
+    const result = runCommit(root, wt, base, false, false, '', {
+      SHIP_INTENT_GENERATION: 'g1',
+      DEVKIT_SHIP_FROM_BRANCH: '1',
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('Retry after fixing: devkit ship --resume feat/sc1537');
+    expect(result.stderr).toContain('fresh full devkit ship');
+    expect(result.stderr).toContain('--from-branch');
+    expect(result.stderr).not.toContain('<new-path>');
+  });
+
+  // Pinned to '0', not unset: a ship run from inside a branch-source gate chain exports the flag,
+  // and an inherited 1 would silently flip this assertion.
+  it('explicit-path mode keeps the trailing-path form', () => {
+    const { root, wt, base } = fixture(true, 'exit 1\n');
+
+    const result = runCommit(root, wt, base, false, false, '', {
+      SHIP_INTENT_GENERATION: 'g1',
+      DEVKIT_SHIP_FROM_BRANCH: '0',
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('devkit ship --resume feat/sc1537 -- <new-path>');
+    expect(result.stderr).not.toContain('--from-branch');
+  });
+});
+
 describe('commit_with_gate_capture — executable hook proof', () => {
   it('runs the projected Husky hook when core.hooksPath is unset and captures proof', () => {
     const { root, wt, base } = fixture(true);
