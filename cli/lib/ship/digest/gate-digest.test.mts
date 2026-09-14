@@ -515,3 +515,163 @@ describe('advisory_result — attempt scoping and crowding', () => {
     expect(text).toContain('Gate findings this run (11)');
   });
 });
+
+/** sc-3175: a verdict that does not cover the committed diff is named with a bypass's weight. */
+describe('unverified verdicts (sc-3175)', () => {
+  const degraded = (cause = 'a capture-bearing hunk did not fit the evidence cap') =>
+    ev({ type: 'gate_degraded', judge: 'sentry-advisory', cause });
+  const intentHit = (diffMatches: boolean) =>
+    ev({
+      type: 'cache_hit',
+      judge: 'review:completeness',
+      scope: 'intent',
+      diff_matches: diffMatches,
+    });
+  const green = ev({ type: 'ship_result', exit_code: 0, blocked_gate: null });
+  const coverageBypass = ev({
+    type: 'gate_result',
+    gate: 'coverage',
+    status: 'bypassed',
+    bypass: 'GUARD_COVERAGE_OK',
+    detail: 'coverage(bypassed:GUARD_COVERAGE_OK)',
+  });
+  const unverifiedLines = (text: string) => text.split('\n').filter((l) => l.startsWith('   · '));
+
+  it('names a self-downgraded judge on a GREEN ship whose sink holds nothing else', () => {
+    const text = render(summarise([ev({ type: 'ship_attempt' }), degraded(), green], SHIP));
+    expect(text).toContain('Gate findings this run (1)');
+    expect(text).toContain(
+      '· sentry-advisory — downgraded to advisory: a capture-bearing hunk did not fit the evidence cap — could not block this commit',
+    );
+  });
+
+  it('moves a PASS judged on an earlier diff out of the ✓ line and names it', () => {
+    const text = render(
+      summarise(
+        [
+          ev({ type: 'ship_attempt' }),
+          intentHit(false),
+          ev({ type: 'cache_hit', judge: 'review:correctness' }),
+          green,
+        ],
+        SHIP,
+      ),
+    );
+    expect(text).toContain('Gate findings this run (1)');
+    expect(text).toContain(
+      '· completeness — cached PASS judged an earlier diff — this diff was not re-judged',
+    );
+    expect(text).toContain('✓ 1 verdict(s) served from cache');
+  });
+
+  it('keeps an intent hit on a byte-identical diff, and a field-less legacy hit, as honest ✓s', () => {
+    const rows = summarise(
+      [intentHit(true), ev({ type: 'cache_hit', judge: 'review:completeness' }), green],
+      SHIP,
+    );
+    expect(rows.map((r) => r.state)).toEqual(['cached', 'cached']);
+    expect(render(rows)).toBe('');
+  });
+
+  it('prints ONE row when pre-commit and commit-msg both replay the same stale verdict', () => {
+    const rows = summarise(
+      [intentHit(false), intentHit(false), degraded(), degraded(), green],
+      SHIP,
+    );
+    expect(rows.filter((r) => r.state === 'unverified').map((r) => r.gate)).toEqual([
+      'completeness',
+      'sentry-advisory',
+    ]);
+  });
+
+  it('closes the sc-2722 run with three unverified entries and one honest ✓ (acceptance)', () => {
+    const text = render(
+      summarise(
+        [
+          ev({ type: 'ship_attempt' }),
+          coverageBypass,
+          degraded(),
+          intentHit(false),
+          ev({ type: 'cache_hit', judge: 'review:correctness' }),
+          green,
+        ],
+        SHIP,
+      ),
+      '/x.log',
+    );
+    expect(text).toContain('Gate findings this run (3)');
+    expect(unverifiedLines(text)).toHaveLength(3);
+    expect(text).toContain('· coverage — bypassed via GUARD_COVERAGE_OK — verified nothing');
+    expect(text).toContain('✓ 1 verdict(s) served from cache');
+  });
+
+  it.each(['review', 'sentry', 'unknown'])(
+    'is never rendered as the blocker (blocked_gate=%s)',
+    (blocked) => {
+      const rows = summarise(
+        [
+          degraded(),
+          intentHit(false),
+          ev({ type: 'ship_result', exit_code: 1, blocked_gate: blocked }),
+        ],
+        SHIP,
+      );
+      expect(rows.map((r) => r.blocking)).toEqual([false, false]);
+      expect(render(rows)).not.toContain('BLOCKED');
+    },
+  );
+
+  it('drops a downgrade from a prior attempt, and one another ship interleaved into the sink', () => {
+    const rows = summarise(
+      [
+        degraded('left by the previous round'),
+        ev({ type: 'ship_attempt' }),
+        {
+          ship_id: 'other-ship',
+          type: 'gate_degraded',
+          judge: 'sentry-advisory',
+          cause: 'foreign',
+        },
+        green,
+      ],
+      SHIP,
+    );
+    expect(rows).toEqual([]);
+  });
+
+  it('still names unverified gates when findings overflow the printed cap', () => {
+    const many = Array.from({ length: 10 }, (_, i) =>
+      ev({ type: 'gate_result', gate: `guard-${i}`, status: 'fail', detail: 'failed' }),
+    );
+    const text = render(
+      summarise(
+        [
+          ev({ type: 'ship_attempt' }),
+          ...many,
+          degraded(),
+          intentHit(false),
+          ev({ type: 'ship_result', blocked_gate: 'deterministic', exit_code: 1 }),
+        ],
+        SHIP,
+      ),
+    );
+    expect(text).toContain('Gate findings this run (12)');
+    expect(text).toContain('· sentry-advisory — downgraded to advisory');
+    expect(text).toContain('· completeness — cached PASS judged an earlier diff');
+  });
+
+  it('renders a wrong-typed or absent cause and judge without throwing', () => {
+    // Through the real JSONL boundary: a producer writing a number where a string is declared is
+    // exactly the shape parseEvent's SAFETY note promises to survive.
+    const sink = sinkWith([
+      JSON.stringify({ ship_id: SHIP, type: 'gate_degraded', judge: 'sentry-advisory', cause: 42 }),
+      JSON.stringify({ ship_id: SHIP, type: 'gate_degraded' }),
+      JSON.stringify({ ship_id: SHIP, type: 'ship_result', exit_code: 0, blocked_gate: null }),
+    ]);
+    const text = render(summarise(readShipEvents(sink, SHIP), SHIP));
+    expect(text).toContain('· sentry-advisory — downgraded to advisory: 42 — could not block');
+    expect(text).toContain(
+      '· unknown — downgraded to advisory: cause not recorded — could not block',
+    );
+  });
+});
