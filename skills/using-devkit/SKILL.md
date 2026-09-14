@@ -111,7 +111,9 @@ devkit command.
 - **Run `devkit ship` in the BACKGROUND** (`run_in_background`), never as a foreground tool call: the
   gate chain's worst case (AI reviewer cascades) exceeds the 10-minute foreground Bash cap, which kills
   the ship mid-gates as exit 143 with no banner. Poll the shell output for the per-reviewer heartbeat
-  lines (`guard-review: <name> — PASS … (checkpointed)`).
+  lines (`guard-review: <name> — PASS … (checkpointed)`). A judge still in flight (completeness can
+  take many minutes) prints `guard-review: still running — <lane> <elapsed> (killed in ≤<bound>) · log:
+  <path>` about every 45s; while those keep arriving the gate is alive, not hung.
 - **A blocked or timed-out ship retries with `devkit ship --resume <branch>` — never re-type the
   invocation.** Reviewer PASSes checkpoint as they land, cleared decisions judgements and the
   deterministic gate prefix are cached, so a retry only pays for the unfinished work; `--resume`
