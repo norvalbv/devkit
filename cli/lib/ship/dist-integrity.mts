@@ -305,7 +305,7 @@ export async function inspectDistIntegrity(
   return { active: true, unresolved, unbriefed, untracked, unlexable: unlexable.sort() };
 }
 
-function shellQuote(value: string): string {
+export function shellQuote(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
