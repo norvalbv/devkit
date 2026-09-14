@@ -12,7 +12,7 @@
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { execJudge, execJudgeAsync, recordAgentRun } from '../run-judge.mts';
 import { DIFF_HEADER, OUTPUT_HEADER, readTranscript } from '../transcript-store.mts';
 
@@ -628,5 +628,115 @@ describe('judge_exec usage on failure outcomes', () => {
       outcome: 'ok',
       lens: 'concurrency-races',
     });
+  });
+});
+
+// sc-2422: the heartbeat is only worth anything if execJudgeAsync arms it for a real spawn and
+// disarms it on EVERY settle path. Units in heartbeat.test.mts pin the rendering; these pin wiring.
+describe('judge heartbeat wiring (sc-2422)', () => {
+  const HB_KEYS = ['DEVKIT_GATE_DEADLINE_MS', 'DEVKIT_JUDGE_HEARTBEAT_MS', 'DEVKIT_GATE_LOG'];
+  const hbSaved: Record<string, string | undefined> = {};
+  let beats: string[];
+
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+  beforeEach(() => {
+    for (const k of HB_KEYS) hbSaved[k] = process.env[k];
+    process.env.DEVKIT_GATE_DEADLINE_MS = String(Date.now() + 10 * 60_000);
+    process.env.DEVKIT_JUDGE_HEARTBEAT_MS = '40';
+    process.env.DEVKIT_GATE_LOG = '/tmp/devkit ship/gate.log';
+    beats = [];
+    // Heartbeat lines are captured; everything else (a judge's own outage warning) still prints.
+    const real: (chunk: string | Uint8Array) => boolean = process.stderr.write.bind(process.stderr);
+    vi.spyOn(process.stderr, 'write').mockImplementation((chunk: string | Uint8Array): boolean => {
+      const text = String(chunk);
+      if (!text.includes('still running')) return real(chunk);
+      beats.push(text);
+      return true;
+    });
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    for (const k of HB_KEYS) {
+      if (hbSaved[k] === undefined) delete process.env[k];
+      else process.env[k] = hbSaved[k];
+    }
+  });
+
+  it('narrates a slow supervised judge by label and log, never its prompt or evidence', async () => {
+    fakeClaude('sleep 0.4\necho VERDICT_TEXT_FROM_MODEL');
+    const out = await execJudgeAsync({
+      label: 'review:completeness',
+      args: ['-p', 'SECRET_PROMPT_BODY', '--model', 'opus'],
+      input: 'SECRET_DIFF_EVIDENCE',
+      timeout: 30_000,
+    });
+    expect(out).toContain('VERDICT_TEXT_FROM_MODEL');
+    expect(beats.length).toBeGreaterThan(0);
+    for (const line of beats) {
+      expect(line).toMatch(/^guard-review: still running — review:completeness \d+s \(killed in ≤/);
+      expect(line).toContain('· log: /tmp/devkit ship/gate.log');
+      expect(line).not.toMatch(/SECRET_PROMPT_BODY|SECRET_DIFF_EVIDENCE|VERDICT_TEXT|opus/);
+    }
+  });
+
+  it('stops the moment the verdict lands — no line after resolve', async () => {
+    fakeClaude('sleep 0.2\necho OK');
+    await execJudgeAsync({ label: 'review:a', args: ['-p', 'q'], timeout: 30_000 });
+    const settled = beats.length;
+    await sleep(200);
+    expect(beats.length).toBe(settled);
+  });
+
+  it('stays silent for an unsupervised judge (plain git commit, no gate deadline)', async () => {
+    delete process.env.DEVKIT_GATE_DEADLINE_MS;
+    fakeClaude('sleep 0.3\necho OK');
+    await execJudgeAsync({ label: 'review:completeness', args: ['-p', 'q'], timeout: 30_000 });
+    expect(beats).toEqual([]);
+  });
+
+  it('stops after a SIGKILLed timeout', async () => {
+    fakeClaude(TRAP_AND_SLEEP);
+    const out = await execJudgeAsync({ label: 'review:slow', args: ['-p', 'q'], timeout: 300 });
+    expect(out).toBeNull();
+    expect(beats.length).toBeGreaterThan(0);
+    const settled = beats.length;
+    await sleep(200);
+    expect(beats.length).toBe(settled);
+  });
+
+  it('stops after empty output and after a spawn failure', async () => {
+    fakeClaude('sleep 0.15\nprintf ""');
+    expect(
+      await execJudgeAsync({ label: 'review:empty', args: ['-p', 'q'], timeout: 30_000 }),
+    ).toBeNull();
+    process.env.PATH = dir; // no claude on PATH → ENOENT through the callback error path
+    expect(
+      await execJudgeAsync({ label: 'review:absent', args: ['-p', 'q'], timeout: 30_000 }),
+    ).toBeNull();
+    const settled = beats.length;
+    await sleep(200);
+    expect(beats.length).toBe(settled);
+  });
+
+  it('stops after a synchronous execFile throw (out-of-range timeout)', async () => {
+    fakeClaude('echo OK');
+    expect(
+      await execJudgeAsync({ label: 'review:bad-timeout', args: ['-p', 'q'], timeout: -1 }),
+    ).toBeNull();
+    await sleep(200);
+    expect(beats.filter((b) => b.includes('review:bad-timeout'))).toEqual([]);
+  });
+
+  it('keeps one line per tick for concurrent judges and drops each lane as it settles', async () => {
+    fakeClaude('case "$*" in *LONG*) sleep 0.5;; *) sleep 0.15;; esac\necho OK');
+    await Promise.all([
+      execJudgeAsync({ label: 'review:short', args: ['-p', 'SHORT'], timeout: 30_000 }),
+      execJudgeAsync({ label: 'review:long', args: ['-p', 'LONG'], timeout: 30_000 }),
+    ]);
+    expect(beats.some((b) => b.includes('review:short') && b.includes('review:long'))).toBe(true);
+    expect(beats.at(-1)).toContain('review:long');
+    expect(beats.at(-1)).not.toContain('review:short');
+    for (const b of beats) expect(b.match(/still running/g)).toHaveLength(1);
   });
 });

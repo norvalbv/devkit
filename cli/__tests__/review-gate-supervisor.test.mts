@@ -1120,6 +1120,32 @@ describe('review gate supervisor', () => {
     }
   });
 
+  // sc-2422: the judge heartbeat needs both this runner's log and the supervisor deadline, in review
+  // and ship alike; the space in the root mirrors a macOS "Application Support" data root.
+  it('hands target code the gate log it tees into and the deadline, for review and ship', () => {
+    const root = mkTmp('devkit gate log ');
+    const probe = [
+      process.execPath,
+      '-e',
+      "process.stdout.write('GATE_ENV ' + JSON.stringify({log: process.env.DEVKIT_GATE_LOG ?? null, deadline: process.env.DEVKIT_GATE_DEADLINE_MS ?? null}) + '\\n')",
+    ];
+    for (const mode of ['review', 'ship'] as const) {
+      const result = gateHarness(root, mode, '30', probe, {
+        ...process.env,
+        DEVKIT_GATE_LOG: '/stale/outer-ship/gate.log',
+      });
+      expect(result.status, result.stderr).toBe(0);
+      // Gate output is teed into the log it names — read it from there, the file a poller opens.
+      const line = readFileSync(join(root, 'gate.log'), 'utf8')
+        .split('\n')
+        .filter((l) => l.startsWith('GATE_ENV '))
+        .at(-1);
+      const seen = JSON.parse(line?.slice('GATE_ENV '.length) ?? '{}');
+      expect(seen.log).toBe(join(root, 'gate.log'));
+      expect(Number(seen.deadline)).toBeGreaterThan(Date.now());
+    }
+  });
+
   // The capture tees to $log AND the optional telemetry archive, and a tee that cannot open one of
   // its files exits non-zero — which the runner turns into a failed gate. $log deserves that; the
   // archive does not. Ship reached this code path for the first time in sc-1199, so an unwritable
