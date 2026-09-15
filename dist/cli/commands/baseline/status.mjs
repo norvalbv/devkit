@@ -2,6 +2,7 @@
 import { DEFAULT_ARTIFACT, DEFAULT_MAX_RUNS, DEFAULT_WORKFLOW, queryBaseline, } from '../../lib/baseline-status/query.mjs';
 export const meta = {
     name: 'baseline-status',
+    agentFacing: true,
     summary: 'Report which test files are failing on the default branch (and whether yours is).',
     help: `devkit baseline-status — decompose a red default branch into per-file facts.
 

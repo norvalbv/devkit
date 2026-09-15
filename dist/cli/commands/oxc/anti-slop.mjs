@@ -3,21 +3,32 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { withLock } from '../../lib/atomic-write.mjs';
-import { adoptBaselineRuleFindings, baselineFromGroups, compareBaseline, migrateBaselineRenames, pruneBaseline, readBaseline, writeBaseline, } from '../../lib/install/anti-slop/baseline.mjs';
-import { checkBaselineEnvelope, inheritedBaseAllowance, printNewAntiSlopFindings, reportInheritedForgiveness, } from '../../lib/install/anti-slop/baseline-envelope.mjs';
+import { overlayBaseRefusal, reportOverlayContract, } from '../../lib/install/anti-slop/overlay/contract.mjs';
+import { adoptBaselineRuleFindings, baselineFromGroups, compareBaseline, pruneBaseline, readBaseline, writeBaseline, } from '../../lib/install/anti-slop/baseline.mjs';
+import { checkBaselineEnvelope, inheritedBaseAllowance, printNewAntiSlopFindings, refuseCommittedGrowth, relocationEvidence, reportInheritedForgiveness, } from '../../lib/install/anti-slop/baseline-envelope.mjs';
 import { ANTI_SLOP_BASELINE_LOCK_REL, ANTI_SLOP_BASELINE_REL, } from '../../lib/install/anti-slop/constants.mjs';
-import { gitBaselineEnvelope, withStableGitIndex, withStagedAntiSlopSnapshot, } from '../../lib/install/anti-slop/git-snapshot.mjs';
+import { gitBaselineEnvelope, withStagedAntiSlopSnapshot, } from '../../lib/install/anti-slop/git-snapshot.mjs';
+import { classifyRelocations, printRelocatedAntiSlopFindings, relocatedWarningNote, relocationKey, reportRelocatedFailure, } from '../../lib/install/anti-slop/relocations.mjs';
+import { adoptRelocations, adoptRenames, baselineOrExplain, capabilityReady, count, } from './anti-slop-adopt.mjs';
 import { clearPendingAntiSlopBaselineActivation, readInstalledAntiSlopBaselineMigrationId, readPendingAntiSlopBaselineActivation, } from '../../lib/install/anti-slop/managed-state.mjs';
 import { collectAntiSlopGroups, resolveAntiSlopScope, } from '../../lib/install/anti-slop/runner.mjs';
+import { resolveOxlintEntryConfig } from '../../lib/install/oxc/lifecycle.mjs';
 export const meta = {
     name: 'anti-slop',
+    agentFacing: false,
+    notRoutedBecause: 'Baseline-aware lint gate invoked by the wired lint:anti-slop script and by the commit ' +
+        'chain. A blocked agent follows the repair the gate prints, which skills/commit-gates ' +
+        'routes.',
     summary: 'Check vendored anti-slop rules with an explicit shrink-only baseline.',
     help: `devkit anti-slop — baseline-aware checks for Devkit's vendored Oxlint plugin.
 
 Usage:
-  devkit anti-slop create [--force] [paths...]   Explicitly snapshot current findings
+  devkit anti-slop create [--force] [paths...]   Bootstrap, or replace/shrink recorded debt
+  devkit anti-slop adopt-activation              Adopt only a newly activated rule's inherited debt
   devkit anti-slop adopt-renames                 Persist debt across staged Git renames
   devkit anti-slop adopt-renames --base <ref>    Persist debt across committed Git renames
+  devkit anti-slop adopt-relocations             Re-anchor debt moved between existing staged files
+  devkit anti-slop adopt-relocations --base <ref> Re-anchor debt moved in committed history
   devkit anti-slop check [paths...]              Check working-tree findings (read-only)
   devkit anti-slop check --staged                Check the exact Git index against HEAD
   devkit anti-slop check --base <git-ref>         Full check + baseline monotonicity for CI
@@ -27,25 +38,19 @@ Usage:
 Configure per-rule off/warn/error and scoped overrides in the repository Oxlint config. Paths default
 to the repository root. Check and inspect never write. Create refuses an existing baseline unless
 --force is explicit; a whole-repository replacement that removes debt from existing files also requires
---confirm-baseline-removals. Prune refuses to write while new error-severity findings exist.`,
+--confirm-baseline-removals. Once a baseline is committed, create refuses any snapshot the commit
+gate would reject against HEAD, so a new finding is fixed, not adopted. Prune refuses to write while
+new error-severity findings exist.
+
+In an OVERLAY install the baseline is per-clone and git-ignored, so no committed tree carries one to
+compare against: --base and adopt-renames are unavailable there, and adopt-activation is how a devkit
+release's newly activated rules are adopted without re-snapshotting unrelated debt.`,
 };
-function baselineOrExplain(cwd) {
-    const baseline = readBaseline(cwd);
-    if (!baseline) {
-        console.error(`anti-slop: ${ANTI_SLOP_BASELINE_REL} is missing; run \`devkit anti-slop create\` explicitly`);
-    }
-    return baseline;
-}
-function count(groups) {
-    return groups.reduce((sum, group) => sum + group.count, 0);
-}
-function capabilityReady(cwd) {
-    if (existsSync(join(cwd, '.devkit', 'anti-slop', 'manifest.json')))
-        return true;
-    console.error('anti-slop: not installed — run `devkit init --anti-slop`');
-    return false;
-}
-function create(cwd, args, force, confirmBaselineRemovals) {
+/**
+ * Exported so an overlay install adopts existing debt through the SAME path the CLI verb uses,
+ * including the pending release-activation consumption below. Overlay can never re-snapshot.
+ */
+export function createAntiSlopBaseline(cwd, args, force, confirmBaselineRemovals) {
     if (!capabilityReady(cwd))
         return 2;
     return withLock(join(cwd, ANTI_SLOP_BASELINE_LOCK_REL), () => {
@@ -72,10 +77,12 @@ function create(cwd, args, force, confirmBaselineRemovals) {
             }
         }
         const groups = collectAntiSlopGroups(cwd, args);
+        let repositoryGroups;
+        const allGroups = () => (repositoryGroups ??= wholeRepository ? groups : collectAntiSlopGroups(cwd, []));
         const pending = readPendingAntiSlopBaselineActivation(cwd);
         const consumablePending = pending?.migrationId === readInstalledAntiSlopBaselineMigrationId(cwd) ? pending : null;
         const migrated = consumablePending !== null
-            ? adoptBaselineRuleFindings(existing ?? baselineFromGroups([]), wholeRepository ? groups : collectAntiSlopGroups(cwd, []), consumablePending.activatedRuleIds, consumablePending.migrationId)
+            ? adoptBaselineRuleFindings(existing ?? baselineFromGroups([]), allGroups(), consumablePending.activatedRuleIds, consumablePending.migrationId)
             : (existing ?? baselineFromGroups([]));
         const next = baselineFromGroups(groups);
         if (migrated.migrationReceipts)
@@ -103,6 +110,8 @@ function create(cwd, args, force, confirmBaselineRemovals) {
                 return 2;
             }
         }
+        if (refuseCommittedGrowth(cwd, next, allGroups))
+            return 2;
         writeBaseline(cwd, next);
         if (consumablePending !== null) {
             clearPendingAntiSlopBaselineActivation(cwd, consumablePending.migrationId);
@@ -114,35 +123,33 @@ function create(cwd, args, force, confirmBaselineRemovals) {
         return 0;
     });
 }
-function adoptRenames(cwd, baseRef = 'HEAD', requireRenames = false) {
+/**
+ * Adopt ONLY the pre-existing findings of rules a devkit release just activated, leaving all other
+ * fingerprint counts untouched — overlay's sole non-laundering route; see oxc-toolchain-migration.
+ */
+function adoptActivation(cwd) {
     if (!capabilityReady(cwd))
         return 2;
     return withLock(join(cwd, ANTI_SLOP_BASELINE_LOCK_REL), () => {
-        const baseline = baselineOrExplain(cwd);
-        if (!baseline)
+        const existing = baselineOrExplain(cwd);
+        if (!existing)
             return 2;
-        const { baseOid, baseRefName, candidateTree, headOid, headRef, renames } = gitBaselineEnvelope(cwd, baseRef);
-        const stableBase = baseRefName !== null || /^(?:HEAD(?:[~^]\d*)*|[0-9a-f]{40}|[0-9a-f]{64})$/u.test(baseRef);
-        if (requireRenames && !stableBase) {
-            console.error('anti-slop: --base cannot be locked; use a direct ref, full OID, or HEAD~n');
-            return 2;
-        }
-        if (requireRenames && renames.size === 0) {
-            console.error(`anti-slop: no Git renames from ${baseRef} to the index; baseline unchanged`);
-            console.error('anti-slop: use the same --base ref as the failing check; if history no longer contains the rename, review the debt before `devkit anti-slop create --force --confirm-baseline-removals`');
-            return 2;
-        }
-        const affected = baseline.entries.filter((entry) => renames.has(entry.file));
-        const next = migrateBaselineRenames(baseline, renames);
-        if (JSON.stringify(next) === JSON.stringify(baseline)) {
-            console.log('anti-slop: adopted 0 finding(s) across 0 staged rename(s); baseline unchanged');
+        const pending = readPendingAntiSlopBaselineActivation(cwd);
+        if (!pending) {
+            console.log('anti-slop: no pending rule activation to adopt');
             return 0;
         }
-        return withStableGitIndex(cwd, { oid: headOid, symbolicRef: headRef }, { expression: baseRef, oid: baseOid, symbolicRef: baseRefName }, candidateTree, () => {
-            writeBaseline(cwd, next);
-            console.log(`anti-slop: adopted ${count(affected)} finding(s) across ${new Set(affected.map((entry) => entry.file)).size} staged rename(s); stage ${ANTI_SLOP_BASELINE_REL}`);
-            return 0;
-        });
+        const installed = readInstalledAntiSlopBaselineMigrationId(cwd);
+        if (pending.migrationId !== installed) {
+            console.error(`anti-slop: pending activation ${pending.migrationId} does not match the installed capability (${installed ?? 'none'}); run \`devkit doctor --fix\` first`);
+            return 2;
+        }
+        const groups = collectAntiSlopGroups(cwd, []);
+        const next = adoptBaselineRuleFindings(existing, groups, pending.activatedRuleIds, pending.migrationId);
+        writeBaseline(cwd, next);
+        clearPendingAntiSlopBaselineActivation(cwd, pending.migrationId);
+        console.log(`anti-slop: adopted ${pending.activatedRuleIds.size} newly activated rule(s) into ${ANTI_SLOP_BASELINE_REL} — ${count(next.entries)} finding(s) in ${next.entries.length} fingerprint(s)`);
+        return 0;
     });
 }
 function check(cwd, args, envelope = null, baseRef) {
@@ -160,24 +167,45 @@ function check(cwd, args, envelope = null, baseRef) {
         ? mkdtempSync(join(tmpdir(), 'devkit-anti-slop-capability-'))
         : null;
     try {
-        const envelopeGroups = collectAntiSlopGroups(cwd, envelope?.activatedRuleIds.size ? [] : args, pin ?? undefined);
+        const envelopeArgs = envelope?.activatedRuleIds.size ? [] : args;
+        const envelopeGroups = collectAntiSlopGroups(cwd, envelopeArgs, pin ?? undefined);
         const candidateGroups = envelope?.activatedRuleIds.size
             ? envelopeGroups.filter((group) => scope.includes(group.file))
             : envelopeGroups;
-        const envelopeStatus = checkBaselineEnvelope(baseline, envelope, envelopeGroups, baseRef);
+        const relocation = {
+            cwd,
+            capabilityCwd: pin,
+            inLintScope: resolveAntiSlopScope(cwd, envelopeArgs).includes,
+        };
+        const envelopeStatus = checkBaselineEnvelope(baseline, envelope, envelopeGroups, baseRef, relocation);
         if (envelopeStatus !== 0)
             return envelopeStatus;
         const allowance = inheritedBaseAllowance(cwd, pin, selected, candidateGroups, envelope);
         const comparison = compareBaseline(allowance, candidateGroups);
-        printNewAntiSlopFindings(comparison.newGroups);
+        const vacated = envelope && comparison.newGroups.length > 0
+            ? relocationEvidence({ ...relocation, inLintScope: scope.includes }, envelope, baseline, candidateGroups, new Set(comparison.newGroups.map(relocationKey)))
+            : null;
+        const { newGroups, relocated } = classifyRelocations(comparison.newGroups, vacated ?? new Map());
+        printNewAntiSlopFindings(newGroups);
+        printRelocatedAntiSlopFindings(relocated);
         reportInheritedForgiveness(compareBaseline(selected, candidateGroups).newGroups, comparison.newGroups);
-        const errors = comparison.newGroups.filter((group) => group.severity === 'error');
-        const warnings = comparison.newGroups.filter((group) => group.severity === 'warning');
-        if (errors.length > 0) {
-            console.error(`anti-slop: FAIL — ${errors.reduce((sum, group) => sum + group.additionalCount, 0)} new error finding(s); baseline unchanged`);
+        const errors = newGroups.filter((group) => group.severity === 'error');
+        const warnings = newGroups.filter((group) => group.severity === 'warning');
+        const newErrorCount = errors.reduce((sum, group) => sum + group.additionalCount, 0);
+        if (relocated.some((group) => group.severity === 'error')) {
+            reportRelocatedFailure(newErrorCount, relocated, baseRef);
+            reportOverlayContract(cwd);
             return 1;
         }
-        console.log(`anti-slop: PASS — ${comparison.currentCount} current finding(s), ${comparison.resolvedCount} ready to prune${warnings.length ? `, ${warnings.length} warning fingerprint(s)` : ''}`);
+        if (errors.length > 0) {
+            console.error(`anti-slop: FAIL — ${newErrorCount} new error finding(s); baseline unchanged`);
+            // Reported on the FAIL path too: a committer reading a block needs the same standing about
+            // what this gate does not enforce — no committed base means no rename forgiveness.
+            reportOverlayContract(cwd);
+            return 1;
+        }
+        console.log(`anti-slop: PASS — ${comparison.currentCount} current finding(s), ${comparison.resolvedCount} ready to prune${warnings.length ? `, ${warnings.length} warning fingerprint(s)` : ''}${relocatedWarningNote(relocated, baseRef)}`);
+        reportOverlayContract(cwd);
         return 0;
     }
     finally {
@@ -278,16 +306,31 @@ export default function run(args, cwd) {
         console.error('anti-slop: --staged is accepted only by check');
         return 2;
     }
-    if (baseRef && operation !== 'check' && operation !== 'adopt-renames') {
-        console.error('anti-slop: --base is accepted only by check or adopt-renames');
+    if (baseRef && !['check', 'adopt-renames', 'adopt-relocations'].includes(operation ?? '')) {
+        console.error('anti-slop: --base is accepted only by check, adopt-renames, or adopt-relocations');
         return 2;
     }
     if (staged && (baseRef || paths.length > 0)) {
         console.error('anti-slop: --staged uses the complete Git index and accepts no paths or --base');
         return 2;
     }
+    // The manifest STAMP, not the repository marker: `.devkit/config.json` is absent from every review
+    // projection, so a marker read drops the capability from the snapshot exactly where it exists.
+    const overlay = resolveOxlintEntryConfig(cwd) !== null;
+    const refusal = overlay ? overlayBaseRefusal(operation, baseRef !== undefined) : null;
+    if (refusal) {
+        console.error(refusal);
+        return 2;
+    }
     if (operation === 'create')
-        return create(cwd, paths, force, confirmBaselineRemovals);
+        return createAntiSlopBaseline(cwd, paths, force, confirmBaselineRemovals);
+    if (operation === 'adopt-activation') {
+        if (paths.length > 0 || force) {
+            console.error('anti-slop adopt-activation accepts no flags or paths');
+            return 2;
+        }
+        return adoptActivation(cwd);
+    }
     if (operation === 'adopt-renames') {
         if (paths.length > 0) {
             console.error('anti-slop adopt-renames accepts no flags or paths');
@@ -295,14 +338,22 @@ export default function run(args, cwd) {
         }
         return adoptRenames(cwd, baseRef ?? 'HEAD', baseRef !== undefined);
     }
+    if (operation === 'adopt-relocations') {
+        if (paths.length > 0) {
+            console.error('anti-slop adopt-relocations accepts no flags or paths');
+            return 2;
+        }
+        return adoptRelocations(cwd, overlay, baseRef ?? 'HEAD', baseRef !== undefined);
+    }
     if (operation === 'check' && staged) {
         return withStagedAntiSlopSnapshot(cwd, (snapshot) => {
             if (snapshot.skipped) {
                 console.log('anti-slop: PASS — no relevant staged files or configuration changes');
+                reportOverlayContract(snapshot.cwd);
                 return 0;
             }
             return check(snapshot.cwd, snapshot.paths, snapshot);
-        });
+        }, { overlay });
     }
     if (operation === 'check') {
         const envelope = baseRef ? gitBaselineEnvelope(cwd, baseRef) : null;
@@ -317,6 +368,6 @@ export default function run(args, cwd) {
     }
     if (operation === 'prune')
         return prune(cwd, paths);
-    console.error('devkit anti-slop: expected create, adopt-renames, check, inspect, or prune');
+    console.error('devkit anti-slop: expected create, adopt-activation, adopt-renames, adopt-relocations, check, inspect, or prune');
     return 2;
 }

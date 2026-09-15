@@ -545,7 +545,7 @@ function applyOverlay(cwd, plan, pkgRel, devkitRef) {
     const { stack, selection, force = false, dryRun = false } = plan;
     console.log(`devkit init${dryRun ? ' (dry-run)' : ''} — OVERLAY (local-only) — stack=${stack}, devkit=${devkitRef}`);
     console.log('  invisible to git (.git/info/exclude); extends the repo; edits nothing committed\n');
-    const { origHooksPath, fallowWired } = installOverlay(cwd, selection, stack, force, dryRun);
+    const wired = installOverlay(cwd, selection, stack, force, dryRun);
     const ownsLineGrowth = upgradeOffers.overlayOwnsLineGrowth(cwd);
     upgradeOffers.applyOverlayMaxLines(cwd, selection, repoAdopted(cwd), ownsLineGrowth, dryRun);
     if (selection.guards?.includes('fanout') || selection.guards?.includes('size')) {
@@ -562,9 +562,8 @@ function applyOverlay(cwd, plan, pkgRel, devkitRef) {
         console.log('  global pre-commit gate (opt-in — survives husky reclaim on a plain `git commit`)');
         installGlobalHook({ dryRun });
     }
-    // Record what was actually wired so clean/doctor are selection-aware. fallow reflects the ACTUAL
-    // outcome (fallowWired) — an aborted install (no binary) records false. dropUndecided keeps an
-    // un-asked optional component absent, exactly as the package writer does.
+    // Recorded so clean/doctor are selection-aware; fallow and antiSlop carry the ACTUAL outcome, so
+    // an aborted install records false and stays in step with the rendered hook.
     const overlayComponents = dropUndecided({
         biome: Boolean(selection.biome),
         guards: [...(selection.guards ?? [])],
@@ -572,8 +571,8 @@ function applyOverlay(cwd, plan, pkgRel, devkitRef) {
         agents: Boolean(selection.agents),
         agentHooks: Boolean(selection.agentHooks),
         searchSteering: false, // never wired in overlay (no resolvable bin without the package)
-        fallow: fallowWired,
-        antiSlop: false,
+        fallow: wired.fallowWired,
+        antiSlop: wired.antiSlopWired,
         lineGrowth: Boolean(selection.lineGrowth),
         adhd: Boolean(selection.adhd),
         priorArtGate: Boolean(selection.priorArtGate),
@@ -589,7 +588,7 @@ function applyOverlay(cwd, plan, pkgRel, devkitRef) {
             initVersion: INIT_VERSION,
             overlay: true,
             pkgRel,
-            origHooksPath, // what core.hooksPath was before — `devkit clean` restores it
+            origHooksPath: wired.origHooksPath, // what core.hooksPath was before — `devkit clean` restores it
             globalCommitGate, // opt-in machine-global init.sh shim wired (so doctor can report it)
             components: overlayComponents,
             review,
@@ -749,10 +748,11 @@ export async function applyInit(cwd, plan) {
     }
     // Oxc repository state is core in every tracked install mode. Anti-slop remains the optional
     // policy layer and selects the extended managed base; overlay returned before this apply path.
+    // `overlay: false` ASSERTED: the on-disk marker is still stale here (step 9 rewrites it below).
     if (selection.antiSlop)
-        antiSlopLifecycle.syncAntiSlopCapability(cwd, { dryRun });
+        antiSlopLifecycle.syncAntiSlopCapability(cwd, { dryRun, overlay: false });
     else
-        oxcLifecycle.syncOxcCapability(cwd, { dryRun, antiSlop: false });
+        oxcLifecycle.syncOxcCapability(cwd, { dryRun, antiSlop: false, overlay: false });
     // The vendored i-have-adhd skill, into devkit's own tree rather than the agent skills dirs — so it
     // no longer depends on the `skills` component. Called unconditionally: a false selection reclaims a
     // previously-installed copy, and syncSurfaces above has already reclaimed the `.claude/skills/`
@@ -834,11 +834,9 @@ function printReferencedSteps() {
     console.log('      GUARD_INDEX_PATH=<path/to/index.db>  (or indexPath in guard.config.json).');
     console.log('      Without it the duplication gate fails open (clone + ratchet gates still run).');
 }
-function structureAvailableFor(stack) {
-    return STRUCTURE_STACKS.has(stack);
-}
 export const meta = {
     name: 'init',
+    agentFacing: true,
     summary: 'Wire this repo onto devkit (interactive wizard; idempotent).',
     help: INIT_HELP,
 };
@@ -869,7 +867,7 @@ export default async function run(args, cwd) {
             console.error('devkit init --baselines-only: unsupported in overlay/standalone mode (no structure preset).');
             return 1;
         }
-        if (!structureAvailableFor(stack)) {
+        if (!STRUCTURE_STACKS.has(stack)) {
             console.error(`devkit init --baselines-only: no structure-lint preset for stack "${stack}".`);
             return 1;
         }
@@ -893,7 +891,7 @@ export default async function run(args, cwd) {
         const result = await runWizard({
             detectedStack,
             detectedMode,
-            structureAvailable: structureAvailableFor(detectedStack),
+            structureAvailable: STRUCTURE_STACKS.has(detectedStack),
             installed,
             existingReview: readJson(join(cwd, '.devkit', 'config.json'))
                 ?.review,
@@ -909,7 +907,6 @@ export default async function run(args, cwd) {
     else {
         ({ selection, disabledGuards, undecided } = initFlags.resolveFlagSelection(cwd, args, flags));
     }
-    antiSlopLifecycle.warnIfAntiSlopUnavailable(mode, flags.antiSlop);
     if (mode === 'overlay')
         selection = applyOverlayConstraints(selection);
     if (!selfHost && !interactive) {
@@ -932,7 +929,7 @@ export default async function run(args, cwd) {
     }
     // Self-host runs structure via `bun run lint:structure` (eslint), not a template preset, so skip
     // the "no preset → disable structure" flip (which would otherwise print a misleading notice).
-    if (!selfHost && !structureAvailableFor(stack) && selection.structure) {
+    if (!selfHost && !STRUCTURE_STACKS.has(stack) && selection.structure) {
         selection.structure = false; // no template for this stack — silently skip (noted below)
         if (stack !== 'generic') {
             console.log(`devkit init: no structure-lint preset for stack "${stack}" yet — skipping it.`);

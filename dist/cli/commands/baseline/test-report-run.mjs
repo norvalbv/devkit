@@ -2,6 +2,9 @@
 import { REPORT_NAME, RUNS_DIR, SUMMARY_NAME, produceTestReport, } from '../../lib/baseline-status/produce.mjs';
 export const meta = {
     name: 'test-report-run',
+    agentFacing: false,
+    notRoutedBecause: "Wired ONCE as the consumer's own test:run:report script, then run by CI. Agents read the" +
+        'report it writes through devkit baseline-status, which is the routed verb.',
     summary: 'Run vitest and emit a machine-readable per-file test report for CI.',
     help: `devkit test-report-run — run the test suite and record WHICH files passed.
 

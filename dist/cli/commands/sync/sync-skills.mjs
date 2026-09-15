@@ -256,6 +256,7 @@ export function detectSkillConflicts(root, targets = AGENT_TARGETS, selected = {
 }
 export const meta = {
     name: 'sync-skills',
+    agentFacing: true,
     summary: 'Copy bundled skills into selected agent providers.',
     help: `devkit sync-skills — copy devkit's bundled skills into Claude, Codex, and Cursor.
 

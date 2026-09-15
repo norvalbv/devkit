@@ -4,6 +4,11 @@ import { type OxcTool, runOxcRuntime } from '../../lib/install/oxc/runtime.mts';
 
 export const meta = {
   name: 'oxc',
+  agentFacing: false,
+  notRoutedBecause:
+    "Passthrough runner for devkit's pinned oxlint/oxfmt binaries, invoked by the package" +
+    "scripts init wires. Agents run the repo's own lint/format scripts, not the wrapper" +
+    'beneath them.',
   summary: "Run Devkit's pinned native Oxlint or Oxfmt (no consumer install).",
   help: `devkit oxc — run Devkit's pinned Oxc tools.
 

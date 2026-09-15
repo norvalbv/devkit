@@ -223,6 +223,7 @@ export function detectAgentConflicts(root: string, targets: string[] = AGENT_TAR
 
 export const meta = {
   name: 'sync-agents',
+  agentFacing: true,
   summary: 'Copy review/testing agents into selected agent providers.',
   help: `devkit sync-agents — copy devkit's review/testing agents into Claude, Codex, and Cursor.
 

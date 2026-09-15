@@ -48,6 +48,11 @@ import { sharedHooksPath, worktreeHooksPathState } from '../../lib/doctor/hooks-
 
 export const meta = {
   name: 'sync-hook-runner',
+  agentFacing: false,
+  notRoutedBecause:
+    'Checkout-provisioning step (point a fresh worktree at its own hooks), run by devkit ' +
+    'upgrade and by the tooling that creates worktrees, not something an agent decides on ' +
+    'mid-task.',
   summary:
     'Make this checkout run its OWN hooks (stage the runner; replace a sibling hooksPath pin).',
   help: `devkit sync-hook-runner — make this checkout gate itself with its own hooks.

@@ -184,6 +184,7 @@ function currentVersion(): string {
 
 export const meta = {
   name: 'update',
+  agentFacing: true,
   summary: 'Self-update devkit to the latest published tag.',
   help: `devkit update — self-update to the latest published tag (also --update / -u).
 
