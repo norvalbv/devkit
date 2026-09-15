@@ -92,7 +92,7 @@ export function checkHusky(cwd: string, selectedGuards: string[]): CheckResult {
   // orchestrator; decisions/review/qavis-advisory keep their own per-id `guard-<id>` fragment.
   // Verify one orchestrator call when any deterministic guard is selected, plus each selected
   // own-fragment sentinel. A pre-collapse block (per-guard lines) fails + is flagged for regen.
-  // `sentry` runs at commit-msg (checkCommitMsgHook) — never expected in the pre-commit block.
+  // `sentry` is owned by commit-msg (checkCommitMsgHook); the ship-only pre-commit prewarm is optional.
   const OWN_FRAGMENT = new Set(['decisions', 'review', QAVIS_ADVISORY_ID]);
   const gates = selectedGuards.filter((guard) => REVIEWABLE_GUARD_IDS.includes(guard));
   const missing: string[] = [];

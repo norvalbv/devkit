@@ -366,13 +366,17 @@ function appendWatchlist(subject: string, evidence: string): void {
   }
 }
 
-/** Normalise a raw commit message to the judged text: drop git comment lines (the editor template),
- * trim, cap. Tolerates CRLF — per-line `#` detection + the final trim handle a `\r\n` message. */
+const BLANK_LINE_RUN_RE = /\n{3,}/g;
+
+/** Normalise a raw message as git's -m cleanup does, so ship's pre-commit and commit-msg runs share one
+ * cache key (sc-3012): drop `#` lines, strip line ends (CRLF too), collapse blank runs, trim, cap. */
 export function cleanMessage(raw: unknown): string {
   return String(raw)
     .split('\n')
     .filter((l) => !l.startsWith('#'))
+    .map((l) => l.trimEnd())
     .join('\n')
+    .replace(BLANK_LINE_RUN_RE, '\n\n')
     .trim()
     .slice(0, 4000);
 }
