@@ -40,7 +40,7 @@ echo "🔍 Reviewer gate (headless domain judges)..."
 # shared verdict store, so the commit-msg gate re-judges it as a cache hit — the deep completeness
 # judgement overlaps the fleet instead of following it. Interactive commits (no message yet) are
 # unchanged. Lifetime is scoped to this hook: the judge is either wait'ed on or killed AND reaped
-# below — nothing outlives the hook to hold git's output pipe open. Review mode is excluded — it
+# below — nothing outlives the hook to hold git's output pipe open. Review and dry-gates modes are excluded — review
 # exports the SAME env as its reviewer intent file (review-target.sh), but completeness is a
 # commit gate, not part of a range review.
 #
@@ -48,7 +48,7 @@ echo "🔍 Reviewer gate (headless domain judges)..."
 # subshell, which would make $! a wrapper whose death leaves the judge orphaned and running. See
 # review-fragments.mts.
 comp_pid=""
-if [ "\${DEVKIT_RUN_MODE:-}" != "review" ] && [ -n "\${DEVKIT_COMMIT_MSG_FILE:-}" ] && [ -f "\${DEVKIT_COMMIT_MSG_FILE:-}" ]; then
+if [ "\${DEVKIT_RUN_MODE:-}" != "review" ] && [ "\${DEVKIT_RUN_MODE:-}" != "dry-gates" ] && [ -n "\${DEVKIT_COMMIT_MSG_FILE:-}" ] && [ -f "\${DEVKIT_COMMIT_MSG_FILE:-}" ]; then
     echo "🧩 Completeness judge started in parallel (ship message known)..."
     ${DK_NO_GIT_ENV_INLINE} "$__dk_package_bin_dir/guard-review" completeness --gate "$DEVKIT_COMMIT_MSG_FILE" & comp_pid=$!
 fi

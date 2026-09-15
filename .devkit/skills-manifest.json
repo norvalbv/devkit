@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "kind": "skills",
   "devkitRef": "v0.63.0",
-  "generatedAt": "2026-09-14T20:25:34.586Z",
+  "generatedAt": "2026-09-14T22:55:37.127Z",
   "files": {
     "_devkit/checklist-store.mjs": "c8a6a01fe75bd570953ccc88e3b99b8ac365bb249c4b1db2ce0c32a589c52193",
     "_devkit/review-roots.d.mts": "384d95945ccf04f994d805e78a5507835321ee5bcbd46acbf216c77385238c9e",
@@ -36,7 +36,7 @@
     "upstream-sync/SKILL.md": "1007c8377ac15393dcc9db5384d80bd38487c85aa465921ae0b49ba5a91bad70",
     "upstream-sync/scripts/sync.mjs": "218aa7ad7e96f280f281a38f99919f2ce55eace902ed95b1119a0099ddbb3c76",
     "upstream-sync/scripts/verify-merge.mjs": "afb2977ab8b7a96fac2e93e29a68ae432508ba7e63d03c580fcf03229fcd0676",
-    "using-devkit/SKILL.md": "60190ddcfba2ac7b291f905296c0fbea86262ccffa7d7b71772650ce372b7fab"
+    "using-devkit/SKILL.md": "baccd98da8c4c3611eaeb7e532735cc3ee221a46b04e1af47c18bf9f7c256a07"
   },
   "providers": {
     "claude": {
@@ -73,7 +73,7 @@
         "upstream-sync/SKILL.md": "1007c8377ac15393dcc9db5384d80bd38487c85aa465921ae0b49ba5a91bad70",
         "upstream-sync/scripts/sync.mjs": "218aa7ad7e96f280f281a38f99919f2ce55eace902ed95b1119a0099ddbb3c76",
         "upstream-sync/scripts/verify-merge.mjs": "afb2977ab8b7a96fac2e93e29a68ae432508ba7e63d03c580fcf03229fcd0676",
-        "using-devkit/SKILL.md": "60190ddcfba2ac7b291f905296c0fbea86262ccffa7d7b71772650ce372b7fab"
+        "using-devkit/SKILL.md": "baccd98da8c4c3611eaeb7e532735cc3ee221a46b04e1af47c18bf9f7c256a07"
       }
     },
     "cursor": {
@@ -110,7 +110,7 @@
         "upstream-sync/SKILL.md": "1007c8377ac15393dcc9db5384d80bd38487c85aa465921ae0b49ba5a91bad70",
         "upstream-sync/scripts/sync.mjs": "218aa7ad7e96f280f281a38f99919f2ce55eace902ed95b1119a0099ddbb3c76",
         "upstream-sync/scripts/verify-merge.mjs": "afb2977ab8b7a96fac2e93e29a68ae432508ba7e63d03c580fcf03229fcd0676",
-        "using-devkit/SKILL.md": "60190ddcfba2ac7b291f905296c0fbea86262ccffa7d7b71772650ce372b7fab"
+        "using-devkit/SKILL.md": "baccd98da8c4c3611eaeb7e532735cc3ee221a46b04e1af47c18bf9f7c256a07"
       }
     }
   }
