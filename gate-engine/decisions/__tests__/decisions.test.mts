@@ -36,7 +36,7 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-function run(args) {
+function run(args, today = '2026-05-29') {
   return spawnSync('node', [SCRIPT, ...args], {
     cwd: dir,
     encoding: 'utf8',
@@ -45,7 +45,7 @@ function run(args) {
       // GUARD_DECISIONS_DIR is the canonical config override (config reads GUARD_*/FRINK_*,
       // not a bare DECISIONS_DIR). It points the engine's decisionsDir at this temp dir.
       GUARD_DECISIONS_DIR: dir,
-      DECISIONS_TODAY: '2026-05-29',
+      DECISIONS_TODAY: today,
       DECISIONS_NO_EMBED: '1', // deterministic: lexical floor, never a live Ollama call
       DECISIONS_INDEX: join(dir, 'vec-index.json'),
     },
@@ -1206,6 +1206,7 @@ describe('draft amendments', () => {
 
     expect(blocked.status).toBe(1);
     expect(blocked.stderr).toContain('already committed');
+    expect(blocked.stderr).toContain('guard-decisions add axis --note');
     expect(readFileSync(file, 'utf8')).toBe(before);
   });
 
@@ -1237,6 +1238,270 @@ describe('draft amendments', () => {
     expect(blocked.stderr).toContain('earlier decision history differs from HEAD');
     expect(readFileSync(file, 'utf8')).toBe(changed);
     expect(readFileSync(join(dir, 'INDEX.md'), 'utf8')).toBe(beforeIndex);
+  });
+
+  // sc-2711: a draft Target stays correctable after draft notes are appended under it.
+  describe('a draft Target followed by draft notes', () => {
+    const file = () => join(dir, 'axis.md');
+    const index = () => join(dir, 'INDEX.md');
+    const read = (path) => readFileSync(path, 'utf8');
+    const targetOf = (slug, extra = {}) => ({
+      context: `${slug} broke: symptom Z, every flow affected`,
+      ruling: `${slug}-ruling`,
+      consequences: `${slug} value protected`,
+      tradeoff: `${slug} cost knowingly paid`,
+      visionFit: 'friendly dev tool for everyone',
+      ...extra,
+    });
+    const headings = (md) => md.match(/^## Target · /gm)?.length ?? 0;
+
+    it('replaces only the Target and leaves every trailing note byte-identical (AC4)', () => {
+      expect(run(target('axis')).status).toBe(0);
+      expect(run(['add', 'axis', '--note', 'first measurement']).status).toBe(0);
+      expect(run(['add', 'axis', '--note', 'second measurement']).status).toBe(0);
+      const before = read(file());
+
+      const amended = run(['amend', 'axis', '--target', ...reqFlags('final')]);
+
+      expect(amended.status, amended.stderr).toBe(0);
+      expect(read(file())).toBe(
+        before.replace(
+          renderTarget('2026-05-29', targetOf('axis')),
+          renderTarget('2026-05-29', targetOf('final')),
+        ),
+      );
+      expect(headings(read(file()))).toBe(1);
+      expect(read(file())).not.toContain('**Evidence-change:**');
+      expect(read(index())).toContain('final-ruling');
+      expect(read(index())).not.toContain('axis-ruling');
+    });
+
+    it('keeps the Target date, not the date of the newest note or of today', () => {
+      expect(run(target('axis'), '2026-05-01').status).toBe(0);
+      expect(run(['add', 'axis', '--note', 'later note'], '2026-05-20').status).toBe(0);
+
+      const amended = run(['amend', 'axis', '--target', ...reqFlags('final')], '2026-05-29');
+
+      expect(amended.status, amended.stderr).toBe(0);
+      const md = read(file());
+      expect(md).toContain('## Target · 2026-05-01 — final-ruling');
+      expect(md).toContain('- 2026-05-20 — later note');
+      expect(read(index())).toContain('2026-05-01');
+    });
+
+    it('refuses a committed Target behind a draft note and names the re-target route (AC2)', () => {
+      run(target('axis'));
+      commitAll();
+      expect(run(['add', 'axis', '--note', 'draft note']).status).toBe(0);
+      const beforeFile = read(file());
+      const beforeIndex = read(index());
+
+      const blocked = run(['amend', 'axis', '--target', ...reqFlags('final')]);
+
+      expect(blocked.status).toBe(1);
+      expect(blocked.stderr).toContain('already committed');
+      expect(blocked.stderr).toContain('guard-decisions add axis --target');
+      expect(blocked.stderr).toContain('--evidence-change');
+      expect(read(file())).toBe(beforeFile);
+      expect(read(index())).toBe(beforeIndex);
+    });
+
+    it('amends only the newest of interleaved Targets, gated on --evidence-change', () => {
+      run(target('axis'));
+      expect(run(['add', 'axis', '--note', 'committed note']).status).toBe(0);
+      commitAll();
+      expect(run(['add', 'axis', '--note', 'draft note one']).status).toBe(0);
+      expect(
+        run(['add', 'axis', '--target', ...reqFlags('second'), '--evidence-change', 'benchmark'])
+          .status,
+      ).toBe(0);
+      expect(run(['add', 'axis', '--note', 'draft note two']).status).toBe(0);
+      const before = read(file());
+      const beforeIndex = read(index());
+
+      const blocked = run(['amend', 'axis', '--target', ...reqFlags('final')]);
+      expect(blocked.status).toBe(1);
+      expect(blocked.stderr).toContain('requires --evidence-change');
+      expect(read(file())).toBe(before);
+      expect(read(index())).toBe(beforeIndex);
+
+      const amended = run([
+        'amend',
+        'axis',
+        '--target',
+        ...reqFlags('final'),
+        '--evidence-change',
+        'corrected benchmark',
+      ]);
+      expect(amended.status, amended.stderr).toBe(0);
+      expect(read(file())).toBe(
+        before.replace(
+          renderTarget('2026-05-29', targetOf('second', { evidenceChange: 'benchmark' })),
+          renderTarget('2026-05-29', targetOf('final', { evidenceChange: 'corrected benchmark' })),
+        ),
+      );
+      expect(headings(read(file()))).toBe(2);
+    });
+
+    it('preserves a hand-written blank line between the Target and its first note', () => {
+      const note = '- 2026-05-29 — note after a blank line\n';
+      writeFileSync(
+        file(),
+        renderDecision(
+          { slug: 'axis', created: '2026-05-29' },
+          `\n# axis\n\n${renderTarget('2026-05-29', targetOf('axis'))}\n\n${note}`,
+        ),
+      );
+
+      const amended = run(['amend', 'axis', '--target', ...reqFlags('final')]);
+
+      expect(amended.status, amended.stderr).toBe(0);
+      expect(read(file())).toBe(
+        renderDecision(
+          { slug: 'axis', created: '2026-05-29' },
+          `\n# axis\n\n${renderTarget('2026-05-29', targetOf('final'))}\n\n${note}`,
+        ),
+      );
+    });
+
+    it('refuses atomically when a heading sits between the Target and a trailing note', () => {
+      writeFileSync(
+        file(),
+        renderDecision(
+          { slug: 'axis', created: '2026-05-29' },
+          `\n# axis\n\n${renderTarget('2026-05-29', targetOf('axis'))}\n\n` +
+            '## [archived — impl-note, not an epic]\n\n- 2026-05-29 — archived note\n',
+        ),
+      );
+      const before = read(file());
+
+      const blocked = run(['amend', 'axis', '--target', ...reqFlags('final')]);
+
+      expect(blocked.status).toBe(1);
+      expect(blocked.stderr).toContain('## [archived');
+      expect(read(file())).toBe(before);
+    });
+
+    it.each([
+      ['with a trailing note', true],
+      ['as the newest entry', false],
+    ])(
+      'amends a Target whose multi-line fields hold heading- or note-like lines, %s',
+      (_, withNote) => {
+        const fields = {
+          rejected:
+            'plan A\n# revisit later\n### also plan B\n- 2026-01-15 abandoned after benchmark',
+          researched: '#tag\n# x\n-  2026-02-01: re-measured\n##no-space',
+        };
+        const flags = ['--rejected', fields.rejected, '--researched', fields.researched];
+        expect(run(target('axis', flags)).status).toBe(0);
+        if (withNote) expect(run(['add', 'axis', '--note', 'draft note']).status).toBe(0);
+        const before = read(file());
+
+        const amended = run(['amend', 'axis', '--target', ...reqFlags('final'), ...flags]);
+
+        expect(amended.status, amended.stderr).toBe(0);
+        expect(read(file())).toBe(
+          before.replace(
+            renderTarget('2026-05-29', targetOf('axis', fields)),
+            renderTarget('2026-05-29', targetOf('final', fields)),
+          ),
+        );
+      },
+    );
+
+    it('refuses a field line every reader already splits as a section, atomically', () => {
+      const flags = ['--rejected', 'plan A\n## a section, not a field\nplan B'];
+      expect(run(target('axis', [...flags, '--scope', 'src/**'])).status).toBe(0);
+      const before = read(file());
+      expect(currentTarget(parseDecision(before).body)?.scope).toBe('');
+
+      const blocked = run(['amend', 'axis', '--target', ...reqFlags('final'), ...flags]);
+
+      expect(blocked.status).toBe(1);
+      expect(blocked.stderr).toContain('## a section, not a field');
+      expect(read(file())).toBe(before);
+    });
+
+    it('keeps note ids and **Amends:** pointers resolvable for the integrity check', () => {
+      expect(run(target('axis')).status).toBe(0);
+      expect(run(['add', 'axis', '--note', 'first same-day note']).status).toBe(0);
+      expect(
+        run(['add', 'axis', '--note', 'narrows it', '--supersedes', 'note:2026-05-29']).status,
+      ).toBe(0);
+
+      expect(run(['amend', 'axis', '--target', ...reqFlags('final')]).status).toBe(0);
+
+      const checked = run(['check', 'axis']);
+      expect(checked.status, checked.stdout + checked.stderr).toBe(0);
+      expect(read(file())).toContain('**Amends:** note:2026-05-29');
+    });
+
+    it('warns when a trailing rescope note still overrides the amended --scope', () => {
+      expect(run(target('axis', ['--scope', 'src/old/**'])).status).toBe(0);
+      expect(
+        run(['rescope', 'axis', '--scope', 'src/moved/**', '--reason', 'renamed']).status,
+      ).toBe(0);
+
+      const amended = run([
+        'amend',
+        'axis',
+        '--target',
+        ...reqFlags('final'),
+        '--scope',
+        'src/new/**',
+      ]);
+
+      expect(amended.status, amended.stderr).toBe(0);
+      expect(amended.stderr).toContain('src/moved/**');
+      expect(read(file())).toContain('- 2026-05-29 — **Scope:** src/moved/** — renamed');
+    });
+
+    it('warns when the replacement drops an optional field the draft Target carried', () => {
+      expect(run(target('axis', ['--scope', 'src/**'])).status).toBe(0);
+      expect(run(['add', 'axis', '--note', 'draft note']).status).toBe(0);
+
+      const amended = run(['amend', 'axis', '--target', ...reqFlags('final')]);
+
+      expect(amended.status, amended.stderr).toBe(0);
+      expect(amended.stderr).toContain('Scope');
+    });
+
+    it('names both routes when amend --note meets a newest Target', () => {
+      run(target('axis'));
+      commitAll();
+      expect(run(['add', 'axis', '--note', 'draft note']).status).toBe(0);
+      expect(
+        run(['add', 'axis', '--target', ...reqFlags('second'), '--evidence-change', 'benchmark'])
+          .status,
+      ).toBe(0);
+      const before = read(file());
+
+      const blocked = run(['amend', 'axis', '--note', 'replacement']);
+
+      expect(blocked.status).toBe(1);
+      expect(blocked.stderr).toContain('guard-decisions amend axis --target');
+      expect(blocked.stderr).toContain('guard-decisions add axis --note');
+      expect(read(file())).toBe(before);
+    });
+
+    it('refuses --target on an axis with notes but no Target, naming add --target', () => {
+      writeFileSync(
+        file(),
+        renderDecision(
+          { slug: 'axis', created: '2026-05-29' },
+          '\n# axis\n\n- 2026-05-29 — legacy note without a Target\n',
+        ),
+      );
+      const before = read(file());
+
+      const blocked = run(['amend', 'axis', '--target', ...reqFlags('final')]);
+
+      expect(blocked.status).toBe(1);
+      expect(blocked.stderr).toContain('no Target');
+      expect(blocked.stderr).toContain('guard-decisions add axis --target');
+      expect(read(file())).toBe(before);
+    });
   });
 });
 

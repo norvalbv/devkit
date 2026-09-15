@@ -89,7 +89,8 @@ export function decide(
     return (
       `Blocked: direct agent edits under ${relative(root, protectedDir) || configured} are disabled ` +
       "because decision history is append-only. Use `guard-decisions add …` to record an entry or " +
-      "`guard-decisions amend …` to correct only the newest uncommitted entry."
+      "`guard-decisions amend …` to correct an uncommitted entry — the newest note, or the newest " +
+      'Target with its trailing notes kept as written.'
     );
   } catch {
     return null;
