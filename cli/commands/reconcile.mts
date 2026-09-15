@@ -37,6 +37,7 @@ function sameRoot(a: string, b: string): boolean {
 
 export const meta = {
   name: 'reconcile',
+  agentFacing: true,
   summary: 'After a PR merges, refresh stale files in a shared checkout.',
   help: `devkit reconcile — after your PR merges, replace stale local copies with the merged
 version in the shared checkout (no stash/pull). Manual lane.

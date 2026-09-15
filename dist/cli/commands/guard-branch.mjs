@@ -12,6 +12,10 @@ import { readFileSync } from 'node:fs';
 import { decide } from '../lib/guard/protected-branch-guard.mjs';
 export const meta = {
     name: 'guard-branch',
+    agentFacing: false,
+    notRoutedBecause: 'PreToolUse hook shim. Its agent-facing surface is the DENIAL it prints (a ready-to-run ' +
+        'devkit ship), not the verb: an agent invoking it directly would be gating its own tool ' +
+        'call. skills/using-devkit documents it as a term for that reason.',
     summary: 'PreToolUse hook: block direct commits on a protected branch.',
     help: `devkit guard-branch — PreToolUse hook: deny a direct \`git commit\` on a protected branch.
 

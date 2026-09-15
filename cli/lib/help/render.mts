@@ -12,6 +12,11 @@ export interface CommandMeta {
   name: string;
   summary: string;
   help: string;
+  /** Should an AGENT ever type this verb? `true` obliges some skill to name `devkit <name>`;
+   *  `false` requires `notRoutedBecause`. Enforced by cli/__tests__/command-skill-routing.test.mts. */
+  agentFacing: boolean;
+  /** Required when `agentFacing` is false: who invokes it instead, and why an agent must not. */
+  notRoutedBecause?: string;
 }
 
 /** The subset used to render the top-level command list (the `help` body is not needed there). */

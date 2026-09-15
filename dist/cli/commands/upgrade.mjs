@@ -34,6 +34,7 @@ import { computeMigration } from './migrate-config.mjs';
 import update, { cmpSemver, DEP, fetchLatestTag, needsRerun, repinPackageJson } from './update.mjs';
 export const meta = {
     name: 'upgrade',
+    agentFacing: true,
     summary: 'Fully reconcile this repo to the installed devkit (one idempotent pass).',
     help: `devkit upgrade — bring a consumer repo fully up to the installed devkit in one command.
 
@@ -191,12 +192,15 @@ export default async function upgrade(args, cwd) {
         // overlay upgrade records a decline nobody made and the offer never fires again.
         const disabledGuards = await offerNewGates(cfg.components?.disabledGuards, sel, dryRun);
         await offerLineGrowth(cwd, sel, dryRun, { canWrite: () => overlayOwnsLineGrowth(cwd) });
-        const undecidedOverlay = await offerOptionalComponents(cfg.components, sel, dryRun, {
-            unavailable: ['antiSlop'],
-        });
+        const undecidedOverlay = await offerOptionalComponents(cfg.components, sel, dryRun);
         if (Object.hasOwn(cfg.components ?? {}, 'oxc')) {
-            console.log('  • retired components.oxc key will be removed; overlay remains runtime-only and writes no tracked Oxc config');
+            console.log("  • retired components.oxc key will be removed; overlay's Oxc state is git-excluded (.devkit/oxc/, oxlint.devkit.json)");
         }
+        // Snapshot the rule registry BEFORE the re-sync overwrites it: overlay's activation evidence
+        // never comes from Git, so this capture is the only record. See oxc-toolchain-migration.
+        const previousAntiSlopRuleIds = sel.antiSlop
+            ? captureAntiSlopBaselineActivation(cwd, dryRun, true)
+            : null;
         await applyInit(cwd, {
             stack,
             selection: sel,
@@ -210,10 +214,14 @@ export default async function upgrade(args, cwd) {
             force: false,
             dryRun,
         });
+        const overlayBaselineReady = !sel.antiSlop ||
+            adoptActivatedAntiSlopFindings(cwd, previousAntiSlopRuleIds, dryRun, () => collectAntiSlopGroups(cwd, []));
         if (dryRun) {
             console.log('\nDry-run complete — nothing written.');
             return 0;
         }
+        if (!overlayBaselineReady)
+            return 1;
         console.log('\nverify\n');
         return doctor([], cwd);
     }

@@ -3,6 +3,7 @@ import { runBaseStatus } from '../../lib/ship/base-drift/cli.mts';
 
 export const meta = {
   name: 'base-status',
+  agentFacing: true,
   summary: 'Report whether origin/<base> moved under this checkout, and which paths it touched.',
   help: `devkit base-status — has the base moved under this worktree?
 
