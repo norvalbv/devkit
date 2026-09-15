@@ -18,6 +18,7 @@ import {
 // regardless of the runner's own env (the test process itself runs under Claude Code = CLAUDECODE=1).
 const ENV = [
   'DEVKIT_SHIP_ID',
+  'DEVKIT_SHIP_MODE',
   'DEVKIT_REVIEW_ID',
   'DEVKIT_REVIEW_REPO',
   'DEVKIT_REVIEW_BRANCH',
@@ -86,6 +87,23 @@ describe('run-context', () => {
       devkit_version: devkitVersion(),
     });
     expect(telemetrySink()).toBe('/tmp/x/gate-events.jsonl');
+  });
+
+  it('a dry-gates rehearsal marks its events, so rehearsal judge spend never reads as a real ship', () => {
+    process.env.DEVKIT_SHIP_ID = 'ship-dry';
+    process.env.DEVKIT_SHIP_REPO = 'devkit';
+    process.env.DEVKIT_SHIP_BRANCH = 'feat/x';
+    process.env.DEVKIT_SHIP_MODE = 'dry-gates';
+    expect(runEnvelope()).toEqual({
+      ship_id: 'ship-dry',
+      repo: 'devkit',
+      branch: 'feat/x',
+      ship_mode: 'dry-gates',
+      source: 'unknown',
+      devkit_version: devkitVersion(),
+    });
+    process.env.DEVKIT_SHIP_MODE = 'ship';
+    expect(runEnvelope()).not.toHaveProperty('ship_mode');
   });
 
   it('a ship that never exported repo/branch degrades to empty, never to a wrong label', () => {

@@ -266,6 +266,33 @@ describe('assembled hook execution (stubbed bins, sh -e)', () => {
     expect(r.calls).not.toContain('guard-qavis-advisory');
   });
 
+  it('dry-gates with reviewers runs the fleet after a deterministic failure, never decisions or Qavis', () => {
+    const r = runHook({
+      DET_RC: '1',
+      DEVKIT_RUN_MODE: 'dry-gates',
+      DEVKIT_REVIEW_GUARDS: 'comments,review',
+    });
+    expect(r.status).toBe(1);
+    expect(r.calls).toContain('guard-deterministic');
+    expect(r.calls).toContain('guard-comments gate');
+    expect(r.calls).toContain('guard-review --gate');
+    expect(r.calls).not.toContain('guard-decisions');
+    expect(r.calls).not.toContain('guard-qavis-advisory');
+  });
+
+  it('dry-gates with reviewers never arms the completeness judge, even with a message file present', () => {
+    // The rehearsal has no commit message of its own; a leaked one would charge (and could block
+    // on) a judge keyed to a message this run never commits.
+    const r = runHook(
+      { DEVKIT_RUN_MODE: 'dry-gates', DEVKIT_REVIEW_GUARDS: 'comments,review' },
+      undefined,
+      { shipMsg: true },
+    );
+    expect(r.status).toBe(0);
+    expect(r.calls).toContain('guard-review --gate');
+    expect(r.calls).not.toContain('guard-review completeness');
+  });
+
   it('reviewer-only profile reaches the reviewer and stays green when deterministic selects none', () => {
     const r = runHook({ DEVKIT_RUN_MODE: 'review', DEVKIT_REVIEW_GUARDS: 'review' });
     expect(r.status).toBe(0);

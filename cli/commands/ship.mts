@@ -27,7 +27,7 @@ export const meta = {
   help: `devkit ship — commit <path...> onto a new branch + open a PR without moving HEAD.
 
 Usage:
-  devkit ship <branch> "<title>" [--dry-gates] [--base <b>] [--from-branch] [--body "<text>"] [--body-file <f>] [--draft] [--link <d>]... [--] <path...>
+  devkit ship <branch> "<title>" [--dry-gates [--with-reviewers]] [--base <b>] [--from-branch] [--body "<text>"] [--body-file <f>] [--draft] [--link <d>]... [--] <path...>
   devkit ship --pr <branch> "<title>" [--ready] [--body "<text>"] [--link <d>]... [--] <path...>
   devkit ship --resume <branch> [--body-file <f>] [--] <extra-path...>
                           bare positional paths (no --) are accepted.
@@ -108,6 +108,12 @@ Usage:
                       review, commit, push, and PR creation. With --base, refreshes and uses the
                       current origin tip just like ship.
                       Never leaves a local branch or commit. Cannot be combined with --resume.
+  --with-reviewers    With --dry-gates only: also run the configured domain reviewers on that same
+                      staging. Decisions, Qavis and completeness stay off (there is no commit
+                      message to judge). Reviewer PASSes land in the cache the real ship reads, so
+                      the identical devkit ship reuses them; a block exits with the reviewer's code.
+                      Costs judge time. For reviewer feedback when a decisions block would stop a
+                      SHIP_DRY_RUN=1 run first.
   --link <d>          Extra gitignored gate-dep dir to symlink into the worktree (repeatable;
                       the base .husky/_ + node_modules are always linked).
   --no-qavis-publish  Skip the post-push step that hands a passed staged Qavis result to qavis for

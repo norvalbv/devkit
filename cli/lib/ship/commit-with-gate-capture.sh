@@ -98,6 +98,9 @@ commit_with_gate_capture() {
     dry_log_suffix="${dry_log_suffix%.log}"
     progress="$root/.devkit/review-progress-$branch_safe-dry-$ship_id_safe-$dry_log_suffix.json"
   fi
+  # Global, not local: ship-branch.sh reads this attempt's log after return to tell whether a
+  # --with-reviewers rehearsal actually reached a reviewer gate.
+  SHIP_GATE_LOG="$log"
 
   # Start the attempt before hook resolution so a fail-closed setup error still has a terminal
   # ship_result row instead of disappearing from telemetry.

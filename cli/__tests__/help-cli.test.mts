@@ -31,6 +31,7 @@ describe('devkit help surface', () => {
     expect(r.stdout).toMatch(/devkit ship —/);
     expect(r.stdout).toMatch(/SHIP_DRY_RUN/);
     expect(r.stdout).toContain('--dry-gates');
+    expect(r.stdout).toContain('--with-reviewers');
     expect(r.stdout).toContain('--from-branch');
     expect(r.stdout).toContain('--draft');
     expect(r.stdout).toContain('--ready');

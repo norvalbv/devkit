@@ -186,6 +186,8 @@ interface RunIdentity {
   source: ReturnType<typeof originatingAgent>;
   devkit_version: string;
   parent_session_id?: string;
+  /** A rehearsal has no ship_attempt row to join against, so its judge spend is marked here. */
+  ship_mode?: 'dry-gates';
 }
 
 export function runEnvelope(): Record<string, unknown> {
@@ -194,6 +196,7 @@ export function runEnvelope(): Record<string, unknown> {
   const parent = parentSessionId();
   if (parent) identity.parent_session_id = parent;
   const ship = process.env.DEVKIT_SHIP_ID;
+  if (ship && process.env.DEVKIT_SHIP_MODE === 'dry-gates') identity.ship_mode = 'dry-gates';
   if (ship)
     return {
       ship_id: ship,

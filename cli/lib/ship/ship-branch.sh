@@ -17,12 +17,13 @@
 # and is removed on exit. Dirty-tree scope stays explicit; --from-branch is the opt-in
 # exception because committed Git objects provide an ownership boundary.
 #
-# Usage:   ship-branch.sh <branch> "<title>" [--dry-gates] [--base <b>] [--from-branch] [--body-file <f>] [--link <d>]... [--] <path...>
+# Usage:   ship-branch.sh <branch> "<title>" [--dry-gates [--with-reviewers]] [--base <b>] [--from-branch] [--body-file <f>] [--link <d>]... [--] <path...>
 #          # PR body via stdin, --body or --body-file; bare positional paths (no --) are accepted.
 # Retry:   ship-branch.sh --resume <branch> [--body-file <f>] [--] <extra-path...>
 #          # replays the invocation recorded by the previous attempt (ship-intent.mts)
 # Preview: SHIP_DRY_RUN=1 ship-branch.sh ...   # local commit, no push/PR
 # Rehearse: ship-branch.sh ... --dry-gates     # exact ship staging + selected pre-commit gates only
+#           ship-branch.sh ... --dry-gates --with-reviewers   # ... plus the domain reviewer fleet
 set -euo pipefail
 
 # Hoisted above the orphan preflight below, which runs before anything else this script sources.
@@ -86,6 +87,7 @@ fi
 LINK_EXTRA=()      # extra symlink dirs beyond the universal base
 PATHS=()
 DRY_GATES=0        # exact ship staging + deterministic/comment gates; no commit, branch, push or PR
+WITH_REVIEWERS=0   # --dry-gates also runs the domain reviewers (sc-2531); still no decisions/completeness
 BODY_SET=0         # --body given? else --body-file, else stdin (back-compat)
 BODY_FILE_SET=0    # --body-file <path>: author the body ONCE in a file; survives every retry
 BASE_FLAG=""       # --base <branch>? else base off this checkout's HEAD/current branch
@@ -111,6 +113,9 @@ while [ "$#" -gt 0 ]; do
     --dry-gates)
       [ "$RESUME" -eq 0 ] || { echo "--dry-gates cannot be combined with --resume" >&2; exit 1; }
       DRY_GATES=1; shift ;;
+    --with-reviewers)
+      [ "$RESUME" -eq 0 ] || { echo "--with-reviewers cannot be combined with --resume" >&2; exit 1; }
+      WITH_REVIEWERS=1; shift ;;
     --from-branch)
       [ "$RESUME" -eq 0 ] || { echo "--resume replays the recorded source mode — omit --from-branch" >&2; exit 1; }
       FROM_BRANCH=1; shift ;;
@@ -146,6 +151,8 @@ done
 # Two body sources cannot both win, and silently preferring one would make the OTHER the operator's
 # unnoticed dead argument — refuse instead.
 [ "$BODY_SET" -eq 0 ] || [ "$BODY_FILE_SET" -eq 0 ] || { echo "--body and --body-file are mutually exclusive" >&2; exit 1; }
+# A real ship already runs the reviewers, so the modifier alone is a mistaken command, not a no-op.
+[ "$WITH_REVIEWERS" -eq 0 ] || [ "$DRY_GATES" -eq 1 ] || { echo "--with-reviewers requires --dry-gates (a real ship already runs the reviewers)" >&2; exit 1; }
 . "$SCRIPT_DIR/wait-ci/args.sh"
 ship_validate_wait_ci "$WAIT_CI" "$WAIT_CI_TIMEOUT" "$WAIT_CI_TIMEOUT_SET" "$DRY_GATES" || exit 1
 
@@ -700,8 +707,9 @@ if [ "$FROM_BRANCH" -eq 0 ] || [ -z "$LOCAL_BRANCH_EXISTS" ]; then
   ship_size_preflight "$ROOT" "$BASE" "${PATHS[@]}"
 fi
 # Unconditional, unlike the size preview above: judge reachability does not depend on the staged
-# scope, and --dry-gates skips the reviewer gate entirely so it skips this too.
-if [ "$DRY_GATES" -eq 0 ]; then
+# scope. A plain --dry-gates skips the reviewer gate entirely so it skips this too; --with-reviewers
+# runs that gate, where a dark provider would otherwise surface only as a strict-mode exit 3.
+if [ "$DRY_GATES" -eq 0 ] || [ "$WITH_REVIEWERS" -eq 1 ]; then
   ship_judge_preflight "$ROOT"
 fi
 
@@ -1424,14 +1432,24 @@ else
   if [ "$DRY_GATES" -eq 1 ]; then
     export DEVKIT_SHIP_MODE=dry-gates
     export DEVKIT_RUN_MODE=dry-gates
-    export DEVKIT_REVIEW_GUARDS=comments
     export DEVKIT_SHIP_DRY_GATES=1
-    echo "🧪 Ship dry gates: exact base/path staging; running formatter, configured deterministic/structure/extra gates, and the comment budget gate." >&2
-    echo "   Skipping decision, Qavis, domain reviewer, completeness, commit, push, and PR creation." >&2
+    if [ "$WITH_REVIEWERS" -eq 1 ]; then
+      # Completeness stays off without a guard here: commit-with-gate-capture.sh never exports a
+      # message file under dry-gates, and the hook refuses to arm the judge in this mode anyway.
+      export DEVKIT_REVIEW_GUARDS=comments,review
+      export DEVKIT_SHIP_DRY_REVIEWERS=1
+      echo "🧪 Ship dry gates: exact base/path staging; running formatter, configured deterministic/structure/extra gates, the comment budget gate, and the domain reviewers." >&2
+      echo "   Skipping decision, Qavis, completeness, commit, push, and PR creation." >&2
+    else
+      export DEVKIT_REVIEW_GUARDS=comments
+      unset DEVKIT_SHIP_DRY_REVIEWERS
+      echo "🧪 Ship dry gates: exact base/path staging; running formatter, configured deterministic/structure/extra gates, and the comment budget gate." >&2
+      echo "   Skipping decision, Qavis, domain reviewer, completeness, commit, push, and PR creation." >&2
+    fi
   else
     export DEVKIT_SHIP_MODE=ship   # tags the ship_attempt telemetry (new-ship vs reship retry)
     export DEVKIT_RUN_MODE=ship    # never inherit a caller's review allowlist into a real ship
-    unset DEVKIT_SHIP_DRY_GATES
+    unset DEVKIT_SHIP_DRY_GATES DEVKIT_SHIP_DRY_REVIEWERS
   fi
 # Preflight: nothing since staging is allowed to have touched the index. Cheap, and it fails BEFORE
 # the operator pays for a multi-minute gate chain.
@@ -1497,7 +1515,17 @@ EOF
 fi
 
 if [ "$DRY_GATES" -eq 1 ]; then
-  echo "✓ Ship dry gates passed; no commit, branch, push, or PR was kept." >&2
+  if [ "$WITH_REVIEWERS" -eq 0 ]; then
+    echo "✓ Ship dry gates passed; no commit, branch, push, or PR was kept." >&2
+  elif grep -qF 'Reviewer gate (headless domain judges)' "${SHIP_GATE_LOG:-/dev/null}" 2>/dev/null; then
+    echo "✓ Ship dry gates + reviewers passed; no commit, branch, push, or PR was kept." >&2
+    echo "   Reviewer PASSes are cached, so the identical devkit ship reuses them." >&2
+  else
+    # The allowlist selects a gate only if the installed hook has one: a consumer without the review
+    # component gets no guard-review block, and a green line naming reviewers would be a false clearance.
+    echo "✓ Ship dry gates passed; no commit, branch, push, or PR was kept." >&2
+    echo "⚠️  --with-reviewers: no reviewer gate ran — this repo's pre-commit hook has no guard-review block (enable the review component with devkit init)." >&2
+  fi
   exit 0
 fi
 
