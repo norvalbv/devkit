@@ -24,6 +24,7 @@ import {
   removeGuardBlock,
   replaceGuardBlock,
 } from './husky-block.mts';
+import { invokeJudge, sentryFragment } from './sentry-fragments.mts';
 
 /** The guard ids whose gates run at commit-msg (not pre-commit), in emit order. */
 export const COMMIT_MSG_GUARD_IDS = ['review', 'sentry'];
@@ -52,20 +53,6 @@ __dk_clear_commit_state() {
 }
 trap '__dk_clear_commit_state' EXIT`;
 
-// One judge invocation line. Package mode runs the repo-pinned local bin; standalone runs the
-// GLOBAL bin, command -v-guarded so a machine without devkit is never blocked (the standalone
-// pre-commit precedent). Both capture the exit into `rcVar` (see TESTED_STATUS_COMMENT).
-function invoke(standalone: boolean, cmd: string, rcVar: string): string {
-  if (!standalone) {
-    const [bin, ...args] = cmd.split(' ');
-    const localBin = `"$__dk_package_bin_dir/${bin}"`;
-    return `[ -x ${localBin} ] || { echo "devkit: pinned ${bin} is missing — run bun install." >&2; exit 1; }
-${localBin}${args.length ? ` ${args.join(' ')}` : ''} --gate "$1" || ${rcVar}=$?`;
-  }
-  const bin = cmd.split(' ')[0];
-  return `if command -v ${bin} >/dev/null 2>&1; then ${cmd} --gate "$1" || ${rcVar}=$?; fi`;
-}
-
 // The feature-completeness judge (guard-review completeness) — hard-by-default upstream
 // (gate-engine/review/completeness.mts): a confident FAIL exits 1, warn/skip 0, fail-open 2,
 // and 3 = judge outage under GUARD_AI_STRICT (ship) — fail CLOSED, mirroring the pre-commit
@@ -73,7 +60,7 @@ ${localBin}${args.length ? ` ${args.join(' ')}` : ''} --gate "$1" || ${rcVar}=$?
 const completenessFragment = (standalone: boolean) => `# devkit:guard-completeness
 echo "🧩 Completeness gate (commit-msg judge)..."
 crc=0
-${invoke(standalone, 'guard-review completeness', 'crc')}
+${invokeJudge(standalone, 'guard-review completeness', 'crc')}
 if [ "$crc" -eq 1 ]; then
     echo "   Confirmed completeness gap (hard-by-default; findings above)."
     echo "   Fix the gap, or — with the user's explicit OK — GUARD_NO_COMPLETENESS=1 git commit ..."
@@ -89,25 +76,6 @@ fi
 # crc 0 = pass / warn-only / skipped, crc 2 = fail-open → continue; 4 = object-database fault.
 # Unlike pre-commit, THIS reader continues by default, so 4 needs an explicit branch here.
 # /devkit:guard-completeness`;
-
-// The Sentry-capture judge (guard-sentry, gate-engine/sentry/check-sentry.mts) — hard-by-default:
-// a confident MONITOR on a silent runtime error-class with no capture in the diff exits 1.
-const sentryFragment = (standalone: boolean) => `# devkit:guard-sentry
-echo "🛰️ Sentry gate (commit-msg judge)..."
-src=0
-${invoke(standalone, 'guard-sentry', 'src')}
-if [ "$src" -eq 1 ]; then
-    echo "   Commit describes an un-monitored runtime error-class (sentry gate, hard mode)."
-    echo "   Add a Sentry capture on the named surface (backlog: docs/sentry-watchlist.md)."
-    echo "   Verdict wrong? Do not bypass on your own judgement — surface it to the user; with"
-    echo "   their approval:  GUARD_NO_SENTRY_JUDGE=1 git commit ..."
-    exit 1
-elif [ "$src" -eq 4 ]; then
-    echo "   NOT a gate rejection — no defect was named; the staged content itself is unreadable."
-    exit 1
-fi
-# src 0 = pass / warn-only / skipped, src 2 = fail-open → continue; 4 = object-database fault.
-# /devkit:guard-sentry`;
 
 // The shebang + header + PATH preamble for a FRESH devkit-owned commit-msg hook (the PATH setup is
 // shared with pre-commit; replaceGuardBlock injects it itself when splicing into a consumer hook

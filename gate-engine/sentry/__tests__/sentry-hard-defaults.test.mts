@@ -243,4 +243,53 @@ describe('diff tier, spawned against a REAL staged diff (sc-1984: authority foll
       }),
     ]);
   });
+
+  it("sc-3012: commit-msg replays the ship prewarm's verdict although git reshaped the message", () => {
+    // Same repo, same store, two message files: ship's raw composed one, then git's cleaned one.
+    const repo = stagedRepo(
+      'export function save() {\n  try { write(); } catch (e) { log.warn(e); }\n}\n',
+    );
+    const store = tmp('sentry-diff-store-');
+    const calls = join(tmp('sentry-diff-calls-'), 'calls.txt');
+    writeFileSync(calls, '');
+    const msgs = tmp('sentry-diff-msg-');
+    const shipMsg = join(msgs, 'devkit-ship-msg');
+    const gitMsg = join(msgs, 'COMMIT_EDITMSG');
+    // Interior reshaping only — the old whole-message trim already absorbed a trailing difference.
+    writeFileSync(
+      shipMsg,
+      'fix(save): swallow a write failure\n\nkeeps the queue alive  \r\n\n\n\nand retries\n',
+    );
+    writeFileSync(
+      gitMsg,
+      'fix(save): swallow a write failure\n\nkeeps the queue alive\n\nand retries\n',
+    );
+    const PATH = monitorStub(undefined, calls);
+    const judged = () => readFileSync(calls, 'utf8').trim().split('\n').filter(Boolean).length;
+    const run = (msgFile: string) =>
+      spawnSync('node', [SCRIPT, '--gate', msgFile], {
+        cwd: repo,
+        env: {
+          ...process.env,
+          PATH,
+          GUARD_SENTRY_CONTEXT: 'diff',
+          GUARD_SENTRY_MODEL: 'haiku',
+          GUARD_SENTRY_WATCHLIST: join(tmp('sentry-diff-wl-'), 'wl.md'),
+          DEVKIT_RUN_MODE: 'review',
+          DEVKIT_REVIEW_DATA_ROOT: store,
+          DEVKIT_NO_TELEMETRY: '1',
+        },
+        encoding: 'utf8',
+      });
+
+    const prewarm = run(shipMsg);
+    expect(prewarm.status).toBe(1);
+    const sampled = judged();
+    expect(sampled).toBe(3);
+
+    const commitMsg = run(gitMsg);
+    expect(commitMsg.status).toBe(1); // the same block, not a fresh vote that could flip after QA
+    expect(commitMsg.stderr).toContain('sentry-judge: cached MONITOR');
+    expect(judged()).toBe(sampled);
+  });
 });

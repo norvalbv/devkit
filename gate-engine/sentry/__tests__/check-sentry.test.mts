@@ -3,11 +3,19 @@
 // every pure rule is exercised via it.each so the assertions read as data, not boilerplate.
 
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { renderSelection } from '../../judge/diff-focus.mts';
 import { buildEvidence, selectSentryHunks, type SentryEvidence } from '../evidence.mts';
 import {
@@ -334,6 +342,59 @@ describe('cleanMessage (drop git template comments, trim, cap; CRLF-tolerant)', 
 
   it('caps a runaway message at 4000 chars', () => {
     expect(cleanMessage(`feat: ${'x'.repeat(9000)}`).length).toBe(4000);
+  });
+
+  it('keeps a single paragraph break — only RUNS of blank lines collapse', () => {
+    expect(cleanMessage('fix(a): b\n\nbody')).toBe('fix(a): b\n\nbody');
+  });
+});
+
+// sc-3012: ship's pre-commit sentry judges the raw composed message, commit-msg judges git's cleaned
+// COMMIT_EDITMSG. Both must clean to the same text or the replay misses and sentry re-judges after QA.
+describe('cleanMessage converges with the message git hands commit-msg (real git -m cleanup)', () => {
+  let repo = '';
+  beforeAll(() => {
+    repo = realpathSync(mkdtempSync(join(tmpdir(), 'sentry-cleanup-')));
+    const git = (...args: string[]) => spawnSync('git', args, { cwd: repo });
+    git('init', '-q');
+    mkdirSync(join(repo, 'hooks'));
+    writeFileSync(join(repo, 'hooks', 'commit-msg'), `#!/bin/sh\ncp "$1" '${repo}/editmsg'\n`);
+    chmodSync(join(repo, 'hooks', 'commit-msg'), 0o755);
+    git('config', 'core.hooksPath', 'hooks');
+  });
+  afterAll(() => rmSync(repo, { recursive: true, force: true }));
+
+  it.each([
+    ['trailing spaces and tabs', 'fix(a): b', 'line one  \nline two\t'],
+    ['runs of blank lines', 'fix(a): b', 'a\n\n\n\nb'],
+    ['a CRLF body', 'fix(a): b', 'a\r\nb\r\n'],
+    ['leading blank lines in the body', 'fix(a): b', '\n\nbody'],
+    ['a whitespace-only body', 'fix(a): b', '   \n  '],
+    ['a padded subject', '  fix(a): b  ', 'body'],
+    ['a # line that -m keeps', 'fix(a): b', '# heading\n\n\nbody'],
+  ])('%s', (_messageCase, title, body) => {
+    const r = spawnSync(
+      'git',
+      [
+        '-c',
+        'user.name=t',
+        '-c',
+        'user.email=t@t',
+        'commit',
+        '-q',
+        '--allow-empty',
+        '-m',
+        title,
+        '-m',
+        body,
+      ],
+      { cwd: repo, encoding: 'utf8' },
+    );
+    expect(r.status).toBe(0);
+    const shipMessage = `${title}\n\n${body}\n`; // commit-with-gate-capture.sh: printf '%s\n\n%s\n'
+    expect(cleanMessage(shipMessage)).toBe(
+      cleanMessage(readFileSync(join(repo, 'editmsg'), 'utf8')),
+    );
   });
 });
 
