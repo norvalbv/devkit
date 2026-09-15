@@ -8,6 +8,7 @@ import {
   hasTargetFields,
   parseDecision,
   parseIndex,
+  parseTargetFields,
   renderDecision,
   renderIndex,
   renderNote,
@@ -16,6 +17,7 @@ import {
   today,
   whyHook,
 } from './decision-format.mts';
+import { effectiveScope } from './recall/retrieval.mts';
 
 export interface DecisionPaths {
   cwd: string;
@@ -63,7 +65,9 @@ function committedDecision(file: string, cwd: string): string | null {
   if (!relative || relative === '..' || relative.startsWith('../')) {
     throw new Error('decision file is outside the Git worktree and cannot be amended safely');
   }
-  const head = spawnSync('git', ['rev-parse', '--verify', '--quiet', 'HEAD'], { cwd: root });
+  const head = spawnSync('git', ['rev-parse', '--verify', '--quiet', 'HEAD'], {
+    cwd: root,
+  });
   if (head.status === 1) return null;
   if (head.status !== 0)
     throw new Error('could not resolve HEAD; refusing to amend decision history');
@@ -83,17 +87,36 @@ function committedDecision(file: string, cwd: string): string | null {
   return shown.stdout;
 }
 
+// Select the newest note (--note) or newest Target (--target) and prove it is absent from HEAD;
+// HEAD's entries are a contiguous prefix, so every entry after an uncommitted one is a draft too.
 function validateAmendment(
+  slug: string,
   current: string,
   committed: string | null,
   requested: 'target' | 'note',
 ) {
   const workingParsed = parseDecision(current);
   const working = timeline(workingParsed.body);
-  if (!working.entries.length) throw new Error('axis has no Target or note to amend');
-  const latest = working.entries.at(-1);
-  if (!latest || latest.kind !== requested) {
-    throw new Error(`newest entry is a ${latest?.kind ?? 'different type'}, not a ${requested}`);
+  let selectedIndex = working.entries.length - 1;
+  if (requested === 'target') {
+    while (selectedIndex >= 0 && working.entries[selectedIndex].kind !== 'target') {
+      selectedIndex -= 1;
+    }
+  }
+  const selected = working.entries[selectedIndex];
+  if (!selected) {
+    throw new Error(
+      requested === 'target'
+        ? `axis has no Target to amend; record one with: guard-decisions add ${slug} --target …`
+        : 'axis has no Target or note to amend',
+    );
+  }
+  const date = selected.text.match(ENTRY_DATE_RE)?.[1] ?? 'undated';
+  if (selected.kind !== requested) {
+    throw new Error(
+      `newest entry is the ${date} Target, not a note; correct it with: ` +
+        `guard-decisions amend ${slug} --target …, or append with: guard-decisions add ${slug} --note "…"`,
+    );
   }
 
   const baseline = committed ? parseDecision(committed) : null;
@@ -104,8 +127,13 @@ function validateAmendment(
   if (baseline && working.prefix !== head.prefix) {
     throw new Error('history before the first entry differs from HEAD; restore it before amending');
   }
-  if (working.entries.length <= head.entries.length) {
-    throw new Error('newest entry is already committed; append a new entry instead');
+  if (selectedIndex < head.entries.length) {
+    throw new Error(
+      requested === 'target'
+        ? `newest Target (${date}) is already committed; re-target with: ` +
+            `guard-decisions add ${slug} --target … --evidence-change "<what shifted>"`
+        : `newest note (${date}) is already committed; append with: guard-decisions add ${slug} --note "…"`,
+    );
   }
   for (let index = 0; index < head.entries.length; index += 1) {
     if (
@@ -115,7 +143,50 @@ function validateAmendment(
       throw new Error('earlier decision history differs from HEAD; restore it before amending');
     }
   }
-  return { workingParsed, latest };
+  return {
+    workingParsed,
+    selected,
+    date,
+    trailing: working.entries.slice(selectedIndex + 1),
+  };
+}
+
+/** Optional Target fields an amendment must re-pass, keyed by the field name parseTargetFields reads. */
+const OPTIONAL_TARGET_FIELDS = [
+  ['researched', 'Researched', 'researched'],
+  ['rejected', 'Rejected', 'rejected'],
+  ['anchored-bet', 'Anchored-bet', 'anchoredBet'],
+  ['revisit-when', 'Revisit-when', 'revisitWhen'],
+  ['scope', 'Scope', 'scope'],
+  ['category', 'Category', 'category'],
+  ['supersedes', 'Supersedes', 'supersedes'],
+] as const;
+
+/** Name what the replacement silently changes: omitted optional fields, and a Scope a note overrides. */
+function warnTargetReplacement(
+  replacedText: string,
+  body: string,
+  hasTrailing: boolean,
+  options: AddOptions,
+) {
+  const replaced = parseTargetFields(replacedText);
+  const dropped = OPTIONAL_TARGET_FIELDS.filter(
+    ([field, , option]) => replaced[field] && !String(options[option] ?? '').trim(),
+  ).map(([, label]) => `**${label}:**`);
+  if (dropped.length) {
+    console.error(
+      `warning: the replaced Target carried ${dropped.join(', ')} and this amendment omits it; ` +
+        'pass the flag again to keep it.',
+    );
+  }
+  const scope = options.scope?.trim();
+  const effective = effectiveScope(body);
+  if (hasTrailing && scope && effective !== scope) {
+    console.error(
+      `warning: a later rescope note still sets Scope to ${effective}, overriding --scope ${scope}; ` +
+        'append a new rescope note if the amended Scope should govern.',
+    );
+  }
 }
 
 function regenerateIndex(paths: DecisionPaths) {
@@ -145,7 +216,10 @@ function regenerateIndex(paths: DecisionPaths) {
   writeFileAtomic(paths.indexPath, renderIndex(rows));
 }
 
-/** Replace the single newest draft entry after proving committed history equals HEAD. */
+/**
+ * Replace a draft entry after proving committed history equals HEAD: the newest note, or the newest
+ * Target with its trailing draft notes kept byte-identical.
+ */
 export function amendDecision(slug: string, options: AddOptions, paths: DecisionPaths) {
   const modeCount =
     Number(Boolean(options.isTarget)) +
@@ -176,9 +250,13 @@ export function amendDecision(slug: string, options: AddOptions, paths: Decision
   const current = readFileSync(file, 'utf8');
   const committed = committedDecision(file, paths.cwd);
   const kind = options.isTarget ? 'target' : 'note';
-  const { workingParsed, latest } = validateAmendment(current, committed, kind);
-  const date = latest.text.match(ENTRY_DATE_RE)?.[1] ?? today();
-  const priorTarget = currentTarget(workingParsed.body.slice(0, latest.start));
+  const { workingParsed, selected, date, trailing } = validateAmendment(
+    slug,
+    current,
+    committed,
+    kind,
+  );
+  const priorTarget = currentTarget(workingParsed.body.slice(0, selected.start));
   if (
     options.isTarget &&
     priorTarget &&
@@ -189,9 +267,9 @@ export function amendDecision(slug: string, options: AddOptions, paths: Decision
   }
   if (options.noteReplace) {
     const [oldText, newText] = options.noteReplace as [string, string];
-    const prefix = latest.text.match(NOTE_PREFIX_RE)?.[0];
+    const prefix = selected.text.match(NOTE_PREFIX_RE)?.[0];
     if (!prefix) throw new Error('newest draft note has an invalid date prefix');
-    const noteText = latest.text.slice(prefix.length);
+    const noteText = selected.text.slice(prefix.length);
     const matches = [];
     for (
       let index = noteText.indexOf(oldText);
@@ -207,7 +285,7 @@ export function amendDecision(slug: string, options: AddOptions, paths: Decision
       throw new Error(`"${oldText}" occurs ${matches.length} times in the newest draft note`);
     }
     const bodyOffset = current.length - workingParsed.body.length;
-    const start = bodyOffset + latest.start + prefix.length + matches[0];
+    const start = bodyOffset + selected.start + prefix.length + matches[0];
     const replacement = sanitizeCell(newText);
     writeFileAtomic(
       file,
@@ -216,14 +294,36 @@ export function amendDecision(slug: string, options: AddOptions, paths: Decision
     console.log(`Amended draft note on "${slug}" (${date}).`);
     return;
   }
-  const replacement =
-    options.isTarget && hasTargetFields(options)
-      ? renderTarget(date, options)
-      : renderNote(date, options.note ?? '');
-  const before = workingParsed.body.slice(0, latest.start).replace(TRAILING_WS_RE, '');
-  const separator = options.isTarget ? '\n\n' : '\n';
-  const body = `${before}${separator}${replacement}\n`;
+  const source = workingParsed.body;
+  const before = source.slice(0, selected.start).replace(TRAILING_WS_RE, '');
+  if (!(options.isTarget && hasTargetFields(options))) {
+    const body = `${before}\n${renderNote(date, options.note ?? '')}\n`;
+    writeFileAtomic(
+      file,
+      renderDecision({ slug, created: workingParsed.fm.created || date }, body),
+    );
+    console.log(`Amended draft note on "${slug}" (${date}).`);
+    return;
+  }
+  // Field values are free text, so only the file's section delimiter (`\n## `, as currentTarget splits)
+  // marks content that is not this Target's and would be lost with the old span.
+  const end = trailing[0]?.start ?? source.length;
+  const span = source.slice(selected.start, end);
+  const boundary = span.indexOf('\n## ');
+  const stray = boundary === -1 ? '' : span.slice(boundary + 1).split('\n')[0];
+  if (stray) {
+    throw new Error(
+      `cannot amend the ${date} Target: "${stray}" sits between it and the next entry, ` +
+        'and replacing the Target would drop it',
+    );
+  }
+  const gap = trailing.length ? span.slice(span.replace(TRAILING_WS_RE, '').length) : '\n';
+  const body = `${before}\n\n${renderTarget(date, options)}${gap}${source.slice(end)}`;
   writeFileAtomic(file, renderDecision({ slug, created: workingParsed.fm.created || date }, body));
-  if (options.isTarget) regenerateIndex(paths);
-  console.log(`Amended draft ${kind} on "${slug}" (${date}).`);
+  regenerateIndex(paths);
+  warnTargetReplacement(selected.text, body, trailing.length > 0, options);
+  const kept = trailing.length
+    ? `; kept ${trailing.length} trailing entr${trailing.length === 1 ? 'y' : 'ies'} unchanged`
+    : '';
+  console.log(`Amended draft target on "${slug}" (${date})${kept}.`);
 }

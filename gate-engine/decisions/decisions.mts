@@ -34,7 +34,8 @@
  *               --evidence-change "..."]                  (epic Target; updates INDEX)
  *   add <slug> --note "..."          cheap convergence note under the current Target (INDEX untouched)
  *   rescope <slug> --scope "glob,glob" --reason "..."  append-only Scope correction (a tagged note)
- *   amend <slug> --target …|--note … replace only the newest entry when it is absent from HEAD
+ *   amend <slug> --target …|--note … replace an entry absent from HEAD: the newest note, or the
+ *     newest Target (its trailing draft notes are preserved byte-for-byte)
  *   amend <slug> --note-replace OLD NEW  replace one unique substring in that draft note
  *   query "<text>" [--top K] [--json] [--full]  rank axes — semantic (Ollama), lexical floor on
  *     fallback; --json emits the bench's envelope; --full prints each matched axis's whole file
