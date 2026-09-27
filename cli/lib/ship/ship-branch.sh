@@ -1576,9 +1576,12 @@ if [ -z "$PR_CREATE_FAILED" ]; then
   # Telemetry: tie this ship's id to the PR it opened, so the usage tracker links a ship row to its
   # PR directly (no gh-by-branch lookup needed). ship_result already fired during the gate chain —
   # before the PR existed — so this is a separate line the collector upserts onto the ship. Reuses
-  # the DEVKIT_SHIP_ID/DEVKIT_GATE_EVENTS that the sourced commit-with-gate-capture.sh exported;
-  # best-effort (`|| true`) so telemetry can never fail a ship. pr_number is a bare JSON number, else null.
+  # DEVKIT_SHIP_ID/DEVKIT_GATE_EVENTS; best-effort (`|| true`) so telemetry can never fail a ship.
+  # pr_number is a bare JSON number, else null. telemetry.sh is sourced HERE, not inherited: a resumed
+  # ship never ran commit_with_gate_capture (the only other place it is sourced), and under `set -u`
+  # its unset DEVKIT_TELEMETRY_VERSION aborted the resume after the PR was already open.
   if [ -n "${DEVKIT_GATE_EVENTS:-}" ] && [ -n "${DEVKIT_SHIP_ID:-}" ]; then
+    . "$(dirname "${BASH_SOURCE[0]}")/telemetry.sh"
     printf '{"type":"ship_pr","ship_id":"%s","devkit_version":"%s"%s,"pr_url":"%s","pr_number":%s,"ts":"%s"}\n' \
       "$(devkit_json_escape "$DEVKIT_SHIP_ID")" "$(devkit_json_escape "$DEVKIT_TELEMETRY_VERSION")" \
       "$(devkit_parent_session_json)" \

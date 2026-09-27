@@ -295,6 +295,8 @@ interface DeferredSignalOptions {
   target?: 'parent' | 'self';
   // Defaults to the real runner; a stripped copy proves the interrupted read actually happened.
   runner?: string;
+  // The gated command's own exit status, which the runner must report through the pending signal.
+  gateExit?: number;
 }
 
 // Builds a copy of the runner with the sc-1711 re-read deleted, so a test can prove the interrupted
@@ -304,16 +306,19 @@ interface DeferredSignalOptions {
 // chance to service the pending trap, so the read returns tee's status and the window silently
 // closes. Sibling paths are symlinked because the runner resolves the supervisor and the progress
 // reader relative to BASH_SOURCE.
-function runnerWithoutReread(root: string): string {
+const REREADS = {
+  tee: /\n *if \[ "\$drain_stage" -eq 0 \] && \[ "\$tee_status" -gt 128 \]; then\n[\s\S]*?\n *fi\n/,
+  supervisor:
+    /\n *if \[ "\$rc" -gt 128 \]; then\n *local rewait_rc[^\n]*\n[\s\S]*?\n {4}fi\n {2}fi\n/,
+};
+
+function runnerWithoutReread(root: string, reread: keyof typeof REREADS = 'tee'): string {
   const shipDir = join(root, 'prefix/cli/lib/ship');
   mkdirSync(shipDir, { recursive: true });
   symlinkSync(join(HERE, '../lib/ship/review'), join(shipDir, 'review'));
   symlinkSync(join(HERE, '../../gate-engine'), join(root, 'prefix/gate-engine'));
   const source = readFileSync(GATE_RUNNER, 'utf8');
-  const stripped = source.replace(
-    /\n *if \[ "\$drain_stage" -eq 0 \] && \[ "\$tee_status" -gt 128 \]; then\n[\s\S]*?\n *fi\n/,
-    '\n',
-  );
+  const stripped = source.replace(REREADS[reread], '\n');
   // Fail loudly rather than silently comparing a runner against itself.
   if (stripped === source) throw new Error('could not strip the re-read — the guard shape changed');
   const path = join(shipDir, 'run-gates-with-capture.sh');
@@ -322,7 +327,13 @@ function runnerWithoutReread(root: string): string {
 }
 
 function deferredSignalGateHarness(root: string, options: DeferredSignalOptions = {}) {
-  const { teeExit = 0, signal = 'TERM', target = 'parent', runner = GATE_RUNNER } = options;
+  const {
+    teeExit = 0,
+    signal = 'TERM',
+    target = 'parent',
+    runner = GATE_RUNNER,
+    gateExit = 0,
+  } = options;
   const bin = join(root, 'bin');
   const log = join(root, 'gate.log');
   const progress = join(root, 'progress.json');
@@ -361,7 +372,7 @@ function deferredSignalGateHarness(root: string, options: DeferredSignalOptions 
       progress,
       process.execPath,
       '-e',
-      'console.log("pending-trap gate output")',
+      `console.log("pending-trap gate output"); process.exit(${gateExit})`,
     ],
     {
       encoding: 'utf8',
@@ -979,6 +990,38 @@ describe('review gate supervisor', () => {
       expect(result.stdout, result.stderr).toContain(`SIGNAL_STATUS=${status}`);
       expect(result.stdout, result.stderr).toContain('RUNNER_RC=0');
       expect(result.stderr).not.toMatch(/could not persist gate output/);
+    },
+  );
+
+  // sc-1896: the supervisor wait has the tee wait's window; its re-read must return the gate's own
+  // status. 127 is also bash's "not a child" status, so it must survive the re-read too.
+  (MODERN_BASH ? it : it.skip).each([{ gateExit: 7 }, { gateExit: 127 }])(
+    `reports a failing gate's own status $gateExit through a pending-trap signal${
+      MODERN_BASH ? '' : ' (skipped: no bash >= 4)'
+    }`,
+    ({ gateExit }) => {
+      const result = deferredSignalGateHarness(mkTmp('devkit-review-pending-trap-fail-'), {
+        gateExit,
+      });
+
+      expect(result.stdout, result.stderr).toContain('SIGNAL_STATUS=143');
+      expect(result.stdout, result.stderr).toContain(`RUNNER_RC=${gateExit}`);
+    },
+  );
+
+  // Proof the supervisor re-read is what carries the clean case, as the tee case proves its own: the
+  // same run against a runner WITHOUT it must read the signal's status instead of the supervisor's.
+  (MODERN_BASH ? it : it.skip)(
+    `needs the supervisor re-read to see a clean gate through a pending-trap signal${
+      MODERN_BASH ? '' : ' (skipped: no bash >= 4)'
+    }`,
+    () => {
+      const root = mkTmp('devkit-review-pending-trap-prefix-');
+      const prefix = deferredSignalGateHarness(join(root, 'prefix-run'), {
+        runner: runnerWithoutReread(root, 'supervisor'),
+      });
+
+      expect(prefix.stdout, prefix.stderr).toContain('RUNNER_RC=143');
     },
   );
 
