@@ -365,12 +365,25 @@ async function cascadeVerdict(
       transcript: first,
     };
   }
+  // Node reads `timeout: 0` as NO cap, so a spent budget skips the escalation. Sampled ONCE: a
+  // second read could cross the deadline after the check and hand exec the 0 it guarded.
+  const escalationBudget = budgetLeft();
+  if (escalationBudget <= 0)
+    return {
+      name: reviewer.name,
+      status: 'inconclusive',
+      reason: 'escalation skipped — the first pass spent the whole budget',
+      inconclusiveCause: 'timeout',
+      escalated: false,
+      model: passModel,
+      transcript: first,
+    };
   let secondOutage: JudgeOutage | undefined;
   const second = await exec({
     label: `review:${reviewer.name}:escalate`,
     args: args(escalatePrompt(prompt, first), escalationModel),
     input,
-    timeout: budgetLeft(),
+    timeout: escalationBudget,
     cwd,
     transcript: false,
     mcpProfile,
