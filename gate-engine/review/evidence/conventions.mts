@@ -138,6 +138,8 @@ export interface ConventionFinding {
   ruleLine: number | null;
   offendingPath: string;
   offendingLine: number;
+  /** The quoted offending text, verbatim; grounding (conventions-grounding.mts) checks it exists. */
+  offendingQuote: string;
 }
 
 interface ConventionCitation {
@@ -165,35 +167,46 @@ function parseConventionCitation(block: string, requireLine: boolean): Conventio
 }
 
 /**
- * Parse complete adjacent `VIOLATION`/`OFFENDING` pairs before the terminal verdict. The same
- * canonical records authorize a conventions FAIL and supply override-valve lens keys, so an orphan
- * line can do neither. The offending path:line stays deterministic for a fixed diff, unlike the
- * free-text verdict reason a judge may paraphrase between byte-identical runs.
+ * Every complete cited pair before the terminal verdict, in order and NOT deduplicated — the input
+ * quote grounding needs, since a fabricated pair must not shadow a genuine one at the same line.
  */
-export function parseConventionFindings(raw: string): ConventionFinding[] {
+export function parseConventionFindingCandidates(raw: string): ConventionFinding[] {
   const transcript = normalizeLineEndings(raw);
   const verdicts = [...transcript.matchAll(VERDICT_LINE_RE)];
   const terminalVerdict = verdicts.at(-1);
   const evidence = transcript.slice(0, terminalVerdict?.index ?? transcript.length);
   const findings: ConventionFinding[] = [];
-  const seenLenses = new Set<string>();
 
   for (const pair of parseConventionEvidencePairs(evidence)) {
     const violation = parseConventionCitation(pair.violation, false);
     const offending = parseConventionCitation(pair.offending, true);
     if (!violation || !offending || offending.line === null) continue;
-    const offendingPath = offending.path;
-    const offendingLine = offending.line;
-    const lens = `${offendingPath}:${offendingLine}`;
-    if (!seenLenses.has(lens)) {
-      findings.push({
-        rulePath: violation.path,
-        ruleLine: violation.line,
-        offendingPath,
-        offendingLine,
-      });
-      seenLenses.add(lens);
-    }
+    findings.push({
+      rulePath: violation.path,
+      ruleLine: violation.line,
+      offendingPath: offending.path,
+      offendingLine: offending.line,
+      offendingQuote: splitConventionCitation(pair.offending)?.quote ?? '',
+    });
   }
   return findings;
+}
+
+/** First finding per offending path:line — the lens key override waivers are keyed on. */
+export function dedupeConventionFindings(
+  findings: readonly ConventionFinding[],
+): ConventionFinding[] {
+  const seenLenses = new Set<string>();
+  return findings.filter((finding) => {
+    const lens = `${finding.offendingPath}:${finding.offendingLine}`;
+    if (seenLenses.has(lens)) return false;
+    seenLenses.add(lens);
+    return true;
+  });
+}
+
+/** Syntax-valid pairs, deduped by path:line (the override-valve lens key). Blocking authority also
+ * needs grounding — see contracts/conventions-grounding.mts. */
+export function parseConventionFindings(raw: string): ConventionFinding[] {
+  return dedupeConventionFindings(parseConventionFindingCandidates(raw));
 }
