@@ -137,6 +137,10 @@ Exit 3 is the **exit-3 contract** — the judge could not run, not a finding aga
 message names the CLI that went dark and why: absent, logged out, or a usage limit with the wait it
 carries. Re-running clears none of those, and a multi-day lock outlasts any ship.
 
+If the banner instead reads `<gate>: could not run — <error> (strict ship mode: failing closed)`, no
+judge is involved: the gate itself failed (for example a git read), and a strict ship blocks rather
+than proceed unjudged. Fix the named error and re-run; the judge-family moves below do not apply.
+
 Move every judge **away from the CLI the message names**, in the shell the ship runs in.
 
 **`codex` is dark** — move to the claude family. Set all four knobs, never a subset:
