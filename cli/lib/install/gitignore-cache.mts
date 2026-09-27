@@ -119,18 +119,22 @@ const GITIGNORE_LOCK = join('.devkit', 'gitignore.lock');
 const LOCK_ATTEMPTS = 40;
 const LOCK_RETRY_MS = 50;
 
-/**
- * Run `fn` under `.devkit/gitignore.lock`. Exclusive among devkit writers: the holder pid is written
- * to a private file and LINKED into place, so acquisition is atomic and the lock is never observable
- * empty. A lock whose holder has died is NOT reclaimed automatically — every lock-free reclaim
- * protocol lets a delayed waiter remove a lock a faster one has just acquired — so the error names
- * the dead holder and the one command that clears it.
- */
+/** Run `fn` under `.devkit/gitignore.lock` (see `withFileLock`). */
 export function withGitignoreLock(cwd: string, fn: () => void): void {
-  const lockPath = join(cwd, GITIGNORE_LOCK);
   const devkitDir = join(cwd, '.devkit');
   const hadDevkitDir = existsSync(devkitDir);
   mkdirSync(devkitDir, { recursive: true });
+  try {
+    withFileLock(join(cwd, GITIGNORE_LOCK), fn);
+  } finally {
+    // A `.devkit/` that exists only for this lock (a nested package's git root) must not outlive it.
+    if (!hadDevkitDir) rmdirIfEmpty(devkitDir);
+  }
+}
+
+/** Run `fn` holding `lockPath` (its dir must exist). The pid is LINKED into place, so taking it is
+ * atomic; a dead holder is named, never reclaimed, as no lock-free reclaim is race-free. */
+export function withFileLock(lockPath: string, fn: () => void): void {
   const mine = `${lockPath}.${process.pid}`;
   // `wx`: create-exclusive, so a pre-planted symlink at this name can never be written THROUGH.
   rmSync(mine, { force: true });
@@ -147,7 +151,7 @@ export function withGitignoreLock(cwd: string, fn: () => void): void {
         const dead = deadHolder(lockPath);
         if (dead !== null) {
           throw new Error(
-            `${GITIGNORE_LOCK} is held by pid ${dead}, which no longer exists — remove the file (rm ${lockPath}) and re-run`,
+            `${lockPath} is held by pid ${dead}, which no longer exists — remove the file (rm ${lockPath}) and re-run`,
           );
         }
         Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, LOCK_RETRY_MS);
@@ -155,17 +159,14 @@ export function withGitignoreLock(cwd: string, fn: () => void): void {
     }
   } finally {
     rmSync(mine, { force: true });
-    if (!held && !hadDevkitDir) rmdirIfEmpty(devkitDir);
   }
   if (!held) {
-    throw new Error(`${GITIGNORE_LOCK} is held by another devkit process; re-run when it finishes`);
+    throw new Error(`${lockPath} is held by another devkit process; re-run when it finishes`);
   }
   try {
     fn();
   } finally {
     rmSync(lockPath, { force: true });
-    // A `.devkit/` that exists only for this lock (a nested package's git root) must not outlive it.
-    if (!hadDevkitDir) rmdirIfEmpty(devkitDir);
   }
 }
 
