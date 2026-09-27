@@ -294,11 +294,24 @@ rewrite_ref_cleanup() {
 # Serialize a rewrite's destructive publication/bookkeeping window and every explicit PR-body
 # publication with the matching head push. Gates still run in parallel. Atomic mkdir supplies
 # exclusion; the holder PID makes a killed publisher reclaimable.
+# Keyed on the GIT COMMON DIR, not $ROOT (sc-2476): linked worktrees of one clone publish the same
+# origin/$BR, so a per-checkout lock let a paused publisher overwrite a sibling's newer PR body. Not
+# $TMPDIR either — it differs per process (sandboxed agents), which would fail open silently. The
+# branch is hashed: a sanitised name maps a/b and a-b to one lock.
 rewrite_publish_lock_acquire() {
   local lock_root holder owner owner_start current_start attempts=0
-  lock_root="$ROOT/.devkit/reship-rewrite-publish"
-  mkdir -p "$lock_root"
-  REWRITE_PUBLISH_LOCK="$lock_root/${BR//\//-}.lock"
+  lock_root=$(git -C "$ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) &&
+    [ -n "$lock_root" ] || {
+    echo "reship rejected: could not resolve the git common dir for the publication lock" >&2
+    return 1
+  }
+  lock_root="$lock_root/devkit/reship-publish"
+  # Checked: an uncreatable root would otherwise spin the whole wait and blame a phantom publisher.
+  mkdir -p "$lock_root" 2>/dev/null || {
+    echo "reship rejected: cannot create the publication lock directory $lock_root" >&2
+    return 1
+  }
+  REWRITE_PUBLISH_LOCK="$lock_root/$(printf '%s' "$BR" | git hash-object --stdin).lock"
   owner_start=$(ps -o lstart= -p $$ 2>/dev/null | git hash-object --stdin)
   REWRITE_PUBLISH_STAMP="$$:$owner_start:$(date +%s)"
   while ! mkdir "$REWRITE_PUBLISH_LOCK" 2>/dev/null; do
