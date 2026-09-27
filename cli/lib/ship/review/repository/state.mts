@@ -303,26 +303,24 @@ function pathMutationEvidence(path: string, label: string, recursive: boolean): 
   return parts;
 }
 
-/** Filesystem evidence closes ref/config ABA gaps between equal logical metadata snapshots. */
-function repositoryMutationEvidence(context: RepositoryContext): string {
-  const parts: Buffer[] = [];
-  for (const [label, directory] of [
-    ['common', context.gitCommonDir],
-    ['worktree', context.gitDir],
-  ] as const) {
-    parts.push(...pathMutationEvidence(directory, `${label}:admin`, false));
-    parts.push(...pathMutationEvidence(join(directory, 'refs'), `${label}:refs`, true));
-    parts.push(...pathMutationEvidence(join(directory, 'reftable'), `${label}:reftable`, true));
-    parts.push(
-      ...pathMutationEvidence(join(directory, 'packed-refs'), `${label}:packed-refs`, false),
-    );
+/** Per-label filesystem evidence closing ref/config ABA gaps; per label so a failure names what
+ *  moved (sc-2166). A non-linked checkout's worktree admin tree is the common one, recorded once. */
+function repositoryMutationEvidence(context: RepositoryContext): Map<string, string> {
+  const evidence = new Map<string, string>();
+  const record = (label: string, path: string, recursive: boolean) =>
+    evidence.set(label, framedHash(label, pathMutationEvidence(path, label, recursive)));
+  const adminTrees: [string, string][] = [['common', context.gitCommonDir]];
+  if (context.gitDir !== context.gitCommonDir) adminTrees.push(['worktree', context.gitDir]);
+  for (const [label, directory] of adminTrees) {
+    record(`${label}:admin`, directory, false);
+    record(`${label}:refs`, join(directory, 'refs'), true);
+    record(`${label}:reftable`, join(directory, 'reftable'), true);
+    record(`${label}:packed-refs`, join(directory, 'packed-refs'), false);
   }
-  parts.push(...pathMutationEvidence(join(context.gitCommonDir, 'config'), 'common:config', false));
-  parts.push(
-    ...pathMutationEvidence(join(context.gitDir, 'config.worktree'), 'worktree:config', false),
-  );
-  parts.push(...pathMutationEvidence(join(context.gitDir, 'HEAD'), 'worktree:HEAD', false));
-  return framedHash('review-repository-mutation-evidence-v2', parts);
+  record('common:config', join(context.gitCommonDir, 'config'), false);
+  record('worktree:config', join(context.gitDir, 'config.worktree'), false);
+  record('worktree:HEAD', join(context.gitDir, 'HEAD'), false);
+  return evidence;
 }
 
 function captureState(context: RepositoryContext): ReviewRepositoryState {
@@ -342,18 +340,58 @@ function captureState(context: RepositoryContext): ReviewRepositoryState {
   };
 }
 
+/** Every logical-state field and evidence label that differs between two capture passes. */
+function changedLabels(
+  before: ReviewRepositoryState,
+  after: ReviewRepositoryState,
+  evidenceBefore: Map<string, string>,
+  evidenceAfter: Map<string, string>,
+): string[] {
+  const afterFields = new Map<string, unknown>(Object.entries(after));
+  const changed = Object.entries(before)
+    .filter(([field, value]) => afterFields.get(field) !== value)
+    .map(([field]) => field);
+  for (const label of new Set([...evidenceBefore.keys(), ...evidenceAfter.keys()]))
+    if (evidenceBefore.get(label) !== evidenceAfter.get(label)) changed.push(label);
+  return changed;
+}
+
+// Only admin-dir churn (a concurrent git's index.lock) is retried, and each retry re-runs the WHOLE
+// before/after pair, so a pass whose evidence differs is never accepted.
+const STABLE_CAPTURE_ATTEMPTS = 3;
+const STABLE_CAPTURE_BACKOFF_MS = [100, 250];
+const isAdminChurn = (label: string) => label.endsWith(':admin');
+
 function stableState(
   context: RepositoryContext,
   options: CaptureReviewRepositoryStateOptions = {},
 ): ReviewRepositoryState {
-  const evidenceBefore = repositoryMutationEvidence(context);
-  const before = captureState(context);
-  options.afterFirstCapture?.();
-  const after = captureState(context);
-  const evidenceAfter = repositoryMutationEvidence(context);
-  if (JSON.stringify(before) !== JSON.stringify(after) || evidenceBefore !== evidenceAfter)
-    fail('target repository metadata changed during capture; retry.');
-  return after;
+  for (let attempt = 1; ; attempt += 1) {
+    const evidenceBefore = repositoryMutationEvidence(context);
+    const before = captureState(context);
+    options.afterFirstCapture?.();
+    const after = captureState(context);
+    const evidenceAfter = repositoryMutationEvidence(context);
+    const changed = changedLabels(before, after, evidenceBefore, evidenceAfter);
+    if (changed.length === 0) return after;
+    const churnOnly = changed.every(isAdminChurn);
+    if (churnOnly && attempt < STABLE_CAPTURE_ATTEMPTS) {
+      Atomics.wait(
+        new Int32Array(new SharedArrayBuffer(4)),
+        0,
+        0,
+        STABLE_CAPTURE_BACKOFF_MS[attempt - 1] ?? 250,
+      );
+      continue;
+    }
+    const hint = churnOnly
+      ? ' — another git process (an editor or agent host polling `git status`) kept writing the' +
+        ' Git admin directory; stop it or retry once it is idle'
+      : '';
+    fail(
+      `target repository metadata changed during capture (${changed.join(', ')})${hint}; retry.`,
+    );
+  }
 }
 
 /** Capture a stable repository state and atomically write its private manifest. */
