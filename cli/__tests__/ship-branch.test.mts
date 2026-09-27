@@ -1599,6 +1599,7 @@ describe('ship-branch.sh — untracked/gitignored gate configs are linked into t
       'oxlint.devkit.json',
       '.anti-slop-baseline.json',
       '.qavis/receipt.json',
+      '.devkit/correctness-overrides.json',
     ]);
   });
 
