@@ -19,6 +19,7 @@ import { execFile, execFileSync } from 'node:child_process';
 import { parseJudgeUsage, unwrapClaudeResult, withResultArgs, } from './claude-result.mjs';
 import { codexFailure, judgeBinFor, judgeCliFor, parseClaudeArgv, parseCodexUsage, unwrapCodexResult, } from './codex/result.mjs';
 import { emitGateEvent } from './gate-events.mjs';
+import { trackJudge } from './process/heartbeat.mjs';
 import { withoutGitEnv } from './judge-isolation.mjs';
 import { prepareJudgeMcpProfile, } from './mcp/profile.mjs';
 import { classifyJudgeOutage, } from './outage/classify.mjs';
@@ -257,6 +258,8 @@ export function execJudgeAsync(opts) {
         projectRoots: opts.mcpProjectRoots,
     });
     return new Promise((resolve) => {
+        // sc-2422 liveness narration; stopped first on every settle path so no line follows the verdict.
+        const stopHeartbeat = trackJudge({ label, timeoutMs: timeout });
         // Shared outage path — a callback error AND a synchronous throw from execFile() itself (e.g. an
         // out-of-range `timeout` validates and throws before spawn even starts, sc-1317) both resolve
         // null the same way. Without the try/catch below, that synchronous throw escaped as a REJECTED
@@ -264,6 +267,7 @@ export function execJudgeAsync(opts) {
         // resolves) for any caller awaiting it outside its own try/catch — the sync execJudge twin
         // already had this same guard via its enclosing try/catch.
         const fail = (err, stdout) => {
+            stopHeartbeat();
             mcp.cleanup();
             // The callback's own stdout wins (execFile hands it beside the error); the throw-attached
             // copy covers the synchronous-throw path.
@@ -289,6 +293,7 @@ export function execJudgeAsync(opts) {
             // The third parameter was omitted, silently dropping stderr — the channel a claude-family
             // quota message arrives on (sc-2538). The sync twin's `stdio` change is this one's mirror.
             (err, stdout, stderr) => {
+                stopHeartbeat();
                 if (err) {
                     fail({ ...judgeErr(err), stderr: stderr ? String(stderr) : undefined }, stdout ? String(stdout) : undefined);
                     return;

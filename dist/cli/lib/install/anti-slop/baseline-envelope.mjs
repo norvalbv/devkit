@@ -1,8 +1,59 @@
 /** Baseline growth, activation migration, and inherited-debt checks for anti-slop gates. */
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { AntiSlopCapabilityError } from './base-capability.mjs';
 import { baselineFromGroups, baselineIncreases, compareBaseline, migrateBaselineRenames, removedBaselineMigrationReceipts, } from './baseline.mjs';
-import { withBaseAntiSlopSnapshot } from './git-snapshot.mjs';
+import { activatedRuleIdsBetween, committedBaselineProbe, withBaseAntiSlopSnapshot, } from './git-snapshot.mjs';
+import { readManagedAntiSlopActivationEvidence } from './managed-state.mjs';
+import { creditRelocatedGrowth, formatSources, relocationBasePaths, relocationKey, vacatedDebt, } from './relocations.mjs';
 import { collectAntiSlopGroups } from './runner.mjs';
+/** Debt bound for relocation: the committed base (renames applied), or the local baseline without one. */
+export function relocationBound(envelope, candidate) {
+    return envelope.base ? migrateBaselineRenames(envelope.base, envelope.renames) : candidate;
+}
+/**
+ * Lint-evidenced debt that changed files gave up since the base tree, for the given keys. Null when
+ * the base tree cannot be judged; empty when no changed file carries matching debt (no lint runs).
+ */
+export function relocationEvidence(context, envelope, candidate, candidateGroups, keys) {
+    const empty = new Map();
+    if (!envelope.baseTree || keys.size === 0)
+        return empty;
+    const bound = relocationBound(envelope, candidate);
+    // Without a committed base no rename was ever adopted, so a renamed path cannot carry local debt.
+    const sources = envelope.base
+        ? envelope.relocationSources
+        : new Map([...envelope.relocationSources].filter(([path, from]) => from.basePath === path));
+    const basePaths = relocationBasePaths(bound, sources, keys);
+    if (basePaths.length === 0)
+        return empty;
+    return withBaseAntiSlopSnapshot(envelope.baseCheckoutCwd ?? context.cwd, context.capabilityCwd ?? context.cwd, envelope.baseTree, basePaths, (snapshot) => {
+        // An empty path list lints the WHOLE base tree; nothing to measure means nothing vacated.
+        if (snapshot.paths.length === 0)
+            return empty;
+        let baseGroups;
+        try {
+            baseGroups = collectAntiSlopGroups(snapshot.cwd, snapshot.paths);
+        }
+        catch (error) {
+            if (!(error instanceof AntiSlopCapabilityError))
+                throw error;
+            return null;
+        }
+        const inherited = migrateBaselineRenames(baselineFromGroups(baseGroups), envelope.renames);
+        return vacatedDebt(bound, inherited, candidateGroups, sources, context.inLintScope, envelope.activatedRuleIds);
+    });
+}
+function splitRelocatedGrowth(increases, base, candidate, envelope, candidateGroups, relocation) {
+    const keys = new Set(increases.map(relocationKey));
+    const vacated = relocation
+        ? relocationEvidence(relocation, envelope, candidate, candidateGroups, keys)
+        : null;
+    if (!relocation || !vacated?.size)
+        return { accepted: [], blocked: [...increases] };
+    const migratedBase = migrateBaselineRenames(base, envelope.renames);
+    return creditRelocatedGrowth(increases, migratedBase, candidate, candidateGroups, vacated, relocation.inLintScope);
+}
 export function printNewAntiSlopFindings(groups) {
     for (const group of groups) {
         const tag = group.severity === 'error' ? 'ERROR' : 'WARN';
@@ -10,7 +61,7 @@ export function printNewAntiSlopFindings(groups) {
         console.log(`      ${group.diagnostic}`);
     }
 }
-export function checkBaselineEnvelope(candidate, envelope, candidateGroups, baseRef) {
+export function checkBaselineEnvelope(candidate, envelope, candidateGroups, baseRef, relocation) {
     if (!envelope?.base)
         return 0; // one-time bootstrap: the base commit has no baseline
     const removedMigrationReceipts = removedBaselineMigrationReceipts(envelope.base, candidate);
@@ -80,11 +131,46 @@ export function checkBaselineEnvelope(candidate, envelope, candidateGroups, base
     }
     if (increases.length === 0)
         return 0;
-    for (const entry of increases) {
+    const { accepted: relocatedGrowth, blocked: grown } = splitRelocatedGrowth(increases, envelope.base, candidate, envelope, candidateGroups, relocation);
+    if (relocatedGrowth.length > 0) {
+        console.log(`anti-slop: accepted ${relocatedGrowth.reduce((sum, entry) => sum + entry.additionalCount, 0)} relocated baseline finding(s) from ${formatSources(relocatedGrowth.flatMap((entry) => entry.sources))}`);
+    }
+    if (grown.length === 0)
+        return 0;
+    for (const entry of grown) {
         console.error(`BASELINE-GROWTH ${entry.ruleId} ${entry.file} (+${entry.additionalCount} adopted finding(s))`);
     }
     console.error('anti-slop: FAIL — the committed baseline may only shrink; fix the finding instead of adopting it');
     return 1;
+}
+/**
+ * Refuse, before writing, what the staged and CI gates would reject against HEAD — their own
+ * decision and wording, so `create` cannot produce a baseline that only fails at commit time.
+ */
+export function refuseCommittedGrowth(cwd, next, allGroups) {
+    const probe = committedBaselineProbe(cwd);
+    if (probe.kind === 'skip') {
+        if (probe.notice)
+            console.error(probe.notice);
+        return false;
+    }
+    const { envelope } = probe;
+    // A whole-repository lint is needed only when a verdict can depend on it: activation or relocation.
+    const needsLint = envelope.activatedRuleIds.size > 0 ||
+        baselineIncreases(probe.base, next, envelope.renames).length > 0;
+    const relocation = { cwd, capabilityCwd: null, inLintScope: () => needsLint };
+    const groups = needsLint ? allGroups() : [];
+    if (checkBaselineEnvelope(next, envelope, groups, undefined, relocation) === 0)
+        return false;
+    const onDisk = activatedRuleIdsBetween(probe.baseActivation, readManagedAntiSlopActivationEvidence(cwd));
+    if ([...onDisk].some((ruleId) => !envelope.activatedRuleIds.has(ruleId))) {
+        console.error('anti-slop: a rule activated on disk is not staged — stage .devkit/anti-slop so the commit carries the activation, then retry');
+    }
+    if (probe.base.entries.some((entry) => !existsSync(join(cwd, entry.file)))) {
+        console.error('anti-slop: committed debt names file(s) that no longer exist — if the code moved, stage the move (`git add -A`) so Git detects it, then run `devkit anti-slop adopt-renames` or `devkit anti-slop adopt-relocations`');
+    }
+    console.error("anti-slop: create refused — baseline unchanged, because the commit gate would reject it for the reason above; `devkit anti-slop check <paths>` lists findings to fix, or change the rule's severity or scoped override in the repository Oxlint config");
+    return true;
 }
 /** Name what the allowance forgave: it is transient, so silence would hide adopted debt. */
 export function reportInheritedForgiveness(before, after) {

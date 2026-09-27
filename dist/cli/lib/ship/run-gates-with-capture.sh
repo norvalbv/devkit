@@ -48,8 +48,10 @@ run_gates_with_capture() {
 
   # DEVKIT_SHIP arms the deterministic-prefix cache and overlay sentinel. The invariant it names is
   # also true for review: ephemeral working tree == synthetic index. GUARD_AI_STRICT makes a dark AI
-  # gate block. DEVKIT_REVIEW_PROGRESS is the structured timeout/checkpoint channel.
-  export DEVKIT_SHIP=1 GUARD_AI_STRICT=1 DEVKIT_REVIEW_PROGRESS="$progress"
+  # gate block. DEVKIT_REVIEW_PROGRESS is the structured timeout/checkpoint channel. DEVKIT_GATE_LOG
+  # names this chain's $log so a long judge's heartbeat (gate-engine/judge/process/heartbeat.mts, sc-2422)
+  # points a poller at the file it is teed into — assigned here, so an outer run's value never wins.
+  export DEVKIT_SHIP=1 GUARD_AI_STRICT=1 DEVKIT_REVIEW_PROGRESS="$progress" DEVKIT_GATE_LOG="$log"
 
   local secs=${SHIP_COMMIT_TIMEOUT:-3600}
   local rc
