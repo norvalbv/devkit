@@ -309,8 +309,10 @@ export function resolveConfigRoots({ configKey, reviewerName }) {
  *
  * Exits non-zero on detection; returns normally when there is genuinely nothing staged. Only a
  * STANDALONE run reaches this: under the gate the script holds the gate's own staged list, which
- * names a deletion-only change as a skip (sc-3400), and a clobbered index is caught by the gate's
- * pre/post staged-tree check and ship's exact staged-set invariants instead.
+ * names a deletion-only change as a skip (sc-3400). There, a clobbered index is caught by the review
+ * gate's mass-deletion check (gate-engine/review/integrity/mass-deletion.mts) and ship's exact
+ * staged-set invariants. The gate's pre/post staged-tree check is NOT clobber protection: it only
+ * sees an index that changes WHILE the gate runs.
  */
 export function assertStagedSetSane(pathspecs, reviewerName) {
   let unfiltered;

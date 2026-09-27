@@ -43,6 +43,7 @@ import { loadReviewerContext } from './evidence/commit-message.mts';
 import { responseContractFor } from './contracts/registry.mts';
 import { renderFindingsBlockForParts } from './evidence/findings.mts';
 import { emitReviewScope, emitReviewSkipped, reportNonRuns } from './evidence/scope.mts';
+import { assertNoMassDeletion } from './integrity/mass-deletion.mts';
 import { gitCached, headHash, stagedFiles, stagedTreeHash } from './evidence/staged-git.mts';
 import { reviewerTargetSalts } from './evidence/targets-block.mts';
 import { reviewerSkipRemedy } from './overrides.mts';
@@ -65,6 +66,7 @@ import {
 import {
   cacheKey,
   effectiveReviewConfig,
+  REVIEWERS,
   type ReviewerSelection,
   resolveEscalationModel,
   resolveReviewModel,
@@ -147,12 +149,6 @@ export async function runReviewGate(
   let assetRoot: string | undefined;
   let identitySalts = new Map<string, string>();
   try {
-    cfg = resolveGuardConfig(cwd);
-    if (cfg.noLlm) {
-      emitReviewSkipped(null, 'no_llm');
-      return finish(0);
-    }
-    if (reviewMode) cfg = effectiveReviewConfig(cfg);
     // Snapshot before ANY read: every byte the gate evaluates postdates this instant, so the
     // finish-time recheck catches movement across the gate's whole life (judge or otherwise).
     // Stable-read pair: HEAD is read on BOTH sides of the tree read and must agree, or a commit
@@ -171,6 +167,17 @@ export async function runReviewGate(
         break;
       }
     }
+    // After the snapshot (a later clobber fails the finish recheck) and before config, which can throw.
+    if (assertNoMassDeletion(cwd) === 1) {
+      for (const { name } of REVIEWERS) emitReviewSkipped(name, 'mass_deletion');
+      return finish(1);
+    }
+    cfg = resolveGuardConfig(cwd);
+    if (cfg.noLlm) {
+      emitReviewSkipped(null, 'no_llm');
+      return finish(0);
+    }
+    if (reviewMode) cfg = effectiveReviewConfig(cfg);
     const staged = stagedFiles(cwd);
     selected = selectRepositoryReviewers(staged, cfg);
     const skip = skippedReviewers();
