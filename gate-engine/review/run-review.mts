@@ -32,18 +32,18 @@
  */
 
 import { envFlag, type GuardConfig, resolveGuardConfig } from '../config.mts';
-import { judgeBinForModel } from '../judge/codex/result.mts';
 import { emitCacheHit } from '../judge/gate-events.mts';
 import { reportGateInfraFailure } from '../judge/odb-probe.mts';
 import { execJudgeAsync, strictRemedy } from '../judge/run-judge.mts';
 import { loadCache } from './cache.mts';
 import { type CascadeResult, runCascade } from './cascade/reviewer.mts';
-import { RESPONSE_CONTRACT_REMEDY } from './contracts/response.mts';
+import { ENGINE_ERROR_REMEDY, RESPONSE_CONTRACT_REMEDY } from './contracts/response.mts';
 import { baseProvenanceLines, primeReviewBaseContext } from './evidence/base-context.mts';
 import { loadReviewerContext } from './evidence/commit-message.mts';
 import { responseContractFor } from './contracts/registry.mts';
 import { renderFindingsBlockForParts } from './evidence/findings.mts';
 import { emitReviewScope, emitReviewSkipped, reportNonRuns } from './evidence/scope.mts';
+import { assertNoMassDeletion } from './integrity/mass-deletion.mts';
 import { gitCached, headHash, stagedFiles, stagedTreeHash } from './evidence/staged-git.mts';
 import { reviewerTargetSalts } from './evidence/targets-block.mts';
 import { reviewerSkipRemedy } from './overrides.mts';
@@ -66,6 +66,7 @@ import {
 import {
   cacheKey,
   effectiveReviewConfig,
+  REVIEWERS,
   type ReviewerSelection,
   resolveEscalationModel,
   resolveReviewModel,
@@ -148,12 +149,6 @@ export async function runReviewGate(
   let assetRoot: string | undefined;
   let identitySalts = new Map<string, string>();
   try {
-    cfg = resolveGuardConfig(cwd);
-    if (cfg.noLlm) {
-      emitReviewSkipped(null, 'no_llm');
-      return finish(0);
-    }
-    if (reviewMode) cfg = effectiveReviewConfig(cfg);
     // Snapshot before ANY read: every byte the gate evaluates postdates this instant, so the
     // finish-time recheck catches movement across the gate's whole life (judge or otherwise).
     // Stable-read pair: HEAD is read on BOTH sides of the tree read and must agree, or a commit
@@ -172,6 +167,17 @@ export async function runReviewGate(
         break;
       }
     }
+    // After the snapshot (a later clobber fails the finish recheck) and before config, which can throw.
+    if (assertNoMassDeletion(cwd) === 1) {
+      for (const { name } of REVIEWERS) emitReviewSkipped(name, 'mass_deletion');
+      return finish(1);
+    }
+    cfg = resolveGuardConfig(cwd);
+    if (cfg.noLlm) {
+      emitReviewSkipped(null, 'no_llm');
+      return finish(0);
+    }
+    if (reviewMode) cfg = effectiveReviewConfig(cfg);
     const staged = stagedFiles(cwd);
     selected = selectRepositoryReviewers(staged, cfg);
     const skip = skippedReviewers();
@@ -213,12 +219,6 @@ export async function runReviewGate(
   const cache = loadCache(cwd);
   const firstModel = resolveReviewModel(cfg);
   const escalationModel = resolveEscalationModel(cfg);
-  // An engine-error rejection loses WHICH pass threw, so name every binary the cascade could have
-  // spawned — a single guess reads as fact and sends a mixed-family operator to the wrong CLI.
-  const engineOutageBin = (rev: { model?: string }): string =>
-    [
-      ...new Set((rev.model ? [rev.model] : [firstModel, escalationModel]).map(judgeBinForModel)),
-    ].join('` or `');
   const concurrency = reviewConcurrency();
   timing.configure(
     selected.map((selection) => selection.reviewer.name),
@@ -336,7 +336,7 @@ export async function runReviewGate(
         name: t.sel.reviewer.name,
         status: reviewMode ? 'error' : 'inconclusive',
         reason: `engine error: ${e?.message ?? e}`,
-        outageBin: engineOutageBin(t.sel.reviewer),
+        inconclusiveCause: 'engine',
         escalated: false,
       }))
       .then((outcome) => {
@@ -361,8 +361,7 @@ export async function runReviewGate(
         name: task.sel.reviewer.name,
         status: reviewMode ? 'error' : 'inconclusive',
         reason: `engine error: ${e?.message ?? e}`,
-        inconclusiveCause: 'outage',
-        outageBin: engineOutageBin(task.sel.reviewer),
+        inconclusiveCause: 'engine',
         escalated: false,
       })),
     gateStart,
@@ -404,7 +403,9 @@ export async function runReviewGate(
     const remedy =
       cause === 'response-contract'
         ? RESPONSE_CONTRACT_REMEDY
-        : strictRemedy(cause, r.outageBin, r.outageResetsAt);
+        : cause === 'engine'
+          ? ENGINE_ERROR_REMEDY
+          : strictRemedy(cause, r.outageBin, r.outageResetsAt);
     console.error(
       strict
         ? `guard-review: ${r.name} INCONCLUSIVE (${r.reason}) — strict ship mode fails closed.\n` +

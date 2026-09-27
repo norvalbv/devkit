@@ -37,6 +37,7 @@ const sha256 = (text: string): string => createHash('sha256').update(text).diges
 export type SkipReason =
   | 'gate_disabled'
   | 'no_llm'
+  | 'mass_deletion'
   | 'GUARD_REVIEW_SKIP'
   | 'not_selected'
   // Distinct from 'not_selected' on purpose: "never ran because the consumer's topology is empty"

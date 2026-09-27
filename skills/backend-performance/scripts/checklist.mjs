@@ -86,10 +86,10 @@ function getStagedFiles() {
   try {
     const output = execFileSync(
       'git',
-      ['diff', '--cached', '--name-only', '--diff-filter=ACM', '--', ...pathspecs],
+      ['diff', '--cached', '--name-only', '--diff-filter=ACMR', '--', ...pathspecs],
       { encoding: 'utf-8' },
     );
-    // ACM hides deletions, so an all-deletions index reads as "nothing staged" here. Never report
+    // ACMR hides deletions, so an all-deletions index reads as "nothing staged" here. Never report
     // that as zero items — a reviewer that examined nothing must not read as a pass.
     if (!output.trim()) assertStagedSetSane(pathspecs, 'backend-performance');
     return output

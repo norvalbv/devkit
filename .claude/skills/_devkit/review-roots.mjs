@@ -26,6 +26,23 @@ export const isNonEmptyStringArray = (value) =>
   value.every((entry) => typeof entry === 'string' && entry.length > 0);
 
 /**
+ * The raw JSON of the gate-injected staged list: inline in DEVKIT_REVIEW_STAGED_FILES, or — for a
+ * list too large for an env var (sc-3400) — in the file DEVKIT_REVIEW_STAGED_FILES_PATH names. The
+ * inline form wins. Throws when the named file cannot be read; undefined when neither is set.
+ */
+function injectedStagedFilesJson() {
+  const inline = process.env.DEVKIT_REVIEW_STAGED_FILES;
+  if (inline !== undefined) return inline;
+  const file = process.env.DEVKIT_REVIEW_STAGED_FILES_PATH;
+  if (file === undefined) return undefined;
+  try {
+    return readFileSync(file, 'utf-8');
+  } catch {
+    throw new Error(`DEVKIT_REVIEW_STAGED_FILES_PATH names an unreadable file: ${file}`);
+  }
+}
+
+/**
  * The gate's authoritative staged file list for THIS reviewer (sc-1439). The gate selects
  * reviewers from its own topology; each checklist previously re-resolved files independently
  * (env/config roots + --diff-filter=ACM), and ANY divergence stranded generate() with zero files
@@ -35,7 +52,8 @@ export const isNonEmptyStringArray = (value) =>
  * review — the ACM mirror). Returns null when unset/invalid: standalone runs resolve as before.
  */
 export function stagedFilesOverride() {
-  const raw = process.env.DEVKIT_REVIEW_STAGED_FILES;
+  // Read OUTSIDE the catch: a named-but-unreadable list must fail loudly, never silently widen.
+  const raw = injectedStagedFilesJson();
   if (raw === undefined) return null;
   try {
     const files = JSON.parse(raw);
@@ -60,10 +78,10 @@ export function normalizeRepositoryFile(file, name = 'staged file') {
  * and fail loudly on a malformed override instead of silently resolving a different universe.
  */
 export function authoritativeStagedFilesOverride() {
-  const raw = process.env.DEVKIT_REVIEW_STAGED_FILES;
-  if (raw === undefined) return null;
   let files;
   try {
+    const raw = injectedStagedFilesJson();
+    if (raw === undefined) return null;
     files = JSON.parse(raw);
   } catch {
     throw new Error('DEVKIT_REVIEW_STAGED_FILES must be a non-empty JSON string array');
@@ -278,18 +296,23 @@ export function resolveConfigRoots({ configKey, reviewerName }) {
 }
 
 /**
- * Every checklist selects its files with `--diff-filter=ACM`, which drops deletions. So a staged set
+ * Every checklist selects its files with `--diff-filter=ACMR`, which drops deletions. So a staged set
  * that is ENTIRELY deletions renders as "nothing to review" and the reviewer waves the commit
  * through — the exact blind spot that let a clobbered ship index (a foreign tree staged as a
  * ~5,976-file deletion of the whole repo) reach the review gate reporting "no items".
  *
- * Call this on the empty-ACM path, BEFORE reporting zero items. It re-asks git WITHOUT the filter:
+ * Call this on the empty-ACMR path, BEFORE reporting zero items. It re-asks git WITHOUT the filter:
  * if the index does hold staged paths after all, they are deletions the checklist cannot see, and
  * that must be loud rather than silent. This is the same rule the correctness checklist already
  * applies to a git FAILURE ("must never masquerade as nothing staged"), extended to a successful
  * query with an answer the filter made meaningless.
  *
- * Exits non-zero on detection; returns normally when there is genuinely nothing staged.
+ * Exits non-zero on detection; returns normally when there is genuinely nothing staged. Only a
+ * STANDALONE run reaches this: under the gate the script holds the gate's own staged list, which
+ * names a deletion-only change as a skip (sc-3400). There, a clobbered index is caught by the review
+ * gate's mass-deletion check (gate-engine/review/integrity/mass-deletion.mts) and ship's exact
+ * staged-set invariants. The gate's pre/post staged-tree check is NOT clobber protection: it only
+ * sees an index that changes WHILE the gate runs.
  */
 export function assertStagedSetSane(pathspecs, reviewerName) {
   let unfiltered;
@@ -298,14 +321,14 @@ export function assertStagedSetSane(pathspecs, reviewerName) {
       encoding: 'utf-8',
     });
   } catch {
-    // The ACM query already succeeded, so git works here; a failure now is not evidence of anything.
+    // The ACMR query already succeeded, so git works here; a failure now is not evidence of anything.
     // Stay silent and let the caller report its honest "nothing staged".
     return;
   }
   const staged = unfiltered.split('\n').filter((line) => line.trim().length > 0);
   if (staged.length === 0) return;
   console.error(
-    `❌ ${reviewerName}: ${staged.length} path(s) are staged but NONE are additions/copies/modifications — ` +
+    `❌ ${reviewerName}: ${staged.length} path(s) are staged but NONE are additions/copies/modifications/renames — ` +
       'the staged set is pure deletions. Refusing to report "no items": a reviewer that examines ' +
       'nothing must not read as a pass. If this is a deliberate deletion-only commit, review it by ' +
       'hand; if it is not, your index has been overwritten — check `git diff --cached --stat`.',

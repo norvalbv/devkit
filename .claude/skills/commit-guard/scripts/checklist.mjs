@@ -41,10 +41,10 @@ function getStagedFiles() {
   try {
     const output = execFileSync(
       'git',
-      ['diff', '--cached', '--name-only', '--diff-filter=ACM', '--', ...pathspecs],
+      ['diff', '--cached', '--name-only', '--diff-filter=ACMR', '--', ...pathspecs],
       { encoding: 'utf-8' },
     );
-    // ACM hides deletions, so an all-deletions index reads as "nothing staged" here. Never report
+    // ACMR hides deletions, so an all-deletions index reads as "nothing staged" here. Never report
     // that as zero items — a reviewer that examined nothing must not read as a pass.
     if (!output.trim()) assertStagedSetSane(pathspecs, 'commit-guard');
     return output
@@ -75,7 +75,7 @@ function init() {
     // sc-1439: the GATE selected this reviewer, so an artifact must exist — a named skip, never
     // an absence (verifyChecklist voids a PASS on a missing artifact).
     if (stagedFilesOverride())
-      writeChecklist({
+      saveChecklist({
         files: [],
         skipped:
           "gate-selected files were all excluded by this checklist's own filters (prose/tests/extensions/deletions) — deliberate skip, not an unfinished review",

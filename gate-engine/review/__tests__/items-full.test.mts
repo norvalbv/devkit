@@ -8,7 +8,7 @@ import { resolveGuardConfig } from '../../config.mts';
 import { runCascade } from '../cascade/reviewer.mts';
 import { attachItems, itemFields, reviewCaptureSchema } from '../evidence/items.mts';
 import { REVIEWERS } from '../reviewers.mts';
-import type { ReviewOutcome } from '../runtime.mts';
+import { isNamedSkip, type ReviewOutcome } from '../runtime.mts';
 import { cleanupReviewFixtures, consumerRepo, mkExec } from './run-review-fixtures.mts';
 
 const long = `src/a.ts:12 — ${'the queued state is never re-driven by the poller, '.repeat(12)}so it sits forever UNIQUE-TAIL-MARKER`;
@@ -228,4 +228,32 @@ describe('attachItems itemsFull', () => {
     ])
       expect(capture({ items })?.provenance).toBe('missing-invalid');
   });
+});
+
+// sc-3400 / gate-verdict-attribution: an EXISTING empty artifact (a named skip) is zero items, which
+// must stay distinguishable on the wire from an absent artifact.
+it('records an existing empty artifact as zero items, and an absent one as nothing', () => {
+  const skipped = outcome();
+  attachItems(skipped, { files: [], skipped: 'deletion-only' }, new Map());
+  expect(itemFields(skipped)).toMatchObject({ item_count: 0, item_artifact: 'files', items: [] });
+  const absent = outcome();
+  attachItems(absent, null, new Map());
+  expect(itemFields(absent)).toEqual({});
+});
+
+// sc-3400: a named skip buys a judge-less PASS, so `skipped` is parsed, never truthiness-checked.
+it.each([
+  [{ files: [], skipped: 'deletion-only' }, true],
+  [{ files: [], skipped: 1 }, false],
+  [{ files: [], skipped: ['x'] }, false],
+  [{ files: [], skipped: '' }, false],
+  [{ files: [], skipped: ' ' }, false],
+  [{ files: [], skipped: '\t\n\u00a0' }, false],
+  [{ files: [{ path: 'a.ts' }], skipped: 'x' }, false],
+  [{ files: [], skipped: 'x', items: [{ name: 'lens', status: 'fail' }] }, false],
+  [{ files: [], skipped: 'x', items: [] }, false],
+  [null, false],
+])('isNamedSkip(%j) is %s', (state, expected) => {
+  // SAFETY: deliberately malformed artifacts — the parse under test is what rejects them.
+  expect(isNamedSkip(state as never)).toBe(expected);
 });
