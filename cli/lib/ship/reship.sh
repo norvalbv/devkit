@@ -195,6 +195,12 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REWRITE_REMOTE_SUPERVISOR="$SCRIPT_DIR/review/process/gate-supervisor.mts"
 [ -f "$REWRITE_REMOTE_SUPERVISOR" ] || REWRITE_REMOTE_SUPERVISOR="$SCRIPT_DIR/review/process/gate-supervisor.mjs"
 rewrite_remote() {
+  # A detached auto-gc/maintenance is reaped as an owned leaked tree, turning a finished fetch into
+  # 124 (sc-3761). Only git takes -c; gh passes through untouched.
+  if [ "${1:-}" = git ]; then
+    shift
+    set -- git -c gc.auto=0 -c maintenance.auto=false "$@"
+  fi
   node "$REWRITE_REMOTE_SUPERVISOR" 60 -- "$@"
 }
 # Resolve owner/repo from origin (best-effort — only used for the final PR-URL print, which falls
@@ -266,6 +272,7 @@ REWRITE_HEAD_REF=""
 REWRITE_BASE_REF=""
 EXPECTED_REMOTE=""
 REQUIRED_SCOPE_FILE=""
+REWRITE_FETCH_ERR=""
 FINAL_SCOPE_FILE=""
 REWRITE_PUBLISH_LOCK=""
 REWRITE_PUBLISH_STAMP=""
@@ -281,6 +288,7 @@ rewrite_ref_cleanup() {
   fi
   [ -z "$REQUIRED_SCOPE_FILE" ] || rm -f "$REQUIRED_SCOPE_FILE"
   [ -z "$FINAL_SCOPE_FILE" ] || rm -f "$FINAL_SCOPE_FILE"
+  [ -z "$REWRITE_FETCH_ERR" ] || rm -f "$REWRITE_FETCH_ERR"
 }
 
 # Serialize a rewrite's destructive publication/bookkeeping window and every explicit PR-body
@@ -437,11 +445,25 @@ if [ "$REWRITE" -eq 1 ]; then
   REWRITE_HEAD_REF="refs/devkit/reship-rewrite/$REF_STAMP/head"
   REWRITE_BASE_REF="refs/devkit/reship-rewrite/$REF_STAMP/base"
   trap rewrite_ref_cleanup EXIT
+  REWRITE_FETCH_ERR=$(mktemp "${TMPDIR:-/tmp}/reship-pin-fetch.XXXXXX")
+  pin_rc=0
   rewrite_remote git fetch -q origin \
     "+refs/heads/$BR:$REWRITE_HEAD_REF" \
-    "+refs/heads/$BASE_REF:$REWRITE_BASE_REF" 2>/dev/null || {
-      echo "cannot pin origin/$BR and origin/$BASE_REF — both branches must exist" >&2; exit 1
-    }
+    "+refs/heads/$BASE_REF:$REWRITE_BASE_REF" 2>"$REWRITE_FETCH_ERR" || pin_rc=$?
+  if [ "$pin_rc" -ne 0 ]; then
+    # Name the cause the fetch actually reported: a reaped or expired fetch is not a missing branch,
+    # and "both branches must exist" sends an agent hunting for branches that are there (sc-3761).
+    if [ "$pin_rc" -eq 124 ]; then
+      echo "cannot pin origin/$BR and origin/$BASE_REF: git fetch did not finish cleanly within 60s (timed out, or left background processes that were reaped)" >&2
+    elif grep -Fxq -e "fatal: couldn't find remote ref refs/heads/$BR" \
+      -e "fatal: couldn't find remote ref refs/heads/$BASE_REF" "$REWRITE_FETCH_ERR"; then
+      echo "cannot pin origin/$BR and origin/$BASE_REF — both branches must exist" >&2
+    else
+      echo "cannot pin origin/$BR and origin/$BASE_REF: git fetch failed (exit $pin_rc)" >&2
+    fi
+    sed 's/^/  /' "$REWRITE_FETCH_ERR" >&2
+    exit 1
+  fi
   EXPECTED_REMOTE=$(git rev-parse "$REWRITE_HEAD_REF")
   BASE=$(git rev-parse "$REWRITE_BASE_REF")
   if [ "$RESUME" -eq 1 ] && [ "$UPDATE_PR_BODY" -eq 1 ]; then
