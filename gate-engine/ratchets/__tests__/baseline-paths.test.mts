@@ -174,6 +174,57 @@ describe('ratchet baseline paths', () => {
     );
   });
 
+  it('a staged gate clear on a full install stages the tracked retired copy deletion', () => {
+    const root = makeRoot();
+    execFileSync('git', ['init', '-q'], { cwd: root });
+    write(root, LEGACY_LINES_BASELINE, '{"files":{"src/legacy.ts":80}}\n');
+    execFileSync('git', ['add', '--', LEGACY_LINES_BASELINE], { cwd: root });
+    execFileSync(
+      'git',
+      ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--no-verify', '-m', 'legacy'],
+      { cwd: root },
+    );
+
+    // Gates clear with { stage: true }; the install owns the retired name, so the deletion must ride
+    // the same commit or the next migration re-adopts the cleared ceiling from the index.
+    removeRatchetBaseline(root, LINES_BASELINE, { stage: true });
+
+    expect(existsSync(join(root, LEGACY_LINES_BASELINE))).toBe(false);
+    expect(
+      execFileSync('git', ['diff', '--cached', '--name-status', '--', LEGACY_LINES_BASELINE], {
+        cwd: root,
+        encoding: 'utf8',
+      }),
+    ).toBe(`D\t${LEGACY_LINES_BASELINE}\n`);
+  });
+
+  it('a staged gate clear on an overlay install leaves the tracked retired copy and index alone', () => {
+    const root = makeRoot();
+    execFileSync('git', ['init', '-q'], { cwd: root });
+    write(root, '.devkit/config.json', '{"overlay":true}\n');
+    write(root, LEGACY_LINES_BASELINE, '{"files":{"src/legacy.ts":80}}\n');
+    execFileSync('git', ['add', '--', LEGACY_LINES_BASELINE], { cwd: root });
+    execFileSync(
+      'git',
+      ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--no-verify', '-m', 'legacy'],
+      { cwd: root },
+    );
+
+    // size-disable and folder-fanout clear with { stage: true }; overlay must not stage a deletion
+    // of the consumer's committed ceiling any more than it may delete the file.
+    removeRatchetBaseline(root, LINES_BASELINE, { stage: true });
+
+    expect(readFileSync(join(root, LEGACY_LINES_BASELINE), 'utf8')).toBe(
+      '{"files":{"src/legacy.ts":80}}\n',
+    );
+    expect(
+      execFileSync('git', ['status', '--porcelain', '--', LEGACY_LINES_BASELINE], {
+        cwd: root,
+        encoding: 'utf8',
+      }),
+    ).toBe('');
+  });
+
   it('writes through a per-file baseline symlink the ship worktree projects', () => {
     const root = makeRoot();
     const primary = makeRoot();
