@@ -10,7 +10,7 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
-import { resolveVitest, runVitest } from '../../../gate-engine/coverage/produce.mts';
+import { resolveVitest, runVitest } from '../../../gate-engine/coverage/vitest-cli.mts';
 import { writeFileAtomic } from '../atomic-write.mts';
 
 /**
