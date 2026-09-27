@@ -33,7 +33,9 @@
  * derived clones would void every committed waiver and split the telemetry in two.
  */
 
+import { z } from 'zod';
 import { diffCacheIdentity } from '../../judge/diff-focus.mts';
+import { storedBaseSchema } from '../evidence/base-context.mts';
 import { planChunkedParts, resolveChunkCap } from './chunk-tasks.mts';
 import { deriveLensReviewer, lensGroupId, resolveLensGroups } from './groups.mts';
 // Re-exported so every existing importer's path keeps working after the guard-size split.
@@ -244,6 +246,38 @@ export function holdLensPart(
   console.error(`guard-review: ${label} — ${part.res.status.toUpperCase()} in ${part.secs}s`);
 }
 
+/** A cache-served reviewer (or split part) and its PASS's stored bases (null = none readable). */
+export interface CachedHit {
+  label: string;
+  files: string[];
+  judgedBases: (string | null)[];
+  part: boolean; // a split part's line has always read `cached PASS (identical)`
+}
+
+/** One scope row's inputs; `judgedBases` = stored bases of whichever parts were served from cache. */
+export interface ScopePlan {
+  sel: ReviewerSelection;
+  diff: string;
+  cached: boolean;
+  judgedBases: (string | null)[];
+}
+
+/** A reviewer served wholly from cache: summed duration, the judging model, and its stored bases. */
+export interface FullyCachedReviewer {
+  name: string;
+  duration: number;
+  model: string | undefined;
+  judgedBases: (string | null)[];
+}
+
+export interface ReviewWorkPlan {
+  tasks: ReviewTask[];
+  scope: ScopePlan[];
+  fullyCached: FullyCachedReviewer[];
+  cachedHits: CachedHit[];
+  splitParts: Map<string, LensPart[]>;
+}
+
 /**
  * Decide what actually has to be judged, before any judge runs.
  *
@@ -265,17 +299,11 @@ export function planReviewWork(
   groups = resolveLensGroups(),
   chunkCap = resolveChunkCap(),
   emitChunkPlan: typeof emitReviewChunkPlan = emitReviewChunkPlan,
-): {
-  tasks: ReviewTask[];
-  scope: { sel: ReviewerSelection; diff: string; cached: boolean }[];
-  fullyCached: { name: string; duration: number; model: unknown }[];
-  cachedLines: string[];
-  splitParts: Map<string, LensPart[]>;
-} {
+): ReviewWorkPlan {
   const tasks: ReviewTask[] = [];
-  const scope: { sel: ReviewerSelection; diff: string; cached: boolean }[] = [];
-  const fullyCached: { name: string; duration: number; model: unknown }[] = [];
-  const cachedLines: string[] = [];
+  const scope: ScopePlan[] = [];
+  const fullyCached: FullyCachedReviewer[] = [];
+  const cachedHits: CachedHit[] = [];
   // Pre-seeded with any group whose PASS was already checkpointed, so a resumed run still emits the
   // FULL per-lens vector — without this the merged row silently omits the cached groups' items.
   const splitParts = new Map<string, LensPart[]>();
@@ -317,14 +345,24 @@ export function planReviewWork(
           }))
         : [{ sel, key: keyOf(name, idText, salt), diffText: diffs[i], base: sel }];
     const allCached = parts.every((p) => Boolean(cache[p.key]));
-    scope.push({ sel, diff: diffs[i], cached: allCached });
+    // The base each stored PASS was judged against (sc-3468), parsed at the cache read (malformed →
+    // null → UNKNOWN). Never refreshed on a hit: that re-stamping is the false provenance it prevents.
+    const judgedBases = parts
+      .filter((p) => cache[p.key])
+      .map((p) => storedBaseSchema.safeParse(cache[p.key].base_sha).data ?? null);
+    scope.push({ sel, diff: diffs[i], cached: allCached, judgedBases });
     if (allCached) {
       const duration = parts.reduce<number>((sum, p) => {
         const d = cache[p.key].duration_ms;
         return sum + (typeof d === 'number' ? d : 0);
       }, 0);
-      fullyCached.push({ name, duration, model: cache[parts[0].key].model });
-      cachedLines.push(`guard-review: ${name} — cached PASS (identical diff)`);
+      fullyCached.push({
+        name,
+        duration,
+        model: z.string().min(1).safeParse(cache[parts[0].key].model).data,
+        judgedBases,
+      });
+      cachedHits.push({ label: name, files: sel.files, judgedBases, part: false });
       continue;
     }
     for (const p of parts) {
@@ -332,7 +370,12 @@ export function planReviewWork(
         tasks.push(p);
         continue;
       }
-      cachedLines.push(`guard-review: ${taskLabel(p)} — cached PASS (identical)`);
+      cachedHits.push({
+        label: taskLabel(p),
+        files: p.sel.files,
+        judgedBases: [storedBaseSchema.safeParse(cache[p.key].base_sha).data ?? null],
+        part: true,
+      });
       if (!p.splitOf) continue;
       // Rebuild the part WITH its cached aggregates (sc-1475): a spilled part's `items` never
       // reached the cache entry (undefined is dropped by JSON), so itemCount/itemTally are the
@@ -357,7 +400,7 @@ export function planReviewWork(
       splitParts.set(p.splitOf, held);
     }
   }
-  return { tasks, scope, fullyCached, cachedLines, splitParts };
+  return { tasks, scope, fullyCached, cachedHits, splitParts };
 }
 
 /** Arm suffix for a bench section key — empty unless THIS reviewer is being split, so every

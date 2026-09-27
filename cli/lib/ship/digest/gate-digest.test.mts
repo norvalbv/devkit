@@ -675,3 +675,91 @@ describe('unverified verdicts (sc-3175)', () => {
     );
   });
 });
+
+// sc-3468: a review PASS replayed across a rebase. Demotion keys on PATH OVERLAP between the judged
+// base and this run's — sha inequality alone stays a ✓ (base-drift-surfaced-at-read-time (b)).
+describe('summarise — review PASS judged against an earlier base', () => {
+  const SHA_A = 'aaaaaaaaaaaa1111111111111111111111111111';
+  const baseHit = (base_state: string, judged: string | null = SHA_A) =>
+    ev({
+      type: 'cache_hit',
+      judge: 'review:correctness-reviewer',
+      base_state,
+      judged_base_sha: judged,
+    });
+  const green = ev({ type: 'ship_result', exit_code: 0, blocked_gate: null });
+
+  it('demotes a hit whose reviewed paths changed on the base, naming the judged base', () => {
+    const text = render(
+      summarise([ev({ type: 'ship_attempt' }), baseHit('moved-overlap'), green], SHIP),
+    );
+    expect(text).toContain('Gate findings this run (1)');
+    expect(text).toContain(
+      '· review:correctness-reviewer — cached PASS judged against aaaaaaaaaaaa — reviewed paths changed on the base since; not re-judged',
+    );
+  });
+
+  it('demotes a hit whose judged base is unknown', () => {
+    const rows = summarise([baseHit('unknown', null), green], SHIP);
+    expect(rows).toEqual([
+      expect.objectContaining({
+        state: 'unverified',
+        blocking: false,
+        detail: 'cached PASS whose judged base is unknown — not re-judged against this base',
+      }),
+    ]);
+  });
+
+  it.each(['moved-clear', 'current'])('keeps a %s hit on the ✓ cache line', (state) => {
+    const rows = summarise([baseHit(state), green], SHIP);
+    expect(rows.map((r) => r.state)).toEqual(['cached']);
+  });
+
+  it('keeps a hit with no base_state (every non-review emitter) on the ✓ cache line', () => {
+    const rows = summarise([ev({ type: 'cache_hit', judge: 'decision-alignment' }), green], SHIP);
+    expect(rows.map((r) => r.state)).toEqual(['cached']);
+  });
+
+  it('never throws on a wrong-typed judged_base_sha read from the sink', () => {
+    const sink = sinkWith([
+      JSON.stringify({
+        ship_id: SHIP,
+        type: 'cache_hit',
+        judge: 'review:correctness-reviewer',
+        base_state: 'moved-overlap',
+        judged_base_sha: 12345,
+      }),
+    ]);
+    const rows = summarise(readShipEvents(sink, SHIP), SHIP);
+    expect(rows[0]).toMatchObject({ state: 'unverified' });
+    expect(rows[0].detail).toContain('judged against an earlier base');
+  });
+
+  it('never invokes a row-supplied toString (a malformed object judged_base_sha)', () => {
+    const row = {
+      ship_id: SHIP,
+      type: 'cache_hit',
+      judge: 'review:correctness-reviewer',
+      base_state: 'moved-overlap',
+      judged_base_sha: { toString: 1 },
+    };
+    const rows = summarise(readShipEvents(sinkWith([JSON.stringify(row)]), SHIP), SHIP);
+    expect(rows[0].detail).toContain('judged against an earlier base');
+    expect(() => render(rows)).not.toThrow();
+  });
+
+  it('shortens a SHA-256 judged base like a SHA-1 one', () => {
+    const rows = summarise([baseHit('moved-overlap', 'c'.repeat(64)), green], SHIP);
+    expect(rows[0].detail).toContain(`judged against ${'c'.repeat(12)} —`);
+  });
+
+  it('names "an earlier base" when the sink row carries no judged sha', () => {
+    const rows = summarise([baseHit('moved-overlap', null), green], SHIP);
+    expect(rows[0].detail).toContain('judged against an earlier base');
+  });
+
+  it('prints ONE row when pre-commit and a re-run both replay the same stale verdict', () => {
+    const rows = summarise([baseHit('moved-overlap'), baseHit('moved-overlap'), green], SHIP);
+    expect(rows.filter((r) => r.state === 'unverified')).toHaveLength(1);
+  });
+});
