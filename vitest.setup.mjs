@@ -112,6 +112,22 @@ for (const k of SCRUBBED_ENV) {
   delete process.env[k];
 }
 
+// Fixtures commit in throwaway temp repos, and git refuses a commit with no author identity. A
+// developer's ~/.gitconfig supplies one, so a fixture that forgets its own identity is green locally
+// and red on a CI runner that has none — the ambient launch env deciding the result, in the direction
+// that hides the bug. Pin a deterministic identity for every spawned git instead. It is set
+// UNCONDITIONALLY so a launcher-exported identity is not inherited either; git's env identity beats
+// user.* config, and fixtures that spread their own GIT_ENV after process.env still win. It lives
+// outside SCRUBBED_ENV, which is a delete-list bound to the ship scripts by a parity test. Cost: a
+// production path that commits in a scratch repo without supplying its own identity would pass here.
+export const SUITE_GIT_IDENTITY = {
+  GIT_AUTHOR_NAME: 'devkit test',
+  GIT_AUTHOR_EMAIL: 'test@devkit.invalid',
+  GIT_COMMITTER_NAME: 'devkit test',
+  GIT_COMMITTER_EMAIL: 'test@devkit.invalid',
+};
+Object.assign(process.env, SUITE_GIT_IDENTITY);
+
 // The ship-path tests (ship-branch / reship / reconcile / …) spawn a REAL commit-with-gate-capture.sh
 // whose gate-events emitter defaults its sink to ~/.devkit/telemetry/gate-events.jsonl — the
 // developer's real ship telemetry. Redirect it to a throwaway per-worker temp file so test ships
