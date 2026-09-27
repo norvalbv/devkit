@@ -3,6 +3,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { devkitVersion } from '../../gate-engine/devkit-version.mts';
 import {
   testExecFileSync as execFileSync,
   findModernBash,
@@ -324,6 +325,36 @@ describe('ship-branch.sh — resume a commit that deleted briefed paths', () => 
 });
 
 describe('ship-branch.sh — resume scope edge cases', () => {
+  // A resume skips commit_with_gate_capture, so telemetry.sh must be sourced at the ship_pr emit
+  // itself — without it the line aborted (bash >= 4) or went out malformed (3.2).
+  it('emits a well-formed ship_pr line when a resumed ship opens its PR', () => {
+    const { dir, env, git } = seedShipRepoLocalRemote();
+    const { publishEnv } = publishEnvFor(dir, env);
+    preserve(dir, env, git, 'feat/resume-telemetry', { briefed: { 'note.txt': 'hi\n' } });
+    const sink = join(dir, 'events.jsonl');
+
+    const retry = retryShip(
+      dir,
+      { ...publishEnv, DEVKIT_GATE_EVENTS: sink },
+      'feat/resume-telemetry',
+      ['note.txt'],
+    );
+
+    expect(retry.status, retry.stderr).toBe(0);
+    expect(retry.stderr).not.toMatch(/unbound variable|command not found/);
+    const events = readFileSync(sink, 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    const prEvent = events.find((e) => e.type === 'ship_pr');
+    expect(prEvent).toMatchObject({
+      devkit_version: devkitVersion(),
+      pr_url: 'https://github.com/acme/app/pull/42',
+      pr_number: 42,
+    });
+    expect(prEvent.ship_id).toMatch(/\S/);
+  });
+
   // A ratchet gate heal-DELETES baselines too (git-index.mts:100), so an ACMR-only recorder would
   // record nothing and the resume would refuse. End to end, so the real recorder is under test.
   it('records a baseline the gate DELETED, and resumes on it', () => {

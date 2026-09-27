@@ -1,9 +1,15 @@
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { INHERITED_RUN_ENV, SCRUBBED_ENV, SHIP_EXPORTED_ENV } from '../../vitest.setup.mjs';
+import {
+  INHERITED_RUN_ENV,
+  SCRUBBED_ENV,
+  SHIP_EXPORTED_ENV,
+  SUITE_GIT_IDENTITY,
+} from '../../vitest.setup.mjs';
 
 const REPO = path.resolve(import.meta.dirname, '../..');
 const SETUP = path.join(REPO, 'vitest.setup.mjs');
@@ -148,5 +154,43 @@ describe('vitest.setup.mjs scrubs inherited gate policy', () => {
     expect(env.SHIP_COMMIT_TIMEOUT).toBe('42');
     expect(env.DEVKIT_PREFLIGHT_TIMEOUT).toBe('7');
     expect(env.DEVKIT_PREFLIGHT_HEARTBEAT).toBe('5');
+  });
+});
+
+describe('vitest.setup.mjs pins a git identity', () => {
+  it('sets every identity var, overriding one the launcher exported', () => {
+    const env = envAfterSetup({
+      GIT_AUTHOR_NAME: 'Outer',
+      GIT_COMMITTER_EMAIL: 'outer@example.com',
+    });
+    for (const [name, value] of Object.entries(SUITE_GIT_IDENTITY))
+      expect(env[name], name).toBe(value);
+  });
+
+  it('lets a fixture commit on a runner with no git identity configured', () => {
+    // The CI condition: no ~/.gitconfig, no system config. Without the pinned identity this commit
+    // fails with "Author identity unknown", which is what kept main's gate red.
+    const root = mkdtempSync(path.join(os.tmpdir(), 'devkit-suite-identity-'));
+    try {
+      const env = {
+        ...envAfterSetup({}),
+        HOME: path.join(root, 'home'),
+        GIT_CONFIG_GLOBAL: '/dev/null',
+        GIT_CONFIG_NOSYSTEM: '1',
+      };
+      const repo = path.join(root, 'repo');
+      execFileSync('git', ['init', '-q', repo], { env });
+      execFileSync('git', ['commit', '-q', '--allow-empty', '-m', 'root'], { cwd: repo, env });
+      const author = execFileSync('git', ['log', '-1', '--format=%an <%ae>'], {
+        cwd: repo,
+        env,
+        encoding: 'utf8',
+      }).trim();
+      expect(author).toBe(
+        `${SUITE_GIT_IDENTITY.GIT_AUTHOR_NAME} <${SUITE_GIT_IDENTITY.GIT_AUTHOR_EMAIL}>`,
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
