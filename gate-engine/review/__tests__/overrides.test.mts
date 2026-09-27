@@ -1,5 +1,13 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -9,6 +17,7 @@ import {
   fingerprint,
   loadOverrides,
   reconcile,
+  withOverridesLock,
 } from '../overrides.mts';
 import { resetReviewBaseContext } from '../evidence/base-context.mts';
 
@@ -350,5 +359,86 @@ describe('waiver base refresh when only the base moved (reviewer finding)', () =
     const second = commitIn(cwd, 'two');
     reconcile(cwd, 'correctness-reviewer', ['races'], 'DIFF', NOW, env);
     expect(loadOverrides(cwd)[fp].baseSha).toBe(second);
+  });
+});
+
+// sc-2175: ship symlinks the store into its gate worktree, so `guard-review waive` (checkout) and the
+// gate's `reconcile` (worktree) edit ONE file via two paths — same entries, same lock.
+describe('waiver store reached through a symlink (ship gate worktree)', () => {
+  const STORE = '.devkit/correctness-overrides.json';
+  const linkedPair = () => {
+    const checkout = repo();
+    const worktree = repo();
+    mkdirSync(join(checkout, '.devkit'), { recursive: true });
+    mkdirSync(join(worktree, '.devkit'), { recursive: true });
+    return { checkout, worktree };
+  };
+
+  it('a waive recorded in the checkout suppresses the finding in the linked worktree', () => {
+    const { checkout, worktree } = linkedPair();
+    const fp = fingerprint('correctness-reviewer', 'concurrency-races', 'D');
+    writeFileSync(join(checkout, STORE), JSON.stringify({ [fp]: { rationale: 'not a race' } }));
+    symlinkSync(join(checkout, STORE), join(worktree, STORE));
+    const r = reconcile(worktree, 'correctness-reviewer', ['concurrency-races'], 'D', NOW, {});
+    expect(r.blocking).toEqual([]);
+    expect(r.suppressed[0]).toMatchObject({ fingerprint: fp, rationale: 'not a race' });
+  });
+
+  it('an env write-through in the worktree lands in the checkout and keeps the link', () => {
+    const { checkout, worktree } = linkedPair();
+    writeFileSync(join(checkout, STORE), '{}\n');
+    symlinkSync(join(checkout, STORE), join(worktree, STORE));
+    const fp = fingerprint('correctness-reviewer', 'concurrency-races', 'D');
+    const env: NodeJS.ProcessEnv = { [`OVERRIDE_${fp}_RATIONALE`]: 'benign' };
+    reconcile(worktree, 'correctness-reviewer', ['concurrency-races'], 'D', NOW, env);
+    expect(lstatSync(join(worktree, STORE)).isSymbolicLink()).toBe(true);
+    expect(loadOverrides(checkout)[fp]).toMatchObject({ rationale: 'benign', by: 'env' });
+  });
+
+  it('the checkout and the worktree contend on ONE lock, so neither can drop the other entry', () => {
+    const { checkout, worktree } = linkedPair();
+    writeFileSync(join(checkout, STORE), '{}\n');
+    symlinkSync(join(checkout, STORE), join(worktree, STORE));
+    withOverridesLock(checkout, () => {
+      expect(() => withOverridesLock(worktree, () => undefined)).toThrow(
+        /holds the overrides lock/,
+      );
+    });
+    expect(withOverridesLock(worktree, () => 'free again')).toBe('free again');
+  });
+
+  it('with no store yet, the lock is still taken and released (the store may be created inside)', () => {
+    const cwd = repo();
+    const out = withOverridesLock(cwd, () => {
+      mkdirSync(join(cwd, '.devkit'), { recursive: true });
+      writeFileSync(join(cwd, STORE), '{}\n');
+      return 'ok';
+    });
+    expect(out).toBe('ok');
+    expect(existsSync(join(cwd, `${STORE}.lock`))).toBe(false);
+    expect(withOverridesLock(cwd, () => 'reacquired')).toBe('reacquired');
+  });
+
+  it('a dangling store link (checkout copy deleted mid-ship) still shares the checkout lock', () => {
+    const { checkout, worktree } = linkedPair();
+    symlinkSync(join(checkout, STORE), join(worktree, STORE));
+    withOverridesLock(checkout, () => {
+      expect(() => withOverridesLock(worktree, () => undefined)).toThrow(
+        /holds the overrides lock/,
+      );
+    });
+    expect(withOverridesLock(worktree, () => 'ok')).toBe('ok');
+    expect(existsSync(join(worktree, `${STORE}.lock`))).toBe(false);
+    expect(existsSync(join(checkout, `${STORE}.lock`))).toBe(false);
+  });
+
+  it('a waive into a dangling link recreates the checkout store, which the worktree then reads', () => {
+    const { checkout, worktree } = linkedPair();
+    symlinkSync(join(checkout, STORE), join(worktree, STORE));
+    const fp = fingerprint('correctness-reviewer', 'concurrency-races', 'D');
+    const env: NodeJS.ProcessEnv = { [`OVERRIDE_${fp}_RATIONALE`]: 'benign' };
+    reconcile(worktree, 'correctness-reviewer', ['concurrency-races'], 'D', NOW, env);
+    expect(loadOverrides(checkout)[fp]).toMatchObject({ rationale: 'benign' });
+    expect(lstatSync(join(worktree, STORE)).isSymbolicLink()).toBe(true);
   });
 });

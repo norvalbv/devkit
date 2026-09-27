@@ -119,6 +119,50 @@ describe('gate config projections', () => {
     expect(project(review.root, review.worktree, 'typo').status).toBe(2);
   });
 
+  // sc-2175: the gitignored `guard-review waive` store must be projected — ship links it, review copies
+  // it privately and must tolerate `reconcile` persisting an env override into that copy.
+  describe('correctness-overrides waiver store', () => {
+    const STORE = '.devkit/correctness-overrides.json';
+    const seedStore = (root: string) => {
+      mkdirSync(join(root, '.devkit'), { recursive: true });
+      writeFileSync(join(root, STORE), '{"abc123def456":{"rationale":"false positive"}}\n');
+    };
+
+    it('ship links the store so an env write-through inside the worktree lands in the checkout', () => {
+      const { root, worktree } = fixture();
+      seedStore(root);
+      const result = project(root, worktree, 'ship');
+      expect(result.status, result.stderr).toBe(0);
+      expect(lstatSync(join(worktree, STORE)).isSymbolicLink()).toBe(true);
+      expect(result.stderr).toContain(STORE);
+      writeFileSync(join(worktree, STORE), '{"abc123def456":{"rationale":"updated"}}\n');
+      expect(lstatSync(join(worktree, STORE)).isSymbolicLink()).toBe(true);
+      expect(readFileSync(join(root, STORE), 'utf8')).toContain('updated');
+    });
+
+    it('ship with no recorded waiver projects nothing and still succeeds', () => {
+      const { root, worktree } = fixture();
+      const result = project(root, worktree, 'ship');
+      expect(result.status, result.stderr).toBe(0);
+      expect(() => lstatSync(join(worktree, STORE))).toThrow();
+      expect(result.stderr).not.toContain(STORE);
+    });
+
+    it('review copies the store privately and a reconcile write-through still passes verify', () => {
+      const { root, worktree } = fixture();
+      seedStore(root);
+      const manifest = join(root, '..', 'projection-runtime.json');
+      const result = project(root, worktree);
+      expect(result.status, result.stderr).toBe(0);
+      expect(lstatSync(join(worktree, STORE)).isSymbolicLink()).toBe(false);
+      expect(readFileSync(join(worktree, STORE), 'utf8')).toContain('abc123def456');
+      expect(mutableProjectionRoots(manifest)).toContain(STORE);
+      writeFileSync(join(worktree, STORE), '{"abc123def456":{"rationale":"env write-through"}}\n');
+      expect(() => verifyProjectionRuntime(root, worktree, manifest)).not.toThrow();
+      expect(readFileSync(join(root, STORE), 'utf8')).toContain('false positive');
+    });
+  });
+
   it('leaves a gate-config symlink already present in the review snapshot untouched', () => {
     const { root, worktree } = fixture();
     writeFileSync(join(root, 'guard.config.json'), '{"scanRoots":["src"]}\n');
