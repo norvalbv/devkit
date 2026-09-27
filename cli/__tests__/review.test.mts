@@ -720,7 +720,10 @@ exec ${JSON.stringify(process.execPath)} "$@"
     const beforeLogs = logs(target.root);
 
     const startedAt = Date.now();
-    const result = runReview(target);
+    // sc-2166: the heartbeat interval is narration — a malformed value must fall back, never abort.
+    const result = runReview(target, [], {
+      env: { ...target.env, DEVKIT_PREFLIGHT_HEARTBEAT: 'soon' },
+    });
     const elapsedMs = Date.now() - startedAt;
 
     expect(result.status, combinedOutput(result)).toBe(0);
@@ -740,6 +743,18 @@ exec ${JSON.stringify(process.execPath)} "$@"
     expect(log).toContain('result=passed exit=0 phase=verdict');
     // Every phase line must precede the gate output rather than being flushed at the end.
     expect(log.indexOf('phase=setup-capture')).toBeLessThan(log.indexOf('REVIEW_HOOK_RAN'));
+    // sc-2166: preflight-verify names each step it runs, and the unguarded watchdog handover is
+    // stamped before the gates so a wedge there no longer reads as a stale preflight-verify.
+    expect(log).toMatch(/step=preflight-verify:worktree-final t=\d+s/);
+    expect(log).toMatch(/step=preflight-verify:target-capture t=\d+s/);
+    expect(log).toMatch(/step=postflight-verify:target-capture t=\d+s/);
+    expect(log).toMatch(/phase=gates-handover t=\d+s/);
+    expect(log.indexOf('phase=gates-handover')).toBeLessThan(log.indexOf('phase=gates t='));
+    expect(log.indexOf('step=preflight-verify:target-capture')).toBeLessThan(
+      log.indexOf('phase=gates-handover'),
+    );
+    // Steps are log-only: the console keeps one line per phase.
+    expect(combinedOutput(result)).not.toContain('step=preflight-verify:');
   }, 240_000);
 
   /**
@@ -798,6 +813,102 @@ exec ${JSON.stringify(process.execPath)} "$@"
     expect(gitBuffer(target.root, 'worktree', 'list', '--porcelain', '-z')).toEqual(
       before.worktrees,
     );
+  }, 240_000);
+
+  // sc-2166: wedges the first dependency verify (step deps-final) so the banner, heartbeat and
+  // trailer are all observed through the real wiring.
+  it('names the wedged preflight-verify step and narrates it until the ceiling fires', () => {
+    const target = fixture();
+    const bin = join(target.parent, 'managed-node-bin');
+    const cliNode = join(bin, 'node-cli');
+    mkdirSync(bin);
+    copyFileSync(process.execPath, cliNode);
+    chmodSync(cliNode, 0o755);
+    write(
+      target.parent,
+      'managed-node-bin/node',
+      `#!/bin/sh
+case "$1:$2" in
+  */review/dependency-runtime.m*s:verify)
+    exec ${JSON.stringify(process.execPath)} -e 'console.error("DEPS_VERIFY_WEDGE_STARTED"); setInterval(() => {}, 1000)'
+    ;;
+esac
+exec ${JSON.stringify(process.execPath)} "$@"
+`,
+      true,
+    );
+    addCommittedChange(target);
+    const before = repositoryEvidence(target.root);
+    const beforeLogs = logs(target.root);
+
+    // Named 124-sentinel carve-out (suite-hangs-bound-at-the-spawn-site). 90s, not 30s: under load
+    // setup alone overran 30s and the ceiling fired before the wedged step was reached.
+    const result = spawnSync(cliNode, [CLI, 'review'], {
+      cwd: target.root,
+      encoding: 'utf8',
+      env: { ...target.env, DEVKIT_PREFLIGHT_TIMEOUT: '90', DEVKIT_PREFLIGHT_HEARTBEAT: '1' },
+      maxBuffer: 16 * 1024 * 1024,
+      timeout: 240_000,
+    });
+    const output = combinedOutput(result);
+    const log = newLogSince(target.root, beforeLogs);
+
+    expect(result.signal, output).toBeNull();
+    expect(output).toContain('DEPS_VERIFY_WEDGE_STARTED');
+    expect(result.status, output).toBe(124);
+    expect(output).toContain('hit the 90s ceiling DURING: preflight-verify:deps-final');
+    // The trailer keeps the coarse phase: its vocabulary is shared with every other terminal line.
+    expect(log).toContain('result=timeout exit=124 phase=preflight-verify');
+    expect(log).toMatch(/step=preflight-verify:deps-final t=\d+s/);
+    // Heartbeats reach both the log and the console, name the step, and count the ceiling down.
+    const beat =
+      /still running — preflight-verify:deps-final \d+m\d{2}s \(ceiling in ≤\d+m\d{2}s\) · log: .+\.log$/m;
+    expect(log).toMatch(beat);
+    expect(output).toMatch(beat);
+    // The guard retires with the run: no heartbeat is written after the terminal trailer.
+    expect(log.slice(log.indexOf('result=timeout'))).not.toContain('still running');
+    expect(repositoryEvidence(target.root)).toEqual(before);
+    expect(gitBuffer(target.root, 'worktree', 'list', '--porcelain', '-z')).toEqual(
+      before.worktrees,
+    );
+  }, 360_000);
+
+  it('stays silent with the heartbeat disabled', () => {
+    const target = fixture();
+    const bin = join(target.parent, 'managed-node-bin');
+    const cliNode = join(bin, 'node-cli');
+    mkdirSync(bin);
+    copyFileSync(process.execPath, cliNode);
+    chmodSync(cliNode, 0o755);
+    write(
+      target.parent,
+      'managed-node-bin/node',
+      `#!/bin/sh
+case "$1:$2" in
+  */review/dependency-runtime.m*s:verify)
+    exec ${JSON.stringify(process.execPath)} -e 'setInterval(() => {}, 1000)'
+    ;;
+esac
+exec ${JSON.stringify(process.execPath)} "$@"
+`,
+      true,
+    );
+    addCommittedChange(target);
+    const beforeLogs = logs(target.root);
+
+    // The named 124-sentinel carve-out in suite-hangs-bound-at-the-spawn-site: this asserts review's
+    // OWN setup ceiling, so supervising it would give the 124 two sources.
+    const result = spawnSync(cliNode, [CLI, 'review'], {
+      cwd: target.root,
+      encoding: 'utf8',
+      env: { ...target.env, DEVKIT_PREFLIGHT_TIMEOUT: '30', DEVKIT_PREFLIGHT_HEARTBEAT: '0' },
+      maxBuffer: 16 * 1024 * 1024,
+      timeout: 150_000,
+    });
+
+    expect(result.status, combinedOutput(result)).toBe(124);
+    expect(combinedOutput(result)).not.toContain('still running');
+    expect(newLogSince(target.root, beforeLogs)).not.toContain('still running');
   }, 240_000);
 
   /**

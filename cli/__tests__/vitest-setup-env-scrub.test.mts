@@ -143,8 +143,10 @@ describe('vitest.setup.mjs scrubs inherited gate policy', () => {
       ...SHIP_ENV,
       SHIP_COMMIT_TIMEOUT: '42',
       DEVKIT_PREFLIGHT_TIMEOUT: '7',
+      DEVKIT_PREFLIGHT_HEARTBEAT: '5',
     });
     expect(env.SHIP_COMMIT_TIMEOUT).toBe('42');
     expect(env.DEVKIT_PREFLIGHT_TIMEOUT).toBe('7');
+    expect(env.DEVKIT_PREFLIGHT_HEARTBEAT).toBe('5');
   });
 });

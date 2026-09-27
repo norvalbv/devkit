@@ -6,6 +6,7 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
@@ -470,5 +471,137 @@ describe('review repository state', () => {
     expect(verifyReviewRepositoryState(linked, manifest)).toEqual(captured);
     git('-c', 'core.hooksPath=/dev/null', 'worktree', 'remove', '--force', ephemeral);
     expect(verifyReviewRepositoryState(linked, manifest)).toEqual(captured);
+  });
+  // sc-2166: a concurrent `git status` moves the admin dir's mtime via index.lock; only that churn
+  // is re-captured, and it must never mask a real change.
+  describe('admin-directory churn during capture (sc-2166)', () => {
+    const failureMessage = (capture: () => void): string => {
+      try {
+        capture();
+      } catch (error) {
+        return error instanceof Error ? error.message : String(error);
+      }
+      return '';
+    };
+    const churn = (gitDir: string) => {
+      const lock = join(gitDir, 'index.lock');
+      writeFileSync(lock, '');
+      unlinkSync(lock);
+    };
+
+    it('re-captures past index.lock churn that settles and writes a verifiable manifest', () => {
+      const target = fixture('devkit review repository admin-churn-settles-');
+      let seamRuns = 0;
+
+      const captured = captureReviewRepositoryState(target.root, target.manifest, {
+        afterFirstCapture: () => {
+          seamRuns += 1;
+          if (seamRuns === 1) churn(join(target.root, '.git'));
+        },
+      });
+
+      expect(seamRuns).toBe(2);
+      expect(verifyReviewRepositoryState(target.root, target.manifest)).toEqual(captured);
+    });
+
+    it('fails after a bounded number of attempts when churn never settles, naming the admin label', () => {
+      const target = fixture('devkit review repository admin-churn-persists-');
+      let seamRuns = 0;
+
+      const message = failureMessage(() =>
+        captureReviewRepositoryState(target.root, target.manifest, {
+          afterFirstCapture: () => {
+            seamRuns += 1;
+            churn(join(target.root, '.git'));
+          },
+        }),
+      );
+
+      expect(seamRuns).toBe(3);
+      expect(message).toMatch(/repository metadata changed during capture/);
+      expect(message).toContain('common:admin');
+      expect(message).toMatch(/another git process/);
+      expect(existsSync(target.manifest)).toBe(false);
+    });
+
+    it('never lets admin churn mask a real ref change in the same window', () => {
+      const target = fixture('devkit review repository admin-churn-masks-ref-');
+      let seamRuns = 0;
+
+      const message = failureMessage(() =>
+        captureReviewRepositoryState(target.root, target.manifest, {
+          afterFirstCapture: () => {
+            seamRuns += 1;
+            churn(join(target.root, '.git'));
+            target.git('update-ref', `refs/heads/raced-${seamRuns}`, 'HEAD');
+          },
+        }),
+      );
+
+      expect(seamRuns).toBe(1);
+      expect(message).toContain('refsSha256');
+      expect(message).toContain('common:refs');
+      expect(message).not.toMatch(/another git process/);
+      expect(existsSync(target.manifest)).toBe(false);
+    });
+
+    it('names config and HEAD changes without retrying them', () => {
+      const config = fixture('devkit review repository named-config-');
+      let configRuns = 0;
+      expect(() =>
+        captureReviewRepositoryState(config.root, config.manifest, {
+          afterFirstCapture: () => {
+            configRuns += 1;
+            config.git('config', 'core.abbrev', String(10 + configRuns));
+          },
+        }),
+      ).toThrow(/changed during capture \(.*configSha256.*common:config/);
+      expect(configRuns).toBe(1);
+
+      const head = fixture('devkit review repository named-head-');
+      let headRuns = 0;
+      expect(() =>
+        captureReviewRepositoryState(head.root, head.manifest, {
+          afterFirstCapture: () => {
+            headRuns += 1;
+            head.git('-c', 'core.hooksPath=/dev/null', 'switch', '--detach', '-q');
+          },
+        }),
+      ).toThrow(/changed during capture \(.*headSymrefBase64.*worktree:HEAD/);
+      expect(headRuns).toBe(1);
+    });
+
+    it('tolerates settling churn in a linked worktree admin directory', () => {
+      const { parent, git, env } = fixture('devkit review repository linked-admin-churn-');
+      const linked = join(parent, 'linked-churn-target');
+      git('-c', 'core.hooksPath=/dev/null', 'worktree', 'add', '-q', '--detach', linked, 'HEAD');
+      const gitDir = realpathSync(
+        execFileSync('git', ['rev-parse', '--path-format=absolute', '--git-dir'], {
+          cwd: linked,
+          env,
+          encoding: 'utf8',
+        }).trim(),
+      );
+      const manifest = join(parent, 'linked-admin-churn.json');
+      let seamRuns = 0;
+
+      const captured = captureReviewRepositoryState(linked, manifest, {
+        afterFirstCapture: () => {
+          seamRuns += 1;
+          if (seamRuns === 1) churn(gitDir);
+        },
+      });
+
+      expect(seamRuns).toBe(2);
+      expect(verifyReviewRepositoryState(linked, manifest)).toEqual(captured);
+
+      const persistent = failureMessage(() =>
+        captureReviewRepositoryState(linked, join(parent, 'linked-admin-churn-2.json'), {
+          afterFirstCapture: () => churn(gitDir),
+        }),
+      );
+      expect(persistent).toContain('worktree:admin');
+      expect(persistent).not.toContain('common:admin');
+    });
   });
 });
