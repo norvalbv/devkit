@@ -49,6 +49,31 @@ export function emitCacheHit(judge: string, model?: unknown, durationMs?: unknow
   });
 }
 
+/** A review-gate hit, which also names the base its PASS was judged against (sc-3468). */
+export interface ReviewCacheHit {
+  judge: string;
+  model: string | undefined;
+  durationMs: number;
+  /** The single earlier base the PASS was judged on; null when current, unknown, or several. */
+  judgedBaseSha: string | null;
+  /** current | moved-clear | moved-overlap | unknown — the digest demotes only the last two. */
+  baseState: string;
+}
+
+/** cache_hit for a domain reviewer. Other emitters keep emitCacheHit, whose rows carry no base
+ * fields, and the digest reads an absent field as "this cache key covers the tree". */
+export function emitReviewCacheHit(hit: ReviewCacheHit): void {
+  emitGateEvent({
+    type: 'cache_hit',
+    judge: hit.judge,
+    // JSON.stringify drops an undefined field, so an unknown model is omitted, not blank.
+    model: hit.model || undefined,
+    duration_ms: Math.max(0, Math.round(hit.durationMs)),
+    judged_base_sha: hit.judgedBaseSha,
+    base_state: hit.baseState,
+  });
+}
+
 /** A hit on a cache key that does NOT hash the evidence bytes (sc-3175). */
 export interface IntentCacheHit {
   judge: string;

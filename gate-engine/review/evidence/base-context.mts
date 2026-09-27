@@ -4,6 +4,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
+import { z } from 'zod';
 import { headHash } from './staged-git.mts';
 
 export type BaseSource = 'ship base' | 'review merge-base' | 'local HEAD';
@@ -22,6 +23,8 @@ export interface ReviewBaseContext {
 }
 
 const SHA_RE = /^[0-9a-f]{7,40}$/;
+/** A FULL object id (SHA-1 or SHA-256): a stored base is compared exactly, never by prefix. */
+const FULL_SHA_RE = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 const PATHS_SHOWN = 10;
 
 export const shortSha = (sha: string): string => sha.slice(0, 12);
@@ -122,6 +125,7 @@ export function primeReviewBaseContext(
 /** Test seam: the resolution reads live git state, which a fixture repo mutates between cases. */
 export function resetReviewBaseContext(): void {
   cache.clear();
+  movedBetween.clear();
 }
 
 /** Paths the base changed since the caller diverged; NULL when git could not answer — a shallow
@@ -150,11 +154,14 @@ function overlaps(moved: string, reviewed: string[]): boolean {
 
 /** Printed once per run on PASS as well as FAIL. Keyed on PATH OVERLAP, never the behind-count or sha
  * inequality: in a shared checkout those are permanently red (base-drift-surfaced-at-read-time (b)).
+ * `run` counts this attempt's judged vs cache-served reviewers: a cached PASS was judged against
+ * whatever base it names on its own line, so the base line claims only the reviewers that ran (sc-3468).
  */
 export function baseProvenanceLines(
   cwd: string,
   reviewedFiles: string[],
   env: NodeJS.ProcessEnv = process.env,
+  run: { fresh: number; cached: number } = { fresh: 1, cached: 0 },
 ): string[] {
   const ctx = reviewBaseContext(cwd, env);
   if (!ctx.baseSha)
@@ -164,8 +171,14 @@ export function baseProvenanceLines(
     ];
   const behind = ctx.behind ? `, ${ctx.behind} commit(s) ahead of your worktree` : '';
   const lines = [
-    `guard-review: reviewed against ${shortSha(ctx.baseSha)} (${ctx.source}${behind}) — ` +
-      'findings below name lines in THAT tree.',
+    run.fresh === 0 && run.cached > 0
+      ? `guard-review: no reviewer ran this attempt — this run's base is ${shortSha(ctx.baseSha)} ` +
+        `(${ctx.source}${behind}), and each cached PASS above names the base it was judged against.`
+      : `guard-review: reviewed against ${shortSha(ctx.baseSha)} (${ctx.source}${behind}) — ` +
+        'findings below name lines in THAT tree.' +
+        (run.cached > 0
+          ? ' Only the reviewers run this attempt; each cached PASS above names its own base.'
+          : ''),
   ];
   if (ctx.envHintMismatch)
     lines.push(
@@ -193,4 +206,110 @@ export function baseProvenanceLines(
       `a finding about them: ${shown.join(', ')}${more}`,
   );
   return lines;
+}
+
+/** Where a replayed PASS's judged base stands against this run's (sc-3468); `moved-*` split on
+ * PATH OVERLAP between the two bases, and `unknown` = unrecorded, malformed or unreadable. */
+export type CachedBaseState = 'current' | 'moved-clear' | 'moved-overlap' | 'unknown';
+
+export interface CachedBaseVerdict {
+  state: CachedBaseState;
+  /** Distinct readable stored bases other than the current one, in first-seen order. */
+  judged: string[];
+  current: string | null;
+  overlapping: string[];
+}
+
+const movedBetween = new Map<string, string[] | null>();
+
+/** Paths whose content differs between two base trees — a TREE diff, so a force-pushed base that
+ * is no descendant of the old one still answers. NULL when git cannot read either commit. */
+function pathsBetween(cwd: string, from: string, to: string): string[] | null {
+  const key = `${cwd}\0${from}\0${to}`;
+  if (movedBetween.has(key)) return movedBetween.get(key) ?? null;
+  const raw = git(cwd, ['diff', '--name-only', '-z', '--no-renames', from, to, '--']);
+  const paths = raw === null ? null : raw.split('\0').filter(Boolean);
+  movedBetween.set(key, paths);
+  return paths;
+}
+
+const RANK = {
+  current: 0,
+  'moved-clear': 1,
+  'moved-overlap': 2,
+  unknown: 3,
+} as const satisfies Record<CachedBaseState, number>;
+
+/** A stored base as read back from the verdict cache: only a sha-shaped string survives, so an
+ * absent, malformed or option-shaped value (it reaches git argv) parses to nothing. */
+export const storedBaseSchema = z.string().regex(FULL_SHA_RE);
+
+export function cachedBaseState(
+  cwd: string,
+  judgedBases: readonly (string | null)[],
+  reviewedFiles: string[],
+  env: NodeJS.ProcessEnv = process.env,
+): CachedBaseVerdict {
+  const current = reviewBaseContext(cwd, env).baseSha;
+  const judged: string[] = [];
+  const overlapping = new Set<string>();
+  let state: CachedBaseState = 'current';
+  const worsen = (next: CachedBaseState): void => {
+    if (RANK[next] > RANK[state]) state = next;
+  };
+  for (const stored of judgedBases) {
+    // A stored value reaches git argv, so only a sha-shaped one is trusted — never an option string.
+    const base = stored !== null && FULL_SHA_RE.test(stored) ? stored : null;
+    if (base === null || current === null) {
+      worsen('unknown');
+      continue;
+    }
+    if (base === current) continue;
+    if (!judged.includes(base)) judged.push(base);
+    const moved = pathsBetween(cwd, base, current);
+    if (moved === null) {
+      worsen('unknown');
+      continue;
+    }
+    const hit = moved.filter((path) => overlaps(path, reviewedFiles));
+    for (const path of hit) overlapping.add(path);
+    worsen(hit.length > 0 ? 'moved-overlap' : 'moved-clear');
+  }
+  return { state, judged, current, overlapping: [...overlapping] };
+}
+
+/** The one base a replayed PASS was judged against, or null when unknown or split across several. */
+export function judgedBaseSha(verdict: CachedBaseVerdict): string | null {
+  if (verdict.state === 'current') return verdict.current;
+  return verdict.state !== 'unknown' && verdict.judged.length === 1 ? verdict.judged[0] : null;
+}
+
+/** The per-reviewer cache line. `current` keeps the historical wording byte-for-byte. */
+export function cachedPassLine(
+  label: string,
+  verdict: CachedBaseVerdict,
+  identical: 'identical diff' | 'identical' = 'identical diff',
+): string {
+  const head = `guard-review: ${label} — cached PASS (${identical}`;
+  const now = verdict.current ? shortSha(verdict.current) : 'UNKNOWN';
+  const was = verdict.judged.map(shortSha).join(', ');
+  switch (verdict.state) {
+    case 'current':
+      return `${head})`;
+    case 'moved-clear':
+      return `${head}; judged against ${was}, base now ${now} — no reviewed path changed between them; not re-judged)`;
+    case 'moved-overlap': {
+      const shown = verdict.overlapping.slice(0, PATHS_SHOWN);
+      const more =
+        verdict.overlapping.length > shown.length
+          ? ` …and ${verdict.overlapping.length - shown.length} more`
+          : '';
+      return (
+        `${head}; judged against ${was}, base now ${now} — ${verdict.overlapping.length} reviewed ` +
+        `path(s) changed between them: ${shown.join(', ')}${more}; NOT re-judged against them)`
+      );
+    }
+    default:
+      return `${head}; judged base UNKNOWN — not re-judged against ${now})`;
+  }
 }

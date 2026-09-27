@@ -40,6 +40,9 @@ export interface GateEvent {
   scope?: string;
   /** cache_hit only: false = the cached verdict was judged on a different staged diff (sc-3175). */
   diff_matches?: boolean;
+  /** review cache_hit only (sc-3468): where the PASS's judged base stands against this run's base. */
+  base_state?: string;
+  judged_base_sha?: string | null;
 }
 
 /** One gate's contribution to this attempt. `gate` is the event's own label, never parsed prose.
@@ -166,6 +169,11 @@ const oneLine = (text: string | undefined = ''): string => {
   return flat.length > DETAIL_CHARS ? `${flat.slice(0, DETAIL_CHARS - 1)}…` : flat;
 };
 
+/** A sink row's judged base, short — JSON.stringify never invokes a row-supplied toString, so a
+ * malformed value (`{"toString":1}`) degrades to "an earlier base" instead of throwing. */
+const shortJudgedBase = (sha: string | null | undefined): string =>
+  /^"([0-9a-f]{7,64})"$/.exec(JSON.stringify(sha ?? null))?.[1].slice(0, 12) ?? 'an earlier base';
+
 /**
  * Which finding this run actually stopped on, given the coarse `blocked_gate` the shell published.
  *
@@ -282,6 +290,21 @@ export function summarise(events: GateEvent[], shipId: string): DigestRow[] {
         state: 'unverified',
         blocking: false,
         detail: 'cached PASS judged an earlier diff — this diff was not re-judged',
+      });
+    } else if (
+      e.type === 'cache_hit' &&
+      (e.base_state === 'moved-overlap' || e.base_state === 'unknown')
+    ) {
+      // A PASS judged on an earlier base whose reviewed paths moved (sc-3468); an absent base_state
+      // (non-review emitters) or 'moved-clear' stays a ✓ — base-drift-surfaced-at-read-time (b).
+      unverified.push({
+        gate: e.judge ?? 'unknown',
+        state: 'unverified',
+        blocking: false,
+        detail:
+          e.base_state === 'unknown'
+            ? 'cached PASS whose judged base is unknown — not re-judged against this base'
+            : `cached PASS judged against ${shortJudgedBase(e.judged_base_sha)} — reviewed paths changed on the base since; not re-judged`,
       });
     } else if (e.type === 'cache_hit') {
       cached.push({ gate: e.judge ?? 'unknown', state: 'cached', blocking: false, detail: '' });

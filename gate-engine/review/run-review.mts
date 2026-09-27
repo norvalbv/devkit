@@ -32,13 +32,19 @@
  */
 
 import { envFlag, type GuardConfig, resolveGuardConfig } from '../config.mts';
-import { emitCacheHit } from '../judge/gate-events.mts';
+import { emitReviewCacheHit } from '../judge/gate-events.mts';
 import { reportGateInfraFailure } from '../judge/odb-probe.mts';
 import { execJudgeAsync, strictRemedy } from '../judge/run-judge.mts';
 import { loadCache } from './cache.mts';
 import { type CascadeResult, runCascade } from './cascade/reviewer.mts';
 import { ENGINE_ERROR_REMEDY, RESPONSE_CONTRACT_REMEDY } from './contracts/response.mts';
-import { baseProvenanceLines, primeReviewBaseContext } from './evidence/base-context.mts';
+import {
+  baseProvenanceLines,
+  cachedBaseState,
+  cachedPassLine,
+  judgedBaseSha,
+  primeReviewBaseContext,
+} from './evidence/base-context.mts';
 import { loadReviewerContext } from './evidence/commit-message.mts';
 import { responseContractFor } from './contracts/registry.mts';
 import { renderFindingsBlockForParts } from './evidence/findings.mts';
@@ -269,18 +275,44 @@ export async function runReviewGate(
     resolveLensGroups(),
     resolveChunkCap(process.env.GUARD_CORRECTNESS_CHUNK, cfg.review.correctnessChunkLoc),
   );
+  // A cached PASS was judged against the base it STORED, not this run's (sc-3468): classify once per
+  // reviewer so its line, scope row and cache_hit all say the same thing.
+  const baseOf = new Map(
+    plan.scope
+      .filter((s) => s.judgedBases.length > 0)
+      .map((s) => [s.sel.reviewer.name, cachedBaseState(cwd, s.judgedBases, s.sel.files)]),
+  );
   for (const s of plan.scope)
-    emitReviewScope(s.sel, s.diff, promptIdentity(s.sel), s.cached, ctx.scopeFields, cwd);
-  for (const line of plan.cachedLines) console.error(line);
+    emitReviewScope(s.sel, s.diff, promptIdentity(s.sel), s.cached, ctx.scopeFields, cwd, {
+      cachedBase: baseOf.get(s.sel.reviewer.name) ?? null,
+    });
+  for (const hit of plan.cachedHits)
+    console.error(
+      cachedPassLine(
+        hit.label,
+        baseOf.get(hit.label) ?? cachedBaseState(cwd, hit.judgedBases, hit.files),
+        hit.part ? 'identical' : 'identical diff',
+      ),
+    );
   // Before any verdict AND before the fully-cached early return below (sc-2480).
+  const fresh = new Set(plan.tasks.map((t) => t.base.reviewer.name)).size;
   for (const line of baseProvenanceLines(
     cwd,
     selected.flatMap((s) => s.files),
+    process.env,
+    { fresh, cached: plan.cachedHits.length },
   ))
     console.error(line);
   for (const c of plan.fullyCached) {
     timing.cacheHit(c.name, c.duration);
-    emitCacheHit(`review:${c.name}`, c.model as string, c.duration);
+    const base = baseOf.get(c.name) ?? cachedBaseState(cwd, c.judgedBases, []);
+    emitReviewCacheHit({
+      judge: `review:${c.name}`,
+      model: c.model,
+      durationMs: c.duration,
+      judgedBaseSha: judgedBaseSha(base),
+      baseState: base.state,
+    });
   }
   if (plan.tasks.length === 0) return finish(0);
   console.error(
