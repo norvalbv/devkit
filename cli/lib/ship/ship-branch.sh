@@ -51,7 +51,9 @@ bounded_remote_git() {
   # .mts in source, built .mjs in an installed consumer (the gate-config-paths dual-ext idiom).
   local supervisor="$SCRIPT_DIR/review/process/gate-supervisor.mts"
   [ -f "$supervisor" ] || supervisor="$SCRIPT_DIR/review/process/gate-supervisor.mjs"
-  node "$supervisor" "${DEVKIT_REMOTE_TIMEOUT_SECONDS:-60}" -- git "$@"
+  # -c: a detached auto-gc/maintenance inherits the supervisor's ownership token and is reaped as a
+  # leaked tree, turning a finished fetch into 124 (sc-3761). Remote git never needs maintenance.
+  node "$supervisor" "${DEVKIT_REMOTE_TIMEOUT_SECONDS:-60}" -- git -c gc.auto=0 -c maintenance.auto=false "$@"
 }
 
 # `--resume <branch>` replays the invocation the previous attempt recorded (ship-intent.mts). A
