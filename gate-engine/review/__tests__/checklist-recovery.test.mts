@@ -5,6 +5,8 @@ import { loadCache } from '../cache.mts';
 import { FOUR_WAY_LENS_GROUPS, lensGroupId } from '../lens/split.mts';
 import { REVIEWERS } from '../reviewers.mts';
 import { runReviewGate } from '../run-review.mts';
+import { runCascade } from '../cascade/reviewer.mts';
+import { resolveGuardConfig } from '../../config.mts';
 import {
   cleanupReviewFixtures,
   consumerRepo,
@@ -482,6 +484,71 @@ describe('runReviewGate — checklist recovery on the strict ship path (sc-2088)
     expect(caps[1]).toBeLessThanOrEqual(caps[0]);
     expect(caps[0] + caps[1]).toBeLessThanOrEqual(2 * 300_000);
     expect(caps[1]).toBeLessThan(300_000);
+  });
+
+  it('never hands the escalation timeout 0 when the first recovery pass spent the whole budget', async () => {
+    const repo = consumerRepo({ backend: true });
+    shipEnv(repo);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    process.env.DEVKIT_GATE_DEADLINE_MS = String(Date.now() + 300_000);
+    // A slow first pass (e.g. one that queued behind another ship's judges) leaves budgetLeft() at 0,
+    // and Node reads `timeout: 0` as NO cap — the escalation would outlive the supervisor uncapped.
+    const realNow = Date.now.bind(Date);
+    let skew = 0;
+    vi.spyOn(Date, 'now').mockImplementation(() => realNow() + skew);
+    const escalations: number[] = [];
+    const attempts = new Map<string, number>();
+    const exec = mkExec(async ({ label, timeout }) => {
+      const attempt = (attempts.get(label) ?? 0) + 1;
+      attempts.set(label, attempt);
+      if (label === TARGET && attempt === 1) {
+        writeArtifact(repo, label, { pending: 3 }); // parks
+        return 'VERDICT: PASS';
+      }
+      if (label === TARGET) {
+        skew += 600_000; // the recovery pass consumed more than its entire budget
+        writeArtifact(repo, label, { failed: 1 });
+        return 'VERDICT: FAIL';
+      }
+      if (label === `${TARGET}:escalate`) {
+        escalations.push(Number(timeout));
+        writeArtifact(repo, TARGET, { failed: 1 });
+        return 'confirmed\nVERDICT: FAIL';
+      }
+      writeArtifact(repo, label);
+      return 'VERDICT: PASS';
+    });
+    await runReviewGate(repo, { exec });
+    expect(escalations).toEqual([]);
+  });
+
+  it('caps the escalation even when the deadline expires between the budget check and the spawn', async () => {
+    const repo = consumerRepo({ backend: true });
+    shipEnv(repo);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const reviewer = REVIEWERS.find((r) => `review:${r.name}` === TARGET)!;
+    // The clock is frozen until the first pass leaves exactly 1ms, then ticks 1ms per read: a guard
+    // that re-reads the budget after checking it sees 0 on the second read and spawns uncapped.
+    let clock = Date.now();
+    let ticking = false;
+    vi.spyOn(Date, 'now').mockImplementation(() => (ticking ? clock++ : clock));
+    const escalations: number[] = [];
+    const exec = mkExec(async ({ label, timeout }) => {
+      if (label === TARGET) {
+        clock += Number(timeout) - 1;
+        ticking = true;
+        writeArtifact(repo, label, { failed: 1 });
+        return 'VERDICT: FAIL';
+      }
+      escalations.push(Number(timeout));
+      writeArtifact(repo, TARGET, { failed: 1 });
+      return 'confirmed\nVERDICT: FAIL';
+    });
+    await runCascade(
+      { reviewer, files: ['src/main/db.ts'] },
+      { cwd: repo, cfg: resolveGuardConfig(repo), exec, judgeTimeoutMs: 300_000 },
+    );
+    expect(escalations).toEqual([1]);
   });
 
   it('classifies the hole from the SETTLED artifact, not the first attempt stale one', async () => {
