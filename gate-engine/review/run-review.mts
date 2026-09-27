@@ -32,13 +32,12 @@
  */
 
 import { envFlag, type GuardConfig, resolveGuardConfig } from '../config.mts';
-import { judgeBinForModel } from '../judge/codex/result.mts';
 import { emitCacheHit } from '../judge/gate-events.mts';
 import { reportGateInfraFailure } from '../judge/odb-probe.mts';
 import { execJudgeAsync, strictRemedy } from '../judge/run-judge.mts';
 import { loadCache } from './cache.mts';
 import { type CascadeResult, runCascade } from './cascade/reviewer.mts';
-import { RESPONSE_CONTRACT_REMEDY } from './contracts/response.mts';
+import { ENGINE_ERROR_REMEDY, RESPONSE_CONTRACT_REMEDY } from './contracts/response.mts';
 import { baseProvenanceLines, primeReviewBaseContext } from './evidence/base-context.mts';
 import { loadReviewerContext } from './evidence/commit-message.mts';
 import { responseContractFor } from './contracts/registry.mts';
@@ -213,12 +212,6 @@ export async function runReviewGate(
   const cache = loadCache(cwd);
   const firstModel = resolveReviewModel(cfg);
   const escalationModel = resolveEscalationModel(cfg);
-  // An engine-error rejection loses WHICH pass threw, so name every binary the cascade could have
-  // spawned — a single guess reads as fact and sends a mixed-family operator to the wrong CLI.
-  const engineOutageBin = (rev: { model?: string }): string =>
-    [
-      ...new Set((rev.model ? [rev.model] : [firstModel, escalationModel]).map(judgeBinForModel)),
-    ].join('` or `');
   const concurrency = reviewConcurrency();
   timing.configure(
     selected.map((selection) => selection.reviewer.name),
@@ -336,7 +329,7 @@ export async function runReviewGate(
         name: t.sel.reviewer.name,
         status: reviewMode ? 'error' : 'inconclusive',
         reason: `engine error: ${e?.message ?? e}`,
-        outageBin: engineOutageBin(t.sel.reviewer),
+        inconclusiveCause: 'engine',
         escalated: false,
       }))
       .then((outcome) => {
@@ -361,8 +354,7 @@ export async function runReviewGate(
         name: task.sel.reviewer.name,
         status: reviewMode ? 'error' : 'inconclusive',
         reason: `engine error: ${e?.message ?? e}`,
-        inconclusiveCause: 'outage',
-        outageBin: engineOutageBin(task.sel.reviewer),
+        inconclusiveCause: 'engine',
         escalated: false,
       })),
     gateStart,
@@ -404,7 +396,9 @@ export async function runReviewGate(
     const remedy =
       cause === 'response-contract'
         ? RESPONSE_CONTRACT_REMEDY
-        : strictRemedy(cause, r.outageBin, r.outageResetsAt);
+        : cause === 'engine'
+          ? ENGINE_ERROR_REMEDY
+          : strictRemedy(cause, r.outageBin, r.outageResetsAt);
     console.error(
       strict
         ? `guard-review: ${r.name} INCONCLUSIVE (${r.reason}) — strict ship mode fails closed.\n` +

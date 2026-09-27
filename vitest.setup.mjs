@@ -95,7 +95,12 @@ export const SHIP_EXPORTED_ENV = [
 
 // FRINK_AI_STRICT is the legacy alias gate-engine reads alongside GUARD_AI_STRICT; no devkit path
 // exports it, so it belongs to neither parity list and is scrubbed on its own merit.
-export const TEST_ONLY_ADDITIONS = ['FRINK_AI_STRICT'];
+// sc-3400: the gate injects the staged-list channel into judge env; a judge's test run must not inherit it.
+export const TEST_ONLY_ADDITIONS = [
+  'FRINK_AI_STRICT',
+  'DEVKIT_REVIEW_STAGED_FILES',
+  'DEVKIT_REVIEW_STAGED_FILES_PATH',
+];
 
 export const SCRUBBED_ENV = [...INHERITED_RUN_ENV, ...SHIP_EXPORTED_ENV, ...TEST_ONLY_ADDITIONS];
 

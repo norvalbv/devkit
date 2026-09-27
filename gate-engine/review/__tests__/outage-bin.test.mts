@@ -73,7 +73,9 @@ describe('strict outage remedy names the dark binary', () => {
     expect(out).not.toContain('check `claude` CLI auth/quota');
   });
 
-  it('an engine-error rejection on a mixed family names BOTH candidate binaries', async () => {
+  // sc-3400: a cascade that THREW is the gate's own failure, not a dark judge — naming any binary's
+  // auth/quota sent operators after a healthy CLI (a deletion-only commit read as a codex outage).
+  it('an engine-error rejection names the engine, never a judge binary', async () => {
     const repo = consumerRepo({ backend: true });
     process.env.GUARD_REVIEW_MODEL = 'gpt-5.6-terra@high';
     process.env.GUARD_REVIEW_ESCALATION_MODEL = 'opus';
@@ -87,7 +89,9 @@ describe('strict outage remedy names the dark binary', () => {
     });
     expect(await runReviewGate(repo, { exec })).toBe(3);
     const out = err.mock.calls.flat().join('\n');
-    expect(out).toContain('check `codex` or `claude` CLI auth/quota');
+    expect(out).toContain('engine error: spawn layer exploded');
+    expect(out).toContain('NOT an auth/quota problem');
+    expect(out).not.toMatch(/check `[^`]+`( or `[^`]+`)? CLI auth\/quota/);
   });
 
   it('a dark codex escalation names codex too (same-family cascade stays correct)', async () => {

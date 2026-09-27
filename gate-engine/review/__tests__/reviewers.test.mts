@@ -1053,6 +1053,10 @@ describe('verifyChecklist — the gate-side anti-hallucination contract', () => 
       null,
     );
     expect(verifyChecklist({ items: [], skipped: '' }, 'PASS')).toContain('skipped the checklist');
+    // sc-3400: whitespace explains nothing either, so it voids like an empty reason.
+    expect(verifyChecklist({ items: [], skipped: ' \t' }, 'PASS')).toContain(
+      'skipped the checklist',
+    );
   });
 });
 

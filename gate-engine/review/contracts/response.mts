@@ -1,13 +1,15 @@
 /** Shared reviewer response primitives. Domain-specific evidence contracts depend on this module. */
 
 /** `rate-limited` is split out of `outage` because its remedy inverts the generic one: re-running
- *  is exactly what cannot succeed until the provider's window resets (sc-2538). */
+ *  is exactly what cannot succeed until the provider's window resets (sc-2538). `engine` is the
+ *  gate's own failure — a throw no judge answered for — which no auth/quota check can clear (sc-3400). */
 export type ReviewInconclusiveCause =
   | 'timeout'
   | 'sync'
   | 'response-contract'
   | 'outage'
-  | 'rate-limited';
+  | 'rate-limited'
+  | 'engine';
 
 /** A parsed VERDICT line: the token (null when absent) plus its markdown-stripped reason. */
 export interface ReviewVerdict {
@@ -43,6 +45,12 @@ export function parseReviewVerdict(raw: string): ReviewVerdict {
     reason: (last[2] ?? '').replace(/\*+/g, '').trim(),
   };
 }
+
+/** Remedy for a cascade that THREW: the gate failed before or around the judge, so pointing the
+ *  operator at a judge CLI's auth/quota sends them after a healthy binary (sc-3400). */
+export const ENGINE_ERROR_REMEDY =
+  'the gate itself failed before or around the judge — this is NOT an auth/quota problem. The ' +
+  'error is quoted above; re-run devkit ship, and if it repeats, report it against devkit';
 
 /** Remedy for any healthy judge whose response failed its declared machine contract. */
 export const RESPONSE_CONTRACT_REMEDY =

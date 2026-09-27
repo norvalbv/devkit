@@ -29,6 +29,7 @@ import {
   agentBody,
   cleanupChecklistState,
   initializeCommitGuardChecklist,
+  isNamedSkip,
   type ReviewOutcome,
   readChecklistState,
   withStagedFiles,
@@ -94,7 +95,22 @@ export async function runCascade(
   const checklistRoot = opts.assetRoot ?? consumerChecklistAssetRoot(cwd, sel.reviewer);
   cleanupChecklistState(cwd, sel.reviewer);
   try {
-    initializeCommitGuardChecklist(cwd, sel.reviewer, checklistRoot, opts.judgeEnv);
+    // The SAME authoritative list the judge gets (sc-3400): without it the script re-resolved its
+    // own ACM universe, and a deletion-only change read as a clobbered index → engine error.
+    const initEnv = withStagedFiles(opts.judgeEnv ?? process.env, sel.reviewer, sel.files);
+    const seeded = initializeCommitGuardChecklist(cwd, sel.reviewer, checklistRoot, initEnv);
+    // Nothing reviewable (every selected path was deleted, say): no judge can add a finding about a
+    // file that no longer exists, so spawning one would only buy an outage risk for a certain PASS.
+    if (isNamedSkip(seeded)) {
+      const skip: CascadeResult = {
+        name: sel.reviewer.name,
+        status: 'pass',
+        reason: `no reviewable files — ${seeded.skipped}`,
+        escalated: false,
+      };
+      attachItems(skip, seeded, new Map(), { full: opts.fullItems });
+      return skip;
+    }
     let res = await cascadeVerdict(sel, opts, checklistRoot);
     // Recovery below only schedules/classifies; it deletes this attempt's artifact without
     // running another judge. Keep its exact private evidence for the resulting inconclusive row.
@@ -230,7 +246,7 @@ async function cascadeVerdict(
       `guard-review: ${reviewer.name}: judge run failed (${firstOutage?.kind ?? 'transient'}), retrying once…`,
     );
     cleanupChecklistState(cwd, reviewer);
-    initializeCommitGuardChecklist(cwd, reviewer, checklistRoot, judgeEnv);
+    initializeCommitGuardChecklist(cwd, reviewer, checklistRoot, env);
     first = await exec(firstOpts);
   }
   if (first === null) {

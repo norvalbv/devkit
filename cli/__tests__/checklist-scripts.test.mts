@@ -565,6 +565,68 @@ describe('checklist scripts — a pure-deletion staged set is never reported as 
     expect(state.files).toEqual(['src/doomed.tsx']);
   });
 
+  // sc-3400: this branch once called an undefined `writeChecklist`, so a deletion-only gate list
+  // threw a ReferenceError that the gate reported as an engine error.
+  it('commit-guard writes a named skip when every gate-selected path is a deletion', () => {
+    const repo = repoWithDeletionOnlyIndex('src');
+    rmSync(join(repo, 'src', 'doomed.tsx')); // a real `git rm`: gone from the worktree too
+    const script = fileURLToPath(
+      new URL('../../skills/commit-guard/scripts/checklist.mjs', import.meta.url),
+    );
+    const r = spawnSync('node', [script, 'init'], {
+      cwd: repo,
+      encoding: 'utf8',
+      env: { ...process.env, DEVKIT_REVIEW_STAGED_FILES: JSON.stringify(['src/doomed.tsx']) },
+    });
+    expect(r.status, r.stderr).toBe(0);
+    const state = JSON.parse(
+      readFileSync(join(repo, '.claude', '.pre-commit-review.json'), 'utf8'),
+    );
+    expect(state.files).toEqual([]);
+    expect(state.skipped).toMatch(/deliberate skip/);
+  });
+
+  // sc-3400: `git mv` stages an R entry, which ACM dropped — a rename-only commit tripped the
+  // "pure deletions" exit. ACMR keeps the renamed file in the checklist.
+  it.each(CASES)('%s reviews the new path of a rename-only staged set', (skill, root, cmd) => {
+    const repo = mkdtempSync(join(tmpdir(), 'checklist-rename-'));
+    dirs.push(repo);
+    const git = (args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' });
+    git(['init', '-q']);
+    git(['config', 'user.email', 'a@b.c']);
+    git(['config', 'user.name', 'a']);
+    git(['config', 'commit.gpgsign', 'false']);
+    writeFileSync(
+      join(repo, 'guard.config.json'),
+      JSON.stringify({
+        scanRoots: [root],
+        review: { backendRoots: [root], frontendRoots: [root] },
+      }),
+    );
+    mkdirSync(join(repo, root), { recursive: true });
+    // auth/db/render-flavoured so every domain checklist finds at least one item on the new path
+    writeFileSync(
+      join(repo, root, 'before.tsx'),
+      'export const login = (password) => db.query(`SELECT ${password}`);\n' +
+        'export const View = () => <img src="a.png" onClick={() => fetch("/x")} />;\n',
+    );
+    git(['add', '-A']);
+    git(['commit', '-qm', 'base']);
+    git(['mv', `${root}/before.tsx`, `${root}/after.tsx`]);
+    const script = fileURLToPath(
+      new URL(`../../skills/${skill}/scripts/checklist.mjs`, import.meta.url),
+    );
+    const r = spawnSync('node', [script, cmd], { cwd: repo, encoding: 'utf8' });
+    expect(r.status, `${skill}: ${r.stdout}${r.stderr}`).toBe(0);
+    expect(r.stderr).not.toMatch(/pure deletions/);
+    if (skill === 'commit-guard') {
+      const state = JSON.parse(
+        readFileSync(join(repo, '.claude', '.pre-commit-review.json'), 'utf8'),
+      );
+      expect(state.files.map((f) => f.path)).toEqual([`${root}/after.tsx`]);
+    }
+  });
+
   it.each(CASES)('%s stays silent when the index is genuinely empty', (skill, root, cmd) => {
     // The counterpart regression: nothing staged at all must remain an ordinary clean skip, or every
     // commit with no in-scope changes starts failing.
