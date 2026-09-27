@@ -32,6 +32,7 @@ const SHIP_ENV = {
   DEVKIT_SHIP_BASE_SHA: 'a'.repeat(40),
   DEVKIT_SHIP_BRANCH: 'outer/ship-branch',
   DEVKIT_SHIP_DRY_GATES: '1',
+  DEVKIT_SHIP_DRY_REVIEWERS: '1',
   DEVKIT_SHIP_FROM_BRANCH: '1',
   DEVKIT_SHIP_ID: 'outer-ship-id',
   DEVKIT_SHIP_INTENT_RECORDED: '1',
@@ -86,6 +87,16 @@ describe('vitest.setup.mjs scrubs inherited gate policy', () => {
       // DEVKIT_GATE_EVENTS is scrubbed and then reassigned; the point is that it is no longer the
       // inherited value, which is what would let a test ship write to the developer's real sink.
       if (name === 'DEVKIT_GATE_EVENTS') continue;
+      expect(env[name], name).toBeUndefined();
+    }
+  });
+
+  it('clears every name of the ship fixture, not only the ones the list already knows', () => {
+    // Iterating SCRUBBED_ENV cannot catch a name missing from SCRUBBED_ENV; the fixture is the
+    // independent side, so a ship variable absent from the list fails here as well.
+    const env = envAfterSetup(SHIP_ENV);
+    for (const name of Object.keys(SHIP_ENV)) {
+      if (name === 'DEVKIT_GATE_EVENTS') continue; // reassigned to a per-worker temp sink by design
       expect(env[name], name).toBeUndefined();
     }
   });
