@@ -297,6 +297,29 @@ gate_node_modules_source() {
   return 2
 }
 
+# The linked install is the ENGINE the worktree hook runs. One older than `.devkit/baselines`
+# (< 0.53.0) misjudges every grandfathered ratchet entry in a repo that stores baselines there, so
+# stop before any commit with the remedy (sc-1934). Exit 2 or a missing helper is a diagnostic that
+# could not run: say so and continue — the worktree gate still decides. Errexit-safe: every status
+# is mapped inside this function.
+gate_baseline_reader_preflight() {
+  local wt=$1 root=$2 node_modules=$3 script_dir tool rc
+  script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+  tool="$script_dir/preflight/baseline-reader.mts"
+  [ -f "$tool" ] || tool="$script_dir/preflight/baseline-reader.mjs"
+  [ -f "$tool" ] || return 0
+  if node "$tool" "$wt" "$root" "$node_modules"; then
+    rc=0
+  else
+    rc=$?
+  fi
+  case "$rc" in
+    0) return 0 ;;
+    1) return 1 ;;
+    *) echo "⚠️  ship: baseline reader preflight unavailable (exit $rc) — continuing to the worktree gate" >&2; return 0 ;;
+  esac
+}
+
 # The pre-commit hook ship will run in the ephemeral worktree. This is the single resolver shared by
 # preparation and commit: overlay wins when projected, an explicit core.hooksPath is honoured, an
 # unset path falls back to the projected package-mode Husky runner, and Git's default hooks directory
@@ -395,7 +418,7 @@ prepare_gate_worktree() {
   for d in "${link_dirs[@]}"; do
     if [ "$d" = node_modules ]; then
       if source=$(gate_node_modules_source "$wt" "$root" "$main_root"); then
-        :
+        gate_baseline_reader_preflight "$wt" "$root" "$source" || return 1
       else
         dependency_rc=$?
         [ "$dependency_rc" -eq 1 ] && continue

@@ -42,6 +42,7 @@ import {
   runnerSkew,
   skewCheck,
 } from '../lib/doctor/pin/runner-identity.mts';
+import { baselineReaderCheck } from '../lib/doctor/pin/baseline-reader.mts';
 import { runSelfHostDoctor } from '../lib/doctor/self-host-doctor.mts';
 import { packageDir, readJson } from '../lib/fs-helpers.mts';
 import { checkCommitMsgHook, commitMsgGuards } from '../lib/husky/commit-msg-block.mts';
@@ -456,6 +457,8 @@ export default async function run(args: string[], cwd: string): Promise<number> 
   const { results, sel } = await collectResults(cwd, cfg, configResult);
   const skewRow = skewCheck(skew);
   if (skewRow) results.unshift(skewRow);
+  const readerRow = baselineReaderCheck(cwd);
+  if (readerRow) results.unshift(readerRow);
 
   console.log('devkit doctor\n');
   const glyph = { OK: '✓', DRIFT: '⚠', MISSING: '✗' };

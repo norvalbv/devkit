@@ -860,6 +860,48 @@ describe('applyInit — per-file line-growth block (recommended-on)', () => {
     expect(existsSync(legacy)).toBe(false);
   });
 
+  // sc-1934: husky runs the INSTALLED devkit, so a pre-0.53 install would lose its freeze if moved.
+  describe('a pinned devkit too old to read .devkit/baselines', () => {
+    const seedLegacyWithInstall = (root: string, installed: string) => {
+      mkdirSync(join(root, 'eslint', 'baselines'), { recursive: true });
+      writeFileSync(
+        join(root, 'eslint', 'baselines', 'size-lines.json'),
+        '{"files":{"a.ts":731}}\n',
+      );
+      const nm = join(root, 'node_modules', '@norvalbv', 'devkit');
+      mkdirSync(nm, { recursive: true });
+      writeFileSync(join(nm, 'package.json'), JSON.stringify({ version: installed }));
+    };
+    const noGates = { ...defaultSelection(), guards: [], husky: false, lineGrowth: false };
+
+    it('leaves the legacy ratchet where the installed 0.52 reader can see it, naming devkit upgrade', async () => {
+      const root = tmpRepo();
+      seedLegacyWithInstall(root, '0.52.9');
+      const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      await applyInit(root, { stack: 'generic', selection: { ...noGates, structure: false } });
+
+      const printed = log.mock.calls.flat().join('\n');
+      log.mockRestore();
+      expect(readFileSync(join(root, 'eslint', 'baselines', 'size-lines.json'), 'utf8')).toBe(
+        '{"files":{"a.ts":731}}\n',
+      );
+      expect(existsSync(linesBaseline(root))).toBe(false);
+      expect(printed).toContain('pinned devkit 0.52.9 cannot read .devkit/baselines');
+      expect(printed).toContain('devkit upgrade');
+    });
+
+    it('migrates at exactly the 0.53.0 floor', async () => {
+      const root = tmpRepo();
+      seedLegacyWithInstall(root, '0.53.0');
+
+      await applyInit(root, { stack: 'generic', selection: { ...noGates, structure: false } });
+
+      expect(readFileSync(linesBaseline(root), 'utf8')).toBe('{"files":{"a.ts":731}}\n');
+      expect(existsSync(join(root, 'eslint', 'baselines', 'size-lines.json'))).toBe(false);
+    });
+  });
+
   it('leaves tracked legacy ratchets untouched in overlay mode', async () => {
     const root = tmpRepo();
     execFileSync('git', ['init', '-q'], { cwd: root });
