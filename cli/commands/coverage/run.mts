@@ -46,7 +46,15 @@ Precedence against your vitest.config, verified against vitest 4.1.10:
       How the failed-file and flaky reporting is read. Pass your own --reporter, configure
       'reporters' in vitest.config, or set DEVKIT_COVERAGE_NO_DIAGNOSIS=1, to drop it.
 
-Exits with vitest's exit code. Vitest-only; the gate itself accepts any istanbul-shaped report.`,
+When EVERY failure is a timeout the retry could not rescue — the load-flake shape — the whole suite
+re-runs ONCE at testTimeout/hookTimeout = max(5 × the observed per-attempt ceiling, 25000ms). vitest
+cannot raise a timeout for a retry, so a load-starved test otherwise fails its retry at the same
+ceiling. It is announced on stderr first, the artifact is published only from that one complete run,
+and anything that passed only there is reported as flaky. Worst case the suite runs twice. Inline
+it(name, fn, ms) timeouts are not raised by --testTimeout. Opt out with DEVKIT_COVERAGE_NO_RERUN=1 or
+--retry=0; passing your own --testTimeout, --hookTimeout or --maxWorkers also disables it.
+
+Exits with vitest's exit code (the re-run's, when one ran). Vitest-only; the gate itself accepts any istanbul-shaped report.`,
 };
 
 export default async function coverageRun(args: string[], cwd: string) {

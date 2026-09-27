@@ -26,7 +26,6 @@
  * Vitest-only ON PURPOSE. The gate itself is runner-agnostic (it reads an istanbul-shaped JSON, which
  * jest/c8/nyc also emit), so this refuses loudly rather than guessing when vitest is absent.
  */
-import { execFileSync, spawn } from 'node:child_process';
 import {
   type Dirent,
   existsSync,
@@ -40,7 +39,11 @@ import { basename, join } from 'node:path';
 import { emitGateEvent } from '../judge/gate-events.mts';
 import {
   formatDiagnosis,
+  formatRerunNotice,
+  formatRerunRescue,
   headSha,
+  raisedTimeoutMs,
+  readClearMarker,
   readDiagnosis,
   removeClearMarker,
   RESULTS_NAME,
@@ -49,6 +52,17 @@ import {
   stagedFiles,
   writeClearMarker,
 } from './failures.mts';
+import {
+  ownsReporter,
+  ownsRetry,
+  ownsTimeoutBudget,
+  RETRY_MIN_VITEST,
+  resolveVitest,
+  runVitestDetailed,
+  supportsRetryCondition,
+  type VitestRun,
+  vitestMajorMinor,
+} from './vitest-cli.mts';
 
 export const COVERAGE_DIR = 'coverage';
 export const REPORT_NAME = 'coverage-final.json';
@@ -57,8 +71,6 @@ export const COVERAGE_FILE = `${COVERAGE_DIR}/${REPORT_NAME}`;
 export const RUNS_DIR = `${COVERAGE_DIR}/.runs`;
 /** Long enough it can never catch a live run; short enough that killed runs don't pile up. */
 export const STALE_RUN_MS = 6 * 60 * 60 * 1000;
-/** Forwarded to the vitest child so a Ctrl-C'd run leaves no run directory and no stale report. */
-const INTERRUPT_SIGNALS = ['SIGINT', 'SIGTERM'] as const;
 
 /**
  * What publishCoverage did. `kept` = a sibling's report survived us; `cleared` = ours was removed.
@@ -195,41 +207,6 @@ export function publishCoverage(
   return 'cleared';
 }
 
-/** The consumer's vitest binary, or null when this repo doesn't have one. */
-export function resolveVitest(cwd: string): string | null {
-  const bin = join(cwd, 'node_modules', '.bin', 'vitest');
-  return existsSync(bin) ? bin : null;
-}
-
-/**
- * Run vitest to completion and return the code the caller should exit with.
- *
- * Shared with cli/lib/baseline-status/produce.mts, devkit's other vitest runner.
- */
-export async function runVitest(bin: string, args: string[], cwd: string): Promise<number> {
-  const child = spawn(bin, args, { cwd, stdio: 'inherit' });
-  // A Ctrl-C'd run must not leave a run directory behind, nor a stale report the gate would trust.
-  // Removed in `finally` because a caller can outlive the run (sc-2228): Node suppresses default
-  // terminate-on-signal while a listener exists, so a leaked one stops the HOST answering SIGTERM.
-  const forwarders = INTERRUPT_SIGNALS.map(
-    (signal) => [signal, () => void child.kill(signal)] as const,
-  );
-  for (const [signal, forward] of forwarders) process.on(signal, forward);
-  try {
-    return await new Promise<number>((done) => {
-      child.on('error', (err) => {
-        console.error(`🚫 could not start vitest: ${err.message}`);
-        done(1);
-      });
-      // `signal ? 1` matters: a killed child reports exitCode null, which `?? 1` alone would keep,
-      // but an explicit 0 from a child that was ALSO signalled must not read as success.
-      child.on('close', (exitCode, signal) => done(signal ? 1 : (exitCode ?? 1)));
-    });
-  } finally {
-    for (const [signal, forward] of forwarders) process.off(signal, forward);
-  }
-}
-
 /** The flag this runner owns — passing it too is what isolation MEANS, so it cannot be delegated. */
 export const RESERVED_FLAG = '--coverage.reportsDirectory';
 
@@ -238,55 +215,27 @@ export function reservesCoverageDir(argv: string[]): boolean {
   return argv.some((arg) => arg === RESERVED_FLAG || arg.startsWith(`${RESERVED_FLAG}=`));
 }
 
-/**
- * ANY mention of retry means the consumer owns it and we inject nothing — `--retry=0` is therefore
- * the opt-out, `--retry.count=3` an override. Both spellings have to count: vitest 4.1.10 CRASHES on
- * `--retry=1` together with `--retry.condition`, so a half-measure here would break the very people
- * who configured retry deliberately.
- */
-export function ownsRetry(argv: string[]): boolean {
-  return argv.some((arg) => /^--(?:no-)?retry(?:[.=]|$)/.test(arg));
+/** Set to keep a timeout-only failure as a failure instead of re-running the suite once. */
+export const NO_RERUN_ENV = 'DEVKIT_COVERAGE_NO_RERUN';
+
+/** Everything shouldRerun decides from. Pure, so every refusal is testable without a suite. */
+export interface RerunInput {
+  code: number;
+  interrupted: boolean;
+  retrying: boolean;
+  diagnosis: RunDiagnosis | null;
+  argv: string[];
+  env: NodeJS.ProcessEnv;
 }
 
-/** Same courtesy for reporters: a consumer who chose their own output does not get ours bolted on. */
-export function ownsReporter(argv: string[]): boolean {
-  return argv.some((arg) => /^--(?:reporter|outputFile)(?:[.=]|$)/.test(arg));
-}
-
-/** The lowest vitest that understands `--retry.condition`. Below it we retry NOTHING — see below. */
-export const RETRY_MIN_VITEST = [4, 1] as const;
-
-/** `vitest/4.1.10 darwin-arm64 node-v22.20.0` → [4, 1]. null when it cannot be read or parsed. */
-export function vitestMajorMinor(bin: string): [number, number] | null {
-  try {
-    const out = execFileSync(bin, ['--version'], {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-      timeout: 30_000,
-    });
-    const m = /(\d+)\.(\d+)\.\d+/.exec(out);
-    return m ? [Number(m[1]), Number(m[2])] : null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Whether it is safe to inject the selective retry.
- *
- * FEATURE-DETECT, DO NOT GUESS. devkit ships inside a consumer's node_modules and runs against
- * whatever vitest is there — `^4.1.10` in devkit's own package.json binds devkit's devDependency, not
- * theirs. vitest silently IGNORES an unknown dotted sub-option, so on an older vitest
- * `--retry.condition` would evaporate while `--retry.count=1` survived, quietly turning the narrow
- * timeout retry into the blanket retry it exists to avoid. That is the worst outcome and it would be
- * invisible, so a version we cannot read is treated as unsupported.
- */
-export function supportsRetryCondition(version: [number, number] | null): boolean {
-  if (!version) return false;
-  const [major, minor] = version;
-  return (
-    major > RETRY_MIN_VITEST[0] || (major === RETRY_MIN_VITEST[0] && minor >= RETRY_MIN_VITEST[1])
-  );
+/** Whether a failed run is the load flake one WHOLE re-run at a raised budget can rescue (sc-3473;
+ * the reasoning, and why each refusal exists, is in the coverage-gate decision). */
+export function shouldRerun(input: RerunInput): boolean {
+  const { code, interrupted, retrying, diagnosis, argv, env } = input;
+  if (code === 0 || interrupted || !retrying) return false;
+  if (!diagnosis?.failures?.allTimedOut) return false;
+  if (ownsRetry(argv) || ownsTimeoutBudget(argv)) return false;
+  return env[NO_RERUN_ENV] !== '1';
 }
 
 /** Set to skip the json reporter (and therefore all post-run diagnosis) without touching retry. */
@@ -360,6 +309,86 @@ export function reportDiagnosis(
   }
 }
 
+/** One complete vitest run, settled: published or cleared, run directory gone. */
+interface Pass extends VitestRun {
+  outcome: PublishOutcome;
+  diagnosis: RunDiagnosis | null;
+  retrying: boolean;
+}
+
+/** One full, isolated coverage run. All per-run state is made fresh here, so a second pass can never
+ * read or clear on the strength of the first one's. */
+async function runPass(
+  vitest: string,
+  cwd: string,
+  argv: string[],
+  budget: string[],
+): Promise<Pass> {
+  pruneStaleRuns(cwd);
+  const runDir = resolveRunDir(cwd);
+  mkdirSync(runDir, { recursive: true });
+  // Captured BEFORE vitest starts: if the artifact changes from this, a sibling published it while
+  // we were running and a failure of ours must not delete it. See publishCoverage.
+  const before = snapshotArtifact(cwd);
+
+  // Inside runDir, which only this run may touch; results.json also keeps it non-empty, so vitest's
+  // cleanAfterRun() has nothing to sweep (the v0.43.1 fail-open).
+  const resultsFile = join(runDir, RESULTS_NAME);
+  const injected = buildInjectedArgs(vitest, argv, resultsFile);
+  const retrying = injected.some((arg) => arg.startsWith('--retry.'));
+
+  let run: VitestRun = { code: 1, interrupted: false };
+  let outcome: PublishOutcome = 'kept';
+  let diagnosis: RunDiagnosis | null = null;
+  // `finally` so a throw never strands runDir. The diagnosis is read before it goes, and never
+  // changes whether the run publishes or clears.
+  try {
+    // The CLI flag beats the consumer's vitest.config reportsDirectory — no config edit downstream.
+    run = await runVitestDetailed(
+      vitest,
+      [
+        'run',
+        '--coverage',
+        `--coverage.reportsDirectory=${runDir}`,
+        ...injected,
+        ...budget,
+        ...argv,
+      ],
+      cwd,
+    );
+    diagnosis = readDiagnosis(resultsFile);
+    // A failed run's report (the consumer's `coverage.reportOnFailure`) is partial: never publish it.
+    if (run.code !== 0) rmSync(join(runDir, REPORT_NAME), { force: true });
+    outcome = publishCoverage(runDir, cwd, before, diagnosis?.failedFiles ?? []);
+  } finally {
+    rmSync(runDir, { recursive: true, force: true });
+  }
+  return { ...run, outcome, diagnosis, retrying };
+}
+
+/** Pass 2 was green: say which pass-1 failures only a bigger budget got through, and count them. */
+function reportRerunRescue(first: RunDiagnosis | null, cwd: string, budget: number): void {
+  const lines = formatRerunRescue(first, cwd, budget);
+  for (const line of lines) console.error(line);
+  const count = first?.failures?.tests.length || first?.failedFiles.length || 0;
+  if (count === 0) return;
+  // The same self-describing type a retry rescue uses: this is a flake, not a gate verdict.
+  emitGateEvent({
+    type: 'test_flaky',
+    gate: 'coverage-run',
+    flaky_count: count,
+    detail: `${count} test(s) passed only on the raised-timeout re-run`,
+  });
+}
+
+/** Keep the marker's clearedAt (when the artifact went) but name the failures that ended the run. */
+function refreshClearMarker(cwd: string, failedFiles: string[]): void {
+  const coverageDir = join(cwd, COVERAGE_DIR);
+  if (existsSync(join(cwd, COVERAGE_FILE))) return; // a sibling published in between — not ours
+  const marker = readClearMarker(coverageDir);
+  if (marker) writeClearMarker(coverageDir, { ...marker, failedFiles });
+}
+
 /**
  * Run the consumer's vitest suite with coverage in an isolated reports directory, publish the report,
  * and return vitest's exit code.
@@ -389,53 +418,29 @@ export async function produceCoverage(cwd = process.cwd(), argv: string[] = []):
     return 1;
   }
 
-  pruneStaleRuns(cwd);
-  const runDir = resolveRunDir(cwd);
-  mkdirSync(runDir, { recursive: true });
-  // Captured BEFORE vitest starts: if the artifact changes from this, a sibling published it while
-  // we were running and a failure of ours must not delete it. See publishCoverage.
-  const before = snapshotArtifact(cwd);
+  const first = await runPass(vitest, cwd, argv, []);
+  reportDiagnosis(first.diagnosis, cwd, first.retrying);
+  let final = first;
 
-  // Both live INSIDE runDir, which only this run may touch. results.json also keeps the directory
-  // non-empty, so vitest's `cleanAfterRun()` — which removes the reports directory once it ends up
-  // empty, the case that produced the v0.43.1 fail-open — has nothing to sweep.
-  const resultsFile = join(runDir, RESULTS_NAME);
-  const injected = buildInjectedArgs(vitest, argv, resultsFile);
-  const retrying = injected.some((arg) => arg.startsWith('--retry.'));
-
-  // The diagnosis is read BEFORE settle() deletes runDir, and is diagnosis ONLY: a run whose report
-  // we cannot describe still publishes or clears exactly as it always did.
-  interface Settled {
-    outcome: PublishOutcome;
-    diagnosis: RunDiagnosis | null;
-  }
-  let settled: Settled | null = null;
-  const settle = (): Settled => {
-    if (settled) return settled;
-    let result: Settled = { outcome: 'kept', diagnosis: null };
-    // `finally`: a throw while publishing must not strand the run directory for the pruner to find
-    // hours later.
-    try {
-      const diagnosis = readDiagnosis(resultsFile);
-      result = {
-        outcome: publishCoverage(runDir, cwd, before, diagnosis?.failedFiles ?? []),
-        diagnosis,
-      };
-    } finally {
-      rmSync(runDir, { recursive: true, force: true });
-      settled = result;
+  if (shouldRerun({ ...first, argv, env: process.env })) {
+    // Pass 1 has fully settled — artifact cleared, marker written — before pass 2 starts, so a kill
+    // anywhere in pass 2 still leaves the gate failing CLOSED with the reason on disk.
+    const budget = raisedTimeoutMs(first.diagnosis?.failures);
+    for (const line of formatRerunNotice(budget)) console.error(line);
+    final = await runPass(vitest, cwd, argv, [
+      `--testTimeout=${budget}`,
+      `--hookTimeout=${budget}`,
+    ]);
+    reportDiagnosis(final.diagnosis, cwd, final.retrying);
+    if (final.code === 0) {
+      reportRerunRescue(first.diagnosis, cwd, budget);
+    } else if (first.outcome === 'cleared' && final.outcome === 'kept') {
+      // Pass 2 found nothing left to clear because pass 1 already had. The marker still names pass
+      // 1's failures; the run that actually ended was pass 2.
+      refreshClearMarker(cwd, final.diagnosis?.failedFiles ?? []);
     }
-    return result;
-  };
-
-  // The CLI flag beats the consumer's vitest.config reportsDirectory — no config edit downstream.
-  const code = await runVitest(
-    vitest,
-    ['run', '--coverage', `--coverage.reportsDirectory=${runDir}`, ...injected, ...argv],
-    cwd,
-  );
-  const { outcome, diagnosis } = settle();
-  reportDiagnosis(diagnosis, cwd, retrying);
+  }
+  const { code, outcome } = final;
 
   // Green tests but no report means the suite never emitted one — most often because `json` is
   // missing from coverage.reporter. The gate still fails CLOSED on the absent artifact, so this is

@@ -27,8 +27,9 @@ import {
   buildInjectedArgs,
   COVERAGE_DIR,
   COVERAGE_FILE,
-  ownsReporter,
-  ownsRetry,
+  NO_RERUN_ENV,
+  type RerunInput,
+  shouldRerun,
   produceCoverage,
   pruneStaleRuns,
   publishCoverage,
@@ -37,12 +38,17 @@ import {
   RUNS_DIR,
   reservesCoverageDir,
   resolveRunDir,
-  resolveVitest,
   STALE_RUN_MS,
   snapshotArtifact,
+} from '../produce.mts';
+import {
+  ownsTimeoutBudget,
+  ownsReporter,
+  ownsRetry,
+  resolveVitest,
   supportsRetryCondition,
   vitestMajorMinor,
-} from '../produce.mts';
+} from '../vitest-cli.mts';
 
 const DEVKIT_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
@@ -611,6 +617,8 @@ describe('a suite that flakes under load', () => {
 
     expect(result.status).not.toBe(0);
     expect(result.stderr).not.toMatch(/passed only on retry/);
+    // A real failure is never a reason to spend a second full run (sc-3473).
+    expect(result.stderr).not.toMatch(/re-running the whole suite/);
     // Fail-CLOSED is unchanged — the artifact is gone. What is new is that the gate can now say WHY.
     expect(existsSync(join(root, COVERAGE_FILE))).toBe(false);
     const marker = readClearMarker(join(root, COVERAGE_DIR));
@@ -921,5 +929,368 @@ writeFileSync(process.argv[2], JSON.stringify({ code }));
     expect(JSON.parse(readFileSync(observed, 'utf8')).code).toBe(1);
     expect(existsSync(join(root, COVERAGE_FILE))).toBe(false);
     expect(readdirSync(join(root, RUNS_DIR))).toEqual([]);
+  });
+});
+
+// sc-3473. vitest cannot raise a timeout for a retry, so a load-starved test fails its retry too.
+// When EVERY failure is a timeout, coverage-run spends one whole re-run at a raised budget.
+describe('the one re-run a timeout-only failure earns', () => {
+  const failing = (): RerunInput => ({
+    code: 1,
+    interrupted: false,
+    retrying: true,
+    diagnosis: {
+      failedFiles: ['/repo/a.test.ts'],
+      flaky: [],
+      failures: { tests: [], allTimedOut: true, timeoutMs: 300 },
+    },
+    argv: [],
+    env: {},
+  });
+
+  it('re-runs a failure that is nothing but timeouts', () => {
+    expect(shouldRerun(failing())).toBe(true);
+  });
+
+  // The documented opt-out is `=1`. A falsy-looking value must not silently switch the rescue off.
+  it.each(['0', 'false', ''])('still re-runs when the opt-out env is %j', (value) => {
+    expect(shouldRerun({ ...failing(), env: { [NO_RERUN_ENV]: value } })).toBe(true);
+  });
+
+  it.each<[string, Partial<RerunInput>]>([
+    ['a green run', { code: 0 }],
+    ['an interrupted run', { interrupted: true }],
+    ['a run devkit did not retry', { retrying: false }],
+    ['a run with no report', { diagnosis: null }],
+    ['a run where nothing failed', { diagnosis: { failedFiles: [], flaky: [] } }],
+    [
+      'a real failure among the timeouts',
+      {
+        diagnosis: {
+          failedFiles: ['/repo/a.test.ts'],
+          flaky: [],
+          failures: { tests: [], allTimedOut: false, timeoutMs: 300 },
+        },
+      },
+    ],
+    ['the opt-out env', { env: { [NO_RERUN_ENV]: '1' } }],
+    ['a consumer-owned retry', { argv: ['--retry=0'] }],
+    ['a consumer-owned timeout', { argv: ['--testTimeout=9000'] }],
+    ['a consumer-owned worker count', { argv: ['--maxWorkers', '2'] }],
+  ])('does not re-run %s', (_label, change) => {
+    expect(shouldRerun({ ...failing(), ...change })).toBe(false);
+  });
+
+  it('recognises every spelling of a consumer-owned budget, and nothing else', () => {
+    for (const arg of [
+      '--testTimeout=1',
+      '--testTimeout',
+      '--test-timeout=1',
+      '--hookTimeout=1',
+      '--hook-timeout',
+      '--maxWorkers=50%',
+      '--max-workers=2',
+    ]) {
+      expect(ownsTimeoutBudget([arg]), arg).toBe(true);
+    }
+    for (const arg of ['--testNamePattern=x', '-t', '--testTimeouts=1', 'testTimeout']) {
+      expect(ownsTimeoutBudget([arg]), arg).toBe(false);
+    }
+  });
+
+  // A scripted vitest: pass N does plan[N-1]. Every invocation's argv is logged, so the tests can
+  // see how many passes ran and exactly what each was given.
+  const scriptedVitest = (root: string, plan: string[], extra = '') => {
+    const log = join(root, 'invocations.log');
+    silentStubVitest(
+      root,
+      `const fs = require('node:fs');
+const arg = (p) => (process.argv.find((a) => a.startsWith(p)) ?? '').slice(p.length);
+fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify(process.argv.slice(2)) + '\\n');
+const n = fs.readFileSync(${JSON.stringify(log)}, 'utf8').trim().split('\\n').length;
+const step = ${JSON.stringify(plan)}[n - 1] ?? 'unplanned';
+const dir = arg('--coverage.reportsDirectory=');
+const out = arg('--outputFile.json=');
+const timedOut = (name, duration) => ({
+  name, status: 'failed', message: '',
+  assertionResults: [{ fullName: 'slow', status: 'failed', duration,
+    failureMessages: ['Error: STACK_TRACE_ERROR\\n  at task', 'Error: STACK_TRACE_ERROR\\n  at task'] }],
+});
+const report = (testResults) => fs.writeFileSync(out, JSON.stringify({ testResults }));
+const green = () => {
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(dir + '/coverage-final.json', JSON.stringify({ 'lib.mjs': { fresh: n } }));
+  report([{ name: '/repo/a.test.ts', status: 'passed', assertionResults: [] }]);
+  process.exit(0);
+};
+${extra}
+if (step === 'timeout') { report([timedOut('/repo/a.test.ts', 612)]); process.exit(1); }
+if (step === 'slow-timeout') { report([timedOut('/repo/a.test.ts', 40000)]); process.exit(1); }
+if (step === 'other-timeout') { report([timedOut('/repo/b.test.ts', 612)]); process.exit(1); }
+if (step === 'bug') {
+  report([{ name: '/repo/a.test.ts', status: 'failed',
+    assertionResults: [{ fullName: 'bug', status: 'failed', failureMessages: ['AssertionError'] }] }]);
+  process.exit(1);
+}
+if (step === 'green') green();
+if (step === 'green-no-report') { report([]); process.exit(0); }
+process.exit(99);`,
+    );
+    // SAFETY: every line was written by the stub above as JSON.stringify(process.argv.slice(2)),
+    // an array of strings.
+    return () =>
+      readFileSync(log, 'utf8')
+        .trim()
+        .split('\n')
+        .map((l) => JSON.parse(l) as string[]);
+  };
+
+  const run = (root: string, args: string[] = [], env: NodeJS.ProcessEnv = {}) =>
+    testSpawnSync(process.execPath, [CLI, 'coverage-run', ...args], {
+      cwd: root,
+      encoding: 'utf8',
+      env: { ...process.env, ...env },
+    });
+
+  const seedArtifact = (root: string) => {
+    mkdirSync(join(root, COVERAGE_DIR), { recursive: true });
+    writeFileSync(join(root, COVERAGE_FILE), '{"from-an-earlier-green-run.ts":{}}');
+  };
+
+  it('publishes from a second pass given a raised budget, and reports the rescue as flaky', () => {
+    const root = makeRoot();
+    const calls = scriptedVitest(root, ['timeout', 'green']);
+    seedArtifact(root);
+
+    const result = run(root);
+
+    expect(result.status).toBe(0);
+    const [first, second] = calls();
+    expect(calls()).toHaveLength(2);
+    // 306ms observed per attempt × 5 is under the floor, so the floor wins.
+    expect(second).toContain('--testTimeout=25000');
+    expect(second).toContain('--hookTimeout=25000');
+    expect(first.some((a) => a.startsWith('--testTimeout'))).toBe(false);
+    // Still retrying, still reporting — pass 2 is a normal run with a bigger budget.
+    expect(second).toContain('--retry.count=1');
+    // Its own run directory: nothing of pass 1's state carries over.
+    const dirOf = (argv: string[]) => argv.find((a) => a.startsWith('--coverage.reportsDirectory'));
+    expect(dirOf(second)).not.toBe(dirOf(first));
+    expect(JSON.parse(readFileSync(join(root, COVERAGE_FILE), 'utf8'))['lib.mjs'].fresh).toBe(2);
+    expect(readClearMarker(join(root, COVERAGE_DIR))).toBeNull();
+    expect(readdirSync(join(root, RUNS_DIR))).toEqual([]);
+    expect(result.stderr).toMatch(/re-running the whole suite ONCE at testTimeout=25000ms/);
+    expect(result.stderr).toMatch(/passed only at the raised timeout/);
+    expect(result.stderr).toMatch(/a\.test\.ts > slow/);
+  });
+
+  it('scales the budget from the observed per-attempt ceiling', () => {
+    const root = makeRoot();
+    const calls = scriptedVitest(root, ['slow-timeout', 'green']);
+
+    expect(run(root).status).toBe(0);
+    // 40000ms summed over two attempts = 20000ms per attempt; × 5.
+    expect(calls()[1]).toContain('--testTimeout=100000');
+  });
+
+  it('runs at most twice, and a second failure names its own files on the marker', () => {
+    const root = makeRoot();
+    const calls = scriptedVitest(root, ['timeout', 'other-timeout', 'green']);
+    seedArtifact(root);
+
+    const result = run(root);
+
+    expect(result.status).toBe(1);
+    expect(calls()).toHaveLength(2);
+    expect(existsSync(join(root, COVERAGE_FILE))).toBe(false);
+    expect(readClearMarker(join(root, COVERAGE_DIR))?.failedFiles).toEqual(['/repo/b.test.ts']);
+    expect(result.stderr).not.toMatch(/passed only at the raised timeout/);
+  });
+
+  it('does not call a green-but-reportless second pass a success', () => {
+    const root = makeRoot();
+    scriptedVitest(root, ['timeout', 'green-no-report']);
+
+    const result = run(root);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toMatch(/vitest passed but produced no coverage-final\.json/);
+  });
+
+  it.each<[string, string[], NodeJS.ProcessEnv]>([
+    ['a real failure', [], {}],
+    ['the opt-out env', [], { [NO_RERUN_ENV]: '1' }],
+    ['a consumer-owned timeout', ['--testTimeout=9000'], {}],
+  ])('stays a single failed run for %s', (label, args, env) => {
+    const root = makeRoot();
+    const calls = scriptedVitest(root, [label === 'a real failure' ? 'bug' : 'timeout', 'green']);
+    seedArtifact(root);
+
+    const result = run(root, args, env);
+
+    expect(result.status).toBe(1);
+    expect(calls()).toHaveLength(1);
+    expect(existsSync(join(root, COVERAGE_FILE))).toBe(false);
+    expect(result.stderr).not.toMatch(/re-running the whole suite/);
+  });
+
+  // In process as well: the scripted stub is silent on stdout (sc-2228), and this is the path the
+  // coverage report can actually see.
+  it('re-runs, publishes and returns the second pass code in process', async () => {
+    const root = makeRoot();
+    const calls = scriptedVitest(root, ['timeout', 'green']);
+    seedArtifact(root);
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      expect(await produceCoverage(root)).toBe(0);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(calls()).toHaveLength(2);
+    expect(existsSync(join(root, COVERAGE_FILE))).toBe(true);
+  });
+
+  it('refreshes the marker with the second pass failures in process', async () => {
+    const root = makeRoot();
+    scriptedVitest(root, ['timeout', 'other-timeout']);
+    seedArtifact(root);
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      expect(await produceCoverage(root)).toBe(1);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(readClearMarker(join(root, COVERAGE_DIR))?.failedFiles).toEqual(['/repo/b.test.ts']);
+  });
+
+  // `coverage.reportOnFailure` makes a failed run write a report anyway. It is partial, so trusting it
+  // — during pass 2, or after pass 2 is killed — would pass the gate on incomplete coverage.
+  it('never publishes the report of a failed pass', async () => {
+    const root = makeRoot();
+    scriptedVitest(
+      root,
+      ['report-on-failure'],
+      `if (step === 'report-on-failure') {
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(dir + '/coverage-final.json', JSON.stringify({ 'partial.mjs': {} }));
+  report([{ name: '/repo/a.test.ts', status: 'failed',
+    assertionResults: [{ fullName: 'bug', status: 'failed', failureMessages: ['AssertionError'] }] }]);
+  process.exit(1);
+}`,
+    );
+    seedArtifact(root);
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      expect(await produceCoverage(root)).toBe(1);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(existsSync(join(root, COVERAGE_FILE))).toBe(false);
+    expect(readClearMarker(join(root, COVERAGE_DIR))?.failedFiles).toEqual(['/repo/a.test.ts']);
+  });
+
+  // Between the passes a sibling agent publishes a good report. Pass 2 failing must not destroy it —
+  // and must not write a marker claiming it discarded something it did not.
+  it('leaves a sibling report published between the passes alone', async () => {
+    const root = makeRoot();
+    scriptedVitest(
+      root,
+      ['timeout', 'sibling-then-fail'],
+      `if (step === 'sibling-then-fail') {
+  fs.mkdirSync(${JSON.stringify(join(root, COVERAGE_DIR))}, { recursive: true });
+  fs.writeFileSync(${JSON.stringify(join(root, COVERAGE_FILE))}, '{"sibling.ts":{}}');
+  report([timedOut('/repo/b.test.ts', 612)]);
+  process.exit(1);
+}`,
+    );
+    seedArtifact(root);
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      expect(await produceCoverage(root)).toBe(1);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(readFileSync(join(root, COVERAGE_FILE), 'utf8')).toContain('sibling.ts');
+    // The marker from pass 1's clear is left as it was, not rewritten for a clear pass 2 never made.
+    expect(readClearMarker(join(root, COVERAGE_DIR))?.failedFiles).toEqual(['/repo/a.test.ts']);
+  });
+
+  // The escape hatch is printed where the failure is, not only after a rescue — the whole point of
+  // the story is that the advice used to arrive one full run too late.
+  it('prints the exact escape hatch when the re-run is opted out', () => {
+    const root = makeRoot();
+    scriptedVitest(root, ['timeout']);
+
+    const result = run(root, [], { [NO_RERUN_ENV]: '1' });
+
+    expect(result.stderr).toContain('--testTimeout=25000 --maxWorkers=50%');
+  });
+
+  // The stub writes a timeout-shaped report and THEN blocks, so everything shouldRerun reads says
+  // "re-run" except the interruption itself. Ctrl-C must end it.
+  it('never starts a second pass after a Ctrl-C', async () => {
+    const root = makeRoot();
+    const ready = join(root, 'ready.flag');
+    const calls = scriptedVitest(
+      root,
+      ['timeout-then-block', 'green'],
+      `if (step === 'timeout-then-block') {
+  report([timedOut('/repo/a.test.ts', 612)]);
+  fs.writeFileSync(${JSON.stringify(ready)}, 'x');
+  ${blockFor(60_000)}
+}`,
+    );
+
+    const child = spawn(process.execPath, [CLI, 'coverage-run'], { cwd: root, stdio: 'pipe' });
+    const guard = setTimeout(() => child.kill('SIGKILL'), 60_000);
+    let stderr = '';
+    child.stderr.on('data', (d) => (stderr += d));
+    try {
+      await waitForPath(ready, 30_000);
+      child.kill('SIGINT');
+      await new Promise((r) => child.on('close', r));
+    } finally {
+      clearTimeout(guard);
+      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+    }
+
+    expect(calls()).toHaveLength(1);
+    expect(stderr).not.toMatch(/re-running the whole suite/);
+    expect(readdirSync(join(root, RUNS_DIR))).toEqual([]);
+  });
+});
+
+describe('a load flake the retry cannot rescue, against real vitest', () => {
+  // Starves on EVERY attempt at 300ms — the field report's shape, where the retry at the same
+  // ceiling failed too. Only a bigger budget gets it through.
+  it('goes green on the one re-run and keeps the artifact', () => {
+    const root = makeRoot();
+    symlinkSync(join(DEVKIT_ROOT, 'node_modules'), join(root, 'node_modules'));
+    writeFileSync(
+      join(root, 'vitest.config.mjs'),
+      `export default {
+        test: {
+          include: ['*.test.mjs'],
+          testTimeout: 300,
+          coverage: { provider: 'v8', reporter: ['json'], reportsDirectory: './coverage' },
+        },
+      };\n`,
+    );
+    writeFileSync(
+      join(root, 'starved.test.mjs'),
+      `import { expect, it } from 'vitest';
+      it('starved under load', async () => {
+        await new Promise((r) => setTimeout(r, 600));
+        expect(1).toBe(1);
+      });\n`,
+    );
+
+    const result = coverageRun(root);
+
+    expect(result.status).toBe(0);
+    expect(existsSync(join(root, COVERAGE_FILE))).toBe(true);
+    expect(result.stderr).toMatch(/re-running the whole suite ONCE/);
+    expect(result.stderr).toMatch(/starved under load/);
+    expect(result.stderr).toMatch(/passed only at the raised timeout/);
   });
 });
