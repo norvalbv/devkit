@@ -78,8 +78,27 @@ describe('native benchmark planning', () => {
   });
   it('censuses four large rows and validates actual derived checklist artifacts', () => {
     const census = preflightPlans(loadRows(reviewer));
-    expect(census.filter((p) => p.chunkCount > 1)).toHaveLength(4);
-    expect(census.reduce((sum, p) => sum + p.taskCount, 0)).toBe(608);
+    // Planner shape, not corpus size: new small rows must not need an edit here.
+    expect(BENCH_LENS_GROUPS).toHaveLength(4);
+    // Rows are compared with ids attached, so a drifting row is named in the failure.
+    const censusRow = (p) => [p.id, p.chunkCount, p.taskCount];
+    expect(
+      census
+        .filter((p) => p.chunkCount > 0)
+        .map(censusRow)
+        .sort(),
+    ).toEqual([
+      ['corr-asymmetric-flip-classifier', 3, 10],
+      ['corr-asymmetric-flip-classifier-repaired', 3, 10],
+      ['corr-only-selector-silent-drop', 3, 10],
+      ['corr-only-selector-silent-drop-repaired', 3, 10],
+    ]);
+    const whole = census.filter((p) => p.chunkCount === 0);
+    expect(whole.length).toBe(census.length - 4);
+    expect(whole.length).toBeGreaterThan(0);
+    expect(whole.filter((p) => p.taskCount !== BENCH_LENS_GROUPS.length).map(censusRow)).toEqual(
+      [],
+    );
     expect(validateRow(large).problems).toEqual([]);
     expect(validateRow(small).problems).toEqual([]);
     expect(() =>
