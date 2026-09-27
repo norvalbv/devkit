@@ -41,12 +41,15 @@ The jargon you'll meet in devkit's help, prompts, and gate output — in one pla
   `(unexpected:2)`. Nothing exports it by default, and it salts the **deterministic-prefix cache** so a
   non-strict all-green key can't authorise a later strict run.
 - **fail-closed** — the ship-only inverse of **fail-open**: when a strict AI gate can't reach a verdict
-  (a `claude` outage, or inconclusive after its one retry) it **blocks** the ship instead of skipping.
+  (a `claude` outage, inconclusive after its one retry, or the gate itself could not run — e.g. a git
+  read failed) it **blocks** the ship instead of skipping.
   Armed by `GUARD_AI_STRICT=1`, which only `devkit ship` exports; an ad-hoc `git commit` stays fail-open.
 - **exit-3 contract** — a strict AI gate that fails closed exits **3**, kept distinct from a real finding's
-  exit **1** (and a deterministic fail-open's **2**). Exit 3 means "the judge couldn't run — check the judge CLI's
-  auth (codex for gpt-* judges, `claude` otherwise) and re-run", never "the code failed review", so a hook never renders an outage as an
-  escalation-confirmed FAIL. When the wait outlasts the ship, re-target the judges at the other
+  exit **1** (and a deterministic fail-open's **2**). Exit 3 means "the judge or the gate couldn't run", never
+  "the code failed review", so a hook never renders an outage as an escalation-confirmed FAIL. The banner above
+  it names which: a judge outage names the judge CLI (codex for gpt-* judges, `claude` otherwise) — check its
+  auth and re-run; a gate that could not run prints `<gate>: could not run — <error> (strict ship mode: failing
+  closed)` — fix that error (e.g. a git failure), not the judge. When the wait outlasts the ship, re-target the judges at the other
   family instead — the knob set is in [troubleshooting.md](troubleshooting.md). Only ship's `GUARD_AI_STRICT` produces it; hand-authored consumer hooks must special-case it.
 - **deterministic-prefix cache** (`guard-prefix`) — once every deterministic gate passes, their all-green
   result is cached against the staged tree's hash under `.devkit/`, armed only under `DEVKIT_SHIP=1` (a ship

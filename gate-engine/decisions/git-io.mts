@@ -10,13 +10,18 @@
  * Thin by design — no error handling here. A git failure is a real gate failure and belongs to the
  * caller's own try/catch, which decides fail-open vs block for ITS gate. W-3: every call runs in the
  * CONSUMER cwd the caller passes, never the package dir.
+ *
+ * The one thing it does set is the output cap (sc-3567): detect buffers the whole staged diff, and
+ * Node's 1 MiB default turned any mass deletion into a spawnSync ENOBUFS — an unjudged gate.
  */
 
 import { execFileSync } from 'node:child_process';
 
+const MAX_GIT_OUTPUT = 64 * 1024 * 1024; // matches review/evidence/staged-git.mts
+
 /** One `git` invocation in `cwd`, argv-form. Throws on non-zero exit (the caller decides). */
 export function git(cwd: string, args: string[]): string {
-  return execFileSync('git', args, { cwd, encoding: 'utf8' });
+  return execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: MAX_GIT_OUTPUT });
 }
 
 /**

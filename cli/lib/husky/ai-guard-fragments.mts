@@ -24,8 +24,8 @@ if [ "$ddrc" -eq 1 ]; then
     echo "   Record the decision target, or bypass a non-decision: GUARD_NO_LOG=1 git commit ..."
     exit 1
 elif [ "$ddrc" -eq 3 ]; then
-    echo "   guard-decisions: judge unavailable — strict ship mode failed closed."
-    echo "   Follow the judge CLI remedy printed above, then re-run devkit ship (cleared judgements are cached)."
+    echo "   guard-decisions: judge unavailable or gate could not run — strict ship mode failed closed."
+    echo "   Follow the remedy printed above, then re-run devkit ship (cleared judgements are cached)."
     exit 1
 elif [ "$ddrc" -ne 0 ] && [ "$ddrc" -ne 2 ]; then
     echo "   guard-decisions: unexpected exit $ddrc — blocking the commit."
