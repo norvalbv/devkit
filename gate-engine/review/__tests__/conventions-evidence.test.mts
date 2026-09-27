@@ -86,7 +86,10 @@ describe('conventions evidence completeness', () => {
     const repo = consumerRepo();
     mkdirSync(join(repo, 'src'), { recursive: true });
     writeFileSync(join(repo, 'CLAUDE.md'), 'Every config must set flag true.\n');
-    writeFileSync(join(repo, 'src', 'config.json'), '{ "flag": false }\n');
+    writeFileSync(
+      join(repo, 'src', 'config.json'),
+      '{ "note": "VIOLATION: quoted source label" }\n',
+    );
     execSync('git add .', { cwd: repo });
     const exec = vi.fn(
       async () =>
@@ -172,7 +175,7 @@ describe('conventions evidence completeness', () => {
       .mockResolvedValueOnce('VERDICT: FAIL — incomplete evidence')
       .mockResolvedValueOnce(
         'VIOLATION: Every config must set flag true. — CLAUDE.md:1\n' +
-          'OFFENDING: { "flag": false } — src/config-0.json:1\n' +
+          'OFFENDING: {"value":"xxxxxxxxxx… — src/config-0.json:1\n' +
           'VERDICT: FAIL — cited violation',
       );
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -294,5 +297,117 @@ describe('conventions post-change line counts', () => {
     const [call] = exec.mock.calls[0];
     expect(call.args[1]).toContain('src/text.json: 1');
     expect(call.args[1]).not.toContain('src/blob.bin:');
+  });
+});
+
+describe('conventions quote grounding (sc-3580)', () => {
+  const DISABLE = '/* eslint-disable max-lines */';
+  const numbered = (count: number) =>
+    [DISABLE, ...Array.from({ length: count - 1 }, (_, i) => `export const v${i + 2} = ${i + 2};`)]
+      .join('\n')
+      .concat('\n');
+  const commit = (repo: string) =>
+    execSync(
+      'git -c user.email=devkit@example.test -c user.name="Devkit Test" -c commit.gpgsign=false commit -qm base',
+      { cwd: repo },
+    );
+
+  // The story's shape: a 520-line file already over the rule at HEAD, one line edited deep inside.
+  const debtRepo = () => {
+    const repo = consumerRepo();
+    mkdirSync(join(repo, 'src'), { recursive: true });
+    writeFileSync(join(repo, 'CLAUDE.md'), 'No source file may exceed 500 lines.\n');
+    writeFileSync(join(repo, 'src', 'flows.json'), numbered(520));
+    execSync('git add .', { cwd: repo });
+    commit(repo);
+    writeFileSync(
+      join(repo, 'src', 'flows.json'),
+      numbered(520).replace('v300 = 300;', 'v300 = 301;'),
+    );
+    execSync('git add .', { cwd: repo });
+    return repo;
+  };
+  const failCiting = (quote: string, line: number) =>
+    'VIOLATION: No source file may exceed 500 lines. — CLAUDE.md:1\n' +
+    `OFFENDING: ${quote} — src/flows.json:${line}\n` +
+    'VERDICT: FAIL — src/flows.json exceeds 500 lines';
+
+  it('a FAIL quoting a symbol absent from the file is inconclusive, not a block', async () => {
+    const repo = debtRepo();
+    const exec = vi.fn(async () => failCiting('FLOW_OUTPUT_SCHEMAS', 1));
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    expect(await runReviewGate(repo, { exec })).toBe(2);
+    const printed = err.mock.calls.flat().join('\n');
+    expect(printed).toContain('whose quote is present in the reviewed change');
+    expect(printed).not.toContain('conventions-reviewer FAILED');
+  });
+
+  it('a verbatim quote of unchanged over-cap debt does not block either', async () => {
+    const repo = debtRepo();
+    const exec = vi.fn(async () => failCiting(DISABLE, 1));
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    expect(await runReviewGate(repo, { exec })).toBe(2);
+  });
+
+  it('a quote of the line this change edits still blocks', async () => {
+    const repo = debtRepo();
+    const exec = vi.fn(async () => failCiting('export const v300 = 301;', 300));
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    expect(await runReviewGate(repo, { exec })).toBe(1);
+    expect(err.mock.calls.flat().join('\n')).toContain('conventions-reviewer FAILED');
+  });
+
+  it('strict mode retries a fabricated FAIL once and blocks on a grounded retry', async () => {
+    process.env.GUARD_AI_STRICT = '1';
+    const repo = debtRepo();
+    const exec = vi
+      .fn()
+      .mockResolvedValueOnce(failCiting('validateFlowTemplates', 1))
+      .mockResolvedValueOnce(failCiting('export const v300 = 301;', 300));
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    expect(await runReviewGate(repo, { exec })).toBe(1);
+    expect(exec).toHaveBeenCalledTimes(2);
+    expect(exec.mock.calls[1][0].args[1]).toContain('copied verbatim, that this change adds');
+  });
+
+  it('strict mode fail-closes when the retry is fabricated too', async () => {
+    process.env.GUARD_AI_STRICT = '1';
+    const repo = debtRepo();
+    const exec = vi.fn(async () => failCiting('FLOW_OUTPUT_SCHEMAS', 1));
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    expect(await runReviewGate(repo, { exec })).toBe(3);
+    expect(exec).toHaveBeenCalledTimes(2);
+  });
+
+  it('asks for one waiver per grounded finding, never for a fabricated pair beside it', async () => {
+    const repo = debtRepo();
+    const exec = vi.fn(
+      async () =>
+        'VIOLATION: No source file may exceed 500 lines. — CLAUDE.md:1\n' +
+        'OFFENDING: export const v300 = 301; — src/flows.json:300\n' +
+        'VIOLATION: No source file may exceed 500 lines. — CLAUDE.md:1\n' +
+        'OFFENDING: FLOW_OUTPUT_SCHEMAS — src/flows.json:1\n' +
+        'VERDICT: FAIL — two findings',
+    );
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    expect(await runReviewGate(repo, { exec })).toBe(1);
+    const printed = err.mock.calls.flat().join('\n');
+    expect(printed).toContain('1 un-overridden finding(s)');
+    expect(printed).toContain('src/flows.json:300');
+    expect(printed).not.toContain('src/flows.json:1 [');
+  });
+
+  it('hands the reviewer the HEAD length beside the post-change length', async () => {
+    const repo = debtRepo();
+    const exec = passWithArtifact(repo);
+    expect(await runReviewGate(repo, { exec })).toBe(0);
+    expect(exec.mock.calls[0][0].args[1]).toContain('src/flows.json: 520 (HEAD: 520)');
+    expect(exec.mock.calls[0][0].args[1]).toContain('carries pre-existing length');
   });
 });

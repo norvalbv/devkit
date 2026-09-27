@@ -10,7 +10,8 @@ import { type ReviewInconclusiveCause, parseReviewVerdict } from '../contracts/r
 import { buildCappedDiffEvidence } from '../diff-evidence.mts';
 import { responseContractFor } from '../contracts/registry.mts';
 import { attachItems } from '../evidence/items.mts';
-import { gitCached } from '../evidence/staged-git.mts';
+import { stagedGroundingSource } from '../contracts/conventions-grounding.mts';
+import { gitCached, stagedTreeHash } from '../evidence/staged-git.mts';
 import { lensGroupId } from '../lens/groups.mts';
 import { applyOverrideValve } from '../overrides.mts';
 import {
@@ -187,6 +188,8 @@ async function cascadeVerdict(
     };
   // Both forms name every staged file; only the checklist reviewers have the Bash to verify a churn
   // count, so the Bash-less one is given the inventory without it.
+  // The index the judge's evidence is cut from; grounding refuses a tree restaged after this point.
+  const evidenceTree = responseContractFor(reviewer.responseContract) ? stagedTreeHash(cwd) : null;
   const inventory = hasChecklist(reviewer)
     ? gitCached(cwd, ['--stat'], files)
     : `STAGED FILES (complete inventory):\n${gitCached(cwd, ['--name-only'], files)}`;
@@ -205,6 +208,9 @@ async function cascadeVerdict(
         lineCountBlock: renderStagedLineCounts(cwd, files),
       });
   const responseContract = responseContractFor(reviewer.responseContract);
+  // Lazy: git is read only for files a FAIL actually cites, once each across all three checks.
+  const grounding = stagedGroundingSource(cwd, files, evidenceTree);
+  const lensesOf = (raw: string) => responseContract?.blockingLenses(raw, grounding) ?? [];
   const input = buildCappedDiffEvidence(gitCached(cwd, [], files), inventory);
   const allowedTools = allowedToolsFor(reviewer, cfg, checklistRoot);
   const mcpProfile = namedAgentMcpProfile();
@@ -283,7 +289,7 @@ async function cascadeVerdict(
       transcript: first,
     };
   if (reviewer.model) {
-    if (responseContract && !responseContract.validatesFail(first)) {
+    if (responseContract && lensesOf(first).length === 0) {
       let contractRetryUsed = false;
       if (retryFirst && !initialRetryUsed) {
         contractRetryUsed = true;
@@ -337,7 +343,7 @@ async function cascadeVerdict(
             };
         }
       }
-      if (firstVerdict.verdict === 'FAIL' && responseContract.validatesFail(first))
+      if (firstVerdict.verdict === 'FAIL' && lensesOf(first).length > 0)
         return {
           name: reviewer.name,
           status: 'fail',
@@ -345,6 +351,7 @@ async function cascadeVerdict(
           escalated: false,
           model: passModel,
           transcript: first,
+          blockingLenses: lensesOf(first),
         };
       return {
         name: reviewer.name,
@@ -363,6 +370,7 @@ async function cascadeVerdict(
       escalated: false,
       model: passModel,
       transcript: first,
+      ...(responseContract && { blockingLenses: lensesOf(first) }),
     };
   }
   let secondOutage: JudgeOutage | undefined;
@@ -395,11 +403,7 @@ async function cascadeVerdict(
     return outcome;
   }
   const finalVerdict = parseReviewVerdict(second);
-  if (
-    finalVerdict.verdict === 'FAIL' &&
-    responseContract &&
-    !responseContract.validatesFail(second)
-  )
+  if (finalVerdict.verdict === 'FAIL' && responseContract && lensesOf(second).length === 0)
     return {
       name: reviewer.name,
       status: 'inconclusive',
@@ -417,6 +421,7 @@ async function cascadeVerdict(
       escalated: true,
       model: passModel,
       transcript: second,
+      ...(responseContract && { blockingLenses: lensesOf(second) }),
     };
   if (finalVerdict.verdict === 'PASS')
     return {
