@@ -36,4 +36,14 @@ devkit_telemetry_version() {
   printf '%s' '<0.47.2'
 }
 
+# Parity with run-context.mts parentSessionId(): same env var + predicate, key omitted otherwise.
+# Explicit character lists (not ranges or classes) keep the match locale-independent.
+devkit_parent_session_json() {
+  local id=${CLAUDE_CODE_SESSION_ID-}
+  local alnum=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789
+  case $id in ''|[!$alnum]*|*[!$alnum._-]*) return 0 ;; esac
+  [ "${#id}" -le 128 ] || return 0
+  printf ',"parent_session_id":"%s"' "$id"
+}
+
 export DEVKIT_TELEMETRY_VERSION="$(devkit_telemetry_version)"

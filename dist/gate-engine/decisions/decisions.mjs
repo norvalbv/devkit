@@ -34,7 +34,8 @@
  *               --evidence-change "..."]                  (epic Target; updates INDEX)
  *   add <slug> --note "..."          cheap convergence note under the current Target (INDEX untouched)
  *   rescope <slug> --scope "glob,glob" --reason "..."  append-only Scope correction (a tagged note)
- *   amend <slug> --target …|--note … replace only the newest entry when it is absent from HEAD
+ *   amend <slug> --target …|--note … replace an entry absent from HEAD: the newest note, or the
+ *     newest Target (its trailing draft notes are preserved byte-for-byte)
  *   amend <slug> --note-replace OLD NEW  replace one unique substring in that draft note
  *   query "<text>" [--top K] [--json] [--full]  rank axes — semantic (Ollama), lexical floor on
  *     fallback; --json emits the bench's envelope; --full prints each matched axis's whole file
@@ -55,7 +56,7 @@ import { writeFileAtomic } from './atomic-write.mjs';
 import { currentTarget, hasTargetFields, parseDecision, parseIndex, renderDecision, renderIndex, renderNote, renderTarget, sanitizeCell, today, upsertRow, whyHook, } from './decision-format.mjs';
 import { warnNearestAxes } from './dedupe.mjs';
 import { runDrift } from './drift.mjs';
-import { assertFullNotJson, printFull, printRanked } from './recall/full-print.mjs';
+import { assertFullNotJson, printFull, printRanked, renderSpine } from './recall/full-print.mjs';
 import { noteTextWithRelation } from './recall/note-relations.mjs';
 import { rankAxes as rankAxesIn, reindexAll } from './recall/retrieval.mjs';
 export { currentTarget, parseDecision, parseIndex, renderDecision, renderIndex, renderNote, renderTarget, upsertRow, } from './decision-format.mjs';
@@ -174,12 +175,12 @@ function addNote(slug, o, p) {
     console.log(`Noted on "${slug}" (${date}).`);
 }
 export function cmdList(cwd = process.cwd()) {
-    const p = paths(cwd);
-    if (!existsSync(p.indexPath)) {
+    const spine = renderSpine(paths(cwd));
+    if (spine === null) {
         console.log('No decisions recorded.');
         return;
     }
-    process.stdout.write(readFileSync(p.indexPath, 'utf8'));
+    process.stdout.write(spine);
 }
 export function cmdShow(slug, cwd = process.cwd()) {
     const file = slugPath(paths(cwd), slug);

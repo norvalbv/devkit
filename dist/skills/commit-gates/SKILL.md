@@ -62,7 +62,10 @@ command. Do not pre-run every gate or replace the managed chain with a hand-writ
   class. A second finding of the same shape means the first fix covered an instance, not the class.
 - **Sentry gate** judges commit-message intent for newly introduced runtime error classes. Add the
   capture on the named surface, or surface a disputed verdict to the user before any bypass.
-- **Qavis advisory** can recommend visual QA but does not turn a non-UI change into UI work.
+- **Qavis advisory** can recommend visual QA but does not turn a non-UI change into UI work. Ship
+  first, QA second: on a ship every judge that can demand an edit runs before the advisory, so run
+  `qavis qa` only when the advisory asks, or ship with `DEVKIT_SHIP_QA=1` to QA the gate tree in the
+  same run. A QA pass taken before `devkit ship` is voided by any judge-forced fix.
 
 ## Comment budget
 

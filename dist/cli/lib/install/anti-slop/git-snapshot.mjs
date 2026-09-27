@@ -1,6 +1,6 @@
 /** Exact Git-index materialization and base-commit baseline evidence for anti-slop gates. */
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { adoptManagedCapability } from './base-capability.mjs';
@@ -48,7 +48,10 @@ function treeForRef(root, ref) {
     return empty.stdout.trim();
 }
 function parseChanges(root, baseTree, candidateTree) {
-    const output = execFileSync('git', ['diff-tree', '--no-commit-id', '--name-status', '-r', '-z', '-M', baseTree, candidateTree], { cwd: root, encoding: 'utf8', maxBuffer: MAX_GIT_OUTPUT });
+    return parseNameStatus(execFileSync('git', ['diff-tree', '--no-commit-id', '--name-status', '-r', '-z', '-M', baseTree, candidateTree], { cwd: root, encoding: 'utf8', maxBuffer: MAX_GIT_OUTPUT }));
+}
+/** Parse `--name-status -z` output; rename and copy records carry two paths. */
+function parseNameStatus(output) {
     const fields = output.split('\0');
     const changes = [];
     for (let index = 0; index < fields.length;) {
@@ -72,6 +75,36 @@ function packagePath(repoPath, prefix) {
     if (!prefix)
         return repoPath;
     return repoPath.startsWith(prefix) ? repoPath.slice(prefix.length) : null;
+}
+/** Package-relative renames, introduced paths, and relocation sources from Git change records. */
+function packageChanges(changes, prefix) {
+    const renames = new Map();
+    const introducedPaths = new Set();
+    const relocationSources = new Map();
+    for (const change of changes) {
+        const path = packagePath(change.path, prefix);
+        if (change.status.startsWith('A') || change.status.startsWith('C')) {
+            if (path !== null)
+                introducedPaths.add(path);
+        }
+        if (path !== null && (change.status.startsWith('M') || change.status.startsWith('D'))) {
+            relocationSources.set(path, { basePath: path, deleted: change.status.startsWith('D') });
+        }
+        if (!change.status.startsWith('R') || change.oldPath === undefined)
+            continue;
+        const oldPath = packagePath(change.oldPath, prefix);
+        if (oldPath === null || path === null)
+            continue;
+        renames.set(oldPath, path);
+        relocationSources.set(path, { basePath: oldPath, deleted: false });
+    }
+    return { renames, introducedPaths, relocationSources };
+}
+/** Rules the candidate evidence enforces that the base did not; none when either side is unknown. */
+export function activatedRuleIdsBetween(base, candidate) {
+    return new Set(base === null || candidate === null
+        ? []
+        : [...candidate.activeRuleIds].filter((ruleId) => !base.activeRuleIds.has(ruleId)));
 }
 function fileAtTree(layout, tree, relativePath, description) {
     const path = `${layout.prefix}${relativePath}`;
@@ -107,38 +140,71 @@ function envelope(cwd, baseRef, candidateTree) {
     const repo = layout(cwd);
     const baseTree = treeForRef(repo.root, baseRef);
     const changes = parseChanges(repo.root, baseTree, candidateTree);
-    const renames = new Map();
-    const introducedPaths = new Set();
-    const baseActivation = activationEvidenceAtTree(repo, baseTree);
     const candidateActivation = activationEvidenceAtTree(repo, candidateTree);
-    const activatedRuleIds = new Set(baseActivation === null || candidateActivation === null
-        ? []
-        : [...candidateActivation.activeRuleIds].filter((ruleId) => !baseActivation.activeRuleIds.has(ruleId)));
-    const candidateMigrationReceipt = candidateActivation?.baselineMigrationId ?? null;
-    for (const change of changes) {
-        if (change.status.startsWith('A') || change.status.startsWith('C')) {
-            const path = packagePath(change.path, repo.prefix);
-            if (path !== null)
-                introducedPaths.add(path);
-        }
-        if (!change.status.startsWith('R') || change.oldPath === undefined)
-            continue;
-        const oldPath = packagePath(change.oldPath, repo.prefix);
-        const nextPath = packagePath(change.path, repo.prefix);
-        if (oldPath !== null && nextPath !== null)
-            renames.set(oldPath, nextPath);
-    }
     return {
         layout: repo,
         baseTree,
         candidateTree,
         changes,
         base: baselineAtTree(repo, baseTree),
-        introducedPaths,
-        activatedRuleIds,
-        candidateMigrationReceipt,
-        renames,
+        ...packageChanges(changes, repo.prefix),
+        activatedRuleIds: activatedRuleIdsBetween(activationEvidenceAtTree(repo, baseTree), candidateActivation),
+        candidateMigrationReceipt: candidateActivation?.baselineMigrationId ?? null,
     };
+}
+/** A staged file's bytes, or null when the index holds no single merged entry for it. */
+function fileInIndex(layout, relativePath) {
+    const shown = spawnSync('git', ['show', `:${layout.prefix}${relativePath}`], {
+        cwd: layout.root,
+        encoding: 'utf8',
+        maxBuffer: MAX_GIT_OUTPUT,
+    });
+    return shown.status === 0 ? shown.stdout : null;
+}
+function activationEvidenceInIndex(layout) {
+    const manifest = fileInIndex(layout, ANTI_SLOP_MANIFEST_REL);
+    const config = fileInIndex(layout, ANTI_SLOP_CONFIG_REL);
+    return manifest === null || config === null
+        ? null
+        : parseAntiSlopManagedActivationEvidence(manifest, config);
+}
+/** The HEAD envelope `create` must satisfy, read WITHOUT `write-tree` so an unmerged index still
+ * compares; renames and activation come from the index, exactly as the staged gate reads them. */
+export function committedBaselineProbe(cwd) {
+    const inside = spawnSync('git', ['rev-parse', '--show-toplevel'], { cwd, encoding: 'utf8' });
+    if (inside.status !== 0)
+        return { kind: 'skip', notice: null };
+    try {
+        const repo = layout(cwd);
+        if (resolveRef(repo.root, 'HEAD') === null)
+            return { kind: 'skip', notice: null };
+        const baseTree = treeForRef(repo.root, 'HEAD');
+        const base = baselineAtTree(repo, baseTree);
+        if (base === null)
+            return { kind: 'skip', notice: null };
+        const staged = execFileSync('git', ['diff-index', '--cached', '--name-status', '-z', '-M', baseTree], { cwd: repo.root, encoding: 'utf8', maxBuffer: MAX_GIT_OUTPUT });
+        const baseActivation = activationEvidenceAtTree(repo, baseTree);
+        const stagedActivation = activationEvidenceInIndex(repo);
+        return {
+            kind: 'compare',
+            base,
+            baseActivation,
+            envelope: {
+                base,
+                baseTree,
+                ...packageChanges(parseNameStatus(staged), repo.prefix),
+                activatedRuleIds: activatedRuleIdsBetween(baseActivation, stagedActivation),
+                candidateMigrationReceipt: stagedActivation?.baselineMigrationId ?? null,
+            },
+        };
+    }
+    catch (error) {
+        const detail = error instanceof Error ? error.message.split('\n')[0] : String(error);
+        return {
+            kind: 'skip',
+            notice: `anti-slop: growth not pre-checked (${detail}); the commit gate still enforces the committed baseline`,
+        };
+    }
 }
 /** Read the base baseline and exact rename map used by a full-tree CI check. */
 export function gitBaselineEnvelope(cwd, baseRef) {
@@ -148,7 +214,7 @@ export function gitBaselineEnvelope(cwd, baseRef) {
     const baseOid = resolveRef(repo.root, baseRef);
     const baseRefName = symbolicFullName(repo.root, baseRef);
     const candidateTree = git(repo.root, ['write-tree']);
-    const { base, baseTree, introducedPaths, activatedRuleIds, candidateMigrationReceipt, renames } = envelope(cwd, baseOid ?? baseRef, candidateTree);
+    const { base, baseTree, introducedPaths, activatedRuleIds, candidateMigrationReceipt, renames, relocationSources, } = envelope(cwd, baseOid ?? baseRef, candidateTree);
     return {
         base,
         baseTree,
@@ -161,6 +227,7 @@ export function gitBaselineEnvelope(cwd, baseRef) {
         activatedRuleIds,
         candidateMigrationReceipt,
         renames,
+        relocationSources,
     };
 }
 function requiresFullScan(path) {
@@ -198,13 +265,13 @@ export function withBaseAntiSlopSnapshot(cwd, capabilityCwd, baseTree, paths, ac
     }
 }
 /**
- * Run an action against the exact candidate index, never the mutable working tree. Unrelated
- * package/repository changes are ignored; config or baseline changes force a complete package scan.
+ * Run an action against the exact candidate index, never the mutable working tree. `overlay` adds
+ * the git-excluded capability and baseline; opt-in, never default — see oxc-toolchain-migration.
  */
-export function withStagedAntiSlopSnapshot(cwd, action) {
+export function withStagedAntiSlopSnapshot(cwd, action, { overlay = false, baseRef = 'HEAD' } = {}) {
     const repo = layout(cwd);
     const candidateTree = git(repo.root, ['write-tree']);
-    const evidence = envelope(cwd, 'HEAD', candidateTree);
+    const evidence = envelope(cwd, baseRef, candidateTree);
     const packageChanges = evidence.changes.flatMap((change) => {
         const path = packagePath(change.path, repo.prefix);
         return path === null ? [] : [{ ...change, path }];
@@ -231,13 +298,24 @@ export function withStagedAntiSlopSnapshot(cwd, action) {
             activatedRuleIds: evidence.activatedRuleIds,
             candidateMigrationReceipt: evidence.candidateMigrationReceipt,
             renames: evidence.renames,
+            relocationSources: evidence.relocationSources,
+            candidateTree,
         });
     }
     const temp = mkdtempSync(join(tmpdir(), 'devkit-anti-slop-index-'));
     try {
         extractTree(repo.root, candidateTree, temp);
+        const snapshotCwd = join(temp, repo.prefix);
+        if (overlay) {
+            adoptManagedCapability(cwd, snapshotCwd);
+            // Copied separately, NOT via MANAGED_RELS: `adoptManagedCapability` also runs for the BASE
+            // snapshot, where overwriting its committed baseline would destroy the comparison.
+            const baseline = join(cwd, ANTI_SLOP_BASELINE_REL);
+            if (existsSync(baseline))
+                cpSync(baseline, join(snapshotCwd, ANTI_SLOP_BASELINE_REL));
+        }
         return action({
-            cwd: join(temp, repo.prefix),
+            cwd: snapshotCwd,
             paths,
             changedFiles,
             fullScan,
@@ -249,6 +327,8 @@ export function withStagedAntiSlopSnapshot(cwd, action) {
             activatedRuleIds: evidence.activatedRuleIds,
             candidateMigrationReceipt: evidence.candidateMigrationReceipt,
             renames: evidence.renames,
+            relocationSources: evidence.relocationSources,
+            candidateTree,
         });
     }
     finally {

@@ -43,7 +43,7 @@ export function adoptRenames(cwd, baseRef = 'HEAD', requireRenames = false) {
         }
         if (requireRenames && renames.size === 0) {
             console.error(`anti-slop: no Git renames from ${baseRef} to the index; baseline unchanged`);
-            console.error('anti-slop: use the same --base ref as the failing check; if history no longer contains the rename, review the debt before `devkit anti-slop create --force --confirm-baseline-removals`');
+            console.error('anti-slop: use the same --base ref as the failing check; if history no longer contains the rename, fix the findings at the new path or re-anchor lint-evidenced moves with `devkit anti-slop adopt-relocations` — create and both gates refuse unevidenced growth');
             return 2;
         }
         const affected = baseline.entries.filter((entry) => renames.has(entry.file));

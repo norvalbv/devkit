@@ -260,7 +260,7 @@ export async function inspectDistIntegrity(root, base, briefedPaths) {
     unresolved.sort((a, b) => `${a.importer}\0${a.specifier}`.localeCompare(`${b.importer}\0${b.specifier}`));
     return { active: true, unresolved, unbriefed, untracked, unlexable: unlexable.sort() };
 }
-function shellQuote(value) {
+export function shellQuote(value) {
     return `'${value.replaceAll("'", "'\\''")}'`;
 }
 export function printDistIntegrityFailure(report) {

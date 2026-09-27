@@ -27,7 +27,7 @@ function cursorCommand(command) {
         .replaceAll('"', '')
         .trim();
 }
-function nativeProjection(provider, registration) {
+export function nativeProjection(provider, registration) {
     const { event, matcher, command } = registration;
     if (provider === 'claude')
         return { event, matcher, command };

@@ -191,6 +191,7 @@ function defaultRoute(cwd) {
     // Exited 0 but said nothing we understand — a version skew or a swallowed error, not a SILENT.
     return { verdict: null, skip: `qavis route printed no verdict (${JSON.stringify(last)})` };
 }
+const SHIP_ORDER_NOTE = '   Order: on a ship every judge that can demand an edit runs before this advisory, so QA this tree now, once — a qavis run taken before shipping is voided by any judge-forced fix.';
 export function runQavisAdvisory(cwd = process.cwd(), deps = {}) {
     const startedAt = Date.now();
     let qaExitCode;
@@ -235,6 +236,9 @@ export function runQavisAdvisory(cwd = process.cwd(), deps = {}) {
     // qavis printed its own reason to stderr; add the remedy + the exit-code decision.
     console.error('qavis-advisory: UI-affecting change with no qavis QA on this staged tree.');
     const mode = shipMode();
+    // sc-3012: order only — fail-open reviewers and GUARD_NO_REVIEW reach here too, so never claim a pass.
+    if (mode !== 'commit')
+        console.error(SHIP_ORDER_NOTE);
     if (mode === 'drifted') {
         // No local command can attest this tree: the gate evaluates a three-way merge onto a base this
         // checkout does not contain. Say so, and name the two honest exits.
@@ -249,6 +253,8 @@ export function runQavisAdvisory(cwd = process.cwd(), deps = {}) {
     if (mode !== 'commit') {
         const branch = process.env.DEVKIT_SHIP_BRANCH;
         console.error(`   then: devkit ship --resume ${branch ? shellQuote(branch) : '<branch>'}    (the receipt in your checkout is linked into the gate worktree)`);
+        if (!qaOptIn())
+            console.error(`   or:   DEVKIT_SHIP_QA=1 devkit ship --resume ${branch ? shellQuote(branch) : '<branch>'}    (qavis drives the gate tree itself; a pass clears this)`);
         if (mode === 'staged') {
             console.error('   note: the receipt attests the staged set — if unrelated paths are already staged, unstage those first (git restore --staged -- <path>), or the gate will name them');
         }

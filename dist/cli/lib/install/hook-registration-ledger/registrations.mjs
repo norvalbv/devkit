@@ -17,11 +17,28 @@
  * "Ship the generator, never the data": this is the MECHANISM list (which devkit hook runs on
  * which event). It carries no consumer-specific paths beyond $CLAUDE_PROJECT_DIR.
  */
-const PKG = 'node_modules/@norvalbv/devkit';
-// devkit's own engine bins are compiled .mjs in an installed consumer (dist) but .mts in devkit's
-// own repo (dev/tests, Node strips types). Derive the extension from THIS module so the generated
-// hook commands point at the file that actually exists in each context.
-const SELF_EXT = import.meta.url.endsWith('.mts') ? '.mts' : '.mjs';
+export const PKG = 'node_modules/@norvalbv/devkit';
+/** Anchored at the CONSUMER's node_modules, so it carries dist/ and is never .mts — see the
+ * 2026-09-04 note in docs/decisions/typescript-source-prebuilt-mjs.md. Frozen; pinned by its test. */
+const SEARCH_TOOL_GUARD_REL = 'dist/gate-engine/search-tool/search-tool-guard.mjs';
+const SEARCH_TOOL_COUNTER_REL = 'dist/gate-engine/search-tool/search-tool-counter.mjs';
+const engineCommand = (scriptRel) => `node "$CLAUDE_PROJECT_DIR"/${PKG}/${scriptRel}`;
+export const SUPERSEDED_HOOK_COMMANDS = [
+    // sc-2563: the pre-dist path resolved to nothing in a packaged consumer. Both prior SELF_EXT
+    // spellings are listed — a packaged install wrote .mjs, a source-context run wrote .mts.
+    ...['.mjs', '.mts'].flatMap((ext) => [
+        {
+            registrationId: 'search-steering:pre-bash',
+            command: `node "$CLAUDE_PROJECT_DIR"/${PKG}/gate-engine/search-tool/search-tool-guard${ext}`,
+            since: '0.64.0',
+        },
+        {
+            registrationId: 'search-steering:post-bash',
+            command: `node "$CLAUDE_PROJECT_DIR"/${PKG}/gate-engine/search-tool/search-tool-counter${ext}`,
+            since: '0.64.0',
+        },
+    ]),
+];
 /** Registrations grouped by the selectable component id (components.mjs) that owns them. */
 export const HOOK_REGISTRATIONS = {
     // The decisions guard owns its authoring boundary. This is deliberately independent of the
@@ -55,13 +72,15 @@ export const HOOK_REGISTRATIONS = {
             registrationId: 'search-steering:pre-bash',
             event: 'PreToolUse',
             matcher: 'Bash',
-            command: `node "$CLAUDE_PROJECT_DIR"/${PKG}/gate-engine/search-tool/search-tool-guard${SELF_EXT}`,
+            command: engineCommand(SEARCH_TOOL_GUARD_REL),
+            scriptRel: SEARCH_TOOL_GUARD_REL,
         },
         {
             registrationId: 'search-steering:post-bash',
             event: 'PostToolUse',
             matcher: 'Bash',
-            command: `node "$CLAUDE_PROJECT_DIR"/${PKG}/gate-engine/search-tool/search-tool-counter${SELF_EXT}`,
+            command: engineCommand(SEARCH_TOOL_COUNTER_REL),
+            scriptRel: SEARCH_TOOL_COUNTER_REL,
         },
     ],
     // The i-have-adhd output style is ALWAYS-ON by selection: the skill sets

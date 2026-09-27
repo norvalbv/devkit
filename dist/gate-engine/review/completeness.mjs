@@ -24,7 +24,8 @@
  *
  * Knobs: GUARD_NO_COMPLETENESS=1 skip · GUARD_COMPLETENESS_HARD=0 soften · cfg.noLlm skip.
  */
-import { execSync } from 'node:child_process';
+import { execFileSync, execSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { envBool, envFlag, resolveGuardConfig } from '../config.mjs';
@@ -32,13 +33,14 @@ import { scopedTargets } from '../decisions/scoped-targets.mjs';
 import { judgeBinForModel } from '../judge/codex/result.mjs';
 import { renderTargets } from './evidence/targets-block.mjs';
 export { renderTargets } from './evidence/targets-block.mjs';
-import { emitCacheHit, emitGateBypass, emitGateEvent, emitGateInfraFailure, finishGateTiming, } from '../judge/gate-events.mjs';
+import { emitCacheHit, emitGateBypass, emitGateEvent, emitGateInfraFailure, emitIntentCacheHit, finishGateTiming, } from '../judge/gate-events.mjs';
 import { JUDGE_ISOLATION } from '../judge/judge-isolation.mjs';
 import { judgeMcpCapabilityFingerprint, namedAgentMcpProfile, withNamedAgentMcpTools, } from '../judge/mcp/profile.mjs';
 import { reportGateInfraFailure } from '../judge/odb-probe.mjs';
 import { DEEP_JUDGE_TIMEOUT_MS, execJudgeAsync, strictRemedy } from '../judge/run-judge.mjs';
 import { loadCache, savePasses } from './cache.mjs';
 import { buildCappedDiffEvidence } from './diff-evidence.mjs';
+import { stagedTreeHash } from './evidence/staged-git.mjs';
 import { cacheKey, parseReviewVerdict, resolveEscalationModel, stripFrontmatter, } from './reviewers.mjs';
 const AGENT_NAME = 'feature-completeness-reviewer';
 const TOOLS = 'Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(git status:*)';
@@ -83,6 +85,48 @@ function verdictBranch(cwd) {
 // conventions-reviewer (which, having no Bash, needs the identical pre-rendered-evidence pattern
 // this gate pioneered). Re-exported under the original name — zero behavior change here.
 export { buildCappedDiffEvidence as buildCompletenessEvidence };
+function snapshotStaged(cwd) {
+    try {
+        // HEAD before the tree: a commit landing in between widens the evidence, never splits it.
+        const base = headTreeish(cwd);
+        const tree = stagedTreeHash(cwd);
+        if (!tree)
+            return { range: ['--cached'], identity: null };
+        const range = [base, tree];
+        // Blob ids as bytes, never decoded: patch text can't tell binaries apart; UTF-8 merges paths.
+        const raw = execFileSync('git', [
+            'diff',
+            '--raw',
+            '-z',
+            '--no-abbrev',
+            '--no-renames',
+            '--no-color',
+            '--no-ext-diff',
+            ...range,
+        ], { cwd, maxBuffer: 64 * 1024 * 1024 });
+        return { range, identity: createHash('sha256').update(raw).digest('hex') };
+    }
+    catch {
+        return { range: ['--cached'], identity: null };
+    }
+}
+/** HEAD, or the empty tree before the first commit: the base `git diff --cached` compares against. */
+function headTreeish(cwd) {
+    try {
+        return execFileSync('git', ['rev-parse', '--verify', '--quiet', 'HEAD'], {
+            cwd,
+            encoding: 'utf8',
+            stdio: ['ignore', 'pipe', 'ignore'],
+        }).trim();
+    }
+    catch {
+        return execFileSync('git', ['hash-object', '-t', 'tree', '--stdin'], {
+            cwd,
+            encoding: 'utf8',
+            input: '',
+        }).trim();
+    }
+}
 /** Wrap the consumer's completeness brief for one headless commit-msg judgement. */
 export function wrapCompleteness(agentBody, message, files, targetsBlock) {
     return ('You are running as an automated HEADLESS COMMIT-MESSAGE GATE, not an interactive assistant.\n' +
@@ -165,6 +209,7 @@ export async function runCompleteness(msgFile, cwd = process.cwd(), { exec = exe
     let mcpProfile = namedAgentMcpProfile();
     let capabilityFingerprint = '';
     let stickyKey = '';
+    let stagedIdentity = null;
     let model = '';
     try {
         const cfg = resolveGuardConfig(cwd);
@@ -175,7 +220,13 @@ export async function runCompleteness(msgFile, cwd = process.cwd(), { exec = exe
             mcpProjectRoots,
         }));
         const message = normalizeCommitMessage(readFileSync(path.isAbsolute(msgFile) ? msgFile : path.resolve(cwd, msgFile), 'utf8'));
-        const files = execSync('git diff --cached --name-only', { cwd, encoding: 'utf8' })
+        // Every staged read below goes through this one snapshot; see snapshotStaged.
+        const snapshot = snapshotStaged(cwd);
+        stagedIdentity = snapshot.identity;
+        const files = execFileSync('git', ['diff', '--name-only', ...snapshot.range], {
+            cwd,
+            encoding: 'utf8',
+        })
             .split('\n')
             .map((s) => s.trim())
             .filter(Boolean);
@@ -201,9 +252,20 @@ export async function runCompleteness(msgFile, cwd = process.cwd(), { exec = exe
         stickyKey = cacheKey('completeness-intent', `${verdictBranch(cwd)}\u0000${message}`, `${body}\u0000${capabilityFingerprint}\u0000${model}`);
         const sticky = loadCache(cwd)[stickyKey];
         if (sticky) {
-            console.error('guard-review: completeness — cached PASS (same branch + message; a retry-reshaped diff is not re-judged)');
+            // Narration only: the key ignores the diff by ruling (sc-3175). A PASS saved before
+            // fingerprints existed, or an unreadable index, cannot vouch.
+            const diffMatches = stagedIdentity !== null && sticky.diff_sha === stagedIdentity;
+            console.error(diffMatches
+                ? 'guard-review: completeness — cached PASS (same branch + message + staged diff)'
+                : 'guard-review: completeness — cached PASS (same branch + message; judged on an earlier diff, which is not re-judged)');
             const stickyDuration = typeof sticky.duration_ms === 'number' ? sticky.duration_ms : undefined;
-            emitCacheHit('review:completeness', sticky.model, stickyDuration);
+            // The resolved model, not the stored one: the sticky key already includes it, so they agree.
+            emitIntentCacheHit({
+                judge: 'review:completeness',
+                model,
+                durationMs: stickyDuration,
+                diffMatches,
+            });
             return finish(0, 'full', stickyDuration);
         }
         const targets = await scopedTargets(files, message.split('\n')[0] ?? '', 6, cwd).catch(() => []);
@@ -212,12 +274,12 @@ export async function runCompleteness(msgFile, cwd = process.cwd(), { exec = exe
         // is being asked to gap-check. Diff prefixes are forced ON-config so a consumer's
         // diff.noprefix/mnemonicPrefix cannot change the segment-header format the extractor splits
         // on (the detect gate's W-3 lesson).
-        const stat = execSync('git diff --cached --stat', {
+        const stat = execFileSync('git', ['diff', '--stat', ...snapshot.range], {
             cwd,
             encoding: 'utf8',
             maxBuffer: 64 * 1024 * 1024,
         });
-        diff = buildCappedDiffEvidence(execSync('git -c diff.noprefix=false -c diff.mnemonicPrefix=false diff --cached', {
+        diff = buildCappedDiffEvidence(execFileSync('git', ['-c', 'diff.noprefix=false', '-c', 'diff.mnemonicPrefix=false', 'diff', ...snapshot.range], {
             cwd,
             encoding: 'utf8',
             maxBuffer: 64 * 1024 * 1024,
@@ -300,6 +362,9 @@ export async function runCompleteness(msgFile, cwd = process.cwd(), { exec = exe
             model,
             duration_ms: Date.now() - startedAt,
         };
+        // Names the snapshot the judge was shown; absent (no snapshot formed) never vouches.
+        if (stagedIdentity)
+            meta.diff_sha = stagedIdentity;
         // Both identities: the exact byte key (any caller, any order) and the branch+message sticky
         // key that lets a ship retry with a reshaped diff skip this judge (see the lookup above).
         savePasses(cwd, stickyKey ? { [key]: meta, [stickyKey]: meta } : { [key]: meta });

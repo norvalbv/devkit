@@ -3,7 +3,7 @@
  * rather than package-local `guard-*`, so it is compared against the generator directly instead of going
  * through the CheckResult pipeline. Split out of doctor.mts, which is at its line budget.
  */
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { printQavisAdvisoryHealth } from './qavis-health.mjs';
 import { detectGitRoot } from '../detect-git-root.mjs';
@@ -21,15 +21,28 @@ import { adviseCodexRuntime, adviseSearchIndex } from './guard-config-checks.mjs
 import { checkHookRunner, checkHooksPathOwner } from './hook-checks.mjs';
 import { printStrayGateCalls } from './stray-gate-calls.mjs';
 import { inspectHookFailOpen, renderUnguardedGateCalls } from './unguarded-gate-calls.mjs';
-export async function runSelfHostDoctor(cwd, cfg, fix) {
+const MANAGED_CAPABILITY = {
+    check: (cwd) => [...checkOxcCapability(cwd), ...checkAntiSlopCapability(cwd)],
+    sync: (cwd) => syncAntiSlopCapability(cwd),
+};
+export async function runSelfHostDoctor(cwd, cfg, fix, capability = MANAGED_CAPABILITY) {
     const { gitRoot, pkgRel } = detectGitRoot(cwd);
     const hookPath = join(gitRoot, '.husky', 'pre-commit');
     console.log('devkit doctor — self-host (source-mode dogfood)\n');
     const selection = selfHostSelection(cfg.components);
-    let capabilityResults = [...checkOxcCapability(cwd), ...checkAntiSlopCapability(cwd)];
+    let capabilityResults = capability.check(cwd);
+    let syncFailed = false;
     if (fix && capabilityResults.some((result) => result.status !== 'OK')) {
-        syncAntiSlopCapability(cwd);
-        capabilityResults = [...checkOxcCapability(cwd), ...checkAntiSlopCapability(cwd)];
+        // A failed capability sync must not take the hook repair below down with it: `doctor --fix` is
+        // the repair the hook-parity gate prints, so it has to reach the hook in any capability state.
+        try {
+            capability.sync(cwd);
+        }
+        catch (error) {
+            syncFailed = true;
+            console.log(`  ✗ anti-slop sync failed: ${error instanceof Error ? error.message : String(error)}`);
+        }
+        capabilityResults = capability.check(cwd);
     }
     for (const result of capabilityResults) {
         const glyph = result.status === 'OK' ? '✓' : result.status === 'MISSING' ? '✗' : '⚠';
@@ -54,22 +67,29 @@ export async function runSelfHostDoctor(cwd, cfg, fix) {
     // Built from `cfg.components` — the same selection `--fix` installs — so a fix is guaranteed to
     // reach parity rather than re-reporting drift against a selection nobody writes.
     const parity = selfHostHookParity(cwd, { components: cfg.components });
-    if (parity.status === 'missing') {
-        console.log('  ✗ .husky/pre-commit MISSING — run `devkit init` (self-host)');
+    if (parity.status === 'ok') {
+        hookOk = true;
+        console.log('  ✓ .husky/pre-commit in sync with the generator');
     }
-    else {
-        if (parity.status === 'ok') {
-            hookOk = true;
-            console.log('  ✓ .husky/pre-commit in sync with the generator');
-        }
-        else if (fix) {
+    else if (fix) {
+        // Every non-ok state repairs here, never via `devkit init`, whose capability re-sync rewrites
+        // tracked managed state (sc-2700, devkit-self-dogfood).
+        try {
             installSelfHostHook(gitRoot, pkgRel, selection, false, cwd);
             hookOk = true;
-            console.log('  ✓ .husky/pre-commit regenerated (was stale — refreshed to the current generator)');
+            console.log(`  ✓ .husky/pre-commit regenerated (was ${parity.status} — refreshed to the current generator)`);
         }
-        else {
-            console.log('  ⚠ .husky/pre-commit is STALE (generator changed or the hook was hand-edited) — run `devkit doctor --fix`');
+        catch (error) {
+            console.log(`  ✗ .husky/pre-commit could not be regenerated: ${error instanceof Error ? error.message : String(error)}`);
         }
+    }
+    else if (parity.status === 'missing') {
+        console.log('  ✗ .husky/pre-commit MISSING — run `devkit doctor --fix`');
+    }
+    else {
+        console.log('  ⚠ .husky/pre-commit is STALE (generator changed or the hook was hand-edited) — run `devkit doctor --fix`');
+    }
+    if (existsSync(hookPath)) {
         // Self-host never runs checkHusky, so without this the duplicate-gate warning is unreachable in
         // exactly the repo that dogfoods devkit — the one most likely to grow a hand-written gate copy.
         printStrayGateCalls(readFileSync(hookPath, 'utf8'), pkgRel, cwd);
@@ -123,7 +143,7 @@ export async function runSelfHostDoctor(cwd, cfg, fix) {
         if (r.status !== 'OK')
             console.log(`      → ${r.remediation}`);
     }
-    const capabilitiesOk = capabilityResults.every((result) => result.status === 'OK');
+    const capabilitiesOk = !syncFailed && capabilityResults.every((result) => result.status === 'OK');
     return hookOk &&
         hookState.every((r) => r.status === 'OK') &&
         capabilitiesOk &&

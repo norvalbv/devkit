@@ -150,7 +150,7 @@ The dashboard below is generated from an append-only event ledger and immutable,
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/benchmarks/assets/dashboard-dark.svg">
   <source media="(prefers-color-scheme: light)" srcset="docs/benchmarks/assets/dashboard-light.svg">
-  <img alt="Benchmark evidence dashboard. Equivalent detailed tables follow: 11 suites have accepted checkpoints, 0 are current, and 2 shipped agents have no benchmark evidence." src="docs/benchmarks/assets/dashboard-light.svg">
+  <img alt="Benchmark evidence dashboard. Equivalent detailed tables follow: 12 suites have accepted checkpoints, 1 is current, and 2 shipped agents have no benchmark evidence." src="docs/benchmarks/assets/dashboard-light.svg">
 </picture>
 
 The tracker separates lifecycle, evidence provenance, freshness, change type, and assessment. A stale score remains visible but is never presented as current. Current history is too sparse and heterogeneous to support exponential-growth or diminishing-return claims; the honest classification is **insufficient comparable evidence**.
@@ -165,7 +165,7 @@ The tracker separates lifecycle, evidence provenance, freshness, change type, an
 | Backend performance reviewer | shipped | accepted | stale | coverage | ? unknown | first-pass FAIL recall: 7/7 (100.0%) · first-pass clean pass: 3/6 (50.0%) · block recall: 7/7 (100.0%) · clean pass: 6/6 (100.0%) |
 | Frontend security reviewer | shipped | accepted | stale | coverage | ? unknown | first-pass FAIL recall: 11/11 (100.0%) · first-pass clean pass: 7/8 (87.5%) · block recall: 10/11 (90.9%) · clean pass: 8/8 (100.0%) |
 | Frontend performance reviewer | shipped | accepted | stale | coverage | ? unknown | first-pass FAIL recall: 10/11 (90.9%) · first-pass clean pass: 7/8 (87.5%) · block recall: 10/11 (90.9%) · clean pass: 7/8 (87.5%) |
-| Correctness reviewer | shipped | accepted | stale | methodology-reset | ? unknown | first-pass FAIL recall: 71/75 (94.7%) · first-pass clean pass: 35/65 (53.8%) |
+| Correctness reviewer | shipped | accepted | stale | methodology-reset | ? unknown | first-pass FAIL recall: 102/105 (97.1%) · first-pass clean pass: 117/180 (65.0%) |
 | Decision governance | shipped | evidence-only | unknown | quality | ↑ improved | Detect accuracy: 45/49 (91.8%) · DECISION recall: 8/9 (88.9%) |
 | Sentry capture judge | shipped | evidence-only | unknown | quality | ↑ improved | Commit-message F1: 56/100 (56.0%) · Focused-diff F1: 87/100 (87.0%) |
 | Edge-case autonomy | no-ship | accepted | stale | no-ship | ? unknown | Judge-free ceiling: 51.2% · Pre-registered target: 35.0% |
@@ -175,6 +175,7 @@ The tracker separates lifecycle, evidence provenance, freshness, change type, an
 | Duplication matcher | shipped | evidence-only | unknown | — | ? unknown | No accepted local checkpoint |
 | Commit-guard retrieval | shipped | evidence-only | unknown | quality | ? unknown | Clone retrieval recall at 10: 59.0% · Semantic retrieval recall at 10: 25.0% |
 | qavis visual QA | shipped | external-required | unknown | — | ? unknown | No accepted local checkpoint |
+| Ship fixture setup cost | experimental | accepted | current | methodology-reset | ? unknown | Fixture CPU candidate/baseline: 19.0% · Fixture elapsed candidate/baseline: 31.4% |
 
 ### Shipped-agent coverage
 

@@ -22,6 +22,12 @@
 # cache qavis writes on a QA pass, read by the ship qavis-advisory gate to clear its block, and the only
 # gate input NOT already carried in by the staged pathspec — so without this link a real QA pass still
 # blocks the ship. Linked file-level, not the `.qavis/` dir (which holds the tracked recipe.json).
+#
+# The four Oxc/anti-slop entries exist for OVERLAY, where the whole managed capability plus its root
+# entry config and per-clone baseline are git-excluded and therefore absent from any checkout. Without
+# them the anti-slop gate throws a capability error inside $WT, and because that gate is failOpen2:false
+# the throw renders as a violation rather than a skip — a broken ship, not a weaker one. In package mode
+# all four are tracked, so they are already in $WT and the projection skips them.
 GATE_PROJECTION_FIXED_CANDIDATES=(
   guard.config.json
   .fallowrc.jsonc
@@ -36,8 +42,12 @@ GATE_PROJECTION_FIXED_CANDIDATES=(
   .devkit/baselines/size.json
   .devkit/baselines/imports.mjs
   .devkit/structure/exempt.mjs
+  .devkit/oxc
+  .devkit/anti-slop
   eslint.config.devkit.mjs
   biome.devkit.jsonc
+  oxlint.devkit.json
+  .anti-slop-baseline.json
   .qavis/receipt.json
 )
 
