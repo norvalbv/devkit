@@ -7,6 +7,8 @@ import {
   type ClearMarker,
   formatClearMarker,
   formatDiagnosis,
+  formatRerunNotice,
+  formatRerunRescue,
   headSha,
   humanAge,
   readClearMarker,
@@ -14,6 +16,9 @@ import {
   removeClearMarker,
   stagedFiles,
   stagedIntersection,
+  RERUN_FLOOR_MS,
+  raisedTimeoutMs,
+  TIMEOUT_FINGERPRINT,
   writeClearMarker,
 } from '../failures.mts';
 
@@ -347,5 +352,311 @@ describe('a marker that is not the one we wrote', () => {
     );
     expect(lines).toHaveLength(2);
     expect(lines.join(' ')).toMatch(/discarded by a test run that produced no report,\s+4m ago\.$/);
+  });
+});
+
+// sc-3473. Every shape below was captured from real vitest 4.1.10 json output, with devkit's
+// `--retry.count=1 --retry.condition` injected, before any of this was written.
+describe('a failure that is nothing but timeouts', () => {
+  const T = TIMEOUT_FINGERPRINT;
+  const timedOut = (fullName: string, duration?: number) => ({
+    fullName,
+    status: 'failed',
+    duration,
+    failureMessages: [`${T}\n    at task (file:///repo/a.test.ts)`, `${T}\n    at task`],
+  });
+
+  it('reads a test that timed out on both attempts as timeout-shaped', () => {
+    const root = makeRoot();
+    const file = results(root, [
+      {
+        name: '/repo/a.test.ts',
+        status: 'failed',
+        message: '',
+        assertionResults: [timedOut('slow', 612)],
+      },
+    ]);
+
+    expect(readDiagnosis(file)?.failures).toEqual({
+      tests: [{ file: '/repo/a.test.ts', name: 'slow' }],
+      allTimedOut: true,
+      // vitest's `duration` ADDS UP every attempt: a 300ms timeout retried once reports ~612ms.
+      // Reading it raw would double the observed budget.
+      timeoutMs: 306,
+    });
+  });
+
+  it('takes the longest per-attempt budget across tests', () => {
+    const root = makeRoot();
+    const file = results(root, [
+      {
+        name: '/repo/a.test.ts',
+        status: 'failed',
+        assertionResults: [timedOut('inline', 410), timedOut('slow', 612), timedOut('no-duration')],
+      },
+    ]);
+
+    expect(readDiagnosis(file)?.failures?.timeoutMs).toBe(306);
+  });
+
+  // A beforeAll/afterAll timeout never reaches a test: vitest fails the FILE, skips (or passes) its
+  // tests, and puts the message on the suite — the one place a timeout's value is still readable.
+  it('reads a whole-file hook timeout as timeout-shaped, with its budget', () => {
+    const root = makeRoot();
+    const file = results(root, [
+      {
+        name: '/repo/h.test.ts',
+        status: 'failed',
+        message: 'Hook timed out in 300ms.\nIf this is a long-running hook, pass a timeout value',
+        assertionResults: [{ fullName: 'x', status: 'skipped', failureMessages: [] }],
+      },
+    ]);
+
+    const d = readDiagnosis(file);
+    expect(d?.failedFiles).toEqual(['/repo/h.test.ts']);
+    expect(d?.failures).toEqual({ tests: [], allTimedOut: true, timeoutMs: 300 });
+  });
+
+  it('does not call an import error a timeout', () => {
+    const root = makeRoot();
+    const file = results(root, [
+      {
+        name: '/repo/c.test.ts',
+        status: 'failed',
+        message: "Cannot find module './nope.mjs' imported from /repo/c.test.ts",
+        assertionResults: [],
+      },
+    ]);
+
+    expect(readDiagnosis(file)?.failures?.allTimedOut).toBe(false);
+  });
+
+  // A config `retry` retries everything; captured under `retry: 1`, these carry two messages but no
+  // timeout fingerprint.
+  it.each([
+    ['an assertion', 'AssertionError: expected 2 to be 99'],
+    ['a snapshot mismatch', 'Error: Snapshot `snap 1` mismatched\n    at as'],
+    ['a plain throw', 'Error: plain boom\n    at /repo/a.test.ts'],
+  ])('does not call %s retried by the consumer config a timeout', (_label, message) => {
+    const root = makeRoot();
+    const file = results(root, [
+      {
+        name: '/repo/a.test.ts',
+        status: 'failed',
+        assertionResults: [
+          { fullName: 'x', status: 'failed', failureMessages: [message, message] },
+        ],
+      },
+    ]);
+
+    expect(readDiagnosis(file)?.failures?.allTimedOut).toBe(false);
+  });
+
+  // devkit's retry always leaves a timeout two messages; the fingerprint alone is not unique to
+  // timeouts, so one message is not evidence.
+  it('does not trust a fingerprint the retry never confirmed', () => {
+    const root = makeRoot();
+    const file = results(root, [
+      {
+        name: '/repo/a.test.ts',
+        status: 'failed',
+        assertionResults: [{ fullName: 'x', status: 'failed', failureMessages: [`${T}\n  at x`] }],
+      },
+    ]);
+
+    expect(readDiagnosis(file)?.failures?.allTimedOut).toBe(false);
+  });
+
+  it('is not all-timeouts when one real failure rides along', () => {
+    const root = makeRoot();
+    const file = results(root, [
+      { name: '/repo/a.test.ts', status: 'failed', assertionResults: [timedOut('slow', 612)] },
+      {
+        name: '/repo/b.test.ts',
+        status: 'failed',
+        assertionResults: [
+          { fullName: 'bug', status: 'failed', failureMessages: ['AssertionError'] },
+        ],
+      },
+    ]);
+
+    const d = readDiagnosis(file);
+    expect(d?.failures?.allTimedOut).toBe(false);
+    expect(d?.failures?.tests.map((t) => t.name)).toEqual(['slow', 'bug']);
+  });
+
+  it('is not all-timeouts when an afterAll assertion fails the file around a timed-out test', () => {
+    const root = makeRoot();
+    const file = results(root, [
+      {
+        name: '/repo/a.test.ts',
+        status: 'failed',
+        message: 'AssertionError: expected 1 to be 2',
+        assertionResults: [timedOut('slow', 612)],
+      },
+    ]);
+
+    expect(readDiagnosis(file)?.failures?.allTimedOut).toBe(false);
+  });
+
+  // vitest exits 1 with every test green on an unhandled error or a coverage threshold miss. There is
+  // no timeout to rescue, and "all of nothing is a timeout" must not read as true.
+  it('has no failure verdict at all when no test or file failed', () => {
+    const root = makeRoot();
+    const file = results(root, [
+      {
+        name: '/repo/a.test.ts',
+        status: 'passed',
+        assertionResults: [{ fullName: 'a', status: 'passed', failureMessages: [] }],
+      },
+    ]);
+
+    expect(readDiagnosis(file)?.failures).toBeUndefined();
+  });
+
+  it('lists a timed-out test matched by two projects once', () => {
+    const root = makeRoot();
+    const suite = {
+      name: '/repo/a.test.ts',
+      status: 'failed',
+      assertionResults: [timedOut('slow', 612)],
+    };
+    const file = results(root, [suite, suite]);
+
+    expect(readDiagnosis(file)?.failures?.tests).toEqual([
+      { file: '/repo/a.test.ts', name: 'slow' },
+    ]);
+  });
+
+  it('names the exact escape hatch where an all-timeout failure is printed', () => {
+    const text = formatDiagnosis(
+      {
+        failedFiles: ['/repo/a.test.ts'],
+        flaky: [],
+        failures: { tests: [], allTimedOut: true, timeoutMs: 306 },
+      },
+      '/repo',
+      null,
+    ).join('\n');
+    expect(text).toMatch(/every failure timed out/i);
+    expect(text).toContain('--testTimeout=25000 --maxWorkers=50%');
+  });
+
+  it('prints no escape hatch when a real failure is in the mix', () => {
+    const text = formatDiagnosis(
+      {
+        failedFiles: ['/repo/a.test.ts'],
+        flaky: [],
+        failures: { tests: [], allTimedOut: false, timeoutMs: 306 },
+      },
+      '/repo',
+      null,
+    ).join('\n');
+    expect(text).not.toContain('--testTimeout');
+  });
+});
+
+describe('the budget a re-run is given', () => {
+  const observed = (timeoutMs: number | null) => ({ tests: [], allTimedOut: true, timeoutMs });
+
+  it('never drops below the floor, even with nothing observed', () => {
+    expect(raisedTimeoutMs(undefined)).toBe(RERUN_FLOOR_MS);
+    expect(raisedTimeoutMs(observed(null))).toBe(RERUN_FLOOR_MS);
+    expect(raisedTimeoutMs(observed(0))).toBe(RERUN_FLOOR_MS);
+    expect(raisedTimeoutMs(observed(5_000))).toBe(RERUN_FLOOR_MS); // exactly 5× hits the floor
+  });
+
+  // A consumer whose own ceiling is 60s must not be LOWERED to the floor — the CLI flag beats their
+  // config, so a fixed 25000 would make the re-run stricter than the run it is rescuing.
+  it('scales above the floor from a generous ceiling', () => {
+    expect(raisedTimeoutMs(observed(5_001))).toBe(25_005);
+    expect(raisedTimeoutMs(observed(60_000))).toBe(300_000);
+  });
+
+  it('ignores a duration that is not a real number', () => {
+    const root = makeRoot();
+    const file = results(root, [
+      {
+        name: '/repo/a.test.ts',
+        status: 'failed',
+        assertionResults: [
+          {
+            fullName: 'x',
+            status: 'failed',
+            duration: -1,
+            failureMessages: [`${TIMEOUT_FINGERPRINT}\n at`, `${TIMEOUT_FINGERPRINT}\n at`],
+          },
+        ],
+      },
+    ]);
+    const d = readDiagnosis(file);
+    expect(d?.failures?.allTimedOut).toBe(true);
+    expect(d?.failures?.timeoutMs).toBeNull();
+  });
+});
+
+describe('what the re-run says', () => {
+  it('announces the budget and every way out before it starts', () => {
+    const text = formatRerunNotice(25_000).join('\n');
+    expect(text).toMatch(/re-running the whole suite ONCE at testTimeout=25000ms/);
+    expect(text).toContain('DEVKIT_COVERAGE_NO_RERUN=1');
+    expect(text).toContain('--retry=0');
+    expect(text).toContain('--maxWorkers=50%');
+  });
+
+  it('names the tests only the raised budget got through', () => {
+    const text = formatRerunRescue(
+      {
+        failedFiles: ['/repo/a.test.ts'],
+        flaky: [],
+        failures: {
+          tests: [{ file: '/repo/a.test.ts', name: 'slow' }],
+          allTimedOut: true,
+          timeoutMs: 300,
+        },
+      },
+      '/repo',
+      25_000,
+    ).join('\n');
+    expect(text).toMatch(/1 test\(s\) passed only at the raised timeout \(25000ms\)/);
+    expect(text).toContain('a.test.ts > slow');
+  });
+
+  // A beforeAll timeout fails the FILE and names no test. The rescue must still say what flaked,
+  // or a whole-file flake passes in silence.
+  it('falls back to files when a hook timeout named no test', () => {
+    const text = formatRerunRescue(
+      {
+        failedFiles: ['/repo/h.test.ts'],
+        flaky: [],
+        failures: { tests: [], allTimedOut: true, timeoutMs: 300 },
+      },
+      '/repo',
+      25_000,
+    ).join('\n');
+    expect(text).toMatch(/1 file\(s\) passed only at the raised timeout/);
+    expect(text).toContain('h.test.ts');
+  });
+
+  it('caps a long rescue list and counts the rest', () => {
+    const tests = Array.from({ length: 13 }, (_, i) => ({
+      file: '/repo/a.test.ts',
+      name: `t${i}`,
+    }));
+    const lines = formatRerunRescue(
+      {
+        failedFiles: ['/repo/a.test.ts'],
+        flaky: [],
+        failures: { tests, allTimedOut: true, timeoutMs: 1 },
+      },
+      '/repo',
+      25_000,
+    );
+    expect(lines).toHaveLength(12);
+    expect(lines.at(-1)).toMatch(/…and 3 more/);
+  });
+
+  it('says nothing when there was nothing to rescue', () => {
+    expect(formatRerunRescue(null, '/repo', 25_000)).toEqual([]);
   });
 });
