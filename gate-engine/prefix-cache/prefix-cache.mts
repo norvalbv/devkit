@@ -31,6 +31,7 @@
  */
 
 import { execSync } from 'node:child_process';
+import { commitIndexEnv } from '../ratchets/commit-index.mts';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -80,7 +81,7 @@ export function computeKey(
 ): string | null {
   let tree: string;
   try {
-    tree = execSync('git write-tree', { cwd, encoding: 'utf8' }).trim();
+    tree = execSync('git write-tree', { cwd, env: commitIndexEnv(cwd), encoding: 'utf8' }).trim();
   } catch {
     return null;
   }

@@ -6,6 +6,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
+import { commitIndexEnv } from '../../ratchets/commit-index.mts';
 import { normalizeRepositoryFile } from '../../../skills/_devkit/review-roots.mjs';
 
 export function gitCached(cwd: string, args: string[], files: string[]): string {
@@ -14,6 +15,7 @@ export function gitCached(cwd: string, args: string[], files: string[]): string 
   );
   return execFileSync('git', ['diff', '--cached', ...args, '--', ...pathspecs], {
     cwd,
+    env: commitIndexEnv(cwd),
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
   });
@@ -22,6 +24,7 @@ export function gitCached(cwd: string, args: string[], files: string[]): string 
 function snapshotFile(cwd: string, spec: string): string {
   return execFileSync('git', ['show', spec], {
     cwd,
+    env: commitIndexEnv(cwd),
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
     stdio: ['ignore', 'pipe', 'ignore'],
@@ -34,6 +37,7 @@ function indexHasStageZero(cwd: string, file: string): boolean {
   // stderr ignored, as in snapshotFile: callers probe paths that may not be in a repo at all.
   const entries = execFileSync('git', ['ls-files', '--stage', '-z', '--', literalPathspec(file)], {
     cwd,
+    env: commitIndexEnv(cwd),
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'ignore'],
   }).split('\0');
@@ -49,7 +53,7 @@ export function headFile(cwd: string, file: string): string | null {
   const entry = execFileSync(
     'git',
     ['ls-tree', '-z', '--name-only', 'HEAD', '--', literalPathspec(normalized)],
-    { cwd, encoding: 'utf8' },
+    { cwd, env: commitIndexEnv(cwd), encoding: 'utf8' },
   );
   if (entry === '') return null;
   return snapshotFile(cwd, `HEAD:${normalized}`);
@@ -63,7 +67,7 @@ export function indexPathsNamed(cwd: string, basename: string): Set<string> | nu
     out = execFileSync(
       'git',
       ['ls-files', '--stage', '-z', '--', `:(top,glob)**/${basename}`, literalPathspec(basename)],
-      { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
+      { cwd, env: commitIndexEnv(cwd), encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
     );
   } catch {
     return null;
@@ -89,7 +93,11 @@ export function indexFile(cwd: string, file: string): string | null {
 export function stagedFiles(cwd: string): string[] {
   // -z: NUL-separated RAW names. Without it git C-quotes paths containing tabs/unicode/quotes,
   // and every byte-keyed consumer (chunk packing, evidence budgeting) silently misses them.
-  return execFileSync('git', ['diff', '--cached', '--name-only', '-z'], { cwd, encoding: 'utf8' })
+  return execFileSync('git', ['diff', '--cached', '--name-only', '-z'], {
+    cwd,
+    env: commitIndexEnv(cwd),
+    encoding: 'utf8',
+  })
     .split('\0')
     .filter(Boolean);
 }
@@ -103,7 +111,13 @@ export function stagedFiles(cwd: string): string[] {
  */
 export function stagedTreeHash(cwd: string): string | null {
   try {
-    return execFileSync('git', ['write-tree'], { cwd, encoding: 'utf8' }).trim() || null;
+    return (
+      execFileSync('git', ['write-tree'], {
+        cwd,
+        env: commitIndexEnv(cwd),
+        encoding: 'utf8',
+      }).trim() || null
+    );
   } catch {
     return null;
   }
@@ -119,6 +133,7 @@ export function headHash(cwd: string): string | null {
     try {
       return execFileSync('git', args, {
         cwd,
+        env: commitIndexEnv(cwd),
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'ignore'],
       }).trim();

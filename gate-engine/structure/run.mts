@@ -17,6 +17,7 @@
 // 2 fail-open (could-not-run).
 
 import { execFileSync } from 'node:child_process';
+import { commitIndexEnv } from '../ratchets/commit-index.mts';
 import { existsSync, readdirSync, realpathSync } from 'node:fs';
 import { extname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -136,7 +137,9 @@ export function planStagedStructureLint(
 }
 
 function gitPaths(cwd: string, args: string[]): string[] {
-  return splitNul(execFileSync('git', args, { cwd, encoding: 'buffer' }).toString());
+  return splitNul(
+    execFileSync('git', args, { cwd, env: commitIndexEnv(cwd), encoding: 'buffer' }).toString(),
+  );
 }
 
 function untrackedPaths(cwd: string): string[] {
@@ -147,6 +150,7 @@ function destructivePaths(cwd: string): string[] {
   const fields = splitNul(
     execFileSync('git', ['diff', '--cached', '--name-status', '-z', '--diff-filter=DR'], {
       cwd,
+      env: commitIndexEnv(cwd),
       encoding: 'buffer',
     }).toString(),
   );
