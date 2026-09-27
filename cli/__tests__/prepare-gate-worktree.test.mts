@@ -1,5 +1,6 @@
 import {
   chmodSync,
+  existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
@@ -264,6 +265,93 @@ describe('prepare_gate_worktree — dependency manifest freshness', () => {
     expect(r.stderr).toContain(join(linked, 'node_modules'));
     expect(r.stderr).toContain(join(main, 'node_modules'));
     expect(r.stderr).toContain('bun install --frozen-lockfile');
+  });
+});
+
+// sc-1934: the linked install IS the engine the worktree hook runs — one older than
+// `.devkit/baselines` blocks every grandfathered ratchet entry as new, so ship must stop first.
+describe('prepare_gate_worktree — a linked devkit too old to read .devkit/baselines', () => {
+  const pinDevkit = (main: string, version: string) =>
+    seedFiles(main, {
+      'node_modules/@norvalbv/devkit/package.json': JSON.stringify({ version }),
+    });
+
+  it('refuses before linking when the install (resolved from the MAIN worktree) is below 0.53', () => {
+    const { main, linked, wt } = seedRepoWithLinkedWorktree();
+    pinDevkit(main, '0.52.0');
+    seedFiles(wt, { '.devkit/baselines/size-lines.json': '{}' });
+
+    const r = prepare(wt, linked);
+
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain('installed devkit 0.52.0 predates 0.53.0');
+    expect(r.stderr).toContain('.devkit/baselines/size-lines.json');
+    expect(r.stderr).toContain(join(main, 'node_modules', '@norvalbv', 'devkit'));
+    expect(r.stderr).toContain('devkit upgrade');
+    expect(existsSync(join(wt, 'node_modules'))).toBe(false);
+  });
+
+  it('proceeds when the installed reader is current', () => {
+    const { main, linked, wt } = seedRepoWithLinkedWorktree();
+    pinDevkit(main, '0.62.0');
+    seedFiles(wt, { '.devkit/baselines/size-lines.json': '{}' });
+
+    const r = prepare(wt, linked);
+
+    expect(r.status, `stderr: ${r.stderr}`).toBe(0);
+    expect(linkTarget(join(wt, 'node_modules'))).toBe(join(main, 'node_modules'));
+  });
+
+  it('judges the worktree the hook runs in, not the live checkout, which can move under it', () => {
+    const { main, linked, wt } = seedRepoWithLinkedWorktree();
+    pinDevkit(main, '0.52.0');
+    seedFiles(wt, { 'eslint/baselines/size.json': '{}' });
+    seedFiles(linked, { '.devkit/baselines/size.json': '{}' });
+
+    const r = prepare(wt, linked);
+
+    expect(r.status, `stderr: ${r.stderr}`).toBe(0);
+  });
+
+  it("finds a monorepo package's canonical-only baselines, not just the root's", () => {
+    const { main, linked, wt } = seedRepoWithLinkedWorktree();
+    pinDevkit(main, '0.52.0');
+    const git = (args: string[]) =>
+      execFileSync('git', args, { cwd: wt, encoding: 'utf8', env: { ...process.env, ...GIT_ENV } });
+    git(['init', '-q']);
+    seedFiles(wt, {
+      'packages/app/.devkit/config.json': '{}',
+      'packages/app/.devkit/baselines/size.json': '{}',
+    });
+    git(['add', 'packages/app/.devkit/config.json']);
+
+    const r = prepare(wt, linked);
+
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain('packages/app/.devkit/baselines/size.json');
+  });
+
+  it('leaves a consistent legacy-only repo on an old pin alone', () => {
+    const { main, linked, wt } = seedRepoWithLinkedWorktree();
+    pinDevkit(main, '0.52.0');
+    seedFiles(wt, { 'eslint/baselines/size-lines.json': '{}' });
+
+    const r = prepare(wt, linked);
+
+    expect(r.status, `stderr: ${r.stderr}`).toBe(0);
+  });
+
+  it('a check that cannot run never aborts the ship under set -e (corrupt installed devkit manifest)', () => {
+    const { main, linked, wt } = seedRepoWithLinkedWorktree();
+    pinDevkit(main, '0.52.0');
+    seedFiles(wt, { '.devkit/baselines/size-lines.json': '{}' });
+    seedFiles(main, { 'node_modules/@norvalbv/devkit/package.json': '{ not json' });
+
+    const r = prepare(wt, linked);
+
+    expect(r.status, `stderr: ${r.stderr}`).toBe(0);
+    expect(r.stderr).toContain('baseline reader preflight unavailable (exit 2)');
+    expect(linkTarget(join(wt, 'node_modules'))).toBe(join(main, 'node_modules'));
   });
 });
 

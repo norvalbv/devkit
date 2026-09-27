@@ -56,7 +56,7 @@ interface VersionedPackage {
 }
 
 /** An installed devkit, its spawnable entrypoint, and the bin path to SHOW — one root, always. */
-interface InstalledDevkit {
+export interface InstalledDevkit {
   version?: string;
   /** The package's own JS entrypoint, spawned via process.execPath. */
   entry?: string;
@@ -92,7 +92,7 @@ export interface RunnerSkew {
   remediation: string;
 }
 
-function readConfig(cwd: string): RunnerConfig {
+export function readConfig(cwd: string): RunnerConfig {
   try {
     return readJson<RunnerConfig>(join(cwd, '.devkit', 'config.json')) ?? {};
   } catch {
@@ -137,7 +137,7 @@ function runningVersion(): string | undefined {
  * let a monorepo package dir validate against the git root's install while handing off to a stale
  * package-local binary — a delegation to code that is not the version we just approved.
  */
-function installedAt(cwd: string): InstalledDevkit {
+export function installedAt(cwd: string): InstalledDevkit {
   let versionOnly: InstalledDevkit = {};
   for (const root of roots(cwd)) {
     const pkgDir = join(root, INSTALLED_DIR_REL);

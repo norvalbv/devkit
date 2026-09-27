@@ -12,7 +12,6 @@ import {
   LEGACY_IMPORT_WALL_BASELINE,
   STRUCTURE_BASELINE_DIR,
   STRUCTURE_EXEMPT,
-  reportRatchetBaselineMigration,
 } from '../../gate-engine/ratchets/baseline-paths.mts';
 import { loadImportWallExempt } from '../../gate-engine/structure/load-baseline.mts';
 import {
@@ -31,6 +30,7 @@ import {
   STRUCTURE_STACKS,
 } from '../lib/components.mts';
 import { detectGitRoot } from '../lib/detect-git-root.mts';
+import { reportBaselineStorage } from '../lib/doctor/pin/baseline-reader.mts';
 import { assertRunnerMayWrite } from '../lib/doctor/pin/runner-identity.mts';
 import { detectStack } from '../lib/detect-stack.mts';
 import { packageDir, readJson, writeIfAbsent } from '../lib/fs-helpers.mts';
@@ -803,7 +803,7 @@ export async function applyInit(cwd: string, plan: InitPlan) {
   // Baselines are durable tracked state. Re-open their canonical directory before migration so a
   // consumer's broad `.devkit/` ignore cannot turn the move into a staged deletion-only commit.
   ensureDevkitCacheGitignore(cwd, dryRun);
-  reportRatchetBaselineMigration(cwd, dryRun);
+  reportBaselineStorage(cwd, dryRun); // skips the move under a pre-0.53 reader (sc-1934)
   console.log(
     `devkit init${dryRun ? ' (dry-run — no files written)' : ''} — stack=${stack}, devkit=${devkitRef}`,
   );

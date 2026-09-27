@@ -304,3 +304,37 @@ describe('pin and binary come from the same root', () => {
     expect(skew.pinnedBin).not.toBe(stray);
   });
 });
+
+// sc-1934: the reader-floor row must be REACHED from a package-mode doctor, not only be correct.
+describe('doctor names a pinned devkit too old to read .devkit/baselines', () => {
+  const readerRepo = (installed: string): string => {
+    const root = mkTmp('reader-wire-');
+    mkdirSync(join(root, '.devkit', 'baselines'), { recursive: true });
+    writeFileSync(join(root, '.devkit', 'config.json'), JSON.stringify({ stack: 'generic' }));
+    writeFileSync(join(root, '.devkit', 'baselines', 'size-lines.json'), '{"files":{}}\n');
+    writeFileSync(
+      join(root, 'package.json'),
+      JSON.stringify({
+        devDependencies: { '@norvalbv/devkit': `git+https://x/y.git#v${installed}` },
+      }),
+    );
+    const nm = join(root, 'node_modules', '@norvalbv', 'devkit');
+    mkdirSync(nm, { recursive: true });
+    writeFileSync(join(nm, 'package.json'), JSON.stringify({ version: installed }));
+    return root;
+  };
+
+  it('reports a DRIFT row naming devkit upgrade, and exits non-zero', async () => {
+    const code = await doctorRun([], readerRepo('0.52.0'));
+    expect(printed()).toMatch(
+      /ratchet baseline reader: DRIFT — installed devkit 0\.52\.0 predates 0\.53\.0/,
+    );
+    expect(printed()).toContain('devkit upgrade');
+    expect(code).not.toBe(0);
+  });
+
+  it('stays silent for a reader at or above the floor', async () => {
+    await doctorRun([], readerRepo('0.53.0'));
+    expect(printed()).not.toContain('ratchet baseline reader');
+  });
+});
