@@ -6,6 +6,11 @@
  * manual lane runs the identical command in a plain terminal.
  */
 import { delimiter, dirname } from 'node:path';
+import {
+  claudeFamilyEnvLine,
+  JUDGE_MODEL_ENVS,
+  judgeEnvUnsetLine,
+} from '../../gate-engine/judge/outage/family-override.mts';
 import { reportShipRuntimeProvenance } from '../lib/ship/runtime-provenance.mts';
 import { runManagedPackagedScript } from '../lib/ship/run-packaged-script.mts';
 
@@ -149,6 +154,18 @@ Env:
   GUARD_DECISIONS_INTEGRITY_OK=1  Commit past a structural finding on a decision record in this
                       change (self-host only). Findings that already exist at HEAD are advisory
                       without any flag; this is for a NEW finding you believe is wrong.
+
+Judge models:
+  ${JUDGE_MODEL_ENVS.join(' ')}
+                      No one knob moves every judge: completeness reads GUARD_REVIEW_ESCALATION_MODEL,
+                      not GUARD_REVIEW_MODEL (which also carries the sentry judge unless a sentry env
+                      pins it); GUARD_CORRECTNESS_CHUNK sets a chunk cap, not a model.
+                      A model id starting \`gpt-\` runs on the codex CLI; any other id on claude.
+                      Codex dark? Move every judge at once, never a subset:
+                        ${claudeFamilyEnvLine()}
+                      Way back once it clears:
+                        ${judgeEnvUnsetLine()}
+                      A \`devkit doctor --fix\` bind in guard.config.json: see docs/troubleshooting.md.
 
 Exits 0 on PR opened, committed under SHIP_DRY_RUN, or a passing --dry-gates rehearsal; 1 on any
 preflight/git/gh/gate error. A --wait-ci verdict never changes that — a red or timed-out CI still
