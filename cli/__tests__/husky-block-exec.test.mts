@@ -413,7 +413,8 @@ describe('assembled hook execution (stubbed bins, sh -e)', () => {
     const r = runHook({ REVIEW_RC: '3' });
     expect(r.status).toBe(1);
     expect(r.stdout).toContain('strict ship mode failed closed');
-    expect(r.stdout).toContain('judge CLI auth/quota named above');
+    expect(r.stdout).toContain('Follow the Remedy named above');
+    expect(r.stdout).not.toContain('auth/quota'); // sc-3400: the cause is named per reviewer
     expect(r.stdout).not.toMatch(/check [`]?claude/i);
     expect(r.stdout).not.toContain('escalation-confirmed');
   });

@@ -206,6 +206,48 @@ describe('stagedFilesOverride — the gate-injected authoritative file list (sc-
     expect(withEnv({ DEVKIT_REVIEW_STAGED_FILES: list }, stagedFilesOverride)).toEqual([real]);
     rmSync(dir, { recursive: true, force: true });
   });
+
+  // sc-3400: a list too large for an env var travels by FILE, so a big deletion-only ship keeps the
+  // gate's authoritative universe instead of falling back to the script's own ACM resolution.
+  describe('DEVKIT_REVIEW_STAGED_FILES_PATH — the large-list channel', () => {
+    const PATH_KEY = 'DEVKIT_REVIEW_STAGED_FILES_PATH';
+    const listFile = (files: string[]) => {
+      const dir = mkdtempSync(join(tmpdir(), 'staged-override-path-'));
+      const file = join(dir, 'staged.json');
+      writeFileSync(file, JSON.stringify(files));
+      return { dir, file };
+    };
+
+    it('both readers take the list from the file when the inline var is absent', () => {
+      const { dir, file } = listFile(['src/a.ts', 'src/gone.ts']);
+      const real = join(dir, 'real.ts');
+      writeFileSync(real, 'export {};\n');
+      writeFileSync(file, JSON.stringify([real, join(dir, 'gone.ts')]));
+      const env = { DEVKIT_REVIEW_STAGED_FILES: undefined, [PATH_KEY]: file };
+      expect(withEnv(env, stagedFilesOverride)).toEqual([real]);
+      writeFileSync(file, JSON.stringify(['src/a.ts', 'src/gone.ts', 'src/a.ts']));
+      expect(withEnv(env, authoritativeStagedFilesOverride)).toEqual(['src/a.ts', 'src/gone.ts']);
+      rmSync(dir, { recursive: true, force: true });
+    });
+
+    it('the inline var wins when both are set', () => {
+      const { dir, file } = listFile(['src/from-file.ts']);
+      const env = { DEVKIT_REVIEW_STAGED_FILES: '["src/inline.ts"]', [PATH_KEY]: file };
+      expect(withEnv(env, authoritativeStagedFilesOverride)).toEqual(['src/inline.ts']);
+      rmSync(dir, { recursive: true, force: true });
+    });
+
+    it('a named but unreadable file is loud for both readers — never a silent re-resolution', () => {
+      const env = {
+        DEVKIT_REVIEW_STAGED_FILES: undefined,
+        [PATH_KEY]: join(tmpdir(), 'devkit-no-such-staged-list.json'),
+      };
+      expect(() => withEnv(env, stagedFilesOverride)).toThrow(/DEVKIT_REVIEW_STAGED_FILES_PATH/);
+      expect(() => withEnv(env, authoritativeStagedFilesOverride)).toThrow(
+        /DEVKIT_REVIEW_STAGED_FILES/,
+      );
+    });
+  });
 });
 
 describe('review.paths', () => {

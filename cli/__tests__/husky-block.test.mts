@@ -426,7 +426,9 @@ describe('exit 4 renders as an object-database fault, never as a verdict', () =>
     // Non-vacuity guard: if these ever stopped printing, the two assertions above would pass for
     // the wrong reason and this suite would be measuring nothing.
     expect(runHook({ 'guard-review': 1 }).out).toContain('escalation-confirmed');
-    expect(runHook({ 'guard-review': 3 }).out).toContain('auth/quota');
+    // sc-3400: exit 3 defers to the per-reviewer Remedy, which names the real cause — a flat
+    // "auth/quota" here misdirected an engine error. The exit-4 lines above must still never say it.
+    expect(runHook({ 'guard-review': 3 }).out).toContain('Follow the Remedy named above');
   });
 });
 

@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
+import { z } from 'zod';
 import type { GuardConfig } from '../config.mts';
 import { consumerChecklistAssetRoot, readConsumerReviewAsset } from './cascade/consumer-assets.mts';
 import type { ReviewInconclusiveCause } from './contracts/response.mts';
@@ -81,6 +82,9 @@ export interface ChecklistState {
   skipped?: string;
 }
 
+// Parsed, never truthiness-checked (sc-3400): a non-string or whitespace-only reason explains nothing.
+const skipReasonSchema = z.string().trim().min(1);
+
 /**
  * Independent verification of the checklist artifact the judge's workflow left behind — the
  * gate-side half of the anti-hallucination contract. Returns null when the artifact is complete
@@ -102,8 +106,7 @@ export function verifyChecklist(
   if (
     Array.isArray(items) &&
     items.length === 0 &&
-    typeof state?.skipped === 'string' &&
-    state.skipped
+    skipReasonSchema.safeParse(state?.skipped).success
   )
     return null;
   if (!Array.isArray(items) || items.length === 0)
@@ -395,27 +398,8 @@ export function gateJudgeEnv(reviewMode: boolean, cfg: GuardConfig): NodeJS.Proc
   };
 }
 
-/**
- * Per-reviewer judge env (sc-1439): hand the gate's authoritative staged file list to the
- * reviewer's checklist script, so generate() can never resolve zero files while the gate selected
- * the reviewer — the second artifact-killer behind the "checklist artifact missing" inconclusives.
- * Checklist reviewers only; oversized lists fall back LOUDLY to script-side resolution.
- */
-export function withStagedFiles(
-  env: NodeJS.ProcessEnv,
-  reviewer: Reviewer,
-  files: string[],
-): NodeJS.ProcessEnv {
-  if (!hasChecklist(reviewer)) return env;
-  const serialized = JSON.stringify(files);
-  if (serialized.length > 100_000) {
-    console.error(
-      `guard-review: ${reviewer.name} staged list too large to inject (${serialized.length}B) — falling back to script-side resolution`,
-    );
-    return env;
-  }
-  return { ...env, DEVKIT_REVIEW_STAGED_FILES: serialized };
-}
+// The staged-list channel lives in its own module (sc-3400); re-exported so callers keep one seam.
+export { withStagedFiles } from './evidence/staged-files-env.mts';
 
 /** GUARD_REVIEW_SKIP / FRINK_REVIEW_SKIP: comma-list of reviewer names to drop from a run — the
  * per-reviewer rollback lever (GUARD_NO_REVIEW kills the whole gate; this surgically disables one). */
@@ -453,14 +437,15 @@ export function cleanupChecklistState(cwd: string, reviewer: Reviewer): void {
  * longer interactive brief has repeatedly returned a prose PASS without executing `init`, leaving
  * strict ship permanently inconclusive. The gate owns enumeration, while the judge still owns every
  * per-file pass/fail mark and `finalize` — a pre-seeded all-pending artifact grants no authority.
+ * Returns the seeded state (null for any other reviewer) so the cascade can see a named skip.
  */
 export function initializeCommitGuardChecklist(
   cwd: string,
   reviewer: Reviewer,
   assetRoot?: string,
   env: NodeJS.ProcessEnv = process.env,
-): void {
-  if (reviewer.name !== 'commit-guard' || !hasChecklist(reviewer)) return;
+): ChecklistState | null {
+  if (reviewer.name !== 'commit-guard' || !hasChecklist(reviewer)) return null;
   const script = checklistScriptAt(reviewer, assetRoot);
   try {
     execFileSync(process.execPath, [script, reviewer.cmds.gen], {
@@ -474,7 +459,25 @@ export function initializeCommitGuardChecklist(
       cause && typeof cause === 'object' && 'stderr' in cause ? String(cause.stderr).trim() : '';
     throw new Error(`commit-guard checklist initialization failed${stderr ? ` — ${stderr}` : ''}`);
   }
-  const files = readChecklistState(cwd, reviewer)?.files;
-  if (!Array.isArray(files) || files.length === 0)
+  const state = readChecklistState(cwd, reviewer);
+  // A NAMED skip (sc-1439) is a result: the gate's list held nothing this checklist reviews — a
+  // deletion-only change, say (sc-3400). Only an UNEXPLAINED empty is an engine failure.
+  if (isNamedSkip(state)) return state;
+  if (!Array.isArray(state?.files) || state.files.length === 0)
     throw new Error('commit-guard checklist initialization produced no staged files');
+  return state;
+}
+
+// No `items` at all: any row there is a review result, which a named skip must never shadow.
+const namedSkipSchema = z.object({
+  files: z.array(z.unknown()).length(0),
+  skipped: skipReasonSchema,
+  items: z.never().optional(),
+});
+
+/** True when a seeded checklist deliberately enumerated nothing (see initializeCommitGuardChecklist). */
+export function isNamedSkip(
+  state: ChecklistState | null,
+): state is ChecklistState & { skipped: string } {
+  return namedSkipSchema.safeParse(state).success;
 }
