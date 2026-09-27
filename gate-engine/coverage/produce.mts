@@ -56,13 +56,15 @@ import {
   ownsReporter,
   ownsRetry,
   ownsTimeoutBudget,
-  RETRY_MIN_VITEST,
   resolveVitest,
   runVitestDetailed,
-  supportsRetryCondition,
   type VitestRun,
-  vitestMajorMinor,
 } from './vitest-cli.mts';
+import {
+  detectVitestVersion,
+  RETRY_MIN_VITEST,
+  supportsRetryCondition,
+} from './vitest-version.mts';
 
 export const COVERAGE_DIR = 'coverage';
 export const REPORT_NAME = 'coverage-final.json';
@@ -241,14 +243,24 @@ export function shouldRerun(input: RerunInput): boolean {
 /** Set to skip the json reporter (and therefore all post-run diagnosis) without touching retry. */
 export const NO_DIAGNOSIS_ENV = 'DEVKIT_COVERAGE_NO_DIAGNOSIS';
 
-export function buildInjectedArgs(vitest: string, argv: string[], resultsFile: string): string[] {
+export function buildInjectedArgs(
+  vitest: string,
+  argv: string[],
+  resultsFile: string,
+  cwd: string,
+): string[] {
   const injected: string[] = [];
   if (!ownsRetry(argv)) {
-    if (supportsRetryCondition(vitestMajorMinor(vitest))) {
+    const detected = detectVitestVersion(cwd, vitest);
+    if (supportsRetryCondition(detected.kind === 'known' ? detected.majorMinor : null)) {
       injected.push('--retry.count=1', `--retry.condition=${RETRY_CONDITION}`);
     } else {
+      // Two different claims, kept apart: "too old" must be checkable, and "could not tell" must not
+      // masquerade as "too old" (sc-3731) — both still inject nothing, see supportsRetryCondition.
       console.error(
-        `ℹ️  Skipping the flake retry: this vitest predates --retry.condition (need >=${RETRY_MIN_VITEST.join('.')}).`,
+        detected.kind === 'known'
+          ? `ℹ️  Skipping the flake retry: detected vitest ${detected.version}, but --retry.condition needs >=${RETRY_MIN_VITEST.join('.')}.0-beta.1.`
+          : `ℹ️  Skipping the flake retry: could not determine the vitest version (${detected.reason}).`,
       );
       console.error('   A timeout-shaped flake will discard the coverage artifact as before.');
     }
@@ -334,7 +346,7 @@ async function runPass(
   // Inside runDir, which only this run may touch; results.json also keeps it non-empty, so vitest's
   // cleanAfterRun() has nothing to sweep (the v0.43.1 fail-open).
   const resultsFile = join(runDir, RESULTS_NAME);
-  const injected = buildInjectedArgs(vitest, argv, resultsFile);
+  const injected = buildInjectedArgs(vitest, argv, resultsFile, cwd);
   const retrying = injected.some((arg) => arg.startsWith('--retry.'));
 
   let run: VitestRun = { code: 1, interrupted: false };

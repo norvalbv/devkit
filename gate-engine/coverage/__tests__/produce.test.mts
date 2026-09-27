@@ -41,14 +41,12 @@ import {
   STALE_RUN_MS,
   snapshotArtifact,
 } from '../produce.mts';
+import { ownsTimeoutBudget, ownsReporter, ownsRetry, resolveVitest } from '../vitest-cli.mts';
 import {
-  ownsTimeoutBudget,
-  ownsReporter,
-  ownsRetry,
-  resolveVitest,
+  detectVitestVersion,
   supportsRetryCondition,
-  vitestMajorMinor,
-} from '../vitest-cli.mts';
+  vitestMajorMinorOf,
+} from '../vitest-version.mts';
 
 const DEVKIT_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
@@ -67,10 +65,8 @@ const silentStubVitest = (root: string, silentBody: string) => {
   const bin = join(root, 'node_modules', '.bin');
   mkdirSync(bin, { recursive: true });
   const path = join(bin, 'vitest');
-  // Extensionless + shebang ⇒ Node treats it as CommonJS, hence `require` rather than `import`.
-  // The version probe runs BEFORE the real invocation (vitestMajorMinor), and its stdio is piped, so
-  // answering it here neither breaks the silence contract nor lets a fixture mistake the probe for
-  // the run it is waiting on.
+  // Extensionless + shebang ⇒ CommonJS. No vitest package.json here, so the piped `--version`
+  // fallback probe runs first; answering it keeps the fixture silent.
   writeFileSync(
     path,
     `#!/usr/bin/env node
@@ -461,20 +457,20 @@ describe('the flags devkit adds on the consumer behalf', () => {
   it.each([['--retry=0'], ['--retry=3'], ['--retry.count=0'], ['--retry.delay=100'], ['--retry']])(
     'injects no retry when the consumer passed %s',
     (arg) => {
-      const args = buildInjectedArgs(VITEST, [arg], '/tmp/results.json');
+      const args = buildInjectedArgs(VITEST, [arg], '/tmp/results.json', DEVKIT_ROOT);
       expect(args.some((a) => a.startsWith('--retry'))).toBe(false);
     },
   );
 
   it('injects the timeout-scoped retry when the consumer said nothing', () => {
-    const args = buildInjectedArgs(VITEST, [], '/tmp/results.json');
+    const args = buildInjectedArgs(VITEST, [], '/tmp/results.json', DEVKIT_ROOT);
     expect(args).toContain('--retry.count=1');
     expect(args).toContain('--retry.condition=(Test|Hook) timed out');
   });
 
   it('leaves the consumer reporters alone when they chose their own', () => {
     for (const arg of ['--reporter=verbose', '--reporter', '--outputFile.json=x.json']) {
-      const args = buildInjectedArgs(VITEST, [arg], '/tmp/results.json');
+      const args = buildInjectedArgs(VITEST, [arg], '/tmp/results.json', DEVKIT_ROOT);
       expect(args.some((a) => a.startsWith('--reporter') || a.startsWith('--outputFile'))).toBe(
         false,
       );
@@ -482,15 +478,16 @@ describe('the flags devkit adds on the consumer behalf', () => {
   });
 
   it('keeps the default reporter so console output is unchanged', () => {
-    const args = buildInjectedArgs(VITEST, [], '/tmp/results.json');
+    const args = buildInjectedArgs(VITEST, [], '/tmp/results.json', DEVKIT_ROOT);
     expect(args).toContain('--reporter=default');
     expect(args).toContain('--reporter=json');
     expect(args).toContain('--outputFile.json=/tmp/results.json');
   });
 
-  it('reads the version off the binary it will actually run', () => {
-    expect(vitestMajorMinor(VITEST)).toEqual([4, 1]);
-    expect(vitestMajorMinor(join(DEVKIT_ROOT, 'node_modules', '.bin', 'not-a-binary'))).toBeNull();
+  it('reads the version of the vitest installed beside the binary it will actually run', () => {
+    const detected = detectVitestVersion(DEVKIT_ROOT, VITEST);
+    expect(detected.kind).toBe('known');
+    expect(detected.kind === 'known' && detected.majorMinor[0]).toBe(4);
   });
 
   // FEATURE-DETECT, DO NOT GUESS. vitest silently IGNORES an unknown dotted sub-option, so on an
@@ -505,11 +502,245 @@ describe('the flags devkit adds on the consumer behalf', () => {
     expect(supportsRetryCondition([5, 0])).toBe(true);
   });
 
+  // sc-3731's acceptance table. 4.10 is the one a string or single-digit compare gets wrong, and a
+  // prerelease is safe to retry on: retry.condition shipped in 4.1.0-beta.1 (vitest#8812).
+  it.each([
+    ['3.9.0', false],
+    ['4.0.0', false],
+    ['4.0.9', false],
+    ['4.1.0', true],
+    ['4.1.9', true],
+    ['4.1.0-beta.1', true],
+    ['4.1.0-beta.12', true],
+    ['4.1.0-rc.0', true],
+    ['4.1.0-alpha.3', false],
+    ['4.1.0-beta.0', false],
+    ['4.1.0-beta', false],
+    ['4.1.0-next.1', false],
+    ['4.2.0-beta.0', true],
+    ['4.10.0', true],
+    ['5.0.0', true],
+  ])('vitest %s → retry %s', (version, expected) => {
+    expect(supportsRetryCondition(vitestMajorMinorOf(version))).toBe(expected);
+  });
+
+  it.each([[''], ['latest'], ['workspace:*'], ['v4.1.9'], ['4.1']])(
+    'refuses to guess a version from %j',
+    (version) => {
+      expect(vitestMajorMinorOf(version)).toBeNull();
+    },
+  );
+
   it('recognises every retry and reporter spelling', () => {
     expect(ownsRetry(['--retry.condition=x'])).toBe(true);
     expect(ownsRetry(['--retries=3'])).toBe(false); // not a vitest flag; must not swallow the retry
     expect(ownsReporter(['--outputFile=x'])).toBe(true);
     expect(ownsReporter(['--reporters=x'])).toBe(false);
+  });
+});
+
+// sc-3731: a failed `vitest --version` spawn (load timeout, Windows sh-shim) used to read as
+// "this vitest predates --retry.condition", so 4.1.9 lost its retry.
+describe('learning the consumer vitest version', () => {
+  // `.bin/vitest` is a plain-file shim (as pnpm writes). On `--version` it leaves a marker, so a test
+  // can prove no spawn, and exits 1 unless shimVersion is given.
+  const consumer = (opts: { installed?: string | null; shimVersion?: string } = {}) => {
+    const root = makeRoot();
+    const bin = join(root, 'node_modules', '.bin');
+    mkdirSync(bin, { recursive: true });
+    const probed = join(root, 'probed');
+    const shim = join(bin, 'vitest');
+    writeFileSync(
+      shim,
+      `#!/usr/bin/env node
+if (process.argv.includes('--version')) {
+  require('node:fs').writeFileSync(${JSON.stringify(probed)}, '');
+  ${opts.shimVersion ? `process.stdout.write('vitest/${opts.shimVersion} linux-x64 node-v22.0.0\\n'); process.exit(0);` : 'process.exit(1);'}
+}
+process.exit(0);
+`,
+    );
+    chmodSync(shim, 0o755);
+    if (opts.installed !== null && opts.installed !== undefined) {
+      mkdirSync(join(root, 'node_modules', 'vitest'), { recursive: true });
+      writeFileSync(join(root, 'node_modules', 'vitest', 'package.json'), opts.installed);
+    }
+    return { root, shim, probed };
+  };
+  const pkg = (version: string) => JSON.stringify({ name: 'vitest', version });
+
+  const noticesFrom = (fn: () => void) => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      fn();
+      return spy.mock.calls.map((c) => String(c[0])).join('\n');
+    } finally {
+      spy.mockRestore();
+    }
+  };
+
+  it('reads 4.1.9 off disk and injects the retry without spawning vitest', () => {
+    const { root, shim, probed } = consumer({ installed: pkg('4.1.9') });
+
+    expect(detectVitestVersion(root, shim)).toEqual({
+      kind: 'known',
+      version: '4.1.9',
+      majorMinor: [4, 1],
+    });
+    let args: string[] = [];
+    const notices = noticesFrom(() => {
+      args = buildInjectedArgs(shim, [], '/tmp/results.json', root);
+    });
+    expect(args).toContain('--retry.count=1');
+    expect(notices).not.toContain('Skipping the flake retry');
+    // THE REGRESSION: a probe that spawns can time out under load. This one must not spawn at all.
+    expect(existsSync(probed)).toBe(false);
+  });
+
+  // bun and pnpm link node_modules/vitest into a store; the read has to follow that link.
+  it('follows a symlinked package directory (pnpm/bun store layout)', () => {
+    const { root, shim } = consumer();
+    const store = join(root, '.store', 'vitest@4.1.9');
+    mkdirSync(store, { recursive: true });
+    writeFileSync(join(store, 'package.json'), pkg('4.1.9'));
+    symlinkSync(store, join(root, 'node_modules', 'vitest'), 'dir');
+
+    expect(detectVitestVersion(root, shim)).toMatchObject({ kind: 'known', version: '4.1.9' });
+  });
+
+  // A symlinked .bin names its package exactly; a stale sibling package.json must not outvote it.
+  it('reads the version of the package a symlinked .bin/vitest actually runs', () => {
+    const { root, shim } = consumer({ installed: pkg('4.1.9') });
+    const old = join(root, '.store', 'vitest@4.0.3');
+    mkdirSync(old, { recursive: true });
+    writeFileSync(join(old, 'package.json'), pkg('4.0.3'));
+    writeFileSync(join(old, 'vitest.mjs'), '#!/usr/bin/env node\nprocess.exit(1);\n');
+    chmodSync(join(old, 'vitest.mjs'), 0o755);
+    rmSync(shim);
+    symlinkSync(join(old, 'vitest.mjs'), shim);
+
+    expect(detectVitestVersion(root, shim)).toMatchObject({ kind: 'known', version: '4.0.3' });
+    const notices = noticesFrom(() => {
+      expect(buildInjectedArgs(shim, [], '/tmp/results.json', root)).not.toContain(
+        '--retry.count=1',
+      );
+    });
+    expect(notices).toContain('detected vitest 4.0.3');
+  });
+
+  it('ignores the sibling package.json when a symlinked .bin leads to no vitest package', () => {
+    const { root, shim } = consumer({ installed: pkg('4.1.9') });
+    const elsewhere = join(root, 'tools');
+    mkdirSync(elsewhere, { recursive: true });
+    writeFileSync(join(elsewhere, 'vitest'), '#!/usr/bin/env node\nprocess.exit(1);\n');
+    chmodSync(join(elsewhere, 'vitest'), 0o755);
+    rmSync(shim);
+    symlinkSync(join(elsewhere, 'vitest'), shim);
+
+    expect(detectVitestVersion(root, shim).kind).toBe('unknown');
+  });
+
+  // The binary that runs is <cwd>/node_modules/.bin/vitest (resolveVitest). A vitest resolved from an
+  // ANCESTOR node_modules may be a different copy, so its version says nothing about this one.
+  it('does not borrow the version of a vitest installed in a parent directory', () => {
+    const parent = makeRoot();
+    mkdirSync(join(parent, 'node_modules', 'vitest'), { recursive: true });
+    writeFileSync(join(parent, 'node_modules', 'vitest', 'package.json'), pkg('4.1.9'));
+    const root = join(parent, 'app');
+    mkdirSync(join(root, 'node_modules', '.bin'), { recursive: true });
+    const shim = join(root, 'node_modules', '.bin', 'vitest');
+    writeFileSync(shim, '#!/usr/bin/env node\nprocess.exit(1);\n');
+    chmodSync(shim, 0o755);
+
+    expect(detectVitestVersion(root, shim).kind).toBe('unknown');
+  });
+
+  it.each([
+    ['not JSON', '{ nope'],
+    ['no version field', JSON.stringify({ name: 'vitest' })],
+    ['a non-semver version', pkg('workspace:*')],
+    ['a JSON array', '[]'],
+  ])('falls back to asking the binary when package.json has %s', (_label, installed) => {
+    const { root, shim, probed } = consumer({ installed, shimVersion: '4.1.10' });
+
+    expect(detectVitestVersion(root, shim)).toMatchObject({ kind: 'known', version: '4.1.10' });
+    expect(existsSync(probed)).toBe(true);
+  });
+
+  it('falls back to asking the binary when no package.json is installed', () => {
+    const { root, shim } = consumer({ shimVersion: '4.1.10' });
+    expect(detectVitestVersion(root, shim)).toMatchObject({ kind: 'known', majorMinor: [4, 1] });
+  });
+
+  // Fail-CLOSED stays: an unknown version still gets no retry. What changes is the notice — it must
+  // not claim the vitest is old when devkit simply could not tell.
+  it('says it could not tell, not that vitest is old, when neither source answers', () => {
+    const { root, shim } = consumer();
+
+    const detected = detectVitestVersion(root, shim);
+    expect(detected.kind).toBe('unknown');
+    let args: string[] = [];
+    const notices = noticesFrom(() => {
+      args = buildInjectedArgs(shim, [], '/tmp/results.json', root);
+    });
+    expect(args.some((a) => a.startsWith('--retry'))).toBe(false);
+    expect(notices).toContain('could not determine the vitest version');
+    expect(notices).toContain(detected.kind === 'unknown' ? detected.reason : '<no reason>');
+    expect(notices).not.toContain('predates');
+  });
+
+  it('names the detected version when vitest really is too old', () => {
+    const { root, shim } = consumer({ installed: pkg('4.0.3') });
+
+    let args: string[] = [];
+    const notices = noticesFrom(() => {
+      args = buildInjectedArgs(shim, [], '/tmp/results.json', root);
+    });
+    expect(args.some((a) => a.startsWith('--retry'))).toBe(false);
+    expect(notices).toContain('detected vitest 4.0.3');
+    expect(notices).toContain('>=4.1');
+  });
+
+  it('does not probe at all when the consumer owns retry', () => {
+    const { root, shim, probed } = consumer();
+    const notices = noticesFrom(() => {
+      buildInjectedArgs(shim, ['--retry=0'], '/tmp/results.json', root);
+    });
+    expect(notices).toBe('');
+    expect(existsSync(probed)).toBe(false);
+  });
+
+  // Wiring: every unit above passes a cwd by hand. produceCoverage must hand over the CONSUMER's,
+  // or the disk read looks in the wrong place and the fix is inert end to end.
+  it('produceCoverage injects the retry into the real invocation from the on-disk version', async () => {
+    const { root, shim, probed } = consumer({ installed: pkg('4.1.9') });
+    const argvFile = join(root, 'argv.json');
+    writeFileSync(
+      shim,
+      `#!/usr/bin/env node
+const probeFs = require('node:fs');
+if (process.argv.includes('--version')) { probeFs.writeFileSync(${JSON.stringify(probed)}, ''); process.exit(1); }
+probeFs.writeFileSync(${JSON.stringify(argvFile)}, JSON.stringify(process.argv.slice(2)));
+${HONOURS_REPORTS_DIR_FLAG_SILENTLY}
+`,
+    );
+
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    let code: number;
+    let notices: string;
+    try {
+      code = await produceCoverage(root);
+    } finally {
+      notices = spy.mock.calls.flat().join('\n');
+      spy.mockRestore();
+    }
+
+    expect(code).toBe(0);
+    expect(notices).not.toContain('Skipping the flake retry');
+    expect(JSON.parse(readFileSync(argvFile, 'utf8'))).toEqual(
+      expect.arrayContaining(['--retry.count=1', '--retry.condition=(Test|Hook) timed out']),
+    );
+    expect(existsSync(probed)).toBe(false);
   });
 });
 

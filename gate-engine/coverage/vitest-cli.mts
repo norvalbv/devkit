@@ -1,6 +1,6 @@
 /** How devkit invokes the consumer's vitest — binary, interrupt forwarding, consumer-owned flags.
  * Shared by coverage/produce.mts and cli/lib/baseline-status/produce.mts. */
-import { execFileSync, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -90,32 +90,4 @@ export function ownsTimeoutBudget(argv: string[]): boolean {
 /** Same courtesy for reporters: a consumer who chose their own output does not get ours bolted on. */
 export function ownsReporter(argv: string[]): boolean {
   return argv.some((arg) => /^--(?:reporter|outputFile)(?:[.=]|$)/.test(arg));
-}
-
-/** The lowest vitest that understands `--retry.condition`. Below it we retry NOTHING — see below. */
-export const RETRY_MIN_VITEST = [4, 1] as const;
-
-/** `vitest/4.1.10 darwin-arm64 node-v22.20.0` → [4, 1]. null when it cannot be read or parsed. */
-export function vitestMajorMinor(bin: string): [number, number] | null {
-  try {
-    const out = execFileSync(bin, ['--version'], {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-      timeout: 30_000,
-    });
-    const m = /(\d+)\.(\d+)\.\d+/.exec(out);
-    return m ? [Number(m[1]), Number(m[2])] : null;
-  } catch {
-    return null;
-  }
-}
-
-/** Feature-detect the consumer's vitest: an older one drops `--retry.condition` silently, turning the
- * narrow retry into a blanket one, so an unreadable version counts as unsupported. */
-export function supportsRetryCondition(version: [number, number] | null): boolean {
-  if (!version) return false;
-  const [major, minor] = version;
-  return (
-    major > RETRY_MIN_VITEST[0] || (major === RETRY_MIN_VITEST[0] && minor >= RETRY_MIN_VITEST[1])
-  );
 }
