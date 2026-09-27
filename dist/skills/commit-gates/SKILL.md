@@ -88,6 +88,10 @@ specific conditions under which that control is appropriate:
 - `GUARD_NO_COMPLETENESS=1` — skip completeness; `GUARD_COMPLETENESS_HARD=0` only softens it.
 - `GUARD_NO_SENTRY_JUDGE=1` — skip the Sentry commit-message judge.
 - `GUARD_COVERAGE_OK=1` — assert the base-branch coverage condition documented by `using-devkit`.
+- `GUARD_MASS_DELETION_OK=1` — commit a deliberate deletion of half or more of the tracked tree.
+  guard-review otherwise blocks it as a clobbered index. Check `git diff --cached --stat` first: an
+  unexpected whole-repo deletion means the index was overwritten, so run `git reset` rather than
+  bypass.
 - `GUARD_QAVIS_OK=1` — ship this change without the advised visual QA. Prefer the audited path the
   advisory prints: `qavis qa`, then `qavis waive --staged --reason '…'` when the verdict is uncertain
   and the gap is accepted, so the reason is bound to the tree. `GUARD_NO_QAVIS_ADVISORY=1` disables
@@ -105,7 +109,9 @@ specific conditions under which that control is appropriate:
 
 A judge that cannot run is not a finding. Under `devkit ship` a dark provider fails the gate closed
 with exit 3, and the printed remedy names the CLI that went dark and why: missing, logged out, or a
-usage limit with the wait it carries. Re-running clears none of those.
+usage limit with the wait it carries. Re-running clears none of those. Exit 3 with a
+`<gate>: could not run — <error>` banner is not a judge outage: the gate itself failed (a git read,
+say), so fix that error instead of re-targeting.
 
 The lever is moving every judge away from the CLI the remedy names. It skips nothing — the same
 reviewers still run, judged elsewhere — so it is not a `GUARD_NO_*` bypass and does not need the

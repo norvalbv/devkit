@@ -433,6 +433,65 @@ describe('--gate (integration, real git repo)', () => {
     expect(gate()).toBe(0);
   });
 
+  // sc-3567: a mass deletion's `git diff --cached` overflowed Node's 1 MiB default maxBuffer, the
+  // gate died with spawnSync ENOBUFS (exit 2, fail-open) and the ship went on unjudged.
+  it('judges a >1 MiB staged deletion (legacy-deletion block, 1) instead of dying on ENOBUFS', () => {
+    writeFileSync(join(repo, 'legacy.ts'), 'export const line = 1;\n'.repeat(100_000)); // ~2.3 MB
+    git('add legacy.ts');
+    git('commit -qm legacy');
+    git('rm -q legacy.ts');
+    const r = spawnSync('node', [DETECT, '--gate'], {
+      cwd: repo,
+      encoding: 'utf8',
+      env: { ...process.env, GUARD_DECISION_NO_LLM: '1', DEVKIT_NO_TELEMETRY: '1' },
+    });
+    expect(r.stderr).not.toContain('ENOBUFS');
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('legacy-deletion');
+  });
+
+  describe('a gate that could not run (git fails)', () => {
+    // A `git` shim that fails the numstat read and delegates everything else to the real git, so
+    // the object-database probe still sees a healthy index and the caller's exit code stands.
+    const gateWithBrokenGit = (extraEnv = {}) => {
+      const realGit = execSync('command -v git', { encoding: 'utf8' }).trim();
+      const bin = join(repo, 'gitshim');
+      mkdirSync(bin, { recursive: true });
+      writeFileSync(
+        join(bin, 'git'),
+        `#!/bin/sh\ncase " $* " in *" --numstat "*) echo "fatal: simulated" >&2; exit 128;; esac\nexec "${realGit}" "$@"\n`,
+      );
+      chmodSync(join(bin, 'git'), 0o755);
+      writeFileSync(join(repo, 'keep.ts'), 'export const x = 4;\n');
+      git('add keep.ts');
+      return spawnSync('node', [DETECT, '--gate'], {
+        cwd: repo,
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          GUARD_DECISION_NO_LLM: '1',
+          DEVKIT_NO_TELEMETRY: '1',
+          GUARD_AI_STRICT: '',
+          FRINK_AI_STRICT: '',
+          PATH: `${bin}:${process.env.PATH}`,
+          ...extraEnv,
+        },
+      });
+    };
+
+    it('fails open (2) off-ship — a human commit is never bricked by infrastructure', () => {
+      const r = gateWithBrokenGit();
+      expect(r.status).toBe(2);
+      expect(r.stderr).toContain('decision-gate: could not run');
+    });
+
+    it('fails closed (3) under GUARD_AI_STRICT (ship) — never proceeds unjudged', () => {
+      const r = gateWithBrokenGit({ GUARD_AI_STRICT: '1' });
+      expect(r.status).toBe(3);
+      expect(r.stderr).toContain('strict ship mode: failing closed');
+    });
+  });
+
   it('ANNOUNCES the pass on a routine edit — no longer silent under the hook header', () => {
     writeFileSync(join(repo, 'keep.ts'), 'export const x = 2;\n');
     git('add keep.ts');
@@ -608,6 +667,17 @@ describe('--gate (integration, real git repo)', () => {
       const abs = join(repo, ev.transcript_ref);
       expect(existsSync(abs)).toBe(true);
       expect(readFileSync(abs, 'utf8')).toContain('ROUTINE'); // the judge's evidence + verdict
+    });
+
+    it('a >1 MiB staged deletion reaches the judge (sc-3567) — the full diff read no longer overflows', () => {
+      writeFileSync(join(repo, 'legacy.ts'), 'export const line = 1;\n'.repeat(100_000));
+      git('add legacy.ts');
+      git('commit -qm legacy');
+      git('rm -q legacy.ts');
+      const r = gateStubbed('echo ROUTINE\n');
+      expect(r.stderr).not.toContain('ENOBUFS');
+      expect(r.status).toBe(0);
+      expect(r.stderr).toContain('judge cleared as ROUTINE');
     });
 
     it('an earned ROUTINE is cached: an identical re-run clears with ZERO judge spawns', () => {

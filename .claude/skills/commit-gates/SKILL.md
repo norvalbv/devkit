@@ -109,7 +109,9 @@ specific conditions under which that control is appropriate:
 
 A judge that cannot run is not a finding. Under `devkit ship` a dark provider fails the gate closed
 with exit 3, and the printed remedy names the CLI that went dark and why: missing, logged out, or a
-usage limit with the wait it carries. Re-running clears none of those.
+usage limit with the wait it carries. Re-running clears none of those. Exit 3 with a
+`<gate>: could not run — <error>` banner is not a judge outage: the gate itself failed (a git read,
+say), so fix that error instead of re-targeting.
 
 The lever is moving every judge away from the CLI the remedy names. It skips nothing — the same
 reviewers still run, judged elsewhere — so it is not a `GUARD_NO_*` bypass and does not need the

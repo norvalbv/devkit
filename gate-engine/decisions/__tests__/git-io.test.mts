@@ -72,4 +72,15 @@ describe('decisions git-io', () => {
   it('git throws on a failing command instead of returning empty', () => {
     expect(() => git(repo, ['rev-parse', '--verify', 'refs/heads/nope'])).toThrow();
   });
+
+  // sc-3567: Node's 1 MiB default maxBuffer threw spawnSync ENOBUFS on a mass-deletion diff, and
+  // the decisions gate went unjudged. A >1 MiB staged diff must come back whole.
+  it('git returns a staged diff larger than 1 MiB instead of throwing ENOBUFS', () => {
+    writeFileSync(join(repo, 'big.ts'), 'export const line = 1;\n'.repeat(100_000)); // ~2.3 MB
+    sh('add big.ts');
+    sh('commit -qm big');
+    sh('rm -q big.ts');
+    const diff = git(repo, ['diff', '--cached']);
+    expect(diff.length).toBeGreaterThan(1024 * 1024);
+  });
 });

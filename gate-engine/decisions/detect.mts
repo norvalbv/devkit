@@ -11,7 +11,7 @@
  * Contract:
  *   --gate : exit 1 = block (smell, no decision staged, not bypassed, LLM didn't clear it)
  *            exit 0 = clean / decision staged / noLog bypass / LLM judged ROUTINE
- *            exit 2 = could-not-run (no git / error) → fail-open
+ *            exit 2 = could-not-run (no git / error) → fail-open; exit 3 under GUARD_AI_STRICT
  *   scan [--working] : print smell labels, exit 0. --working scans the whole working tree
  *            (staged + unstaged vs HEAD) — used by a Stop-hook reminder.
  *
@@ -500,8 +500,8 @@ function runGate() {
     });
     finish(1);
   } catch (e: unknown) {
-    // sc-1366: an unreadable staged object is infrastructure, not a verdict (see odb-probe.mts).
-    finish(reportGateInfraFailure('decisions', 'decision-gate', e, cwd, 2)); // 2 = fail-open
+    const s = strictShip(); // sc-1366: infra, not a verdict. sc-3567: a strict ship fails closed (3)
+    finish(reportGateInfraFailure('decisions', 'decision-gate', e, cwd, s ? 3 : 2, { strict: s }));
   }
 }
 
