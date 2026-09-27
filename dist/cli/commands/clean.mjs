@@ -22,6 +22,7 @@ import { ANTI_SLOP_BASELINE_REL } from '../lib/install/anti-slop/constants.mjs';
 import { removeAntiSlopCapability } from '../lib/install/anti-slop/lifecycle.mjs';
 import { pruneDevkitCacheGitignore, withGitignoreLock } from '../lib/install/gitignore-cache.mjs';
 import { removeHookRegistrations, removeHookScripts } from '../lib/install/install-hooks.mjs';
+import { hasOrphanExcludeBlock, pruneGitExclude } from '../lib/install/overlay-excludes.mjs';
 import { removeSearchCode } from '../lib/install/install-search-code.mjs';
 import { OVERLAY_ENTRY_REL, removeOxcCapability } from '../lib/install/oxc/lifecycle.mjs';
 import { removeHealAlias } from '../lib/overlay.mjs';
@@ -66,27 +67,6 @@ function extendsDevkit(path) {
         raw.includes('biome.devkit') ||
         raw.includes('eslint.config.devkit'));
 }
-// Drop devkit's lines (+ its header) from .git/info/exclude, leaving the user's own ignores. The
-// agent-half + fallow lines (added when overlay grew past the lint/guard set) are prefix-tolerant
-// (`(.*\/)?`) so a monorepo `pkgRel/`-scoped entry is pruned too — a miss orphans the line.
-const DEVKIT_EXCLUDE_LINE = /^(# devkit overlay|\.devkit\/|.*\/\.devkit\/|.*guard\.config\.json|.*biome\.devkit\.jsonc|.*eslint\.config\.devkit\.mjs|.*eslint\/baselines\/|(.*\/)?\.claude\/(skills|agents|hooks)\/|(.*\/)?\.agents\/skills\/|(.*\/)?\.codex\/(agents|hooks)\/|(.*\/)?\.(cursor|codex)\/hooks\.json|(.*\/)?\.cursor\/(skills|agents|hooks)\/|(.*\/)?\.claude\/settings\.local\.json|(.*\/)?\.fallow\/|(.*\/)?fallow-baselines\/|(.*\/)?oxlint\.devkit\.json$|(.*\/)?\.anti-slop-baseline\.json$)/;
-const BLANK_RUN_RE = /\n{3,}/g;
-const LEADING_BLANKS_RE = /^\n+/;
-function pruneGitExclude(gitRoot, dryRun) {
-    const file = join(gitRoot, '.git', 'info', 'exclude');
-    if (!existsSync(file))
-        return;
-    const lines = readFileSync(file, 'utf8').split('\n');
-    const kept = lines.filter((l) => !DEVKIT_EXCLUDE_LINE.test(l));
-    if (kept.length === lines.length)
-        return;
-    if (dryRun) {
-        console.log('  [dry-run] prune devkit lines from .git/info/exclude');
-        return;
-    }
-    writeFileSync(file, kept.join('\n').replace(BLANK_RUN_RE, '\n\n').replace(LEADING_BLANKS_RE, ''));
-    console.log('  ✓ pruned devkit lines from .git/info/exclude');
-}
 // Overlay leftovers when the config (and maybe the manifests) are gone — an orphaned or partial
 // clean. The tell-tale is a devkit-BUNDLED skill dir present-and-UNTRACKED under a surface (package
 // mode commits its skills, so a tracked one isn't a stray), or a surviving .devkit / fallow-baselines.
@@ -94,8 +74,7 @@ function hasOverlayStrays(gitRoot) {
     if (existsSync(join(gitRoot, '.devkit')) || existsSync(join(gitRoot, 'fallow-baselines'))) {
         return true;
     }
-    const exclude = join(gitRoot, '.git', 'info', 'exclude');
-    if (existsSync(exclude) && readFileSync(exclude, 'utf8').includes('# devkit overlay'))
+    if (hasOrphanExcludeBlock(gitRoot))
         return true;
     const skillsSrc = join(packageDir(), 'skills');
     const names = existsSync(skillsSrc)

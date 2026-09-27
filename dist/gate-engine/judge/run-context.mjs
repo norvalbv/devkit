@@ -49,6 +49,15 @@ export function originatingAgent() {
         return 'codex';
     return 'unknown';
 }
+const PARENT_SESSION_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+/**
+ * The ROOT Claude Code session that caused this run (a Task subagent reports its root's id), or
+ * undefined when absent/malformed — omitted, never '', so no fake session bucket forms downstream.
+ */
+export function parentSessionId(env = process.env) {
+    const id = env.CLAUDE_CODE_SESSION_ID;
+    return id !== undefined && PARENT_SESSION_ID_RE.test(id) ? id : undefined;
+}
 /** The telemetry JSONL sink: the ship's DEVKIT_GATE_EVENTS, else the every-commit default, else none. */
 export function telemetrySink() {
     return (process.env.DEVKIT_GATE_EVENTS ||
@@ -155,30 +164,21 @@ export function runId() {
         return null;
     return commitRunContext()?.id ?? null;
 }
-/**
- * Fields stamped onto every emitted event so the collector can correlate — and, for a commit run,
- * synthesise a run row: `run_mode` + repo + branch ride the gate events themselves.
- * Every non-silent envelope also carries `source` — the originating agent — so a downstream reader
- * can attribute each ship/commit to Claude vs Codex.
- *
- * A ship used to omit repo/branch on the grounds that its `ship_attempt` already carries them. That
- * holds only for a reader who JOINS on ship_id; the raw stream was unreadable without one, and since
- * the default sink is per-MACHINE (~/.devkit/telemetry/gate-events.jsonl) two repos' runs interleave
- * with no way to separate them — every per-reviewer figure over that file silently blends repos
- * (sc-1239). The ship path exports its own repo/branch (commit-with-gate-capture.sh); absent (an
- * older/hand-set DEVKIT_SHIP_ID) they degrade to '' rather than mislabelling the run.
- */
 export function runEnvelope() {
-    const source = originatingAgent();
-    const runningVersion = devkitVersion();
+    const identity = { source: originatingAgent(), devkit_version: devkitVersion() };
+    // parent_session_id is envelope-owned; an event's own `session_id` (a judge's session) is distinct.
+    const parent = parentSessionId();
+    if (parent)
+        identity.parent_session_id = parent;
     const ship = process.env.DEVKIT_SHIP_ID;
+    if (ship && process.env.DEVKIT_SHIP_MODE === 'dry-gates')
+        identity.ship_mode = 'dry-gates';
     if (ship)
         return {
             ship_id: ship,
             repo: process.env.DEVKIT_SHIP_REPO ?? '',
             branch: process.env.DEVKIT_SHIP_BRANCH ?? '',
-            source,
-            devkit_version: runningVersion,
+            ...identity,
         };
     const review = process.env.DEVKIT_REVIEW_ID;
     if (review)
@@ -187,8 +187,7 @@ export function runEnvelope() {
             run_mode: 'review',
             repo: process.env.DEVKIT_REVIEW_REPO ?? '',
             branch: process.env.DEVKIT_REVIEW_BRANCH ?? '',
-            source,
-            devkit_version: runningVersion,
+            ...identity,
         };
     // An agent invocation has no staged tree to describe, and deriving one would cost a `git
     // write-tree` whose id is precisely what must NOT be shared here. Repo/branch come from plain
@@ -201,8 +200,7 @@ export function runEnvelope() {
             run_mode: 'agent',
             repo: repoName(top),
             branch: git(['rev-parse', '--abbrev-ref', 'HEAD']) || '',
-            source,
-            devkit_version: runningVersion,
+            ...identity,
         };
     }
     const ctx = telemetryEnabled() ? commitRunContext() : null;
@@ -214,8 +212,7 @@ export function runEnvelope() {
         commit_tree: ctx.tree,
         repo: ctx.repo,
         branch: ctx.branch,
-        source,
-        devkit_version: runningVersion,
+        ...identity,
     };
 }
 /** Test seam: drop the memoised commit context so a test can switch git state between assertions. */

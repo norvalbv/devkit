@@ -1,6 +1,7 @@
 import { existsSync, linkSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, writeFileSync, } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
+import { overlayInstall } from '../overlay-mode.mjs';
 import { assertBaselineTrackable, indexTracksBaseline, stageBaselineMigration, stageBaseline, } from './git-index.mjs';
 export const FANOUT_BASELINE = '.devkit/baselines/fanout.json';
 export const LINES_BASELINE = '.devkit/baselines/size-lines.json';
@@ -35,19 +36,6 @@ function discardRetiredCopy(root, canonical, stage) {
     rmSync(join(root, legacy), { force: true });
     if (stage)
         stageBaseline(root, legacy);
-}
-/** Is this root a local-only overlay install (env flag, or the marker init writes)? */
-function overlayInstall(root) {
-    if (process.env.DEVKIT_OVERLAY === '1')
-        return true;
-    try {
-        // SAFETY: init owns this local JSON marker; strict equality treats absent values as false.
-        const config = JSON.parse(readFileSync(join(root, '.devkit/config.json'), 'utf8'));
-        return config.overlay === true;
-    }
-    catch {
-        return false;
-    }
 }
 function legacyDevkitBaselines(root) {
     const legacyDir = join(root, LEGACY_STRUCTURE_BASELINE_DIR);

@@ -1,17 +1,24 @@
 /** Collision-safe install, drift, and uninstall lifecycle for core Oxc repository state. */
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { overlayInstall } from '../../../../gate-engine/overlay-mode.mjs';
 import { withLock, writeFileAtomic } from '../../atomic-write.mjs';
 import { check } from '../../doctor/check-result.mjs';
 import { assertRunnerMayWrite, runnerSkew } from '../../doctor/pin/runner-identity.mjs';
 import { digest, packageDir } from '../../fs-helpers.mjs';
 import { probeOxcRuntime } from './runtime.mjs';
-const OXLINT_CONFIGS = [
+export const OXLINT_CONFIGS = [
     '.oxlintrc.json',
     '.oxlintrc.jsonc',
     'oxlint.config.ts',
     'oxlint.config.mts',
 ];
+/**
+ * Overlay's entry config — deliberately NOT an `OXLINT_CONFIGS` discovery name. It must stay at the
+ * package ROOT: oxlint resolves `overrides[].files` globs against the ENTRY config's directory.
+ */
+export const OVERLAY_ENTRY_REL = 'oxlint.devkit.json';
+const OVERLAY_ENTRY = `${JSON.stringify({ extends: ['./.devkit/oxc/oxlint.base.json'] }, null, 2)}\n`;
 const OXFMT_CONFIGS = ['.oxfmtrc.json', '.oxfmtrc.jsonc', 'oxfmt.config.ts', 'oxfmt.config.mts'];
 const OXLINT_STARTER = `${JSON.stringify({ extends: ['./.devkit/oxc/oxlint.base.json'], jsPlugins: [], overrides: [], rules: {} }, null, 2)}\n`;
 const OXFMT_STARTER = '{}\n';
@@ -56,6 +63,33 @@ function readManifest(cwd) {
 function candidates(cwd, names) {
     return names.filter((name) => existsSync(join(cwd, name)));
 }
+/**
+ * The entry config to pass to `-c`, or null when oxlint's own discovery is correct. READ-side only:
+ * resolved from the manifest so no stray root file can redirect a lint, and a snapshot cwd works.
+ */
+export function resolveOxlintEntryConfig(cwd) {
+    if (!isOverlayManifest(readManifest(cwd)))
+        return null;
+    return existsSync(join(cwd, OVERLAY_ENTRY_REL)) ? OVERLAY_ENTRY_REL : null;
+}
+/**
+ * The read-side mode stamp, as ONE predicate every reader shares. Compared against the only filename
+ * devkit writes, so a manifest naming another path cannot redirect a lint's whole ruleset.
+ */
+function isOverlayManifest(manifest) {
+    return manifest?.overlayEntryConfig === OVERLAY_ENTRY_REL;
+}
+/**
+ * WRITE-side mode resolution: explicit flag, then the repository marker, then the stamp LAST —
+ * `readManifest` returns null for a corrupt manifest, which is the state doctor --fix repairs.
+ */
+function resolveOverlayMode(cwd, explicit, stamp) {
+    if (explicit !== undefined)
+        return explicit;
+    if (overlayInstall(cwd))
+        return true;
+    return Boolean(stamp);
+}
 function assertNoConfigCollisions(cwd) {
     for (const names of [OXLINT_CONFIGS, OXFMT_CONFIGS]) {
         const found = candidates(cwd, names);
@@ -64,21 +98,19 @@ function assertNoConfigCollisions(cwd) {
         }
     }
 }
-/**
- * Preflight for a dependent capability. Pass `publish` when the caller is about to MUTATE its own
- * managed tree: anti-slop replaces its tree before the Oxc writer ever runs, so a runner refused
- * only downstream would leave older-shaped state stranded if the process died before the rollback.
- * `pinRoot` judges a different tree than the one written — ship publishes into a worktree (sc-2099).
- */
-export function assertOxcCapabilityReady(cwd, publish) {
-    if (publish)
-        assertRunnerMayWrite(publish.pinRoot ?? cwd);
+/** Preflight for a dependent capability; refuses before any managed byte moves. */
+export function assertOxcCapabilityReady(cwd, opts = {}) {
+    if (opts.publish)
+        assertRunnerMayWrite(opts.pinRoot ?? cwd);
     const lint = probeOxcRuntime('lint');
     const fmt = probeOxcRuntime('fmt');
     if (!lint.ok || !fmt.ok || !lint.runtime || !fmt.runtime) {
         throw new Error(`bundled Oxc runtime unavailable: ${lint.detail}; ${fmt.detail}`);
     }
-    assertNoConfigCollisions(cwd);
+    // Mirrors the writer's own `if (!overlay)`. Caller-passed, not inferred: on a first overlay init
+    // the marker is written after `installOverlay`, so inference resolves false when it is true.
+    if (!opts.overlay)
+        assertNoConfigCollisions(cwd);
 }
 // Name the devkit that produced the bytes, so a stale digest distinguishes "the content drifted"
 // from "a different devkit version wrote this" — the second is invisible without a stamp, and is
@@ -105,20 +137,30 @@ function ownershipFor(cwd, names, starterPath, starter, previous, dryRun) {
         const path = found[0];
         return previous?.path === path ? previous : { path, createdDigest: null };
     }
+    // Last line of defence: makes a visible root config UNREACHABLE while the repo is still overlaid,
+    // even with every mode signal lost. Both remedies are named — the caller's intent is ambiguous.
+    if (overlayInstall(cwd)) {
+        throw new Error(`refusing to create ${starterPath} in an overlay install: overlay writes no tracked root config. To stay on overlay, run \`devkit init --overlay\` (restores ${OVERLAY_ENTRY_REL}). To convert this repo to a package install, run \`devkit clean\` first.`);
+    }
     if (!dryRun)
         writeFileAtomic(join(cwd, starterPath), starter);
     return { path: starterPath, createdDigest: digest(starter) };
 }
-function syncOxcCapabilityUnlocked(cwd, dryRun, antiSlop, pinRoot, allowSkew) {
+function syncOxcCapabilityUnlocked(cwd, dryRun, plan) {
+    const { antiSlop, pinRoot, allowSkew } = plan;
     const previous = readManifest(cwd);
+    const overlay = resolveOverlayMode(cwd, plan.overlay, previous?.overlayEntryConfig);
     const lint = probeOxcRuntime('lint');
     const fmt = probeOxcRuntime('fmt');
     if (!lint.ok || !fmt.ok || !lint.runtime || !fmt.runtime) {
         throw new Error(`bundled Oxc runtime unavailable: ${lint.detail}; ${fmt.detail}`);
     }
+    // A consumer's own root configs are irrelevant to an overlay install — it never reads them and
+    // never writes one — so a pre-existing pair is not a collision there, only in the owned geometry.
     // Validate both tools before creating either starter: a formatter collision must not leave a
     // half-installed linter config (and vice versa).
-    assertNoConfigCollisions(cwd);
+    if (!overlay)
+        assertNoConfigCollisions(cwd);
     const base = baseContent(antiSlop);
     // Validated HERE, immediately before the first write rather than on entry: the runtime probes
     // above take seconds, and a concurrent `bun install` moving the pin inside that window would let
@@ -130,12 +172,22 @@ function syncOxcCapabilityUnlocked(cwd, dryRun, antiSlop, pinRoot, allowSkew) {
     }
     const created = [];
     try {
-        const hadOxlint = candidates(cwd, OXLINT_CONFIGS).length > 0;
-        const oxlint = ownershipFor(cwd, OXLINT_CONFIGS, '.oxlintrc.json', OXLINT_STARTER, previous?.configs.oxlint, dryRun);
-        if (!dryRun && !hadOxlint)
+        // Overlay owns a root entry config outright and never adopts or creates a discovery-named one:
+        // `.git/info/exclude` cannot hide a tracked file, and a consumer's is not devkit's to edit.
+        const hadOxlint = !overlay && candidates(cwd, OXLINT_CONFIGS).length > 0;
+        const oxlint = overlay
+            ? { path: OVERLAY_ENTRY_REL, createdDigest: digest(OVERLAY_ENTRY) }
+            : ownershipFor(cwd, OXLINT_CONFIGS, '.oxlintrc.json', OXLINT_STARTER, previous?.configs.oxlint, dryRun);
+        if (overlay && !dryRun)
+            writeFileAtomic(join(cwd, OVERLAY_ENTRY_REL), OVERLAY_ENTRY);
+        if (!dryRun && !hadOxlint && !overlay)
             created.push([oxlint.path, digest(OXLINT_STARTER)]);
-        const hadOxfmt = candidates(cwd, OXFMT_CONFIGS).length > 0;
-        const oxfmt = ownershipFor(cwd, OXFMT_CONFIGS, '.oxfmtrc.json', OXFMT_STARTER, previous?.configs.oxfmt, dryRun);
+        if (!dryRun && overlay)
+            created.push([OVERLAY_ENTRY_REL, digest(OVERLAY_ENTRY)]);
+        const hadOxfmt = overlay || candidates(cwd, OXFMT_CONFIGS).length > 0;
+        const oxfmt = overlay
+            ? { path: '.oxfmtrc.json', createdDigest: null }
+            : ownershipFor(cwd, OXFMT_CONFIGS, '.oxfmtrc.json', OXFMT_STARTER, previous?.configs.oxfmt, dryRun);
         if (!dryRun && !hadOxfmt)
             created.push([oxfmt.path, digest(OXFMT_STARTER)]);
         const manifest = {
@@ -145,13 +197,17 @@ function syncOxcCapabilityUnlocked(cwd, dryRun, antiSlop, pinRoot, allowSkew) {
             baseDigest: digest(base),
             configs: { oxlint, oxfmt },
         };
+        if (overlay)
+            manifest.overlayEntryConfig = OVERLAY_ENTRY_REL;
         if (skew?.running)
             manifest.devkitRef = `v${skew.running}`;
         // Only reachable through the visible opt-out — assertRunnerMayWrite throws otherwise.
         if (skew?.kind === 'older')
             manifest.writtenUnderSkew = true;
         if (dryRun) {
-            console.log(`  [dry-run] sync ${BASE_REL} + ${MANIFEST_REL}; preserve existing root configs`);
+            console.log(overlay
+                ? `  [dry-run] sync ${BASE_REL} + ${MANIFEST_REL} + ${OVERLAY_ENTRY_REL} (git-excluded); touch no consumer config`
+                : `  [dry-run] sync ${BASE_REL} + ${MANIFEST_REL}; preserve existing root configs`);
             return;
         }
         // The pin is re-read once more before the manifest — the LAST write — because nothing devkit
@@ -179,13 +235,16 @@ function syncOxcCapabilityUnlocked(cwd, dryRun, antiSlop, pinRoot, allowSkew) {
     }
 }
 /** Install or upgrade managed base/provenance while preserving every existing root config byte. */
-export function syncOxcCapability(cwd, { dryRun = false, antiSlop = false, pinRoot, allowSkew } = {}) {
+export function syncOxcCapability(cwd, { dryRun = false, antiSlop = false, pinRoot, allowSkew, overlay } = {}) {
+    // ONE plan value shared by both arms: the dry-run arm previously dropped `pinRoot`/`allowSkew`,
+    // so a dry run narrated a different install than the real one. One object makes that impossible.
+    const plan = { antiSlop, pinRoot, allowSkew, overlay };
     if (dryRun) {
-        syncOxcCapabilityUnlocked(cwd, true, antiSlop);
+        syncOxcCapabilityUnlocked(cwd, true, plan);
         return;
     }
     mkdirSync(join(cwd, '.devkit'), { recursive: true });
-    withLock(join(cwd, LOCK_REL), () => syncOxcCapabilityUnlocked(cwd, false, antiSlop, pinRoot, allowSkew));
+    withLock(join(cwd, LOCK_REL), () => syncOxcCapabilityUnlocked(cwd, false, plan));
 }
 function parseJsonConfig(cwd, ownership) {
     if (!ownership.path.endsWith('.json'))
@@ -245,11 +304,26 @@ export function checkOxcCapability(cwd) {
     const base = baseCurrent
         ? check('Oxlint base', 'OK', BASE_REL)
         : check('Oxlint base', existsSync(basePath) ? 'DRIFT' : 'MISSING', BASE_REL, 'run `devkit doctor --fix`', true);
+    return [runtime, base, ...configRows(cwd, manifest)];
+}
+/**
+ * Mode-dependent config rows. Overlay owns one root file and adopts none, so package-mode ownership
+ * questions invert: no phantom oxfmt row, and instead a check for a consumer config `-c` shadows.
+ */
+function configRows(cwd, manifest) {
+    if (!isOverlayManifest(manifest)) {
+        return [
+            configCheck(cwd, 'oxlint', manifest.configs.oxlint, OXLINT_CONFIGS),
+            configCheck(cwd, 'oxfmt', manifest.configs.oxfmt, OXFMT_CONFIGS),
+        ];
+    }
+    const consumer = candidates(cwd, OXLINT_CONFIGS);
     return [
-        runtime,
-        base,
-        configCheck(cwd, 'oxlint', manifest.configs.oxlint, OXLINT_CONFIGS),
-        configCheck(cwd, 'oxfmt', manifest.configs.oxfmt, OXFMT_CONFIGS),
+        configCheck(cwd, 'oxlint', manifest.configs.oxlint, [OVERLAY_ENTRY_REL]),
+        consumer.length > 0
+            ? check('oxlint discovery', 'DRIFT', `this repo now owns ${consumer.join(', ')}, which the overlay gate never reads (\`-c ${OVERLAY_ENTRY_REL}\` replaces discovery)`, 'remove it, or run `devkit clean` and reinstall in package mode')
+            : check('oxlint discovery', 'OK', 'no consumer Oxlint config is being shadowed'),
+        check('oxfmt config', 'OK', 'not owned in overlay (devkit writes no formatter config here)'),
     ];
 }
 function removeOxcCapabilityUnlocked(cwd, dryRun) {

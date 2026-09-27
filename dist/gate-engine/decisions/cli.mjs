@@ -6,7 +6,8 @@
  * resolveGuardConfig(process.cwd()) — i.e. against the CONSUMER repo, never the package dir (W-3):
  *
  *   guard-decisions add <slug> --target …| --note …   record a Target / append a note
- *   guard-decisions amend <slug> --target …| --note …| --note-replace OLD NEW  correct newest draft
+ *   guard-decisions amend <slug> --target …| --note …| --note-replace OLD NEW  correct a draft entry
+ *     (--target reaches the newest draft Target even when draft notes follow it)
  *   guard-decisions rescope <slug> --scope … --reason …  append-only Scope correction (a tagged note)
  *   guard-decisions query "<text>" [--top K] [--json|--full]  rank axes (semantic → lexical floor)
  *   guard-decisions reindex | list | show <slug> | check <slug>
@@ -35,11 +36,12 @@ var __rewriteRelativeImportExtension = (this && this.__rewriteRelativeImportExte
     }
     return path;
 };
-import { realpathSync } from 'node:fs';
-import { main as decisionsMain } from './decisions.mjs';
-import { cmdIntegrity } from './integrity/scan.mjs';
-import { runStagedIntegrity } from './integrity/staged-gate.mjs';
-import { cmdCategories } from './recall/category-report.mjs';
+import { readdirSync, realpathSync } from 'node:fs';
+import { resolveFromCwd, resolveGuardConfig } from '../config.mjs';
+/**
+ * Sub-engines load dynamically so a missing parser is catchable, and only via STRING LITERALS so the
+ * dist rewrite and dist-integrity both see them. Why: decision-retrieval-candidate-set (sc-2692).
+ */
 // Dev runs the .mts source (Node strips types); the shipped dist is compiled .mjs. Derive the
 // runtime extension from THIS module so the sub-engine URLs resolve in both.
 const SELF_EXT = import.meta.url.endsWith('.mts') ? '.mts' : '.mjs';
@@ -51,6 +53,9 @@ const SUB_ENGINES = {
 async function run(argv) {
     const [cmd, ...rest] = argv;
     if (cmd === 'categories') {
+        // recall/category-report.mts's import closure never reaches markdown.mts, so this command works
+        // on a tree with no mdast installed. It only ever failed because of the static link above.
+        const { cmdCategories } = await import('./recall/category-report.mjs');
         cmdCategories();
         return;
     }
@@ -59,7 +64,9 @@ async function run(argv) {
         // catch below, which would relabel it as `guard-decisions: <error>`.
         // --staged is the commit-time gate: same checks, scoped to this change and diffed against HEAD.
         // Bare `integrity` keeps its whole-corpus contract, known historical finding included.
-        process.exitCode = rest.includes('--staged') ? runStagedIntegrity() : cmdIntegrity();
+        process.exitCode = rest.includes('--staged')
+            ? (await import('./integrity/staged-gate.mjs')).runStagedIntegrity()
+            : (await import('./integrity/scan.mjs')).cmdIntegrity();
         return;
     }
     const sub = SUB_ENGINES[cmd];
@@ -70,9 +77,100 @@ async function run(argv) {
         await import(__rewriteRelativeImportExtension(sub.href));
         return;
     }
+    const { main: decisionsMain } = await import('./decisions.mjs');
     await decisionsMain(argv);
 }
-run(process.argv.slice(2)).catch((e) => {
-    console.error(`guard-decisions: ${e?.message ?? e}`);
+/** The one string a caller can grep for to tell an outage from an answer. */
+const UNAVAILABLE_MARKER = 'decision engine UNAVAILABLE';
+/** Commands that ANSWER from the log, where an outage is mistakable for "nothing rules on this".
+ * Every other command fails visibly on its own terms and needs no retrieval caveat. */
+const RETRIEVAL_COMMANDS = new Set(['query', 'scoped-targets']);
+/**
+ * The dependency an unloadable engine named, else null. Positive-signal-only: anything but
+ * ERR_MODULE_NOT_FOUND stays an ordinary error (judge-outage-classified-not-blocked).
+ */
+function missingModule(error) {
+    // SAFETY: Node module-resolution failures carry ErrnoException.code; an absent field fails below.
+    const { code } = error;
+    if (code !== 'ERR_MODULE_NOT_FOUND')
+        return null;
+    const named = /Cannot find (?:package|module) '([^']+)'/.exec(error.message);
+    return named?.[1] ?? 'a required dependency';
+}
+/**
+ * Axis FILENAMES, alphabetical and deliberately unranked — never record content.
+ * Why both: decision-format-parsed-not-regexed, and the note on decision-retrieval-candidate-set.
+ */
+function axisSlugs() {
+    try {
+        const dir = resolveFromCwd(resolveGuardConfig(process.cwd()), 'decisionsDir');
+        return dir == null
+            ? null
+            : readdirSync(dir)
+                .filter((f) => f.endsWith('.md') && f !== 'INDEX.md')
+                .map((f) => f.slice(0, -3))
+                .sort();
+    }
+    catch {
+        return null;
+    }
+}
+/**
+ * Built HERE because decisions.mts is the module that failed. `rows: []` keeps a rows-only consumer
+ * at "abstained". Field-by-field reasoning: the sc-2692 note on decision-retrieval-candidate-set.
+ */
+const UNAVAILABLE_ENVELOPE = {
+    state: 'UNAVAILABLE',
+    source: 'unavailable',
+    tau: null,
+    margin: null,
+    rows: [],
+    cost: { llmCalls: 0, ms: 0 },
+};
+/** Say what did not happen, then hand over the manual route. Everything here goes to STDERR. */
+function reportUnavailable(dependency, cmd) {
+    console.error(`guard-decisions: ${UNAVAILABLE_MARKER} — could not load ('${dependency}' is not installed).`);
+    console.error("Remedy: install this package's dependencies (e.g. `bun install`), then re-run.");
+    // Only a command that ANSWERS from the log can have its outage misread as an empty answer, so
+    // only those get the caveat and the manual route. `integrity` failing is just a failure.
+    if (!RETRIEVAL_COMMANDS.has(cmd ?? ''))
+        return;
+    console.error('Nothing was searched. This is NOT "no governing Target", and must not be read as one.');
+    const slugs = axisSlugs();
+    if (slugs == null) {
+        console.error('The decisions directory could not be resolved either — check guard.config.json.');
+        return;
+    }
+    if (slugs.length === 0) {
+        console.error('The decisions directory is empty: nothing has been recorded.');
+        return;
+    }
+    const noun = slugs.length === 1 ? 'axis' : 'axes';
+    console.error(`\nRead the log by hand. ${slugs.length} ${noun}, ALPHABETICAL — not a ranking:`);
+    for (const slug of slugs)
+        console.error(`  ${slug}`);
+    console.error('\n  1. INDEX.md in that directory — the rendered spine (a view, and it can omit axes)');
+    console.error('  2. cat <decisionsDir>/<slug>.md');
+    console.error("  3. grep -n '^## ' <decisionsDir>/<slug>.md — a LATER `## Target ·` block supersedes an earlier one");
+}
+// Captured BEFORE run(): the SUB_ENGINES dispatch rewrites process.argv to re-enter its engine, so
+// by the time a failed import rejects, process.argv[2] is that engine's first flag, not the command.
+const argv = process.argv.slice(2);
+run(argv).catch((error) => {
+    // Narrowed as gate-engine/structure/load-baseline.mts does: a non-Error throw carries no code.
+    const dependency = error instanceof Error ? missingModule(error) : null;
+    if (dependency) {
+        reportUnavailable(dependency, argv[0]);
+        // --json gets the envelope; every other invocation leaves stdout EMPTY, because a `[]` here is
+        // exactly how an outage gets read as "nothing governs".
+        if (argv[0] === 'query' && argv.includes('--json')) {
+            process.stdout.write(`${JSON.stringify(UNAVAILABLE_ENVELOPE, null, 2)}\n`);
+        }
+        // exitCode, not process.exit (which can truncate a piped stdout). 1 not 3, per
+        // gate-opt-out-is-visible-and-detectable: this is a local, reproducible could-not-run.
+        process.exitCode = 1;
+        return;
+    }
+    console.error(`guard-decisions: ${error instanceof Error ? error.message : String(error)}`);
     process.exit(1);
 });

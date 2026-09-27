@@ -5,9 +5,9 @@ import { readJson } from '../../fs-helpers.mjs';
 import { isTracked } from '../../git-tracked.mjs';
 import { isSafeAgentAssetPath } from '../agent-asset-manifest/lifecycle.mjs';
 import { LEGACY_AGENT_PROVIDERS } from '../agent-assets/agent-providers.mjs';
+import { dataRecord } from './plain-data.mjs';
 import { encodeHookRegistrationLedger, HOOK_REGISTRATION_LEDGER_REL, } from './codec.mjs';
 import { checkProjectedHookRegistrations, projectHookRegistrations, writeHookRegistrationLedger, } from './lifecycle.mjs';
-import { dataRecord } from './plain-data.mjs';
 export const ledgerOf = (entries = []) => ({
     schemaVersion: 1,
     kind: 'agent_hook_registration_ownership',
@@ -23,15 +23,13 @@ const RETIRED_COMMANDS = {
         cursor: ['.cursor/hooks/fallow-gate.sh'],
     },
 };
-/**
- * Reclaim exact commands written by pre-ledger releases after their live registration disappears.
- * The exact retired command is itself the ownership proof: pre-ledger configs can contain one even
- * when their later component selection never recorded its owner (sc-1321). Keep the component-id
- * parameter for caller compatibility, but do not let a deselected component strand its old command.
- */
-export function stripRetiredRegistrations(document, _componentIds, provider) {
+/** Reclaim what a previous devkit release wrote here. RETIRED_COMMANDS accepts the literal anywhere
+ * (a pre-ledger config names no location, sc-1321); `owned` stays inside the event its row names. */
+export function stripReclaimedCommands(document, provider, owned = []) {
     const commands = new Set(Object.values(RETIRED_COMMANDS).flatMap((commandsByProvider) => commandsByProvider?.[provider] ?? []));
-    if (!commands.size || provider === 'codex')
+    // The old `provider === 'codex'` clause was unreachable (no codex arm, so `!commands.size` won),
+    // and codex DOES need the superseded arm.
+    if (!commands.size && !owned.length)
         return { document, changed: false };
     const root = dataRecord(document);
     const hooks = dataRecord(root?.hooks);
@@ -43,7 +41,13 @@ export function stripRetiredRegistrations(document, _componentIds, provider) {
         if (!Array.isArray(rawList))
             continue;
         if (provider === 'cursor') {
-            const list = rawList.filter((entry) => !commands.has(String(dataRecord(entry)?.command ?? '')));
+            const list = rawList.filter((entry) => {
+                const item = dataRecord(entry);
+                const command = String(item?.command ?? '');
+                // Cursor keeps a FLAT list per event, so the event alone locates a handler.
+                return (!commands.has(command) &&
+                    !owned.some((handler) => handler.event === event && handler.command === command));
+            });
             if (list.length === rawList.length)
                 continue;
             changed = true;
@@ -62,7 +66,16 @@ export function stripRetiredRegistrations(document, _componentIds, provider) {
                 list.push(rawGroup);
                 continue;
             }
-            const kept = handlers.filter((handler) => !commands.has(String(dataRecord(handler)?.command ?? '')));
+            const kept = handlers.filter((entry) => {
+                const command = String(dataRecord(entry)?.command ?? '');
+                return (!commands.has(command) &&
+                    !owned.some((handler) => handler.event === event &&
+                        handler.command === command &&
+                        // Mirrors lifecycle.mts matcherGroup: null means the group carries no `matcher` key.
+                        (handler.matcher === null
+                            ? !Object.hasOwn(group, 'matcher')
+                            : group.matcher === handler.matcher)));
+            });
             if (kept.length === handlers.length) {
                 list.push(rawGroup);
                 continue;

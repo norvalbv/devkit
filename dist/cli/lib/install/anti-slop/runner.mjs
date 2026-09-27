@@ -2,6 +2,7 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, realpathSync, statSync } from 'node:fs';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
+import { resolveOxlintEntryConfig } from '../oxc/lifecycle.mjs';
 import { resolveOxcRuntime } from '../oxc/runtime.mjs';
 import { adoptManagedCapability, AntiSlopCapabilityError, withManagedCapabilityLock, } from './base-capability.mjs';
 import { ANTI_SLOP_BASELINE_MODE, ANTI_SLOP_EXECUTION_MODE_ENV, ANTI_SLOP_IGNORE_PATTERNS, } from './constants.mjs';
@@ -15,7 +16,9 @@ export function resolveAntiSlopScope(cwd, args) {
     const paths = args.filter((arg) => arg !== '--');
     const option = options.find((arg) => arg.startsWith('-'));
     if (option) {
-        throw new Error(`anti-slop operations accept repository paths, not Oxlint option ${option}; configure rules in .oxlintrc.json`);
+        // Deliberately does not name a config file: which one governs depends on the install mode, and
+        // in overlay the consumer's root config is not read at all.
+        throw new Error(`anti-slop operations accept repository paths, not Oxlint option ${option}; configure rules in the repository's Oxlint config`);
     }
     const requested = paths.length > 0 ? paths : ['.'];
     const lintArguments = paths.length > 0 ? [...args] : ['.'];
@@ -47,8 +50,8 @@ export function resolveAntiSlopScope(cwd, args) {
     };
 }
 /**
- * Run the installed capability under the repository's combined Oxlint config. `pinCapabilityTo`
- * copies the capability THIS lint used, under the same lock, so a later step cannot judge another.
+ * Run the installed capability under the repository's combined Oxlint config — or devkit's own
+ * git-excluded entry config in overlay. `pinCapabilityTo` copies the capability THIS lint used.
  */
 export function collectAntiSlopGroups(cwd, args, pinCapabilityTo) {
     if (!existsSync(resolve(cwd, '.devkit'))) {
@@ -67,8 +70,12 @@ function collectAntiSlopGroupsUnlocked(cwd, args) {
         throw new AntiSlopCapabilityError(issue);
     const scope = resolveAntiSlopScope(cwd, args);
     const runtime = resolveOxcRuntime('lint');
+    // Resolved from the managed manifest, which travels into a snapshot cwd with the capability — so
+    // this works identically in the repository and in the `mkdtemp` extraction of the Git index.
+    const entry = resolveOxlintEntryConfig(cwd);
     const result = spawnSync(process.execPath, [
         runtime.binPath,
+        ...(entry ? ['--config', entry] : []),
         '--format',
         'json',
         '--no-error-on-unmatched-pattern',

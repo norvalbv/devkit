@@ -14,6 +14,7 @@ import { buildCommitTerminalFragment } from './commit-terminal.mjs';
 import { FORMAT_FRAGMENT } from './format-fragment.mjs';
 import { markEnd, markStart } from './husky.mjs';
 import { DK_HOOK_HELPERS, DK_REVIEW_BASELINE_HELPER, selectedFragment, } from './review-fragments.mjs';
+import { sentryShipPrewarmFragment } from './sentry-fragments.mjs';
 // Commit/ship exits on failure; diagnostic modes remember it so every diagnostic runs (safe under `sh -e`).
 const DK_DETERMINISTIC_GATE_HELPER = `dk_review_det_failed=0
 __dk_gate_deterministic() {
@@ -41,7 +42,7 @@ __dk_gate_deterministic "$__dk_package_bin_dir/guard-deterministic" --hook "\${D
 // a doomed commit never pays for a judge. Explicit lists — never rely on object-key order.
 const DETERMINISTIC_GUARD_IDS = ['size', 'fanout', 'dup', 'clone', 'coverage'];
 const AI_GUARD_IDS = ['comments', 'decisions', 'review'];
-// qavis-advisory runs last with its own 0/3 exit contract; routing and pass receipts live in qavis.
+// qavis-advisory runs after every judge that can demand an edit (sc-3012), own 0/3 exit contract.
 // This wrapper stays fail-open when qavis/the bin is absent, matching the fallow precedent.
 export const QAVIS_ADVISORY_ID = 'qavis-advisory';
 const QAVIS_FRAGMENT = `# devkit:guard-qavis-advisory
@@ -111,6 +112,8 @@ export function buildGuardBlock(selection, pkgRel = '') {
         if (selection.guards?.includes(id))
             pieces.push(selectedFragment(id, GUARD_FRAGMENTS[id]));
     }
+    if (selection.guards?.includes('sentry'))
+        pieces.push(selectedFragment('sentry', sentryShipPrewarmFragment(false)));
     if (selection.guards?.includes(QAVIS_ADVISORY_ID))
         pieces.push(selectedFragment(QAVIS_ADVISORY_ID, QAVIS_FRAGMENT));
     if (deterministic)
@@ -164,6 +167,8 @@ export function buildStandaloneBlock(selection, pkgRel = '') {
         if (selection.guards?.includes(id))
             pieces.push(`if __dk_gate_selected ${id}; then __dk_gate_ai ${STANDALONE_GATES[id].join(' ')}; fi`);
     }
+    if (selection.guards?.includes('sentry'))
+        pieces.push(selectedFragment('sentry', sentryShipPrewarmFragment(true)));
     if (selection.guards?.includes(QAVIS_ADVISORY_ID))
         pieces.push(selectedFragment(QAVIS_ADVISORY_ID, standaloneQavisLines));
     if (deterministic)
@@ -246,6 +251,7 @@ export function buildOverlayHook(selection, chainTarget = '.husky/pre-commit', p
         if (selection.guards?.includes(id))
             gates.push(`if __dk_gate_selected ${id}; then __dk_gate_ai ${STANDALONE_GATES[id].join(' ')}; fi`);
     }
+    // No sentry prewarm: an overlay installs no devkit commit-msg judge, so none follows the advisory.
     if (selection.guards?.includes(QAVIS_ADVISORY_ID))
         gates.push(selectedFragment(QAVIS_ADVISORY_ID, standaloneQavisLines));
     const inner = `${gates.join('\n')}\n\n${OVERLAY_LINT_STEPS}${fallow ? `\n\n${FALLOW_OVERLAY_GATE}` : ''}${deterministic ? `\n\n${REVIEW_DETERMINISTIC_FINALIZER}` : ''}`;

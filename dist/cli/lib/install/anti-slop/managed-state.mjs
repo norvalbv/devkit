@@ -55,7 +55,7 @@ export function readAntiSlopManifest(cwd) {
         : null;
 }
 /** Read a previous install's active managed rules without requiring its pins to match this Devkit. */
-function readManagedAntiSlopActivationEvidence(cwd) {
+export function readManagedAntiSlopActivationEvidence(cwd) {
     const manifestPath = join(cwd, ANTI_SLOP_MANIFEST_REL);
     const configPath = join(cwd, ANTI_SLOP_CONFIG_REL);
     if (!existsSync(manifestPath) || !existsSync(configPath))

@@ -32,6 +32,7 @@ const AGENT_SURFACE_SETS = {
 // Components OFFERED in OVERLAY mode (no package): the agent-half + the biome extend. Excludes
 // tsconfig/structure (need package/plugin resolution), searchSteering (its hooks reference a
 // node_modules path), search-code, and husky (the local hook is always on, not optional).
+// anti-slop is offered through ANTI_SLOP_OPTION below, not here — it is not in COMPONENT_OPTIONS.
 const OVERLAY_PICKABLE = new Set(['biome', 'skills', 'agents', 'agentHooks']);
 const STACKS = ['electron', 'react-app', 'component-lib', 'next', 'node-service', 'generic'];
 // The picker components (everything except `guards`, which gets its own multiselect when
@@ -165,10 +166,13 @@ export async function runWizard({ detectedStack, detectedMode = 'package', struc
                 componentOption(ADHD_OPTION),
                 componentOption(PRIOR_ART_GATE_OPTION),
                 componentOption(BASE_DRIFT_OPTION),
+                componentOption(ANTI_SLOP_OPTION),
             ],
+            // anti-slop is NEVER pre-ticked on a fresh overlay: adopting it snapshots the repository's
+            // existing debt into a per-clone baseline, which is a choice to make deliberately.
             initialValues: [
                 ...choices.filter((c) => c.recommended).map((c) => c.id),
-                ...installedOptional.filter((id) => id !== 'antiSlop'),
+                ...installedOptional,
             ],
             required: false,
         });
@@ -183,6 +187,7 @@ export async function runWizard({ detectedStack, detectedMode = 'package', struc
         // Overlay syncs hooks too (same delivery as agentHooks), so the gate works here unchanged.
         selection.priorArtGate = chosen.has('priorArtGate');
         selection.baseDrift = chosen.has('baseDrift');
+        selection.antiSlop = chosen.has('antiSlop');
         selection.husky = true; // overlay's local hook is the delivery mechanism — always on
     }
     else {
@@ -352,6 +357,7 @@ function summarize(mode, selection, structureAvailable, deselected) {
             `${on('adhd')} ${ADHD_OPTION.label}`,
             `${on('priorArtGate')} ${PRIOR_ART_GATE_OPTION.label}`,
             `${on('baseDrift')} ${BASE_DRIFT_OPTION.label}`,
+            `${on('antiSlop')} ${ANTI_SLOP_OPTION.label} (per-clone baseline, git-ignored)`,
         ].join('\n');
     }
     const lines = COMPONENTS.filter((c) => !(c.id === 'structure' && !structureAvailable)).map((c) => {

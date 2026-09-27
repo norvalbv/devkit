@@ -135,9 +135,11 @@ where implementation churn lives — so it never masquerades as a target flip.
 
 **Never mutate or delete a written block.** A→B→A is preserved; the *why* of each survives. The
 only edit allowed is an entry you're authoring in the *current uncommitted* workflow (typo fix).
-Use `amend <slug> --target …` or `amend <slug> --note "…"` for that narrow case: only the newest
-uncommitted entry can be replaced; earlier uncommitted entries are preserved, and the CLI refuses
-if committed history changed. For a small correction in a long draft note, use
+Use `amend <slug> --target …` or `amend <slug> --note "…"` for that narrow case. `--note` replaces
+the newest uncommitted note; `--target` replaces the newest uncommitted Target even when draft notes
+already sit under it, and those notes are kept byte-for-byte. Earlier committed entries are
+preserved, and the CLI refuses if committed history changed — a committed Target moves only through
+a new `add --target … --evidence-change`. For a small correction in a long draft note, use
 `amend <slug> --note-replace "<old>" "<new>"`; it changes exactly one matching substring and refuses
 missing or ambiguous matches. While the decisions guard is selected, direct native agent edits are blocked only
 under the configured decisions directory; shell commands and unsupported payloads remain outside

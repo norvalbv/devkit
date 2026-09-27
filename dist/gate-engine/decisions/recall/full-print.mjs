@@ -13,9 +13,24 @@
  */
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { whyHook } from '../decision-format.mjs';
+import { renderIndex, whyHook } from '../decision-format.mjs';
+import { loadAxisRows } from './retrieval.mjs';
 /** How many qualifying notes the truncated PROSE surface shows before pointing at `show`. */
 const PROSE_QUALIFIERS = 3;
+/**
+ * `guard-decisions list` — the spine RENDERED from the decisions directory, never INDEX.md read back
+ * (decision-retrieval-candidate-set). Cells narrow to INDEX shape; null = empty log, not empty table.
+ */
+export function renderSpine(p) {
+    const rows = loadAxisRows(p);
+    if (rows.length === 0)
+        return null;
+    return renderIndex(rows.map((r) => ({
+        ...r,
+        updated: r.liveRulingId?.split(':')[1] ?? r.updated,
+        why: whyHook(r.why),
+    })));
+}
 // `why` is now the axis file's full Context (the INDEX cell was truncated to 70 chars), so bound it
 // at print time — the ranker wants the whole thing, a terminal reader does not.
 export function printRanked(rows, mode) {

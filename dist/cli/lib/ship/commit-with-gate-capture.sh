@@ -98,6 +98,9 @@ commit_with_gate_capture() {
     dry_log_suffix="${dry_log_suffix%.log}"
     progress="$root/.devkit/review-progress-$branch_safe-dry-$ship_id_safe-$dry_log_suffix.json"
   fi
+  # Global, not local: ship-branch.sh reads this attempt's log after return to tell whether a
+  # --with-reviewers rehearsal actually reached a reviewer gate.
+  SHIP_GATE_LOG="$log"
 
   # Start the attempt before hook resolution so a fail-closed setup error still has a terminal
   # ship_result row instead of disappearing from telemetry.
@@ -109,9 +112,9 @@ commit_with_gate_capture() {
   resumed_json=false; [ "${DEVKIT_SHIP_RESUMED:-0}" = "1" ] && resumed_json=true
   body_bytes=$(printf '%s' "$body" | wc -c | tr -d ' ')
   if [ "$ship_dry_gates" -eq 0 ]; then
-    printf '{"type":"ship_attempt","ship_id":"%s","repo":"%s","branch":"%s","devkit_version":"%s","mode":"%s","resumed":%s,"body_bytes":%d,"log_path":"%s","ts":"%s"}\n' \
+    printf '{"type":"ship_attempt","ship_id":"%s","repo":"%s","branch":"%s","devkit_version":"%s"%s,"mode":"%s","resumed":%s,"body_bytes":%d,"log_path":"%s","ts":"%s"}\n' \
       "$(devkit_json_escape "$DEVKIT_SHIP_ID")" "$(devkit_json_escape "$repo_name")" "$(devkit_json_escape "$br")" \
-      "$(devkit_json_escape "$DEVKIT_TELEMETRY_VERSION")" \
+      "$(devkit_json_escape "$DEVKIT_TELEMETRY_VERSION")" "$(devkit_parent_session_json)" \
       "$(devkit_json_escape "${DEVKIT_SHIP_MODE:-ship}")" "$resumed_json" "$body_bytes" \
       "$(devkit_json_escape "$ship_log")" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
       >> "$DEVKIT_GATE_EVENTS" 2>/dev/null || true
@@ -312,9 +315,9 @@ SHIP_HOOK_WRAPPER
   else blocked_json='"unknown"'; timed_out=false
   fi
   if [ "$ship_dry_gates" -eq 0 ]; then
-    printf '{"type":"ship_result","ship_id":"%s","repo":"%s","branch":"%s","devkit_version":"%s","exit_code":%d,"timed_out":%s,"blocked_gate":%s,"duration_s":%d,"log_path":"%s","ts":"%s"}\n' \
+    printf '{"type":"ship_result","ship_id":"%s","repo":"%s","branch":"%s","devkit_version":"%s"%s,"exit_code":%d,"timed_out":%s,"blocked_gate":%s,"duration_s":%d,"log_path":"%s","ts":"%s"}\n' \
       "$(devkit_json_escape "$DEVKIT_SHIP_ID")" "$(devkit_json_escape "$repo_name")" "$(devkit_json_escape "$br")" \
-      "$(devkit_json_escape "$DEVKIT_TELEMETRY_VERSION")" "$rc" "$timed_out" "$blocked_json" \
+      "$(devkit_json_escape "$DEVKIT_TELEMETRY_VERSION")" "$(devkit_parent_session_json)" "$rc" "$timed_out" "$blocked_json" \
       "$(( $(date +%s) - dur_start ))" "$(devkit_json_escape "$ship_log")" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
       >> "$DEVKIT_GATE_EVENTS" 2>/dev/null || true
   fi
@@ -328,8 +331,10 @@ SHIP_HOOK_WRAPPER
       echo "✓ pre-commit gates ran in the ship worktree — full output: $log"
       # Was: "(e.g. coverage is NOT gated in the ship worktree)" — false since prepare-gate-worktree.sh
       # started linking coverage/ in, and it taught agents the exact opposite of the gate they were
-      # fighting. Point at the real thing a reader must not miss: a gate that PASSED by bypass.
-      echo "  Review it for any SKIP / BYPASSED / ⚠️ lines — a bypassed gate verified nothing."
+      # fighting. Point at the real thing a reader must not miss: a gate that PASSED by bypass — or,
+      # since sc-3175, one that downgraded itself or reused a PASS judged on an earlier diff.
+      echo "  Review it for any SKIP / BYPASSED / ⚠️ lines, and any Gate findings block below — a bypassed,"
+      echo "  downgraded or earlier-diff verdict did not verify this diff."
     } >&2
   elif [ "$head_clobbered" -eq 1 ]; then
     # Reuses the SAME evidence-checked verdict as the telemetry above — never a second independent
@@ -429,13 +434,22 @@ SHIP_HOOK_WRAPPER
   # Narration only, per blocking-gates-narrate-attribution-never-depend-on-it: it runs after $rc is
   # final, holds no exit, is errexit-suppressed, and prints nothing on every unhappy path (the
   # reader contains its own failures and emits an empty string). The command GROUP fixes the
-  # redirection order — the inner 2>/dev/null discards the reader's own stderr, the group's stdout
-  # becomes ship stderr, and a ship's stdout stays reserved for the PR URL.
-  local digest_reader
+  # redirection order — the reader's own stderr is discarded, and a ship's stdout stays reserved for
+  # the PR URL.
+  #
+  # sc-3175: the block also ends BOTH retained logs, because a reviewer reads those after the
+  # terminal is gone. The gate chain tees $log and the per-ship archive $ship_log separately and
+  # nothing writes either after it, so this tees to both. Captured first, so a silent digest
+  # appends nothing, and a tee that cannot write a log still cannot touch $rc.
+  local digest_reader digest_text=""
   digest_reader="$(dirname "${BASH_SOURCE[0]}")/digest/gate-digest.mts"
   [ -f "$digest_reader" ] || digest_reader="$(dirname "${BASH_SOURCE[0]}")/digest/gate-digest.mjs"
   if [ -f "$digest_reader" ]; then
-    { node "$digest_reader" digest "${DEVKIT_GATE_EVENTS:-}" "${DEVKIT_SHIP_ID:-}" "$log" 2>/dev/null || true; } >&2
+    digest_text="$(node "$digest_reader" digest "${DEVKIT_GATE_EVENTS:-}" "${DEVKIT_SHIP_ID:-}" "$log" 2>/dev/null)" || digest_text=""
+  fi
+  if [ -n "$digest_text" ]; then
+    # Order matters: stdout joins ship stderr FIRST, then only tee's own complaints are discarded.
+    printf '%s\n' "$digest_text" | tee -a "$log" "$ship_log" >&2 2>/dev/null || true
   fi
 
   # sc-2299. The path brief again, next to the verdict. The resume banner already printed it in FULL,
