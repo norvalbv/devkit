@@ -21,6 +21,7 @@ import {
   processAlive,
   testSpawnSync as spawnSync,
 } from './_helpers.mts';
+import { rewriteRepo } from './_reship-rewrite-fixture.mts';
 import { bodyUpdateRepo } from './_ship-branch-fixture.mts';
 
 // `devkit ship --pr <branch>` (re-push): adds the current changes to an EXISTING PR's branch as a
@@ -103,129 +104,6 @@ function repo(origin = 'git@github.com:acme/app.git') {
   g(['commit', '-q', '--allow-empty', '-m', 'base']);
   g(['remote', 'add', 'origin', origin]);
   return { dir, g };
-}
-
-/** Existing PR off an old base plus a caller snapshot already resolved on today's main. The raw
- * origin stays GitHub-shaped for PR identity checks; url.insteadOf keeps every fetch/push hermetic. */
-function rewriteRepo({ extraPath = false, rename = false, objectFormat = 'sha1' } = {}) {
-  const bare = mkdtempSync(join(tmpdir(), 'reship-rewrite-bare-'));
-  const dir = mkdtempSync(join(tmpdir(), 'reship-rewrite-wt-'));
-  const stubBin = mkdtempSync(join(tmpdir(), 'reship-rewrite-bin-'));
-  const ghLog = join(stubBin, 'gh.log');
-  const ghBody = join(stubBin, 'gh.body');
-  const realGit = execFileSync('/bin/sh', ['-c', 'command -v git'], {
-    encoding: 'utf8',
-  }).trim();
-  dirs.push(bare, dir, stubBin);
-  const env = { ...process.env, ...GENV };
-  const g = (a, o = {}) =>
-    execFileSync('git', ['-C', dir, ...a], { env, encoding: 'utf8', ...o }).trim();
-  const objectFormatArgs = objectFormat === 'sha256' ? ['--object-format=sha256'] : [];
-  execFileSync('git', ['init', '-q', '--bare', ...objectFormatArgs, bare], { env });
-  g(['init', '-q', '-b', 'main', ...objectFormatArgs]);
-  g(['config', 'user.email', 'a@b.c']);
-  g(['config', 'user.name', 'a']);
-  g(['config', 'commit.gpgsign', 'false']);
-  g(['remote', 'add', 'origin', 'git@github.com:acme/app.git']);
-  g(['config', `url.${bare}.insteadOf`, 'git@github.com:acme/app.git']);
-  mkdirSync(join(dir, '.husky/_'), { recursive: true });
-  writeFileSync(join(dir, '.husky/.keep'), '');
-  writeFileSync(join(dir, '.gitignore'), '.devkit/\n');
-  writeFileSync(join(dir, 'conflict.txt'), 'base\n');
-  if (rename) writeFileSync(join(dir, 'old.txt'), 'old\n');
-  g(['add', '.gitignore', '.husky/.keep', 'conflict.txt', ...(rename ? ['old.txt'] : [])]);
-  g(['commit', '-q', '-m', 'base']);
-  g(['push', '-q', 'origin', 'main']);
-
-  g(['checkout', '-q', '-b', 'feature']);
-  writeFileSync(join(dir, 'conflict.txt'), 'feature\n');
-  if (extraPath) writeFileSync(join(dir, 'extra.txt'), 'feature extra\n');
-  if (rename) {
-    rmSync(join(dir, 'old.txt'));
-    writeFileSync(join(dir, 'new.txt'), 'renamed\n');
-  }
-  g(['add', '-A']);
-  g(['commit', '-q', '-m', 'feature']);
-  g(['push', '-q', 'origin', 'HEAD:feat/pr']);
-  const oldPrTip = g(['rev-parse', 'HEAD']);
-
-  g(['checkout', '-q', 'main']);
-  writeFileSync(join(dir, 'conflict.txt'), 'main\n');
-  g(['add', 'conflict.txt']);
-  g(['commit', '-q', '-m', 'main moves']);
-  g(['push', '-q', 'origin', 'main']);
-  const mainTip = g(['rev-parse', 'HEAD']);
-
-  // Equivalent to the completed local rebase in sc-2323: main is the ancestor and the caller has
-  // already resolved the conflict. devkit's job is publication, not this history edit.
-  g(['checkout', '-q', '-b', 'prepared']);
-  writeFileSync(join(dir, 'conflict.txt'), 'main + feature\n');
-  if (extraPath) writeFileSync(join(dir, 'extra.txt'), 'feature extra\n');
-  if (rename) {
-    rmSync(join(dir, 'old.txt'));
-    writeFileSync(join(dir, 'new.txt'), 'renamed\n');
-  }
-  g(['add', '-A']);
-  g(['commit', '-q', '-m', 'resolved feature']);
-  writeFileSync(join(dir, '.husky/_/pre-commit'), '#!/bin/sh\nexit 0\n');
-  chmodSync(join(dir, '.husky/_/pre-commit'), 0o755);
-  g(['config', 'core.hooksPath', '.husky/_']);
-
-  writeFileSync(
-    join(stubBin, 'gh'),
-    [
-      '#!/bin/sh',
-      'printf \'%s\\n\' "$*" >> "$GH_LOG"',
-      'if [ "$1" = pr ] && [ "$2" = edit ]; then',
-      '  if [ "${GH_EDIT_KILL_PARENT:-0}" -eq 1 ]; then kill -9 "$PPID"; exit 9; fi',
-      '  cat > "$GH_BODY"',
-      '  if [ -n "${GH_EDIT_PAUSE_MARKER:-}" ]; then',
-      '    : > "$GH_EDIT_PAUSE_MARKER"',
-      '    while [ ! -e "$GH_EDIT_PAUSE_RELEASE" ]; do sleep 0.02; done',
-      '  fi',
-      '  if [ -n "${GH_INTENT_LOCK:-}" ]; then',
-      '    mkdir -p "$GH_INTENT_LOCK"',
-      '    printf \'%s:held\' "$PPID" > "$GH_INTENT_LOCK/holder"',
-      '  fi',
-      '  exit "${GH_EDIT_STATUS:-0}"',
-      'fi',
-      'case " $* " in',
-      "  *' --json url '*) printf '%s\\n' 'https://github.com/acme/app/pull/7'; exit 0 ;;",
-      'esac',
-      `printf '7\\tOPEN\\t%s\\t%s\\tacme/app\\tmain\\t${mainTip}\\thttps://github.com/acme/app/pull/7\\n' "\${PR_HEAD_REF_NAME:-feat/pr}" "\${PR_HEAD_OID:-${oldPrTip}}"`,
-      '',
-    ].join('\n'),
-  );
-  chmodSync(join(stubBin, 'gh'), 0o755);
-  writeFileSync(
-    join(stubBin, 'git'),
-    [
-      '#!/bin/sh',
-      'if [ "${KILL_BEFORE_REWRITE_PUSH:-0}" -eq 1 ]; then',
-      '  case " $* " in',
-      '    *" push --force-with-lease="*)',
-      '      ship_pid=$(ps -o ppid= -p "$PPID" | tr -d " ")',
-      '      kill -9 "$ship_pid"',
-      '      exit 9',
-      '      ;;',
-      '  esac',
-      'fi',
-      `exec '${realGit}' "$@"`,
-      '',
-    ].join('\n'),
-  );
-  chmodSync(join(stubBin, 'git'), 0o755);
-  return {
-    bare,
-    dir,
-    env: { PATH: `${stubBin}:${process.env.PATH}`, GH_LOG: ghLog, GH_BODY: ghBody },
-    g,
-    mainTip,
-    oldPrTip,
-    stubBin,
-    ghLog,
-    ghBody,
-  };
 }
 
 describe('reship — resolve + arg guards', () => {
