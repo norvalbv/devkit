@@ -19,7 +19,12 @@ import { envFlag, type GuardConfig } from '../../config.mts';
 import { emitGateEvent } from '../../judge/gate-events.mts';
 import { saveTranscript } from '../../judge/transcript-store.mts';
 import { measureDiffEvidenceCap } from '../diff-evidence.mts';
-import { reviewBaseContext } from './base-context.mts';
+import {
+  type CachedBaseState,
+  type CachedBaseVerdict,
+  judgedBaseSha,
+  reviewBaseContext,
+} from './base-context.mts';
 import {
   declaredRoots,
   hasChecklist,
@@ -172,6 +177,27 @@ export function diffLineCounts(diffText: string) {
 // scope from a spilled one — the list is never silently dropped.
 const SCOPE_FILES_INLINE_BUDGET = 2000;
 
+/** `base_sha` names the tree the verdict was JUDGED against: this run's for a judged row, the stored
+ * one for a cache-served row (null when unknown or split across several bases). */
+interface ScopeBaseFields {
+  base_sha: string | null;
+  current_base_sha?: string | null;
+  base_state?: CachedBaseState;
+  cached_parts_base_state?: CachedBaseState;
+}
+
+function baseFields(
+  live: string | null,
+  verdict: CachedBaseVerdict | null,
+  wholly: boolean,
+): ScopeBaseFields {
+  if (!verdict) return { base_sha: live };
+  // Partly cached (split parts): the live parts judged THIS base; the replayed parts' state rides along.
+  if (!wholly)
+    return { base_sha: live, current_base_sha: live, cached_parts_base_state: verdict.state };
+  return { base_sha: judgedBaseSha(verdict), current_base_sha: live, base_state: verdict.state };
+}
+
 /**
  * One row per reviewer the gate SELECTED — emitted before the judge runs, so it lands for a cached
  * PASS too. This is the row that answers "did this reviewer see this file, on which bytes, under
@@ -188,6 +214,8 @@ export function emitReviewScope(
   contextFields: { commit_msg: boolean; targets_via: 'scope' | 'scope+semantic' } | null = null,
   // The tree the diff was computed against — without it a finding is not re-resolvable from the sink.
   cwd: string = process.cwd(),
+  // A cache-served row was judged against the base its PASS stored, not this run's (sc-3468).
+  { cachedBase = null }: { cachedBase?: CachedBaseVerdict | null } = {},
 ): void {
   const files = [...sel.files].sort();
   const inline = JSON.stringify(files);
@@ -213,7 +241,7 @@ export function emitReviewScope(
     // second source of truth the gate cannot import and would have to sync-test.
     has_checklist: hasChecklist(sel.reviewer),
     cached,
-    base_sha: reviewBaseContext(cwd).baseSha,
+    ...baseFields(reviewBaseContext(cwd).baseSha, cachedBase, cached),
     ...(contextFields ?? {}),
   });
 }

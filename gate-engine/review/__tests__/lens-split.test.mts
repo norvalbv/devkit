@@ -377,3 +377,69 @@ describe('planReviewWork — a sentry-additive restage keeps earned keys', () =>
     expect(after.fullyCached).toHaveLength(0);
   });
 });
+
+// sc-3468: the planner hands every cache-served reviewer (and split part) the base its PASS STORED,
+// raw, so the caller can name it instead of attributing the replay to this run's base.
+describe('planReviewWork — cached PASSes carry the base they were judged against', () => {
+  const sel = { reviewer: base, files: ['src/a.ts'] };
+  const key = (n: string, d: string, salt: string) => `${n}|${d}|${salt}`;
+  const groups = DEFAULT_LENS_GROUPS;
+  const A = 'a'.repeat(40);
+  const B = 'b'.repeat(40);
+  const partKey = (i: number) =>
+    key('correctness-reviewer', 'd', `|split:${lensGroupId(groups[i])}`);
+
+  it('a fully cached split reviewer reports every part base, one hit, one scope row', () => {
+    const cache = {
+      [partKey(0)]: { at: 'n', base_sha: A },
+      [partKey(1)]: { at: 'n', base_sha: B },
+    };
+    const plan = planReviewWork([sel], ['d'], cache, new Map(), key, groups);
+    expect(plan.fullyCached[0].judgedBases).toEqual([A, B]);
+    expect(plan.cachedHits).toEqual([
+      { label: 'correctness-reviewer', files: ['src/a.ts'], judgedBases: [A, B], part: false },
+    ]);
+    expect(plan.scope).toEqual([expect.objectContaining({ cached: true, judgedBases: [A, B] })]);
+  });
+
+  it('a partially cached split reviewer names the cached part alone, with its own base', () => {
+    const cache = { [partKey(0)]: { at: 'n', base_sha: A } };
+    const plan = planReviewWork([sel], ['d'], cache, new Map(), key, groups);
+    expect(plan.tasks).toHaveLength(1);
+    expect(plan.cachedHits).toHaveLength(1);
+    expect(plan.cachedHits[0].judgedBases).toEqual([A]);
+    expect(plan.cachedHits[0].part).toBe(true);
+    expect(plan.cachedHits[0].label).not.toBe('correctness-reviewer'); // the part label, not the reviewer
+    // Not every part was served: the row is live, but still carries the replayed part's base.
+    expect(plan.scope[0]).toMatchObject({ cached: false, judgedBases: [A] });
+  });
+
+  it.each([
+    ['no stored base (a legacy entry)', {}],
+    ['a non-string base', { base_sha: 42 }],
+    ['an option-shaped base', { base_sha: '--output=/tmp/x' }],
+  ])('parses %s to null at the cache read, never a fabricated base', (_label, extra) => {
+    const cache = { [key('correctness-reviewer', 'd', '')]: { at: 'n', ...extra } };
+    const plan = planReviewWork([sel], ['d'], cache, new Map(), key, null);
+    expect(plan.cachedHits[0].judgedBases).toEqual([null]);
+    expect(plan.fullyCached[0].judgedBases).toEqual([null]);
+  });
+
+  it('parses the cached model at the read: a non-string model is dropped, not forwarded', () => {
+    const k = key('correctness-reviewer', 'd', '');
+    expect(
+      planReviewWork([sel], ['d'], { [k]: { at: 'n', model: 7 } }, new Map(), key, null)
+        .fullyCached[0].model,
+    ).toBeUndefined();
+    expect(
+      planReviewWork([sel], ['d'], { [k]: { at: 'n', model: 'opus' } }, new Map(), key, null)
+        .fullyCached[0].model,
+    ).toBe('opus');
+  });
+
+  it('an uncached reviewer produces no cached hit', () => {
+    const plan = planReviewWork([sel], ['d'], {}, new Map(), key, null);
+    expect(plan.cachedHits).toEqual([]);
+    expect(plan.fullyCached).toEqual([]);
+  });
+});
