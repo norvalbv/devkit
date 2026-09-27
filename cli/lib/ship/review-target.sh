@@ -51,8 +51,8 @@ done
 SHIP_BASE_SHA=${DEVKIT_SHIP_BASE_SHA:-}
 
 # Never inherit another ship/review's authority, private paths, or telemetry destination. The two
-# topology hints, SHIP_COMMIT_TIMEOUT and DEVKIT_PREFLIGHT_TIMEOUT are intentional invocation inputs
-# and remain untouched. DEVKIT_PREFLIGHT_TIMEOUT deliberately avoids the DEVKIT_REVIEW_ prefix:
+# topology hints, SHIP_COMMIT_TIMEOUT, DEVKIT_PREFLIGHT_TIMEOUT and DEVKIT_PREFLIGHT_HEARTBEAT are
+# intentional invocation inputs and remain untouched. DEVKIT_PREFLIGHT_TIMEOUT deliberately avoids the DEVKIT_REVIEW_ prefix:
 # cli/commands/review.mts strips that whole namespace as inherited run context, so a knob named
 # DEVKIT_REVIEW_* would be silently deleted before this script ever saw it.
 for name in \
@@ -75,6 +75,7 @@ done
 . "$SCRIPT_DIR/review/snapshot.sh"
 . "$SCRIPT_DIR/review/submodules.sh"
 . "$SCRIPT_DIR/review/process/gate-signal-handoff.sh"
+. "$SCRIPT_DIR/review/progress.sh"
 . "$SCRIPT_DIR/prepare-gate-worktree.sh"
 . "$SCRIPT_DIR/run-gates-with-capture.sh"
 _review_worktree_clear_git_env
@@ -290,6 +291,12 @@ esac
 [ "$PREFLIGHT_TIMEOUT_SECS" -ge 1 ] && [ "$PREFLIGHT_TIMEOUT_SECS" -le 2147483 ] ||
   preflight_timeout_invalid
 
+# sc-2166: how often the hang guard below narrates a still-running setup/teardown step. Whole
+# seconds; 0 turns it off. Deliberately LENIENT where the ceiling above is strict — this is
+# narration, and a malformed narration knob must never abort a review (the judge heartbeat,
+# gate-engine/judge/process/heartbeat.mts, falls back to its default the same way).
+PREFLIGHT_HEARTBEAT_SECS=$(review_heartbeat_interval "${DEVKIT_PREFLIGHT_HEARTBEAT-}")
+
 FINAL_WT_CREATED=0
 BASE_WT_CREATED=0
 FINAL_SUBMODULES_CREATED=0
@@ -357,9 +364,20 @@ emit_terminal_result() {
 # phase boundary would be a dozen new ways for a full disk to kill the run.
 review_phase() {
   REVIEW_PHASE=$1
-  printf '%s\n' "$REVIEW_PHASE" > "$PREFLIGHT_STAGE_FILE" 2>/dev/null || :
+  review_write_stage "$PREFLIGHT_STAGE_FILE" "$REVIEW_PHASE"
   printf 'devkit review: phase=%s t=%ss\n' "$REVIEW_PHASE" "$(( $(date +%s) - STARTED_AT ))" |
     tee -a "$LOG" >&2 || :
+}
+
+# sc-2166: one phase can run a dozen unrelated steps (preflight-verify re-verifies every snapshot,
+# manifest and runtime), so a phase stamp alone cannot say WHICH one wedged. The step goes to the
+# stage file the hang guard reads — its banner and heartbeat then name it — and to the log only,
+# keeping the console to one line per phase. REVIEW_PHASE, and so the terminal `result=` trailer,
+# stays the coarse phase. Instrumentation, so every write is best-effort for the same reasons.
+review_step() {
+  review_write_stage "$PREFLIGHT_STAGE_FILE" "$REVIEW_PHASE:$1"
+  printf 'devkit review: step=%s:%s t=%ss\n' "$REVIEW_PHASE" "$1" \
+    "$(( $(date +%s) - STARTED_AT ))" >> "$LOG" 2>/dev/null || :
 }
 
 # ── Setup/teardown hang guard ────────────────────────────────────────────────────────────────────
@@ -389,6 +407,9 @@ start_preflight_watchdog() {
   local main=$$
   (
     trap '' HUP INT QUIT TERM
+    # A heartbeat write to a stderr whose reader has gone would otherwise SIGPIPE this subshell, and
+    # the hang guard would die of its own narration. Ignored, the write fails and `|| :` absorbs it.
+    trap '' PIPE
     # Poll rather than one long sleep: this subshell inherits the caller's stderr (its banner has to
     # reach the console), so a single `sleep $PREFLIGHT_TIMEOUT` would hold that pipe open for the
     # whole ceiling if the shell were SIGKILLed — the pipe-holder wedge documented at the top of
@@ -398,9 +419,27 @@ start_preflight_watchdog() {
     # a few milliseconds in. Waiting one boundary longer guarantees the guard never fires EARLY —
     # overshooting a hang ceiling by under a second costs nothing, undershooting it kills live runs.
     SECONDS=0
+    next_beat=$PREFLIGHT_HEARTBEAT_SECS
     while [ "$SECONDS" -le "$PREFLIGHT_TIMEOUT_SECS" ]; do
       /bin/sleep 0.25
       kill -0 "$main" 2>/dev/null || exit 0
+      # sc-2166: phase lines alone go quiet for as long as one step runs, which on a large repo is
+      # tens of minutes — long enough that a caller cannot tell slow from wedged without `ps`. Same
+      # line shape as the judge heartbeat. Narration only: every failure is swallowed.
+      if [ "$PREFLIGHT_HEARTBEAT_SECS" -gt 0 ] && [ "$SECONDS" -ge "$next_beat" ]; then
+        next_beat=$((SECONDS + PREFLIGHT_HEARTBEAT_SECS))
+        beat_stage=unknown
+        [ ! -f "$PREFLIGHT_STAGE_FILE" ] ||
+          IFS= read -r beat_stage < "$PREFLIGHT_STAGE_FILE" 2>/dev/null || beat_stage=unknown
+        beat_elapsed=$(( $(date +%s) - STARTED_AT )) 2>/dev/null || beat_elapsed=0
+        beat_left=$((PREFLIGHT_TIMEOUT_SECS - SECONDS))
+        [ "$beat_left" -ge 0 ] || beat_left=0
+        beat_line=$(printf 'devkit review: still running — %s %dm%02ds (ceiling in ≤%dm%02ds) · log: %s' \
+          "$beat_stage" "$((beat_elapsed / 60))" "$((beat_elapsed % 60))" \
+          "$((beat_left / 60))" "$((beat_left % 60))" "$LOG")
+        printf '%s\n' "$beat_line" >> "$LOG" 2>/dev/null || :
+        printf '%s\n' "$beat_line" >&2 2>/dev/null || :
+      fi
     done
     stage=unknown
     [ ! -f "$PREFLIGHT_STAGE_FILE" ] || IFS= read -r stage < "$PREFLIGHT_STAGE_FILE" || stage=unknown
@@ -803,23 +842,37 @@ git_line_into BASE_BEFORE_HEAD "$BASE_WT" rev-parse --verify HEAD || exit 1
   exit 1
 }
 review_phase preflight-verify
+review_step worktree-final
 review_worktree_matches_tree "$FINAL_WT" "$RAW_TREE" "$STAGED_TREE"
+review_step worktree-base
 review_worktree_matches_tree "$BASE_WT" "$BASE_RAW_TREE" "$BASE_TREE"
+review_step submodules-final
 review_verify_submodules "$FINAL_SUBMODULE_MANIFEST"
+review_step submodules-base
 review_verify_submodules "$BASE_SUBMODULE_MANIFEST"
+review_step setup-runtime
 node "$SETUP_RUNTIME_TOOL" verify "$SETUP_MANIFEST" "$SETUP_RUNTIME_MANIFEST"
+review_step deps-final
 node "$DEPENDENCY_RUNTIME_TOOL" verify "$TARGET_ROOT" "$FINAL_DEPENDENCY_MANIFEST"
+review_step deps-base
 node "$DEPENDENCY_RUNTIME_TOOL" verify "$TARGET_ROOT" "$BASE_DEPENDENCY_MANIFEST"
+review_step projection-final
 node "$PROJECTION_RUNTIME_TOOL" verify "$TARGET_ROOT" "$FINAL_TARGET" \
   "$FINAL_PROJECTION_MANIFEST"
+review_step projection-base
 node "$PROJECTION_RUNTIME_TOOL" verify "$TARGET_ROOT" "$BASE_TARGET" \
   "$BASE_PROJECTION_MANIFEST"
+review_step assets
 node "$ASSET_RUNTIME_TOOL" verify "$PACKAGE_ROOT" "$ASSET_RUNTIME" "$ASSET_FINGERPRINT"
+review_step target-capture
 verify_target_capture
 
 # Hand the ceiling over to the gate chain, which has owned its own since sc-1199. Two guards must
 # never be armed at once: this one signals the whole process group, which would tear the supervised
 # gate tree out from under the supervisor that is already reaping it.
+# Stamped while the guard is still armed: the stop and the chain's launch are the one stretch no
+# watchdog covers, and a wedge there used to leave the log reading a stale `preflight-verify`.
+review_phase gates-handover
 stop_preflight_watchdog
 review_phase gates
 GATE_RAW_STATUS=0
@@ -848,6 +901,7 @@ start_preflight_watchdog
 review_phase postflight-verify
 AUTHORITY_OK=1
 FORMAT_CHANGED=0
+review_step staged-trees
 FINAL_AFTER_STAGED=$(review_staged_tree "$FINAL_WT" 2>/dev/null) || AUTHORITY_OK=0
 if [ "$FINAL_AFTER_STAGED" != "$FINAL_BEFORE_STAGED" ]; then FORMAT_CHANGED=1; AUTHORITY_OK=0; fi
 BASE_AFTER_STAGED=$(review_staged_tree "$BASE_WT" 2>/dev/null) || AUTHORITY_OK=0
@@ -860,22 +914,30 @@ if ! review_worktree_matches_tree "$FINAL_WT" "$RAW_TREE" "$STAGED_TREE"; then
   FORMAT_CHANGED=1
   AUTHORITY_OK=0
 fi
+review_step worktree-base
 review_worktree_matches_tree "$BASE_WT" "$BASE_RAW_TREE" "$BASE_TREE" || AUTHORITY_OK=0
+review_step untracked
 review_assert_untracked_unchanged "$FINAL_WT" "$FINAL_UNTRACKED_MANIFEST" \
   "$FINAL_EXCLUSIONS" || AUTHORITY_OK=0
 review_assert_untracked_unchanged "$BASE_WT" "$BASE_UNTRACKED_MANIFEST" \
   "$BASE_EXCLUSIONS" || AUTHORITY_OK=0
+review_step submodules
 review_verify_submodules "$FINAL_SUBMODULE_MANIFEST" || AUTHORITY_OK=0
 review_verify_submodules "$BASE_SUBMODULE_MANIFEST" || AUTHORITY_OK=0
+review_step setup-runtime
 node "$SETUP_RUNTIME_TOOL" verify "$SETUP_MANIFEST" "$SETUP_RUNTIME_MANIFEST" || AUTHORITY_OK=0
+review_step deps
 node "$DEPENDENCY_RUNTIME_TOOL" verify "$TARGET_ROOT" "$FINAL_DEPENDENCY_MANIFEST" || AUTHORITY_OK=0
 node "$DEPENDENCY_RUNTIME_TOOL" verify "$TARGET_ROOT" "$BASE_DEPENDENCY_MANIFEST" || AUTHORITY_OK=0
+review_step projection
 node "$PROJECTION_RUNTIME_TOOL" verify "$TARGET_ROOT" "$FINAL_TARGET" \
   "$FINAL_PROJECTION_MANIFEST" || AUTHORITY_OK=0
 node "$PROJECTION_RUNTIME_TOOL" verify "$TARGET_ROOT" "$BASE_TARGET" \
   "$BASE_PROJECTION_MANIFEST" || AUTHORITY_OK=0
+review_step assets
 node "$ASSET_RUNTIME_TOOL" verify "$PACKAGE_ROOT" "$ASSET_RUNTIME" \
   "$ASSET_FINGERPRINT" || AUTHORITY_OK=0
+review_step target-capture
 verify_target_capture || AUTHORITY_OK=0
 
 review_phase cleanup
