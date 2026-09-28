@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import { closeSync, existsSync, fstatSync, lstatSync, openSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync, } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import { z } from 'zod';
+import { commitIndexEnv } from '../ratchets/commit-index.mjs';
 export const MANIFEST_NAME = 'coverage-manifest.json';
 /** A path that existed at HEAD but not in the working tree when the run started. */
 export const DELETED = 'deleted';
@@ -23,8 +24,10 @@ const manifestSchema = z.object({
 });
 // Only the keys matter here; computePercentages has already validated each entry's shape.
 const artifactKeysSchema = z.record(z.string(), z.unknown());
+// The commit's own index, not the default one: a pathspec or `-a` commit stages into a temp index.
 const git = (cwd, args, input) => execFileSync('git', ['--literal-pathspecs', ...args], {
     cwd,
+    env: commitIndexEnv(cwd),
     encoding: 'utf8',
     input,
     maxBuffer: 256 * 1024 * 1024,

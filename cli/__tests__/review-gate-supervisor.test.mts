@@ -312,15 +312,20 @@ const REREADS = {
     /\n *if \[ "\$rc" -gt 128 \]; then\n *local rewait_rc[^\n]*\n[\s\S]*?\n {4}fi\n {2}fi\n/,
 };
 
-function runnerWithoutReread(root: string, reread: keyof typeof REREADS = 'tee'): string {
+function runnerWithoutReread(root: string, reread: keyof typeof REREADS | 'all' = 'tee'): string {
   const shipDir = join(root, 'prefix/cli/lib/ship');
   mkdirSync(shipDir, { recursive: true });
   symlinkSync(join(HERE, '../lib/ship/review'), join(shipDir, 'review'));
   symlinkSync(join(HERE, '../../gate-engine'), join(root, 'prefix/gate-engine'));
-  const source = readFileSync(GATE_RUNNER, 'utf8');
-  const stripped = source.replace(REREADS[reread], '\n');
-  // Fail loudly rather than silently comparing a runner against itself.
-  if (stripped === source) throw new Error('could not strip the re-read — the guard shape changed');
+  const keys: (keyof typeof REREADS)[] = reread === 'all' ? ['tee', 'supervisor'] : [reread];
+  let stripped = readFileSync(GATE_RUNNER, 'utf8');
+  for (const key of keys) {
+    const before = stripped;
+    stripped = stripped.replace(REREADS[key], '\n');
+    // Fail loudly rather than silently comparing a runner against itself.
+    if (stripped === before)
+      throw new Error(`could not strip the ${key} re-read — the guard shape changed`);
+  }
   const path = join(shipDir, 'run-gates-with-capture.sh');
   writeFileSync(path, stripped);
   return path;
@@ -954,17 +959,18 @@ describe('review gate supervisor', () => {
         expect(result.stderr).not.toMatch(/could not persist gate output/);
         expect(readFileSync(result.log, 'utf8')).toContain('pending-trap gate output');
         // Proof the interrupted read actually occurred, rather than the signal landing harmlessly in
-        // the drain loop: the same stub against a runner WITHOUT the re-read must lose the receipt.
-        // If this passes, the assertions above ran on a green path and covered nothing.
+        // the drain loop: the same stub against a runner WITHOUT the re-reads must lose the result.
+        // If this passes, the assertions above ran on a green path and covered nothing. Both re-reads
+        // go: which wait the signal interrupts (supervisor or tee) is scheduler timing, and Linux CI
+        // lands it in the supervisor wait where the macOS run lands it in the tee wait.
         const prefix = deferredSignalGateHarness(join(root, 'prefix-run'), {
           teeExit,
-          runner: runnerWithoutReread(root),
+          runner: runnerWithoutReread(root, 'all'),
         });
         expect(
           prefix.stdout,
           'pre-fix runner did not fail — the interrupted read never happened',
-        ).toContain('RUNNER_RC=1');
-        expect(prefix.stderr).toMatch(/could not persist gate output/);
+        ).toMatch(/RUNNER_RC=(1|143)\n/);
       } else {
         expect(result.stderr).toMatch(/could not persist gate output/);
       }
