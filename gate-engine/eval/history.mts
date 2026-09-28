@@ -69,7 +69,10 @@ interface RawHistoryEntry {
 
 function parseRawHistory(source: RepositorySource): RawHistoryEntry[] {
   const content = source.read(HISTORY_PATH);
-  if (content === null) throw new Error(`Missing ${HISTORY_PATH}`);
+  if (content === null) {
+    const why = source.explainAbsence?.(HISTORY_PATH);
+    throw new Error(`Missing ${HISTORY_PATH}${why ? `\n${why}` : ''}`);
+  }
   return content
     .split('\n')
     .filter(Boolean)
