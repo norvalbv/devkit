@@ -178,6 +178,11 @@ function emitProvenance(p: Provenance): void {
   });
 }
 
+// Names the PHYSICAL artifact so a borrowed verdict is visible (sc-3491).
+function artifactLine(file: string): string {
+  return `   read ${canonicalPath(file)}`;
+}
+
 /** Run the coverage gate against `cwd`. Returns the exit code (0 pass/bypass, 1 fail). */
 export function runCoverage(cwd = process.cwd()): number {
   // BEFORE resolveGuardConfig — it THROWS on a malformed guard.config.json, and an explicit operator
@@ -213,7 +218,7 @@ export function runCoverage(cwd = process.cwd()): number {
       '   `bun run test:run:coverage`, then re-run. Under `devkit ship` the artifact is',
     );
     console.error(
-      '   SYMLINKED IN from your checkout — so it must exist THERE; the ephemeral ship',
+      '   SYMLINKED IN from THIS worktree (never the main checkout) — so it must exist THERE; the ship',
     );
     console.error('   worktree cannot produce one.');
     console.error('   Sharing this checkout with another agent? Point that script at `devkit');
@@ -246,6 +251,7 @@ export function runCoverage(cwd = process.cwd()): number {
     console.error(
       `🚫 Coverage gate FAILED — ${COVERAGE_FILE} is present but not valid coverage data.`,
     );
+    console.error(artifactLine(file));
     console.error(
       '   Unparseable or malformed coverage data is not verification. Re-run `bun run test:run:coverage`.',
     );
@@ -260,6 +266,7 @@ export function runCoverage(cwd = process.cwd()): number {
     for (const m of shortfalls) {
       console.error(`   ${m}: ${computed[m]}% (min ${coverage[m] as number}%)`);
     }
+    console.error(artifactLine(file));
     console.error('   Add tests to raise coverage, then run `bun run test:run:coverage`.');
     for (const line of BYPASS_REMEDY) console.error(line);
     return 1;
@@ -289,6 +296,7 @@ export function runCoverage(cwd = process.cwd()): number {
       console.error(
         `   The artifact (run ${provenance.manifest.runId}, measured ${age} ago) never saw these`,
       );
+      console.error(artifactLine(file));
       console.error(
         '   versions, so its percentages describe different code. Re-run `bun run test:run:coverage`',
       );
@@ -319,6 +327,7 @@ export function runCoverage(cwd = process.cwd()): number {
       ? ''
       : ` — artifact run ${provenance.manifest.runId}, measured ${age} ago`;
   console.log(`✓ Coverage gate passed (${summary})${measured}.`);
+  console.log(artifactLine(file));
   return 0;
 }
 

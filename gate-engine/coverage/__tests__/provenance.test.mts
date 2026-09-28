@@ -158,6 +158,7 @@ describe('gate — provenance of a passing artifact', () => {
     expect(code).toBe(1);
     expect(out).toContain('coverage artifact predates 1 briefed file(s):');
     expect(out).toContain('src/a.mts');
+    expect(out).toMatch(/ {3}read \/.*\/coverage\/coverage-final\.json/); // sc-3491: names the artifact
     expect(out).toContain('GUARD_COVERAGE_OK=1');
     expect(out).not.toContain('✓ Coverage gate passed');
   });

@@ -23,7 +23,8 @@ import { testExecFileSync as execFileSync, testSpawnSync as spawnSync } from './
 // never brings them across. The consumer root can itself be a linked worktree — devkit's own stated
 // premise ("parallel agents share one working tree"), and what any tool spawning per-task worktrees
 // produces. Linking only from $root therefore failed closed on .husky/_ for a perfectly set-up repo
-// and silently dropped node_modules/coverage. These cover the fallback to the MAIN worktree.
+// and silently dropped node_modules. These cover the fallback to the MAIN worktree — which coverage
+// deliberately does NOT get (sc-3491, below): its absence is the fail-CLOSED path.
 
 const scriptPath = fileURLToPath(new URL('../lib/ship/prepare-gate-worktree.sh', import.meta.url));
 const GIT_ENV = { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' };
@@ -34,9 +35,9 @@ afterAll(() => {
 });
 
 /** A main checkout carrying the gitignored gate deps, plus a linked worktree that (correctly) lacks them. */
-function seedRepoWithLinkedWorktree({ husky = true } = {}) {
+function seedRepoWithLinkedWorktree({ husky = true, prefix = 'gatewt-' } = {}) {
   // realpath: `git worktree list` reports resolved paths, and macOS /var is a symlink to /private/var.
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'gatewt-')));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
   dirs.push(root);
   const main = join(root, 'main');
   mkdirSync(main, { recursive: true });
@@ -76,10 +77,19 @@ function seedRepoWithLinkedWorktree({ husky = true } = {}) {
  * (ship-branch.sh, reship.sh, review-target.sh), so a predicate that answers "no" must never abort
  * the caller. Without it these tests would run the code in a shell no consumer uses.
  */
-function prepare(wt: string, root: string) {
+function prepare(wt: string, root: string, ...extraLinks: string[]) {
+  // Paths travel as positional args, never interpolated: real roots contain spaces.
   return spawnSync(
     '/bin/bash',
-    ['-c', `set -euo pipefail; . "${scriptPath}"; prepare_gate_worktree "${wt}" "${root}" ship`],
+    [
+      '-c',
+      'set -euo pipefail; . "$0"; prepare_gate_worktree "$@"',
+      scriptPath,
+      wt,
+      root,
+      'ship',
+      ...extraLinks,
+    ],
     { encoding: 'utf8', env: { ...process.env, ...GIT_ENV } },
   );
 }
@@ -93,6 +103,14 @@ function seedFiles(base: string, files: Record<string, string>) {
   }
 }
 
+const lstatSafe = (p: string) => {
+  try {
+    lstatSync(p);
+    return true;
+  } catch {
+    return false;
+  }
+};
 const linkTarget = (p: string) => (lstatSync(p).isSymbolicLink() ? readlinkSync(p) : null);
 
 describe('prepare_gate_worktree — gate deps in a linked worktree', () => {
@@ -104,7 +122,9 @@ describe('prepare_gate_worktree — gate deps in a linked worktree', () => {
     expect(r.status, `must not fail closed (stderr: ${r.stderr})`).toBe(0);
     expect(linkTarget(join(wt, '.husky/_'))).toBe(join(main, '.husky/_'));
     expect(linkTarget(join(wt, 'node_modules'))).toBe(join(main, 'node_modules'));
-    expect(linkTarget(join(wt, 'coverage'))).toBe(join(main, 'coverage'));
+    // sc-3491: never the main checkout's coverage — that is another branch's artifact.
+    expect(existsSync(join(wt, 'coverage'))).toBe(false);
+    expect(r.stderr).not.toMatch(/linked coverage/);
   });
 
   it('still prefers the consumer root when it has its own copy', () => {
@@ -229,6 +249,199 @@ describe('prepare_gate_worktree — a present-but-unusable dependency dir', () =
 
     expect(r.status, `stderr: ${r.stderr}`).toBe(0);
     expect(linkTarget(join(wt, 'coverage'))).toBe(join(linked, 'coverage'));
+  });
+});
+
+// sc-3491: coverage/ is linked from the consumer root ONLY — a main-checkout copy is another
+// branch's numbers (docs/decisions/coverage-gate.md, Rejected (b) and the sc-3491 note).
+describe('prepare_gate_worktree — coverage resolves from the consumer root only', () => {
+  it('links a linked worktree its OWN coverage, never the main checkout copy', () => {
+    const { linked, wt } = seedRepoWithLinkedWorktree();
+    seedFiles(linked, { 'coverage/coverage-final.json': '{}' });
+
+    const r = prepare(wt, linked);
+
+    expect(r.status, `stderr: ${r.stderr}`).toBe(0);
+    expect(linkTarget(join(wt, 'coverage'))).toBe(join(linked, 'coverage'));
+    expect(r.stderr).toContain(`linked coverage ← ${join(linked, 'coverage')}`);
+    expect(r.stderr).not.toMatch(/MAIN checkout/);
+  });
+
+  it('shipping from the main checkout itself still links its coverage, with no warning', () => {
+    const { main, wt } = seedRepoWithLinkedWorktree();
+
+    const r = prepare(wt, main);
+
+    expect(r.status, `stderr: ${r.stderr}`).toBe(0);
+    expect(linkTarget(join(wt, 'coverage'))).toBe(join(main, 'coverage'));
+    expect(r.stderr).not.toMatch(/MAIN checkout/);
+  });
+
+  it('a sibling worktree with coverage never supplies it to one without (parallel agents)', () => {
+    const { main, linked, wt, git } = seedRepoWithLinkedWorktree();
+    const sibling = join(dirname(main), 'sibling');
+    git(['worktree', 'add', '-q', '-b', 'sibling', sibling]);
+    seedFiles(sibling, { 'coverage/coverage-final.json': '{"sibling":1}' });
+
+    const r = prepare(wt, linked);
+
+    expect(r.status, `stderr: ${r.stderr}`).toBe(0);
+    expect(existsSync(join(wt, 'coverage'))).toBe(false);
+    expect(lstatSafe(join(wt, 'coverage'))).toBe(false);
+  });
+
+  it('a DANGLING coverage symlink in the linked root is not replaced by the main copy', () => {
+    // `[ -e ]` is false for a dangling link — the old existence tail then fell through to main.
+    const { linked, wt } = seedRepoWithLinkedWorktree();
+    symlinkSync(join(linked, 'nowhere'), join(linked, 'coverage'));
+
+    const r = prepare(wt, linked);
+
+    expect(r.status, `stderr: ${r.stderr}`).toBe(0);
+    expect(lstatSafe(join(wt, 'coverage'))).toBe(false);
+  });
+
+  it.each(['coverage', './coverage', 'coverage/', './/coverage//', 'x/../coverage', 'coverage/.'])(
+    'an explicit extra link spelled %j is root-only too',
+    (spelling) => {
+      const { linked, wt } = seedRepoWithLinkedWorktree();
+
+      const r = prepare(wt, linked, spelling);
+
+      expect(r.status, `stderr: ${r.stderr}`).toBe(0);
+      expect(lstatSafe(join(wt, 'coverage'))).toBe(false);
+      expect(r.stderr).not.toMatch(/linked .*coverage/);
+    },
+  );
+
+  it.each([
+    ['./coverage', 'coverage'],
+    ['x/../coverage', 'coverage'],
+    ['coverage/sub/', 'coverage/sub'],
+    ['../coverage', '../coverage'],
+    ['a/../../coverage', '../coverage'],
+    ['../../x/coverage', '../../x/coverage'],
+    ['coverage\nother', 'coverage\nother'],
+    ['./coverage\n/x', 'coverage\n/x'],
+    ['cov*\t', 'cov*\t'],
+    ['-n', '-n'],
+    ['coverage\n', 'coverage\n'],
+  ])('gate_normalize_rel(%j) → %j — only `/` separates; `..` escapes kept', (input, want) => {
+    const r = spawnSync(
+      '/bin/bash',
+      ['-c', 'set -euo pipefail; . "$0"; gate_normalize_rel "$1"', scriptPath, input],
+      { encoding: 'utf8' },
+    );
+    expect(r.status, `stderr: ${r.stderr}`).toBe(0);
+    expect(r.stdout).toBe(want);
+  });
+
+  it('a --link whose name merely STARTS with coverage plus a newline links that dir, not coverage/', () => {
+    // `$(…)` strips trailing newlines; the classifier must see the whole name.
+    const { linked, wt } = seedRepoWithLinkedWorktree();
+    const odd = 'coverage\n';
+    mkdirSync(join(linked, odd), { recursive: true });
+
+    const r = prepare(wt, linked, odd);
+
+    expect(r.status, `stderr: ${r.stderr}`).toBe(0);
+    expect(linkTarget(join(wt, odd))).toBe(join(linked, odd));
+  });
+
+  it('an explicit link INSIDE coverage/ never borrows the main copy either', () => {
+    const { main, linked, wt } = seedRepoWithLinkedWorktree();
+    seedFiles(main, { 'coverage/sub/coverage-final.json': '{}' });
+
+    const r = prepare(wt, linked, 'coverage/sub');
+
+    expect(r.status, `stderr: ${r.stderr}`).toBe(0);
+    expect(lstatSafe(join(wt, 'coverage', 'sub'))).toBe(false);
+  });
+
+  it('WARNS when main coverage/ is itself a symlink and the linked root points at it', () => {
+    // pwd -P follows the whole chain out of <main>, so a check against "<main>/coverage" alone misses it.
+    const { main, linked, wt } = seedRepoWithLinkedWorktree();
+    const shared = `${dirname(main)}/shared-coverage`;
+    seedFiles(shared, { 'coverage-final.json': '{}' });
+    rmSync(join(main, 'coverage'), { recursive: true, force: true });
+    symlinkSync(shared, join(main, 'coverage'));
+    symlinkSync(join(main, 'coverage'), join(linked, 'coverage'));
+
+    const r = prepare(wt, linked);
+
+    expect(r.status, `stderr: ${r.stderr}`).toBe(0);
+    expect(r.stderr).toMatch(/coverage\/ is the MAIN checkout's/);
+  });
+
+  it('WARNS when the linked root points straight at the target main coverage/ symlinks to', () => {
+    const { main, linked, wt } = seedRepoWithLinkedWorktree();
+    const shared = `${dirname(main)}/shared-coverage`;
+    seedFiles(shared, { 'coverage-final.json': '{}' });
+    rmSync(join(main, 'coverage'), { recursive: true, force: true });
+    symlinkSync(shared, join(main, 'coverage'));
+    symlinkSync(shared, join(linked, 'coverage'));
+
+    const r = prepare(wt, linked);
+
+    expect(r.stderr).toMatch(/coverage\/ is the MAIN checkout's/);
+  });
+
+  it('WARNS when the linked root coverage/ is a hand-made symlink into the main checkout', () => {
+    const { main, linked, wt } = seedRepoWithLinkedWorktree();
+    symlinkSync(join(main, 'coverage'), join(linked, 'coverage'));
+
+    const r = prepare(wt, linked);
+
+    expect(r.status, `stderr: ${r.stderr}`).toBe(0);
+    expect(linkTarget(join(wt, 'coverage'))).toBe(join(linked, 'coverage'));
+    expect(r.stderr).toMatch(/coverage\/ is the MAIN checkout's/);
+    expect(r.stderr).toContain(join(main, 'coverage'));
+  });
+
+  it('warns through a symlinked PARENT too (coverage lives inside a linked-in main dir)', () => {
+    const { main, linked, wt } = seedRepoWithLinkedWorktree();
+    mkdirSync(join(main, 'coverage', 'nested'), { recursive: true });
+    symlinkSync(join(main, 'coverage', 'nested'), join(linked, 'coverage'));
+
+    const r = prepare(wt, linked);
+
+    expect(r.stderr).toMatch(/coverage\/ is the MAIN checkout's/);
+  });
+
+  it('does NOT warn for a sibling dir that merely shares the main path as a string prefix', () => {
+    // `<main>-other/coverage` starts with `<main>` as a string, not as a path.
+    const { main, linked, wt } = seedRepoWithLinkedWorktree();
+    seedFiles(`${main}-other`, { 'coverage/coverage-final.json': '{}' });
+    symlinkSync(join(`${main}-other`, 'coverage'), join(linked, 'coverage'));
+
+    const r = prepare(wt, linked);
+
+    expect(r.status, `stderr: ${r.stderr}`).toBe(0);
+    expect(r.stderr).not.toMatch(/MAIN checkout/);
+  });
+
+  it('does NOT warn when the main checkout is reached through a symlinked alias path', () => {
+    // macOS: /var → /private/var. git reports the resolved main path, the caller may pass the alias.
+    const { main, wt } = seedRepoWithLinkedWorktree();
+    const alias = `${dirname(main)}/alias-of-main`;
+    symlinkSync(main, alias);
+
+    const r = prepare(wt, alias);
+
+    expect(r.status, `stderr: ${r.stderr}`).toBe(0);
+    expect(existsSync(join(wt, 'coverage'))).toBe(true);
+    expect(r.stderr).not.toMatch(/MAIN checkout/);
+  });
+
+  it('handles roots whose paths contain spaces (real checkouts do)', () => {
+    const { main, linked, wt } = seedRepoWithLinkedWorktree({ prefix: 'gate wt ' });
+    symlinkSync(join(main, 'coverage'), join(linked, 'coverage'));
+
+    const r = prepare(wt, linked);
+
+    expect(r.status, `stderr: ${r.stderr}`).toBe(0);
+    expect(linkTarget(join(wt, 'coverage'))).toBe(join(linked, 'coverage'));
+    expect(r.stderr).toMatch(/coverage\/ is the MAIN checkout's/);
   });
 });
 
