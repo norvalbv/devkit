@@ -34,6 +34,33 @@ const ALL_GUARDS = ['size', 'fanout', 'dup', 'clone', 'comments', 'decisions', '
 // fragments are POSIX sh; prove it where dash is installed instead of assuming.
 const hasDash = existsSync('/bin/dash');
 
+// Stubs log to calls.log and exit with the named env knob, so ordering is read off the log.
+function writeStub(path, name, rcVar) {
+  writeFileSync(
+    path,
+    `#!/bin/sh\necho "${name} $*" >> "$HOME/calls.log"\ncat >/dev/null\nexit \${${rcVar}:-0}\n`,
+  );
+  chmodSync(path, 0o755);
+}
+
+// Overlay staged-gate fixtures. fallow is global ($HOME/.bun/bin, first on the hook's PATH), where a
+// consumer's `command -v fallow` finds it; eslint is the repo-local bin the overlay step requires.
+function stageOverlayFixtures(home, { bin, packageBin, pkgRel, fallow, staged, eslintOverlay }) {
+  if (fallow) writeStub(join(bin, 'fallow'), 'fallow', 'FALLOW_RC');
+  if (eslintOverlay) {
+    writeFileSync(join(home, 'eslint.config.devkit.mjs'), 'export default [];\n');
+    writeStub(join(packageBin, 'eslint'), 'eslint', 'ESLINT_RC');
+  }
+  if (!staged) return;
+  // Outside a repo `git diff --cached` fails and the hook exits before fallow/eslint run, so an
+  // ordering assertion would pass vacuously.
+  const src = join(pkgRel ? join(home, pkgRel) : home, 'src');
+  mkdirSync(src, { recursive: true });
+  writeFileSync(join(src, 'staged.ts'), 'export const unused = 1;\n');
+  execFileSync('git', ['init', '-q'], { cwd: home });
+  execFileSync('git', ['add', join(src, 'staged.ts')], { cwd: home });
+}
+
 function runHook(
   env = {},
   selection = { biome: false, guards: ALL_GUARDS },
@@ -46,6 +73,9 @@ function runHook(
     missingBins = [],
     missingLocalBins = [],
     realDeterministic = false,
+    fallow = false,
+    staged = false,
+    eslintOverlay = false,
   } = {},
 ) {
   const home = mkdtempSync(join(tmpdir(), dirPrefix));
@@ -167,12 +197,13 @@ esac
   }
 
   if (pkgRel) mkdirSync(join(home, pkgRel), { recursive: true });
+  stageOverlayFixtures(home, { bin, packageBin, pkgRel, fallow, staged, eslintOverlay });
   const hookPath = join(home, 'pre-commit');
   const hook =
     builder === 'standalone'
       ? buildStandaloneHook(selection, pkgRel)
       : builder === 'overlay'
-        ? buildOverlayHook(selection, '', pkgRel)
+        ? buildOverlayHook(selection, '', pkgRel, { fallow })
         : buildFullHook(selection, pkgRel);
   writeFileSync(hookPath, hook);
   let status = 0;
@@ -1056,5 +1087,100 @@ describe('ship: sentry is judged before the qavis advisory', () => {
     expect(r.status).toBe(1);
     expect(r.calls).toContain('guard-sentry --gate');
     expect(r.calls).not.toContain('guard-qavis-advisory');
+  });
+});
+
+// sc-3020: cheap blocking staged gates run before the paid AI guards; review keeps its baselines
+// after them (fallow-gate-owned-by-fallow, 2026-09-28 note).
+describe('overlay staged gates run before the AI guards (sc-3020)', () => {
+  const REVIEWED = { biome: false, guards: ['comments', 'decisions', 'review'] };
+  const AI_CALLS = ['guard-comments', 'guard-decisions', 'guard-review'];
+  const overlay = (extra = {}) => ({ builder: 'overlay', fallow: true, staged: true, ...extra });
+
+  for (const mode of ['', 'ship', 'dry-gates']) {
+    it(`a failing fallow audit blocks before any AI guard runs (mode=${mode || 'commit'})`, () => {
+      // dry-gates selects only DEVKIT_REVIEW_GUARDS; comments,review models --with-reviewers.
+      const env = { FALLOW_RC: '1', DEVKIT_RUN_MODE: mode };
+      if (mode === 'dry-gates') env.DEVKIT_REVIEW_GUARDS = 'comments,review';
+      const r = runHook(env, REVIEWED, overlay());
+      expect(r.status).toBe(1);
+      expect(r.calls).toContain('fallow audit --diff-stdin');
+      for (const ai of AI_CALLS) expect(r.calls).not.toContain(ai);
+    });
+  }
+
+  it('a passing fallow audit runs first, then every AI guard', () => {
+    const r = runHook({}, REVIEWED, overlay());
+    expect(r.status).toBe(0);
+    const fallowAt = r.calls.indexOf('fallow audit');
+    expect(fallowAt).toBeGreaterThanOrEqual(0);
+    for (const ai of AI_CALLS) expect(r.calls.indexOf(ai)).toBeGreaterThan(fallowAt);
+  });
+
+  it('the deterministic orchestrator still runs before fallow, and its failure skips fallow', () => {
+    const passing = runHook({}, { biome: false, guards: ['size', 'review'] }, overlay());
+    expect(passing.calls.indexOf('guard-deterministic')).toBeLessThan(
+      passing.calls.indexOf('fallow audit'),
+    );
+    const failing = runHook(
+      { DET_RC: '1' },
+      { biome: false, guards: ['size', 'review'] },
+      overlay(),
+    );
+    expect(failing.status).toBe(1);
+    expect(failing.calls).not.toContain('fallow');
+    expect(failing.calls).not.toContain('guard-review');
+  });
+
+  it('blocks before the AI guards when no deterministic guard is selected (helpers still defined)', () => {
+    const r = runHook({ FALLOW_RC: '1' }, { biome: false, guards: ['review'] }, overlay());
+    expect(r.status).toBe(1);
+    expect(r.calls).toContain('fallow audit');
+    expect(r.calls).not.toContain('guard-review');
+  });
+
+  it('a failing eslint overlay blocks before any AI guard runs', () => {
+    const r = runHook(
+      { ESLINT_RC: '1' },
+      REVIEWED,
+      overlay({ fallow: false, eslintOverlay: true }),
+    );
+    expect(r.status).toBe(1);
+    expect(r.calls).toContain('eslint -c eslint.config.devkit.mjs');
+    for (const ai of AI_CALLS) expect(r.calls).not.toContain(ai);
+  });
+
+  it('a monorepo package subshell propagates the fallow block before the AI guards', () => {
+    const r = runHook({ FALLOW_RC: '1' }, REVIEWED, overlay({ pkgRel: 'pkg/a' }));
+    expect(r.status).toBe(1);
+    expect(r.calls).toContain('fallow audit');
+    for (const ai of AI_CALLS) expect(r.calls).not.toContain(ai);
+  });
+
+  it('fallow absent stays fail-open: the AI guards still run and the commit passes', () => {
+    const r = runHook({}, REVIEWED, overlay({ fallow: false }));
+    expect(r.status).toBe(0);
+    expect(r.calls).not.toContain('fallow');
+    expect(r.calls).toContain('guard-review --gate');
+  });
+
+  it('review mode keeps the fallow baseline after the reviewer and never runs the staged audit', () => {
+    const r = runHook(
+      { DEVKIT_RUN_MODE: 'review', DEVKIT_REVIEW_GUARDS: 'review', FALLOW_RC: '1' },
+      REVIEWED,
+      overlay(),
+    );
+    expect(r.calls).not.toContain('fallow audit');
+    expect(r.calls).toContain('guard-review --gate');
+    // The node stub logs `baseline <helper path> <gate> <baseline dir>`.
+    const baselineFallow = r.calls.search(/^baseline \S+ fallow /m);
+    expect(baselineFallow).toBeGreaterThan(r.calls.indexOf('guard-review --gate'));
+  });
+
+  it.skipIf(!hasDash)('the reordered overlay stays POSIX: dash blocks on fallow before AI', () => {
+    const r = runHook({ FALLOW_RC: '1' }, REVIEWED, overlay({ shell: 'dash' }));
+    expect(r.status).toBe(1);
+    expect(r.calls).toContain('fallow audit');
+    expect(r.calls).not.toContain('guard-review');
   });
 });

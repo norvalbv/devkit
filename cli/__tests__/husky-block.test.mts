@@ -488,6 +488,29 @@ describe('buildOverlayHook — gates-only guard for the global init.sh shim', ()
       withFallow.indexOf('DEVKIT_VIA_HUSKY_INIT'),
     );
   });
+
+  it('emits the staged blocking gates before the first AI guard and review baselines after (sc-3020)', () => {
+    const hook = buildOverlayHook(
+      { guards: [...GUARD_IDS, 'qavis-advisory'] },
+      '.husky/pre-commit',
+      '',
+      { fallow: true },
+    );
+    // The call site, not the helper definition that precedes every gate.
+    const firstAi = hook.indexOf('; then __dk_gate_ai ');
+    expect(firstAi).toBeGreaterThan(0);
+    expect(hook.indexOf('fallow audit --diff-stdin')).toBeLessThan(firstAi);
+    expect(hook.indexOf('node_modules/.bin/eslint -c eslint.config.devkit.mjs')).toBeLessThan(
+      firstAi,
+    );
+    expect(hook.indexOf('guard-qavis-advisory --gate')).toBeGreaterThan(
+      hook.indexOf('fallow audit --diff-stdin'),
+    );
+    expect(hook.indexOf('__dk_review_baseline_gate eslint')).toBeGreaterThan(firstAi);
+    expect(hook.indexOf('__dk_review_baseline_gate fallow')).toBeGreaterThan(firstAi);
+    // Staged checks never leak into review mode, nor baselines into commit/ship.
+    expect(hook).toContain('if [ "${DEVKIT_RUN_MODE:-}" != "review" ]; then\n    DK_TS=');
+  });
 });
 
 // sc-1549: overlay's fallow gate BLOCKS on new findings (unlike the self-host advisory twin), and
