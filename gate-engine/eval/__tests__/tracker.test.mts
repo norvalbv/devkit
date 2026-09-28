@@ -387,6 +387,40 @@ describe('catalog load failures name what actually happened', () => {
     expect(() => loadCatalog(memory({}))).toThrow(/Missing docs\/benchmarks\/catalog\.json/);
     expect(() => loadCatalog(memory({}))).not.toThrow(/undefined/);
   });
+
+  it('keeps the missing-catalog first line and appends why the staged index lacks it (sc-3215)', () => {
+    const fixture = stagedRepo();
+    try {
+      fixture.git('rm', '-q', '--cached', 'docs/benchmarks/catalog.json');
+      const source = repositorySource(fixture.root, 'staged');
+      let message = '';
+      try {
+        loadCatalog(source);
+      } catch (error) {
+        message = error instanceof Error ? error.message : String(error);
+      }
+      expect(message.split('\n')[0]).toBe(
+        `Missing docs/benchmarks/catalog.json — not in the staged snapshot at ${source.root}`,
+      );
+      expect(message).toMatch(/staged vs HEAD: D$/m);
+      expect(message).toMatch(/re-probe: absent/);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it('appends the same diagnostic when the staged history ledger is missing', () => {
+    const fixture = stagedRepo();
+    try {
+      fixture.git('rm', '-q', '--cached', 'docs/benchmarks/history.jsonl');
+      const source = repositorySource(fixture.root, 'staged');
+      expect(() => validateHistory(source)).toThrow(
+        /^Missing docs\/benchmarks\/history\.jsonl\n[\s\S]*staged vs HEAD: D/,
+      );
+    } finally {
+      fixture.cleanup();
+    }
+  });
 });
 
 describe('catalog and generated views', () => {

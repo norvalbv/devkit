@@ -74,7 +74,7 @@ index so the published bytes are the bytes being committed:
 git add gate-engine/judge/matcher-core.mts gate-engine/critique/eval/results.baseline.json
 
 # 2. publish from the index; this is the LAST staging step for source files
-bun gate-engine/eval/cli.mts publish --suite critique --tree STAGED \
+node gate-engine/eval/cli.mts publish --suite critique --tree STAGED \
   --change-type methodology-reset --note "measured prompt revision"
 
 # 3. stage publish's own outputs, then commit all of it at once
@@ -88,11 +88,11 @@ reports `Generated output is stale`. Re-render from the index with
 
 ```bash
 # Publish an adapter-accepted baseline from a committed tree and regenerate views
-bun gate-engine/eval/cli.mts publish --suite critique --tree HEAD \
+node gate-engine/eval/cli.mts publish --suite critique --tree HEAD \
   --change-type quality --assessment improved --note "measured prompt revision"
 
 # Correct an accepted claim by appending a new event; the referenced event remains byte-for-byte intact
-bun gate-engine/eval/cli.mts publish --suite critique --tree HEAD \
+node gate-engine/eval/cli.mts publish --suite critique --tree HEAD \
   --supersedes <event-id> --recorded-at <new-ISO-8601-time> --assessment improved
 
 # Render without publishing
@@ -104,10 +104,10 @@ bun run benchmarks:check -- --mode staged
 bun run benchmarks:check -- --mode tree --tree HEAD --base <base-sha>
 
 # Inspect historical candidates; local logs are aggregate-only and opt-in
-bun gate-engine/eval/cli.mts backfill --since 2026-07-01
+node gate-engine/eval/cli.mts backfill --since 2026-07-01
 
 # Union parallel-worktree additions; duplicate IDs with different bytes fail
-bun gate-engine/eval/cli.mts reconcile left.jsonl right.jsonl --output merged.jsonl
+node gate-engine/eval/cli.mts reconcile left.jsonl right.jsonl --output merged.jsonl
 ```
 
 `publish` derives assessment from adapter metrics, their MDE/noise floors, and shared-row flips. The optional `--assessment` value is an assertion: publication fails if it contradicts that derived result. Publishing defaults to a committed Git tree. `--tree STAGED` publishes the Git index, so the published bytes are the bytes being committed; it refuses an unmerged index, an empty one, and a `history.jsonl` or checkpoint that differs between index and working tree, and its `sourceCommit` names the parent commit the index was staged over. `--tree WORKTREE` is only accepted when the entire working tree is clean, so its commit provenance cannot describe uncommitted bytes; it stays the route for a gitignored baseline, which can never be staged and never dirties the tree.

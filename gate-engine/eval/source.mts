@@ -2,15 +2,18 @@ import { type SpawnSyncReturns, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { relative, resolve } from 'node:path';
+import { explainStagedAbsence, probe } from './snapshot/absence.mts';
+import {
+  assertBlobMatches,
+  GIT_MAX_BUFFER,
+  indexIdentity,
+  spawnGit,
+  splitNul,
+} from './snapshot/integrity.mts';
 import type { HashSet, TrackerMode } from './types.mts';
 
 const DOUBLE_STAR_TOKEN = '___DEVKIT_DOUBLE_STAR___';
 const DOUBLE_STAR_DIRECTORY_TOKEN = '___DEVKIT_DOUBLE_STAR_DIRECTORY___';
-// node caps spawnSync stdout at 1 MiB by default and reports the overflow as ENOBUFS with a NULL
-// status — indistinguishable, without this, from a git that refused to run. docs/benchmarks/
-// history.jsonl is append-only by ruling, so it crosses that line on its own schedule and would
-// take every mode of the checker down with it.
-const GIT_MAX_BUFFER = 128 * 1024 * 1024;
 // A submodule's index/tree entry. Not a blob: `git show :<gitlink>` is `fatal: bad object`, so it
 // must never enter a listing whose contract is "these paths can be read".
 const GITLINK_MODE = '160000';
@@ -48,19 +51,42 @@ function git(
   allowFailure = false,
   mode: TrackerMode | 'raw' = 'raw',
 ): string {
-  const result = spawnSync('git', args, { cwd, encoding: 'utf8', maxBuffer: GIT_MAX_BUFFER });
-  if (result.status === 0) return result.stdout;
+  const result = spawnGit(cwd, args);
+  if (result.status === 0) return result.stdout.toString('utf8');
   if (allowFailure) return '';
-  // NOT `result.stderr.trim()`: a spawn that failed to fork leaves stderr null, so the old form
-  // replaced the real fault with a bare TypeError.
-  throw new Error(`git ${args.join(' ')} failed\n${gitFailureContext(cwd, mode, result)}`);
+  throw gitFailure(cwd, args, mode, result);
 }
 
-// `-z` rather than newline-splitting: git QUOTES any path outside the printable-ASCII set in its
-// default output, so a non-ASCII tracked file used to enter the file list as `"docs/\303\251.md"`
-// and could never be read back.
-function splitNul(output: string): string[] {
-  return output.split('\0').filter(Boolean);
+// NOT `result.stderr.trim()`: a spawn that failed to fork leaves stderr null, so the old form
+// replaced the real fault with a bare TypeError.
+function gitFailure(
+  cwd: string,
+  args: string[],
+  mode: TrackerMode | 'raw',
+  result: SpawnSyncReturns<Buffer>,
+) {
+  const failed = { ...result, stdout: '', stderr: result.stderr?.toString() ?? '', output: [] };
+  return new Error(`git ${args.join(' ')} failed\n${gitFailureContext(cwd, mode, failed)}`);
+}
+
+function gitBytes(cwd: string, args: string[], mode: TrackerMode): Buffer {
+  const result = spawnGit(cwd, args);
+  if (result.status === 0) return result.stdout;
+  throw gitFailure(cwd, args, mode, result);
+}
+
+function gitListing(cwd: string, args: string[], mode: TrackerMode): string[] {
+  return splitNul(git(cwd, args, false, mode));
+}
+
+function listingBlobs(records: string[], keep: (metadata: string) => boolean, oidColumn: number) {
+  const blobs = new Map<string, string>();
+  for (const record of records) {
+    const tab = record.indexOf('\t');
+    if (tab < 0 || !keep(record.slice(0, tab))) continue;
+    blobs.set(record.slice(tab + 1), record.slice(0, tab).split(' ')[oidColumn]);
+  }
+  return blobs;
 }
 
 /**
@@ -90,6 +116,8 @@ export interface RepositorySource {
   ref?: string;
   listFiles(): string[];
   read(path: string): string | null;
+  // Diagnostic lines for a path read() answered null for. Never throws; never changes a verdict.
+  explainAbsence?(path: string): string;
 }
 
 function repositoryPath(root: string, path: string): { absolute: string; relative: string } {
@@ -111,13 +139,14 @@ function repositoryPath(root: string, path: string): { absolute: string; relativ
  * fault that must throw. It also drops one subprocess per read — the check performs hundreds, and
  * fork pressure is itself a candidate cause of the original incident.
  */
-function gitReader(root: string, mode: TrackerMode, listFiles: () => string[]) {
-  let present: Set<string> | undefined;
+function gitReader(root: string, mode: TrackerMode, blobs: () => Map<string, string>) {
   return (path: string, spec: (repoPath: string) => string): string | null => {
     const repoPath = repositoryPath(root, path).relative;
-    present ??= new Set(listFiles());
-    if (!present.has(repoPath)) return null;
-    return git(root, ['show', spec(repoPath)], false, mode);
+    const oid = blobs().get(repoPath);
+    if (!oid) return null;
+    const bytes = gitBytes(root, ['show', spec(repoPath)], mode);
+    assertBlobMatches(spec(repoPath), bytes, oid);
+    return bytes.toString('utf8');
   };
 }
 
@@ -147,37 +176,49 @@ export function repositorySource(cwd: string, mode: TrackerMode, ref?: string): 
   }
 
   if (mode === 'staged') {
-    let files: string[] | undefined;
-    const listFiles = () => {
-      // `--stage` over `--cached`: the mode column is what separates a blob from a gitlink.
-      files ??= listingPaths(
-        splitNul(git(root, ['ls-files', '--stage', '-z'], false, mode)),
+    let blobs: Map<string, string> | undefined;
+    // `--stage` over `--cached`: the mode column is what separates a blob from a gitlink.
+    const staged = () =>
+      (blobs ??= listingBlobs(
+        gitListing(root, ['ls-files', '--stage', '-z'], mode),
         (metadata) => !metadata.startsWith(`${GITLINK_MODE} `),
-      );
-      return files;
+        1,
+      ));
+    const listFiles = () => [...staged().keys()].sort();
+    const read = gitReader(root, mode, staged);
+    return {
+      mode,
+      root,
+      listFiles,
+      read: (path) => read(path, (repoPath) => `:${repoPath}`),
+      explainAbsence: (path) =>
+        explainStagedAbsence(root, repositoryPath(root, path).relative, listFiles),
     };
-    const read = gitReader(root, mode, listFiles);
-    return { mode, root, listFiles, read: (path) => read(path, (repoPath) => `:${repoPath}`) };
   }
 
   const tree = ref ?? 'HEAD';
-  let files: string[] | undefined;
-  const listFiles = () => {
-    // Without `--name-only` the type column arrives too; `-r` yields only blobs and gitlinks, so
-    // keeping `blob` is exactly the readable set.
-    files ??= listingPaths(
-      splitNul(git(root, ['ls-tree', '-r', '-z', tree], false, mode)),
+  let blobs: Map<string, string> | undefined;
+  // Without `--name-only` the type column arrives too; `-r` yields only blobs and gitlinks, so
+  // keeping `blob` is exactly the readable set.
+  const listed = () =>
+    (blobs ??= listingBlobs(
+      gitListing(root, ['ls-tree', '-r', '-z', tree], mode),
       (metadata) => metadata.split(' ')[1] === 'blob',
-    );
-    return files;
-  };
-  const read = gitReader(root, mode, listFiles);
+      2,
+    ));
+  const listFiles = () => [...listed().keys()].sort();
+  const read = gitReader(root, mode, listed);
   return {
     mode,
     root,
     ref: tree,
     listFiles,
     read: (path) => read(path, (repoPath) => `${tree}:${repoPath}`),
+    explainAbsence: (path) =>
+      [
+        `  absence of ${repositoryPath(root, path).relative} (tree):`,
+        probe('listing', () => `${listFiles().length} entries at ${tree}`),
+      ].join('\n'),
   };
 }
 
@@ -248,8 +289,7 @@ export function commitDate(root: string, commit: string): string {
 /** Content identity of the whole index: mode, object, stage and path per entry. Read-only, unlike
  * `write-tree`, which mints objects no publication ever commits. */
 export function stagedIndexIdentity(root: string): string {
-  const listing = git(root, ['ls-files', '--stage', '-z'], false, 'staged');
-  return `sha256:${createHash('sha256').update(listing).digest('hex')}`;
+  return indexIdentity(git(root, ['ls-files', '--stage', '-z'], false, 'staged'));
 }
 
 /** Refuse an index a publication cannot read honestly, naming the remedy for each case. */
