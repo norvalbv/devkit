@@ -1,16 +1,5 @@
-/**
- * `guard-structure` bin — the zero-consumer-dependency structure gate. It runs eslint + the
- * folder-structure plugin from DEVKIT's OWN install (buildStructureConfigs embeds the plugin as a
- * loaded object), so a consumer needs NO eslint / plugin / parser. These tmp repos have no
- * node_modules at all — the gate must still resolve + run. Exit contract: 0 clean, 1 violations,
- * 2 fail-open.
- *
- * The exit-1 (violation → block) path is exercised in the real tree by devkit's OWN pre-commit
- * (`guard-structure` is wired into devkit's hook and dogfooded on every commit) and is verified
- * against `runStructureGate(devkitRoot)` returning code 1 on a planted violation. The unit tests
- * here pin the zero-dependency mechanism + the fail-open / nothing-to-lint contract, which are what
- * the refactor introduces.
- */
+// guard-structure runs eslint + the plugin from devkit's OWN install, so these tmp repos (outside
+// devkit's checkout, no node_modules) also pin the absolute projectRoot anchoring (sc-2309).
 import { execFileSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -103,8 +92,8 @@ describe('guard-structure gate — zero consumer deps', () => {
   });
 
   it('exit 0 when only ignored files are present (no throw leaks out)', async () => {
-    // A single-element `{ts}` extension glob is a minimatch literal → matches nothing → ESLint would
-    // throw "all files ignored"; the bin must swallow that as clean, not fail.
+    // A root holding no file of a governed extension → ESLint throws "no files matching"; the bin
+    // must swallow that as clean, not fail. (`thing.ts` here would be LINTED — and violate {pascal}.)
     const root = repo({
       scanRoots: ['src'],
       structure: {
@@ -113,7 +102,7 @@ describe('guard-structure gate — zero consumer deps', () => {
         ],
       },
     });
-    write(root, 'src/thing.ts');
+    write(root, 'src/notes.md');
     expect((await runStructureGate(root)).code).toBe(0);
   });
 
@@ -147,12 +136,13 @@ describe('guard-structure gate — zero consumer deps', () => {
     });
     write(root, 'a/Ok.ts'); // 'b' never created
     expect((await runStructureGate(root)).code).toBe(0); // clean, not a fail-open throw
+    write(root, 'a/bad-name.ts');
+    expect((await runStructureGate(root)).code).toBe(1); // the present root is really enforced
   });
 
   it('a present-but-all-ignored FIRST root does not mask later roots (per-root lint, not one batch)', async () => {
-    // Root 'a' matches nothing (single-element `{ts}` glob is a minimatch literal) → ESLint would
-    // throw "all files ignored" for a batched lintFiles(['a','b']) and short-circuit, skipping 'b'.
-    // Per-root, 'a' is skipped as clean and 'b' is still linted.
+    // Root 'a' holds nothing lintable, which would throw for a batched lintFiles(['a','b']); per-root,
+    // 'a' is skipped as clean and 'b' is still linted — proven by 'b' reporting a real violation.
     const root = repo({
       scanRoots: ['a', 'b'],
       structure: {
@@ -167,9 +157,11 @@ describe('guard-structure gate — zero consumer deps', () => {
         ],
       },
     });
-    write(root, 'a/thing.ts'); // all-ignored (single-ext glob)
+    write(root, 'a/notes.md'); // nothing lintable in 'a'
     write(root, 'b/Ok.ts'); // conforms
     expect((await runStructureGate(root)).code).toBe(0); // 'b' reached + clean, not a masked/fail-open
+    write(root, 'b/bad-name.ts');
+    expect((await runStructureGate(root)).code).toBe(1); // ...and 'b' is genuinely enforced
   });
 });
 
