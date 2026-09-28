@@ -222,6 +222,21 @@ gate_link_source() {
   return 1
 }
 
+# sc-1292: rebase linked coverage keys onto THIS worktree so fallow CRAP joins measured coverage.
+# Advisory: any failure keeps the link, and this always returns 0 under the caller's errexit.
+gate_rebase_coverage() {
+  local wt=$1 source=$2 purpose=$3 script_dir tool root
+  script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+  tool="$script_dir/coverage/coverage-rebase.mts"
+  [ -f "$tool" ] || tool="$script_dir/coverage/coverage-rebase.mjs"
+  [ -f "$tool" ] || return 0
+  root=$(node "$tool" "$wt" "$source") || root=''
+  if [ -n "$root" ]; then
+    echo "  ↳ $purpose: rebased coverage keys from $root onto the worktree (fallow CRAP reads measured coverage)" >&2
+  fi
+  return 0
+}
+
 gate_dependency_preflight_tool() {
   local script_dir tool
   script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -431,6 +446,7 @@ prepare_gate_worktree() {
     mkdir -p "$wt/$(dirname "$d")"
     ln -s "$source" "$wt/$d"
     echo "  ↳ $purpose: linked $d ← $source" >&2
+    if [ "$d" = coverage ]; then gate_rebase_coverage "$wt" "$source" "$purpose"; fi
   done
 
   # Postcondition, not a second resolution question: a projected hook directory that carries no
