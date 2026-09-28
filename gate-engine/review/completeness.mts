@@ -56,6 +56,7 @@ import { DEEP_JUDGE_TIMEOUT_MS, execJudgeAsync, strictRemedy } from '../judge/ru
 import type { VerdictMeta } from '../judge/verdict-store.mts';
 import { loadCache, savePasses } from './cache.mts';
 import { buildCappedDiffEvidence } from './diff-evidence.mts';
+import { commitIndexEnv } from '../ratchets/commit-index.mts';
 import { stagedTreeHash } from './evidence/staged-git.mts';
 import {
   cacheKey,
@@ -288,6 +289,7 @@ export async function runCompleteness(
     stagedIdentity = snapshot.identity;
     const files = execFileSync('git', ['diff', '--name-only', ...snapshot.range], {
       cwd,
+      env: commitIndexEnv(cwd),
       encoding: 'utf8',
     })
       .split('\n')
@@ -349,6 +351,7 @@ export async function runCompleteness(
     // on (the detect gate's W-3 lesson).
     const stat = execFileSync('git', ['diff', '--stat', ...snapshot.range], {
       cwd,
+      env: commitIndexEnv(cwd),
       encoding: 'utf8',
       maxBuffer: 64 * 1024 * 1024,
     });
@@ -358,6 +361,7 @@ export async function runCompleteness(
         ['-c', 'diff.noprefix=false', '-c', 'diff.mnemonicPrefix=false', 'diff', ...snapshot.range],
         {
           cwd,
+          env: commitIndexEnv(cwd),
           encoding: 'utf8',
           maxBuffer: 64 * 1024 * 1024,
         },

@@ -15,6 +15,7 @@ import { buildCommitTerminalFragment } from './commit-terminal.mts';
 import { FORMAT_FRAGMENT } from './format-fragment.mts';
 import { markEnd, markStart } from './husky.mts';
 import {
+  DK_COMMIT_INDEX_CAPTURE,
   DK_HOOK_HELPERS,
   DK_REVIEW_BASELINE_HELPER,
   selectedFragment,
@@ -91,6 +92,9 @@ for dir in "$HOME/.bun/bin" "$HOME/.local/bin"; do
 done
 export PATH`;
 
+const HOOK_PATH_PRELUDE =
+  'DK_HOOK_PATH="$(cd "$(dirname -- "$0")" >/dev/null 2>&1 && pwd)/$(basename -- "$0")"';
+
 // True when a hook already establishes PATH (so we never inject a duplicate PATH_SETUP).
 const HAS_PATH_SETUP_RE = /\$HOME\/\.bun\/bin|export\s+PATH/;
 
@@ -149,13 +153,17 @@ export function buildGuardBlock(selection: HookSelection, pkgRel = ''): string {
   if (selection.guards?.includes(QAVIS_ADVISORY_ID))
     pieces.push(selectedFragment(QAVIS_ADVISORY_ID, QAVIS_FRAGMENT));
   if (deterministic) pieces.push(REVIEW_DETERMINISTIC_FINALIZER);
-  const body = pieces.join('\n\n');
+  return wrapGuardBlock(pieces.join('\n\n'), pkgRel, HOOK_PATH_PRELUDE, '\n\n');
+}
+
+/** Marker-wrap a block body, capturing the commit index before a monorepo package `cd`. */
+export function wrapGuardBlock(body: string, pkgRel: string, prelude: string, gap: string): string {
   const start = markStart(pkgRel);
   const end = markEnd(pkgRel);
-  if (!pkgRel) return `${start}\n${body}\n${end}`;
+  if (!pkgRel) return `${start}\n${DK_COMMIT_INDEX_CAPTURE}${gap}${body}\n${end}`;
   // Run the package's gates from its own dir. An inner `exit 1` exits the SUBSHELL; the
   // `) || exit 1` then propagates that failure to the hook (a bare subshell would swallow it).
-  return `${start}\nDK_HOOK_PATH="$(cd "$(dirname -- "$0")" >/dev/null 2>&1 && pwd)/$(basename -- "$0")"\n( cd "${pkgRel}" || exit 1\n\n${body}\n) || exit 1\n${end}`;
+  return `${start}\n${DK_COMMIT_INDEX_CAPTURE}\n${prelude}\n( cd "${pkgRel}" || exit 1${gap}${body}\n) || exit 1\n${end}`;
 }
 
 /** A full fresh hook (preamble + assembled block + trailing exit 0) for a repo with no hook. */
@@ -212,11 +220,7 @@ export function buildStandaloneBlock(selection: HookSelection, pkgRel = ''): str
   if (selection.guards?.includes(QAVIS_ADVISORY_ID))
     pieces.push(selectedFragment(QAVIS_ADVISORY_ID, standaloneQavisLines));
   if (deterministic) pieces.push(REVIEW_DETERMINISTIC_FINALIZER);
-  const body = pieces.join('\n');
-  const start = markStart(pkgRel);
-  const end = markEnd(pkgRel);
-  if (!pkgRel) return `${start}\n${body}\n${end}`;
-  return `${start}\nDK_HOOK_PATH="$(cd "$(dirname -- "$0")" >/dev/null 2>&1 && pwd)/$(basename -- "$0")"\n( cd "${pkgRel}" || exit 1\n${body}\n) || exit 1\n${end}`;
+  return wrapGuardBlock(pieces.join('\n'), pkgRel, HOOK_PATH_PRELUDE, '\n');
 }
 
 /** A full fresh STANDALONE hook (preamble + standalone block + exit 0). */
@@ -304,8 +308,8 @@ export function buildOverlayHook(
     gates.push(selectedFragment(QAVIS_ADVISORY_ID, standaloneQavisLines));
   const inner = `${gates.join('\n')}\n\n${OVERLAY_LINT_STEPS}${fallow ? `\n\n${FALLOW_OVERLAY_GATE}` : ''}${deterministic ? `\n\n${REVIEW_DETERMINISTIC_FINALIZER}` : ''}`;
   const scoped = pkgRel
-    ? `DK_HOOK_PATH="$(cd "$(dirname -- "$0")" >/dev/null 2>&1 && pwd)/$(basename -- "$0")"\n( cd ${JSON.stringify(pkgRel)} || exit 1\n${inner}\n) || exit 1`
-    : inner;
+    ? `${DK_COMMIT_INDEX_CAPTURE}\n${HOOK_PATH_PRELUDE}\n( cd ${JSON.stringify(pkgRel)} || exit 1\n${inner}\n) || exit 1`
+    : `${DK_COMMIT_INDEX_CAPTURE}\n${inner}`;
   return `${HOOK_PREAMBLE}
 # devkit OVERLAY (LOCAL, git-ignored). Runs devkit's gates + lint overlay on this commit, then
 # the repo's OWN committed hook UNCHANGED. Invisible to the team — nothing here is committed.
