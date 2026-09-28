@@ -18,11 +18,12 @@
 
 import { execFileSync } from 'node:child_process';
 import { commitIndexEnv } from '../ratchets/commit-index.mts';
-import { existsSync, mkdtempSync, readdirSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { extname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { ESLint, type Linter } from 'eslint'; // devkit's OWN eslint (now a dependency), never the consumer's
+import { z } from 'zod';
 import { resolveGuardConfig } from '../config.mts';
 import { gitPrefix, splitNul } from '../ratchets/git-index.mts';
 import { buildStructureConfigs } from './eslint-config.mts';
@@ -35,9 +36,14 @@ interface StructureTree {
   grammar?: unknown;
 }
 
+// Which runner lints a scope: the consumer's own pinned eslint (electron preset) or devkit's
+// bundled grammar engine.
+type StructureLeg = 'preset' | 'grammar';
+
 interface StagedScope {
   root: string;
   extensions: string[];
+  leg?: StructureLeg;
 }
 
 interface StagedPlan {
@@ -67,12 +73,30 @@ const couldNotRun = (reason: string): StructureGateResult => ({
   text: `guard-structure: gate did NOT run — ${reason}`,
 });
 
+/** Fold per-leg verdicts: any violation blocks, else any could-not-run fails open, else clean. A
+ * blocking result still names every leg that did NOT run, so a skipped leg is never silent. */
+export function combineStructureResults(results: StructureGateResult[]): StructureGateResult {
+  const texts = (subset: StructureGateResult[]) =>
+    subset
+      .map((result) => result.text)
+      .filter(Boolean)
+      .join('\n');
+  const blocked = results.filter((result) => result.code === 1);
+  const skipped = results.filter((result) => result.code === 2);
+  if (blocked.length) {
+    const errorCount = blocked.reduce((n, result) => n + result.errorCount, 0);
+    return violations(errorCount, texts([...blocked, ...skipped]));
+  }
+  if (skipped.length) return { code: 2, errorCount: 0, text: texts(skipped) };
+  return clean();
+}
+
 // ESLint throws "No files matching the pattern" for an absent tree and "…are ignored" when every file
 // in a present tree is ignored — both mean "nothing to lint" (clean), not a failure. Hoisted (perf).
 const NOTHING_TO_LINT_RE = /No files matching|are ignored/i;
 const ELECTRON_SOURCE_EXTENSIONS = ['ts', 'tsx', 'css'];
 const POLICY_PATH_RE =
-  /^(?:eslint\.config\.mjs|guard\.config\.json|eslint\/(?:domains\.mjs|baselines\/)|\.devkit\/(?:structure\/exempt\.mjs|baselines\/(?:imports\.mjs|structure\/)))/;
+  /^(?:(?:eslint\.config\.mjs|guard\.config\.json|eslint\/domains\.mjs|\.devkit\/(?:config\.json|structure\/exempt\.mjs|baselines\/imports\.mjs))$|eslint\/baselines\/|\.devkit\/baselines\/structure\/)/;
 
 function pathInRoot(file: string, root: string): boolean {
   const cleanRoot = root.replace(/\/+$/, '');
@@ -97,9 +121,12 @@ export function planStagedStructureLint(
   changed: string[],
   destructive: string[],
   unstaged: string[],
+  routingInputs: string[] = [],
 ): StagedPlan {
-  const unstablePolicy = unstaged.some(isPolicyPath);
-  const stagedPolicy = changed.some(isPolicyPath);
+  const isPolicy = (file: string) => isPolicyPath(file) || routingInputs.includes(file);
+  const unstablePolicy = unstaged.some(isPolicy);
+  // A staged deletion or rename of a policy file changes policy as surely as an edit does.
+  const stagedPolicy = [...changed, ...destructive].some(isPolicy);
   const deferred: string[] = [];
   const probeScopes = new Map<string, StagedScope>();
   const unstableScopes = new Set(
@@ -118,14 +145,16 @@ export function planStagedStructureLint(
       if (hasDestructiveChange) deferred.push(scope.root);
       continue;
     }
-    if (stagedPolicy || hasDestructiveChange) probeScopes.set(scope.root, scope);
+    if (stagedPolicy || hasDestructiveChange) probeScopes.set(`${scope.leg}:${scope.root}`, scope);
   }
 
   const targets: string[] = [];
   for (const file of changed) {
-    const scope = scopes.find((candidate) => pathInScope(file, candidate));
-    if (!scope) continue;
-    if (unstablePolicy || unstableScopes.has(scope.root)) {
+    // Scopes may overlap (a grammar root nested in an electron scanRoot); a file is unstable when ANY
+    // scope that owns it is.
+    const owners = scopes.filter((candidate) => pathInScope(file, candidate));
+    if (!owners.length) continue;
+    if (unstablePolicy || owners.some((scope) => unstableScopes.has(scope.root))) {
       deferred.push(file);
       continue;
     }
@@ -173,18 +202,94 @@ function toCwdPaths(paths: string[], prefix: string): string[] {
   return paths.filter((file) => file.startsWith(prefix)).map((file) => file.slice(prefix.length));
 }
 
-function stagedScopes(cwd: string): StagedScope[] {
+// init writes `stack` as a string; any other shape cannot say whether the preset leg applies.
+const STACK_MARKER = z.object({ stack: z.string().optional() });
+const DEPS = z.record(z.string(), z.unknown()).optional();
+const MANIFEST = z.object({ dependencies: DEPS, devDependencies: DEPS });
+
+// No recorded stack: detectStack's electron rule (cli/lib/detect-stack.mts), as upgrade resolves it.
+function detectedElectron(cwd: string): boolean {
+  const file = join(cwd, 'package.json');
+  if (!existsSync(file)) return false; // no manifest is detectStack's 'generic', never electron
+  let json: unknown;
+  try {
+    json = JSON.parse(readFileSync(file, 'utf8'));
+  } catch (e: unknown) {
+    throw new Error(`package.json is unreadable (${e instanceof Error ? e.message : e})`);
+  }
+  const manifest = MANIFEST.safeParse(json);
+  if (!manifest.success) throw new Error('package.json dependencies are not objects');
+  const deps = { ...manifest.data.dependencies, ...manifest.data.devDependencies };
+  return Boolean(deps.electron || deps['electron-vite']);
+}
+
+interface PresetStack {
+  electron: boolean;
+  detected: boolean; // decided by package.json, which is then a routing (policy) input too
+}
+
+// Keyed on the recorded stack (as migrate-config is), never on "no grammar" — that also matches the
+// universal shim, which is itself the bundled engine, and would lint every file twice.
+function electronPreset(cwd: string): PresetStack {
+  const file = join(cwd, '.devkit/config.json');
+  const detect = (): PresetStack => ({ electron: detectedElectron(cwd), detected: true });
+  if (!existsSync(file)) return detect();
+  let json: unknown;
+  try {
+    json = JSON.parse(readFileSync(file, 'utf8'));
+  } catch (e: unknown) {
+    throw new Error(`.devkit/config.json is unreadable (${e instanceof Error ? e.message : e})`);
+  }
+  const marker = STACK_MARKER.safeParse(json);
+  if (!marker.success)
+    throw new Error('.devkit/config.json is not an object with a string `stack`');
+  const { stack } = marker.data;
+  return stack === undefined ? detect() : { electron: stack === 'electron', detected: false };
+}
+
+function stagedScopes(cwd: string, electron: boolean): StagedScope[] {
   const cfg = resolveGuardConfig(cwd);
   const trees: StructureTree[] = cfg.structure?.trees ?? [];
-  const configScopes = trees
-    .filter((tree): tree is StructureTree & { root: string } => Boolean(tree.root))
-    .map((tree) => ({
-      root: tree.root,
-      extensions: tree.sourceExtensions?.length ? tree.sourceExtensions : cfg.sourceExtensions,
-    }));
-  return configScopes.length
-    ? configScopes
-    : cfg.scanRoots.map((root) => ({ root, extensions: ELECTRON_SOURCE_EXTENSIONS }));
+  const treeScope = (tree: StructureTree & { root: string }, leg: StructureLeg): StagedScope => ({
+    root: tree.root,
+    extensions: tree.sourceExtensions?.length ? tree.sourceExtensions : cfg.sourceExtensions,
+    leg,
+  });
+  const rootedTrees = trees.filter((tree): tree is StructureTree & { root: string } =>
+    Boolean(tree.root),
+  );
+  const scanRootScopes = (leg: StructureLeg): StagedScope[] =>
+    cfg.scanRoots.map((root) => ({ root, extensions: ELECTRON_SOURCE_EXTENSIONS, leg }));
+  if (electron) {
+    // Additive: the preset keeps every scanRoot it covered before; grammar trees join alongside.
+    const grammarScopes = rootedTrees
+      .filter((tree) => tree.grammar)
+      .map((tree) => treeScope(tree, 'grammar'));
+    return [...scanRootScopes('preset'), ...grammarScopes];
+  }
+  // Only a recorded electron stack has a local preset; every other stack gates through the bundled
+  // engine, which names a grammar-less tree as could-not-run rather than guessing a preset.
+  const configScopes = rootedTrees.map((tree) => treeScope(tree, 'grammar'));
+  return configScopes.length ? configScopes : scanRootScopes('grammar');
+}
+
+// The electron preset leg: the consumer's locally pinned eslint + its own eslint.config.mjs.
+function runPresetLint(cwd: string, targets: string[]): StructureGateResult {
+  const eslintBin = join(cwd, 'node_modules', 'eslint', 'bin', 'eslint.js');
+  if (!existsSync(eslintBin)) {
+    return couldNotRun('electron structure lint needs the locally pinned eslint binary');
+  }
+  // An empty root is clean, not ESLint's exit-2 "no files matching".
+  const args = [...eslintNodeFlags(cwd), eslintBin, '--no-error-on-unmatched-pattern', '--'];
+  try {
+    execFileSync(process.execPath, [...args, ...targets], { cwd, stdio: 'inherit' });
+    return clean();
+  } catch (e: unknown) {
+    // ESLint exits 1 for lint errors only; a crash, a broken config or a failed spawn did not lint.
+    const status = e instanceof Error && 'status' in e ? e.status : undefined;
+    if (status === 1) return violations(0, 'guard-structure: local eslint failed');
+    return couldNotRun(`local eslint exited abnormally (status ${String(status ?? 'unknown')})`);
+  }
 }
 
 function firstProbeFile(
@@ -214,6 +319,9 @@ function firstProbeFile(
 
 export async function runStagedStructureGate(cwd = process.cwd()): Promise<StructureGateResult> {
   try {
+    // Read the routing inputs BEFORE the git snapshots: an edit racing this read then shows up in
+    // `unstaged` below and defers as policy, instead of silently routing on bytes nobody staged.
+    const stack = electronPreset(cwd);
     const prefix = gitPrefix(cwd);
     const changed = toCwdPaths(
       gitPaths(cwd, ['diff', '--cached', '--name-only', '-z', '--diff-filter=ACMR']),
@@ -227,77 +335,96 @@ export async function runStagedStructureGate(cwd = process.cwd()): Promise<Struc
     const unstaged = unique(
       toCwdPaths([...gitPaths(cwd, ['diff', '--name-only', '-z']), ...untrackedPaths(cwd)], prefix),
     );
-    const plan = planStagedStructureLint(stagedScopes(cwd), changed, destructive, unstaged);
-    if (plan.deferred.length) {
-      console.error(
-        `⚠️  Structure lint deferred mixed staged/unstaged input to CI: ${plan.deferred.join(', ')}`,
-      );
-    }
+    const routingInputs = stack.detected ? ['package.json'] : [];
+    // An unstable routing input may have mis-detected the stack: widen to both legs' scopes so every
+    // staged file that could matter is deferred as policy, not dropped as out of scope.
+    const routingUnstable = ['.devkit/config.json', ...routingInputs].some((file) =>
+      unstaged.includes(file),
+    );
+    const scopes = stagedScopes(cwd, stack.electron || routingUnstable);
+    const plan = planStagedStructureLint(scopes, changed, destructive, unstaged, routingInputs);
     // A probe also reads worktree bytes. Do not select a dirty source as the representative file
     // for a deletion/rename check; its result would not describe the staged tree either.
     const unstableSources = new Set(unstaged);
-    const probeTargets = plan.probeScopes
-      .map((scope) => firstProbeFile(cwd, scope, unstableSources))
+    const probes = plan.probeScopes.map((scope) => ({
+      scope,
+      target: firstProbeFile(cwd, scope, unstableSources),
+    }));
+    const probeTargets = probes
+      .map((probe) => probe.target)
       .filter((target): target is string => target !== null);
-    const unprobedRoots = plan.probeScopes
-      .filter((scope) => !probeTargets.some((target) => pathInScope(target, scope)))
-      .map((scope) => scope.root);
+    const unprobedRoots = probes.filter((probe) => probe.target === null).map((p) => p.scope.root);
+    // Deferred input was inspected by nothing, so it is could-not-run — never folded into a clean 0.
+    const results: StructureGateResult[] = [];
+    if (plan.deferred.length) {
+      results.push(
+        couldNotRun(`deferred mixed staged/unstaged input to CI: ${plan.deferred.join(', ')}`),
+      );
+    }
     if (unprobedRoots.length) {
-      console.error(
-        `⚠️  Structure deletion probe deferred to CI (no remaining source file): ${unprobedRoots.join(', ')}`,
+      results.push(
+        couldNotRun(
+          `deletion probe deferred to CI (no remaining source): ${unprobedRoots.join(', ')}`,
+        ),
       );
     }
-    if (!plan.targets.length && !probeTargets.length) return clean();
 
-    const cfg = resolveGuardConfig(cwd);
-    const trees: StructureTree[] = cfg.structure?.trees ?? [];
-    const configDriven = trees.some((tree) => Boolean(tree.grammar));
-    if (configDriven) return runStructureGate(cwd, unique([...plan.targets, ...probeTargets]));
-
-    const eslintBin = join(cwd, 'node_modules', 'eslint', 'bin', 'eslint.js');
-    if (!existsSync(eslintBin)) {
-      return couldNotRun('electron structure lint needs the locally pinned eslint binary');
-    }
-    try {
-      execFileSync(
-        process.execPath,
-        [...eslintNodeFlags(cwd), eslintBin, '--', ...unique([...plan.targets, ...probeTargets])],
-        { cwd, stdio: 'inherit' },
+    // Route each file to every leg whose scope owns it — a grammar root nested in a scanRoot is
+    // linted by both, so neither leg's rules are lost to the other.
+    const legFiles = (leg: StructureLeg) =>
+      unique([...plan.targets, ...probeTargets]).filter((file) =>
+        scopes.some((scope) => scope.leg === leg && pathInScope(file, scope)),
       );
-      return clean();
-    } catch {
-      return violations(0, 'guard-structure: local eslint failed');
-    }
+    const presetFiles = legFiles('preset');
+    const grammarFiles = legFiles('grammar');
+    if (presetFiles.length) results.push(runPresetLint(cwd, presetFiles));
+    if (grammarFiles.length) results.push(await runGrammarLint(cwd, grammarFiles));
+    return combineStructureResults(results);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     return couldNotRun(message);
   }
 }
 
-/**
- * Run the folder-structure gate over a repo's declared structure roots. `cwd` is the consumer root
- * (holds guard.config.json + .devkit baseline/policy state). Returns one of the named verdicts.
- */
+/** Gate a consumer root's declared structure roots (an electron consumer also runs its preset over
+ * present scanRoots); explicit `targets` lint through the grammar leg only. */
 export async function runStructureGate(
   cwd = process.cwd(),
   targets?: string[],
 ): Promise<StructureGateResult> {
+  if (targets) return runGrammarLint(cwd, targets);
+  try {
+    if (!electronPreset(cwd).electron) return await runGrammarLint(cwd);
+    const cfg = resolveGuardConfig(cwd);
+    const trees: StructureTree[] = cfg.structure?.trees ?? [];
+    const presetRoots = cfg.scanRoots.filter((root) => existsSync(join(cwd, root)));
+    const results: StructureGateResult[] = [];
+    if (presetRoots.length) results.push(runPresetLint(cwd, presetRoots));
+    if (trees.some((tree) => tree.grammar)) results.push(await runGrammarLint(cwd));
+    if (!results.length) return couldNotRun('no electron scanRoot or grammar root is present');
+    return combineStructureResults(results);
+  } catch (e: unknown) {
+    return couldNotRun(e instanceof Error ? e.message : String(e));
+  }
+}
+
+// The grammar leg: devkit's bundled eslint over the grammar trees (or the given targets).
+async function runGrammarLint(cwd: string, targets?: string[]): Promise<StructureGateResult> {
   try {
     const cfg = resolveGuardConfig(cwd);
-    // Lint only roots that EXIST on disk (an absent root has nothing to enforce yet).
-    const trees: StructureTree[] = cfg.structure?.trees ?? [];
-    const roots = (
-      targets ??
-      trees.map((t) => t.root).filter((r): r is string => (r ? existsSync(join(cwd, r)) : false))
-    ).filter((target) => existsSync(join(cwd, target)));
-    if (!roots.length)
-      return couldNotRun(
-        'no structure root is both declared in guard.config.json and present on disk',
-      );
     const baseConfig = await buildStructureConfigs(cwd);
     if (!baseConfig.length)
       return couldNotRun(
-        "no structure.trees[].grammar declared (preset-only consumer); this repo's own structure lint is the wall here",
+        'no structure.trees[].grammar declared (preset-only consumer); the electron preset leg runs only for an electron stack (recorded, else detected)',
+      );
+    // Only GRAMMAR roots, and only those on disk: a preset root enclosing a grammar root would lint
+    // that grammar root a second time.
+    const trees: StructureTree[] = cfg.structure?.trees ?? [];
+    const grammarRoots = trees.flatMap((tree) => (tree.grammar && tree.root ? [tree.root] : []));
+    const roots = (targets ?? grammarRoots).filter((target) => existsSync(join(cwd, target)));
+    if (!roots.length)
+      return couldNotRun(
+        'no structure root is both declared in guard.config.json and present on disk',
       );
 
     // The plugin's error cache drops a message already cached for another filename; persisted in the

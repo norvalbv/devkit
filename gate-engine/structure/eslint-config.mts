@@ -32,7 +32,9 @@ export async function buildStructureConfigs(root: string): Promise<Linter.Config
   // cfg.structure.trees is object[] generically; at this config-read boundary they ARE tree specs.
   const trees = (cfg.structure?.trees ?? []) as TreeSpec[];
   for (const tree of trees) {
-    if (!tree.grammar) continue; // a `preset` tree (if any) compiles via its own path, not here
+    // A tree without a grammar is an electron preset tree: the consumer's own pinned eslint lints it
+    // (guard-structure's preset leg, run.mts), never this bundled config.
+    if (!tree.grammar) continue;
     const exts = resolveTreeExtensions(cfg, tree);
     const rule = compileToEslint(tree, exts, {
       baseline: await loadBaseline(tree.name),
