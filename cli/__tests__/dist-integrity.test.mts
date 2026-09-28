@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -452,9 +452,17 @@ describe('dist-integrity CLI', () => {
   });
 });
 
+// Ship's hook-dir preflight (sc-3883) runs first; an uninitialised fixture never reaches this one.
+function seedHookDir(root: string): void {
+  mkdirSync(join(root, '.husky/_'), { recursive: true });
+  writeFileSync(join(root, '.husky/_/pre-commit'), '#!/bin/sh\nexit 0\n');
+  chmodSync(join(root, '.husky/_/pre-commit'), 0o755);
+}
+
 describe('ship dist-integrity preflight', () => {
   it('blocks a new ship before creating its worktree', () => {
     const { root } = seedShipRepo();
+    seedHookDir(root);
     git(root, 'remote', 'add', 'origin', 'git@github.com:acme/app.git');
     const result = spawnSync(
       '/bin/bash',
@@ -476,6 +484,7 @@ describe('ship dist-integrity preflight', () => {
 
   it('blocks a reship before creating its worktree', () => {
     const { root } = seedShipRepo();
+    seedHookDir(root);
     const bare = mkTmp('dist-integrity-origin-');
     execFileSync('git', ['init', '-q', '--bare', bare], {
       env: { ...process.env, ...GIT_ENV },
