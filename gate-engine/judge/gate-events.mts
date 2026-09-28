@@ -58,6 +58,8 @@ export interface ReviewCacheHit {
   judgedBaseSha: string | null;
   /** current | moved-clear | moved-overlap | unknown — the digest demotes only the last two. */
   baseState: string;
+  /** evidence_* coverage of the packet the PASS was judged on; {} when complete (sc-2305). */
+  coverage?: object;
 }
 
 /** cache_hit for a domain reviewer. Other emitters keep emitCacheHit, whose rows carry no base
@@ -71,6 +73,7 @@ export function emitReviewCacheHit(hit: ReviewCacheHit): void {
     duration_ms: Math.max(0, Math.round(hit.durationMs)),
     judged_base_sha: hit.judgedBaseSha,
     base_state: hit.baseState,
+    ...hit.coverage,
   });
 }
 

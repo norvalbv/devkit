@@ -37,6 +37,8 @@ export interface CapOptions {
 export interface CappedSegments {
   kept: string[];
   omitted: string[];
+  /** Bare labels of the OMITTED segments, in order — `omitted` holds the rendered marker lines. */
+  omittedLabels: string[];
   truncated: number;
   /** Bytes of SEGMENT CONTENT kept — excludes the OMITTED/TRUNCATED marker text. */
   shownBytes: number;
@@ -48,12 +50,14 @@ export function capNamedSegments(
 ): CappedSegments {
   const kept: string[] = [];
   const omitted: string[] = [];
+  const omittedLabels: string[] = [];
   let used = 0;
   let truncated = 0;
   let shownBytes = 0;
   for (const seg of segments) {
     const room = totalCap - used;
     if (room <= 0) {
+      omittedLabels.push(seg.label);
       omitted.push(
         `OMITTED: ${seg.label} (${seg.content.length} chars over the evidence budget — ${hint(seg.label)})`,
       );
@@ -73,7 +77,7 @@ export function capNamedSegments(
       used += cap;
     }
   }
-  return { kept, omitted, truncated, shownBytes };
+  return { kept, omitted, omittedLabels, truncated, shownBytes };
 }
 
 /** `capNamedSegments` + the OMITTED-list cutoff + the trailing INCOMPLETE-evidence warning —
@@ -98,11 +102,70 @@ const SEGMENT_CAP = 8000; // no single file may eat the budget (greedy in diff o
 const OMITTED_LIST_MAX = 40; // OMITTED pointer lines; the --stat header is the full inventory
 const SEGMENT_PATH_RE = /^diff --git (?:a\/)?(\S+)/;
 
+// The POST-image path, whole even with spaces: `+++ b/<p>` (git tab-terminates a spaced name), else
+// `rename to`/`copy to` (a pure rename has no hunks), else the same-path `diff --git` header.
+const POST_IMAGE_RES = [
+  /^\+\+\+ b\/(.+?)\t?$/m,
+  /^(?:rename|copy) to (.+)$/m,
+  /^diff --git a\/(.+) b\/\1$/m,
+];
+// The same three shapes as git C-quotes them (a `"`, `\\`, control or non-ASCII byte in the path).
+const QUOTED_POST_IMAGE_RES = [
+  /^\+\+\+ "b\/((?:[^"\\]|\\.)*)"\t?$/m,
+  /^(?:rename|copy) to "((?:[^"\\]|\\.)*)"$/m,
+  /^diff --git "a\/(?:[^"\\]|\\.)*" "b\/((?:[^"\\]|\\.)*)"$/m,
+];
+const C_ESCAPES = new Map([
+  ['n', 10],
+  ['t', 9],
+  ['r', 13],
+  ['a', 7],
+  ['b', 8],
+  ['f', 12],
+  ['v', 11],
+]);
+
+/** Undo git's C-style path quoting: `\\ooo` octal bytes (UTF-8) and single-letter escapes. */
+function cUnquote(body: string): string {
+  const bytes: number[] = [];
+  for (let i = 0; i < body.length; i++) {
+    if (body[i] !== '\\') {
+      bytes.push(...Buffer.from(body[i], 'utf8'));
+      continue;
+    }
+    const next = body[++i] ?? '';
+    const octal = /^[0-7]{3}/.exec(body.slice(i, i + 3))?.[0];
+    if (octal) {
+      bytes.push(Number.parseInt(octal, 8));
+      i += 2;
+    } else bytes.push(C_ESCAPES.get(next) ?? next.charCodeAt(0));
+  }
+  return Buffer.from(bytes).toString('utf8');
+}
+
 function segmentPath(seg: string): string {
+  const hunk = seg.indexOf('\n@@');
+  const header = hunk === -1 ? seg : seg.slice(0, hunk);
+  for (const re of QUOTED_POST_IMAGE_RES) {
+    const quoted = re.exec(header)?.[1];
+    if (quoted !== undefined) return cUnquote(quoted);
+  }
+  for (const re of POST_IMAGE_RES) {
+    const path = re.exec(header)?.[1];
+    if (path) return path;
+  }
   return seg.match(SEGMENT_PATH_RE)?.[1] ?? '(unknown path)';
 }
 
-const diffHint = (label: string) => `run \`git diff --cached -- ${label}\``;
+/** One shell word: a plain path stays byte-identical; anything else is single-quoted. */
+const shellWord = (s: string) => (/^[\w@%+=:,./-]+$/.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`);
+
+const diffHint = (label: string) => `run \`git diff --cached -- ${shellWord(label)}\``;
+
+/** The recovery hint for a judge with Read but no shell (a claude-runtime reviewer without a
+ * checklist): the `git diff` hint above names a command it cannot run (sc-2305). */
+export const readFileHint = (label: string) =>
+  `Read \`${label}\` directly — the post-change file (absent if this change deleted it); its diff hunk is not in this evidence`;
 
 /** What `buildCappedDiffEvidence` would SHOW of a diff: UTF-8 content bytes kept (marker text and
  * stat header excluded) — compare with `diff_bytes`, NOT the caps, which act on UTF-16 units. */
@@ -110,6 +173,20 @@ export interface DiffEvidenceCap {
   evidence_bytes_shown: number;
   omitted_files: number;
   truncated_files: number;
+}
+
+function namedDiffSegments(diff: string): NamedSegment[] {
+  return splitDiffByFile(diff).map((content) => ({ label: segmentPath(content), content }));
+}
+
+function capDiffSegments(segments: NamedSegment[]): CappedSegments {
+  return capNamedSegments(segments, {
+    totalCap: EVIDENCE_TOTAL_CAP,
+    segmentCap: SEGMENT_CAP,
+    omittedListMax: OMITTED_LIST_MAX,
+    hint: diffHint,
+    omittedFooterHint: '',
+  });
 }
 
 export function measureDiffEvidenceCap(fullDiff: string): DiffEvidenceCap {
@@ -120,17 +197,7 @@ export function measureDiffEvidenceCap(fullDiff: string): DiffEvidenceCap {
       omitted_files: 0,
       truncated_files: 0,
     };
-  const segments = splitDiffByFile(diff).map((content) => ({
-    label: segmentPath(content),
-    content,
-  }));
-  const { omitted, truncated, shownBytes } = capNamedSegments(segments, {
-    totalCap: EVIDENCE_TOTAL_CAP,
-    segmentCap: SEGMENT_CAP,
-    omittedListMax: OMITTED_LIST_MAX,
-    hint: diffHint,
-    omittedFooterHint: '',
-  });
+  const { omitted, truncated, shownBytes } = capDiffSegments(namedDiffSegments(diff));
   return {
     evidence_bytes_shown: shownBytes,
     omitted_files: omitted.length,
@@ -138,21 +205,45 @@ export function measureDiffEvidenceCap(fullDiff: string): DiffEvidenceCap {
   };
 }
 
+/** How much of a diff the judge's packet covered, in files — the verdict-side twin of
+ * `measureDiffEvidenceCap` (sc-2305), read by evidence/packet/coverage.mts. */
+export interface DiffCoverage {
+  file_count: number;
+  omitted_files: number;
+  truncated_files: number;
+  /** The first OMITTED_LIST_MAX omitted paths — the same cutoff the packet itself applies. */
+  omitted_paths: string[];
+}
+
+export function measureDiffCoverage(fullDiff: string): DiffCoverage {
+  const diff = String(fullDiff);
+  const segments = namedDiffSegments(diff);
+  if (diff.length <= EVIDENCE_TOTAL_CAP)
+    return { file_count: segments.length, omitted_files: 0, truncated_files: 0, omitted_paths: [] };
+  const { omittedLabels, truncated } = capDiffSegments(segments);
+  return {
+    file_count: segments.length,
+    omitted_files: omittedLabels.length,
+    truncated_files: truncated,
+    omitted_paths: omittedLabels.slice(0, OMITTED_LIST_MAX),
+  };
+}
+
 /** Per-file capped diff evidence + explicit omission accounting. `inventory` (the full `--stat`
  * map, or a churn-free `--name-only` list for a reviewer with no Bash to verify churn with — see
  * cascade/reviewer.mts) always rides first, and either form names every file. */
-export function buildCappedDiffEvidence(fullDiff: string, inventory: string): string {
+export function buildCappedDiffEvidence(
+  fullDiff: string,
+  inventory: string,
+  { hint = diffHint }: { hint?: (label: string) => string } = {},
+): string {
   const diff = String(fullDiff);
   if (diff.length <= EVIDENCE_TOTAL_CAP) return `${inventory}\n${diff}`;
-  const segments = splitDiffByFile(diff).map((content) => ({
-    label: segmentPath(content),
-    content,
-  }));
-  const body = renderCappedSegments(segments, {
+  const body = renderCappedSegments(namedDiffSegments(diff), {
     totalCap: EVIDENCE_TOTAL_CAP,
     segmentCap: SEGMENT_CAP,
     omittedListMax: OMITTED_LIST_MAX,
-    hint: diffHint,
+    hint,
     omittedFooterHint: 'the staged-file inventory above lists every file',
   });
   return `${inventory}\n${body}`;

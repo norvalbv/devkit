@@ -205,6 +205,20 @@ by a command-rewriting shell hook, exactly as with `SHIP_COMMIT_TIMEOUT` below.
 
 `devkit doctor` reports the same models per role, and says which env is blocking an automatic bind.
 
+## A reviewer shows `PASS over an incomplete packet` (or `partial evidence`)
+
+Each AI reviewer reads a capped diff packet. On a large diff, files past the budget are OMITTED or
+TRUNCATED. Only the correctness reviewer is chunked so that every file reaches some judge. Every other
+reviewer's PASS on a large diff may cover only part of it, so the ship digest lists that PASS as
+unverified (`·`) with the files it was not shown. The review run's completion line appends `partial
+evidence: N/M file(s) omitted`. The row does not block.
+
+The judge was told to inspect the omitted files before passing, but the verdict alone cannot show that
+it did. To get a full review:
+
+- Split the change into smaller ships so each reviewer's diff fits the budget.
+- Or review the named files yourself before merging.
+
 ## A `.devkit/` ship cache looks stale (gates pass when they shouldn't)
 
 The **deterministic-prefix cache** and **checkpointed verdicts** live under `.devkit/`, keyed on the
