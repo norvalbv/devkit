@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { sourceMatchers } from '../config.mjs';
 import { LINES_BASELINE, readRatchetBaseline } from './baseline-paths.mjs';
+import { fanoutSplitHints } from './folder-fanout.mjs';
 import { mergeBaseRef, treeTextAtRef } from './git-index.mjs';
 import { SIZE_SKIP_DIRS } from './size-policy.mjs';
 class LineAuthorityError extends Error {
@@ -269,6 +270,7 @@ export function lineViolationReport(root, cfg, scoped, cap, grandfathered, scope
         }
         report.push(`   ${entry.file}: ${entry.lines} lines (max ${lowered?.current ?? effectiveLineCeiling(grandfathered, entry.file, cap(entry.file))})`);
     }
+    report.push(...fanoutSplitHints(root, violations.keys()));
     return { error: null, lines: report };
 }
 export function tightenLineBaseline(root, snapshot, staged, grandfathered, cap) {

@@ -31,29 +31,42 @@
  * `devkit review` deliberately supplies CURRENT packaged briefs/skills via an isolated runtime.
  */
 import { envFlag, resolveGuardConfig } from '../config.mjs';
-import { judgeBinForModel } from '../judge/codex/result.mjs';
-import { emitCacheHit } from '../judge/gate-events.mjs';
+import { emitReviewCacheHit } from '../judge/gate-events.mjs';
 import { reportGateInfraFailure } from '../judge/odb-probe.mjs';
 import { execJudgeAsync, strictRemedy } from '../judge/run-judge.mjs';
 import { loadCache } from './cache.mjs';
 import { runCascade } from './cascade/reviewer.mjs';
-import { RESPONSE_CONTRACT_REMEDY } from './contracts/response.mjs';
-import { baseProvenanceLines, primeReviewBaseContext } from './evidence/base-context.mjs';
+import { ENGINE_ERROR_REMEDY, RESPONSE_CONTRACT_REMEDY } from './contracts/response.mjs';
+import { baseProvenanceLines, cachedBaseState, cachedPassLine, judgedBaseSha, primeReviewBaseContext, } from './evidence/base-context.mjs';
 import { loadReviewerContext } from './evidence/commit-message.mjs';
 import { responseContractFor } from './contracts/registry.mjs';
 import { renderFindingsBlockForParts } from './evidence/findings.mjs';
 import { emitReviewScope, emitReviewSkipped, reportNonRuns } from './evidence/scope.mjs';
+import { assertNoMassDeletion } from './integrity/mass-deletion.mjs';
 import { gitCached, headHash, stagedFiles, stagedTreeHash } from './evidence/staged-git.mjs';
 import { reviewerTargetSalts } from './evidence/targets-block.mjs';
 import { reviewerSkipRemedy } from './overrides.mjs';
 import { emitMergedLensResults, mapLimit, planReviewWork, resolveChunkCap, resolveLensGroups, taskLabel, } from './lens/split.mjs';
 import { clearProgress, writeProgress } from './progress.mjs';
 import { retryableReason, runDeferredRecoveries, settleReviewOutcome, } from './recovery/settle.mjs';
-import { cacheKey, effectiveReviewConfig, resolveEscalationModel, resolveReviewModel, } from './reviewers.mjs';
+import { cacheKey, effectiveReviewConfig, REVIEWERS, resolveEscalationModel, resolveReviewModel, } from './reviewers.mjs';
 import { selectRepositoryReviewers } from './scope/repository.mjs';
 import { gateJudgeEnv, passAssetVerifier, preflightReviewAssets, resolveReviewerIdentities, skippedReviewers, } from './runtime.mjs';
 import { ReviewGateTiming, reviewConcurrency } from './telemetry/timing.mjs';
 export { runCascade };
+/** The running header's per-reviewer models (sc-3446): a pinned reviewer runs single-pass at its
+ * own model, so listing it under `first → escalation` hid a partial family move. */
+export function describeReviewModels(reviewers, firstModel, escalationModel) {
+    const byName = new Map(reviewers.map((r) => [r.name, r.model]));
+    const cascade = [...byName].filter(([, m]) => !m).map(([n]) => n);
+    const pinned = [...byName].filter(([, m]) => m).map(([n, m]) => `${n} on ${m}`);
+    return [
+        cascade.length ? `${cascade.join(', ')} (${firstModel} → ${escalationModel} on FAIL)` : '',
+        pinned.length ? `${pinned.join(', ')} (single-pass)` : '',
+    ]
+        .filter(Boolean)
+        .join('; ');
+}
 /**
  * The gate → exit code (see module contract). Selected reviewers run concurrently but BOUNDED to
  * `reviewConcurrency()` cascades in flight (GUARD_REVIEW_CONCURRENCY, default 6) — so under machine
@@ -113,13 +126,6 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
     let assetRoot;
     let identitySalts = new Map();
     try {
-        cfg = resolveGuardConfig(cwd);
-        if (cfg.noLlm) {
-            emitReviewSkipped(null, 'no_llm');
-            return finish(0);
-        }
-        if (reviewMode)
-            cfg = effectiveReviewConfig(cfg);
         // Snapshot before ANY read: every byte the gate evaluates postdates this instant, so the
         // finish-time recheck catches movement across the gate's whole life (judge or otherwise).
         // Stable-read pair: HEAD is read on BOTH sides of the tree read and must agree, or a commit
@@ -138,6 +144,19 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
                 break;
             }
         }
+        // After the snapshot (a later clobber fails the finish recheck) and before config, which can throw.
+        if (assertNoMassDeletion(cwd) === 1) {
+            for (const { name } of REVIEWERS)
+                emitReviewSkipped(name, 'mass_deletion');
+            return finish(1);
+        }
+        cfg = resolveGuardConfig(cwd);
+        if (cfg.noLlm) {
+            emitReviewSkipped(null, 'no_llm');
+            return finish(0);
+        }
+        if (reviewMode)
+            cfg = effectiveReviewConfig(cfg);
         const staged = stagedFiles(cwd);
         selected = selectRepositoryReviewers(staged, cfg);
         const skip = skippedReviewers();
@@ -180,11 +199,6 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
     const cache = loadCache(cwd);
     const firstModel = resolveReviewModel(cfg);
     const escalationModel = resolveEscalationModel(cfg);
-    // An engine-error rejection loses WHICH pass threw, so name every binary the cascade could have
-    // spawned — a single guess reads as fact and sends a mixed-family operator to the wrong CLI.
-    const engineOutageBin = (rev) => [
-        ...new Set((rev.model ? [rev.model] : [firstModel, escalationModel]).map(judgeBinForModel)),
-    ].join('` or `');
     const concurrency = reviewConcurrency();
     timing.configure(selected.map((selection) => selection.reviewer.name), concurrency);
     const judgeEnv = gateJudgeEnv(reviewMode, cfg);
@@ -208,20 +222,35 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
     // chunkCap derives from the SAME resolved cfg snapshot as model/reviewer selection (W-3 +
     // no torn plan): planReviewWork's own default would re-read the launcher's guard.config.json.
     const plan = planReviewWork(selected, diffs, cache, targetSalts, cacheKey, resolveLensGroups(), resolveChunkCap(process.env.GUARD_CORRECTNESS_CHUNK, cfg.review.correctnessChunkLoc));
+    // A cached PASS was judged against the base it STORED, not this run's (sc-3468): classify once per
+    // reviewer so its line, scope row and cache_hit all say the same thing.
+    const baseOf = new Map(plan.scope
+        .filter((s) => s.judgedBases.length > 0)
+        .map((s) => [s.sel.reviewer.name, cachedBaseState(cwd, s.judgedBases, s.sel.files)]));
     for (const s of plan.scope)
-        emitReviewScope(s.sel, s.diff, promptIdentity(s.sel), s.cached, ctx.scopeFields, cwd);
-    for (const line of plan.cachedLines)
-        console.error(line);
+        emitReviewScope(s.sel, s.diff, promptIdentity(s.sel), s.cached, ctx.scopeFields, cwd, {
+            cachedBase: baseOf.get(s.sel.reviewer.name) ?? null,
+        });
+    for (const hit of plan.cachedHits)
+        console.error(cachedPassLine(hit.label, baseOf.get(hit.label) ?? cachedBaseState(cwd, hit.judgedBases, hit.files), hit.part ? 'identical' : 'identical diff'));
     // Before any verdict AND before the fully-cached early return below (sc-2480).
-    for (const line of baseProvenanceLines(cwd, selected.flatMap((s) => s.files)))
+    const fresh = new Set(plan.tasks.map((t) => t.base.reviewer.name)).size;
+    for (const line of baseProvenanceLines(cwd, selected.flatMap((s) => s.files), process.env, { fresh, cached: plan.cachedHits.length }))
         console.error(line);
     for (const c of plan.fullyCached) {
         timing.cacheHit(c.name, c.duration);
-        emitCacheHit(`review:${c.name}`, c.model, c.duration);
+        const base = baseOf.get(c.name) ?? cachedBaseState(cwd, c.judgedBases, []);
+        emitReviewCacheHit({
+            judge: `review:${c.name}`,
+            model: c.model,
+            durationMs: c.duration,
+            judgedBaseSha: judgedBaseSha(base),
+            baseState: base.state,
+        });
     }
     if (plan.tasks.length === 0)
         return finish(0);
-    console.error(`guard-review: running ${plan.tasks.map((t) => t.sel.reviewer.name).join(', ')} (≤${concurrency} concurrent, ${firstModel} → ${escalationModel} on FAIL)…`);
+    console.error(`guard-review: running ${describeReviewModels(plan.tasks.map((t) => t.sel.reviewer), firstModel, escalationModel)} (≤${concurrency} concurrent)…`);
     // Checkpoint each PASS as it lands, so a killed ship reruns only unfinished reviewers. The
     // progress JSON names unfinished work; heartbeat lines remain for humans. The catch prevents one
     // rejected cascade from abandoning its siblings (see mapLimit).
@@ -273,7 +302,7 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
             name: t.sel.reviewer.name,
             status: reviewMode ? 'error' : 'inconclusive',
             reason: `engine error: ${e?.message ?? e}`,
-            outageBin: engineOutageBin(t.sel.reviewer),
+            inconclusiveCause: 'engine',
             escalated: false,
         }))
             .then((outcome) => {
@@ -294,8 +323,7 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
         name: task.sel.reviewer.name,
         status: reviewMode ? 'error' : 'inconclusive',
         reason: `engine error: ${e?.message ?? e}`,
-        inconclusiveCause: 'outage',
-        outageBin: engineOutageBin(task.sel.reviewer),
+        inconclusiveCause: 'engine',
         escalated: false,
     })), gateStart);
     if (progressFile)
@@ -333,7 +361,9 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
         const cause = r.inconclusiveCause ?? 'outage';
         const remedy = cause === 'response-contract'
             ? RESPONSE_CONTRACT_REMEDY
-            : strictRemedy(cause, r.outageBin, r.outageResetsAt);
+            : cause === 'engine'
+                ? ENGINE_ERROR_REMEDY
+                : strictRemedy(cause, r.outageBin, r.outageResetsAt);
         console.error(strict
             ? `guard-review: ${r.name} INCONCLUSIVE (${r.reason}) — strict ship mode fails closed.\n` +
                 `   Remedy: ${remedy} (completed verdicts are cached).`

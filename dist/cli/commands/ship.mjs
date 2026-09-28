@@ -52,8 +52,10 @@ Usage:
                       with --pr; resume remembers the committed-source mode and frozen path set.
   --body "<text>"     Commit + PR body, inline (no temp file). Wins over stdin; omit it to read the
                       commit body from stdin (a pipe or here-doc) or to leave the body empty.
-  --body-file <f>     Commit + PR body read from a file — author it ONCE; the recorded invocation
-                      replays it on every retry. Mutually exclusive with --body; wins over stdin.
+  --body-file <f>     Commit + PR body read from a file. The recorded invocation stores the file's
+                      CONTENT, and --resume replays those bytes — a later edit to <f> is NOT picked
+                      up until you re-pass --body-file on the resume (--resume warns when <f> and
+                      the recorded body differ). Mutually exclusive with --body; wins over stdin.
                       With --pr, only these two explicit flags refresh the EXISTING PR description;
                       omitting both preserves it (piped stdin remains commit-only for compatibility).
   --resume <branch>   Replay the invocation recorded by the previous attempt for <branch> (title,

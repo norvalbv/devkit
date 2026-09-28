@@ -4,7 +4,7 @@
  * `packageDir()` (devkit's own dir, the source of templates + skills).
  */
 import { createHash } from 'node:crypto';
-import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync, } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 /**
@@ -14,6 +14,18 @@ import { fileURLToPath } from 'node:url';
  */
 export function packageDir() {
     return resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+}
+/**
+ * The canonical form of a path for identity comparison: symlinks resolved (macOS `/tmp` →
+ * `/private/tmp`), falling back to a lexical resolve when the path does not exist.
+ */
+export function canonicalPath(path) {
+    try {
+        return realpathSync(path);
+    }
+    catch {
+        return resolve(path);
+    }
 }
 /** Read + parse a JSON file. Returns null if absent; throws on malformed JSON (loud, not silent). */
 export function readJson(path) {

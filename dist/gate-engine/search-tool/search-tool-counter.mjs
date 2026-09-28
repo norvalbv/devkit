@@ -24,6 +24,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { resolveGuardConfig } from '../config.mjs';
+import { isExactStringCommand } from './search-tool-exemption.mjs';
 import { isExcludedTarget, isOutOfScanRoots, isPrimarySearchCommand, normalize, } from './search-tool-lib.mjs';
 import { resolveSearchTools } from './tools.mjs';
 // Ecosystem-universal roots the semantic-search index never covers,
@@ -87,9 +88,11 @@ if (!isPrimarySearchCommand(norm)) {
 if (isExcludedTarget(norm, EXCLUDE_ROOTS) || isOutOfScanRoots(norm, scanRoots)) {
     process.exit(0);
 }
-// Every primary search counts — a run of clean-identifier greps is still
-// concept-by-enumeration. Only the semantic-search tool / a non-search command
-// (handled above) breaks the streak.
+// An exact string copied from output is grep's job: a no-op like an out-of-index target (sc-3404).
+if (isExactStringCommand(norm, EXCLUDE_ROOTS, scanRoots))
+    process.exit(0);
+// Every other primary search counts — identifier greps, bare or `function X`, are still
+// concept-by-enumeration. Only the semantic-search tool / a non-search command resets.
 state.streak = (state.streak ?? 0) + 1;
 state.lastGrep = Date.now();
 state.recentCmds = [...(state.recentCmds ?? []), cmd.slice(0, 120)].slice(-THRESHOLD);

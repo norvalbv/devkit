@@ -1,5 +1,6 @@
 // Review-gate clobbered-index tripwire (sc-3400): blocks a staged set that deletes most of HEAD.
 import { execFileSync } from 'node:child_process';
+import { commitIndexEnv } from '../../ratchets/commit-index.mjs';
 import { envFlag } from '../../config.mjs';
 import { emitGateBypass } from '../../judge/gate-events.mjs';
 import { headHash } from '../evidence/staged-git.mjs';
@@ -31,7 +32,12 @@ export function parseNameStatus(z) {
     }
     return { deleted, added };
 }
-const gitZ = (cwd, args) => execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 1024 * 1024 * 1024 });
+const gitZ = (cwd, args) => execFileSync('git', args, {
+    cwd,
+    env: commitIndexEnv(cwd),
+    encoding: 'utf8',
+    maxBuffer: 1024 * 1024 * 1024,
+});
 /** The staged D/A counts, plus HEAD's tracked-file count — read only when D reaches the floor. */
 export function stagedDeletionCensus(cwd) {
     const { deleted, added } = parseNameStatus(gitZ(cwd, ['diff', '--cached', '--name-status', '-z', '-M']));

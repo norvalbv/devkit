@@ -10,7 +10,7 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
-import { resolveVitest, runVitest } from '../../../gate-engine/coverage/produce.mjs';
+import { resolveVitest, runVitest } from '../../../gate-engine/coverage/vitest-cli.mjs';
 import { writeFileAtomic } from '../atomic-write.mjs';
 /**
  * Every run writes into its OWN directory under here and nothing is ever published to a shared path.

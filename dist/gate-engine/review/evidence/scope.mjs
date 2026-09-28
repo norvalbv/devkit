@@ -19,7 +19,7 @@ import { envFlag } from '../../config.mjs';
 import { emitGateEvent } from '../../judge/gate-events.mjs';
 import { saveTranscript } from '../../judge/transcript-store.mjs';
 import { measureDiffEvidenceCap } from '../diff-evidence.mjs';
-import { reviewBaseContext } from './base-context.mjs';
+import { judgedBaseSha, reviewBaseContext, } from './base-context.mjs';
 import { declaredRoots, hasChecklist, REVIEWERS, underRoot, } from '../reviewers.mjs';
 const sha256 = (text) => createHash('sha256').update(text).digest('hex');
 export function emitReviewSkipped(reviewer, reason) {
@@ -124,6 +124,14 @@ export function diffLineCounts(diffText) {
 // `file_count` + `files_sha256` ride inline either way, so a reader can always tell a truly-empty
 // scope from a spilled one — the list is never silently dropped.
 const SCOPE_FILES_INLINE_BUDGET = 2000;
+function baseFields(live, verdict, wholly) {
+    if (!verdict)
+        return { base_sha: live };
+    // Partly cached (split parts): the live parts judged THIS base; the replayed parts' state rides along.
+    if (!wholly)
+        return { base_sha: live, current_base_sha: live, cached_parts_base_state: verdict.state };
+    return { base_sha: judgedBaseSha(verdict), current_base_sha: live, base_state: verdict.state };
+}
 /**
  * One row per reviewer the gate SELECTED — emitted before the judge runs, so it lands for a cached
  * PASS too. This is the row that answers "did this reviewer see this file, on which bytes, under
@@ -135,7 +143,9 @@ export function emitReviewScope(sel, diffText, promptIdentity, cached,
 // comparison cannot be computed from the sink.
 contextFields = null, 
 // The tree the diff was computed against — without it a finding is not re-resolvable from the sink.
-cwd = process.cwd()) {
+cwd = process.cwd(), 
+// A cache-served row was judged against the base its PASS stored, not this run's (sc-3468).
+{ cachedBase = null } = {}) {
     const files = [...sel.files].sort();
     const inline = JSON.stringify(files);
     const spilled = inline.length > SCOPE_FILES_INLINE_BUDGET
@@ -159,7 +169,7 @@ cwd = process.cwd()) {
         // second source of truth the gate cannot import and would have to sync-test.
         has_checklist: hasChecklist(sel.reviewer),
         cached,
-        base_sha: reviewBaseContext(cwd).baseSha,
+        ...baseFields(reviewBaseContext(cwd).baseSha, cachedBase, cached),
         ...(contextFields ?? {}),
     });
 }

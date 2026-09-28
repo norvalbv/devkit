@@ -8,6 +8,7 @@
  * (every consumer installs it; devkit devDeps it for the dogfood). compile.mjs stays plugin-free
  * (returns a plain config object); the plugin wrapping happens here.
  */
+import { resolve } from 'node:path';
 import { createFolderStructure, projectStructureParser, projectStructurePlugin, } from 'eslint-plugin-project-structure';
 import { resolveGuardConfig, resolveTreeExtensions } from '../config.mjs';
 import { compileToEslint } from './compile.mjs';
@@ -24,12 +25,17 @@ export async function buildStructureConfigs(root) {
     // cfg.structure.trees is object[] generically; at this config-read boundary they ARE tree specs.
     const trees = (cfg.structure?.trees ?? []);
     for (const tree of trees) {
+        // A tree without a grammar is an electron preset tree: the consumer's own pinned eslint lints it
+        // (guard-structure's preset leg, run.mts), never this bundled config.
         if (!tree.grammar)
-            continue; // a `preset` tree (if any) compiles via its own path, not here
+            continue;
         const exts = resolveTreeExtensions(cfg, tree);
         const rule = compileToEslint(tree, exts, {
             baseline: await loadBaseline(tree.name),
             exempt: await loadExempt(tree.name),
+            // `resolve`, never `realpathSync`: the plugin gates on a raw `filename.includes(structureRoot)`
+            // against ESLint's own (un-realpathed) path, so the root must be spelled as ESLint spells it.
+            projectRoot: resolve(root),
         });
         configs.push({
             // A single extension must NOT use a brace: minimatch does not expand a 1-element `{mts}`, so

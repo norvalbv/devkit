@@ -80,6 +80,14 @@ export function compileToEslint(treeSpec, exts, opts = {}) {
     const grammar = treeSpec.grammar ?? {};
     const rootFiles = [...new Set([...(grammar.files ?? []), ...(treeSpec.entryAllowlist ?? [])])];
     const rootNode = { ...grammar, files: rootFiles };
+    const compiled = folderStructureBody(treeSpec, exts, opts, grammar, rootNode);
+    // The plugin otherwise roots itself at its own realpathed install and skips every file outside it;
+    // only an ABSOLUTE projectRoot overrides that — a relative one resolves against that root (sc-2309).
+    if (opts.projectRoot)
+        compiled.projectRoot = opts.projectRoot;
+    return compiled;
+}
+function folderStructureBody(treeSpec, exts, opts, grammar, rootNode) {
     return {
         structureRoot: treeSpec.root,
         ignorePatterns: [

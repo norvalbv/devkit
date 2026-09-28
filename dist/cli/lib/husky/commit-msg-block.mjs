@@ -14,8 +14,7 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { detectGitRoot } from '../detect-git-root.mjs';
-import { markEnd, markStart } from './husky.mjs';
-import { extractGuardBlock, PACKAGE_BIN_DIR_FRAGMENT, PATH_SETUP, removeGuardBlock, replaceGuardBlock, } from './husky-block.mjs';
+import { extractGuardBlock, PACKAGE_BIN_DIR_FRAGMENT, PATH_SETUP, removeGuardBlock, replaceGuardBlock, wrapGuardBlock, } from './husky-block.mjs';
 import { invokeJudge, sentryFragment } from './sentry-fragments.mjs';
 /** The guard ids whose gates run at commit-msg (not pre-commit), in emit order. */
 export const COMMIT_MSG_GUARD_IDS = ['review', 'sentry'];
@@ -44,10 +43,10 @@ trap '__dk_clear_commit_state' EXIT`;
 // (gate-engine/review/completeness.mts): a confident FAIL exits 1, warn/skip 0, fail-open 2,
 // and 3 = judge outage under GUARD_AI_STRICT (ship) — fail CLOSED, mirroring the pre-commit
 // AI fragments (a strict-ship outage must never silently pass the gate).
-const completenessFragment = (standalone) => `# devkit:guard-completeness
+const completenessFragment = (standalone, scrub) => `# devkit:guard-completeness
 echo "🧩 Completeness gate (commit-msg judge)..."
 crc=0
-${invokeJudge(standalone, 'guard-review completeness', 'crc')}
+${invokeJudge(standalone, 'guard-review completeness', 'crc', '"$1"', scrub)}
 if [ "$crc" -eq 1 ]; then
     echo "   Confirmed completeness gap (hard-by-default; findings above)."
     echo "   Fix the gap, or — with the user's explicit OK — GUARD_NO_COMPLETENESS=1 git commit ..."
@@ -66,7 +65,7 @@ fi
 // The shebang + header + PATH preamble for a FRESH devkit-owned commit-msg hook (the PATH setup is
 // shared with pre-commit; replaceGuardBlock injects it itself when splicing into a consumer hook
 // that has none).
-const COMMIT_MSG_PREAMBLE = `#!/bin/sh
+export const COMMIT_MSG_PREAMBLE = `#!/bin/sh
 # devkit generic commit-msg hook (POSIX sh). The commit-MESSAGE judges live here, not in
 # pre-commit: the message only exists once git has it (passed as the message-file path in $1).
 # The block between the two \`# devkit-guards\` markers is devkit-owned and is the only region
@@ -85,7 +84,7 @@ export function commitMsgGuards(guards = []) {
  * `pkgRel` (monorepo): package-scoped markers, and the judges run from the package dir (its staged
  * diff + guard.config.json). `standalone` swaps local paths for command -v-guarded global bins.
  */
-export function buildCommitMsgBlock(selection, pkgRel = '', { standalone = false } = {}) {
+export function buildCommitMsgBlock(selection, pkgRel = '', { standalone = false, scrubGitEnv = false } = {}) {
     const selected = commitMsgGuards(selection.guards);
     if (!selected.length)
         return null;
@@ -95,19 +94,15 @@ export function buildCommitMsgBlock(selection, pkgRel = '', { standalone = false
         TESTED_STATUS_COMMENT,
     ];
     if (selected.includes('review'))
-        pieces.push(completenessFragment(standalone));
+        pieces.push(completenessFragment(standalone, scrubGitEnv));
     if (selected.includes('sentry'))
-        pieces.push(sentryFragment(standalone));
-    const body = pieces.join('\n\n');
-    const start = markStart(pkgRel);
-    const end = markEnd(pkgRel);
-    if (!pkgRel)
-        return `${start}\n${body}\n${end}`;
+        pieces.push(sentryFragment(standalone, scrubGitEnv));
     // Absolutize the message path BEFORE cd'ing into the package (git hands it repo-root-relative on
     // a normal commit; a linked worktree already passes it absolute), then judge from the package
     // dir. `set --` rewrites $1 in place — the subshell inherits it — and `) || exit 1` propagates
     // an inner block, exactly like the pre-commit package block.
-    return `${start}\ncase "$1" in /*) ;; *) set -- "$PWD/$1" ;; esac\n( cd "${pkgRel}" || exit 1\n\n${body}\n) || exit 1\n${end}`;
+    const prelude = 'case "$1" in /*) ;; *) set -- "$PWD/$1" ;; esac';
+    return wrapGuardBlock(pieces.join('\n\n'), pkgRel, prelude, '\n\n');
 }
 /**
  * A full fresh commit-msg hook: preamble + block + explicit trailing `exit 0`, so a judge's

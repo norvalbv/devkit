@@ -37,7 +37,8 @@ function discardRetiredCopy(root, canonical, stage) {
     if (stage)
         stageBaseline(root, legacy);
 }
-function legacyDevkitBaselines(root) {
+/** Every legacy → canonical baseline pair a pre-0.53 devkit reads from its legacy side. */
+export function legacyDevkitBaselines(root) {
     const legacyDir = join(root, LEGACY_STRUCTURE_BASELINE_DIR);
     const canonicalDir = join(root, STRUCTURE_BASELINE_DIR);
     const modules = new Set([legacyDir, canonicalDir].flatMap((dir) => existsSync(dir)

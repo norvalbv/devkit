@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { commitIndexEnv } from '../ratchets/commit-index.mjs';
 import { existsSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 /**
@@ -15,6 +16,11 @@ export const RETRY_CONDITION = '(Test|Hook) timed out';
 export const RESULTS_NAME = 'results.json';
 /** The advisory sidecar a CLEARING run leaves beside the artifact it removed. */
 export const CLEAR_MARKER_NAME = '.last-clear.json';
+/** vitest 4.1.10's json spelling of a test timeout (an upstream quirk, pinned by tests). Not unique
+ * to timeouts, so it is only trusted alongside a retry — see the coverage-gate decision. */
+export const TIMEOUT_FINGERPRINT = 'Error: STACK_TRACE_ERROR';
+/** A whole-file beforeAll/afterAll timeout lands on the suite, value intact. */
+const HOOK_TIMEOUT = /^Hook timed out in (\d+)ms/;
 /** realpath where possible — vitest reports /private/tmp for a file created under /tmp on macOS. */
 const canonical = (p) => {
     try {
@@ -44,6 +50,13 @@ export function readDiagnosis(resultsFile) {
         // still matches the order vitest reported.
         const failedFiles = new Set();
         const flaky = [];
+        const failedTests = new Map();
+        let allTimedOut = true;
+        let timeoutMs = null;
+        const observe = (ms) => {
+            if (Number.isFinite(ms) && ms > 0)
+                timeoutMs = Math.max(timeoutMs ?? 0, Math.round(ms));
+        };
         for (const suite of report.testResults) {
             const file = suite?.name;
             if (!file)
@@ -53,6 +66,16 @@ export function readDiagnosis(resultsFile) {
                 const messages = a?.failureMessages ?? [];
                 if (a?.status === 'failed') {
                     failed = true;
+                    const name = a.fullName ?? a.title ?? '';
+                    failedTests.set(`${file}\0${name}`, { file, name });
+                    if (messages.length >= 2 && messages.every((m) => m.startsWith(TIMEOUT_FINGERPRINT))) {
+                        // `duration` is the SUM of every attempt; each attempt ran to the same ceiling.
+                        // A missing duration divides to NaN, which observe() discards.
+                        observe(Number(a.duration) / messages.length);
+                    }
+                    else {
+                        allTimedOut = false;
+                    }
                 }
                 else if (a?.status === 'passed' && messages.length > 0) {
                     // Passed, yet carrying the record of a failure: an earlier attempt threw and the retry
@@ -63,10 +86,23 @@ export function readDiagnosis(resultsFile) {
             }
             // A suite can fail with NO assertion results at all — a collection or import error kills the
             // file before any test runs. Naming the file is the point, so take the suite's own verdict too.
+            if (suite.status === 'failed') {
+                // The suite's own message is a file-level error: a hook timeout (readable, value and all),
+                // or anything else — an import error, an afterAll assertion — which is not a timeout.
+                const hook = HOOK_TIMEOUT.exec(suite.message ?? '');
+                if (hook)
+                    observe(Number(hook[1]));
+                else if (suite.message || !failed)
+                    allTimedOut = false;
+            }
             if (failed || suite.status === 'failed')
                 failedFiles.add(file);
         }
-        return { failedFiles: [...failedFiles], flaky };
+        const diagnosis = { failedFiles: [...failedFiles], flaky };
+        if (failedFiles.size > 0) {
+            diagnosis.failures = { tests: [...failedTests.values()], allTimedOut, timeoutMs };
+        }
+        return diagnosis;
     }
     catch {
         // Absent, torn, or shaped unlike VitestReport. All three mean the same thing to the caller —
@@ -83,7 +119,12 @@ export function readDiagnosis(resultsFile) {
  * which cannot run git must not report a missing catalog.
  */
 export function stagedFiles(cwd) {
-    const git = (args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    const git = (args) => execFileSync('git', args, {
+        cwd,
+        env: commitIndexEnv(cwd),
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+    });
     try {
         const top = canonical(git(['rev-parse', '--show-toplevel']).trim());
         return git(['diff', '--cached', '--name-only', '-z'])
@@ -128,6 +169,16 @@ export function humanAge(ms) {
     const hours = Math.round(mins / 60);
     return hours < 48 ? `${hours}h` : `${Math.round(hours / 24)}d`;
 }
+/** The re-run budget never drops below this — the value that turned the field report green. */
+export const RERUN_FLOOR_MS = 25_000;
+/** How far above the observed ceiling a load-starved re-run is given. */
+export const RERUN_MULTIPLIER = 5;
+/** The re-run's timeout: observed ceiling × RERUN_MULTIPLIER, never below RERUN_FLOOR_MS. Observed,
+ * not read from config — see the coverage-gate decision (sc-3473). */
+export function raisedTimeoutMs(failures) {
+    const observed = failures?.timeoutMs ?? 0;
+    return Math.max(RERUN_FLOOR_MS, observed * RERUN_MULTIPLIER);
+}
 /** Enough to see the shape of a failure; short enough not to bury vitest's own summary. */
 const MAX_LISTED_FILES = 10;
 const markerPath = (coverageDir) => join(coverageDir, CLEAR_MARKER_NAME);
@@ -170,16 +221,8 @@ export function readClearMarker(coverageDir) {
         return null;
     }
 }
-/**
- * The producer's post-run lines: what failed, whether it is yours, and — when a retry rescued
- * something — that the suite is flaking on load rather than breaking.
- *
- * The timeout claim is made ONLY from rescued tests. vitest's json reporter replaces a timeout's
- * message with `Error: STACK_TRACE_ERROR`, so the shape cannot be read off a surviving failure; but a
- * rescue can only have happened through RETRY_CONDITION, which matches timeouts alone. Asserting the
- * shape where it is provable and staying quiet where it is not is the difference between a hint and a
- * guess.
- */
+/** The producer's post-run lines: what failed, whether it is yours, and whether it is load. Timeouts
+ * are named only where provable — a retry rescue, or a FailureVerdict that proves every part timed out. */
 export function formatDiagnosis(diagnosis, cwd, staged) {
     const lines = [];
     if (diagnosis.flaky.length > 0) {
@@ -203,6 +246,12 @@ export function formatDiagnosis(diagnosis, cwd, staged) {
                 ? '   None of them are in your staged diff.'
                 : `   In your staged diff: ${mine.map((f) => displayPath(f, cwd)).join(', ')}`);
         }
+        // Said HERE, where the run failed — not only after a rescue — so the remedy arrives before the
+        // next full run is spent rather than after it (sc-3473).
+        if (diagnosis.failures?.allTimedOut) {
+            lines.push('   Every failure timed out — the load-flake shape, not a broken test.');
+            lines.push(`   Re-run with a bigger budget: -- --testTimeout=${raisedTimeoutMs(diagnosis.failures)} --maxWorkers=50%`);
+        }
     }
     return lines;
 }
@@ -218,5 +267,34 @@ export function formatClearMarker(marker, cwd, now = Date.now()) {
     if (marker.failedFiles.length > 0) {
         lines.push(`   Failed: ${marker.failedFiles.map((f) => displayPath(f, cwd)).join(', ')}`);
     }
+    return lines;
+}
+/** Said BEFORE the second pass starts: what is about to happen, why, and how to refuse it. */
+export function formatRerunNotice(budgetMs) {
+    return [
+        `🔁 Every failure timed out, so re-running the whole suite ONCE at testTimeout=${budgetMs}ms.`,
+        '   A retry cannot help here: vitest re-runs a timed-out test at the same ceiling, and under',
+        '   load it starves again. The artifact is published only if this complete run passes.',
+        '   Opt out with DEVKIT_COVERAGE_NO_RERUN=1 or --retry=0, or pass your own --testTimeout.',
+        '   Still starving? Also lower parallelism: -- --maxWorkers=50%',
+    ];
+}
+/** Said AFTER a green second pass: what only the bigger budget got through — flaky, not green. */
+export function formatRerunRescue(first, cwd, budgetMs) {
+    const tests = first?.failures?.tests ?? [];
+    const files = first?.failedFiles ?? [];
+    const items = tests.length > 0
+        ? tests.map((t) => `${displayPath(t.file, cwd)} > ${t.name}`)
+        : files.map((f) => displayPath(f, cwd));
+    if (items.length === 0)
+        return [];
+    const lines = [
+        `⚠️  ${items.length} ${tests.length > 0 ? 'test(s)' : 'file(s)'} passed only at the raised timeout (${budgetMs}ms) — the suite is flaking, not green:`,
+    ];
+    for (const item of items.slice(0, MAX_LISTED_FILES))
+        lines.push(`     ${item}`);
+    const hidden = items.length - MAX_LISTED_FILES;
+    if (hidden > 0)
+        lines.push(`     …and ${hidden} more`);
     return lines;
 }
