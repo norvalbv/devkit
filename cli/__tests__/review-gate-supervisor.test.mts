@@ -317,7 +317,7 @@ function runnerWithoutReread(root: string, reread: keyof typeof REREADS | 'all' 
   mkdirSync(shipDir, { recursive: true });
   symlinkSync(join(HERE, '../lib/ship/review'), join(shipDir, 'review'));
   symlinkSync(join(HERE, '../../gate-engine'), join(root, 'prefix/gate-engine'));
-  const keys = reread === 'all' ? (Object.keys(REREADS) as (keyof typeof REREADS)[]) : [reread];
+  const keys: (keyof typeof REREADS)[] = reread === 'all' ? ['tee', 'supervisor'] : [reread];
   let stripped = readFileSync(GATE_RUNNER, 'utf8');
   for (const key of keys) {
     const before = stripped;
