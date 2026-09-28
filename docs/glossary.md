@@ -87,4 +87,6 @@ The jargon you'll meet in devkit's help, prompts, and gate output — in one pla
   devkit's (devkit's hook lives outside the committed tree). The per-clone `git ci` alias re-points
   `core.hooksPath` to devkit's hook just before committing, so the overlay gates actually run. A plain
   `git commit` (or an IDE/GUI commit) **skips** them — see [troubleshooting.md](troubleshooting.md). An
-  opt-in machine-global husky shim (`devkit init --overlay --global-commit-gate`) closes this gap.
+  opt-in machine-global husky shim (`devkit init --overlay --global-commit-gate`) closes this gap for the
+  **pre-commit** gates only: the commit-message judges (completeness, sentry) live in devkit's
+  `.devkit/hooks/commit-msg` and still run only via `git ci` or `devkit ship`.

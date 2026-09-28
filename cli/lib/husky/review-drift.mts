@@ -23,6 +23,7 @@ export function reviewHookDrift(cwd: string): string | null {
   if (!cfg) return 'missing .devkit/config.json';
   const { gitRoot, pkgRel } = detectGitRoot(cwd);
   if (cfg.overlay) {
+    // Pre-commit drift only: review never runs commit-msg (completeness is a commit gate, sc-2361).
     const sync = syncOverlayHook(gitRoot, cwd, cfg, { dryRun: true });
     return sync.drift ? 'overlay pre-commit differs from the current generator' : null;
   }

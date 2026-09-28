@@ -454,7 +454,7 @@ describe('buildOverlayHook — gates-only guard for the global init.sh shim', ()
   });
 
   it('still chains to the repo hook for the normal (non-shim) path', () => {
-    expect(hook).toContain('exec sh ".husky/pre-commit" "$@"');
+    expect(hook).toContain('exec sh .husky/pre-commit "$@"'); // shQuote: a safe path stays bare
   });
 
   it('runs the deterministic orchestrator command -v-guarded (global bin)', () => {

@@ -57,10 +57,10 @@ trap '__dk_clear_commit_state' EXIT`;
 // (gate-engine/review/completeness.mts): a confident FAIL exits 1, warn/skip 0, fail-open 2,
 // and 3 = judge outage under GUARD_AI_STRICT (ship) — fail CLOSED, mirroring the pre-commit
 // AI fragments (a strict-ship outage must never silently pass the gate).
-const completenessFragment = (standalone: boolean) => `# devkit:guard-completeness
+const completenessFragment = (standalone: boolean, scrub: boolean) => `# devkit:guard-completeness
 echo "🧩 Completeness gate (commit-msg judge)..."
 crc=0
-${invokeJudge(standalone, 'guard-review completeness', 'crc')}
+${invokeJudge(standalone, 'guard-review completeness', 'crc', '"$1"', scrub)}
 if [ "$crc" -eq 1 ]; then
     echo "   Confirmed completeness gap (hard-by-default; findings above)."
     echo "   Fix the gap, or — with the user's explicit OK — GUARD_NO_COMPLETENESS=1 git commit ..."
@@ -80,7 +80,7 @@ fi
 // The shebang + header + PATH preamble for a FRESH devkit-owned commit-msg hook (the PATH setup is
 // shared with pre-commit; replaceGuardBlock injects it itself when splicing into a consumer hook
 // that has none).
-const COMMIT_MSG_PREAMBLE = `#!/bin/sh
+export const COMMIT_MSG_PREAMBLE = `#!/bin/sh
 # devkit generic commit-msg hook (POSIX sh). The commit-MESSAGE judges live here, not in
 # pre-commit: the message only exists once git has it (passed as the message-file path in $1).
 # The block between the two \`# devkit-guards\` markers is devkit-owned and is the only region
@@ -109,7 +109,7 @@ export function commitMsgGuards(guards: string[] = []): string[] {
 export function buildCommitMsgBlock(
   selection: CommitMsgSelection,
   pkgRel = '',
-  { standalone = false }: { standalone?: boolean } = {},
+  { standalone = false, scrubGitEnv = false }: { standalone?: boolean; scrubGitEnv?: boolean } = {},
 ): string | null {
   const selected = commitMsgGuards(selection.guards);
   if (!selected.length) return null;
@@ -118,8 +118,8 @@ export function buildCommitMsgBlock(
     COMMIT_ATTEMPT_HANDOFF,
     TESTED_STATUS_COMMENT,
   ];
-  if (selected.includes('review')) pieces.push(completenessFragment(standalone));
-  if (selected.includes('sentry')) pieces.push(sentryFragment(standalone));
+  if (selected.includes('review')) pieces.push(completenessFragment(standalone, scrubGitEnv));
+  if (selected.includes('sentry')) pieces.push(sentryFragment(standalone, scrubGitEnv));
   // Absolutize the message path BEFORE cd'ing into the package (git hands it repo-root-relative on
   // a normal commit; a linked worktree already passes it absolute), then judge from the package
   // dir. `set --` rewrites $1 in place — the subshell inherits it — and `) || exit 1` propagates

@@ -23,6 +23,9 @@ touched temporarily while the isolated review worktrees exist.
 Overlay setup is local to each checkout and is not copied by Git. Before reviewing a fresh clone of
 an overlay consumer, run \`devkit init --overlay --review\` inside that target checkout.
 
+The completeness and sentry judges read a commit message, so they run at commit-msg (\`git ci\`,
+\`devkit ship\`) and never here; a green review can still be followed by a completeness block.
+
 WARNING: target-controlled hooks and package scripts execute. Review trusted targets only.
 
 Output streams for the whole run, not just the gates: setup and teardown emit a
