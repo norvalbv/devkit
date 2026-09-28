@@ -44,7 +44,7 @@ function declaredMajor(range: string): number {
  * beside a TS6 library (the documented side-by-side arrangement) declares TS6 here and keeps the
  * TypeScript parser, which is correct — that repo's parser still resolves a compiler API.
  */
-export function structureParserDeps(pkg: PackageJson): Record<string, string> {
+export function structureParserDeps(pkg: PackageJson) {
   const declared = pkg.devDependencies?.typescript ?? pkg.dependencies?.typescript ?? '';
   if (declaredMajor(declared) < 7) return { '@typescript-eslint/parser': '^8.0.0' };
   return {
