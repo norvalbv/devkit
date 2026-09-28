@@ -45,30 +45,29 @@ import type { ReconcileManifest, ReconcilePath } from '../reconcile.mts';
 
 const WS_SPLIT = /\s+/; // split a `git ls-tree` line into its mode/type/sha/path columns
 const PR_DIGITS = /^\d+$/; // a non-empty --pr is an integer; anything else → null
-const LITERAL_GIT_ENV = { ...process.env };
-for (const key of [
-  'GIT_LITERAL_PATHSPECS',
-  'GIT_GLOB_PATHSPECS',
-  'GIT_NOGLOB_PATHSPECS',
-  'GIT_ICASE_PATHSPECS',
-])
-  delete LITERAL_GIT_ENV[key];
+/** process.env minus git's global pathspec modes, which misread or reject `:(literal)` selectors. */
+export function literalPathspecEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  for (const key of [
+    'GIT_LITERAL_PATHSPECS',
+    'GIT_GLOB_PATHSPECS',
+    'GIT_NOGLOB_PATHSPECS',
+    'GIT_ICASE_PATHSPECS',
+  ])
+    delete env[key];
+  return env;
+}
+const LITERAL_GIT_ENV = literalPathspecEnv();
 
-/** Run git in <root>, return trimmed stdout, or null if the command fails (missing path, etc.). */
-function git(root: string, args: string[], literalPaths: boolean): string | null {
+/** Run git in <root>, return trimmed stdout, or null on failure. Shipped paths are concrete
+ *  filenames (sc-2425), so pathspecs are literal; the scrubbed env avoids inherited glob modes. */
+function git(root: string, args: string[]): string | null {
   try {
-    return execFileSync(
-      'git',
-      ['-C', root, ...(literalPaths ? ['--literal-pathspecs'] : []), ...args],
-      {
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'ignore'],
-        // `--literal-pathspecs` conflicts with inherited glob/noglob modes. Concrete branch-derived
-        // filenames opt into a scrubbed environment; legacy explicit-pathspec callers retain their
-        // established Git semantics until Story #2425 decides that compatibility contract.
-        env: literalPaths ? LITERAL_GIT_ENV : process.env,
-      },
-    ).trim();
+    return execFileSync('git', ['-C', root, '--literal-pathspecs', ...args], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      env: LITERAL_GIT_ENV,
+    }).trim();
   } catch {
     return null;
   }
@@ -156,26 +155,20 @@ function classifyLiteral(
  * PRE-deletion committed blob so reconcile can prove still-deleted-as-shipped vs re-created).
  * Returns null only if a deleted path has no base blob either (never shipped anything real).
  */
-function classify(
-  gitRoot: string,
-  baseSha: string,
-  p: string,
-  literalPaths: boolean,
-): ReconcilePath | null {
+function classify(gitRoot: string, baseSha: string, p: string): ReconcilePath | null {
   if (p.startsWith('/') || p.split('/').includes('..')) return null; // repo-relative paths only (defense-in-depth)
   const abs = join(gitRoot, p);
   if (existsSync(abs)) {
-    const blobSha = git(gitRoot, ['hash-object', '--', p], literalPaths);
+    const blobSha = git(gitRoot, ['hash-object', '--', p]);
     if (!blobSha) return null;
-    const existedAtBase =
-      git(gitRoot, ['cat-file', '-e', `${baseSha}:${p}`], literalPaths) !== null;
+    const existedAtBase = git(gitRoot, ['cat-file', '-e', `${baseSha}:${p}`]) !== null;
     return { path: p, blobSha, mode: worktreeMode(abs), op: existedAtBase ? 'modify' : 'add' };
   }
   // Deleted: the pre-deletion blob + its tree mode come from BASE.
-  const lsTree = git(gitRoot, ['ls-tree', baseSha, '--', p], literalPaths); // "<mode> blob <sha>\t<path>"
+  const lsTree = git(gitRoot, ['ls-tree', baseSha, '--', p]); // "<mode> blob <sha>\t<path>"
   if (!lsTree) return null;
   const [mode] = lsTree.split(WS_SPLIT);
-  const blobSha = git(gitRoot, ['rev-parse', `${baseSha}:${p}`], literalPaths);
+  const blobSha = git(gitRoot, ['rev-parse', `${baseSha}:${p}`]);
   if (!blobSha) return null;
   return { path: p, blobSha, mode, op: 'delete' };
 }
@@ -275,7 +268,7 @@ export function recordShip(
     const base = treeBlobs(hashRoot, baseSha, paths);
     if (!tip || !base) return fail('could not read the pinned tip/base trees');
     classified = paths.map((p) => classifyLiteral(p, tip, base));
-  } else classified = paths.map((p) => classify(hashRoot, baseSha, p, false));
+  } else classified = paths.map((p) => classify(hashRoot, baseSha, p));
   const entries = classified.filter((e): e is ReconcilePath => e !== null);
   // Before the lock (and before the no-entry throw below): an all-unresolvable merge is a benign no-op.
   if (entries.length === 0) return fail('no recordable paths (all empty/unresolvable)');

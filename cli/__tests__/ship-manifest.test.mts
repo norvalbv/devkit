@@ -153,6 +153,58 @@ describe('reconcile-manifest-write — classifies shipped paths', () => {
     });
   });
 
+  // sc-2425: explicit-path ships (no --literal-paths) name files too. A deleted magic-named path
+  // read back through a bare `ls-tree -- <path>` matched nothing and silently dropped the delete.
+  it('classifies an explicit deleted magic-named path literally, under any ambient pathspec mode', () => {
+    const { root, g } = repo();
+    const magic = ':(exclude)*';
+    writeFileSync(join(root, magic), 'literal filename\n');
+    g('--literal-pathspecs', 'add', '--', magic);
+    g('commit', '-q', '-m', 'add magic-looking filename');
+    const base = g('rev-parse', 'HEAD');
+    const blob = g('rev-parse', `${base}:${magic}`);
+    rmSync(join(root, magic));
+
+    const r = write(root, base, ['--pr', '7', '--', magic], { ...GENV, GIT_GLOB_PATHSPECS: '1' });
+    expect(r.status, r.stderr).toBe(0);
+    expect(readManifest(root).branches['feat/x'].paths).toEqual([
+      { path: magic, op: 'delete', mode: '100644', blobSha: blob },
+    ]);
+  });
+
+  // `rev-parse <rev>:*.txt` without --verify echoes the argument back and exits 0 (git reads a glob
+  // as a possible filename), so the recorded blob would be that text instead of an object id.
+  it('records a real blob id for a deleted glob-named path', () => {
+    const { root, g } = repo();
+    writeFileSync(join(root, '*.txt'), 'glob name\n');
+    g('--literal-pathspecs', 'add', '--', '*.txt');
+    g('commit', '-q', '-m', 'add glob-named file');
+    const base = g('rev-parse', 'HEAD');
+    rmSync(join(root, '*.txt'));
+
+    const r = write(root, base, ['--pr', '7', '--', '*.txt']);
+    expect(r.status, r.stderr).toBe(0);
+    expect(readManifest(root).branches['feat/x'].paths).toEqual([
+      {
+        path: '*.txt',
+        op: 'delete',
+        mode: '100644',
+        blobSha: g('rev-parse', '--verify', `${base}:*.txt`),
+      },
+    ]);
+  });
+
+  it('an explicit ./ spelling still classifies against the base (literal keeps ./ normalising)', () => {
+    const { root, g, base } = repo();
+    rmSync(join(root, 'old.ts'));
+
+    const r = write(root, base, ['--pr', '7', '--', './old.ts']);
+    expect(r.status, r.stderr).toBe(0);
+    expect(readManifest(root).branches['feat/x'].paths).toEqual([
+      { path: './old.ts', op: 'delete', mode: '100644', blobSha: g('rev-parse', `${base}:old.ts`) },
+    ]);
+  });
+
   it('records both sides of a committed file-to-directory transition in literal branch mode', () => {
     const { root, g } = repo();
     writeFileSync(join(root, 'shape'), 'old file\n');
