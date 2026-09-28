@@ -21,6 +21,22 @@
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { matchesFolderName, resolvePatterns } from './grammar.mjs';
+// Child folder `name`'s grammar node: named mapping, else first recurse rule whose folderName matches
+// (the first id under a domainGate; `matched: false` if none). `null`: no child folder is allowed.
+export function childGrammarNode(node, name, rules, exts) {
+    const named = node.folders?.[name];
+    if (named)
+        return { node: named, matched: true };
+    const ids = node.recurse == null ? [] : Array.isArray(node.recurse) ? node.recurse : [node.recurse];
+    if (node.domainGate)
+        return { node: ids[0] != null ? rules[ids[0]] : undefined, matched: true };
+    if (ids.length === 0)
+        return null;
+    const matched = ids
+        .map((id) => rules[id])
+        .find((rule) => rule && matchesFolderName(name, rule.folderName, exts));
+    return { node: matched ?? rules[ids[0]], matched: Boolean(matched) };
+}
 /**
  * Walk one structure.trees[] entry and return sorted tree-relative violator paths (the grandfather
  * set). `treeSpec` is the tree entry ({ root, grammar, libDomains?, frozenDirs?, ignoredDirs?,
@@ -84,28 +100,16 @@ export function walkTree(treeSpec, absRoot, exts) {
                 allFiles(childRel); // one-way door: every descendant grandfathered
                 continue;
             }
-            const named = node.folders?.[e.name];
-            if (named) {
-                walk(childRel, named, nodeBroken);
-            }
-            else if (node.domainGate) {
-                const registered = (libDomains[node.domainGate] ?? []).includes(e.name);
-                const id = Array.isArray(node.recurse) ? node.recurse[0] : node.recurse;
-                walk(childRel, id != null ? rules[id] : undefined, nodeBroken || !registered);
-            }
-            else if (node.recurse) {
-                // `recurse` may be a list of rule ids (sibling families, e.g. react-app pages → pageFolder OR
-                // componentFolder). Dispatch to the FIRST rule whose folderName matches; broken if none do.
-                const ids = Array.isArray(node.recurse) ? node.recurse : [node.recurse];
-                const matched = ids
-                    .map((id) => rules[id])
-                    .find((r) => r && matchesFolderName(e.name, r.folderName, exts));
-                walk(childRel, matched ?? rules[ids[0]], nodeBroken || !matched);
-            }
-            else {
+            const child = childGrammarNode(node, e.name, rules, exts);
+            if (!child) {
                 add(`${childRel}/`); // unexpected folder in a flat/leaf tree
                 allFiles(childRel);
+                continue;
             }
+            const unregistered = !node.folders?.[e.name] &&
+                Boolean(node.domainGate) &&
+                !(libDomains[node.domainGate ?? ''] ?? []).includes(e.name);
+            walk(childRel, child.node, nodeBroken || !child.matched || unregistered);
         }
     }
     // Root node = the tree's grammar, with entryAllowlist merged into its allowed root files.

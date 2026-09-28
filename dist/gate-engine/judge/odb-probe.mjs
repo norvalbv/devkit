@@ -35,6 +35,7 @@
  *      fallback message says so rather than implying a verified-clean staged set.
  */
 import { execFileSync } from 'node:child_process';
+import { commitIndexEnv } from '../ratchets/commit-index.mjs';
 import { emitGateInfraFailure } from './gate-events.mjs';
 /** A submodule's commit lives in the SUBMODULE's object database; absent here by design. */
 const GITLINK_MODE = '160000';
@@ -51,6 +52,7 @@ const PROBE_TIMEOUT_MS = 15_000;
 function git(cwd, args, input) {
     return execFileSync('git', args, {
         cwd,
+        env: commitIndexEnv(cwd),
         encoding: 'utf8',
         maxBuffer: MAX_BUFFER,
         timeout: PROBE_TIMEOUT_MS,

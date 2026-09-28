@@ -17,7 +17,8 @@ export function parseArgs(argv) {
             a === '--update-pr-body' ||
             a === '--draft' ||
             a === '--resumed' ||
-            a === '--merge-paths')
+            a === '--merge-paths' ||
+            a === '--keep-body-file')
             booleans.add(a.slice(2));
         else if (a === '--link')
             links.push(argv[++i] ?? '');

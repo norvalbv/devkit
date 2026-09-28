@@ -13,7 +13,15 @@ const SQLITE_SUFFIXES = ['', '-wal', '-shm', '-journal'];
 // Ratchet/cache gates legitimately update their own ignored baseline/cache state during a run, so
 // these roots are allowed to drift between the captured source and the private copy (verify checks
 // only that they stay symlink-free); every other projected root is immutable and must match exactly.
-const MUTABLE_ROOTS = ['.fallow', 'fallow-baselines', '.decisions', '.devkit/baselines'];
+// The waiver store is here because the correctness gate's reconcile persists an env-channel override
+// into it mid-run.
+const MUTABLE_ROOTS = [
+    '.fallow',
+    'fallow-baselines',
+    '.decisions',
+    '.devkit/baselines',
+    '.devkit/correctness-overrides.json',
+];
 const PRESENT_STATE_TYPES = ['file', 'directory', 'link-file', 'link-directory'];
 const LINK_STATE_FIELDS = ['linkTarget', 'linkPath', 'physicalPath'];
 function manifestHash(value) {

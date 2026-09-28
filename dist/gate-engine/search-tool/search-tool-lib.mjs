@@ -23,6 +23,7 @@
  * Regexes are hoisted to module scope (devkit lint: useTopLevelRegex) — they are
  * the classifier's static grammar, reused on every hook invocation.
  */
+import { CODE_KEYWORDS, exactSignalReason, RE_DESCRIPTIVE, RE_LEADING_CAP, RE_LEADING_NONWORD, RE_QUESTION_WORD, RE_QUOTE_OR_COLON, } from './search-tool-exact.mjs';
 import { matchUnquoted, splitUnquotedSegments, tokenizeArgv } from './search-tool-shell.mjs';
 export { hasCommandSearch, isPrimarySearchCommand, normalize } from './search-tool-shell.mjs';
 // --- extractPattern ---
@@ -66,40 +67,9 @@ const RE_REL_PATH = /^\.\.?\//;
 const RE_SLASH = /\//;
 const RE_REGEX_META = /[\\^$|(){}[\]?+*]/;
 const RE_SINGLE_IDENTIFIER = /^[\w.-]+$/;
-const RE_LEADING_CAP = /^[A-Z]/;
 const RE_QUOTECHAR = /['"`]/;
-const RE_QUESTION_WORD = /^(where|how|what|which|who|why|when)\b/i;
-const RE_DESCRIPTIVE = /^(function|code|logic|handler|component|hook)\s+(that|which|for|to)\b/i;
 const RE_META_OR_PUNCT = /[\\^$|(){}[\]?+*=:]/;
-const RE_QUOTE_OR_COLON = /['"`:]/;
 const RE_PLAIN_WORD = /^[a-z]+$/;
-// A verbatim code snippet (e.g. `export async function getFooBar`, copy-pasted
-// to grep for) reads as multi-word natural language by word count alone but
-// is a literal search: see looksLikeCodeSnippet for the exact contract
-// (every word but the last must be one of these declaration modifiers).
-const CODE_KEYWORDS = new Set([
-    'export',
-    'import',
-    'async',
-    'function',
-    'const',
-    'let',
-    'var',
-    'class',
-    'interface',
-    'type',
-    'def',
-    'return',
-    'public',
-    'private',
-    'protected',
-    'static',
-    'struct',
-    'fn',
-    'impl',
-    'enum',
-    'namespace',
-]);
 // Flags that consume a SEPARATE argv token as a DISCARDABLE value (not
 // `=`-joined — tokenizeArgv already merges that form into one flag token;
 // and NOT `-e`/`--regexp`, whose value IS a pattern, not discardable — see
@@ -112,6 +82,9 @@ const CODE_KEYWORDS = new Set([
 // would otherwise leak their value into the pattern or the target list.
 const RE_VALUE_FLAG = /^(-[ABCmfdD]|--(after-context|before-context|context|max-count|file|directories|devices))$/;
 const RE_PATTERN_FLAG = /^(-e|--regexp)$/;
+// `-ePAT`, `--regexp=PAT` and a no-value cluster ending in e (`-rne PAT`) spell the same flag.
+const RE_PATTERN_FLAG_JOINED = /^(?:-([a-zA-Z]*?)e([\s\S]*)|--regexp=([\s\S]*))$/;
+const RE_VALUE_FLAG_LETTER = /[ABCmfdD]/;
 // Classify a grep-family invocation's argv tokens (everything after the bin
 // name) into: values passed via `-e`/`--regexp` (each IS a pattern, never a
 // target — grep's own contract once `-e` appears at all: with no `-e`,
@@ -137,6 +110,7 @@ function classifyOperands(tokens, bin) {
     const isValueFlag = (t) => RE_VALUE_FLAG.test(t) || (isFd && RE_PATTERN_FLAG.test(t));
     const patternValues = [];
     const positionals = [];
+    const flags = []; // every flag token not consumed as -e, for the exemption's allowlist
     for (let i = 0; i < tokens.length; i++) {
         const t = tokens[i];
         if (!t.startsWith('-')) {
@@ -148,10 +122,25 @@ function classifyOperands(tokens, bin) {
                 patternValues.push(tokens[++i]);
             continue;
         }
+        const joined = isFd ? null : t.match(RE_PATTERN_FLAG_JOINED);
+        if (joined && joined[3] !== undefined) {
+            patternValues.push(joined[3]);
+            continue;
+        }
+        if (joined && !RE_VALUE_FLAG_LETTER.test(joined[1])) {
+            if (joined[1])
+                flags.push(`-${joined[1]}`);
+            if (joined[2])
+                patternValues.push(joined[2]);
+            else if (i + 1 < tokens.length)
+                patternValues.push(tokens[++i]);
+            continue;
+        }
+        flags.push(t);
         if (isValueFlag(t))
             i += 1; // discard this flag's value token
     }
-    return { patternValues, positionals };
+    return { patternValues, positionals, flags };
 }
 // For each segment that actually INVOKES a grep-family bin (not merely
 // mentions one inside a quote — matchUnquoted skips any match that falls
@@ -171,12 +160,16 @@ function grepInvocations(cmd) {
         const match = matchUnquoted(segment, RE_GREP_SCOPE);
         if (!match)
             continue;
-        const { patternValues, positionals } = classifyOperands(tokenizeArgv(match[2]), match[1]);
+        const { patternValues, positionals, flags } = classifyOperands(tokenizeArgv(match[2]), match[1]);
         // NOT filtering bare cwd-refs (`.`/`..`) out of targets here — see
         // allTargetsMissEveryRoot's doc comment for why a pre-filter is wrong
         // for a MIXED target list.
+        const patterns = patternValues.length ? patternValues : positionals.slice(0, 1);
         invocations.push({
-            pattern: patternValues.length ? patternValues[0] : (positionals[0] ?? null),
+            pattern: patterns[0] ?? null,
+            patterns,
+            bin: match[1],
+            flags,
             targets: patternValues.length ? positionals : positionals.slice(1),
         });
     }
@@ -218,16 +211,16 @@ export function extractPattern(c) {
  * `src/`, so that's no longer a blocker.
  */
 export function firstAdvisablePattern(cmd, excludeRoots, scanRoots) {
-    for (const inv of grepInvocations(cmd)) {
-        if (inv.pattern === null)
-            continue;
-        if (allTargetsMatchSomeRoot(inv.targets, excludeRoots))
-            continue;
-        if (allTargetsMissEveryRoot(inv.targets, scanRoots))
-            continue;
-        return inv.pattern;
-    }
-    return null;
+    return advisablePatterns(cmd, excludeRoots, scanRoots)[0] ?? null;
+}
+// Every in-scope invocation's pattern, in order. The counter needs all of them:
+// a conceptual grep chained after an exact one must not ride its exemption (sc-3404).
+export function advisablePatterns(cmd, excludeRoots, scanRoots) {
+    return inScopeInvocations(cmd, excludeRoots, scanRoots).flatMap((inv) => inv.patterns);
+}
+export function inScopeInvocations(cmd, excludeRoots, scanRoots) {
+    return grepInvocations(cmd).filter((inv) => !allTargetsMatchSomeRoot(inv.targets, excludeRoots) &&
+        !allTargetsMissEveryRoot(inv.targets, scanRoots));
 }
 // `find`'s argv is `[path...] [expression]` — its paths are the LEADING
 // non-flag tokens, not "everything after token 0" (find has no pattern
@@ -367,7 +360,7 @@ function looksLikeCodeSnippet(words) {
  * Classify a pattern as literal (grep is correct) or conceptual (steer toward
  * the semantic-search tool). Verdicts: literal | conceptual_medium | conceptual_high.
  */
-// Reason: the branches ARE the literal-vs-conceptual classification algorithm: each guard is a distinct verdict tier (filesystem path, regex/glob, single identifier, error-message shape, question word, descriptive phrasing, code-snippet shape, 4-word/3-word/2-word thresholds) checked in priority order; extracting them hides the heuristic ladder
+// Reason: the branches ARE the literal-vs-conceptual classification algorithm: each guard is a distinct verdict tier (filesystem path, regex/glob, single identifier, error-message shape, question word, descriptive phrasing, code-snippet shape, 4-word threshold, 3-word tier with its exact-punctuation / log-sentinel escapes, 2-word threshold) checked in priority order; extracting them hides the heuristic ladder
 // fallow-ignore-next-line complexity
 export function classify(pattern) {
     const trimmed = (pattern ?? '').trim();
@@ -394,11 +387,12 @@ export function classify(pattern) {
         return { verdict: 'literal', reason: 'error message shape', wordCount };
     }
     // English question word → high confidence conceptual.
-    if (RE_QUESTION_WORD.test(trimmed)) {
+    const lead = trimmed.replace(RE_LEADING_NONWORD, ''); // `(where is auth)` still leads with a question
+    if (RE_QUESTION_WORD.test(lead)) {
         return { verdict: 'conceptual_high', reason: 'English question word', wordCount };
     }
     // "function that ..." / "code that ..." → high.
-    if (RE_DESCRIPTIVE.test(trimmed)) {
+    if (RE_DESCRIPTIVE.test(lead)) {
         return { verdict: 'conceptual_high', reason: 'descriptive phrasing', wordCount };
     }
     // Verbatim code snippet (keyword + identifier token + no connective) → literal.
@@ -423,6 +417,10 @@ export function classify(pattern) {
         if (RE_LEADING_CAP.test(trimmed) && RE_QUOTE_OR_COLON.test(trimmed)) {
             return { verdict: 'literal', reason: 'error message shape', wordCount };
         }
+        // Copied-output signals (sc-3404); the 4+-word tier already goes literal on punctuation.
+        const exactReason = exactSignalReason(trimmed, words);
+        if (exactReason)
+            return { verdict: 'literal', reason: exactReason, wordCount };
         return { verdict: 'conceptual_medium', reason: '3 words', wordCount };
     }
     // 2 words: conceptual only if BOTH are plain lowercase English.

@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { copyFileSync, mkdirSync, mkdtempSync, rmdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { commitIndexEnv } from '../../../../gate-engine/ratchets/commit-index.mjs';
 export const MAX_GIT_OUTPUT = 128 * 1024 * 1024;
 const GIT_LOCK_WAIT_MS = 5_000;
 const GIT_LOCK_RETRY_MS = 25;
@@ -16,6 +17,7 @@ const GIT_LOCK_RELEASE_OPERATIONS = {
 export function git(cwd, args) {
     const output = execFileSync('git', [...args], {
         cwd,
+        env: commitIndexEnv(cwd),
         encoding: 'utf8',
         maxBuffer: MAX_GIT_OUTPUT,
     });

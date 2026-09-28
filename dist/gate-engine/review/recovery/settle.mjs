@@ -24,6 +24,7 @@
 import { emitGateEvent } from '../../judge/gate-events.mjs';
 import { composeTranscript, saveTranscript } from '../../judge/transcript-store.mjs';
 import { savePasses } from '../cache.mjs';
+import { reviewBaseContext } from '../evidence/base-context.mjs';
 import { archiveFailedDiff } from '../evidence/diff-archive.mjs';
 import { cachedLensFields, itemFields } from '../evidence/items.mjs';
 import { holdLensPart, taskLabel } from '../lens/split.mjs';
@@ -52,6 +53,9 @@ export function settleReviewOutcome(ctx, t, outcome, durationMs, retried = false
                 at: new Date().toISOString(),
                 model: res.model ?? ctx.firstModel,
                 duration_ms: durationMs,
+                // The tree this verdict was judged against — the gate pins it before any evidence is read,
+                // so a later replay can name it instead of borrowing its own run's base (sc-3468).
+                base_sha: reviewBaseContext(ctx.cwd).baseSha,
                 ...(t.splitOf ? cachedLensFields(res) : {}), // spill-safe lens re-seed (sc-1475)
             },
         });

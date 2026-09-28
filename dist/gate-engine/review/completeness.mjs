@@ -40,6 +40,7 @@ import { reportGateInfraFailure } from '../judge/odb-probe.mjs';
 import { DEEP_JUDGE_TIMEOUT_MS, execJudgeAsync, strictRemedy } from '../judge/run-judge.mjs';
 import { loadCache, savePasses } from './cache.mjs';
 import { buildCappedDiffEvidence } from './diff-evidence.mjs';
+import { commitIndexEnv } from '../ratchets/commit-index.mjs';
 import { stagedTreeHash } from './evidence/staged-git.mjs';
 import { cacheKey, parseReviewVerdict, resolveEscalationModel, stripFrontmatter, } from './reviewers.mjs';
 const AGENT_NAME = 'feature-completeness-reviewer';
@@ -225,6 +226,7 @@ export async function runCompleteness(msgFile, cwd = process.cwd(), { exec = exe
         stagedIdentity = snapshot.identity;
         const files = execFileSync('git', ['diff', '--name-only', ...snapshot.range], {
             cwd,
+            env: commitIndexEnv(cwd),
             encoding: 'utf8',
         })
             .split('\n')
@@ -276,11 +278,13 @@ export async function runCompleteness(msgFile, cwd = process.cwd(), { exec = exe
         // on (the detect gate's W-3 lesson).
         const stat = execFileSync('git', ['diff', '--stat', ...snapshot.range], {
             cwd,
+            env: commitIndexEnv(cwd),
             encoding: 'utf8',
             maxBuffer: 64 * 1024 * 1024,
         });
         diff = buildCappedDiffEvidence(execFileSync('git', ['-c', 'diff.noprefix=false', '-c', 'diff.mnemonicPrefix=false', 'diff', ...snapshot.range], {
             cwd,
+            env: commitIndexEnv(cwd),
             encoding: 'utf8',
             maxBuffer: 64 * 1024 * 1024,
         }), stat);

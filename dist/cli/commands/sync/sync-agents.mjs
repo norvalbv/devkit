@@ -11,6 +11,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { AGENT_TARGETS } from '../../lib/components.mjs';
 import { detectGitRoot } from '../../lib/detect-git-root.mjs';
+import { assertRunsFromSource } from '../../lib/doctor/pin/runner-identity.mjs';
 import { packageDir, readJson, sha256, writeIfAbsent } from '../../lib/fs-helpers.mjs';
 import { assertLegacyAssetWriterCompatible, nextLegacyManifestGeneratedAt, } from '../../lib/install/agent-asset-manifest/compatibility.mjs';
 import { findProviderNativeAssetConflicts, requiresProviderNativeLifecycle, syncProviderNativeAssets, withAgentAssetLifecycleLock, } from '../../lib/install/agent-asset-manifest/lifecycle.mjs';
@@ -41,6 +42,8 @@ export function listAgents(dir) {
  */
 export function syncAgents(args, cwd, targets = AGENT_TARGETS, { skipTracked, override = () => false } = {}) {
     const dryRun = args.includes('--dry-run');
+    if (!dryRun)
+        assertRunsFromSource(cwd, 'sync-agents');
     return withAgentAssetLifecycleLock(cwd, dryRun, () => syncAgentsLocked(args, cwd, targets, { skipTracked, override }));
 }
 function syncAgentsLocked(args, cwd, targets, { skipTracked, override = () => false }) {

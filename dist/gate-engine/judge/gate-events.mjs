@@ -47,6 +47,19 @@ export function emitCacheHit(judge, model, durationMs) {
             : {}),
     });
 }
+/** cache_hit for a domain reviewer. Other emitters keep emitCacheHit, whose rows carry no base
+ * fields, and the digest reads an absent field as "this cache key covers the tree". */
+export function emitReviewCacheHit(hit) {
+    emitGateEvent({
+        type: 'cache_hit',
+        judge: hit.judge,
+        // JSON.stringify drops an undefined field, so an unknown model is omitted, not blank.
+        model: hit.model || undefined,
+        duration_ms: Math.max(0, Math.round(hit.durationMs)),
+        judged_base_sha: hit.judgedBaseSha,
+        base_state: hit.baseState,
+    });
+}
 /** cache_hit for completeness's branch+message sticky key, which a reshaped diff can reuse. Same
  * row and label per Ruling (3); byte-keyed callers keep emitCacheHit, which covers the diff. */
 export function emitIntentCacheHit(hit) {

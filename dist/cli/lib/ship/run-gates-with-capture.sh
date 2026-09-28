@@ -124,6 +124,23 @@ run_gates_with_capture() {
     done < <(jobs -p)
     [ "$running" -eq 1 ] || break
   done
+  # READ IT TWICE, like the tee wait below. The supervisor holds stdout until it exits, so tee's EOF —
+  # and a signal it triggers — can land while this wait is blocked. bash >= 4 then returns 128+signum
+  # without collecting the job, and the job has already left `jobs -p`, so the probe above breaks with
+  # the SIGNAL's status, not the supervisor's: a clean gate read as 129/130/131/143 on Linux CI only
+  # (bash 3.2 collects on the first read). The second read returns the supervisor's own status — the
+  # one bash remembered, if the first read did collect it. A bash that has forgotten the pid reports
+  # "not a child" instead (127 plus a diagnostic), and then the first status stands. 127 alone cannot
+  # decide it: the supervisor itself exits 127 when the gate command cannot be spawned, and that must
+  # not read as the signal's 143. An `if`, not a loop, for the same reason as the tee re-read.
+  if [ "$rc" -gt 128 ]; then
+    local rewait_rc rewait_err="$capture_dir/supervisor-rewait.err"
+    wait "$supervisor_pid" 2>"$rewait_err"
+    rewait_rc=$?
+    if [ "$rewait_rc" -ne 127 ] || [ ! -s "$rewait_err" ]; then
+      rc=$rewait_rc
+    fi
+  fi
 
   # The ownership token exists in this parent before target launch. A fresh supervisor can adopt
   # and clean the target tree even when the original supervisor was itself killed or crashed.
@@ -176,11 +193,12 @@ run_gates_with_capture() {
     # the first read, which is why only Linux CI ever saw it. The second read returns tee's OWN
     # status, so this cannot fail open: a tee that really exited 1 reads 1 again. It must stay an
     # `if` — a child that genuinely died of a signal reports 128+signum on EVERY re-read, so a loop
-    # would spin forever. It also cannot be jobs-probe-guarded like the supervisor re-wait above:
-    # after an interrupted wait the job has already left `jobs -pr; jobs -ps`, so the probe would
-    # break before the second read. Two residuals accepted: a signal delivered to the process GROUP
-    # kills tee for real (reads >128 twice, fails closed — the log truly was cut), and a second
-    # signal landing between the two reads degrades to the old behaviour.
+    # would spin forever. It also cannot be jobs-probe-guarded: after an interrupted wait the job has
+    # already left `jobs -pr; jobs -ps`, so the probe would break before the second read — the same
+    # hole the supervisor loop above had until it gained its own re-read. Two residuals accepted: a
+    # signal delivered to the process GROUP kills tee for real (reads >128 twice, fails closed — the
+    # log truly was cut), and a second signal landing between the two reads degrades to the old
+    # behaviour.
     if [ "$drain_stage" -eq 0 ] && [ "$tee_status" -gt 128 ]; then
       wait "$tee_pid"
       tee_status=$?

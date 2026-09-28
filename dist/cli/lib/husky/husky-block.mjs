@@ -13,8 +13,9 @@ import { GUARD_FRAGMENTS } from './ai-guard-fragments.mjs';
 import { buildCommitTerminalFragment } from './commit-terminal.mjs';
 import { FORMAT_FRAGMENT } from './format-fragment.mjs';
 import { markEnd, markStart } from './husky.mjs';
-import { DK_HOOK_HELPERS, DK_REVIEW_BASELINE_HELPER, selectedFragment, } from './review-fragments.mjs';
+import { DK_COMMIT_INDEX_CAPTURE, DK_HOOK_HELPERS, DK_REVIEW_BASELINE_HELPER, selectedFragment, } from './review-fragments.mjs';
 import { sentryShipPrewarmFragment } from './sentry-fragments.mjs';
+import { shQuote } from '../ship/redact-secrets.mjs';
 // Commit/ship exits on failure; diagnostic modes remember it so every diagnostic runs (safe under `sh -e`).
 const DK_DETERMINISTIC_GATE_HELPER = `dk_review_det_failed=0
 __dk_gate_deterministic() {
@@ -63,6 +64,7 @@ for dir in "$HOME/.bun/bin" "$HOME/.local/bin"; do
     [ -d "$dir" ] && case ":$PATH:" in *":$dir:"*) ;; *) PATH="$dir:$PATH" ;; esac
 done
 export PATH`;
+const HOOK_PATH_PRELUDE = 'DK_HOOK_PATH="$(cd "$(dirname -- "$0")" >/dev/null 2>&1 && pwd)/$(basename -- "$0")"';
 // True when a hook already establishes PATH (so we never inject a duplicate PATH_SETUP).
 const HAS_PATH_SETUP_RE = /\$HOME\/\.bun\/bin|export\s+PATH/;
 // Preamble-line shapes (top-level → no per-call regex compile). See findPreambleEnd.
@@ -118,14 +120,17 @@ export function buildGuardBlock(selection, pkgRel = '') {
         pieces.push(selectedFragment(QAVIS_ADVISORY_ID, QAVIS_FRAGMENT));
     if (deterministic)
         pieces.push(REVIEW_DETERMINISTIC_FINALIZER);
-    const body = pieces.join('\n\n');
+    return wrapGuardBlock(pieces.join('\n\n'), pkgRel, HOOK_PATH_PRELUDE, '\n\n');
+}
+/** Marker-wrap a block body, capturing the commit index before a monorepo package `cd`. */
+export function wrapGuardBlock(body, pkgRel, prelude, gap) {
     const start = markStart(pkgRel);
     const end = markEnd(pkgRel);
     if (!pkgRel)
-        return `${start}\n${body}\n${end}`;
+        return `${start}\n${DK_COMMIT_INDEX_CAPTURE}${gap}${body}\n${end}`;
     // Run the package's gates from its own dir. An inner `exit 1` exits the SUBSHELL; the
     // `) || exit 1` then propagates that failure to the hook (a bare subshell would swallow it).
-    return `${start}\nDK_HOOK_PATH="$(cd "$(dirname -- "$0")" >/dev/null 2>&1 && pwd)/$(basename -- "$0")"\n( cd "${pkgRel}" || exit 1\n\n${body}\n) || exit 1\n${end}`;
+    return `${start}\n${DK_COMMIT_INDEX_CAPTURE}\n${prelude}\n( cd "${pkgRel}" || exit 1${gap}${body}\n) || exit 1\n${end}`;
 }
 /** A full fresh hook (preamble + assembled block + trailing exit 0) for a repo with no hook. */
 export function buildFullHook(selection, pkgRel = '') {
@@ -173,12 +178,7 @@ export function buildStandaloneBlock(selection, pkgRel = '') {
         pieces.push(selectedFragment(QAVIS_ADVISORY_ID, standaloneQavisLines));
     if (deterministic)
         pieces.push(REVIEW_DETERMINISTIC_FINALIZER);
-    const body = pieces.join('\n');
-    const start = markStart(pkgRel);
-    const end = markEnd(pkgRel);
-    if (!pkgRel)
-        return `${start}\n${body}\n${end}`;
-    return `${start}\nDK_HOOK_PATH="$(cd "$(dirname -- "$0")" >/dev/null 2>&1 && pwd)/$(basename -- "$0")"\n( cd "${pkgRel}" || exit 1\n${body}\n) || exit 1\n${end}`;
+    return wrapGuardBlock(pieces.join('\n'), pkgRel, HOOK_PATH_PRELUDE, '\n');
 }
 /** A full fresh STANDALONE hook (preamble + standalone block + exit 0). */
 export function buildStandaloneHook(selection, pkgRel = '') {
@@ -191,17 +191,12 @@ export function buildStandaloneHook(selection, pkgRel = '') {
 // `--relative` makes `git diff` emit paths relative to the CURRENT dir, so this works whether
 // the hook runs at the repo root or cd'd into a monorepo package (eslint/biome + their configs
 // are then resolved package-locally).
-const OVERLAY_LINT_STEPS = `# devkit lint overlay — STAGED files only, against configs that EXTEND the repo's (git-ignored).
-if [ "\${DEVKIT_RUN_MODE:-}" = "review" ]; then
-    __dk_review_baseline_gate eslint || exit 1
-else
-    DK_TS=$(git diff --cached --name-only --relative --diff-filter=ACM | grep -E '\\.(tsx?|jsx?)$' || true)
-    if [ -n "$DK_TS" ] && [ -f eslint.config.devkit.mjs ] && [ -x node_modules/.bin/eslint ]; then
-        echo "🧱 devkit eslint overlay (staged)..."
-        echo "$DK_TS" | xargs node_modules/.bin/eslint -c eslint.config.devkit.mjs || exit 1
-    fi
-fi
-DK_FMT=$(git diff --cached --name-only --relative --diff-filter=ACM | grep -E '\\.(tsx?|jsx?|css|jsonc?)$' || true)
+const OVERLAY_ESLINT_STAGED = `DK_TS=$(git diff --cached --name-only --relative --diff-filter=ACM | grep -E '\\.(tsx?|jsx?)$' || true)
+if [ -n "$DK_TS" ] && [ -f eslint.config.devkit.mjs ] && [ -x node_modules/.bin/eslint ]; then
+    echo "🧱 devkit eslint overlay (staged)..."
+    echo "$DK_TS" | xargs node_modules/.bin/eslint -c eslint.config.devkit.mjs || exit 1
+fi`;
+const OVERLAY_BIOME = `DK_FMT=$(git diff --cached --name-only --relative --diff-filter=ACM | grep -E '\\.(tsx?|jsx?|css|jsonc?)$' || true)
 if [ -n "$DK_FMT" ] && [ -f biome.devkit.jsonc ] && [ -x node_modules/.bin/biome ]; then
     echo "🎨 devkit biome overlay (staged)..."
     echo "$DK_FMT" | xargs node_modules/.bin/biome check --config-path biome.devkit.jsonc || exit 1
@@ -209,23 +204,36 @@ fi`;
 // Overlay shadows fallow's installed hook, so its optional audit must run inline here. Scope the
 // audit to the index: ship refreshes reviewer assets in its worktree AFTER staging, and a base-wide
 // audit would otherwise attribute those unstaged runtime files to the caller's commit (sc-1549).
-const FALLOW_OVERLAY_GATE = `# devkit fallow gate (overlay) — normal commits fail-open if fallow isn't installed.
-if [ "\${DEVKIT_RUN_MODE:-}" = "review" ]; then
-    __dk_review_baseline_gate fallow || exit 1
-else
-    if command -v fallow >/dev/null 2>&1; then
-        DK_FALLOW_DIFF="$(mktemp)" || exit 1
-        if ! git diff --cached --binary --full-index --find-renames --relative >"$DK_FALLOW_DIFF"; then
-            rm -f "$DK_FALLOW_DIFF"
-            exit 1
-        fi
-        # __dk_no_git_env: fallow's snapshot machinery has clobbered a ship worktree before. The
-        # staged diff is already captured with the committing index's git environment intact.
-        DK_FALLOW_RC=0
-        __dk_no_git_env fallow audit --diff-stdin <"$DK_FALLOW_DIFF" || DK_FALLOW_RC=$?
+// Normal commits fail-open if fallow isn't installed.
+const FALLOW_OVERLAY_STAGED = `if command -v fallow >/dev/null 2>&1; then
+    DK_FALLOW_DIFF="$(mktemp)" || exit 1
+    if ! git diff --cached --binary --full-index --find-renames --relative >"$DK_FALLOW_DIFF"; then
         rm -f "$DK_FALLOW_DIFF"
-        [ "$DK_FALLOW_RC" -eq 0 ] || exit 1
+        exit 1
     fi
+    # __dk_no_git_env: fallow's snapshot machinery has clobbered a ship worktree before. The
+    # staged diff is already captured with the committing index's git environment intact.
+    DK_FALLOW_RC=0
+    __dk_no_git_env fallow audit --diff-stdin <"$DK_FALLOW_DIFF" || DK_FALLOW_RC=$?
+    rm -f "$DK_FALLOW_DIFF"
+    [ "$DK_FALLOW_RC" -eq 0 ] || exit 1
+fi`;
+// Hoisted (perf: no per-call regex compile).
+const LINE_START_RE = /^(?=.)/gm;
+const indent = (body) => body.replace(LINE_START_RE, '    ');
+// Commit, ship and dry-gates: the cheap BLOCKING staged checks run before the AI guards, so a lint
+// or dead-code finding never waits behind the reviewer chain (sc-3020).
+const overlayStagedGates = (fallow) => `# devkit lint overlay — STAGED files only, against configs that EXTEND the repo's (git-ignored).
+if [ "\${DEVKIT_RUN_MODE:-}" != "review" ]; then
+${indent(OVERLAY_ESLINT_STAGED)}
+${indent(OVERLAY_BIOME)}${fallow ? `\n    # devkit fallow gate (overlay)\n${indent(FALLOW_OVERLAY_STAGED)}` : ''}
+fi`;
+// Review is diagnostic: its merge-base baselines exit on a finding, so they stay AFTER the guards
+// and a lint finding never hides the reviewer's report.
+const overlayReviewBaseline = (fallow) => `# devkit lint overlay — review mode, merge-base baselines.
+if [ "\${DEVKIT_RUN_MODE:-}" = "review" ]; then
+    __dk_review_baseline_gate eslint || exit 1
+${indent(OVERLAY_BIOME)}${fallow ? '\n    __dk_review_baseline_gate fallow || exit 1' : ''}
 fi`;
 /**
  * Build the OVERLAY hook — a complete, self-contained file devkit fully owns (written to a
@@ -247,17 +255,18 @@ export function buildOverlayHook(selection, chainTarget = '.husky/pre-commit', p
     ];
     if (deterministic)
         gates.push(DK_DETERMINISTIC_GATE_HELPER, standaloneDeterministicLines());
+    gates.push(overlayStagedGates(fallow));
     for (const id of AI_GUARD_IDS) {
         if (selection.guards?.includes(id))
             gates.push(`if __dk_gate_selected ${id}; then __dk_gate_ai ${STANDALONE_GATES[id].join(' ')}; fi`);
     }
-    // No sentry prewarm: an overlay installs no devkit commit-msg judge, so none follows the advisory.
+    // No sentry prewarm: overlay's commit-msg judge (sc-1794) runs sentry after the advisory instead.
     if (selection.guards?.includes(QAVIS_ADVISORY_ID))
         gates.push(selectedFragment(QAVIS_ADVISORY_ID, standaloneQavisLines));
-    const inner = `${gates.join('\n')}\n\n${OVERLAY_LINT_STEPS}${fallow ? `\n\n${FALLOW_OVERLAY_GATE}` : ''}${deterministic ? `\n\n${REVIEW_DETERMINISTIC_FINALIZER}` : ''}`;
+    const inner = `${gates.join('\n')}\n\n${overlayReviewBaseline(fallow)}${deterministic ? `\n\n${REVIEW_DETERMINISTIC_FINALIZER}` : ''}`;
     const scoped = pkgRel
-        ? `DK_HOOK_PATH="$(cd "$(dirname -- "$0")" >/dev/null 2>&1 && pwd)/$(basename -- "$0")"\n( cd ${JSON.stringify(pkgRel)} || exit 1\n${inner}\n) || exit 1`
-        : inner;
+        ? `${DK_COMMIT_INDEX_CAPTURE}\n${HOOK_PATH_PRELUDE}\n( cd ${JSON.stringify(pkgRel)} || exit 1\n${inner}\n) || exit 1`
+        : `${DK_COMMIT_INDEX_CAPTURE}\n${inner}`;
     return `${HOOK_PREAMBLE}
 # devkit OVERLAY (LOCAL, git-ignored). Runs devkit's gates + lint overlay on this commit, then
 # the repo's OWN committed hook UNCHANGED. Invisible to the team — nothing here is committed.
@@ -278,7 +287,7 @@ ${scoped}
 command -v __dk_commit_result >/dev/null 2>&1 && { trap - EXIT; __dk_commit_result 0; }
 
 # Chain to the repo's own pre-commit (exec → its exit code becomes the hook's).
-[ -f ${JSON.stringify(chainTarget)} ] && exec sh ${JSON.stringify(chainTarget)} "$@"
+[ -f ${shQuote(chainTarget)} ] && exec sh ${shQuote(chainTarget)} "$@"
 exit 0
 `;
 }
@@ -293,7 +302,7 @@ export function buildPassthroughHook(chainScript) {
     return `${HOOK_PREAMBLE}
 # devkit overlay pass-through — git now runs this dir, so we forward to the repo's own hook
 # unchanged (devkit adds nothing to it).
-[ -f ${JSON.stringify(chainScript)} ] && exec sh ${JSON.stringify(chainScript)} "$@"
+[ -f ${shQuote(chainScript)} ] && exec sh ${shQuote(chainScript)} "$@"
 exit 0
 `;
 }

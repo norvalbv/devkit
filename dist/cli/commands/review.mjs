@@ -22,6 +22,9 @@ touched temporarily while the isolated review worktrees exist.
 Overlay setup is local to each checkout and is not copied by Git. Before reviewing a fresh clone of
 an overlay consumer, run \`devkit init --overlay --review\` inside that target checkout.
 
+The completeness and sentry judges read a commit message, so they run at commit-msg (\`git ci\`,
+\`devkit ship\`) and never here; a green review can still be followed by a completeness block.
+
 WARNING: target-controlled hooks and package scripts execute. Review trusted targets only.
 
 Output streams for the whole run, not just the gates: setup and teardown emit a
@@ -38,7 +41,9 @@ Env:
                           asset materialization, and cleanup that sit outside the gate chain.
                           Defaults to SHIP_COMMIT_TIMEOUT, so one knob normally moves both. Set it
                           only to bound setup separately from the gates. A wedged step is reported
-                          as a 124 timeout naming the phase it died in.
+                          as a 124 timeout naming the phase and step it died in.
+  DEVKIT_PREFLIGHT_HEARTBEAT  Seconds between 'still running' lines while one setup/teardown step
+                          runs (default 45; 0 disables). Written to the console and the run log.
 
 Exits 0 when the review passes or there is nothing to review, 1 on argument/setup/gate/format
 failure, and preserves timeout statuses such as 124.`,

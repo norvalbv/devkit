@@ -18,10 +18,15 @@
 
 # Devkit config/artifact files the gates read; linked into the throwaway ship/review worktree ($WT)
 # because a fresh checkout lacks the untracked/gitignored ones. All bare names (a test pins the exact
-# list — no inline comments). The last, .qavis/receipt.json, is the non-obvious one: it's the gitignored
-# cache qavis writes on a QA pass, read by the ship qavis-advisory gate to clear its block, and the only
-# gate input NOT already carried in by the staged pathspec — so without this link a real QA pass still
-# blocks the ship. Linked file-level, not the `.qavis/` dir (which holds the tracked recipe.json).
+# list — no inline comments). .qavis/receipt.json is a non-obvious one: it's the gitignored cache qavis
+# writes on a QA pass, read by the ship qavis-advisory gate to clear its block, and never carried in by
+# the staged pathspec — so without this link a real QA pass still blocks the ship. Linked file-level, not the `.qavis/` dir (which holds the tracked recipe.json).
+#
+# .devkit/correctness-overrides.json is the `guard-review waive` store (sc-2175). It is gitignored and
+# the gate's reconcile reads it relative to $WT, so without this link a recorded waive can never clear
+# a ship. It is an audit record, not a content-addressed cache, so it is deliberately not a
+# GATE_PROJECTION_CACHE_CANDIDATES entry. The link also carries an env-channel write-through back to
+# the invoking checkout, so the persisted rationale outlives $WT.
 #
 # The four Oxc/anti-slop entries exist for OVERLAY, where the whole managed capability plus its root
 # entry config and per-clone baseline are git-excluded and therefore absent from any checkout. Without
@@ -49,6 +54,7 @@ GATE_PROJECTION_FIXED_CANDIDATES=(
   oxlint.devkit.json
   .anti-slop-baseline.json
   .qavis/receipt.json
+  .devkit/correctness-overrides.json
 )
 
 # Candidates that are a content-addressed CACHE, not source. A copy in the base commit is stale by
