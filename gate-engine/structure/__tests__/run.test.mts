@@ -1,12 +1,17 @@
 // guard-structure runs eslint + the plugin from devkit's OWN install, so these tmp repos (outside
 // devkit's checkout, no node_modules) also pin the absolute projectRoot anchoring (sc-2309).
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { planStagedStructureLint, runStagedStructureGate, runStructureGate } from '../run.mts';
+import { afterEach, describe, expect, it } from 'vitest';
+import {
+  combineStructureResults,
+  planStagedStructureLint,
+  runStagedStructureGate,
+  runStructureGate,
+} from '../run.mts';
 
 const DEVKIT_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
@@ -219,6 +224,28 @@ describe('guard-structure staged plan', () => {
     });
   });
 
+  it.each([
+    'eslint.config.mjs.bak',
+    'guard.config.json.orig',
+    'eslint/domains.mjs~',
+    '.devkit/config.json.backup',
+    '.devkit/structure/exempt.mjs.old',
+    '.devkit/baselines/imports.mjs.tmp',
+  ])('does not treat %s (a name extending a policy file) as policy', (lookalike) => {
+    expect(planStagedStructureLint(scopes, ['src/Feature/index.ts'], [], [lookalike])).toEqual({
+      targets: ['src/Feature/index.ts'],
+      probeScopes: [],
+      deferred: [],
+    });
+  });
+
+  it.each(['.devkit/config.json', 'eslint.config.mjs', 'guard.config.json'])(
+    'a staged DELETION of policy %s probes every root, like an edit would',
+    (policy) => {
+      expect(planStagedStructureLint(scopes, [], [policy], []).probeScopes).toEqual(scopes);
+    },
+  );
+
   it('defers a partially staged source file instead of reading its worktree bytes as index bytes', () => {
     expect(
       planStagedStructureLint(scopes, ['src/Feature/index.ts'], [], ['src/Feature/index.ts']),
@@ -236,6 +263,7 @@ describe('guard-structure staged plan', () => {
     '.devkit/structure/exempt.mjs',
     '.devkit/baselines/imports.mjs',
     '.devkit/baselines/structure/renderer.mjs',
+    '.devkit/config.json',
   ])('defers all staged structure input when policy %s has unstaged edits', (policy) => {
     expect(planStagedStructureLint(scopes, ['src/Feature/index.ts'], [], [policy])).toEqual({
       targets: [],
@@ -285,7 +313,10 @@ describe('guard-structure staged execution', () => {
     // CI rather than reject a staged snapshot on the basis of an unstaged edit.
     write(root, 'src/not-ok.ts');
 
-    await expect(runStagedStructureGate(root)).resolves.toMatchObject({ code: 0 });
+    // Deferred, not rejected (never 1) — and never a vacuous clean 0: it inspected nothing.
+    const result = await runStagedStructureGate(root);
+    expect(result.code).toBe(2);
+    expect(result.text).toContain('src/Ok.ts');
   });
 
   it('defers an untracked source from a package cwd', async () => {
@@ -301,11 +332,26 @@ describe('guard-structure staged execution', () => {
     write(pkg, 'src/Ok.ts', 'export const changed = true;\n');
     execFileSync('git', ['add', '--', 'packages/lib/src/Ok.ts'], { cwd: root });
     write(pkg, 'src/Uncommitted.ts');
-    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
 
-    await expect(runStagedStructureGate(pkg)).resolves.toMatchObject({ code: 0 });
-    expect(error).toHaveBeenCalledWith(expect.stringContaining('src/Ok.ts'));
-    error.mockRestore();
+    const result = await runStagedStructureGate(pkg);
+    expect(result.code).toBe(2);
+    expect(result.text).toContain('src/Ok.ts');
+  });
+
+  it('a deletion that empties a root reports its skipped probe as could-not-run, not clean', async () => {
+    const root = repo();
+    write(root, 'guard.config.json', JSON.stringify(config));
+    write(root, 'src/Ok.ts');
+    initializeGit(root);
+    execFileSync('git', ['add', '--', 'guard.config.json', 'src/Ok.ts'], { cwd: root });
+    execFileSync('git', ['commit', '-qm', 'initial'], { cwd: root });
+    write(root, 'src/Gone.ts');
+    execFileSync('git', ['add', '--', 'src/Gone.ts'], { cwd: root });
+    execFileSync('git', ['commit', '-qm', 'second'], { cwd: root });
+    execFileSync('git', ['rm', '-q', '--', 'src/Gone.ts', 'src/Ok.ts'], { cwd: root });
+    const result = await runStagedStructureGate(root);
+    expect(result.code).toBe(2); // the deletion emptied the root: its probe could not run
+    expect(result.text).toContain('src');
   });
 
   it('exit 0 when nothing structure-relevant is staged (delegation must not become an opt-out)', async () => {
@@ -328,5 +374,414 @@ describe('guard-structure staged execution', () => {
     const result = await runStagedStructureGate(root);
     expect(result.code).toBe(2);
     expect(result.text).toContain('did NOT run');
+  });
+});
+
+// sc-3149: the preset is a stub eslint.js that logs its argv and fails any "Bad" path — this pins the
+// leg wiring; the real electron template's rules are pinned by cli/__tests__/electron-*.test.mts.
+describe('guard-structure mixed electron preset + grammar trees', () => {
+  const STUB = `const { appendFileSync, readdirSync, statSync } = require('node:fs');
+const files = process.argv.slice(process.argv.indexOf('--') + 1);
+appendFileSync(require('node:path').join(process.cwd(), 'preset-calls.log'), JSON.stringify(files) + '\\n');
+const flags = process.argv.slice(2, process.argv.indexOf('--'));
+appendFileSync(require('node:path').join(process.cwd(), 'preset-flags.log'), JSON.stringify(flags) + '\\n');
+const names = files.flatMap((f) => (statSync(f).isDirectory() ? readdirSync(f, { recursive: true }) : [f]));
+if (names.some((f) => String(f).includes('Crash'))) { console.error('Oops! Something went wrong!'); process.exit(2); }
+if (names.some((f) => String(f).includes('Bad'))) { console.log('PRESET-VIOLATION'); process.exit(1); }
+`;
+  const cliTree = {
+    name: 'cli',
+    root: 'cli',
+    sourceExtensions: ['ts', 'tsx'],
+    grammar: { files: ['{kebab}'] },
+  };
+  const mixedConfig = { scanRoots: ['src'], structure: { trees: [cliTree] } };
+
+  function electronRepo({ stack = 'electron', preset = true, config = mixedConfig } = {}) {
+    const root = repo(config);
+    if (stack !== null) write(root, '.devkit/config.json', JSON.stringify({ stack }));
+    if (preset) write(root, 'node_modules/eslint/bin/eslint.js', STUB);
+    write(root, '.gitignore', 'node_modules/\npreset-calls.log\npreset-flags.log\n');
+    initializeGit(root);
+    commitAll(root); // policy files committed, so the staged plan sees only what a test stages
+    return root;
+  }
+  function commitAll(root) {
+    execFileSync('git', ['add', '-A'], { cwd: root });
+    execFileSync('git', ['commit', '-qm', 'setup'], { cwd: root });
+  }
+  function stage(root, ...files) {
+    for (const file of files) write(root, file);
+    execFileSync('git', ['add', '--', ...files], { cwd: root });
+  }
+  function presetCalls(root): string[][] {
+    try {
+      return readFileSync(join(root, 'preset-calls.log'), 'utf8')
+        .trim()
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => JSON.parse(line));
+    } catch {
+      return [];
+    }
+  }
+
+  it('still runs the preset over a staged scanRoots file once a grammar tree is declared', async () => {
+    const root = electronRepo();
+    stage(root, 'src/Bad.ts');
+    const result = await runStagedStructureGate(root);
+    expect(result.code).toBe(1);
+    expect(presetCalls(root)).toEqual([['src/Bad.ts']]);
+  });
+
+  it('runs the grammar leg on a staged grammar-root file and never hands it to the preset', async () => {
+    const root = electronRepo();
+    stage(root, 'cli/NotKebab.ts');
+    const result = await runStagedStructureGate(root);
+    expect(result.code).toBe(1);
+    expect(result.text).toContain('NotKebab.ts');
+    expect(presetCalls(root)).toEqual([]);
+  });
+
+  it('reports BOTH legs when each has a violation in one commit', async () => {
+    const root = electronRepo();
+    stage(root, 'src/Bad.ts', 'cli/NotKebab.ts');
+    const result = await runStagedStructureGate(root);
+    expect(result.code).toBe(1);
+    expect(result.text).toContain('NotKebab.ts');
+    expect(result.text).toContain('local eslint failed');
+    expect(presetCalls(root)).toEqual([['src/Bad.ts']]);
+  });
+
+  it('a local eslint crash (exit 2, e.g. a broken config) is could-not-run, never a violation', async () => {
+    const root = electronRepo();
+    stage(root, 'src/Crash.ts');
+    const result = await runStagedStructureGate(root);
+    expect(result.code).toBe(2);
+    expect(result.text).toContain('status 2');
+  });
+
+  it('a local eslint crash does not mask a grammar violation in the same commit', async () => {
+    const root = electronRepo();
+    stage(root, 'src/Crash.ts', 'cli/NotKebab.ts');
+    const result = await runStagedStructureGate(root);
+    expect(result.code).toBe(1);
+    expect(result.text).toContain('NotKebab.ts');
+    expect(result.text).toContain('status 2');
+  });
+
+  it('exit 0 when both legs are clean', async () => {
+    const root = electronRepo();
+    stage(root, 'src/Fine.ts', 'cli/fine-name.ts');
+    await expect(runStagedStructureGate(root)).resolves.toMatchObject({ code: 0 });
+    expect(presetCalls(root)).toEqual([['src/Fine.ts']]);
+  });
+
+  it('a missing local eslint does not mask a grammar violation (preset fail-open is per leg)', async () => {
+    const root = electronRepo({ preset: false });
+    stage(root, 'src/Fine.ts', 'cli/NotKebab.ts');
+    const result = await runStagedStructureGate(root);
+    expect(result.code).toBe(1);
+    expect(result.text).toContain('NotKebab.ts');
+    expect(result.text).toContain('locally pinned eslint binary');
+  });
+
+  it('a missing local eslint with a clean grammar leg is exit 2, never a claimed clean', async () => {
+    const root = electronRepo({ preset: false });
+    stage(root, 'src/Fine.ts', 'cli/fine-name.ts');
+    const result = await runStagedStructureGate(root);
+    expect(result.code).toBe(2);
+    expect(result.text).toContain('did NOT run');
+  });
+
+  it('hands a file under a grammar root nested in a scanRoot to BOTH legs', async () => {
+    const root = electronRepo({
+      config: {
+        scanRoots: ['src'],
+        structure: { trees: [{ ...cliTree, root: 'src/cli' }] },
+      },
+    });
+    stage(root, 'src/cli/BadCase.ts');
+    const result = await runStagedStructureGate(root);
+    expect(result.code).toBe(1);
+    expect(result.text).toContain('BadCase.ts'); // grammar leg
+    expect(presetCalls(root)).toEqual([['src/cli/BadCase.ts']]); // preset leg
+  });
+
+  it('keeps a preset-only tree entry on the preset leg (story repro step 3)', async () => {
+    const root = electronRepo({
+      config: {
+        scanRoots: ['src'],
+        structure: { trees: [{ name: 'renderer', root: 'src' }, cliTree] },
+      },
+    });
+    stage(root, 'src/Bad.ts');
+    const result = await runStagedStructureGate(root);
+    expect(result.code).toBe(1);
+    expect(presetCalls(root)).toEqual([['src/Bad.ts']]);
+  });
+
+  it('probes the preset leg after a staged deletion under scanRoots in a mixed repo', async () => {
+    const root = electronRepo();
+    stage(root, 'src/Keep.ts', 'src/Gone.ts', 'cli/fine-name.ts');
+    execFileSync('git', ['commit', '-qm', 'initial'], { cwd: root });
+    execFileSync('git', ['rm', '-q', '--', 'src/Gone.ts'], { cwd: root });
+    await runStagedStructureGate(root);
+    expect(presetCalls(root)).toEqual([['src/Keep.ts']]);
+  });
+
+  it('hands a grammar-scope deletion probe to the preset too when the preset owns the probe file', async () => {
+    const root = electronRepo({
+      config: {
+        scanRoots: ['src'],
+        structure: {
+          trees: [{ ...cliTree, root: 'src/cli', sourceExtensions: ['ts', 'mts'] }],
+        },
+      },
+    });
+    stage(root, 'src/cli/keep-me.ts', 'src/cli/gone.mts');
+    execFileSync('git', ['commit', '-qm', 'seed'], { cwd: root });
+    execFileSync('git', ['rm', '-q', '--', 'src/cli/gone.mts'], { cwd: root });
+    await runStagedStructureGate(root);
+    expect(presetCalls(root)).toEqual([['src/cli/keep-me.ts']]);
+  });
+
+  it.each([
+    ['a config without `stack`', '{}'],
+    ['no .devkit/config.json', null],
+  ])(
+    'with %s, an electron manifest still selects the preset leg (recorded ?? detected)',
+    async (_label, body) => {
+      const root = electronRepo({ stack: null });
+      if (body !== null) write(root, '.devkit/config.json', body);
+      write(root, 'package.json', JSON.stringify({ devDependencies: { electron: '^30.0.0' } }));
+      commitAll(root);
+      stage(root, 'src/Bad.ts');
+      expect((await runStagedStructureGate(root)).code).toBe(1);
+      expect(presetCalls(root)).toEqual([['src/Bad.ts']]);
+    },
+  );
+
+  it('defers when a DETECTED stack reads an unstaged package.json, never when the stack is recorded', async () => {
+    const detected = electronRepo({ stack: null });
+    write(detected, 'package.json', JSON.stringify({ devDependencies: { electron: '^30.0.0' } }));
+    commitAll(detected);
+    stage(detected, 'src/Bad.ts');
+    write(detected, 'package.json', '{}'); // unstaged: the worktree no longer names electron
+    const deferred = await runStagedStructureGate(detected);
+    expect(deferred.code).toBe(2); // deferred as policy — visible, never a vacuous clean
+    expect(deferred.text).toContain('structure policy');
+
+    const recorded = electronRepo();
+    write(recorded, 'package.json', '{}');
+    commitAll(recorded);
+    stage(recorded, 'src/Bad.ts');
+    write(recorded, 'package.json', '{"name":"x"}'); // unstaged, but routing ignores the manifest
+    expect((await runStagedStructureGate(recorded)).code).toBe(1);
+  });
+
+  it.each(['{ not json', '{"dependencies":5}', 'null'])(
+    'with no recorded stack, a malformed package.json (%s) is could-not-run, never a silent non-electron',
+    async (manifest) => {
+      const root = electronRepo({ stack: null });
+      write(root, 'package.json', manifest);
+      commitAll(root);
+      stage(root, 'src/Bad.ts');
+      const result = await runStagedStructureGate(root);
+      expect(result.code).toBe(2);
+      expect(result.text).toContain('package.json');
+    },
+  );
+
+  it('an unstaged stack flip in .devkit/config.json defers scanRoots input, never drops it as out of scope', async () => {
+    const root = electronRepo();
+    stage(root, 'src/Bad.ts');
+    write(root, '.devkit/config.json', JSON.stringify({ stack: 'react-app' })); // unstaged
+    const result = await runStagedStructureGate(root);
+    expect(result.code).toBe(2);
+    expect(result.text).toContain('src/Bad.ts');
+  });
+
+  it('a staged deletion of .devkit/config.json re-probes under the routing the commit leaves behind', async () => {
+    const root = electronRepo();
+    write(root, 'package.json', JSON.stringify({ devDependencies: { electron: '^30.0.0' } }));
+    write(root, 'src/Bad.ts');
+    commitAll(root);
+    execFileSync('git', ['rm', '-q', '--', '.devkit/config.json'], { cwd: root });
+    const result = await runStagedStructureGate(root);
+    expect(result.code).toBe(1); // detected electron still owns src/, and the probe reached it
+    expect(presetCalls(root)).toEqual([['src/Bad.ts']]);
+  });
+
+  it('never routes a non-electron repo without grammar to a local eslint (stack decides the leg)', async () => {
+    const root = electronRepo({ stack: 'react-app', config: { scanRoots: ['src'] } });
+    stage(root, 'src/Bad.ts');
+    const result = await runStagedStructureGate(root);
+    expect(result.code).toBe(2);
+    expect(presetCalls(root)).toEqual([]);
+  });
+
+  it('runs the preset leg from a package subdirectory cwd with package-relative paths', async () => {
+    const root = repo();
+    const pkg = join(root, 'packages', 'app');
+    write(pkg, 'guard.config.json', JSON.stringify(mixedConfig));
+    write(pkg, '.devkit/config.json', JSON.stringify({ stack: 'electron' }));
+    write(pkg, 'node_modules/eslint/bin/eslint.js', STUB);
+    write(root, '.gitignore', 'node_modules/\npreset-calls.log\n');
+    initializeGit(root);
+    commitAll(root);
+    stage(root, 'packages/app/src/Bad.ts');
+    const result = await runStagedStructureGate(pkg);
+    expect(result.code).toBe(1);
+    expect(presetCalls(pkg)).toEqual([['src/Bad.ts']]);
+  });
+
+  it.each([
+    ['no recorded stack', null],
+    ['a non-electron stack', 'component-lib'],
+  ])(
+    'with %s, a grammar repo never invokes a local eslint (no double lint)',
+    async (_label, stack) => {
+      const root = electronRepo({ stack });
+      stage(root, 'src/Bad.ts', 'cli/fine-name.ts');
+      await expect(runStagedStructureGate(root)).resolves.toMatchObject({ code: 0 });
+      expect(presetCalls(root)).toEqual([]);
+    },
+  );
+
+  it.each([
+    '{ not json',
+    'null',
+    '[]',
+    '{"stack":42}',
+    '{"stack":null}',
+    '{"stack":["electron"]}',
+    '{"stack":{}}',
+  ])(
+    'a present but unreadable .devkit/config.json (%s) is could-not-run, never a silent clean',
+    async (body) => {
+      const root = electronRepo();
+      write(root, '.devkit/config.json', body);
+      commitAll(root);
+      stage(root, 'src/Bad.ts');
+      const staged = await runStagedStructureGate(root);
+      expect(staged.code).toBe(2);
+      expect(staged.text).toContain('.devkit/config.json');
+      const full = await runStructureGate(root);
+      expect(full.code).toBe(2);
+      expect(full.text).toContain('.devkit/config.json');
+    },
+  );
+
+  describe('full gate (guard-structure gate)', () => {
+    it('lints scanRoots through the preset in a mixed electron repo', async () => {
+      const root = electronRepo();
+      write(root, 'src/Bad.ts');
+      write(root, 'cli/fine-name.ts');
+      const result = await runStructureGate(root);
+      expect(result.code).toBe(1);
+      expect(presetCalls(root)).toEqual([['src']]);
+    });
+
+    it('lints a grammar root nested in a preset tree root once, not once per enclosing root', async () => {
+      const root = electronRepo({
+        config: {
+          scanRoots: ['src'],
+          structure: {
+            trees: [
+              { name: 'renderer', root: 'src' },
+              { ...cliTree, root: 'src/cli' },
+            ],
+          },
+        },
+      });
+      write(root, 'src/cli/NotKebab.ts');
+      const result = await runStructureGate(root);
+      expect(result).toMatchObject({ code: 1, errorCount: 1 });
+    });
+
+    it('runs the preset for a preset-only electron repo instead of reporting did-not-run', async () => {
+      const root = electronRepo({ config: { scanRoots: ['src'] } });
+      write(root, 'src/Fine.ts');
+      await expect(runStructureGate(root)).resolves.toMatchObject({ code: 0 });
+      expect(presetCalls(root)).toEqual([['src']]);
+    });
+
+    it('hands directory roots to the preset with --no-error-on-unmatched-pattern (empty root = clean)', async () => {
+      const root = electronRepo({ config: { scanRoots: ['src'] } });
+      write(root, 'src/notes.md');
+      await runStructureGate(root);
+      const flags = readFileSync(join(root, 'preset-flags.log'), 'utf8');
+      expect(flags).toContain('--no-error-on-unmatched-pattern');
+    });
+
+    it('skips absent scanRoots when handing roots to the preset', async () => {
+      const root = electronRepo({ config: { scanRoots: ['src', 'socket-server/src'] } });
+      write(root, 'src/Fine.ts');
+      await runStructureGate(root);
+      expect(presetCalls(root)).toEqual([['src']]);
+    });
+
+    it('a missing local eslint with a clean grammar leg is exit 2, never a claimed clean', async () => {
+      const root = electronRepo({ preset: false });
+      write(root, 'src/Fine.ts');
+      write(root, 'cli/fine-name.ts');
+      expect((await runStructureGate(root)).code).toBe(2);
+    });
+  });
+});
+
+describe('combineStructureResults', () => {
+  const ok = { code: 0 as const, errorCount: 0 };
+  const bad = (text) => ({ code: 1 as const, errorCount: 1, text });
+  const skip = (text) => ({ code: 2 as const, errorCount: 0, text });
+
+  it.each([
+    ['no legs', [], 0],
+    ['all clean', [ok, ok], 0],
+    ['violation beats fail-open', [skip('a'), bad('b')], 1],
+    ['fail-open beats clean', [ok, skip('a')], 2],
+  ])('%s', (_label, results, code) => {
+    expect(combineStructureResults(results).code).toBe(code);
+  });
+
+  it('a violation still names a leg that did NOT run (no silent opt-out)', () => {
+    const combined = combineStructureResults([skip('preset did NOT run'), bad('grammar error')]);
+    expect(combined.code).toBe(1);
+    expect(combined.text).toContain('grammar error');
+    expect(combined.text).toContain('preset did NOT run');
+  });
+
+  it('sums error counts and keeps every violation text', () => {
+    const combined = combineStructureResults([bad('first'), { ...bad('second'), errorCount: 2 }]);
+    expect(combined).toMatchObject({ code: 1, errorCount: 3 });
+    expect(combined.text).toContain('first');
+    expect(combined.text).toContain('second');
+  });
+});
+
+describe('planStagedStructureLint — overlapping scopes', () => {
+  const preset = { root: 'src', extensions: ['ts', 'tsx', 'css'] };
+  const grammar = { root: 'src/cli', extensions: ['ts', 'mts'] };
+
+  it('targets a file matched by only the second scope (extension the first lacks)', () => {
+    expect(
+      planStagedStructureLint([preset, grammar], ['src/cli/tool.mts'], [], []).targets,
+    ).toEqual(['src/cli/tool.mts']);
+  });
+
+  it('treats caller-named routing inputs as policy', () => {
+    expect(
+      planStagedStructureLint([preset], ['src/a.ts'], [], ['package.json'], ['package.json']),
+    ).toMatchObject({ targets: [], deferred: ['structure policy', 'src/a.ts'] });
+    expect(planStagedStructureLint([preset], ['src/a.ts'], [], ['package.json']).targets).toEqual([
+      'src/a.ts',
+    ]);
+  });
+
+  it('defers a file when ANY scope that owns it is unstable', () => {
+    expect(
+      planStagedStructureLint([preset, grammar], ['src/cli/tool.ts'], [], ['src/cli/other.mts']),
+    ).toMatchObject({ targets: [], deferred: ['src/cli/tool.ts'] });
   });
 });

@@ -38,7 +38,12 @@ describe('electron structure lint in a ship worktree', () => {
 
   const writeElectronConfig = (cwd, body) => {
     writeFileSync(join(cwd, 'guard.config.json'), '{"scanRoots":["src"]}\n');
-    writeFileSync(join(cwd, 'package.json'), '{"type":"module"}\n');
+    // A real electron consumer names electron in its manifest; with no recorded stack, that is
+    // what selects guard-structure's preset leg (the same rule detectStack applies).
+    writeFileSync(
+      join(cwd, 'package.json'),
+      '{"type":"module","devDependencies":{"electron":"^30.0.0"}}\n',
+    );
     writeFileSync(
       join(cwd, 'eslint.config.mjs'),
       `import {
