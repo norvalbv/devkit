@@ -18,6 +18,7 @@ import upgrade from '../commands/upgrade.mts';
 import { applyOverlayConstraints, defaultSelection } from '../lib/components.mts';
 import { isTracked } from '../lib/git-tracked.mts';
 import { wireOverlayAntiSlop } from '../lib/install/anti-slop/overlay/install.mts';
+import { reviewHookDrift } from '../lib/husky/review-drift.mts';
 import { HEAL_ALIAS_CMD, syncOverlayHook } from '../lib/overlay.mts';
 import { removeSkills } from '../lib/sync-manifest.mts';
 import { rootRegistry, testExecFileSync } from './_helpers.mts';
@@ -1238,6 +1239,7 @@ describe('overlay hook regeneration (syncOverlayHook + doctor --fix)', () => {
     expect(syncOverlayHook(root, root, cfg, { dryRun: true })).toEqual({
       missing: false,
       drift: true,
+      commitMsg: { missing: false, drift: false }, // no message judge selected, no repo hook
     });
     expect(readHook(root)).not.toContain('devkit-gates: chain start');
 
@@ -1520,5 +1522,185 @@ describe('overlay upgrade (re-syncs, not the old bail)', () => {
         .split('.')
         .every((p: string) => Number.isInteger(Number(p))),
     ).toBe(true);
+  });
+});
+
+// sc-1794: overlay used to write every non-pre-commit hook as a pass-through, so the completeness +
+// sentry message judges package mode wires at commit-msg never ran — and nothing said so.
+describe('overlay commit-msg judges (sc-1794)', () => {
+  const judged = () =>
+    applyOverlayConstraints({ ...defaultSelection(), guards: ['size', 'review', 'sentry'] });
+  const init = (root, selection = judged(), extra = {}) =>
+    applyInit(root, {
+      stack: 'react-app',
+      selection,
+      overlay: true,
+      devkitRef: 'v0.9.0',
+      ...extra,
+    });
+  const cmsgPath = (root) => join(root, '.devkit', 'hooks', 'commit-msg');
+  const cmsg = (root) => readFileSync(cmsgPath(root), 'utf8');
+  // The team's own commit-msg (commitlint stand-in): logs the path git hands it, rejects "BAD".
+  const withRepoCommitMsg = (root) => {
+    writeFileSync(
+      join(root, '.husky', 'commit-msg'),
+      '#!/bin/sh\necho "team-commit-msg $1" >> "$HOME/calls.log"\ngrep -q BAD "$1" && exit 1\nexit 0\n',
+    );
+    execFileSync('git', ['add', '-A'], { cwd: root });
+    execFileSync('git', ['-c', 'core.hooksPath=/dev/null', 'commit', '-qm', 'team commit-msg'], {
+      cwd: root,
+    });
+  };
+  const readCfg = (root) => JSON.parse(readFileSync(join(root, '.devkit', 'config.json'), 'utf8'));
+
+  it('init --overlay wires the judges and still chains the team commit-msg', async () => {
+    const root = workRepo();
+    withRepoCommitMsg(root);
+    await init(root);
+    const hook = cmsg(root);
+    expect(hook).toContain('# devkit:guard-completeness');
+    expect(hook).toContain('# devkit:guard-sentry');
+    expect(hook).toContain('command -v guard-review'); // global bins: overlay is package-less
+    expect(hook).toContain('exec sh .husky/commit-msg "$@"');
+    // no pre-commit prewarm (it would leak the git env past the commit-index boundary)
+    expect(readFileSync(join(root, '.devkit', 'hooks', 'pre-commit'), 'utf8')).not.toContain(
+      '# devkit:guard-sentry-prewarm',
+    );
+  });
+
+  it('a real commit through core.hooksPath runs the judge, then the team hook; a FAIL blocks', async () => {
+    const root = workRepo();
+    withRepoCommitMsg(root);
+    await init(root);
+    // Isolate the message hook: the pre-commit gates are covered elsewhere.
+    writeFileSync(join(root, '.devkit', 'hooks', 'pre-commit'), '#!/bin/sh\nexit 0\n');
+    const home = mkTmp('ov-cmsg-home-');
+    const bin = join(home, '.bun', 'bin'); // PATH_SETUP prepends $HOME/.bun/bin
+    mkdirSync(bin, { recursive: true });
+    const stub = (name, rc) => {
+      writeFileSync(
+        join(bin, name),
+        `#!/bin/sh\necho "${name} $*" >> "$HOME/calls.log"\nexit ${rc}\n`,
+      );
+      execFileSync('chmod', ['755', join(bin, name)]);
+    };
+    stub('guard-sentry', 0);
+    const commit = (msg) =>
+      testExecFileSync('git', ['commit', '--allow-empty', '-qm', msg], {
+        cwd: root,
+        env: { ...process.env, HOME: home },
+      });
+    const log = () => readFileSync(join(home, 'calls.log'), 'utf8');
+    const head = () =>
+      execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
+
+    stub('guard-review', 1);
+    const before = head();
+    expect(() => commit('feat: gap')).toThrow();
+    expect(head()).toBe(before);
+    expect(log()).toContain('guard-review completeness --gate');
+    expect(log()).not.toContain('team-commit-msg');
+
+    stub('guard-review', 0);
+    commit('feat: ok');
+    expect(head()).not.toBe(before);
+    expect(log()).toMatch(/team-commit-msg \S*COMMIT_EDITMSG/);
+    // the team hook still has the last word
+    expect(() => commit('BAD subject')).toThrow();
+  });
+
+  it('doctor --fix keeps the judges (no pass-through clobber) and heals a stale commit-msg alone', async () => {
+    const root = workRepo();
+    withRepoCommitMsg(root);
+    await init(root);
+    writeFileSync(cmsgPath(root), '#!/bin/sh\n# old pass-through\nexit 0\n');
+    const cfg = readCfg(root);
+    const sync = syncOverlayHook(root, root, cfg, { dryRun: true });
+    expect(sync.drift).toBe(false); // pre-commit is current
+    expect(sync.commitMsg).toEqual({ missing: false, drift: true });
+    // review never runs commit-msg, so a stale one must not make it refuse
+    expect(reviewHookDrift(root)).toBeNull();
+
+    expect(await doctorRun([], root)).toBe(1);
+    expect(await doctorRun(['--fix'], root)).toBe(0);
+    expect(cmsg(root)).toContain('# devkit:guard-completeness');
+    expect(await doctorRun([], root)).toBe(0);
+  });
+
+  it('doctor names a MISSING commit-msg judge hook and --fix restores it', async () => {
+    const root = workRepo(); // no team commit-msg
+    await init(root);
+    rmSync(cmsgPath(root));
+    const logs = [];
+    vi.mocked(console.log).mockImplementation((...a) => logs.push(a.join(' ')));
+    expect(await doctorRun([], root)).toBe(1);
+    expect(logs.join('\n')).toMatch(/commit-msg MISSING — the completeness \+ sentry judge/);
+    expect(await doctorRun(['--fix'], root)).toBe(0);
+    expect(existsSync(cmsgPath(root))).toBe(true);
+  });
+
+  it('deselecting review + sentry reverts to a pass-through, or removes the hook when the team has none', async () => {
+    const withTeam = workRepo();
+    withRepoCommitMsg(withTeam);
+    await init(withTeam);
+    await init(withTeam, defaultSelection());
+    expect(cmsg(withTeam)).not.toContain('guard-review');
+    expect(cmsg(withTeam)).toContain('.husky/commit-msg');
+
+    const bare = workRepo();
+    await init(bare);
+    expect(existsSync(cmsgPath(bare))).toBe(true);
+    await init(bare, defaultSelection());
+    expect(existsSync(cmsgPath(bare))).toBe(false);
+  });
+
+  it('a team commit-msg that already calls completeness never makes devkit drop its judges', async () => {
+    const root = workRepo();
+    writeFileSync(
+      join(root, '.husky', 'commit-msg'),
+      '#!/bin/sh\nguard-review completeness --gate "$1" || exit 1\n',
+    );
+    execFileSync('git', ['add', '-A'], { cwd: root });
+    execFileSync('git', ['-c', 'core.hooksPath=/dev/null', 'commit', '-qm', 'hand-wired'], {
+      cwd: root,
+    });
+    const logs = [];
+    vi.mocked(console.log).mockImplementation((...a) => logs.push(a.join(' ')));
+    await init(root);
+    const hook = cmsg(root);
+    expect(hook).toContain('# devkit:guard-completeness');
+    expect(hook).toContain('# devkit:guard-sentry');
+    expect(logs.join('\n')).toMatch(/it will run twice/);
+    expect(await doctorRun([], root)).toBe(0);
+  });
+
+  it('doctor warns that plain commits skip the judges once husky reclaims hooksPath', async () => {
+    const logs = [];
+    vi.mocked(console.log).mockImplementation((...a) => logs.push(a.join(' ')));
+    const wired = workRepo();
+    await init(wired);
+    execFileSync('git', ['config', 'core.hooksPath', '.husky/_'], { cwd: wired });
+    logs.length = 0;
+    await doctorRun([], wired);
+    expect(logs.join('\n')).toMatch(/commit-msg judges run only via `git ci`/);
+  });
+
+  it('with no judge selected, a stale pass-through commit-msg is named — never a silent exit 1', async () => {
+    const root = workRepo();
+    withRepoCommitMsg(root);
+    await init(root, defaultSelection());
+    writeFileSync(cmsgPath(root), '#!/bin/sh\n# old wrapper\nexit 0\n');
+    const logs = [];
+    vi.mocked(console.log).mockImplementation((...a) => logs.push(a.join(' ')));
+    expect(await doctorRun([], root)).toBe(1);
+    expect(logs.join('\n')).toMatch(/commit-msg STALE — the repo's own commit-msg may not run/);
+    expect(await doctorRun(['--fix'], root)).toBe(0);
+    expect(cmsg(root)).toContain('.husky/commit-msg');
+  });
+
+  it('--dry-run writes no commit-msg', async () => {
+    const root = workRepo();
+    await init(root, judged(), { dryRun: true });
+    expect(existsSync(cmsgPath(root))).toBe(false);
   });
 });

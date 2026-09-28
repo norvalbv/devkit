@@ -19,6 +19,7 @@ import {
 } from '../install/anti-slop/lifecycle.mts';
 import { selectedHookAssets } from '../install/hook-registration-ledger/selection.mts';
 import { checkOxcCapability } from '../install/oxc/lifecycle.mts';
+import { commitMsgGuards } from '../husky/commit-msg-block.mts';
 import { HEAL_ALIAS_NAME, isHealAlias, syncOverlayHook } from '../overlay.mts';
 import { globalHookInstalled, globalInitPath } from '../overlay-global-hook.mts';
 import { checkAgentAssets, checkRegistrations } from './asset-checks.mts';
@@ -75,6 +76,11 @@ export async function runOverlayDoctor(
   console.log(
     `  ${pathOk ? '✓' : '⚠'} core.hooksPath = ${healed ? `.devkit/hooks (re-pointed from ${hooksPath || '(unset)'}; husky reclaims it on every install — make it durable with \`devkit init --overlay --global-commit-gate\`)` : hooksPath || '(unset)'}${pathOk ? '' : ` — heal with \`git ${HEAL_ALIAS_NAME}\` (re-points it), \`devkit doctor --fix\`, or re-run \`devkit init --overlay\``}`,
   );
+  const judgesWired = printCommitMsgRow(cfg, fix, sync.commitMsg);
+  if (judgesWired && (!pathOk || globalHookInstalled()))
+    console.log(
+      `    commit-msg judges run only via \`git ${HEAL_ALIAS_NAME}\` / \`devkit ship\` while husky owns core.hooksPath (the global shim gates pre-commit only)`,
+    );
   // Advisory only — never affects the exit code (hook + path are the real health signal).
   if (aliasOurs && !hookOk)
     console.log(
@@ -166,5 +172,31 @@ export async function runOverlayDoctor(
     );
   }
   // A stale hook is unhealthy (exit 1) so CI/agents notice; --fix having just regenerated it heals this run.
-  return hookOk && pathOk && (fix || !sync.drift) ? 0 : 1;
+  return hookOk && pathOk && (fix || (!sync.drift && !sync.commitMsg.drift)) ? 0 : 1;
+}
+
+// sc-1794: the commit-msg judges (completeness, sentry) — a silently dropped message gate is
+// unhealthy, so a stale/missing hook counts in the exit code (via sync.commitMsg.drift).
+function printCommitMsgRow(
+  cfg: OverlayDoctorConfig,
+  fix: boolean,
+  state: { missing: boolean; drift: boolean },
+): boolean {
+  const wanted = commitMsgGuards(cfg.components?.guards ?? []);
+  // No judge selected: stay quiet when healthy, but a drifted pass-through still fails the exit code.
+  if (!wanted.length && !state.drift) return false;
+  const what = wanted.length
+    ? `${wanted.map((id) => (id === 'review' ? 'completeness' : id)).join(' + ')} judge(s)`
+    : 'pass-through';
+  if (state.drift && !fix) {
+    const impact = wanted.length
+      ? `the ${what} do not run`
+      : "the repo's own commit-msg may not run";
+    console.log(
+      `  ⚠ .devkit/hooks/commit-msg ${state.missing ? 'MISSING' : 'STALE'} — ${impact}; run \`devkit doctor --fix\``,
+    );
+    return false;
+  }
+  console.log(`  ✓ .devkit/hooks/commit-msg: ${what} ${state.drift ? 'regenerated' : 'wired'}`);
+  return wanted.length > 0;
 }
