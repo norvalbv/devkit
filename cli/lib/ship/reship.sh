@@ -114,6 +114,9 @@ done
 [ "$BODY_SET" -eq 0 ] || [ "$BODY_FILE_SET" -eq 0 ] || { echo "--body and --body-file are mutually exclusive" >&2; exit 1; }
 . "$(dirname "${BASH_SOURCE[0]}")/wait-ci/args.sh"
 ship_validate_wait_ci "$WAIT_CI" "$WAIT_CI_TIMEOUT" "$WAIT_CI_TIMEOUT_SET" || exit 1
+# Every git selector below is built as `:(literal)<path>` (sc-2425). Ambient Git pathspec modes
+# either reinterpret that prefix as plain text or conflict with it, so they are not inputs.
+unset GIT_LITERAL_PATHSPECS GIT_GLOB_PATHSPECS GIT_NOGLOB_PATHSPECS GIT_ICASE_PATHSPECS
 BODY_RECEIPT_PREFIX=refs/devkit/reship-body-receipts
 BODY_PAYLOAD_PREFIX=refs/devkit/reship-body-payloads
 BODY_RECEIPT_REF=
@@ -176,8 +179,11 @@ if [ "$RESUME" -eq 1 ]; then
 fi
 
 [ "${#PATHS[@]}" -gt 0 ] || { echo "no paths given" >&2; exit 1; }
+# Paths are repo-root relative, like every git call that consumes them — a cwd-relative test lets a
+# root-level directory through from a subdirectory.
+DIR_CHECK_ROOT=$(git rev-parse --show-toplevel)
 for p in "${PATHS[@]}"; do
-  [ -d "$p" ] && {
+  [ -d "$DIR_CHECK_ROOT/$p" ] && {
     echo "directory path not allowed (pass individual files): $p" >&2
     echo "  list its tracked files: git ls-files -- \"$p\"" >&2
     exit 1
@@ -529,7 +535,7 @@ if [ "$REWRITE" -eq 1 ]; then
   # An unmerged index is not a resolution, and a missing skip-worktree path is not an intentional
   # deletion. Refuse both before recording an intent or paying any gate cost.
   for p in "${PATHS[@]}"; do
-    [ -z "$(git -C "$ROOT" ls-files -u -- "$p")" ] || {
+    [ -z "$(git -C "$ROOT" ls-files -u -- ":(literal)$p")" ] || {
       echo "refusing rewrite: briefed path is still unmerged: $p" >&2; exit 1
     }
     if [ -L "$ROOT/$p" ] && [ ! -e "$ROOT/$p" ]; then
@@ -537,8 +543,8 @@ if [ "$REWRITE" -eq 1 ]; then
       exit 1
     fi
     if [ ! -e "$ROOT/$p" ] && [ ! -L "$ROOT/$p" ] && \
-       git -C "$ROOT" ls-files --error-unmatch -- "$p" >/dev/null 2>&1 && \
-       git -C "$ROOT" diff --quiet -- "$p" && git -C "$ROOT" diff --cached --quiet -- "$p"; then
+       git -C "$ROOT" ls-files --error-unmatch -- ":(literal)$p" >/dev/null 2>&1 && \
+       git -C "$ROOT" diff --quiet -- ":(literal)$p" && git -C "$ROOT" diff --cached --quiet -- ":(literal)$p"; then
       echo "refusing rewrite: briefed path is absent but not deleted (sparse or unmaterialized): $p" >&2
       exit 1
     fi
@@ -708,9 +714,10 @@ for p in "${PATHS[@]}"; do
     # re-push before the staged-set snapshot, gates, commit, and push. Every PATHS entry is
     # caller-explicit (positional after --; directories already rejected above), so forcing it is
     # exactly what was asked — same reasoning as husky-block.mts's `git add -f`.
-    git -C "$WT" add -f -- "$p"
+    git -C "$WT" add -f -- ":(literal)$p"
   else
-    git -C "$WT" rm -q --ignore-unmatch -- "$p" || true
+    # Literal: a glob-named path that is gone must remove only itself, never the files it matches.
+    git -C "$WT" rm -q --ignore-unmatch -- ":(literal)$p" || true
   fi
 done
 
@@ -719,6 +726,8 @@ done
 # tree with today's briefed bytes overlaid: receipt-only gate additions remain authoritative, while
 # any caller-path drift refuses the shortcut. This is the re-ship twin of new-ship's gate receipt.
 REWRITE_ALREADY_PUBLISHED=0
+LITERAL_PATHS=()
+for p in "${PATHS[@]}"; do LITERAL_PATHS+=(":(literal)$p"); done
 if [ "$REWRITE" -eq 1 ] && [ "$UPDATE_PR_BODY" -eq 1 ] && [ "$RESUME" -eq 1 ] &&
    [ -n "${SHIP_INTENT_GENERATION:-}" ] && [ "$REWRITE_RECEIPT_PROVEN" -eq 1 ]; then
   STAGED_REWRITE_TREE=$(git -C "$WT" write-tree)
@@ -734,7 +743,7 @@ if [ "$REWRITE" -eq 1 ] && [ "$UPDATE_PR_BODY" -eq 1 ] && [ "$RESUME" -eq 1 ] &&
     rm -f "$BODY_RECOVERY_INDEX" # read-tree must create it; an empty file is not a valid index
     BODY_RECOVERY_PATCH=$(mktemp "${TMPDIR:-/tmp}/reship-body-patch.XXXXXX")
     if GIT_INDEX_FILE="$BODY_RECOVERY_INDEX" git -C "$WT" read-tree "$EXPECTED_REMOTE" &&
-       git -C "$WT" diff --binary "$EXPECTED_REMOTE" "$STAGED_REWRITE_TREE" -- "${PATHS[@]}" > "$BODY_RECOVERY_PATCH" &&
+       git -C "$WT" diff --binary "$EXPECTED_REMOTE" "$STAGED_REWRITE_TREE" -- "${LITERAL_PATHS[@]}" > "$BODY_RECOVERY_PATCH" &&
        { [ ! -s "$BODY_RECOVERY_PATCH" ] || GIT_INDEX_FILE="$BODY_RECOVERY_INDEX" git -C "$WT" apply --cached "$BODY_RECOVERY_PATCH"; }; then
       RECOVERED_REWRITE_TREE=$(GIT_INDEX_FILE="$BODY_RECOVERY_INDEX" git -C "$WT" write-tree)
       PUBLISHED_REWRITE_TREE=$(git rev-parse "$EXPECTED_REMOTE^{tree}")

@@ -44,6 +44,7 @@
             "help",
             "husky",
             "install",
+            "move",
             "ship"
           ]
         },

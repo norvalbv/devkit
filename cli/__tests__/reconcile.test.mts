@@ -194,6 +194,67 @@ describe('reconcile — the core payoff: stale tree becomes ff-pullable', () => 
   });
 });
 
+// sc-2425: manifest paths are literal filenames, so `*.txt` must never reach git as a glob.
+describe('reconcile — a manifest path is one literal file', () => {
+  const GLOB = '*.txt';
+  /** Merge `change` for the glob-named file upstream, touching nothing else, then pin back to base. */
+  function mergeGlobUpstream(root, g, base, content) {
+    g('checkout', '-q', '-b', 'feat/up');
+    if (content === null) g('rm', '-q', '--', `:(literal)${GLOB}`);
+    else {
+      writeFileSync(join(root, GLOB), content);
+      g('add', '--', `:(literal)${GLOB}`);
+    }
+    g('commit', '-q', '-m', 'upstream change');
+    g('checkout', '-q', '0.0.9');
+    g('merge', '-q', '--no-ff', 'feat/up', '-m', 'merge PR');
+    g('push', '-q', 'origin', '0.0.9');
+    g('reset', '-q', '--hard', base);
+    g('branch', '-q', '-D', 'feat/up');
+  }
+
+  it('staging a shipped glob-named deletion leaves the files it would match in the index', () => {
+    const { root, g, base } = makeRepo({ [GLOB]: 'goner\n', 'a.txt': 'A\n', 'b.txt': 'B\n' });
+    mergeGlobUpstream(root, g, base, null);
+    rmSync(join(root, GLOB));
+    const entry = entryFor(root, g, base, [{ path: GLOB, op: 'delete' }]);
+
+    const res = reconcileBranch({ mainRepo: root, branch: 'feat/x', entry, apply: true });
+
+    expect(res.restored, JSON.stringify(res.warnings)).toEqual([GLOB]);
+    expect(g('ls-files').split('\n').sort()).toEqual(['a.txt', 'b.txt']);
+  });
+
+  it('stages the deletion under an ambient GIT_LITERAL_PATHSPECS=1 in the caller shell', () => {
+    const { root, g, base } = makeRepo({ [GLOB]: 'goner\n', 'a.txt': 'A\n' });
+    mergeGlobUpstream(root, g, base, null);
+    rmSync(join(root, GLOB));
+    const entry = entryFor(root, g, base, [{ path: GLOB, op: 'delete' }]);
+
+    process.env.GIT_LITERAL_PATHSPECS = '1';
+    try {
+      const res = reconcileBranch({ mainRepo: root, branch: 'feat/x', entry, apply: true });
+      expect(res.restored, JSON.stringify(res.warnings)).toEqual([GLOB]);
+    } finally {
+      delete process.env.GIT_LITERAL_PATHSPECS;
+    }
+    expect(g('ls-files')).toBe('a.txt');
+  });
+
+  it('restoring a glob-named edit never overwrites a sibling the glob matches', () => {
+    const { root, g, base } = makeRepo({ [GLOB]: 'OLD\n', 'a.txt': 'A\n' });
+    mergeGlobUpstream(root, g, base, 'NEW\n');
+    writeFileSync(join(root, GLOB), 'NEW\n'); // the shipped bytes, pristine
+    writeFileSync(join(root, 'a.txt'), 'my unshipped edit\n');
+    const entry = entryFor(root, g, base, [{ path: GLOB }]);
+
+    const res = reconcileBranch({ mainRepo: root, branch: 'feat/x', entry, apply: true });
+
+    expect(res.restored).toEqual([GLOB]);
+    expect(readFileSync(join(root, 'a.txt'), 'utf8')).toBe('my unshipped edit\n');
+  });
+});
+
 describe('reconcile — the three-way gate', () => {
   it('idempotent re-run: a second apply restores nothing (already reconciled)', () => {
     const { root, g, base } = makeRepo({ 'foo.ts': 'OLD\n' });
