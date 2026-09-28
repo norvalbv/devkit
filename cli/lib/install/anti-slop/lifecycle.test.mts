@@ -1,8 +1,9 @@
-import { spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import antiSlop from '../../../commands/oxc/anti-slop.mts';
 import { digest } from '../../fs-helpers.mts';
 import { syncOxcCapability } from '../oxc/lifecycle.mts';
 import { resolveOxcRuntime } from '../oxc/runtime.mts';
@@ -399,5 +400,45 @@ export default { meta: { name: 'local' }, rules: { classes: rule } };
 
     expect(existsSync(join(cwd, '.devkit/anti-slop'))).toBe(false);
     expect(existsSync(join(cwd, '.devkit/oxc'))).toBe(false);
+  });
+});
+
+// sc-2459: a commit must not land an unbaselined error finding in a file it changes. The staged gate
+// is what `devkit ship` and the pre-commit hook run, so this pins that gate, not the CI --base run.
+describe('anti-slop staged gate', () => {
+  function git(cwd: string, args: string[]): void {
+    execFileSync('git', args, { cwd, stdio: 'ignore' });
+  }
+
+  it('rejects a staged conditional empty-object spread the baseline does not record', () => {
+    const output: string[] = [];
+    const capture = (...args: unknown[]) => {
+      output.push(args.map(String).join(' '));
+    };
+    vi.spyOn(console, 'log').mockImplementation(capture);
+    vi.spyOn(console, 'error').mockImplementation(capture);
+    const cwd = root();
+    git(cwd, ['init', '-q']);
+    syncAntiSlopCapability(cwd);
+    syncOxcCapability(cwd, { antiSlop: true });
+    writeFileSync(
+      join(cwd, ANTI_SLOP_BASELINE_REL),
+      `${JSON.stringify({ schemaVersion: 1, upstreamCommit: ANTI_SLOP_UPSTREAM, entries: [] }, null, 2)}\n`,
+    );
+    mkdirSync(join(cwd, 'src'));
+    writeFileSync(join(cwd, 'src/env.ts'), 'export const env = { mode: "base" };\n');
+    git(cwd, ['add', '-A']);
+    git(cwd, ['-c', 'user.name=t', '-c', 'user.email=t@test.invalid', 'commit', '-qm', 'base']);
+
+    writeFileSync(
+      join(cwd, 'src/env.ts'),
+      'export const withTimeout = (timeout?: string) => ({ mode: "base", ...(timeout ? { timeout } : {}) });\n',
+    );
+    git(cwd, ['add', 'src/env.ts']);
+
+    expect(antiSlop(['check', '--staged'], cwd)).toBe(1);
+    const report = output.join('\n');
+    expect(report).toContain('anti-slop/no-conditional-empty-object-spread');
+    expect(report).toMatch(/FAIL — [1-9]\d* new error finding\(s\)/u);
   });
 });
