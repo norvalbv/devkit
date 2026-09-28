@@ -1,9 +1,11 @@
+import { execFileSync as rawExecFileSync } from 'node:child_process';
 import {
   chmodSync,
   existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   readlinkSync,
   realpathSync,
   rmSync,
@@ -14,6 +16,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
+import { coverageMapSchema } from '../lib/ship/coverage/coverage-rebase.mts';
 import { testExecFileSync as execFileSync, testSpawnSync as spawnSync } from './_helpers.mts';
 
 // Gate dependencies (.husky/_, node_modules, coverage) are all GITIGNORED, so `git worktree add`
@@ -485,5 +488,86 @@ echo "SURVIVED:$?"`,
 
     expect(r.stdout).toContain('SURVIVED:0');
     expect(r.stderr).toContain('not installed or not on PATH');
+  });
+});
+
+// sc-1292 wiring under the errexit shell real callers use; unit behaviour lives in
+// cli/lib/ship/coverage/coverage-rebase.test.mts.
+describe('prepare_gate_worktree — linked coverage is rebased onto the worktree', () => {
+  // Raw leaf git calls still carry a native bound so one cannot wedge this single-worker project.
+  const LEAF_TIMEOUT_MS = 30_000;
+
+  /** A real git worktree (as ship creates) under a root with a SPACE, as real consumer paths have. */
+  function seedShipWorktree(coverageKeyRoot: (main: string) => string) {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'gatewt cov-')));
+    dirs.push(root);
+    const main = join(root, 'main');
+    mkdirSync(join(main, 'src'), { recursive: true });
+    const git = (args: string[], cwd = main) =>
+      rawExecFileSync('git', args, {
+        cwd,
+        encoding: 'utf8',
+        env: { ...process.env, ...GIT_ENV },
+        timeout: LEAF_TIMEOUT_MS,
+      });
+    git(['init', '-q', '-b', 'main']);
+    git(['config', 'user.email', 'a@b.c']);
+    git(['config', 'user.name', 'a']);
+    writeFileSync(join(main, '.gitignore'), 'node_modules\ncoverage\n.husky/_\n');
+    writeFileSync(join(main, 'src/a.ts'), 'export const a = 1;\n');
+    git(['add', '.']);
+    git(['commit', '-q', '-m', 'root']);
+    const key = `${coverageKeyRoot(main)}/src/a.ts`;
+    seedFiles(main, {
+      'node_modules/dep.js': 'x',
+      'coverage/coverage-final.json': JSON.stringify({ [key]: { path: key, s: {}, f: {}, b: {} } }),
+      'coverage/.last-clear.json': '{}',
+    });
+    mkdirSync(join(main, '.husky/_'), { recursive: true });
+    writeFileSync(join(main, '.husky/_/pre-commit'), 'x', { mode: 0o755 });
+    const wt = join(root, 'ship wt');
+    git(['worktree', 'add', '-q', '--detach', wt]);
+    return { main, wt };
+  }
+
+  it('replaces the link with a rebased report when coverage came from the developer checkout', () => {
+    const { main, wt } = seedShipWorktree((m) => m);
+
+    const r = prepare(wt, main);
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).toContain(`rebased coverage keys from ${main} onto the worktree`);
+    expect(lstatSync(join(wt, 'coverage')).isDirectory()).toBe(true);
+    expect(linkTarget(join(wt, 'coverage/.last-clear.json'))).toBe(
+      join(main, 'coverage/.last-clear.json'),
+    );
+    const report = coverageMapSchema.parse(
+      JSON.parse(readFileSync(join(wt, 'coverage/coverage-final.json'), 'utf8')),
+    );
+    expect(Object.keys(report)).toEqual([`${realpathSync(wt)}/src/a.ts`]);
+    // Linked AFTER staging: the rebase must not leave anything the ship could commit.
+    expect(
+      rawExecFileSync('git', ['status', '--porcelain'], {
+        cwd: wt,
+        encoding: 'utf8',
+        timeout: LEAF_TIMEOUT_MS,
+      }),
+    ).toBe('');
+  });
+
+  it('keeps the plain link when the report already names the worktree paths', () => {
+    const { main, wt } = seedShipWorktree(() => '');
+    // Re-key under the worktree itself — the case of coverage produced inside it.
+    const key = `${realpathSync(wt)}/src/a.ts`;
+    writeFileSync(
+      join(main, 'coverage/coverage-final.json'),
+      JSON.stringify({ [key]: { path: key } }),
+    );
+
+    const r = prepare(wt, main);
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).not.toContain('rebased coverage keys');
+    expect(linkTarget(join(wt, 'coverage'))).toBe(join(main, 'coverage'));
   });
 });
