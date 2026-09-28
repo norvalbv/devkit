@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -151,6 +151,13 @@ describe('search-tool-guard (PreToolUse)', () => {
   it('stays quiet on a /tmp target regardless of pattern shape (sc-1359 #3)', () => {
     expect(guardFires(`grep -oE "FAIL +[^ ]+\\.test\\.tsx?" /tmp/vitest-out.log`)).toBe(false);
   });
+
+  it('stays quiet on exact log strings copied from gate output (sc-3404)', () => {
+    expect(guardFires(String.raw`grep -rlE "judge unavailable \(" src/`)).toBe(false);
+    expect(guardFires(`grep -rln "NONE are additions" src/`)).toBe(false);
+    // An acronym-led concept query is still flagged.
+    expect(guardFires(`grep -rn "API rate limiting" src/`)).toBe(true);
+  });
 });
 
 describe('search-tool-counter (PostToolUse) — streak state machine', () => {
@@ -203,6 +210,72 @@ describe('search-tool-counter (PostToolUse) — streak state machine', () => {
     expect(msg).toContain('3 consecutive');
     // The excluded call must not appear in the recent-commands list either.
     expect(msg).not.toContain('node_modules');
+  });
+
+  it('exact log-string greps are a NO-OP on the streak — no STOP, no reset (sc-3404)', () => {
+    expect(runCounter(String.raw`grep -rlE "judge unavailable \(" src/`)).toBe(false);
+    expect(runCounter(`grep -rln "NONE are additions" src/`)).toBe(false);
+    expect(runCounter(`grep -rn "Cannot read property 'foo' of undefined" src/`)).toBe(false);
+    expect(existsSync(stateFile()) ? JSON.parse(readFileSync(stateFile(), 'utf8')).streak : 0).toBe(
+      0,
+    );
+    // Between two identifier greps, an exact string neither counts nor resets the run.
+    runCounter(`grep -rn "getUser" src/`);
+    expect(runCounter(`grep -rn "NONE are additions" src/`)).toBe(false);
+    runCounter(`grep -rn "getAuth" src/`);
+    const msg = JSON.parse(runCounterRaw(`grep -rn "getSession" src/`)).hookSpecificOutput
+      .additionalContext;
+    expect(msg).toContain('3 consecutive');
+    expect(msg).not.toContain('NONE are additions');
+  });
+
+  it('identifier enumeration wrapped in a code snippet still escalates (sc-3404)', () => {
+    expect(runCounter(`grep -rn "function getUser" src/`)).toBe(false);
+    expect(runCounter(`grep -rn "function getAuth" src/`)).toBe(false);
+    expect(runCounter(`grep -rn "function getSession" src/`)).toBe(true);
+  });
+
+  it('a compound grep is exempt only when EVERY in-scope pattern is exact (sc-3404)', () => {
+    const mixed = `grep -rn "NONE are additions" src/ && grep -rn "auth flow handler" src/`;
+    expect(runCounter(mixed)).toBe(false);
+    expect(runCounter(mixed)).toBe(false);
+    expect(runCounter(mixed)).toBe(true);
+  });
+
+  it('a multi -e grep mixing exact and conceptual patterns still counts (ship review finding)', () => {
+    const mixed = `grep -rn -e "NONE are additions" -e "auth flow handler" src/`;
+    expect(runCounter(mixed)).toBe(false);
+    expect(runCounter(mixed)).toBe(false);
+    expect(runCounter(mixed)).toBe(true);
+  });
+
+  it('punctuated snippet enumeration still escalates (ship review finding)', () => {
+    expect(runCounter(`grep -rn "function getUser()" src/`)).toBe(false);
+    expect(runCounter(`grep -rn "function getAuth()" src/`)).toBe(false);
+    expect(runCounter(`grep -rn "const MAX_RETRY" src/`)).toBe(true);
+  });
+
+  it('an exact grep chained with a find still counts (ship review finding)', () => {
+    const cmd = `grep -rn "NONE are additions" src/ && find src -name "*.ts"`;
+    expect(runCounter(cmd)).toBe(false);
+    expect(runCounter(cmd)).toBe(false);
+    expect(runCounter(cmd)).toBe(true);
+  });
+
+  it('an rtk-wrapped or cd-prefixed exact grep is a no-op too: normalize() unwraps both first', () => {
+    for (let i = 0; i < 3; i++) {
+      expect(runCounter(`cd /x && rtk grep -rn "NONE are additions" src/`)).toBe(false);
+    }
+  });
+
+  it('an attached -e exact string is a no-op too (ship review finding)', () => {
+    for (let i = 0; i < 3; i++) expect(runCounter(`grep -e"NONE are additions" src/`)).toBe(false);
+  });
+
+  it('find (no pattern) still counts toward the streak (sc-3404)', () => {
+    expect(runCounter(`find src -name "*.ts"`)).toBe(false);
+    expect(runCounter(`find src -name "*.mts"`)).toBe(false);
+    expect(runCounter(`find src -name "*.js"`)).toBe(true);
   });
 
   it('degrades gracefully on a corrupt state file (concurrency safety: no throw, treated as 0)', () => {

@@ -24,6 +24,15 @@
  * the classifier's static grammar, reused on every hook invocation.
  */
 
+import {
+  CODE_KEYWORDS,
+  exactSignalReason,
+  RE_DESCRIPTIVE,
+  RE_LEADING_CAP,
+  RE_LEADING_NONWORD,
+  RE_QUESTION_WORD,
+  RE_QUOTE_OR_COLON,
+} from './search-tool-exact.mts';
 import { matchUnquoted, splitUnquotedSegments, tokenizeArgv } from './search-tool-shell.mts';
 
 export { hasCommandSearch, isPrimarySearchCommand, normalize } from './search-tool-shell.mts';
@@ -71,41 +80,18 @@ const RE_REL_PATH = /^\.\.?\//;
 const RE_SLASH = /\//;
 const RE_REGEX_META = /[\\^$|(){}[\]?+*]/;
 const RE_SINGLE_IDENTIFIER = /^[\w.-]+$/;
-const RE_LEADING_CAP = /^[A-Z]/;
 const RE_QUOTECHAR = /['"`]/;
-const RE_QUESTION_WORD = /^(where|how|what|which|who|why|when)\b/i;
-const RE_DESCRIPTIVE = /^(function|code|logic|handler|component|hook)\s+(that|which|for|to)\b/i;
 const RE_META_OR_PUNCT = /[\\^$|(){}[\]?+*=:]/;
-const RE_QUOTE_OR_COLON = /['"`:]/;
 const RE_PLAIN_WORD = /^[a-z]+$/;
 
-// A verbatim code snippet (e.g. `export async function getFooBar`, copy-pasted
-// to grep for) reads as multi-word natural language by word count alone but
-// is a literal search: see looksLikeCodeSnippet for the exact contract
-// (every word but the last must be one of these declaration modifiers).
-const CODE_KEYWORDS = new Set([
-  'export',
-  'import',
-  'async',
-  'function',
-  'const',
-  'let',
-  'var',
-  'class',
-  'interface',
-  'type',
-  'def',
-  'return',
-  'public',
-  'private',
-  'protected',
-  'static',
-  'struct',
-  'fn',
-  'impl',
-  'enum',
-  'namespace',
-]);
+// One grep-family invocation: its bin, pattern(s), unconsumed flag tokens, and targets.
+interface GrepInvocation {
+  pattern: string | null;
+  patterns: string[];
+  bin: string;
+  flags: string[];
+  targets: string[];
+}
 
 // A pattern-classification verdict tier and its rationale (see classify()).
 export type SearchVerdict = 'literal' | 'conceptual_medium' | 'conceptual_high';
@@ -128,6 +114,9 @@ export interface Classification {
 const RE_VALUE_FLAG =
   /^(-[ABCmfdD]|--(after-context|before-context|context|max-count|file|directories|devices))$/;
 const RE_PATTERN_FLAG = /^(-e|--regexp)$/;
+// `-ePAT`, `--regexp=PAT` and a no-value cluster ending in e (`-rne PAT`) spell the same flag.
+const RE_PATTERN_FLAG_JOINED = /^(?:-([a-zA-Z]*?)e([\s\S]*)|--regexp=([\s\S]*))$/;
+const RE_VALUE_FLAG_LETTER = /[ABCmfdD]/;
 
 // Classify a grep-family invocation's argv tokens (everything after the bin
 // name) into: values passed via `-e`/`--regexp` (each IS a pattern, never a
@@ -148,15 +137,13 @@ const RE_PATTERN_FLAG = /^(-e|--regexp)$/;
 // unrelated flags the same way, so `fd -e ts "conceptual query" src/` must
 // NOT read "ts" as the pattern (guard-review finding, sc-1359 follow-up
 // round 10).
-function classifyOperands(
-  tokens: string[],
-  bin: string,
-): { patternValues: string[]; positionals: string[] } {
+function classifyOperands(tokens: string[], bin: string) {
   const isFd = bin === 'fd';
   const isPatternFlag = (t: string) => !isFd && RE_PATTERN_FLAG.test(t);
   const isValueFlag = (t: string) => RE_VALUE_FLAG.test(t) || (isFd && RE_PATTERN_FLAG.test(t));
   const patternValues: string[] = [];
   const positionals: string[] = [];
+  const flags: string[] = []; // every flag token not consumed as -e, for the exemption's allowlist
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i];
     if (!t.startsWith('-')) {
@@ -167,9 +154,21 @@ function classifyOperands(
       if (i + 1 < tokens.length) patternValues.push(tokens[++i]);
       continue;
     }
+    const joined = isFd ? null : t.match(RE_PATTERN_FLAG_JOINED);
+    if (joined && joined[3] !== undefined) {
+      patternValues.push(joined[3]);
+      continue;
+    }
+    if (joined && !RE_VALUE_FLAG_LETTER.test(joined[1])) {
+      if (joined[1]) flags.push(`-${joined[1]}`);
+      if (joined[2]) patternValues.push(joined[2]);
+      else if (i + 1 < tokens.length) patternValues.push(tokens[++i]);
+      continue;
+    }
+    flags.push(t);
     if (isValueFlag(t)) i += 1; // discard this flag's value token
   }
-  return { patternValues, positionals };
+  return { patternValues, positionals, flags };
 }
 
 // For each segment that actually INVOKES a grep-family bin (not merely
@@ -184,17 +183,24 @@ function classifyOperands(
 // the echo's argument as the search pattern. Shared by extractPattern
 // (wants the pattern) and the out-of-index helpers (want the targets), so
 // the two can't drift on what counts as "this grep's own argv".
-function grepInvocations(cmd: string): { pattern: string | null; targets: string[] }[] {
-  const invocations: { pattern: string | null; targets: string[] }[] = [];
+function grepInvocations(cmd: string): GrepInvocation[] {
+  const invocations: GrepInvocation[] = [];
   for (const segment of splitUnquotedSegments(cmd)) {
     const match = matchUnquoted(segment, RE_GREP_SCOPE);
     if (!match) continue;
-    const { patternValues, positionals } = classifyOperands(tokenizeArgv(match[2]), match[1]);
+    const { patternValues, positionals, flags } = classifyOperands(
+      tokenizeArgv(match[2]),
+      match[1],
+    );
     // NOT filtering bare cwd-refs (`.`/`..`) out of targets here — see
     // allTargetsMissEveryRoot's doc comment for why a pre-filter is wrong
     // for a MIXED target list.
+    const patterns = patternValues.length ? patternValues : positionals.slice(0, 1);
     invocations.push({
-      pattern: patternValues.length ? patternValues[0] : (positionals[0] ?? null),
+      pattern: patterns[0] ?? null,
+      patterns,
+      bin: match[1],
+      flags,
       targets: patternValues.length ? positionals : positionals.slice(1),
     });
   }
@@ -241,13 +247,25 @@ export function firstAdvisablePattern(
   excludeRoots: string[],
   scanRoots: string[],
 ): string | null {
-  for (const inv of grepInvocations(cmd)) {
-    if (inv.pattern === null) continue;
-    if (allTargetsMatchSomeRoot(inv.targets, excludeRoots)) continue;
-    if (allTargetsMissEveryRoot(inv.targets, scanRoots)) continue;
-    return inv.pattern;
-  }
-  return null;
+  return advisablePatterns(cmd, excludeRoots, scanRoots)[0] ?? null;
+}
+
+// Every in-scope invocation's pattern, in order. The counter needs all of them:
+// a conceptual grep chained after an exact one must not ride its exemption (sc-3404).
+export function advisablePatterns(
+  cmd: string,
+  excludeRoots: string[],
+  scanRoots: string[],
+): string[] {
+  return inScopeInvocations(cmd, excludeRoots, scanRoots).flatMap((inv) => inv.patterns);
+}
+
+export function inScopeInvocations(cmd: string, excludeRoots: string[], scanRoots: string[]) {
+  return grepInvocations(cmd).filter(
+    (inv) =>
+      !allTargetsMatchSomeRoot(inv.targets, excludeRoots) &&
+      !allTargetsMissEveryRoot(inv.targets, scanRoots),
+  );
 }
 
 // `find`'s argv is `[path...] [expression]` — its paths are the LEADING
@@ -394,7 +412,7 @@ function looksLikeCodeSnippet(words: string[]): boolean {
  * Classify a pattern as literal (grep is correct) or conceptual (steer toward
  * the semantic-search tool). Verdicts: literal | conceptual_medium | conceptual_high.
  */
-// Reason: the branches ARE the literal-vs-conceptual classification algorithm: each guard is a distinct verdict tier (filesystem path, regex/glob, single identifier, error-message shape, question word, descriptive phrasing, code-snippet shape, 4-word/3-word/2-word thresholds) checked in priority order; extracting them hides the heuristic ladder
+// Reason: the branches ARE the literal-vs-conceptual classification algorithm: each guard is a distinct verdict tier (filesystem path, regex/glob, single identifier, error-message shape, question word, descriptive phrasing, code-snippet shape, 4-word threshold, 3-word tier with its exact-punctuation / log-sentinel escapes, 2-word threshold) checked in priority order; extracting them hides the heuristic ladder
 // fallow-ignore-next-line complexity
 export function classify(pattern: string | null | undefined): Classification {
   const trimmed = (pattern ?? '').trim();
@@ -428,12 +446,13 @@ export function classify(pattern: string | null | undefined): Classification {
   }
 
   // English question word → high confidence conceptual.
-  if (RE_QUESTION_WORD.test(trimmed)) {
+  const lead = trimmed.replace(RE_LEADING_NONWORD, ''); // `(where is auth)` still leads with a question
+  if (RE_QUESTION_WORD.test(lead)) {
     return { verdict: 'conceptual_high', reason: 'English question word', wordCount };
   }
 
   // "function that ..." / "code that ..." → high.
-  if (RE_DESCRIPTIVE.test(trimmed)) {
+  if (RE_DESCRIPTIVE.test(lead)) {
     return { verdict: 'conceptual_high', reason: 'descriptive phrasing', wordCount };
   }
 
@@ -461,6 +480,9 @@ export function classify(pattern: string | null | undefined): Classification {
     if (RE_LEADING_CAP.test(trimmed) && RE_QUOTE_OR_COLON.test(trimmed)) {
       return { verdict: 'literal', reason: 'error message shape', wordCount };
     }
+    // Copied-output signals (sc-3404); the 4+-word tier already goes literal on punctuation.
+    const exactReason = exactSignalReason(trimmed, words);
+    if (exactReason) return { verdict: 'literal', reason: exactReason, wordCount };
     return { verdict: 'conceptual_medium', reason: '3 words', wordCount };
   }
 

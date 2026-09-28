@@ -49,6 +49,18 @@
       "expected_tool": "grep",
       "why": "verbatim code snippet (sc-1359 #1) — keyword + identifier, not English prose"
     },
+    {
+      "id": "lit-09",
+      "pattern": "judge unavailable (",
+      "expected_tool": "grep",
+      "why": "exact log string with code punctuation (sc-3404)"
+    },
+    {
+      "id": "lit-10",
+      "pattern": "NONE are additions",
+      "expected_tool": "grep",
+      "why": "exact gate-output string led by a log sentinel (sc-3404)"
+    },
 
     {
       "id": "sem-01",
@@ -146,6 +158,18 @@
       "pattern": "relationship between Client and Server",
       "expected_tool": "graphify_path",
       "why": "two-node relationship"
+    },
+    {
+      "id": "sem-13",
+      "pattern": "API rate limiting",
+      "expected_tool": "searchCode",
+      "why": "acronym-led concept query must not read as a log sentinel (sc-3404)"
+    },
+    {
+      "id": "sem-14",
+      "pattern": "JWT token refresh",
+      "expected_tool": "searchCode",
+      "why": "acronym-led concept query must not read as a log sentinel (sc-3404)"
     }
   ]
 }
