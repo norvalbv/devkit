@@ -31,7 +31,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { basename, dirname, join, relative, resolve } from 'node:path';
-import { Node, Project, type SourceFile, SyntaxKind, ts } from 'ts-morph';
+import { Node, Project, type SourceFile, SyntaxKind } from 'ts-morph';
 import { STRUCTURE_BASELINE_DIR } from '../../gate-engine/ratchets/baseline-paths.mts';
 import { resolveBaselineRoots } from '../lib/generate/generate-structure-baseline.mts';
 import {
@@ -41,20 +41,15 @@ import {
   trackedPathState,
   type SourceIdentity,
 } from '../lib/git-tracked.mts';
+import {
+  readAlias,
+  resolveSpec,
+  specifierFor,
+  stripExt,
+  toPosix,
+} from '../lib/move/specifiers.mts';
 import { reviewPathWithin } from '../lib/ship/review/runtime-paths.mts';
 
-/**
- * `pathsBasePath` is absent from TypeScript's published CompilerOptions typings;
- * parseJsonConfigFileContent sets it to the directory of the config that declared `paths`.
- */
-interface ResolvedPathOptions extends ts.CompilerOptions {
-  pathsBasePath?: string;
-}
-/** A resolved `@/*` alias: its specifier prefix and the absolute src root it points at. */
-interface Alias {
-  prefix: string;
-  root: string;
-}
 /** An editable module-specifier reference in a source file (get/set its literal value). */
 interface SpecifierHandle {
   get: () => string;
@@ -78,76 +73,7 @@ interface PhysicalMove {
 const TEST_SUFFIXES = ['.test.ts', '.test.tsx', '.spec.ts', '.spec.tsx'];
 const MOCK_CALLEES = new Set(['vi.mock', 'vi.doMock', 'jest.mock', 'require', 'import']);
 const NO_ALIAS_HINT = 'no "@/*"-style path alias found in tsconfig — pass --alias @/=src/renderer';
-// 18003 always fires because readDirectory is stubbed below, and 5023 fires on valid configs using
-// an option this TypeScript predates. Every other diagnostic left `paths` genuinely unresolved.
-const BENIGN_CONFIG_CODES = new Set([18003, 5023]);
-
-const EXT_RE = /\.(ts|tsx|js|jsx)$/;
-const STAR_END_RE = /\*$/;
-const SLASH_END_RE = /\/$/;
-const INDEX_SUFFIX_RE = /\/index$/;
 const RE_META_RE = /[.*+?^${}()|[\]\\]/g;
-
-const stripExt = (p: string): string => p.replace(EXT_RE, '');
-const toPosix = (p: string): string => p.replaceAll('\\', '/');
-
-/** Reads the `@/*` alias the way tsc does: whole `extends` chain, real tsconfig JSONC. */
-function readAlias(cwd: string, override?: string): Alias | null {
-  const tsPath = join(cwd, 'tsconfig.json');
-  // Checked even under --alias: the rewrite pass below builds a ts-morph Project from this file
-  // AFTER git mv, so an absent one would abort mid-run and strand a half-moved tree.
-  if (!existsSync(tsPath))
-    throw new Error(`could not read ${relative(cwd, tsPath)}: file not found`);
-  if (override) {
-    const [prefix, dir] = override.split('=');
-    if (!dir) throw new Error(`--alias needs PREFIX=DIR, got --alias=${override}`);
-    return { prefix: prefix.replace(STAR_END_RE, ''), root: resolve(cwd, dir) };
-  }
-  const read = ts.readConfigFile(tsPath, (p) => ts.sys.readFile(p));
-  if (read.error)
-    throw new Error(
-      `could not read ${relative(cwd, tsPath)}: ${ts.flattenDiagnosticMessageText(read.error.messageText, ' ')}`,
-    );
-  // readDirectory is stubbed: only compilerOptions is wanted, and the include glob would walk the repo.
-  const host: ts.ParseConfigHost = {
-    useCaseSensitiveFileNames: ts.sys.useCaseSensitiveFileNames,
-    readDirectory: () => [],
-    fileExists: (p) => ts.sys.fileExists(p),
-    readFile: (p) => ts.sys.readFile(p),
-  };
-  const parsed = ts.parseJsonConfigFileContent(read.config, host, cwd, undefined, tsPath);
-  const opts: ResolvedPathOptions = parsed.options;
-  const entry = Object.entries(opts.paths ?? {}).find(([k, v]) => k.endsWith('/*') && v[0]);
-  if (!entry) {
-    // Only consulted once nothing resolved: these same diagnostics fire harmlessly when the root
-    // config's own paths win, so they are the diagnosis only when there is nothing else to report.
-    const fault = parsed.errors.find((d) => !BENIGN_CONFIG_CODES.has(d.code));
-    if (fault) {
-      const where = fault.file ? relative(cwd, fault.file.fileName) : relative(cwd, tsPath);
-      throw new Error(
-        `could not read ${where}: ${ts.flattenDiagnosticMessageText(fault.messageText, ' ')}`,
-      );
-    }
-    return null;
-  }
-  const prefix = entry[0].replace(STAR_END_RE, ''); // '@/*' -> '@/'
-  const target = entry[1][0].replace(STAR_END_RE, '').replace(SLASH_END_RE, ''); // './src/renderer/*' -> './src/renderer'
-  // tsc resolves `paths` against baseUrl when declared, else against the declaring config's dir.
-  return { prefix, root: resolve(opts.baseUrl ?? opts.pathsBasePath ?? cwd, target) };
-}
-
-/** A specifier → absolute extensionless module path, or null if external/bare. */
-function resolveSpec(spec: string, resolveDir: string, alias: Alias): string | null {
-  if (spec.startsWith(alias.prefix))
-    return stripExt(join(alias.root, spec.slice(alias.prefix.length)));
-  if (spec.startsWith('./') || spec.startsWith('../')) return stripExt(resolve(resolveDir, spec));
-  return null;
-}
-
-/** Absolute extensionless module path → alias specifier ('@/lib/utils/x', drops trailing /index). */
-function aliasFor(absMod: string, alias: Alias): string {
-  return alias.prefix + toPosix(relative(alias.root, absMod)).replace(INDEX_SUFFIX_RE, '');
-}
 
 function testSiblings(fileAbs: string): string[] {
   const base = stripExt(fileAbs);
@@ -267,7 +193,8 @@ Usage:
   devkit move <src...> <dest-dir> [--dry-run] [--no-baseline] [--alias=@/=src/renderer]
 
 Rewrites import / export-from / dynamic import() / vi.mock|jest.mock|require in the repo's @/ alias
-style, moves colocated *.test siblings, re-anchors the moved file's own relative imports, and
+style — or as a relative path when the importer or the target lies outside the alias root, so it
+never emits @/../ — moves colocated *.test siblings, re-anchors the moved file's own relative imports, and
 surgically prunes the moved entries from .devkit/baselines/structure (no whole-tree regen). Tracked
 sources preserve history through git mv; untracked sources move without requiring a first commit.
   --dry-run        Preview only.
@@ -462,12 +389,14 @@ export default async function move(args: string[], cwd: string): Promise<number>
       const absMod = resolveSpec(spec, resolveDir, alias);
       if (absMod == null) continue;
       const hit = moves.find((m) => m.oldMod === absMod);
-      if (hit) {
-        h.set(aliasFor(hit.newMod ?? stripExt(hit.newAbs), alias)); // → a moved file's new home
-        touched = true;
-        rewrites++;
-      } else if (moved && !spec.startsWith(alias.prefix)) {
-        h.set(aliasFor(absMod, alias)); // moved file's own relative → re-anchor to alias
+      let next: string | null = null;
+      if (hit)
+        next = specifierFor(hit.newMod ?? stripExt(hit.newAbs), fileAbs, alias); // → a moved file's new home
+      // moved file's own specifiers: relatives always break; aliases break once it leaves the root
+      else if (moved && (!spec.startsWith(alias.prefix) || !reviewPathWithin(alias.root, fileAbs)))
+        next = specifierFor(absMod, fileAbs, alias);
+      if (next != null && next !== spec) {
+        h.set(next);
         touched = true;
         rewrites++;
       }

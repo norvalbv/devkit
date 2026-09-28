@@ -1,7 +1,8 @@
 /**
  * `devkit move` codemod — verifies it relocates a file and rewrites EVERY reference style
  * (alias importer, relative importer, the moved file's own relative imports, vi.mock + dynamic
- * import string args, colocated test sibling) into `@/` alias form, and surgically prunes the
+ * import string args, colocated test sibling) into `@/` alias form — or relative form when the
+ * importer or target lies outside the alias root (sc-3016) — and surgically prunes the
  * structure baseline. Runs the real CLI in a throwaway git repo (git mv needs an index).
  */
 import { execFileSync, spawn } from 'node:child_process';
@@ -1108,5 +1109,205 @@ describe('devkit move — tsconfig edge cases', () => {
     const r = runMove(root);
     expect(r.status, r.stderr).toBe(0);
     expect(read(root, 'src/renderer/features/b/use.ts')).toContain("'@/lib/utils/util'");
+  });
+});
+
+describe('devkit move — outside the alias root', () => {
+  // frink shape (sc-3016): `@/` → src/renderer, main-process code imports relatively. A move
+  // inside src/main must never emit `@/../…` — that breaches the main/renderer import wall.
+  function mainFixture() {
+    const root = mkTmp('move-main-');
+    writePath(
+      root,
+      'package.json',
+      JSON.stringify({ name: 'fx', version: '0.0.0', type: 'module' }),
+    );
+    writePath(root, 'tsconfig.json', DEFAULT_TSCONFIG);
+    writePath(root, 'src/shared/y.ts', 'export const y = 1;\n');
+    writePath(
+      root,
+      'src/main/lib/a/x.ts',
+      "import { y } from '../../../shared/y';\nexport const x = y;\n",
+    );
+    writePath(
+      root,
+      'src/main/lib/a/x.test.ts',
+      "import { vi } from 'vitest';\nimport { x } from './x';\nvi.mock('./x');\nexport const load = () => import('./x');\nexport const t = x;\n",
+    );
+    writePath(
+      root,
+      'src/main/lib/b/importer.ts',
+      "import { vi } from 'vitest';\nimport { x } from '../a/x';\nvi.mock('../a/x');\nexport const z = x;\n",
+    );
+    writePath(
+      root,
+      'src/renderer/features/r.ts',
+      "import { x } from '../../main/lib/a/x';\nexport const r = x;\n",
+    );
+    git(root, 'init', '-q');
+    git(root, 'add', '-A');
+    return root;
+  }
+
+  const aliasEscapes = (root) =>
+    readdirSync(join(root, 'src'), { recursive: true, encoding: 'utf8' })
+      .filter((rel) => rel.endsWith('.ts'))
+      .filter((rel) => read(root, join('src', rel)).includes('@/../'));
+
+  it('rewrites a main-process move with relative specifiers, never `@/../`', () => {
+    const root = mainFixture();
+
+    const r = runMoveArgs(root, 'src/main/lib/a/x.ts', 'src/main/lib/c');
+
+    expect(r.status, r.stderr).toBe(0);
+    const importer = read(root, 'src/main/lib/b/importer.ts');
+    expect(importer).toContain("from '../c/x'");
+    expect(importer).toContain("vi.mock('../c/x')");
+    expect(read(root, 'src/main/lib/c/x.ts')).toContain("from '../../../shared/y'");
+    const sibling = read(root, 'src/main/lib/c/x.test.ts');
+    expect(sibling).toContain("from './x'");
+    expect(sibling).toContain("vi.mock('./x')");
+    expect(sibling).toContain("import('./x')");
+    // renderer importer reaching a main-side target: the target is outside the root → relative
+    expect(read(root, 'src/renderer/features/r.ts')).toContain("from '../../main/lib/c/x'");
+    expect(aliasEscapes(root)).toEqual([]);
+    // only changed specifiers count: importer ×2 + r.ts. x.ts → shared/y and the co-moved
+    // sibling's './x' keep their text, so they are neither rewritten nor counted
+    expect(r.stdout).toContain('rewrote 3 specifier(s)');
+  });
+
+  it('points co-moved main files at each other from their new directory', () => {
+    const root = mainFixture();
+
+    const r = runMoveArgs(
+      root,
+      'src/main/lib/a/x.ts',
+      'src/main/lib/b/importer.ts',
+      'src/main/lib/c',
+    );
+
+    expect(r.status, r.stderr).toBe(0);
+    const importer = read(root, 'src/main/lib/c/importer.ts');
+    expect(importer).toContain("from './x'");
+    expect(importer).toContain("vi.mock('./x')");
+    expect(aliasEscapes(root)).toEqual([]);
+  });
+
+  it('treats a sibling directory sharing the alias root name prefix as outside the root', () => {
+    const root = mainFixture();
+    writePath(root, 'src/renderer-legacy/old.ts', 'export const old = 1;\n');
+    writePath(
+      root,
+      'src/renderer-legacy/use.ts',
+      "import { old } from './old';\nexport const u = old;\n",
+    );
+    git(root, 'add', '-A');
+
+    const r = runMoveArgs(root, 'src/renderer-legacy/old.ts', 'src/renderer-legacy/lib');
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(read(root, 'src/renderer-legacy/use.ts')).toContain("from './lib/old'");
+    expect(aliasEscapes(root)).toEqual([]);
+  });
+
+  it('switches each specifier style when a file crosses into the alias root', () => {
+    const root = mainFixture();
+
+    const r = runMoveArgs(root, 'src/main/lib/a/x.ts', 'src/renderer/lib');
+
+    expect(r.status, r.stderr).toBe(0);
+    // renderer importer + target both under the root now → alias
+    expect(read(root, 'src/renderer/features/r.ts')).toContain("from '@/lib/x'");
+    // main importer is outside the root → relative to the new renderer home
+    expect(read(root, 'src/main/lib/b/importer.ts')).toContain("from '../../../renderer/lib/x'");
+    // the moved file's own import of src/shared is outside the root → relative from its new dir
+    expect(read(root, 'src/renderer/lib/x.ts')).toContain("from '../../shared/y'");
+    expect(aliasEscapes(root)).toEqual([]);
+  });
+
+  it('rewrites a main-side `@/` importer of a moved renderer file to a relative specifier', () => {
+    const root = mainFixture();
+    writePath(
+      root,
+      'src/main/lib/uses-r.ts',
+      "import { r } from '@/features/r';\nexport const u = r;\n",
+    );
+    git(root, 'add', '-A');
+
+    const r = runMoveArgs(root, 'src/renderer/features/r.ts', 'src/renderer/lib');
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(read(root, 'src/main/lib/uses-r.ts')).toContain("from '../../renderer/lib/r'");
+    // the moved renderer file's own main-side import is outside the root → relative, not `@/../`
+    expect(read(root, 'src/renderer/lib/r.ts')).toContain("from '../../main/lib/a/x'");
+    expect(aliasEscapes(root)).toEqual([]);
+  });
+
+  it('re-anchors a moved file’s own alias imports when it leaves the alias root', () => {
+    const root = mainFixture();
+    writePath(root, 'src/renderer/lib/y.ts', 'export const y = 1;\n');
+    writePath(root, 'src/renderer/lib/z.ts', 'export const z = 1;\n');
+    writePath(
+      root,
+      'src/renderer/a.ts',
+      "import { y } from '@/lib/y';\nexport { z } from '@/lib/z';\nexport const a = y;\n",
+    );
+    git(root, 'add', '-A');
+
+    const r = runMoveArgs(root, 'src/renderer/a.ts', 'src/main');
+
+    expect(r.status, r.stderr).toBe(0);
+    const moved = read(root, 'src/main/a.ts');
+    expect(moved).toContain("from '../renderer/lib/y'");
+    expect(moved).toContain("from '../renderer/lib/z'");
+    expect(moved).not.toContain('@/');
+  });
+
+  it('leaves a moved file’s alias imports untouched while it stays inside the alias root', () => {
+    const root = fixture();
+    writePath(
+      root,
+      'src/renderer/features/a/util.ts',
+      "import { helper } from '@/features/a/helper';\nexport const x = helper;\n",
+    );
+    git(root, 'add', '-A');
+
+    const r = runMoveArgs(root, 'src/renderer/features/a/util.ts', 'src/renderer/lib/utils');
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(read(root, 'src/renderer/lib/utils/util.ts')).toContain("from '@/features/a/helper'");
+  });
+
+  it('keeps an importer’s explicit /index when a same-named sibling module exists', () => {
+    const root = mainFixture();
+    writePath(root, 'src/main/lib/foo.mts', 'export const sibling = 1;\n');
+    writePath(root, 'src/main/lib/foo/index.ts', 'export const idx = 1;\n');
+    writePath(
+      root,
+      'src/main/lib/user.ts',
+      "import { idx } from './foo/index';\nexport const u = idx;\n",
+    );
+    git(root, 'add', '-A');
+
+    const r = runMoveArgs(root, 'src/main/lib/user.ts', 'src/main/app');
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(read(root, 'src/main/app/user.ts')).toContain("from '../lib/foo/index'");
+  });
+
+  it('keeps an explicit /index segment rather than collapsing a relative specifier to `..`', () => {
+    const root = mainFixture();
+    writePath(root, 'src/main/lib/sub/index.ts', 'export const idx = 1;\n');
+    writePath(
+      root,
+      'src/main/lib/sub/leaf.ts',
+      "import { idx } from './index';\nexport const l = idx;\n",
+    );
+    git(root, 'add', '-A');
+
+    const r = runMoveArgs(root, 'src/main/lib/sub/leaf.ts', 'src/main/lib/sub/deeper');
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(read(root, 'src/main/lib/sub/deeper/leaf.ts')).toContain("from '../index'");
   });
 });
