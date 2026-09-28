@@ -65,6 +65,13 @@ import {
   RETRY_MIN_VITEST,
   supportsRetryCondition,
 } from './vitest-version.mts';
+import {
+  markTouchedDuringRun,
+  publishManifest,
+  type SourceSnapshot,
+  snapshotSource,
+  stageManifest,
+} from './provenance.mts';
 
 export const COVERAGE_DIR = 'coverage';
 export const REPORT_NAME = 'coverage-final.json';
@@ -161,13 +168,23 @@ export function publishCoverage(
   cwd: string,
   before: number | null,
   failedFiles: string[] = [],
+  source: SourceSnapshot | null = null,
 ): PublishOutcome {
   const fresh = join(runDir, REPORT_NAME);
   const stable = join(cwd, COVERAGE_FILE);
   const coverageDir = join(cwd, COVERAGE_DIR);
   if (existsSync(fresh)) {
     mkdirSync(coverageDir, { recursive: true });
+    // Staged from OUR report before it moves, so its hash matches only this run's file (sc-3225).
+    // No snapshot → no manifest; a previous one mismatches this artifact's hash and reads as unknown.
+    let manifest: string | null = null;
+    try {
+      manifest = source ? stageManifest(runDir, fresh, source, basename(runDir)) : null;
+    } catch {
+      manifest = null;
+    }
     renameSync(fresh, stable);
+    if (manifest) publishManifest(manifest, coverageDir);
     // A fresh report answers every question the marker existed to answer; leaving it would let the
     // gate narrate an old failure over a current pass.
     removeClearMarker(coverageDir);
@@ -342,6 +359,10 @@ async function runPass(
   // Captured BEFORE vitest starts: if the artifact changes from this, a sibling published it while
   // we were running and a failure of ours must not delete it. See publishCoverage.
   const before = snapshotArtifact(cwd);
+  // Also BEFORE vitest (sc-3225); anything whose mtime moves during the run is marked unmeasured
+  // after it, which catches an edit-then-restore the start hashes alone cannot see.
+  const startedAt = Date.now();
+  const source = snapshotSource(cwd);
 
   // Inside runDir, which only this run may touch; results.json also keeps it non-empty, so vitest's
   // cleanAfterRun() has nothing to sweep (the v0.43.1 fail-open).
@@ -371,7 +392,9 @@ async function runPass(
     diagnosis = readDiagnosis(resultsFile);
     // A failed run's report (the consumer's `coverage.reportOnFailure`) is partial: never publish it.
     if (run.code !== 0) rmSync(join(runDir, REPORT_NAME), { force: true });
-    outcome = publishCoverage(runDir, cwd, before, diagnosis?.failedFiles ?? []);
+    const measured =
+      source && markTouchedDuringRun(cwd, source, startedAt, join(runDir, REPORT_NAME));
+    outcome = publishCoverage(runDir, cwd, before, diagnosis?.failedFiles ?? [], measured);
   } finally {
     rmSync(runDir, { recursive: true, force: true });
   }
