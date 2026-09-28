@@ -4,6 +4,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { commitIndexEnv } from '../../../../gate-engine/ratchets/commit-index.mts';
 import { adoptManagedCapability } from './base-capability.mts';
 import { type AntiSlopBaseline, parseBaseline } from './baseline.mts';
 import {
@@ -249,6 +250,7 @@ export type CommittedBaselineProbe =
 function fileInIndex(layout: GitLayout, relativePath: string): string | null {
   const shown = spawnSync('git', ['show', `:${layout.prefix}${relativePath}`], {
     cwd: layout.root,
+    env: commitIndexEnv(layout.root),
     encoding: 'utf8',
     maxBuffer: MAX_GIT_OUTPUT,
   });
@@ -277,7 +279,12 @@ export function committedBaselineProbe(cwd: string): CommittedBaselineProbe {
     const staged = execFileSync(
       'git',
       ['diff-index', '--cached', '--name-status', '-z', '-M', baseTree],
-      { cwd: repo.root, encoding: 'utf8', maxBuffer: MAX_GIT_OUTPUT },
+      {
+        cwd: repo.root,
+        env: commitIndexEnv(repo.root),
+        encoding: 'utf8',
+        maxBuffer: MAX_GIT_OUTPUT,
+      },
     );
     const baseActivation = activationEvidenceAtTree(repo, baseTree);
     const stagedActivation = activationEvidenceInIndex(repo);

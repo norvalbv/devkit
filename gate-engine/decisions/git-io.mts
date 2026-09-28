@@ -16,12 +16,18 @@
  */
 
 import { execFileSync } from 'node:child_process';
+import { commitIndexEnv } from '../ratchets/commit-index.mts';
 
 const MAX_GIT_OUTPUT = 64 * 1024 * 1024; // matches review/evidence/staged-git.mts
 
 /** One `git` invocation in `cwd`, argv-form. Throws on non-zero exit (the caller decides). */
 export function git(cwd: string, args: string[]): string {
-  return execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: MAX_GIT_OUTPUT });
+  return execFileSync('git', args, {
+    cwd,
+    env: commitIndexEnv(cwd),
+    encoding: 'utf8',
+    maxBuffer: MAX_GIT_OUTPUT,
+  });
 }
 
 /**

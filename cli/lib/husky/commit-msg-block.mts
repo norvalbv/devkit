@@ -16,13 +16,13 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'n
 import { join } from 'node:path';
 import { detectGitRoot } from '../detect-git-root.mts';
 import type { CheckResult } from '../doctor/check-result.mts';
-import { markEnd, markStart } from './husky.mts';
 import {
   extractGuardBlock,
   PACKAGE_BIN_DIR_FRAGMENT,
   PATH_SETUP,
   removeGuardBlock,
   replaceGuardBlock,
+  wrapGuardBlock,
 } from './husky-block.mts';
 import { invokeJudge, sentryFragment } from './sentry-fragments.mts';
 
@@ -120,15 +120,12 @@ export function buildCommitMsgBlock(
   ];
   if (selected.includes('review')) pieces.push(completenessFragment(standalone));
   if (selected.includes('sentry')) pieces.push(sentryFragment(standalone));
-  const body = pieces.join('\n\n');
-  const start = markStart(pkgRel);
-  const end = markEnd(pkgRel);
-  if (!pkgRel) return `${start}\n${body}\n${end}`;
   // Absolutize the message path BEFORE cd'ing into the package (git hands it repo-root-relative on
   // a normal commit; a linked worktree already passes it absolute), then judge from the package
   // dir. `set --` rewrites $1 in place — the subshell inherits it — and `) || exit 1` propagates
   // an inner block, exactly like the pre-commit package block.
-  return `${start}\ncase "$1" in /*) ;; *) set -- "$PWD/$1" ;; esac\n( cd "${pkgRel}" || exit 1\n\n${body}\n) || exit 1\n${end}`;
+  const prelude = 'case "$1" in /*) ;; *) set -- "$PWD/$1" ;; esac';
+  return wrapGuardBlock(pieces.join('\n\n'), pkgRel, prelude, '\n\n');
 }
 
 /**

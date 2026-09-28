@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { commitIndexEnv } from '../ratchets/commit-index.mts';
 import { existsSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 
@@ -169,7 +170,12 @@ export function readDiagnosis(resultsFile: string): RunDiagnosis | null {
  */
 export function stagedFiles(cwd: string): string[] | null {
   const git = (args: string[]): string =>
-    execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    execFileSync('git', args, {
+      cwd,
+      env: commitIndexEnv(cwd),
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
   try {
     const top = canonical(git(['rev-parse', '--show-toplevel']).trim());
     return git(['diff', '--cached', '--name-only', '-z'])

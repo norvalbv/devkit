@@ -6,17 +6,26 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { lstatSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { commitIndexEnv, commitIndexKind } from './commit-index.mts';
 
 const INDEX_LOCK_RETRY = new Int32Array(new SharedArrayBuffer(4));
+
+// A partial commit's temporary index is dropped after the commit, so a baseline staged into it
+// would be committed yet read as deleted by the real index.
+export function partialCommitRemedy(rel: string): string {
+  return `Devkit cannot stage ratchet baseline ${rel} during a partial commit (\`git commit -- <path>\`). Stage your change with \`git add\`, then commit without a pathspec.`;
+}
 
 function stagePathStrict(
   root: string,
   rel: string,
   { missingIsSuccess = false }: { missingIsSuccess?: boolean } = {},
 ): void {
+  if (commitIndexKind(root) === 'partial') throw new Error(partialCommitRemedy(rel));
   for (let attempt = 0; attempt < 50; attempt += 1) {
     const result = spawnSync('git', ['add', '--', rel], {
       cwd: root,
+      env: commitIndexEnv(root),
       encoding: 'utf8',
     });
     if (result.status === 0) return;
@@ -35,6 +44,7 @@ function isGitWorktree(root: string): boolean {
     return (
       execFileSync('git', ['rev-parse', '--is-inside-work-tree'], {
         cwd: root,
+        env: commitIndexEnv(root),
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'ignore'],
       }).trim() === 'true'
@@ -48,6 +58,7 @@ export function indexTracksBaseline(root: string, rel: string): boolean {
   if (!isGitWorktree(root)) return false;
   const result = spawnSync('git', ['ls-files', '--error-unmatch', '--', rel], {
     cwd: root,
+    env: commitIndexEnv(root),
     stdio: 'ignore',
   });
   return result.status === 0;
@@ -77,6 +88,7 @@ export function assertBaselineTrackable(root: string, rel: string): void {
   }
   const result = spawnSync('git', ['check-ignore', '-q', '--no-index', '--', rel], {
     cwd: root,
+    env: commitIndexEnv(root),
     stdio: 'ignore',
   });
   if (result.status === 1) return;
@@ -114,8 +126,16 @@ export function stageBaselineMigration(root: string, from: string, to: string): 
 // and non-git contexts (temp-dir tests, a bare checkout) simply leave the change on disk for a later
 // commit/freeze.
 export function stageBaseline(root: string, rel: string): void {
+  if (commitIndexKind(root) === 'partial') {
+    console.error(partialCommitRemedy(rel));
+    return;
+  }
   try {
-    execFileSync('git', ['add', '--', rel], { cwd: root, stdio: 'pipe' });
+    execFileSync('git', ['add', '--', rel], {
+      cwd: root,
+      env: commitIndexEnv(root),
+      stdio: 'pipe',
+    });
   } catch {
     // not a git repo / git absent — the change is still on disk; picked up on the next commit.
     // ponytail: also swallows the ship worktree's `fatal: pathspec ... is beyond a symbolic link`
@@ -136,6 +156,7 @@ export function hasStagedFiles(root: string): boolean {
   try {
     const out = execFileSync('git', ['diff', '--cached', '--name-only'], {
       cwd: root,
+      env: commitIndexEnv(root),
       encoding: 'utf8',
     });
     return out.split('\n').some((l) => l.trim().length > 0);
@@ -152,7 +173,10 @@ export function splitNul(out: string): string[] {
 
 function mergeInProgress(root: string): boolean {
   return (
-    spawnSync('git', ['rev-parse', '--verify', '--quiet', 'MERGE_HEAD'], { cwd: root }).status === 0
+    spawnSync('git', ['rev-parse', '--verify', '--quiet', 'MERGE_HEAD'], {
+      cwd: root,
+      env: commitIndexEnv(root),
+    }).status === 0
   );
 }
 
@@ -187,7 +211,9 @@ export function stagedTouchedSet(root: string): Set<string> | null {
   ];
   try {
     const staged = new Set(
-      splitNul(execFileSync('git', argv([]), { cwd: root, encoding: 'utf8' })),
+      splitNul(
+        execFileSync('git', argv([]), { cwd: root, env: commitIndexEnv(root), encoding: 'utf8' }),
+      ),
     );
     // An ordinary commit has no MERGE_HEAD, and the first-parent set is the whole answer.
     if (!mergeInProgress(root)) return staged;
@@ -196,6 +222,7 @@ export function stagedTouchedSet(root: string): Set<string> | null {
         splitNul(
           execFileSync('git', argv(['MERGE_HEAD']), {
             cwd: root,
+            env: commitIndexEnv(root),
             encoding: 'utf8',
             stdio: ['ignore', 'pipe', 'ignore'],
           }),
@@ -222,6 +249,7 @@ export function stagedSet(root: string): Set<string> | null {
   try {
     const out = execFileSync('git', ['diff', '--cached', '--name-only', '--diff-filter=ACMR'], {
       cwd: root,
+      env: commitIndexEnv(root),
       encoding: 'utf8',
     });
     const staged = new Set(
@@ -234,7 +262,12 @@ export function stagedSet(root: string): Set<string> | null {
       const mergeOut = execFileSync(
         'git',
         ['diff', '--cached', '--name-only', '--diff-filter=ACMR', 'MERGE_HEAD'],
-        { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
+        {
+          cwd: root,
+          env: commitIndexEnv(root),
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'ignore'],
+        },
       );
       const changedFromMergeHead = new Set(
         mergeOut
@@ -257,6 +290,7 @@ export function gitPrefix(root: string): string {
   try {
     return execFileSync('git', ['rev-parse', '--show-prefix'], {
       cwd: root,
+      env: commitIndexEnv(root),
       encoding: 'utf8',
     }).trimEnd();
   } catch {
@@ -269,6 +303,7 @@ export function indexTreeRef(root: string): string | null {
   try {
     return execFileSync('git', ['write-tree'], {
       cwd: root,
+      env: commitIndexEnv(root),
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
     }).trim();
@@ -282,6 +317,7 @@ export function treeTextAtRef(root: string, ref: string, relativePath: string): 
   try {
     return execFileSync('git', ['show', `${ref}:${gitPrefix(root)}${relativePath}`], {
       cwd: root,
+      env: commitIndexEnv(root),
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
     });
@@ -294,6 +330,7 @@ export function mergeBaseRef(root: string, ref: string): string | null {
   try {
     return execFileSync('git', ['merge-base', ref, 'HEAD'], {
       cwd: root,
+      env: commitIndexEnv(root),
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
     }).trim();
@@ -309,13 +346,14 @@ export function changedSetSince(root: string, baseRef: string): Set<string> | nu
   try {
     execFileSync('git', ['rev-parse', '--verify', `${baseRef}^{commit}`], {
       cwd: root,
+      env: commitIndexEnv(root),
       stdio: ['ignore', 'pipe', 'ignore'],
     });
     const prefix = gitPrefix(root);
     const out = execFileSync(
       'git',
       ['diff', '--name-only', '-z', '--diff-filter=ACMR', `${baseRef}...HEAD`],
-      { cwd: root, encoding: 'utf8' },
+      { cwd: root, env: commitIndexEnv(root), encoding: 'utf8' },
     );
     const paths = out.split('\0').filter(Boolean);
     return new Set(
@@ -347,6 +385,7 @@ export function indexFiles(root: string): string[] | null {
   try {
     const out = execFileSync('git', ['ls-files', '-z', '--cached'], {
       cwd: root,
+      env: commitIndexEnv(root),
       encoding: 'utf8',
     });
     return [...new Set(splitNul(out))];
@@ -362,6 +401,7 @@ export function treeFilesAtRef(root: string, ref = 'HEAD'): string[] | null {
   try {
     const out = execFileSync('git', ['ls-tree', '-r', '--name-only', '-z', ref], {
       cwd: root,
+      env: commitIndexEnv(root),
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
     });

@@ -6,6 +6,7 @@
  * comment token. Delimiters inside strings, regexes, templates, and JSX text are therefore inert.
  */
 import { execFileSync } from 'node:child_process';
+import { commitIndexEnv } from '../ratchets/commit-index.mts';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { ts } from 'ts-morph';
@@ -55,6 +56,7 @@ const sha12 = (value: string) => createHash('sha256').update(value).digest('hex'
 function git(cwd: string, args: string[]): string {
   return execFileSync('git', args, {
     cwd,
+    env: commitIndexEnv(cwd),
     encoding: 'utf8',
     maxBuffer: MAX_GIT_OUTPUT,
     stdio: ['ignore', 'pipe', 'pipe'],

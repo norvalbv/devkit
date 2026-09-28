@@ -17,6 +17,7 @@
  * never a broken commit.
  */
 import { execFileSync } from 'node:child_process';
+import { commitIndexEnv } from '../ratchets/commit-index.mts';
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
@@ -78,6 +79,7 @@ export function telemetrySink(): string | undefined {
 function git(args: string[]): string | null {
   try {
     return execFileSync('git', args, {
+      env: commitIndexEnv(process.cwd()),
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
     }).trim();

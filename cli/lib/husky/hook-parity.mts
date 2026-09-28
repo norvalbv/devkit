@@ -6,6 +6,7 @@
  */
 
 import { spawnSync } from 'node:child_process';
+import { commitIndexEnv } from '../../../gate-engine/ratchets/commit-index.mts';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -220,7 +221,7 @@ export interface HookParityVerdict {
 function gitPaths(cwd: string, args: string[]): string[] | null {
   // Callers place -z themselves: appending it here would land AFTER a `--` separator, where git
   // reads it as a pathspec rather than a flag.
-  const result = spawnSync('git', args, { cwd, encoding: 'utf8' });
+  const result = spawnSync('git', args, { cwd, env: commitIndexEnv(cwd), encoding: 'utf8' });
   if (result.status !== 0) return null;
   return result.stdout.split('\0').filter(Boolean);
 }

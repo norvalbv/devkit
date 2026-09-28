@@ -18,6 +18,9 @@ for (const k of [
   'GIT_OBJECT_DIRECTORY',
   'GIT_COMMON_DIR',
   'GIT_PREFIX',
+  // devkit's own carrier for the commit's index (gate-engine/ratchets/commit-index.mts).
+  'DEVKIT_COMMIT_INDEX_FILE',
+  'DEVKIT_COMMIT_GIT_DIR',
 ]) {
   delete process.env[k];
 }
