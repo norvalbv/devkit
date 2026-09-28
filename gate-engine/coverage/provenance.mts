@@ -17,6 +17,7 @@ import {
 } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import { z } from 'zod';
+import { commitIndexEnv } from '../ratchets/commit-index.mts';
 
 export const MANIFEST_NAME = 'coverage-manifest.json';
 /** A path that existed at HEAD but not in the working tree when the run started. */
@@ -72,9 +73,11 @@ export type Provenance =
   | { state: 'fresh'; manifest: CoverageManifest }
   | { state: 'drift'; manifest: CoverageManifest; production: string[]; tests: string[] };
 
+// The commit's own index, not the default one: a pathspec or `-a` commit stages into a temp index.
 const git = (cwd: string, args: string[], input?: string): string =>
   execFileSync('git', ['--literal-pathspecs', ...args], {
     cwd,
+    env: commitIndexEnv(cwd),
     encoding: 'utf8',
     input,
     maxBuffer: 256 * 1024 * 1024,

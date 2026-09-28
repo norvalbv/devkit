@@ -180,6 +180,7 @@ export const HOOK_GENERATOR_FILES = [
   'cli/lib/components.mts',
   'cli/lib/fs-helpers.mts',
   'cli/lib/install/agent-assets/agent-providers.mts',
+  'cli/lib/ship/redact-secrets.mts',
   'gate-engine/judge/judge-isolation.mts',
 ] as const;
 /** Directory prefixes with the same effect. */

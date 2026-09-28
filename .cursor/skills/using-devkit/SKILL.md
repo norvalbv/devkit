@@ -77,6 +77,9 @@ devkit command.
   publishes its already-gated immutable commit. Already sitting on some *other* branch is fine and normal:
   ship reads file **content** from your working tree, so uncommitted work ships correctly without a
   single commit of your own.
+- **Each `-- <path>` is one literal file, relative to the repo root.** Globs and git pathspec magic
+  are not expanded — `'*.txt'` names the file called `*.txt` — and a directory is refused. List the
+  files instead (`git ls-files -- <dir>`).
 - **`--from-branch` owns only committed bytes.** It requires `--base`, accepts no explicit paths on
   the full invocation, and is unavailable with `--pr`. Rebase or merge the current remote base first;
   a divergent/ahead base, changed submodule gitlink, non-UTF-8 path, or staged/unstaged/untracked/

@@ -29,7 +29,8 @@ command. Do not pre-run every gate or replace the managed chain with a hand-writ
    branch, so read YOUR branch's rather than globbing (parallel agents leave several). The effective
    set is that recorded list UNION any path the retry added, and patch anchoring shapes the content
    further. If a finding names a file absent from the brief, brief it on the retry
-   (`--resume <branch> -- <path>`) instead of chasing the finding.
+   (`--resume <branch> -- <path>`) instead of chasing the finding. Each briefed path is one literal file
+   from the repo root; a glob is not expanded, so brief every file by name.
 4. Treat a bypass as an explicit operator decision. Never use `--no-verify`, silently disable a
    selected guard, freeze a baseline to absorb new debt, or invent an environment variable.
 

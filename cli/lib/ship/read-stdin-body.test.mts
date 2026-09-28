@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -35,6 +35,10 @@ function seedShipRepo(): { dir: string; script: string; args: string[] } {
   git(dir, ['add', 'note.txt']);
   git(dir, ['commit', '-q', '-m', 'base']);
   git(dir, ['remote', 'add', 'origin', 'git@github.com:acme/app.git']);
+  // Ship's hook-dir preflight (sc-3883) runs before the body read; an uninitialised repo stops there.
+  mkdirSync(join(dir, '.husky/_'), { recursive: true });
+  writeFileSync(join(dir, '.husky/_/pre-commit'), '#!/bin/sh\nexit 0\n');
+  chmodSync(join(dir, '.husky/_/pre-commit'), 0o755);
   writeFileSync(join(dir, 'note.txt'), 'changed\n');
   return {
     dir,

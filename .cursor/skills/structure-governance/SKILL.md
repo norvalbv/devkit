@@ -75,6 +75,8 @@ HARD STOPS (lint errors, not guidelines):
  3c. FAN-OUT: max 12 impl files per folder, ANY depth (tests/index barrels don't count).
     Folder full → split into cohesive kebab subfolders (group by concern; graphify/co-occurrence
     can suggest clusters). Existing piles are grandfathered shrink-only (.devkit/baselines/fanout.json).
+    A SIZE split (1) adds a sibling here, so guard-size prints the folder's fan-out headroom
+    beside an over-cap file; at 0 the split belongs in a subfolder.
  4. PROCESS: renderer never imports src/main — not even types (cross-process types live in
     src/shared/types; existing offenders are grandfathered shrink-only in .devkit/baselines/imports.mjs;
     sole permanent exempt: lib/trpc.ts AppRouter). No Node builtins in renderer (bare `path` OK —
@@ -94,7 +96,7 @@ Full prose lives in [`references/walls.md`](references/walls.md) and the matchin
 |---|------|--------------|
 | 1 | Placement | move the file to its kind's home in the table above |
 | 2 | Domain vocabulary | put it under a registered `lib/<domain>/`; add the domain to `eslint/domains.mjs` |
-| 3 | File size | split below the cap — never add `eslint-disable max-lines` |
+| 3 | File size | split below the cap — never add `eslint-disable max-lines`; when guard-size reports the folder has no fan-out headroom, split into a subfolder (registering it if the parent is domain-gated) |
 | 4 | Folder fan-out | split the >12-file folder into cohesive kebab subfolders |
 | 5 | Frozen legacy dirs | don't add to `utils/`/`contexts/`; use `lib/<domain>/` |
 | 6 | Import walls | no renderer→main, no deep cross-feature; use shared types / barrels / tRPC |
