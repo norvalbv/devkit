@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { RepositorySource } from '../source.mts';
+import { assertBlobMatches, gitObjectId } from '../snapshot/integrity.mts';
 import { hashPaths, repositorySource } from '../source.mts';
 
 const roots: string[] = [];
@@ -315,6 +316,21 @@ describe('absence diagnostics name why a path is missing from a snapshot', () =>
     expect(report).toMatch(/staged vs HEAD: none$/m);
   });
 
+  it('looks up tracked names that are pathspec syntax literally, in HEAD and the index', () => {
+    const root = repo();
+    const names = [':(exclude)foo', ':!bar', 'a*.txt'];
+    for (const name of names) writeFileSync(join(root, name), `${name}\n`);
+    git(root, 'add', '--', ...names.map((name) => `:(literal)${name}`));
+    git(root, 'commit', '-qm', 'magic names');
+    git(root, 'rm', '-q', '--cached', '--', ...names.map((name) => `:(literal)${name}`));
+    const staged = repositorySource(root, 'staged');
+    for (const name of names) {
+      const report = explain(staged, name);
+      expect(report).toMatch(/HEAD: tracked/);
+      expect(report).toMatch(/staged vs HEAD: D$/m);
+    }
+  });
+
   it('reports an unborn HEAD instead of an unavailable probe', () => {
     const root = mkdtempSync(join(tmpdir(), 'benchmark-source-unborn-'));
     roots.push(root);
@@ -384,5 +400,99 @@ describe('absence diagnostics name why a path is missing from a snapshot', () =>
     const root = repo();
     const report = explain(repositorySource(root, 'tree', 'HEAD'), 'missing.txt');
     expect(report).toMatch(/listing: 1 entries at HEAD/);
+  });
+});
+
+// sc-3215 root cause: bun's spawnSync returned truncated git stdout with exit 0 (32,768 of 94,846
+// bytes, reproduced). A short read must be a fault, never a content verdict.
+describe('subprocess output is verified against the object id the listing named', () => {
+  const blob = Buffer.from('{"catalog":true}\n');
+  const oid = gitObjectId(blob, 40);
+
+  it('accepts bytes that hash to the listed blob id, SHA-1 and SHA-256 alike', () => {
+    expect(() => assertBlobMatches(':x', blob, oid)).not.toThrow();
+    expect(() => assertBlobMatches(':x', blob, gitObjectId(blob, 64))).not.toThrow();
+  });
+
+  it('refuses truncated or empty output as a fault naming the read', () => {
+    expect(() =>
+      assertBlobMatches(':docs/benchmarks/catalog.json', blob.subarray(0, 5), oid),
+    ).toThrow(
+      /git show :docs\/benchmarks\/catalog\.json returned 5 bytes that do not hash to .*truncated/,
+    );
+    expect(() => assertBlobMatches(':x', Buffer.alloc(0), oid)).toThrow(/returned 0 bytes/);
+  });
+
+  it('matches real reads byte-for-byte, including non-UTF-8 content, in staged and tree modes', () => {
+    const root = repo();
+    writeFileSync(join(root, 'latin1.bin'), Buffer.from([0xe9, 0x00, 0xff, 0x0a]));
+    git(root, 'add', 'latin1.bin');
+    git(root, 'commit', '-qm', 'binary');
+    expect(() => repositorySource(root, 'staged').read('latin1.bin')).not.toThrow();
+    expect(() => repositorySource(root, 'tree', 'HEAD').read('latin1.bin')).not.toThrow();
+    expect(repositorySource(root, 'staged').read('value.txt')).toBe('base\n');
+  });
+
+  // The reproduced fault itself: a git whose stdout arrives cut short while it still exits 0.
+  function withTruncatingGit<T>(subcommand: string, bytes: number, action: () => T): T {
+    const bin = mkdtempSync(join(tmpdir(), 'benchmark-source-truncating-'));
+    roots.push(bin);
+    const log = join(bin, 'calls.log');
+    const real = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
+    writeFileSync(
+      join(bin, 'git'),
+      `#!/bin/sh\nif [ "$1" = '${subcommand}' ]; then echo "$*" >> '${log}'; '${real}' "$@" | head -c ${bytes}; exit 0; fi\nexec '${real}' "$@"\n`,
+    );
+    chmodSync(join(bin, 'git'), 0o755);
+    const original = process.env.PATH;
+    process.env.PATH = `${bin}${delimiter}${original ?? ''}`;
+    try {
+      return action();
+    } finally {
+      process.env.PATH = original;
+      expect(existsSync(log)).toBe(true);
+    }
+  }
+
+  it('throws on a truncated blob read instead of returning short content', () => {
+    const root = repo();
+    const staged = repositorySource(root, 'staged');
+    staged.listFiles();
+    withTruncatingGit('show', 2, () => {
+      expect(() => staged.read('value.txt')).toThrow(/returned 2 bytes .*truncated/);
+    });
+  });
+
+  it('captures git stdout through a file, never the pipe the truncation was reproduced on', () => {
+    const root = repo();
+    const bin = mkdtempSync(join(tmpdir(), 'benchmark-source-nopipe-'));
+    roots.push(bin);
+    const log = join(bin, 'calls.log');
+    const real = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
+    writeFileSync(
+      join(bin, 'git'),
+      `#!/bin/sh\necho "$1" >> '${log}'\nif [ ! -f /dev/stdout ]; then echo 'stdout is not a file' >&2; exit 3; fi\nexec '${real}' "$@"\n`,
+    );
+    chmodSync(join(bin, 'git'), 0o755);
+    const original = process.env.PATH;
+    process.env.PATH = `${bin}${delimiter}${original ?? ''}`;
+    try {
+      const staged = repositorySource(root, 'staged');
+      expect(staged.listFiles()).toEqual(['value.txt']);
+      expect(staged.read('value.txt')).toBe('base\n');
+      expect(repositorySource(root, 'tree', 'HEAD').read('value.txt')).toBe('base\n');
+    } finally {
+      process.env.PATH = original;
+    }
+    expect(readFileSync(log, 'utf8')).toMatch(/ls-files[\s\S]*show/);
+  });
+
+  it('verifies reads in a SHA-256 repository', () => {
+    const root = mkdtempSync(join(tmpdir(), 'benchmark-source-sha256-'));
+    roots.push(root);
+    git(root, 'init', '-q', '--object-format=sha256');
+    writeFileSync(join(root, 'value.txt'), 'sha256\n');
+    git(root, 'add', 'value.txt');
+    expect(repositorySource(root, 'staged').read('value.txt')).toBe('sha256\n');
   });
 });
