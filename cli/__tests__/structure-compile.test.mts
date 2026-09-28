@@ -89,6 +89,12 @@ describe('compileToEslint — devkit cli tree (domain-gated lib)', () => {
   };
   const out = compileToEslint(cliTree, ['mjs', 'js'], { baseline: ['lib/legacy.mjs'] });
 
+  it('passes an explicit projectRoot through, and emits none when not given (sc-2309)', () => {
+    expect(compileToEslint(cliTree, ['mjs'], { projectRoot: '/abs/repo' }).projectRoot).toBe(
+      '/abs/repo',
+    );
+    expect('projectRoot' in out).toBe(false);
+  });
   it('emits structureRoot + the token table + the closed-registry alternation', () => {
     expect(out.structureRoot).toBe('cli');
     expect(out.regexParameters.kebab).toBe('^[a-z][a-z0-9-]*\\.(mjs|js)$');

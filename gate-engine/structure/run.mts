@@ -18,13 +18,15 @@
 
 import { execFileSync } from 'node:child_process';
 import { commitIndexEnv } from '../ratchets/commit-index.mts';
-import { existsSync, readdirSync, realpathSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, realpathSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { extname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { ESLint } from 'eslint'; // devkit's OWN eslint (now a dependency), never the consumer's
+import { ESLint, type Linter } from 'eslint'; // devkit's OWN eslint (now a dependency), never the consumer's
 import { resolveGuardConfig } from '../config.mts';
 import { gitPrefix, splitNul } from '../ratchets/git-index.mts';
 import { buildStructureConfigs } from './eslint-config.mts';
+import { eslintNodeFlags } from './eslint-node-flags.mts';
 
 // The one field this gate reads off each structure.trees[] entry — its on-disk root.
 interface StructureTree {
@@ -259,7 +261,7 @@ export async function runStagedStructureGate(cwd = process.cwd()): Promise<Struc
     try {
       execFileSync(
         process.execPath,
-        ['--preserve-symlinks', eslintBin, '--', ...unique([...plan.targets, ...probeTargets])],
+        [...eslintNodeFlags(cwd), eslintBin, '--', ...unique([...plan.targets, ...probeTargets])],
         { cwd, stdio: 'inherit' },
       );
       return clean();
@@ -298,32 +300,48 @@ export async function runStructureGate(
         "no structure.trees[].grammar declared (preset-only consumer); this repo's own structure lint is the wall here",
       );
 
-    const eslint = new ESLint({ cwd, overrideConfigFile: true, baseConfig });
-    // Lint each root INDEPENDENTLY. ESLint 10's lintFiles fail-fasts on the FIRST unmatched/all-ignored
-    // pattern, so a single ignored/empty root in a batched `lintFiles(roots)` would throw and mask a
-    // violation in a sibling root. Per-root: a root that's all-ignored / matches nothing is that root's
-    // own "clean" (skip it), while other roots still get enforced.
-    const allResults = [];
-    for (const root of roots) {
-      try {
-        allResults.push(...(await eslint.lintFiles([root])));
-      } catch (e: unknown) {
-        // Nothing-to-lint for THIS root → clean; any other throw is a real failure → fail-open below.
-        const message = e instanceof Error ? e.message : '';
-        if (NOTHING_TO_LINT_RE.test(message)) continue;
-        throw e;
-      }
+    // The plugin's error cache drops a message already cached for another filename; persisted in the
+    // repo root it silences the next run (sc-2309), so it lives for this run only.
+    const cacheDir = mkdtempSync(join(tmpdir(), 'devkit-structure-cache-'));
+    try {
+      return await lintStructureRoots(cwd, roots, [
+        ...baseConfig,
+        { settings: { 'project-structure/cache-location': cacheDir } },
+      ]);
+    } finally {
+      rmSync(cacheDir, { recursive: true, force: true });
     }
-    const errorCount = allResults.reduce((n, r) => n + r.errorCount, 0);
-    if (errorCount === 0) return clean();
-    const text = await (await eslint.loadFormatter('stylish')).format(allResults);
-    return violations(errorCount, text);
   } catch (e: unknown) {
     // Fail OPEN (exit 2), like the ratchet gates when their baseline is missing — a structure gate
     // that can't run must never wedge a commit. guard-deterministic treats 2 as fail-open (continue).
     const message = e instanceof Error ? e.message : String(e);
     return couldNotRun(message);
   }
+}
+
+async function lintStructureRoots(
+  cwd: string,
+  roots: string[],
+  baseConfig: Linter.Config[],
+): Promise<StructureGateResult> {
+  const eslint = new ESLint({ cwd, overrideConfigFile: true, baseConfig });
+  // Lint each root INDEPENDENTLY: a batched lintFiles fail-fasts on the first empty/all-ignored root
+  // and would mask a sibling's violation; per-root, that root is its own "clean".
+  const allResults = [];
+  for (const root of roots) {
+    try {
+      allResults.push(...(await eslint.lintFiles([root])));
+    } catch (e: unknown) {
+      // Nothing-to-lint for THIS root → clean; any other throw is a real failure → fail-open above.
+      const message = e instanceof Error ? e.message : '';
+      if (NOTHING_TO_LINT_RE.test(message)) continue;
+      throw e;
+    }
+  }
+  const errorCount = allResults.reduce((n, r) => n + r.errorCount, 0);
+  if (errorCount === 0) return clean();
+  const text = await (await eslint.loadFormatter('stylish')).format(allResults);
+  return violations(errorCount, text);
 }
 
 export async function runCli(cmd = 'gate') {

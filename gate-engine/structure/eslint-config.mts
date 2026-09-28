@@ -9,6 +9,7 @@
  * (returns a plain config object); the plugin wrapping happens here.
  */
 
+import { resolve } from 'node:path';
 import type { Linter } from 'eslint';
 import {
   createFolderStructure,
@@ -36,6 +37,9 @@ export async function buildStructureConfigs(root: string): Promise<Linter.Config
     const rule = compileToEslint(tree, exts, {
       baseline: await loadBaseline(tree.name),
       exempt: await loadExempt(tree.name),
+      // `resolve`, never `realpathSync`: the plugin gates on a raw `filename.includes(structureRoot)`
+      // against ESLint's own (un-realpathed) path, so the root must be spelled as ESLint spells it.
+      projectRoot: resolve(root),
     });
     configs.push({
       // A single extension must NOT use a brace: minimatch does not expand a 1-element `{mts}`, so

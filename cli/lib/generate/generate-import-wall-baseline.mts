@@ -31,6 +31,7 @@ import { existsSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { resolveGuardConfig } from '../../../gate-engine/config.mts';
+import { eslintNodeFlags } from '../../../gate-engine/structure/eslint-node-flags.mts';
 import {
   IMPORT_WALL_BASELINE,
   LEGACY_IMPORT_WALL_BASELINE,
@@ -134,7 +135,8 @@ function resolveEslintBin(cwd: string) {
 }
 
 function runScan(cwd: string, eslintBin: string, globs: string[]): EslintFileReport[] {
-  const r = spawnSync(process.execPath, [eslintBin, '--format', 'json', ...globs], {
+  const argv = [...eslintNodeFlags(cwd), eslintBin, '--format', 'json', ...globs];
+  const r = spawnSync(process.execPath, argv, {
     cwd,
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
