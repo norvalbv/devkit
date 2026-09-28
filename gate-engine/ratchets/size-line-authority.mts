@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { resolveGuardConfig } from '../config.mts';
 import { sourceMatchers } from '../config.mts';
 import { LINES_BASELINE, readRatchetBaseline } from './baseline-paths.mts';
+import { fanoutSplitHints } from './folder-fanout.mts';
 import { mergeBaseRef, treeTextAtRef } from './git-index.mts';
 import { SIZE_SKIP_DIRS } from './size-policy.mts';
 
@@ -393,6 +394,7 @@ export function lineViolationReport(
       `   ${entry.file}: ${entry.lines} lines (max ${lowered?.current ?? effectiveLineCeiling(grandfathered, entry.file, cap(entry.file))})`,
     );
   }
+  report.push(...fanoutSplitHints(root, violations.keys()));
   return { error: null, lines: report };
 }
 

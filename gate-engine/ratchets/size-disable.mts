@@ -18,6 +18,7 @@ import {
   SIZE_BASELINE,
   writeRatchetBaseline,
 } from './baseline-paths.mts';
+import { fanoutSplitHints } from './folder-fanout.mts';
 import {
   hasStagedFiles,
   indexTreeRef,
@@ -368,6 +369,7 @@ function runDisableGate(
       );
     }
     console.error('   Split the file below the cap instead of disabling.');
+    for (const hint of fanoutSplitHints(root, grew)) console.error(hint);
     process.exit(1);
   }
 
