@@ -89,7 +89,9 @@ size debt may only shrink …                                   # a NEW eslint-d
 **Cause:** file/function over the hard cap, OR you added an `eslint-disable max-lines`.
 **Fix: SPLIT — never add a disable.** The size-disable ratchet blocks new disables monotonically, so
 suppressing it is not an option. Extract cohesive pieces into sibling files (or a kebab subfolder if
-you'd cross the fan-out cap → row 5). After shrinking, optionally lock in the lower count:
+you'd cross the fan-out cap → row 5). guard-size prints each over-cap file's folder fan-out
+headroom beneath the violation; `split into a subfolder instead` there means a sibling file would
+trip guard-fanout. After shrinking, optionally lock in the lower count:
 
 ```bash
 guard-size freeze

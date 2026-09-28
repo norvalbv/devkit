@@ -21,7 +21,14 @@
 import { type Dirent, existsSync, readdirSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { CONFIG_FILENAME, resolveGuardConfig, sourceMatchers } from '../config.mts';
+import {
+  CONFIG_FILENAME,
+  resolveGuardConfig,
+  resolveTreeExtensions,
+  sourceMatchers,
+} from '../config.mts';
+import type { GrammarNode, TreeSpec } from '../structure/compile.mts';
+import { childGrammarNode } from '../structure/walk.mts';
 import {
   FANOUT_BASELINE,
   readRatchetBaseline,
@@ -128,13 +135,116 @@ export function overCap(counts: FanoutCounts, cap: number): FanoutCounts {
   return Object.fromEntries(Object.entries(counts).filter(([, n]) => n > cap));
 }
 
+// Everything the gate observes to reach a verdict, gathered in one place so any other reader of
+// fan-out standing (guard-size's split hint) judges a folder exactly as the gate would.
+export interface FanoutJudgement {
+  failOpen: boolean; // ungoverned + un-frozen: the gate does not run
+  hasBaseline: boolean;
+  frozen: FanoutBaseline;
+  inCommit: boolean;
+  counts: FanoutCounts; // the tally under judgement: the index during a commit, else the filesystem
+  headCounts: FanoutCounts;
+  allowed: (dir: string) => number;
+}
+
+export function judgeFanout(
+  root: string,
+  cap = resolveGuardConfig(root).fanoutCap,
+): FanoutJudgement {
+  // Finish every filesystem/index observation before snapshotting the baseline used to judge it.
+  const indexCounts = countFanoutFrom(root, indexFiles(root));
+  const inCommit = indexCounts !== null && hasStagedFiles(root);
+  const counts = indexCounts !== null && inCommit ? indexCounts : countFanout(root);
+  const headCounts = inCommit ? (countFanoutFrom(root, treeFilesAtRef(root, 'HEAD')) ?? {}) : {};
+  const baseline = readRatchetBaseline(root, BASELINE);
+  const hasBaseline = baseline !== null;
+  // Only an ungoverned (no guard.config.json) + un-frozen repo fails open. Never key this on
+  // .devkit/config.json: it is absent in devkit's own repo and in CI, which would disable the gate.
+  const failOpen = !hasBaseline && !existsSync(join(root, CONFIG_FILENAME));
+  // SAFETY: reads the Devkit-owned fan-out baseline shape produced by freeze/migration.
+  const frozen: FanoutBaseline = baseline
+    ? (JSON.parse(baseline.contents) as FanoutBaseline)
+    : { cap, dirs: {} };
+  // The gate blocks only above BOTH the config cap and the frozen allowance, so the limit is their max.
+  const allowed = (dir: string) => Math.max(cap, frozen.cap, frozen.dirs?.[dir] ?? 0);
+  return { failOpen, hasBaseline, frozen, inCommit, counts, headCounts, allowed };
+}
+
+// A folder whose child folders must be registered in a libDomains list before they may exist,
+// resolved through the same named/domain/recurse dispatch the structure walker applies.
+function isDomainGated(cfg: ReturnType<typeof resolveGuardConfig>, dir: string): boolean {
+  // SAFETY: cfg.structure.trees is object[] generically; at this config-read boundary each entry is a
+  // tree spec, and every field read below is optional-chained or truth-tested before use.
+  return (cfg.structure.trees as TreeSpec[]).some((tree) => {
+    if (!tree.root || !tree.grammar) return false;
+    if (dir !== tree.root && !dir.startsWith(`${tree.root}/`)) return false;
+    const rules = tree.grammar.rules ?? {};
+    const exts = resolveTreeExtensions(cfg, tree);
+    const below = dir === tree.root ? [] : dir.slice(tree.root.length + 1).split('/');
+    // walkTree never applies grammar under ignored, frozen or __tests__ folders: nothing to register.
+    const unjudged = new Set([
+      ...(tree.ignoredDirs ?? []),
+      ...(tree.frozenDirs ?? []),
+      '__tests__',
+    ]);
+    if (below.some((name) => unjudged.has(name))) return false;
+    let node: GrammarNode | undefined = tree.grammar;
+    for (const name of below) {
+      node = node ? childGrammarNode(node, name, rules, exts)?.node : undefined;
+    }
+    return Boolean(node?.domainGate);
+  });
+}
+
+// guard-size's split remedy trips guard-fanout when the folder has no headroom, so say so up front.
+// Advisory only: a failure to judge fan-out yields no hint rather than breaking the size gate.
+export function fanoutSplitHints(root: string, files: Iterable<string>): string[] {
+  try {
+    const cfg = resolveGuardConfig(root);
+    const match = sourceMatchers(cfg.sourceExtensions);
+    const dirs = new Set<string>();
+    for (const file of files) {
+      const segments = file.split('/');
+      const name = segments.pop() ?? '';
+      // Tests and barrels never count toward fan-out, so splitting one can never trip it.
+      if (!match.isSource(name) || match.isTest(name) || match.isBarrel(name)) continue;
+      dirs.add(segments.join('/'));
+    }
+    if (dirs.size === 0) return [];
+    const judged = judgeFanout(root, cfg.fanoutCap);
+    if (judged.failOpen) return [];
+    const hints: string[] = [];
+    for (const dir of [...dirs].sort()) {
+      const count = judged.counts[dir];
+      if (count === undefined) continue; // exempt or outside scanRoots: fan-out does not judge it
+      const allowed = judged.allowed(dir);
+      const headroom = allowed - count;
+      if (headroom > 0) {
+        hints.push(
+          `   ↳ ${dir}: ${count}/${allowed} impl files — room for ${headroom} more sibling file(s) before guard-fanout blocks`,
+        );
+        continue;
+      }
+      const register = isDomainGated(cfg, dir)
+        ? ' and register it in the tree’s structure libDomains'
+        : '';
+      hints.push(
+        `   ↳ ${dir} is at ${count}/${allowed} impl files: a sibling split will trip guard-fanout — split into a subfolder instead${register}`,
+      );
+    }
+    return hints;
+  } catch {
+    return [];
+  }
+}
+
 function runCli(cmd: string) {
   const root = process.cwd();
   const cfg = resolveGuardConfig(root);
   const cap = cfg.fanoutCap;
-  const offenders = overCap(countFanout(root), cap);
 
   if (cmd === 'freeze') {
+    const offenders = overCap(countFanout(root), cap);
     const baseline = readRatchetBaseline(root, BASELINE);
     if (Object.keys(offenders).length > 0) {
       // Read the OUTGOING baseline before clobbering it, so the refresh can name what it is newly
@@ -167,25 +277,12 @@ function runCli(cmd: string) {
   // Reason: the two ratchets (folder-fanout / size-disable) are parallel-by-design independent guard bins (+ tests); each self-contained with the same freeze/gate CLI shell
   // fallow-ignore-next-line code-duplication
   if (cmd === 'gate') {
-    // Finish every filesystem/index observation before snapshotting the baseline used to judge it.
-    const indexCounts = countFanoutFrom(root, indexFiles(root));
-    const inCommit = indexCounts !== null && hasStagedFiles(root);
-    const headCounts = inCommit ? (countFanoutFrom(root, treeFilesAtRef(root, 'HEAD')) ?? {}) : {};
-    const over = inCommit ? overCap(indexCounts as FanoutCounts, cap) : offenders;
-    const baseline = readRatchetBaseline(root, BASELINE);
-    const hasBaseline = baseline !== null;
-    // Missing baseline = no grandfathered over-cap folders. Enforce the config cap whenever the repo
-    // is governed (guard.config.json present — devkit's own repo, CI, any adopted consumer); only an
-    // UNgoverned + un-frozen repo fails open, so an unadopted repo is never wedged. Never key this on
-    // .devkit/config.json — absent in devkit's sync-dogfooded repo and in CI (would disable the gate).
-    if (!hasBaseline && !existsSync(join(root, CONFIG_FILENAME))) {
-      process.exit(2); // ungoverned + un-frozen → fail open
-    }
-    // SAFETY: gate reads the Devkit-owned fan-out baseline shape produced by freeze/migration.
-    const frozen: FanoutBaseline = baseline
-      ? (JSON.parse(baseline.contents) as FanoutBaseline)
-      : { cap, dirs: {} };
-    const allowed = (dir: string) => Math.max(frozen.cap, frozen.dirs[dir] ?? 0);
+    const { failOpen, hasBaseline, frozen, inCommit, counts, headCounts, allowed } = judgeFanout(
+      root,
+      cap,
+    );
+    if (failOpen) process.exit(2); // ungoverned + un-frozen → fail open
+    const over = overCap(counts, cap);
 
     // A ratchet must fail the CHANGE that broke it, not whoever commits next. During a commit judge
     // tracked state and require growth: the pending index against HEAD. Reading the index rather
@@ -241,6 +338,11 @@ function runCli(cmd: string) {
   process.exit(2);
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
+// existsSync first: realpathSync throws on a missing argv[1], which would make a plain import throw.
+if (
+  process.argv[1] &&
+  existsSync(process.argv[1]) &&
+  import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href
+) {
   runCli(process.argv[2]);
 }
