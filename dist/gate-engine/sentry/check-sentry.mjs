@@ -64,6 +64,7 @@
  * authored elimination-tier) but is a dev-only SEED the gate never reads at runtime.
  */
 import { execSync } from 'node:child_process';
+import { commitIndexEnv } from '../ratchets/commit-index.mjs';
 import { appendFileSync, existsSync, readFileSync, realpathSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -255,9 +256,10 @@ export function judge(input, { model, samples = 1, prompt = SENTRY_JUDGE_PROMPT 
     }
 }
 // ─── gate-only git + watchlist I/O ───────────────────────────────────────────────
+const stagedGit = (cmd, opts = {}) => execSync(cmd, { cwd: CWD, env: commitIndexEnv(CWD), encoding: 'utf8', ...opts }).trim();
 function stagedNameStatus() {
     try {
-        return execSync('git diff --cached --name-status', { cwd: CWD, encoding: 'utf8' }).trim();
+        return stagedGit('git diff --cached --name-status');
     }
     catch {
         return '';
@@ -270,12 +272,10 @@ function stagedNameStatus() {
 // `git diff` (index lock, a slow textconv/external diff driver) must not block the commit forever.
 function stagedDiff() {
     try {
-        return execSync('git -c diff.noprefix=false -c diff.mnemonicPrefix=false diff --cached', {
-            cwd: CWD,
-            encoding: 'utf8',
+        return stagedGit('git -c diff.noprefix=false -c diff.mnemonicPrefix=false diff --cached', {
             maxBuffer: 64 * 1024 * 1024,
             timeout: 10000,
-        }).trim();
+        });
     }
     catch {
         return '';

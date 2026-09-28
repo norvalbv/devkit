@@ -8,12 +8,13 @@ import { parseReviewVerdict } from '../contracts/response.mjs';
 import { buildCappedDiffEvidence } from '../diff-evidence.mjs';
 import { responseContractFor } from '../contracts/registry.mjs';
 import { attachItems } from '../evidence/items.mjs';
-import { gitCached } from '../evidence/staged-git.mjs';
+import { stagedGroundingSource } from '../contracts/conventions-grounding.mjs';
+import { gitCached, stagedTreeHash } from '../evidence/staged-git.mjs';
 import { lensGroupId } from '../lens/groups.mjs';
 import { applyOverrideValve } from '../overrides.mjs';
 import { allowedToolsFor, escalatePrompt, hasChecklist, resolveEscalationModel, resolveReviewModel, wrapConventionsPrompt, wrapPrompt, } from '../reviewers.mjs';
 import { enforceChecklistContract } from '../contracts/checklist.mjs';
-import { agentBody, cleanupChecklistState, initializeCommitGuardChecklist, readChecklistState, withStagedFiles, } from '../runtime.mjs';
+import { agentBody, cleanupChecklistState, initializeCommitGuardChecklist, isNamedSkip, readChecklistState, withStagedFiles, } from '../runtime.mjs';
 import { consumerChecklistAssetRoot } from './consumer-assets.mjs';
 /** Reason + machine cause for an inconclusive outcome, both naming what the PROVIDER said: a usage
  *  lock collapsed into "judge outage" sends the reader to the one remedy that cannot work. */
@@ -44,7 +45,22 @@ export async function runCascade(sel, opts) {
     const checklistRoot = opts.assetRoot ?? consumerChecklistAssetRoot(cwd, sel.reviewer);
     cleanupChecklistState(cwd, sel.reviewer);
     try {
-        initializeCommitGuardChecklist(cwd, sel.reviewer, checklistRoot, opts.judgeEnv);
+        // The SAME authoritative list the judge gets (sc-3400): without it the script re-resolved its
+        // own ACM universe, and a deletion-only change read as a clobbered index → engine error.
+        const initEnv = withStagedFiles(opts.judgeEnv ?? process.env, sel.reviewer, sel.files);
+        const seeded = initializeCommitGuardChecklist(cwd, sel.reviewer, checklistRoot, initEnv);
+        // Nothing reviewable (every selected path was deleted, say): no judge can add a finding about a
+        // file that no longer exists, so spawning one would only buy an outage risk for a certain PASS.
+        if (isNamedSkip(seeded)) {
+            const skip = {
+                name: sel.reviewer.name,
+                status: 'pass',
+                reason: `no reviewable files — ${seeded.skipped}`,
+                escalated: false,
+            };
+            attachItems(skip, seeded, new Map(), { full: opts.fullItems });
+            return skip;
+        }
         let res = await cascadeVerdict(sel, opts, checklistRoot);
         // Recovery below only schedules/classifies; it deletes this attempt's artifact without
         // running another judge. Keep its exact private evidence for the resulting inconclusive row.
@@ -98,6 +114,8 @@ async function cascadeVerdict({ reviewer, files }, { cwd, cfg, exec = execJudgeA
         };
     // Both forms name every staged file; only the checklist reviewers have the Bash to verify a churn
     // count, so the Bash-less one is given the inventory without it.
+    // The index the judge's evidence is cut from; grounding refuses a tree restaged after this point.
+    const evidenceTree = responseContractFor(reviewer.responseContract) ? stagedTreeHash(cwd) : null;
     const inventory = hasChecklist(reviewer)
         ? gitCached(cwd, ['--stat'], files)
         : `STAGED FILES (complete inventory):\n${gitCached(cwd, ['--name-only'], files)}`;
@@ -108,6 +126,9 @@ async function cascadeVerdict({ reviewer, files }, { cwd, cfg, exec = execJudgeA
             lineCountBlock: renderStagedLineCounts(cwd, files),
         });
     const responseContract = responseContractFor(reviewer.responseContract);
+    // Lazy: git is read only for files a FAIL actually cites, once each across all three checks.
+    const grounding = stagedGroundingSource(cwd, files, evidenceTree);
+    const lensesOf = (raw) => responseContract?.blockingLenses(raw, grounding) ?? [];
     const input = buildCappedDiffEvidence(gitCached(cwd, [], files), inventory);
     const allowedTools = allowedToolsFor(reviewer, cfg, checklistRoot);
     const mcpProfile = namedAgentMcpProfile();
@@ -147,7 +168,7 @@ async function cascadeVerdict({ reviewer, files }, { cwd, cfg, exec = execJudgeA
         initialRetryUsed = true;
         console.error(`guard-review: ${reviewer.name}: judge run failed (${firstOutage?.kind ?? 'transient'}), retrying once…`);
         cleanupChecklistState(cwd, reviewer);
-        initializeCommitGuardChecklist(cwd, reviewer, checklistRoot, judgeEnv);
+        initializeCommitGuardChecklist(cwd, reviewer, checklistRoot, env);
         first = await exec(firstOpts);
     }
     if (first === null) {
@@ -185,7 +206,7 @@ async function cascadeVerdict({ reviewer, files }, { cwd, cfg, exec = execJudgeA
             transcript: first,
         };
     if (reviewer.model) {
-        if (responseContract && !responseContract.validatesFail(first)) {
+        if (responseContract && lensesOf(first).length === 0) {
             let contractRetryUsed = false;
             if (retryFirst && !initialRetryUsed) {
                 contractRetryUsed = true;
@@ -237,7 +258,7 @@ async function cascadeVerdict({ reviewer, files }, { cwd, cfg, exec = execJudgeA
                         };
                 }
             }
-            if (firstVerdict.verdict === 'FAIL' && responseContract.validatesFail(first))
+            if (firstVerdict.verdict === 'FAIL' && lensesOf(first).length > 0)
                 return {
                     name: reviewer.name,
                     status: 'fail',
@@ -245,6 +266,7 @@ async function cascadeVerdict({ reviewer, files }, { cwd, cfg, exec = execJudgeA
                     escalated: false,
                     model: passModel,
                     transcript: first,
+                    blockingLenses: lensesOf(first),
                 };
             return {
                 name: reviewer.name,
@@ -263,14 +285,28 @@ async function cascadeVerdict({ reviewer, files }, { cwd, cfg, exec = execJudgeA
             escalated: false,
             model: passModel,
             transcript: first,
+            ...(responseContract && { blockingLenses: lensesOf(first) }),
         };
     }
+    // Node reads `timeout: 0` as NO cap, so a spent budget skips the escalation. Sampled ONCE: a
+    // second read could cross the deadline after the check and hand exec the 0 it guarded.
+    const escalationBudget = budgetLeft();
+    if (escalationBudget <= 0)
+        return {
+            name: reviewer.name,
+            status: 'inconclusive',
+            reason: 'escalation skipped — the first pass spent the whole budget',
+            inconclusiveCause: 'timeout',
+            escalated: false,
+            model: passModel,
+            transcript: first,
+        };
     let secondOutage;
     const second = await exec({
         label: `review:${reviewer.name}:escalate`,
         args: args(escalatePrompt(prompt, first), escalationModel),
         input,
-        timeout: budgetLeft(),
+        timeout: escalationBudget,
         cwd,
         transcript: false,
         mcpProfile,
@@ -296,9 +332,7 @@ async function cascadeVerdict({ reviewer, files }, { cwd, cfg, exec = execJudgeA
         return outcome;
     }
     const finalVerdict = parseReviewVerdict(second);
-    if (finalVerdict.verdict === 'FAIL' &&
-        responseContract &&
-        !responseContract.validatesFail(second))
+    if (finalVerdict.verdict === 'FAIL' && responseContract && lensesOf(second).length === 0)
         return {
             name: reviewer.name,
             status: 'inconclusive',
@@ -316,6 +350,7 @@ async function cascadeVerdict({ reviewer, files }, { cwd, cfg, exec = execJudgeA
             escalated: true,
             model: passModel,
             transcript: second,
+            ...(responseContract && { blockingLenses: lensesOf(second) }),
         };
     if (finalVerdict.verdict === 'PASS')
         return {

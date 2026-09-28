@@ -32,6 +32,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { withLock, writeFileAtomic } from './atomic-write.mjs';
+import { literalPathspecEnv } from './ship/reconcile-manifest-write.mjs';
 const ABSENT = Symbol('absent'); // a file/blob that does not exist on a given side (≠ any sha)
 const MAX_BUFFER = 64 * 1024 * 1024; // a few thousand dirty paths overflow Node's 1 MiB default
 /** Run a git PROBE in <root>: trimmed stdout, or null on any failure. Never throws. */
@@ -47,15 +48,12 @@ export function git(root, args) {
         return null;
     }
 }
-/**
- * Run a git WRITE: null when it landed, else what git actually said. Neither silent nor fatal — an
- * unhandled throw here killed a run mid-manifest with Node's bare `Command failed: git -C <root>
- * checkout …`: the argv and nothing else — no exit status, no stderr, and an unquoted repo path that
- * reads as a path-quoting bug when the cause was elsewhere. The status is rendered, never assumed.
- */
+/** Run a git WRITE: null when it landed, else git's exit status and diagnosis — never a bare throw,
+ *  which killed a run mid-manifest naming only the argv. Pathspecs are literal (sc-2425). */
 function gitWrite(root, args) {
     try {
         execFileSync('git', ['-C', root, ...args], {
+            env: literalPathspecEnv(),
             encoding: 'utf8',
             stdio: ['ignore', 'pipe', 'pipe'],
             maxBuffer: MAX_BUFFER,
@@ -103,8 +101,8 @@ function isAncestor(root, a, b) {
         return false;
     }
 }
-const blobAt = (root, ref, path) => git(root, ['rev-parse', `${ref}:${path}`]) ?? ABSENT;
-const indexBlob = (root, path) => git(root, ['rev-parse', `:${path}`]) ?? ABSENT;
+const blobAt = (root, ref, path) => git(root, ['rev-parse', '--verify', '-q', `${ref}:${path}`]) ?? ABSENT; // else `*.txt` echoes back
+const indexBlob = (root, path) => git(root, ['rev-parse', '--verify', '-q', `:${path}`]) ?? ABSENT;
 const worktreeBlob = (root, path) => existsSync(join(root, path)) ? (git(root, ['hash-object', '--', path]) ?? ABSENT) : ABSENT;
 const manifestFile = (mainRepo) => join(mainRepo, '.devkit', 'reconcile-manifest.json');
 export function loadManifest(mainRepo) {
@@ -164,6 +162,7 @@ export function reconcilePath(mainRepo, P, upstreamSha, apply) {
     if (P.path.startsWith('/') || P.path.split('/').includes('..')) {
         return { warning: `${P.path}: non-relative path refused (repo-relative paths only)` };
     }
+    const literal = `:(literal)${P.path}`; // a manifest path is one file, never a glob (sc-2425)
     const upstream = blobAt(mainRepo, upstreamSha, P.path);
     const cur = worktreeBlob(mainRepo, P.path);
     const idx = indexBlob(mainRepo, P.path);
@@ -178,7 +177,7 @@ export function reconcilePath(mainRepo, P, upstreamSha, apply) {
             return { done: true }; // deletion already staged
         if (apply) {
             // stage the deletion → pullable. Swallowing this used to print "✓ restored" and prune the entry.
-            const failure = gitWrite(mainRepo, ['rm', '--cached', '--ignore-unmatch', '--', P.path]);
+            const failure = gitWrite(mainRepo, ['rm', '--cached', '--ignore-unmatch', '--', literal]);
             if (failure)
                 return { warning: `${P.path}: staging the deletion failed — ${failure}`, failed: true };
         }
@@ -192,7 +191,7 @@ export function reconcilePath(mainRepo, P, upstreamSha, apply) {
             return {
                 warning: `${P.path}: upstream merged a different shape (path absent) — resolve by hand`,
             };
-        const failure = apply ? gitWrite(mainRepo, ['checkout', upstreamSha, '--', P.path]) : null;
+        const failure = apply ? gitWrite(mainRepo, ['checkout', upstreamSha, '--', literal]) : null;
         if (failure)
             return { warning: `${P.path}: restore failed — ${failure}`, failed: true };
         return { restored: true };

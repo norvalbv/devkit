@@ -22,15 +22,17 @@
  * un-bypassed one against the same tree. It exists because a base branch whose coverage is ALREADY
  * red otherwise corners an agent shipping unrelated work into fixing out-of-scope debt.
  */
-import { existsSync, readFileSync, realpathSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { existsSync, realpathSync } from 'node:fs';
+import { relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { coverageBypassed, resolveGuardConfig } from '../config.mjs';
+import { coverageBypassed, resolveGuardConfig, sourceMatchers, } from '../config.mjs';
 import { emitGateEvent } from '../judge/gate-events.mjs';
-import { formatClearMarker, readClearMarker } from './failures.mjs';
+import { displayPath, formatClearMarker, humanAge, readClearMarker } from './failures.mjs';
 // Shared with the PRODUCER (`devkit coverage-run`) so the path this gate reads and the path that
 // runner writes can never drift apart.
 import { COVERAGE_DIR, COVERAGE_FILE } from './produce.mjs';
+import { checkProvenance, readArtifact, } from './provenance.mjs';
 // The metrics we can compute from an istanbul/V8 coverage-final.json. Only the KEYS a consumer
 // configured are enforced; the rest are computed but ignored.
 const METRICS = ['statements', 'functions', 'branches', 'lines'];
@@ -91,6 +93,57 @@ const BYPASS_REMEDY = [
     '   Not your debt? If the BASE branch already fails this and your diff did not cause it,',
     '   ship without coverage for this run:  export GUARD_COVERAGE_OK=1',
 ];
+const MAX_LISTED = 10;
+function listPaths(paths, cwd, top) {
+    const lines = paths.slice(0, MAX_LISTED).map((p) => `     ${displayPath(resolve(top, p), cwd)}`);
+    if (paths.length > MAX_LISTED)
+        lines.push(`     …and ${paths.length - MAX_LISTED} more`);
+    return lines;
+}
+const TEST_PATH = /\.(test|spec)\.|(^|\/)__tests__\//;
+/** production / test / other; a MEASURED path is source whatever sourceExtensions says, and a package
+ * gate owns only its subtree plus what its artifact measured. `other` is never drift. */
+function classifier(extensions, pkgPrefix) {
+    const { isSource } = sourceMatchers(extensions);
+    return (path, measured) => {
+        if (!measured && pkgPrefix && !path.startsWith(`${pkgPrefix}/`))
+            return 'other';
+        if (!measured && !isSource(path))
+            return 'other';
+        return TEST_PATH.test(path) ? 'test' : 'production';
+    };
+}
+const canonicalPath = (p) => {
+    try {
+        return realpathSync(p);
+    }
+    catch {
+        return resolve(p);
+    }
+};
+/** The repo root the provenance paths are relative to; cwd itself when git cannot say. */
+function repoTop(cwd) {
+    try {
+        return execFileSync('git', ['rev-parse', '--show-toplevel'], {
+            cwd,
+            encoding: 'utf8',
+            stdio: ['ignore', 'pipe', 'ignore'],
+        }).trim();
+    }
+    catch {
+        return cwd;
+    }
+}
+function emitProvenance(p) {
+    emitGateEvent({
+        type: 'coverage_provenance',
+        gate: 'coverage',
+        state: p.state,
+        production_count: p.state === 'drift' ? p.production.length : 0,
+        test_count: p.state === 'drift' ? p.tests.length : 0,
+        detail: p.state === 'unknown' ? p.reason : p.manifest.runId,
+    });
+}
 /** Run the coverage gate against `cwd`. Returns the exit code (0 pass/bypass, 1 fail). */
 export function runCoverage(cwd = process.cwd()) {
     // BEFORE resolveGuardConfig — it THROWS on a malformed guard.config.json, and an explicit operator
@@ -141,8 +194,10 @@ export function runCoverage(cwd = process.cwd()) {
     // (computePercentages throws on the latter). Either way, corrupt data is not verification →
     // fail CLOSED with a clean message instead of crashing or reading garbage as coverage.
     let computed;
+    let artifact;
     try {
-        computed = computePercentages(JSON.parse(readFileSync(file, 'utf8')));
+        artifact = readArtifact(file);
+        computed = computePercentages(JSON.parse(artifact.bytes));
     }
     catch {
         console.error(`🚫 Coverage gate FAILED — ${COVERAGE_FILE} is present but not valid coverage data.`);
@@ -162,11 +217,44 @@ export function runCoverage(cwd = process.cwd()) {
             console.error(line);
         return 1;
     }
+    // Thresholds met — but met BY WHAT? The artifact is linked in from the developer's checkout, so a
+    // source edit after the coverage run leaves a verdict about code it never measured (sc-3225).
+    const top = repoTop(cwd);
+    const pkgPrefix = relative(canonicalPath(top), canonicalPath(cwd)).replaceAll('\\', '/');
+    const provenance = checkProvenance(cwd, resolve(cwd, COVERAGE_DIR), artifact, classifier(resolveGuardConfig(cwd).sourceExtensions, pkgPrefix));
+    emitProvenance(provenance);
+    const age = provenance.state === 'unknown'
+        ? ''
+        : humanAge(Date.now() - Date.parse(provenance.manifest.finishedAt));
+    if (provenance.state === 'drift') {
+        if (provenance.production.length > 0) {
+            console.error(`🚫 Coverage gate FAILED — coverage artifact predates ${provenance.production.length} briefed file(s):`);
+            for (const line of listPaths(provenance.production, cwd, top))
+                console.error(line);
+            console.error(`   The artifact (run ${provenance.manifest.runId}, measured ${age} ago) never saw these`);
+            console.error('   versions, so its percentages describe different code. Re-run `bun run test:run:coverage`');
+            console.error('   (a full run) after your last source edit, then re-run. Rewritten only by the');
+            console.error('   commit formatter? Run the formatter before coverage so it measures those bytes.');
+            for (const line of BYPASS_REMEDY)
+                console.error(line);
+            return 1;
+        }
+        console.log(`⚠️  Coverage artifact predates ${provenance.tests.length} briefed test file(s) — passing, but re-run coverage if they matter:`);
+        for (const line of listPaths(provenance.tests, cwd, top))
+            console.log(line);
+    }
+    else if (provenance.state === 'unknown') {
+        console.log(`⚠️  Coverage artifact provenance unknown (${provenance.reason}).`);
+        console.log('   Its percentages may describe a tree other than the one being committed.');
+    }
     const enforced = METRICS.filter((m) => typeof coverage[m] === 'number');
     const summary = enforced.length
         ? enforced.map((m) => `${m} ${computed[m]}%`).join(', ')
         : `statements ${computed.statements}%, functions ${computed.functions}%`;
-    console.log(`✓ Coverage gate passed (${summary}).`);
+    const measured = provenance.state === 'unknown'
+        ? ''
+        : ` — artifact run ${provenance.manifest.runId}, measured ${age} ago`;
+    console.log(`✓ Coverage gate passed (${summary})${measured}.`);
     return 0;
 }
 function runCli(cmd) {

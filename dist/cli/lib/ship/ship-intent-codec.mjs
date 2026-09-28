@@ -2,9 +2,11 @@
 import { isUtf8 } from 'node:buffer';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { closeSync, constants, fstatSync, openSync, readFileSync } from 'node:fs';
+import path from 'node:path';
 import { git } from '../reconcile.mjs';
 import { fail, parseArgs } from './ship-intent-args.mjs';
+import { shQuote } from './redact-secrets.mjs';
 const membershipKey = (value) => createHash('sha256').update(value).digest('hex');
 const sourceMembershipPrefix = (branch) => `refs/devkit/ship-source-memberships/${membershipKey(branch)}/`;
 export const sourceMembershipRef = (branch, sourceAttemptId) => `${sourceMembershipPrefix(branch)}${membershipKey(sourceAttemptId)}`;
@@ -138,6 +140,73 @@ export function provenStrings(v) {
         if (provenString(e) === null)
             return null;
     return v;
+}
+// Older than this, the ship was ABANDONED (every live retry re-records), and branch names get
+// reused — replaying weeks-old bytes under a confident "Resuming" banner is the failure mode.
+const MAX_AGE_MS = 6 * 60 * 60 * 1000;
+// Small allowance for clock drift between the writer and a reader; anything further in the future
+// is a misdated record, refused by the two-sided age check.
+const FUTURE_SKEW_MS = 5 * 60 * 1000;
+/** Two-sided replay window, and canonical ISO only: the round-trip refuses rollover dates
+ * (2026-02-30 parses as March 2), since the writer never emits one. */
+export function freshRecordStamp(createdAt, nowMs) {
+    const created = Date.parse(createdAt);
+    return (Number.isFinite(created) &&
+        new Date(created).toISOString() === createdAt &&
+        nowMs - created <= MAX_AGE_MS &&
+        created - nowMs <= FUTURE_SKEW_MS);
+}
+/** An absolute, non-stream (/dev, /proc) path free of line-breaking characters, else undefined —
+ * dropped, never refused. Writers resolve it from the invoker's cwd (ship scripts never cd). */
+export function advisoryBodyFile(v) {
+    const p = provenString(v);
+    // Cc = C0, DEL and C1 controls; Zl/Zp = U+2028/U+2029 — anything that could split the one line.
+    const breaksLine = /[\p{Cc}\p{Zl}\p{Zp}]/u;
+    if (!p || !path.isAbsolute(p) || /^\/(dev|proc)\//.test(p) || breaksLine.test(p))
+        return undefined;
+    return p;
+}
+/** sc-2527: warn when the recorded body no longer matches its `--body-file`. Never re-reads the
+ * file into the body (the completeness PASS keys on exact bytes); every unknown is silence. */
+export function bodyDriftWarning(intent) {
+    if (!intent.bodyFile)
+        return null;
+    let onDisk;
+    let fd;
+    try {
+        // One non-blocking open, judged by fstat on THAT descriptor: a FIFO swapped in after a
+        // path-level stat would otherwise block the read forever.
+        fd = openSync(intent.bodyFile, constants.O_RDONLY | (constants.O_NONBLOCK ?? 0));
+        if (!fstatSync(fd).isFile())
+            return null;
+        onDisk = readFileSync(fd);
+    }
+    catch {
+        return null;
+    }
+    finally {
+        if (fd !== undefined)
+            closeSync(fd);
+    }
+    const recorded = Buffer.from(intent.bodyB64, 'base64');
+    if (recorded.equals(onDisk))
+        return null;
+    const refresh = `devkit ship --resume ${shQuote(intent.branch)} --body-file ${shQuote(intent.bodyFile)}`;
+    return (`ship: ${intent.bodyFile} changed since this invocation was recorded ` +
+        `(${recorded.length} bytes recorded, ${onDisk.length} on disk) — replaying the RECORDED body. ` +
+        (intent.mode === 'reship'
+            ? 'Using the file also rewrites the PR description: '
+            : 'To use the file: ') +
+        refresh);
+}
+/** `ship-intent body-drift`: print the drift line, if any; exit 0 always. Pinned to the generation
+ * the resume replays — a record replaced since then holds some other attempt's body. */
+export function reportBodyDrift(result, generation) {
+    const replayed = 'intent' in result && result.intent.generation === generation;
+    const warning = replayed ? bodyDriftWarning(result.intent) : null;
+    if (warning)
+        console.error(warning);
+    return 0;
 }
 /** Emit the NUL-delimited field order consumed by the Bash resume readers. */
 export function emitFields(intent) {

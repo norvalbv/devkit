@@ -32,7 +32,9 @@
  * name, and gate-verdict-attribution expects ONE review_result row per reviewer — so renaming the
  * derived clones would void every committed waiver and split the telemetry in two.
  */
+import { z } from 'zod';
 import { diffCacheIdentity } from '../../judge/diff-focus.mjs';
+import { storedBaseSchema } from '../evidence/base-context.mjs';
 import { planChunkedParts, resolveChunkCap } from './chunk-tasks.mjs';
 import { deriveLensReviewer, lensGroupId, resolveLensGroups } from './groups.mjs';
 // Re-exported so every existing importer's path keeps working after the guard-size split.
@@ -180,7 +182,7 @@ export function planReviewWork(selected, diffs, cache, salts, keyOf, groups = re
     const tasks = [];
     const scope = [];
     const fullyCached = [];
-    const cachedLines = [];
+    const cachedHits = [];
     // Pre-seeded with any group whose PASS was already checkpointed, so a resumed run still emits the
     // FULL per-lens vector — without this the merged row silently omits the cached groups' items.
     const splitParts = new Map();
@@ -217,14 +219,24 @@ export function planReviewWork(selected, diffs, cache, salts, keyOf, groups = re
                 }))
                 : [{ sel, key: keyOf(name, idText, salt), diffText: diffs[i], base: sel }];
         const allCached = parts.every((p) => Boolean(cache[p.key]));
-        scope.push({ sel, diff: diffs[i], cached: allCached });
+        // The base each stored PASS was judged against (sc-3468), parsed at the cache read (malformed →
+        // null → UNKNOWN). Never refreshed on a hit: that re-stamping is the false provenance it prevents.
+        const judgedBases = parts
+            .filter((p) => cache[p.key])
+            .map((p) => storedBaseSchema.safeParse(cache[p.key].base_sha).data ?? null);
+        scope.push({ sel, diff: diffs[i], cached: allCached, judgedBases });
         if (allCached) {
             const duration = parts.reduce((sum, p) => {
                 const d = cache[p.key].duration_ms;
                 return sum + (typeof d === 'number' ? d : 0);
             }, 0);
-            fullyCached.push({ name, duration, model: cache[parts[0].key].model });
-            cachedLines.push(`guard-review: ${name} — cached PASS (identical diff)`);
+            fullyCached.push({
+                name,
+                duration,
+                model: z.string().min(1).safeParse(cache[parts[0].key].model).data,
+                judgedBases,
+            });
+            cachedHits.push({ label: name, files: sel.files, judgedBases, part: false });
             continue;
         }
         for (const p of parts) {
@@ -232,7 +244,12 @@ export function planReviewWork(selected, diffs, cache, salts, keyOf, groups = re
                 tasks.push(p);
                 continue;
             }
-            cachedLines.push(`guard-review: ${taskLabel(p)} — cached PASS (identical)`);
+            cachedHits.push({
+                label: taskLabel(p),
+                files: p.sel.files,
+                judgedBases: [storedBaseSchema.safeParse(cache[p.key].base_sha).data ?? null],
+                part: true,
+            });
             if (!p.splitOf)
                 continue;
             // Rebuild the part WITH its cached aggregates (sc-1475): a spilled part's `items` never
@@ -257,7 +274,7 @@ export function planReviewWork(selected, diffs, cache, salts, keyOf, groups = re
             splitParts.set(p.splitOf, held);
         }
     }
-    return { tasks, scope, fullyCached, cachedLines, splitParts };
+    return { tasks, scope, fullyCached, cachedHits, splitParts };
 }
 /** Arm suffix for a bench section key — empty unless THIS reviewer is being split, so every
  * existing baseline key stays byte-identical and the monolith stays comparable to its history. */

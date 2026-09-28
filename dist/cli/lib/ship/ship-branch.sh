@@ -51,7 +51,9 @@ bounded_remote_git() {
   # .mts in source, built .mjs in an installed consumer (the gate-config-paths dual-ext idiom).
   local supervisor="$SCRIPT_DIR/review/process/gate-supervisor.mts"
   [ -f "$supervisor" ] || supervisor="$SCRIPT_DIR/review/process/gate-supervisor.mjs"
-  node "$supervisor" "${DEVKIT_REMOTE_TIMEOUT_SECONDS:-60}" -- git "$@"
+  # -c: a detached auto-gc/maintenance inherits the supervisor's ownership token and is reaped as a
+  # leaked tree, turning a finished fetch into 124 (sc-3761). Remote git never needs maintenance.
+  node "$supervisor" "${DEVKIT_REMOTE_TIMEOUT_SECONDS:-60}" -- git -c gc.auto=0 -c maintenance.auto=false "$@"
 }
 
 # `--resume <branch>` replays the invocation the previous attempt recorded (ship-intent.mts). A
@@ -260,17 +262,17 @@ if [ "$RESUME" -eq 0 ] && [ "$FROM_BRANCH" -eq 1 ] && [ "${#PATHS[@]}" -gt 0 ]; 
   exit 1
 fi
 [ "$FROM_BRANCH" -eq 1 ] || [ "${#PATHS[@]}" -gt 0 ] || { echo "no paths given" >&2; exit 1; }
-if [ "$FROM_BRANCH" -eq 1 ]; then
-  # The mode constructs its own root-anchored literal selectors. Ambient Git pathspec modes either
-  # reinterpret those magic prefixes as plain text or conflict with them, so they are not inputs.
-  unset GIT_LITERAL_PATHSPECS GIT_GLOB_PATHSPECS GIT_NOGLOB_PATHSPECS GIT_ICASE_PATHSPECS
-fi
+# Both modes construct their own literal selectors (sc-2425). Ambient Git pathspec modes either
+# reinterpret those magic prefixes as plain text or conflict with them, so they are not inputs.
+unset GIT_LITERAL_PATHSPECS GIT_GLOB_PATHSPECS GIT_NOGLOB_PATHSPECS GIT_ICASE_PATHSPECS
 # Files only: `git diff/ls-files -- <dir>` recurses and would sweep in a parallel
 # agent's edits under that directory, defeating the per-file isolation. (A deleted
 # file is not a dir, so it still passes — deletions are valid pathspecs.)
 if [ "$FROM_BRANCH" -eq 0 ]; then
   for p in "${PATHS[@]}"; do
-    [ -d "$p" ] && {
+    # Framed on $ROOT like every git call that consumes the path: from a subdirectory a cwd-relative
+    # test lets a root-level directory through, and git then recurses into it.
+    [ -d "$ROOT/$p" ] && {
       echo "directory path not allowed (pass individual files): $p" >&2
       echo "  list its tracked files: git ls-files -- \"$p\"" >&2
       exit 1
@@ -671,7 +673,12 @@ if [ "$FROM_BRANCH" -eq 1 ]; then
     for p in "${PATHS[@]}"; do printf '  %q\n' "$p" >&2; done
   fi
 else
-  GIT_PATHS=("${PATHS[@]}")
+  # An explicit path names ONE file, whatever bytes its name holds (sc-2425): `*.txt` and
+  # `:(exclude)*` are legal filenames, and a bare pathspec would read them as a glob or as magic.
+  # `literal` WITHOUT `top`: under `git -C "$ROOT"` it still normalises `./note.txt`, which
+  # `:(top,literal)` does not. Raw PATHS stays the storage and display identity.
+  GIT_PATHS=()
+  for p in "${PATHS[@]}"; do GIT_PATHS+=(":(literal)$p"); done
 fi
 
 # Where the staging patch is ANCHORED, and which briefed paths cannot be three-way merged. See
@@ -711,6 +718,16 @@ fi
 # runs that gate, where a dark provider would otherwise surface only as a strict-mode exit 3.
 if [ "$DRY_GATES" -eq 0 ] || [ "$WITH_REVIEWERS" -eq 1 ]; then
   ship_judge_preflight "$ROOT"
+fi
+# Before `git worktree add -b` (sc-3883): a missing hook dir used to surface only inside
+# prepare_gate_worktree, after the branch existed. When this worktree also holds $BR, name that blocker
+# in the same refusal — otherwise the operator frees the branch, re-runs, and only then meets this one.
+if ! gate_hook_source_preflight "$ROOT" "$BASE" shipping; then
+  if [ -n "$PREFLIGHT_SELF" ]; then
+    echo "ship: also blocked — $PREFLIGHT_HINT. Fix both before re-running:" >&2
+    _ship_orphan_report_self "$PWD" "$BR"
+  fi
+  exit 1
 fi
 
 # Nothing to commit → say so NOW. Staging (below) has exactly three inputs: the tracked diff vs
@@ -770,6 +787,9 @@ elif [ "$BODY_FILE_SET" -eq 1 ]; then
   BODY=$(cat -- "$BODY_FILE_FLAG" && printf x) || { echo "--body-file: unreadable: $BODY_FILE_FLAG" >&2; exit 1; }
   BODY=${BODY%x}
 elif [ "$RESUME" -eq 1 ]; then BODY="$RESUME_BODY"
+  # Replaying recorded bytes: say so if the --body-file they came from has since been edited
+  # (sc-2527). Here — past the mode hand-off, before any worktree or gate — so it prints once.
+  node "$SHIP_INTENT" body-drift --root "$ROOT" --branch "$BR" --generation "$RESUME_GENERATION" || true
 elif [ -t 0 ]; then BODY=""
 else ship_read_stdin_body; fi
 # The body is the ONLY thing ship reads from stdin, and it has been read. Hand every descendant
@@ -812,6 +832,10 @@ if [ "$DRY_GATES" -eq 0 ]; then
   # Any boolean added here must ALSO join the allowlist in ship-intent-args.mts:16-22, or its
   # `--flag` is treated as value-taking and silently eats the next argv entry.
   [ "$DRAFT" -eq 0 ] || SHIP_INTENT_ARGS+=(--draft)
+  # The body file's path rides the record so a later resume can warn when it drifts (sc-2527); a
+  # resume that replayed the recorded body keeps the recorded path, and --body clears it.
+  [ "$BODY_FILE_SET" -eq 0 ] || SHIP_INTENT_ARGS+=(--body-file-path "$BODY_FILE_FLAG")
+  [ "$RESUME" -eq 0 ] || [ "$BODY_SET" -eq 1 ] || [ "$BODY_FILE_SET" -eq 1 ] || SHIP_INTENT_ARGS+=(--keep-body-file)
   if [ "$RESUME" -eq 1 ]; then
     SHIP_INTENT_ARGS+=(--resumed --expect-generation "$RESUME_GENERATION")
     if [ "$FROM_BRANCH" -eq 0 ]; then
@@ -1124,8 +1148,8 @@ if [ -n "$LOCAL_BRANCH_EXISTS" ]; then
       # already supplied the right content; leave it alone. Probes are newline-framed on purpose:
       # only emptiness is read, and `-z` inside $() makes bash strip NULs and warn on stderr.
       if [ "${#GATE_ADD_EXCLUDE[@]}" -gt 0 ] &&
-         [ -n "$(git -C "$ROOT" diff --name-only --no-renames "$RECOVERY_PARENT" "$RECOVERY_COMMIT" -- "$p")" ] &&
-         [ -z "$(git -C "$ROOT" diff --name-only --no-renames "$RECOVERY_PARENT" "$RECOVERY_COMMIT" -- "$p" "${GATE_ADD_EXCLUDE[@]}")" ]; then
+         [ -n "$(git -C "$ROOT" diff --name-only --no-renames "$RECOVERY_PARENT" "$RECOVERY_COMMIT" -- ":(literal)$p")" ] &&
+         [ -z "$(git -C "$ROOT" diff --name-only --no-renames "$RECOVERY_PARENT" "$RECOVERY_COMMIT" -- ":(literal)$p" "${GATE_ADD_EXCLUDE[@]}")" ]; then
         continue
       fi
       # (b) A path the commit DELETED. read-tree has already applied the deletion, so it is in
@@ -1135,10 +1159,10 @@ if [ -n "$LOCAL_BRANCH_EXISTS" ]; then
       # broken symlink. --others deliberately WITHOUT --exclude-standard so a force-added ignored
       # file still counts as present. A path the caller has since RE-CREATED matches again, stays in
       # the add set, and still refuses via the tree comparison below — as it must.
-      if [ -z "$(GIT_INDEX_FILE="$RECOVERY_INDEX" git -C "$ROOT" ls-files --cached --others -- "$p")" ]; then
+      if [ -z "$(GIT_INDEX_FILE="$RECOVERY_INDEX" git -C "$ROOT" ls-files --cached --others -- ":(literal)$p")" ]; then
         continue
       fi
-      RECOVERY_ADD_PATHS+=("$p")
+      RECOVERY_ADD_PATHS+=(":(literal)$p")
     done
     # `git add -A --` with NO pathspec stages the WHOLE worktree, so an empty set must be an explicit
     # skip. Nothing is lost by skipping: read-tree's index already IS the commit's tree.
@@ -1301,9 +1325,10 @@ else
     # straight on. Same temp-file idiom as the branch-paths and gitlink enumerations above; preferred
     # over `done < <(...)`, which loses the enumerator's own failure to set -e.
     UNTRACKED_FILE=$(mktemp "${TMPDIR:-/tmp}/ship-untracked.XXXXXX")
-    git -C "$ROOT" ls-files -o --exclude-standard -- "${PATHS[@]}" > "$UNTRACKED_FILE"
+    # -z + literal adds (sc-2425): a newline in a name must not split it, nor `:(exclude)*` act as magic.
+    git -C "$ROOT" ls-files -z -o --exclude-standard -- "${GIT_PATHS[@]}" > "$UNTRACKED_FILE"
     UNTRACKED_CLOBBER=()
-    while IFS= read -r f; do
+    while IFS= read -r -d '' f; do
       # A path untracked HERE can still be TRACKED at the refreshed base: the base ADDED it after this
       # checkout forked. Copying wholesale would silently replace the base's version — the untracked
       # twin of sc-2451, and invisible to the patch arm above because the fork point has no such path
@@ -1324,7 +1349,7 @@ else
         UNTRACKED_CLOBBER+=("$f")
         continue
       fi
-      git -C "$WT" add -- "$f"
+      git -C "$WT" add -- ":(top,literal)$f"
     done < "$UNTRACKED_FILE"
     rm -f "$UNTRACKED_FILE"
     # Both untracked passes accumulate into UNTRACKED_CLOBBER and are reported together below, so an
@@ -1347,9 +1372,9 @@ else
   # a file tracked at their OWN fork point) still emits it and is unaffected, but a path the base
   # added after the fork has no deletion to express, so it is force-added here as a new file.
     IGNORED_FILE=$(mktemp "${TMPDIR:-/tmp}/ship-ignored.XXXXXX")
-    git -C "$ROOT" ls-files -o -i --exclude-standard -- "${PATHS[@]}" > "$IGNORED_FILE"
-    while IFS= read -r f; do
-      git -C "$WT" diff --cached --quiet --diff-filter=D -- "$f" || continue
+    git -C "$ROOT" ls-files -z -o -i --exclude-standard -- "${GIT_PATHS[@]}" > "$IGNORED_FILE"
+    while IFS= read -r -d '' f; do
+      git -C "$WT" diff --cached --quiet --diff-filter=D -- ":(top,literal)$f" || continue
       mkdir -p "$WT/$(dirname "$f")"
       cp -Pp "$ROOT/$f" "$WT/$f"
       # The same base-clobber check the ordinary untracked pass runs, for the same reason: `-f` makes
@@ -1363,7 +1388,7 @@ else
         UNTRACKED_CLOBBER+=("$f")
         continue
       fi
-      git -C "$WT" add -f -- "$f"
+      git -C "$WT" add -f -- ":(top,literal)$f"
     done < "$IGNORED_FILE"
     rm -f "$IGNORED_FILE"
     if [ "${#UNTRACKED_CLOBBER[@]}" -gt 0 ]; then
@@ -1574,9 +1599,12 @@ if [ -z "$PR_CREATE_FAILED" ]; then
   # Telemetry: tie this ship's id to the PR it opened, so the usage tracker links a ship row to its
   # PR directly (no gh-by-branch lookup needed). ship_result already fired during the gate chain —
   # before the PR existed — so this is a separate line the collector upserts onto the ship. Reuses
-  # the DEVKIT_SHIP_ID/DEVKIT_GATE_EVENTS that the sourced commit-with-gate-capture.sh exported;
-  # best-effort (`|| true`) so telemetry can never fail a ship. pr_number is a bare JSON number, else null.
+  # DEVKIT_SHIP_ID/DEVKIT_GATE_EVENTS; best-effort (`|| true`) so telemetry can never fail a ship.
+  # pr_number is a bare JSON number, else null. telemetry.sh is sourced HERE, not inherited: a resumed
+  # ship never ran commit_with_gate_capture (the only other place it is sourced), and under `set -u`
+  # its unset DEVKIT_TELEMETRY_VERSION aborted the resume after the PR was already open.
   if [ -n "${DEVKIT_GATE_EVENTS:-}" ] && [ -n "${DEVKIT_SHIP_ID:-}" ]; then
+    . "$(dirname "${BASH_SOURCE[0]}")/telemetry.sh"
     printf '{"type":"ship_pr","ship_id":"%s","devkit_version":"%s"%s,"pr_url":"%s","pr_number":%s,"ts":"%s"}\n' \
       "$(devkit_json_escape "$DEVKIT_SHIP_ID")" "$(devkit_json_escape "$DEVKIT_TELEMETRY_VERSION")" \
       "$(devkit_parent_session_json)" \

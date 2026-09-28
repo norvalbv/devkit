@@ -25,7 +25,8 @@ import { statSync } from 'node:fs';
 import { join } from 'node:path';
 import { cmpSemver, DEP } from '../../../commands/update.mjs';
 import { detectGitRoot } from '../../detect-git-root.mjs';
-import { packageDir, readJson } from '../../fs-helpers.mjs';
+import { canonicalPath, packageDir, readJson } from '../../fs-helpers.mjs';
+import { isDevkitRepo } from '../../husky/self-host.mjs';
 import { check } from '../check-result.mjs';
 import { devkitDepRef } from './pin-checks.mjs';
 const SEMVER = /^\d+\.\d+\.\d+$/;
@@ -43,7 +44,7 @@ const BIN_DISPLAY_NAMES = process.platform === 'win32' ? ['devkit.cmd', 'devkit'
 export const DELEGATED_ENV = 'DEVKIT_SKEW_DELEGATED';
 /** Visible opt-out (docs/decisions/gate-opt-out-is-visible-and-detectable.md). */
 export const ALLOW_SKEW_ENV = 'DEVKIT_ALLOW_SKEWED_FIX';
-function readConfig(cwd) {
+export function readConfig(cwd) {
     try {
         return readJson(join(cwd, '.devkit', 'config.json')) ?? {};
     }
@@ -84,7 +85,7 @@ function runningVersion() {
  * let a monorepo package dir validate against the git root's install while handing off to a stale
  * package-local binary — a delegation to code that is not the version we just approved.
  */
-function installedAt(cwd) {
+export function installedAt(cwd) {
     let versionOnly = {};
     for (const root of roots(cwd)) {
         const pkgDir = join(root, INSTALLED_DIR_REL);
@@ -246,4 +247,26 @@ export function assertRunnerMayWrite(cwd, allowSkew = false, env = process.env) 
     throw new Error(`refusing to write devkit-managed state: running devkit ${skew.running}, but this repo pins ${skew.pinned}. ` +
         `An older devkit writes .devkit/oxc in its own older shape, which the pinned gate then reports as stale. ` +
         `Run: ${skew.remediation}`);
+}
+// In devkit's own repo, refuse a devkit that is not this checkout: it would hash ITS bundled
+// skills/agents into this checkout's manifests (sc-2345). Consumers and bad package.json pass.
+export function assertRunsFromSource(cwd, command, packageRoot = packageDir()) {
+    // Any directory inside the repo resolves to its root, so a subdirectory run cannot slip past.
+    const { gitRoot } = detectGitRoot(cwd);
+    let selfHost;
+    try {
+        selfHost = isDevkitRepo(gitRoot);
+    }
+    catch {
+        selfHost = false;
+    }
+    if (!selfHost)
+        return;
+    const repo = canonicalPath(gitRoot);
+    const running = canonicalPath(packageRoot);
+    if (repo === running)
+        return;
+    throw new Error(`refusing to write devkit-managed agent assets: this is devkit's own repo (${repo}), but the running devkit is ${running}. ` +
+        `Its bundled skills/agents would overwrite this checkout's and revert .devkit/*-manifest.json. ` +
+        `Run from source: bun run devkit ${command}`);
 }

@@ -3,6 +3,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { commitIndexEnv } from '../../../../gate-engine/ratchets/commit-index.mjs';
 import { adoptManagedCapability } from './base-capability.mjs';
 import { parseBaseline } from './baseline.mjs';
 import { ANTI_SLOP_BASELINE_REL, ANTI_SLOP_CONFIG_REL, ANTI_SLOP_MANIFEST_REL, parseAntiSlopManagedActivationEvidence, } from './constants.mjs';
@@ -156,6 +157,7 @@ function envelope(cwd, baseRef, candidateTree) {
 function fileInIndex(layout, relativePath) {
     const shown = spawnSync('git', ['show', `:${layout.prefix}${relativePath}`], {
         cwd: layout.root,
+        env: commitIndexEnv(layout.root),
         encoding: 'utf8',
         maxBuffer: MAX_GIT_OUTPUT,
     });
@@ -182,7 +184,12 @@ export function committedBaselineProbe(cwd) {
         const base = baselineAtTree(repo, baseTree);
         if (base === null)
             return { kind: 'skip', notice: null };
-        const staged = execFileSync('git', ['diff-index', '--cached', '--name-status', '-z', '-M', baseTree], { cwd: repo.root, encoding: 'utf8', maxBuffer: MAX_GIT_OUTPUT });
+        const staged = execFileSync('git', ['diff-index', '--cached', '--name-status', '-z', '-M', baseTree], {
+            cwd: repo.root,
+            env: commitIndexEnv(repo.root),
+            encoding: 'utf8',
+            maxBuffer: MAX_GIT_OUTPUT,
+        });
         const baseActivation = activationEvidenceAtTree(repo, baseTree);
         const stagedActivation = activationEvidenceInIndex(repo);
         return {

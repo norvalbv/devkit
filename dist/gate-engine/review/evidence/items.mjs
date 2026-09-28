@@ -176,7 +176,8 @@ export function attachItems(res, state, disposition, opts = {}) {
     // reviewed file, identified by `path`). Same precedence verifyChecklist uses — reading only items[]
     // would label every commit-guard entry '(finding)'.
     const raw = state?.items ?? state?.files;
-    if (!Array.isArray(raw) || raw.length === 0)
+    // Only an ABSENT vector returns bare: an existing empty one (a named skip) is recorded as zero items.
+    if (!Array.isArray(raw))
         return;
     res.itemArtifact = state?.items ? 'items' : 'files';
     const ordered = raw

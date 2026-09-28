@@ -10,18 +10,11 @@ import { pathToFileURL } from 'node:url';
 import { devkitVersion } from '../../../gate-engine/devkit-version.mjs';
 import { emitShipIntentEvent } from './ship-intent-event.mjs';
 import { fail, parseArgs } from './ship-intent-args.mjs';
-import { bindSourceMembershipForWrite, cleanupDeletedSourceMembershipRefs, cleanupFailedSourceMembership, cleanupReplacedSourceMembership, emitFields, handlePathCodecCommand, originRepo, provenBool, provenString, provenStrings, sourceMembershipMatches, } from './ship-intent-codec.mjs';
+import { advisoryBodyFile, bindSourceMembershipForWrite, cleanupDeletedSourceMembershipRefs, cleanupFailedSourceMembership, cleanupReplacedSourceMembership, emitFields, freshRecordStamp, handlePathCodecCommand, originRepo, provenBool, provenString, provenStrings, reportBodyDrift, sourceMembershipMatches, } from './ship-intent-codec.mjs';
 import { withLock } from '../atomic-write.mjs';
 const LEGACY_EXPLICIT_SCHEMA_VERSION = 1;
 const EXPLICIT_SCHEMA_VERSION = 2;
 const BRANCH_SCHEMA_VERSION = 3;
-// A manifest this old describes an ABANDONED ship: every live retry chain rewrites it on each
-// attempt, so age only accumulates when no attempt has run — and branch names get reused. Replaying
-// weeks-old bytes under a confident "Resuming" banner is the failure mode; refusing is cheap.
-const MAX_AGE_MS = 6 * 60 * 60 * 1000;
-// Small allowance for clock drift between the writer and a reader; anything further in the future
-// is a misdated record, refused by the two-sided age check.
-const FUTURE_SKEW_MS = 5 * 60 * 1000;
 /** The raw-branch hash separates sanitized-name collisions; readIntent's raw branch equality is
  * the final guarantee that a copied or colliding file never replays another branch's invocation. */
 export const relIntentPath = (branch) => {
@@ -83,6 +76,7 @@ export function writeIntent(opts, paths) {
         intent.sourceMode = sourceMode;
     if (sourceAttemptId)
         intent.sourceAttemptId = sourceAttemptId;
+    intent.bodyFile = advisoryBodyFile(opts.bodyFilePath && path.resolve(opts.bodyFilePath));
     const file = intentFile(opts.root, opts.branch);
     mkdirSync(path.dirname(file), { recursive: true });
     let boundNewMembership = null;
@@ -123,6 +117,9 @@ export function writeIntent(opts, paths) {
                 }
                 return;
             }
+            // Past the CAS, so onDisk is the record this resume read: its path is the one to carry.
+            if (opts.keepBodyFile)
+                intent.bodyFile ??= advisoryBodyFile(onDisk?.bodyFile);
             if (opts.mergePaths && onDisk !== null)
                 for (const p of provenStrings(onDisk.paths) ?? [])
                     if (!intent.paths.includes(p))
@@ -354,15 +351,7 @@ export function readIntent(root, branch, nowMs = Date.now()) {
             reason: `recorded branch-source frozen membership failed its Git binding — run the full command, which re-records`,
         };
     const createdAt = provenString(r.createdAt) ?? '';
-    const created = Date.parse(createdAt);
-    // Two-sided: older than the abandonment bound is stale, and a FUTURE stamp (clock skew, a
-    // hand-edit) must not buy a record immortality past the six-hour boundary. The toISOString
-    // round-trip refuses rollover dates (2026-02-30 parses as March 2) — the writer only ever
-    // emits canonical ISO, so inequality proves tampering or corruption.
-    if (!Number.isFinite(created) ||
-        new Date(created).toISOString() !== createdAt ||
-        nowMs - created > MAX_AGE_MS ||
-        created - nowMs > FUTURE_SKEW_MS)
+    if (!freshRecordStamp(createdAt, nowMs))
         return {
             reason: `recorded invocation is stale or misdated (recorded ${String(r.createdAt)}; every live attempt re-records) — run the full command`,
         };
@@ -386,6 +375,7 @@ export function readIntent(root, branch, nowMs = Date.now()) {
     };
     if (sourceAttemptId)
         intent.sourceAttemptId = sourceAttemptId;
+    intent.bodyFile = advisoryBodyFile(r.bodyFile);
     return { intent };
 }
 function main() {
@@ -419,6 +409,8 @@ function main() {
             expectGeneration: values.get('expect-generation'),
             sourceAttemptId: values.get('source-attempt-id'),
             donatePaths: donates,
+            bodyFilePath: values.get('body-file-path'),
+            keepBodyFile: booleans.has('keep-body-file'),
             body: readFileSync(0), // Buffer, never utf8 — see the header
         }, paths);
     }
@@ -429,6 +421,8 @@ function main() {
         emitFields(result.intent);
         return 0;
     }
+    if (sub === 'body-drift')
+        return reportBodyDrift(readIntent(root, branch), values.get('generation'));
     if (sub === 'owns') {
         const generation = values.get('generation');
         if (!generation)
@@ -437,7 +431,7 @@ function main() {
     }
     if (sub === 'delete')
         return deleteIntent(root, branch, values.get('generation'), paths.length > 0 ? paths : undefined);
-    return fail(`unknown subcommand '${String(sub)}' (write|read|owns|delete|validate-paths|validate-membership|filter-membership|frozen-drift)`);
+    return fail(`unknown subcommand '${String(sub)}' (write|read|body-drift|owns|delete|validate-paths|validate-membership|filter-membership|frozen-drift)`);
 }
 // CLI entrypoint only; realpath keeps the guard correct through a symlinked module directory.
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href)

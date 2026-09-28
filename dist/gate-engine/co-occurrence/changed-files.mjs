@@ -1,4 +1,5 @@
 import { execSync } from 'node:child_process';
+import { commitIndexEnv } from '../ratchets/commit-index.mjs';
 // Splits MATCHER_CHANGED_FILES / `git diff` output into individual paths.
 const PATH_SEP = /[\n,]/;
 const split = (raw) => raw
@@ -7,7 +8,7 @@ const split = (raw) => raw
     .filter(Boolean);
 const gitLines = (cmd, cwd) => {
     try {
-        return split(execSync(cmd, { cwd, encoding: 'utf8' }));
+        return split(execSync(cmd, { cwd, env: commitIndexEnv(cwd), encoding: 'utf8' }));
     }
     catch {
         return [];

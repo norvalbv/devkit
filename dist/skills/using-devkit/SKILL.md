@@ -53,7 +53,7 @@ devkit command.
 | You need the PR's **CI verdict**, not just its URL — an end-to-end status before handing off | `devkit ship <branch> "<title>" --wait-ci -- <paths>` (add `--wait-ci-timeout <60..7200>`, default 900) | ship otherwise returns while the checks are still pending. The wait runs **last**, after every artifact is durable, so it cannot cost the ship: it prints progress only when the tally changes plus a liveness line each minute, then one verdict line on stderr — `ship: ci-outcome=<passed\|failed\|cancelled\|no-checks\|timed-out\|unavailable\|not-run> pr=<n> …` (`not-run` when the wait was requested but could not run — a failed `--ready` flip, an unresolvable PR number, or `SHIP_DRY_RUN`; it always carries a `reason=`). Grep that line; the verdict **never** reaches the exit code, so a red PR is not a failed ship and must not be retried with `--resume`. Valid with `--pr` too. **Not** replayed by `--resume` — re-pass it on a retry. For a one-off check without waiting, `gh pr checks <n> --json bucket,name,state,link` is the quiet one-shot (`gh run watch` needs a run id and redraws) |
 | An existing PR conflicts after its base moved, and you have **already resolved it locally** | First rebase/merge the actual PR base, then `devkit ship <branch> "<title>" --pr --base <actual-pr-base> -- <every-old-pr-path...>` | devkit gates one replacement commit and rewrites only under an exact head-OID lease. It publishes the caller-prepared resolution; it does not perform the rebase or merge. |
 | A ship was **blocked or timed out** and you are about to re-type the command | `devkit ship --resume <branch>` — in explicit-path mode only, a fix that ADDS a file: `devkit ship --resume <branch> -- <new-path>` | every attempt records its invocation (title, base, body, links, paths); `--resume` replays it byte-identically, so cached verdicts and a preserved landed commit still converge. Branch-source membership stays frozen; start a fresh full `--from-branch` invocation to include another committed path. Re-typing a multi-KB heredoc across 20–70 attempts is pure token burn, and one typo forfeits the landed-commit resume |
-| The PR body is **long** and the ship may take several attempts | write it to a file once, then `devkit ship <branch> "<title>" --body-file <file> -- <paths>` | a heredoc does not survive a retry through a wrapper (its stdin reads as a silently EMPTY body); the file and the recorded invocation both do |
+| The PR body is **long** and the ship may take several attempts | write it to a file once, then `devkit ship <branch> "<title>" --body-file <file> -- <paths>` | a heredoc does not survive a retry through a wrapper (its stdin reads as a silently EMPTY body). The record stores the file's CONTENT, not the file: after editing it, re-pass `--body-file <file>` on the `--resume` (a resume that would replay a stale body says so) |
 | `devkit doctor` reports **config drift** (`biome.jsonc`/`tsconfig.json`/husky `DRIFT`/`MISSING`) | `devkit doctor --fix` | hand-editing re-introduces the same drift on the next sync; `--fix` re-runs the recorded init idempotently |
 | `devkit doctor` reports **skills/agents drift** (synced copy ≠ manifest) | `devkit sync-skills` / `devkit sync-agents` | editing `.claude/.cursor` copies by hand just re-drifts; `devkit sync` is **not a command** |
 | You must **relocate or rename source files** and imports must follow | `devkit move <src...> <dest-dir>` | `git mv` leaves every `import`/`vi.mock`/dynamic-import pointing at the old path; `move` rewrites them all — alias style inside the alias root, relative paths outside it |
@@ -77,6 +77,9 @@ devkit command.
   publishes its already-gated immutable commit. Already sitting on some *other* branch is fine and normal:
   ship reads file **content** from your working tree, so uncommitted work ships correctly without a
   single commit of your own.
+- **Each `-- <path>` is one literal file, relative to the repo root.** Globs and git pathspec magic
+  are not expanded — `'*.txt'` names the file called `*.txt` — and a directory is refused. List the
+  files instead (`git ls-files -- <dir>`).
 - **`--from-branch` owns only committed bytes.** It requires `--base`, accepts no explicit paths on
   the full invocation, and is unavailable with `--pr`. Rebase or merge the current remote base first;
   a divergent/ahead base, changed submodule gitlink, non-UTF-8 path, or staged/unstaged/untracked/
@@ -159,8 +162,9 @@ devkit command.
 - **Ship-message rules — structure the message for the gates; length is yours.**
   - The **subject line** is what retrieves the governing decision Targets — make it the change's real
     intent, not a mechanical file list.
-  - Author a long body **once, in a file**, and pass `--body-file` — it survives every retry via the
-    recorded invocation.
+  - Author a long body **once, in a file**, and pass `--body-file` — the recorded invocation keeps
+    its CONTENT for every retry. An edit to the file is not picked up by a bare `--resume`; re-pass
+    `--body-file <file>` (the resume warns when the file and the recorded body differ).
   - **Never reword the body between attempts.** The completeness judge keys on the exact message
     bytes: an unchanged body replays its cached PASS, a reworded one re-pays a multi-minute opus
     call — per attempt.

@@ -3,11 +3,12 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync }
 import { join } from 'node:path';
 import { confirm, isCancel, outro } from '@clack/prompts';
 import { enableLineGrowth, hasLineCap, LINE_CAP, } from '../../gate-engine/ratchets/size-disable.mjs';
-import { IMPORT_WALL_BASELINE, LEGACY_IMPORT_WALL_BASELINE, STRUCTURE_BASELINE_DIR, STRUCTURE_EXEMPT, reportRatchetBaselineMigration, } from '../../gate-engine/ratchets/baseline-paths.mjs';
+import { IMPORT_WALL_BASELINE, LEGACY_IMPORT_WALL_BASELINE, STRUCTURE_BASELINE_DIR, STRUCTURE_EXEMPT, } from '../../gate-engine/ratchets/baseline-paths.mjs';
 import { loadImportWallExempt } from '../../gate-engine/structure/load-baseline.mjs';
 import { AGENT_TARGETS, applyOverlayConstraints, COMPONENTS, CONFIG_DRIVEN_STRUCTURE, disabledGuardsFor, dropUndecided, GUARD_IDS, normalizeReviewProfile, RECORDED_COMPONENT_IDS, structureCmdFor, STRUCTURE_STACKS, } from '../lib/components.mjs';
 import { detectGitRoot } from '../lib/detect-git-root.mjs';
-import { assertRunnerMayWrite } from '../lib/doctor/pin/runner-identity.mjs';
+import { reportBaselineStorage } from '../lib/doctor/pin/baseline-reader.mjs';
+import { assertRunnerMayWrite, assertRunsFromSource } from '../lib/doctor/pin/runner-identity.mjs';
 import { detectStack } from '../lib/detect-stack.mjs';
 import { packageDir, readJson, writeIfAbsent } from '../lib/fs-helpers.mjs';
 import { generateImportWallBaseline } from '../lib/generate/generate-import-wall-baseline.mjs';
@@ -648,7 +649,7 @@ export async function applyInit(cwd, plan) {
     // Baselines are durable tracked state. Re-open their canonical directory before migration so a
     // consumer's broad `.devkit/` ignore cannot turn the move into a staged deletion-only commit.
     ensureDevkitCacheGitignore(cwd, dryRun);
-    reportRatchetBaselineMigration(cwd, dryRun);
+    reportBaselineStorage(cwd, dryRun); // skips the move under a pre-0.53 reader (sc-1934)
     console.log(`devkit init${dryRun ? ' (dry-run — no files written)' : ''} — stack=${stack}, devkit=${devkitRef}`);
     if (standalone) {
         console.log('  standalone: no package.json dep — global devkit CLI, fail-open hook');
@@ -844,12 +845,12 @@ export const meta = {
 // fallow-ignore-next-line complexity
 export default async function run(args, cwd) {
     const flags = initFlags.parseFlags(args);
-    // Refuse a skewed runner HERE, not at the managed-Oxc write near the end: by then the package.json
-    // patch, hook chain, baselines, skills/agents and the search-code wiring have all been rewritten
-    // by the older devkit, so the throw would leave a half-applied init whose remedy ("doctor --fix")
-    // is not the command that would finish it. A dry run writes nothing, so it stays open. (sc-2100)
+    // Refuse before any write — a skewed runner (sc-2100), or a non-source devkit in devkit's own repo
+    // (sc-2345): a later throw leaves a half-applied init that `doctor --fix` cannot finish.
     if (!flags.dryRun)
         assertRunnerMayWrite(cwd);
+    if (!flags.dryRun)
+        assertRunsFromSource(cwd, 'init');
     const detectedStack = flags.stack ?? detectStack(cwd);
     // Mode: --overlay / --standalone seed it; the wizard asks (so the interactive flow exposes it).
     const detectedMode = flags.overlay ? 'overlay' : flags.standalone ? 'standalone' : 'package';

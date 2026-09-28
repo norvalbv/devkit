@@ -114,6 +114,9 @@ done
 [ "$BODY_SET" -eq 0 ] || [ "$BODY_FILE_SET" -eq 0 ] || { echo "--body and --body-file are mutually exclusive" >&2; exit 1; }
 . "$(dirname "${BASH_SOURCE[0]}")/wait-ci/args.sh"
 ship_validate_wait_ci "$WAIT_CI" "$WAIT_CI_TIMEOUT" "$WAIT_CI_TIMEOUT_SET" || exit 1
+# Every git selector below is built as `:(literal)<path>` (sc-2425). Ambient Git pathspec modes
+# either reinterpret that prefix as plain text or conflict with it, so they are not inputs.
+unset GIT_LITERAL_PATHSPECS GIT_GLOB_PATHSPECS GIT_NOGLOB_PATHSPECS GIT_ICASE_PATHSPECS
 BODY_RECEIPT_PREFIX=refs/devkit/reship-body-receipts
 BODY_PAYLOAD_PREFIX=refs/devkit/reship-body-payloads
 BODY_RECEIPT_REF=
@@ -176,8 +179,11 @@ if [ "$RESUME" -eq 1 ]; then
 fi
 
 [ "${#PATHS[@]}" -gt 0 ] || { echo "no paths given" >&2; exit 1; }
+# Paths are repo-root relative, like every git call that consumes them — a cwd-relative test lets a
+# root-level directory through from a subdirectory.
+DIR_CHECK_ROOT=$(git rev-parse --show-toplevel)
 for p in "${PATHS[@]}"; do
-  [ -d "$p" ] && {
+  [ -d "$DIR_CHECK_ROOT/$p" ] && {
     echo "directory path not allowed (pass individual files): $p" >&2
     echo "  list its tracked files: git ls-files -- \"$p\"" >&2
     exit 1
@@ -195,6 +201,12 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REWRITE_REMOTE_SUPERVISOR="$SCRIPT_DIR/review/process/gate-supervisor.mts"
 [ -f "$REWRITE_REMOTE_SUPERVISOR" ] || REWRITE_REMOTE_SUPERVISOR="$SCRIPT_DIR/review/process/gate-supervisor.mjs"
 rewrite_remote() {
+  # A detached auto-gc/maintenance is reaped as an owned leaked tree, turning a finished fetch into
+  # 124 (sc-3761). Only git takes -c; gh passes through untouched.
+  if [ "${1:-}" = git ]; then
+    shift
+    set -- git -c gc.auto=0 -c maintenance.auto=false "$@"
+  fi
   node "$REWRITE_REMOTE_SUPERVISOR" 60 -- "$@"
 }
 # Resolve owner/repo from origin (best-effort — only used for the final PR-URL print, which falls
@@ -266,6 +278,7 @@ REWRITE_HEAD_REF=""
 REWRITE_BASE_REF=""
 EXPECTED_REMOTE=""
 REQUIRED_SCOPE_FILE=""
+REWRITE_FETCH_ERR=""
 FINAL_SCOPE_FILE=""
 REWRITE_PUBLISH_LOCK=""
 REWRITE_PUBLISH_STAMP=""
@@ -281,16 +294,30 @@ rewrite_ref_cleanup() {
   fi
   [ -z "$REQUIRED_SCOPE_FILE" ] || rm -f "$REQUIRED_SCOPE_FILE"
   [ -z "$FINAL_SCOPE_FILE" ] || rm -f "$FINAL_SCOPE_FILE"
+  [ -z "$REWRITE_FETCH_ERR" ] || rm -f "$REWRITE_FETCH_ERR"
 }
 
 # Serialize a rewrite's destructive publication/bookkeeping window and every explicit PR-body
 # publication with the matching head push. Gates still run in parallel. Atomic mkdir supplies
 # exclusion; the holder PID makes a killed publisher reclaimable.
+# Keyed on the GIT COMMON DIR, not $ROOT (sc-2476): linked worktrees of one clone publish the same
+# origin/$BR, so a per-checkout lock let a paused publisher overwrite a sibling's newer PR body. Not
+# $TMPDIR either — it differs per process (sandboxed agents), which would fail open silently. The
+# branch is hashed: a sanitised name maps a/b and a-b to one lock.
 rewrite_publish_lock_acquire() {
   local lock_root holder owner owner_start current_start attempts=0
-  lock_root="$ROOT/.devkit/reship-rewrite-publish"
-  mkdir -p "$lock_root"
-  REWRITE_PUBLISH_LOCK="$lock_root/${BR//\//-}.lock"
+  lock_root=$(git -C "$ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) &&
+    [ -n "$lock_root" ] || {
+    echo "reship rejected: could not resolve the git common dir for the publication lock" >&2
+    return 1
+  }
+  lock_root="$lock_root/devkit/reship-publish"
+  # Checked: an uncreatable root would otherwise spin the whole wait and blame a phantom publisher.
+  mkdir -p "$lock_root" 2>/dev/null || {
+    echo "reship rejected: cannot create the publication lock directory $lock_root" >&2
+    return 1
+  }
+  REWRITE_PUBLISH_LOCK="$lock_root/$(printf '%s' "$BR" | git hash-object --stdin).lock"
   owner_start=$(ps -o lstart= -p $$ 2>/dev/null | git hash-object --stdin)
   REWRITE_PUBLISH_STAMP="$$:$owner_start:$(date +%s)"
   while ! mkdir "$REWRITE_PUBLISH_LOCK" 2>/dev/null; do
@@ -437,11 +464,25 @@ if [ "$REWRITE" -eq 1 ]; then
   REWRITE_HEAD_REF="refs/devkit/reship-rewrite/$REF_STAMP/head"
   REWRITE_BASE_REF="refs/devkit/reship-rewrite/$REF_STAMP/base"
   trap rewrite_ref_cleanup EXIT
+  REWRITE_FETCH_ERR=$(mktemp "${TMPDIR:-/tmp}/reship-pin-fetch.XXXXXX")
+  pin_rc=0
   rewrite_remote git fetch -q origin \
     "+refs/heads/$BR:$REWRITE_HEAD_REF" \
-    "+refs/heads/$BASE_REF:$REWRITE_BASE_REF" 2>/dev/null || {
-      echo "cannot pin origin/$BR and origin/$BASE_REF — both branches must exist" >&2; exit 1
-    }
+    "+refs/heads/$BASE_REF:$REWRITE_BASE_REF" 2>"$REWRITE_FETCH_ERR" || pin_rc=$?
+  if [ "$pin_rc" -ne 0 ]; then
+    # Name the cause the fetch actually reported: a reaped or expired fetch is not a missing branch,
+    # and "both branches must exist" sends an agent hunting for branches that are there (sc-3761).
+    if [ "$pin_rc" -eq 124 ]; then
+      echo "cannot pin origin/$BR and origin/$BASE_REF: git fetch did not finish cleanly within 60s (timed out, or left background processes that were reaped)" >&2
+    elif grep -Fxq -e "fatal: couldn't find remote ref refs/heads/$BR" \
+      -e "fatal: couldn't find remote ref refs/heads/$BASE_REF" "$REWRITE_FETCH_ERR"; then
+      echo "cannot pin origin/$BR and origin/$BASE_REF — both branches must exist" >&2
+    else
+      echo "cannot pin origin/$BR and origin/$BASE_REF: git fetch failed (exit $pin_rc)" >&2
+    fi
+    sed 's/^/  /' "$REWRITE_FETCH_ERR" >&2
+    exit 1
+  fi
   EXPECTED_REMOTE=$(git rev-parse "$REWRITE_HEAD_REF")
   BASE=$(git rev-parse "$REWRITE_BASE_REF")
   if [ "$RESUME" -eq 1 ] && [ "$UPDATE_PR_BODY" -eq 1 ]; then
@@ -494,7 +535,7 @@ if [ "$REWRITE" -eq 1 ]; then
   # An unmerged index is not a resolution, and a missing skip-worktree path is not an intentional
   # deletion. Refuse both before recording an intent or paying any gate cost.
   for p in "${PATHS[@]}"; do
-    [ -z "$(git -C "$ROOT" ls-files -u -- "$p")" ] || {
+    [ -z "$(git -C "$ROOT" ls-files -u -- ":(literal)$p")" ] || {
       echo "refusing rewrite: briefed path is still unmerged: $p" >&2; exit 1
     }
     if [ -L "$ROOT/$p" ] && [ ! -e "$ROOT/$p" ]; then
@@ -502,8 +543,8 @@ if [ "$REWRITE" -eq 1 ]; then
       exit 1
     fi
     if [ ! -e "$ROOT/$p" ] && [ ! -L "$ROOT/$p" ] && \
-       git -C "$ROOT" ls-files --error-unmatch -- "$p" >/dev/null 2>&1 && \
-       git -C "$ROOT" diff --quiet -- "$p" && git -C "$ROOT" diff --cached --quiet -- "$p"; then
+       git -C "$ROOT" ls-files --error-unmatch -- ":(literal)$p" >/dev/null 2>&1 && \
+       git -C "$ROOT" diff --quiet -- ":(literal)$p" && git -C "$ROOT" diff --cached --quiet -- ":(literal)$p"; then
       echo "refusing rewrite: briefed path is absent but not deleted (sparse or unmaterialized): $p" >&2
       exit 1
     fi
@@ -532,6 +573,8 @@ ship_reclaim_orphan_worktrees "$PWD" "$BR" reship || exit 1
 ship_size_preflight "$ROOT" "$BASE" "${PATHS[@]}"
 # See ship-branch.sh: advisory judge reachability, before the deterministic chain is paid.
 ship_judge_preflight "$ROOT"
+# See ship-branch.sh (sc-3883): a missing hook dir refuses before the worktree, not inside it.
+gate_hook_source_preflight "$ROOT" "$BASE" shipping || exit 1
 
 WT="${TMPDIR:-/tmp}/devkit-reship-${BR//\//-}-$$"
 # Body: --body "<text>" wins (explicit, no temp file); then --body-file; then — on --resume — the
@@ -547,6 +590,9 @@ elif [ "$BODY_FILE_SET" -eq 1 ]; then
   BODY=$(cat -- "$BODY_FILE_FLAG" && printf x) || { echo "--body-file: unreadable: $BODY_FILE_FLAG" >&2; exit 1; }
   BODY=${BODY%x}
 elif [ "$RESUME" -eq 1 ]; then BODY="$RESUME_BODY"
+  # Replaying recorded bytes: say so if the --body-file they came from has since been edited
+  # (sc-2527). Here — past the mode hand-off, before any worktree or gate — so it prints once.
+  node "$SHIP_INTENT" body-drift --root "$ROOT" --branch "$BR" --generation "$RESUME_GENERATION" || true
 elif [ -t 0 ]; then BODY=""
 else ship_read_stdin_body; fi
 # Match new-ship: the body is the only stdin read, so hand descendants /dev/null and make credential
@@ -577,6 +623,9 @@ SHIP_INTENT_ARGS=(write --root "$ROOT" --branch "$BR" --mode reship --title "$TI
 for d in ${LINK_EXTRA[@]+"${LINK_EXTRA[@]}"}; do SHIP_INTENT_ARGS+=(--link "$d"); done
 [ "$QAVIS_PUBLISH" -eq 1 ] || SHIP_INTENT_ARGS+=(--no-qavis-publish)
 [ "$UPDATE_PR_BODY" -eq 0 ] || SHIP_INTENT_ARGS+=(--update-pr-body)
+# See ship-branch.sh: the body file's path rides the record for the resume drift warning (sc-2527).
+[ "$BODY_FILE_SET" -eq 0 ] || SHIP_INTENT_ARGS+=(--body-file-path "$BODY_FILE_FLAG")
+[ "$RESUME" -eq 0 ] || [ "$BODY_SET" -eq 1 ] || [ "$BODY_FILE_SET" -eq 1 ] || SHIP_INTENT_ARGS+=(--keep-body-file)
 if [ "$RESUME" -eq 1 ]; then
   SHIP_INTENT_ARGS+=(--resumed --merge-paths --expect-generation "$RESUME_GENERATION")
   for p in ${RESUME_EXTRA_PATHS[@]+"${RESUME_EXTRA_PATHS[@]}"}; do SHIP_INTENT_ARGS+=(--donate "$p"); done
@@ -667,9 +716,10 @@ for p in "${PATHS[@]}"; do
     # re-push before the staged-set snapshot, gates, commit, and push. Every PATHS entry is
     # caller-explicit (positional after --; directories already rejected above), so forcing it is
     # exactly what was asked — same reasoning as husky-block.mts's `git add -f`.
-    git -C "$WT" add -f -- "$p"
+    git -C "$WT" add -f -- ":(literal)$p"
   else
-    git -C "$WT" rm -q --ignore-unmatch -- "$p" || true
+    # Literal: a glob-named path that is gone must remove only itself, never the files it matches.
+    git -C "$WT" rm -q --ignore-unmatch -- ":(literal)$p" || true
   fi
 done
 
@@ -678,6 +728,8 @@ done
 # tree with today's briefed bytes overlaid: receipt-only gate additions remain authoritative, while
 # any caller-path drift refuses the shortcut. This is the re-ship twin of new-ship's gate receipt.
 REWRITE_ALREADY_PUBLISHED=0
+LITERAL_PATHS=()
+for p in "${PATHS[@]}"; do LITERAL_PATHS+=(":(literal)$p"); done
 if [ "$REWRITE" -eq 1 ] && [ "$UPDATE_PR_BODY" -eq 1 ] && [ "$RESUME" -eq 1 ] &&
    [ -n "${SHIP_INTENT_GENERATION:-}" ] && [ "$REWRITE_RECEIPT_PROVEN" -eq 1 ]; then
   STAGED_REWRITE_TREE=$(git -C "$WT" write-tree)
@@ -693,7 +745,7 @@ if [ "$REWRITE" -eq 1 ] && [ "$UPDATE_PR_BODY" -eq 1 ] && [ "$RESUME" -eq 1 ] &&
     rm -f "$BODY_RECOVERY_INDEX" # read-tree must create it; an empty file is not a valid index
     BODY_RECOVERY_PATCH=$(mktemp "${TMPDIR:-/tmp}/reship-body-patch.XXXXXX")
     if GIT_INDEX_FILE="$BODY_RECOVERY_INDEX" git -C "$WT" read-tree "$EXPECTED_REMOTE" &&
-       git -C "$WT" diff --binary "$EXPECTED_REMOTE" "$STAGED_REWRITE_TREE" -- "${PATHS[@]}" > "$BODY_RECOVERY_PATCH" &&
+       git -C "$WT" diff --binary "$EXPECTED_REMOTE" "$STAGED_REWRITE_TREE" -- "${LITERAL_PATHS[@]}" > "$BODY_RECOVERY_PATCH" &&
        { [ ! -s "$BODY_RECOVERY_PATCH" ] || GIT_INDEX_FILE="$BODY_RECOVERY_INDEX" git -C "$WT" apply --cached "$BODY_RECOVERY_PATCH"; }; then
       RECOVERED_REWRITE_TREE=$(GIT_INDEX_FILE="$BODY_RECOVERY_INDEX" git -C "$WT" write-tree)
       PUBLISHED_REWRITE_TREE=$(git rev-parse "$EXPECTED_REMOTE^{tree}")

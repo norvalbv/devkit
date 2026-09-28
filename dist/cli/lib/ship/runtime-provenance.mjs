@@ -1,21 +1,13 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, realpathSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { detectGitRoot } from '../detect-git-root.mjs';
-import { packageDir } from '../fs-helpers.mjs';
+import { canonicalPath, packageDir } from '../fs-helpers.mjs';
 import { shellQuote } from './dist-integrity.mjs';
 const DEVKIT_PACKAGE = '@norvalbv/devkit';
 const RELEASE_VERSION = /^\d+\.\d+\.\d+$/;
 const PACKAGED_SHIP_PATHS = ['cli/commands/ship.mts', 'cli/lib/ship'];
 const SHORTLOG_LIMIT = 5;
-function canonicalPath(path) {
-    try {
-        return realpathSync(path);
-    }
-    catch {
-        return resolve(path);
-    }
-}
 function isJsonObject(value) {
     return Object.prototype.toString.call(value) === '[object Object]';
 }

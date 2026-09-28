@@ -1,16 +1,19 @@
 /** Message-judge invocation + Sentry judge fragments, shared by the commit-msg and pre-commit
  *  builders as a leaf module so neither builder imports the other. */
+import { DK_NO_GIT_ENV_INLINE } from './review-fragments.mjs';
 // Package mode runs the pinned local bin; standalone a command -v-guarded global. `msg` names the
 // message file: git's "$1" at commit-msg, ship's temp file at pre-commit.
-export function invokeJudge(standalone, cmd, rcVar, msg = '"$1"') {
+// `scrub` runs the judge with git's per-repo env stripped (the commit index rides DEVKIT_COMMIT_INDEX_FILE).
+export function invokeJudge(standalone, cmd, rcVar, msg = '"$1"', scrub = false) {
+    const pre = scrub ? `${DK_NO_GIT_ENV_INLINE} ` : '';
     if (!standalone) {
         const [bin, ...args] = cmd.split(' ');
         const localBin = `"$__dk_package_bin_dir/${bin}"`;
         return `[ -x ${localBin} ] || { echo "devkit: pinned ${bin} is missing — run bun install." >&2; exit 1; }
-${localBin}${args.length ? ` ${args.join(' ')}` : ''} --gate ${msg} || ${rcVar}=$?`;
+${pre}${localBin}${args.length ? ` ${args.join(' ')}` : ''} --gate ${msg} || ${rcVar}=$?`;
     }
     const bin = cmd.split(' ')[0];
-    return `if command -v ${bin} >/dev/null 2>&1; then ${cmd} --gate ${msg} || ${rcVar}=$?; fi`;
+    return `if command -v ${bin} >/dev/null 2>&1; then ${pre}${cmd} --gate ${msg} || ${rcVar}=$?; fi`;
 }
 const SENTRY_ARMS = `if [ "$src" -eq 1 ]; then
     echo "   Commit describes an un-monitored runtime error-class (sentry gate, hard mode)."
@@ -25,10 +28,10 @@ fi
 # src 0 = pass / warn-only / skipped, src 2 = fail-open → continue; 4 = object-database fault.`;
 // guard-sentry (gate-engine/sentry/check-sentry.mts), hard-by-default: a confident MONITOR on a
 // silent runtime error-class with no capture in the diff exits 1.
-export const sentryFragment = (standalone) => `# devkit:guard-sentry
+export const sentryFragment = (standalone, scrub = false) => `# devkit:guard-sentry
 echo "🛰️ Sentry gate (commit-msg judge)..."
 src=0
-${invokeJudge(standalone, 'guard-sentry', 'src')}
+${invokeJudge(standalone, 'guard-sentry', 'src', '"$1"', scrub)}
 ${SENTRY_ARMS}
 # /devkit:guard-sentry`;
 // sc-3012: on a ship, judge sentry BEFORE the qavis advisory (a later fix voids a QA receipt);

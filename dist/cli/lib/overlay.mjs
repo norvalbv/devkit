@@ -13,7 +13,8 @@ import { AGENT_TARGETS, normalizeSelection } from './components.mjs';
 import { detectGitRoot } from './detect-git-root.mjs';
 import { packageDir, readJson, writeIfAbsent } from './fs-helpers.mjs';
 import { trackedPathPredicate } from './git-tracked.mjs';
-import { buildOverlayHook, buildPassthroughHook } from './husky/husky-block.mjs';
+import { buildOverlayHook } from './husky/husky-block.mjs';
+import { describeOverlayCommitMsg, syncOverlaySiblingHooks } from './husky/overlay/commit-msg.mjs';
 import { ADHD_SKILL_DIR, syncAdhdSkill } from './install/adhd-skill.mjs';
 import { wireOverlayAntiSlop } from './install/anti-slop/overlay/install.mjs';
 import { selectedHookAssets } from './install/hook-registration-ledger/selection.mjs';
@@ -245,9 +246,11 @@ function installOverlayHook(gitRoot, pkgRel, sel, origHooksPath, dryRun, fallow 
     const scriptDir = overlayHookScriptDir(origHooksPath);
     const existing = detectExistingHooks(gitRoot, scriptDir);
     const preCommitChain = existing.includes('pre-commit') ? `${scriptDir}/pre-commit` : '';
-    const passthrough = existing.filter((h) => h !== 'pre-commit');
+    const passthrough = existing.filter((h) => h !== 'pre-commit' && h !== 'commit-msg');
+    const siblings = { gitRoot, scriptDir, existing, selection: sel, pkgRel };
+    const commitMsgLine = describeOverlayCommitMsg(syncOverlaySiblingHooks(siblings, { dryRun: true }).plan);
     if (dryRun) {
-        console.log(`  [dry-run] git config core.hooksPath ${LOCAL_HOOKS}; pre-commit (gates${preCommitChain ? ` → ${preCommitChain}` : ''}${fallow ? ' + fallow' : ''})${passthrough.length ? `; pass-through: ${passthrough.join(', ')}` : ''}`);
+        console.log(`  [dry-run] git config core.hooksPath ${LOCAL_HOOKS}; pre-commit (gates${preCommitChain ? ` → ${preCommitChain}` : ''}${fallow ? ' + fallow' : ''})${passthrough.length ? `; pass-through: ${passthrough.join(', ')}` : ''}${commitMsgLine ? `; ${commitMsgLine}` : ''}`);
         return;
     }
     const dir = join(gitRoot, LOCAL_HOOKS);
@@ -256,12 +259,10 @@ function installOverlayHook(gitRoot, pkgRel, sel, origHooksPath, dryRun, fallow 
     const pre = join(dir, 'pre-commit');
     writeFileSync(pre, buildOverlayHook(sel, preCommitChain, pkgRel, { fallow }));
     chmodSync(pre, 0o755);
-    // every OTHER existing hook → pass-through wrapper so it keeps running unchanged.
-    for (const h of passthrough) {
-        const p = join(dir, h);
-        writeFileSync(p, buildPassthroughHook(`${scriptDir}/${h}`));
-        chmodSync(p, 0o755);
-    }
+    // every OTHER existing hook → pass-through (commit-msg: devkit's message judges, sc-1794).
+    syncOverlaySiblingHooks(siblings, { dryRun: false });
+    if (commitMsgLine)
+        console.log(`  ✓ ${commitMsgLine}`);
     try {
         execFileSync('git', ['config', 'core.hooksPath', LOCAL_HOOKS], {
             cwd: gitRoot,
@@ -280,7 +281,7 @@ function installOverlayHook(gitRoot, pkgRel, sel, origHooksPath, dryRun, fallow 
  * (e.g. one predating a new ship gate) until re-init. This lets `devkit doctor --fix` refresh it
  * without a manual `devkit init --overlay`. Pass-through wrappers are refreshed alongside (idempotent).
  * `core.hooksPath` is left untouched — the `git ci` alias owns it and doctor reports it separately.
- * Returns { missing, drift } observed BEFORE any write (missing counts as drift).
+ * Returns the pre-commit { missing, drift } (what review reads) plus commitMsg, observed BEFORE any write.
  */
 export function syncOverlayHook(gitRoot, cwd, cfg, { dryRun }) {
     const sel = normalizeSelection(cfg.components ?? {});
@@ -298,18 +299,13 @@ export function syncOverlayHook(gitRoot, cwd, cfg, { dryRun }) {
     const missing = current === null;
     const drift = current !== expected; // a missing hook (null) is drift too
     if (!dryRun && drift) {
-        const dir = join(gitRoot, LOCAL_HOOKS);
-        mkdirSync(dir, { recursive: true });
+        mkdirSync(join(gitRoot, LOCAL_HOOKS), { recursive: true });
         writeFileSync(pre, expected);
         chmodSync(pre, 0o755);
-        // refresh the pass-through wrappers for the repo's OTHER hooks (idempotent).
-        for (const h of existing.filter((n) => n !== 'pre-commit')) {
-            const p = join(dir, h);
-            writeFileSync(p, buildPassthroughHook(`${scriptDir}/${h}`));
-            chmodSync(p, 0o755);
-        }
     }
-    return { missing, drift };
+    // Siblings sync on their own: a stale commit-msg must heal even when pre-commit is current.
+    const cm = syncOverlaySiblingHooks({ gitRoot, scriptDir, existing, selection: sel, pkgRel }, { dryRun });
+    return { missing, drift, commitMsg: { missing: cm.missing, drift: cm.drift } };
 }
 // Sync the agent-half (skills + agents + agentHooks) into the git root's selected surfaces, skipping
 // any path git already TRACKS (C2 — exclude can't hide a tracked file), and return the git-root-

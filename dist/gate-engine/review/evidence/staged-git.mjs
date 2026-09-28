@@ -5,11 +5,13 @@
  * JSON.stringify-quoted) lets a crafted path like `$(cmd).ts` expand before git runs.
  */
 import { execFileSync } from 'node:child_process';
+import { commitIndexEnv } from '../../ratchets/commit-index.mjs';
 import { normalizeRepositoryFile } from '../../../skills/_devkit/review-roots.mjs';
 export function gitCached(cwd, args, files) {
     const pathspecs = files.map((file) => `:(top,literal)${normalizeRepositoryFile(file, 'review evidence file')}`);
     return execFileSync('git', ['diff', '--cached', ...args, '--', ...pathspecs], {
         cwd,
+        env: commitIndexEnv(cwd),
         encoding: 'utf8',
         maxBuffer: 64 * 1024 * 1024,
     });
@@ -17,6 +19,7 @@ export function gitCached(cwd, args, files) {
 function snapshotFile(cwd, spec) {
     return execFileSync('git', ['show', spec], {
         cwd,
+        env: commitIndexEnv(cwd),
         encoding: 'utf8',
         maxBuffer: 64 * 1024 * 1024,
         stdio: ['ignore', 'pipe', 'ignore'],
@@ -27,6 +30,7 @@ function indexHasStageZero(cwd, file) {
     // stderr ignored, as in snapshotFile: callers probe paths that may not be in a repo at all.
     const entries = execFileSync('git', ['ls-files', '--stage', '-z', '--', literalPathspec(file)], {
         cwd,
+        env: commitIndexEnv(cwd),
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'ignore'],
     }).split('\0');
@@ -40,7 +44,7 @@ export function headFile(cwd, file) {
         throw new Error('cannot read HEAD while resolving review policy');
     if (head.startsWith('unborn:'))
         return null;
-    const entry = execFileSync('git', ['ls-tree', '-z', '--name-only', 'HEAD', '--', literalPathspec(normalized)], { cwd, encoding: 'utf8' });
+    const entry = execFileSync('git', ['ls-tree', '-z', '--name-only', 'HEAD', '--', literalPathspec(normalized)], { cwd, env: commitIndexEnv(cwd), encoding: 'utf8' });
     if (entry === '')
         return null;
     return snapshotFile(cwd, `HEAD:${normalized}`);
@@ -50,7 +54,7 @@ export function headFile(cwd, file) {
 export function indexPathsNamed(cwd, basename) {
     let out;
     try {
-        out = execFileSync('git', ['ls-files', '--stage', '-z', '--', `:(top,glob)**/${basename}`, literalPathspec(basename)], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+        out = execFileSync('git', ['ls-files', '--stage', '-z', '--', `:(top,glob)**/${basename}`, literalPathspec(basename)], { cwd, env: commitIndexEnv(cwd), encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
     }
     catch {
         return null;
@@ -76,7 +80,11 @@ export function indexFile(cwd, file) {
 export function stagedFiles(cwd) {
     // -z: NUL-separated RAW names. Without it git C-quotes paths containing tabs/unicode/quotes,
     // and every byte-keyed consumer (chunk packing, evidence budgeting) silently misses them.
-    return execFileSync('git', ['diff', '--cached', '--name-only', '-z'], { cwd, encoding: 'utf8' })
+    return execFileSync('git', ['diff', '--cached', '--name-only', '-z'], {
+        cwd,
+        env: commitIndexEnv(cwd),
+        encoding: 'utf8',
+    })
         .split('\0')
         .filter(Boolean);
 }
@@ -89,7 +97,11 @@ export function stagedFiles(cwd) {
  */
 export function stagedTreeHash(cwd) {
     try {
-        return execFileSync('git', ['write-tree'], { cwd, encoding: 'utf8' }).trim() || null;
+        return (execFileSync('git', ['write-tree'], {
+            cwd,
+            env: commitIndexEnv(cwd),
+            encoding: 'utf8',
+        }).trim() || null);
     }
     catch {
         return null;
@@ -105,6 +117,7 @@ export function headHash(cwd) {
         try {
             return execFileSync('git', args, {
                 cwd,
+                env: commitIndexEnv(cwd),
                 encoding: 'utf8',
                 stdio: ['ignore', 'pipe', 'ignore'],
             }).trim();

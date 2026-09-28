@@ -11,6 +11,7 @@ import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { AGENT_TARGETS, skillNamesForSelection, } from '../../lib/components.mjs';
 import { detectGitRoot } from '../../lib/detect-git-root.mjs';
+import { assertRunsFromSource } from '../../lib/doctor/pin/runner-identity.mjs';
 import { packageDir, readJson, sha256, writeIfAbsent } from '../../lib/fs-helpers.mjs';
 import { assertLegacyAssetWriterCompatible, nextLegacyManifestGeneratedAt, } from '../../lib/install/agent-asset-manifest/compatibility.mjs';
 import { findProviderNativeAssetConflicts, requiresProviderNativeLifecycle, syncProviderNativeAssets, withAgentAssetLifecycleLock, } from '../../lib/install/agent-asset-manifest/lifecycle.mjs';
@@ -91,6 +92,8 @@ export function walk(dir, base = dir) {
  */
 export function syncSkills(args, cwd, targets = AGENT_TARGETS, { skipTracked, override = () => false, selection = {} } = {}) {
     const dryRun = args.includes('--dry-run');
+    if (!dryRun)
+        assertRunsFromSource(cwd, 'sync-skills');
     return withAgentAssetLifecycleLock(cwd, dryRun, () => syncSkillsLocked(args, cwd, targets, { skipTracked, override, selection }));
 }
 function syncSkillsLocked(args, cwd, targets, { skipTracked, override = () => false, selection = {} }) {

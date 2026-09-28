@@ -16,6 +16,7 @@ import { hookChecks } from '../lib/doctor/hook-checks.mjs';
 import { runOverlayDoctor } from '../lib/doctor/overlay-doctor.mjs';
 import { checkLockPin, checkPin } from '../lib/doctor/pin/pin-checks.mjs';
 import { ALLOW_SKEW_ENV, delegateToPinned, printSkewBanner, runnerSkew, skewCheck, } from '../lib/doctor/pin/runner-identity.mjs';
+import { baselineReaderCheck } from '../lib/doctor/pin/baseline-reader.mjs';
 import { runSelfHostDoctor } from '../lib/doctor/self-host-doctor.mjs';
 import { packageDir, readJson } from '../lib/fs-helpers.mjs';
 import { checkCommitMsgHook, commitMsgGuards } from '../lib/husky/commit-msg-block.mjs';
@@ -354,6 +355,9 @@ export default async function run(args, cwd) {
     const skewRow = skewCheck(skew);
     if (skewRow)
         results.unshift(skewRow);
+    const readerRow = baselineReaderCheck(cwd);
+    if (readerRow)
+        results.unshift(readerRow);
     console.log('devkit doctor\n');
     const glyph = { OK: '✓', DRIFT: '⚠', MISSING: '✗' };
     for (const r of results) {

@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { CONFIG_FILENAME, resolveGuardConfig, sourceMatchers } from '../config.mjs';
 import { readRatchetBaseline, removeRatchetBaseline, SIZE_BASELINE, writeRatchetBaseline, } from './baseline-paths.mjs';
+import { fanoutSplitHints } from './folder-fanout.mjs';
 import { hasStagedFiles, indexTreeRef, mergeBaseRef, pullRequestScope, stagedSet, } from './git-index.mjs';
 import { freezeLinesBaseline } from './size-lines-freeze.mjs';
 import { lineBaselineForGate, lineCountsAtRef, lineViolationReport, measureLines, tightenLineBaseline, } from './size-line-authority.mjs';
@@ -271,6 +272,8 @@ function runDisableGate(root, baselineContents, current, ciScope) {
             console.error(`   ${f}: ${cur[f].file}/${cur[f].fn} file/fn disables vs ${ceil(f).file}/${ceil(f).fn} allowed`);
         }
         console.error('   Split the file below the cap instead of disabling.');
+        for (const hint of fanoutSplitHints(root, grew))
+            console.error(hint);
         process.exit(1);
     }
     if (ciScope || !inCommit || !staged) {

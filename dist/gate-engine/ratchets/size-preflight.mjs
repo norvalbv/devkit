@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { resolveGuardConfig, sourceMatchers } from '../config.mjs';
 import { readRatchetBaseline } from './baseline-paths.mjs';
+import { fanoutSplitHints } from './folder-fanout.mjs';
 import { stagedSet, treeTextAtRef } from './git-index.mjs';
 import { decodeLineBaseline, effectiveLineCeiling, measureLines, normalizeCandidateLineBaseline, normalizeLineBaseline, } from './size-line-authority.mjs';
 import { LINES_BASELINE, SIZE_SKIP_DIRS } from './size-policy.mjs';
@@ -114,6 +115,8 @@ export function preflightLines(root, ref, requested = []) {
             : '';
         console.error(`   ${row.file}: ${row.lines} lines (max ${row.ceiling}${drift})`);
     }
+    for (const hint of fanoutSplitHints(root, grew.map((row) => row.file)))
+        console.error(hint);
     return 1;
 }
 export function runPreflightCli(args) {

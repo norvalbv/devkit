@@ -27,6 +27,35 @@ export const DK_NO_GIT_ENV_HELPER = `__dk_no_git_env() {
  * Same GIT_ENV_VARS source as the function above, so the two can never scrub different sets.
  */
 export const DK_NO_GIT_ENV_INLINE = `env ${GIT_ENV_VARS.map((name) => `-u ${name}`).join(' ')}`;
+// Carry the commit's index past the scrub for commitIndexEnv; fail-open, emitted before any `cd`.
+// Paths compare canonically (`.git/index` vs `/private/...`): docs/decisions/gates-judge-commit-index.md.
+export const DK_COMMIT_INDEX_CAPTURE = `# devkit:commit-index
+unset DEVKIT_COMMIT_INDEX_FILE DEVKIT_COMMIT_GIT_DIR
+__dk_exact() {
+    __dk_out="$("$@" && printf x)" || return 1
+    __dk_out="\${__dk_out%x}"
+    __dk_out="\${__dk_out%?}"
+}
+__dk_canonical_path() {
+    __dk_exact sh -c 'cd -P "$1" && pwd -P' sh "\${1%/*}/" 2>/dev/null || return 1
+    __dk_out="\${__dk_out%/}/\${1##*/}"
+}
+__dk_commit_index_capture() {
+    [ -n "\${GIT_INDEX_FILE:-}" ] || return 0
+    case "$GIT_INDEX_FILE" in /*) __dk_ci="$GIT_INDEX_FILE" ;; *) __dk_ci="$PWD/$GIT_INDEX_FILE" ;; esac
+    __dk_canonical_path "$__dk_ci" || return 0
+    __dk_ci="$__dk_out"
+    __dk_exact env -u GIT_INDEX_FILE git rev-parse --path-format=absolute --git-path index 2>/dev/null || return 0
+    __dk_canonical_path "$__dk_out" || return 0
+    [ "$__dk_ci" = "$__dk_out" ] && return 0
+    __dk_exact git rev-parse --absolute-git-dir 2>/dev/null || return 0
+    __dk_exact sh -c 'cd -P "$1" && pwd -P' sh "$__dk_out" 2>/dev/null || return 0
+    DEVKIT_COMMIT_INDEX_FILE="$__dk_ci"
+    DEVKIT_COMMIT_GIT_DIR="$__dk_out"
+    export DEVKIT_COMMIT_INDEX_FILE DEVKIT_COMMIT_GIT_DIR
+}
+__dk_commit_index_capture || true
+# /devkit:commit-index`;
 export const DK_GATE_SELECTED_HELPER = `__dk_gate_selected() {
     case "\${DEVKIT_RUN_MODE:-}" in review|dry-gates) ;; *) return 0 ;; esac
     __dk_review_guards=$(printf '%s' "\${DEVKIT_REVIEW_GUARDS:-}" | sed \

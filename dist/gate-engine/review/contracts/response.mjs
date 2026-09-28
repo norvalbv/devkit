@@ -25,6 +25,10 @@ export function parseReviewVerdict(raw) {
         reason: (last[2] ?? '').replace(/\*+/g, '').trim(),
     };
 }
+/** Remedy for a cascade that THREW: the gate failed before or around the judge, so pointing the
+ *  operator at a judge CLI's auth/quota sends them after a healthy binary (sc-3400). */
+export const ENGINE_ERROR_REMEDY = 'the gate itself failed before or around the judge — this is NOT an auth/quota problem. The ' +
+    'error is quoted above; re-run devkit ship, and if it repeats, report it against devkit';
 /** Remedy for any healthy judge whose response failed its declared machine contract. */
 export const RESPONSE_CONTRACT_REMEDY = 'the judge response did not satisfy its declared contract; inspect the transcript or checklist ' +
     'above, fix a real violation if present, then re-run devkit ship';
