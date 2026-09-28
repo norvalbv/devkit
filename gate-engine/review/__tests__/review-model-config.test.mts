@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { resolveGuardConfig, resolveGuardConfigJson } from '../../config.mts';
 import { CLAUDE_FAMILY_SET, JUDGE_MODEL_ENVS } from '../../judge/outage/family-override.mts';
 import { reviewerTargetSalts } from '../evidence/targets-block.mts';
+import { describeReviewModels } from '../run-review.mts';
 import {
   correctnessModel,
   resolveEscalationModel,
@@ -295,5 +296,70 @@ describe('the sentry judge resolves like its three siblings', () => {
     expect(resolveSentryModel(cfg())).toBe('sonnet');
     process.env.GUARD_SENTRY_MODEL = 'opus';
     expect(resolveSentryModel(cfg())).toBe('opus');
+  });
+});
+
+// sc-3446: the run header printed `<review.model> → <escalation> on FAIL` for EVERY reviewer, so a
+// GUARD_REVIEW_MODEL family move looked complete while the correctness pin kept running codex.
+describe('the run header names the model each reviewer actually runs', () => {
+  const ALL = { backendRoots: ['src'], frontendRoots: ['web'] };
+  const staged = ['src/a.ts', 'web/b.tsx'];
+  const header = (cfg: ReturnType<typeof resolveGuardConfig>) =>
+    describeReviewModels(
+      selectReviewers(staged, cfg).map((s) => s.reviewer),
+      resolveReviewModel(cfg),
+      resolveEscalationModel(cfg),
+    );
+  const cascadePart = (h: string) => h.split('; ')[0];
+
+  it('GUARD_REVIEW_MODEL alone leaves correctness on its own pin — and the header says so', () => {
+    process.env.GUARD_REVIEW_MODEL = 'claude-sonnet-5';
+    process.env.GUARD_REVIEW_ESCALATION_MODEL = 'claude-opus-5';
+    const h = header(cfgIn({ review: ALL }));
+    expect(h).toContain('correctness-reviewer on gpt-5.6-sol');
+    expect(h).toContain('(claude-sonnet-5 → claude-opus-5 on FAIL)');
+    expect(cascadePart(h)).not.toContain('correctness-reviewer');
+  });
+
+  it('a blank GUARD_CORRECTNESS_MODEL falls to the pin, never to GUARD_REVIEW_MODEL', () => {
+    process.env.GUARD_REVIEW_MODEL = 'claude-sonnet-5';
+    process.env.GUARD_CORRECTNESS_MODEL = '  ';
+    expect(header(cfgIn({ review: ALL }))).toContain('correctness-reviewer on gpt-5.6-sol');
+  });
+
+  it('conventions is single-pass at review.model — never shown with an escalation arrow', () => {
+    process.env.GUARD_REVIEW_MODEL = 'haiku';
+    const h = header(cfgIn({ review: ALL }));
+    expect(h).toContain('conventions-reviewer on haiku');
+    expect(cascadePart(h)).not.toContain('conventions-reviewer');
+    expect(h.split('; ')[1]).not.toContain('→');
+  });
+
+  it('a guard.config.json-bound claude family shows the bound correctness model', () => {
+    const h = header(cfgIn({ review: { ...ALL, ...CLAUDE_FAMILY_SET } }));
+    expect(h).toContain(`correctness-reviewer on ${CLAUDE_FAMILY_SET.correctnessModel}`);
+    expect(h).not.toContain('gpt-');
+  });
+
+  it('a lens fan-out (one reviewer, many tasks) names the reviewer once', () => {
+    const corr = REVIEWERS.filter((r) => r.name === 'correctness-reviewer');
+    const h = describeReviewModels([...corr, ...corr, ...corr, ...corr], 'haiku', 'opus');
+    expect(h.match(/correctness-reviewer/g)).toHaveLength(1);
+  });
+
+  it('only pinned reviewers selected — no empty cascade group, no dangling separator', () => {
+    const pinned = REVIEWERS.filter((r) => r.model !== undefined);
+    const h = describeReviewModels(pinned, 'haiku', 'opus');
+    expect(h).not.toContain('on FAIL');
+    expect(h.startsWith(';')).toBe(false);
+    expect(h).toMatch(/\(single-pass\)$/);
+  });
+
+  it('only cascade reviewers selected — no single-pass group, no dangling separator', () => {
+    const cascade = REVIEWERS.filter((r) => r.model === undefined);
+    const h = describeReviewModels(cascade, 'haiku', 'opus');
+    expect(h).not.toContain('single-pass');
+    expect(h).not.toContain(';');
+    expect(h).toMatch(/\(haiku → opus on FAIL\)$/);
   });
 });

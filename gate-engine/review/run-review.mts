@@ -72,6 +72,7 @@ import {
 import {
   cacheKey,
   effectiveReviewConfig,
+  type Reviewer,
   REVIEWERS,
   type ReviewerSelection,
   resolveEscalationModel,
@@ -88,6 +89,24 @@ import {
 import { ReviewGateTiming, reviewConcurrency } from './telemetry/timing.mts';
 
 export { runCascade };
+
+/** The running header's per-reviewer models (sc-3446): a pinned reviewer runs single-pass at its
+ * own model, so listing it under `first → escalation` hid a partial family move. */
+export function describeReviewModels(
+  reviewers: readonly Reviewer[],
+  firstModel: string,
+  escalationModel: string,
+): string {
+  const byName = new Map(reviewers.map((r) => [r.name, r.model]));
+  const cascade = [...byName].filter(([, m]) => !m).map(([n]) => n);
+  const pinned = [...byName].filter(([, m]) => m).map(([n, m]) => `${n} on ${m}`);
+  return [
+    cascade.length ? `${cascade.join(', ')} (${firstModel} → ${escalationModel} on FAIL)` : '',
+    pinned.length ? `${pinned.join(', ')} (single-pass)` : '',
+  ]
+    .filter(Boolean)
+    .join('; ');
+}
 
 /**
  * The gate → exit code (see module contract). Selected reviewers run concurrently but BOUNDED to
@@ -316,7 +335,11 @@ export async function runReviewGate(
   }
   if (plan.tasks.length === 0) return finish(0);
   console.error(
-    `guard-review: running ${plan.tasks.map((t) => t.sel.reviewer.name).join(', ')} (≤${concurrency} concurrent, ${firstModel} → ${escalationModel} on FAIL)…`,
+    `guard-review: running ${describeReviewModels(
+      plan.tasks.map((t) => t.sel.reviewer),
+      firstModel,
+      escalationModel,
+    )} (≤${concurrency} concurrent)…`,
   );
   // Checkpoint each PASS as it lands, so a killed ship reruns only unfinished reviewers. The
   // progress JSON names unfinished work; heartbeat lines remain for humans. The catch prevents one
