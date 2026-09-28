@@ -582,6 +582,9 @@ elif [ "$BODY_FILE_SET" -eq 1 ]; then
   BODY=$(cat -- "$BODY_FILE_FLAG" && printf x) || { echo "--body-file: unreadable: $BODY_FILE_FLAG" >&2; exit 1; }
   BODY=${BODY%x}
 elif [ "$RESUME" -eq 1 ]; then BODY="$RESUME_BODY"
+  # Replaying recorded bytes: say so if the --body-file they came from has since been edited
+  # (sc-2527). Here — past the mode hand-off, before any worktree or gate — so it prints once.
+  node "$SHIP_INTENT" body-drift --root "$ROOT" --branch "$BR" --generation "$RESUME_GENERATION" || true
 elif [ -t 0 ]; then BODY=""
 else ship_read_stdin_body; fi
 # Match new-ship: the body is the only stdin read, so hand descendants /dev/null and make credential
@@ -612,6 +615,9 @@ SHIP_INTENT_ARGS=(write --root "$ROOT" --branch "$BR" --mode reship --title "$TI
 for d in ${LINK_EXTRA[@]+"${LINK_EXTRA[@]}"}; do SHIP_INTENT_ARGS+=(--link "$d"); done
 [ "$QAVIS_PUBLISH" -eq 1 ] || SHIP_INTENT_ARGS+=(--no-qavis-publish)
 [ "$UPDATE_PR_BODY" -eq 0 ] || SHIP_INTENT_ARGS+=(--update-pr-body)
+# See ship-branch.sh: the body file's path rides the record for the resume drift warning (sc-2527).
+[ "$BODY_FILE_SET" -eq 0 ] || SHIP_INTENT_ARGS+=(--body-file-path "$BODY_FILE_FLAG")
+[ "$RESUME" -eq 0 ] || [ "$BODY_SET" -eq 1 ] || [ "$BODY_FILE_SET" -eq 1 ] || SHIP_INTENT_ARGS+=(--keep-body-file)
 if [ "$RESUME" -eq 1 ]; then
   SHIP_INTENT_ARGS+=(--resumed --merge-paths --expect-generation "$RESUME_GENERATION")
   for p in ${RESUME_EXTRA_PATHS[@]+"${RESUME_EXTRA_PATHS[@]}"}; do SHIP_INTENT_ARGS+=(--donate "$p"); done

@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -432,6 +432,148 @@ describe('ship --resume: overrides and refusals', () => {
     // Byte-exact including the file's trailing newline — git normalizes at commit time, not here.
     expect(Buffer.from(record.bodyB64, 'base64').toString()).toBe('amended body\n');
     git(['worktree', 'prune']);
+  });
+
+  describe('an edited --body-file between attempts (sc-2527)', () => {
+    const DRIFT = 'changed since this invocation was recorded';
+    const count = (text, needle) => text.split(needle).length - 1;
+
+    /** A blocked FIRST attempt whose body came from body.md; the hook is left blocking. */
+    function seedFileRecord(branch, content) {
+      const seeded = seedResumableRepo({ hookBody: 'exit 1' });
+      writeFileSync(join(seeded.dir, 'note.txt'), 'hello\n');
+      writeFileSync(join(seeded.dir, 'body.md'), content);
+      const blocked = runShip(
+        seeded.dir,
+        seeded.env,
+        [branch, 'x', '--body-file', 'body.md', '--', 'note.txt'],
+        { extraEnv: { SHIP_DRY_RUN: '1' } },
+      );
+      expect(blocked.status).not.toBe(0);
+      return seeded;
+    }
+
+    it('warns once, before the gate worktree, and replays the RECORDED body', () => {
+      const { dir, env, git } = seedFileRecord('feat/drift', 'attempt one\n');
+      installHook(dir, 'exit 0');
+      writeFileSync(join(dir, 'body.md'), 'attempt two, corrected\n');
+
+      const stale = runShip(dir, env, ['--resume', 'feat/drift'], {
+        extraEnv: { SHIP_DRY_RUN: '1' },
+      });
+      expect(stale.status, stale.stderr).toBe(0); // a warning, never a block
+      expect(count(stale.stderr, DRIFT)).toBe(1);
+      expect(stale.stderr).toContain('12 bytes recorded, 23 on disk');
+      expect(stale.stderr).toContain('--resume feat/drift --body-file ');
+      // Before any gate: the warning precedes the worktree the gate chain runs in.
+      expect(stale.stderr.indexOf(DRIFT)).toBeLessThan(stale.stderr.indexOf('devkit-ship-'));
+      expect(git(['log', '-1', '--format=%b', 'feat/drift']).trim()).toBe('attempt one');
+      git(['worktree', 'prune']);
+    });
+
+    it('re-passing --body-file on the resume commits the edit and prints no warning', () => {
+      const { dir, env, git } = seedFileRecord('feat/refresh', 'attempt one\n');
+      installHook(dir, 'exit 0');
+      writeFileSync(join(dir, 'body.md'), 'attempt two, corrected\n');
+      const fresh = runShip(dir, env, ['--resume', 'feat/refresh', '--body-file', 'body.md'], {
+        extraEnv: { SHIP_DRY_RUN: '1' },
+      });
+      expect(fresh.status, fresh.stderr).toBe(0);
+      expect(fresh.stderr).not.toContain(DRIFT);
+      expect(git(['log', '-1', '--format=%b', 'feat/refresh']).trim()).toBe(
+        'attempt two, corrected',
+      );
+      git(['worktree', 'prune']);
+    });
+
+    it('the path survives a blocked resume re-record; --body clears it; a deleted file is silent', () => {
+      const { dir, env, git } = seedFileRecord('feat/carry', 'one\n');
+      // Resume #1 blocks again and RE-RECORDS without --body-file: the path must ride along.
+      const again = runShip(dir, env, ['--resume', 'feat/carry'], {
+        extraEnv: { SHIP_DRY_RUN: '1' },
+      });
+      expect(again.status).not.toBe(0);
+      expect(again.stderr).not.toContain(DRIFT); // unchanged file
+      writeFileSync(join(dir, 'body.md'), 'two\n');
+      const warned = runShip(dir, env, ['--resume', 'feat/carry'], {
+        extraEnv: { SHIP_DRY_RUN: '1' },
+      });
+      expect(warned.stderr).toContain(DRIFT);
+
+      // A --body override means the body no longer came from the file: stop warning about it.
+      const inline = runShip(dir, env, ['--resume', 'feat/carry', '--body', 'inline'], {
+        extraEnv: { SHIP_DRY_RUN: '1' },
+      });
+      expect(inline.stderr).not.toContain(DRIFT);
+      const record = JSON.parse(readFileSync(intentFileOf(dir, 'feat/carry'), 'utf8'));
+      expect(record.bodyFile).toBeUndefined();
+      const after = runShip(dir, env, ['--resume', 'feat/carry'], {
+        extraEnv: { SHIP_DRY_RUN: '1' },
+      });
+      expect(after.stderr).not.toContain(DRIFT);
+
+      // Re-arm with the file, then delete it: nothing to compare, nothing printed.
+      const rearm = runShip(dir, env, ['--resume', 'feat/carry', '--body-file', 'body.md'], {
+        extraEnv: { SHIP_DRY_RUN: '1' },
+      });
+      expect(rearm.stderr).not.toContain(DRIFT);
+      rmSync(join(dir, 'body.md'));
+      installHook(dir, 'exit 0');
+      const gone = runShip(dir, env, ['--resume', 'feat/carry'], {
+        extraEnv: { SHIP_DRY_RUN: '1' },
+      });
+      expect(gone.status, gone.stderr).toBe(0);
+      expect(gone.stderr).not.toContain(DRIFT);
+      expect(git(['log', '-1', '--format=%b', 'feat/carry']).trim()).toBe('two');
+      git(['worktree', 'prune']);
+    });
+
+    it('a stdin-bodied record never warns, whatever files sit in the checkout', () => {
+      const { dir, env, git } = seedBlockedRecord('feat/stdin');
+      writeFileSync(join(dir, 'body.md'), 'unrelated\n');
+      const r = runShip(dir, env, ['--resume', 'feat/stdin'], { extraEnv: { SHIP_DRY_RUN: '1' } });
+      expect(r.status, r.stderr).toBe(0);
+      expect(r.stderr).not.toContain(DRIFT);
+      git(['worktree', 'prune']);
+    });
+
+    it('a recorded re-push warns once, after the cross-dispatch, naming the PR description', () => {
+      const { dir, env, git } = seedResumableRepo();
+      writeFileSync(join(dir, 'note.txt'), 'hello\n');
+      const { hookCount, publishEnv } = publishEnvFor(dir, env);
+      const first = runShip(dir, publishEnv, ['feat/re-drift', 'x', '--', 'note.txt'], {
+        input: 'b\n',
+        extraEnv: { TEST_HOOK_COUNT: hookCount },
+      });
+      expect(first.status, first.stderr).toBe(0);
+      writeFileSync(join(dir, 'pr.md'), 'b\n');
+      execFileSync(
+        'node',
+        [
+          intentCli,
+          'write',
+          '--root',
+          dir,
+          '--branch',
+          'feat/re-drift',
+          '--mode',
+          'reship',
+          '--title',
+          'x',
+          '--body-file-path',
+          join(dir, 'pr.md'),
+          '--',
+          'note.txt',
+        ],
+        { input: 'b\n', env },
+      );
+      writeFileSync(join(dir, 'pr.md'), 'edited\n');
+      const resumed = runShip(dir, publishEnv, ['--resume', 'feat/re-drift']);
+      expect(resumed.status, resumed.stderr).toBe(0);
+      expect(count(resumed.stderr, DRIFT)).toBe(1);
+      expect(resumed.stderr).toContain('also rewrites the PR description');
+      git(['worktree', 'prune']);
+    });
   });
 
   it('--resume never reads stdin: an open-but-idle pipe cannot stall or blank the body', () => {

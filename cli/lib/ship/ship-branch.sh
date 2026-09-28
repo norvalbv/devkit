@@ -772,6 +772,9 @@ elif [ "$BODY_FILE_SET" -eq 1 ]; then
   BODY=$(cat -- "$BODY_FILE_FLAG" && printf x) || { echo "--body-file: unreadable: $BODY_FILE_FLAG" >&2; exit 1; }
   BODY=${BODY%x}
 elif [ "$RESUME" -eq 1 ]; then BODY="$RESUME_BODY"
+  # Replaying recorded bytes: say so if the --body-file they came from has since been edited
+  # (sc-2527). Here — past the mode hand-off, before any worktree or gate — so it prints once.
+  node "$SHIP_INTENT" body-drift --root "$ROOT" --branch "$BR" --generation "$RESUME_GENERATION" || true
 elif [ -t 0 ]; then BODY=""
 else ship_read_stdin_body; fi
 # The body is the ONLY thing ship reads from stdin, and it has been read. Hand every descendant
@@ -814,6 +817,10 @@ if [ "$DRY_GATES" -eq 0 ]; then
   # Any boolean added here must ALSO join the allowlist in ship-intent-args.mts:16-22, or its
   # `--flag` is treated as value-taking and silently eats the next argv entry.
   [ "$DRAFT" -eq 0 ] || SHIP_INTENT_ARGS+=(--draft)
+  # The body file's path rides the record so a later resume can warn when it drifts (sc-2527); a
+  # resume that replayed the recorded body keeps the recorded path, and --body clears it.
+  [ "$BODY_FILE_SET" -eq 0 ] || SHIP_INTENT_ARGS+=(--body-file-path "$BODY_FILE_FLAG")
+  [ "$RESUME" -eq 0 ] || [ "$BODY_SET" -eq 1 ] || [ "$BODY_FILE_SET" -eq 1 ] || SHIP_INTENT_ARGS+=(--keep-body-file)
   if [ "$RESUME" -eq 1 ]; then
     SHIP_INTENT_ARGS+=(--resumed --expect-generation "$RESUME_GENERATION")
     if [ "$FROM_BRANCH" -eq 0 ]; then
