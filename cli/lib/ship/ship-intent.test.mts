@@ -1,9 +1,10 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import {
   existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -21,6 +22,7 @@ import {
 } from './ship-intent.mts';
 import {
   bindSourceMembership,
+  bodyDriftWarning,
   filterMembershipStream,
   frozenDriftStream,
   membershipStreamError,
@@ -1083,5 +1085,313 @@ describe('ship-intent CLI protocol', () => {
     expect(ev.pr_body).not.toContain('hunter2'); // URL userinfo credentials
     expect(ev.pr_body).toContain('https://[REDACTED]@example.com/r.git');
     expect(ev.pr_body).toContain('AWS_SECRET_ACCESS_KEY=[REDACTED]');
+  });
+});
+
+describe('recorded --body-file path and resume drift warning (sc-2527)', () => {
+  /** Record an invocation whose body came from `file` (written with `content` first). */
+  function recordFromFile(content: string, opts: Partial<Parameters<typeof writeIntent>[0]> = {}) {
+    const o = base({ body: Buffer.from(content), ...opts });
+    const file = join(o.root, 'body.md');
+    writeFileSync(file, content);
+    expect(writeIntent({ ...o, bodyFilePath: file }, ['p.txt'])).toBe(0);
+    return { ...o, file };
+  }
+  /** What `ship-intent body-drift` computes: read the record, then compare its file. */
+  const driftFor = (root: string) => {
+    const r = readIntent(root, 'feat/x');
+    return 'reason' in r ? null : bodyDriftWarning(r.intent);
+  };
+  const recordOf = (root: string) =>
+    JSON.parse(readFileSync(join(root, relIntentPath('feat/x')), 'utf8'));
+
+  it('records the path absolute, resolved from the invoking cwd rather than the repo root', () => {
+    const root = seedRepo();
+    const sub = join(root, 'pkg', 'app');
+    mkdirSync(sub, { recursive: true });
+    writeFileSync(join(sub, 'body.md'), 'x');
+    // Invoked the way the ship scripts invoke it: a RELATIVE path, from the operator's subdir.
+    execFileSync(
+      'node',
+      [
+        cliPath,
+        'write',
+        '--root',
+        root,
+        '--branch',
+        'feat/x',
+        '--mode',
+        'ship',
+        '--title',
+        't',
+        '--body-file-path',
+        'body.md',
+        '--',
+        'p.txt',
+      ],
+      { input: 'x', cwd: sub },
+    );
+    const r = readIntent(root, 'feat/x');
+    if ('reason' in r) throw new Error(r.reason);
+    expect(realpathSync(r.intent.bodyFile ?? '')).toBe(realpathSync(join(sub, 'body.md')));
+  });
+
+  it('an unchanged file warns nothing — bytes compared, not mtimes', () => {
+    const o = recordFromFile('same body\n');
+    writeFileSync(o.file, 'same body\n'); // touched, identical bytes
+    expect(driftFor(o.root)).toBeNull();
+  });
+
+  it('an edited file names the file, both byte counts and the exact refresh command', () => {
+    const o = recordFromFile('attempt three\n');
+    writeFileSync(o.file, 'the corrected, longer body\n');
+    const w = driftFor(o.root);
+    expect(w).toContain(o.file);
+    expect(w).toContain('14 bytes recorded');
+    expect(w).toContain('27 on disk');
+    expect(w).toContain(`devkit ship --resume feat/x --body-file ${o.file}`);
+    expect(w).not.toContain('PR description');
+  });
+
+  it('an EMPTY recorded body against a non-empty file still warns (0-byte boundary)', () => {
+    const o = recordFromFile('');
+    writeFileSync(o.file, 'x');
+    expect(driftFor(o.root)).toContain('0 bytes recorded');
+  });
+
+  it('a trailing-newline-only edit is drift — the recorded bytes are exact', () => {
+    const o = recordFromFile('body');
+    writeFileSync(o.file, 'body\n');
+    expect(driftFor(o.root)).not.toBeNull();
+  });
+
+  it('shell-quotes a path with spaces and quotes so the printed command pastes as-is', () => {
+    const o = base({ body: Buffer.from('a') });
+    const file = join(o.root, "my body's draft.md");
+    writeFileSync(file, 'b');
+    writeIntent({ ...o, bodyFilePath: file }, ['p.txt']);
+    const w = driftFor(o.root) ?? '';
+    const cmd = w.slice(w.indexOf('devkit ship --resume'));
+    const argv = execFileSync('bash', ['-c', `printf '%s\\0' ${cmd.replace(/^devkit /, '')}`])
+      .toString()
+      .split('\0');
+    expect(argv.slice(0, 4)).toEqual(['ship', '--resume', 'feat/x', '--body-file']);
+    expect(argv[4]).toBe(file);
+  });
+
+  it('a recorded re-push says the refresh also rewrites the PR description', () => {
+    const o = recordFromFile('old\n', { mode: 'reship' });
+    writeFileSync(o.file, 'new\n');
+    const w = driftFor(o.root) ?? '';
+    expect(w).toContain('PR description');
+    // The note sits BEFORE the command, so the line still ends in a paste-able command.
+    expect(w.endsWith(`devkit ship --resume feat/x --body-file ${o.file}`)).toBe(true);
+  });
+
+  it('prints nothing when no file was recorded, the file is gone, or the path is not a regular file', () => {
+    const plain = base();
+    writeIntent(plain, ['p.txt']);
+    expect(driftFor(plain.root)).toBeNull();
+
+    const gone = recordFromFile('a');
+    rmSync(gone.file);
+    expect(driftFor(gone.root)).toBeNull();
+
+    const dir = recordFromFile('a');
+    rmSync(dir.file);
+    mkdirSync(dir.file);
+    expect(driftFor(dir.root)).toBeNull();
+  });
+
+  it('a path that became a FIFO is never opened — a read would block the resume forever', () => {
+    const o = recordFromFile('a');
+    rmSync(o.file);
+    execFileSync('mkfifo', [o.file]);
+    // Returning at all is the assertion: readFileSync on a writer-less FIFO never returns.
+    expect(driftFor(o.root)).toBeNull();
+  });
+
+  it('never records a /dev or /proc path: those name a stream, not the file that was authored', () => {
+    const o = base();
+    writeIntent({ ...o, bodyFilePath: '/dev/stdin' }, ['p.txt']);
+    expect(recordOf(o.root).bodyFile).toBeUndefined();
+    writeIntent({ ...o, bodyFilePath: '/proc/self/fd/0' }, ['p.txt']);
+    expect(recordOf(o.root).bodyFile).toBeUndefined();
+  });
+
+  it('never records a path with control characters: the drift warning must stay ONE line', () => {
+    const o = base();
+    for (const bad of [
+      'nl\nship: forged line.md',
+      'cr\r.md',
+      'esc\u001b[2J.md',
+      'del\u007f.md',
+      'nel\u0085.md', // C1: NEXT LINE
+      'csi\u009b2J.md', // C1: 8-bit CSI
+      'ls\u2028.md', // Unicode LINE SEPARATOR
+      'ps\u2029.md', // Unicode PARAGRAPH SEPARATOR
+    ]) {
+      const file = join(o.root, bad);
+      writeFileSync(file, 'x');
+      writeIntent({ ...o, bodyFilePath: file }, ['p.txt']);
+      expect(recordOf(o.root).bodyFile).toBeUndefined();
+    }
+  });
+
+  it('a malformed or relative bodyFile is dropped, never a refusal of the whole resume', () => {
+    for (const bad of [42, '', 'relative/body.md', ['x']]) {
+      const o = recordFromFile('a');
+      const file = join(o.root, relIntentPath('feat/x'));
+      const j = JSON.parse(readFileSync(file, 'utf8'));
+      j.bodyFile = bad;
+      writeFileSync(file, JSON.stringify(j));
+      const r = readIntent(o.root, 'feat/x');
+      if ('reason' in r) throw new Error(`refused on bodyFile=${JSON.stringify(bad)}: ${r.reason}`);
+      expect(r.intent.bodyFile).toBeUndefined();
+      expect(driftFor(o.root)).toBeNull();
+    }
+  });
+
+  it('keepBodyFile carries the path across a resume re-record; omitting it clears the path', () => {
+    const o = recordFromFile('a');
+    const gen = () => recordOf(o.root).generation;
+    writeIntent(
+      { ...o, resumed: true, mergePaths: true, expectGeneration: gen(), keepBodyFile: true },
+      ['p.txt'],
+    );
+    expect(recordOf(o.root).bodyFile).toBe(o.file);
+    // A `--body "<text>"` override re-records with neither flag: the body no longer came from it.
+    writeIntent({ ...o, resumed: true, mergePaths: true, expectGeneration: gen() }, ['p.txt']);
+    expect(recordOf(o.root).bodyFile).toBeUndefined();
+  });
+
+  it('a re-passed --body-file records the NEW path, even with keepBodyFile set', () => {
+    const o = recordFromFile('a');
+    const other = join(o.root, 'other.md');
+    writeFileSync(other, 'b');
+    writeIntent(
+      {
+        ...o,
+        body: Buffer.from('b'),
+        resumed: true,
+        mergePaths: true,
+        expectGeneration: recordOf(o.root).generation,
+        bodyFilePath: other,
+        keepBodyFile: true,
+      },
+      ['p.txt'],
+    );
+    expect(recordOf(o.root).bodyFile).toBe(other);
+  });
+
+  it("a losing resume cannot overwrite a newer full invocation's bodyFile (CAS)", () => {
+    const o = recordFromFile('a');
+    const staleGen = recordOf(o.root).generation; // what the resume read
+    const newer = join(o.root, 'newer.md');
+    writeFileSync(newer, 'n');
+    writeIntent({ ...o, bodyFilePath: newer }, ['p.txt']); // concurrent full invocation wins
+    writeIntent(
+      { ...o, resumed: true, mergePaths: true, expectGeneration: staleGen, keepBodyFile: true },
+      ['p.txt'],
+    );
+    expect(recordOf(o.root).bodyFile).toBe(newer);
+  });
+
+  it('keeps the absolute path out of the ship_intent telemetry event', () => {
+    const root = seedRepo();
+    const sink = join(root, 'events.jsonl');
+    writeFileSync(join(root, 'body.md'), 'x');
+    execFileSync(
+      'node',
+      [
+        cliPath,
+        'write',
+        '--root',
+        root,
+        '--branch',
+        'feat/x',
+        '--mode',
+        'ship',
+        '--title',
+        't',
+        '--body-file-path',
+        join(root, 'body.md'),
+        '--',
+        'p.txt',
+      ],
+      { input: 'x', env: { ...process.env, DEVKIT_GATE_EVENTS: sink } },
+    );
+    expect(recordOf(root).bodyFile).toBe(join(root, 'body.md'));
+    expect(readFileSync(sink, 'utf8')).not.toContain('body.md');
+  });
+
+  it('CLI: body-drift prints the warning on stderr and exits 0 — drift never blocks', () => {
+    const o = recordFromFile('a');
+    writeFileSync(o.file, 'b');
+    const run = (argv: string[]) =>
+      spawnSync('node', [cliPath, 'body-drift', ...argv], { encoding: 'utf8' });
+    const r = run([
+      '--root',
+      o.root,
+      '--branch',
+      'feat/x',
+      '--generation',
+      recordOf(o.root).generation,
+    ]);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toBe('');
+    expect(r.stderr).toContain('changed since this invocation was recorded');
+    // An unreadable/absent record is equally silent and equally non-blocking.
+    const none = run(['--root', o.root, '--branch', 'feat/none']);
+    expect(none.status).toBe(0);
+    expect(none.stderr).toBe('');
+  });
+
+  it('CLI: body-drift judges only the generation the resume replayed, never a newer record', () => {
+    const o = recordFromFile('a');
+    const replayedGen = recordOf(o.root).generation;
+    writeIntent({ ...o, body: Buffer.from('newer'), bodyFilePath: o.file }, ['p.txt']); // racer
+    writeFileSync(o.file, 'b');
+    const run = (gen: string) =>
+      spawnSync(
+        'node',
+        [cliPath, 'body-drift', '--root', o.root, '--branch', 'feat/x', '--generation', gen],
+        { encoding: 'utf8' },
+      );
+    const stale = run(replayedGen);
+    expect(stale.status).toBe(0);
+    expect(stale.stderr).toBe(''); // a different record's body is not what this resume replays
+    expect(run(recordOf(o.root).generation).stderr).toContain('changed since');
+  });
+
+  it('CLI: --keep-body-file is a boolean and does not swallow the next flag', () => {
+    const o = recordFromFile('a');
+    const gen = recordOf(o.root).generation;
+    execFileSync(
+      'node',
+      [
+        cliPath,
+        'write',
+        '--root',
+        o.root,
+        '--branch',
+        'feat/x',
+        '--mode',
+        'ship',
+        '--title',
+        't',
+        '--keep-body-file',
+        '--resumed',
+        '--merge-paths',
+        '--expect-generation',
+        gen,
+        '--',
+        'p.txt',
+      ],
+      { input: 'a' },
+    );
+    const rec = recordOf(o.root);
+    expect(rec.bodyFile).toBe(o.file);
+    expect(rec.generation).not.toBe(gen); // the write happened (not a superseded no-op)
   });
 });
