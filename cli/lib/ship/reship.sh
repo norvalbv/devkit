@@ -573,6 +573,8 @@ ship_reclaim_orphan_worktrees "$PWD" "$BR" reship || exit 1
 ship_size_preflight "$ROOT" "$BASE" "${PATHS[@]}"
 # See ship-branch.sh: advisory judge reachability, before the deterministic chain is paid.
 ship_judge_preflight "$ROOT"
+# See ship-branch.sh (sc-3883): a missing hook dir refuses before the worktree, not inside it.
+gate_hook_source_preflight "$ROOT" "$BASE" shipping || exit 1
 
 WT="${TMPDIR:-/tmp}/devkit-reship-${BR//\//-}-$$"
 # Body: --body "<text>" wins (explicit, no temp file); then --body-file; then — on --resume — the
