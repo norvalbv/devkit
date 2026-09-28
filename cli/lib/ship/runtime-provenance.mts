@@ -1,8 +1,8 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, realpathSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { detectGitRoot } from '../detect-git-root.mts';
-import { packageDir } from '../fs-helpers.mts';
+import { canonicalPath, packageDir } from '../fs-helpers.mts';
 import { shellQuote } from './dist-integrity.mts';
 
 const DEVKIT_PACKAGE = '@norvalbv/devkit';
@@ -29,14 +29,6 @@ interface JsonObject {
 interface PackageManifest {
   name?: JsonValue;
   version?: string;
-}
-
-function canonicalPath(path: string): string {
-  try {
-    return realpathSync(path);
-  } catch {
-    return resolve(path);
-  }
 }
 
 function isJsonObject(value: JsonValue): value is JsonObject {

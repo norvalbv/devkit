@@ -16,6 +16,7 @@ import {
   skillNamesForSelection,
 } from '../../lib/components.mts';
 import { detectGitRoot } from '../../lib/detect-git-root.mts';
+import { assertRunsFromSource } from '../../lib/doctor/pin/runner-identity.mts';
 import { packageDir, readJson, sha256, writeIfAbsent } from '../../lib/fs-helpers.mts';
 import type { SyncManifestV2 } from '../../lib/install/agent-asset-manifest/codec.mts';
 import {
@@ -131,6 +132,7 @@ export function syncSkills(
   { skipTracked, override = () => false, selection = {} }: SyncOpts = {},
 ): AssetManifest {
   const dryRun = args.includes('--dry-run');
+  if (!dryRun) assertRunsFromSource(cwd, 'sync-skills');
   return withAgentAssetLifecycleLock(cwd, dryRun, () =>
     syncSkillsLocked(args, cwd, targets, { skipTracked, override, selection }),
   );

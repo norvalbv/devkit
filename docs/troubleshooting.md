@@ -58,6 +58,10 @@ the fully merged value and _does_ see it — so review can fail on a hooksPath d
 A synced copy in `.claude/` or `.cursor/` diverged from its **manifest** (or devkit's source moved ahead).
 Re-run `devkit sync-skills` / `devkit sync-agents` (NOT a hand edit). `devkit doctor --fix` also repairs it.
 
+In devkit's own repo, run these from source: `bun run devkit sync-skills`. A global or `dist/` devkit
+would hash its own bundled skills into the manifests and revert every entry the checkout has moved
+past, so the writers refuse it with that remedy.
+
 ## My stack was detected as `generic`
 
 Detection is heuristic (it reads framework markers in package.json). If nothing matched, you get `generic`,
