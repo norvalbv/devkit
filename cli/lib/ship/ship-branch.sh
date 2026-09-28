@@ -262,17 +262,17 @@ if [ "$RESUME" -eq 0 ] && [ "$FROM_BRANCH" -eq 1 ] && [ "${#PATHS[@]}" -gt 0 ]; 
   exit 1
 fi
 [ "$FROM_BRANCH" -eq 1 ] || [ "${#PATHS[@]}" -gt 0 ] || { echo "no paths given" >&2; exit 1; }
-if [ "$FROM_BRANCH" -eq 1 ]; then
-  # The mode constructs its own root-anchored literal selectors. Ambient Git pathspec modes either
-  # reinterpret those magic prefixes as plain text or conflict with them, so they are not inputs.
-  unset GIT_LITERAL_PATHSPECS GIT_GLOB_PATHSPECS GIT_NOGLOB_PATHSPECS GIT_ICASE_PATHSPECS
-fi
+# Both modes construct their own literal selectors (sc-2425). Ambient Git pathspec modes either
+# reinterpret those magic prefixes as plain text or conflict with them, so they are not inputs.
+unset GIT_LITERAL_PATHSPECS GIT_GLOB_PATHSPECS GIT_NOGLOB_PATHSPECS GIT_ICASE_PATHSPECS
 # Files only: `git diff/ls-files -- <dir>` recurses and would sweep in a parallel
 # agent's edits under that directory, defeating the per-file isolation. (A deleted
 # file is not a dir, so it still passes — deletions are valid pathspecs.)
 if [ "$FROM_BRANCH" -eq 0 ]; then
   for p in "${PATHS[@]}"; do
-    [ -d "$p" ] && {
+    # Framed on $ROOT like every git call that consumes the path: from a subdirectory a cwd-relative
+    # test lets a root-level directory through, and git then recurses into it.
+    [ -d "$ROOT/$p" ] && {
       echo "directory path not allowed (pass individual files): $p" >&2
       echo "  list its tracked files: git ls-files -- \"$p\"" >&2
       exit 1
@@ -673,7 +673,12 @@ if [ "$FROM_BRANCH" -eq 1 ]; then
     for p in "${PATHS[@]}"; do printf '  %q\n' "$p" >&2; done
   fi
 else
-  GIT_PATHS=("${PATHS[@]}")
+  # An explicit path names ONE file, whatever bytes its name holds (sc-2425): `*.txt` and
+  # `:(exclude)*` are legal filenames, and a bare pathspec would read them as a glob or as magic.
+  # `literal` WITHOUT `top`: under `git -C "$ROOT"` it still normalises `./note.txt`, which
+  # `:(top,literal)` does not. Raw PATHS stays the storage and display identity.
+  GIT_PATHS=()
+  for p in "${PATHS[@]}"; do GIT_PATHS+=(":(literal)$p"); done
 fi
 
 # Where the staging patch is ANCHORED, and which briefed paths cannot be three-way merged. See
@@ -1126,8 +1131,8 @@ if [ -n "$LOCAL_BRANCH_EXISTS" ]; then
       # already supplied the right content; leave it alone. Probes are newline-framed on purpose:
       # only emptiness is read, and `-z` inside $() makes bash strip NULs and warn on stderr.
       if [ "${#GATE_ADD_EXCLUDE[@]}" -gt 0 ] &&
-         [ -n "$(git -C "$ROOT" diff --name-only --no-renames "$RECOVERY_PARENT" "$RECOVERY_COMMIT" -- "$p")" ] &&
-         [ -z "$(git -C "$ROOT" diff --name-only --no-renames "$RECOVERY_PARENT" "$RECOVERY_COMMIT" -- "$p" "${GATE_ADD_EXCLUDE[@]}")" ]; then
+         [ -n "$(git -C "$ROOT" diff --name-only --no-renames "$RECOVERY_PARENT" "$RECOVERY_COMMIT" -- ":(literal)$p")" ] &&
+         [ -z "$(git -C "$ROOT" diff --name-only --no-renames "$RECOVERY_PARENT" "$RECOVERY_COMMIT" -- ":(literal)$p" "${GATE_ADD_EXCLUDE[@]}")" ]; then
         continue
       fi
       # (b) A path the commit DELETED. read-tree has already applied the deletion, so it is in
@@ -1137,10 +1142,10 @@ if [ -n "$LOCAL_BRANCH_EXISTS" ]; then
       # broken symlink. --others deliberately WITHOUT --exclude-standard so a force-added ignored
       # file still counts as present. A path the caller has since RE-CREATED matches again, stays in
       # the add set, and still refuses via the tree comparison below — as it must.
-      if [ -z "$(GIT_INDEX_FILE="$RECOVERY_INDEX" git -C "$ROOT" ls-files --cached --others -- "$p")" ]; then
+      if [ -z "$(GIT_INDEX_FILE="$RECOVERY_INDEX" git -C "$ROOT" ls-files --cached --others -- ":(literal)$p")" ]; then
         continue
       fi
-      RECOVERY_ADD_PATHS+=("$p")
+      RECOVERY_ADD_PATHS+=(":(literal)$p")
     done
     # `git add -A --` with NO pathspec stages the WHOLE worktree, so an empty set must be an explicit
     # skip. Nothing is lost by skipping: read-tree's index already IS the commit's tree.
@@ -1303,9 +1308,10 @@ else
     # straight on. Same temp-file idiom as the branch-paths and gitlink enumerations above; preferred
     # over `done < <(...)`, which loses the enumerator's own failure to set -e.
     UNTRACKED_FILE=$(mktemp "${TMPDIR:-/tmp}/ship-untracked.XXXXXX")
-    git -C "$ROOT" ls-files -o --exclude-standard -- "${PATHS[@]}" > "$UNTRACKED_FILE"
+    # -z + literal adds (sc-2425): a newline in a name must not split it, nor `:(exclude)*` act as magic.
+    git -C "$ROOT" ls-files -z -o --exclude-standard -- "${GIT_PATHS[@]}" > "$UNTRACKED_FILE"
     UNTRACKED_CLOBBER=()
-    while IFS= read -r f; do
+    while IFS= read -r -d '' f; do
       # A path untracked HERE can still be TRACKED at the refreshed base: the base ADDED it after this
       # checkout forked. Copying wholesale would silently replace the base's version — the untracked
       # twin of sc-2451, and invisible to the patch arm above because the fork point has no such path
@@ -1326,7 +1332,7 @@ else
         UNTRACKED_CLOBBER+=("$f")
         continue
       fi
-      git -C "$WT" add -- "$f"
+      git -C "$WT" add -- ":(top,literal)$f"
     done < "$UNTRACKED_FILE"
     rm -f "$UNTRACKED_FILE"
     # Both untracked passes accumulate into UNTRACKED_CLOBBER and are reported together below, so an
@@ -1349,9 +1355,9 @@ else
   # a file tracked at their OWN fork point) still emits it and is unaffected, but a path the base
   # added after the fork has no deletion to express, so it is force-added here as a new file.
     IGNORED_FILE=$(mktemp "${TMPDIR:-/tmp}/ship-ignored.XXXXXX")
-    git -C "$ROOT" ls-files -o -i --exclude-standard -- "${PATHS[@]}" > "$IGNORED_FILE"
-    while IFS= read -r f; do
-      git -C "$WT" diff --cached --quiet --diff-filter=D -- "$f" || continue
+    git -C "$ROOT" ls-files -z -o -i --exclude-standard -- "${GIT_PATHS[@]}" > "$IGNORED_FILE"
+    while IFS= read -r -d '' f; do
+      git -C "$WT" diff --cached --quiet --diff-filter=D -- ":(top,literal)$f" || continue
       mkdir -p "$WT/$(dirname "$f")"
       cp -Pp "$ROOT/$f" "$WT/$f"
       # The same base-clobber check the ordinary untracked pass runs, for the same reason: `-f` makes
@@ -1365,7 +1371,7 @@ else
         UNTRACKED_CLOBBER+=("$f")
         continue
       fi
-      git -C "$WT" add -f -- "$f"
+      git -C "$WT" add -f -- ":(top,literal)$f"
     done < "$IGNORED_FILE"
     rm -f "$IGNORED_FILE"
     if [ "${#UNTRACKED_CLOBBER[@]}" -gt 0 ]; then
