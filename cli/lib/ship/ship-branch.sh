@@ -719,6 +719,16 @@ fi
 if [ "$DRY_GATES" -eq 0 ] || [ "$WITH_REVIEWERS" -eq 1 ]; then
   ship_judge_preflight "$ROOT"
 fi
+# Before `git worktree add -b` (sc-3883): a missing hook dir used to surface only inside
+# prepare_gate_worktree, after the branch existed. When this worktree also holds $BR, name that blocker
+# in the same refusal — otherwise the operator frees the branch, re-runs, and only then meets this one.
+if ! gate_hook_source_preflight "$ROOT" "$BASE" shipping; then
+  if [ -n "$PREFLIGHT_SELF" ]; then
+    echo "ship: also blocked — $PREFLIGHT_HINT. Fix both before re-running:" >&2
+    _ship_orphan_report_self "$PWD" "$BR"
+  fi
+  exit 1
+fi
 
 # Nothing to commit → say so NOW. Staging (below) has exactly three inputs: the tracked diff vs
 # BASE, the untracked files in scope, and the untracked-but-IGNORED files in scope (a briefed path
