@@ -65,7 +65,8 @@ function tryRequire(id) {
 
 function resolveStructureParser() {
   const tsParser = tryRequire('@typescript-eslint/parser');
-  if (tsParser && typeof tryRequire('typescript')?.createSourceFile === 'function') {
+  const typescript = tryRequire('typescript');
+  if (tsParser && typescript && 'createSourceFile' in typescript) {
     return [tsParser, { ecmaFeatures: { jsx: true }, sourceType: 'module' }];
   }
   return [
