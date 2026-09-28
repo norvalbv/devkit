@@ -12,6 +12,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { AGENT_TARGETS } from '../../lib/components.mts';
 import { detectGitRoot } from '../../lib/detect-git-root.mts';
+import { assertRunsFromSource } from '../../lib/doctor/pin/runner-identity.mts';
 import { packageDir, readJson, sha256, writeIfAbsent } from '../../lib/fs-helpers.mts';
 import type { SyncManifestV2 } from '../../lib/install/agent-asset-manifest/codec.mts';
 import {
@@ -76,6 +77,7 @@ export function syncAgents(
   { skipTracked, override = () => false }: SyncOpts = {},
 ): AssetManifest {
   const dryRun = args.includes('--dry-run');
+  if (!dryRun) assertRunsFromSource(cwd, 'sync-agents');
   return withAgentAssetLifecycleLock(cwd, dryRun, () =>
     syncAgentsLocked(args, cwd, targets, { skipTracked, override }),
   );

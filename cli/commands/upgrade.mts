@@ -22,6 +22,7 @@ import { join } from 'node:path';
 import { applyOverlayConstraints, normalizeSelection, type Selection } from '../lib/components.mts';
 import { detectGitRoot } from '../lib/detect-git-root.mts';
 import { detectStack } from '../lib/detect-stack.mts';
+import { assertRunsFromSource } from '../lib/doctor/pin/runner-identity.mts';
 import { packageDir, readJson } from '../lib/fs-helpers.mts';
 import { selfHostSelection } from '../lib/husky/self-host.mts';
 import { resolveExistingAgentProviders } from '../lib/install/agent-assets/agent-providers.mts';
@@ -128,6 +129,9 @@ export default async function upgrade(args: string[], cwd: string): Promise<numb
   // Regenerate the source hook + re-sync assets from the current generator, then verify — the whole
   // point is that `devkit upgrade` keeps the dogfood hook in lockstep with the generator, for free.
   if (cfg.selfHost) {
+    // Refuse before applyInit rewrites the hook: a non-source devkit here reverts the checkout's
+    // agent assets to its own bundled copies (sc-2345).
+    if (!dryRun) assertRunsFromSource(gitRoot, 'upgrade');
     const selection = { ...selfHostSelection(cfg.components), agentTargets };
     const previousAntiSlopRuleIds = selection.antiSlop
       ? captureAntiSlopBaselineActivation(cwd, dryRun, true)

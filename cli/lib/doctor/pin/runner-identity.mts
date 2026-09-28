@@ -26,7 +26,8 @@ import { statSync } from 'node:fs';
 import { join } from 'node:path';
 import { cmpSemver, DEP } from '../../../commands/update.mts';
 import { detectGitRoot } from '../../detect-git-root.mts';
-import { packageDir, readJson } from '../../fs-helpers.mts';
+import { canonicalPath, packageDir, readJson } from '../../fs-helpers.mts';
+import { isDevkitRepo } from '../../husky/self-host.mts';
 import { type CheckResult, check } from '../check-result.mts';
 import { devkitDepRef } from './pin-checks.mts';
 
@@ -324,5 +325,31 @@ export function assertRunnerMayWrite(
     `refusing to write devkit-managed state: running devkit ${skew.running}, but this repo pins ${skew.pinned}. ` +
       `An older devkit writes .devkit/oxc in its own older shape, which the pinned gate then reports as stale. ` +
       `Run: ${skew.remediation}`,
+  );
+}
+
+// In devkit's own repo, refuse a devkit that is not this checkout: it would hash ITS bundled
+// skills/agents into this checkout's manifests (sc-2345). Consumers and bad package.json pass.
+export function assertRunsFromSource(
+  cwd: string,
+  command: string,
+  packageRoot: string = packageDir(),
+): void {
+  // Any directory inside the repo resolves to its root, so a subdirectory run cannot slip past.
+  const { gitRoot } = detectGitRoot(cwd);
+  let selfHost: boolean;
+  try {
+    selfHost = isDevkitRepo(gitRoot);
+  } catch {
+    selfHost = false;
+  }
+  if (!selfHost) return;
+  const repo = canonicalPath(gitRoot);
+  const running = canonicalPath(packageRoot);
+  if (repo === running) return;
+  throw new Error(
+    `refusing to write devkit-managed agent assets: this is devkit's own repo (${repo}), but the running devkit is ${running}. ` +
+      `Its bundled skills/agents would overwrite this checkout's and revert .devkit/*-manifest.json. ` +
+      `Run from source: bun run devkit ${command}`,
   );
 }
