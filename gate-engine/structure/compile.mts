@@ -71,6 +71,7 @@ interface CompiledNode {
 interface CompileOpts {
   baseline?: string[];
   exempt?: string[];
+  projectRoot?: string;
 }
 
 // The plugin matches a file's path RELATIVE to structureRoot, and the structure ROOT node's `name`
@@ -140,6 +141,21 @@ export function compileToEslint(treeSpec: TreeSpec, exts: string[], opts: Compil
   const grammar: Grammar = treeSpec.grammar ?? {};
   const rootFiles = [...new Set([...(grammar.files ?? []), ...(treeSpec.entryAllowlist ?? [])])];
   const rootNode = { ...grammar, files: rootFiles };
+  const compiled: { projectRoot?: string } & ReturnType<typeof folderStructureBody> =
+    folderStructureBody(treeSpec, exts, opts, grammar, rootNode);
+  // The plugin otherwise roots itself at its own realpathed install and skips every file outside it;
+  // only an ABSOLUTE projectRoot overrides that — a relative one resolves against that root (sc-2309).
+  if (opts.projectRoot) compiled.projectRoot = opts.projectRoot;
+  return compiled;
+}
+
+function folderStructureBody(
+  treeSpec: TreeSpec,
+  exts: string[],
+  opts: CompileOpts,
+  grammar: Grammar,
+  rootNode: GrammarNode,
+) {
   return {
     structureRoot: treeSpec.root,
     ignorePatterns: [
