@@ -21,6 +21,7 @@ import {
   selectedFragment,
 } from './review-fragments.mts';
 import { sentryShipPrewarmFragment } from './sentry-fragments.mts';
+import { shQuote } from '../ship/redact-secrets.mts';
 
 /**
  * A superset of every builder's needs; each reads only its own fields. `biome` keeps owning whether
@@ -303,7 +304,7 @@ export function buildOverlayHook(
         `if __dk_gate_selected ${id}; then __dk_gate_ai ${STANDALONE_GATES[id].join(' ')}; fi`,
       );
   }
-  // No sentry prewarm: an overlay installs no devkit commit-msg judge, so none follows the advisory.
+  // No sentry prewarm: overlay's commit-msg judge (sc-1794) runs sentry after the advisory instead.
   if (selection.guards?.includes(QAVIS_ADVISORY_ID))
     gates.push(selectedFragment(QAVIS_ADVISORY_ID, standaloneQavisLines));
   const inner = `${gates.join('\n')}\n\n${OVERLAY_LINT_STEPS}${fallow ? `\n\n${FALLOW_OVERLAY_GATE}` : ''}${deterministic ? `\n\n${REVIEW_DETERMINISTIC_FINALIZER}` : ''}`;
@@ -330,7 +331,7 @@ ${scoped}
 command -v __dk_commit_result >/dev/null 2>&1 && { trap - EXIT; __dk_commit_result 0; }
 
 # Chain to the repo's own pre-commit (exec → its exit code becomes the hook's).
-[ -f ${JSON.stringify(chainTarget)} ] && exec sh ${JSON.stringify(chainTarget)} "$@"
+[ -f ${shQuote(chainTarget)} ] && exec sh ${shQuote(chainTarget)} "$@"
 exit 0
 `;
 }
@@ -346,7 +347,7 @@ export function buildPassthroughHook(chainScript: string): string {
   return `${HOOK_PREAMBLE}
 # devkit overlay pass-through — git now runs this dir, so we forward to the repo's own hook
 # unchanged (devkit adds nothing to it).
-[ -f ${JSON.stringify(chainScript)} ] && exec sh ${JSON.stringify(chainScript)} "$@"
+[ -f ${shQuote(chainScript)} ] && exec sh ${shQuote(chainScript)} "$@"
 exit 0
 `;
 }

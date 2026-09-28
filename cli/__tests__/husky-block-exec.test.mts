@@ -1045,7 +1045,7 @@ describe('ship: sentry is judged before the qavis advisory', () => {
     expect(r.calls).toContain('guard-qavis-advisory --gate');
   });
 
-  it('overlay installs no commit-msg judge, so it gains no new blocking sentry gate', () => {
+  it('overlay pre-commit runs no sentry prewarm — its commit-msg judge (sc-1794) judges sentry', () => {
     const r = runHook({ SENTRY_RC: '1' }, SHIP, { shipMsg: true, builder: 'overlay' });
     expect(r.status).toBe(0);
     expect(r.calls).not.toContain('guard-sentry');

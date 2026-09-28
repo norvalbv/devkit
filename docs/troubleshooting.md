@@ -26,7 +26,9 @@ pre-commit hook lives at the git root with a **package-scoped** block. Example:
 
 In **overlay mode** a plain `git commit` (or an IDE/GUI commit) runs the **repo's own** hooks, not devkit's —
 that's the **self-heal** gap. Commit via the per-clone `git ci` alias instead, or enable the opt-in global
-shim with `devkit init --overlay --global-commit-gate`. See **overlay self-heal** in the glossary.
+shim with `devkit init --overlay --global-commit-gate`. The shim covers the pre-commit gates only — the
+completeness and sentry commit-message judges run only via `git ci` or `devkit ship` (`devkit doctor`
+says so when they are wired). See **overlay self-heal** in the glossary.
 
 ## My commit in a worktree ran a DIFFERENT checkout's hook
 
