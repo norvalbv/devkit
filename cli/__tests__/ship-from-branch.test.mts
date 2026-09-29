@@ -174,7 +174,9 @@ describe('ship-branch.sh — --from-branch committed scope (sc-2352)', () => {
       gitWrapper,
       [
         '#!/bin/bash',
-        'if [ "${1:-}" = worktree ] && [ "${2:-}" = add ] && [ "${5:-}" = "$TEST_RACE_BRANCH" ]; then',
+        // ship-branch.sh prefixes `-c core.hooksPath=/dev/null` (#669); match past any `-c k=v` pairs.
+        'args=("$@"); while [ "${args[0]:-}" = -c ]; do args=("${args[@]:2}"); done',
+        'if [ "${args[0]:-}" = worktree ] && [ "${args[1]:-}" = add ] && [ "${args[4]:-}" = "$TEST_RACE_BRANCH" ]; then',
         '  : > "$TEST_RACE_DIR/$TEST_RACE_ROLE.arrived"',
         '  if [ "$TEST_RACE_ROLE" = A ]; then',
         '    n=0; while [ ! -e "$TEST_RACE_DIR/B.arrived" ]; do n=$((n + 1)); [ "$n" -lt 500 ] || exit 98; sleep 0.02; done',
