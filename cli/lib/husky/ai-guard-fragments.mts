@@ -6,15 +6,16 @@ echo "🧯 Changed-comment firewall..."
 ccrc=0
 __dk_no_git_env "$__dk_package_bin_dir/guard-comments" gate || ccrc=$?
 if [ "$ccrc" -eq 1 ]; then
-    exit 1
+    __dk_block_deterministic guard-comments
 elif [ "$ccrc" -eq 4 ]; then
     echo "   guard-comments: NOT a rejection — staged comment evidence is unreadable or unsupported."
-    exit 1
+    __dk_block_deterministic guard-comments
 elif [ "$ccrc" -ne 0 ]; then
     echo "   guard-comments: unexpected exit $ccrc — blocking the commit."
-    exit 1
+    __dk_block_deterministic guard-comments
 fi
 # ccrc 0 = clean, 1 = paragraph over the 2-line budget, 4 = unreadable/unsupported evidence; anything else blocks.
+# A deterministic gate: review and dry-gates remember the block so later gates still report.
 # /devkit:guard-comments`,
   decisions: `# devkit:guard-decisions
 echo "🧭 Decision-log gate..."
@@ -22,7 +23,7 @@ ddrc=0
 __dk_no_git_env "$__dk_package_bin_dir/guard-decisions" detect --gate || ddrc=$?
 if [ "$ddrc" -eq 1 ]; then
     echo "   Record the decision target, or bypass a non-decision: GUARD_NO_LOG=1 git commit ..."
-    exit 1
+    __dk_block_ai guard-decisions
 elif [ "$ddrc" -eq 3 ]; then
     echo "   guard-decisions: judge unavailable or gate could not run — strict ship mode failed closed."
     echo "   Follow the remedy printed above, then re-run devkit ship (cleared judgements are cached)."
@@ -32,6 +33,7 @@ elif [ "$ddrc" -ne 0 ] && [ "$ddrc" -ne 2 ]; then
     exit 1
 fi
 # ddrc 0 = clean / staged / routine / bypassed, ddrc 2 = fail-open → continue; any other code blocks.
+# Only a confirmed finding (1) is deferred in review; an outage (3) still stops the run.
 # /devkit:guard-decisions`,
   review: `# devkit:guard-review
 echo "🔍 Reviewer gate (headless domain judges)..."
@@ -98,7 +100,7 @@ fi
 if [ "$rrc" -eq 1 ]; then
     echo "   A reviewer FAILED (escalation-confirmed). Fix the findings above, then re-run."
     __dk_comp_observed
-    exit 1
+    __dk_block_ai guard-review
 elif [ "$rrc" -eq 3 ]; then
     echo "   guard-review: judge unavailable after retry — strict ship mode failed closed."
     echo "   Follow the Remedy named above — or, when a re-run cannot clear it, use the knobs that Remedy names to move the judges (completed verdicts are cached)."

@@ -140,7 +140,7 @@ describe('buildGuardBlock', () => {
     const lines = block.split('\n').filter((l) => l.includes('guard-deterministic'));
     expect(lines).toHaveLength(1);
     expect(lines[0]).toContain('__dk_gate_deterministic');
-    expect(block).toContain('# devkit:review-deterministic-finalizer');
+    expect(block).toContain('# devkit:review-failure-finalizer');
     // no AI guards selected → no AI fragment
     expect(block).not.toContain('$__dk_package_bin_dir/guard-decisions');
   });
@@ -148,13 +148,13 @@ describe('buildGuardBlock', () => {
   it('emits the deterministic orchestrator when coverage is the only selected guard', () => {
     const block = buildGuardBlock({ guards: ['coverage'] });
     expect(block).toContain('guard-deterministic');
-    expect(block).toContain('# devkit:review-deterministic-finalizer');
+    expect(block).toContain('# devkit:review-failure-finalizer');
   });
 
   it('emits the deterministic orchestrator when anti-slop is the only selected policy', () => {
     const block = buildGuardBlock({ guards: [], antiSlop: true });
     expect(block).toContain('guard-deterministic');
-    expect(block).toContain('# devkit:review-deterministic-finalizer');
+    expect(block).toContain('# devkit:review-failure-finalizer');
     expect(block).not.toContain('guard-review');
   });
 
@@ -315,7 +315,7 @@ describe('deterministic orchestrator policy is fail-closed', () => {
     const block = buildGuardBlock({ guards: ['size'] });
     const line = block.split('\n').find((l) => l.includes('guard-deterministic'));
     expect(line).toContain('__dk_gate_deterministic');
-    expect(block).toContain('[ "${dk_review_det_failed:-0}" -ne 0 ]');
+    expect(block).toContain('[ "${dk_review_failed:-0}" -ne 0 ]');
   });
 });
 
@@ -482,9 +482,9 @@ describe('buildOverlayHook — gates-only guard for the global init.sh shim', ()
     expect(withFallow).toContain('command -v fallow');
     expect(withFallow).toContain('baseline-gate.mjs');
     expect(withFallow.indexOf('__dk_review_baseline_gate fallow')).toBeLessThan(
-      withFallow.indexOf('# devkit:review-deterministic-finalizer'),
+      withFallow.indexOf('# devkit:review-failure-finalizer'),
     );
-    expect(withFallow.indexOf('# devkit:review-deterministic-finalizer')).toBeLessThan(
+    expect(withFallow.indexOf('# devkit:review-failure-finalizer')).toBeLessThan(
       withFallow.indexOf('DEVKIT_VIA_HUSKY_INIT'),
     );
   });
