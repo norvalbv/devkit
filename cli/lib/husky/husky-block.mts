@@ -295,14 +295,14 @@ fi`;
  * gates + lint overlay (cd'd into the package for a monorepo), then `exec`s the repo's OWN
  * committed hook unchanged (so its exit propagates).
  *
- * `chainTarget` is the existing hook, `pkgRel` scopes monorepos, and `opts.fallow` adds the inline
- * audit that the overlay hooksPath would otherwise shadow.
+ * `chainTarget` is the existing hook, `pkgRel` scopes monorepos, `opts.fallow` adds the inline audit
+ * the overlay hooksPath would otherwise shadow, and `opts.prelude` runs before any gate.
  */
 export function buildOverlayHook(
   selection: HookSelection,
   chainTarget = '.husky/pre-commit',
   pkgRel = '',
-  { fallow = false }: { fallow?: boolean } = {},
+  { fallow = false, prelude = '' }: { fallow?: boolean; prelude?: string } = {},
 ): string {
   const handoff = selection.guards?.some((id) => id === 'review' || id === 'sentry') ?? false;
   const deterministic = wantsDeterministic(selection);
@@ -334,7 +334,7 @@ export function buildOverlayHook(
 # no-op and never report "gates ran" when they didn't. Only during ship (DEVKIT_SHIP=1) — a normal
 # \`git ci\` stays quiet. Emitted before the gates so even a first-gate block still records it.
 [ -n "\${DEVKIT_SHIP:-}" ] && echo 'devkit-gates: chain start' >&2
-${scoped}
+${prelude ? `${prelude}\n` : ''}${scoped}
 
 # Invoked by the global init.sh shim (husky reclaimed core.hooksPath on a plain \`git commit\`):
 # run gates ONLY and stop — husky's _/h runs the repo's committed hook itself, so chaining here

@@ -15,7 +15,8 @@ import {
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { buildOverlayHook, buildStandaloneHook } from '../lib/husky/husky-block.mts';
+import { buildStandaloneHook } from '../lib/husky/husky-block.mts';
+import { buildOverlayPreCommit } from '../lib/overlay.mts';
 import { globalInitPath, installGlobalHook } from '../lib/overlay-global-hook.mts';
 import { captureReviewSetup } from '../lib/ship/review/setup-manifest.mts';
 import {
@@ -65,7 +66,7 @@ function fixture(
     write(
       gitRoot,
       '.devkit/hooks/pre-commit',
-      buildOverlayHook(selection, '.git/hooks/pre-commit', targetRel),
+      buildOverlayPreCommit(selection, '.git/hooks/pre-commit', targetRel),
       true,
     );
   } else {
@@ -136,7 +137,7 @@ describe('private review setup runtime — husky-reclaimed overlay hooksPath', (
     write(
       gitRoot,
       '.devkit/hooks/pre-commit',
-      buildOverlayHook(selection, '.husky/pre-commit'),
+      buildOverlayPreCommit(selection, '.husky/pre-commit'),
       true,
     );
     write(
