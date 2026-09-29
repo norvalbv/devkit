@@ -8,7 +8,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import type { Selection } from '../components.mts';
 import { detectGitRoot } from '../detect-git-root.mts';
 import { resolveExistingAgentProviders } from '../install/agent-assets/agent-providers.mts';
@@ -20,12 +20,20 @@ import {
 import { selectedHookAssets } from '../install/hook-registration-ledger/selection.mts';
 import { checkOxcCapability } from '../install/oxc/lifecycle.mts';
 import { commitMsgGuards } from '../husky/commit-msg-block.mts';
+import {
+  LOCAL_HOOKS,
+  overlayHome,
+  overlayHooksPath,
+  projectOverlayIntoWorktree,
+  worktrees,
+} from '../husky/overlay/overlay-home.mts';
 import { HEAL_ALIAS_NAME, isHealAlias, syncOverlayHook } from '../overlay.mts';
 import { globalHookInstalled, globalInitPath } from '../overlay-global-hook.mts';
 import { checkAgentAssets, checkRegistrations } from './asset-checks.mts';
 import type { CheckResult } from './check-result.mts';
 import { adviseCodexRuntime, adviseSearchIndex } from './guard-config-checks.mts';
 import { repointHooksPath } from './hook-checks.mts';
+import { hooksDir, sameDir, worktreeScopedPin } from './hooks-path.mts';
 
 /** The recorded `.devkit/config.json` fields the overlay doctor consults. */
 export interface OverlayDoctorConfig {
@@ -41,7 +49,7 @@ export async function runOverlayDoctor(
   printQavisAdvisoryHealth: (cwd: string, guards: string[]) => void,
 ): Promise<number> {
   // hooksPath and its alias are repo-wide, including for a monorepo package.
-  const { gitRoot } = detectGitRoot(cwd);
+  const { gitRoot, pkgRel } = detectGitRoot(cwd);
   const gitGet = (key: string): string => {
     try {
       return execFileSync('git', ['config', '--get', key], {
@@ -57,8 +65,12 @@ export async function runOverlayDoctor(
   // Compare the ignored overlay hook with a fresh build; --fix rewrites stale/missing copies.
   const sync = syncOverlayHook(gitRoot, cwd, cfg, { dryRun: !fix });
   const hookOk = existsSync(join(gitRoot, '.devkit', 'hooks', 'pre-commit')); // post-fix presence
-  const healed = fix && hooksPath !== '.devkit/hooks' && repointHooksPath(gitRoot, hookOk);
-  const pathOk = healed || hooksPath === '.devkit/hooks';
+  // sc-4157: only the ABSOLUTE value reaches linked worktrees; the legacy relative one is drift.
+  const home = overlayHome(gitRoot) ?? gitRoot; // never a linked worktree's legacy copy
+  const expected = overlayHooksPath(home);
+  const current = isAbsolute(hooksPath) && sameDir(hooksPath, expected);
+  const healed = fix && !current && repointHooksPath(home, hookOk);
+  const pathOk = healed || current;
   console.log('devkit doctor — overlay (local-only)\n');
   if (!hookOk)
     console.log(
@@ -74,8 +86,9 @@ export async function runOverlayDoctor(
     );
   else console.log('  ✓ .devkit/hooks/pre-commit present');
   console.log(
-    `  ${pathOk ? '✓' : '⚠'} core.hooksPath = ${healed ? `.devkit/hooks (re-pointed from ${hooksPath || '(unset)'}; husky reclaims it on every install — make it durable with \`devkit init --overlay --global-commit-gate\`)` : hooksPath || '(unset)'}${pathOk ? '' : ` — heal with \`git ${HEAL_ALIAS_NAME}\` (re-points it), \`devkit doctor --fix\`, or re-run \`devkit init --overlay\``}`,
+    `  ${pathOk ? '✓' : '⚠'} core.hooksPath = ${healed ? `${expected} (re-pointed from ${hooksPath || '(unset)'}; husky reclaims it on every install — make it durable with \`devkit init --overlay --global-commit-gate\`)` : hooksPath || '(unset)'}${hooksPath === LOCAL_HOOKS && !pathOk ? ' — RELATIVE, so every linked worktree runs no hooks at all;' : ''}${pathOk ? '' : ` — heal with \`git ${HEAL_ALIAS_NAME}\` (re-points it), \`devkit doctor --fix\`, or re-run \`devkit init --overlay\``}`,
   );
+  const worktreesOk = printLinkedWorktrees(home, pkgRel, fix);
   const judgesWired = printCommitMsgRow(cfg, fix, sync.commitMsg);
   if (judgesWired && (!pathOk || globalHookInstalled()))
     console.log(
@@ -172,7 +185,33 @@ export async function runOverlayDoctor(
     );
   }
   // A stale hook is unhealthy (exit 1) so CI/agents notice; --fix having just regenerated it heals this run.
-  return hookOk && pathOk && (fix || (!sync.drift && !sync.commitMsg.drift)) ? 0 : 1;
+  return hookOk && pathOk && worktreesOk && (fix || (!sync.drift && !sync.commitMsg.drift)) ? 0 : 1;
+}
+
+// sc-4157: a worktree-scoped hooksPath shadows the overlay (unhealthy); an unlinked worktree self-links.
+function printLinkedWorktrees(home: string, pkgRel: string, fix: boolean): boolean {
+  let ok = true;
+  const pending: string[] = [];
+  const expected = overlayHooksPath(home);
+  for (const { path, bare } of worktrees(home)) {
+    if (bare || sameDir(path, home) || !existsSync(path)) continue;
+    const pin = worktreeScopedPin(path);
+    if (pin && !sameDir(hooksDir(path, pin), expected)) {
+      ok = false;
+      console.log(
+        `  ⚠ ${path}: a worktree-scoped core.hooksPath (${pin}) shadows the overlay — commits there skip devkit's gates`,
+      );
+    }
+    if (existsSync(join(path, pkgRel, '.devkit', 'config.json'))) continue;
+    if (!fix) pending.push(path);
+    else if (projectOverlayIntoWorktree(path, home, pkgRel).length)
+      console.log(`  ✓ linked ${path} to this overlay`);
+  }
+  if (pending.length)
+    console.log(
+      `  · ${pending.length} linked worktree(s) not yet linked to the overlay — each links on its first commit, or run \`devkit doctor --fix\``,
+    );
+  return ok;
 }
 
 // sc-1794: the commit-msg judges (completeness, sentry) — a silently dropped message gate is

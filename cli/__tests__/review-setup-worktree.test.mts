@@ -22,7 +22,7 @@ import {
 } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { buildOverlayHook } from '../lib/husky/husky-block.mts';
+import { buildOverlayPreCommit } from '../lib/overlay.mts';
 import {
   captureReviewSetup,
   type ReviewSetupManifest,
@@ -54,7 +54,7 @@ function pathRecord(manifest: ReviewSetupManifest, id: string) {
 
 /** Overlay artifacts inside `root`, chaining to `chain` and recording `origHooksPath`. */
 function installOverlay(root: string, chain: string, origHooksPath: string): void {
-  write(root, '.devkit/hooks/pre-commit', buildOverlayHook(selection, chain), true);
+  write(root, '.devkit/hooks/pre-commit', buildOverlayPreCommit(selection, chain), true);
   write(root, '.devkit/config.json', `${JSON.stringify(overlayConfig(origHooksPath), null, 2)}\n`);
   git(root, 'config', 'core.hooksPath', '.devkit/hooks');
 }

@@ -42,6 +42,8 @@ const BLOCK = `${MARK_START}
 # HUSKY=0. Repo root resolved via git so worktrees / submodules / git -C still gate the right tree.
 if [ "\${HUSKY:-}" != "0" ] && [ "\${0##*/}" = "pre-commit" ]; then
   __dk_root=$(git rev-parse --show-toplevel 2>/dev/null) || __dk_root=
+  # A linked worktree has no overlay of its own until its first gated commit links one (sc-4157).
+  [ -x "$__dk_root/${OVERLAY_HOOK_REL}" ] || __dk_root=$(git worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p')
   if [ -n "$__dk_root" ] && [ -x "$__dk_root/${OVERLAY_HOOK_REL}" ]; then
     DEVKIT_VIA_HUSKY_INIT=1 sh "$__dk_root/${OVERLAY_HOOK_REL}" "$@" || exit $?
   fi

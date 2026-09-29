@@ -5,7 +5,6 @@
   "files": {
     "cli/commands/init.mts": 1137,
     "cli/lib/generate/generate-structure-baseline.mts": 867,
-    "cli/lib/overlay.mts": 532,
     "gate-engine/co-occurrence/matcher.mts": 539,
     "gate-engine/critique/eval/bench.mts": 1164,
     "gate-engine/decisions/detect.mts": 542,

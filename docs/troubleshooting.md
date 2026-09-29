@@ -30,6 +30,11 @@ shim with `devkit init --overlay --global-commit-gate`. The shim covers the pre-
 completeness and sentry commit-message judges run only via `git ci` or `devkit ship` (`devkit doctor`
 says so when they are wired). See **overlay self-heal** in the glossary.
 
+**In a linked worktree** (`git worktree add`), the overlay's hooks run too: `core.hooksPath` is the
+absolute path of the overlay's `.devkit/hooks`, and the first commit in a worktree links that overlay in
+(a `devkit: linked this worktree…` line). An install from before this change wrote a relative path, and
+under it every linked worktree ran no hooks at all. `devkit doctor --fix` (or `devkit upgrade`) re-points it.
+
 ## My commit in a worktree ran a DIFFERENT checkout's hook
 
 Symptom: a commit made in a linked worktree is blocked by a gate that worktree's own

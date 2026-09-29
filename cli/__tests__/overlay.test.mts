@@ -8,7 +8,15 @@
 import { execFileSync } from 'node:child_process';
 // Reason: test scenario setup is intentionally explicit + self-contained per install mode (package/standalone/overlay/monorepo); shared bits already live in __tests__/_helpers.mjs
 // fallow-ignore-next-line code-duplication
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import doctorRun from '../commands/doctor.mts';
@@ -19,7 +27,7 @@ import { applyOverlayConstraints, defaultSelection } from '../lib/components.mts
 import { isTracked } from '../lib/git-tracked.mts';
 import { wireOverlayAntiSlop } from '../lib/install/anti-slop/overlay/install.mts';
 import { reviewHookDrift } from '../lib/husky/review-drift.mts';
-import { HEAL_ALIAS_CMD, syncOverlayHook } from '../lib/overlay.mts';
+import { healAliasCmd, syncOverlayHook } from '../lib/overlay.mts';
 import { removeSkills } from '../lib/sync-manifest.mts';
 import { rootRegistry, testExecFileSync } from './_helpers.mts';
 
@@ -274,7 +282,7 @@ describe('overlay (local-only) install', () => {
         cwd: root,
         encoding: 'utf8',
       }).trim(),
-    ).toBe('.devkit/hooks');
+    ).toBe(join(root, '.devkit', 'hooks'));
     const hook = readFileSync(join(root, '.devkit', 'hooks', 'pre-commit'), 'utf8');
     expect(hook).toContain('guard-deterministic'); // devkit's deterministic gates run in the overlay
     expect(hook).toContain('.husky/pre-commit'); // chains to the team's committed hook
@@ -343,7 +351,7 @@ describe('overlay (local-only) install', () => {
         cwd: root,
         encoding: 'utf8',
       }).trim(),
-    ).toBe('.devkit/hooks');
+    ).toBe(join(root, '.devkit', 'hooks'));
     expect(() =>
       execFileSync('sh', ['-n', join(root, '.devkit', 'hooks', 'pre-commit')], { stdio: 'pipe' }),
     ).not.toThrow();
@@ -403,7 +411,7 @@ describe('overlay (local-only) install', () => {
       }).trim(),
       // Reason: test scenario setup is intentionally explicit + self-contained per install mode (package/standalone/overlay/monorepo); shared bits already live in __tests__/_helpers.mjs
       // fallow-ignore-next-line code-duplication
-    ).toBe('.devkit/hooks');
+    ).toBe(join(root, '.devkit', 'hooks'));
 
     const cleanRun = (await import('../commands/clean.mts')).default;
     await cleanRun(['--yes'], root);
@@ -472,12 +480,14 @@ describe('overlay (local-only) install', () => {
         devkitRef: 'v0.9.0',
       });
 
-      expect(git('config', '--local', '--get', 'alias.ci').trim()).toBe(HEAL_ALIAS_CMD);
+      expect(git('config', '--local', '--get', 'alias.ci').trim()).toBe(
+        healAliasCmd(join(root, '.devkit', 'hooks')),
+      );
 
       // simulate husky re-claiming the hook on `bun install`, then heal via `git ci`
       git('config', 'core.hooksPath', '.husky/_');
       git('ci', '--allow-empty', '-m', 'heal');
-      expect(git('config', '--get', 'core.hooksPath').trim()).toBe('.devkit/hooks');
+      expect(git('config', '--get', 'core.hooksPath').trim()).toBe(join(root, '.devkit', 'hooks'));
     } finally {
       if (prevGlobal === undefined) delete process.env.GIT_CONFIG_GLOBAL;
       else process.env.GIT_CONFIG_GLOBAL = prevGlobal;
@@ -502,7 +512,7 @@ describe('overlay (local-only) install', () => {
           cwd: root,
           encoding: 'utf8',
         }).trim(),
-      ).toBe(HEAL_ALIAS_CMD);
+      ).toBe(healAliasCmd(join(root, '.devkit', 'hooks')));
       const cleanRun = (await import('../commands/clean.mts')).default;
       await cleanRun(['--yes'], root);
       expect(() =>
@@ -1284,7 +1294,7 @@ describe('overlay hook regeneration (syncOverlayHook + doctor --fix)', () => {
     expect(hooksPathOf(root)).toBe('.husky/_');
 
     expect(await doctorRun(['--fix'], root)).toBe(0);
-    expect(hooksPathOf(root)).toBe('.devkit/hooks');
+    expect(realpathSync(hooksPathOf(root))).toBe(realpathSync(join(root, '.devkit', 'hooks')));
   });
 
   it('doctor --fix never leaves a re-pointed hooksPath aiming at a missing hook', async () => {
@@ -1297,30 +1307,25 @@ describe('overlay hook regeneration (syncOverlayHook + doctor --fix)', () => {
     execFileSync('git', ['config', 'core.hooksPath', '.husky/_'], { cwd: root });
 
     expect(await doctorRun(['--fix'], root)).toBe(0);
-    expect(hooksPathOf(root)).toBe('.devkit/hooks');
+    expect(realpathSync(hooksPathOf(root))).toBe(realpathSync(join(root, '.devkit', 'hooks')));
     expect(existsSync(join(root, '.devkit', 'hooks', 'pre-commit'))).toBe(true);
   });
 
-  it('doctor --fix leaves the shared core.hooksPath alone inside a linked worktree', async () => {
-    // core.hooksPath lives in the SHARED .git/config (only --worktree scope is per-checkout) and
-    // `.devkit/hooks` is relative, so writing it here would re-point every sibling worktree at a
-    // directory most of them do not have.
+  it('doctor --fix in a linked worktree re-points the shared hooksPath at the overlay home', async () => {
+    // sc-4157: the value is absolute and shared, so it must name the home, never a worktree's copy.
     const root = workRepo();
     await initOverlay(root);
     execFileSync('git', ['config', 'core.hooksPath', '.husky/_'], { cwd: root });
     const linked = join(mkTmp('overlay-linked-'), 'wt');
     execFileSync('git', ['worktree', 'add', '-q', '--detach', linked], { cwd: root });
-    // `.devkit/` is git-ignored (overlay is invisible), so a fresh worktree has none. Copy it in,
-    // otherwise doctor exits "not initialized" and the worktree guard is never reached.
+    // A legacy per-worktree copy (the pre-sc-4157 workaround): doctor reads its config from here.
     cpSync(join(root, '.devkit'), join(linked, '.devkit'), { recursive: true });
-    expect(existsSync(join(linked, '.devkit', 'hooks', 'pre-commit'))).toBe(true);
 
-    // Exit 1 (not 2 "not initialized") proves the overlay branch ran, and the hook IS present, so
-    // the only thing that can have refused the write is the linked-worktree guard.
-    expect(await doctorRun(['--fix'], linked)).toBe(1);
+    await doctorRun(['--fix'], linked);
 
-    expect(hooksPathOf(root)).toBe('.husky/_');
-    expect(hooksPathOf(linked)).toBe('.husky/_');
+    const home = realpathSync(join(root, '.devkit', 'hooks'));
+    expect(realpathSync(hooksPathOf(root))).toBe(home);
+    expect(realpathSync(hooksPathOf(linked))).toBe(home);
   });
 });
 

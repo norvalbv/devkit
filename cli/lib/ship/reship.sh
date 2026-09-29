@@ -697,7 +697,7 @@ reship_release_worktree_for_wait() {
 gate_signal_handoff_init
 
 # Detached worktree at the PR branch tip for an append, or at the pinned PR base for a rewrite.
-git worktree add -q --detach "$WT" "$BASE" >&2
+git -c core.hooksPath=/dev/null worktree add -q --detach "$WT" "$BASE" >&2
 # branch_created=0 always: this worktree is detached and holds no branch, so nothing may ever delete
 # one on its behalf. The record exists so a leftover re-ship worktree is attributable to the process
 # that made it, the same way new-ship's is.

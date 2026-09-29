@@ -342,7 +342,7 @@ gate_baseline_reader_preflight() {
 # with a useful path instead of treating absence as an opt-out.
 gate_worktree_pre_commit() {
   local wt=$1 root=${2:-} hooks_path default_hooks_dir
-  if [ -n "$root" ] && [ -x "$root/.devkit/hooks/pre-commit" ]; then
+  if [ -n "$root" ] && [ -x "$(gate_overlay_root "$root")/.devkit/hooks/pre-commit" ]; then
     printf '%s\n' "$wt/.devkit/hooks/pre-commit"
     return 0
   fi
@@ -367,8 +367,22 @@ gate_worktree_pre_commit() {
 }
 
 # prepare_gate_worktree <worktree> <consumer-root> <purpose> [extra-link-dir...]
+# Where <root>'s overlay lives: its own, else the main worktree's — a linked worktree only gets the
+# git-excluded overlay linked in on its first commit (sc-4157). Empty when the repo is not overlay.
+gate_overlay_root() {
+  local main
+  if grep -Eq '"overlay"[[:space:]]*:[[:space:]]*true' "$1/.devkit/config.json" 2>/dev/null; then
+    printf '%s\n' "$1"
+    return 0
+  fi
+  main=$(gate_main_worktree "$1")
+  grep -Eq '"overlay"[[:space:]]*:[[:space:]]*true' "$main/.devkit/config.json" 2>/dev/null &&
+    printf '%s\n' "$main"
+  return 0
+}
+
 gate_overlay_mode() {
-  grep -Eq '"overlay"[[:space:]]*:[[:space:]]*true' "$1/.devkit/config.json" 2>/dev/null
+  [ -n "$(gate_overlay_root "$1")" ]
 }
 
 # The hook directory git will actually use, relative to the checkout <dir>; empty when hooksPath is
@@ -402,8 +416,10 @@ gate_hook_source_preflight() {
   local root=$1 base=$2 purpose=$3 wt=${4:-}
   # Overlay mode stores its complete hook chain under ignored .devkit/hooks. An absent executable hook
   # is a dark gate, so fail closed.
-  if gate_overlay_mode "$root" && [ ! -x "$root/.devkit/hooks/pre-commit" ]; then
-    echo "overlay mode but $root/.devkit/hooks/pre-commit missing/non-executable — run 'devkit init --overlay' (gates must not fail open)" >&2
+  local overlay_root
+  overlay_root=$(gate_overlay_root "$root")
+  if [ -n "$overlay_root" ] && [ ! -x "$overlay_root/.devkit/hooks/pre-commit" ]; then
+    echo "overlay mode but $overlay_root/.devkit/hooks/pre-commit missing/non-executable — run 'devkit init --overlay' (gates must not fail open)" >&2
     return 1
   fi
   local rel main_root
