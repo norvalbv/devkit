@@ -15,8 +15,7 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { buildCommitMsgBlock, COMMIT_MSG_PREAMBLE, commitMsgGuards } from '../commit-msg-block.mts';
-import { buildPassthroughHook } from '../husky-block.mts';
-import { shQuote } from '../../ship/redact-secrets.mts';
+import { buildPassthroughHook, chainWord } from '../husky-block.mts';
 
 const LOCAL_HOOK = join('.devkit', 'hooks', 'commit-msg');
 const HOOK_MODE = 0o755;
@@ -43,7 +42,7 @@ export function buildOverlayCommitMsgHook(
   pkgRel = '',
 ): string {
   const block = buildCommitMsgBlock(selection, pkgRel, { standalone: true, scrubGitEnv: true });
-  const chain = shQuote(chainTarget); // single quotes: a hooksPath with $(...) must not execute
+  const chain = chainWord(chainTarget); // single-quoted: a hooksPath with $(...) must not execute
   return `${COMMIT_MSG_PREAMBLE}
 # devkit OVERLAY commit-msg (LOCAL, git-ignored): devkit's message judges, then the repo's OWN
 # commit-msg unchanged. Global CLI, fail-open when devkit is not installed.

@@ -5,11 +5,14 @@
 
 import { execFileSync } from 'node:child_process';
 import {
+  chmodSync,
   existsSync,
   lstatSync,
   mkdirSync,
   readFileSync,
   realpathSync,
+  rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
@@ -18,11 +21,13 @@ import cleanRun from '../commands/clean.mts';
 import doctorRun from '../commands/doctor.mts';
 import { applyInit } from '../commands/init.mts';
 import { applyOverlayConstraints, defaultSelection } from '../lib/components.mts';
+import { chainWord } from '../lib/husky/husky-block.mts';
 import { healAliasCmd, isHealAlias } from '../lib/husky/overlay/heal-alias.mts';
 import {
   isOverlayHooksValue,
   overlayCommandCwd,
   overlayHome,
+  unprojectOverlay,
   worktrees,
 } from '../lib/husky/overlay/overlay-home.mts';
 import { captureOrigHooksPath } from '../lib/overlay.mts';
@@ -109,8 +114,9 @@ describe('overlay hooks in linked worktrees (sc-4157)', () => {
     commit(wt, 'from the worktree');
 
     expect(markerLines()).toEqual([realpathSync(wt)]);
-    expect(lstatSync(join(wt, '.devkit')).isSymbolicLink()).toBe(true);
-    expect(lstatSync(join(wt, 'eslint.config.devkit.mjs')).isSymbolicLink()).toBe(true);
+    expect(lstatSync(join(wt, '.devkit')).isDirectory()).toBe(true);
+    expect(lstatSync(join(wt, '.devkit', 'config.json')).isSymbolicLink()).toBe(true);
+    expect(lstatSync(join(wt, 'eslint.config.devkit.mjs')).isFile()).toBe(true);
     expect(git(wt, 'status', '--porcelain')).toBe('');
   });
 
@@ -145,11 +151,12 @@ describe('overlay hooks in linked worktrees (sc-4157)', () => {
     await initOverlay(root);
     const wt = addWorktree(root);
     commit(wt, 'link it');
-    expect(lstatSync(join(wt, '.devkit')).isSymbolicLink()).toBe(true);
+    expect(lstatSync(join(wt, '.devkit', 'config.json')).isSymbolicLink()).toBe(true);
 
     await cleanRun(['--yes'], root);
 
     expect(existsSync(join(wt, '.devkit'))).toBe(false);
+    expect(existsSync(join(wt, 'eslint.config.devkit.mjs'))).toBe(false);
     expect(git(wt, 'status', '--porcelain')).toBe('');
     expect(git(root, 'config', '--get', 'core.hooksPath')).toBe('.husky/_');
   });
@@ -241,7 +248,7 @@ describe('overlay hooks in linked worktrees (sc-4157)', () => {
     const nested = join(root, '.worktrees', 'feature');
     git(root, 'worktree', 'add', '-q', '--detach', nested);
     commit(nested, 'link it');
-    expect(lstatSync(join(nested, '.devkit')).isSymbolicLink()).toBe(true);
+    expect(lstatSync(join(nested, '.devkit', 'config.json')).isSymbolicLink()).toBe(true);
 
     await cleanRun(['--yes'], root);
 
@@ -257,5 +264,185 @@ describe('overlay hooks in linked worktrees (sc-4157)', () => {
     expect(lstatSync(join(wt, '.devkit', 'config.json')).isSymbolicLink()).toBe(true);
 
     expect(realpathSync(overlayCommandCwd(wt))).toBe(realpathSync(root));
+  });
+
+  // Node resolves an ESM module at its real path, so a LINKED devkit config would import the home's.
+  it('the worktree lints with its own eslint.config.mjs, not the home’s', async () => {
+    const root = workRepo();
+    await initOverlay(root);
+    const wt = addWorktree(root);
+    commit(wt, 'link it');
+    writeFileSync(join(wt, 'eslint.config.mjs'), "export default ['branch-rules'];\n");
+
+    const first = execFileSync(
+      'node',
+      [
+        '--input-type=module',
+        '-e',
+        `const m = await import(${JSON.stringify(join(wt, 'eslint.config.devkit.mjs'))}); console.log(m.default[0])`,
+      ],
+      { encoding: 'utf8' },
+    ).trim();
+
+    expect(first).toBe('branch-rules');
+  });
+
+  it('ratchet baselines are copied, so a worktree lowering one leaves the home’s alone', async () => {
+    const root = workRepo();
+    await initOverlay(root);
+    mkdirSync(join(root, '.devkit', 'baselines'), { recursive: true });
+    writeFileSync(join(root, '.devkit', 'baselines', 'size-lines.json'), '{"a.ts":400}\n');
+    mkdirSync(join(root, 'fallow-baselines'));
+    writeFileSync(join(root, 'fallow-baselines', 'health.json'), '{}\n');
+    writeFileSync(join(root, '.git', 'info', 'exclude'), '\nfallow-baselines\n', { flag: 'a' });
+    const wt = addWorktree(root);
+
+    commit(wt, 'link it');
+    writeFileSync(join(wt, '.devkit', 'baselines', 'size-lines.json'), '{"a.ts":300}\n');
+
+    expect(lstatSync(join(wt, '.devkit', 'baselines')).isSymbolicLink()).toBe(false);
+    expect(lstatSync(join(wt, 'fallow-baselines')).isSymbolicLink()).toBe(false);
+    expect(readFileSync(join(root, '.devkit', 'baselines', 'size-lines.json'), 'utf8')).toBe(
+      '{"a.ts":400}\n',
+    );
+    expect(git(wt, 'status', '--porcelain')).toBe('');
+  });
+
+  it('doctor flags a worktree linked by the first sc-4157 projection, and --fix makes it branch-local', async () => {
+    const root = workRepo();
+    await initOverlay(root);
+    const wt = addWorktree(root);
+    symlinkSync(join(root, '.devkit'), join(wt, '.devkit'));
+    symlinkSync(join(root, 'eslint.config.devkit.mjs'), join(wt, 'eslint.config.devkit.mjs'));
+
+    expect(await doctorRun([], root)).toBe(1);
+    await doctorRun(['--fix'], root);
+
+    expect(lstatSync(join(wt, '.devkit')).isSymbolicLink()).toBe(false);
+    expect(lstatSync(join(wt, '.devkit', 'config.json')).isSymbolicLink()).toBe(true);
+    expect(lstatSync(join(wt, 'eslint.config.devkit.mjs')).isFile()).toBe(true);
+    expect(existsSync(join(root, '.devkit', 'config.json'))).toBe(true);
+    expect(git(wt, 'status', '--porcelain')).toBe('');
+  });
+
+  it('a repo whose own hook lives in .git/hooks still chains to it from a linked worktree', async () => {
+    const root = mkTmp('overlay-githooks-');
+    git(root, 'init', '-q');
+    git(root, 'config', 'user.email', 't@t.t');
+    git(root, 'config', 'user.name', 't');
+    writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'work' }));
+    writeFileSync(join(root, 'eslint.config.mjs'), 'export default [];\n');
+    git(root, 'add', '-A');
+    git(root, '-c', 'core.hooksPath=/dev/null', 'commit', '-qm', 'init');
+    const hook = join(root, '.git', 'hooks', 'pre-commit');
+    writeFileSync(hook, '#!/bin/sh\npwd -P >> "$DK_TEST_MARKER"\n');
+    chmodSync(hook, 0o755);
+    await initOverlay(root);
+    const wt = addWorktree(root);
+
+    commit(root, 'from the home');
+    commit(wt, 'from the worktree');
+
+    expect(markerLines()).toEqual([realpathSync(root), realpathSync(wt)]);
+  });
+
+  it('clean removes only the copies projection made, never a worktree’s own file', async () => {
+    const root = workRepo();
+    await initOverlay(root);
+    mkdirSync(join(root, '.devkit', 'baselines'), { recursive: true });
+    writeFileSync(join(root, '.devkit', 'baselines', 'size-lines.json'), '{}\n');
+    const wt = addWorktree(root);
+    writeFileSync(join(wt, 'eslint.config.devkit.mjs'), '// the worktree’s own\n');
+
+    commit(wt, 'link it');
+    expect(lstatSync(join(wt, '.devkit', 'baselines')).isDirectory()).toBe(true);
+    await cleanRun(['--yes'], root);
+
+    expect(readFileSync(join(wt, 'eslint.config.devkit.mjs'), 'utf8')).toBe(
+      '// the worktree’s own\n',
+    );
+    expect(existsSync(join(wt, '.devkit'))).toBe(false);
+  });
+
+  it('clean keeps a baseline the branch changed and lists it, but drops untouched copies', async () => {
+    const root = workRepo();
+    await initOverlay(root);
+    mkdirSync(join(root, '.devkit', 'baselines'), { recursive: true });
+    writeFileSync(join(root, '.devkit', 'baselines', 'size-lines.json'), '{"a.ts":400}\n');
+    const wt = addWorktree(root);
+    commit(wt, 'link it');
+    writeFileSync(join(wt, '.devkit', 'baselines', 'size-lines.json'), '{"a.ts":300}\n');
+
+    await cleanRun(['--yes'], root);
+
+    expect(readFileSync(join(wt, '.devkit', 'baselines', 'size-lines.json'), 'utf8')).toBe(
+      '{"a.ts":300}\n',
+    );
+    expect(existsSync(join(wt, 'eslint.config.devkit.mjs'))).toBe(false);
+  });
+
+  it('doctor --fix restores a copy a worktree lost', async () => {
+    const root = workRepo();
+    await initOverlay(root);
+    const wt = addWorktree(root);
+    commit(wt, 'link it');
+    rmSync(join(wt, 'eslint.config.devkit.mjs'));
+
+    expect(await doctorRun([], root)).toBe(1);
+    await doctorRun(['--fix'], root);
+
+    expect(lstatSync(join(wt, 'eslint.config.devkit.mjs')).isFile()).toBe(true);
+  });
+
+  it('a .git/hooks chain resolves through the common dir, trailing slash or not', () => {
+    for (const target of [
+      '.git/hooks/pre-commit',
+      '.git/hooks//pre-commit',
+      './.git/hooks/pre-commit',
+    ])
+      expect(chainWord(target)).toBe(
+        '"$(git rev-parse --path-format=absolute --git-common-dir)/hooks/"pre-commit',
+      );
+    expect(chainWord('.husky/pre-commit')).toBe('.husky/pre-commit');
+    expect(chainWord('.githooks/$(rm -rf ~)')).toBe("'.githooks/$(rm -rf ~)'");
+  });
+
+  it('a copy that fails leaves the worktree unprojected, so the next commit retries', async () => {
+    const root = workRepo();
+    await initOverlay(root);
+    mkdirSync(join(root, 'fallow-baselines'));
+    const unreadable = join(root, 'fallow-baselines', 'health.json');
+    writeFileSync(unreadable, '{}\n');
+    chmodSync(unreadable, 0o000);
+    writeFileSync(join(root, '.git', 'info', 'exclude'), '\nfallow-baselines\n', { flag: 'a' });
+    const wt = addWorktree(root);
+
+    try {
+      commit(wt, 'copy fails');
+      expect(existsSync(join(wt, 'fallow-baselines'))).toBe(false);
+      expect(existsSync(join(wt, '.devkit', 'config.json'))).toBe(false);
+    } finally {
+      chmodSync(unreadable, 0o644);
+    }
+    commit(wt, 'copy succeeds');
+
+    expect(readFileSync(join(wt, 'fallow-baselines', 'health.json'), 'utf8')).toBe('{}\n');
+    expect(lstatSync(join(wt, '.devkit', 'config.json')).isSymbolicLink()).toBe(true);
+  });
+
+  it('clean never deletes the home’s baselines through a legacy linked .devkit', async () => {
+    const root = workRepo();
+    await initOverlay(root);
+    mkdirSync(join(root, '.devkit', 'baselines'), { recursive: true });
+    writeFileSync(join(root, '.devkit', 'baselines', 'size-lines.json'), '{}\n');
+    const wt = addWorktree(root);
+    symlinkSync(join(root, '.devkit'), join(wt, '.devkit'));
+
+    unprojectOverlay(root, '');
+
+    expect(readFileSync(join(root, '.devkit', 'baselines', 'size-lines.json'), 'utf8')).toBe(
+      '{}\n',
+    );
+    expect(existsSync(join(wt, '.devkit'))).toBe(false);
   });
 });

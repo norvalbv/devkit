@@ -213,9 +213,15 @@ function cleanOverlay(cwd: string, cfg: DevkitConfig, dryRun: boolean): void {
   restoreHooksPath(gitRoot, cfg.origHooksPath ?? '', dryRun);
   removeHealAlias(gitRoot, dryRun);
   // sc-4157: links first — once this home's .devkit goes they dangle, and the exclude prune exposes them.
-  const unlinked = dryRun ? [] : unprojectOverlay(gitRoot, cfg.pkgRel ?? '');
+  const { unlinked, kept } = dryRun
+    ? { unlinked: [], kept: [] }
+    : unprojectOverlay(gitRoot, cfg.pkgRel ?? '');
   if (unlinked.length)
     console.log(`  ✓ unlinked the overlay from ${unlinked.length} worktree path(s)`);
+  if (kept.length)
+    console.log(
+      `  · kept ${kept.length} branch-changed copy/copies (delete by hand): ${kept.join(', ')}`,
+    );
   // agent-half (skills/agents/agent-hook scripts + their registrations) — repo-wide at the git root.
   // The synced files + manifests are git-ignored; removing them keeps the round-trip footprint-free.
   const comp = cfg.components ?? {};
