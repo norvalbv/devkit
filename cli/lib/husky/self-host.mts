@@ -23,13 +23,13 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'n
 import { join } from 'node:path';
 import { defaultSelection, RECOMMENDED_GUARD_IDS, type Selection } from '../components.mts';
 import { readJson } from '../fs-helpers.mts';
+import { REVIEW_FAILURE_FINALIZER } from './gate-policy/block-helpers.mts';
 import { markEnd } from './husky.mts';
 import {
   buildFullHook,
   buildGuardBlock,
   extractGuardBlock,
   PACKAGE_BIN_DIR_FRAGMENT,
-  REVIEW_DETERMINISTIC_FINALIZER,
   replaceGuardBlock,
 } from './husky-block.mts';
 import {
@@ -218,9 +218,7 @@ function definedOnly(recorded: Partial<Selection> | undefined): Partial<Selectio
 
 function withSelfHostFragment(text: string, pkgRel: string, fragment: string): string {
   const end = markEnd(pkgRel);
-  const anchor = text.includes(REVIEW_DETERMINISTIC_FINALIZER)
-    ? REVIEW_DETERMINISTIC_FINALIZER
-    : end;
+  const anchor = text.includes(REVIEW_FAILURE_FINALIZER) ? REVIEW_FAILURE_FINALIZER : end;
   return text.replace(`\n${anchor}`, `\n\n${fragment}\n\n${anchor}`);
 }
 

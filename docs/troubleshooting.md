@@ -248,8 +248,16 @@ still perform the scoped merge after `init` or `doctor --fix` refreshed the mana
 The deterministic gates (structure, fanout, size, dup, clone …) run all-and-**aggregate**: instead of
 failing fast on the first, they collect every failure into one report naming each (`guard-<id>`). Fix each
 named gate (see **A pre-commit gate blocked my commit** above) and re-commit — the **deterministic-prefix
-cache** means the gates that already passed won't re-run. AI gates are the exception: they stay fail-fast,
-one finding at a time, by design.
+cache** means the gates that already passed won't re-run. AI gates are the exception: on a commit or ship
+they stay fail-fast, one finding at a time, by design.
+
+## `✗ review: failed gates: <names>`
+
+`devkit review` runs every selected gate even after one blocks, then prints this line and exits 1.
+guard-comments is deterministic, so it defers under `--dry-gates` too, where the line reads
+`✗ dry-gates: …`. A confirmed AI finding from guard-decisions or guard-review defers only in review. A
+judge outage (exit 3), unreadable evidence (exit 4) or a Qavis strict block still stops the run at once.
+Each named gate's findings appear above the line.
 
 ## `bun install` fails: `no commit matching "<sha>" found for "@norvalbv/devkit"`
 

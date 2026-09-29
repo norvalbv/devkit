@@ -11,6 +11,12 @@
  */
 
 import { GUARD_FRAGMENTS } from './ai-guard-fragments.mts';
+import {
+  DK_DETERMINISTIC_GATE_HELPER,
+  DK_GATE_AI_HELPER,
+  DK_GATE_BLOCK_HELPERS,
+  REVIEW_FAILURE_FINALIZER,
+} from './gate-policy/block-helpers.mts';
 import { buildCommitTerminalFragment } from './commit-terminal.mts';
 import { FORMAT_FRAGMENT } from './format-fragment.mts';
 import { markEnd, markStart } from './husky.mts';
@@ -39,19 +45,7 @@ interface HookSelection {
   extras?: Array<{ label: string; cmd: string }>;
 }
 
-// Commit/ship exits on failure; diagnostic modes remember it so every diagnostic runs (safe under `sh -e`).
-const DK_DETERMINISTIC_GATE_HELPER = `dk_review_det_failed=0
-__dk_gate_deterministic() {
-    dk_det_rc=0
-    __dk_no_git_env "$@" || dk_det_rc=$?
-    [ "$dk_det_rc" -eq 0 ] && return 0
-    case "\${DEVKIT_RUN_MODE:-}" in review|dry-gates) ;; *) exit 1 ;; esac
-    dk_review_det_failed=1
-}`;
 export const PACKAGE_BIN_DIR_FRAGMENT = '__dk_package_bin_dir="$(bun pm bin)"';
-export const REVIEW_DETERMINISTIC_FINALIZER = `# devkit:review-deterministic-finalizer
-if [ "\${dk_review_det_failed:-0}" -ne 0 ]; then exit 1; fi
-# /devkit:review-deterministic-finalizer`;
 
 // The ONE deterministic line: `guard-deterministic` (gate-engine/deterministic/run.mjs) owns the
 // prefix-cache check/record, runs the selected guards (.devkit/config.json components.guards),
@@ -138,6 +132,7 @@ export function buildGuardBlock(selection: HookSelection, pkgRel = ''): string {
     ...DK_HOOK_HELPERS,
     PACKAGE_BIN_DIR_FRAGMENT,
     DK_REVIEW_BASELINE_HELPER,
+    DK_GATE_BLOCK_HELPERS,
   ];
   // First so a first-gate block still records the run's terminal (the trap covers every exit path).
   if (!pkgRel && selection.biome) pieces.push(FORMAT_FRAGMENT);
@@ -153,7 +148,7 @@ export function buildGuardBlock(selection: HookSelection, pkgRel = ''): string {
     pieces.push(selectedFragment('sentry', sentryShipPrewarmFragment(false)));
   if (selection.guards?.includes(QAVIS_ADVISORY_ID))
     pieces.push(selectedFragment(QAVIS_ADVISORY_ID, QAVIS_FRAGMENT));
-  if (deterministic) pieces.push(REVIEW_DETERMINISTIC_FINALIZER);
+  pieces.push(REVIEW_FAILURE_FINALIZER);
   return wrapGuardBlock(pieces.join('\n\n'), pkgRel, HOOK_PATH_PRELUDE, '\n\n');
 }
 
@@ -172,13 +167,12 @@ export function buildFullHook(selection: HookSelection, pkgRel = ''): string {
   return `${HOOK_PREAMBLE}\n${buildGuardBlock(selection, pkgRel)}\n\nexit 0\n`;
 }
 
-// Standalone (no-package) AI-gate args, in run order. The bin is global (devkit installed with
-// `bun add -g`); the block fail-opens per gate so a repo whose committer doesn't have devkit is
-// never blocked — exactly fallow's `command -v fallow || exit 0`.
+// Standalone (no-package) gate args, in run order, each led by its block lane. The bin is global
+// (`bun add -g`) and fail-opens per gate, exactly fallow's `command -v fallow || exit 0`.
 const STANDALONE_GATES = {
-  comments: ['guard-comments', 'gate'],
-  decisions: ['guard-decisions', 'detect', '--gate'],
-  review: ['guard-review', '--gate'],
+  comments: ['deterministic', 'guard-comments', 'gate'],
+  decisions: ['ai', 'guard-decisions', 'detect', '--gate'],
+  review: ['ai', 'guard-review', '--gate'],
 };
 
 // Standalone/overlay use the global orchestrator if installed and share the package-mode policy:
@@ -188,12 +182,6 @@ const standaloneDeterministicLines = (
 ) => `if command -v guard-deterministic >/dev/null 2>&1; then
     __dk_gate_deterministic guard-deterministic --hook "\${DK_HOOK_PATH:-$0}"${structureCmd ? ` --structure "${structureCmd}"` : ''}
 fi`;
-
-// AI-gate helper: FAIL-FAST (never aggregated — findings surface one at a time), with exit 3
-// (strict ship mode failing closed on a judge outage) given its own remedy so it is never
-// rendered as a code violation.
-const DK_GATE_AI_HELPER =
-  '__dk_gate_ai() { command -v "$1" >/dev/null 2>&1 || return 0; rc=0; __dk_no_git_env "$@" || rc=$?; if [ "$rc" -eq 4 ]; then echo "   $1: NOT a gate rejection — the staged content itself is unreadable (evidence above)."; exit 1; elif [ "$rc" -eq 3 ]; then echo "   $1: judge unavailable — strict ship mode failed closed. Follow the judge CLI remedy printed above, then re-run devkit ship."; exit 1; elif [ "$rc" -eq 1 ] || { [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ]; }; then exit 1; fi; }';
 
 /**
  * Build standalone gates from global fail-open bins. Biome needs local tooling and is omitted;
@@ -206,6 +194,7 @@ export function buildStandaloneBlock(selection: HookSelection, pkgRel = ''): str
     '# devkit standalone gates — global CLI, fail-open (skipped if devkit is not installed).',
     buildCommitTerminalFragment(handoff),
     ...DK_HOOK_HELPERS,
+    DK_GATE_BLOCK_HELPERS,
     DK_GATE_AI_HELPER,
   ];
   if (deterministic)
@@ -220,7 +209,7 @@ export function buildStandaloneBlock(selection: HookSelection, pkgRel = ''): str
     pieces.push(selectedFragment('sentry', sentryShipPrewarmFragment(true)));
   if (selection.guards?.includes(QAVIS_ADVISORY_ID))
     pieces.push(selectedFragment(QAVIS_ADVISORY_ID, standaloneQavisLines));
-  if (deterministic) pieces.push(REVIEW_DETERMINISTIC_FINALIZER);
+  pieces.push(REVIEW_FAILURE_FINALIZER);
   return wrapGuardBlock(pieces.join('\n'), pkgRel, HOOK_PATH_PRELUDE, '\n');
 }
 
@@ -309,6 +298,7 @@ export function buildOverlayHook(
   const gates = [
     buildCommitTerminalFragment(handoff),
     ...DK_HOOK_HELPERS,
+    DK_GATE_BLOCK_HELPERS,
     DK_GATE_AI_HELPER,
     DK_REVIEW_BASELINE_HELPER,
   ];
@@ -323,7 +313,7 @@ export function buildOverlayHook(
   // No sentry prewarm: overlay's commit-msg judge (sc-1794) runs sentry after the advisory instead.
   if (selection.guards?.includes(QAVIS_ADVISORY_ID))
     gates.push(selectedFragment(QAVIS_ADVISORY_ID, standaloneQavisLines));
-  const inner = `${gates.join('\n')}\n\n${overlayReviewBaseline(fallow)}${deterministic ? `\n\n${REVIEW_DETERMINISTIC_FINALIZER}` : ''}`;
+  const inner = `${gates.join('\n')}\n\n${overlayReviewBaseline(fallow)}\n\n${REVIEW_FAILURE_FINALIZER}`;
   const scoped = pkgRel
     ? `${DK_COMMIT_INDEX_CAPTURE}\n${HOOK_PATH_PRELUDE}\n( cd ${JSON.stringify(pkgRel)} || exit 1\n${inner}\n) || exit 1`
     : `${DK_COMMIT_INDEX_CAPTURE}\n${inner}`;
