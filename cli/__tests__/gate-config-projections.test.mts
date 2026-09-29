@@ -187,7 +187,7 @@ describe('gate config projections', () => {
     expect(() => lstatSync(join(worktree, 'guard.config.json'))).toThrow();
   });
 
-  it('copies the complete SQLite family and isolates runtime writes from the target', () => {
+  it('copies the SQLite family but its wal-index and isolates runtime writes from the target', () => {
     const { root, worktree } = fixture();
     const indexPath = '.search-code/index\nreview.db';
     const source = join(root, indexPath);
@@ -208,11 +208,13 @@ describe('gate config projections', () => {
     for (const [suffix, content] of [
       ['', 'main'],
       ['-wal', 'wal'],
-      ['-shm', 'shm'],
       ['-journal', 'journal'],
     ]) {
       expect(readFileSync(`${join(worktree, indexPath)}${suffix}`, 'utf8')).toBe(content);
     }
+    expect(
+      lstatSync(`${join(worktree, indexPath)}-shm`, { throwIfNoEntry: false }),
+    ).toBeUndefined();
     writeFileSync(`${join(worktree, indexPath)}-wal`, 'runtime');
     expect(readFileSync(`${source}-wal`, 'utf8')).toBe('wal');
   });

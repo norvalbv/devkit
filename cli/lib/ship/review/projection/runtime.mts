@@ -24,10 +24,10 @@ import {
 } from '../runtime-paths.mts';
 import { fail } from '../shared/common.mts';
 import { resolveReviewSource } from '../source-projection.mts';
+import { sqliteFamily, sqliteFamilyPath, sqliteWalIndexPath } from './sqlite-family.mts';
 
 const VERSION = 1 as const;
 const SHA256 = /^[a-f0-9]{64}$/;
-const SQLITE_SUFFIXES = ['', '-wal', '-shm', '-journal'] as const;
 // Ratchet/cache gates legitimately update their own ignored baseline/cache state during a run, so
 // these roots are allowed to drift between the captured source and the private copy (verify checks
 // only that they stay symlink-free); every other projected root is immutable and must match exactly.
@@ -144,7 +144,7 @@ function copySafeTree(source: string, destination: string): void {
 }
 
 function mutablePath(path: string, indexPath: string): boolean {
-  if (indexPath && SQLITE_SUFFIXES.some((suffix) => path === `${indexPath}${suffix}`)) return true;
+  if (sqliteFamilyPath(path, indexPath)) return true;
   return MUTABLE_ROOTS.some((root) => path === root || path.startsWith(`${root}/`));
 }
 
@@ -161,7 +161,7 @@ function candidatePaths(candidates: string[], indexPath: string): string[] {
   const result: string[] = [];
   for (const path of ordered) {
     if (result.some((parent) => path.startsWith(`${parent}/`))) continue;
-    if (path === indexPath) result.push(...SQLITE_SUFFIXES.map((suffix) => `${path}${suffix}`));
+    if (path === indexPath) result.push(...sqliteFamily(path));
     else result.push(path);
   }
   return result;
@@ -196,8 +196,8 @@ function privateDestination(root: string, path: string): string {
   );
 }
 
-function sqliteFamilyPath(path: string, indexPath: string): boolean {
-  return Boolean(indexPath && SQLITE_SUFFIXES.some((suffix) => path === `${indexPath}${suffix}`));
+function projectedSourceState(root: string, path: string, indexPath: string): ProjectionState {
+  return sqliteWalIndexPath(path, indexPath) ? { type: 'absent' } : captureState(root, path, true);
 }
 
 function selectProjections(
@@ -211,7 +211,7 @@ function selectProjections(
     if (lstatSync(privateDestination(destination, path), { throwIfNoEntry: false }) !== undefined) {
       continue;
     }
-    const sourceBefore = captureState(source, path, true);
+    const sourceBefore = projectedSourceState(source, path, indexPath);
     if (sourceBefore.type === 'absent' && !sqliteFamilyPath(path, indexPath)) continue;
     selected.push({ path, source: sourceBefore });
   }
@@ -250,7 +250,7 @@ function verifySelectedProjection(
   selected: SelectedProjection,
   indexPath: string,
 ): ProjectionEntry {
-  const sourceAfter = captureState(source, selected.path, true);
+  const sourceAfter = projectedSourceState(source, selected.path, indexPath);
   if (!stateMatches(selected.source, sourceAfter)) {
     fail('gate projections changed during capture; retry');
   }
