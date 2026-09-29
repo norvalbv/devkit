@@ -9,7 +9,7 @@ import {
 } from '../manifest/validation.mts';
 import { errorMessage, fail, objectValue } from '../shared/common.mts';
 
-export const REVIEW_REPOSITORY_STATE_VERSION = 1 as const;
+export const REVIEW_REPOSITORY_STATE_VERSION = 2 as const;
 export const REVIEW_REPOSITORY_OBJECT_ID = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
 const SHA256 = /^[a-f0-9]{64}$/;
 const MAX_MANIFEST_SIZE = 1024 * 1024;

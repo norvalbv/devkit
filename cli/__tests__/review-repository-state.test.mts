@@ -2,7 +2,6 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import {
   appendFileSync,
   existsSync,
-  mkdirSync,
   readdirSync,
   readFileSync,
   realpathSync,
@@ -17,6 +16,7 @@ import {
   verifyReviewRepositoryState,
 } from '../lib/ship/review/repository/state.mts';
 import { rootRegistry } from './_helpers.mts';
+import { repositoryStateFixture } from './_review-repository-state-fixture.mts';
 
 const REPOSITORY_STATE_CLI = fileURLToPath(
   new URL('../lib/ship/review/repository/state.mts', import.meta.url),
@@ -25,41 +25,7 @@ const { mkTmp, cleanup } = rootRegistry();
 
 afterEach(cleanup);
 
-interface RepositoryFixture {
-  env: NodeJS.ProcessEnv;
-  parent: string;
-  root: string;
-  manifest: string;
-  git: (...args: string[]) => string;
-}
-
-function fixture(name = 'devkit-review-repository-state-'): RepositoryFixture {
-  const parent = mkTmp(name);
-  const root = join(parent, 'target');
-  const home = join(parent, 'home');
-  mkdirSync(root);
-  mkdirSync(home);
-  const env = {
-    ...process.env,
-    GIT_CONFIG_NOSYSTEM: '1',
-    HOME: home,
-    XDG_CONFIG_HOME: join(home, '.config'),
-  };
-  const git = (...args: string[]) =>
-    execFileSync('git', args, { cwd: root, env, encoding: 'utf8' }).trim();
-  git('init', '-q', '-b', 'main');
-  git('config', 'user.name', 'Repository State Test');
-  git('config', 'user.email', 'repository-state@test.invalid');
-  writeFileSync(join(root, 'tracked.txt'), 'base\n');
-  git('add', 'tracked.txt');
-  git('commit', '-q', '-m', 'base');
-  git('update-ref', 'refs/remotes/origin/main', 'HEAD');
-  git('symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main');
-  git('config', 'branch.main.remote', 'origin');
-  git('config', 'branch.main.merge', 'refs/heads/main');
-  git('config', 'remote.origin.url', 'https://example.invalid/owner/repository.git');
-  return { env, parent, root, manifest: join(parent, 'repository-state.json'), git };
-}
+const fixture = (name?: string) => repositoryStateFixture(mkTmp, name);
 
 function runCli(args: string[], env: NodeJS.ProcessEnv = process.env) {
   return spawnSync(process.execPath, [REPOSITORY_STATE_CLI, ...args], {
@@ -93,66 +59,18 @@ describe('review repository state', () => {
     expect(verifyReviewRepositoryState(root, detachedManifest)).toEqual(detached);
   });
 
-  it('fails when a local branch, remote-tracking ref, or remote symref changes', () => {
-    const local = fixture('devkit review repository local-ref-');
-    captureReviewRepositoryState(local.root, local.manifest);
-    local.git('update-ref', 'refs/heads/new-local-branch', 'HEAD');
-    expect(() => verifyReviewRepositoryState(local.root, local.manifest)).toThrow(
+  it('fails when the checked-out branch moves or HEAD switches branch', () => {
+    const moved = fixture('devkit review repository moved-branch-');
+    captureReviewRepositoryState(moved.root, moved.manifest);
+    moved.git('commit', '--allow-empty', '-q', '-m', 'advance');
+    expect(() => verifyReviewRepositoryState(moved.root, moved.manifest)).toThrow(
       /repository metadata changed after capture/,
     );
 
-    const remote = fixture('devkit review repository remote-ref-');
-    remote.git('update-ref', 'refs/remotes/origin/other', 'HEAD');
-    captureReviewRepositoryState(remote.root, remote.manifest);
-    remote.git('symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/other');
-    expect(() => verifyReviewRepositoryState(remote.root, remote.manifest)).toThrow(
-      /repository metadata changed after capture/,
-    );
-
-    const tracking = fixture('devkit review repository tracking-ref-');
-    captureReviewRepositoryState(tracking.root, tracking.manifest);
-    tracking.git('update-ref', '-d', 'refs/remotes/origin/main');
-    expect(() => verifyReviewRepositoryState(tracking.root, tracking.manifest)).toThrow(
-      /repository metadata changed after capture/,
-    );
-  });
-
-  it('freezes tag and non-branch ref namespaces', () => {
-    const createdTag = fixture('devkit review repository created-tag-');
-    captureReviewRepositoryState(createdTag.root, createdTag.manifest);
-    createdTag.git('tag', 'created-after-capture');
-    expect(() => verifyReviewRepositoryState(createdTag.root, createdTag.manifest)).toThrow(
-      /repository metadata changed after capture/,
-    );
-
-    const movedTag = fixture('devkit review repository moved-tag-');
-    movedTag.git('tag', 'release', 'HEAD');
-    const replacement = movedTag.git(
-      'commit-tree',
-      'HEAD^{tree}',
-      '-p',
-      'HEAD',
-      '-m',
-      'replacement',
-    );
-    captureReviewRepositoryState(movedTag.root, movedTag.manifest);
-    movedTag.git('update-ref', 'refs/tags/release', replacement);
-    expect(() => verifyReviewRepositoryState(movedTag.root, movedTag.manifest)).toThrow(
-      /repository metadata changed after capture/,
-    );
-
-    const deletedTag = fixture('devkit review repository deleted-tag-');
-    deletedTag.git('tag', 'removed-after-capture');
-    captureReviewRepositoryState(deletedTag.root, deletedTag.manifest);
-    deletedTag.git('tag', '--delete', 'removed-after-capture');
-    expect(() => verifyReviewRepositoryState(deletedTag.root, deletedTag.manifest)).toThrow(
-      /repository metadata changed after capture/,
-    );
-
-    const notes = fixture('devkit review repository notes-ref-');
-    captureReviewRepositoryState(notes.root, notes.manifest);
-    notes.git('notes', '--ref=review', 'add', '-m', 'review note', 'HEAD');
-    expect(() => verifyReviewRepositoryState(notes.root, notes.manifest)).toThrow(
+    const switched = fixture('devkit review repository switched-branch-');
+    captureReviewRepositoryState(switched.root, switched.manifest);
+    switched.git('-c', 'core.hooksPath=/dev/null', 'switch', '-q', '-c', 'other');
+    expect(() => verifyReviewRepositoryState(switched.root, switched.manifest)).toThrow(
       /repository metadata changed after capture/,
     );
   });
@@ -376,7 +294,7 @@ describe('review repository state', () => {
 
     expect(() =>
       captureReviewRepositoryState(target.root, target.manifest, {
-        afterFirstCapture: () => target.git('update-ref', 'refs/heads/raced', 'HEAD'),
+        afterFirstCapture: () => target.git('commit', '--allow-empty', '-q', '-m', 'raced'),
       }),
     ).toThrow(/repository metadata changed during capture/);
 
@@ -433,25 +351,28 @@ describe('review repository state', () => {
     expect(existsSync(manifest)).toBe(false);
   });
 
-  it('detects a create/delete ref ABA during capture and succeeds once stable', () => {
-    const target = fixture('devkit review repository ref-aba-');
+  it('detects a create/delete worktree-ref ABA during capture and succeeds once stable', () => {
+    const { parent, git, env } = fixture('devkit review repository ref-aba-');
+    const linked = join(parent, 'linked-aba-target');
+    git('-c', 'core.hooksPath=/dev/null', 'worktree', 'add', '-q', '--detach', linked, 'HEAD');
+    const inLinked = (...args: string[]) => execFileSync('git', args, { cwd: linked, env });
+    const manifest = join(parent, 'linked-aba.json');
     let seamRuns = 0;
 
     expect(() =>
-      captureReviewRepositoryState(target.root, target.manifest, {
+      captureReviewRepositoryState(linked, manifest, {
         afterFirstCapture: () => {
           seamRuns += 1;
-          target.git('update-ref', 'refs/heads/capture-aba', 'HEAD');
-          target.git('update-ref', '-d', 'refs/heads/capture-aba');
+          inLinked('update-ref', 'refs/bisect/capture-aba', 'HEAD');
+          inLinked('update-ref', '-d', 'refs/bisect/capture-aba');
         },
       }),
-    ).toThrow(/repository metadata changed during capture/);
+    ).toThrow(/changed during capture \(.*worktree:refs/);
     expect(seamRuns).toBe(1);
-    expect(target.git('for-each-ref', '--format=%(refname)', 'refs/heads/capture-aba')).toBe('');
-    expect(existsSync(target.manifest)).toBe(false);
+    expect(existsSync(manifest)).toBe(false);
 
-    const captured = captureReviewRepositoryState(target.root, target.manifest);
-    expect(verifyReviewRepositoryState(target.root, target.manifest)).toEqual(captured);
+    const captured = captureReviewRepositoryState(linked, manifest);
+    expect(verifyReviewRepositoryState(linked, manifest)).toEqual(captured);
   });
 
   it('allows linked-worktree administrative metadata churn', () => {
@@ -533,14 +454,13 @@ describe('review repository state', () => {
           afterFirstCapture: () => {
             seamRuns += 1;
             churn(join(target.root, '.git'));
-            target.git('update-ref', `refs/heads/raced-${seamRuns}`, 'HEAD');
+            target.git('commit', '--allow-empty', '-q', '-m', `raced-${seamRuns}`);
           },
         }),
       );
 
       expect(seamRuns).toBe(1);
-      expect(message).toContain('refsSha256');
-      expect(message).toContain('common:refs');
+      expect(message).toContain('headOid');
       expect(message).not.toMatch(/another git process/);
       expect(existsSync(target.manifest)).toBe(false);
     });
