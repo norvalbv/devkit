@@ -5,7 +5,7 @@
  * and GUARD_COVERAGE_OK / GUARD_NO_COVERAGE (per-run operator assertion). Also covers the
  * istanbul/V8 aggregation math (statements/functions/branches/lines) in computePercentages.
  */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -246,6 +246,50 @@ describe('runCoverage — fail-closed gate', () => {
     const s = spy();
     expect(runCoverage(root)).toBe(1);
     expect(text(s.err)).toMatch(/reads that file from the COMMITTED tree/);
+  });
+});
+
+// sc-3491: under ship coverage/ is a symlink, so every arm that READ an artifact names its physical
+// path — a verdict from another worktree's artifact must be visible in the log.
+describe('runCoverage — names the artifact it judged', () => {
+  /** The ship worktree's view: its coverage/ is a symlink to <source>/coverage holding <contents>. */
+  const seedLinkedCoverage = (contents: string) => {
+    const source = realpathSync(makeRoot());
+    const cwd = makeRoot();
+    mkdirSync(join(source, 'coverage'), { recursive: true });
+    writeFileSync(join(source, 'coverage', 'coverage-final.json'), contents);
+    symlinkSync(join(source, 'coverage'), join(cwd, 'coverage'));
+    return { cwd, artifact: join(source, 'coverage', 'coverage-final.json') };
+  };
+
+  it('PASS names the physical artifact, not the symlinked path', () => {
+    const { cwd, artifact } = seedLinkedCoverage(JSON.stringify(COV));
+    const s = spy();
+    expect(runCoverage(cwd)).toBe(0);
+    expect(text(s.log)).toContain(`read ${artifact}`);
+  });
+
+  it('a threshold FAIL names the artifact too — a blocked verdict may be the borrowed one', () => {
+    const { cwd, artifact } = seedLinkedCoverage(JSON.stringify(COV));
+    writeConfig(cwd, { coverage: { statements: 60 } });
+    const s = spy();
+    expect(runCoverage(cwd)).toBe(1);
+    expect(text(s.err)).toContain(`read ${artifact}`);
+  });
+
+  it('a malformed-artifact FAIL names the artifact', () => {
+    const { cwd, artifact } = seedLinkedCoverage('{ not json');
+    const s = spy();
+    expect(runCoverage(cwd)).toBe(1);
+    expect(text(s.err)).toContain(`read ${artifact}`);
+  });
+
+  it('a DANGLING coverage symlink is the absent arm (exit 1), never a crash', () => {
+    const cwd = makeRoot();
+    symlinkSync(join(cwd, 'nowhere'), join(cwd, 'coverage'));
+    const s = spy();
+    expect(runCoverage(cwd)).toBe(1);
+    expect(text(s.err)).toMatch(/no coverage data/);
   });
 });
 
