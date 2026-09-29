@@ -48,6 +48,20 @@ describe('review projection: the SQLite wal-index is never copied', () => {
     expect(shm).toMatchObject({ mutable: true, sourceVolatile: true, source: { type: 'absent' } });
   });
 
+  it('retries a capture torn by a writer that then goes quiet', () => {
+    const { root, worktree, manifest } = target();
+    writeFileSync(join(root, INDEX), 'sqlite-main');
+    writeFileSync(join(root, `${INDEX}-wal`), 'frames');
+    let commits = 2;
+    materializeProjectionRuntime(root, worktree, manifest, [INDEX], INDEX, {
+      beforeSourceVerification: () => {
+        if (commits-- > 0) appendFileSync(join(root, `${INDEX}-wal`), '+commit');
+      },
+    });
+    expect(readFileSync(join(worktree, `${INDEX}-wal`), 'utf8')).toBe('frames+commit+commit');
+    expect(existsSync(manifest)).toBe(true);
+  });
+
   it('still refuses a capture torn by a writer appending WAL frames mid-copy', () => {
     const { root, worktree, manifest } = target();
     writeFileSync(join(root, INDEX), 'sqlite-main');
@@ -56,7 +70,9 @@ describe('review projection: the SQLite wal-index is never copied', () => {
       materializeProjectionRuntime(root, worktree, manifest, [INDEX], INDEX, {
         beforeSourceVerification: () => appendFileSync(join(root, `${INDEX}-wal`), 'commit'),
       }),
-    ).toThrow(/gate projections changed during capture; retry/);
+    ).toThrow(/changed during capture; retry — .*index\.db-wal was still being written after 5/);
+    expect(existsSync(manifest)).toBe(false);
+    expect(existsSync(join(worktree, `${INDEX}-wal`))).toBe(false);
   });
 
   it('recovers uncheckpointed WAL rows in the private copy without the -shm', () => {

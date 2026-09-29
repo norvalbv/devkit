@@ -24,6 +24,7 @@ import {
   PACKAGED_REVIEW_RUNTIME_MODULE_STEMS,
 } from '../../../../gate-engine/review/runtime.mts';
 import { readAgentAssetManifest } from '../../install/agent-asset-manifest/reader.mts';
+import { isVendoredSkillPath } from '../../install/vendored-skills.mts';
 import { runDirectReviewCli } from './run-direct.mts';
 import {
   readPinnedReviewFile,
@@ -182,6 +183,7 @@ function packageShipAssetPaths(sourceRoot: string): readonly string[] {
     .flatMap((directory) =>
       runtimeFiles(join(sourceRoot, directory)).map((path) => `${directory}/${path}`),
     )
+    .filter((path) => !isVendoredSkillPath(path))
     .sort();
   validateAssetPaths(paths);
   return paths;

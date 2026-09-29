@@ -1,5 +1,13 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { lstatSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -235,7 +243,7 @@ describe('gate config projections', () => {
         manifest,
         ['guard.config.json', '.search-code/index.db'],
         '.search-code/index.db',
-        { beforeSourceVerification: () => writeFileSync(`${source}-wal`, 'mutation') },
+        { beforeSourceVerification: () => appendFileSync(`${source}-wal`, 'mutation') },
       ),
     ).toThrow(/gate projections changed during capture/);
   });
@@ -272,7 +280,7 @@ describe('gate config projections', () => {
     writeFileSync(
       mutationTool,
       [
-        "import { readFileSync, writeFileSync } from 'node:fs';",
+        "import { appendFileSync, readFileSync } from 'node:fs';",
         `import { materializeProjectionRuntime } from ${JSON.stringify(pathToFileURL(projectionRuntime).href)};`,
         "const [command, sourceRoot, destinationRoot, manifestPath, indexPath = ''] = process.argv.slice(2);",
         "if (command !== 'materialize') throw new Error('unexpected projection command');",
@@ -281,7 +289,7 @@ describe('gate config projections', () => {
         "if (!mutationPath) throw new Error('mutation path is unavailable');",
         'try {',
         '  materializeProjectionRuntime(sourceRoot, destinationRoot, manifestPath, candidates, indexPath, {',
-        "    beforeSourceVerification: () => writeFileSync(mutationPath, 'mutation'),",
+        "    beforeSourceVerification: () => appendFileSync(mutationPath, 'mutation'),",
         '  });',
         '} catch (error) {',
         '  console.error(error instanceof Error ? error.message : String(error));',

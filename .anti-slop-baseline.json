@@ -307,14 +307,6 @@
       "count": 2
     },
     {
-      "ruleId": "anti-slop/no-runtime-typeof",
-      "file": "cli/lib/ship/review/projection/runtime.mts",
-      "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
-      "context": "typeof raw.selfHash !== 'string'",
-      "fingerprint": "087fccab26c191cdea249e74b1b11322765dc73b8ad0463343b83b225efa955d",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
       "file": "gate-engine/critique/evidence-bindings.mts",
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
@@ -1035,6 +1027,14 @@
       "count": 1
     },
     {
+      "fingerprint": "17e6b6d6878ba3433324c9f9158ddb8ea359ceab20f89c146d6e36ba90b01a57",
+      "ruleId": "anti-slop/no-unknown-parameters",
+      "file": "cli/lib/ship/review/projection/manifest.mts",
+      "diagnostic": "Parameter `value` leaves input unparsed. Accept a named domain type; run the expected schema or parser at the I/O boundary before calling this function.",
+      "context": "function parseState(value: unknown): ProjectionState {",
+      "count": 1
+    },
+    {
       "ruleId": "anti-slop/no-known-value-widening",
       "file": "cli/lib/doctor/pin/pin-checks.test.mts",
       "diagnostic": "The explicit open dictionary type on binding `pkg` discards known type evidence. Keep inference, validate with `satisfies`, or use a named owner contract.",
@@ -1211,14 +1211,6 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/no-runtime-typeof",
-      "file": "cli/lib/ship/review/projection/runtime.mts",
-      "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
-      "context": "if (typeof value !== 'string') fail('invalid projection link state');",
-      "fingerprint": "1cf136a9573331bfcfd14273271e0f756243512835ff4932fb825ecd3f6f7569",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
       "file": "cli/__tests__/review-submodules.test.mts",
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
@@ -1232,6 +1224,14 @@
       "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
       "context": "return typeof value === 'number' && Number.isFinite(value);",
       "fingerprint": "1d4232a91212c3ab9819eb6cf37e02a74446890670e8ec04de138596c75cc266",
+      "count": 1
+    },
+    {
+      "fingerprint": "1d66c40fbae9d2c82248e8cc9183d84cde3a2d4642ce9ebb29cba11fbf82a798",
+      "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
+      "file": "cli/lib/ship/review/projection/manifest.mts",
+      "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
+      "context": "return value as Record<string, unknown>;",
       "count": 1
     },
     {
@@ -1364,14 +1364,6 @@
     },
     {
       "ruleId": "anti-slop/no-unsafe-dictionary-type",
-      "file": "cli/lib/ship/review/projection/runtime.mts",
-      "diagnostic": "This dictionary's unknown value type gives callers no concrete value contract. Use an owner/schema-derived value type; parse external payloads before insertion.",
-      "context": "function validateLinkedState(state: Record<string, unknown>): void {",
-      "fingerprint": "211ff64d952bad9d311c1c57e14f9ba8e75d5ab2430c9d7b8daf5d4583d21526",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/no-unsafe-dictionary-type",
       "file": "gate-engine/eval/adapters.mts",
       "diagnostic": "This dictionary's unknown value type gives callers no concrete value contract. Use an owner/schema-derived value type; parse external payloads before insertion.",
       "context": "function rows(value: Json): Record<string, unknown> {",
@@ -1416,6 +1408,14 @@
       "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
       "context": ".filter((b) => b.type === 'text' && typeof b.text === 'string')",
       "fingerprint": "21e25a8b6a0db088876b34027146780ea120c78a0f84bd612c226ef5f6bcfcea",
+      "count": 1
+    },
+    {
+      "fingerprint": "21f4786746f9c22227539908db452ef8c61d121d4318c15aa321bcc1279e3225",
+      "ruleId": "anti-slop/no-unknown-parameters",
+      "file": "cli/lib/ship/review/projection/manifest.mts",
+      "diagnostic": "Parameter `value` leaves input unparsed. Accept a named domain type; run the expected schema or parser at the I/O boundary before calling this function.",
+      "context": "function recordValue(value: unknown, message: string): Record<string, unknown> {",
       "count": 1
     },
     {
@@ -1579,6 +1579,14 @@
       "count": 1
     },
     {
+      "fingerprint": "251205bd34c43b349b41487f97b2f2311fe8e0b8ab6a43e9d617d1156032d323",
+      "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
+      "file": "cli/lib/ship/review/projection/manifest.mts",
+      "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
+      "context": "return state as unknown as ProjectionState;",
+      "count": 2
+    },
+    {
       "ruleId": "anti-slop/no-unsafe-dictionary-type",
       "file": "gate-engine/critique/evidence-store.mts",
       "diagnostic": "This dictionary's unknown value type gives callers no concrete value contract. Use an owner/schema-derived value type; parse external payloads before insertion.",
@@ -1720,6 +1728,14 @@
       "diagnostic": "The explicit open dictionary type on return value of `build` discards known type evidence. Keep inference, validate with `satisfies`, or use a named owner contract.",
       "context": "return {",
       "fingerprint": "28abc14614435b80ecd3dd132ec468935b4fbdf1dfe5686f3323f4062922d1d3",
+      "count": 1
+    },
+    {
+      "fingerprint": "28aee7df5a30307e914ba669d3eb217e9a621be614a7d17704c85ab86c8e7dba",
+      "ruleId": "anti-slop/no-unsafe-dictionary-type",
+      "file": "cli/lib/ship/review/projection/manifest.mts",
+      "diagnostic": "This dictionary's unknown value type gives callers no concrete value contract. Use an owner/schema-derived value type; parse external payloads before insertion.",
+      "context": "function validateLinkState(state: Record<string, unknown>, linked: boolean): void {",
       "count": 1
     },
     {
@@ -1960,14 +1976,6 @@
       "diagnostic": "Parameter `v` leaves input unparsed. Accept a named domain type; run the expected schema or parser at the I/O boundary before calling this function.",
       "context": "const arr = <T,>(v: unknown, fallback: T[]): T[] => (Array.isArray(v) ? v : fallback);",
       "fingerprint": "2d9c6d5d1f20b4f72783deac7c3e4b8d13f4c2d56bc39897a36f7247f3745bfb",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/no-unsafe-dictionary-type",
-      "file": "cli/lib/ship/review/projection/runtime.mts",
-      "diagnostic": "This dictionary's unknown value type gives callers no concrete value contract. Use an owner/schema-derived value type; parse external payloads before insertion.",
-      "context": "function validateUnlinkedState(state: Record<string, unknown>): void {",
-      "fingerprint": "2da3c6b764fe49637439875ecd9f695a964ef4dd288630f5f685c8f009a307bd",
       "count": 1
     },
     {
@@ -2299,6 +2307,14 @@
       "count": 1
     },
     {
+      "fingerprint": "350132f71777874262017d2ed2c5c04ffc5fb8755f8adcc33b4a0376c51dd4db",
+      "ruleId": "anti-slop/no-unknown-returns",
+      "file": "cli/lib/ship/review/projection/manifest.mts",
+      "diagnostic": "This function exposes `unknown` to its caller. Parse the value at its boundary and return a named domain type.",
+      "context": "function readManifestJson(path: string): unknown {",
+      "count": 1
+    },
+    {
       "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
       "file": "cli/commands/update.mts",
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
@@ -2432,14 +2448,6 @@
       "diagnostic": "This dictionary's unknown value type gives callers no concrete value contract. Use an owner/schema-derived value type; parse external payloads before insertion.",
       "context": "const pkg: Record<string, unknown> = { name: 'consumer', version: '1.0.0', ...o.pkgExtra };",
       "fingerprint": "380fedcedb201830646aeb501139633c39a3f6fa8d7ce5511a2264be3d9e9352",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/no-unsafe-dictionary-type",
-      "file": "cli/lib/ship/review/projection/runtime.mts",
-      "diagnostic": "This dictionary's unknown value type gives callers no concrete value contract. Use an owner/schema-derived value type; parse external payloads before insertion.",
-      "context": "function validateLinkState(state: Record<string, unknown>, linked: boolean): void {",
-      "fingerprint": "38475a814cec5f9edabd1e1840d382e2ea0ee3898392ec58eb91344efdcab724",
       "count": 1
     },
     {
@@ -2587,6 +2595,14 @@
       "count": 1
     },
     {
+      "fingerprint": "3b906e07fb284f73a1d218c86bffdcbcb46a2289e6511336c9df4a7434763861",
+      "ruleId": "anti-slop/no-runtime-typeof",
+      "file": "cli/lib/ship/review/projection/manifest.mts",
+      "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
+      "context": "typeof state.fingerprint !== 'string' ||",
+      "count": 1
+    },
+    {
       "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
       "file": "gate-engine/eval/adapters.mts",
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
@@ -2648,6 +2664,14 @@
       "diagnostic": "Parameter `e` leaves input unparsed. Accept a named domain type; run the expected schema or parser at the I/O boundary before calling this function.",
       "context": "main(process.argv.slice(2)).catch((e: unknown) => {",
       "fingerprint": "3c291b3cabe993a2b5e8996717f6cba1b8b299214c182e5256912ac5ef0cb4da",
+      "count": 1
+    },
+    {
+      "fingerprint": "3c3b9df9361c9e5a60b5432e3580a5e0f732bc7275c954faa7f325464d04bab8",
+      "ruleId": "anti-slop/no-runtime-typeof",
+      "file": "cli/lib/ship/review/projection/manifest.mts",
+      "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
+      "context": "if (!value || typeof value !== 'object' || Array.isArray(value)) fail(message);",
       "count": 1
     },
     {
@@ -3419,14 +3443,6 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/no-unknown-parameters",
-      "file": "cli/lib/ship/review/projection/runtime.mts",
-      "diagnostic": "Parameter `value` leaves input unparsed. Accept a named domain type; run the expected schema or parser at the I/O boundary before calling this function.",
-      "context": "function parseManifestHeader(value: unknown): ParsedManifestHeader {",
-      "fingerprint": "4bcf302af23b4f9557847967ca3a87cdc7e9b1736276e73459637b979ff9719a",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
       "file": "gate-engine/eval/history.mts",
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
@@ -3611,14 +3627,6 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/no-unsafe-dictionary-type",
-      "file": "cli/lib/ship/review/projection/runtime.mts",
-      "diagnostic": "This dictionary's unknown value type gives callers no concrete value contract. Use an owner/schema-derived value type; parse external payloads before insertion.",
-      "context": "return value as Record<string, unknown>;",
-      "fingerprint": "4fe27f035fa58330023f570f9fb7acad985c0a01195d27be53158d4613d21892",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
       "file": "gate-engine/critique/__tests__/capture-normalizer.test.mts",
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
@@ -3776,14 +3784,6 @@
       "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
       "context": "typeof envelope.result === 'string' &&",
       "fingerprint": "549a65aa4a826dfec1f00fb75c1ed842248253fd903bca3faa096e7251400d1e",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/no-unknown-parameters",
-      "file": "cli/lib/ship/review/projection/runtime.mts",
-      "diagnostic": "Parameter `value` leaves input unparsed. Accept a named domain type; run the expected schema or parser at the I/O boundary before calling this function.",
-      "context": "function isPresentStateType(value: unknown): value is (typeof PRESENT_STATE_TYPES)[number] {",
-      "fingerprint": "550eadd0ec20ab5b6906abcbc1932dd5a2470ef4a0c02cbd677e4c4427823a63",
       "count": 1
     },
     {
@@ -4035,6 +4035,14 @@
       "count": 1
     },
     {
+      "fingerprint": "5b5392484793c5d16e8f1676afc9487b9ceed858ac204b406b46bf65fa0b5d0d",
+      "ruleId": "anti-slop/no-chained-type-assertions",
+      "file": "cli/lib/ship/review/projection/manifest.mts",
+      "diagnostic": "This assertion chain discards type evidence. Keep the original precise type, or parse untrusted input at its boundary before narrowing it.",
+      "context": "return raw as unknown as ParsedManifestHeader;",
+      "count": 1
+    },
+    {
       "ruleId": "anti-slop/no-unsafe-dictionary-type",
       "file": "cli/lib/install/hook-registration-ledger/plain-data.mts",
       "diagnostic": "This dictionary's unknown value type gives callers no concrete value contract. Use an owner/schema-derived value type; parse external payloads before insertion.",
@@ -4172,14 +4180,6 @@
     },
     {
       "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
-      "file": "cli/lib/ship/review/projection/runtime.mts",
-      "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
-      "context": "return state as unknown as ProjectionState;",
-      "fingerprint": "5e4160074b4553b47be46d7b6967b43475898852022db7cb9222806cf8e9fc85",
-      "count": 2
-    },
-    {
-      "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
       "file": "gate-engine/critique/__tests__/evidence-store.test.mts",
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
       "context": "(record.repository as { fingerprintSource: string }).fingerprintSource = 'origin';",
@@ -4200,6 +4200,14 @@
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
       "context": "const report = JSON.parse(readFileSync(reportPath, 'utf8')) as JscpdReport;",
       "fingerprint": "5e7cffd875497c32e3fc625623d624cf7be3d21a04b951638070fff360eeac6a",
+      "count": 1
+    },
+    {
+      "fingerprint": "5e8e23932d188406d72210eceee33cbd134d6aa8ff0e810736b1f9b9818eee7b",
+      "ruleId": "anti-slop/no-runtime-typeof",
+      "file": "cli/lib/ship/review/projection/manifest.mts",
+      "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
+      "context": "typeof raw.destinationRoot !== 'string' ||",
       "count": 1
     },
     {
@@ -4491,11 +4499,11 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/no-unsafe-dictionary-type",
-      "file": "cli/lib/ship/review/projection/runtime.mts",
-      "diagnostic": "This dictionary's unknown value type gives callers no concrete value contract. Use an owner/schema-derived value type; parse external payloads before insertion.",
-      "context": "function recordValue(value: unknown, message: string): Record<string, unknown> {",
-      "fingerprint": "638147516f4093d7cfa1294dc480c1e0c2b645b6d3b1883059df196fd5f129a4",
+      "fingerprint": "63c7adede8ecc23be4beba63e13dde30dfee1df3ef1aedd498c7b4d90c1a8dae",
+      "ruleId": "anti-slop/no-unknown-parameters",
+      "file": "cli/lib/ship/review/projection/manifest.mts",
+      "diagnostic": "Parameter `value` leaves input unparsed. Accept a named domain type; run the expected schema or parser at the I/O boundary before calling this function.",
+      "context": "function manifestHash(value: unknown): string {",
       "count": 1
     },
     {
@@ -4611,20 +4619,20 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/no-runtime-typeof",
-      "file": "cli/lib/ship/review/projection/runtime.mts",
-      "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
-      "context": "typeof state.fingerprint !== 'string' ||",
-      "fingerprint": "66632d2fc108f24c21684e4f6d065f4a8d1ea1cd8077c50f9507c8ad2a1c0010",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
       "file": "gate-engine/critique/__tests__/eval-bench.test.mts",
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
       "context": "execWorkflow: (async () => {",
       "fingerprint": "667f4eedcc1b0d571d2fe976ebf2b987d598e7c0258957a24c23ab5f23bf6382",
       "count": 2
+    },
+    {
+      "fingerprint": "668e3614894df457366bb834d36d2f3c33f99b0e6144a6fe4662c116c796a790",
+      "ruleId": "anti-slop/no-chained-type-assertions",
+      "file": "cli/lib/ship/review/projection/manifest.mts",
+      "diagnostic": "This assertion chain discards type evidence. Keep the original precise type, or parse untrusted input at its boundary before narrowing it.",
+      "context": "return state as unknown as ProjectionState;",
+      "count": 1
     },
     {
       "ruleId": "anti-slop/no-unknown-parameters",
@@ -5331,14 +5339,6 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/no-unsafe-dictionary-type",
-      "file": "cli/lib/ship/review/projection/runtime.mts",
-      "diagnostic": "This dictionary's unknown value type gives callers no concrete value contract. Use an owner/schema-derived value type; parse external payloads before insertion.",
-      "context": "state: Record<string, unknown>,",
-      "fingerprint": "74fc46bc4e1af1afbfec46fc3a5fb6096c83d3cabfa1d86ba323d97b0cc2a0c1",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
       "file": "cli/__tests__/upgrade-optional-component-offer.test.mts",
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
@@ -5553,14 +5553,6 @@
       "context": "? ({ ...value, antiSlop: value.antiSlop === true } as OxcManifest)",
       "fingerprint": "7906295382c1a1672855d5b34bfa6216dc5c3f65995de5b168bbe93e637ca47d",
       "count": 1
-    },
-    {
-      "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
-      "file": "cli/lib/ship/review/projection/runtime.mts",
-      "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
-      "context": "return raw as unknown as ParsedManifestHeader;",
-      "fingerprint": "790ed254de5aa4a17d53f6b9439fac33f5127241a47423e1beb3c06d0008d800",
-      "count": 2
     },
     {
       "ruleId": "anti-slop/no-conditional-empty-object-spread",
@@ -5913,14 +5905,6 @@
       "context": "if (!Object.hasOwn(root, 'hooks')) return { root, hooks: {} };",
       "fingerprint": "80a44bcd2823976312abd887b5b9511c2e61770f559c1d1ecdc2bb5219a05581",
       "count": 1
-    },
-    {
-      "ruleId": "anti-slop/no-runtime-typeof",
-      "file": "cli/lib/ship/review/projection/runtime.mts",
-      "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
-      "context": "if (typeof candidate.path !== 'string' || typeof candidate.mutable !== 'boolean') {",
-      "fingerprint": "80b4674c68df15d574484c947da93e8fd1e2e2d2bbbe336305ff3f92d65d1cfc",
-      "count": 2
     },
     {
       "ruleId": "anti-slop/no-runtime-typeof",
@@ -6603,14 +6587,6 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/no-unknown-parameters",
-      "file": "cli/lib/ship/review/projection/runtime.mts",
-      "diagnostic": "Parameter `value` leaves input unparsed. Accept a named domain type; run the expected schema or parser at the I/O boundary before calling this function.",
-      "context": "function parseState(value: unknown): ProjectionState {",
-      "fingerprint": "8d8a1cc57db5bd7ffe31b8ccb86f579dafd530b672c8a0e0254e6ec1333f4d1a",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/no-runtime-typeof",
       "file": "cli/lib/ship/review/setup-manifest-format.mts",
       "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
@@ -7219,14 +7195,6 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/no-unknown-returns",
-      "file": "cli/lib/ship/review/projection/runtime.mts",
-      "diagnostic": "This function exposes `unknown` to its caller. Parse the value at its boundary and return a named domain type.",
-      "context": "function readManifestJson(path: string): unknown {",
-      "fingerprint": "97a5dc9f3381f6e2ece9b61ad2017f746904e32320583624cfcfa8613c46009b",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/no-unknown-parameters",
       "file": "gate-engine/critique/response-contract.mts",
       "diagnostic": "Parameter `value` leaves input unparsed. Accept a named domain type; run the expected schema or parser at the I/O boundary before calling this function.",
@@ -7240,6 +7208,14 @@
       "diagnostic": "The explicit anonymous object type on return value of `reviewPlanFromFlags` discards known type evidence. Keep inference, validate with `satisfies`, or use a named owner contract.",
       "context": "return { error: `devkit init: ${modifiers.join(' and ')} require --review.` };",
       "fingerprint": "97fe9c91d0abcbd2c21e094cc75b0860d847b2e432d24737485cd1ac788de5bc",
+      "count": 1
+    },
+    {
+      "fingerprint": "9842ffb782aae698718ca60bd306dd4202ed79350e3319a160d19c1bd80e469c",
+      "ruleId": "anti-slop/no-runtime-typeof",
+      "file": "cli/lib/ship/review/projection/manifest.mts",
+      "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
+      "context": "if (typeof value !== 'string') fail('invalid projection link state');",
       "count": 1
     },
     {
@@ -7619,6 +7595,22 @@
       "count": 1
     },
     {
+      "fingerprint": "9fc81c24c04c0c4098e3629902ba531c693eb29b2ab47d6e10c4bb4867d5a2b9",
+      "ruleId": "anti-slop/no-unsafe-dictionary-type",
+      "file": "cli/lib/ship/review/projection/manifest.mts",
+      "diagnostic": "This dictionary's unknown value type gives callers no concrete value contract. Use an owner/schema-derived value type; parse external payloads before insertion.",
+      "context": "state: Record<string, unknown>,",
+      "count": 1
+    },
+    {
+      "fingerprint": "9fcc088d55b4b8f872072c113f0c468183151d34a8ce07050dbd8a8b015b8683",
+      "ruleId": "anti-slop/no-unknown-parameters",
+      "file": "cli/lib/ship/review/projection/manifest.mts",
+      "diagnostic": "Parameter `value` leaves input unparsed. Accept a named domain type; run the expected schema or parser at the I/O boundary before calling this function.",
+      "context": "function parseEntry(value: unknown): ProjectionEntry {",
+      "count": 1
+    },
+    {
       "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
       "file": "cli/lib/ship/review/asset-runtime.mts",
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
@@ -7824,14 +7816,6 @@
       "diagnostic": "The explicit anonymous object type on return value of `buildVectors` discards known type evidence. Keep inference, validate with `satisfies`, or use a named owner contract.",
       "context": "return { dim, codeV, descV };",
       "fingerprint": "a507ea75964e02e2d957a4739b30ae9d1e2053f822e83b4b47e7dcc9a675076e",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/no-unknown-parameters",
-      "file": "cli/lib/ship/review/projection/runtime.mts",
-      "diagnostic": "Parameter `value` leaves input unparsed. Accept a named domain type; run the expected schema or parser at the I/O boundary before calling this function.",
-      "context": "function manifestHash(value: unknown): string {",
-      "fingerprint": "a51736df8513b99a403848e38b39d2ae0c982206e5c02bb55a8d30c88c9ee03c",
       "count": 1
     },
     {
@@ -8048,14 +8032,6 @@
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
       "context": "return realKill(pid, signal as NodeJS.Signals);",
       "fingerprint": "a9967dfe2519edd5125c1a0b7843331f4324f007567fa3762f9ba5823ce247e3",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/no-unknown-parameters",
-      "file": "cli/lib/ship/review/projection/runtime.mts",
-      "diagnostic": "Parameter `value` leaves input unparsed. Accept a named domain type; run the expected schema or parser at the I/O boundary before calling this function.",
-      "context": "function recordValue(value: unknown, message: string): Record<string, unknown> {",
-      "fingerprint": "a9c87277fdea5f6f678fc3ef93f8f829df86c40668753f74045fb7585c2e70f8",
       "count": 1
     },
     {
@@ -8448,6 +8424,14 @@
       "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
       "context": "typeof v === 'string' ? v : undefined;",
       "fingerprint": "b02c90b66c0ed5327d9828561235af1876da99ae26d71e41c54dabda61c87fb2",
+      "count": 1
+    },
+    {
+      "fingerprint": "b0473908be092ff1173c937bc6f2456e7c8cc810e95e0ad4174a319f445c7ca3",
+      "ruleId": "anti-slop/no-unknown-parameters",
+      "file": "cli/lib/ship/review/projection/manifest.mts",
+      "diagnostic": "Parameter `value` leaves input unparsed. Accept a named domain type; run the expected schema or parser at the I/O boundary before calling this function.",
+      "context": "function isPresentStateType(value: unknown): value is (typeof PRESENT_STATE_TYPES)[number] {",
       "count": 1
     },
     {
@@ -9227,14 +9211,6 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/no-runtime-typeof",
-      "file": "cli/lib/ship/review/projection/runtime.mts",
-      "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
-      "context": "typeof raw.sourceRoot !== 'string' ||",
-      "fingerprint": "bf94a8148d1fc3b8c4d74c2fab231424036aa8cb03d071babc75e4c86f46b434",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/no-unknown-type-aliases",
       "file": "e2e/fixtures/anti-slop/all-rules.ts",
       "diagnostic": "Type alias `ExternalValue` hides `unknown`. Keep `unknown` explicit at the parsing boundary or on an allowed `cause` field; otherwise use the parsed owner type.",
@@ -9256,14 +9232,6 @@
       "diagnostic": "The explicit open dictionary type on binding `fm` discards known type evidence. Keep inference, validate with `satisfies`, or use a named owner contract.",
       "context": "fm = { slug, created: date };",
       "fingerprint": "c0397858487d565be362b71ca12d94628957c19e97abce9d487fa80c46289fef",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/no-chained-type-assertions",
-      "file": "cli/lib/ship/review/projection/runtime.mts",
-      "diagnostic": "This assertion chain discards type evidence. Keep the original precise type, or parse untrusted input at its boundary before narrowing it.",
-      "context": "return state as unknown as ProjectionState;",
-      "fingerprint": "c039c7fe199651c3f4294e49a4ba8a7b625859446c9ae301a03a092df78e9a57",
       "count": 1
     },
     {
@@ -9691,14 +9659,6 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/no-unknown-parameters",
-      "file": "cli/lib/ship/review/projection/runtime.mts",
-      "diagnostic": "Parameter `value` leaves input unparsed. Accept a named domain type; run the expected schema or parser at the I/O boundary before calling this function.",
-      "context": "function parseEntry(value: unknown): ProjectionEntry {",
-      "fingerprint": "c7e56775f57c0f16a5af3386a9babd5e96cba35bc3bc62463e9eed040f9b7196",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/no-known-value-widening",
       "file": "gate-engine/critique/evidence-bindings.mts",
       "diagnostic": "The explicit anonymous object type on return value of `loadBindings` discards known type evidence. Keep inference, validate with `satisfies`, or use a named owner contract.",
@@ -10011,14 +9971,6 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/no-chained-type-assertions",
-      "file": "cli/lib/ship/review/projection/runtime.mts",
-      "diagnostic": "This assertion chain discards type evidence. Keep the original precise type, or parse untrusted input at its boundary before narrowing it.",
-      "context": "return raw as unknown as ParsedManifestHeader;",
-      "fingerprint": "cfa30c8d6365a61616d0d296a6611f82266a059f6e4ae356d0c1df31d48fd5a2",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/no-runtime-typeof",
       "file": "gate-engine/config.mts",
       "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
@@ -10051,11 +10003,27 @@
       "count": 1
     },
     {
+      "fingerprint": "d06babe4f618847788ae0ba7ac3fb41e851f3e5db5a7c84c14ced34c4134bda4",
+      "ruleId": "anti-slop/no-unsafe-dictionary-type",
+      "file": "cli/lib/ship/review/projection/manifest.mts",
+      "diagnostic": "This dictionary's unknown value type gives callers no concrete value contract. Use an owner/schema-derived value type; parse external payloads before insertion.",
+      "context": "function validateLinkedState(state: Record<string, unknown>): void {",
+      "count": 1
+    },
+    {
       "ruleId": "anti-slop/no-known-value-widening",
       "file": "cli/commands/init.mts",
       "diagnostic": "The explicit open dictionary type on binding `STRUCTURE_TEMPLATE_FILES` discards known type evidence. Keep inference, validate with `satisfies`, or use a named owner contract.",
       "context": "const STRUCTURE_TEMPLATE_FILES: Record<string, [string, string][]> = {",
       "fingerprint": "d08832828826b6563dadde07953dfa20fb5f2a6198877aa45f555e0ad4122f3a",
+      "count": 1
+    },
+    {
+      "fingerprint": "d0a21bda52a3978a20f8c7f23515ec4dca84c9a93d92d921f5d1b6406080e582",
+      "ruleId": "anti-slop/no-runtime-typeof",
+      "file": "cli/lib/ship/review/projection/manifest.mts",
+      "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
+      "context": "typeof raw.selfHash !== 'string'",
       "count": 1
     },
     {
@@ -10436,14 +10404,6 @@
     },
     {
       "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
-      "file": "cli/lib/ship/review/projection/runtime.mts",
-      "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
-      "context": "return value as Record<string, unknown>;",
-      "fingerprint": "da55c4e859951115da11ac5610a23be70c2267492884cb8ed85385d537127b99",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
       "file": "cli/lib/detect-stack.mts",
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
       "context": "const pkg = readJson(join(cwd, 'package.json')) as PackageJson | null;",
@@ -10504,6 +10464,14 @@
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
       "context": "process.exit(e.code as number);",
       "fingerprint": "db9cdf33f3824cdcf239115fefcfff989501dff2871f04ac88b78efe006b8d59",
+      "count": 1
+    },
+    {
+      "fingerprint": "dba05ac6fa9dec9ef8b082f14ce16efba630157963249b6b8671dcd2cf1a18b4",
+      "ruleId": "anti-slop/no-unsafe-dictionary-type",
+      "file": "cli/lib/ship/review/projection/manifest.mts",
+      "diagnostic": "This dictionary's unknown value type gives callers no concrete value contract. Use an owner/schema-derived value type; parse external payloads before insertion.",
+      "context": "function recordValue(value: unknown, message: string): Record<string, unknown> {",
       "count": 1
     },
     {
@@ -10987,14 +10955,6 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/no-runtime-typeof",
-      "file": "cli/lib/ship/review/projection/runtime.mts",
-      "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
-      "context": "if (!value || typeof value !== 'object' || Array.isArray(value)) fail(message);",
-      "fingerprint": "e5a3c8635a2f8c9ca9dbe16dfc62190b273f03bf216b04fba7f8ca058c27b020",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
       "file": "gate-engine/decisions/recall/markdown.mts",
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
@@ -11307,6 +11267,14 @@
       "count": 1
     },
     {
+      "fingerprint": "ecc5243a7b7097574e51b44d30b1b8a197518a2d407c3bd9d44969d812af8072",
+      "ruleId": "anti-slop/no-runtime-typeof",
+      "file": "cli/lib/ship/review/projection/manifest.mts",
+      "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
+      "context": "if (typeof candidate.path !== 'string' || typeof candidate.mutable !== 'boolean') {",
+      "count": 2
+    },
+    {
       "ruleId": "anti-slop/no-chained-type-assertions",
       "file": "gate-engine/review/__tests__/lens-split.test.mts",
       "diagnostic": "This assertion chain discards type evidence. Keep the original precise type, or parse untrusted input at its boundary before narrowing it.",
@@ -11368,6 +11336,14 @@
       "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
       "context": "if (value && typeof value === 'object') {",
       "fingerprint": "edadd436c12d59c9186181071dddc81e51197e55ae88d362f353650bd8966dff",
+      "count": 1
+    },
+    {
+      "fingerprint": "ede7ba26aba952b50522a7a9e5f20112dbcd200eb57103e91748593b157a1af5",
+      "ruleId": "anti-slop/no-runtime-typeof",
+      "file": "cli/lib/ship/review/projection/manifest.mts",
+      "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
+      "context": "typeof raw.sourceRoot !== 'string' ||",
       "count": 1
     },
     {
@@ -11433,14 +11409,6 @@
       "context": "function payload(overrides: Record<string, unknown> = {}): Record<string, unknown> {",
       "fingerprint": "eea42205789981a939e2c9abd3023cd8a4839afc4247c5d3320d70ef79199f0f",
       "count": 2
-    },
-    {
-      "ruleId": "anti-slop/no-runtime-typeof",
-      "file": "cli/lib/ship/review/projection/runtime.mts",
-      "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
-      "context": "typeof raw.destinationRoot !== 'string' ||",
-      "fingerprint": "eebb333c37fe3d3efe99a563af0c8659decc2b43917ce93e0ef26d9b9607230a",
-      "count": 1
     },
     {
       "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
@@ -11595,6 +11563,14 @@
       "count": 1
     },
     {
+      "fingerprint": "f16246c3196686b6c570bc11f06710fad7432d54fa8982f76c543d43781e42f4",
+      "ruleId": "anti-slop/no-unsafe-dictionary-type",
+      "file": "cli/lib/ship/review/projection/manifest.mts",
+      "diagnostic": "This dictionary's unknown value type gives callers no concrete value contract. Use an owner/schema-derived value type; parse external payloads before insertion.",
+      "context": "function validateUnlinkedState(state: Record<string, unknown>): void {",
+      "count": 1
+    },
+    {
       "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
       "file": "cli/commands/update.mts",
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
@@ -11609,6 +11585,14 @@
       "context": "...(transcriptRef ? { transcript_ref: transcriptRef } : {}),",
       "fingerprint": "f19d21a3ef66d8285ea7fcb7991d777b8c062e291e45543ddc18d7d093ff10cf",
       "count": 1
+    },
+    {
+      "fingerprint": "f1ad10ad61add508067d44e13aa36a9bb753b78ed2a2e7736538f401b2c39bad",
+      "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
+      "file": "cli/lib/ship/review/projection/manifest.mts",
+      "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
+      "context": "return raw as unknown as ParsedManifestHeader;",
+      "count": 2
     },
     {
       "ruleId": "anti-slop/no-unsafe-dictionary-type",
@@ -11712,6 +11696,14 @@
       "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
       "context": "const joined = parsed.filter((s) => typeof s === 'string' && s.trim()).join('\\n');",
       "fingerprint": "f31757fa476b79f99f10f8cb8a5d7a5686e2d0e20c307e126f98df68155ab916",
+      "count": 1
+    },
+    {
+      "fingerprint": "f32509ab5bd15a43c79857ce0cfaf76eb3dd1b7bab49d648c5259460c1f0ccb1",
+      "ruleId": "anti-slop/no-unknown-parameters",
+      "file": "cli/lib/ship/review/projection/manifest.mts",
+      "diagnostic": "Parameter `value` leaves input unparsed. Accept a named domain type; run the expected schema or parser at the I/O boundary before calling this function.",
+      "context": "function parseManifestHeader(value: unknown): ParsedManifestHeader {",
       "count": 1
     },
     {
@@ -11976,6 +11968,14 @@
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
       "context": "exec: exec as never,",
       "fingerprint": "f7f4d1481d5217519bbb0a2df47e6c3e47d3b6e70748c7a6f46c73de8d1d879d",
+      "count": 1
+    },
+    {
+      "fingerprint": "f83ddb8ebe538a58fbbc54e6ea547bd00985cdebdaecf9208bd0d1796a7639f5",
+      "ruleId": "anti-slop/no-unsafe-dictionary-type",
+      "file": "cli/lib/ship/review/projection/manifest.mts",
+      "diagnostic": "This dictionary's unknown value type gives callers no concrete value contract. Use an owner/schema-derived value type; parse external payloads before insertion.",
+      "context": "return value as Record<string, unknown>;",
       "count": 1
     },
     {
