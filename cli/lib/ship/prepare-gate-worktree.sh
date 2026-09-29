@@ -27,6 +27,18 @@ materialize_private_review_dependencies() {
   fi
 }
 
+materialize_private_review_coverage() {
+  local wt=$1 root=$2 script_dir tool
+  script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+  tool="$script_dir/coverage/review-coverage-copy.mts"
+  [ -f "$tool" ] || tool="$script_dir/coverage/review-coverage-copy.mjs"
+  [ -f "$tool" ] || {
+    echo "devkit review: private coverage runtime helper is unavailable" >&2
+    return 1
+  }
+  node "$tool" materialize "$root" "$wt"
+}
+
 # The running CLI's package root. Source runs place this script under cli/lib/ship; published runs
 # place it under dist/cli/lib/ship, and packageDir() treats that dist directory as the package root.
 gate_package_root() {
@@ -536,7 +548,10 @@ prepare_gate_worktree() {
     review | review-baseline) review_runtime=1 ;;
   esac
   if [ "$review_runtime" -eq 1 ]; then
-    materialize_private_review_dependencies "$wt" "$root" "$purpose"
+    materialize_private_review_dependencies "$wt" "$root" "$purpose" || return $?
+    [ "$purpose" = review ] || return 0
+    # A private COPY, never a link: review must not write through to the target. Absent → NOT MEASURED.
+    materialize_private_review_coverage "$wt" "$root"
     return $?
   fi
 
