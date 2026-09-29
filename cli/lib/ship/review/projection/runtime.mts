@@ -40,6 +40,9 @@ const MUTABLE_ROOTS = [
   '.devkit/baselines',
   '.devkit/correctness-overrides.json',
 ] as const;
+// Pure caches the gates only read through the private copy: their target source churns under live
+// readers and indexers, so postflight skips its drift check. Ratchet freezes stay source-strict.
+const SOURCE_VOLATILE_CACHES: readonly string[] = ['.fallow', '.decisions'];
 const PRESENT_STATE_TYPES = ['file', 'directory', 'link-file', 'link-directory'] as const;
 const LINK_STATE_FIELDS = ['linkTarget', 'linkPath', 'physicalPath'] as const;
 
@@ -56,6 +59,7 @@ type ProjectionState =
 interface ProjectionEntry {
   path: string;
   mutable: boolean;
+  sourceVolatile: boolean;
   source: ProjectionState;
   destination: ProjectionState;
 }
@@ -261,6 +265,8 @@ function verifySelectedProjection(
   return {
     path: selected.path,
     mutable: mutablePath(selected.path, indexPath),
+    sourceVolatile:
+      sqliteFamilyPath(selected.path, indexPath) || SOURCE_VOLATILE_CACHES.includes(selected.path),
     source: selected.source,
     destination: destinationAfter,
   };
@@ -401,6 +407,7 @@ function parseEntry(value: unknown): ProjectionEntry {
   return {
     path: safeRelativePath(candidate.path),
     mutable: candidate.mutable,
+    sourceVolatile: candidate.sourceVolatile === true,
     source: parseState(candidate.source),
     destination: parseState(candidate.destination),
   };
@@ -423,7 +430,7 @@ function readManifest(path: string): ProjectionRuntimeManifest {
   return { ...unsigned, selfHash: raw.selfHash };
 }
 
-/** Verify immutable copies and every source after target-controlled hook code has executed. */
+/** Verify copies and non-volatile sources after target hooks; volatile caches were frozen privately. */
 export function verifyProjectionRuntime(
   sourceRoot: string,
   destinationRoot: string,
@@ -435,7 +442,8 @@ export function verifyProjectionRuntime(
     fail('gate projection manifest belongs to different roots');
   }
   for (const entry of manifest.entries) {
-    if (!stateMatches(captureState(source, entry.path, true), entry.source)) {
+    const live = entry.sourceVolatile ? entry.source : captureState(source, entry.path, true);
+    if (!stateMatches(live, entry.source)) {
       fail(`target gate projection changed while review was running: ${entry.path}`);
     }
     const current = captureState(destination, entry.path, false);
