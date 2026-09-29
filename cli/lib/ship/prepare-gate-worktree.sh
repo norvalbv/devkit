@@ -180,7 +180,8 @@ gate_dir_is_populated() {
 #
 # Deliberately NOT everything gate_link_source resolves:
 #
-#   coverage  — an empty/`.tmp`-only local coverage/ must stay linked AS IS so the fail-CLOSED coverage
+#   coverage  — never reaches gate_link_source: gate_coverage_source resolves it from the consumer root
+#               only. An empty/`.tmp`-only local coverage/ must stay linked AS IS so the fail-CLOSED coverage
 #               gate finds no coverage-final.json and blocks. Borrowing the main worktree's artifact
 #               would pass the gate on coverage computed from another branch's source — decision
 #               coverage-gate.md Rejected (b), "silently ships unverified coverage, the exact defect".
@@ -200,7 +201,7 @@ gate_prefers_populated() {
 # and the consumer root can itself be a linked worktree. That is not an edge case, it is devkit's
 # stated premise (ship-branch.sh: "parallel agents share one working tree"), and it is what any tool
 # that spawns per-task worktrees produces. Without this, shipping from such a worktree fails closed
-# on `.husky/_` even when the repo is perfectly set up, and silently drops node_modules/coverage —
+# on `.husky/_` even when the repo is perfectly set up, and silently drops node_modules —
 # turning a correct repo into "run dependency setup", which is not the user's bug to fix.
 #
 # Resolving `$root` first keeps a worktree that HAS its own copy (or a deliberate override) winning —
@@ -235,6 +236,90 @@ gate_rebase_coverage() {
     echo "  ↳ $purpose: rebased coverage keys from $root onto the worktree (fallow CRAP reads measured coverage)" >&2
   fi
   return 0
+}
+
+# The coverage artifact has worktree identity, so it comes from the consumer root ONLY — never the
+# gate_link_source main-worktree tail (sc-3491). That tail is right for node_modules, whose bytes do
+# not depend on the branch; coverage-final.json is computed FROM the branch, and the main checkout's
+# copy is one every parallel worktree would share and any agent could overwrite. Absent here → not
+# linked → the fail-CLOSED gate blocks with its own remedy (decision coverage-gate.md Target +
+# Rejected (b)). A dangling link is absent too.
+#
+# A root whose coverage/ an operator symlinked into the main checkout by hand is linked as asked, but
+# loudly: the gate is about to judge another tree's numbers. "Into the main checkout" is decided
+# physically (`pwd -P`) against BOTH main's lexical coverage/ and wherever main's coverage/ itself
+# resolves — main's copy may be a symlink too, and `pwd -P` follows the whole chain out of main. The
+# caller may also name the main checkout through an alias (macOS /var → /private/var), which must not
+# read as "a linked worktree borrowing main".
+#
+# <rel> is a normalized path whose first component is `coverage` (gate_normalize_rel).
+# Physical path of a FILE: follow its symlink chain (bounded), then resolve the final parent with
+# `pwd -P`. `cd -P` alone resolves directories only, so it cannot see a symlinked report.
+gate_physical_file() {
+  local path=$1 target hops=0 dir
+  while [ -L "$path" ] && [ "$hops" -lt 40 ]; do
+    target=$(readlink -- "$path") || return 1
+    case $target in
+      /*) path=$target ;;
+      *) path="$(dirname -- "$path")/$target" ;;
+    esac
+    hops=$((hops + 1))
+  done
+  dir=$(cd -P "$(dirname -- "$path")" 2>/dev/null && pwd) || return 1
+  printf '%s/%s\n' "$dir" "$(basename -- "$path")"
+}
+
+gate_coverage_source() {
+  local root=$1 main_root=$2 rel=${3:-coverage} real_root real_main real_main_cov real_cov borrowed
+  [ -e "$root/$rel" ] || return 1
+  real_root=$(cd -P "$root" 2>/dev/null && pwd) || real_root=$root
+  real_main=$(cd -P "$main_root" 2>/dev/null && pwd) || real_main=$main_root
+  real_main_cov=$(cd -P "$main_root/coverage" 2>/dev/null && pwd) || real_main_cov=
+  if [ "$real_root" != "$real_main" ] && real_cov=$(cd -P "$root/$rel" 2>/dev/null && pwd); then
+    borrowed="$root/$rel/ is the MAIN checkout's ($real_cov)"
+    # A local coverage/ can still hold a report symlinked into main, so the gate reads the FILE's path.
+    if [ "$rel" = coverage ] && [ -L "$root/$rel/coverage-final.json" ]; then
+      real_cov=$(gate_physical_file "$root/$rel/coverage-final.json") || real_cov=
+      borrowed="$root/$rel/coverage-final.json is the MAIN checkout's ($real_cov)"
+    fi
+    case "$real_cov/" in
+      "$real_main/coverage/"* | "${real_main_cov:-/nonexistent-main-coverage}/"*)
+        echo "  ⚠️  $borrowed, not this worktree's — the coverage" >&2
+        echo "     gate will judge another tree's numbers. Remove the link and run \`devkit coverage-run\` here." >&2
+        ;;
+    esac
+  fi
+  printf '%s\n' "$root/$rel"
+}
+
+# Lexically normalize a relative link path: drop empty and `.` components, fold `..` (an unmatched one
+# is kept). Every `--link` spelling of the coverage dir (`./coverage`, `coverage/`, `x/../coverage`)
+# must classify as coverage, or it would slip back onto gate_link_source's main-worktree tail. Only
+# `/` separates — no `read`, which stops at a newline — and the result is printed WITHOUT a trailing
+# newline so a name ending in one survives the caller's sentinel-guarded capture. Pure string work:
+# no filesystem, no caller shell options touched (this file is SOURCED).
+gate_normalize_rel() {
+  local rest=$1 part more=1 joined='' seg
+  local -a out=()
+  while [ "$more" -eq 1 ]; do
+    case $rest in
+      */*) part=${rest%%/*}; rest=${rest#*/} ;;
+      *) part=$rest; more=0 ;;
+    esac
+    case $part in
+      '' | .) ;;
+      ..)
+        if [ "${#out[@]}" -gt 0 ] && [ "${out[${#out[@]}-1]}" != .. ]; then
+          out=("${out[@]:0:${#out[@]}-1}")
+        else
+          out+=(..)   # escapes the root: kept, so `../coverage` never reads as the root's own
+        fi
+        ;;
+      *) out+=("$part") ;;
+    esac
+  done
+  for seg in ${out[@]+"${out[@]}"}; do joined=${joined:+$joined/}$seg; done
+  printf '%s' "$joined"
 }
 
 gate_dependency_preflight_tool() {
@@ -473,7 +558,7 @@ prepare_gate_worktree() {
   # the same ship, already "print[s] a loud notice so it is never silent"; this was its silent sibling,
   # and that silence is why sc-1243 read as "this repo has no linters installed" instead of "the wrong
   # node_modules got linked".
-  local d source dependency_rc
+  local d rel source dependency_rc
   for d in "${link_dirs[@]}"; do
     if [ "$d" = node_modules ]; then
       if source=$(gate_node_modules_source "$wt" "$root" "$main_root"); then
@@ -484,7 +569,17 @@ prepare_gate_worktree() {
         return 1
       fi
     else
-      source=$(gate_link_source "$root" "$main_root" "$d") || continue
+      rel=$(gate_normalize_rel "$d" && printf .) && rel=${rel%.}
+      case "$d" in /*) rel= ;; esac
+      if [ "$rel" = coverage ] || [[ "$rel" == coverage/* ]]; then
+        source=$(gate_coverage_source "$root" "$main_root" "$rel" && printf .) || continue
+        d=$rel
+      else
+        source=$(gate_link_source "$root" "$main_root" "$d" && printf .) || continue
+      fi
+      # The `.` sentinel keeps `$(…)` from eating a trailing newline that belongs to the path itself.
+      source=${source%.}
+      source=${source%$'\n'}
     fi
     [ ! -e "$wt/$d" ] && [ ! -L "$wt/$d" ] || continue
     mkdir -p "$wt/$(dirname "$d")"
