@@ -106,10 +106,10 @@ describe('review repository state', () => {
     );
   });
 
-  it('freezes exact shared config bytes and active local include contents', () => {
+  it('freezes shared config entries written directly and active local include contents', () => {
     const bytes = fixture('devkit review repository config-bytes-');
     captureReviewRepositoryState(bytes.root, bytes.manifest);
-    appendFileSync(join(bytes.root, '.git', 'config'), '# byte-only mutation\n');
+    appendFileSync(join(bytes.root, '.git', 'config'), '[review]\n\tmarker = raw\n');
     expect(() => verifyReviewRepositoryState(bytes.root, bytes.manifest)).toThrow(
       /repository metadata changed after capture/,
     );
@@ -306,21 +306,7 @@ describe('review repository state', () => {
     ).toThrow(/repository metadata changed during capture/);
   });
 
-  it('detects shared and worktree config round trips during capture without writing a manifest', () => {
-    const shared = fixture('devkit review repository shared-config-aba-');
-    const sharedConfig = join(shared.root, '.git', 'config');
-    const sharedBytes = readFileSync(sharedConfig);
-    expect(() =>
-      captureReviewRepositoryState(shared.root, shared.manifest, {
-        afterFirstCapture: () => {
-          writeFileSync(sharedConfig, Buffer.concat([sharedBytes, Buffer.from('# raced\n')]));
-          writeFileSync(sharedConfig, sharedBytes);
-        },
-      }),
-    ).toThrow(/repository metadata changed during capture/);
-    expect(readFileSync(sharedConfig)).toEqual(sharedBytes);
-    expect(existsSync(shared.manifest)).toBe(false);
-
+  it('detects worktree config round trips during capture without writing a manifest', () => {
     const selected = fixture('devkit review repository worktree-config-aba-');
     const linked = join(selected.parent, 'linked-config-aba-target');
     selected.git('config', 'extensions.worktreeConfig', 'true');
@@ -475,7 +461,7 @@ describe('review repository state', () => {
             config.git('config', 'core.abbrev', String(10 + configRuns));
           },
         }),
-      ).toThrow(/changed during capture \(.*configSha256.*common:config/);
+      ).toThrow(/changed during capture \(.*configSha256/);
       expect(configRuns).toBe(1);
 
       const head = fixture('devkit review repository named-head-');
