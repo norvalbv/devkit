@@ -253,16 +253,38 @@ gate_rebase_coverage() {
 # read as "a linked worktree borrowing main".
 #
 # <rel> is a normalized path whose first component is `coverage` (gate_normalize_rel).
+# Physical path of a FILE: follow its symlink chain (bounded), then resolve the final parent with
+# `pwd -P`. `cd -P` alone resolves directories only, so it cannot see a symlinked report.
+gate_physical_file() {
+  local path=$1 target hops=0 dir
+  while [ -L "$path" ] && [ "$hops" -lt 40 ]; do
+    target=$(readlink -- "$path") || return 1
+    case $target in
+      /*) path=$target ;;
+      *) path="$(dirname -- "$path")/$target" ;;
+    esac
+    hops=$((hops + 1))
+  done
+  dir=$(cd -P "$(dirname -- "$path")" 2>/dev/null && pwd) || return 1
+  printf '%s/%s\n' "$dir" "$(basename -- "$path")"
+}
+
 gate_coverage_source() {
-  local root=$1 main_root=$2 rel=${3:-coverage} real_root real_main real_main_cov real_cov
+  local root=$1 main_root=$2 rel=${3:-coverage} real_root real_main real_main_cov real_cov borrowed
   [ -e "$root/$rel" ] || return 1
   real_root=$(cd -P "$root" 2>/dev/null && pwd) || real_root=$root
   real_main=$(cd -P "$main_root" 2>/dev/null && pwd) || real_main=$main_root
   real_main_cov=$(cd -P "$main_root/coverage" 2>/dev/null && pwd) || real_main_cov=
   if [ "$real_root" != "$real_main" ] && real_cov=$(cd -P "$root/$rel" 2>/dev/null && pwd); then
+    borrowed="$root/$rel/ is the MAIN checkout's ($real_cov)"
+    # A local coverage/ can still hold a report symlinked into main, so the gate reads the FILE's path.
+    if [ "$rel" = coverage ] && [ -L "$root/$rel/coverage-final.json" ]; then
+      real_cov=$(gate_physical_file "$root/$rel/coverage-final.json") || real_cov=
+      borrowed="$root/$rel/coverage-final.json is the MAIN checkout's ($real_cov)"
+    fi
     case "$real_cov/" in
       "$real_main/coverage/"* | "${real_main_cov:-/nonexistent-main-coverage}/"*)
-        echo "  ⚠️  $root/$rel/ is the MAIN checkout's ($real_cov), not this worktree's — the coverage" >&2
+        echo "  ⚠️  $borrowed, not this worktree's — the coverage" >&2
         echo "     gate will judge another tree's numbers. Remove the link and run \`devkit coverage-run\` here." >&2
         ;;
     esac

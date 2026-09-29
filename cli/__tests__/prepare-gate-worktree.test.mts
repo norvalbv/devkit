@@ -408,6 +408,32 @@ describe('prepare_gate_worktree — coverage resolves from the consumer root onl
     expect(r.stderr).toMatch(/coverage\/ is the MAIN checkout's/);
   });
 
+  it('WARNS when a LOCAL coverage/ holds a report symlinked into the main checkout', () => {
+    const { main, linked, wt } = seedRepoWithLinkedWorktree();
+    mkdirSync(join(linked, 'coverage'));
+    symlinkSync(
+      join(main, 'coverage', 'coverage-final.json'),
+      join(linked, 'coverage', 'coverage-final.json'),
+    );
+
+    const r = prepare(wt, linked);
+
+    expect(r.status, `stderr: ${r.stderr}`).toBe(0);
+    expect(r.stderr).toMatch(/coverage-final\.json is the MAIN checkout's/);
+    expect(r.stderr).toContain(join(main, 'coverage', 'coverage-final.json'));
+  });
+
+  it('does NOT warn for a local report symlinked to another file inside the worktree', () => {
+    const { linked, wt } = seedRepoWithLinkedWorktree();
+    seedFiles(linked, { 'coverage/runs/latest.json': '{}' });
+    symlinkSync('runs/latest.json', join(linked, 'coverage', 'coverage-final.json'));
+
+    const r = prepare(wt, linked);
+
+    expect(r.status, `stderr: ${r.stderr}`).toBe(0);
+    expect(r.stderr).not.toMatch(/MAIN checkout/);
+  });
+
   it('does NOT warn for a sibling dir that merely shares the main path as a string prefix', () => {
     // `<main>-other/coverage` starts with `<main>` as a string, not as a path.
     const { main, linked, wt } = seedRepoWithLinkedWorktree();
