@@ -494,7 +494,7 @@ echo "SURVIVED:$?"`,
 // sc-1292 wiring under the errexit shell real callers use; unit behaviour lives in
 // cli/lib/ship/coverage/coverage-rebase.test.mts.
 describe('prepare_gate_worktree — linked coverage is rebased onto the worktree', () => {
-  // Raw leaf git calls still carry a native bound so one cannot wedge this single-worker project.
+  // Raw leaf git calls still carry a native bound so one cannot wedge a git-integration worker.
   const LEAF_TIMEOUT_MS = 30_000;
 
   /** A real git worktree (as ship creates) under a root with a SPACE, as real consumer paths have. */
