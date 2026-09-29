@@ -9,8 +9,9 @@
  * Usage: dependency-preflight.mjs <package.json> <node_modules>
  * Missing packages are emitted one per line and exit 1. An unreadable/unsafe manifest exits 2.
  */
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 interface PackageManifest {
   dependencies?: Record<string, unknown>;
@@ -46,26 +47,46 @@ function declaredDependencies(manifest: PackageManifest): string[] {
   return [...names].sort();
 }
 
+/** Declared root dependencies absent from `nodeModulesPath`; empty when package.json is absent. */
+export function missingDeclaredDependencies(
+  manifestPath: string,
+  nodeModulesPath: string,
+): string[] {
+  if (!existsSync(manifestPath)) return [];
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as PackageManifest;
+  return declaredDependencies(manifest).filter(
+    (name) => !existsSync(join(nodeModulesPath, ...safePackageParts(name), 'package.json')),
+  );
+}
+
+/** The frozen-lockfile install command for the checkout at `dir` (mirrors gate_dependency_install_remedy). */
+export function dependencyInstallRemedy(dir: string): string {
+  const has = (name: string): boolean => existsSync(join(dir, name));
+  if (has('bun.lock') || has('bun.lockb')) return 'bun install --frozen-lockfile';
+  if (has('pnpm-lock.yaml')) return 'pnpm install --frozen-lockfile';
+  if (has('yarn.lock')) return 'yarn install --immutable';
+  if (has('package-lock.json') || has('npm-shrinkwrap.json')) return 'npm ci';
+  return "install dependencies with this repo's package manager";
+}
+
 function run(args: string[]): number {
   if (args.length !== 2) {
     throw new Error('usage: dependency-preflight <package.json> <node_modules>');
   }
   const [manifestPath, nodeModulesPath] = args as [string, string];
-  if (!existsSync(manifestPath)) return 0;
-  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as PackageManifest;
-  const missing = declaredDependencies(manifest).filter(
-    (name) => !existsSync(join(nodeModulesPath, ...safePackageParts(name), 'package.json')),
-  );
+  const missing = missingDeclaredDependencies(manifestPath, nodeModulesPath);
   if (missing.length === 0) return 0;
   process.stdout.write(`${missing.join('\n')}\n`);
   return 1;
 }
 
-try {
-  process.exitCode = run(process.argv.slice(2));
-} catch (error) {
-  process.stderr.write(
-    `devkit ship: dependency preflight failed: ${error instanceof Error ? error.message : String(error)}\n`,
-  );
-  process.exitCode = 2;
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
+  try {
+    process.exitCode = run(process.argv.slice(2));
+  } catch (error) {
+    process.stderr.write(
+      `devkit ship: dependency preflight failed: ${error instanceof Error ? error.message : String(error)}\n`,
+    );
+    process.exitCode = 2;
+  }
 }

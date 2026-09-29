@@ -11,11 +11,20 @@ import {
   readlinkSync,
   realpathSync,
   rmSync,
+  statSync,
   symlinkSync,
 } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { writeFileAtomic } from '../../atomic-write.mts';
+import {
+  aliasedChangeHint,
+  type DependencyAliases,
+  reRootAliasedPath,
+  resolveDependencyAliases,
+  skippedDependencyEntry,
+} from './repository/dependency-alias.mts';
 import { runDirectReviewCli } from './run-direct.mts';
+import { fail } from './shared/common.mts';
 import {
   canonicalReviewDirectory,
   canonicalReviewLeaf,
@@ -54,9 +63,7 @@ interface Topology {
   fingerprint: string;
 }
 
-function fail(message: string): never {
-  throw new Error(`devkit review: ${message}`);
-}
+type LinkScope = { root: string; aliases: DependencyAliases };
 
 function validateRoots(sourceRoot: string, destinationRoot: string): [string, string] {
   const source = canonicalReviewDirectory(sourceRoot, 'dependency source root');
@@ -133,7 +140,7 @@ function isGitPath(path: string): boolean {
   return path === '.git' || path.startsWith('.git/');
 }
 
-function mapLinkTarget(root: string, linkPath: string, rawTarget: string): string {
+function mapLinkTarget({ root, aliases }: LinkScope, linkPath: string, rawTarget: string): string {
   const lexical = isAbsolute(rawTarget)
     ? resolve(rawTarget)
     : resolve(dirname(linkPath), rawTarget);
@@ -143,6 +150,7 @@ function mapLinkTarget(root: string, linkPath: string, rawTarget: string): strin
   } catch {
     return fail(`dangling dependency link: ${repoPath(root, linkPath)}`);
   }
+  mapped = reRootAliasedPath(root, mapped, aliases);
   const target = repoPath(root, mapped);
   if (isGitPath(target)) return fail(`dependency link targets .git: ${repoPath(root, linkPath)}`);
   if (lstatSync(mapped, { throwIfNoEntry: false }) === undefined) {
@@ -151,13 +159,13 @@ function mapLinkTarget(root: string, linkPath: string, rawTarget: string): strin
   return target;
 }
 
-function validateLinkGraph(root: string, linkPath: string, seen = new Set<string>()): string {
-  const linkRel = repoPath(root, linkPath);
+function validateLinkGraph(scope: LinkScope, linkPath: string, seen = new Set<string>()): string {
+  const linkRel = repoPath(scope.root, linkPath);
   if (seen.has(linkRel)) return linkRel;
   seen.add(linkRel);
-  const target = mapLinkTarget(root, linkPath, readlinkSync(linkPath));
-  const targetPath = absoluteRepoPath(root, target);
-  if (lstatSync(targetPath).isSymbolicLink()) validateLinkGraph(root, targetPath, seen);
+  const target = mapLinkTarget(scope, linkPath, readlinkSync(linkPath));
+  const targetPath = absoluteRepoPath(scope.root, target);
+  if (lstatSync(targetPath).isSymbolicLink()) validateLinkGraph(scope, targetPath, seen);
   return target;
 }
 
@@ -191,22 +199,22 @@ function fileEntry(root: string, path: string): RuntimeEntry {
   };
 }
 
-function captureEntry(root: string, path: string, entries: RuntimeEntry[]): void {
-  const stat = lstatSync(path);
-  const relativePath = repoPath(root, path);
+function captureEntry(scope: LinkScope, path: string, entries: RuntimeEntry[]): void {
+  const relativePath = repoPath(scope.root, path);
+  const stat = scope.aliases.has(relativePath) ? statSync(path) : lstatSync(path);
   if (isGitPath(relativePath)) return;
   if (stat.isSymbolicLink()) {
-    entries.push({ path: relativePath, type: 'symlink', target: validateLinkGraph(root, path) });
+    entries.push({ path: relativePath, type: 'symlink', target: validateLinkGraph(scope, path) });
     return;
   }
   if (stat.isFile()) {
-    entries.push(fileEntry(root, path));
+    entries.push(fileEntry(scope.root, path));
     return;
   }
   if (!stat.isDirectory()) fail(`unsupported dependency entry type: ${relativePath}`);
   entries.push({ path: relativePath, type: 'directory' });
   for (const name of readdirSync(path).sort()) {
-    if (name !== '.git') captureEntry(root, join(path, name), entries);
+    if (!skippedDependencyEntry(path, name)) captureEntry(scope, join(path, name), entries);
   }
 }
 
@@ -214,12 +222,14 @@ function topologyFingerprint(surfaces: string[], entries: RuntimeEntry[]): strin
   return createHash('sha256').update(JSON.stringify({ surfaces, entries })).digest('hex');
 }
 
-function captureSource(root: string): Topology {
+function captureSource(root: string): Topology & { aliases: DependencyAliases } {
   const surfaces = discoverDependencySurfaces(root);
+  const aliases = resolveDependencyAliases(root, surfaces);
+  const scope = { root, aliases };
   const entries: RuntimeEntry[] = [];
-  for (const surface of surfaces) captureEntry(root, absoluteRepoPath(root, surface), entries);
+  for (const surface of surfaces) captureEntry(scope, absoluteRepoPath(root, surface), entries);
   entries.sort((left, right) => (left.path === right.path ? 0 : left.path < right.path ? -1 : 1));
-  return { surfaces, entries, fingerprint: topologyFingerprint(surfaces, entries) };
+  return { surfaces, entries, fingerprint: topologyFingerprint(surfaces, entries), aliases };
 }
 
 function entryWithinSurface(path: string, surface: string): boolean {
@@ -260,7 +270,11 @@ function projectedEntry(root: string, expected: RuntimeEntry): RuntimeEntry {
     return expected;
   if (expected.type === 'file' && stat.isFile()) return fileEntry(root, path);
   if (expected.type === 'symlink' && stat.isSymbolicLink()) {
-    return { path: expected.path, type: 'symlink', target: validateLinkGraph(root, path) };
+    return {
+      path: expected.path,
+      type: 'symlink',
+      target: validateLinkGraph({ root, aliases: new Map() }, path),
+    };
   }
   return fail(`dependency runtime conflicts with snapshot entry: ${expected.path}`);
 }
@@ -373,7 +387,7 @@ export function materializeDependencyRuntime(
     hooks.beforeSourceVerification?.();
     const after = captureSource(source);
     if (after.fingerprint !== sourceBefore.fingerprint)
-      fail('dependencies changed during capture; retry');
+      fail(`dependencies changed during capture${aliasedChangeHint(after.aliases)}; retry`);
     const destinationTopology = captureDestination(destination, before);
     if (destinationTopology.fingerprint !== before.fingerprint) {
       fail('private dependency runtime does not match its captured source');
@@ -436,8 +450,10 @@ export function verifyDependencyRuntime(
   const manifest = readManifest(manifestPath);
   if (source !== manifest.sourceRoot)
     return fail('dependency runtime manifest belongs to another root');
-  if (captureSource(source).fingerprint !== manifest.sourceFingerprint) {
-    return fail('target dependencies changed while review was running; retry');
+  const current = captureSource(source);
+  if (current.fingerprint !== manifest.sourceFingerprint) {
+    const hint = aliasedChangeHint(current.aliases);
+    return fail(`target dependencies changed while review was running${hint}; retry`);
   }
   const [, destination] = validateRoots(source, manifest.destinationRoot);
   if (destination !== manifest.destinationRoot) {
