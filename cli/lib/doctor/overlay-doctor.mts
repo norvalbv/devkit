@@ -24,7 +24,9 @@ import {
   LOCAL_HOOKS,
   overlayHome,
   overlayHooksPath,
+  projectionGaps,
   projectOverlayIntoWorktree,
+  repairProjection,
   worktrees,
 } from '../husky/overlay/overlay-home.mts';
 import { HEAL_ALIAS_NAME, isHealAlias, syncOverlayHook } from '../overlay.mts';
@@ -202,16 +204,48 @@ function printLinkedWorktrees(home: string, pkgRel: string, fix: boolean): boole
         `  ⚠ ${path}: a worktree-scoped core.hooksPath (${pin}) shadows the overlay — commits there skip devkit's gates`,
       );
     }
-    if (existsSync(join(path, pkgRel, '.devkit', 'config.json'))) continue;
+    if (existsSync(join(path, pkgRel, '.devkit', 'config.json'))) {
+      ok = printProjectionGaps(path, home, pkgRel, fix) && ok;
+      continue;
+    }
     if (!fix) pending.push(path);
-    else if (projectOverlayIntoWorktree(path, home, pkgRel).length)
-      console.log(`  ✓ linked ${path} to this overlay`);
+    else ok = linkWorktree(path, home, pkgRel) && ok;
   }
   if (pending.length)
     console.log(
       `  · ${pending.length} linked worktree(s) not yet linked to the overlay — each links on its first commit, or run \`devkit doctor --fix\``,
     );
   return ok;
+}
+
+function linkWorktree(path: string, home: string, pkgRel: string): boolean {
+  try {
+    if (projectOverlayIntoWorktree(path, home, pkgRel).length)
+      console.log(`  ✓ linked ${path} to this overlay`);
+    return true;
+  } catch (e) {
+    console.log(`  ⚠ ${path}: could not link the overlay: ${e instanceof Error ? e.message : e}`);
+    return false;
+  }
+}
+
+// A linked worktree must lint and ratchet as its own branch: its lint config and baselines are copies.
+function printProjectionGaps(path: string, home: string, pkgRel: string, fix: boolean): boolean {
+  try {
+    const gaps = fix ? repairProjection(path, home, pkgRel) : projectionGaps(path, home, pkgRel);
+    if (!gaps.length) return true;
+    if (fix) console.log(`  ✓ ${path}: made ${gaps.join(', ')} branch-local`);
+    else
+      console.log(
+        `  ⚠ ${path}: ${gaps.join(', ')} not branch-local — its lint config or baselines are not the branch's own; run \`devkit doctor --fix\``,
+      );
+    return fix;
+  } catch (e) {
+    console.log(
+      `  ⚠ ${path}: could not repair the projection: ${e instanceof Error ? e.message : e}`,
+    );
+    return false;
+  }
 }
 
 // sc-1794: the commit-msg judges (completeness, sentry) — a silently dropped message gate is

@@ -337,9 +337,18 @@ ${prelude ? `${prelude}\n` : ''}${scoped}
 command -v __dk_commit_result >/dev/null 2>&1 && { trap - EXIT; __dk_commit_result 0; }
 
 # Chain to the repo's own pre-commit (exec → its exit code becomes the hook's).
-[ -f ${shQuote(chainTarget)} ] && exec sh ${shQuote(chainTarget)} "$@"
+[ -f ${chainWord(chainTarget)} ] && exec sh ${chainWord(chainTarget)} "$@"
 exit 0
 `;
+}
+
+/** Linked-worktree chain word for the repo's own hook: `.git` is a FILE there, so a `.git/hooks/*`
+ * target resolves through the common dir. Anything else stays single-quoted (never executes). */
+export function chainWord(target: string): string {
+  const hook = /^(?:\.\/)?\.git\/hooks\/+([^/]+)$/.exec(target)?.[1];
+  return hook
+    ? `"$(git rev-parse --path-format=absolute --git-common-dir)/hooks/"${shQuote(hook)}`
+    : shQuote(target);
 }
 
 /**
@@ -353,7 +362,7 @@ export function buildPassthroughHook(chainScript: string): string {
   return `${HOOK_PREAMBLE}
 # devkit overlay pass-through — git now runs this dir, so we forward to the repo's own hook
 # unchanged (devkit adds nothing to it).
-[ -f ${shQuote(chainScript)} ] && exec sh ${shQuote(chainScript)} "$@"
+[ -f ${chainWord(chainScript)} ] && exec sh ${chainWord(chainScript)} "$@"
 exit 0
 `;
 }
