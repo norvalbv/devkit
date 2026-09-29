@@ -129,11 +129,20 @@ function headSymref(root: string): string | null {
   return raw.subarray(0, -1).toString('base64');
 }
 
-function refsState(root: string): Buffer {
+// git-worktree(1): only these namespaces are per-worktree; every other ref is shared with sibling
+// sessions and cannot change the reviewed snapshot, which HEAD and the tree IDs already pin.
+const WORKTREE_REF_NAMESPACES = ['refs/bisect', 'refs/worktree', 'refs/rewritten'] as const;
+
+function worktreeRefsState(root: string): Buffer {
   return gitRaw(
     root,
-    ['for-each-ref', '--sort=refname', '--format=%(refname)%00%(objectname)%00%(symref)%00'],
-    'read target refs',
+    [
+      'for-each-ref',
+      '--sort=refname',
+      '--format=%(refname)%00%(objectname)%00%(symref)%00',
+      ...WORKTREE_REF_NAMESPACES,
+    ],
+    'read target worktree refs',
   );
 }
 
@@ -303,19 +312,17 @@ function pathMutationEvidence(path: string, label: string, recursive: boolean): 
   return parts;
 }
 
-/** Per-label filesystem evidence closing ref/config ABA gaps; per label so a failure names what
- *  moved (sc-2166). A non-linked checkout's worktree admin tree is the common one, recorded once. */
+/** Per-label evidence closing worktree-ref/config ABA gaps (sc-2166); shared ref storage is left
+ *  out so sibling sessions' commits and fetches cannot abort a review (sc-4159). */
 function repositoryMutationEvidence(context: RepositoryContext): Map<string, string> {
   const evidence = new Map<string, string>();
   const record = (label: string, path: string, recursive: boolean) =>
     evidence.set(label, framedHash(label, pathMutationEvidence(path, label, recursive)));
-  const adminTrees: [string, string][] = [['common', context.gitCommonDir]];
-  if (context.gitDir !== context.gitCommonDir) adminTrees.push(['worktree', context.gitDir]);
-  for (const [label, directory] of adminTrees) {
-    record(`${label}:admin`, directory, false);
-    record(`${label}:refs`, join(directory, 'refs'), true);
-    record(`${label}:reftable`, join(directory, 'reftable'), true);
-    record(`${label}:packed-refs`, join(directory, 'packed-refs'), false);
+  record('common:admin', context.gitCommonDir, false);
+  if (context.gitDir !== context.gitCommonDir) {
+    record('worktree:admin', context.gitDir, false);
+    record('worktree:refs', join(context.gitDir, 'refs'), true);
+    record('worktree:reftable', join(context.gitDir, 'reftable'), true);
   }
   record('common:config', join(context.gitCommonDir, 'config'), false);
   record('worktree:config', join(context.gitDir, 'config.worktree'), false);
@@ -335,7 +342,7 @@ function captureState(context: RepositoryContext): ReviewRepositoryState {
   return {
     headOid,
     headSymrefBase64: headSymref(root),
-    refsSha256: framedHash('review-repository-refs-v1', [refsState(root)]),
+    refsSha256: framedHash('review-repository-worktree-refs-v1', [worktreeRefsState(root)]),
     configSha256: configFingerprint(context),
   };
 }
