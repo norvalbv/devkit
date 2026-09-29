@@ -793,12 +793,11 @@ exec ${JSON.stringify(process.execPath)} "$@"
     const result = spawnSync(cliNode, [CLI, 'review'], {
       cwd: target.root,
       encoding: 'utf8',
-      // Generous enough that setup reliably REACHES the wedge before the ceiling fires — the wedge
-      // is infinite, so the guard still fires deterministically, just attributed to the phase we
-      // meant to test. A tight ceiling would race parallel test load and name an earlier phase.
-      env: { ...target.env, DEVKIT_PREFLIGHT_TIMEOUT: '30' },
+      // 90s, not 30s: setup must REACH the infinite wedge before the ceiling fires, and under pool
+      // load setup alone can overrun 30s, naming an earlier phase (same raise as the deps-final case).
+      env: { ...target.env, DEVKIT_PREFLIGHT_TIMEOUT: '90' },
       maxBuffer: 16 * 1024 * 1024,
-      timeout: 150_000,
+      timeout: 240_000,
     });
 
     expect(result.signal, combinedOutput(result)).toBeNull();
@@ -806,14 +805,14 @@ exec ${JSON.stringify(process.execPath)} "$@"
     // 124, not 143: the sentinel is what separates a ceiling from a user's Ctrl-C, and it reuses the
     // gate chain's timeout vocabulary rather than inventing a second one.
     expect(result.status, combinedOutput(result)).toBe(124);
-    expect(combinedOutput(result)).toContain('hit the 30s ceiling DURING: assets');
+    expect(combinedOutput(result)).toContain('hit the 90s ceiling DURING: assets');
     expect(newLogSince(target.root, beforeLogs)).toContain('result=timeout exit=124 phase=assets');
     // A hang guard that leaks ephemeral worktrees is worse than no hang guard.
     expect(repositoryEvidence(target.root)).toEqual(before);
     expect(gitBuffer(target.root, 'worktree', 'list', '--porcelain', '-z')).toEqual(
       before.worktrees,
     );
-  }, 240_000);
+  }, 360_000);
 
   // sc-2166: wedges the first dependency verify (step deps-final) so the banner, heartbeat and
   // trailer are all observed through the real wiring.

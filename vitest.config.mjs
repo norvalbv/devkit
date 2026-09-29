@@ -47,6 +47,9 @@ const SHARED_TEST_CONFIG = {
   // for that cleanup to finish and report exit 124 instead of racing Vitest's own timeout.
   testTimeout: 150_000,
 };
+// One value for both projects: vitest throws when one groupOrder mixes maxWorkers.
+// Leaves headroom for concurrent local development; VITEST_MAX_WORKERS overrides it per run.
+const SUITE_WORKERS = '50%';
 
 // The devkit test surface is the gate engines only. Skills under skills/ may
 // carry helper scripts (incl. *.test.mjs) that are repo-coupled and not part of
@@ -61,11 +64,7 @@ export default defineConfig({
           name: 'parallel',
           include: TEST_INCLUDE,
           exclude: GIT_INTEGRATION_TESTS,
-          // Leave headroom for concurrent local development. NOTE: this does NOT need headroom for
-          // the git-integration project — vitest resolves fileParallelism:false to maxWorkers:1,
-          // which puts that project in its own trailing `sequential` task group, and task groups are
-          // awaited one at a time. The two projects run back-to-back, never concurrently.
-          maxWorkers: '50%',
+          maxWorkers: SUITE_WORKERS,
         },
       },
       {
@@ -73,11 +72,9 @@ export default defineConfig({
           ...SHARED_TEST_CONFIG,
           name: 'git-integration',
           include: GIT_INTEGRATION_TESTS,
-          // These files create real repos/worktrees and contend on git + filesystem resources.
-          // One worker prevents the suite from manufacturing the load that made their clocks flaky.
-          // It does NOT shield them from load outside this process, so a file here still must not
-          // assert on how fast a contended machine executes (sc-2288).
-          fileParallelism: false,
+          // Shares parallel's pool; a 1-worker project became a trailing group that doubled wall time.
+          // Spawns here stay supervised (suite-hangs-bound-at-the-spawn-site), not serialised.
+          maxWorkers: SUITE_WORKERS,
         },
       },
     ],

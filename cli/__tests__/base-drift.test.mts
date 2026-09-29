@@ -6,8 +6,8 @@
  * shared-clone ref mutation across linked worktrees, a genuinely unreachable remote, and git's own
  * rename reporting.
  *
- * Registered in vitest.config.mjs's GIT_INTEGRATION_TESTS — it creates real repos, does real
- * fetches and shares a $TMPDIR marker namespace, so it must not run in the parallel project.
+ * Registered in vitest.config.mjs's GIT_INTEGRATION_TESTS — it creates real repos and does real
+ * fetches; every marker dir is a per-test mkdtemp, so it is safe beside other files in the pool.
  */
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
