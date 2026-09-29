@@ -265,19 +265,23 @@ export function materializeProjectionRuntime(
 ): ProjectionRuntimeManifest {
   const [source, destination] = validateRoots(sourceRoot, destinationRoot);
   const manifestDestination = validateManifestPath(manifestPath, source, destination);
-  for (let attempt = 1; ; attempt += 1) {
+  let drifted = '';
+  for (let attempt = 0; attempt < CAPTURE_ATTEMPTS; attempt += 1) {
+    pause(CAPTURE_BACKOFF_MS * attempt);
     try {
       return captureOnce(source, destination, manifestDestination, candidates, indexPath, hooks);
     } catch (cause) {
-      if (!(cause instanceof CaptureDrift)) throw cause;
-      if (attempt === CAPTURE_ATTEMPTS) {
-        fail(
-          `gate projections changed during capture; retry — ${cause.path} was still being written after ${CAPTURE_ATTEMPTS} attempts`,
-        );
-      }
-      pause(CAPTURE_BACKOFF_MS * attempt);
+      drifted = driftedPath(cause);
     }
   }
+  return fail(
+    `gate projections changed during capture; retry — ${drifted} was still being written after ${CAPTURE_ATTEMPTS} attempts`,
+  );
+}
+
+function driftedPath(cause: unknown): string {
+  if (cause instanceof CaptureDrift) return cause.path;
+  throw cause;
 }
 
 function captureOnce(
