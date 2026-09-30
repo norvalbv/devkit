@@ -732,7 +732,7 @@ echo "SURVIVED:$?"`,
 
 // sc-1292 wiring under the errexit shell real callers use; unit behaviour lives in
 // cli/lib/ship/coverage/coverage-rebase.test.mts.
-describe('prepare_gate_worktree — linked coverage is rebased onto the worktree', () => {
+describe('prepare_gate_worktree — fallow gets rekeyed coverage, the gate keeps the link', () => {
   // Raw leaf git calls still carry a native bound so one cannot wedge a git-integration worker.
   const LEAF_TIMEOUT_MS = 30_000;
 
@@ -769,22 +769,41 @@ describe('prepare_gate_worktree — linked coverage is rebased onto the worktree
     return { main, wt };
   }
 
-  it('replaces the link with a rebased report when coverage came from the developer checkout', () => {
+  /** prepare_gate_worktree in the caller's errexit shell, then the FALLOW_COVERAGE it left exported. */
+  function prepareExported(wt: string, root: string, fallowCoverage = '') {
+    const r = spawnSync(
+      '/bin/bash',
+      [
+        '-c',
+        'set -euo pipefail; . "$0"; prepare_gate_worktree "$@"; printf "FALLOW_COVERAGE=%s\\n" "${FALLOW_COVERAGE-}"',
+        scriptPath,
+        wt,
+        root,
+        'ship',
+      ],
+      { encoding: 'utf8', env: { ...process.env, ...GIT_ENV, FALLOW_COVERAGE: fallowCoverage } },
+    );
+    return { ...r, exported: /FALLOW_COVERAGE=(.*)\n/.exec(r.stdout)?.[1] ?? null };
+  }
+
+  it('keeps the link byte-exact and exports FALLOW_COVERAGE to a private rekeyed copy', () => {
     const { main, wt } = seedShipWorktree((m) => m);
 
-    const r = prepare(wt, main);
+    const r = prepareExported(wt, main);
 
     expect(r.status, r.stderr).toBe(0);
-    expect(r.stderr).toContain(`rebased coverage keys from ${main} onto the worktree`);
-    expect(lstatSync(join(wt, 'coverage')).isDirectory()).toBe(true);
-    expect(linkTarget(join(wt, 'coverage/.last-clear.json'))).toBe(
-      join(main, 'coverage/.last-clear.json'),
-    );
-    const report = coverageMapSchema.parse(
-      JSON.parse(readFileSync(join(wt, 'coverage/coverage-final.json'), 'utf8')),
-    );
+    expect(r.stderr).toContain(`fallow reads coverage rekeyed from ${main} (FALLOW_COVERAGE)`);
+    // The provenance gate reads the link: it must remain the developer's artifact, never a rewrite.
+    expect(linkTarget(join(wt, 'coverage'))).toBe(join(main, 'coverage'));
+    const gitDir = rawExecFileSync('git', ['rev-parse', '--absolute-git-dir'], {
+      cwd: wt,
+      encoding: 'utf8',
+      timeout: LEAF_TIMEOUT_MS,
+    }).trim();
+    expect(r.exported).toBe(join(gitDir, 'devkit-fallow-coverage.json'));
+    const report = coverageMapSchema.parse(JSON.parse(readFileSync(r.exported ?? '', 'utf8')));
     expect(Object.keys(report)).toEqual([`${realpathSync(wt)}/src/a.ts`]);
-    // Linked AFTER staging: the rebase must not leave anything the ship could commit.
+    // Linked AFTER staging: nothing the ship could commit may appear.
     expect(
       rawExecFileSync('git', ['status', '--porcelain'], {
         cwd: wt,
@@ -794,7 +813,7 @@ describe('prepare_gate_worktree — linked coverage is rebased onto the worktree
     ).toBe('');
   });
 
-  it('keeps the plain link when the report already names the worktree paths', () => {
+  it('exports nothing when the report already names the worktree paths', () => {
     const { main, wt } = seedShipWorktree(() => '');
     // Re-key under the worktree itself — the case of coverage produced inside it.
     const key = `${realpathSync(wt)}/src/a.ts`;
@@ -803,10 +822,21 @@ describe('prepare_gate_worktree — linked coverage is rebased onto the worktree
       JSON.stringify({ [key]: { path: key } }),
     );
 
-    const r = prepare(wt, main);
+    const r = prepareExported(wt, main);
 
     expect(r.status, r.stderr).toBe(0);
-    expect(r.stderr).not.toContain('rebased coverage keys');
+    expect(r.stderr).not.toContain('rekeyed');
+    expect(r.exported).toBe('');
     expect(linkTarget(join(wt, 'coverage'))).toBe(join(main, 'coverage'));
+  });
+
+  it("leaves an operator's FALLOW_COVERAGE in place and says so", () => {
+    const { main, wt } = seedShipWorktree((m) => m);
+
+    const r = prepareExported(wt, main, '/operator/coverage.json');
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.exported).toBe('/operator/coverage.json');
+    expect(r.stderr).toContain('FALLOW_COVERAGE is already set (/operator/coverage.json)');
   });
 });
