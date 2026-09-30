@@ -47,6 +47,7 @@ import { parseJsonObject } from '../config-json.mts';
 import { coverageBypassed, deterministicStrict, envFlag, structureBypassed } from '../config.mts';
 import { emitGateBypass, emitGateEvent, finishGateTiming } from '../judge/gate-events.mts';
 import { prefixEntry, recordPrefix } from '../prefix-cache/prefix-cache.mts';
+import { coverageFirst, gateEnv, stopOnAbsentCoverage } from './coverage-first.mts';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 // Sibling gate modules are spawned as `node <path>`. In dev the tree is .mts (Node strips types at
@@ -178,6 +179,7 @@ interface RunDeterministicOpts extends Partial<ParsedOpts> {
 
 // A runnable gate descriptor. `argv` is null for an unrunnable gate (empty command).
 interface Gate {
+  id?: string; // the DETERMINISTIC registry id; --extra and structure gates have none
   label: string;
   argv: string[] | null;
   failOpen2: boolean;
@@ -289,9 +291,9 @@ export function prefixCacheScope(scope?: string, effectiveIds?: string[]): strin
 
 // Run one gate as a subprocess; return its exit code (0 on success). stdio inherited so the gate's
 // own banner/output reaches the user exactly as it did when the hook invoked it directly.
-function runArgv(cwd: string, argv: string[], exec = execFileSync): number {
+function runArgv(cwd: string, argv: string[], exec = execFileSync, env = process.env): number {
   try {
-    exec(argv[0], argv.slice(1), { cwd, stdio: 'inherit' });
+    exec(argv[0], argv.slice(1), { cwd, stdio: 'inherit', env });
     return 0;
   } catch (e: unknown) {
     // spawn failure / kill → treat as a real fail
@@ -379,6 +381,7 @@ export function runDeterministic(cwd = process.cwd(), opts: RunDeterministicOpts
     }
     const ids = new Set(effectiveIds);
     const gates: Gate[] = DETERMINISTIC.filter((g) => ids.has(g.id)).map((g) => ({
+      id: g.id,
       label: `guard-${g.id}`,
       argv: ['node', path.resolve(HERE, g.module.replace(MJS_EXT_RE, SELF_EXT)), ...g.args],
       failOpen2:
@@ -388,12 +391,13 @@ export function runDeterministic(cwd = process.cwd(), opts: RunDeterministicOpts
     if (opts.structure && !bypassStructure) {
       gates.push(commandGate('structure-lint', opts.structure));
     }
-    for (const gate of gates) {
+    for (const [index, gate] of coverageFirst(gates).entries()) {
       if (!gate.argv) {
         fails.push(`${gate.label}(unrunnable: empty command)`);
         continue;
       }
-      const rc = runArgv(cwd, gate.argv, exec);
+      const rc = runArgv(cwd, gate.argv, exec, gateEnv(gate));
+      if (stopOnAbsentCoverage(gates, index, rc, fails)) break;
       // `failOpen2` is a property of the GATE ("exit 2 is an opt-out for this one"); strict is a
       // property of the RUN ("what we do about an opt-out"). Keeping them separate is what lets an
       // `--extra` command's fatal exit 2 — failOpen2:false, never an opt-out — stay `(unexpected:2)`

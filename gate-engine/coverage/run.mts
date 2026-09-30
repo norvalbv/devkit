@@ -16,6 +16,7 @@ import { emitGateEvent } from '../judge/gate-events.mts';
 import { displayPath, formatClearMarker, humanAge, readClearMarker } from './failures.mts';
 // Shared with the PRODUCER (`devkit coverage-run`) so the path this gate reads and the path that
 // runner writes can never drift apart.
+import { signalAbsent } from './absent-signal.mts';
 import { COVERAGE_DIR, COVERAGE_FILE } from './produce.mts';
 import {
   type ArtifactRead,
@@ -221,6 +222,7 @@ export function runCoverage(cwd = process.cwd()): number {
   const file = resolve(cwd, COVERAGE_FILE);
   if (!existsSync(file)) {
     if (reviewMode) return reviewNotMeasuredAbsent(cwd);
+    signalAbsent();
     console.error(`🚫 Coverage gate FAILED — no coverage data (${COVERAGE_FILE} absent).`);
     const marker = readClearMarker(resolve(cwd, COVERAGE_DIR));
     if (marker) for (const line of formatClearMarker(marker, cwd)) console.error(line);

@@ -1,0 +1,59 @@
+/** guard-deterministic's one exception to aggregation: coverage runs first and an absent artifact stops
+ *  the suite, on the gate's own verdict. Why: docs/decisions/ship-gates-converge-not-restart.md. */
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { ABSENT, ABSENT_SIGNAL_ENV } from '../coverage/absent-signal.mjs';
+// By registry id, never by label: an --extra gate may be labelled anything, including guard-coverage.
+const isCoverage = (gate) => gate?.id === 'coverage';
+// The signal file handed to the coverage gate's current run (one gate run at a time, sequentially).
+let signalDir = null;
+/** Sort the coverage gate to the front, in place, keeping every other gate's order. */
+export function coverageFirst(gates) {
+    return gates.sort((a, b) => Number(isCoverage(b)) - Number(isCoverage(a)));
+}
+/** The environment a gate runs under: the coverage gate alone also gets a fresh signal file. With no
+ *  channel (an unwritable temp dir) it runs without one, so the runner aggregates as before sc-3712. */
+export function gateEnv(gate) {
+    signalDir = null;
+    if (!isCoverage(gate))
+        return process.env;
+    try {
+        signalDir = mkdtempSync(path.join(tmpdir(), 'devkit-coverage-signal-'));
+    }
+    catch {
+        return process.env;
+    }
+    return { ...process.env, [ABSENT_SIGNAL_ENV]: path.join(signalDir, 'reason') };
+}
+/** What the coverage gate's run just signalled, consuming the channel. */
+function takeSignal() {
+    if (!signalDir)
+        return null;
+    const dir = signalDir;
+    signalDir = null;
+    try {
+        return readFileSync(path.join(dir, 'reason'), 'utf8');
+    }
+    catch {
+        return null;
+    }
+    finally {
+        rmSync(dir, { recursive: true, force: true });
+    }
+}
+/** True when `gates[index]` is the coverage gate that failed AND said the artifact is absent: its failure
+ *  is recorded, the suite stops, and every later gate is named as NOT RUN so none reads as passed. */
+export function stopOnAbsentCoverage(gates, index, rc, fails) {
+    if (!isCoverage(gates[index]))
+        return false;
+    if (takeSignal() !== ABSENT || rc !== 1)
+        return false;
+    fails.push(gates[index].label);
+    const notRun = gates.slice(index + 1).map((g) => g.label);
+    if (notRun.length > 0) {
+        console.error(`⏭  No coverage data, so ${notRun.length} deterministic gate(s) did NOT run:${notRun.map((g) => ` ${g}`).join('')}`);
+        console.error('   Generate coverage (remedy above), then re-run: these gates still have to pass.');
+    }
+    return true;
+}
