@@ -1017,10 +1017,12 @@ describe('review gate supervisor', () => {
 
   // Proof the supervisor re-read is what carries the clean case, as the tee case proves its own: the
   // same run against a runner WITHOUT it must read the signal's status instead of the supervisor's.
+  // Retried: it proves the race is REACHABLE, and under load one attempt's signal can land late.
   (MODERN_BASH ? it : it.skip)(
     `needs the supervisor re-read to see a clean gate through a pending-trap signal${
       MODERN_BASH ? '' : ' (skipped: no bash >= 4)'
     }`,
+    { retry: 4 },
     () => {
       const root = mkTmp('devkit-review-pending-trap-prefix-');
       const prefix = deferredSignalGateHarness(join(root, 'prefix-run'), {
