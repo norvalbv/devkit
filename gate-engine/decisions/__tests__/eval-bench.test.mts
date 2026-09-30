@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   BenchAbort,
   cleanBenchEnv,
+  GATE_SOURCES,
   compare,
   lintCases,
   majorityVerdict,
@@ -22,6 +23,13 @@ import {
 import { openCheckpoint } from '../eval/checkpoint.mts';
 
 // ─── Pure metrics ─────────────────────────────────────────────────────────────────
+
+// sc-2769 moved the depth prompt out of check-alignment; a prompt edit must still void checkpoints.
+describe('gate hash sources', () => {
+  it('hash every module whose prompt or parse feeds a verdict, including the depth pass', () => {
+    expect(GATE_SOURCES).toEqual(['../detect', '../check-alignment', '../depth/depth-pass']);
+  });
+});
 
 describe('tally (multiclass metrics)', () => {
   const rows = [
