@@ -3,6 +3,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   symlinkSync,
@@ -23,6 +24,7 @@ import {
   seedShipRepoLocalRemote,
 } from './_ship-branch-fixture.mts';
 
+const PREFLIGHT_BLOCK = 'blocked before creating a branch or worktree';
 const TEN_LINES = Array.from({ length: 10 }, (_, i) => `l${i + 1}`).join('\n') + '\n';
 
 /** A checkout parked at the fork point A, plus an origin whose `base` branch is also at A and ready
@@ -39,7 +41,7 @@ function seedForked(seed: (dir: string) => void, { hookBody = 'exit 0' } = {}) {
 
 /** Advance origin/base with REAL new content, through a throwaway clone. The caller's checkout never
  *  fetches, so it stays at the fork point — which is the whole point of the bug. */
-function advanceBase(bare: string, mutate: (clone: string) => void) {
+function advanceBase(bare: string, mutate: (clone: string) => void, message = 'base advances') {
   const clone = mkdtempSync(join(tmpdir(), 'shipbase-'));
   dirs.push(clone);
   const cgit = (a: string[]) =>
@@ -49,7 +51,7 @@ function advanceBase(bare: string, mutate: (clone: string) => void) {
   cgit(['config', 'user.name', 'a']);
   mutate(clone);
   cgit(['add', '-A']);
-  cgit(['commit', '-q', '-m', 'base advances']);
+  cgit(['commit', '-q', '-m', message]);
   cgit(['push', '-q', 'origin', 'base']);
   return execFileSync('git', ['-C', bare, 'rev-parse', 'base'], {
     env: { ...process.env, ...GIT_ENV },
@@ -82,6 +84,7 @@ describe('ship --base: newer same-file base changes survive a stale caller patch
     dropWorktree(git, r.stderr);
 
     expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).not.toContain(PREFLIGHT_BLOCK);
     expect(git(['rev-parse', 'feat/keep^']).trim()).toBe(advancedTip); // cut from the refreshed tip
     const shipped = git(['show', 'feat/keep:f.txt']);
     expect(shipped).toContain('l1-CALLER'); // the caller's work landed
@@ -167,6 +170,11 @@ describe('ship --base: newer same-file base changes survive a stale caller patch
     expect(r.status).toBe(1);
     expect(r.stderr).toContain('changed the same region of');
     expect(r.stderr).toContain('f.txt');
+    // Decided BEFORE any branch or worktree exists (sc-3496), naming the commit and the remedy.
+    expect(r.stderr).toContain(PREFLIGHT_BLOCK);
+    expect(r.stderr).toMatch(/f\.txt\n\s+[0-9a-f]{7,} base advances\n/);
+    expect(r.stderr).toContain('Merge or rebase origin/base into this checkout');
+    expect(r.stderr.split('changed the same region of').length).toBe(2); // staging never re-ran it
     // The base-drift advisory printed to this same stderr, just above the abort. It must not
     // contradict it — that self-contradiction inside one run cost two ship rounds (sc-2664).
     expect(r.stderr).not.toMatch(/not blocked/i);
@@ -193,6 +201,7 @@ describe('ship --base: newer same-file base changes survive a stale caller patch
     expect(r.status).toBe(1);
     expect(r.stderr).toContain('deleted or retyped briefed path');
     expect(r.stderr).toContain('d.txt');
+    expect(r.stderr).toContain(PREFLIGHT_BLOCK);
     expect(localBranchExists(git, 'feat/gone')).toBe(false);
   });
 
@@ -482,5 +491,191 @@ describe('ship --base: fork-point anchoring edge cases (sc-2451)', () => {
     expect(r.status, r.stderr).toBe(0);
     expect(localBranchExists(git, 'feat/drygate')).toBe(false);
     expect(remoteBranchExists(bare, 'feat/drygate')).toBe(false);
+  });
+});
+
+/** The region of stderr that names same-region conflicts, so a path merely narrated by git's own
+ *  "Applied patch to 'x' cleanly." cannot satisfy — or break — an assertion about what was blamed. */
+function conflictListing(stderr: string) {
+  return stderr.split('changed the same region of:')[1]?.split('ship cannot resolve')[0] ?? '';
+}
+
+describe('ship --base: the hunk-level verdict is taken before any branch exists (sc-3496)', () => {
+  it('names EVERY conflicting path and never blames a path that merged cleanly', () => {
+    const { dir, env, git, bare } = seedForked((d) => {
+      for (const f of ['a.txt', 'b.txt', 'c.txt']) writeFileSync(join(d, f), TEN_LINES);
+    });
+    advanceBase(bare, (c) => {
+      writeFileSync(join(c, 'a.txt'), TEN_LINES.replace('l5', 'l5-BASE'));
+      writeFileSync(join(c, 'b.txt'), TEN_LINES.replace('l2', 'l2-BASE'));
+    });
+    writeFileSync(join(dir, 'a.txt'), TEN_LINES.replace('l5', 'l5-CALLER'));
+    writeFileSync(join(dir, 'b.txt'), TEN_LINES.replace('l2', 'l2-CALLER'));
+    writeFileSync(join(dir, 'c.txt'), TEN_LINES.replace('l7', 'l7-CALLER')); // base never touched it
+
+    const r = ship(dir, env, 'feat/multi', ['a.txt', 'b.txt', 'c.txt']);
+    dropWorktree(git, r.stderr);
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(PREFLIGHT_BLOCK);
+    const listed = conflictListing(r.stderr);
+    expect(listed).toContain('a.txt');
+    expect(listed).toContain('b.txt');
+    expect(listed).not.toContain('c.txt');
+    expect(localBranchExists(git, 'feat/multi')).toBe(false);
+  });
+
+  it('caps the diverging-commit list at the three NEWEST, so history cannot bury the remedy', () => {
+    const { dir, env, git, bare } = seedForked((d) => writeFileSync(join(d, 'f.txt'), TEN_LINES));
+    for (const n of [1, 2, 3, 4]) {
+      const body = TEN_LINES.replace('l5', `l5-BASE-${n}`);
+      advanceBase(bare, (c) => writeFileSync(join(c, 'f.txt'), body), `base edit ${n}`);
+    }
+    writeFileSync(join(dir, 'f.txt'), TEN_LINES.replace('l5', 'l5-CALLER'));
+
+    const r = ship(dir, env, 'feat/hot', ['f.txt']);
+    dropWorktree(git, r.stderr);
+
+    expect(r.status).toBe(1);
+    const listed = conflictListing(r.stderr);
+    expect(listed).toMatch(/base edit 4[\s\S]*base edit 3[\s\S]*base edit 2/); // newest first
+    expect(listed).not.toContain('base edit 1');
+    expect(r.stderr.trimEnd().split('\n').at(-2)).toContain('Merge or rebase origin/base');
+  });
+
+  it('names a conflicting path that holds glob and pathspec-magic characters literally', () => {
+    const odd = ':weird name*.txt';
+    const { dir, env, git, bare } = seedForked((d) => {
+      writeFileSync(join(d, odd), TEN_LINES);
+      writeFileSync(join(d, 'weird name-sibling.txt'), TEN_LINES); // a `*` glob would also match this
+    });
+    advanceBase(
+      bare,
+      (c) => {
+        writeFileSync(join(c, odd), TEN_LINES.replace('l5', 'l5-BASE'));
+        writeFileSync(join(c, 'weird name-sibling.txt'), 'sibling moved\n');
+      },
+      'odd path edit',
+    );
+    writeFileSync(join(dir, odd), TEN_LINES.replace('l5', 'l5-CALLER'));
+
+    const r = ship(dir, env, 'feat/odd', [odd]);
+    dropWorktree(git, r.stderr);
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(PREFLIGHT_BLOCK);
+    const listed = conflictListing(r.stderr);
+    expect(listed).toContain('weird\\ name\\*.txt'); // %q-quoted, one entry
+    expect(listed).toContain('odd path edit');
+    expect(listed).not.toContain('sibling');
+  });
+
+  it('names a conflicting path that holds a NEWLINE as one path, not as fragments', () => {
+    const nl = 'two\nlines.txt';
+    const { dir, env, git, bare } = seedForked((d) => {
+      writeFileSync(join(d, nl), TEN_LINES);
+      writeFileSync(join(d, 'lines.txt'), TEN_LINES); // the fragment a newline split would blame
+    });
+    advanceBase(
+      bare,
+      (c) => writeFileSync(join(c, nl), TEN_LINES.replace('l5', 'l5-BASE')),
+      'nl edit',
+    );
+    writeFileSync(join(dir, nl), TEN_LINES.replace('l5', 'l5-CALLER'));
+
+    const r = ship(dir, env, 'feat/nl', [nl]);
+    dropWorktree(git, r.stderr);
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(PREFLIGHT_BLOCK);
+    const listed = conflictListing(r.stderr);
+    expect(listed).toContain("$'two\\nlines.txt'"); // %q-quoted, one entry
+    expect(listed).toContain('nl edit'); // the commit lookup used the whole path
+    expect(listed).not.toMatch(/^ {2}lines\.txt$/m);
+    expect(listed).not.toMatch(/^ {2}two$/m);
+  });
+
+  it('leaves the caller’s own index and TMPDIR exactly as it found them', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'ship-trial-tmp-'));
+    dirs.push(tmp);
+    const { dir, env, git, bare } = seedForked((d) => {
+      writeFileSync(join(d, 'f.txt'), TEN_LINES);
+      writeFileSync(join(d, 'staged.txt'), 'before\n');
+    });
+    advanceBase(bare, (c) => writeFileSync(join(c, 'f.txt'), TEN_LINES.replace('l5', 'l5-BASE')));
+    writeFileSync(join(dir, 'f.txt'), TEN_LINES.replace('l5', 'l5-CALLER'));
+    writeFileSync(join(dir, 'staged.txt'), 'staged by the caller\n');
+    git(['add', 'staged.txt']);
+    const indexBefore = git(['ls-files', '-s']);
+
+    const r = ship(dir, env, 'feat/clean', ['f.txt'], { TMPDIR: tmp });
+    dropWorktree(git, r.stderr);
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(PREFLIGHT_BLOCK);
+    expect(git(['ls-files', '-s'])).toBe(indexBefore);
+    expect(git(['ls-files', '-u'])).toBe('');
+    expect(git(['diff', '--cached', '--name-only']).trim()).toBe('staged.txt');
+    expect(readdirSync(tmp).filter((f) => f.startsWith('ship-trial'))).toEqual([]);
+  });
+
+  it('fails OPEN when the trial itself cannot run, leaving staging to take the verdict', () => {
+    // A git that rejects `apply --cached --3way` — the shape of git < 2.32. The trial must neither
+    // block a ship that merges cleanly nor swallow a real conflict: staging still decides both.
+    const realGit = execFileSync('/bin/sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
+    const shim = mkdtempSync(join(tmpdir(), 'ship-git-shim-'));
+    dirs.push(shim);
+    writeFileSync(
+      join(shim, 'git'),
+      [
+        '#!/bin/bash',
+        'cached=0; three=0',
+        'for a in "$@"; do case $a in --cached) cached=1;; --3way) three=1;; esac; done',
+        '[ "$cached$three" = 11 ] && { echo "error: --cached and --3way cannot be used together." >&2; exit 128; }',
+        `exec '${realGit}' "$@"`,
+      ].join('\n'),
+    );
+    chmodSync(join(shim, 'git'), 0o755);
+    const shimEnv = (env: NodeJS.ProcessEnv) => ({
+      PATH: `${shim}:${env.PATH ?? process.env.PATH}`,
+    });
+
+    const clean = seedForked((d) => writeFileSync(join(d, 'f.txt'), TEN_LINES));
+    advanceBase(clean.bare, (c) =>
+      writeFileSync(join(c, 'f.txt'), TEN_LINES.replace('l10', 'l10-BASE')),
+    );
+    writeFileSync(join(clean.dir, 'f.txt'), TEN_LINES.replace('l1\n', 'l1-CALLER\n'));
+    const ok = ship(clean.dir, clean.env, 'feat/old-git', ['f.txt'], shimEnv(clean.env));
+    dropWorktree(clean.git, ok.stderr);
+    expect(ok.status, ok.stderr).toBe(0);
+    expect(ok.stderr).not.toContain(PREFLIGHT_BLOCK);
+
+    const clash = seedForked((d) => writeFileSync(join(d, 'f.txt'), TEN_LINES));
+    advanceBase(clash.bare, (c) =>
+      writeFileSync(join(c, 'f.txt'), TEN_LINES.replace('l5', 'l5-BASE')),
+    );
+    writeFileSync(join(clash.dir, 'f.txt'), TEN_LINES.replace('l5', 'l5-CALLER'));
+    const late = ship(clash.dir, clash.env, 'feat/old-git-clash', ['f.txt'], shimEnv(clash.env));
+    dropWorktree(clash.git, late.stderr);
+    expect(late.status).toBe(1);
+    expect(late.stderr).not.toContain(PREFLIGHT_BLOCK); // the trial stepped aside...
+    expect(late.stderr).toContain('changed the same region of'); // ...and staging still caught it
+    expect(localBranchExists(clash.git, 'feat/old-git-clash')).toBe(false);
+  });
+
+  it('steps aside for an existing branch so a preserved-commit retry reaches its OWN refusal', () => {
+    const { dir, env, git, bare } = seedForked((d) => writeFileSync(join(d, 'f.txt'), TEN_LINES));
+    git(['branch', 'feat/again']); // a prior attempt's branch, still at the fork point
+    advanceBase(bare, (c) => writeFileSync(join(c, 'f.txt'), TEN_LINES.replace('l5', 'l5-BASE')));
+    writeFileSync(join(dir, 'f.txt'), TEN_LINES.replace('l5', 'l5-CALLER'));
+
+    // Non-dry: a dry run refuses any existing branch outright, before the trial could be reached.
+    const r = ship(dir, env, 'feat/again', ['f.txt'], { SHIP_DRY_RUN: '' });
+    dropWorktree(git, r.stderr);
+
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).not.toContain(PREFLIGHT_BLOCK);
+    expect(r.stderr).toContain('branch already exists: feat/again');
+    expect(remoteBranchExists(bare, 'feat/again')).toBe(false);
   });
 });
