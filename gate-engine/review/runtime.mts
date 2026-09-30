@@ -171,7 +171,7 @@ export interface ReviewOutcome {
    * say how long the wait is instead of telling the operator to re-run into the same wall. */
   outageResetsAt?: number;
   transcript?: string;
-  /** Contract-validated `path:line` lenses of a FAIL — the only findings the override valve may
+  /** Contract-validated waiver lenses of a FAIL — the only findings the override valve may
    * block or waive (a fabricated pair beside a grounded one must not demand its own waiver). */
   blockingLenses?: string[];
   /** Structured acknowledgement records for findings suppressed by the override valve. Present on
