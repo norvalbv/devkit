@@ -213,6 +213,7 @@ describe('DK_COMMIT_INDEX_CAPTURE', () => {
 // Allowed index readers that do not call commitIndexEnv themselves, with the reason.
 const ROUTED_ELSEWHERE = {
   'gate-engine/decisions/check-alignment.mts': 'argv routed through decisions/git-io.mts git()',
+  'gate-engine/decisions/depth/depth-pass.mts': 'argv routed through decisions/git-io.mts git()',
   'gate-engine/decisions/detect.mts': 'argv routed through decisions/git-io.mts git()',
   'gate-engine/review/baseline-gate.mts': 'review-mode only, in devkit review scratch worktrees',
 } satisfies Record<string, string>;
