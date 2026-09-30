@@ -52,6 +52,11 @@ export const SELF_HOST_EXTRAS: Array<{ label: string; cmd: string }> = [
   // against this generator is meaningless, and `guard-decisions integrity` already ships as a bin
   // for consumers who want the whole-corpus check.
   { label: 'hook-parity', cmd: 'node cli/lib/husky/hook-parity.mts --gate' },
+  // sc-2701: the consumer formatter's identity, decided here instead of by the completeness judge.
+  {
+    label: 'formatter-identity',
+    cmd: 'node cli/lib/husky/format-identity/formatter-identity.mts --gate',
+  },
   { label: 'decisions-integrity', cmd: 'node gate-engine/decisions/cli.mts integrity --staged' },
   { label: 'benchmarks', cmd: 'bun run benchmarks:check -- --mode staged' },
   // sc-2496: the structural half of `bench.mts validate` (0 model calls, ~1 s); nothing in the
