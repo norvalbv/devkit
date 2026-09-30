@@ -97,3 +97,39 @@ describe('runCompleteness — a rate-limited judge', () => {
     expect(out).not.toContain('CLI auth/quota, then re-run devkit ship');
   });
 });
+
+// sc-2769: a missing binary is its own cause at both gates — install leads, never an auth check.
+describe('an ABSENT judge binary', () => {
+  const msg = (repo, text) => {
+    const f = join(repo, '.git', 'COMMIT_EDITMSG_TEST');
+    writeFileSync(f, text);
+    return f;
+  };
+  const absent = () =>
+    mkExec(async (opts) => {
+      opts.onOutage?.({ kind: 'absent', permanent: true });
+      return null;
+    });
+
+  it('the review gate reports it as absent, spawns once per reviewer, and leads with install', async () => {
+    const repo = consumerRepo({ backend: true });
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    process.env.GUARD_AI_STRICT = '1';
+    const exec = absent();
+    expect(await runReviewGate(repo, { exec })).toBe(3);
+    expect(exec).toHaveBeenCalledTimes(5);
+    const out = err.mock.calls.flat().join('\n');
+    expect(out).toContain('is not installed or not on PATH — this is NOT an auth/quota problem');
+    expect(out).not.toContain('CLI auth/quota, then re-run devkit ship');
+  });
+
+  it('completeness names it in its SKIP line and gives the install-first remedy', async () => {
+    const repo = consumerRepo({ backend: true });
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    process.env.GUARD_AI_STRICT = '1';
+    expect(await runCompleteness(msg(repo, 'feat: x'), repo, { exec: absent() })).toBe(3);
+    const out = err.mock.calls.flat().join('\n');
+    expect(out).toContain('SKIPPED (judge CLI is not installed)');
+    expect(out).toContain('is not installed or not on PATH — this is NOT an auth/quota problem');
+  });
+});

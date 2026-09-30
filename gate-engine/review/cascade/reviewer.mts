@@ -3,10 +3,10 @@ import { judgeBinForModel } from '../../judge/codex/result.mts';
 import { JUDGE_ISOLATION } from '../../judge/judge-isolation.mts';
 import { namedAgentMcpProfile } from '../../judge/mcp/profile.mts';
 import type { JudgeOutage } from '../../judge/outage/classify.mts';
-import { DEEP_JUDGE_TIMEOUT_MS, execJudgeAsync } from '../../judge/run-judge.mts';
+import { DEEP_JUDGE_TIMEOUT_MS, execJudgeAsync, remedyCause } from '../../judge/run-judge.mts';
 import { renderGoverningClaudeMd } from '../claude-md.mts';
 import { renderStagedLineCounts } from '../evidence/line-counts.mts';
-import { type ReviewInconclusiveCause, parseReviewVerdict } from '../contracts/response.mts';
+import { parseReviewVerdict } from '../contracts/response.mts';
 import { buildCappedDiffEvidence } from '../diff-evidence.mts';
 import { responseContractFor } from '../contracts/registry.mts';
 import { attachItems } from '../evidence/items.mts';
@@ -52,14 +52,6 @@ function outageReason(
   if (outage?.kind === 'unauthenticated') return `${subject} CLI is not authenticated`;
   if (outage?.kind === 'absent') return `${subject} CLI is not installed`;
   return `${subject} outage`;
-}
-
-/** The machine cause `strictRemedy` branches on. Only the two whose remedies genuinely differ are
- *  split out; absent/unauthenticated share the auth/quota remedy, which is right for both. */
-function outageCause(outage: JudgeOutage | undefined): ReviewInconclusiveCause {
-  if (outage?.kind === 'timeout') return 'timeout';
-  if (outage?.kind === 'rate-limited') return 'rate-limited';
-  return 'outage';
 }
 
 /** Orchestration inputs threaded through one reviewer's cascade. */
@@ -260,7 +252,7 @@ async function cascadeVerdict(
       name: reviewer.name,
       status: 'inconclusive',
       reason: outageReason(firstOutage),
-      inconclusiveCause: outageCause(firstOutage),
+      inconclusiveCause: remedyCause(firstOutage),
       outageBin: judgeBinForModel(passModel),
       escalated: false,
       model: passModel,
@@ -309,7 +301,7 @@ async function cascadeVerdict(
             name: reviewer.name,
             status: 'inconclusive',
             reason: outageReason(contractRetryOutage),
-            inconclusiveCause: outageCause(contractRetryOutage),
+            inconclusiveCause: remedyCause(contractRetryOutage),
             outageBin: judgeBinForModel(passModel),
             escalated: false,
             model: passModel,
@@ -406,7 +398,7 @@ async function cascadeVerdict(
       name: reviewer.name,
       status: 'inconclusive',
       reason: outageReason(secondOutage, 'escalation'),
-      inconclusiveCause: outageCause(secondOutage),
+      inconclusiveCause: remedyCause(secondOutage),
       outageBin: judgeBinForModel(escalationModel),
       escalated: true,
       model: passModel,
