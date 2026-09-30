@@ -195,8 +195,10 @@ by a command-rewriting shell hook, exactly as with `SHIP_COMMIT_TIMEOUT` below.
   is why both blocks unset it. `devkit doctor --fix` refuses to bind while one pins codex, rather than
   reporting a move that left a judge behind.
 - `devkit doctor --fix` writes the same four keys into `guard.config.json` — durable, but it binds
-  only toward Claude, and a ship reads that file **from the base commit**, so commit it first. An
-  exported env needs no commit and works mid-ship.
+  only toward Claude, and a ship reads that file **from the base commit**, so commit it first. It
+  binds only when no codex binary resolves: for a codex that is installed but usage-limited or
+  logged out it is a silent no-op, so use the export. An exported env needs no commit and works
+  mid-ship.
 - Both routes re-judge every reviewer: a cached PASS is keyed on the model that earned it, so an
   in-flight converging ship restarts its review wave.
 - Claude publishes no quota query, so nothing can warn you before its headroom runs out.
