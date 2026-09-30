@@ -50,8 +50,11 @@ const SHARED_TEST_CONFIG = {
 // One value for both projects: vitest throws when one groupOrder mixes maxWorkers.
 // Leaves headroom for concurrent local development; VITEST_MAX_WORKERS overrides it per run.
 const SUITE_WORKERS = '50%';
-// Files proven to fail only when pooled; a later 1-worker group runs them. Empty since the drain fix.
-const POOLED_FAILURES = [];
+// Files proven to fail only when pooled; a later 1-worker group runs them (bash job-table race).
+const POOLED_FAILURES = [
+  'cli/__tests__/review-gate-supervisor.test.mts',
+  'cli/__tests__/ship-branch.test.mts',
+];
 
 // The devkit test surface is the gate engines only. Skills under skills/ may
 // carry helper scripts (incl. *.test.mjs) that are repo-coupled and not part of
