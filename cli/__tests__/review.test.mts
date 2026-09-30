@@ -463,6 +463,31 @@ printf 'REVIEW_SNAPSHOT_OK\\n'
     );
   }, 240_000);
 
+  it('copies the target coverage artifact privately and names NOT MEASURED on the verdict line', () => {
+    const target = fixture(
+      [
+        "[ -f coverage/coverage-final.json ] && printf 'REVIEW_COVERAGE_COPIED\\n'",
+        'printf \'coverage=not-measured reason=stale\\n\' >> "$DEVKIT_REVIEW_NOTICES"',
+      ].join('\n'),
+    );
+    write(target.root, '.gitignore', '.devkit/review-runs/\nignored.txt\ncoverage/\n');
+    write(target.root, 'coverage/coverage-final.json', '{}');
+    const before = logs(target.root);
+    const result = runReview(target);
+
+    const output = combinedOutput(result);
+    expect(result.status, output).toBe(0);
+    expect(output).toContain('REVIEW_COVERAGE_COPIED');
+    expect(output).toContain('copied coverage ← target');
+    expect(output).toContain(
+      '✓ devkit review: configured pre-commit gates passed — coverage NOT MEASURED (stale). full output',
+    );
+    expect(newLogSince(target.root, before)).toContain(
+      'result=passed exit=0 phase=verdict notices=coverage-not-measured',
+    );
+    expect(readFileSync(join(target.root, 'coverage/coverage-final.json'), 'utf8')).toBe('{}');
+  }, 240_000);
+
   /**
    * A P1 report claimed a drifted core.hooksPath exits 0 with an unreviewed diff — the persisted log
    * being nothing but its own header made a setup abort look like a legitimate short run. The drift
