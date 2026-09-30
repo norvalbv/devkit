@@ -50,8 +50,8 @@ const SHARED_TEST_CONFIG = {
 // One value for both projects: vitest throws when one groupOrder mixes maxWorkers.
 // Leaves headroom for concurrent local development; VITEST_MAX_WORKERS overrides it per run.
 const SUITE_WORKERS = '50%';
-// Fail only when pooled, on Linux (bash >= 4 signal-drain race); a later 1-worker group runs them.
-const POOLED_FAILURES = ['cli/__tests__/review-gate-supervisor.test.mts'];
+// Files proven to fail only when pooled; a later 1-worker group runs them. Empty since the drain fix.
+const POOLED_FAILURES = [];
 
 // The devkit test surface is the gate engines only. Skills under skills/ may
 // carry helper scripts (incl. *.test.mjs) that are repo-coupled and not part of
@@ -80,16 +80,21 @@ export default defineConfig({
           maxWorkers: SUITE_WORKERS,
         },
       },
-      {
-        test: {
-          ...SHARED_TEST_CONFIG,
-          name: 'git-serial',
-          include: POOLED_FAILURES,
-          // Explicit order keeps it solo even when VITEST_MAX_WORKERS lifts maxWorkers above 1.
-          maxWorkers: 1,
-          sequence: { groupOrder: 1 },
-        },
-      },
+      // Only when non-empty: an empty include would fall back to vitest's default globs.
+      ...(POOLED_FAILURES.length === 0
+        ? []
+        : [
+            {
+              test: {
+                ...SHARED_TEST_CONFIG,
+                name: 'git-serial',
+                include: POOLED_FAILURES,
+                // Explicit order keeps it solo even when VITEST_MAX_WORKERS lifts maxWorkers above 1.
+                maxWorkers: 1,
+                sequence: { groupOrder: 1 },
+              },
+            },
+          ]),
     ],
     // `e2e/lib/**/*.unit.test.mts` = FAST pure-logic tests of the harness helpers (no build); the
     // slow build+pack+install `*.e2e.test.mts` suites live in the separate vitest.e2e.config.mjs.
