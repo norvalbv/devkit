@@ -19,3 +19,4 @@ created: 2026-07-01
 **Revisit-when:** depth-audit shows platitude Revisit-when lines passing check 4 (the judge stopped catching vague conditions), or the schema gains structured machine-checkable validity conditions making the prose field redundant
 **Scope:** gate-engine/decisions/check-alignment.mjs
 **Source:** collab
+- 2026-09-30 — **Scope:** gate-engine/decisions/depth/** — sc-2769 moved the depth rubric (DEPTH_PROMPT, parseDepthVerdict, the warn-only depth pass) out of check-alignment into gate-engine/decisions/depth/depth-pass.mts. The old Scope named check-alignment.mjs, a stale .mjs source path that matched no staged file, so the alignment gate never armed on the rubric this Target governs.

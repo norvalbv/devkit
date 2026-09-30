@@ -84,13 +84,9 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { resolveFromCwd, resolveGuardConfig } from '../../config.mts';
-import {
-  judgeDetailed,
-  matchScope,
-  parseDepthVerdict,
-  runDepthJudge,
-} from '../check-alignment.mts';
+import { judgeDetailed, matchScope } from '../check-alignment.mts';
 import { currentTarget, parseDecision } from '../decisions.mts';
+import { parseDepthVerdict, runDepthJudge } from '../depth/depth-pass.mts';
 import { buildDetectJudgeInput, detectSmells, parseVerdict, runDetectJudge } from '../detect.mts';
 import { BenchAbort, loadCases, SUBS } from './cases.mts';
 import { NO_CHECKPOINT, openCheckpoint } from './checkpoint.mts';
@@ -634,10 +630,11 @@ const configKey = (name) =>
 // generated from different rows or a different gate is mechanically skipped, never silently lied.
 const sha12 = (s) => createHash('sha256').update(s).digest('hex').slice(0, 12);
 const SELF_EXT = import.meta.url.endsWith('.mts') ? '.mts' : '.mjs';
+/** Every module whose prompt or parse feeds a verdict; the depth pass lives apart since sc-2769. */
+export const GATE_SOURCES = ['../detect', '../check-alignment', '../depth/depth-pass'];
 const gateHash = () =>
   sha12(
-    readFileSync(path.join(here, `../detect${SELF_EXT}`), 'utf8') +
-      readFileSync(path.join(here, `../check-alignment${SELF_EXT}`), 'utf8'),
+    GATE_SOURCES.map((rel) => readFileSync(path.join(here, `${rel}${SELF_EXT}`), 'utf8')).join(''),
   );
 
 function main(argv) {

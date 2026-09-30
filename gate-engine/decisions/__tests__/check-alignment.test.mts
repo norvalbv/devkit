@@ -263,6 +263,56 @@ describe('--gate (integration, real git repo)', () => {
     expect(gateWithStub(bin, { GUARD_AI_STRICT: '1' }).status).toBe(1);
   });
 
+  // sc-2769: the remedy names the binary that went dark and its classified cause, never a default.
+  it('strict: an ABSENT codex judge is named, with install first — not a claude auth check', () => {
+    const bin = stubClaude(repo, 'echo CONTRADICT\n');
+    writeFileSync(join(repo, 'src', 'new.ts'), 'export const y = 2;\n');
+    git('add src/new.ts');
+    const missing = join(repo, 'missing-codex');
+    const r = gateWithStub(bin, {
+      GUARD_AI_STRICT: '1',
+      GUARD_REVIEW_MODEL: 'gpt-5.6-sol',
+      GUARD_CODEX_BIN: missing,
+    });
+    expect(r.status).toBe(3);
+    expect(r.stderr).toContain(`Remedy: \`${missing}\` is not installed or not on PATH`);
+    expect(r.stderr).not.toContain('check `claude` CLI auth');
+  });
+
+  it('strict: an escalation-pass outage names the ESCALATION model binary', () => {
+    const bin = stubClaude(repo, 'echo CONTRADICT\n');
+    writeFileSync(join(repo, 'src', 'rogue.ts'), 'export const y = 2;\n');
+    git('add src/rogue.ts');
+    const missing = join(repo, 'missing-codex');
+    const r = gateWithStub(bin, {
+      GUARD_AI_STRICT: '1',
+      GUARD_REVIEW_ESCALATION_MODEL: 'gpt-5.6-sol',
+      GUARD_CODEX_BIN: missing,
+    });
+    expect(r.status).toBe(3);
+    expect(r.stderr).toContain(`Remedy: \`${missing}\` is not installed`);
+  });
+
+  it('strict: a usage-locked claude judge gets the rate-limited remedy, no doctor route', () => {
+    const bin = stubClaude(repo, "echo 'Claude usage limit reached' >&2; exit 1\n");
+    writeFileSync(join(repo, 'src', 'new.ts'), 'export const y = 2;\n');
+    git('add src/new.ts');
+    const r = gateWithStub(bin, { GUARD_AI_STRICT: '1' });
+    expect(r.status).toBe(3);
+    expect(r.stderr).toContain('`claude` reports its usage limit reached');
+    expect(r.stderr).not.toContain('devkit doctor --fix');
+  });
+
+  it('strict: a judge that answers without a parseable VERDICT is not reported as an outage', () => {
+    const bin = stubClaude(repo, "echo 'ALIGN or CONTRADICT, unsure'\n");
+    writeFileSync(join(repo, 'src', 'new.ts'), 'export const y = 2;\n');
+    git('add src/new.ts');
+    const r = gateWithStub(bin, { GUARD_AI_STRICT: '1' });
+    expect(r.status).toBe(3);
+    expect(r.stderr).toContain('returned no parseable VERDICT line');
+    expect(r.stderr).not.toContain('CLI auth/quota');
+  });
+
   it('opus crashing after a haiku CONTRADICT fails open (0) — a half-cascade never blocks', () => {
     const bin = stubClaude(
       repo,
@@ -509,13 +559,17 @@ describe('judge cascade (in-process, stubbed claude on PATH)', () => {
       useStub('echo "$*" >> "$CLAUDE_STUB_LOG"\nexit 3\n');
       const warn = vi.spyOn(console, 'error').mockImplementation(() => {});
       try {
-        expect(judgeDetailed(['rogue.ts'], target, repo)).toEqual({
+        const d = judgeDetailed(['rogue.ts'], target, repo);
+        expect(d).toMatchObject({
           firstRaw: null,
           firstVerdict: null,
           finalRaw: null,
           finalVerdict: null,
           escalated: false,
         });
+        // sc-2769: the classified cause and the dark binary travel with it, for the strict remedy.
+        expect(d?.outage).toMatchObject({ bin: 'claude' });
+        expect(d?.outage?.kind).toBeTypeOf('string');
       } finally {
         warn.mockRestore();
       }

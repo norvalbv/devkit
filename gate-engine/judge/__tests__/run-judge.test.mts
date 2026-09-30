@@ -6,7 +6,7 @@ import {
   JUDGE_MODEL_ENVS,
   judgeEnvUnsetLine,
 } from '../outage/family-override.mts';
-import { strictRemedy, unavailableMessage } from '../run-judge.mts';
+import { remedyCause, strictRemedy, unavailableMessage } from '../run-judge.mts';
 
 // A developer who pins a codex build exports GUARD_CODEX_BIN, which turns the bare word "codex" into
 // an unknown bin; isolate it so every remedy assertion below reads the same resolution.
@@ -140,15 +140,62 @@ describe('strictRemedy', () => {
     ).toBe(true);
   });
 
-  // The generic cause also covers an ABSENT binary — the one state doctor --fix can bind — so the
-  // escape hatch has to be reachable from here, not only from the rate-limited arm.
-  it('a genuine outage also names the escape hatch, in full', () => {
+  // sc-2769: every binary reaching the generic arm RAN (only ENOENT reads as absent), so doctor's
+  // bind cannot apply there; the full env move stays, the dead doctor lever and absent clause go.
+  it('a genuine outage names the family move in full, never the doctor route', () => {
     const r = strictRemedy('outage', 'codex');
     expect(r).toContain('GUARD_REVIEW_MODEL=haiku');
     expect(r).toContain('GUARD_CORRECTNESS_CHUNK=off');
-    expect(r).toContain('devkit doctor --fix');
-    expect(r).toContain('If no codex binary resolves at all');
     expect(r).toContain('cached PASS is discarded');
+    expect(r).not.toContain('devkit doctor --fix');
+    expect(r).not.toContain('If that CLI is absent');
+  });
+
+  it('an absent codex leads with installing it, not an auth check, and hedges the family move', () => {
+    const r = strictRemedy('absent', 'codex');
+    expect(
+      r.startsWith('`codex` is not installed or not on PATH — this is NOT an auth/quota problem'),
+    ).toBe(true);
+    expect(r).toContain('GUARD_CODEX_BIN');
+    expect(r).toContain('If the other judge CLI is installed');
+    expect(r).toContain(claudeFamilyEnvLine());
+    // codex is unresolvable here, so doctor's bind CAN apply — offered after the env move.
+    expect(r).toContain('devkit doctor --fix');
+    expect(r).not.toContain('CLI auth/quota');
+  });
+
+  it('an absent claude names the codex direction and no doctor route', () => {
+    const r = strictRemedy('absent', 'claude');
+    expect(r).toContain('`claude` is not installed or not on PATH');
+    expect(r).toContain('the packaged codex family');
+    expect(r).toContain('Install it, then resume the ship.');
+    expect(r).not.toContain('devkit doctor --fix');
+  });
+
+  it('an absent compound bin names no family move', () => {
+    const r = strictRemedy('absent', 'codex` or `claude');
+    expect(r).toContain('no family move is safe yet');
+    expect(r).not.toContain('If the other judge CLI is installed');
+  });
+
+  it('remedyCause keeps the three remedy-changing kinds and folds the rest into outage', () => {
+    const kinds = [
+      'timeout',
+      'rate-limited',
+      'absent',
+      'unauthenticated',
+      'transient',
+      'empty',
+    ] as const;
+    expect(kinds.map((kind) => remedyCause({ kind, permanent: false }))).toEqual([
+      'timeout',
+      'rate-limited',
+      'absent',
+      'outage',
+      'outage',
+      'outage',
+    ]);
+    expect(remedyCause(undefined)).toBe('outage');
   });
 
   // The remedy that sc-2538's operator was given for six days was "re-run devkit ship", which could
@@ -180,7 +227,7 @@ describe('strictRemedy', () => {
   // the operator to the wrong subscription. The redirect half may name the other family, never to authenticate.
   it('an outage remedy names the binary that went dark — codex outages must not send you to claude auth', () => {
     const r = strictRemedy('outage', 'codex');
-    const diagnosis = r.slice(0, r.indexOf(familyOverrideRemedy('codex')));
+    const diagnosis = r.slice(0, r.indexOf(familyOverrideRemedy('codex', true)));
     expect(diagnosis).toContain('check `codex` CLI auth/quota, then re-run devkit ship');
     expect(diagnosis).not.toContain('claude');
     expect(r).not.toContain('check `claude`');
@@ -273,9 +320,9 @@ describe('strictRemedy', () => {
   });
 
   it('every cause yields a distinct remedy — no two gates can print the same wrong line', () => {
-    const all = (['timeout', 'sync', 'outage', 'rate-limited'] as const).map((c) =>
+    const all = (['timeout', 'sync', 'outage', 'rate-limited', 'absent'] as const).map((c) =>
       strictRemedy(c),
     );
-    expect(new Set(all).size).toBe(4);
+    expect(new Set(all).size).toBe(5);
   });
 });
