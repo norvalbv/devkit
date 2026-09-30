@@ -10,6 +10,7 @@ import { emitGateEvent } from '../judge/gate-events.mjs';
 import { displayPath, formatClearMarker, humanAge, readClearMarker } from './failures.mjs';
 // Shared with the PRODUCER (`devkit coverage-run`) so the path this gate reads and the path that
 // runner writes can never drift apart.
+import { signalAbsent } from './absent-signal.mjs';
 import { COVERAGE_DIR, COVERAGE_FILE } from './produce.mjs';
 import { checkProvenance, readArtifact, } from './provenance.mjs';
 // The metrics we can compute from an istanbul/V8 coverage-final.json. Only the KEYS a consumer
@@ -184,6 +185,7 @@ export function runCoverage(cwd = process.cwd()) {
     if (!existsSync(file)) {
         if (reviewMode)
             return reviewNotMeasuredAbsent(cwd);
+        signalAbsent();
         console.error(`🚫 Coverage gate FAILED — no coverage data (${COVERAGE_FILE} absent).`);
         const marker = readClearMarker(resolve(cwd, COVERAGE_DIR));
         if (marker)

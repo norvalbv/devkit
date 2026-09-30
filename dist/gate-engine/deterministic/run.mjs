@@ -46,6 +46,7 @@ import { parseJsonObject } from '../config-json.mjs';
 import { coverageBypassed, deterministicStrict, envFlag, structureBypassed } from '../config.mjs';
 import { emitGateBypass, emitGateEvent, finishGateTiming } from '../judge/gate-events.mjs';
 import { prefixEntry, recordPrefix } from '../prefix-cache/prefix-cache.mjs';
+import { coverageFirst, gateEnv, stopOnAbsentCoverage } from './coverage-first.mjs';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 // Sibling gate modules are spawned as `node <path>`. In dev the tree is .mts (Node strips types at
 // the repo root); in the shipped dist it is compiled .mjs. Derive the runtime extension from THIS
@@ -240,9 +241,9 @@ export function prefixCacheScope(scope, effectiveIds) {
 }
 // Run one gate as a subprocess; return its exit code (0 on success). stdio inherited so the gate's
 // own banner/output reaches the user exactly as it did when the hook invoked it directly.
-function runArgv(cwd, argv, exec = execFileSync) {
+function runArgv(cwd, argv, exec = execFileSync, env = process.env) {
     try {
-        exec(argv[0], argv.slice(1), { cwd, stdio: 'inherit' });
+        exec(argv[0], argv.slice(1), { cwd, stdio: 'inherit', env });
         return 0;
     }
     catch (e) {
@@ -326,6 +327,7 @@ export function runDeterministic(cwd = process.cwd(), opts = {}) {
         }
         const ids = new Set(effectiveIds);
         const gates = DETERMINISTIC.filter((g) => ids.has(g.id)).map((g) => ({
+            id: g.id,
             label: `guard-${g.id}`,
             argv: ['node', path.resolve(HERE, g.module.replace(MJS_EXT_RE, SELF_EXT)), ...g.args],
             failOpen2: !('failOpen2' in g) || (g.failOpen2 === 'review' ? reviewMode : g.failOpen2 !== false),
@@ -335,12 +337,14 @@ export function runDeterministic(cwd = process.cwd(), opts = {}) {
         if (opts.structure && !bypassStructure) {
             gates.push(commandGate('structure-lint', opts.structure));
         }
-        for (const gate of gates) {
+        for (const [index, gate] of coverageFirst(gates).entries()) {
             if (!gate.argv) {
                 fails.push(`${gate.label}(unrunnable: empty command)`);
                 continue;
             }
-            const rc = runArgv(cwd, gate.argv, exec);
+            const rc = runArgv(cwd, gate.argv, exec, gateEnv(gate));
+            if (stopOnAbsentCoverage(gates, index, rc, fails))
+                break;
             // `failOpen2` is a property of the GATE ("exit 2 is an opt-out for this one"); strict is a
             // property of the RUN ("what we do about an opt-out"). Keeping them separate is what lets an
             // `--extra` command's fatal exit 2 — failOpen2:false, never an opt-out — stay `(unexpected:2)`
