@@ -15,6 +15,8 @@ import { packageDir, readJson, writeIfAbsent } from './fs-helpers.mjs';
 import { trackedPathPredicate } from './git-tracked.mjs';
 import { buildOverlayHook } from './husky/husky-block.mjs';
 import { describeOverlayCommitMsg, syncOverlaySiblingHooks } from './husky/overlay/commit-msg.mjs';
+import { installHealAlias } from './husky/overlay/heal-alias.mjs';
+import { isOverlayHooksValue, LOCAL_HOOKS, overlayHooksPath, projectionPrelude, } from './husky/overlay/overlay-home.mjs';
 import { ADHD_SKILL_DIR, syncAdhdSkill } from './install/adhd-skill.mjs';
 import { wireOverlayAntiSlop } from './install/anti-slop/overlay/install.mjs';
 import { selectedHookAssets } from './install/hook-registration-ledger/selection.mjs';
@@ -24,16 +26,6 @@ import { overlayAssetExcludes } from './install/overlay-asset-excludes.mjs';
 import { addToGitExclude } from './install/overlay-excludes.mjs';
 import { firstLine } from './standalone.mjs';
 import { removeAgents, removeSkills } from './sync-manifest.mjs';
-const LOCAL_HOOKS = '.devkit/hooks';
-// every `bun install`; this LOCAL (uncommitted) alias re-points it back to our hooks dir right
-// before a commit, so `git ci …` keeps devkit's gates wired without touching anything committed.
-// Fail-open `;` (never `&&`): a re-point hiccup must NEVER block your commit — it just runs the
-// repo's own hooks that once, matching every devkit gate's fail-open stance.
-const HEAL_ALIAS_NAME = 'ci';
-const HEAL_ALIAS_CMD = `!git config --local core.hooksPath ${LOCAL_HOOKS}; git commit`;
-// "Ours" by a STABLE marker (the re-point), not the exact literal — so a future HEAL_ALIAS_CMD
-// tweak still recognises (and lets `clean` remove) an alias an older devkit installed.
-const isHealAlias = (v) => v.startsWith('!') && v.includes(`core.hooksPath ${LOCAL_HOOKS}`);
 // husky sets core.hooksPath to `.husky/_`; the real committed script is the parent's hook.
 const HUSKY_UNDERSCORE_RE = /\/_$/;
 // Standard git hook names — used to pick the repo's real hooks out of a hooks dir (ignoring
@@ -68,75 +60,14 @@ function readHooksPath(gitRoot) {
         return '';
     }
 }
-// Install the per-clone `git ci` self-heal alias (LOCAL config — never global). The collision check
-// reads the RESOLVED value (--get, all scopes) so a user's common GLOBAL `ci` (= `commit -v`) is
-// seen and NEVER clobbered; we only set ours when `ci` is unset or already ours.
-function installHealAlias(gitRoot, dryRun) {
-    let current = '';
-    try {
-        current = execFileSync('git', ['config', '--get', `alias.${HEAL_ALIAS_NAME}`], {
-            cwd: gitRoot,
-            encoding: 'utf8',
-        }).trim();
-    }
-    catch {
-        current = ''; // unset
-    }
-    if (current && !isHealAlias(current)) {
-        console.log(`  • git alias '${HEAL_ALIAS_NAME}' already set — skipping self-heal. Re-point at commit time with: git config core.hooksPath ${LOCAL_HOOKS}`);
-        return;
-    }
-    if (dryRun) {
-        console.log(`  [dry-run] git config --local alias.${HEAL_ALIAS_NAME} (self-heal core.hooksPath)`);
-        return;
-    }
-    try {
-        execFileSync('git', ['config', '--local', `alias.${HEAL_ALIAS_NAME}`, HEAL_ALIAS_CMD], {
-            cwd: gitRoot,
-        });
-        console.log(`  ✓ git ${HEAL_ALIAS_NAME} self-heal alias (re-points core.hooksPath before commit)`);
-    }
-    catch (e) {
-        console.log(`  ! could not set alias.${HEAL_ALIAS_NAME}: ${firstLine(e)}`);
-    }
-}
-// Remove the self-heal alias on `clean` — ONLY when it's ours (by marker) and ONLY at --local scope
-// (read --local too, so we never even inspect, let alone touch, the user's GLOBAL `ci`).
-export function removeHealAlias(gitRoot, dryRun) {
-    let current = '';
-    try {
-        current = execFileSync('git', ['config', '--local', '--get', `alias.${HEAL_ALIAS_NAME}`], {
-            cwd: gitRoot,
-            encoding: 'utf8',
-        }).trim();
-    }
-    catch {
-        return; // no local alias
-    }
-    if (!isHealAlias(current))
-        return; // foreign / the user's own — leave it
-    if (dryRun) {
-        console.log(`  [dry-run] unset local alias.${HEAL_ALIAS_NAME}`);
-        return;
-    }
-    try {
-        execFileSync('git', ['config', '--local', '--unset', `alias.${HEAL_ALIAS_NAME}`], {
-            cwd: gitRoot,
-        });
-        console.log(`  ✓ removed git ${HEAL_ALIAS_NAME} self-heal alias`);
-    }
-    catch (e) {
-        console.log(`  ! could not unset alias.${HEAL_ALIAS_NAME}: ${firstLine(e)}`);
-    }
-}
-export { HEAL_ALIAS_CMD, HEAL_ALIAS_NAME, isHealAlias };
+export { HEAL_ALIAS_NAME, healAliasCmd, isHealAlias, removeHealAlias, } from './husky/overlay/heal-alias.mjs';
 // The TRUE original core.hooksPath to record (so `devkit clean` restores it). CRITICAL: if a
 // prior overlay is already in place (current === .devkit/hooks), recording that would make clean
 // restore a value devkit itself deleted — so recover the real original from the prior overlay's
 // config, else detect husky (.husky/_), else '' (unset). This makes re-running overlay idempotent.
 export function captureOrigHooksPath(gitRoot, cwd) {
     const current = readHooksPath(gitRoot);
-    if (current && current !== LOCAL_HOOKS)
+    if (current && !isOverlayHooksValue(current, gitRoot))
         return current;
     const prev = readJson(join(cwd, '.devkit', 'config.json'));
     if (prev &&
@@ -238,6 +169,11 @@ function writeBiomeOverlay(cwd, stack, force, dryRun) {
     console.log(`  ✓ wrote biome.devkit.jsonc (extends ${repoBiome} + devkit ${variant})`);
     return true;
 }
+/** The overlay pre-commit as written: the gates plus the linked-worktree prelude (sc-4157). */
+export function buildOverlayPreCommit(sel, chainTarget, pkgRel = '', { fallow = false } = {}) {
+    const prelude = projectionPrelude(pkgRel, chainTarget);
+    return buildOverlayHook(sel, chainTarget, pkgRel, { fallow, prelude });
+}
 // Take over core.hooksPath (at the GIT ROOT — repo-wide) and write our hooks dir. CRITICAL: git
 // then runs ONLY our dir, so we wrap EVERY hook the repo already had (pre-push, commit-msg, …) as
 // a pass-through, or they'd silently stop. pre-commit additionally runs devkit's gates (cd'd into
@@ -249,26 +185,25 @@ function installOverlayHook(gitRoot, pkgRel, sel, origHooksPath, dryRun, fallow 
     const passthrough = existing.filter((h) => h !== 'pre-commit' && h !== 'commit-msg');
     const siblings = { gitRoot, scriptDir, existing, selection: sel, pkgRel };
     const commitMsgLine = describeOverlayCommitMsg(syncOverlaySiblingHooks(siblings, { dryRun: true }).plan);
+    const hooksPath = overlayHooksPath(gitRoot);
     if (dryRun) {
-        console.log(`  [dry-run] git config core.hooksPath ${LOCAL_HOOKS}; pre-commit (gates${preCommitChain ? ` → ${preCommitChain}` : ''}${fallow ? ' + fallow' : ''})${passthrough.length ? `; pass-through: ${passthrough.join(', ')}` : ''}${commitMsgLine ? `; ${commitMsgLine}` : ''}`);
+        console.log(`  [dry-run] git config core.hooksPath ${hooksPath}; pre-commit (gates${preCommitChain ? ` → ${preCommitChain}` : ''}${fallow ? ' + fallow' : ''})${passthrough.length ? `; pass-through: ${passthrough.join(', ')}` : ''}${commitMsgLine ? `; ${commitMsgLine}` : ''}`);
         return;
     }
     const dir = join(gitRoot, LOCAL_HOOKS);
     mkdirSync(dir, { recursive: true });
     // pre-commit: devkit gates (+ optional fallow gate) + chain to the repo's pre-commit (if any).
     const pre = join(dir, 'pre-commit');
-    writeFileSync(pre, buildOverlayHook(sel, preCommitChain, pkgRel, { fallow }));
+    writeFileSync(pre, buildOverlayPreCommit(sel, preCommitChain, pkgRel, { fallow }));
     chmodSync(pre, 0o755);
     // every OTHER existing hook → pass-through (commit-msg: devkit's message judges, sc-1794).
     syncOverlaySiblingHooks(siblings, { dryRun: false });
     if (commitMsgLine)
         console.log(`  ✓ ${commitMsgLine}`);
     try {
-        execFileSync('git', ['config', 'core.hooksPath', LOCAL_HOOKS], {
-            cwd: gitRoot,
-        });
+        execFileSync('git', ['config', 'core.hooksPath', hooksPath], { cwd: gitRoot });
         const extra = passthrough.length ? ` (+ pass-through: ${passthrough.join(', ')})` : '';
-        console.log(`  ✓ core.hooksPath → ${LOCAL_HOOKS} (local) — pre-commit + your hooks preserved${extra}`);
+        console.log(`  ✓ core.hooksPath → ${hooksPath} (local) — pre-commit + your hooks preserved${extra}`);
     }
     catch (e) {
         console.log(`  ! could not set core.hooksPath: ${firstLine(e)}`);
@@ -287,13 +222,13 @@ export function syncOverlayHook(gitRoot, cwd, cfg, { dryRun }) {
     const sel = normalizeSelection(cfg.components ?? {});
     const pkgRel = cfg.pkgRel ?? '';
     const fallow = Boolean(cfg.components?.fallow);
-    // Use the RECORDED origHooksPath — post-install core.hooksPath is `.devkit/hooks`, so reading it
+    // Use the RECORDED origHooksPath — post-install core.hooksPath is devkit's own, so reading it
     // live would chain the overlay to ITSELF. Fall back to the same recovery init uses.
     const origHooksPath = cfg.origHooksPath ?? captureOrigHooksPath(gitRoot, cwd);
     const scriptDir = overlayHookScriptDir(origHooksPath);
     const existing = detectExistingHooks(gitRoot, scriptDir);
     const preCommitChain = existing.includes('pre-commit') ? `${scriptDir}/pre-commit` : '';
-    const expected = buildOverlayHook(sel, preCommitChain, pkgRel, { fallow });
+    const expected = buildOverlayPreCommit(sel, preCommitChain, pkgRel, { fallow });
     const pre = join(gitRoot, LOCAL_HOOKS, 'pre-commit');
     const current = existsSync(pre) ? readFileSync(pre, 'utf8') : null;
     const missing = current === null;
@@ -401,6 +336,7 @@ export function installOverlay(cwd, sel, stack, force, dryRun) {
     const excludes = new Set([
         `${LOCAL_HOOKS}/`, // .devkit/hooks at the git root
         `${pfx}.devkit/`, // the package's .devkit (config + vendored biome)
+        `${pfx}.devkit`, // slash-less: a linked worktree's projected SYMLINK is not a directory to git
         `${pfx}guard.config.json`,
     ]);
     if (pkgRel)
@@ -434,6 +370,7 @@ export function installOverlay(cwd, sel, stack, force, dryRun) {
         if (fallowWired) {
             excludes.add(`${pfx}.fallow/`);
             excludes.add(`${pfx}fallow-baselines/`);
+            excludes.add(`${pfx}fallow-baselines`);
         }
     }
     // Same shape as fallow: resolved before the hook renders, since the gate fragment is keyed on the
@@ -446,7 +383,7 @@ export function installOverlay(cwd, sel, stack, force, dryRun) {
     const hookSel = { ...sel, antiSlop: antiSlop.wired };
     installOverlayHook(gitRoot, pkgRel, hookSel, origHooksPath, dryRun, fallowWired);
     // Per-clone alias restores this repo-wide hook path after husky reclaims it.
-    installHealAlias(gitRoot, dryRun);
+    installHealAlias(gitRoot, overlayHooksPath(gitRoot), dryRun);
     for (const rel of installOverlayAgentSurfaces(gitRoot, sel, dryRun, force, legacyOwnedComponentIds))
         excludes.add(rel);
     // make it all invisible to git (the git root's .git/info/exclude).

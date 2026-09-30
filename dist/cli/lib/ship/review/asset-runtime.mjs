@@ -3,6 +3,7 @@ import { chmodSync, closeSync, constants, cpSync, fstatSync, lstatSync, mkdirSyn
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { PACKAGED_REVIEW_ASSET_PATHS, PACKAGED_REVIEW_RUNTIME_ENTRYPOINT, PACKAGED_REVIEW_RUNTIME_MODULE_STEMS, } from '../../../../gate-engine/review/runtime.mjs';
 import { readAgentAssetManifest } from '../../install/agent-asset-manifest/reader.mjs';
+import { isVendoredSkillPath } from '../../install/vendored-skills.mjs';
 import { runDirectReviewCli } from './run-direct.mjs';
 import { readPinnedReviewFile, reviewRuntimeFileFingerprint, reviewRuntimeFingerprint, } from './runtime-fingerprint.mjs';
 import { canonicalReviewDirectory, canonicalReviewLeaf, isSafeReviewRelativePath, reviewPathWithin, } from './runtime-paths.mjs';
@@ -122,6 +123,7 @@ function packageShipAssetPaths(sourceRoot) {
     }
     const paths = ['agents', 'skills']
         .flatMap((directory) => runtimeFiles(join(sourceRoot, directory)).map((path) => `${directory}/${path}`))
+        .filter((path) => !isVendoredSkillPath(path))
         .sort();
     validateAssetPaths(paths);
     return paths;

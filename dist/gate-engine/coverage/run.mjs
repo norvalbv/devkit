@@ -1,30 +1,9 @@
 #!/usr/bin/env node
-/**
- * guard-coverage — the coverage gate. A deterministic guard (runs inside guard-deterministic when
- * `coverage` is in .devkit/config.json components.guards). Unlike the other gates it reads a runtime
- * artifact — coverage/coverage-final.json (istanbul/V8 shape, produced by `test:run:coverage`) — and
- * enforces the thresholds configured in guard.config.json `coverage`.
- *
- * The whole point is to be FAIL-CLOSED: a selected coverage gate must never silently pass unverified.
- *   - `GUARD_COVERAGE_OK=1`  → explicit per-RUN operator bypass, exit 0 (loudly bannered).
- *                              (`GUARD_NO_COVERAGE=1` is an accepted alias — see coverageBypassed.)
- *   - `coverage: false`      → explicit repo-wide opt-out, exit 0.
- *   - artifact ABSENT        → exit 1 (run test:run:coverage first). NOT a fail-open (2).
- *   - artifact malformed     → exit 1 (corrupt data isn't verification).
- *   - artifact present       → enforce the threshold KEYS present in the config; a shortfall exits 1.
- * Exit contract for the orchestrator: 0 = pass/bypass, 1 = real failure. There is no `2` path.
- *
- * The per-run bypass is NOT the "ship auto-bypasses coverage" that docs/decisions/coverage-gate.md
- * rejected — that was an IMPLICIT always-on skip, which is the fail-open this gate exists to kill.
- * This is an explicit operator assertion in the same class as GUARD_NO_LOG (decisions) and
- * GUARD_QAVIS_OK (qavis): the default path stays fail-CLOSED, the bypass is bannered + telemetered,
- * and guard-deterministic salts its prefix-cache scope so a bypassed run can never authorise a later
- * un-bypassed one against the same tree. It exists because a base branch whose coverage is ALREADY
- * red otherwise corners an agent shipping unrelated work into fixing out-of-scope debt.
- */
+/** guard-coverage: enforce guard.config.json `coverage` thresholds on coverage-final.json, fail-CLOSED.
+ * Exit 0 pass/bypass, 1 fail, 2 NOT MEASURED (review only). Rulings: docs/decisions/coverage-gate.md. */
 import { execFileSync } from 'node:child_process';
-import { existsSync, realpathSync } from 'node:fs';
-import { relative, resolve } from 'node:path';
+import { appendFileSync, existsSync, realpathSync } from 'node:fs';
+import { isAbsolute, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { coverageBypassed, resolveGuardConfig, sourceMatchers, } from '../config.mjs';
 import { emitGateEvent } from '../judge/gate-events.mjs';
@@ -144,7 +123,40 @@ function emitProvenance(p) {
         detail: p.state === 'unknown' ? p.reason : p.manifest.runId,
     });
 }
-/** Run the coverage gate against `cwd`. Returns the exit code (0 pass/bypass, 1 fail). */
+// Names the PHYSICAL artifact so a borrowed verdict is visible (sc-3491).
+function artifactLine(file) {
+    return `   read ${canonicalPath(file)}`;
+}
+/** Tell review-target.sh's verdict line that coverage went unmeasured. Written only into this review's
+ * own temp root, so a nested run cannot reach an outer review's file. Advisory: never throws. */
+function recordReviewNotice(reason) {
+    const file = process.env.DEVKIT_REVIEW_NOTICES;
+    const root = process.env.DEVKIT_REVIEW_TEMP_ROOT;
+    if (!file || !root || !isAbsolute(file) || !isAbsolute(root))
+        return;
+    if (!resolve(file).startsWith(`${resolve(root)}/`))
+        return;
+    try {
+        appendFileSync(file, `coverage=not-measured reason=${reason}\n`);
+    }
+    catch {
+        // The deterministic runner's skip banner still names the gate.
+    }
+}
+function reviewNotMeasuredAbsent(cwd) {
+    console.log(`⚠️  Coverage NOT MEASURED in this review — no ${COVERAGE_FILE} in the target checkout.`);
+    const marker = readClearMarker(resolve(cwd, COVERAGE_DIR));
+    if (marker)
+        for (const line of formatClearMarker(marker, cwd))
+            console.log(line);
+    console.log("   `devkit review` copies the target's artifact when one exists; it never makes one.");
+    console.log('   Measure it: run `devkit coverage-run` in the target, then review again.');
+    console.log('   `devkit ship` and commits still BLOCK without it.');
+    recordReviewNotice('absent');
+    return 2;
+}
+/** Run the coverage gate against `cwd`. Returns the exit code (0 pass/bypass, 1 fail, 2 review-only
+ * NOT MEASURED). */
 export function runCoverage(cwd = process.cwd()) {
     // BEFORE resolveGuardConfig — it THROWS on a malformed guard.config.json, and an explicit operator
     // bypass must not be defeated by an unrelated config typo it isn't being asked to care about.
@@ -167,8 +179,11 @@ export function runCoverage(cwd = process.cwd()) {
         console.log('⏭️  Coverage gate bypassed (coverage: false in guard.config.json).');
         return 0;
     }
+    const reviewMode = process.env.DEVKIT_RUN_MODE === 'review';
     const file = resolve(cwd, COVERAGE_FILE);
     if (!existsSync(file)) {
+        if (reviewMode)
+            return reviewNotMeasuredAbsent(cwd);
         console.error(`🚫 Coverage gate FAILED — no coverage data (${COVERAGE_FILE} absent).`);
         const marker = readClearMarker(resolve(cwd, COVERAGE_DIR));
         if (marker)
@@ -176,7 +191,7 @@ export function runCoverage(cwd = process.cwd()) {
                 console.error(line);
         console.error('   Coverage was NOT verified for this commit. Generate it with');
         console.error('   `bun run test:run:coverage`, then re-run. Under `devkit ship` the artifact is');
-        console.error('   SYMLINKED IN from your checkout — so it must exist THERE; the ephemeral ship');
+        console.error('   SYMLINKED IN from THIS worktree (never the main checkout) — so it must exist THERE; the ship');
         console.error('   worktree cannot produce one.');
         console.error('   Sharing this checkout with another agent? Point that script at `devkit');
         console.error('   coverage-run` — concurrent plain `vitest --coverage` runs delete each other.');
@@ -201,10 +216,32 @@ export function runCoverage(cwd = process.cwd()) {
     }
     catch {
         console.error(`🚫 Coverage gate FAILED — ${COVERAGE_FILE} is present but not valid coverage data.`);
+        console.error(artifactLine(file));
         console.error('   Unparseable or malformed coverage data is not verification. Re-run `bun run test:run:coverage`.');
         for (const line of BYPASS_REMEDY)
             console.error(line);
         return 1;
+    }
+    const top = repoTop(cwd);
+    const pkgPrefix = relative(canonicalPath(top), canonicalPath(cwd)).replaceAll('\\', '/');
+    const readProvenance = () => {
+        const p = checkProvenance(cwd, resolve(cwd, COVERAGE_DIR), artifact, classifier(resolveGuardConfig(cwd).sourceExtensions, pkgPrefix));
+        emitProvenance(p);
+        return p;
+    };
+    // Review judges freshness BEFORE thresholds: a stale artifact's percentages describe other code,
+    // so they can neither pass nor fail this tree.
+    let provenance = reviewMode ? readProvenance() : undefined;
+    if (provenance?.state === 'drift' && provenance.production.length > 0) {
+        const age = humanAge(Date.now() - Date.parse(provenance.manifest.finishedAt));
+        console.log(`⚠️  Coverage NOT MEASURED in this review — the artifact predates ${provenance.production.length} briefed file(s):`);
+        for (const line of listPaths(provenance.production, cwd, top))
+            console.log(line);
+        console.log(`   The artifact (run ${provenance.manifest.runId}, measured ${age} ago) never saw`);
+        console.log('   these versions. Re-run `devkit coverage-run` in the target after your last');
+        console.log('   source edit, then review again. `devkit ship` BLOCKS on a stale artifact.');
+        recordReviewNotice('stale');
+        return 2;
     }
     const shortfalls = METRICS.filter((m) => typeof coverage[m] === 'number' && computed[m] < coverage[m]);
     if (shortfalls.length > 0) {
@@ -212,6 +249,7 @@ export function runCoverage(cwd = process.cwd()) {
         for (const m of shortfalls) {
             console.error(`   ${m}: ${computed[m]}% (min ${coverage[m]}%)`);
         }
+        console.error(artifactLine(file));
         console.error('   Add tests to raise coverage, then run `bun run test:run:coverage`.');
         for (const line of BYPASS_REMEDY)
             console.error(line);
@@ -219,10 +257,7 @@ export function runCoverage(cwd = process.cwd()) {
     }
     // Thresholds met — but met BY WHAT? The artifact is linked in from the developer's checkout, so a
     // source edit after the coverage run leaves a verdict about code it never measured (sc-3225).
-    const top = repoTop(cwd);
-    const pkgPrefix = relative(canonicalPath(top), canonicalPath(cwd)).replaceAll('\\', '/');
-    const provenance = checkProvenance(cwd, resolve(cwd, COVERAGE_DIR), artifact, classifier(resolveGuardConfig(cwd).sourceExtensions, pkgPrefix));
-    emitProvenance(provenance);
+    provenance ??= readProvenance();
     const age = provenance.state === 'unknown'
         ? ''
         : humanAge(Date.now() - Date.parse(provenance.manifest.finishedAt));
@@ -232,6 +267,7 @@ export function runCoverage(cwd = process.cwd()) {
             for (const line of listPaths(provenance.production, cwd, top))
                 console.error(line);
             console.error(`   The artifact (run ${provenance.manifest.runId}, measured ${age} ago) never saw these`);
+            console.error(artifactLine(file));
             console.error('   versions, so its percentages describe different code. Re-run `bun run test:run:coverage`');
             console.error('   (a full run) after your last source edit, then re-run. Rewritten only by the');
             console.error('   commit formatter? Run the formatter before coverage so it measures those bytes.');
@@ -255,6 +291,7 @@ export function runCoverage(cwd = process.cwd()) {
         ? ''
         : ` — artifact run ${provenance.manifest.runId}, measured ${age} ago`;
     console.log(`✓ Coverage gate passed (${summary})${measured}.`);
+    console.log(artifactLine(file));
     return 0;
 }
 function runCli(cmd) {

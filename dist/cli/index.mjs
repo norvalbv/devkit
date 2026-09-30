@@ -65,6 +65,7 @@ const GIT_COMMANDS = new Set([
     'init',
     'sync-hook-runner',
 ]);
+const OVERLAY_HOME_COMMANDS = new Set(['doctor', 'clean', 'upgrade']);
 /**
  * Top-level help, derived from every command's `meta.summary` (single source of truth). Each meta
  * is loaded in its own try/catch so one command module that throws at import can't take the whole
@@ -127,7 +128,12 @@ async function main() {
     if (GIT_COMMANDS.has(cmd))
         assertGit(cmd); // friendly throw on missing git → main().catch prints it
     const mod = await loader();
-    const code = await mod.default(cmdArgs, process.cwd());
+    // sc-4157: through a linked worktree's overlay links these would half-change the home's overlay.
+    const retarget = OVERLAY_HOME_COMMANDS.has(cmd) || (cmd === 'init' && cmdArgs.includes('--overlay'));
+    const cwd = retarget
+        ? (await import('./lib/husky/overlay/overlay-home.mjs')).overlayCommandCwd(process.cwd())
+        : process.cwd();
+    const code = await mod.default(cmdArgs, cwd);
     process.exit(code ?? 0);
 }
 main().catch((e) => {
