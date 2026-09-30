@@ -34,7 +34,7 @@ import { wireOverlayAntiSlop } from '../lib/install/anti-slop/overlay/install.mt
 import { reviewHookDrift } from '../lib/husky/review-drift.mts';
 import { healAliasCmd, syncOverlayHook } from '../lib/overlay.mts';
 import { removeSkills } from '../lib/sync-manifest.mts';
-import { rootRegistry, testExecFileSync } from './_helpers.mts';
+import { devkitHome, rootRegistry, testExecFileSync } from './_helpers.mts';
 
 /** Verbs that DISPATCH A HOOK here: `commit`, and the `ci` heal alias, which re-pins hooksPath and
  *  then commits. Both are process trees; every other git verb is a leaf and stays raw. */
@@ -231,7 +231,10 @@ describe('overlay (local-only) install', () => {
 
     // The team untracks it, but the repo is now adopted so the write is deferred to `devkit upgrade`.
     execFileSync('git', ['rm', '--cached', '-q', 'guard.config.json'], { cwd: root });
-    testExecFileSync('git', ['commit', '-qm', 'untrack guard config'], { cwd: root });
+    testExecFileSync('git', ['commit', '-qm', 'untrack guard config'], {
+      cwd: root,
+      env: { ...process.env, HOME: devkitHome(mkTmp('ov-devkit-home-')) },
+    });
     await applyInit(root, opts);
 
     expect(
@@ -494,7 +497,10 @@ describe('overlay (local-only) install', () => {
 
       // simulate husky re-claiming the hook on `bun install`, then heal via `git ci`
       git('config', 'core.hooksPath', '.husky/_');
-      git('ci', '--allow-empty', '-m', 'heal');
+      testExecFileSync('git', ['ci', '--allow-empty', '-m', 'heal'], {
+        cwd: root,
+        env: { ...process.env, HOME: devkitHome(mkTmp('ov-devkit-home-')) },
+      });
       expect(git('config', '--get', 'core.hooksPath').trim()).toBe(join(root, '.devkit', 'hooks'));
     } finally {
       if (prevGlobal === undefined) delete process.env.GIT_CONFIG_GLOBAL;

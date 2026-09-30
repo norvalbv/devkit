@@ -20,7 +20,7 @@ import {
 import { dirname, isAbsolute, join, matchesGlob, relative, resolve } from 'node:path';
 import {
   FIXED_GATE_INPUTS,
-  OVERLAY_WRITTEN,
+  type GateInput,
   readableGateInputs,
 } from '../../../../gate-engine/deterministic/gate-inputs.mts';
 import { overlayConfigured } from '../../../../gate-engine/overlay-mode.mts';
@@ -28,7 +28,6 @@ import { detectGitRoot } from '../../detect-git-root.mts';
 import { gitOut, isInside, isInsideResolved, sameDir } from '../../doctor/hooks-path.mts';
 import { DEVKIT_CACHE_IGNORES, LEGACY_GITIGNORE_LINES } from '../../install/gitignore-cache.mts';
 import { shQuote } from '../../ship/redact-secrets.mts';
-import { chainWord } from '../husky-block.mts';
 
 export const LOCAL_HOOKS = '.devkit/hooks';
 const OURS_ABSOLUTE_RE = /\/\.devkit\/hooks\/?$/;
@@ -392,83 +391,66 @@ const safeList = (dir: string) => {
   }
 };
 
-/**
- * The pre-commit prelude: link the home's overlay into a linked worktree that cannot reach its config.
- * Home is the hook's own `../..`; review runs a private copy, so it never projects. It bootstraps only
- * what devkit writes; `doctor --fix` projects the rest of the registry.
- */
-export function projectionPrelude(pkgRel: string, chainTarget: string): string {
-  const marker = shQuote(`${pkgRel ? `${pkgRel}/` : ''}.devkit/config.json`);
-  const written = OVERLAY_WRITTEN.map((input) => ({ ...input, path: pkgPath(pkgRel, input.path) }));
-  const entries = [...devkitDirs(pkgRel), ...written.map((input) => input.path)]
-    .map(shQuote)
-    .join(' ');
-  const copied = written
-    .filter((input) => input.share === 'branch')
-    .map((input) => shQuote(input.path))
-    .join('|');
-  const devkitCopies = [
-    ...new Set(
-      FIXED_GATE_INPUTS.filter(
-        (input) => input.share === 'branch' && input.path.startsWith('.devkit/'),
-      ).map((input) => input.path.split('/')[1]),
-    ),
-  ].join('|');
-  const chain = chainTarget
-    ? `[ -f ${chainWord(chainTarget)} ] && exec sh ${chainWord(chainTarget)} "$@"`
-    : ':';
-  const devkit = shQuote(pkgDevkit(pkgRel));
-  // The registry's branch entries are copies, the rest links.
-  return `# sc-4157: a linked worktree never gets the git-excluded overlay, so borrow the home's before any gate.
-if [ "\${DEVKIT_RUN_MODE:-}" != "review" ] && [ ! -f ${marker} ]; then
-    __dk_failed=''
-    __dk_copy() {
-        __dk_t="$2.copy-$$"
-        [ -d ${devkit} ] && [ ! -L ${devkit} ] && __dk_t=${devkit}/".copy-$$-\${2##*/}"
-        if cp -R "$1" "$__dk_t" 2>/dev/null && { [ -e "$2" ] || [ -L "$2" ] || mv "$__dk_t" "$2"; }; then
-            rm -rf "$__dk_t"; return 0
-        fi
-        rm -rf "$__dk_t"
-        { [ -e "$2" ] || [ -L "$2" ]; } && return 0
-        __dk_failed=1; echo "devkit: could not copy $2 into this worktree" >&2
-    }
-    __dk_home=$(cd "$(dirname -- "$0")/../.." 2>/dev/null && pwd -P) || __dk_home=''
-    if [ -n "$__dk_home" ] && [ "$__dk_home" != "$(pwd -P)" ]; then
-        for __dk_e in ${entries}; do
-            [ -e "$__dk_home/$__dk_e" ] || continue
-            if [ "$__dk_e" = ${devkit} ] && [ ! -e "$__dk_e" ] && [ ! -L "$__dk_e" ] \
-                && git check-ignore -q --no-index -- "$__dk_e/config.json"; then mkdir -p "$__dk_e"; fi
-            if [ -d "$__dk_e" ] && [ ! -L "$__dk_e" ]; then
-                for __dk_c in "$__dk_home/$__dk_e"/* "$__dk_home/$__dk_e"/.[!.]*; do
-                    [ -e "$__dk_c" ] || continue
-                    __dk_n="$__dk_e/\${__dk_c##*/}"
-                    { [ -e "$__dk_n" ] || [ -L "$__dk_n" ]; } && continue
-                    git check-ignore -q --no-index -- "$__dk_n" || continue
-                    if [ "$__dk_e" = ${devkit} ] && case "\${__dk_c##*/}" in ${devkitCopies}) true ;; *) false ;; esac; then __dk_copy "$__dk_c" "$__dk_n"
-                    else ln -s "$__dk_c" "$__dk_n"; fi
-                done
-                continue
-            fi
-            { [ -e "$__dk_e" ] || [ -L "$__dk_e" ]; } && continue
-            if ! git check-ignore -q --no-index -- "$__dk_e"; then
-                echo "devkit: $__dk_e is not git-ignored here, so it was not linked" >&2
-            else
-                case "$__dk_e" in
-                    ${copied}) __dk_copy "$__dk_home/$__dk_e" "$__dk_e" ;;
-                    *) ln -s "$__dk_home/$__dk_e" "$__dk_e" ;;
-                esac
-            fi
-        done
-        # A failed copy leaves the worktree unprojected, so the next commit retries rather than trusts it.
-        [ -n "$__dk_failed" ] && [ -L ${marker} ] && rm -f ${marker}
-        if [ -f ${marker} ]; then echo "devkit: linked this worktree to the overlay at $__dk_home" >&2
-        else
-            echo "devkit: overlay not reachable here, gates skipped. Run devkit doctor --fix" >&2
-            [ -n "\${DEVKIT_SHIP:-}" ] && exit 1
-            ${chain}
-            exit 0
-        fi
-    fi
+/** devkit's global bin dir, from its orchestrator; an overlay commit cannot run its gates without it. */
+const DEVKIT_BIN_DIR_FRAGMENT = `__dk_devkit_bin_dir=$(command -v guard-deterministic) || {
+    echo "devkit: not installed on PATH, and every commit here runs devkit's gates — install devkit, then commit again" >&2
+    exit 1
+}
+__dk_devkit_bin_dir=\${__dk_devkit_bin_dir%/*}`;
+
+const shGlob = (glob: string) =>
+  glob
+    .split('*')
+    .map((part) => part && shQuote(part))
+    .join('*');
+const shWords = (paths: string[]) => paths.map(shQuote).join(' ');
+
+/** Passes only when a linked worktree owes nothing to the registry as rendered from `root`'s config;
+ * it may fail a complete one. A later config path change is hook drift until doctor --fix. */
+function projectedTest(root: string, pkgRel: string): string {
+  const inputs = readableGateInputs(join(root, pkgRel)).filter(
+    (input) => input.share !== 'checkout' && !input.eachFile,
+  );
+  const perFile = FIXED_GATE_INPUTS.filter((input) => input.eachFile && input.share !== 'checkout');
+  const rels = (share: GateInput['share']) =>
+    shWords(inputs.filter((i) => i.share === share).map((i) => pkgPath(pkgRel, i.path)));
+  const all = [...inputs, ...perFile].map((input) => pkgPath(pkgRel, input.path));
+  const runtime = RUNTIME_STATE.flatMap((glob) => [glob, `${glob}.generation`]).map(shGlob);
+  const globs = perFile.map((input) => {
+    const dir = shQuote(pkgPath(pkgRel, input.path));
+    return `    for __dk_p in "$__dk_home"/${dir}/*${shQuote(input.eachFile ?? '')}; do __dk_owed ${dir}/"\${__dk_p##*/}"${input.share === 'branch' ? ' 1' : ''} && return 1; done`;
+  });
+  const children = devkitDirs(pkgRel).map((dir) => {
+    const covered = all
+      .filter((rel) => rel.startsWith(`${dir}/`))
+      .map((rel) => rel.slice(dir.length + 1).split('/')[0]);
+    const d = shQuote(dir);
+    return `    for __dk_p in "$__dk_home"/${d}/* "$__dk_home"/${d}/.[!.]* "$__dk_home"/${d}/..?*; do
+        case "\${__dk_p##*/}" in ${[...new Set(covered)].map(shQuote).concat(runtime).join('|')}) continue ;; esac
+        __dk_owed ${d}/"\${__dk_p##*/}" && return 1
+    done`;
+  });
+  return `__dk_has() { [ -e "$1" ] || [ -L "$1" ]; }
+# Owed: the home holds $1 and this worktree lacks it, or holds a link where a branch copy belongs ($2).
+__dk_owed() { __dk_has "$__dk_home/$1" && { ! __dk_has "$1" || { [ -n "\${2:-}" ] && [ -L "$1" ]; }; }; }
+__dk_projected() {
+    for __dk_p in ${shWords(devkitDirs(pkgRel))}; do [ -L "$__dk_p" ] && return 1; done
+    for __dk_p in ${rels('clone')}; do __dk_owed "$__dk_p" && return 1; done
+    for __dk_p in ${rels('branch')}; do __dk_owed "$__dk_p" 1 && return 1; done
+${[...globs, ...children].join('\n')}
+    return 0
+}`;
+}
+
+/** Fail without devkit on PATH; in a linked worktree (the hook's `../..` is not this checkout) project
+ * the home's overlay via the one TS projector, or fail. Under the husky shim `../..` is physical. */
+export function projectionPrelude(root: string, pkgRel: string): string {
+  const pkg = pkgRel ? ` --pkg ${shQuote(pkgRel)}` : '';
+  return `${DEVKIT_BIN_DIR_FRAGMENT}
+__dk_home=$(cd \${DEVKIT_VIA_HUSKY_INIT:+-P} "$(dirname -- "$0")/../.." && pwd -P) || exit 1
+if [ "$__dk_home" != "$(pwd -P)" ]; then
+${projectedTest(root, pkgRel).replace(/^(?=.)/gm, '    ')}
+    __dk_projected || "$__dk_devkit_bin_dir/devkit" sync-worktree --home "$__dk_home"${pkg} || exit 1
 fi`;
 }
 
