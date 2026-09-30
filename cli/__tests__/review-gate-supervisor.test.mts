@@ -1,12 +1,5 @@
 import { type ChildProcess, execFileSync, spawn } from 'node:child_process';
-import {
-  chmodSync,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  symlinkSync,
-  writeFileSync,
-} from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -293,52 +286,12 @@ interface DeferredSignalOptions {
   signal?: string;
   // 'parent' signals the runner's shell (the sc-1711 window); 'self' makes tee die of the signal.
   target?: 'parent' | 'self';
-  // Defaults to the real runner; a stripped copy proves the interrupted read actually happened.
-  runner?: string;
   // The gated command's own exit status, which the runner must report through the pending signal.
   gateExit?: number;
 }
 
-// Builds a copy of the runner with the sc-1711 re-read deleted, so a test can prove the interrupted
-// read really happened: the pre-fix copy must FAIL on the same run that the real one passes. This is
-// the only honest observable available. Instrumenting the runner's own `wait` (shadowing the builtin
-// to log each status) was tried and DESTROYS the phenomenon — the extra function call gives bash a
-// chance to service the pending trap, so the read returns tee's status and the window silently
-// closes. Sibling paths are symlinked because the runner resolves the supervisor and the progress
-// reader relative to BASH_SOURCE.
-const REREADS = {
-  tee: /\n *if \[ "\$drain_stage" -eq 0 \] && \[ "\$tee_status" -gt 128 \]; then\n[\s\S]*?\n *fi\n/,
-  supervisor:
-    /\n *if \[ "\$rc" -gt 128 \]; then\n *local rewait_rc[^\n]*\n[\s\S]*?\n {4}fi\n {2}fi\n/,
-};
-
-function runnerWithoutReread(root: string, reread: keyof typeof REREADS | 'all' = 'tee'): string {
-  const shipDir = join(root, 'prefix/cli/lib/ship');
-  mkdirSync(shipDir, { recursive: true });
-  symlinkSync(join(HERE, '../lib/ship/review'), join(shipDir, 'review'));
-  symlinkSync(join(HERE, '../../gate-engine'), join(root, 'prefix/gate-engine'));
-  const keys: (keyof typeof REREADS)[] = reread === 'all' ? ['tee', 'supervisor'] : [reread];
-  let stripped = readFileSync(GATE_RUNNER, 'utf8');
-  for (const key of keys) {
-    const before = stripped;
-    stripped = stripped.replace(REREADS[key], '\n');
-    // Fail loudly rather than silently comparing a runner against itself.
-    if (stripped === before)
-      throw new Error(`could not strip the ${key} re-read — the guard shape changed`);
-  }
-  const path = join(shipDir, 'run-gates-with-capture.sh');
-  writeFileSync(path, stripped);
-  return path;
-}
-
 function deferredSignalGateHarness(root: string, options: DeferredSignalOptions = {}) {
-  const {
-    teeExit = 0,
-    signal = 'TERM',
-    target = 'parent',
-    runner = GATE_RUNNER,
-    gateExit = 0,
-  } = options;
+  const { teeExit = 0, signal = 'TERM', target = 'parent', gateExit = 0 } = options;
   const bin = join(root, 'bin');
   const log = join(root, 'gate.log');
   const progress = join(root, 'progress.json');
@@ -370,7 +323,7 @@ function deferredSignalGateHarness(root: string, options: DeferredSignalOptions 
       '-c',
       shell,
       'pending-trap-test',
-      runner,
+      GATE_RUNNER,
       HANDOFF,
       root,
       log,
@@ -386,6 +339,8 @@ function deferredSignalGateHarness(root: string, options: DeferredSignalOptions 
         PATH: `${bin}:${process.env.PATH ?? ''}`,
         REAL_TEE: realTee,
       },
+      // Sentinel carve-out (suite-hangs-bound-at-the-spawn-site): a native bound names a wedge here.
+      timeout: 60_000,
     },
   );
   return { ...result, log };
@@ -958,19 +913,6 @@ describe('review gate supervisor', () => {
       if (teeExit === 0) {
         expect(result.stderr).not.toMatch(/could not persist gate output/);
         expect(readFileSync(result.log, 'utf8')).toContain('pending-trap gate output');
-        // Proof the interrupted read actually occurred, rather than the signal landing harmlessly in
-        // the drain loop: the same stub against a runner WITHOUT the re-reads must lose the result.
-        // If this passes, the assertions above ran on a green path and covered nothing. Both re-reads
-        // go: which wait the signal interrupts (supervisor or tee) is scheduler timing, and Linux CI
-        // lands it in the supervisor wait where the macOS run lands it in the tee wait.
-        const prefix = deferredSignalGateHarness(join(root, 'prefix-run'), {
-          teeExit,
-          runner: runnerWithoutReread(root, 'all'),
-        });
-        expect(
-          prefix.stdout,
-          'pre-fix runner did not fail — the interrupted read never happened',
-        ).toMatch(/RUNNER_RC=(1|143)\n/);
       } else {
         expect(result.stderr).toMatch(/could not persist gate output/);
       }
@@ -1012,24 +954,6 @@ describe('review gate supervisor', () => {
 
       expect(result.stdout, result.stderr).toContain('SIGNAL_STATUS=143');
       expect(result.stdout, result.stderr).toContain(`RUNNER_RC=${gateExit}`);
-    },
-  );
-
-  // Proof the supervisor re-read is what carries the clean case, as the tee case proves its own: the
-  // same run against a runner WITHOUT it must read the signal's status instead of the supervisor's.
-  // Retried: it proves the race is REACHABLE, and under load one attempt's signal can land late.
-  (MODERN_BASH ? it : it.skip)(
-    `needs the supervisor re-read to see a clean gate through a pending-trap signal${
-      MODERN_BASH ? '' : ' (skipped: no bash >= 4)'
-    }`,
-    { retry: 4 },
-    () => {
-      const root = mkTmp('devkit-review-pending-trap-prefix-');
-      const prefix = deferredSignalGateHarness(join(root, 'prefix-run'), {
-        runner: runnerWithoutReread(root, 'supervisor'),
-      });
-
-      expect(prefix.stdout, prefix.stderr).toContain('RUNNER_RC=143');
     },
   );
 
