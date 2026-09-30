@@ -3,8 +3,7 @@
 import { chmodSync, closeSync, fstatSync, mkdirSync, openSync, statSync, readFileSync, renameSync, rmSync, writeFileSync, } from 'node:fs';
 import { join } from 'node:path';
 import { buildCommitMsgBlock, COMMIT_MSG_PREAMBLE, commitMsgGuards } from '../commit-msg-block.mjs';
-import { buildPassthroughHook } from '../husky-block.mjs';
-import { shQuote } from '../../ship/redact-secrets.mjs';
+import { buildPassthroughHook, chainWord } from '../husky-block.mjs';
 const LOCAL_HOOK = join('.devkit', 'hooks', 'commit-msg');
 const HOOK_MODE = 0o755;
 // Text that LOOKS like a repo hook already calls a judge. Advisory only (a double-run warning): hook
@@ -23,7 +22,7 @@ export function judgesAlsoInRepoHook(hookContent) {
  *  monorepo, where the package subshell already cleared it). */
 export function buildOverlayCommitMsgHook(selection, chainTarget, pkgRel = '') {
     const block = buildCommitMsgBlock(selection, pkgRel, { standalone: true, scrubGitEnv: true });
-    const chain = shQuote(chainTarget); // single quotes: a hooksPath with $(...) must not execute
+    const chain = chainWord(chainTarget); // single-quoted: a hooksPath with $(...) must not execute
     return `${COMMIT_MSG_PREAMBLE}
 # devkit OVERLAY commit-msg (LOCAL, git-ignored): devkit's message judges, then the repo's OWN
 # commit-msg unchanged. Global CLI, fail-open when devkit is not installed.

@@ -93,6 +93,9 @@ _review_snapshot_write_excludes() {
     cat "$configured" >> "$destination"
     printf '\n' >> "$destination"
   fi
+  # Dependency surfaces are materialized privately (dependency-runtime.mts), never snapshotted. No
+  # trailing slash: a `node_modules/` gitignore misses a worktree's node_modules SYMLINK.
+  printf '%s\n' node_modules >> "$destination"
   return 0
 }
 

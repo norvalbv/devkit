@@ -19,7 +19,8 @@
  * never reaching the shim.
  */
 import { existsSync, lstatSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
+import { sameDir } from '../../../doctor/hooks-path.mjs';
 import { globalHookWired, globalInitPath } from '../../../overlay-global-hook.mjs';
 /** The hooksPath an overlay install writes, and the one review's private gate run always uses. */
 export const OVERLAY_HOOKS_PATH = '.devkit/hooks';
@@ -138,9 +139,12 @@ function huskyReclaimRejection(context) {
 /**
  * Why `value` is unacceptable as an overlay repo's live core.hooksPath, or null when it is fine.
  * `.devkit/hooks` is accepted outright; `.husky/_` only on proof; anything else is drift.
+ * sc-4157: an absolute value only when it IS this checkout's `.devkit/hooks` (through the one link).
  */
 export function overlayHooksPathRejection(value, context) {
     if (value === OVERLAY_HOOKS_PATH)
+        return null;
+    if (isAbsolute(value) && sameDir(value, join(context.gitRoot, OVERLAY_HOOKS_PATH)))
         return null;
     if (value !== HUSKY_RUNNER_HOOKS_PATH)
         return `core.hooksPath is ${JSON.stringify(value || '(unset)')}, expected ${OVERLAY_HOOKS_PATH}`;

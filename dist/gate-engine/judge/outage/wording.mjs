@@ -1,6 +1,7 @@
 /** How a classified outage reads to the operator, and what it tells them to do next. Split from
  *  classify.mts so the decision stays separable from its phrasing; all pure, so all unit-testable. */
-import { classifyJudgeOutage, formatResetDelta } from './classify.mjs';
+import { judgeProviderOfBin } from '../codex/result.mjs';
+import { classifyJudgeOutage, formatResetDelta, } from './classify.mjs';
 import { familyOverrideRemedy } from './family-override.mjs';
 // Shared by both runners so the twin catch blocks cannot diverge. Both name the BINARY that went
 // dark: "check claude auth" on a codex outage sends the operator to the wrong subscription.
@@ -35,6 +36,11 @@ export function unavailableMessage(label, e, timeout, bin = 'claude') {
     const reason = e.code ?? (e.status != null ? `exit ${e.status}` : (e.message ?? 'unknown'));
     return `${prefix} unavailable (${reason}; offline/quota/absent) — judgement skipped`;
 }
+/** ONE outage→cause mapper for every fail-closed gate (sc-2769), so no gate keeps a private copy. */
+export function remedyCause(outage) {
+    const kind = outage?.kind;
+    return kind === 'timeout' || kind === 'rate-limited' || kind === 'absent' ? kind : 'outage';
+}
 /** The remedy a fail-closed gate prints when a judge produced no verdict — ONE wording seam for
  *  every gate (sc-1227). The CAUSE picks the remedy, and the wrong one costs real operator time. */
 export function strictRemedy(cause, bin = 'claude', resetsAt) {
@@ -55,8 +61,16 @@ export function strictRemedy(cause, bin = 'claude', resetsAt) {
         return (`\`${bin}\` reports its usage limit reached — re-running cannot succeed ${window}. Either ` +
             `wait it out, or ${familyOverrideRemedy(bin, true)}`);
     }
-    // The generic cause covers a MISSING and an unauthenticated binary alike, and a missing one is the
-    // single state `devkit doctor --fix` can bind — so the redirect belongs here too, after the check.
-    return (`check \`${bin}\` CLI auth/quota, then re-run devkit ship. If that CLI is absent, or the ` +
-        `account stays dark longer than the ship can wait, ${familyOverrideRemedy(bin)}`);
+    if (cause === 'absent') {
+        // Install leads: a family move needs the OTHER CLI, and doctor's bind needs claude to resolve.
+        const pathHint = judgeProviderOfBin(bin) === 'codex' ? ' (or point GUARD_CODEX_BIN at it)' : '';
+        const install = `\`${bin}\` is not installed or not on PATH — this is NOT an auth/quota problem. Install ` +
+            `it${pathHint}, then resume the ship.`;
+        if (judgeProviderOfBin(bin) === null)
+            return `${install} Otherwise ${familyOverrideRemedy(bin)}`;
+        return `${install} If the other judge CLI is installed, you can instead ${familyOverrideRemedy(bin, false)}`;
+    }
+    // Every binary reaching this arm ran (only ENOENT reads as absent), so doctor's bind cannot apply.
+    return (`check \`${bin}\` CLI auth/quota, then re-run devkit ship. If the account stays dark longer ` +
+        `than the ship can wait, ${familyOverrideRemedy(bin, true)}`);
 }

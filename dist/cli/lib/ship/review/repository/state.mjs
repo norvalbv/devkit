@@ -1,45 +1,12 @@
-import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { closeSync, fstatSync, lstatSync, openSync, readdirSync, readlinkSync, readSync, statSync, } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { writeFileAtomic } from '../../../atomic-write.mjs';
 import { runDirectReviewCli } from '../run-direct.mjs';
 import { canonicalReviewDirectory, canonicalReviewLeaf, reviewPathWithin, } from '../runtime-paths.mjs';
-import { errorMessage, fail, gitEnvironment } from '../shared/common.mjs';
+import { errorMessage, fail } from '../shared/common.mjs';
+import { gitFailure, gitLine, gitOptionalRaw, gitRaw, MAX_GIT_OUTPUT, spawnGit } from './git.mjs';
 import { parseReviewRepositoryStateManifest, REVIEW_REPOSITORY_OBJECT_ID, REVIEW_REPOSITORY_STATE_VERSION, reviewRepositoryManifestHash, } from './manifest.mjs';
-const MAX_GIT_OUTPUT = 64 * 1024 * 1024;
-function spawnGit(root, args) {
-    return spawnSync('git', ['-c', 'core.hooksPath=/dev/null', '-C', root, ...args], {
-        env: gitEnvironment(),
-        maxBuffer: MAX_GIT_OUTPUT,
-    });
-}
-function gitFailure(label, result) {
-    if (result.error)
-        fail(`could not ${label} (${errorMessage(result.error)}).`);
-    const detail = result.stderr.toString().trim();
-    fail(`could not ${label} (git exited ${String(result.status)}${detail ? `: ${detail}` : ''}).`);
-}
-function gitRaw(root, args, label) {
-    const result = spawnGit(root, args);
-    if (result.status !== 0)
-        gitFailure(label, result);
-    return result.stdout;
-}
-function gitOptionalRaw(root, args, label) {
-    const result = spawnGit(root, args);
-    if (result.status === 0)
-        return result.stdout;
-    if (result.status === 1 && result.stdout.length === 0 && result.stderr.length === 0)
-        return Buffer.alloc(0);
-    return gitFailure(label, result);
-}
-function gitLine(root, args, label) {
-    const raw = gitRaw(root, args, label);
-    if (raw.length === 0 || raw[raw.length - 1] !== 0x0a)
-        fail(`${label} returned malformed output.`);
-    return raw.subarray(0, -1);
-}
 function repositoryContext(requestedTarget) {
     const targetRoot = canonicalReviewDirectory(requestedTarget, 'review target checkout');
     const rawGitRoot = gitLine(targetRoot, ['rev-parse', '--path-format=absolute', '--show-toplevel'], 'locate the target Git root');
@@ -81,11 +48,39 @@ function headSymref(root) {
         fail('target symbolic HEAD returned malformed output.');
     return raw.subarray(0, -1).toString('base64');
 }
-function refsState(root) {
-    return gitRaw(root, ['for-each-ref', '--sort=refname', '--format=%(refname)%00%(objectname)%00%(symref)%00'], 'read target refs');
+// git-worktree(1): only these namespaces are per-worktree; every other ref is shared with sibling
+// sessions and cannot change the reviewed snapshot, which HEAD and the tree IDs already pin.
+const WORKTREE_REF_NAMESPACES = ['refs/bisect', 'refs/worktree', 'refs/rewritten'];
+function worktreeRefsState(root) {
+    return gitRaw(root, [
+        'for-each-ref',
+        '--sort=refname',
+        '--format=%(refname)%00%(objectname)%00%(symref)%00',
+        ...WORKTREE_REF_NAMESPACES,
+    ], 'read target worktree refs');
 }
 function effectiveConfigState(root, scope) {
     return gitRaw(root, ['config', scope, '--includes', '--null', '--show-origin', '--list'], `read target ${scope.slice(2)} config`);
+}
+/** Drops `branch.<other>.*` entries: sibling sessions write their own upstreams (`push -u`,
+ *  `worktree add --track`) into the shared file, and those never shape this checkout (sc-4171). */
+function withoutSiblingBranchConfig(effective, symrefBase64) {
+    const symref = symrefBase64 === null ? '' : Buffer.from(symrefBase64, 'base64').toString('latin1');
+    const ownBranch = symref.startsWith('refs/heads/') ? symref.slice('refs/heads/'.length) : null;
+    const fields = effective.toString('latin1').split('\0'); // latin1 round-trips every byte
+    const kept = [];
+    for (let index = 0; index + 1 < fields.length; index += 2) {
+        const origin = fields[index] ?? '';
+        const entry = fields[index + 1] ?? '';
+        const key = entry.split('\n', 1)[0] ?? '';
+        const lastDot = key.lastIndexOf('.');
+        const siblingBranch = key.startsWith('branch.') &&
+            lastDot > 'branch.'.length &&
+            key.slice('branch.'.length, lastDot) !== ownBranch;
+        if (!siblingBranch)
+            kept.push(origin, entry);
+    }
+    return Buffer.from(kept.map((field) => `${field}\0`).join(''), 'latin1');
 }
 function worktreeConfigEnabled(root) {
     const enabled = gitOptionalRaw(root, ['config', '--local', '--includes', '--type=bool', '--get', 'extensions.worktreeConfig'], 'read target worktree-config extension');
@@ -161,6 +156,27 @@ function readConfigFile(path, label, type) {
             closeSync(descriptor);
     }
 }
+/** Entry type and link target only: the shared file is rewritten by sibling sessions, so its
+ *  bytes are judged through `git config --list` instead of read directly (sc-4171). */
+function configEntryState(path, label) {
+    const stat = inspectConfigFile(path, label);
+    if (!stat)
+        return { readable: false, parts: [Buffer.from('missing')] };
+    const type = fileType(stat);
+    if (type === 'file')
+        return { readable: true, parts: [Buffer.from(type)] };
+    if (type !== 'symlink')
+        return { readable: false, parts: [Buffer.from(type)] };
+    try {
+        return {
+            readable: true,
+            parts: [Buffer.from(type), readlinkSync(path, { encoding: 'buffer' })],
+        };
+    }
+    catch (cause) {
+        return fail(`could not read target ${label} link (${errorMessage(cause)}).`);
+    }
+}
 /** Exact path entry state. Regular files hash raw bytes; symlinks hash link and resolved bytes. */
 function configFileState(path, label) {
     const stat = inspectConfigFile(path, label);
@@ -181,18 +197,25 @@ function gitDirectory(root, flag, label) {
         fail(`target ${label} is not an absolute path.`);
     return canonicalReviewDirectory(path, `target ${label}`);
 }
-function configFingerprint(context) {
+/** `exact` hashes shared config bytes (prove-regression: did a command touch the caller?);
+ *  `review` hashes only entries that can shape this checkout (sc-4171). */
+function configFingerprint(context, mode) {
     const commonConfig = join(context.gitCommonDir, 'config');
     const worktreeConfig = join(context.gitDir, 'config.worktree');
-    const shared = configFileState(commonConfig, 'shared repository config');
+    const shared = mode === 'exact'
+        ? configFileState(commonConfig, 'shared repository config')
+        : configEntryState(commonConfig, 'shared repository config');
     const selectedWorktree = configFileState(worktreeConfig, 'worktree repository config');
-    const sharedEffective = shared.readable
+    const localEffective = shared.readable
         ? effectiveConfigState(context.gitRoot, '--local')
         : Buffer.alloc(0);
+    const sharedEffective = mode === 'exact' || !shared.readable
+        ? localEffective
+        : withoutSiblingBranchConfig(localEffective, headSymref(context.gitRoot));
     const worktreeEffective = selectedWorktree.readable && worktreeConfigEnabled(context.gitRoot)
         ? effectiveConfigState(context.gitRoot, '--worktree')
         : Buffer.alloc(0);
-    return framedHash('review-repository-config-v2', [
+    return framedHash(mode === 'exact' ? 'review-repository-config-v2' : 'review-repository-config-v3', [
         Buffer.from(commonConfig),
         ...shared.parts,
         sharedEffective,
@@ -203,7 +226,7 @@ function configFingerprint(context) {
 }
 /** Fingerprint repository-owned common/worktree config bytes plus their effective includes. */
 export function reviewRepositoryConfigFingerprint(targetRoot) {
-    return configFingerprint(repositoryContext(targetRoot));
+    return configFingerprint(repositoryContext(targetRoot), 'exact');
 }
 function metadataBuffer(stat) {
     return Buffer.from([fileType(stat), stat.dev, stat.ino, stat.mode, stat.size, stat.mtimeNs, stat.ctimeNs].join(':'));
@@ -241,21 +264,17 @@ function pathMutationEvidence(path, label, recursive) {
         parts.push(...pathMutationEvidence(join(path, name), `${label}/${name}`, true));
     return parts;
 }
-/** Per-label filesystem evidence closing ref/config ABA gaps; per label so a failure names what
- *  moved (sc-2166). A non-linked checkout's worktree admin tree is the common one, recorded once. */
+/** Per-label evidence closing worktree-ref/config ABA gaps (sc-2166); shared ref storage is left
+ *  out so sibling sessions' commits and fetches cannot abort a review (sc-4159). */
 function repositoryMutationEvidence(context) {
     const evidence = new Map();
     const record = (label, path, recursive) => evidence.set(label, framedHash(label, pathMutationEvidence(path, label, recursive)));
-    const adminTrees = [['common', context.gitCommonDir]];
-    if (context.gitDir !== context.gitCommonDir)
-        adminTrees.push(['worktree', context.gitDir]);
-    for (const [label, directory] of adminTrees) {
-        record(`${label}:admin`, directory, false);
-        record(`${label}:refs`, join(directory, 'refs'), true);
-        record(`${label}:reftable`, join(directory, 'reftable'), true);
-        record(`${label}:packed-refs`, join(directory, 'packed-refs'), false);
+    record('common:admin', context.gitCommonDir, false);
+    if (context.gitDir !== context.gitCommonDir) {
+        record('worktree:admin', context.gitDir, false);
+        record('worktree:refs', join(context.gitDir, 'refs'), true);
+        record('worktree:reftable', join(context.gitDir, 'reftable'), true);
     }
-    record('common:config', join(context.gitCommonDir, 'config'), false);
     record('worktree:config', join(context.gitDir, 'config.worktree'), false);
     record('worktree:HEAD', join(context.gitDir, 'HEAD'), false);
     return evidence;
@@ -268,8 +287,8 @@ function captureState(context) {
     return {
         headOid,
         headSymrefBase64: headSymref(root),
-        refsSha256: framedHash('review-repository-refs-v1', [refsState(root)]),
-        configSha256: configFingerprint(context),
+        refsSha256: framedHash('review-repository-worktree-refs-v1', [worktreeRefsState(root)]),
+        configSha256: configFingerprint(context, 'review'),
     };
 }
 /** Every logical-state field and evidence label that differs between two capture passes. */
