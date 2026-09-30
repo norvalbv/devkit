@@ -887,6 +887,9 @@ describe('overlay (local-only) install', () => {
     const exclude = readFileSync(join(root, '.git', 'info', 'exclude'), 'utf8');
     expect(exclude).toContain('.fallow/');
     expect(exclude).toContain('fallow-baselines/');
+    // sc-2274: the decisions embedding cache is local too, so ship never asks anyone to commit it
+    expect(exclude).toContain('.decisions/index.json\n');
+    expect(exclude).toContain('.decisions/index.json.*.tmp');
     // overlay never edits the committed .gitignore for fallow
     expect(existsSync(join(root, '.gitignore'))).toBe(false);
     // config records fallow as actually wired
@@ -939,6 +942,7 @@ describe('overlay (local-only) install', () => {
       'settings.local.json',
       '.fallow/',
       'fallow-baselines/',
+      '.decisions/',
       'devkit',
     ]) {
       expect(exclude).not.toContain(line);
