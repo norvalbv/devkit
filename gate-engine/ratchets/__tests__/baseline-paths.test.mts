@@ -90,6 +90,26 @@ function write(root: string, relativePath: string, contents: string): void {
   writeFileSync(file, contents);
 }
 
+/** A linked ship worktree as link-gate-configs.sh leaves it: the primary checkout's untracked
+ * baseline projected as a file symlink, but no .devkit/config.json. */
+function shipWorktree(config: string) {
+  const primary = makeRoot();
+  const worktree = join(makeRoot(), 'ship');
+  execFileSync('git', ['init', '-q'], { cwd: primary });
+  write(primary, '.git/info/exclude', '/.devkit\n');
+  write(primary, '.devkit/config.json', config);
+  write(primary, LINES_BASELINE, '{"files":{"src/a.ts":900}}\n');
+  write(primary, 'README.md', 'x\n');
+  execFileSync('git', ['add', 'README.md'], { cwd: primary });
+  execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'init'], {
+    cwd: primary,
+  });
+  execFileSync('git', ['worktree', 'add', '-q', '--detach', worktree], { cwd: primary });
+  mkdirSync(join(worktree, '.devkit/baselines'), { recursive: true });
+  symlinkSync(join(primary, LINES_BASELINE), join(worktree, LINES_BASELINE));
+  return { primary, worktree };
+}
+
 afterEach(() => {
   for (const root of roots) rmSync(root, { recursive: true, force: true });
   roots = [];
@@ -361,6 +381,62 @@ describe('ratchet baseline paths', () => {
     writeRatchetBaseline(root, LINES_BASELINE, '{"files":{"src/legacy.ts":70}}\n');
 
     expect(readFileSync(join(root, LINES_BASELINE), 'utf8')).toContain('70');
+  });
+
+  it('lowers an overlay ship worktree baseline that carries no config.json of its own', () => {
+    const { primary, worktree } = shipWorktree('{"overlay":true}\n');
+    const lowered = '{"files":{"src/a.ts":700}}\n';
+
+    writeRatchetBaseline(worktree, LINES_BASELINE, lowered, { stage: true });
+
+    expect(readFileSync(join(primary, LINES_BASELINE), 'utf8')).toBe(lowered);
+  });
+
+  it('lowers an overlay submodule ship worktree baseline, reading the submodule checkout', () => {
+    const { primary } = shipWorktree('{"overlay":true}\n');
+    const superproject = makeRoot();
+    const worktree = join(makeRoot(), 'ship');
+    execFileSync('git', ['init', '-q'], { cwd: superproject });
+    execFileSync(
+      'git',
+      ['-c', 'protocol.file.allow=always', 'submodule', 'add', '-q', primary, 'sub'],
+      { cwd: superproject },
+    );
+    const submodule = join(superproject, 'sub');
+    const exclude = execFileSync(
+      'git',
+      ['rev-parse', '--path-format=absolute', '--git-path', 'info/exclude'],
+      { cwd: submodule, encoding: 'utf8' },
+    ).trim();
+    writeFileSync(exclude, '/.devkit\n');
+    write(submodule, '.devkit/config.json', '{"overlay":true}\n');
+    write(submodule, LINES_BASELINE, '{"files":{"src/a.ts":900}}\n');
+    execFileSync('git', ['worktree', 'add', '-q', '--detach', worktree], { cwd: submodule });
+    mkdirSync(join(worktree, '.devkit/baselines'), { recursive: true });
+    symlinkSync(join(submodule, LINES_BASELINE), join(worktree, LINES_BASELINE));
+    const lowered = '{"files":{"src/a.ts":700}}\n';
+
+    writeRatchetBaseline(worktree, LINES_BASELINE, lowered, { stage: true });
+
+    expect(readFileSync(join(submodule, LINES_BASELINE), 'utf8')).toBe(lowered);
+  });
+
+  it('keeps an unreadable own config.json from borrowing the primary checkout overlay flag', () => {
+    const { worktree } = shipWorktree('{"overlay":true}\n');
+    // A config.json that exists but cannot be read (here EISDIR) is not an absent marker.
+    mkdirSync(join(worktree, '.devkit/config.json'));
+
+    expect(() =>
+      writeRatchetBaseline(worktree, LINES_BASELINE, '{"files":{"src/a.ts":700}}\n'),
+    ).toThrow(`${LINES_BASELINE} is ignored by Git`);
+  });
+
+  it('still stops a package ship worktree write when its primary checkout ignores the baseline', () => {
+    const { worktree } = shipWorktree('{}\n');
+
+    expect(() =>
+      writeRatchetBaseline(worktree, LINES_BASELINE, '{"files":{"src/a.ts":700}}\n'),
+    ).toThrow(`${LINES_BASELINE} is ignored by Git`);
   });
 
   it('copies legacy debt during migration when hard links are not permitted', () => {
