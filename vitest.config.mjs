@@ -50,6 +50,8 @@ const SHARED_TEST_CONFIG = {
 // One value for both projects: vitest throws when one groupOrder mixes maxWorkers.
 // Leaves headroom for concurrent local development; VITEST_MAX_WORKERS overrides it per run.
 const SUITE_WORKERS = '50%';
+// Fail only when pooled, on Linux (bash >= 4 signal-drain race); a later 1-worker group runs them.
+const POOLED_FAILURES = ['cli/__tests__/review-gate-supervisor.test.mts'];
 
 // The devkit test surface is the gate engines only. Skills under skills/ may
 // carry helper scripts (incl. *.test.mjs) that are repo-coupled and not part of
@@ -72,9 +74,20 @@ export default defineConfig({
           ...SHARED_TEST_CONFIG,
           name: 'git-integration',
           include: GIT_INTEGRATION_TESTS,
+          exclude: POOLED_FAILURES,
           // Shares parallel's pool; a 1-worker project became a trailing group that doubled wall time.
           // Spawns here stay supervised (suite-hangs-bound-at-the-spawn-site), not serialised.
           maxWorkers: SUITE_WORKERS,
+        },
+      },
+      {
+        test: {
+          ...SHARED_TEST_CONFIG,
+          name: 'git-serial',
+          include: POOLED_FAILURES,
+          // Explicit order keeps it solo even when VITEST_MAX_WORKERS lifts maxWorkers above 1.
+          maxWorkers: 1,
+          sequence: { groupOrder: 1 },
         },
       },
     ],
