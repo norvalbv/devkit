@@ -5,7 +5,16 @@
  * and GUARD_COVERAGE_OK / GUARD_NO_COVERAGE (per-run operator assertion). Also covers the
  * istanbul/V8 aggregation math (statements/functions/branches/lines) in computePercentages.
  */
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -359,5 +368,48 @@ describe('resolveGuardConfig — coverage field', () => {
     const root = makeRoot();
     writeConfig(root, { coverage: [1, 2] });
     expect(resolveGuardConfig(root).coverage).toEqual({});
+  });
+});
+
+// sc-3712: guard-deterministic stops its suite only on this explicit signal from the gate itself.
+describe('runCoverage — the absent-artifact signal to guard-deterministic', () => {
+  const withSignal = (root: string) => {
+    const file = join(root, 'signal');
+    vi.stubEnv('DEVKIT_COVERAGE_ABSENT_SIGNAL', file);
+    return file;
+  };
+  afterEach(() => vi.unstubAllEnvs());
+
+  it('writes "absent" when it fails for want of an artifact', () => {
+    const root = makeRoot();
+    const file = withSignal(root);
+    spy();
+
+    expect(runCoverage(root)).toBe(1);
+
+    expect(readFileSync(file, 'utf8')).toBe('absent');
+  });
+
+  it('stays silent on a threshold failure, so the runner keeps aggregating', () => {
+    const root = makeRoot();
+    writeConfig(root, { coverage: { statements: 60 } });
+    writeCoverage(root, COV);
+    const file = withSignal(root);
+    spy();
+
+    expect(runCoverage(root)).toBe(1);
+
+    expect(existsSync(file)).toBe(false);
+  });
+
+  it('stays silent in review mode, where an absent artifact is NOT MEASURED', () => {
+    const root = makeRoot();
+    const file = withSignal(root);
+    vi.stubEnv('DEVKIT_RUN_MODE', 'review');
+    spy();
+
+    runCoverage(root);
+
+    expect(existsSync(file)).toBe(false);
   });
 });

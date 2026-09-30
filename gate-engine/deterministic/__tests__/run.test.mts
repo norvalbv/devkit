@@ -741,3 +741,128 @@ describe('deterministicStrict', () => {
     expect(deterministicStrict()).toBe(false);
   });
 });
+
+// ship-gates-converge-not-restart, sc-3712: an absent coverage artifact is the one deterministic
+// failure that stops the suite — on the coverage gate's own explicit signal, never a later stat.
+describe('runDeterministic — coverage first, fail fast on an absent artifact', () => {
+  const ran = (exec) => exec.mock.calls.map(([, argv]) => argv[0]);
+  // The coverage gate failing on absence: exit 1 AND its explicit signal, as the real gate does.
+  const absentExec = (codes = {}) => {
+    const rest = mkExec(codes);
+    return vi.fn((node, argv, opts) => {
+      if (!argv[0].includes('coverage/run')) return rest(node, argv, opts);
+      writeFileSync(opts.env.DEVKIT_COVERAGE_ABSENT_SIGNAL, 'absent');
+      throw Object.assign(new Error('exit 1'), { status: 1 });
+    });
+  };
+
+  it('runs coverage before the other selected gates', () => {
+    const exec = mkExec({});
+
+    expect(runDeterministic(repo(['size', 'dup', 'coverage']), { exec })).toBe(0);
+
+    expect(ran(exec)[0]).toContain('coverage/run');
+    expect(ran(exec)).toHaveLength(3);
+  });
+
+  it('stops after the coverage gate signals an absent artifact, naming every gate it did not run', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exec = absentExec();
+
+    expect(runDeterministic(repo(['size', 'dup', 'coverage']), { exec })).toBe(1);
+
+    expect(ran(exec)).toHaveLength(1);
+    const text = err.mock.calls.flat().join('\n');
+    expect(text).toMatch(/did NOT run: guard-size guard-dup/);
+    expect(text).toContain('guard-coverage');
+  });
+
+  // The race the signal exists for: a threshold failure whose artifact vanishes before any later stat.
+  it('keeps aggregating a coverage failure that did not signal absence, artifact or not', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exec = mkExec({ 'coverage/run': 1, 'size-disable': 1 });
+
+    expect(runDeterministic(repo(['size', 'dup', 'coverage']), { exec })).toBe(1);
+
+    expect(ran(exec)).toHaveLength(3);
+  });
+
+  // No signal channel (an unwritable temp dir) means no stop — the pre-sc-3712 aggregation, never a crash.
+  it('aggregates rather than crashing when the signal channel cannot be created', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const d = repo(['size', 'coverage']);
+    vi.stubEnv('TMPDIR', '/nonexistent/devkit-signal-test');
+    const exec = mkExec({ 'coverage/run': 1 });
+
+    expect(runDeterministic(d, { exec })).toBe(1);
+
+    expect(ran(exec)).toHaveLength(2);
+    vi.unstubAllEnvs();
+  });
+
+  // Identity is the registry id: an --extra labelled guard-coverage gets no channel and cannot stop the run.
+  it('ignores an --extra gate that merely borrows the guard-coverage label', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exec = vi.fn((_bin, _argv, opts) => {
+      const signal = opts.env?.DEVKIT_COVERAGE_ABSENT_SIGNAL;
+      if (signal) writeFileSync(signal, 'absent');
+      throw Object.assign(new Error('exit 1'), { status: 1 });
+    });
+
+    const rc = runDeterministic(repo(['size']), {
+      exec,
+      extra: [{ label: 'guard-coverage', cmd: 'bun run spoof' }],
+    });
+
+    expect(rc).toBe(1);
+    expect(exec).toHaveBeenCalledTimes(2);
+    expect(exec.mock.calls.every(([, , opts]) => !opts.env?.DEVKIT_COVERAGE_ABSENT_SIGNAL)).toBe(
+      true,
+    );
+  });
+
+  it('hands the signal channel to the coverage gate only', () => {
+    const exec = mkExec({});
+
+    runDeterministic(repo(['size', 'coverage']), { exec });
+
+    const envs = exec.mock.calls.map(([, , opts]) => opts.env.DEVKIT_COVERAGE_ABSENT_SIGNAL);
+    expect(envs[0]).toEqual(expect.any(String));
+    expect(envs[1]).toBeUndefined();
+  });
+
+  // Review mode reports an absent artifact as NOT MEASURED (exit 2), which proves nothing to stop on.
+  it('never stops a review run, where an absent artifact is not measured', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    process.env.DEVKIT_RUN_MODE = 'review';
+    process.env.DEVKIT_REVIEW_GUARDS = 'size,coverage';
+    const exec = mkExec({ 'coverage/run': 2 });
+
+    runDeterministic(repo(['size', 'coverage']), { exec });
+
+    expect(ran(exec)).toHaveLength(2);
+  });
+
+  it('honours --only: coverage leads and stops the run even when the selection omits it', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exec = absentExec();
+
+    expect(runDeterministic(repo(['size']), { exec, only: ['size', 'coverage'] })).toBe(1);
+
+    expect(ran(exec)).toEqual([expect.stringContaining('coverage/run')]);
+  });
+
+  it('still runs the --extra and structure gates after a passing coverage gate', () => {
+    const exec = vi.fn();
+
+    expect(
+      runDeterministic(repo(['coverage']), {
+        exec,
+        extra: [{ label: 'lint', cmd: 'bun run lint' }],
+        structure: 'bunx eslint src',
+      }),
+    ).toBe(0);
+
+    expect(exec).toHaveBeenCalledTimes(3);
+  });
+});

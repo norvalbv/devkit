@@ -253,6 +253,13 @@ named gate (see **A pre-commit gate blocked my commit** above) and re-commit —
 cache** means the gates that already passed won't re-run. AI gates are the exception: on a commit or ship
 they stay fail-fast, one finding at a time, by design.
 
+One deterministic exception: when the coverage gate is selected it runs **first**, and if it fails because
+`coverage/coverage-final.json` is absent, the run stops there and prints
+`⏭  No coverage data, so N deterministic gate(s) did NOT run: …`. Those gates did not pass — generate the
+artifact (`devkit coverage-run`), then re-commit or re-ship, and they run then. A coverage failure with an
+artifact present (a threshold shortfall, malformed data) still aggregates with the rest, and `devkit review`
+never stops here (it reports absent coverage as NOT MEASURED).
+
 ## `✗ review: failed gates: <names>`
 
 `devkit review` runs every selected gate even after one blocks, then prints this line and exits 1.
