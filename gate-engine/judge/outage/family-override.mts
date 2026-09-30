@@ -76,7 +76,7 @@ export const claudeFamilyKeyLine = (): string =>
  *  (gate-engine cannot reach binResolvable), so the seam stays testable with GUARD_CODEX_BIN alone. */
 // The provider comes from judgeProviderOfBin, so a GUARD_CODEX_BIN path still reads as codex; a
 // compound bin has none — either family may be dark — so it names no move, like preflight's both-dark.
-export function familyOverrideRemedy(dark: string): string {
+export function familyOverrideRemedy(dark: string, binPresent?: boolean): string {
   const provider = judgeProviderOfBin(dark);
   if (provider === null)
     return (
@@ -92,13 +92,18 @@ export function familyOverrideRemedy(dark: string): string {
       'the ship. The codex CLI has to resolve (or GUARD_CODEX_BIN point at it), and the move ' +
       'discards every cached PASS'
     );
+  // claudeBindable refuses whenever codex resolves, so a present codex gets no doctor route (sc-2534).
+  const doctorRoute =
+    binPresent === true
+      ? ''
+      : 'If no codex binary resolves at all, `devkit doctor --fix` writes the same keys into ' +
+        'guard.config.json instead, which a ship reads only once that file is committed. ';
   return (
     `move the judges to the claude family: run \`${claudeFamilyEnvLine()}\` in the shell that ` +
     `ships, then resume the ship. Set all ${FAMILY_ENV_KEYS.length} — the correctness chunk cap is ` +
     'benched for gpt-5.6-sol only, so a partial move runs sonnet at an un-benched cap; the command ' +
     'also clears any sentry pin, so that judge follows GUARD_REVIEW_MODEL rather than staying ' +
-    'behind. `devkit doctor --fix` writes the same keys into guard.config.json instead, which ' +
-    'a ship reads only once that file is committed. Either way every cached PASS is discarded, ' +
+    `behind. ${doctorRoute}Every cached PASS is discarded, ` +
     'because a verdict is keyed on its judging model, and remaining claude headroom cannot be ' +
     `queried ahead of time. Once the outage clears, \`${judgeEnvUnsetLine()}\` returns to the default`
   );

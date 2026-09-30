@@ -267,11 +267,35 @@ describe('renderPreflight', () => {
     expect(out).not.toContain('transient');
   });
 
-  it('says re-running will not help, and names the override that will', () => {
+  // sc-2534: a locked codex still resolves, so doctor --fix cannot bind — naming it is a dead end.
+  it('says re-running will not help, and names the override that will — never doctor --fix', () => {
     const out = renderPreflight(locked, now).join('\n');
     expect(out).toContain('re-running will not help');
+    expect(out).toContain('GUARD_CORRECTNESS_CHUNK=off');
+    expect(out).not.toContain('devkit doctor --fix');
+  });
+
+  it('a logged-out but installed codex is not offered doctor --fix either', () => {
+    const loggedOut = [
+      {
+        role: 'review' as const,
+        model: 'gpt-5.6-sol',
+        bin: 'codex',
+        state: 'unauthenticated' as const,
+      },
+    ];
+    const out = renderPreflight(loggedOut, now).join('\n');
+    expect(out).toContain('GUARD_REVIEW_MODEL=haiku');
+    expect(out).not.toContain('devkit doctor --fix');
+  });
+
+  it('an absent codex keeps doctor --fix — the one state where the bind works', () => {
+    const absent = [
+      { role: 'review' as const, model: 'gpt-5.6-sol', bin: 'codex', state: 'absent' as const },
+    ];
+    const out = renderPreflight(absent, now).join('\n');
     expect(out).toContain('devkit doctor --fix');
-    expect(out).toContain('GUARD_REVIEW_MODEL');
+    expect(out).toContain('GUARD_REVIEW_MODEL=haiku');
   });
 
   // sc-2689: the redirect is only honest when ONE family is dark. With both blocked there is

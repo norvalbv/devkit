@@ -68,11 +68,12 @@ export function strictRemedy(
       resetsAt === undefined
         ? 'until the limit resets'
         : `for another ${formatResetDelta(resetsAt)}`;
+    // A binary that reported its usage limit ran, so it resolves: the doctor route cannot bind.
     // Naming the override, never taking it: a runtime cross-family swap moves spend to an unwatched
     // subscription and puts its verdicts outside the model-keyed cache salt (review-gate-in-chain).
     return (
       `\`${bin}\` reports its usage limit reached — re-running cannot succeed ${window}. Either ` +
-      `wait it out, or ${familyOverrideRemedy(bin)}`
+      `wait it out, or ${familyOverrideRemedy(bin, true)}`
     );
   }
   // The generic cause covers a MISSING and an unauthenticated binary alike, and a missing one is the

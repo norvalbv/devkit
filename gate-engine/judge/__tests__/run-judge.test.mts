@@ -147,6 +147,7 @@ describe('strictRemedy', () => {
     expect(r).toContain('GUARD_REVIEW_MODEL=haiku');
     expect(r).toContain('GUARD_CORRECTNESS_CHUNK=off');
     expect(r).toContain('devkit doctor --fix');
+    expect(r).toContain('If no codex binary resolves at all');
     expect(r).toContain('cached PASS is discarded');
   });
 
@@ -156,8 +157,17 @@ describe('strictRemedy', () => {
     const r = strictRemedy('rate-limited', 'codex', Date.now() + 5 * 24 * 60 * 60 * 1000);
     expect(r).toContain('cannot succeed');
     expect(r).toMatch(/for another \d+d/);
-    expect(r).toContain('devkit doctor --fix');
-    expect(r).toContain('GUARD_REVIEW_MODEL');
+    expect(r).toContain('GUARD_CORRECTNESS_CHUNK=off');
+    // sc-2534: the limit came from a binary that ran, so doctor --fix (codex must be unresolvable) is a no-op.
+    expect(r).not.toContain('devkit doctor --fix');
+  });
+
+  it('a known-present dark codex drops the doctor route but keeps the full move and its cost', () => {
+    const r = familyOverrideRemedy('codex', true);
+    expect(r).toContain(`\`${claudeFamilyEnvLine()}\``);
+    expect(r).toContain('cached PASS is discarded');
+    expect(r).not.toContain('devkit doctor --fix');
+    expect(familyOverrideRemedy('codex', false)).toContain('devkit doctor --fix');
   });
 
   it('a rate-limited remedy without a known reset still refuses to promise a re-run works', () => {

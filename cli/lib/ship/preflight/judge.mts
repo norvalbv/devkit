@@ -158,10 +158,12 @@ export function renderPreflight(statuses: ModelStatus[], now: number = Date.now(
   // Naming the override, never taking it: a runtime cross-family swap moves spend to an unwatched
   // subscription and puts its verdicts outside the model-keyed cache salt (review-gate-in-chain).
   const dark = [...new Set(blocked.map((s) => s.bin))];
+  // Presence is resolved once per provider, so one absent row speaks for every role on that bin.
+  const present = !blocked.some((s) => s.bin === dark[0] && s.state === 'absent');
   lines.push(
     dark.length > 1
       ? '   Both judge CLIs are dark, so no family move helps — install or authenticate one of them.'
-      : `   To ship inside this window, ${familyOverrideRemedy(dark[0] ?? 'codex')}.`,
+      : `   To ship inside this window, ${familyOverrideRemedy(dark[0] ?? 'codex', present)}.`,
   );
   return lines;
 }
