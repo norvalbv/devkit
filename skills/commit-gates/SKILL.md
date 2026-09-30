@@ -156,7 +156,9 @@ dark; find which with `devkit doctor` before moving anything.
   doctor will not bind while one pins codex.
 - `devkit doctor --fix` writes the same four keys into `guard.config.json`, which a ship reads from
   the base commit — so that route needs the file committed first, and it only ever binds toward
-  Claude. The claude-dark step above says how to remove that bind by hand.
+  Claude. It binds only when no codex binary resolves: a codex that is installed but usage-limited
+  or logged out makes `doctor --fix` a silent no-op, so use the exports above. The claude-dark step
+  above says how to remove that bind by hand.
 - Either route re-judges everything: a cached PASS is keyed on the model that earned it. Claude's
   remaining headroom cannot be queried, so nothing warns before it runs out.
 
