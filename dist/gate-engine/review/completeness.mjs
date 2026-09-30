@@ -37,7 +37,7 @@ import { emitCacheHit, emitGateBypass, emitGateEvent, emitGateInfraFailure, emit
 import { JUDGE_ISOLATION } from '../judge/judge-isolation.mjs';
 import { judgeMcpCapabilityFingerprint, namedAgentMcpProfile, withNamedAgentMcpTools, } from '../judge/mcp/profile.mjs';
 import { reportGateInfraFailure } from '../judge/odb-probe.mjs';
-import { DEEP_JUDGE_TIMEOUT_MS, execJudgeAsync, strictRemedy } from '../judge/run-judge.mjs';
+import { DEEP_JUDGE_TIMEOUT_MS, execJudgeAsync, remedyCause, strictRemedy, } from '../judge/run-judge.mjs';
 import { loadCache, savePasses } from './cache.mjs';
 import { buildCappedDiffEvidence } from './diff-evidence.mjs';
 import { commitIndexEnv } from '../ratchets/commit-index.mjs';
@@ -159,16 +159,10 @@ const DETAIL_CAP = 500;
 const SKIP_WORDING = {
     timeout: 'judge timed out',
     'rate-limited': 'judge hit the provider usage limit',
+    absent: 'judge CLI is not installed',
     outage: 'judge outage',
 };
-/** Collapse the judge's outage kind to the cause `strictRemedy` branches on. */
-function completenessCause(outage) {
-    if (outage?.kind === 'timeout')
-        return 'timeout';
-    if (outage?.kind === 'rate-limited')
-        return 'rate-limited';
-    return 'outage';
-}
+/** The gate → exit code (see module contract). `exec` injectable for tests. */
 export async function runCompleteness(msgFile, cwd = process.cwd(), { exec = execJudgeAsync, mcpProjectRoots, } = {}) {
     const startedAt = Date.now();
     const finish = (code, cacheState = 'none', effectiveMs) => finishGateTiming('completeness', startedAt, code, cacheState, effectiveMs);
@@ -348,7 +342,7 @@ export async function runCompleteness(msgFile, cwd = process.cwd(), { exec = exe
         if (envFlag('AI_STRICT')) {
             // Name the CAUSE: a cap kill is not auth/quota (sc-1227), and a usage lock is its mirror —
             // CLI fine, account locked, generic remedy says re-run for a wait it never mentions.
-            const cause = completenessCause(outage);
+            const cause = remedyCause(outage);
             const named = SKIP_WORDING[cause];
             console.error(`guard-review: completeness SKIPPED (${named}) — strict ship mode fails closed.\n` +
                 `   Remedy: ${strictRemedy(cause, judgeBinForModel(model), outage?.resetsAt)} (an earned PASS is cached).`);

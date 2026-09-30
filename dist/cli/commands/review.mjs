@@ -25,6 +25,11 @@ an overlay consumer, run \`devkit init --overlay --review\` inside that target c
 The completeness and sentry judges read a commit message, so they run at commit-msg (\`git ci\`,
 \`devkit ship\`) and never here; a green review can still be followed by a completeness block.
 
+Coverage (when the coverage guard is selected) is judged from a private COPY of the target's
+coverage/ artifact; review never produces one. An absent artifact, or one that predates the reviewed
+source, is reported as NOT MEASURED on the final line instead of failing the review — \`devkit ship\`
+and commits still block on it, so run \`devkit coverage-run\` in the target before shipping.
+
 WARNING: target-controlled hooks and package scripts execute. Review trusted targets only.
 
 Output streams for the whole run, not just the gates: setup and teardown emit a

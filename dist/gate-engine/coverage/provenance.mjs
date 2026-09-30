@@ -164,11 +164,20 @@ export function publishManifest(staged, coverageDir) {
         /* no manifest for this run: the gate reports provenance unknown */
     }
 }
+/** Manifest text as the manifest, or null when it is not the shape we wrote. Never throws. */
+export function parseManifest(text) {
+    try {
+        const parsed = manifestSchema.safeParse(JSON.parse(text));
+        return parsed.success ? parsed.data : null;
+    }
+    catch {
+        return null;
+    }
+}
 /** The manifest, or null when absent or not the shape we wrote. Never throws. */
 export function readManifest(coverageDir) {
     try {
-        const parsed = manifestSchema.safeParse(JSON.parse(readFileSync(join(coverageDir, MANIFEST_NAME), 'utf8')));
-        return parsed.success ? parsed.data : null;
+        return parseManifest(readFileSync(join(coverageDir, MANIFEST_NAME), 'utf8'));
     }
     catch {
         return null;

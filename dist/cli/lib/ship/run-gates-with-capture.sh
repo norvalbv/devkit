@@ -167,6 +167,8 @@ run_gates_with_capture() {
     while IFS= read -r job; do
       [ "$job" != "$tee_pid" ] || running=1
     done < <(jobs -pr; jobs -ps)
+    # bash 5 can keep a reaped tee "Running" while a trapped signal is handled; trust the kernel too.
+    [ "$running" -eq 0 ] || kill -0 "$tee_pid" 2>/dev/null || running=0
     [ "$running" -eq 1 ] || break
     if [ "$SECONDS" -ge "$drain_deadline" ]; then
       case "$drain_stage" in

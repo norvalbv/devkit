@@ -22,8 +22,9 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'n
 import { join } from 'node:path';
 import { defaultSelection, RECOMMENDED_GUARD_IDS } from '../components.mjs';
 import { readJson } from '../fs-helpers.mjs';
+import { REVIEW_FAILURE_FINALIZER } from './gate-policy/block-helpers.mjs';
 import { markEnd } from './husky.mjs';
-import { buildFullHook, buildGuardBlock, extractGuardBlock, PACKAGE_BIN_DIR_FRAGMENT, REVIEW_DETERMINISTIC_FINALIZER, replaceGuardBlock, } from './husky-block.mjs';
+import { buildFullHook, buildGuardBlock, extractGuardBlock, PACKAGE_BIN_DIR_FRAGMENT, replaceGuardBlock, } from './husky-block.mjs';
 import { FORMAT_EXTENSION_FILTER, FORMAT_FAILURE_REPORT, FORMAT_TOOL_SETUP, } from './format-fragment.mjs';
 // Structure-lint and the hard Biome lint/assist gate fold into the deterministic orchestrator via
 // `--extra`. Self-host-only for formatting: its SCOPE (proven allowlist) and hard FAILURE POLICY.
@@ -186,9 +187,7 @@ function definedOnly(recorded) {
 }
 function withSelfHostFragment(text, pkgRel, fragment) {
     const end = markEnd(pkgRel);
-    const anchor = text.includes(REVIEW_DETERMINISTIC_FINALIZER)
-        ? REVIEW_DETERMINISTIC_FINALIZER
-        : end;
+    const anchor = text.includes(REVIEW_FAILURE_FINALIZER) ? REVIEW_FAILURE_FINALIZER : end;
     return text.replace(`\n${anchor}`, `\n\n${fragment}\n\n${anchor}`);
 }
 function withFallow(text, pkgRel) {

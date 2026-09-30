@@ -1,15 +1,13 @@
 /** Private, manifest-backed gate-input projections for an isolated review worktree. */
-import { createHash } from 'node:crypto';
 import { chmodSync, copyFileSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync, } from 'node:fs';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { runDirectReviewCli } from '../run-direct.mjs';
 import { reviewRuntimeFingerprint } from '../runtime-fingerprint.mjs';
-import { assertSymlinkFreeReviewTree, canonicalReviewDirectory, canonicalReviewLeaf, isSafeReviewRelativePath, reviewPathWithin, safeReviewDestination, } from '../runtime-paths.mjs';
+import { assertSymlinkFreeReviewTree, canonicalReviewDirectory, canonicalReviewLeaf, reviewPathWithin, safeReviewDestination, } from '../runtime-paths.mjs';
 import { fail } from '../shared/common.mjs';
 import { resolveReviewSource } from '../source-projection.mjs';
-const VERSION = 1;
-const SHA256 = /^[a-f0-9]{64}$/;
-const SQLITE_SUFFIXES = ['', '-wal', '-shm', '-journal'];
+import { projectionManifest, readManifest, safeRelativePath, } from './manifest.mjs';
+import { sqliteFamily, sqliteFamilyPath, sqliteWalIndexPath } from './sqlite-family.mjs';
 // Ratchet/cache gates legitimately update their own ignored baseline/cache state during a run, so
 // these roots are allowed to drift between the captured source and the private copy (verify checks
 // only that they stay symlink-free); every other projected root is immutable and must match exactly.
@@ -22,17 +20,9 @@ const MUTABLE_ROOTS = [
     '.devkit/baselines',
     '.devkit/correctness-overrides.json',
 ];
-const PRESENT_STATE_TYPES = ['file', 'directory', 'link-file', 'link-directory'];
-const LINK_STATE_FIELDS = ['linkTarget', 'linkPath', 'physicalPath'];
-function manifestHash(value) {
-    return createHash('sha256').update(JSON.stringify(value)).digest('hex');
-}
-function safeRelativePath(path) {
-    if (!isSafeReviewRelativePath(path) || path === '.git' || path.startsWith('.git/')) {
-        return fail(`unsafe gate projection path: ${JSON.stringify(path)}`);
-    }
-    return path;
-}
+// Pure caches the gates only read through the private copy: their target source churns under live
+// readers and indexers, so postflight skips its drift check. Ratchet freezes stay source-strict.
+const SOURCE_VOLATILE_CACHES = ['.fallow', '.decisions'];
 function absolutePath(root, path) {
     const safe = safeRelativePath(path);
     const absolute = resolve(root, ...safe.split('/'));
@@ -84,7 +74,7 @@ function copySafeTree(source, destination) {
     }
 }
 function mutablePath(path, indexPath) {
-    if (indexPath && SQLITE_SUFFIXES.some((suffix) => path === `${indexPath}${suffix}`))
+    if (sqliteFamilyPath(path, indexPath))
         return true;
     return MUTABLE_ROOTS.some((root) => path === root || path.startsWith(`${root}/`));
 }
@@ -101,7 +91,7 @@ function candidatePaths(candidates, indexPath) {
         if (result.some((parent) => path.startsWith(`${parent}/`)))
             continue;
         if (path === indexPath)
-            result.push(...SQLITE_SUFFIXES.map((suffix) => `${path}${suffix}`));
+            result.push(...sqliteFamily(path));
         else
             result.push(path);
     }
@@ -128,8 +118,8 @@ function validateManifestPath(path, source, destination) {
 function privateDestination(root, path) {
     return safeReviewDestination(root, path, 'gate projection escapes its root', 'gate projection has an unsafe destination parent');
 }
-function sqliteFamilyPath(path, indexPath) {
-    return Boolean(indexPath && SQLITE_SUFFIXES.some((suffix) => path === `${indexPath}${suffix}`));
+function projectedSourceState(root, path, indexPath) {
+    return sqliteWalIndexPath(path, indexPath) ? { type: 'absent' } : captureState(root, path, true);
 }
 function selectProjections(source, destination, candidates, indexPath) {
     const selected = [];
@@ -137,7 +127,7 @@ function selectProjections(source, destination, candidates, indexPath) {
         if (lstatSync(privateDestination(destination, path), { throwIfNoEntry: false }) !== undefined) {
             continue;
         }
-        const sourceBefore = captureState(source, path, true);
+        const sourceBefore = projectedSourceState(source, path, indexPath);
         if (sourceBefore.type === 'absent' && !sqliteFamilyPath(path, indexPath))
             continue;
         selected.push({ path, source: sourceBefore });
@@ -164,9 +154,9 @@ function copySelectedProjections(source, destination, selected, created, hooks) 
     }
 }
 function verifySelectedProjection(source, destination, selected, indexPath) {
-    const sourceAfter = captureState(source, selected.path, true);
+    const sourceAfter = projectedSourceState(source, selected.path, indexPath);
     if (!stateMatches(selected.source, sourceAfter)) {
-        fail('gate projections changed during capture; retry');
+        throw new CaptureDrift(selected.path);
     }
     const destinationAfter = captureState(destination, selected.path, false);
     if (selected.source.type !== 'absent' &&
@@ -177,23 +167,47 @@ function verifySelectedProjection(source, destination, selected, indexPath) {
     return {
         path: selected.path,
         mutable: mutablePath(selected.path, indexPath),
+        sourceVolatile: sqliteFamilyPath(selected.path, indexPath) || SOURCE_VOLATILE_CACHES.includes(selected.path),
         source: selected.source,
         destination: destinationAfter,
     };
 }
-function projectionManifest(sourceRoot, destinationRoot, entries) {
-    const unsigned = {
-        version: VERSION,
-        sourceRoot,
-        destinationRoot,
-        entries,
-    };
-    return { ...unsigned, selfHash: manifestHash(unsigned) };
+// A source that moved between its first read and the post-copy recheck may have torn the copy, so
+// the whole capture rolls back and is redone once the writer (an indexer, a build) goes quiet.
+class CaptureDrift extends Error {
+    path;
+    constructor(path) {
+        super(`gate projections changed during capture: ${path}`);
+        this.path = path;
+    }
+}
+const CAPTURE_ATTEMPTS = 5;
+const CAPTURE_BACKOFF_MS = 150;
+function pause(ms) {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 /** Copy absent gate inputs into a private worktree and authenticate their source state. */
 export function materializeProjectionRuntime(sourceRoot, destinationRoot, manifestPath, candidates, indexPath = '', hooks = {}) {
     const [source, destination] = validateRoots(sourceRoot, destinationRoot);
     const manifestDestination = validateManifestPath(manifestPath, source, destination);
+    let drifted = '';
+    for (let attempt = 0; attempt < CAPTURE_ATTEMPTS; attempt += 1) {
+        pause(CAPTURE_BACKOFF_MS * attempt);
+        try {
+            return captureOnce(source, destination, manifestDestination, candidates, indexPath, hooks);
+        }
+        catch (cause) {
+            drifted = driftedPath(cause);
+        }
+    }
+    return fail(`gate projections changed during capture; retry — ${drifted} was still being written after ${CAPTURE_ATTEMPTS} attempts`);
+}
+function driftedPath(cause) {
+    if (cause instanceof CaptureDrift)
+        return cause.path;
+    throw cause;
+}
+function captureOnce(source, destination, manifestDestination, candidates, indexPath, hooks) {
     const created = [];
     try {
         const selected = selectProjections(source, destination, candidates, indexPath);
@@ -210,106 +224,7 @@ export function materializeProjectionRuntime(sourceRoot, destinationRoot, manife
         throw cause;
     }
 }
-function recordValue(value, message) {
-    if (!value || typeof value !== 'object' || Array.isArray(value))
-        fail(message);
-    return value;
-}
-function isPresentStateType(value) {
-    return PRESENT_STATE_TYPES.some((type) => value === type);
-}
-function requiredLinkString(state, field) {
-    const value = state[field];
-    if (typeof value !== 'string')
-        fail('invalid projection link state');
-    return value;
-}
-function validateLinkedState(state) {
-    requiredLinkString(state, 'linkTarget');
-    const linkPath = requiredLinkString(state, 'linkPath');
-    if (!isSafeReviewRelativePath(linkPath))
-        fail('invalid projection link state');
-    const physicalPath = requiredLinkString(state, 'physicalPath');
-    if (!isAbsolute(physicalPath))
-        fail('invalid projection link state');
-}
-function validateUnlinkedState(state) {
-    for (const field of LINK_STATE_FIELDS) {
-        if (state[field] !== undefined)
-            fail('invalid projection link state');
-    }
-}
-function validateLinkState(state, linked) {
-    if (linked)
-        validateLinkedState(state);
-    else
-        validateUnlinkedState(state);
-}
-function parseState(value) {
-    const state = recordValue(value, 'invalid projection state');
-    if (state.type === 'absent') {
-        if (Object.keys(state).length !== 1)
-            fail('invalid projection state');
-        return { type: 'absent' };
-    }
-    if (!isPresentStateType(state.type) ||
-        typeof state.fingerprint !== 'string' ||
-        !SHA256.test(state.fingerprint)) {
-        fail('invalid projection state');
-    }
-    validateLinkState(state, state.type.startsWith('link-'));
-    return state;
-}
-function readManifestJson(path) {
-    let value;
-    try {
-        value = JSON.parse(readFileSync(path, 'utf8'));
-    }
-    catch {
-        return fail('could not read gate projection manifest');
-    }
-    return value;
-}
-function parseManifestHeader(value) {
-    const raw = recordValue(value, 'invalid projection manifest');
-    if (raw.version !== VERSION ||
-        typeof raw.sourceRoot !== 'string' ||
-        typeof raw.destinationRoot !== 'string' ||
-        !Array.isArray(raw.entries) ||
-        typeof raw.selfHash !== 'string') {
-        fail('invalid projection manifest');
-    }
-    return raw;
-}
-function parseEntry(value) {
-    const candidate = recordValue(value, 'invalid projection entry');
-    if (typeof candidate.path !== 'string' || typeof candidate.mutable !== 'boolean') {
-        fail('invalid projection entry');
-    }
-    return {
-        path: safeRelativePath(candidate.path),
-        mutable: candidate.mutable,
-        source: parseState(candidate.source),
-        destination: parseState(candidate.destination),
-    };
-}
-function readManifest(path) {
-    const raw = parseManifestHeader(readManifestJson(path));
-    const entries = raw.entries.map(parseEntry);
-    if (new Set(entries.map((entry) => entry.path)).size !== entries.length) {
-        fail('duplicate projection manifest path');
-    }
-    const unsigned = {
-        version: VERSION,
-        sourceRoot: raw.sourceRoot,
-        destinationRoot: raw.destinationRoot,
-        entries,
-    };
-    if (manifestHash(unsigned) !== raw.selfHash)
-        fail('gate projection manifest self-hash is invalid');
-    return { ...unsigned, selfHash: raw.selfHash };
-}
-/** Verify immutable copies and every source after target-controlled hook code has executed. */
+/** Verify copies and non-volatile sources after target hooks; volatile caches were frozen privately. */
 export function verifyProjectionRuntime(sourceRoot, destinationRoot, manifestPath) {
     const [source, destination] = validateRoots(sourceRoot, destinationRoot);
     const manifest = readManifest(manifestPath);
@@ -317,7 +232,8 @@ export function verifyProjectionRuntime(sourceRoot, destinationRoot, manifestPat
         fail('gate projection manifest belongs to different roots');
     }
     for (const entry of manifest.entries) {
-        if (!stateMatches(captureState(source, entry.path, true), entry.source)) {
+        const live = entry.sourceVolatile ? entry.source : captureState(source, entry.path, true);
+        if (!stateMatches(live, entry.source)) {
             fail(`target gate projection changed while review was running: ${entry.path}`);
         }
         const current = captureState(destination, entry.path, false);

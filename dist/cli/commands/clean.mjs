@@ -25,6 +25,7 @@ import { removeHookRegistrations, removeHookScripts } from '../lib/install/insta
 import { hasOrphanExcludeBlock, pruneGitExclude } from '../lib/install/overlay-excludes.mjs';
 import { removeSearchCode } from '../lib/install/install-search-code.mjs';
 import { OVERLAY_ENTRY_REL, removeOxcCapability } from '../lib/install/oxc/lifecycle.mjs';
+import { isOverlayHooksValue, unprojectOverlay } from '../lib/husky/overlay/overlay-home.mjs';
 import { removeHealAlias } from '../lib/overlay.mjs';
 import { removeGlobalHook } from '../lib/overlay-global-hook.mjs';
 import { removeAgents, removeSkills } from '../lib/sync-manifest.mjs';
@@ -143,7 +144,7 @@ function restoreHooksPath(gitRoot, orig, dryRun) {
     // A poisoned origHooksPath (devkit's own dir — from a pre-0.8.1 re-overlay) can't be restored
     // to itself (clean just deleted it). Fall back to husky's dir if present, else unset.
     let target = orig;
-    if (target === '.devkit/hooks') {
+    if (isOverlayHooksValue(target, gitRoot)) {
         target = existsSync(join(gitRoot, '.husky', '_')) ? '.husky/_' : '';
     }
     if (dryRun) {
@@ -173,6 +174,14 @@ function cleanOverlay(cwd, cfg, dryRun) {
     console.log('cleaning OVERLAY — restoring the repo to untouched:');
     restoreHooksPath(gitRoot, cfg.origHooksPath ?? '', dryRun);
     removeHealAlias(gitRoot, dryRun);
+    // sc-4157: links first — once this home's .devkit goes they dangle, and the exclude prune exposes them.
+    const { unlinked, kept } = dryRun
+        ? { unlinked: [], kept: [] }
+        : unprojectOverlay(gitRoot, cfg.pkgRel ?? '');
+    if (unlinked.length)
+        console.log(`  ✓ unlinked the overlay from ${unlinked.length} worktree path(s)`);
+    if (kept.length)
+        console.log(`  · kept ${kept.length} branch-changed copy/copies (delete by hand): ${kept.join(', ')}`);
     // agent-half (skills/agents/agent-hook scripts + their registrations) — repo-wide at the git root.
     // The synced files + manifests are git-ignored; removing them keeps the round-trip footprint-free.
     const comp = cfg.components ?? {};
@@ -403,12 +412,13 @@ export default async function run(args, cwd) {
         // (deleted) dir AND/OR synced agent-half files + fallow-baselines may be stranded. Recover the
         // full overlay footprint, not just the hook — the agent-half is removed by bundled-name fallback
         // since the manifests may be gone too (the old recovery removed `.devkit/` without them).
-        if (hp === '.devkit/hooks' || hasOverlayStrays(gitRoot)) {
-            console.log(hp === '.devkit/hooks'
-                ? 'devkit clean: orphaned overlay (core.hooksPath → .devkit/hooks, no config) — recovering:\n'
+        const ours = isOverlayHooksValue(hp, gitRoot);
+        if (ours || hasOverlayStrays(gitRoot)) {
+            console.log(ours
+                ? `devkit clean: orphaned overlay (core.hooksPath → ${hp}, no config) — recovering:\n`
                 : 'devkit clean: overlay leftovers found (no config) — cleaning them up:\n');
-            if (hp === '.devkit/hooks')
-                restoreHooksPath(gitRoot, '.devkit/hooks', dryRun); // → .husky/_ or unset
+            if (ours)
+                restoreHooksPath(gitRoot, hp, dryRun); // → .husky/_ or unset
             removeHealAlias(gitRoot, dryRun);
             cleanOverlayStrays(cwd, gitRoot, dryRun);
             console.log(`\n${dryRun ? 'Dry-run complete.' : 'Recovered.'}`);

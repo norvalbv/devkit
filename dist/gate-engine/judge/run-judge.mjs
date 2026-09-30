@@ -27,7 +27,7 @@ import { unavailableMessage, warnNoOutput } from './outage/wording.mjs';
 import { composeTranscript, saveTranscriptUnique } from './transcript-store.mjs';
 // Re-exported so the gates that already import their remedy wording from here keep ONE import path,
 // while the wording itself lives beside the classifier that decides it.
-export { strictRemedy, unavailableMessage } from './outage/wording.mjs';
+export { remedyCause, strictRemedy, unavailableMessage, } from './outage/wording.mjs';
 // Narrow an unknown thrown value to the JudgeError shape; a non-object (or null) reads as {} so every
 // field access is undefined — matching the original `e?.field` optional-chaining behaviour exactly.
 function judgeErr(e) {

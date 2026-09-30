@@ -247,8 +247,8 @@ SHIP_HOOK_WRAPPER
     rc=1
     blocked_override='"hook_proof"'
     ship_abort_reported=1
-  elif [ "$rc" -eq 0 ] && [ -x "$root/.devkit/hooks/pre-commit" ] \
-     && grep -q 'devkit-gates: chain start' "$root/.devkit/hooks/pre-commit" \
+  elif [ "$rc" -eq 0 ] && [ -x "$(gate_overlay_root "$root")/.devkit/hooks/pre-commit" ] \
+     && grep -q 'devkit-gates: chain start' "$(gate_overlay_root "$root")/.devkit/hooks/pre-commit" \
      && ! grep -q 'devkit-gates: chain start' "$log"; then
     [ "$ship_dry_gates" -eq 1 ] || git -C "$wt" reset --soft HEAD~1 2>/dev/null || true
     {

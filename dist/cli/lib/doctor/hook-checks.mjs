@@ -15,40 +15,22 @@ import { REVIEWABLE_GUARD_IDS } from '../components.mjs';
 import { detectGitRoot } from '../detect-git-root.mjs';
 import { markEnd, markStart } from '../husky/husky.mjs';
 import { extractGuardBlock, QAVIS_ADVISORY_ID } from '../husky/husky-block.mjs';
+import { installHealAlias } from '../husky/overlay/heal-alias.mjs';
+import { overlayHooksPath } from '../husky/overlay/overlay-home.mjs';
 import { firstLine } from '../standalone.mjs';
 import { check } from './check-result.mjs';
 import { foreignPin, hooksDir, isInside, isInsideResolved, sharedHooksPath, worktreeHooksPathState, worktreeScopedPin, } from './hooks-path.mjs';
 import { strayGateCalls } from './stray-gate-calls.mjs';
 import { checkFailOpenGuards } from './unguarded-gate-calls.mjs';
-/**
- * `doctor --fix`'s repair for a husky-reclaimed `core.hooksPath` in OVERLAY mode. husky's `prepare`
- * resets it to `.husky/_` on every install, and until now `--fix` only WARNED — while `devkit review`
- * told users to run exactly this command to repair it. Transient by nature (the next install
- * reclaims it again); `devkit init --overlay --global-commit-gate` is the durable fix.
- *
- * Lives here rather than in `doctor.mts` for the same reason the checks above do — that file is at
- * its recorded size budget — and beside them because this module already owns doctor's hooksPath
- * reasoning.
- *
- * Two refusals, both fail-safe:
- *   - no `.devkit/hooks/pre-commit` → re-pointing would aim core.hooksPath at a directory with no
- *     hook in it, turning a loud warning into a silent zero-gate state. Belt-and-braces in practice:
- *     the caller runs syncOverlayHook first, which regenerates a missing hook under `--fix`, so this
- *     only fires if that ever stops guaranteeing the file. The pointer must never lead the hook.
- *   - a LINKED worktree → core.hooksPath lives in the SHARED .git/config (only `--worktree` scope is
- *     per-checkout) and `.devkit/hooks` is relative, so writing it from here would re-point every
- *     sibling worktree at a path most of them do not have. Print the main-checkout command instead.
- */
+// doctor --fix: re-point core.hooksPath at the overlay's ABSOLUTE hooks dir (sc-4157), never ahead
+// of the hook it names. Rationale: docs/decisions/overlay-self-heal.md.
 export function repointHooksPath(gitRoot, hookOk) {
     if (!hookOk)
         return false;
     try {
-        const git = (...args) => execFileSync('git', args, { cwd: gitRoot, encoding: 'utf8' }).trim();
-        if (git('rev-parse', '--git-dir') !== git('rev-parse', '--git-common-dir')) {
-            console.log('  · linked worktree — core.hooksPath is shared with every other worktree, so --fix leaves it alone; re-point from the main checkout: git config --local core.hooksPath .devkit/hooks');
-            return false;
-        }
-        git('config', '--local', 'core.hooksPath', '.devkit/hooks');
+        const value = overlayHooksPath(gitRoot);
+        execFileSync('git', ['config', '--local', 'core.hooksPath', value], { cwd: gitRoot });
+        installHealAlias(gitRoot, value, false);
         return true; // the caller reports the healed path on its own core.hooksPath line
     }
     catch (e) {

@@ -43,13 +43,17 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { envFlag, resolveFromCwd, resolveGuardConfig } from '../config.mjs';
 import { emitCacheHit } from '../judge/gate-events.mjs';
-import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from '../judge/judge-isolation.mjs';
+import { judgeBinForModel } from '../judge/codex/result.mjs';
+import { JUDGE_ISOLATION } from '../judge/judge-isolation.mjs';
 import { reportGateInfraFailure } from '../judge/odb-probe.mjs';
-import { execJudge, strictRemedy } from '../judge/run-judge.mjs';
+import { execJudge, remedyCause, strictRemedy } from '../judge/run-judge.mjs';
 import { resolveEscalationModel, resolveReviewModel } from '../review/reviewers.mjs';
 import { currentTarget, effectiveScope, parseDecision } from './decisions.mjs';
+import { depthPass } from './depth/depth-pass.mjs';
 import { git, stagedFiles } from './git-io.mjs';
 import { hasVerdict, saveVerdict, verdictKey } from './verdict-cache.mjs';
+// The depth pass moved to depth/ (sc-2769); re-exported so this published subpath keeps its surface.
+export { parseDepthVerdict, runDepthJudge } from './depth/depth-pass.mjs';
 // glob → regex literals. ** = any incl. `/`; * = any non-slash; ? = one non-slash.
 const GLOB_ESC_RE = /[.+^${}()|[\]\\]/g;
 const GLOB_STARS_RE = /\*\*|\*|\?/g; // wildcards in ONE pass (** before *; ? is single-char, no placeholder)
@@ -57,7 +61,6 @@ const ALIGN_RE = { CONTRADICT: /\bCONTRADICT\b/, ALIGN: /\bALIGN\b/, UNCLEAR: /\
 // Tolerates markdown dressing (bold/bullet/heading) around the line — a judge that formats its
 // verdict must not silently fall through to the ambiguous-word fallback and lose a block.
 const VERDICT_LINE_RE = /^[\s*#>-]*VERDICT:\s*\**\s*(ALIGN|CONTRADICT|UNCLEAR)\b/gim;
-const DEPTH_RE = { PASS: /\bPASS\b/, THIN: /\bTHIN\b/ };
 // Read-only investigation surface for the judge. `git diff` (pattern-scoped Bash) is how it reads
 // STAGED hunks — worktree Reads alone would miss partial staging.
 const JUDGE_TOOLS = 'Read,Grep,Glob,Bash(git diff:*)';
@@ -83,19 +86,6 @@ const ESCALATE_PROMPT = (ruling, vision, files, firstPass) => `${ALIGN_PROMPT(ru
     '─────\n' +
     'Independently verify its evidence with your own investigation — confirm or overturn. ' +
     'Your verdict is final; a CONTRADICT blocks the commit.';
-// The depth rubric — a SOFT lint. Judges the *content* of an already-recorded Target, since the
-// schema already requires the fields (a non-empty field can still be shallow). Warn-only by default.
-// Check 4 is the 100-year test's QUALITY half: a Revisit-when line, when present, must state a
-// condition a future reader could actually check. The PRESENCE half is deterministic and lives in
-// the eval depth-audit's "(no Revisit-when)" marker — an eval run against a labelled corpus showed
-// an inference-based "could the reader infer when to revisit?" check destabilises the judge
-// (76.5% vs 100% accuracy), so absence is flagged mechanically, never judged.
-const DEPTH_PROMPT = 'A decision-log Target block (on stdin) records an architectural decision. Judge its RATIONALE DEPTH:\n' +
-    '1. Does Context state a forcing COST/failure that made the status quo untenable — NOT merely restate a prior ruling or the new mechanism (circular)?\n' +
-    '2. Is each rejected alternative paired with the concrete CRITERION it loses on, not just named?\n' +
-    '3. Is the Negative consequence concrete and specific, NOT a platitude?\n' +
-    '4. ONLY IF the block has a Revisit-when line: does it state a concrete, checkable condition (a measurable threshold or observable event), not a platitude like "when things change"? A block with NO Revisit-when line passes this check.\n' +
-    'Reply THIN if ANY check fails, else PASS. Reply with exactly one word: PASS or THIN.';
 // ─── Pure logic (testable without git/claude) ───────────────────────────────────
 function globToRe(glob) {
     const re = glob
@@ -125,12 +115,6 @@ export function parseAlignVerdict(raw) {
 /** Block ONLY on a confident CONTRADICT. Everything else passes (fail-safe toward not blocking). */
 export function gateExit(verdict) {
     return verdict === 'CONTRADICT' ? 1 : 0;
-}
-/** Bounded one-word depth verdict; ambiguity / unknown / empty → null (→ no warn). */
-export function parseDepthVerdict(raw) {
-    const out = String(raw).toUpperCase();
-    const hits = ['PASS', 'THIN'].filter((v) => DEPTH_RE[v].test(out));
-    return hits.length === 1 ? hits[0] : null;
 }
 // ─── fs + claude I/O (thin; run in the CONSUMER cwd) ─────────────────────────────
 // git/stagedFiles are shared with the detect gate — see git-io.mts.
@@ -177,7 +161,7 @@ export function loadScopedTargets(dir) {
  * `--allowedTools` is VARIADIC — anything after it (incl. a positional prompt) is swallowed into
  * the tools list, silently leaving stdin as the prompt. Prompt first, tools last.
  */
-function runJudge(cwd, model, prompt, stdinText, timeout) {
+function runJudge(cwd, model, prompt, stdinText, timeout, onOutage) {
     return execJudge({
         label: 'decision-alignment',
         args: ['-p', prompt, '--model', model, ...JUDGE_ISOLATION, '--allowedTools', JUDGE_TOOLS],
@@ -186,6 +170,7 @@ function runJudge(cwd, model, prompt, stdinText, timeout) {
         cwd,
         // Read-only tools; the decisions gate has no tamper detection — codex stays read-only-sandboxed.
         codexReadOnly: true,
+        onOutage,
     });
 }
 /**
@@ -205,7 +190,14 @@ export function judgeDetailed(files, target, cwd = process.cwd(), { firstModel, 
     const stat = git(cwd, ['diff', '--cached', '--stat', '--', ...files]);
     // Gate semantics follow the review knobs (env > guard.config.json > default): the light judge
     // model investigates, the escalation model confirms. The bench passes both explicitly.
-    const first = runJudge(cwd, firstModel ?? resolveReviewModel(cfg), ALIGN_PROMPT(target.ruling, target.vision, files), stat, ALIGNMENT_JUDGE_TIMEOUT_MS);
+    const firstM = firstModel ?? resolveReviewModel(cfg);
+    let outage;
+    // Only one pass can fail per call, so the bin is that pass's own model's binary (sc-2769).
+    const capture = (model) => (o) => {
+        outage = { ...o, bin: judgeBinForModel(model) };
+    };
+    const promptA = ALIGN_PROMPT(target.ruling, target.vision, files);
+    const first = runJudge(cwd, firstM, promptA, stat, ALIGNMENT_JUDGE_TIMEOUT_MS, capture(firstM));
     if (first === null)
         return {
             firstRaw: null,
@@ -213,6 +205,7 @@ export function judgeDetailed(files, target, cwd = process.cwd(), { firstModel, 
             finalRaw: null,
             finalVerdict: null,
             escalated: false,
+            outage,
         };
     const firstVerdict = parseAlignVerdict(first);
     if (firstVerdict !== 'CONTRADICT' || !escalate)
@@ -223,115 +216,22 @@ export function judgeDetailed(files, target, cwd = process.cwd(), { firstModel, 
             finalVerdict: firstVerdict,
             escalated: false,
         };
-    const second = runJudge(cwd, escalateModel ?? resolveEscalationModel(cfg), ESCALATE_PROMPT(target.ruling, target.vision, files, first), stat, ALIGNMENT_JUDGE_TIMEOUT_MS);
+    const escM = escalateModel ?? resolveEscalationModel(cfg);
+    const promptB = ESCALATE_PROMPT(target.ruling, target.vision, files, first);
+    const second = runJudge(cwd, escM, promptB, stat, ALIGNMENT_JUDGE_TIMEOUT_MS, capture(escM));
     return {
         firstRaw: first,
         firstVerdict,
         finalRaw: second,
         finalVerdict: second === null ? null : parseAlignVerdict(second),
         escalated: true,
+        outage,
     };
 }
 /** Block = escalation-confirmed CONTRADICT; every guard/outage path stays null (fail-open). */
 export function judge(files, target, cwd = process.cwd()) {
     const d = judgeDetailed(files, target, cwd);
     return d === null ? null : d.finalVerdict;
-}
-/**
- * cwd-relative path of the decisions dir, robust to the /tmp↔/private/tmp symlink (macOS) and to
- * an absolute env-configured dir: both endpoints are realpath-canonicalised before relativising, so
- * the staged-file prefix filter below compares like for like. Returns '' if the dir is outside cwd.
- */
-function decisionsDirRel(cwd, cfg) {
-    const abs = resolveFromCwd(cfg, 'decisionsDir');
-    if (abs === null)
-        return ''; // no decisions dir configured → treat as outside cwd (no prefix filter)
-    const canon = (p) => {
-        try {
-            return realpathSync(p);
-        }
-        catch {
-            return p; // dir may not exist yet — fall back to the literal path
-        }
-    };
-    const rel = path.relative(canon(cwd), canon(abs));
-    return rel.startsWith('..') ? '' : rel;
-}
-/** Staged decision *.md → [{slug, block}] (the STAGED blob, so partial staging is honoured). */
-function stagedDecisionTargets(cwd, changed, decisionsRel) {
-    const out = [];
-    for (const f of changed) {
-        if (!f.endsWith('.md') || path.basename(f) === 'INDEX.md')
-            continue;
-        if (decisionsRel && !f.startsWith(`${decisionsRel}/`))
-            continue;
-        let content;
-        try {
-            content = git(cwd, ['show', `:${f}`]);
-        }
-        catch {
-            continue; // not in the index (e.g. a pure deletion) → nothing to judge
-        }
-        const t = currentTarget(parseDecision(content).body);
-        if (t?.block)
-            out.push({ slug: path.basename(f, '.md'), block: t.block });
-    }
-    return out;
-}
-/**
- * One depth-judge run → raw transcript, or null on outage (execJudge warns once). Pure-text judge:
- * READ_ONLY before ISOLATION (variadic bounding), positional prompt last. Exported so eval/bench.mjs
- * exercises the exact prompt/argv/truncation/timeout the gate runs — and can distinguish outage
- * (raw null) from parse-null, which judgeDepth below deliberately conflates.
- */
-export function runDepthJudge(cwd, block, model) {
-    return execJudge({
-        label: 'decision-depth',
-        args: [
-            '-p',
-            '--model',
-            model ?? resolveReviewModel(resolveGuardConfig(cwd)),
-            ...JUDGE_READ_ONLY,
-            ...JUDGE_ISOLATION,
-            DEPTH_PROMPT,
-        ],
-        input: String(block).slice(0, 12000),
-        timeout: 120000,
-        cwd,
-    });
-}
-function judgeDepth(cwd, noLlm, block) {
-    if (noLlm || !block.trim())
-        return null;
-    const raw = runDepthJudge(cwd, block);
-    return raw === null ? null : parseDepthVerdict(raw);
-}
-// ─── Dispatch ─────────────────────────────────────────────────────────────────
-// WARN-ONLY: flag THIN Targets among staged decision files (the schema already requires the fields;
-// this judges whether they SAY anything). The author deepens the still-uncommitted block in place.
-// Returns true only when GUARD_DEPTH_HARD must escalate a confident THIN to a block.
-function depthPass(cwd, cfg, changed) {
-    let block = false;
-    // Staged file names are cwd-relative; the decisions dir may be configured absolute (env) or
-    // relative (file). Compare both in cwd-relative form so the prefix filter actually matches.
-    const decisionsRel = decisionsDirRel(cwd, cfg);
-    for (const d of stagedDecisionTargets(cwd, changed, decisionsRel)) {
-        // A block that already judged PASS never re-runs (keyed on its exact content).
-        const key = verdictKey('depth', d.block);
-        if (hasVerdict(cwd, key))
-            continue;
-        const v = judgeDepth(cwd, cfg.noLlm, d.block);
-        if (v === 'PASS')
-            saveVerdict(cwd, key);
-        if (v !== 'THIN')
-            continue;
-        console.error(`decision-depth: target "${d.slug}" reads THIN — Context may restate the prior ruling, ` +
-            'a rejected road may lack the criterion it loses on, or the Negative may be a platitude. ' +
-            'Deepen the block before committing (it is still uncommitted).');
-        if (envFlag('DEPTH_HARD'))
-            block = true;
-    }
-    return block;
 }
 // Blocks (process.exit 1) on a confident CONTRADICT of a scoped Target — the flip-flop guard.
 // Under GUARD_AI_STRICT (the ship path) a judge OUTAGE blocks too (exit 3, the fail-closed
@@ -361,12 +261,14 @@ function alignmentPass(cwd, cfg, changed) {
         if (d.finalVerdict === 'ALIGN')
             saveVerdict(cwd, key); // confident non-block only
         if (d.finalVerdict === null && strict) {
-            // outage (first or escalation pass) or unparseable transcript
-            // Shared wording (judge/run-judge strictRemedy) so the three fail-closed gates cannot drift.
-            // This judge layer does not surface the outage KIND, so it reports the generic outage remedy;
-            // its caps are tight (120s/240s) and a cap kill here is not the observed failure mode.
-            console.error(`decision-alignment: judge unavailable for target "${t.slug}" — strict ship mode fails closed.\n` +
-                `  Remedy: ${strictRemedy('outage')}.`);
+            // Shared wording (strictRemedy) so the three fail-closed gates cannot drift; a judge that ran
+            // but broke the VERDICT contract is not an outage, so it gets its own line.
+            const o = d.outage;
+            console.error(o
+                ? `decision-alignment: judge unavailable for target "${t.slug}" — strict ship mode fails closed.\n` +
+                    `  Remedy: ${strictRemedy(remedyCause(o), o.bin, o.resetsAt)}.`
+                : `decision-alignment: judge for target "${t.slug}" returned no parseable VERDICT line — strict ship mode fails closed.\n` +
+                    '  Remedy: re-run devkit ship; this is not an auth/quota problem.');
             process.exit(3);
         }
         if (gateExit(d.finalVerdict) !== 1)

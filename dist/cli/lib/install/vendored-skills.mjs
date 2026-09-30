@@ -25,3 +25,8 @@ export const VENDORED_SKILLS = [
         holder: 'Ayoub Ghriss',
     },
 ];
+/** True for a packaged `skills/<vendored>/…` path. Vendored skills live only in
+ *  `.devkit/vendored-skills/`, so no agent-skills projection (ship's included) may copy them. */
+export function isVendoredSkillPath(path) {
+    return VENDORED_SKILLS.some(({ name }) => path.startsWith(`skills/${name}/`));
+}

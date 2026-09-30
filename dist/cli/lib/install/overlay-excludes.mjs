@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { hasOwnOverlay } from '../husky/overlay/overlay-home.mjs';
 import { withFileLock } from './gitignore-cache.mjs';
 const EXCLUDE_HEADER = '# devkit overlay (local-only) — not committed';
 const AGENT_ASSET_RE = /^\.(?:(?:claude|cursor)\/(?:skills|agents|hooks)(?:\/|$)|agents\/skills(?:\/|$)|codex\/(?:agents|hooks)(?:\/|$)|(?:cursor|codex)\/hooks\.json$)/;
@@ -8,7 +9,7 @@ const CLAUDE_LOCAL_SETTINGS_RE = /^\.claude\/settings\.local\.json$/;
 const AGENT_MANIFEST_RE = /^\.devkit\/(?:skills|agents|agent-hooks|agent-hook-registrations)-manifest\.json$/;
 // Every line devkit has ever added; agent-half + fallow entries are prefix-tolerant (`(.*\/)?`) so
 // a monorepo `pkgRel/`-scoped line is pruned too — a miss orphans it.
-const DEVKIT_EXCLUDE_LINE = /^(# devkit overlay|\.devkit\/|.*\/\.devkit\/|.*guard\.config\.json|.*biome\.devkit\.jsonc|.*eslint\.config\.devkit\.mjs|.*eslint\/baselines\/|(.*\/)?\.claude\/(skills|agents|hooks)\/|(.*\/)?\.agents\/skills\/|(.*\/)?\.codex\/(agents|hooks)\/|(.*\/)?\.(cursor|codex)\/hooks\.json|(.*\/)?\.cursor\/(skills|agents|hooks)\/|(.*\/)?\.claude\/settings\.local\.json|(.*\/)?\.fallow\/|(.*\/)?fallow-baselines\/|(.*\/)?oxlint\.devkit\.json$|(.*\/)?\.anti-slop-baseline\.json$)/;
+const DEVKIT_EXCLUDE_LINE = /^(# devkit overlay|\.devkit\/|.*\/\.devkit\/|.*guard\.config\.json|.*biome\.devkit\.jsonc|.*eslint\.config\.devkit\.mjs|.*eslint\/baselines\/|(.*\/)?\.claude\/(skills|agents|hooks)\/|(.*\/)?\.agents\/skills\/|(.*\/)?\.codex\/(agents|hooks)\/|(.*\/)?\.(cursor|codex)\/hooks\.json|(.*\/)?\.cursor\/(skills|agents|hooks)\/|(.*\/)?\.claude\/settings\.local\.json|(.*\/)?\.fallow\/|(.*\/)?fallow-baselines\/?$|(.*\/)?\.devkit$|(.*\/)?oxlint\.devkit\.json$|(.*\/)?\.anti-slop-baseline\.json$)/;
 const BLANK_RUN_RE = /\n{3,}/g;
 const LEADING_BLANKS_RE = /^\n+/;
 const isManagedAgentPath = (line) => AGENT_ASSET_RE.test(line) || CLAUDE_LOCAL_SETTINGS_RE.test(line) || AGENT_MANIFEST_RE.test(line);
@@ -22,8 +23,8 @@ export function gitExcludeFile(gitRoot) {
         return join(gitRoot, '.git', 'info', 'exclude');
     }
 }
-/** Other checkouts of this clone with a live overlay: every overlay install (`--no-husky` too) writes
- * `.devkit/hooks/pre-commit`. All read ONE exclude file, so no line goes while one still needs it. */
+/** Other checkouts of this clone with a live overlay of their OWN — a projected link is not one (sc-4157).
+ * All read ONE exclude file, so no line goes while one still needs it. */
 export function siblingOverlayCheckouts(gitRoot) {
     let listing;
     try {
@@ -40,7 +41,7 @@ export function siblingOverlayCheckouts(gitRoot) {
         .split('\0')
         .filter((line) => line.startsWith('worktree '))
         .map((line) => line.slice('worktree '.length))
-        .filter((path) => existsSync(join(path, '.devkit', 'hooks', 'pre-commit')) && realpathSync(path) !== self);
+        .filter((path) => hasOwnOverlay(path) && realpathSync(path) !== self);
 }
 /** Exact-reconcile Devkit's agent paths after its local-only exclude marker. Every checkout of the
  * clone rewrites the same file, so the read-modify-write holds a lock beside it. */

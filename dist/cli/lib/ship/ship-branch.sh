@@ -1223,18 +1223,18 @@ if [ -n "$LOCAL_BRANCH_EXISTS" ]; then
   echo "Resuming preserved ship commit ${RECOVERY_COMMIT:0:7} on $BR (gate receipt verified)." >&2
   # Detached at the verified OID: a concurrent local branch update cannot change what this retry
   # pushes or what the reconcile manifest records.
-  git worktree add -q --detach "$WT" "$RECOVERY_COMMIT" >&2
+  git -c core.hooksPath=/dev/null worktree add -q --detach "$WT" "$RECOVERY_COMMIT" >&2
   # branch_created=0: a resume attaches to a branch this run did not create, so nothing downstream
   # may delete it. Written on the very next line, because between `worktree add` and this the entry
   # is registered but unattributable.
   ship_run_record_begin "$WT" "$BR" "$RECOVERY_COMMIT" 0 "$SHIP_RUN_MODE"
 else
   if [ "$DRY_GATES" -eq 1 ]; then
-    git worktree add -q --detach "$WT" "$BASE" >&2
+    git -c core.hooksPath=/dev/null worktree add -q --detach "$WT" "$BASE" >&2
     ship_run_record_begin "$WT" "$BR" "$BASE" 0 "$SHIP_RUN_MODE"
   else
     BRANCH_CREATED=1
-    git worktree add -q -b "$BR" "$WT" "$BASE" >&2
+    git -c core.hooksPath=/dev/null worktree add -q -b "$BR" "$WT" "$BASE" >&2
     ship_run_record_begin "$WT" "$BR" "$BASE" 1 "$SHIP_RUN_MODE"
   fi
   # The atomic branch/worktree claim comes before the intent write: only its winner may own the
