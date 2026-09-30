@@ -284,8 +284,8 @@ const MODERN_BASH = findModernBash();
 interface DeferredSignalOptions {
   teeExit?: number;
   signal?: string;
-  // 'parent' signals the runner's shell (the sc-1711 window); 'self' makes tee die of the signal.
-  target?: 'parent' | 'self';
+  // 'parent' signals the runner's shell (the sc-1711 window), 'self' only tee, 'group' both at once.
+  target?: 'parent' | 'self' | 'group';
   // The gated command's own exit status, which the runner must report through the pending signal.
   gateExit?: number;
 }
@@ -299,7 +299,8 @@ function deferredSignalGateHarness(root: string, options: DeferredSignalOptions 
   // Resolved, not hardcoded: tee is not at /usr/bin on every distro, and a stub that cannot find the
   // real binary reddens for the wrong reason. Same lookup ship-branch.test.mts uses.
   const realTee = execFileSync('/bin/sh', ['-c', 'command -v tee'], { encoding: 'utf8' }).trim();
-  const kill = target === 'parent' ? `kill -${signal} "$PPID"` : `kill -${signal} $$`;
+  const pids = { parent: '"$PPID"', self: '$$', group: '"$PPID" $$' }[target];
+  const kill = `kill -${signal} ${pids}`;
   writeFileSync(join(bin, 'tee'), `#!/bin/sh\n"$REAL_TEE" "$@"\n${kill}\nexit ${teeExit}\n`);
   chmodSync(join(bin, 'tee'), 0o755);
   const shell = [
@@ -957,11 +958,8 @@ describe('review gate supervisor', () => {
     },
   );
 
-  // The accepted residual, pinned so it cannot silently become a fail-OPEN. When the signal reaches
-  // tee itself (a process-GROUP kill, which is how a terminal Ctrl-C and some task harnesses deliver
-  // it) both reads report tee's own death, the runner cannot prove the log is whole, and it must fail
-  // closed — no receipt. Note SIGNAL_STATUS=0: the shell was never signalled, so this is purely the
-  // second read refusing to launder a signal-dead tee into a success.
+  // A tee that really died (SIGKILL: it ignores HUP/TERM) cannot prove the log whole, so the runner
+  // fails closed — no receipt. SIGNAL_STATUS=0: only tee was signalled, never the shell.
   (MODERN_BASH ? it : it.skip)(
     `fails closed when the signal kills tee itself rather than the shell${
       MODERN_BASH ? '' : ' (skipped: no bash >= 4)'
@@ -969,11 +967,32 @@ describe('review gate supervisor', () => {
     () => {
       const result = deferredSignalGateHarness(mkTmp('devkit-review-tee-signalled-'), {
         target: 'self',
+        signal: 'KILL',
       });
 
       expect(result.stdout, result.stderr).toContain('SIGNAL_STATUS=0');
       expect(result.stdout, result.stderr).toContain('RUNNER_RC=1');
       expect(result.stderr).toMatch(/could not persist gate output/);
+    },
+  );
+
+  // A process-GROUP HUP/TERM (managed CLI forwarding, a harness kill) reaches tee as well as the shell.
+  // tee ignores both, so the log drains whole and a commit that already landed keeps its receipt.
+  it.each([
+    { signal: 'TERM', status: 143 },
+    { signal: 'HUP', status: 129 },
+  ])(
+    'keeps the log whole when a $signal group signal reaches tee and the shell',
+    ({ signal, status }) => {
+      const result = deferredSignalGateHarness(mkTmp('devkit-review-group-signal-'), {
+        target: 'group',
+        signal,
+      });
+
+      expect(result.stdout, result.stderr).toContain(`SIGNAL_STATUS=${status}`);
+      expect(result.stdout, result.stderr).toContain('RUNNER_RC=0');
+      expect(result.stderr).not.toMatch(/could not persist gate output/);
+      expect(readFileSync(result.log, 'utf8')).toContain('pending-trap gate output');
     },
   );
 

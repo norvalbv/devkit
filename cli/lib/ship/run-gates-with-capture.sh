@@ -93,10 +93,12 @@ run_gates_with_capture() {
   fi
 
   set +e
-  tee -a "${logs[@]}" < "$capture_fifo" >&2 &
+  # tee outlives a process-GROUP HUP/TERM (managed CLI, harness kill) so a landed commit keeps its
+  # receipt; exec keeps $! and tee's $PPID. Every abandon path below must therefore use KILL.
+  (trap '' HUP TERM; exec tee -a "${logs[@]}") < "$capture_fifo" >&2 &
   tee_pid=$!
   if ! exec 8> "$capture_fifo"; then
-    kill "$tee_pid" 2>/dev/null || true
+    kill -KILL "$tee_pid" 2>/dev/null || true
     wait "$tee_pid" 2>/dev/null || true
     rm -rf -- "$capture_dir"
     set -e
@@ -105,7 +107,7 @@ run_gates_with_capture() {
   fi
   if ! rm -f -- "$capture_fifo"; then
     exec 8>&-
-    kill "$tee_pid" 2>/dev/null || true
+    kill -KILL "$tee_pid" 2>/dev/null || true
     wait "$tee_pid" 2>/dev/null || true
     rm -rf -- "$capture_dir"
     set -e
@@ -158,9 +160,8 @@ run_gates_with_capture() {
     review_gate_reaped "$supervisor_pid"
   fi
 
-  # Once the supervisor is reaped there is nobody left for an outer signal handoff to target. Give
-  # tee five seconds to observe EOF, then TERM/KILL it with one bounded second per signal. This
-  # keeps a failed supervisor plus an undiscovered pipe writer from hanging the review shell.
+  # Give tee five seconds to observe EOF, then KILL it (it ignores HUP/TERM) and allow one more second,
+  # so a failed supervisor plus an undiscovered pipe writer cannot hang the review shell.
   tee_status=1
   capture_failed=0
   drain_stage=0
@@ -174,10 +175,9 @@ run_gates_with_capture() {
         0)
           capture_failed=1
           echo "$label: gate output drain exceeded 5s; terminating capture" >&2
-          kill -TERM "$tee_pid" 2>/dev/null || true
+          kill -KILL "$tee_pid" 2>/dev/null || true
           ;;
-        1) kill -KILL "$tee_pid" 2>/dev/null || true ;;
-        2) break ;;
+        1) break ;;
       esac
       drain_stage=$((drain_stage + 1))
       drain_deadline=$((SECONDS + 1))
