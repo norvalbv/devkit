@@ -140,6 +140,9 @@ export function readCodexRateLimits(
     timer.unref?.();
 
     child.on('error', () => finish(null));
+    // A child that exits before reading gets EPIPE as an async stream 'error', which the write's try
+    // cannot catch; unhandled, it is an uncaught exception that fails the whole run.
+    child.stdin?.on('error', () => finish(null));
     // Exiting before the reply arrived is itself an answer: we learned nothing.
     child.on('close', () => finish(null));
     child.stderr?.on('data', () => {
