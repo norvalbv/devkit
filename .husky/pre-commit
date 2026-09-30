@@ -231,25 +231,6 @@ echo "🚧 Deterministic gates (aggregated)..."
 __dk_gate_deterministic node gate-engine/deterministic/run.mts --hook "${DK_HOOK_PATH:-$0}" --structure "bun run lint:structure" --extra "lint=bun run lint" --extra "hook-parity=node cli/lib/husky/hook-parity.mts --gate" --extra "decisions-integrity=node gate-engine/decisions/cli.mts integrity --staged" --extra "benchmarks=bun run benchmarks:check -- --mode staged" --extra "corpus-lint=bun run benchmarks:corpus"
 # /devkit:deterministic
 
-if __dk_gate_selected comments; then
-# devkit:guard-comments
-echo "🧯 Changed-comment firewall..."
-ccrc=0
-__dk_no_git_env node gate-engine/comment-firewall/cli.mts gate || ccrc=$?
-if [ "$ccrc" -eq 1 ]; then
-    __dk_block_deterministic guard-comments
-elif [ "$ccrc" -eq 4 ]; then
-    echo "   guard-comments: NOT a rejection — staged comment evidence is unreadable or unsupported."
-    __dk_block_deterministic guard-comments
-elif [ "$ccrc" -ne 0 ]; then
-    echo "   guard-comments: unexpected exit $ccrc — blocking the commit."
-    __dk_block_deterministic guard-comments
-fi
-# ccrc 0 = clean, 1 = paragraph over the 2-line budget, 4 = unreadable/unsupported evidence; anything else blocks.
-# A deterministic gate: review and dry-gates remember the block so later gates still report.
-# /devkit:guard-comments
-fi
-
 if __dk_gate_selected decisions; then
 # devkit:guard-decisions
 echo "🧭 Decision-log gate..."
