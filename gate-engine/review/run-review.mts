@@ -36,6 +36,7 @@ import { emitReviewCacheHit } from '../judge/gate-events.mts';
 import { reportGateInfraFailure } from '../judge/odb-probe.mts';
 import { execJudgeAsync, strictRemedy } from '../judge/run-judge.mts';
 import { loadCache } from './cache.mts';
+import { isShipLane } from './cascade/consumer-assets.mts';
 import { type CascadeResult, runCascade } from './cascade/reviewer.mts';
 import { ENGINE_ERROR_REMEDY, RESPONSE_CONTRACT_REMEDY } from './contracts/response.mts';
 import {
@@ -460,7 +461,7 @@ export async function runReviewGate(
         ? RESPONSE_CONTRACT_REMEDY
         : cause === 'engine'
           ? ENGINE_ERROR_REMEDY
-          : strictRemedy(cause, r.outageBin, r.outageResetsAt);
+          : strictRemedy(cause, r.outageBin, r.outageResetsAt, isShipLane());
     console.error(
       strict
         ? `guard-review: ${r.name} INCONCLUSIVE (${r.reason}) — strict ship mode fails closed.\n` +

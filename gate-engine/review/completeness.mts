@@ -61,6 +61,7 @@ import {
 } from '../judge/run-judge.mts';
 import type { VerdictMeta } from '../judge/verdict-store.mts';
 import { loadCache, savePasses } from './cache.mts';
+import { isShipLane, reviewAgentsDir } from './cascade/consumer-assets.mts';
 import { buildCappedDiffEvidence } from './diff-evidence.mts';
 import { commitIndexEnv } from '../ratchets/commit-index.mts';
 import { stagedTreeHash } from './evidence/staged-git.mts';
@@ -296,14 +297,19 @@ export async function runCompleteness(
       .map((s) => s.trim())
       .filter(Boolean);
     if (files.length === 0) return finish(0);
-    const dir = cfg.review.agentsDir;
+    const dir = reviewAgentsDir(cwd, cfg);
     let body: string;
     try {
-      body = readFileSync(
-        path.join(path.isAbsolute(dir) ? dir : path.resolve(cwd, dir), `${AGENT_NAME}.md`),
-        'utf8',
-      );
+      body = readFileSync(path.join(dir, `${AGENT_NAME}.md`), 'utf8');
     } catch {
+      // Ship projected this brief from the running package, so its absence is a broken install.
+      if (isShipLane() && envFlag('AI_STRICT')) {
+        console.error(
+          `guard-review: ${AGENT_NAME}.md missing under ${dir} — strict ship mode fails closed.\n` +
+            `   Remedy: ${strictRemedy('sync', undefined, undefined, true)}.`,
+        );
+        return finish(3);
+      }
       console.error(`guard-review: ${AGENT_NAME}.md not found under ${dir} — completeness skipped`);
       return finish(0);
     }
