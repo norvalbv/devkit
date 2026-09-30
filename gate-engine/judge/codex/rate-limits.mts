@@ -24,23 +24,28 @@ export interface CodexRateLimits {
   /** The window this percentage is measured over — 10080 minutes is the observed weekly plan. */
   windowDurationMins?: number;
   planType?: string;
-  /** True only when the provider positively reported a limit AS reached. */
+  /** Provider reported a limit reached, or a window is fully spent with no usable credits (sc-3207:
+   *  `rateLimitReachedType` is nullable upstream and was absent on a locked account). */
   reached: boolean;
   /** The provider's own enum value, e.g. `rate_limit_reached`. Reported, never interpreted. */
   reachedType?: string;
+  /** Which window's consumption locked the account, when one did. Reported, never interpreted. */
+  exhaustedWindow?: 'primary' | 'secondary';
 }
 
 /** The wire shape — every field optional (codexEventsOf's contract in result.mts). Values are
  *  re-checked below, so a field carrying the wrong type is dropped rather than reported. */
-interface RateLimitsPrimary {
+interface RateLimitsWindow {
   usedPercent?: number;
   windowDurationMins?: number;
   resetsAt?: number;
 }
 interface RateLimitsPayload {
-  primary?: RateLimitsPrimary | null;
+  primary?: RateLimitsWindow | null;
+  secondary?: RateLimitsWindow | null;
   planType?: string;
   rateLimitReachedType?: string;
+  credits?: { hasCredits?: boolean; unlimited?: boolean } | null;
 }
 interface RateLimitsReply {
   result?: { rateLimits?: RateLimitsPayload | null };
@@ -54,6 +59,24 @@ const usableNumber = (v: number | undefined): number | undefined =>
 /** Same for text: an absent or blank value is not a signal. */
 const usableText = (v: string | undefined): string | undefined =>
   v && `${v}`.trim() ? v : undefined;
+
+/** One window's usable fields, or null with no window object. resetsAt is seconds on the wire; an
+ *  implausible value (a unit change) is dropped, keeping the lock but not the time. */
+function readWindow(
+  w: RateLimitsWindow | null | undefined,
+): Pick<CodexRateLimits, 'usedPercent' | 'windowDurationMins' | 'resetsAt'> | null {
+  // A non-object window (a stray string) reads every field as absent, which is already the answer.
+  if (!w) return null;
+  const out: Pick<CodexRateLimits, 'usedPercent' | 'windowDurationMins' | 'resetsAt'> = {};
+  const used = usableNumber(w.usedPercent);
+  if (used !== undefined) out.usedPercent = used;
+  const window = usableNumber(w.windowDurationMins);
+  if (window !== undefined) out.windowDurationMins = window;
+  const seconds = usableNumber(w.resetsAt);
+  if (seconds !== undefined && seconds > 0 && plausibleReset(seconds * 1000))
+    out.resetsAt = seconds * 1000;
+  return out;
+}
 
 /** Parse one reply line, or null when it is not the reply we asked for. Exported for tests: this
  *  protocol is the likeliest thing to drift, and a captured payload beats spawning a daemon. */
@@ -70,28 +93,42 @@ export function parseRateLimitsReply(line: string): CodexRateLimits | null {
   const limits = parsed.result?.rateLimits;
   if (!limits) return null;
 
-  const snapshot: CodexRateLimits = {
-    // Absent `rateLimitReachedType` means "not reached" — the field the ROLLOUT LOGS never populate,
-    // and the reason this RPC exists rather than a file read.
-    reached: usableText(limits.rateLimitReachedType) !== undefined,
-  };
   const reachedType = usableText(limits.rateLimitReachedType);
+  const primary = readWindow(limits.primary);
+  const secondary = readWindow(limits.secondary);
+  // codex's TUI cap test (rate_limits.rs): either window at 100%, unless credits are usable. Only a
+  // strict `true` excuses it — a garbled credits field is not evidence of headroom.
+  const credits = limits.credits;
+  const creditsUsable = credits?.unlimited === true || credits?.hasCredits === true;
+  // The lock lasts until the LAST exhausted window clears; an unknown reset ranks latest, so no
+  // other window's time is offered as the clearing time.
+  let exhaustedWindow: 'primary' | 'secondary' | undefined;
+  let latestReset = Number.NEGATIVE_INFINITY;
+  for (const [name, w] of [
+    ['primary', primary],
+    ['secondary', secondary],
+  ] as const) {
+    if (creditsUsable || w?.usedPercent === undefined || w.usedPercent < 100) continue;
+    const reset = w.resetsAt ?? Number.POSITIVE_INFINITY;
+    if (exhaustedWindow === undefined || reset > latestReset) {
+      exhaustedWindow = name;
+      latestReset = reset;
+    }
+  }
+
+  const snapshot: CodexRateLimits = {
+    // Absent `rateLimitReachedType` alone is NOT "not reached" — the backend maps an unknown kind to
+    // None — so a spent window is the second positive signal.
+    reached: reachedType !== undefined || exhaustedWindow !== undefined,
+  };
   if (reachedType !== undefined) snapshot.reachedType = reachedType;
   const planType = usableText(limits.planType);
   if (planType !== undefined) snapshot.planType = planType;
+  if (exhaustedWindow !== undefined) snapshot.exhaustedWindow = exhaustedWindow;
 
-  const primary = limits.primary;
-  if (primary) {
-    const used = usableNumber(primary.usedPercent);
-    if (used !== undefined) snapshot.usedPercent = used;
-    const window = usableNumber(primary.windowDurationMins);
-    if (window !== undefined) snapshot.windowDurationMins = window;
-    const seconds = usableNumber(primary.resetsAt);
-    // Seconds on the wire; the shared window catches a unit change that would otherwise render as
-    // "resets in 104249970674d". Out of range keeps the lock and drops only the time.
-    if (seconds !== undefined && seconds > 0 && plausibleReset(seconds * 1000))
-      snapshot.resetsAt = seconds * 1000;
-  }
+  // The reported window is the one that locked; with none locked, primary as before.
+  const shown = exhaustedWindow === 'secondary' ? secondary : primary;
+  if (shown) Object.assign(snapshot, shown);
   return snapshot;
 }
 
