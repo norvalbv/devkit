@@ -6,6 +6,7 @@ import { walk } from '../../commands/sync/sync-skills.mjs';
 import { readJson } from '../fs-helpers.mjs';
 import { readAgentAssetManifest } from '../install/agent-asset-manifest/reader.mjs';
 import { projectionDrift } from '../install/agent-assets/projection-parity.mjs';
+import { selfHostCommand, SYNC_SKILLS } from '../ship/generated-paths/registry.mjs';
 import { isDevkitRepo } from './self-host.mjs';
 function manifestTargets(root) {
     const manifest = readAgentAssetManifest(join(root, '.devkit', 'skills-manifest.json'), 'skills');
@@ -70,7 +71,7 @@ export function printSkillProjectionWarning(report) {
     console.error(`⚠ devkit self-host: skill projection drift detected (advisory) — ${report.findings.length} finding(s)`);
     for (const finding of report.findings)
         console.error(`  ${finding}`);
-    console.error('  Repair missing/stale provider files with `node cli/index.mts sync-skills`.');
+    console.error(`  Repair missing/stale provider files with \`${selfHostCommand(SYNC_SKILLS)}\`.`);
     console.error('  Repair dist with `bun run build`; remove orphan files explicitly.');
     return 0;
 }
