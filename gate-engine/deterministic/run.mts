@@ -109,8 +109,14 @@ export const DETERMINISTIC = [
   // Coverage reads coverage/coverage-final.json and enforces guard.config.json `coverage` thresholds.
   // `optIn`: never swept in by the missing-config fallback below — it runs ONLY when a repo explicitly
   // selects it (an unadopted/CI repo must not fail hard on a coverage artifact it never asked for).
-  // Fail-CLOSED once selected: no 2 (fail-open) path — absent data exits 1.
-  { id: 'coverage', module: '../coverage/run.mjs', args: ['gate'], optIn: true },
+  // Fail-CLOSED once selected. Its exit 2 (NOT MEASURED) is a skip only under `devkit review`.
+  {
+    id: 'coverage',
+    module: '../coverage/run.mjs',
+    args: ['gate'],
+    optIn: true,
+    failOpen2: 'review',
+  },
   {
     id: 'anti-slop',
     module: '../../cli/index.mjs',
@@ -375,7 +381,8 @@ export function runDeterministic(cwd = process.cwd(), opts: RunDeterministicOpts
     const gates: Gate[] = DETERMINISTIC.filter((g) => ids.has(g.id)).map((g) => ({
       label: `guard-${g.id}`,
       argv: ['node', path.resolve(HERE, g.module.replace(MJS_EXT_RE, SELF_EXT)), ...g.args],
-      failOpen2: !('failOpen2' in g) || g.failOpen2 !== false,
+      failOpen2:
+        !('failOpen2' in g) || (g.failOpen2 === 'review' ? reviewMode : g.failOpen2 !== false),
     }));
     for (const x of opts.extra ?? []) gates.push(commandGate(x.label, x.cmd));
     if (opts.structure && !bypassStructure) {
@@ -472,7 +479,10 @@ export function runDeterministic(cwd = process.cwd(), opts: RunDeterministicOpts
   // next time (ship only — recordPrefix is a no-op otherwise).
   if (!skip) {
     const durationMs = Date.now() - startedAt;
-    recordPrefix(cwd, { hookPath: opts.hookPath, scope: cacheScope, durationMs });
+    // A review skip (coverage NOT MEASURED) proved nothing, so it must not authorise a later review.
+    if (!(reviewMode && skipped.length > 0)) {
+      recordPrefix(cwd, { hookPath: opts.hookPath, scope: cacheScope, durationMs });
+    }
     return finish(0);
   }
   const cachedDuration =

@@ -60,7 +60,7 @@ for name in \
   DEVKIT_GATE_ARCHIVE_LOG DEVKIT_GATE_EVENTS DEVKIT_GATE_LOG DEVKIT_REVIEW_ASSET_ROOT \
   DEVKIT_REVIEW_BASELINE_DIR DEVKIT_REVIEW_BRANCH DEVKIT_REVIEW_DATA_ROOT \
   DEVKIT_REVIEW_DEPENDENCY_MANIFEST DEVKIT_REVIEW_DEPENDENCY_TOOL DEVKIT_REVIEW_GUARDS \
-  DEVKIT_REVIEW_ID DEVKIT_REVIEW_MERGE_BASE DEVKIT_REVIEW_PACKAGE_ROOT \
+  DEVKIT_REVIEW_ID DEVKIT_REVIEW_MERGE_BASE DEVKIT_REVIEW_NOTICES DEVKIT_REVIEW_PACKAGE_ROOT \
   DEVKIT_REVIEW_PROGRESS DEVKIT_REVIEW_PROJECTION_MANIFEST DEVKIT_REVIEW_PROJECTION_TOOL \
   DEVKIT_REVIEW_REPO DEVKIT_REVIEW_SUPERVISOR_OWNER_TOKEN DEVKIT_REVIEW_TEMP_ROOT \
   DEVKIT_REVIEW_RUNTIME_FINGERPRINT \
@@ -557,8 +557,8 @@ on_exit() {
       129 | 130 | 131 | 143) result_word=signaled ;;
       *) result_word=failed ;;
     esac
-    printf 'devkit review: result=%s exit=%s phase=%s\n' \
-      "$result_word" "$status" "${REVIEW_PHASE:-unknown}" >> "$LOG"
+    printf 'devkit review: result=%s exit=%s phase=%s%s\n' \
+      "$result_word" "$status" "${REVIEW_PHASE:-unknown}" "${REVIEW_NOTICE_TRAILER:-}" >> "$LOG"
   fi
   emit_terminal_result "$status"
   exit "$status"
@@ -793,6 +793,13 @@ export DEVKIT_REVIEW_ASSET_ROOT="$ASSET_RUNTIME"
 export DEVKIT_REVIEW_DATA_ROOT="$PRIVATE_DATA_ROOT"
 export DEVKIT_REVIEW_BASELINE_DIR="$BASELINE_RUNTIME"
 export DEVKIT_REVIEW_MERGE_BASE="$MERGE_BASE"
+# Gates append advisory notices here (coverage NOT MEASURED); the verdict line reports them.
+REVIEW_NOTICES="$STATE_ROOT/notices"
+(set -C; umask 077; : > "$REVIEW_NOTICES") || {
+  echo 'devkit review: could not create the private notices file.' >&2
+  exit 1
+}
+export DEVKIT_REVIEW_NOTICES="$REVIEW_NOTICES"
 
 # sc-1442: no commit message exists for a review run — synthesize advisory intent from the
 # reviewed range's subjects, oldest first (line 1 = the branch's founding intent, which becomes
@@ -977,6 +984,15 @@ if [ "$FINAL_STATUS" -eq 0 ] && { [ "$AUTHORITY_OK" -ne 1 ] || [ "$CACHE_RESET" 
   FINAL_STATUS=1
 fi
 review_phase verdict
+# Read now: on_exit removes STATE_ROOT before it writes the trailer.
+REVIEW_NOTICE_SUFFIX=
+if [ -s "$REVIEW_NOTICES" ]; then
+  reasons=$(sed -n 's/^coverage=not-measured reason=\([a-z]*\)$/\1/p' "$REVIEW_NOTICES" | sort -u | paste -sd, - || true)
+  if [ -n "$reasons" ]; then
+    REVIEW_NOTICE_SUFFIX=" — coverage NOT MEASURED ($reasons)"
+    REVIEW_NOTICE_TRAILER=" notices=coverage-not-measured"
+  fi
+fi
 
 if [ "$FORMAT_CHANGED" -eq 1 ]; then
   {
@@ -987,13 +1003,13 @@ elif [ "$AUTHORITY_OK" -ne 1 ]; then
   printf '✗ devkit review: snapshot/runtime integrity changed during review; verdict discarded. Full output: %s\n' \
     "$LOG" | tee -a "$LOG" >&2
 elif [ "$GATE_RAW_STATUS" -ne 0 ]; then
-  printf '✗ devkit review: gate chain blocked (gate exit %s; command exit %s). Full output: %s\n' \
-    "$GATE_RAW_STATUS" "$FINAL_STATUS" "$LOG" | tee -a "$LOG" >&2
+  printf '✗ devkit review: gate chain blocked (gate exit %s; command exit %s)%s. Full output: %s\n' \
+    "$GATE_RAW_STATUS" "$FINAL_STATUS" "$REVIEW_NOTICE_SUFFIX" "$LOG" | tee -a "$LOG" >&2
 elif [ "$CACHE_RESET" -eq 1 ]; then
   printf '✗ devkit review: a cache reset raced this run; rerun before accepting green. Full output: %s\n' \
     "$LOG" | tee -a "$LOG" >&2
 else
-  printf '✓ devkit review: configured pre-commit gates passed. full output: %s\n' "$LOG" \
-    | tee -a "$LOG" >&2
+  printf '✓ devkit review: configured pre-commit gates passed%s. full output: %s\n' \
+    "$REVIEW_NOTICE_SUFFIX" "$LOG" | tee -a "$LOG" >&2
 fi
 exit "$FINAL_STATUS"
