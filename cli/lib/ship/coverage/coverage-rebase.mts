@@ -1,26 +1,12 @@
 #!/usr/bin/env node
-/**
- * sc-1292: rewrite a ship worktree's linked coverage keys onto its own paths, so fallow's auto-detected
- * CRAP joins measured coverage. Prints the foreign root, or nothing; always exits 0 (never a gate).
- */
+/** sc-1292: write a PRIVATE copy of the linked coverage map, keys moved onto the ship worktree, for
+ * fallow's CRAP join (FALLOW_COVERAGE). Never touches <wt>/coverage, which the provenance gate reads. */
 import { execFileSync } from 'node:child_process';
-import {
-  existsSync,
-  lstatSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  realpathSync,
-  renameSync,
-  rmSync,
-  symlinkSync,
-  unlinkSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
-import { COVERAGE_DIR, REPORT_NAME } from '../../../../gate-engine/coverage/produce.mts';
+import { REPORT_NAME } from '../../../../gate-engine/coverage/produce.mts';
 
 /**
  * One istanbul file entry. Only `path` is read here; every other field (statementMap, s, f, b, …)
@@ -96,34 +82,9 @@ function trackedPaths(wt: string): Set<string> {
   return new Set(listed.split('\0').filter(Boolean));
 }
 
-/** Swap the `<wt>/coverage` link for a real dir: the rebased report plus links to every other source
- * entry. Built beside it, so any failure leaves or restores the original link. */
-function materialize(wt: string, source: string, rebased: CoverageMap): void {
-  const dest = join(wt, COVERAGE_DIR);
-  if (!lstatSync(dest).isSymbolicLink()) throw new Error(`${dest} is not the link ship created`);
-  const staging = join(wt, `.${COVERAGE_DIR}-rebase-${process.pid}`);
-  rmSync(staging, { recursive: true, force: true });
-  mkdirSync(staging);
-  try {
-    for (const entry of readdirSync(source)) {
-      if (entry !== REPORT_NAME) symlinkSync(join(source, entry), join(staging, entry));
-    }
-    writeFileSync(join(staging, REPORT_NAME), JSON.stringify(rebased));
-    unlinkSync(dest);
-    try {
-      renameSync(staging, dest);
-    } catch (error) {
-      symlinkSync(source, dest);
-      throw error;
-    }
-  } catch (error) {
-    rmSync(staging, { recursive: true, force: true });
-    throw error;
-  }
-}
-
-/** Rebase `<wt>/coverage` when its map was produced elsewhere. Returns the foreign root, or null. */
-export function rebaseWorktreeCoverage(wt: string, source: string): string | null {
+/** Write `source`'s map, rekeyed onto `wt`, to a NEW `outFile` when it was produced elsewhere.
+ * Returns the foreign root, or null (nothing written). */
+export function rebaseWorktreeCoverage(wt: string, source: string, outFile: string): string | null {
   const report = join(source, REPORT_NAME);
   if (!existsSync(report)) return null;
   const parsed = coverageMapSchema.safeParse(JSON.parse(readFileSync(report, 'utf8')));
@@ -132,15 +93,17 @@ export function rebaseWorktreeCoverage(wt: string, source: string): string | nul
   const wtRoot = realpathSync(wt);
   const root = deriveForeignRoot(Object.keys(map), trackedPaths(wt), wtRoot);
   if (root === null) return null;
-  materialize(wt, source, rebaseCoverageMap(map, root, wtRoot));
+  writeFileSync(outFile, JSON.stringify(rebaseCoverageMap(map, root, wtRoot)), { flag: 'wx' });
   return root;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
-  const [wt, source] = process.argv.slice(2);
+  const [wt, source, outFile] = process.argv.slice(2);
   try {
-    if (!wt || !source) throw new Error('usage: coverage-rebase <worktree> <linked-coverage-dir>');
-    const root = rebaseWorktreeCoverage(wt, source);
+    if (!wt || !source || !outFile) {
+      throw new Error('usage: coverage-rebase <worktree> <linked-coverage-dir> <out-file>');
+    }
+    const root = rebaseWorktreeCoverage(wt, source, outFile);
     if (root !== null) process.stdout.write(`${root}\n`);
   } catch (error) {
     process.stderr.write(

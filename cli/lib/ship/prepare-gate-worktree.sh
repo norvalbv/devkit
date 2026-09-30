@@ -235,17 +235,24 @@ gate_link_source() {
   return 1
 }
 
-# sc-1292: rebase linked coverage keys onto THIS worktree so fallow CRAP joins measured coverage.
-# Advisory: any failure keeps the link, and this always returns 0 under the caller's errexit.
+# sc-1292: fallow reads a PRIVATE rekeyed copy (FALLOW_COVERAGE); <wt>/coverage stays the plain link so
+# the provenance gate judges the artifact byte-exact. Advisory: always returns 0 under the caller's errexit.
 gate_rebase_coverage() {
-  local wt=$1 source=$2 purpose=$3 script_dir tool root
+  local wt=$1 source=$2 purpose=$3 script_dir tool root out
   script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
   tool="$script_dir/coverage/coverage-rebase.mts"
   [ -f "$tool" ] || tool="$script_dir/coverage/coverage-rebase.mjs"
   [ -f "$tool" ] || return 0
-  root=$(node "$tool" "$wt" "$source") || root=''
-  if [ -n "$root" ]; then
-    echo "  ↳ $purpose: rebased coverage keys from $root onto the worktree (fallow CRAP reads measured coverage)" >&2
+  if [ -n "${FALLOW_COVERAGE:-}" ]; then
+    echo "  ↳ $purpose: FALLOW_COVERAGE is already set ($FALLOW_COVERAGE) — fallow keeps it; coverage keys not rekeyed" >&2
+    return 0
+  fi
+  out=$(git -C "$wt" rev-parse --absolute-git-dir 2>/dev/null) || return 0
+  out="$out/devkit-fallow-coverage.json"
+  root=$(node "$tool" "$wt" "$source" "$out") || root=''
+  if [ -n "$root" ] && [ -f "$out" ]; then
+    export FALLOW_COVERAGE="$out"
+    echo "  ↳ $purpose: fallow reads coverage rekeyed from $root (FALLOW_COVERAGE); the coverage gate reads coverage/ unchanged" >&2
   fi
   return 0
 }
