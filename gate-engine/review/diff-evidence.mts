@@ -1,4 +1,5 @@
 import { splitDiffByFile } from '../judge/diff-focus.mts';
+import { unquoteGitPath } from './lens/chunk.mts';
 // Capped, omission-accounted stdin evidence for a checklist-less gate judge that has no Bash of
 // its own to fetch its own diff (sc-1060's completeness lesson, generalized). The old contract was
 // positionally sliced at a blunt byte cap — every byte past the slice point silently vanished, and
@@ -115,40 +116,12 @@ const QUOTED_POST_IMAGE_RES = [
   /^(?:rename|copy) to "((?:[^"\\]|\\.)*)"$/m,
   /^diff --git "a\/(?:[^"\\]|\\.)*" "b\/((?:[^"\\]|\\.)*)"$/m,
 ];
-const C_ESCAPES = new Map([
-  ['n', 10],
-  ['t', 9],
-  ['r', 13],
-  ['a', 7],
-  ['b', 8],
-  ['f', 12],
-  ['v', 11],
-]);
-
-/** Undo git's C-style path quoting: `\\ooo` octal bytes (UTF-8) and single-letter escapes. */
-function cUnquote(body: string): string {
-  const bytes: number[] = [];
-  for (let i = 0; i < body.length; i++) {
-    if (body[i] !== '\\') {
-      bytes.push(...Buffer.from(body[i], 'utf8'));
-      continue;
-    }
-    const next = body[++i] ?? '';
-    const octal = /^[0-7]{3}/.exec(body.slice(i, i + 3))?.[0];
-    if (octal) {
-      bytes.push(Number.parseInt(octal, 8));
-      i += 2;
-    } else bytes.push(C_ESCAPES.get(next) ?? next.charCodeAt(0));
-  }
-  return Buffer.from(bytes).toString('utf8');
-}
-
 function segmentPath(seg: string): string {
   const hunk = seg.indexOf('\n@@');
   const header = hunk === -1 ? seg : seg.slice(0, hunk);
   for (const re of QUOTED_POST_IMAGE_RES) {
     const quoted = re.exec(header)?.[1];
-    if (quoted !== undefined) return cUnquote(quoted);
+    if (quoted !== undefined) return unquoteGitPath(`"${quoted}"`);
   }
   for (const re of POST_IMAGE_RES) {
     const path = re.exec(header)?.[1];
