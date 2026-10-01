@@ -37,6 +37,13 @@ describe('referencedRepoPathCandidates', () => {
     ]);
   });
 
+  it('reads a Claude Code @import as the path it imports', () => {
+    expect(referencedRepoPathCandidates('@AGENTS.md\n@docs/rules.md')).toEqual([
+      'AGENTS.md',
+      'docs/rules.md',
+    ]);
+  });
+
   it('ignores remote URLs, glob forms and placeholder-bearing paths', () => {
     const markdown = [
       'https://example.com/docs/readme.md',
