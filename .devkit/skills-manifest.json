@@ -36,7 +36,7 @@
     "upstream-sync/SKILL.md": "1007c8377ac15393dcc9db5384d80bd38487c85aa465921ae0b49ba5a91bad70",
     "upstream-sync/scripts/sync.mjs": "218aa7ad7e96f280f281a38f99919f2ce55eace902ed95b1119a0099ddbb3c76",
     "upstream-sync/scripts/verify-merge.mjs": "afb2977ab8b7a96fac2e93e29a68ae432508ba7e63d03c580fcf03229fcd0676",
-    "using-devkit/SKILL.md": "f636ad3744738338f29cfe591ffe82142f5f50612fe7de2527cc6ab1824a017d"
+    "using-devkit/SKILL.md": "5682f9a60696c3fddd25ead4ea7c1c6df1d2fc612319e68983faa0da59f39e95"
   },
   "providers": {
     "claude": {
@@ -73,7 +73,7 @@
         "upstream-sync/SKILL.md": "1007c8377ac15393dcc9db5384d80bd38487c85aa465921ae0b49ba5a91bad70",
         "upstream-sync/scripts/sync.mjs": "218aa7ad7e96f280f281a38f99919f2ce55eace902ed95b1119a0099ddbb3c76",
         "upstream-sync/scripts/verify-merge.mjs": "afb2977ab8b7a96fac2e93e29a68ae432508ba7e63d03c580fcf03229fcd0676",
-        "using-devkit/SKILL.md": "f636ad3744738338f29cfe591ffe82142f5f50612fe7de2527cc6ab1824a017d"
+        "using-devkit/SKILL.md": "5682f9a60696c3fddd25ead4ea7c1c6df1d2fc612319e68983faa0da59f39e95"
       }
     },
     "cursor": {
@@ -110,7 +110,7 @@
         "upstream-sync/SKILL.md": "1007c8377ac15393dcc9db5384d80bd38487c85aa465921ae0b49ba5a91bad70",
         "upstream-sync/scripts/sync.mjs": "218aa7ad7e96f280f281a38f99919f2ce55eace902ed95b1119a0099ddbb3c76",
         "upstream-sync/scripts/verify-merge.mjs": "afb2977ab8b7a96fac2e93e29a68ae432508ba7e63d03c580fcf03229fcd0676",
-        "using-devkit/SKILL.md": "f636ad3744738338f29cfe591ffe82142f5f50612fe7de2527cc6ab1824a017d"
+        "using-devkit/SKILL.md": "5682f9a60696c3fddd25ead4ea7c1c6df1d2fc612319e68983faa0da59f39e95"
       }
     }
   }

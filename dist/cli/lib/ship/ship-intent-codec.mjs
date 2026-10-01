@@ -113,6 +113,22 @@ export function cleanupFailedSourceMembership(root, branch, membership) {
     }
 }
 /** The value when it really is a NUL-free string primitive, else null. */
+/** The generation `generation` reports, and `--expect-generation` matches, when no record exists. */
+export const NO_RECORD = 'none';
+/** The record's generation, or NO_RECORD: a fresh attempt's snapshot for its failure-path CAS. */
+export function generationAt(file) {
+    try {
+        // SAFETY: only generation is read, then proven as a string.
+        return (provenString(JSON.parse(readFileSync(file, 'utf8')).generation) || NO_RECORD);
+    }
+    catch {
+        return NO_RECORD;
+    }
+}
+export function printGeneration(file) {
+    process.stdout.write(`${generationAt(file)}\n`);
+    return 0;
+}
 export function provenString(v) {
     return v != null && String(v) === v && !v.includes('\0') ? v : null;
 }
