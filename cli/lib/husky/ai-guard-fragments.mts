@@ -1,22 +1,6 @@
 import { DK_NO_GIT_ENV_INLINE } from './review-fragments.mts';
 
 export const GUARD_FRAGMENTS = {
-  comments: `# devkit:guard-comments
-echo "🧯 Changed-comment firewall..."
-ccrc=0
-__dk_no_git_env "$__dk_package_bin_dir/guard-comments" gate || ccrc=$?
-if [ "$ccrc" -eq 1 ]; then
-    __dk_block_deterministic guard-comments
-elif [ "$ccrc" -eq 4 ]; then
-    echo "   guard-comments: NOT a rejection — staged comment evidence is unreadable or unsupported."
-    __dk_block_deterministic guard-comments
-elif [ "$ccrc" -ne 0 ]; then
-    echo "   guard-comments: unexpected exit $ccrc — blocking the commit."
-    __dk_block_deterministic guard-comments
-fi
-# ccrc 0 = clean, 1 = paragraph over the 2-line budget, 4 = unreadable/unsupported evidence; anything else blocks.
-# A deterministic gate: review and dry-gates remember the block so later gates still report.
-# /devkit:guard-comments`,
   decisions: `# devkit:guard-decisions
 echo "🧭 Decision-log gate..."
 ddrc=0

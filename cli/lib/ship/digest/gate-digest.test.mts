@@ -77,6 +77,29 @@ describe('summarise', () => {
     expect(rows.every((r) => r.blocking === true)).toBe(true);
   });
 
+  // sc-2753: a comments-only aggregate publishes blocked_gate='comments' while its row keeps the
+  // deterministic family; the gate name must still carry the join, and only for that gate.
+  it('attributes a comments-only deterministic failure to blocked_gate comments', () => {
+    const comments = (status: string, detail: string) =>
+      ev({ type: 'gate_result', gate: 'comments', family: 'deterministic', status, detail });
+    for (const row of [
+      comments('fail', 'guard-comments'),
+      comments('could_not_run', 'guard-comments(unreadable-evidence)'),
+    ]) {
+      const rows = summarise([row, completenessFail('gap'), shipResult('comments')], SHIP);
+      expect(rows.find((r) => r.gate === 'comments')?.blocking).toBe(true);
+      expect(rows.find((r) => r.gate === 'completeness')?.blocking).toBe(false);
+    }
+    const other = summarise(
+      [
+        ev({ type: 'gate_result', gate: 'size', family: 'deterministic', status: 'fail' }),
+        shipResult('comments'),
+      ],
+      SHIP,
+    );
+    expect(other[0].blocking).toBe(false);
+  });
+
   it('nothing is blocking when the run did not stop on a gate (timeout, green, clobber)', () => {
     const rows = summarise([completenessFail('gap'), shipResult('timeout')], SHIP);
     expect(rows[0].blocking).toBe(false);

@@ -146,6 +146,152 @@ describe('runDeterministic — aggregation + trichotomy', () => {
   });
 });
 
+// sc-2753: the judge-free comment budget aggregates here, so one fix pass sees every cheap finding.
+describe('runDeterministic — comments joins the aggregated set', () => {
+  const eventsOf = (sink) =>
+    readFileSync(sink, 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map((l) => JSON.parse(l))
+      .filter((e) => e.type === 'gate_result');
+
+  it('reports anti-slop AND comment-budget findings in ONE block (the sc-2753 two-attempt bug)', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exec = mkExec({ 'cli/index.mts': 1, 'comment-firewall/cli': 1 });
+    expect(runDeterministic(repo(['comments'], true), { exec })).toBe(1);
+    const out = err.mock.calls.flat().join('\n');
+    expect(out).toContain('deterministic gates failed: guard-anti-slop guard-comments');
+    expect(out).toContain(
+      'On commit or ship, decision and reviewer gates run only after these pass.',
+    );
+    expect(exec).toHaveBeenCalledWith(
+      'node',
+      [expect.stringMatching(/comment-firewall[/\\]cli\.m[tj]s$/), 'gate'],
+      expect.anything(),
+    );
+  });
+
+  it('a clean comment budget adds no failure', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exec = mkExec({});
+    expect(runDeterministic(repo(['size', 'comments']), { exec })).toBe(0);
+    expect(exec).toHaveBeenCalledTimes(2);
+  });
+
+  it('exit 4 blocks as unreadable-evidence — never unexpected:4, and could_not_run in telemetry', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const d = repo(['comments']);
+    const sink = join(d, 'events.jsonl');
+    process.env.DEVKIT_GATE_EVENTS = sink;
+    expect(runDeterministic(d, { exec: mkExec({ 'comment-firewall/cli': 4 }) })).toBe(1);
+    const out = err.mock.calls.flat().join('\n');
+    expect(out).toContain('deterministic gates failed: guard-comments(unreadable-evidence)');
+    expect(out).not.toContain('unexpected:4');
+    expect(eventsOf(sink)).toEqual([
+      expect.objectContaining({
+        gate: 'comments',
+        status: 'could_not_run',
+        family: 'deterministic',
+      }),
+    ]);
+  });
+
+  it('a real comment finding is a fail in telemetry, never an unreadable-evidence label', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const d = repo(['comments']);
+    const sink = join(d, 'events.jsonl');
+    process.env.DEVKIT_GATE_EVENTS = sink;
+    expect(runDeterministic(d, { exec: mkExec({ 'comment-firewall/cli': 1 }) })).toBe(1);
+    expect(err.mock.calls.flat().join('\n')).not.toContain('unreadable-evidence');
+    expect(eventsOf(sink)).toEqual([expect.objectContaining({ gate: 'comments', status: 'fail' })]);
+  });
+
+  it('exit 2 is never an opt-out for comments — it blocks as unexpected, strict or not', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(
+      runDeterministic(repo(['comments']), { exec: mkExec({ 'comment-firewall/cli': 2 }) }),
+    ).toBe(1);
+    const out = err.mock.calls.flat().join('\n');
+    expect(out).toContain('guard-comments(unexpected:2)');
+    expect(out).not.toContain('opted out');
+  });
+
+  it('strict mode keeps the unreadable-evidence label (it was never an opt-out)', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    process.env.GUARD_DETERMINISTIC_STRICT = '1';
+    expect(
+      runDeterministic(repo(['comments']), { exec: mkExec({ 'comment-firewall/cli': 4 }) }),
+    ).toBe(1);
+    const out = err.mock.calls.flat().join('\n');
+    expect(out).toContain('guard-comments(unreadable-evidence)');
+    expect(out).not.toContain('could-not-run');
+  });
+
+  it("the exit-4 label is comments' own — another gate's exit 4 stays unexpected:4", () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exec = mkExec({ 'size-disable': 4, 'comment-firewall/cli': 4 });
+    expect(runDeterministic(repo(['size', 'comments']), { exec })).toBe(1);
+    expect(err.mock.calls.flat().join('\n')).toContain(
+      'deterministic gates failed: guard-size(unexpected:4) guard-comments(unreadable-evidence)',
+    );
+  });
+
+  // A caller-shaped `--extra` label must never decide the outcome: the exit code does (sc-2753).
+  it.each(['x(unreadable-evidence)', 'y(unexpected:9)', 'z(could-not-run)'])(
+    'an --extra gate labelled %s that exits 1 is a fail under its full label',
+    (label) => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      const d = repo([]);
+      const sink = join(d, 'events.jsonl');
+      process.env.DEVKIT_GATE_EVENTS = sink;
+      const exec = vi.fn(() => {
+        const e = new Error('exit 1');
+        e.status = 1;
+        throw e;
+      });
+      expect(runDeterministic(d, { exec, extra: [{ label, cmd: 'lint-it' }] })).toBe(1);
+      expect(eventsOf(sink)).toEqual([expect.objectContaining({ gate: label, status: 'fail' })]);
+    },
+  );
+
+  it('--only comments is a known id and runs just the firewall', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exec = mkExec({});
+    expect(runDeterministic(repo(['size', 'comments']), { exec, only: ['comments'] })).toBe(0);
+    expect(exec).toHaveBeenCalledTimes(1);
+    expect(exec.mock.calls[0][1][0]).toMatch(/comment-firewall/);
+  });
+
+  it('runs the REAL firewall end-to-end: a staged 3-line comment paragraph blocks in the aggregate', () => {
+    const d = repo(['comments']);
+    const git = (...a) => execFileSync('git', a, { cwd: d, stdio: 'pipe' });
+    git('init', '-q');
+    git('config', 'user.email', 't@example.com');
+    git('config', 'user.name', 'T');
+    git('add', '.devkit/config.json');
+    git('commit', '-q', '-m', 'base');
+    mkdirSync(join(d, 'src'), { recursive: true });
+    writeFileSync(
+      join(d, 'src', 'a.ts'),
+      '// first line of prose\n// second line of prose\n// third line of prose\nexport const a = 1;\n',
+    );
+    git('add', 'src/a.ts');
+    const runner = join(import.meta.dirname, '..', 'run.mts');
+    let status = 0;
+    let stderr = '';
+    try {
+      execFileSync(process.execPath, [runner], { cwd: d, stdio: 'pipe', encoding: 'utf8' });
+    } catch (e) {
+      status = e.status;
+      stderr = `${e.stderr}`;
+    }
+    expect(status).toBe(1);
+    // The child's own first line stays byte-stable for the collector, then the aggregate names it.
+    expect(stderr).toContain('guard-comments: 1 added/modified comment paragraph need a decision.');
+    expect(stderr).toContain('✗ deterministic gates failed: guard-comments\n');
+  });
+});
+
 describe('runDeterministic — --structure / --extra / --only', () => {
   it('--structure "guard-structure gate" runs the sibling module and keeps the trichotomy', () => {
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -411,6 +557,24 @@ describe('selectedIds', () => {
     const d = repo([], true);
     writeFileSync(join(d, '.devkit', 'config.json'), '{ nope');
     expect(selectedIds(d)).toEqual(['size', 'fanout', 'dup', 'clone']);
+  });
+
+  it('selects comments from components.guards, but keeps it out of both fallbacks (opt-in)', () => {
+    expect(selectedIds(repo(['size', 'comments']))).toEqual(['size', 'comments']);
+    expect(selectedIds(repo(['review', 'decisions']))).toEqual([]);
+    expect(selectedIds(repo(null))).not.toContain('comments');
+    const d = repo(['comments']);
+    writeFileSync(join(d, '.devkit', 'config.json'), '{ nope');
+    expect(selectedIds(d)).not.toContain('comments');
+  });
+
+  it('review mode honours comments in the explicit allowlist, and only there', () => {
+    const d = repo(['size', 'comments']);
+    process.env.DEVKIT_RUN_MODE = 'review';
+    process.env.DEVKIT_REVIEW_GUARDS = 'comments,review';
+    expect(selectedIds(d)).toEqual(['comments']);
+    process.env.DEVKIT_REVIEW_GUARDS = 'size,review';
+    expect(selectedIds(d)).toEqual(['size']);
   });
 
   it('uses the explicit review allowlist instead of components.guards in review mode', () => {

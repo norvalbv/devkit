@@ -185,7 +185,8 @@ const shortJudgedBase = (sha: string | null | undefined): string =>
  * failed.
  */
 function isBlocking(finding: Attributable, blocked: string, siblings: Attributable[]): boolean {
-  if (!blocked || finding.family !== blocked) return false;
+  // `comments` is the one deterministic sub-gate that keeps its own blocked_gate token (sc-2753).
+  if (!blocked || (finding.family !== blocked && finding.gate !== blocked)) return false;
   if (finding.gate !== COMPLETENESS) return true;
   return !siblings.some((s) => s.family === 'review' && s.gate !== COMPLETENESS);
 }

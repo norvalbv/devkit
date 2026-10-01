@@ -307,6 +307,8 @@ SHIP_HOOK_WRAPPER
   # before the greps below for the same reason — whichever gate happened to read the staged diff first
   # is the one that dies, so a grep would blame it for a failure it did not cause.
   elif [ "$staged_missing" -eq 1 ]; then blocked_json='"staged_objects_missing"'; timed_out=false
+  # sc-2753: guard-comments aggregates in the deterministic stage; alone, it keeps its own name.
+  elif grep -qE '✗ deterministic gates failed: guard-comments(\([^)]*\))?$' "$log" 2>/dev/null; then blocked_json='"comments"'; timed_out=false
   elif grep -q '✗ deterministic gates failed' "$log" 2>/dev/null; then blocked_json='"deterministic"'; timed_out=false
   elif grep -q 'decision smells:' "$log" 2>/dev/null; then blocked_json='"decisions"'; timed_out=false
   elif grep -q 'guard-comments: .* need a decision' "$log" 2>/dev/null; then blocked_json='"comments"'; timed_out=false
