@@ -179,6 +179,137 @@ describe('ship --base: newer same-file base changes survive a stale caller patch
     if (existsSync(mark)) rmSync(mark);
   });
 
+  // sc-2770: a generated file both sides regenerated must be pointed at its generator, never at a
+  // hand-merge that yields a manifest matching neither tree.
+  const MANIFEST = '.devkit/skills-manifest.json';
+  const manifest = (stamp: string) =>
+    JSON.stringify({ generatedAt: stamp, files: { 'a/SKILL.md': stamp } }, null, 2) + '\n';
+
+  function seedManifestClash(extra: (d: string) => void = () => {}) {
+    const forked = seedForked((d) => {
+      mkdirSync(join(d, '.devkit'), { recursive: true });
+      writeFileSync(join(d, MANIFEST), manifest('fork'));
+      writeFileSync(join(d, 'f.txt'), TEN_LINES);
+      extra(d);
+    });
+    advanceBase(forked.bare, (c) => writeFileSync(join(c, MANIFEST), manifest('base')));
+    writeFileSync(join(forked.dir, MANIFEST), manifest('caller'));
+    return forked;
+  }
+
+  it('ABORTS naming the generator — not a hand-merge — when only a generated file conflicts', () => {
+    const { dir, env, git, bare } = seedManifestClash();
+
+    const r = ship(dir, env, 'feat/manifest', [MANIFEST]);
+    dropWorktree(git, r.stderr);
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(MANIFEST);
+    expect(r.stderr).toContain('`devkit sync-skills`');
+    expect(r.stderr).toMatch(/do not hand-merge/i);
+    expect(r.stderr).not.toContain('where you can see both sides');
+    expect(localBranchExists(git, 'feat/manifest')).toBe(false);
+    expect(remoteBranchExists(bare, 'feat/manifest')).toBe(false);
+  });
+
+  it('ABORTS listing generated and hand-written conflicts separately', () => {
+    const { dir, env, git, bare } = seedManifestClash();
+    advanceBase(bare, (c) => writeFileSync(join(c, 'f.txt'), TEN_LINES.replace('l5', 'l5-BASE')));
+    writeFileSync(join(dir, 'f.txt'), TEN_LINES.replace('l5', 'l5-CALLER'));
+
+    const r = ship(dir, env, 'feat/mixed', [MANIFEST, 'f.txt']);
+    dropWorktree(git, r.stderr);
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('`devkit sync-skills`');
+    const hand = r.stderr.slice(r.stderr.indexOf('changed the same region of'));
+    expect(hand).toContain('f.txt');
+    expect(hand.split('where you can see both sides')[0]).not.toContain(MANIFEST);
+  });
+
+  it('ABORTS naming a CONSUMER-declared generator from guard.config.json verbatim', () => {
+    const { dir, env, git, bare } = seedForked((d) => {
+      mkdirSync(join(d, 'gen'), { recursive: true });
+      writeFileSync(join(d, 'gen', 'api.json'), TEN_LINES);
+      writeFileSync(
+        join(d, 'guard.config.json'),
+        JSON.stringify({ generated: [{ glob: 'gen/*.json', command: 'pnpm codegen' }] }),
+      );
+    });
+    advanceBase(bare, (c) =>
+      writeFileSync(join(c, 'gen', 'api.json'), TEN_LINES.replace('l5', 'l5-BASE')),
+    );
+    writeFileSync(join(dir, 'gen', 'api.json'), TEN_LINES.replace('l5', 'l5-CALLER'));
+
+    const r = ship(dir, env, 'feat/codegen', ['gen/api.json']);
+    dropWorktree(git, r.stderr);
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('`pnpm codegen`');
+    expect(r.stderr).not.toContain('where you can see both sides');
+  });
+
+  it('classifies a generated conflict whose NAME holds a tab — git C-quotes it unless read with -z', () => {
+    const name = 'gen/a\tb.json';
+    const { dir, env, git, bare } = seedForked((d) => {
+      mkdirSync(join(d, 'gen'), { recursive: true });
+      writeFileSync(join(d, name), TEN_LINES);
+      writeFileSync(
+        join(d, 'guard.config.json'),
+        JSON.stringify({ generated: [{ glob: 'gen/**', command: 'pnpm codegen' }] }),
+      );
+    });
+    advanceBase(bare, (c) => writeFileSync(join(c, name), TEN_LINES.replace('l5', 'l5-BASE')));
+    writeFileSync(join(dir, name), TEN_LINES.replace('l5', 'l5-CALLER'));
+
+    const r = ship(dir, env, 'feat/tabname', [name]);
+    dropWorktree(git, r.stderr);
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('`pnpm codegen`');
+    expect(r.stderr).toContain(JSON.stringify(name));
+    expect(r.stderr).not.toContain('where you can see both sides');
+  });
+
+  it('classifies by the config in the tree being SHIPPED, which a base-side declaration reaches', () => {
+    // The stale checkout has no guard.config.json; origin/base declares gen/** as generated. The
+    // conflicts come from the staged tree, so the declaration must be read from that same tree.
+    const { dir, env, git, bare } = seedForked((d) => {
+      mkdirSync(join(d, 'gen'), { recursive: true });
+      writeFileSync(join(d, 'gen', 'api.json'), TEN_LINES);
+    });
+    advanceBase(bare, (c) => {
+      writeFileSync(join(c, 'gen', 'api.json'), TEN_LINES.replace('l5', 'l5-BASE'));
+      writeFileSync(
+        join(c, 'guard.config.json'),
+        JSON.stringify({ generated: [{ glob: 'gen/**', command: 'pnpm codegen' }] }),
+      );
+    });
+    writeFileSync(join(dir, 'gen', 'api.json'), TEN_LINES.replace('l5', 'l5-CALLER'));
+
+    const r = ship(dir, env, 'feat/basecfg', ['gen/api.json']);
+    dropWorktree(git, r.stderr);
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('`pnpm codegen`');
+    expect(r.stderr).not.toContain('where you can see both sides');
+  });
+
+  it('FALLS BACK to the hand-merge text, still aborting, when the generated config is malformed', () => {
+    const { dir, env, git } = seedManifestClash((d) =>
+      writeFileSync(join(d, 'guard.config.json'), JSON.stringify({ generated: 'nope' })),
+    );
+
+    const r = ship(dir, env, 'feat/badcfg', [MANIFEST]);
+    dropWorktree(git, r.stderr);
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('changed the same region of');
+    expect(r.stderr).toContain(MANIFEST);
+    expect(r.stderr).toContain('where you can see both sides');
+    expect(localBranchExists(git, 'feat/badcfg')).toBe(false);
+  });
+
   it('ABORTS with a devkit message — not raw git — when the base DELETED a briefed path', () => {
     const { dir, env, git, bare } = seedForked((d) => {
       writeFileSync(join(d, 'd.txt'), TEN_LINES);

@@ -10,6 +10,8 @@
   "//sourceExtensions": "Source extensions the ratchets count. Default: ['ts','tsx']. A JS/MJS codebase sets ['mjs','js']. Tests (*.test.<ext> / *.spec.<ext>) are excluded from impl fan-out but included when maxTestLines is enabled.",
   "sourceExtensions": ["ts", "tsx"],
 
+  "//generated": "Generated paths and the command that regenerates each. When `devkit ship` cannot three-way merge one of these, it names the command instead of asking you to hand-merge a file whose correct content is derived. devkit only PRINTS the command, never runs it. devkit's own .devkit/skills-manifest.json and .devkit/agents-manifest.json are built in; an entry with the same glob overrides one. Globs are repo-relative; the first matching entry wins. Default: [].",
+  "generated": [{ "glob": "src/generated/**", "command": "npm run codegen" }],
   "//maxLines": "Raw line cap for implementation files. Existing oversized files are grandfathered shrink-only. 0 = off.",
   "maxLines": 500,
 
