@@ -56,12 +56,7 @@ import * as antiSlopLifecycle from '../lib/install/anti-slop/lifecycle.mts';
 import * as initFlags from '../lib/install/flags/init-flags.mts';
 import { reviewPlanFromFlags } from '../lib/install/flags/review-profile.mts';
 import { ensureDevkitCacheGitignore } from '../lib/install/gitignore-cache.mts';
-import {
-  ensureFallowGitignore,
-  installFallow,
-  saveFallowBaselines,
-  wireFallowHooks,
-} from '../lib/install/install-fallow.mts';
+import { ensureFallowGitignore, installFallow } from '../lib/install/install-fallow.mts';
 import { installSearchCode } from '../lib/install/install-search-code.mts';
 import * as oxcLifecycle from '../lib/install/oxc/lifecycle.mts';
 import { type PackageJson, patchPackageJson } from '../lib/install/package-json.mts';
@@ -429,25 +424,16 @@ async function subConfirm(
   return isCancel(v) ? fallback : v;
 }
 
-// Does the repo carry fallow debt? `fallow audit` exits non-zero when it finds NEW issues
-// against (absent) baselines — i.e. there's something to grandfather. Fail-open: any throw
-// (missing binary, etc.) is treated as "no debt" so we never save empty baselines.
-function fallowHasDebt(cwd: string) {
-  try {
-    execFileSync('fallow', ['audit'], { cwd, stdio: 'pipe' });
-    return false; // exit 0 → clean → nothing to baseline
-  } catch (e: unknown) {
-    return (e as ExecError).status != null; // non-zero exit → debt; ENOENT (status null) → treat as none
-  }
-}
-
-// Apply the OPTIONAL fallow component. Every step is fail-open (install-fallow never throws);
-// order: install → gitignore (always) → optional `fallow init` (sub-confirm, default NO —
-// fallow is zero-config) → wire fallow's own git hook → save baselines ONLY if the gate wired
-// AND the repo has debt to grandfather. dryRun prints + writes nothing throughout.
-// Reason: flat fail-open orchestration: each fallow step (install → gitignore → optional init → wire gate → save baselines) is a sequential guarded call with its own dryRun/ok branch; the branch COUNT is the step count, no nesting
+// Reason: flat fail-open orchestration: each fallow step (install → gitignore → optional init → gate line) is a sequential guarded call with its own dryRun/ok branch; the gate itself is step 3's block (sc-2341)
 // fallow-ignore-next-line complexity
-async function applyFallow(cwd: string, dryRun: boolean, interactive: boolean) {
+type FallowGateSurface = 'block' | 'no-husky' | 'self-host';
+
+async function applyFallow(
+  cwd: string,
+  dryRun: boolean,
+  interactive: boolean,
+  gate: FallowGateSurface,
+) {
   const r = installFallow({ cwd, dryRun });
   console.log(`  ${r.ok ? '✓' : '!'} ${r.message}`);
   ensureFallowGitignore({ cwd, dryRun });
@@ -469,13 +455,16 @@ async function applyFallow(cwd: string, dryRun: boolean, interactive: boolean) {
     }
   }
 
-  const gate = wireFallowHooks({ cwd, dryRun });
-  for (const line of gate.log) console.log(`  ${line}`);
-  if (gate.ok && (dryRun || fallowHasDebt(cwd))) {
-    const saved = saveFallowBaselines({ cwd, dryRun });
-    console.log(`  ${saved.ok ? '✓ saved' : '! some'} fallow baselines (grandfather debt)`);
-  }
+  console.log(FALLOW_GATE_LINE[gate]);
 }
+
+const FALLOW_GATE_LINE = {
+  block:
+    '  ✓ fallow staged gate in the devkit pre-commit block (git diff --cached | fallow audit --diff-stdin)',
+  'no-husky':
+    '  ! fallow gate not wired: husky is off, so no pre-commit runs it — re-run with --husky and devkit emits it in its block',
+  'self-host': '  • self-host: fallow stays the advisory audit in devkit’s own hook',
+} satisfies Record<FallowGateSurface, string>;
 
 // ── removal steps (SAFE: never delete a file devkit didn't create) ───────────
 
@@ -906,7 +895,12 @@ export async function applyInit(cwd: string, plan: InitPlan) {
 
   if (selection.fallow) {
     console.log('8. fallow (optional code-health layer)');
-    await applyFallow(cwd, dryRun, interactive);
+    await applyFallow(
+      cwd,
+      dryRun,
+      interactive,
+      selfHost ? 'self-host' : selection.husky ? 'block' : 'no-husky',
+    );
   }
 
   if (selection.searchCode) {

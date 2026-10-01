@@ -68,6 +68,14 @@ function rm(path: string, label: string, dryRun: boolean): void {
   if (!dryRun) rmSync(path, { recursive: true, force: true });
 }
 
+// devkit no longer writes fallow-baselines/ (sc-2341), so it may be the consumer's: never delete it.
+function keepFallowBaselines(cwd: string): void {
+  if (!existsSync(join(cwd, 'fallow-baselines'))) return;
+  console.log(
+    '  • kept fallow-baselines/ — delete it yourself if devkit wrote it (devkit < sc-2341)',
+  );
+}
+
 // A tracked path devkit declines to delete, named with the remedy: a silent survivor makes the next
 // `devkit init` refuse for a reason the user cannot see.
 function announceTracked(rel: string): void {
@@ -107,11 +115,9 @@ function extendsDevkit(path: string): boolean {
 
 // Overlay leftovers when the config (and maybe the manifests) are gone — an orphaned or partial
 // clean. The tell-tale is a devkit-BUNDLED skill dir present-and-UNTRACKED under a surface (package
-// mode commits its skills, so a tracked one isn't a stray), or a surviving .devkit / fallow-baselines.
+// mode commits its skills, so a tracked one isn't a stray), or a surviving .devkit.
 function hasOverlayStrays(gitRoot: string): boolean {
-  if (existsSync(join(gitRoot, '.devkit')) || existsSync(join(gitRoot, 'fallow-baselines'))) {
-    return true;
-  }
+  if (existsSync(join(gitRoot, '.devkit'))) return true;
   if (hasOrphanExcludeBlock(gitRoot)) return true;
   const skillsSrc = join(packageDir(), 'skills');
   const names = existsSync(skillsSrc)
@@ -169,7 +175,7 @@ function cleanOverlayStrays(cwd: string, gitRoot: string, dryRun: boolean): void
   rmUntracked(OVERLAY_ENTRY_REL, OVERLAY_ENTRY_REL);
   rmUntracked(ANTI_SLOP_BASELINE_REL, ANTI_SLOP_BASELINE_REL);
   rmUntracked('eslint/baselines', 'eslint/baselines/');
-  rm(join(cwd, 'fallow-baselines'), 'fallow-baselines/', dryRun);
+  keepFallowBaselines(cwd);
   cleanUntrackedDevkitState(gitRoot, dryRun);
   pruneGitExclude(gitRoot, dryRun);
 }
@@ -258,9 +264,8 @@ function cleanOverlay(cwd: string, cfg: DevkitConfig, dryRun: boolean): void {
   // package mode retains, so leaving it behind only exposes it once the exclude block is pruned.
   rmUntracked(ANTI_SLOP_BASELINE_REL, ANTI_SLOP_BASELINE_REL);
   rm(join(cwd, 'eslint', 'baselines'), 'eslint/baselines/', dryRun);
-  // fallow: devkit saved the grandfather baselines in overlay (fallow-baselines/). The .fallow/ cache
-  // is fallow's own — left in place, like package-mode clean leaves fallow's files.
-  if (comp.fallow) rm(join(cwd, 'fallow-baselines'), 'fallow-baselines/', dryRun);
+  // The .fallow/ cache is fallow's own — left in place, like package-mode clean leaves fallow's files.
+  if (comp.fallow) keepFallowBaselines(cwd);
   pruneGitExclude(gitRoot, dryRun);
 }
 

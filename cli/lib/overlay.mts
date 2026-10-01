@@ -444,11 +444,9 @@ export function installOverlay(
   if (sel.fallow) {
     console.log('  fallow (code-health gate)');
     fallowWired = resolveOverlayFallow(cwd, dryRun);
-    if (fallowWired) {
-      excludes.add(`${pfx}.fallow/`);
-      excludes.add(`${pfx}fallow-baselines/`);
-      excludes.add(`${pfx}fallow-baselines`);
-    }
+    // Only fallow's cache: devkit no longer writes fallow-baselines/ (sc-2341), and hiding one would
+    // hide the consumer's own.
+    if (fallowWired) excludes.add(`${pfx}.fallow/`);
   }
 
   // Same shape as fallow: resolved before the hook renders, since the gate fragment is keyed on the

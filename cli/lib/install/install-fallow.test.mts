@@ -17,7 +17,7 @@ const {
   detectFallow,
   installFallow,
   ensureFallowGitignore,
-  wireFallowHooks,
+  resolveOverlayFallow,
 } = await import('./install-fallow.mts');
 
 let roots = [];
@@ -140,21 +140,31 @@ describe('ensureFallowGitignore', () => {
   });
 });
 
-// devkit installs FALLOW's hooks rather than shipping a gate of its own: `fallow audit` already
-// defaults to --gate new-only and takes --diff-file/--diff-stdin, so a devkit-authored gate would
-// reimplement fallow's attribution and drift from it. What devkit owns is the WIRING — including
-// the Cursor surface, which fallow's installer does not write.
-describe('wireFallowHooks', () => {
-  it("wires fallow's own GIT hook, and deliberately not its agent gate", () => {
-    spawnSync.mockReturnValue(result(0));
-    const root = tmpRepo();
-    const r = wireFallowHooks({ cwd: root });
-    expect(r.ok).toBe(true);
-    const targets = spawnSync.mock.calls
-      .filter(([cmd, args]) => cmd === 'fallow' && args[0] === 'hooks')
-      .map(([, args]) => args[args.indexOf('--target') + 1]);
-    // ONLY the git hook. fallow's agent gate is deliberately not installed — it would fire beside
-    // devkit's staged-scope wrapper and re-block on the unstaged work the wrapper excludes.
-    expect(targets).toEqual(['git']);
+// sc-2341: baselines can suppress a genuinely introduced clone under the staged --diff-stdin gate,
+// and `new-only` already grandfathers old debt — so no install surface saves them any more.
+describe('resolveOverlayFallow', () => {
+  const spawnedArgs = () => spawnSync.mock.calls.flatMap(([, args]) => args);
+
+  it('fallow present: wires the gate and saves NO baselines', () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    spawnSync.mockReturnValue(result(0, 'fallow 3.10.0\n'));
+    expect(resolveOverlayFallow('/x', false)).toBe(true);
+    expect(spawnedArgs()).not.toContain('--save-baseline');
+  });
+
+  it('fallow installed on demand: still saves NO baselines', () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    spawnSync
+      .mockReturnValueOnce(result(null)) // fallow --version: ENOENT
+      .mockReturnValueOnce(result(null)) // npx --no-install: ENOENT
+      .mockReturnValue(result(0)); // bun add -g succeeds
+    expect(resolveOverlayFallow('/x', false)).toBe(true);
+    expect(spawnedArgs()).not.toContain('--save-baseline');
+  });
+
+  it('install impossible: skips the gate', () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    spawnSync.mockReturnValue(result(null));
+    expect(resolveOverlayFallow('/x', false)).toBe(false);
   });
 });
