@@ -63,8 +63,8 @@ __dk_gate_deterministic "$__dk_package_bin_dir/guard-deterministic" --hook "\${D
 
 // Guard run order: the deterministic orchestrator first (one aggregated report), AI gates last so
 // a doomed commit never pays for a judge. Explicit lists — never rely on object-key order.
-const DETERMINISTIC_GUARD_IDS = ['size', 'fanout', 'dup', 'clone', 'coverage'];
-const AI_GUARD_IDS = ['comments', 'decisions', 'review'] as const;
+const DETERMINISTIC_GUARD_IDS = ['size', 'fanout', 'dup', 'clone', 'coverage', 'comments'];
+const AI_GUARD_IDS = ['decisions', 'review'] as const;
 // qavis-advisory runs after every judge that can demand an edit (sc-3012), own 0/3 exit contract.
 // This wrapper stays fail-open when qavis/the bin is absent, matching the fallow precedent.
 export const QAVIS_ADVISORY_ID = 'qavis-advisory';
@@ -170,7 +170,6 @@ export function buildFullHook(selection: HookSelection, pkgRel = ''): string {
 // Standalone (no-package) gate args, in run order, each led by its block lane. The bin is global
 // (`bun add -g`) and fail-opens per gate, exactly fallow's `command -v fallow || exit 0`.
 const STANDALONE_GATES = {
-  comments: ['deterministic', 'guard-comments', 'gate'],
   decisions: ['ai', 'guard-decisions', 'detect', '--gate'],
   review: ['ai', 'guard-review', '--gate'],
 };

@@ -5,6 +5,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   realpathSync,
   rmSync,
   writeFileSync,
@@ -257,5 +258,60 @@ describe('reship.sh — the same early check (sc-3883)', () => {
     expect(r.stderr).toMatch(MISSING_RUNNER_RE);
     expect(existsSync(spy.marker)).toBe(false);
     expect(worktreeCount(git)).toBe(before);
+  });
+});
+
+describe('reship.sh — an overlay borrowed by a linked worktree (sc-4157)', () => {
+  /** An overlay home plus a linked worktree on the PR branch whose own .devkit holds only ship
+   *  records — the state ship leaves in any caller before the overlay is projected into it. */
+  function seedLinkedOverlay(hook: string) {
+    const { dir, env, git } = seedReshipRepo();
+    addOverlay(dir, hook);
+    writeFileSync(join(dir, '.git/info/exclude'), '.devkit/\n');
+    git(['config', 'core.hooksPath', join(dir, '.devkit/hooks')], { stdio: 'ignore' });
+    const linked = join(realpathSync(mkdtempSync(join(tmpdir(), 'reship-overlay-'))), 'wt');
+    dirs.push(linked);
+    git(['worktree', 'add', '-q', '-b', 'task', linked, 'origin/pr-open'], { stdio: 'ignore' });
+    writeFileSync(join(linked, 'note.txt'), 'delta\n');
+    const reship = (...args: string[]) =>
+      spawnSync('/bin/bash', [reshipScript, ...args], {
+        cwd: linked,
+        input: 'b\n',
+        encoding: 'utf8',
+        env: { ...env, SHIP_DRY_RUN: '1' },
+      });
+    return { dir, linked, reship };
+  }
+
+  it("runs the home's overlay chain, not the caller's partial .devkit", () => {
+    const { linked, reship } = seedLinkedOverlay(
+      `echo 'devkit-gates: chain start' >&2\necho 'LINKED_OVERLAY_MARKER'`,
+    );
+
+    const r = reship('pr-open', 't', 'note.txt');
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).not.toMatch(/no executable pre-commit hook/);
+    expect(readFileSync(join(linked, '.devkit/last-ship-gates-pr-open.log'), 'utf8')).toMatch(
+      /LINKED_OVERLAY_MARKER/,
+    );
+  });
+
+  it('--resume after a blocked attempt resolves the same overlay', () => {
+    const { dir, linked, reship } = seedLinkedOverlay(
+      `echo 'devkit-gates: chain start' >&2\nexit 1`,
+    );
+    expect(reship('pr-open', 't', 'note.txt').status).not.toBe(0);
+    writeFileSync(
+      join(dir, '.devkit/hooks/pre-commit'),
+      `#!/bin/sh\necho 'devkit-gates: chain start' >&2\necho 'RESUMED_OVERLAY_MARKER'\n`,
+    );
+
+    const r = reship('--resume', 'pr-open');
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(readFileSync(join(linked, '.devkit/last-ship-gates-pr-open.log'), 'utf8')).toMatch(
+      /RESUMED_OVERLAY_MARKER/,
+    );
   });
 });

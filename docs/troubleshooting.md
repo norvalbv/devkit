@@ -22,6 +22,18 @@ devkit is git-root-aware: in a monorepo, run `init` **inside the package**, not 
 pre-commit hook lives at the git root with a **package-scoped** block. Example:
 `cd services/webapp && bunx devkit init --stack react-app`. Re-run `devkit doctor` from that package dir.
 
+## `devkit init: another devkit init/upgrade is running in <root> (pid N)`
+
+`devkit init` and `devkit upgrade` hold one lock per repository for their whole run. The lock sits
+in the git admin dir, as `.git/devkit-init.lock` (or under the `gitdir:` a worktree's `.git` file
+names), so it can never be staged. Outside git it is `.devkit/init.lock`. A second run waits about
+5 seconds and then refuses, instead of overwriting the first run's component record and undoing its
+installs. Monorepo packages share the one lock.
+
+Wait for pid N to finish, then re-run. A lock left by a crashed run is removed automatically once it
+is older than 60 seconds and its pid is gone. To clear one sooner, check that the pid is not running
+and delete the lock path the message prints. `--dry-run` never takes the lock.
+
 ## My commit didn't run the gates (overlay mode)
 
 In **overlay mode** a plain `git commit` (or an IDE/GUI commit) runs the **repo's own** hooks, not devkit's —
@@ -142,6 +154,27 @@ the completeness judgement, cleared decisions judgements, and the all-green **de
 it was mid-flight in and any reviewers missing a completion heartbeat. For more room per attempt, see
 `SHIP_COMMIT_TIMEOUT` below.
 
+## A devkit test failed with `ceiling-timeout:`
+
+The label means setup ran out of time **before** it reached the step under test. The two
+ceiling-sentinel tests in `cli/__tests__/review.test.mts` (the asset wedge and the
+`preflight-verify:deps-final` wedge) set `DEVKIT_PREFLIGHT_TIMEOUT` and assert that the ceiling fires
+*at the wedge*. When the wedge's marker is absent and review's own ceiling banner names an earlier
+phase, the test fails with `ceiling-timeout: the 90s setup ceiling fired during <phase> before
+reaching <phase>`. There are two possible causes, and the label names the likelier one:
+
+- **Machine load** (the 1-minute loadavg exceeds `cpus=`): setup was starved of CPU.
+- **A real hang in the named earlier phase** (loadavg within `cpus=`): treat it as a regression.
+
+A failure **without** the prefix, or with the marker present, is an ordinary assertion failure.
+
+Every `vitest run` (unit and e2e configs) also prints `devkit test load: start …` and
+`devkit test load: end …` to stderr, so you can weigh any timeout-shaped failure. To confirm, re-run
+the file alone: `bun run test:run -- cli/__tests__/review.test.mts`. If it still fails at normal load,
+investigate the named phase. Raise the ceiling only when setup is legitimately slower; never lower
+it and never serialise the file (`suite-hangs-bound-at-the-spawn-site`,
+`test-deadlines-are-hang-detectors`).
+
 ## A gate exited 3: the judge hit a usage limit, or its CLI is missing
 
 Exit 3 is the **exit-3 contract** — the judge could not run, not a finding against your code. The
@@ -205,6 +238,20 @@ by a command-rewriting shell hook, exactly as with `SHIP_COMMIT_TIMEOUT` below.
 
 `devkit doctor` reports the same models per role, and says which env is blocking an automatic bind.
 
+## A reviewer shows `PASS over an incomplete packet` (or `partial evidence`)
+
+Each AI reviewer reads a capped diff packet. On a large diff, files past the budget are OMITTED or
+TRUNCATED. Only the correctness reviewer is chunked so that every file reaches some judge. Every other
+reviewer's PASS on a large diff may cover only part of it, so the ship digest lists that PASS as
+unverified (`·`) with the files it was not shown. The review run's completion line appends `partial
+evidence: N/M file(s) omitted`. The row does not block.
+
+The judge was told to inspect the omitted files before passing, but the verdict alone cannot show that
+it did. To get a full review:
+
+- Split the change into smaller ships so each reviewer's diff fits the budget.
+- Or review the named files yourself before merging.
+
 ## A `.devkit/` ship cache looks stale (gates pass when they shouldn't)
 
 The **deterministic-prefix cache** and **checkpointed verdicts** live under `.devkit/`, keyed on the
@@ -247,18 +294,21 @@ still perform the scoped merge after `init` or `doctor --fix` refreshed the mana
 
 ## `✗ deterministic gates failed: <names>`
 
-The deterministic gates (structure, fanout, size, dup, clone …) run all-and-**aggregate**: instead of
-failing fast on the first, they collect every failure into one report naming each (`guard-<id>`). Fix each
-named gate (see **A pre-commit gate blocked my commit** above) and re-commit — the **deterministic-prefix
-cache** means the gates that already passed won't re-run. AI gates are the exception: on a commit or ship
-they stay fail-fast, one finding at a time, by design.
+The deterministic gates (structure, fanout, size, dup, clone, anti-slop, comments …) run
+all-and-**aggregate**: instead of failing fast on the first, they collect every failure into one report
+naming each (`guard-<id>`). Fix each named gate (see **A pre-commit gate blocked my commit** above) and
+re-commit. To converge without a ship round, stage the paths and run `guard-deterministic` locally.
+`guard-comments(unreadable-evidence)` is not a rejection: the gate could not read the staged content.
+On a commit or ship, the decision and reviewer gates run only after this stage passes, one finding
+at a time, by design.
 
 ## `✗ review: failed gates: <names>`
 
 `devkit review` runs every selected gate even after one blocks, then prints this line and exits 1.
-guard-comments is deterministic, so it defers under `--dry-gates` too, where the line reads
-`✗ dry-gates: …`. A confirmed AI finding from guard-decisions or guard-review defers only in review. A
-judge outage (exit 3), unreadable evidence (exit 4) or a Qavis strict block still stops the run at once.
+The deterministic stage (guard-comments included) defers under `--dry-gates` too, where the line
+reads `✗ dry-gates: …`. A confirmed AI finding from guard-decisions or guard-review defers only in review. A
+judge outage (exit 3) or unreadable evidence (exit 4) from an AI gate, or a Qavis strict block, still
+stops the run at once.
 Each named gate's findings appear above the line.
 
 ## `bun install` fails: `no commit matching "<sha>" found for "@norvalbv/devkit"`

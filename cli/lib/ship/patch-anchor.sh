@@ -428,10 +428,26 @@ ship_apply_text_arm() {
   fi
 
   cat "$err" >&2
-  if [ "${#conflicts[@]}" -gt 0 ]; then
+  # A GENERATED path (a devkit manifest, or one the consumer declares under `generated` in its
+  # guard.config.json) must be pointed at its generator: hand-merging one produces a file that
+  # matches neither tree (sc-2770). The declarations come from the tree being SHIPPED, so a generated
+  # path the base newly declares is honoured — the worktree for staging, and for the trial the
+  # config files materialised from its throwaway index into a scratch root. Captured first so a
+  # failed render prints nothing partial; any failure falls back to the plain hand-merge text.
+  local gen_abort=
+  if [ "${#conflicts[@]}" -gt 0 ]; then gen_abort=$(_ship_generated_abort "$root" "$base_ref" "$mode" "$target" "${conflicts[@]}"); fi
+  if [ -n "$gen_abort" ]; then
+    printf '%s\n' "$gen_abort" >&2
+  elif [ "${#conflicts[@]}" -gt 0 ]; then
     echo "ship: origin/$base_ref and your working tree changed the same region of:" >&2
-    for p in "${conflicts[@]}"; do _ship_path_with_commits "$root" "$base" "$patch_base" "$p"; done
+    for p in "${conflicts[@]}"; do printf '  %q\n' "$p" >&2; done
     echo "  ship cannot resolve this for you — the merge has to happen where you can see both sides." >&2
+  fi
+  # Whichever renderer named the conflicts, name the base commits behind them too (sc-3496): the
+  # advisory already knew them, and they are what the operator has to go and read.
+  if [ "${#conflicts[@]}" -gt 0 ]; then
+    echo "  base commits behind these conflicts since ${patch_base:0:7}:" >&2
+    for p in "${conflicts[@]}"; do _ship_path_with_commits "$root" "$base" "$patch_base" "$p"; done
   fi
   if [ "${#vanished[@]}" -gt 0 ]; then
     echo "ship: origin/$base_ref has deleted or retyped briefed path(s) since ${patch_base:0:7}:" >&2
@@ -450,6 +466,28 @@ ship_apply_text_arm() {
   fi
   echo "  Merge or rebase origin/$base_ref into this checkout, then retry the same command." >&2
   return 1
+}
+
+# _ship_generated_abort <root> <base_ref> <mode> <target> <path>...
+# The generator-pointing abort text for these unmerged paths, or nothing (any failure included).
+_ship_generated_abort() {
+  local root=$1 base_ref=$2 mode=$3 target=$4 cli decl_root scratch= f out=
+  shift 4
+  cli="$SCRIPT_DIR/generated-paths/cli.mts"
+  [ -f "$cli" ] || cli="$SCRIPT_DIR/generated-paths/cli.mjs"
+  [ -f "$cli" ] || return 0
+  if [ "$mode" = --index ]; then
+    scratch=$(mktemp -d "${TMPDIR:-/tmp}/ship-trial-decl.XXXXXX") || return 0
+    for f in guard.config.json package.json; do
+      GIT_INDEX_FILE=$target git -C "$root" --work-tree="$scratch" checkout-index -q -- "$f" 2>/dev/null || true
+    done
+    decl_root=$scratch
+  else
+    decl_root=$target
+  fi
+  out=$(printf '%s\0' "$@" | node "$cli" --root "$decl_root" --base-ref "$base_ref" 2>/dev/null) || out=
+  [ -z "$scratch" ] || rm -rf "$scratch"
+  [ -z "$out" ] || printf '%s' "$out"
 }
 
 # _ship_path_with_commits <root> <base> <patch_base> <path>

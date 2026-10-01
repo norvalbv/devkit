@@ -57,6 +57,8 @@ export interface BaselineAnswer {
   skippedRuns: { runId: number; conclusion: string; why: string }[];
   reason?: UnknownReason;
   detail?: string;
+  /** What to change so the next query can answer — set only where the fix is on the consumer side. */
+  remedy?: string;
   file?: FileAnswer;
 }
 
@@ -113,6 +115,11 @@ export function fileExistsAt(cwd: string, sha: string, path: string): boolean | 
   return has(`${sha}:${path}`);
 }
 
+/** Cache entry name: the artifact is part of the key, so a reconfigured artifact never reads another's. */
+export function cacheName(runId: number, attempt: number, artifact: string): string {
+  return `${runId}-${attempt}-${encodeURIComponent(artifact)}.json`;
+}
+
 /**
  * The summary for one run, from cache or from GitHub. Keyed on runId + ATTEMPT, never sha: a re-run
  * keeps the sha, so a sha key would serve the pre-re-run answer after main was made green.
@@ -126,7 +133,7 @@ export function loadSummary({
   run: RunRef;
   artifact: string;
 }): TestReportSummary {
-  const cacheFile = join(cwd, CACHE_DIR, `${run.databaseId}-${run.attempt}.json`);
+  const cacheFile = join(cwd, CACHE_DIR, cacheName(run.databaseId, run.attempt, artifact));
   if (existsSync(cacheFile)) {
     try {
       // Re-validated, not trusted: `{}` parses, so JSON.parse alone would admit it.
@@ -257,6 +264,24 @@ function unknownAnswer(ref: string, reason: UnknownReason, detail: string): Base
   };
 }
 
+/**
+ * The workflow as gh's `--workflow` expects it: GitHub reads workflows only from the top of
+ * `.github/workflows/`, so a path is a filename in disguise — and gh 404s on the path form.
+ */
+export function workflowSelector(workflow: string): string {
+  return workflow.trim().split(/[\\/]/).pop() ?? '';
+}
+
+/** How to make the producer side exist; shared by every reason that means "CI emits nothing here". */
+function producerRemedy(workflow: string, artifact: string, branch: string): string {
+  return (
+    `The workflow that runs your tests on pushes to ${branch} must run \`devkit test-report-run\` ` +
+    `and upload \`${artifact}\` with \`if: always()\` (see \`devkit test-report-run --help\`). ` +
+    `If that is not ${workflow}, name it with --workflow <file> or ` +
+    `{ "baselineStatus": { "workflow": "<file>" } } in guard.config.json.`
+  );
+}
+
 /** The whole query. Never throws for a knowable-unknown; the caller renders whatever comes back. */
 export function queryBaseline({
   cwd = process.cwd(),
@@ -274,6 +299,7 @@ export function queryBaseline({
   maxRuns?: number;
 } = {}): BaselineAnswer {
   const branch = resolveRef(cwd, ref);
+  workflow = workflowSelector(workflow);
   let runs: RunRef[];
   try {
     runs = listRuns({
@@ -285,11 +311,19 @@ export function queryBaseline({
   } catch (e) {
     // `instanceof` rather than a cast: gh.mts is the only thrower here, but an unexpected throw must
     // still surface as a named unknown rather than reading a `reason` off something that has none.
+    if (e instanceof GhUnavailable && e.reason === 'workflow-missing') {
+      const unknown = unknownAnswer(branch, e.reason, e.message);
+      unknown.remedy =
+        `No workflow \`${workflow}\` exists on the default branch. ` +
+        producerRemedy(workflow, artifact, branch);
+      return unknown;
+    }
     if (e instanceof GhUnavailable) return unknownAnswer(branch, e.reason, e.message);
     return unknownAnswer(branch, 'gh-failed', e instanceof Error ? e.message : String(e));
   }
 
   const skippedRuns: BaselineAnswer['skippedRuns'] = [];
+  let runsWithoutArtifact = 0;
   for (const run of runs) {
     if (!isUsableRun(run)) {
       skippedRuns.push({
@@ -310,6 +344,7 @@ export function queryBaseline({
       // means evidence may exist but could not be read, and answering from an older run would
       // present a stale baseline as the current one.
       const isMissing = e instanceof GhUnavailable && e.reason === 'no-artifact';
+      if (isMissing) runsWithoutArtifact++;
       if (!isMissing) {
         const reason = e instanceof GhUnavailable ? e.reason : 'artifact-unreadable';
         const unknown = unknownAnswer(branch, reason, why);
@@ -349,8 +384,17 @@ export function queryBaseline({
   const answer = unknownAnswer(
     branch,
     'no-usable-run',
-    `no run of ${workflow} on ${branch} in the last ${runs.length} carried a \`${artifact}\` artifact`,
+    // Zero runs is its own fact — the workflow exists but never ran on this branch (a PR-only
+    // trigger, say) — and "none of the last 0 carried an artifact" would hide that.
+    runs.length === 0
+      ? `${workflow} has no runs on ${branch}`
+      : `no run of ${workflow} on ${branch} in the last ${runs.length} carried a \`${artifact}\` artifact`,
   );
   answer.skippedRuns = skippedRuns;
+  // Only where the producer is the gap: a window of cancelled runs is a CI-history fact that no
+  // workflow edit fixes, and telling the reader to rewire CI there would be advice about nothing.
+  if (runs.length === 0 || runsWithoutArtifact > 0) {
+    answer.remedy = producerRemedy(workflow, artifact, branch);
+  }
   return answer;
 }

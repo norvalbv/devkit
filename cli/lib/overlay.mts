@@ -438,6 +438,10 @@ export function installOverlay(
     excludes.add(`${pfx}biome.devkit.jsonc`);
   }
   if (writeEslintOverlay(cwd, force, dryRun)) excludes.add(`${pfx}eslint.config.devkit.mjs`);
+  // The decisions embedding cache (+ its atomic-write sidecars), written by any `guard-decisions query`
+  // whatever the guard selection. Scoped to the file so a decisionsDir named `.decisions` stays visible.
+  excludes.add(`${pfx}.decisions/index.json`);
+  excludes.add(`${pfx}.decisions/index.json.*.tmp`);
 
   // Resolve fallow before rendering the hook; an unavailable binary aborts only that component.
   let fallowWired = false;

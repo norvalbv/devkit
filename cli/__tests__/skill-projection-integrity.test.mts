@@ -177,6 +177,10 @@ describe('self-host Husky skill projection warning', () => {
       expect.stringContaining('skill projection drift detected (advisory)'),
     );
     expect(stderr).toHaveBeenCalledWith(expect.stringContaining('remove orphan files explicitly'));
+    // The generator comes from the shared generated-paths registry ship's abort also reads (sc-2770).
+    expect(stderr).toHaveBeenCalledWith(
+      expect.stringContaining('`node cli/index.mts sync-skills`'),
+    );
   });
 
   it('is generated only into the internal self-host hook and remains fail-open', () => {

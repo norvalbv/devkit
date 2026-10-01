@@ -10,7 +10,12 @@ import { mkdtempSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { assertBaselineTrackable, stagedTouchedSet } from '../git-index.mts';
+import {
+  assertBaselineTrackable,
+  freezeIndex,
+  frozenTouchedSet,
+  stagedTouchedSet,
+} from '../git-index.mts';
 
 const cleanup: string[] = [];
 afterEach(() => {
@@ -98,6 +103,123 @@ describe('stagedTouchedSet', () => {
     // The resolution differs from both parents; the cleanly-inherited file differs only from HEAD.
     expect(touched).toContain('kept.txt');
     expect(touched).not.toContain('side-only.txt');
+  });
+});
+
+/**
+ * sc-2478 — the frozen counterpart. One `write-tree` pins the pending commit, so every later read is
+ * against an immutable object and a concurrent `git add` cannot split the judged snapshot.
+ */
+describe('freezeIndex + frozenTouchedSet', () => {
+  it('reports what the index held at the freeze, not what it holds now', () => {
+    const root = seed();
+    writeFileSync(join(root, 'kept.txt'), 'staged before the freeze\n');
+    git(root, 'add', 'kept.txt');
+    const frozen = freezeIndex(root);
+    writeFileSync(join(root, 'late.txt'), 'staged after the freeze\n');
+    git(root, 'add', 'late.txt');
+    expect(frozen).not.toBeNull();
+    expect(frozenTouchedSet(root, frozen!)).toEqual(new Set(['kept.txt']));
+    expect(stagedTouchedSet(root)).toEqual(new Set(['kept.txt', 'late.txt']));
+  });
+
+  it('pins the base too: a commit landing after the freeze does not shrink the set', () => {
+    const root = seed();
+    writeFileSync(join(root, 'kept.txt'), 'edit\n');
+    git(root, 'add', 'kept.txt');
+    const frozen = freezeIndex(root)!;
+    git(root, 'commit', '-qm', 'someone else commits the same change');
+    expect(frozenTouchedSet(root, frozen)).toEqual(new Set(['kept.txt']));
+  });
+
+  it('agrees with stagedTouchedSet on deletions and both sides of a rename', () => {
+    const root = seed();
+    git(root, 'mv', 'doomed.txt', 'moved.txt');
+    git(root, 'rm', '-q', 'kept.txt');
+    expect(frozenTouchedSet(root, freezeIndex(root)!)).toEqual(stagedTouchedSet(root));
+  });
+
+  it('is empty — not null — when nothing is staged', () => {
+    const root = seed();
+    expect(frozenTouchedSet(root, freezeIndex(root)!)).toEqual(new Set());
+  });
+
+  it('freezes an unborn HEAD against the empty tree, so every staged path is touched', () => {
+    const root = mkdtempSync(join(tmpdir(), 'devkit-frozen-unborn-'));
+    cleanup.push(root);
+    git(root, 'init', '-q', '-b', 'main');
+    writeFileSync(join(root, 'first.txt'), 'first\n');
+    git(root, 'add', 'first.txt');
+    const frozen = freezeIndex(root);
+    expect(frozen?.base).toBe('4b825dc642cb6eb9a060e54bf8d69288fbee4904');
+    expect(frozenTouchedSet(root, frozen!)).toEqual(new Set(['first.txt']));
+  });
+
+  it('returns null — never a live fallback — while another git process holds index.lock', () => {
+    const root = seed();
+    writeFileSync(join(root, '.git', 'index.lock'), '');
+    expect(freezeIndex(root)).toBeNull();
+  });
+
+  it('returns null outside a repository', () => {
+    const root = mkdtempSync(join(tmpdir(), 'devkit-frozen-nogit-'));
+    cleanup.push(root);
+    expect(freezeIndex(root)).toBeNull();
+  });
+
+  // Agents stage with `git add -N`. write-tree omits an intent-to-add entry rather than failing, so
+  // the gate keeps running instead of silently going inert on every such commit.
+  it('freezes an index carrying an intent-to-add entry, which the commit would not include either', () => {
+    const root = seed();
+    writeFileSync(join(root, 'intent.txt'), 'not yet added\n');
+    git(root, 'add', '-N', 'intent.txt');
+    const frozen = freezeIndex(root);
+    expect(frozen).not.toBeNull();
+    expect(frozenTouchedSet(root, frozen!)).not.toContain('intent.txt');
+  });
+
+  it('during a merge, intersects with the MERGE_HEAD captured at the freeze', () => {
+    const root = seed();
+    git(root, 'checkout', '-q', '-b', 'side');
+    writeFileSync(join(root, 'side-only.txt'), 'from the side branch\n');
+    writeFileSync(join(root, 'kept.txt'), 'side edit\n');
+    git(root, 'add', '-A');
+    git(root, 'commit', '-qm', 'side');
+    git(root, 'checkout', '-q', 'main');
+    writeFileSync(join(root, 'kept.txt'), 'main edit\n');
+    git(root, 'add', '-A');
+    git(root, 'commit', '-qm', 'main');
+    try {
+      git(root, 'merge', '--no-commit', 'side');
+    } catch {
+      /* the conflicting merge leaves MERGE_HEAD in place — the state under test */
+    }
+    writeFileSync(join(root, 'kept.txt'), 'resolved\n');
+    git(root, 'add', '-A');
+
+    const frozen = freezeIndex(root)!;
+    expect(frozen.mergeHead).toBe(git(root, 'rev-parse', 'side'));
+    // Aborting after the freeze must not widen the set to every path inherited from `side`.
+    git(root, 'merge', '--abort');
+    const touched = frozenTouchedSet(root, frozen);
+    expect(touched).toContain('kept.txt');
+    expect(touched).not.toContain('side-only.txt');
+  });
+
+  it('refuses to freeze an index with unmerged paths', () => {
+    const root = seed();
+    git(root, 'checkout', '-q', '-b', 'side');
+    writeFileSync(join(root, 'kept.txt'), 'side edit\n');
+    git(root, 'commit', '-qam', 'side');
+    git(root, 'checkout', '-q', 'main');
+    writeFileSync(join(root, 'kept.txt'), 'main edit\n');
+    git(root, 'commit', '-qam', 'main');
+    try {
+      git(root, 'merge', '--no-commit', 'side');
+    } catch {
+      /* unresolved conflict: kept.txt is unmerged */
+    }
+    expect(freezeIndex(root)).toBeNull();
   });
 });
 

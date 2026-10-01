@@ -101,6 +101,8 @@ commit_with_gate_capture() {
   # Global, not local: ship-branch.sh reads this attempt's log after return to tell whether a
   # --with-reviewers rehearsal actually reached a reviewer gate.
   SHIP_GATE_LOG="$log"
+  # `devkit ship --queue` reads the running ship's gate from the log actually allocated here.
+  ! declare -F ship_queue_slot_note_log >/dev/null || ship_queue_slot_note_log "$log"
 
   # Start the attempt before hook resolution so a fail-closed setup error still has a terminal
   # ship_result row instead of disappearing from telemetry.
@@ -307,6 +309,8 @@ SHIP_HOOK_WRAPPER
   # before the greps below for the same reason — whichever gate happened to read the staged diff first
   # is the one that dies, so a grep would blame it for a failure it did not cause.
   elif [ "$staged_missing" -eq 1 ]; then blocked_json='"staged_objects_missing"'; timed_out=false
+  # sc-2753: guard-comments aggregates in the deterministic stage; alone, it keeps its own name.
+  elif grep -qE '✗ deterministic gates failed: guard-comments(\([^)]*\))?$' "$log" 2>/dev/null; then blocked_json='"comments"'; timed_out=false
   elif grep -q '✗ deterministic gates failed' "$log" 2>/dev/null; then blocked_json='"deterministic"'; timed_out=false
   elif grep -q 'decision smells:' "$log" 2>/dev/null; then blocked_json='"decisions"'; timed_out=false
   elif grep -q 'guard-comments: .* need a decision' "$log" 2>/dev/null; then blocked_json='"comments"'; timed_out=false

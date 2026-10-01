@@ -35,6 +35,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { resolveFromCwd, resolveGuardConfig } from '../config.mts';
+import { exitGate, failLine } from '../deterministic/reason.mts';
 import { ALLOWLIST_CLI, loadAllowlist } from './allowlist-io.mts';
 import { flagReader } from './argv.mts';
 import { loadChangedSet } from './changed-files.mts';
@@ -288,7 +289,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
   } catch (e: unknown) {
     // jscpd missing / errored = "could not run". The gate fails OPEN (exit 2) so
     // an infra failure never bricks a commit; non-gate callers surface the error.
-    console.error(e instanceof Error ? e.message : String(e));
+    failLine(e instanceof Error ? e.message : String(e));
     process.exit(gate ? 2 : 1);
   }
 
@@ -303,11 +304,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
     // Block on NEW clones (fragmentHash not covered by a live allowlist entry).
     const allowed = liveAllowlistedHashes();
     const novel = clones.filter((c) => !allowed.has(c.fragmentHash));
-    for (const c of novel) {
-      console.log(
+    const rows = novel.map(
+      (c) =>
         `  ${String(c.lines).padStart(3)}L  ${c.fragmentHash}  ${c.fileA}:${loc(c, 'startA')} <> ${c.fileB}:${loc(c, 'startB')}`,
-      );
-    }
+    );
+    for (const row of rows) console.log(row);
     if (novel.length > 0) {
       console.log(`\nclone gate: ${novel.length} new clone(s) — block.`);
       // Ready-to-paste approval, pre-filled with lines + ranges (fill in <why>), so an
@@ -327,7 +328,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
     } else {
       console.log('clone gate: no new clones ✓');
     }
-    process.exit(novel.length > 0 ? 1 : 0);
+    exitGate(novel.length > 0 ? 1 : 0, [`clone gate: ${novel.length} new clone(s)`, ...rows]);
   }
 
   if (mode === 'json') {

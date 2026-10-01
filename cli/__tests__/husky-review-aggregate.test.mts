@@ -3,6 +3,7 @@ import { cleanupHomes, hasDash, runHook } from './_husky-hook-harness.mts';
 
 // Consumer PR #108: a guard-comments block hid guard-decisions and the whole reviewer fleet from
 // `devkit review`. Review now runs every selected gate and blocks once, naming each failure.
+// Since sc-2753 the comment budget runs inside guard-deterministic, so its block is DET_RC here.
 
 afterEach(cleanupHomes);
 
@@ -16,11 +17,12 @@ const review = (extra = {}) => ({
 });
 
 describe.each(BUILDERS)('%s hook, review mode', (builder) => {
-  it('a guard-comments block still runs decisions and the reviewer fleet, then exits 1', () => {
-    const r = runHook(review({ COMMENTS_RC: '1' }), AI_CHAIN, { builder });
+  it('a comment-budget block still runs decisions and the reviewer fleet, then exits 1', () => {
+    const r = runHook(review({ DET_RC: '1' }), AI_CHAIN, { builder });
+    expect(r.calls).not.toContain('guard-comments');
     expect(r.calls).toContain('guard-decisions detect --gate');
     expect(r.calls).toContain('guard-review --gate');
-    expect(r.stdout).toContain('✗ review: failed gates: guard-comments (findings above).');
+    expect(r.stdout).toContain('✗ review: failed gates: deterministic-gates (findings above).');
     expect(r.status).toBe(1);
   });
 
@@ -32,10 +34,10 @@ describe.each(BUILDERS)('%s hook, review mode', (builder) => {
   });
 
   it('the summary names every failed gate in run order', () => {
-    const r = runHook(review({ COMMENTS_RC: '1', DEC_RC: '1', REVIEW_RC: '1' }), AI_CHAIN, {
+    const r = runHook(review({ DET_RC: '1', DEC_RC: '1', REVIEW_RC: '1' }), AI_CHAIN, {
       builder,
     });
-    expect(r.stdout).toContain('failed gates: guard-comments guard-decisions guard-review');
+    expect(r.stdout).toContain('failed gates: deterministic-gates guard-decisions guard-review');
     expect(r.status).toBe(1);
   });
 
@@ -95,28 +97,28 @@ describe.each(BUILDERS)('%s hook, review mode', (builder) => {
 describe.each(['standalone', 'overlay'])('%s hook, global bins', (builder) => {
   it('a missing global reviewer stays fail-open in review (the lane never reaches the probe)', () => {
     const r = runHook(review(), AI_CHAIN, { builder, missingBins: ['guard-review'] });
-    expect(r.calls).toContain('guard-comments gate');
+    expect(r.calls).toContain('guard-deterministic');
     expect(r.calls).not.toContain('guard-review');
     expect(r.status).toBe(0);
   });
 });
 
 describe.each(BUILDERS)('%s hook, commit and dry-gates keep their policy', (builder) => {
-  it('a commit stops at the guard-comments block', () => {
-    const r = runHook({ COMMENTS_RC: '1' }, AI_CHAIN, { builder });
+  it('a commit stops at the comment-budget block', () => {
+    const r = runHook({ DET_RC: '1' }, AI_CHAIN, { builder });
     expect(r.calls).not.toContain('guard-decisions');
     expect(r.calls).not.toContain('guard-review');
     expect(r.status).toBe(1);
   });
 
-  it('dry-gates defers the deterministic guard-comments block to the reviewers', () => {
+  it('dry-gates defers the deterministic comment-budget block to the reviewers', () => {
     const r = runHook(
-      { COMMENTS_RC: '1', DEVKIT_RUN_MODE: 'dry-gates', DEVKIT_REVIEW_GUARDS: 'comments,review' },
+      { DET_RC: '1', DEVKIT_RUN_MODE: 'dry-gates', DEVKIT_REVIEW_GUARDS: 'comments,review' },
       AI_CHAIN,
       { builder },
     );
     expect(r.calls).toContain('guard-review --gate');
-    expect(r.stdout).toContain('✗ dry-gates: failed gates: guard-comments');
+    expect(r.stdout).toContain('✗ dry-gates: failed gates: deterministic-gates');
     expect(r.status).toBe(1);
   });
 
@@ -138,12 +140,12 @@ describe.each(BUILDERS)('%s hook, commit and dry-gates keep their policy', (buil
 
 describe.skipIf(!hasDash)('dash', () => {
   it.each(BUILDERS)('%s review aggregation holds under dash', (builder) => {
-    const r = runHook(review({ COMMENTS_RC: '1', DEC_RC: '1' }), AI_CHAIN, {
+    const r = runHook(review({ DET_RC: '1', DEC_RC: '1' }), AI_CHAIN, {
       builder,
       shell: 'dash',
     });
     expect(r.calls).toContain('guard-review --gate');
-    expect(r.stdout).toContain('failed gates: guard-comments guard-decisions');
+    expect(r.stdout).toContain('failed gates: deterministic-gates guard-decisions');
     expect(r.status).toBe(1);
   });
 });

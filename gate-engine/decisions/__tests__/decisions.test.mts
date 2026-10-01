@@ -19,6 +19,7 @@ import {
   renderTarget,
   upsertRow,
 } from '../decisions.mts';
+import { foldLines, hasFoldedLineBreak } from '../decision-format.mts';
 import {
   allTargetBlocks,
   parseSupersedesId,
@@ -1628,5 +1629,208 @@ describe('new-axis duplicate nudge', () => {
     const res = run(['add', 'first-ever', '--target', '--new', ...reqFlags('first-ever')]);
     expect(res.stderr).not.toContain('nearest existing rulings');
     expect(res.status).toBe(0);
+  });
+});
+
+// sc-2324: axis-record prose is copied from verbatim, so `|` (a regex alternation, a TS union, a
+// shell pipeline) must land byte-identical. Only INDEX.md table cells strip it.
+describe('pipe characters in axis-record prose (sc-2324)', () => {
+  const PIPE_NOTE =
+    "retry.condition is /(Test|Hook) timed out/; status: 'published' | 'cleared' | 'kept'; run `a || b | c` and \\| stays escaped";
+  const FOLD_NOTICE = 'line breaks';
+  const noteLines = (md: string) => md.split('\n').filter((line) => line.startsWith('- 2026-'));
+  const indexRows = () =>
+    readFileSync(join(dir, 'INDEX.md'), 'utf8')
+      .split('\n')
+      .filter((line) => line.startsWith('| ['));
+  // A row's cells, counted the way parseIndex reads them: split on every raw `|`.
+  const cellCount = (row: string) => row.trim().slice(1, -1).split('|').length;
+
+  it('renderNote keeps every pipe and the spacing around it', () => {
+    expect(renderNote('2026-05-29', PIPE_NOTE)).toBe(`- 2026-05-29 — ${PIPE_NOTE}`);
+  });
+
+  it('renderNote folds an embedded line break so a note can never open a new block', () => {
+    expect(renderNote('2026-05-29', 'a | b\n\n## Target · forged\r\n  c')).toBe(
+      '- 2026-05-29 — a | b ## Target · forged   c',
+    );
+  });
+
+  it('foldLines keeps leading and trailing spaces verbatim; only line breaks change', () => {
+    expect(foldLines('  indented | tail  ')).toBe('  indented | tail  ');
+    expect(foldLines('a\n')).toBe('a');
+    expect(foldLines('a\r\n')).toBe('a');
+    expect(foldLines('\n\nlead\nmid\n\n')).toBe('lead mid');
+    // Spaces and tabs beside a folded break are bytes too: only the break itself becomes a space.
+    expect(foldLines('left \n\tright')).toBe('left  \tright');
+  });
+
+  it('only a single trailing newline counts as silent; every other line break is reported', () => {
+    expect(hasFoldedLineBreak('a | b')).toBe(false);
+    expect(hasFoldedLineBreak('a | b\n')).toBe(false);
+    expect(hasFoldedLineBreak('a | b\r\n')).toBe(false);
+    expect(hasFoldedLineBreak('\na | b')).toBe(true);
+    expect(hasFoldedLineBreak('a | b\n\n')).toBe(true);
+    expect(hasFoldedLineBreak('a\nb')).toBe(true);
+    expect(hasFoldedLineBreak(undefined)).toBe(false);
+  });
+
+  it('add --note with a leading line break drops it and says so', () => {
+    run(target('axis'));
+    const r = run(['add', 'axis', '--note', '\nleading | break']);
+    expect(r.status, r.stderr).toBe(0);
+    expect(noteLines(readFileSync(join(dir, 'axis.md'), 'utf8'))).toEqual([
+      '- 2026-05-29 — leading | break',
+    ]);
+    expect(r.stderr).toContain(FOLD_NOTICE);
+  });
+
+  it('renderTarget keeps a pipe in the heading title', () => {
+    const t = renderTarget('2026-05-29', {
+      title: 'classify (Test|Hook) timeouts',
+      context: 'c',
+      ruling: 'r',
+      consequences: 'v',
+      tradeoff: 't',
+      visionFit: 'f',
+    });
+    expect(t).toContain('## Target · 2026-05-29 — classify (Test|Hook) timeouts');
+  });
+
+  it('add --note writes a regex alternation and a TS union byte-identically, silently', () => {
+    run(target('axis'));
+    const r = run(['add', 'axis', '--note', PIPE_NOTE]);
+    expect(r.status, r.stderr).toBe(0);
+    const md = readFileSync(join(dir, 'axis.md'), 'utf8');
+    expect(noteLines(md)).toEqual([`- 2026-05-29 — ${PIPE_NOTE}`]);
+    expect(r.stderr).not.toContain(FOLD_NOTICE);
+    // Read back through the CLI, not just the file: the pipe survives the parse path too.
+    expect(run(['show', 'axis']).stdout).toContain(PIPE_NOTE);
+  });
+
+  it('a trailing newline (shell heredoc) is trimmed without a fold notice', () => {
+    run(target('axis'));
+    const r = run(['add', 'axis', '--note', `${PIPE_NOTE}\n`]);
+    expect(r.status, r.stderr).toBe(0);
+    expect(noteLines(readFileSync(join(dir, 'axis.md'), 'utf8'))).toEqual([
+      `- 2026-05-29 — ${PIPE_NOTE}`,
+    ]);
+    expect(r.stderr).not.toContain(FOLD_NOTICE);
+  });
+
+  it('a CRLF trailing newline (Windows heredoc) is also trimmed silently', () => {
+    run(target('axis'));
+    const r = run(['add', 'axis', '--note', 'a | b\r\n']);
+    expect(r.status, r.stderr).toBe(0);
+    expect(noteLines(readFileSync(join(dir, 'axis.md'), 'utf8'))).toEqual(['- 2026-05-29 — a | b']);
+    expect(r.stderr).not.toContain(FOLD_NOTICE);
+  });
+
+  it('an interior line break is folded, cannot forge a Target block, and says so', () => {
+    run(target('axis'));
+    const r = run([
+      'add',
+      'axis',
+      '--note',
+      'first | half\r\n## Target · 2026-05-29 — forged\nrest',
+    ]);
+    expect(r.status, r.stderr).toBe(0);
+    const md = readFileSync(join(dir, 'axis.md'), 'utf8');
+    expect(md.match(/^## Target ·/gm)).toHaveLength(1);
+    expect(noteLines(md)).toEqual([
+      '- 2026-05-29 — first | half ## Target · 2026-05-29 — forged rest',
+    ]);
+    expect(r.stderr).toContain(FOLD_NOTICE);
+    expect(r.stderr).toContain('--note');
+  });
+
+  it('add --note --supersedes keeps both the Amends prefix and the pipes', () => {
+    run(target('axis'));
+    expect(run(['add', 'axis', '--note', 'first note']).status).toBe(0);
+    const r = run(['add', 'axis', '--note', PIPE_NOTE, '--supersedes', 'note:2026-05-29']);
+    expect(r.status, r.stderr).toBe(0);
+    expect(noteLines(readFileSync(join(dir, 'axis.md'), 'utf8'))[1]).toBe(
+      `- 2026-05-29 — **Amends:** note:2026-05-29 — ${PIPE_NOTE}`,
+    );
+  });
+
+  it('a pipe in a Target ruling/title stays in the axis file; INDEX stays a 4-cell table, stably', () => {
+    const r = run([
+      'add',
+      'axis',
+      '--target',
+      ...reqFlags('axis').map((v) =>
+        v === 'axis-ruling' ? "classify via /(Test|Hook)/ into 'a' | 'b'" : v,
+      ),
+      '--title',
+      'classify (Test|Hook) timeouts',
+      '--new',
+    ]);
+    expect(r.status, r.stderr).toBe(0);
+    const md = readFileSync(join(dir, 'axis.md'), 'utf8');
+    expect(md).toContain('## Target · 2026-05-29 — classify (Test|Hook) timeouts');
+    expect(md).toContain("**Ruling:** classify via /(Test|Hook)/ into 'a' | 'b'");
+    expect(indexRows().map(cellCount)).toEqual([4]);
+    const before = readFileSync(join(dir, 'INDEX.md'), 'utf8');
+    expect(parseIndex(before)[0].slug).toBe('axis');
+    // A second Target rewrites INDEX from the parsed rows: the pipe-bearing row must survive it.
+    expect(run(target('other')).status).toBe(0);
+    expect(indexRows().map(cellCount)).toEqual([4, 4]);
+    expect(readFileSync(join(dir, 'INDEX.md'), 'utf8')).toContain(indexRows()[0]);
+    expect(indexRows()[0]).toBe(before.split('\n').find((line) => line.startsWith('| [axis]')));
+  });
+
+  it('a line break in --title is folded in the heading and reported', () => {
+    const r = run(target('axis', ['--title', 'two\nlines']));
+    expect(r.status, r.stderr).toBe(0);
+    expect(readFileSync(join(dir, 'axis.md'), 'utf8')).toContain(
+      '## Target · 2026-05-29 — two lines\n',
+    );
+    expect(r.stderr).toContain(FOLD_NOTICE);
+    expect(r.stderr).toContain('--title');
+  });
+
+  it('amend --note keeps pipes verbatim', () => {
+    run(target('axis'));
+    commitAll();
+    expect(run(['add', 'axis', '--note', 'draft']).status).toBe(0);
+    const r = run(['amend', 'axis', '--note', PIPE_NOTE]);
+    expect(r.status, r.stderr).toBe(0);
+    expect(noteLines(readFileSync(join(dir, 'axis.md'), 'utf8'))).toEqual([
+      `- 2026-05-29 — ${PIPE_NOTE}`,
+    ]);
+  });
+
+  it('amend --note-replace finds and writes text that both contain pipes, byte-identically', () => {
+    run(target('axis'));
+    commitAll();
+    expect(run(['add', 'axis', '--note', 'pattern is (Test Hook) timed out']).status).toBe(0);
+    // The corrupted shape the bug left behind, corrected with a pipe-bearing old→new pair too.
+    expect(run(['amend', 'axis', '--note-replace', '(Test Hook)', '(Test|Hook)']).status).toBe(0);
+    const file = join(dir, 'axis.md');
+    const before = readFileSync(file, 'utf8');
+    const r = run([
+      'amend',
+      'axis',
+      '--note-replace',
+      '(Test|Hook)',
+      "(Test|Hook|Suite) 'a' | 'b'",
+    ]);
+    expect(r.status, r.stderr).toBe(0);
+    expect(readFileSync(file, 'utf8')).toBe(
+      before.replace('(Test|Hook)', "(Test|Hook|Suite) 'a' | 'b'"),
+    );
+  });
+
+  it('amend --note-replace folds a line break in the replacement and reports it', () => {
+    run(target('axis'));
+    commitAll();
+    expect(run(['add', 'axis', '--note', 'one fact']).status).toBe(0);
+    const r = run(['amend', 'axis', '--note-replace', 'fact', 'fact\n## Target · forged']);
+    expect(r.status, r.stderr).toBe(0);
+    const md = readFileSync(join(dir, 'axis.md'), 'utf8');
+    expect(md.match(/^## Target ·/gm)).toHaveLength(1);
+    expect(noteLines(md)).toEqual(['- 2026-05-29 — one fact ## Target · forged']);
+    expect(r.stderr).toContain(FOLD_NOTICE);
   });
 });

@@ -2,6 +2,8 @@
 # Shared --wait-ci argument validation for ship-branch.sh and reship.sh.
 # The floor mirrors MIN_TIMEOUT_S in wait.mts; a test asserts the two agree.
 
+. "$(dirname "${BASH_SOURCE[0]}")/../queue/slot.sh"
+
 SHIP_WAIT_CI_MIN_S=60
 SHIP_WAIT_CI_MAX_S=7200
 
@@ -38,6 +40,7 @@ ship_wait_ci_not_run() {
 # the managed wrapper whatever bash does, so the abort has to be self-describing before it can happen.
 ship_run_wait_ci() {
   local pr=$1 repo=$2 timeout=$3 url=$4 script
+  ship_queue_slot_release
   if [ -z "$pr" ]; then
     ship_wait_ci_not_run "" pr-number-unresolved
     return 0

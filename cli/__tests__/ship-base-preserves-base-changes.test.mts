@@ -187,6 +187,137 @@ describe('ship --base: newer same-file base changes survive a stale caller patch
     if (existsSync(mark)) rmSync(mark);
   });
 
+  // sc-2770: a generated file both sides regenerated must be pointed at its generator, never at a
+  // hand-merge that yields a manifest matching neither tree.
+  const MANIFEST = '.devkit/skills-manifest.json';
+  const manifest = (stamp: string) =>
+    JSON.stringify({ generatedAt: stamp, files: { 'a/SKILL.md': stamp } }, null, 2) + '\n';
+
+  function seedManifestClash(extra: (d: string) => void = () => {}) {
+    const forked = seedForked((d) => {
+      mkdirSync(join(d, '.devkit'), { recursive: true });
+      writeFileSync(join(d, MANIFEST), manifest('fork'));
+      writeFileSync(join(d, 'f.txt'), TEN_LINES);
+      extra(d);
+    });
+    advanceBase(forked.bare, (c) => writeFileSync(join(c, MANIFEST), manifest('base')));
+    writeFileSync(join(forked.dir, MANIFEST), manifest('caller'));
+    return forked;
+  }
+
+  it('ABORTS naming the generator — not a hand-merge — when only a generated file conflicts', () => {
+    const { dir, env, git, bare } = seedManifestClash();
+
+    const r = ship(dir, env, 'feat/manifest', [MANIFEST]);
+    dropWorktree(git, r.stderr);
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(MANIFEST);
+    expect(r.stderr).toContain('`devkit sync-skills`');
+    expect(r.stderr).toMatch(/do not hand-merge/i);
+    expect(r.stderr).not.toContain('where you can see both sides');
+    expect(localBranchExists(git, 'feat/manifest')).toBe(false);
+    expect(remoteBranchExists(bare, 'feat/manifest')).toBe(false);
+  });
+
+  it('ABORTS listing generated and hand-written conflicts separately', () => {
+    const { dir, env, git, bare } = seedManifestClash();
+    advanceBase(bare, (c) => writeFileSync(join(c, 'f.txt'), TEN_LINES.replace('l5', 'l5-BASE')));
+    writeFileSync(join(dir, 'f.txt'), TEN_LINES.replace('l5', 'l5-CALLER'));
+
+    const r = ship(dir, env, 'feat/mixed', [MANIFEST, 'f.txt']);
+    dropWorktree(git, r.stderr);
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('`devkit sync-skills`');
+    const hand = r.stderr.slice(r.stderr.indexOf('changed the same region of'));
+    expect(hand).toContain('f.txt');
+    expect(hand.split('where you can see both sides')[0]).not.toContain(MANIFEST);
+  });
+
+  it('ABORTS naming a CONSUMER-declared generator from guard.config.json verbatim', () => {
+    const { dir, env, git, bare } = seedForked((d) => {
+      mkdirSync(join(d, 'gen'), { recursive: true });
+      writeFileSync(join(d, 'gen', 'api.json'), TEN_LINES);
+      writeFileSync(
+        join(d, 'guard.config.json'),
+        JSON.stringify({ generated: [{ glob: 'gen/*.json', command: 'pnpm codegen' }] }),
+      );
+    });
+    advanceBase(bare, (c) =>
+      writeFileSync(join(c, 'gen', 'api.json'), TEN_LINES.replace('l5', 'l5-BASE')),
+    );
+    writeFileSync(join(dir, 'gen', 'api.json'), TEN_LINES.replace('l5', 'l5-CALLER'));
+
+    const r = ship(dir, env, 'feat/codegen', ['gen/api.json']);
+    dropWorktree(git, r.stderr);
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('`pnpm codegen`');
+    expect(r.stderr).not.toContain('where you can see both sides');
+  });
+
+  it('classifies a generated conflict whose NAME holds a tab — git C-quotes it unless read with -z', () => {
+    const name = 'gen/a\tb.json';
+    const { dir, env, git, bare } = seedForked((d) => {
+      mkdirSync(join(d, 'gen'), { recursive: true });
+      writeFileSync(join(d, name), TEN_LINES);
+      writeFileSync(
+        join(d, 'guard.config.json'),
+        JSON.stringify({ generated: [{ glob: 'gen/**', command: 'pnpm codegen' }] }),
+      );
+    });
+    advanceBase(bare, (c) => writeFileSync(join(c, name), TEN_LINES.replace('l5', 'l5-BASE')));
+    writeFileSync(join(dir, name), TEN_LINES.replace('l5', 'l5-CALLER'));
+
+    const r = ship(dir, env, 'feat/tabname', [name]);
+    dropWorktree(git, r.stderr);
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('`pnpm codegen`');
+    expect(r.stderr).toContain(JSON.stringify(name));
+    expect(r.stderr).not.toContain('where you can see both sides');
+  });
+
+  it('classifies by the config in the tree being SHIPPED, which a base-side declaration reaches', () => {
+    // The stale checkout has no guard.config.json; origin/base declares gen/** as generated. The
+    // conflicts come from the staged tree, so the declaration must be read from that same tree.
+    const { dir, env, git, bare } = seedForked((d) => {
+      mkdirSync(join(d, 'gen'), { recursive: true });
+      writeFileSync(join(d, 'gen', 'api.json'), TEN_LINES);
+    });
+    advanceBase(bare, (c) => {
+      writeFileSync(join(c, 'gen', 'api.json'), TEN_LINES.replace('l5', 'l5-BASE'));
+      writeFileSync(
+        join(c, 'guard.config.json'),
+        JSON.stringify({ generated: [{ glob: 'gen/**', command: 'pnpm codegen' }] }),
+      );
+    });
+    writeFileSync(join(dir, 'gen', 'api.json'), TEN_LINES.replace('l5', 'l5-CALLER'));
+
+    const r = ship(dir, env, 'feat/basecfg', ['gen/api.json']);
+    dropWorktree(git, r.stderr);
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('`pnpm codegen`');
+    expect(r.stderr).not.toContain('where you can see both sides');
+  });
+
+  it('FALLS BACK to the hand-merge text, still aborting, when the generated config is malformed', () => {
+    const { dir, env, git } = seedManifestClash((d) =>
+      writeFileSync(join(d, 'guard.config.json'), JSON.stringify({ generated: 'nope' })),
+    );
+
+    const r = ship(dir, env, 'feat/badcfg', [MANIFEST]);
+    dropWorktree(git, r.stderr);
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('changed the same region of');
+    expect(r.stderr).toContain(MANIFEST);
+    expect(r.stderr).toContain('where you can see both sides');
+    expect(localBranchExists(git, 'feat/badcfg')).toBe(false);
+  });
+
   it('ABORTS with a devkit message — not raw git — when the base DELETED a briefed path', () => {
     const { dir, env, git, bare } = seedForked((d) => {
       writeFileSync(join(d, 'd.txt'), TEN_LINES);
@@ -500,6 +631,11 @@ function conflictListing(stderr: string) {
   return stderr.split('changed the same region of:')[1]?.split('ship cannot resolve')[0] ?? '';
 }
 
+/** The per-path base-commit section printed under the conflict listing (sc-3496). */
+function commitListing(stderr: string) {
+  return stderr.split('base commits behind these conflicts')[1]?.split('Merge or rebase')[0] ?? '';
+}
+
 describe('ship --base: the hunk-level verdict is taken before any branch exists (sc-3496)', () => {
   it('names EVERY conflicting path and never blames a path that merged cleanly', () => {
     const { dir, env, git, bare } = seedForked((d) => {
@@ -537,7 +673,7 @@ describe('ship --base: the hunk-level verdict is taken before any branch exists 
     dropWorktree(git, r.stderr);
 
     expect(r.status).toBe(1);
-    const listed = conflictListing(r.stderr);
+    const listed = commitListing(r.stderr);
     expect(listed).toMatch(/base edit 4[\s\S]*base edit 3[\s\S]*base edit 2/); // newest first
     expect(listed).not.toContain('base edit 1');
     expect(r.stderr.trimEnd().split('\n').at(-2)).toContain('Merge or rebase origin/base');
@@ -565,9 +701,12 @@ describe('ship --base: the hunk-level verdict is taken before any branch exists 
     expect(r.status).toBe(1);
     expect(r.stderr).toContain(PREFLIGHT_BLOCK);
     const listed = conflictListing(r.stderr);
-    expect(listed).toContain('weird\\ name\\*.txt'); // %q-quoted, one entry
-    expect(listed).toContain('odd path edit');
+    expect(listed).toContain(':weird name*.txt');
     expect(listed).not.toContain('sibling');
+    const commits = commitListing(r.stderr);
+    expect(commits).toContain('weird\\ name\\*.txt'); // %q-quoted, one entry
+    expect(commits).toContain('odd path edit'); // the commit lookup matched the name literally
+    expect(commits).not.toContain('sibling');
   });
 
   it('names a conflicting path that holds a NEWLINE as one path, not as fragments', () => {
@@ -589,10 +728,13 @@ describe('ship --base: the hunk-level verdict is taken before any branch exists 
     expect(r.status).toBe(1);
     expect(r.stderr).toContain(PREFLIGHT_BLOCK);
     const listed = conflictListing(r.stderr);
-    expect(listed).toContain("$'two\\nlines.txt'"); // %q-quoted, one entry
-    expect(listed).toContain('nl edit'); // the commit lookup used the whole path
+    expect(listed.trim().split('\n')).toHaveLength(1); // one entry, not two fragments
     expect(listed).not.toMatch(/^ {2}lines\.txt$/m);
-    expect(listed).not.toMatch(/^ {2}two$/m);
+    const commits = commitListing(r.stderr);
+    expect(commits).toContain("$'two\\nlines.txt'"); // %q-quoted, one entry
+    expect(commits).toContain('nl edit'); // the commit lookup used the whole path
+    expect(commits).not.toMatch(/^ {2}lines\.txt$/m);
+    expect(commits).not.toMatch(/^ {2}two$/m);
   });
 
   it('leaves the caller’s own index and TMPDIR exactly as it found them', () => {

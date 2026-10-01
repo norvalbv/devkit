@@ -386,6 +386,13 @@ describe('commit_with_gate_capture — executable hook proof', () => {
 
   it.each([
     ['guard-comments: 1 added/modified comment paragraph need a decision.', 'comments'],
+    // sc-2753: aggregated in the deterministic stage — alone it keeps its name, mixed it is the family.
+    ['✗ deterministic gates failed: guard-comments', 'comments'],
+    ['✗ deterministic gates failed: guard-comments(unreadable-evidence)', 'comments'],
+    ['✗ deterministic gates failed: guard-comments(unexpected:2)', 'comments'],
+    ['✗ deterministic gates failed: guard-anti-slop guard-comments', 'deterministic'],
+    ['✗ deterministic gates failed: guard-comments guard-anti-slop', 'deterministic'],
+    ['✗ deterministic gates failed: guard-comments-lint', 'deterministic'],
     ['qavis-advisory: strict gate blocked', 'qavis-advisory'],
     ['qavis-advisory: UI-affecting change with no qavis QA on this staged tree.', 'unknown'],
   ])('attributes terminal hook output %s to %s', (message, blockedGate) => {

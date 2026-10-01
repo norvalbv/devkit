@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { CONSUMER_FORMATTER } from '../lib/husky/format-fragment.mts';
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { confirm, isCancel, outro } from '@clack/prompts';
@@ -29,6 +30,7 @@ import {
   structureCmdFor,
   STRUCTURE_STACKS,
 } from '../lib/components.mts';
+import { writeFileAtomic } from '../lib/atomic-write.mts';
 import { detectGitRoot } from '../lib/detect-git-root.mts';
 import { reportBaselineStorage } from '../lib/doctor/pin/baseline-reader.mts';
 import { assertRunnerMayWrite, assertRunsFromSource } from '../lib/doctor/pin/runner-identity.mts';
@@ -53,6 +55,8 @@ import { installAgentSurfaces as syncSurfaces } from '../lib/install/agent-asset
 import { resolveAssetConflicts } from '../lib/install/agent-assets/asset-conflict-picker.mts';
 import * as antiSlopLifecycle from '../lib/install/anti-slop/lifecycle.mts';
 import * as initFlags from '../lib/install/flags/init-flags.mts';
+import { lockedCommand } from '../lib/install/init/init-lock.mts';
+import { applyScanRoots } from '../lib/install/init/scan-roots.mts';
 import { reviewPlanFromFlags } from '../lib/install/flags/review-profile.mts';
 import { ensureDevkitCacheGitignore } from '../lib/install/gitignore-cache.mts';
 import {
@@ -97,13 +101,8 @@ const STRUCTURE_TEMPLATE_FILES: Record<string, [string, string][]> = {
   ],
 };
 
-// devDeps/scripts owned by each component — used by both install (add) and remove (delete).
-const BIOME_DEV_DEPS = ['@biomejs/biome'];
-const BIOME_SCRIPTS = ['lint', 'format'];
-
-// Matches the scanRoots array value in guard.config.json for an in-place --scan-root patch
-// (preserves the //-comment guidance keys a JSON round-trip would drop). Hoisted (perf).
-const SCANROOTS_RE = /("scanRoots"\s*:\s*)\[[^\]]*\]/;
+const BIOME_DEV_DEPS = [CONSUMER_FORMATTER.package.name];
+const BIOME_SCRIPTS = Object.keys(CONSUMER_FORMATTER.scripts);
 
 /**
  * The `components` block as .devkit/config.json records it. Every toggle is OPTIONAL because an
@@ -275,31 +274,6 @@ function installStructureFiles(cwd: string, stack: string, sel: Selection, plan:
       logWrite(writeIfAbsent(target, readText(srcPath), { force }), dest);
     }
   }
-}
-
-// Override guard.config.json scanRoots from --scan-root, BEFORE the freezes run so they (and
-// the react-app structureRoot, which derives from scanRoots[0]) grandfather the right tree —
-// e.g. a non-`src` root like services/webapp/src. Patches the scanRoots array in place via
-// regex to PRESERVE the template's //-comment guidance keys; falls back to a JSON round-trip if
-// the key is absent. No-op when guard.config.json wasn't written (no guards/structure selected).
-function applyScanRoots(cwd: string, scanRoots: string[] | null, dryRun: boolean) {
-  if (!scanRoots?.length) return;
-  const value = JSON.stringify(scanRoots);
-  if (dryRun) {
-    console.log(`  [dry-run] set guard.config.json scanRoots = ${value}`);
-    return;
-  }
-  const path = join(cwd, 'guard.config.json');
-  if (!existsSync(path)) return;
-  const raw = readText(path);
-  let next = raw.replace(SCANROOTS_RE, `$1${value}`);
-  if (next === raw) {
-    const cfg: Record<string, unknown> = (readJson(path) as Record<string, unknown> | null) ?? {};
-    cfg.scanRoots = scanRoots;
-    next = `${JSON.stringify(cfg, null, 2)}\n`;
-  }
-  writeFileSync(path, next);
-  console.log(`  ✓ guard.config.json scanRoots = ${value}`);
 }
 
 // Wire the pre-commit hook from the selection. The hook lives at `hookRoot` (the git root —
@@ -710,7 +684,7 @@ function applyOverlay(cwd: string, plan: InitPlan, pkgRel: string, devkitRef: st
   overlayComponents.disabledGuards = disabledGuardsFor(selection.guards ?? [], plan.disabledGuards);
   if (!dryRun) {
     mkdirSync(join(cwd, '.devkit'), { recursive: true });
-    writeFileSync(
+    writeFileAtomic(
       join(cwd, '.devkit', 'config.json'),
       `${JSON.stringify(
         {
@@ -987,7 +961,7 @@ export async function applyInit(cwd: string, plan: InitPlan) {
     console.log('  [dry-run] write .devkit/config.json');
   } else {
     mkdirSync(join(cwd, '.devkit'), { recursive: true });
-    writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
+    writeFileAtomic(configPath, `${JSON.stringify(config, null, 2)}\n`);
     console.log('  ✓ wrote .devkit/config.json');
   }
 
@@ -1016,7 +990,7 @@ export const meta = {
 
 // Reason: flat CLI dispatch: resolves one `selection` via three converging paths (interactive wizard / --yes flags / non-TTY) then hands a fully-resolved plan to applyInit; the branches ARE the resolution-mode fork, each path linear with no shared nesting
 // fallow-ignore-next-line complexity
-export default async function run(args: string[], cwd: string) {
+async function run(args: string[], cwd: string): Promise<number> {
   const flags = initFlags.parseFlags(args);
   // Refuse before any write — a skewed runner (sc-2100), or a non-source devkit in devkit's own repo
   // (sc-2345): a later throw leaves a half-applied init that `doctor --fix` cannot finish.
@@ -1132,6 +1106,9 @@ export default async function run(args: string[], cwd: string) {
   if (interactive && !selfHost) outro('Done — run `devkit doctor` to verify.');
   return 0;
 }
+
+// One run per git root (sc-2429): run() reads the selection, installs from it, records it last.
+export default lockedCommand('init', run);
 
 // Re-export flag helpers for existing test importers; their implementation lives under install/flags.
 export { parseFlags, selectionFromFlags } from '../lib/install/flags/init-flags.mts';

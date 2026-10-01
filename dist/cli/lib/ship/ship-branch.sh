@@ -734,30 +734,13 @@ if [ "$FROM_BRANCH" -eq 0 ] && [ "$PATCH_BASE" != "$BASE" ] && [ -z "$LOCAL_BRAN
   ship_text_arm_trial || exit 1
 fi
 
-# Preview the raw-line ratchet against the exact base baseline BEFORE creating the worktree.
-# NOTE: this measures the CALLER's files against BASE, while a fork-point-anchored ship commits the
-# three-way MERGE of those files with the base — so when PATCH_BASE differs the preview can UNDER-count
-# a file the base grew. It fails CLOSED (the authoritative in-worktree ratchet still runs and still
-# blocks), and it is already --exit-zero advisory, so the imprecision is accepted rather than chased.
 . "$SCRIPT_DIR/prepare-gate-worktree.sh"
-if [ "$FROM_BRANCH" -eq 0 ] || [ -z "$LOCAL_BRANCH_EXISTS" ]; then
-  ship_size_preflight "$ROOT" "$BASE" "${PATHS[@]}"
-fi
-# Unconditional, unlike the size preview above: judge reachability does not depend on the staged
-# scope. A plain --dry-gates skips the reviewer gate entirely so it skips this too; --with-reviewers
-# runs that gate, where a dark provider would otherwise surface only as a strict-mode exit 3.
+# Judge reachability does not depend on the staged scope. A plain --dry-gates skips the reviewer gate
+# entirely so it skips this too; --with-reviewers runs that gate, where a dark provider would otherwise
+# surface only as a strict-mode exit 3. Fail-open, so it may run before the invocation is recorded;
+# the BLOCKING preflights (size, hook source, dist integrity) run after record_ship_intent exists.
 if [ "$DRY_GATES" -eq 0 ] || [ "$WITH_REVIEWERS" -eq 1 ]; then
   ship_judge_preflight "$ROOT"
-fi
-# Before `git worktree add -b` (sc-3883): a missing hook dir used to surface only inside
-# prepare_gate_worktree, after the branch existed. When this worktree also holds $BR, name that blocker
-# in the same refusal — otherwise the operator frees the branch, re-runs, and only then meets this one.
-if ! gate_hook_source_preflight "$ROOT" "$BASE" shipping; then
-  if [ -n "$PREFLIGHT_SELF" ]; then
-    echo "ship: also blocked — $PREFLIGHT_HINT. Fix both before re-running:" >&2
-    _ship_orphan_report_self "$PWD" "$BR"
-  fi
-  exit 1
 fi
 
 # Nothing to commit → say so NOW. Staging (below) has exactly three inputs: the tracked diff vs
@@ -851,6 +834,7 @@ done
 export DEVKIT_SHIP_PATHS
 export DEVKIT_SHIP_RESUMED=$RESUME
 SHIP_INTENT_GENERATION=""
+SHIP_INTENT_START_GENERATION=
 SHIP_SOURCE_ATTEMPT_ID=
 export DEVKIT_SHIP_INTENT_RECORDED=0
 if [ "$DRY_GATES" -eq 0 ]; then
@@ -880,6 +864,11 @@ if [ "$DRY_GATES" -eq 0 ]; then
       SHIP_INTENT_ARGS+=(--source-attempt-id "$SHIP_SOURCE_ATTEMPT_ID")
     fi
   fi
+  # A fresh attempt's failure-path record CASes this pre-preflight snapshot ('none' = no record), so
+  # a concurrent attempt that recorded meanwhile keeps its record rather than being clobbered (sc-2535).
+  [ "$RESUME" -eq 1 ] ||
+    SHIP_INTENT_START_GENERATION=$(node "$SHIP_INTENT" generation --root "$ROOT" --branch "$BR") ||
+    SHIP_INTENT_START_GENERATION=
 fi
 
 record_ship_intent() {
@@ -899,6 +888,19 @@ record_ship_intent() {
       fi
     fi
   fi
+}
+
+# A blocking preflight refused: record this attempt unless it already recorded, then exit with the
+# preflight's own status. record_ship_intent is a no-op under --dry-gates; a resume already CASes the
+# generation it read, and a fresh attempt CASes its pre-preflight snapshot.
+ship_abort_resumable() {
+  local rc=$1
+  if [ "$DEVKIT_SHIP_INTENT_RECORDED" -ne 1 ]; then
+    [ -z "$SHIP_INTENT_START_GENERATION" ] ||
+      SHIP_INTENT_ARGS+=(--expect-generation "$SHIP_INTENT_START_GENERATION")
+    record_ship_intent
+  fi
+  exit "$rc"
 }
 
 # A preserved-commit resume must win its intent CAS before the receipt/source-owner comparison
@@ -988,16 +990,37 @@ trap cleanup EXIT
 . "$SCRIPT_DIR/review/process/gate-signal-handoff.sh"
 gate_signal_handoff_init
 
-# This integrity boundary is caller-root-only and must run before any worktree/branch creation. A
-# failure is still resumable: record the invocation after the read-only check fails, then exit.
+# The blocking preflights. Each is read-only against the caller root and runs before any worktree or
+# branch exists, yet AFTER record_ship_intent is available: a blocked attempt records its invocation
+# and exits, so the printed retry is `devkit ship --resume <branch>` (sc-2389, sc-2535). A new
+# blocking preflight belongs here too — preflight-resume.test.mts fails one placed ahead of the record.
+# Identity and collision refusals above stay unrecorded: the record is keyed per branch, and writing
+# one for a branch this attempt may not own could clobber a live ship's resume record.
+
+# Preview the raw-line ratchet against the exact base baseline. NOTE: this measures the CALLER's files
+# against BASE, while a fork-point-anchored ship commits the three-way MERGE of those files with the
+# base — so when PATCH_BASE differs the preview can UNDER-count a file the base grew. It fails CLOSED
+# (the authoritative in-worktree ratchet still runs and still blocks), and it is already --exit-zero
+# advisory, so the imprecision is accepted rather than chased.
+if [ "$FROM_BRANCH" -eq 0 ] || [ -z "$LOCAL_BRANCH_EXISTS" ]; then
+  ship_size_preflight "$ROOT" "$BASE" "${PATHS[@]}" || ship_abort_resumable $?
+fi
+# Before `git worktree add -b` (sc-3883): a missing hook dir used to surface only inside
+# prepare_gate_worktree, after the branch existed. When this worktree also holds $BR, name that blocker
+# in the same refusal — otherwise the operator frees the branch, re-runs, and only then meets this one.
+if ! gate_hook_source_preflight "$ROOT" "$BASE" shipping; then
+  if [ -n "$PREFLIGHT_SELF" ]; then
+    echo "ship: also blocked — $PREFLIGHT_HINT. Fix both before re-running:" >&2
+    _ship_orphan_report_self "$PWD" "$BR"
+  fi
+  ship_abort_resumable 1
+fi
+# This integrity boundary is caller-root-only and must run before any worktree/branch creation.
 set +e
 node "$DIST_INTEGRITY" --root "$ROOT" --base "$BASE" -- "${PATHS[@]}"
 DIST_INTEGRITY_STATUS=$?
 set -e
-if [ "$DIST_INTEGRITY_STATUS" -ne 0 ]; then
-  [ "$DEVKIT_SHIP_INTENT_RECORDED" -eq 1 ] || record_ship_intent
-  exit "$DIST_INTEGRITY_STATUS"
-fi
+[ "$DIST_INTEGRITY_STATUS" -eq 0 ] || ship_abort_resumable "$DIST_INTEGRITY_STATUS"
 
 if [ -n "$LOCAL_BRANCH_EXISTS" ]; then
   # Resume only when the existing branch proves it is the exact output this invocation would have

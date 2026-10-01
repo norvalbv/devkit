@@ -5,7 +5,15 @@
  * and GUARD_COVERAGE_OK / GUARD_NO_COVERAGE (per-run operator assertion). Also covers the
  * istanbul/V8 aggregation math (statements/functions/branches/lines) in computePercentages.
  */
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -172,6 +180,39 @@ describe('runCoverage — fail-closed gate', () => {
     const s = spy();
     expect(runCoverage(root)).toBe(1);
     expect(text(s.err)).toMatch(/statements: 50% \(min 60%\)/);
+  });
+
+  it('a shortfall records the header and each failing metric as the gate reason, not the remedy (sc-1231)', () => {
+    const root = makeRoot();
+    writeConfig(root, { coverage: { statements: 60, lines: 60 } });
+    writeCoverage(root, COV);
+    const file = join(root, 'reason.txt');
+    process.env.DEVKIT_GATE_REASON_FILE = file;
+    try {
+      spy();
+      expect(runCoverage(root)).toBe(1);
+    } finally {
+      delete process.env.DEVKIT_GATE_REASON_FILE;
+    }
+    const reason = readFileSync(file, 'utf8');
+    expect(reason).toContain('Coverage below threshold');
+    expect(reason).toMatch(/statements: 50% \(min 60%\)/);
+    expect(reason).toMatch(/lines: 50% \(min 60%\)/);
+    expect(reason).not.toMatch(/Add tests to raise coverage/);
+  });
+
+  it('absent coverage data records a one-line reason (sc-1231)', () => {
+    const root = makeRoot();
+    writeConfig(root, { coverage: { statements: 60 } });
+    const file = join(root, 'reason.txt');
+    process.env.DEVKIT_GATE_REASON_FILE = file;
+    try {
+      spy();
+      expect(runCoverage(root)).toBe(1);
+    } finally {
+      delete process.env.DEVKIT_GATE_REASON_FILE;
+    }
+    expect(readFileSync(file, 'utf8').trim().split('\n')).toHaveLength(1);
   });
 
   it('enforces ONLY the configured keys — a branch floor fails while functions pass', () => {
