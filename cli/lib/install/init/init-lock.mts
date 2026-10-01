@@ -35,7 +35,7 @@ export function initLockWaitMs(raw: string | undefined): number {
 /** Run `fn` holding the init lock; on contention print the holder and return exit code 1. */
 export async function withInitLock(
   cwd: string,
-  command: 'init' | 'upgrade',
+  command: 'init' | 'upgrade' | 'doctor --fix',
   fn: () => Promise<number>,
 ): Promise<number> {
   const { gitRoot } = detectGitRoot(cwd);

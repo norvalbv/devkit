@@ -612,12 +612,9 @@ function applyRemovals(
 async function applyOverlay(cwd: string, plan: InitPlan, pkgRel: string, devkitRef: string) {
   const { stack, selection, force = false, dryRun = false } = plan;
   console.log(
-    `devkit init${dryRun ? ' (dry-run)' : ''} — OVERLAY (local-only) — stack=${stack}, devkit=${devkitRef}`,
+    `devkit init${dryRun ? ' (dry-run)' : ''} — OVERLAY (local-only) — stack=${stack}, devkit=${devkitRef}\n  invisible to git (.git/info/exclude); extends the repo; edits nothing committed\n`,
   );
-  console.log(
-    '  invisible to git (.git/info/exclude); extends the repo; edits nothing committed\n',
-  );
-  const wired = await installOverlay(cwd, selection, stack, force, dryRun);
+  const wired = await installOverlay(cwd, selection, stack, force, dryRun, plan);
   const ownsLineGrowth = upgradeOffers.overlayOwnsLineGrowth(cwd);
   upgradeOffers.applyOverlayMaxLines(cwd, selection, repoAdopted(cwd), ownsLineGrowth, dryRun);
   if (selection.guards?.includes('fanout') || selection.guards?.includes('size')) {
@@ -641,6 +638,8 @@ async function applyOverlay(cwd: string, plan: InitPlan, pkgRel: string, devkitR
   const overlayComponents = dropUndecided(
     {
       biome: Boolean(selection.biome),
+      tsconfig: Boolean(selection.tsconfig),
+      husky: Boolean(selection.husky),
       guards: [...(selection.guards ?? [])],
       skills: Boolean(selection.skills),
       agents: Boolean(selection.agents),
