@@ -50,3 +50,33 @@ ship_read_stdin_body() {
   BODY=$(<"$body_file")
   rm -f "$body_file"
 }
+
+# The --resume banner's body clause, naming the body that will SHIP (sc-3411): --body/--body-file
+# override the record, so sizing the record alone made an applied fix look like a stale replay.
+# Runs in the caller's shell (never $(...)) and sets SHIP_BODY_NOTE. A readable --body-file is read
+# HERE, once, into BODY_FILE_PREREAD; the BODY resolution ships those same bytes, so a rewrite of
+# the file during the gate run cannot make the banner describe bytes other than the ones shipped.
+# A failed pre-read is latched (BODY_FILE_PREREAD_SET=2); the resolution exits 1 on it.
+ship_resume_body_note() {
+  local recorded n
+  recorded=$(printf '%s' "$RESUME_BODY" | wc -c | tr -d ' ')
+  if [ "$BODY_SET" -eq 1 ]; then
+    n=$(printf '%s' "$BODY_FLAG" | wc -c | tr -d ' ')
+    SHIP_BODY_NOTE="body $n bytes (from --body, overriding recorded $recorded)"
+  elif [ "$BODY_FILE_SET" -eq 1 ]; then
+    # cat + sentinel, as at the resolution: $(<file) would strip every trailing newline.
+    if [ -f "$BODY_FILE_FLAG" ] && BODY_FILE_PREREAD=$(cat -- "$BODY_FILE_FLAG" 2>/dev/null && printf x); then
+      BODY_FILE_PREREAD=${BODY_FILE_PREREAD%x}
+      BODY_FILE_PREREAD_SET=1
+      n=$(printf '%s' "$BODY_FILE_PREREAD" | wc -c | tr -d ' ')
+      SHIP_BODY_NOTE=$(printf 'body %s bytes (from --body-file %q, overriding recorded %s)' "$n" "$BODY_FILE_FLAG" "$recorded")
+    else
+      # Latched: the resolution refuses rather than re-reading a file that appears later.
+      BODY_FILE_PREREAD_SET=2
+      if [ -f "$BODY_FILE_FLAG" ]; then BODY_FILE_PREREAD_ERR=unreadable; else BODY_FILE_PREREAD_ERR="no such file"; fi
+      SHIP_BODY_NOTE=$(printf 'body from --body-file %q (missing or unreadable — recorded %s bytes not used)' "$BODY_FILE_FLAG" "$recorded")
+    fi
+  else
+    SHIP_BODY_NOTE="body $recorded bytes"
+  fi
+}

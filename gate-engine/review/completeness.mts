@@ -106,6 +106,16 @@ export function normalizeCommitMessage(raw: string): string {
   return raw.replace(TRAILING_WS_RE, '').replace(BLANK_RUN_RE, '\n\n').trim();
 }
 
+/** Which message a PASS covers (sc-3411): subject, size, short sha of the normalised bytes. The
+ *  sticky PASS is diff-blind, so this is the log's only proof of which --resume body was judged. */
+function judgedMessageId(message: string): string {
+  const subject = message.split('\n', 1)[0] ?? '';
+  const chars = Array.from(subject); // code points: a UTF-16 slice can split an emoji's surrogates
+  const shown = chars.length > 60 ? `${chars.slice(0, 57).join('')}...` : subject;
+  const sha = createHash('sha256').update(message).digest('hex').slice(0, 12);
+  return `${JSON.stringify(shown)} ${Buffer.byteLength(message)}B sha:${sha}`;
+}
+
 /** The branch a sticky verdict is scoped to: the ship's exported branch, else the checkout's. */
 function verdictBranch(cwd: string): string {
   const exported = process.env.DEVKIT_SHIP_BRANCH;
@@ -257,6 +267,7 @@ export async function runCompleteness(
   let mcpProfile = namedAgentMcpProfile();
   let capabilityFingerprint = '';
   let stickyKey = '';
+  let messageId = '';
   let stagedIdentity: string | null = null;
   let model = '';
   try {
@@ -269,6 +280,7 @@ export async function runCompleteness(
     const message = normalizeCommitMessage(
       readFileSync(path.isAbsolute(msgFile) ? msgFile : path.resolve(cwd, msgFile), 'utf8'),
     );
+    messageId = judgedMessageId(message);
     // Every staged read below goes through this one snapshot; see snapshotStaged.
     const snapshot = snapshotStaged(cwd);
     stagedIdentity = snapshot.identity;
@@ -317,8 +329,8 @@ export async function runCompleteness(
       const diffMatches = stagedIdentity !== null && sticky.diff_sha === stagedIdentity;
       console.error(
         diffMatches
-          ? 'guard-review: completeness — cached PASS (same branch + message + staged diff)'
-          : 'guard-review: completeness — cached PASS (same branch + message; judged on an earlier diff, which is not re-judged)',
+          ? `guard-review: completeness — cached PASS (same branch + message + staged diff) — message ${messageId}`
+          : `guard-review: completeness — cached PASS (same branch + message; judged on an earlier diff, which is not re-judged) — message ${messageId}`,
       );
       const stickyDuration =
         typeof sticky.duration_ms === 'number' ? sticky.duration_ms : undefined;
@@ -383,7 +395,9 @@ export async function runCompleteness(
   );
   const hit = loadCache(cwd)[key];
   if (hit) {
-    console.error('guard-review: completeness — cached PASS (identical judgement)');
+    console.error(
+      `guard-review: completeness — cached PASS (identical judgement) — message ${messageId}`,
+    );
     // The most expensive entry in this store: its hit rate is the one that pays.
     const cachedDuration = typeof hit.duration_ms === 'number' ? hit.duration_ms : undefined;
     emitCacheHit('review:completeness', hit.model, cachedDuration);
@@ -455,6 +469,7 @@ export async function runCompleteness(
   }
   if (verdict === 'PASS') {
     emitVerdict('pass', reason || 'no gap found');
+    console.error(`guard-review: completeness — PASS — message ${messageId}`);
     return finish(0);
   }
   if (verdict !== 'FAIL') {
