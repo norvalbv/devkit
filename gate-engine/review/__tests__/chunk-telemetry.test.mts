@@ -3,12 +3,8 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { type ChunkPlanEntry, emitReviewChunkPlan } from '../evidence/chunk-plan.mts';
 import type { ChunkAssignment } from '../lens/chunk.mts';
-import {
-  deriveLensReviewer,
-  emitMergedLensResults,
-  type LensPart,
-  type ReviewTask,
-} from '../lens/split.mts';
+import { emitMergedLensResults } from '../lens/merge-results.mts';
+import { deriveLensReviewer, type LensPart, type ReviewTask } from '../lens/split.mts';
 import { hasChecklist, REVIEWERS, type ReviewerSelection } from '../reviewers.mts';
 import { runReviewGate } from '../run-review.mts';
 import { cleanupReviewFixtures, consumerRepo, passWithArtifact } from './run-review-fixtures.mts';

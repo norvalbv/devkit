@@ -231,6 +231,8 @@ export interface JudgeCli {
   codex: boolean;
   /** Env additions for the judge SPAWN (mcp secret forwarding — values never ride argv). */
   extraEnv?: Record<string, string>;
+  /** Codex only: the MCP servers actually injected — a dropped one is a server the judge lacks. */
+  mcpInjected?: string[];
 }
 
 /** One MCP server definition as the judge registry stores it (claude mcpServers shape). Typed as
@@ -247,6 +249,7 @@ export interface CodexMcpServerDef {
 export interface CodexMcpInjection {
   argv: string[];
   extraEnv: Record<string, string>;
+  injected: string[];
 }
 
 /** True when the runtime representation is a real string (a JSON number/object is not its own
@@ -271,6 +274,7 @@ export function codexMcpArgs(
 ): CodexMcpInjection {
   const argv: string[] = [];
   const extraEnv: Record<string, string> = {};
+  const injected: string[] = [];
   for (const [name, def] of Object.entries(servers)) {
     if (!MCP_NAME_RE.test(name)) {
       console.error(
@@ -321,8 +325,9 @@ export function codexMcpArgs(
     serverArgv.push('-c', `mcp_servers.${name}.startup_timeout_sec=10`);
     argv.push(...serverArgv);
     Object.assign(extraEnv, serverEnv);
+    injected.push(name);
   }
-  return { argv, extraEnv };
+  return { argv, extraEnv, injected };
 }
 
 /** The codex binary to spawn: overridable so an operator can pin ONE build when several sit on
@@ -355,6 +360,7 @@ export function judgeCliFor(
     argv: codexExecArgs(parts, mcp.argv),
     codex: true,
     extraEnv: mcp.extraEnv,
+    mcpInjected: mcp.injected,
   };
 }
 

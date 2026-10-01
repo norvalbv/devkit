@@ -56,6 +56,14 @@ describe('codexMcpArgs', () => {
       expect(collide.argv.join(' ')).toContain('mcp_servers.a.');
       expect(collide.argv.join(' ')).not.toContain('mcp_servers.b.');
       expect(collide.extraEnv).toEqual({ TOKEN: 'one' });
+      // sc-2837: what was dropped is reported, so the gate can mark the verdict DEGRADED.
+      expect(collide.injected).toEqual(['a']);
+      expect(dotted.injected).toEqual([]);
+      const url = codexMcpArgs(
+        { codebase: { url: 'https://x.test/mcp' }, c7: { command: 'x' } },
+        null,
+      );
+      expect(url.injected).toEqual(['c7']);
     } finally {
       err.mockRestore();
     }
@@ -84,5 +92,21 @@ describe('judgeCliFor with servers', () => {
     const claude = judgeCliFor(argvFor('sonnet'), SERVERS);
     expect(claude.codex).toBe(false);
     expect(claude.argv.join(' ')).not.toContain('mcp_servers');
+  });
+});
+
+describe('judgeCliFor MCP injection report (sc-2837)', () => {
+  it('names the injected servers on the codex path and leaves the claude path unreported', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const servers = { codebase: { url: 'https://x.test/mcp' }, context7: { command: 'npx' } };
+      const args = ['-p', 'x', '--allowedTools', 'mcp__codebase__*,mcp__context7__*'];
+      const codex = judgeCliFor([...args, '--model', 'gpt-5.6-sol'], servers);
+      expect(codex.codex).toBe(true);
+      expect(codex.mcpInjected).toEqual(['context7']);
+      expect(judgeCliFor([...args, '--model', 'sonnet'], servers).mcpInjected).toBeUndefined();
+    } finally {
+      err.mockRestore();
+    }
   });
 });

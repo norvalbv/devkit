@@ -2,7 +2,7 @@
 
 import { z } from 'zod';
 import { emitGateEvent } from '../../judge/gate-events.mts';
-import { boundedCause, RETRIEVAL_REVIEWER } from '../evidence/base-context.mts';
+import { boundedCause, degradedSuffix, RETRIEVAL_REVIEWER } from '../evidence/base-context.mts';
 import { attachItems } from '../evidence/items.mts';
 import type { ReviewerSelection } from '../reviewers.mts';
 import {
@@ -81,8 +81,10 @@ export function retrievalDegradation(
 }
 
 /** The status token a completion line prints — never a bare PASS for a degraded one. */
-export function verdictToken(res: Pick<ReviewOutcome, 'status' | 'degraded'>): string {
-  return `${res.status.toUpperCase()}${res.degraded ? ' (DEGRADED)' : ''}`;
+export function verdictToken(
+  res: Pick<ReviewOutcome, 'status' | 'degraded' | 'mcpDegraded'>,
+): string {
+  return `${res.status.toUpperCase()}${degradedSuffix(res)}`;
 }
 
 /**

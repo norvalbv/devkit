@@ -35,7 +35,12 @@
 
 import { z } from 'zod';
 import { diffCacheIdentity } from '../../judge/diff-focus.mts';
-import { cachedRetrievalDegradation, storedBaseSchema } from '../evidence/base-context.mts';
+import {
+  cachedMcpDegradation,
+  cachedRetrievalDegradation,
+  degradedSuffix,
+  storedBaseSchema,
+} from '../evidence/base-context.mts';
 import { planChunkedParts, resolveChunkCap } from './chunk-tasks.mts';
 import { deriveLensReviewer, lensGroupId, resolveLensGroups } from './groups.mts';
 // Re-exported so every existing importer's path keeps working after the guard-size split.
@@ -50,10 +55,7 @@ export {
 export { resolveChunkCap } from './chunk-tasks.mts';
 import type { ChunkAssignment } from './chunk.mts';
 import { emitReviewChunkPlan } from '../evidence/chunk-plan.mts';
-import { emitGateEvent } from '../../judge/gate-events.mts';
-import { composeTranscript, saveTranscript } from '../../judge/transcript-store.mts';
 import { coverageFields, partialEvidenceNote } from '../evidence/packet/coverage.mts';
-import { itemFields, mergeItemVectors } from '../evidence/items.mts';
 import type { ChecklistReviewer, ReviewerSelection } from '../reviewers.mts';
 import { parseReviewVerdict } from '../contracts/response.mts';
 
@@ -127,7 +129,14 @@ export function mergeLensOutcomes<
 }
 
 export type LensPart = {
-  res: { status: string; name: string; transcript?: string; model?: string; items?: unknown[] };
+  res: {
+    status: string;
+    name: string;
+    transcript?: string;
+    model?: string;
+    items?: unknown[];
+    mcpDegraded?: { cause: string; cached?: true }; // cached: replayed, not judged this run
+  };
   secs: number;
   /** The task this part ran. Carries the diff AND the derived reviewer, whose `lens` is the only
    * place the group survives — the reviewer NAME deliberately does not encode it. */
@@ -136,71 +145,6 @@ export type LensPart = {
    * recovered lens stays attributable in the merged row's lens_parts. Never in a cache key. */
   retried?: boolean;
 };
-
-/**
- * Emit the ONE review_result row per split reviewer that gate-verdict-attribution pairs with the
- * scope row. `secs` SUMS across groups — the honest cost of the split is the total judge time it
- * spent, not its wall-clock — while the item vectors concatenate so per-lens production rates stay
- * joinable across the flag.
- */
-export function emitMergedLensResults(
-  splitParts: Map<string, LensPart[]>,
-  firstModel: string,
-): void {
-  for (const [name, parts] of splitParts) {
-    const merged = mergeLensOutcomes(
-      parts.map((p) => p.res),
-      name,
-    ) as LensPart['res'] & {
-      reason?: string;
-      escalated?: boolean;
-      waivers?: unknown[];
-      inconclusiveCause?: string;
-    };
-    const transcript = parts
-      .filter((p) => p.res.transcript)
-      .map((p) => p.res.transcript)
-      .join('\n\n');
-    const transcriptRef = transcript
-      ? saveTranscript(`review-${name}`, composeTranscript(parts[0].task.diffText, transcript))
-      : null;
-    // Rebuild the item fields ACROSS the parts. Without this the event pairs one part's count and
-    // tally with every part's items, so a four-way split reads as a single-lens reviewer — the
-    // "everything comes from one agent" failure the per-lens vector exists to prevent.
-    mergeItemVectors(merged as never, parts.map((p) => p.res) as never);
-    emitGateEvent({
-      type: 'review_result',
-      reviewer: name,
-      status: merged.status,
-      escalated: Boolean(merged.escalated),
-      model: merged.model ?? firstModel,
-      reason: merged.reason,
-      inconclusive_cause: merged.inconclusiveCause,
-      secs: parts.reduce((sum, p) => sum + p.secs, 0),
-      // Per-group cost and verdict. `secs` above sums, and `escalated`/`model` collapse to the
-      // worst part, so without this vector a slow or repeatedly-escalating lens is invisible —
-      // exactly the per-agent breakdown separate reviewers would have given for free.
-      lens_parts: parts.map((p) => ({
-        lens: lensGroupId(p.task.sel.reviewer.lens ?? []),
-        status: p.res.status,
-        secs: p.secs,
-        // Chunk-telemetry wire format (sc-1999): WHICH plan slice this part judged, by index AND
-        // membership hash (an index alone is unstable); null when un-chunked. Chunk-grain table only.
-        chunk_index: p.task.chunk?.index ?? null,
-        chunk_files_sha: p.task.chunk?.filesSha ?? null,
-        ...coverageFields([p.task]),
-        ...(p.res.model ? { model: p.res.model } : {}),
-        ...(p.retried ? { retried: true } : {}),
-      })),
-      // The merged row itself is flagged when ANY part needed the post-wave recovery (sc-1476).
-      ...(parts.some((p) => p.retried) ? { retried: true, retry_phase: 'deferred' } : {}),
-      ...(merged.waivers?.length ? { waivers: merged.waivers } : {}),
-      ...itemFields(merged as never),
-      ...coverageFields(parts.map((p) => p.task)),
-      ...(transcriptRef ? { transcript_ref: transcriptRef } : {}),
-    });
-  }
-}
 
 export type ReviewTask = {
   sel: ReviewerSelection;
@@ -242,8 +186,9 @@ export function holdLensPart(
   held.push(part);
   parts.set(reviewer, held);
   const verdict = part.res.status.toUpperCase();
+  const suffix = part.res.status === 'pass' ? degradedSuffix(part.res) : '';
   const note = verdict === 'PASS' ? partialEvidenceNote(coverageFields([part.task])) : '';
-  console.error(`guard-review: ${label} — ${verdict} in ${part.secs}s${note}`);
+  console.error(`guard-review: ${label} — ${verdict}${suffix} in ${part.secs}s${note}`);
 }
 
 /** A cache-served reviewer (or split part) and its PASS's stored bases (null = none readable). */
@@ -253,6 +198,7 @@ export interface CachedHit {
   judgedBases: (string | null)[];
   part: boolean; // a split part's line has always read `cached PASS (identical)`
   degradedCause?: string; // sc-2317: a DEGRADED PASS replays as DEGRADED, never as a bare PASS
+  mcpDegradedCause?: string; // sc-2837: judged without a verdict-bearing MCP server
 }
 
 /** One scope row's inputs; `judgedBases` = stored bases of whichever parts were served from cache. */
@@ -366,7 +312,18 @@ export function planReviewWork(
         coverage: coverageFields(parts),
       });
       const degradedCause = cachedRetrievalDegradation(name, cache[parts[0].key]);
-      cachedHits.push({ label: name, files: sel.files, judgedBases, part: false, degradedCause });
+      // Every part: a split replays DEGRADED when any one of its groups was judged degraded.
+      const mcpDegradedCause = parts
+        .map((p) => cachedMcpDegradation(cache[p.key]))
+        .find((cause) => cause !== undefined);
+      cachedHits.push({
+        label: name,
+        files: sel.files,
+        judgedBases,
+        part: false,
+        degradedCause,
+        mcpDegradedCause,
+      });
       continue;
     }
     for (const p of parts) {
@@ -379,6 +336,7 @@ export function planReviewWork(
         files: p.sel.files,
         judgedBases: [storedBaseSchema.safeParse(cache[p.key].base_sha).data ?? null],
         part: true,
+        mcpDegradedCause: cachedMcpDegradation(cache[p.key]),
       });
       if (!p.splitOf) continue;
       // Rebuild the part WITH its cached aggregates (sc-1475): a spilled part's items never reach the
@@ -395,6 +353,10 @@ export function planReviewWork(
             e.itemTally && typeof e.itemTally === 'object' && !Array.isArray(e.itemTally)
               ? (e.itemTally as Record<string, number>)
               : undefined,
+          // A cached degraded group keeps the merged row DEGRADED beside freshly judged ones.
+          mcpDegraded: ((cause) => (cause ? { cause, cached: true } : undefined))(
+            cachedMcpDegradation(e),
+          ),
         } as LensPart['res'],
         secs: 0,
         task: p,

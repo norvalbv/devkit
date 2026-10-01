@@ -13,6 +13,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from '
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { namedAgentMcpProfile, withNamedAgentMcpTools } from '../mcp/profile.mts';
 import { execJudge, execJudgeAsync, recordAgentRun } from '../run-judge.mts';
 import { DIFF_HEADER, OUTPUT_HEADER, readTranscript } from '../transcript-store.mts';
 
@@ -738,5 +739,54 @@ describe('judge heartbeat wiring (sc-2422)', () => {
     expect(beats.at(-1)).toContain('review:long');
     expect(beats.at(-1)).not.toContain('review:short');
     for (const b of beats) expect(b.match(/still running/g)).toHaveLength(1);
+  });
+});
+
+describe('the spawn reports its own MCP degradation (sc-2837)', () => {
+  // The registry can hold codebase while the routed runtime still cannot use it: codex has no
+  // mapping for a url-typed server, so the judge runs without codebase search.
+  it('a codex spawn that drops a url-typed codebase reports a DEGRADED cause; claude does not', async () => {
+    const registry = path.join(dir, 'registry.json');
+    writeFileSync(
+      registry,
+      JSON.stringify({
+        mcpServers: {
+          codebase: { type: 'http', url: 'https://x.test/mcp' },
+          context7: { type: 'stdio', command: 'c7' },
+          autonomous_bugs: { type: 'stdio', command: 'bugs' },
+        },
+      }),
+      { mode: 0o600 },
+    );
+    process.env.DEVKIT_JUDGE_MCP_CONFIG = registry;
+    const fakeCodex = path.join(dir, 'fake-codex');
+    writeFileSync(fakeCodex, '#!/bin/sh\ncat >/dev/null\n', { mode: 0o755 });
+    process.env.GUARD_CODEX_BIN = fakeCodex;
+    fakeClaude('echo PASS');
+    const cwd = path.join(dir, 'repo');
+    mkdirSync(cwd);
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const causeFor = async (model: string) => {
+        let cause: string | undefined = 'never-called';
+        await execJudgeAsync({
+          label: 'review:commit-guard',
+          args: ['-p', 'x', '--model', model, '--allowedTools', withNamedAgentMcpTools('Read')],
+          timeout: 30000,
+          cwd,
+          mcpProfile: namedAgentMcpProfile(),
+          onMcpPrepared: (_fingerprint, degradedCause) => {
+            cause = degradedCause;
+          },
+        });
+        return cause;
+      };
+      expect(await causeFor('gpt-5.6-sol')).toMatch(
+        /^MCP codebase unavailable \(dropped by the codex judge config/,
+      );
+      expect(await causeFor('sonnet')).toBeUndefined();
+    } finally {
+      err.mockRestore();
+    }
   });
 });

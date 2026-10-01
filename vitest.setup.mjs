@@ -1,3 +1,4 @@
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -149,3 +150,27 @@ process.env.DEVKIT_GATE_EVENTS = path.join(
 // by a test must not auto-capture (git write-tree + transcript writes it never asked for). Disable it
 // suite-wide; a ship test sets DEVKIT_SHIP_ID (unaffected), and run-context's own test toggles this.
 process.env.DEVKIT_NO_TELEMETRY = '1';
+
+// sc-2837: runReviewGate now resolves the judge MCP registry ITSELF (to name, before any judge
+// spawns, the reviewers that will run without codebase) — so a gate test would otherwise answer to
+// the developer's ~/.claude.json: green PASS on a machine with codebase configured, PASS (DEGRADED)
+// on one without (CI, most laptops). Pin a hermetic registry carrying every baseline server so the
+// default suite run is the full-capability case; degraded-path tests point DEVKIT_JUDGE_MCP_CONFIG
+// at their own registry. The file must be absolute, owner-only and outside every fixture repo —
+// the same trust rules a real override meets (gate-engine/judge/mcp/profile.mts).
+{
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'devkit-test-mcp-registry-'));
+  const file = path.join(dir, 'registry.json');
+  writeFileSync(
+    file,
+    JSON.stringify({
+      mcpServers: {
+        codebase: { type: 'stdio', command: 'devkit-test-codebase' },
+        context7: { type: 'stdio', command: 'devkit-test-context7' },
+        autonomous_bugs: { type: 'stdio', command: 'devkit-test-autonomous-bugs' },
+      },
+    }),
+    { mode: 0o600 },
+  );
+  process.env.DEVKIT_JUDGE_MCP_CONFIG = file;
+}
