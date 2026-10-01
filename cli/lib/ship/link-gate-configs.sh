@@ -64,6 +64,30 @@ GATE_PROJECTION_CACHE_CANDIDATES=(
   .qavis/receipt.json
 )
 
+# Machine-local caches devkit's own tools write and its installers ignore. Never commit-appropriate,
+# so the linked-input notice must not tell anyone to commit one that happens not to be ignored
+# (sc-2274). The configured indexPath joins them at classification time.
+GATE_PROJECTION_LOCAL_CACHES=(
+  .fallow
+  .decisions
+)
+
+# gate_projection_is_local_cache <repo-relative-path> <configured-indexPath> <configured-decisionsDir>
+# A configured decisionsDir holds source records, so a projected path AT it or CONTAINING it is
+# source-owned and wins over the fixed cache names. A decisionsDir that contains the path (`.`) does
+# not: the records sit beside `.decisions`, which then holds only the embedding cache.
+gate_projection_is_local_cache() {
+  local rel=$1 index_rel=$2 decisions_rel=$3 cache
+  if [ -n "$decisions_rel" ]; then
+    case "$decisions_rel" in "$rel" | "$rel"/*) return 1 ;; esac
+  fi
+  [ -n "$index_rel" ] && [ "$rel" = "$index_rel" ] && return 0
+  for cache in "${GATE_PROJECTION_LOCAL_CACHES[@]}" "${GATE_PROJECTION_CACHE_CANDIDATES[@]}"; do
+    [ "$rel" = "$cache" ] && return 0
+  done
+  return 1
+}
+
 # gate_projection_is_stale_cache <worktree> <repo-relative-path>
 # A cache candidate the BASE COMMIT put in $WT and that is still there: not a symlink (we placed that),
 # not a path change-application already removed (a ship that untracks it), and not one absent from HEAD
@@ -270,6 +294,12 @@ link_untracked_gate_configs() {
   # Guard the empty array BEFORE expanding it (stock-macOS bash 3.2 aborts on "${arr[@]}" when empty
   # under `set -u`; cf. commit-with-gate-capture.sh).
   [ "${#linked[@]}" -eq 0 ] && return 0
+  # Wording only: a resolver failure leaves both empty and the fixed cache names still classify.
+  local decisions_rel=''
+  if [ -z "$index_rel" ]; then
+    IFS= read -r -d '' index_rel < <(node "$emitter" "$candidate_root" indexPath --null 2>/dev/null) || index_rel=
+  fi
+  IFS= read -r -d '' decisions_rel < <(node "$emitter" "$candidate_root" decisionsDir --null 2>/dev/null) || decisions_rel=
   {
     echo "⚠️  ship: ${#linked[@]} gate config(s) present in the repo but absent from the committed tree —"
     if is_review_projection_purpose "$purpose"; then
@@ -282,6 +312,8 @@ link_untracked_gate_configs() {
       # `check-ignore -q` inside the `if` → its exit-1 "not ignored" is errexit-safe.
       if gate_projection_source_is_ignored "$root" "${linked_sources[$linked_index]}" "$rel"; then
         echo "   - $rel (gitignored cache — normal)"
+      elif gate_projection_is_local_cache "$rel" "$index_rel" "$decisions_rel"; then
+        echo "   - $rel (local cache — linked in, intentionally not committed)"
       else
         echo "   - $rel (untracked — commit it so gates are consistent for everyone)"
       fi

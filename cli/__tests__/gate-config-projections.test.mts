@@ -171,6 +171,75 @@ describe('gate config projections', () => {
     });
   });
 
+  // sc-2274: the linked-input notice may only prescribe "commit it" for real config. A local cache
+  // that happens not to be gitignored must be named as one, never handed an imperative to commit it.
+  describe('linked-input notice classifies local caches', () => {
+    const COMMIT_HINT = 'commit it so gates are consistent';
+    const noticeLine = (stderr: string, rel: string) =>
+      stderr.split('\n').find((line) => line.startsWith(`   - ${rel} (`)) ?? '';
+    type ProjectionConfig = { indexPath?: string; decisionsDir?: string };
+    const seed = (root: string, config: ProjectionConfig) => {
+      writeFileSync(join(root, 'guard.config.json'), JSON.stringify(config));
+      for (const rel of [
+        '.decisions/index.json',
+        '.fallow/cache.bin',
+        '.cache/search index.db',
+        '.qavis/receipt.json',
+      ]) {
+        mkdirSync(join(root, rel, '..'), { recursive: true });
+        writeFileSync(join(root, rel), 'x');
+      }
+    };
+
+    for (const purpose of ['ship', 'review']) {
+      it(`${purpose}: un-ignored caches read as local, untracked config keeps the commit hint`, () => {
+        const { root, worktree } = fixture();
+        seed(root, { indexPath: '.cache/search index.db' });
+
+        const result = project(root, worktree, purpose);
+
+        expect(result.status, result.stderr).toBe(0);
+        for (const rel of [
+          '.decisions',
+          '.fallow',
+          '.cache/search index.db',
+          '.qavis/receipt.json',
+        ]) {
+          expect(noticeLine(result.stderr, rel)).toContain('local cache');
+          expect(noticeLine(result.stderr, rel)).not.toContain(COMMIT_HINT);
+        }
+        expect(noticeLine(result.stderr, 'guard.config.json')).toContain(COMMIT_HINT);
+      });
+    }
+
+    // Records AT or BENEATH `.decisions` make it source; at `.` they sit beside it, leaving only the cache.
+    for (const [decisionsDir, expected] of [
+      ['.decisions', COMMIT_HINT],
+      ['.decisions/records', COMMIT_HINT],
+      ['.', 'local cache'],
+    ]) {
+      it(`decisionsDir "${decisionsDir}" gives .decisions the ${expected} wording`, () => {
+        const { root, worktree } = fixture();
+        seed(root, { decisionsDir });
+
+        const result = project(root, worktree, 'ship');
+
+        expect(result.status, result.stderr).toBe(0);
+        expect(noticeLine(result.stderr, '.decisions')).toContain(expected);
+      });
+    }
+
+    it('a gitignored cache keeps the existing "normal" wording ahead of the cache classifier', () => {
+      const { root, worktree } = fixture();
+      seed(root, {});
+      writeFileSync(join(root, '.gitignore'), '.fallow/\n');
+
+      const result = project(root, worktree, 'ship');
+
+      expect(noticeLine(result.stderr, '.fallow')).toContain('gitignored cache — normal');
+    });
+  });
+
   it('leaves a gate-config symlink already present in the review snapshot untouched', () => {
     const { root, worktree } = fixture();
     writeFileSync(join(root, 'guard.config.json'), '{"scanRoots":["src"]}\n');
