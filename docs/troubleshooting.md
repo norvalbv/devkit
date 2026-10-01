@@ -22,6 +22,18 @@ devkit is git-root-aware: in a monorepo, run `init` **inside the package**, not 
 pre-commit hook lives at the git root with a **package-scoped** block. Example:
 `cd services/webapp && bunx devkit init --stack react-app`. Re-run `devkit doctor` from that package dir.
 
+## `devkit init: another devkit init/upgrade is running in <root> (pid N)`
+
+`devkit init` and `devkit upgrade` hold one lock per repository for their whole run. The lock sits
+in the git admin dir, as `.git/devkit-init.lock` (or under the `gitdir:` a worktree's `.git` file
+names), so it can never be staged. Outside git it is `.devkit/init.lock`. A second run waits about
+5 seconds and then refuses, instead of overwriting the first run's component record and undoing its
+installs. Monorepo packages share the one lock.
+
+Wait for pid N to finish, then re-run. A lock left by a crashed run is removed automatically once it
+is older than 60 seconds and its pid is gone. To clear one sooner, check that the pid is not running
+and delete the lock path the message prints. `--dry-run` never takes the lock.
+
 ## My commit didn't run the gates (overlay mode)
 
 In **overlay mode** a plain `git commit` (or an IDE/GUI commit) runs the **repo's own** hooks, not devkit's —
