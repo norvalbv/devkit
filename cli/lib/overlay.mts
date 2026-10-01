@@ -8,7 +8,6 @@
 import { execFileSync } from 'node:child_process';
 import {
   chmodSync,
-  copyFileSync,
   existsSync,
   mkdirSync,
   readdirSync,
@@ -16,13 +15,21 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import { CONFIG_FILENAME, resolveGuardConfig } from '../../gate-engine/config.mts';
 import { FALLOW_CACHE, OVERLAY_WRITTEN } from '../../gate-engine/deterministic/gate-inputs.mts';
 import { syncAgents } from '../commands/sync/sync-agents.mts';
 import { syncSkills } from '../commands/sync/sync-skills.mts';
-import { AGENT_TARGETS, normalizeSelection, type Selection } from './components.mts';
+import {
+  AGENT_TARGETS,
+  normalizeSelection,
+  overlayStructureNotice,
+  type Selection,
+  structureCmdFor,
+} from './components.mts';
 import { detectGitRoot } from './detect-git-root.mts';
 import { packageDir, readJson, writeIfAbsent } from './fs-helpers.mts';
-import { trackedPathPredicate } from './git-tracked.mts';
+import { cutStructureBaselines } from './generate/cut-structure-baselines.mts';
+import { isTracked, trackedPathPredicate } from './git-tracked.mts';
 import { buildOverlayHook } from './husky/husky-block.mts';
 import { describeOverlayCommitMsg, syncOverlaySiblingHooks } from './husky/overlay/commit-msg.mts';
 import { installHealAlias } from './husky/overlay/heal-alias.mts';
@@ -43,7 +50,9 @@ import {
   syncHookScripts,
 } from './install/install-hooks.mts';
 import { DECISIONS_INDEX_IGNORES } from './install/gitignore-cache.mts';
+import { installSearchCode, SEARCH_CODE_WRITTEN } from './install/install-search-code.mts';
 import { overlayAssetExcludes } from './install/overlay-asset-excludes.mts';
+import { writeBiomeOverlay, writeEslintOverlay } from './install/overlay-lint-configs.mts';
 import { addToGitExclude, overlayExcludeLines } from './install/overlay-excludes.mts';
 import { firstLine } from './standalone.mts';
 import { removeAgents, removeSkills } from './sync-manifest.mts';
@@ -125,97 +134,18 @@ function detectExistingHooks(gitRoot: string, scriptDir: string) {
   return readdirSync(abs).filter((f) => GIT_HOOKS.has(f));
 }
 
-// Detect the repo's flat eslint config to extend (overlay only supports flat ESM/JS configs).
-function repoEslintConfig(cwd: string) {
-  for (const f of ['eslint.config.mjs', 'eslint.config.js']) {
-    if (existsSync(join(cwd, f))) return f;
-  }
-  return null;
-}
-
-function writeEslintOverlay(cwd: string, force: boolean, dryRun: boolean) {
-  const repo = repoEslintConfig(cwd);
-  if (!repo) {
-    console.log('  • no flat eslint.config.{mjs,js} found — skipping eslint overlay');
-    return false;
-  }
-  const dest = join(cwd, 'eslint.config.devkit.mjs');
-  const content = `// devkit OVERLAY eslint config (LOCAL, git-ignored) — extends the repo's own config and
-// adds devkit's built-in size caps (no plugin). The overlay hook runs THIS over staged files.
-import repoConfig from './${repo}';
-
-const base = Array.isArray(repoConfig) ? repoConfig : [repoConfig];
-
-export default [
-  ...base,
-  {
-    files: ['**/*.{ts,tsx,js,jsx}'],
-    ignores: ['**/*.{test,spec}.{ts,tsx,js,jsx}'],
-    rules: {
-      'max-lines': ['error', { max: 500, skipBlankLines: false, skipComments: false }],
-      'max-lines-per-function': [
-        'error',
-        { max: 300, skipBlankLines: false, skipComments: false, IIFEs: true },
-      ],
-    },
-  },
-];
-`;
-  if (dryRun) {
-    console.log(`  [dry-run] write eslint.config.devkit.mjs (extends ./${repo} + size caps)`);
-    return true;
-  }
-  if (existsSync(dest) && !force) {
-    console.log('  • eslint.config.devkit.mjs exists (use --force to refresh)');
-    return true;
-  }
-  writeFileSync(dest, content);
-  console.log(`  ✓ wrote eslint.config.devkit.mjs (extends ./${repo} + size caps)`);
-  return true;
-}
-
-function writeBiomeOverlay(cwd: string, stack: string, force: boolean, dryRun: boolean) {
-  if (!existsSync(join(cwd, 'biome.jsonc')) && !existsSync(join(cwd, 'biome.json'))) {
-    console.log('  • no repo biome config — skipping biome overlay');
-    return false;
-  }
-  const repoBiome = existsSync(join(cwd, 'biome.jsonc')) ? './biome.jsonc' : './biome.json';
-  const variant = ['electron', 'react-app', 'next'].includes(stack) ? 'react' : 'base';
-  if (dryRun) {
-    console.log('  [dry-run] vendor biome base + write biome.devkit.jsonc (extends repo biome)');
-    return true;
-  }
-  // Vendor devkit's biome bases so the overlay can extend them by relative path (no package).
-  const destDir = join(cwd, '.devkit', 'biome');
-  mkdirSync(destDir, { recursive: true });
-  for (const f of readdirSync(join(packageDir(), 'biome'))) {
-    copyFileSync(join(packageDir(), 'biome', f), join(destDir, f));
-  }
-  const content = `${JSON.stringify(
-    { extends: [repoBiome, `./.devkit/biome/${variant}.jsonc`] },
-    null,
-    2,
-  )}\n`;
-  const dest = join(cwd, 'biome.devkit.jsonc');
-  if (existsSync(dest) && !force) {
-    console.log('  • biome.devkit.jsonc exists (use --force to refresh)');
-    return true;
-  }
-  writeFileSync(dest, content);
-  console.log(`  ✓ wrote biome.devkit.jsonc (extends ${repoBiome} + devkit ${variant})`);
-  return true;
-}
-
 /** The overlay pre-commit as written: the gates plus the linked-worktree prelude (sc-4157), whose
  * projection check is rendered from the gate inputs of the overlay installed at `root`. */
 export function buildOverlayPreCommit(
-  sel: Parameters<typeof buildOverlayHook>[0],
+  sel: Parameters<typeof buildOverlayHook>[0] & { structure?: boolean },
   chainTarget: string,
   pkgRel: string,
-  { root, fallow = false }: { root: string; fallow?: boolean },
+  { root, fallow = false, stack = '' }: { root: string; fallow?: boolean; stack?: string },
 ) {
-  const prelude = projectionPrelude(root, pkgRel);
-  return buildOverlayHook(sel, chainTarget, pkgRel, { fallow, prelude });
+  const notice = overlayStructureNotice(stack);
+  const prelude = `${projectionPrelude(root, pkgRel)}${notice ? `\necho "${notice}"` : ''}`;
+  const structureCmd = sel.structure ? structureCmdFor(stack) : undefined;
+  return buildOverlayHook({ ...sel, structureCmd }, chainTarget, pkgRel, { fallow, prelude });
 }
 
 // Take over core.hooksPath (at the GIT ROOT — repo-wide) and write our hooks dir. CRITICAL: git
@@ -228,7 +158,7 @@ function installOverlayHook(
   sel: Selection,
   origHooksPath: string,
   dryRun: boolean,
-  fallow = false,
+  { fallow, stack }: { fallow: boolean; stack: string },
 ) {
   const scriptDir = overlayHookScriptDir(origHooksPath);
   const existing = detectExistingHooks(gitRoot, scriptDir);
@@ -249,7 +179,10 @@ function installOverlayHook(
   mkdirSync(dir, { recursive: true });
   // pre-commit: devkit gates (+ optional fallow gate) + chain to the repo's pre-commit (if any).
   const pre = join(dir, 'pre-commit');
-  writeFileSync(pre, buildOverlayPreCommit(sel, preCommitChain, pkgRel, { root: gitRoot, fallow }));
+  writeFileSync(
+    pre,
+    buildOverlayPreCommit(sel, preCommitChain, pkgRel, { root: gitRoot, fallow, stack }),
+  );
   chmodSync(pre, 0o755);
   // every OTHER existing hook → pass-through (commit-msg: devkit's message judges, sc-1794).
   syncOverlaySiblingHooks(siblings, { dryRun: false });
@@ -278,13 +211,15 @@ export function syncOverlayHook(
   gitRoot: string,
   cwd: string,
   cfg: {
+    stack?: string;
     components?: Partial<Selection>;
     pkgRel?: string;
     origHooksPath?: string;
   },
   { dryRun }: { dryRun: boolean },
 ) {
-  const sel = normalizeSelection(cfg.components ?? {});
+  // Raw `structure`: normalizeSelection defaults it on, which would gate an overlay never baselined.
+  const sel = { ...normalizeSelection(cfg.components), structure: cfg.components?.structure };
   const pkgRel = cfg.pkgRel ?? '';
   const fallow = Boolean(cfg.components?.fallow);
   // Use the RECORDED origHooksPath — post-install core.hooksPath is devkit's own, so reading it
@@ -293,7 +228,11 @@ export function syncOverlayHook(
   const scriptDir = overlayHookScriptDir(origHooksPath);
   const existing = detectExistingHooks(gitRoot, scriptDir);
   const preCommitChain = existing.includes('pre-commit') ? `${scriptDir}/pre-commit` : '';
-  const expected = buildOverlayPreCommit(sel, preCommitChain, pkgRel, { root: gitRoot, fallow });
+  const expected = buildOverlayPreCommit(sel, preCommitChain, pkgRel, {
+    root: gitRoot,
+    fallow,
+    stack: cfg.stack,
+  });
 
   const pre = join(gitRoot, LOCAL_HOOKS, 'pre-commit');
   const current = existsSync(pre) ? readFileSync(pre, 'utf8') : null;
@@ -354,6 +293,9 @@ function installOverlayAgentSurfaces(
     removeAgents(gitRoot, dryRun);
   }
   const hooks = selectedHookAssets(sel, { searchSteering: false });
+  console.log(
+    '  · search-code steering hooks: not available in overlay (their command needs the package)',
+  );
   if (hooks.scripts.length) {
     console.log('  agent-hook scripts');
     const m = syncHookScripts(gitRoot, {
@@ -389,10 +331,25 @@ function installOverlayAgentSurfaces(
   return excl;
 }
 
+/** Structure judges by guard.config.json's grammar; a config without one (kept, or tracked) cannot run it. */
+function structureGrammarDeclared(cwd: string, stack: string) {
+  let trees: { grammar?: unknown }[] = [];
+  try {
+    trees = resolveGuardConfig(cwd).structure?.trees ?? [];
+  } catch (e: unknown) {
+    console.log(`  ! guard.config.json could not be read: ${firstLine(e)}`);
+  }
+  if (trees.some((tree) => tree.grammar)) return true;
+  console.log(
+    `  ! structure skipped — guard.config.json declares no structure grammar; \`devkit init --overlay --force\` writes the ${stack} template.`,
+  );
+  return false;
+}
+
 /** Install the overlay and return the cleanup metadata recorded in its config. */
 // Reason: flat overlay install orchestration: ordered guarded steps (config → lint → fallow → hook → alias → surfaces → exclude) each a single delegated call; high branch COUNT, near-zero nesting — splitting scatters the install sequence
 // fallow-ignore-next-line complexity
-export function installOverlay(
+export async function installOverlay(
   cwd: string,
   sel: Selection,
   stack: string,
@@ -404,7 +361,9 @@ export function installOverlay(
   // The real original hooksPath (never our own .devkit/hooks) — recorded for restore on clean.
   const origHooksPath = captureOrigHooksPath(gitRoot, cwd);
   const prior = readJson(join(cwd, '.devkit', 'config.json')) as {
-    components?: Partial<Pick<Selection, 'searchSteering' | 'agentHooks' | 'fallow' | 'guards'>>;
+    components?: Partial<
+      Pick<Selection, 'searchSteering' | 'agentHooks' | 'fallow' | 'guards' | 'structure'>
+    >;
   } | null;
   const legacyOwnedComponentIds = [
     prior?.components?.searchSteering && 'searchSteering',
@@ -424,18 +383,33 @@ export function installOverlay(
   ]);
   if (pkgRel) console.log(`  monorepo: package "${pkgRel}" — hook + git-ignore at the git root`);
 
-  // guard.config.json (data) — generic template.
+  // guard.config.json (data). Structure needs the stack template: it carries the `structure` grammar.
   console.log('  guard.config.json');
-  if (sel.guards?.length) {
-    const src = join(packageDir(), 'templates', 'generic', 'guard.config.json');
+  let wroteConfig = false;
+  if (sel.guards?.length || sel.structure) {
+    const tpl = sel.structure ? stack : 'generic';
+    const src = join(packageDir(), 'templates', tpl, 'guard.config.json');
     if (dryRun) {
       console.log('  [dry-run] write guard.config.json');
     } else {
-      writeIfAbsent(join(cwd, 'guard.config.json'), readFileSync(src, 'utf8'), {
-        force,
-      });
+      const dest = join(cwd, 'guard.config.json');
+      wroteConfig = writeIfAbsent(dest, readFileSync(src, 'utf8'), { force }) !== 'exists';
       console.log('  ✓ guard.config.json');
     }
+  }
+  const structure = Boolean(sel.structure) && (dryRun || structureGrammarDeclared(cwd, stack));
+  // Grandfather the tree whenever the grammar it is judged by is new: first wired, or rewritten.
+  if (structure && (wroteConfig || !prior?.components?.structure)) {
+    console.log('  structure baselines (grandfather current tree)');
+    if (dryRun) console.log('  [dry-run] skip structure + import-wall baseline generators');
+    else await cutStructureBaselines(cwd, stack);
+  }
+  if (sel.searchCode) {
+    installSearchCode(cwd, dryRun, {
+      configTracked: isTracked(gitRoot, `${pfx}${CONFIG_FILENAME}`),
+    });
+    for (const input of SEARCH_CODE_WRITTEN)
+      for (const l of overlayExcludeLines(pfx, input)) excludes.add(l);
   }
 
   // ours-extends-theirs lint overlays, in the package.
@@ -457,8 +431,11 @@ export function installOverlay(
 
   // local hook (core.hooksPath override) at the git root + chain + pass-through of all hooks.
   console.log('  local hook');
-  const hookSel = { ...sel, antiSlop: antiSlop.wired };
-  installOverlayHook(gitRoot, pkgRel, hookSel, origHooksPath, dryRun, fallowWired);
+  const hookSel = { ...sel, structure, antiSlop: antiSlop.wired };
+  installOverlayHook(gitRoot, pkgRel, hookSel, origHooksPath, dryRun, {
+    fallow: fallowWired,
+    stack,
+  });
 
   // Per-clone alias restores this repo-wide hook path after husky reclaims it.
   installHealAlias(gitRoot, overlayHooksPath(gitRoot), dryRun);
@@ -477,5 +454,7 @@ export function installOverlay(
   addToGitExclude(gitRoot, [...excludes], dryRun);
 
   // Cleanup restores the original hook path and only removes components recorded as wired.
-  return { origHooksPath, fallowWired, antiSlopWired: antiSlop.wired };
+  const { searchCode } = sel;
+  const components = { fallow: fallowWired, antiSlop: antiSlop.wired, structure, searchCode };
+  return { origHooksPath, components };
 }

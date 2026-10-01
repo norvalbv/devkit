@@ -229,11 +229,12 @@ async function upgrade(args: string[], cwd: string): Promise<number> {
     // init'd with --no-biome. Honour the recorded value; else infer from the on-disk overlay marker (the
     // same legacy-inference idiom as `structure` above) — biome.devkit.jsonc is written iff biome was on.
     const biome = cfg.components?.biome ?? existsSync(join(cwd, 'biome.devkit.jsonc'));
-    const sel = applyOverlayConstraints({
-      ...normalizeSelection(cfg.components),
-      agentTargets,
-      biome,
-    });
+    // structure as recorded, never the normalized default: an adopted overlay is never re-baselined.
+    const structure = cfg.components?.structure ?? false;
+    const sel = applyOverlayConstraints(
+      { ...normalizeSelection(cfg.components), agentTargets, biome, structure },
+      stack,
+    );
     // `--force` must NOT reach applyOverlay's config writers: writeIfAbsent(guard.config.json) and
     // writeBiomeOverlay OVERWRITE on force, but upgrade's contract (and the package-mode branch, which
     // hardcodes force:false) is that tuned configs are NEVER overwritten. Refreshing overlay configs is

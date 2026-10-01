@@ -508,7 +508,7 @@ describe('buildOverlayHook — gates-only guard for the global init.sh shim', ()
     expect(hook.indexOf('__dk_review_baseline_gate eslint')).toBeGreaterThan(firstAi);
     expect(hook.indexOf('__dk_review_baseline_gate fallow')).toBeGreaterThan(firstAi);
     // Staged checks never leak into review mode, nor baselines into commit/ship.
-    expect(hook).toContain('if [ "${DEVKIT_RUN_MODE:-}" != "review" ]; then\n    DK_TS=');
+    expect(hook).toContain('if [ "${DEVKIT_RUN_MODE:-}" != "review" ]; then\n    DK_STAGED=');
   });
 });
 
