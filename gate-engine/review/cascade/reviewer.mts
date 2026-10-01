@@ -13,6 +13,7 @@ import { renderGoverningClaudeMd } from '../claude-md.mts';
 import { renderStagedLineCounts } from '../evidence/line-counts.mts';
 import { parseReviewVerdict } from '../contracts/response.mts';
 import { buildCappedDiffEvidence } from '../diff-evidence.mts';
+import { omissionHintFor } from '../evidence/packet/omission-hint.mts';
 import { responseContractFor } from '../contracts/registry.mts';
 import { attachItems } from '../evidence/items.mts';
 import { stagedGroundingSource } from '../contracts/conventions-grounding.mts';
@@ -209,7 +210,13 @@ async function cascadeVerdict(
   // Lazy: git is read only for files a FAIL actually cites, once each across all three checks.
   const grounding = stagedGroundingSource(cwd, files, evidenceTree);
   const lensesOf = (raw: string) => responseContract?.blockingLenses(raw, grounding) ?? [];
-  const input = buildCappedDiffEvidence(gitCached(cwd, [], files), inventory);
+  const passModel = reviewer.model ?? firstModel;
+  // A shell-less judge gets a Read hint beside each OMITTED/TRUNCATED marker (sc-2305).
+  const input = buildCappedDiffEvidence(
+    gitCached(cwd, [], files),
+    inventory,
+    omissionHintFor(reviewer, passModel),
+  );
   const allowedTools = allowedToolsFor(reviewer, cfg, checklistRoot);
   const mcpProfile = namedAgentMcpProfile();
   const args = (promptBody: string, model: string): string[] => [
@@ -221,7 +228,6 @@ async function cascadeVerdict(
     '--allowedTools',
     allowedTools,
   ];
-  const passModel = reviewer.model ?? firstModel;
   // Per-lens spend attribution: every split part deliberately shares one judge LABEL (the reviewer
   // identity the caches and warehouse key on), so the lens rides the judge_exec event as its own field.
   const lens = reviewer.lens?.length ? lensGroupId(reviewer.lens) : undefined;

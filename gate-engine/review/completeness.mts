@@ -64,6 +64,7 @@ import { loadCache, savePasses } from './cache.mts';
 import { isShipLane, reviewAgentsDir } from './cascade/consumer-assets.mts';
 import { buildCappedDiffEvidence } from './diff-evidence.mts';
 import { commitIndexEnv } from '../ratchets/commit-index.mts';
+import { headTreeish } from '../ratchets/git-index.mts';
 import { stagedTreeHash } from './evidence/staged-git.mts';
 import {
   cacheKey,
@@ -154,23 +155,6 @@ function snapshotStaged(cwd: string): StagedSnapshot {
     return { range, identity: createHash('sha256').update(raw).digest('hex') };
   } catch {
     return { range: ['--cached'], identity: null };
-  }
-}
-
-/** HEAD, or the empty tree before the first commit: the base `git diff --cached` compares against. */
-function headTreeish(cwd: string): string {
-  try {
-    return execFileSync('git', ['rev-parse', '--verify', '--quiet', 'HEAD'], {
-      cwd,
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    }).trim();
-  } catch {
-    return execFileSync('git', ['hash-object', '-t', 'tree', '--stdin'], {
-      cwd,
-      encoding: 'utf8',
-      input: '',
-    }).trim();
   }
 }
 

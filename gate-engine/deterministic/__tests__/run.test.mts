@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { deterministicStrict } from '../../config.mts';
 import { parseOpts, prefixCacheScope, runDeterministic, selectedIds } from '../run.mts';
@@ -143,6 +143,152 @@ describe('runDeterministic — aggregation + trichotomy', () => {
     expect(err.mock.calls.flat().join('\n')).toContain(
       'deterministic gates failed: guard-size guard-anti-slop',
     );
+  });
+});
+
+// sc-2753: the judge-free comment budget aggregates here, so one fix pass sees every cheap finding.
+describe('runDeterministic — comments joins the aggregated set', () => {
+  const eventsOf = (sink) =>
+    readFileSync(sink, 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map((l) => JSON.parse(l))
+      .filter((e) => e.type === 'gate_result');
+
+  it('reports anti-slop AND comment-budget findings in ONE block (the sc-2753 two-attempt bug)', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exec = mkExec({ 'cli/index.mts': 1, 'comment-firewall/cli': 1 });
+    expect(runDeterministic(repo(['comments'], true), { exec })).toBe(1);
+    const out = err.mock.calls.flat().join('\n');
+    expect(out).toContain('deterministic gates failed: guard-anti-slop guard-comments');
+    expect(out).toContain(
+      'On commit or ship, decision and reviewer gates run only after these pass.',
+    );
+    expect(exec).toHaveBeenCalledWith(
+      'node',
+      [expect.stringMatching(/comment-firewall[/\\]cli\.m[tj]s$/), 'gate'],
+      expect.anything(),
+    );
+  });
+
+  it('a clean comment budget adds no failure', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exec = mkExec({});
+    expect(runDeterministic(repo(['size', 'comments']), { exec })).toBe(0);
+    expect(exec).toHaveBeenCalledTimes(2);
+  });
+
+  it('exit 4 blocks as unreadable-evidence — never unexpected:4, and could_not_run in telemetry', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const d = repo(['comments']);
+    const sink = join(d, 'events.jsonl');
+    process.env.DEVKIT_GATE_EVENTS = sink;
+    expect(runDeterministic(d, { exec: mkExec({ 'comment-firewall/cli': 4 }) })).toBe(1);
+    const out = err.mock.calls.flat().join('\n');
+    expect(out).toContain('deterministic gates failed: guard-comments(unreadable-evidence)');
+    expect(out).not.toContain('unexpected:4');
+    expect(eventsOf(sink)).toEqual([
+      expect.objectContaining({
+        gate: 'comments',
+        status: 'could_not_run',
+        family: 'deterministic',
+      }),
+    ]);
+  });
+
+  it('a real comment finding is a fail in telemetry, never an unreadable-evidence label', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const d = repo(['comments']);
+    const sink = join(d, 'events.jsonl');
+    process.env.DEVKIT_GATE_EVENTS = sink;
+    expect(runDeterministic(d, { exec: mkExec({ 'comment-firewall/cli': 1 }) })).toBe(1);
+    expect(err.mock.calls.flat().join('\n')).not.toContain('unreadable-evidence');
+    expect(eventsOf(sink)).toEqual([expect.objectContaining({ gate: 'comments', status: 'fail' })]);
+  });
+
+  it('exit 2 is never an opt-out for comments — it blocks as unexpected, strict or not', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(
+      runDeterministic(repo(['comments']), { exec: mkExec({ 'comment-firewall/cli': 2 }) }),
+    ).toBe(1);
+    const out = err.mock.calls.flat().join('\n');
+    expect(out).toContain('guard-comments(unexpected:2)');
+    expect(out).not.toContain('opted out');
+  });
+
+  it('strict mode keeps the unreadable-evidence label (it was never an opt-out)', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    process.env.GUARD_DETERMINISTIC_STRICT = '1';
+    expect(
+      runDeterministic(repo(['comments']), { exec: mkExec({ 'comment-firewall/cli': 4 }) }),
+    ).toBe(1);
+    const out = err.mock.calls.flat().join('\n');
+    expect(out).toContain('guard-comments(unreadable-evidence)');
+    expect(out).not.toContain('could-not-run');
+  });
+
+  it("the exit-4 label is comments' own — another gate's exit 4 stays unexpected:4", () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exec = mkExec({ 'size-disable': 4, 'comment-firewall/cli': 4 });
+    expect(runDeterministic(repo(['size', 'comments']), { exec })).toBe(1);
+    expect(err.mock.calls.flat().join('\n')).toContain(
+      'deterministic gates failed: guard-size(unexpected:4) guard-comments(unreadable-evidence)',
+    );
+  });
+
+  // A caller-shaped `--extra` label must never decide the outcome: the exit code does (sc-2753).
+  it.each(['x(unreadable-evidence)', 'y(unexpected:9)', 'z(could-not-run)'])(
+    'an --extra gate labelled %s that exits 1 is a fail under its full label',
+    (label) => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      const d = repo([]);
+      const sink = join(d, 'events.jsonl');
+      process.env.DEVKIT_GATE_EVENTS = sink;
+      const exec = vi.fn(() => {
+        const e = new Error('exit 1');
+        e.status = 1;
+        throw e;
+      });
+      expect(runDeterministic(d, { exec, extra: [{ label, cmd: 'lint-it' }] })).toBe(1);
+      expect(eventsOf(sink)).toEqual([expect.objectContaining({ gate: label, status: 'fail' })]);
+    },
+  );
+
+  it('--only comments is a known id and runs just the firewall', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exec = mkExec({});
+    expect(runDeterministic(repo(['size', 'comments']), { exec, only: ['comments'] })).toBe(0);
+    expect(exec).toHaveBeenCalledTimes(1);
+    expect(exec.mock.calls[0][1][0]).toMatch(/comment-firewall/);
+  });
+
+  it('runs the REAL firewall end-to-end: a staged 3-line comment paragraph blocks in the aggregate', () => {
+    const d = repo(['comments']);
+    const git = (...a) => execFileSync('git', a, { cwd: d, stdio: 'pipe' });
+    git('init', '-q');
+    git('config', 'user.email', 't@example.com');
+    git('config', 'user.name', 'T');
+    git('add', '.devkit/config.json');
+    git('commit', '-q', '-m', 'base');
+    mkdirSync(join(d, 'src'), { recursive: true });
+    writeFileSync(
+      join(d, 'src', 'a.ts'),
+      '// first line of prose\n// second line of prose\n// third line of prose\nexport const a = 1;\n',
+    );
+    git('add', 'src/a.ts');
+    const runner = join(import.meta.dirname, '..', 'run.mts');
+    let status = 0;
+    let stderr = '';
+    try {
+      execFileSync(process.execPath, [runner], { cwd: d, stdio: 'pipe', encoding: 'utf8' });
+    } catch (e) {
+      status = e.status;
+      stderr = `${e.stderr}`;
+    }
+    expect(status).toBe(1);
+    // The child's own first line stays byte-stable for the collector, then the aggregate names it.
+    expect(stderr).toContain('guard-comments: 1 added/modified comment paragraph need a decision.');
+    expect(stderr).toContain('✗ deterministic gates failed: guard-comments\n');
   });
 });
 
@@ -411,6 +557,24 @@ describe('selectedIds', () => {
     const d = repo([], true);
     writeFileSync(join(d, '.devkit', 'config.json'), '{ nope');
     expect(selectedIds(d)).toEqual(['size', 'fanout', 'dup', 'clone']);
+  });
+
+  it('selects comments from components.guards, but keeps it out of both fallbacks (opt-in)', () => {
+    expect(selectedIds(repo(['size', 'comments']))).toEqual(['size', 'comments']);
+    expect(selectedIds(repo(['review', 'decisions']))).toEqual([]);
+    expect(selectedIds(repo(null))).not.toContain('comments');
+    const d = repo(['comments']);
+    writeFileSync(join(d, '.devkit', 'config.json'), '{ nope');
+    expect(selectedIds(d)).not.toContain('comments');
+  });
+
+  it('review mode honours comments in the explicit allowlist, and only there', () => {
+    const d = repo(['size', 'comments']);
+    process.env.DEVKIT_RUN_MODE = 'review';
+    process.env.DEVKIT_REVIEW_GUARDS = 'comments,review';
+    expect(selectedIds(d)).toEqual(['comments']);
+    process.env.DEVKIT_REVIEW_GUARDS = 'size,review';
+    expect(selectedIds(d)).toEqual(['size']);
   });
 
   it('uses the explicit review allowlist instead of components.guards in review mode', () => {
@@ -739,5 +903,225 @@ describe('deterministicStrict', () => {
   it('treats an explicit falsey value as off, not as "set"', () => {
     process.env.GUARD_DETERMINISTIC_STRICT = '0';
     expect(deterministicStrict()).toBe(false);
+  });
+});
+
+// sc-1231: a failing gate's REASON reaches the aggregated verdict and the gate_result detail through
+// the out-of-band DEVKIT_GATE_REASON_FILE, while stdio stays inherited.
+describe('runDeterministic — failure reasons (sc-1231)', () => {
+  // Like mkExec, but a gate may record a reason through the env the runner handed it — the real
+  // channel, not a shortcut — and every call's options are kept for the isolation assertions.
+  function mkReasonExec(byModule) {
+    const calls = [];
+    const exec = vi.fn((_node, argv, opts) => {
+      calls.push(opts);
+      const hit = Object.entries(byModule).find(([k]) => argv[0].includes(k));
+      const { code = 0, reason } = hit ? hit[1] : {};
+      if (reason) writeFileSync(opts.env.DEVKIT_GATE_REASON_FILE, reason);
+      if (code !== 0) {
+        const e = new Error(`exit ${code}`);
+        e.status = code;
+        throw e;
+      }
+    });
+    return { exec, calls };
+  }
+  const events = (sink) =>
+    readFileSync(sink, 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map((l) => JSON.parse(l))
+      .filter((e) => e.type === 'gate_result');
+  const sinkIn = (d) => {
+    process.env.DEVKIT_GATE_EVENTS = join(d, 'events.jsonl');
+    return process.env.DEVKIT_GATE_EVENTS;
+  };
+
+  it('the reason survives later noisy gates: it sits UNDER the ✗ line and in the event detail', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const d = repo(['size', 'fanout', 'dup', 'clone']);
+    const sink = sinkIn(d);
+    const { exec } = mkReasonExec({
+      'size-disable': {
+        code: 1,
+        reason: '🚫 1 file(s) over\n   cli/commands/init.mts: 1320 lines (max 1319)\n',
+      },
+      matcher: { code: 0, reason: 'a PASSING gate that wrote a reason anyway' },
+    });
+    expect(runDeterministic(d, { exec })).toBe(1);
+    const out = err.mock.calls.flat().join('\n');
+    const verdict = out.indexOf('✗ deterministic gates failed: guard-size');
+    expect(verdict).toBeGreaterThan(-1);
+    expect(out.indexOf('cli/commands/init.mts: 1320 lines (max 1319)')).toBeGreaterThan(verdict);
+    // A passing gate's reason is never attributed — it did not fail.
+    expect(out).not.toContain('a PASSING gate');
+    expect(out).not.toContain('listed above');
+    const size = events(sink).find((e) => e.gate === 'size');
+    expect(size.detail).toBe(
+      'guard-size: 🚫 1 file(s) over · cli/commands/init.mts: 1320 lines (max 1319)',
+    );
+  });
+
+  it('a failing gate that recorded nothing gets the fallback note, and its detail stays the bare label', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const d = repo(['size']);
+    const sink = sinkIn(d);
+    const { exec } = mkReasonExec({ 'size-disable': { code: 1 } });
+    expect(runDeterministic(d, { exec })).toBe(1);
+    const out = err.mock.calls.flat().join('\n');
+    expect(out).toContain('no reason summary from this gate');
+    expect(out).toContain('guard-size reads the index');
+    expect(events(sink).find((e) => e.gate === 'size').detail).toBe('guard-size');
+  });
+
+  it('two failing gates each report ONLY their own reason — no cross-attribution', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const d = repo(['size', 'fanout']);
+    const sink = sinkIn(d);
+    const { exec, calls } = mkReasonExec({
+      'size-disable': { code: 1, reason: 'SIZE-REASON' },
+      'folder-fanout': { code: 1, reason: 'FANOUT-REASON' },
+    });
+    expect(runDeterministic(d, { exec })).toBe(1);
+    const files = calls.map((o) => o.env.DEVKIT_GATE_REASON_FILE);
+    expect(new Set(files).size).toBe(files.length);
+    const byGate = new Map(events(sink).map((e) => [e.gate, e.detail]));
+    expect(byGate.get('size')).toBe('guard-size: SIZE-REASON');
+    expect(byGate.get('fanout')).toBe('guard-fanout: FANOUT-REASON');
+    const out = err.mock.calls.flat().join('\n');
+    expect(out.indexOf('SIZE-REASON')).toBeLessThan(out.indexOf('── guard-fanout ──'));
+  });
+
+  it("every gate still runs with stdio INHERITED (no pipe), and an outer run's reason file is overridden", () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const d = repo(['size', 'dup']);
+    process.env.DEVKIT_GATE_REASON_FILE = join(d, 'outer.txt'); // e.g. a nested guard-deterministic
+    try {
+      const { exec, calls } = mkReasonExec({ 'size-disable': { code: 1, reason: 'why' } });
+      expect(runDeterministic(d, { exec })).toBe(1);
+      for (const o of calls) {
+        expect(o.stdio).toBe('inherit');
+        expect(o.env.DEVKIT_GATE_REASON_FILE).not.toBe(join(d, 'outer.txt'));
+      }
+      expect(() => readFileSync(join(d, 'outer.txt'))).toThrow(); // the outer file was never written
+    } finally {
+      delete process.env.DEVKIT_GATE_REASON_FILE;
+    }
+  });
+
+  it('the private reason dir is removed after the run — green, red, and a spawn crash alike', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const seen = [];
+    const record = (opts) => seen.push(dirname(opts.env.DEVKIT_GATE_REASON_FILE));
+    const d = repo(['size']);
+    const green = vi.fn((_n, _a, o) => record(o));
+    const red = vi.fn((_n, _a, o) => {
+      record(o);
+      writeFileSync(o.env.DEVKIT_GATE_REASON_FILE, 'x');
+      throw Object.assign(new Error('x'), { status: 1 });
+    });
+    const crash = vi.fn((_n, _a, o) => {
+      record(o);
+      throw new Error('spawn ENOENT'); // no numeric status → treated as a real fail
+    });
+    expect(runDeterministic(d, { exec: green })).toBe(0);
+    expect(runDeterministic(d, { exec: red })).toBe(1);
+    expect(runDeterministic(d, { exec: crash })).toBe(1);
+    expect(seen).toHaveLength(3);
+    for (const dir of seen) expect(existsSync(dir)).toBe(false);
+  });
+
+  it('strict could-not-run and unexpected codes carry the reason too, and the gate name stays bare', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    process.env.GUARD_DETERMINISTIC_STRICT = '1';
+    const d = repo(['size', 'fanout']);
+    const sink = sinkIn(d);
+    const { exec } = mkReasonExec({
+      'size-disable': { code: 2, reason: 'no baseline' },
+      'folder-fanout': { code: 5, reason: 'boom' },
+    });
+    expect(runDeterministic(d, { exec })).toBe(1);
+    const byGate = new Map(events(sink).map((e) => [e.gate, e]));
+    expect(byGate.get('size')).toMatchObject({
+      status: 'could_not_run',
+      detail: 'guard-size(could-not-run): no baseline',
+    });
+    expect(byGate.get('fanout')).toMatchObject({
+      status: 'could_not_run',
+      detail: 'guard-fanout(unexpected:5): boom',
+    });
+  });
+
+  it('an unusable TMPDIR never stops the gates: the verdict stands, reasons degrade to the note', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const d = repo(['size', 'fanout']);
+    const saved = process.env.TMPDIR;
+    process.env.TMPDIR = join(d, 'missing', 'tmp');
+    try {
+      const { exec, calls } = mkReasonExec({ 'size-disable': { code: 1 } });
+      expect(runDeterministic(d, { exec })).toBe(1);
+      expect(calls).toHaveLength(2); // every gate still ran
+      expect(err.mock.calls.flat().join('\n')).toContain('no reason summary from this gate');
+      expect(runDeterministic(d, { exec: mkReasonExec({}).exec })).toBe(0);
+    } finally {
+      if (saved === undefined) delete process.env.TMPDIR;
+      else process.env.TMPDIR = saved;
+    }
+  });
+
+  it("an --extra spelled like a built-in label never gets the built-in size gate's hint", () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const d = repo(['fanout']);
+    const exec = vi.fn((cmd) => {
+      if (cmd === 'false') throw Object.assign(new Error('x'), { status: 1 });
+    });
+    const extra = [
+      { label: 'guard-size(foo)', cmd: 'false' },
+      { label: 'guard-size', cmd: 'false' },
+    ];
+    expect(runDeterministic(d, { exec, extra })).toBe(1);
+    expect(err.mock.calls.flat().join('\n')).not.toContain('reads the index');
+  });
+
+  it('a strict could-not-run built-in still carries its reason into the report and event', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    process.env.GUARD_DETERMINISTIC_STRICT = '1';
+    const d = repo(['dup']);
+    const sink = sinkIn(d);
+    const { exec } = mkReasonExec({ matcher: { code: 2, reason: 'co-occurrence index missing' } });
+    expect(runDeterministic(d, { exec })).toBe(1);
+    expect(err.mock.calls.flat().join('\n')).toContain('co-occurrence index missing');
+    expect(events(sink).find((e) => e.gate === 'dup').detail).toBe(
+      'guard-dup(could-not-run): co-occurrence index missing',
+    );
+  });
+
+  it('an unrunnable --extra never spawns, reports the fallback note, and does not crash the report', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const d = repo(['size']);
+    const { exec } = mkReasonExec({});
+    expect(runDeterministic(d, { exec, extra: [{ label: 'lint' }] })).toBe(1);
+    const out = err.mock.calls.flat().join('\n');
+    expect(out).toContain('── lint(unrunnable: empty command) ──');
+    expect(out).toContain('no reason summary from this gate');
+  });
+
+  it('a gate reason with ANSI colour and CRLF (Windows tooling) is stripped and split in both outputs', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const d = repo(['size']);
+    const sink = sinkIn(d);
+    const { exec } = mkReasonExec({
+      'size-disable': {
+        code: 1,
+        reason: '\u001b[31mred\u001b[0m\r\n  src\\a.ts: 9 lines (max 1)\r\n',
+      },
+    });
+    expect(runDeterministic(d, { exec })).toBe(1);
+    const out = err.mock.calls.flat().join('\n');
+    expect(out).not.toContain('\u001b[');
+    expect(out).not.toContain('\r');
+    expect(events(sink).find((e) => e.gate === 'size').detail).toBe(
+      'guard-size: red · src\\a.ts: 9 lines (max 1)',
+    );
   });
 });

@@ -67,7 +67,7 @@ describe('assembled hook execution (stubbed bins, sh -e)', () => {
     expect(r.calls).toContain('guard-review --gate');
   });
 
-  it('dry-gates remembers deterministic failure, runs comments, and skips expensive gates', () => {
+  it('dry-gates remembers deterministic failure and skips expensive gates', () => {
     const r = runHook({
       DET_RC: '1',
       DEVKIT_RUN_MODE: 'dry-gates',
@@ -75,7 +75,8 @@ describe('assembled hook execution (stubbed bins, sh -e)', () => {
     });
     expect(r.status).toBe(1);
     expect(r.calls).toContain('guard-deterministic');
-    expect(r.calls).toContain('guard-comments gate');
+    // sc-2753: the comment budget runs inside guard-deterministic, never as its own hook step.
+    expect(r.calls).not.toContain('guard-comments');
     expect(r.calls).not.toContain('guard-decisions');
     expect(r.calls).not.toContain('guard-review');
     expect(r.calls).not.toContain('guard-qavis-advisory');
@@ -89,7 +90,6 @@ describe('assembled hook execution (stubbed bins, sh -e)', () => {
     });
     expect(r.status).toBe(1);
     expect(r.calls).toContain('guard-deterministic');
-    expect(r.calls).toContain('guard-comments gate');
     expect(r.calls).toContain('guard-review --gate');
     expect(r.calls).not.toContain('guard-decisions');
     expect(r.calls).not.toContain('guard-qavis-advisory');
@@ -125,15 +125,15 @@ describe('assembled hook execution (stubbed bins, sh -e)', () => {
     expect(r.calls).toContain('guard-review --gate');
   });
 
-  it('review runs every selected gate after deterministic and comments failures, then blocks once', () => {
+  it('review runs every selected gate after deterministic and decision failures, then blocks once', () => {
     const r = runHook({
       DET_RC: '1',
-      COMMENTS_RC: '1',
+      DEC_RC: '1',
       DEVKIT_RUN_MODE: 'review',
-      DEVKIT_REVIEW_GUARDS: 'size,comments,review',
+      DEVKIT_REVIEW_GUARDS: 'size,decisions,review',
     });
     expect(r.status).toBe(1);
-    expect(r.calls).toContain('guard-comments gate');
+    expect(r.calls).toContain('guard-decisions');
     expect(r.calls).toContain('guard-review --gate');
   });
 
@@ -185,7 +185,6 @@ describe('assembled hook execution (stubbed bins, sh -e)', () => {
     const r = runHook({ DET_RC: '0' });
     expect(r.status).toBe(0);
     expect(r.calls).toContain('guard-deterministic');
-    expect(r.calls).toContain('guard-comments gate');
     expect(r.calls).toContain('guard-decisions');
     expect(r.calls).toContain('guard-review');
   });
@@ -243,24 +242,26 @@ describe('assembled hook execution (stubbed bins, sh -e)', () => {
     expect(r.stdout).not.toContain('Record the decision target');
   });
 
-  it('guard-comments blocks before later AI gates on an unresolved finding', () => {
-    const r = runHook({ COMMENTS_RC: '1' });
-    expect(r.status).toBe(1);
-    expect(r.calls).toContain('guard-comments gate');
-    expect(r.calls).not.toContain('guard-decisions');
-    expect(r.calls).not.toContain('guard-review');
-  });
+  // sc-2753: an installed guard-comments bin is never the hook's own step any more — a stale
+  // failing bin must not block, because the orchestrator owns the comment budget now.
+  it.each(['package', 'standalone', 'overlay'])(
+    '%s hook never calls guard-comments directly, even when that bin would block',
+    (builder) => {
+      const r = runHook({ COMMENTS_RC: '1' }, undefined, { builder });
+      expect(r.status).toBe(0);
+      expect(r.calls).toContain('guard-deterministic');
+      expect(r.calls).not.toContain('guard-comments');
+    },
+  );
 
-  it('guard-comments blocks on every non-zero exit — there is no fail-open outage code', () => {
-    const r = runHook({ COMMENTS_RC: '2' });
-    expect(r.status).toBe(1);
-    expect(r.stdout).toContain('unexpected exit 2');
-    expect(r.calls).not.toContain('guard-decisions');
-    expect(runHook({ COMMENTS_RC: '3' }).status).toBe(1);
-    const unreadable = runHook({ COMMENTS_RC: '4' });
-    expect(unreadable.status).toBe(1);
-    expect(unreadable.stdout).toContain('NOT a rejection');
-  });
+  it.each(['package', 'standalone', 'overlay'])(
+    '%s comments-only selection still emits the deterministic orchestrator',
+    (builder) => {
+      const r = runHook({ DET_RC: '1' }, { biome: false, guards: ['comments'] }, { builder });
+      expect(r.status).toBe(1);
+      expect(r.calls).toContain('guard-deterministic');
+    },
+  );
 });
 
 describe('parallel completeness prewarm (ship message file present)', () => {
@@ -876,7 +877,8 @@ describe('ship: sentry is judged before the qavis advisory', () => {
 // after them (fallow-gate-owned-by-fallow, 2026-09-28 note).
 describe('overlay staged gates run before the AI guards (sc-3020)', () => {
   const REVIEWED = { biome: false, guards: ['comments', 'decisions', 'review'] };
-  const AI_CALLS = ['guard-comments', 'guard-decisions', 'guard-review'];
+  // sc-2753: comments rides guard-deterministic, which already runs before fallow.
+  const AI_CALLS = ['guard-decisions', 'guard-review'];
   const overlay = (extra = {}) => ({ builder: 'overlay', fallow: true, staged: true, ...extra });
 
   for (const mode of ['', 'ship', 'dry-gates']) {

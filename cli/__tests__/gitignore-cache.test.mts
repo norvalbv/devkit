@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import {
   existsSync,
   mkdirSync,
@@ -133,6 +133,22 @@ describe('ensureDevkitCacheGitignore', () => {
     const gi = readFileSync(join(d, '.gitignore'), 'utf8');
     expect(gi).not.toContain('!.devkit/comment-firewall-rationales.json');
     expect(gi).not.toContain('.devkit/comment-firewall-receipts.json');
+  });
+
+  // sc-2274: the decisions embedding cache and its crash-leftover atomic-write sidecars are ignored,
+  // but a decisionsDir configured as `.decisions` keeps its records committable.
+  it('ignores the decisions embedding cache without hiding records that share its directory', () => {
+    const d = tmp();
+    execFileSync('git', ['init', '-q'], { cwd: d });
+    ensureDevkitCacheGitignore(d, false);
+    const ignored = (rel: string) =>
+      spawnSync('git', ['check-ignore', '-q', '--no-index', rel], { cwd: d }).status === 0;
+    expect(ignored('.decisions/index.json')).toBe(true);
+    expect(ignored('.decisions/index.json.4242.1767225600000.tmp')).toBe(true);
+    expect(ignored('.decisions/some-axis.md')).toBe(false);
+    expect(ignored('.decisions/INDEX.md')).toBe(false);
+    expect(ignored('.decisions/index.json.md')).toBe(false);
+    expect(ignored('.decisions/index.json-notes.md')).toBe(false);
   });
 
   it('dry-run writes nothing', () => {

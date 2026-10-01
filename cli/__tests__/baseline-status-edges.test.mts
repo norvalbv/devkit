@@ -16,7 +16,13 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import baselineStatus from '../commands/baseline/status.mts';
 import { type RunRef, isUsableRun } from '../lib/baseline-status/gh.mts';
 import { produceTestReport, summarise } from '../lib/baseline-status/produce.mts';
-import { MAX_RUNS_CEILING, queryBaseline, resolveRef } from '../lib/baseline-status/query.mts';
+import {
+  DEFAULT_ARTIFACT,
+  MAX_RUNS_CEILING,
+  cacheName,
+  queryBaseline,
+  resolveRef,
+} from '../lib/baseline-status/query.mts';
 
 const FIXTURES = join(import.meta.dirname, 'fixtures');
 
@@ -567,7 +573,7 @@ describe('artifact validation and transient failures (correctness-reviewer findi
       summaryFor({ 'cli/a.test.mts': 'passed' }, true),
     );
     mkdirSync(join(dir, '.devkit/baseline-status'), { recursive: true });
-    writeFileSync(join(dir, '.devkit/baseline-status/100-1.json'), '{}');
+    writeFileSync(join(dir, '.devkit/baseline-status', cacheName(100, 1, DEFAULT_ARTIFACT)), '{}');
     const answer = queryBaseline({ cwd: dir, ref: 'main', file: 'cli/a.test.mts' });
     expect(answer.file?.status).toBe('passed');
   });
@@ -755,7 +761,7 @@ describe('provenance, list validation and status vocabulary (reviewer round 3)',
     // Schema-valid, correctly named, but describing run 555 — believing it reports another run's
     // per-file results under this run's identity.
     writeFileSync(
-      join(dir, '.devkit/baseline-status/100-1.json'),
+      join(dir, '.devkit/baseline-status', cacheName(100, 1, DEFAULT_ARTIFACT)),
       summaryFor({ 'cli/a.test.mts': 'failed' }, false, 555),
     );
     expect(queryBaseline({ cwd: dir, ref: 'main', file: 'cli/a.test.mts' }).file?.status).toBe(

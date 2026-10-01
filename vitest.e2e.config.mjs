@@ -10,8 +10,8 @@ export default defineConfig({
     // Same GIT_DIR-family + JSCPD_BIN stripping the unit suite relies on — mandatory here because
     // the fixtures spawn a real `git commit` that fires the installed hook.
     setupFiles: ['./vitest.setup.mjs'],
-    // Build + pack + install happens once before workers start; a build failure aborts the run.
-    globalSetup: ['./e2e/lib/global-setup.mts'],
+    // Load stamp first, so a run whose build + pack + install aborts still records its start load.
+    globalSetup: ['./vitest.global-setup.mjs', './e2e/lib/global-setup.mts'],
     // Real subprocess chains (git commit → sh hook → bunx → guard-*) are slow under load; match the
     // unit suite's generous ceiling rather than vitest's 5s default.
     hookTimeout: 120000,

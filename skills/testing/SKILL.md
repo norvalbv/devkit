@@ -46,7 +46,9 @@ artifact CI uploads, not from log scraping — a CI log interleaves failures fro
 grepping it cannot prove a file passed. It reports `passed` / `failed` / `skipped` / `excluded` /
 `absent` / `unknown` separately, and reports the whole run's status apart from the test step's,
 because those two differ constantly. A file that is already failing on the default branch is not
-yours to fix; say so instead of burning fix cycles on it.
+yours to fix; say so instead of burning fix cycles on it. An `unknown` carrying a remedy line
+(`workflow-missing`, or `no-usable-run` with no artifact) means this repo's CI does not produce
+the report yet — follow the remedy (`devkit test-report-run --help`) rather than re-running tests.
 
 ## Fixing failures — max 2 cycles
 
@@ -82,6 +84,8 @@ So:
 - Put the budget in one named constant per file, with a comment, so it is not quietly tightened later.
 
 Making these changes is fixing a broken test, not weakening a real one — the timing claim was never what the test was protecting.
+
+A test that asserts a product's **own** timeout (for example, "the ceiling fires and names the stuck step") races setup against that timeout. Have the stuck step print a marker. Before the strict assertions, check for it: if the timeout fired and the marker is absent, the timeout won the race before the step under test ran. Fail with a distinct, greppable label that says so, and include the machine load. Do not reuse the assertion's message. A reached marker with the wrong outcome is a real regression and must keep failing on the strict assertions.
 
 ## Reviewing test adequacy
 

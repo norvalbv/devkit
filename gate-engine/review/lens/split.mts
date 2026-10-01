@@ -52,6 +52,7 @@ import type { ChunkAssignment } from './chunk.mts';
 import { emitReviewChunkPlan } from '../evidence/chunk-plan.mts';
 import { emitGateEvent } from '../../judge/gate-events.mts';
 import { composeTranscript, saveTranscript } from '../../judge/transcript-store.mts';
+import { coverageFields, partialEvidenceNote } from '../evidence/packet/coverage.mts';
 import { itemFields, mergeItemVectors } from '../evidence/items.mts';
 import type { ChecklistReviewer, ReviewerSelection } from '../reviewers.mts';
 import { parseReviewVerdict } from '../contracts/response.mts';
@@ -183,13 +184,11 @@ export function emitMergedLensResults(
         lens: lensGroupId(p.task.sel.reviewer.lens ?? []),
         status: p.res.status,
         secs: p.secs,
-        // Chunk-telemetry wire format (sc-1999): WHICH slice of the chunk plan this part judged,
-        // by index AND membership hash (a bare index is unstable across packing changes). Null on
-        // every un-chunked run — today that is every production run; sc-1907 starts assigning
-        // ReviewTask.chunk. The warehouse ingests non-null entries into its chunk-grain child
-        // table and must never widen its per-lens row for them.
+        // Chunk-telemetry wire format (sc-1999): WHICH plan slice this part judged, by index AND
+        // membership hash (an index alone is unstable); null when un-chunked. Chunk-grain table only.
         chunk_index: p.task.chunk?.index ?? null,
         chunk_files_sha: p.task.chunk?.filesSha ?? null,
+        ...coverageFields([p.task]),
         ...(p.res.model ? { model: p.res.model } : {}),
         ...(p.retried ? { retried: true } : {}),
       })),
@@ -197,6 +196,7 @@ export function emitMergedLensResults(
       ...(parts.some((p) => p.retried) ? { retried: true, retry_phase: 'deferred' } : {}),
       ...(merged.waivers?.length ? { waivers: merged.waivers } : {}),
       ...itemFields(merged as never),
+      ...coverageFields(parts.map((p) => p.task)),
       ...(transcriptRef ? { transcript_ref: transcriptRef } : {}),
     });
   }
@@ -213,9 +213,7 @@ export type ReviewTask = {
    * derived clone against it always mismatches and would flip every split PASS to `error` in review
    * mode. The on-disk assets are identical either way, so the base selection is what to verify. */
   base: ReviewerSelection;
-  /** The chunk-plan slice this task judges (sc-1999 wire format; never in a cache key here — chunk
-   * identity reaches keys via sc-1907's own plan-suffix design). Absent on every un-chunked task,
-   * which today is all of them; production chunking (sc-1907) is the assigner. */
+  /** The chunk-plan slice this task judges (sc-1999); absent when un-chunked, never a key input. */
   chunk?: ChunkAssignment;
 };
 
@@ -243,7 +241,9 @@ export function holdLensPart(
   const held = parts.get(reviewer) ?? [];
   held.push(part);
   parts.set(reviewer, held);
-  console.error(`guard-review: ${label} — ${part.res.status.toUpperCase()} in ${part.secs}s`);
+  const verdict = part.res.status.toUpperCase();
+  const note = verdict === 'PASS' ? partialEvidenceNote(coverageFields([part.task])) : '';
+  console.error(`guard-review: ${label} — ${verdict} in ${part.secs}s${note}`);
 }
 
 /** A cache-served reviewer (or split part) and its PASS's stored bases (null = none readable). */
@@ -262,12 +262,13 @@ export interface ScopePlan {
   judgedBases: (string | null)[];
 }
 
-/** A reviewer served wholly from cache: summed duration, the judging model, and its stored bases. */
+/** A reviewer served wholly from cache: summed duration, model, stored bases, packet coverage. */
 export interface FullyCachedReviewer {
   name: string;
   duration: number;
   model: string | undefined;
   judgedBases: (string | null)[];
+  coverage: ReturnType<typeof coverageFields>;
 }
 
 export interface ReviewWorkPlan {
@@ -361,6 +362,7 @@ export function planReviewWork(
         duration,
         model: z.string().min(1).safeParse(cache[parts[0].key].model).data,
         judgedBases,
+        coverage: coverageFields(parts),
       });
       cachedHits.push({ label: name, files: sel.files, judgedBases, part: false });
       continue;

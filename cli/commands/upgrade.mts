@@ -32,6 +32,7 @@ import {
   captureAntiSlopBaselineActivation,
 } from '../lib/install/anti-slop/managed-state.mts';
 import { collectAntiSlopGroups } from '../lib/install/anti-slop/runner.mts';
+import { lockedCommand } from '../lib/install/init/init-lock.mts';
 import {
   offerLineGrowth,
   offerNewGates,
@@ -101,7 +102,7 @@ interface PackageManifest {
 // broad refresh → force-adopt → verify), each a single delegated call with near-zero nesting; the
 // real logic lives in the composed commands (applyInit / computeMigration / doctor / update).
 // fallow-ignore-next-line complexity
-export default async function upgrade(args: string[], cwd: string): Promise<number> {
+async function upgrade(args: string[], cwd: string): Promise<number> {
   const dryRun = args.includes('--dry-run');
   const force = args.includes('--force');
 
@@ -433,6 +434,10 @@ export default async function upgrade(args: string[], cwd: string): Promise<numb
   console.log('\n6. verify\n');
   return doctor([], cwd);
 }
+
+// Upgrade reads the recorded selection, re-installs from it and rewrites config.json — the same
+// read-early/write-late run as init, so it shares init's lock (sc-2429).
+export default lockedCommand('upgrade', upgrade);
 
 // Reconcile a stale devkit pin in package.json to `#v<target>` — update's "up to date"
 // short-circuit never re-pins, so an installed==latest repo can keep a stale #vX.Y.Z. Idempotent:

@@ -42,6 +42,9 @@ export function rewriteRepo({ extraPath = false, rename = false, objectFormat = 
   g(['add', '.gitignore', '.husky/.keep', 'conflict.txt', ...(rename ? ['old.txt'] : [])]);
   g(['commit', '-q', '-m', 'base']);
   g(['push', '-q', 'origin', 'main']);
+  // What GitHub reports as the PR's baseRefOid: a snapshot from the last head push, NOT the live
+  // base tip — main moves below and this value does not follow it (sc-2739).
+  const oldBase = g(['rev-parse', 'HEAD']);
 
   g(['checkout', '-q', '-b', 'feature']);
   writeFileSync(join(dir, 'conflict.txt'), 'feature\n');
@@ -98,7 +101,12 @@ export function rewriteRepo({ extraPath = false, rename = false, objectFormat = 
       'case " $* " in',
       "  *' --json url '*) printf '%s\\n' 'https://github.com/acme/app/pull/7'; exit 0 ;;",
       'esac',
-      `printf '7\\tOPEN\\t%s\\t%s\\tacme/app\\tmain\\t${mainTip}\\thttps://github.com/acme/app/pull/7\\n' "\${PR_HEAD_REF_NAME:-feat/pr}" "\${PR_HEAD_OID:-${oldPrTip}}"`,
+      // PR_BASE_OID_FILE lets a gate hook change the reported snapshot mid-run.
+      `base_oid=\${PR_BASE_OID:-${oldBase}}`,
+      'if [ -n "${PR_BASE_OID_FILE:-}" ] && [ -f "$PR_BASE_OID_FILE" ]; then base_oid=$(cat "$PR_BASE_OID_FILE"); fi',
+      // Like real gh, emit baseRefOid only when the caller asked for it.
+      'base_col=""; case " $* " in *baseRefOid*) base_col="$base_oid\t" ;; esac',
+      `printf "7\\tOPEN\\t%s\\t%s\\tacme/app\\t%s\\t\${base_col}https://github.com/acme/app/pull/7\\n" "\${PR_HEAD_REF_NAME:-feat/pr}" "\${PR_HEAD_OID:-${oldPrTip}}" "\${PR_BASE_REF_NAME:-main}"`,
       '',
     ].join('\n'),
   );
@@ -120,7 +128,9 @@ export function rewriteRepo({ extraPath = false, rename = false, objectFormat = 
       // AUTO_GC_IGNORES_CONFIG forces one anyway, i.e. any clean-but-leaky fetch.
       'case " $* " in',
       '  *" fetch "*)',
-      '    if [ -n "${FETCH_FAIL_STATUS:-}" ]; then',
+      // FETCH_FAIL_ARMED_BY: fail only fetches made after a gate hook creates that file.
+      '    if [ -n "${FETCH_FAIL_ARMED_BY:-}" ] && [ ! -e "$FETCH_FAIL_ARMED_BY" ]; then :',
+      '    elif [ -n "${FETCH_FAIL_STATUS:-}" ]; then',
       '      printf \'%s\\n\' "${FETCH_FAIL_STDERR:-fatal: Could not read from remote repository.}" >&2',
       '      exit "$FETCH_FAIL_STATUS"',
       '    fi',
@@ -158,6 +168,7 @@ export function rewriteRepo({ extraPath = false, rename = false, objectFormat = 
     env: { PATH: `${stubBin}:${process.env.PATH}`, GH_LOG: ghLog, GH_BODY: ghBody },
     g,
     mainTip,
+    oldBase,
     oldPrTip,
     stubBin,
     ghLog,

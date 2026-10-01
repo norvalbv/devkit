@@ -313,6 +313,70 @@ describe('raw-line cap (the maxLines gate — size owned by the ratchet, not esl
     expect(r.stderr).toContain('src/fresh.ts: 70 lines (max 50)');
   });
 
+  // sc-1231: under guard-deterministic the gate also records WHY, so the aggregated verdict can
+  // repeat it after every later gate has printed.
+  const gateWithReason = (root) => {
+    const file = join(root, 'reason.txt');
+    const r = spawnSync(process.execPath, [SCRIPT, 'gate'], {
+      cwd: root,
+      encoding: 'utf8',
+      env: { ...process.env, DEVKIT_GATE_REASON_FILE: file },
+    });
+    let reason = '';
+    try {
+      reason = readFileSync(file, 'utf8');
+    } catch {}
+    return { r, reason };
+  };
+
+  it('a line-cap block records the offending file and limit as the gate reason', () => {
+    const root = makeRoot();
+    writeConfig(root, { scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 50 });
+    write(root, 'src/fresh.ts', big(70));
+    const { r, reason } = gateWithReason(root);
+    expect(r.status).toBe(1);
+    expect(reason).toContain('src/fresh.ts: 70 lines (max 50)');
+    expect(reason).not.toContain('↳'); // fan-out hints are remedy, log-only
+  });
+
+  it('hints are split by identity, not by glyph: a file named ↳… stays in the reason', () => {
+    const root = makeRoot();
+    writeConfig(root, { scanRoots: ['.'], sourceExtensions: ['ts'], maxLines: 50 });
+    write(root, '↳large.ts', big(70));
+    const { r, reason } = gateWithReason(root);
+    expect(r.status).toBe(1);
+    expect(reason).toContain('↳large.ts: 70 lines (max 50)');
+    expect(reason).not.toContain('impl files'); // the fan-out hint itself stays log-only
+  });
+
+  it('an ungoverned opt-out (exit 2) records why, so a strict run that blocks on it can say so', () => {
+    const root = makeRoot(); // no guard.config.json, no baseline
+    write(root, 'src/a.ts', 'export {};\n');
+    const { r, reason } = gateWithReason(root);
+    expect(r.status).toBe(2);
+    expect(reason).toContain('ungoverned repo');
+  });
+
+  it('a new disable directive records the file and its counts as the gate reason', () => {
+    const root = makeRoot();
+    writeConfig(root, { scanRoots: ['src'] });
+    write(root, 'src/b.ts', '/* eslint-disable max-lines */\nexport {};\n');
+    const { r, reason } = gateWithReason(root);
+    expect(r.status).toBe(1);
+    expect(reason).toContain('may only SHRINK');
+    expect(reason).toContain('src/b.ts: 1/0 file/fn disables vs 0/0 allowed');
+    expect(reason).not.toContain('Split the file'); // remedy stays in the log only
+  });
+
+  it('a PASSING gate records no reason (nothing a later reader could misattribute)', () => {
+    const root = makeRoot();
+    writeConfig(root, { scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 50 });
+    write(root, 'src/ok.ts', big(10));
+    const { r, reason } = gateWithReason(root);
+    expect(r.status).toBe(0);
+    expect(reason).toBe('');
+  });
+
   it('freeze records logical line counts under the current baseline version', () => {
     const root = makeRoot();
     writeConfig(root, { scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 50 });

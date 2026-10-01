@@ -513,7 +513,7 @@ describe('conventions-reviewer (domain conventions, skill-less)', () => {
 
 // The lens fields these parser cases pin; the verbatim quote is grounding's input and has its own tests.
 const lensesOf = (raw: string) =>
-  parseConventionFindings(raw).map(({ offendingQuote: _quote, ...lens }) => lens);
+  parseConventionFindings(raw).map(({ offendingQuote: _quote, ruleQuote: _rule, ...lens }) => lens);
 
 describe('wrapConventionsPrompt / parseConventionFindings', () => {
   it('never mentions a checklist script or git diff — there is no Bash to run either with', () => {

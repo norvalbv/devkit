@@ -7,8 +7,8 @@
  * empty and passed real failures as GREEN. The hook now calls this ONE bin, which:
  *   1. runs the deterministic-prefix check — on a cached all-green staged tree (ship only) it SKIPS
  *      every gate;
- *   2. else runs each SELECTED deterministic guard (size, fanout, dup, clone, coverage, anti-slop)
- *      as a subprocess,
+ *   2. else runs each SELECTED deterministic guard (size, fanout, dup, clone, coverage, anti-slop,
+ *      comments) as a subprocess,
  *      capturing its exit code and applying the shared TRICHOTOMY — 1 = real failure (accumulate),
  *      2 = could-not-run (fail-open, continue), any other non-zero = unexpected (accumulate, named);
  *   3. NAMES every gate that opted out, on a green run as loudly as on a red one — a fail-open gate
@@ -47,6 +47,15 @@ import { parseJsonObject } from '../config-json.mts';
 import { coverageBypassed, deterministicStrict, envFlag, structureBypassed } from '../config.mts';
 import { emitGateBypass, emitGateEvent, finishGateTiming } from '../judge/gate-events.mts';
 import { prefixEntry, recordPrefix } from '../prefix-cache/prefix-cache.mts';
+import {
+  type GateFailure,
+  gateEnv,
+  readGateReason,
+  reasonDetail,
+  reasonReport,
+  withReasonFiles,
+} from './reason.mts';
+import { type ConfigComponent, DETERMINISTIC, type RawDevkitComponents } from './registry.mts';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 // Sibling gate modules are spawned as `node <path>`. In dev the tree is .mts (Node strips types at
@@ -54,10 +63,9 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 // module so the same literals resolve in both — string-literal paths are NOT rewritten by tsc emit.
 const SELF_EXT = import.meta.url.endsWith('.mts') ? '.mts' : '.mjs';
 
-// Telemetry: strip the `guard-` bin prefix and any `(unexpected:rc)` / `(could-not-run)` suffix off a
-// gate label to get the bare gate name (module-level per biome's useTopLevelRegex).
+// Telemetry: strip the `guard-` bin prefix to get the bare gate name (module-level per biome's
+// useTopLevelRegex). Outcome suffixes are recorded apart from the label, never parsed back off it.
 const GUARD_PREFIX_RE = /^guard-/;
-const GATE_SUFFIX_RE = /\(.*\)$/;
 // The suffix a STRICT run appends to a gate that opted out. Distinct from `(unexpected:2)`, which
 // stays reserved for a gate whose exit 2 was never an opt-out (an `--extra` command's fatal config
 // error): both are could-not-run for telemetry, but only this one is an opt-out we chose to reject.
@@ -72,15 +80,9 @@ const DETERMINISTIC_FAMILY = 'deterministic';
 const NOT_FOUND_RE = /\(unexpected:127\)/;
 const OBJECT_ID = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
 
-interface RawDevkitComponents {
-  guards?: string[];
-  antiSlop?: boolean;
-}
 interface RawDevkitConfig {
   components?: RawDevkitComponents;
 }
-type ConfigComponent = Exclude<keyof RawDevkitComponents, 'guards'>;
-const ANTI_SLOP_COMPONENT: ConfigComponent = 'antiSlop';
 
 /** `components.<name> === true`, guarded so an inherited Object.prototype member never counts. */
 function componentEnabled(
@@ -90,42 +92,6 @@ function componentEnabled(
   return components !== undefined && Object.hasOwn(components, name) && components[name] === true;
 }
 
-// The deterministic guard set, in fixed registry order. Each runs as `node <path> <args>` — a sibling
-// module under gate-engine, so it resolves the same way in every install mode. Their exit contract is
-// the invariant this orchestrator preserves: 0 clean, 1 violation, 2 fail-open (could-not-run).
-export const DETERMINISTIC = [
-  { id: 'size', module: '../ratchets/size-disable.mjs', args: ['gate'] },
-  { id: 'fanout', module: '../ratchets/folder-fanout.mjs', args: ['gate'] },
-  {
-    id: 'dup',
-    module: '../co-occurrence/matcher.mjs',
-    args: ['scan', '--new', '--changed', '--gate'],
-  },
-  {
-    id: 'clone',
-    module: '../co-occurrence/clone-detector.mjs',
-    args: ['scan', '--changed', '--gate'],
-  },
-  // Coverage reads coverage/coverage-final.json and enforces guard.config.json `coverage` thresholds.
-  // `optIn`: never swept in by the missing-config fallback below — it runs ONLY when a repo explicitly
-  // selects it (an unadopted/CI repo must not fail hard on a coverage artifact it never asked for).
-  // Fail-CLOSED once selected. Its exit 2 (NOT MEASURED) is a skip only under `devkit review`.
-  {
-    id: 'coverage',
-    module: '../coverage/run.mjs',
-    args: ['gate'],
-    optIn: true,
-    failOpen2: 'review',
-  },
-  {
-    id: 'anti-slop',
-    module: '../../cli/index.mjs',
-    args: ['anti-slop', 'check', '--staged'],
-    optIn: true,
-    configComponent: ANTI_SLOP_COMPONENT,
-    failOpen2: false,
-  },
-];
 const ALL_IDS = DETERMINISTIC.map((g) => g.id);
 const GUARD_COMPONENT_IDS = DETERMINISTIC.filter((g) => !('configComponent' in g)).map((g) => g.id);
 // The set the missing/unreadable-config fallback runs: every guard EXCEPT the opt-in ones. `--only`
@@ -178,9 +144,12 @@ interface RunDeterministicOpts extends Partial<ParsedOpts> {
 
 // A runnable gate descriptor. `argv` is null for an unrunnable gate (empty command).
 interface Gate {
+  /** The registry id of a built-in gate; absent for `--extra` / structure commands. */
+  id?: string;
   label: string;
   argv: string[] | null;
   failOpen2: boolean;
+  rcLabels?: Record<number, string>;
 }
 
 export function parseOpts(argv: string[]): ParsedOpts {
@@ -288,10 +257,10 @@ export function prefixCacheScope(scope?: string, effectiveIds?: string[]): strin
 }
 
 // Run one gate as a subprocess; return its exit code (0 on success). stdio inherited so the gate's
-// own banner/output reaches the user exactly as it did when the hook invoked it directly.
-function runArgv(cwd: string, argv: string[], exec = execFileSync): number {
+// output reaches the user as if run directly; its failure reason returns via `reasonFile`.
+function runArgv(cwd: string, argv: string[], exec: typeof execFileSync, reasonFile: string) {
   try {
-    exec(argv[0], argv.slice(1), { cwd, stdio: 'inherit' });
+    exec(argv[0], argv.slice(1), { cwd, stdio: 'inherit', env: gateEnv(reasonFile) });
     return 0;
   } catch (e: unknown) {
     // spawn failure / kill → treat as a real fail
@@ -368,7 +337,14 @@ export function runDeterministic(cwd = process.cwd(), opts: RunDeterministicOpts
   // so a repeat bypassed run would otherwise record nothing. could_not_run, never a clean-reading
   // status — the ruling emitGateBypass carries forward.
   if (bypassStructure) emitGateBypass('structure-lint', 'GUARD_STRUCTURE_OK');
-  const fails = [];
+  const fails: GateFailure[] = [];
+  // Whether each failure reached a verdict, decided where its exit code is read — never re-derived
+  // from the label, which an `--extra` spec controls (sc-2753).
+  const failed: Array<{ gate: string; verdict: boolean }> = [];
+  const fail = (gate: Gate, suffix = '', verdict = suffix === '', reason: string[] = []) => {
+    fails.push({ id: gate.id, label: `${gate.label}${suffix}`, reason });
+    failed.push({ gate: gate.label.replace(GUARD_PREFIX_RE, ''), verdict });
+  };
   // Gates that opted out (exit 2 where that IS an opt-out) and so proved nothing. Reported even on a
   // green run — the whole defect this exists for is a skipped gate reading like a passed one.
   const skipped: string[] = [];
@@ -379,31 +355,36 @@ export function runDeterministic(cwd = process.cwd(), opts: RunDeterministicOpts
     }
     const ids = new Set(effectiveIds);
     const gates: Gate[] = DETERMINISTIC.filter((g) => ids.has(g.id)).map((g) => ({
+      id: g.id,
       label: `guard-${g.id}`,
       argv: ['node', path.resolve(HERE, g.module.replace(MJS_EXT_RE, SELF_EXT)), ...g.args],
       failOpen2:
         !('failOpen2' in g) || (g.failOpen2 === 'review' ? reviewMode : g.failOpen2 !== false),
+      rcLabels: 'rcLabels' in g ? g.rcLabels : undefined,
     }));
     for (const x of opts.extra ?? []) gates.push(commandGate(x.label, x.cmd));
     if (opts.structure && !bypassStructure) {
       gates.push(commandGate('structure-lint', opts.structure));
     }
-    for (const gate of gates) {
-      if (!gate.argv) {
-        fails.push(`${gate.label}(unrunnable: empty command)`);
-        continue;
-      }
-      const rc = runArgv(cwd, gate.argv, exec);
-      // `failOpen2` is a property of the GATE ("exit 2 is an opt-out for this one"); strict is a
-      // property of the RUN ("what we do about an opt-out"). Keeping them separate is what lets an
-      // `--extra` command's fatal exit 2 — failOpen2:false, never an opt-out — stay `(unexpected:2)`
-      // under strict instead of being relabelled as a gate that chose to skip.
-      if (rc === 1) fails.push(gate.label);
-      else if (rc === 2 && gate.failOpen2) {
-        if (deterministicStrict()) fails.push(`${gate.label}${COULD_NOT_RUN}`);
-        else skipped.push(gate.label);
-      } else if (rc !== 0) fails.push(`${gate.label}(unexpected:${rc})`);
-    }
+    withReasonFiles((fileFor) => {
+      gates.forEach((gate, i) => {
+        if (!gate.argv) {
+          fail(gate, '(unrunnable: empty command)', true);
+          return;
+        }
+        const reasonFile = fileFor(i);
+        const rc = runArgv(cwd, gate.argv, exec, reasonFile);
+        const failRc = (suffix = '') => fail(gate, suffix, undefined, readGateReason(reasonFile));
+        // failOpen2 belongs to the GATE (exit 2 = opt-out), strict to the RUN: so an `--extra`'s
+        // fatal exit 2 (never an opt-out) stays `(unexpected:2)` under strict, not a skip.
+        if (rc === 1) failRc();
+        else if (gate.rcLabels && Object.hasOwn(gate.rcLabels, rc)) failRc(gate.rcLabels[rc]);
+        else if (rc === 2 && gate.failOpen2) {
+          if (deterministicStrict()) failRc(COULD_NOT_RUN);
+          else skipped.push(gate.label);
+        } else if (rc !== 0) failRc(`(unexpected:${rc})`);
+      });
+    });
   }
   // Before the failure branch, so this prints on a GREEN run too — the case that motivated it: a
   // fail-open gate's own stderr scrolls past at the same visual weight as a gate that passed.
@@ -411,7 +392,7 @@ export function runDeterministic(cwd = process.cwd(), opts: RunDeterministicOpts
     for (const label of skipped) {
       emitGateEvent({
         type: 'gate_result',
-        gate: label.replace(GUARD_PREFIX_RE, '').replace(GATE_SUFFIX_RE, ''),
+        gate: label.replace(GUARD_PREFIX_RE, ''),
         family: DETERMINISTIC_FAMILY,
         status: 'could_not_run',
         detail: `${label}(opted-out)`,
@@ -432,27 +413,24 @@ export function runDeterministic(cwd = process.cwd(), opts: RunDeterministicOpts
     // to the exact gate(s). Both `(unexpected:rc)` and `(could-not-run)` mean the gate never reached
     // a verdict, so neither is a `fail`: counting them as findings would inflate the fail rate with
     // gates that never ran.
-    for (const label of fails) {
+    for (const [i, { label, reason }] of fails.entries()) {
       emitGateEvent({
         type: 'gate_result',
-        gate: label.replace(GUARD_PREFIX_RE, '').replace(GATE_SUFFIX_RE, ''),
+        gate: failed[i].gate,
         // This chain reports PER GATE (`fanout`, `anti-slop`), one level finer than the
         // blocked_gate vocabulary the ship script publishes, which names the family. Without the
         // family a reader cannot join the two, and the ship terminus digest reported the very gate
         // that stopped the run as "did NOT block this run" (sc-2488).
         family: DETERMINISTIC_FAMILY,
-        status:
-          label.includes('(unexpected:') || label.includes(COULD_NOT_RUN)
-            ? 'could_not_run'
-            : 'fail',
-        detail: label,
+        status: failed[i].verdict ? 'fail' : 'could_not_run',
+        detail: reasonDetail(label, reason),
       });
     }
-    console.error(`✗ deterministic gates failed:${fails.map((f) => ` ${f}`).join('')}`);
-    console.error(
-      '   Every deterministic failure is listed above — fix them together, then commit once.',
-    );
-    if (fails.some((f) => f.startsWith('structure-lint'))) {
+    console.error(`✗ deterministic gates failed:${fails.map((f) => ` ${f.label}`).join('')}`);
+    for (const line of reasonReport(fails)) console.error(line);
+    console.error('   Fix every failure above together, then commit once.');
+    console.error('   On commit or ship, decision and reviewer gates run only after these pass.');
+    if (fails.some((f) => f.label.startsWith('structure-lint'))) {
       console.error(
         '   Base branch structure debt that your diff did not cause? Re-run with the explicit',
       );
@@ -461,7 +439,7 @@ export function runDeterministic(cwd = process.cwd(), opts: RunDeterministicOpts
         '   A structure violation introduced by your own change must be fixed instead.',
       );
     }
-    if (fails.some((f) => NOT_FOUND_RE.test(f))) {
+    if (fails.some((f) => NOT_FOUND_RE.test(f.label))) {
       console.error(
         '   exit 127 = command not found: the gate ran, but its BINARY did not resolve — a',
       );
