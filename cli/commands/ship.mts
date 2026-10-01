@@ -132,7 +132,8 @@ Usage:
   --pr                Re-push: add changes to the EXISTING PR on <branch> as a new commit
                       (fast-forward, never --force). Pair with --base only when replacing a PR whose
                       conflicts you already resolved; that explicit mode rewrites under an exact
-                      expected-OID lease and refuses an incomplete old-PR path brief.
+                      expected-OID lease on the PR head and refuses an incomplete old-PR path brief.
+                      Rebase/merge origin/<base> locally first — nothing needs pushing beforehand.
   --                  Force everything after it to be a file path (ships a dash-leading filename).
 
 Env:

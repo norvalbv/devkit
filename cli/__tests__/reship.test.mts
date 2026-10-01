@@ -1154,6 +1154,163 @@ describe('reship --base — replace a conflicted PR from a caller-prepared snaps
   });
 });
 
+// sc-2739: GitHub's baseRefOid is a snapshot from the PR's last head push, so the rewrite lease must
+// not depend on it, and a base that only moved FORWARD must not strand a gated replacement.
+describe('reship --base — a moved PR base never strands the rewrite (sc-2739)', () => {
+  const rewrite = [
+    'feat/pr',
+    'publish resolved PR',
+    '--pr',
+    '--base',
+    'main',
+    '--',
+    'conflict.txt',
+  ];
+  const head = ({ bare, g }) => g(['--git-dir', bare, 'rev-parse', 'refs/heads/feat/pr']);
+  /** A pre-commit hook (runs mid-gates) that moves origin/main in the bare repo. */
+  const gateHook = (dir, body) => {
+    writeFileSync(join(dir, '.husky/_/pre-commit'), `#!/bin/sh\n${body}\nexit 0\n`);
+    chmodSync(join(dir, '.husky/_/pre-commit'), 0o755);
+  };
+  /** Shell that lands one new commit on origin/main, as a sibling merge during gates would. */
+  const advanceMain = ({ bare, mainTip }) =>
+    `c=$(echo moved | git --git-dir='${bare}' commit-tree '${mainTip}^{tree}' -p '${mainTip}')\n` +
+    `git --git-dir='${bare}' update-ref refs/heads/main "$c"`;
+
+  it('publishes when GitHub still reports the stale pre-move base OID', () => {
+    const repo = rewriteRepo();
+    const r = run(rewrite, repo.dir, repo.env);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).not.toContain('refusing rewrite');
+    expect(repo.g(['--git-dir', repo.bare, 'rev-parse', `${head(repo)}^`])).toBe(repo.mainTip);
+  });
+
+  it('publishes when the reported base OID is an object this clone never fetched', () => {
+    const repo = rewriteRepo();
+    const r = run(rewrite, repo.dir, { ...repo.env, PR_BASE_OID: 'f'.repeat(40) });
+    expect(r.status, r.stderr).toBe(0);
+    expect(head(repo)).not.toBe(repo.oldPrTip);
+  });
+
+  it('does not reject the push when GitHub refreshes only the base OID during gates', () => {
+    const repo = rewriteRepo();
+    const oidFile = join(repo.stubBin, 'base-oid');
+    gateHook(repo.dir, `printf '%s' '${repo.mainTip}' > '${oidFile}'`);
+    const r = run(rewrite, repo.dir, { ...repo.env, PR_BASE_OID_FILE: oidFile });
+    expect(r.status, r.stderr).toBe(0);
+    expect(head(repo)).not.toBe(repo.oldPrTip);
+  });
+
+  it('refuses a PR retargeted to another base, naming the --base to pass', () => {
+    const repo = rewriteRepo();
+    const r = run(rewrite, repo.dir, { ...repo.env, PR_BASE_REF_NAME: 'release/1.x' });
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain('--base release/1.x');
+    expect(head(repo)).toBe(repo.oldPrTip);
+  });
+
+  it('refuses a caller that has not rebased onto the current base, naming the next step', () => {
+    const repo = rewriteRepo();
+    const { bare, g, mainTip } = repo;
+    const moved = g(['--git-dir', bare, 'commit-tree', `${mainTip}^{tree}`, '-p', mainTip], {
+      input: 'main moves again\n',
+    });
+    g(['--git-dir', bare, 'update-ref', 'refs/heads/main', moved]);
+    const r = run(rewrite, repo.dir, { ...repo.env, SHIP_DRY_RUN: '1' });
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain('is not an ancestor of the caller checkout');
+    expect(r.stderr).toContain('git rebase origin/main');
+    expect(head(repo)).toBe(repo.oldPrTip);
+  });
+
+  it('publishes when origin/main advances while the gates run', () => {
+    const repo = rewriteRepo();
+    const { bare, dir, mainTip } = repo;
+    gateHook(dir, advanceMain(repo));
+    const r = run(rewrite, dir, repo.env);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).toContain('advanced during gates');
+    // Gated on the base it was cut from; the PR simply shows behind the newer tip.
+    expect(repo.g(['--git-dir', bare, 'rev-parse', `${head(repo)}^`])).toBe(mainTip);
+    // The pin ref now holds the NEWER tip, not the gated parent; cleanup must still remove it.
+    expect(repo.g(['for-each-ref', '--format=%(refname)', 'refs/devkit/reship-rewrite'])).toBe('');
+  });
+
+  it.each([
+    [
+      'rewound',
+      (r) => `git --git-dir='${r.bare}' update-ref refs/heads/main '${r.oldBase}'`,
+      'rewound',
+    ],
+    ['deleted', (r) => `git --git-dir='${r.bare}' update-ref -d refs/heads/main`, 'missing'],
+  ])('refuses and leaves the PR head alone when origin/main is %s during gates', (_, hook, why) => {
+    const repo = rewriteRepo();
+    gateHook(repo.dir, hook(repo));
+    const r = run(rewrite, repo.dir, repo.env);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain(why);
+    expect(head(repo)).toBe(repo.oldPrTip);
+  });
+
+  it.each([1, 128])(
+    'refuses as unverifiable, never as a rewind, when the re-pin fetch exits %i after main moved',
+    (status) => {
+      const repo = rewriteRepo();
+      const armed = join(repo.dir, 'fetch-armed');
+      gateHook(repo.dir, `${advanceMain(repo)}\n: > '${armed}'`);
+      const env = { ...repo.env, FETCH_FAIL_ARMED_BY: armed, FETCH_FAIL_STATUS: String(status) };
+      const r = run(rewrite, repo.dir, env);
+      expect(r.status).not.toBe(0);
+      expect(r.stderr).toContain('could not be verified');
+      expect(r.stderr).not.toContain('rewound');
+      expect(head(repo)).toBe(repo.oldPrTip);
+    },
+  );
+
+  it('resumes a published rewrite after origin/main advanced, without re-running gates', () => {
+    const repo = rewriteRepo();
+    const { bare, dir, env, g, mainTip, ghBody } = repo;
+    const argv = [
+      ...rewrite.slice(0, 5),
+      '--body',
+      'resume body\n',
+      '--no-qavis-publish',
+      '--',
+      'conflict.txt',
+    ];
+    const interrupted = run(argv, dir, { ...env, GH_EDIT_KILL_PARENT: '1' });
+    expect(interrupted.status).not.toBe(0);
+    const accepted = head(repo);
+    expect(accepted).not.toBe(repo.oldPrTip);
+
+    const moved = g(['--git-dir', bare, 'commit-tree', `${mainTip}^{tree}`, '-p', mainTip], {
+      input: 'main moves after publication\n',
+    });
+    g(['--git-dir', bare, 'update-ref', 'refs/heads/main', moved]);
+    const marker = join(dir, 'gate-ran');
+    gateHook(dir, `: > '${marker}'; exit 97`);
+
+    // The SIGKILLed publisher above could not clean up its own pin refs; they are the baseline.
+    const pinRefs = () => g(['for-each-ref', '--format=%(refname)', 'refs/devkit/reship-rewrite']);
+    const pinsBeforeResume = pinRefs();
+    const resumed = run(
+      ['--resume', 'feat/pr'],
+      dir,
+      { ...env, PR_HEAD_OID: accepted },
+      { input: '' },
+    );
+    expect(resumed.status, resumed.stderr).toBe(0);
+    expect(readFileSync(ghBody, 'utf8')).toBe('resume body\n');
+    expect(existsSync(marker), 'resume must reuse the gated receipt').toBe(false);
+    expect(head(repo)).toBe(accepted);
+    // Re-anchoring moved BASE off the pinned tip; the resume's own pin refs must not leak.
+    expect(pinRefs()).toBe(pinsBeforeResume);
+    const manifest = JSON.parse(readFileSync(join(dir, '.devkit/reconcile-manifest.json'), 'utf8'));
+    // Scope is the replacement's own diff, never main's newer commit.
+    expect(manifest.branches['feat/pr'].paths.map((p) => p.path)).toEqual(['conflict.txt']);
+  });
+});
+
 // Regression (sc-1183): a briefed path can be TRACKED on the PR branch yet sit under a gitignored
 // dir (a tracked dist/ build artifact is the case that bit us). The staging loop's `git add` STAGES
 // it but exits nonzero with "The following paths are ignored", and set -euo pipefail aborted the
