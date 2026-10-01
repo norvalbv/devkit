@@ -63,6 +63,9 @@ export function formatShipQueue(view, now = Date.now()) {
         const h = view.holder;
         lines.push(`running: ${h.branch}  ${h.repo}  ${elapsed(h.startedAt, now)}  pid ${h.pid}`);
         lines.push(`         gate: ${h.gate}`);
+        // devkit never signals it: holder.json is same-user writable, so the owner checks what runs first.
+        const scope = h.pgid === undefined ? `-p ${h.pid}` : `-g ${h.pgid}`;
+        lines.push(`         stuck? inspect it with: ps -o pid,lstart,command ${scope} — then stop it yourself`);
     }
     else {
         lines.push('running: (none)');

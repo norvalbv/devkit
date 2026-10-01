@@ -1,9 +1,7 @@
-/**
- * The one decision `devkit ship` makes before its first gate: queue for the machine-wide slot, or
- * run without it — and every unqueued path is loud (gate-opt-out-is-visible-and-detectable).
- */
+/** Before its first gate, `devkit ship` joins the machine-wide slot: as the acquirer, or as a guest
+ * under an ancestor ship. There is no unqueued path. */
 import { join } from 'node:path';
-import { emitGateBypass, emitGateEvent } from '../../../../gate-engine/judge/gate-events.mts';
+import { emitGateEvent } from '../../../../gate-engine/judge/gate-events.mts';
 import { processStartIdentity } from '../../../../gate-engine/judge/process/identity.mts';
 import { type ProcessRecord, readProcessTable } from '../review/process/process-table.mts';
 import {
@@ -23,7 +21,8 @@ import {
 
 export { SLOT_ENV };
 
-export const NO_QUEUE_ENV = 'DEVKIT_SHIP_NO_QUEUE';
+/** Retired: neither skips nor redirects the queue any more (see ship-machine-wide-queue). */
+export const RETIRED_ENVS = ['DEVKIT_SHIP_NO_QUEUE', 'DEVKIT_SHIP_QUEUE_DIR'] as const;
 export const SLOT_DIR_ENV = 'DEVKIT_SHIP_SLOT_DIR';
 /** Set only by the acquirer: tells its bash that IT may release the slot before --wait-ci. */
 export const SLOT_RELEASE_ENV = 'DEVKIT_SHIP_SLOT_RELEASE';
@@ -35,6 +34,8 @@ export interface EnteredQueue {
 
 export interface EnterOptions {
   env: NodeJS.ProcessEnv;
+  /** Tests only; production always uses queueRoot(). */
+  root?: string;
   repo: string;
   branch: string;
   mode: string;
@@ -88,20 +89,14 @@ function isAncestorHolder(
   return false;
 }
 
-function unqueued(reason: string, log: (line: string) => void): EnteredQueue {
-  log(
-    `⚠️  ship queue BYPASSED (${reason}) — this ship runs alongside any other ship on this machine.`,
-  );
-  return { env: { [SLOT_RELEASE_ENV]: '' } };
-}
-
 export async function enterShipQueue(options: EnterOptions): Promise<EnteredQueue> {
   const log = options.log ?? ((line: string) => console.error(line));
   const probe = options.probe ?? DEFAULT_PROBE;
-  const root = queueRoot(options.env);
-  if (options.env[NO_QUEUE_ENV] === '1') {
-    emitGateBypass('ship-queue', NO_QUEUE_ENV);
-    return unqueued(`${NO_QUEUE_ENV}=1`, log);
+  const root = options.root ?? queueRoot();
+  for (const name of RETIRED_ENVS) {
+    if (options.env[name] !== undefined) {
+      log(`ship: ${name} no longer exists and is ignored; this ship queues.`);
+    }
   }
   const inherited = options.env[SLOT_ENV];
   if (inherited) {
@@ -123,8 +118,7 @@ export async function enterShipQueue(options: EnterOptions): Promise<EnteredQueu
     }
     log(`ship: ignoring a stale ${SLOT_ENV} (its holder is gone or is not an ancestor); queueing.`);
   }
-  // Only an uncreatable queue root may run unqueued. Any later failure propagates and stops the ship
-  // rather than silently dropping mutual exclusion.
+  // No unqueued path exists: an uncreatable root stops the ship (a sandbox must grant the write).
   try {
     ensureRoot(root);
   } catch (cause) {
@@ -135,7 +129,9 @@ export async function enterShipQueue(options: EnterOptions): Promise<EnteredQueu
       status: 'could_not_run',
       detail: `ship-queue(unavailable:${message})`,
     });
-    return unqueued(`queue unavailable at ${root}: ${message}`, log);
+    throw new Error(
+      `cannot create the queue at ${root} (${message}); run ship where it can write there, or grant that path`,
+    );
   }
   const handle = await (options.acquire ?? acquireShipSlot)({
     repo: options.repo,
