@@ -84,6 +84,8 @@ export interface ChecklistState {
   /** Named reason the checklist deliberately enumerated nothing (sc-1439) — a valid empty
    * artifact, distinct from an absent one, which still voids a PASS. */
   skipped?: string;
+  /** Whether commit-guard's semantic retrieval ran (sc-2317); untrusted — parse via `retrievalSchema`. */
+  retrieval?: unknown;
 }
 
 // Parsed, never truthiness-checked (sc-3400): a non-string or whitespace-only reason explains nothing.
@@ -209,6 +211,9 @@ export interface ReviewOutcome {
    * global default — a sonnet-pinned reviewer's verdict labeled 'haiku' sends readers of the
    * usage dashboard chasing a model downgrade that never happened. */
   model?: string;
+  /** Set only on a PASS whose core check did not fully run (sc-2317: commit-guard without semantic
+   * retrieval). The verdict stands, but must never render as a bare PASS, live or cached. */
+  degraded?: { cause: string };
 }
 
 /** The directory `agentBody` reads: the packaged runtime in review mode, else `reviewAgentsDir`. */

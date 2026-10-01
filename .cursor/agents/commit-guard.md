@@ -25,8 +25,9 @@ is unset, treat all staged source files as in scope.
   exact-name lookups grep is faster and more reliable.
 - If the configured MCP search tool is unavailable, run `search-code search "<natural-language query>" --json`
   from the repo root. `search-code` is an externally installed engine, not a vendored project file.
-  If the executable or repository index is unavailable, state that semantic retrieval is unavailable;
-  do not substitute grep, and continue with the deterministic matcher and clone checks.
+  If the executable or repository index is unavailable, semantic retrieval is unavailable: do not
+  substitute grep, continue with the deterministic matcher and clone checks, and record it at
+  finalize (`--retrieval unavailable --cause "<why>"`) so the gate reports the PASS as DEGRADED.
 - Retrieval is hybrid (dense description embedding + sparse BM25 over raw code, RRF-fused). The
   similarity threshold below applies to the dense channel score returned in `similarity`.
 - Similarity threshold: 0.82. Hits below this or in the same file are ignored.
@@ -108,9 +109,14 @@ or repeated inline JSX. The jscpd-backed clone detector catches those (verbatim,
 
 ## 4. Finalize
 ```bash
-node $SCRIPT finalize
+node $SCRIPT finalize --retrieval ok
+# or, when no semantic search query could run:
+node $SCRIPT finalize --retrieval unavailable --cause "<what failed, e.g. remote embeddings unreachable>"
 ```
 A passing `finalize` removes the checklist file itself; when the environment needs it kept (gate verification, review evidence) it stays automatically. Never delete it by hand.
+`--retrieval` is how the gate learns whether the semantic check ran: a PASS finalized without it, or
+with `unavailable`, is reported as DEGRADED rather than as a clean PASS. Use `ok` only when your
+search queries actually returned results.
 `finalize` verifies every staged file was marked — it refuses (exits non-zero) an incomplete or failed checklist, so coverage can't be claimed without doing the work. Report the unapproved pairs/clones you surfaced (or state that none were found). No verbose summary.
 </workflow>
 
