@@ -79,6 +79,7 @@ PATHS=()
 BASE_FLAG=""
 BODY_SET=0         # --body given? else --body-file, else stdin (back-compat)
 BODY_FILE_SET=0    # --body-file <path>: author the body once in a file; survives every retry
+BODY_FILE_PREREAD_SET=0  # --resume banner's one --body-file read: 1 = bytes kept, 2 = failed (latched)
 UPDATE_PR_BODY=0   # explicit body flag? Refresh the existing PR too; recorded across --resume
 QAVIS_PUBLISH=1    # suppresses only the post-push description write, never the staged gate
 READY=0            # --ready marks the PR ready-for-review after the push lands
@@ -266,7 +267,11 @@ fi
 # the exact misdescription this listing exists to prevent (sc-2299). Still far ahead of the gate
 # chain, so a stale-but-valid record is visible before the multi-minute wait, not after it.
 if [ "$RESUME" -eq 1 ]; then
-  echo "Resuming recorded invocation for $BR (--pr): \"$TITLE\" — ${#PATHS[@]} paths, body $(printf '%s' "$RESUME_BODY" | wc -c | tr -d ' ') bytes, recorded $RESUME_CREATED" >&2
+  . "$SCRIPT_DIR/read-stdin-body.sh"
+  ship_resume_body_note
+  # Under --pr the body reaches the PR only when a body flag asked for it (now or as recorded).
+  if [ "$UPDATE_PR_BODY" -eq 1 ]; then si_pr_effect="commit + PR body"; else si_pr_effect="commit only, PR body kept"; fi
+  echo "Resuming recorded invocation for $BR (--pr): \"$TITLE\" — ${#PATHS[@]} paths, $SHIP_BODY_NOTE ($si_pr_effect), recorded $RESUME_CREATED" >&2
   for p in "${PATHS[@]}"; do
     si_extra=
     for q in ${RESUME_EXTRA_PATHS[@]+"${RESUME_EXTRA_PATHS[@]}"}; do [ "$q" = "$p" ] && { si_extra=1; break; }; done
@@ -612,6 +617,9 @@ WT="${TMPDIR:-/tmp}/devkit-reship-${BR//\//-}-$$"
 # forever. Back-compat stdin remains commit-only under --pr; omitting both flags preserves PR text.
 . "$SCRIPT_DIR/read-stdin-body.sh"
 if [ "$BODY_SET" -eq 1 ]; then BODY="$BODY_FLAG"
+elif [ "$BODY_FILE_SET" -eq 1 ] && [ "$BODY_FILE_PREREAD_SET" -eq 1 ]; then BODY="$BODY_FILE_PREREAD" # the bytes the --resume banner sized
+elif [ "$BODY_FILE_SET" -eq 1 ] && [ "$BODY_FILE_PREREAD_SET" -eq 2 ]; then
+  echo "--body-file: $BODY_FILE_PREREAD_ERR: $BODY_FILE_FLAG" >&2; exit 1 # as the banner said; never re-read
 elif [ "$BODY_FILE_SET" -eq 1 ]; then
   [ -f "$BODY_FILE_FLAG" ] || { echo "--body-file: no such file: $BODY_FILE_FLAG" >&2; exit 1; }
   # cat + sentinel, never $(<file): command substitution strips EVERY trailing newline, silently
