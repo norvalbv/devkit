@@ -23,7 +23,12 @@ import doctorRun from '../commands/doctor.mts';
 import { applyInit } from '../commands/init.mts';
 import update, { fetchLatestTag } from '../commands/update.mts';
 import upgrade from '../commands/upgrade.mts';
-import { applyOverlayConstraints, defaultSelection } from '../lib/components.mts';
+import {
+  applyOverlayConstraints,
+  defaultSelection,
+  RECOMMENDED_GUARD_IDS,
+  type Selection,
+} from '../lib/components.mts';
 import { isTracked } from '../lib/git-tracked.mts';
 import { wireOverlayAntiSlop } from '../lib/install/anti-slop/overlay/install.mts';
 import { reviewHookDrift } from '../lib/husky/review-drift.mts';
@@ -977,6 +982,175 @@ describe('overlay (local-only) install', () => {
     expect(codex.description).toBe('team hooks');
     expect(JSON.stringify(codex.hooks)).toContain(foreignCodexCommand);
     expect(JSON.stringify(codex.hooks)).not.toContain('.codex/hooks/decision-stop-check.sh');
+  });
+
+  // sc-1232: hook components other than agentHooks/decisions. `decisions` is dropped because it
+  // opened clean's old removal gate and hid the leak.
+  const HOOK_PROVIDER_DIRS = ['.claude/hooks', '.codex/hooks', '.cursor/hooks'];
+  const HOOK_DOCUMENTS = ['.claude/settings.local.json', '.codex/hooks.json', '.cursor/hooks.json'];
+  const overlayOnly = (extra: Partial<Selection>) =>
+    applyOverlayConstraints({
+      ...defaultSelection(),
+      agentHooks: false,
+      guards: RECOMMENDED_GUARD_IDS.filter((guard) => guard !== 'decisions'),
+      ...extra,
+    });
+  const expectNoDevkitHooks = (root: string) => {
+    for (const dir of HOOK_PROVIDER_DIRS) expect(existsSync(join(root, dir)), dir).toBe(false);
+    for (const doc of HOOK_DOCUMENTS) {
+      const p = join(root, doc);
+      if (existsSync(p)) expect(readFileSync(p, 'utf8'), doc).not.toMatch(/\/hooks\//);
+    }
+  };
+  const expectCleanTree = (root: string) =>
+    expect(
+      execFileSync('git', ['status', '--porcelain'], { cwd: root, encoding: 'utf8' }).trim(),
+    ).toBe('');
+
+  it.each([
+    ['fallow', 'fallow-staged-gate.sh'],
+    ['adhd', 'adhd-session-start.mjs'],
+    ['priorArtGate', 'prior-art-gate.mjs'],
+    ['baseDrift', 'base-drift-lib.mjs'],
+  ] as const)(
+    'clean removes the hooks a %s-only overlay installed (sc-1232)',
+    async (component, script) => {
+      const root = workRepo();
+      await applyInit(root, {
+        stack: 'react-app',
+        selection: overlayOnly({ [component]: true }),
+        overlay: true,
+        devkitRef: 'v0.21.0',
+      });
+      for (const dir of HOOK_PROVIDER_DIRS)
+        expect(existsSync(join(root, dir, script)), `${dir}/${script} installed`).toBe(true);
+
+      const cleanRun = (await import('../commands/clean.mts')).default;
+      await cleanRun(['--yes'], root);
+
+      expectNoDevkitHooks(root);
+      expectCleanTree(root);
+    },
+  );
+
+  it.each([
+    ['components.fallow', { fallow: false }],
+    ['components.agentTargets', { agentTargets: ['cursor'] }],
+  ])('clean follows the hook manifest + ledger when %s drifted after install', async (_, drift) => {
+    const root = workRepo();
+    await applyInit(root, {
+      stack: 'react-app',
+      selection: overlayOnly({ fallow: true }),
+      overlay: true,
+      devkitRef: 'v0.21.0',
+    });
+    const cfgPath = join(root, '.devkit', 'config.json');
+    const cfg = JSON.parse(readFileSync(cfgPath, 'utf8'));
+    Object.assign(cfg.components, drift);
+    writeFileSync(cfgPath, JSON.stringify(cfg));
+
+    const cleanRun = (await import('../commands/clean.mts')).default;
+    await cleanRun(['--yes'], root);
+
+    expectNoDevkitHooks(root);
+  });
+
+  it('clean keeps the user’s own empty settings.local.json when no hook was ever registered', async () => {
+    const root = workRepo();
+    seedLocalSettings(root, {});
+    await applyInit(root, {
+      stack: 'react-app',
+      selection: overlayOnly({}),
+      overlay: true,
+      devkitRef: 'v0.21.0',
+    });
+    const cleanRun = (await import('../commands/clean.mts')).default;
+    await cleanRun(['--yes'], root);
+
+    expect(existsSync(join(root, '.claude', 'settings.local.json'))).toBe(true);
+  });
+
+  it('a ledger for Cursor alone gives clean no authority over the user’s empty Claude settings', async () => {
+    const root = workRepo();
+    seedLocalSettings(root, {});
+    await applyInit(root, {
+      stack: 'react-app',
+      selection: overlayOnly({ fallow: true, agentTargets: ['cursor'] }),
+      overlay: true,
+      devkitRef: 'v0.21.0',
+    });
+    expect(readFileSync(join(root, '.cursor', 'hooks.json'), 'utf8')).toContain(
+      'fallow-staged-gate',
+    );
+    const cleanRun = (await import('../commands/clean.mts')).default;
+    await cleanRun(['--yes'], root);
+
+    expect(existsSync(join(root, '.claude', 'settings.local.json'))).toBe(true);
+    expect(existsSync(join(root, '.cursor', 'hooks.json'))).toBe(false);
+  });
+
+  it('a forged ledger row gives clean no authority over the user’s empty Claude settings', async () => {
+    const root = workRepo();
+    seedLocalSettings(root, {});
+    await applyInit(root, {
+      stack: 'react-app',
+      selection: overlayOnly({ fallow: true, agentTargets: ['cursor'] }),
+      overlay: true,
+      devkitRef: 'v0.21.0',
+    });
+    const ledgerPath = join(root, '.devkit', 'agent-hook-registrations-manifest.json');
+    const ledger = JSON.parse(readFileSync(ledgerPath, 'utf8'));
+    const forged = {
+      ...ledger.entries[0],
+      provider: 'claude',
+      destinationRel: '.claude/settings.local.json',
+    };
+    ledger.entries.push(forged);
+    writeFileSync(ledgerPath, JSON.stringify(ledger));
+
+    const cleanRun = (await import('../commands/clean.mts')).default;
+    await cleanRun(['--yes'], root);
+
+    expect(existsSync(join(root, '.claude', 'settings.local.json'))).toBe(true);
+    expect(existsSync(join(root, '.cursor', 'hooks.json'))).toBe(false);
+  });
+
+  it('orphan clean keeps the user’s empty hook documents it never stripped', async () => {
+    const root = workRepo();
+    seedLocalSettings(root, {});
+    mkdirSync(join(root, '.codex'), { recursive: true });
+    writeFileSync(join(root, '.codex', 'hooks.json'), JSON.stringify({ hooks: {} }));
+    writeFileSync(
+      join(root, '.git', 'info', 'exclude'),
+      '# devkit overlay (local-only) — not committed\n.claude/settings.local.json\n.codex/hooks.json\n',
+    );
+
+    const cleanRun = (await import('../commands/clean.mts')).default;
+    await cleanRun(['--yes'], root);
+
+    expect(existsSync(join(root, '.claude', 'settings.local.json'))).toBe(true);
+    expect(existsSync(join(root, '.codex', 'hooks.json'))).toBe(true);
+  });
+
+  it('clean never deletes a git-tracked settings.local.json, even once its hooks are empty', async () => {
+    const root = workRepo();
+    seedLocalSettings(root, { hooks: {} });
+    execFileSync('git', ['add', '-f', '.claude/settings.local.json'], { cwd: root });
+    execFileSync('git', ['commit', '-qm', 'track local settings'], { cwd: root });
+    await applyInit(root, {
+      stack: 'react-app',
+      selection: overlayOnly({ fallow: true }),
+      overlay: true,
+      devkitRef: 'v0.21.0',
+    });
+    const cleanRun = (await import('../commands/clean.mts')).default;
+    await cleanRun(['--yes'], root);
+
+    // Overlay deliberately edits a tracked Claude settings.local.json (skipProvider exempts claude),
+    // so the round-trip may reformat it; what clean owes is that the file survives, hook-free.
+    const local = join(root, '.claude', 'settings.local.json');
+    expect(existsSync(local)).toBe(true);
+    expect(readFileSync(local, 'utf8')).not.toContain('.claude/hooks/');
   });
 
   it('isTracked: true for a committed file, false for an untracked one', () => {

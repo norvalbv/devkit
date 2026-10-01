@@ -44,6 +44,28 @@ describe('clean (package mode)', () => {
     expect(existsSync(join(root, 'guard.config.json'))).toBe(false);
   });
 
+  // sc-1232 lock: a hook component other than agentHooks/decisions must still be reversed. The
+  // decisions guard is dropped because it used to open the overlay clean gate and mask exactly this.
+  it('removes a non-agentHooks hook component and its registrations', () => {
+    const root = tmpRepo();
+    const guards = 'size,dup,fanout';
+    expect(
+      devkit(root, 'init', '--stack', 'generic', '--yes', '--guards', guards, '--prior-art-gate')
+        .status,
+    ).toBe(0);
+    expect(existsSync(join(root, '.claude/hooks/prior-art-gate.mjs'))).toBe(true);
+    expect(readFileSync(join(root, '.claude/settings.json'), 'utf8')).toContain('prior-art-gate');
+
+    expect(devkit(root, 'clean', '--yes').status).toBe(0);
+
+    for (const dir of ['.claude/hooks', '.codex/hooks', '.cursor/hooks'])
+      expect(existsSync(join(root, dir, 'prior-art-gate.mjs')), dir).toBe(false);
+    for (const doc of ['.claude/settings.json', '.codex/hooks.json', '.cursor/hooks.json']) {
+      const p = join(root, doc);
+      if (existsSync(p)) expect(readFileSync(p, 'utf8'), doc).not.toContain('prior-art-gate');
+    }
+  });
+
   it('--dry-run removes nothing', () => {
     const root = tmpRepo();
     devkit(root, 'init', '--stack', 'generic', '--yes');
