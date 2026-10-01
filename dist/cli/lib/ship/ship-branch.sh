@@ -1274,7 +1274,23 @@ else
       # `ls-files -u` names precisely the paths that failed, which is narrower and more actionable
       # than the base-drift overlap set (every path that moved, merged or not).
       APPLY_CONFLICTS=$(git -C "$WT" diff --name-only --diff-filter=U 2>/dev/null || true)
-      if [ -n "$APPLY_CONFLICTS" ]; then
+      # A GENERATED path (a devkit manifest, or one the consumer declares under `generated` in its
+      # guard.config.json) must be pointed at its generator: hand-merging one produces a file that
+      # matches neither tree (sc-2770). The helper renders the whole block; captured first so a failed
+      # run prints nothing partial, and any failure falls back to the plain hand-merge text below.
+      GENERATED_ABORT=
+      GENERATED_CLI="$SCRIPT_DIR/generated-paths/cli.mts"
+      [ -f "$GENERATED_CLI" ] || GENERATED_CLI="$SCRIPT_DIR/generated-paths/cli.mjs"
+      if [ -n "$APPLY_CONFLICTS" ] && [ -f "$GENERATED_CLI" ]; then
+        # -z: the default output C-quotes a name holding a tab or newline, which no glob would match.
+        # --root "$WT": the declarations must come from the same tree the conflicts do — the one
+        # being shipped — so a generated path the base newly declares is honoured.
+        GENERATED_ABORT=$(git -C "$WT" diff -z --name-only --diff-filter=U 2>/dev/null |
+          node "$GENERATED_CLI" --root "$WT" --base-ref "$BASE_REF" 2>/dev/null) || GENERATED_ABORT=
+      fi
+      if [ -n "$GENERATED_ABORT" ]; then
+        printf '%s\n' "$GENERATED_ABORT" >&2
+      elif [ -n "$APPLY_CONFLICTS" ]; then
         echo "ship: origin/$BASE_REF and your working tree changed the same region of:" >&2
         while IFS= read -r p; do [ -n "$p" ] && printf '  %q\n' "$p" >&2; done <<< "$APPLY_CONFLICTS"
         echo "  ship cannot resolve this for you — the merge has to happen where you can see both sides." >&2
