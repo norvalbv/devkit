@@ -74,3 +74,12 @@ The agent-facing procedure docs live under `skills/`: `skills/using-devkit/SKILL
 `gate-engine/review/claude-md.mts` feeds a governing `CLAUDE.md` to conventions-reviewer, which
 treats an unhedged directive here as an enforceable rule and can block a commit on it. This page
 stays descriptive for that reason, and `cli/__tests__/root-routing-doc.test.mts` holds it there.
+
+## Working rules
+
+The engineering rules for changing devkit itself — PR scope, the minimal-code bar, when to record a
+decision, how gated commits behave — live in `AGENTS.md`, imported below so Claude Code loads them
+with this page. `gate-engine/review/claude-md.mts` reads this file verbatim and does not expand the
+import, so those rules sit outside conventions-reviewer's governing surface.
+
+@AGENTS.md
