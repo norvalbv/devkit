@@ -968,3 +968,142 @@ describe('overlay staged gates run before the AI guards (sc-3020)', () => {
     expect(r.calls).not.toContain('guard-review');
   });
 });
+
+// sc-2341: package and standalone blocks carry the overlay's staged fallow gate, scoped to the index
+// so neither a stale base nor another agent's unstaged work reaches the audit.
+describe('package + standalone staged fallow gate (sc-2341)', () => {
+  const REVIEWED = { biome: false, guards: ['comments', 'decisions', 'review'], fallow: true };
+  // comments now run inside guard-deterministic (sc-2753); these are the paid AI guards.
+  const AI_CALLS = ['guard-decisions', 'guard-review'];
+  const opts = (builder, extra = {}) => ({ builder, fallow: true, staged: true, ...extra });
+
+  for (const builder of ['package', 'standalone']) {
+    it(`${builder}: a failing staged audit blocks before any AI guard runs`, () => {
+      const r = runHook({ FALLOW_RC: '1' }, REVIEWED, opts(builder));
+      expect(r.status).toBe(1);
+      expect(r.calls).toContain('fallow audit --diff-stdin');
+      for (const ai of AI_CALLS) expect(r.calls).not.toContain(ai);
+    });
+
+    it(`${builder}: a passing audit runs first, then every AI guard`, () => {
+      const r = runHook({}, REVIEWED, opts(builder));
+      expect(r.status).toBe(0);
+      const fallowAt = r.calls.indexOf('fallow audit');
+      expect(fallowAt).toBeGreaterThanOrEqual(0);
+      for (const ai of AI_CALLS) expect(r.calls.indexOf(ai)).toBeGreaterThan(fallowAt);
+    });
+
+    it(`${builder}: fallow is handed ONLY the staged diff, never unstaged tracked edits`, () => {
+      const r = runHook({}, REVIEWED, opts(builder, { unstagedDebt: true }));
+      expect(r.status).toBe(0);
+      const handed = readFileSync(join(r.home, 'fallow-stdin'), 'utf8');
+      expect(handed).toContain('src/staged.ts');
+      expect(handed).not.toContain('other.ts');
+      expect(handed).not.toContain('unstagedDebt');
+    });
+
+    it(`${builder}: nothing staged skips the audit instead of paying for an empty one`, () => {
+      const r = runHook({ FALLOW_RC: '1' }, REVIEWED, opts(builder, { staged: 'none' }));
+      expect(r.status).toBe(0);
+      expect(r.calls).not.toContain('fallow');
+    });
+
+    it(`${builder}: a staged diff over fallow's 10 MiB cap fails OPEN (fallow would unscope it)`, () => {
+      const r = runHook(
+        { FALLOW_RC: '1' },
+        REVIEWED,
+        opts(builder, { stagedBytes: 10 * 1024 * 1024 + 4096 }),
+      );
+      expect(r.status).toBe(0);
+      expect(r.calls).not.toContain('fallow');
+      expect(r.calls).toContain('guard-review --gate');
+    });
+
+    it(`${builder}: an unsizeable diff is named and fails open — never mistaken for "nothing staged"`, () => {
+      const r = runHook(
+        { FALLOW_RC: '1' },
+        REVIEWED,
+        opts(builder, { binStubs: { wc: '#!/bin/sh\ncat >/dev/null\nexit 1\n' } }),
+      );
+      expect(r.status).toBe(0);
+      expect(r.stdout).toContain('could not size the staged diff');
+      expect(r.calls).not.toContain('fallow');
+    });
+
+    it(`${builder}: fallow absent stays fail-open`, () => {
+      const r = runHook({}, REVIEWED, opts(builder, { fallow: false }));
+      expect(r.status).toBe(0);
+      expect(r.calls).toContain('guard-review --gate');
+    });
+
+    it(`${builder}: review mode never runs the staged audit`, () => {
+      const r = runHook(
+        { DEVKIT_RUN_MODE: 'review', DEVKIT_REVIEW_GUARDS: 'review', FALLOW_RC: '1' },
+        REVIEWED,
+        opts(builder),
+      );
+      expect(r.calls).not.toContain('fallow audit');
+    });
+
+    // A fallow older than --diff-stdin would exit 2 on the unknown flag and block every commit.
+    it(`${builder}: a fallow below the 3.6.0 floor is skipped and named; a current one audits`, () => {
+      const stub = (v) =>
+        `#!/bin/sh\nif [ "$1" = --version ]; then echo "fallow ${v}"; exit 0; fi\necho "fallow $*" >> "$HOME/calls.log"\ncat >/dev/null\nexit \${FALLOW_RC:-0}\n`;
+      const old = runHook(
+        { FALLOW_RC: '2' },
+        REVIEWED,
+        opts(builder, { fallow: false, binStubs: { fallow: stub('3.5.2') } }),
+      );
+      expect(old.status).toBe(0);
+      expect(old.stdout).toContain('fallow 3.5 predates --diff-stdin');
+      expect(old.calls).not.toContain('fallow audit');
+      const current = runHook(
+        { FALLOW_RC: '1' },
+        REVIEWED,
+        opts(builder, { fallow: false, binStubs: { fallow: stub('3.10.0') } }),
+      );
+      expect(current.status).toBe(1);
+      expect(current.calls).toContain('fallow audit --diff-stdin');
+    });
+
+    // Git exports the default index RELATIVE (`.git/index`) to hooks; the package subshell `cd`s.
+    it(`${builder}: a relative GIT_INDEX_FILE still audits the staged diff inside a package subshell`, () => {
+      const r = runHook(
+        { GIT_INDEX_FILE: '.git/index' },
+        REVIEWED,
+        opts(builder, { pkgRel: 'pkg/a' }),
+      );
+      expect(r.status).toBe(0);
+      expect(readFileSync(join(r.home, 'fallow-stdin'), 'utf8')).toContain('src/staged.ts');
+    });
+
+    it(`${builder}: a monorepo package subshell propagates the fallow block`, () => {
+      const r = runHook({ FALLOW_RC: '1' }, REVIEWED, opts(builder, { pkgRel: 'pkg/a' }));
+      expect(r.status).toBe(1);
+      expect(r.calls).toContain('fallow audit --diff-stdin');
+      for (const ai of AI_CALLS) expect(r.calls).not.toContain(ai);
+    });
+
+    it(`${builder}: fallow unselected emits no gate even with fallow on PATH and a failing audit`, () => {
+      const r = runHook({ FALLOW_RC: '1' }, { ...REVIEWED, fallow: false }, opts(builder));
+      expect(r.status).toBe(0);
+      expect(r.calls).not.toContain('fallow');
+    });
+
+    it.skipIf(!hasDash)(`${builder}: the fragment stays POSIX under dash`, () => {
+      const r = runHook({ FALLOW_RC: '1' }, REVIEWED, opts(builder, { shell: 'dash' }));
+      expect(r.status).toBe(1);
+      expect(r.calls).toContain('fallow audit --diff-stdin');
+    });
+  }
+
+  it('overlay honours the same size cap (one shared fragment)', () => {
+    const r = runHook(
+      { FALLOW_RC: '1' },
+      { biome: false, guards: ['review'] },
+      { builder: 'overlay', fallow: true, staged: true, stagedBytes: 10 * 1024 * 1024 + 4096 },
+    );
+    expect(r.status).toBe(0);
+    expect(r.calls).not.toContain('fallow audit');
+  });
+});

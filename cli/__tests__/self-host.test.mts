@@ -519,6 +519,22 @@ describe('buildSelfHostHook', () => {
     const reapplied = replaceGuardBlock(fresh, block, '');
     expect(reapplied).toBe(fresh); // no drift: the fallow fragment lives in the block, not a fragile tail
   });
+
+  // sc-2341: selfHostSelection spreads RECORDED components, so flipping components.fallow on in
+  // devkit's own config must not smuggle the blocking consumer gate in beside the advisory one.
+  it('recorded fallow:true keeps only the advisory — never the blocking staged consumer gate', () => {
+    for (const out of [
+      buildSelfHostBlock({ ...HOOK_SEL, fallow: true }, '', ROOT),
+      buildSelfHostHook({ ...HOOK_SEL, fallow: true }, '', ROOT),
+    ]) {
+      expect(out).toContain('# devkit:fallow-advisory');
+      expect(out).not.toContain('# devkit:fallow\n');
+      expect(out).not.toContain('fallow audit --diff-stdin');
+    }
+    expect(buildSelfHostBlock({ ...HOOK_SEL, fallow: true }, '', ROOT)).toBe(
+      buildSelfHostBlock(HOOK_SEL, '', ROOT),
+    );
+  });
 });
 
 describe('isDevkitRepo', () => {

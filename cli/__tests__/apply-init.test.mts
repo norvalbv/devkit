@@ -13,8 +13,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const fallowSpies = vi.hoisted(() => ({
   installFallow: vi.fn(() => ({ ok: true, method: 'bun', message: 'installed fallow' })),
   ensureFallowGitignore: vi.fn(),
-  wireFallowHooks: vi.fn(() => ({ ok: true, log: ['wired'] })),
-  saveFallowBaselines: vi.fn(() => ({ ok: true })),
 }));
 vi.mock('../lib/install/install-fallow.mts', () => fallowSpies);
 
@@ -772,7 +770,13 @@ describe('structure is stack-generic (react-app un-gated)', () => {
 });
 
 describe('fallow apply step (mocked installer — never shells out)', () => {
-  it('selection.fallow drives install → gitignore → gate in order + records it', async () => {
+  const logged = () =>
+    vi
+      .mocked(console.log)
+      .mock.calls.map((c) => c.join(' '))
+      .join('\n');
+
+  it('selection.fallow drives install → gitignore in order and records it', async () => {
     const root = tmpRepo();
     await applyInit(root, {
       stack: 'generic',
@@ -789,12 +793,52 @@ describe('fallow apply step (mocked installer — never shells out)', () => {
     });
     expect(fallowSpies.installFallow).toHaveBeenCalledTimes(1);
     expect(fallowSpies.ensureFallowGitignore).toHaveBeenCalledTimes(1);
-    expect(fallowSpies.wireFallowHooks).toHaveBeenCalledTimes(1);
-    // install runs before the gate is wired.
     expect(fallowSpies.installFallow.mock.invocationCallOrder[0]).toBeLessThan(
-      fallowSpies.wireFallowHooks.mock.invocationCallOrder[0],
+      fallowSpies.ensureFallowGitignore.mock.invocationCallOrder[0],
     );
     expect(config(root).components.fallow).toBe(true);
+    // husky off: say the gate is NOT wired rather than imply it is.
+    expect(logged()).toContain('fallow gate not wired: husky is off');
+  });
+
+  // sc-2341 regression: an existing .husky/pre-commit used to make `fallow hooks install --target
+  // git` fail and relay fallow's MERGE-BASE paste-in block. devkit now emits its own staged gate.
+  it('into an existing .husky/pre-commit: emits the staged gate, never a --base block', async () => {
+    const root = tmpRepo();
+    mkdirSync(join(root, '.husky'), { recursive: true });
+    writeFileSync(join(root, '.husky', 'pre-commit'), '#!/bin/sh\nnpm test\n');
+    await applyInit(root, {
+      stack: 'generic',
+      selection: { ...defaultSelection(), structure: false, fallow: true },
+      devkitRef: 'v0.3.0',
+    });
+    const hook = readFileSync(join(root, '.husky', 'pre-commit'), 'utf8');
+    expect(hook).toContain('npm test');
+    expect(hook).toContain('# devkit:fallow');
+    expect(hook).toContain('fallow audit --diff-stdin');
+    expect(hook).not.toMatch(/fallow audit[^\n]*--base/);
+    const out = logged();
+    expect(out).toContain('fallow staged gate in the devkit pre-commit block');
+    expect(out).not.toContain('--base');
+    expect(out).not.toContain('could not wire');
+  });
+
+  it('a re-run with fallow deselected drops the gate from the block', async () => {
+    const root = tmpRepo();
+    const sel = { ...defaultSelection(), structure: false };
+    await applyInit(root, {
+      stack: 'generic',
+      selection: { ...sel, fallow: true },
+      devkitRef: 'v0.3.0',
+    });
+    await applyInit(root, {
+      stack: 'generic',
+      selection: { ...sel, fallow: false },
+      devkitRef: 'v0.3.0',
+    });
+    const hook = readFileSync(join(root, '.husky', 'pre-commit'), 'utf8');
+    expect(hook).not.toContain('# devkit:fallow');
+    expect(hook).not.toContain('fallow audit');
   });
 
   it('does NOT run any fallow step when fallow is unselected, records fallow:false', async () => {
@@ -805,7 +849,6 @@ describe('fallow apply step (mocked installer — never shells out)', () => {
       devkitRef: 'v0.3.0',
     });
     expect(fallowSpies.installFallow).not.toHaveBeenCalled();
-    expect(fallowSpies.wireFallowHooks).not.toHaveBeenCalled();
     expect(config(root).components.fallow).toBe(false);
   });
 });

@@ -799,3 +799,43 @@ describe('extras (--extra hard gates on the deterministic line)', () => {
     expect(without).not.toContain('--extra');
   });
 });
+
+// sc-2341: every consumer builder emits the SAME staged fallow gate, and none of them ever emits a
+// ref-range (`--base`) fallow audit — the scoping fallow's own installer fallback handed consumers.
+describe('staged fallow gate across consumer builders (sc-2341)', () => {
+  const sel = { guards: ['size', 'comments', 'review'], biome: true, antiSlop: true };
+  const builders = {
+    package: (fallow: boolean, pkgRel = '') => buildGuardBlock({ ...sel, fallow }, pkgRel),
+    standalone: (fallow: boolean, pkgRel = '') => buildStandaloneBlock({ ...sel, fallow }, pkgRel),
+    overlay: (fallow: boolean, pkgRel = '') => buildOverlayHook(sel, '', pkgRel, { fallow }),
+  };
+
+  for (const [name, build] of Object.entries(builders)) {
+    for (const pkgRel of ['', 'packages/app']) {
+      it(`${name}${pkgRel ? ' (monorepo)' : ''}: fallow on → --diff-stdin, never --base`, () => {
+        const out = build(true, pkgRel);
+        expect(out).toContain('fallow audit --diff-stdin');
+        expect(out).toContain('git diff --cached --binary --full-index --find-renames --relative');
+        expect(out).toContain('-gt 10485760');
+        expect(out).not.toMatch(/fallow audit[^\n]*--base/);
+      });
+
+      it(`${name}${pkgRel ? ' (monorepo)' : ''}: fallow off → no staged audit at all`, () => {
+        expect(build(false, pkgRel)).not.toContain('fallow audit --diff-stdin');
+      });
+    }
+  }
+
+  it('package/standalone gate sits after the deterministic line and before the first AI guard', () => {
+    for (const out of [builders.package(true), builders.standalone(true)]) {
+      const fallowAt = out.indexOf('# devkit:fallow');
+      expect(fallowAt).toBeGreaterThan(out.indexOf('guard-deterministic'));
+      expect(fallowAt).toBeLessThan(out.indexOf('guard-review'));
+    }
+  });
+
+  it('fallow off is byte-identical to a selection without the key (no drift for existing repos)', () => {
+    expect(buildGuardBlock({ ...sel, fallow: false })).toBe(buildGuardBlock(sel));
+    expect(buildStandaloneBlock({ ...sel, fallow: false })).toBe(buildStandaloneBlock(sel));
+  });
+});

@@ -66,8 +66,8 @@ export const SELF_HOST_EXTRAS: Array<{ label: string; cmd: string }> = [
 
 // The hand hook ended with an ADVISORY fallow audit (dead-code / duplication / complexity on the
 // changed set; command-v-guarded so it no-ops without fallow, `|| true` so it never blocks). The
-// package generator emits no fallow fragment and `fallow: false` keeps fallow an opt-in COMPONENT
-// (no installer / no wireFallowGate), so this preserves JUST the advisory line — injected as the last
+// package generator's BLOCKING staged fallow gate is pinned off here (buildSelfHostBlock passes
+// `fallow: false`), so this preserves JUST the advisory line — injected as the last
 // fragment INSIDE the devkit-guards block (a sentinel'd fragment). Inside, not a trailing tail: an
 // out-of-block line gets mis-absorbed into the preamble by replaceGuardBlock's findPreambleEnd on a
 // re-run (splitting the comment from its command), and being in-block means the parity/doctor check
@@ -236,13 +236,20 @@ function withSelfHostAdvisories(text: string, pkgRel: string): string {
 }
 
 /** The self-host guard BLOCK (markers inclusive) — the shared source of truth for install, doctor, and the parity test. */
+// `fallow: false` — self-host keeps its ADVISORY FALLOW_FRAGMENT, never the blocking consumer gate.
 export function buildSelfHostBlock(sel: SelfHostHookInput, pkgRel: string, cwd: string): string {
-  return withSelfHostAdvisories(toSelfHost(buildGuardBlock(sel, pkgRel), cwd), pkgRel);
+  return withSelfHostAdvisories(
+    toSelfHost(buildGuardBlock({ ...sel, fallow: false }, pkgRel), cwd),
+    pkgRel,
+  );
 }
 
 /** A full fresh self-host hook (preamble + rewritten block incl. self-host advisories + exit 0). */
 export function buildSelfHostHook(sel: SelfHostHookInput, pkgRel: string, cwd: string): string {
-  return withSelfHostAdvisories(toSelfHost(buildFullHook(sel, pkgRel), cwd), pkgRel);
+  return withSelfHostAdvisories(
+    toSelfHost(buildFullHook({ ...sel, fallow: false }, pkgRel), cwd),
+    pkgRel,
+  );
 }
 
 /**

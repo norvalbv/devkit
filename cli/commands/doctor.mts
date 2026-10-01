@@ -339,7 +339,7 @@ async function collectResults(
   const overrides = new Set(cfg.configOverrides ?? []);
 
   const results = [configResult];
-  if (sel.husky) results.push(...hookChecks(cwd, sel.guards ?? []));
+  if (sel.husky) results.push(...hookChecks(cwd, sel.guards ?? [], sel.fallow));
   results.push(checkDevkitCacheGitignore(cwd));
   if (sel.husky && commitMsgGuards(sel.guards ?? []).length)
     results.push(checkCommitMsgHook(cwd, sel.guards ?? []));

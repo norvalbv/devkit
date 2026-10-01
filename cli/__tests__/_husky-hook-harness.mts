@@ -36,8 +36,18 @@ function writeStub(path, name, rcVar) {
 
 // Overlay staged-gate fixtures. fallow is global ($HOME/.bun/bin, first on the hook's PATH), where a
 // consumer's `command -v fallow` finds it; eslint is the repo-local bin the overlay step requires.
-function stageOverlayFixtures(home, { bin, packageBin, pkgRel, fallow, staged, eslintOverlay }) {
-  if (fallow) writeStub(join(bin, 'fallow'), 'fallow', 'FALLOW_RC');
+function stageOverlayFixtures(
+  home,
+  { bin, packageBin, pkgRel, fallow, staged, eslintOverlay, stagedBytes, unstagedDebt },
+) {
+  if (fallow) {
+    // Keeps the diff fallow was handed, so a test can assert WHAT it scoped, not just that it ran.
+    writeFileSync(
+      join(bin, 'fallow'),
+      `#!/bin/sh\necho "fallow $*" >> "$HOME/calls.log"\ncat > "$HOME/fallow-stdin"\nexit \${FALLOW_RC:-0}\n`,
+    );
+    chmodSync(join(bin, 'fallow'), 0o755);
+  }
   if (eslintOverlay) {
     writeFileSync(join(home, 'eslint.config.devkit.mjs'), 'export default [];\n');
     writeStub(join(packageBin, 'eslint'), 'eslint', 'ESLINT_RC');
@@ -47,8 +57,21 @@ function stageOverlayFixtures(home, { bin, packageBin, pkgRel, fallow, staged, e
   // ordering assertion would pass vacuously.
   const src = join(pkgRel ? join(home, pkgRel) : home, 'src');
   mkdirSync(src, { recursive: true });
-  writeFileSync(join(src, 'staged.ts'), 'export const unused = 1;\n');
   execFileSync('git', ['init', '-q'], { cwd: home });
+  if (staged === 'none') return;
+  if (unstagedDebt) {
+    // A TRACKED file with unstaged edits — another agent's work in a shared tree.
+    execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: home });
+    execFileSync('git', ['config', 'user.name', 'Test'], { cwd: home });
+    writeFileSync(join(src, 'other.ts'), 'export const a = 1;\n');
+    execFileSync('git', ['add', join(src, 'other.ts')], { cwd: home });
+    execFileSync('git', ['commit', '-q', '-m', 'base'], { cwd: home });
+    writeFileSync(join(src, 'other.ts'), 'export const a = 1;\nexport const unstagedDebt = 2;\n');
+  }
+  const body = stagedBytes
+    ? '// padding line for the diff-size cap\n'.repeat(Math.ceil(stagedBytes / 38))
+    : 'export const unused = 1;\n';
+  writeFileSync(join(src, 'staged.ts'), body);
   execFileSync('git', ['add', join(src, 'staged.ts')], { cwd: home });
 }
 
@@ -67,6 +90,9 @@ export function runHook(
     fallow = false,
     staged = false,
     eslintOverlay = false,
+    stagedBytes = 0,
+    unstagedDebt = false,
+    binStubs = {},
   } = {},
 ) {
   const home = mkdtempSync(join(tmpdir(), dirPrefix));
@@ -144,6 +170,11 @@ esac
     }
   }
   for (const name of missingBins) rmSync(join(bin, name), { force: true });
+  // Extra tools shadowed on the hook's PATH (first entry), e.g. a broken `wc`.
+  for (const [name, body] of Object.entries(binStubs)) {
+    writeFileSync(join(bin, name), body);
+    chmodSync(join(bin, name), 0o755);
+  }
   for (const name of missingLocalBins) rmSync(join(packageBin, name), { force: true });
 
   if (realDeterministic) {
@@ -189,7 +220,16 @@ esac
   }
 
   if (pkgRel) mkdirSync(join(home, pkgRel), { recursive: true });
-  stageOverlayFixtures(home, { bin, packageBin, pkgRel, fallow, staged, eslintOverlay });
+  stageOverlayFixtures(home, {
+    bin,
+    packageBin,
+    pkgRel,
+    fallow,
+    staged,
+    eslintOverlay,
+    stagedBytes,
+    unstagedDebt,
+  });
   const hookPath = join(home, 'pre-commit');
   const hook =
     builder === 'standalone'

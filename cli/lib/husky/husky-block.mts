@@ -18,6 +18,7 @@ import {
   REVIEW_FAILURE_FINALIZER,
 } from './gate-policy/block-helpers.mts';
 import { buildCommitTerminalFragment } from './commit-terminal.mts';
+import { FALLOW_STAGED, FALLOW_STAGED_BLOCK } from './gate-policy/fallow-staged.mts';
 import { FORMAT_FRAGMENT } from './format-fragment.mts';
 import { markEnd, markStart } from './husky.mts';
 import {
@@ -43,6 +44,9 @@ interface HookSelection {
   // fragment is byte-identical to before. Self-host seeds `[{label:'lint',cmd:'bun run lint'}]` to
   // preserve devkit's own hard lint commit gate.
   extras?: Array<{ label: string; cmd: string }>;
+  // The optional fallow component: emits the staged `--diff-stdin` audit (sc-2341). Self-host pins
+  // it off — devkit's own hook keeps its advisory fragment instead.
+  fallow?: boolean;
 }
 
 export const PACKAGE_BIN_DIR_FRAGMENT = '__dk_package_bin_dir="$(bun pm bin)"';
@@ -141,6 +145,8 @@ export function buildGuardBlock(selection: HookSelection, pkgRel = ''): string {
       DK_DETERMINISTIC_GATE_HELPER,
       deterministicFragment(selection.structureCmd, selection.extras),
     );
+  // After the deterministic set, before the paid AI guards (sc-3020 ordering).
+  if (selection.fallow) pieces.push(FALLOW_STAGED_BLOCK);
   for (const id of AI_GUARD_IDS) {
     if (selection.guards?.includes(id)) pieces.push(selectedFragment(id, GUARD_FRAGMENTS[id]));
   }
@@ -198,6 +204,7 @@ export function buildStandaloneBlock(selection: HookSelection, pkgRel = ''): str
   ];
   if (deterministic)
     pieces.push(DK_DETERMINISTIC_GATE_HELPER, standaloneDeterministicLines(selection.structureCmd));
+  if (selection.fallow) pieces.push(FALLOW_STAGED_BLOCK);
   for (const id of AI_GUARD_IDS) {
     if (selection.guards?.includes(id))
       pieces.push(
@@ -235,24 +242,6 @@ if [ -n "$DK_FMT" ] && [ -f biome.devkit.jsonc ] && [ -x node_modules/.bin/biome
     echo "$DK_FMT" | xargs node_modules/.bin/biome check --config-path biome.devkit.jsonc || exit 1
 fi`;
 
-// Overlay shadows fallow's installed hook, so its optional audit must run inline here. Scope the
-// audit to the index: ship refreshes reviewer assets in its worktree AFTER staging, and a base-wide
-// audit would otherwise attribute those unstaged runtime files to the caller's commit (sc-1549).
-// Normal commits fail-open if fallow isn't installed.
-const FALLOW_OVERLAY_STAGED = `if command -v fallow >/dev/null 2>&1; then
-    DK_FALLOW_DIFF="$(mktemp)" || exit 1
-    if ! git diff --cached --binary --full-index --find-renames --relative >"$DK_FALLOW_DIFF"; then
-        rm -f "$DK_FALLOW_DIFF"
-        exit 1
-    fi
-    # __dk_no_git_env: fallow's snapshot machinery has clobbered a ship worktree before. The
-    # staged diff is already captured with the committing index's git environment intact.
-    DK_FALLOW_RC=0
-    __dk_no_git_env fallow audit --diff-stdin <"$DK_FALLOW_DIFF" || DK_FALLOW_RC=$?
-    rm -f "$DK_FALLOW_DIFF"
-    [ "$DK_FALLOW_RC" -eq 0 ] || exit 1
-fi`;
-
 // Hoisted (perf: no per-call regex compile).
 const LINE_START_RE = /^(?=.)/gm;
 const indent = (body: string) => body.replace(LINE_START_RE, '    ');
@@ -264,7 +253,7 @@ const overlayStagedGates = (
 ) => `# devkit lint overlay — STAGED files only, against configs that EXTEND the repo's (git-ignored).
 if [ "\${DEVKIT_RUN_MODE:-}" != "review" ]; then
 ${indent(OVERLAY_ESLINT_STAGED)}
-${indent(OVERLAY_BIOME)}${fallow ? `\n    # devkit fallow gate (overlay)\n${indent(FALLOW_OVERLAY_STAGED)}` : ''}
+${indent(OVERLAY_BIOME)}${fallow ? `\n    # devkit fallow gate (overlay)\n${indent(FALLOW_STAGED)}` : ''}
 fi`;
 
 // Review is diagnostic: its merge-base baselines exit on a finding, so they stay AFTER the guards

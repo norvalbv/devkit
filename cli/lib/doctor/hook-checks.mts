@@ -20,6 +20,7 @@ import { installHealAlias } from '../husky/overlay/heal-alias.mts';
 import { overlayHooksPath } from '../husky/overlay/overlay-home.mts';
 import { firstLine } from '../standalone.mts';
 import { type CheckResult, check } from './check-result.mts';
+import { checkFallowHook } from './fallow/fallow-hook-check.mts';
 import {
   foreignPin,
   hooksDir,
@@ -464,9 +465,10 @@ export function replaceableHooksPathPin(cwd: string): ReplaceableHooksPathPin | 
  * growing its own call site — cli/commands/doctor.mts sits on its recorded size budget and the
  * ratchet is shrink-only.
  */
-export function hookChecks(cwd: string, guards: string[]): CheckResult[] {
+export function hookChecks(cwd: string, guards: string[], fallow?: boolean): CheckResult[] {
   return [
     checkHusky(cwd, guards),
+    ...checkFallowHook(cwd, fallow),
     checkHookRunner(cwd),
     ...checkHooksPathOwner(cwd),
     checkFailOpenGuards(cwd),

@@ -56,8 +56,6 @@ vi.mock('../lib/install/install-fallow.mts', async (importOriginal) => ({
   ...(await importOriginal()),
   detectFallow: () => ({ available: true, version: '2.89.0' }),
   installFallow: () => ({ ok: true, method: 'bun', message: 'installed fallow@2.89.0 via bun' }),
-  saveFallowBaselines: () => ({ ok: true }),
-  wireFallowGate: () => ({ ok: true }),
 }));
 
 // For the overlay-upgrade suite below: keep cmpSemver / needsRerun / repoUrl REAL, but stub the
@@ -891,7 +889,8 @@ describe('overlay (local-only) install', () => {
     expect(hook).not.toContain('fallow hooks install'); // NOT fallow's own (shadowed) hook
     const exclude = readFileSync(join(root, '.git', 'info', 'exclude'), 'utf8');
     expect(exclude).toContain('.fallow/');
-    expect(exclude).toContain('fallow-baselines/');
+    // sc-2341: devkit writes no fallow-baselines/, so excluding one would only hide the consumer's.
+    expect(exclude).not.toContain('fallow-baselines');
     // overlay never edits the committed .gitignore for fallow
     expect(existsSync(join(root, '.gitignore'))).toBe(false);
     // config records fallow as actually wired
@@ -1166,6 +1165,24 @@ describe('overlay (local-only) install', () => {
 
     expect(isTracked(root, 'tracked.txt')).toBe(true);
     expect(isTracked(root, 'untracked.txt')).toBe(false);
+  });
+
+  // sc-2341: devkit no longer writes fallow-baselines/, so clean never deletes one — it may be the
+  // consumer's, and no check-then-delete can rule out a concurrent `git add`.
+  it('clean keeps fallow-baselines/, tracked or not, and names it', async () => {
+    const root = workRepo();
+    await applyInit(root, {
+      stack: 'react-app',
+      selection: overlayAll(),
+      overlay: true,
+      devkitRef: 'v0.21.0',
+    });
+    mkdirSync(join(root, 'fallow-baselines'), { recursive: true });
+    writeFileSync(join(root, 'fallow-baselines', 'health.json'), '{}\n');
+    const cleanRun = (await import('../commands/clean.mts')).default;
+    await cleanRun(['--yes'], root);
+    expect(existsSync(join(root, 'fallow-baselines', 'health.json'))).toBe(true);
+    expect(console.log.mock.calls.flat().join('\n')).toContain('kept fallow-baselines/');
   });
 
   it('orphan clean removes provable legacy assets but exposes ownership-uncertain native data', async () => {
