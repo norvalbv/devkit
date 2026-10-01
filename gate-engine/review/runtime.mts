@@ -4,7 +4,11 @@ import { readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
 import type { GuardConfig } from '../config.mts';
-import { consumerChecklistAssetRoot, readConsumerReviewAsset } from './cascade/consumer-assets.mts';
+import {
+  consumerChecklistAssetRoot,
+  readConsumerReviewAsset,
+  reviewAgentsDir,
+} from './cascade/consumer-assets.mts';
 import type { ReviewInconclusiveCause } from './contracts/response.mts';
 import type { RecordedWaiver } from './overrides.mts';
 import {
@@ -207,14 +211,18 @@ export interface ReviewOutcome {
   model?: string;
 }
 
+/** The directory `agentBody` reads: the packaged runtime in review mode, else `reviewAgentsDir`. */
+export function agentsDirFor(cwd: string, cfg: GuardConfig, assetRoot?: string): string {
+  return assetRoot ? path.join(assetRoot, 'agents') : reviewAgentsDir(cwd, cfg);
+}
+
 export function agentBody(
   cwd: string,
   cfg: GuardConfig,
   name: string,
   assetRoot?: string,
 ): string | null {
-  const dir = assetRoot ? path.join(assetRoot, 'agents') : cfg.review.agentsDir;
-  const file = path.join(path.isAbsolute(dir) ? dir : path.resolve(cwd, dir), `${name}.md`);
+  const file = path.join(agentsDirFor(cwd, cfg, assetRoot), `${name}.md`);
   try {
     return readFileSync(file, 'utf8');
   } catch {
