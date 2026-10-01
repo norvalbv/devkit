@@ -26,6 +26,21 @@ export function packageDir() {
   return resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 }
 
+/** What the build mirrors verbatim into dist/. Lives here, not scripts/, because the ship preflight
+ * needs it and scripts/ never ships; scripts/shipped-assets.mjs re-exports it. */
+export const PACKAGED_ROOT_DIRS: readonly string[] = [
+  'biome',
+  'tsconfig',
+  'oxc',
+  'templates',
+  'skills',
+  'agents',
+  'agents-hooks',
+];
+export const PACKAGED_ROOT_FILES: readonly string[] = ['package.json', 'README.md'];
+/** Copied beside anti-slop's tsc-compiled src/, which the build emits as .js. */
+export const ANTI_SLOP_FILES: readonly string[] = ['LICENSE', 'UPSTREAM.md'];
+
 /**
  * The canonical form of a path for identity comparison: symlinks resolved (macOS `/tmp` →
  * `/private/tmp`), falling back to a lexical resolve when the path does not exist.
