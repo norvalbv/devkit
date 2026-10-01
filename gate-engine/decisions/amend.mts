@@ -13,8 +13,10 @@ import {
   renderIndex,
   renderNote,
   renderTarget,
+  foldLines,
   sanitizeCell,
   today,
+  warnIfFolded,
   whyHook,
 } from './decision-format.mts';
 import { effectiveScope } from './recall/retrieval.mts';
@@ -286,11 +288,12 @@ export function amendDecision(slug: string, options: AddOptions, paths: Decision
     }
     const bodyOffset = current.length - workingParsed.body.length;
     const start = bodyOffset + selected.start + prefix.length + matches[0];
-    const replacement = sanitizeCell(newText);
+    const replacement = foldLines(newText);
     writeFileAtomic(
       file,
       `${current.slice(0, start)}${replacement}${current.slice(start + oldText.length)}`,
     );
+    warnIfFolded('--note-replace', newText);
     console.log(`Amended draft note on "${slug}" (${date}).`);
     return;
   }
