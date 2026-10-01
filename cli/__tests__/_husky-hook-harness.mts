@@ -11,7 +11,7 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildFullHook, buildOverlayHook, buildStandaloneHook } from '../lib/husky/husky-block.mts';
+import { buildFullHook, buildOverlayHook } from '../lib/husky/husky-block.mts';
 
 // Runs an ASSEMBLED hook under a real `sh -e` with per-tool stubs whose exit codes come from env
 // knobs; every invocation lands in calls.log, so ordering is read off the log.
@@ -192,11 +192,9 @@ esac
   stageOverlayFixtures(home, { bin, packageBin, pkgRel, fallow, staged, eslintOverlay });
   const hookPath = join(home, 'pre-commit');
   const hook =
-    builder === 'standalone'
-      ? buildStandaloneHook(selection, pkgRel)
-      : builder === 'overlay'
-        ? buildOverlayHook(selection, '', pkgRel, { fallow })
-        : buildFullHook(selection, pkgRel);
+    builder === 'overlay'
+      ? buildOverlayHook(selection, '', pkgRel, { fallow })
+      : buildFullHook(selection, pkgRel, builder === 'standalone' ? 'global-optional' : 'package');
   writeFileSync(hookPath, hook);
   let status = 0;
   let stdout = '';

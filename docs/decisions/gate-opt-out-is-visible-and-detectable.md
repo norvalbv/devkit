@@ -45,3 +45,4 @@ created: 2026-08-05
 **Category:** commit-gates
 **Source:** collab
 **Evidence-change:** The owner mandate that every overlay commit runs the full chain or fails closed, and frink #5, #68 and #108, which shipped from overlay worktrees whose commits ran no gates.
+- 2026-09-30 — The renderer the 2026-09-30 Target waited on is unified, so the per-gate command -v checks are gone from overlay and standalone alike. Every overlay gate runs from the global bin dir that the fail-closed probe resolved. Standalone keeps its documented fail-open at the block level: its bin-dir line wraps the whole gate block in a command -v guard-deterministic test, so a teammate without devkit commits ungated, as before. A gate bin missing from an INSTALLED devkit now blocks in every mode, as a missing pinned bin already did in package mode. That is a broken install, not an absent one, and skipping it silently was the invisible opt-out this axis rules out.

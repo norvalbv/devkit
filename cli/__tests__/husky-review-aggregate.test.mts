@@ -95,11 +95,11 @@ describe.each(BUILDERS)('%s hook, review mode', (builder) => {
 });
 
 describe.each(['standalone', 'overlay'])('%s hook, global bins', (builder) => {
-  it('a missing global reviewer stays fail-open in review (the lane never reaches the probe)', () => {
+  it('a reviewer missing from the installed devkit blocks review, as a missing pinned bin does', () => {
     const r = runHook(review(), AI_CHAIN, { builder, missingBins: ['guard-review'] });
     expect(r.calls).toContain('guard-deterministic');
-    expect(r.calls).not.toContain('guard-review');
-    expect(r.status).toBe(0);
+    expect(r.stdout).toContain('guard-review: unexpected exit 127');
+    expect(r.status).toBe(1);
   });
 });
 
