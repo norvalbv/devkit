@@ -2,9 +2,7 @@
  * `devkit doctor --fix` runs. Rationale: docs/decisions/overlay-self-heal.md. */
 
 import { parseArgs } from 'node:util';
-import { printProjectionGaps } from '../../lib/doctor/overlay-doctor.mts';
-import { sameDir } from '../../lib/doctor/hooks-path.mts';
-import { hasOwnOverlay } from '../../lib/husky/overlay/overlay-home.mts';
+import { projectBorrowedOverlay } from '../../lib/husky/overlay/projection-report.mts';
 
 export const meta = {
   name: 'sync-worktree',
@@ -31,8 +29,7 @@ export default function run(args: string[], cwd: string): number {
     options: { home: { type: 'string' }, pkg: { type: 'string', default: '' } },
   });
   if (!values.home) throw new Error('sync-worktree: --home <overlay home> is required');
-  if (sameDir(values.home, cwd) || hasOwnOverlay(cwd)) return 0;
-  if (printProjectionGaps(cwd, values.home, values.pkg, true)) return 0;
+  if (projectBorrowedOverlay(cwd, values.home, values.pkg)) return 0;
   console.error(
     "devkit: this worktree lacks the overlay's gate inputs listed above, so the commit is blocked — fix what they name, then commit again (devkit doctor --fix re-checks)",
   );

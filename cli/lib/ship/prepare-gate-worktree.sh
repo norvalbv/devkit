@@ -201,8 +201,8 @@ gate_dir_is_populated() {
 #               coverage-gate.md Rejected (b), "silently ships unverified coverage, the exact defect".
 #   --link    — documented as "link THIS dir" (ship-branch.sh usage), an explicit instruction rather
 #               than a pair of candidates to choose between.
-#   .devkit   — overlay mode resolves it from gate_overlay_root, the overlay the hook preflight validated:
-#               a linked worktree's own .devkit often holds only ship logs and intents (sc-4157).
+#   .devkit   — the caller's own, projected just before: a linked worktree's .devkit often holds only
+#               ship logs and intents (sc-4157), and another checkout's holds another branch's baselines.
 gate_prefers_populated() {
   case $1 in
     node_modules | .husky/_) return 0 ;;
@@ -480,7 +480,13 @@ gate_overlay_root() {
   local emitter
   emitter="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../husky/overlay/overlay-root.mts"
   [ -f "$emitter" ] || emitter="${emitter%.mts}.mjs"
-  node "$emitter" "$1"
+  node "$emitter" "$@"
+}
+
+# Project the overlay into <root> when <root> only borrows it, through the projector a commit there
+# runs, so ship and review read the caller's own gate inputs, its branch-local copies included.
+gate_project_caller() {
+  gate_overlay_root "$1" --project >&2
 }
 
 # The hook directory git will actually use, relative to the checkout <dir>; empty when hooksPath is
@@ -564,6 +570,7 @@ prepare_gate_worktree() {
 
   # The worktree exists now, so it answers for itself; BASE is not consulted (it is what $wt holds).
   gate_hook_source_preflight "$root" '' "$purpose" "$wt" || return 1
+  gate_project_caller "$root" || return 1
   local overlay_root
   overlay_root=$(gate_overlay_root "$root")
   [ -z "$overlay_root" ] || link_dirs+=(.devkit)
@@ -596,7 +603,7 @@ prepare_gate_worktree() {
         source=$(gate_coverage_source "$root" "$main_root" "$rel" && printf .) || continue
         d=$rel
       elif [ "$rel" = .devkit ] && [ -n "$overlay_root" ]; then
-        source=$overlay_root/.devkit
+        source=$root/.devkit
       else
         source=$(gate_link_source "$root" "$main_root" "$d" && printf .) || continue
       fi

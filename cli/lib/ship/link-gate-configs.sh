@@ -39,15 +39,17 @@ gate_projection_is_local_cache() {
 # (change-application put those there from the invoking checkout — already the live bytes). A committed
 # cache is stale by construction: the sha it attests cannot cover the set being shipped (sc-1489).
 gate_projection_is_stale_cache() {
-  local wt=$1 rel=$2 cache
+  local wt=$1 rel=$2
   shift 2
-  for cache in "$@"; do
-    [ "$rel" = "$cache" ] || continue
-    [ -L "$wt/$rel" ] && return 1
-    [ -f "$wt/$rel" ] || return 1
-    git -C "$wt" cat-file -e "HEAD:$rel" 2>/dev/null && return 0
-    return 1
-  done
+  gate_projection_listed "$rel" "$@" && [ ! -L "$wt/$rel" ] && [ -f "$wt/$rel" ] &&
+    git -C "$wt" cat-file -e "HEAD:$rel" 2>/dev/null
+}
+
+# gate_projection_listed <repo-relative-path> [entry...]
+gate_projection_listed() {
+  local rel=$1 entry
+  shift
+  for entry in "$@"; do [ "$rel" = "$entry" ] && return 0; done
   return 1
 }
 
@@ -106,9 +108,9 @@ gate_projection_source_is_ignored() {
 # link_untracked_gate_configs <worktree> <root> [purpose]
 link_untracked_gate_configs() {
   local wt=$1 root=$2 purpose=${3:-ship} emitter resolved rel line index_rel='' candidate_manifest=''
-  local main_root='' candidate_root=$root other_root='' source='' stale_hit=''
+  local main_root='' candidate_root=$root source='' stale_hit='' from=''
   local projection_manifest=${DEVKIT_REVIEW_PROJECTION_MANIFEST:-} projection_tool=''
-  local linked=() linked_sources=() candidates=() caches=() stale=()
+  local linked=() linked_sources=() candidates=() caches=() stale=() branch_local=()
   case "$purpose" in
     ship | review | review-baseline) ;;
     *)
@@ -149,13 +151,16 @@ link_untracked_gate_configs() {
       echo "✗ ship: the gate-input registry emitted nothing ($emitter did not run) — refusing to gate on defaults" >&2
       return 1
     }
-    # The other checkout's per-file entries too, so a file only it holds still links.
-    other_root=$main_root
-    [ "$candidate_root" = "$root" ] || other_root=$root
-    resolved+=$'\n'$(node "$emitter" "$other_root" --each-file 2>/dev/null || true)
+    # share: branch entries resolve from this checkout alone (a linked overlay worktree is projected
+    # first): another checkout's copy holds another branch's lint rules and ratchet ceilings.
+    [ "$candidate_root" = "$root" ] ||
+      resolved+=$'\n'$(node "$emitter" "$root" --each-file 2>/dev/null || true)
     while IFS= read -r line; do [ -n "$line" ] && candidates+=("$line"); done <<< "$resolved"
     while IFS= read -r line; do [ -n "$line" ] && caches+=("$line"); done < <(
       node "$emitter" "$root" --cache 2>/dev/null
+    )
+    while IFS= read -r line; do [ -n "$line" ] && branch_local+=("$line"); done < <(
+      node "$emitter" "$candidate_root" --branch 2>/dev/null
     )
   fi
   if is_review_projection_purpose "$purpose"; then
@@ -198,7 +203,9 @@ link_untracked_gate_configs() {
         stale+=("$rel")
         stale_hit=1
       fi
-      source=$(gate_link_source "$root" "$main_root" "$rel" prefer-populated) || continue
+      from=$main_root
+      gate_projection_listed "$rel" ${branch_local[@]+"${branch_local[@]}"} && from=$root
+      source=$(gate_link_source "$root" "$from" "$rel" prefer-populated) || continue
       if [ -z "$stale_hit" ]; then
         [ ! -e "$wt/$rel" ] && [ ! -L "$wt/$rel" ] || continue
         linked+=("$rel")
