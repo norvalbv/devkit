@@ -15,7 +15,7 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { buildCommitMsgBlock, COMMIT_MSG_PREAMBLE, commitMsgGuards } from '../commit-msg-block.mts';
-import { buildPassthroughHook, chainWord } from '../husky-block.mts';
+import { buildPassthroughHook, chainWord, GATES_ONLY_STOP } from '../husky-block.mts';
 
 const LOCAL_HOOK = join('.devkit', 'hooks', 'commit-msg');
 const HOOK_MODE = 0o755;
@@ -50,6 +50,7 @@ ${block}
 
 # Judges passed — clear the handoff now: \`exec\` replaces this process, so no EXIT trap fires after.
 command -v __dk_clear_commit_state >/dev/null 2>&1 && { __dk_clear_commit_state; trap - EXIT; }
+${GATES_ONLY_STOP}
 
 # Chain to the repo's own commit-msg (exec → its exit code becomes the hook's).
 [ -f ${chain} ] && exec sh ${chain} "$@"

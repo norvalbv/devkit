@@ -38,9 +38,11 @@ and delete the lock path the message prints. `--dry-run` never takes the lock.
 
 In **overlay mode** a plain `git commit` (or an IDE/GUI commit) runs the **repo's own** hooks, not devkit's —
 that's the **self-heal** gap. Commit via the per-clone `git ci` alias instead, or enable the opt-in global
-shim with `devkit init --overlay --global-commit-gate`. The shim covers the pre-commit gates only — the
-completeness and sentry commit-message judges run only via `git ci` or `devkit ship` (`devkit doctor`
-says so when they are wired). See **overlay self-heal** in the glossary.
+shim with `devkit init --overlay --global-commit-gate`. The shim runs the pre-commit gates and the
+completeness and sentry commit-message judges. Husky only reaches it for a hook the repo commits, so the
+judges need a committed `.husky/commit-msg` (`devkit doctor` warns when one is missing). A shim an older
+devkit wrote runs the pre-commit gates only until `devkit doctor --fix` refreshes it. See **overlay
+self-heal** in the glossary.
 
 **In a linked worktree** (`git worktree add`), the overlay's hooks run too: `core.hooksPath` is the
 absolute path of the overlay's `.devkit/hooks`, and a commit in a worktree that lacks any of the overlay's
