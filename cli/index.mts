@@ -62,6 +62,7 @@ const COMMANDS: Record<string, CommandLoader> = {
   'guard-branch': () => import('./commands/guard-branch.mts'),
   'base-status': () => import('./commands/base-drift/base-status.mts'),
   'coverage-run': () => import('./commands/coverage/run.mts'),
+  'coverage-diff': () => import('./commands/coverage/diff.mts'),
   'test-report-run': () => import('./commands/baseline/test-report-run.mts'),
   'baseline-status': () => import('./commands/baseline/status.mts'),
   'prove-regression': () => import('./commands/baseline/prove-regression.mts'),
@@ -70,6 +71,7 @@ const COMMANDS: Record<string, CommandLoader> = {
 // The subcommands that shell out to git — they get a friendly missing-git preflight (require-git).
 const GIT_COMMANDS = new Set([
   'baseline-status',
+  'coverage-diff',
   'base-status',
   'prove-regression',
   'ship',

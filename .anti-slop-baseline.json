@@ -4179,6 +4179,14 @@
       "count": 1
     },
     {
+      "fingerprint": "5e35b7d93de401f10ecba3ad25fc3c817a4dd369f0290e24865ccfa364387b8e",
+      "ruleId": "anti-slop/no-runtime-typeof",
+      "file": "gate-engine/coverage/lines.mts",
+      "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
+      "context": "if (typeof line !== 'number') continue;",
+      "count": 1
+    },
+    {
       "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
       "file": "gate-engine/critique/__tests__/evidence-store.test.mts",
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
@@ -11464,14 +11472,6 @@
       "diagnostic": "The explicit anonymous object type on return value of `voteSlot` discards known type evidence. Keep inference, validate with `satisfies`, or use a named owner contract.",
       "context": "return { match: Number(winner), stable: sorted.length === 1, outage: false };",
       "fingerprint": "efb3c17844266977356fff86bf7916e89afaa09fc2e7fa8cdac50b7e0296f98f",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/no-runtime-typeof",
-      "file": "gate-engine/coverage/run.mts",
-      "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
-      "context": "if (typeof line !== 'number') continue;",
-      "fingerprint": "efbeb07356e8c2acb9cd5e955c84eae8ac4cb0705c50f21dc185c02628f0b54f",
       "count": 1
     },
     {

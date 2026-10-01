@@ -1,6 +1,6 @@
 ---
 name: using-devkit
-description: Use when working in a repo that has devkit installed and you are about to run a git or maintenance command — a commit was denied on a protected branch, `devkit doctor` reports drift, you need to relocate/rename source files, refresh a shared checkout after your PR merged, uninstall devkit, or update it, you need to know whether the base moved under long-running work, or you want the reviewer gate's findings before opening a PR because you are on a protected branch or holding work that must not be committed — and you must pick the right devkit command instead of a hand-rolled git workflow.
+description: Use when working in a repo that has devkit installed and you are about to run a git or maintenance command — a commit was denied on a protected branch, `devkit doctor` reports drift, you need to relocate/rename source files, refresh a shared checkout after your PR merged, uninstall devkit, or update it, you need to know whether the base moved under long-running work, a brief asks for coverage of the new diff, or you want the reviewer gate's findings before opening a PR because you are on a protected branch or holding work that must not be committed — and you must pick the right devkit command instead of a hand-rolled git workflow.
 ---
 
 # Using devkit
@@ -183,6 +183,10 @@ devkit command.
   does nothing** under ship (it reads that file from the committed tree, not your working tree), and
   re-running the full coverage suite to manufacture the artifact can take tens of minutes and still
   produce nothing if the base's tests are already failing — don't idle on it.
+- **"Coverage of the new diff" means the lines you ADDED — measure it with `devkit coverage-diff`.**
+  A whole-file percentage on a large existing file mostly measures code your change never touched,
+  so 40% there can be 80%+ of what you added. Run `devkit coverage-run` first; the report names the
+  uncovered added lines, which is where any extra test belongs — not padding the rest of the file.
 - **`devkit help <command>` is the source of truth for flags.** This skill routes you to the command;
   it deliberately does not restate usage.
 
