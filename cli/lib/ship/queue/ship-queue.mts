@@ -2,7 +2,7 @@
 // a kernel lock is ruled in docs/decisions/ship-machine-wide-queue.md.
 import { randomUUID } from 'node:crypto';
 import { lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { userInfo } from 'node:os';
 import { join } from 'node:path';
 import {
   processOwnerIsProvablyGone,
@@ -61,8 +61,10 @@ export const DEFAULT_PROBE: QueueProbe = {
   },
 };
 
-export function queueRoot(env: NodeJS.ProcessEnv = process.env): string {
-  return env.DEVKIT_SHIP_QUEUE_DIR || join(homedir(), '.devkit', 'ship-queue');
+/** The machine's one queue. Read from the passwd entry, never the environment: an env-chosen root
+ * (or $HOME, which os.homedir() honours) would hand an agent a private, silent queue. */
+export function queueRoot(home: string = userInfo().homedir): string {
+  return join(home, '.devkit', 'ship-queue');
 }
 
 const slotDir = (root: string) => join(root, 'slot');
