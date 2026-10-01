@@ -199,7 +199,8 @@ gate_dir_is_populated() {
 #               coverage-gate.md Rejected (b), "silently ships unverified coverage, the exact defect".
 #   --link    — documented as "link THIS dir" (ship-branch.sh usage), an explicit instruction rather
 #               than a pair of candidates to choose between.
-#   .devkit   — overlay's own tree, already validated at its source by the executable-hook check below.
+#   .devkit   — overlay mode resolves it from gate_overlay_root, the overlay the hook preflight validated:
+#               a linked worktree's own .devkit often holds only ship logs and intents (sc-4157).
 gate_prefers_populated() {
   case $1 in
     node_modules | .husky/_) return 0 ;;
@@ -485,10 +486,6 @@ gate_overlay_root() {
   return 0
 }
 
-gate_overlay_mode() {
-  [ -n "$(gate_overlay_root "$1")" ]
-}
-
 # The hook directory git will actually use, relative to the checkout <dir>; empty when hooksPath is
 # absolute (a global hooks dir is never projected). Package-mode Husky points at its ignored `.husky/_`
 # runner, while a standalone install deliberately points at the committed `.husky` directory and needs
@@ -567,7 +564,9 @@ prepare_gate_worktree() {
 
   # The worktree exists now, so it answers for itself; BASE is not consulted (it is what $wt holds).
   gate_hook_source_preflight "$root" '' "$purpose" "$wt" || return 1
-  gate_overlay_mode "$root" && link_dirs+=(.devkit)
+  local overlay_root
+  overlay_root=$(gate_overlay_root "$root")
+  [ -z "$overlay_root" ] || link_dirs+=(.devkit)
 
   local main_root hook_link_rel
   main_root=$(gate_main_worktree "$root")
@@ -596,6 +595,8 @@ prepare_gate_worktree() {
       if [ "$rel" = coverage ] || [[ "$rel" == coverage/* ]]; then
         source=$(gate_coverage_source "$root" "$main_root" "$rel" && printf .) || continue
         d=$rel
+      elif [ "$rel" = .devkit ] && [ -n "$overlay_root" ]; then
+        source=$overlay_root/.devkit
       else
         source=$(gate_link_source "$root" "$main_root" "$d" && printf .) || continue
       fi
