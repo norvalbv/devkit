@@ -13,6 +13,8 @@ import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { assignedNames, ownDirVars, scanShellScript } from '../doctor/hook-gate-scan.mts';
+import { inspectReleaseOnlyDist, printReleaseOnlyDist } from './preflight/release-only-dist.mts';
+import { ANTI_SLOP_FILES, PACKAGED_ROOT_DIRS, PACKAGED_ROOT_FILES } from '../fs-helpers.mts';
 
 /** One relative-import edge: who imports, what they wrote, and where it resolves in the repo. */
 export interface ImportEdge {
@@ -95,9 +97,22 @@ function importTarget(root: string, importer: string, specifier: string): string
   return repoPath(root, fileURLToPath(new URL(specifier, importerUrl)));
 }
 
+/** The dist path a briefed source builds to. Mirrored assets map verbatim, before the tsc rewrite;
+ * only a NEW artifact is ever demanded (typescript-source-prebuilt-mjs, sc-2266). */
 function generatedPath(briefedPath: string): string | undefined {
   const normalized = briefedPath.split(path.sep).join('/');
   if (normalized.startsWith('dist/')) return normalized;
+  const under = (dir: string): boolean => normalized.startsWith(`${dir}/`);
+  if (PACKAGED_ROOT_FILES.includes(normalized) || PACKAGED_ROOT_DIRS.some(under)) {
+    return `dist/${normalized}`;
+  }
+  if (under('anti-slop')) {
+    const rel = normalized.slice('anti-slop/'.length);
+    if (ANTI_SLOP_FILES.includes(rel)) return `dist/${normalized}`;
+    return rel.startsWith('src/') && normalized.endsWith('.ts')
+      ? `dist/${normalized.slice(0, -'.ts'.length)}.js`
+      : undefined;
+  }
   if (!normalized.startsWith('cli/') && !normalized.startsWith('gate-engine/')) return undefined;
   return normalized.endsWith('.mts')
     ? `dist/${normalized.slice(0, -'.mts'.length)}.mjs`
@@ -350,9 +365,19 @@ export function printDistIntegrityFailure(report: DistIntegrityReport): number {
   return 1;
 }
 
-function parseArgs(argv: string[]): { base: string; paths: string[]; root: string } {
+interface Args {
+  base: string;
+  branch: string | undefined;
+  paths: string[];
+  root: string;
+  tree: string | undefined;
+}
+
+function parseArgs(argv: string[]): Args {
   let root = '';
   let base = '';
+  let branch: string | undefined;
+  let tree: string | undefined;
   let i = 0;
   for (; i < argv.length; i++) {
     if (argv[i] === '--') {
@@ -361,17 +386,26 @@ function parseArgs(argv: string[]): { base: string; paths: string[]; root: strin
     }
     if (argv[i] === '--root' && argv[i + 1]) root = argv[++i];
     else if (argv[i] === '--base' && argv[i + 1]) base = argv[++i];
+    else if (argv[i] === '--branch' && argv[i + 1]) branch = argv[++i];
+    else if (argv[i] === '--tree' && argv[i + 1]) tree = argv[++i];
     else throw new Error(`unknown or incomplete argument: ${argv[i]}`);
   }
   if (!root || !base)
-    throw new Error('usage: dist-integrity --root <root> --base <sha> -- <paths>');
-  return { base, paths: argv.slice(i), root };
+    throw new Error(
+      'usage: dist-integrity --root <root> --base <sha> [--branch <name>] [--tree <sha>] -- <paths>',
+    );
+  return { base, branch, paths: argv.slice(i), root, tree };
 }
 
 async function main(): Promise<void> {
   try {
-    const { base, paths, root } = parseArgs(process.argv.slice(2));
-    process.exitCode = printDistIntegrityFailure(await inspectDistIntegrity(root, base, paths));
+    const { base, branch, paths, root, tree } = parseArgs(process.argv.slice(2));
+    // --tree (CI, on a PR's committed tree) judges release-only only: integrity reads the
+    // caller's physical build, which a committed tree does not have.
+    const report = tree !== undefined ? undefined : await inspectDistIntegrity(root, base, paths);
+    const integrity = report === undefined ? 0 : printDistIntegrityFailure(report);
+    const releaseOnly = printReleaseOnlyDist(inspectReleaseOnlyDist(root, base, branch, { tree }));
+    process.exitCode = integrity || releaseOnly;
   } catch (error) {
     console.error(
       `✗ devkit ship: dist integrity preflight could not run — ${error instanceof Error ? error.message : String(error)}`,

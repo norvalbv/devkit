@@ -49,7 +49,9 @@ gate_package_root() {
   printf '%s\n' "$package_root"
 }
 
-# Refresh only the throwaway ship worktree from the CURRENT running devkit package. The caller's
+# Refresh only the throwaway ship worktree from the CURRENT running devkit package. The fixed
+# .claude/agents target is the reader-side twin of SHIP_AGENTS_PROJECTION (consumer-assets.mts): in a
+# ship lane the gate reads briefs from here, never from a custom review.agentsDir (sc-1882). The caller's
 # synced .claude projection may lag the installed package (sc-1300); trusting it makes a clean ship
 # fail closed as "checklist artifact missing" until the shared checkout is manually mutated.
 refresh_ship_reviewer_assets() {

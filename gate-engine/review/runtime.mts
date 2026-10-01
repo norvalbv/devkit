@@ -4,7 +4,11 @@ import { readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
 import type { GuardConfig } from '../config.mts';
-import { consumerChecklistAssetRoot, readConsumerReviewAsset } from './cascade/consumer-assets.mts';
+import {
+  consumerChecklistAssetRoot,
+  readConsumerReviewAsset,
+  reviewAgentsDir,
+} from './cascade/consumer-assets.mts';
 import type { ReviewInconclusiveCause } from './contracts/response.mts';
 import type { RecordedWaiver } from './overrides.mts';
 import {
@@ -80,20 +84,12 @@ export interface ChecklistState {
   /** Named reason the checklist deliberately enumerated nothing (sc-1439) — a valid empty
    * artifact, distinct from an absent one, which still voids a PASS. */
   skipped?: string;
-  /** Whether commit-guard's semantic duplicate retrieval ran, as `finalize --retrieval` recorded
-   * it (sc-2317). Untrusted JSON — read only through `retrievalSchema`. */
+  /** Whether commit-guard's semantic retrieval ran (sc-2317); untrusted — parse via `retrievalSchema`. */
   retrieval?: unknown;
 }
 
 // Parsed, never truthiness-checked (sc-3400): a non-string or whitespace-only reason explains nothing.
 const skipReasonSchema = z.string().trim().min(1);
-
-/** The recorded retrieval outcome. Anything else — absent, a typo'd status, a blank cause — is not
- * evidence that retrieval ran, so the gate reads it as DEGRADED rather than as `ok`. */
-export const retrievalSchema = z.discriminatedUnion('status', [
-  z.object({ status: z.literal('ok') }),
-  z.object({ status: z.literal('unavailable'), cause: skipReasonSchema }),
-]);
 
 /**
  * Independent verification of the checklist artifact the judge's workflow left behind — the
@@ -220,14 +216,18 @@ export interface ReviewOutcome {
   degraded?: { cause: string };
 }
 
+/** The directory `agentBody` reads: the packaged runtime in review mode, else `reviewAgentsDir`. */
+export function agentsDirFor(cwd: string, cfg: GuardConfig, assetRoot?: string): string {
+  return assetRoot ? path.join(assetRoot, 'agents') : reviewAgentsDir(cwd, cfg);
+}
+
 export function agentBody(
   cwd: string,
   cfg: GuardConfig,
   name: string,
   assetRoot?: string,
 ): string | null {
-  const dir = assetRoot ? path.join(assetRoot, 'agents') : cfg.review.agentsDir;
-  const file = path.join(path.isAbsolute(dir) ? dir : path.resolve(cwd, dir), `${name}.md`);
+  const file = path.join(agentsDirFor(cwd, cfg, assetRoot), `${name}.md`);
   try {
     return readFileSync(file, 'utf8');
   } catch {

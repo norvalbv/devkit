@@ -47,6 +47,7 @@ import { dirname, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { envBool, resolveFromCwd, resolveGuardConfig } from '../config.mts';
+import { exitGate, failLine } from '../deterministic/reason.mts';
 import {
   ALLOWLIST_CLI,
   type AllowlistPair,
@@ -62,17 +63,18 @@ import {
   canVerify,
   chunkColumns,
   dot,
+  emptyIndexMessage,
   freshnessNotice,
   orderKey,
   partitionFresh,
+  USABLE_CHUNK_WHERE,
   verifierForIndex,
 } from './chunk-index.mts';
 import { classifyPair } from './classify.mts';
 import { isExpired } from './decay.mts';
 import { missingIndexMessage, refreshIndex } from './index-refresh.mts';
 
-// ── Types ── the `chunks` row shape, the blob decode and working-tree freshness live in
-// chunk-index.mts, which owns the whole index-read boundary.
+// ── Types ── the row shape, blob decode and freshness live in chunk-index.mts (index-read boundary).
 // Tier + size thresholds (mirrors resolveGuardConfig().thresholds + --flag overrides).
 interface Knobs {
   nearCode: number;
@@ -97,6 +99,7 @@ interface Pair {
   desc: number;
   tier: Tier;
 }
+const pairName = (p: Pair) => `${p.symbolA} <> ${p.symbolB}`; // a blocked pair, in the gate's reason
 // The allowlist entry shape (AllowlistPair), its order-insensitive key (symFileKey), and
 // the corruption-refusing loader/atomic writer now live in ./allowlist-io.mts — shared with
 // the clone detector and the guard-dup-allowlist CRUD CLI (imported above).
@@ -161,7 +164,7 @@ const APPLY = argv.includes('--apply');
 // control-flow narrowing — a guard `if (x == null) cannotRun(...)` then treats x as
 // non-null, and a try/catch whose catch calls it is definitely-assigned afterwards.
 function cannotRun(msg: string): never {
-  console.error(msg);
+  failLine(msg);
   process.exit(2);
 }
 
@@ -212,7 +215,7 @@ try {
   // `id` only when the index has it — an unconditional select throws there, failing open every run.
   rows = db
     .prepare(
-      `SELECT ${canVerify(columns) ? 'id, ' : ''}file_path, symbol_name, start_line, end_line, code_hash, embedding, code_embedding FROM chunks WHERE code_embedding IS NOT NULL AND embedding IS NOT NULL AND symbol_name IS NOT NULL`,
+      `SELECT ${canVerify(columns) ? 'id, ' : ''}file_path, symbol_name, start_line, end_line, code_hash, embedding, code_embedding FROM chunks WHERE ${USABLE_CHUNK_WHERE}`,
     )
     .all() as ChunkRow[];
 } catch (e: unknown) {
@@ -229,11 +232,8 @@ const verifier = verifierForIndex(db, cfg.cwd, columns);
 // stored '\' would otherwise never match → reconcile over-drops, the gate fails open.
 for (const r of rows) r.file_path = r.file_path.replace(BACKSLASH_RE, '/');
 const n = rows.length;
-if (n === 0) {
-  // Empty index = nothing to compare = clean. Gate allows (exit 0).
-  console.error('No embedded chunks with a symbol_name. Nothing to match.');
-  process.exit(0);
-}
+// Empty index = nothing compared = could-not-run, never clean (sc-2269). Before the mode dispatch.
+if (n === 0) cannotRun(emptyIndexMessage(dbPath));
 const { dim, codeV, descV } = buildVectors(rows);
 const isTest = (i: number) => rows[i].file_path.includes('.test.');
 const loc = (i: number) => rows[i].end_line - rows[i].start_line + 1;
@@ -247,8 +247,7 @@ function detect(knobs: Knobs, changed: Set<string> | null = null) {
     const bi = i * dim;
     for (let j = i + 1; j < n; j++) {
       if (rows[i].file_path === rows[j].file_path) continue;
-      // --changed: only pairs where at least one side is a staged file (this
-      // commit's own dups). Skips the dot for everything else → cheap at commit.
+      // --changed: only pairs with a staged side (this commit's own dups) — skips the dot elsewhere.
       if (changed && !changed.has(rows[i].file_path) && !changed.has(rows[j].file_path)) continue;
       const bj = j * dim;
       const code = dot(codeV, bi, codeV, bj, dim);
@@ -371,7 +370,7 @@ function runScan() {
     for (const l of freshnessNotice([], { verified: verifier.enabled, blocking: true }))
       console.log(l);
   }
-  if (GATE) process.exit(pairs.length > 0 ? 1 : 0);
+  if (GATE) exitGate(pairs.length ? 1 : 0, displayed.map(pairName));
 }
 
 // Reason: the branches ARE the confusion-matrix algorithm: the TP/FP/FN/TN four-way classification plus precision/recall/F1 derivation over labels.json; CRAP-flagged because this is dev-only bench tooling exercised end-to-end against fixtures, not unit-tested

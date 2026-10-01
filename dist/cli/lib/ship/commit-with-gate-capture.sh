@@ -38,6 +38,34 @@
 # that outlived a CLEAN leader), 129/130/131/143 (a signal forwarded to the gate), 137 (the supervisor
 # itself was SIGKILLed — NOT a ceiling).
 #
+# A shell word a reader can paste: bare when nothing in it is special to a shell, else single-quoted.
+_ship_sh_word() {
+  if [[ "$1" =~ ^[A-Za-z0-9@%+=:,./_-]+$ ]]; then printf '%s' "$1"; return 0; fi
+  # Parameter expansion, not $(sed …): command substitution would strip a trailing newline.
+  local q="'\\''"
+  printf "'%s'" "${1//\'/$q}"
+}
+
+# `devkit ship <br> "<title>" --dry-gates …` for the invocation this attempt ran. Reads the caller's
+# BASE_FLAG / LINK_EXTRA / PATHS (set by ship-branch.sh, also on resume) by dynamic scope, defaulted because
+# run-gates-with-capture.sh sources this file without them. Branch-source membership is derived, so
+# that mode takes --from-branch instead of a path list.
+_ship_dry_gates_command() {
+  local cmd p
+  cmd="devkit ship $(_ship_sh_word "$1") $(_ship_sh_word "${2:-<title>}") --dry-gates"
+  [ -z "${BASE_FLAG:-}" ] || cmd+=" --base $(_ship_sh_word "$BASE_FLAG")"
+  for p in ${LINK_EXTRA[@]+"${LINK_EXTRA[@]}"}; do cmd+=" --link $(_ship_sh_word "$p")"; done
+  if [ "${DEVKIT_SHIP_FROM_BRANCH:-0}" = 1 ]; then
+    cmd+=" --from-branch"
+  elif [ -n "${PATHS[*]+x}" ] && [ "${#PATHS[@]}" -gt 0 ]; then
+    cmd+=" --"
+    for p in "${PATHS[@]}"; do cmd+=" $(_ship_sh_word "$p")"; done
+  else
+    cmd+=" -- <paths>"
+  fi
+  printf '%s\n' "$cmd"
+}
+
 # Usage:  commit_with_gate_capture <worktree> <root> <branch> <title> <body>
 commit_with_gate_capture() {
   local wt="$1" root="$2" br="$3" title="$4" body="$5"
@@ -209,6 +237,14 @@ SHIP_HOOK_WRAPPER
     fi
   fi
 
+  # sc-3443: guard-deterministic prints this in its OWN failure footer, so no attribution is needed.
+  # New-ship mode only: --pr (reship) has no dry-gates rehearsal, and a dry-gates run is already one.
+  if [ "${DEVKIT_SHIP_MODE:-ship}" = ship ]; then
+    DEVKIT_SHIP_DRY_GATES_CMD=$(_ship_dry_gates_command "$br" "$title") || DEVKIT_SHIP_DRY_GATES_CMD=""
+    export DEVKIT_SHIP_DRY_GATES_CMD
+  else
+    unset DEVKIT_SHIP_DRY_GATES_CMD
+  fi
   if [ "$hook_setup_failed" -eq 1 ]; then
     printf '%s\n' "$hook_setup_error" | tee -a "$log" "$ship_log" >&2
   else
@@ -307,6 +343,8 @@ SHIP_HOOK_WRAPPER
   # before the greps below for the same reason — whichever gate happened to read the staged diff first
   # is the one that dies, so a grep would blame it for a failure it did not cause.
   elif [ "$staged_missing" -eq 1 ]; then blocked_json='"staged_objects_missing"'; timed_out=false
+  # sc-2753: guard-comments aggregates in the deterministic stage; alone, it keeps its own name.
+  elif grep -qE '✗ deterministic gates failed: guard-comments(\([^)]*\))?$' "$log" 2>/dev/null; then blocked_json='"comments"'; timed_out=false
   elif grep -q '✗ deterministic gates failed' "$log" 2>/dev/null; then blocked_json='"deterministic"'; timed_out=false
   elif grep -q 'decision smells:' "$log" 2>/dev/null; then blocked_json='"decisions"'; timed_out=false
   elif grep -q 'guard-comments: .* need a decision' "$log" 2>/dev/null; then blocked_json='"comments"'; timed_out=false
@@ -497,5 +535,6 @@ SHIP_HOOK_WRAPPER
     } >&2 || true
     ;;
   esac
+  unset DEVKIT_SHIP_DRY_GATES_CMD
   return "$rc"
 }

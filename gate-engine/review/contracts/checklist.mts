@@ -1,5 +1,6 @@
 /** The CHECKLIST half of the reviewer response contract, beside response.mts (the prose half). */
 
+import { z } from 'zod';
 import { emitGateEvent } from '../../judge/gate-events.mts';
 import { boundedCause, RETRIEVAL_REVIEWER } from '../evidence/base-context.mts';
 import { attachItems } from '../evidence/items.mts';
@@ -10,7 +11,6 @@ import {
   isNamedSkip,
   readChecklistState,
   type ReviewOutcome,
-  retrievalSchema,
   verifyChecklist,
 } from '../runtime.mts';
 import type { ReviewInconclusiveCause } from './response.mts';
@@ -62,6 +62,13 @@ function checklistHoleCause(state: ChecklistState | null): ReviewInconclusiveCau
   // present artifact, even an empty one, proves the script ran, so its hole is the judge's.
   return state === null ? 'sync' : 'response-contract';
 }
+
+/** The recorded retrieval outcome. Anything else — absent, a typo'd status, a blank cause — is not
+ * evidence that retrieval ran, so the gate reads it as DEGRADED rather than as `ok`. */
+const retrievalSchema = z.discriminatedUnion('status', [
+  z.object({ status: z.literal('ok') }),
+  z.object({ status: z.literal('unavailable'), cause: z.string().trim().min(1) }),
+]);
 
 export const RETRIEVAL_UNRECORDED =
   'retrieval status not recorded — finalize ran without --retrieval, or the synced checklist ' +

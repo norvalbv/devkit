@@ -97,6 +97,8 @@ export DEVKIT_GATE_EVENTS="$2"
 export DEVKIT_SHIP_BASE_SHA="$3"
 export DEVKIT_SHIP_ID=sc1537-test
 export SHIP_COMMIT_TIMEOUT=10
+# The ship caller's own BASE_FLAG / PATHS, which the helper reads by dynamic scope (sc-3443).
+eval "\${DK_TEST_CALLER_VARS:-}"
 commit_with_gate_capture "$4" "$5" feat/sc1537 "test title" "test body"
 `;
   // Supervised: this runs the shipped script and dispatches real hooks (suite-hangs-bound-at-the-spawn-site).
@@ -433,5 +435,101 @@ describe('commit_with_gate_capture — executable hook proof', () => {
       exit_code: 1,
       blocked_gate: 'hook_proof',
     });
+  });
+});
+
+// sc-3443: ship hands guard-deterministic the exact --dry-gates invocation; the gate prints it in its
+// own failure footer, so the shell attributes nothing. The stub hook echoes what it was handed.
+describe('commit_with_gate_capture — hands the gate the ship-exact --dry-gates command', () => {
+  const ECHO_CMD = 'echo "CMD=[${DEVKIT_SHIP_DRY_GATES_CMD:-}]" >&2\nexit 1\n';
+
+  it('is the full invocation with the recorded base and quoted paths', () => {
+    const { root, wt, base } = fixture(true, ECHO_CMD);
+    const result = runCommit(root, wt, base, false, false, '', {
+      SHIP_INTENT_GENERATION: 'g1',
+      DEVKIT_SHIP_FROM_BRANCH: '0',
+      DK_TEST_CALLER_VARS: `BASE_FLAG=main; PATHS=(src/a.ts 'docs/with space.md')`,
+    });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(
+      "CMD=[devkit ship feat/sc1537 'test title' --dry-gates --base main -- src/a.ts 'docs/with space.md']",
+    );
+    expect(result.stderr).toContain('Retry after fixing: devkit ship --resume feat/sc1537');
+  });
+
+  it('carries every recorded --link, since linked dependencies change the verdict', () => {
+    const { root, wt, base } = fixture(true, ECHO_CMD);
+    const result = runCommit(root, wt, base, false, false, '', {
+      DEVKIT_SHIP_FROM_BRANCH: '0',
+      DK_TEST_CALLER_VARS: `BASE_FLAG=main; LINK_EXTRA=(vendor 'my libs'); PATHS=(src/a.ts)`,
+    });
+    expect(result.stderr).toContain(
+      "--dry-gates --base main --link vendor --link 'my libs' -- src/a.ts]",
+    );
+  });
+
+  it('branch-source mode takes --from-branch instead of a path list', () => {
+    const { root, wt, base } = fixture(true, ECHO_CMD);
+    const result = runCommit(root, wt, base, false, false, '', {
+      DEVKIT_SHIP_FROM_BRANCH: '1',
+      DK_TEST_CALLER_VARS: 'BASE_FLAG=main; PATHS=(src/a.ts)',
+    });
+    expect(result.stderr).toContain('--dry-gates --base main --from-branch]');
+  });
+
+  it('uses placeholders when the caller set no paths', () => {
+    const { root, wt, base } = fixture(true, ECHO_CMD);
+    const result = runCommit(root, wt, base, false, false, '', { DEVKIT_SHIP_FROM_BRANCH: '0' });
+    expect(result.stderr).toContain(
+      "CMD=[devkit ship feat/sc1537 'test title' --dry-gates -- <paths>]",
+    );
+  });
+
+  it('the --pr (reship) flow gets none — dry-gates cannot rehearse a re-push', () => {
+    const { root, wt, base } = fixture(true, ECHO_CMD);
+    const result = runCommit(root, wt, base, false, false, '0', {
+      DEVKIT_SHIP_DRY_GATES_CMD: 'leaked from caller',
+    });
+    expect(result.stderr).toContain('CMD=[]');
+  });
+
+  it('a --dry-gates run gets none — it already is one', () => {
+    const { root, wt, base } = fixture(true, ECHO_CMD);
+    const result = runCommit(root, wt, base, false, true);
+    expect(result.stderr).toContain('CMD=[]');
+  });
+
+  it('the shell itself never prints a --dry-gates hint, whatever the hook output says', () => {
+    const { root, wt, base } = fixture(
+      true,
+      "echo '✗ deterministic gates failed: probe' >&2\necho 'guard-review: security FAILED' >&2\nexit 1\n",
+    );
+    const result = runCommit(root, wt, base, false, false, '', { SHIP_INTENT_GENERATION: 'g1' });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).not.toContain('--dry-gates');
+  });
+});
+
+// The class behind a trailing-newline counterexample: every argument the hint quotes must round-trip
+// through the shell unchanged — including content command substitution would have eaten.
+describe('_ship_sh_word — quoting round-trips any argument', () => {
+  const CASES = [
+    'plain',
+    "it's",
+    'a$HOME',
+    'trail\n',
+    'a\nb',
+    '',
+    'sp ace',
+    "''",
+    "'\n'",
+    'back\\slash',
+    '*?[x]',
+    '&|;',
+  ];
+  it.each(CASES)('%j', (input) => {
+    const script = `. "$1"; w=$(_ship_sh_word "$2"; printf x); w=\${w%x}; eval "got=$w"; printf '%s' "$got"`;
+    const r = testSpawnSync('/bin/bash', ['-c', script, 'rt', helper, input], { encoding: 'utf8' });
+    expect(r.stdout).toBe(input);
   });
 });

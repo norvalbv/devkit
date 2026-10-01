@@ -20,6 +20,14 @@ command. Do not pre-run every gate or replace the managed chain with a hand-writ
    stages and `--resume` replays the
    recorded invocation byte-identically, so restarting with different flags or a re-typed body
    usually wastes work and can discard useful evidence.
+   **Re-check a named deterministic failure before re-shipping.** The `✗ deterministic gates
+   failed` block ends with the command that re-judges each failed gate (anti-slop's documented form
+   is `devkit anti-slop check --staged`). Stage the fix and run that line — seconds, no judges.
+   Under `devkit ship` those lines judge your checkout's index, not the briefed paths, so the ship
+   block also prints the `devkit ship <branch> "<title>" --dry-gates …` invocation that re-runs the
+   deterministic set on ship's exact staging. A hand-rolled substitute (`npx oxlint …` against the
+   anti-slop config) ignores the baseline and cannot reproduce the new-versus-inherited verdict.
+   This re-checks a gate that already named itself; it is not a licence to pre-run every gate.
 3. **Check which files the gates actually had.** A ship's gate worktree is cut from the base, so
    every path NOT in the ship's brief is judged at its **base** content — that is how a clone gate
    reports a duplication against a symbol you already moved, or a drift in a file that verifies clean
@@ -59,6 +67,9 @@ command. Do not pre-run every gate or replace the managed chain with a hand-writ
   base, so `git show HEAD:<file>`, `grep` and `git diff --stat` in your own checkout can all agree
   with each other and still describe a different tree. Waive on evidence read from the reviewed
   base, and pass the `--base` the block note prints so the record says which tree you checked.
+  A lens PASS is one sample from a nondeterministic judge, not a certificate that its concern is
+  clean. A later attempt can fail the same lens on code you did not touch. Treat that as an
+  ordinary finding and fix it: it was missed, not caused by your last edit.
 - **A counterexample stands for a class.** A correctness finding against a matcher, parser,
   predicate or validator names ONE input the check gets wrong. Before re-shipping, name the property
   that makes it wrong, list the other inputs that share it (every character that continues a path,

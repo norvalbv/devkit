@@ -27,6 +27,7 @@ import {
   resolveTreeExtensions,
   sourceMatchers,
 } from '../config.mts';
+import { exitGate } from '../deterministic/reason.mts';
 import type { GrammarNode, TreeSpec } from '../structure/compile.mts';
 import { childGrammarNode } from '../structure/walk.mts';
 import {
@@ -281,7 +282,8 @@ function runCli(cmd: string) {
       root,
       cap,
     );
-    if (failOpen) process.exit(2); // ungoverned + un-frozen → fail open
+    if (failOpen)
+      exitGate(2, ['guard-fanout: ungoverned repo and no fan-out baseline — opted out']);
     const over = overCap(counts, cap);
 
     // A ratchet must fail the CHANGE that broke it, not whoever commits next. During a commit judge
@@ -295,12 +297,15 @@ function runCli(cmd: string) {
       ([dir, n]) => n > allowed(dir) && (!inCommit || n > (headCounts[dir] ?? 0)),
     );
     if (grew.length > 0) {
-      console.error(`🚫 Folder fan-out exceeded (cap ${frozen.cap} impl files/folder, any depth):`);
-      for (const [dir, n] of grew) console.error(`   ${dir}: ${n} files (allowed ${allowed(dir)})`);
+      const why = [
+        `🚫 Folder fan-out exceeded (cap ${frozen.cap} impl files/folder, any depth):`,
+        ...grew.map(([dir, n]) => `   ${dir}: ${n} files (allowed ${allowed(dir)})`),
+      ];
+      for (const line of why) console.error(line);
       console.error(
         '   Split into cohesive kebab subfolders (group by concern — graphify/co-occurrence can suggest clusters).',
       );
-      process.exit(1);
+      exitGate(1, why);
     }
     // Drift was already over its allowance at HEAD and was not grown here. Report it separately so
     // the remedy is an honest baseline refresh, not an unrelated directory split in this change.

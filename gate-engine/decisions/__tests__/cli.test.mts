@@ -99,6 +99,60 @@ function runWithoutParser(args: string[]) {
   });
 }
 
+type Exit = Pick<ReturnType<typeof spawnSync>, 'status' | 'signal' | 'stderr'>;
+
+/**
+ * A signal kill leaves status null — never let it read as exit 0 or as a refusal (sc-2477).
+ */
+function expectExit(r: Exit, code: number) {
+  expect(r.signal, String(r.stderr)).toBeNull();
+  expect(r.status, String(r.stderr)).toBe(code);
+}
+
+/** A refusal is a real non-zero exit code, not merely "anything but 0" — null is a crash. */
+function expectRefusal(r: Exit) {
+  expect(r.signal, String(r.stderr)).toBeNull();
+  expect(r.status, String(r.stderr)).toBeGreaterThan(0);
+}
+
+describe('expectExit / expectRefusal (sc-2477)', () => {
+  const killed: Exit = { status: null, signal: 'SIGKILL', stderr: '' };
+  // spawnSync's shape when the spawn itself fails (ENOENT, EACCES): no status AND no signal.
+  const neverRan: Exit = { status: null, signal: null, stderr: '' };
+
+  it('rejects a signal kill where a clean exit is expected', () => {
+    expect(() => expectExit(killed, 0)).toThrow();
+  });
+
+  it('rejects a signal kill where a refusal is expected — a crash is not a refusal', () => {
+    expect(() => expectRefusal(killed)).toThrow();
+  });
+
+  it('rejects a child that never ran, under either form', () => {
+    expect(() => expectExit(neverRan, 0)).toThrow();
+    expect(() => expectRefusal(neverRan)).toThrow();
+  });
+
+  it('accepts real exits and still tells 0 from non-zero', () => {
+    expectExit({ status: 0, signal: null, stderr: '' }, 0);
+    expectRefusal({ status: 1, signal: null, stderr: '' });
+    expect(() => expectRefusal({ status: 0, signal: null, stderr: '' })).toThrow();
+    expect(() => expectExit({ status: 1, signal: null, stderr: '' }, 0)).toThrow();
+  });
+
+  // The fixtures above are hand-built; this pins them to the shape spawnSync really returns. POSIX
+  // only — Windows has no signal delivery, so a self-kill there reports an exit code instead.
+  it.skipIf(process.platform === 'win32')('rejects a real child that a signal killed', () => {
+    const r = spawnSync('node', ['-e', 'process.kill(process.pid, "SIGKILL")'], {
+      encoding: 'utf8',
+      timeout: 30_000,
+    });
+    expect(r.signal).toBe('SIGKILL');
+    expect(() => expectExit(r, 0)).toThrow();
+    expect(() => expectRefusal(r)).toThrow();
+  });
+});
+
 const reqFlags = (slug: string) => [
   '--context',
   `${slug} broke`,
@@ -180,7 +234,7 @@ describe('guard-decisions integrity (via cli.mts, the real bin)', () => {
     // ...while the staged variant finds nothing staged in a non-git fixture and stands down. The
     // two must not produce the same verdict, or the dispatch is not wired.
     const staged = run(['integrity', '--staged']);
-    expect(staged.status ?? 0).toBe(0);
+    expectExit(staged, 0);
     expect(staged.stderr).not.toContain('h1-slug-mismatch');
   });
 
@@ -203,7 +257,7 @@ describe('guard-decisions integrity (via cli.mts, the real bin)', () => {
       '--evidence-change',
       '   ',
     ]);
-    expect(retarget.status).not.toBe(0);
+    expectRefusal(retarget);
     expect(retarget.stderr).toContain('evidence-change');
 
     // …and the log it refused to write is still clean.
@@ -241,7 +295,7 @@ describe('guard-decisions add --note --supersedes (via cli.mts, the real bin)', 
   it('refuses a pointer that names no note on the axis', () => {
     seed();
     const r = run(['add', 'my-axis', '--note', 'nope', '--supersedes', 'note:2020-01-01']);
-    expect(r.status).not.toBe(0);
+    expectRefusal(r);
     expect(r.stderr).toContain('names no note on this axis');
     expect(run(['integrity']).status).toBe(0);
   });
@@ -249,7 +303,7 @@ describe('guard-decisions add --note --supersedes (via cli.mts, the real bin)', 
   it('refuses a Target id — a note amends a NOTE, not a ruling', () => {
     seed();
     const r = run(['add', 'my-axis', '--note', 'nope', '--supersedes', 'target:2026-07-26']);
-    expect(r.status).not.toBe(0);
+    expectRefusal(r);
     expect(r.stderr).toContain('is not a note id');
   });
 
@@ -318,6 +372,10 @@ describe('retrieval unavailable (the parser dependency cannot resolve)', () => {
     // decisions command the generated pre-commit hook runs, and its code must not move.
     const withParser = run(['detect', '--gate']);
     const withoutParser = runWithoutParser(['detect', '--gate']);
+    // Two crashes, or two failed spawns, both report status null — equal, and proving nothing.
+    expect(withParser.signal, withParser.stderr).toBeNull();
+    expect(withParser.status, withParser.stderr).toBeGreaterThanOrEqual(0);
+    expect(withoutParser.signal, withoutParser.stderr).toBeNull();
     expect(withoutParser.status).toBe(withParser.status);
   });
 });
@@ -347,7 +405,7 @@ describe('retrieval unavailable — failure shapes and the contract other caller
     writeFileSync(join(dir, 'some-axis.md'), '# some-axis\n');
     const r = runWithoutParser(['scoped-targets', '--files', 'src/a.ts']);
 
-    expect(r.status).not.toBe(0);
+    expectRefusal(r);
     expect(r.stdout).toBe('');
     expect(r.stderr).toContain('decision engine UNAVAILABLE');
     // scoped-targets ANSWERS from the log, so it keeps the caveat. Its dispatch rewrites

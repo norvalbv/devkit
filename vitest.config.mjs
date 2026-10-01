@@ -12,6 +12,7 @@ const GIT_INTEGRATION_TESTS = [
   'cli/__tests__/baseline-status.test.mts',
   'cli/__tests__/baseline-status-config.test.mts',
   'cli/__tests__/baseline-status-edges.test.mts',
+  'cli/__tests__/dist-integrity-release-only.test.mts',
   'cli/__tests__/doctor-hookspath-owner.test.mts',
   'cli/__tests__/guard-branch.test.mts',
   'cli/__tests__/hook-parity.test.mts',
