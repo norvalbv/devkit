@@ -319,3 +319,68 @@ describe('checkSearchIndex — the branches the callers gate off', () => {
     expect(result.detail).toContain('scan-time body verification');
   });
 });
+
+// sc-2269: an index with nothing usable makes guard-dup opt out every commit. Doctor counts with the
+// matcher's own predicate, so a --phase0-only index (rows, NULL embeddings) is caught too.
+describe('doctor — a configured index with no usable chunk is drift', () => {
+  type Usable = { symbol: string | null; embedded: boolean };
+
+  function fullIndex(root: string, rows: Usable[]): void {
+    const source = join(root, 'src.ts');
+    writeFileSync(source, 'export const indexed = true;\n');
+    writeFileSync(
+      join(root, 'guard.config.json'),
+      JSON.stringify({ indexPath: '.search-code/index.db' }),
+    );
+    mkdirSync(join(root, '.search-code'), { recursive: true });
+    const db = new DatabaseSync(join(root, '.search-code', 'index.db'));
+    db.exec(
+      'CREATE TABLE chunks (file_path TEXT, file_mtime INTEGER, symbol_name TEXT, embedding BLOB, code_embedding BLOB)',
+    );
+    const ins = db.prepare(
+      'INSERT INTO chunks (file_path, file_mtime, symbol_name, embedding, code_embedding) VALUES (?, ?, ?, ?, ?)',
+    );
+    const blob = Buffer.from([1, 2, 3, 4]);
+    for (const r of rows) {
+      ins.run(
+        'src.ts',
+        statSync(source).mtimeMs,
+        r.symbol,
+        r.embedded ? blob : null,
+        r.embedded ? blob : null,
+      );
+    }
+    db.close();
+  }
+
+  it.each<[string, Usable[]]>([
+    ['zero rows (schema only, never populated)', []],
+    ['rows with NULL embeddings (--phase0-only)', [{ symbol: 'indexed', embedded: false }]],
+    ['embedded rows with no symbol_name', [{ symbol: null, embedded: true }]],
+  ])('%s → advisory DRIFT naming the remedy', (_label, rows) => {
+    const root = mkTmp('doctor-search-index-empty-');
+    fullIndex(root, rows);
+    const result = checkSearchIndex(root, '.search-code/index.db', true);
+    expect(result).toMatchObject({ status: 'DRIFT', advisory: true, fixable: false });
+    expect(result.detail).toContain('no embedded chunks');
+    expect(result.remediation).toContain('search-code index');
+  });
+
+  it('one usable, fresh row stays OK (the boundary is zero, not "few")', () => {
+    const root = mkTmp('doctor-search-index-one-');
+    fullIndex(root, [{ symbol: 'indexed', embedded: true }]);
+    const result = checkSearchIndex(root, '.search-code/index.db', true);
+    expect(result.status).toBe('OK');
+    expect(result.detail).toContain('indexed file(s) match');
+  });
+
+  // Integration: the file's indexPath reaches the check, and it stays advisory so a consumer
+  // mid-index does not get a doctor that exits 1 until embedding finishes.
+  it('is reached through checkGuardConfig from the file indexPath, as advisory', async () => {
+    const root = mkTmp('doctor-search-index-empty-exit-');
+    fullIndex(root, []);
+    const results = await checkGuardConfig(root, true, true, { review: false, sentry: false });
+    const index = results.find((r) => r.name === CHECK);
+    expect(index).toMatchObject({ status: 'DRIFT', advisory: true });
+  });
+});
