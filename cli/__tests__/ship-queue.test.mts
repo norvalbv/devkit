@@ -9,7 +9,7 @@ import {
   utimesSync,
   writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -18,6 +18,7 @@ import { enterShipQueue, joinAncestorSlot } from '../lib/ship/queue/enter.mts';
 import {
   acquireShipSlot,
   ensureRoot,
+  queueRoot,
   liveTickets,
   enqueue,
   type QueueProbe,
@@ -279,7 +280,7 @@ describe('tickets and acquisition', () => {
   it.each([0, -1, 1.5, 2_147_483_648])('rejects a slot holder with pid %d', (pid) => {
     const root = tempRoot();
     seatHolder(root, holder({ pid }));
-    expect(readHolder(root)).toBeUndefined();
+    expect(readHolder(join(root, 'slot'))).toBeUndefined();
   });
 
   it('prunes a ticket whose pid was reused by an unrelated process', () => {
@@ -409,12 +410,23 @@ describe('ship queue status', () => {
     const before = readdirSync(join(root, 'tickets')).sort();
 
     const view = readShipQueue(root, probe([111, 222, 333]));
-    expect(view.holder?.gate).toBe('guard-review: running');
+    expect(view.running.map((h) => h.gate)).toEqual(['guard-review: running']);
+    expect(view).toMatchObject({ slots: 1, occupied: 1 });
     expect(view.waiters.map((w) => w.branch)).toEqual(['feat/next', 'feat/late']);
     expect(readdirSync(join(root, 'tickets')).sort()).toEqual(before);
 
     const text = formatShipQueue(view, 125 * 60_000);
-    expect(text.split('\n')[0]).toContain('running: feat/a');
+    expect(text.split('\n')[0]).toBe('slots: 1/1 in use');
+    expect(text.split('\n')[1]).toContain('running: feat/a');
+    expect(text).toContain('stuck? inspect it with: ps -o pid,lstart,command -p 111');
+    expect(text).not.toMatch(/\bkill\b/); // devkit never hands out a signal command
+    const grouped = formatShipQueue({
+      running: [{ ...holder({ pgid: 900 }), gate: 'g' }],
+      waiters: [],
+      slots: 2,
+      occupied: 1,
+    });
+    expect(grouped).toContain('ps -o pid,lstart,command -g 900');
     expect(text).toContain('2h5m');
     expect(text.indexOf('feat/next')).toBeLessThan(text.indexOf('feat/late'));
   });
@@ -422,24 +434,61 @@ describe('ship queue status', () => {
   it('reports no holder when the claimed holder is dead, and an unknown gate without a log', () => {
     const root = tempRoot();
     seatHolder(root, holder({ pid: 111 }));
-    expect(readShipQueue(root, probe([])).holder).toBeUndefined();
-    expect(formatShipQueue({ waiters: [] })).toBe('running: (none)\nwaiting: (none)');
+    expect(readShipQueue(root, probe([])).running).toEqual([]);
+    expect(formatShipQueue({ running: [], waiters: [], slots: 1, occupied: 0 })).toBe(
+      'slots: 0/1 in use\nrunning: (none)\nwaiting: (none)',
+    );
     expect(currentGate({})).toBe('not started');
     expect(currentGate({ gateLog: join(root, 'missing.log') })).toBe('unknown');
   });
 });
 
 describe('entering the queue', () => {
-  it('bypasses loudly and records telemetry for DEVKIT_SHIP_NO_QUEUE=1', async () => {
+  it.each([
+    ['DEVKIT_SHIP_NO_QUEUE', '1'],
+    ['DEVKIT_SHIP_NO_QUEUE', ''],
+    ['DEVKIT_SHIP_QUEUE_DIR', '/tmp/private-queue'],
+    ['DEVKIT_SHIP_QUEUE_DIR', ''],
+  ])('ignores the retired %s=%j with a notice, and still queues', async (name, value) => {
     const root = tempRoot();
-    const events = join(root, 'events.jsonl');
-    const previous = process.env.DEVKIT_GATE_EVENTS;
-    process.env.DEVKIT_GATE_EVENTS = events;
     const logged: string[] = [];
     let acquired = false;
+    const entered = await enterShipQueue({
+      env: { [name]: value },
+      root,
+      repo: '/r',
+      branch: 'b',
+      mode: 'test',
+      acquire: async (options) => {
+        acquired = true;
+        expect(options.root).toBe(root); // never redirected by the environment
+        return { token: 't', slotDir: join(root, 'slot'), release: () => undefined };
+      },
+      log: (line) => logged.push(line),
+    });
+    expect(acquired).toBe(true);
+    expect(entered.env.DEVKIT_SHIP_SLOT_RELEASE).toBe('1');
+    expect(logged.join('\n')).toContain(`${name} no longer exists and is ignored`);
+  });
+
+  it('resolves the machine queue from the passwd home, not $HOME or any env var', () => {
+    const previous = process.env.HOME;
+    process.env.HOME = tempRoot();
     try {
-      const entered = await enterShipQueue({
-        env: { DEVKIT_SHIP_NO_QUEUE: '1', DEVKIT_SHIP_QUEUE_DIR: root },
+      expect(queueRoot()).toBe(join(userInfo().homedir, '.devkit', 'ship-queue'));
+    } finally {
+      process.env.HOME = previous;
+    }
+  });
+
+  it('stops the ship, never running unqueued, when the queue root cannot be created', async () => {
+    const root = tempRoot();
+    writeFileSync(join(root, 'file'), '');
+    let acquired = false;
+    await expect(
+      enterShipQueue({
+        env: { DEVKIT_GATE_EVENTS: '' },
+        root: join(root, 'file', 'queue'),
         repo: '/r',
         branch: 'b',
         mode: 'test',
@@ -447,56 +496,18 @@ describe('entering the queue', () => {
           acquired = true;
           throw new Error('unreachable');
         },
-        log: (line) => logged.push(line),
-      });
-      expect(entered.handle).toBeUndefined();
-      expect(entered.env.DEVKIT_SHIP_SLOT_RELEASE).toBe('');
-    } finally {
-      if (previous === undefined) delete process.env.DEVKIT_GATE_EVENTS;
-      else process.env.DEVKIT_GATE_EVENTS = previous;
-    }
+        log: () => undefined,
+      }),
+    ).rejects.toThrow(/cannot create the queue at .*grant that path/);
     expect(acquired).toBe(false);
-    expect(logged.join('\n')).toMatch(/ship queue BYPASSED \(DEVKIT_SHIP_NO_QUEUE=1\)/);
-    expect(JSON.parse(readFileSync(events, 'utf8').trim())).toMatchObject({
-      gate: 'ship-queue',
-      bypass: 'DEVKIT_SHIP_NO_QUEUE',
-    });
-  });
-
-  it.each(['0', '', 'true'])('does not bypass for DEVKIT_SHIP_NO_QUEUE=%j', async (value) => {
-    const root = tempRoot();
-    const entered = await enterShipQueue({
-      env: { DEVKIT_SHIP_NO_QUEUE: value, DEVKIT_SHIP_QUEUE_DIR: root },
-      repo: '/r',
-      branch: 'b',
-      mode: 'test',
-      log: () => undefined,
-    });
-    expect(entered.handle).toBeDefined();
-    expect(entered.env.DEVKIT_SHIP_SLOT_RELEASE).toBe('1');
-    entered.handle?.release();
-  });
-
-  it('runs unqueued, loudly, when the queue root cannot be created', async () => {
-    const root = tempRoot();
-    writeFileSync(join(root, 'file'), '');
-    const logged: string[] = [];
-    const entered = await enterShipQueue({
-      env: { DEVKIT_SHIP_QUEUE_DIR: join(root, 'file', 'queue'), DEVKIT_GATE_EVENTS: '' },
-      repo: '/r',
-      branch: 'b',
-      mode: 'test',
-      log: (line) => logged.push(line),
-    });
-    expect(entered.handle).toBeUndefined();
-    expect(logged.join('\n')).toMatch(/ship queue BYPASSED \(queue unavailable at /);
   });
 
   it('stops the ship, rather than running unqueued, when acquisition fails past root creation', async () => {
     const root = tempRoot();
     await expect(
       enterShipQueue({
-        env: { DEVKIT_SHIP_QUEUE_DIR: root },
+        env: {},
+        root,
         repo: '/r',
         branch: 'b',
         mode: 'test',
@@ -512,7 +523,8 @@ describe('entering the queue', () => {
     const root = tempRoot();
     const logged: string[] = [];
     const entered = await enterShipQueue({
-      env: { DEVKIT_SHIP_SLOT: 'leaked', DEVKIT_SHIP_QUEUE_DIR: root },
+      env: { DEVKIT_SHIP_SLOT: 'leaked' },
+      root,
       repo: '/r',
       branch: 'b',
       mode: 'test',
@@ -527,7 +539,8 @@ describe('entering the queue', () => {
     const root = tempRoot();
     seatHolder(root, holder({ pid: process.ppid, identity: 'ps:x', token: 'outer' }));
     const entered = await enterShipQueue({
-      env: { DEVKIT_SHIP_SLOT: 'outer', DEVKIT_SHIP_QUEUE_DIR: root },
+      env: { DEVKIT_SHIP_SLOT: 'outer' },
+      root,
       repo: '/r',
       branch: 'b',
       mode: 'test',
@@ -538,13 +551,13 @@ describe('entering the queue', () => {
       log: () => undefined,
     });
     expect(entered.env).toEqual({ DEVKIT_SHIP_SLOT_RELEASE: '' });
-    expect(readHolder(root)?.guests?.map((g) => g.pid)).toEqual([process.pid]);
+    expect(readHolder(join(root, 'slot'))?.guests?.map((g) => g.pid)).toEqual([process.pid]);
     // While the guest runs, neither the outer dispatcher nor Bash's pre-CI hand-off may free the slot.
     expect(releaseSlot(root, 'outer', { probe: probe([process.pid]), handOff: true })).toBe(
       'in-use',
     );
     entered.handle?.release();
-    expect(readHolder(root)?.guests).toEqual([]);
+    expect(readHolder(join(root, 'slot'))?.guests).toEqual([]);
     expect(releaseSlot(root, 'outer', { probe: probe([]), handOff: true })).toBe('released');
   });
 
@@ -708,7 +721,7 @@ describe("ship_queue_slot_register (bash, the acquirer's first action)", () => {
     });
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("cannot read this ship's process group");
-    expect(readHolder(root)?.pgid).toBeUndefined();
+    expect(readHolder(join(root, 'slot'))?.pgid).toBeUndefined();
   });
 
   it('is a no-op for an unqueued or nested ship', () => {
@@ -821,7 +834,7 @@ describe('status snapshot during a hand-off', () => {
 
   it('changes no queue state and creates no queue root', () => {
     const root = join(tempRoot(), 'absent');
-    expect(readShipQueue(root)).toEqual({ waiters: [] });
+    expect(readShipQueue(root)).toEqual({ running: [], waiters: [], slots: 1, occupied: 0 });
     expect(existsSync(root)).toBe(false);
   });
 });
@@ -855,8 +868,8 @@ describe('ship_queue_slot_note_log (bash)', () => {
         timeout: 20_000,
       });
     expect(run('other').status).toBe(0);
-    expect(readHolder(root)?.gateLog).toBeUndefined();
+    expect(readHolder(join(root, 'slot'))?.gateLog).toBeUndefined();
     expect(run('mine').status).toBe(0);
-    expect(readHolder(root)?.gateLog).toBe('/tmp/g.log');
+    expect(readHolder(join(root, 'slot'))?.gateLog).toBe('/tmp/g.log');
   });
 });

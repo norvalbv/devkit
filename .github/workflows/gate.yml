@@ -63,6 +63,18 @@ jobs:
           BENCHMARK_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: bun run benchmarks:check -- --mode tree --tree HEAD --base "$BENCHMARK_BASE"
 
+      # Regenerated dist is release-only (typescript-source-prebuilt-mjs, sc-2467). Judged on the PR's
+      # committed tree because every path a commit takes to a PR passes here, whichever tool made it.
+      - name: Release-only dist (a PR may add or delete dist, never rewrite it)
+        if: github.event_name == 'pull_request'
+        env:
+          DIST_BASE: ${{ github.event.pull_request.base.sha }}
+          DIST_HEAD: ${{ github.event.pull_request.head.sha }}
+          DIST_BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: |
+          node cli/lib/ship/dist-integrity.mts --root . --tree "$(git rev-parse "$DIST_HEAD^{tree}")" \
+            --base "$(git merge-base "$DIST_BASE" "$DIST_HEAD")" --branch "$DIST_BRANCH" --
+
       # STEP-level, deliberately, not job-level (sc-2393). A job timeout cancels the job, which puts
       # the two `if: always()` uploads below at the mercy of cancellation semantics; a step bound
       # leaves the job alive so a wedged run still publishes whatever per-file record exists and

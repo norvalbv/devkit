@@ -11,6 +11,7 @@ import {
   reshipScript,
   scriptPath,
   seedReshipRepo,
+  seedShipRepo,
   seedShipRepoLocalRemote,
   WT_RE,
 } from './_ship-branch-fixture.mts';
@@ -307,4 +308,34 @@ describe('ship-branch.sh resume — explicit paths are literal files (sc-2425)',
       }).stdout.trim(),
     ).toBe(preserved);
   });
+});
+
+// Without -z git C-quotes these names; the quoted spelling names no file, so the staged-set check
+// reported a formatter no-op as lost work and falsely aborted the ship.
+describe('ship-branch.sh staged-set check — odd names survive a formatter no-op', () => {
+  for (const name of ['café.txt', 'say "hi".txt', 'back\\slash.txt', 'two\nlines.txt']) {
+    it(`allows a formatter no-op on ${JSON.stringify(name)}`, () => {
+      const { dir, env, git } = seedShipRepo({
+        hookBody: "git restore --source=HEAD --staged --worktree -- . ':(exclude)note.txt'\nexit 0",
+      });
+      writeFileSync(join(dir, name), 'base\n');
+      git(['add', '--', name], { stdio: 'ignore' });
+      git(['commit', '--no-verify', '-qm', 'odd name'], { stdio: 'ignore' });
+      writeFileSync(join(dir, name), 'needs formatting\n');
+      writeFileSync(join(dir, 'note.txt'), 'real change\n');
+
+      const r = spawnSync('/bin/bash', [scriptPath, 'feat/odd-noop', 't', name, 'note.txt'], {
+        cwd: dir,
+        input: 'b\n',
+        encoding: 'utf8',
+        env: { ...env, SHIP_DRY_RUN: '1' },
+      });
+
+      dropWorktree(git, r.stderr);
+      expect(r.status, r.stderr).toBe(0);
+      expect(r.stderr).toMatch(/normalized to its base content/);
+      expect(r.stderr).not.toMatch(/missing work that was staged/);
+      expect(r.stderr).toMatch(/DRY: committed locally/);
+    });
+  }
 });

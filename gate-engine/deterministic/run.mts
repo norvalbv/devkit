@@ -55,6 +55,7 @@ import {
   reasonReport,
   withReasonFiles,
 } from './reason.mts';
+import { printRecheckFooter, recheckCommand, recheckLines, registryRecheck } from './recheck.mts';
 import { type ConfigComponent, DETERMINISTIC, type RawDevkitComponents } from './registry.mts';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -150,6 +151,9 @@ interface Gate {
   argv: string[] | null;
   failOpen2: boolean;
   rcLabels?: Record<number, string>;
+  /** sc-3443: the local command that re-judges this gate, and its documented short form. */
+  recheck?: string;
+  alias?: string;
 }
 
 export function parseOpts(argv: string[]): ParsedOpts {
@@ -276,17 +280,15 @@ function runArgv(cwd: string, argv: string[], exec: typeof execFileSync, reasonF
 // 2 = could-not-run → fail-open); any other command spawns its own argv[0] via PATH and BLOCKS on
 // every non-zero code (eslint's exit 2 is a fatal config error, not an opt-out). An empty command
 // (a malformed `--extra` spec) yields argv null → reported as unrunnable, never silently skipped.
-function commandGate(label: string, cmd?: string): Gate {
+function commandGate(label: string, cwd: string, cmd?: string): Gate {
   const tokens = (cmd ?? '').split(WHITESPACE_RE).filter(Boolean);
   if (!tokens.length) return { label, argv: null, failOpen2: false };
   if (tokens[0] === 'guard-structure') {
-    return {
-      label,
-      argv: ['node', path.resolve(HERE, `../structure/run${SELF_EXT}`), ...tokens.slice(1)],
-      failOpen2: true,
-    };
+    const argv = ['node', path.resolve(HERE, `../structure/run${SELF_EXT}`), ...tokens.slice(1)];
+    return { label, argv, failOpen2: true, recheck: recheckCommand(argv, cwd) };
   }
-  return { label, argv: tokens, failOpen2: false };
+  // The tokens that RUN, quoted — never the raw string, which a shell would parse differently.
+  return { label, argv: tokens, failOpen2: false, recheck: recheckCommand(tokens) };
 }
 
 /**
@@ -341,9 +343,11 @@ export function runDeterministic(cwd = process.cwd(), opts: RunDeterministicOpts
   // Whether each failure reached a verdict, decided where its exit code is read — never re-derived
   // from the label, which an `--extra` spec controls (sc-2753).
   const failed: Array<{ gate: string; verdict: boolean }> = [];
+  const rechecks: string[] = [];
   const fail = (gate: Gate, suffix = '', verdict = suffix === '', reason: string[] = []) => {
     fails.push({ id: gate.id, label: `${gate.label}${suffix}`, reason });
     failed.push({ gate: gate.label.replace(GUARD_PREFIX_RE, ''), verdict });
+    rechecks.push(...recheckLines(`${gate.label}${suffix}`, gate));
   };
   // Gates that opted out (exit 2 where that IS an opt-out) and so proved nothing. Reported even on a
   // green run — the whole defect this exists for is a skipped gate reading like a passed one.
@@ -354,17 +358,21 @@ export function runDeterministic(cwd = process.cwd(), opts: RunDeterministicOpts
       console.log('   Repository structure was NOT verified for this commit.');
     }
     const ids = new Set(effectiveIds);
-    const gates: Gate[] = DETERMINISTIC.filter((g) => ids.has(g.id)).map((g) => ({
-      id: g.id,
-      label: `guard-${g.id}`,
-      argv: ['node', path.resolve(HERE, g.module.replace(MJS_EXT_RE, SELF_EXT)), ...g.args],
-      failOpen2:
-        !('failOpen2' in g) || (g.failOpen2 === 'review' ? reviewMode : g.failOpen2 !== false),
-      rcLabels: 'rcLabels' in g ? g.rcLabels : undefined,
-    }));
-    for (const x of opts.extra ?? []) gates.push(commandGate(x.label, x.cmd));
+    const gates: Gate[] = DETERMINISTIC.filter((g) => ids.has(g.id)).map((g) => {
+      const argv = ['node', path.resolve(HERE, g.module.replace(MJS_EXT_RE, SELF_EXT)), ...g.args];
+      return {
+        id: g.id,
+        label: `guard-${g.id}`,
+        argv,
+        failOpen2:
+          !('failOpen2' in g) || (g.failOpen2 === 'review' ? reviewMode : g.failOpen2 !== false),
+        rcLabels: 'rcLabels' in g ? g.rcLabels : undefined,
+        ...registryRecheck(g, argv, cwd),
+      };
+    });
+    for (const x of opts.extra ?? []) gates.push(commandGate(x.label, cwd, x.cmd));
     if (opts.structure && !bypassStructure) {
-      gates.push(commandGate('structure-lint', opts.structure));
+      gates.push(commandGate('structure-lint', cwd, opts.structure));
     }
     withReasonFiles((fileFor) => {
       gates.forEach((gate, i) => {
@@ -430,6 +438,7 @@ export function runDeterministic(cwd = process.cwd(), opts: RunDeterministicOpts
     for (const line of reasonReport(fails)) console.error(line);
     console.error('   Fix every failure above together, then commit once.');
     console.error('   On commit or ship, decision and reviewer gates run only after these pass.');
+    printRecheckFooter(rechecks);
     if (fails.some((f) => f.label.startsWith('structure-lint'))) {
       console.error(
         '   Base branch structure debt that your diff did not cause? Re-run with the explicit',
