@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { CONSUMER_FORMATTER } from '../lib/husky/format-fragment.mts';
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { confirm, isCancel, outro } from '@clack/prompts';
@@ -97,9 +98,8 @@ const STRUCTURE_TEMPLATE_FILES: Record<string, [string, string][]> = {
   ],
 };
 
-// devDeps/scripts owned by each component — used by both install (add) and remove (delete).
-const BIOME_DEV_DEPS = ['@biomejs/biome'];
-const BIOME_SCRIPTS = ['lint', 'format'];
+const BIOME_DEV_DEPS = [CONSUMER_FORMATTER.package.name];
+const BIOME_SCRIPTS = Object.keys(CONSUMER_FORMATTER.scripts);
 
 // Matches the scanRoots array value in guard.config.json for an in-place --scan-root patch
 // (preserves the //-comment guidance keys a JSON round-trip would drop). Hoisted (perf).

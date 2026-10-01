@@ -6,6 +6,7 @@
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Selection } from '../components.mts';
+import { CONSUMER_FORMATTER } from '../husky/format-fragment.mts';
 import { readJson } from '../fs-helpers.mts';
 
 // The consumer's package.json — only the maps this patches add/remove entries in.
@@ -77,9 +78,10 @@ export function patchPackageJson(
   // the `guard-structure` bin (devkit's own eslint + plugin). Only ELECTRON keeps consumer-side
   // eslint/parser/plugin — its preset imports them directly in a consumer eslint.config.mjs + domains.
   const electronPreset = isStructure && stack === 'electron';
-  const devDeps = {
-    '@norvalbv/devkit': `${repoUrl}#${devkitRef}`,
-    ...(sel.biome ? { '@biomejs/biome': '^2.5.0' } : {}),
+  const devDeps: Record<string, string> = {};
+  devDeps['@norvalbv/devkit'] = `${repoUrl}#${devkitRef}`;
+  if (sel.biome) devDeps[CONSUMER_FORMATTER.package.name] = CONSUMER_FORMATTER.package.range;
+  Object.assign(devDeps, {
     ...(sel.husky ? { husky: '^9.1.7' } : {}),
     ...(electronPreset
       ? {
@@ -88,15 +90,16 @@ export function patchPackageJson(
           'eslint-plugin-project-structure': '^3.14.3',
         }
       : {}),
-  };
-  const scripts = {
-    ...(sel.biome ? { lint: 'biome check .', format: 'biome check --write .' } : {}),
+  });
+  const scripts: Record<string, string> = {};
+  if (sel.biome) Object.assign(scripts, CONSUMER_FORMATTER.scripts);
+  Object.assign(scripts, {
     ...(sel.husky ? { prepare: PREPARE_SCRIPT } : {}),
     ...(sel.guards?.includes('fanout') || sel.guards?.includes('size')
       ? { 'guard:freeze': 'guard-fanout freeze && guard-size freeze' }
       : {}),
     ...(electronPreset ? { 'lint:structure': ELECTRON_STRUCTURE_SCRIPT } : {}),
-  };
+  });
 
   pkg.devDependencies = pkg.devDependencies ?? {};
   pkg.scripts = pkg.scripts ?? {};
