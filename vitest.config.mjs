@@ -99,6 +99,8 @@ export default defineConfig({
     // `e2e/lib/**/*.unit.test.mts` = FAST pure-logic tests of the harness helpers (no build); the
     // slow build+pack+install `*.e2e.test.mts` suites live in the separate vitest.e2e.config.mjs.
     include: TEST_INCLUDE,
+    // Root only, never per project: it stamps machine load once at each end of the run (sc-2785).
+    globalSetup: ['./vitest.global-setup.mjs'],
     // Strip leaked git control vars (GIT_DIR, …) so a hook-launched run can't make the
     // git-integration tests operate on devkit's own repo. See vitest.setup.mjs.
     setupFiles: SHARED_TEST_CONFIG.setupFiles,
