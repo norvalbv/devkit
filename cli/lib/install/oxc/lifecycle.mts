@@ -21,7 +21,12 @@ export const OXLINT_CONFIGS = [
  */
 export const OVERLAY_ENTRY_REL = 'oxlint.devkit.json';
 const OVERLAY_ENTRY = `${JSON.stringify({ extends: ['./.devkit/oxc/oxlint.base.json'] }, null, 2)}\n`;
-const OXFMT_CONFIGS = ['.oxfmtrc.json', '.oxfmtrc.jsonc', 'oxfmt.config.ts', 'oxfmt.config.mts'];
+export const OXFMT_CONFIGS = [
+  '.oxfmtrc.json',
+  '.oxfmtrc.jsonc',
+  'oxfmt.config.ts',
+  'oxfmt.config.mts',
+];
 const OXLINT_STARTER = `${JSON.stringify(
   { extends: ['./.devkit/oxc/oxlint.base.json'], jsPlugins: [], overrides: [], rules: {} },
   null,
