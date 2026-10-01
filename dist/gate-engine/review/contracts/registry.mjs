@@ -1,10 +1,12 @@
-import { groundedConventionFindings } from './conventions-grounding.mjs';
+import { conventionWaiverLenses, parseConventionFindingCandidates, } from '../evidence/conventions.mjs';
+import { groundConventionFindings } from './conventions-grounding.mjs';
 const RESPONSE_CONTRACTS = {
     'conventions-v1': Object.freeze({
         // The verdict cache salts on this. v2 (sc-2181): authoritative post-change line counts. v3
         // (sc-3580): an OFFENDING quote must exist in the change it cites, so v2 FAILs must not replay.
-        identity: 'conventions-v3:grounded-quote',
-        blockingLenses: (raw, source) => groundedConventionFindings(raw, source).map((f) => `${f.offendingPath}:${f.offendingLine}`),
+        // v4 (sc-3324): lenses are rule + file, from EVERY grounded pair, not one per path:line.
+        identity: 'conventions-v4:rule-file-lens',
+        blockingLenses: (raw, source) => conventionWaiverLenses(groundConventionFindings(parseConventionFindingCandidates(raw), source)),
         retryInstruction: 'EVIDENCE-CONTRACT RETRY: the prior FAIL had no complete cited VIOLATION/OFFENDING pair. ' +
             'Either emit at least one complete pair using the exact required format, or return ' +
             'VERDICT: PASS. Do not repeat an evidence-free FAIL. If the finding concerns a length, cite ' +

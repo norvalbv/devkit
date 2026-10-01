@@ -21,10 +21,12 @@
  * banner semantics: a parked reviewer is NOT completed until its recovery settles, so a kill
  * mid-phase still names it unfinished and the re-run converges on it).
  */
+import { reportRetrievalDegraded, verdictToken } from '../contracts/checklist.mjs';
 import { emitGateEvent } from '../../judge/gate-events.mjs';
 import { composeTranscript, saveTranscript } from '../../judge/transcript-store.mjs';
 import { savePasses } from '../cache.mjs';
-import { reviewBaseContext } from '../evidence/base-context.mjs';
+import { RETRIEVAL_REVIEWER, reviewBaseContext } from '../evidence/base-context.mjs';
+import { coverageFields, partialEvidenceNote } from '../evidence/packet/coverage.mjs';
 import { archiveFailedDiff } from '../evidence/diff-archive.mjs';
 import { cachedLensFields, itemFields } from '../evidence/items.mjs';
 import { holdLensPart, taskLabel } from '../lens/split.mjs';
@@ -45,6 +47,8 @@ export function settleReviewOutcome(ctx, t, outcome, durationMs, retried = false
     if (retryableReason(res))
         return res;
     ctx.timing.observed(res.name, durationMs);
+    // Only a PASS can be degraded: asset re-verification may have voided the verdict since.
+    const degraded = res.status === 'pass' ? res.degraded : undefined;
     if (res.status === 'pass')
         // res.model = the model that actually judged (a Reviewer.model pin wins over the cascade
         // default) — recording firstModel here mislabeled every pinned reviewer's cached PASS.
@@ -57,6 +61,9 @@ export function settleReviewOutcome(ctx, t, outcome, durationMs, retried = false
                 // so a later replay can name it instead of borrowing its own run's base (sc-3468).
                 base_sha: reviewBaseContext(ctx.cwd).baseSha,
                 ...(t.splitOf ? cachedLensFields(res) : {}), // spill-safe lens re-seed (sc-1475)
+                // A cache hit must replay DEGRADED, not a bare PASS (sc-2317). Undefined → dropped by JSON.
+                degraded_cause: degraded?.cause,
+                retrieval: res.name === RETRIEVAL_REVIEWER && !degraded ? 'ok' : undefined,
             },
         });
     if (res.status === 'fail')
@@ -76,6 +83,9 @@ export function settleReviewOutcome(ctx, t, outcome, durationMs, retried = false
     const transcriptRef = res.transcript
         ? saveTranscript(`review-${res.name}`, composeTranscript(t.diffText, res.transcript))
         : null;
+    // What the judge's packet actually covered (sc-2305) — on the verdict row, so a PASS over a
+    // partial packet reaches the digest as unverified instead of reading like a whole-diff PASS.
+    const coverage = coverageFields([t]);
     // Ship telemetry (best-effort, no-op off-ship): every reviewer outcome (pass/fail/
     // inconclusive) so the usage tracker can report per-reviewer error counts and fail-rate.
     emitGateEvent({
@@ -90,6 +100,7 @@ export function settleReviewOutcome(ctx, t, outcome, durationMs, retried = false
         // Machine cause, so a consumer never parses the human-readable reason (gate-verdict-attribution).
         // JSON.stringify drops it when absent, which is exactly the pass/fail case.
         inconclusive_cause: res.inconclusiveCause,
+        degraded_cause: degraded?.cause,
         secs,
         // A recovered outcome stays measurable (gate-telemetry-self-describing): without this flag
         // the fix would erase the field rate of the very failure mode it schedules around. NEVER in
@@ -99,12 +110,17 @@ export function settleReviewOutcome(ctx, t, outcome, durationMs, retried = false
         // The per-lens vector, passes included; empty when the judge left no artifact (see
         // evidence/items.mts for the shape and the spill rule).
         ...itemFields(res),
+        ...coverage,
         ...(transcriptRef ? { transcript_ref: transcriptRef } : {}),
     });
     // Surface the one-line verdict reason on the completion line too (fails get theirs in the
     // dedicated block below, with the full transcript — don't double-print it here).
-    const tail = !['fail', 'error'].includes(res.status) && res.reason ? ` — ${res.reason}` : '';
-    console.error(`guard-review: ${res.name} — ${res.status.toUpperCase()}${res.escalated ? ' (escalated)' : ''} in ${secs}s${res.status === 'pass' ? ' (checkpointed)' : ''}${tail}`);
+    const tail = (!['fail', 'error'].includes(res.status) && res.reason ? ` — ${res.reason}` : '') +
+        (res.status === 'pass' ? partialEvidenceNote(coverage) : '');
+    console.error(`guard-review: ${res.name} — ${verdictToken({ status: res.status, degraded })}${res.escalated ? ' (escalated)' : ''} in ${secs}s${res.status === 'pass' ? ' (checkpointed)' : ''}${tail}`);
+    // commit-guard never lens-splits (only correctness does), so the split branch above needs none.
+    if (degraded)
+        reportRetrievalDegraded(res.name, degraded.cause);
     return res;
 }
 // Never START a deferred cascade the ceiling is about to kill — a killed ship converges anyway

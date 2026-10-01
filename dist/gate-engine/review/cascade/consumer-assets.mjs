@@ -2,6 +2,23 @@ import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { checklistAssetPath, hasChecklist } from '../reviewers.mjs';
 const CONSUMER_SKILL_ROOTS = ['.claude', '.agents', '.cursor'];
+/** Inside a ship/reship worktree (incl. --dry-gates)? DEVKIT_RUN_MODE alone can leak into a plain
+ *  commit; DEVKIT_SHIP_MODE is exported only by ship-branch.sh/reship.sh after the brief refresh. */
+export function isShipLane(env = process.env) {
+    const mode = env.DEVKIT_RUN_MODE;
+    return (mode === 'ship' || mode === 'dry-gates') && !!env.DEVKIT_SHIP_MODE;
+}
+/** Where `refresh_ship_reviewer_assets` (cli/lib/ship/prepare-gate-worktree.sh) projects the
+ *  running package's briefs inside a ship worktree. The shell target and this constant are twins. */
+export const SHIP_AGENTS_PROJECTION = '.claude/agents';
+/** Absolute brief dir: the refreshed projection in a ship lane (ship never refreshes a custom
+ *  `review.agentsDir`, sc-1882), else the configured dir resolved against `cwd`. */
+export function reviewAgentsDir(cwd, cfg, env = process.env) {
+    if (isShipLane(env))
+        return path.resolve(cwd, SHIP_AGENTS_PROJECTION);
+    const dir = cfg.review.agentsDir;
+    return path.isAbsolute(dir) ? dir : path.resolve(cwd, dir);
+}
 /** Resolve the provider-projected checklist root actually present in a consumer checkout. */
 export function consumerChecklistAssetRoot(cwd, reviewer) {
     if (!hasChecklist(reviewer))
@@ -14,8 +31,7 @@ export function consumerChecklistAssetRoot(cwd, reviewer) {
 export function readConsumerReviewAsset(cwd, cfg, skillRoot, relativePath) {
     const agentsPrefix = 'agents/';
     if (relativePath.startsWith(agentsPrefix)) {
-        const dir = cfg.review.agentsDir;
-        const base = path.isAbsolute(dir) ? dir : path.resolve(cwd, dir);
+        const base = reviewAgentsDir(cwd, cfg);
         return readFileSync(path.join(base, relativePath.slice(agentsPrefix.length)));
     }
     return readFileSync(path.resolve(cwd, skillRoot, relativePath));

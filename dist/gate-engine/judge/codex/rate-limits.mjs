@@ -16,6 +16,24 @@ const READ_ID = 2;
 const usableNumber = (v) => Number.isFinite(v) ? v : undefined;
 /** Same for text: an absent or blank value is not a signal. */
 const usableText = (v) => v && `${v}`.trim() ? v : undefined;
+/** One window's usable fields, or null with no window object. resetsAt is seconds on the wire; an
+ *  implausible value (a unit change) is dropped, keeping the lock but not the time. */
+function readWindow(w) {
+    // A non-object window (a stray string) reads every field as absent, which is already the answer.
+    if (!w)
+        return null;
+    const out = {};
+    const used = usableNumber(w.usedPercent);
+    if (used !== undefined)
+        out.usedPercent = used;
+    const window = usableNumber(w.windowDurationMins);
+    if (window !== undefined)
+        out.windowDurationMins = window;
+    const seconds = usableNumber(w.resetsAt);
+    if (seconds !== undefined && seconds > 0 && plausibleReset(seconds * 1000))
+        out.resetsAt = seconds * 1000;
+    return out;
+}
 /** Parse one reply line, or null when it is not the reply we asked for. Exported for tests: this
  *  protocol is the likeliest thing to drift, and a captured payload beats spawning a daemon. */
 export function parseRateLimitsReply(line) {
@@ -33,31 +51,45 @@ export function parseRateLimitsReply(line) {
     const limits = parsed.result?.rateLimits;
     if (!limits)
         return null;
-    const snapshot = {
-        // Absent `rateLimitReachedType` means "not reached" — the field the ROLLOUT LOGS never populate,
-        // and the reason this RPC exists rather than a file read.
-        reached: usableText(limits.rateLimitReachedType) !== undefined,
-    };
     const reachedType = usableText(limits.rateLimitReachedType);
+    const primary = readWindow(limits.primary);
+    const secondary = readWindow(limits.secondary);
+    // codex's TUI cap test (rate_limits.rs): either window at 100%, unless credits are usable. Only a
+    // strict `true` excuses it — a garbled credits field is not evidence of headroom.
+    const credits = limits.credits;
+    const creditsUsable = credits?.unlimited === true || credits?.hasCredits === true;
+    // The lock lasts until the LAST exhausted window clears; an unknown reset ranks latest, so no
+    // other window's time is offered as the clearing time.
+    let exhaustedWindow;
+    let latestReset = Number.NEGATIVE_INFINITY;
+    for (const [name, w] of [
+        ['primary', primary],
+        ['secondary', secondary],
+    ]) {
+        if (creditsUsable || w?.usedPercent === undefined || w.usedPercent < 100)
+            continue;
+        const reset = w.resetsAt ?? Number.POSITIVE_INFINITY;
+        if (exhaustedWindow === undefined || reset > latestReset) {
+            exhaustedWindow = name;
+            latestReset = reset;
+        }
+    }
+    const snapshot = {
+        // Absent `rateLimitReachedType` alone is NOT "not reached" — the backend maps an unknown kind to
+        // None — so a spent window is the second positive signal.
+        reached: reachedType !== undefined || exhaustedWindow !== undefined,
+    };
     if (reachedType !== undefined)
         snapshot.reachedType = reachedType;
     const planType = usableText(limits.planType);
     if (planType !== undefined)
         snapshot.planType = planType;
-    const primary = limits.primary;
-    if (primary) {
-        const used = usableNumber(primary.usedPercent);
-        if (used !== undefined)
-            snapshot.usedPercent = used;
-        const window = usableNumber(primary.windowDurationMins);
-        if (window !== undefined)
-            snapshot.windowDurationMins = window;
-        const seconds = usableNumber(primary.resetsAt);
-        // Seconds on the wire; the shared window catches a unit change that would otherwise render as
-        // "resets in 104249970674d". Out of range keeps the lock and drops only the time.
-        if (seconds !== undefined && seconds > 0 && plausibleReset(seconds * 1000))
-            snapshot.resetsAt = seconds * 1000;
-    }
+    if (exhaustedWindow !== undefined)
+        snapshot.exhaustedWindow = exhaustedWindow;
+    // The reported window is the one that locked; with none locked, primary as before.
+    const shown = exhaustedWindow === 'secondary' ? secondary : primary;
+    if (shown)
+        Object.assign(snapshot, shown);
     return snapshot;
 }
 /** Ask the local codex install for its rate-limit state. Resolves null for every unhappy path;
@@ -99,6 +131,9 @@ export function readCodexRateLimits(timeoutMs = PROBE_TIMEOUT_MS) {
         // A daemon that never answers must not keep the ship's event loop alive past its own timeout.
         timer.unref?.();
         child.on('error', () => finish(null));
+        // A child that exits before reading gets EPIPE as an async stream 'error', which the write's try
+        // cannot catch; unhandled, it is an uncaught exception that fails the whole run.
+        child.stdin?.on('error', () => finish(null));
         // Exiting before the reply arrived is itself an answer: we learned nothing.
         child.on('close', () => finish(null));
         child.stderr?.on('data', () => {

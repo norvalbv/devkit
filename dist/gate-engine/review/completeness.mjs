@@ -39,8 +39,10 @@ import { judgeMcpCapabilityFingerprint, namedAgentMcpProfile, withNamedAgentMcpT
 import { reportGateInfraFailure } from '../judge/odb-probe.mjs';
 import { DEEP_JUDGE_TIMEOUT_MS, execJudgeAsync, remedyCause, strictRemedy, } from '../judge/run-judge.mjs';
 import { loadCache, savePasses } from './cache.mjs';
+import { isShipLane, reviewAgentsDir } from './cascade/consumer-assets.mjs';
 import { buildCappedDiffEvidence } from './diff-evidence.mjs';
 import { commitIndexEnv } from '../ratchets/commit-index.mjs';
+import { headTreeish } from '../ratchets/git-index.mjs';
 import { stagedTreeHash } from './evidence/staged-git.mjs';
 import { cacheKey, parseReviewVerdict, resolveEscalationModel, stripFrontmatter, } from './reviewers.mjs';
 const AGENT_NAME = 'feature-completeness-reviewer';
@@ -68,6 +70,15 @@ const TRAILING_WS_RE = /[ \t]+$/gm;
 const BLANK_RUN_RE = /\n{3,}/g;
 export function normalizeCommitMessage(raw) {
     return raw.replace(TRAILING_WS_RE, '').replace(BLANK_RUN_RE, '\n\n').trim();
+}
+/** Which message a PASS covers (sc-3411): subject, size, short sha of the normalised bytes. The
+ *  sticky PASS is diff-blind, so this is the log's only proof of which --resume body was judged. */
+function judgedMessageId(message) {
+    const subject = message.split('\n', 1)[0] ?? '';
+    const chars = Array.from(subject); // code points: a UTF-16 slice can split an emoji's surrogates
+    const shown = chars.length > 60 ? `${chars.slice(0, 57).join('')}...` : subject;
+    const sha = createHash('sha256').update(message).digest('hex').slice(0, 12);
+    return `${JSON.stringify(shown)} ${Buffer.byteLength(message)}B sha:${sha}`;
 }
 /** The branch a sticky verdict is scoped to: the ship's exported branch, else the checkout's. */
 function verdictBranch(cwd) {
@@ -109,23 +120,6 @@ function snapshotStaged(cwd) {
     }
     catch {
         return { range: ['--cached'], identity: null };
-    }
-}
-/** HEAD, or the empty tree before the first commit: the base `git diff --cached` compares against. */
-function headTreeish(cwd) {
-    try {
-        return execFileSync('git', ['rev-parse', '--verify', '--quiet', 'HEAD'], {
-            cwd,
-            encoding: 'utf8',
-            stdio: ['ignore', 'pipe', 'ignore'],
-        }).trim();
-    }
-    catch {
-        return execFileSync('git', ['hash-object', '-t', 'tree', '--stdin'], {
-            cwd,
-            encoding: 'utf8',
-            input: '',
-        }).trim();
     }
 }
 /** Wrap the consumer's completeness brief for one headless commit-msg judgement. */
@@ -204,6 +198,7 @@ export async function runCompleteness(msgFile, cwd = process.cwd(), { exec = exe
     let mcpProfile = namedAgentMcpProfile();
     let capabilityFingerprint = '';
     let stickyKey = '';
+    let messageId = '';
     let stagedIdentity = null;
     let model = '';
     try {
@@ -215,6 +210,7 @@ export async function runCompleteness(msgFile, cwd = process.cwd(), { exec = exe
             mcpProjectRoots,
         }));
         const message = normalizeCommitMessage(readFileSync(path.isAbsolute(msgFile) ? msgFile : path.resolve(cwd, msgFile), 'utf8'));
+        messageId = judgedMessageId(message);
         // Every staged read below goes through this one snapshot; see snapshotStaged.
         const snapshot = snapshotStaged(cwd);
         stagedIdentity = snapshot.identity;
@@ -228,12 +224,18 @@ export async function runCompleteness(msgFile, cwd = process.cwd(), { exec = exe
             .filter(Boolean);
         if (files.length === 0)
             return finish(0);
-        const dir = cfg.review.agentsDir;
+        const dir = reviewAgentsDir(cwd, cfg);
         let body;
         try {
-            body = readFileSync(path.join(path.isAbsolute(dir) ? dir : path.resolve(cwd, dir), `${AGENT_NAME}.md`), 'utf8');
+            body = readFileSync(path.join(dir, `${AGENT_NAME}.md`), 'utf8');
         }
         catch {
+            // Ship projected this brief from the running package, so its absence is a broken install.
+            if (isShipLane() && envFlag('AI_STRICT')) {
+                console.error(`guard-review: ${AGENT_NAME}.md missing under ${dir} — strict ship mode fails closed.\n` +
+                    `   Remedy: ${strictRemedy('sync', undefined, undefined, true)}.`);
+                return finish(3);
+            }
             console.error(`guard-review: ${AGENT_NAME}.md not found under ${dir} — completeness skipped`);
             return finish(0);
         }
@@ -252,8 +254,8 @@ export async function runCompleteness(msgFile, cwd = process.cwd(), { exec = exe
             // fingerprints existed, or an unreadable index, cannot vouch.
             const diffMatches = stagedIdentity !== null && sticky.diff_sha === stagedIdentity;
             console.error(diffMatches
-                ? 'guard-review: completeness — cached PASS (same branch + message + staged diff)'
-                : 'guard-review: completeness — cached PASS (same branch + message; judged on an earlier diff, which is not re-judged)');
+                ? `guard-review: completeness — cached PASS (same branch + message + staged diff) — message ${messageId}`
+                : `guard-review: completeness — cached PASS (same branch + message; judged on an earlier diff, which is not re-judged) — message ${messageId}`);
             const stickyDuration = typeof sticky.duration_ms === 'number' ? sticky.duration_ms : undefined;
             // The resolved model, not the stored one: the sticky key already includes it, so they agree.
             emitIntentCacheHit({
@@ -301,7 +303,7 @@ export async function runCompleteness(msgFile, cwd = process.cwd(), { exec = exe
     const key = cacheKey('completeness', diff, `${prompt}\u0000${capabilityFingerprint}\u0000${model}`);
     const hit = loadCache(cwd)[key];
     if (hit) {
-        console.error('guard-review: completeness — cached PASS (identical judgement)');
+        console.error(`guard-review: completeness — cached PASS (identical judgement) — message ${messageId}`);
         // The most expensive entry in this store: its hit rate is the one that pays.
         const cachedDuration = typeof hit.duration_ms === 'number' ? hit.duration_ms : undefined;
         emitCacheHit('review:completeness', hit.model, cachedDuration);
@@ -369,6 +371,7 @@ export async function runCompleteness(msgFile, cwd = process.cwd(), { exec = exe
     }
     if (verdict === 'PASS') {
         emitVerdict('pass', reason || 'no gap found');
+        console.error(`guard-review: completeness — PASS — message ${messageId}`);
         return finish(0);
     }
     if (verdict !== 'FAIL') {
