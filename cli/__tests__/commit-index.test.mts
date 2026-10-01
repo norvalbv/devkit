@@ -2,17 +2,21 @@ import { execFileSync } from 'node:child_process';
 import {
   copyFileSync,
   existsSync,
+  mkdirSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   commitIndexEnv,
   commitIndexFile,
   commitIndexKind,
+  commitIndexTree,
   resetCommitIndexCache,
 } from '../../gate-engine/ratchets/commit-index.mts';
 import { computeKey } from '../../gate-engine/prefix-cache/prefix-cache.mts';
@@ -230,5 +234,158 @@ describe('index snapshots read the commit index', () => {
     );
     expect(result).toBe('applied');
     expect(existsSync(lock)).toBe(true);
+  });
+});
+
+// The tree `index` describes, read from a scratch copy so the expectation never locks the original.
+function treeOf(root: string, index: string): string {
+  const scratch = join(mkTmp('commit-index-expect-'), 'index');
+  copyFileSync(index, scratch);
+  return git(root, ['write-tree'], {
+    ...process.env,
+    GIT_INDEX_FILE: scratch,
+  }).trim();
+}
+
+describe('commitIndexTree (sc-3312: lock-free staged tree identity)', () => {
+  it('hashes the default index while another process holds index.lock, leaving the lock alone', () => {
+    const root = seedRepo();
+    writeFileSync(join(root, 'f.txt'), 'staged\n');
+    git(root, ['add', 'f.txt']);
+    const expected = treeOf(root, join(root, '.git', 'index'));
+    const lock = join(root, '.git', 'index.lock');
+    writeFileSync(lock, 'held by a concurrent git');
+    expect(commitIndexTree(root)).toEqual({ tree: expected });
+    expect(readFileSync(lock, 'utf8')).toBe('held by a concurrent git');
+  });
+
+  it('never rewrites the index it hashes (write-tree on the original would store a cache-tree)', () => {
+    const root = seedRepo();
+    writeFileSync(join(root, 'f.txt'), 'staged\n');
+    git(root, ['add', 'f.txt']);
+    const index = join(root, '.git', 'index');
+    const before = readFileSync(index);
+    expect(commitIndexTree(root).tree).toMatch(/^[0-9a-f]{40,64}$/);
+    expect(readFileSync(index).equals(before)).toBe(true);
+  });
+
+  it.each([
+    ['lock', 'index.lock'],
+    ['partial', 'next-index-4242.lock'],
+  ])(
+    'hashes the %s carrier, not the default index, and leaves the carrier untouched',
+    (_kind, name) => {
+      const root = seedRepo();
+      const index = commitIndex(root, name);
+      const before = readFileSync(index);
+      const expected = treeOf(root, index);
+      expect(expected).not.toBe(treeOf(root, join(root, '.git', 'index')));
+      const result = commitIndexTree(root, carrier(index, join(root, '.git')));
+      expect(result).toEqual({ tree: expected });
+      expect(readFileSync(index).equals(before)).toBe(true);
+    },
+  );
+
+  it('hashes an alternate carrier that lives outside the git dir', () => {
+    const root = seedRepo();
+    const outside = join(mkTmp('commit-index-alt-'), 'idx');
+    copyFileSync(commitIndex(root, 'alt-src'), outside);
+    const base = carrier(outside, join(root, '.git'));
+    expect(commitIndexKind(root, base)).toBe('alternate');
+    expect(commitIndexTree(root, base)).toEqual({
+      tree: treeOf(root, outside),
+    });
+  });
+
+  it('honours a caller-chosen relative GIT_INDEX_FILE from a package subdirectory', () => {
+    // git resolves a relative GIT_INDEX_FILE against the top level, not the caller's cwd.
+    const root = seedRepo();
+    const alt = commitIndex(root, 'alt-rel');
+    mkdirSync(join(root, 'pkg'));
+    const base = { ...process.env, GIT_INDEX_FILE: '.git/alt-rel' };
+    expect(commitIndexTree(join(root, 'pkg'), base)).toEqual({
+      tree: treeOf(root, alt),
+    });
+  });
+
+  it("hashes a linked worktree's own index (the ship gate worktree shape), not the main one", () => {
+    const main = seedRepo();
+    const wt = join(mkTmp('commit-index-wt-'), 'gate wt');
+    git(main, ['worktree', 'add', '-q', '--detach', wt]);
+    writeFileSync(join(wt, 'f.txt'), 'worktree only\n');
+    git(wt, ['add', 'f.txt']);
+    const wtIndex = join(git(wt, ['rev-parse', '--absolute-git-dir']).trim(), 'index');
+    writeFileSync(`${wtIndex}.lock`, '');
+    const expected = treeOf(wt, wtIndex);
+    expect(expected).not.toBe(treeOf(main, join(main, '.git', 'index')));
+    expect(commitIndexTree(wt)).toEqual({ tree: expected });
+  });
+
+  it('reads a split index through its shared index without leaving a new one behind', () => {
+    const root = seedRepo();
+    git(root, ['config', 'core.splitIndex', 'true']);
+    git(root, ['update-index', '--split-index']);
+    writeFileSync(join(root, 'f.txt'), 'split\n');
+    git(root, ['add', 'f.txt']);
+    const shared = () =>
+      readdirSync(join(root, '.git')).filter((n) => n.startsWith('sharedindex.'));
+    const before = shared();
+    const expected = git(root, ['write-tree']).trim();
+    expect(commitIndexTree(root)).toEqual({ tree: expected });
+    expect(shared()).toEqual(before);
+  });
+
+  it('returns the empty tree for a fresh repository that has no index file yet', () => {
+    const root = realpathSync(mkTmp('commit-index-fresh-'));
+    git(root, ['init', '-q']);
+    expect(existsSync(join(root, '.git', 'index'))).toBe(false);
+    expect(commitIndexTree(root)).toEqual({
+      tree: '4b825dc642cb6eb9a060e54bf8d69288fbee4904',
+    });
+  });
+
+  it('reports unmerged paths as an error naming git’s reason, never as a tree', () => {
+    const root = seedRepo();
+    git(root, ['checkout', '-qb', 'side']);
+    writeFileSync(join(root, 'f.txt'), 'side\n');
+    git(root, ['-c', 'core.hooksPath=/dev/null', 'commit', '-qam', 'side']);
+    git(root, ['checkout', '-q', '-']);
+    writeFileSync(join(root, 'f.txt'), 'main\n');
+    git(root, ['-c', 'core.hooksPath=/dev/null', 'commit', '-qam', 'main']);
+    expect(() => git(root, ['merge', '-q', 'side'])).toThrow();
+    const result = commitIndexTree(root);
+    expect(result.tree).toBeNull();
+    expect('error' in result && result.error).toMatch(/unmerged|write-tree/i);
+  });
+
+  it('outside a repository returns an error instead of throwing', () => {
+    const plain = mkTmp('commit-index-plain-');
+    const result = commitIndexTree(plain, {
+      ...process.env,
+      GIT_CEILING_DIRECTORIES: tmpdir(),
+    });
+    expect(result.tree).toBeNull();
+  });
+
+  it('removes its private index copy on success and on failure', () => {
+    const root = seedRepo();
+    const corrupt = seedRepo();
+    writeFileSync(join(corrupt, '.git', 'index'), 'not an index');
+    // A private TMPDIR: parallel test files create scratch copies in the shared one.
+    const scratch = mkTmp('commit-index-scratch-');
+    const saved = process.env.TMPDIR;
+    process.env.TMPDIR = scratch;
+    try {
+      expect(commitIndexTree(root).tree).not.toBeNull();
+      // Fails at write-tree, after the copy exists.
+      expect(commitIndexTree(corrupt)).toMatchObject({ tree: null, error: /write-tree/ });
+    } finally {
+      if (saved === undefined) delete process.env.TMPDIR;
+      else process.env.TMPDIR = saved;
+    }
+    // Only devkit's own copies: macOS's git shim writes xcrun_db into TMPDIR too.
+    expect(readdirSync(scratch).filter((name) => name.startsWith('devkit-tree-index-'))).toEqual(
+      [],
+    );
   });
 });

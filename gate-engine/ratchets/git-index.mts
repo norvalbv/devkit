@@ -6,7 +6,7 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { lstatSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { commitIndexEnv, commitIndexKind } from './commit-index.mts';
+import { commitIndexEnv, commitIndexKind, commitIndexTree } from './commit-index.mts';
 
 const INDEX_LOCK_RETRY = new Int32Array(new SharedArrayBuffer(4));
 
@@ -341,16 +341,7 @@ export function gitPrefix(root: string): string {
 
 /** Freeze the pending index into one immutable tree object without changing the index or worktree. */
 export function indexTreeRef(root: string): string | null {
-  try {
-    return execFileSync('git', ['write-tree'], {
-      cwd: root,
-      env: commitIndexEnv(root),
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    }).trim();
-  } catch {
-    return null;
-  }
+  return commitIndexTree(root).tree;
 }
 
 /** Read a CWD-relative UTF-8 blob from a Git tree. Missing paths or refs return null. */

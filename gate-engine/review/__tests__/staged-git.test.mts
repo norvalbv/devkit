@@ -1,8 +1,9 @@
-import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawn } from 'node:child_process';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { fileURLToPath } from 'node:url';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { resolveGuardConfig } from '../../config.mts';
 import {
   gitCached,
@@ -10,11 +11,13 @@ import {
   indexFile,
   indexPathsNamed,
   stagedFiles,
+  stagedTreeHash,
 } from '../evidence/staged-git.mts';
 import { selectRepositoryReviewers } from '../scope/repository.mts';
 
 const roots: string[] = [];
 afterEach(() => {
+  vi.restoreAllMocks();
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
@@ -159,4 +162,105 @@ describe('review staged Git evidence', () => {
     ]);
     for (const entry of selected) expect(entry.files).toEqual(['src/a.ts']);
   });
+});
+
+const STAGED_GIT = fileURLToPath(new URL('../evidence/staged-git.mts', import.meta.url));
+
+function captureStderr(): string[] {
+  const lines: string[] = [];
+  vi.spyOn(process.stderr, 'write').mockImplementation((chunk: string | Uint8Array) => {
+    lines.push(String(chunk));
+    return true;
+  });
+  return lines;
+}
+
+function conflicted(): string {
+  const root = repo();
+  const git = (args: string[]) => execFileSync('git', args, { cwd: root, stdio: 'pipe' });
+  writeFileSync(join(root, 'f.txt'), 'base\n');
+  git(['add', 'f.txt']);
+  git(['-c', 'core.hooksPath=/dev/null', 'commit', '-qm', 'f']);
+  git(['checkout', '-qb', 'side']);
+  writeFileSync(join(root, 'f.txt'), 'side\n');
+  git(['-c', 'core.hooksPath=/dev/null', 'commit', '-qam', 'side']);
+  git(['checkout', '-q', '-']);
+  writeFileSync(join(root, 'f.txt'), 'main\n');
+  git(['-c', 'core.hooksPath=/dev/null', 'commit', '-qam', 'main']);
+  expect(() => git(['merge', '-q', 'side'])).toThrow();
+  return root;
+}
+
+describe('stagedTreeHash (sc-3312)', () => {
+  it('hashes the staged tree while a concurrent git holds index.lock, printing nothing', () => {
+    const root = repo();
+    writeFileSync(join(root, 'guard.config.json'), '{"scanRoots":["lib"]}\n');
+    execFileSync('git', ['add', 'guard.config.json'], { cwd: root });
+    const expected = execFileSync('git', ['write-tree'], {
+      cwd: root,
+      encoding: 'utf8',
+    }).trim();
+    writeFileSync(join(root, '.git', 'index.lock'), 'busy');
+    const stderr = captureStderr();
+    expect(stagedTreeHash(root, 'held-lock probe')).toBe(expected);
+    expect(stderr).toEqual([]);
+    expect(readFileSync(join(root, '.git', 'index.lock'), 'utf8')).toBe('busy');
+  });
+
+  it('names the caller and git’s reason once per process, however often the read is retried', () => {
+    const root = conflicted();
+    const stderr = captureStderr();
+    for (let attempt = 0; attempt < 3; attempt += 1)
+      expect(stagedTreeHash(root, 'dedupe probe')).toBeNull();
+    const named = stderr.filter((line) => line.includes('(dedupe probe)'));
+    expect(named).toHaveLength(1);
+    expect(named[0]).toMatch(/^guard-review: git write-tree failed \(dedupe probe\): .+\n$/);
+  });
+
+  it('attributes the same failure separately to each caller that depends on it', () => {
+    const root = conflicted();
+    const stderr = captureStderr();
+    stagedTreeHash(root, 'caller A');
+    stagedTreeHash(root, 'caller B');
+    expect(stderr.filter((line) => line.includes('(caller A)'))).toHaveLength(1);
+    expect(stderr.filter((line) => line.includes('(caller B)'))).toHaveLength(1);
+  });
+
+  it('two review lanes hashing at once never collide on index.lock (the ship race)', async () => {
+    const root = repo();
+    const probe = join(root, 'probe.mts');
+    writeFileSync(
+      probe,
+      `import { stagedTreeHash } from ${JSON.stringify(STAGED_GIT)};
+const out = [];
+for (let i = 0; i < 20; i += 1) out.push(stagedTreeHash(process.argv[2], 'stress'));
+console.log(JSON.stringify(out));
+`,
+    );
+    const runs = await Promise.all(
+      Array.from(
+        { length: 24 },
+        () =>
+          new Promise<{ out: string; err: string; code: number | null }>((done) => {
+            const child = spawn(process.execPath, [probe, root], {
+              stdio: 'pipe',
+            });
+            let out = '';
+            let err = '';
+            child.stdout.on('data', (d) => (out += d));
+            child.stderr.on('data', (d) => (err += d));
+            child.on('close', (code) => done({ out, err, code }));
+          }),
+      ),
+    );
+    const expected = execFileSync('git', ['write-tree'], {
+      cwd: root,
+      encoding: 'utf8',
+    }).trim();
+    for (const run of runs) {
+      expect(run.err).not.toContain('index.lock');
+      expect(run.code).toBe(0);
+      expect(new Set(JSON.parse(run.out))).toEqual(new Set([expected]));
+    }
+  }, 60_000);
 });
