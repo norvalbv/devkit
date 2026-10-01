@@ -261,7 +261,7 @@ describe('matcher reconcile', () => {
     expect(readFileSync(al, 'utf8')).toBe(before);
   });
 
-  it('empty index exits 0 and never writes (no wipe)', () => {
+  it('empty index exits 2 (could-not-run) and never writes (no wipe)', () => {
     const emptyDb = join(tmp, 'empty.db');
     const edb = new DatabaseSync(emptyDb);
     edb.exec(
@@ -271,7 +271,7 @@ describe('matcher reconcile', () => {
     const al = join(tmp, 'reconcile-emptyindex.json');
     const before = JSON.stringify({ pairs: [DETECTED, DEAD], clones: CLONES });
     writeFileSync(al, before);
-    expect(reconcile(al, ['--apply'], { SEARCH_CODE_DB: emptyDb }).status).toBe(0);
+    expect(reconcile(al, ['--apply'], { SEARCH_CODE_DB: emptyDb }).status).toBe(2);
     expect(readFileSync(al, 'utf8')).toBe(before);
   });
 
@@ -334,6 +334,98 @@ function runMatcher(args, env) {
     return e.status;
   }
 }
+
+// sc-2269: an index with no usable chunk compared nothing, yet exit 0 read as "clean" to the runner,
+// its opt-out summary and GUARD_DETERMINISTIC_STRICT. It must be exit 2 in every mode.
+describe('matcher configured-but-empty index is could-not-run, never clean', () => {
+  const COLS =
+    'file_path TEXT, symbol_name TEXT, start_line INTEGER, end_line INTEGER, code_hash TEXT, embedding BLOB, code_embedding BLOB';
+  const INSERT =
+    'INSERT INTO chunks (file_path, symbol_name, start_line, end_line, code_hash, embedding, code_embedding) VALUES (?,?,?,?,?,?,?)';
+  type Row = [string, string | null, number, number, string, Buffer | null, Buffer | null];
+
+  function indexWith(name: string, rows: Row[]): string {
+    const p = join(tmp, `${name}.db`);
+    const db = new DatabaseSync(p);
+    db.exec(`CREATE TABLE chunks (${COLS})`);
+    const ins = db.prepare(INSERT);
+    for (const r of rows) ins.run(...r);
+    db.close();
+    return p;
+  }
+
+  function scanStderr(index: string) {
+    try {
+      execFileSync('node', [MATCHER, 'scan', '--new', '--changed', '--gate'], {
+        env: { ...process.env, SEARCH_CODE_DB: index, MATCHER_CHANGED_FILES: 'src/a.ts' },
+        stdio: 'pipe',
+      });
+      return { status: 0, stderr: '' };
+    } catch (e) {
+      return { status: e.status, stderr: `${e.stderr ?? ''}` };
+    }
+  }
+
+  const cases: Array<[string, Row[]]> = [
+    ['zero rows (schema only, never populated)', []],
+    [
+      'rows present but no embeddings (--phase0-only / interrupted embed)',
+      [
+        ['src/a.ts', 'a', 1, 5, 'H1', null, null],
+        ['src/b.ts', 'b', 1, 5, 'H1', null, null],
+      ],
+    ],
+    [
+      'code_embedding missing on every row (description embedded only)',
+      [['src/a.ts', 'a', 1, 5, 'H1', emb(), null]],
+    ],
+    [
+      'embedded rows but no symbol_name (file-level chunks only)',
+      [['src/a.ts', null, 1, 5, 'H1', emb(), emb()]],
+    ],
+  ];
+
+  it.each(cases)('scan --gate on %s → exit 2 naming the index and the remedy', (label, rows) => {
+    const index = indexWith(`empty-${label.replace(/\W+/g, '-')}`, rows);
+    const { status, stderr } = scanStderr(index);
+    expect(status).toBe(2);
+    expect(stderr).toContain(index);
+    expect(stderr).toContain('search-code index');
+  });
+
+  // Boundary: ONE usable row is a real (if tiny) corpus — the gate looked, so 0 is honest.
+  it('a single usable row is not empty: scan --gate answers 0', () => {
+    const index = indexWith('one-usable', [['src/a.ts', 'a', 1, 5, 'H1', emb(), emb()]]);
+    expect(scanStderr(index).status).toBe(0);
+  });
+
+  // baseline drops every prior `baseline` pair before appending the detected set; with nothing
+  // detected it would silently delete every frozen approval.
+  it('baseline on an empty index → exit 2, allowlist byte-identical', () => {
+    const index = indexWith('empty-baseline', []);
+    const al = join(tmp, 'baseline-emptyindex.json');
+    const before = JSON.stringify({
+      pairs: [{ ...DETECTED, description: 'baseline 2020-01-01 — exact duplicate' }],
+      clones: CLONES,
+    });
+    writeFileSync(al, before);
+    expect(runMatcher(['baseline'], { SEARCH_CODE_DB: index, CO_OCCURRENCE_ALLOWLIST: al })).toBe(
+      2,
+    );
+    expect(readFileSync(al, 'utf8')).toBe(before);
+  });
+
+  it('backfill-ranges on an empty index → exit 2, allowlist byte-identical', () => {
+    const index = indexWith('empty-backfill', []);
+    const al = join(tmp, 'backfill-emptyindex.json');
+    const before = JSON.stringify({ pairs: [DETECTED], clones: CLONES });
+    writeFileSync(al, before);
+    expect(
+      runMatcher(['backfill-ranges'], { SEARCH_CODE_DB: index, CO_OCCURRENCE_ALLOWLIST: al }),
+    ).toBe(2);
+    expect(readFileSync(al, 'utf8')).toBe(before);
+  });
+});
 
 // The corrupt-allowlist guard lives in loadAllowlist(), so EVERY destructive mode inherits it —
 // not just reconcile. baseline + backfill-ranges must refuse too.

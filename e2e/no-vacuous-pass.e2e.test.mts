@@ -1,5 +1,6 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { afterAll, describe, expect, it } from 'vitest';
 import { DETERMINISTIC } from '../gate-engine/deterministic/registry.mts';
 import { type Fixture, makeFixture, out } from './lib/harness.mts';
@@ -54,6 +55,9 @@ interface Deprivation {
    * unsupported evidence is its own blocking exit 4. None may be 0.
    */
   expected: 1 | 2 | 4;
+  /** Extra fixture state after the config write: deprives CONTENT, not configuration (an empty but
+   *  configured index is a different defect from no index — sc-2269). */
+  setup?: (repoDir: string) => void;
 }
 
 const DEPRIVED: Deprivation[] = [
@@ -83,6 +87,29 @@ const DEPRIVED: Deprivation[] = [
     config: true,
     speaks: true,
     expected: 2,
+  },
+  {
+    id: 'dup',
+    bin: 'guard-dup',
+    args: ['scan', '--new', '--changed', '--gate'],
+    // Configured, present, readable — and empty. The shape a consumer gets from a never-populated
+    // or --phase0-only index, and the one that used to answer a silent 0.
+    because: 'the configured search-code index holds no embedded chunks, so nothing is compared',
+    config: false,
+    speaks: true,
+    expected: 2,
+    setup: (repoDir) => {
+      writeFileSync(
+        join(repoDir, 'guard.config.json'),
+        JSON.stringify({ scanRoots: ['src'], indexPath: '.search-code/index.db' }),
+      );
+      mkdirSync(join(repoDir, '.search-code'), { recursive: true });
+      const db = new DatabaseSync(join(repoDir, '.search-code', 'index.db'));
+      db.exec(
+        'CREATE TABLE chunks (file_path TEXT, symbol_name TEXT, start_line INTEGER, end_line INTEGER, code_hash TEXT, embedding BLOB, code_embedding BLOB)',
+      );
+      db.close();
+    },
   },
   {
     id: 'clone',
@@ -168,6 +195,7 @@ describe('no gate reports clean without evaluating', () => {
     for (const [rel, body] of Object.entries(row.files ?? {})) {
       writeFileSync(join(fixture.repoDir, rel), body);
     }
+    row.setup?.(fixture.repoDir);
     fixture.git('add', '--all');
 
     const result = fixture.run(row.bin, row.args, { env: row.env });

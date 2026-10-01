@@ -63,9 +63,11 @@ import {
   canVerify,
   chunkColumns,
   dot,
+  emptyIndexMessage,
   freshnessNotice,
   orderKey,
   partitionFresh,
+  USABLE_CHUNK_WHERE,
   verifierForIndex,
 } from './chunk-index.mts';
 import { classifyPair } from './classify.mts';
@@ -213,7 +215,7 @@ try {
   // `id` only when the index has it — an unconditional select throws there, failing open every run.
   rows = db
     .prepare(
-      `SELECT ${canVerify(columns) ? 'id, ' : ''}file_path, symbol_name, start_line, end_line, code_hash, embedding, code_embedding FROM chunks WHERE code_embedding IS NOT NULL AND embedding IS NOT NULL AND symbol_name IS NOT NULL`,
+      `SELECT ${canVerify(columns) ? 'id, ' : ''}file_path, symbol_name, start_line, end_line, code_hash, embedding, code_embedding FROM chunks WHERE ${USABLE_CHUNK_WHERE}`,
     )
     .all() as ChunkRow[];
 } catch (e: unknown) {
@@ -230,11 +232,8 @@ const verifier = verifierForIndex(db, cfg.cwd, columns);
 // stored '\' would otherwise never match → reconcile over-drops, the gate fails open.
 for (const r of rows) r.file_path = r.file_path.replace(BACKSLASH_RE, '/');
 const n = rows.length;
-if (n === 0) {
-  // Empty index = nothing to compare = clean. Gate allows (exit 0).
-  console.error('No embedded chunks with a symbol_name. Nothing to match.');
-  process.exit(0);
-}
+// Empty index = nothing compared = could-not-run, never clean (sc-2269). Before the mode dispatch.
+if (n === 0) cannotRun(emptyIndexMessage(dbPath));
 const { dim, codeV, descV } = buildVectors(rows);
 const isTest = (i: number) => rows[i].file_path.includes('.test.');
 const loc = (i: number) => rows[i].end_line - rows[i].start_line + 1;
