@@ -95,6 +95,7 @@ DRY_GATES=0        # exact ship staging + deterministic/comment gates; no commit
 WITH_REVIEWERS=0   # --dry-gates also runs the domain reviewers (sc-2531); still no decisions/completeness
 BODY_SET=0         # --body given? else --body-file, else stdin (back-compat)
 BODY_FILE_SET=0    # --body-file <path>: author the body ONCE in a file; survives every retry
+BODY_FILE_PREREAD_SET=0  # --resume banner's one --body-file read: 1 = bytes kept, 2 = failed (latched)
 BASE_FLAG=""       # --base <branch>? else base off this checkout's HEAD/current branch
 FROM_BRANCH=0      # derive a frozen committed path set from origin/<base>..HEAD
 QAVIS_PUBLISH=1     # passed staged evidence is published after the PR exists; explicit opt-out only
@@ -238,7 +239,9 @@ if [ "$RESUME" -eq 1 ]; then
   PATHS=("${SI_PATHS[@]}")
   # One line naming what is being replayed, BEFORE the multi-minute gate chain — a stale-but-valid
   # record must be visible here, not after the run.
-  echo "Resuming recorded invocation for $BR: \"$TITLE\" — ${#PATHS[@]} paths, body $(printf '%s' "$RESUME_BODY" | wc -c | tr -d ' ') bytes, recorded $RESUME_CREATED" >&2
+  . "$SCRIPT_DIR/read-stdin-body.sh"
+  ship_resume_body_note
+  echo "Resuming recorded invocation for $BR: \"$TITLE\" — ${#PATHS[@]} paths, $SHIP_BODY_NOTE, recorded $RESUME_CREATED" >&2
   # Then the brief ITSELF, one path per line. A count cannot answer the question a contradicting gate
   # raises — "did the gate read my copy of this file, or the base's?" — and the answer is exactly this
   # list: the gate worktree is cut from the base, so every path NOT here is judged at its base content
@@ -796,6 +799,9 @@ WT="${TMPDIR:-/tmp}/devkit-ship-${BR//\//-}-$$"
 . "$SCRIPT_DIR/read-stdin-body.sh"
 if [ "$DRY_GATES" -eq 1 ]; then BODY=""
 elif [ "$BODY_SET" -eq 1 ]; then BODY="$BODY_FLAG"
+elif [ "$BODY_FILE_SET" -eq 1 ] && [ "$BODY_FILE_PREREAD_SET" -eq 1 ]; then BODY="$BODY_FILE_PREREAD" # the bytes the --resume banner sized
+elif [ "$BODY_FILE_SET" -eq 1 ] && [ "$BODY_FILE_PREREAD_SET" -eq 2 ]; then
+  echo "--body-file: $BODY_FILE_PREREAD_ERR: $BODY_FILE_FLAG" >&2; exit 1 # as the banner said; never re-read
 elif [ "$BODY_FILE_SET" -eq 1 ]; then
   [ -f "$BODY_FILE_FLAG" ] || { echo "--body-file: no such file: $BODY_FILE_FLAG" >&2; exit 1; }
   # cat + sentinel, never $(<file): command substitution strips EVERY trailing newline, silently
