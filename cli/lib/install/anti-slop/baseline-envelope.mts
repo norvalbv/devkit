@@ -2,6 +2,7 @@
 
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { failLine } from '../../../../gate-engine/deterministic/reason.mts';
 import { AntiSlopCapabilityError } from './base-capability.mts';
 import {
   type AntiSlopBaseline,
@@ -143,7 +144,7 @@ export function checkBaselineEnvelope(
     for (const receipt of removedMigrationReceipts) {
       console.error(`BASELINE-MIGRATION-RECEIPT ${receipt} removed`);
     }
-    console.error(
+    failLine(
       'anti-slop: FAIL — completed rule-migration receipts are append-only; restore the base receipt',
     );
     return 1;
@@ -159,13 +160,13 @@ export function checkBaselineEnvelope(
     for (const receipt of addedReceipts) {
       console.error(`BASELINE-MIGRATION-RECEIPT ${receipt} does not match candidate capability`);
     }
-    console.error(
+    failLine(
       'anti-slop: FAIL — add a migration receipt only with the managed capability state that issued it',
     );
     return 1;
   }
   if (envelope.activatedRuleIds.size > 0 && requiredReceipt === null) {
-    console.error(
+    failLine(
       'anti-slop: FAIL — newly activated managed rules lack a release-bound baseline migration identity',
     );
     return 1;
@@ -176,7 +177,7 @@ export function checkBaselineEnvelope(
     !candidateReceipts.has(requiredReceipt)
   ) {
     console.error(`BASELINE-MIGRATION-RECEIPT ${requiredReceipt} missing`);
-    console.error(
+    failLine(
       'anti-slop: FAIL — record the release activation receipt even when the newly activated rules have zero findings',
     );
     return 1;
@@ -194,9 +195,7 @@ export function checkBaselineEnvelope(
     const remedy = baseRef
       ? `devkit anti-slop adopt-renames --base ${baseRef}`
       : 'devkit anti-slop adopt-renames';
-    console.error(
-      `anti-slop: FAIL — persist renamed debt with \`${remedy}\`, then stage the baseline`,
-    );
+    failLine(`anti-slop: FAIL — persist renamed debt with \`${remedy}\`, then stage the baseline`);
     return 1;
   }
   const omittedActivatedFindings = compareBaseline(candidate, candidateGroups).newGroups.filter(
@@ -204,7 +203,7 @@ export function checkBaselineEnvelope(
   );
   if (omittedActivatedFindings.length > 0) {
     printNewAntiSlopFindings(omittedActivatedFindings);
-    console.error(
+    failLine(
       'anti-slop: FAIL — newly activated error finding(s) must be fixed or recorded in the release baseline',
     );
     return 1;
@@ -254,7 +253,7 @@ export function checkBaselineEnvelope(
       `BASELINE-GROWTH ${entry.ruleId} ${entry.file} (+${entry.additionalCount} adopted finding(s))`,
     );
   }
-  console.error(
+  failLine(
     'anti-slop: FAIL — the committed baseline may only shrink; fix the finding instead of adopting it',
   );
   return 1;
