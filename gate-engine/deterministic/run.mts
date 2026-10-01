@@ -47,6 +47,14 @@ import { parseJsonObject } from '../config-json.mts';
 import { coverageBypassed, deterministicStrict, envFlag, structureBypassed } from '../config.mts';
 import { emitGateBypass, emitGateEvent, finishGateTiming } from '../judge/gate-events.mts';
 import { prefixEntry, recordPrefix } from '../prefix-cache/prefix-cache.mts';
+import {
+  type GateFailure,
+  gateEnv,
+  readGateReason,
+  reasonDetail,
+  reasonReport,
+  withReasonFiles,
+} from './reason.mts';
 import { type ConfigComponent, DETERMINISTIC, type RawDevkitComponents } from './registry.mts';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -136,6 +144,8 @@ interface RunDeterministicOpts extends Partial<ParsedOpts> {
 
 // A runnable gate descriptor. `argv` is null for an unrunnable gate (empty command).
 interface Gate {
+  /** The registry id of a built-in gate; absent for `--extra` / structure commands. */
+  id?: string;
   label: string;
   argv: string[] | null;
   failOpen2: boolean;
@@ -247,10 +257,10 @@ export function prefixCacheScope(scope?: string, effectiveIds?: string[]): strin
 }
 
 // Run one gate as a subprocess; return its exit code (0 on success). stdio inherited so the gate's
-// own banner/output reaches the user exactly as it did when the hook invoked it directly.
-function runArgv(cwd: string, argv: string[], exec = execFileSync): number {
+// output reaches the user as if run directly; its failure reason returns via `reasonFile`.
+function runArgv(cwd: string, argv: string[], exec: typeof execFileSync, reasonFile: string) {
   try {
-    exec(argv[0], argv.slice(1), { cwd, stdio: 'inherit' });
+    exec(argv[0], argv.slice(1), { cwd, stdio: 'inherit', env: gateEnv(reasonFile) });
     return 0;
   } catch (e: unknown) {
     // spawn failure / kill → treat as a real fail
@@ -327,13 +337,13 @@ export function runDeterministic(cwd = process.cwd(), opts: RunDeterministicOpts
   // so a repeat bypassed run would otherwise record nothing. could_not_run, never a clean-reading
   // status — the ruling emitGateBypass carries forward.
   if (bypassStructure) emitGateBypass('structure-lint', 'GUARD_STRUCTURE_OK');
-  const fails: string[] = [];
+  const fails: GateFailure[] = [];
   // Whether each failure reached a verdict, decided where its exit code is read — never re-derived
   // from the label, which an `--extra` spec controls (sc-2753).
   const failed: Array<{ gate: string; verdict: boolean }> = [];
-  const fail = (label: string, suffix = '', verdict = suffix === '') => {
-    fails.push(`${label}${suffix}`);
-    failed.push({ gate: label.replace(GUARD_PREFIX_RE, ''), verdict });
+  const fail = (gate: Gate, suffix = '', verdict = suffix === '', reason: string[] = []) => {
+    fails.push({ id: gate.id, label: `${gate.label}${suffix}`, reason });
+    failed.push({ gate: gate.label.replace(GUARD_PREFIX_RE, ''), verdict });
   };
   // Gates that opted out (exit 2 where that IS an opt-out) and so proved nothing. Reported even on a
   // green run — the whole defect this exists for is a skipped gate reading like a passed one.
@@ -345,6 +355,7 @@ export function runDeterministic(cwd = process.cwd(), opts: RunDeterministicOpts
     }
     const ids = new Set(effectiveIds);
     const gates: Gate[] = DETERMINISTIC.filter((g) => ids.has(g.id)).map((g) => ({
+      id: g.id,
       label: `guard-${g.id}`,
       argv: ['node', path.resolve(HERE, g.module.replace(MJS_EXT_RE, SELF_EXT)), ...g.args],
       failOpen2:
@@ -355,24 +366,25 @@ export function runDeterministic(cwd = process.cwd(), opts: RunDeterministicOpts
     if (opts.structure && !bypassStructure) {
       gates.push(commandGate('structure-lint', opts.structure));
     }
-    for (const gate of gates) {
-      if (!gate.argv) {
-        fail(gate.label, '(unrunnable: empty command)', true);
-        continue;
-      }
-      const rc = runArgv(cwd, gate.argv, exec);
-      // `failOpen2` is a property of the GATE ("exit 2 is an opt-out for this one"); strict is a
-      // property of the RUN ("what we do about an opt-out"). Keeping them separate is what lets an
-      // `--extra` command's fatal exit 2 — failOpen2:false, never an opt-out — stay `(unexpected:2)`
-      // under strict instead of being relabelled as a gate that chose to skip.
-      if (rc === 1) fail(gate.label);
-      else if (gate.rcLabels && Object.hasOwn(gate.rcLabels, rc))
-        fail(gate.label, gate.rcLabels[rc]);
-      else if (rc === 2 && gate.failOpen2) {
-        if (deterministicStrict()) fail(gate.label, COULD_NOT_RUN);
-        else skipped.push(gate.label);
-      } else if (rc !== 0) fail(gate.label, `(unexpected:${rc})`);
-    }
+    withReasonFiles((fileFor) => {
+      gates.forEach((gate, i) => {
+        if (!gate.argv) {
+          fail(gate, '(unrunnable: empty command)', true);
+          return;
+        }
+        const reasonFile = fileFor(i);
+        const rc = runArgv(cwd, gate.argv, exec, reasonFile);
+        const failRc = (suffix = '') => fail(gate, suffix, undefined, readGateReason(reasonFile));
+        // failOpen2 belongs to the GATE (exit 2 = opt-out), strict to the RUN: so an `--extra`'s
+        // fatal exit 2 (never an opt-out) stays `(unexpected:2)` under strict, not a skip.
+        if (rc === 1) failRc();
+        else if (gate.rcLabels && Object.hasOwn(gate.rcLabels, rc)) failRc(gate.rcLabels[rc]);
+        else if (rc === 2 && gate.failOpen2) {
+          if (deterministicStrict()) failRc(COULD_NOT_RUN);
+          else skipped.push(gate.label);
+        } else if (rc !== 0) failRc(`(unexpected:${rc})`);
+      });
+    });
   }
   // Before the failure branch, so this prints on a GREEN run too — the case that motivated it: a
   // fail-open gate's own stderr scrolls past at the same visual weight as a gate that passed.
@@ -401,7 +413,7 @@ export function runDeterministic(cwd = process.cwd(), opts: RunDeterministicOpts
     // to the exact gate(s). Both `(unexpected:rc)` and `(could-not-run)` mean the gate never reached
     // a verdict, so neither is a `fail`: counting them as findings would inflate the fail rate with
     // gates that never ran.
-    for (const [i, label] of fails.entries()) {
+    for (const [i, { label, reason }] of fails.entries()) {
       emitGateEvent({
         type: 'gate_result',
         gate: failed[i].gate,
@@ -411,15 +423,14 @@ export function runDeterministic(cwd = process.cwd(), opts: RunDeterministicOpts
         // that stopped the run as "did NOT block this run" (sc-2488).
         family: DETERMINISTIC_FAMILY,
         status: failed[i].verdict ? 'fail' : 'could_not_run',
-        detail: label,
+        detail: reasonDetail(label, reason),
       });
     }
-    console.error(`✗ deterministic gates failed:${fails.map((f) => ` ${f}`).join('')}`);
-    console.error(
-      '   Every deterministic failure is listed above — fix them together, then commit once.',
-    );
+    console.error(`✗ deterministic gates failed:${fails.map((f) => ` ${f.label}`).join('')}`);
+    for (const line of reasonReport(fails)) console.error(line);
+    console.error('   Fix every failure above together, then commit once.');
     console.error('   On commit or ship, decision and reviewer gates run only after these pass.');
-    if (fails.some((f) => f.startsWith('structure-lint'))) {
+    if (fails.some((f) => f.label.startsWith('structure-lint'))) {
       console.error(
         '   Base branch structure debt that your diff did not cause? Re-run with the explicit',
       );
@@ -428,7 +439,7 @@ export function runDeterministic(cwd = process.cwd(), opts: RunDeterministicOpts
         '   A structure violation introduced by your own change must be fixed instead.',
       );
     }
-    if (fails.some((f) => NOT_FOUND_RE.test(f))) {
+    if (fails.some((f) => NOT_FOUND_RE.test(f.label))) {
       console.error(
         '   exit 127 = command not found: the gate ran, but its BINARY did not resolve — a',
       );

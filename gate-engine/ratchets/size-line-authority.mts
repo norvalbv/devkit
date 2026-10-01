@@ -25,7 +25,10 @@ interface SnapshotLineBaseline extends DecodedLineBaseline {
 
 export interface LineViolationResult {
   error: string | null;
+  /** What failed — the gate's recorded reason. */
   lines: string[];
+  /** Fan-out split remedy, printed after `lines` but never part of the reason. */
+  hints: string[];
 }
 
 export interface LineTightening {
@@ -365,7 +368,7 @@ export function lineViolationReport(
       : [];
   } catch (error) {
     if (!(error instanceof LineAuthorityError)) throw error;
-    return { error: error.message, lines: [] };
+    return { error: error.message, lines: [], hints: [] };
   }
   const authority = new Map(changes.map((change) => [change.file, change]));
   const violations = new Map(
@@ -380,7 +383,7 @@ export function lineViolationReport(
   for (const change of changes) {
     if (change.lines > change.current) violations.set(change.file, change);
   }
-  if (!violations.size) return { error: null, lines: [] };
+  if (!violations.size) return { error: null, lines: [], hints: [] };
 
   const report = [`🚫 ${violations.size} file(s) exceed their line limit or lowered ceiling:`];
   for (const entry of violations.values()) {
@@ -394,8 +397,7 @@ export function lineViolationReport(
       `   ${entry.file}: ${entry.lines} lines (max ${lowered?.current ?? effectiveLineCeiling(grandfathered, entry.file, cap(entry.file))})`,
     );
   }
-  report.push(...fanoutSplitHints(root, violations.keys()));
-  return { error: null, lines: report };
+  return { error: null, lines: report, hints: fanoutSplitHints(root, violations.keys()) };
 }
 
 export function tightenLineBaseline(
