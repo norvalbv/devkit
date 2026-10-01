@@ -32,6 +32,15 @@ const SEGMENT_CAP = 12_000;
 
 const read = (rel: string): string => readFileSync(join(ROOT, rel), 'utf8');
 
+/** CLAUDE.md headings and substantive lines that reappear verbatim in `other`. */
+function restatedLines(claudeMd: string, other: string): string[] {
+  return claudeMd
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith('#') || line.length >= 40)
+    .filter((line) => other.includes(line));
+}
+
 const tmp: string[] = [];
 afterAll(() => {
   for (const dir of tmp.splice(0)) rmSync(dir, { recursive: true, force: true });
@@ -58,8 +67,9 @@ describe('every path the routing docs name still resolves', () => {
   });
 });
 
-describe('the routing docs stay descriptive, so the conventions gate stays quiet', () => {
-  it.each(ROUTING_DOCS)('%s carries no unhedged directive keyword', (doc) => {
+describe('CLAUDE.md stays descriptive, so the conventions gate stays quiet', () => {
+  it('CLAUDE.md carries no unhedged directive keyword', () => {
+    const doc = 'CLAUDE.md';
     const offenders = read(doc)
       .split('\n')
       .map((line, i) => ({ line: i + 1, text: line }))
@@ -87,8 +97,8 @@ describe('the routing docs stay descriptive, so the conventions gate stays quiet
     expect(DIRECTIVE_RE.test('> **Ruling:** paths must resolve consumer-cwd-relative')).toBe(true);
   });
 
-  it.each(ROUTING_DOCS)('%s uses no numbered <rule id= markers', (doc) => {
-    expect(read(doc)).not.toContain('<rule id=');
+  it('CLAUDE.md uses no numbered <rule id= markers', () => {
+    expect(read('CLAUDE.md')).not.toContain('<rule id=');
   });
 });
 
@@ -142,16 +152,25 @@ describe('CLAUDE.md still carries the routing content it exists to carry', () =>
   });
 });
 
-describe('CLAUDE.md and AGENTS.md stay one canonical doc plus one pointer', () => {
-  it('AGENTS.md points at CLAUDE.md', () => {
+describe('CLAUDE.md routes and AGENTS.md carries the working rules', () => {
+  it('AGENTS.md points at CLAUDE.md for routing', () => {
     expect(read('AGENTS.md')).toContain('CLAUDE.md');
   });
 
-  it('AGENTS.md is a pointer, not a second copy that can drift', () => {
-    const canonical = read('CLAUDE.md');
-    const pointer = read('AGENTS.md');
-    expect(pointer).not.toEqual(canonical);
-    expect(pointer.length).toBeLessThan(canonical.length / 2);
+  it('CLAUDE.md imports AGENTS.md so Claude Code loads the working rules', () => {
+    expect(read('CLAUDE.md')).toMatch(/^@AGENTS\.md$/m);
+  });
+
+  it('AGENTS.md does not restate the routing doc', () => {
+    // Routing lives in CLAUDE.md and working rules in AGENTS.md.
+    expect(restatedLines(read('CLAUDE.md'), read('AGENTS.md'))).toEqual([]);
+  });
+
+  it('the restatement check catches routing content copied under a renamed heading', () => {
+    const claudeMd = read('CLAUDE.md');
+    const paragraph = claudeMd.split('\n').find((line) => line.trim().length >= 40) ?? '';
+    const copy = `${read('AGENTS.md')}\n## Orientation\n${paragraph}\n`;
+    expect(restatedLines(claudeMd, copy)).toEqual([paragraph.trim()]);
   });
 
   it('CLAUDE.md fits inside the judge segment cap, uncut', () => {
@@ -190,8 +209,9 @@ describe('wiring: devkit files now have a governing CLAUDE.md', () => {
   });
 
   it('AGENTS.md is not picked up as a governing rule surface', () => {
-    // Only CLAUDE.md is probed, which is why the pointer needs no directive budget of its own.
+    // Only CLAUDE.md is probed and its @import is not expanded, which is why AGENTS.md needs no
+    // directive budget of its own.
     const rendered = renderGoverningClaudeMd(stagedCopyOfTheRealDocs(), ['cli/index.mts']);
-    expect(rendered).not.toContain('AGENTS.md');
+    expect(rendered).not.toContain('<pr_scope_rules>');
   });
 });

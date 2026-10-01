@@ -14,7 +14,8 @@ const TOKEN_SPLIT_RE = /[\s`() ,;"']+/;
 export function referencedRepoPathCandidates(markdown: string): string[] {
   const out = new Set<string>();
   for (const raw of markdown.split(TOKEN_SPLIT_RE)) {
-    let token = raw.replace(/[.,;:!?]+$/, '');
+    // A leading `@` is a Claude Code memory import (`@AGENTS.md`); the path after it is the citation.
+    let token = raw.replace(/[.,;:!?]+$/, '').replace(/^@/, '');
     if (token === '') continue;
 
     // Angle-wrapped Markdown destinations are valid, while a placeholder embedded in a path is

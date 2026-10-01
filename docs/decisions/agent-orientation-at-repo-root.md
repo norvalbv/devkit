@@ -19,3 +19,20 @@ created: 2026-08-30
 **Revisit-when:** conventions-reviewer produces a false block traceable to a line in the root CLAUDE.md, or a harness other than Claude Code becomes the primary surface here so CLAUDE.md is no longer the auto-loaded file.
 **Scope:** CLAUDE.md,AGENTS.md,cli/__tests__/root-routing-doc.test.mts
 **Source:** shortcut · sc-2312
+
+## Target · 2026-10-01 — CLAUDE.md routes; AGENTS.md carries the working rules for changing devkit
+
+**Context:** AGENTS.md was a short pointer to CLAUDE.md, held there by cli/__tests__/root-routing-doc.test.mts (length under half of CLAUDE.md, no directive keywords). That kept the conventions gate quiet but gave an agent reading AGENTS.md no rules for how to change devkit: scope limits, the minimal-code bar, when to record a decision, how gated commits behave.
+**Ruling:** CLAUDE.md stays the descriptive routing document and the only root file gate-engine/review/claude-md.mts loads as governing rules, so it keeps its no-directive and no-rule-id checks. AGENTS.md becomes the working-rules document: it points at CLAUDE.md for routing and then carries devkit's engineering rules, which may be phrased as directives. CLAUDE.md ends with an @AGENTS.md import so Claude Code loads those rules; claude-md.mts reads CLAUDE.md verbatim and does not expand the import, so AGENTS.md's rule content stays outside the governing surface. The routing-doc test checks that every path AGENTS.md names resolves case-exactly, that no CLAUDE.md heading or substantive line reappears in AGENTS.md, and that the rendered conventions brief carries none of AGENTS.md's content.
+**Consequences:**
+- Positive: Positive: Codex and Claude Code both load devkit's working rules. conventions-reviewer gains only CLAUDE.md's new descriptive Working rules section and the import line; none of AGENTS.md's directives reach it. Negative: the pointer-length guard against drift is gone, and the no-restatement check catches verbatim copies only, not paraphrase. A future claude-md.mts that expands @imports would put every AGENTS.md directive in front of the blocking reviewer.
+- Negative: A longer AGENTS.md that can drift from practice, in exchange for written working rules where an agent reads them.
+**Vision-fit:** n/a — internal tooling; agent guidance for working on devkit itself.
+**Researched:** frink-oss AGENTS.md (source of the ported rules), gate-engine/review/claude-md.mts (only CLAUDE.md is probed, verbatim), cli/__tests__/root-routing-doc.test.mts, gate-engine/markdown/referenced-paths.mts.
+**Rejected:** (a) Verbatim copy of the sibling file: it names paths absent here and product-specific rules that do not apply to devkit. (b) Putting the rules in CLAUDE.md: claude-md.mts would feed every directive to conventions-reviewer as a blocking rule over every devkit commit.
+**Anchored-bet:** [BET]
+**Revisit-when:** claude-md.mts starts expanding @imports or loading AGENTS.md, or AGENTS.md drifts from the rules gates actually enforce.
+**Scope:** CLAUDE.md,AGENTS.md,cli/__tests__/root-routing-doc.test.mts
+**Source:** collab
+**Evidence-change:** The owner chose to bring devkit's AGENTS.md up to the working-rules standard already used in a sibling repository (PR scope and LOC limits, minimal code, research first, critique before plan, model selection, gate and bug-reporting workflows). A pointer-only AGENTS.md left Codex with no working rules at all.
+- 2026-10-01 — CLAUDE.md now ends with an @AGENTS.md import so Claude Code loads the working rules, closing the gap the 2026-10-01 Target named. claude-md.mts reads CLAUDE.md verbatim without expanding the import, so conventions-reviewer's governing surface is unchanged; the routing-doc test asserts the rendered brief carries none of AGENTS.md's content. gate-engine/markdown/referenced-paths.mts strips a leading @ so the import is checked as a path.
