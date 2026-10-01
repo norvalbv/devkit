@@ -5,6 +5,7 @@ import { existsSync, readdirSync, readFileSync, realpathSync, writeFileSync, } f
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { CONFIG_FILENAME, resolveGuardConfig, sourceMatchers } from '../config.mjs';
+import { exitGate } from '../deterministic/reason.mjs';
 import { readRatchetBaseline, removeRatchetBaseline, SIZE_BASELINE, writeRatchetBaseline, } from './baseline-paths.mjs';
 import { fanoutSplitHints } from './folder-fanout.mjs';
 import { hasStagedFiles, indexTreeRef, mergeBaseRef, pullRequestScope, stagedSet, } from './git-index.mjs';
@@ -194,7 +195,7 @@ function runLinesGate(root, cfg, ciScope) {
             ? over.filter((o) => selected.has(o.file))
             : over;
     // A file fails when it exceeds its own recorded ceiling (grandfathered) or the cap (new file).
-    const { error, lines: report } = lineViolationReport(root, cfg, scoped, cap, grandfathered, {
+    const { error, lines: report, hints, } = lineViolationReport(root, cfg, scoped, cap, grandfathered, {
         candidate,
         inCommit,
         parents,
@@ -202,12 +203,12 @@ function runLinesGate(root, cfg, ciScope) {
     });
     if (error) {
         console.error(error);
-        process.exit(2);
+        exitGate(2, [error]);
     }
     if (report.length) {
-        for (const line of report)
+        for (const line of [...report, ...hints])
             console.error(line);
-        process.exit(1);
+        exitGate(1, report);
     }
     if (ciScope || !inCommit || !staged)
         return; // CI never tightens/stages
@@ -263,18 +264,22 @@ function runDisableGate(root, baselineContents, current, ciScope) {
             : Object.keys({ ...cur, ...grandfathered });
     const grew = scoped.filter((f) => cur[f] && (cur[f].file > ceil(f).file || cur[f].fn > ceil(f).fn));
     if (grew.length) {
-        if (legacy) {
-            console.error(`🚫 ${BASELINE} is a pre-per-file baseline — its grandfathered disables aren't recognised. Run \`guard-size freeze\` to migrate.`);
-            process.exit(1);
+        const why = legacy
+            ? [
+                `🚫 ${BASELINE} is a pre-per-file baseline — its grandfathered disables aren't recognised. Run \`guard-size freeze\` to migrate.`,
+            ]
+            : [
+                '🚫 New `eslint-disable max-lines` directive(s) — size debt may only SHRINK.',
+                ...grew.map((f) => `   ${f}: ${cur[f].file}/${cur[f].fn} file/fn disables vs ${ceil(f).file}/${ceil(f).fn} allowed`),
+            ];
+        for (const line of why)
+            console.error(line);
+        if (!legacy) {
+            console.error('   Split the file below the cap instead of disabling.');
+            for (const hint of fanoutSplitHints(root, grew))
+                console.error(hint);
         }
-        console.error('🚫 New `eslint-disable max-lines` directive(s) — size debt may only SHRINK.');
-        for (const f of grew) {
-            console.error(`   ${f}: ${cur[f].file}/${cur[f].fn} file/fn disables vs ${ceil(f).file}/${ceil(f).fn} allowed`);
-        }
-        console.error('   Split the file below the cap instead of disabling.');
-        for (const hint of fanoutSplitHints(root, grew))
-            console.error(hint);
-        process.exit(1);
+        exitGate(1, why);
     }
     if (ciScope || !inCommit || !staged) {
         // No commit in progress → never mutate. Nudge a re-freeze if anything shrank or a legacy file lingers.
@@ -362,7 +367,9 @@ function runCli(cmd) {
         // never adopted the ratchet is never wedged. Never key this on .devkit/config.json — it is
         // absent in devkit's sync-dogfooded repo and in CI, which would silently disable the gate.
         if (!hasBaseline && !existsSync(join(root, CONFIG_FILENAME))) {
-            process.exit(2); // ungoverned + un-frozen → fail open
+            exitGate(2, [
+                'guard-size: ungoverned repo (no guard.config.json) and no baseline — opted out',
+            ]);
         }
         // Disable ratchet: per-file, per-commit shrink-only (auto-lowers as disables are removed).
         runDisableGate(root, baseline?.contents ?? null, current, ciScope);

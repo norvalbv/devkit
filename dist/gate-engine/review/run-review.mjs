@@ -35,10 +35,14 @@ import { emitReviewCacheHit } from '../judge/gate-events.mjs';
 import { reportGateInfraFailure } from '../judge/odb-probe.mjs';
 import { execJudgeAsync, strictRemedy } from '../judge/run-judge.mjs';
 import { loadCache } from './cache.mjs';
+import { isShipLane } from './cascade/consumer-assets.mjs';
 import { runCascade } from './cascade/reviewer.mjs';
+import { reportRetrievalDegraded } from './contracts/checklist.mjs';
 import { ENGINE_ERROR_REMEDY, RESPONSE_CONTRACT_REMEDY } from './contracts/response.mjs';
 import { baseProvenanceLines, cachedBaseState, cachedPassLine, judgedBaseSha, primeReviewBaseContext, } from './evidence/base-context.mjs';
 import { loadReviewerContext } from './evidence/commit-message.mjs';
+import { coverageFields, partialEvidenceNote } from './evidence/packet/coverage.mjs';
+import { omissionHintSalt } from './evidence/packet/omission-hint.mjs';
 import { responseContractFor } from './contracts/registry.mjs';
 import { renderFindingsBlockForParts } from './evidence/findings.mjs';
 import { emitReviewScope, emitReviewSkipped, reportNonRuns } from './evidence/scope.mjs';
@@ -217,6 +221,11 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
         const responseContract = responseContractFor(reviewer.responseContract);
         if (responseContract)
             targetSalts.set(reviewer.name, `${targetSalts.get(reviewer.name) ?? ''}\0${responseContract.identity}`);
+        // One-time: a shell-less judge's PASS earned under the "run git diff" hint it could not follow
+        // is re-judged under the Read hint it can (sc-2305) — same predicate as the packet builder.
+        const hintSalt = omissionHintSalt(reviewer, reviewer.model ?? firstModel);
+        if (hintSalt)
+            targetSalts.set(reviewer.name, `${targetSalts.get(reviewer.name) ?? ''}${hintSalt}`);
     }
     // What has to be judged, incl. a split reviewer's fan-out, + one scope row each (lens/split.mts).
     // chunkCap derives from the SAME resolved cfg snapshot as model/reviewer selection (W-3 +
@@ -231,8 +240,15 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
         emitReviewScope(s.sel, s.diff, promptIdentity(s.sel), s.cached, ctx.scopeFields, cwd, {
             cachedBase: baseOf.get(s.sel.reviewer.name) ?? null,
         });
-    for (const hit of plan.cachedHits)
-        console.error(cachedPassLine(hit.label, baseOf.get(hit.label) ?? cachedBaseState(cwd, hit.judgedBases, hit.files), hit.part ? 'identical' : 'identical diff'));
+    for (const hit of plan.cachedHits) {
+        console.error(cachedPassLine(hit.label, baseOf.get(hit.label) ?? cachedBaseState(cwd, hit.judgedBases, hit.files), hit.part ? 'identical' : 'identical diff', hit.degradedCause !== undefined) +
+            // A part's packet is cut from its own files (a chunk's, or the whole scope for a lens).
+            partialEvidenceNote(hit.part
+                ? coverageFields([{ diffText: gitCached(cwd, [], hit.files) }])
+                : (plan.fullyCached.find((c) => c.name === hit.label)?.coverage ?? {})));
+        if (hit.degradedCause)
+            reportRetrievalDegraded(hit.label, hit.degradedCause);
+    }
     // Before any verdict AND before the fully-cached early return below (sc-2480).
     const fresh = new Set(plan.tasks.map((t) => t.base.reviewer.name)).size;
     for (const line of baseProvenanceLines(cwd, selected.flatMap((s) => s.files), process.env, { fresh, cached: plan.cachedHits.length }))
@@ -246,6 +262,7 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
             durationMs: c.duration,
             judgedBaseSha: judgedBaseSha(base),
             baseState: base.state,
+            coverage: c.coverage,
         });
     }
     if (plan.tasks.length === 0)
@@ -363,7 +380,7 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
             ? RESPONSE_CONTRACT_REMEDY
             : cause === 'engine'
                 ? ENGINE_ERROR_REMEDY
-                : strictRemedy(cause, r.outageBin, r.outageResetsAt);
+                : strictRemedy(cause, r.outageBin, r.outageResetsAt, isShipLane());
         console.error(strict
             ? `guard-review: ${r.name} INCONCLUSIVE (${r.reason}) — strict ship mode fails closed.\n` +
                 `   Remedy: ${remedy} (completed verdicts are cached).`

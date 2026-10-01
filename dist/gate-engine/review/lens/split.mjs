@@ -34,7 +34,7 @@
  */
 import { z } from 'zod';
 import { diffCacheIdentity } from '../../judge/diff-focus.mjs';
-import { storedBaseSchema } from '../evidence/base-context.mjs';
+import { cachedRetrievalDegradation, storedBaseSchema } from '../evidence/base-context.mjs';
 import { planChunkedParts, resolveChunkCap } from './chunk-tasks.mjs';
 import { deriveLensReviewer, lensGroupId, resolveLensGroups } from './groups.mjs';
 // Re-exported so every existing importer's path keeps working after the guard-size split.
@@ -43,6 +43,7 @@ export { resolveChunkCap } from './chunk-tasks.mjs';
 import { emitReviewChunkPlan } from '../evidence/chunk-plan.mjs';
 import { emitGateEvent } from '../../judge/gate-events.mjs';
 import { composeTranscript, saveTranscript } from '../../judge/transcript-store.mjs';
+import { coverageFields, partialEvidenceNote } from '../evidence/packet/coverage.mjs';
 import { itemFields, mergeItemVectors } from '../evidence/items.mjs';
 import { parseReviewVerdict } from '../contracts/response.mjs';
 /**
@@ -131,13 +132,11 @@ export function emitMergedLensResults(splitParts, firstModel) {
                 lens: lensGroupId(p.task.sel.reviewer.lens ?? []),
                 status: p.res.status,
                 secs: p.secs,
-                // Chunk-telemetry wire format (sc-1999): WHICH slice of the chunk plan this part judged,
-                // by index AND membership hash (a bare index is unstable across packing changes). Null on
-                // every un-chunked run — today that is every production run; sc-1907 starts assigning
-                // ReviewTask.chunk. The warehouse ingests non-null entries into its chunk-grain child
-                // table and must never widen its per-lens row for them.
+                // Chunk-telemetry wire format (sc-1999): WHICH plan slice this part judged, by index AND
+                // membership hash (an index alone is unstable); null when un-chunked. Chunk-grain table only.
                 chunk_index: p.task.chunk?.index ?? null,
                 chunk_files_sha: p.task.chunk?.filesSha ?? null,
+                ...coverageFields([p.task]),
                 ...(p.res.model ? { model: p.res.model } : {}),
                 ...(p.retried ? { retried: true } : {}),
             })),
@@ -145,6 +144,7 @@ export function emitMergedLensResults(splitParts, firstModel) {
             ...(parts.some((p) => p.retried) ? { retried: true, retry_phase: 'deferred' } : {}),
             ...(merged.waivers?.length ? { waivers: merged.waivers } : {}),
             ...itemFields(merged),
+            ...coverageFields(parts.map((p) => p.task)),
             ...(transcriptRef ? { transcript_ref: transcriptRef } : {}),
         });
     }
@@ -164,7 +164,9 @@ export function holdLensPart(parts, reviewer, part, label) {
     const held = parts.get(reviewer) ?? [];
     held.push(part);
     parts.set(reviewer, held);
-    console.error(`guard-review: ${label} — ${part.res.status.toUpperCase()} in ${part.secs}s`);
+    const verdict = part.res.status.toUpperCase();
+    const note = verdict === 'PASS' ? partialEvidenceNote(coverageFields([part.task])) : '';
+    console.error(`guard-review: ${label} — ${verdict} in ${part.secs}s${note}`);
 }
 /**
  * Decide what actually has to be judged, before any judge runs.
@@ -235,8 +237,10 @@ export function planReviewWork(selected, diffs, cache, salts, keyOf, groups = re
                 duration,
                 model: z.string().min(1).safeParse(cache[parts[0].key].model).data,
                 judgedBases,
+                coverage: coverageFields(parts),
             });
-            cachedHits.push({ label: name, files: sel.files, judgedBases, part: false });
+            const degradedCause = cachedRetrievalDegradation(name, cache[parts[0].key]);
+            cachedHits.push({ label: name, files: sel.files, judgedBases, part: false, degradedCause });
             continue;
         }
         for (const p of parts) {
@@ -252,10 +256,8 @@ export function planReviewWork(selected, diffs, cache, salts, keyOf, groups = re
             });
             if (!p.splitOf)
                 continue;
-            // Rebuild the part WITH its cached aggregates (sc-1475): a spilled part's `items` never
-            // reached the cache entry (undefined is dropped by JSON), so itemCount/itemTally are the
-            // only proof the artifact existed — without them mergeItemVectors reads the part as
-            // "never ran" and the merged review_result silently omits a real lens group.
+            // Rebuild the part WITH its cached aggregates (sc-1475): a spilled part's items never reach the
+            // cache, so itemCount/itemTally alone prove it ran — else the merge silently drops a lens group.
             const e = cache[p.key];
             const held = splitParts.get(p.splitOf) ?? [];
             held.push({

@@ -177,6 +177,22 @@ const RANK = {
 /** A stored base as read back from the verdict cache: only a sha-shaped string survives, so an
  * absent, malformed or option-shaped value (it reaches git argv) parses to nothing. */
 export const storedBaseSchema = z.string().regex(FULL_SHA_RE);
+/** The one reviewer whose PASS depends on a semantic retrieval backend it may not reach (sc-2317). */
+export const RETRIEVAL_REVIEWER = 'commit-guard';
+const MAX_CAUSE_CHARS = 200;
+/** Judge- or cache-supplied cause text lands on one log line, a cache entry and an event. */
+export function boundedCause(cause) {
+    const flat = cause.replace(/\s+/g, ' ').trim();
+    return flat.length > MAX_CAUSE_CHARS ? `${flat.slice(0, MAX_CAUSE_CHARS - 1)}…` : flat;
+}
+export const CACHED_RETRIEVAL_UNPROVEN = 'cached PASS carries no retrieval record (written before sc-2317, or the record is malformed)';
+/** Why a replayed commit-guard PASS is DEGRADED; only an entry stamped `retrieval: 'ok'` is clean. */
+export function cachedRetrievalDegradation(reviewer, meta) {
+    if (reviewer !== RETRIEVAL_REVIEWER || meta.retrieval === 'ok')
+        return undefined;
+    const cause = z.string().trim().min(1).safeParse(meta.degraded_cause).data;
+    return cause === undefined ? CACHED_RETRIEVAL_UNPROVEN : boundedCause(cause);
+}
 export function cachedBaseState(cwd, judgedBases, reviewedFiles, env = process.env) {
     const current = reviewBaseContext(cwd, env).baseSha;
     const judged = [];
@@ -216,8 +232,8 @@ export function judgedBaseSha(verdict) {
     return verdict.state !== 'unknown' && verdict.judged.length === 1 ? verdict.judged[0] : null;
 }
 /** The per-reviewer cache line. `current` keeps the historical wording byte-for-byte. */
-export function cachedPassLine(label, verdict, identical = 'identical diff') {
-    const head = `guard-review: ${label} — cached PASS (${identical}`;
+export function cachedPassLine(label, verdict, identical = 'identical diff', degraded = false) {
+    const head = `guard-review: ${label} — cached PASS${degraded ? ' (DEGRADED)' : ''} (${identical}`;
     const now = verdict.current ? shortSha(verdict.current) : 'UNKNOWN';
     const was = verdict.judged.map(shortSha).join(', ');
     switch (verdict.state) {

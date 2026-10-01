@@ -47,6 +47,8 @@ const TARGET_FIELD_RE = /^[ \t]*\*\*([^:]+):\*\*\s*(.*)\r?$/;
 export const NOTE_BULLET_RE = /^-\s+\d{4}-\d{2}-\d{2}\b/;
 const TITLE_CUT_RE = /\. |\.$| — |; /;
 const MARKDOWN_TABLE_BREAK_RE = /\s*[|\n\r]+\s*/g;
+const LINE_BREAK_RE = /[\r\n]+/g;
+const EDGE_LINE_BREAK_RE = /^[\r\n]+|[\r\n]+$/g;
 export function hasTargetFields(options) {
     return Boolean(options.ruling &&
         options.context &&
@@ -57,10 +59,29 @@ export function hasTargetFields(options) {
 export function today() {
     return process.env.DECISIONS_TODAY ?? new Date().toISOString().slice(0, 10);
 }
+// INDEX.md table cells only: strips `|`, which would split the cell. Never apply it to axis-record
+// prose — a note is copied from verbatim, and `(Test|Hook)` → `(Test Hook)` matches nothing (sc-2324).
 export function sanitizeCell(value) {
     return String(value ?? '')
         .replace(MARKDOWN_TABLE_BREAK_RE, ' ')
         .trim();
+}
+// Axis-record prose stays one line and nothing else: edge line breaks drop, interior ones fold to a
+// space, every other byte (`|` and its spaces included) lands as written.
+export function foldLines(value) {
+    return String(value ?? '')
+        .replace(EDGE_LINE_BREAK_RE, '')
+        .replace(LINE_BREAK_RE, ' ');
+}
+// True when foldLines changes more than one trailing newline (the shell heredoc's, LF or CRLF).
+export function hasFoldedLineBreak(value) {
+    return /[\r\n]/.test(String(value ?? '').replace(/\r?\n$/, ''));
+}
+// The fold is never silent (sc-2324): the renderers below and amend's --note-replace name the flag.
+export function warnIfFolded(flag, value) {
+    if (!hasFoldedLineBreak(value))
+        return;
+    console.error(`warning: line breaks in ${flag} were joined or dropped — an axis-record entry is a single line.`);
 }
 export function whyHook(why) {
     const one = sanitizeCell(why);
@@ -137,8 +158,9 @@ function firstClause(value) {
     return lastSpace > 60 ? capped.slice(0, lastSpace) : capped;
 }
 export function renderTarget(date, options) {
+    warnIfFolded('--title', options.title);
     const lines = [
-        `## Target · ${date} — ${sanitizeCell(options.title || firstClause(options.ruling))}`,
+        `## Target · ${date} — ${foldLines(options.title || firstClause(options.ruling))}`,
         '',
     ];
     lines.push(`**Context:** ${options.context}`);
@@ -178,7 +200,8 @@ export function renderTarget(date, options) {
     return lines.join('\n');
 }
 export function renderNote(date, text) {
-    return `- ${date} — ${sanitizeCell(text)}`;
+    warnIfFolded('--note', text);
+    return `- ${date} — ${foldLines(text)}`;
 }
 /**
  * Extract every `**Field:** value` line from a block's raw text.

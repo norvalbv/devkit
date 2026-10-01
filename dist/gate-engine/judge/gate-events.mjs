@@ -58,6 +58,7 @@ export function emitReviewCacheHit(hit) {
         duration_ms: Math.max(0, Math.round(hit.durationMs)),
         judged_base_sha: hit.judgedBaseSha,
         base_state: hit.baseState,
+        ...hit.coverage,
     });
 }
 /** cache_hit for completeness's branch+message sticky key, which a reshaped diff can reuse. Same

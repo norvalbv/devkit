@@ -6,6 +6,7 @@ import { appendFileSync, existsSync, realpathSync } from 'node:fs';
 import { isAbsolute, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { coverageBypassed, resolveGuardConfig, sourceMatchers, } from '../config.mjs';
+import { failLine } from '../deterministic/reason.mjs';
 import { emitGateEvent } from '../judge/gate-events.mjs';
 import { displayPath, formatClearMarker, humanAge, readClearMarker } from './failures.mjs';
 // Shared with the PRODUCER (`devkit coverage-run`) so the path this gate reads and the path that
@@ -184,7 +185,7 @@ export function runCoverage(cwd = process.cwd()) {
     if (!existsSync(file)) {
         if (reviewMode)
             return reviewNotMeasuredAbsent(cwd);
-        console.error(`🚫 Coverage gate FAILED — no coverage data (${COVERAGE_FILE} absent).`);
+        failLine(`🚫 Coverage gate FAILED — no coverage data (${COVERAGE_FILE} absent).`);
         const marker = readClearMarker(resolve(cwd, COVERAGE_DIR));
         if (marker)
             for (const line of formatClearMarker(marker, cwd))
@@ -215,7 +216,7 @@ export function runCoverage(cwd = process.cwd()) {
         computed = computePercentages(JSON.parse(artifact.bytes));
     }
     catch {
-        console.error(`🚫 Coverage gate FAILED — ${COVERAGE_FILE} is present but not valid coverage data.`);
+        failLine(`🚫 Coverage gate FAILED — ${COVERAGE_FILE} is present but not valid coverage data.`);
         console.error(artifactLine(file));
         console.error('   Unparseable or malformed coverage data is not verification. Re-run `bun run test:run:coverage`.');
         for (const line of BYPASS_REMEDY)
@@ -245,9 +246,9 @@ export function runCoverage(cwd = process.cwd()) {
     }
     const shortfalls = METRICS.filter((m) => typeof coverage[m] === 'number' && computed[m] < coverage[m]);
     if (shortfalls.length > 0) {
-        console.error('🚫 Coverage below threshold:');
+        failLine('🚫 Coverage below threshold:');
         for (const m of shortfalls) {
-            console.error(`   ${m}: ${computed[m]}% (min ${coverage[m]}%)`);
+            failLine(`   ${m}: ${computed[m]}% (min ${coverage[m]}%)`);
         }
         console.error(artifactLine(file));
         console.error('   Add tests to raise coverage, then run `bun run test:run:coverage`.');
@@ -263,9 +264,9 @@ export function runCoverage(cwd = process.cwd()) {
         : humanAge(Date.now() - Date.parse(provenance.manifest.finishedAt));
     if (provenance.state === 'drift') {
         if (provenance.production.length > 0) {
-            console.error(`🚫 Coverage gate FAILED — coverage artifact predates ${provenance.production.length} briefed file(s):`);
+            failLine(`🚫 Coverage gate FAILED — coverage artifact predates ${provenance.production.length} briefed file(s):`);
             for (const line of listPaths(provenance.production, cwd, top))
-                console.error(line);
+                failLine(line);
             console.error(`   The artifact (run ${provenance.manifest.runId}, measured ${age} ago) never saw these`);
             console.error(artifactLine(file));
             console.error('   versions, so its percentages describe different code. Re-run `bun run test:run:coverage`');

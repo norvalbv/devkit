@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
-import { consumerChecklistAssetRoot, readConsumerReviewAsset } from './cascade/consumer-assets.mjs';
+import { consumerChecklistAssetRoot, readConsumerReviewAsset, reviewAgentsDir, } from './cascade/consumer-assets.mjs';
 import { checklistAssetPath, checklistScriptAt, hasChecklist, REVIEWERS, } from './reviewers.mjs';
 const REVIEW_ROOTS_HELPER = 'skills/_devkit/review-roots.mjs';
 // Imported by every checklist script (createChecklistStore), so its bytes are execution inputs of
@@ -75,9 +75,12 @@ export function verifyChecklist(state, verdict) {
             .join(', ')}`;
     return null;
 }
+/** The directory `agentBody` reads: the packaged runtime in review mode, else `reviewAgentsDir`. */
+export function agentsDirFor(cwd, cfg, assetRoot) {
+    return assetRoot ? path.join(assetRoot, 'agents') : reviewAgentsDir(cwd, cfg);
+}
 export function agentBody(cwd, cfg, name, assetRoot) {
-    const dir = assetRoot ? path.join(assetRoot, 'agents') : cfg.review.agentsDir;
-    const file = path.join(path.isAbsolute(dir) ? dir : path.resolve(cwd, dir), `${name}.md`);
+    const file = path.join(agentsDirFor(cwd, cfg, assetRoot), `${name}.md`);
     try {
         return readFileSync(file, 'utf8');
     }

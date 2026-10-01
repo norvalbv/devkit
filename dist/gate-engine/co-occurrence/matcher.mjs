@@ -46,13 +46,15 @@ import { dirname, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { envBool, resolveFromCwd, resolveGuardConfig } from '../config.mjs';
+import { exitGate, failLine } from '../deterministic/reason.mjs';
 import { ALLOWLIST_CLI, loadAllowlist as loadAllowlistFile, saveAllowlist, symFileKey, } from './allowlist-io.mjs';
 import { flagReader } from './argv.mjs';
 import { loadChangedSet } from './changed-files.mjs';
-import { buildVectors, canVerify, chunkColumns, dot, freshnessNotice, orderKey, partitionFresh, verifierForIndex, } from './chunk-index.mjs';
+import { buildVectors, canVerify, chunkColumns, dot, emptyIndexMessage, freshnessNotice, orderKey, partitionFresh, USABLE_CHUNK_WHERE, verifierForIndex, } from './chunk-index.mjs';
 import { classifyPair } from './classify.mjs';
 import { isExpired } from './decay.mjs';
 import { missingIndexMessage, refreshIndex } from './index-refresh.mjs';
+const pairName = (p) => `${p.symbolA} <> ${p.symbolB}`; // a blocked pair, in the gate's reason
 // Hoisted per useTopLevelRegex — this runs once per index row in the normalize loop.
 const BACKSLASH_RE = /\\/g;
 // Package-relative ONLY for labels.json (engine-shipped bench fixtures). Every
@@ -101,7 +103,7 @@ const APPLY = argv.includes('--apply');
 // control-flow narrowing — a guard `if (x == null) cannotRun(...)` then treats x as
 // non-null, and a try/catch whose catch calls it is definitely-assigned afterwards.
 function cannotRun(msg) {
-    console.error(msg);
+    failLine(msg);
     process.exit(2);
 }
 // No index configured (config.indexPath null AND no SEARCH_CODE_DB) => matcher
@@ -145,7 +147,7 @@ try {
         columns = chunkColumns(db);
     // `id` only when the index has it — an unconditional select throws there, failing open every run.
     rows = db
-        .prepare(`SELECT ${canVerify(columns) ? 'id, ' : ''}file_path, symbol_name, start_line, end_line, code_hash, embedding, code_embedding FROM chunks WHERE code_embedding IS NOT NULL AND embedding IS NOT NULL AND symbol_name IS NOT NULL`)
+        .prepare(`SELECT ${canVerify(columns) ? 'id, ' : ''}file_path, symbol_name, start_line, end_line, code_hash, embedding, code_embedding FROM chunks WHERE ${USABLE_CHUNK_WHERE}`)
         .all();
 }
 catch (e) {
@@ -161,11 +163,9 @@ const verifier = verifierForIndex(db, cfg.cwd, columns);
 for (const r of rows)
     r.file_path = r.file_path.replace(BACKSLASH_RE, '/');
 const n = rows.length;
-if (n === 0) {
-    // Empty index = nothing to compare = clean. Gate allows (exit 0).
-    console.error('No embedded chunks with a symbol_name. Nothing to match.');
-    process.exit(0);
-}
+// Empty index = nothing compared = could-not-run, never clean (sc-2269). Before the mode dispatch.
+if (n === 0)
+    cannotRun(emptyIndexMessage(dbPath));
 const { dim, codeV, descV } = buildVectors(rows);
 const isTest = (i) => rows[i].file_path.includes('.test.');
 const loc = (i) => rows[i].end_line - rows[i].start_line + 1;
@@ -179,8 +179,7 @@ function detect(knobs, changed = null) {
         for (let j = i + 1; j < n; j++) {
             if (rows[i].file_path === rows[j].file_path)
                 continue;
-            // --changed: only pairs where at least one side is a staged file (this
-            // commit's own dups). Skips the dot for everything else → cheap at commit.
+            // --changed: only pairs with a staged side (this commit's own dups) — skips the dot elsewhere.
             if (changed && !changed.has(rows[i].file_path) && !changed.has(rows[j].file_path))
                 continue;
             const bj = j * dim;
@@ -302,7 +301,7 @@ function runScan() {
             console.log(l);
     }
     if (GATE)
-        process.exit(pairs.length > 0 ? 1 : 0);
+        exitGate(pairs.length ? 1 : 0, displayed.map(pairName));
 }
 // Reason: the branches ARE the confusion-matrix algorithm: the TP/FP/FN/TN four-way classification plus precision/recall/F1 derivation over labels.json; CRAP-flagged because this is dev-only bench tooling exercised end-to-end against fixtures, not unit-tested
 // fallow-ignore-next-line complexity

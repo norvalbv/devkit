@@ -11,7 +11,7 @@ import path from 'node:path';
 import { envFlag, resolveFromCwd, resolveGuardConfig } from '../../config.mjs';
 import { repositorySource } from '../../eval/source.mjs';
 import { emitGateBypass } from '../../judge/gate-events.mjs';
-import { stagedTouchedSet } from '../../ratchets/git-index.mjs';
+import { freezeIndex, frozenTouchedSet } from '../../ratchets/git-index.mjs';
 import { parseDecision, parseIndex } from '../decision-format.mjs';
 import { axisNotes } from '../recall/note-relations.mjs';
 import { checkAxis, integrityFindingKey } from './checks.mjs';
@@ -56,7 +56,7 @@ function indexRowMap(text) {
  * without that record being staged. Removed rows are deliberately not scoped: checkIndexStale
  * returns nothing for an absent row, so a removal cannot produce a finding to attribute.
  */
-function scopedSlugs(staged, decisionsRel, root) {
+function scopedSlugs(staged, decisionsRel, now, head) {
     const slugs = new Set();
     const prefix = decisionsPrefix(decisionsRel);
     const indexRel = `${prefix}INDEX.md`;
@@ -70,9 +70,9 @@ function scopedSlugs(staged, decisionsRel, root) {
         slugs.add(path.basename(file, '.md'));
     }
     if (staged.has(indexRel)) {
-        const now = indexRowMap(repositorySource(root, 'staged').read(indexRel));
-        const base = indexRowMap(repositorySource(root, 'tree', 'HEAD').read(indexRel));
-        for (const [slug, row] of now) {
+        const nowRows = indexRowMap(now.read(indexRel));
+        const base = indexRowMap(head.read(indexRel));
+        for (const [slug, row] of nowRows) {
             const was = base.get(slug);
             if (!was || was.updated !== row.updated || was.ruling !== row.ruling)
                 slugs.add(slug);
@@ -143,31 +143,53 @@ function keyCounts(findings) {
     }
     return counts;
 }
-/** Pure verdict — no printing, no process.exit, so tests can assert the partition directly. */
-export function judgeStagedIntegrity(cwd = process.cwd()) {
-    const empty = { code: 0, blocking: [], preexisting: [], scoped: [] };
+const NOTHING_JUDGED = { code: 0, blocking: [], preexisting: [], scoped: [] };
+function locateCorpus(cwd) {
     const root = repoRoot(cwd);
     if (root === null)
-        return { ...empty, inert: 'could not attribute this change (git unavailable)' };
+        return { ...NOTHING_JUDGED, inert: 'could not attribute this change (git unavailable)' };
     // Config resolved from the ROOT, not cwd: `decisionsDir` is a relative path, so resolving it
     // against a subdirectory yields <subdir>/docs/decisions and scopes nothing. Both sides are
     // realpath'd because repoRoot resolves symlinks and stagedSet's paths hang off that same root.
     const configured = resolveFromCwd(resolveGuardConfig(root), 'decisionsDir');
     if (!configured || !existsSync(configured))
-        return { ...empty, inert: null };
-    const dir = realpathSync(configured);
-    const staged = stagedTouchedSet(root);
+        return { ...NOTHING_JUDGED, inert: null };
+    const decisionsRel = path.relative(root, realpathSync(configured)).replaceAll('\\', '/');
+    return { root, decisionsRel };
+}
+/** Pure verdict — no printing, no process.exit. The commit is frozen ONCE before scope discovery
+ * (sc-2478), and every read comes from that snapshot; see ratchets-blame-the-change-not-the-tree. */
+export function judgeStagedIntegrity(cwd = process.cwd(), freeze = freezeIndex) {
+    const corpus = locateCorpus(cwd);
+    if (!('root' in corpus))
+        return corpus;
+    const frozen = freeze(corpus.root);
+    // A live read here would reinstate the race, so an index that cannot form a tree stands down.
+    if (frozen === null)
+        return {
+            ...NOTHING_JUDGED,
+            inert: 'could not freeze the index (unmerged paths, or another git process holds index.lock)',
+        };
+    return judgeSnapshot(corpus, frozen);
+}
+/** Judge a snapshot frozen earlier — whatever the live index or HEAD has done since. */
+export function judgeFrozenIntegrity(cwd, frozen) {
+    const corpus = locateCorpus(cwd);
+    return 'root' in corpus ? judgeSnapshot(corpus, frozen) : corpus;
+}
+function judgeSnapshot({ root, decisionsRel }, frozen) {
+    const staged = frozenTouchedSet(root, frozen);
     // No staged set means git could not answer, so there is no change to attribute. Blaming the tree
     // here is precisely what the ratchets ruling forbids.
     if (staged === null)
-        return { ...empty, inert: 'could not attribute this change (git unavailable)' };
-    const decisionsRel = path.relative(root, dir).replaceAll('\\', '/');
-    const stagedSlugs = scopedSlugs(staged, decisionsRel, root);
+        return { ...NOTHING_JUDGED, inert: 'could not attribute this change (git unavailable)' };
+    // An unborn base is the empty tree: a first commit's records have no history to inherit.
+    const now = repositorySource(root, 'tree', frozen.tree);
+    const head = repositorySource(root, 'tree', frozen.base);
+    const stagedSlugs = scopedSlugs(staged, decisionsRel, now, head);
     // The ~95% path: nothing decision-shaped is staged, so the corpus is never read at all.
     if (!stagedSlugs.length)
-        return { ...empty, inert: null };
-    const now = repositorySource(root, 'staged');
-    const head = repositorySource(root, 'tree', 'HEAD');
+        return { ...NOTHING_JUDGED, inert: null };
     // Each side resolves cross-axis note ids against its OWN snapshot, never the worktree. Sharing one
     // map looks cheaper and is wrong in both directions: a staged `**Amends:**` pointer would resolve
     // against an unstaged referent, and removing a note another axis points at would make the newly

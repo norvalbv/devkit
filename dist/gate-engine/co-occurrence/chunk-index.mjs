@@ -30,6 +30,9 @@
  */
 import { readFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
+// Rows the matcher can compare. Shared so doctor's emptiness count and the matcher's read agree on a
+// --phase0-only index: rows present, none usable (sc-2269).
+export const USABLE_CHUNK_WHERE = 'code_embedding IS NOT NULL AND embedding IS NOT NULL AND symbol_name IS NOT NULL';
 // ── Embedding math (moved from matcher.mts, unchanged except dot()'s explicit dim) ───────────────
 export function decode(blob) {
     return new Float32Array(blob.buffer.slice(blob.byteOffset, blob.byteOffset + blob.byteLength));
@@ -220,6 +223,22 @@ export function createVerifier(deps) {
             return judgeBody(chunkBody(stored.rawCode, stored.startLine, stored.endLine), text);
         },
     };
+}
+/** USABLE_CHUNK_WHERE row count; null when the schema lacks those columns (legacy or foreign index,
+ *  which this count cannot judge). */
+export function usableChunkCount(db) {
+    try {
+        const row = db.prepare(`SELECT COUNT(*) AS n FROM chunks WHERE ${USABLE_CHUNK_WHERE}`).get();
+        return Number(row?.n ?? 0);
+    }
+    catch {
+        return null;
+    }
+}
+/** The matcher's exit-2 reason for an index with no usable chunk: nothing was compared, so it is
+ *  could-not-run, never clean. */
+export function emptyIndexMessage(indexPath) {
+    return `co-occurrence matcher: index ${indexPath} has no embedded chunks with a symbol_name — nothing was compared. Populate it with \`search-code index\` (a --phase0-only or interrupted run leaves embeddings empty). Matcher opted out (fail-open).`;
 }
 /** Chunks-table column names — the input to canVerify. */
 export function chunkColumns(db) {

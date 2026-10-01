@@ -3,7 +3,7 @@
 import { execFileSync } from 'node:child_process';
 import { parsePatchHunks } from '../../comment-firewall/patch.mjs';
 import { countLines } from '../../ratchets/size-line-authority.mjs';
-import { dedupeConventionFindings, parseConventionFindingCandidates, } from '../evidence/conventions.mjs';
+import { dedupeConventionFindings, normalizeCitedPath, parseConventionFindingCandidates, } from '../evidence/conventions.mjs';
 import { headHash, stagedTreeHash } from '../evidence/staged-git.mjs';
 /** How far a quote may sit from its cited line — judges cite a statement's start or a near line. */
 export const QUOTE_WINDOW = 3;
@@ -44,14 +44,6 @@ function quoteForms(quote) {
     const marked = plain.match(/^([+-])(.*)$/);
     const marker = marked?.[1] === '+' ? '+' : marked?.[1] === '-' ? '-' : null;
     return { plain, marker, body: marked ? normalizeQuote(marked[2]) : null };
-}
-/** Judges decorate paths: backticks, a leading `./`, Windows separators. */
-function normalizeCitedPath(path) {
-    let text = path.trim();
-    const fence = text.match(/^`+([^`]*)`+$/);
-    if (fence)
-        text = fence[1].trim();
-    return text.replaceAll('\\', '/').replace(/^(?:\.\/)+/, '');
 }
 function safe(read, fallback) {
     try {

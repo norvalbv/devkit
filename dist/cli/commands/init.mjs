@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { CONSUMER_FORMATTER } from '../lib/husky/format-fragment.mjs';
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { confirm, isCancel, outro } from '@clack/prompts';
@@ -6,6 +7,7 @@ import { enableLineGrowth, hasLineCap, LINE_CAP, } from '../../gate-engine/ratch
 import { IMPORT_WALL_BASELINE, LEGACY_IMPORT_WALL_BASELINE, STRUCTURE_BASELINE_DIR, STRUCTURE_EXEMPT, } from '../../gate-engine/ratchets/baseline-paths.mjs';
 import { loadImportWallExempt } from '../../gate-engine/structure/load-baseline.mjs';
 import { AGENT_TARGETS, applyOverlayConstraints, COMPONENTS, CONFIG_DRIVEN_STRUCTURE, disabledGuardsFor, dropUndecided, GUARD_IDS, normalizeReviewProfile, RECORDED_COMPONENT_IDS, structureCmdFor, STRUCTURE_STACKS, } from '../lib/components.mjs';
+import { writeFileAtomic } from '../lib/atomic-write.mjs';
 import { detectGitRoot } from '../lib/detect-git-root.mjs';
 import { reportBaselineStorage } from '../lib/doctor/pin/baseline-reader.mjs';
 import { assertRunnerMayWrite, assertRunsFromSource } from '../lib/doctor/pin/runner-identity.mjs';
@@ -22,6 +24,8 @@ import { installAgentSurfaces as syncSurfaces } from '../lib/install/agent-asset
 import { resolveAssetConflicts } from '../lib/install/agent-assets/asset-conflict-picker.mjs';
 import * as antiSlopLifecycle from '../lib/install/anti-slop/lifecycle.mjs';
 import * as initFlags from '../lib/install/flags/init-flags.mjs';
+import { lockedCommand } from '../lib/install/init/init-lock.mjs';
+import { applyScanRoots } from '../lib/install/init/scan-roots.mjs';
 import { reviewPlanFromFlags } from '../lib/install/flags/review-profile.mjs';
 import { ensureDevkitCacheGitignore } from '../lib/install/gitignore-cache.mjs';
 import { ensureFallowGitignore, installFallow, saveFallowBaselines, wireFallowHooks, } from '../lib/install/install-fallow.mjs';
@@ -58,12 +62,8 @@ const STRUCTURE_TEMPLATE_FILES = {
         ['_shared/exempt.mjs', STRUCTURE_EXEMPT],
     ],
 };
-// devDeps/scripts owned by each component — used by both install (add) and remove (delete).
-const BIOME_DEV_DEPS = ['@biomejs/biome'];
-const BIOME_SCRIPTS = ['lint', 'format'];
-// Matches the scanRoots array value in guard.config.json for an in-place --scan-root patch
-// (preserves the //-comment guidance keys a JSON round-trip would drop). Hoisted (perf).
-const SCANROOTS_RE = /("scanRoots"\s*:\s*)\[[^\]]*\]/;
+const BIOME_DEV_DEPS = [CONSUMER_FORMATTER.package.name];
+const BIOME_SCRIPTS = Object.keys(CONSUMER_FORMATTER.scripts);
 // Which components are currently wired? Read the recorded set first (authoritative), then
 // fall back to on-disk detection for a pre-wizard repo with no `components` block.
 export function detectInstalled(cwd) {
@@ -168,32 +168,6 @@ function installStructureFiles(cwd, stack, sel, plan) {
             logWrite(writeIfAbsent(target, readText(srcPath), { force }), dest);
         }
     }
-}
-// Override guard.config.json scanRoots from --scan-root, BEFORE the freezes run so they (and
-// the react-app structureRoot, which derives from scanRoots[0]) grandfather the right tree —
-// e.g. a non-`src` root like services/webapp/src. Patches the scanRoots array in place via
-// regex to PRESERVE the template's //-comment guidance keys; falls back to a JSON round-trip if
-// the key is absent. No-op when guard.config.json wasn't written (no guards/structure selected).
-function applyScanRoots(cwd, scanRoots, dryRun) {
-    if (!scanRoots?.length)
-        return;
-    const value = JSON.stringify(scanRoots);
-    if (dryRun) {
-        console.log(`  [dry-run] set guard.config.json scanRoots = ${value}`);
-        return;
-    }
-    const path = join(cwd, 'guard.config.json');
-    if (!existsSync(path))
-        return;
-    const raw = readText(path);
-    let next = raw.replace(SCANROOTS_RE, `$1${value}`);
-    if (next === raw) {
-        const cfg = readJson(path) ?? {};
-        cfg.scanRoots = scanRoots;
-        next = `${JSON.stringify(cfg, null, 2)}\n`;
-    }
-    writeFileSync(path, next);
-    console.log(`  ✓ guard.config.json scanRoots = ${value}`);
 }
 // Wire the pre-commit hook from the selection. The hook lives at `hookRoot` (the git root —
 // `cwd` for a single-package repo, else the monorepo root). `pkgRel` scopes the block + `cd`s
@@ -583,7 +557,7 @@ function applyOverlay(cwd, plan, pkgRel, devkitRef) {
     overlayComponents.disabledGuards = disabledGuardsFor(selection.guards ?? [], plan.disabledGuards);
     if (!dryRun) {
         mkdirSync(join(cwd, '.devkit'), { recursive: true });
-        writeFileSync(join(cwd, '.devkit', 'config.json'), `${JSON.stringify({
+        writeFileAtomic(join(cwd, '.devkit', 'config.json'), `${JSON.stringify({
             stack,
             devkitRef,
             initVersion: INIT_VERSION,
@@ -822,7 +796,7 @@ export async function applyInit(cwd, plan) {
     }
     else {
         mkdirSync(join(cwd, '.devkit'), { recursive: true });
-        writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
+        writeFileAtomic(configPath, `${JSON.stringify(config, null, 2)}\n`);
         console.log('  ✓ wrote .devkit/config.json');
     }
     printReferencedSteps();
@@ -843,7 +817,7 @@ export const meta = {
 };
 // Reason: flat CLI dispatch: resolves one `selection` via three converging paths (interactive wizard / --yes flags / non-TTY) then hands a fully-resolved plan to applyInit; the branches ARE the resolution-mode fork, each path linear with no shared nesting
 // fallow-ignore-next-line complexity
-export default async function run(args, cwd) {
+async function run(args, cwd) {
     const flags = initFlags.parseFlags(args);
     // Refuse before any write — a skewed runner (sc-2100), or a non-source devkit in devkit's own repo
     // (sc-2345): a later throw leaves a half-applied init that `doctor --fix` cannot finish.
@@ -956,5 +930,7 @@ export default async function run(args, cwd) {
         outro('Done — run `devkit doctor` to verify.');
     return 0;
 }
+// One run per git root (sc-2429): run() reads the selection, installs from it, records it last.
+export default lockedCommand('init', run);
 // Re-export flag helpers for existing test importers; their implementation lives under install/flags.
 export { parseFlags, selectionFromFlags } from '../lib/install/flags/init-flags.mjs';

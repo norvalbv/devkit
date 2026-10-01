@@ -28,6 +28,7 @@ import { resolveExistingAgentProviders } from '../lib/install/agent-assets/agent
 import { adoptAgentAssetCollisions } from '../lib/install/agent-assets/agent-surfaces.mjs';
 import { adoptActivatedAntiSlopFindings, captureAntiSlopBaselineActivation, } from '../lib/install/anti-slop/managed-state.mjs';
 import { collectAntiSlopGroups } from '../lib/install/anti-slop/runner.mjs';
+import { lockedCommand } from '../lib/install/init/init-lock.mjs';
 import { offerLineGrowth, offerNewGates, offerOptionalComponents, overlayOwnsLineGrowth, } from '../lib/install/upgrade-offers.mjs';
 import doctor from './doctor.mjs';
 import { applyInit } from './init.mjs';
@@ -70,7 +71,7 @@ const SEMVER = /^\d+\.\d+\.\d+$/;
 // broad refresh → force-adopt → verify), each a single delegated call with near-zero nesting; the
 // real logic lives in the composed commands (applyInit / computeMigration / doctor / update).
 // fallow-ignore-next-line complexity
-export default async function upgrade(args, cwd) {
+async function upgrade(args, cwd) {
     const dryRun = args.includes('--dry-run');
     const force = args.includes('--force');
     const cfg = readJson(join(cwd, '.devkit', 'config.json'));
@@ -361,6 +362,9 @@ export default async function upgrade(args, cwd) {
     console.log('\n6. verify\n');
     return doctor([], cwd);
 }
+// Upgrade reads the recorded selection, re-installs from it and rewrites config.json — the same
+// read-early/write-late run as init, so it shares init's lock (sc-2429).
+export default lockedCommand('upgrade', upgrade);
 // Reconcile a stale devkit pin in package.json to `#v<target>` — update's "up to date"
 // short-circuit never re-pins, so an installed==latest repo can keep a stale #vX.Y.Z. Idempotent:
 // writes only when the ref actually changes; NO `bun install` — node_modules already matches the

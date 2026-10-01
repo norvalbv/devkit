@@ -46,6 +46,11 @@ function classify(e) {
     }
     const stderr = String(e?.stderr ?? '');
     const msg = stderr.trim() || e?.message || String(e);
+    // First: gh echoes the user's workflow name, so a name like "authentication" must not reach the
+    // looser patterns below. A bare "HTTP 404" stays generic — an inaccessible repo 404s too.
+    if (/workflow .+ not found on the default branch|could not find any workflows named/i.test(stderr)) {
+        return new GhUnavailable('workflow-missing', msg);
+    }
     if (/gh auth login|authentication|not logged/i.test(stderr)) {
         return new GhUnavailable('gh-unauthenticated', `gh is not authenticated: ${msg}`);
     }

@@ -21,6 +21,7 @@ import { resolveExistingAgentProviders, SUPPORTED_AGENT_PROVIDERS, } from '../li
 import { ANTI_SLOP_BASELINE_REL } from '../lib/install/anti-slop/constants.mjs';
 import { removeAntiSlopCapability } from '../lib/install/anti-slop/lifecycle.mjs';
 import { pruneDevkitCacheGitignore, withGitignoreLock } from '../lib/install/gitignore-cache.mjs';
+import { removeEmptyOverlaySettings } from '../lib/install/hook-registration-ledger/overlay-settings.mjs';
 import { removeHookRegistrations, removeHookScripts } from '../lib/install/install-hooks.mjs';
 import { hasOrphanExcludeBlock, pruneGitExclude } from '../lib/install/overlay-excludes.mjs';
 import { removeSearchCode } from '../lib/install/install-search-code.mjs';
@@ -125,8 +126,8 @@ function cleanOverlayStrays(cwd, gitRoot, dryRun) {
     removeSkills(gitRoot, dryRun, targets, true, skipTracked);
     removeAgents(gitRoot, dryRun, targets, true, skipTracked);
     removeHookScripts(gitRoot, { dryRun, targets, skipTracked });
-    removeHookRegistrations(gitRoot, { dryRun, targets, overlay: true });
-    removeEmptyOverlaySettings(gitRoot, dryRun);
+    const stripped = removeHookRegistrations(gitRoot, { dryRun, targets, overlay: true });
+    removeEmptyOverlaySettings(gitRoot, dryRun, stripped);
     const rmUntracked = rmUntrackedIn(cwd, gitRoot, dryRun);
     rmUntracked('guard.config.json', 'guard.config.json');
     rmUntracked('biome.devkit.jsonc', 'biome.devkit.jsonc');
@@ -185,30 +186,29 @@ function cleanOverlay(cwd, cfg, dryRun) {
     // agent-half (skills/agents/agent-hook scripts + their registrations) — repo-wide at the git root.
     // The synced files + manifests are git-ignored; removing them keeps the round-trip footprint-free.
     const comp = cfg.components ?? {};
-    const decisionsEnabled = comp.guards?.includes('decisions') ?? false;
     const targets = resolveExistingAgentProviders(gitRoot, comp.agentTargets);
     const skipTracked = trackedPathPredicate(gitRoot);
     if (comp.skills)
         removeSkills(gitRoot, dryRun, targets, true, skipTracked);
     if (comp.agents)
         removeAgents(gitRoot, dryRun, targets, true, skipTracked);
-    if (comp.agentHooks || decisionsEnabled)
-        removeHookScripts(gitRoot, { dryRun, targets, skipTracked });
+    // Hook ownership comes from the manifest + ledger, never the recorded components or agentTargets:
+    // either can drift from what was installed, and the .devkit wipe below erases the record (sc-1232).
+    const hookTargets = [...SUPPORTED_AGENT_PROVIDERS];
+    removeHookScripts(gitRoot, { dryRun, targets: hookTargets, skipTracked });
+    const legacyOwnedComponentIds = [
+        comp.searchSteering && 'searchSteering',
+        comp.agentHooks && 'agentHooks',
+    ].filter((id) => Boolean(id));
     // Strip devkit hooks from the LOCAL-override settings.local.json (where overlay registered them) +
     // provider hook documents; never delete files that still hold the user's own settings/hooks.
-    if (comp.agentHooks || comp.searchSteering || decisionsEnabled) {
-        const legacyOwnedComponentIds = [
-            comp.searchSteering && 'searchSteering',
-            comp.agentHooks && 'agentHooks',
-        ].filter((id) => Boolean(id));
-        removeHookRegistrations(gitRoot, {
-            dryRun,
-            targets,
-            overlay: true,
-            legacyOwnedComponentIds,
-        });
-        removeEmptyOverlaySettings(gitRoot, dryRun);
-    }
+    const stripped = removeHookRegistrations(gitRoot, {
+        dryRun,
+        targets: hookTargets,
+        overlay: true,
+        legacyOwnedComponentIds,
+    });
+    removeEmptyOverlaySettings(gitRoot, dryRun, stripped);
     // Tracked-aware like every removal below it: a blunt recursive rm here destroyed a force-added
     // `.devkit/anti-slop/manifest.json` one line ABOVE the guard that exists for exactly that case.
     cleanUntrackedDevkitState(gitRoot, dryRun);
@@ -260,30 +260,6 @@ function depesc(cwd, dryRun) {
     console.log(`  ${dryRun ? '[dry-run] remove' : '✓ removed'} @norvalbv/devkit dep + devkit scripts`);
     if (!dryRun)
         writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
-}
-// A settings object holds nothing of the user's iff its only keys are `allowed` (the devkit scaffold
-// keys) AND its hooks block is empty — i.e. devkit created it and all that remained were the now-
-// stripped hooks. Claude (.claude/settings.local.json) allows only `hooks`; Cursor (.cursor/hooks.json)
-// also has a scaffold `version`.
-const onlyEmptyHooks = (obj, allowed) => Object.keys(obj).every((k) => allowed.includes(k)) && Object.keys(obj.hooks ?? {}).length === 0;
-// After stripping devkit's hooks from the overlay settings files, delete one IFF it's now empty —
-// these files are untracked + were git-excluded, so pruning the exclude line would otherwise leave
-// them VISIBLE as untracked leftovers. A file carrying the user's own keys is KEPT.
-function removeEmptyOverlaySettings(gitRoot, dryRun) {
-    const claudeP = join(gitRoot, '.claude', 'settings.local.json');
-    const claude = readJson(claudeP);
-    if (claude && onlyEmptyHooks(claude, ['hooks']))
-        rm(claudeP, '.claude/settings.local.json (devkit-created, now empty)', dryRun);
-    const cursorP = join(gitRoot, '.cursor', 'hooks.json');
-    const cursor = readJson(cursorP);
-    if (cursor &&
-        onlyEmptyHooks(cursor, ['version', 'hooks']) &&
-        !isTracked(gitRoot, '.cursor/hooks.json'))
-        rm(cursorP, '.cursor/hooks.json (devkit-created, now empty)', dryRun);
-    const codexP = join(gitRoot, '.codex', 'hooks.json');
-    const codex = readJson(codexP);
-    if (codex && onlyEmptyHooks(codex, ['hooks']) && !isTracked(gitRoot, '.codex/hooks.json'))
-        rm(codexP, '.codex/hooks.json (devkit-created, now empty)', dryRun);
 }
 // Remove a single line devkit added to .gitignore (e.g. fallow's `.fallow/` cache dir). Leaves the
 // rest of the file untouched; no-ops if the line isn't present.

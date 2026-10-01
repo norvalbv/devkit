@@ -15,6 +15,7 @@ import { check } from '../doctor/check-result.mjs';
 // Each entry matches its writer verbatim: prefix-cache.mjs STORE_FILE, decisions/verdict-cache.mjs
 // STORE_FILE, review/cache.mjs CACHE_FILE, review/run-review.mjs progress (DEVKIT_REVIEW_PROGRESS),
 // review-target.sh's per-run output, commit-with-gate-capture.sh's log, reconcile-manifest-write,
+// decisions.mts's embedding cache (outside .devkit/),
 // ship-intent.mts (which also PROBES the ignore with `git check-ignore` before writing, so the
 // recorded PR body can never precede its own ignore line as a stageable untracked file).
 export const DEVKIT_CACHE_IGNORES = [
@@ -31,6 +32,10 @@ export const DEVKIT_CACHE_IGNORES = [
     '.devkit/setup.json',
     '.devkit/anti-slop-baseline-upgrade.json',
     '.devkit/*.lock',
+    // decisions.mts vecIndexPath + the `<path>.<pid>.<ms>.tmp` sidecar a crashed atomic write leaves.
+    // Exact shapes, never a prefix glob, so `.md` records in a `.decisions` decisionsDir stay tracked.
+    '.decisions/index.json',
+    '.decisions/index.json.*.tmp',
     // Not a cache — a LOCAL preference (adhd-session-start.mjs reads it as the durable off switch).
     // Ignored for the same reason the caches are: committing it would impose one reader's output
     // preference on everyone who clones the repo.

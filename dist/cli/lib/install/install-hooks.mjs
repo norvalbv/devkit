@@ -267,11 +267,12 @@ export function reconcileHookRegistrations(root, componentIds, previouslyOwnedCo
 }
 export function removeHookRegistrations(root, { dryRun = false, targets = AGENT_TARGETS, overlay = false, legacyOwnedComponentIds, } = {}) {
     const scope = overlay ? 'overlay' : 'shared';
-    withAgentAssetLifecycleLock(root, dryRun, () => {
+    const stripped = new Set();
+    return withAgentAssetLifecycleLock(root, dryRun, () => {
         const storedLedger = readHookRegistrationLedger(root);
         if (!storedLedger && !legacyOwnedComponentIds) {
             console.log('  • no hook registration ledger — preserving provider settings');
-            return;
+            return stripped;
         }
         const ledger = storedLedger ?? ledgerOf();
         let entries = [...ledger.entries];
@@ -298,8 +299,11 @@ export function removeHookRegistrations(root, { dryRun = false, targets = AGENT_
                 changed: retired.changed || removed.changed,
             };
             published = publishPlan(root, plan, entries, published, dryRun);
+            if (plan.changed)
+                stripped.add(rel);
         }
         console.log(`  ${dryRun ? '[dry-run] remove' : '✓ removed'} hook registrations`);
+        return stripped;
     });
 }
 export function checkHookRegistrations(root, componentIds, { overlay = false, targets = AGENT_TARGETS, legacyOwnedComponentIds, } = {}) {

@@ -11,6 +11,23 @@
 #   - hang protection no longer depends on coreutils being installed (node + /bin/ps only)
 #   - a timeout is exactly 124; 137 now means the SUPERVISOR was SIGKILLed, never "the chain timed out"
 
+# Liveness without the `wait` builtin: bash 5 can reap a child inside an interrupted `wait` and lose
+# its status (jobs.c waitchld), so a child is only waited once current-shell `jobs` and the kernel agree.
+gate_child_alive() {
+  local pid=$1 jobs_file=$2 job listed=0
+  { jobs -pr; jobs -ps; } >"$jobs_file"
+  while IFS= read -r job; do [ "$job" != "$pid" ] || listed=1; done <"$jobs_file"
+  [ "$listed" -eq 1 ] && kill -0 "$pid" 2>/dev/null
+}
+
+# Sleeps in a foreground child, so a trapped signal runs between polls instead of interrupting a wait.
+gate_child_poll() {
+  local started=$SECONDS
+  while gate_child_alive "$1" "$2"; do
+    if [ $((SECONDS - started)) -lt 2 ]; then /bin/sleep 0.05; else /bin/sleep 0.25; fi
+  done
+}
+
 # run_gates_with_capture <worktree> <root> <label> <log> <progress> -- <command...>
 run_gates_with_capture() {
   local wt=$1 root=$2 label=$3 log=$4 progress=$5
@@ -57,7 +74,7 @@ run_gates_with_capture() {
   local rc
   local supervisor="$(dirname "${BASH_SOURCE[0]}")/review/process/gate-supervisor.mts"
   [ -f "$supervisor" ] || supervisor="$(dirname "${BASH_SOURCE[0]}")/review/process/gate-supervisor.mjs"
-  local capture_dir capture_fifo tee_pid supervisor_pid tee_status job running
+  local capture_dir capture_fifo tee_pid supervisor_pid tee_status running
   local capture_failed cleanup_status drain_deadline drain_stage ownership_token
   capture_dir=$(mktemp -d "${TMPDIR:-/tmp}/devkit-review-capture.XXXXXX") || {
     echo "$label: could not create private gate output capture" >&2
@@ -76,10 +93,12 @@ run_gates_with_capture() {
   fi
 
   set +e
-  tee -a "${logs[@]}" < "$capture_fifo" >&2 &
+  # tee outlives a process-GROUP HUP/TERM (managed CLI, harness kill) so a landed commit keeps its
+  # receipt; exec keeps $! and tee's $PPID. Every abandon path below must therefore use KILL.
+  (trap '' HUP TERM; exec tee -a "${logs[@]}") < "$capture_fifo" >&2 &
   tee_pid=$!
   if ! exec 8> "$capture_fifo"; then
-    kill "$tee_pid" 2>/dev/null || true
+    kill -KILL "$tee_pid" 2>/dev/null || true
     wait "$tee_pid" 2>/dev/null || true
     rm -rf -- "$capture_dir"
     set -e
@@ -88,7 +107,7 @@ run_gates_with_capture() {
   fi
   if ! rm -f -- "$capture_fifo"; then
     exec 8>&-
-    kill "$tee_pid" 2>/dev/null || true
+    kill -KILL "$tee_pid" 2>/dev/null || true
     wait "$tee_pid" 2>/dev/null || true
     rm -rf -- "$capture_dir"
     set -e
@@ -114,25 +133,11 @@ run_gates_with_capture() {
     review_gate_started "$supervisor_pid"
   fi
 
-  rc=1
-  while :; do
-    wait "$supervisor_pid"
-    rc=$?
-    running=0
-    while IFS= read -r job; do
-      [ "$job" != "$supervisor_pid" ] || running=1
-    done < <(jobs -p)
-    [ "$running" -eq 1 ] || break
-  done
-  # READ IT TWICE, like the tee wait below. The supervisor holds stdout until it exits, so tee's EOF —
-  # and a signal it triggers — can land while this wait is blocked. bash >= 4 then returns 128+signum
-  # without collecting the job, and the job has already left `jobs -p`, so the probe above breaks with
-  # the SIGNAL's status, not the supervisor's: a clean gate read as 129/130/131/143 on Linux CI only
-  # (bash 3.2 collects on the first read). The second read returns the supervisor's own status — the
-  # one bash remembered, if the first read did collect it. A bash that has forgotten the pid reports
-  # "not a child" instead (127 plus a diagnostic), and then the first status stands. 127 alone cannot
-  # decide it: the supervisor itself exits 127 when the gate command cannot be spawned, and that must
-  # not read as the signal's 143. An `if`, not a loop, for the same reason as the tee re-read.
+  gate_child_poll "$supervisor_pid" "$capture_dir/jobs"
+  wait "$supervisor_pid"
+  rc=$?
+  # READ IT TWICE (sc-1896): a signal pending as `wait` starts returns 128+signum uncollected. 127 plus a
+  # "not a child" diagnostic means the first read already collected it; the supervisor exits 127 too.
   if [ "$rc" -gt 128 ]; then
     local rewait_rc rewait_err="$capture_dir/supervisor-rewait.err"
     wait "$supervisor_pid" 2>"$rewait_err"
@@ -155,30 +160,24 @@ run_gates_with_capture() {
     review_gate_reaped "$supervisor_pid"
   fi
 
-  # Once the supervisor is reaped there is nobody left for an outer signal handoff to target. Give
-  # tee five seconds to observe EOF, then TERM/KILL it with one bounded second per signal. This
-  # keeps a failed supervisor plus an undiscovered pipe writer from hanging the review shell.
+  # Give tee five seconds to observe EOF, then KILL it (it ignores HUP/TERM) and allow one more second,
+  # so a failed supervisor plus an undiscovered pipe writer cannot hang the review shell.
   tee_status=1
   capture_failed=0
   drain_stage=0
   drain_deadline=$((SECONDS + 5))
   while :; do
     running=0
-    while IFS= read -r job; do
-      [ "$job" != "$tee_pid" ] || running=1
-    done < <(jobs -pr; jobs -ps)
-    # bash 5 can keep a reaped tee "Running" while a trapped signal is handled; trust the kernel too.
-    [ "$running" -eq 0 ] || kill -0 "$tee_pid" 2>/dev/null || running=0
+    if gate_child_alive "$tee_pid" "$capture_dir/jobs"; then running=1; fi
     [ "$running" -eq 1 ] || break
     if [ "$SECONDS" -ge "$drain_deadline" ]; then
       case "$drain_stage" in
         0)
           capture_failed=1
           echo "$label: gate output drain exceeded 5s; terminating capture" >&2
-          kill -TERM "$tee_pid" 2>/dev/null || true
+          kill -KILL "$tee_pid" 2>/dev/null || true
           ;;
-        1) kill -KILL "$tee_pid" 2>/dev/null || true ;;
-        2) break ;;
+        1) break ;;
       esac
       drain_stage=$((drain_stage + 1))
       drain_deadline=$((SECONDS + 1))
@@ -188,19 +187,8 @@ run_gates_with_capture() {
   if [ "$running" -eq 0 ]; then
     wait "$tee_pid"
     tee_status=$?
-    # READ IT TWICE. With a trapped signal PENDING, bash >= 4 returns 128+signum here without
-    # collecting the job, so a tee that drained and exited 0 read as 143 — line 177 then blamed a log
-    # that persisted fine, and ship-branch.sh refused the receipt for a commit that had ALREADY
-    # LANDED with every gate green (the retry re-ran the whole chain, sc-1711). bash 3.2 collects on
-    # the first read, which is why only Linux CI ever saw it. The second read returns tee's OWN
-    # status, so this cannot fail open: a tee that really exited 1 reads 1 again. It must stay an
-    # `if` — a child that genuinely died of a signal reports 128+signum on EVERY re-read, so a loop
-    # would spin forever. It also cannot be jobs-probe-guarded: after an interrupted wait the job has
-    # already left `jobs -pr; jobs -ps`, so the probe would break before the second read — the same
-    # hole the supervisor loop above had until it gained its own re-read. Two residuals accepted: a
-    # signal delivered to the process GROUP kills tee for real (reads >128 twice, fails closed — the
-    # log truly was cut), and a second signal landing between the two reads degrades to the old
-    # behaviour.
+    # READ IT TWICE (sc-1711): a signal pending as `wait` starts returns 128+signum uncollected. An `if`,
+    # never a loop: a tee that really died of a signal reads >128 on every read, so it fails closed.
     if [ "$drain_stage" -eq 0 ] && [ "$tee_status" -gt 128 ]; then
       wait "$tee_pid"
       tee_status=$?

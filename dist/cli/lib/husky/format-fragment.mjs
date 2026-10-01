@@ -2,18 +2,46 @@
  * The biome format-staged-files step, emitted when the `biome` component is selected.
  * Rationale: the 2026-09-03 note in docs/decisions/oxc-toolchain-migration.md.
  */
+export const CONSUMER_FORMATTER = {
+    tool: 'biome',
+    configProbes: ['biome.json', 'biome.jsonc'],
+    stepArgs: 'format --write',
+    agentArgs: { afterEdit: 'check --write', lintCheck: 'check --no-errors-on-unmatched' },
+    package: { name: '@biomejs/biome', range: '^2.5.0' },
+    scripts: { lint: 'biome check .', format: 'biome check --write .' },
+};
 // The three constants toSelfHost re-points (tool setup, failure policy, scope) are interpolated
 // below, so its search strings are the emitted bytes by construction, not a hand-copied duplicate.
 /**
- * Run biome only where a biome CONFIG exists, the rule 10bcb1a7 already applied to the agent hooks.
- * Configless biome formats to its own defaults, rewriting bytes a repo's real gate then rejects.
+ * Run the formatter only where its CONFIG exists, the rule 10bcb1a7 already applied to the agent
+ * hooks. Configless biome formats to its own defaults, rewriting bytes a repo's real gate rejects.
  */
-export const FORMAT_TOOL_SETUP = `    if [ ! -f biome.json ] && [ ! -f biome.jsonc ]; then
-        echo "🎨 No biome config here (biome.json / biome.jsonc) — staged files left as authored."
+export function renderToolSetup(f) {
+    const bin = `"$__dk_package_bin_dir/${f.tool}"`;
+    return `    if ${f.configProbes.map((p) => `[ ! -f ${p} ]`).join(' && ')}; then
+        echo "🎨 No ${f.tool} config here (${f.configProbes.join(' / ')}) — staged files left as authored."
         return 0
     fi
-    FMT_TOOL=biome; FMT_BIN="$__dk_package_bin_dir/biome"
-    __dk_fmt_run() { xargs -0 "$__dk_package_bin_dir/biome" format --write; }`;
+    FMT_TOOL=${f.tool}; FMT_BIN=${bin}
+    __dk_fmt_run() { xargs -0 ${bin} ${f.stepArgs}; }`;
+}
+export const FORMAT_TOOL_SETUP = renderToolSetup(CONSUMER_FORMATTER);
+export function renderAgentHookLines(f) {
+    const gate = `{ ${f.configProbes.map((p) => `[ -f "${p}" ]`).join(' || ')}; }`;
+    const bin = `[ -x "./node_modules/.bin/${f.tool}" ]`;
+    return {
+        'agents-hooks/format-after-edit.sh': [
+            `if [[ "$file_path" =~ \\.(ts|tsx|js|jsx|json|jsonc)$ ]] && ${gate}; then`,
+            `  if command -v bun &>/dev/null && [ -f "package.json" ] && ${bin}; then`,
+            `    bun run ${f.tool} ${f.agentArgs.afterEdit} "$file_path" 2>/dev/null || true`,
+        ],
+        'agents-hooks/lint-check.sh': [
+            `if ${bin} && ${gate}; then`,
+            `    lint_output=$(bun run ${f.tool} ${f.agentArgs.lintCheck} "\${biome_files[@]}" 2>&1)`,
+            `      echo "Run 'bun run ${f.tool} ${f.agentArgs.afterEdit} <file>' to auto-fix." >&2`,
+        ],
+    };
+}
 /**
  * Extension-only: devkit cannot know a consumer's authored-file boundary, and NOT derived from
  * `sourceExtensions`, whose edits would then each be a hook-drift event. self-host swaps in a scope.

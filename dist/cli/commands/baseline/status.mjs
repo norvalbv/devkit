@@ -1,5 +1,6 @@
 /** `devkit baseline-status` (sc-2245) — see `meta.help` below for the full contract. */
-import { DEFAULT_ARTIFACT, DEFAULT_MAX_RUNS, DEFAULT_WORKFLOW, queryBaseline, } from '../../lib/baseline-status/query.mjs';
+import { DEFAULT_ARTIFACT, DEFAULT_MAX_RUNS, DEFAULT_WORKFLOW, queryBaseline, workflowSelector, } from '../../lib/baseline-status/query.mjs';
+import { configuredSource } from '../../lib/baseline-status/source.mjs';
 export const meta = {
     name: 'baseline-status',
     agentFacing: true,
@@ -8,14 +9,18 @@ export const meta = {
 
 Usage:
   devkit baseline-status [--file <path>] [--json] [--ref <branch>] [--max-runs <n>]
+                         [--workflow <file>]
 
-  --file <path>    answer for one test file, plus the last run in which it passed
-  --json           machine-readable output (the intended interface for agents)
-  --ref <branch>   branch to read (default: the remote's HEAD, else main)
-  --max-runs <n>   how far back to walk for --file (default: ${DEFAULT_MAX_RUNS})
+  --file <path>      answer for one test file, plus the last run in which it passed
+  --json             machine-readable output (the intended interface for agents)
+  --ref <branch>     branch to read (default: the remote's HEAD, else main)
+  --max-runs <n>     how far back to walk for --file (default: ${DEFAULT_MAX_RUNS})
+  --workflow <file>  the CI workflow to read (default: guard.config.json, else ${DEFAULT_WORKFLOW})
 
-Reads the \`${DEFAULT_ARTIFACT}\` artifact that \`devkit test-report-run\` uploads from
-${DEFAULT_WORKFLOW}. No log scraping: a CI log interleaves failures from nested test runs, so
+Reads the per-file summary artifact that \`devkit test-report-run\` uploads from a CI workflow.
+Configure both in guard.config.json — { "baselineStatus": { "workflow": "<file>", "artifact":
+"<name>" } } — defaults ${DEFAULT_WORKFLOW} and \`${DEFAULT_ARTIFACT}\`. The workflow must exist on
+the default branch. No log scraping: a CI log interleaves failures from nested test runs, so
 grepping it cannot prove a file passed.
 
 Two verdicts are reported separately, because they differ constantly:
@@ -26,11 +31,13 @@ A file is passed / failed / skipped / excluded (existed but the runner did not c
 absent (did not exist at that commit) / unknown. Those are not interchangeable: an undifferentiated
 "did not run" reads as reassurance and would swallow a path typo.
 
-This never guesses. Missing gh, no GitHub remote, an expired artifact or a run killed before the
-reporter flushed all report \`unknown\` with a named reason.
+This never guesses. Missing gh, no GitHub remote, no such workflow, an expired artifact or a run
+killed before the reporter flushed all report \`unknown\` with a named reason — and, where the fix
+is in your CI, a remedy line naming it.
 
 Exit 0 = the query ran, including "no run carries data yet". Exit 2 = it could not be performed at
-all (no gh, not authenticated, no GitHub remote). Exit 1 = a bad argument.
+all (no gh, not authenticated, no GitHub remote, no such workflow on the default branch). Exit 1 = a
+bad argument or an unreadable guard.config.json.
 
 \`--file\` history begins at the first run carrying the artifact; before that it reports
 lastPassedReason "no-artifact-history" rather than implying the file never passed.
@@ -40,7 +47,13 @@ Set DEVKIT_BASELINE_DEBUG=1 to surface gh's stderr.`,
 class UsageError extends Error {
 }
 /** Reasons that mean the query never ran, as opposed to running and finding nothing. */
-const UNPERFORMED = new Set(['gh-missing', 'gh-unauthenticated', 'not-a-github-repo', 'gh-failed']);
+const UNPERFORMED = new Set([
+    'gh-missing',
+    'gh-unauthenticated',
+    'not-a-github-repo',
+    'workflow-missing',
+    'gh-failed',
+]);
 /**
  * Flag value, or undefined when absent or followed by another flag (`--file --json` is a typo, not
  * a path). Kept local: devkit's commands each parse their own small flag set.
@@ -63,6 +76,8 @@ function render(answer) {
         for (const skipped of answer.skippedRuns) {
             console.log(`   skipped run ${skipped.runId} (${skipped.conclusion}): ${skipped.why}`);
         }
+        if (answer.remedy)
+            console.log(`   → ${answer.remedy}`);
         return;
     }
     const icon = answer.runStatus === 'green' ? '✅' : '❌';
@@ -89,8 +104,25 @@ function render(answer) {
     }
 }
 /** Every option this command accepts, and which of them consume the argument after them. */
-const KNOWN_FLAGS = new Set(['--file', '--json', '--ref', '--max-runs']);
-const VALUED_FLAGS = new Set(['--file', '--ref', '--max-runs']);
+const KNOWN_FLAGS = new Set(['--file', '--json', '--ref', '--max-runs', '--workflow']);
+const VALUED_FLAGS = new Set(['--file', '--ref', '--max-runs', '--workflow']);
+/** Flag > guard.config.json > default. A corrupt config is a usage error, not a stack trace. */
+function source(args, cwd) {
+    let configured;
+    try {
+        configured = configuredSource(cwd);
+    }
+    catch (e) {
+        throw new UsageError(e instanceof Error ? e.message : String(e));
+    }
+    const raw = flag(args, '--workflow');
+    if (raw === undefined)
+        return configured;
+    const workflow = workflowSelector(raw);
+    if (!workflow)
+        throw new UsageError(`--workflow needs a workflow file name (got "${raw}")`);
+    return { ...configured, workflow };
+}
 /**
  * Refuse anything this command does not understand.
  *
@@ -131,6 +163,7 @@ export default function baselineStatus(args, cwd) {
             ref: flag(args, '--ref'),
             file: flag(args, '--file'),
             maxRuns,
+            ...source(args, cwd),
         });
     }
     catch (e) {

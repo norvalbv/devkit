@@ -5,13 +5,18 @@
  * propagates the exit code. A consuming repo shells out to this command (never imports it); the
  * manual lane runs the identical command in a plain terminal.
  */
+import { spawnSync } from 'node:child_process';
 import { delimiter, dirname } from 'node:path';
 import { claudeFamilyEnvLine, JUDGE_MODEL_ENVS, judgeEnvUnsetLine, } from '../../gate-engine/judge/outage/family-override.mjs';
+import { enterShipQueue } from '../lib/ship/queue/enter.mjs';
+import { formatShipQueue, readShipQueue } from '../lib/ship/queue/status.mjs';
 import { reportShipRuntimeProvenance } from '../lib/ship/runtime-provenance.mjs';
 import { runManagedPackagedScript } from '../lib/ship/run-packaged-script.mjs';
 const DEFAULT_DEPENDENCIES = {
     reportRuntimeProvenance: reportShipRuntimeProvenance,
     runManagedScript: runManagedPackagedScript,
+    enterQueue: enterShipQueue,
+    showQueue: () => formatShipQueue(readShipQueue()),
 };
 export const meta = {
     name: 'ship',
@@ -23,6 +28,7 @@ Usage:
   devkit ship <branch> "<title>" [--dry-gates [--with-reviewers]] [--base <b>] [--from-branch] [--body "<text>"] [--body-file <f>] [--draft] [--link <d>]... [--] <path...>
   devkit ship --pr <branch> "<title>" [--ready] [--body "<text>"] [--link <d>]... [--] <path...>
   devkit ship --resume <branch> [--body-file <f>] [--] <extra-path...>
+  devkit ship --queue
                           bare positional paths (no --) are accepted.
 
   <branch> and "<title>" are POSITIONAL and must come FIRST, before any flag. The bracketed flags
@@ -109,6 +115,8 @@ Usage:
                       the identical devkit ship reuses them; a block exits with the reviewer's code.
                       Costs judge time. For reviewer feedback when a decisions block would stop a
                       SHIP_DRY_RUN=1 run first.
+  --queue             Print the machine-wide ship queue — the running ship (branch, repo, elapsed,
+                      last gate line) and the waiters, next up first — then exit. Takes no slot.
   --link <d>          Extra gitignored gate-dep dir to symlink into the worktree (repeatable;
                       the base .husky/_ + node_modules are always linked).
   --no-qavis-publish  Skip the post-push step that hands a passed staged Qavis result to qavis for
@@ -119,7 +127,8 @@ Usage:
   --pr                Re-push: add changes to the EXISTING PR on <branch> as a new commit
                       (fast-forward, never --force). Pair with --base only when replacing a PR whose
                       conflicts you already resolved; that explicit mode rewrites under an exact
-                      expected-OID lease and refuses an incomplete old-PR path brief.
+                      expected-OID lease on the PR head and refuses an incomplete old-PR path brief.
+                      Rebase/merge origin/<base> locally first — nothing needs pushing beforehand.
   --                  Force everything after it to be a file path (ships a dash-leading filename).
 
 Env:
@@ -161,13 +170,34 @@ preflight/git/gh/gate error. A --wait-ci verdict never changes that — a red or
 exits 0, because the PR opened. The one exception is a SIGNAL during the wait: ship exits 130/143
 even though the PR is open, so the wait announces the PR URL before it starts. A commit
 that lands but fails to push KEEPS the branch; an identical retry verifies and resumes that commit.
-A commit that never lands auto-deletes the empty branch. Every blocked attempt records its
+A commit that never lands auto-deletes the empty branch.
+
+Ships queue machine-wide: every ship waits for a slot, first come first served, before its first
+gate, and holds it until it exits — or until --wait-ci starts polling, which needs no slot. One slot
+by default; ~/.devkit/ship-queue/config.json {"slots": N} (1..4) lets N ships run at once. A
+waiting ship prints its position once. A slot frees itself when its ship (and that ship's whole
+process group) is gone. There is no way to skip it; \`devkit ship --queue\` names the running ship
+with the \`ps\` that inspects it if it looks stuck. Every blocked attempt records its
 invocation — retry with \`devkit ship --resume <branch>\` instead of re-typing the command.`,
 };
 export default function ship(args, cwd, dependencies = DEFAULT_DEPENDENCIES) {
     if (args.length === 0) {
         console.log(meta.help); // no args is a usage error (`--help` is intercepted in index.mjs)
         return 1;
+    }
+    if (args[0] === '--queue') {
+        if (args.length > 1) {
+            console.error('--queue takes no other arguments');
+            return 1;
+        }
+        try {
+            console.log(dependencies.showQueue());
+            return 0;
+        }
+        catch (cause) {
+            console.error(`ship: could not read the queue: ${cause instanceof Error ? cause.message : String(cause)}`);
+            return 1;
+        }
     }
     dependencies.reportRuntimeProvenance(cwd);
     // `--pr` (before any `--` terminator, so a dash-leading file path can't misroute) selects the
@@ -188,7 +218,11 @@ export default function ship(args, cwd, dependencies = DEFAULT_DEPENDENCIES) {
         // that spelling as opaque body text, in which case a later mode flag still controls routing.
         if (arg === '--')
             break;
-        if (arg === '--pr' || arg === '--from-branch' || arg === '--draft' || arg === '--ready')
+        if (arg === '--pr' ||
+            arg === '--from-branch' ||
+            arg === '--draft' ||
+            arg === '--ready' ||
+            arg === '--dry-gates')
             routeFlags.add(arg);
     }
     if (routeFlags.has('--pr') && routeFlags.has('--from-branch')) {
@@ -228,9 +262,35 @@ export default function ship(args, cwd, dependencies = DEFAULT_DEPENDENCIES) {
         ...process.env,
         PATH: [dirname(process.execPath), process.env.PATH].filter(Boolean).join(delimiter),
     };
-    return dependencies.runManagedScript(`${mode}.sh`, args, {
-        command: 'devkit ship',
-        cwd,
-        env,
-    });
+    const queueMode = resuming ? 'resume' : routeFlags.has('--dry-gates') ? 'dry-gates' : mode;
+    return queueThenRun(args, cwd, mode, queueMode, env, dependencies);
+}
+function repoRoot(cwd) {
+    const result = spawnSync('git', ['rev-parse', '--show-toplevel'], { cwd, encoding: 'utf8' });
+    return result.status === 0 ? result.stdout.trim() : cwd;
+}
+/** One machine-wide slot before the first gate (sc-3785); see ../lib/ship/queue/ship-queue.mts. */
+async function queueThenRun(args, cwd, mode, queueMode, env, dependencies) {
+    // <branch> is the first positional in every form (`--resume <branch>`, `--pr <branch>`, `<branch> …`).
+    const branch = args.find((arg) => !arg.startsWith('--')) ?? '(unknown)';
+    let queued;
+    try {
+        queued = await dependencies.enterQueue({ env, repo: repoRoot(cwd), branch, mode: queueMode });
+    }
+    catch (cause) {
+        const message = cause instanceof Error ? cause.message : String(cause);
+        console.error(`ship: could not join the machine-wide ship queue: ${message}`);
+        console.error('  Fix the cause above and re-run; the queue cannot be skipped.');
+        return 1;
+    }
+    try {
+        return await dependencies.runManagedScript(`${mode}.sh`, args, {
+            command: 'devkit ship',
+            cwd,
+            env: { ...env, ...queued.env },
+        });
+    }
+    finally {
+        queued.handle?.release();
+    }
 }

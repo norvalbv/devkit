@@ -133,7 +133,8 @@ const shortJudgedBase = (sha) => /^"([0-9a-f]{7,64})"$/.exec(JSON.stringify(sha 
  * failed.
  */
 function isBlocking(finding, blocked, siblings) {
-    if (!blocked || finding.family !== blocked)
+    // `comments` is the one deterministic sub-gate that keeps its own blocked_gate token (sc-2753).
+    if (!blocked || (finding.family !== blocked && finding.gate !== blocked))
         return false;
     if (finding.gate !== COMPLETENESS)
         return true;
@@ -231,30 +232,41 @@ export function summarise(events, shipId) {
                 gate: e.judge ?? 'unknown',
                 state: 'unverified',
                 blocking: false,
-                detail: `downgraded to advisory: ${oneLine(e.cause) || 'cause not recorded'} — could not block this commit`,
+                // A judge that names its own degradation (commit-guard without semantic retrieval,
+                // sc-2317) supplies `detail`; sentry's downgrade keeps its historical wording.
+                detail: oneLine(e.detail) ||
+                    `downgraded to advisory: ${oneLine(e.cause) || 'cause not recorded'} — could not block this commit`,
             });
+        }
+        else if ((e.type === 'review_result' && e.status === 'pass') ||
+            (e.type === 'cache_hit' && partialPacket(e))) {
+            // sc-2305: a PASS whose capped packet left files out. A clean review_result adds no row; a
+            // cached one may ALSO sit on a drifted base, and one row per gate survives, so it names both.
+            const reuse = e.type === 'cache_hit' ? [earlierDiffDetail(e), baseDriftDetail(e)] : [];
+            if (partialPacket(e))
+                unverified.push({
+                    gate: e.type === 'review_result' ? `review:${e.reviewer ?? 'unknown'}` : cacheGate(e),
+                    state: 'unverified',
+                    blocking: false,
+                    detail: [partialPacketDetail(e), ...reuse].filter(Boolean).join('; '),
+                });
         }
         else if (e.type === 'cache_hit' && e.diff_matches === false) {
             // A PASS reused across a reshaped diff. `=== false`, not falsy: a byte-keyed hit carries no
             // field, and a missing field must keep meaning "this cache key covers the diff".
             unverified.push({
-                gate: e.judge === `review:${COMPLETENESS}` ? COMPLETENESS : (e.judge ?? 'unknown'),
+                gate: cacheGate(e),
                 state: 'unverified',
                 blocking: false,
-                detail: 'cached PASS judged an earlier diff — this diff was not re-judged',
+                detail: earlierDiffDetail(e),
             });
         }
-        else if (e.type === 'cache_hit' &&
-            (e.base_state === 'moved-overlap' || e.base_state === 'unknown')) {
-            // A PASS judged on an earlier base whose reviewed paths moved (sc-3468); an absent base_state
-            // (non-review emitters) or 'moved-clear' stays a ✓ — base-drift-surfaced-at-read-time (b).
+        else if (e.type === 'cache_hit' && baseDriftDetail(e)) {
             unverified.push({
                 gate: e.judge ?? 'unknown',
                 state: 'unverified',
                 blocking: false,
-                detail: e.base_state === 'unknown'
-                    ? 'cached PASS whose judged base is unknown — not re-judged against this base'
-                    : `cached PASS judged against ${shortJudgedBase(e.judged_base_sha)} — reviewed paths changed on the base since; not re-judged`,
+                detail: baseDriftDetail(e),
             });
         }
         else if (e.type === 'cache_hit') {
@@ -277,6 +289,49 @@ export function summarise(events, shipId) {
         ...firstPerGate(unverified),
         ...cached,
     ];
+}
+/** A cache_hit's gate label; completeness's intent key reports under the judge's own gate name. */
+const cacheGate = (e) => e.judge === `review:${COMPLETENESS}` ? COMPLETENESS : (e.judge ?? 'unknown');
+/** A PASS reused across a reshaped diff (sc-3175), or ''. `=== false`: an absent field covers it. */
+const earlierDiffDetail = (e) => e.diff_matches === false
+    ? 'cached PASS judged an earlier diff — this diff was not re-judged'
+    : '';
+/** A PASS judged on an earlier base whose reviewed paths moved (sc-3468), or ''. An absent
+ * base_state (non-review emitters) or 'moved-clear' stays a ✓ — base-drift-surfaced-at-read-time (b). */
+function baseDriftDetail(e) {
+    if (e.base_state === 'unknown')
+        return 'cached PASS whose judged base is unknown — not re-judged against this base';
+    if (e.base_state === 'moved-overlap')
+        return `cached PASS judged against ${shortJudgedBase(e.judged_base_sha)} — reviewed paths changed on the base since; not re-judged`;
+    return '';
+}
+/** A positive integer count, or 0. Untrusted JSON: isSafeInteger rejects a non-number WITHOUT
+ * coercing it (coercing `{"toString":1,"valueOf":1}` throws), so `>` only sees a real number. */
+const count = (v) => v !== undefined && Number.isSafeInteger(v) && v > 0 ? v : 0;
+/** A string field as text, or '' — via JSON.stringify for the reason shortJudgedBase gives: it never
+ * invokes a row-supplied toString, so a non-string value degrades to '' instead of throwing. */
+const textOf = (v) => /^"(.*)"$/.exec(JSON.stringify(v ?? null))?.[1] ?? '';
+function partialPacket(e) {
+    return count(e.evidence_omitted_files) > 0 || count(e.evidence_truncated_files) > 0;
+}
+const PATHS_SHOWN = 3;
+function partialPacketDetail(e) {
+    const omitted = count(e.evidence_omitted_files);
+    const lensName = textOf(e.evidence_lens);
+    const lens = lensName ? ` (${oneLine(lensName)} lens)` : '';
+    const total = count(e.evidence_file_count) ? `/${count(e.evidence_file_count)}` : '';
+    const paths = (Array.isArray(e.evidence_omitted_paths) ? e.evidence_omitted_paths : [])
+        .map(textOf)
+        .filter(Boolean);
+    const more = paths.length > PATHS_SHOWN || omitted > PATHS_SHOWN ? ', …' : '';
+    const named = paths.length
+        ? ` — not shown: ${paths
+            .slice(0, PATHS_SHOWN)
+            .map((p) => oneLine(p))
+            .join(', ')}${more}`
+        : '';
+    const cached = e.type === 'cache_hit' ? 'cached ' : '';
+    return `${cached}PASS over an incomplete packet${lens}: ${omitted}${total} file(s) omitted, ${count(e.evidence_truncated_files)} truncated${named}`;
 }
 /** The first row per state+gate, in event order. */
 function firstPerGate(rows) {

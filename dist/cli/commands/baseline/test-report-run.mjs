@@ -23,6 +23,24 @@ is the one the per-file record exists to decompose, and keeping them apart lets 
 fetch only the small one. The reader selects by the provenance recorded inside the summary, never by
 filename, so a directory left behind by an earlier run cannot be mistaken for this one's.
 
+Example GitHub Actions steps, in the workflow that runs on pushes to the default branch — its file
+name is what \`devkit baseline-status --workflow\` / guard.config.json \`baselineStatus.workflow\`
+names:
+
+  - run: npm run test:run:report          # or bun / pnpm
+  - if: always()
+    uses: actions/upload-artifact@v4
+    with:
+      name: test-report-summary
+      path: ${RUNS_DIR}/*/${SUMMARY_NAME}
+      include-hidden-files: true           # .devkit is a dot-folder: without this, nothing uploads
+  - if: always()
+    uses: actions/upload-artifact@v4
+    with:
+      name: test-report
+      path: ${RUNS_DIR}/*/${REPORT_NAME}
+      include-hidden-files: true
+
 The console summary and the GitHub PR annotations are preserved — the json reporter is added
 alongside them, never in place of them. Vitest-only; \`devkit baseline-status\` is not.`,
 };

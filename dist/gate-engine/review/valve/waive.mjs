@@ -72,8 +72,8 @@ export function resolveWaiveAuthor(cwd, env = process.env, run = (args) => execF
     }
     return env.USER || env.USERNAME || 'unknown';
 }
-/** Split `<reviewer>[:<lens>]` on the FIRST colon — a conventions lens is itself `path:line`, so a
- * naive split(':') on every colon would truncate it. Missing lens defaults to '(finding)',
+/** Split `<reviewer>[:<lens>]` on the FIRST colon — a conventions lens carries its rule's
+ * `CLAUDE.md:<line>` (conventionWaiverLens), so a naive split(':') on every colon would truncate it. Missing lens defaults to '(finding)',
  * matching reconcile's own fallback (overrides.mts) for a reviewer with no resolved lens. */
 export function parseWaiveTarget(spec) {
     const i = spec.indexOf(':');

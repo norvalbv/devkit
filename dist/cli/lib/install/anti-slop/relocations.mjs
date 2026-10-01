@@ -1,4 +1,5 @@
 /** Relocated anti-slop debt: findings a partial move carried between files Git sees only as edits. */
+import { failLine } from '../../../../gate-engine/deterministic/reason.mjs';
 import { ANTI_SLOP_BASELINE_REL } from './constants.mjs';
 export const relocationKey = (entry) => JSON.stringify([entry.ruleId, entry.diagnostic, entry.context]);
 const countsOf = (entries) => new Map(entries.map((entry) => [entry.fingerprint, entry.count]));
@@ -154,7 +155,7 @@ export function printRelocatedAntiSlopFindings(groups) {
 export function reportRelocatedFailure(newErrorCount, relocated, baseRef) {
     const errors = relocated.filter((group) => group.severity === 'error');
     const moved = errors.reduce((sum, group) => sum + group.relocatedCount, 0);
-    console.error(`anti-slop: FAIL — ${newErrorCount} new, ${moved} relocated from ${formatSources(errors.flatMap((group) => group.sources))}; baseline unchanged`);
+    failLine(`anti-slop: FAIL — ${newErrorCount} new, ${moved} relocated from ${formatSources(errors.flatMap((group) => group.sources))}; baseline unchanged`);
     console.error(`anti-slop: re-anchor relocated debt with \`${relocationRemedy(baseRef)}\`, then stage ${ANTI_SLOP_BASELINE_REL}`);
 }
 export function relocatedWarningNote(relocated, baseRef) {

@@ -8,6 +8,13 @@ const LINE_BUCKET = 5;
 /** The correctness lens whose single counterexample stands for a class (mirrors CORRECTNESS_LENSES). */
 export const CLASSIFICATION_LENS = 'error-and-edge-classification';
 export const CLASS_FIX_HINT = '  ↳ If a finding names one input to a matcher/parser/predicate/validator, derive why it fails and fix + test the whole class (commit-gates skill).';
+/** Every `file:line` an issue string cites, in order — the same allowlist as the fold key. */
+export function issueLocations(issue) {
+    return [...String(issue).matchAll(new RegExp(LOCATION_RE.source, 'gi'))].map((m) => ({
+        file: m[1],
+        line: Number(m[2]),
+    }));
+}
 function fingerprint(lens, issue) {
     const loc = issue.match(LOCATION_RE);
     if (loc)
