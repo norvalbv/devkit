@@ -503,10 +503,11 @@ elif [ -n "$BASE_FLAG" ]; then
   # 2026-09-01 note): it would fire on every legitimate concurrent edit of a shared file in a
   # parallel-agent repo, which is the ignorable-signal failure this whole feature exists to end.
   #
-  # The verdict is HUNK-level and is taken later, at staging. Since sc-2451 the patch is anchored at
-  # the fork point and applied with `git apply --index --3way` (below); when the base and the working
-  # tree changed the same REGION of a briefed path, that aborts THIS ship before the gate chain and
-  # prints the authoritative message there. Do NOT restate that here as a guarantee: two arms reach
+  # The verdict is HUNK-level and is taken later, by staging's own apply. Since sc-2451 the patch is
+  # anchored at the fork point and applied with `git apply --index --3way` (below); since sc-3496 the
+  # same function first runs against a throwaway index before any branch or worktree exists. When the
+  # base and the working tree changed the same REGION of a briefed path, that aborts THIS ship there
+  # and prints the authoritative message. Do NOT restate that here as a guarantee: two arms reach
   # staging without ever conflicting — patch-anchor.sh keeps binary/symlink/gitlink paths on
   # BASE-anchored whole-file staging, and a shallow clone degrades --3way to direct application.
   # This print sees none of that, so it names where the outcome is decided and claims nothing more.
@@ -705,6 +706,35 @@ if [ "$FROM_BRANCH" -eq 0 ]; then
     echo "ship: origin/$BASE_REF moved to ${BASE:0:7} since this checkout forked at ${PATCH_BASE:0:7} — staging is anchored at the fork point and three-way merged." >&2
     ship_warn_whole_file_drift "$ROOT" "$BASE" "$PATCH_BASE" "$BASE_REF"
   fi
+fi
+
+# Take staging's hunk-level verdict BEFORE any branch or worktree exists (sc-3496). The same function
+# staging calls below, pointed at a throwaway index holding BASE instead of the ephemeral worktree,
+# so the two cannot disagree about what conflicts or how it is named. It used to run only after the
+# worktree claim and the size/judge/hook preflights, so a conflict the base-drift advisory had
+# already named cost a branch+worktree created and deleted for nothing. Still hunk-level, never
+# path-level: base-drift-surfaced-at-read-time Rejected(a) is untouched.
+#
+# Staging stays AUTHORITATIVE. $ROOT is a shared checkout, so a clean trial does not promise a clean
+# apply later; the rare conflict a concurrent edit would have dissolved is an accepted false block.
+# Skipped when the branch already exists, so a preserved-commit --resume still reaches its own
+# refusal. Fails OPEN on anything but a named conflict — it is a preflight, not the payload.
+ship_text_arm_trial() {
+  local idx patch err rc=0
+  idx=$(mktemp "${TMPDIR:-/tmp}/ship-trial-index.XXXXXX") || return 0
+  rm -f "$idx" # read-tree must create it; an empty file is not a valid index
+  patch=$(mktemp "${TMPDIR:-/tmp}/ship-trial.XXXXXX") || return 0
+  err=$(mktemp "${TMPDIR:-/tmp}/ship-trial-err.XXXXXX") || { rm -f "$patch"; return 0; }
+  if GIT_INDEX_FILE=$idx git -C "$ROOT" read-tree "$BASE" 2>/dev/null; then
+    ship_apply_text_arm "$ROOT" "$BASE" "$PATCH_BASE" "$BASE_REF" "$patch" "$err" --index "$idx" || rc=$?
+  fi
+  rm -f "$idx" "$idx.lock" "$patch" "$err"
+  [ "$rc" -ne 1 ] && return 0
+  echo "ship: preflight — blocked before creating a branch or worktree; nothing was staged or gated." >&2
+  return 1
+}
+if [ "$FROM_BRANCH" -eq 0 ] && [ "$PATCH_BASE" != "$BASE" ] && [ -z "$LOCAL_BRANCH_EXISTS" ]; then
+  ship_text_arm_trial || exit 1
 fi
 
 . "$SCRIPT_DIR/prepare-gate-worktree.sh"
@@ -1286,78 +1316,14 @@ else
     # than as a rebuilt file list: the positive side then cannot degenerate to "all paths", and a path
     # the classification enumeration missed still reaches this arm — failing toward including the
     # caller's work rather than dropping it. An all-carve-out brief simply yields an empty patch.
-    git -C "$ROOT" diff "$PATCH_BASE" --binary -- \
-      "${GIT_PATHS[@]}" ${WHOLE_EXCLUDES[@]+"${WHOLE_EXCLUDES[@]}"} > "$PATCH"
-    if [ -s "$PATCH" ] && ! git -C "$WT" apply --index --3way "$PATCH" 2> "$APPLY_ERR"; then
-      # `git apply` is ATOMIC: the structural failure below stages nothing at all, and the conflict
-      # failure leaves stages 1/2/3 that make ship_record_staged_state's write-tree fatal 128. Either
-      # way there is nothing to salvage and nothing to gate, so abort HERE — before the snapshot, and
-      # long before the multi-minute gate chain the operator would otherwise pay for.
-      cat "$APPLY_ERR" >&2
-
-      # (a) Same-region overlap. UNMERGED index entries are the unambiguous, locale-independent
-      # marker: `git apply --3way` writes stages 1/2/3 exactly when its merge produced conflict hunks.
-      # `ls-files -u` names precisely the paths that failed, which is narrower and more actionable
-      # than the base-drift overlap set (every path that moved, merged or not).
-      APPLY_CONFLICTS=$(git -C "$WT" diff --name-only --diff-filter=U 2>/dev/null || true)
-      # A GENERATED path (a devkit manifest, or one the consumer declares under `generated` in its
-      # guard.config.json) must be pointed at its generator: hand-merging one produces a file that
-      # matches neither tree (sc-2770). The helper renders the whole block; captured first so a failed
-      # run prints nothing partial, and any failure falls back to the plain hand-merge text below.
-      GENERATED_ABORT=
-      GENERATED_CLI="$SCRIPT_DIR/generated-paths/cli.mts"
-      [ -f "$GENERATED_CLI" ] || GENERATED_CLI="$SCRIPT_DIR/generated-paths/cli.mjs"
-      if [ -n "$APPLY_CONFLICTS" ] && [ -f "$GENERATED_CLI" ]; then
-        # -z: the default output C-quotes a name holding a tab or newline, which no glob would match.
-        # --root "$WT": the declarations must come from the same tree the conflicts do — the one
-        # being shipped — so a generated path the base newly declares is honoured.
-        GENERATED_ABORT=$(git -C "$WT" diff -z --name-only --diff-filter=U 2>/dev/null |
-          node "$GENERATED_CLI" --root "$WT" --base-ref "$BASE_REF" 2>/dev/null) || GENERATED_ABORT=
-      fi
-      if [ -n "$GENERATED_ABORT" ]; then
-        printf '%s\n' "$GENERATED_ABORT" >&2
-      elif [ -n "$APPLY_CONFLICTS" ]; then
-        echo "ship: origin/$BASE_REF and your working tree changed the same region of:" >&2
-        while IFS= read -r p; do [ -n "$p" ] && printf '  %q\n' "$p" >&2; done <<< "$APPLY_CONFLICTS"
-        echo "  ship cannot resolve this for you — the merge has to happen where you can see both sides." >&2
-      fi
-
-      # (b) Structural: the base DELETED or RETYPED a briefed path out from under the patch. Git
-      # reports this as "does not exist in index", then falls back to direct application and fails the
-      # whole patch WITHOUT leaving any unmerged entry — so (a) would name nothing. That string is
-      # translatable, so the condition is recomputed from the trees instead. --no-renames turns a
-      # base-side rename into the D+A pair this filter sees; T catches file->symlink and
-      # file->directory transitions, which break application the same way.
-      # Intersected with what the CALLER actually changed. The base-side D/T set alone also contains
-      # paths the caller never touched — the base simply deleted them — and naming those would tell an
-      # operator their edits target a file they never edited, sending them to inspect the wrong path
-      # while the real conflict goes unmentioned.
-      # -z: a C-quoted name (non-ASCII, quote, backslash, newline) matches no literal pathspec and
-      # would silently drop out of this list.
-      APPLY_VANISHED=()
-      while IFS= read -r -d '' p; do
-        git -C "$ROOT" diff --quiet "$PATCH_BASE" -- ":(top,literal)$p" 2>/dev/null && continue
-        APPLY_VANISHED+=("$p")
-      done < <(git -C "$ROOT" diff --name-only -z --no-renames --diff-filter=DT \
-        "$PATCH_BASE" "$BASE" -- "${GIT_PATHS[@]}" ${WHOLE_EXCLUDES[@]+"${WHOLE_EXCLUDES[@]}"} 2>/dev/null || true)
-      if [ "${#APPLY_VANISHED[@]}" -gt 0 ]; then
-        echo "ship: origin/$BASE_REF has deleted or retyped briefed path(s) since ${PATCH_BASE:0:7}:" >&2
-        printf '  %q\n' "${APPLY_VANISHED[@]}" >&2
-        echo "  your edits target a file the base no longer has — decide whether the deletion or your" >&2
-        echo "  edit wins before shipping." >&2
-      fi
-
-      # No shallow PRE-probe, deliberately: when the fork-point blobs are absent git falls back to
-      # DIRECT application of the same fork-point-anchored patch, which is still correct (that patch
-      # carries no deletion hunk for base-only work), so only merge tolerance is lost. Re-anchoring at
-      # BASE to dodge this would silently re-stage the sc-2451 revert on every ship in such a repo —
-      # fail-open on a DIAGNOSTIC is ship_size_preflight's rule, fail-open on the PAYLOAD is the bug.
-      if [ "$(git -C "$ROOT" rev-parse --is-shallow-repository 2>/dev/null || echo false)" = "true" ]; then
-        echo "  (shallow clone: three-way merge data may be missing — \`git fetch --unshallow\` can turn some of these into clean merges)" >&2
-      fi
-      echo "  Merge or rebase origin/$BASE_REF into this checkout, then retry the same command." >&2
-      exit 1
-    fi
+    #
+    # `git apply` is ATOMIC: the structural failure stages nothing at all, and the conflict failure
+    # leaves stages 1/2/3 that make ship_record_staged_state's write-tree fatal 128. Either way there
+    # is nothing to salvage and nothing to gate, so abort HERE — before the snapshot, and long before
+    # the multi-minute gate chain. The pre-worktree trial above already ran this same function
+    # against a throwaway index, so a failure here means $ROOT changed in between,
+    # or the trial was skipped (a preserved branch) or failed open.
+    ship_apply_text_arm "$ROOT" "$BASE" "$PATCH_BASE" "$BASE_REF" "$PATCH" "$APPLY_ERR" --worktree "$WT" || exit 1
   fi
 
   if [ "$FROM_BRANCH" -eq 0 ]; then
