@@ -49,6 +49,14 @@ describe('fingerprint', () => {
       fingerprint('correctness-reviewer', 'state-transitions', 'D'),
     );
   });
+  // Committed waivers are keyed by this value; captured at the NUL-literal source (sc-2285), so a
+  // delimiter re-encoding that changes it would silently void every consumer's waivers on upgrade.
+  it('is byte-stable across source re-encodings of the delimiter', () => {
+    expect(fingerprint('correctness-reviewer', 'concurrency-races', 'DIFF-A')).toBe('126d61dc6b9e');
+  });
+  it('keeps the reviewer/lens boundary, so a shifted split cannot share a waiver', () => {
+    expect(fingerprint('ab', 'c', 'D')).not.toBe(fingerprint('a', 'bc', 'D'));
+  });
 });
 
 describe('envOverrides', () => {
