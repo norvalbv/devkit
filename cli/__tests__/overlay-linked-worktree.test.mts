@@ -10,6 +10,7 @@ import {
   lstatSync,
   mkdirSync,
   readFileSync,
+  readlinkSync,
   realpathSync,
   rmSync,
   symlinkSync,
@@ -36,14 +37,14 @@ import { rootRegistry, testExecFileSync } from './_helpers.mts';
 
 const { mkTmp, cleanup } = rootRegistry();
 
-// No gates selected: the hook's only observable effect is chaining to the team hook's marker.
+// The recommended guards, so the install writes a real selection's exclude lines; every commit here is
+// empty, so the hook's observable effect is chaining to the team hook's marker.
 const SELECTION = applyOverlayConstraints({
   ...defaultSelection(),
   biome: false,
   skills: false,
   agents: false,
   lineGrowth: false,
-  guards: [],
 });
 
 const git = (cwd: string, ...args: string[]) =>
@@ -83,6 +84,21 @@ const addWorktree = (root: string, ...flags: string[]) => {
   git(root, 'worktree', 'add', '-q', '--detach', ...flags, wt);
   return wt;
 };
+
+const exclude = (root: string, ...lines: string[]) =>
+  writeFileSync(join(root, '.git', 'info', 'exclude'), `\n${lines.join('\n')}\n`, { flag: 'a' });
+
+// The consumer-owned gate inputs a home holds, each git-ignored by the consumer's own lines.
+function withGateInputs(root: string) {
+  writeFileSync(join(root, 'guard.config.json'), '{"indexPath": ".search-code/index.db"}\n');
+  writeFileSync(join(root, '.fallowrc.jsonc'), '{}\n');
+  mkdirSync(join(root, 'docs', 'decisions'), { recursive: true });
+  writeFileSync(join(root, 'docs', 'decisions', 'a.md'), '# a\n');
+  mkdirSync(join(root, '.search-code'));
+  writeFileSync(join(root, '.search-code', 'index.db'), 'db');
+  writeFileSync(join(root, '.co-occurrence-allowlist.json'), '{}\n');
+  exclude(root, '/.fallowrc.jsonc', '/docs/*', '.search-code', '/.co-occurrence-allowlist.json');
+}
 
 const ORIGINAL = { global: process.env.GIT_CONFIG_GLOBAL, system: process.env.GIT_CONFIG_SYSTEM };
 beforeEach(() => {
@@ -381,6 +397,26 @@ describe('overlay hooks in linked worktrees (sc-4157)', () => {
     expect(existsSync(join(wt, 'eslint.config.devkit.mjs'))).toBe(false);
   });
 
+  it('clean removes a copied directory that only a `dir/` line ignores', async () => {
+    const root = workRepo();
+    await initOverlay(root);
+    mkdirSync(join(root, 'fallow-baselines'));
+    writeFileSync(join(root, 'fallow-baselines', 'health.json'), '{}\n');
+    const exclude = join(root, '.git', 'info', 'exclude');
+    const lines = readFileSync(exclude, 'utf8').split('\n');
+    writeFileSync(
+      exclude,
+      `${lines.filter((line) => line !== 'fallow-baselines').join('\n')}\nfallow-baselines/\n`,
+    );
+    const wt = addWorktree(root);
+    await doctorRun(['--fix'], root);
+    expect(lstatSync(join(wt, 'fallow-baselines')).isDirectory()).toBe(true);
+
+    await cleanRun(['--yes'], root);
+
+    expect(existsSync(join(wt, 'fallow-baselines'))).toBe(false);
+  });
+
   it('doctor --fix restores a copy a worktree lost', async () => {
     const root = workRepo();
     await initOverlay(root);
@@ -443,6 +479,182 @@ describe('overlay hooks in linked worktrees (sc-4157)', () => {
     expect(readFileSync(join(root, '.devkit', 'baselines', 'size-lines.json'), 'utf8')).toBe(
       '{}\n',
     );
+    expect(() => lstatSync(join(wt, '.devkit'))).toThrow(); // the link itself is gone
+  });
+
+  it('doctor fails until a fresh worktree is projected, and --fix projects every registry input', async () => {
+    const root = workRepo();
+    await initOverlay(root);
+    withGateInputs(root);
+    const wt = addWorktree(root);
+
+    expect(await doctorRun([], root)).toBe(1);
+    expect(await doctorRun(['--fix'], root)).toBe(0);
+
+    for (const rel of [
+      '.devkit/config.json',
+      'guard.config.json',
+      '.fallowrc.jsonc',
+      'docs/decisions',
+      '.search-code/index.db',
+    ])
+      expect(lstatSync(join(wt, rel)).isSymbolicLink()).toBe(true);
+    expect(lstatSync(join(wt, '.co-occurrence-allowlist.json')).isFile()).toBe(true);
+    expect(lstatSync(join(wt, 'eslint.config.devkit.mjs')).isFile()).toBe(true);
+    expect(git(wt, 'status', '--porcelain')).toBe('');
+  });
+
+  it('a directory ignored only by a `dir/` line is copied when branch-local and reported when linked', async () => {
+    const root = workRepo();
+    await initOverlay(root);
+    writeFileSync(join(root, 'guard.config.json'), '{}\n');
+    for (const dir of ['docs/decisions', '.fallow', 'fallow-baselines']) {
+      mkdirSync(join(root, dir), { recursive: true });
+      writeFileSync(join(root, dir, 'a'), 'a\n');
+    }
+    const excludeFile = join(root, '.git', 'info', 'exclude');
+    const lines = readFileSync(excludeFile, 'utf8').replace(/^fallow-baselines$/m, '');
+    writeFileSync(excludeFile, `${lines}\ndocs/decisions/\n.fallow/\n`);
+    const wt = addWorktree(root);
+
+    expect(await doctorRun([], root)).toBe(1);
+    expect(await doctorRun(['--fix'], root)).toBe(1);
+
+    expect(lstatSync(join(wt, 'fallow-baselines')).isDirectory()).toBe(true);
+    for (const rel of ['docs/decisions', '.fallow']) expect(existsSync(join(wt, rel))).toBe(false);
+    expect(vi.mocked(console.log).mock.calls.flat().join('\n')).toContain(
+      '.fallow, docs/decisions cannot be linked from the overlay',
+    );
+    expect(git(wt, 'status', '--porcelain')).toBe('');
+
+    exclude(root, '/docs/decisions', '.fallow');
+    expect(await doctorRun(['--fix'], root)).toBe(0);
+    for (const rel of ['docs/decisions', '.fallow'])
+      expect(lstatSync(join(wt, rel)).isSymbolicLink()).toBe(true);
+    expect(git(wt, 'status', '--porcelain')).toBe('');
+  });
+
+  it('a projected worktree that lacks guard.config.json is a gap, and --fix links it', async () => {
+    const root = workRepo();
+    await initOverlay(root);
+    writeFileSync(join(root, 'guard.config.json'), '{}\n');
+    const wt = addWorktree(root);
+    commit(wt, 'link it');
+    rmSync(join(wt, 'guard.config.json'));
+
+    expect(await doctorRun([], root)).toBe(1);
+    await doctorRun(['--fix'], root);
+
+    expect(lstatSync(join(wt, 'guard.config.json')).isSymbolicLink()).toBe(true);
+  });
+
+  it('a worktree with a legacy linked .devkit and no guard.config.json is a gap, and --fix links it', async () => {
+    const root = workRepo();
+    await initOverlay(root);
+    writeFileSync(join(root, 'guard.config.json'), '{}\n');
+    const wt = addWorktree(root);
+    symlinkSync(join(root, '.devkit'), join(wt, '.devkit'));
+
+    expect(await doctorRun([], root)).toBe(1);
+    expect(await doctorRun(['--fix'], root)).toBe(0);
+
+    expect(lstatSync(join(wt, '.devkit')).isSymbolicLink()).toBe(false);
+    expect(lstatSync(join(wt, 'guard.config.json')).isSymbolicLink()).toBe(true);
+  });
+
+  it('doctor leaves a sibling checkout with its own overlay unprojected', async () => {
+    const root = workRepo();
+    await initOverlay(root);
+    writeFileSync(join(root, 'guard.config.json'), '{}\n');
+    const wt = addWorktree(root);
+    mkdirSync(join(wt, '.devkit', 'hooks'), { recursive: true });
+    writeFileSync(join(wt, '.devkit', 'hooks', 'pre-commit'), '#!/bin/sh\n', { mode: 0o755 });
+
+    expect(await doctorRun([], root)).toBe(0);
+    expect(existsSync(join(wt, 'guard.config.json'))).toBe(false);
+  });
+
+  it('projection never links the home’s per-checkout runtime state', async () => {
+    const root = workRepo();
+    await initOverlay(root);
+    const state = [
+      'last-ship-gates-x.log',
+      'comment-firewall-receipts.json',
+      'comment-firewall-receipts.json.generation',
+    ];
+    for (const name of state) writeFileSync(join(root, '.devkit', name), 'x\n');
+    mkdirSync(join(root, '.devkit', 'review-runs'));
+    const wt = addWorktree(root);
+
+    await doctorRun(['--fix'], root);
+
+    expect(lstatSync(join(wt, '.devkit', 'config.json')).isSymbolicLink()).toBe(true);
+    for (const name of [...state, 'review-runs'])
+      expect(existsSync(join(wt, '.devkit', name))).toBe(false);
+  });
+
+  it('a hand-made decisions link in the worktree is left as it is', async () => {
+    const root = workRepo();
+    await initOverlay(root);
+    withGateInputs(root);
+    const wt = addWorktree(root);
+    const elsewhere = mkTmp('overlay-own-decisions-');
+    mkdirSync(join(wt, 'docs'), { recursive: true });
+    symlinkSync(elsewhere, join(wt, 'docs', 'decisions'));
+
+    expect(await doctorRun(['--fix'], root)).toBe(0);
+
+    expect(readlinkSync(join(wt, 'docs', 'decisions'))).toBe(elsewhere);
+    expect(await doctorRun([], root)).toBe(0);
+  });
+
+  it('clean unprojects every registry input and keeps a copy the branch changed', async () => {
+    const root = workRepo();
+    await initOverlay(root);
+    withGateInputs(root);
+    const wt = addWorktree(root);
+    commit(wt, 'link it');
+    mkdirSync(join(wt, 'docs'));
+    for (const rel of ['.fallowrc.jsonc', 'docs/decisions'])
+      symlinkSync(join(root, rel), join(wt, rel));
+    writeFileSync(join(wt, '.co-occurrence-allowlist.json'), '{"branch": true}\n');
+
+    await cleanRun(['--yes'], root);
+
+    for (const rel of ['.fallowrc.jsonc', 'docs/decisions', '.devkit'])
+      expect(existsSync(join(wt, rel))).toBe(false);
+    expect(readFileSync(join(wt, '.co-occurrence-allowlist.json'), 'utf8')).toBe(
+      '{"branch": true}\n',
+    );
+  });
+
+  it('clean never deletes a gate input the worktree’s branch tracks', async () => {
+    const root = workRepo();
+    writeFileSync(join(root, '.co-occurrence-allowlist.json'), '{}\n');
+    git(root, 'add', '.co-occurrence-allowlist.json');
+    commit(root, 'track the allowlist');
+    await initOverlay(root);
+    const wt = addWorktree(root);
+    commit(wt, 'link it');
+
+    await cleanRun(['--yes'], root);
+
+    expect(git(wt, 'status', '--porcelain')).toBe('');
+  });
+
+  it('clean unprojects worktrees even when guard.config.json does not parse', async () => {
+    const root = workRepo();
+    await initOverlay(root);
+    const wt = addWorktree(root);
+    commit(wt, 'link it');
+    rmSync(addWorktree(root), { recursive: true, force: true }); // pruned: its path is gone
+    writeFileSync(join(root, 'guard.config.json'), '{ not json');
+
+    expect(await cleanRun(['--yes'], root)).toBe(0);
+
     expect(existsSync(join(wt, '.devkit'))).toBe(false);
+    expect(vi.mocked(console.log).mock.calls.flat().join('\n')).toMatch(
+      /not valid JSON.* — links to the paths it configures .* delete them by hand/,
+    );
   });
 });

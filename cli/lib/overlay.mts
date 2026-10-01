@@ -16,6 +16,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import { FALLOW_CACHE, OVERLAY_WRITTEN } from '../../gate-engine/deterministic/gate-inputs.mts';
 import { syncAgents } from '../commands/sync/sync-agents.mts';
 import { syncSkills } from '../commands/sync/sync-skills.mts';
 import { AGENT_TARGETS, normalizeSelection, type Selection } from './components.mts';
@@ -41,8 +42,9 @@ import {
   removeHookScripts,
   syncHookScripts,
 } from './install/install-hooks.mts';
+import { DECISIONS_INDEX_IGNORES } from './install/gitignore-cache.mts';
 import { overlayAssetExcludes } from './install/overlay-asset-excludes.mts';
-import { addToGitExclude } from './install/overlay-excludes.mts';
+import { addToGitExclude, overlayExcludeLines } from './install/overlay-excludes.mts';
 import { firstLine } from './standalone.mts';
 import { removeAgents, removeSkills } from './sync-manifest.mts';
 
@@ -410,11 +412,14 @@ export function installOverlay(
     prior?.components?.fallow && 'fallow',
   ].filter((id): id is string => Boolean(id));
   const pfx = pkgRel ? `${pkgRel}/` : '';
+  // Every path devkit writes is excluded whether or not this selection writes it: a line for an
+  // absent file hides nothing, and the list stays the registry's.
   const excludes = new Set([
-    `${LOCAL_HOOKS}/`, // .devkit/hooks at the git root
-    `${pfx}.devkit/`, // the package's .devkit (config + vendored biome)
-    `${pfx}.devkit`, // slash-less: a linked worktree's projected SYMLINK is not a directory to git
-    `${pfx}guard.config.json`,
+    ...overlayExcludeLines('', { path: LOCAL_HOOKS, kind: 'dir' }), // at the git root
+    ...overlayExcludeLines(pfx, { path: '.devkit', kind: 'dir' }), // config + vendored biome
+    ...OVERLAY_WRITTEN.flatMap((input) => overlayExcludeLines(pfx, input)),
+    // Any `guard-decisions query` writes it, whatever the guard selection.
+    ...DECISIONS_INDEX_IGNORES.map((line) => `${pfx}${line}`),
   ]);
   if (pkgRel) console.log(`  monorepo: package "${pkgRel}" — hook + git-ignore at the git root`);
 
@@ -434,31 +439,20 @@ export function installOverlay(
 
   // ours-extends-theirs lint overlays, in the package.
   console.log('  lint overlays (extend the repo config)');
-  if (sel.biome && writeBiomeOverlay(cwd, stack, force, dryRun)) {
-    excludes.add(`${pfx}biome.devkit.jsonc`);
-  }
-  if (writeEslintOverlay(cwd, force, dryRun)) excludes.add(`${pfx}eslint.config.devkit.mjs`);
-  // The decisions embedding cache (+ its atomic-write sidecars), written by any `guard-decisions query`
-  // whatever the guard selection. Scoped to the file so a decisionsDir named `.decisions` stays visible.
-  excludes.add(`${pfx}.decisions/index.json`);
-  excludes.add(`${pfx}.decisions/index.json.*.tmp`);
+  if (sel.biome) writeBiomeOverlay(cwd, stack, force, dryRun);
+  writeEslintOverlay(cwd, force, dryRun);
 
   // Resolve fallow before rendering the hook; an unavailable binary aborts only that component.
   let fallowWired = false;
   if (sel.fallow) {
     console.log('  fallow (code-health gate)');
     fallowWired = resolveOverlayFallow(cwd, dryRun);
-    if (fallowWired) {
-      excludes.add(`${pfx}.fallow/`);
-      excludes.add(`${pfx}fallow-baselines/`);
-      excludes.add(`${pfx}fallow-baselines`);
-    }
+    if (fallowWired) for (const line of overlayExcludeLines(pfx, FALLOW_CACHE)) excludes.add(line);
   }
 
   // Same shape as fallow: resolved before the hook renders, since the gate fragment is keyed on the
-  // selection. Owns its own excludes and its own deselection — see wireOverlayAntiSlop.
+  // selection. Owns its own deselection — see wireOverlayAntiSlop.
   const antiSlop = wireOverlayAntiSlop(cwd, gitRoot, pfx, sel, dryRun);
-  for (const rel of antiSlop.excludes) excludes.add(rel);
 
   // local hook (core.hooksPath override) at the git root + chain + pass-through of all hooks.
   console.log('  local hook');
