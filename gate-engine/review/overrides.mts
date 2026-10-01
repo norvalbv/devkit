@@ -38,7 +38,10 @@ import path from 'node:path';
 import { diffCacheIdentity } from '../judge/diff-focus.mts';
 import { emitGateEvent } from '../judge/gate-events.mts';
 import { reviewBaseContext, shortSha } from './evidence/base-context.mts';
-import { parseConventionFindings } from './evidence/conventions.mts';
+import {
+  conventionWaiverLenses,
+  parseConventionFindingCandidates,
+} from './evidence/conventions.mts';
 import type { LensDisposition } from './evidence/items.mts';
 import type { ReviewerSelection } from './reviewers.mts';
 import type { ChecklistState, ReviewOutcome } from './runtime.mts';
@@ -54,8 +57,8 @@ const sha12 = (text: string) => createHash('sha256').update(text).digest('hex').
 /** Bound on the rationale copied into a `waiver_created` event: the sink's atomic-append contract
  * is sub-4KB lines (gate-events.mts), and the FULL rationale already lives in the store file. */
 export const WAIVER_RATIONALE_EVENT_CAP = 400;
-/** Same contract for the lens: a conventions lens is a caller-supplied `path:line` string, so it
- * is as unbounded as the rationale — the store keeps the full value. */
+/** Same contract for the lens: a conventions lens embeds two caller-supplied paths
+ * (conventionWaiverLens), so it is as unbounded as the rationale — the store keeps the full value. */
 export const WAIVER_LENS_EVENT_CAP = 200;
 
 /** One recorded override. `reviewer`/`lens`/`itemId`/`author` are populated by the `waive` CLI
@@ -325,8 +328,8 @@ export function domainExclusivityDrop(
  * single-pass reviewers reach it (`reviewer.model`): a cascading reviewer's FAIL is already
  * opus-confirmed, so there is nothing to acknowledge.
  *
- * A checklist reviewer's lens is the checklist item name; a skill-less one's is the OFFENDING
- * path:line each violation names. Neither uses the free-text VERDICT reason — a haiku judge's
+ * A checklist reviewer's lens is the checklist item name; a skill-less one's is the offending FILE
+ * plus the rule it breaks (conventionWaiverLens) — not the line, which a judge re-picks every run. Neither uses the free-text VERDICT reason — a haiku judge's
  * one-line paraphrase of the SAME violation varies run-to-run on byte-identical input, which would
  * silently un-match a dev's already-committed waiver and re-block them.
  */
@@ -353,9 +356,7 @@ export function applyOverrideValve(
   // Contract-validated lenses first (sc-3580): an ungrounded pair must not block or need a waiver.
   const conventionLenses =
     res.blockingLenses ??
-    parseConventionFindings(res.transcript ?? '').map(
-      (f) => `${f.offendingPath}:${f.offendingLine}`,
-    );
+    conventionWaiverLenses(parseConventionFindingCandidates(res.transcript ?? ''));
   const failedLenses = sel.reviewer.stateFile ? kept : conventionLenses;
   // All checklist lenses dropped as out-of-charter → not a correctness block (checklist reviewers only).
   if (sel.reviewer.stateFile && failedCount > 0 && kept.length === 0) {
@@ -388,6 +389,11 @@ export function applyOverrideValve(
   return disposition;
 }
 
+// A conventions lens embeds the cited file path, which may hold spaces or shell metacharacters.
+const SHELL_SAFE_WORD_RE = /^[\w@./:#+=,-]+$/;
+const shellWord = (word: string) =>
+  SHELL_SAFE_WORD_RE.test(word) ? word : `'${word.replaceAll("'", "'\\''")}'`;
+
 /** The human-facing block note for un-overridden findings — prints the exact override affordance.
  * The `--base` the command carries is the tree the finding was judged against: it makes the copied
  * command self-describing, and it is the only channel that can supply one, since the waive CLI runs
@@ -402,7 +408,7 @@ export function blockingNote(
   const lines = blocking.map(
     (b) =>
       `  • ${b.lens} [${b.fp}] — fix it, or waive with a reason:\n` +
-      `      guard-review waive ${reviewerName}:${b.lens} ${b.fp}${base} "why this is not a real defect"\n` +
+      `      guard-review waive ${shellWord(`${reviewerName}:${b.lens}`)} ${b.fp}${base} "why this is not a real defect"\n` +
       `      (or OVERRIDE_${b.fp}_RATIONALE="…" / add it to ${OVERRIDES_FILE})`,
   );
   return (

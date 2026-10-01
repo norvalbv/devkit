@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { normalizeLineEndings, VERDICT_LINE_RE } from '../contracts/response.mts';
 
 const CONVENTION_VIOLATION_START_RE = /^[\s>*#-]*\**VIOLATION\**\s*:\s*(.*)$/i;
@@ -140,6 +141,8 @@ export interface ConventionFinding {
   offendingLine: number;
   /** The quoted offending text, verbatim; grounding (conventions-grounding.mts) checks it exists. */
   offendingQuote: string;
+  /** The quoted rule text, verbatim; the only identity a lineless rule citation carries. */
+  ruleQuote: string;
 }
 
 interface ConventionCitation {
@@ -187,12 +190,49 @@ export function parseConventionFindingCandidates(raw: string): ConventionFinding
       offendingPath: offending.path,
       offendingLine: offending.line,
       offendingQuote: splitConventionCitation(pair.offending)?.quote ?? '',
+      ruleQuote: splitConventionCitation(pair.violation)?.quote ?? '',
     });
   }
   return findings;
 }
 
-/** First finding per offending path:line — the lens key override waivers are keyed on. */
+/** Judges decorate paths: backticks, a leading `./`, Windows separators. */
+export function normalizeCitedPath(path: string): string {
+  let text = path.trim();
+  const fence = text.match(/^`+([^`]*)`+$/);
+  if (fence) text = fence[1].trim();
+  return text.replaceAll('\\', '/').replace(/^(?:\.\/)+/, '');
+}
+
+// A judge's ` (repo root)` after a CLAUDE.md is its own prose, and varies run to run.
+const RULE_LOCATION_NOTE_RE = /^(.*?)\s+\([^()]*\)$/;
+
+/** The rule's CLAUDE.md: fences unwrapped around the whole location or its file part, note dropped. */
+function ruleFile(location: string): string {
+  const whole = normalizeCitedPath(location);
+  const note = whole.match(RULE_LOCATION_NOTE_RE);
+  const file = note && /CLAUDE\.md`*$/i.test(note[1]) ? note[1] : whole;
+  return normalizeCitedPath(file);
+}
+
+/** Override-valve lens: offending FILE + the rule, never the line a judge re-picks each run (sc-3324).
+ * A lineless rule is told apart from its siblings by its quoted text. */
+export function conventionWaiverLens(finding: ConventionFinding): string {
+  const file = normalizeCitedPath(finding.offendingPath);
+  const rule = ruleFile(finding.rulePath);
+  if (finding.ruleLine !== null) return `${file}@${rule}:${finding.ruleLine}`;
+  const text = finding.ruleQuote.toLowerCase().replace(/\s+/g, ' ').trim();
+  const digest = createHash('sha256').update(`${rule}\0${text}`).digest('hex').slice(0, 8);
+  return `${file}@${rule}#${digest}`;
+}
+
+/** Distinct waiver lenses of a finding set, in first-seen order. */
+export function conventionWaiverLenses(findings: readonly ConventionFinding[]): string[] {
+  return [...new Set(findings.map(conventionWaiverLens))];
+}
+
+/** First finding per offending path:line — the grounding and eval identity of a finding; waivers key
+ * on the coarser conventionWaiverLens instead. */
 export function dedupeConventionFindings(
   findings: readonly ConventionFinding[],
 ): ConventionFinding[] {
@@ -205,7 +245,7 @@ export function dedupeConventionFindings(
   });
 }
 
-/** Syntax-valid pairs, deduped by path:line (the override-valve lens key). Blocking authority also
+/** Syntax-valid pairs, deduped by path:line. Blocking authority also
  * needs grounding — see contracts/conventions-grounding.mts. */
 export function parseConventionFindings(raw: string): ConventionFinding[] {
   return dedupeConventionFindings(parseConventionFindingCandidates(raw));

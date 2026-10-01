@@ -7,6 +7,7 @@ import { countLines } from '../../ratchets/size-line-authority.mts';
 import {
   type ConventionFinding,
   dedupeConventionFindings,
+  normalizeCitedPath,
   parseConventionFindingCandidates,
 } from '../evidence/conventions.mts';
 import { headHash, stagedTreeHash } from '../evidence/staged-git.mts';
@@ -71,14 +72,6 @@ function quoteForms(quote: string): QuoteForms | null {
   const marked = plain.match(/^([+-])(.*)$/);
   const marker = marked?.[1] === '+' ? '+' : marked?.[1] === '-' ? '-' : null;
   return { plain, marker, body: marked ? normalizeQuote(marked[2]) : null };
-}
-
-/** Judges decorate paths: backticks, a leading `./`, Windows separators. */
-function normalizeCitedPath(path: string): string {
-  let text = path.trim();
-  const fence = text.match(/^`+([^`]*)`+$/);
-  if (fence) text = fence[1].trim();
-  return text.replaceAll('\\', '/').replace(/^(?:\.\/)+/, '');
 }
 
 function safe<T>(read: () => T, fallback: T): T {
