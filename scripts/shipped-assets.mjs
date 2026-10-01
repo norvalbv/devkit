@@ -7,17 +7,17 @@
  */
 import { readdirSync } from 'node:fs';
 import { join, relative } from 'node:path';
+import { PACKAGED_ROOT_DIRS as ROOT_DIRS } from '../cli/lib/fs-helpers.mts';
 
-/** Whole root asset dirs + files consumed via packageDir() / the exports map. */
-export const ROOT_DIRS = [
-  'biome',
-  'tsconfig',
-  'oxc',
-  'templates',
-  'skills',
-  'agents',
-  'agents-hooks',
-];
+/**
+ * Whole root asset dirs + files consumed via packageDir() / the exports map. Owned by
+ * cli/lib/fs-helpers.mts, which ships, so the dist-integrity preflight reads the same list.
+ */
+export {
+  ANTI_SLOP_FILES,
+  PACKAGED_ROOT_DIRS as ROOT_DIRS,
+  PACKAGED_ROOT_FILES as ROOT_FILES,
+} from '../cli/lib/fs-helpers.mts';
 
 /** The two trees tsc compiles, and the only ones carrying non-TS files worth mirroring. */
 export const TREE_ROOTS = ['cli', 'gate-engine'];

@@ -13,6 +13,7 @@ import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { assignedNames, ownDirVars, scanShellScript } from '../doctor/hook-gate-scan.mts';
+import { ANTI_SLOP_FILES, PACKAGED_ROOT_DIRS, PACKAGED_ROOT_FILES } from '../fs-helpers.mts';
 
 /** One relative-import edge: who imports, what they wrote, and where it resolves in the repo. */
 export interface ImportEdge {
@@ -95,9 +96,22 @@ function importTarget(root: string, importer: string, specifier: string): string
   return repoPath(root, fileURLToPath(new URL(specifier, importerUrl)));
 }
 
+/** The dist path a briefed source builds to. Mirrored assets map verbatim, before the tsc rewrite;
+ * only a NEW artifact is ever demanded (typescript-source-prebuilt-mjs, sc-2266). */
 function generatedPath(briefedPath: string): string | undefined {
   const normalized = briefedPath.split(path.sep).join('/');
   if (normalized.startsWith('dist/')) return normalized;
+  const under = (dir: string): boolean => normalized.startsWith(`${dir}/`);
+  if (PACKAGED_ROOT_FILES.includes(normalized) || PACKAGED_ROOT_DIRS.some(under)) {
+    return `dist/${normalized}`;
+  }
+  if (under('anti-slop')) {
+    const rel = normalized.slice('anti-slop/'.length);
+    if (ANTI_SLOP_FILES.includes(rel)) return `dist/${normalized}`;
+    return rel.startsWith('src/') && normalized.endsWith('.ts')
+      ? `dist/${normalized.slice(0, -'.ts'.length)}.js`
+      : undefined;
+  }
   if (!normalized.startsWith('cli/') && !normalized.startsWith('gate-engine/')) return undefined;
   return normalized.endsWith('.mts')
     ? `dist/${normalized.slice(0, -'.mts'.length)}.mjs`

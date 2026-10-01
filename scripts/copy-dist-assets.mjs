@@ -12,7 +12,7 @@
 import { cpSync, existsSync, readdirSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ROOT_DIRS, shippedTreeFiles } from './shipped-assets.mjs';
+import { ANTI_SLOP_FILES, ROOT_DIRS, ROOT_FILES, shippedTreeFiles } from './shipped-assets.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const dist = join(root, 'dist');
@@ -21,7 +21,6 @@ if (!existsSync(join(dist, 'cli')) || !existsSync(join(dist, 'gate-engine'))) {
   process.exit(1);
 }
 
-const ROOT_FILES = ['package.json', 'README.md'];
 for (const d of ROOT_DIRS) {
   // These are mirrors, not overlays. Clear the destination first so renamed or removed templates
   // cannot survive in the published package after disappearing from the source tree.
@@ -29,7 +28,7 @@ for (const d of ROOT_DIRS) {
   cpSync(join(root, d), join(dist, d), { recursive: true });
 }
 for (const f of ROOT_FILES) if (existsSync(join(root, f))) cpSync(join(root, f), join(dist, f));
-for (const f of ['LICENSE', 'UPSTREAM.md'])
+for (const f of ANTI_SLOP_FILES)
   cpSync(join(root, 'anti-slop', f), join(dist, 'anti-slop', f));
 for (const entry of readdirSync(join(dist, 'anti-slop', 'src'), {
   recursive: true,
