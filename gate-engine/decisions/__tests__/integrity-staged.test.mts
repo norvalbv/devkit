@@ -8,11 +8,16 @@
  * fails that one — which is why it is written first.
  */
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { judgeStagedIntegrity, runStagedIntegrity } from '../integrity/staged-gate.mts';
+import { freezeIndex } from '../../ratchets/git-index.mts';
+import {
+  judgeFrozenIntegrity,
+  judgeStagedIntegrity,
+  runStagedIntegrity,
+} from '../integrity/staged-gate.mts';
 
 const cleanup: string[] = [];
 afterEach(() => {
@@ -414,6 +419,120 @@ describe('judgeStagedIntegrity — corpus layout', () => {
   });
 });
 
+// sc-2478: scope, INDEX rows, corpus and records all come from one `write-tree` and a pinned HEAD,
+// so nothing done to the live index or HEAD after the freeze reaches the verdict.
+describe('judgeStagedIntegrity — one frozen snapshot', () => {
+  const clean = () =>
+    seed({
+      [`${D}/a.md`]: record('a', '2026-01-01', [target('2026-01-01', 'one')]),
+      [`${D}/INDEX.md`]: index([['a', '2026-01-01']]),
+    });
+  const retargeted = () =>
+    record('a', '2026-01-01', [target('2026-01-01', 'one'), target('2026-02-01', 'two', true)]);
+
+  it('judges the snapshot taken at the freeze, not an index restaged afterwards', () => {
+    const root = clean();
+    stage(root, { [`${D}/a.md`]: retargeted(), [`${D}/INDEX.md`]: index([['a', '2026-02-01']]) });
+    const frozen = freezeIndex(root);
+    expect(frozen).not.toBeNull();
+    // A concurrent writer rolls the row back: the live index is now stale, the frozen one is not.
+    stage(root, { [`${D}/INDEX.md`]: index([['a', '2026-01-01']]) });
+    expect(judgeFrozenIntegrity(root, frozen!).code).toBe(0);
+    // A fresh freeze sees the defect, so the pass above came from the snapshot, not from luck.
+    expect(judgeStagedIntegrity(root).blocking.map((f) => f.check)).toContain('index-stale');
+  });
+
+  it('does not judge a record staged only after the freeze', () => {
+    const root = clean();
+    stage(root, { 'unrelated.txt': 'hello' });
+    const frozen = freezeIndex(root)!;
+    stage(root, { [`${D}/a.md`]: retargeted() });
+    expect(judgeFrozenIntegrity(root, frozen)).toMatchObject({ code: 0, scoped: [] });
+  });
+
+  // Committing the defective record moves HEAD. Judged against the NEW head, the finding would read
+  // as pre-existing and wave this commit through.
+  it('keeps blaming this change when HEAD moves after the freeze', () => {
+    const root = clean();
+    stage(root, { [`${D}/a.md`]: retargeted() });
+    const frozen = freezeIndex(root)!;
+    git(root, '-c', 'core.hooksPath=/dev/null', 'commit', '-qm', 'a concurrent commit lands');
+    const verdict = judgeFrozenIntegrity(root, frozen);
+    expect(verdict.code).toBe(1);
+    expect(verdict.blocking.map((f) => f.check)).toContain('index-stale');
+    expect(verdict.preexisting).toEqual([]);
+  });
+
+  // `commit -a` builds the commit in a carrier index; scope AND content must both come from it, not
+  // content from the default index.
+  it('judges the commit -a carrier index, not the default index', () => {
+    const root = clean();
+    const lock = join(root, '.git', 'index.lock');
+    copyFileSync(join(root, '.git', 'index'), lock);
+    write(root, { [`${D}/a.md`]: retargeted() });
+    execFileSync('git', ['add', '--', `${D}/a.md`], {
+      cwd: root,
+      env: { ...process.env, GIT_INDEX_FILE: lock },
+    });
+    Object.assign(process.env, {
+      DEVKIT_COMMIT_INDEX_FILE: lock,
+      DEVKIT_COMMIT_GIT_DIR: join(root, '.git'),
+    });
+    try {
+      const verdict = judgeStagedIntegrity(root);
+      expect(verdict.scoped).toEqual(['a']);
+      expect(verdict.code).toBe(1);
+      expect(verdict.blocking.map((f) => f.check)).toContain('index-stale');
+    } finally {
+      delete process.env.DEVKIT_COMMIT_INDEX_FILE;
+      delete process.env.DEVKIT_COMMIT_GIT_DIR;
+      rmSync(lock, { force: true });
+    }
+  });
+
+  it('judges a first commit on an unborn branch against the empty tree', () => {
+    const root = seed({ [`${D}/INDEX.md`]: index([]) }, false);
+    stage(root, {
+      [`${D}/INDEX.md`]: index([]),
+      [`${D}/b.md`]: record('b', '2026-01-01', [
+        target('2026-01-01', 'one'),
+        target('2026-02-01', 'two'),
+      ]),
+    });
+    const verdict = judgeStagedIntegrity(root);
+    expect(verdict.inert).toBeNull();
+    expect(verdict.code).toBe(1);
+    expect(verdict.blocking.map((f) => f.check)).toContain('retarget-missing-evidence-change');
+  });
+
+  it('is inert, never a live read, when another git process holds index.lock', () => {
+    const root = clean();
+    stage(root, { [`${D}/a.md`]: retargeted() });
+    writeFileSync(join(root, '.git', 'index.lock'), '');
+    const verdict = judgeStagedIntegrity(root);
+    expect(verdict).toMatchObject({ code: 0, blocking: [], scoped: [] });
+    expect(verdict.inert).toMatch(/could not freeze the index/);
+  });
+
+  it('is inert when the index has unmerged paths', () => {
+    const root = clean();
+    git(root, 'checkout', '-q', '-b', 'side');
+    stage(root, { [`${D}/a.md`]: `${retargeted()}side\n` });
+    git(root, '-c', 'core.hooksPath=/dev/null', 'commit', '-qm', 'side');
+    git(root, 'checkout', '-q', 'main');
+    stage(root, { [`${D}/a.md`]: `${retargeted()}main\n` });
+    git(root, '-c', 'core.hooksPath=/dev/null', 'commit', '-qm', 'main');
+    try {
+      git(root, 'merge', '--no-commit', 'side');
+    } catch {
+      /* the conflict on a.md is the state under test */
+    }
+    const verdict = judgeStagedIntegrity(root);
+    expect(verdict.code).toBe(0);
+    expect(verdict.inert).toMatch(/could not freeze the index/);
+  });
+});
+
 // `--extra` runs with failOpen2:false, so every non-zero exit blocks the commit. These pin what the
 // hook actually propagates, and that an advisory finding is visibly distinguished from a blocking one.
 describe('runStagedIntegrity — printed verdict and exit code', () => {
@@ -499,6 +618,21 @@ describe('runStagedIntegrity — printed verdict and exit code', () => {
     });
     expect(runStagedIntegrity(root)).toBe(0);
     expect(out.join('\n')).toContain('BYPASSED');
+    expect(err).toEqual([]);
+  });
+
+  it('exits 0 and says nothing was judged when the index cannot be frozen', () => {
+    const root = cleanRepo();
+    stage(root, {
+      [`${D}/a.md`]: record('a', '2026-01-01', [
+        target('2026-01-01', 'one'),
+        target('2026-02-01', 'two', true),
+      ]),
+    });
+    writeFileSync(join(root, '.git', 'index.lock'), '');
+    expect(runStagedIntegrity(root)).toBe(0);
+    expect(out.join('\n')).toContain('could not freeze the index');
+    expect(out.join('\n')).toContain('nothing was judged');
     expect(err).toEqual([]);
   });
 

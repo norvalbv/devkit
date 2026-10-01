@@ -194,46 +194,87 @@ function mergeInProgress(root: string): boolean {
  * when git cannot answer, so callers can stand down rather than blame the tree.
  */
 export function stagedTouchedSet(root: string): Set<string> | null {
-  // No --diff-filter at all: every status the index can carry is a path this commit touched,
-  // including D (delete) and T (regular file <-> symlink). An allowlist of statuses is exactly how
-  // deletions were missed once already.
-  //
-  // --no-renames because rename detection reports only the DESTINATION. Moving a governed file out
-  // of its governed path would then be invisible to a caller matching on the source path, and the
-  // drift that move caused would read as pre-existing. Split into delete + add, both sides appear.
-  const argv = (args: string[]) => [
-    'diff',
-    '--cached',
-    '--name-only',
-    '-z',
-    '--no-renames',
-    ...args,
-  ];
   try {
-    const staged = new Set(
-      splitNul(
-        execFileSync('git', argv([]), { cwd: root, env: commitIndexEnv(root), encoding: 'utf8' }),
-      ),
-    );
+    const staged = touchedPaths(root, ['--cached']);
     // An ordinary commit has no MERGE_HEAD, and the first-parent set is the whole answer.
     if (!mergeInProgress(root)) return staged;
     try {
-      const fromMergeHead = new Set(
-        splitNul(
-          execFileSync('git', argv(['MERGE_HEAD']), {
-            cwd: root,
-            env: commitIndexEnv(root),
-            encoding: 'utf8',
-            stdio: ['ignore', 'pipe', 'ignore'],
-          }),
-        ),
-      );
+      const fromMergeHead = touchedPaths(root, ['--cached', 'MERGE_HEAD'], true);
       return new Set([...staged].filter((file) => fromMergeHead.has(file)));
     } catch {
       // A merge IS in progress but its second-parent diff will not resolve, so first-parent scope
       // would blame every path inherited from MERGE_HEAD. Stand down instead of blaming the tree.
       return null;
     }
+  } catch {
+    return null;
+  }
+}
+
+// No --diff-filter: every status (D and T included) is a path this commit touched. --no-renames so
+// a move reports its SOURCE too, not only the destination a governed-path match would miss.
+function touchedPaths(root: string, range: string[], quiet = false): Set<string> {
+  return new Set(
+    splitNul(
+      execFileSync('git', ['diff', '--name-only', '-z', '--no-renames', ...range], {
+        cwd: root,
+        env: commitIndexEnv(root),
+        encoding: 'utf8',
+        ...(quiet && { stdio: ['ignore', 'pipe', 'ignore'] }),
+      }),
+    ),
+  );
+}
+
+/** HEAD, or the empty tree before the first commit: the base `git diff --cached` compares against. */
+export function headTreeish(cwd: string): string {
+  try {
+    return execFileSync('git', ['rev-parse', '--verify', '--quiet', 'HEAD'], {
+      cwd,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+  } catch {
+    return execFileSync('git', ['hash-object', '-t', 'tree', '--stdin'], {
+      cwd,
+      encoding: 'utf8',
+      input: '',
+    }).trim();
+  }
+}
+
+/** The pending commit pinned to immutable objects: its base, its second parent, and its tree. */
+export interface FrozenIndex {
+  base: string;
+  mergeHead: string | null;
+  tree: string;
+}
+
+/** Freeze the pending commit ONCE (sc-2478), refs before the tree as snapshotStaged orders them.
+ * Null when the index cannot form a tree; callers stand down, never fall back to live reads. */
+export function freezeIndex(root: string): FrozenIndex | null {
+  try {
+    const base = headTreeish(root);
+    const merge = spawnSync('git', ['rev-parse', '--verify', '--quiet', 'MERGE_HEAD'], {
+      cwd: root,
+      env: commitIndexEnv(root),
+      encoding: 'utf8',
+    });
+    const tree = indexTreeRef(root);
+    if (!tree) return null;
+    return { base, mergeHead: merge.status === 0 ? merge.stdout.trim() : null, tree };
+  } catch {
+    return null;
+  }
+}
+
+/** stagedTouchedSet over a frozen snapshot: the same attribution, read from immutable objects. */
+export function frozenTouchedSet(root: string, frozen: FrozenIndex): Set<string> | null {
+  try {
+    const touched = touchedPaths(root, [frozen.base, frozen.tree]);
+    if (!frozen.mergeHead) return touched;
+    const fromMergeHead = touchedPaths(root, [frozen.mergeHead, frozen.tree]);
+    return new Set([...touched].filter((file) => fromMergeHead.has(file)));
   } catch {
     return null;
   }
