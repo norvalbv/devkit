@@ -26,6 +26,7 @@ import { emitGateEvent } from '../../judge/gate-events.mts';
 import { composeTranscript, saveTranscript } from '../../judge/transcript-store.mts';
 import { savePasses } from '../cache.mts';
 import { reviewBaseContext } from '../evidence/base-context.mts';
+import { coverageFields, partialEvidenceNote } from '../evidence/packet/coverage.mts';
 import { archiveFailedDiff } from '../evidence/diff-archive.mts';
 import { cachedLensFields, itemFields } from '../evidence/items.mts';
 import { holdLensPart, type LensPart, type ReviewTask, taskLabel } from '../lens/split.mts';
@@ -106,6 +107,9 @@ export function settleReviewOutcome(
   const transcriptRef = res.transcript
     ? saveTranscript(`review-${res.name}`, composeTranscript(t.diffText, res.transcript))
     : null;
+  // What the judge's packet actually covered (sc-2305) — on the verdict row, so a PASS over a
+  // partial packet reaches the digest as unverified instead of reading like a whole-diff PASS.
+  const coverage = coverageFields([t]);
   // Ship telemetry (best-effort, no-op off-ship): every reviewer outcome (pass/fail/
   // inconclusive) so the usage tracker can report per-reviewer error counts and fail-rate.
   emitGateEvent({
@@ -129,11 +133,14 @@ export function settleReviewOutcome(
     // The per-lens vector, passes included; empty when the judge left no artifact (see
     // evidence/items.mts for the shape and the spill rule).
     ...itemFields(res),
+    ...coverage,
     ...(transcriptRef ? { transcript_ref: transcriptRef } : {}),
   });
   // Surface the one-line verdict reason on the completion line too (fails get theirs in the
   // dedicated block below, with the full transcript — don't double-print it here).
-  const tail = !['fail', 'error'].includes(res.status) && res.reason ? ` — ${res.reason}` : '';
+  const tail =
+    (!['fail', 'error'].includes(res.status) && res.reason ? ` — ${res.reason}` : '') +
+    (res.status === 'pass' ? partialEvidenceNote(coverage) : '');
   console.error(
     `guard-review: ${res.name} — ${res.status.toUpperCase()}${res.escalated ? ' (escalated)' : ''} in ${secs}s${res.status === 'pass' ? ' (checkpointed)' : ''}${tail}`,
   );
