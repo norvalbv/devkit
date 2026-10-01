@@ -11,6 +11,9 @@
  *   status                Show progress summary
  *   check-file <path>     Mark file as reviewed (--pass or --fail "reason")
  *   finalize              Verify every item was resolved; refuses if any are pending or failed
+ *                         --retrieval ok | --retrieval unavailable --cause "why" records whether
+ *                         semantic duplicate retrieval ran (the gate reports an unrecorded or
+ *                         unavailable retrieval as DEGRADED — sc-2317)
  */
 
 import { execFileSync } from 'node:child_process';
@@ -138,7 +141,7 @@ function checkFile(path, pass, failReason) {
 
 // Reason: flat CLI handler for the commit-guard finalize command: sequential early-exit guards (no checklist, pending files, failed files/issues), near-zero nesting; high branch COUNT, each trivial; vendored commit-guard skill script whose review flow owns the complexity, not devkit's core gate
 // fallow-ignore-next-line complexity
-function finalize() {
+function finalize(retrieval) {
   const data = loadChecklist();
   if (!data) {
     log('❌ No checklist');
@@ -163,6 +166,12 @@ function finalize() {
   }
 
   log('✅ All checks passed');
+  if (retrieval) {
+    data.retrieval = retrieval;
+    saveChecklist(data);
+    if (retrieval.status === 'unavailable')
+      log(`⚠️  Semantic retrieval unavailable: ${retrieval.cause}`);
+  }
   // Automatic tidy — same contract as checklist-store.mjs finalize: env guards keep gate/review artifacts.
   tidy();
 }
@@ -175,6 +184,26 @@ function tidy() {
     unlinkSync(CHECKLIST_PATH);
     log('🗑️  Removed checklist');
   }
+}
+
+const FINALIZE_USAGE = 'Usage: finalize [--retrieval ok | --retrieval unavailable --cause "why"]';
+
+// Reason: strict finalize grammar for the retrieval flag the gate reads back (sc-2317): null = no --retrieval (interactive runs stay valid; the gate reads absent as DEGRADED), undefined = refused; each branch rejects one malformed or contradictory shape
+// fallow-ignore-next-line complexity
+function parseRetrieval(argv) {
+  const flags = new Map();
+  for (let i = 0; i < argv.length; i += 2) {
+    const [flag, value] = [argv[i], argv[i + 1]];
+    const known = flag === '--retrieval' || flag === '--cause';
+    if (!known || flags.has(flag) || value === undefined || value.startsWith('--'))
+      return undefined;
+    flags.set(flag, value.trim());
+  }
+  const status = flags.get('--retrieval');
+  const cause = flags.get('--cause');
+  if (status === undefined) return cause === undefined ? null : undefined;
+  if (status === 'ok') return cause === undefined ? { status: 'ok' } : undefined;
+  return status === 'unavailable' && cause ? { status: 'unavailable', cause } : undefined;
 }
 
 // ============ MAIN ============
@@ -201,14 +230,20 @@ switch (cmd) {
     checkFile(path, pass, failReason);
     break;
   }
-  case 'finalize':
-    finalize();
+  case 'finalize': {
+    const retrieval = parseRetrieval(args.slice(1));
+    if (retrieval === undefined) {
+      log(FINALIZE_USAGE);
+      process.exit(1);
+    }
+    finalize(retrieval);
     break;
+  }
   default:
     log('Commands:');
     log('  init                         Create checklist from staged files');
     log('  status                       Show progress');
     log('  check-file <path> --pass|--fail  Mark file reviewed');
-    log('  finalize                     Verify every item was resolved');
+    log('  finalize [--retrieval ok|unavailable --cause "why"]  Verify every item was resolved');
     process.exit(1);
 }

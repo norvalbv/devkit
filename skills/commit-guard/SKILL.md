@@ -5,7 +5,7 @@ description: Guard commits against unintentional code duplication using semantic
 
 # Commit Guard
 
-Dispatch the `commit-guard` agent before committing. It runs semantic search queries against staged files via `mcp__codebase__searchCode`; when that tool is unavailable, use the externally installed `search-code search "<text>"` CLI from the repo root. `search-code` is intentionally not vendored: if its executable or this repo's index is unavailable, report semantic retrieval as unavailable and continue with the deterministic matcher and clone checks. Queries describe what the staged symbol DOES (purpose/behaviour) — not its name. searchCode is hybrid (dense + sparse BM25); use grep for exact-name lookups.
+Dispatch the `commit-guard` agent before committing. It runs semantic search queries against staged files via `mcp__codebase__searchCode`; when that tool is unavailable, use the externally installed `search-code search "<text>"` CLI from the repo root. `search-code` is intentionally not vendored: if its executable or this repo's index is unavailable, continue with the deterministic matcher and clone checks and record it with `finalize --retrieval unavailable --cause "<why>"` (otherwise `finalize --retrieval ok`) — the gate reports an unavailable or unrecorded retrieval as a DEGRADED PASS, never a bare one. Queries describe what the staged symbol DOES (purpose/behaviour) — not its name. searchCode is hybrid (dense + sparse BM25); use grep for exact-name lookups.
 
 **REQUIRED SUB-SKILL:** Use `dup-detection` for allowlist mechanics, matcher/clone-detector CLI, burn-down workflow, and the pre-flight rule (`matcher scan --new --changed` before declaring done).
 
@@ -43,7 +43,7 @@ fi
 
 | Script | Purpose |
 |--------|---------|
-| `checklist.mjs` | Per-file review checklist — `init`, `status`, `check-file`, `finalize` (refuses an incomplete/failed checklist), `cleanup` |
+| `checklist.mjs` | Per-file review checklist — `init`, `status`, `check-file`, `finalize --retrieval ok|unavailable --cause "…"` (refuses an incomplete/failed checklist; records whether semantic retrieval ran), `cleanup` |
 
 ## Two detectors, one allowlist (overview)
 

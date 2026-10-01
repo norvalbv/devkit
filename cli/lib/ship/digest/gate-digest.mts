@@ -289,7 +289,11 @@ export function summarise(events: GateEvent[], shipId: string): DigestRow[] {
         gate: e.judge ?? 'unknown',
         state: 'unverified',
         blocking: false,
-        detail: `downgraded to advisory: ${oneLine(e.cause) || 'cause not recorded'} — could not block this commit`,
+        // A judge that names its own degradation (commit-guard without semantic retrieval,
+        // sc-2317) supplies `detail`; sentry's downgrade keeps its historical wording.
+        detail:
+          oneLine(e.detail) ||
+          `downgraded to advisory: ${oneLine(e.cause) || 'cause not recorded'} — could not block this commit`,
       });
     } else if (
       (e.type === 'review_result' && e.status === 'pass') ||

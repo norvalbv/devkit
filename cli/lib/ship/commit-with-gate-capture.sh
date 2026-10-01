@@ -372,9 +372,10 @@ SHIP_HOOK_WRAPPER
       # Was: "(e.g. coverage is NOT gated in the ship worktree)" — false since prepare-gate-worktree.sh
       # started linking coverage/ in, and it taught agents the exact opposite of the gate they were
       # fighting. Point at the real thing a reader must not miss: a gate that PASSED by bypass — or,
-      # since sc-3175, one that downgraded itself or reused a PASS judged on an earlier diff.
-      echo "  Review it for any SKIP / BYPASSED / ⚠️ lines, and any Gate findings block below — a bypassed,"
-      echo "  downgraded or earlier-diff verdict did not verify this diff."
+      # since sc-3175, one that downgraded itself or reused a PASS judged on an earlier diff; since
+      # sc-2317, a DEGRADED PASS whose semantic check could not run.
+      echo "  Review it for any SKIP / BYPASSED / DEGRADED / ⚠️ lines, and any Gate findings block below — a"
+      echo "  bypassed, degraded, downgraded or earlier-diff verdict did not verify this diff."
     } >&2
   elif [ "$head_clobbered" -eq 1 ]; then
     # Reuses the SAME evidence-checked verdict as the telemetry above — never a second independent

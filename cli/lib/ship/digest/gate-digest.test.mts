@@ -568,6 +568,31 @@ describe('unverified verdicts (sc-3175)', () => {
     );
   });
 
+  // sc-2317: commit-guard names its own degradation; the sentry wording would misdescribe it.
+  it('renders a degraded commit-guard PASS with its own detail as an unverified row', () => {
+    const cg = ev({
+      type: 'gate_degraded',
+      judge: 'commit-guard',
+      cause: 'remote embeddings unreachable',
+      detail:
+        'semantic retrieval unavailable: remote embeddings unreachable — only the deterministic\nmatcher and clone gates checked duplication',
+    });
+    const text = render(summarise([ev({ type: 'ship_attempt' }), cg, green], SHIP));
+    expect(text).toContain('Gate findings this run (1)');
+    expect(unverifiedLines(text)).toEqual([
+      '   · commit-guard — semantic retrieval unavailable: remote embeddings unreachable — only the deterministic matcher and clone gates checked duplication',
+    ]);
+    expect(text).not.toContain('could not block this commit');
+  });
+
+  it('falls back to the cause wording when a degraded event carries a blank detail', () => {
+    const blank = ev({ type: 'gate_degraded', judge: 'commit-guard', cause: 'x', detail: '   ' });
+    const text = render(summarise([ev({ type: 'ship_attempt' }), blank, green], SHIP));
+    expect(text).toContain(
+      '· commit-guard — downgraded to advisory: x — could not block this commit',
+    );
+  });
+
   it('moves a PASS judged on an earlier diff out of the ✓ line and names it', () => {
     const text = render(
       summarise(
