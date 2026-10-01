@@ -154,10 +154,22 @@ const SELF_HOST_FORMAT_FILTER =
 const DIST_PREFIX_RE = /^\.\/dist\//;
 const MJS_EXT_RE = /\.mjs$/;
 
+const DEVKIT_PACKAGE_NAME = '@norvalbv/devkit';
+
 /** True when `cwd` IS the devkit package itself (the only repo self-host mode applies to). */
 export function isDevkitRepo(cwd: string): boolean {
   const pkg = readJson(join(cwd, 'package.json')) as { name?: string } | null;
-  return pkg?.name === '@norvalbv/devkit';
+  return pkg?.name === DEVKIT_PACKAGE_NAME;
+}
+
+/** isDevkitRepo over package.json text read from elsewhere (a git tree); malformed is not devkit. */
+export function isDevkitPackageJson(raw: string | null | undefined): boolean {
+  if (!raw) return false;
+  try {
+    return JSON.parse(raw)?.name === DEVKIT_PACKAGE_NAME;
+  } catch {
+    return false;
+  }
 }
 
 /**

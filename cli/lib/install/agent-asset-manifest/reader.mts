@@ -17,6 +17,16 @@ export function readAgentAssetManifest(
     limitLabel: '1 MiB',
   });
   if (bytes === null) return null;
+  return decodeAgentAssetManifestBytes(bytes, kind);
+}
+
+/** Decode manifest bytes already read from somewhere other than the working tree (a git tree). */
+export function decodeAgentAssetManifestBytes(
+  bytes: Uint8Array,
+  kind: AgentAssetKind,
+): DecodedSyncManifest {
+  if (bytes.byteLength > MAX_MANIFEST_BYTES)
+    throw new Error('agent asset manifest exceeds the 1 MiB limit');
 
   let raw: string;
   try {

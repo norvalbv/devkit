@@ -39,7 +39,7 @@ function stagePathStrict(
   }
 }
 
-function isGitWorktree(root: string): boolean {
+export function isGitWorktree(root: string): boolean {
   try {
     return (
       execFileSync('git', ['rev-parse', '--is-inside-work-tree'], {
