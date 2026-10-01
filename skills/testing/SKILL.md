@@ -85,6 +85,8 @@ So:
 
 Making these changes is fixing a broken test, not weakening a real one — the timing claim was never what the test was protecting.
 
+A test that asserts a product's **own** timeout (for example, "the ceiling fires and names the stuck step") races setup against that timeout. Have the stuck step print a marker. Before the strict assertions, check for it: if the timeout fired and the marker is absent, the timeout won the race before the step under test ran. Fail with a distinct, greppable label that says so, and include the machine load. Do not reuse the assertion's message. A reached marker with the wrong outcome is a real regression and must keep failing on the strict assertions.
+
 ## Reviewing test adequacy
 
 When judging whether a change is adequately tested, ask:
