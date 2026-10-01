@@ -7,14 +7,15 @@
  * Shared by the ship manifest writer (cli/lib/ship/reconcile-manifest-write.mjs) and reconcile's
  * pruneBranch (cli/lib/reconcile.mjs) — both mutate .devkit/reconcile-manifest.json. writeFileAtomic
  * only guarantees a single write is never torn; the lost-update race (two read-modify-write callers)
- * is guarded by `withLock` below, which both callers wrap their read→modify→write in.
+ * is guarded by `withLock` below, which both callers wrap their read→modify→write in. devkit
+ * init/upgrade hold `withLockAsync` across their whole async run (cli/lib/install/init/init-lock.mts).
  *
  * Distinct from the two gate-engine/<engine>/atomic-write.mjs copies on purpose: a gate-engine ships
  * its own copy to stay independently vendorable (no cross-engine import), whereas cli/ has one home.
  */
 import { randomUUID } from 'node:crypto';
 import { lstatSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 export function writeFileAtomic(path: string, contents: string): void {
   const tmp = `${path}.${process.pid}.${Date.now()}.tmp`;
@@ -86,6 +87,32 @@ function reapIfDead(lockDir: string): void {
   rmSync(lockDir, { recursive: true, force: true });
 }
 
+/** Try once to take `lockDir` for `stamp`; on contention, reap a provably dead holder and report false. */
+function tryAcquire(lockDir: string, stamp: string): boolean {
+  try {
+    mkdirSync(lockDir);
+  } catch (e: unknown) {
+    if (!(e instanceof Error && 'code' in e && e.code === 'EEXIST')) throw e;
+    reapIfDead(lockDir);
+    return false;
+  }
+  try {
+    writeFileSync(holderFile(lockDir), stamp, 'utf8');
+  } catch (e: unknown) {
+    rmSync(lockDir, { recursive: true, force: true }); // never leave a lock we cannot prove is ours
+    throw e;
+  }
+  return true;
+}
+
+/**
+ * Release OUR acquisition only. If this lock was wrongly reaped and another process now holds it,
+ * an unconditional rmSync here would strip a live holder's lock and admit a third writer.
+ */
+function release(lockDir: string, stamp: string): void {
+  if (readHolder(lockDir)?.stamp === stamp) rmSync(lockDir, { recursive: true, force: true });
+}
+
 /**
  * Atomic-mkdir mutex (flock is absent on macOS — verified). The dir IS the lock; mkdir is
  * atomic create-or-fail on every POSIX fs, and the holder stamps its pid inside so ownership can be
@@ -100,29 +127,57 @@ export function withLock<T>(lockDir: string, fn: () => T): T {
   const deadline = Date.now() + LOCK_WAIT_MS;
   let held = false;
   while (Date.now() <= deadline) {
-    try {
-      mkdirSync(lockDir);
-    } catch (e: unknown) {
-      if (!(e instanceof Error && 'code' in e && e.code === 'EEXIST')) throw e;
-      reapIfDead(lockDir);
-      sleepSync(LOCK_RETRY_MS);
-      continue;
+    if (tryAcquire(lockDir, stamp)) {
+      held = true;
+      break;
     }
-    try {
-      writeFileSync(holderFile(lockDir), stamp, 'utf8');
-    } catch (e: unknown) {
-      rmSync(lockDir, { recursive: true, force: true }); // never leave a lock we cannot prove is ours
-      throw e;
-    }
-    held = true;
-    break;
+    sleepSync(LOCK_RETRY_MS);
   }
   if (!held) throw new Error(`timed out acquiring manifest lock: ${lockDir}`);
   try {
     return fn();
   } finally {
-    // Release OUR acquisition only. If this lock was wrongly reaped and another process now holds
-    // it, an unconditional rmSync here would strip a live holder's lock and admit a third writer.
-    if (readHolder(lockDir)?.stamp === stamp) rmSync(lockDir, { recursive: true, force: true });
+    release(lockDir, stamp);
+  }
+}
+
+/** tryAcquire that first ensures the parent; a parent removed in between (ENOENT) is a retry. */
+function tryAcquireInParent(lockDir: string, stamp: string): boolean {
+  mkdirSync(dirname(lockDir), { recursive: true });
+  try {
+    return tryAcquire(lockDir, stamp);
+  } catch (e: unknown) {
+    if (e instanceof Error && 'code' in e && e.code === 'ENOENT') return false;
+    throw e;
+  }
+}
+
+/** A contended lock that stayed held past the wait. `holderPid` is null when no stamp was readable. */
+export class LockHeldError extends Error {
+  readonly holderPid: number | null;
+  constructor(lockDir: string, holderPid: number | null) {
+    super(`lock held by pid ${holderPid ?? 'unknown'}: ${lockDir}`);
+    this.name = 'LockHeldError';
+    this.holderPid = holderPid;
+  }
+}
+
+// withLock for an awaiting critical section: timer retries keep the event loop free, a live holder
+// is never reaped, and after `waitMs` the caller gets a LockHeldError naming it.
+export async function withLockAsync<T>(
+  lockDir: string,
+  fn: () => Promise<T>,
+  { waitMs = LOCK_WAIT_MS }: { waitMs?: number } = {},
+): Promise<T> {
+  const stamp = `${process.pid}:${randomUUID()}`;
+  const deadline = Date.now() + waitMs;
+  while (!tryAcquireInParent(lockDir, stamp)) {
+    if (Date.now() > deadline) throw new LockHeldError(lockDir, readHolder(lockDir)?.pid ?? null);
+    await new Promise((resolve) => setTimeout(resolve, LOCK_RETRY_MS));
+  }
+  try {
+    return await fn();
+  } finally {
+    release(lockDir, stamp);
   }
 }
