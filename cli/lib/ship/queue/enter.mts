@@ -11,7 +11,7 @@ import {
   holderAlive,
   type QueueProbe,
   queueRoot,
-  readHolder,
+  findHolder,
   SLOT_ENV,
   type SlotHandle,
   setGuest,
@@ -72,8 +72,8 @@ function isAncestorHolder(
   probe: QueueProbe,
   processes: Map<number, ProcessRecord>,
 ): boolean {
-  const holder = readHolder(root);
-  if (!holder || holder.token !== token || !holderAlive(holder, probe)) return false;
+  const holder = findHolder(root, token)?.holder;
+  if (!holder || !holderAlive(holder, probe)) return false;
   const seen = new Set<number>();
   let pid = process.pid;
   while (pid > 1 && !seen.has(pid)) {
@@ -111,9 +111,10 @@ export async function enterShipQueue(options: EnterOptions): Promise<EnteredQueu
         }
       };
       process.once('exit', leave);
+      const slotDir = findHolder(root, inherited)?.dir ?? join(root, 'slot');
       return {
         env: { [SLOT_RELEASE_ENV]: '' },
-        handle: { token: inherited, slotDir: join(root, 'slot'), release: leave },
+        handle: { token: inherited, slotDir, release: leave },
       };
     }
     log(`ship: ignoring a stale ${SLOT_ENV} (its holder is gone or is not an ancestor); queueing.`);
@@ -141,6 +142,14 @@ export async function enterShipQueue(options: EnterOptions): Promise<EnteredQueu
     probe,
     pollMs: options.pollMs,
     log,
+    // A capacity above one is the owner's call, but it must stay countable after the fact.
+    onCapacity: (slots) =>
+      emitGateEvent({
+        type: 'gate_result',
+        gate: 'ship-queue',
+        status: 'pass',
+        detail: `ship-queue(slots:${slots})`,
+      }),
   });
   return {
     handle,
