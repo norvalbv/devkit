@@ -28,6 +28,9 @@ set -euo pipefail
 
 # Hoisted above the orphan preflight below, which runs before anything else this script sources.
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# Before any work: the machine-wide queue slot must carry this process group, or this ship must not run.
+. "$SCRIPT_DIR/queue/slot.sh"
+ship_queue_slot_register
 
 # run-packaged-script.mts hands its private signal-lock root to the managed child. Only
 # review-target.sh implements that handshake; ship inherits the variable and forwards the caller
