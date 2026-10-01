@@ -1332,16 +1332,17 @@ else
       # paths the caller never touched — the base simply deleted them — and naming those would tell an
       # operator their edits target a file they never edited, sending them to inspect the wrong path
       # while the real conflict goes unmentioned.
-      APPLY_VANISHED=
-      while IFS= read -r p; do
-        [ -n "$p" ] || continue
+      # -z: a C-quoted name (non-ASCII, quote, backslash, newline) matches no literal pathspec and
+      # would silently drop out of this list.
+      APPLY_VANISHED=()
+      while IFS= read -r -d '' p; do
         git -C "$ROOT" diff --quiet "$PATCH_BASE" -- ":(top,literal)$p" 2>/dev/null && continue
-        APPLY_VANISHED="${APPLY_VANISHED}${p}"$'\n'
-      done <<< "$(git -C "$ROOT" diff --name-only --no-renames --diff-filter=DT \
-        "$PATCH_BASE" "$BASE" -- "${GIT_PATHS[@]}" ${WHOLE_EXCLUDES[@]+"${WHOLE_EXCLUDES[@]}"} 2>/dev/null || true)"
-      if [ -n "$APPLY_VANISHED" ]; then
+        APPLY_VANISHED+=("$p")
+      done < <(git -C "$ROOT" diff --name-only -z --no-renames --diff-filter=DT \
+        "$PATCH_BASE" "$BASE" -- "${GIT_PATHS[@]}" ${WHOLE_EXCLUDES[@]+"${WHOLE_EXCLUDES[@]}"} 2>/dev/null || true)
+      if [ "${#APPLY_VANISHED[@]}" -gt 0 ]; then
         echo "ship: origin/$BASE_REF has deleted or retyped briefed path(s) since ${PATCH_BASE:0:7}:" >&2
-        while IFS= read -r p; do [ -n "$p" ] && printf '  %q\n' "$p" >&2; done <<< "$APPLY_VANISHED"
+        printf '  %q\n' "${APPLY_VANISHED[@]}" >&2
         echo "  your edits target a file the base no longer has — decide whether the deletion or your" >&2
         echo "  edit wins before shipping." >&2
       fi
