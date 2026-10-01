@@ -12,6 +12,7 @@ import {
   resolveGuardConfig,
   sourceMatchers,
 } from '../config.mts';
+import { failLine } from '../deterministic/reason.mts';
 import { emitGateEvent } from '../judge/gate-events.mts';
 import { displayPath, formatClearMarker, humanAge, readClearMarker } from './failures.mts';
 // Shared with the PRODUCER (`devkit coverage-run`) so the path this gate reads and the path that
@@ -221,7 +222,7 @@ export function runCoverage(cwd = process.cwd()): number {
   const file = resolve(cwd, COVERAGE_FILE);
   if (!existsSync(file)) {
     if (reviewMode) return reviewNotMeasuredAbsent(cwd);
-    console.error(`🚫 Coverage gate FAILED — no coverage data (${COVERAGE_FILE} absent).`);
+    failLine(`🚫 Coverage gate FAILED — no coverage data (${COVERAGE_FILE} absent).`);
     const marker = readClearMarker(resolve(cwd, COVERAGE_DIR));
     if (marker) for (const line of formatClearMarker(marker, cwd)) console.error(line);
     console.error('   Coverage was NOT verified for this commit. Generate it with');
@@ -259,9 +260,7 @@ export function runCoverage(cwd = process.cwd()): number {
     artifact = readArtifact(file);
     computed = computePercentages(JSON.parse(artifact.bytes));
   } catch {
-    console.error(
-      `🚫 Coverage gate FAILED — ${COVERAGE_FILE} is present but not valid coverage data.`,
-    );
+    failLine(`🚫 Coverage gate FAILED — ${COVERAGE_FILE} is present but not valid coverage data.`);
     console.error(artifactLine(file));
     console.error(
       '   Unparseable or malformed coverage data is not verification. Re-run `bun run test:run:coverage`.',
@@ -303,9 +302,9 @@ export function runCoverage(cwd = process.cwd()): number {
     (m) => typeof coverage[m] === 'number' && computed[m] < (coverage[m] as number),
   );
   if (shortfalls.length > 0) {
-    console.error('🚫 Coverage below threshold:');
+    failLine('🚫 Coverage below threshold:');
     for (const m of shortfalls) {
-      console.error(`   ${m}: ${computed[m]}% (min ${coverage[m] as number}%)`);
+      failLine(`   ${m}: ${computed[m]}% (min ${coverage[m]}%)`);
     }
     console.error(artifactLine(file));
     console.error('   Add tests to raise coverage, then run `bun run test:run:coverage`.');
@@ -322,10 +321,10 @@ export function runCoverage(cwd = process.cwd()): number {
       : humanAge(Date.now() - Date.parse(provenance.manifest.finishedAt));
   if (provenance.state === 'drift') {
     if (provenance.production.length > 0) {
-      console.error(
+      failLine(
         `🚫 Coverage gate FAILED — coverage artifact predates ${provenance.production.length} briefed file(s):`,
       );
-      for (const line of listPaths(provenance.production, cwd, top)) console.error(line);
+      for (const line of listPaths(provenance.production, cwd, top)) failLine(line);
       console.error(
         `   The artifact (run ${provenance.manifest.runId}, measured ${age} ago) never saw these`,
       );

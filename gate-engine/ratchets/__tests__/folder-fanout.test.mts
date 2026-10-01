@@ -156,6 +156,23 @@ describe('CLI freeze/gate contract', () => {
     expect(r.stderr).toContain('src/new-pile');
   });
 
+  it('a fan-out block records the folder and its counts as the gate reason (sc-1231)', () => {
+    const root = makeRoot();
+    writeConfig(root, {});
+    fill(root, 'src/new-pile', FANOUT_CAP + 1);
+    const file = join(root, 'reason.txt');
+    const r = spawnSync(process.execPath, [SCRIPT, 'gate'], {
+      cwd: root,
+      encoding: 'utf8',
+      env: { ...process.env, DEVKIT_GATE_REASON_FILE: file },
+    });
+    expect(r.status).toBe(1);
+    const reason = readFileSync(file, 'utf8');
+    expect(reason).toContain(`src/new-pile: ${FANOUT_CAP + 1} files`);
+    // The split remedy is generic advice, not the reason — it stays in the log only.
+    expect(reason).not.toContain('Split into cohesive');
+  });
+
   it('gate counts a skip-named scanRoot in both HEAD and the pending index', () => {
     const root = makeRoot();
     gitInit(root);

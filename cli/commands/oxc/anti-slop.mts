@@ -3,6 +3,7 @@
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { failLine } from '../../../gate-engine/deterministic/reason.mts';
 import { withLock } from '../../lib/atomic-write.mts';
 import {
   overlayBaseRefusal,
@@ -296,7 +297,7 @@ function check(
       return 1;
     }
     if (errors.length > 0) {
-      console.error(`anti-slop: FAIL — ${newErrorCount} new error finding(s); baseline unchanged`);
+      failLine(`anti-slop: FAIL — ${newErrorCount} new error finding(s); baseline unchanged`);
       // Reported on the FAIL path too: a committer reading a block needs the same standing about
       // what this gate does not enforce — no committed base means no rename forgiveness.
       reportOverlayContract(cwd);
