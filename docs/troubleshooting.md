@@ -175,6 +175,20 @@ investigate the named phase. Raise the ceiling only when setup is legitimately s
 it and never serialise the file (`suite-hangs-bound-at-the-spawn-site`,
 `test-deadlines-are-hang-detectors`).
 
+## CI `Release-only dist` failed: `this ship rewrites tracked dist, which is release-only`
+
+This applies only in devkit's own repo. Between releases, `bun run build` rewrites tracked `dist/` files
+whose sources were changed by **other** merged PRs. Those rewrites ship only with `devkit release`
+(`docs/decisions/typescript-source-prebuilt-mjs.md`), so the `gate` workflow judges your PR's committed
+tree and fails if it changes any tracked dist file. Whole-file mirrors such as `dist/README.md` count
+too. A feature PR may only **add** dist files (new artifacts) or **delete** them.
+
+- **Before shipping:** `devkit ship` lists rebuilt files as `release-only drift from main — leave them
+  out of the brief`. Brief your source, plus only the **new** dist paths the preflight names.
+- **Already on the PR:** restore the listed files from the PR's merge-base, which is what CI diffs
+  against (`main` may have moved its own dist since). Run
+  `git checkout "$(git merge-base origin/main HEAD)" -- <listed paths>`, commit, and `devkit ship --pr`.
+
 ## A gate exited 3: the judge hit a usage limit, or its CLI is missing
 
 Exit 3 is the **exit-3 contract** — the judge could not run, not a finding against your code. The
