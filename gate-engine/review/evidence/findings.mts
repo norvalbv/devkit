@@ -24,6 +24,14 @@ export interface FindingsSummary {
   blockingLenses: string[];
 }
 
+/** Every `file:line` an issue string cites, in order — the same allowlist as the fold key. */
+export function issueLocations(issue: string): { file: string; line: number }[] {
+  return [...String(issue).matchAll(new RegExp(LOCATION_RE.source, 'gi'))].map((m) => ({
+    file: m[1],
+    line: Number(m[2]),
+  }));
+}
+
 function fingerprint(lens: string, issue: string): string {
   const loc = issue.match(LOCATION_RE);
   if (loc) return `${lens}|${loc[1]}|${Math.floor(Number(loc[2]) / LINE_BUCKET)}`;

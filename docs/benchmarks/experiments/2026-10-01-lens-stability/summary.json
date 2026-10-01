@@ -1,0 +1,301 @@
+{
+  "reviewer": "correctness-reviewer",
+  "until": "2026-10-01T09:00:00.000Z",
+  "maxGapHours": 24,
+  "lenses": {
+    "concurrency-races": {
+      "pass-pass": {
+        "pairs": 738,
+        "outcomes": {
+          "not-applicable": 738
+        },
+        "reasons": {},
+        "findings": {}
+      },
+      "fail-pass": {
+        "pairs": 42,
+        "outcomes": {
+          "not-applicable": 42
+        },
+        "reasons": {},
+        "findings": {}
+      },
+      "fail-fail": {
+        "pairs": 44,
+        "outcomes": {
+          "unchanged": 1,
+          "elsewhere": 34,
+          "same-diff-flip": 8,
+          "undeterminable": 1
+        },
+        "reasons": {
+          "chunked": 1
+        },
+        "findings": {
+          "unchanged": 10,
+          "changed": 34,
+          "new-at-k1": 1
+        }
+      },
+      "pass-fail": {
+        "pairs": 21,
+        "outcomes": {
+          "elsewhere": 13,
+          "undeterminable": 6,
+          "unchanged": 2
+        },
+        "reasons": {
+          "chunked": 4,
+          "no-k-diff": 2
+        },
+        "findings": {
+          "changed": 12,
+          "unchanged": 2,
+          "new-at-k1": 1
+        }
+      },
+      "rates": {
+        "unchangedShareOfDeterminablePassFail": 0.13333333333333333,
+        "unchangedPerPassLowerBound": 0.002635046113306983
+      }
+    },
+    "error-and-edge-classification": {
+      "fail-fail": {
+        "pairs": 37,
+        "outcomes": {
+          "elsewhere": 29,
+          "undeterminable": 3,
+          "unchanged": 5
+        },
+        "reasons": {
+          "no-location": 2,
+          "chunked": 1
+        },
+        "findings": {
+          "changed": 29,
+          "no-location": 2,
+          "unchanged": 5
+        }
+      },
+      "fail-pass": {
+        "pairs": 81,
+        "outcomes": {
+          "not-applicable": 81
+        },
+        "reasons": {},
+        "findings": {}
+      },
+      "pass-pass": {
+        "pairs": 687,
+        "outcomes": {
+          "not-applicable": 687
+        },
+        "reasons": {},
+        "findings": {}
+      },
+      "pass-fail": {
+        "pairs": 39,
+        "outcomes": {
+          "elsewhere": 19,
+          "undeterminable": 17,
+          "unchanged": 3
+        },
+        "reasons": {
+          "no-k-diff": 12,
+          "chunked": 5
+        },
+        "findings": {
+          "changed": 20,
+          "unchanged": 3
+        }
+      },
+      "rates": {
+        "unchangedShareOfDeterminablePassFail": 0.13636363636363635,
+        "unchangedPerPassLowerBound": 0.004132231404958678
+      }
+    },
+    "state-transitions": {
+      "pass-pass": {
+        "pairs": 737,
+        "outcomes": {
+          "not-applicable": 737
+        },
+        "reasons": {},
+        "findings": {}
+      },
+      "fail-pass": {
+        "pairs": 47,
+        "outcomes": {
+          "not-applicable": 47
+        },
+        "reasons": {},
+        "findings": {}
+      },
+      "pass-fail": {
+        "pairs": 22,
+        "outcomes": {
+          "elsewhere": 11,
+          "undeterminable": 8,
+          "unchanged": 3
+        },
+        "reasons": {
+          "no-k-diff": 8
+        },
+        "findings": {
+          "changed": 11,
+          "unchanged": 3
+        }
+      },
+      "fail-fail": {
+        "pairs": 31,
+        "outcomes": {
+          "undeterminable": 2,
+          "elsewhere": 25,
+          "same-diff-flip": 4
+        },
+        "reasons": {
+          "no-location": 1,
+          "chunked": 1
+        },
+        "findings": {
+          "no-location": 1,
+          "changed": 27,
+          "unchanged": 4
+        }
+      },
+      "rates": {
+        "unchangedShareOfDeterminablePassFail": 0.21428571428571427,
+        "unchangedPerPassLowerBound": 0.003952569169960474
+      }
+    },
+    "writer-reader-contracts": {
+      "pass-pass": {
+        "pairs": 496,
+        "outcomes": {
+          "not-applicable": 496
+        },
+        "reasons": {},
+        "findings": {}
+      },
+      "pass-fail": {
+        "pairs": 91,
+        "outcomes": {
+          "elsewhere": 15,
+          "undeterminable": 72,
+          "unchanged": 4
+        },
+        "reasons": {
+          "chunked": 54,
+          "no-k-diff": 15,
+          "no-location": 2,
+          "outside-diff": 1
+        },
+        "findings": {
+          "changed": 15,
+          "unchanged": 4,
+          "no-location": 2,
+          "outside-diff": 1
+        }
+      },
+      "fail-pass": {
+        "pairs": 148,
+        "outcomes": {
+          "not-applicable": 148
+        },
+        "reasons": {},
+        "findings": {}
+      },
+      "fail-fail": {
+        "pairs": 78,
+        "outcomes": {
+          "undeterminable": 52,
+          "elsewhere": 21,
+          "unchanged": 4,
+          "same-diff-flip": 1
+        },
+        "reasons": {
+          "outside-diff": 1,
+          "chunked": 51
+        },
+        "findings": {
+          "outside-diff": 1,
+          "changed": 21,
+          "unchanged": 5,
+          "new-at-k1": 1
+        }
+      },
+      "rates": {
+        "unchangedShareOfDeterminablePassFail": 0.21052631578947367,
+        "unchangedPerPassLowerBound": 0.0068143100511073255
+      }
+    }
+  },
+  "totals": {
+    "pass-pass": {
+      "pairs": 2658,
+      "outcomes": {
+        "not-applicable": 2658
+      },
+      "reasons": {},
+      "findings": {}
+    },
+    "fail-fail": {
+      "pairs": 190,
+      "outcomes": {
+        "elsewhere": 109,
+        "undeterminable": 58,
+        "unchanged": 10,
+        "same-diff-flip": 13
+      },
+      "reasons": {
+        "no-location": 3,
+        "outside-diff": 1,
+        "chunked": 54
+      },
+      "findings": {
+        "changed": 111,
+        "no-location": 3,
+        "outside-diff": 1,
+        "unchanged": 24,
+        "new-at-k1": 2
+      }
+    },
+    "fail-pass": {
+      "pairs": 318,
+      "outcomes": {
+        "not-applicable": 318
+      },
+      "reasons": {},
+      "findings": {}
+    },
+    "pass-fail": {
+      "pairs": 173,
+      "outcomes": {
+        "elsewhere": 58,
+        "undeterminable": 103,
+        "unchanged": 12
+      },
+      "reasons": {
+        "chunked": 63,
+        "no-k-diff": 37,
+        "no-location": 2,
+        "outside-diff": 1
+      },
+      "findings": {
+        "changed": 58,
+        "unchanged": 12,
+        "new-at-k1": 1,
+        "no-location": 2,
+        "outside-diff": 1
+      }
+    },
+    "unchangedShareOfDeterminablePassFail": 0.17142857142857143,
+    "unchangedPerPassLowerBound": 0.0042387848816672555
+  },
+  "excluded": {
+    "stale-pair": 48,
+    "replayed": 393,
+    "non-verdict": 54
+  },
+  "skippedShips": 1810
+}
