@@ -101,6 +101,8 @@ commit_with_gate_capture() {
   # Global, not local: ship-branch.sh reads this attempt's log after return to tell whether a
   # --with-reviewers rehearsal actually reached a reviewer gate.
   SHIP_GATE_LOG="$log"
+  # `devkit ship --queue` reads the running ship's gate from the log actually allocated here.
+  ! declare -F ship_queue_slot_note_log >/dev/null || ship_queue_slot_note_log "$log"
 
   # Start the attempt before hook resolution so a fail-closed setup error still has a terminal
   # ship_result row instead of disappearing from telemetry.

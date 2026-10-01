@@ -31,6 +31,10 @@ unset DEVKIT_MANAGED_SIGNAL_ROOT
 export GIT_TERMINAL_PROMPT=0
 export GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -o BatchMode=yes}"
 
+# Before any work: the machine-wide queue slot must carry this process group, or this ship must not run.
+. "$(dirname "${BASH_SOURCE[0]}")/queue/slot.sh"
+ship_queue_slot_register
+
 # `--pr` is the MODE flag: ship.mts routes on it, then forwards argv VERBATIM — so it still arrives
 # here, and wherever the caller put it. Strip a LEADING one before reading positionals; the parse loop
 # below drops a trailing one. Without this, the spelling the help text itself documents
