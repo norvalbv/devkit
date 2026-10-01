@@ -8,13 +8,24 @@ import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
 import { REPORT_NAME } from '../../../../gate-engine/coverage/produce.mts';
 
-/**
- * One istanbul file entry. Only `path` is read here; every other field (statementMap, s, f, b, …)
- * passes through untouched, so the coverage gate's totals are computed from exactly the same data.
- */
-const coverageEntrySchema = z.looseObject({ path: z.string().optional() });
+/** vitest's v8→istanbul conversion can emit a negative hit count, which fails fallow's u32 parse
+ * of the whole file. A negative hit is a miss and the gate counts only hits > 0: 0 keeps totals. */
+const hitSchema = z.int().transform((hits) => Math.max(0, hits));
+const hitsSchema = z.record(z.string(), hitSchema).optional();
 
-/** coverage-final.json: file key → istanbul entry. A map that does not parse is never rebased. */
+/**
+ * One istanbul file entry. `path` is rekeyed and the s/f/b hit counts are clamped; every other field
+ * (statementMap, fnMap, branchMap, …) passes through untouched.
+ */
+const coverageEntrySchema = z.looseObject({
+  path: z.string().optional(),
+  s: hitsSchema,
+  f: hitsSchema,
+  b: z.record(z.string(), z.array(hitSchema)).optional(),
+});
+
+/** coverage-final.json: file key → istanbul entry. A map that does not parse is never rebased, so
+ * fallow is never handed counts it cannot read and scores CRAP from estimates instead. */
 export const coverageMapSchema = z.record(z.string(), coverageEntrySchema);
 export type CoverageMap = z.infer<typeof coverageMapSchema>;
 
@@ -88,7 +99,7 @@ export function rebaseWorktreeCoverage(wt: string, source: string, outFile: stri
   const report = join(source, REPORT_NAME);
   if (!existsSync(report)) return null;
   const parsed = coverageMapSchema.safeParse(JSON.parse(readFileSync(report, 'utf8')));
-  if (!parsed.success) return null;
+  if (!parsed.success) throw new Error(`${report}: ${z.prettifyError(parsed.error)}`);
   const map = parsed.data;
   const wtRoot = realpathSync(wt);
   const root = deriveForeignRoot(Object.keys(map), trackedPaths(wt), wtRoot);

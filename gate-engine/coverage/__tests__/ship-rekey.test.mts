@@ -40,7 +40,7 @@ function shipWorktree() {
       statementMap: { '0': { start: { line: 1 } } },
       s: { '0': 1 },
       f: {},
-      b: {},
+      b: { '0': [1, -1] },
     },
   });
   measure(root, undefined, cov);
@@ -77,5 +77,10 @@ describe('ship: coverage provenance after the fallow rekey', () => {
       Object.keys(coverageMapSchema.parse(JSON.parse(readFileSync(file, 'utf8'))));
     expect(keysOf(join(wt, 'coverage/coverage-final.json'))).toEqual([`${root}/src/a.mts`]);
     expect(keysOf(out)[0]).toMatch(/\/ship wt\/src\/a\.mts$/);
+    // The gate judges the artifact as produced; only fallow's copy clamps a negative count to 0.
+    expect(readFileSync(join(wt, 'coverage/coverage-final.json'), 'utf8')).toContain(
+      '"b":{"0":[1,-1]}',
+    );
+    expect(readFileSync(out, 'utf8')).toContain('"b":{"0":[1,0]}');
   });
 });
