@@ -8,6 +8,7 @@ import { processOwnerIsProvablyGone, processStartIdentity, } from '../../../../g
 import { z } from 'zod';
 import { writeFileAtomic } from '../../atomic-write.mjs';
 import { LOCK_TIMEOUT_PREFIX, withQueueLock } from './queue-lock.mjs';
+import { readSlotCount, slotDirs, takeFreeSlot } from './slots.mjs';
 /** An empty claim (acquirer died between mkdir and its holder write) is reclaimable after this. */
 const EMPTY_SLOT_STALE_MS = 60_000;
 const POLL_MS = 2_000;
@@ -32,9 +33,8 @@ export const DEFAULT_PROBE = {
 export function queueRoot(home = userInfo().homedir) {
     return join(home, '.devkit', 'ship-queue');
 }
-const slotDir = (root) => join(root, 'slot');
 const slotLock = (root) => join(root, 'slot.lock');
-const holderFile = (root) => join(slotDir(root), 'holder.json');
+const holderFile = (slot) => join(slot, 'holder.json');
 const ticketsDir = (root) => join(root, 'tickets');
 function errnoCode(cause) {
     return cause instanceof Error && 'code' in cause ? String(cause.code) : undefined;
@@ -75,9 +75,22 @@ function readTicketFile(path) {
         return undefined;
     }
 }
-export function readHolder(root) {
-    const holder = readTicketFile(holderFile(root));
+/** The holder of one slot directory. */
+export function readHolder(slot) {
+    const holder = readTicketFile(holderFile(slot));
     return holder?.token ? { ...holder, token: holder.token } : undefined;
+}
+/** Every slot directory with its holder (absent for an empty or torn claim). */
+export function readHolders(root) {
+    return slotDirs(root).map((dir) => ({ dir, holder: readHolder(dir) }));
+}
+/** The slot whose claim carries `token`: token-addressed operations work in any slot. */
+export function findHolder(root, token) {
+    for (const entry of readHolders(root)) {
+        if (entry.holder?.token === token)
+            return { dir: entry.dir, holder: entry.holder };
+    }
+    return undefined;
 }
 function liveGuests(holder, probe) {
     return (holder.guests ?? []).filter((guest) => !probe.ownerGone(guest.pid, guest.identity));
@@ -91,11 +104,11 @@ export function holderAlive(holder, probe = DEFAULT_PROBE) {
 }
 /** Caller holds the slot lock. Add (or, with `leave`, remove) a guest on the claim carrying `token`. */
 export function writeGuestLocked(root, token, guest, leave = false) {
-    const holder = readHolder(root);
-    if (holder?.token !== token)
+    const found = findHolder(root, token);
+    if (!found)
         return false;
-    const others = (holder.guests ?? []).filter((g) => g.pid !== guest.pid);
-    writeFileAtomic(holderFile(root), JSON.stringify({ ...holder, guests: leave ? others : [...others, guest] }));
+    const others = (found.holder.guests ?? []).filter((g) => g.pid !== guest.pid);
+    writeFileAtomic(holderFile(found.dir), JSON.stringify({ ...found.holder, guests: leave ? others : [...others, guest] }));
     return true;
 }
 export function setGuest(root, token, guest, leave = false) {
@@ -140,20 +153,22 @@ function unlessContended(fn) {
         throw cause;
     }
 }
-/** Remove the slot only when it is provably a dead holder's. */
+/** Remove each slot that is provably a dead holder's (or an empty claim past its grace period). */
 export function reapSlotIfDead(root, probe = DEFAULT_PROBE) {
     withSlotLock(root, () => {
-        let mtimeMs;
-        try {
-            mtimeMs = lstatSync(slotDir(root)).mtimeMs;
+        for (const dir of slotDirs(root)) {
+            let mtimeMs;
+            try {
+                mtimeMs = lstatSync(dir).mtimeMs;
+            }
+            catch {
+                continue;
+            }
+            const holder = readHolder(dir);
+            if (holder ? holderAlive(holder, probe) : Date.now() - mtimeMs <= EMPTY_SLOT_STALE_MS)
+                continue;
+            rmSync(dir, { recursive: true, force: true });
         }
-        catch {
-            return;
-        }
-        const holder = readHolder(root);
-        if (holder ? holderAlive(holder, probe) : Date.now() - mtimeMs <= EMPTY_SLOT_STALE_MS)
-            return;
-        rmSync(slotDir(root), { recursive: true, force: true });
     });
 }
 /**
@@ -162,20 +177,20 @@ export function reapSlotIfDead(root, probe = DEFAULT_PROBE) {
  */
 export function registerGroup(root, token, pgid) {
     return withSlotLock(root, () => {
-        const holder = readHolder(root);
-        if (holder?.token !== token)
+        const found = findHolder(root, token);
+        if (!found)
             return false;
-        writeFileAtomic(holderFile(root), JSON.stringify({ ...holder, pgid }));
+        writeFileAtomic(holderFile(found.dir), JSON.stringify({ ...found.holder, pgid }));
         return true;
     });
 }
 /** Record the gate log this ship's attempt allocated, for `devkit ship --queue`. */
 export function noteGateLog(root, token, gateLog) {
     return withSlotLock(root, () => {
-        const holder = readHolder(root);
-        if (holder?.token !== token || !gateLog)
+        const found = findHolder(root, token);
+        if (!found || !gateLog)
             return false;
-        writeFileAtomic(holderFile(root), JSON.stringify({ ...holder, gateLog }));
+        writeFileAtomic(holderFile(found.dir), JSON.stringify({ ...found.holder, gateLog }));
         return true;
     });
 }
@@ -183,14 +198,15 @@ export function noteGateLog(root, token, gateLog) {
  * Bash's pre-CI `handOff`) its group is gone. Anything still in use keeps the slot until reaped. */
 export function releaseSlot(root, token, { handOff = false, probe = DEFAULT_PROBE } = {}) {
     return withSlotLock(root, () => {
-        const holder = readHolder(root);
-        if (holder?.token !== token)
+        const found = findHolder(root, token);
+        if (!found)
             return 'not-held';
+        const { dir, holder } = found;
         if (liveGuests(holder, probe).length > 0)
             return 'in-use';
         if (!handOff && holder.pgid !== undefined && probe.groupAlive(holder.pgid))
             return 'in-use';
-        rmSync(slotDir(root), { recursive: true, force: true });
+        rmSync(dir, { recursive: true, force: true });
         return 'released';
     });
 }
@@ -229,42 +245,59 @@ export function ensureRoot(root) {
             throw cause;
     }
 }
-function describe(holder, now) {
-    if (!holder)
+function describe(running, now) {
+    const [only] = running;
+    if (!only)
         return 'a ship that is starting';
-    const minutes = Math.max(0, Math.round((now - holder.startedAt) / 60_000));
-    return `${holder.branch} (${holder.repo}, running ${minutes}m)`;
+    if (running.length > 1)
+        return `${running.length} running ships`;
+    const minutes = Math.max(0, Math.round((now - only.startedAt) / 60_000));
+    return `${only.branch} (${only.repo}, running ${minutes}m)`;
 }
-function claimSlot(root, ticket, ticketPath) {
+/** Under the lock: only the queue head (re-checked here, so a stale outside view cannot jump FIFO)
+ * claims, only while fewer than `slots` slot dirs exist, into the lowest free index. */
+function claimSlot(root, ticket, ticketPath, probe, log, onCapacity) {
     const holder = { ...ticket, startedAt: Date.now(), token: randomUUID() };
-    const claimed = withSlotLock(root, () => {
+    const dir = withSlotLock(root, () => {
+        const [head] = liveTickets(root, probe);
+        if (head?.seq !== ticket.seq || head.pid !== ticket.pid)
+            return undefined;
+        // Capacity is read under the lock too: an owner's shrink binds the very next claim.
+        // The claim's own read can warn too: a config made invalid since the last poll is never silent.
+        const slots = readSlotCount(root, log);
+        if (slotDirs(root).length >= slots)
+            return undefined;
+        const free = takeFreeSlot(root, slots);
+        if (!free)
+            return undefined;
         try {
-            mkdirSync(slotDir(root));
+            mkdirSync(free);
         }
         catch (cause) {
             if (errnoCode(cause) === 'EEXIST')
-                return false;
+                return undefined;
             throw cause;
         }
         try {
-            writeFileAtomic(holderFile(root), JSON.stringify(holder));
+            writeFileAtomic(holderFile(free), JSON.stringify(holder));
         }
         catch (cause) {
-            rmSync(slotDir(root), { recursive: true, force: true }); // never leave an ownerless claim
+            rmSync(free, { recursive: true, force: true }); // never leave an ownerless claim
             throw cause;
         }
         rmSync(ticketPath, { force: true }); // claim and leave the queue in one step, for --queue
-        return true;
+        // Recorded inside the claim's synchronous locked step, with the capacity it read: one per claim.
+        if (slots > 1) {
+            log(`ship: this machine runs up to ${slots} ships at once (${join(root, 'config.json')})`);
+            onCapacity?.(slots);
+        }
+        return free;
     });
-    if (!claimed)
+    if (!dir)
         return undefined;
     const release = () => unlessContended(() => releaseSlot(root, holder.token));
     process.once('exit', release);
-    return {
-        token: holder.token,
-        slotDir: slotDir(root),
-        release,
-    };
+    return { token: holder.token, slotDir: dir, release };
 }
 const WAIT_SIGNALS = { SIGHUP: 129, SIGINT: 130, SIGTERM: 143 };
 /** Wait for the machine-wide slot in arrival order. Prints one line per change in position. */
@@ -294,18 +327,19 @@ export async function acquireShipSlot(options) {
     let announced = '';
     try {
         for (;;) {
+            readSlotCount(root, log); // surfaces an invalid config to a waiting ship, once per content
             unlessContended(() => reapSlotIfDead(root, probe));
             const ahead = liveTickets(root, probe).filter((other) => other.seq < ticket.seq || (other.seq === ticket.seq && other.pid < ticket.pid));
             if (ahead.length === 0) {
-                const handle = unlessContended(() => claimSlot(root, ticket, ticketPath));
+                const handle = unlessContended(() => claimSlot(root, ticket, ticketPath, probe, log, options.onCapacity));
                 if (handle)
                     return handle;
             }
-            const holder = readHolder(root);
-            const state = `${ahead.length}:${holder?.token ?? ''}`;
+            const running = readHolders(root).flatMap((entry) => (entry.holder ? [entry.holder] : []));
+            const state = `${ahead.length}:${running.map((h) => h.token).join(',')}`;
             if (state !== announced) {
                 announced = state;
-                log(`ship: queued — position ${ahead.length + 1}, waiting behind ${describe(holder, Date.now())}`);
+                log(`ship: queued — position ${ahead.length + 1}, waiting behind ${describe(running, Date.now())}`);
             }
             await new Promise((resolve) => setTimeout(resolve, options.pollMs ?? POLL_MS));
         }

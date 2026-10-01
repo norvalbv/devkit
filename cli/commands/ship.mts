@@ -187,9 +187,10 @@ even though the PR is open, so the wait announces the PR URL before it starts. A
 that lands but fails to push KEEPS the branch; an identical retry verifies and resumes that commit.
 A commit that never lands auto-deletes the empty branch.
 
-Ships queue machine-wide: every ship waits for ONE slot, first come first served, before its first
-gate, and holds it until it exits — or until --wait-ci starts polling, which needs no slot. A
-waiting ship prints its position once. The slot frees itself when its ship (and that ship's whole
+Ships queue machine-wide: every ship waits for a slot, first come first served, before its first
+gate, and holds it until it exits — or until --wait-ci starts polling, which needs no slot. One slot
+by default; ~/.devkit/ship-queue/config.json {"slots": N} (1..4) lets N ships run at once. A
+waiting ship prints its position once. A slot frees itself when its ship (and that ship's whole
 process group) is gone. There is no way to skip it; \`devkit ship --queue\` names the running ship
 with the \`ps\` that inspects it if it looks stuck. Every blocked attempt records its
 invocation — retry with \`devkit ship --resume <branch>\` instead of re-typing the command.`,

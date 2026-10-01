@@ -280,7 +280,7 @@ describe('tickets and acquisition', () => {
   it.each([0, -1, 1.5, 2_147_483_648])('rejects a slot holder with pid %d', (pid) => {
     const root = tempRoot();
     seatHolder(root, holder({ pid }));
-    expect(readHolder(root)).toBeUndefined();
+    expect(readHolder(join(root, 'slot'))).toBeUndefined();
   });
 
   it('prunes a ticket whose pid was reused by an unrelated process', () => {
@@ -410,17 +410,21 @@ describe('ship queue status', () => {
     const before = readdirSync(join(root, 'tickets')).sort();
 
     const view = readShipQueue(root, probe([111, 222, 333]));
-    expect(view.holder?.gate).toBe('guard-review: running');
+    expect(view.running.map((h) => h.gate)).toEqual(['guard-review: running']);
+    expect(view).toMatchObject({ slots: 1, occupied: 1 });
     expect(view.waiters.map((w) => w.branch)).toEqual(['feat/next', 'feat/late']);
     expect(readdirSync(join(root, 'tickets')).sort()).toEqual(before);
 
     const text = formatShipQueue(view, 125 * 60_000);
-    expect(text.split('\n')[0]).toContain('running: feat/a');
+    expect(text.split('\n')[0]).toBe('slots: 1/1 in use');
+    expect(text.split('\n')[1]).toContain('running: feat/a');
     expect(text).toContain('stuck? inspect it with: ps -o pid,lstart,command -p 111');
     expect(text).not.toMatch(/\bkill\b/); // devkit never hands out a signal command
     const grouped = formatShipQueue({
-      holder: { ...holder({ pgid: 900 }), gate: 'g' },
+      running: [{ ...holder({ pgid: 900 }), gate: 'g' }],
       waiters: [],
+      slots: 2,
+      occupied: 1,
     });
     expect(grouped).toContain('ps -o pid,lstart,command -g 900');
     expect(text).toContain('2h5m');
@@ -430,8 +434,10 @@ describe('ship queue status', () => {
   it('reports no holder when the claimed holder is dead, and an unknown gate without a log', () => {
     const root = tempRoot();
     seatHolder(root, holder({ pid: 111 }));
-    expect(readShipQueue(root, probe([])).holder).toBeUndefined();
-    expect(formatShipQueue({ waiters: [] })).toBe('running: (none)\nwaiting: (none)');
+    expect(readShipQueue(root, probe([])).running).toEqual([]);
+    expect(formatShipQueue({ running: [], waiters: [], slots: 1, occupied: 0 })).toBe(
+      'slots: 0/1 in use\nrunning: (none)\nwaiting: (none)',
+    );
     expect(currentGate({})).toBe('not started');
     expect(currentGate({ gateLog: join(root, 'missing.log') })).toBe('unknown');
   });
@@ -545,13 +551,13 @@ describe('entering the queue', () => {
       log: () => undefined,
     });
     expect(entered.env).toEqual({ DEVKIT_SHIP_SLOT_RELEASE: '' });
-    expect(readHolder(root)?.guests?.map((g) => g.pid)).toEqual([process.pid]);
+    expect(readHolder(join(root, 'slot'))?.guests?.map((g) => g.pid)).toEqual([process.pid]);
     // While the guest runs, neither the outer dispatcher nor Bash's pre-CI hand-off may free the slot.
     expect(releaseSlot(root, 'outer', { probe: probe([process.pid]), handOff: true })).toBe(
       'in-use',
     );
     entered.handle?.release();
-    expect(readHolder(root)?.guests).toEqual([]);
+    expect(readHolder(join(root, 'slot'))?.guests).toEqual([]);
     expect(releaseSlot(root, 'outer', { probe: probe([]), handOff: true })).toBe('released');
   });
 
@@ -715,7 +721,7 @@ describe("ship_queue_slot_register (bash, the acquirer's first action)", () => {
     });
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("cannot read this ship's process group");
-    expect(readHolder(root)?.pgid).toBeUndefined();
+    expect(readHolder(join(root, 'slot'))?.pgid).toBeUndefined();
   });
 
   it('is a no-op for an unqueued or nested ship', () => {
@@ -828,7 +834,7 @@ describe('status snapshot during a hand-off', () => {
 
   it('changes no queue state and creates no queue root', () => {
     const root = join(tempRoot(), 'absent');
-    expect(readShipQueue(root)).toEqual({ waiters: [] });
+    expect(readShipQueue(root)).toEqual({ running: [], waiters: [], slots: 1, occupied: 0 });
     expect(existsSync(root)).toBe(false);
   });
 });
@@ -862,8 +868,8 @@ describe('ship_queue_slot_note_log (bash)', () => {
         timeout: 20_000,
       });
     expect(run('other').status).toBe(0);
-    expect(readHolder(root)?.gateLog).toBeUndefined();
+    expect(readHolder(join(root, 'slot'))?.gateLog).toBeUndefined();
     expect(run('mine').status).toBe(0);
-    expect(readHolder(root)?.gateLog).toBe('/tmp/g.log');
+    expect(readHolder(join(root, 'slot'))?.gateLog).toBe('/tmp/g.log');
   });
 });

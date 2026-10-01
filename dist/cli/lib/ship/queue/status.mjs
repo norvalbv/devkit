@@ -4,7 +4,8 @@
  */
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { DEFAULT_PROBE, holderAlive, parseTicket, queueRoot, readHolder, withSlotLock, } from './ship-queue.mjs';
+import { DEFAULT_PROBE, holderAlive, parseTicket, queueRoot, readHolders, withSlotLock, } from './ship-queue.mjs';
+import { readSlotCount } from './slots.mjs';
 /** The last non-empty line of the gate log the holder's bash recorded (dry-gates logs included). */
 export function currentGate(holder) {
     if (!holder.gateLog)
@@ -23,12 +24,18 @@ export function currentGate(holder) {
 /** One consistent snapshot: claims and their ticket drops happen under the same slot lock. */
 export function readShipQueue(root = queueRoot(), probe = DEFAULT_PROBE) {
     if (!existsSync(root))
-        return { waiters: [] };
+        return { running: [], waiters: [], slots: 1, occupied: 0 };
     return withSlotLock(root, () => {
-        const view = { waiters: [] };
-        const holder = readHolder(root);
-        if (holder && holderAlive(holder, probe))
-            view.holder = { ...holder, gate: currentGate(holder) };
+        const entries = readHolders(root);
+        const view = {
+            running: entries
+                .flatMap(({ holder }) => (holder && holderAlive(holder, probe) ? [holder] : []))
+                .map((holder) => ({ ...holder, gate: currentGate(holder) }))
+                .sort((a, b) => a.startedAt - b.startedAt),
+            waiters: [],
+            slots: readSlotCount(root),
+            occupied: entries.length,
+        };
         let names = [];
         try {
             names = readdirSync(join(root, 'tickets'));
@@ -58,17 +65,15 @@ function elapsed(since, now) {
     return minutes >= 60 ? `${Math.floor(minutes / 60)}h${minutes % 60}m` : `${minutes}m`;
 }
 export function formatShipQueue(view, now = Date.now()) {
-    const lines = [];
-    if (view.holder) {
-        const h = view.holder;
+    const lines = [`slots: ${view.occupied}/${view.slots} in use`];
+    if (view.running.length === 0)
+        lines.push('running: (none)');
+    for (const h of view.running) {
         lines.push(`running: ${h.branch}  ${h.repo}  ${elapsed(h.startedAt, now)}  pid ${h.pid}`);
         lines.push(`         gate: ${h.gate}`);
         // devkit never signals it: holder.json is same-user writable, so the owner checks what runs first.
         const scope = h.pgid === undefined ? `-p ${h.pid}` : `-g ${h.pgid}`;
         lines.push(`         stuck? inspect it with: ps -o pid,lstart,command ${scope} — then stop it yourself`);
-    }
-    else {
-        lines.push('running: (none)');
     }
     if (view.waiters.length === 0)
         lines.push('waiting: (none)');

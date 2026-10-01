@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { emitGateEvent } from '../../../../gate-engine/judge/gate-events.mjs';
 import { processStartIdentity } from '../../../../gate-engine/judge/process/identity.mjs';
 import { readProcessTable } from '../review/process/process-table.mjs';
-import { acquireShipSlot, DEFAULT_PROBE, ensureRoot, holderAlive, queueRoot, readHolder, SLOT_ENV, setGuest, withSlotLock, writeGuestLocked, } from './ship-queue.mjs';
+import { acquireShipSlot, DEFAULT_PROBE, ensureRoot, holderAlive, queueRoot, findHolder, SLOT_ENV, setGuest, withSlotLock, writeGuestLocked, } from './ship-queue.mjs';
 export { SLOT_ENV };
 /** Retired: neither skips nor redirects the queue any more (see ship-machine-wide-queue). */
 export const RETIRED_ENVS = ['DEVKIT_SHIP_NO_QUEUE', 'DEVKIT_SHIP_QUEUE_DIR'];
@@ -28,8 +28,8 @@ export function joinAncestorSlot(token, root, probe, table) {
     }
 }
 function isAncestorHolder(token, root, probe, processes) {
-    const holder = readHolder(root);
-    if (!holder || holder.token !== token || !holderAlive(holder, probe))
+    const holder = findHolder(root, token)?.holder;
+    if (!holder || !holderAlive(holder, probe))
         return false;
     const seen = new Set();
     let pid = process.pid;
@@ -71,9 +71,10 @@ export async function enterShipQueue(options) {
                 }
             };
             process.once('exit', leave);
+            const slotDir = findHolder(root, inherited)?.dir ?? join(root, 'slot');
             return {
                 env: { [SLOT_RELEASE_ENV]: '' },
-                handle: { token: inherited, slotDir: join(root, 'slot'), release: leave },
+                handle: { token: inherited, slotDir, release: leave },
             };
         }
         log(`ship: ignoring a stale ${SLOT_ENV} (its holder is gone or is not an ancestor); queueing.`);
@@ -100,6 +101,13 @@ export async function enterShipQueue(options) {
         probe,
         pollMs: options.pollMs,
         log,
+        // A capacity above one is the owner's call, but it must stay countable after the fact.
+        onCapacity: (slots) => emitGateEvent({
+            type: 'gate_result',
+            gate: 'ship-queue',
+            status: 'pass',
+            detail: `ship-queue(slots:${slots})`,
+        }),
     });
     return {
         handle,
