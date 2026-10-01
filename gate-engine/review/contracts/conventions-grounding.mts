@@ -271,7 +271,7 @@ export function stagedGroundingSource(
   files: readonly string[],
   pinnedTree?: string | null,
 ): GroundingSource {
-  const tree = stagedTreeHash(cwd);
+  const tree = stagedTreeHash(cwd, 'conventions grounding freshness');
   const head = headHash(cwd);
   // `pinnedTree` is the index the judge's evidence was cut from; a restage since then grounds nothing.
   if (tree === null || head === null || (pinnedTree !== undefined && pinnedTree !== tree))
@@ -284,7 +284,7 @@ export function stagedGroundingSource(
   const literal = (file: string) => `:(top,literal)${file}`;
   return {
     reviewedFiles: files,
-    isCurrent: () => stagedTreeHash(cwd) === tree,
+    isCurrent: () => stagedTreeHash(cwd, 'conventions grounding freshness') === tree,
     readStaged: memo((file) => blob(tree, file)),
     readHead: memo((file) => blob(base, renameSource(file) ?? file)),
     // --no-color/--no-ext-diff: the consumer's git config must not change the bytes parsed here.

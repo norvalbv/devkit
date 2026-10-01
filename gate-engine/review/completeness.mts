@@ -132,7 +132,7 @@ function snapshotStaged(cwd: string): StagedSnapshot {
   try {
     // HEAD before the tree: a commit landing in between widens the evidence, never splits it.
     const base = headTreeish(cwd);
-    const tree = stagedTreeHash(cwd);
+    const tree = stagedTreeHash(cwd, 'completeness evidence identity — falling back to --cached');
     if (!tree) return { range: ['--cached'], identity: null };
     const range = [base, tree];
     // Blob ids as bytes, never decoded: patch text can't tell binaries apart; UTF-8 merges paths.
