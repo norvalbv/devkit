@@ -13,7 +13,11 @@ import {
 
 const REPO = path.resolve(import.meta.dirname, '../..');
 const SETUP = path.join(REPO, 'vitest.setup.mjs');
-const SHIP_SCRIPTS = ['cli/lib/ship/ship-branch.sh', 'cli/lib/ship/run-gates-with-capture.sh'];
+const SHIP_SCRIPTS = [
+  'cli/lib/ship/ship-branch.sh',
+  'cli/lib/ship/run-gates-with-capture.sh',
+  'cli/lib/ship/commit-with-gate-capture.sh',
+];
 
 const read = (rel: string) => readFileSync(path.join(REPO, rel), 'utf8');
 

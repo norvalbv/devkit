@@ -20,6 +20,14 @@ command. Do not pre-run every gate or replace the managed chain with a hand-writ
    stages and `--resume` replays the
    recorded invocation byte-identically, so restarting with different flags or a re-typed body
    usually wastes work and can discard useful evidence.
+   **Re-check a named deterministic failure before re-shipping.** The `✗ deterministic gates
+   failed` block ends with the command that re-judges each failed gate (anti-slop's documented form
+   is `devkit anti-slop check --staged`). Stage the fix and run that line — seconds, no judges.
+   Under `devkit ship` those lines judge your checkout's index, not the briefed paths, so the ship
+   block also prints the `devkit ship <branch> "<title>" --dry-gates …` invocation that re-runs the
+   deterministic set on ship's exact staging. A hand-rolled substitute (`npx oxlint …` against the
+   anti-slop config) ignores the baseline and cannot reproduce the new-versus-inherited verdict.
+   This re-checks a gate that already named itself; it is not a licence to pre-run every gate.
 3. **Check which files the gates actually had.** A ship's gate worktree is cut from the base, so
    every path NOT in the ship's brief is judged at its **base** content — that is how a clone gate
    reports a duplication against a symbol you already moved, or a drift in a file that verifies clean
