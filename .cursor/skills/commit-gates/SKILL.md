@@ -59,6 +59,9 @@ command. Do not pre-run every gate or replace the managed chain with a hand-writ
   base, so `git show HEAD:<file>`, `grep` and `git diff --stat` in your own checkout can all agree
   with each other and still describe a different tree. Waive on evidence read from the reviewed
   base, and pass the `--base` the block note prints so the record says which tree you checked.
+  A lens PASS is one sample from a nondeterministic judge, not a certificate that its concern is
+  clean. A later attempt can fail the same lens on code you did not touch. Treat that as an
+  ordinary finding and fix it: it was missed, not caused by your last edit.
 - **A counterexample stands for a class.** A correctness finding against a matcher, parser,
   predicate or validator names ONE input the check gets wrong. Before re-shipping, name the property
   that makes it wrong, list the other inputs that share it (every character that continues a path,

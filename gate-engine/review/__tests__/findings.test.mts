@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CLASS_FIX_HINT,
   CLASSIFICATION_LENS,
+  issueLocations,
   renderFindingsBlock,
   renderFindingsBlockForParts,
   summarizeFindings,
@@ -238,5 +239,16 @@ describe('class-fix hint for classification findings', () => {
     ]);
     expect(s.lines).toHaveLength(12);
     expect(s.blockingLenses).toEqual([CLASSIFICATION_LENS, 'state-transitions']);
+  });
+});
+
+describe('issueLocations', () => {
+  it('returns every cited file:line in order, and none for prose or host:port', () => {
+    expect(issueLocations('src/a.ts:12 reads what /abs/lib/b.mts:3 writes')).toEqual([
+      { file: 'src/a.ts', line: 12 },
+      { file: '/abs/lib/b.mts', line: 3 },
+    ]);
+    expect(issueLocations('db.internal:5432 times out')).toEqual([]);
+    expect(issueLocations('')).toEqual([]);
   });
 });
