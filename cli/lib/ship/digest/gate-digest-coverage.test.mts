@@ -76,7 +76,11 @@ describe('summarise — partial evidence packets', () => {
       SHIP,
     );
     expect(rows).toEqual([
-      expect.objectContaining({ gate: 'review:conventions-reviewer', state: 'finding', blocking: true }),
+      expect.objectContaining({
+        gate: 'review:conventions-reviewer',
+        state: 'finding',
+        blocking: true,
+      }),
     ]);
   });
 
@@ -122,12 +126,13 @@ describe('summarise — partial evidence packets', () => {
         gate: 'review:api-security-reviewer',
         state: 'unverified',
         blocking: false,
-        detail: 'PASS over an incomplete packet: 0 file(s) omitted, 1 truncated — not shown: src/b.mts',
+        detail:
+          'PASS over an incomplete packet: 0 file(s) omitted, 1 truncated — not shown: src/b.mts',
       },
     ]);
   });
 
-  it('keeps a cached PASS\'s base-drift reason when its packet was also partial', () => {
+  it("keeps a cached PASS's base-drift reason when its packet was also partial", () => {
     const [row] = summarise(
       [
         ev({
@@ -147,11 +152,20 @@ describe('summarise — partial evidence packets', () => {
 
   it('keeps the earlier-diff warning when a reused cached PASS was also partial', () => {
     const [row] = summarise(
-      [ev({ type: 'cache_hit', judge: 'review:conventions-reviewer', diff_matches: false, ...partial })],
+      [
+        ev({
+          type: 'cache_hit',
+          judge: 'review:conventions-reviewer',
+          diff_matches: false,
+          ...partial,
+        }),
+      ],
       SHIP,
     );
     expect(row.detail).toContain('incomplete packet');
-    expect(row.detail).toContain('cached PASS judged an earlier diff — this diff was not re-judged');
+    expect(row.detail).toContain(
+      'cached PASS judged an earlier diff — this diff was not re-judged',
+    );
   });
 
   it('emits one row per reviewer when pre-commit and commit-msg both replay the partial PASS', () => {

@@ -352,7 +352,9 @@ const cacheGate = (e: GateEvent): string =>
 
 /** A PASS reused across a reshaped diff (sc-3175), or ''. `=== false`: an absent field covers it. */
 const earlierDiffDetail = (e: GateEvent): string =>
-  e.diff_matches === false ? 'cached PASS judged an earlier diff — this diff was not re-judged' : '';
+  e.diff_matches === false
+    ? 'cached PASS judged an earlier diff — this diff was not re-judged'
+    : '';
 
 /** A PASS judged on an earlier base whose reviewed paths moved (sc-3468), or ''. An absent
  * base_state (non-review emitters) or 'moved-clear' stays a ✓ — base-drift-surfaced-at-read-time (b). */
@@ -390,7 +392,10 @@ function partialPacketDetail(e: GateEvent): string {
     .filter(Boolean);
   const more = paths.length > PATHS_SHOWN || omitted > PATHS_SHOWN ? ', …' : '';
   const named = paths.length
-    ? ` — not shown: ${paths.slice(0, PATHS_SHOWN).map((p) => oneLine(p)).join(', ')}${more}`
+    ? ` — not shown: ${paths
+        .slice(0, PATHS_SHOWN)
+        .map((p) => oneLine(p))
+        .join(', ')}${more}`
     : '';
   const cached = e.type === 'cache_hit' ? 'cached ' : '';
   return `${cached}PASS over an incomplete packet${lens}: ${omitted}${total} file(s) omitted, ${count(e.evidence_truncated_files)} truncated${named}`;
