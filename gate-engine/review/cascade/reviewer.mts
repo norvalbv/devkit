@@ -26,7 +26,7 @@ import {
   wrapConventionsPrompt,
   wrapPrompt,
 } from '../reviewers.mts';
-import { enforceChecklistContract } from '../contracts/checklist.mts';
+import { enforceChecklistContract, retrievalDegradation } from '../contracts/checklist.mts';
 import {
   agentBody,
   cleanupChecklistState,
@@ -136,9 +136,11 @@ export async function runCascade(
       readState: () => readChecklistState(cwd, sel.reviewer),
       stagedDiff: () => gitCached(cwd, [], sel.files),
     });
-    attachItems(res, readChecklistState(cwd, sel.reviewer) ?? captureState, disposition, {
-      full: opts.fullItems,
-    });
+    const finalState = readChecklistState(cwd, sel.reviewer) ?? captureState;
+    attachItems(res, finalState, disposition, { full: opts.fullItems });
+    // Read before the finally deletes the artifact — the flag lives nowhere else (sc-2317).
+    const degraded = retrievalDegradation(sel.reviewer.name, finalState, res.status);
+    if (degraded) res.degraded = degraded;
     return res;
   } finally {
     cleanupChecklistState(cwd, sel.reviewer);

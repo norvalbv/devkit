@@ -35,7 +35,7 @@
 
 import { z } from 'zod';
 import { diffCacheIdentity } from '../../judge/diff-focus.mts';
-import { storedBaseSchema } from '../evidence/base-context.mts';
+import { cachedRetrievalDegradation, storedBaseSchema } from '../evidence/base-context.mts';
 import { planChunkedParts, resolveChunkCap } from './chunk-tasks.mts';
 import { deriveLensReviewer, lensGroupId, resolveLensGroups } from './groups.mts';
 // Re-exported so every existing importer's path keeps working after the guard-size split.
@@ -252,6 +252,7 @@ export interface CachedHit {
   files: string[];
   judgedBases: (string | null)[];
   part: boolean; // a split part's line has always read `cached PASS (identical)`
+  degradedCause?: string; // sc-2317: a DEGRADED PASS replays as DEGRADED, never as a bare PASS
 }
 
 /** One scope row's inputs; `judgedBases` = stored bases of whichever parts were served from cache. */
@@ -364,7 +365,8 @@ export function planReviewWork(
         judgedBases,
         coverage: coverageFields(parts),
       });
-      cachedHits.push({ label: name, files: sel.files, judgedBases, part: false });
+      const degradedCause = cachedRetrievalDegradation(name, cache[parts[0].key]);
+      cachedHits.push({ label: name, files: sel.files, judgedBases, part: false, degradedCause });
       continue;
     }
     for (const p of parts) {
@@ -379,10 +381,8 @@ export function planReviewWork(
         part: true,
       });
       if (!p.splitOf) continue;
-      // Rebuild the part WITH its cached aggregates (sc-1475): a spilled part's `items` never
-      // reached the cache entry (undefined is dropped by JSON), so itemCount/itemTally are the
-      // only proof the artifact existed — without them mergeItemVectors reads the part as
-      // "never ran" and the merged review_result silently omits a real lens group.
+      // Rebuild the part WITH its cached aggregates (sc-1475): a spilled part's items never reach the
+      // cache, so itemCount/itemTally alone prove it ran — else the merge silently drops a lens group.
       const e = cache[p.key];
       const held = splitParts.get(p.splitOf) ?? [];
       held.push({

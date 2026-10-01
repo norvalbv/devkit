@@ -80,10 +80,20 @@ export interface ChecklistState {
   /** Named reason the checklist deliberately enumerated nothing (sc-1439) — a valid empty
    * artifact, distinct from an absent one, which still voids a PASS. */
   skipped?: string;
+  /** Whether commit-guard's semantic duplicate retrieval ran, as `finalize --retrieval` recorded
+   * it (sc-2317). Untrusted JSON — read only through `retrievalSchema`. */
+  retrieval?: unknown;
 }
 
 // Parsed, never truthiness-checked (sc-3400): a non-string or whitespace-only reason explains nothing.
 const skipReasonSchema = z.string().trim().min(1);
+
+/** The recorded retrieval outcome. Anything else — absent, a typo'd status, a blank cause — is not
+ * evidence that retrieval ran, so the gate reads it as DEGRADED rather than as `ok`. */
+export const retrievalSchema = z.discriminatedUnion('status', [
+  z.object({ status: z.literal('ok') }),
+  z.object({ status: z.literal('unavailable'), cause: skipReasonSchema }),
+]);
 
 /**
  * Independent verification of the checklist artifact the judge's workflow left behind — the
@@ -205,6 +215,9 @@ export interface ReviewOutcome {
    * global default — a sonnet-pinned reviewer's verdict labeled 'haiku' sends readers of the
    * usage dashboard chasing a model downgrade that never happened. */
   model?: string;
+  /** Set only on a PASS whose core check did not fully run (sc-2317: commit-guard without semantic
+   * retrieval). The verdict stands, but must never render as a bare PASS, live or cached. */
+  degraded?: { cause: string };
 }
 
 export function agentBody(

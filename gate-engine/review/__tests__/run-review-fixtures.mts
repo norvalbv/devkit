@@ -186,7 +186,22 @@ export const mkExec = (impl) => vi.fn(impl);
 export const reviewerFromLabel = (label) =>
   REVIEWERS.find((r) => label === `review:${r.name}` || label === `review:${r.name}:escalate`);
 
-export function writeArtifact(repo, label, { pending = 0, failed = 0 } = {}): void {
+/** What a judge may leave in commit-guard's `retrieval` field — malformed shapes included, since
+ * the gate must treat those as unrecorded (sc-2317). `null` = the judge recorded nothing. */
+export type RetrievalFixture = { status: string; cause?: string } | string | null;
+
+const RETRIEVAL_OK: RetrievalFixture = { status: 'ok' };
+
+// commit-guard's `retrieval` defaults to what a current judge records when search ran.
+export function writeArtifact(
+  repo,
+  label,
+  {
+    pending = 0,
+    failed = 0,
+    retrieval = RETRIEVAL_OK,
+  }: { pending?: number; failed?: number; retrieval?: RetrievalFixture } = {},
+): void {
   const reviewer = reviewerFromLabel(label);
   // A skill-less reviewer (conventions-reviewer) has no checklist stateFile — nothing to write;
   // its PASS is trusted directly (see run-review.mts's `hasChecklist` branch).
@@ -201,7 +216,12 @@ export function writeArtifact(repo, label, { pending = 0, failed = 0 } = {}): vo
     ...Array.from({ length: pending }, (_, i) => mk('pending', i + 1)),
     ...Array.from({ length: failed }, (_, i) => mk('fail', i + 1)),
   ];
-  writeFileSync(join(repo, reviewer.stateFile), JSON.stringify({ [key]: rows }));
+  // JSON.stringify drops an undefined `retrieval`, which is exactly the "recorded nothing" shape.
+  const recorded = reviewer.name === 'commit-guard' && retrieval !== null ? retrieval : undefined;
+  writeFileSync(
+    join(repo, reviewer.stateFile),
+    JSON.stringify({ [key]: rows, retrieval: recorded }),
+  );
 }
 
 // PASS judge that honours the checklist contract (writes a complete artifact).

@@ -37,6 +37,7 @@ import { reportGateInfraFailure } from '../judge/odb-probe.mts';
 import { execJudgeAsync, strictRemedy } from '../judge/run-judge.mts';
 import { loadCache } from './cache.mts';
 import { type CascadeResult, runCascade } from './cascade/reviewer.mts';
+import { reportRetrievalDegraded } from './contracts/checklist.mts';
 import { ENGINE_ERROR_REMEDY, RESPONSE_CONTRACT_REMEDY } from './contracts/response.mts';
 import {
   baseProvenanceLines,
@@ -312,12 +313,13 @@ export async function runReviewGate(
     emitReviewScope(s.sel, s.diff, promptIdentity(s.sel), s.cached, ctx.scopeFields, cwd, {
       cachedBase: baseOf.get(s.sel.reviewer.name) ?? null,
     });
-  for (const hit of plan.cachedHits)
+  for (const hit of plan.cachedHits) {
     console.error(
       cachedPassLine(
         hit.label,
         baseOf.get(hit.label) ?? cachedBaseState(cwd, hit.judgedBases, hit.files),
         hit.part ? 'identical' : 'identical diff',
+        hit.degradedCause !== undefined,
       ) +
         // A part's packet is cut from its own files (a chunk's, or the whole scope for a lens).
         partialEvidenceNote(
@@ -326,6 +328,8 @@ export async function runReviewGate(
             : (plan.fullyCached.find((c) => c.name === hit.label)?.coverage ?? {}),
         ),
     );
+    if (hit.degradedCause) reportRetrievalDegraded(hit.label, hit.degradedCause);
+  }
   // Before any verdict AND before the fully-cached early return below (sc-2480).
   const fresh = new Set(plan.tasks.map((t) => t.base.reviewer.name)).size;
   for (const line of baseProvenanceLines(
