@@ -19,7 +19,9 @@ import {
   emitFields,
   freshRecordStamp,
   handlePathCodecCommand,
+  NO_RECORD,
   originRepo,
+  printGeneration,
   provenBool,
   provenString,
   provenStrings,
@@ -144,7 +146,7 @@ export function writeIntent(
       } catch {
         onDisk = null; // absent/torn — nothing to merge or protect
       }
-      const onDiskGen = onDisk && provenString(onDisk.generation);
+      const onDiskGen = (onDisk && provenString(onDisk.generation)) || NO_RECORD;
       if (opts.expectGeneration !== undefined && onDiskGen !== opts.expectGeneration) {
         superseded = true;
         // A losing resume contributes only its explicitly briefed donatePaths. Its stale recorded
@@ -277,7 +279,7 @@ export function readIntent(
     raw = readFileSync(file, 'utf8');
   } catch {
     return {
-      reason: `no recorded ship invocation for '${branch}' — run the full devkit ship command once (it records on every attempt)`,
+      reason: `no recorded ship invocation for '${branch}' — run the full devkit ship command once (an attempt records once it reaches the blocking preflights; argument, branch and nothing-to-commit refusals and --dry-gates never record)`,
     };
   }
   let m: unknown;
@@ -473,6 +475,7 @@ function main(): number {
   }
   if (sub === 'body-drift')
     return reportBodyDrift(readIntent(root, branch), values.get('generation'));
+  if (sub === 'generation') return printGeneration(intentFile(root, branch));
   if (sub === 'owns') {
     const generation = values.get('generation');
     if (!generation) return fail('owns: missing --generation');
@@ -486,7 +489,7 @@ function main(): number {
       paths.length > 0 ? paths : undefined,
     );
   return fail(
-    `unknown subcommand '${String(sub)}' (write|read|body-drift|owns|delete|validate-paths|validate-membership|filter-membership|frozen-drift)`,
+    `unknown subcommand '${String(sub)}' (write|read|body-drift|generation|owns|delete|validate-paths|validate-membership|filter-membership|frozen-drift)`,
   );
 }
 

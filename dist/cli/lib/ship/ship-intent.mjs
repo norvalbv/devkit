@@ -10,7 +10,7 @@ import { pathToFileURL } from 'node:url';
 import { devkitVersion } from '../../../gate-engine/devkit-version.mjs';
 import { emitShipIntentEvent } from './ship-intent-event.mjs';
 import { fail, parseArgs } from './ship-intent-args.mjs';
-import { advisoryBodyFile, bindSourceMembershipForWrite, cleanupDeletedSourceMembershipRefs, cleanupFailedSourceMembership, cleanupReplacedSourceMembership, emitFields, freshRecordStamp, handlePathCodecCommand, originRepo, provenBool, provenString, provenStrings, reportBodyDrift, sourceMembershipMatches, } from './ship-intent-codec.mjs';
+import { advisoryBodyFile, bindSourceMembershipForWrite, cleanupDeletedSourceMembershipRefs, cleanupFailedSourceMembership, cleanupReplacedSourceMembership, emitFields, freshRecordStamp, handlePathCodecCommand, NO_RECORD, originRepo, printGeneration, provenBool, provenString, provenStrings, reportBodyDrift, sourceMembershipMatches, } from './ship-intent-codec.mjs';
 import { withLock } from '../atomic-write.mjs';
 const LEGACY_EXPLICIT_SCHEMA_VERSION = 1;
 const EXPLICIT_SCHEMA_VERSION = 2;
@@ -96,7 +96,7 @@ export function writeIntent(opts, paths) {
             catch {
                 onDisk = null; // absent/torn — nothing to merge or protect
             }
-            const onDiskGen = onDisk && provenString(onDisk.generation);
+            const onDiskGen = (onDisk && provenString(onDisk.generation)) || NO_RECORD;
             if (opts.expectGeneration !== undefined && onDiskGen !== opts.expectGeneration) {
                 superseded = true;
                 // A losing resume contributes only its explicitly briefed donatePaths. Its stale recorded
@@ -225,7 +225,7 @@ export function readIntent(root, branch, nowMs = Date.now()) {
     }
     catch {
         return {
-            reason: `no recorded ship invocation for '${branch}' — run the full devkit ship command once (it records on every attempt)`,
+            reason: `no recorded ship invocation for '${branch}' — run the full devkit ship command once (an attempt records once it reaches the blocking preflights; argument, branch and nothing-to-commit refusals and --dry-gates never record)`,
         };
     }
     let m;
@@ -423,6 +423,8 @@ function main() {
     }
     if (sub === 'body-drift')
         return reportBodyDrift(readIntent(root, branch), values.get('generation'));
+    if (sub === 'generation')
+        return printGeneration(intentFile(root, branch));
     if (sub === 'owns') {
         const generation = values.get('generation');
         if (!generation)
@@ -431,7 +433,7 @@ function main() {
     }
     if (sub === 'delete')
         return deleteIntent(root, branch, values.get('generation'), paths.length > 0 ? paths : undefined);
-    return fail(`unknown subcommand '${String(sub)}' (write|read|body-drift|owns|delete|validate-paths|validate-membership|filter-membership|frozen-drift)`);
+    return fail(`unknown subcommand '${String(sub)}' (write|read|body-drift|generation|owns|delete|validate-paths|validate-membership|filter-membership|frozen-drift)`);
 }
 // CLI entrypoint only; realpath keeps the guard correct through a symlinked module directory.
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href)

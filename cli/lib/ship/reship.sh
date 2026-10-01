@@ -597,11 +597,9 @@ PREFLIGHT_HINT=
 # ship it never needs refs/heads/$BR free — and being checked out on the branch being re-pushed is
 # the normal way to reach `--pr`, not a problem to report.
 ship_reclaim_orphan_worktrees "$PWD" "$BR" reship || exit 1
-ship_size_preflight "$ROOT" "$BASE" "${PATHS[@]}"
-# See ship-branch.sh: advisory judge reachability, before the deterministic chain is paid.
+# See ship-branch.sh: advisory judge reachability, before the deterministic chain is paid. Fail-open;
+# the BLOCKING preflights run after the intent write below so a refusal stays resumable (sc-2535).
 ship_judge_preflight "$ROOT"
-# See ship-branch.sh (sc-3883): a missing hook dir refuses before the worktree, not inside it.
-gate_hook_source_preflight "$ROOT" "$BASE" shipping || exit 1
 
 WT="${TMPDIR:-/tmp}/devkit-reship-${BR//\//-}-$$"
 # Body: --body "<text>" wins (explicit, no temp file); then --body-file; then — on --resume — the
@@ -685,9 +683,13 @@ rewrite_publish_lock_release
 # for an attempt that was never recorded.
 export DEVKIT_SHIP_INTENT_RECORDED=$([ -n "$SHIP_INTENT_GENERATION" ] && echo 1 || echo 0)
 
-# Match new-ship: run against the caller checkout after recording so an omitted artifact can ride
-# `--resume <branch> -- <artifact>`, but before the detached worktree hides ignored dist output.
-# The helper remains a no-op for every consumer repo.
+# The blocking preflights, after recording like new-ship's (sc-2389, sc-2535): a refusal leaves this
+# invocation replayable via `devkit ship --resume <branch>`, and each still runs against the caller
+# checkout before the detached worktree exists. See ship-branch.sh (sc-3883) for the hook-dir check.
+ship_size_preflight "$ROOT" "$BASE" "${PATHS[@]}"
+gate_hook_source_preflight "$ROOT" "$BASE" shipping || exit 1
+# An omitted artifact rides `--resume <branch> -- <artifact>`; dist integrity runs before the detached
+# worktree hides ignored dist output. The helper remains a no-op for every consumer repo.
 DIST_INTEGRITY="$SCRIPT_DIR/dist-integrity.mts"
 [ -f "$DIST_INTEGRITY" ] || DIST_INTEGRITY="$SCRIPT_DIR/dist-integrity.mjs"
 node "$DIST_INTEGRITY" --root "$ROOT" --base "$BASE" -- "${PATHS[@]}"
