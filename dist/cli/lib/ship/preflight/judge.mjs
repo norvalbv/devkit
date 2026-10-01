@@ -92,7 +92,8 @@ export function renderPreflight(statuses, now = Date.now()) {
         const detail = [];
         if (s.usedPercent !== undefined) {
             const window = s.windowMins === undefined ? 'window' : `${describeWindow(s.windowMins)} window`;
-            detail.push(`${Math.round(s.usedPercent)}% of a ${window} used`);
+            // Floor, never round: 99.6 rendered as "100% … reachable" contradicts itself (sc-3207).
+            detail.push(`${Math.floor(s.usedPercent)}% of a ${window} used`);
         }
         if (s.state === 'rate-limited' && s.resetsAt !== undefined)
             detail.push(`resets in ${formatResetDelta(s.resetsAt, now)}`);
@@ -104,7 +105,7 @@ export function renderPreflight(statuses, now = Date.now()) {
                 : s.state === 'unauthenticated'
                     ? `\`${s.bin}\` not authenticated`
                     : s.state === 'rate-limited'
-                        ? 'USAGE LIMIT REACHED'
+                        ? 'EXHAUSTED — USAGE LIMIT REACHED'
                         : 'not verified';
         lines.push(`  ${s.role}: ${s.model} via ${s.bin} — ${verdict}${suffix}`);
     }

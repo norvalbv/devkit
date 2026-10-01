@@ -31,6 +31,10 @@ unset DEVKIT_MANAGED_SIGNAL_ROOT
 export GIT_TERMINAL_PROMPT=0
 export GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -o BatchMode=yes}"
 
+# Before any work: the machine-wide queue slot must carry this process group, or this ship must not run.
+. "$(dirname "${BASH_SOURCE[0]}")/queue/slot.sh"
+ship_queue_slot_register
+
 # `--pr` is the MODE flag: ship.mts routes on it, then forwards argv VERBATIM — so it still arrives
 # here, and wherever the caller put it. Strip a LEADING one before reading positionals; the parse loop
 # below drops a trailing one. Without this, the spelling the help text itself documents
@@ -75,6 +79,7 @@ PATHS=()
 BASE_FLAG=""
 BODY_SET=0         # --body given? else --body-file, else stdin (back-compat)
 BODY_FILE_SET=0    # --body-file <path>: author the body once in a file; survives every retry
+BODY_FILE_PREREAD_SET=0  # --resume banner's one --body-file read: 1 = bytes kept, 2 = failed (latched)
 UPDATE_PR_BODY=0   # explicit body flag? Refresh the existing PR too; recorded across --resume
 QAVIS_PUBLISH=1    # suppresses only the post-push description write, never the staged gate
 READY=0            # --ready marks the PR ready-for-review after the push lands
@@ -209,6 +214,14 @@ rewrite_remote() {
   fi
   node "$REWRITE_REMOTE_SUPERVISOR" 60 -- "$@"
 }
+# The open PR's identity for the rewrite lease. baseRefOid is deliberately absent: GitHub snapshots
+# it at the PR's last head push and never advances it as the base moves, so it cannot be compared
+# with a live base tip and must not make two reads of an unchanged PR differ (sc-2739).
+rewrite_pr_identity() {
+  rewrite_remote gh pr view "$BR" --repo "$REPO" \
+    --json number,state,headRefName,headRefOid,headRepository,baseRefName,url \
+    --jq '[.number,.state,.headRefName,.headRefOid,(.headRepository.nameWithOwner // ""),.baseRefName,.url] | @tsv' 2>/dev/null
+}
 # Resolve owner/repo from origin (best-effort — only used for the final PR-URL print, which falls
 # back to a plain message; a non-GitHub origin still re-pushes fine).
 ORIGIN_URL=$(git config --get remote.origin.url || git remote get-url origin)
@@ -254,7 +267,11 @@ fi
 # the exact misdescription this listing exists to prevent (sc-2299). Still far ahead of the gate
 # chain, so a stale-but-valid record is visible before the multi-minute wait, not after it.
 if [ "$RESUME" -eq 1 ]; then
-  echo "Resuming recorded invocation for $BR (--pr): \"$TITLE\" — ${#PATHS[@]} paths, body $(printf '%s' "$RESUME_BODY" | wc -c | tr -d ' ') bytes, recorded $RESUME_CREATED" >&2
+  . "$SCRIPT_DIR/read-stdin-body.sh"
+  ship_resume_body_note
+  # Under --pr the body reaches the PR only when a body flag asked for it (now or as recorded).
+  if [ "$UPDATE_PR_BODY" -eq 1 ]; then si_pr_effect="commit + PR body"; else si_pr_effect="commit only, PR body kept"; fi
+  echo "Resuming recorded invocation for $BR (--pr): \"$TITLE\" — ${#PATHS[@]} paths, $SHIP_BODY_NOTE ($si_pr_effect), recorded $RESUME_CREATED" >&2
   for p in "${PATHS[@]}"; do
     si_extra=
     for q in ${RESUME_EXTRA_PATHS[@]+"${RESUME_EXTRA_PATHS[@]}"}; do [ "$q" = "$p" ] && { si_extra=1; break; }; done
@@ -276,6 +293,10 @@ fi
 # origin/* tracking ref, so parallel ship/review processes cannot change the objects being proved.
 REWRITE_HEAD_REF=""
 REWRITE_BASE_REF=""
+# The oid REWRITE_BASE_REF holds right now. NOT $BASE: the gated parent stays put when a forward-base
+# fetch re-pins the ref, and receipt re-anchoring moves BASE off it, so cleanup keyed on BASE would
+# fail its compare-and-delete and leak the ref.
+REWRITE_BASE_PIN=""
 EXPECTED_REMOTE=""
 REQUIRED_SCOPE_FILE=""
 REWRITE_FETCH_ERR=""
@@ -289,7 +310,7 @@ rewrite_ref_cleanup() {
     [ -z "$cleanup_oid" ] || git update-ref -d "$REWRITE_HEAD_REF" "$cleanup_oid" 2>/dev/null || true
   fi
   if [ -n "$REWRITE_BASE_REF" ]; then
-    cleanup_oid=${BASE:-$(git rev-parse -q --verify "$REWRITE_BASE_REF" 2>/dev/null || true)}
+    cleanup_oid=${REWRITE_BASE_PIN:-$(git rev-parse -q --verify "$REWRITE_BASE_REF" 2>/dev/null || true)}
     [ -z "$cleanup_oid" ] || git update-ref -d "$REWRITE_BASE_REF" "$cleanup_oid" 2>/dev/null || true
   fi
   [ -z "$REQUIRED_SCOPE_FILE" ] || rm -f "$REQUIRED_SCOPE_FILE"
@@ -485,6 +506,7 @@ if [ "$REWRITE" -eq 1 ]; then
   fi
   EXPECTED_REMOTE=$(git rev-parse "$REWRITE_HEAD_REF")
   BASE=$(git rev-parse "$REWRITE_BASE_REF")
+  REWRITE_BASE_PIN=$BASE
   if [ "$RESUME" -eq 1 ] && [ "$UPDATE_PR_BODY" -eq 1 ]; then
     BODY_RECEIPT_REF="$BODY_RECEIPT_PREFIX/$BR/$EXPECTED_REMOTE"
     BODY_PAYLOAD_REF="$BODY_PAYLOAD_PREFIX/$BR/$EXPECTED_REMOTE"
@@ -492,23 +514,37 @@ if [ "$REWRITE" -eq 1 ]; then
     [ "$BODY_RECEIPT" != "$EXPECTED_REMOTE" ] || REWRITE_RECEIPT_PROVEN=1
   fi
 
-  PR_FIELDS=$(rewrite_remote gh pr view "$BR" --repo "$REPO" \
-    --json number,state,headRefName,headRefOid,headRepository,baseRefName,baseRefOid,url \
-    --jq '[.number,.state,.headRefName,.headRefOid,(.headRepository.nameWithOwner // ""),.baseRefName,.baseRefOid,.url] | @tsv' 2>/dev/null) || {
+  PR_FIELDS=$(rewrite_pr_identity) || {
       echo "cannot inspect the open PR for origin/$BR" >&2; exit 1
     }
-  IFS=$'\t' read -r PR_NUM PR_STATE PR_HEAD_REF PR_HEAD_OID PR_HEAD_REPO PR_BASE_REF PR_BASE_OID PR_URL <<< "$PR_FIELDS"
+  IFS=$'\t' read -r PR_NUM PR_STATE PR_HEAD_REF PR_HEAD_OID PR_HEAD_REPO PR_BASE_REF PR_URL <<< "$PR_FIELDS"
   case "$PR_NUM" in *[!0-9]*|'') echo "PR identity response is malformed" >&2; exit 1 ;; esac
   [ "$PR_STATE" = "OPEN" ] || { echo "refusing rewrite: PR #$PR_NUM is not open (state $PR_STATE)" >&2; exit 1; }
   [ "$PR_HEAD_REF" = "$BR" ] && [ "$PR_HEAD_OID" = "$EXPECTED_REMOTE" ] && [ "$PR_HEAD_REPO" = "$REPO" ] || {
     echo "refusing rewrite: open PR head identity does not match origin/$BR at $EXPECTED_REMOTE" >&2; exit 1
   }
-  [ "$PR_BASE_REF" = "$BASE_REF" ] && [ "$PR_BASE_OID" = "$BASE" ] || {
-    echo "refusing rewrite: PR #$PR_NUM targets $PR_BASE_REF at $PR_BASE_OID, not origin/$BASE_REF at $BASE" >&2; exit 1
+  # Only the base NAME is leased. The base tip's freshness is proven locally by the containment check
+  # below, and history safety by the exact head-OID lease on the push (sc-2739).
+  [ "$PR_BASE_REF" = "$BASE_REF" ] || {
+    echo "refusing rewrite: PR #$PR_NUM targets $PR_BASE_REF, not $BASE_REF" >&2
+    echo "  re-run with --base $PR_BASE_REF" >&2
+    exit 1
   }
+  # A retained receipt whose published replacement sits on an OLDER tip of this same base keeps that
+  # tip: the base moving on after publication must not strand bookkeeping-only recovery, and the
+  # replacement's scope is measured against the parent it was actually gated on.
+  if [ "$REWRITE_RECEIPT_PROVEN" -eq 1 ]; then
+    PUBLISHED_BASE=$(git rev-parse -q --verify "$EXPECTED_REMOTE^" 2>/dev/null || true)
+    if [ -n "$PUBLISHED_BASE" ] && [ "$PUBLISHED_BASE" != "$BASE" ] &&
+       git merge-base --is-ancestor "$PUBLISHED_BASE" "$BASE" 2>/dev/null; then
+      BASE=$PUBLISHED_BASE
+    fi
+  fi
   git merge-base --is-ancestor "$BASE" HEAD || {
     echo "refusing rewrite: origin/$BASE_REF is not an ancestor of the caller checkout" >&2
-    echo "  devkit publishes the prepared resolution; rebase or merge the PR base first" >&2
+    echo "  devkit publishes the prepared resolution; it does not perform the rebase or merge. First:" >&2
+    echo "    git fetch origin $BASE_REF && git rebase origin/$BASE_REF   (or: git merge origin/$BASE_REF)" >&2
+    echo "  resolve any conflicts, then re-run this same ship command" >&2
     exit 1
   }
 
@@ -581,6 +617,9 @@ WT="${TMPDIR:-/tmp}/devkit-reship-${BR//\//-}-$$"
 # forever. Back-compat stdin remains commit-only under --pr; omitting both flags preserves PR text.
 . "$SCRIPT_DIR/read-stdin-body.sh"
 if [ "$BODY_SET" -eq 1 ]; then BODY="$BODY_FLAG"
+elif [ "$BODY_FILE_SET" -eq 1 ] && [ "$BODY_FILE_PREREAD_SET" -eq 1 ]; then BODY="$BODY_FILE_PREREAD" # the bytes the --resume banner sized
+elif [ "$BODY_FILE_SET" -eq 1 ] && [ "$BODY_FILE_PREREAD_SET" -eq 2 ]; then
+  echo "--body-file: $BODY_FILE_PREREAD_ERR: $BODY_FILE_FLAG" >&2; exit 1 # as the banner said; never re-read
 elif [ "$BODY_FILE_SET" -eq 1 ]; then
   [ -f "$BODY_FILE_FLAG" ] || { echo "--body-file: no such file: $BODY_FILE_FLAG" >&2; exit 1; }
   # cat + sentinel, never $(<file): command substitution strips EVERY trailing newline, silently
@@ -937,19 +976,12 @@ if [ "$REWRITE_ALREADY_PUBLISHED" -eq 1 ]; then
     echo "reship: recorded rewrite recovery refused: its intent was superseded" >&2
     exit 1
   }
-  RECOVERY_PR_FIELDS=$(rewrite_remote gh pr view "$BR" --repo "$REPO" \
-    --json number,state,headRefName,headRefOid,headRepository,baseRefName,baseRefOid,url \
-    --jq '[.number,.state,.headRefName,.headRefOid,(.headRepository.nameWithOwner // ""),.baseRefName,.baseRefOid,.url] | @tsv' 2>/dev/null) || {
+  RECOVERY_PR_FIELDS=$(rewrite_pr_identity) || {
       echo "reship: recorded rewrite recovery refused: cannot re-check PR identity" >&2
       exit 1
     }
   [ "$RECOVERY_PR_FIELDS" = "$PR_FIELDS" ] || {
     echo "reship: recorded rewrite recovery refused: PR head/base identity changed after preflight" >&2
-    exit 1
-  }
-  RECOVERY_BASE=$(rewrite_remote git ls-remote --heads origin "refs/heads/$BASE_REF" | awk 'NR == 1 { print $1 }')
-  [ "$RECOVERY_BASE" = "$BASE" ] || {
-    echo "reship: recorded rewrite recovery refused: origin/$BASE_REF moved after preflight" >&2
     exit 1
   }
   RECOVERY_REMOTE_HEAD=$(rewrite_remote git ls-remote --heads origin "refs/heads/$BR" | awk 'NR == 1 { print $1 }')
@@ -1014,20 +1046,34 @@ if [ "$UPDATE_PR_BODY" -eq 1 ]; then
   fi
 fi
 if [ "$REWRITE" -eq 1 ]; then
-  CURRENT_PR_FIELDS=$(rewrite_remote gh pr view "$BR" --repo "$REPO" \
-    --json number,state,headRefName,headRefOid,headRepository,baseRefName,baseRefOid,url \
-    --jq '[.number,.state,.headRefName,.headRefOid,(.headRepository.nameWithOwner // ""),.baseRefName,.baseRefOid,.url] | @tsv' 2>/dev/null) || {
+  CURRENT_PR_FIELDS=$(rewrite_pr_identity) || {
       echo "rewrite rejected: cannot re-check PR identity before push" >&2; exit 1
     }
   [ "$CURRENT_PR_FIELDS" = "$PR_FIELDS" ] || {
     echo "rewrite rejected: PR head/base identity changed during gates; no history was overwritten" >&2
     exit 1
   }
+  # A base that only moved FORWARD during gates leaves the replacement safely behind, exactly as a
+  # push landing a moment earlier would. A deleted or rewound base is refused: the gated parent is
+  # no longer history of the branch this PR merges into (sc-2739).
   CURRENT_BASE=$(rewrite_remote git ls-remote --heads origin "refs/heads/$BASE_REF" | awk 'NR == 1 { print $1 }')
-  [ "$CURRENT_BASE" = "$BASE" ] || {
-    echo "rewrite rejected: origin/$BASE_REF advanced after preflight (expected $BASE, found ${CURRENT_BASE:-missing})" >&2
+  if [ -z "$CURRENT_BASE" ]; then
+    echo "rewrite rejected: origin/$BASE_REF is missing after preflight; no history was overwritten" >&2
     exit 1
-  }
+  elif [ "$CURRENT_BASE" != "$BASE" ]; then
+    base_rc=0
+    # Any fetch failure is "unverifiable", never a verdict: fetch exits 1 on ordinary remote errors,
+    # and that must not read as merge-base's "not an ancestor" (= rewound) below.
+    rewrite_remote git fetch -q origin "+refs/heads/$BASE_REF:$REWRITE_BASE_REF" >/dev/null 2>&1 || base_rc=2
+    # The fetch may land a tip newer than ls-remote saw; judge whatever it pinned.
+    [ "$base_rc" -ne 0 ] || { CURRENT_BASE=$(git rev-parse "$REWRITE_BASE_REF"); REWRITE_BASE_PIN=$CURRENT_BASE; }
+    [ "$base_rc" -ne 0 ] || git merge-base --is-ancestor "$BASE" "$CURRENT_BASE" || base_rc=$?
+    case "$base_rc" in
+      0) echo "origin/$BASE_REF advanced during gates (${BASE:0:7} → ${CURRENT_BASE:0:7}); publishing — the PR will show behind" >&2 ;;
+      1) echo "rewrite rejected: origin/$BASE_REF was rewound or force-pushed during gates (${BASE:0:7} is not an ancestor of ${CURRENT_BASE:0:7}); no history was overwritten" >&2; exit 1 ;;
+      *) echo "rewrite rejected: origin/$BASE_REF moved during gates and its new tip ${CURRENT_BASE:0:7} could not be verified; no history was overwritten" >&2; exit 1 ;;
+    esac
+  fi
   if [ "$UPDATE_PR_BODY" -eq 1 ]; then
     # Persist the exact gated object BEFORE publication. If the publisher is killed after Git
     # accepts it, the retained intent can prove and converge this snapshot without manufacturing a

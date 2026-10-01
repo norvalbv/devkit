@@ -25,18 +25,22 @@
 # briefed tracked path into a legitimate no-op by restoring its base content.
 
 # ship_record_staged_state <worktree> <state-file>
-# Snapshot the index the instant staging finishes: tree oid on line 1, staged paths after it.
+# Snapshot the index the instant staging finishes: tree oid on line 1, then the staged paths
+# NUL-delimited. Without -z git C-quotes any name holding a non-ASCII byte, a quote, a backslash or a
+# newline, and the quoted spelling names no file — so a formatter no-op on such a path was judged
+# LOST, aborting an honest ship.
 ship_record_staged_state() {
   local wt=$1 state=$2 tree
   tree=$(git -C "$wt" write-tree) || return 1
   {
     printf '%s\n' "$tree"
-    git -C "$wt" diff --cached --no-renames --name-only
+    git -C "$wt" diff --cached --no-renames --name-only -z
   } > "$state"
 }
 
 _ship_state_tree() { head -n 1 "$1"; }
 _ship_state_paths() { tail -n +2 "$1"; }
+_ship_nul_count() { tr -cd '\0' | wc -c | tr -d ' '; }
 
 # A missing commit path is a legitimate formatter no-op only when it existed in the base and the
 # post-hook worktree is clean for that path. Requiring base membership keeps a clobbered newly-added
@@ -136,7 +140,7 @@ ship_assert_staged_unchanged() {
     echo "🛑 ship: ABORTED — the ship worktree's index changed between staging and the commit."
     echo "   expected tree $expected, found $actual. Nothing had run yet that is allowed to touch it,"
     echo "   so another process wrote this worktree's index (\$GIT_INDEX_FILE leak?). Nothing pushed."
-    printf '   staged now: %s path(s)\n' "$(git -C "$wt" diff --cached --name-only | grep -c . || true)"
+    printf '   staged now: %s path(s)\n' "$(git -C "$wt" diff --cached --name-only -z | _ship_nul_count)"
   } >&2
   return 1
 }
@@ -148,33 +152,47 @@ ship_assert_commit_scope() {
   # is UNSET in bash 4.4+ (CI, every Linux runner), so reading it on the clean path — the path every
   # honest ship takes — aborts the ship with "lost: unbound variable". macOS bash 3.2 treats it as
   # empty instead, which is why the suite is green locally and red in CI.
-  local wt=$1 base=$2 state=$3 changed missing lost='' path rc briefed_n del_extra_n
-  changed=$(git -C "$wt" diff --no-renames --name-only "$base" HEAD) || {
-    echo "🛑 ship: could not diff the ship commit against its base ($base)." >&2
-    return 1
-  }
+  local wt=$1 base=$2 state=$3 lost='' path rc briefed_n present_n del_extra_n
+  local -a staged=() keep=() skip=()
+  # NUL-delimited end to end (see ship_record_staged_state). `literal` keeps a glob-named path from
+  # matching its neighbours.
+  while IFS= read -r -d '' path; do
+    staged+=("$path")
+    keep+=(":(top,literal)$path")
+    skip+=(":(top,exclude,literal)$path")
+  done < <(_ship_state_paths "$state")
+  briefed_n=${#staged[@]}
 
   # (1) Every path staging put in the index must still be in the commit unless a formatter restored
   # an existing base path exactly to its base state. Index clobbers leave the intended worktree
   # change behind (including force-added ignored files), so they remain distinguishable and fatal.
-  missing=$(comm -23 \
-    <(_ship_state_paths "$state" | sort -u) \
-    <(printf '%s\n' "$changed" | sort -u))
-  if [ -n "$missing" ]; then
-    while IFS= read -r path; do
-      [ -n "$path" ] || continue
-      if _ship_path_matches_base "$wt" "$base" "$path"; then
-        echo "↳ ship: $path normalized to its base content during pre-commit; treating it as a no-op." >&2
-        continue
-      else
-        rc=$?
-      fi
-      if [ "$rc" -gt 1 ]; then
-        echo "🛑 ship: could not verify the post-commit state of $path." >&2
-        return 1
-      fi
-      lost+="${lost:+$'\n'}$path"
-    done <<< "$missing"
+  # One diff settles the honest ship: if every staged path is still changed, nothing is missing.
+  # Only a shortfall pays for the per-path walk that names the culprits.
+  if [ "$briefed_n" -gt 0 ]; then
+    present_n=$(set -o pipefail
+      git -C "$wt" diff --no-renames --name-only -z "$base" HEAD -- "${keep[@]}" | _ship_nul_count) || {
+      echo "🛑 ship: could not diff the ship commit against its base ($base)." >&2
+      return 1
+    }
+    if [ "$present_n" -ne "$briefed_n" ]; then
+      for path in "${staged[@]}"; do
+        rc=0
+        git -C "$wt" diff --quiet --no-renames "$base" HEAD -- ":(top,literal)$path" || rc=$?
+        [ "$rc" -eq 1 ] && continue # still changed in the commit
+        if [ "$rc" -eq 0 ]; then
+          _ship_path_matches_base "$wt" "$base" "$path" || rc=$?
+          if [ "$rc" -eq 0 ]; then
+            printf '↳ ship: %q normalized to its base content during pre-commit; treating it as a no-op.\n' "$path" >&2
+            continue
+          fi
+        fi
+        if [ "$rc" -gt 1 ]; then
+          printf '🛑 ship: could not verify the post-commit state of %q.\n' "$path" >&2
+          return 1
+        fi
+        lost+="${lost:+$'\n'}$(printf '%q' "$path")"
+      done
+    fi
   fi
   if [ -n "$lost" ]; then
     {
@@ -189,11 +207,10 @@ ship_assert_commit_scope() {
   # (2) The incident shape: a foreign index turns the commit into a bulk deletion of files the ship
   # was never asked to touch. A ratchet gate legitimately heal-deletes a baseline or two, so this
   # bounds unbriefed deletions by the briefed count rather than forbidding them.
-  briefed_n=$(_ship_state_paths "$state" | grep -c . || true)
-  del_extra_n=$(comm -13 \
-    <(_ship_state_paths "$state" | sort -u) \
-    <(git -C "$wt" diff --no-renames --name-only --diff-filter=D "$base" HEAD | sort -u) \
-    | grep -c . || true)
+  # A pathspec of only exclusions means "everything except these", so an empty briefed set counts
+  # every deletion.
+  del_extra_n=$(git -C "$wt" diff --no-renames --name-only -z --diff-filter=D "$base" HEAD \
+    -- ${skip[@]+"${skip[@]}"} | _ship_nul_count)
   if [ "$del_extra_n" -gt "$briefed_n" ]; then
     {
       echo "🛑 ship: ABORTED — the commit deletes $del_extra_n path(s) it was never asked to touch,"
@@ -217,8 +234,8 @@ ship_assert_commit_scope() {
 #
 # Both sides are enumerated with `git diff -z` so the record is byte-comparable with the resume
 # side's own enumeration and stays binary safe for unusual filenames. The briefed side is derived
-# from the staged TREE on line 1 of the state file, NOT from its newline-delimited path list: a path
-# containing a newline would split there, read as unbriefed, and silently widen the record.
+# from the staged TREE on line 1 of the state file rather than its recorded path list, so the record
+# compares base against exactly what was staged.
 ship_record_gate_adds() {
   local wt=$1 base=$2 state=$3 out=$4 tree briefed path
   local -a exclude=()

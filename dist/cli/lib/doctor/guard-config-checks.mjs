@@ -34,6 +34,7 @@ import { accessSync, constants, existsSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { pathToFileURL } from 'node:url';
+import { usableChunkCount } from '../../../gate-engine/co-occurrence/chunk-index.mjs';
 import { inspectIndexFreshness, missingIndexMessage, staleIndexMessage, } from '../../../gate-engine/co-occurrence/index-refresh.mjs';
 import { isCodexModel, parseModelSpec } from '../../../gate-engine/judge/codex/result.mjs';
 import { claudeFamilyEnvLine, claudeFamilyKeyLine, } from '../../../gate-engine/judge/outage/family-override.mjs';
@@ -95,6 +96,9 @@ export function checkSearchIndex(cwd, resolved, searchCodeSelected) {
             const freshness = inspectIndexFreshness(db, indexPath, { cwd, indexPath: resolved });
             if (freshness.status === 'stale') {
                 return check(SEARCH_INDEX_CHECK, 'DRIFT', staleIndexMessage(freshness), 'run `touch <files> && search-code index --seed-files "<files>"` and retry', false, true);
+            }
+            if (usableChunkCount(db) === 0) {
+                return check(SEARCH_INDEX_CHECK, 'DRIFT', `matcher reads ${resolved}, but it holds no embedded chunks with a symbol_name — the duplication gate compares nothing and opts out on every commit`, 'populate it with `search-code index` (a --phase0-only or interrupted run leaves embeddings empty)', false, true);
             }
             if (freshness.status === 'unverifiable') {
                 return check(SEARCH_INDEX_CHECK, 'OK', `matcher reads ${resolved}; freshness unavailable (${freshness.reason ?? 'unknown index schema'}), so scan-time body verification remains the fallback`);

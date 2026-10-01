@@ -21,6 +21,7 @@ import { existsSync, readdirSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { CONFIG_FILENAME, resolveGuardConfig, resolveTreeExtensions, sourceMatchers, } from '../config.mjs';
+import { exitGate } from '../deterministic/reason.mjs';
 import { childGrammarNode } from '../structure/walk.mjs';
 import { FANOUT_BASELINE, readRatchetBaseline, removeRatchetBaseline, writeRatchetBaseline, } from './baseline-paths.mjs';
 import { hasStagedFiles, indexFiles, treeFilesAtRef } from './git-index.mjs';
@@ -232,7 +233,7 @@ function runCli(cmd) {
     if (cmd === 'gate') {
         const { failOpen, hasBaseline, frozen, inCommit, counts, headCounts, allowed } = judgeFanout(root, cap);
         if (failOpen)
-            process.exit(2); // ungoverned + un-frozen → fail open
+            exitGate(2, ['guard-fanout: ungoverned repo and no fan-out baseline — opted out']);
         const over = overCap(counts, cap);
         // A ratchet must fail the CHANGE that broke it, not whoever commits next. During a commit judge
         // tracked state and require growth: the pending index against HEAD. Reading the index rather
@@ -243,11 +244,14 @@ function runCli(cmd) {
         // every over-cap folder part of the initial commit.
         const grew = Object.entries(over).filter(([dir, n]) => n > allowed(dir) && (!inCommit || n > (headCounts[dir] ?? 0)));
         if (grew.length > 0) {
-            console.error(`🚫 Folder fan-out exceeded (cap ${frozen.cap} impl files/folder, any depth):`);
-            for (const [dir, n] of grew)
-                console.error(`   ${dir}: ${n} files (allowed ${allowed(dir)})`);
+            const why = [
+                `🚫 Folder fan-out exceeded (cap ${frozen.cap} impl files/folder, any depth):`,
+                ...grew.map(([dir, n]) => `   ${dir}: ${n} files (allowed ${allowed(dir)})`),
+            ];
+            for (const line of why)
+                console.error(line);
             console.error('   Split into cohesive kebab subfolders (group by concern — graphify/co-occurrence can suggest clusters).');
-            process.exit(1);
+            exitGate(1, why);
         }
         // Drift was already over its allowance at HEAD and was not grown here. Report it separately so
         // the remedy is an honest baseline refresh, not an unrelated directory split in this change.

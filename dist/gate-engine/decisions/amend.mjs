@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { writeFileAtomic } from './atomic-write.mjs';
-import { currentTarget, hasTargetFields, parseDecision, parseIndex, parseTargetFields, renderDecision, renderIndex, renderNote, renderTarget, sanitizeCell, today, whyHook, } from './decision-format.mjs';
+import { currentTarget, hasTargetFields, parseDecision, parseIndex, parseTargetFields, renderDecision, renderIndex, renderNote, renderTarget, foldLines, sanitizeCell, today, warnIfFolded, whyHook, } from './decision-format.mjs';
 import { effectiveScope } from './recall/retrieval.mjs';
 const TRAILING_WS_RE = /\s*$/;
 const TIMELINE_ENTRY_RE = /^(?:## Target · \d{4}-\d{2}-\d{2}\b.*|- \d{4}-\d{2}-\d{2}\s+—\s+.*)$/gm;
@@ -214,8 +214,9 @@ export function amendDecision(slug, options, paths) {
         }
         const bodyOffset = current.length - workingParsed.body.length;
         const start = bodyOffset + selected.start + prefix.length + matches[0];
-        const replacement = sanitizeCell(newText);
+        const replacement = foldLines(newText);
         writeFileAtomic(file, `${current.slice(0, start)}${replacement}${current.slice(start + oldText.length)}`);
+        warnIfFolded('--note-replace', newText);
         console.log(`Amended draft note on "${slug}" (${date}).`);
         return;
     }

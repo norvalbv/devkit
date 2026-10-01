@@ -1,11 +1,12 @@
 import { judgeBinForModel } from '../../judge/codex/result.mjs';
 import { JUDGE_ISOLATION } from '../../judge/judge-isolation.mjs';
 import { namedAgentMcpProfile } from '../../judge/mcp/profile.mjs';
-import { DEEP_JUDGE_TIMEOUT_MS, execJudgeAsync, remedyCause } from '../../judge/run-judge.mjs';
+import { DEEP_JUDGE_TIMEOUT_MS, execJudgeAsync, remedyCause, syncRemedy, } from '../../judge/run-judge.mjs';
 import { renderGoverningClaudeMd } from '../claude-md.mjs';
 import { renderStagedLineCounts } from '../evidence/line-counts.mjs';
 import { parseReviewVerdict } from '../contracts/response.mjs';
 import { buildCappedDiffEvidence } from '../diff-evidence.mjs';
+import { omissionHintFor } from '../evidence/packet/omission-hint.mjs';
 import { responseContractFor } from '../contracts/registry.mjs';
 import { attachItems } from '../evidence/items.mjs';
 import { stagedGroundingSource } from '../contracts/conventions-grounding.mjs';
@@ -13,9 +14,9 @@ import { gitCached, stagedTreeHash } from '../evidence/staged-git.mjs';
 import { lensGroupId } from '../lens/groups.mjs';
 import { applyOverrideValve } from '../overrides.mjs';
 import { allowedToolsFor, escalatePrompt, hasChecklist, resolveEscalationModel, resolveReviewModel, wrapConventionsPrompt, wrapPrompt, } from '../reviewers.mjs';
-import { enforceChecklistContract } from '../contracts/checklist.mjs';
-import { agentBody, cleanupChecklistState, initializeCommitGuardChecklist, isNamedSkip, readChecklistState, withStagedFiles, } from '../runtime.mjs';
-import { consumerChecklistAssetRoot } from './consumer-assets.mjs';
+import { enforceChecklistContract, retrievalDegradation } from '../contracts/checklist.mjs';
+import { agentBody, agentsDirFor, cleanupChecklistState, initializeCommitGuardChecklist, isNamedSkip, readChecklistState, withStagedFiles, } from '../runtime.mjs';
+import { consumerChecklistAssetRoot, isShipLane } from './consumer-assets.mjs';
 /** Reason + machine cause for an inconclusive outcome, both naming what the PROVIDER said: a usage
  *  lock collapsed into "judge outage" sends the reader to the one remedy that cannot work. */
 function outageReason(outage, pass = 'judge') {
@@ -77,9 +78,12 @@ export async function runCascade(sel, opts) {
             readState: () => readChecklistState(cwd, sel.reviewer),
             stagedDiff: () => gitCached(cwd, [], sel.files),
         });
-        attachItems(res, readChecklistState(cwd, sel.reviewer) ?? captureState, disposition, {
-            full: opts.fullItems,
-        });
+        const finalState = readChecklistState(cwd, sel.reviewer) ?? captureState;
+        attachItems(res, finalState, disposition, { full: opts.fullItems });
+        // Read before the finally deletes the artifact — the flag lives nowhere else (sc-2317).
+        const degraded = retrievalDegradation(sel.reviewer.name, finalState, res.status);
+        if (degraded)
+            res.degraded = degraded;
         return res;
     }
     finally {
@@ -99,7 +103,7 @@ async function cascadeVerdict({ reviewer, files }, { cwd, cfg, exec = execJudgeA
         return {
             name: reviewer.name,
             status: 'inconclusive',
-            reason: `agent brief ${reviewer.name}.md missing under ${cfg.review.agentsDir} — run devkit sync-agents && devkit sync-skills`,
+            reason: `agent brief ${reviewer.name}.md missing under ${agentsDirFor(cwd, cfg, assetRoot)} — ${syncRemedy(isShipLane())}`,
             inconclusiveCause: 'sync',
             escalated: false,
         };
@@ -120,7 +124,9 @@ async function cascadeVerdict({ reviewer, files }, { cwd, cfg, exec = execJudgeA
     // Lazy: git is read only for files a FAIL actually cites, once each across all three checks.
     const grounding = stagedGroundingSource(cwd, files, evidenceTree);
     const lensesOf = (raw) => responseContract?.blockingLenses(raw, grounding) ?? [];
-    const input = buildCappedDiffEvidence(gitCached(cwd, [], files), inventory);
+    const passModel = reviewer.model ?? firstModel;
+    // A shell-less judge gets a Read hint beside each OMITTED/TRUNCATED marker (sc-2305).
+    const input = buildCappedDiffEvidence(gitCached(cwd, [], files), inventory, omissionHintFor(reviewer, passModel));
     const allowedTools = allowedToolsFor(reviewer, cfg, checklistRoot);
     const mcpProfile = namedAgentMcpProfile();
     const args = (promptBody, model) => [
@@ -132,7 +138,6 @@ async function cascadeVerdict({ reviewer, files }, { cwd, cfg, exec = execJudgeA
         '--allowedTools',
         allowedTools,
     ];
-    const passModel = reviewer.model ?? firstModel;
     // Per-lens spend attribution: every split part deliberately shares one judge LABEL (the reviewer
     // identity the caches and warehouse key on), so the lens rides the judge_exec event as its own field.
     const lens = reviewer.lens?.length ? lensGroupId(reviewer.lens) : undefined;

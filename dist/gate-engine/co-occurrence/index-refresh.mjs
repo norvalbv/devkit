@@ -19,16 +19,15 @@ import { realpathSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 const MTIME_TOLERANCE_MS = 1;
 const BACKSLASH_RE = /\\/g;
-/**
- * Absolute working root of the PRIMARY checkout — the one holding the real `.git`. Every linked
- * worktree of a repo shares that common dir, so this resolves to the same place from anywhere in
- * the repo family, which is what makes it a usable "link the index from HERE" hint. null when git
- * is unavailable or this is not a repo (callers degrade the hint to a placeholder).
- */
+/** The primary checkout's working root, shared by every linked worktree (null outside git). A
+ * submodule names it by core.worktree, relative to its common dir under .git/modules. */
 export function primaryCheckout(cwd) {
     try {
         const commonDir = execFileSync('git', ['-C', cwd, 'rev-parse', '--path-format=absolute', '--git-common-dir'], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-        return commonDir ? dirname(commonDir) : null;
+        if (!commonDir)
+            return null;
+        const worktree = execFileSync('git', ['-C', cwd, 'config', '--default', '', '--get', 'core.worktree'], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+        return worktree ? resolve(commonDir, worktree) : dirname(commonDir);
     }
     catch {
         return null;

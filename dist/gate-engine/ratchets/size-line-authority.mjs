@@ -249,7 +249,7 @@ export function lineViolationReport(root, cfg, scoped, cap, grandfathered, scope
     catch (error) {
         if (!(error instanceof LineAuthorityError))
             throw error;
-        return { error: error.message, lines: [] };
+        return { error: error.message, lines: [], hints: [] };
     }
     const authority = new Map(changes.map((change) => [change.file, change]));
     const violations = new Map(scoped
@@ -261,7 +261,7 @@ export function lineViolationReport(root, cfg, scoped, cap, grandfathered, scope
             violations.set(change.file, change);
     }
     if (!violations.size)
-        return { error: null, lines: [] };
+        return { error: null, lines: [], hints: [] };
     const report = [`🚫 ${violations.size} file(s) exceed their line limit or lowered ceiling:`];
     for (const entry of violations.values()) {
         const lowered = authority.get(entry.file);
@@ -270,8 +270,7 @@ export function lineViolationReport(root, cfg, scoped, cap, grandfathered, scope
         }
         report.push(`   ${entry.file}: ${entry.lines} lines (max ${lowered?.current ?? effectiveLineCeiling(grandfathered, entry.file, cap(entry.file))})`);
     }
-    report.push(...fanoutSplitHints(root, violations.keys()));
-    return { error: null, lines: report };
+    return { error: null, lines: report, hints: fanoutSplitHints(root, violations.keys()) };
 }
 export function tightenLineBaseline(root, snapshot, staged, grandfathered, cap) {
     const files = { ...grandfathered.files };
