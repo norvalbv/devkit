@@ -95,12 +95,13 @@ describe('buildGuardBlock', () => {
     expect(block).toContain('"$__dk_package_bin_dir/guard-deterministic" --hook');
     expect(block).not.toContain('$__dk_package_bin_dir/guard-size');
     expect(block).not.toContain('$__dk_package_bin_dir/guard-fanout');
+    // sc-2753: the judge-free comment budget aggregates inside the orchestrator, no own fragment.
+    expect(block).not.toContain('guard-comments');
+    expect(block).not.toContain('__dk_gate_selected comments');
     // AI guards keep their own fail-fast fragments.
-    expect(block).toContain('"$__dk_package_bin_dir/guard-comments" gate');
     expect(block).toContain('"$__dk_package_bin_dir/guard-decisions"');
     expect(block).toContain('"$__dk_package_bin_dir/guard-review"');
     expect(block).not.toContain('bunx ');
-    expect(block).toContain('__dk_gate_selected comments');
     expect(block).toContain('__dk_gate_selected decisions');
     expect(block).toContain('__dk_gate_selected review');
     expect(block).toContain('DEVKIT_REVIEW_GUARDS');

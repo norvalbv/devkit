@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { DETERMINISTIC } from '../gate-engine/deterministic/run.mts';
+import { DETERMINISTIC } from '../gate-engine/deterministic/registry.mts';
 import { type Fixture, makeFixture, out } from './lib/harness.mts';
 
 // A gate that could not evaluate its input must not exit 0.
@@ -39,6 +39,9 @@ interface Deprivation {
    * them is not knowing which roots to walk.
    */
   config: boolean;
+  /** Extra guard.config.json keys and staged files a row needs to withhold its evaluator. */
+  configExtra?: { sourceExtensions: string[] };
+  files?: Record<string, string>;
   /**
    * Whether the bin names its own reason. The ratchets opt out SILENTLY and lean on
    * guard-deterministic to narrate the skip, so a consumer running the bin directly sees nothing.
@@ -47,9 +50,10 @@ interface Deprivation {
   speaks: boolean;
   /**
    * Fail-open gates answer 2. Coverage is deliberately fail-CLOSED once selected (absent data is a
-   * finding, not an opt-out), so it answers 1. Both satisfy the invariant; neither may be 0.
+   * finding, not an opt-out), so it answers 1. guard-comments has no opt-out: unreadable or
+   * unsupported evidence is its own blocking exit 4. None may be 0.
    */
-  expected: 1 | 2;
+  expected: 1 | 2 | 4;
 }
 
 const DEPRIVED: Deprivation[] = [
@@ -111,6 +115,19 @@ const DEPRIVED: Deprivation[] = [
     expected: 2,
   },
   {
+    id: 'comments',
+    bin: 'guard-comments',
+    args: ['gate'],
+    // Withhold the LEXER: a staged .rb source is configured but has no comment adapter, so no
+    // comment token in it was ever read. A staged .ts with no comments is an honest 0.
+    because: 'a configured source extension has no lexer adapter, so its comments were never read',
+    configExtra: { sourceExtensions: ['ts', 'rb'] },
+    files: { 'src/thing.rb': '# a comment the gate cannot see\nvalue = 1\n' },
+    config: true,
+    speaks: true,
+    expected: 4,
+  },
+  {
     id: 'structure',
     bin: 'guard-structure',
     args: ['gate'],
@@ -145,8 +162,11 @@ describe('no gate reports clean without evaluating', () => {
     if (row.config) {
       writeFileSync(
         join(fixture.repoDir, 'guard.config.json'),
-        JSON.stringify({ scanRoots: ['src'] }),
+        JSON.stringify({ scanRoots: ['src'], ...row.configExtra }),
       );
+    }
+    for (const [rel, body] of Object.entries(row.files ?? {})) {
+      writeFileSync(join(fixture.repoDir, rel), body);
     }
     fixture.git('add', '--all');
 

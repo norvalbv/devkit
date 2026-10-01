@@ -1479,12 +1479,12 @@ else
       # message file under dry-gates, and the hook refuses to arm the judge in this mode anyway.
       export DEVKIT_REVIEW_GUARDS=comments,review
       export DEVKIT_SHIP_DRY_REVIEWERS=1
-      echo "🧪 Ship dry gates: exact base/path staging; running formatter, configured deterministic/structure/extra gates, the comment budget gate, and the domain reviewers." >&2
+      echo "🧪 Ship dry gates: exact base/path staging; running formatter, configured deterministic/structure/extra gates (comment budget included), and the domain reviewers." >&2
       echo "   Skipping decision, Qavis, completeness, commit, push, and PR creation." >&2
     else
       export DEVKIT_REVIEW_GUARDS=comments
       unset DEVKIT_SHIP_DRY_REVIEWERS
-      echo "🧪 Ship dry gates: exact base/path staging; running formatter, configured deterministic/structure/extra gates, and the comment budget gate." >&2
+      echo "🧪 Ship dry gates: exact base/path staging; running formatter, configured deterministic/structure/extra gates (comment budget included)." >&2
       echo "   Skipping decision, Qavis, domain reviewer, completeness, commit, push, and PR creation." >&2
     fi
   else
