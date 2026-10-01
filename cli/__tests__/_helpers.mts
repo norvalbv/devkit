@@ -18,9 +18,10 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { availableParallelism, loadavg, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { formatLoad } from '../../vitest.global-setup.mjs';
 
 /** Absolute path to the devkit CLI entry (cli/index.mjs). */
 export const CLI = join(dirname(fileURLToPath(import.meta.url)), '..', 'index.mts');
@@ -28,6 +29,8 @@ const TEST_SUBPROCESS = fileURLToPath(new URL('./test-subprocess.mts', import.me
 export const TEST_SUBPROCESS_TIMEOUT_MS = 90_000;
 /** Exported alongside the deadline so test-subprocess.test.mts can pin the resolved outer budget. */
 export const TEST_SUBPROCESS_CLEANUP_MS = 30_000;
+/** review-target.sh echoes DEVKIT_PREFLIGHT_TIMEOUT verbatim, so the ceiling may be fractional. */
+const SETUP_CEILING_RE = /hit the ([\d.]+)s ceiling DURING: (\S+)/;
 const EPHEMERAL_SHIP_WORKTREE_RE = /devkit-(?:re)?ship-/;
 
 function commandCall(
@@ -299,4 +302,35 @@ export function structFixtures(prefix) {
     writeFileSync(join(root, rel), content);
   };
   return { tmpRepo: () => mkTmp(prefix), write, cleanup };
+}
+
+/** sc-2785: labels review's own setup ceiling firing before the wedge marker. Load vs cpus picks the
+ *  likelier cause; a reached wedge or a 124 without the banner stays with the strict assertions. */
+export function ceilingTimeoutMessage({
+  status,
+  output,
+  marker,
+  expected,
+  loadavg: load = loadavg(),
+  cpus = availableParallelism(),
+}: {
+  status: number | null;
+  output: string;
+  marker: string;
+  expected: string;
+  loadavg?: number[];
+  cpus?: number;
+}): string | null {
+  const banner = SETUP_CEILING_RE.exec(output);
+  if (status !== 124 || output.includes(marker) || !banner) return null;
+  const [, ceiling, reached] = banner;
+  const cause =
+    (load[0] ?? 0) > cpus
+      ? 'loadavg exceeds the cpu count, so machine load is the likely cause'
+      : `loadavg is within the cpu count, so suspect a real hang in ${reached}`;
+  return (
+    `ceiling-timeout: the ${ceiling}s setup ceiling fired during ${reached} before reaching ` +
+    `${expected} (wedge marker ${marker} absent; ${formatLoad(load, cpus)}). ${cause}. ` +
+    `Re-run this file alone to tell load from a regression.\n\n${output}`
+  );
 }

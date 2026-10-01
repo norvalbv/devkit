@@ -15,7 +15,7 @@ import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { normalizeSelection, type Selection } from '../lib/components.mts';
 import { buildFullHook } from '../lib/husky/husky-block.mts';
-import { CLI, rootRegistry, testSpawnSync } from './_helpers.mts';
+import { CLI, ceilingTimeoutMessage, rootRegistry, testSpawnSync } from './_helpers.mts';
 
 const { cleanup, mkTmp } = rootRegistry();
 afterEach(cleanup);
@@ -234,6 +234,21 @@ function newLogSince(root: string, before: readonly string[]): string {
 
 function combinedOutput(result: SpawnSyncReturns<string>): string {
   return `${result.stdout ?? ''}${result.stderr ?? ''}`;
+}
+
+/** sc-2785: a ceiling that beat setup to the wedge fails as `ceiling-timeout:`, not as a bare miss. */
+function failIfCeilingBeatSetup(
+  result: SpawnSyncReturns<string>,
+  marker: string,
+  expected: string,
+): void {
+  const message = ceilingTimeoutMessage({
+    status: result.status,
+    output: combinedOutput(result),
+    marker,
+    expected,
+  });
+  if (message) throw new Error(message);
 }
 
 function processAlive(pid: number): boolean {
@@ -826,6 +841,7 @@ exec ${JSON.stringify(process.execPath)} "$@"
     });
 
     expect(result.signal, combinedOutput(result)).toBeNull();
+    failIfCeilingBeatSetup(result, 'ASSET_WEDGE_STARTED', 'assets');
     expect(combinedOutput(result)).toContain('ASSET_WEDGE_STARTED');
     // 124, not 143: the sentinel is what separates a ceiling from a user's Ctrl-C, and it reuses the
     // gate chain's timeout vocabulary rather than inventing a second one.
@@ -878,6 +894,7 @@ exec ${JSON.stringify(process.execPath)} "$@"
     const log = newLogSince(target.root, beforeLogs);
 
     expect(result.signal, output).toBeNull();
+    failIfCeilingBeatSetup(result, 'DEPS_VERIFY_WEDGE_STARTED', 'preflight-verify:deps-final');
     expect(output).toContain('DEPS_VERIFY_WEDGE_STARTED');
     expect(result.status, output).toBe(124);
     expect(output).toContain('hit the 90s ceiling DURING: preflight-verify:deps-final');
