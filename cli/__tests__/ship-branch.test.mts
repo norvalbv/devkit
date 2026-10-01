@@ -1272,7 +1272,7 @@ describe('reship.sh (ship --pr) — overlay-mode gate chain', () => {
     const { dir, env, git } = seedReshipRepo();
     writeFileSync(
       join(dir, '.husky/_/pre-commit'),
-      '#!/bin/sh\necho "RESHIP_ENV mode=$DEVKIT_RUN_MODE"\n',
+      '#!/bin/sh\necho "RESHIP_ENV mode=$DEVKIT_RUN_MODE shipmode=$DEVKIT_SHIP_MODE"\n',
     );
     writeFileSync(join(dir, 'note.txt'), 'delta\n');
     const r = spawnSync('/bin/bash', [reshipScript, 'pr-open', 't', 'note.txt'], {
@@ -1290,7 +1290,7 @@ describe('reship.sh (ship --pr) — overlay-mode gate chain', () => {
 
     expect(r.status, r.stderr).toBe(0);
     expect(readFileSync(join(dir, '.devkit/last-ship-gates-pr-open.log'), 'utf8')).toMatch(
-      /RESHIP_ENV mode=ship/,
+      /RESHIP_ENV mode=ship shipmode=reship/,
     );
   });
 
