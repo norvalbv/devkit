@@ -1,9 +1,10 @@
 import { execSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { vi } from 'vitest';
-import { REVIEWERS } from '../reviewers.mts';
+import { OWN_PACKAGE_ROOT } from '../cascade/consumer-assets.mts';
+import { REVIEWERS, stripFrontmatter } from '../reviewers.mts';
 
 export const COMMIT_GUARD_INIT_SCRIPT = `
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -149,6 +150,21 @@ export function reviewAssets(): string {
   }
   return root;
 }
+
+/** A checkout whose ignored `.claude` projection never landed (a fresh worktree): every brief and
+ * checklist skill must resolve from the running package. */
+export function unprojected(repo: string): string {
+  rmSync(join(repo, '.claude', 'agents'), { recursive: true, force: true });
+  rmSync(join(repo, '.claude', 'skills'), { recursive: true, force: true });
+  return repo;
+}
+
+/** The first line of a packaged brief's body — proof a prompt carries that brief. */
+export const packagedBriefLine = (name: string): string =>
+  stripFrontmatter(readFileSync(join(OWN_PACKAGE_ROOT, 'agents', `${name}.md`), 'utf8'))
+    .trim()
+    .split('\n', 1)
+    .join('');
 
 export function syncSkillAssets(repo: string): void {
   mkdirSync(join(repo, '.claude', 'skills', '_devkit'), { recursive: true });
