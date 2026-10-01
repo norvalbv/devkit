@@ -46,6 +46,8 @@ import {
   primeReviewBaseContext,
 } from './evidence/base-context.mts';
 import { loadReviewerContext } from './evidence/commit-message.mts';
+import { coverageFields, partialEvidenceNote } from './evidence/packet/coverage.mts';
+import { omissionHintSalt } from './evidence/packet/omission-hint.mts';
 import { responseContractFor } from './contracts/registry.mts';
 import { renderFindingsBlockForParts } from './evidence/findings.mts';
 import { emitReviewScope, emitReviewSkipped, reportNonRuns } from './evidence/scope.mts';
@@ -281,6 +283,11 @@ export async function runReviewGate(
         reviewer.name,
         `${targetSalts.get(reviewer.name) ?? ''}\0${responseContract.identity}`,
       );
+    // One-time: a shell-less judge's PASS earned under the "run git diff" hint it could not follow
+    // is re-judged under the Read hint it can (sc-2305) — same predicate as the packet builder.
+    const hintSalt = omissionHintSalt(reviewer, reviewer.model ?? firstModel);
+    if (hintSalt)
+      targetSalts.set(reviewer.name, `${targetSalts.get(reviewer.name) ?? ''}${hintSalt}`);
   }
   // What has to be judged, incl. a split reviewer's fan-out, + one scope row each (lens/split.mts).
   // chunkCap derives from the SAME resolved cfg snapshot as model/reviewer selection (W-3 +
@@ -311,7 +318,13 @@ export async function runReviewGate(
         hit.label,
         baseOf.get(hit.label) ?? cachedBaseState(cwd, hit.judgedBases, hit.files),
         hit.part ? 'identical' : 'identical diff',
-      ),
+      ) +
+        // A part's packet is cut from its own files (a chunk's, or the whole scope for a lens).
+        partialEvidenceNote(
+          hit.part
+            ? coverageFields([{ diffText: gitCached(cwd, [], hit.files) }])
+            : (plan.fullyCached.find((c) => c.name === hit.label)?.coverage ?? {}),
+        ),
     );
   // Before any verdict AND before the fully-cached early return below (sc-2480).
   const fresh = new Set(plan.tasks.map((t) => t.base.reviewer.name)).size;
@@ -331,6 +344,7 @@ export async function runReviewGate(
       durationMs: c.duration,
       judgedBaseSha: judgedBaseSha(base),
       baseState: base.state,
+      coverage: c.coverage,
     });
   }
   if (plan.tasks.length === 0) return finish(0);

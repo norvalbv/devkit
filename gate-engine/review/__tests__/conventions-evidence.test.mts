@@ -66,6 +66,17 @@ describe('conventions evidence completeness', () => {
     expect(call.args[1]).toContain('must not produce a semantic FAIL');
   });
 
+  it('gives a claude-runtime reviewer a Read hint per omitted file, never a git command (sc-2305)', async () => {
+    // consumerRepo() pins GUARD_REVIEW_MODEL=haiku and restores it itself — nothing to set here.
+    const repo = cappedRepo();
+    const exec = passWithArtifact(repo);
+    expect(await runReviewGate(repo, { exec })).toBe(0);
+    const [call] = exec.mock.calls[0];
+    expect(call.args).toContain('haiku');
+    expect(call.input).toMatch(/^OMITTED: \S+ .*Read `src\/config-\d+\.json` directly/m);
+    expect(call.input).not.toContain('git diff --cached');
+  });
+
   it('directs the reviewer to read a capped governing rule instead of blocking the commit', async () => {
     const repo = consumerRepo();
     mkdirSync(join(repo, 'src'), { recursive: true });
