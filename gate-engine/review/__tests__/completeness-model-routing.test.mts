@@ -345,7 +345,8 @@ describe('runCompleteness — fingerprint integrity (sc-3175)', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const git = (...args: string[]) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' });
     const headBefore = git('rev-parse', 'HEAD').trim();
-    // Another process commits the instant write-tree runs: a PATH shim at the real race site.
+    // Another process commits the instant the tree snapshot starts: a PATH shim at the real race
+    // site, which is where commitIndexTree locates the index it copies (sc-3312).
     const shimDir = mkdtempSync(join(tmpdir(), 'completeness-race-'));
     const realGit = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
     const fired = join(shimDir, 'fired');
@@ -353,7 +354,7 @@ describe('runCompleteness — fingerprint integrity (sc-3175)', () => {
       join(shimDir, 'git'),
       [
         '#!/bin/sh',
-        `if [ "$1" = write-tree ] && [ ! -e "${fired}" ]; then`,
+        `if [ "$1 $2 $3" = 'rev-parse --git-path index' ] && [ ! -e "${fired}" ]; then`,
         `  : > "${fired}"`,
         `  "${realGit}" -c core.hooksPath=/dev/null -c user.name=t -c user.email=t@t commit -qm race`,
         "  printf 'export const q = 8;\\n' > src/main/db.ts",

@@ -6,7 +6,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { commitIndexEnv } from '../../ratchets/commit-index.mts';
+import { commitIndexEnv, commitIndexTree } from '../../ratchets/commit-index.mts';
 import { normalizeRepositoryFile } from '../../../skills/_devkit/review-roots.mjs';
 
 export function gitCached(cwd: string, args: string[], files: string[]): string {
@@ -108,20 +108,21 @@ export function stagedFiles(cwd: string): string[] {
  * codex judges run workspace-write (the checklist state file needs cwd writes and codex cannot
  * confine cwd), so the gate snapshots the staged tree before the judge wave and refuses to pass
  * if ANY judge changed what would be committed — tamper DETECTION where prevention is impossible.
+ * sc-3312: hashed from a private index copy, so parallel gates never race on index.lock. `use`
+ * names what loses the tree on failure; that line is narration, never part of the return value.
  */
-export function stagedTreeHash(cwd: string): string | null {
-  try {
-    return (
-      execFileSync('git', ['write-tree'], {
-        cwd,
-        env: commitIndexEnv(cwd),
-        encoding: 'utf8',
-      }).trim() || null
-    );
-  } catch {
-    return null;
+export function stagedTreeHash(cwd: string, use = 'staged tree identity'): string | null {
+  const result = commitIndexTree(cwd);
+  if (result.tree !== null) return result.tree;
+  const line = `guard-review: git write-tree failed (${use}): ${result.error.replace(/\s+/g, ' ')}\n`;
+  if (!reportedTreeFailures.has(line)) {
+    reportedTreeFailures.add(line);
+    process.stderr.write(line);
   }
+  return null;
 }
+
+const reportedTreeFailures = new Set<string>();
 
 /** HEAD identity, `unborn:<ref>` before the first commit (a determinate state carrying the
  * symbolic target, so even switching unborn branches reads as movement), or null when HEAD is

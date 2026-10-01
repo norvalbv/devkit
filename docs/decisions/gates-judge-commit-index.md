@@ -18,3 +18,4 @@ created: 2026-09-27
 **Revisit-when:** Git changes the GIT_INDEX_FILE it exports to hooks, a gate needs to write a partial-commit index, or qavis/fallow grow a way to be handed the commit index.
 **Scope:** cli/lib/husky/**,gate-engine/ratchets/commit-index.mts,gate-engine/ratchets/git-index.mts,cli/lib/install/anti-slop/git-index-lock.mts
 **Source:** collab · sc-2463
+- 2026-10-01 — sc-3312: tree identity never locks the commit index. commitIndexTree (gate-engine/ratchets/commit-index.mts) resolves the index commitIndexEnv selects via rev-parse --git-path, copies it to a private temp index, and runs write-tree there with splitIndex off. stagedTreeHash and indexTreeRef route through it, because write-tree takes <index>.lock with die-on-error and the ship's parallel completeness lane and reviewer fleet raced on it, turning a lost race into a false UNVERIFIABLE block or an identity-less completeness range.
