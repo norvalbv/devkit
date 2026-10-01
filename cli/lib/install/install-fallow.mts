@@ -1,12 +1,7 @@
 /**
  * fallow install helper for the `devkit init` wizard. fallow is the free static-analysis
  * layer (dead-code, dupes, complexity health) the devkit gate set can lean on. This module
- * OWNS getting fallow onto a consumer's machine and wiring fallow's own GIT hook.
- *
- * It does NOT install fallow's agent hook: that gate resolves its base as the merge-base against
- * the remote default, which cannot express "the staged set". devkit's own thin wrapper
- * (agents-hooks/fallow-staged-gate.sh) owns the agent surface and hands fallow the staged diff
- * via --diff-stdin. See [[fallow-gate-owned-by-fallow]].
+ * OWNS getting fallow onto a consumer's machine — never fallow's own hooks (sc-2341).
  *
  * Everything here is FAIL-OPEN: a missing package manager, an offline machine, or fallow
  * not being installed must never throw — the wizard keeps going and prints the manual
@@ -40,14 +35,6 @@ import { writeIfAbsent } from '../fs-helpers.mts';
  * `audit --format json` contract the staged gate reads are unchanged across the major.
  */
 export const FALLOW_PINNED_VERSION = '3.10.0';
-
-// The three per-analysis baselines `fallow audit` consumes (--dead-code-baseline etc.).
-// Each maps a sub-analysis save command to its file under fallow-baselines/.
-const BASELINES = [
-  { cmd: 'dead-code', file: 'dead-code.json' },
-  { cmd: 'health', file: 'health.json' },
-  { cmd: 'dupes', file: 'dupes.json' },
-];
 
 // Shared shape for every command helper's options object (the destructured `opts` arg).
 interface FallowCommandOptions {
@@ -190,76 +177,12 @@ export function ensureFallowGitignore({ cwd, dryRun }: FallowCommandOptions = {}
 }
 
 /**
- * Wire fallow's OWN self-maintaining hook via `fallow hooks install --target <git|agent>`.
- * This is fallow's hook, not devkit's gate — we do NOT hand-write a husky line for it.
- * Fail-open: a missing/erroring fallow returns ok:false, never throws.
- *
- */
-export function wireFallowGate({
-  cwd,
-  dryRun,
-  target = 'git',
-}: FallowCommandOptions & { target?: string } = {}): { ok: boolean } {
-  const { status } = run('fallow', ['hooks', 'install', '--target', target], { cwd, dryRun });
-  return { ok: status === 0 };
-}
-
-/**
- * Wire ALL of fallow's own hooks for a consumer, across every surface devkit supports.
- *
- * devkit installs fallow's hooks rather than shipping a gate of its own: `fallow audit` already
- * defaults to `--gate new-only` (only findings the changeset introduces fail) and takes
- * `--diff-file`/`--diff-stdin` for exact scoping, so a devkit-authored gate would reimplement
- * fallow's attribution and then drift from it. fallow regenerates its script on every install;
- * devkit only wires it and mirrors it onto Cursor, which fallow's installer does not write.
- *
- * ONLY `--target git` (the husky-managed pre-commit hook). fallow's `--target agent` gate is
- * deliberately NOT installed: it resolves its own base as the merge-base against the remote
- * default, so it would fire alongside devkit's staged-scope wrapper and re-block on exactly the
- * unstaged/other-agent work the wrapper exists to exclude ([[fallow-gate-owned-by-fallow]]).
- * Fail-open throughout: `ok` reports the git hook (what the baseline step keys off), and `log`
- * carries the caller's progress lines so the wizard stays a two-liner.
- */
-export function wireFallowHooks({ cwd, dryRun }: FallowCommandOptions = {}): {
-  ok: boolean;
-  log: string[];
-} {
-  const log: string[] = [];
-  const git = wireFallowGate({ cwd, dryRun, target: 'git' });
-  log.push(`${git.ok ? '✓ wired' : '! could not wire'} fallow git hook`);
-  return { ok: git.ok, log };
-}
-
-/**
- * Save the three per-analysis baselines into fallow-baselines/ so `fallow audit` only
- * fails on genuinely NEW issues (pre-existing debt is grandfathered). Fail-open per save.
- * Only the integrator calls this — and only when the gate was wired AND the repo has debt.
- *
- */
-export function saveFallowBaselines({ cwd, dryRun }: FallowCommandOptions = {}): { ok: boolean } {
-  let ok = true;
-  for (const { cmd, file } of BASELINES) {
-    const target = join('fallow-baselines', file);
-    // capture (not inherit): the baseline file is written regardless, and we DON'T want fallow's
-    // full health/dupes/dead-code report flooding the install terminal — the caller prints a
-    // one-line "saved baselines" summary instead.
-    const { status } = run('fallow', [cmd, '--save-baseline', target], {
-      cwd,
-      dryRun,
-      capture: true,
-    });
-    if (status !== 0) ok = false;
-  }
-  return { ok };
-}
-
-/**
- * Resolve fallow for an OVERLAY install: detect → install-if-missing → save baselines so a legacy
- * repo's debt is grandfathered. Returns whether to wire the gate; fail-open — abort, never block.
+ * Resolve fallow for an OVERLAY install: detect → install-if-missing. Returns whether to wire the
+ * gate; fail-open — abort, never block. No baselines: `new-only` already grandfathers old debt.
  */
 export function resolveOverlayFallow(cwd: string, dryRun: boolean): boolean {
   if (dryRun) {
-    console.log('  [dry-run] fallow: detect → install-if-missing → save baselines → gate in hook');
+    console.log('  [dry-run] fallow: detect → install-if-missing → gate in hook');
     return true;
   }
   const det = detectFallow({ cwd });
@@ -276,21 +199,15 @@ export function resolveOverlayFallow(cwd: string, dryRun: boolean): boolean {
     }
     console.log(`  ✓ ${r.message}`);
   }
-  const saved = saveFallowBaselines({ cwd });
-  console.log(
-    `  ${saved.ok ? '✓ saved' : '! some'} fallow baselines → fallow-baselines/ (grandfather debt)`,
-  );
   return true;
 }
 
-// CLI smoke entry: `node install-fallow.mjs [detect|install|gate|baselines]`. Helps verify
+// CLI smoke entry: `node install-fallow.mjs [detect|install]`. Helps verify
 // the helper by hand without the wizard.
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   const sub = process.argv[2] ?? 'detect';
   const cwd = process.cwd();
   if (sub === 'detect') console.log(JSON.stringify(detectFallow({ cwd })));
   else if (sub === 'install') console.log(JSON.stringify(installFallow({ cwd })));
-  else if (sub === 'gate') console.log(JSON.stringify(wireFallowGate({ cwd })));
-  else if (sub === 'baselines') console.log(JSON.stringify(saveFallowBaselines({ cwd })));
   else console.error(`unknown subcommand: ${sub}`);
 }
