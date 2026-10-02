@@ -107,8 +107,7 @@ export const REVIEWERS = Object.freeze([
 // which are consumer data and come from guard.config.json.
 export const checklistAssetPath = (reviewer) => `skills/${reviewer.skill}/scripts/checklist.mjs`;
 export const checklistScript = (reviewer) => `.claude/${checklistAssetPath(reviewer)}`;
-/** Review invocations may supply a short isolated runtime containing Devkit's CURRENT packaged
- * assets. Normal commit/ship calls keep the synced consumer path. */
+/** The checklist script under the skill root the brief resolver chose (consumer-assets.mts). */
 export function checklistScriptAt(reviewer, assetRoot = '.claude') {
     return `${assetRoot.replace(TRAILING_SLASH_RE, '')}/${checklistAssetPath(reviewer)}`;
 }
@@ -219,8 +218,8 @@ export function loadAgentSource(mdPath) {
 }
 /**
  * Wrap an interactive reviewer brief for headless gate use. The same Devkit-owned .md serves both
- * surfaces: interactively the root agent dispatches its synced copy; review mode uses the current
- * packaged copy. In the gate this
+ * surfaces: interactively the root agent dispatches its synced copy; the gate reads the copy the
+ * brief resolver picks. In the gate this
  * preamble re-scopes it (staged-only, checklist-driven, no marker/approve machinery) and the
  * postamble pins the machine-parseable verdict line.
  */

@@ -21,13 +21,13 @@ import { codexFailure, judgeBinFor, judgeCliFor, parseClaudeArgv, parseCodexUsag
 import { emitGateEvent } from './gate-events.mjs';
 import { trackJudge } from './process/heartbeat.mjs';
 import { withoutGitEnv } from './judge-isolation.mjs';
-import { prepareJudgeMcpProfile, } from './mcp/profile.mjs';
+import { prepareJudgeMcpProfile, spawnDegradedCause, } from './mcp/profile.mjs';
 import { classifyJudgeOutage, } from './outage/classify.mjs';
 import { unavailableMessage, warnNoOutput } from './outage/wording.mjs';
 import { composeTranscript, saveTranscriptUnique } from './transcript-store.mjs';
 // Re-exported so the gates that already import their remedy wording from here keep ONE import path,
 // while the wording itself lives beside the classifier that decides it.
-export { remedyCause, strictRemedy, syncRemedy, unavailableMessage, } from './outage/wording.mjs';
+export { remedyCause, strictRemedy, unavailableMessage, } from './outage/wording.mjs';
 // Narrow an unknown thrown value to the JudgeError shape; a non-object (or null) reads as {} so every
 // field access is undefined — matching the original `e?.field` optional-chaining behaviour exactly.
 function judgeErr(e) {
@@ -190,10 +190,10 @@ export function execJudge(opts) {
         projectRoots: opts.mcpProjectRoots,
     });
     try {
-        opts.onMcpPrepared?.(mcp.capabilityFingerprint);
         // Inside the try on purpose: an argv a codex model cannot express (no prompt) surfaces as ONE
         // outage warning carrying the translation error, keeping this function's never-throws contract.
         const cli = spawnFor(args, mcp, opts.codexReadOnly === true);
+        opts.onMcpPrepared?.(mcp.capabilityFingerprint, spawnDegradedCause(mcp, cli.mcpInjected));
         const out = execFileSync(cli.bin, cli.argv, {
             cwd,
             // Never the caller's env verbatim: git leaks an ABSOLUTE GIT_INDEX_FILE/GIT_DIR into every
@@ -276,10 +276,10 @@ export function execJudgeAsync(opts) {
             resolve(null);
         };
         try {
-            opts.onMcpPrepared?.(mcp.capabilityFingerprint);
             // See the sync twin: routing inside the try keeps the never-rejects contract when argv
             // translation itself throws.
             const cli = spawnFor(args, mcp, opts.codexReadOnly === true);
+            opts.onMcpPrepared?.(mcp.capabilityFingerprint, spawnDegradedCause(mcp, cli.mcpInjected));
             const child = execFile(cli.bin, cli.argv, {
                 cwd,
                 // env: see the execJudge twin — the git-env scrub applies to every judge spawn.

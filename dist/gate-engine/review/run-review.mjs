@@ -27,19 +27,19 @@
  * FRINK_* aliases honoured. Judges are isolated (JUDGE_ISOLATION) with an airtight read-only
  * allowlist — a gate judge can never write, stage, or commit.
  *
- * W-3: config + git resolve against the CONSUMER cwd. Commit/ship briefs resolve there too;
- * `devkit review` deliberately supplies CURRENT packaged briefs/skills via an isolated runtime.
+ * W-3: config + git resolve against the CONSUMER cwd. Briefs/skills resolve in every mode through
+ * consumer-assets.mts: a consumer copy under a devkit name wins, else the running package's.
  */
 import { envFlag, resolveGuardConfig } from '../config.mjs';
 import { emitReviewCacheHit } from '../judge/gate-events.mjs';
 import { reportGateInfraFailure } from '../judge/odb-probe.mjs';
+import { reportFleetMcp } from '../judge/mcp/profile.mjs';
 import { execJudgeAsync, strictRemedy } from '../judge/run-judge.mjs';
 import { loadCache } from './cache.mjs';
-import { isShipLane } from './cascade/consumer-assets.mjs';
 import { runCascade } from './cascade/reviewer.mjs';
 import { reportRetrievalDegraded } from './contracts/checklist.mjs';
 import { ENGINE_ERROR_REMEDY, RESPONSE_CONTRACT_REMEDY } from './contracts/response.mjs';
-import { baseProvenanceLines, cachedBaseState, cachedPassLine, judgedBaseSha, primeReviewBaseContext, } from './evidence/base-context.mjs';
+import { baseProvenanceLines, cachedBaseState, cachedPassLine, judgedBaseSha, primeReviewBaseContext, reportMcpDegraded, } from './evidence/base-context.mjs';
 import { loadReviewerContext } from './evidence/commit-message.mjs';
 import { coverageFields, partialEvidenceNote } from './evidence/packet/coverage.mjs';
 import { omissionHintSalt } from './evidence/packet/omission-hint.mjs';
@@ -49,8 +49,9 @@ import { emitReviewScope, emitReviewSkipped, reportNonRuns } from './evidence/sc
 import { assertNoMassDeletion } from './integrity/mass-deletion.mjs';
 import { gitCached, headHash, stagedFiles, stagedTreeHash } from './evidence/staged-git.mjs';
 import { reviewerTargetSalts } from './evidence/targets-block.mjs';
-import { reviewerSkipRemedy } from './overrides.mjs';
-import { emitMergedLensResults, mapLimit, planReviewWork, resolveChunkCap, resolveLensGroups, taskLabel, } from './lens/split.mjs';
+import { emitMergedLensResults } from './lens/merge-results.mjs';
+import { narrowSelection, narrowTasks, printRemedy } from './valve/recheck.mjs';
+import { mapLimit, planReviewWork, resolveChunkCap, resolveLensGroups, taskLabel, } from './lens/split.mjs';
 import { clearProgress, writeProgress } from './progress.mjs';
 import { retryableReason, runDeferredRecoveries, settleReviewOutcome, } from './recovery/settle.mjs';
 import { cacheKey, effectiveReviewConfig, REVIEWERS, resolveEscalationModel, resolveReviewModel, } from './reviewers.mjs';
@@ -77,7 +78,7 @@ export function describeReviewModels(reviewers, firstModel, escalationModel) {
  * load each judge keeps enough CPU + subscription slots to finish under its timeout. Wall-clock is
  * ceil(N/K) waves of the slowest cascade rather than the single slowest, a deliberate trade.
  */
-export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync } = {}) {
+export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync, only } = {}) {
     const timing = new ReviewGateTiming();
     let preJudgeTree;
     let preJudgeHead = null;
@@ -174,13 +175,15 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
             }
             selected = selected.filter((s) => !skip.has(s.reviewer.name));
         }
+        if (only)
+            selected = narrowSelection(selected, only, knobDropped);
         // Before the early return: name what an empty domain root dropped, then record every non-run.
         reportNonRuns(staged, cfg, selected, knobDropped, skip);
         if (selected.length === 0)
-            return finish(0);
+            return finish(only ? 1 : 0); // an empty recheck is never a PASS
         if (reviewMode) {
             assetRoot = process.env.DEVKIT_REVIEW_ASSET_ROOT;
-            identitySalts = preflightReviewAssets(assetRoot, selected, cfg);
+            identitySalts = preflightReviewAssets(cwd, assetRoot, selected, cfg);
         }
         // One domain diff per reviewer (its cache identity): the exact staged bytes in its files.
         diffs = selected.map((s) => gitCached(cwd, [], s.files));
@@ -206,7 +209,7 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
     const concurrency = reviewConcurrency();
     timing.configure(selected.map((selection) => selection.reviewer.name), concurrency);
     const judgeEnv = gateJudgeEnv(reviewMode, cfg);
-    const verifyAssets = passAssetVerifier(reviewMode, assetRoot, cfg, identitySalts);
+    const verifyAssets = passAssetVerifier(cwd, reviewMode, assetRoot, cfg, identitySalts);
     // Identity + cache salt, one resolution for both roles (sc-1437) — see resolveReviewerIdentities.
     const { identities, cacheSalts } = resolveReviewerIdentities(reviewMode, identitySalts, selected, cwd, cfg);
     const promptIdentity = (sel) => identities.get(sel.reviewer.name) ?? null;
@@ -231,6 +234,8 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
     // chunkCap derives from the SAME resolved cfg snapshot as model/reviewer selection (W-3 +
     // no torn plan): planReviewWork's own default would re-read the launcher's guard.config.json.
     const plan = planReviewWork(selected, diffs, cache, targetSalts, cacheKey, resolveLensGroups(), resolveChunkCap(process.env.GUARD_CORRECTNESS_CHUNK, cfg.review.correctnessChunkLoc));
+    if (only)
+        plan.tasks = narrowTasks(plan.tasks, only); // the other lenses stay cached or unjudged
     // A cached PASS was judged against the base it STORED, not this run's (sc-3468): classify once per
     // reviewer so its line, scope row and cache_hit all say the same thing.
     const baseOf = new Map(plan.scope
@@ -241,13 +246,16 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
             cachedBase: baseOf.get(s.sel.reviewer.name) ?? null,
         });
     for (const hit of plan.cachedHits) {
-        console.error(cachedPassLine(hit.label, baseOf.get(hit.label) ?? cachedBaseState(cwd, hit.judgedBases, hit.files), hit.part ? 'identical' : 'identical diff', hit.degradedCause !== undefined) +
+        console.error(cachedPassLine(hit.label, baseOf.get(hit.label) ?? cachedBaseState(cwd, hit.judgedBases, hit.files), hit.part ? 'identical' : 'identical diff', hit.degradedCause !== undefined || hit.mcpDegradedCause !== undefined) +
             // A part's packet is cut from its own files (a chunk's, or the whole scope for a lens).
             partialEvidenceNote(hit.part
                 ? coverageFields([{ diffText: gitCached(cwd, [], hit.files) }])
                 : (plan.fullyCached.find((c) => c.name === hit.label)?.coverage ?? {})));
         if (hit.degradedCause)
             reportRetrievalDegraded(hit.label, hit.degradedCause);
+        // A cached split PART is reported once at its reviewer's merge, with the freshly judged groups.
+        if (hit.mcpDegradedCause && !hit.part)
+            reportMcpDegraded(hit.label, hit.mcpDegradedCause, true);
     }
     // Before any verdict AND before the fully-cached early return below (sc-2480).
     const fresh = new Set(plan.tasks.map((t) => t.base.reviewer.name)).size;
@@ -267,6 +275,8 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
     }
     if (plan.tasks.length === 0)
         return finish(0);
+    // Before any spawn, so the warning names the reviewers it weakens (sc-2837).
+    const mcpCause = reportFleetMcp(cwd, judgeEnv, plan.tasks);
     console.error(`guard-review: running ${describeReviewModels(plan.tasks.map((t) => t.sel.reviewer), firstModel, escalationModel)} (≤${concurrency} concurrent)…`);
     // Checkpoint each PASS as it lands, so a killed ship reruns only unfinished reviewers. The
     // progress JSON names unfinished work; heartbeat lines remain for humans. The catch prevents one
@@ -300,6 +310,7 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
         assetRoot,
         judgeEnv,
         promptExtras: ctx.promptExtras,
+        mcpDegradedCause: mcpCause,
     };
     // sc-1476/sc-2088: contract recovery defers out of the contended wave; the serial phase below
     // re-runs each parked reviewer solo through the SAME settle path.
@@ -345,7 +356,8 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
     })), gateStart);
     if (progressFile)
         clearProgress(progressFile); // ran to completion → nothing unfinished to report
-    emitMergedLensResults(splitParts, firstModel); // one merged review_result per split reviewer
+    if (!only?.lens)
+        emitMergedLensResults(splitParts, firstModel); // never a recheck's partial vector
     const fails = results.filter((r) => r.status === 'fail');
     const findingsPrinted = new Set();
     for (const f of fails) {
@@ -361,8 +373,8 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
         }
         if (f.transcript)
             console.error(f.transcript.trim());
-        if (firstFindingForReviewer && f.escalated)
-            console.error(`   Remedy: ${reviewerSkipRemedy(f.name)}`);
+        if (firstFindingForReviewer)
+            printRemedy(f, splitParts, only);
     }
     const errors = results.filter((r) => r.status === 'error');
     for (const r of errors) {
@@ -380,7 +392,7 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
             ? RESPONSE_CONTRACT_REMEDY
             : cause === 'engine'
                 ? ENGINE_ERROR_REMEDY
-                : strictRemedy(cause, r.outageBin, r.outageResetsAt, isShipLane());
+                : strictRemedy(cause, r.outageBin, r.outageResetsAt);
         console.error(strict
             ? `guard-review: ${r.name} INCONCLUSIVE (${r.reason}) — strict ship mode fails closed.\n` +
                 `   Remedy: ${remedy} (completed verdicts are cached).`

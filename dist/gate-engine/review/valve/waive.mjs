@@ -18,6 +18,7 @@
  * command refuses them rather than silently writing a store entry reconcile() will never consult.
  */
 import { execFileSync } from 'node:child_process';
+import { stripVTControlCharacters } from 'node:util';
 import { emitGateEvent } from '../../judge/gate-events.mjs';
 import { FINGERPRINT_RE, loadOverrides, persist, reviewerSkipRemedy, WAIVER_LENS_EVENT_CAP, WAIVER_RATIONALE_EVENT_CAP, withOverridesLock, } from '../overrides.mjs';
 import { REVIEWERS } from '../reviewers.mjs';
@@ -97,7 +98,7 @@ function listWaives(cwd) {
         const who = e.author ?? (typeof e.by === 'string' ? e.by : 'unknown');
         console.log(`[${fp}] ${e.reviewer ?? '?'}:${e.lens ?? '(finding)'} — by ${who}${e.at ? ` at ${e.at}` : ''}` +
             (e.baseSha ? ` · judged against ${e.baseSha.slice(0, 12)}` : ' · base unrecorded'));
-        console.log(`    ${e.rationale}`);
+        console.log(`    ${stripVTControlCharacters(e.rationale ?? '')}`);
     }
     return 0;
 }
@@ -137,7 +138,7 @@ export function runWaive(rest, cwd = process.cwd(), resolveAuthor = resolveWaive
     }
     if (rationale.length < RATIONALE_MIN_CHARS || isPlaceholder(rationale)) {
         console.error(`guard-review: waive — rationale must be a real, specific reason (>= ${RATIONALE_MIN_CHARS} ` +
-            `chars, not a placeholder), got "${rationale}"`);
+            `chars, not a placeholder), got "${stripVTControlCharacters(rationale)}"`);
         return 2;
     }
     // The lock is try-once (a held lock throws, not queues), so no telemetry I/O may run inside it —
@@ -178,6 +179,6 @@ export function runWaive(rest, cwd = process.cwd(), resolveAuthor = resolveWaive
             by: 'cli',
             base_sha: flag.baseSha,
         });
-    console.error(`guard-review: waived ${reviewer}:${lens} [${itemId}] — ${rationale}`);
+    console.error(`guard-review: waived ${reviewer}:${lens} [${itemId}] — ${stripVTControlCharacters(rationale)}`);
     return 0;
 }

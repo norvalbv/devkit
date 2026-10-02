@@ -170,6 +170,7 @@ const tomlStr = (v) => JSON.stringify(v);
 export function codexMcpArgs(servers, allowedTools) {
     const argv = [];
     const extraEnv = {};
+    const injected = [];
     for (const [name, def] of Object.entries(servers)) {
         if (!MCP_NAME_RE.test(name)) {
             console.error(`codex judge: mcp server name ${JSON.stringify(name)} not addressable via -c — skipped`);
@@ -219,8 +220,9 @@ export function codexMcpArgs(servers, allowedTools) {
         serverArgv.push('-c', `mcp_servers.${name}.startup_timeout_sec=10`);
         argv.push(...serverArgv);
         Object.assign(extraEnv, serverEnv);
+        injected.push(name);
     }
-    return { argv, extraEnv };
+    return { argv, extraEnv, injected };
 }
 /** The codex binary to spawn: overridable so an operator can pin ONE build when several sit on
  * PATH (measured on this machine: 0.149.0-alpha and 0.146.0 resolve depending on hook PATH
@@ -248,6 +250,7 @@ forceReadOnlySandbox = false) {
         argv: codexExecArgs(parts, mcp.argv),
         codex: true,
         extraEnv: mcp.extraEnv,
+        mcpInjected: mcp.injected,
     };
 }
 /** The binary NAME for outage wording — must never throw (it runs inside catch blocks, including

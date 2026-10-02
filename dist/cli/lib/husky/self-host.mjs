@@ -22,9 +22,9 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'n
 import { join } from 'node:path';
 import { defaultSelection, RECOMMENDED_GUARD_IDS } from '../components.mjs';
 import { readJson } from '../fs-helpers.mjs';
-import { REVIEW_FAILURE_FINALIZER } from './gate-policy/block-helpers.mjs';
+import { BIN_DIRS, REVIEW_FAILURE_FINALIZER, shipRehearsalHint, } from './gate-policy/block-helpers.mjs';
 import { markEnd } from './husky.mjs';
-import { buildFullHook, buildGuardBlock, extractGuardBlock, PACKAGE_BIN_DIR_FRAGMENT, replaceGuardBlock, } from './husky-block.mjs';
+import { buildFullHook, buildGuardBlock, extractGuardBlock, replaceGuardBlock, } from './husky-block.mjs';
 import { FORMAT_EXTENSION_FILTER, FORMAT_FAILURE_REPORT, FORMAT_TOOL_SETUP, } from './format-fragment.mjs';
 // Structure-lint and the hard Biome lint/assist gate fold into the deterministic orchestrator via
 // `--extra`. Self-host-only for formatting: its SCOPE (proven allowlist) and hard FAILURE POLICY.
@@ -111,7 +111,7 @@ fi
 # /devkit:self-host-skill-projection-advisory`;
 // Matches the package-local `guard-<x>` bins the generator emits. `guard-qavis-advisory` (double hyphen) is
 // covered by `[a-z-]+`. The formatter bin gets its own exact rewrite below, because
-// PACKAGE_BIN_DIR_FRAGMENT is stripped here and `$__dk_package_bin_dir` would expand to ''.
+// the package bin-dir line is stripped here and `$__dk_package_bin_dir` would expand to ''.
 const PACKAGE_GUARD_RE = /"\$__dk_package_bin_dir\/(guard-[a-z-]+)"/g;
 // Devkit formats with Oxfmt unconditionally, so the consumer's config detection is replaced
 // outright rather than left to resolve — no dead biome arm reaches Devkit's own hook.
@@ -121,6 +121,7 @@ const SELF_HOST_TOOL_SETUP = `    FMT_TOOL=Oxfmt; FMT_BIN=node_modules/.bin/oxfm
 // fragment's only other `$__dk_package_bin_dir` mention; the rewritten hook must contain none.
 const SELF_HOST_FORMAT_FAILURE = `        if [ "$FMT_RC" -ne 0 ]; then
             echo "🎨 Oxfmt failed over $FMT_N staged file(s) (xargs exit $FMT_RC) — blocking: devkit formats its own staged set hard." >&2
+${shipRehearsalHint('            ')}
             exit 1
         fi`;
 // Keep the staged hook on the same authored-file boundary as package.json's format scripts. A
@@ -130,10 +131,22 @@ const SELF_HOST_FORMAT_FILTER = "grep -E '^((cli|gate-engine)/.*\\.(tsx?|jsx?|cs
 // The `./dist/<...>.mjs` → `<...>.mts` transform pieces (hoisted — useTopLevelRegex).
 const DIST_PREFIX_RE = /^\.\/dist\//;
 const MJS_EXT_RE = /\.mjs$/;
+const DEVKIT_PACKAGE_NAME = '@norvalbv/devkit';
 /** True when `cwd` IS the devkit package itself (the only repo self-host mode applies to). */
 export function isDevkitRepo(cwd) {
     const pkg = readJson(join(cwd, 'package.json'));
-    return pkg?.name === '@norvalbv/devkit';
+    return pkg?.name === DEVKIT_PACKAGE_NAME;
+}
+/** isDevkitRepo over package.json text read from elsewhere (a git tree); malformed is not devkit. */
+export function isDevkitPackageJson(raw) {
+    if (!raw)
+        return false;
+    try {
+        return JSON.parse(raw)?.name === DEVKIT_PACKAGE_NAME;
+    }
+    catch {
+        return false;
+    }
 }
 /**
  * Resolve a `guard-*` bin name to its SOURCE `.mts` path, relative to the repo root — the form the
@@ -152,7 +165,7 @@ export function sourceBinFor(cwd, binName) {
 /** Rewrite generated consumer commands to Devkit's self-host source/pinned-runtime equivalents. */
 export function toSelfHost(hookText, cwd) {
     return (hookText
-        .replace(`${PACKAGE_BIN_DIR_FRAGMENT}\n\n`, '')
+        .replace(`${BIN_DIRS.package.open}\n\n`, '')
         .replace(PACKAGE_GUARD_RE, (_m, bin) => `node ${sourceBinFor(cwd, bin)}`)
         // Three rewrites, one per genuine self-host difference: bin path, failure policy, scope.
         // Each search string is a generator constant, so it matches the emitted bytes by construction.

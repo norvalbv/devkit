@@ -7,6 +7,9 @@ import { lstatSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { commitIndexEnv, commitIndexKind } from './commit-index.mjs';
 const INDEX_LOCK_RETRY = new Int32Array(new SharedArrayBuffer(4));
+// For a read that stands down on failure (null/false/''): stdout carries the answer, and git's
+// stderr is dropped rather than inherited, or a non-git cwd dumps git's usage text into every log.
+const QUIET_STDIO = ['ignore', 'pipe', 'ignore'];
 // A partial commit's temporary index is dropped after the commit, so a baseline staged into it
 // would be committed yet read as deleted by the real index.
 export function partialCommitRemedy(rel) {
@@ -33,13 +36,13 @@ function stagePathStrict(root, rel, { missingIsSuccess = false } = {}) {
         throw new Error(`Git could not stage ratchet baseline ${rel}: ${output.trim()}`);
     }
 }
-function isGitWorktree(root) {
+export function isGitWorktree(root) {
     try {
         return (execFileSync('git', ['rev-parse', '--is-inside-work-tree'], {
             cwd: root,
             env: commitIndexEnv(root),
             encoding: 'utf8',
-            stdio: ['ignore', 'pipe', 'ignore'],
+            stdio: QUIET_STDIO,
         }).trim() === 'true');
     }
     catch {
@@ -148,6 +151,7 @@ export function hasStagedFiles(root) {
             cwd: root,
             env: commitIndexEnv(root),
             encoding: 'utf8',
+            stdio: QUIET_STDIO,
         });
         return out.split('\n').some((l) => l.trim().length > 0);
     }
@@ -186,7 +190,7 @@ export function stagedTouchedSet(root) {
         if (!mergeInProgress(root))
             return staged;
         try {
-            const fromMergeHead = touchedPaths(root, ['--cached', 'MERGE_HEAD'], true);
+            const fromMergeHead = touchedPaths(root, ['--cached', 'MERGE_HEAD']);
             return new Set([...staged].filter((file) => fromMergeHead.has(file)));
         }
         catch {
@@ -201,12 +205,12 @@ export function stagedTouchedSet(root) {
 }
 // No --diff-filter: every status (D and T included) is a path this commit touched. --no-renames so
 // a move reports its SOURCE too, not only the destination a governed-path match would miss.
-function touchedPaths(root, range, quiet = false) {
+function touchedPaths(root, range) {
     return new Set(splitNul(execFileSync('git', ['diff', '--name-only', '-z', '--no-renames', ...range], {
         cwd: root,
         env: commitIndexEnv(root),
         encoding: 'utf8',
-        ...(quiet && { stdio: ['ignore', 'pipe', 'ignore'] }),
+        stdio: QUIET_STDIO,
     })));
 }
 /** HEAD, or the empty tree before the first commit: the base `git diff --cached` compares against. */
@@ -215,7 +219,7 @@ export function headTreeish(cwd) {
         return execFileSync('git', ['rev-parse', '--verify', '--quiet', 'HEAD'], {
             cwd,
             encoding: 'utf8',
-            stdio: ['ignore', 'pipe', 'ignore'],
+            stdio: QUIET_STDIO,
         }).trim();
     }
     catch {
@@ -270,6 +274,7 @@ export function stagedSet(root) {
             cwd: root,
             env: commitIndexEnv(root),
             encoding: 'utf8',
+            stdio: QUIET_STDIO,
         });
         const staged = new Set(out
             .split('\n')
@@ -280,7 +285,7 @@ export function stagedSet(root) {
                 cwd: root,
                 env: commitIndexEnv(root),
                 encoding: 'utf8',
-                stdio: ['ignore', 'pipe', 'ignore'],
+                stdio: QUIET_STDIO,
             });
             const changedFromMergeHead = new Set(mergeOut
                 .split('\n')
@@ -304,6 +309,7 @@ export function gitPrefix(root) {
             cwd: root,
             env: commitIndexEnv(root),
             encoding: 'utf8',
+            stdio: QUIET_STDIO,
         }).trimEnd();
     }
     catch {
@@ -317,7 +323,7 @@ export function indexTreeRef(root) {
             cwd: root,
             env: commitIndexEnv(root),
             encoding: 'utf8',
-            stdio: ['ignore', 'pipe', 'ignore'],
+            stdio: QUIET_STDIO,
         }).trim();
     }
     catch {
@@ -331,7 +337,7 @@ export function treeTextAtRef(root, ref, relativePath) {
             cwd: root,
             env: commitIndexEnv(root),
             encoding: 'utf8',
-            stdio: ['ignore', 'pipe', 'ignore'],
+            stdio: QUIET_STDIO,
         });
     }
     catch {
@@ -344,7 +350,7 @@ export function mergeBaseRef(root, ref) {
             cwd: root,
             env: commitIndexEnv(root),
             encoding: 'utf8',
-            stdio: ['ignore', 'pipe', 'ignore'],
+            stdio: QUIET_STDIO,
         }).trim();
     }
     catch {
@@ -359,9 +365,11 @@ export function changedSetSince(root, baseRef) {
         execFileSync('git', ['rev-parse', '--verify', `${baseRef}^{commit}`], {
             cwd: root,
             env: commitIndexEnv(root),
-            stdio: ['ignore', 'pipe', 'ignore'],
+            stdio: ['ignore', 'pipe', 'inherit'],
         });
         const prefix = gitPrefix(root);
+        // Stderr stays inherited on purpose: a failure here is pullRequestScope's hard exit 2, and git's
+        // reason (e.g. "no merge base" in a shallow PR clone) is the only cause that exit shows.
         const out = execFileSync('git', ['diff', '--name-only', '-z', '--diff-filter=ACMR', `${baseRef}...HEAD`], { cwd: root, env: commitIndexEnv(root), encoding: 'utf8' });
         const paths = out.split('\0').filter(Boolean);
         return new Set(prefix
@@ -384,6 +392,9 @@ export function pullRequestScope(root) {
     console.error(`guard-size: pull-request base is unavailable: ${baseRef}`);
     process.exit(2);
 }
+// Node buffers 1 MiB of child output by default; a large repo's path list exceeds that, the call throws
+// ENOBUFS and the caller silently falls back to judging the whole tree.
+const GIT_LIST_MAX_BUFFER = 512 * 1024 * 1024;
 // Every tracked path in the git INDEX — the tree the pending commit will record — CWD-relative.
 // `git ls-files` is already scoped and addressed to the cwd. Deduped: an UNMERGED index lists a
 // conflicted path once per stage (1/2/3), and a conflicted file is still one file. Returns null when
@@ -394,6 +405,8 @@ export function indexFiles(root) {
             cwd: root,
             env: commitIndexEnv(root),
             encoding: 'utf8',
+            maxBuffer: GIT_LIST_MAX_BUFFER,
+            stdio: QUIET_STDIO,
         });
         return [...new Set(splitNul(out))];
     }
@@ -410,7 +423,8 @@ export function treeFilesAtRef(root, ref = 'HEAD') {
             cwd: root,
             env: commitIndexEnv(root),
             encoding: 'utf8',
-            stdio: ['ignore', 'pipe', 'ignore'],
+            maxBuffer: GIT_LIST_MAX_BUFFER,
+            stdio: QUIET_STDIO,
         });
         return splitNul(out);
     }

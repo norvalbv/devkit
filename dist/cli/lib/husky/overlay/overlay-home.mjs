@@ -1,37 +1,91 @@
 // sc-4157: `.devkit/` never reaches a linked worktree, so core.hooksPath is absolute and the hook
 // links the home's overlay in on demand. Rationale: docs/decisions/overlay-self-heal.md.
-import { execFileSync } from 'node:child_process';
-import { cpSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, rmdirSync, realpathSync, renameSync, rmSync, symlinkSync, unlinkSync, } from 'node:fs';
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { cpSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, rmdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, } from 'node:fs';
+import { dirname, isAbsolute, join, matchesGlob, relative, resolve } from 'node:path';
+import { FIXED_GATE_INPUTS, readableGateInputs, } from '../../../../gate-engine/deterministic/gate-inputs.mjs';
+import { overlayConfigured } from '../../../../gate-engine/overlay-mode.mjs';
 import { detectGitRoot } from '../../detect-git-root.mjs';
 import { gitOut, isInside, isInsideResolved, sameDir } from '../../doctor/hooks-path.mjs';
-import { ANTI_SLOP_BASELINE_REL } from '../../install/anti-slop/constants.mjs';
+import { DEVKIT_CACHE_IGNORES, LEGACY_GITIGNORE_LINES } from '../../install/gitignore-cache.mjs';
 import { shQuote } from '../../ship/redact-secrets.mjs';
-import { chainWord } from '../husky-block.mjs';
+import { BIN_DIRS } from '../gate-policy/block-helpers.mjs';
 export const LOCAL_HOOKS = '.devkit/hooks';
 const OURS_ABSOLUTE_RE = /\/\.devkit\/hooks\/?$/;
-// The overlay-owned, git-excluded package entries a gate reads; caches and agent assets stay per-checkout.
-const PACKAGE_ENTRIES = [
-    '.devkit',
-    'guard.config.json',
-    'biome.devkit.jsonc',
-    'eslint.config.devkit.mjs',
-    'oxlint.devkit.json',
-    ANTI_SLOP_BASELINE_REL,
-    'fallow-baselines',
-];
-// COPIED, never linked: Node imports a linked eslint.config.devkit.mjs's siblings from the HOME, and a
-// ratchet baseline lowered on one branch must not move every other branch's ceiling.
-const COPIED = new Set(['eslint.config.devkit.mjs', ANTI_SLOP_BASELINE_REL, 'fallow-baselines']);
-const COPIED_DEVKIT_CHILD = 'baselines';
-const pkgDevkit = (pkgRel) => (pkgRel ? `${pkgRel}/.devkit` : '.devkit');
+const pkgPath = (pkgRel, rel) => (pkgRel ? `${pkgRel}/${rel}` : rel);
+const pkgDevkit = (pkgRel) => pkgPath(pkgRel, '.devkit');
+const devkitDirs = (pkgRel) => [...new Set(['.devkit', pkgDevkit(pkgRel)])];
 const baseName = (rel) => rel.slice(rel.lastIndexOf('/') + 1);
-const isCopied = (rel) => COPIED.has(baseName(rel));
-/** Every branch-local copy a projection owes a worktree, git-root-relative. */
-const copyRels = (pkgRel) => [
-    ...projectionEntries(pkgRel).filter(isCopied),
-    `${pkgDevkit(pkgRel)}/${COPIED_DEVKIT_CHILD}`,
-];
+// Per-checkout runtime state is never projected; the verdict caches it lists (and their
+// `.generation` companions) are anchored to the main checkout, so no worktree reads a copy.
+const RUNTIME_STATE = [...DEVKIT_CACHE_IGNORES, ...LEGACY_GITIGNORE_LINES]
+    .filter((rule) => rule.startsWith('.devkit/'))
+    .map((rule) => rule.slice('.devkit/'.length).replace(/\/$/, ''));
+const isRuntimeState = (child) => RUNTIME_STATE.some((glob) => matchesGlob(child.replace(/\.generation$/, ''), glob));
+const isDir = (path) => {
+    try {
+        return statSync(path).isDirectory();
+    }
+    catch {
+        return false;
+    }
+};
+/** What the home owes a linked worktree: each `.devkit` child the registry does not cover, then the
+ * registry (a `branch` entry is copied, a `clone` one linked), limited to what the home holds. */
+function projection(home, pkgRel, onConfigError) {
+    const registry = readableGateInputs(join(home, pkgRel), onConfigError)
+        .filter((input) => input.share !== 'checkout')
+        .map((input) => ({ rel: pkgPath(pkgRel, input.path), copy: input.share === 'branch' }));
+    const covered = (rel) => registry.some((entry) => entry.rel === rel || entry.rel.startsWith(`${rel}/`));
+    const children = devkitDirs(pkgRel).flatMap((dir) => safeList(join(home, dir))
+        .filter((child) => !isRuntimeState(child))
+        .map((child) => ({ rel: `${dir}/${child}`, copy: false }))
+        .filter((entry) => !covered(entry.rel)));
+    return [...children, ...registry]
+        .filter((entry) => occupied(join(home, entry.rel)))
+        .map((entry) => ({ ...entry, dir: isDir(join(home, entry.rel)) }));
+}
+const isLink = (path) => {
+    try {
+        return lstatSync(path).isSymbolicLink();
+    }
+    catch {
+        return false;
+    }
+};
+const isRealFile = (path) => {
+    try {
+        return lstatSync(path).isFile();
+    }
+    catch {
+        return false;
+    }
+};
+/** Is a directory above `rel` a link in `wt` (a legacy linked `.devkit`)? Nothing projects through it. */
+const beyondLink = (wt, rel) => {
+    for (let dir = dirname(rel); dir !== '.'; dir = dirname(dir))
+        if (isLink(join(wt, dir)))
+            return true;
+    return false;
+};
+const CHECK_IGNORE_ANSWERED = new Set([0, 1]);
+/** Which of `owed` git ignores and does not track in `wt`, asked in one check-ignore; git refuses a
+ * path beyond a link. A directory is also asked as `rel/`, the only form a `dir/` line matches. */
+function ignoredIn(wt, owed) {
+    const asked = owed
+        .filter(({ rel }) => !beyondLink(wt, rel))
+        .flatMap(({ rel, dir }) => (dir && !isLink(join(wt, rel)) ? [rel, `${rel}/`] : [rel]));
+    if (!asked.length)
+        return new Set();
+    const r = spawnSync('git', ['-C', wt, 'check-ignore', '-z', '--stdin'], {
+        input: `${asked.join('\0')}\0`,
+        encoding: 'utf8',
+    });
+    // 0 = some ignored, 1 = none; anything else (null when git never ran) is git refusing to answer.
+    if (!CHECK_IGNORE_ANSWERED.has(r.status))
+        throw new Error(`git check-ignore failed in ${wt}: ${[r.stderr, r.error].filter(Boolean).join(' ')}`);
+    return new Set(r.stdout.split('\0').filter(Boolean));
+}
 /** Did devkit's overlay write `value`? The legacy relative form, or exactly one of this repo's
  * worktrees' `.devkit/hooks` — a same-named dir elsewhere is somebody else's. */
 export function isOverlayHooksValue(value, gitRoot) {
@@ -44,12 +98,6 @@ export function isOverlayHooksValue(value, gitRoot) {
 /** The absolute core.hooksPath for an overlay installed at `gitRoot`. */
 export function overlayHooksPath(gitRoot) {
     return join(resolve(gitRoot), LOCAL_HOOKS);
-}
-/** Git-root-relative entries a linked worktree borrows from the home, `.devkit` (hooks) first. */
-export function projectionEntries(pkgRel) {
-    if (!pkgRel)
-        return PACKAGE_ENTRIES;
-    return ['.devkit', ...PACKAGE_ENTRIES.map((entry) => `${pkgRel}/${entry}`)];
 }
 /** Every registered worktree, main first; a bare repository's own entry is flagged. */
 export function worktrees(gitRoot) {
@@ -73,37 +121,40 @@ export function hasOwnOverlay(root) {
         return false;
     }
 }
-/** The worktree whose `.devkit/hooks` the overlay runs: named by an absolute hooksPath, else found. */
-export function overlayHome(gitRoot) {
+/** Does `root` declare an overlay install of its own — a real `.devkit/config.json`, hook or not? A
+ * config that does not parse throws, so ship fails closed rather than gating as package mode. */
+const declaresOverlay = (root) => !isLink(join(root, '.devkit')) &&
+    isRealFile(join(root, '.devkit', 'config.json')) &&
+    overlayConfigured(root);
+/** The one home resolver (ship's via overlay-root.mts): the worktree an absolute hooksPath names,
+ * else the first non-bare worktree that `owns` an overlay. */
+export function overlayHome(gitRoot, owns = hasOwnOverlay) {
     const value = gitOut(gitRoot, ['config', '--get', 'core.hooksPath']);
     if (isAbsolute(value) && isOverlayHooksValue(value, gitRoot)) {
         const home = dirname(dirname(value.replace(/\/+$/, '')));
-        if (hasOwnOverlay(home))
+        if (owns(home))
             return home;
     }
-    return worktrees(gitRoot).find((wt) => !wt.bare && hasOwnOverlay(wt.path))?.path ?? null;
+    return worktrees(gitRoot).find((wt) => !wt.bare && owns(wt.path))?.path ?? null;
 }
-const isIgnored = (wt, rel) => {
-    try {
-        execFileSync('git', ['-C', wt, 'check-ignore', '-q', '--no-index', '--', rel], {
-            stdio: 'ignore',
-        });
-        return true;
-    }
-    catch {
-        return false;
-    }
-};
+/** overlayHome's worktree scan as a shell command, for the husky shim, which runs in every husky repo
+ * and so never starts node. Its hooksPath step never applies there: husky's runner owns hooksPath. */
+export const OVERLAY_HOME_SH = `git worktree list --porcelain 2>/dev/null |
+    awk '/^worktree /{w=substr($0,10)} /^bare$/{w=""} /^$/{if(w!="")print w; w=""}' |
+    while IFS= read -r __dk_w; do [ -x "$__dk_w/${LOCAL_HOOKS}/pre-commit" ] && { printf '%s\\n' "$__dk_w"; break; }; done`;
+/** Ship's overlay root: `root` itself when it declares its own overlay, else the home. Found by config,
+ * not hook, so ship fails closed on a missing hook instead of gating as package mode. */
+export function shipOverlayRoot(root) {
+    return declaresOverlay(root) ? root : overlayHome(root, declaresOverlay);
+}
 // A concurrent repair may have linked it first: that link is the one we wanted, not a failure.
 const link = (src, dst) => {
     try {
         symlinkSync(src, dst);
-        return true;
     }
     catch (e) {
-        if (e instanceof Error && 'code' in e && e.code === 'EEXIST')
-            return false;
-        throw e;
+        if (!(e instanceof Error && 'code' in e && e.code === 'EEXIST'))
+            throw e;
     }
 };
 const occupied = (path) => {
@@ -115,69 +166,62 @@ const occupied = (path) => {
         return false;
     }
 };
-/** Project the home's overlay into `wt`: links, except the branch-local COPIED entries. The package
- * `.devkit` is always a real directory, so its `baselines` can be a copy beside linked siblings. */
-export function projectOverlayIntoWorktree(wt, home, pkgRel) {
-    const linked = [];
-    const devkit = join(wt, pkgDevkit(pkgRel));
-    // Temp + rename: a crash never leaves a partial copy that reads as done, and a concurrent
-    // projector's finished copy wins rather than being removed.
-    const copy = (src, dst) => {
-        const own = occupied(devkit) && !lstatSync(devkit).isSymbolicLink();
-        const tmp = own
-            ? join(devkit, `.copy-${process.pid}-${baseName(dst)}`)
-            : `${dst}.copy-${process.pid}`;
-        try {
-            cpSync(src, tmp, { recursive: true });
-            renameSync(tmp, dst);
-            return true;
-        }
-        catch (e) {
-            if (occupied(dst))
-                return false;
-            throw e;
-        }
-        finally {
-            rmSync(tmp, { recursive: true, force: true });
-        }
-    };
-    for (const rel of projectionEntries(pkgRel)) {
-        const src = join(home, rel);
-        const dst = join(wt, rel);
-        if (!occupied(src))
-            continue;
-        if (rel === pkgDevkit(pkgRel) && !occupied(dst) && isIgnored(wt, `${rel}/config.json`))
-            mkdirSync(dst, { recursive: true });
-        if (occupied(dst) && lstatSync(dst).isDirectory()) {
-            for (const child of readdirSync(src)) {
-                const childRel = `${rel}/${child}`;
-                if (occupied(join(dst, child)) || !isIgnored(wt, childRel))
-                    continue;
-                const branchLocal = rel === pkgDevkit(pkgRel) && child === COPIED_DEVKIT_CHILD;
-                if ((branchLocal ? copy : link)(join(src, child), join(dst, child)))
-                    linked.push(childRel);
-            }
-            continue;
-        }
-        if (occupied(dst) || !isIgnored(wt, rel))
-            continue;
-        if ((isCopied(rel) ? copy : link)(src, dst))
-            linked.push(rel);
+// In the worktree's own `.devkit` when it has one, so git never sees the temp.
+const copyTemp = (devkit, dst) => occupied(devkit) && !lstatSync(devkit).isSymbolicLink()
+    ? join(devkit, `.copy-${process.pid}-${baseName(dst)}`)
+    : `${dst}.copy-${process.pid}`;
+// Temp + rename: a crash never leaves a partial copy that reads as done, and a concurrent
+// projector's finished copy wins rather than being removed.
+function copyInto(devkit, src, dst) {
+    const tmp = copyTemp(devkit, dst);
+    try {
+        cpSync(src, tmp, { recursive: true });
+        renameSync(tmp, dst);
     }
-    return linked;
+    catch (e) {
+        if (!occupied(dst))
+            throw e;
+    }
+    finally {
+        rmSync(tmp, { recursive: true, force: true });
+    }
 }
-/** What a worktree's projection still owes it: a linked package `.devkit` or copy entry (the first
- * sc-4157 projection linked everything), or a copy that is simply missing. */
+/** Project the home's overlay into `wt`: every ignored, unoccupied entry the home holds, so a path the
+ * worktree already has (its own file, or a hand-made link) is never replaced. */
+function projectOverlayIntoWorktree(wt, home, pkgRel) {
+    const devkit = join(wt, pkgDevkit(pkgRel));
+    const owed = projection(home, pkgRel);
+    const ignored = ignoredIn(wt, owed);
+    const missing = owed.filter((e) => placeable(ignored, e) && !occupied(join(wt, e.rel)));
+    for (const { rel, copy } of missing) {
+        const dst = join(wt, rel);
+        mkdirSync(dirname(dst), { recursive: true });
+        if (copy)
+            copyInto(devkit, join(home, rel), dst);
+        else
+            link(join(home, rel), dst);
+    }
+}
+/** Would what projection places for `entry` be ignored: a link reads as a file, a copy as its type. */
+const placeable = (ignored, { rel, dir, copy }) => ignored.has(rel) || (dir && copy && ignored.has(`${rel}/`));
 export function projectionGaps(wt, home, pkgRel) {
-    const devkit = pkgDevkit(pkgRel);
-    const linked = linksInto(home, join(wt, devkit)) ? [devkit] : [];
-    return linked.concat(copyRels(pkgRel).filter((rel) => linksInto(home, join(wt, rel)) ||
-        (occupied(join(home, rel)) && !occupied(join(wt, rel)) && isIgnored(wt, rel))));
+    const legacy = devkitDirs(pkgRel).filter((dir) => linksInto(home, join(wt, dir)));
+    const owed = projection(home, pkgRel);
+    const ignored = ignoredIn(wt, owed);
+    const absent = (e) => !occupied(join(wt, e.rel));
+    const wrong = (e) => e.copy && linksInto(home, join(wt, e.rel));
+    return {
+        owed: legacy.concat(owed.filter((e) => placeable(ignored, e) && (absent(e) || wrong(e))).map((e) => e.rel)),
+        unlinkable: owed
+            .filter((e) => absent(e) && e.dir && !e.copy && !placeable(ignored, e))
+            .filter((e) => ignored.has(`${e.rel}/`))
+            .map((e) => e.rel),
+    };
 }
-/** Close `projectionGaps`: drop the links (never the home's files), then project what is missing. */
+/** Close the owed gaps: drop the links (never the home's files), then project what is missing. */
 export function repairProjection(wt, home, pkgRel) {
     const gaps = projectionGaps(wt, home, pkgRel);
-    for (const rel of gaps.filter((r) => linksInto(home, join(wt, r)))) {
+    for (const rel of gaps.owed.filter((r) => linksInto(home, join(wt, r)))) {
         try {
             unlinkSync(join(wt, rel));
         }
@@ -186,7 +230,7 @@ export function repairProjection(wt, home, pkgRel) {
                 throw e; // a racing repair
         }
     }
-    if (gaps.length)
+    if (gaps.owed.length)
         projectOverlayIntoWorktree(wt, home, pkgRel);
     return gaps;
 }
@@ -229,34 +273,62 @@ const sameTree = (a, b) => {
 export function unprojectOverlay(home, pkgRel) {
     const unlinked = [];
     const kept = [];
+    let unread;
     const intoHome = (path) => linksInto(home, path);
+    const owed = projection(home, pkgRel, (message) => {
+        unread = message;
+    });
     for (const wt of worktrees(home)) {
-        if (wt.bare || sameDir(home, wt.path))
-            continue; // a worktree NESTED in the home still counts
-        for (const rel of copyRels(pkgRel)) {
+        // A worktree NESTED in the home still counts; a pruned one's path is gone.
+        if (wt.bare || sameDir(home, wt.path) || !occupied(wt.path))
+            continue;
+        // Only what projection could have placed: ignored, untracked, not beyond a link (a legacy linked
+        // .devkit is itself dropped by the devkitDirs loop below).
+        const ignored = ignoredIn(wt.path, owed);
+        const removed = [];
+        const drop = (path) => {
+            unlinkSync(path);
+            unlinked.push(path);
+            removed.push(path);
+        };
+        for (const { rel, copy } of owed.filter((entry) => placeable(ignored, entry))) {
             const path = join(wt.path, rel);
-            if (!ownedBy(wt.path, path))
-                continue; // a link, or reached through one (a legacy linked .devkit)
-            if (sameTree(path, join(home, rel)))
+            if (!copy || !ownedBy(wt.path, path)) {
+                if (intoHome(path))
+                    drop(path);
+            }
+            else if (sameTree(path, join(home, rel))) {
                 rmSync(path, { recursive: true, force: true });
+                removed.push(path);
+            }
             else
                 kept.push(path);
         }
-        for (const rel of projectionEntries(pkgRel)) {
-            const dst = join(wt.path, rel);
-            const children = intoHome(dst) ? [] : safeList(dst);
-            for (const child of children.map((c) => join(dst, c)).filter(intoHome))
-                unlinkSync(child);
-            // The real .devkit a projection created goes with it; one still holding ship logs stays.
-            if (baseName(rel) === '.devkit' && children.length && !safeList(dst).length)
-                rmdirSync(dst);
-            if (!intoHome(dst))
-                continue;
-            unlinkSync(dst);
-            unlinked.push(dst);
+        // What an older projection linked beyond today's entries (ship logs), or a legacy linked .devkit.
+        for (const dir of devkitDirs(pkgRel).map((rel) => join(wt.path, rel))) {
+            if (intoHome(dir))
+                drop(dir);
+            else
+                for (const child of safeList(dir)
+                    .map((c) => join(dir, c))
+                    .filter(intoHome))
+                    drop(child);
+        }
+        for (const path of removed)
+            pruneEmptyParents(wt.path, path);
+    }
+    return { unlinked, kept, unread };
+}
+/** Drop the directories a projection created above `path` once empty; one holding anything stays. */
+function pruneEmptyParents(wt, path) {
+    for (let dir = dirname(path); dir !== wt && isInside(wt, dir); dir = dirname(dir)) {
+        try {
+            rmdirSync(dir);
+        }
+        catch {
+            return;
         }
     }
-    return { unlinked, kept };
 }
 const safeList = (dir) => {
     try {
@@ -266,69 +338,53 @@ const safeList = (dir) => {
         return [];
     }
 };
-/**
- * The pre-commit prelude: link the home's overlay into a linked worktree that cannot reach its config.
- * Home is the hook's own `../..`; review runs a private copy, so it never projects.
- */
-export function projectionPrelude(pkgRel, chainTarget) {
-    const marker = shQuote(`${pkgRel ? `${pkgRel}/` : ''}.devkit/config.json`);
-    const entries = projectionEntries(pkgRel).map(shQuote).join(' ');
-    const copied = projectionEntries(pkgRel).filter(isCopied).map(shQuote).join('|');
-    const chain = chainTarget
-        ? `[ -f ${chainWord(chainTarget)} ] && exec sh ${chainWord(chainTarget)} "$@"`
-        : ':';
-    const devkit = shQuote(pkgDevkit(pkgRel));
-    // Mirrors projectOverlayIntoWorktree: COPIED entries and .devkit/baselines are copies, the rest links.
-    return `# sc-4157: a linked worktree never gets the git-excluded overlay, so borrow the home's before any gate.
-if [ "\${DEVKIT_RUN_MODE:-}" != "review" ] && [ ! -f ${marker} ]; then
-    __dk_failed=''
-    __dk_copy() {
-        __dk_t="$2.copy-$$"
-        [ -d ${devkit} ] && [ ! -L ${devkit} ] && __dk_t=${devkit}/".copy-$$-\${2##*/}"
-        if cp -R "$1" "$__dk_t" 2>/dev/null && { [ -e "$2" ] || [ -L "$2" ] || mv "$__dk_t" "$2"; }; then
-            rm -rf "$__dk_t"; return 0
-        fi
-        rm -rf "$__dk_t"
-        { [ -e "$2" ] || [ -L "$2" ]; } && return 0
-        __dk_failed=1; echo "devkit: could not copy $2 into this worktree" >&2
-    }
-    __dk_home=$(cd "$(dirname -- "$0")/../.." 2>/dev/null && pwd -P) || __dk_home=''
-    if [ -n "$__dk_home" ] && [ "$__dk_home" != "$(pwd -P)" ]; then
-        for __dk_e in ${entries}; do
-            [ -e "$__dk_home/$__dk_e" ] || continue
-            if [ "$__dk_e" = ${devkit} ] && [ ! -e "$__dk_e" ] && [ ! -L "$__dk_e" ] \
-                && git check-ignore -q --no-index -- "$__dk_e/config.json"; then mkdir -p "$__dk_e"; fi
-            if [ -d "$__dk_e" ] && [ ! -L "$__dk_e" ]; then
-                for __dk_c in "$__dk_home/$__dk_e"/* "$__dk_home/$__dk_e"/.[!.]*; do
-                    [ -e "$__dk_c" ] || continue
-                    __dk_n="$__dk_e/\${__dk_c##*/}"
-                    { [ -e "$__dk_n" ] || [ -L "$__dk_n" ]; } && continue
-                    git check-ignore -q --no-index -- "$__dk_n" || continue
-                    if [ "$__dk_e" = ${devkit} ] && [ "\${__dk_c##*/}" = ${COPIED_DEVKIT_CHILD} ]; then __dk_copy "$__dk_c" "$__dk_n"
-                    else ln -s "$__dk_c" "$__dk_n"; fi
-                done
-                continue
-            fi
-            { [ -e "$__dk_e" ] || [ -L "$__dk_e" ]; } && continue
-            if ! git check-ignore -q --no-index -- "$__dk_e"; then
-                echo "devkit: $__dk_e is not git-ignored here, so it was not linked" >&2
-            else
-                case "$__dk_e" in
-                    ${copied}) __dk_copy "$__dk_home/$__dk_e" "$__dk_e" ;;
-                    *) ln -s "$__dk_home/$__dk_e" "$__dk_e" ;;
-                esac
-            fi
-        done
-        # A failed copy leaves the worktree unprojected, so the next commit retries rather than trusts it.
-        [ -n "$__dk_failed" ] && [ -L ${marker} ] && rm -f ${marker}
-        if [ -f ${marker} ]; then echo "devkit: linked this worktree to the overlay at $__dk_home" >&2
-        else
-            echo "devkit: overlay not reachable here, gates skipped. Run devkit doctor --fix" >&2
-            [ -n "\${DEVKIT_SHIP:-}" ] && exit 1
-            ${chain}
-            exit 0
-        fi
-    fi
+const shGlob = (glob) => glob
+    .split('*')
+    .map((part) => part && shQuote(part))
+    .join('*');
+const shWords = (paths) => paths.map(shQuote).join(' ');
+/** Passes only when a linked worktree owes nothing to the registry as rendered from `root`'s config;
+ * it may fail a complete one. A later config path change is hook drift until doctor --fix. */
+function projectedTest(root, pkgRel) {
+    const inputs = readableGateInputs(join(root, pkgRel)).filter((input) => input.share !== 'checkout' && !input.eachFile);
+    const perFile = FIXED_GATE_INPUTS.filter((input) => input.eachFile && input.share !== 'checkout');
+    const rels = (share) => shWords(inputs.filter((i) => i.share === share).map((i) => pkgPath(pkgRel, i.path)));
+    const all = [...inputs, ...perFile].map((input) => pkgPath(pkgRel, input.path));
+    const runtime = RUNTIME_STATE.flatMap((glob) => [glob, `${glob}.generation`]).map(shGlob);
+    const globs = perFile.map((input) => {
+        const dir = shQuote(pkgPath(pkgRel, input.path));
+        return `    for __dk_p in "$__dk_home"/${dir}/*${shQuote(input.eachFile ?? '')}; do __dk_owed ${dir}/"\${__dk_p##*/}"${input.share === 'branch' ? ' 1' : ''} && return 1; done`;
+    });
+    const children = devkitDirs(pkgRel).map((dir) => {
+        const covered = all
+            .filter((rel) => rel.startsWith(`${dir}/`))
+            .map((rel) => rel.slice(dir.length + 1).split('/')[0]);
+        const d = shQuote(dir);
+        return `    for __dk_p in "$__dk_home"/${d}/* "$__dk_home"/${d}/.[!.]* "$__dk_home"/${d}/..?*; do
+        case "\${__dk_p##*/}" in ${[...new Set(covered)].map(shQuote).concat(runtime).join('|')}) continue ;; esac
+        __dk_owed ${d}/"\${__dk_p##*/}" && return 1
+    done`;
+    });
+    return `__dk_has() { [ -e "$1" ] || [ -L "$1" ]; }
+# Owed: the home holds $1 and this worktree lacks it, or holds a link where a branch copy belongs ($2).
+__dk_owed() { __dk_has "$__dk_home/$1" && { ! __dk_has "$1" || { [ -n "\${2:-}" ] && [ -L "$1" ]; }; }; }
+__dk_projected() {
+    for __dk_p in ${shWords(devkitDirs(pkgRel))}; do [ -L "$__dk_p" ] && return 1; done
+    for __dk_p in ${rels('clone')}; do __dk_owed "$__dk_p" && return 1; done
+    for __dk_p in ${rels('branch')}; do __dk_owed "$__dk_p" 1 && return 1; done
+${[...globs, ...children].join('\n')}
+    return 0
+}`;
+}
+/** Fail without devkit on PATH; in a linked worktree (the hook's `../..` is not this checkout) project
+ * the home's overlay via the one TS projector, or fail. Under the husky shim `../..` is physical. */
+export function projectionPrelude(root, pkgRel) {
+    const pkg = pkgRel ? ` --pkg ${shQuote(pkgRel)}` : '';
+    return `${BIN_DIRS.global.open}
+__dk_home=$(cd \${DEVKIT_VIA_HUSKY_INIT:+-P} "$(dirname -- "$0")/../.." && pwd -P) || exit 1
+if [ "$__dk_home" != "$(pwd -P)" ]; then
+${projectedTest(root, pkgRel).replace(/^(?=.)/gm, '    ')}
+    __dk_projected || "$__dk_package_bin_dir/devkit" sync-worktree --home "$__dk_home"${pkg} || exit 1
 fi`;
 }
 /** Where an overlay-owning command runs: the home, when `cwd` only borrows its overlay through links. */

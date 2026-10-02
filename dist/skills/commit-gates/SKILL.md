@@ -25,7 +25,8 @@ command. Do not pre-run every gate or replace the managed chain with a hand-writ
    is `devkit anti-slop check --staged`). Stage the fix and run that line — seconds, no judges.
    Under `devkit ship` those lines judge your checkout's index, not the briefed paths, so the ship
    block also prints the `devkit ship <branch> "<title>" --dry-gates …` invocation that re-runs the
-   deterministic set on ship's exact staging. A hand-rolled substitute (`npx oxlint …` against the
+   deterministic set on ship's exact staging. A blocking overlay lint step (eslint, biome, fallow)
+   and devkit's own formatter print the same invocation under `devkit ship`. A hand-rolled substitute (`npx oxlint …` against the
    anti-slop config) ignores the baseline and cannot reproduce the new-versus-inherited verdict.
    This re-checks a gate that already named itself; it is not a licence to pre-run every gate.
 3. **Check which files the gates actually had.** A ship's gate worktree is cut from the base, so
@@ -40,7 +41,8 @@ command. Do not pre-run every gate or replace the managed chain with a hand-writ
    (`--resume <branch> -- <path>`) instead of chasing the finding. Each briefed path is one literal file
    from the repo root; a glob is not expanded, so brief every file by name.
 4. Treat a bypass as an explicit operator decision. Never use `--no-verify`, silently disable a
-   selected guard, freeze a baseline to absorb new debt, or invent an environment variable.
+   selected guard, freeze a baseline to absorb new debt, or invent an environment variable. A
+   `guard-review waive` backed by a reproduction (see the reviewer gates below) is a dispute, not a bypass.
 
 ## Managed gate families
 
@@ -67,15 +69,30 @@ command. Do not pre-run every gate or replace the managed chain with a hand-writ
   base, so `git show HEAD:<file>`, `grep` and `git diff --stat` in your own checkout can all agree
   with each other and still describe a different tree. Waive on evidence read from the reviewed
   base, and pass the `--base` the block note prints so the record says which tree you checked.
+  When a correctness or conventions finding names a concrete input and running that input against
+  the reviewed code gives the correct result, waive it with the command and its output as the
+  rationale. Do not add tests or edits only to change the diff and re-sample the judge: any real
+  change voids the waiver and proves nothing. A race that did not reproduce is not disproved.
   A lens PASS is one sample from a nondeterministic judge, not a certificate that its concern is
   clean. A later attempt can fail the same lens on code you did not touch. Treat that as an
   ordinary finding and fix it: it was missed, not caused by your last edit.
+  **Re-check one failed reviewer or lens before re-shipping.** Each FAIL block ends with
+  `Re-check a fix locally … guard-review lens <reviewer>[:<lens>]`. Stage the fix and run it: it
+  judges only that reviewer (or that one correctness lens) on your staged index, with the gate's
+  prompt, model and cache key. Its PASS is cached, so the next `devkit ship --resume` skips that lens
+  — but only when the same paths ship briefed are staged and the `GUARD_REVIEW_*` model env matches.
 - **A counterexample stands for a class.** A correctness finding against a matcher, parser,
   predicate or validator names ONE input the check gets wrong. Before re-shipping, name the property
   that makes it wrong, list the other inputs that share it (every character that continues a path,
   not just the `.` quoted), and fix the class: an allowlist or grammar instead of a longer
   blocklist, or a narrower check on an exact token. Pin the fix with a table-driven test over that
   class. A second finding of the same shape means the first fix covered an instance, not the class.
+- **A `↻ … not converging` line** under a blocked ship's digest means the same reviewer has blocked
+  three or more rounds on this branch with no pass between, and its latest blocking-finding count is
+  no better than its best earlier round. It says the count is not falling, not which findings recur.
+  Stop re-shipping blind: fix the remaining findings as a class, waive any you judge not real with
+  the `guard-review waive` line and a rationale, or ask the user for the reviewer skip the block note
+  names. `--no-verify` is never the landing path.
 - **Sentry gate** judges commit-message intent for newly introduced runtime error classes. Add the
   capture on the named surface, or surface a disputed verdict to the user before any bypass.
 - **Qavis advisory** can recommend visual QA but does not turn a non-UI change into UI work. Ship
@@ -120,6 +137,12 @@ specific conditions under which that control is appropriate:
   own repo only; the gate is already advisory when no hook-generator input is staged).
 - `GUARD_DECISIONS_INTEGRITY_OK=1` — assert that a NEW structural finding on a decision record in
   this change is wrong (Devkit's own repo only; findings already present at HEAD never block).
+
+Anti-slop has no one-run control by design: CI's `anti-slop check --base` would still fail the PR,
+so a bypass would only move the failure later. To accept a finding deliberately, add a path-scoped
+`overrides` entry (or change the rule's severity) in the repository Oxlint config, where a reviewer
+sees it in the diff. In an overlay install the baseline is per-clone, so `devkit anti-slop create
+--force <paths>` adopts it locally. The FAIL output names the route for the mode it ran in.
 
 ## Judge outage: re-targeting, not bypassing
 

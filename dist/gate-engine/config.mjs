@@ -211,6 +211,7 @@ const arr = (v, fallback) => (Array.isArray(v) ? v : fallback);
 // non-numeric cap must never silently disable chunking): representation guards, typed not trusted.
 const str = (v, d) => v != null && `${v}` === v && v.trim() !== '' ? v.trim() : d;
 const nonNegInt = (v, d) => v !== undefined && Number.isInteger(v) && v >= 0 ? v : d;
+const globs = (v) => arr(v, []).filter((p) => str(p, ''));
 /**
  * Resolve one already-parsed governance config. Kept separate so a staged guard.config.json can
  * be compared with its HEAD baseline without materializing either version onto the filesystem.
@@ -294,10 +295,9 @@ function resolveLoadedGuardConfig(file, cwd) {
             paths: normalizeReviewPaths(fr.paths),
             accessibility: { ...dr.accessibility, ...(fr.accessibility ?? {}) },
         },
-        // Reference-checkout globs for the prior-art agent's local research leg. Declared-only:
-        // an empty resolution means the leg attests `unavailable`, never a silent scan of
-        // undeclared sibling checkouts. Globs resolve against cwd (W-3: the config's directory).
-        research: { referenceCheckouts: arr(file.research?.referenceCheckouts, []) },
+        // Prior-art reference-checkout globs; declared-only, never a scan of undeclared siblings.
+        // Resolve against cwd (W-3), then the main worktree's same dir (skills/prior-art/SKILL.md).
+        research: { referenceCheckouts: globs(file.research?.referenceCheckouts) },
         noLog: noLogEnv ?? Boolean(file.noLog ?? DEFAULTS.noLog),
         noLlm: noLlmEnv ?? Boolean(file.noLlm ?? DEFAULTS.noLlm),
         // Echo the resolution base so engines never have to re-derive it (and never reach

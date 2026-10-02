@@ -22,7 +22,7 @@ const CLEAN_REPORT = {
     unlexable: [],
 };
 function git(root, args) {
-    const raw = execFileSync('git', ['-C', root, ...args]);
+    const raw = execFileSync('git', ['-C', root, '--no-optional-locks', ...args]);
     return raw.toString('utf8').split('\0').filter(Boolean);
 }
 function repoPath(root, absolute) {
@@ -213,7 +213,9 @@ export async function inspectDistIntegrity(root, base, briefedPaths) {
     // regenerable artifact back on disk silently re-adds itself and the deletion can never land). It
     // reports as D because `git diff <commit>` never sees an untracked file, so a path dropped from
     // the index while still on disk looks deleted against the base the worktree is cut from.
-    const deleted = new Set(git(root, ['diff', '--name-only', '-z', '--diff-filter=D', base, '--', 'dist']));
+    // Plumbing, not porcelain `git diff`: that refreshes and REWRITES the shared index even under
+    // --no-optional-locks, and an A/D answer needs no refresh.
+    const deleted = new Set(git(root, ['diff-index', '--name-only', '-z', '--diff-filter=D', base, '--', 'dist']));
     // Index membership is not the property that matters — presence in the commit this ship is about
     // to create is. ship-branch.sh and reship.sh `git add -f` every briefed path, so briefing one IS
     // shipping it, and demanding it be pre-staged rejects the artifact a release just generated.
@@ -271,7 +273,15 @@ export async function inspectDistIntegrity(root, base, briefedPaths) {
     // without putting it in `briefed`, and that asymmetry IS the guard — it is what still catches a
     // ship that carries source while leaving its build output behind (sc-1199/sc-1246).
     const untracked = physical.filter((file) => required.has(file) && !tracked.has(file) && !shipping(file));
-    const added = git(root, ['diff', '--name-only', '-z', '--diff-filter=A', base, '--', 'dist']);
+    const added = git(root, [
+        'diff-index',
+        '--name-only',
+        '-z',
+        '--diff-filter=A',
+        base,
+        '--',
+        'dist',
+    ]);
     const unbriefed = added.filter((file) => required.has(file) && !briefed.has(file)).sort();
     unresolved.sort((a, b) => `${a.importer}\0${a.specifier}`.localeCompare(`${b.importer}\0${b.specifier}`));
     return { active: true, unresolved, unbriefed, untracked, unlexable: unlexable.sort() };

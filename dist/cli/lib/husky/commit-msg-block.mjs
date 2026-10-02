@@ -14,7 +14,9 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { detectGitRoot } from '../detect-git-root.mjs';
-import { extractGuardBlock, PACKAGE_BIN_DIR_FRAGMENT, PATH_SETUP, removeGuardBlock, replaceGuardBlock, wrapGuardBlock, } from './husky-block.mjs';
+import { buildCommitGateLogFragment, exitDispatchTrap } from './gate-policy/commit-gate-log.mjs';
+import { BIN_DIRS } from './gate-policy/block-helpers.mjs';
+import { extractGuardBlock, PATH_SETUP, removeGuardBlock, replaceGuardBlock, wrapGuardBlock, } from './husky-block.mjs';
 import { invokeJudge, sentryFragment } from './sentry-fragments.mjs';
 /** The guard ids whose gates run at commit-msg (not pre-commit), in emit order. */
 export const COMMIT_MSG_GUARD_IDS = ['review', 'sentry'];
@@ -32,21 +34,23 @@ const TESTED_STATUS_COMMENT = `# \`|| var=$?\` makes each judge's exit a TESTED 
 # would never print. (Same guard the pre-commit AI fragments use: \`rc=0; … || rc=$?\`.)`;
 // The pre-commit and commit-msg hooks are separate Git child processes, so environment exports do
 // not cross the boundary. Pre-commit leaves a tree-bound attempt id in this worktree's Git metadata;
-// run-context reads it for the message judges, and this trap removes it on every commit-msg exit.
+// run-context reads it for the message judges, and the shared EXIT dispatcher removes it on every
+// commit-msg exit, after which the gate log (appended to pre-commit's, sc-2755) closes.
 const COMMIT_ATTEMPT_HANDOFF = `# Rejoin this hook to pre-commit's telemetry attempt, then clear the handoff on exit.
 __dk_commit_state="$(git rev-parse --git-path devkit-commit-attempt 2>/dev/null || true)"
 __dk_clear_commit_state() {
     [ -n "$__dk_commit_state" ] && rm -f "$__dk_commit_state" 2>/dev/null || true
 }
-trap '__dk_clear_commit_state' EXIT`;
+${buildCommitGateLogFragment('commit-msg')}
+${exitDispatchTrap(['__dk_clear_commit_state', '__dk_gate_log_finish'])}`;
 // The feature-completeness judge (guard-review completeness) — hard-by-default upstream
 // (gate-engine/review/completeness.mts): a confident FAIL exits 1, warn/skip 0, fail-open 2,
 // and 3 = judge outage under GUARD_AI_STRICT (ship) — fail CLOSED, mirroring the pre-commit
 // AI fragments (a strict-ship outage must never silently pass the gate).
-const completenessFragment = (standalone, scrub) => `# devkit:guard-completeness
+const completenessFragment = (binDir) => `# devkit:guard-completeness
 echo "🧩 Completeness gate (commit-msg judge)..."
 crc=0
-${invokeJudge(standalone, 'guard-review completeness', 'crc', '"$1"', scrub)}
+${invokeJudge(binDir, 'guard-review completeness', 'crc')}
 if [ "$crc" -eq 1 ]; then
     echo "   Confirmed completeness gap (hard-by-default; findings above)."
     echo "   Fix the gap, or — with the user's explicit OK — GUARD_NO_COMPLETENESS=1 git commit ..."
@@ -82,21 +86,19 @@ export function commitMsgGuards(guards = []) {
  * no commit-msg guard is selected (callers then remove any existing block instead).
  *
  * `pkgRel` (monorepo): package-scoped markers, and the judges run from the package dir (its staged
- * diff + guard.config.json). `standalone` swaps local paths for command -v-guarded global bins.
+ * diff + guard.config.json). `binDir` picks where the judges' bins resolve (BIN_DIRS).
  */
-export function buildCommitMsgBlock(selection, pkgRel = '', { standalone = false, scrubGitEnv = false } = {}) {
+export function buildCommitMsgBlock(selection, pkgRel = '', binDir = 'package') {
     const selected = commitMsgGuards(selection.guards);
     if (!selected.length)
         return null;
-    const pieces = [
-        ...(standalone ? [] : [PACKAGE_BIN_DIR_FRAGMENT]),
-        COMMIT_ATTEMPT_HANDOFF,
-        TESTED_STATUS_COMMENT,
-    ];
+    const pieces = [BIN_DIRS[binDir].open, COMMIT_ATTEMPT_HANDOFF, TESTED_STATUS_COMMENT];
     if (selected.includes('review'))
-        pieces.push(completenessFragment(standalone, scrubGitEnv));
+        pieces.push(completenessFragment(binDir));
     if (selected.includes('sentry'))
-        pieces.push(sentryFragment(standalone, scrubGitEnv));
+        pieces.push(sentryFragment(binDir));
+    if (BIN_DIRS[binDir].close)
+        pieces.push(BIN_DIRS[binDir].close);
     // Absolutize the message path BEFORE cd'ing into the package (git hands it repo-root-relative on
     // a normal commit; a linked worktree already passes it absolute), then judge from the package
     // dir. `set --` rewrites $1 in place — the subshell inherits it — and `) || exit 1` propagates
@@ -109,8 +111,8 @@ export function buildCommitMsgBlock(selection, pkgRel = '', { standalone = false
  * fail-open exit 2 (captured into its rc var, never re-raised) can never propagate as a hook
  * failure. Callers guarantee a commit-msg guard is selected (block non-null).
  */
-export function buildCommitMsgHook(selection, pkgRel = '', opts = {}) {
-    return `${COMMIT_MSG_PREAMBLE}\n${buildCommitMsgBlock(selection, pkgRel, opts)}\n\nexit 0\n`;
+export function buildCommitMsgHook(selection, pkgRel = '', binDir = 'package') {
+    return `${COMMIT_MSG_PREAMBLE}\n${buildCommitMsgBlock(selection, pkgRel, binDir)}\n\nexit 0\n`;
 }
 /**
  * Write/refresh/remove the managed `.husky/commit-msg` from a selection — the commit-msg half of
@@ -121,7 +123,8 @@ export function buildCommitMsgHook(selection, pkgRel = '', opts = {}) {
  *     how pre-commit deselection strips the block and leaves the consumer's hook).
  */
 export function installCommitMsgHook(hookRoot, pkgRel, selection, { dryRun = false, standalone = false } = {}) {
-    const block = buildCommitMsgBlock(selection, pkgRel, { standalone });
+    const binDir = standalone ? 'global-optional' : 'package';
+    const block = buildCommitMsgBlock(selection, pkgRel, binDir);
     if (block === null) {
         removeCommitMsgBlock(hookRoot, pkgRel, dryRun);
         return;
@@ -133,7 +136,7 @@ export function installCommitMsgHook(hookRoot, pkgRel, selection, { dryRun = fal
             return;
         }
         mkdirSync(join(hookRoot, '.husky'), { recursive: true });
-        writeFileSync(hookPath, buildCommitMsgHook(selection, pkgRel, { standalone }));
+        writeFileSync(hookPath, buildCommitMsgHook(selection, pkgRel, binDir));
         chmodSync(hookPath, 0o755);
         console.log('  ✓ created .husky/commit-msg (commit-msg judges)');
         return;

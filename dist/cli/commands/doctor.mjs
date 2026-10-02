@@ -11,7 +11,7 @@ import { check } from '../lib/doctor/check-result.mjs';
 import { checkExtends, EXTENDS_REPAIRABLE, expectedExtends, repairExtends, } from '../lib/doctor/extends-checks.mjs';
 import { checkGuardConfig, judgeGuardsOf, CODEX_RUNTIME_CHECK, SEARCH_INDEX_CHECK, } from '../lib/doctor/guard-config-checks.mjs';
 import { bindClaudeFamily } from '../lib/doctor/judge/judge-family.mjs';
-import { printQavisAdvisoryHealth } from '../lib/doctor/qavis-health.mjs';
+import { printPriorArtAdvisoryHealth, printQavisAdvisoryHealth, } from '../lib/doctor/qavis-health.mjs';
 import { hookChecks } from '../lib/doctor/hook-checks.mjs';
 import { runOverlayDoctor } from '../lib/doctor/overlay-doctor.mjs';
 import { checkLockPin, checkPin } from '../lib/doctor/pin/pin-checks.mjs';
@@ -26,6 +26,7 @@ import { checkDevkitCacheGitignore, repairDevkitCacheGitignore, } from '../lib/i
 import { resolveExistingAgentProviders, SUPPORTED_AGENT_PROVIDERS, } from '../lib/install/agent-assets/agent-providers.mjs';
 import { checkAntiSlopCapability, syncAntiSlopCapability, } from '../lib/install/anti-slop/lifecycle.mjs';
 import { selectedHookAssets } from '../lib/install/hook-registration-ledger/selection.mjs';
+import { withInitLock } from '../lib/install/init/init-lock.mjs';
 import { checkOxcCapability, syncOxcCapability } from '../lib/install/oxc/lifecycle.mjs';
 import { cmpSemver, fetchLatestTag } from './update.mjs';
 // Devkit modules are .mts in source and .mjs when installed; runtime string paths need the live ext.
@@ -300,7 +301,8 @@ Usage:
 
   --fix    Re-run init for the recorded selection (recreates MISSING pieces; never re-freezes a
            baseline). In an overlay repo, regenerates a stale/missing local gate hook (e.g. after
-           \`devkit update\` shipped a new hook shape). Exit 0 all-ok, 1 drift, 2 not-initialized.
+           \`devkit update\` shipped a new hook shape) and re-syncs drifted skills, agents and agent
+           hooks. Exit 0 all-ok, 1 drift, 2 not-initialized.
 
 Also warns if the RUNNING devkit is older than this repo's init stamp or a hand-declared
 "minDevkit":"x.y.z" floor in .devkit/config.json.
@@ -347,8 +349,11 @@ export default async function run(args, cwd) {
     // `|| 1` on skew: drift is drift in every mode, so a skewed overlay/self-host doctor must not
     // report 0 where package mode reports 1 for the identical condition.
     const skewed = skew.kind === 'older';
-    if (cfg.overlay)
-        return (await runOverlayDoctor(cwd, cfg, fix, printQavisAdvisoryHealth)) || +skewed;
+    if (cfg.overlay) {
+        const overlay = () => runOverlayDoctor(cwd, cfg, fix, printQavisAdvisoryHealth);
+        // --fix re-runs install's own steps, so it holds init's lock, as package mode's spawned init does.
+        return (await (fix ? withInitLock(cwd, 'doctor --fix', overlay) : overlay())) || +skewed;
+    }
     if (cfg.selfHost)
         return (await runSelfHostDoctor(cwd, cfg, fix)) || +skewed;
     const { results, sel } = await collectResults(cwd, cfg, configResult);
@@ -367,6 +372,7 @@ export default async function run(args, cwd) {
         console.log(line);
     }
     printQavisAdvisoryHealth(cwd, sel.guards ?? []);
+    printPriorArtAdvisoryHealth(cwd, sel);
     const drifted = results.some((r) => r.status !== 'OK' && !r.advisory); // see CheckResult.advisory
     if (fix && drifted) {
         applyFix(cwd, results, sel, cfg.stack ?? 'generic', Boolean(cfg.standalone));

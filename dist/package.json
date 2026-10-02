@@ -1,6 +1,6 @@
 {
   "name": "@norvalbv/devkit",
-  "version": "0.64.0",
+  "version": "0.65.0",
   "private": true,
   "type": "module",
   "license": "MIT",
@@ -58,6 +58,7 @@
     "test": "vitest",
     "test:run": "vitest run",
     "test:run:report": "node cli/index.mts test-report-run",
+    "test:run:coverage:changed": "vitest run --changed=${COVERAGE_BASE:-origin/main} --coverage.enabled --coverage.include='{cli,gate-engine,anti-slop}/**/*.mts' --coverage.reporter=text --coverage.reportsDirectory=coverage/.changed/$$",
     "test:e2e": "vitest run -c vitest.e2e.config.mjs",
     "playground": "bun scripts/playground.mts",
     "lint": "bun run lint:oxlint",
@@ -84,10 +85,10 @@
     "@types/node": "^25.9.3",
     "@typescript-eslint/parser": "^8.0.0",
     "@typescript/native": "npm:typescript@7.0.2",
-    "@vitest/coverage-v8": "^4.1.10",
+    "@vitest/coverage-v8": "^5.0.3",
     "husky": "^9.1.7",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.10"
+    "vitest": "^5.0.3"
   },
   "optionalDependencies": {
     "jscpd": "^4.2.4"

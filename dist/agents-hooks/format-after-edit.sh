@@ -37,7 +37,7 @@ cd "${CLAUDE_PROJECT_DIR:-$HOOK_DIR/../..}" 2>/dev/null || { echo '{}'; exit 0; 
 # Strip the prefix from the same UNRESOLVED root the guard above compared against — `pwd -P`
 # would resolve symlinks (/tmp → /private/tmp) and the strip would silently miss.
 source "$HOOK_DIR/session-edits-lib.sh" 2>/dev/null || true
-if type session_edits_file &>/dev/null; then
+if declare -F session_edits_file &>/dev/null; then
   rel_path="${file_path#"${CLAUDE_PROJECT_DIR:-$(pwd)}"/}"
   if [ -n "$rel_path" ] && [ "$rel_path" != "$file_path" ]; then
     ledger=$(session_edits_file "$input")
@@ -71,10 +71,29 @@ if [[ "$file_path" =~ \.(tsx?|css)$ ]] && [ -x "./node_modules/.bin/eslint" ]; t
   fi
   in_scope=""
   if [ -n "$scan_roots" ]; then
-    # Match the edited file against any configured scanRoot path segment.
+    # Match whole path segments (sc-1053): a substring match let `src` cover `src2/`, and a project
+    # under ~/src/ put every file in scope. Both sides resolve to absolute against the UNRESOLVED
+    # project root (as the ledger strip does), with `.`/`..`/empty segments collapsed lexically.
+    norm_path() {
+      local seg joined="" n=0 i=0 out=() segs=()
+      IFS=/ read -ra segs <<< "$1"
+      for seg in "${segs[@]}"; do
+        case "$seg" in
+          '' | .) ;;
+          ..) [ "$n" -gt 0 ] && n=$((n - 1)) ;;
+          *) out[n]="$seg"; n=$((n + 1)) ;;
+        esac
+      done
+      while [ "$i" -lt "$n" ]; do joined="$joined/${out[i]}"; i=$((i + 1)); done
+      printf '%s' "${joined:-/}"
+    }
+    project_root="${CLAUDE_PROJECT_DIR:-$(pwd)}"
+    abs_path() { if [[ "$1" == /* ]]; then norm_path "$1"; else norm_path "$project_root/$1"; fi; }
+    scope_abs=$(abs_path "$file_path")
     while IFS= read -r root; do
       [ -z "$root" ] && continue
-      if [[ "$file_path" == *"/$root/"* ]] || [[ "$file_path" == "$root/"* ]] || [[ "$file_path" == *"/$root"* ]]; then
+      root_abs=$(abs_path "$root")
+      if [[ "$scope_abs" == "$root_abs" || "$scope_abs" == "${root_abs%/}/"* ]]; then
         in_scope="1"; break
       fi
     done <<< "$scan_roots"

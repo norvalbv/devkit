@@ -68,6 +68,8 @@ export default function run(args, cwd) {
     // And again for base-drift: reading it here is what stops a full sync PRUNING an installed
     // hook as though the component had been deselected.
     const baseDrift = cfg?.components?.baseDrift ?? false;
+    // And for the anti-slop preflight hook, owned by the antiSlop component.
+    const antiSlop = cfg?.components?.antiSlop ?? false;
     const explicitTargets = listFlag(args, '--targets');
     const targets = explicitTargets ??
         (cfg
@@ -88,7 +90,15 @@ export default function run(args, cwd) {
     const override = args.includes('--force') ? () => true : undefined;
     const desired = only
         ? undefined
-        : hookScriptsFor({ agentHooks: true, decisions, fallow, adhd, priorArtGate, baseDrift });
+        : hookScriptsFor({
+            agentHooks: true,
+            decisions,
+            fallow,
+            adhd,
+            priorArtGate,
+            baseDrift,
+            antiSlop,
+        });
     syncHookScripts(gitRoot, {
         dryRun: args.includes('--dry-run'),
         targets,

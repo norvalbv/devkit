@@ -17,29 +17,30 @@ import { listAgents } from '../../../commands/sync/sync-agents.mjs';
 import { walk } from '../../../commands/sync/sync-skills.mjs';
 import { skillNamesForSelection } from '../../components.mjs';
 import { agentAssetDir, projectAgentAsset, projectedAssetRel } from './agent-assets.mjs';
+/** The working tree, read the way the sync writers see it. */
+export function fsReader(root) {
+    return {
+        list: (dir) => (existsSync(join(root, dir)) ? walk(join(root, dir)) : []),
+        // Guarded: `walk` reports a symlink-to-directory as a leaf (EISDIR); unreadable = not identical.
+        read: (rel) => {
+            try {
+                return readFileSync(join(root, rel));
+            }
+            catch {
+                return null;
+            }
+        },
+    };
+}
 /** The logical files the writer would ship for `kind`, after the shared selection filter. */
-export function projectedLogicals({ root, kind, srcDir, selection = {}, }) {
-    const src = join(root, srcDir);
+export function projectedLogicals({ root, kind, srcDir, selection = {}, reader, }) {
     if (kind === 'agents')
-        return listAgents(src);
-    const all = walk(src);
+        return reader
+            ? reader.list(srcDir).filter((rel) => !rel.includes('/') && rel.endsWith('.md'))
+            : listAgents(join(root, srcDir));
+    const all = (reader ?? fsReader(root)).list(srcDir);
     const names = new Set(skillNamesForSelection([...new Set(all.map((rel) => rel.split('/')[0]))], selection));
     return all.filter((rel) => names.has(rel.split('/')[0]));
-}
-/**
- * Compare `dest` to the bytes the writer would produce.
- *
- * The read is guarded because `walk` is lstat-shaped: it reports a symlink-to-directory as a leaf,
- * so `readFileSync` on one throws EISDIR. A parity check that CRASHES on a malformed projection is
- * strictly worse than one that reports it — unreadable is, for this purpose, simply not identical.
- */
-function matchesProjection(dest, want) {
-    try {
-        return readFileSync(dest).equals(want);
-    }
-    catch {
-        return false;
-    }
 }
 /**
  * Every way `root`'s projections diverge from their source, as human-readable lines.
@@ -56,23 +57,36 @@ export function projectionDrift(input) {
     const { root, kind, srcDir, targets } = input;
     if (!targets.length)
         return [`unchecked ${kind}/ — no agentTargets configured, nothing compared`];
-    const src = join(root, srcDir);
-    const logicals = projectedLogicals(input);
+    const reader = input.reader ?? fsReader(root);
     const drift = [];
+    // A source the snapshot lists but cannot read (a symlink staged in place of a file) is reported
+    // once and skipped, rather than crashing the advisory or repeating per target.
+    const logicals = projectedLogicals(input);
+    const sources = new Map();
+    for (const logical of logicals) {
+        const bytes = reader.read(`${srcDir}/${logical}`);
+        if (bytes)
+            sources.set(logical, bytes);
+        else
+            drift.push(`unreadable ${srcDir}/${logical}`);
+    }
     for (const target of targets) {
         const dir = agentAssetDir(target, kind);
         const expected = new Map(logicals.map((rel) => [projectedAssetRel(target, kind, rel), rel]));
+        const present = new Set(reader.list(dir));
         for (const [rel, logical] of expected) {
-            const dest = join(root, dir, rel);
-            const want = projectAgentAsset(target, kind, logical, readFileSync(join(src, logical)));
-            if (!existsSync(dest))
+            const source = sources.get(logical);
+            if (!source)
+                continue;
+            const want = projectAgentAsset(target, kind, logical, source);
+            if (!present.has(rel))
                 drift.push(`missing ${dir}/${rel}`);
-            else if (!matchesProjection(dest, want))
+            else if (!reader.read(`${dir}/${rel}`)?.equals(want))
                 drift.push(`stale ${dir}/${rel}`);
         }
-        // A target dir that was never synced yields no orphans rather than an ENOENT — its files are
+        // A target dir that was never synced lists nothing, so it yields no orphans — its files are
         // already fully reported by the `missing` pass above.
-        for (const found of existsSync(join(root, dir)) ? walk(join(root, dir)) : [])
+        for (const found of present)
             if (!expected.has(found))
                 drift.push(`orphan ${dir}/${found}`);
     }

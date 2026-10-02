@@ -5,7 +5,7 @@ import { runManagedPackagedScript } from '../lib/ship/run-packaged-script.mjs';
 export const meta = {
     name: 'review',
     agentFacing: true,
-    summary: 'Review a trusted checkout without committing or changing it.',
+    summary: 'Review a trusted checkout without committing or changing its source.',
     help: `devkit review — run the configured pre-commit chain against a trusted checkout.
 
 Usage:
@@ -16,11 +16,13 @@ Usage:
 
 The reviewed snapshot includes committed branch changes plus staged, unstaged, deleted, and
 non-ignored untracked files. Devkit never fetches, calls GitHub, commits, pushes, or copies gate
-changes back. The target checkout stays unchanged, although Git's shared worktree metadata is
-touched temporarily while the isolated review worktrees exist.
+changes back. The target's tracked and untracked files stay unchanged, although Git's shared
+worktree metadata is touched temporarily while the isolated review worktrees exist.
 
-Overlay setup is local to each checkout and is not copied by Git. Before reviewing a fresh clone of
-an overlay consumer, run \`devkit init --overlay --review\` inside that target checkout.
+Overlay setup is local to each checkout and is not copied by Git. A linked worktree of an overlay
+checkout borrows its overlay: before capturing anything, review projects the overlay's git-ignored
+gate inputs into the target, the same links and copies a commit there makes. Before reviewing a
+fresh clone of an overlay consumer, run \`devkit init --overlay --review\` inside that target checkout.
 
 The completeness and sentry judges read a commit message, so they run at commit-msg (\`git ci\`,
 \`devkit ship\`) and never here; a green review can still be followed by a completeness block.

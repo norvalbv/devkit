@@ -81,7 +81,7 @@ const linked = (rows) => rows.map((r) => (r.link ? `${oneLine(r.name)}:${oneLine
     'none';
 /** The one machine-readable line. A caller branches on this, never on ship's exit code. */
 export function verdictLine(result, pr) {
-    const head = `${VERDICT_PREFIX}${result.outcome} pr=${pr}`;
+    const head = `${VERDICT_PREFIX}${result.outcome} pr=${pr}${result.required ? ' scope=required' : ''}`;
     switch (result.outcome) {
         case 'failed':
             return `${head} failing=${linked(result.failures)}`;
@@ -318,6 +318,7 @@ export function recordCiEvent(result, pr, env = process.env) {
         waited_s: Math.round(result.elapsedMs / 1000),
         polls: result.polls,
         reason: result.unavailableReason ?? null,
+        required: result.required ?? false,
         ts: new Date().toISOString(),
     };
     const parent = parentSessionId(env);
@@ -342,12 +343,13 @@ async function main(argv) {
         positiveInt(process.env.DEVKIT_WAIT_CI_INTERVAL_MS) ??
         DEFAULT_INTERVAL_MS;
     const settleGraceMs = positiveInt(process.env.DEVKIT_WAIT_CI_SETTLE_MS) ?? DEFAULT_SETTLE_GRACE_MS;
+    const required = argv.includes('--required');
     const result = await waitForChecks({
-        poll: ghChecksPoller({ pr, repo, cwd: process.cwd(), required: argv.includes('--required') }),
+        poll: ghChecksPoller({ pr, repo, cwd: process.cwd(), required }),
         timeoutMs: seconds * 1000,
         intervalMs,
         settleGraceMs,
-    });
+    }).then((r) => ({ ...r, required }));
     console.error(verdictLine(result, pr));
     recordCiEvent(result, pr);
     return 0; // the ship already succeeded; this process never speaks for it

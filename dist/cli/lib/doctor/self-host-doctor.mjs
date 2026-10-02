@@ -5,7 +5,7 @@
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { printQavisAdvisoryHealth } from './qavis-health.mjs';
+import { printPriorArtAdvisoryHealth, printQavisAdvisoryHealth } from './qavis-health.mjs';
 import { detectGitRoot } from '../detect-git-root.mjs';
 import { selfHostHookParity } from '../husky/hook-parity.mjs';
 import { installSelfHostHook, selfHostSelection } from '../husky/self-host.mjs';
@@ -133,6 +133,7 @@ export async function runSelfHostDoctor(cwd, cfg, fix, capability = MANAGED_CAPA
     await adviseSearchIndex(cwd, sel);
     await adviseCodexRuntime(cwd, sel);
     printQavisAdvisoryHealth(cwd, sel.guards ?? []);
+    printPriorArtAdvisoryHealth(cwd, sel);
     // The dogfood repo is gated by the same mechanism devkit ships to consumers, so it owes itself the
     // same worktree-safety verdict — a self-host repo whose runner is unreachable gates nothing either.
     // For the same reason it owes itself the ownership verdict: devkit is developed almost entirely

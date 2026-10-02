@@ -6,22 +6,20 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { primaryCheckout } from './co-occurrence/index-refresh.mjs';
 import { gitPrefix } from './ratchets/git-index.mjs';
+/** `.devkit/config.json` sets `overlay: true`; a missing or unparseable config throws. */
+export function overlayConfigured(root) {
+    // SAFETY: init owns this local JSON marker; strict equality treats any other shape as false.
+    const config = JSON.parse(readFileSync(join(root, '.devkit/config.json'), 'utf8'));
+    return config.overlay === true;
+}
 /** The root's own overlay flag; undefined only when this checkout has no config.json at all. */
 function configuredOverlay(root) {
-    let text;
     try {
-        text = readFileSync(join(root, '.devkit/config.json'), 'utf8');
+        return overlayConfigured(root);
     }
     catch (error) {
-        // SAFETY: Node filesystem failures carry ErrnoException.code.
+        // SAFETY: Node filesystem failures carry ErrnoException.code; a parse error carries none.
         return error.code === 'ENOENT' ? undefined : false;
-    }
-    try {
-        // SAFETY: init owns this local JSON marker; strict equality treats absent values as false.
-        return JSON.parse(text).overlay === true;
-    }
-    catch {
-        return false;
     }
 }
 export function overlayInstall(root) {
@@ -31,7 +29,7 @@ export function overlayInstall(root) {
     if (own !== undefined)
         return own;
     // Overlay is a repository property: a ship gate worktree is projected its baselines but not
-    // config.json, so it answers from the primary checkout (as gate_overlay_root does in shell).
+    // config.json, so it answers from the primary checkout.
     const primary = primaryCheckout(root);
     return primary !== null && configuredOverlay(join(primary, gitPrefix(root))) === true;
 }

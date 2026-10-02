@@ -10,14 +10,13 @@
  * brittle regex against shell prose.
  */
 import { GUARD_FRAGMENTS } from './ai-guard-fragments.mjs';
-import { DK_DETERMINISTIC_GATE_HELPER, DK_GATE_AI_HELPER, DK_GATE_BLOCK_HELPERS, REVIEW_FAILURE_FINALIZER, } from './gate-policy/block-helpers.mjs';
-import { buildCommitTerminalFragment } from './commit-terminal.mjs';
-import { FORMAT_FRAGMENT } from './format-fragment.mjs';
+import { BIN_DIRS, DK_DETERMINISTIC_GATE_HELPER, DK_GATE_BLOCK_HELPERS, REVIEW_FAILURE_FINALIZER, shipRehearsalHint, } from './gate-policy/block-helpers.mjs';
+import { buildPreCommitExit, PRE_COMMIT_PASS_EXIT } from './gate-policy/commit-gate-log.mjs';
+import { formatFragment } from './format-fragment.mjs';
 import { markEnd, markStart } from './husky.mjs';
 import { DK_COMMIT_INDEX_CAPTURE, DK_HOOK_HELPERS, DK_REVIEW_BASELINE_HELPER, selectedFragment, } from './review-fragments.mjs';
 import { sentryShipPrewarmFragment } from './sentry-fragments.mjs';
 import { shQuote } from '../ship/redact-secrets.mjs';
-export const PACKAGE_BIN_DIR_FRAGMENT = '__dk_package_bin_dir="$(bun pm bin)"';
 // The ONE deterministic line: `guard-deterministic` (gate-engine/deterministic/run.mjs) owns the
 // prefix-cache check/record, runs the selected guards (.devkit/config.json components.guards),
 // applies the rc trichotomy per gate, and aggregates every failure into one report + one exit
@@ -42,10 +41,6 @@ __dk_no_git_env "$__dk_package_bin_dir/guard-qavis-advisory" --gate || qarc=$?
 # qarc 0 = continue (SILENT / advisory-only / receipt-cleared / qavis absent); 3 = strict-ship block
 # (the remedy — run qavis, or export GUARD_QAVIS_OK=1 — is printed by the bin).
 # /devkit:guard-qavis-advisory`;
-const standaloneQavisLines = `if command -v guard-qavis-advisory >/dev/null 2>&1; then
-    qarc=0; __dk_no_git_env guard-qavis-advisory --gate || qarc=$?
-    [ "$qarc" -eq 3 ] && exit 1
-fi`;
 // Inject user bins before gates when a GUI client's minimal PATH omits bun/bunx.
 export const PATH_SETUP = `# GUI git clients launch with a minimal PATH that omits user bin dirs, so \`bun\`/\`bunx\`
 # can go missing → the hook fails. Prepend the standard user install locations.
@@ -81,34 +76,37 @@ function wantsDeterministic(selection) {
         return true;
     return DETERMINISTIC_GUARD_IDS.some((id) => selection.guards?.includes(id));
 }
-/**
- * Order: format (first — the prefix-cache key hashes the post-format index) →
- * guard-deterministic → AI guards. `pkgRel` scopes a monorepo block to a failing subshell.
- */
-export function buildGuardBlock(selection, pkgRel = '') {
+/** The ONE gate body for every install mode: format (the prefix-cache key hashes the post-format
+ *  index) → deterministic → preAi → AI guards → postGuards. */
+export function buildGuardBlock(selection, pkgRel = '', { binDir = 'package', preAi, postGuards } = {}) {
     const handoff = selection.guards?.some((id) => id === 'review' || id === 'sentry') ?? false;
-    const deterministic = wantsDeterministic(selection);
     const pieces = [
-        buildCommitTerminalFragment(handoff),
+        buildPreCommitExit(handoff),
         ...DK_HOOK_HELPERS,
-        PACKAGE_BIN_DIR_FRAGMENT,
+        BIN_DIRS[binDir].open,
         DK_REVIEW_BASELINE_HELPER,
         DK_GATE_BLOCK_HELPERS,
     ];
     // First so a first-gate block still records the run's terminal (the trap covers every exit path).
     if (!pkgRel && selection.biome)
-        pieces.push(FORMAT_FRAGMENT);
-    if (deterministic)
+        pieces.push(formatFragment(BIN_DIRS[binDir].formatter));
+    if (wantsDeterministic(selection))
         pieces.push(DK_DETERMINISTIC_GATE_HELPER, deterministicFragment(selection.structureCmd, selection.extras));
+    if (preAi)
+        pieces.push(preAi);
     for (const id of AI_GUARD_IDS) {
         if (selection.guards?.includes(id))
             pieces.push(selectedFragment(id, GUARD_FRAGMENTS[id]));
     }
     if (selection.guards?.includes('sentry'))
-        pieces.push(selectedFragment('sentry', sentryShipPrewarmFragment(false)));
+        pieces.push(selectedFragment('sentry', sentryShipPrewarmFragment(binDir)));
     if (selection.guards?.includes(QAVIS_ADVISORY_ID))
         pieces.push(selectedFragment(QAVIS_ADVISORY_ID, QAVIS_FRAGMENT));
+    if (postGuards)
+        pieces.push(postGuards);
     pieces.push(REVIEW_FAILURE_FINALIZER);
+    if (BIN_DIRS[binDir].close)
+        pieces.push(BIN_DIRS[binDir].close);
     return wrapGuardBlock(pieces.join('\n\n'), pkgRel, HOOK_PATH_PRELUDE, '\n\n');
 }
 /** Marker-wrap a block body, capturing the commit index before a monorepo package `cd`. */
@@ -122,68 +120,30 @@ export function wrapGuardBlock(body, pkgRel, prelude, gap) {
     return `${start}\n${DK_COMMIT_INDEX_CAPTURE}\n${prelude}\n( cd "${pkgRel}" || exit 1${gap}${body}\n) || exit 1\n${end}`;
 }
 /** A full fresh hook (preamble + assembled block + trailing exit 0) for a repo with no hook. */
-export function buildFullHook(selection, pkgRel = '') {
-    return `${HOOK_PREAMBLE}\n${buildGuardBlock(selection, pkgRel)}\n\nexit 0\n`;
-}
-// Standalone (no-package) gate args, in run order, each led by its block lane. The bin is global
-// (`bun add -g`) and fail-opens per gate, exactly fallow's `command -v fallow || exit 0`.
-const STANDALONE_GATES = {
-    decisions: ['ai', 'guard-decisions', 'detect', '--gate'],
-    review: ['ai', 'guard-review', '--gate'],
-};
-// Standalone/overlay use the global orchestrator if installed and share the package-mode policy:
-// commit/ship fails fast; review remembers the failure until its finalizer.
-const standaloneDeterministicLines = (structureCmd) => `if command -v guard-deterministic >/dev/null 2>&1; then
-    __dk_gate_deterministic guard-deterministic --hook "\${DK_HOOK_PATH:-$0}"${structureCmd ? ` --structure "${structureCmd}"` : ''}
-fi`;
-/**
- * Build standalone gates from global fail-open bins. Biome needs local tooling and is omitted;
- * structure joins via `--structure`, and `pkgRel` scopes monorepos.
- */
-export function buildStandaloneBlock(selection, pkgRel = '') {
-    const handoff = selection.guards?.some((id) => id === 'review' || id === 'sentry') ?? false;
-    const deterministic = wantsDeterministic(selection);
-    const pieces = [
-        '# devkit standalone gates — global CLI, fail-open (skipped if devkit is not installed).',
-        buildCommitTerminalFragment(handoff),
-        ...DK_HOOK_HELPERS,
-        DK_GATE_BLOCK_HELPERS,
-        DK_GATE_AI_HELPER,
-    ];
-    if (deterministic)
-        pieces.push(DK_DETERMINISTIC_GATE_HELPER, standaloneDeterministicLines(selection.structureCmd));
-    for (const id of AI_GUARD_IDS) {
-        if (selection.guards?.includes(id))
-            pieces.push(`if __dk_gate_selected ${id}; then __dk_gate_ai ${STANDALONE_GATES[id].join(' ')}; fi`);
-    }
-    if (selection.guards?.includes('sentry'))
-        pieces.push(selectedFragment('sentry', sentryShipPrewarmFragment(true)));
-    if (selection.guards?.includes(QAVIS_ADVISORY_ID))
-        pieces.push(selectedFragment(QAVIS_ADVISORY_ID, standaloneQavisLines));
-    pieces.push(REVIEW_FAILURE_FINALIZER);
-    return wrapGuardBlock(pieces.join('\n'), pkgRel, HOOK_PATH_PRELUDE, '\n');
-}
-/** A full fresh STANDALONE hook (preamble + standalone block + exit 0). */
-export function buildStandaloneHook(selection, pkgRel = '') {
-    return `${HOOK_PREAMBLE}\n${buildStandaloneBlock(selection, pkgRel)}\n\nexit 0\n`;
+export function buildFullHook(selection, pkgRel = '', binDir = 'package') {
+    return `${HOOK_PREAMBLE}\n${buildGuardBlock(selection, pkgRel, { binDir })}\n\nexit 0\n`;
 }
 // The eslint/biome overlay steps — run the LOCAL devkit configs (which extend the repo's) over
 // STAGED files only (so new changes are checked without flooding on the team's existing code,
-// which can't be grandfathered invisibly). Each step is fail-open: only fires if the local
-// config + the repo's own binary are present.
+// which can't be grandfathered invisibly). Each fires when its local config is present; the binary
+// is the repo's own, so its absence is a visible skip line, never a silent one.
 // `--relative` makes `git diff` emit paths relative to the CURRENT dir, so this works whether
 // the hook runs at the repo root or cd'd into a monorepo package (eslint/biome + their configs
 // are then resolved package-locally).
-const OVERLAY_ESLINT_STAGED = `DK_TS=$(git diff --cached --name-only --relative --diff-filter=ACM | grep -E '\\.(tsx?|jsx?)$' || true)
-if [ -n "$DK_TS" ] && [ -f eslint.config.devkit.mjs ] && [ -x node_modules/.bin/eslint ]; then
-    echo "🧱 devkit eslint overlay (staged)..."
-    echo "$DK_TS" | xargs node_modules/.bin/eslint -c eslint.config.devkit.mjs || exit 1
+const overlayLintStep = (tool, label, exts, config, args) => `DK_STAGED=$(git diff --cached --name-only --relative --diff-filter=ACM | grep -E '\\.(${exts})$' || true)
+if [ -n "$DK_STAGED" ] && [ -f ${config} ]; then
+    if [ -x node_modules/.bin/${tool} ]; then
+        echo "${label}"
+        echo "$DK_STAGED" | xargs node_modules/.bin/${tool} ${args} || {
+${shipRehearsalHint('            ')}
+            exit 1
+        }
+    else
+        echo "devkit ${tool} overlay: skipped — node_modules/.bin/${tool} not found (install the repo's dependencies)"
+    fi
 fi`;
-const OVERLAY_BIOME = `DK_FMT=$(git diff --cached --name-only --relative --diff-filter=ACM | grep -E '\\.(tsx?|jsx?|css|jsonc?)$' || true)
-if [ -n "$DK_FMT" ] && [ -f biome.devkit.jsonc ] && [ -x node_modules/.bin/biome ]; then
-    echo "🎨 devkit biome overlay (staged)..."
-    echo "$DK_FMT" | xargs node_modules/.bin/biome check --config-path biome.devkit.jsonc || exit 1
-fi`;
+const OVERLAY_ESLINT_STAGED = overlayLintStep('eslint', '🧱 devkit eslint overlay (staged)...', 'tsx?|jsx?', 'eslint.config.devkit.mjs', '-c eslint.config.devkit.mjs');
+const OVERLAY_BIOME = overlayLintStep('biome', '🎨 devkit biome overlay (staged)...', 'tsx?|jsx?|css|jsonc?', 'biome.devkit.jsonc', 'check --config-path biome.devkit.jsonc');
 // Overlay shadows fallow's installed hook, so its optional audit must run inline here. Scope the
 // audit to the index: ship refreshes reviewer assets in its worktree AFTER staging, and a base-wide
 // audit would otherwise attribute those unstaged runtime files to the caller's commit (sc-1549).
@@ -199,7 +159,10 @@ const FALLOW_OVERLAY_STAGED = `if command -v fallow >/dev/null 2>&1; then
     DK_FALLOW_RC=0
     __dk_no_git_env fallow audit --diff-stdin <"$DK_FALLOW_DIFF" || DK_FALLOW_RC=$?
     rm -f "$DK_FALLOW_DIFF"
-    [ "$DK_FALLOW_RC" -eq 0 ] || exit 1
+    [ "$DK_FALLOW_RC" -eq 0 ] || {
+${shipRehearsalHint('        ')}
+        exit 1
+    }
 fi`;
 // Hoisted (perf: no per-call regex compile).
 const LINE_START_RE = /^(?=.)/gm;
@@ -211,6 +174,9 @@ if [ "\${DEVKIT_RUN_MODE:-}" != "review" ]; then
 ${indent(OVERLAY_ESLINT_STAGED)}
 ${indent(OVERLAY_BIOME)}${fallow ? `\n    # devkit fallow gate (overlay)\n${indent(FALLOW_OVERLAY_STAGED)}` : ''}
 fi`;
+/** Under the global husky shim (cli/lib/overlay-global-hook.mts) an overlay hook stops before its
+ * chain: husky's _/h runs the repo's own hook itself, so chaining would run it twice. */
+export const GATES_ONLY_STOP = '[ -n "${DEVKIT_VIA_HUSKY_INIT:-}" ] && exit 0';
 // Review is diagnostic: its merge-base baselines exit on a finding, so they stay AFTER the guards
 // and a lint finding never hides the reviewer's report.
 const overlayReviewBaseline = (fallow) => `# devkit lint overlay — review mode, merge-base baselines.
@@ -228,29 +194,11 @@ fi`;
  * the overlay hooksPath would otherwise shadow, and `opts.prelude` runs before any gate.
  */
 export function buildOverlayHook(selection, chainTarget = '.husky/pre-commit', pkgRel = '', { fallow = false, prelude = '' } = {}) {
-    const handoff = selection.guards?.some((id) => id === 'review' || id === 'sentry') ?? false;
-    const deterministic = wantsDeterministic(selection);
-    const gates = [
-        buildCommitTerminalFragment(handoff),
-        ...DK_HOOK_HELPERS,
-        DK_GATE_BLOCK_HELPERS,
-        DK_GATE_AI_HELPER,
-        DK_REVIEW_BASELINE_HELPER,
-    ];
-    if (deterministic)
-        gates.push(DK_DETERMINISTIC_GATE_HELPER, standaloneDeterministicLines());
-    gates.push(overlayStagedGates(fallow));
-    for (const id of AI_GUARD_IDS) {
-        if (selection.guards?.includes(id))
-            gates.push(`if __dk_gate_selected ${id}; then __dk_gate_ai ${STANDALONE_GATES[id].join(' ')}; fi`);
-    }
-    // No sentry prewarm: overlay's commit-msg judge (sc-1794) runs sentry after the advisory instead.
-    if (selection.guards?.includes(QAVIS_ADVISORY_ID))
-        gates.push(selectedFragment(QAVIS_ADVISORY_ID, standaloneQavisLines));
-    const inner = `${gates.join('\n')}\n\n${overlayReviewBaseline(fallow)}\n\n${REVIEW_FAILURE_FINALIZER}`;
-    const scoped = pkgRel
-        ? `${DK_COMMIT_INDEX_CAPTURE}\n${HOOK_PATH_PRELUDE}\n( cd ${JSON.stringify(pkgRel)} || exit 1\n${inner}\n) || exit 1`
-        : `${DK_COMMIT_INDEX_CAPTURE}\n${inner}`;
+    const block = buildGuardBlock(selection, pkgRel, {
+        binDir: 'global',
+        preAi: overlayStagedGates(fallow),
+        postGuards: overlayReviewBaseline(fallow),
+    });
     return `${HOOK_PREAMBLE}
 # devkit OVERLAY (LOCAL, git-ignored). Runs devkit's gates + lint overlay on this commit, then
 # the repo's OWN committed hook UNCHANGED. Invisible to the team — nothing here is committed.
@@ -258,17 +206,16 @@ export function buildOverlayHook(selection, chainTarget = '.husky/pre-commit', p
 # no-op and never report "gates ran" when they didn't. Only during ship (DEVKIT_SHIP=1) — a normal
 # \`git ci\` stays quiet. Emitted before the gates so even a first-gate block still records it.
 [ -n "\${DEVKIT_SHIP:-}" ] && echo 'devkit-gates: chain start' >&2
-${prelude ? `${prelude}\n` : ''}${scoped}
+${prelude ? `${prelude}\n` : ''}${block}
 
 # Invoked by the global init.sh shim (husky reclaimed core.hooksPath on a plain \`git commit\`):
 # run gates ONLY and stop — husky's _/h runs the repo's committed hook itself, so chaining here
 # would run it twice. Reached only after the gates above PASSED (a failure already exited 1).
-[ -n "\${DEVKIT_VIA_HUSKY_INIT:-}" ] && exit 0
+${GATES_ONLY_STOP}
 
-# devkit gates passed — emit the commit-run terminal NOW: \`exec\` replaces this process, so the
-# EXIT trap would never fire on the pass path. commit_result records the DEVKIT chain's outcome
-# (the chained repo hook may still block the commit on its own gates).
-command -v __dk_commit_result >/dev/null 2>&1 && { trap - EXIT; __dk_commit_result 0; }
+# devkit gates passed — run the exit work NOW (\`exec\` drops the EXIT trap): commit_result records
+# the DEVKIT chain's outcome, and the gate log closes before the repo's own hook runs.
+${PRE_COMMIT_PASS_EXIT}
 
 # Chain to the repo's own pre-commit (exec → its exit code becomes the hook's).
 [ -f ${chainWord(chainTarget)} ] && exec sh ${chainWord(chainTarget)} "$@"
@@ -294,6 +241,7 @@ export function buildPassthroughHook(chainScript) {
     return `${HOOK_PREAMBLE}
 # devkit overlay pass-through — git now runs this dir, so we forward to the repo's own hook
 # unchanged (devkit adds nothing to it).
+${GATES_ONLY_STOP}
 [ -f ${chainWord(chainScript)} ] && exec sh ${chainWord(chainScript)} "$@"
 exit 0
 `;

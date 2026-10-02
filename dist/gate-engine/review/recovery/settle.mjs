@@ -25,7 +25,7 @@ import { reportRetrievalDegraded, verdictToken } from '../contracts/checklist.mj
 import { emitGateEvent } from '../../judge/gate-events.mjs';
 import { composeTranscript, saveTranscript } from '../../judge/transcript-store.mjs';
 import { savePasses } from '../cache.mjs';
-import { RETRIEVAL_REVIEWER, reviewBaseContext } from '../evidence/base-context.mjs';
+import { reportMcpDegraded, RETRIEVAL_REVIEWER, reviewBaseContext, } from '../evidence/base-context.mjs';
 import { coverageFields, partialEvidenceNote } from '../evidence/packet/coverage.mjs';
 import { archiveFailedDiff } from '../evidence/diff-archive.mjs';
 import { cachedLensFields, itemFields } from '../evidence/items.mjs';
@@ -49,6 +49,7 @@ export function settleReviewOutcome(ctx, t, outcome, durationMs, retried = false
     ctx.timing.observed(res.name, durationMs);
     // Only a PASS can be degraded: asset re-verification may have voided the verdict since.
     const degraded = res.status === 'pass' ? res.degraded : undefined;
+    const mcpDegraded = res.status === 'pass' ? res.mcpDegraded : undefined;
     if (res.status === 'pass')
         // res.model = the model that actually judged (a Reviewer.model pin wins over the cascade
         // default) — recording firstModel here mislabeled every pinned reviewer's cached PASS.
@@ -64,6 +65,8 @@ export function settleReviewOutcome(ctx, t, outcome, durationMs, retried = false
                 // A cache hit must replay DEGRADED, not a bare PASS (sc-2317). Undefined → dropped by JSON.
                 degraded_cause: degraded?.cause,
                 retrieval: res.name === RETRIEVAL_REVIEWER && !degraded ? 'ok' : undefined,
+                // Its own field (sc-2837): `retrieval` above must keep describing retrieval alone.
+                mcp_degraded_cause: mcpDegraded?.cause,
             },
         });
     if (res.status === 'fail')
@@ -101,6 +104,7 @@ export function settleReviewOutcome(ctx, t, outcome, durationMs, retried = false
         // JSON.stringify drops it when absent, which is exactly the pass/fail case.
         inconclusive_cause: res.inconclusiveCause,
         degraded_cause: degraded?.cause,
+        mcp_degraded_cause: mcpDegraded?.cause,
         secs,
         // A recovered outcome stays measurable (gate-telemetry-self-describing): without this flag
         // the fix would erase the field rate of the very failure mode it schedules around. NEVER in
@@ -117,10 +121,13 @@ export function settleReviewOutcome(ctx, t, outcome, durationMs, retried = false
     // dedicated block below, with the full transcript — don't double-print it here).
     const tail = (!['fail', 'error'].includes(res.status) && res.reason ? ` — ${res.reason}` : '') +
         (res.status === 'pass' ? partialEvidenceNote(coverage) : '');
-    console.error(`guard-review: ${res.name} — ${verdictToken({ status: res.status, degraded })}${res.escalated ? ' (escalated)' : ''} in ${secs}s${res.status === 'pass' ? ' (checkpointed)' : ''}${tail}`);
-    // commit-guard never lens-splits (only correctness does), so the split branch above needs none.
+    console.error(`guard-review: ${res.name} — ${verdictToken({ status: res.status, degraded, mcpDegraded })}${res.escalated ? ' (escalated)' : ''} in ${secs}s${res.status === 'pass' ? ' (checkpointed)' : ''}${tail}`);
+    // commit-guard never lens-splits (only correctness does), so the split branch above needs no
+    // retrieval report; an MCP-degraded split reviewer is reported once at its merge (lens/split.mts).
     if (degraded)
         reportRetrievalDegraded(res.name, degraded.cause);
+    if (mcpDegraded)
+        reportMcpDegraded(res.name, mcpDegraded.cause);
     return res;
 }
 // Never START a deferred cascade the ceiling is about to kill — a killed ship converges anyway

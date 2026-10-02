@@ -25,6 +25,10 @@ Docs-, config-, and comment-only changes do not require a test run.
 2. **Write the test next to its peers**, following the project's existing test layout and naming. Reuse existing fixtures and helpers before adding new ones.
 3. **Run the full command**, not a single-file subset, before declaring done — a change can break a sibling.
 
+### Before writing a suite
+
+When the repository runs anti-slop (`.devkit/anti-slop/` exists), write the first test file, then run `devkit anti-slop check <that file>` before writing the rest. Its policy is static, so a violation is visible after one file rather than after a whole suite. Module mocking (`vi.mock`, `jest.mock`) is refused: give the module under test a seam instead, such as an optional `deps` parameter that defaults to the real imports and that the test fills with fakes. With the anti-slop component installed, a PostToolUse hook runs the same check after each edit.
+
 ## Reading a run
 
 Read the runner's summary line (labelled examples: vitest `Test Files … Tests …`; pytest `=== N passed in Ns ===`), the command's exit status, and any error printed *instead of* a summary. Not the last thing on screen.
@@ -86,6 +90,19 @@ So:
 Making these changes is fixing a broken test, not weakening a real one — the timing claim was never what the test was protecting.
 
 A test that asserts a product's **own** timeout (for example, "the ceiling fires and names the stuck step") races setup against that timeout. Have the stuck step print a marker. Before the strict assertions, check for it: if the timeout fired and the marker is absent, the timeout won the race before the step under test ran. Fail with a distinct, greppable label that says so, and include the machine load. Do not reuse the assertion's message. A reached marker with the wrong outcome is a real regression and must keep failing on the strict assertions.
+
+## Coverage of code run in a subprocess
+
+V8 coverage measures the test process. Code a test reaches by spawning a CLI (`node cli.mts …`) counts only when the runner attaches child processes, usually by handing each child `NODE_V8_COVERAGE` through its environment (labelled examples: vitest 5 `coverage.autoAttachSubprocess: true` with the `v8` provider). Without it, a CLI module that dozens of tests drive end to end reports near 0%.
+
+Before treating a low number on a CLI module as untested code, rule out the measurement:
+
+- **The child's environment.** A spawn that replaces `env` (`{ HOME, PATH }`) instead of spreading `process.env` drops `NODE_V8_COVERAGE`, so that child is never measured.
+- **How the child ended.** Node writes the profile on a normal exit. A child killed with `SIGKILL`, or still running when the test file finishes, contributes nothing.
+- **The path.** The child reports its real path. A project root reached through a symlink (macOS `/tmp` is `/private/tmp`) matches none of it and scores 0%.
+- **A module both imported and spawned.** A runner can merge the in-process profile and the child's profile of the same file before converting them, so the combined number under-reports (labelled examples: vitest 5.0.3). Read such a file's number as a floor, not a measurement.
+
+A number explained by one of these is a measurement gap. Say so in the report rather than writing tests to chase it.
 
 ## Reviewing test adequacy
 

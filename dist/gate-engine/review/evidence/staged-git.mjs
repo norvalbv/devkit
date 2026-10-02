@@ -4,7 +4,7 @@
  * argv-based on purpose: staged FILENAMES ride these calls, and a shell string (even
  * JSON.stringify-quoted) lets a crafted path like `$(cmd).ts` expand before git runs.
  */
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { commitIndexEnv } from '../../ratchets/commit-index.mjs';
 import { normalizeRepositoryFile } from '../../../skills/_devkit/review-roots.mjs';
 export function gitCached(cwd, args, files) {
@@ -69,6 +69,17 @@ export function indexPathsNamed(cwd, basename) {
         paths.add(entry.slice(tab + 1));
     }
     return paths;
+}
+/** Whether git ignores `file` (relative to `cwd`) and does not track it: no commit can carry it. */
+export function gitIgnores(cwd, file) {
+    const r = spawnSync('git', ['check-ignore', '-q', '--', file], {
+        cwd,
+        env: commitIndexEnv(cwd),
+        stdio: 'ignore',
+    });
+    if (r.status === 0 || r.status === 1)
+        return r.status === 0;
+    throw new Error(`git check-ignore could not judge ${file} in ${cwd}`);
 }
 /** Read one stage-0 file from Git's index. Missing/deleted/unmerged → null. */
 export function indexFile(cwd, file) {

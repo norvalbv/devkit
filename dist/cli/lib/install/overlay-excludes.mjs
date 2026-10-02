@@ -1,15 +1,30 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { FALLOW_CACHE, OVERLAY_WRITTEN, } from '../../../gate-engine/deterministic/gate-inputs.mjs';
 import { hasOwnOverlay } from '../husky/overlay/overlay-home.mjs';
-import { withFileLock } from './gitignore-cache.mjs';
+import { DECISIONS_INDEX_IGNORES, withFileLock } from './gitignore-cache.mjs';
+import { SEARCH_CODE_WRITTEN } from './install-search-code.mjs';
 const EXCLUDE_HEADER = '# devkit overlay (local-only) — not committed';
 const AGENT_ASSET_RE = /^\.(?:(?:claude|cursor)\/(?:skills|agents|hooks)(?:\/|$)|agents\/skills(?:\/|$)|codex\/(?:agents|hooks)(?:\/|$)|(?:cursor|codex)\/hooks\.json$)/;
 const CLAUDE_LOCAL_SETTINGS_RE = /^\.claude\/settings\.local\.json$/;
 const AGENT_MANIFEST_RE = /^\.devkit\/(?:skills|agents|agent-hooks|agent-hook-registrations)-manifest\.json$/;
-// Every line devkit has ever added; agent-half + fallow entries are prefix-tolerant (`(.*\/)?`) so
-// a monorepo `pkgRel/`-scoped line is pruned too — a miss orphans it.
-const DEVKIT_EXCLUDE_LINE = /^(# devkit overlay|\.devkit\/|.*\/\.devkit\/|.*guard\.config\.json|.*biome\.devkit\.jsonc|.*eslint\.config\.devkit\.mjs|.*eslint\/baselines\/|(.*\/)?\.claude\/(skills|agents|hooks)\/|(.*\/)?\.agents\/skills\/|(.*\/)?\.codex\/(agents|hooks)\/|(.*\/)?\.(cursor|codex)\/hooks\.json|(.*\/)?\.cursor\/(skills|agents|hooks)\/|(.*\/)?\.claude\/settings\.local\.json|(.*\/)?\.fallow\/|(.*\/)?fallow-baselines\/?$|(.*\/)?\.devkit$|(.*\/)?\.decisions\/index\.json(\.\*\.tmp)?$|(.*\/)?oxlint\.devkit\.json$|(.*\/)?\.anti-slop-baseline\.json$)/;
+const escapeRe = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/** The exclude lines for a path devkit writes: a dir also slash-less, since a trailing-slash pattern
+ * never matches the symlink a linked worktree's projection puts there. */
+export function overlayExcludeLines(pfx, input) {
+    const line = `${pfx}${input.path}`;
+    return input.kind === 'dir' ? [`${line}/`, line] : [line];
+}
+// Every line devkit writes, plus the legacy `eslint/baselines/`.
+const DEVKIT_LINE_FORMS = [
+    '.devkit',
+    'eslint/baselines/',
+    ...DECISIONS_INDEX_IGNORES,
+    ...[FALLOW_CACHE, ...OVERLAY_WRITTEN, ...SEARCH_CODE_WRITTEN].flatMap((input) => overlayExcludeLines('', input)),
+].map(escapeRe);
+// The optional relative prefix is a monorepo package's; a `/`-anchored line is always the user's own.
+const DEVKIT_EXCLUDE_LINE = new RegExp(`^(?:[^/\\s]\\S*/)?(?:${DEVKIT_LINE_FORMS.join('|')}|\\.devkit/.*|(?:${AGENT_ASSET_RE.source.slice(1)}).*|${CLAUDE_LOCAL_SETTINGS_RE.source.slice(1)})$`);
 const BLANK_RUN_RE = /\n{3,}/g;
 const LEADING_BLANKS_RE = /^\n+/;
 const isManagedAgentPath = (line) => AGENT_ASSET_RE.test(line) || CLAUDE_LOCAL_SETTINGS_RE.test(line) || AGENT_MANIFEST_RE.test(line);
@@ -118,10 +133,13 @@ export function hasOrphanExcludeBlock(gitRoot) {
         readFileSync(file, 'utf8').includes('# devkit overlay') &&
         siblingOverlayCheckouts(gitRoot).length === 0);
 }
+/** The exclude without devkit's block: the header and every devkit line after it, wherever a later
+ * install appended it. Lines above the header, and user lines after it, are the user's. */
 function withoutDevkitLines(text) {
     const lines = text.split('\n');
-    const kept = lines.filter((line) => !DEVKIT_EXCLUDE_LINE.test(line));
-    if (kept.length === lines.length)
+    const headerAt = lines.indexOf(EXCLUDE_HEADER);
+    if (headerAt === -1)
         return null;
+    const kept = lines.filter((line, index) => index < headerAt || !(line === EXCLUDE_HEADER || DEVKIT_EXCLUDE_LINE.test(line)));
     return kept.join('\n').replace(BLANK_RUN_RE, '\n\n').replace(LEADING_BLANKS_RE, '');
 }

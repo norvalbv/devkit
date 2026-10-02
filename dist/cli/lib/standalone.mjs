@@ -17,7 +17,7 @@ import { execFileSync } from 'node:child_process';
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, } from 'node:fs';
 import { join } from 'node:path';
 import { packageDir, writeIfAbsent } from './fs-helpers.mjs';
-import { buildStandaloneBlock, buildStandaloneHook, replaceGuardBlock, } from './husky/husky-block.mjs';
+import { buildFullHook, buildGuardBlock, replaceGuardBlock } from './husky/husky-block.mjs';
 export const firstLine = (e) => {
     let raw = '';
     if (e && typeof e === 'object') {
@@ -138,13 +138,13 @@ export function installStandaloneHook(gitRoot, pkgRel, sel, dryRun) {
             return;
         }
         mkdirSync(huskyDir, { recursive: true });
-        writeFileSync(hookPath, buildStandaloneHook(sel, pkgRel));
+        writeFileSync(hookPath, buildFullHook(sel, pkgRel, 'global-optional'));
         chmodSync(hookPath, 0o755);
         console.log('  ✓ created .husky/pre-commit (standalone, fail-open global gates)');
         return;
     }
     const current = readFileSync(hookPath, 'utf8');
-    const merged = replaceGuardBlock(current, buildStandaloneBlock(sel, pkgRel), pkgRel);
+    const merged = replaceGuardBlock(current, buildGuardBlock(sel, pkgRel, { binDir: 'global-optional' }), pkgRel);
     if (merged === current) {
         console.log('  • .husky/pre-commit already wired (standalone block current)');
         return;

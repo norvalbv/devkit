@@ -107,7 +107,7 @@ while [ "$#" -gt 0 ]; do
       # The PR already exists here, so there is nothing to open as a draft. Name the actual remedy
       # rather than falling through to the generic unknown-flag error.
       echo "--draft applies to a NEW ship (opening the PR); this PR already exists. To convert it back to a draft: gh pr ready --undo $BR" >&2; exit 1 ;;
-    --wait-ci) WAIT_CI=1; shift ;;
+    --wait-ci|--wait-ci-required) if [ "$1" = --wait-ci ]; then WAIT_CI=1; else WAIT_CI_REQUIRED=1; fi; shift ;;
     --wait-ci-timeout)
       WAIT_CI_TIMEOUT="${2:?--wait-ci-timeout requires seconds}"; WAIT_CI_TIMEOUT_SET=1; shift 2 ;;
     --resume) echo "--resume must come FIRST: devkit ship --resume <branch> [--] <extra-path...>" >&2; exit 1 ;;
@@ -118,7 +118,7 @@ while [ "$#" -gt 0 ]; do
 done
 [ "$BODY_SET" -eq 0 ] || [ "$BODY_FILE_SET" -eq 0 ] || { echo "--body and --body-file are mutually exclusive" >&2; exit 1; }
 . "$(dirname "${BASH_SOURCE[0]}")/wait-ci/args.sh"
-ship_validate_wait_ci "$WAIT_CI" "$WAIT_CI_TIMEOUT" "$WAIT_CI_TIMEOUT_SET" || exit 1
+ship_validate_wait_ci "$WAIT_CI" "$WAIT_CI_TIMEOUT" "$WAIT_CI_TIMEOUT_SET" "${WAIT_CI_REQUIRED:-0}" || exit 1
 # Every git selector below is built as `:(literal)<path>` (sc-2425). Ambient Git pathspec modes
 # either reinterpret that prefix as plain text or conflict with it, so they are not inputs.
 unset GIT_LITERAL_PATHSPECS GIT_GLOB_PATHSPECS GIT_NOGLOB_PATHSPECS GIT_ICASE_PATHSPECS
@@ -184,16 +184,9 @@ if [ "$RESUME" -eq 1 ]; then
 fi
 
 [ "${#PATHS[@]}" -gt 0 ] || { echo "no paths given" >&2; exit 1; }
-# Paths are repo-root relative, like every git call that consumes them — a cwd-relative test lets a
-# root-level directory through from a subdirectory.
-DIR_CHECK_ROOT=$(git rev-parse --show-toplevel)
-for p in "${PATHS[@]}"; do
-  [ -d "$DIR_CHECK_ROOT/$p" ] && {
-    echo "directory path not allowed (pass individual files): $p" >&2
-    echo "  list its tracked files: git ls-files -- \"$p\"" >&2
-    exit 1
-  }
-done
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+. "$SCRIPT_DIR/refuse-dir-paths.sh"
+ship_refuse_dir_paths "$(git rev-parse --show-toplevel)" "${PATHS[@]}" || exit 1
 
 LINK_DIRS=()
 [ "${#LINK_EXTRA[@]}" -gt 0 ] && LINK_DIRS+=("${LINK_EXTRA[@]}")
@@ -202,7 +195,6 @@ ROOT=$(git rev-parse --show-toplevel)
 # Pinned before any staging: in a shared parallel-agent checkout $ROOT can gain a commit mid-run, and
 # a later read would name a tree the caller never read (sc-2480). Empty when unreadable.
 CALLER_HEAD=$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || true)
-SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REWRITE_REMOTE_SUPERVISOR="$SCRIPT_DIR/review/process/gate-supervisor.mts"
 [ -f "$REWRITE_REMOTE_SUPERVISOR" ] || REWRITE_REMOTE_SUPERVISOR="$SCRIPT_DIR/review/process/gate-supervisor.mjs"
 rewrite_remote() {
@@ -900,7 +892,7 @@ if git -C "$WT" diff --cached --quiet; then
       [ -n "${PR_URL:-}" ] || PR_URL=$(gh pr view "$BR" --repo "$REPO" --json url -q .url 2>/dev/null) || PR_URL=""
       [ -n "${PR_NUM:-}" ] || PR_NUM=${PR_URL##*/}
       if [[ "${PR_NUM:-}" =~ ^[0-9]+$ ]]; then
-        ship_run_wait_ci "$PR_NUM" "$REPO" "$WAIT_CI_TIMEOUT" "$PR_URL"
+        ship_run_wait_ci "$PR_NUM" "$REPO" "$WAIT_CI_TIMEOUT" "$PR_URL" "${WAIT_CI_REQUIRED:-0}"
       else
         ship_wait_ci_not_run "" pr-number-unresolved
       fi
@@ -1235,7 +1227,7 @@ if [ -n "$PR_URL" ]; then
       ship_wait_ci_not_run "${PR_NUM:-}" ready-flip-failed
     elif [[ "$PR_NUM" =~ ^[0-9]+$ ]]; then
       reship_release_worktree_for_wait
-      ship_run_wait_ci "$PR_NUM" "$REPO" "$WAIT_CI_TIMEOUT" "$PR_URL"
+      ship_run_wait_ci "$PR_NUM" "$REPO" "$WAIT_CI_TIMEOUT" "$PR_URL" "${WAIT_CI_REQUIRED:-0}"
     else
       ship_wait_ci_not_run "" pr-number-unresolved
     fi

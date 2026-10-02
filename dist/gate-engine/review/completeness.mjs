@@ -35,29 +35,29 @@ import { renderTargets } from './evidence/targets-block.mjs';
 export { renderTargets } from './evidence/targets-block.mjs';
 import { emitCacheHit, emitGateBypass, emitGateEvent, emitGateInfraFailure, emitIntentCacheHit, finishGateTiming, } from '../judge/gate-events.mjs';
 import { JUDGE_ISOLATION } from '../judge/judge-isolation.mjs';
-import { judgeMcpCapabilityFingerprint, namedAgentMcpProfile, withNamedAgentMcpTools, } from '../judge/mcp/profile.mjs';
+import { judgeMcpCapabilityFingerprint, judgeMcpMissingServers, namedAgentMcpProfile, trackMcpSpawns, withNamedAgentMcpTools, } from '../judge/mcp/profile.mjs';
+import { printCachedPass, reportMcpDegraded } from './evidence/base-context.mjs';
 import { reportGateInfraFailure } from '../judge/odb-probe.mjs';
 import { DEEP_JUDGE_TIMEOUT_MS, execJudgeAsync, remedyCause, strictRemedy, } from '../judge/run-judge.mjs';
 import { loadCache, savePasses } from './cache.mjs';
-import { isShipLane, reviewAgentsDir } from './cascade/consumer-assets.mjs';
 import { buildCappedDiffEvidence } from './diff-evidence.mjs';
 import { commitIndexEnv } from '../ratchets/commit-index.mjs';
 import { headTreeish } from '../ratchets/git-index.mjs';
 import { stagedTreeHash } from './evidence/staged-git.mjs';
 import { cacheKey, parseReviewVerdict, resolveEscalationModel, stripFrontmatter, } from './reviewers.mjs';
+import { agentBody } from './runtime.mjs';
 const AGENT_NAME = 'feature-completeness-reviewer';
 const TOOLS = 'Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(git status:*)';
 /** The exact judge capabilities shared by cache identity, execution, and the benchmark. */
 export function completenessJudgeSetup(cfg, cwd = process.cwd(), { mcpProjectRoots } = {}) {
     const mcpProfile = namedAgentMcpProfile();
     const allowedTools = withNamedAgentMcpTools(TOOLS, cfg.indexPath ? cfg.searchTool : '');
+    const mcpOptions = { cwd, projectRoots: mcpProjectRoots };
     return {
         allowedTools,
         mcpProfile,
-        capabilityFingerprint: judgeMcpCapabilityFingerprint(mcpProfile, allowedTools, {
-            cwd,
-            projectRoots: mcpProjectRoots,
-        }),
+        capabilityFingerprint: judgeMcpCapabilityFingerprint(mcpProfile, allowedTools, mcpOptions),
+        mcp: judgeMcpMissingServers(mcpProfile, mcpOptions), // what it runs without (sc-2837)
     };
 }
 // Trailing whitespace + blank-run normalisation, mirroring git's `--cleanup=whitespace` (the mode
@@ -197,6 +197,7 @@ export async function runCompleteness(msgFile, cwd = process.cwd(), { exec = exe
     let allowedTools = withNamedAgentMcpTools(TOOLS);
     let mcpProfile = namedAgentMcpProfile();
     let capabilityFingerprint = '';
+    let mcp;
     let stickyKey = '';
     let messageId = '';
     let stagedIdentity = null;
@@ -206,7 +207,7 @@ export async function runCompleteness(msgFile, cwd = process.cwd(), { exec = exe
         if (cfg.noLlm)
             return finish(0);
         model = resolveEscalationModel(cfg);
-        ({ allowedTools, mcpProfile, capabilityFingerprint } = completenessJudgeSetup(cfg, cwd, {
+        ({ allowedTools, mcpProfile, capabilityFingerprint, mcp } = completenessJudgeSetup(cfg, cwd, {
             mcpProjectRoots,
         }));
         const message = normalizeCommitMessage(readFileSync(path.isAbsolute(msgFile) ? msgFile : path.resolve(cwd, msgFile), 'utf8'));
@@ -224,21 +225,7 @@ export async function runCompleteness(msgFile, cwd = process.cwd(), { exec = exe
             .filter(Boolean);
         if (files.length === 0)
             return finish(0);
-        const dir = reviewAgentsDir(cwd, cfg);
-        let body;
-        try {
-            body = readFileSync(path.join(dir, `${AGENT_NAME}.md`), 'utf8');
-        }
-        catch {
-            // Ship projected this brief from the running package, so its absence is a broken install.
-            if (isShipLane() && envFlag('AI_STRICT')) {
-                console.error(`guard-review: ${AGENT_NAME}.md missing under ${dir} — strict ship mode fails closed.\n` +
-                    `   Remedy: ${strictRemedy('sync', undefined, undefined, true)}.`);
-                return finish(3);
-            }
-            console.error(`guard-review: ${AGENT_NAME}.md not found under ${dir} — completeness skipped`);
-            return finish(0);
-        }
+        const body = agentBody(cwd, cfg, AGENT_NAME);
         // Intent-scoped sticky PASS (cost ruling, 2026-08-06): this gate judges the MESSAGE's claims
         // against the delivered change, so a retry whose diff was reshaped to satisfy ANOTHER
         // reviewer — same branch, same message — has not changed what is claimed and is not
@@ -253,9 +240,9 @@ export async function runCompleteness(msgFile, cwd = process.cwd(), { exec = exe
             // Narration only: the key ignores the diff by ruling (sc-3175). A PASS saved before
             // fingerprints existed, or an unreadable index, cannot vouch.
             const diffMatches = stagedIdentity !== null && sticky.diff_sha === stagedIdentity;
-            console.error(diffMatches
-                ? `guard-review: completeness — cached PASS (same branch + message + staged diff) — message ${messageId}`
-                : `guard-review: completeness — cached PASS (same branch + message; judged on an earlier diff, which is not re-judged) — message ${messageId}`);
+            printCachedPass('completeness', sticky, diffMatches
+                ? `(same branch + message + staged diff) — message ${messageId}`
+                : `(same branch + message; judged on an earlier diff, which is not re-judged) — message ${messageId}`);
             const stickyDuration = typeof sticky.duration_ms === 'number' ? sticky.duration_ms : undefined;
             // The resolved model, not the stored one: the sticky key already includes it, so they agree.
             emitIntentCacheHit({
@@ -303,14 +290,15 @@ export async function runCompleteness(msgFile, cwd = process.cwd(), { exec = exe
     const key = cacheKey('completeness', diff, `${prompt}\u0000${capabilityFingerprint}\u0000${model}`);
     const hit = loadCache(cwd)[key];
     if (hit) {
-        console.error(`guard-review: completeness — cached PASS (identical judgement) — message ${messageId}`);
+        printCachedPass('completeness', hit, `(identical judgement) — message ${messageId}`);
         // The most expensive entry in this store: its hit rate is the one that pays.
         const cachedDuration = typeof hit.duration_ms === 'number' ? hit.duration_ms : undefined;
         emitCacheHit('review:completeness', hit.model, cachedDuration);
         return finish(0, 'full', cachedDuration);
     }
+    // Its own process (backgrounded by the hook), so it names itself — only once a judge will spawn.
+    const mcpSpawn = trackMcpSpawns(mcp, ['completeness'], capabilityFingerprint);
     let outage;
-    let observedCapabilityFingerprint;
     const raw = await exec({
         label: 'review:completeness',
         args: ['-p', prompt, '--model', model, ...JUDGE_ISOLATION, '--allowedTools', allowedTools],
@@ -320,14 +308,15 @@ export async function runCompleteness(msgFile, cwd = process.cwd(), { exec = exe
         mcpProfile,
         mcpProjectRoots,
         codexReadOnly: true,
-        onMcpPrepared: (fingerprint) => {
-            observedCapabilityFingerprint = fingerprint;
+        onMcpPrepared: (fingerprint, cause) => {
+            mcpSpawn.observe(cause, fingerprint);
         },
         onOutage: (kind) => {
             outage = kind;
         },
     });
-    if (observedCapabilityFingerprint && observedCapabilityFingerprint !== capabilityFingerprint) {
+    const mcpCause = mcpSpawn.cause();
+    if (mcpSpawn.drift() === 'unexplained') {
         emitNoRun('mcp_capabilities_changed');
         console.error('guard-review: completeness SKIPPED (MCP capabilities changed while preparing the judge) — rerun with a stable trusted MCP registry.');
         return finish(envFlag('AI_STRICT') ? 3 : 2);
@@ -356,7 +345,7 @@ export async function runCompleteness(msgFile, cwd = process.cwd(), { exec = exe
     // Only a CONFIDENT PASS is cached — never a FAIL (the author fixes, the evidence changes), never
     // an unparseable verdict, and never the GUARD_COMPLETENESS_HARD=0 soften below (it exits 0 on a
     // FAIL the judge did make; caching it would make one softened run silence every later re-run).
-    if (verdict === 'PASS') {
+    if (verdict === 'PASS' && mcpSpawn.drift() === 'same') {
         const meta = {
             at: new Date().toISOString(),
             model,
@@ -365,13 +354,17 @@ export async function runCompleteness(msgFile, cwd = process.cwd(), { exec = exe
         // Names the snapshot the judge was shown; absent (no snapshot formed) never vouches.
         if (stagedIdentity)
             meta.diff_sha = stagedIdentity;
+        if (mcpCause)
+            meta.mcp_degraded_cause = mcpCause;
         // Both identities: the exact byte key (any caller, any order) and the branch+message sticky
         // key that lets a ship retry with a reshaped diff skip this judge (see the lookup above).
         savePasses(cwd, stickyKey ? { [key]: meta, [stickyKey]: meta } : { [key]: meta });
     }
     if (verdict === 'PASS') {
         emitVerdict('pass', reason || 'no gap found');
-        console.error(`guard-review: completeness — PASS — message ${messageId}`);
+        console.error(`guard-review: completeness — PASS${mcpCause ? ' (DEGRADED)' : ''} — message ${messageId}`);
+        if (mcpCause)
+            reportMcpDegraded('completeness', mcpCause);
         return finish(0);
     }
     if (verdict !== 'FAIL') {

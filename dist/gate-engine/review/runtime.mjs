@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
-import { consumerChecklistAssetRoot, readConsumerReviewAsset, reviewAgentsDir, } from './cascade/consumer-assets.mjs';
+import { checklistAssetRoot, readReviewAsset, reviewBriefPath, } from './cascade/consumer-assets.mjs';
 import { checklistAssetPath, checklistScriptAt, hasChecklist, REVIEWERS, } from './reviewers.mjs';
 const REVIEW_ROOTS_HELPER = 'skills/_devkit/review-roots.mjs';
 // Imported by every checklist script (createChecklistStore), so its bytes are execution inputs of
@@ -61,8 +61,7 @@ export function verifyChecklist(state, verdict) {
         skipReasonSchema.safeParse(state?.skipped).success)
         return null;
     if (!Array.isArray(items) || items.length === 0)
-        return ('checklist artifact missing — the judge skipped the checklist workflow (or its ' +
-            'checklist script was never synced: devkit sync-skills)');
+        return 'checklist artifact missing — the judge skipped the checklist workflow';
     const pending = items.filter((i) => i.status === 'pending');
     if (pending.length > 0)
         return `checklist incomplete — ${pending.length} item(s) never resolved: ${pending
@@ -75,29 +74,20 @@ export function verifyChecklist(state, verdict) {
             .join(', ')}`;
     return null;
 }
-/** The directory `agentBody` reads: the packaged runtime in review mode, else `reviewAgentsDir`. */
-export function agentsDirFor(cwd, cfg, assetRoot) {
-    return assetRoot ? path.join(assetRoot, 'agents') : reviewAgentsDir(cwd, cfg);
-}
+/** The one brief read for commit, ship and review; a reviewer with no brief anywhere throws. */
 export function agentBody(cwd, cfg, name, assetRoot) {
-    const file = path.join(agentsDirFor(cwd, cfg, assetRoot), `${name}.md`);
-    try {
-        return readFileSync(file, 'utf8');
-    }
-    catch {
-        return null;
-    }
+    return readFileSync(reviewBriefPath(cwd, cfg, name, assetRoot), 'utf8');
 }
 /**
  * The identity of one reviewer's execution inputs: its brief, its registry entry, every registered
  * reviewer asset, and the config subset that changes WHAT it reviews.
  *
- * Deliberately shared by the packaged review-mode preflight and the consumer-path telemetry stamp:
- * one formula means a review-mode identity and a ship-mode identity are COMPARABLE whenever the
- * bytes match, which is the entire reason for recording it. Two formulas would silently produce two
- * incomparable namespaces and every cross-mode rate would be a blend.
+ * Shared by the review-mode preflight and the commit/ship stamp, read through the judge's resolver:
+ * one formula over the bytes the judge reads keeps the two modes' identities comparable.
  */
-function hashReviewerIdentity(readAsset, reviewer, cfg) {
+function hashReviewerIdentity(cwd, cfg, reviewer, packagedRoot) {
+    const skillRoot = checklistAssetRoot(cwd, reviewer, packagedRoot);
+    const readAsset = (rel) => readReviewAsset(cwd, cfg, skillRoot, rel, packagedRoot);
     const [brief, ...executionAssets] = reviewerAssetPaths(reviewer);
     const hash = createHash('sha256')
         .update(readAsset(brief))
@@ -113,8 +103,8 @@ function hashReviewerIdentity(readAsset, reviewer, cfg) {
     }));
     return hash.digest('hex');
 }
-/** Validate and fingerprint current packaged assets before a review-mode cache lookup. */
-export function preflightReviewAssets(assetRoot, selected, cfg) {
+/** Validate the packaged runtime and fingerprint the resolved assets before a review-mode cache lookup. */
+export function preflightReviewAssets(cwd, assetRoot, selected, cfg) {
     if (!assetRoot || !path.isAbsolute(assetRoot))
         throw new Error('DEVKIT_REVIEW_ASSET_ROOT is missing or not absolute');
     // Eager, before the loop: an unreadable helper is a packaging fault, and it must surface even when
@@ -127,12 +117,12 @@ export function preflightReviewAssets(assetRoot, selected, cfg) {
             if (!reviewer.stateFile.startsWith('.claude/') || !reviewer.cmds.gen || !reviewer.cmds.check)
                 throw new Error(`${reviewer.name} has an invalid checklist registry binding`);
         }
-        identities.set(reviewer.name, hashReviewerIdentity((rel) => readPackagedReviewAsset(assetRoot, rel), reviewer, cfg));
+        identities.set(reviewer.name, hashReviewerIdentity(cwd, cfg, reviewer, assetRoot));
     }
     return identities;
 }
 /**
- * Per-reviewer prompt identity for the ordinary commit/ship path, where there is no packaged asset
+ * Per-reviewer prompt identity for the ordinary commit/ship path, where there is no pinned asset
  * root and `preflightReviewAssets` therefore never runs. This is what makes a production verdict
  * attributable to the prompt version that produced it — AND, since sc-1437, what salts the verdict
  * cache key on this path, so editing a synced brief/checklist/SKILL.md invalidates cached PASSes in
@@ -142,14 +132,13 @@ export function preflightReviewAssets(assetRoot, selected, cfg) {
  *
  * Returns null on ANY unreadable asset rather than throwing: telemetry must never fail a gate, and
  * the cache path substitutes UNATTRIBUTABLE_IDENTITY_SALT for null (never '', the legacy
- * namespace). A genuinely missing brief is already handled upstream — `cascadeVerdict` resolves it
- * to `inconclusive` — so a null here means "unattributable", never "broken".
+ * namespace). An unreadable brief also fails the cascade itself, loudly, as an engine error.
  */
 /**
  * Identity + cache-salt resolution for one gate run — the ONE place the salt is composed (sc-1441
  * will fold the rendered Targets block in here).
  *
- * Review mode: the packaged preflight salts (throwing contract) serve both roles. Commit/ship path:
+ * Review mode: the preflight salts (throwing contract) serve both roles. Commit/ship path:
  * the consumer identity serves telemetry with honest nulls, while the cache salt substitutes
  * UNATTRIBUTABLE_IDENTITY_SALT for null — never '', the legacy pre-salt namespace whose reuse would
  * replay stale PASSes for exactly the unattributable population.
@@ -165,26 +154,25 @@ export function resolveReviewerIdentities(reviewMode, identitySalts, selected, c
 }
 export function consumerReviewerIdentity(cwd, cfg, reviewer) {
     try {
-        const skillRoot = consumerChecklistAssetRoot(cwd, reviewer);
-        return hashReviewerIdentity((rel) => readConsumerReviewAsset(cwd, cfg, skillRoot, rel), reviewer, cfg);
+        return hashReviewerIdentity(cwd, cfg, reviewer);
     }
     catch {
         return null;
     }
 }
 /** Recheck one completed reviewer's exact execution inputs before its PASS becomes durable. */
-export function verifyReviewAssetIdentity(assetRoot, selected, cfg, expected) {
-    const actual = preflightReviewAssets(assetRoot, [selected], cfg).get(selected.reviewer.name);
+export function verifyReviewAssetIdentity(cwd, assetRoot, selected, cfg, expected) {
+    const actual = preflightReviewAssets(cwd, assetRoot, [selected], cfg).get(selected.reviewer.name);
     if (actual !== expected)
         throw new Error(`${selected.reviewer.name} assets changed while the reviewer was running`);
 }
 /** Build the PASS checkpoint guard once from the immutable review-run context. */
-export function passAssetVerifier(reviewMode, assetRoot, cfg, expectedByReviewer) {
+export function passAssetVerifier(cwd, reviewMode, assetRoot, cfg, expectedByReviewer) {
     return (outcome, selected) => {
         if (!reviewMode || outcome.status !== 'pass')
             return outcome;
         try {
-            verifyReviewAssetIdentity(assetRoot, selected, cfg, expectedByReviewer.get(selected.reviewer.name) ?? '');
+            verifyReviewAssetIdentity(cwd, assetRoot, selected, cfg, expectedByReviewer.get(selected.reviewer.name) ?? '');
             return outcome;
         }
         catch (cause) {

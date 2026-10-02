@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { QAVIS_RECIPE, qavisOnPath, qavisSupportsPublish, } from '../../../gate-engine/qavis-advisory/check.mjs';
+import { resolveGuardConfig } from '../../../gate-engine/config.mjs';
 import { detectGitRoot } from '../detect-git-root.mjs';
 import { QAVIS_ADVISORY_ID } from '../husky/husky-block.mjs';
 /**
@@ -37,4 +38,22 @@ export function printQavisAdvisoryHealth(cwd, guards) {
                 : 'ship cannot publish PR evidence — this qavis predates `publish` (upgrade it)';
         console.log(`  ✓ ${QAVIS_ADVISORY_ID}: qavis on PATH (${QAVIS_RECIPE} present) · ${publish}`);
     }
+}
+/**
+ * prior-art advisory: gate on but no `research.referenceCheckouts` means the local leg reads nothing.
+ * Declaration only — the agent is the one glob resolver; a corrupt config is the validity check's.
+ */
+export function printPriorArtAdvisoryHealth(cwd, sel) {
+    if (!sel.priorArtGate)
+        return;
+    let declared;
+    try {
+        declared = resolveGuardConfig(cwd).research.referenceCheckouts;
+    }
+    catch {
+        return;
+    }
+    if (declared.length)
+        return;
+    console.log('  · prior-art: guard.config.json declares no research.referenceCheckouts — the local research leg reads no reference checkout (declare sibling clones as globs)');
 }

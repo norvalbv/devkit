@@ -1,19 +1,14 @@
 /** Message-judge invocation + Sentry judge fragments, shared by the commit-msg and pre-commit
  *  builders as a leaf module so neither builder imports the other. */
+import { BIN_DIRS } from './gate-policy/block-helpers.mjs';
 import { DK_NO_GIT_ENV_INLINE } from './review-fragments.mjs';
-// Package mode runs the pinned local bin; standalone a command -v-guarded global. `msg` names the
-// message file: git's "$1" at commit-msg, ship's temp file at pre-commit.
-// `scrub` runs the judge with git's per-repo env stripped (the commit index rides DEVKIT_COMMIT_INDEX_FILE).
-export function invokeJudge(standalone, cmd, rcVar, msg = '"$1"', scrub = false) {
-    const pre = scrub ? `${DK_NO_GIT_ENV_INLINE} ` : '';
-    if (!standalone) {
-        const [bin, ...args] = cmd.split(' ');
-        const localBin = `"$__dk_package_bin_dir/${bin}"`;
-        return `[ -x ${localBin} ] || { echo "devkit: pinned ${bin} is missing — run bun install." >&2; exit 1; }
-${pre}${localBin}${args.length ? ` ${args.join(' ')}` : ''} --gate ${msg} || ${rcVar}=$?`;
-    }
-    const bin = cmd.split(' ')[0];
-    return `if command -v ${bin} >/dev/null 2>&1; then ${pre}${cmd} --gate ${msg} || ${rcVar}=$?; fi`;
+// `msg` is git's "$1" at commit-msg or ship's temp file at pre-commit. Git env is always scrubbed:
+// both runs read the index via DEVKIT_COMMIT_INDEX_FILE (gates-judge-commit-index).
+export function invokeJudge(binDir, cmd, rcVar, msg = '"$1"') {
+    const [bin, ...args] = cmd.split(' ');
+    const path = `"$__dk_package_bin_dir/${bin}"`;
+    return `[ -x ${path} ] || { echo "devkit: ${BIN_DIRS[binDir].missing(bin)}." >&2; exit 1; }
+${DK_NO_GIT_ENV_INLINE} ${path}${args.length ? ` ${args.join(' ')}` : ''} --gate ${msg} || ${rcVar}=$?`;
 }
 const SENTRY_ARMS = `if [ "$src" -eq 1 ]; then
     echo "   Commit describes an un-monitored runtime error-class (sentry gate, hard mode)."
@@ -28,19 +23,19 @@ fi
 # src 0 = pass / warn-only / skipped, src 2 = fail-open → continue; 4 = object-database fault.`;
 // guard-sentry (gate-engine/sentry/check-sentry.mts), hard-by-default: a confident MONITOR on a
 // silent runtime error-class with no capture in the diff exits 1.
-export const sentryFragment = (standalone, scrub = false) => `# devkit:guard-sentry
+export const sentryFragment = (binDir) => `# devkit:guard-sentry
 echo "🛰️ Sentry gate (commit-msg judge)..."
 src=0
-${invokeJudge(standalone, 'guard-sentry', 'src', '"$1"', scrub)}
+${invokeJudge(binDir, 'guard-sentry', 'src')}
 ${SENTRY_ARMS}
 # /devkit:guard-sentry`;
 // sc-3012: on a ship, judge sentry BEFORE the qavis advisory (a later fix voids a QA receipt);
-// commit-msg replays the verdict from the diff-tier cache. Git env kept so both runs key the same index.
-export const sentryShipPrewarmFragment = (standalone) => `# devkit:guard-sentry-prewarm
+// commit-msg replays the verdict from the diff-tier cache.
+export const sentryShipPrewarmFragment = (binDir) => `# devkit:guard-sentry-prewarm
 if [ "\${DEVKIT_RUN_MODE:-}" != "review" ] && [ -n "\${DEVKIT_COMMIT_MSG_FILE:-}" ] && [ -f "\${DEVKIT_COMMIT_MSG_FILE:-}" ]; then
 echo "🛰️ Sentry gate (ship: judged before the qavis advisory; commit-msg replays the verdict)..."
 src=0
-${invokeJudge(standalone, 'guard-sentry', 'src', '"$DEVKIT_COMMIT_MSG_FILE"')}
+${invokeJudge(binDir, 'guard-sentry', 'src', '"$DEVKIT_COMMIT_MSG_FILE"')}
 ${SENTRY_ARMS}
 # Pre-commit policy, prewarm only: a code this contract does not define means no verdict was
 # reached, so block rather than fall through to the advisory. commit-msg keeps its continue default.

@@ -25,11 +25,13 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, readlinkSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync, } from 'node:fs';
 import path from 'node:path';
+import { stripVTControlCharacters } from 'node:util';
+import { CORRECTNESS_OVERRIDES_FILE as OVERRIDES_FILE } from '../deterministic/gate-inputs.mjs';
 import { diffCacheIdentity } from '../judge/diff-focus.mjs';
 import { emitGateEvent } from '../judge/gate-events.mjs';
 import { reviewBaseContext, shortSha } from './evidence/base-context.mjs';
+import { shellWord } from './valve/shell-word.mjs';
 import { conventionWaiverLenses, parseConventionFindingCandidates, } from './evidence/conventions.mjs';
-const OVERRIDES_FILE = '.devkit/correctness-overrides.json';
 /** A fingerprint (see `fingerprint` below) is always this shape — shared by the env-var parser and
  * the `waive` CLI's itemId validation, so both channels accept exactly the same ids. */
 export const FINGERPRINT_RE = /^[0-9a-f]{12}$/;
@@ -305,7 +307,7 @@ export function applyOverrideValve(sel, res, cwd, io) {
         res.waivers = suppressed;
     for (const s of suppressed) {
         disposition.set(s.lens, 'waived');
-        console.error(`guard-review: ${sel.reviewer.name} — ${s.lens} overridden [${s.fingerprint}]: ${s.rationale}`);
+        console.error(`guard-review: ${sel.reviewer.name} — ${s.lens} overridden [${s.fingerprint}]: ${stripVTControlCharacters(s.rationale)}`);
     }
     for (const b of blocking)
         disposition.set(b.lens, 'blocking');
@@ -314,13 +316,13 @@ export function applyOverrideValve(sel, res, cwd, io) {
         res.reason = `all ${suppressed.length} finding(s) overridden`;
     }
     else {
-        res.reason = blockingNote(sel.reviewer.name, blocking, reviewBaseContext(cwd).baseSha);
+        const baseSha = reviewBaseContext(cwd).baseSha;
+        res.reason = blockingNote(sel.reviewer.name, blocking, baseSha);
+        const base = baseSha ? shortSha(baseSha) : undefined;
+        res.blocking = blocking.map((b) => ({ ...b, base }));
     }
     return disposition;
 }
-// A conventions lens embeds the cited file path, which may hold spaces or shell metacharacters.
-const SHELL_SAFE_WORD_RE = /^[\w@./:#+=,-]+$/;
-const shellWord = (word) => SHELL_SAFE_WORD_RE.test(word) ? word : `'${word.replaceAll("'", "'\\''")}'`;
 /** The human-facing block note for un-overridden findings — prints the exact override affordance.
  * The `--base` the command carries is the tree the finding was judged against: it makes the copied
  * command self-describing, and it is the only channel that can supply one, since the waive CLI runs

@@ -1,7 +1,7 @@
 /** The CHECKLIST half of the reviewer response contract, beside response.mts (the prose half). */
 import { z } from 'zod';
 import { emitGateEvent } from '../../judge/gate-events.mjs';
-import { boundedCause, RETRIEVAL_REVIEWER } from '../evidence/base-context.mjs';
+import { boundedCause, degradedSuffix, RETRIEVAL_REVIEWER } from '../evidence/base-context.mjs';
 import { attachItems } from '../evidence/items.mjs';
 import { cleanupChecklistState, isNamedSkip, readChecklistState, verifyChecklist, } from '../runtime.mjs';
 /**
@@ -22,7 +22,7 @@ export async function enforceChecklistContract(selection, initial, cwd, recovery
         if (initial.transcript && result.transcript)
             result.transcript = `${initial.transcript}\n\n───── CHECKLIST-CONTRACT RETRY ─────\n${result.transcript}`;
         // The freshest artifact wins: a callback that ran its own judge left one, and classifying that
-        // attempt from the pre-cleanup state would report the FIRST attempt's kind of hole. Falls back
+        // attempt from the pre-cleanup state would report the FIRST attempt's items. Falls back
         // to the captured state for today's callbacks, which run no judge and leave nothing.
         const settled = readChecklistState(cwd, selection.reviewer) ?? initialState;
         if (result.status !== 'pass')
@@ -30,20 +30,14 @@ export async function enforceChecklistContract(selection, initial, cwd, recovery
         // Only when the retry left the cause open: an outage/timeout carries its own, and the operator
         // needs its auth/quota remedy rather than an artifact one.
         if (result.status === 'inconclusive' && result.inconclusiveCause === undefined)
-            result.inconclusiveCause = checklistHoleCause(settled);
+            result.inconclusiveCause = 'response-contract';
     }
     else if (hole) {
         result.status = 'inconclusive';
         result.reason = hole;
-        result.inconclusiveCause = checklistHoleCause(initialState);
+        result.inconclusiveCause = 'response-contract';
     }
     return result;
-}
-function checklistHoleCause(state) {
-    // Keyed on whether an artifact EXISTS, not on whether it has rows. `readChecklistState` returns
-    // null only when the file is absent or unreadable — the shape a never-synced script leaves. A
-    // present artifact, even an empty one, proves the script ran, so its hole is the judge's.
-    return state === null ? 'sync' : 'response-contract';
 }
 /** The recorded retrieval outcome. Anything else — absent, a typo'd status, a blank cause — is not
  * evidence that retrieval ran, so the gate reads it as DEGRADED rather than as `ok`. */
@@ -65,7 +59,7 @@ export function retrievalDegradation(reviewerName, state, status) {
 }
 /** The status token a completion line prints — never a bare PASS for a degraded one. */
 export function verdictToken(res) {
-    return `${res.status.toUpperCase()}${res.degraded ? ' (DEGRADED)' : ''}`;
+    return `${res.status.toUpperCase()}${degradedSuffix(res)}`;
 }
 /**
  * Surface a degraded PASS on every channel an operator or agent audits: a ⚠️ stderr line (the ship
