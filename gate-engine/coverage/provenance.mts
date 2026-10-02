@@ -90,7 +90,7 @@ export const sha256 = (bytes: string | Buffer): string =>
   createHash('sha256').update(bytes).digest('hex');
 
 /** git's top level, plus the same directory as `cwd` spells it when a symlink sits in the prefix. */
-function checkoutRoots(cwd: string, top: string): string[] {
+export function checkoutRoots(cwd: string, top: string): string[] {
   const logical = resolve(cwd);
   let sub = '';
   try {
@@ -247,7 +247,7 @@ export function readManifest(coverageDir: string): CoverageManifest | null {
 }
 
 /** path → blob id for `paths` in `treeish`. A path absent from the tree is absent from the map. */
-function blobsIn(top: string, treeish: string, paths: string[]): Map<string, string> {
+export function blobsIn(top: string, treeish: string, paths: string[]): Map<string, string> {
   const out = new Map<string, string>();
   if (paths.length === 0) return out;
   for (const entry of nulList(git(top, ['ls-tree', '-r', '-z', treeish, '--', ...paths]))) {
@@ -258,19 +258,23 @@ function blobsIn(top: string, treeish: string, paths: string[]): Map<string, str
   return out;
 }
 
-/** The artifact's measured files as repo-relative paths: istanbul keys by the absolute path in the
+/** repo-relative path → the artifact key measuring it: istanbul keys by the absolute path in the
  * run's checkout, which `roots` records; keys outside every root are dropped. */
-function measuredPaths(artifact: string, roots: string[]): Set<string> {
+export function keysByPath(artifactKeys: string[], roots: string[]): Map<string, string> {
   const prefixes = roots.map((r) => `${r.replaceAll('\\', '/').replace(/\/$/, '')}/`);
-  const out = new Set<string>();
-  const parsed = artifactKeysSchema.safeParse(JSON.parse(artifact));
-  if (!parsed.success) return out;
-  for (const key of Object.keys(parsed.data)) {
+  const out = new Map<string, string>();
+  for (const key of artifactKeys) {
     const k = key.replaceAll('\\', '/');
     const prefix = prefixes.find((p) => k.startsWith(p));
-    if (prefix) out.add(k.slice(prefix.length));
+    if (prefix) out.set(k.slice(prefix.length), key);
   }
   return out;
+}
+
+/** The artifact's measured files as repo-relative paths. */
+function measuredPaths(artifact: string, roots: string[]): Set<string> {
+  const parsed = artifactKeysSchema.safeParse(JSON.parse(artifact));
+  return parsed.success ? new Set(keysByPath(Object.keys(parsed.data), roots).keys()) : new Set();
 }
 
 /** Compare each briefed blob with the one the manifest says was measured. `artifact` is the exact

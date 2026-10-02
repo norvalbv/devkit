@@ -36,7 +36,7 @@ const git = (cwd, args, input) => execFileSync('git', ['--literal-pathspecs', ..
 const nulList = (out) => out.split('\0').filter(Boolean);
 export const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 /** git's top level, plus the same directory as `cwd` spells it when a symlink sits in the prefix. */
-function checkoutRoots(cwd, top) {
+export function checkoutRoots(cwd, top) {
     const logical = resolve(cwd);
     let sub = '';
     try {
@@ -184,7 +184,7 @@ export function readManifest(coverageDir) {
     }
 }
 /** path → blob id for `paths` in `treeish`. A path absent from the tree is absent from the map. */
-function blobsIn(top, treeish, paths) {
+export function blobsIn(top, treeish, paths) {
     const out = new Map();
     if (paths.length === 0)
         return out;
@@ -196,21 +196,23 @@ function blobsIn(top, treeish, paths) {
     }
     return out;
 }
-/** The artifact's measured files as repo-relative paths: istanbul keys by the absolute path in the
+/** repo-relative path → the artifact key measuring it: istanbul keys by the absolute path in the
  * run's checkout, which `roots` records; keys outside every root are dropped. */
-function measuredPaths(artifact, roots) {
+export function keysByPath(artifactKeys, roots) {
     const prefixes = roots.map((r) => `${r.replaceAll('\\', '/').replace(/\/$/, '')}/`);
-    const out = new Set();
-    const parsed = artifactKeysSchema.safeParse(JSON.parse(artifact));
-    if (!parsed.success)
-        return out;
-    for (const key of Object.keys(parsed.data)) {
+    const out = new Map();
+    for (const key of artifactKeys) {
         const k = key.replaceAll('\\', '/');
         const prefix = prefixes.find((p) => k.startsWith(p));
         if (prefix)
-            out.add(k.slice(prefix.length));
+            out.set(k.slice(prefix.length), key);
     }
     return out;
+}
+/** The artifact's measured files as repo-relative paths. */
+function measuredPaths(artifact, roots) {
+    const parsed = artifactKeysSchema.safeParse(JSON.parse(artifact));
+    return parsed.success ? new Set(keysByPath(Object.keys(parsed.data), roots).keys()) : new Set();
 }
 /** Compare each briefed blob with the one the manifest says was measured. `artifact` is the exact
  * bytes the verdict came from; `classify` routes a path to production / test / other (never drift). */

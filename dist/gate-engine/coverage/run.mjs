@@ -9,6 +9,7 @@ import { coverageBypassed, resolveGuardConfig, sourceMatchers, } from '../config
 import { failLine } from '../deterministic/reason.mjs';
 import { emitGateEvent } from '../judge/gate-events.mjs';
 import { displayPath, formatClearMarker, humanAge, readClearMarker } from './failures.mjs';
+import { lineHits } from './lines.mjs';
 // Shared with the PRODUCER (`devkit coverage-run`) so the path this gate reads and the path that
 // runner writes can never drift apart.
 import { COVERAGE_DIR, COVERAGE_FILE } from './produce.mjs';
@@ -44,15 +45,7 @@ export function computePercentages(cov) {
             tb += arms.length;
             cb += arms.filter((v) => v > 0).length;
         }
-        // Lines (istanbul's definition): a source line is covered when ANY statement starting on it ran.
-        const lineHit = new Map();
-        for (const [id, loc] of Object.entries(file.statementMap ?? {})) {
-            const line = loc.start?.line;
-            if (typeof line !== 'number')
-                continue;
-            const ran = (file.s?.[id] ?? 0) > 0;
-            lineHit.set(line, (lineHit.get(line) ?? false) || ran);
-        }
+        const lineHit = lineHits(file);
         tl += lineHit.size;
         cl += [...lineHit.values()].filter(Boolean).length;
     }
@@ -80,7 +73,7 @@ function listPaths(paths, cwd, top) {
         lines.push(`     …and ${paths.length - MAX_LISTED} more`);
     return lines;
 }
-const TEST_PATH = /\.(test|spec)\.|(^|\/)__tests__\//;
+export const TEST_PATH = /\.(test|spec)\.|(^|\/)__tests__\//;
 /** production / test / other; a MEASURED path is source whatever sourceExtensions says, and a package
  * gate owns only its subtree plus what its artifact measured. `other` is never drift. */
 function classifier(extensions, pkgPrefix) {
