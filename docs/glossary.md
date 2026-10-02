@@ -16,7 +16,10 @@ The jargon you'll meet in devkit's help, prompts, and gate output — in one pla
   private dependency is unwanted. Requires devkit installed globally (`bun add -g`).
 - **overlay mode** (`devkit init --overlay`) — for a repo you can't modify. Everything is git-ignored via
   `.git/info/exclude` (invisible to the team), the local hook **chains** to the repo's own, and the
-  eslint/biome configs **extend** the repo's. Requires global devkit. See **self-heal** below.
+  eslint/biome configs **extend** the repo's. Requires global devkit: without it every commit is
+  blocked. The gates are the package-mode gates, found in the global bin dir, and it selects the same
+  components except tsconfig, the search-code steering hooks, and structure lint for an eslint-backed
+  stack such as electron, which its hook names instead of dropping. See **self-heal** below.
 
 ## Gates & enforcement
 
@@ -49,7 +52,7 @@ The jargon you'll meet in devkit's help, prompts, and gate output — in one pla
   "the code failed review", so a hook never renders an outage as an escalation-confirmed FAIL. The banner above
   it names which: a judge outage names the judge CLI (codex for gpt-* judges, `claude` otherwise) — check its
   auth and re-run; a gate that could not run prints `<gate>: could not run — <error> (strict ship mode: failing
-  closed)` — fix that error (e.g. a git failure), not the judge. When the wait outlasts the ship, re-target the judges at the other
+closed)` — fix that error (e.g. a git failure), not the judge. When the wait outlasts the ship, re-target the judges at the other
   family instead — the knob set is in [troubleshooting.md](troubleshooting.md). Only ship's `GUARD_AI_STRICT` produces it; hand-authored consumer hooks must special-case it.
 - **deterministic-prefix cache** (`guard-prefix`) — once every deterministic gate passes, their all-green
   result is cached against the staged tree's hash under `.devkit/`, armed only under `DEVKIT_SHIP=1` (a ship
@@ -88,5 +91,5 @@ The jargon you'll meet in devkit's help, prompts, and gate output — in one pla
   `core.hooksPath` to devkit's hook just before committing, so the overlay gates actually run. A plain
   `git commit` (or an IDE/GUI commit) **skips** them — see [troubleshooting.md](troubleshooting.md). An
   opt-in machine-global husky shim (`devkit init --overlay --global-commit-gate`) closes this gap for the
-  **pre-commit** gates only: the commit-message judges (completeness, sentry) live in devkit's
-  `.devkit/hooks/commit-msg` and still run only via `git ci` or `devkit ship`.
+  pre-commit gates and the commit-message judges (completeness, sentry), for each hook the repo commits
+  under `.husky/`.

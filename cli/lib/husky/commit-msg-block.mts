@@ -17,9 +17,9 @@ import { join } from 'node:path';
 import { detectGitRoot } from '../detect-git-root.mts';
 import { buildCommitGateLogFragment, exitDispatchTrap } from './gate-policy/commit-gate-log.mts';
 import type { CheckResult } from '../doctor/check-result.mts';
+import { BIN_DIRS, type BinDir } from './gate-policy/block-helpers.mts';
 import {
   extractGuardBlock,
-  PACKAGE_BIN_DIR_FRAGMENT,
   PATH_SETUP,
   removeGuardBlock,
   replaceGuardBlock,
@@ -60,10 +60,10 @@ ${exitDispatchTrap(['__dk_clear_commit_state', '__dk_gate_log_finish'])}`;
 // (gate-engine/review/completeness.mts): a confident FAIL exits 1, warn/skip 0, fail-open 2,
 // and 3 = judge outage under GUARD_AI_STRICT (ship) — fail CLOSED, mirroring the pre-commit
 // AI fragments (a strict-ship outage must never silently pass the gate).
-const completenessFragment = (standalone: boolean, scrub: boolean) => `# devkit:guard-completeness
+const completenessFragment = (binDir: BinDir) => `# devkit:guard-completeness
 echo "🧩 Completeness gate (commit-msg judge)..."
 crc=0
-${invokeJudge(standalone, 'guard-review completeness', 'crc', '"$1"', scrub)}
+${invokeJudge(binDir, 'guard-review completeness', 'crc')}
 if [ "$crc" -eq 1 ]; then
     echo "   Confirmed completeness gap (hard-by-default; findings above)."
     echo "   Fix the gap, or — with the user's explicit OK — GUARD_NO_COMPLETENESS=1 git commit ..."
@@ -107,22 +107,19 @@ export function commitMsgGuards(guards: string[] = []): string[] {
  * no commit-msg guard is selected (callers then remove any existing block instead).
  *
  * `pkgRel` (monorepo): package-scoped markers, and the judges run from the package dir (its staged
- * diff + guard.config.json). `standalone` swaps local paths for command -v-guarded global bins.
+ * diff + guard.config.json). `binDir` picks where the judges' bins resolve (BIN_DIRS).
  */
 export function buildCommitMsgBlock(
   selection: CommitMsgSelection,
   pkgRel = '',
-  { standalone = false, scrubGitEnv = false }: { standalone?: boolean; scrubGitEnv?: boolean } = {},
+  binDir: BinDir = 'package',
 ): string | null {
   const selected = commitMsgGuards(selection.guards);
   if (!selected.length) return null;
-  const pieces = [
-    ...(standalone ? [] : [PACKAGE_BIN_DIR_FRAGMENT]),
-    COMMIT_ATTEMPT_HANDOFF,
-    TESTED_STATUS_COMMENT,
-  ];
-  if (selected.includes('review')) pieces.push(completenessFragment(standalone, scrubGitEnv));
-  if (selected.includes('sentry')) pieces.push(sentryFragment(standalone, scrubGitEnv));
+  const pieces = [BIN_DIRS[binDir].open, COMMIT_ATTEMPT_HANDOFF, TESTED_STATUS_COMMENT];
+  if (selected.includes('review')) pieces.push(completenessFragment(binDir));
+  if (selected.includes('sentry')) pieces.push(sentryFragment(binDir));
+  if (BIN_DIRS[binDir].close) pieces.push(BIN_DIRS[binDir].close);
   // Absolutize the message path BEFORE cd'ing into the package (git hands it repo-root-relative on
   // a normal commit; a linked worktree already passes it absolute), then judge from the package
   // dir. `set --` rewrites $1 in place — the subshell inherits it — and `) || exit 1` propagates
@@ -139,9 +136,9 @@ export function buildCommitMsgBlock(
 export function buildCommitMsgHook(
   selection: CommitMsgSelection,
   pkgRel = '',
-  opts: { standalone?: boolean } = {},
+  binDir: BinDir = 'package',
 ): string {
-  return `${COMMIT_MSG_PREAMBLE}\n${buildCommitMsgBlock(selection, pkgRel, opts)}\n\nexit 0\n`;
+  return `${COMMIT_MSG_PREAMBLE}\n${buildCommitMsgBlock(selection, pkgRel, binDir)}\n\nexit 0\n`;
 }
 
 /**
@@ -158,7 +155,8 @@ export function installCommitMsgHook(
   selection: CommitMsgSelection,
   { dryRun = false, standalone = false }: { dryRun?: boolean; standalone?: boolean } = {},
 ): void {
-  const block = buildCommitMsgBlock(selection, pkgRel, { standalone });
+  const binDir = standalone ? 'global-optional' : 'package';
+  const block = buildCommitMsgBlock(selection, pkgRel, binDir);
   if (block === null) {
     removeCommitMsgBlock(hookRoot, pkgRel, dryRun);
     return;
@@ -170,7 +168,7 @@ export function installCommitMsgHook(
       return;
     }
     mkdirSync(join(hookRoot, '.husky'), { recursive: true });
-    writeFileSync(hookPath, buildCommitMsgHook(selection, pkgRel, { standalone }));
+    writeFileSync(hookPath, buildCommitMsgHook(selection, pkgRel, binDir));
     chmodSync(hookPath, 0o755);
     console.log('  ✓ created .husky/commit-msg (commit-msg judges)');
     return;

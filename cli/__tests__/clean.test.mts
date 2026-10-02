@@ -66,6 +66,20 @@ describe('clean (package mode)', () => {
     }
   });
 
+  it('removes the allowlist wherever guard.config.json puts it', () => {
+    const root = tmpRepo();
+    expect(devkit(root, 'init', '--stack', 'generic', '--yes', '--no-husky').status).toBe(0);
+    const cfg = join(root, 'guard.config.json');
+    const moved = { ...JSON.parse(readFileSync(cfg, 'utf8')), allowlistPath: 'cfg/allow.json' };
+    writeFileSync(cfg, JSON.stringify(moved));
+    mkdirSync(join(root, 'cfg'));
+    writeFileSync(join(root, 'cfg', 'allow.json'), '{}\n');
+
+    expect(devkit(root, 'clean', '--yes').status).toBe(0);
+
+    expect(existsSync(join(root, 'cfg', 'allow.json'))).toBe(false);
+  });
+
   it('--dry-run removes nothing', () => {
     const root = tmpRepo();
     devkit(root, 'init', '--stack', 'generic', '--yes');

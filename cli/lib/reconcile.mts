@@ -142,8 +142,8 @@ function gitWrite(root: string, args: string[]): string | null {
  * Untrimmed, NUL-split git output — `null` when the probe FAILED (distinct from `[]`, which means
  * it ran and found nothing). Not `git()`: that trims, and `trim()` eats the leading ' ' of a
  * porcelain status record (" M path") and of any path that genuinely starts with a space, both of
- * which silently drop a blocker. `--no-optional-locks` because porcelain diff/status otherwise
- * refresh-and-WRITE .git/index — a dry run must stay byte-pure, and N agents share this tree.
+ * which silently drop a blocker. `--no-optional-locks` keeps `status` from writing .git/index (N
+ * agents share it); it does NOT cover a working-tree `git diff <rev>`, so none is run here.
  */
 function gitZ(root: string, args: string[]): string[] | null {
   try {

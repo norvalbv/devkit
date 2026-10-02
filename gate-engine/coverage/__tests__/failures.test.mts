@@ -386,6 +386,121 @@ describe('a failure that is nothing but timeouts', () => {
     });
   });
 
+  // vitest 5 stopped writing the 4.1.10 quirk and reports the real message, budget included
+  // (captured from 5.0.3 json output with the same injected retry). sc-3321.
+  describe('the vitest 5 spelling', () => {
+    const attempt = (kind: 'Test' | 'Hook', ms: number) =>
+      `Error: ${kind} timed out in ${ms}ms.\nIf this is a long-running test, pass a timeout value`;
+
+    it('reads a test that timed out on both attempts as timeout-shaped', () => {
+      const root = makeRoot();
+      const file = results(root, [
+        {
+          name: '/repo/a.test.ts',
+          status: 'failed',
+          message: '',
+          assertionResults: [
+            {
+              fullName: 'starved',
+              status: 'failed',
+              duration: 604.692,
+              failureMessages: [attempt('Test', 300), attempt('Test', 300)],
+            },
+          ],
+        },
+      ]);
+
+      expect(readDiagnosis(file)?.failures).toEqual({
+        tests: [{ file: '/repo/a.test.ts', name: 'starved' }],
+        allTimedOut: true,
+        timeoutMs: 300,
+      });
+    });
+
+    it('reads a per-test hook timeout on every attempt as timeout-shaped', () => {
+      const root = makeRoot();
+      const file = results(root, [
+        {
+          name: '/repo/a.test.ts',
+          status: 'failed',
+          assertionResults: [
+            {
+              fullName: 'slow setup',
+              status: 'failed',
+              duration: 1210,
+              failureMessages: [attempt('Hook', 600), attempt('Hook', 600)],
+            },
+          ],
+        },
+      ]);
+
+      expect(readDiagnosis(file)?.failures).toMatchObject({ allTimedOut: true, timeoutMs: 600 });
+    });
+
+    it('does not call a timeout followed by an assertion failure timeout-shaped', () => {
+      const root = makeRoot();
+      const file = results(root, [
+        {
+          name: '/repo/a.test.ts',
+          status: 'failed',
+          assertionResults: [
+            {
+              fullName: 'mixed',
+              status: 'failed',
+              duration: 400,
+              failureMessages: [attempt('Test', 300), 'AssertionError: expected 1 to be 2'],
+            },
+          ],
+        },
+      ]);
+
+      expect(readDiagnosis(file)?.failures?.allTimedOut).toBe(false);
+    });
+
+    it('does not trust a single unretried timeout', () => {
+      const root = makeRoot();
+      const file = results(root, [
+        {
+          name: '/repo/a.test.ts',
+          status: 'failed',
+          assertionResults: [
+            {
+              fullName: 'once',
+              status: 'failed',
+              duration: 300,
+              failureMessages: [attempt('Test', 300)],
+            },
+          ],
+        },
+      ]);
+
+      expect(readDiagnosis(file)?.failures?.allTimedOut).toBe(false);
+    });
+
+    it('does not read a test that merely mentions a timeout in its own message', () => {
+      const root = makeRoot();
+      const file = results(root, [
+        {
+          name: '/repo/a.test.ts',
+          status: 'failed',
+          assertionResults: [
+            {
+              fullName: 'quotes it',
+              status: 'failed',
+              duration: 20,
+              failureMessages: [
+                'AssertionError: expected "Error: Test timed out in 5ms." to be ""',
+                'AssertionError: expected "Error: Test timed out in 5ms." to be ""',
+              ],
+            },
+          ],
+        },
+      ]);
+
+      expect(readDiagnosis(file)?.failures?.allTimedOut).toBe(false);
+    });
+  });
+
   it('takes the longest per-attempt budget across tests', () => {
     const root = makeRoot();
     const file = results(root, [

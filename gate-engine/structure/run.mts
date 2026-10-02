@@ -28,6 +28,16 @@ import { resolveGuardConfig } from '../config.mts';
 import { gitPrefix, splitNul } from '../ratchets/git-index.mts';
 import { buildStructureConfigs } from './eslint-config.mts';
 import { eslintNodeFlags } from './eslint-node-flags.mts';
+import {
+  clean,
+  combineStructureResults,
+  couldNotRun,
+  type StructureGateResult,
+  violations,
+  withUncompiledWalls,
+} from './verdict.mts';
+
+export { combineStructureResults };
 
 // The one field this gate reads off each structure.trees[] entry — its on-disk root.
 interface StructureTree {
@@ -50,45 +60,6 @@ interface StagedPlan {
   targets: string[];
   probeScopes: StagedScope[];
   deferred: string[];
-}
-
-// Outcome of the folder-structure gate: 0 lint ran and was clean, 1 violations, 2 could not run.
-interface StructureGateResult {
-  code: 0 | 1 | 2;
-  errorCount: number;
-  text?: string;
-}
-
-// The trichotomy as named verdicts, so a call site states what it concluded instead of a bare
-// number — `clean()` asserts a tree was read, `couldNotRun()` asserts one was not.
-const clean = (): StructureGateResult => ({ code: 0, errorCount: 0 });
-const violations = (errorCount: number, text?: string): StructureGateResult => ({
-  code: 1,
-  errorCount,
-  text,
-});
-const couldNotRun = (reason: string): StructureGateResult => ({
-  code: 2,
-  errorCount: 0,
-  text: `guard-structure: gate did NOT run — ${reason}`,
-});
-
-/** Fold per-leg verdicts: any violation blocks, else any could-not-run fails open, else clean. A
- * blocking result still names every leg that did NOT run, so a skipped leg is never silent. */
-export function combineStructureResults(results: StructureGateResult[]): StructureGateResult {
-  const texts = (subset: StructureGateResult[]) =>
-    subset
-      .map((result) => result.text)
-      .filter(Boolean)
-      .join('\n');
-  const blocked = results.filter((result) => result.code === 1);
-  const skipped = results.filter((result) => result.code === 2);
-  if (blocked.length) {
-    const errorCount = blocked.reduce((n, result) => n + result.errorCount, 0);
-    return violations(errorCount, texts([...blocked, ...skipped]));
-  }
-  if (skipped.length) return { code: 2, errorCount: 0, text: texts(skipped) };
-  return clean();
 }
 
 // ESLint throws "No files matching the pattern" for an absent tree and "…are ignored" when every file
@@ -379,7 +350,7 @@ export async function runStagedStructureGate(cwd = process.cwd()): Promise<Struc
     const grammarFiles = legFiles('grammar');
     if (presetFiles.length) results.push(runPresetLint(cwd, presetFiles));
     if (grammarFiles.length) results.push(await runGrammarLint(cwd, grammarFiles));
-    return combineStructureResults(results);
+    return withUncompiledWalls(cwd, combineStructureResults(results));
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     return couldNotRun(message);
@@ -392,20 +363,24 @@ export async function runStructureGate(
   cwd = process.cwd(),
   targets?: string[],
 ): Promise<StructureGateResult> {
-  if (targets) return runGrammarLint(cwd, targets);
   try {
-    if (!electronPreset(cwd).electron) return await runGrammarLint(cwd);
-    const cfg = resolveGuardConfig(cwd);
-    const trees: StructureTree[] = cfg.structure?.trees ?? [];
-    const presetRoots = cfg.scanRoots.filter((root) => existsSync(join(cwd, root)));
-    const results: StructureGateResult[] = [];
-    if (presetRoots.length) results.push(runPresetLint(cwd, presetRoots));
-    if (trees.some((tree) => tree.grammar)) results.push(await runGrammarLint(cwd));
-    if (!results.length) return couldNotRun('no electron scanRoot or grammar root is present');
-    return combineStructureResults(results);
+    return withUncompiledWalls(cwd, await structureLegs(cwd, targets));
   } catch (e: unknown) {
     return couldNotRun(e instanceof Error ? e.message : String(e));
   }
+}
+
+async function structureLegs(cwd: string, targets?: string[]): Promise<StructureGateResult> {
+  if (targets) return runGrammarLint(cwd, targets);
+  if (!electronPreset(cwd).electron) return runGrammarLint(cwd);
+  const cfg = resolveGuardConfig(cwd);
+  const trees: StructureTree[] = cfg.structure?.trees ?? [];
+  const presetRoots = cfg.scanRoots.filter((root) => existsSync(join(cwd, root)));
+  const results: StructureGateResult[] = [];
+  if (presetRoots.length) results.push(runPresetLint(cwd, presetRoots));
+  if (trees.some((tree) => tree.grammar)) results.push(await runGrammarLint(cwd));
+  if (!results.length) return couldNotRun('no electron scanRoot or grammar root is present');
+  return combineStructureResults(results);
 }
 
 // The grammar leg: devkit's bundled eslint over the grammar trees (or the given targets).

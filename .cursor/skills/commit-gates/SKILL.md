@@ -76,6 +76,12 @@ command. Do not pre-run every gate or replace the managed chain with a hand-writ
   not just the `.` quoted), and fix the class: an allowlist or grammar instead of a longer
   blocklist, or a narrower check on an exact token. Pin the fix with a table-driven test over that
   class. A second finding of the same shape means the first fix covered an instance, not the class.
+- **A `↻ … not converging` line** under a blocked ship's digest means the same reviewer has blocked
+  three or more rounds on this branch with no pass between, and its latest blocking-finding count is
+  no better than its best earlier round. It says the count is not falling, not which findings recur.
+  Stop re-shipping blind: fix the remaining findings as a class, waive any you judge not real with
+  the `guard-review waive` line and a rationale, or ask the user for the reviewer skip the block note
+  names. `--no-verify` is never the landing path.
 - **Sentry gate** judges commit-message intent for newly introduced runtime error classes. Add the
   capture on the named surface, or surface a disputed verdict to the user before any bypass.
 - **Qavis advisory** can recommend visual QA but does not turn a non-UI change into UI work. Ship

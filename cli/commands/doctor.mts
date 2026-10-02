@@ -31,7 +31,10 @@ import {
   SEARCH_INDEX_CHECK,
 } from '../lib/doctor/guard-config-checks.mts';
 import { bindClaudeFamily } from '../lib/doctor/judge/judge-family.mts';
-import { printQavisAdvisoryHealth } from '../lib/doctor/qavis-health.mts';
+import {
+  printPriorArtAdvisoryHealth,
+  printQavisAdvisoryHealth,
+} from '../lib/doctor/qavis-health.mts';
 import { hookChecks } from '../lib/doctor/hook-checks.mts';
 import { runOverlayDoctor } from '../lib/doctor/overlay-doctor.mts';
 import { checkLockPin, checkPin } from '../lib/doctor/pin/pin-checks.mts';
@@ -61,6 +64,7 @@ import {
   syncAntiSlopCapability,
 } from '../lib/install/anti-slop/lifecycle.mts';
 import { selectedHookAssets } from '../lib/install/hook-registration-ledger/selection.mts';
+import { withInitLock } from '../lib/install/init/init-lock.mts';
 import { checkOxcCapability, syncOxcCapability } from '../lib/install/oxc/lifecycle.mts';
 import { cmpSemver, fetchLatestTag } from './update.mts';
 
@@ -396,7 +400,8 @@ Usage:
 
   --fix    Re-run init for the recorded selection (recreates MISSING pieces; never re-freezes a
            baseline). In an overlay repo, regenerates a stale/missing local gate hook (e.g. after
-           \`devkit update\` shipped a new hook shape). Exit 0 all-ok, 1 drift, 2 not-initialized.
+           \`devkit update\` shipped a new hook shape) and re-syncs drifted skills, agents and agent
+           hooks. Exit 0 all-ok, 1 drift, 2 not-initialized.
 
 Also warns if the RUNNING devkit is older than this repo's init stamp or a hand-declared
 "minDevkit":"x.y.z" floor in .devkit/config.json.
@@ -450,8 +455,11 @@ export default async function run(args: string[], cwd: string): Promise<number> 
   // `|| 1` on skew: drift is drift in every mode, so a skewed overlay/self-host doctor must not
   // report 0 where package mode reports 1 for the identical condition.
   const skewed = skew.kind === 'older';
-  if (cfg.overlay)
-    return (await runOverlayDoctor(cwd, cfg, fix, printQavisAdvisoryHealth)) || +skewed;
+  if (cfg.overlay) {
+    const overlay = () => runOverlayDoctor(cwd, cfg, fix, printQavisAdvisoryHealth);
+    // --fix re-runs install's own steps, so it holds init's lock, as package mode's spawned init does.
+    return (await (fix ? withInitLock(cwd, 'doctor --fix', overlay) : overlay())) || +skewed;
+  }
   if (cfg.selfHost) return (await runSelfHostDoctor(cwd, cfg, fix)) || +skewed;
 
   const { results, sel } = await collectResults(cwd, cfg, configResult);
@@ -468,6 +476,7 @@ export default async function run(args: string[], cwd: string): Promise<number> 
     console.log(line);
   }
   printQavisAdvisoryHealth(cwd, sel.guards ?? []);
+  printPriorArtAdvisoryHealth(cwd, sel);
 
   const drifted = results.some((r) => r.status !== 'OK' && !r.advisory); // see CheckResult.advisory
   if (fix && drifted) {

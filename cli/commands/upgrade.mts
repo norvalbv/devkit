@@ -39,6 +39,7 @@ import {
   offerOptionalComponents,
   overlayOwnsLineGrowth,
 } from '../lib/install/upgrade-offers.mts';
+import { resyncOverlayAgentSurfaces } from '../lib/overlay.mts';
 import doctor from './doctor.mts';
 import { applyInit } from './init.mts';
 import { computeMigration } from './migrate-config.mts';
@@ -229,16 +230,16 @@ async function upgrade(args: string[], cwd: string): Promise<number> {
     // init'd with --no-biome. Honour the recorded value; else infer from the on-disk overlay marker (the
     // same legacy-inference idiom as `structure` above) — biome.devkit.jsonc is written iff biome was on.
     const biome = cfg.components?.biome ?? existsSync(join(cwd, 'biome.devkit.jsonc'));
-    const sel = applyOverlayConstraints({
-      ...normalizeSelection(cfg.components),
-      agentTargets,
-      biome,
-    });
+    // structure as recorded, never the normalized default: an adopted overlay is never re-baselined.
+    const structure = cfg.components?.structure ?? false;
+    const sel = applyOverlayConstraints(
+      { ...normalizeSelection(cfg.components), agentTargets, biome, structure },
+      stack,
+    );
     // `--force` must NOT reach applyOverlay's config writers: writeIfAbsent(guard.config.json) and
     // writeBiomeOverlay OVERWRITE on force, but upgrade's contract (and the package-mode branch, which
     // hardcodes force:false) is that tuned configs are NEVER overwritten. Refreshing overlay configs is
-    // the deliberate `devkit init --overlay --force`, not upgrade.
-    // ponytail: overlay upgrade has no assets-only force-adopt pass (package Step 5); add if needed.
+    // the deliberate `devkit init --overlay --force`, not upgrade. Assets are adopted below, as in Step 5.
     if (force) {
       console.log(
         '  • --force: tuned overlay configs are never overwritten by upgrade — run `devkit init --overlay --force` to refresh them.',
@@ -273,6 +274,10 @@ async function upgrade(args: string[], cwd: string): Promise<number> {
       force: false,
       dryRun,
     });
+    if (force) {
+      console.log('\n3. --force: adopt consumer-authored asset collisions');
+      resyncOverlayAgentSurfaces(cwd, sel, cfg.components, () => true, dryRun);
+    }
     const overlayBaselineReady =
       !sel.antiSlop ||
       adoptActivatedAntiSlopFindings(cwd, previousAntiSlopRuleIds, dryRun, () =>

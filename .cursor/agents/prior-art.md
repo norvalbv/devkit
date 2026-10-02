@@ -83,8 +83,14 @@ Reading existing code to understand a still-unplanned problem is valid step-0 wo
 ### Phase 0: Read repo context (MANDATORY — before anything)
 
 1. Read `guard.config.json` (see `<architecture_context>`). Resolve `research.referenceCheckouts`
-   globs and COUNT them: `declaredCheckouts` = number of glob patterns declared, `resolvedCheckouts`
-   = number of existing directories they resolve to. These counts go in the response verbatim.
+   globs and COUNT them: `declaredCheckouts` = number of non-blank string patterns declared,
+   `resolvedCheckouts` = number of existing directories they resolve to. Resolve each pattern
+   against the config's directory first. If it matches nothing and the cwd is a LINKED worktree,
+   retry that pattern once against the same directory inside the main worktree — the first
+   `worktree` entry of `git worktree list --porcelain`, skipped when that entry is `bare` — since
+   sibling clones sit beside the main checkout, not beside a worktree. A pattern matching from
+   neither base is skipped silently and counts only as declared. These counts go in the response
+   verbatim.
 2. If a decision log exists, query it for the axes the problem touches — unless the caller already
    supplied Settled Axes, in which case use those and do not re-run the query.
 

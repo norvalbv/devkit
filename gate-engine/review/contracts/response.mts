@@ -5,7 +5,6 @@
  *  gate's own failure — a throw no judge answered for — which no auth/quota check can clear (sc-3400). */
 export type ReviewInconclusiveCause =
   | 'timeout'
-  | 'sync'
   | 'response-contract'
   | 'outage'
   | 'rate-limited'

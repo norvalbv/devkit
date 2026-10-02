@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { GUARD_IDS } from '../lib/components.mts';
+import { BIN_DIRS } from '../lib/husky/gate-policy/block-helpers.mts';
 import {
   buildCommitMsgBlock,
   buildCommitMsgHook,
@@ -21,7 +22,6 @@ import {
   buildFullHook,
   buildGuardBlock,
   buildOverlayHook,
-  buildStandaloneBlock,
   findPreambleEnd,
   hasFragment,
   removeFragment,
@@ -110,7 +110,7 @@ describe('buildGuardBlock', () => {
   it('keeps generated outage guidance and completeness comments provider-neutral', () => {
     const generated = [
       buildGuardBlock({ guards: ['decisions', 'review'] }),
-      buildStandaloneBlock({ guards: ['decisions', 'review'] }),
+      buildGuardBlock({ guards: ['decisions', 'review'] }, '', { binDir: 'global-optional' }),
       buildCommitMsgBlock({ guards: ['review'] }) ?? '',
     ];
     for (const text of generated) {
@@ -458,19 +458,18 @@ describe('buildOverlayHook — gates-only guard for the global init.sh shim', ()
     expect(hook).toContain('exec sh .husky/pre-commit "$@"'); // shQuote: a safe path stays bare
   });
 
-  it('runs the deterministic orchestrator command -v-guarded (global bin)', () => {
-    expect(hook).toContain('command -v guard-deterministic');
+  it('calls every gate from the fail-closed global bin dir, never a command -v fail-open probe', () => {
+    expect(hook).toContain(BIN_DIRS.global.open);
+    expect(hook).toContain('"$__dk_package_bin_dir/guard-deterministic" --hook');
+    expect(hook.match(/command -v guard-/g)).toHaveLength(1); // the bin-dir probe itself
   });
 
-  it('does NOT forward structure to the orchestrator (overlay is deliberately structure-free)', () => {
-    // The overlay is non-invasive and sets up no structure config, so buildOverlayHook calls
-    // standaloneDeterministicLines() with no command — passing structureCmd must not leak a
-    // --structure arg in. Lock the intentional omission so it is not re-added by accident.
+  it("forwards the selection's structure command exactly as package mode does", () => {
     const withStruct = buildOverlayHook(
       { guards: [...GUARD_IDS], structureCmd: 'guard-structure gate' },
       '.husky/pre-commit',
     );
-    expect(withStruct).not.toContain('--structure');
+    expect(withStruct).toContain('--structure "guard-structure gate"');
   });
 
   it('uses merge-base ESLint/Fallow baselines only in review mode and preserves commit behavior', () => {
@@ -497,20 +496,19 @@ describe('buildOverlayHook — gates-only guard for the global init.sh shim', ()
       '',
       { fallow: true },
     );
-    // The call site, not the helper definition that precedes every gate.
-    const firstAi = hook.indexOf('; then __dk_gate_ai ');
+    const firstAi = hook.indexOf('# devkit:guard-decisions');
     expect(firstAi).toBeGreaterThan(0);
     expect(hook.indexOf('fallow audit --diff-stdin')).toBeLessThan(firstAi);
     expect(hook.indexOf('node_modules/.bin/eslint -c eslint.config.devkit.mjs')).toBeLessThan(
       firstAi,
     );
-    expect(hook.indexOf('guard-qavis-advisory --gate')).toBeGreaterThan(
+    expect(hook.indexOf('# devkit:guard-qavis-advisory')).toBeGreaterThan(
       hook.indexOf('fallow audit --diff-stdin'),
     );
     expect(hook.indexOf('__dk_review_baseline_gate eslint')).toBeGreaterThan(firstAi);
     expect(hook.indexOf('__dk_review_baseline_gate fallow')).toBeGreaterThan(firstAi);
     // Staged checks never leak into review mode, nor baselines into commit/ship.
-    expect(hook).toContain('if [ "${DEVKIT_RUN_MODE:-}" != "review" ]; then\n    DK_TS=');
+    expect(hook).toContain('if [ "${DEVKIT_RUN_MODE:-}" != "review" ]; then\n    DK_STAGED=');
   });
 });
 
@@ -627,13 +625,11 @@ describe('buildCommitMsgBlock', () => {
     expect(block.match(/TESTED status/g)).toHaveLength(1);
   });
 
-  it('standalone → command -v-guarded GLOBAL bins, no bunx (absent devkit never blocks)', () => {
-    const block = buildCommitMsgBlock({ guards: ['review', 'sentry'] }, '', { standalone: true });
+  it('standalone → the whole block is skipped when the global devkit is absent, no bunx', () => {
+    const block = buildCommitMsgBlock({ guards: ['review', 'sentry'] }, '', 'global-optional');
     expect(block).not.toContain('bunx');
-    expect(block).toContain(
-      'if command -v guard-sentry >/dev/null 2>&1; then guard-sentry --gate "$1" || src=$?; fi',
-    );
-    expect(block).toContain('command -v guard-review'); // completeness guarded the same way
+    expect(block).toContain(BIN_DIRS['global-optional'].open);
+    expect(block).toMatch(/\n# \/devkit:guard-sentry\n\nfi\n# <<< devkit-guards <<<$/);
   });
 
   it('monorepo: scoped markers, $1 absolutized BEFORE the cd, subshell propagates a block', () => {

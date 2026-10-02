@@ -148,15 +148,19 @@ describe('assembled hook execution (stubbed bins, sh -e)', () => {
     expect(r.calls).toContain('guard-review --gate');
   });
 
-  it('standalone review keeps missing global deterministic tooling fail-open', () => {
-    const r = runHook(
-      { DEVKIT_RUN_MODE: 'review', DEVKIT_REVIEW_GUARDS: 'size,review' },
-      undefined,
-      { builder: 'standalone', missingBins: ['guard-deterministic'] },
-    );
+  it('standalone without a global devkit skips its whole block (the documented fail-open)', () => {
+    const r = runHook({ REVIEW_RC: '1' }, undefined, {
+      builder: 'standalone',
+      missingBins: ['guard-deterministic'],
+    });
     expect(r.status).toBe(0);
-    expect(r.calls).not.toContain('guard-deterministic');
-    expect(r.calls).toContain('guard-review --gate');
+    expect(r.calls).toBe('');
+  });
+
+  it('overlay without a global devkit blocks before any gate', () => {
+    const r = runHook({}, undefined, { builder: 'overlay', missingBins: ['guard-deterministic'] });
+    expect(r.status).toBe(1);
+    expect(r.calls).toBe('');
   });
 
   it('overlay review runs AI and baseline diagnostics before finalizing deterministic failure', () => {
@@ -272,12 +276,15 @@ describe('parallel completeness prewarm (ship message file present)', () => {
     expect(r.calls).not.toContain('guard-review completeness');
   });
 
-  it('with the ship message file, completeness runs alongside the fleet and a clean pair passes', () => {
-    const r = runHook({}, undefined, { shipMsg: true });
-    expect(r.status).toBe(0);
-    expect(r.calls).toContain('guard-review completeness --gate');
-    expect(r.calls).toContain('guard-review --gate');
-  });
+  it.each(['package', 'standalone', 'overlay'])(
+    '%s: with the ship message file, completeness runs alongside the fleet and a clean pair passes',
+    (builder) => {
+      const r = runHook({}, undefined, { shipMsg: true, builder });
+      expect(r.status).toBe(0);
+      expect(r.calls).toContain('guard-review completeness --gate');
+      expect(r.calls).toContain('guard-review --gate');
+    },
+  );
 
   it('a confident completeness FAIL (exit 1) blocks the commit at pre-commit', () => {
     const r = runHook({ COMP_RC: '1' }, undefined, { shipMsg: true });
@@ -760,7 +767,7 @@ describe('commit-terminal telemetry (real temp git repo)', () => {
 describe('ship: sentry is judged before the qavis advisory', () => {
   const SHIP = { biome: false, guards: ['review', 'sentry', 'qavis-advisory'] };
 
-  it.each(['package', 'standalone'])(
+  it.each(['package', 'standalone', 'overlay'])(
     '%s: review → sentry on the ship message → qavis',
     (builder) => {
       const r = runHook({}, SHIP, { shipMsg: true, builder, dirPrefix: 'dk hook exec sentry ' });
@@ -848,22 +855,14 @@ describe('ship: sentry is judged before the qavis advisory', () => {
     expect(r.calls).not.toContain('guard-qavis-advisory');
   });
 
-  it('standalone: no global guard-sentry is fail-open and the advisory still runs', () => {
-    const r = runHook({}, SHIP, {
-      shipMsg: true,
-      builder: 'standalone',
-      missingBins: ['guard-sentry'],
-    });
-    expect(r.status).toBe(0);
-    expect(r.calls).not.toContain('guard-sentry');
-    expect(r.calls).toContain('guard-qavis-advisory --gate');
-  });
-
-  it('overlay pre-commit runs no sentry prewarm — its commit-msg judge (sc-1794) judges sentry', () => {
-    const r = runHook({ SENTRY_RC: '1' }, SHIP, { shipMsg: true, builder: 'overlay' });
-    expect(r.status).toBe(0);
-    expect(r.calls).not.toContain('guard-sentry');
-  });
+  it.each(['standalone', 'overlay'])(
+    '%s: a guard-sentry missing from the installed devkit blocks',
+    (builder) => {
+      const r = runHook({}, SHIP, { shipMsg: true, builder, missingBins: ['guard-sentry'] });
+      expect(r.status).toBe(1);
+      expect(r.calls).not.toContain('guard-qavis-advisory');
+    },
+  );
 
   it('monorepo package block: a sentry block propagates out of the package subshell', () => {
     const r = runHook({ SENTRY_RC: '1' }, SHIP, { shipMsg: true, pkgRel: 'pkg/a' });
@@ -932,6 +931,20 @@ describe('overlay staged gates run before the AI guards (sc-3020)', () => {
     expect(r.status).toBe(1);
     expect(r.calls).toContain('eslint -c eslint.config.devkit.mjs');
     for (const ai of AI_CALLS) expect(r.calls).not.toContain(ai);
+  });
+
+  it('an eslint overlay whose repo binary is missing says so instead of skipping silently', () => {
+    const r = runHook(
+      {},
+      REVIEWED,
+      overlay({ fallow: false, eslintOverlay: true, missingLocalBins: ['eslint'] }),
+    );
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain(
+      'devkit eslint overlay: skipped — node_modules/.bin/eslint not found',
+    );
+    expect(r.calls).not.toContain('eslint -c');
+    expect(r.calls).toContain('guard-review --gate');
   });
 
   it('a monorepo package subshell propagates the fallow block before the AI guards', () => {
