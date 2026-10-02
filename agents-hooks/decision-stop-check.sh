@@ -31,7 +31,7 @@ cd "${CLAUDE_PROJECT_DIR:-$HOOK_DIR/../..}" 2>/dev/null || exit 0
 # session edits → FAIL-OPEN: a session that edited nothing made no decision to record.
 # The commit gate (guard-decisions detect --gate) stays working-tree-wide.
 source "$HOOK_DIR/session-edits-lib.sh" 2>/dev/null || true
-type session_edits_file &>/dev/null || exit 0
+declare -F session_edits_file &>/dev/null || exit 0
 LEDGER=$(clean_session_ledger "$(session_edits_file "$input")")
 [ -n "$LEDGER" ] || exit 0
 trap 'rm -f "$LEDGER"' EXIT
