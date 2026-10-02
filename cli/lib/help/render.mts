@@ -17,6 +17,11 @@ export interface CommandMeta {
   agentFacing: boolean;
   /** Required when `agentFacing` is false: who invokes it instead, and why an agent must not. */
   notRoutedBecause?: string;
+  /** Flags that consume the next token as an opaque value, so generic `--help` detection must
+   *  skip that token (sc-2485). See `wantsCommandHelp` in ./wants-help.mts. */
+  valueFlags?: readonly string[];
+  /** The value flags this exact argv lets the command consume; overrides `valueFlags` (sc-2485). */
+  valueFlagsFor?: (args: readonly string[]) => readonly string[];
 }
 
 /** The subset used to render the top-level command list (the `help` body is not needed there). */

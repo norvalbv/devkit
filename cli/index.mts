@@ -19,6 +19,7 @@
 import { readFileSync } from 'node:fs';
 import { assertGit } from './lib/guard/require-git.mts';
 import { type CommandMeta, renderCommandHelp, renderTopLevelHelp } from './lib/help/render.mts';
+import { wantsCommandHelp } from './lib/help/wants-help.mts';
 
 /** The devkit-owned package.json fields this CLI reads. */
 interface DevkitPackageJson {
@@ -144,17 +145,17 @@ async function main() {
   // Generic per-command help: every command gets `devkit <cmd> --help` for free.
   // Oxc has one extra verb level, so `devkit oxc lint --help` / `fmt --help` belong to the pinned
   // tool; bare `devkit oxc --help` still describes Devkit's wrapper.
+  // sc-2485: a declared value flag's value is opaque, so `ship --body --help` is a ship, not help.
   const oxcToolHelp = cmd === 'oxc' && ['lint', 'fmt', 'format'].includes(cmdArgs[0] ?? '');
-  const commandBoundary = cmdArgs.indexOf('--');
-  const devkitArgs = commandBoundary === -1 ? cmdArgs : cmdArgs.slice(0, commandBoundary);
-  if (!oxcToolHelp && (devkitArgs.includes('--help') || devkitArgs.includes('-h'))) {
-    console.log(renderCommandHelp((await loader()).meta));
+  const mod = await loader();
+  const valueFlags = mod.meta.valueFlagsFor?.(cmdArgs) ?? mod.meta.valueFlags;
+  if (!oxcToolHelp && wantsCommandHelp(cmdArgs, valueFlags)) {
+    console.log(renderCommandHelp(mod.meta));
     process.exit(0);
   }
 
   if (GIT_COMMANDS.has(cmd)) assertGit(cmd); // friendly throw on missing git → main().catch prints it
 
-  const mod = await loader();
   // sc-4157: through a linked worktree's overlay links these would half-change the home's overlay.
   const retarget =
     OVERLAY_HOME_COMMANDS.has(cmd) || (cmd === 'init' && cmdArgs.includes('--overlay'));
