@@ -540,6 +540,42 @@ describe('ship-branch.sh — edge cases around the self-checkout remedy (sc-2261
     expect(remoteBranchExists(seeded.bare, 'story')).toBe(true);
   });
 
+  it('names origin’s default, not a stale release branch, in BOTH the remedy and the advisory (sc-3409)', () => {
+    // The reported shape: an old release branch whose tip is in the default's past, a story cut from
+    // the default, and the default since advanced past the fork point — so it is no longer an ancestor.
+    const seeded = seedShipRepoLocalRemote();
+    const { git, bare } = seeded;
+    execFileSync('git', ['-C', bare, 'symbolic-ref', 'HEAD', 'refs/heads/work'], {
+      env: { ...process.env, ...GIT_ENV },
+    });
+    git(['push', '-q', 'origin', 'work:0.0.8'], { stdio: 'ignore' });
+    git(['switch', '-q', '-c', 'advance'], { stdio: 'ignore' });
+    writeFileSync(join(seeded.dir, 'advance.txt'), 'x\n');
+    git(['add', 'advance.txt'], { stdio: 'ignore' });
+    git(['commit', '-q', '-m', 'the default advances'], { stdio: 'ignore' });
+    git(['push', '-q', 'origin', 'advance:work'], { stdio: 'ignore' });
+    git(['switch', '-q', 'work'], { stdio: 'ignore' });
+    git(['fetch', '-q', 'origin'], { stdio: 'ignore' });
+    const wt = join(mkdtempSync(join(tmpdir(), 'shipstale-')), 'wt');
+    dirs.push(wt);
+    git(['worktree', 'add', '-q', '-b', 'story', wt, 'refs/remotes/origin/0.0.8'], {
+      stdio: 'ignore',
+    });
+    writeFileSync(join(wt, 'note.txt'), 'hello\n');
+
+    const r = spawnSync('/bin/bash', [scriptPath, 'story', 't', '--body', 'b', '--', 'note.txt'], {
+      cwd: wt,
+      encoding: 'utf8',
+      env: seeded.env,
+    });
+
+    expect(r.status, r.stderr).not.toBe(0);
+    expect(r.stderr).toMatch(/story is checked out in THIS worktree/);
+    const bases = [...r.stderr.matchAll(/--base '([^']+)'/g)].map((m) => m[1]);
+    expect(bases.length, r.stderr).toBeGreaterThan(0);
+    expect(new Set(bases), r.stderr).toEqual(new Set(['work']));
+  });
+
   it('does not tell a re-push (--pr) to delete the branch it is re-pushing', () => {
     const { dir, env, git } = seedReshipRepo();
     git(['switch', '-q', 'pr-open'], { stdio: 'ignore' });
