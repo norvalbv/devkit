@@ -9,6 +9,8 @@
  * blocked: the shell settled that and published it on this ship's ship_result row, which this
  * reader consumes, so the two can never disagree.
  */
+import { blockingFindings } from './blocking.mts';
+import { count, oneLine, textOf } from './fields.mts';
 import { scanBackward } from './tail.mts';
 import { readBranchHistory, renderTrend, summariseTrend } from './trend.mts';
 
@@ -51,6 +53,11 @@ export interface GateEvent {
   evidence_truncated_files?: number;
   evidence_omitted_paths?: string[];
   evidence_lens?: string;
+  /** review_result FAIL only (sc-3212): every finding the override valve left blocking, one per
+   * fingerprint. Absent on a cascade-confirmed FAIL (no valve) and on an emitter predating it. */
+  blocking?: { lens?: string; fp?: string }[];
+  blocking_omitted?: number;
+  blocking_base?: string;
 }
 
 /** One gate's contribution to this attempt. `gate` is the event's own label, never parsed prose.
@@ -62,6 +69,10 @@ export interface DigestRow {
   /** true = this stopped the run · false = it did not · null = the run failed unattributably. */
   blocking: boolean | null;
   detail: string;
+  /** The finding's fingerprint, when the gate named one — one gate can yield several rows. */
+  fp?: string;
+  /** How many findings this row stands for, when not one: the emitter's omitted-blocking tally. */
+  findings?: number;
 }
 
 /** A row that COULD have stopped the run, so its blocking status must be computed, never assumed. */
@@ -70,11 +81,12 @@ interface Attributable {
   family: string;
   detail: string;
   state: 'finding' | 'could-not-run';
+  fp?: string;
+  findings?: number;
 }
 
 /** The ship_attempt row opens this attempt's span, so finding it bounds the backward read exactly. */
 const ATTEMPT = 'ship_attempt';
-const DETAIL_CHARS = 140;
 /** The parallel judge's gate name — a `gate_result` row, not a fleet `review_result`. */
 const COMPLETENESS = 'completeness';
 /** Caps on what one terminus prints: past these the digest is the wall of text it replaces. */
@@ -114,13 +126,6 @@ export function readShipEvents(sink: string, shipId: string): GateEvent[] {
     (kept) => kept.some((e) => e.type === ATTEMPT),
   );
 }
-
-const oneLine = (text: string | undefined = ''): string => {
-  // Template coercion, not `.replace` on the parameter: the value reaches here from unvalidated
-  // JSON, so its declared type is an assertion and a number would throw on a string method.
-  const flat = `${text ?? ''}`.replace(/\s+/g, ' ').trim();
-  return flat.length > DETAIL_CHARS ? `${flat.slice(0, DETAIL_CHARS - 1)}…` : flat;
-};
 
 /** A sink row's judged base, short — JSON.stringify never invokes a row-supplied toString, so a
  * malformed value (`{"toString":1}`) degrades to "an earlier base" instead of throwing. */
@@ -176,13 +181,10 @@ export function summarise(events: GateEvent[], shipId: string): DigestRow[] {
   const unverified: DigestRow[] = [];
   for (const e of mine) {
     if (e.type === 'review_result' && e.status === 'fail') {
-      const reviewer = e.reviewer ?? 'unknown';
-      attributable.push({
-        gate: `review:${reviewer}`,
-        family: 'review',
-        detail: oneLine(e.reason),
-        state: 'finding',
-      });
+      const gate = `review:${e.reviewer ?? 'unknown'}`;
+      for (const f of blockingFindings(e)) {
+        attributable.push({ gate, family: 'review', state: 'finding', ...f });
+      }
     } else if (e.type === 'gate_result' && e.status === 'fail') {
       const gate = e.gate ?? 'unknown';
       // A row without its own family IS its family — only the deterministic chain reports finer
@@ -276,16 +278,16 @@ export function summarise(events: GateEvent[], shipId: string): DigestRow[] {
   }
 
   const seen = new Set<string>();
-  const unique = attributable.filter(
-    (a) => !seen.has(`${a.state}:${a.gate}`) && seen.add(`${a.state}:${a.gate}`) !== undefined,
-  );
+  const key = (a: Attributable): string => `${a.state}:${a.gate}:${a.fp ?? ''}`;
+  const unique = attributable.filter((a) => !seen.has(key(a)) && seen.add(key(a)) !== undefined);
   return [
-    ...unique.map((a) => ({
-      gate: a.gate,
-      state: a.state,
-      blocking: unattributed ? null : isBlocking(a, blocked, unique),
-      detail: a.detail,
-    })),
+    ...unique.map((a) => {
+      const blocking = unattributed ? null : isBlocking(a, blocked, unique);
+      const row: DigestRow = { gate: a.gate, state: a.state, blocking, detail: a.detail };
+      if (a.fp) row.fp = a.fp;
+      if (a.findings) row.findings = a.findings;
+      return row;
+    }),
     // NOT passed through the `unattributed` null-blocking arm: that arm exists for a run whose
     // blocker is unknowable, and an advisory's non-blocking status is knowable on every run.
     ...firstPerGate(advisory),
@@ -314,16 +316,6 @@ function baseDriftDetail(e: GateEvent): string {
     return `cached PASS judged against ${shortJudgedBase(e.judged_base_sha)} — reviewed paths changed on the base since; not re-judged`;
   return '';
 }
-
-/** A positive integer count, or 0. Untrusted JSON: isSafeInteger rejects a non-number WITHOUT
- * coercing it (coercing `{"toString":1,"valueOf":1}` throws), so `>` only sees a real number. */
-const count = (v: number | undefined): number =>
-  v !== undefined && Number.isSafeInteger(v) && v > 0 ? v : 0;
-
-/** A string field as text, or '' — via JSON.stringify for the reason shortJudgedBase gives: it never
- * invokes a row-supplied toString, so a non-string value degrades to '' instead of throwing. */
-const textOf = (v: string | undefined): string =>
-  /^"(.*)"$/.exec(JSON.stringify(v ?? null))?.[1] ?? '';
 
 function partialPacket(e: GateEvent): boolean {
   return count(e.evidence_omitted_files) > 0 || count(e.evidence_truncated_files) > 0;
@@ -370,9 +362,18 @@ export function render(rows: DigestRow[], logPath = ''): string {
   if (findings.length === 0 && missing.length === 0 && unverified.length === 0) return '';
 
   const cached = rows.filter((r) => r.state === 'cached').length;
-  const total = findings.length + missing.length + unverified.length;
-  const out = [`📋 Gate findings this run (${total}):`];
-  for (const r of findings.slice(0, MAX_FINDINGS)) {
+  const listed = [...findings, ...missing, ...unverified];
+  const total = listed.reduce((n, r) => n + (r.findings ?? 1), 0);
+  const gates = new Set(listed.map((r) => `${r.state}:${r.gate}`)).size;
+  // Findings, not gates, are what a reader must clear: one reviewer can block on several IDs.
+  const counted = gates === total ? `${total}` : `${gates} gate(s) / ${total} finding(s)`;
+  const out = [`📋 Gate findings this run (${counted}):`];
+  // Never capped: a blocker, or a row naming a fingerprint even when attribution is unknown — each
+  // is a separate ID to fix or waive, and a hidden one costs a whole re-ship.
+  const pinned = (r: DigestRow): boolean => r.blocking === true || r.fp !== undefined;
+  const blockers = findings.filter(pinned);
+  const others = findings.filter((r) => !pinned(r));
+  for (const r of [...blockers, ...others.slice(0, MAX_FINDINGS)]) {
     const tail = r.detail ? `: ${r.detail}` : '';
     if (r.blocking === true) out.push(`   ✗ ${r.gate} — BLOCKED this run${tail}`);
     else if (r.blocking === null) {
@@ -384,8 +385,8 @@ export function render(rows: DigestRow[], logPath = ''): string {
       );
     }
   }
-  if (findings.length > MAX_FINDINGS) {
-    out.push(`   … ${findings.length - MAX_FINDINGS} more finding(s) — all of them are in the log`);
+  if (others.length > MAX_FINDINGS) {
+    out.push(`   … ${others.length - MAX_FINDINGS} more finding(s) — all of them are in the log`);
   }
   for (const r of missing.slice(0, MAX_MISSING)) {
     // A gate that could not run is normally advisory context, but under GUARD_DETERMINISTIC_STRICT

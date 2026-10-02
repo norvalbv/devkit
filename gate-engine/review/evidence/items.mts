@@ -113,6 +113,10 @@ const wireItemSchema = z.object({}).loose();
  * where three of four lenses hit cache, that is most of the reviewer's output.
  */
 export function mergeItemVectors(res: ReviewOutcome, parts: readonly ReviewOutcome[]): void {
+  // Blocking fingerprints merge here too, deduped by fp ONLY: chunked parts of one lens hash
+  // different file sets, so one lens can carry two separately-waivable fps (sc-3212).
+  const blocking = new Map(parts.flatMap((p) => p.blocking ?? []).map((b) => [b.fp, b]));
+  res.blocking = blocking.size > 0 ? [...blocking.values()] : undefined;
   const withArtifact = parts.filter((p) => p.itemCount !== undefined || p.items?.length);
   if (withArtifact.length === 0) return;
   res.itemArtifact = withArtifact.find((p) => p.itemArtifact)?.itemArtifact;
@@ -254,15 +258,61 @@ export function attachItems(
  * The item fields of a `review_result` event. Lives beside `attachItems` so the wire shape and the
  * spill decision cannot drift apart: `items` and `items_ref` are mutually exclusive, while the count,
  * artifact kind and tally ride along either way — so a spilled vector is never read as a short one.
- * Empty when there was no artifact at all.
+ * Empty when there was no artifact at all — except `blocking`, which conventions-reviewer carries
+ * with no checklist (see blockingFields).
  */
-export function itemFields(res: ReviewOutcome): Record<string, unknown> {
-  if (res.itemCount === undefined) return {};
+export function itemFields(res: ReviewOutcome): ItemFields {
+  if (res.itemCount === undefined) return blockingFields(res);
   return {
+    ...blockingFields(res),
     item_count: res.itemCount,
     item_artifact: res.itemArtifact,
     item_tally: res.itemTally,
     ...(res.items ? { items: res.items } : {}),
     ...(res.itemsRef ? { items_ref: res.itemsRef } : {}),
   };
+}
+
+// ~60 bytes an entry, so ~8 inline: the line also carries `items` and `reason` under the 4KB append.
+const BLOCKING_BUDGET = 512;
+const BLOCKING_LENS_CHARS = 120;
+
+export interface ItemFields extends BlockingFields {
+  item_count?: number;
+  item_artifact?: ReviewOutcome['itemArtifact'];
+  item_tally?: ReviewOutcome['itemTally'];
+  items?: ReviewOutcome['items'];
+  items_ref?: string;
+}
+
+export interface BlockingFields {
+  blocking?: { lens: string; fp: string }[];
+  /** Entries dropped to fit BLOCKING_BUDGET, so a short list is never read as the whole one. */
+  blocking_omitted?: number;
+  /** The judged base every entry shares — the `--base` blockingNote's waive command carries. */
+  blocking_base?: string;
+}
+
+/** Every fingerprint the valve left blocking (sc-3212), dropped from the tail to fit the budget —
+ * never cut, because a truncated ID cannot be waived. */
+export function blockingFields(res: Pick<ReviewOutcome, 'blocking'>): BlockingFields {
+  const fields: BlockingFields = {};
+  // A cut lens ends in `…`, so the digest knows not to build a waive command from it.
+  const all = (res.blocking ?? []).map((b) => ({
+    lens:
+      b.lens.length > BLOCKING_LENS_CHARS ? `${b.lens.slice(0, BLOCKING_LENS_CHARS - 1)}…` : b.lens,
+    fp: b.fp,
+  }));
+  if (all.length === 0) return fields;
+  let kept = all.length;
+  while (
+    kept > 0 &&
+    Buffer.byteLength(JSON.stringify(all.slice(0, kept)), 'utf8') > BLOCKING_BUDGET
+  )
+    kept--;
+  fields.blocking = all.slice(0, kept);
+  const base = res.blocking?.find((b) => b.base)?.base;
+  if (base) fields.blocking_base = base;
+  if (kept < all.length) fields.blocking_omitted = all.length - kept;
+  return fields;
 }
