@@ -33,17 +33,24 @@ const inventory = (touched: number): CommentInventory => ({
   })),
 });
 
+const none = { kept: 0, refs: 0 };
+
 afterEach(() => {
   vi.unstubAllEnvs();
 });
 
 describe('commentBudgetEvent', () => {
   it('carries the paragraph shape, the findings, and the touched anchors', () => {
-    const event = commentBudgetEvent('block', inventory(2), [finding(0), finding(1)]);
+    const event = commentBudgetEvent('block', inventory(2), [finding(0), finding(1)], {
+      kept: 1,
+      refs: 3,
+    });
     expect(event).toMatchObject({
       type: 'comment_budget',
       gate: 'comments',
       status: 'block',
+      kept: 1,
+      refs: 3,
       files: 3,
       paragraphs: { one: 4, two: 2, over: 2 },
       trailing_added: 5,
@@ -73,7 +80,7 @@ describe('commentBudgetEvent', () => {
 
   it('shrinks under the atomic-append budget, dropping touched anchors before findings', () => {
     const findings = Array.from({ length: 200 }, (_, index) => finding(index));
-    const event = commentBudgetEvent('block', inventory(200), findings);
+    const event = commentBudgetEvent('block', inventory(200), findings, none);
     expect(Buffer.byteLength(JSON.stringify(event), 'utf8')).toBeLessThanOrEqual(
       EVENT_BUDGET - 320,
     );
@@ -84,7 +91,7 @@ describe('commentBudgetEvent', () => {
   });
 
   it('never omits findings when the touched list alone was over budget', () => {
-    const event = commentBudgetEvent('block', inventory(120), [finding(0)]);
+    const event = commentBudgetEvent('block', inventory(120), [finding(0)], none);
     expect(event.findings).toHaveLength(1);
     expect(event.omitted).toMatchObject({ findings: 0 });
   });
@@ -99,7 +106,7 @@ describe('emitCommentBudget', () => {
     vi.stubEnv('DEVKIT_SHIP_BRANCH', `feature/${'x'.repeat(900)}`);
     vi.stubEnv('DEVKIT_SHIP_REPO', 'r'.repeat(300));
     const findings = Array.from({ length: 120 }, (_, index) => finding(index));
-    emitCommentBudget('block', inventory(120), findings);
+    emitCommentBudget('block', inventory(120), findings, none);
     const line = readFileSync(sink, 'utf8').trimEnd();
     expect(Buffer.byteLength(line, 'utf8')).toBeLessThanOrEqual(EVENT_BUDGET * 2 - 128);
     const event = JSON.parse(line);
@@ -114,7 +121,7 @@ describe('emitCommentBudget', () => {
     vi.stubEnv('DEVKIT_GATE_EVENTS', sink);
     vi.stubEnv('DEVKIT_SHIP_ID', 'ship-huge');
     vi.stubEnv('DEVKIT_SHIP_BRANCH', 'x'.repeat(4000));
-    emitCommentBudget('pass', emptyInventory(), []);
+    emitCommentBudget('pass', emptyInventory(), [], none);
     expect(existsSync(sink)).toBe(false);
     rmSync(dir, { recursive: true, force: true });
   });
@@ -124,7 +131,7 @@ describe('emitCommentBudget', () => {
     const sink = path.join(dir, 'events.jsonl');
     vi.stubEnv('DEVKIT_GATE_EVENTS', sink);
     vi.stubEnv('DEVKIT_SHIP_ID', 'ship-1');
-    emitCommentBudget('pass', emptyInventory(), []);
+    emitCommentBudget('pass', emptyInventory(), [], none);
     const lines = readFileSync(sink, 'utf8').trim().split('\n');
     expect(lines).toHaveLength(1);
     expect(JSON.parse(lines[0] ?? '')).toMatchObject({

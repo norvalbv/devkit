@@ -15,6 +15,14 @@ export interface CommentFinding {
   textLines: number;
 }
 
+/** One changed comment line citing a reference the repo's comment policy forbids. */
+export interface RefFinding {
+  path: string;
+  line: number;
+  refs: string[];
+  comment: string;
+}
+
 export interface TouchedParagraph {
   anchor: string;
   /** The paragraph's current text lines, so a deletion-only shortening still reads as ≤2. */
@@ -33,6 +41,7 @@ export interface CommentInventory {
 
 export interface DetectionResult {
   findings: CommentFinding[];
+  refFindings: RefFinding[];
   unsupported: Array<{ extension: string; path: string }>;
   inventory: CommentInventory;
 }

@@ -23,6 +23,8 @@ import {
   textLineCount,
 } from './inventory.mts';
 import { commentTouchLines, type PatchHunk, parsePatchHunks } from './patch.mts';
+import { loadCommentPolicy } from './policy.mts';
+import { refFindings } from './refs.mts';
 import type { CommentFinding, CommentInventory, DetectionResult } from './types.mts';
 
 export { parsePatchHunks } from './patch.mts';
@@ -207,19 +209,22 @@ function stagedBlob(cwd: string, file: string): string {
   return git(cwd, ['show', `:${repoPath}`]);
 }
 
-/** Every line of `ref`'s version of the file that lies inside a comment token; empty when absent. */
-function commentLinesAt(cwd: string, file: string, extension: string, ref: string): Set<number> {
-  const lines = new Set<number>();
+/** Each comment line of `ref`'s version of the file, mapped to its parts of every token on it. */
+function commentFragmentsAt(cwd: string, file: string, extension: string, ref: string) {
+  const fragments = new Map<number, string[]>();
   let source: string;
   try {
     source = git(cwd, ['show', `${ref}:${gitPrefix(cwd)}${file}`]);
   } catch {
-    return lines;
+    return fragments;
   }
   for (const token of scanCommentTokens(source, extension)) {
-    for (let line = token.startLine; line <= token.endLine; line += 1) lines.add(line);
+    token.text.split('\n').forEach((part, offset) => {
+      const line = token.startLine + offset;
+      fragments.set(line, [...(fragments.get(line) ?? []), part]);
+    });
   }
-  return lines;
+  return fragments;
 }
 
 function normalizedRoot(cwd: string, root: string): string {
@@ -337,14 +342,13 @@ type TwinDiscriminator = { ordinal: number } | null;
 function changedParagraphs(
   file: string,
   source: string,
-  extension: string,
+  tokens: CommentToken[],
   hunks: PatchHunk[],
   touchLines: ReadonlySet<number>,
   inventory: CommentInventory,
 ): ChangedParagraph[] {
   const lines = source.split('\n');
   const isBlank = (line: number): boolean => (lines[line - 1] ?? '').trim() === '';
-  const tokens = scanCommentTokens(source, extension);
   const paragraphs = paragraphCommentTokens(tokens, isBlank);
   const addedLines = new Set(hunks.flatMap((hunk) => [...hunk.addedLines]));
   for (const token of tokens) {
@@ -422,7 +426,9 @@ export function detectChangedComments(cwd = process.cwd()): DetectionResult {
   const cfg = resolveGuardConfig(cwd);
   const roots = cfg.scanRoots.map((root) => normalizedRoot(cwd, root));
   const isConfiguredSource = sourceMatchers(cfg.sourceExtensions).isSource;
+  const policy = loadCommentPolicy(cwd);
   const findings: CommentFinding[] = [];
+  const cited: DetectionResult['refFindings'] = [];
   const unsupported: DetectionResult['unsupported'] = [];
   const inventory = emptyInventory();
   const decisionsDir = normalizedRoot(cwd, cfg.decisionsDir);
@@ -438,13 +444,14 @@ export function detectChangedComments(cwd = process.cwd()): DetectionResult {
     inventory.files += 1;
     const first = parsePatchHunks(patch(cwd, file));
     let effective = first;
-    let touchLines = commentTouchLines(first, commentLinesAt(cwd, file, extension, 'HEAD'));
+    const headFragments = commentFragmentsAt(cwd, file, extension, 'HEAD');
+    let touchLines = commentTouchLines(first, new Set(headFragments.keys()));
     try {
       const second = parsePatchHunks(patch(cwd, file, 'MERGE_HEAD'));
       const secondLines = new Set(second.flatMap((hunk) => [...hunk.addedLines]));
       const secondTouch = commentTouchLines(
         second,
-        commentLinesAt(cwd, file, extension, 'MERGE_HEAD'),
+        new Set(commentFragmentsAt(cwd, file, extension, 'MERGE_HEAD').keys()),
       );
       effective = first.map((hunk) => ({
         ...hunk,
@@ -455,10 +462,12 @@ export function detectChangedComments(cwd = process.cwd()): DetectionResult {
       // Ordinary commit: the first-parent staged patch is the complete attribution set.
     }
     const source = stagedBlob(cwd, file);
-    const paragraphs = changedParagraphs(file, source, extension, effective, touchLines, inventory);
+    const tokens = scanCommentTokens(source, extension);
+    cited.push(...refFindings({ file, tokens, hunks: effective, headFragments }, policy.refs));
+    const paragraphs = changedParagraphs(file, source, tokens, effective, touchLines, inventory);
     for (const paragraph of paragraphs) {
       findings.push(findingFor(file, extension, source, paragraph, effective));
     }
   }
-  return { findings, unsupported, inventory };
+  return { findings, refFindings: cited, unsupported, inventory };
 }

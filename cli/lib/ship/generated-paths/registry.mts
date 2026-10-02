@@ -66,7 +66,8 @@ const entrySchema = z.strictObject({
     .refine((c) => !UNSAFE_CHAR.test(c), 'must be one line of visible characters'),
 });
 
-// Only `generated` is read here; every other guard.config.json key belongs to gate-engine/config.mts.
+// Only `generated` is read here; `comments` belongs to gate-engine/comment-firewall/policy.mts and
+// every other guard.config.json key to gate-engine/config.mts.
 const configSchema = z.looseObject({ generated: z.array(entrySchema).optional() });
 
 /**

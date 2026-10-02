@@ -50,10 +50,12 @@ command. Do not pre-run every gate or replace the managed chain with a hand-writ
   clone, coverage, anti-slop, and comment-budget checks and lists every failure in one block. Follow the printed repair. Existing ratchet debt may shrink; do not
   re-freeze it merely to admit a new violation. A missing or inherited coverage artifact may use the
   documented one-run `GUARD_COVERAGE_OK=1` assertion only when the change did not cause the shortfall.
-- **Comment budget** (`guard-comments`) blocks any added or modified standalone comment paragraph
-  with three or more text lines. Shorten it to at most two lines, or move the information into
-  code, types, a test name/assertion, or a decision record (`guard-decisions`). There is no
-  rationale, waiver, or reviewer; a paragraph-long explanation belongs in docs, not in code.
+- **Comment budget** (`guard-comments`) blocks a new standalone comment paragraph with three or
+  more changed text lines the first time it is shown. Shorten the comment where possible; a
+  paragraph that justifies a workaround means the code is wrong, so fix the code. If every line
+  states something the code cannot, retry unchanged: the same paragraph never blocks twice. When
+  `guard.config.json` sets `comments.forbiddenRefs` or `comments.forbidDecisionRefs`, a changed
+  comment citing a ticket or decision record blocks on every attempt until the reference is gone.
 - **Local pre-ship loop.** Stage the paths (`git add <paths>`), then run `guard-deterministic`
   (in devkit itself: `node gate-engine/deterministic/run.mts`). It runs the same aggregated set
   a ship attempt runs, without the ship round. Single checks: `guard-comments gate` (reads the
