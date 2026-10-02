@@ -5,7 +5,7 @@ import { detectGitRoot } from '../detect-git-root.mts';
 import { readJson } from '../fs-helpers.mts';
 import { syncOverlayHook } from '../overlay.mts';
 import { guardBlockMatches, selfHostHookParity } from './hook-parity.mts';
-import { buildGuardBlock, buildStandaloneBlock } from './husky-block.mts';
+import { buildGuardBlock } from './husky-block.mts';
 
 interface ReviewSetupConfig {
   overlay?: boolean;
@@ -32,12 +32,13 @@ export function reviewHookDrift(cwd: string): string | null {
   const hookPath = join(gitRoot, '.husky', 'pre-commit');
   if (!existsSync(hookPath)) return 'missing .husky/pre-commit';
   const selection = normalizeSelection(cfg.components ?? {});
-  const expected = (cfg.standalone ? buildStandaloneBlock : buildGuardBlock)(
+  const expected = buildGuardBlock(
     {
       ...selection,
       structureCmd: selection.structure ? structureCmdFor(cfg.stack ?? 'generic') : undefined,
     },
     pkgRel,
+    { binDir: cfg.standalone ? 'global-optional' : 'package' },
   );
   return guardBlockMatches(readFileSync(hookPath, 'utf8'), expected, pkgRel)
     ? null

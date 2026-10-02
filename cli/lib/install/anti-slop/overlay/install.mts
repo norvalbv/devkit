@@ -4,7 +4,8 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { createAntiSlopBaseline } from '../../../../commands/oxc/anti-slop.mts';
 import { trackedPathPredicate } from '../../../git-tracked.mts';
-import { OVERLAY_ENTRY_REL, OXLINT_CONFIGS } from '../../oxc/lifecycle.mts';
+import { firstLine } from '../../../standalone.mts';
+import { OVERLAY_ENTRY_REL, OXLINT_CONFIGS, syncOxcCapability } from '../../oxc/lifecycle.mts';
 import { ANTI_SLOP_BASELINE_REL, ANTI_SLOP_MANIFEST_REL } from '../constants.mts';
 import { removeAntiSlopCapability, syncAntiSlopCapability } from '../lifecycle.mts';
 
@@ -12,17 +13,28 @@ import { removeAntiSlopCapability, syncAntiSlopCapability } from '../lifecycle.m
  * Paths an overlay anti-slop install owns; git must track NONE, since `.git/info/exclude` cannot
  * hide a tracked file. Dirs not files: a partly tracked capability is refused, not half-projected.
  */
-const OVERLAY_ANTI_SLOP_OWNED = [
-  OVERLAY_ENTRY_REL,
-  ANTI_SLOP_BASELINE_REL,
-  '.devkit/oxc',
-  '.devkit/anti-slop',
-] as const;
+const OVERLAY_OXC_OWNED = [OVERLAY_ENTRY_REL, '.devkit/oxc'];
+const OVERLAY_ANTI_SLOP_OWNED = [...OVERLAY_OXC_OWNED, ANTI_SLOP_BASELINE_REL, '.devkit/anti-slop'];
 
-/** What `installOverlay` needs back: whether to render the gate, and what to hide from git. */
+/** True, with the untrack remedy printed, when git tracks any owned path the overlay must write. */
+function ownedPathTracked(gitRoot: string, pfx: string, owned: string[], what: string): boolean {
+  const isTracked = trackedPathPredicate(gitRoot);
+  const tracked = owned.filter((rel) => isTracked(`${pfx}${rel}`));
+  if (tracked.length === 0) return false;
+  console.log(
+    `  ! ${what} skipped — git already TRACKS ${tracked.join(', ')}; an overlay cannot hide a tracked path.`,
+  );
+  // NOT `devkit clean`: it now declines to delete a tracked path (and prints why), so naming it
+  // here would point at a command that cannot perform the fix. Untracking is the only remedy.
+  console.log(
+    `    Untrack them first: \`git rm -r --cached ${tracked.map((rel) => `${pfx}${rel}`).join(' ')}\` and commit.`,
+  );
+  return true;
+}
+
+/** What `installOverlay` needs back: whether to render the gate. */
 interface OverlayAntiSlopWiring {
   wired: boolean;
-  excludes: string[];
 }
 
 /** Reclaim a half-installed capability so no stranded managed tree outlives its gate. */
@@ -36,10 +48,8 @@ function abandon(cwd: string, reason: string): false {
   return false;
 }
 
-/**
- * RETURNS its exclude entries for `installOverlay`'s one authoritative reconcile, never writing them
- * here — a second call naming only these two paths would prune every agent line it omits.
- */
+/** Never reconciles the exclude: `installOverlay` excludes every overlay-written path in one call, and
+ * a second call naming only these would prune every agent line it omits. */
 export function wireOverlayAntiSlop(
   cwd: string,
   gitRoot: string,
@@ -51,14 +61,22 @@ export function wireOverlayAntiSlop(
   if (sel.antiSlop) {
     console.log('  anti-slop (vendored Oxlint rules + per-clone baseline)');
     wired = resolveOverlayAntiSlop(cwd, gitRoot, pfx, dryRun);
-  } else if (existsSync(join(cwd, ANTI_SLOP_MANIFEST_REL))) {
-    console.log('  anti-slop (deselected — reclaiming)');
-    removeAntiSlopCapability(cwd, dryRun, true);
+  } else {
+    if (existsSync(join(cwd, ANTI_SLOP_MANIFEST_REL))) {
+      console.log('  anti-slop (deselected — reclaiming)');
+      removeAntiSlopCapability(cwd, dryRun, true);
+    }
+    // Core Oxc, as package mode always installs it; anti-slop's own sync carries it otherwise.
+    if (!ownedPathTracked(gitRoot, pfx, OVERLAY_OXC_OWNED, 'Oxc')) {
+      try {
+        syncOxcCapability(cwd, { dryRun, antiSlop: false, overlay: true });
+      } catch (error: unknown) {
+        // The install goes on so its excludes still hide what it wrote; doctor reports the gap.
+        console.log(`  ! Oxc could not be installed (${firstLine(error)}) — skipping it.`);
+      }
+    }
   }
-  const excludes = [OVERLAY_ENTRY_REL, ANTI_SLOP_BASELINE_REL]
-    .filter((rel) => wired || existsSync(join(cwd, rel)))
-    .map((rel) => `${pfx}${rel}`);
-  return { wired, excludes };
+  return { wired };
 }
 
 /**
@@ -75,19 +93,7 @@ export function resolveOverlayAntiSlop(
     console.log('  [dry-run] anti-slop: sync capability → baseline-if-absent → gate in hook');
     return true;
   }
-  const isTracked = trackedPathPredicate(gitRoot);
-  const tracked = OVERLAY_ANTI_SLOP_OWNED.filter((rel) => isTracked(`${pfx}${rel}`));
-  if (tracked.length > 0) {
-    console.log(
-      `  ! anti-slop skipped — git already TRACKS ${tracked.join(', ')}; an overlay cannot hide a tracked path.`,
-    );
-    // NOT `devkit clean`: it now declines to delete a tracked path (and prints why), so naming it
-    // here would point at a command that cannot perform the fix. Untracking is the only remedy.
-    console.log(
-      `    Untrack them first: \`git rm -r --cached ${tracked.map((rel) => `${pfx}${rel}`).join(' ')}\` and commit.`,
-    );
-    return false;
-  }
+  if (ownedPathTracked(gitRoot, pfx, OVERLAY_ANTI_SLOP_OWNED, 'anti-slop')) return false;
   // `-c` replaces discovery outright, so a consumer's own Oxlint config would stop being read;
   // refusing beats silently overriding a linter config in a repo devkit does not own.
   const consumerConfig = OXLINT_CONFIGS.find((name) => existsSync(join(cwd, name)));
@@ -103,8 +109,7 @@ export function resolveOverlayAntiSlop(
   try {
     syncAntiSlopCapability(cwd, { overlay: true });
   } catch (error: unknown) {
-    const detail = error instanceof Error ? error.message.split('\n')[0] : String(error);
-    return abandon(cwd, `could not be installed (${detail})`);
+    return abandon(cwd, `could not be installed (${firstLine(error)})`);
   }
   if (existsSync(join(cwd, ANTI_SLOP_BASELINE_REL))) {
     console.log(`  ✓ anti-slop baseline present (${ANTI_SLOP_BASELINE_REL}) — not re-snapshotted`);

@@ -38,14 +38,19 @@ and delete the lock path the message prints. `--dry-run` never takes the lock.
 
 In **overlay mode** a plain `git commit` (or an IDE/GUI commit) runs the **repo's own** hooks, not devkit's —
 that's the **self-heal** gap. Commit via the per-clone `git ci` alias instead, or enable the opt-in global
-shim with `devkit init --overlay --global-commit-gate`. The shim covers the pre-commit gates only — the
-completeness and sentry commit-message judges run only via `git ci` or `devkit ship` (`devkit doctor`
-says so when they are wired). See **overlay self-heal** in the glossary.
+shim with `devkit init --overlay --global-commit-gate`. The shim runs the pre-commit gates and the
+completeness and sentry commit-message judges. Husky only reaches it for a hook the repo commits, so the
+judges need a committed `.husky/commit-msg` (`devkit doctor` warns when one is missing). A shim an older
+devkit wrote runs the pre-commit gates only until `devkit doctor --fix` refreshes it. See **overlay
+self-heal** in the glossary.
 
 **In a linked worktree** (`git worktree add`), the overlay's hooks run too: `core.hooksPath` is the
-absolute path of the overlay's `.devkit/hooks`, and the first commit in a worktree links that overlay in
-(a `devkit: linked this worktree…` line). An install from before this change wrote a relative path, and
-under it every linked worktree ran no hooks at all. `devkit doctor --fix` (or `devkit upgrade`) re-points it.
+absolute path of the overlay's `.devkit/hooks`, and a commit in a worktree that lacks any of the overlay's
+gate inputs projects them in first (a `✓ <worktree>: projected …` line). When that projection fails, or
+devkit is not on PATH, the commit is **blocked** rather than run without gates, and the lines above it
+name the fix: install devkit, add a slash-less `.git/info/exclude` line, or run `devkit doctor --fix`.
+An install from before this change wrote a relative path, and under it every linked worktree ran no
+hooks at all. `devkit doctor --fix` (or `devkit upgrade`) re-points it.
 
 ## My commit in a worktree ran a DIFFERENT checkout's hook
 

@@ -1,11 +1,11 @@
 /** sc-1882: in a ship lane every brief reader takes the refreshed `.claude/agents` projection, never
- *  a custom `review.agentsDir`; outside it (even a leaked run mode) the configured dir rules. */
+ *  a custom `review.agentsDir`; outside it (even a leaked run mode) the configured dir rules. A brief
+ *  missing from that directory resolves from the running package (review-gate-in-chain). */
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { type GuardConfig, resolveGuardConfig } from '../../config.mts';
-import { strictRemedy } from '../../judge/run-judge.mts';
 import {
   isShipLane,
   reviewAgentsDir,
@@ -20,6 +20,7 @@ import {
   consumerRepo,
   messageFile,
   mkExec,
+  packagedBriefLine,
   trackReviewFixtureDir,
   writeArtifact,
 } from './run-review-fixtures.mts';
@@ -165,26 +166,23 @@ describe('runReviewGate — ship lane reads the refreshed projection', () => {
     expect(prompts.join('\n')).toContain('STALE brief for api-security-reviewer');
   });
 
-  it('a missing projected brief fails closed naming the projection and the reinstall remedy', async () => {
+  it('a brief missing from the projection resolves the running package, never the stale custom copy', async () => {
     const repo = consumerRepo({ backend: true });
     withStaleCustomAgents(repo, 'custom/agents');
     rmSync(join(repo, '.claude', 'agents', 'api-security-reviewer.md'));
     enterShipLane();
     process.env.GUARD_AI_STRICT = '1';
-    const errors: string[] = [];
-    vi.spyOn(console, 'error').mockImplementation((...a: unknown[]) => {
-      errors.push(a.map(String).join(' '));
-    });
-    const exec = mkExec(async ({ label }) => {
+    const prompts: string[] = [];
+    const exec = mkExec(async ({ label, args }) => {
+      prompts.push(args[1]);
       writeArtifact(repo, label);
       return 'VERDICT: PASS';
     });
 
-    expect(await runReviewGate(repo, { exec })).toBe(3);
-    const out = errors.join('\n');
-    expect(out).toContain(`missing under ${join(repo, '.claude', 'agents')}`);
-    expect(out).toContain('reinstall or rebuild devkit');
-    expect(out).not.toContain('devkit sync-agents');
+    expect(await runReviewGate(repo, { exec })).toBe(0);
+    const all = prompts.join('\n');
+    expect(all).toContain(packagedBriefLine('api-security-reviewer'));
+    expect(all).not.toContain('STALE brief');
   });
 });
 
@@ -222,32 +220,31 @@ describe('runCompleteness — ship lane reads the refreshed projection', () => {
   });
 });
 
-describe('runCompleteness — a missing projected brief in a strict ship lane', () => {
-  it('fails closed with the reinstall remedy instead of skipping', async () => {
+describe('runCompleteness — a brief missing from the consumer directory', () => {
+  it.each([
+    ['a strict ship lane', true],
+    ['a plain commit', false],
+  ])('%s judges on the running package brief instead of skipping', async (_label, ship) => {
     const repo = consumerRepo({ backend: true });
     rmSync(join(repo, '.claude', 'agents', 'feature-completeness-reviewer.md'));
-    enterShipLane();
-    process.env.GUARD_AI_STRICT = '1';
+    if (ship) {
+      enterShipLane();
+      process.env.GUARD_AI_STRICT = '1';
+    }
     const errors: string[] = [];
     vi.spyOn(console, 'error').mockImplementation((...a: unknown[]) => {
       errors.push(a.map(String).join(' '));
     });
-    const exec = mkExec(async () => 'VERDICT: PASS');
+    const prompts: string[] = [];
+    const exec = mkExec(async ({ args }) => {
+      prompts.push(args[1]);
+      return 'VERDICT: PASS';
+    });
 
-    expect(await runCompleteness(messageFile(repo, 'feat: broken package'), repo, { exec })).toBe(
-      3,
-    );
-    expect(errors.join('\n')).toContain('reinstall or rebuild devkit');
+    expect(await runCompleteness(messageFile(repo, 'feat: unprojected'), repo, { exec })).toBe(0);
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]).toContain(packagedBriefLine('feature-completeness-reviewer'));
     expect(errors.join('\n')).not.toContain('completeness skipped');
-  });
-
-  it('a plain non-strict commit keeps the advisory skip', async () => {
-    const repo = consumerRepo({ backend: true });
-    rmSync(join(repo, '.claude', 'agents', 'feature-completeness-reviewer.md'));
-    vi.spyOn(console, 'error').mockImplementation(() => {});
-    const exec = mkExec(async () => 'VERDICT: PASS');
-
-    expect(await runCompleteness(messageFile(repo, 'feat: plain'), repo, { exec })).toBe(0);
   });
 });
 
@@ -267,14 +264,5 @@ describe('consumerReviewerIdentity — ship lane hashes the bytes it judges', ()
     expect(identity()).toBe(before);
     writeFileSync(join(repo, '.claude', 'agents', 'conventions-reviewer.md'), 'new package brief');
     expect(identity()).not.toBe(before);
-  });
-});
-
-describe('strictRemedy — sync cause', () => {
-  it('in the ship lane points at the running package, not at the sync commands', () => {
-    const r = strictRemedy('sync', 'claude', undefined, true);
-    expect(r).toContain('reinstall or rebuild devkit');
-    expect(r).toContain('re-run devkit ship');
-    expect(r).not.toContain('devkit sync-agents');
   });
 });

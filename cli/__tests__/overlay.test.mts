@@ -23,6 +23,7 @@ import doctorRun from '../commands/doctor.mts';
 import { applyInit } from '../commands/init.mts';
 import update, { fetchLatestTag } from '../commands/update.mts';
 import upgrade from '../commands/upgrade.mts';
+import { runStagedStructureGate } from '../../gate-engine/structure/run.mts';
 import {
   applyOverlayConstraints,
   defaultSelection,
@@ -34,7 +35,7 @@ import { wireOverlayAntiSlop } from '../lib/install/anti-slop/overlay/install.mt
 import { reviewHookDrift } from '../lib/husky/review-drift.mts';
 import { healAliasCmd, syncOverlayHook } from '../lib/overlay.mts';
 import { removeSkills } from '../lib/sync-manifest.mts';
-import { rootRegistry, testExecFileSync } from './_helpers.mts';
+import { devkitHome, rootRegistry, testExecFileSync } from './_helpers.mts';
 
 /** Verbs that DISPATCH A HOOK here: `commit`, and the `ci` heal alias, which re-pins hooksPath and
  *  then commits. Both are process trees; every other git verb is a leaf and stays raw. */
@@ -47,7 +48,7 @@ const gitVerb = (args: string[]) =>
 // when the user checks everything. applyInit consumes an already-resolved selection directly, so we
 // apply the overlay constraints here too (forces tsconfig/structure/searchSteering off, husky on).
 const overlayAll = () =>
-  applyOverlayConstraints({ ...defaultSelection(), agentHooks: true, fallow: true });
+  applyOverlayConstraints({ ...defaultSelection(), agentHooks: true, fallow: true }, 'react-app');
 
 // Stub fallow's external CLI (detect/install/baselines/hook) so overlay's fallow flow runs without
 // a real `fallow` binary or a global network install. detectFallow → present, so resolveOverlayFallow
@@ -231,7 +232,10 @@ describe('overlay (local-only) install', () => {
 
     // The team untracks it, but the repo is now adopted so the write is deferred to `devkit upgrade`.
     execFileSync('git', ['rm', '--cached', '-q', 'guard.config.json'], { cwd: root });
-    testExecFileSync('git', ['commit', '-qm', 'untrack guard config'], { cwd: root });
+    testExecFileSync('git', ['commit', '-qm', 'untrack guard config'], {
+      cwd: root,
+      env: { ...process.env, HOME: devkitHome(mkTmp('ov-devkit-home-')) },
+    });
     await applyInit(root, opts);
 
     expect(
@@ -304,11 +308,12 @@ describe('overlay (local-only) install', () => {
       './.devkit/biome/react.jsonc',
     ]);
 
-    // config records overlay, but its local-only contract writes no tracked Oxc repository state.
+    // Core Oxc lands as in package mode, but only in git-excluded paths: no discovery-named config.
     const overlayConfig = JSON.parse(readFileSync(join(root, '.devkit', 'config.json'), 'utf8'));
     expect(overlayConfig.overlay).toBe(true);
     expect(overlayConfig.components).not.toHaveProperty('oxc');
-    expect(existsSync(join(root, '.devkit', 'oxc'))).toBe(false);
+    expect(existsSync(join(root, '.devkit', 'oxc', 'manifest.json'))).toBe(true);
+    expect(exclude).toContain('oxlint.devkit.json');
     expect(existsSync(join(root, '.oxlintrc.json'))).toBe(false);
     expect(existsSync(join(root, '.oxfmtrc.json'))).toBe(false);
   });
@@ -343,7 +348,10 @@ describe('overlay (local-only) install', () => {
     expect(existsSync(join(root, '.devkit', 'hooks', 'pre-commit'))).toBe(true);
     expect(existsSync(join(pkg, '.devkit', 'hooks'))).toBe(false);
     const exclude = readFileSync(join(root, '.git', 'info', 'exclude'), 'utf8');
-    expect(exclude).toContain('.devkit/hooks/');
+    // Both forms: a linked worktree's projection places a link, which a `dir/` line never ignores.
+    expect(exclude.split('\n')).toEqual(
+      expect.arrayContaining(['.devkit/hooks/', '.devkit/hooks']),
+    );
     expect(exclude).toContain('services/webapp/guard.config.json');
 
     // configs in the package; hook cd's into it; core.hooksPath at the root
@@ -491,7 +499,10 @@ describe('overlay (local-only) install', () => {
 
       // simulate husky re-claiming the hook on `bun install`, then heal via `git ci`
       git('config', 'core.hooksPath', '.husky/_');
-      git('ci', '--allow-empty', '-m', 'heal');
+      testExecFileSync('git', ['ci', '--allow-empty', '-m', 'heal'], {
+        cwd: root,
+        env: { ...process.env, HOME: devkitHome(mkTmp('ov-devkit-home-')) },
+      });
       expect(git('config', '--get', 'core.hooksPath').trim()).toBe(join(root, '.devkit', 'hooks'));
     } finally {
       if (prevGlobal === undefined) delete process.env.GIT_CONFIG_GLOBAL;
@@ -903,6 +914,24 @@ describe('overlay (local-only) install', () => {
     ).toBe(true);
   });
 
+  it('a linked worktree’s projected .fallow link is git-ignored, so doctor --fix leaves it clean', async () => {
+    const root = workRepo();
+    await applyInit(root, {
+      stack: 'react-app',
+      selection: overlayAll(),
+      overlay: true,
+      devkitRef: 'v0.21.0',
+    });
+    mkdirSync(join(root, '.fallow'), { recursive: true });
+    const wt = join(mkTmp('overlay-fallow-wt-'), 'wt');
+    execFileSync('git', ['worktree', 'add', '-q', '--detach', wt], { cwd: root });
+
+    await doctorRun(['--fix'], root);
+
+    expect(realpathSync(join(wt, '.fallow'))).toBe(realpathSync(join(root, '.fallow')));
+    expect(execFileSync('git', ['status', '--porcelain'], { cwd: wt, encoding: 'utf8' })).toBe('');
+  });
+
   it('clean reverses the agent-half + fallow (files gone, devkit-created settings gone, exclude pruned)', async () => {
     const root = workRepo();
     await applyInit(root, {
@@ -945,9 +974,9 @@ describe('overlay (local-only) install', () => {
       '.codex/hooks/',
       '.codex/hooks.json',
       'settings.local.json',
-      '.fallow/',
-      'fallow-baselines/',
-      '.decisions/',
+      '.fallow',
+      'fallow-baselines',
+      '.decisions',
       'devkit',
     ]) {
       expect(exclude).not.toContain(line);
@@ -1262,7 +1291,7 @@ describe('overlay (local-only) install', () => {
   });
 
   it('applyOverlayConstraints: forces non-viable off + husky on, keeps the viable opt-in/opt-out', () => {
-    const sel = applyOverlayConstraints({
+    const chosen = {
       ...defaultSelection(),
       tsconfig: true,
       structure: true,
@@ -1273,12 +1302,15 @@ describe('overlay (local-only) install', () => {
       agents: false, // user opted OUT — must be preserved
       agentHooks: true, // opted IN — preserved
       fallow: true,
-    });
+    };
+    const sel = applyOverlayConstraints(chosen, 'react-app');
     // can't-work-without-the-package components are forced off; the local hook is forced on
     expect(sel.tsconfig).toBe(false);
-    expect(sel.structure).toBe(false);
     expect(sel.searchSteering).toBe(false);
-    expect(sel.searchCode).toBe(false);
+    // devkit lints a config-driven stack's structure itself; an eslint-backed preset cannot run
+    expect(sel.structure).toBe(true);
+    expect(applyOverlayConstraints(chosen, 'electron').structure).toBe(false);
+    expect(sel.searchCode).toBe(true);
     expect(sel).not.toHaveProperty('oxc');
     expect(sel.husky).toBe(true);
     // viable choices pass through untouched (overlay offers the same opt-in choices as package)
@@ -1291,10 +1323,10 @@ describe('overlay (local-only) install', () => {
   // anti-slop needs nothing from the consumer, so it is an ordinary opt-in rather than a component
   // that cannot work without the package — see oxc-toolchain-migration.
   it('applyOverlayConstraints: antiSlop is a pass-through opt-in, not forced off', () => {
-    expect(applyOverlayConstraints({ ...defaultSelection(), antiSlop: true }).antiSlop).toBe(true);
-    expect(applyOverlayConstraints({ ...defaultSelection(), antiSlop: false }).antiSlop).toBe(
-      false,
-    );
+    const pick = (antiSlop: boolean) =>
+      applyOverlayConstraints({ ...defaultSelection(), antiSlop }, 'react-app').antiSlop;
+    expect(pick(true)).toBe(true);
+    expect(pick(false)).toBe(false);
   });
 });
 
@@ -1313,7 +1345,7 @@ describe('overlay anti-slop — refusals that keep the tree clean', () => {
 
     await applyInit(root, {
       stack: 'generic',
-      selection: applyOverlayConstraints({ ...defaultSelection(), antiSlop: true }),
+      selection: applyOverlayConstraints({ ...defaultSelection(), antiSlop: true }, 'react-app'),
       overlay: true,
       devkitRef: 'v0.0.0-test',
     });
@@ -1333,7 +1365,7 @@ describe('overlay anti-slop — refusals that keep the tree clean', () => {
 
     await applyInit(root, {
       stack: 'generic',
-      selection: applyOverlayConstraints({ ...defaultSelection(), antiSlop: true }),
+      selection: applyOverlayConstraints({ ...defaultSelection(), antiSlop: true }, 'react-app'),
       overlay: true,
       devkitRef: 'v0.0.0-test',
     });
@@ -1347,7 +1379,7 @@ describe('overlay anti-slop — refusals that keep the tree clean', () => {
 
   // The damage is a WINDOW — the caller's later reconcile restores what a partial one pruned — so an
   // end-state assertion cannot see it. Asserted at the seam: this writes no exclude line at all.
-  it('wireOverlayAntiSlop returns its excludes and never reconciles the exclude file itself', () => {
+  it('wireOverlayAntiSlop never reconciles the exclude file itself', () => {
     const root = workRepo();
     const git = (...a: string[]) => execFileSync('git', a, { cwd: root });
     writeFileSync(join(root, '.anti-slop-baseline.json'), '{"schemaVersion":1,"entries":[]}\n');
@@ -1370,8 +1402,15 @@ describe('overlay anti-slop — refusals that keep the tree clean', () => {
     expect(wiring.wired).toBe(false);
     // Byte-for-byte: the agent half is the caller's to reconcile, and nothing here may touch it.
     expect(readFileSync(excludePath, 'utf8')).toBe(seeded);
-    // The paths still come back for the caller's one authoritative call — here none, nothing wired.
-    expect(wiring.excludes).toEqual(['.anti-slop-baseline.json']);
+  });
+
+  it('an Oxc install failure is printed and the overlay install goes on', () => {
+    const root = workRepo();
+    writeFileSync(join(root, '.devkit'), 'not a directory\n');
+    const log = vi.mocked(console.log);
+    log.mockClear();
+    expect(wireOverlayAntiSlop(root, root, '', { antiSlop: false }, false).wired).toBe(false);
+    expect(log.mock.calls.flat().join('\n')).toContain('! Oxc could not be installed');
   });
 
   // The writer skips assertNoConfigCollisions under overlay because it neither reads nor writes a
@@ -1386,7 +1425,7 @@ describe('overlay anti-slop — refusals that keep the tree clean', () => {
 
     await applyInit(root, {
       stack: 'generic',
-      selection: applyOverlayConstraints({ ...defaultSelection(), antiSlop: true }),
+      selection: applyOverlayConstraints({ ...defaultSelection(), antiSlop: true }, 'react-app'),
       overlay: true,
       devkitRef: 'v0.0.0-test',
     });
@@ -1400,6 +1439,124 @@ describe('overlay anti-slop — refusals that keep the tree clean', () => {
 // `devkit update` re-pins the CLI but never regenerates the git-ignored .devkit/hooks/pre-commit, so an
 // updated overlay repo can keep an OLD hook shape (a version-skew gap). syncOverlayHook + `doctor --fix`
 // let the hook be refreshed without a manual `devkit init --overlay`.
+describe('overlay selects the same components as package mode', () => {
+  const git = (root: string, ...args: string[]) =>
+    gitVerb(args)('git', args, { cwd: root, encoding: 'utf8' }).trim();
+  const install = (root: string, stack: string, extra: Partial<Selection> = {}, force = false) =>
+    applyInit(root, {
+      stack,
+      selection: applyOverlayConstraints({ ...defaultSelection(), ...extra }, stack),
+      overlay: true,
+      force,
+      devkitRef: 'v0.7.0',
+    });
+  const write = (root: string, rel: string, text: string) => {
+    mkdirSync(join(root, rel, '..'), { recursive: true });
+    writeFileSync(join(root, rel), text);
+  };
+
+  it('a react-app overlay runs structure and judges only violations added after install', async () => {
+    const root = workRepo();
+    write(root, 'src/components/legacy-widget/index.tsx', 'export const a = 1;\n');
+    git(root, 'add', '-A');
+    git(root, 'commit', '-qm', 'legacy');
+    await install(root, 'react-app');
+
+    expect(readFileSync(join(root, '.devkit', 'hooks', 'pre-commit'), 'utf8')).toContain(
+      '--structure "guard-structure staged"',
+    );
+    expect(readCfgComponents(root).structure).toBe(true);
+    expect(git(root, 'status', '--porcelain')).toBe('');
+    write(root, 'src/components/legacy-widget/index.tsx', 'export const a = 2;\n');
+    git(root, 'add', '-A');
+    expect((await runStagedStructureGate(root)).code).toBe(0);
+    write(root, 'src/components/new-widget/index.tsx', 'export const b = 1;\n');
+    git(root, 'add', '-A');
+    expect((await runStagedStructureGate(root)).code).toBe(1);
+  });
+
+  it('structure never records on without a grammar, and --force grandfathers the template it writes', async () => {
+    const root = workRepo();
+    write(root, 'src/components/legacy-widget/index.tsx', 'export const a = 1;\n');
+    git(root, 'add', '-A');
+    git(root, 'commit', '-qm', 'legacy');
+    await install(root, 'react-app', { structure: false });
+    const log = vi.mocked(console.log);
+    log.mockClear();
+    await install(root, 'react-app');
+    expect(log.mock.calls.flat().join('\n')).toContain('declares no structure grammar');
+    expect(readCfgComponents(root).structure).toBe(false);
+    const hook = join(root, '.devkit', 'hooks', 'pre-commit');
+    expect(readFileSync(hook, 'utf8')).not.toContain('--structure');
+
+    await install(root, 'react-app', {}, true);
+    expect(readCfgComponents(root).structure).toBe(true);
+    expect(readFileSync(hook, 'utf8')).toContain('--structure "guard-structure staged"');
+    write(root, 'src/components/legacy-widget/index.tsx', 'export const a = 2;\n');
+    git(root, 'add', '-A');
+    expect((await runStagedStructureGate(root)).code).toBe(0);
+  });
+
+  it('an electron overlay names the structure lint it cannot run instead of dropping it', async () => {
+    const root = workRepo();
+    await install(root, 'electron');
+    const hook = readFileSync(join(root, '.devkit', 'hooks', 'pre-commit'), 'utf8');
+    expect(hook).toContain('echo "structure: not available in overlay for electron"');
+    expect(hook).not.toContain('--structure');
+    expect(readCfgComponents(root).structure).toBe(false);
+  });
+
+  it('search-code survives upgrade and clean removes it, with nothing ever visible to git', async () => {
+    vi.mocked(update).mockReset().mockResolvedValue(0);
+    vi.mocked(fetchLatestTag).mockReset().mockReturnValue({ latest: '0.0.0' });
+    const root = workRepo();
+    await install(root, 'react-app', { searchCode: true });
+    write(root, '.search-code/index.db', '');
+    expect(existsSync(join(root, 'search-code.config.json'))).toBe(true);
+    expect(existsSync(join(root, '.gitignore'))).toBe(false);
+    expect(readFileSync(join(root, 'guard.config.json'), 'utf8')).toContain(
+      '"indexPath": ".search-code/index.db"',
+    );
+    expect(git(root, 'status', '--porcelain')).toBe('');
+
+    expect(await upgrade([], root)).toBe(0);
+    expect(readCfgComponents(root).searchCode).toBe(true);
+
+    vi.mocked(console.log).mockClear();
+    await (await import('../commands/clean.mts')).default(['--yes'], root);
+    expect(vi.mocked(console.log).mock.calls.flat().join('\n')).toContain(
+      '.search-code/ index left in place',
+    );
+    expect(existsSync(join(root, 'search-code.config.json'))).toBe(false);
+    expect(readFileSync(join(root, '.git', 'info', 'exclude'), 'utf8')).not.toContain(
+      'search-code',
+    );
+  });
+
+  it('search-code never edits a guard.config.json the repo tracks', async () => {
+    const root = workRepo();
+    write(root, 'guard.config.json', '{\n  "scanRoots": ["src"]\n}\n');
+    git(root, 'add', '-A');
+    git(root, 'commit', '-qm', 'team config');
+    await install(root, 'generic', { searchCode: true });
+    expect(git(root, 'status', '--porcelain')).toBe('');
+  });
+
+  it('installs core Oxc without anti-slop; doctor names it missing and --fix restores it', async () => {
+    const root = workRepo();
+    await install(root, 'react-app', { antiSlop: false });
+    const manifest = join(root, '.devkit', 'oxc', 'manifest.json');
+    expect(existsSync(manifest)).toBe(true);
+    rmSync(join(root, '.devkit', 'oxc'), { recursive: true });
+    const log = vi.mocked(console.log);
+    log.mockClear();
+    await doctorRun([], root);
+    expect(log.mock.calls.flat().join('\n')).toContain('· Oxc manifest: .devkit/oxc/manifest.json');
+    await doctorRun(['--fix'], root);
+    expect(existsSync(manifest)).toBe(true);
+  });
+});
+
 describe('overlay hook regeneration (syncOverlayHook + doctor --fix)', () => {
   const initOverlay = (root) =>
     applyInit(root, {
@@ -1660,7 +1817,7 @@ describe('overlay upgrade (re-syncs, not the old bail)', () => {
     const root = workRepo();
     await applyInit(root, {
       stack: 'react-app',
-      selection: applyOverlayConstraints({ ...defaultSelection(), biome: false }),
+      selection: applyOverlayConstraints({ ...defaultSelection(), biome: false }, 'react-app'),
       overlay: true,
       devkitRef: 'v0.7.0',
     });
@@ -1712,7 +1869,10 @@ describe('overlay upgrade (re-syncs, not the old bail)', () => {
 // sentry message judges package mode wires at commit-msg never ran — and nothing said so.
 describe('overlay commit-msg judges (sc-1794)', () => {
   const judged = () =>
-    applyOverlayConstraints({ ...defaultSelection(), guards: ['size', 'review', 'sentry'] });
+    applyOverlayConstraints(
+      { ...defaultSelection(), guards: ['size', 'review', 'sentry'] },
+      'react-app',
+    );
   const init = (root, selection = judged(), extra = {}) =>
     applyInit(root, {
       stack: 'react-app',
@@ -1743,10 +1903,10 @@ describe('overlay commit-msg judges (sc-1794)', () => {
     const hook = cmsg(root);
     expect(hook).toContain('# devkit:guard-completeness');
     expect(hook).toContain('# devkit:guard-sentry');
-    expect(hook).toContain('command -v guard-review'); // global bins: overlay is package-less
+    expect(hook).toContain('command -v guard-deterministic'); // global bins: package-less
     expect(hook).toContain('exec sh .husky/commit-msg "$@"');
-    // no pre-commit prewarm (it would leak the git env past the commit-index boundary)
-    expect(readFileSync(join(root, '.devkit', 'hooks', 'pre-commit'), 'utf8')).not.toContain(
+    // A ship judges sentry at pre-commit, before the qavis advisory, as package mode does.
+    expect(readFileSync(join(root, '.devkit', 'hooks', 'pre-commit'), 'utf8')).toContain(
       '# devkit:guard-sentry-prewarm',
     );
   });
@@ -1767,6 +1927,7 @@ describe('overlay commit-msg judges (sc-1794)', () => {
       );
       execFileSync('chmod', ['755', join(bin, name)]);
     };
+    stub('guard-deterministic', 0);
     stub('guard-sentry', 0);
     const commit = (msg) =>
       testExecFileSync('git', ['commit', '--allow-empty', '-qm', msg], {

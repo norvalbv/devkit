@@ -47,6 +47,10 @@ gate-engine/prior-art/eval/runs.log
 gate-engine/prior-art/eval/checkpoint.jsonl
 gate-engine/critique/eval/transcripts/
 
+# test:run:coverage:changed reports. Root-anchored: an unanchored `coverage/` would also ignore
+# the gate-engine/coverage/ source directory.
+/coverage/
+
 # eslint-plugin-project-structure cache
 projectStructure.cache.json
 

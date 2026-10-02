@@ -19,6 +19,8 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { BIN_DIRS, type BinDir } from '../lib/husky/gate-policy/block-helpers.mts';
+import { buildGuardBlock, buildOverlayHook, extractGuardBlock } from '../lib/husky/husky-block.mts';
 import {
   guardBlockMatches,
   HOOK_REL,
@@ -59,6 +61,46 @@ function seedRoot(hookContent?: string): string {
   }
   return root;
 }
+
+// Package, standalone and overlay render ONE gate body: stripping the bin-dir line, its missing-bin
+// remedy, the formatter's bin dir and overlay's two lint slots leaves the three identical.
+describe('one gate-body renderer for every install mode', () => {
+  const SEL = {
+    biome: true,
+    antiSlop: true,
+    structureCmd: 'guard-structure gate',
+    guards: [
+      'size',
+      'dup',
+      'coverage',
+      'comments',
+      'decisions',
+      'review',
+      'sentry',
+      'qavis-advisory',
+    ],
+  };
+  const body = (block: string, binDir: BinDir) =>
+    block
+      .replaceAll(BIN_DIRS[binDir].missing('guard-sentry'), '<missing-bin remedy>')
+      .replaceAll(`"${BIN_DIRS[binDir].formatter}/`, `"${BIN_DIRS.package.formatter}/`)
+      .split('\n\n')
+      .filter((chunk) => chunk !== BIN_DIRS[binDir].open);
+  const lintSlot = (chunk: string) => chunk.startsWith('# devkit lint overlay');
+
+  it.each(['', 'packages/a b'])('differs only by bin dir and named slots (pkgRel %j)', (pkgRel) => {
+    const pkg = body(buildGuardBlock(SEL, pkgRel), 'package');
+    const standalone = buildGuardBlock(SEL, pkgRel, { binDir: 'global-optional' });
+    const close = `\n\n${BIN_DIRS['global-optional'].close}\n`;
+    const hook = buildOverlayHook(SEL, '.husky/pre-commit', pkgRel, { fallow: true });
+    const overlay = body(extractGuardBlock(hook, pkgRel) ?? '', 'global');
+
+    expect(body(standalone.replace(close, '\n'), 'global-optional')).toEqual(pkg);
+    expect(overlay.filter(lintSlot)).toHaveLength(2);
+    expect(overlay.filter((chunk) => !lintSlot(chunk))).toEqual(pkg);
+    expect(hook.includes('"node_modules/.bin/biome" format --write')).toBe(!pkgRel);
+  });
+});
 
 describe('guardBlockMatches', () => {
   const expected = buildSelfHostBlock(HOOK_SEL, '', ROOT);

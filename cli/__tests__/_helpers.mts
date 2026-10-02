@@ -22,6 +22,7 @@ import { availableParallelism, loadavg, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { formatLoad } from '../../vitest.global-setup.mjs';
+import { shQuote } from '../lib/ship/redact-secrets.mts';
 
 /** Absolute path to the devkit CLI entry (cli/index.mjs). */
 export const CLI = join(dirname(fileURLToPath(import.meta.url)), '..', 'index.mts');
@@ -256,6 +257,19 @@ export function rootRegistry() {
     roots.length = 0;
   };
   return { mkTmp, cleanup };
+}
+
+/** A HOME whose `.bun/bin` (first on an overlay hook's PATH) holds this checkout's CLI, logging each
+ * call to `devkit-calls`, and passing gate bins that log to `gate-calls`: a global devkit install. */
+export function devkitHome(home: string): string {
+  const bin = join(home, '.bun', 'bin');
+  mkdirSync(bin, { recursive: true });
+  const devkit = `#!/bin/sh\necho "$*" >> "$HOME/devkit-calls"\nexec node ${shQuote(CLI)} "$@"\n`;
+  writeFileSync(join(bin, 'devkit'), devkit, { mode: 0o755 });
+  const gate = '#!/bin/sh\necho "${0##*/} $*" >> "$HOME/gate-calls"\n';
+  for (const name of ['deterministic', 'comments', 'decisions', 'review', 'qavis-advisory'])
+    writeFileSync(join(bin, `guard-${name}`), gate, { mode: 0o755 });
+  return home;
 }
 
 /**

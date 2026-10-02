@@ -201,8 +201,8 @@ gate_dir_is_populated() {
 #               coverage-gate.md Rejected (b), "silently ships unverified coverage, the exact defect".
 #   --link    — documented as "link THIS dir" (ship-branch.sh usage), an explicit instruction rather
 #               than a pair of candidates to choose between.
-#   .devkit   — overlay mode resolves it from gate_overlay_root, the overlay the hook preflight validated:
-#               a linked worktree's own .devkit often holds only ship logs and intents (sc-4157).
+#   .devkit   — the caller's own, projected just before: a linked worktree's .devkit often holds only
+#               ship logs and intents (sc-4157), and another checkout's holds another branch's baselines.
 gate_prefers_populated() {
   case $1 in
     node_modules | .husky/_) return 0 ;;
@@ -474,18 +474,19 @@ gate_worktree_pre_commit() {
 }
 
 # prepare_gate_worktree <worktree> <consumer-root> <purpose> [extra-link-dir...]
-# Where <root>'s overlay lives: its own, else the main worktree's — a linked worktree only gets the
-# git-excluded overlay linked in on its first commit (sc-4157). Empty when the repo is not overlay.
+# Where <root>'s overlay lives: its own, else the overlay home's, from the one TS resolver (a linked
+# worktree only borrows the git-excluded overlay, sc-4157). Empty when the repo is not overlay.
 gate_overlay_root() {
-  local main
-  if grep -Eq '"overlay"[[:space:]]*:[[:space:]]*true' "$1/.devkit/config.json" 2>/dev/null; then
-    printf '%s\n' "$1"
-    return 0
-  fi
-  main=$(gate_main_worktree "$1")
-  grep -Eq '"overlay"[[:space:]]*:[[:space:]]*true' "$main/.devkit/config.json" 2>/dev/null &&
-    printf '%s\n' "$main"
-  return 0
+  local emitter
+  emitter="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../husky/overlay/overlay-root.mts"
+  [ -f "$emitter" ] || emitter="${emitter%.mts}.mjs"
+  node "$emitter" "$@"
+}
+
+# Project the overlay into <root> when <root> only borrows it, through the projector a commit there
+# runs, so ship and review read the caller's own gate inputs, its branch-local copies included.
+gate_project_caller() {
+  gate_overlay_root "$1" --project >&2
 }
 
 # The hook directory git will actually use, relative to the checkout <dir>; empty when hooksPath is
@@ -520,7 +521,10 @@ gate_hook_source_preflight() {
   # Overlay mode stores its complete hook chain under ignored .devkit/hooks. An absent executable hook
   # is a dark gate, so fail closed.
   local overlay_root
-  overlay_root=$(gate_overlay_root "$root")
+  overlay_root=$(gate_overlay_root "$root") || {
+    echo "could not resolve the overlay home for $root (gates must not fail open)" >&2
+    return 1
+  }
   if [ -n "$overlay_root" ] && [ ! -x "$overlay_root/.devkit/hooks/pre-commit" ]; then
     echo "overlay mode but $overlay_root/.devkit/hooks/pre-commit missing/non-executable — run 'devkit init --overlay' (gates must not fail open)" >&2
     return 1
@@ -566,6 +570,7 @@ prepare_gate_worktree() {
 
   # The worktree exists now, so it answers for itself; BASE is not consulted (it is what $wt holds).
   gate_hook_source_preflight "$root" '' "$purpose" "$wt" || return 1
+  gate_project_caller "$root" || return 1
   local overlay_root
   overlay_root=$(gate_overlay_root "$root")
   [ -z "$overlay_root" ] || link_dirs+=(.devkit)
@@ -598,7 +603,7 @@ prepare_gate_worktree() {
         source=$(gate_coverage_source "$root" "$main_root" "$rel" && printf .) || continue
         d=$rel
       elif [ "$rel" = .devkit ] && [ -n "$overlay_root" ]; then
-        source=$overlay_root/.devkit
+        source=$root/.devkit
       else
         source=$(gate_link_source "$root" "$main_root" "$d" && printf .) || continue
       fi

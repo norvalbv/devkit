@@ -580,6 +580,9 @@ printf 'devkit review: target=%s base=%s merge-base=%s\n' \
 # would have nowhere to go, and that stretch is argument parsing plus a handful of rev-parses.
 start_preflight_watchdog
 review_phase setup-capture
+# A linked worktree only borrows the overlay's git-excluded files: project them in first, as a commit
+# there would, so the captured setup and every gate input are the target's own.
+gate_project_caller "$GIT_ROOT"
 node "$SETUP_MANIFEST_TOOL" capture "$TARGET_ROOT" "$SETUP_MANIFEST"
 # Fail closed on a helper that exited 0 without doing its job. runDirectReviewCli returns silently
 # (exit 0) when its realpath entrypoint guard does not match, which would let the whole setup

@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { GuardConfig } from '../../config.mts';
 import { checklistAssetPath, hasChecklist, type Reviewer } from '../reviewers.mts';
 
@@ -28,27 +29,52 @@ export function reviewAgentsDir(
   return path.isAbsolute(dir) ? dir : path.resolve(cwd, dir);
 }
 
-/** Resolve the provider-projected checklist root actually present in a consumer checkout. */
-export function consumerChecklistAssetRoot(cwd: string, reviewer: Reviewer): string {
-  if (!hasChecklist(reviewer)) return '.claude';
+// The running devkit's own root (gate-engine/review/cascade → ../../..), which ships `agents/` and
+// `skills/` — keyed to import.meta.url like JSCPD_OWN_ROOT, never to the consumer's cwd (W-3).
+export const OWN_PACKAGE_ROOT = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '..',
+  '..',
+  '..',
+);
+
+/** A consumer brief under a devkit reviewer name in `reviewAgentsDir` wins; otherwise the packaged
+ *  one is the brief. */
+export function reviewBriefPath(
+  cwd: string,
+  cfg: GuardConfig,
+  name: string,
+  packagedRoot = OWN_PACKAGE_ROOT,
+): string {
+  const consumer = path.join(reviewAgentsDir(cwd, cfg), `${name}.md`);
+  return existsSync(consumer) ? consumer : path.join(packagedRoot, 'agents', `${name}.md`);
+}
+
+/** The skill root a checklist reviewer runs from: a consumer projection wins, else the package. */
+export function checklistAssetRoot(
+  cwd: string,
+  reviewer: Reviewer,
+  packagedRoot = OWN_PACKAGE_ROOT,
+): string {
+  if (!hasChecklist(reviewer)) return packagedRoot;
   const relativePath = checklistAssetPath(reviewer);
   return (
     CONSUMER_SKILL_ROOTS.find((root) => existsSync(path.resolve(cwd, root, relativePath))) ??
-    '.claude'
+    packagedRoot
   );
 }
 
-/** Read one package-relative asset from its consumer-projected brief or skill root. */
-export function readConsumerReviewAsset(
+/** Read one package-relative asset (`agents/x.md`, `skills/…`) from where the judge resolves it. */
+export function readReviewAsset(
   cwd: string,
   cfg: GuardConfig,
   skillRoot: string,
   relativePath: string,
+  packagedRoot?: string,
 ): Buffer {
-  const agentsPrefix = 'agents/';
-  if (relativePath.startsWith(agentsPrefix)) {
-    const base = reviewAgentsDir(cwd, cfg);
-    return readFileSync(path.join(base, relativePath.slice(agentsPrefix.length)));
-  }
+  if (relativePath.startsWith('agents/'))
+    return readFileSync(
+      reviewBriefPath(cwd, cfg, path.basename(relativePath, '.md'), packagedRoot),
+    );
   return readFileSync(path.resolve(cwd, skillRoot, relativePath));
 }
