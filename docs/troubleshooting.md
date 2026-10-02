@@ -333,7 +333,9 @@ Each named gate's findings appear above the line.
 To check a fix without another commit or ship, stage it and run the per-gate command the block prints
 under `Re-check a fix locally` (anti-slop: `devkit anti-slop check --staged`). Under `devkit ship`, those
 commands judge your checkout's index; the ship block also prints the `devkit ship … --dry-gates` invocation
-that re-runs the deterministic set on ship's exact staging. No judges run after a deterministic block.
+that re-runs the deterministic set on ship's exact staging. A blocking overlay lint step (eslint, biome,
+fallow) and devkit's own formatter print the same invocation under `devkit ship`. No judges run after a
+deterministic block.
 
 ## `bun install` fails: `no commit matching "<sha>" found for "@norvalbv/devkit"`
 

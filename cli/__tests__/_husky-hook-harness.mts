@@ -36,11 +36,18 @@ function writeStub(path, name, rcVar) {
 
 // Overlay staged-gate fixtures. fallow is global ($HOME/.bun/bin, first on the hook's PATH), where a
 // consumer's `command -v fallow` finds it; eslint is the repo-local bin the overlay step requires.
-function stageOverlayFixtures(home, { bin, packageBin, pkgRel, fallow, staged, eslintOverlay }) {
+function stageOverlayFixtures(
+  home,
+  { bin, packageBin, pkgRel, fallow, staged, eslintOverlay, biomeOverlay },
+) {
   if (fallow) writeStub(join(bin, 'fallow'), 'fallow', 'FALLOW_RC');
   if (eslintOverlay) {
     writeFileSync(join(home, 'eslint.config.devkit.mjs'), 'export default [];\n');
     writeStub(join(packageBin, 'eslint'), 'eslint', 'ESLINT_RC');
+  }
+  if (biomeOverlay) {
+    writeFileSync(join(home, 'biome.devkit.jsonc'), '{}\n');
+    writeStub(join(packageBin, 'biome'), 'biome', 'BIOME_RC');
   }
   if (!staged) return;
   // Outside a repo `git diff --cached` fails and the hook exits before fallow/eslint run, so an
@@ -67,6 +74,7 @@ export function runHook(
     fallow = false,
     staged = false,
     eslintOverlay = false,
+    biomeOverlay = false,
   } = {},
 ) {
   const home = mkdtempSync(join(tmpdir(), dirPrefix));
@@ -188,7 +196,15 @@ esac
   }
 
   if (pkgRel) mkdirSync(join(home, pkgRel), { recursive: true });
-  stageOverlayFixtures(home, { bin, packageBin, pkgRel, fallow, staged, eslintOverlay });
+  stageOverlayFixtures(home, {
+    bin,
+    packageBin,
+    pkgRel,
+    fallow,
+    staged,
+    eslintOverlay,
+    biomeOverlay,
+  });
   for (const name of missingLocalBins) rmSync(join(packageBin, name), { force: true });
   const hookPath = join(home, 'pre-commit');
   const hook =
@@ -198,10 +214,13 @@ esac
   writeFileSync(hookPath, hook);
   let status = 0;
   let stdout = '';
+  let stderr = '';
+  // A ship's exported rehearsal command must come only from the test's own env, never the runner's.
+  const { DEVKIT_SHIP_DRY_GATES_CMD: _inherited, ...parentEnv } = process.env;
   try {
     stdout = execFileSync(shell, ['-e', hookPath], {
       env: {
-        ...process.env,
+        ...parentEnv,
         DEVKIT_COMMIT_MSG_FILE: '',
         DEVKIT_REVIEW_BASELINE_DIR: baselineDir,
         DEVKIT_REVIEW_PACKAGE_ROOT: packageRoot,
@@ -216,6 +235,7 @@ esac
   } catch (e) {
     status = e.status;
     stdout = `${e.stdout ?? ''}`;
+    stderr = `${e.stderr ?? ''}`;
   }
   let calls = '';
   try {
@@ -224,7 +244,7 @@ esac
     // hook never reached the stub
   }
   // `home` rides along so a test can assert on markers the stubs dropped there (the reap probe).
-  return { status, stdout, calls, home };
+  return { status, stdout, stderr, calls, home };
 }
 
 export function cleanupHomes() {
