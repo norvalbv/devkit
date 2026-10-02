@@ -119,40 +119,193 @@ ship_origin_ancestor_branch() {
   printf '%s %s\n' "$best_oid" "$best"
 }
 
-# ship_origin_base_candidate <repo>
-# A branch on origin that this checkout could switch to AND then ship against. Origin's default is the
-# right answer when there is one; when there is not (a `git init` + `remote add` repo, a bare whose
-# HEAD is unborn) the next best is a remote branch this HEAD is already ON TOP OF — that is what the
-# work was cut from, so it is the base the PR wants anyway. Echoes nothing when neither holds, because
-# the caller must then print a placeholder: naming a branch that does not exist is the failure mode
-# this whole file exists to end.
+# ship_suggested_base_memo <repo> [head]
+# ship_suggested_base resolved ONCE per pinned head for this ship process; the answer lands in the
+# global SHIP_SUGGESTED_ANSWER. A refusal can print its remedy up to three times (the preflight, the
+# hook-dir block, the resume refusal) plus ship_suggest_base's advisory, and re-resolving each time
+# would let a push to origin between them print two different --base values in one refusal. Each
+# reuse is still re-proven against origin before it is printed. MUST be called outside `$(...)`, or
+# the memo dies with the subshell.
+ship_suggested_base_memo() {
+  local head=${2-HEAD} kind name oid ok=0
+  if [ "${SHIP_SUGGESTED_MEMO_SET-}" = 1 ] && [ "${SHIP_SUGGESTED_MEMO_HEAD-}" = "$head" ]; then
+    # Reused, so re-proven NOW against origin, pinned to the oid it was first proven at. A base that
+    # fails is withdrawn for the rest of this refusal: later prints say "choose the base yourself"
+    # rather than switch to a second, different base.
+    [ -n "${SHIP_SUGGESTED_PROVEN-}" ] || return 0
+    read -r kind name oid <<EOF
+$SHIP_SUGGESTED_PROVEN
+EOF
+    case "$kind" in
+      default) ship_origin_default_still "$1" "$name" "$oid" && ok=1 ;;
+      # A guess stands only while origin's HEAD is STILL unreadable: once origin names a default, the
+      # cached ladder answer would be announced as a default origin no longer has.
+      guess) [ -z "$(ship_origin_head_branch "$1")" ] && ship_origin_branch_exists "$1" "$name" "$oid" && ok=1 ;;
+      *) ship_origin_branch_exists "$1" "$name" "$oid" && ok=1 ;;
+    esac
+    [ "$ok" = 1 ] || { SHIP_SUGGESTED_PROVEN=; SHIP_SUGGESTED_ANSWER=; }
+    return 0
+  fi
+  SHIP_SUGGESTED_PROVEN=$(ship_suggested_base_proven "$1" "$head") || SHIP_SUGGESTED_PROVEN=
+  SHIP_SUGGESTED_ANSWER=
+  if [ -n "$SHIP_SUGGESTED_PROVEN" ]; then
+    SHIP_SUGGESTED_ANSWER=${SHIP_SUGGESTED_PROVEN% *}
+    case "$SHIP_SUGGESTED_ANSWER" in guess\ *) SHIP_SUGGESTED_ANSWER="default ${SHIP_SUGGESTED_ANSWER#guess }" ;; esac
+  fi
+  SHIP_SUGGESTED_MEMO_HEAD=$head
+  SHIP_SUGGESTED_MEMO_SET=1
+}
+
+# ship_origin_base_candidate <repo> [head]
+# A branch on origin that this checkout could switch to AND then ship against — the bare name, or
+# nothing. A thin view over ship_suggested_base, so the rename remedy and ship's base advisory can never
+# name different bases (sc-3409: they once printed '0.0.8' and 'main' two lines apart). Echoes nothing
+# when no base can be proven, because the caller must then print a placeholder: naming a branch that
+# does not exist is the failure mode this whole file exists to end.
 ship_origin_base_candidate() {
-  local repo=$1 cand= nearest= best= best_oid=
-  # A branch this HEAD is ON TOP OF wins over origin's nominal default, and the order is load-bearing:
-  # work cut from origin/release, in a repo whose default is main, would otherwise be told to switch
-  # to main and re-run unchanged — silently retargeting the PR at a branch it does not belong on.
-  # Ancestry is what makes a base correct here; being the repo's default only makes it likely.
-  #
-  # Remote-tracking refs are a local CACHE: origin deletes a branch and `refs/remotes/origin/<it>`
-  # survives until someone prunes. So every candidate is proven against origin before it is returned —
-  # the only use of this value is printing a command the caller will run, and a name that is no longer
-  # there is precisely the unusable remedy this file exists to stop. Ancestry is checked first because
-  # it is free; the round-trip is paid only on real candidates, on a path already about to refuse.
-  nearest=$(ship_origin_ancestor_branch "$repo") || nearest=
+  local answer=
+  # `-` not `:-`: an explicitly EMPTY pin is cannot-tell and must reach the resolver as such.
+  answer=$(ship_suggested_base "$1" "${2-HEAD}") || answer=
+  [ -z "$answer" ] || printf '%s\n' "${answer#* }"
+}
+
+# ship_suggested_base <repo> [head]
+# The PR base to SUGGEST for <head>, as `ancestor <name>` or `default <name>`; nothing (exit 1) when no
+# branch on origin can be proven. The kind picks the printed sentence: an ancestor is never announced
+# as the repository's default (sc-2357). Order: the nearest origin ancestor of <head>, unless origin's
+# default, as it is on origin NOW, contains that ancestor's tip (sc-3409: an advanced main drops out of
+# --merged and leaves a stale release branch as "nearest"); then the ancestor; then the default.
+# Every name is proven on origin first. Why the rule lives here and not in ship_origin_ancestor_branch,
+# and its accepted cost, are the 2026-10-01 Target in docs/decisions/ship-base-must-contain-branch-point.md.
+# An EMPTY head is cannot-tell: the ancestor tier is skipped rather than re-reading live HEAD.
+ship_suggested_base() {
+  local answer=
+  answer=$(ship_suggested_base_proven "$1" "${2-HEAD}") || return 1
+  answer=${answer% *}
+  # A local-ladder guess is still announced as origin's default, as it always was.
+  case "$answer" in guess\ *) answer="default ${answer#guess }" ;; esac
+  printf '%s\n' "$answer"
+}
+
+# ship_suggested_base_proven <repo> [head]
+# ship_suggested_base with the oid each answer was proven at: `ancestor|default|guess <name> <oid>`.
+# `guess` is the local main/master ladder's answer (origin's HEAD unreadable, nothing an ancestor).
+ship_suggested_base_proven() {
+  local repo=$1 head=${2-HEAD} nearest= cand= cand_oid= def= def_remote= contains= verdict= def_oid=
+  if [ -n "$head" ]; then
+    nearest=$(ship_origin_ancestor_branch "$repo" "$head") || nearest=
+  fi
   if [ -n "$nearest" ]; then
-    best_oid=${nearest%% *}
-    best=${nearest#* }
-    # Pinned to the oid ancestry was decided against: existence alone would survive a force-push that
-    # moved the branch off the history HEAD was shown to sit on.
-    if ship_origin_branch_exists "$repo" "$best" "$best_oid"; then
-      printf '%s\n' "$best"
+    cand_oid=${nearest%% *}
+    cand=${nearest#* }
+  fi
+  # Origin's own HEAD over the network first; the local symref/main/master ladder when that fails.
+  def=$(ship_origin_head_branch "$repo") || def=
+  def_remote=$def
+  [ -n "$def" ] || def=$(ship_origin_default_branch "$repo") || def=
+
+  # Only a default ORIGIN named may outrank an ancestor; the local ladder is a cache and stays a
+  # last-resort guess below.
+  if [ -n "$cand" ] && [ -n "$def_remote" ]; then
+    verdict=$(ship_origin_default_contains "$repo" "$def" "$cand_oid")
+    contains=${verdict%% *}
+    def_oid=${verdict#* }
+    # Re-proven pinned to the oid containment was judged against, immediately before it is printed.
+    # A default that moved in between is never suggested by ANY tier below: its new tip is unjudged.
+    if [ "$contains" = yes ] && ship_origin_default_still "$repo" "$def" "$def_oid"; then
+      printf 'default %s %s\n' "$def" "$def_oid"
       return 0
     fi
+    [ "$contains" != yes ] || contains=moved
+    # The default IS the ancestor but was moved off this work's line: naming it is no remedy.
+    [ "$cand" != "$def" ] || [ "$contains" = unknown ] || return 1
   fi
-  # No ancestor on origin: this work sits on nothing the remote has, so the default is the only
-  # honest guess left. It is still proven to exist before it is offered.
-  cand=$(ship_origin_default_branch "$repo") || cand=
-  if [ -n "$cand" ] && ship_origin_branch_exists "$repo" "$cand"; then printf '%s\n' "$cand"; fi
+  # Pinned to the oid ancestry was decided against: existence alone would survive a force-push that
+  # moved the branch off the history <head> was shown to sit on.
+  if [ -n "$cand" ] && ship_origin_branch_exists "$repo" "$cand" "$cand_oid"; then
+    printf 'ancestor %s %s\n' "$cand" "$cand_oid"
+    return 0
+  fi
+  [ "$contains" != moved ] || return 1
+  # No usable ancestor. When there WAS a candidate (it just could not be proven), only a default
+  # origin names right now -- re-proven in one advertisement, and not the candidate's own line, whose
+  # tip is exactly what failed -- may stand in; a cached name never does. Named as origin's default,
+  # never as what the work sits on (sc-2261: never go silent while a tier can still answer).
+  if [ -n "$cand" ]; then
+    # Containment was judged here, so the default carries an oid ("no <oid>"); it is re-proven pinned
+    # to it. "unknown" carries none, and a default nobody could read is not offered.
+    if [ -n "$def_remote" ] && [ "$cand" != "$def" ] && [ "$contains" = no ] \
+      && ship_origin_default_still "$repo" "$def" "$def_oid"; then
+      printf 'default %s %s\n' "$def" "$def_oid"
+      return 0
+    fi
+    return 1
+  fi
+  if [ -n "$def_remote" ]; then
+    # Nothing was judged (no candidate), so there is no oid to pin: it must still be origin's HEAD.
+    def_oid=$(ship_origin_branch_oid "$repo" "$def") || return 1
+    ship_origin_default_still "$repo" "$def" "$def_oid" || return 1
+    printf 'default %s %s\n' "$def" "$def_oid"
+    return 0
+  fi
+  # Nothing on origin is an ancestor and origin's HEAD cannot be read (a `git init` + `remote add`
+  # repo): the local ladder's guess, proven to exist, is the last honest answer.
+  if [ -n "$def" ] && def_oid=$(ship_origin_branch_oid "$repo" "$def"); then
+    printf 'guess %s %s\n' "$def" "$def_oid"
+    return 0
+  fi
+  return 1
+}
+
+# ship_origin_branch_oid <repo> <branch>
+# The oid origin advertises for refs/heads/<branch> right now; nothing (exit 1) when it has none.
+ship_origin_branch_oid() {
+  local line=
+  line=$(git -C "$1" ls-remote --exit-code --heads origin "refs/heads/$2" 2>/dev/null) || return 1
+  line=${line%%[[:space:]]*}
+  [ -n "$line" ] || return 1
+  printf '%s\n' "$line"
+}
+
+# ship_origin_default_still <repo> <default> [oid]
+# Is <default> STILL origin's default, AND (when <oid> is given) still at it -- else merely present?
+# Both read from ONE ls-remote advertisement, so a HEAD repointed to another branch, or the default
+# force-pushed, since it was judged cannot pass as the same answer. Anything that fails to read is "no".
+ship_origin_default_still() {
+  local repo=$1 def=$2 oid=${3-} out= tab
+  tab=$(printf '\t')
+  out=$(git -C "$repo" ls-remote --symref origin HEAD "refs/heads/$def" 2>/dev/null) || return 1
+  printf '%s\n' "$out" | grep -qxF "ref: refs/heads/$def${tab}HEAD" || return 1
+  if [ -n "$oid" ]; then
+    printf '%s\n' "$out" | grep -qxF "$oid${tab}refs/heads/$def"
+  else
+    printf '%s\n' "$out" | cut -f2 | grep -qxF "refs/heads/$def"
+  fi
+}
+
+# ship_origin_default_contains <repo> <default> <oid>
+# Does origin's default, AS IT IS ON ORIGIN NOW, contain <oid>? Echoes `yes <default-oid>`,
+# `no <default-oid>` or `unknown` — the oid so the caller can re-prove the answer pinned to it.
+# Judged only against the commit ls-remote names, never refs/remotes/origin/<default>: that cache
+# misses a force-push made from another clone, and "contains" against it is a stale fact. A commit
+# not yet here is fetched by name with --refmap= (no ref is written) and --no-write-fetch-head, so a
+# shared checkout's refs are untouched. Anything that fails — origin gone, old git, shallow — is unknown.
+ship_origin_default_contains() {
+  local repo=$1 def=$2 oid=$3 line= def_oid= rc=0
+  line=$(git -C "$repo" ls-remote --exit-code --heads origin "refs/heads/$def" 2>/dev/null) || line=
+  def_oid=${line%%[[:space:]]*}
+  if [ -z "$def_oid" ]; then echo unknown; return 0; fi
+  if ! git -C "$repo" cat-file -e "$def_oid^{commit}" 2>/dev/null; then
+    git -C "$repo" fetch -q --no-tags --no-write-fetch-head --refmap= origin "refs/heads/$def" \
+      >/dev/null 2>&1 || true
+    git -C "$repo" cat-file -e "$def_oid^{commit}" 2>/dev/null || { echo unknown; return 0; }
+  fi
+  git -C "$repo" merge-base --is-ancestor "$oid" "$def_oid" >/dev/null 2>&1 || rc=$?
+  case "$rc" in
+    0) echo "yes $def_oid" ;;
+    1) echo "no $def_oid" ;;
+    *) echo unknown ;;
+  esac
 }
 
 # ship_origin_branch_exists <repo> <branch> [expected-oid]
@@ -319,29 +472,17 @@ ship_base_contains_branch_point() {
 # ship_origin_ancestor_branch answers what the work is actually built on, and the two tiers say
 # DIFFERENT sentences on purpose — a candidate must never be announced as the repository's default.
 ship_suggest_base() {
-  local repo=$1 root=${2:-.} head=${3:-} suggested= nearest= ancestor= ancestor_oid=
+  local repo=$1 root=${2:-.} head=${3:-} answer=
   # An EMPTY pin is cannot-tell, and the ancestor tier is skipped rather than re-reading live HEAD.
   # Falling back would name a branch derived from a commit this run never reasoned about — in a
   # shared checkout, a sibling's — which is the unusable remedy this whole file exists to end. The
   # default tier does not depend on HEAD, so the caller still gets a name.
-  if [ -n "$head" ]; then
-    nearest=$(ship_origin_ancestor_branch "$root" "$head") || nearest=
-  fi
-  if [ -n "$nearest" ]; then
-    ancestor_oid=${nearest%% *}
-    ancestor=${nearest#* }
-    # Proven against origin before it is printed, pinned to the oid ancestry was decided against —
-    # the same rule ship_origin_base_candidate follows, for the same reason.
-    if ship_origin_branch_exists "$root" "$ancestor" "$ancestor_oid"; then
-      echo "  the branch this work sits on top of is '$ancestor' — pass --base $(ship_shell_quote "$ancestor") if that is the intended target."
-      return 0
-    fi
-  fi
-  suggested=$(ship_origin_head_branch "$root") || suggested=
-  if [ -n "$suggested" ]; then
+  ship_suggested_base_memo "$root" "$head"
+  answer=$SHIP_SUGGESTED_ANSWER
+  case "$answer" in
     # The copyable half goes through the quoter; the prose half stays readable.
-    echo "  origin's default branch is '$suggested' — pass --base $(ship_shell_quote "$suggested") if that is the intended target."
-  else
-    echo "  no branch on origin could be resolved as a base${repo:+ for $repo}; choose the base yourself and pass --base <branch>."
-  fi
+    ancestor\ *) echo "  the branch this work sits on top of is '${answer#* }' — pass --base $(ship_shell_quote "${answer#* }") if that is the intended target." ;;
+    default\ *) echo "  origin's default branch is '${answer#* }' — pass --base $(ship_shell_quote "${answer#* }") if that is the intended target." ;;
+    *) echo "  no branch on origin could be resolved as a base${repo:+ for $repo}; choose the base yourself and pass --base <branch>." ;;
+  esac
 }
