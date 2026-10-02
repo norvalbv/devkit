@@ -75,7 +75,7 @@ export function lintRows(rows: Row[]): string[] {
       errors.push(
         `${at}: legs.local resolves ${local.resolved} checkouts with no glob pattern declared`,
       );
-    for (const leg of ['github', 'web', 'deep-research'] as const)
+    for (const leg of ['github', 'web', 'papers', 'deep-research'] as const)
       if (!LEG_STATUSES.includes(row?.legs?.[leg] as string))
         errors.push(`${at}: legs.${leg} must be reached|unavailable|failed`);
     const slotIds = new Set<string>();
