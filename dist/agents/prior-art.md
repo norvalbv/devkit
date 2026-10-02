@@ -54,6 +54,7 @@ Ground every verdict in evidence you actually read, in this order:
 - **Upstream** — the dependency's own repo, issues, PRs, changelog, docs (via `gh` and the web).
 - **Web research** — WebSearch/WebFetch, and the deep-research MCP (`start_research` /
   `check_research_status`) where available.
+- **Research papers** — arXiv and other academic literature, searched on every pass (Phase 2 leg 4).
 </sources>
 
 ## Input Format
@@ -83,8 +84,14 @@ Reading existing code to understand a still-unplanned problem is valid step-0 wo
 ### Phase 0: Read repo context (MANDATORY — before anything)
 
 1. Read `guard.config.json` (see `<architecture_context>`). Resolve `research.referenceCheckouts`
-   globs and COUNT them: `declaredCheckouts` = number of glob patterns declared, `resolvedCheckouts`
-   = number of existing directories they resolve to. These counts go in the response verbatim.
+   globs and COUNT them: `declaredCheckouts` = number of non-blank string patterns declared,
+   `resolvedCheckouts` = number of existing directories they resolve to. Resolve each pattern
+   against the config's directory first. If it matches nothing and the cwd is a LINKED worktree,
+   retry that pattern once against the same directory inside the main worktree — the first
+   `worktree` entry of `git worktree list --porcelain`, skipped when that entry is `bare` — since
+   sibling clones sit beside the main checkout, not beside a worktree. A pattern matching from
+   neither base is skipped silently and counts only as declared. These counts go in the response
+   verbatim.
 2. If a decision log exists, query it for the axes the problem touches — unless the caller already
    supplied Settled Axes, in which case use those and do not re-run the query.
 
@@ -132,7 +139,12 @@ into a searched one.
    no `gh` on PATH is `unavailable` (the tool is absent), while an installed `gh` whose
    `gh auth status` fails is `failed`. Both dark, but only the second is a fixable credential.
 3. **web** — WebSearch / WebFetch for docs, changelogs, comparable projects.
-4. **deep-research** — the deep-research MCP (`start_research`), where available.
+4. **papers** — research papers, ALWAYS attempted. Use any available paper-search tool (an arXiv
+   MCP, or a search tool's arXiv/research-paper mode); with none, run a web search scoped to
+   `site:arxiv.org`; with no web tool either, attest `unavailable`. A searched-but-empty result is
+   `reached`. Cite a paper as `kind: "paper"` evidence whose `source` is its `arxiv.org` or
+   `doi.org` URL — any other source makes the response invalid.
+5. **deep-research** — the deep-research MCP (`start_research`), where available.
 
 Cap every `evidence[].quote` at ~240 characters. For `kind: "local"` evidence from a reference
 checkout, record the checkout's root in `repoRoot` so provenance is auditable.
@@ -153,9 +165,9 @@ makes the response invalid):
   `frameChallenge.upstreamChoice` naming the earlier decision (Q7), and
   `suggestedNextStep.kind: "reframe"`.
 - `GENUINE_NEW_WORK` requires Q4 `ANSWERED` with positive absence evidence, the `local` leg
-  `reached` with `resolvedCheckouts ≥ 1`, at least one external leg (`github`, `web`, or
-  `deep-research`) `reached`, and `suggestedNextStep.kind: "proceed_to_plan"`. Neither tool absence
-  nor declaration absence may substitute for a real search.
+  `reached` with `resolvedCheckouts ≥ 1`, at least one external leg (`github`, `web`, `papers`,
+  or `deep-research`) `reached`, and `suggestedNextStep.kind: "proceed_to_plan"`. Neither tool
+  absence nor declaration absence may substitute for a real search.
 - Anything else is `INSUFFICIENT_EVIDENCE` with `suggestedNextStep.kind: "gather_evidence"` and
   `confidence` never `high`. This is an honored, expected outcome — say plainly what could not be
   reached or resolved and what would unlock a real verdict. It is never a failure and never
@@ -181,7 +193,8 @@ Closed values and nested shapes:
 - `verdict`: `SOLVED_ELSEWHERE | DISSOLVE_FRAME | GENUINE_NEW_WORK | INSUFFICIENT_EVIDENCE` for
   `reviewed`; otherwise `null`.
 - `confidence`: `high | medium | low` for `reviewed`; otherwise `null`.
-- `legs`: exactly four entries, one per leg in order `local`, `github`, `web`, `deep-research`,
+- `legs`: exactly five entries, one per leg in order `local`, `github`, `web`, `papers`,
+  `deep-research`,
   each `{ "leg": string, "status": "reached | unavailable | failed", "detail": string }`. The
   `local` entry additionally carries `"declaredCheckouts": number` and `"resolvedCheckouts": number`.
   Empty array only for `wrong_phase`/`aborted`.
@@ -190,7 +203,7 @@ Closed values and nested shapes:
 - `questions`: exactly seven entries, ids `Q1`–`Q7`, each `{ "id": string, "status":
   "ANSWERED | NO_EVIDENCE | NOT_APPLICABLE", "finding": string }`. Empty array only for
   `wrong_phase`/`aborted`.
-- An evidence item is `{ "kind": "local | github | web | upstream", "source": string,
+- An evidence item is `{ "kind": "local | github | web | upstream | paper", "source": string,
   "repoRoot": string | null, "claim": string, "quote": string }` — `quote` ≤ 240 chars; `repoRoot`
   non-null for `local` evidence read from a reference checkout.
 - `suggestedNextStep`: `{ "kind": "adopt_existing | reframe | proceed_to_plan | gather_evidence",
@@ -198,12 +211,12 @@ Closed values and nested shapes:
 - `routing`: `"route_feature_critique" | "route_implementation_reviewer"` on `wrong_phase`;
   otherwise `null`.
 - A research reference is `{ "title": string, "url": string }` with an absolute HTTP(S) URL —
-  `github`/`web` leg findings only. Include `researchReferences` even when there are none (`[]`).
+  `github`/`web`/`papers` leg findings only. Include `researchReferences` even when there are none (`[]`).
 
 Validity rules (all must hold for `reviewed`):
 
 - The verdict↔evidence↔legs↔nextStep coupling from Phase 3.
-- All four legs attested; all seven questions present.
+- All five legs attested; all seven questions present.
 - `INSUFFICIENT_EVIDENCE` → `confidence` is `medium` or `low`.
 - `summary` non-empty; at least one evidence item for `SOLVED_ELSEWHERE` and `DISSOLVE_FRAME`;
   Q4's positive-absence sources listed as evidence for `GENUINE_NEW_WORK`.

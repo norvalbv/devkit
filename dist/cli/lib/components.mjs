@@ -188,16 +188,23 @@ export function defaultSelection() {
 /**
  * Enforce the OVERLAY invariants, however overlay was resolved: the components forced off below
  * cannot work without the package, and every other choice passes through as in package mode.
+ * Structure stays only for a config-driven stack, which devkit's own `guard-structure` lints; an
+ * eslint-backed preset needs the consumer's pinned eslint, so the overlay hook names its absence.
  */
-export function applyOverlayConstraints(sel) {
+export function applyOverlayConstraints(sel, stack) {
     return {
         ...sel,
         tsconfig: false,
-        structure: false,
+        structure: sel.structure && CONFIG_DRIVEN_STRUCTURE.has(stack),
         searchSteering: false,
-        searchCode: false,
         husky: true,
     };
+}
+/** The line an overlay prints for a component package mode would run but overlay cannot. */
+export function overlayStructureNotice(stack) {
+    return STRUCTURE_STACKS.has(stack) && !CONFIG_DRIVEN_STRUCTURE.has(stack)
+        ? `structure: not available in overlay for ${stack}`
+        : null;
 }
 /** Normalise a (possibly partial) selection to a full one — missing keys take recommended defaults. */
 export function normalizeSelection(partial = {}) {

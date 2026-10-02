@@ -8,9 +8,14 @@
  */
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-const CONFIG_FILE = 'search-code.config.json';
+export const SEARCH_CODE_CONFIG = 'search-code.config.json';
 const INDEX_LINE = '.search-code/';
 const INDEX_PATH = '.search-code/index.db';
+/** What an overlay install git-excludes instead of writing the tracked `.gitignore`. */
+export const SEARCH_CODE_WRITTEN = [
+    { path: SEARCH_CODE_CONFIG, kind: 'file' },
+    { path: '.search-code', kind: 'dir' },
+];
 // Minimal opt-in config: the engine merges this OVER its own defaults, so this is enough to opt the
 // repo in. sourceRoots seeded (the engine walks the whole root by default) + left editable.
 const STARTER = `{
@@ -55,15 +60,21 @@ function setIndexPath(cwd, dryRun) {
         writeFileSync(p, next);
     console.log(`  ${dryRun ? '[dry-run] set' : '✓ set'} indexPath in guard.config.json`);
 }
-export function installSearchCode(cwd, dryRun) {
+/** An `overlay` install edits no tracked file: its caller git-excludes SEARCH_CODE_WRITTEN instead of
+ * the `.gitignore` line, and a guard.config.json git tracks keeps its bytes. */
+export function installSearchCode(cwd, dryRun, overlay) {
     console.log('  search-code (opt-in semantic search)');
-    const cfgPath = join(cwd, CONFIG_FILE);
+    const cfgPath = join(cwd, SEARCH_CODE_CONFIG);
     const existed = existsSync(cfgPath);
     if (!existed && !dryRun)
         writeFileSync(cfgPath, STARTER);
-    console.log(`  ${dryRun ? '[dry-run] write' : existed ? '• kept' : '✓ wrote'} ${CONFIG_FILE}`);
-    ensureGitignoreLine(cwd, INDEX_LINE, dryRun);
-    setIndexPath(cwd, dryRun);
+    console.log(`  ${dryRun ? '[dry-run] write' : existed ? '• kept' : '✓ wrote'} ${SEARCH_CODE_CONFIG}`);
+    if (!overlay)
+        ensureGitignoreLine(cwd, INDEX_LINE, dryRun);
+    if (overlay?.configTracked)
+        console.log(`  ! guard.config.json is tracked, so overlay leaves it as is — export GUARD_INDEX_PATH=${INDEX_PATH} to wire the dup matcher`);
+    else
+        setIndexPath(cwd, dryRun);
     // The engine is REFERENCED, not vendored — print the install/index steps (devkit ships no engine).
     console.log('  ℹ needs the search-code engine + Ollama. Install once, then index this repo:');
     console.log('      bun add -g git+ssh://git@github.com/norvalbv/search-code.git');
@@ -72,10 +83,10 @@ export function installSearchCode(cwd, dryRun) {
 // clean reversal: remove the devkit-written opt-in config. The `.search-code/` gitignore line is
 // pruned by clean's pruneGitignoreLine; the index dir is the engine's data — left in place.
 export function removeSearchCode(cwd, dryRun) {
-    const cfgPath = join(cwd, CONFIG_FILE);
+    const cfgPath = join(cwd, SEARCH_CODE_CONFIG);
     if (!existsSync(cfgPath))
         return;
     if (!dryRun)
         rmSync(cfgPath);
-    console.log(`  ${dryRun ? '[dry-run] remove' : '✓ removed'} ${CONFIG_FILE}`);
+    console.log(`  ${dryRun ? '[dry-run] remove' : '✓ removed'} ${SEARCH_CODE_CONFIG}`);
 }

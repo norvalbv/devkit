@@ -27,6 +27,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { accessSync, constants, copyFileSync, existsSync, lstatSync, mkdirSync, statSync, } from 'node:fs';
 import path from 'node:path';
 import { envFlag } from '../config.mjs';
+import { QAVIS_RECEIPT } from '../deterministic/gate-inputs.mjs';
 import { emitGateBypass, finishGateTiming } from '../judge/gate-events.mjs';
 import { finishQavis } from './telemetry.mjs';
 /**
@@ -129,7 +130,6 @@ export function qavisSupportsPublish(cwd = process.cwd()) {
 }
 /** A qavis repo advertises how to launch its app here; absent ⇒ nothing for qavis to QA. */
 export const QAVIS_RECIPE = path.join('.qavis', 'recipe.json');
-const QAVIS_RECEIPT = path.join('.qavis', 'receipt.json');
 /** The self-run: qavis drives THIS staged tree, with its output streamed to the operator. */
 function defaultQa(cwd) {
     const r = spawnSync('qavis', ['qa', '--staged', '--route', 'vision', '--repo', cwd], {

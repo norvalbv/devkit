@@ -66,7 +66,6 @@ ${handoffToCommitMsg
             rm -f "$__dk_commit_state" 2>/dev/null || true
         fi
     }
-    trap '__dk_commit_result "$?"' EXIT
 fi
 # /devkit:commit-terminal`;
 }

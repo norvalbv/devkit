@@ -41,23 +41,13 @@ export function remedyCause(outage) {
     const kind = outage?.kind;
     return kind === 'timeout' || kind === 'rate-limited' || kind === 'absent' ? kind : 'outage';
 }
-/** A missing brief/checklist: in a ship lane ship projected it from the running package, so only a
- *  complete package fixes it (sc-1882); elsewhere the sync commands do. */
-export function syncRemedy(shipLane) {
-    return shipLane
-        ? 'ship projects the briefs + checklist scripts from the running devkit package, so a missing ' +
-            'one means that package is incomplete — reinstall or rebuild devkit'
-        : 'run `devkit sync-agents && devkit sync-skills` so the briefs + checklist scripts are present';
-}
 /** The remedy a fail-closed gate prints when a judge produced no verdict — ONE wording seam for
  *  every gate (sc-1227). The CAUSE picks the remedy, and the wrong one costs real operator time. */
-export function strictRemedy(cause, bin = 'claude', resetsAt, shipLane = false) {
+export function strictRemedy(cause, bin = 'claude', resetsAt) {
     if (cause === 'timeout')
         return ('the judge hit its time cap — this is NOT an auth/quota problem. Re-run `devkit ship`; run ' +
             'it in a real terminal or a detached ship so the 600s agent tool cap cannot kill it early; ' +
             'or stage a smaller commit, which judges faster');
-    if (cause === 'sync')
-        return `${syncRemedy(shipLane)}, then re-run devkit ship`;
     if (cause === 'rate-limited') {
         const window = resetsAt === undefined
             ? 'until the limit resets'

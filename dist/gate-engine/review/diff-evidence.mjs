@@ -1,5 +1,6 @@
 import { splitDiffByFile } from '../judge/diff-focus.mjs';
 import { unquoteGitPath } from './lens/chunk.mjs';
+import { shellWord } from './valve/shell-word.mjs';
 export function capNamedSegments(segments, { totalCap, segmentCap, hint }) {
     const kept = [];
     const omitted = [];
@@ -74,8 +75,6 @@ function segmentPath(seg) {
     }
     return seg.match(SEGMENT_PATH_RE)?.[1] ?? '(unknown path)';
 }
-/** One shell word: a plain path stays byte-identical; anything else is single-quoted. */
-const shellWord = (s) => (/^[\w@%+=:,./-]+$/.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`);
 const diffHint = (label) => `run \`git diff --cached -- ${shellWord(label)}\``;
 /** The recovery hint for a judge with Read but no shell (a claude-runtime reviewer without a
  * checklist): the `git diff` hint above names a command it cannot run (sc-2305). */

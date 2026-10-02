@@ -19,6 +19,10 @@ export const CLEAR_MARKER_NAME = '.last-clear.json';
 /** vitest 4.1.10's json spelling of a test timeout (an upstream quirk, pinned by tests). Not unique
  * to timeouts, so it is only trusted alongside a retry — see the coverage-gate decision. */
 export const TIMEOUT_FINGERPRINT = 'Error: STACK_TRACE_ERROR';
+/** vitest 5's json spelling of the same attempt: the real message, budget included. Anchored, so an
+ * assertion that merely quotes this text is not read as one. */
+const ATTEMPT_TIMEOUT = /^Error: (?:Test|Hook) timed out in (\d+)ms\b/;
+const isTimeoutAttempt = (message) => message.startsWith(TIMEOUT_FINGERPRINT) || ATTEMPT_TIMEOUT.test(message);
 /** A whole-file beforeAll/afterAll timeout lands on the suite, value intact. */
 const HOOK_TIMEOUT = /^Hook timed out in (\d+)ms/;
 /** realpath where possible — vitest reports /private/tmp for a file created under /tmp on macOS. */
@@ -68,10 +72,17 @@ export function readDiagnosis(resultsFile) {
                     failed = true;
                     const name = a.fullName ?? a.title ?? '';
                     failedTests.set(`${file}\0${name}`, { file, name });
-                    if (messages.length >= 2 && messages.every((m) => m.startsWith(TIMEOUT_FINGERPRINT))) {
-                        // `duration` is the SUM of every attempt; each attempt ran to the same ceiling.
-                        // A missing duration divides to NaN, which observe() discards.
-                        observe(Number(a.duration) / messages.length);
+                    if (messages.length >= 2 && messages.every(isTimeoutAttempt)) {
+                        const budgets = messages.map((m) => ATTEMPT_TIMEOUT.exec(m)?.[1]);
+                        if (budgets.every(Boolean)) {
+                            for (const ms of budgets)
+                                observe(Number(ms));
+                        }
+                        else {
+                            // 4.1.10 hides the budget. `duration` is the SUM of every attempt, each run to the
+                            // same ceiling; a missing duration divides to NaN, which observe() discards.
+                            observe(Number(a.duration) / messages.length);
+                        }
                     }
                     else {
                         allTimedOut = false;

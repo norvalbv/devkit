@@ -34,17 +34,14 @@
  */
 import { z } from 'zod';
 import { diffCacheIdentity } from '../../judge/diff-focus.mjs';
-import { cachedRetrievalDegradation, storedBaseSchema } from '../evidence/base-context.mjs';
+import { cachedMcpDegradation, cachedRetrievalDegradation, degradedSuffix, storedBaseSchema, } from '../evidence/base-context.mjs';
 import { planChunkedParts, resolveChunkCap } from './chunk-tasks.mjs';
 import { deriveLensReviewer, lensGroupId, resolveLensGroups } from './groups.mjs';
 // Re-exported so every existing importer's path keeps working after the guard-size split.
 export { CORRECTNESS_LENSES, DEFAULT_LENS_GROUPS, deriveLensReviewer, FOUR_WAY_LENS_GROUPS, lensGroupId, resolveLensGroups, } from './groups.mjs';
 export { resolveChunkCap } from './chunk-tasks.mjs';
 import { emitReviewChunkPlan } from '../evidence/chunk-plan.mjs';
-import { emitGateEvent } from '../../judge/gate-events.mjs';
-import { composeTranscript, saveTranscript } from '../../judge/transcript-store.mjs';
 import { coverageFields, partialEvidenceNote } from '../evidence/packet/coverage.mjs';
-import { itemFields, mergeItemVectors } from '../evidence/items.mjs';
 import { parseReviewVerdict } from '../contracts/response.mjs';
 /**
  * The mandatory-checklist paragraph of a judge prompt.
@@ -96,59 +93,6 @@ export function mergeLensOutcomes(parts, name) {
         waivers: parts.flatMap((p) => p.waivers ?? []),
     };
 }
-/**
- * Emit the ONE review_result row per split reviewer that gate-verdict-attribution pairs with the
- * scope row. `secs` SUMS across groups — the honest cost of the split is the total judge time it
- * spent, not its wall-clock — while the item vectors concatenate so per-lens production rates stay
- * joinable across the flag.
- */
-export function emitMergedLensResults(splitParts, firstModel) {
-    for (const [name, parts] of splitParts) {
-        const merged = mergeLensOutcomes(parts.map((p) => p.res), name);
-        const transcript = parts
-            .filter((p) => p.res.transcript)
-            .map((p) => p.res.transcript)
-            .join('\n\n');
-        const transcriptRef = transcript
-            ? saveTranscript(`review-${name}`, composeTranscript(parts[0].task.diffText, transcript))
-            : null;
-        // Rebuild the item fields ACROSS the parts. Without this the event pairs one part's count and
-        // tally with every part's items, so a four-way split reads as a single-lens reviewer — the
-        // "everything comes from one agent" failure the per-lens vector exists to prevent.
-        mergeItemVectors(merged, parts.map((p) => p.res));
-        emitGateEvent({
-            type: 'review_result',
-            reviewer: name,
-            status: merged.status,
-            escalated: Boolean(merged.escalated),
-            model: merged.model ?? firstModel,
-            reason: merged.reason,
-            inconclusive_cause: merged.inconclusiveCause,
-            secs: parts.reduce((sum, p) => sum + p.secs, 0),
-            // Per-group cost and verdict. `secs` above sums, and `escalated`/`model` collapse to the
-            // worst part, so without this vector a slow or repeatedly-escalating lens is invisible —
-            // exactly the per-agent breakdown separate reviewers would have given for free.
-            lens_parts: parts.map((p) => ({
-                lens: lensGroupId(p.task.sel.reviewer.lens ?? []),
-                status: p.res.status,
-                secs: p.secs,
-                // Chunk-telemetry wire format (sc-1999): WHICH plan slice this part judged, by index AND
-                // membership hash (an index alone is unstable); null when un-chunked. Chunk-grain table only.
-                chunk_index: p.task.chunk?.index ?? null,
-                chunk_files_sha: p.task.chunk?.filesSha ?? null,
-                ...coverageFields([p.task]),
-                ...(p.res.model ? { model: p.res.model } : {}),
-                ...(p.retried ? { retried: true } : {}),
-            })),
-            // The merged row itself is flagged when ANY part needed the post-wave recovery (sc-1476).
-            ...(parts.some((p) => p.retried) ? { retried: true, retry_phase: 'deferred' } : {}),
-            ...(merged.waivers?.length ? { waivers: merged.waivers } : {}),
-            ...itemFields(merged),
-            ...coverageFields(parts.map((p) => p.task)),
-            ...(transcriptRef ? { transcript_ref: transcriptRef } : {}),
-        });
-    }
-}
 /** Progress label. Group-qualified so a fanned-out reviewer's unfinished groups are named
  * individually — with a bare name repeated N times, `running − completed` could not say WHICH
  * group is still owed. */
@@ -165,8 +109,9 @@ export function holdLensPart(parts, reviewer, part, label) {
     held.push(part);
     parts.set(reviewer, held);
     const verdict = part.res.status.toUpperCase();
+    const suffix = part.res.status === 'pass' ? degradedSuffix(part.res) : '';
     const note = verdict === 'PASS' ? partialEvidenceNote(coverageFields([part.task])) : '';
-    console.error(`guard-review: ${label} — ${verdict} in ${part.secs}s${note}`);
+    console.error(`guard-review: ${label} — ${verdict}${suffix} in ${part.secs}s${note}`);
 }
 /**
  * Decide what actually has to be judged, before any judge runs.
@@ -240,7 +185,18 @@ export function planReviewWork(selected, diffs, cache, salts, keyOf, groups = re
                 coverage: coverageFields(parts),
             });
             const degradedCause = cachedRetrievalDegradation(name, cache[parts[0].key]);
-            cachedHits.push({ label: name, files: sel.files, judgedBases, part: false, degradedCause });
+            // Every part: a split replays DEGRADED when any one of its groups was judged degraded.
+            const mcpDegradedCause = parts
+                .map((p) => cachedMcpDegradation(cache[p.key]))
+                .find((cause) => cause !== undefined);
+            cachedHits.push({
+                label: name,
+                files: sel.files,
+                judgedBases,
+                part: false,
+                degradedCause,
+                mcpDegradedCause,
+            });
             continue;
         }
         for (const p of parts) {
@@ -253,6 +209,7 @@ export function planReviewWork(selected, diffs, cache, salts, keyOf, groups = re
                 files: p.sel.files,
                 judgedBases: [storedBaseSchema.safeParse(cache[p.key].base_sha).data ?? null],
                 part: true,
+                mcpDegradedCause: cachedMcpDegradation(cache[p.key]),
             });
             if (!p.splitOf)
                 continue;
@@ -269,6 +226,8 @@ export function planReviewWork(selected, diffs, cache, salts, keyOf, groups = re
                     itemTally: e.itemTally && typeof e.itemTally === 'object' && !Array.isArray(e.itemTally)
                         ? e.itemTally
                         : undefined,
+                    // A cached degraded group keeps the merged row DEGRADED beside freshly judged ones.
+                    mcpDegraded: ((cause) => (cause ? { cause, cached: true } : undefined))(cachedMcpDegradation(e)),
                 },
                 secs: 0,
                 task: p,

@@ -5,7 +5,6 @@ import { join } from 'node:path';
 import { confirm, isCancel, outro } from '@clack/prompts';
 import { enableLineGrowth, hasLineCap, LINE_CAP, } from '../../gate-engine/ratchets/size-disable.mjs';
 import { IMPORT_WALL_BASELINE, LEGACY_IMPORT_WALL_BASELINE, STRUCTURE_BASELINE_DIR, STRUCTURE_EXEMPT, } from '../../gate-engine/ratchets/baseline-paths.mjs';
-import { loadImportWallExempt } from '../../gate-engine/structure/load-baseline.mjs';
 import { AGENT_TARGETS, applyOverlayConstraints, COMPONENTS, CONFIG_DRIVEN_STRUCTURE, disabledGuardsFor, dropUndecided, GUARD_IDS, normalizeReviewProfile, RECORDED_COMPONENT_IDS, structureCmdFor, STRUCTURE_STACKS, } from '../lib/components.mjs';
 import { writeFileAtomic } from '../lib/atomic-write.mjs';
 import { detectGitRoot } from '../lib/detect-git-root.mjs';
@@ -13,8 +12,7 @@ import { reportBaselineStorage } from '../lib/doctor/pin/baseline-reader.mjs';
 import { assertRunnerMayWrite, assertRunsFromSource } from '../lib/doctor/pin/runner-identity.mjs';
 import { detectStack } from '../lib/detect-stack.mjs';
 import { packageDir, readJson, writeIfAbsent } from '../lib/fs-helpers.mjs';
-import { generateImportWallBaseline } from '../lib/generate/generate-import-wall-baseline.mjs';
-import { generateStructureBaselines } from '../lib/generate/generate-structure-baseline.mjs';
+import { cutStructureBaselines } from '../lib/generate/cut-structure-baselines.mjs';
 import { INIT_HELP } from '../lib/help/init-help.mjs';
 import { installCommitMsgHook, removeCommitMsgBlock } from '../lib/husky/commit-msg-block.mjs';
 import { buildFullHook, buildGuardBlock, extractGuardBlock, hasFragment, removeFragment, removeGuardBlock, replaceGuardBlock, } from '../lib/husky/husky-block.mjs';
@@ -251,31 +249,7 @@ async function runStructureBaselines(cwd, stack, dryRun, regen = true) {
         console.log('  • repo already adopted — keeping structure + import-wall baselines (run `devkit init` to re-snapshot)');
         return;
     }
-    // The generators grandfather electron's process trees (the generator's own DEFAULT_ROOTS).
-    // react-app needs no generated structure baseline: its preset is grandfathered via permissive
-    // rules + EMPTY baselines (the eslint.config loadBaseline() returns [] when absent), and its
-    // structureRoot is derived live from guard.config.json scanRoots — so for a src-rooted app
-    // these calls are no-ops by design (the electron tree names never match).
-    const opts = { log: (m) => console.log(m) };
-    try {
-        await generateStructureBaselines(cwd, opts);
-    }
-    catch (e) {
-        console.log(`  ! structure baseline generator failed: ${firstLine(e)}`);
-    }
-    try {
-        // Honour the consumer's hand-maintained import-wall exemptions:
-        // an exempt file is a permanent architectural allowance, not a violator, so it must be skipped
-        // during the scan — else it would be re-grandfathered every regen.
-        generateImportWallBaseline(cwd, {
-            ...opts,
-            exemptPatterns: await loadImportWallExempt(cwd),
-        });
-    }
-    catch (e) {
-        console.log(`  ! import-wall baseline generator skipped: ${firstLine(e)}`);
-        console.log(`    (install deps — bun install — then re-run \`devkit init --stack ${stack}\`)`);
-    }
+    await cutStructureBaselines(cwd, stack);
 }
 function firstLine(e) {
     const err = e;
@@ -516,11 +490,10 @@ function applyRemovals(cwd, remove, prevConfig, gitRoot, pkgRel, dryRun) {
 // Overlay (local-only) install: invisible to git (.git/info/exclude), non-invasive (extends the
 // repo, edits nothing committed). Self-contained — writes its own git-ignored .devkit/config.json
 // and returns; applyInit's package/standalone path never runs for an overlay.
-function applyOverlay(cwd, plan, pkgRel, devkitRef) {
+async function applyOverlay(cwd, plan, pkgRel, devkitRef) {
     const { stack, selection, force = false, dryRun = false } = plan;
-    console.log(`devkit init${dryRun ? ' (dry-run)' : ''} — OVERLAY (local-only) — stack=${stack}, devkit=${devkitRef}`);
-    console.log('  invisible to git (.git/info/exclude); extends the repo; edits nothing committed\n');
-    const wired = installOverlay(cwd, selection, stack, force, dryRun);
+    console.log(`devkit init${dryRun ? ' (dry-run)' : ''} — OVERLAY (local-only) — stack=${stack}, devkit=${devkitRef}\n  invisible to git (.git/info/exclude); extends the repo; edits nothing committed\n`);
+    const wired = await installOverlay(cwd, selection, stack, force, dryRun, plan);
     const ownsLineGrowth = upgradeOffers.overlayOwnsLineGrowth(cwd);
     upgradeOffers.applyOverlayMaxLines(cwd, selection, repoAdopted(cwd), ownsLineGrowth, dryRun);
     if (selection.guards?.includes('fanout') || selection.guards?.includes('size')) {
@@ -541,13 +514,14 @@ function applyOverlay(cwd, plan, pkgRel, devkitRef) {
     // an aborted install records false and stays in step with the rendered hook.
     const overlayComponents = dropUndecided({
         biome: Boolean(selection.biome),
+        tsconfig: Boolean(selection.tsconfig),
+        husky: Boolean(selection.husky),
         guards: [...(selection.guards ?? [])],
         skills: Boolean(selection.skills),
         agents: Boolean(selection.agents),
         agentHooks: Boolean(selection.agentHooks),
         searchSteering: false, // never wired in overlay (no resolvable bin without the package)
-        fallow: wired.fallowWired,
-        antiSlop: wired.antiSlopWired,
+        ...wired.components,
         lineGrowth: Boolean(selection.lineGrowth),
         adhd: Boolean(selection.adhd),
         priorArtGate: Boolean(selection.priorArtGate),
@@ -883,7 +857,7 @@ async function run(args, cwd) {
         ({ selection, disabledGuards, undecided } = initFlags.resolveFlagSelection(cwd, args, flags));
     }
     if (mode === 'overlay')
-        selection = applyOverlayConstraints(selection);
+        selection = applyOverlayConstraints(selection, stack);
     if (!selfHost && !interactive) {
         const reviewPlan = reviewPlanFromFlags(flags, selection);
         if (reviewPlan.error) {
