@@ -165,6 +165,20 @@ describe('overlay hooks in linked worktrees (sc-4157)', () => {
     );
   });
 
+  it('a linked-worktree commit runs the selected gates from the global devkit install', async () => {
+    const root = workRepo();
+    const selection = { ...SELECTION, guards: [...SELECTION.guards, 'review'] };
+    await applyInit(root, { stack: 'react-app', selection, overlay: true, devkitRef: 'v0.9.0' });
+    const wt = addWorktree(root);
+
+    commit(wt, 'gated in the worktree');
+
+    const calls = readFileSync(join(home, 'gate-calls'), 'utf8');
+    expect(calls).toContain('guard-deterministic --hook');
+    expect(calls).toContain('guard-review --gate');
+    expect(markerLines()).toEqual([realpathSync(wt)]);
+  });
+
   it('a --no-checkout worktree is gated too, since linking happens at commit time', async () => {
     const root = workRepo();
     await initOverlay(root);

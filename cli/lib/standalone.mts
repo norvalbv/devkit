@@ -27,11 +27,7 @@ import {
 import { join } from 'node:path';
 import type { Selection } from './components.mts';
 import { packageDir, writeIfAbsent } from './fs-helpers.mts';
-import {
-  buildStandaloneBlock,
-  buildStandaloneHook,
-  replaceGuardBlock,
-} from './husky/husky-block.mts';
+import { buildFullHook, buildGuardBlock, replaceGuardBlock } from './husky/husky-block.mts';
 
 export const firstLine = (e: unknown): string => {
   let raw: unknown = '';
@@ -195,13 +191,17 @@ export function installStandaloneHook(
       return;
     }
     mkdirSync(huskyDir, { recursive: true });
-    writeFileSync(hookPath, buildStandaloneHook(sel, pkgRel));
+    writeFileSync(hookPath, buildFullHook(sel, pkgRel, 'global-optional'));
     chmodSync(hookPath, 0o755);
     console.log('  ✓ created .husky/pre-commit (standalone, fail-open global gates)');
     return;
   }
   const current = readFileSync(hookPath, 'utf8');
-  const merged = replaceGuardBlock(current, buildStandaloneBlock(sel, pkgRel), pkgRel);
+  const merged = replaceGuardBlock(
+    current,
+    buildGuardBlock(sel, pkgRel, { binDir: 'global-optional' }),
+    pkgRel,
+  );
   if (merged === current) {
     console.log('  • .husky/pre-commit already wired (standalone block current)');
     return;

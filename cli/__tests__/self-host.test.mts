@@ -25,12 +25,11 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { projectionDrift } from '../lib/install/agent-assets/projection-parity.mts';
 import { FORMAT_TOOL_SETUP } from '../lib/husky/format-fragment.mts';
+import { BIN_DIRS } from '../lib/husky/gate-policy/block-helpers.mts';
 import {
   buildFullHook,
   buildOverlayHook,
-  buildStandaloneHook,
   extractGuardBlock,
-  PACKAGE_BIN_DIR_FRAGMENT,
   replaceGuardBlock,
 } from '../lib/husky/husky-block.mts';
 import { selfHostHookParity } from '../lib/husky/hook-parity.mts';
@@ -153,7 +152,7 @@ describe('self-host bin rewrite', () => {
   });
 
   it('toSelfHost re-points source gates and the formatter bin off the package bin dir', () => {
-    const input = `${PACKAGE_BIN_DIR_FRAGMENT}\n\n"$__dk_package_bin_dir/guard-review" --gate
+    const input = `${BIN_DIRS.package.open}\n\n"$__dk_package_bin_dir/guard-review" --gate
 ${FORMAT_TOOL_SETUP}
 "$__dk_package_bin_dir/guard-deterministic" --hook x`;
     const out = toSelfHost(input, ROOT);
@@ -501,7 +500,7 @@ describe('buildSelfHostHook', () => {
   it('never leaks the devkit-relative advisory emitter into a consumer hook, which would fail silently there', () => {
     const consumerHooks = [
       buildFullHook({ biome: true, guards: ['review', 'decisions'] }),
-      buildStandaloneHook({ guards: ['review', 'decisions'] }),
+      buildFullHook({ guards: ['review', 'decisions'] }, '', 'global-optional'),
       // The overlay with fallow ON is the closest a consumer gets: it runs fallow inline too, but
       // through the BLOCKING wrapper, which needs no emitter because its findings stop the run.
       buildOverlayHook({ guards: ['review'] }, '.husky/pre-commit', '', { fallow: true }),

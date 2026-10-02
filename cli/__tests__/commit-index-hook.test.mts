@@ -12,7 +12,7 @@ import {
 import { join, relative, resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { buildCommitMsgBlock } from '../lib/husky/commit-msg-block.mts';
-import { buildOverlayHook, buildStandaloneHook } from '../lib/husky/husky-block.mts';
+import { buildFullHook, buildOverlayHook } from '../lib/husky/husky-block.mts';
 import { DK_COMMIT_INDEX_CAPTURE } from '../lib/husky/review-fragments.mts';
 import { rootRegistry } from './_helpers.mts';
 
@@ -78,7 +78,7 @@ function seedHookedRepo(pkgRel = '') {
   git(['add', '-A']);
   git(['commit', '-qm', 'base']);
   const hook = join(root, '.git', 'hooks', 'pre-commit');
-  writeFileSync(hook, buildStandaloneHook({ guards: ['size'] }, pkgRel));
+  writeFileSync(hook, buildFullHook({ guards: ['size'] }, pkgRel, 'global-optional'));
   chmodSync(hook, 0o755);
   const views = (): GateView[] =>
     readFileSync(out, 'utf8')

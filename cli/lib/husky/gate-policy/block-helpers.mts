@@ -1,4 +1,5 @@
-/** Shell block policy shared by every hook flavour: which modes defer a gate's block to the finalizer. */
+/** Shell block policy shared by every hook flavour: which modes defer a gate's block to the finalizer,
+ *  and where the gates find devkit's bins. */
 
 // Commit/ship exit on a block. Review remembers both lanes and dry-gates the deterministic one, so
 // every selected gate still reports before REVIEW_FAILURE_FINALIZER (safe under `sh -e`).
@@ -28,25 +29,42 @@ if [ "\${dk_review_failed:-0}" -ne 0 ]; then
 fi
 # /devkit:review-failure-finalizer`;
 
-// `__dk_gate_ai <lane> <bin> args…`: the lane is shifted off BEFORE the probe, because `command -v`
-// also resolves functions. The AI lane defers only a confirmed finding (1); outages and 4 exit.
-export const DK_GATE_AI_HELPER = `__dk_gate_ai() {
-    dk_lane="$1"
-    shift
-    command -v "$1" >/dev/null 2>&1 || return 0
-    rc=0
-    __dk_no_git_env "$@" || rc=$?
-    { [ "$rc" -eq 0 ] || [ "$rc" -eq 2 ]; } && return 0
-    if [ "$rc" -eq 4 ]; then
-        echo "   $1: NOT a gate rejection — the staged content itself is unreadable (evidence above)."
-    elif [ "$rc" -eq 3 ]; then
-        echo "   $1: judge unavailable — strict ship mode failed closed. Follow the judge CLI remedy printed above, then re-run devkit ship."
-    fi
-    if [ "$dk_lane" = deterministic ]; then
-        __dk_block_deterministic "$1"
-    elif [ "$rc" -eq 1 ]; then
-        __dk_block_ai "$1"
-    else
-        exit 1
-    fi
-}`;
+// Where a hook's gates find devkit's bins, what a missing one prints, and where the consumer's own
+// formatter lives. Every gate reads the one variable, so the three modes render the same gate body.
+const GLOBAL_MISSING = (bin: string) =>
+  `${bin} is missing from devkit's install — reinstall devkit`;
+
+// A global devkit's bin dir holds only devkit's bins; the consumer's formatter is in its own.
+const CONSUMER_BIN = 'node_modules/.bin';
+export const BIN_DIRS = {
+  // Package mode: the version pinned in the consumer's own dependencies.
+  package: {
+    open: '__dk_package_bin_dir="$(bun pm bin)"',
+    close: '',
+    missing: (bin: string) => `pinned ${bin} is missing — run bun install`,
+    // `bun pm bin` is the consumer's own bin dir, so its formatter sits beside devkit's bins.
+    formatter: '$__dk_package_bin_dir',
+  },
+  // Overlay: nothing is committed, so the global CLI is the only runtime and every commit needs it.
+  global: {
+    open: `__dk_package_bin_dir=$(command -v guard-deterministic) || {
+    echo "devkit: not installed on PATH, and every commit here runs devkit's gates — install devkit, then commit again" >&2
+    exit 1
+}
+__dk_package_bin_dir=\${__dk_package_bin_dir%/*}`,
+    close: '',
+    missing: GLOBAL_MISSING,
+    formatter: CONSUMER_BIN,
+  },
+  // Standalone: a committed hook in a shared repo whose teammates may not install devkit, so the
+  // whole block is skipped without it (its documented fail-open contract).
+  'global-optional': {
+    open: `# devkit standalone gates — global CLI, fail-open (skipped if devkit is not installed).
+if __dk_package_bin_dir=$(command -v guard-deterministic); then
+__dk_package_bin_dir=\${__dk_package_bin_dir%/*}`,
+    close: 'fi',
+    missing: GLOBAL_MISSING,
+    formatter: CONSUMER_BIN,
+  },
+};
+export type BinDir = keyof typeof BIN_DIRS;

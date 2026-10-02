@@ -34,8 +34,8 @@ export const CONSUMER_FORMATTER = {
  * Run the formatter only where its CONFIG exists, the rule 10bcb1a7 already applied to the agent
  * hooks. Configless biome formats to its own defaults, rewriting bytes a repo's real gate rejects.
  */
-export function renderToolSetup(f: ConsumerFormatter): string {
-  const bin = `"$__dk_package_bin_dir/${f.tool}"`;
+export function renderToolSetup(f: ConsumerFormatter, binDir = '$__dk_package_bin_dir'): string {
+  const bin = `"${binDir}/${f.tool}"`;
   return `    if ${f.configProbes.map((p) => `[ ! -f ${p} ]`).join(' && ')}; then
         echo "🎨 No ${f.tool} config here (${f.configProbes.join(' / ')}) — staged files left as authored."
         return 0
@@ -89,7 +89,8 @@ export const FORMAT_FAILURE_REPORT = `        if [ "$FMT_RC" -eq 127 ]; then
             echo "🎨 $FMT_TOOL failed over $FMT_N staged file(s) (xargs exit $FMT_RC) — some may be UNFORMATTED; its diagnostics are above. This commit continues."
         fi`;
 
-export const FORMAT_FRAGMENT = `# devkit:biome-format
+/** The format step, running the consumer formatter from `binDir`, the consumer's own bin dir. */
+export const formatFragment = (binDir: string) => `# devkit:biome-format
 # Format staged files, then re-stage exactly those (scoped — never a blanket \`git add -u\`, which
 # would sweep unrelated working-tree changes into the commit). Only re-add files with NO unstaged
 # edits, so partially-staged files commit exactly as staged.
@@ -112,7 +113,7 @@ export const FORMAT_FRAGMENT = `# devkit:biome-format
 # A function so the "no formatter here" arm is an early \`return\`, not a branch wrapping the whole
 # body — self-host replaces the setup outright, and an unreachable arm must not survive into it.
 __dk_format_staged() {
-${FORMAT_TOOL_SETUP}
+${renderToolSetup(CONSUMER_FORMATTER, binDir)}
 STAGED_FMT=$(git diff --cached --name-only -z --diff-filter=ACM | tr '\\0' '\\n' | ${FORMAT_EXTENSION_FILTER} || true)
 if [ -z "$STAGED_FMT" ]; then
     echo "🎨 $FMT_TOOL: no staged formattable path — nothing to format."

@@ -13,7 +13,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { normalizeSelection, structureCmdFor } from '../lib/components.mts';
-import { buildStandaloneHook } from '../lib/husky/husky-block.mts';
+import { buildFullHook } from '../lib/husky/husky-block.mts';
 import { buildOverlayPreCommit } from '../lib/overlay.mts';
 import { globalInitPath, installGlobalHook } from '../lib/overlay-global-hook.mts';
 import {
@@ -61,7 +61,7 @@ function setup(name: string, overlay = false) {
   if (overlay) writeFileSync(chain, '#!/bin/sh\necho chained\n', { mode: 0o755 });
   const hook = overlay
     ? buildOverlayPreCommit(selection, '.git/hooks/pre-commit', '', { root })
-    : buildStandaloneHook(selection);
+    : buildFullHook(selection, '', 'global-optional');
   write(root, overlay ? '.devkit/hooks/pre-commit' : '.husky/pre-commit', hook, true);
   write(root, '.devkit/config.json', `${JSON.stringify(config(overlay), null, 2)}\n`);
   git(root, 'config', 'core.hooksPath', overlay ? '.devkit/hooks' : '.husky/_');
@@ -160,7 +160,12 @@ describe('review setup manifest', () => {
     git(gitRoot, 'init', '-q');
     write(gitRoot, '.husky/_/pre-commit', '#!/bin/sh\nexit 0\n', true);
     write(gitRoot, '.husky/_/h', '#!/bin/sh\nexit 0\n');
-    write(gitRoot, '.husky/pre-commit', buildStandaloneHook(selection, 'packages/app'), true);
+    write(
+      gitRoot,
+      '.husky/pre-commit',
+      buildFullHook(selection, 'packages/app', 'global-optional'),
+      true,
+    );
     write(
       targetRoot,
       '.devkit/config.json',
@@ -188,7 +193,11 @@ describe('review setup manifest', () => {
     delete legacyConfig.components;
     writeFileSync(
       join(legacy.root, '.husky/pre-commit'),
-      buildStandaloneHook({ ...normalizeSelection(), structureCmd: structureCmdFor('generic') }),
+      buildFullHook(
+        { ...normalizeSelection(), structureCmd: structureCmdFor('generic') },
+        '',
+        'global-optional',
+      ),
       { mode: 0o755 },
     );
     writeFileSync(
@@ -204,9 +213,13 @@ describe('review setup manifest', () => {
       ...normalizeSelection({ guards: ['decisions'] }),
       structureCmd: structureCmdFor('generic'),
     };
-    writeFileSync(join(partial.root, '.husky/pre-commit'), buildStandaloneHook(selected), {
-      mode: 0o755,
-    });
+    writeFileSync(
+      join(partial.root, '.husky/pre-commit'),
+      buildFullHook(selected, '', 'global-optional'),
+      {
+        mode: 0o755,
+      },
+    );
     writeFileSync(
       join(partial.root, '.devkit/config.json'),
       `${JSON.stringify(config(false, { components: { guards: ['decisions'] } }), null, 2)}\n`,
@@ -428,7 +441,7 @@ describe('review setup manifest', () => {
     git(root, 'init', '-q');
     write(root, '.husky/_/pre-commit', '#!/bin/sh\nexit 0\n', true);
     write(root, '.husky/_/h', '#!/bin/sh\nexit 0\n');
-    write(root, '.husky/pre-commit', buildStandaloneHook(selection), true);
+    write(root, '.husky/pre-commit', buildFullHook(selection, '', 'global-optional'), true);
     write(root, '.devkit/config.json', `${JSON.stringify(config(false), null, 2)}\n`);
     git(root, 'config', 'core.hooksPath', '.husky/_');
     const manifest = join(base, 'manifest with space\nand newline.json');

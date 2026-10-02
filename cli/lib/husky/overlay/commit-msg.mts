@@ -1,5 +1,5 @@
-/** Overlay's local `.devkit/hooks/commit-msg` (sc-1794): devkit's message judges, fail-open global
- *  bins, then the repo's own commit-msg. Rationale: the 2026-09-28 note on overlay-self-heal. */
+/** Overlay's local `.devkit/hooks/commit-msg` (sc-1794): devkit's message judges from the global
+ *  CLI, failing closed without it, then the repo's own commit-msg. Rationale: overlay-self-heal. */
 
 import {
   chmodSync,
@@ -41,11 +41,11 @@ export function buildOverlayCommitMsgHook(
   chainTarget: string,
   pkgRel = '',
 ): string {
-  const block = buildCommitMsgBlock(selection, pkgRel, { standalone: true, scrubGitEnv: true });
+  const block = buildCommitMsgBlock(selection, pkgRel, 'global');
   const chain = chainWord(chainTarget); // single-quoted: a hooksPath with $(...) must not execute
   return `${COMMIT_MSG_PREAMBLE}
 # devkit OVERLAY commit-msg (LOCAL, git-ignored): devkit's message judges, then the repo's OWN
-# commit-msg unchanged. Global CLI, fail-open when devkit is not installed.
+# commit-msg unchanged. Global CLI; the commit is blocked when devkit is not installed.
 ${block}
 
 # Judges passed — clear the handoff now: \`exec\` replaces this process, so no EXIT trap fires after.

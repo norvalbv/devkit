@@ -1768,10 +1768,10 @@ describe('overlay commit-msg judges (sc-1794)', () => {
     const hook = cmsg(root);
     expect(hook).toContain('# devkit:guard-completeness');
     expect(hook).toContain('# devkit:guard-sentry');
-    expect(hook).toContain('command -v guard-review'); // global bins: overlay is package-less
+    expect(hook).toContain('command -v guard-deterministic'); // global bins: package-less
     expect(hook).toContain('exec sh .husky/commit-msg "$@"');
-    // no pre-commit prewarm (it would leak the git env past the commit-index boundary)
-    expect(readFileSync(join(root, '.devkit', 'hooks', 'pre-commit'), 'utf8')).not.toContain(
+    // A ship judges sentry at pre-commit, before the qavis advisory, as package mode does.
+    expect(readFileSync(join(root, '.devkit', 'hooks', 'pre-commit'), 'utf8')).toContain(
       '# devkit:guard-sentry-prewarm',
     );
   });
@@ -1792,6 +1792,7 @@ describe('overlay commit-msg judges (sc-1794)', () => {
       );
       execFileSync('chmod', ['755', join(bin, name)]);
     };
+    stub('guard-deterministic', 0);
     stub('guard-sentry', 0);
     const commit = (msg) =>
       testExecFileSync('git', ['commit', '--allow-empty', '-qm', msg], {
