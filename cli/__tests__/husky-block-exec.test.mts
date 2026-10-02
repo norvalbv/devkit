@@ -981,3 +981,102 @@ describe('overlay staged gates run before the AI guards (sc-3020)', () => {
     expect(r.calls).not.toContain('guard-review');
   });
 });
+
+// sc-2695: an overlay lint block names ship's --dry-gates rehearsal from its OWN failure arm (the
+// shell banner attributes nothing), and only when a new ship exported the command.
+describe('overlay lint blocks name the ship --dry-gates rehearsal (sc-2695)', () => {
+  const REVIEWED = { biome: false, guards: ['comments', 'decisions', 'review'] };
+  const CMD = "devkit ship feat/x 'add thing' --dry-gates --base main -- src/staged.ts";
+  const LEAD = "Ship's exact staging, no judges:";
+  const overlay = (extra = {}) => ({ builder: 'overlay', fallow: false, staged: true, ...extra });
+  // A plain commit replays its gate log on stdout at exit; a ship keeps the hook's own stderr.
+  const ARMS = [
+    ['eslint', { ESLINT_RC: '1' }, { eslintOverlay: true }],
+    ['biome', { BIOME_RC: '1' }, { biomeOverlay: true }],
+    ['fallow', { FALLOW_RC: '1' }, { fallow: true }],
+  ];
+
+  for (const [arm, rc, fixture] of ARMS) {
+    it(`a failing ${arm} overlay prints the command verbatim, after its own run`, () => {
+      const r = runHook({ ...rc, DEVKIT_SHIP_DRY_GATES_CMD: CMD }, REVIEWED, overlay(fixture));
+      expect(r.status).toBe(1);
+      expect(r.calls).toContain(arm);
+      expect(`${r.stdout}${r.stderr}`).toContain(LEAD);
+      expect(`${r.stdout}${r.stderr}`).toContain(`     ${CMD}\n`);
+      expect(r.calls).not.toContain('guard-review');
+    });
+
+    it(`a failing ${arm} overlay prints nothing extra when no ship exported a command`, () => {
+      const r = runHook(rc, REVIEWED, overlay(fixture));
+      expect(r.status).toBe(1);
+      expect(`${r.stdout}${r.stderr}`).not.toContain(LEAD);
+    });
+  }
+
+  it('an exported-but-empty command (the helper failed) prints no dangling lead', () => {
+    const r = runHook(
+      { ESLINT_RC: '1', DEVKIT_SHIP_DRY_GATES_CMD: '' },
+      REVIEWED,
+      overlay({ eslintOverlay: true }),
+    );
+    expect(r.status).toBe(1);
+    expect(`${r.stdout}${r.stderr}`).not.toContain(LEAD);
+  });
+
+  it('prints a hostile title/path byte-for-byte and never evaluates it', () => {
+    // A title is user text; the hook must echo the pre-quoted command, not re-run its expansions.
+    const hostile = `devkit ship x '$(touch pwned) \`touch pwned2\` $HOME "q"' --dry-gates -- 'a b.ts'`;
+    const r = runHook(
+      { ESLINT_RC: '1', DEVKIT_SHIP_DRY_GATES_CMD: hostile },
+      REVIEWED,
+      overlay({ eslintOverlay: true }),
+    );
+    expect(r.status).toBe(1);
+    expect(`${r.stdout}${r.stderr}`).toContain(`     ${hostile}\n`);
+    expect(existsSync(join(r.home, 'pwned'))).toBe(false);
+    expect(existsSync(join(r.home, 'pwned2'))).toBe(false);
+  });
+
+  it('a reviewer block never names the rehearsal — --dry-gates cannot reproduce it', () => {
+    const r = runHook(
+      { REVIEW_RC: '1', DEVKIT_SHIP_DRY_GATES_CMD: CMD },
+      REVIEWED,
+      overlay({ fallow: true }),
+    );
+    expect(r.status).toBe(1);
+    expect(r.calls).toContain('guard-review --gate');
+    expect(`${r.stdout}${r.stderr}`).not.toContain(CMD);
+  });
+
+  it('a monorepo package subshell still prints the hint and propagates the block', () => {
+    const r = runHook(
+      { FALLOW_RC: '1', DEVKIT_SHIP_DRY_GATES_CMD: CMD },
+      REVIEWED,
+      overlay({ fallow: true, pkgRel: 'pkg/a' }),
+    );
+    expect(r.status).toBe(1);
+    expect(`${r.stdout}${r.stderr}`).toContain(`     ${CMD}\n`);
+    expect(r.calls).not.toContain('guard-review');
+  });
+
+  it.skipIf(!hasDash)('stays POSIX: dash prints the hint and blocks on a failing overlay', () => {
+    const r = runHook(
+      { ESLINT_RC: '1', DEVKIT_SHIP_DRY_GATES_CMD: CMD },
+      REVIEWED,
+      overlay({ eslintOverlay: true, shell: 'dash' }),
+    );
+    expect(r.status).toBe(1);
+    expect(`${r.stdout}${r.stderr}`).toContain(`     ${CMD}\n`);
+  });
+
+  it.skipIf(!hasDash)("dash's echo would expand backslashes — the command still prints raw", () => {
+    const raw = "devkit ship x 'fix a\\nb \\c tail' --dry-gates -- a.ts";
+    const r = runHook(
+      { ESLINT_RC: '1', DEVKIT_SHIP_DRY_GATES_CMD: raw },
+      REVIEWED,
+      overlay({ eslintOverlay: true, shell: 'dash' }),
+    );
+    expect(r.status).toBe(1);
+    expect(`${r.stdout}${r.stderr}`).toContain(`     ${raw}\n`);
+  });
+});

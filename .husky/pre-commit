@@ -274,6 +274,10 @@ else
         printf '%s\n' "$FMT_SAFE" | tr '\n' '\0' | __dk_fmt_run || FMT_RC=$?
         if [ "$FMT_RC" -ne 0 ]; then
             echo "🎨 Oxfmt failed over $FMT_N staged file(s) (xargs exit $FMT_RC) — blocking: devkit formats its own staged set hard." >&2
+            if [ -n "${DEVKIT_SHIP_DRY_GATES_CMD:-}" ]; then
+                echo "   Ship's exact staging, no judges:" >&2
+                printf '     %s\n' "$DEVKIT_SHIP_DRY_GATES_CMD" >&2
+            fi
             exit 1
         fi
         printf '%s\n' "$FMT_SAFE" | tr '\n' '\0' | xargs -0 git add -f
