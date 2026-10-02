@@ -10,6 +10,7 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   readlinkSync,
   realpathSync,
@@ -72,6 +73,15 @@ const commit = (cwd: string, message: string, env?: Record<string, string>) =>
     encoding: 'utf8',
     env: hookEnv(env),
   });
+// A plain commit now persists its gate output (sc-2755). Clean keeps a .devkit that still holds a
+// gate log — the same rule that keeps ship logs — so "projection gone" means nothing else remains.
+const projectionLeftovers = (dir: string) =>
+  existsSync(join(dir, '.devkit'))
+    ? readdirSync(join(dir, '.devkit')).filter(
+        (f) => !/^last-commit-gates-.*\.log$/.test(f) && f !== '.gitignore',
+      )
+    : [];
+
 /** The stderr of a commit the hook must block. */
 function blockedCommit(cwd: string, env?: Record<string, string>): string {
   try {
@@ -248,7 +258,7 @@ describe('overlay hooks in linked worktrees (sc-4157)', () => {
 
     await cleanRun(['--yes'], root);
 
-    expect(existsSync(join(wt, '.devkit'))).toBe(false);
+    expect(projectionLeftovers(wt)).toEqual([]);
     expect(existsSync(join(wt, 'eslint.config.devkit.mjs'))).toBe(false);
     expect(git(wt, 'status', '--porcelain')).toBe('');
     expect(git(root, 'config', '--get', 'core.hooksPath')).toBe('.husky/_');
@@ -345,7 +355,7 @@ describe('overlay hooks in linked worktrees (sc-4157)', () => {
 
     await cleanRun(['--yes'], root);
 
-    expect(existsSync(join(nested, '.devkit'))).toBe(false);
+    expect(projectionLeftovers(nested)).toEqual([]);
   });
 
   it('a real .devkit holding only a LINKED config is borrowed, so commands run in the home', async () => {
@@ -454,7 +464,7 @@ describe('overlay hooks in linked worktrees (sc-4157)', () => {
     expect(readFileSync(join(wt, 'eslint.config.devkit.mjs'), 'utf8')).toBe(
       '// the worktree’s own\n',
     );
-    expect(existsSync(join(wt, '.devkit'))).toBe(false);
+    expect(projectionLeftovers(wt)).toEqual([]);
   });
 
   it('clean keeps a baseline the branch changed and lists it, but drops untouched copies', async () => {
@@ -842,8 +852,9 @@ describe('overlay hooks in linked worktrees (sc-4157)', () => {
 
     await cleanRun(['--yes'], root);
 
-    for (const rel of ['.fallowrc.jsonc', 'docs/decisions', '.devkit'])
+    for (const rel of ['.fallowrc.jsonc', 'docs/decisions'])
       expect(existsSync(join(wt, rel))).toBe(false);
+    expect(projectionLeftovers(wt)).toEqual([]);
     expect(readFileSync(join(wt, '.co-occurrence-allowlist.json'), 'utf8')).toBe(
       '{"branch": true}\n',
     );
@@ -873,7 +884,7 @@ describe('overlay hooks in linked worktrees (sc-4157)', () => {
 
     expect(await cleanRun(['--yes'], root)).toBe(0);
 
-    expect(existsSync(join(wt, '.devkit'))).toBe(false);
+    expect(projectionLeftovers(wt)).toEqual([]);
     expect(vi.mocked(console.log).mock.calls.flat().join('\n')).toMatch(
       /not valid JSON.* — links to the paths it configures .* delete them by hand/,
     );

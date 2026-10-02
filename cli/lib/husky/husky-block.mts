@@ -18,7 +18,7 @@ import {
   DK_GATE_BLOCK_HELPERS,
   REVIEW_FAILURE_FINALIZER,
 } from './gate-policy/block-helpers.mts';
-import { buildCommitTerminalFragment } from './commit-terminal.mts';
+import { buildPreCommitExit, PRE_COMMIT_PASS_EXIT } from './gate-policy/commit-gate-log.mts';
 import { formatFragment } from './format-fragment.mts';
 import { markEnd, markStart } from './husky.mts';
 import {
@@ -133,7 +133,7 @@ export function buildGuardBlock(
 ): string {
   const handoff = selection.guards?.some((id) => id === 'review' || id === 'sentry') ?? false;
   const pieces = [
-    buildCommitTerminalFragment(handoff),
+    buildPreCommitExit(handoff),
     ...DK_HOOK_HELPERS,
     BIN_DIRS[binDir].open,
     DK_REVIEW_BASELINE_HELPER,
@@ -287,10 +287,9 @@ ${prelude ? `${prelude}\n` : ''}${block}
 # would run it twice. Reached only after the gates above PASSED (a failure already exited 1).
 ${GATES_ONLY_STOP}
 
-# devkit gates passed — emit the commit-run terminal NOW: \`exec\` replaces this process, so the
-# EXIT trap would never fire on the pass path. commit_result records the DEVKIT chain's outcome
-# (the chained repo hook may still block the commit on its own gates).
-command -v __dk_commit_result >/dev/null 2>&1 && { trap - EXIT; __dk_commit_result 0; }
+# devkit gates passed — run the exit work NOW (\`exec\` drops the EXIT trap): commit_result records
+# the DEVKIT chain's outcome, and the gate log closes before the repo's own hook runs.
+${PRE_COMMIT_PASS_EXIT}
 
 # Chain to the repo's own pre-commit (exec → its exit code becomes the hook's).
 [ -f ${chainWord(chainTarget)} ] && exec sh ${chainWord(chainTarget)} "$@"
