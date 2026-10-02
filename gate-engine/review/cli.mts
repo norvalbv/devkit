@@ -6,6 +6,7 @@
  *   guard-review --gate                          run the selected domain reviewers (pre-commit)
  *   guard-review completeness --gate <msg-file>  feature-completeness judge (commit-msg, warn-only)
  *   guard-review scan                            reviewer→files mapping + cache status (no judges)
+ *   guard-review lens <reviewer>[:<lens>]        re-judge ONE reviewer/lens on the staged index
  *   guard-review clear-cache                     drop cached PASS verdicts
  *   guard-review waive <reviewer>[:<lens>] <id> [--base <sha>] "<why>"  record an override
  *   guard-review waive --list                    show active waives
@@ -30,6 +31,7 @@ import { cacheKey, resolveEscalationModel, resolveReviewModel } from './reviewer
 import { selectRepositoryReviewers } from './scope/repository.mts';
 import { runReviewGate } from './run-review.mts';
 import { resolveReviewerIdentities, skippedReviewers } from './runtime.mts';
+import { parseRecheckTarget, type RecheckTarget } from './valve/recheck.mts';
 import { runWaive } from './valve/waive.mts';
 
 /**
@@ -167,6 +169,25 @@ async function run(argv: string[]): Promise<number> {
   if (cmd === '--gate') return runReviewGate();
   if (cmd === 'completeness' && rest[0] === '--gate' && rest[1]) return runCompleteness(rest[1]);
   if (cmd === 'scan') return scanReview();
+  if (cmd === 'lens' && rest[0]) {
+    let only: RecheckTarget;
+    try {
+      only = parseRecheckTarget(rest[0]);
+    } catch (e) {
+      console.error(`guard-review lens: ${e instanceof Error ? e.message : String(e)}`);
+      return 2;
+    }
+    // The gate exits 0 on these, which a recheck must never mistake for "the fix cleared it".
+    if (envFlag('NO_REVIEW') || resolveGuardConfig().noLlm) {
+      console.error(
+        'guard-review lens: review is disabled (GUARD_NO_REVIEW / noLlm) — nothing judged',
+      );
+      return 1;
+    }
+    // Same per-invocation id rule as waive below: never filed as a fabricated commit run.
+    process.env.DEVKIT_AGENT_RUN_ID ||= `recheck-${randomUUID()}`;
+    return runReviewGate(process.cwd(), { only });
+  }
   if (cmd === 'clear-cache') {
     clearCache(process.cwd());
     return 0;
@@ -192,7 +213,7 @@ async function run(argv: string[]): Promise<number> {
   }
   if (cmd === 'record-agent' && rest[0]) return recordAgent(rest[0], rest.slice(1));
   console.error(
-    'Usage: guard-review --gate | completeness --gate <msg-file> | scan | clear-cache | ' +
+    'Usage: guard-review --gate | completeness --gate <msg-file> | scan | lens <reviewer>[:<lens>] | clear-cache | ' +
       'waive <reviewer>[:<lens>] <id> [--base <sha>] "<why>" | waive --list | transcript <ref> | ' +
       'record-agent <label> [--model <m>] [--duration-ms <n>] ' +
       '[--disposition followed|overridden|unverified] [--reason "<why>"] ' +

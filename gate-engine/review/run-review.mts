@@ -57,8 +57,8 @@ import { emitReviewScope, emitReviewSkipped, reportNonRuns } from './evidence/sc
 import { assertNoMassDeletion } from './integrity/mass-deletion.mts';
 import { gitCached, headHash, stagedFiles, stagedTreeHash } from './evidence/staged-git.mts';
 import { reviewerTargetSalts } from './evidence/targets-block.mts';
-import { reviewerSkipRemedy } from './overrides.mts';
 import { emitMergedLensResults } from './lens/merge-results.mts';
+import { narrowSelection, narrowTasks, printRemedy, type RecheckTarget } from './valve/recheck.mts';
 import {
   mapLimit,
   planReviewWork,
@@ -121,7 +121,7 @@ export function describeReviewModels(
  */
 export async function runReviewGate(
   cwd = process.cwd(),
-  { exec = execJudgeAsync }: { exec?: typeof execJudgeAsync } = {},
+  { exec = execJudgeAsync, only }: { exec?: typeof execJudgeAsync; only?: RecheckTarget } = {},
 ): Promise<number> {
   const timing = new ReviewGateTiming();
   let preJudgeTree: string | null | undefined;
@@ -221,9 +221,10 @@ export async function runReviewGate(
       }
       selected = selected.filter((s) => !skip.has(s.reviewer.name));
     }
+    if (only) selected = narrowSelection(selected, only, knobDropped);
     // Before the early return: name what an empty domain root dropped, then record every non-run.
     reportNonRuns(staged, cfg, selected, knobDropped, skip);
-    if (selected.length === 0) return finish(0);
+    if (selected.length === 0) return finish(only ? 1 : 0); // an empty recheck is never a PASS
     if (reviewMode) {
       assetRoot = process.env.DEVKIT_REVIEW_ASSET_ROOT;
       identitySalts = preflightReviewAssets(cwd, assetRoot, selected, cfg);
@@ -304,6 +305,7 @@ export async function runReviewGate(
     resolveLensGroups(),
     resolveChunkCap(process.env.GUARD_CORRECTNESS_CHUNK, cfg.review.correctnessChunkLoc),
   );
+  if (only) plan.tasks = narrowTasks(plan.tasks, only); // the other lenses stay cached or unjudged
   // A cached PASS was judged against the base it STORED, not this run's (sc-3468): classify once per
   // reviewer so its line, scope row and cache_hit all say the same thing.
   const baseOf = new Map(
@@ -448,7 +450,7 @@ export async function runReviewGate(
   );
   if (progressFile) clearProgress(progressFile); // ran to completion → nothing unfinished to report
 
-  emitMergedLensResults(splitParts, firstModel); // one merged review_result per split reviewer
+  if (!only?.lens) emitMergedLensResults(splitParts, firstModel); // never a recheck's partial vector
   const fails = results.filter((r) => r.status === 'fail');
   const findingsPrinted = new Set<string>();
   for (const f of fails) {
@@ -467,8 +469,7 @@ export async function runReviewGate(
       if (findings) console.error(findings);
     }
     if (f.transcript) console.error(f.transcript.trim());
-    if (firstFindingForReviewer && f.escalated)
-      console.error(`   Remedy: ${reviewerSkipRemedy(f.name)}`);
+    if (firstFindingForReviewer) printRemedy(f, splitParts, only);
   }
   const errors = results.filter((r) => r.status === 'error');
   for (const r of errors) {
