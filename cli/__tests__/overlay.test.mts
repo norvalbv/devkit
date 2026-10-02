@@ -18,7 +18,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import doctorRun from '../commands/doctor.mts';
 import { applyInit } from '../commands/init.mts';
 import update, { fetchLatestTag } from '../commands/update.mts';
@@ -31,22 +31,17 @@ import {
   type Selection,
 } from '../lib/components.mts';
 import { isTracked } from '../lib/git-tracked.mts';
-import { wireOverlayAntiSlop } from '../lib/install/anti-slop/overlay/install.mts';
 import { reviewHookDrift } from '../lib/husky/review-drift.mts';
 import { healAliasCmd, syncOverlayHook } from '../lib/overlay.mts';
 import { removeSkills } from '../lib/sync-manifest.mts';
 import { devkitHome, rootRegistry, testExecFileSync } from './_helpers.mts';
+import {
+  gitVerb,
+  isolateOverlayTestEnv,
+  readCfgComponents,
+  workRepo as fixtureWorkRepo,
+} from './_overlay-fixture.mts';
 
-/** Verbs that DISPATCH A HOOK here: `commit`, and the `ci` heal alias, which re-pins hooksPath and
- *  then commits. Both are process trees; every other git verb is a leaf and stays raw. */
-const HOOK_DISPATCHING_GIT_VERBS = new Set(['commit', 'ci']);
-/** See suite-hangs-bound-at-the-spawn-site: `workRepo` installs a real `.husky/pre-commit`. */
-const gitVerb = (args: string[]) =>
-  HOOK_DISPATCHING_GIT_VERBS.has(args[0]) ? testExecFileSync : execFileSync;
-
-// A full overlay selection with the opt-ins (agentHooks + fallow) ON — what the wizard produces
-// when the user checks everything. applyInit consumes an already-resolved selection directly, so we
-// apply the overlay constraints here too (forces tsconfig/structure/searchSteering off, husky on).
 const overlayAll = () =>
   applyOverlayConstraints({ ...defaultSelection(), agentHooks: true, fallow: true }, 'react-app');
 
@@ -75,30 +70,7 @@ vi.mock('../commands/update.mts', async (importOriginal) => ({
 const { mkTmp, cleanup } = rootRegistry();
 
 // A work repo that already has a committed husky hook + flat eslint + biome (the team's).
-function workRepo() {
-  const root = mkTmp('overlay-');
-  const git = (...a) => gitVerb(a)('git', a, { cwd: root });
-  git('init', '-q');
-  git('config', 'user.email', 't@t.t');
-  git('config', 'user.name', 't');
-  writeFileSync(
-    join(root, 'package.json'),
-    JSON.stringify({ name: 'work', devDependencies: { react: '^18' } }, null, 2),
-  );
-  mkdirSync(join(root, '.husky'), { recursive: true });
-  writeFileSync(join(root, '.husky', 'pre-commit'), '#!/bin/sh\necho team-hook\n');
-  writeFileSync(join(root, 'eslint.config.mjs'), 'export default [{ rules: {} }];\n');
-  writeFileSync(join(root, 'biome.jsonc'), '{ "linter": { "enabled": true } }\n');
-  git('config', 'core.hooksPath', '.husky/_'); // simulate husky owning the hook
-  git('add', '-A');
-  // Reason: test scenario setup is intentionally explicit + self-contained per install mode (package/standalone/overlay/monorepo); shared bits already live in __tests__/_helpers.mjs
-  // fallow-ignore-next-line code-duplication
-  git('commit', '-qm', 'init');
-  return root;
-}
-
-const readCfgComponents = (root) =>
-  JSON.parse(readFileSync(join(root, '.devkit', 'config.json'), 'utf8')).components;
+const workRepo = () => fixtureWorkRepo(mkTmp);
 
 // Seed an existing (untracked) .claude/settings.local.json — the user's own — before an overlay run.
 function seedLocalSettings(root, obj) {
@@ -106,29 +78,7 @@ function seedLocalSettings(root, obj) {
   writeFileSync(join(root, '.claude', 'settings.local.json'), JSON.stringify(obj));
 }
 
-// Unlike the ship-branch/reship/reconcile suites (which spawn devkit as a SUBPROCESS and isolate git
-// via an explicit `env: GENV` per call), this file calls `applyInit`/`overlay.mts` IN-PROCESS — so
-// its internal `execFileSync('git', …)` calls (e.g. installHealAlias's `alias.ci` collision check)
-// inherit whatever `process.env` already is, not anything this test passes per-call. A developer
-// machine with its OWN global `git ci` alias already set makes that check correctly (and
-// deliberately — see overlay.mts) skip installing devkit's self-heal alias, which then reads as a
-// false failure here. Isolate the whole process for the file's duration, restored after, so the
-// suite is deterministic regardless of the host's real ~/.gitconfig.
-const ORIGINAL_GIT_CONFIG_GLOBAL = process.env.GIT_CONFIG_GLOBAL;
-const ORIGINAL_GIT_CONFIG_SYSTEM = process.env.GIT_CONFIG_SYSTEM;
-beforeEach(() => {
-  vi.spyOn(console, 'log').mockImplementation(() => {});
-  process.env.GIT_CONFIG_GLOBAL = '/dev/null';
-  process.env.GIT_CONFIG_SYSTEM = '/dev/null';
-});
-afterEach(() => {
-  vi.restoreAllMocks();
-  cleanup();
-  if (ORIGINAL_GIT_CONFIG_GLOBAL === undefined) delete process.env.GIT_CONFIG_GLOBAL;
-  else process.env.GIT_CONFIG_GLOBAL = ORIGINAL_GIT_CONFIG_GLOBAL;
-  if (ORIGINAL_GIT_CONFIG_SYSTEM === undefined) delete process.env.GIT_CONFIG_SYSTEM;
-  else process.env.GIT_CONFIG_SYSTEM = ORIGINAL_GIT_CONFIG_SYSTEM;
-});
+isolateOverlayTestEnv(cleanup);
 
 describe('overlay (local-only) install', () => {
   it('grandfathers existing debt into local canonical baselines on first install', async () => {
@@ -1332,110 +1282,6 @@ describe('overlay (local-only) install', () => {
 
 // Overlay's contract is "nothing git can see"; these cover the two paths that break it quietly — an
 // already-TRACKED capability, and a consumer Oxlint config an overlay `-c` would stop honouring.
-describe('overlay anti-slop — refusals that keep the tree clean', () => {
-  const porcelain = (root: string) =>
-    execFileSync('git', ['status', '--porcelain'], { cwd: root, encoding: 'utf8' });
-
-  it('refuses when git already tracks an anti-slop path, and writes nothing', async () => {
-    const root = workRepo();
-    const git = (...a: string[]) => execFileSync('git', a, { cwd: root });
-    writeFileSync(join(root, '.anti-slop-baseline.json'), '{"schemaVersion":1,"entries":[]}\n');
-    git('add', '-f', '.anti-slop-baseline.json');
-    git('commit', '-qm', 'tracked baseline');
-
-    await applyInit(root, {
-      stack: 'generic',
-      selection: applyOverlayConstraints({ ...defaultSelection(), antiSlop: true }, 'react-app'),
-      overlay: true,
-      devkitRef: 'v0.0.0-test',
-    });
-
-    expect(readCfgComponents(root).antiSlop).toBe(false);
-    expect(existsSync(join(root, 'oxlint.devkit.json'))).toBe(false);
-    expect(existsSync(join(root, '.devkit', 'anti-slop', 'manifest.json'))).toBe(false);
-    expect(porcelain(root)).toBe('');
-  });
-
-  it('refuses when the repo owns its own Oxlint config, rather than silently overriding it', async () => {
-    const root = workRepo();
-    const git = (...a: string[]) => execFileSync('git', a, { cwd: root });
-    writeFileSync(join(root, '.oxlintrc.json'), '{ "rules": { "eqeqeq": "error" } }\n');
-    git('add', '-A');
-    git('commit', '-qm', 'consumer oxlint config');
-
-    await applyInit(root, {
-      stack: 'generic',
-      selection: applyOverlayConstraints({ ...defaultSelection(), antiSlop: true }, 'react-app'),
-      overlay: true,
-      devkitRef: 'v0.0.0-test',
-    });
-
-    expect(readCfgComponents(root).antiSlop).toBe(false);
-    expect(existsSync(join(root, 'oxlint.devkit.json'))).toBe(false);
-    // The consumer's own config survives byte for byte.
-    expect(readFileSync(join(root, '.oxlintrc.json'), 'utf8')).toContain('"eqeqeq": "error"');
-    expect(porcelain(root)).toBe('');
-  });
-
-  // The damage is a WINDOW — the caller's later reconcile restores what a partial one pruned — so an
-  // end-state assertion cannot see it. Asserted at the seam: this writes no exclude line at all.
-  it('wireOverlayAntiSlop never reconciles the exclude file itself', () => {
-    const root = workRepo();
-    const git = (...a: string[]) => execFileSync('git', a, { cwd: root });
-    writeFileSync(join(root, '.anti-slop-baseline.json'), '{"schemaVersion":1,"entries":[]}\n');
-    git('add', '-f', '.anti-slop-baseline.json');
-    git('commit', '-qm', 'tracked baseline');
-
-    const excludePath = join(root, '.git', 'info', 'exclude');
-    mkdirSync(join(root, '.git', 'info'), { recursive: true });
-    const seeded = [
-      '# devkit overlay (local-only) — not committed',
-      '.claude/skills/',
-      '.claude/agents/',
-      '.devkit/skills-manifest.json',
-      '',
-    ].join('\n');
-    writeFileSync(excludePath, seeded);
-
-    const wiring = wireOverlayAntiSlop(root, root, '', { antiSlop: true }, false);
-
-    expect(wiring.wired).toBe(false);
-    // Byte-for-byte: the agent half is the caller's to reconcile, and nothing here may touch it.
-    expect(readFileSync(excludePath, 'utf8')).toBe(seeded);
-  });
-
-  it('an Oxc install failure is printed and the overlay install goes on', () => {
-    const root = workRepo();
-    writeFileSync(join(root, '.devkit'), 'not a directory\n');
-    const log = vi.mocked(console.log);
-    log.mockClear();
-    expect(wireOverlayAntiSlop(root, root, '', { antiSlop: false }, false).wired).toBe(false);
-    expect(log.mock.calls.flat().join('\n')).toContain('! Oxc could not be installed');
-  });
-
-  // The writer skips assertNoConfigCollisions under overlay because it neither reads nor writes a
-  // consumer root config; the PREFLIGHT has to agree or a second oxfmt config aborts the install.
-  it('installs despite two consumer Oxfmt configs — overlay owns neither', async () => {
-    const root = workRepo();
-    const git = (...a: string[]) => execFileSync('git', a, { cwd: root });
-    writeFileSync(join(root, '.oxfmtrc.json'), '{ "indentWidth": 2 }\n');
-    writeFileSync(join(root, 'oxfmt.config.mts'), 'export default { indentWidth: 2 };\n');
-    git('add', '-A');
-    git('commit', '-qm', 'two oxfmt configs');
-
-    await applyInit(root, {
-      stack: 'generic',
-      selection: applyOverlayConstraints({ ...defaultSelection(), antiSlop: true }, 'react-app'),
-      overlay: true,
-      devkitRef: 'v0.0.0-test',
-    });
-
-    expect(readCfgComponents(root).antiSlop).toBe(true);
-    expect(existsSync(join(root, 'oxlint.devkit.json'))).toBe(true);
-    expect(porcelain(root)).toBe('');
-  });
-});
-
 // `devkit update` re-pins the CLI but never regenerates the git-ignored .devkit/hooks/pre-commit, so an
 // updated overlay repo can keep an OLD hook shape (a version-skew gap). syncOverlayHook + `doctor --fix`
 // let the hook be refreshed without a manual `devkit init --overlay`.
