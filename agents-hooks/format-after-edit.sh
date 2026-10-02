@@ -71,10 +71,29 @@ if [[ "$file_path" =~ \.(tsx?|css)$ ]] && [ -x "./node_modules/.bin/eslint" ]; t
   fi
   in_scope=""
   if [ -n "$scan_roots" ]; then
-    # Match the edited file against any configured scanRoot path segment.
+    # Match whole path segments (sc-1053): a substring match let `src` cover `src2/`, and a project
+    # under ~/src/ put every file in scope. Both sides resolve to absolute against the UNRESOLVED
+    # project root (as the ledger strip does), with `.`/`..`/empty segments collapsed lexically.
+    norm_path() {
+      local seg joined="" n=0 i=0 out=() segs=()
+      IFS=/ read -ra segs <<< "$1"
+      for seg in "${segs[@]}"; do
+        case "$seg" in
+          '' | .) ;;
+          ..) [ "$n" -gt 0 ] && n=$((n - 1)) ;;
+          *) out[n]="$seg"; n=$((n + 1)) ;;
+        esac
+      done
+      while [ "$i" -lt "$n" ]; do joined="$joined/${out[i]}"; i=$((i + 1)); done
+      printf '%s' "${joined:-/}"
+    }
+    project_root="${CLAUDE_PROJECT_DIR:-$(pwd)}"
+    abs_path() { if [[ "$1" == /* ]]; then norm_path "$1"; else norm_path "$project_root/$1"; fi; }
+    scope_abs=$(abs_path "$file_path")
     while IFS= read -r root; do
       [ -z "$root" ] && continue
-      if [[ "$file_path" == *"/$root/"* ]] || [[ "$file_path" == "$root/"* ]] || [[ "$file_path" == *"/$root"* ]]; then
+      root_abs=$(abs_path "$root")
+      if [[ "$scope_abs" == "$root_abs" || "$scope_abs" == "${root_abs%/}/"* ]]; then
         in_scope="1"; break
       fi
     done <<< "$scan_roots"
