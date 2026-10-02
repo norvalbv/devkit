@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-/** Emit the gate-input registry for shell callers: `<root> [field] [--null] [--cache] [--local-cache] [--each-file]`.
+/** Emit the gate-input registry for shell callers:
+ * `<root> [field] [--null] [--cache] [--local-cache] [--each-file] [--branch]`.
  * A bad guard.config.json exits 1 after the fixed entries, so ship still links those. */
 import { gateInputs } from '../../../gate-engine/deterministic/gate-inputs.mts';
 
@@ -13,6 +14,7 @@ try {
     if (args.includes('--cache') && !input.cache) continue;
     if (args.includes('--local-cache') && !input.localCache) continue;
     if (args.includes('--each-file') && !input.eachFile) continue;
+    if (args.includes('--branch') && input.share !== 'branch') continue;
     process.stdout.write(`${input.path}${end}`);
   }
 } catch (error) {

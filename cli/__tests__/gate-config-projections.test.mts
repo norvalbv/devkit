@@ -203,7 +203,7 @@ describe('gate config projections', () => {
   });
 
   it.each(['main', 'linked'])(
-    'ship links structure baselines split across a linked and the main worktree (config in %s)',
+    "ship links a linked worktree's own structure baselines, never the main worktree's (config in %s)",
     (configIn) => {
       const { root: main, worktree } = fixture();
       execFileSync('git', [
@@ -233,11 +233,12 @@ describe('gate config projections', () => {
       const result = project(linked, worktree, 'ship');
 
       expect(result.status, result.stderr).toBe(0);
-      for (const name of ['a.mjs', 'b.mjs']) {
-        expect(lstatSync(join(worktree, STRUCTURE_BASELINE_DIR, name)).isSymbolicLink(), name).toBe(
-          true,
-        );
-      }
+      expect(lstatSync(join(worktree, STRUCTURE_BASELINE_DIR, 'b.mjs')).isSymbolicLink()).toBe(
+        true,
+      );
+      expect(
+        lstatSync(join(worktree, STRUCTURE_BASELINE_DIR, 'a.mjs'), { throwIfNoEntry: false }),
+      ).toBeUndefined();
     },
   );
 
