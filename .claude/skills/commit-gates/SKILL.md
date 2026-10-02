@@ -40,7 +40,8 @@ command. Do not pre-run every gate or replace the managed chain with a hand-writ
    (`--resume <branch> -- <path>`) instead of chasing the finding. Each briefed path is one literal file
    from the repo root; a glob is not expanded, so brief every file by name.
 4. Treat a bypass as an explicit operator decision. Never use `--no-verify`, silently disable a
-   selected guard, freeze a baseline to absorb new debt, or invent an environment variable.
+   selected guard, freeze a baseline to absorb new debt, or invent an environment variable. A
+   `guard-review waive` backed by a reproduction (see the reviewer gates below) is a dispute, not a bypass.
 
 ## Managed gate families
 
@@ -67,6 +68,10 @@ command. Do not pre-run every gate or replace the managed chain with a hand-writ
   base, so `git show HEAD:<file>`, `grep` and `git diff --stat` in your own checkout can all agree
   with each other and still describe a different tree. Waive on evidence read from the reviewed
   base, and pass the `--base` the block note prints so the record says which tree you checked.
+  When a correctness or conventions finding names a concrete input and running that input against
+  the reviewed code gives the correct result, waive it with the command and its output as the
+  rationale. Do not add tests or edits only to change the diff and re-sample the judge: any real
+  change voids the waiver and proves nothing. A race that did not reproduce is not disproved.
   A lens PASS is one sample from a nondeterministic judge, not a certificate that its concern is
   clean. A later attempt can fail the same lens on code you did not touch. Treat that as an
   ordinary finding and fix it: it was missed, not caused by your last edit.

@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { conventionWaiverLens, parseConventionFindings } from '../evidence/conventions.mts';
 import { responseContractFor } from '../contracts/registry.mts';
 import type { GroundingSource } from '../contracts/conventions-grounding.mts';
@@ -256,6 +256,25 @@ describe('applyOverrideValve — conventions waiver across anchor drift (sc-3324
     expect(res2.reason).toContain(
       'guard-review waive conventions-reviewer:src/flows.ts@CLAUDE.md:20',
     );
+  });
+
+  it('prints a pasted-terminal-output rationale without its escape sequences', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'conv-waive-'));
+    dirs.push(cwd);
+    const raw = transcript(SIZE_RULE, 'a — src/flows.ts:668');
+    const [lens] = lensOf(raw);
+    const fp = fingerprint('conventions-reviewer', lens ?? '', 'DIFF-UNCHANGED');
+    reconcile(cwd, 'conventions-reviewer', [lens ?? ''], 'DIFF-UNCHANGED', 'T', {
+      [`OVERRIDE_${fp}_RATIONALE`]: 'wc -l says 496 \x1b]0;pwned\x07\x1b[2J\x1b[32mok\x1b[0m',
+    });
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const res = outcome(raw);
+    applyOverrideValve(sel, res, cwd, io);
+    const printed = err.mock.calls.flat().join('\n');
+    err.mockRestore();
+    expect(res.status).toBe('pass');
+    expect(printed).toContain('wc -l says 496 ok');
+    expect(printed).not.toContain('\x1b');
   });
 
   it('a waiver for one rule does not pass a second rule cited at the same path:line', () => {

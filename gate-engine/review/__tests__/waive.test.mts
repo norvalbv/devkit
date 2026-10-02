@@ -276,6 +276,42 @@ describe('waiver_created telemetry', () => {
     expect(loadOverrides(cwd)[fp].rationale).toBe(long);
   });
 
+  // commit-gates tells authors to waive a non-reproducing finding with the command and its output as
+  // the rationale, so pasted terminal output (newlines, quotes, tabs, colour escapes) must round-trip.
+  it('a pasted reproduction (multi-line output, colour escapes) is stored as text and suppresses', () => {
+    const cwd = repo();
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const fp = fingerprint('correctness-reviewer', 'error-and-edge-classification', 'D');
+    const output =
+      '$ node -e "console.log(captureSymbols(\'`${`${a}`}`\'))"\n' +
+      "[ 'a' ]\n\t\x1b[32m✓\x1b[0m nested interpolation captured\r\n";
+    expect(
+      runWaive(
+        ['correctness-reviewer:error-and-edge-classification', fp, output],
+        cwd,
+        fixedAuthor,
+      ),
+    ).toBe(0);
+    const raw = readFileSync(join(cwd, '.devkit', 'correctness-overrides.json'), 'utf8');
+    expect([...raw].filter((c) => c < ' ' && c !== '\n')).toEqual([]);
+    expect(loadOverrides(cwd)[fp].rationale).toBe(output.trim());
+    const r = reconcile(
+      cwd,
+      'correctness-reviewer',
+      ['error-and-edge-classification'],
+      'D',
+      '2026-01-01',
+    );
+    expect(r.blocking).toEqual([]);
+    expect(r.suppressed[0].rationale).toBe(output.trim());
+    // Stored verbatim, but never re-emitted raw: a pasted escape sequence must not drive the terminal.
+    expect(runWaive(['--list'], cwd)).toBe(0);
+    const printed = [...err.mock.calls, ...log.mock.calls].flat().join('\n');
+    expect(printed).toContain('nested interpolation captured');
+    expect(printed).not.toContain('\x1b');
+  });
+
   it('a refused waive (cascade reviewer) emits nothing', () => {
     const cwd = repo();
     vi.spyOn(console, 'error').mockImplementation(() => {});
