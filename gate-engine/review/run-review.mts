@@ -34,6 +34,7 @@
 import { envFlag, type GuardConfig, resolveGuardConfig } from '../config.mts';
 import { emitReviewCacheHit } from '../judge/gate-events.mts';
 import { reportGateInfraFailure } from '../judge/odb-probe.mts';
+import { reportFleetMcp } from '../judge/mcp/profile.mts';
 import { execJudgeAsync, strictRemedy } from '../judge/run-judge.mts';
 import { loadCache } from './cache.mts';
 import { type CascadeResult, runCascade } from './cascade/reviewer.mts';
@@ -45,6 +46,7 @@ import {
   cachedPassLine,
   judgedBaseSha,
   primeReviewBaseContext,
+  reportMcpDegraded,
 } from './evidence/base-context.mts';
 import { loadReviewerContext } from './evidence/commit-message.mts';
 import { coverageFields, partialEvidenceNote } from './evidence/packet/coverage.mts';
@@ -56,8 +58,8 @@ import { assertNoMassDeletion } from './integrity/mass-deletion.mts';
 import { gitCached, headHash, stagedFiles, stagedTreeHash } from './evidence/staged-git.mts';
 import { reviewerTargetSalts } from './evidence/targets-block.mts';
 import { reviewerSkipRemedy } from './overrides.mts';
+import { emitMergedLensResults } from './lens/merge-results.mts';
 import {
-  emitMergedLensResults,
   mapLimit,
   planReviewWork,
   resolveChunkCap,
@@ -319,7 +321,7 @@ export async function runReviewGate(
         hit.label,
         baseOf.get(hit.label) ?? cachedBaseState(cwd, hit.judgedBases, hit.files),
         hit.part ? 'identical' : 'identical diff',
-        hit.degradedCause !== undefined,
+        hit.degradedCause !== undefined || hit.mcpDegradedCause !== undefined,
       ) +
         // A part's packet is cut from its own files (a chunk's, or the whole scope for a lens).
         partialEvidenceNote(
@@ -329,6 +331,8 @@ export async function runReviewGate(
         ),
     );
     if (hit.degradedCause) reportRetrievalDegraded(hit.label, hit.degradedCause);
+    // A cached split PART is reported once at its reviewer's merge, with the freshly judged groups.
+    if (hit.mcpDegradedCause && !hit.part) reportMcpDegraded(hit.label, hit.mcpDegradedCause, true);
   }
   // Before any verdict AND before the fully-cached early return below (sc-2480).
   const fresh = new Set(plan.tasks.map((t) => t.base.reviewer.name)).size;
@@ -352,6 +356,8 @@ export async function runReviewGate(
     });
   }
   if (plan.tasks.length === 0) return finish(0);
+  // Before any spawn, so the warning names the reviewers it weakens (sc-2837).
+  const mcpCause = reportFleetMcp(cwd, judgeEnv, plan.tasks);
   console.error(
     `guard-review: running ${describeReviewModels(
       plan.tasks.map((t) => t.sel.reviewer),
@@ -390,6 +396,7 @@ export async function runReviewGate(
     assetRoot,
     judgeEnv,
     promptExtras: ctx.promptExtras,
+    mcpDegradedCause: mcpCause,
   };
   // sc-1476/sc-2088: contract recovery defers out of the contended wave; the serial phase below
   // re-runs each parked reviewer solo through the SAME settle path.

@@ -57,6 +57,8 @@ export interface PreparedJudgeMcpProfile {
   servers: McpServers;
   /** Secret-safe identity of the exact server definitions prepared for this spawn. */
   capabilityFingerprint: string;
+  /** Set when THIS spawn runs without a verdict-bearing server (sc-2837) — the spawn's own truth. */
+  degradedCause?: string;
   cleanup: () => void;
 }
 
@@ -212,32 +214,203 @@ export function withNamedAgentMcpTools(tools: string, ...extraTools: string[]): 
   return [...new Set(values)].join(',');
 }
 
-/**
- * Stable, secret-safe cache partition for the capabilities a named judge can actually receive.
- * The digest includes the declared tool set, trusted registry location, and selected definitions;
- * cache entries therefore never survive a capability change, while secret-bearing config is never
- * written to the cache itself.
- */
-export function judgeMcpCapabilityFingerprint(
-  profile: JudgeMcpProfile,
-  allowedTools: string,
+/** Servers whose absence weakens a reviewer's VERDICT (sc-2837); the others are only narrated.
+ * Why codebase alone: the judge-mcp-profiles decision note of 2026-10-01. */
+export const VERDICT_BEARING_SERVER_NAMES: readonly string[] = ['codebase'];
+
+/** Where a profile's servers resolved from, and which of them did not — computed without spawning. */
+export interface JudgeMcpResolution {
+  kind: 'unavailable' | 'unreadable' | 'resolved';
+  /** The canonical trusted registry, or the requested path when it is not trustable. */
+  registryPath: string;
+  servers: McpServers;
+  /** Requested servers the spawn will NOT receive; every one of them when there is no registry. */
+  missing: string[];
+  /** One warning identity per registry state, shared by every caller in this process. */
+  warnKey: string;
+}
+
+function resolveJudgeMcp(
+  serverNames: readonly string[],
   options: PrepareJudgeMcpOptions,
-): string {
+): JudgeMcpResolution {
   const env = options.env ?? process.env;
   const explicit = options.registryPath !== undefined || env[REGISTRY_ENV] !== undefined;
   const requested =
     options.registryPath ?? env[REGISTRY_ENV] ?? path.join(homedir(), '.claude.json');
   const registryPath = trustedRegistryPath(requested, options.cwd, explicit, options.projectRoots);
-  const registry = registryPath ? readRegistry(registryPath) : null;
+  if (!registryPath)
+    return {
+      kind: 'unavailable',
+      registryPath: requested,
+      servers: {},
+      missing: [...serverNames],
+      warnKey: `registry:${requested}`,
+    };
+  const registry = readRegistry(registryPath);
+  if (!registry)
+    return {
+      kind: 'unreadable',
+      registryPath,
+      servers: {},
+      missing: [...serverNames],
+      warnKey: `registry-json:${registryPath}`,
+    };
   const servers =
-    profile.kind === 'named-agent' && registry
-      ? selectedServers(
+    serverNames.length === 0
+      ? {}
+      : selectedServers(
           registry,
-          profile.serverNames,
+          serverNames,
           projectCandidates(options.cwd, env, options.projectRoots),
-        )
-      : {};
-  return capabilityFingerprint(profile, allowedTools, registryPath ?? requested, servers);
+        );
+  const missing = serverNames.filter((name) => !Object.hasOwn(servers, name));
+  return {
+    kind: 'resolved',
+    registryPath,
+    servers,
+    missing,
+    warnKey: `missing:${registryPath}:${missing.join(',')}`,
+  };
+}
+
+/** Which of a profile's servers a judge spawned now would run without (sc-2837). */
+export function judgeMcpMissingServers(
+  profile: JudgeMcpProfile,
+  options: PrepareJudgeMcpOptions,
+): JudgeMcpResolution {
+  return resolveJudgeMcp(profile.kind === 'named-agent' ? profile.serverNames : [], options);
+}
+
+/** The verdict-bearing servers in a missing set — non-empty means a PASS is DEGRADED. */
+export function verdictBearingMissing(resolution: Pick<JudgeMcpResolution, 'missing'>): string[] {
+  return resolution.missing.filter((name) => VERDICT_BEARING_SERVER_NAMES.includes(name));
+}
+
+function missingReason(resolution: JudgeMcpResolution): string {
+  if (resolution.kind === 'unavailable')
+    return `trusted MCP registry unavailable at ${resolution.registryPath}`;
+  if (resolution.kind === 'unreadable') return 'trusted MCP registry is unreadable';
+  return 'missing from the trusted MCP registry';
+}
+
+/** One-line cause a DEGRADED reviewer verdict carries, or undefined when nothing verdict-bearing is
+ * missing. */
+export function mcpDegradedCause(resolution: JudgeMcpResolution): string | undefined {
+  return degradedCauseFor(resolution.missing, missingReason(resolution));
+}
+
+function degradedCauseFor(missing: readonly string[], reason: string): string | undefined {
+  const lost = verdictBearingMissing({ missing: [...missing] });
+  if (lost.length === 0) return undefined;
+  return `MCP ${lost.join(', ')} unavailable (${reason}) — reviewer ran without codebase search`;
+}
+
+/** A spawn's own cause: its profile's, else a verdict-bearing server the codex translation dropped
+ * (`injected` is codex-only; url-typed or env-colliding servers are not expressible there). */
+export function spawnDegradedCause(
+  prepared: Pick<PreparedJudgeMcpProfile, 'degradedCause' | 'serverNames'>,
+  injected?: readonly string[],
+): string | undefined {
+  if (prepared.degradedCause !== undefined || injected === undefined) return prepared.degradedCause;
+  const dropped = prepared.serverNames.filter((name) => !injected.includes(name));
+  return degradedCauseFor(
+    dropped,
+    'dropped by the codex judge config — url-typed or inexpressible',
+  );
+}
+
+/** Folds the MCP cause across one verdict's judge spawns: once any spawn reports, the spawns decide —
+ * a clean spawn clears a stale run-level cause, and any degraded spawn degrades the verdict. */
+export function mcpSpawnTracker(runLevelCause?: string, expectedFingerprint?: string) {
+  let spawned = false;
+  let spawnCause: string | undefined;
+  let fingerprint: string | undefined;
+  return {
+    observe: (degradedCause?: string, spawnFingerprint?: string) => {
+      spawned = true;
+      spawnCause ??= degradedCause;
+      fingerprint = spawnFingerprint;
+    },
+    cause: () => (spawned ? spawnCause : runLevelCause),
+    /** Did the spawn get other capabilities than expected? A degraded spawn, or a clean one after a
+     * degraded gate-start read (registry repaired), explains its own change. */
+    drift: () => {
+      if (fingerprint === undefined || fingerprint === expectedFingerprint) return 'same';
+      if (spawnCause !== undefined) return 'degraded-spawn';
+      return runLevelCause === undefined ? 'unexplained' : 'recovered';
+    },
+  };
+}
+
+/** The reviewer fleet's gate-start read: every cascade judge gets the same baseline profile, so one
+ * resolution names them all, and the per-spawn warning shares its key and stays silent. */
+export function reportFleetMcp(
+  cwd: string,
+  env: NodeJS.ProcessEnv,
+  tasks: readonly { base: { reviewer: { name: string } } }[],
+): string | undefined {
+  const resolution = judgeMcpMissingServers(namedAgentMcpProfile(), { cwd, env });
+  reportMissingMcpServers(resolution, [...new Set(tasks.map((t) => t.base.reviewer.name))]);
+  return mcpDegradedCause(resolution);
+}
+
+/** Narrate the run-level state for `agents` (when one was read), then track their spawns from it. */
+export function trackMcpSpawns(
+  resolution: JudgeMcpResolution | undefined,
+  agents: string[],
+  expectedFingerprint?: string,
+) {
+  if (resolution) reportMissingMcpServers(resolution, agents);
+  return mcpSpawnTracker(resolution && mcpDegradedCause(resolution), expectedFingerprint);
+}
+
+/** Narrate a missing-server state once per registry state per process; a caller naming the agents
+ * goes first, so the per-spawn call shares its key and stays silent. Codebase gaps carry ⚠️ DEGRADED. */
+export function reportMissingMcpServers(
+  resolution: JudgeMcpResolution,
+  agents: readonly string[] = [],
+): void {
+  if (resolution.missing.length === 0) return;
+  const degraded = verdictBearingMissing(resolution).length > 0;
+  const marker = degraded ? '⚠️  ' : '';
+  const servers = resolution.missing.join(', ');
+  if (agents.length > 0) {
+    warnOnce(
+      resolution.warnKey,
+      degraded
+        ? `${marker}guard-review: DEGRADED — no MCP ${servers} for ${agents.join(', ')} (${missingReason(resolution)}) under strict isolation; a judged PASS from them is marked DEGRADED`
+        : `guard-review: no MCP ${servers} for ${agents.join(', ')} (${missingReason(resolution)}) — continuing under strict isolation`,
+    );
+    return;
+  }
+  const suffix = degraded ? ' — DEGRADED' : '';
+  if (resolution.kind === 'unavailable')
+    warnOnce(
+      resolution.warnKey,
+      `${marker}guard-review: trusted MCP registry unavailable at ${resolution.registryPath} — named agents continue with strict-empty MCP isolation${suffix}`,
+    );
+  else if (resolution.kind === 'unreadable')
+    warnOnce(
+      resolution.warnKey,
+      `${marker}guard-review: trusted MCP registry is unreadable — named agents continue with strict-empty MCP isolation${suffix}`,
+    );
+  else
+    warnOnce(
+      resolution.warnKey,
+      `${marker}guard-review: named-agent MCP profile missing ${servers} — continuing with the configured subset under strict isolation${suffix}`,
+    );
+}
+
+/** Secret-safe cache partition over the declared tools, trusted registry and selected server
+ * definitions: an entry never survives a capability change, and no secret reaches the cache. */
+export function judgeMcpCapabilityFingerprint(
+  profile: JudgeMcpProfile,
+  allowedTools: string,
+  options: PrepareJudgeMcpOptions,
+): string {
+  const resolution = judgeMcpMissingServers(profile, options);
+  return capabilityFingerprint(profile, allowedTools, resolution.registryPath, resolution.servers);
 }
 
 function capabilityFingerprint(
@@ -251,12 +424,16 @@ function capabilityFingerprint(
     .digest('hex');
 }
 
-function emptyProfile(capabilityFingerprint: string): PreparedJudgeMcpProfile {
+function emptyProfile(
+  capabilityFingerprint: string,
+  degradedCause?: string,
+): PreparedJudgeMcpProfile {
   return {
     args: ['--mcp-config', EMPTY_MCP_CONFIG, '--strict-mcp-config'],
     serverNames: [],
     servers: {},
     capabilityFingerprint,
+    degradedCause,
     cleanup: () => {},
   };
 }
@@ -269,38 +446,16 @@ export function prepareJudgeMcpProfile(
   if (profile.kind === 'none')
     return emptyProfile(judgeMcpCapabilityFingerprint(profile, allowedTools, options));
 
-  const env = options.env ?? process.env;
-  const explicit = options.registryPath !== undefined || env[REGISTRY_ENV] !== undefined;
-  const requested =
-    options.registryPath ?? env[REGISTRY_ENV] ?? path.join(homedir(), '.claude.json');
-  const registryPath = trustedRegistryPath(requested, options.cwd, explicit, options.projectRoots);
-  if (!registryPath) {
-    warnOnce(
-      `registry:${requested}`,
-      `guard-review: trusted MCP registry unavailable at ${requested} — named agents continue with strict-empty MCP isolation`,
-    );
-    return emptyProfile(capabilityFingerprint(profile, allowedTools, requested, {}));
-  }
-  const registry = readRegistry(registryPath);
-  if (!registry) {
-    warnOnce(
-      `registry-json:${registryPath}`,
-      'guard-review: trusted MCP registry is unreadable — named agents continue with strict-empty MCP isolation',
-    );
-    return emptyProfile(capabilityFingerprint(profile, allowedTools, registryPath, {}));
-  }
-
-  const roots = projectCandidates(options.cwd, env, options.projectRoots);
-  const servers = selectedServers(registry, profile.serverNames, roots);
+  const resolution = judgeMcpMissingServers(profile, options);
+  const { registryPath, servers } = resolution;
+  reportMissingMcpServers(resolution);
   const present = Object.keys(servers);
-  const missing = profile.serverNames.filter((name) => !present.includes(name));
-  if (missing.length > 0)
-    warnOnce(
-      `missing:${registryPath}:${missing.join(',')}`,
-      `guard-review: named-agent MCP profile missing ${missing.join(', ')} — continuing with the configured subset under strict isolation`,
-    );
+  const degradedCause = mcpDegradedCause(resolution);
   if (present.length === 0)
-    return emptyProfile(capabilityFingerprint(profile, allowedTools, registryPath, {}));
+    return emptyProfile(
+      capabilityFingerprint(profile, allowedTools, registryPath, {}),
+      degradedCause,
+    );
 
   let directory: string | null = null;
   try {
@@ -318,14 +473,20 @@ export function prepareJudgeMcpProfile(
       serverNames: present,
       servers,
       capabilityFingerprint: capabilityFingerprint(profile, allowedTools, registryPath, servers),
+      degradedCause,
       cleanup: () => rmSync(privateDirectory, { recursive: true, force: true }),
     };
   } catch {
     if (directory) rmSync(directory, { recursive: true, force: true });
+    // Every requested server is lost here, whatever the registry held.
+    const lostCause = degradedCauseFor(
+      profile.serverNames,
+      'private MCP profile file could not be created',
+    );
     warnOnce(
       'temporary-config',
-      'guard-review: private MCP profile file could not be created — named agents continue with strict-empty MCP isolation',
+      `${lostCause ? '⚠️  ' : ''}guard-review: private MCP profile file could not be created — named agents continue with strict-empty MCP isolation${lostCause ? ' — DEGRADED' : ''}`,
     );
-    return emptyProfile(capabilityFingerprint(profile, allowedTools, registryPath, {}));
+    return emptyProfile(capabilityFingerprint(profile, allowedTools, registryPath, {}), lostCause);
   }
 }

@@ -209,9 +209,10 @@ export interface ReviewOutcome {
    * global default — a sonnet-pinned reviewer's verdict labeled 'haiku' sends readers of the
    * usage dashboard chasing a model downgrade that never happened. */
   model?: string;
-  /** Set only on a PASS whose core check did not fully run (sc-2317: commit-guard without semantic
-   * retrieval). The verdict stands, but must never render as a bare PASS, live or cached. */
+  /** Set only on a PASS whose core check did not fully run — sc-2317 retrieval (`degraded`), sc-2837
+   * no codebase MCP (`mcpDegraded`, apart so `retrieval:'ok'` stays retrieval-only). Never bare PASS. */
   degraded?: { cause: string };
+  mcpDegraded?: { cause: string };
 }
 
 /** The one brief read for commit, ship and review; a reviewer with no brief anywhere throws. */
