@@ -34,6 +34,11 @@ import {
   unprojectOverlay,
   worktrees,
 } from '../lib/husky/overlay/overlay-home.mts';
+import {
+  ESLINT_OVERLAY_FILE,
+  eslintOverlayContent,
+  legacyEslintOverlayContent,
+} from '../lib/install/overlay-lint-configs.mts';
 import { captureOrigHooksPath } from '../lib/overlay.mts';
 import { installGlobalHook } from '../lib/overlay-global-hook.mts';
 import { shQuote } from '../lib/ship/redact-secrets.mts';
@@ -382,7 +387,7 @@ describe('overlay hooks in linked worktrees (sc-4157)', () => {
       [
         '--input-type=module',
         '-e',
-        `const m = await import(${JSON.stringify(join(wt, 'eslint.config.devkit.mjs'))}); console.log(m.default[0])`,
+        `const m = await import(${JSON.stringify(join(wt, 'eslint.config.devkit.mjs'))}); console.log(m.default.at(-1))`,
       ],
       { encoding: 'utf8' },
     ).trim();
@@ -888,5 +893,24 @@ describe('overlay hooks in linked worktrees (sc-4157)', () => {
     expect(vi.mocked(console.log).mock.calls.flat().join('\n')).toMatch(
       /not valid JSON.* — links to the paths it configures .* delete them by hand/,
     );
+  });
+});
+
+describe('overlay eslint config across re-init (sc-3791)', () => {
+  it('a re-run keeps an outdated or edited overlay, and recreates a deleted one', async () => {
+    const root = workRepo();
+    const overlayCfg = join(root, ESLINT_OVERLAY_FILE);
+    writeFileSync(overlayCfg, legacyEslintOverlayContent('eslint.config.mjs'));
+    await initOverlay(root); // non-force, as `devkit upgrade`'s overlay re-sync runs it
+    expect(readFileSync(overlayCfg, 'utf8')).toBe(legacyEslintOverlayContent('eslint.config.mjs'));
+    rmSync(overlayCfg);
+    await initOverlay(root);
+    expect(readFileSync(overlayCfg, 'utf8')).toBe(eslintOverlayContent('eslint.config.mjs'));
+
+    const edited = `${eslintOverlayContent('eslint.config.mjs')}// team tweak\n`;
+    writeFileSync(overlayCfg, edited);
+    await initOverlay(root);
+    expect(readFileSync(overlayCfg, 'utf8')).toBe(edited);
+    expect(git(root, 'status', '--porcelain')).toBe('');
   });
 });
