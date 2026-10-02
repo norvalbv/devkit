@@ -474,18 +474,13 @@ gate_worktree_pre_commit() {
 }
 
 # prepare_gate_worktree <worktree> <consumer-root> <purpose> [extra-link-dir...]
-# Where <root>'s overlay lives: its own, else the main worktree's — a linked worktree only gets the
-# git-excluded overlay linked in on its first commit (sc-4157). Empty when the repo is not overlay.
+# Where <root>'s overlay lives: its own, else the overlay home's, from the one TS resolver (a linked
+# worktree only borrows the git-excluded overlay, sc-4157). Empty when the repo is not overlay.
 gate_overlay_root() {
-  local main
-  if grep -Eq '"overlay"[[:space:]]*:[[:space:]]*true' "$1/.devkit/config.json" 2>/dev/null; then
-    printf '%s\n' "$1"
-    return 0
-  fi
-  main=$(gate_main_worktree "$1")
-  grep -Eq '"overlay"[[:space:]]*:[[:space:]]*true' "$main/.devkit/config.json" 2>/dev/null &&
-    printf '%s\n' "$main"
-  return 0
+  local emitter
+  emitter="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../husky/overlay/overlay-root.mts"
+  [ -f "$emitter" ] || emitter="${emitter%.mts}.mjs"
+  node "$emitter" "$1"
 }
 
 # The hook directory git will actually use, relative to the checkout <dir>; empty when hooksPath is
@@ -520,7 +515,10 @@ gate_hook_source_preflight() {
   # Overlay mode stores its complete hook chain under ignored .devkit/hooks. An absent executable hook
   # is a dark gate, so fail closed.
   local overlay_root
-  overlay_root=$(gate_overlay_root "$root")
+  overlay_root=$(gate_overlay_root "$root") || {
+    echo "could not resolve the overlay home for $root (gates must not fail open)" >&2
+    return 1
+  }
   if [ -n "$overlay_root" ] && [ ! -x "$overlay_root/.devkit/hooks/pre-commit" ]; then
     echo "overlay mode but $overlay_root/.devkit/hooks/pre-commit missing/non-executable — run 'devkit init --overlay' (gates must not fail open)" >&2
     return 1
