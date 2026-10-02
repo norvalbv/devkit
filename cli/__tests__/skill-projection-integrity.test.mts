@@ -87,6 +87,7 @@ describe('inspectSkillProjectionIntegrity', () => {
       active: true,
       checkedProjections: ['claude', 'cursor', 'dist'],
       findings: [],
+      source: 'working-tree',
     });
   });
 
@@ -137,6 +138,7 @@ describe('inspectSkillProjectionIntegrity', () => {
       active: true,
       checkedProjections: ['claude', 'cursor', 'dist'],
       findings: ['unchecked skills/ — canonical skills directory missing'],
+      source: 'working-tree',
     });
   });
 
@@ -169,7 +171,7 @@ describe('self-host Husky skill projection warning', () => {
     const status = printSkillProjectionWarning({
       active: true,
       checkedProjections: ['cursor', 'dist'],
-      findings: ['orphan .cursor/skills/review/extra.md'],
+      findings: ['stale .cursor/skills/review/SKILL.md', 'orphan .cursor/skills/review/extra.md'],
     });
 
     expect(status).toBe(0);
