@@ -1374,12 +1374,15 @@ describe('ship — refreshes .claude reviewer assets inside the worktree', () =>
     }
   });
 
-  it('replaces tracked stale assets for the gate run without adding them to the commit', () => {
+  it('replaces tracked stale devkit-owned assets for the gate run without adding them to the commit', () => {
     const { dir, env, git } = seedShipRepo();
     mkdirSync(join(dir, '.claude/agents'), { recursive: true });
     writeFileSync(join(dir, '.claude/agents/api-security-reviewer.md'), '# tracked\n');
     git(['add', '.claude/agents/api-security-reviewer.md'], { stdio: 'ignore' });
     git(['commit', '-q', '-m', 'track .claude'], { stdio: 'ignore' });
+    mkdirSync(join(dir, '.devkit'), { recursive: true });
+    const owned = { files: { 'api-security-reviewer.md': '0'.repeat(64) }, targets: ['claude'] };
+    writeFileSync(join(dir, '.devkit/agents-manifest.json'), `${JSON.stringify(owned)}\n`);
     writeFileSync(join(dir, 'note.txt'), 'hi\n');
     const r = spawnSync('/bin/bash', [scriptPath, 'feat/claude-tracked', 't', 'note.txt'], {
       cwd: dir,

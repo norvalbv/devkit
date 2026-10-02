@@ -22,6 +22,7 @@ import {
 } from '../completeness.mts';
 import { CORRECTNESS_LENSES, FOUR_WAY_LENS_GROUPS, lensGroupId } from '../lens/split.mts';
 import { readProgress, unfinishedReviewers, writeProgress } from '../progress.mts';
+import { OWN_PACKAGE_ROOT } from '../cascade/consumer-assets.mts';
 import { REVIEWERS } from '../reviewers.mts';
 import { runReviewGate } from '../run-review.mts';
 import { parallelMakespan } from '../telemetry/timing.mts';
@@ -31,11 +32,13 @@ import {
   concurrencyProbe,
   consumerRepo,
   mkExec,
+  packagedBriefLine,
   passWithArtifact,
   reviewAssets,
   reviewerFromLabel,
   syncSkillAssets,
   trackReviewFixtureDir,
+  unprojected,
   writeArtifact,
 } from './run-review-fixtures.mts';
 
@@ -113,8 +116,8 @@ afterEach(() => {
 });
 
 describe('runReviewGate — cascade + exit contract', () => {
-  it('review mode uses current packaged briefs instead of target-controlled .claude copies', async () => {
-    const repo = consumerRepo({ backend: true });
+  it('review mode lets a target brief under a devkit name win, and falls back to the packaged one', async () => {
+    const repo = unprojected(consumerRepo({ backend: true }));
     const assets = reviewAssets();
     const dataRoot = realpathSync(mkdtempSync(join(tmpdir(), 'guard-managed-review-data-')));
     trackReviewFixtureDir(dataRoot);
@@ -122,10 +125,8 @@ describe('runReviewGate — cascade + exit contract', () => {
     process.env.DEVKIT_REVIEW_ID = 'managed-review';
     process.env.DEVKIT_REVIEW_DATA_ROOT = dataRoot;
     process.env.DEVKIT_REVIEW_ASSET_ROOT = assets;
-    writeFileSync(
-      join(repo, '.claude', 'agents', 'api-security-reviewer.md'),
-      'MALICIOUS target brief',
-    );
+    mkdirSync(join(repo, '.claude', 'agents'));
+    writeFileSync(join(repo, '.claude', 'agents', 'api-security-reviewer.md'), 'TARGET brief');
     const prompts: string[] = [];
     const exec = mkExec(async ({ label, args }) => {
       prompts.push(args[1]);
@@ -134,12 +135,13 @@ describe('runReviewGate — cascade + exit contract', () => {
     });
 
     expect(await runReviewGate(repo, { exec })).toBe(0);
-    expect(prompts.join('\n')).toContain('PACKAGED brief for api-security-reviewer');
-    expect(prompts.join('\n')).not.toContain('MALICIOUS target brief');
+    expect(prompts.join('\n')).toContain('TARGET brief');
+    expect(prompts.join('\n')).not.toContain('PACKAGED brief for api-security-reviewer');
+    expect(prompts.join('\n')).toContain('PACKAGED brief for backend-performance-reviewer');
   });
 
   it('review-mode asset preflight fails setup before consulting a cached PASS', async () => {
-    const repo = consumerRepo({ backend: true });
+    const repo = unprojected(consumerRepo({ backend: true }));
     const assets = reviewAssets();
     process.env.DEVKIT_RUN_MODE = 'review';
     process.env.DEVKIT_REVIEW_ASSET_ROOT = assets;
@@ -152,7 +154,7 @@ describe('runReviewGate — cascade + exit contract', () => {
   });
 
   it('review mode refuses to checkpoint a PASS when its packaged assets change mid-review', async () => {
-    const repo = consumerRepo({ backend: true });
+    const repo = unprojected(consumerRepo({ backend: true }));
     const assets = reviewAssets();
     process.env.DEVKIT_RUN_MODE = 'review';
     process.env.DEVKIT_REVIEW_ASSET_ROOT = assets;
@@ -174,7 +176,7 @@ describe('runReviewGate — cascade + exit contract', () => {
   });
 
   it('review-mode cache invalidates only the reviewer whose packaged brief changed', async () => {
-    const repo = consumerRepo({ backend: true });
+    const repo = unprojected(consumerRepo({ backend: true }));
     const assets = reviewAssets();
     process.env.DEVKIT_RUN_MODE = 'review';
     process.env.DEVKIT_REVIEW_ASSET_ROOT = assets;
@@ -190,7 +192,7 @@ describe('runReviewGate — cascade + exit contract', () => {
   });
 
   it('review-mode cache invalidates checklist reviewers when shared support changes', async () => {
-    const repo = consumerRepo({ backend: true });
+    const repo = unprojected(consumerRepo({ backend: true }));
     const assets = reviewAssets();
     process.env.DEVKIT_RUN_MODE = 'review';
     process.env.DEVKIT_REVIEW_ASSET_ROOT = assets;
@@ -207,7 +209,7 @@ describe('runReviewGate — cascade + exit contract', () => {
     ]);
   });
   it('review mode injects scanRoots for an empty frontend topology into selector and judges', async () => {
-    const repo = consumerRepo({ frontend: true });
+    const repo = unprojected(consumerRepo({ frontend: true }));
     const config = JSON.parse(readFileSync(join(repo, 'guard.config.json'), 'utf8'));
     config.review.frontendRoots = [];
     writeFileSync(join(repo, 'guard.config.json'), JSON.stringify(config));
@@ -225,7 +227,7 @@ describe('runReviewGate — cascade + exit contract', () => {
   });
 
   it('review mode retries a skipped checklist workflow once and caches only the verified retry', async () => {
-    const repo = consumerRepo({ backend: true });
+    const repo = unprojected(consumerRepo({ backend: true }));
     const assets = reviewAssets();
     process.env.DEVKIT_RUN_MODE = 'review';
     process.env.DEVKIT_REVIEW_ASSET_ROOT = assets;
@@ -246,7 +248,7 @@ describe('runReviewGate — cascade + exit contract', () => {
   });
 
   it('review mode reports a repeated checklist-contract violation as an error, never inconclusive', async () => {
-    const repo = consumerRepo({ backend: true });
+    const repo = unprojected(consumerRepo({ backend: true }));
     const assets = reviewAssets();
     process.env.DEVKIT_RUN_MODE = 'review';
     process.env.DEVKIT_REVIEW_ASSET_ROOT = assets;
@@ -422,7 +424,7 @@ describe('runReviewGate — cascade + exit contract', () => {
   });
 
   it('an unattributable identity keeps prompt_identity null but never reuses the legacy key namespace (sc-1437)', async () => {
-    // No syncSkillAssets: every checklist reviewer's identity is null (skills unreadable), while
+    // commit-guard's projection lacks its SKILL.md, so its identity is null (unreadable), while
     // conventions-reviewer (brief-only) resolves. Telemetry must keep the honest null — the cache
     // key substitutes the sentinel, and both must stay deterministic across runs.
     const repo = consumerRepo({ backend: true });
@@ -436,7 +438,7 @@ describe('runReviewGate — cascade + exit contract', () => {
       .map((l) => JSON.parse(l))
       .filter((e) => e.type === 'review_scope');
     const byReviewer = Object.fromEntries(scope.map((e) => [e.reviewer, e.prompt_identity]));
-    expect(byReviewer['api-security-reviewer']).toBeNull();
+    expect(byReviewer['commit-guard']).toBeNull();
     expect(byReviewer['conventions-reviewer']).toMatch(/^[0-9a-f]{64}$/);
     // Second run: the sentinel-salted keys must hit (deterministic), zero judge spawns.
     const exec = mkExec(async () => 'VERDICT: PASS');
@@ -532,9 +534,9 @@ describe('runReviewGate — cascade + exit contract', () => {
     expect(scope.find((e) => e.reviewer === 'conventions-reviewer').has_checklist).toBe(false);
   });
 
-  it('records prompt_identity as null rather than failing when a synced asset is absent', async () => {
-    // No syncSkillAssets here: a checklist reviewer's SKILL.md/checklist.mjs are missing, so its
-    // identity is genuinely unattributable. The gate must still pass — telemetry never fails a gate.
+  it('records prompt_identity as null rather than failing when a projected asset is unreadable', async () => {
+    // commit-guard's projection holds its checklist script but no SKILL.md, so its identity is
+    // genuinely unattributable. The gate must still pass — telemetry never fails a gate.
     const repo = consumerRepo({ backend: true });
     const sink = join(repo, 'events.jsonl');
     process.env.DEVKIT_GATE_EVENTS = sink;
@@ -545,9 +547,7 @@ describe('runReviewGate — cascade + exit contract', () => {
       .split('\n')
       .map((l) => JSON.parse(l))
       .filter((e) => e.type === 'review_scope');
-    expect(
-      scope.find((e) => e.reviewer === 'backend-performance-reviewer').prompt_identity,
-    ).toBeNull();
+    expect(scope.find((e) => e.reviewer === 'commit-guard').prompt_identity).toBeNull();
     // conventions is skill-less — its identity needs only the brief, which IS present.
     expect(scope.find((e) => e.reviewer === 'conventions-reviewer').prompt_identity).toMatch(
       /^[0-9a-f]{64}$/,
@@ -1074,26 +1074,22 @@ describe('runReviewGate — cascade + exit contract', () => {
     );
   });
 
-  it('missing agent brief → inconclusive with a sync nudge (exit 2), never judged on an empty brief', async () => {
-    const repo = consumerRepo({ backend: true });
-    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
-    rmSync(join(repo, '.claude', 'agents', 'api-security-reviewer.md'));
-    const exec = passWithArtifact(repo);
-    expect(await runReviewGate(repo, { exec })).toBe(2);
-    expect(exec.mock.calls.map(([o]) => o.label)).not.toContain('review:api-security-reviewer');
-    expect(err.mock.calls.flat().join('\n')).toContain('devkit sync-agents');
-  });
-
-  it('missing agent brief under strict ship → fail-closed exit 3 with the SYNC remedy (not auth/quota)', async () => {
-    const repo = consumerRepo({ backend: true });
-    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
-    process.env.GUARD_AI_STRICT = '1';
-    rmSync(join(repo, '.claude', 'agents', 'api-security-reviewer.md'));
-    expect(await runReviewGate(repo, { exec: passWithArtifact(repo) })).toBe(3);
-    const out = err.mock.calls.flat().join('\n');
-    expect(out).toContain('strict ship mode fails closed');
-    expect(out).toContain('devkit sync-agents'); // the cause-correct remedy…
-    expect(out).not.toContain('auth/quota'); // …NOT the misleading generic one
+  it('a checkout with no projected briefs or skills judges every reviewer from the package', async () => {
+    const repo = unprojected(consumerRepo({ backend: true }));
+    process.env.GUARD_AI_STRICT = '1'; // an inconclusive reviewer would exit 3
+    const prompts = new Map<string, string>();
+    const exec = mkExec(async ({ label, args }) => {
+      prompts.set(label, args[1]);
+      writeArtifact(repo, label);
+      return 'VERDICT: PASS';
+    });
+    expect(await runReviewGate(repo, { exec })).toBe(0);
+    expect(prompts.size).toBe(5);
+    for (const [label, prompt] of prompts)
+      expect(prompt).toContain(packagedBriefLine(String(reviewerFromLabel(label)?.name)));
+    expect(prompts.get('review:api-security-reviewer')).toContain(
+      `node ${OWN_PACKAGE_ROOT}/skills/api-security/scripts/checklist.mjs generate`,
+    );
   });
 
   it('PASS verdict with NO checklist artifact → voided to inconclusive (exit 2), never cached', async () => {
@@ -1210,6 +1206,7 @@ describe('runReviewGate — cascade + exit contract', () => {
 
   it('the wrapped prompt reaches the judge with brief, checklist mandate + verdict pin; the diffstat rides stdin', async () => {
     const repo = consumerRepo({ backend: true });
+    syncSkillAssets(repo);
     let captured: { label: string; args: string[]; input?: string; timeout?: number };
     const exec = mkExec(async (opts) => {
       if (opts.label === 'review:api-security-reviewer') captured = opts;
@@ -2002,14 +1999,15 @@ describe('runCompleteness — hard-by-default commit-msg gate', () => {
     expect(captured.input.indexOf('|')).toBeLessThan(captured.input.indexOf('diff --git'));
   });
 
-  it('missing agent brief → skip with a note, exit 0', async () => {
-    const repo = consumerRepo({ backend: true });
-    rmSync(join(repo, '.claude', 'agents', 'feature-completeness-reviewer.md'));
-    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const exec = mkExec(async () => 'VERDICT: PASS');
+  it('a checkout with no projected brief judges completeness with the packaged one', async () => {
+    const repo = unprojected(consumerRepo({ backend: true }));
+    let prompt = '';
+    const exec = mkExec(async ({ args }) => {
+      prompt = args[1];
+      return 'VERDICT: PASS';
+    });
     expect(await runCompleteness(msg(repo, 'feat: x'), repo, { exec })).toBe(0);
-    expect(exec).not.toHaveBeenCalled();
-    expect(err.mock.calls.flat().join('\n')).toContain('completeness skipped');
+    expect(prompt).toContain(packagedBriefLine('feature-completeness-reviewer'));
   });
 });
 

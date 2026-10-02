@@ -346,11 +346,7 @@ export function projectShipAssetKind(
 ): void {
   const runtime = canonicalReviewDirectory(runtimeRootPath, `ship reviewer ${kind} runtime`);
   runtimeFiles(runtime);
-  const packaged = readdirSync(runtime)
-    .sort()
-    .map((name) => shipAssetName(name, kind, 'packaged'));
   const owned = manifestOwnedNames(ownedNamesPath, kind);
-  const replacements = [...new Set([...owned, ...packaged])].sort();
   const descriptors: number[] = [];
   const quarantined: Array<{ name: string; path: string }> = [];
   const installed: string[] = [];
@@ -362,6 +358,10 @@ export function projectShipAssetKind(
       descriptors.push(enterPinnedDirectory(worktree, 'ship reviewer worktree'));
       descriptors.push(enterPinnedDirectory('.claude', 'ship reviewer .claude root'));
       descriptors.push(enterPinnedDirectory(kind, `ship reviewer ${kind} root`));
+      const packaged = readdirSync(runtime)
+        .sort()
+        .map((name) => shipAssetName(name, kind, 'packaged'))
+        .filter((name) => owned.includes(name) || !lstatSync(name, { throwIfNoEntry: false }));
       staging = realpathSync(mkdtempSync('.devkit-review-assets-'));
       const quarantine = join(staging, '.quarantine');
       mkdirSync(quarantine);
@@ -372,7 +372,7 @@ export function projectShipAssetKind(
           force: false,
         });
       }
-      for (const [index, name] of replacements.entries()) {
+      for (const [index, name] of owned.entries()) {
         if (lstatSync(name, { throwIfNoEntry: false }) !== undefined) {
           const path = join(quarantine, String(index));
           rename(name, path);

@@ -198,8 +198,8 @@ describe('packaged reviewer asset runtime', () => {
       files: ['src/example.ts'],
     }));
     const cfg = resolveGuardConfig(source);
-    expect([...preflightReviewAssets(captured.root, selected, cfg)]).toEqual([
-      ...preflightReviewAssets(source, selected, cfg),
+    expect([...preflightReviewAssets(source, captured.root, selected, cfg)]).toEqual([
+      ...preflightReviewAssets(source, source, selected, cfg),
     ]);
   });
 

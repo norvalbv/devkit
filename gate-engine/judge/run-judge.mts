@@ -56,7 +56,6 @@ export {
   type RemedyCause,
   remedyCause,
   strictRemedy,
-  syncRemedy,
   unavailableMessage,
 } from './outage/wording.mts';
 

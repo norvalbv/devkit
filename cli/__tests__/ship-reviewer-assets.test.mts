@@ -59,7 +59,7 @@ function runReviewerRefresh(worktree, root, packageRoot = '', env = process.env)
 }
 
 describe('ship reviewer asset refresh', () => {
-  it('preserves tracked consumer skills while exact-replacing packaged reviewer assets', () => {
+  it('preserves consumer skills and overrides while exact-replacing devkit-owned reviewer assets', () => {
     const consumerSkill = '# consumer-owned identity\n';
     const retiredAgent = 'retired-reviewer.md';
     const { dir, env, git } = seedShipRepo({
@@ -68,6 +68,7 @@ describe('ship reviewer asset refresh', () => {
     mkdirSync(join(dir, '.claude/agents'), { recursive: true });
     writeFileSync(join(dir, '.claude/agents/api-security-reviewer.md'), '# tracked\n');
     writeFileSync(join(dir, '.claude/agents', retiredAgent), '# retired devkit agent\n');
+    writeFileSync(join(dir, '.claude/agents/correctness-reviewer.md'), '# consumer override\n');
     mkdirSync(join(dir, '.claude/skills/api-security/scripts'), { recursive: true });
     writeFileSync(
       join(dir, '.claude/skills/api-security/scripts/checklist.mjs'),
@@ -79,7 +80,11 @@ describe('ship reviewer asset refresh', () => {
     mkdirSync(join(dir, '.devkit'), { recursive: true });
     writeFileSync(
       join(dir, '.devkit/agents-manifest.json'),
-      `${JSON.stringify({ files: { [retiredAgent]: '0'.repeat(64) }, targets: ['claude'] })}\n`,
+      `${JSON.stringify({ files: { [retiredAgent]: '0'.repeat(64), 'api-security-reviewer.md': '0'.repeat(64) }, targets: ['claude'] })}\n`,
+    );
+    writeFileSync(
+      join(dir, '.devkit/skills-manifest.json'),
+      `${JSON.stringify({ files: { 'api-security/scripts/checklist.mjs': '0'.repeat(64) }, targets: ['claude'] })}\n`,
     );
     git(['add', '.claude'], { stdio: 'ignore' });
     git(['commit', '-q', '-m', 'track .claude'], { stdio: 'ignore' });
@@ -112,6 +117,9 @@ describe('ship reviewer asset refresh', () => {
       expect(
         readFileSync(join(worktree, '.claude/agents/feature-completeness-reviewer.md'), 'utf8'),
       ).toBe(readFileSync(packagedCompletenessAgent, 'utf8'));
+      expect(readFileSync(join(worktree, '.claude/agents/correctness-reviewer.md'), 'utf8')).toBe(
+        '# consumer override\n',
+      );
       expect(readdirSync(join(worktree, '.claude/agents')).sort()).toEqual(
         readdirSync(join(sourcePackageRoot, 'agents')).sort(),
       );
@@ -242,7 +250,7 @@ describe('ship reviewer asset refresh', () => {
     writeFileSync(join(agents, 'b.md'), 'consumer b\n');
     writeFileSync(join(runtime, 'a.md'), 'packaged a\n');
     writeFileSync(join(runtime, 'b.md'), 'packaged b\n');
-    writeFileSync(owned, '');
+    writeFileSync(owned, 'a.md\0b.md\0');
     const originalCwd = process.cwd();
     let renames = 0;
 
@@ -277,7 +285,7 @@ describe('ship reviewer asset refresh', () => {
     writeFileSync(join(agents, 'b.md'), 'consumer b\n');
     writeFileSync(join(runtime, 'a.md'), 'packaged a\n');
     writeFileSync(join(runtime, 'b.md'), 'packaged b\n');
-    writeFileSync(owned, '');
+    writeFileSync(owned, 'a.md\0b.md\0');
     const originalCwd = process.cwd();
     let renames = 0;
     let failure: unknown;

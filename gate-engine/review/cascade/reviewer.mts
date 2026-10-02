@@ -3,12 +3,7 @@ import { judgeBinForModel } from '../../judge/codex/result.mts';
 import { JUDGE_ISOLATION } from '../../judge/judge-isolation.mts';
 import { namedAgentMcpProfile } from '../../judge/mcp/profile.mts';
 import type { JudgeOutage } from '../../judge/outage/classify.mts';
-import {
-  DEEP_JUDGE_TIMEOUT_MS,
-  execJudgeAsync,
-  remedyCause,
-  syncRemedy,
-} from '../../judge/run-judge.mts';
+import { DEEP_JUDGE_TIMEOUT_MS, execJudgeAsync, remedyCause } from '../../judge/run-judge.mts';
 import { renderGoverningClaudeMd } from '../claude-md.mts';
 import { renderStagedLineCounts } from '../evidence/line-counts.mts';
 import { parseReviewVerdict } from '../contracts/response.mts';
@@ -34,7 +29,6 @@ import {
 import { enforceChecklistContract, retrievalDegradation } from '../contracts/checklist.mts';
 import {
   agentBody,
-  agentsDirFor,
   cleanupChecklistState,
   initializeCommitGuardChecklist,
   isNamedSkip,
@@ -42,7 +36,7 @@ import {
   readChecklistState,
   withStagedFiles,
 } from '../runtime.mts';
-import { consumerChecklistAssetRoot, isShipLane } from './consumer-assets.mts';
+import { checklistAssetRoot } from './consumer-assets.mts';
 
 /** One reviewer cascade outcome, including its persisted transcript when a judge ran. */
 export type CascadeResult = ReviewOutcome;
@@ -92,7 +86,7 @@ export async function runCascade(
   opts: CascadeOpts,
 ): Promise<CascadeResult> {
   const { cwd } = opts;
-  const checklistRoot = opts.assetRoot ?? consumerChecklistAssetRoot(cwd, sel.reviewer);
+  const checklistRoot = checklistAssetRoot(cwd, sel.reviewer, opts.assetRoot);
   cleanupChecklistState(cwd, sel.reviewer);
   try {
     // The SAME authoritative list the judge gets (sc-3400): without it the script re-resolved its
@@ -179,14 +173,6 @@ async function cascadeVerdict(
       : Math.max(0, Math.min(DEEP_JUDGE_TIMEOUT_MS, cascadeDeadline - Date.now()));
   const env = withStagedFiles(judgeEnv ?? process.env, reviewer, files);
   const body = agentBody(cwd, cfg, reviewer.name, assetRoot);
-  if (body === null)
-    return {
-      name: reviewer.name,
-      status: 'inconclusive',
-      reason: `agent brief ${reviewer.name}.md missing under ${agentsDirFor(cwd, cfg, assetRoot)} — ${syncRemedy(isShipLane())}`,
-      inconclusiveCause: 'sync',
-      escalated: false,
-    };
   // Both forms name every staged file; only the checklist reviewers have the Bash to verify a churn
   // count, so the Bash-less one is given the inventory without it.
   // The index the judge's evidence is cut from; grounding refuses a tree restaged after this point.

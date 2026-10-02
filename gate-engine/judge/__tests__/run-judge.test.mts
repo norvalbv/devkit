@@ -129,11 +129,6 @@ describe('strictRemedy', () => {
     expect(r).toContain('smaller commit');
   });
 
-  it('a sync gap points at the sync commands, not at the CLI', () => {
-    expect(strictRemedy('sync')).toContain('devkit sync-agents && devkit sync-skills');
-    expect(strictRemedy('sync')).not.toContain('auth/quota');
-  });
-
   it('a genuine outage LEADS with the auth/quota remedy — that cause really is auth/quota', () => {
     expect(
       strictRemedy('outage').startsWith('check `claude` CLI auth/quota, then re-run devkit ship'),
@@ -320,9 +315,9 @@ describe('strictRemedy', () => {
   });
 
   it('every cause yields a distinct remedy — no two gates can print the same wrong line', () => {
-    const all = (['timeout', 'sync', 'outage', 'rate-limited', 'absent'] as const).map((c) =>
+    const all = (['timeout', 'outage', 'rate-limited', 'absent'] as const).map((c) =>
       strictRemedy(c),
     );
-    expect(new Set(all).size).toBe(5);
+    expect(new Set(all).size).toBe(4);
   });
 });
