@@ -17,7 +17,9 @@ The jargon you'll meet in devkit's help, prompts, and gate output — in one pla
 - **overlay mode** (`devkit init --overlay`) — for a repo you can't modify. Everything is git-ignored via
   `.git/info/exclude` (invisible to the team), the local hook **chains** to the repo's own, and the
   eslint/biome configs **extend** the repo's. Requires global devkit: without it every commit is
-  blocked. The gates are the package-mode gates, found in the global bin dir. See **self-heal** below.
+  blocked. The gates are the package-mode gates, found in the global bin dir, and it selects the same
+  components except tsconfig, the search-code steering hooks, and structure lint for an eslint-backed
+  stack such as electron, which its hook names instead of dropping. See **self-heal** below.
 
 ## Gates & enforcement
 

@@ -8,6 +8,7 @@ import {
 } from '../../../gate-engine/deterministic/gate-inputs.mts';
 import { hasOwnOverlay } from '../husky/overlay/overlay-home.mts';
 import { DECISIONS_INDEX_IGNORES, withFileLock } from './gitignore-cache.mts';
+import { SEARCH_CODE_WRITTEN } from './install-search-code.mts';
 
 const EXCLUDE_HEADER = '# devkit overlay (local-only) — not committed';
 const AGENT_ASSET_RE =
@@ -32,7 +33,9 @@ const DEVKIT_LINE_FORMS = [
   '.devkit',
   'eslint/baselines/',
   ...DECISIONS_INDEX_IGNORES,
-  ...[FALLOW_CACHE, ...OVERLAY_WRITTEN].flatMap((input) => overlayExcludeLines('', input)),
+  ...[FALLOW_CACHE, ...OVERLAY_WRITTEN, ...SEARCH_CODE_WRITTEN].flatMap((input) =>
+    overlayExcludeLines('', input),
+  ),
 ].map(escapeRe);
 // The optional relative prefix is a monorepo package's; a `/`-anchored line is always the user's own.
 const DEVKIT_EXCLUDE_LINE = new RegExp(

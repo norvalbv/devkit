@@ -23,13 +23,16 @@ afterEach(() => {
   cleanup();
 });
 
-const SELECTION = applyOverlayConstraints({
-  ...defaultSelection(),
-  biome: false,
-  skills: false,
-  agents: false,
-  lineGrowth: false,
-});
+const SELECTION = applyOverlayConstraints(
+  {
+    ...defaultSelection(),
+    biome: false,
+    skills: false,
+    agents: false,
+    lineGrowth: false,
+  },
+  'react-app',
+);
 
 const git = (cwd: string, ...args: string[]) =>
   execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();

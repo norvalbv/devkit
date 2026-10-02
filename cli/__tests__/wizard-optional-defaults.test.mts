@@ -11,6 +11,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+let offered: string[] | undefined;
 const selectAnswers: Record<string, unknown> = {
   'Install mode': 'package',
   'Select your stack': 'generic',
@@ -24,8 +25,17 @@ vi.mock('@clack/prompts', () => ({
   cancel: () => {},
   isCancel: () => false,
   select: async ({ message }: { message: string }) => selectAnswers[message],
-  // Accept the defaults verbatim — the behaviour under test.
-  multiselect: async ({ initialValues }: { initialValues?: unknown[] }) => initialValues ?? [],
+  // Accept the defaults verbatim — the behaviour under test. The first picker's choices are kept.
+  multiselect: async ({
+    initialValues,
+    options,
+  }: {
+    initialValues?: unknown[];
+    options: { value: string }[];
+  }) => {
+    offered ??= options.map((option) => option.value);
+    return initialValues ?? [];
+  },
   // `Apply?` must be true; every `Remove <id>?` must be false (its own initialValue).
   confirm: async ({ message, initialValue }: { message: string; initialValue?: boolean }) =>
     message === 'Apply?' ? true : (initialValue ?? false),
@@ -41,6 +51,7 @@ const opts = (installed: Set<string>, mode = 'package') => ({
 });
 
 beforeEach(() => {
+  offered = undefined;
   vi.spyOn(console, 'log').mockImplementation(() => {});
 });
 afterEach(() => vi.restoreAllMocks());
@@ -68,5 +79,19 @@ describe('wizard defaults — opt-in components on a re-run', () => {
     // Overlay runs its own multiselect branch — the fix has to be in both, not just the package one.
     const result = await runWizard(opts(new Set(['skills', 'adhd']), 'overlay'));
     expect(result?.selection.adhd).toBe(true);
+  });
+
+  it('overlay offers what it can run: structure for a config-driven stack and search-code', async () => {
+    // The mode comes from the `Install mode` answer, not detectedMode.
+    Object.assign(selectAnswers, { 'Install mode': 'overlay', 'Select your stack': 'react-app' });
+    try {
+      const result = await runWizard({ ...opts(new Set(), 'overlay'), structureAvailable: true });
+      expect(offered).toEqual(expect.arrayContaining(['structure', 'search-code', 'skills']));
+      expect(offered).not.toContain('tsconfig');
+      expect(result?.selection.structure).toBe(true);
+      expect(result?.selection.husky).toBe(true);
+    } finally {
+      Object.assign(selectAnswers, { 'Install mode': 'package', 'Select your stack': 'generic' });
+    }
   });
 });

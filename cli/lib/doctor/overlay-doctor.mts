@@ -18,7 +18,7 @@ import {
   syncAntiSlopCapability,
 } from '../install/anti-slop/lifecycle.mts';
 import { selectedHookAssets } from '../install/hook-registration-ledger/selection.mts';
-import { checkOxcCapability } from '../install/oxc/lifecycle.mts';
+import { checkOxcCapability, syncOxcCapability } from '../install/oxc/lifecycle.mts';
 import { commitMsgGuards } from '../husky/commit-msg-block.mts';
 import {
   hasOwnOverlay,
@@ -152,25 +152,26 @@ export async function runOverlayDoctor(
     );
   }
   // Overlay short-circuits before collectResults, so without these rows its git-excluded managed
-  // state is undiagnosable. Gated on the recorded selection: the check spawns a real oxlint probe.
-  if (sel.antiSlop) {
-    let oxc = checkOxcCapability(cwd);
-    let antiSlop = checkAntiSlopCapability(cwd);
-    // `overlay: true` is explicit rather than inferred: the state most needing repair, a missing or
-    // corrupt manifest, is exactly the one where no stamp survives to infer it from.
-    if (fix && [...oxc, ...antiSlop].some((r) => r.fixable && r.status !== 'OK')) {
-      try {
-        syncAntiSlopCapability(cwd, { overlay: true });
-        oxc = checkOxcCapability(cwd);
-        antiSlop = checkAntiSlopCapability(cwd);
-      } catch (error: unknown) {
-        console.log(
-          `  ⚠ anti-slop capability could not be repaired: ${error instanceof Error ? error.message.split('\n')[0] : String(error)}`,
-        );
-      }
+  // state is undiagnosable. Oxc is core in every mode; anti-slop rows follow the recorded selection.
+  let oxc = checkOxcCapability(cwd);
+  let antiSlop = sel.antiSlop ? checkAntiSlopCapability(cwd) : [];
+  // `overlay: true` is explicit rather than inferred: the state most needing repair, a missing or
+  // corrupt manifest, is exactly the one where no stamp survives to infer it from.
+  if (fix && [...oxc, ...antiSlop].some((r) => r.fixable && r.status !== 'OK')) {
+    try {
+      if (sel.antiSlop) syncAntiSlopCapability(cwd, { overlay: true });
+      else syncOxcCapability(cwd, { antiSlop: false, overlay: true });
+      oxc = checkOxcCapability(cwd);
+      antiSlop = sel.antiSlop ? checkAntiSlopCapability(cwd) : [];
+    } catch (error: unknown) {
+      console.log(
+        `  ⚠ Oxc capability could not be repaired: ${error instanceof Error ? error.message.split('\n')[0] : String(error)}`,
+      );
     }
-    for (const r of oxc) advise(r);
-    for (const r of antiSlop) advise(r);
+  }
+  for (const r of oxc) advise(r);
+  for (const r of antiSlop) advise(r);
+  if (sel.antiSlop) {
     // The gate declares failOpen2:false, so an absent baseline BLOCKS rather than skips. The second
     // line names the weaker contract, per gate-opt-out-is-visible-and-detectable.
     const baseline = existsSync(join(cwd, ANTI_SLOP_BASELINE_REL));

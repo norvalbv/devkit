@@ -13,6 +13,7 @@ import { cancel, confirm, intro, isCancel, multiselect, note, select } from '@cl
 import {
   AGENT_TARGETS,
   COMPONENTS,
+  CONFIG_DRIVEN_STRUCTURE,
   DEFAULT_REVIEW_DECISIONS_DIR,
   GUARD_OPTIONS,
   OPTIONAL_COMPONENTS,
@@ -55,11 +56,9 @@ const AGENT_SURFACE_SETS: Record<string, string[]> = {
   cursor: ['cursor'],
 };
 
-// Components OFFERED in OVERLAY mode (no package): the agent-half + the biome extend. Excludes
-// tsconfig/structure (need package/plugin resolution), searchSteering (its hooks reference a
-// node_modules path), search-code, and husky (the local hook is always on, not optional).
-// anti-slop is offered through ANTI_SLOP_OPTION below, not here — it is not in COMPONENT_OPTIONS.
-const OVERLAY_PICKABLE = new Set(['biome', 'skills', 'agents', 'agentHooks']);
+// Components overlay never OFFERS: tsconfig needs the package, searchSteering's hooks reference a
+// node_modules path, and husky is not optional there (the local hook is the delivery mechanism).
+const OVERLAY_UNPICKABLE = new Set(['tsconfig', 'searchSteering', 'husky']);
 
 const STACKS = ['electron', 'react-app', 'component-lib', 'next', 'node-service', 'generic'];
 
@@ -222,12 +221,11 @@ export async function runWizard({
   });
   if (bail(stack)) return null;
 
-  // 3. Components. Overlay offers a picker too — but only the components VIABLE without the package
-  // (the agent-half + biome extend + fallow); tsconfig/structure/searchSteering/search-code are
-  // excluded (they need package/plugin resolution or a node_modules path) and the local hook is
-  // always on (applyOverlayConstraints enforces this). Standalone omits structure-lint. Structure
-  // is only offered in PACKAGE mode where a template exists.
-  const structAvail = mode === 'package' && structureAvailable;
+  // 3. Components — one picker for every mode, offering what it can run (applyOverlayConstraints).
+  // Standalone omits structure-lint; overlay keeps it for config-driven stacks only.
+  const structAvail =
+    structureAvailable &&
+    (mode === 'package' || (mode === 'overlay' && CONFIG_DRIVEN_STRUCTURE.has(stack)));
   // Opt-in components are never `recommended`, so nothing pre-ticks them — but on a RE-RUN that
   // would silently DROP one the repo already has: accepting the defaults records `false`, and the
   // asset is pruned. Seed the ones already installed so "keep what I have" is the default answer.
@@ -235,67 +233,40 @@ export async function runWizard({
   // Built up incrementally (component flags + guards/agentTargets), so it's a Partial until the
   // apply layer normalises it — the wizard sets the fields the chosen mode touches.
   const selection: WizardSelection = { guards: [] };
-  if (mode === 'overlay') {
-    const choices = COMPONENT_OPTIONS.filter((c) => OVERLAY_PICKABLE.has(c.id));
-    const picked = await multiselect({
-      message: 'Select components to install (overlay — all git-ignored)',
-      options: [
-        ...choices.map(componentOption),
-        componentOption(FALLOW_OPTION),
-        componentOption(ADHD_OPTION),
-        componentOption(PRIOR_ART_GATE_OPTION),
-        componentOption(BASE_DRIFT_OPTION),
-        componentOption(ANTI_SLOP_OPTION),
-      ],
-      // anti-slop is NEVER pre-ticked on a fresh overlay: adopting it snapshots the repository's
-      // existing debt into a per-clone baseline, which is a choice to make deliberately.
-      initialValues: [
-        ...choices.filter((c) => c.recommended).map((c) => c.id),
-        ...installedOptional,
-      ],
-      required: false,
-    });
-    if (bail(picked)) return null;
-    const chosen = new Set(picked);
-    for (const c of choices) selection[c.id] = chosen.has(c.id);
-    selection.fallow = chosen.has('fallow');
-    // Overlay syncs skills too, so the vendored skill works here unchanged.
-    selection.adhd = chosen.has('adhd');
-    // Overlay syncs hooks too (same delivery as agentHooks), so the gate works here unchanged.
-    selection.priorArtGate = chosen.has('priorArtGate');
-    selection.baseDrift = chosen.has('baseDrift');
-    selection.antiSlop = chosen.has('antiSlop');
-    selection.husky = true; // overlay's local hook is the delivery mechanism — always on
-  } else {
-    const componentChoices = COMPONENT_OPTIONS.filter((c) => c.id !== 'structure' || structAvail);
-    const picked = await multiselect({
-      message: 'Select components to install',
-      options: [
-        ...componentChoices.map(componentOption),
-        componentOption(FALLOW_OPTION),
-        componentOption(SEARCHCODE_OPTION),
-        componentOption(ADHD_OPTION),
-        componentOption(PRIOR_ART_GATE_OPTION),
-        componentOption(BASE_DRIFT_OPTION),
-        componentOption(ANTI_SLOP_OPTION),
-      ],
-      initialValues: [
-        ...componentChoices.filter((c) => c.recommended).map((c) => c.id),
-        ...installedOptional,
-      ],
-      required: false,
-    });
-    if (bail(picked)) return null;
-    const chosen = new Set(picked);
-    for (const c of COMPONENT_OPTIONS) selection[c.id] = chosen.has(c.id);
-    selection.fallow = chosen.has('fallow');
-    selection.searchCode = chosen.has('search-code');
-    selection.adhd = chosen.has('adhd');
-    selection.priorArtGate = chosen.has('priorArtGate');
-    selection.baseDrift = chosen.has('baseDrift');
-    selection.antiSlop = chosen.has('antiSlop');
-    if (!structAvail) selection.structure = false;
-  }
+  const componentChoices = COMPONENT_OPTIONS.filter((c) =>
+    c.id === 'structure' ? structAvail : mode !== 'overlay' || !OVERLAY_UNPICKABLE.has(c.id),
+  );
+  const picked = await multiselect({
+    message:
+      mode === 'overlay'
+        ? 'Select components to install (overlay — all git-ignored)'
+        : 'Select components to install',
+    options: [
+      ...componentChoices.map(componentOption),
+      componentOption(FALLOW_OPTION),
+      componentOption(SEARCHCODE_OPTION),
+      componentOption(ADHD_OPTION),
+      componentOption(PRIOR_ART_GATE_OPTION),
+      componentOption(BASE_DRIFT_OPTION),
+      componentOption(ANTI_SLOP_OPTION),
+    ],
+    initialValues: [
+      ...componentChoices.filter((c) => c.recommended).map((c) => c.id),
+      ...installedOptional,
+    ],
+    required: false,
+  });
+  if (bail(picked)) return null;
+  const chosen = new Set(picked);
+  for (const c of COMPONENT_OPTIONS) selection[c.id] = chosen.has(c.id);
+  selection.fallow = chosen.has('fallow');
+  selection.searchCode = chosen.has('search-code');
+  selection.adhd = chosen.has('adhd');
+  selection.priorArtGate = chosen.has('priorArtGate');
+  selection.baseDrift = chosen.has('baseDrift');
+  selection.antiSlop = chosen.has('antiSlop');
+  if (!structAvail) selection.structure = false;
+  if (mode === 'overlay') selection.husky = true;
 
   // Agent surface(s): asked whenever something syncs into an agent provider (every mode now does). A
   // repo that uses only one tool picks just that surface → no redundant copy in the other's dir. A
@@ -440,6 +411,7 @@ function summarize(
       `✓ guards${g}`,
       '✓ local hook → chains to the repo’s own',
       `${on('biome')} biome overlay (extends the repo, staged files)`,
+      `${on('structure')} structure lint · ${on('searchCode')} ${SEARCHCODE_OPTION.label}`,
       `${on('skills')} skills · ${on('agents')} agents → ${surfaces} (skipping anything git tracks)`,
       `${on('agentHooks')} agent hooks → ${surfaces} provider settings (tracked files preserved)`,
       `${on('fallow')} fallow gate (chained into the local hook; global install if missing, else skipped)`,

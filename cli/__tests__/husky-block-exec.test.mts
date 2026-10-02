@@ -933,6 +933,20 @@ describe('overlay staged gates run before the AI guards (sc-3020)', () => {
     for (const ai of AI_CALLS) expect(r.calls).not.toContain(ai);
   });
 
+  it('an eslint overlay whose repo binary is missing says so instead of skipping silently', () => {
+    const r = runHook(
+      {},
+      REVIEWED,
+      overlay({ fallow: false, eslintOverlay: true, missingLocalBins: ['eslint'] }),
+    );
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain(
+      'devkit eslint overlay: skipped — node_modules/.bin/eslint not found',
+    );
+    expect(r.calls).not.toContain('eslint -c');
+    expect(r.calls).toContain('guard-review --gate');
+  });
+
   it('a monorepo package subshell propagates the fallow block before the AI guards', () => {
     const r = runHook({ FALLOW_RC: '1' }, REVIEWED, overlay({ pkgRel: 'pkg/a' }));
     expect(r.status).toBe(1);

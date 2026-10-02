@@ -32,7 +32,7 @@ import { pruneDevkitCacheGitignore, withGitignoreLock } from '../lib/install/git
 import { removeEmptyOverlaySettings } from '../lib/install/hook-registration-ledger/overlay-settings.mts';
 import { removeHookRegistrations, removeHookScripts } from '../lib/install/install-hooks.mts';
 import { hasOrphanExcludeBlock, pruneGitExclude } from '../lib/install/overlay-excludes.mts';
-import { removeSearchCode } from '../lib/install/install-search-code.mts';
+import { removeSearchCode, SEARCH_CODE_CONFIG } from '../lib/install/install-search-code.mts';
 import { removeOxcCapability } from '../lib/install/oxc/lifecycle.mts';
 import { isOverlayHooksValue, unprojectOverlay } from '../lib/husky/overlay/overlay-home.mts';
 import { removeHealAlias } from '../lib/overlay.mts';
@@ -260,6 +260,10 @@ function cleanOverlay(cwd: string, cfg: DevkitConfig, dryRun: boolean): void {
   // Tracked-aware: a recorded overlay proves devkit wrote these, not that the user never
   // `git add -f`'d one since. The .fallow/ cache is fallow's own, left like package-mode clean does.
   removeOverlayWritten(cwd, gitRoot, dryRun);
+  // The `.search-code/` index is the engine's data, left in place as package-mode clean leaves it.
+  if (comp.searchCode) rmUntrackedIn(cwd, gitRoot, dryRun)(SEARCH_CODE_CONFIG, SEARCH_CODE_CONFIG);
+  if (comp.searchCode && existsSync(join(cwd, '.search-code')))
+    console.log('  · .search-code/ index left in place (git now shows it) — delete it if unwanted');
   rm(join(cwd, 'eslint', 'baselines'), 'eslint/baselines/', dryRun);
   pruneGitExclude(gitRoot, dryRun);
 }
