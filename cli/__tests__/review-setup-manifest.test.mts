@@ -60,7 +60,7 @@ function setup(name: string, overlay = false) {
   const chain = join(root, '.git/hooks/pre-commit');
   if (overlay) writeFileSync(chain, '#!/bin/sh\necho chained\n', { mode: 0o755 });
   const hook = overlay
-    ? buildOverlayPreCommit(selection, '.git/hooks/pre-commit')
+    ? buildOverlayPreCommit(selection, '.git/hooks/pre-commit', '', { root })
     : buildStandaloneHook(selection);
   write(root, overlay ? '.devkit/hooks/pre-commit' : '.husky/pre-commit', hook, true);
   write(root, '.devkit/config.json', `${JSON.stringify(config(overlay), null, 2)}\n`);
@@ -246,9 +246,13 @@ describe('review setup manifest', () => {
   it('does not freeze an unrelated hook directory when the configured chain is absent', () => {
     const { root, manifest } = setup('overlay-without-chain', true);
     rmSync(join(root, '.git/hooks/pre-commit'));
-    writeFileSync(join(root, '.devkit/hooks/pre-commit'), buildOverlayPreCommit(selection, ''), {
-      mode: 0o755,
-    });
+    writeFileSync(
+      join(root, '.devkit/hooks/pre-commit'),
+      buildOverlayPreCommit(selection, '', '', { root }),
+      {
+        mode: 0o755,
+      },
+    );
 
     const captured = captureReviewSetup(root, manifest);
 
@@ -404,7 +408,7 @@ describe('review setup manifest', () => {
     write(root, 'pre-commit', '#!/bin/sh\necho root chain\n', true);
     writeFileSync(
       join(root, '.devkit/hooks/pre-commit'),
-      buildOverlayPreCommit(selection, './pre-commit'),
+      buildOverlayPreCommit(selection, './pre-commit', '', { root }),
       { mode: 0o755 },
     );
     writeFileSync(
@@ -494,7 +498,7 @@ describe('review setup manifest — husky-reclaimed overlay hooksPath', () => {
     write(
       root,
       '.devkit/hooks/pre-commit',
-      buildOverlayPreCommit(selection, '.husky/pre-commit'),
+      buildOverlayPreCommit(selection, '.husky/pre-commit', '', { root }),
       true,
     );
     write(
@@ -559,9 +563,13 @@ describe('review setup manifest — husky-reclaimed overlay hooksPath', () => {
     // hook the shim never fires at all and every commit is silently ungated.
     const { root, manifest } = reclaimed('no-committed-hook');
     rmSync(join(root, '.husky/pre-commit'));
-    writeFileSync(join(root, '.devkit/hooks/pre-commit'), buildOverlayPreCommit(selection, ''), {
-      mode: 0o755,
-    });
+    writeFileSync(
+      join(root, '.devkit/hooks/pre-commit'),
+      buildOverlayPreCommit(selection, '', '', { root }),
+      {
+        mode: 0o755,
+      },
+    );
 
     expect(() => captureReviewSetup(root, manifest)).toThrow(
       /husky's runner would never reach it|exits before sourcing the shim/,
@@ -643,7 +651,7 @@ describe('review setup manifest — husky-reclaimed overlay hooksPath', () => {
     write(
       root,
       '.devkit/hooks/pre-commit',
-      buildOverlayPreCommit(selection, '.git/hooks/pre-commit'),
+      buildOverlayPreCommit(selection, '.git/hooks/pre-commit', '', { root }),
       true,
     );
     write(
