@@ -87,6 +87,19 @@ Making these changes is fixing a broken test, not weakening a real one — the t
 
 A test that asserts a product's **own** timeout (for example, "the ceiling fires and names the stuck step") races setup against that timeout. Have the stuck step print a marker. Before the strict assertions, check for it: if the timeout fired and the marker is absent, the timeout won the race before the step under test ran. Fail with a distinct, greppable label that says so, and include the machine load. Do not reuse the assertion's message. A reached marker with the wrong outcome is a real regression and must keep failing on the strict assertions.
 
+## Coverage of code run in a subprocess
+
+V8 coverage measures the test process. Code a test reaches by spawning a CLI (`node cli.mts …`) counts only when the runner attaches child processes, usually by handing each child `NODE_V8_COVERAGE` through its environment (labelled examples: vitest 5 `coverage.autoAttachSubprocess: true` with the `v8` provider). Without it, a CLI module that dozens of tests drive end to end reports near 0%.
+
+Before treating a low number on a CLI module as untested code, rule out the measurement:
+
+- **The child's environment.** A spawn that replaces `env` (`{ HOME, PATH }`) instead of spreading `process.env` drops `NODE_V8_COVERAGE`, so that child is never measured.
+- **How the child ended.** Node writes the profile on a normal exit. A child killed with `SIGKILL`, or still running when the test file finishes, contributes nothing.
+- **The path.** The child reports its real path. A project root reached through a symlink (macOS `/tmp` is `/private/tmp`) matches none of it and scores 0%.
+- **A module both imported and spawned.** A runner can merge the in-process profile and the child's profile of the same file before converting them, so the combined number under-reports (labelled examples: vitest 5.0.3). Read such a file's number as a floor, not a measurement.
+
+A number explained by one of these is a measurement gap. Say so in the report rather than writing tests to chase it.
+
 ## Reviewing test adequacy
 
 When judging whether a change is adequately tested, ask:

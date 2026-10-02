@@ -21,6 +21,7 @@ The package and agent assets use the same release tag. A prompt or skill cannot 
 - Git
 - [Bun](https://bun.sh/) for installation and repository development
 - Node.js 23.6 or newer when running the emitted JavaScript directly
+- Node.js 22.12+, 24 or 26+ to run devkit's own test suite (vitest 5 rejects 23 and 25; `.nvmrc` pins 24)
 - A supported Claude, Codex, or Cursor host when using the optional agent surfaces
 
 ## Quick start

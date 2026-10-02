@@ -487,7 +487,10 @@ describe('the flags devkit adds on the consumer behalf', () => {
   it('reads the version of the vitest installed beside the binary it will actually run', () => {
     const detected = detectVitestVersion(DEVKIT_ROOT, VITEST);
     expect(detected.kind).toBe('known');
-    expect(detected.kind === 'known' && detected.majorMinor[0]).toBe(4);
+    const installed = JSON.parse(
+      readFileSync(join(DEVKIT_ROOT, 'node_modules/vitest/package.json'), 'utf8'),
+    );
+    expect(detected.kind === 'known' && detected.version).toBe(installed.version);
   });
 
   // FEATURE-DETECT, DO NOT GUESS. vitest silently IGNORES an unknown dotted sub-option, so on an
