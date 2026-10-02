@@ -3,7 +3,6 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { testSpawnSync as spawnSync } from './_helpers.mts';
 import {
-  DIR_RE,
   dropWorktree,
   createScopedPreservedCommit,
   localBranchExists,
@@ -21,6 +20,7 @@ import {
 
 const MAGIC = ':(exclude)*';
 const GLOB = '*.txt';
+const TWO_DIRS_RE = /directory path not allowed \(pass individual files\): lib sub\n/;
 
 function seed(files: Record<string, string>) {
   const seeded = seedShipRepoLocalRemote();
@@ -190,10 +190,12 @@ describe('ship-branch.sh — explicit paths are literal files (sc-2425)', () => 
     const { dir, env, git } = seed({ 'lib/one.ts': '1\n', 'sub/keep': '' });
     writeFileSync(join(dir, 'lib/one.ts'), '2\n');
 
-    const r = ship(dir, env, 'feat/dir-from-sub', ['lib'], { cwd: join(dir, 'sub') });
+    const r = ship(dir, env, 'feat/dir-from-sub', ['lib', 'lib/one.ts', 'sub'], {
+      cwd: join(dir, 'sub'),
+    });
 
     expect(r.status).toBe(1);
-    expect(r.stderr).toMatch(DIR_RE);
+    expect(r.stderr).toMatch(TWO_DIRS_RE); // every offender in one refusal, not the first alone
     expect(localBranchExists(git, 'feat/dir-from-sub')).toBe(false);
   });
 });
@@ -264,7 +266,8 @@ describe('reship.sh --pr — explicit paths are literal files (sc-2425)', () => 
 
   it('refuses a root-level directory even when invoked from a subdirectory', () => {
     const { dir, env } = seedPr({ 'lib/one.ts': '1\n', 'sub/keep': '' });
-    const r = spawnSync('/bin/bash', [reshipScript, 'pr-open', 'again', '--pr', '--', 'lib'], {
+    const args = [reshipScript, 'pr-open', 'again', '--pr', '--', 'lib', 'lib/one.ts', 'sub'];
+    const r = spawnSync('/bin/bash', args, {
       cwd: join(dir, 'sub'),
       input: '',
       encoding: 'utf8',
@@ -272,7 +275,7 @@ describe('reship.sh --pr — explicit paths are literal files (sc-2425)', () => 
     });
 
     expect(r.status).toBe(1);
-    expect(r.stderr).toMatch(DIR_RE);
+    expect(r.stderr).toMatch(TWO_DIRS_RE);
   });
 });
 

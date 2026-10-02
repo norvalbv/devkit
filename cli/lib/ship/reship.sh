@@ -184,16 +184,9 @@ if [ "$RESUME" -eq 1 ]; then
 fi
 
 [ "${#PATHS[@]}" -gt 0 ] || { echo "no paths given" >&2; exit 1; }
-# Paths are repo-root relative, like every git call that consumes them — a cwd-relative test lets a
-# root-level directory through from a subdirectory.
-DIR_CHECK_ROOT=$(git rev-parse --show-toplevel)
-for p in "${PATHS[@]}"; do
-  [ -d "$DIR_CHECK_ROOT/$p" ] && {
-    echo "directory path not allowed (pass individual files): $p" >&2
-    echo "  list its tracked files: git ls-files -- \"$p\"" >&2
-    exit 1
-  }
-done
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+. "$SCRIPT_DIR/refuse-dir-paths.sh"
+ship_refuse_dir_paths "$(git rev-parse --show-toplevel)" "${PATHS[@]}" || exit 1
 
 LINK_DIRS=()
 [ "${#LINK_EXTRA[@]}" -gt 0 ] && LINK_DIRS+=("${LINK_EXTRA[@]}")
@@ -202,7 +195,6 @@ ROOT=$(git rev-parse --show-toplevel)
 # Pinned before any staging: in a shared parallel-agent checkout $ROOT can gain a commit mid-run, and
 # a later read would name a tree the caller never read (sc-2480). Empty when unreadable.
 CALLER_HEAD=$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || true)
-SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REWRITE_REMOTE_SUPERVISOR="$SCRIPT_DIR/review/process/gate-supervisor.mts"
 [ -f "$REWRITE_REMOTE_SUPERVISOR" ] || REWRITE_REMOTE_SUPERVISOR="$SCRIPT_DIR/review/process/gate-supervisor.mjs"
 rewrite_remote() {

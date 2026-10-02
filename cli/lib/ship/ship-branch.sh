@@ -271,20 +271,8 @@ fi
 # Both modes construct their own literal selectors (sc-2425). Ambient Git pathspec modes either
 # reinterpret those magic prefixes as plain text or conflict with them, so they are not inputs.
 unset GIT_LITERAL_PATHSPECS GIT_GLOB_PATHSPECS GIT_NOGLOB_PATHSPECS GIT_ICASE_PATHSPECS
-# Files only: `git diff/ls-files -- <dir>` recurses and would sweep in a parallel
-# agent's edits under that directory, defeating the per-file isolation. (A deleted
-# file is not a dir, so it still passes — deletions are valid pathspecs.)
-if [ "$FROM_BRANCH" -eq 0 ]; then
-  for p in "${PATHS[@]}"; do
-    # Framed on $ROOT like every git call that consumes the path: from a subdirectory a cwd-relative
-    # test lets a root-level directory through, and git then recurses into it.
-    [ -d "$ROOT/$p" ] && {
-      echo "directory path not allowed (pass individual files): $p" >&2
-      echo "  list its tracked files: git ls-files -- \"$p\"" >&2
-      exit 1
-    }
-  done
-fi
+. "$SCRIPT_DIR/refuse-dir-paths.sh"
+[ "$FROM_BRANCH" -eq 1 ] || ship_refuse_dir_paths "$ROOT" "${PATHS[@]}" || exit 1
 
 # Assemble extra symlinks; prepare-gate-worktree.sh adds the universal base.
 LINK_DIRS=()
