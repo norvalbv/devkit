@@ -18,6 +18,7 @@
  * command refuses them rather than silently writing a store entry reconcile() will never consult.
  */
 import { execFileSync } from 'node:child_process';
+import { stripVTControlCharacters } from 'node:util';
 import { emitGateEvent } from '../../judge/gate-events.mts';
 import {
   FINGERPRINT_RE,
@@ -118,7 +119,7 @@ function listWaives(cwd: string): number {
       `[${fp}] ${e.reviewer ?? '?'}:${e.lens ?? '(finding)'} — by ${who}${e.at ? ` at ${e.at}` : ''}` +
         (e.baseSha ? ` · judged against ${e.baseSha.slice(0, 12)}` : ' · base unrecorded'),
     );
-    console.log(`    ${e.rationale}`);
+    console.log(`    ${stripVTControlCharacters(e.rationale ?? '')}`);
   }
   return 0;
 }
@@ -167,7 +168,7 @@ export function runWaive(
   if (rationale.length < RATIONALE_MIN_CHARS || isPlaceholder(rationale)) {
     console.error(
       `guard-review: waive — rationale must be a real, specific reason (>= ${RATIONALE_MIN_CHARS} ` +
-        `chars, not a placeholder), got "${rationale}"`,
+        `chars, not a placeholder), got "${stripVTControlCharacters(rationale)}"`,
     );
     return 2;
   }
@@ -208,6 +209,8 @@ export function runWaive(
       by: 'cli',
       base_sha: flag.baseSha,
     });
-  console.error(`guard-review: waived ${reviewer}:${lens} [${itemId}] — ${rationale}`);
+  console.error(
+    `guard-review: waived ${reviewer}:${lens} [${itemId}] — ${stripVTControlCharacters(rationale)}`,
+  );
   return 0;
 }

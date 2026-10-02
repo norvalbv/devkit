@@ -35,6 +35,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import path from 'node:path';
+import { stripVTControlCharacters } from 'node:util';
 import { CORRECTNESS_OVERRIDES_FILE as OVERRIDES_FILE } from '../deterministic/gate-inputs.mts';
 import { diffCacheIdentity } from '../judge/diff-focus.mts';
 import { emitGateEvent } from '../judge/gate-events.mts';
@@ -377,7 +378,7 @@ export function applyOverrideValve(
   for (const s of suppressed) {
     disposition.set(s.lens, 'waived');
     console.error(
-      `guard-review: ${sel.reviewer.name} — ${s.lens} overridden [${s.fingerprint}]: ${s.rationale}`,
+      `guard-review: ${sel.reviewer.name} — ${s.lens} overridden [${s.fingerprint}]: ${stripVTControlCharacters(s.rationale)}`,
     );
   }
   for (const b of blocking) disposition.set(b.lens, 'blocking');
