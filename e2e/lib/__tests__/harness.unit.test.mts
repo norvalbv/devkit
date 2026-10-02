@@ -1,8 +1,17 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join, relative, sep } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { collectFiles, hashSourceTree, out, shouldRebuildFresh, whichAbs } from '../harness.mts';
+import {
+  buildSteps,
+  CACHE_ROOT,
+  collectFiles,
+  hashSourceTree,
+  out,
+  REPO_ROOT,
+  shouldRebuildFresh,
+  whichAbs,
+} from '../harness.mts';
 
 // Fast, build-free unit tests for the harness's pure logic. The slow build+pack+install lives in the
 // *.e2e.test.mts suites; these pin the cache-key correctness (B1 silent-pass guard), the fresh-rebuild
@@ -112,5 +121,40 @@ describe('whichAbs', () => {
   });
   it('throws a clear precondition error for a missing binary', () => {
     expect(() => whichAbs('definitely-not-a-real-bin-xyz-123')).toThrow(/not found on PATH/);
+  });
+});
+
+describe('buildSteps — sc-3220: the build never writes the repo dist/', () => {
+  const stage = join(tmpdir(), 'devkit-e2e-stage-x');
+  const prefix = join(CACHE_ROOT, 'abc');
+  const [compile, copyAssets, pack] = buildSteps(stage, prefix);
+  const insideRepo = (p: string) => {
+    const rel = relative(REPO_ROOT, p);
+    return rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
+  };
+  const after = (args: string[], flag: string) => args[args.indexOf(flag) + 1] ?? '';
+
+  it('compiles and mirrors assets into the SAME stage dist, outside the repo', () => {
+    const outDir = after(compile.args, '--outDir');
+    expect(outDir).toBe(join(stage, 'dist'));
+    expect(after(copyAssets.args, '--out')).toBe(outDir);
+    expect(insideRepo(outDir)).toBe(false);
+  });
+
+  it('packs from the stage into the prefix with lifecycle scripts off', () => {
+    expect(pack.cwd).toBe(stage);
+    expect(pack.args).toContain('--ignore-scripts');
+    expect(after(pack.args, '--destination')).toBe(prefix);
+    expect(insideRepo(pack.cwd)).toBe(false);
+  });
+
+  it('never runs the in-tree `bun run build` script', () => {
+    for (const s of [compile, copyAssets, pack]) expect(s.args).not.toContain('build');
+  });
+
+  it('every path argument is absolute, so a step is independent of the caller cwd', () => {
+    for (const s of [compile, copyAssets]) {
+      for (const a of s.args.filter((x) => !x.startsWith('-'))) expect(isAbsolute(a), a).toBe(true);
+    }
   });
 });
