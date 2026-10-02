@@ -7,11 +7,14 @@
 SHIP_WAIT_CI_MIN_S=60
 SHIP_WAIT_CI_MAX_S=7200
 
-# ship_validate_wait_ci <wait-ci> <timeout> <timeout-was-set> [<dry-gates>]
+# ship_validate_wait_ci <wait-ci> <timeout> <timeout-was-set> <required> [<dry-gates>]
 ship_validate_wait_ci() {
-  local wait_ci=$1 timeout=$2 timeout_set=$3 dry_gates=${4:-0}
+  local wait_ci=$1 timeout=$2 timeout_set=$3 required=$4 dry_gates=${5:-0}
   if [ "$timeout_set" -eq 1 ] && [ "$wait_ci" -eq 0 ]; then
     echo "--wait-ci-timeout has no effect without --wait-ci" >&2; return 1
+  fi
+  if [ "$required" -eq 1 ] && [ "$wait_ci" -eq 0 ]; then
+    echo "--wait-ci-required has no effect without --wait-ci" >&2; return 1
   fi
   if [ "$wait_ci" -eq 1 ] && [ "$dry_gates" -eq 1 ]; then
     echo "--wait-ci waits on a PR's checks, and --dry-gates never opens a PR" >&2; return 1
@@ -35,11 +38,11 @@ ship_wait_ci_not_run() {
   echo "ship: ci-outcome=not-run pr=${1:-?} reason=$2" >&2
 }
 
-# ship_run_wait_ci <pr-number> <repo> <timeout> <pr-url>
+# ship_run_wait_ci <pr-number> <repo> <timeout> <pr-url> [<required>]
 # Runs LAST, after every artifact is durable. Announces the PR first: a signal here exits 130 through
 # the managed wrapper whatever bash does, so the abort has to be self-describing before it can happen.
 ship_run_wait_ci() {
-  local pr=$1 repo=$2 timeout=$3 url=$4 script
+  local pr=$1 repo=$2 timeout=$3 url=$4 required=${5:-0} script
   ship_queue_slot_release
   if [ -z "$pr" ]; then
     ship_wait_ci_not_run "" pr-number-unresolved
@@ -47,5 +50,9 @@ ship_run_wait_ci() {
   fi
   echo "ship: the PR is open at $url and the ship is complete; waiting on its checks (Ctrl-C is safe)" >&2
   script="$SCRIPT_DIR/wait-ci/wait.mts"; [ -f "$script" ] || script="$SCRIPT_DIR/wait-ci/wait.mjs"
-  node "$script" --pr "$pr" --repo "$repo" --timeout "$timeout" || true
+  if [ "$required" -eq 1 ]; then
+    node "$script" --pr "$pr" --repo "$repo" --timeout "$timeout" --required || true
+  else
+    node "$script" --pr "$pr" --repo "$repo" --timeout "$timeout" || true
+  fi
 }
