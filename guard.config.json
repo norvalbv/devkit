@@ -27,7 +27,6 @@
         "dist/**",
         "**/dist/**",
         "coverage/**",
-        "**/coverage/**",
         "*.lock",
         "**/*.lock"
       ]
