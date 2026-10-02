@@ -554,6 +554,9 @@ describe('--gate (integration, real git repo)', () => {
     // deliberately NOT staged
     expect(scan()).toBe(''); // cached scan: nothing staged
     expect(scan(['--working'])).toContain('dep-change'); // working scan: sees the unstaged change
+    // sc-1051 contract: label-only output never carries a tab — decision-stop-check.sh reads
+    // "non-empty, no tab" as a bin too old for --files.
+    expect(scan(['--working'])).not.toContain('\t');
   });
 
   it('scan --working --files emits (label, dep-name) pairs for the Stop-hook seen-set', () => {

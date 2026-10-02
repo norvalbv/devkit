@@ -11,7 +11,11 @@
 # The smell scan calls the devkit `guard-decisions detect scan --working` bin (not a
 # consumer-local script). That bin resolves boundaries + the decisions dir from the
 # consumer's guard.config.json relative to its cwd, so this hook carries no repo-specific
-# paths. Self-skips cleanly when guard-decisions is unavailable (devkit not installed).
+# paths. Self-skips cleanly when guard-decisions is unavailable (devkit not installed). A bin too OLD
+# to emit file-scoped pairs is reported once per session instead of silently disabling the nudge
+# (sc-1051) — only for a session with edits, since the ledger gate runs first. Not detectable here:
+# a scan that errors (detect.mts swallows it) or a bin with no `scan` subcommand — both print nothing,
+# which is indistinguishable from "no smells".
 
 input=$(cat)
 
@@ -60,16 +64,48 @@ SEEN="$SNOOZE_DIR/${REPO_KEY}-${SID:-unknown}"
 # — turning the intended silent no-op into a blocked stop.
 if [ -x "./node_modules/.bin/guard-decisions" ]; then
   DECISIONS="./node_modules/.bin/guard-decisions"
+  BIN_KIND=local
+  BIN_PATH="$(pwd -P)/node_modules/.bin/guard-decisions"
 elif command -v guard-decisions &>/dev/null; then
   DECISIONS="guard-decisions"
+  BIN_KIND=global
+  BIN_PATH=$(command -v guard-decisions)
 else
   exit 0
 fi
 
 # Cheap regex scan of the WHOLE working tree (staged + unstaged), emitting (label, contributing-file)
 # pairs. No LLM here — the gate's claude -p judgment is for commit time; this turn-end check stays fast.
-PAIRS=$($DECISIONS detect scan --working --files 2>/dev/null)
+# Fingerprint the bin BEFORE it runs, and run exactly that path, so an upgrade landing mid-scan is not
+# snoozed under the old bin's stale-bin notice (sc-1051, below).
+STAMP=$({ ls -lLd "$BIN_PATH"; cksum <"$BIN_PATH"; } 2>/dev/null | cksum | cut -d' ' -f1)
+PAIRS=$("$BIN_PATH" detect scan --working --files 2>/dev/null)
 [ -z "$PAIRS" ] && exit 0
+
+# sc-1051 — a bin that predates `--files` (c72dc608, 2026-06-30) IGNORES the flag and prints bare
+# labels; the ledger filter below keys on a tab-separated file column, so it would drop every line
+# and the nudge would go dark with no signal. Every current-bin line carries a tab and no smell label
+# does, so "non-empty, no tab anywhere" is exactly "stale bin". Report it once per session per bin
+# fingerprint (Stop hooks within a session are serial, so no locking): the marker is written only
+# AFTER the notice is delivered, so a kill or EPIPE just repeats it next stop, and a marker that
+# cannot be written exits 0 rather than blocking every stop.
+if ! printf '%s\n' "$PAIRS" | grep -q "$(printf '\t')"; then
+  STALE_MARK="$SEEN.stale-bin-${STAMP}"
+  [ -e "$STALE_MARK" ] && exit 0
+  PIN=$(grep -oE '"devkitRef"[[:space:]]*:[[:space:]]*"[^"]*"' .devkit/config.json 2>/dev/null | head -1 | sed -E 's/.*"([^"]+)"$/\1/')
+  {
+    echo "🧭 Decision-capture nudges are OFF in this repo: $BIN_PATH predates"
+    echo "'guard-decisions detect scan --files', so it cannot say which file each smell came from."
+    if [ "$BIN_KIND" = local ]; then
+      echo "Fix: bump this repo's @norvalbv/devkit dependency${PIN:+ to $PIN}, then reinstall."
+    else
+      echo "Fix: upgrade the global devkit on PATH${PIN:+ to $PIN, the devkitRef this repo pins}."
+    fi
+    echo "(shown once per session until that bin changes)"
+  } >&2 || exit 0
+  { mkdir -p "$SNOOZE_DIR" && : >"$STALE_MARK"; } 2>/dev/null || exit 0
+  exit 2
+fi
 
 # Keep only pairs whose contributing file is in this session's edits ledger — a smell in a
 # file a PARALLEL session is working on is that session's nudge, not this one's.
