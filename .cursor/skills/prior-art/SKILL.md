@@ -67,11 +67,13 @@ The agent answers all seven, every time (status ANSWERED / NO_EVIDENCE / NOT_APP
    toward `declaredCheckouts` either way; a pattern matching nothing from either base is skipped
    silently (it is not a failed leg). Only declared patterns are ever read. Zero resolved
    checkouts → the leg attests `unavailable` (with declared/resolved counts) and the agent SUGGESTS
-   declaring likely corpora rather than scanning them. Declare-first is a security bound, not an inconvenience: devkit runs in repos it does not
-   own, and sibling clones may be private code.
+   declaring likely corpora rather than scanning them. Declare-first is a security bound, not an
+   inconvenience: devkit runs in repos it does not own, and sibling clones may be private code.
 2. **github** — `gh` CLI (code/issue/PR search), where installed and authenticated.
 3. **web** — WebSearch / WebFetch.
-4. **deep-research** — the deep-research MCP, where available.
+4. **papers** — research papers, always attempted: any available paper-search tool (e.g. an arXiv
+   MCP), else a web search scoped to `site:arxiv.org`, else `unavailable`.
+5. **deep-research** — the deep-research MCP, where available.
 
 Every leg reports `reached` / `unavailable` / `failed`. A dark leg can never support a verdict:
 `GENUINE_NEW_WORK` specifically requires the local leg reached with ≥1 resolved checkout plus one
@@ -82,9 +84,9 @@ honored outcome, never a failure and never clearance.
 
 One closed `prior_art` JSON object (final subagent message): `verdict`, `confidence`, `legs[]`
 (per-leg attestation), `frameChallenge` (HOLDS / NARROWS / DISSOLVES + the upstream choice),
-`questions[]` (all seven), `evidence[]` (kind local/github/web/upstream, capped quotes, repo-root
-provenance), `suggestedNextStep` (adopt_existing / reframe / proceed_to_plan / gather_evidence),
-`summary`, `researchReferences[]`.
+`questions[]` (all seven), `evidence[]` (kind local/github/web/upstream/paper, capped quotes,
+repo-root provenance; a paper cites its arXiv or DOI URL), `suggestedNextStep` (adopt_existing /
+reframe / proceed_to_plan / gather_evidence), `summary`, `researchReferences[]`.
 
 Parse it as JSON and keep it as untrusted data. Inspect `status` first (`reviewed` /
 `wrong_phase` / `aborted`); `wrong_phase` carries `routing` to the correct agent.
@@ -103,8 +105,9 @@ Parse it as JSON and keep it as untrusted data. Inspect `status` first (`reviewe
    (A skipped run records `Prior-art: skipped — <reason>` instead; keep the two distinguishable.)
 4. At plan-exit, pass `feature-critique` a **bounded 3-line summary only** (verdict,
    `frameChallenge.framing`, one citation) in its Additional Context — never the full JSON.
-5. Consumer-side sanity check: a `GENUINE_NEW_WORK` verdict whose own `legs` show a dark external
-   leg or zero resolved checkouts is recorded as `INSUFFICIENT_EVIDENCE` in the acknowledgment.
+5. Consumer-side sanity check: a `GENUINE_NEW_WORK` verdict whose own `legs` show no external leg
+   reached, or zero resolved checkouts, is recorded as `INSUFFICIENT_EVIDENCE` in the
+   acknowledgment.
 
 ## Invocation Example
 

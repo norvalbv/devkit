@@ -4,6 +4,7 @@ import {
   parsePriorArtResponse,
   validatePriorArtCoupling,
 } from '../response-contract.mts';
+import type { PriorArtLeg } from '../response-status.mts';
 
 const raw = (value: unknown): string => JSON.stringify(value);
 
@@ -17,6 +18,7 @@ const LEGS_ALL_REACHED = [
   },
   { leg: 'github', status: 'reached', detail: 'gh code search over the SDK' },
   { leg: 'web', status: 'reached', detail: 'docs + changelog' },
+  { leg: 'papers', status: 'reached', detail: 'arXiv search, no relevant paper' },
   { leg: 'deep-research', status: 'unavailable', detail: 'MCP not configured' },
 ] as const;
 
@@ -165,6 +167,7 @@ describe('parsePriorArtResponse — absence-laundering guards', () => {
       LEGS_ALL_REACHED[0],
       { leg: 'github', status: 'failed', detail: 'gh unauthenticated (401)' },
       { leg: 'web', status: 'unavailable', detail: 'offline' },
+      { leg: 'papers', status: 'unavailable', detail: 'no paper tool, no web tool' },
       { leg: 'deep-research', status: 'unavailable', detail: 'MCP not configured' },
     ];
     expect(
@@ -204,6 +207,7 @@ describe('parsePriorArtResponse — absence-laundering guards', () => {
       },
       { leg: 'github', status: 'unavailable', detail: 'gh absent' },
       { leg: 'web', status: 'unavailable', detail: 'offline' },
+      { leg: 'papers', status: 'unavailable', detail: 'no paper tool, no web tool' },
       { leg: 'deep-research', status: 'unavailable', detail: 'MCP not configured' },
     ];
     expect(
@@ -235,6 +239,7 @@ describe('parsePriorArtResponse — absence-laundering guards', () => {
       LEGS_ALL_REACHED[0],
       { leg: 'github', status: 'failed', detail: 'gh unauthenticated' },
       { leg: 'web', status: 'unavailable', detail: 'offline fetch tool' },
+      { leg: 'papers', status: 'unavailable', detail: 'no paper tool, no web tool' },
       { leg: 'deep-research', status: 'reached', detail: 'deep-research MCP report' },
     ];
     const result = parsePriorArtResponse(
@@ -254,6 +259,106 @@ describe('parsePriorArtResponse — absence-laundering guards', () => {
       ),
     );
     expect(result.ok).toBe(true);
+  });
+
+  describe('the papers leg', () => {
+    /** Legs where only the local and papers legs reached: an arXiv tool worked, nothing else did. */
+    const papersOnly: PriorArtLeg[] = [
+      LEGS_ALL_REACHED[0],
+      { leg: 'github', status: 'failed', detail: 'gh unauthenticated' },
+      { leg: 'web', status: 'unavailable', detail: 'no web tool' },
+      { leg: 'papers', status: 'reached', detail: 'arXiv MCP search_papers' },
+      { leg: 'deep-research', status: 'unavailable', detail: 'MCP not configured' },
+    ];
+    const paper = {
+      kind: 'paper',
+      source: 'https://arxiv.org/abs/2401.00001',
+      repoRoot: null,
+      claim: 'A published method already bounds this.',
+      quote: 'We bound the wait by consuming the stream for the session lifetime.',
+    } as const;
+
+    it('credits a reached papers leg for paper evidence', () => {
+      expect(
+        parsePriorArtResponse(
+          raw(reviewed({ legs: papersOnly, evidence: [EVIDENCE_LOCAL, paper] })),
+        ).ok,
+      ).toBe(true);
+    });
+
+    it.each([
+      ['web', 'https://example.com/blog'],
+      ['upstream', 'upstream changelog v2.4'],
+    ] as const)('does not credit the papers leg for %s evidence', (kind, source) => {
+      const other = { ...paper, kind, source };
+      expect(errorCodeOf(reviewed({ legs: papersOnly, evidence: [EVIDENCE_LOCAL, other] }))).toBe(
+        'INVALID_STATUS_COMBINATION',
+      );
+    });
+
+    it.each(['https://arxiv.org/pdf/2401.00001v2', 'https://doi.org/10.1145/3597503.3639187'])(
+      'accepts a paper cited by its arXiv or DOI URL: %s',
+      (source) => {
+        const cited = { ...paper, source };
+        expect(
+          parsePriorArtResponse(
+            raw(reviewed({ legs: papersOnly, evidence: [EVIDENCE_LOCAL, cited] })),
+          ).ok,
+        ).toBe(true);
+      },
+    );
+
+    it.each([
+      'https://example.com/blog',
+      'https://arxiv.org.evil.example/abs/2401.00001',
+      'arXiv:2401.00001',
+      'httpx://arxiv.org/abs/2401.00001',
+    ])('rejects a paper whose source is not an arXiv or DOI URL: %s', (source) => {
+      const relabelled = { ...paper, source };
+      expect(
+        errorCodeOf(reviewed({ legs: papersOnly, evidence: [EVIDENCE_LOCAL, relabelled] })),
+      ).toBe('INVALID_STATUS_COMBINATION');
+    });
+
+    it('rejects paper evidence when the papers leg never reached', () => {
+      const papersDark = LEGS_ALL_REACHED.map((entry) =>
+        entry.leg === 'papers' ? { ...entry, status: 'unavailable' as const } : entry,
+      );
+      expect(errorCodeOf(reviewed({ legs: papersDark, evidence: [EVIDENCE_LOCAL, paper] }))).toBe(
+        'INVALID_STATUS_COMBINATION',
+      );
+    });
+
+    it('does not let a paper alone carry SOLVED_ELSEWHERE, which needs an adoptable artifact', () => {
+      expect(errorCodeOf(reviewed({ legs: papersOnly, evidence: [paper] }))).toBe(
+        'INVALID_STATUS_COMBINATION',
+      );
+    });
+
+    it('rejects a response that omits the papers leg', () => {
+      const fourLegs = LEGS_ALL_REACHED.filter((entry) => entry.leg !== 'papers');
+      expect(parsePriorArtResponse(raw(reviewed({ legs: fourLegs }))).ok).toBe(false);
+    });
+
+    it('keeps GENUINE_NEW_WORK valid on a github-only external pass with papers dark', () => {
+      const legs: PriorArtLeg[] = [
+        LEGS_ALL_REACHED[0],
+        LEGS_ALL_REACHED[1],
+        { leg: 'web', status: 'unavailable', detail: 'no web tool' },
+        { leg: 'papers', status: 'unavailable', detail: 'no paper tool, no web tool' },
+        { leg: 'deep-research', status: 'unavailable', detail: 'MCP not configured' },
+      ];
+      const result = parsePriorArtResponse(
+        raw(
+          reviewed({
+            verdict: 'GENUINE_NEW_WORK',
+            legs,
+            suggestedNextStep: { kind: 'proceed_to_plan', detail: 'build it' },
+          }),
+        ),
+      );
+      expect(result.ok).toBe(true);
+    });
   });
 
   it('accepts leg-independent local evidence (own-repo record) even with zero checkouts', () => {

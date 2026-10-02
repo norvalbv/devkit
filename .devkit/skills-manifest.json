@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "kind": "skills",
   "devkitRef": "v0.64.0",
-  "generatedAt": "2026-10-02T12:52:54.715Z",
+  "generatedAt": "2026-10-02T13:46:56.415Z",
   "files": {
     "_devkit/checklist-store.mjs": "c8a6a01fe75bd570953ccc88e3b99b8ac365bb249c4b1db2ce0c32a589c52193",
     "_devkit/review-roots.d.mts": "384d95945ccf04f994d805e78a5507835321ee5bcbd46acbf216c77385238c9e",
@@ -11,7 +11,7 @@
     "api-security/scripts/checklist.mjs": "07840e28ed2756cc2575a4d4f22c3d973b9e6c7059559949cbc50907fa0872ff",
     "backend-performance/SKILL.md": "5ff0858b34ffc91d677976dd279f27714d934aa5062f0a3f6b38088e7bd10ddb",
     "backend-performance/scripts/checklist.mjs": "11b0fa63f4b8760408d57235551a6d37d88e927e8397d35314feeab0780b60e3",
-    "brainstorming/SKILL.md": "1c25870729d5cb4ba17682a2ef251f6902a715d69aee0f20c4f548ea2715be5e",
+    "brainstorming/SKILL.md": "7ef56113745ad1d504202acc268dd09d4536c0c43d68d0ed7ad73dbb7e7516fa",
     "commit-gates/SKILL.md": "b1de15f45b89f342891993cf80fdc85f0ad3887486b7b4b2ba537fab193a5435",
     "commit-guard/SKILL.md": "ec3a823b1f0072e07895e5c95ff8dbf4e49f47dad1e47d68f78518ef1d83bb5e",
     "commit-guard/references/co-occurrence.md": "0225034aeb87a8be80d59e4121aa67a99129f6ee8388a9605e0db484e7d767d4",
@@ -28,7 +28,7 @@
     "frontend-security/SKILL.md": "b4f097efd4076ebf530d59b2042def53bb51d975c50e6dc12da698d882fe630f",
     "frontend-security/scripts/checklist.mjs": "c4fa9d4827054b719417ae67edb84efa846d3ea31541040b0464e7d4018ab7d9",
     "parallel-neon-migration/SKILL.md": "b2c2d90ff77fe8bd4eb6e2dda074dd0c8b5adfc1b179ac136689445a4d2c981e",
-    "prior-art/SKILL.md": "8c190f0571f707649a2548f9b186279637aca4c1a451e672c556966a729f34f6",
+    "prior-art/SKILL.md": "43b69bfbf24b803d6664238d6dcb6aba7a4384a18486168dd3a508750357f291",
     "structure-governance/SKILL.md": "4e13c0fcdcb4c49ff10409431d3ec5e44270a9f97024a73e08feb2801f5dc239",
     "structure-governance/references/fixing-lint-errors.md": "710d3f91a4a21c1ae6bcd6338673f38e3d28f04368bcb0329f95035fe51ad556",
     "structure-governance/references/walls.md": "6abf951adaf7aa71d1d0827bcddc2e9fdc517e622f86c40aa1ffde6deb4e5ecb",
@@ -36,7 +36,7 @@
     "upstream-sync/SKILL.md": "1007c8377ac15393dcc9db5384d80bd38487c85aa465921ae0b49ba5a91bad70",
     "upstream-sync/scripts/sync.mjs": "218aa7ad7e96f280f281a38f99919f2ce55eace902ed95b1119a0099ddbb3c76",
     "upstream-sync/scripts/verify-merge.mjs": "afb2977ab8b7a96fac2e93e29a68ae432508ba7e63d03c580fcf03229fcd0676",
-    "using-devkit/SKILL.md": "f3daf51ddcf03774732756d73bf9964f26c8c3840f33ab9cf573a0ebc30ec472"
+    "using-devkit/SKILL.md": "2b53bb8bfea8254b346fa0c6719eed9e9a4fa04f556886338d6854121555a8a9"
   },
   "providers": {
     "claude": {
@@ -48,7 +48,7 @@
         "api-security/scripts/checklist.mjs": "07840e28ed2756cc2575a4d4f22c3d973b9e6c7059559949cbc50907fa0872ff",
         "backend-performance/SKILL.md": "5ff0858b34ffc91d677976dd279f27714d934aa5062f0a3f6b38088e7bd10ddb",
         "backend-performance/scripts/checklist.mjs": "11b0fa63f4b8760408d57235551a6d37d88e927e8397d35314feeab0780b60e3",
-        "brainstorming/SKILL.md": "1c25870729d5cb4ba17682a2ef251f6902a715d69aee0f20c4f548ea2715be5e",
+        "brainstorming/SKILL.md": "7ef56113745ad1d504202acc268dd09d4536c0c43d68d0ed7ad73dbb7e7516fa",
         "commit-gates/SKILL.md": "b1de15f45b89f342891993cf80fdc85f0ad3887486b7b4b2ba537fab193a5435",
         "commit-guard/SKILL.md": "ec3a823b1f0072e07895e5c95ff8dbf4e49f47dad1e47d68f78518ef1d83bb5e",
         "commit-guard/references/co-occurrence.md": "0225034aeb87a8be80d59e4121aa67a99129f6ee8388a9605e0db484e7d767d4",
@@ -65,7 +65,7 @@
         "frontend-security/SKILL.md": "b4f097efd4076ebf530d59b2042def53bb51d975c50e6dc12da698d882fe630f",
         "frontend-security/scripts/checklist.mjs": "c4fa9d4827054b719417ae67edb84efa846d3ea31541040b0464e7d4018ab7d9",
         "parallel-neon-migration/SKILL.md": "b2c2d90ff77fe8bd4eb6e2dda074dd0c8b5adfc1b179ac136689445a4d2c981e",
-        "prior-art/SKILL.md": "8c190f0571f707649a2548f9b186279637aca4c1a451e672c556966a729f34f6",
+        "prior-art/SKILL.md": "43b69bfbf24b803d6664238d6dcb6aba7a4384a18486168dd3a508750357f291",
         "structure-governance/SKILL.md": "4e13c0fcdcb4c49ff10409431d3ec5e44270a9f97024a73e08feb2801f5dc239",
         "structure-governance/references/fixing-lint-errors.md": "710d3f91a4a21c1ae6bcd6338673f38e3d28f04368bcb0329f95035fe51ad556",
         "structure-governance/references/walls.md": "6abf951adaf7aa71d1d0827bcddc2e9fdc517e622f86c40aa1ffde6deb4e5ecb",
@@ -73,7 +73,7 @@
         "upstream-sync/SKILL.md": "1007c8377ac15393dcc9db5384d80bd38487c85aa465921ae0b49ba5a91bad70",
         "upstream-sync/scripts/sync.mjs": "218aa7ad7e96f280f281a38f99919f2ce55eace902ed95b1119a0099ddbb3c76",
         "upstream-sync/scripts/verify-merge.mjs": "afb2977ab8b7a96fac2e93e29a68ae432508ba7e63d03c580fcf03229fcd0676",
-        "using-devkit/SKILL.md": "f3daf51ddcf03774732756d73bf9964f26c8c3840f33ab9cf573a0ebc30ec472"
+        "using-devkit/SKILL.md": "2b53bb8bfea8254b346fa0c6719eed9e9a4fa04f556886338d6854121555a8a9"
       }
     },
     "cursor": {
@@ -85,7 +85,7 @@
         "api-security/scripts/checklist.mjs": "07840e28ed2756cc2575a4d4f22c3d973b9e6c7059559949cbc50907fa0872ff",
         "backend-performance/SKILL.md": "5ff0858b34ffc91d677976dd279f27714d934aa5062f0a3f6b38088e7bd10ddb",
         "backend-performance/scripts/checklist.mjs": "11b0fa63f4b8760408d57235551a6d37d88e927e8397d35314feeab0780b60e3",
-        "brainstorming/SKILL.md": "1c25870729d5cb4ba17682a2ef251f6902a715d69aee0f20c4f548ea2715be5e",
+        "brainstorming/SKILL.md": "7ef56113745ad1d504202acc268dd09d4536c0c43d68d0ed7ad73dbb7e7516fa",
         "commit-gates/SKILL.md": "b1de15f45b89f342891993cf80fdc85f0ad3887486b7b4b2ba537fab193a5435",
         "commit-guard/SKILL.md": "ec3a823b1f0072e07895e5c95ff8dbf4e49f47dad1e47d68f78518ef1d83bb5e",
         "commit-guard/references/co-occurrence.md": "0225034aeb87a8be80d59e4121aa67a99129f6ee8388a9605e0db484e7d767d4",
@@ -102,7 +102,7 @@
         "frontend-security/SKILL.md": "b4f097efd4076ebf530d59b2042def53bb51d975c50e6dc12da698d882fe630f",
         "frontend-security/scripts/checklist.mjs": "c4fa9d4827054b719417ae67edb84efa846d3ea31541040b0464e7d4018ab7d9",
         "parallel-neon-migration/SKILL.md": "b2c2d90ff77fe8bd4eb6e2dda074dd0c8b5adfc1b179ac136689445a4d2c981e",
-        "prior-art/SKILL.md": "8c190f0571f707649a2548f9b186279637aca4c1a451e672c556966a729f34f6",
+        "prior-art/SKILL.md": "43b69bfbf24b803d6664238d6dcb6aba7a4384a18486168dd3a508750357f291",
         "structure-governance/SKILL.md": "4e13c0fcdcb4c49ff10409431d3ec5e44270a9f97024a73e08feb2801f5dc239",
         "structure-governance/references/fixing-lint-errors.md": "710d3f91a4a21c1ae6bcd6338673f38e3d28f04368bcb0329f95035fe51ad556",
         "structure-governance/references/walls.md": "6abf951adaf7aa71d1d0827bcddc2e9fdc517e622f86c40aa1ffde6deb4e5ecb",
@@ -110,7 +110,7 @@
         "upstream-sync/SKILL.md": "1007c8377ac15393dcc9db5384d80bd38487c85aa465921ae0b49ba5a91bad70",
         "upstream-sync/scripts/sync.mjs": "218aa7ad7e96f280f281a38f99919f2ce55eace902ed95b1119a0099ddbb3c76",
         "upstream-sync/scripts/verify-merge.mjs": "afb2977ab8b7a96fac2e93e29a68ae432508ba7e63d03c580fcf03229fcd0676",
-        "using-devkit/SKILL.md": "f3daf51ddcf03774732756d73bf9964f26c8c3840f33ab9cf573a0ebc30ec472"
+        "using-devkit/SKILL.md": "2b53bb8bfea8254b346fa0c6719eed9e9a4fa04f556886338d6854121555a8a9"
       }
     }
   }

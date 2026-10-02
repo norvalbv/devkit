@@ -21,12 +21,12 @@ export type PriorArtVerdict = (typeof PRIOR_ART_VERDICTS)[number];
 export const PRIOR_ART_CONFIDENCES = ['high', 'medium', 'low'] as const;
 export const PRIOR_ART_FRAMINGS = ['HOLDS', 'NARROWS', 'DISSOLVES'] as const;
 export const PRIOR_ART_BOUNDARY_ANSWERS = ['yes', 'no', 'unknown'] as const;
-export const PRIOR_ART_LEG_NAMES = ['local', 'github', 'web', 'deep-research'] as const;
+export const PRIOR_ART_LEG_NAMES = ['local', 'github', 'web', 'papers', 'deep-research'] as const;
 export type PriorArtLegName = (typeof PRIOR_ART_LEG_NAMES)[number];
 export const PRIOR_ART_LEG_STATUSES = ['reached', 'unavailable', 'failed'] as const;
 export const PRIOR_ART_QUESTION_IDS = ['Q1', 'Q2', 'Q3', 'Q4', 'Q5', 'Q6', 'Q7'] as const;
 export const PRIOR_ART_QUESTION_STATUSES = ['ANSWERED', 'NO_EVIDENCE', 'NOT_APPLICABLE'] as const;
-export const PRIOR_ART_EVIDENCE_KINDS = ['local', 'github', 'web', 'upstream'] as const;
+export const PRIOR_ART_EVIDENCE_KINDS = ['local', 'github', 'web', 'upstream', 'paper'] as const;
 export const PRIOR_ART_NEXT_STEP_KINDS = [
   'adopt_existing',
   'reframe',
@@ -118,6 +118,24 @@ export type ParsePriorArtResponseResult =
 
 // ─── Status-combination rules (the coupling that makes the verdict earnable) ──────
 
+const PAPER_HOSTS = new Set([
+  'arxiv.org',
+  'www.arxiv.org',
+  'export.arxiv.org',
+  'doi.org',
+  'dx.doi.org',
+]);
+
+/** True when `source` is an absolute http(s) arXiv or DOI URL, the only way a paper may be cited. */
+function isPaperSource(source: string): boolean {
+  const url = URL.parse(source);
+  return (
+    url !== null &&
+    (url.protocol === 'https:' || url.protocol === 'http:') &&
+    PAPER_HOSTS.has(url.hostname)
+  );
+}
+
 /**
  * Validate the verdict↔evidence↔legs coupling. `combo` reports one violation and never returns
  * (the parser supplies its ContractFailure thrower), so validation stops at the first breach.
@@ -161,7 +179,7 @@ export function validatePriorArtCoupling(
     return; // combo always throws; the return is for control-flow narrowing only
   }
   if (response.legs.length !== PRIOR_ART_LEG_NAMES.length)
-    combo('$.legs', 'reviewed requires all four legs attested');
+    combo('$.legs', `reviewed requires all ${PRIOR_ART_LEG_NAMES.length} legs attested`);
   if (response.questions.length !== PRIOR_ART_QUESTION_IDS.length)
     combo('$.questions', 'reviewed requires all seven questions');
   const local = response.legs[0];
@@ -175,27 +193,34 @@ export function validatePriorArtCoupling(
   // `github` is the gh-CLI leg's shape specifically; `web` arrives via the web leg OR the
   // deep-research MCP (the md groups deep-research under web research); `upstream` facts
   // (issues, changelogs, docs) arrive via gh, the web, or deep-research, so any of the three.
-  const reached = (index: number) => response.legs[index]?.status === 'reached';
+  const reached = (name: PriorArtLegName) =>
+    response.legs.some((entry) => entry.leg === name && entry.status === 'reached');
   response.evidence.forEach((item, index) => {
     const supported =
       item.kind === 'local'
-        ? item.repoRoot === null || reached(0)
+        ? item.repoRoot === null || reached('local')
         : item.kind === 'github'
-          ? reached(1)
+          ? reached('github')
           : item.kind === 'web'
-            ? reached(2) || reached(3)
-            : reached(1) || reached(2) || reached(3);
+            ? reached('web') || reached('deep-research')
+            : item.kind === 'paper'
+              ? reached('papers')
+              : reached('github') || reached('web') || reached('deep-research');
     if (!supported)
       combo(
         `$.evidence[${index}].kind`,
         `${item.kind} evidence requires its research leg attested reached`,
       );
+    if (item.kind === 'paper' && !isPaperSource(item.source))
+      combo(`$.evidence[${index}].source`, 'paper evidence must cite an arXiv or DOI URL');
   });
-  const nonWebEvidence = response.evidence.some((item) => item.kind !== 'web');
+  const adoptableEvidence = response.evidence.some(
+    (item) => item.kind !== 'web' && item.kind !== 'paper',
+  );
   const step = suggestedNextStep.kind;
   switch (verdict) {
     case 'SOLVED_ELSEWHERE':
-      if (!nonWebEvidence)
+      if (!adoptableEvidence)
         combo(
           '$.evidence',
           'SOLVED_ELSEWHERE requires local/github/upstream evidence actually read',

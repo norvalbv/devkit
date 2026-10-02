@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "kind": "agents",
   "devkitRef": "v0.64.0",
-  "generatedAt": "2026-10-01T23:38:28.552Z",
+  "generatedAt": "2026-10-02T12:09:19.744Z",
   "files": {
     "api-security-reviewer.md": "bfa4ff0d792a03ec7845dc7c7daf586779bdc76f053551c6d05a2ee11b22a87e",
     "backend-performance-reviewer.md": "ff60c2338a9854fa63104a1b343e1d90f0feecf1126c84c66c5b86d4537c9ba0",
@@ -15,7 +15,7 @@
     "frontend-accessibility-reviewer.md": "1555ca737f0e6a548cb7a066d78a586fc7c5efde078addbc3d038b900d0a9287",
     "frontend-performance-reviewer.md": "01bf36905b2be06997e10f5c95f2cc5ae5102456965e69d46483f2161a8bdd17",
     "frontend-security-reviewer.md": "2eebe20d291feeae89f9116bb8e5fd0c79d9f7e690e9c9133a162aca042ed8ff",
-    "prior-art.md": "8da37cd262b5e88d37e94b6a9773967abee9804172d0b17c94ec60a17fad25d6"
+    "prior-art.md": "830f437b449a40a89b07fe9d05eca208e972a11ee18fc133b8ba14e7226622a3"
   },
   "providers": {
     "claude": {
@@ -31,7 +31,7 @@
         "frontend-accessibility-reviewer.md": "1555ca737f0e6a548cb7a066d78a586fc7c5efde078addbc3d038b900d0a9287",
         "frontend-performance-reviewer.md": "01bf36905b2be06997e10f5c95f2cc5ae5102456965e69d46483f2161a8bdd17",
         "frontend-security-reviewer.md": "2eebe20d291feeae89f9116bb8e5fd0c79d9f7e690e9c9133a162aca042ed8ff",
-        "prior-art.md": "8da37cd262b5e88d37e94b6a9773967abee9804172d0b17c94ec60a17fad25d6"
+        "prior-art.md": "830f437b449a40a89b07fe9d05eca208e972a11ee18fc133b8ba14e7226622a3"
       }
     },
     "cursor": {
@@ -47,7 +47,7 @@
         "frontend-accessibility-reviewer.md": "1555ca737f0e6a548cb7a066d78a586fc7c5efde078addbc3d038b900d0a9287",
         "frontend-performance-reviewer.md": "01bf36905b2be06997e10f5c95f2cc5ae5102456965e69d46483f2161a8bdd17",
         "frontend-security-reviewer.md": "2eebe20d291feeae89f9116bb8e5fd0c79d9f7e690e9c9133a162aca042ed8ff",
-        "prior-art.md": "8da37cd262b5e88d37e94b6a9773967abee9804172d0b17c94ec60a17fad25d6"
+        "prior-art.md": "830f437b449a40a89b07fe9d05eca208e972a11ee18fc133b8ba14e7226622a3"
       }
     }
   }

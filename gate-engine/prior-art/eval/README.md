@@ -4,7 +4,7 @@ Scores `agents/prior-art.md` on hand-authored **intrinsic** rows: each row inlin
 reachable research corpus and pins the per-leg attestations, so this tier measures **recognition +
 frame courage** (does the agent name the dissolving artifact and challenge the frame?), never
 retrieval. Retrieval belongs to the Phase-3 workflow tier (fixture repos with declared
-`research.referenceCheckouts`); the live network legs (`gh`, web, deep-research) are **unbenchmarked
+`research.referenceCheckouts`); the live network legs (`gh`, web, papers, deep-research) are **unbenchmarked
 departures**, same idiom as the critique bench's deep-research gap.
 
 ## Corpus (`cases-prior-art.jsonl`, 15 rows)
