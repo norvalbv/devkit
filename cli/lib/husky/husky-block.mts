@@ -64,7 +64,7 @@ __dk_gate_deterministic "$__dk_package_bin_dir/guard-deterministic" --hook "\${D
 // Guard run order: the deterministic orchestrator first (one aggregated report), AI gates last so
 // a doomed commit never pays for a judge. Explicit lists — never rely on object-key order.
 const DETERMINISTIC_GUARD_IDS = ['size', 'fanout', 'dup', 'clone', 'coverage', 'comments'];
-const AI_GUARD_IDS = ['decisions', 'review'] as const;
+export const AI_GUARD_IDS = ['decisions', 'review'] as const;
 // qavis-advisory runs after every judge that can demand an edit (sc-3012), own 0/3 exit contract.
 // This wrapper stays fail-open when qavis/the bin is absent, matching the fallow precedent.
 export const QAVIS_ADVISORY_ID = 'qavis-advisory';

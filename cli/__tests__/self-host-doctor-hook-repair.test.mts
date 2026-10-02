@@ -124,6 +124,16 @@ describe('self-host doctor --fix repairs the hook without touching managed state
     expect(snapshot(root)).toEqual(before);
     expect(capability.sync).not.toHaveBeenCalled();
     expect(output()).not.toMatch(/pre-commit.*devkit init/);
+    // A repaired hook reports its run order too; self-host installs no commit-msg hook.
+    expect(output()).toMatch(
+      /gate order — pre-commit: format \(biome\) → deterministic\(.*,structure\) → decisions → review \[\+completeness prewarm on ship\] → qavis-advisory → fallow \[advisory\] → skill-projection \[advisory\]\n/,
+    );
+    expect(output()).not.toMatch(/commit-msg:/);
+  });
+
+  it('without --fix, prints no gate order for a hook that is missing', async () => {
+    await runSelfHostDoctor(seedRepo(), CFG, false, capability);
+    expect(output()).not.toMatch(/gate order/);
   });
 
   it.skipIf(process.platform === 'win32')(

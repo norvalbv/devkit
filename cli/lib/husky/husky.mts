@@ -19,6 +19,8 @@
  * the consumer's own hook and is never touched by init or removal.
  */
 
+import { statSync } from 'node:fs';
+
 const MARK_START_BASE = '# >>> devkit-guards';
 const MARK_END_BASE = '# <<< devkit-guards';
 
@@ -29,4 +31,15 @@ export function markStart(pkgRel = '') {
 /** Closing marker for a package (pkgRel '' → the unsuffixed root marker, back-compat). */
 export function markEnd(pkgRel = '') {
   return pkgRel ? `${MARK_END_BASE}: ${pkgRel} <<<` : `${MARK_END_BASE} <<<`;
+}
+
+/** Git runs a hook it executes directly (core.hooksPath, no husky `sh` wrapper) only when the file
+ * is an executable file; Windows has no mode bits to check. Missing or unreadable → false. */
+export function hookRunnable(path: string): boolean {
+  try {
+    const stat = statSync(path);
+    return stat.isFile() && (process.platform === 'win32' || (stat.mode & 0o111) !== 0);
+  } catch {
+    return false;
+  }
 }

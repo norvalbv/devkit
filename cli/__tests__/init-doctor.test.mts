@@ -650,7 +650,171 @@ describe('doctor — selection-aware', () => {
     devkit(root, 'init', '--stack', 'generic', '--yes', '--guards', 'fanout,size');
     const r = devkit(root, 'doctor');
     expect(r.status).toBe(0);
-    expect(r.stdout).toMatch(/block calls: fanout, size/);
+    expect(r.stdout).toMatch(
+      /gate order — pre-commit: format \(biome\) → deterministic\(size,fanout\)\n/,
+    );
+  });
+
+  // Doctor prints RUN order, not the recorded selection order: qavis-advisory recorded before review
+  // must still print after it, or an agent concludes QA runs before the reviewers can demand an edit.
+  it('prints the run order across pre-commit and commit-msg, not the recorded order', () => {
+    const root = tmpRepo();
+    devkit(root, 'init', '--stack', 'generic', '--yes', '--guards', 'qavis-advisory,review,size');
+    // Exit code not asserted: a review selection adds judge-health rows a bare tmp repo can't satisfy.
+    const r = devkit(root, 'doctor');
+    expect(r.stdout).toContain(
+      'gate order — pre-commit: format (biome) → deterministic(size) → review [+completeness prewarm on ship] → qavis-advisory · commit-msg: completeness',
+    );
+  });
+
+  it('prints the standalone order: sentry prewarm, but no completeness prewarm', () => {
+    const root = tmpRepo();
+    devkit(
+      root,
+      'init',
+      '--standalone',
+      '--stack',
+      'generic',
+      '--yes',
+      '--guards',
+      'size,review,sentry',
+    );
+    const r = devkit(root, 'doctor');
+    expect(r.stdout).toContain(
+      'gate order — pre-commit: deterministic(size) → review → sentry [ship prewarm] · commit-msg: completeness → sentry',
+    );
+  });
+
+  it('prints the overlay order: no prewarm, so sentry judges at commit-msg after the advisory', () => {
+    const root = tmpRepo();
+    expect(spawnSync('git', ['init', '-q'], { cwd: root }).status).toBe(0);
+    devkit(
+      root,
+      'init',
+      '--overlay',
+      '--stack',
+      'generic',
+      '--yes',
+      '--guards',
+      'size,qavis-advisory,review,sentry',
+    );
+    const r = devkit(root, 'doctor');
+    expect(r.stdout).toContain(
+      'gate order — pre-commit: deterministic(size) → lint overlay (eslint,biome) → review → qavis-advisory · commit-msg: completeness → sentry',
+    );
+  });
+
+  // A hook that does not match the generator does not run the generator's order, so doctor must not
+  // claim it: overlay prints no order line, and a broken commit-msg hook is named unverified.
+  it('prints no overlay gate order while the overlay hook is missing or stale', () => {
+    const root = tmpRepo();
+    expect(spawnSync('git', ['init', '-q'], { cwd: root }).status).toBe(0);
+    devkit(root, 'init', '--overlay', '--stack', 'generic', '--yes', '--guards', 'size,review');
+    const hook = join(root, '.devkit', 'hooks', 'pre-commit');
+    writeFileSync(hook, '#!/bin/sh\nexit 0\n');
+    expect(devkit(root, 'doctor').stdout).not.toContain('gate order');
+    rmSync(hook);
+    expect(devkit(root, 'doctor').stdout).not.toContain('gate order');
+  });
+
+  // A hand-reordered block keeps every sentinel, so presence checks pass it; any difference from the
+  // generator means the generator's order is not what runs.
+  it('claims no order for a hand-edited pre-commit or commit-msg block', () => {
+    const root = tmpRepo();
+    devkit(root, 'init', '--stack', 'generic', '--yes', '--guards', 'size,qavis-advisory,review');
+    const pre = join(root, '.husky', 'pre-commit');
+    const qavis =
+      /if __dk_gate_selected qavis-advisory; then\n[\s\S]*?\n# \/devkit:guard-qavis-advisory\nfi\n/;
+    const original = readFileSync(pre, 'utf8');
+    const fragment = original.match(qavis)?.[0] ?? '';
+    expect(fragment).not.toBe('');
+    // Move the advisory ahead of the reviewer fleet: every sentinel still present, order changed.
+    const reordered = original
+      .replace(fragment, '')
+      .replace(
+        'if __dk_gate_selected review; then',
+        `${fragment}if __dk_gate_selected review; then`,
+      );
+    writeFileSync(pre, reordered);
+    expect(devkit(root, 'doctor').stdout).toContain(
+      '.husky/pre-commit: OK — block present — gate order not verified: the hook differs from the generator',
+    );
+
+    writeFileSync(pre, original);
+    const msg = join(root, '.husky', 'commit-msg');
+    writeFileSync(
+      msg,
+      readFileSync(msg, 'utf8').replace(
+        '# devkit:guard-completeness',
+        'echo hand-edit\n# devkit:guard-completeness',
+      ),
+    );
+    expect(devkit(root, 'doctor').stdout).toMatch(
+      /gate order — pre-commit: .*qavis-advisory · commit-msg: not verified \(hook missing or stale\)/,
+    );
+  });
+
+  // Git skips a hook it executes directly when the file lacks the exec bit (husky's own wrapper
+  // uses `sh`), so standalone and overlay must not claim an order for one.
+  it.skipIf(process.platform === 'win32')(
+    'claims no order for a standalone or overlay hook git cannot execute',
+    () => {
+      const solo = tmpRepo();
+      devkit(
+        solo,
+        'init',
+        '--standalone',
+        '--stack',
+        'generic',
+        '--yes',
+        '--guards',
+        'size,review',
+      );
+      chmodSync(join(solo, '.husky', 'pre-commit'), 0o644);
+      expect(devkit(solo, 'doctor').stdout).toContain('gate order not verified');
+      chmodSync(join(solo, '.husky', 'pre-commit'), 0o755);
+      chmodSync(join(solo, '.husky', 'commit-msg'), 0o644);
+      expect(devkit(solo, 'doctor').stdout).toMatch(/commit-msg: not verified/);
+
+      const overlay = tmpRepo();
+      expect(spawnSync('git', ['init', '-q'], { cwd: overlay }).status).toBe(0);
+      devkit(
+        overlay,
+        'init',
+        '--overlay',
+        '--stack',
+        'generic',
+        '--yes',
+        '--guards',
+        'size,review',
+      );
+      chmodSync(join(overlay, '.devkit', 'hooks', 'pre-commit'), 0o644);
+      expect(devkit(overlay, 'doctor').stdout).not.toContain('gate order');
+    },
+  );
+
+  it('claims no overlay order while core.hooksPath points away from the overlay hooks', () => {
+    const root = tmpRepo();
+    expect(spawnSync('git', ['init', '-q'], { cwd: root }).status).toBe(0);
+    devkit(root, 'init', '--overlay', '--stack', 'generic', '--yes', '--guards', 'size,review');
+    expect(spawnSync('git', ['config', '--unset', 'core.hooksPath'], { cwd: root }).status).toBe(0);
+    // An empty XDG config home: no global husky shim, so nothing else gates this repo's commits.
+    const r = spawnSync(process.execPath, [CLI, 'doctor'], {
+      cwd: root,
+      encoding: 'utf8',
+      env: { ...process.env, XDG_CONFIG_HOME: join(root, '.no-xdg') },
+    });
+    expect(r.stdout).toMatch(/core\.hooksPath = \(unset\)/);
+    expect(r.stdout).not.toContain('gate order');
+  });
+
+  it('marks the commit-msg order unverified when that hook is missing', () => {
+    const root = tmpRepo();
+    devkit(root, 'init', '--stack', 'generic', '--yes', '--guards', 'size,review');
+    rmSync(join(root, '.husky', 'commit-msg'));
+    expect(devkit(root, 'doctor').stdout).toMatch(
+      /gate order — pre-commit: .* · commit-msg: not verified \(hook missing or stale\)/,
+    );
   });
 
   // The qavis-advisory gate fails OPEN when qavis can't be reached, so at commit time a missing

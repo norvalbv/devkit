@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { printQavisAdvisoryHealth } from './qavis-health.mts';
 import type { Selection } from '../components.mts';
 import { detectGitRoot } from '../detect-git-root.mts';
+import { formatGateOrder, gateRunOrder } from '../husky/gate-policy/gate-order.mts';
 import { selfHostHookParity } from '../husky/hook-parity.mts';
 import { installSelfHostHook, selfHostSelection } from '../husky/self-host.mts';
 import { checkAdhdSkill } from '../install/adhd-skill.mts';
@@ -131,6 +132,10 @@ export async function runSelfHostDoctor(
       '  ⚠ .husky/pre-commit is STALE (generator changed or the hook was hand-edited) — run `devkit doctor --fix`',
     );
   }
+  if (hookOk)
+    console.log(
+      `    gate order — ${formatGateOrder(gateRunOrder(selection, 'self-host', pkgRel))}`,
+    );
   if (existsSync(hookPath)) {
     // Self-host never runs checkHusky, so without this the duplicate-gate warning is unreachable in
     // exactly the repo that dogfoods devkit — the one most likely to grow a hand-written gate copy.
