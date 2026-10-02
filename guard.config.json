@@ -5,6 +5,11 @@
   "indexPath": ".search-code/index.db",
   "//generated": "Paths ship's three-way staging abort points at a generator instead of a hand-merge (sc-2770). .devkit/*-manifest.json are built-in defaults.",
   "generated": [{ "glob": "dist/**", "command": "bun run build" }],
+  "//comments": "devkit is open source: a comment citing a private Shortcut ticket, an autonomous report id or a decision record means nothing to an outside reader, so guard-comments blocks changed comments that do.",
+  "comments": {
+    "forbiddenRefs": ["\\bsc-\\d+\\b", "\\breport-[0-9a-f]{6,}\\b"],
+    "forbidDecisionRefs": true
+  },
   "//research": "Sibling clones the prior-art agent may read (agents/prior-art.md). Unresolved entries are skipped, so a clone without them stays valid.",
   "research": {
     "referenceCheckouts": ["../bug-mcp", "../claude-usage-dashboard", "../frink", "../qavis"]

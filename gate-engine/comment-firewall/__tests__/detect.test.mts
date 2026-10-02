@@ -631,45 +631,60 @@ describe('finding id identity semantics', () => {
   });
 });
 
-describe('gate outcome with legacy waiver evidence on disk', () => {
+describe('gate outcome across attempts', () => {
   const PARAGRAPH = [
     '// Offsets in this protocol are UTF-16 code units, not bytes.',
     '// A surrogate pair therefore advances the cursor by two.',
     '// Byte-based slicing corrupts every message past the first.',
   ].join('\n');
 
-  it('blocks even when a rationale entry and a PASS receipt exist for the finding', () => {
+  function attempt(root: string) {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exit = runCommentFirewall(root, { emit: () => {} });
+    const output = vi.mocked(console.error).mock.calls.flat().join('\n');
+    vi.restoreAllMocks();
+    return { exit, output };
+  }
+
+  it('blocks a new paragraph once, then passes it unchanged or reworded', () => {
+    const root = fixture();
+    writeFileSync(path.join(root, 'src/a.ts'), 'const anchor = 1;\nconst after = 2;\n');
+    commitAll(root, 'base');
+    writeFileSync(
+      path.join(root, 'src/a.ts'),
+      `const anchor = 1;\n${PARAGRAPH}\nconst after = 2;\n`,
+    );
+    git(root, ['add', 'src/a.ts']);
+
+    const first = attempt(root);
+    expect(first.exit).toBe(1);
+    expect(first.output).toContain('src/a.ts:2-4');
+    expect(attempt(root)).toMatchObject({ exit: 0, output: expect.stringContaining('kept 1') });
+
+    const reworded = PARAGRAPH.replace('advances the cursor', 'moves the cursor');
+    writeFileSync(
+      path.join(root, 'src/a.ts'),
+      `const anchor = 1;\n${reworded}\nconst after = 2;\n`,
+    );
+    git(root, ['add', 'src/a.ts']);
+    expect(attempt(root).exit).toBe(0);
+  });
+
+  it('shares the shown store with a linked worktree, as a ship gate worktree does', () => {
     const root = fixture();
     writeFileSync(path.join(root, 'src/a.ts'), 'const anchor = 1;\n');
     commitAll(root, 'base');
     writeFileSync(path.join(root, 'src/a.ts'), `const anchor = 1;\n${PARAGRAPH}\n`);
     git(root, ['add', 'src/a.ts']);
-    const id = detectChangedComments(root).findings[0]?.id ?? '';
-    expect(id).toMatch(/^[0-9a-f]{12}$/);
+    expect(attempt(root).exit).toBe(1);
 
-    const gitDir = git(root, ['rev-parse', '--git-common-dir']).trim();
-    mkdirSync(path.join(root, gitDir, 'devkit'), { recursive: true });
-    writeFileSync(
-      path.join(root, gitDir, 'devkit/comment-firewall-rationales.json'),
-      JSON.stringify({
-        version: 1,
-        entries: { [id]: { rationale: 'A durable protocol invariant.', at: '2026-08-15' } },
-      }),
-    );
-    mkdirSync(path.join(root, '.devkit'), { recursive: true });
-    writeFileSync(
-      path.join(root, '.devkit/comment-firewall-receipts.json'),
-      JSON.stringify({ version: 1, entries: { legacy: { verdict: 'PASS', findingId: id } } }),
-    );
-
-    vi.spyOn(console, 'error').mockImplementation(() => {});
-    const exit = runCommentFirewall(root);
-    const output = vi.mocked(console.error).mock.calls.flat().join('\n');
-    vi.restoreAllMocks();
-
-    expect(exit).toBe(1);
-    expect(output).toContain(`[${id}] src/a.ts:2-4`);
-    expect(output).toContain('Shorten it to at most 2 lines');
-    expect(output).not.toContain('justify');
+    git(root, ['stash', '-q']);
+    const linked = mkdtempSync(path.join(tmpdir(), 'guard-comments-linked-'));
+    roots.push(linked);
+    git(root, ['worktree', 'add', '-q', '--detach', linked]);
+    git(root, ['stash', 'pop', '-q']);
+    writeFileSync(path.join(linked, 'src/a.ts'), `const anchor = 1;\n${PARAGRAPH}\n`);
+    git(linked, ['add', 'src/a.ts']);
+    expect(attempt(linked).exit).toBe(0);
   });
 });

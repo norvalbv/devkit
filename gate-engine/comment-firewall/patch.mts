@@ -7,11 +7,18 @@ export interface DeletedLine {
   neighbours: number[];
 }
 
+/** A maximal block of removed (old-side) and added (new-side) lines with no context between. */
+export interface ChangeRun {
+  removed: number[];
+  added: Set<number>;
+}
+
 export interface PatchHunk {
   newStart: number;
   newCount: number;
   addedLines: Set<number>;
   deleted: DeletedLine[];
+  runs: ChangeRun[];
   text: string;
 }
 
@@ -46,12 +53,21 @@ function deletedLines(lines: HunkLine[]): DeletedLine[] {
 export function parsePatchHunks(diff: string): PatchHunk[] {
   const hunks: PatchHunk[] = [];
   let current: PatchHunk | null = null;
+  let run: ChangeRun | null = null;
   let lines: HunkLine[] = [];
   let newLine = 0;
   let oldLine = 0;
   const flush = (): void => {
     if (current) current.deleted = deletedLines(lines);
     lines = [];
+    run = null;
+  };
+  const changeRun = (hunk: PatchHunk): ChangeRun => {
+    if (!run) {
+      run = { removed: [], added: new Set() };
+      hunk.runs.push(run);
+    }
+    return run;
   };
   for (const raw of diff.split('\n')) {
     if (raw.startsWith('diff --git ')) {
@@ -67,6 +83,7 @@ export function parsePatchHunks(diff: string): PatchHunk[] {
         newCount: header[3] === undefined ? 1 : Number(header[3]),
         addedLines: new Set(),
         deleted: [],
+        runs: [],
         text: raw,
       };
       oldLine = Number(header[1]);
@@ -79,12 +96,15 @@ export function parsePatchHunks(diff: string): PatchHunk[] {
     /* File headers precede hunks; within a hunk `+++value` is source beginning with `++`. */
     if (raw.startsWith('+')) {
       current.addedLines.add(newLine);
+      changeRun(current).added.add(newLine);
       lines.push({ kind: '+', newLine, oldLine });
       newLine += 1;
     } else if (raw.startsWith('-')) {
+      changeRun(current).removed.push(oldLine);
       lines.push({ kind: '-', newLine, oldLine });
       oldLine += 1;
     } else if (!raw.startsWith('\\')) {
+      run = null;
       lines.push({ kind: ' ', newLine, oldLine });
       newLine += 1;
       oldLine += 1;

@@ -98,21 +98,41 @@ which ships **no structure preset**. Set it explicitly: `devkit init --stack rea
   `structure-governance` skill.
 - **size** — you added an `eslint-disable max-lines`; the count may only shrink. Refactor instead.
 - **decisions / dup / clone / comments** — see each gate's message; it names the offending file and
-  the fix. For `guard-comments`, shorten the paragraph to two lines or move the explanation into
-  code, tests, or a decision record; there is no waiver.
+  the fix. For `guard-comments`, see the section below.
 
 ## `guard-comments` blocked an added or modified comment paragraph
 
-The gate is deterministic. It blocks any standalone JS/TS-family comment paragraph where the staged
-change adds or modifies three or more non-structural text lines; comment groups separated only by
-blank lines count as one paragraph. One- and two-line changes, inline comments after code, untouched
-comments, deletions, and pure renames pass automatically. Keywords, license headers, and JSDoc tags
-never exempt a paragraph.
+The gate is deterministic and checks two things.
 
-Shorten the paragraph to at most two lines, or move the information into code, types, a test
-name/assertion, or a decision record (`guard-decisions`). There is no rationale, waiver, or reviewer.
-Exit 4 means the staged evidence was unreadable or a configured language has no lexer adapter; that
-is not a rejection, so follow the printed remedy.
+**Long paragraphs block once.** A standalone JS/TS-family comment paragraph where the staged change
+adds or modifies three or more non-structural text lines blocks the first time it is shown. Comment
+groups separated only by blank lines count as one paragraph. One- and two-line changes, inline
+comments after code, untouched comments, deletions, and pure renames pass. Shorten the comment where
+possible. A paragraph that justifies a workaround means the code is wrong: fix the code. If every
+line states something the code cannot, retry unchanged. The paragraph is remembered by the code
+around it in `<git-common-dir>/devkit/comment-shown/` (one empty file per paragraph per 30-day
+window), so rewording it does not block again, and a sighting older than 30 days no longer counts.
+`devkit review` shows every finding, including ones already shown, without spending the one block.
+If that directory cannot be created or written, the gate exits 4 and names the path.
+
+**Configured references always block.** With `comments` set in `guard.config.json`, a changed
+comment line citing a forbidden reference blocks on every attempt:
+
+```json
+"comments": {
+  "forbiddenRefs": ["\\bsc-\\d+\\b"],
+  "forbidDecisionRefs": true
+}
+```
+
+`forbiddenRefs` holds regular expressions, for example a private tracker's ticket ids.
+`forbidDecisionRefs` matches the `decisionsDir` path and every committed decision record name that
+contains a hyphen. Both are off by default. A code-only edit beside an unchanged trailing reference
+passes; rewording that comment, pasting a copy, or swapping the ticket blocks. State the fact the
+reference stands for, or move the ticket to the commit message or PR body.
+
+Exit 4 means the staged evidence was unreadable, a configured pattern does not compile, or a
+configured language has no lexer adapter. It is not a rejection, so follow the printed remedy.
 
 Older installs may still hold `.devkit/comment-firewall-receipts.json` and
 `<git-common-dir>/devkit/comment-firewall-rationales.json` from the retired rationale flow. Nothing

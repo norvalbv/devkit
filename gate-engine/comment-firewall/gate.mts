@@ -1,14 +1,22 @@
 import { detectChangedComments } from './detect.mts';
 import { emptyInventory } from './inventory.mts';
+import { recordShown, shownAnchors } from './shown.mts';
 import { emitCommentBudget } from './telemetry.mts';
-import type { CommentFinding, DetectionResult } from './types.mts';
+import type { CommentFinding, DetectionResult, RefFinding } from './types.mts';
 
 interface FirewallDeps {
   detect: (cwd: string) => DetectionResult;
+  shown: (cwd: string, anchors: string[]) => Set<string>;
+  record: (cwd: string, anchors: string[]) => void;
   emit: typeof emitCommentBudget;
 }
 
-const defaults: FirewallDeps = { detect: detectChangedComments, emit: emitCommentBudget };
+const defaults: FirewallDeps = {
+  detect: detectChangedComments,
+  shown: shownAnchors,
+  record: recordShown,
+  emit: emitCommentBudget,
+};
 
 function findingLocation(finding: CommentFinding): string {
   return `${finding.path}:${finding.startLine}${
@@ -21,20 +29,96 @@ function printFinding(finding: CommentFinding): void {
   console.error(`  • [${finding.id}] ${findingLocation(finding)} — ${summary}`);
 }
 
-/** The first line is the collector's classification key; keep it byte-stable. */
-function printBlock(findings: CommentFinding[]): void {
-  console.error(
-    `guard-comments: ${findings.length} added/modified comment paragraph${findings.length === 1 ? '' : 's'} need a decision.`,
-  );
+const PARAGRAPH_REMEDY = [
+  '',
+  'Each paragraph has 3+ changed text lines. Shorten the comment where possible.',
+  'If you need a paragraph-long comment to justify a workaround, the code is wrong — fix the code.',
+  'If every line states something the code cannot, retry unchanged: a paragraph blocks only once.',
+].join('\n');
+
+const REF_REMEDY = [
+  '',
+  'Comments outlive tickets and internal docs. State the fact the reference stands for, or drop it:',
+  'the ticket belongs in the commit message or PR body, and a decision record reaches readers',
+  'through its Scope, not a citation. This block repeats until the reference is gone.',
+].join('\n');
+
+function printParagraphs(findings: CommentFinding[]): void {
   for (const finding of findings) printFinding(finding);
-  console.error(
-    '\nEach paragraph is over the 2-line budget. Shorten it to at most 2 lines, or move the information',
-  );
-  console.error('into code, types, a test name/assertion, or a decision record (guard-decisions).');
-  console.error('There is no rationale or waiver.');
+  console.error(PARAGRAPH_REMEDY);
 }
 
-/** Exit contract: 0 clean, 1 over budget, 4 unreadable evidence or unsupported language. */
+function printRefs(findings: RefFinding[]): void {
+  for (const { path, line, refs, comment } of findings) {
+    console.error(`  • ${path}:${line} cites ${refs.join(', ')} — ${comment}`);
+  }
+  console.error(REF_REMEDY);
+}
+
+/** The first line is the collector's classification key; keep it byte-stable. */
+function printBlock(paragraphs: CommentFinding[], refs: RefFinding[]): void {
+  const total = paragraphs.length + refs.length;
+  console.error(
+    `guard-comments: ${total} added/modified comment paragraph${total === 1 ? '' : 's'} need a decision.`,
+  );
+  if (paragraphs.length > 0) printParagraphs(paragraphs);
+  if (refs.length > 0) printRefs(refs);
+}
+
+/** A review reports every finding and spends no block, so it never touches the store. */
+const reviewing = () => process.env.DEVKIT_RUN_MODE === 'review';
+
+function printUnsupported(unsupported: DetectionResult['unsupported']): void {
+  console.error('guard-comments: configured staged source uses unsupported comment syntax:');
+  for (const item of unsupported)
+    console.error(`  • .${item.extension || '(none)'} — ${item.path}`);
+  console.error(
+    'Add an explicit lexer adapter or exclude that extension from sourceExtensions; no regex fallback was used.',
+  );
+}
+
+function unreadable(cause: unknown, deps: FirewallDeps): 4 {
+  console.error(
+    `guard-comments: comment evidence unreadable — ${cause instanceof Error ? cause.message : cause}`,
+  );
+  deps.emit('unreadable', emptyInventory(), [], { kept: 0, refs: 0 });
+  return 4;
+}
+
+/** Over-budget paragraphs an earlier attempt showed pass; the rest, and every reference, block.
+ * The block is printed before it is recorded, so an interrupted run can never pass it unseen. */
+function decide(cwd: string, detection: DetectionResult, deps: FirewallDeps): 0 | 1 {
+  const { findings, refFindings, inventory } = detection;
+  const review = reviewing();
+  const kept = review
+    ? new Set<string>()
+    : deps.shown(
+        cwd,
+        findings.map((item) => item.anchor),
+      );
+  const fresh = findings.filter((finding) => !kept.has(finding.anchor));
+  const counts = { kept: kept.size, refs: refFindings.length };
+  if (fresh.length === 0 && refFindings.length === 0) {
+    if (counts.kept > 0) {
+      console.error(
+        `guard-comments: kept ${counts.kept} long comment(s) shown on an earlier attempt.`,
+      );
+    }
+    deps.emit('pass', inventory, [], counts);
+    return 0;
+  }
+  printBlock(fresh, refFindings);
+  if (!review)
+    deps.record(
+      cwd,
+      fresh.map((finding) => finding.anchor),
+    );
+  deps.emit('block', inventory, fresh, counts);
+  return 1;
+}
+
+/** Exit contract: 0 clean, 1 new over-budget paragraph or forbidden reference, 4 unreadable
+ * evidence, an unusable shown store, or an unsupported language. */
 export function runCommentFirewall(
   cwd = process.cwd(),
   injected: Partial<FirewallDeps> = {},
@@ -44,28 +128,19 @@ export function runCommentFirewall(
   try {
     detection = deps.detect(cwd);
   } catch (cause) {
-    console.error(
-      `guard-comments: comment evidence unreadable — ${cause instanceof Error ? cause.message : cause}`,
-    );
-    deps.emit('unreadable', emptyInventory(), []);
-    return 4;
+    return unreadable(cause, deps);
   }
   if (detection.unsupported.length > 0) {
-    console.error('guard-comments: configured staged source uses unsupported comment syntax:');
-    for (const item of detection.unsupported) {
-      console.error(`  • .${item.extension || '(none)'} — ${item.path}`);
-    }
-    console.error(
-      'Add an explicit lexer adapter or exclude that extension from sourceExtensions; no regex fallback was used.',
-    );
-    deps.emit('unsupported', detection.inventory, detection.findings);
+    printUnsupported(detection.unsupported);
+    deps.emit('unsupported', detection.inventory, detection.findings, {
+      kept: 0,
+      refs: detection.refFindings.length,
+    });
     return 4;
   }
-  if (detection.findings.length === 0) {
-    deps.emit('pass', detection.inventory, []);
-    return 0;
+  try {
+    return decide(cwd, detection, deps);
+  } catch (cause) {
+    return unreadable(cause, deps);
   }
-  printBlock(detection.findings);
-  deps.emit('block', detection.inventory, detection.findings);
-  return 1;
 }
