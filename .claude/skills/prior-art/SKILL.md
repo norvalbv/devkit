@@ -60,9 +60,14 @@ The agent answers all seven, every time (status ANSWERED / NO_EVIDENCE / NOT_APP
 
 1. **local** — reference checkouts declared in `guard.config.json` →
    `research.referenceCheckouts` (globs relative to the config's directory), plus the repo's own
-   decision log and utilities. Zero resolved checkouts → the leg attests `unavailable` (with
-   declared/resolved counts) and the agent SUGGESTS declaring likely corpora rather than scanning
-   them. Declare-first is a security bound, not an inconvenience: devkit runs in repos it does not
+   decision log and utilities. In a linked worktree, a pattern that matches nothing is retried once
+   against the same directory inside the main worktree — the first `worktree` entry of
+   `git worktree list --porcelain`, skipped when that entry is `bare` — because sibling clones sit
+   beside the main checkout, not beside a worktree. Each non-blank string pattern counts once
+   toward `declaredCheckouts` either way; a pattern matching nothing from either base is skipped
+   silently (it is not a failed leg). Only declared patterns are ever read. Zero resolved
+   checkouts → the leg attests `unavailable` (with declared/resolved counts) and the agent SUGGESTS
+   declaring likely corpora rather than scanning them. Declare-first is a security bound, not an inconvenience: devkit runs in repos it does not
    own, and sibling clones may be private code.
 2. **github** — `gh` CLI (code/issue/PR search), where installed and authenticated.
 3. **web** — WebSearch / WebFetch.

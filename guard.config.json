@@ -5,6 +5,10 @@
   "indexPath": ".search-code/index.db",
   "//generated": "Paths ship's three-way staging abort points at a generator instead of a hand-merge (sc-2770). .devkit/*-manifest.json are built-in defaults.",
   "generated": [{ "glob": "dist/**", "command": "bun run build" }],
+  "//research": "Sibling clones the prior-art agent may read (agents/prior-art.md). Unresolved entries are skipped, so a clone without them stays valid.",
+  "research": {
+    "referenceCheckouts": ["../bug-mcp", "../claude-usage-dashboard", "../frink", "../qavis"]
+  },
   "review": {
     "backendRoots": ["cli", "gate-engine"],
     "frontendRoots": [],
