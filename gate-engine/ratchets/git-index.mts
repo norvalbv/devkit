@@ -427,6 +427,10 @@ export function pullRequestScope(root: string): Set<string> | null {
   process.exit(2);
 }
 
+// Node buffers 1 MiB of child output by default; a large repo's path list exceeds that, the call throws
+// ENOBUFS and the caller silently falls back to judging the whole tree.
+const GIT_LIST_MAX_BUFFER = 512 * 1024 * 1024;
+
 // Every tracked path in the git INDEX — the tree the pending commit will record — CWD-relative.
 // `git ls-files` is already scoped and addressed to the cwd. Deduped: an UNMERGED index lists a
 // conflicted path once per stage (1/2/3), and a conflicted file is still one file. Returns null when
@@ -437,6 +441,7 @@ export function indexFiles(root: string): string[] | null {
       cwd: root,
       env: commitIndexEnv(root),
       encoding: 'utf8',
+      maxBuffer: GIT_LIST_MAX_BUFFER,
       stdio: QUIET_STDIO,
     });
     return [...new Set(splitNul(out))];
@@ -454,6 +459,7 @@ export function treeFilesAtRef(root: string, ref = 'HEAD'): string[] | null {
       cwd: root,
       env: commitIndexEnv(root),
       encoding: 'utf8',
+      maxBuffer: GIT_LIST_MAX_BUFFER,
       stdio: QUIET_STDIO,
     });
     return splitNul(out);
