@@ -15,6 +15,7 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { detectGitRoot } from '../detect-git-root.mts';
+import { buildCommitGateLogFragment, exitDispatchTrap } from './gate-policy/commit-gate-log.mts';
 import type { CheckResult } from '../doctor/check-result.mts';
 import {
   extractGuardBlock,
@@ -45,13 +46,15 @@ const TESTED_STATUS_COMMENT = `# \`|| var=$?\` makes each judge's exit a TESTED 
 
 // The pre-commit and commit-msg hooks are separate Git child processes, so environment exports do
 // not cross the boundary. Pre-commit leaves a tree-bound attempt id in this worktree's Git metadata;
-// run-context reads it for the message judges, and this trap removes it on every commit-msg exit.
+// run-context reads it for the message judges, and the shared EXIT dispatcher removes it on every
+// commit-msg exit, after which the gate log (appended to pre-commit's, sc-2755) closes.
 const COMMIT_ATTEMPT_HANDOFF = `# Rejoin this hook to pre-commit's telemetry attempt, then clear the handoff on exit.
 __dk_commit_state="$(git rev-parse --git-path devkit-commit-attempt 2>/dev/null || true)"
 __dk_clear_commit_state() {
     [ -n "$__dk_commit_state" ] && rm -f "$__dk_commit_state" 2>/dev/null || true
 }
-trap '__dk_clear_commit_state' EXIT`;
+${buildCommitGateLogFragment('commit-msg')}
+${exitDispatchTrap(['__dk_clear_commit_state', '__dk_gate_log_finish'])}`;
 
 // The feature-completeness judge (guard-review completeness) — hard-by-default upstream
 // (gate-engine/review/completeness.mts): a confident FAIL exits 1, warn/skip 0, fail-open 2,

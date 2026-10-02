@@ -17,7 +17,7 @@ import {
   DK_GATE_BLOCK_HELPERS,
   REVIEW_FAILURE_FINALIZER,
 } from './gate-policy/block-helpers.mts';
-import { buildCommitTerminalFragment } from './commit-terminal.mts';
+import { buildPreCommitExit, PRE_COMMIT_PASS_EXIT } from './gate-policy/commit-gate-log.mts';
 import { FORMAT_FRAGMENT } from './format-fragment.mts';
 import { markEnd, markStart } from './husky.mts';
 import {
@@ -128,7 +128,7 @@ export function buildGuardBlock(selection: HookSelection, pkgRel = ''): string {
   const handoff = selection.guards?.some((id) => id === 'review' || id === 'sentry') ?? false;
   const deterministic = wantsDeterministic(selection);
   const pieces = [
-    buildCommitTerminalFragment(handoff),
+    buildPreCommitExit(handoff),
     ...DK_HOOK_HELPERS,
     PACKAGE_BIN_DIR_FRAGMENT,
     DK_REVIEW_BASELINE_HELPER,
@@ -191,7 +191,7 @@ export function buildStandaloneBlock(selection: HookSelection, pkgRel = ''): str
   const deterministic = wantsDeterministic(selection);
   const pieces = [
     '# devkit standalone gates — global CLI, fail-open (skipped if devkit is not installed).',
-    buildCommitTerminalFragment(handoff),
+    buildPreCommitExit(handoff),
     ...DK_HOOK_HELPERS,
     DK_GATE_BLOCK_HELPERS,
     DK_GATE_AI_HELPER,
@@ -295,7 +295,7 @@ export function buildOverlayHook(
   const handoff = selection.guards?.some((id) => id === 'review' || id === 'sentry') ?? false;
   const deterministic = wantsDeterministic(selection);
   const gates = [
-    buildCommitTerminalFragment(handoff),
+    buildPreCommitExit(handoff),
     ...DK_HOOK_HELPERS,
     DK_GATE_BLOCK_HELPERS,
     DK_GATE_AI_HELPER,
@@ -330,10 +330,9 @@ ${prelude ? `${prelude}\n` : ''}${scoped}
 # would run it twice. Reached only after the gates above PASSED (a failure already exited 1).
 [ -n "\${DEVKIT_VIA_HUSKY_INIT:-}" ] && exit 0
 
-# devkit gates passed — emit the commit-run terminal NOW: \`exec\` replaces this process, so the
-# EXIT trap would never fire on the pass path. commit_result records the DEVKIT chain's outcome
-# (the chained repo hook may still block the commit on its own gates).
-command -v __dk_commit_result >/dev/null 2>&1 && { trap - EXIT; __dk_commit_result 0; }
+# devkit gates passed — run the exit work NOW (\`exec\` drops the EXIT trap): commit_result records
+# the DEVKIT chain's outcome, and the gate log closes before the repo's own hook runs.
+${PRE_COMMIT_PASS_EXIT}
 
 # Chain to the repo's own pre-commit (exec → its exit code becomes the hook's).
 [ -f ${chainWord(chainTarget)} ] && exec sh ${chainWord(chainTarget)} "$@"

@@ -14,6 +14,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import { GATE_LOG_FINISH_PASS } from '../gate-policy/commit-gate-log.mts';
 import { buildCommitMsgBlock, COMMIT_MSG_PREAMBLE, commitMsgGuards } from '../commit-msg-block.mts';
 import { buildPassthroughHook, chainWord } from '../husky-block.mts';
 
@@ -48,8 +49,10 @@ export function buildOverlayCommitMsgHook(
 # commit-msg unchanged. Global CLI, fail-open when devkit is not installed.
 ${block}
 
-# Judges passed — clear the handoff now: \`exec\` replaces this process, so no EXIT trap fires after.
-command -v __dk_clear_commit_state >/dev/null 2>&1 && { __dk_clear_commit_state; trap - EXIT; }
+# Judges passed — run the exit work now: \`exec\` replaces this process, so no EXIT trap fires after.
+trap - EXIT
+command -v __dk_clear_commit_state >/dev/null 2>&1 && { __dk_clear_commit_state || :; }
+${GATE_LOG_FINISH_PASS}
 
 # Chain to the repo's own commit-msg (exec → its exit code becomes the hook's).
 [ -f ${chain} ] && exec sh ${chain} "$@"
