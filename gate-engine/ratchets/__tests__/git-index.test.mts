@@ -14,7 +14,9 @@ import {
   assertBaselineTrackable,
   freezeIndex,
   frozenTouchedSet,
+  indexFiles,
   stagedTouchedSet,
+  treeFilesAtRef,
 } from '../git-index.mts';
 
 const cleanup: string[] = [];
@@ -342,5 +344,29 @@ describe('stand-down probes write nothing to stderr (sc-2772)', () => {
     const result = probe(root, `console.log(JSON.stringify(m.changedSetSince(cwd, '${base}')));`);
     expect(result.out).toBeNull();
     expect(result.stderr).toMatch(/no merge base/i);
+  });
+});
+
+describe('indexFiles / treeFilesAtRef on a path list larger than 1 MiB', () => {
+  it('returns every path instead of null (no ENOBUFS)', () => {
+    const root = mkdtempSync(join(tmpdir(), 'devkit-big-index-'));
+    cleanup.push(root);
+    git(root, 'init', '-q', '-b', 'main');
+    git(root, 'config', 'user.email', 'test@example.com');
+    git(root, 'config', 'user.name', 'Test');
+    const blob = execFileSync('git', ['hash-object', '-w', '--stdin'], { cwd: root, input: '' })
+      .toString()
+      .trim();
+    const dir = 'd'.repeat(180);
+    const paths = Array.from({ length: 6000 }, (_, i) => `${dir}/file-${i}.txt`);
+    execFileSync('git', ['update-index', '--index-info'], {
+      cwd: root,
+      input: paths.map((p) => `100644 ${blob}\t${p}`).join('\n'),
+    });
+    git(root, 'commit', '-q', '-m', 'big');
+    expect(paths.join('\0').length).toBeGreaterThan(1024 * 1024);
+
+    expect(indexFiles(root)?.length).toBe(paths.length);
+    expect(treeFilesAtRef(root, 'HEAD')?.length).toBe(paths.length);
   });
 });
