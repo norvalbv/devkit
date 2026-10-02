@@ -18,6 +18,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import cleanRun from '../commands/clean.mts';
 import doctorRun from '../commands/doctor.mts';
@@ -125,6 +126,36 @@ function withGateInputs(root: string) {
   writeFileSync(join(root, '.search-code', 'index.db'), 'db');
   writeFileSync(join(root, '.co-occurrence-allowlist.json'), '{}\n');
   exclude(root, '/.fallowrc.jsonc', '/docs/*', '.search-code', '/.co-occurrence-allowlist.json');
+}
+
+/** Run `fn` with the global husky shim's config dir at `xdg`, and return what it returns. */
+async function withXdg<T>(xdg: string, fn: () => T | Promise<T>): Promise<T> {
+  const saved = process.env.XDG_CONFIG_HOME;
+  process.env.XDG_CONFIG_HOME = xdg;
+  try {
+    return await fn();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_CONFIG_HOME;
+    else process.env.XDG_CONFIG_HOME = saved;
+  }
+}
+
+/** Install the global husky shim into a fresh XDG config dir, and return that dir. */
+async function installShim(): Promise<string> {
+  const xdg = mkTmp('overlay-xdg-');
+  await withXdg(xdg, installGlobalHook);
+  return xdg;
+}
+
+/** What `husky` (index.js) does on every install: its runner and stubs, and core.hooksPath. */
+function huskyReclaim(root: string) {
+  const runner = join(root, '.husky', '_');
+  mkdirSync(runner, { recursive: true });
+  cpSync(join(dirname(fileURLToPath(import.meta.resolve('husky'))), 'husky'), join(runner, 'h'));
+  for (const hook of ['pre-commit', 'commit-msg'])
+    writeFileSync(join(runner, hook), '#!/usr/bin/env sh\n. "$(dirname "$0")/h"', { mode: 0o755 });
+  writeFileSync(join(runner, '.gitignore'), '*');
+  git(root, 'config', 'core.hooksPath', '.husky/_');
 }
 
 const ORIGINAL = { global: process.env.GIT_CONFIG_GLOBAL, system: process.env.GIT_CONFIG_SYSTEM };
@@ -582,15 +613,7 @@ describe('overlay hooks in linked worktrees (sc-4157)', () => {
     commit(wt, 'project it');
     rmSync(join(wt, '.devkit', 'config.json'));
     rmSync(join(wt, 'eslint.config.devkit.mjs'));
-    const xdg = mkTmp('overlay-xdg-');
-    const saved = process.env.XDG_CONFIG_HOME;
-    process.env.XDG_CONFIG_HOME = xdg;
-    try {
-      installGlobalHook();
-    } finally {
-      if (saved === undefined) delete process.env.XDG_CONFIG_HOME;
-      else process.env.XDG_CONFIG_HOME = saved;
-    }
+    const xdg = await installShim();
     // husky's _/h sources init.sh from a script named after the hook, in the committing checkout.
     const driver = join(mkTmp('overlay-husky-'), 'pre-commit');
     writeFileSync(driver, `. ${shQuote(join(xdg, 'husky', 'init.sh'))}\n`);
@@ -600,6 +623,47 @@ describe('overlay hooks in linked worktrees (sc-4157)', () => {
     expect(devkitCalls()).toHaveLength(2);
     expect(lstatSync(join(wt, '.devkit', 'config.json')).isSymbolicLink()).toBe(true);
     expect(lstatSync(join(wt, 'eslint.config.devkit.mjs')).isFile()).toBe(true);
+  });
+
+  it.each([
+    ['the commit-msg judges', [...SELECTION.guards, 'review'], 1],
+    ['a pass-through commit-msg', SELECTION.guards.filter((g) => g !== 'review'), 0],
+  ])(
+    'under the global husky shim a plain commit runs %s once and the repo hooks once',
+    async (_, guards, judged) => {
+      const root = workRepo();
+      writeFileSync(
+        join(root, '.husky', 'commit-msg'),
+        '#!/bin/sh\necho commit-msg >> "$DK_TEST_MARKER"\n',
+      );
+      await applyInit(root, {
+        stack: 'react-app',
+        selection: { ...SELECTION, guards },
+        overlay: true,
+        devkitRef: 'v0.9.0',
+      });
+      huskyReclaim(root);
+
+      commit(root, 'plain', { XDG_CONFIG_HOME: await installShim() });
+
+      expect(markerLines()).toEqual([realpathSync(root), 'commit-msg']);
+      const calls = readFileSync(join(home, 'gate-calls'), 'utf8');
+      expect(calls.match(/^guard-review completeness --gate/gm) ?? []).toHaveLength(judged);
+    },
+  );
+
+  it('doctor names a shim an older devkit wrote, and --fix refreshes it', async () => {
+    const root = workRepo();
+    await initOverlay(root);
+    const xdg = await installShim();
+    const init = join(xdg, 'husky', 'init.sh');
+    const current = readFileSync(init, 'utf8');
+    writeFileSync(init, current.replace(/commit-msg/g, 'pre-commit'));
+
+    await withXdg(xdg, () => doctorRun([], root));
+    expect(vi.mocked(console.log).mock.calls.flat().join('\n')).toContain('predates this devkit');
+    await withXdg(xdg, () => doctorRun(['--fix'], root));
+    expect(readFileSync(init, 'utf8')).toBe(current);
   });
 
   it('review’s private worktree and ship’s gate worktree run their own hook and are never projected', async () => {
