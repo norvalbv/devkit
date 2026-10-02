@@ -106,6 +106,39 @@ describe('devkit help surface', () => {
     expect(r.stderr).not.toContain('unknown flag: --pr');
   });
 
+  // sc-2485: the generic help check ran before ship's parser and read a value-flag's opaque value
+  // as a Devkit help request, so the ship silently became a help page with exit 0.
+  it.each([
+    ['--body', '--help'],
+    ['--body-file', '-h'],
+  ])('does not read a %s value spelled %s as a help request', (flag, value) => {
+    // --pr resolves without a current branch, so this holds on a detached CI checkout too.
+    const r = run(['ship', '--pr', 'feat/x', 't', flag, value, '--', 'note.txt'], {
+      ...process.env,
+      SHIP_RESOLVE_ONLY: '1',
+    });
+    expect(r.stdout).not.toMatch(/devkit ship —/);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout).toContain('BR=feat/x');
+  });
+
+  it('a value flag misplaced in the title slot does not swallow a following --help', () => {
+    const r = run(['ship', 'feat/x', '--body', '--help']);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toMatch(/devkit ship —/);
+  });
+
+  it.each(['--help', '-h'])('`ship %s` still prints ship help', (flag) => {
+    const r = run(['ship', flag]);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toMatch(/devkit ship —/);
+  });
+
+  it('`oxc --help` describes the wrapper; `oxc lint --help` belongs to the pinned tool', () => {
+    expect(run(['oxc', '--help']).stdout).toMatch(/devkit oxc —/);
+    expect(run(['oxc', 'lint', '--help']).stdout).not.toMatch(/devkit oxc —/);
+  });
+
   it('`<command> --help` works for every command generically', () => {
     const r = run(['reconcile', '--help']);
     expect(r.status).toBe(0);
@@ -171,6 +204,13 @@ describe('git preflight (require-git)', () => {
     expect(r.status).toBe(1);
     expect(r.stderr).toMatch(/git is not installed or not on PATH/);
     expect(r.stderr).not.toMatch(/spawnSync|ENOENT/);
+  });
+
+  // The command module now loads before the git preflight (sc-2485), so --help must still win.
+  it('a git-command `--help` still prints help when git is missing', () => {
+    const r = run(['ship', '--help'], noGitEnv);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toMatch(/devkit ship —/);
   });
 
   it('a non-git command (sync-skills) is unaffected by missing git', () => {
