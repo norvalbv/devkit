@@ -1,7 +1,7 @@
 import { judgeBinForModel } from '../../judge/codex/result.mjs';
 import { JUDGE_ISOLATION } from '../../judge/judge-isolation.mjs';
-import { namedAgentMcpProfile } from '../../judge/mcp/profile.mjs';
-import { DEEP_JUDGE_TIMEOUT_MS, execJudgeAsync, remedyCause, syncRemedy, } from '../../judge/run-judge.mjs';
+import { mcpSpawnTracker, namedAgentMcpProfile } from '../../judge/mcp/profile.mjs';
+import { DEEP_JUDGE_TIMEOUT_MS, execJudgeAsync, remedyCause } from '../../judge/run-judge.mjs';
 import { renderGoverningClaudeMd } from '../claude-md.mjs';
 import { renderStagedLineCounts } from '../evidence/line-counts.mjs';
 import { parseReviewVerdict } from '../contracts/response.mjs';
@@ -15,8 +15,8 @@ import { lensGroupId } from '../lens/groups.mjs';
 import { applyOverrideValve } from '../overrides.mjs';
 import { allowedToolsFor, escalatePrompt, hasChecklist, resolveEscalationModel, resolveReviewModel, wrapConventionsPrompt, wrapPrompt, } from '../reviewers.mjs';
 import { enforceChecklistContract, retrievalDegradation } from '../contracts/checklist.mjs';
-import { agentBody, agentsDirFor, cleanupChecklistState, initializeCommitGuardChecklist, isNamedSkip, readChecklistState, withStagedFiles, } from '../runtime.mjs';
-import { consumerChecklistAssetRoot, isShipLane } from './consumer-assets.mjs';
+import { agentBody, cleanupChecklistState, initializeCommitGuardChecklist, isNamedSkip, readChecklistState, withStagedFiles, } from '../runtime.mjs';
+import { checklistAssetRoot } from './consumer-assets.mjs';
 /** Reason + machine cause for an inconclusive outcome, both naming what the PROVIDER said: a usage
  *  lock collapsed into "judge outage" sends the reader to the one remedy that cannot work. */
 function outageReason(outage, pass = 'judge') {
@@ -34,7 +34,7 @@ function outageReason(outage, pass = 'judge') {
 /** Run one reviewer with checklist verification, override handling, and cleanup. */
 export async function runCascade(sel, opts) {
     const { cwd } = opts;
-    const checklistRoot = opts.assetRoot ?? consumerChecklistAssetRoot(cwd, sel.reviewer);
+    const checklistRoot = checklistAssetRoot(cwd, sel.reviewer, opts.assetRoot);
     cleanupChecklistState(cwd, sel.reviewer);
     try {
         // The SAME authoritative list the judge gets (sc-3400): without it the script re-resolved its
@@ -53,7 +53,18 @@ export async function runCascade(sel, opts) {
             attachItems(skip, seeded, new Map(), { full: opts.fullItems });
             return skip;
         }
-        let res = await cascadeVerdict(sel, opts, checklistRoot);
+        // The spawns' own MCP profiles decide over the run-level read: the registry can change, or the
+        // private config fail, between the two (sc-2837).
+        const mcpSpawn = mcpSpawnTracker(opts.mcpDegradedCause);
+        const exec = opts.exec ?? execJudgeAsync;
+        const observed = (o) => exec({
+            ...o,
+            onMcpPrepared: (fingerprint, cause) => {
+                o.onMcpPrepared?.(fingerprint, cause);
+                mcpSpawn.observe(cause);
+            },
+        });
+        let res = await cascadeVerdict(sel, { ...opts, exec: observed }, checklistRoot);
         // Recovery below only schedules/classifies; it deletes this attempt's artifact without
         // running another judge. Keep its exact private evidence for the resulting inconclusive row.
         const captureState = opts.fullItems ? readChecklistState(cwd, sel.reviewer) : null;
@@ -84,6 +95,10 @@ export async function runCascade(sel, opts) {
         const degraded = retrievalDegradation(sel.reviewer.name, finalState, res.status);
         if (degraded)
             res.degraded = degraded;
+        // A named skip judged nothing, so a missing tool weakened nothing — same rule as retrieval.
+        const mcpCause = mcpSpawn.cause();
+        if (mcpCause && res.status === 'pass' && !isNamedSkip(finalState))
+            res.mcpDegraded = { cause: mcpCause };
         return res;
     }
     finally {
@@ -99,14 +114,6 @@ async function cascadeVerdict({ reviewer, files }, { cwd, cfg, exec = execJudgeA
         : Math.max(0, Math.min(DEEP_JUDGE_TIMEOUT_MS, cascadeDeadline - Date.now()));
     const env = withStagedFiles(judgeEnv ?? process.env, reviewer, files);
     const body = agentBody(cwd, cfg, reviewer.name, assetRoot);
-    if (body === null)
-        return {
-            name: reviewer.name,
-            status: 'inconclusive',
-            reason: `agent brief ${reviewer.name}.md missing under ${agentsDirFor(cwd, cfg, assetRoot)} — ${syncRemedy(isShipLane())}`,
-            inconclusiveCause: 'sync',
-            escalated: false,
-        };
     // Both forms name every staged file; only the checklist reviewers have the Bash to verify a churn
     // count, so the Bash-less one is given the inventory without it.
     // The index the judge's evidence is cut from; grounding refuses a tree restaged after this point.

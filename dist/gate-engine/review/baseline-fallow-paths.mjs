@@ -1,3 +1,11 @@
+/** In fallow's discovery precedence; the baseline gate reads the first that exists. Here, not in
+ * the gate-input registry that lists them, because the frozen review runtime cannot load config. */
+export const FALLOW_CONFIG_FILES = [
+    '.fallowrc.json',
+    '.fallowrc.jsonc',
+    'fallow.toml',
+    '.fallow.toml',
+];
 const DROP_FALLOW_VALUE = Symbol('drop-fallow-value');
 const HUNK_HEADER_RE = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/gm;
 const LINE_RANGE_RE = /^(\d+)-(\d+)$/;

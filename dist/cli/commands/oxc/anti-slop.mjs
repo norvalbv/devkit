@@ -8,12 +8,13 @@ import { overlayBaseRefusal, reportOverlayContract, } from '../../lib/install/an
 import { adoptBaselineRuleFindings, baselineFromGroups, compareBaseline, pruneBaseline, readBaseline, writeBaseline, } from '../../lib/install/anti-slop/baseline.mjs';
 import { checkBaselineEnvelope, inheritedBaseAllowance, printNewAntiSlopFindings, refuseCommittedGrowth, relocationEvidence, reportInheritedForgiveness, } from '../../lib/install/anti-slop/baseline-envelope.mjs';
 import { ANTI_SLOP_BASELINE_LOCK_REL, ANTI_SLOP_BASELINE_REL, } from '../../lib/install/anti-slop/constants.mjs';
+import { antiSlopRemedyLines } from '../../lib/install/anti-slop/report/remedy.mjs';
 import { gitBaselineEnvelope, withStagedAntiSlopSnapshot, } from '../../lib/install/anti-slop/git-snapshot.mjs';
 import { classifyRelocations, printRelocatedAntiSlopFindings, relocatedWarningNote, relocationKey, reportRelocatedFailure, } from '../../lib/install/anti-slop/relocations.mjs';
 import { adoptRelocations, adoptRenames, baselineOrExplain, capabilityReady, count, } from './anti-slop-adopt.mjs';
 import { clearPendingAntiSlopBaselineActivation, readInstalledAntiSlopBaselineMigrationId, readPendingAntiSlopBaselineActivation, } from '../../lib/install/anti-slop/managed-state.mjs';
 import { collectAntiSlopGroups, resolveAntiSlopScope, } from '../../lib/install/anti-slop/runner.mjs';
-import { resolveOxlintEntryConfig } from '../../lib/install/oxc/lifecycle.mjs';
+import { isOverlayOxcInstall, resolveOxlintEntryConfig } from '../../lib/install/oxc/lifecycle.mjs';
 export const meta = {
     name: 'anti-slop',
     agentFacing: false,
@@ -200,6 +201,9 @@ function check(cwd, args, envelope = null, baseRef) {
         }
         if (errors.length > 0) {
             failLine(`anti-slop: FAIL — ${newErrorCount} new error finding(s); baseline unchanged`);
+            const overlay = isOverlayOxcInstall(cwd);
+            for (const line of antiSlopRemedyLines(errors.map((group) => group.ruleId), overlay))
+                console.error(line);
             // Reported on the FAIL path too: a committer reading a block needs the same standing about
             // what this gate does not enforce — no committed base means no rename forgiveness.
             reportOverlayContract(cwd);

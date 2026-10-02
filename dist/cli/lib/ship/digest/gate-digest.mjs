@@ -9,17 +9,14 @@
  * blocked: the shell settled that and published it on this ship's ship_result row, which this
  * reader consumes, so the two can never disagree.
  */
-import { closeSync, fstatSync, openSync, readSync } from 'node:fs';
+import { blockingFindings } from './blocking.mjs';
+import { count, oneLine, textOf } from './fields.mjs';
+import { scanBackward } from './tail.mjs';
+import { readBranchHistory, renderTrend, summariseTrend } from './trend.mjs';
 /** The ship_attempt row opens this attempt's span, so finding it bounds the backward read exactly. */
 const ATTEMPT = 'ship_attempt';
-const CHUNK = 256 * 1024;
-/** Backstop for a sink whose ship_attempt is missing (a hand-set DEVKIT_SHIP_ID, a rotated file). */
-const MAX_READ = 16 * 1024 * 1024;
-const DETAIL_CHARS = 140;
 /** The parallel judge's gate name — a `gate_result` row, not a fleet `review_result`. */
 const COMPLETENESS = 'completeness';
-const NEWLINE = 0x0a;
-const EMPTY = Buffer.alloc(0);
 /** Caps on what one terminus prints: past these the digest is the wall of text it replaces. */
 const MAX_FINDINGS = 8;
 const MAX_MISSING = 3;
@@ -48,77 +45,12 @@ function parseEvent(line, shipId) {
  * without it a digest blends repos. Never throws: an absent, unreadable or torn sink yields [].
  */
 export function readShipEvents(sink, shipId) {
-    if (!sink || !shipId)
+    if (!shipId)
         return [];
-    let fd;
-    try {
-        fd = openSync(sink, 'r');
-        let pos = fstatSync(fd).size;
-        let read = 0;
-        // The partial FIRST line of the region already scanned — completed by the chunk read next,
-        // which sits EARLIER in the file.
-        let carry = EMPTY;
-        const perChunk = [];
-        while (pos > 0 && read < MAX_READ) {
-            const len = Math.min(CHUNK, pos);
-            pos -= len;
-            const buf = Buffer.alloc(len);
-            readSync(fd, buf, 0, len, pos);
-            read += len;
-            const combined = carry.length > 0 ? Buffer.concat([buf, carry]) : buf;
-            // Split on the newline BYTE rather than decoding the whole accumulation each pass: 0x0A can
-            // never occur inside a UTF-8 multi-byte sequence, so this cannot cut a codepoint, and the
-            // scan stays linear in the bytes read instead of quadratic in the chunks.
-            let text;
-            const cut = pos === 0 ? -1 : combined.indexOf(NEWLINE);
-            if (pos === 0) {
-                // Offset 0 IS a line boundary — the file begins here, so nothing is left dangling.
-                text = combined.toString('utf8');
-                carry = EMPTY;
-            }
-            else if (cut === -1) {
-                carry = combined;
-                text = '';
-            }
-            else {
-                carry = combined.subarray(0, cut);
-                text = combined.subarray(cut + 1).toString('utf8');
-            }
-            const rows = [];
-            for (const line of text.split('\n')) {
-                const event = line ? parseEvent(line, shipId) : undefined;
-                if (event)
-                    rows.push(event);
-            }
-            perChunk.unshift(rows);
-            // Stop at MY attempt, never at whichever attempt the scan meets first. The default sink is
-            // per-MACHINE, so two panes shipping different repos at once interleave in it; breaking on a
-            // stranger's row truncates this run's findings to whatever happened to sit after it.
-            if (rows.some((e) => e.type === ATTEMPT))
-                break;
-        }
-        return perChunk.flat();
-    }
-    catch {
-        return [];
-    }
-    finally {
-        if (fd !== undefined) {
-            try {
-                closeSync(fd);
-            }
-            catch {
-                /* nothing left to do with a descriptor we cannot close */
-            }
-        }
-    }
+    return scanBackward(sink, (line) => parseEvent(line, shipId), 
+    // Stop at MY attempt, not the first one met: two repos' ships interleave in the per-machine sink.
+    (kept) => kept.some((e) => e.type === ATTEMPT));
 }
-const oneLine = (text = '') => {
-    // Template coercion, not `.replace` on the parameter: the value reaches here from unvalidated
-    // JSON, so its declared type is an assertion and a number would throw on a string method.
-    const flat = `${text ?? ''}`.replace(/\s+/g, ' ').trim();
-    return flat.length > DETAIL_CHARS ? `${flat.slice(0, DETAIL_CHARS - 1)}…` : flat;
-};
 /** A sink row's judged base, short — JSON.stringify never invokes a row-supplied toString, so a
  * malformed value (`{"toString":1}`) degrades to "an earlier base" instead of throwing. */
 const shortJudgedBase = (sha) => /^"([0-9a-f]{7,64})"$/.exec(JSON.stringify(sha ?? null))?.[1].slice(0, 12) ?? 'an earlier base';
@@ -171,13 +103,10 @@ export function summarise(events, shipId) {
     const unverified = [];
     for (const e of mine) {
         if (e.type === 'review_result' && e.status === 'fail') {
-            const reviewer = e.reviewer ?? 'unknown';
-            attributable.push({
-                gate: `review:${reviewer}`,
-                family: 'review',
-                detail: oneLine(e.reason),
-                state: 'finding',
-            });
+            const gate = `review:${e.reviewer ?? 'unknown'}`;
+            for (const f of blockingFindings(e)) {
+                attributable.push({ gate, family: 'review', state: 'finding', ...f });
+            }
         }
         else if (e.type === 'gate_result' && e.status === 'fail') {
             const gate = e.gate ?? 'unknown';
@@ -274,14 +203,18 @@ export function summarise(events, shipId) {
         }
     }
     const seen = new Set();
-    const unique = attributable.filter((a) => !seen.has(`${a.state}:${a.gate}`) && seen.add(`${a.state}:${a.gate}`) !== undefined);
+    const key = (a) => `${a.state}:${a.gate}:${a.fp ?? ''}`;
+    const unique = attributable.filter((a) => !seen.has(key(a)) && seen.add(key(a)) !== undefined);
     return [
-        ...unique.map((a) => ({
-            gate: a.gate,
-            state: a.state,
-            blocking: unattributed ? null : isBlocking(a, blocked, unique),
-            detail: a.detail,
-        })),
+        ...unique.map((a) => {
+            const blocking = unattributed ? null : isBlocking(a, blocked, unique);
+            const row = { gate: a.gate, state: a.state, blocking, detail: a.detail };
+            if (a.fp)
+                row.fp = a.fp;
+            if (a.findings)
+                row.findings = a.findings;
+            return row;
+        }),
         // NOT passed through the `unattributed` null-blocking arm: that arm exists for a run whose
         // blocker is unknowable, and an advisory's non-blocking status is knowable on every run.
         ...firstPerGate(advisory),
@@ -305,12 +238,6 @@ function baseDriftDetail(e) {
         return `cached PASS judged against ${shortJudgedBase(e.judged_base_sha)} — reviewed paths changed on the base since; not re-judged`;
     return '';
 }
-/** A positive integer count, or 0. Untrusted JSON: isSafeInteger rejects a non-number WITHOUT
- * coercing it (coercing `{"toString":1,"valueOf":1}` throws), so `>` only sees a real number. */
-const count = (v) => v !== undefined && Number.isSafeInteger(v) && v > 0 ? v : 0;
-/** A string field as text, or '' — via JSON.stringify for the reason shortJudgedBase gives: it never
- * invokes a row-supplied toString, so a non-string value degrades to '' instead of throwing. */
-const textOf = (v) => /^"(.*)"$/.exec(JSON.stringify(v ?? null))?.[1] ?? '';
 function partialPacket(e) {
     return count(e.evidence_omitted_files) > 0 || count(e.evidence_truncated_files) > 0;
 }
@@ -353,9 +280,18 @@ export function render(rows, logPath = '') {
     if (findings.length === 0 && missing.length === 0 && unverified.length === 0)
         return '';
     const cached = rows.filter((r) => r.state === 'cached').length;
-    const total = findings.length + missing.length + unverified.length;
-    const out = [`📋 Gate findings this run (${total}):`];
-    for (const r of findings.slice(0, MAX_FINDINGS)) {
+    const listed = [...findings, ...missing, ...unverified];
+    const total = listed.reduce((n, r) => n + (r.findings ?? 1), 0);
+    const gates = new Set(listed.map((r) => `${r.state}:${r.gate}`)).size;
+    // Findings, not gates, are what a reader must clear: one reviewer can block on several IDs.
+    const counted = gates === total ? `${total}` : `${gates} gate(s) / ${total} finding(s)`;
+    const out = [`📋 Gate findings this run (${counted}):`];
+    // Never capped: a blocker, or a row naming a fingerprint even when attribution is unknown — each
+    // is a separate ID to fix or waive, and a hidden one costs a whole re-ship.
+    const pinned = (r) => r.blocking === true || r.fp !== undefined;
+    const blockers = findings.filter(pinned);
+    const others = findings.filter((r) => !pinned(r));
+    for (const r of [...blockers, ...others.slice(0, MAX_FINDINGS)]) {
         const tail = r.detail ? `: ${r.detail}` : '';
         if (r.blocking === true)
             out.push(`   ✗ ${r.gate} — BLOCKED this run${tail}`);
@@ -367,8 +303,8 @@ export function render(rows, logPath = '') {
             out.push(`   ⚠ ${r.gate} — finding recorded, did NOT block this run — read it before retrying${tail}`);
         }
     }
-    if (findings.length > MAX_FINDINGS) {
-        out.push(`   … ${findings.length - MAX_FINDINGS} more finding(s) — all of them are in the log`);
+    if (others.length > MAX_FINDINGS) {
+        out.push(`   … ${others.length - MAX_FINDINGS} more finding(s) — all of them are in the log`);
     }
     for (const r of missing.slice(0, MAX_MISSING)) {
         // A gate that could not run is normally advisory context, but under GUARD_DETERMINISTIC_STRICT
@@ -398,7 +334,15 @@ export function render(rows, logPath = '') {
 // so this prints nothing rather than adding noise to a run that already failed.
 if (/[/\\]gate-digest\.m[jt]s$/.test(process.argv[1] ?? '') && process.argv[2] === 'digest') {
     const [sink = '', shipId = '', logPath = ''] = process.argv.slice(3);
-    const text = render(summarise(readShipEvents(sink, shipId), shipId), logPath);
+    // The ship exports its own repo/branch (commit-with-gate-capture.sh); unset = no trend line.
+    const { DEVKIT_SHIP_REPO: repo = '', DEVKIT_SHIP_BRANCH: branch = '' } = process.env;
+    const key = { shipId, repo, branch };
+    const text = [
+        render(summarise(readShipEvents(sink, shipId), shipId), logPath),
+        renderTrend(summariseTrend(readBranchHistory(sink, key), key)),
+    ]
+        .filter(Boolean)
+        .join('\n');
     if (text)
         process.stdout.write(`${text}\n`);
 }

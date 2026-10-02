@@ -6,6 +6,7 @@ import { AntiSlopCapabilityError } from './base-capability.mjs';
 import { baselineFromGroups, baselineIncreases, compareBaseline, migrateBaselineRenames, removedBaselineMigrationReceipts, } from './baseline.mjs';
 import { activatedRuleIdsBetween, committedBaselineProbe, withBaseAntiSlopSnapshot, } from './git-snapshot.mjs';
 import { readManagedAntiSlopActivationEvidence } from './managed-state.mjs';
+import { ACCEPT_VIA_OVERRIDE } from './report/remedy.mjs';
 import { creditRelocatedGrowth, formatSources, relocationBasePaths, relocationKey, vacatedDebt, } from './relocations.mjs';
 import { collectAntiSlopGroups } from './runner.mjs';
 /** Debt bound for relocation: the committed base (renames applied), or the local baseline without one. */
@@ -141,7 +142,8 @@ export function checkBaselineEnvelope(candidate, envelope, candidateGroups, base
     for (const entry of grown) {
         console.error(`BASELINE-GROWTH ${entry.ruleId} ${entry.file} (+${entry.additionalCount} adopted finding(s))`);
     }
-    failLine('anti-slop: FAIL — the committed baseline may only shrink; fix the finding instead of adopting it');
+    // Overlay never reaches here (no committed base), so the override route is always the right one.
+    failLine(`anti-slop: FAIL — the committed baseline may only shrink; fix the finding instead of adopting it, or ${ACCEPT_VIA_OVERRIDE}`);
     return 1;
 }
 /**
@@ -170,7 +172,7 @@ export function refuseCommittedGrowth(cwd, next, allGroups) {
     if (probe.base.entries.some((entry) => !existsSync(join(cwd, entry.file)))) {
         console.error('anti-slop: committed debt names file(s) that no longer exist — if the code moved, stage the move (`git add -A`) so Git detects it, then run `devkit anti-slop adopt-renames` or `devkit anti-slop adopt-relocations`');
     }
-    console.error("anti-slop: create refused — baseline unchanged, because the commit gate would reject it for the reason above; `devkit anti-slop check <paths>` lists findings to fix, or change the rule's severity or scoped override in the repository Oxlint config");
+    console.error(`anti-slop: create refused — baseline unchanged, because the commit gate would reject it for the reason above; \`devkit anti-slop check <paths>\` lists findings to fix, or ${ACCEPT_VIA_OVERRIDE}`);
     return true;
 }
 /** Name what the allowance forgave: it is transient, so silence would hide adopted debt. */

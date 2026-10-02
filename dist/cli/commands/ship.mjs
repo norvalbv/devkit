@@ -8,6 +8,7 @@
 import { spawnSync } from 'node:child_process';
 import { delimiter, dirname } from 'node:path';
 import { claudeFamilyEnvLine, JUDGE_MODEL_ENVS, judgeEnvUnsetLine, } from '../../gate-engine/judge/outage/family-override.mjs';
+import { findsFlag } from '../lib/help/wants-help.mjs';
 import { enterShipQueue } from '../lib/ship/queue/enter.mjs';
 import { formatShipQueue, readShipQueue } from '../lib/ship/queue/status.mjs';
 import { reportShipRuntimeProvenance } from '../lib/ship/runtime-provenance.mjs';
@@ -18,9 +19,38 @@ const DEFAULT_DEPENDENCIES = {
     enterQueue: enterShipQueue,
     showQueue: () => formatShipQueue(readShipQueue()),
 };
+/** Value flags the bash parsers refuse under --resume (it replays WHAT ships). */
+export const RESUME_REFUSED_VALUE_FLAGS = ['--base', '--link'];
+/** Flags assert-positional-args.sh rejects in a <branch>/<title> slot. */
+export const POSITIONAL_REJECTED_FLAGS = [
+    '--base',
+    '--link',
+    '--body',
+    '--body-file',
+    '--pr',
+    '--resume',
+    '--dry-gates',
+    '--with-reviewers',
+    '--from-branch',
+    '--no-qavis-publish',
+    '--draft',
+    '--ready',
+    '--wait-ci',
+    '--wait-ci-timeout',
+];
 export const meta = {
     name: 'ship',
     agentFacing: true,
+    // Each takes the next token as opaque text (`--body --help`): read by index.mts's help check and
+    // the route scan below, locked to the bash parsers by ship-value-flags-parity.test.mts.
+    valueFlags: ['--base', '--body', '--body-file', '--link', '--wait-ci-timeout'],
+    // An argv the dispatcher rejects never reaches a parser, so none of its tokens is consumed.
+    valueFlagsFor(args) {
+        if (args[0] === '--queue')
+            return [];
+        const flags = parserValueFlags(args);
+        return dispatchRejection(args, routeFlagsOf(args, flags)) ? [] : flags;
+    },
     summary: 'Commit files onto a new branch + open a PR without moving HEAD.',
     help: `devkit ship — commit <path...> onto a new branch + open a PR without moving HEAD.
 
@@ -91,14 +121,19 @@ Usage:
   --wait-ci           After the PR is open and every artifact is durable, poll its GitHub checks and
                       end with ONE verdict line on stderr: \`ship: ci-outcome=<passed|failed|
                       cancelled|no-checks|timed-out|unavailable> pr=<n> …\`. Progress prints only when
-                      the tally changes, plus a liveness line each minute. Polls ALL checks, not just
-                      the branch-protection required ones — a repo without branch protection reports
-                      an EMPTY required set, which would render a red PR green.
+                      the tally changes, plus a liveness line each minute. Polls ALL checks by
+                      default — see --wait-ci-required.
                       The verdict NEVER reaches the exit code: a red PR is not a failed ship, and an
                       agent reading non-zero would retry --resume against a record the push deleted.
                       Grep the line, or read the ship_ci telemetry row. Valid for a new ship and for
                       --pr. NOT replayed by --resume: it observes a PR that already exists rather
                       than describing what shipped, so re-request it on the retry.
+  --wait-ci-required  With --wait-ci only: wait on the branch-protection REQUIRED checks alone, so
+                      an advisory check (a review bot) neither holds the wait open nor turns it red.
+                      gh lists only required checks that have already REPORTED (cli/cli#8855): one
+                      that has not started yet is invisible. A branch without protection, or whose
+                      required checks have not reported, therefore ends in no-checks — never passed.
+                      The verdict line carries \`scope=required\`. NOT replayed by --resume.
   --wait-ci-timeout <s>  Bound for --wait-ci, 60..7200, default 900. The floor exists because below
                       it a "this repo has no checks" verdict is unreachable and would surface as a
                       timeout instead. A terminal result is confirmed over ~30s before it is
@@ -180,9 +215,29 @@ process group) is gone. There is no way to skip it; \`devkit ship --queue\` name
 with the \`ps\` that inspects it if it looks stuck. Every blocked attempt records its
 invocation — retry with \`devkit ship --resume <branch>\` instead of re-typing the command.`,
 };
+/** reship.sh strips the whole leading --pr/--resume run; ship-branch.sh strips one leading --resume. */
+function parserValueFlags(args) {
+    let lead = 0;
+    while (args[lead] === '--pr' || args[lead] === '--resume')
+        lead++;
+    const shipBranch = valueFlagsAfter(args, args[0] === '--resume' ? 1 : 0);
+    const reship = args.slice(0, lead).includes('--pr') || findsFlag(args, ['--pr'], shipBranch);
+    return reship ? valueFlagsAfter(args, lead) : shipBranch;
+}
+/** Value flags the bash parser consumes once `strip` leading mode flags are gone. A flag in a
+ *  positional slot fails the parser before any option is read, so then nothing is consumed. */
+function valueFlagsAfter(args, strip) {
+    const resuming = args.slice(0, strip).includes('--resume');
+    const slots = args.slice(strip, strip + (resuming ? 1 : 2));
+    if (slots.some((slot) => POSITIONAL_REJECTED_FLAGS.includes(slot)))
+        return [];
+    return resuming
+        ? meta.valueFlags.filter((flag) => !RESUME_REFUSED_VALUE_FLAGS.includes(flag))
+        : meta.valueFlags;
+}
 export default function ship(args, cwd, dependencies = DEFAULT_DEPENDENCIES) {
     if (args.length === 0) {
-        console.log(meta.help); // no args is a usage error (`--help` is intercepted in index.mjs)
+        console.log(meta.help); // no args is a usage error (`--help` is intercepted in index.mts)
         return 1;
     }
     if (args[0] === '--queue') {
@@ -200,49 +255,12 @@ export default function ship(args, cwd, dependencies = DEFAULT_DEPENDENCIES) {
         }
     }
     dependencies.reportRuntimeProvenance(cwd);
-    // `--pr` (before any `--` terminator, so a dash-leading file path can't misroute) selects the
-    // re-push flow: add the changes to an existing PR's branch (ff-push) instead of a new PR.
-    const routeFlags = new Set();
-    // Both scripts accept `--resume` in LEADING position only, so this is the whole test for it.
     const resuming = args[0] === '--resume';
-    // --wait-ci-timeout takes a value, so it MUST be listed: an unlisted value-taking flag leaves its
-    // argument in the scan, and `--wait-ci-timeout --pr` would then route a new ship to reship.sh.
-    const valueFlags = new Set(['--base', '--body', '--body-file', '--link', '--wait-ci-timeout']);
-    for (let i = 0; i < args.length; i++) {
-        const arg = args[i];
-        if (valueFlags.has(arg)) {
-            i++; // its value is opaque text, even when it is spelled like a mode flag
-            continue;
-        }
-        // Only an unconsumed `--` terminates option scanning. A value-taking flag may legitimately use
-        // that spelling as opaque body text, in which case a later mode flag still controls routing.
-        if (arg === '--')
-            break;
-        if (arg === '--pr' ||
-            arg === '--from-branch' ||
-            arg === '--draft' ||
-            arg === '--ready' ||
-            arg === '--dry-gates')
-            routeFlags.add(arg);
-    }
-    if (routeFlags.has('--pr') && routeFlags.has('--from-branch')) {
-        console.error('--from-branch is only valid for a new ship and cannot be combined with --pr');
-        return 1;
-    }
-    // Draft-ness is decided when the PR is CREATED, so --draft belongs to a new ship only. Caught here
-    // rather than in bash so the message names the real remedy instead of "unknown flag".
-    if (routeFlags.has('--pr') && routeFlags.has('--draft')) {
-        console.error('--draft applies to a NEW ship (opening the PR); a --pr re-push targets a PR that already exists.');
-        console.error('  To convert that PR back to a draft: gh pr ready --undo <branch>');
-        return 1;
-    }
-    // The mirror case: a new ship is ready-for-review already, so --ready without --pr is either a
-    // forgotten mode flag or a misreading of --draft. `--resume` is exempt: it takes its mode from the
-    // RECORD, not argv, so a recorded reship legitimately carries no --pr here — rejecting it would
-    // make `devkit ship --resume <branch> --ready` unreachable even though reship.sh accepts it.
-    if (!resuming && !routeFlags.has('--pr') && routeFlags.has('--ready')) {
-        console.error('--ready marks an EXISTING PR ready and requires --pr; a new ship opens a ready PR by default.');
-        console.error('  To open a draft instead, use --draft.');
+    const routeFlags = routeFlagsOf(args, parserValueFlags(args));
+    const rejection = dispatchRejection(args, routeFlags);
+    if (rejection) {
+        for (const line of rejection)
+            console.error(line);
         return 1;
     }
     const mode = routeFlags.has('--pr') ? 'reship' : 'ship-branch';
@@ -264,6 +282,49 @@ export default function ship(args, cwd, dependencies = DEFAULT_DEPENDENCIES) {
     };
     const queueMode = resuming ? 'resume' : routeFlags.has('--dry-gates') ? 'dry-gates' : mode;
     return queueThenRun(args, cwd, mode, queueMode, env, dependencies);
+}
+/** `--pr` (before any `--` terminator, so a dash-leading file path can't misroute) selects the
+ *  re-push flow: add the changes to an existing PR's branch (ff-push) instead of a new PR. */
+function routeFlagsOf(args, valueFlags) {
+    const routeFlags = new Set();
+    for (let i = 0; i < args.length; i++) {
+        const arg = args[i];
+        // --wait-ci-timeout takes a value, so it MUST be listed: `--wait-ci-timeout --pr` must not route.
+        if (valueFlags.includes(arg)) {
+            i++; // its value is opaque text, even when it is spelled like a mode flag
+            continue;
+        }
+        // Only an unconsumed `--` terminates option scanning; a consumed one is opaque body text.
+        if (arg === '--')
+            break;
+        if (arg === '--pr' ||
+            arg === '--from-branch' ||
+            arg === '--draft' ||
+            arg === '--ready' ||
+            arg === '--dry-gates')
+            routeFlags.add(arg);
+    }
+    return routeFlags;
+}
+/** The dispatcher's cross-flag refusals, as stderr lines; undefined when the argv may dispatch. */
+function dispatchRejection(args, routeFlags) {
+    if (routeFlags.has('--pr') && routeFlags.has('--from-branch'))
+        return ['--from-branch is only valid for a new ship and cannot be combined with --pr'];
+    // Draft-ness is decided when the PR is CREATED, so --draft belongs to a new ship only. Caught here
+    // rather than in bash so the message names the real remedy instead of "unknown flag".
+    if (routeFlags.has('--pr') && routeFlags.has('--draft'))
+        return [
+            '--draft applies to a NEW ship (opening the PR); a --pr re-push targets a PR that already exists.',
+            '  To convert that PR back to a draft: gh pr ready --undo <branch>',
+        ];
+    // A new ship is ready-for-review already. `--resume` is exempt: it takes its mode from the RECORD,
+    // so a recorded reship legitimately carries no --pr here and reship.sh accepts its --ready.
+    if (args[0] !== '--resume' && !routeFlags.has('--pr') && routeFlags.has('--ready'))
+        return [
+            '--ready marks an EXISTING PR ready and requires --pr; a new ship opens a ready PR by default.',
+            '  To open a draft instead, use --draft.',
+        ];
+    return undefined;
 }
 function repoRoot(cwd) {
     const result = spawnSync('git', ['rev-parse', '--show-toplevel'], { cwd, encoding: 'utf8' });

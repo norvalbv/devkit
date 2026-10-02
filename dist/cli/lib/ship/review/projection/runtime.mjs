@@ -1,6 +1,7 @@
 /** Private, manifest-backed gate-input projections for an isolated review worktree. */
 import { chmodSync, copyFileSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync, } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import { gateInputFor } from '../../../../../gate-engine/deterministic/gate-inputs.mjs';
 import { runDirectReviewCli } from '../run-direct.mjs';
 import { reviewRuntimeFingerprint } from '../runtime-fingerprint.mjs';
 import { assertSymlinkFreeReviewTree, canonicalReviewDirectory, canonicalReviewLeaf, reviewPathWithin, safeReviewDestination, } from '../runtime-paths.mjs';
@@ -8,21 +9,6 @@ import { fail } from '../shared/common.mjs';
 import { resolveReviewSource } from '../source-projection.mjs';
 import { projectionManifest, readManifest, safeRelativePath, } from './manifest.mjs';
 import { sqliteFamily, sqliteFamilyPath, sqliteWalIndexPath } from './sqlite-family.mjs';
-// Ratchet/cache gates legitimately update their own ignored baseline/cache state during a run, so
-// these roots are allowed to drift between the captured source and the private copy (verify checks
-// only that they stay symlink-free); every other projected root is immutable and must match exactly.
-// The waiver store is here because the correctness gate's reconcile persists an env-channel override
-// into it mid-run.
-const MUTABLE_ROOTS = [
-    '.fallow',
-    'fallow-baselines',
-    '.decisions',
-    '.devkit/baselines',
-    '.devkit/correctness-overrides.json',
-];
-// Pure caches the gates only read through the private copy: their target source churns under live
-// readers and indexers, so postflight skips its drift check. Ratchet freezes stay source-strict.
-const SOURCE_VOLATILE_CACHES = ['.fallow', '.decisions'];
 function absolutePath(root, path) {
     const safe = safeRelativePath(path);
     const absolute = resolve(root, ...safe.split('/'));
@@ -72,11 +58,6 @@ function copySafeTree(source, destination) {
     for (const name of readdirSync(source).sort()) {
         copySafeTree(join(source, name), join(destination, name));
     }
-}
-function mutablePath(path, indexPath) {
-    if (sqliteFamilyPath(path, indexPath))
-        return true;
-    return MUTABLE_ROOTS.some((root) => path === root || path.startsWith(`${root}/`));
 }
 function pathDepth(path) {
     return path.split('/').length;
@@ -164,10 +145,14 @@ function verifySelectedProjection(source, destination, selected, indexPath) {
             selected.source.fingerprint !== destinationAfter.fingerprint)) {
         fail('private gate projection does not match its captured source');
     }
+    // Mutable roots may drift in the private copy (verify keeps them symlink-free); sourceVolatile
+    // caches skip postflight's source drift check. The search index family is both.
+    const index = sqliteFamilyPath(selected.path, indexPath);
+    const input = gateInputFor(selected.path);
     return {
         path: selected.path,
-        mutable: mutablePath(selected.path, indexPath),
-        sourceVolatile: sqliteFamilyPath(selected.path, indexPath) || SOURCE_VOLATILE_CACHES.includes(selected.path),
+        mutable: index || input?.mutable === true,
+        sourceVolatile: index || input?.sourceVolatile === true,
         source: selected.source,
         destination: destinationAfter,
     };
