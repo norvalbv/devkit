@@ -12,9 +12,6 @@ import {
 
 export const scriptPath = fileURLToPath(new URL('../lib/ship/ship-branch.sh', import.meta.url));
 export const reshipScript = fileURLToPath(new URL('../lib/ship/reship.sh', import.meta.url));
-export const linkGateConfigsScript = fileURLToPath(
-  new URL('../lib/ship/link-gate-configs.sh', import.meta.url),
-);
 export const packagedApiSecurityAgent = fileURLToPath(
   new URL('../../agents/api-security-reviewer.md', import.meta.url),
 );

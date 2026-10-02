@@ -35,6 +35,7 @@ import {
 } from 'node:fs';
 import path from 'node:path';
 import { envFlag } from '../config.mts';
+import { QAVIS_RECEIPT } from '../deterministic/gate-inputs.mts';
 import { emitGateBypass, finishGateTiming } from '../judge/gate-events.mts';
 import { finishQavis } from './telemetry.mts';
 
@@ -136,7 +137,6 @@ export function qavisSupportsPublish(cwd = process.cwd()): boolean | null {
 
 /** A qavis repo advertises how to launch its app here; absent ⇒ nothing for qavis to QA. */
 export const QAVIS_RECIPE = path.join('.qavis', 'recipe.json');
-const QAVIS_RECEIPT = path.join('.qavis', 'receipt.json');
 
 /**
  * The outcome of asking qavis to route the staged tree. The null arm carries `skip` — the human

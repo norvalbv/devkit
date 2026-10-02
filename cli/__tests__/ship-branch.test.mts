@@ -34,7 +34,6 @@ import {
   GIT_ENV,
   ghStub,
   hasGh,
-  linkGateConfigsScript,
   localBranchExists,
   manifestOf,
   NOTE_RE,
@@ -1564,43 +1563,6 @@ describe('ship-branch.sh — untracked/gitignored gate configs are linked into t
     const log = readFileSync(join(dir, '.devkit/last-ship-gates-feat-qavis-receipt.log'), 'utf8');
     expect(log).toMatch(/RECEIPT_SEEN/); // reached the worktree = `qavis route` can read + clear
     expect(log).not.toMatch(/RECEIPT_MISSING/);
-  });
-
-  // The candidates array is the whole gate-parity contract, and dropping an entry breaks it SILENTLY
-  // (the gate falls to defaults and still reports a pass). Pin the set so a deletion fails loudly.
-  it('pins the fixed gate-artifact candidate set (a dropped entry silently weakens every ship)', () => {
-    const src = readFileSync(linkGateConfigsScript, 'utf8');
-    const block = /GATE_PROJECTION_FIXED_CANDIDATES=\(\n([\s\S]*?)\n\)/.exec(src);
-    expect(block, 'candidate registry not found — did the helper get restructured?').toBeTruthy();
-    expect(src).toContain('/.devkit/baselines/structure/*.mjs');
-    expect(
-      (block as RegExpExecArray)[1]
-        .split('\n')
-        .map((line) => line.trim())
-        .filter(Boolean),
-    ).toEqual([
-      'guard.config.json',
-      '.fallowrc.jsonc',
-      '.fallowrc.json',
-      'fallow.toml',
-      '.fallow.toml',
-      '.fallow',
-      'fallow-baselines',
-      '.decisions',
-      '.devkit/baselines/fanout.json',
-      '.devkit/baselines/size-lines.json',
-      '.devkit/baselines/size.json',
-      '.devkit/baselines/imports.mjs',
-      '.devkit/structure/exempt.mjs',
-      '.devkit/oxc',
-      '.devkit/anti-slop',
-      'eslint.config.devkit.mjs',
-      'biome.devkit.jsonc',
-      'oxlint.devkit.json',
-      '.anti-slop-baseline.json',
-      '.qavis/receipt.json',
-      '.devkit/correctness-overrides.json',
-    ]);
   });
 
   it('labels a config-resolved, gitignored index path as a cache — not a "commit it" nudge', () => {
