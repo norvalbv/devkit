@@ -1,6 +1,6 @@
 /**
- * Overlay-mode doctor. Overlay health is gated by its local hook + `core.hooksPath`; agent assets
- * and fallow are advisory (printed, never in the exit code) because a re-run re-syncs them.
+ * Overlay-mode doctor. Overlay health is gated by its local hook, `core.hooksPath` and the synced
+ * agent half, which `--fix` re-syncs; fallow and the other advisories never reach the exit code.
  *
  * Lives here beside `self-host-doctor.mts` — the same shape, a mode-specific doctor in its own
  * module — rather than in `doctor.mts`, which is at its line budget.
@@ -9,9 +9,12 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
-import type { Selection } from '../components.mts';
+import { applyOverlayConstraints, normalizeSelection, type Selection } from '../components.mts';
 import { detectGitRoot } from '../detect-git-root.mts';
-import { resolveExistingAgentProviders } from '../install/agent-assets/agent-providers.mts';
+import {
+  type AgentProvider,
+  resolveExistingAgentProviders,
+} from '../install/agent-assets/agent-providers.mts';
 import { ANTI_SLOP_BASELINE_REL } from '../install/anti-slop/constants.mts';
 import {
   checkAntiSlopCapability,
@@ -28,7 +31,12 @@ import {
   worktrees,
 } from '../husky/overlay/overlay-home.mts';
 import { printProjectionGaps } from '../husky/overlay/projection-report.mts';
-import { HEAL_ALIAS_NAME, isHealAlias, syncOverlayHook } from '../overlay.mts';
+import {
+  HEAL_ALIAS_NAME,
+  isHealAlias,
+  resyncOverlayAgentSurfaces,
+  syncOverlayHook,
+} from '../overlay.mts';
 import { globalHookInstalled, globalInitPath } from '../overlay-global-hook.mts';
 import { checkAgentAssets, checkRegistrations } from './asset-checks.mts';
 import type { CheckResult } from './check-result.mts';
@@ -38,10 +46,11 @@ import { hooksDir, sameDir, worktreeScopedPin } from './hooks-path.mts';
 
 /** The recorded `.devkit/config.json` fields the overlay doctor consults. */
 export interface OverlayDoctorConfig {
+  stack?: string;
   components?: Partial<Selection>;
 }
 
-// Reason: flat signal reporting keeps the exit code gated only on hook + path.
+// Reason: flat signal reporting; the exit code is the conjunction of the gating rows.
 // fallow-ignore-next-line complexity
 export async function runOverlayDoctor(
   cwd: string,
@@ -124,20 +133,34 @@ export async function runOverlayDoctor(
       `  · plain \`git commit\` is ungated (husky reclaimed core.hooksPath); \`git ${HEAL_ALIAS_NAME}\` heals it, or wire it permanently with \`devkit init --overlay --global-commit-gate\``,
     );
   }
-  // Agent-half + fallow checks — ADVISORY (printed, never gate the exit code; a re-run re-syncs them).
   const recorded: Partial<Selection> = cfg?.components ?? {};
-  const surfaces = resolveExistingAgentProviders(gitRoot, recorded.agentTargets);
-  const sel: Partial<Selection> = { ...recorded, agentTargets: surfaces };
+  // The agent half is installed once, at the overlay's own checkout: a linked worktree only links it.
+  const agentRoot = hasOwnOverlay(gitRoot) ? gitRoot : home;
+  const surfaces = resolveExistingAgentProviders(agentRoot, recorded.agentTargets);
+  // What install wrote: the recorded choices under the overlay invariants, never a defaulted structure.
+  const sel = applyOverlayConstraints(
+    {
+      ...normalizeSelection(recorded),
+      structure: Boolean(recorded.structure),
+      agentTargets: surfaces,
+    },
+    cfg.stack ?? 'generic',
+  );
   const advise = (r: CheckResult) =>
     console.log(`  ${r.status === 'OK' ? '✓' : '·'} ${r.name}: ${r.detail}`);
-  const hooks = selectedHookAssets(sel, { searchSteering: false });
-  if (sel.skills && surfaces.length) advise(checkAgentAssets(cwd, 'skills', surfaces, sel));
-  if (sel.agents && surfaces.length) advise(checkAgentAssets(cwd, 'agents', surfaces));
-  if (hooks.scripts.length && surfaces.length)
-    advise(checkAgentAssets(cwd, 'hooks', surfaces, { expected: hooks.scripts }));
-  if (surfaces.length) advise(checkRegistrations(cwd, hooks.components, surfaces, true));
+  let agentRows = agentHalfChecks(agentRoot, sel, surfaces);
+  // Package doctor gates and re-syncs the same rows; preserved collisions stay preserved.
+  if (fix && agentRows.some((r) => r.fixable && r.status !== 'OK')) {
+    resyncOverlayAgentSurfaces(agentRoot, sel, recorded, () => false);
+    agentRows = agentHalfChecks(agentRoot, sel, surfaces);
+  }
+  for (const r of agentRows)
+    console.log(
+      `  ${r.status === 'OK' ? '✓' : '⚠'} ${r.name}: ${r.detail}${r.status !== 'OK' && r.fixable ? ' — run `devkit doctor --fix`' : ''}`,
+    );
+  const agentsOk = agentRows.every((r) => r.status === 'OK');
   // Overlay short-circuits before collectResults, so the dup gate's silent opt-out would otherwise
-  // be undetectable here. Advisory: overlay health is gated on hook + hooksPath.
+  // be undetectable here. Advisory: never in the exit code.
   await adviseSearchIndex(cwd, sel);
   await adviseCodexRuntime(cwd, sel);
   printQavisAdvisoryHealth(cwd, sel.guards ?? []);
@@ -187,7 +210,21 @@ export async function runOverlayDoctor(
     );
   }
   // A stale hook is unhealthy (exit 1) so CI/agents notice; --fix having just regenerated it heals this run.
-  return hookOk && pathOk && worktreesOk && (fix || (!sync.drift && !sync.commitMsg.drift)) ? 0 : 1;
+  const hookCurrent = fix || (!sync.drift && !sync.commitMsg.drift);
+  return hookOk && pathOk && worktreesOk && agentsOk && hookCurrent ? 0 : 1;
+}
+
+/** The synced agent half: skills, agents, agent-hook scripts and their registrations. */
+function agentHalfChecks(cwd: string, sel: Partial<Selection>, surfaces: AgentProvider[]) {
+  if (!surfaces.length) return [];
+  const hooks = selectedHookAssets(sel, { searchSteering: false });
+  return [
+    sel.skills && checkAgentAssets(cwd, 'skills', surfaces, sel),
+    sel.agents && checkAgentAssets(cwd, 'agents', surfaces),
+    hooks.scripts.length > 0 &&
+      checkAgentAssets(cwd, 'hooks', surfaces, { expected: hooks.scripts }),
+    checkRegistrations(cwd, hooks.components, surfaces, true),
+  ].filter((r): r is CheckResult => Boolean(r));
 }
 
 // sc-4157: a worktree-scoped hooksPath shadows the overlay, and a worktree missing any of the overlay's

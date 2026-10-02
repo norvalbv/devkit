@@ -40,8 +40,10 @@ import {
   projectionPrelude,
 } from './husky/overlay/overlay-home.mts';
 import { ADHD_SKILL_DIR, syncAdhdSkill } from './install/adhd-skill.mts';
+import { resolveAssetConflicts } from './install/agent-assets/asset-conflict-picker.mts';
 import { wireOverlayAntiSlop } from './install/anti-slop/overlay/install.mts';
 import { selectedHookAssets } from './install/hook-registration-ledger/selection.mts';
+import { applyScanRoots } from './install/init/scan-roots.mts';
 import { resolveOverlayFallow } from './install/install-fallow.mts';
 import {
   installHookRegistrations,
@@ -263,13 +265,12 @@ function installOverlayAgentSurfaces(
   gitRoot: string,
   sel: Selection,
   dryRun: boolean,
-  force = false,
-  legacyOwnedComponentIds: string[] = [],
+  override: (kind: string, name: string) => boolean,
+  legacyOwnedComponentIds: string[],
 ) {
   const targets = sel.agentTargets ?? AGENT_TARGETS;
+  // An override replaces only an untracked collision; tracked files always remain untouched.
   const skipTracked = trackedPathPredicate(gitRoot);
-  // --force can replace an untracked collision; tracked files always remain untouched.
-  const override = force ? () => true : undefined;
   const args = dryRun ? ['--dry-run'] : [];
   const excl = [];
   if (sel.skills) {
@@ -331,6 +332,37 @@ function installOverlayAgentSurfaces(
   return excl;
 }
 
+type RecordedComponents = Partial<
+  Pick<Selection, 'searchSteering' | 'agentHooks' | 'fallow' | 'guards' | 'structure'>
+>;
+
+/** Components an earlier overlay recorded: their hook registrations predate the ledger. */
+function legacyOwnedComponentIds(prior: RecordedComponents | undefined) {
+  return [
+    prior?.searchSteering && 'searchSteering',
+    prior?.agentHooks && 'agentHooks',
+    prior?.guards?.includes('decisions') && 'decisions',
+    prior?.fallow && 'fallow',
+  ].filter((id): id is string => Boolean(id));
+}
+
+/** Re-sync the recorded agent half the way install does: doctor --fix and upgrade --force. */
+export function resyncOverlayAgentSurfaces(
+  cwd: string,
+  sel: Selection,
+  recorded: RecordedComponents | undefined,
+  override: (kind: string, name: string) => boolean,
+  dryRun = false,
+) {
+  const { gitRoot } = detectGitRoot(cwd);
+  const legacy = legacyOwnedComponentIds(recorded);
+  addToGitExclude(
+    gitRoot,
+    installOverlayAgentSurfaces(gitRoot, sel, dryRun, override, legacy),
+    dryRun,
+  );
+}
+
 /** Structure judges by guard.config.json's grammar; a config without one (kept, or tracked) cannot run it. */
 function structureGrammarDeclared(cwd: string, stack: string) {
   let trees: { grammar?: unknown }[] = [];
@@ -355,22 +387,18 @@ export async function installOverlay(
   stack: string,
   force: boolean,
   dryRun: boolean,
+  {
+    interactive = false,
+    scanRoots = null,
+  }: { interactive?: boolean; scanRoots?: string[] | null } = {},
 ) {
   // Configs live in cwd; hooks and git-exclude live at the git root (also in a monorepo).
   const { gitRoot, pkgRel } = detectGitRoot(cwd);
   // The real original hooksPath (never our own .devkit/hooks) — recorded for restore on clean.
   const origHooksPath = captureOrigHooksPath(gitRoot, cwd);
   const prior = readJson(join(cwd, '.devkit', 'config.json')) as {
-    components?: Partial<
-      Pick<Selection, 'searchSteering' | 'agentHooks' | 'fallow' | 'guards' | 'structure'>
-    >;
+    components?: RecordedComponents;
   } | null;
-  const legacyOwnedComponentIds = [
-    prior?.components?.searchSteering && 'searchSteering',
-    prior?.components?.agentHooks && 'agentHooks',
-    prior?.components?.guards?.includes('decisions') && 'decisions',
-    prior?.components?.fallow && 'fallow',
-  ].filter((id): id is string => Boolean(id));
   const pfx = pkgRel ? `${pkgRel}/` : '';
   // Every path devkit writes is excluded whether or not this selection writes it: a line for an
   // absent file hides nothing, and the list stays the registry's.
@@ -397,6 +425,12 @@ export async function installOverlay(
       console.log('  ✓ guard.config.json');
     }
   }
+  const configTracked = isTracked(gitRoot, `${pfx}${CONFIG_FILENAME}`);
+  if (scanRoots?.length && configTracked)
+    console.log(
+      '  ! --scan-root not applied: guard.config.json is tracked, and overlay edits nothing committed',
+    );
+  else applyScanRoots(cwd, scanRoots, dryRun);
   const structure = Boolean(sel.structure) && (dryRun || structureGrammarDeclared(cwd, stack));
   // Grandfather the tree whenever the grammar it is judged by is new: first wired, or rewritten.
   if (structure && (wroteConfig || !prior?.components?.structure)) {
@@ -405,9 +439,7 @@ export async function installOverlay(
     else await cutStructureBaselines(cwd, stack);
   }
   if (sel.searchCode) {
-    installSearchCode(cwd, dryRun, {
-      configTracked: isTracked(gitRoot, `${pfx}${CONFIG_FILENAME}`),
-    });
+    installSearchCode(cwd, dryRun, { configTracked });
     for (const input of SEARCH_CODE_WRITTEN)
       for (const l of overlayExcludeLines(pfx, input)) excludes.add(l);
   }
@@ -431,8 +463,9 @@ export async function installOverlay(
 
   // local hook (core.hooksPath override) at the git root + chain + pass-through of all hooks.
   console.log('  local hook');
-  const hookSel = { ...sel, structure, antiSlop: antiSlop.wired };
-  installOverlayHook(gitRoot, pkgRel, hookSel, origHooksPath, dryRun, {
+  // What was actually wired, as recorded below: the hook and agent half both follow it, as doctor does.
+  const wired = { ...sel, structure, antiSlop: antiSlop.wired, fallow: fallowWired };
+  installOverlayHook(gitRoot, pkgRel, wired, origHooksPath, dryRun, {
     fallow: fallowWired,
     stack,
   });
@@ -440,13 +473,10 @@ export async function installOverlay(
   // Per-clone alias restores this repo-wide hook path after husky reclaims it.
   installHealAlias(gitRoot, overlayHooksPath(gitRoot), dryRun);
 
-  for (const rel of installOverlayAgentSurfaces(
-    gitRoot,
-    sel,
-    dryRun,
-    force,
-    legacyOwnedComponentIds,
-  ))
+  // Consumer-authored collisions resolve exactly as in package mode: preserved unless --force or picked.
+  const override = await resolveAssetConflicts(gitRoot, wired, { interactive, force });
+  const legacy = legacyOwnedComponentIds(prior?.components);
+  for (const rel of installOverlayAgentSurfaces(gitRoot, wired, dryRun, override, legacy))
     excludes.add(rel);
 
   // make it all invisible to git (the git root's .git/info/exclude).
