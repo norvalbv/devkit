@@ -134,6 +134,18 @@ Absolute checkout paths and line numbers are excluded. Identical fingerprints ca
 third copy of an already-baselined two-copy pattern is still new. The file contains no timestamp and
 entries sort by fingerprint, making identical repositories byte-for-byte deterministic.
 
+## Authoring-time check
+
+With the anti-slop component installed, `devkit init` also installs the `anti-slop-preflight.sh`
+agent hook (Claude PostToolUse `Edit|Write|MultiEdit`, Cursor `afterFileEdit`). It runs
+`devkit anti-slop check <file>` on each JavaScript/TypeScript file an agent writes and feeds new
+findings back right away, so a violation shows after the first offending file instead of at commit.
+It blocks only on the check's own FAIL verdict and fails open otherwise (no capability, no
+resolvable `devkit` bin, a file outside the project). When a check fails, the output also prints a
+hint for each rule that has one (for example, a `deps` parameter instead of module mocking), plus the
+acceptance route for the install mode: a path-scoped override in the repository Oxlint config, or a
+local `create --force` in overlay. Anti-slop deliberately has no `GUARD_*` one-run bypass.
+
 ## Rule configuration and overrides
 
 All rules default to error. Ordinary Oxlint precedence applies, so a repository can change one

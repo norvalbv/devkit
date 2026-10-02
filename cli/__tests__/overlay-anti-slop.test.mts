@@ -62,6 +62,11 @@ describe('overlay anti-slop — refusals that keep the tree clean', () => {
     expect(existsSync(join(root, 'oxlint.devkit.json'))).toBe(false);
     // The consumer's own config survives byte for byte.
     expect(readFileSync(join(root, '.oxlintrc.json'), 'utf8')).toContain('"eqeqeq": "error"');
+    // Agent surfaces follow what was WIRED, so the refused capability installs no preflight hook.
+    expect(existsSync(join(root, '.claude', 'hooks', 'anti-slop-preflight.sh'))).toBe(false);
+    const settings = join(root, '.claude', 'settings.json');
+    if (existsSync(settings))
+      expect(readFileSync(settings, 'utf8')).not.toContain('anti-slop-preflight.sh');
     expect(porcelain(root)).toBe('');
   });
 
