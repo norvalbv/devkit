@@ -1,51 +1,31 @@
-/**
- * Opt-in global pre-commit shim for OVERLAY mode.
- *
- * Overlay points `core.hooksPath` at a git-ignored `.devkit/hooks/`, but husky re-claims it to
- * `.husky/_` on every `prepare`/`bun install` (husky/index.js sets it unconditionally), so a plain
- * `git commit` (or a GUI client) runs husky's chain with devkit's gates unwired. The per-clone
- * `git ci` alias only heals a CLI `git ci`.
- *
- * The one seam that SURVIVES the reclaim is husky's own `~/.config/husky/init.sh`, which `.husky/_/h`
- * sources BEFORE running the repo's committed hook. This module writes a single devkit marker block
- * there that runs the overlay's pre-commit GATES (gates-only — `_/h` runs the committed hook itself,
- * so the block must not chain) for any repo devkit has overlaid, and is a guarded NO-OP everywhere
- * else: package-mode and non-devkit repos have no `.devkit/hooks/`.
- *
- * Strictly OPT-IN (`devkit init --overlay --global-commit-gate`) and uninstallable
- * (`devkit clean --global`) so the overlay's per-clone/invisible default is preserved.
- */
+/** Opt-in ~/.config/husky/init.sh block that runs the overlay's pre-commit and commit-msg gates once
+ * husky reclaims core.hooksPath. Rationale: docs/decisions/overlay-self-heal.md. */
 
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { LOCAL_HOOKS, OVERLAY_HOME_SH } from './husky/overlay/overlay-home.mts';
 
 const MARK_START = '# >>> devkit overlay global pre-commit gate >>>';
 const MARK_END = '# <<< devkit overlay global pre-commit gate <<<';
 const TRAILING_NEWLINES = /\n+$/; // hoisted (perf: never recompile per install/remove)
-// The overlay hook the block invokes. Interpolated into BLOCK (never re-typed) so the string
-// `globalHookWired` greps for cannot drift from the string the block actually runs.
-const OVERLAY_HOOK_REL = '.devkit/hooks/pre-commit';
+// The overlay hook whose presence marks a checkout as overlaid.
+const OVERLAY_HOOK_REL = `${LOCAL_HOOKS}/pre-commit`;
 
-// The devkit block. Guarded so it ONLY acts in an overlaid repo and is otherwise inert:
-//   - HUSKY=0 (husky's documented skip-hooks escape hatch) → skip. _/h's own HUSKY=0 exit is at
-//     line 14, AFTER it sources init.sh (line 12), so the shim must self-check it here.
-//   - only the pre-commit hook ($0 is _/<hook>, basename = hook name — overlay only gates pre-commit).
-//   - repo root via `git rev-parse --show-toplevel` (NOT cwd-relative: worktrees/submodules/git -C).
-//   - run the overlay hook gates-only via DEVKIT_VIA_HUSKY_INIT=1; its exit (1 on a failed gate)
-//     rides the source chain (init.sh -> _/h -> stub) up to git and aborts the commit.
+// Inert outside an overlaid repo, under HUSKY=0 and for other hooks; shell only, as husky sources it in
+// every husky repo. The overlay hook runs gates-only, and its failing exit aborts the commit.
 const BLOCK = `${MARK_START}
-# devkit overlay: run the overlay pre-commit gates on a plain git commit too (husky reclaims
-# core.hooksPath on every install, unwiring the per-clone .devkit/hooks pointer). Sourced by
+# devkit overlay: run the overlay pre-commit and commit-msg gates on a plain git commit too (husky
+# reclaims core.hooksPath on every install, unwiring the per-clone .devkit/hooks pointer). Sourced by
 # husky's _/h BEFORE the repo's own committed hook, which husky still runs afterwards. A guarded
 # NO-OP outside an overlaid repo (package-mode + non-devkit repos have no .devkit/hooks). Honors
 # HUSKY=0. Repo root resolved via git so worktrees / submodules / git -C still gate the right tree.
-if [ "\${HUSKY:-}" != "0" ] && [ "\${0##*/}" = "pre-commit" ]; then
+if [ "\${HUSKY:-}" != "0" ] && { [ "\${0##*/}" = "pre-commit" ] || [ "\${0##*/}" = "commit-msg" ]; }; then
   __dk_root=$(git rev-parse --show-toplevel 2>/dev/null) || __dk_root=
   # A linked worktree has no overlay of its own until its first gated commit links one (sc-4157).
-  [ -x "$__dk_root/${OVERLAY_HOOK_REL}" ] || __dk_root=$(git worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p')
-  if [ -n "$__dk_root" ] && [ -x "$__dk_root/${OVERLAY_HOOK_REL}" ]; then
-    DEVKIT_VIA_HUSKY_INIT=1 sh "$__dk_root/${OVERLAY_HOOK_REL}" "$@" || exit $?
+  [ -x "$__dk_root/${OVERLAY_HOOK_REL}" ] || __dk_root=$(${OVERLAY_HOME_SH})
+  if [ -n "$__dk_root" ] && [ -x "$__dk_root/${LOCAL_HOOKS}/\${0##*/}" ]; then
+    DEVKIT_VIA_HUSKY_INIT=1 sh "$__dk_root/${LOCAL_HOOKS}/\${0##*/}" "$@" || exit $?
   fi
   unset __dk_root
 fi

@@ -37,7 +37,12 @@ import {
   resyncOverlayAgentSurfaces,
   syncOverlayHook,
 } from '../overlay.mts';
-import { globalHookInstalled, globalInitPath } from '../overlay-global-hook.mts';
+import {
+  globalHookInstalled,
+  globalHookWired,
+  globalInitPath,
+  installGlobalHook,
+} from '../overlay-global-hook.mts';
 import { checkAgentAssets, checkRegistrations } from './asset-checks.mts';
 import type { CheckResult } from './check-result.mts';
 import { adviseCodexRuntime, adviseSearchIndex } from './guard-config-checks.mts';
@@ -100,9 +105,9 @@ export async function runOverlayDoctor(
   );
   const worktreesOk = printLinkedWorktrees(home, pkgRel, fix);
   const judgesWired = printCommitMsgRow(cfg, fix, sync.commitMsg);
-  if (judgesWired && (!pathOk || globalHookInstalled()))
+  if (judgesWired && !pathOk && !globalHookInstalled())
     console.log(
-      `    commit-msg judges run only via \`git ${HEAL_ALIAS_NAME}\` / \`devkit ship\` while husky owns core.hooksPath (the global shim gates pre-commit only)`,
+      `    commit-msg judges run only via \`git ${HEAL_ALIAS_NAME}\` / \`devkit ship\` while husky owns core.hooksPath`,
     );
   // Advisory only — never affects the exit code (hook + path are the real health signal).
   if (aliasOurs && !hookOk)
@@ -116,18 +121,26 @@ export async function runOverlayDoctor(
     );
   // The opt-in global shim gates plain commits after Husky reclaims hooksPath; advisory here.
   if (globalHookInstalled()) {
-    console.log(`  ✓ global pre-commit gate (${globalInitPath()}) — plain \`git commit\` gated`);
+    // An older devkit's shim gates pre-commit only; the user opted in, so --fix refreshes it.
+    if (fix && !globalHookWired()) installGlobalHook();
+    if (globalHookWired())
+      console.log(`  ✓ global commit gate (${globalInitPath()}) — plain \`git commit\` gated`);
+    else
+      console.log(
+        `  ⚠ global commit gate (${globalInitPath()}) predates this devkit, so a plain \`git commit\` may skip the commit-msg judges — run \`devkit doctor --fix\``,
+      );
     if (aliasOurs)
       console.log(
         `    (git ${HEAL_ALIAS_NAME} is the CLI fast-path; shim + alias don't double-run)`,
       );
-    // Husky cannot source the shim without a committed .husky/pre-commit.
+    // Husky sources the shim only for a hook the repo commits under .husky/.
     const huskyPresent =
       existsSync(join(gitRoot, '.husky', '_')) || existsSync(join(gitRoot, '.husky'));
-    if (huskyPresent && !existsSync(join(gitRoot, '.husky', 'pre-commit')))
-      console.log(
-        `  ⚠ no committed .husky/pre-commit — husky won't source the shim for pre-commit; a plain \`git commit\` stays ungated here (use \`git ${HEAL_ALIAS_NAME}\`)`,
-      );
+    for (const hook of judgesWired ? ['pre-commit', 'commit-msg'] : ['pre-commit'])
+      if (huskyPresent && !existsSync(join(gitRoot, '.husky', hook)))
+        console.log(
+          `  ⚠ no committed .husky/${hook} — husky won't source the shim for ${hook}; a plain \`git commit\` skips its gates here (use \`git ${HEAL_ALIAS_NAME}\`)`,
+        );
   } else if (!pathOk) {
     console.log(
       `  · plain \`git commit\` is ungated (husky reclaimed core.hooksPath); \`git ${HEAL_ALIAS_NAME}\` heals it, or wire it permanently with \`devkit init --overlay --global-commit-gate\``,

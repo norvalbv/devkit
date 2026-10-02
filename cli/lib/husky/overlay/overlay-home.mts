@@ -188,6 +188,12 @@ export function overlayHome(gitRoot: string, owns = hasOwnOverlay): string | nul
   return worktrees(gitRoot).find((wt) => !wt.bare && owns(wt.path))?.path ?? null;
 }
 
+/** overlayHome's worktree scan as a shell command, for the husky shim, which runs in every husky repo
+ * and so never starts node. Its hooksPath step never applies there: husky's runner owns hooksPath. */
+export const OVERLAY_HOME_SH = `git worktree list --porcelain 2>/dev/null |
+    awk '/^worktree /{w=substr($0,10)} /^bare$/{w=""} /^$/{if(w!="")print w; w=""}' |
+    while IFS= read -r __dk_w; do [ -x "$__dk_w/${LOCAL_HOOKS}/pre-commit" ] && { printf '%s\\n' "$__dk_w"; break; }; done`;
+
 /** Ship's overlay root: `root` itself when it declares its own overlay, else the home. Found by config,
  * not hook, so ship fails closed on a missing hook instead of gating as package mode. */
 export function shipOverlayRoot(root: string): string | null {

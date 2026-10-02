@@ -239,6 +239,10 @@ ${indent(OVERLAY_ESLINT_STAGED)}
 ${indent(OVERLAY_BIOME)}${fallow ? `\n    # devkit fallow gate (overlay)\n${indent(FALLOW_OVERLAY_STAGED)}` : ''}
 fi`;
 
+/** Under the global husky shim (cli/lib/overlay-global-hook.mts) an overlay hook stops before its
+ * chain: husky's _/h runs the repo's own hook itself, so chaining would run it twice. */
+export const GATES_ONLY_STOP = '[ -n "${DEVKIT_VIA_HUSKY_INIT:-}" ] && exit 0';
+
 // Review is diagnostic: its merge-base baselines exit on a finding, so they stay AFTER the guards
 // and a lint finding never hides the reviewer's report.
 const overlayReviewBaseline = (
@@ -281,7 +285,7 @@ ${prelude ? `${prelude}\n` : ''}${block}
 # Invoked by the global init.sh shim (husky reclaimed core.hooksPath on a plain \`git commit\`):
 # run gates ONLY and stop — husky's _/h runs the repo's committed hook itself, so chaining here
 # would run it twice. Reached only after the gates above PASSED (a failure already exited 1).
-[ -n "\${DEVKIT_VIA_HUSKY_INIT:-}" ] && exit 0
+${GATES_ONLY_STOP}
 
 # devkit gates passed — emit the commit-run terminal NOW: \`exec\` replaces this process, so the
 # EXIT trap would never fire on the pass path. commit_result records the DEVKIT chain's outcome
@@ -314,6 +318,7 @@ export function buildPassthroughHook(chainScript: string): string {
   return `${HOOK_PREAMBLE}
 # devkit overlay pass-through — git now runs this dir, so we forward to the repo's own hook
 # unchanged (devkit adds nothing to it).
+${GATES_ONLY_STOP}
 [ -f ${chainWord(chainScript)} ] && exec sh ${chainWord(chainScript)} "$@"
 exit 0
 `;

@@ -8,7 +8,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import cleanCmd from '../commands/clean.mts';
 import {
@@ -135,13 +135,13 @@ describe('global shim dispatch (sourced like husky _/h)', () => {
   }
 
   /** Drive the shim: a `<name>` script that sources the installed init.sh (so $0 basename = name). */
-  function runShim({ hookName = 'pre-commit', cwd, env = {} }) {
+  function runShim({ hookName = 'pre-commit', cwd, env = {}, args = [] }) {
     const driverDir = mkdtempSync(join(tmpdir(), 'dk-driver-'));
     dirs.push(driverDir);
     const driver = join(driverDir, hookName);
     writeFileSync(driver, `#!/bin/sh\n. "${globalInitPath()}"\nexit 0\n`);
     const marker = join(driverDir, 'marker');
-    const r = spawnSync('sh', [driver], {
+    const r = spawnSync('sh', [driver, ...args], {
       cwd,
       encoding: 'utf8',
       env: { ...GENV, DK_MARKER: marker, DK_STUB_EXIT: '0', ...env },
@@ -163,6 +163,45 @@ describe('global shim dispatch (sourced like husky _/h)', () => {
     const { status, via } = runShim({ cwd: root, env: { DK_STUB_EXIT: '1' } });
     expect(via).toBe('VIA=1'); // it DID run
     expect(status).toBe(1); // and the sourced `exit 1` aborted the driver
+  });
+
+  it('runs the overlay commit-msg gates-only on a commit-msg, with the message file', () => {
+    const root = overlaidRepo();
+    const stub = join(root, '.devkit', 'hooks', 'commit-msg');
+    writeFileSync(
+      stub,
+      '#!/bin/sh\nprintf \'VIA=%s %s\\n\' "$DEVKIT_VIA_HUSKY_INIT" "$1" > "$DK_MARKER"\n',
+    );
+    chmodSync(stub, 0o755);
+    installGlobalHook({});
+    const { status, via } = runShim({ hookName: 'commit-msg', cwd: root, args: ['MSG'] });
+    expect(status).toBe(0);
+    expect(via).toBe('VIA=1 MSG');
+  });
+
+  it('in a bare layout, a worktree without an overlay borrows the first non-bare one holding it', () => {
+    const seed = mkdtempSync(join(tmpdir(), 'dk-seed-'));
+    const parent = mkdtempSync(join(tmpdir(), 'dk-bare-'));
+    dirs.push(seed, parent);
+    execFileSync('git', ['-C', seed, 'init', '-q'], { env: GENV });
+    const id = ['-c', 'user.email=t@t.t', '-c', 'user.name=t'];
+    execFileSync('git', ['-C', seed, ...id, 'commit', '-q', '--allow-empty', '-m', 'i'], {
+      env: GENV,
+    });
+    const bare = join(parent, 'repo.git');
+    execFileSync('git', ['clone', '-q', '--bare', seed, bare], { env: GENV });
+    const [home, other] = [join(parent, 'home'), join(parent, 'other')];
+    for (const wt of [home, other])
+      execFileSync('git', ['-C', bare, 'worktree', 'add', '-q', '--detach', wt], { env: GENV });
+    const hook = join(home, '.devkit', 'hooks', 'pre-commit');
+    mkdirSync(dirname(hook), { recursive: true });
+    writeFileSync(
+      hook,
+      '#!/bin/sh\nprintf \'VIA=%s\\n\' "$DEVKIT_VIA_HUSKY_INIT" > "$DK_MARKER"\n',
+    );
+    chmodSync(hook, 0o755);
+    installGlobalHook({});
+    expect(runShim({ cwd: other }).via).toBe('VIA=1');
   });
 
   it('is a no-op for a non-pre-commit hook (EC pre-push)', () => {
@@ -209,9 +248,17 @@ describe('global shim dispatch (sourced like husky _/h)', () => {
     dirs.push(root);
     execFileSync('git', ['-C', root, 'init', '-q'], { env: GENV });
     installGlobalHook({});
-    const { status, via } = runShim({ cwd: root });
-    expect(status).toBe(0);
-    expect(via).toBeNull();
+    // The shim runs in every husky repo on the machine, so outside an overlay it stays shell-only.
+    const bin = mkdtempSync(join(tmpdir(), 'dk-bin-'));
+    dirs.push(bin);
+    for (const name of ['node', 'devkit'])
+      writeFileSync(join(bin, name), '#!/bin/sh\necho ran > "$DK_MARKER"\n', { mode: 0o755 });
+    const PATH = `${bin}:${process.env.PATH}`;
+    for (const hookName of ['pre-commit', 'commit-msg']) {
+      const { status, via } = runShim({ hookName, cwd: root, env: { PATH } });
+      expect(status).toBe(0);
+      expect(via).toBeNull();
+    }
   });
 });
 
