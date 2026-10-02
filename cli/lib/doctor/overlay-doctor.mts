@@ -36,6 +36,7 @@ import type { CheckResult } from './check-result.mts';
 import { adviseCodexRuntime, adviseSearchIndex } from './guard-config-checks.mts';
 import { repointHooksPath } from './hook-checks.mts';
 import { hooksDir, sameDir, worktreeScopedPin } from './hooks-path.mts';
+import { printPriorArtAdvisoryHealth } from './qavis-health.mts';
 
 /** The recorded `.devkit/config.json` fields the overlay doctor consults. */
 export interface OverlayDoctorConfig {
@@ -142,6 +143,7 @@ export async function runOverlayDoctor(
   await adviseSearchIndex(cwd, sel);
   await adviseCodexRuntime(cwd, sel);
   printQavisAdvisoryHealth(cwd, sel.guards ?? []);
+  printPriorArtAdvisoryHealth(cwd, sel);
   if (sel.fallow) {
     const wired =
       hookOk &&
