@@ -44,6 +44,8 @@ export type SkipReason =
   | 'no_llm'
   | 'mass_deletion'
   | 'GUARD_REVIEW_SKIP'
+  // `guard-review lens <reviewer>` ran one reviewer on purpose — not a knob, not an empty domain.
+  | 'recheck'
   | 'not_selected'
   // Distinct from 'not_selected' on purpose: "never ran because the consumer's topology is empty"
   // and "never ran because nothing in its domain was staged" are opposite conclusions in a

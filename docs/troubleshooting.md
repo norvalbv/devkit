@@ -336,6 +336,8 @@ commands judge your checkout's index; the ship block also prints the `devkit shi
 that re-runs the deterministic set on ship's exact staging. A blocking overlay lint step (eslint, biome,
 fallow) and devkit's own formatter print the same invocation under `devkit ship`. No judges run after a
 deterministic block.
+A reviewer FAIL prints `guard-review lens <reviewer>[:<lens>]` the same way: it re-judges only that
+reviewer or correctness lens on your staged index, and its PASS seeds the cache the next ship reads.
 
 ## `bun install` fails: `no commit matching "<sha>" found for "@norvalbv/devkit"`
 
