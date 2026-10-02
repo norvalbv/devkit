@@ -57,4 +57,5 @@ commands, gate engines) is `kebab-case`.
 3. **FROZEN** — no new file in a `frozenDirs` dir; migrate to the live home.
 4. **SIZE** — over the line/function cap → split. An inline disable is blocked by the ratchet.
 5. **FAN-OUT** — more than `fanoutCap` impl files in one folder → split into cohesive subfolders.
-6. **IMPORT** — crossing a declared `structure.walls` boundary fails; route through the allowed surface.
+6. **IMPORT** — crossing an electron preset import wall fails; route through the allowed surface.
+   `structure.walls` is not compiled yet: a non-empty list reports could-not-run, it does not enforce.

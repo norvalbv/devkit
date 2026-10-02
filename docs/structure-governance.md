@@ -43,7 +43,7 @@ it — so the rule and the baseline can never drift apart.
       "grammar": { /* folders + {token} file patterns — see 01-generalize-engine.md */ }
     }
   ],
-  "walls": []          // import walls — empty = no import-wall gate (the common case)
+  "walls": []          // import walls — NOT compiled yet: non-empty ⇒ gate reports could-not-run
 }
 ```
 
@@ -60,7 +60,7 @@ everything else is expressible directly in `grammar`.
 | **Placement** | files in the wrong folder / wrong name | `eslint-plugin-project-structure` (folder-structure), generated from `grammar` |
 | **Domain vocabulary** | junk-drawer `lib/misc`, flat `lib/` dumps | closed `libDomains` registry — the first folder under a `lib/`-style root must be registered |
 | **Frozen dirs** | growing a legacy pile you're migrating out of | `frozenDirs` — existing files grandfathered, new files rejected |
-| **Import walls** | crossing trust / feature boundaries | `independent-modules`, from `structure.walls` (empty ⇒ skipped) |
+| **Import walls** | crossing trust / feature boundaries | electron preset: `independent-modules` in its `eslint.config.mjs`. `structure.walls` is **not compiled yet** — a non-empty list makes `guard-structure` report could-not-run (exit 2), never enforce |
 | **File size** | god-files | `max-lines` + the size ratchet ([`gate-engine/ratchets/`](../gate-engine/ratchets/)) |
 | **Folder fan-out** | 30 files dumped flat in one folder | fan-out ratchet (≤ `fanoutCap`/folder, recursive) |
 
@@ -86,7 +86,8 @@ e.g. devkit's `gate-engine/`, whose top-level folders are its sub-engines.)
 | new file in a frozen dir rejected | `frozenDirs` one-way door | put it in the live home instead |
 | `max-lines` / "size debt may only shrink" | over cap, or a new disable | **split the file** — don't add a disable |
 | "Folder fan-out exceeded" | > cap impl files in one folder | split into cohesive kebab subfolders |
-| import across a wall rejected | a `structure.walls` boundary | route through the allowed surface (a barrel, a bridge) |
+| import across a wall rejected | an electron preset import wall | route through the allowed surface (a barrel, a bridge) |
+| "structure.walls declares N import wall(s) that are NOT enforced" | `structure.walls` is not compiled yet | nothing is checked; enforce the boundary by review until the compiler lands |
 
 **If you believe a block is genuinely a permanent exception** (architectural, not "I'm in a hurry"):
 add an entry to `.devkit/structure/exempt.mjs` with a one-line reason. That hand-edited file is the
@@ -121,7 +122,8 @@ No single command covers everything — the walls split across two mechanisms:
 
 | Wall | In `eslint` (`bun run lint`)? | Where it fires |
 |------|------------------------------|----------------|
-| Placement, domain, frozen-dir, import walls | ✅ yes | eslint (generated rule) |
+| Placement, domain, frozen-dir | ✅ yes | eslint (generated rule) |
+| Import walls | electron preset only | its `eslint.config.mjs`; `structure.walls` is not compiled yet (could-not-run) |
 | Size **cap** (`max-lines`) | ✅ yes | eslint |
 | Size-disable **ratchet** (count gate) | ❌ no | `gate-engine/ratchets/*` at pre-commit |
 | Fan-out **ratchet** | ❌ no | `gate-engine/ratchets/*` at pre-commit |
