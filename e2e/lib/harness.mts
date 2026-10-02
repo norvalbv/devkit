@@ -3,8 +3,9 @@
  *
  * The unit suites run `cli/index.mts` via type-stripping; they never exercise the `dist/*.mjs` bins a
  * consumer installs, so bin-resolution / dist-asset / pin bugs are invisible to them. This harness
- * closes that gap: build → `bun pm pack` → install the tarball into an isolated prefix → symlink that
- * prefix's node_modules into a throwaway git repo → run the REAL installed `devkit`/`guard-*` bins.
+ * closes that gap: build into a tmp stage → `bun pm pack` → install the tarball into an isolated
+ * prefix → symlink that prefix's node_modules into a throwaway git repo → run the REAL installed
+ * `devkit`/`guard-*` bins.
  *
  * Shared by the `*.e2e.test.mts` suites and by `scripts/playground.mts` (same bootstrap, one an
  * asserted run, the other an interactive shell).
@@ -12,6 +13,7 @@
 import { execFileSync, spawnSync, type SpawnSyncReturns } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
+  copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -26,6 +28,7 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { PACKAGED_ROOT_FILES } from '../../cli/lib/fs-helpers.mts';
 
 /** Repo root: two dirs up from e2e/lib/. */
 export const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -129,6 +132,49 @@ function runOrThrow(bin: string, args: string[], cwd: string, label: string): vo
   }
 }
 
+export interface BuildStep {
+  bin: string;
+  args: string[];
+  cwd: string;
+  label: string;
+}
+
+/**
+ * The spawned build + pack steps, in order, writing only under `stage` and `prefix`: compile into
+ * `<stage>/dist`, mirror the assets there, then pack from `stage` (whose manifest the caller copies
+ * in between). Sources are read from REPO_ROOT; nothing is written to it. `--ignore-scripts` stops
+ * the `prepare:husky` lifecycle running.
+ */
+export function buildSteps(stage: string, prefix: string): [BuildStep, BuildStep, BuildStep] {
+  const dist = join(stage, 'dist');
+  return [
+    {
+      bin: process.execPath,
+      args: [
+        join(REPO_ROOT, 'node_modules', '@typescript', 'native', 'bin', 'tsc'),
+        '-p',
+        join(REPO_ROOT, 'tsconfig.build.json'),
+        '--outDir',
+        dist,
+      ],
+      cwd: REPO_ROOT,
+      label: 'tsc -p tsconfig.build.json',
+    },
+    {
+      bin: process.execPath,
+      args: [join(REPO_ROOT, 'scripts', 'copy-dist-assets.mjs'), '--out', dist],
+      cwd: REPO_ROOT,
+      label: 'copy-dist-assets',
+    },
+    {
+      bin: BUN,
+      args: ['pm', 'pack', '--ignore-scripts', '--destination', prefix],
+      cwd: stage,
+      label: 'bun pm pack',
+    },
+  ];
+}
+
 let prefixPromise: Promise<string> | undefined;
 
 /**
@@ -152,10 +198,18 @@ export function ensureInstalledPrefix(): Promise<string> {
     mkdirSync(prefix, { recursive: true });
 
     // Build FIRST, throw on failure — the B1 fix. Never proceed to pack against a stale/partial dist.
-    runOrThrow(BUN, ['run', 'build'], REPO_ROOT, 'bun run build');
-
-    // Pack — --ignore-scripts stops the `prepare:husky` lifecycle mutating the dev repo.
-    runOrThrow(BUN, ['pm', 'pack', '--ignore-scripts', '--destination', prefix], REPO_ROOT, 'bun pm pack');
+    // Build + pack from a tmp stage, never the repo's dist/: that tree is committed on release commits
+    // only, so an in-tree build rewrites tracked files a test run has no business touching (sc-3220).
+    const stage = mkdtempSync(join(tmpdir(), 'devkit-e2e-stage-'));
+    try {
+      const [compile, copyAssets, pack] = buildSteps(stage, prefix);
+      for (const step of [compile, copyAssets]) runOrThrow(step.bin, step.args, step.cwd, step.label);
+      for (const f of PACKAGED_ROOT_FILES)
+        if (existsSync(join(REPO_ROOT, f))) copyFileSync(join(REPO_ROOT, f), join(stage, f));
+      runOrThrow(pack.bin, pack.args, pack.cwd, pack.label);
+    } finally {
+      rmSync(stage, { recursive: true, force: true });
+    }
     const tgz = readdirSync(prefix).find((f) => f.endsWith('.tgz'));
     if (!tgz) throw new Error(`e2e harness: no .tgz produced in ${prefix}`);
 
