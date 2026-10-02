@@ -31,7 +31,10 @@ import {
   SEARCH_INDEX_CHECK,
 } from '../lib/doctor/guard-config-checks.mts';
 import { bindClaudeFamily } from '../lib/doctor/judge/judge-family.mts';
-import { printQavisAdvisoryHealth } from '../lib/doctor/qavis-health.mts';
+import {
+  printPriorArtAdvisoryHealth,
+  printQavisAdvisoryHealth,
+} from '../lib/doctor/qavis-health.mts';
 import { hookChecks } from '../lib/doctor/hook-checks.mts';
 import { runOverlayDoctor } from '../lib/doctor/overlay-doctor.mts';
 import { checkLockPin, checkPin } from '../lib/doctor/pin/pin-checks.mts';
@@ -473,6 +476,7 @@ export default async function run(args: string[], cwd: string): Promise<number> 
     console.log(line);
   }
   printQavisAdvisoryHealth(cwd, sel.guards ?? []);
+  printPriorArtAdvisoryHealth(cwd, sel);
 
   const drifted = results.some((r) => r.status !== 'OK' && !r.advisory); // see CheckResult.advisory
   if (fix && drifted) {
