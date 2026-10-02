@@ -513,3 +513,79 @@ describe('recordCiEvent edge cases', () => {
     expect(JSON.parse(readFileSync(file, 'utf8')).pr_number).toBeNull();
   });
 });
+
+describe('--required narrowing (opt-in)', () => {
+  const REQUIRED_EMPTY = "no required checks reported on the 'feat/x' branch";
+  const throwing = (stderr: string) => (): never => {
+    throw Object.assign(new Error('gh failed'), {
+      status: 1,
+      stdout: '',
+      stderr,
+    });
+  };
+  const requiredPoller = (exec: Parameters<typeof ghChecksPoller>[0]['exec']) =>
+    ghChecksPoller({
+      pr: '514',
+      repo: 'acme/app',
+      cwd: '/tmp',
+      required: true,
+      exec,
+    });
+
+  it('appends --required to the gh call only when asked', () => {
+    let seen: string[] = [];
+    requiredPoller((args) => {
+      seen = args;
+      return '[]';
+    })();
+    expect(seen.at(-1)).toBe('--required');
+  });
+
+  it('reports no-checks, never passed, when an unprotected branch has an empty required set', async () => {
+    // The trap the decision record measured: gh exits 1 here while the unfiltered call is red.
+    const poll = requiredPoller(throwing(REQUIRED_EMPTY));
+    const result = await drive([], { poll, settleGraceMs: 30_000 }).run();
+    expect(result.outcome).toBe('no-checks');
+  });
+
+  it('waits out a required check that registers inside the settle grace', async () => {
+    // The empty set is a race until the grace proves otherwise; a late required job still decides.
+    let calls = 0;
+    const red = '[{"bucket":"fail","name":"gate","state":"FAILURE","link":"","workflow":"gate"}]';
+    const poll = requiredPoller(() => (calls++ < 2 ? throwing(REQUIRED_EMPTY)() : red));
+    const result = await drive([], { poll, settleGraceMs: 10_000 }).run();
+    expect(result.outcome).toBe('failed');
+  });
+
+  it('names a gh too old for --required as a gh failure, not an empty set', () => {
+    // gh exits 1 for an unknown flag too. Reading that as "no required checks" would report a
+    // clean no-checks on a repo whose required CI may be red.
+    const result = requiredPoller(throwing('unknown flag: --required'))();
+    expect(result).toMatchObject({ kind: 'unavailable', reason: 'gh-failed' });
+  });
+
+  it('tags the verdict so a narrowed answer is never read as an all-checks one', async () => {
+    const passed = await drive([rows(row('pass', 'gate'))]).run();
+    expect(verdictLine({ ...passed, required: true }, '514')).toBe(
+      'ship: ci-outcome=passed pr=514 scope=required checks=1',
+    );
+    const empty = await drive([rows()]).run();
+    expect(verdictLine({ ...empty, required: true }, '514')).toBe(
+      'ship: ci-outcome=no-checks pr=514 scope=required checks=0',
+    );
+    expect(verdictLine(passed, '514')).not.toContain('scope=');
+  });
+
+  it('records the scope on the telemetry row, false by default', async () => {
+    const result = await drive([rows()]).run();
+    const file = join(mkdtempSync(join(tmpdir(), 'ci-events-')), 'events.jsonl');
+    const env = { DEVKIT_GATE_EVENTS: file, DEVKIT_SHIP_ID: 'ship-1' };
+    recordCiEvent({ ...result, required: true }, '1', env);
+    recordCiEvent(result, '2', env);
+    const written = readFileSync(file, 'utf8')
+      .trimEnd()
+      .split('\n')
+      .map((l) => JSON.parse(l));
+    expect(written.map((r) => r.required)).toEqual([true, false]);
+  });
+});
