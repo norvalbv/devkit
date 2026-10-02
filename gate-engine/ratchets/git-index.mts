@@ -395,7 +395,7 @@ export function changedSetSince(root: string, baseRef: string): Set<string> | nu
     execFileSync('git', ['rev-parse', '--verify', `${baseRef}^{commit}`], {
       cwd: root,
       env: commitIndexEnv(root),
-      stdio: QUIET_STDIO,
+      stdio: ['ignore', 'pipe', 'inherit'],
     });
     const prefix = gitPrefix(root);
     // Stderr stays inherited on purpose: a failure here is pullRequestScope's hard exit 2, and git's
