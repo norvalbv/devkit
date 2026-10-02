@@ -61,8 +61,12 @@ const POOLED_FAILURES = [];
 export default defineConfig({
   test: {
     ...SHARED_TEST_CONFIG,
+    // vitest 5 (#10750) makes inline projects extend the root and concatenate arrays, which ran
+    // setupFiles twice and put every root `include` file in git-integration too. Each project
+    // carries its own settings, so none inherits.
     projects: [
       {
+        extends: false,
         test: {
           ...SHARED_TEST_CONFIG,
           name: 'parallel',
@@ -72,6 +76,7 @@ export default defineConfig({
         },
       },
       {
+        extends: false,
         test: {
           ...SHARED_TEST_CONFIG,
           name: 'git-integration',
@@ -87,6 +92,7 @@ export default defineConfig({
         ? []
         : [
             {
+              extends: false,
               test: {
                 ...SHARED_TEST_CONFIG,
                 name: 'git-serial',
@@ -103,6 +109,10 @@ export default defineConfig({
     include: TEST_INCLUDE,
     // Root only, never per project: it stamps machine load once at each end of the run (sc-2785).
     globalSetup: ['./vitest.global-setup.mjs'],
+    // Root only: coverage resolves once per run. Most CLI modules are tested by spawning
+    // `node <module>.mts`, which the worker alone never sees; autoAttachSubprocess (vitest 5) hands
+    // children NODE_V8_COVERAGE through process.env and merges their profiles (sc-3321).
+    coverage: { provider: 'v8', autoAttachSubprocess: true },
     // Strip leaked git control vars (GIT_DIR, …) so a hook-launched run can't make the
     // git-integration tests operate on devkit's own repo. See vitest.setup.mjs.
     setupFiles: SHARED_TEST_CONFIG.setupFiles,
