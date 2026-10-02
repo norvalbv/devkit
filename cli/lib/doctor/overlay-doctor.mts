@@ -215,8 +215,14 @@ const listed = (paths: string[]) =>
     ? `${paths.slice(0, MAX_LISTED).join(', ')} +${paths.length - MAX_LISTED} more`
     : paths.join(', ');
 
-// Links the shared inputs and copies the branch-local ones (lint config, baselines).
-function printProjectionGaps(path: string, home: string, pkgRel: string, fix: boolean): boolean {
+/** Report `path`'s projection gaps, or with `fix` close them (links the shared inputs, copies the
+ * branch-local ones); false while any gap stays open. The overlay pre-commit runs it too. */
+export function printProjectionGaps(
+  path: string,
+  home: string,
+  pkgRel: string,
+  fix: boolean,
+): boolean {
   try {
     const { owed, unlinkable } = fix
       ? repairProjection(path, home, pkgRel)

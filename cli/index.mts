@@ -50,6 +50,7 @@ const COMMANDS: Record<string, CommandLoader> = {
   'sync-agents': () => import('./commands/sync/sync-agents.mts'),
   'sync-hooks': () => import('./commands/sync/sync-hooks.mts'),
   'sync-hook-runner': () => import('./commands/sync/sync-hook-runner.mts'),
+  'sync-worktree': () => import('./commands/sync/sync-worktree.mts'),
   release: () => import('./commands/release.mts'),
   update: () => import('./commands/update.mts'),
   upgrade: () => import('./commands/upgrade.mts'),

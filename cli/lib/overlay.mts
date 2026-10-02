@@ -206,14 +206,15 @@ function writeBiomeOverlay(cwd: string, stack: string, force: boolean, dryRun: b
   return true;
 }
 
-/** The overlay pre-commit as written: the gates plus the linked-worktree prelude (sc-4157). */
+/** The overlay pre-commit as written: the gates plus the linked-worktree prelude (sc-4157), whose
+ * projection check is rendered from the gate inputs of the overlay installed at `root`. */
 export function buildOverlayPreCommit(
   sel: Parameters<typeof buildOverlayHook>[0],
   chainTarget: string,
-  pkgRel = '',
-  { fallow = false }: { fallow?: boolean } = {},
+  pkgRel: string,
+  { root, fallow = false }: { root: string; fallow?: boolean },
 ) {
-  const prelude = projectionPrelude(pkgRel, chainTarget);
+  const prelude = projectionPrelude(root, pkgRel);
   return buildOverlayHook(sel, chainTarget, pkgRel, { fallow, prelude });
 }
 
@@ -248,7 +249,7 @@ function installOverlayHook(
   mkdirSync(dir, { recursive: true });
   // pre-commit: devkit gates (+ optional fallow gate) + chain to the repo's pre-commit (if any).
   const pre = join(dir, 'pre-commit');
-  writeFileSync(pre, buildOverlayPreCommit(sel, preCommitChain, pkgRel, { fallow }));
+  writeFileSync(pre, buildOverlayPreCommit(sel, preCommitChain, pkgRel, { root: gitRoot, fallow }));
   chmodSync(pre, 0o755);
   // every OTHER existing hook → pass-through (commit-msg: devkit's message judges, sc-1794).
   syncOverlaySiblingHooks(siblings, { dryRun: false });
@@ -292,7 +293,7 @@ export function syncOverlayHook(
   const scriptDir = overlayHookScriptDir(origHooksPath);
   const existing = detectExistingHooks(gitRoot, scriptDir);
   const preCommitChain = existing.includes('pre-commit') ? `${scriptDir}/pre-commit` : '';
-  const expected = buildOverlayPreCommit(sel, preCommitChain, pkgRel, { fallow });
+  const expected = buildOverlayPreCommit(sel, preCommitChain, pkgRel, { root: gitRoot, fallow });
 
   const pre = join(gitRoot, LOCAL_HOOKS, 'pre-commit');
   const current = existsSync(pre) ? readFileSync(pre, 'utf8') : null;

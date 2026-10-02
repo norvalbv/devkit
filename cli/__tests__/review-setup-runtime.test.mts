@@ -66,7 +66,7 @@ function fixture(
     write(
       gitRoot,
       '.devkit/hooks/pre-commit',
-      buildOverlayPreCommit(selection, '.git/hooks/pre-commit', targetRel),
+      buildOverlayPreCommit(selection, '.git/hooks/pre-commit', targetRel, { root: gitRoot }),
       true,
     );
   } else {
@@ -137,7 +137,7 @@ describe('private review setup runtime — husky-reclaimed overlay hooksPath', (
     write(
       gitRoot,
       '.devkit/hooks/pre-commit',
-      buildOverlayPreCommit(selection, '.husky/pre-commit'),
+      buildOverlayPreCommit(selection, '.husky/pre-commit', '', { root: gitRoot }),
       true,
     );
     write(
