@@ -413,6 +413,8 @@ describe('correctness-reviewer (domain all)', () => {
     const authored = [
       'agents-hooks/decision-stop-check.sh',
       'cli/index.mts',
+      // Source under a coverage/ directory: an unanchored `**/coverage/**` exclude once hid it.
+      'gate-engine/coverage/produce.mts',
       'skills/_devkit/review-roots.mjs',
       'skills/correctness/scripts/checklist.mjs',
       'gate-engine/review/__tests__/reviewers.test.mts',
@@ -436,7 +438,7 @@ describe('correctness-reviewer (domain all)', () => {
       'packages/api/.envrc',
       'packages/ui/node_modules/package/index.js',
       'packages/ui/dist/index.mjs',
-      'packages/ui/coverage/coverage-final.json',
+      'coverage/coverage-final.json',
     ];
     const selected = selectReviewers(
       [...authored, ...excluded, 'dist/gate-engine/review/reviewers.mjs', 'bun.lock'],
