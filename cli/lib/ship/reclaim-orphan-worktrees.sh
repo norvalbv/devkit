@@ -294,7 +294,7 @@ _ship_orphan_is_self() {
 # what --base is for -- and naming the PR target explicitly is no loss on the one path where an
 # inferred base was the original bug.
 _ship_orphan_report_self() {
-  local repo=$1 br=$2 base freed tip
+  local repo=$1 br=$2 base freed tip work=
   # The destination name is chosen by the OPERATOR'S shell, at the moment the command runs, not here.
   # Picking one now means probing for a free name and then handing over a command that runs seconds
   # later -- a check-then-act whose only outcome on a lost race is a rename that refuses and a caller
@@ -303,7 +303,15 @@ _ship_orphan_report_self() {
   # so this half is deliberately left OUTSIDE the quoting the source branch gets.
   tip=$(git -C "$repo" rev-parse --short --verify --quiet "refs/heads/$br") || tip=
   freed="devkit-freed-${tip:-nohead}-\$\$"
-  base=$(ship_origin_base_candidate "$repo") || base=
+  # Judged against the branch being freed, not live HEAD: this runs before ship pins CALLER_HEAD, and
+  # in the self case $br IS what HEAD is on — so this is the same commit ship_suggest_base is later
+  # handed, and the two lines cannot name different bases (sc-3409).
+  work=$(git -C "$repo" rev-parse --verify --quiet "refs/heads/$br^{commit}") || work=
+  # An unreadable tip stays EMPTY — cannot-tell skips the ancestor tier rather than reading live HEAD.
+  # Memoised per pin, so every print of this remedy in one refusal names the same base.
+  ship_suggested_base_memo "$repo" "$work"
+  base=
+  [ -z "$SHIP_SUGGESTED_ANSWER" ] || base=${SHIP_SUGGESTED_ANSWER#* }
   # Every ref name in a copyable line goes through ship_shell_quote. These are meant to be pasted
   # into a shell, and a branch name is not a safe literal in either direction: `$`, backticks and
   # parentheses are legal, so a bare name could execute as the operator, and an apostrophe is legal
