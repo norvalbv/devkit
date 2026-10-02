@@ -784,22 +784,6 @@ describe('runCase', () => {
     ).rejects.toThrow(/free-skipped/);
   });
 
-  it('a missing agent brief free-skips and aborts', async () => {
-    const emptyAgents = mkdtempSync(join(tmpdir(), 'completeness-eval-test-'));
-    try {
-      await expect(
-        runCase(makeRow(), {
-          reviewerExec: async () => REVIEWER_TRANSCRIPT,
-          matcherExec: matcherStub,
-          agentsDir: emptyAgents,
-          saveTranscript: false,
-        }),
-      ).rejects.toThrow(/free-skipped/);
-    } finally {
-      rmSync(emptyAgents, { recursive: true, force: true });
-    }
-  });
-
   it('a scope-mismatched decoy still reaches the prompt via the SEMANTIC channel', async () => {
     // scopedTargets has two channels: scope-match (glob) and semantic (the commit message). Here
     // the glob misses (Scope src/**, staged file in lib/) but the message "add export-csv shortcut

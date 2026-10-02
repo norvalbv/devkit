@@ -13,7 +13,6 @@ import {
   type ReviewOutcome,
   verifyChecklist,
 } from '../runtime.mts';
-import type { ReviewInconclusiveCause } from './response.mts';
 
 /**
  * Verify the artifact behind a PASS and, when the caller SCHEDULED a recovery, hand the hole to it.
@@ -40,27 +39,20 @@ export async function enforceChecklistContract(
     if (initial.transcript && result.transcript)
       result.transcript = `${initial.transcript}\n\n───── CHECKLIST-CONTRACT RETRY ─────\n${result.transcript}`;
     // The freshest artifact wins: a callback that ran its own judge left one, and classifying that
-    // attempt from the pre-cleanup state would report the FIRST attempt's kind of hole. Falls back
+    // attempt from the pre-cleanup state would report the FIRST attempt's items. Falls back
     // to the captured state for today's callbacks, which run no judge and leave nothing.
     const settled = readChecklistState(cwd, selection.reviewer) ?? initialState;
     if (result.status !== 'pass') attachItems(result, settled, new Map());
     // Only when the retry left the cause open: an outage/timeout carries its own, and the operator
     // needs its auth/quota remedy rather than an artifact one.
     if (result.status === 'inconclusive' && result.inconclusiveCause === undefined)
-      result.inconclusiveCause = checklistHoleCause(settled);
+      result.inconclusiveCause = 'response-contract';
   } else if (hole) {
     result.status = 'inconclusive';
     result.reason = hole;
-    result.inconclusiveCause = checklistHoleCause(initialState);
+    result.inconclusiveCause = 'response-contract';
   }
   return result;
-}
-
-function checklistHoleCause(state: ChecklistState | null): ReviewInconclusiveCause {
-  // Keyed on whether an artifact EXISTS, not on whether it has rows. `readChecklistState` returns
-  // null only when the file is absent or unreadable — the shape a never-synced script leaves. A
-  // present artifact, even an empty one, proves the script ran, so its hole is the judge's.
-  return state === null ? 'sync' : 'response-contract';
 }
 
 /** The recorded retrieval outcome. Anything else — absent, a typo'd status, a blank cause — is not

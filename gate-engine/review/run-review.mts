@@ -27,8 +27,8 @@
  * FRINK_* aliases honoured. Judges are isolated (JUDGE_ISOLATION) with an airtight read-only
  * allowlist — a gate judge can never write, stage, or commit.
  *
- * W-3: config + git resolve against the CONSUMER cwd. Commit/ship briefs resolve there too;
- * `devkit review` deliberately supplies CURRENT packaged briefs/skills via an isolated runtime.
+ * W-3: config + git resolve against the CONSUMER cwd. Briefs/skills resolve in every mode through
+ * consumer-assets.mts: a consumer copy under a devkit name wins, else the running package's.
  */
 
 import { envFlag, type GuardConfig, resolveGuardConfig } from '../config.mts';
@@ -36,7 +36,6 @@ import { emitReviewCacheHit } from '../judge/gate-events.mts';
 import { reportGateInfraFailure } from '../judge/odb-probe.mts';
 import { execJudgeAsync, strictRemedy } from '../judge/run-judge.mts';
 import { loadCache } from './cache.mts';
-import { isShipLane } from './cascade/consumer-assets.mts';
 import { type CascadeResult, runCascade } from './cascade/reviewer.mts';
 import { reportRetrievalDegraded } from './contracts/checklist.mts';
 import { ENGINE_ERROR_REMEDY, RESPONSE_CONTRACT_REMEDY } from './contracts/response.mts';
@@ -225,7 +224,7 @@ export async function runReviewGate(
     if (selected.length === 0) return finish(0);
     if (reviewMode) {
       assetRoot = process.env.DEVKIT_REVIEW_ASSET_ROOT;
-      identitySalts = preflightReviewAssets(assetRoot, selected, cfg);
+      identitySalts = preflightReviewAssets(cwd, assetRoot, selected, cfg);
     }
     // One domain diff per reviewer (its cache identity): the exact staged bytes in its files.
     diffs = selected.map((s) => gitCached(cwd, [], s.files));
@@ -254,7 +253,7 @@ export async function runReviewGate(
     concurrency,
   );
   const judgeEnv = gateJudgeEnv(reviewMode, cfg);
-  const verifyAssets = passAssetVerifier(reviewMode, assetRoot, cfg, identitySalts);
+  const verifyAssets = passAssetVerifier(cwd, reviewMode, assetRoot, cfg, identitySalts);
   // Identity + cache salt, one resolution for both roles (sc-1437) — see resolveReviewerIdentities.
   const { identities, cacheSalts } = resolveReviewerIdentities(
     reviewMode,
@@ -479,7 +478,7 @@ export async function runReviewGate(
         ? RESPONSE_CONTRACT_REMEDY
         : cause === 'engine'
           ? ENGINE_ERROR_REMEDY
-          : strictRemedy(cause, r.outageBin, r.outageResetsAt, isShipLane());
+          : strictRemedy(cause, r.outageBin, r.outageResetsAt);
     console.error(
       strict
         ? `guard-review: ${r.name} INCONCLUSIVE (${r.reason}) — strict ship mode fails closed.\n` +
