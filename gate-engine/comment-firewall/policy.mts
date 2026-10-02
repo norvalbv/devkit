@@ -3,9 +3,10 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
-import { CONFIG_FILENAME, resolveGuardConfig } from '../config.mts';
+import { CONFIG_FILENAME, resolveGuardConfigJson } from '../config.mts';
 import { parseJsonObject } from '../config-json.mts';
 import { commitIndexEnv } from '../ratchets/commit-index.mts';
+import { gitIgnores, indexFile } from '../review/evidence/staged-git.mts';
 
 export interface CommentPolicy {
   /** Every configured reference pattern, global so one comment reports each match. */
@@ -53,13 +54,20 @@ function decisionPattern(cwd: string, decisionsDir: string): RegExp | null {
   return new RegExp(`(?<![\\w-])(?:${alternatives.join('|')})(?![\\w-])`, 'g');
 }
 
+/** The staged config, so an unstaged edit cannot change the verdict; a git-ignored local config
+ * has no staged copy and is read from the working tree. */
+function stagedConfig(cwd: string): string | null {
+  const indexed = indexFile(cwd, CONFIG_FILENAME);
+  if (indexed !== null) return indexed;
+  const file = path.join(cwd, CONFIG_FILENAME);
+  return gitIgnores(cwd, CONFIG_FILENAME) && existsSync(file) ? readFileSync(file, 'utf8') : null;
+}
+
 /** Absent key or file: no reference patterns, so a consumer that never opted in sees no change. */
 export function loadCommentPolicy(cwd: string): CommentPolicy {
-  const file = path.join(cwd, CONFIG_FILENAME);
-  if (!existsSync(file)) return { refs: [] };
-  const parsed = commentsSchema.safeParse(
-    parseJsonObject<object>(readFileSync(file, 'utf8'), CONFIG_FILENAME),
-  );
+  const contents = stagedConfig(cwd);
+  if (contents === null) return { refs: [] };
+  const parsed = commentsSchema.safeParse(parseJsonObject<object>(contents, CONFIG_FILENAME));
   if (!parsed.success) {
     const issue = parsed.error.issues[0];
     throw new Error(`${CONFIG_FILENAME} ${issue?.path.join('.')}: ${issue?.message}`);
@@ -67,7 +75,7 @@ export function loadCommentPolicy(cwd: string): CommentPolicy {
   const comments = parsed.data.comments ?? {};
   const refs = (comments.forbiddenRefs ?? []).map(compile);
   const decisions = comments.forbidDecisionRefs
-    ? decisionPattern(cwd, resolveGuardConfig(cwd).decisionsDir)
+    ? decisionPattern(cwd, resolveGuardConfigJson(contents, cwd).decisionsDir)
     : null;
   if (decisions) refs.push(decisions);
   return { refs };

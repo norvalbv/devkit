@@ -196,6 +196,23 @@ describe('forbidden references in changed comments', () => {
     expect(cited(root)).toEqual([]);
   });
 
+  it('reads the policy from the staged config, so an unstaged edit cannot switch it off', () => {
+    const root = staged('const a = 0;\n', '// see sc-12\nconst a = 1;\n');
+    writeFileSync(path.join(root, 'guard.config.json'), JSON.stringify({ scanRoots: ['src'] }));
+    expect(cited(root)).toEqual(['sc-12']);
+  });
+
+  it('reads a git-ignored local config from the working tree', () => {
+    const root = staged('const a = 0;\n', '// see sc-12\nconst a = 1;\n', null);
+    git(root, ['rm', '-q', '--cached', 'guard.config.json']);
+    writeFileSync(path.join(root, '.gitignore'), 'guard.config.json\n');
+    writeFileSync(
+      path.join(root, 'guard.config.json'),
+      JSON.stringify({ scanRoots: ['src'], sourceExtensions: ['tsx'], comments: DEVKIT_REFS }),
+    );
+    expect(cited(root)).toEqual(['sc-12']);
+  });
+
   it('exits 4 naming the key when a configured pattern does not compile', () => {
     const root = staged('const a = 0;\n', '// x\nconst a = 1;\n', { forbiddenRefs: ['sc-(\\d+'] });
     vi.spyOn(console, 'error').mockImplementation(() => {});
