@@ -37,7 +37,7 @@ cd "${CLAUDE_PROJECT_DIR:-$HOOK_DIR/../..}" 2>/dev/null || { echo '{}'; exit 0; 
 # Strip the prefix from the same UNRESOLVED root the guard above compared against — `pwd -P`
 # would resolve symlinks (/tmp → /private/tmp) and the strip would silently miss.
 source "$HOOK_DIR/session-edits-lib.sh" 2>/dev/null || true
-if type session_edits_file &>/dev/null; then
+if declare -F session_edits_file &>/dev/null; then
   rel_path="${file_path#"${CLAUDE_PROJECT_DIR:-$(pwd)}"/}"
   if [ -n "$rel_path" ] && [ "$rel_path" != "$file_path" ]; then
     ledger=$(session_edits_file "$input")
