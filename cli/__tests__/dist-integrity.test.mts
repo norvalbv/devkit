@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -324,6 +324,17 @@ describe('inspectDistIntegrity', () => {
     expect(report.unresolved).toEqual([
       { importer: 'dist/index.mjs', specifier: './cli/new.mjs', target: 'dist/cli/new.mjs' },
     ]);
+  });
+
+  it('leaves the shared .git/index byte-identical while reading a stat-dirty build', async () => {
+    const { base, root } = repo();
+    // `bun run build` reproducing the committed bytes leaves only a newer mtime behind.
+    const future = new Date(Date.now() + 60_000);
+    utimesSync(join(root, 'dist/index.mjs'), future, future);
+    const before = readFileSync(join(root, '.git', 'index'));
+
+    expect(await inspectDistIntegrity(root, base, ['dist/index.mjs'])).toEqual(CLEAN_ACTIVE);
+    expect(readFileSync(join(root, '.git', 'index')).equals(before)).toBe(true);
   });
 
   it('does not affect consumer repositories', async () => {

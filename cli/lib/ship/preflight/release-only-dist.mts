@@ -1,7 +1,7 @@
 // Regenerated dist is release-only (typescript-source-prebuilt-mjs, 2026-07-26): a PR's committed tree
 // may add or delete dist, never rewrite it. CI judges it (gate.yml); ship only names drift (sc-2467).
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readlinkSync } from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
 
@@ -11,13 +11,23 @@ const VersionedPackage = z.object({ version: z.string().regex(/^\d+\.\d+\.\d+$/)
 const NamedPackage = z.object({ name: z.literal('@norvalbv/devkit') });
 /** Only these statuses leave tracked dist bytes untouched: a new artifact, or a deletion (sc-2060). */
 const FEATURE_SAFE = new Set(['A', 'D']);
+const REGULAR_FILE = new Set(['100644', '100755']);
 
 export function releaseVersion(branch: string | undefined): string | undefined {
   return branch === undefined ? undefined : RELEASE_BRANCH.exec(branch)?.[1];
 }
 
-function git(root: string, args: string[]): string {
-  return execFileSync('git', ['-C', root, ...args], { stdio: 'pipe' }).toString('utf8');
+function git(root: string, args: string[], input?: Buffer): string {
+  return execFileSync('git', ['-C', root, '--no-optional-locks', ...args], {
+    input,
+    stdio: 'pipe',
+  }).toString('utf8');
+}
+
+/** A symlink's blob is its target text; `hash-object <path>` would hash the file it points at. */
+function linkBlob(root: string, file: string): string {
+  const target = readlinkSync(path.join(root, file), { encoding: 'buffer' });
+  return git(root, ['hash-object', '--stdin'], target).trim();
 }
 
 /** Parse one package.json read; any read, parse or shape failure is `undefined`. */
@@ -69,6 +79,34 @@ function statusPairs(raw: string): Array<[string, string]> {
   return pairs;
 }
 
+/** Caller-side dist rewrites vs `base`, via `diff-index`: porcelain `git diff` rewrites the shared
+ *  index. A null worktree sha (stat-dirty, no refresh) is settled by hashing the file's bytes. */
+function callerDrift(root: string, base: string): string[] {
+  const raw = git(root, ['diff-index', '--raw', '-z', '--no-renames', base, '--', 'dist']);
+  const fields = raw.split('\0').filter(Boolean);
+  const rewritten: string[] = [];
+  const unhashed = new Map<string, string>(); // path → base blob
+  for (let i = 0; i + 1 < fields.length; i += 2) {
+    // `:<srcMode> <dstMode> <srcSha> <dstSha> <status>`, then the path.
+    const [srcMode, dstMode, srcSha, dstSha, status] = fields[i]!.slice(1).split(' ');
+    const file = fields[i + 1]!;
+    if (FEATURE_SAFE.has(status!)) continue;
+    const statDirty = srcMode === dstMode && /^0+$/.test(dstSha!);
+    if (statDirty && REGULAR_FILE.has(srcMode!)) unhashed.set(file, srcSha!);
+    else if (!statDirty || srcMode !== '120000' || linkBlob(root, file) !== srcSha) {
+      rewritten.push(file);
+    }
+  }
+  const files = [...unhashed.keys()];
+  // argv, never newline-delimited --stdin-paths: a tracked path may itself contain a newline.
+  for (let i = 0; i < files.length; i += 500) {
+    const batch = files.slice(i, i + 500);
+    const hashes = git(root, ['hash-object', '--', ...batch]).split('\n');
+    rewritten.push(...batch.filter((file, j) => hashes[j] !== unhashed.get(file)));
+  }
+  return rewritten.sort();
+}
+
 /** With `tree` (CI: the PR head's committed tree) this refuses; without it (ship's caller-side
  *  preflight) it only names the working tree's drift, so nobody sorts it by hand. */
 export function inspectReleaseOnlyDist(
@@ -78,13 +116,12 @@ export function inspectReleaseOnlyDist(
   { tree }: { tree?: string } = {},
 ): ReleaseOnlyReport {
   if (!isDevkit(root, base, tree)) return { active: false, releaseOnly: [], drift: [] };
-  const target = tree === undefined ? [base] : [base, tree];
-  const diff = ['diff', '--no-renames', '--name-status', '-z', ...target, '--', 'dist'];
+  if (tree === undefined) return { active: true, releaseOnly: [], drift: callerDrift(root, base) };
+  const diff = ['diff', '--no-renames', '--name-status', '-z', base, tree, '--', 'dist'];
   const rewritten = statusPairs(git(root, diff))
     .filter(([status]) => !FEATURE_SAFE.has(status))
     .map(([, file]) => file)
     .sort();
-  if (tree === undefined) return { active: true, releaseOnly: [], drift: rewritten };
   if (provenRelease(root, base, branch, tree)) return { active: true, releaseOnly: [], drift: [] };
   return { active: true, releaseOnly: rewritten, drift: [] };
 }

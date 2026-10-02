@@ -6,7 +6,7 @@
  * makes the tree pullable without moving the shared HEAD.
  */
 import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -429,6 +429,29 @@ describe('reconcile — ff-pullability is measured, not claimed', () => {
     // implementation that re-read the ref instead of the passed sha would report a bare all-clear.
     writeFileSync(join(root, '.git', 'FETCH_HEAD'), `${base}\t\tbranch '0.0.9' of origin\n`);
     expect(ffBlockers(root, merged, new Set())).toEqual(['bar.ts']);
+  });
+
+  it('leaves .git/index byte-identical when a tracked file is only stat-dirty', () => {
+    const { root, g, base } = makeRepo({ 'foo.ts': 'OLD\n', 'bar.ts': 'other\n' });
+    mergeUpstream(root, g, base, { 'foo.ts': 'NEW\n' });
+    g('fetch', '-q', 'origin', '0.0.9');
+    const merged = g('rev-parse', 'FETCH_HEAD');
+    // A future mtime with unchanged bytes is exactly what makes git's opportunistic refresh write.
+    const future = new Date(Date.now() + 60_000);
+    utimesSync(join(root, 'bar.ts'), future, future);
+    const index = () => readFileSync(join(root, '.git', 'index'));
+    const before = index();
+
+    expect(ffBlockers(root, merged, new Set())).toEqual([]);
+    expect(index().equals(before)).toBe(true);
+    // Control: a working-tree `git diff` rewrites the index even under --no-optional-locks, so
+    // the assertion above cannot pass merely because nothing was stat-dirty.
+    spawnSync(
+      'git',
+      ['-C', root, '--no-optional-locks', 'diff', '--quiet', 'HEAD', '--', 'bar.ts'],
+      { env: GENV },
+    );
+    expect(index().equals(before)).toBe(false);
   });
 
   it('an UNSTAGED worktree deletion is not reported (false alarms read as "reconcile failed")', () => {

@@ -1,7 +1,16 @@
 /** A PR's committed tree may add or delete dist, never rewrite it; only a proven release may. CI
  *  judges it via gate.yml; ship only names drift (sc-2467, typescript-source-prebuilt-mjs). */
 import { execFileSync } from 'node:child_process';
-import { chmodSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  lutimesSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -264,6 +273,56 @@ describe('inspectReleaseOnlyDist — caller pass, advisory only', () => {
       releaseOnly: [],
       drift: ['dist/cli/a.mjs', 'dist/cli/b.mjs'],
     });
+  });
+
+  it('neither rewrites the shared index nor names a byte-identical rebuild as drift', () => {
+    const { base, root } = repo();
+    // A rebuild that reproduces the committed bytes leaves only a newer mtime behind.
+    const future = new Date(Date.now() + 60_000);
+    utimesSync(join(root, 'dist/cli/a.mjs'), future, future);
+    rebuild(root, 'dist/cli/b.mjs');
+    const before = readFileSync(join(root, '.git', 'index'));
+
+    expect(inspectReleaseOnlyDist(root, base, 'feat/x').drift).toEqual(['dist/cli/b.mjs']);
+    expect(readFileSync(join(root, '.git', 'index')).equals(before)).toBe(true);
+  });
+
+  it('hashes a stat-dirty path containing a newline as one path, not two', () => {
+    const { root } = repo();
+    const odd = 'dist/cli/new\nline.mjs';
+    write(root, odd, 'export {};\n');
+    stage(root, odd);
+    git(root, 'commit', '-q', '-m', 'odd name');
+    const base = git(root, 'rev-parse', 'HEAD');
+    const future = new Date(Date.now() + 60_000);
+    utimesSync(join(root, odd), future, future);
+
+    expect(inspectReleaseOnlyDist(root, base, 'feat/x').drift).toEqual([]);
+    write(root, odd, 'export const changed = 1;\n');
+    utimesSync(join(root, odd), future, future);
+    expect(inspectReleaseOnlyDist(root, base, 'feat/x').drift).toEqual([odd]);
+  });
+
+  it('compares a stat-dirty symlink by its target text, not the file it points at', () => {
+    const { root } = repo();
+    symlinkSync('a.mjs', join(root, 'dist/cli/link.mjs'));
+    stage(root, 'dist/cli/link.mjs');
+    git(root, 'commit', '-q', '-m', 'link');
+    const base = git(root, 'rev-parse', 'HEAD');
+    const future = new Date(Date.now() + 60_000);
+    lutimesSync(join(root, 'dist/cli/link.mjs'), future, future);
+
+    expect(inspectReleaseOnlyDist(root, base, 'feat/x').drift).toEqual([]);
+    rmSync(join(root, 'dist/cli/link.mjs'));
+    symlinkSync('b.mjs', join(root, 'dist/cli/link.mjs'));
+    expect(inspectReleaseOnlyDist(root, base, 'feat/x').drift).toEqual(['dist/cli/link.mjs']);
+  });
+
+  it('still names a mode-only rewrite, which a content hash alone would miss', () => {
+    const { base, root } = repo();
+    chmodSync(join(root, 'dist/cli/a.mjs'), 0o755);
+
+    expect(inspectReleaseOnlyDist(root, base, 'feat/x').drift).toEqual(['dist/cli/a.mjs']);
   });
 });
 
