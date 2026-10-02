@@ -17,6 +17,7 @@ import {
   DK_DETERMINISTIC_GATE_HELPER,
   DK_GATE_BLOCK_HELPERS,
   REVIEW_FAILURE_FINALIZER,
+  shipRehearsalHint,
 } from './gate-policy/block-helpers.mts';
 import { buildPreCommitExit, PRE_COMMIT_PASS_EXIT } from './gate-policy/commit-gate-log.mts';
 import { formatFragment } from './format-fragment.mts';
@@ -187,7 +188,10 @@ const overlayLintStep = (tool: string, label: string, exts: string, config: stri
 if [ -n "$DK_STAGED" ] && [ -f ${config} ]; then
     if [ -x node_modules/.bin/${tool} ]; then
         echo "${label}"
-        echo "$DK_STAGED" | xargs node_modules/.bin/${tool} ${args} || exit 1
+        echo "$DK_STAGED" | xargs node_modules/.bin/${tool} ${args} || {
+${shipRehearsalHint('            ')}
+            exit 1
+        }
     else
         echo "devkit ${tool} overlay: skipped — node_modules/.bin/${tool} not found (install the repo's dependencies)"
     fi
@@ -222,7 +226,10 @@ const FALLOW_OVERLAY_STAGED = `if command -v fallow >/dev/null 2>&1; then
     DK_FALLOW_RC=0
     __dk_no_git_env fallow audit --diff-stdin <"$DK_FALLOW_DIFF" || DK_FALLOW_RC=$?
     rm -f "$DK_FALLOW_DIFF"
-    [ "$DK_FALLOW_RC" -eq 0 ] || exit 1
+    [ "$DK_FALLOW_RC" -eq 0 ] || {
+${shipRehearsalHint('        ')}
+        exit 1
+    }
 fi`;
 
 // Hoisted (perf: no per-call regex compile).

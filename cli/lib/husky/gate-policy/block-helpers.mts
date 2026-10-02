@@ -1,6 +1,8 @@
 /** Shell block policy shared by every hook flavour: which modes defer a gate's block to the finalizer,
  *  and where the gates find devkit's bins. */
 
+import { SHIP_REHEARSAL_LEAD } from '../../../../gate-engine/deterministic/recheck.mts';
+
 // Commit/ship exit on a block. Review remembers both lanes and dry-gates the deterministic one, so
 // every selected gate still reports before REVIEW_FAILURE_FINALIZER (safe under `sh -e`).
 export const DK_GATE_BLOCK_HELPERS = `dk_review_failed=0
@@ -68,3 +70,18 @@ __dk_package_bin_dir=\${__dk_package_bin_dir%/*}`,
   },
 };
 export type BinDir = keyof typeof BIN_DIRS;
+
+/**
+ * A hook gate's own `|| { …; exit 1; }` arm: ship's exact --dry-gates command, only when a new ship
+ * exported one (sc-2695). Printed quoted, never evaluated — the title in it is user text.
+ */
+export function shipRehearsalHint(indent: string): string {
+  return [
+    'if [ -n "${DEVKIT_SHIP_DRY_GATES_CMD:-}" ]; then',
+    `    echo "   ${SHIP_REHEARSAL_LEAD}" >&2`,
+    '    printf \'     %s\\n\' "$DEVKIT_SHIP_DRY_GATES_CMD" >&2',
+    'fi',
+  ]
+    .map((line) => `${indent}${line}`)
+    .join('\n');
+}

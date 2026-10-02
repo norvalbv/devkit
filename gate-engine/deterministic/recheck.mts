@@ -66,6 +66,9 @@ export function recheckLines(
   return lines;
 }
 
+/** The lead before ship's exact `--dry-gates` command; the hook's overlay arms print it too (sc-2695). */
+export const SHIP_REHEARSAL_LEAD = "Ship's exact staging, no judges:";
+
 /** Footer lines after the aggregated failure: one re-check per failed gate, then ship's exact one. */
 export function printRecheckFooter(rechecks: string[]): void {
   if (rechecks.length === 0) return;
@@ -77,6 +80,6 @@ export function printRecheckFooter(rechecks: string[]): void {
   console.error(
     "   Under devkit ship these are approximate: they judge YOUR checkout's staged index, not",
   );
-  console.error("   ship's briefed paths on a base-cut worktree. Ship's exact staging, no judges:");
+  console.error(`   ship's briefed paths on a base-cut worktree. ${SHIP_REHEARSAL_LEAD}`);
   console.error(`     ${shipCmd}`);
 }

@@ -9,6 +9,7 @@
  *    and `agents/`. If it fails, a source edit shipped without re-running the writer: run
  *    `node cli/index.mts sync-skills` / `sync-agents` and commit.
  */
+import { spawnSync } from 'node:child_process';
 import {
   chmodSync,
   existsSync,
@@ -360,6 +361,35 @@ describe('buildSelfHostHook', () => {
     )?.[0];
     expect(fragment).toBeDefined();
     expect(() => execFileSync('sh', ['-c', fragment ?? 'exit 1'], { cwd: root })).toThrow();
+  });
+
+  // sc-2695: the block names ship's exact rehearsal only when a new ship exported it.
+  it.each([
+    ['names', "devkit ship feat/x 't' --dry-gates -- cli/sample.mts"],
+    ['omits', undefined],
+  ])("an Oxfmt block %s ship's --dry-gates rehearsal", (_label, cmd) => {
+    const root = mkdtempSync(join(tmpdir(), 'self-host-oxfmt-hint-'));
+    execFileSync('git', ['init', '-q'], { cwd: root });
+    mkdirSync(join(root, 'cli'), { recursive: true });
+    mkdirSync(join(root, 'node_modules', '.bin'), { recursive: true });
+    const oxfmt = join(root, 'node_modules', '.bin', 'oxfmt');
+    writeFileSync(oxfmt, '#!/bin/sh\nexit 7\n');
+    chmodSync(oxfmt, 0o755);
+    writeFileSync(join(root, 'cli', 'sample.mts'), 'const value={answer:42}\n');
+    execFileSync('git', ['add', 'cli/sample.mts'], { cwd: root });
+    const fragment = buildSelfHostHook(HOOK_SEL, '', ROOT).match(
+      /# devkit:biome-format[\s\S]*?# \/devkit:biome-format/,
+    )?.[0];
+    const env = { ...process.env, DEVKIT_SHIP_DRY_GATES_CMD: cmd ?? '' };
+    const r = spawnSync('sh', ['-c', fragment ?? 'exit 1'], {
+      cwd: root,
+      env,
+      encoding: 'utf8',
+      timeout: 30_000,
+    });
+    expect(r.status).toBe(1);
+    if (cmd) expect(r.stderr).toContain(`Ship's exact staging, no judges:\n     ${cmd}\n`);
+    else expect(r.stderr).not.toContain("Ship's exact staging");
   });
 
   it('backs the lint extra with the native Oxlint policy only', () => {

@@ -23,7 +23,11 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'n
 import { join } from 'node:path';
 import { defaultSelection, RECOMMENDED_GUARD_IDS, type Selection } from '../components.mts';
 import { readJson } from '../fs-helpers.mts';
-import { BIN_DIRS, REVIEW_FAILURE_FINALIZER } from './gate-policy/block-helpers.mts';
+import {
+  BIN_DIRS,
+  REVIEW_FAILURE_FINALIZER,
+  shipRehearsalHint,
+} from './gate-policy/block-helpers.mts';
 import { markEnd } from './husky.mts';
 import {
   buildFullHook,
@@ -142,6 +146,7 @@ const SELF_HOST_TOOL_SETUP = `    FMT_TOOL=Oxfmt; FMT_BIN=node_modules/.bin/oxfm
 // fragment's only other `$__dk_package_bin_dir` mention; the rewritten hook must contain none.
 const SELF_HOST_FORMAT_FAILURE = `        if [ "$FMT_RC" -ne 0 ]; then
             echo "🎨 Oxfmt failed over $FMT_N staged file(s) (xargs exit $FMT_RC) — blocking: devkit formats its own staged set hard." >&2
+${shipRehearsalHint('            ')}
             exit 1
         fi`;
 // Keep the staged hook on the same authored-file boundary as package.json's format scripts. A
