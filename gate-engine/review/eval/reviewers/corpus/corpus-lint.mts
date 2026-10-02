@@ -8,6 +8,7 @@ import { REVIEWERS } from '../../../reviewers.mts';
 import { assertHoldoutGroups, casesFile, holdoutFloorShortfalls, lintRows } from '../corpus.mts';
 
 let problems = 0;
+let warnings = 0;
 let rows = 0;
 for (const reviewer of REVIEWERS) {
   const file = casesFile(reviewer);
@@ -22,7 +23,10 @@ for (const reviewer of REVIEWERS) {
       if (process.env.DEVKIT_HOLDOUT_FLOOR_STRICT === '1') {
         console.error(`corpus-lint: PROBLEM ${msg}`);
         problems += 1;
-      } else console.error(`corpus-lint: WARNING ${msg}`);
+      } else {
+        console.error(`corpus-lint: WARNING ${msg}`);
+        warnings += 1;
+      }
     }
   } catch (e) {
     problems += 1;
@@ -31,5 +35,7 @@ for (const reviewer of REVIEWERS) {
     );
   }
 }
-console.error(`corpus-lint: ${rows} row(s) across the reviewer corpora, ${problems} problem(s)`);
+console.error(
+  `corpus-lint: ${rows} row(s) across the reviewer corpora, ${problems} problem(s)${warnings ? `, ${warnings} warning(s)` : ''}`,
+);
 process.exit(problems > 0 ? 1 : 0);
