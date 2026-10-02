@@ -180,6 +180,7 @@ export interface ReviewOutcome {
   /** Structured acknowledgement records for findings suppressed by the override valve. Present on
    * both all-waived PASS and mixed waived+blocking FAIL outcomes. */
   waivers?: RecordedWaiver[];
+  blocking?: { lens: string; fp: string; base?: string }[]; // `reason`'s blocking fps (sc-3212)
   /** The per-lens vector the judge produced, INCLUDING the passes — the only way to tell a reviewer
    * that cleared every lens from one that never looked. Absent when no artifact existed (a
    * skill-less reviewer, or a judge that never wrote one), which is itself the distinction a

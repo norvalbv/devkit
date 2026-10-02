@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { mergeItemVectors } from '../evidence/items.mts';
+import { blockingFields, itemFields, mergeItemVectors } from '../evidence/items.mts';
+import type { ReviewOutcome } from '../runtime.mts';
 import {
   CORRECTNESS_LENSES,
   DEFAULT_LENS_GROUPS,
@@ -441,5 +442,65 @@ describe('planReviewWork — cached PASSes carry the base they were judged again
     const plan = planReviewWork([sel], ['d'], {}, new Map(), key, null);
     expect(plan.cachedHits).toEqual([]);
     expect(plan.fullyCached).toEqual([]);
+  });
+});
+
+describe('blocking fingerprints across a split (sc-3212)', () => {
+  const part = (blocking?: ReviewOutcome['blocking']): ReviewOutcome => ({
+    name: 'correctness-reviewer',
+    status: blocking ? 'fail' : 'pass',
+    reason: '',
+    escalated: false,
+    blocking,
+  });
+  const merge = (...parts: ReviewOutcome[]) => {
+    // The worst part's copy, as mergeLensOutcomes' spread leaves it before the vectors are rebuilt.
+    const merged = part([{ lens: 'stale', fp: 'ffffffffffff' }]);
+    mergeItemVectors(merged, parts);
+    return merged.blocking;
+  };
+
+  it("keeps every part's fingerprint, so the merged row names each waivable ID", () => {
+    const blocking = merge(
+      part([{ lens: 'state-transitions', fp: '33d1bd1cf709' }]),
+      part(),
+      part([{ lens: 'error-and-edge-classification', fp: 'b79515e707fc' }]),
+    );
+    expect(blocking?.map((b) => b.fp)).toEqual(['33d1bd1cf709', 'b79515e707fc']);
+  });
+
+  it('dedupes by fingerprint only, so two chunks of one lens both survive', () => {
+    const blocking = merge(
+      part([{ lens: 'state-transitions', fp: 'aaaaaaaaaaaa' }]),
+      part([
+        { lens: 'state-transitions', fp: 'bbbbbbbbbbbb' },
+        { lens: 'state-transitions', fp: 'aaaaaaaaaaaa' },
+      ]),
+    );
+    expect(blocking?.map((b) => b.fp)).toEqual(['aaaaaaaaaaaa', 'bbbbbbbbbbbb']);
+  });
+
+  it('clears a worst-part copy when no part blocks', () => {
+    expect(merge(part(), part())).toBeUndefined();
+  });
+
+  it('bounds the event field by bytes and counts what it dropped, never cutting a fingerprint', () => {
+    const blocking = Array.from({ length: 15 }, (_, i) => ({
+      lens: `src/${'deep/'.repeat(60)}file-${i}.ts@CLAUDE.md:${i}`,
+      fp: i.toString(16).padStart(12, '0'),
+    }));
+    const fields = blockingFields({ blocking });
+    const kept = fields.blocking ?? [];
+    expect(Buffer.byteLength(JSON.stringify(kept), 'utf8')).toBeLessThanOrEqual(512);
+    expect(fields.blocking_omitted).toBe(15 - kept.length);
+    expect(fields.blocking_omitted).toBeGreaterThan(0);
+    for (const b of kept) expect(b.fp).toMatch(/^[0-9a-f]{12}$/);
+  });
+
+  it('adds no field when nothing blocks, and rides itemFields even without an artifact', () => {
+    expect(blockingFields({})).toEqual({});
+    expect(blockingFields({ blocking: [] })).toEqual({});
+    const blocking = [{ lens: 'src/a.ts@CLAUDE.md:3', fp: '0123456789ab' }];
+    expect(itemFields(part(blocking))).toEqual({ blocking });
   });
 });

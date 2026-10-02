@@ -2,6 +2,8 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { blockingFields } from '../../../../gate-engine/review/evidence/items.mts';
+import { blockingNote } from '../../../../gate-engine/review/overrides.mts';
 import { type GateEvent, readShipEvents, render, summarise } from './gate-digest.mts';
 
 const SHIP = 'ship-1';
@@ -809,5 +811,168 @@ describe('summarise — review PASS judged against an earlier base', () => {
   it('prints ONE row when pre-commit and a re-run both replay the same stale verdict', () => {
     const rows = summarise([baseHit('moved-overlap'), baseHit('moved-overlap'), green], SHIP);
     expect(rows.filter((r) => r.state === 'unverified')).toHaveLength(1);
+  });
+});
+
+describe('a reviewer blocking on several fingerprints (sc-3212)', () => {
+  const REASON =
+    'correctness-reviewer: 1 un-overridden finding(s) block this commit. • state-transitions …';
+  const blockingFail = (blocking: GateEvent['blocking'], extra: Partial<GateEvent> = {}) =>
+    ev({
+      type: 'review_result',
+      reviewer: 'correctness-reviewer',
+      status: 'fail',
+      reason: REASON,
+      blocking,
+      ...extra,
+    });
+  /** Through the real JSONL boundary, so a hostile `blocking` reaches the reader as it would live. */
+  const hostile = (blocking: string): GateEvent[] =>
+    readShipEvents(
+      sinkWith([
+        `{"ship_id":"${SHIP}","type":"review_result","reviewer":"correctness-reviewer","status":"fail","reason":"${REASON}","blocking":${blocking}}`,
+        JSON.stringify(shipResult('review')),
+      ]),
+      SHIP,
+    );
+  const THREE = [
+    { lens: 'state-transitions', fp: 'f5e7af930a7e' },
+    { lens: 'error-and-edge-classification', fp: 'a5421e88403c' },
+    { lens: 'writer-reader-contracts', fp: '30d8dce61eb3' },
+  ];
+
+  it('lists every blocking ID with its lens, and counts findings as well as gates', () => {
+    const text = render(
+      summarise([ev({ type: 'ship_attempt' }), blockingFail(THREE), shipResult('review')], SHIP),
+    );
+    expect(text).toContain('Gate findings this run (1 gate(s) / 3 finding(s))');
+    for (const { lens, fp } of THREE) {
+      expect(text).toContain(
+        `✗ review:correctness-reviewer — BLOCKED this run: ${lens} [${fp}] — fix it, or: guard-review waive correctness-reviewer:${lens} ${fp} "why this is not a real defect"`,
+      );
+    }
+  });
+
+  it('prints the exact waive command blockingNote prints, judged base included', () => {
+    const base = '5c8482e8fa4e80899f2cd48bdfcd317bb082444f';
+    const lens = "docs/it's here.ts@CLAUDE.md:12";
+    const blocking = [{ lens, fp: '0123456789ab' }];
+    const note = blockingNote('correctness-reviewer', blocking, base);
+    const command = /guard-review waive .*"why this is not a real defect"/.exec(note)?.[0];
+    expect(command).toContain('--base 5c8482e8fa4e');
+    const fields = blockingFields({ blocking: [{ ...blocking[0], base: '5c8482e8fa4e' }] });
+    const text = render(
+      summarise([blockingFail(fields.blocking, fields), shipResult('review')], SHIP),
+    );
+    expect(text).toContain(`${command}`);
+  });
+
+  it('keeps the ID when the lens is too long for the waive hint', () => {
+    const lens = `src/${'nested dir/'.repeat(20)}flows.ts@CLAUDE.md:20`;
+    const text = render(
+      summarise([blockingFail([{ lens, fp: '0123456789ab' }]), shipResult('review')], SHIP),
+    );
+    expect(text).toContain('[0123456789ab] — the waive command is in the log');
+    expect(text).not.toContain('guard-review waive');
+  });
+
+  it('quotes a lens holding spaces or shell metacharacters, as blockingNote does', () => {
+    const lens = "docs/my file's.ts@CLAUDE.md:12";
+    const text = render(
+      summarise([blockingFail([{ lens, fp: '0123456789ab' }]), shipResult('review')], SHIP),
+    );
+    expect(text).toContain(
+      `guard-review waive 'correctness-reviewer:docs/my file'\\''s.ts@CLAUDE.md:12' 0123456789ab`,
+    );
+  });
+
+  it('decodes a lens holding quotes and backslashes back to the exact finding label', () => {
+    const lens = 'docs/a"b\\c.ts@CLAUDE.md:1';
+    const rows = summarise(hostile(JSON.stringify([{ lens, fp: '0123456789ab' }])), SHIP);
+    expect(rows[0].detail).toContain(`waive 'correctness-reviewer:${lens}' 0123456789ab`);
+  });
+
+  it('builds no waive command from a lens the display had to reshape', () => {
+    const rows = summarise(
+      [blockingFail([{ lens: 'a  b\tc', fp: '0123456789ab' }]), shipResult('review')],
+      SHIP,
+    );
+    expect(rows[0].detail).toBe('a b c [0123456789ab] — the waive command is in the log');
+  });
+
+  it('strips terminal control bytes a staged path can smuggle into a lens', () => {
+    const lens = 'src/\u001b[2K\u001b[31mok\u0007\u009b.ts@CLAUDE.md:1';
+    const rows = summarise(
+      [blockingFail([{ lens, fp: '0123456789ab' }]), shipResult('review')],
+      SHIP,
+    );
+    const text = render(rows);
+    const controls = [...text].filter((ch) => {
+      const code = ch.codePointAt(0) ?? 0;
+      return code !== 10 && (code < 32 || (code >= 127 && code < 160));
+    });
+    expect(controls).toEqual([]);
+    expect(rows[0].detail).toMatch(/\[0123456789ab\] — the waive command is in the log$/);
+  });
+
+  it('builds no waive command from a lens the emitter had to cut', () => {
+    // Through the emitter's own serialization: a 130-char lens fits the digest's line, so only the
+    // emitter's `…` marker can tell the reader the label no longer matches the finding.
+    const lens = `src/${'a'.repeat(110)}.ts@CLAUDE.md:1`;
+    const { blocking } = blockingFields({ blocking: [{ lens, fp: '0123456789ab' }] });
+    expect(blocking?.[0].lens.endsWith('…')).toBe(true);
+    const text = render(summarise([blockingFail(blocking), shipResult('review')], SHIP));
+    expect(text).toContain('[0123456789ab] — the waive command is in the log');
+    expect(text).not.toContain('guard-review waive');
+  });
+
+  it('drops malformed entries without throwing, and falls back to the prose row when none survive', () => {
+    const junk =
+      '[null,"x",{"lens":"a","fp":42},{"lens":"b","fp":"0123456789a"},{"lens":{"toString":1},"fp":{"toString":1}}';
+    const rows = summarise(hostile(`${junk}]`), SHIP);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].detail).toContain('un-overridden finding(s)');
+    expect(summarise(hostile('"not-an-array"'), SHIP)).toHaveLength(1);
+    const mixed = summarise(hostile(`${junk},{"lens":{"toString":1},"fp":"abcdefabcdef"}]`), SHIP);
+    expect(mixed.map((r) => r.fp)).toEqual(['abcdefabcdef']);
+    expect(mixed[0].detail).toMatch(/^\(finding\) \[abcdefabcdef\]/);
+  });
+
+  it('never caps a blocking ID away, only the non-blocking findings', () => {
+    const ten = Array.from({ length: 10 }, (_, i) => ({
+      lens: `lens-${i}`,
+      fp: i.toString(16).padStart(12, '0'),
+    }));
+    const advisories = Array.from({ length: 10 }, (_, i) => completenessFail(`note ${i}`));
+    const text = render(summarise([blockingFail(ten), ...advisories, shipResult('review')], SHIP));
+    for (const { fp } of ten) expect(text).toContain(`[${fp}]`);
+    expect(text).toContain('Gate findings this run (2 gate(s) / 11 finding(s))');
+  });
+
+  it('never caps a fingerprint away when the run failed unattributably', () => {
+    const ten = Array.from({ length: 10 }, (_, i) => ({
+      lens: `lens-${i}`,
+      fp: i.toString(16).padStart(12, '0'),
+    }));
+    const advisories = Array.from({ length: 10 }, (_, i) => completenessFail(`note ${i}`));
+    for (const blocked of [null, 'unknown']) {
+      const result = ev({ type: 'ship_result', blocked_gate: blocked, exit_code: 1 });
+      const text = render(summarise([blockingFail(ten), ...advisories, result], SHIP));
+      for (const { fp } of ten) expect(text).toContain(`[${fp}]`);
+      expect(text).toContain('Gate findings this run (2 gate(s) / 11 finding(s))');
+    }
+  });
+
+  it('says how many blocking IDs the event had to drop for its byte budget', () => {
+    const text = render(
+      summarise([blockingFail(THREE, { blocking_omitted: 4 }), shipResult('review')], SHIP),
+    );
+    expect(text).toContain('+4 more blocking finding(s) — every ID is in the log');
+    expect(text).toContain('Gate findings this run (1 gate(s) / 7 finding(s))');
+  });
+
+  it('lists the same fingerprints once when the reviewer judged twice in one run', () => {
+    const rows = summarise([blockingFail(THREE), blockingFail(THREE), shipResult('review')], SHIP);
+    expect(rows.map((r) => r.fp)).toEqual(THREE.map((b) => b.fp));
   });
 });
