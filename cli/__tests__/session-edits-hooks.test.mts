@@ -11,7 +11,7 @@
  *
  * Lives under cli/ because vitest's include glob is ['gate-engine/**\/*.test.mjs','cli/**\/*.test.mjs'].
  */
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -38,7 +38,7 @@ const writeExec = (root, rel, body) => {
   chmodSync(join(root, rel), 0o755);
 };
 
-const runHook = (hook, root, payload, tmp) =>
+const runHook = (hook, root, payload, tmp, extraEnv = {}) =>
   spawnSync('bash', [hook], {
     input: JSON.stringify(payload),
     env: {
@@ -47,6 +47,7 @@ const runHook = (hook, root, payload, tmp) =>
       TMPDIR: tmp,
       GUARD_NO_LOG: '',
       FRINK_NO_LOG: '',
+      ...extraEnv,
     },
     encoding: 'utf8',
   });
@@ -298,6 +299,172 @@ describe('decision-stop-check.sh — nudge scoped to session edits', () => {
       DECISION_HOOK,
       root,
       { session_id: 's2' },
+      seedSessionLedger(root, 's1', ['src/mine.ts']),
+    );
+    expect(r.status).toBe(0);
+    expect(r.stderr).toBe('');
+  });
+});
+
+// sc-1051: a pre-`--files` bin prints tab-less labels the ledger filter silently drops; the hook must
+// report that once per session per bin instead of going dark.
+describe('decision-stop-check.sh — a stale guard-decisions bin is reported, not silent', () => {
+  const STALE_BIN = '#!/bin/sh\nprintf "retry-policy\\ncaching\\n"\n';
+
+  /** A consumer with NO local devkit; the stale bin lives on PATH (global install shape). */
+  const globalFixture = (binDirName = 'gbin') => {
+    const root = mkTmp('sess-stale-');
+    write(root, 'src/mine.ts');
+    const binDir = join(root, '.fake', binDirName);
+    writeExec(root, join('.fake', binDirName, 'guard-decisions'), STALE_BIN);
+    const tmp = seedSessionLedger(root, 's1', ['src/mine.ts']);
+    const env = { PATH: `${binDir}:${process.env.PATH}` };
+    const stop = (sid = 's1') => {
+      seedSessionLedger(root, sid, ['src/mine.ts']);
+      return runHook(DECISION_HOOK, root, { session_id: sid }, tmp, env);
+    };
+    return { root, binDir, tmp, env, stop };
+  };
+
+  it('a stale GLOBAL bin blocks the stop once, naming the bin and the global remedy — never bunx', () => {
+    const { root, binDir, stop } = globalFixture();
+    write(
+      root,
+      '.devkit/config.json',
+      '{\n  "stack": "node-service",\n  "devkitRef": "v0.63.4"\n}\n',
+    );
+    const r = stop();
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain(join(binDir, 'guard-decisions'));
+    expect(r.stderr).toContain('--files');
+    expect(r.stderr).toMatch(/global devkit/);
+    expect(r.stderr).toContain('v0.63.4');
+    expect(r.stderr).not.toMatch(/bunx/);
+    // It is NOT the ordinary smell nudge — that would tell the agent to record a decision.
+    expect(r.stderr).not.toContain('New architectural decision smelled');
+  });
+
+  it('stays silent on later stops of the SAME session, and warns a NEW session once', () => {
+    const { stop } = globalFixture();
+    expect(stop('s1').status).toBe(2);
+    const again = stop('s1');
+    expect(again.status).toBe(0);
+    expect(again.stderr).toBe('');
+    expect(stop('s2').status).toBe(2);
+  });
+
+  it('re-arms within a session when the bin changes (an upgrade that is still stale)', () => {
+    const { root, stop } = globalFixture();
+    expect(stop().status).toBe(2);
+    writeExec(root, '.fake/gbin/guard-decisions', `${STALE_BIN}# reinstalled, different size\n`);
+    expect(stop().status).toBe(2);
+  });
+
+  it('re-arms on a same-size, same-minute rewrite of the bin (content, not just ls metadata)', () => {
+    const { root, stop } = globalFixture();
+    writeExec(root, '.fake/gbin/guard-decisions', `${STALE_BIN}#a\n`);
+    expect(stop().status).toBe(2);
+    writeExec(root, '.fake/gbin/guard-decisions', `${STALE_BIN}#b\n`);
+    expect(stop().status).toBe(2);
+  });
+
+  it('fingerprints the bin that ran the scan, not one swapped in during it', () => {
+    const { root, stop } = globalFixture();
+    const bin = join(root, '.fake/gbin/guard-decisions');
+    // Upgrade lands mid-scan: the old bin replaces itself with a DIFFERENT (still stale) bin.
+    writeExec(
+      root,
+      '.fake/gbin/guard-decisions',
+      `#!/bin/sh\nprintf '#!/bin/sh\\nprintf "retry-policy\\\\n"\\n# v2\\n' > "${bin}.new" && chmod +x "${bin}.new" && mv "${bin}.new" "${bin}"\nprintf "retry-policy\\n"\n`,
+    );
+    expect(stop().status).toBe(2);
+    // The swapped-in bin never got its own notice, so it must not be snoozed.
+    expect(stop().status).toBe(2);
+  });
+
+  it('a stale LOCAL bin names the dependency bump, not a global upgrade', () => {
+    const root = mkTmp('sess-stale-');
+    write(root, 'src/mine.ts');
+    write(root, '.devkit/config.json', '{"devkitRef":"v0.70.1"}');
+    writeExec(root, 'node_modules/.bin/guard-decisions', STALE_BIN);
+    const r = runHook(
+      DECISION_HOOK,
+      root,
+      { session_id: 's1' },
+      seedSessionLedger(root, 's1', ['src/mine.ts']),
+    );
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain('node_modules/.bin/guard-decisions');
+    expect(r.stderr).toMatch(/dependency/);
+    expect(r.stderr).toContain('v0.70.1');
+    expect(r.stderr).not.toMatch(/global devkit/);
+  });
+
+  it('omits the pin cleanly when .devkit/config.json carries no devkitRef', () => {
+    const r = globalFixture().stop();
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain('Fix: upgrade the global devkit on PATH.');
+    expect(r.stderr).not.toContain('devkitRef');
+  });
+
+  it('a session with no recorded edits stays silent even on a stale bin (ledger gate runs first)', () => {
+    const { root, tmp, env } = globalFixture();
+    const r = runHook(DECISION_HOOK, root, { session_id: 's9' }, tmp, env);
+    expect(r.status).toBe(0);
+    expect(r.stderr).toBe('');
+  });
+
+  it('handles a global bin whose directory path contains a space', () => {
+    const { binDir, stop } = globalFixture('Application Support');
+    const r = stop();
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain(join(binDir, 'guard-decisions'));
+    expect(stop().status).toBe(0);
+  });
+
+  it('a notice that never reached a reader (EPIPE) is not snoozed — the next stop warns', async () => {
+    const { root, tmp, env, stop } = globalFixture();
+    const code = await new Promise((resolve) => {
+      const c = spawn('bash', [DECISION_HOOK], {
+        env: {
+          ...process.env,
+          CLAUDE_PROJECT_DIR: root,
+          TMPDIR: tmp,
+          GUARD_NO_LOG: '',
+          FRINK_NO_LOG: '',
+          ...env,
+        },
+      });
+      c.stderr.destroy(); // the harness stopped reading stderr
+      c.on('close', (status) => resolve(status));
+      c.stdin.end(JSON.stringify({ session_id: 's1' }));
+    });
+    expect(code).not.toBe(2);
+    const r = stop();
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain('--files');
+  });
+
+  it('fails OPEN when the snooze marker cannot be written — never a block on every stop', () => {
+    const { tmp, stop } = globalFixture();
+    // A FILE where the snooze directory should be: the marker write fails after the notice.
+    writeFileSync(join(tmp, 'devkit-decision-snooze'), 'not a dir');
+    expect(stop().status).toBe(0);
+    expect(stop().status).toBe(0);
+  });
+
+  it('a CURRENT bin is never mistaken for stale when every pair falls outside the ledger', () => {
+    const root = mkTmp('sess-stale-');
+    write(root, 'src/mine.ts');
+    writeExec(
+      root,
+      'node_modules/.bin/guard-decisions',
+      '#!/bin/sh\nprintf "caching\\tsrc/other.ts\\n"\n',
+    );
+    const r = runHook(
+      DECISION_HOOK,
+      root,
+      { session_id: 's1' },
       seedSessionLedger(root, 's1', ['src/mine.ts']),
     );
     expect(r.status).toBe(0);

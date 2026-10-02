@@ -9,7 +9,8 @@
  * blocked: the shell settled that and published it on this ship's ship_result row, which this
  * reader consumes, so the two can never disagree.
  */
-import { closeSync, fstatSync, openSync, readSync } from 'node:fs';
+import { scanBackward } from './tail.mts';
+import { readBranchHistory, renderTrend, summariseTrend } from './trend.mts';
 
 /**
  * The fields this digest reads off a gate event, and only those. The sink is an append-only stream
@@ -73,14 +74,9 @@ interface Attributable {
 
 /** The ship_attempt row opens this attempt's span, so finding it bounds the backward read exactly. */
 const ATTEMPT = 'ship_attempt';
-const CHUNK = 256 * 1024;
-/** Backstop for a sink whose ship_attempt is missing (a hand-set DEVKIT_SHIP_ID, a rotated file). */
-const MAX_READ = 16 * 1024 * 1024;
 const DETAIL_CHARS = 140;
 /** The parallel judge's gate name — a `gate_result` row, not a fleet `review_result`. */
 const COMPLETENESS = 'completeness';
-const NEWLINE = 0x0a;
-const EMPTY = Buffer.alloc(0);
 /** Caps on what one terminus prints: past these the digest is the wall of text it replaces. */
 const MAX_FINDINGS = 8;
 const MAX_MISSING = 3;
@@ -110,64 +106,13 @@ function parseEvent(line: string, shipId: string): GateEvent | undefined {
  * without it a digest blends repos. Never throws: an absent, unreadable or torn sink yields [].
  */
 export function readShipEvents(sink: string, shipId: string): GateEvent[] {
-  if (!sink || !shipId) return [];
-  let fd: number | undefined;
-  try {
-    fd = openSync(sink, 'r');
-    let pos = fstatSync(fd).size;
-    let read = 0;
-    // The partial FIRST line of the region already scanned — completed by the chunk read next,
-    // which sits EARLIER in the file.
-    let carry = EMPTY;
-    const perChunk: GateEvent[][] = [];
-    while (pos > 0 && read < MAX_READ) {
-      const len = Math.min(CHUNK, pos);
-      pos -= len;
-      const buf = Buffer.alloc(len);
-      readSync(fd, buf, 0, len, pos);
-      read += len;
-      const combined = carry.length > 0 ? Buffer.concat([buf, carry]) : buf;
-
-      // Split on the newline BYTE rather than decoding the whole accumulation each pass: 0x0A can
-      // never occur inside a UTF-8 multi-byte sequence, so this cannot cut a codepoint, and the
-      // scan stays linear in the bytes read instead of quadratic in the chunks.
-      let text: string;
-      const cut = pos === 0 ? -1 : combined.indexOf(NEWLINE);
-      if (pos === 0) {
-        // Offset 0 IS a line boundary — the file begins here, so nothing is left dangling.
-        text = combined.toString('utf8');
-        carry = EMPTY;
-      } else if (cut === -1) {
-        carry = combined;
-        text = '';
-      } else {
-        carry = combined.subarray(0, cut);
-        text = combined.subarray(cut + 1).toString('utf8');
-      }
-
-      const rows: GateEvent[] = [];
-      for (const line of text.split('\n')) {
-        const event = line ? parseEvent(line, shipId) : undefined;
-        if (event) rows.push(event);
-      }
-      perChunk.unshift(rows);
-      // Stop at MY attempt, never at whichever attempt the scan meets first. The default sink is
-      // per-MACHINE, so two panes shipping different repos at once interleave in it; breaking on a
-      // stranger's row truncates this run's findings to whatever happened to sit after it.
-      if (rows.some((e) => e.type === ATTEMPT)) break;
-    }
-    return perChunk.flat();
-  } catch {
-    return [];
-  } finally {
-    if (fd !== undefined) {
-      try {
-        closeSync(fd);
-      } catch {
-        /* nothing left to do with a descriptor we cannot close */
-      }
-    }
-  }
+  if (!shipId) return [];
+  return scanBackward(
+    sink,
+    (line) => parseEvent(line, shipId),
+    // Stop at MY attempt, not the first one met: two repos' ships interleave in the per-machine sink.
+    (kept) => kept.some((e) => e.type === ATTEMPT),
+  );
 }
 
 const oneLine = (text: string | undefined = ''): string => {
@@ -469,6 +414,14 @@ export function render(rows: DigestRow[], logPath = ''): string {
 // so this prints nothing rather than adding noise to a run that already failed.
 if (/[/\\]gate-digest\.m[jt]s$/.test(process.argv[1] ?? '') && process.argv[2] === 'digest') {
   const [sink = '', shipId = '', logPath = ''] = process.argv.slice(3);
-  const text = render(summarise(readShipEvents(sink, shipId), shipId), logPath);
+  // The ship exports its own repo/branch (commit-with-gate-capture.sh); unset = no trend line.
+  const { DEVKIT_SHIP_REPO: repo = '', DEVKIT_SHIP_BRANCH: branch = '' } = process.env;
+  const key = { shipId, repo, branch };
+  const text = [
+    render(summarise(readShipEvents(sink, shipId), shipId), logPath),
+    renderTrend(summariseTrend(readBranchHistory(sink, key), key)),
+  ]
+    .filter(Boolean)
+    .join('\n');
   if (text) process.stdout.write(`${text}\n`);
 }

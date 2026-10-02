@@ -12,6 +12,7 @@ import {
   runStagedStructureGate,
   runStructureGate,
 } from '../run.mts';
+import { withUncompiledWalls } from '../verdict.mts';
 
 const DEVKIT_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
@@ -75,6 +76,49 @@ describe('guard-structure gate — zero consumer deps', () => {
     const result = await runStructureGate(root);
     expect(result.code).toBe(2);
     expect(result.text).toContain('did NOT run');
+  });
+
+  // sc-3148: nothing compiles structure.walls yet, so a declared wall must surface, never pass clean.
+  describe('declared but uncompiled structure.walls', () => {
+    const lib = {
+      name: 'lib',
+      root: 'src',
+      sourceExtensions: ['ts'],
+      grammar: { files: ['{pascal}'] },
+    };
+    const wall = { pattern: 'src/**', allowImportsFrom: ['src/**'] };
+
+    it('a conforming tree with walls is could-not-run naming the walls, not clean', async () => {
+      const root = repo({ scanRoots: ['src'], structure: { trees: [lib], walls: [wall, wall] } });
+      write(root, 'src/Button.ts');
+      const result = await runStructureGate(root);
+      expect(result.code).toBe(2);
+      expect(result.text).toContain('structure.walls declares 2 import wall(s)');
+    });
+
+    it('a placement violation still blocks, and the walls notice rides along', async () => {
+      const root = repo({ scanRoots: ['src'], structure: { trees: [lib], walls: [wall] } });
+      write(root, 'src/bad-name.ts');
+      const result = await runStructureGate(root);
+      expect(result.code).toBe(1);
+      expect(result.text).toContain('bad-name.ts');
+      expect(result.text).toContain('structure.walls');
+    });
+
+    it('a config that turns unreadable after the legs ran keeps their violation (code 1)', () => {
+      const root = repo('{ not json');
+      const found = { code: 1 as const, errorCount: 2, text: 'src/bad-name.ts' };
+      const result = withUncompiledWalls(root, found);
+      expect(result.code).toBe(1);
+      expect(result.errorCount).toBe(2);
+      expect(result.text).toContain('did NOT run');
+    });
+
+    it('an explicitly empty walls list stays clean', async () => {
+      const root = repo({ scanRoots: ['src'], structure: { trees: [lib], walls: [] } });
+      write(root, 'src/Button.ts');
+      expect((await runStructureGate(root)).code).toBe(0);
+    });
   });
 
   it('exit 2 when no structure trees are declared (e.g. the generic guard.config)', async () => {

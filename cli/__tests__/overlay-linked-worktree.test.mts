@@ -6,16 +6,20 @@
 import { execFileSync } from 'node:child_process';
 import {
   chmodSync,
+  cpSync,
   existsSync,
   lstatSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
+  readlinkSync,
   realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import cleanRun from '../commands/clean.mts';
 import doctorRun from '../commands/doctor.mts';
@@ -31,33 +35,68 @@ import {
   worktrees,
 } from '../lib/husky/overlay/overlay-home.mts';
 import { captureOrigHooksPath } from '../lib/overlay.mts';
+import { installGlobalHook } from '../lib/overlay-global-hook.mts';
+import { shQuote } from '../lib/ship/redact-secrets.mts';
 import { overlayHooksPathRejection } from '../lib/ship/review/setup/overlay-hooks-path.mts';
-import { rootRegistry, testExecFileSync } from './_helpers.mts';
+import { devkitHome, rootRegistry, testExecFileSync } from './_helpers.mts';
 
 const { mkTmp, cleanup } = rootRegistry();
 
-// No gates selected: the hook's only observable effect is chaining to the team hook's marker.
-const SELECTION = applyOverlayConstraints({
-  ...defaultSelection(),
-  biome: false,
-  skills: false,
-  agents: false,
-  lineGrowth: false,
-  guards: [],
-});
+// The recommended guards, so the install writes a real selection's exclude lines; every commit here is
+// empty, so the hook's observable effect is chaining to the team hook's marker.
+const SELECTION = applyOverlayConstraints(
+  {
+    ...defaultSelection(),
+    biome: false,
+    skills: false,
+    agents: false,
+    lineGrowth: false,
+  },
+  'react-app',
+);
 
 const git = (cwd: string, ...args: string[]) =>
   execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
 
 let marker = '';
-const commit = (cwd: string, message: string) =>
+let home = '';
+const hookEnv = (env: Record<string, string> = {}) => ({
+  ...process.env,
+  HOME: home,
+  DK_TEST_MARKER: marker,
+  DEVKIT_NO_TELEMETRY: '1',
+  ...env,
+});
+const commit = (cwd: string, message: string, env?: Record<string, string>) =>
   testExecFileSync('git', ['commit', '-q', '--allow-empty', '-m', message], {
     cwd,
     encoding: 'utf8',
-    env: { ...process.env, DK_TEST_MARKER: marker, DEVKIT_NO_TELEMETRY: '1' },
+    env: hookEnv(env),
   });
+// A plain commit now persists its gate output (sc-2755). Clean keeps a .devkit that still holds a
+// gate log — the same rule that keeps ship logs — so "projection gone" means nothing else remains.
+const projectionLeftovers = (dir: string) =>
+  existsSync(join(dir, '.devkit'))
+    ? readdirSync(join(dir, '.devkit')).filter(
+        (f) => !/^last-commit-gates-.*\.log$/.test(f) && f !== '.gitignore',
+      )
+    : [];
+
+/** The stderr of a commit the hook must block. */
+function blockedCommit(cwd: string, env?: Record<string, string>): string {
+  try {
+    commit(cwd, 'blocked', env);
+  } catch (e) {
+    return e instanceof Error && 'stderr' in e ? String(e.stderr) : String(e);
+  }
+  throw new Error(`the commit in ${cwd} was not blocked`);
+}
 const markerLines = () =>
   existsSync(marker) ? readFileSync(marker, 'utf8').trim().split('\n') : [];
+const devkitCalls = () => {
+  const log = join(home, 'devkit-calls');
+  return existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n') : [];
+};
 
 // The team's committed husky hook records which checkout it ran in.
 function workRepo() {
@@ -84,6 +123,51 @@ const addWorktree = (root: string, ...flags: string[]) => {
   return wt;
 };
 
+const exclude = (root: string, ...lines: string[]) =>
+  writeFileSync(join(root, '.git', 'info', 'exclude'), `\n${lines.join('\n')}\n`, { flag: 'a' });
+
+// The consumer-owned gate inputs a home holds, each git-ignored by the consumer's own lines.
+function withGateInputs(root: string) {
+  writeFileSync(join(root, 'guard.config.json'), '{"indexPath": ".search-code/index.db"}\n');
+  writeFileSync(join(root, '.fallowrc.jsonc'), '{}\n');
+  mkdirSync(join(root, 'docs', 'decisions'), { recursive: true });
+  writeFileSync(join(root, 'docs', 'decisions', 'a.md'), '# a\n');
+  mkdirSync(join(root, '.search-code'));
+  writeFileSync(join(root, '.search-code', 'index.db'), 'db');
+  writeFileSync(join(root, '.co-occurrence-allowlist.json'), '{}\n');
+  exclude(root, '/.fallowrc.jsonc', '/docs/*', '.search-code', '/.co-occurrence-allowlist.json');
+}
+
+/** Run `fn` with the global husky shim's config dir at `xdg`, and return what it returns. */
+async function withXdg<T>(xdg: string, fn: () => T | Promise<T>): Promise<T> {
+  const saved = process.env.XDG_CONFIG_HOME;
+  process.env.XDG_CONFIG_HOME = xdg;
+  try {
+    return await fn();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_CONFIG_HOME;
+    else process.env.XDG_CONFIG_HOME = saved;
+  }
+}
+
+/** Install the global husky shim into a fresh XDG config dir, and return that dir. */
+async function installShim(): Promise<string> {
+  const xdg = mkTmp('overlay-xdg-');
+  await withXdg(xdg, installGlobalHook);
+  return xdg;
+}
+
+/** What `husky` (index.js) does on every install: its runner and stubs, and core.hooksPath. */
+function huskyReclaim(root: string) {
+  const runner = join(root, '.husky', '_');
+  mkdirSync(runner, { recursive: true });
+  cpSync(join(dirname(fileURLToPath(import.meta.resolve('husky'))), 'husky'), join(runner, 'h'));
+  for (const hook of ['pre-commit', 'commit-msg'])
+    writeFileSync(join(runner, hook), '#!/usr/bin/env sh\n. "$(dirname "$0")/h"', { mode: 0o755 });
+  writeFileSync(join(runner, '.gitignore'), '*');
+  git(root, 'config', 'core.hooksPath', '.husky/_');
+}
+
 const ORIGINAL = { global: process.env.GIT_CONFIG_GLOBAL, system: process.env.GIT_CONFIG_SYSTEM };
 beforeEach(() => {
   vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -91,6 +175,7 @@ beforeEach(() => {
   process.env.GIT_CONFIG_GLOBAL = '/dev/null';
   process.env.GIT_CONFIG_SYSTEM = '/dev/null';
   marker = join(mkTmp('overlay-marker-'), 'ran');
+  home = devkitHome(mkTmp('overlay-home-'));
 });
 afterEach(() => {
   vi.restoreAllMocks();
@@ -118,6 +203,24 @@ describe('overlay hooks in linked worktrees (sc-4157)', () => {
     expect(lstatSync(join(wt, '.devkit', 'config.json')).isSymbolicLink()).toBe(true);
     expect(lstatSync(join(wt, 'eslint.config.devkit.mjs')).isFile()).toBe(true);
     expect(git(wt, 'status', '--porcelain')).toBe('');
+    // One projector: the hook delegates to it rather than linking or copying on its own.
+    expect(readFileSync(join(root, '.devkit', 'hooks', 'pre-commit'), 'utf8')).not.toMatch(
+      /\bln -s\b|\bcp -R\b/,
+    );
+  });
+
+  it('a linked-worktree commit runs the selected gates from the global devkit install', async () => {
+    const root = workRepo();
+    const selection = { ...SELECTION, guards: [...SELECTION.guards, 'review'] };
+    await applyInit(root, { stack: 'react-app', selection, overlay: true, devkitRef: 'v0.9.0' });
+    const wt = addWorktree(root);
+
+    commit(wt, 'gated in the worktree');
+
+    const calls = readFileSync(join(home, 'gate-calls'), 'utf8');
+    expect(calls).toContain('guard-deterministic --hook');
+    expect(calls).toContain('guard-review --gate');
+    expect(markerLines()).toEqual([realpathSync(wt)]);
   });
 
   it('a --no-checkout worktree is gated too, since linking happens at commit time', async () => {
@@ -155,7 +258,7 @@ describe('overlay hooks in linked worktrees (sc-4157)', () => {
 
     await cleanRun(['--yes'], root);
 
-    expect(existsSync(join(wt, '.devkit'))).toBe(false);
+    expect(projectionLeftovers(wt)).toEqual([]);
     expect(existsSync(join(wt, 'eslint.config.devkit.mjs'))).toBe(false);
     expect(git(wt, 'status', '--porcelain')).toBe('');
     expect(git(root, 'config', '--get', 'core.hooksPath')).toBe('.husky/_');
@@ -252,7 +355,7 @@ describe('overlay hooks in linked worktrees (sc-4157)', () => {
 
     await cleanRun(['--yes'], root);
 
-    expect(existsSync(join(nested, '.devkit'))).toBe(false);
+    expect(projectionLeftovers(nested)).toEqual([]);
   });
 
   it('a real .devkit holding only a LINKED config is borrowed, so commands run in the home', async () => {
@@ -361,7 +464,7 @@ describe('overlay hooks in linked worktrees (sc-4157)', () => {
     expect(readFileSync(join(wt, 'eslint.config.devkit.mjs'), 'utf8')).toBe(
       '// the worktree’s own\n',
     );
-    expect(existsSync(join(wt, '.devkit'))).toBe(false);
+    expect(projectionLeftovers(wt)).toEqual([]);
   });
 
   it('clean keeps a baseline the branch changed and lists it, but drops untouched copies', async () => {
@@ -379,6 +482,26 @@ describe('overlay hooks in linked worktrees (sc-4157)', () => {
       '{"a.ts":300}\n',
     );
     expect(existsSync(join(wt, 'eslint.config.devkit.mjs'))).toBe(false);
+  });
+
+  it('clean removes a copied directory that only a `dir/` line ignores', async () => {
+    const root = workRepo();
+    await initOverlay(root);
+    mkdirSync(join(root, 'fallow-baselines'));
+    writeFileSync(join(root, 'fallow-baselines', 'health.json'), '{}\n');
+    const exclude = join(root, '.git', 'info', 'exclude');
+    const lines = readFileSync(exclude, 'utf8').split('\n');
+    writeFileSync(
+      exclude,
+      `${lines.filter((line) => line !== 'fallow-baselines').join('\n')}\nfallow-baselines/\n`,
+    );
+    const wt = addWorktree(root);
+    await doctorRun(['--fix'], root);
+    expect(lstatSync(join(wt, 'fallow-baselines')).isDirectory()).toBe(true);
+
+    await cleanRun(['--yes'], root);
+
+    expect(existsSync(join(wt, 'fallow-baselines'))).toBe(false);
   });
 
   it('doctor --fix restores a copy a worktree lost', async () => {
@@ -407,7 +530,7 @@ describe('overlay hooks in linked worktrees (sc-4157)', () => {
     expect(chainWord('.githooks/$(rm -rf ~)')).toBe("'.githooks/$(rm -rf ~)'");
   });
 
-  it('a copy that fails leaves the worktree unprojected, so the next commit retries', async () => {
+  it('a projection that fails blocks the commit with its remedy, and the next commit retries', async () => {
     const root = workRepo();
     await initOverlay(root);
     mkdirSync(join(root, 'fallow-baselines'));
@@ -418,9 +541,9 @@ describe('overlay hooks in linked worktrees (sc-4157)', () => {
     const wt = addWorktree(root);
 
     try {
-      commit(wt, 'copy fails');
+      expect(blockedCommit(wt)).toContain('could not repair the projection');
       expect(existsSync(join(wt, 'fallow-baselines'))).toBe(false);
-      expect(existsSync(join(wt, '.devkit', 'config.json'))).toBe(false);
+      expect(markerLines()).toEqual([]);
     } finally {
       chmodSync(unreadable, 0o644);
     }
@@ -428,6 +551,153 @@ describe('overlay hooks in linked worktrees (sc-4157)', () => {
 
     expect(readFileSync(join(wt, 'fallow-baselines', 'health.json'), 'utf8')).toBe('{}\n');
     expect(lstatSync(join(wt, '.devkit', 'config.json')).isSymbolicLink()).toBe(true);
+    expect(markerLines()).toEqual([realpathSync(wt)]);
+  });
+
+  it('under the global husky shim a failed projection blocks without running the repo hook', async () => {
+    const root = workRepo();
+    await initOverlay(root);
+    mkdirSync(join(root, 'fallow-baselines'));
+    const unreadable = join(root, 'fallow-baselines', 'health.json');
+    writeFileSync(unreadable, '{}\n');
+    chmodSync(unreadable, 0o000);
+    writeFileSync(join(root, '.git', 'info', 'exclude'), '\nfallow-baselines\n', { flag: 'a' });
+    const wt = addWorktree(root);
+
+    try {
+      expect(() =>
+        testExecFileSync('git', ['hook', 'run', 'pre-commit'], {
+          cwd: wt,
+          encoding: 'utf8',
+          env: hookEnv({ DEVKIT_VIA_HUSKY_INIT: '1' }),
+        }),
+      ).toThrow();
+    } finally {
+      chmodSync(unreadable, 0o644);
+    }
+    // husky's own _/h runs the repo hook after the shim; the overlay hook must not run it too.
+    expect(markerLines()).toEqual([]);
+  });
+
+  it('without devkit on PATH every commit fails closed, in the home and in a linked worktree', async () => {
+    const root = workRepo();
+    await initOverlay(root);
+    const wt = addWorktree(root);
+    const gitDir = dirname(execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }));
+    const PATH = `${gitDir}:/usr/bin:/bin`;
+    expect(() =>
+      execFileSync('sh', ['-c', 'command -v guard-deterministic'], { env: { PATH } }),
+    ).toThrow();
+    const bare = { PATH, HOME: mkTmp('overlay-no-devkit-') };
+
+    for (const checkout of [root, wt])
+      expect(blockedCommit(checkout, bare)).toContain('devkit: not installed on PATH');
+    expect(markerLines()).toEqual([]);
+  });
+
+  it('a complete worktree commits without the projector, and a gate input the home gains is projected', async () => {
+    const root = workRepo();
+    await initOverlay(root);
+    const wt = addWorktree(root);
+
+    commit(wt, 'project it');
+    expect(devkitCalls()).toHaveLength(1);
+    commit(wt, 'complete');
+    expect(devkitCalls()).toHaveLength(1);
+
+    mkdirSync(join(root, '.devkit', 'baselines', 'structure'), { recursive: true });
+    writeFileSync(join(root, '.devkit', 'baselines', 'structure', 'app.mjs'), 'export {};\n');
+    commit(wt, 'a new baseline');
+    rmSync(join(wt, 'eslint.config.devkit.mjs'));
+    commit(wt, 'a lost copy');
+
+    expect(devkitCalls()).toHaveLength(3);
+    expect(lstatSync(join(wt, '.devkit', 'baselines', 'structure', 'app.mjs')).isFile()).toBe(true);
+    expect(lstatSync(join(wt, 'eslint.config.devkit.mjs')).isFile()).toBe(true);
+  });
+
+  it('under the global husky shim a projected worktree that lost an input is projected again', async () => {
+    const root = workRepo();
+    await initOverlay(root);
+    const wt = addWorktree(root);
+    commit(wt, 'project it');
+    rmSync(join(wt, '.devkit', 'config.json'));
+    rmSync(join(wt, 'eslint.config.devkit.mjs'));
+    const xdg = await installShim();
+    // husky's _/h sources init.sh from a script named after the hook, in the committing checkout.
+    const driver = join(mkTmp('overlay-husky-'), 'pre-commit');
+    writeFileSync(driver, `. ${shQuote(join(xdg, 'husky', 'init.sh'))}\n`);
+
+    testExecFileSync('sh', [driver], { cwd: wt, encoding: 'utf8', env: hookEnv() });
+
+    expect(devkitCalls()).toHaveLength(2);
+    expect(lstatSync(join(wt, '.devkit', 'config.json')).isSymbolicLink()).toBe(true);
+    expect(lstatSync(join(wt, 'eslint.config.devkit.mjs')).isFile()).toBe(true);
+  });
+
+  it.each([
+    ['the commit-msg judges', [...SELECTION.guards, 'review'], 1],
+    ['a pass-through commit-msg', SELECTION.guards.filter((g) => g !== 'review'), 0],
+  ])(
+    'under the global husky shim a plain commit runs %s once and the repo hooks once',
+    async (_, guards, judged) => {
+      const root = workRepo();
+      writeFileSync(
+        join(root, '.husky', 'commit-msg'),
+        '#!/bin/sh\necho commit-msg >> "$DK_TEST_MARKER"\n',
+      );
+      await applyInit(root, {
+        stack: 'react-app',
+        selection: { ...SELECTION, guards },
+        overlay: true,
+        devkitRef: 'v0.9.0',
+      });
+      huskyReclaim(root);
+
+      commit(root, 'plain', { XDG_CONFIG_HOME: await installShim() });
+
+      expect(markerLines()).toEqual([realpathSync(root), 'commit-msg']);
+      const calls = readFileSync(join(home, 'gate-calls'), 'utf8');
+      expect(calls.match(/^guard-review completeness --gate/gm) ?? []).toHaveLength(judged);
+    },
+  );
+
+  it('doctor names a shim an older devkit wrote, and --fix refreshes it', async () => {
+    const root = workRepo();
+    await initOverlay(root);
+    const xdg = await installShim();
+    const init = join(xdg, 'husky', 'init.sh');
+    const current = readFileSync(init, 'utf8');
+    writeFileSync(init, current.replace(/commit-msg/g, 'pre-commit'));
+
+    await withXdg(xdg, () => doctorRun([], root));
+    expect(vi.mocked(console.log).mock.calls.flat().join('\n')).toContain('predates this devkit');
+    await withXdg(xdg, () => doctorRun(['--fix'], root));
+    expect(readFileSync(init, 'utf8')).toBe(current);
+  });
+
+  it('review’s private worktree and ship’s gate worktree run their own hook and are never projected', async () => {
+    const root = workRepo();
+    await initOverlay(root);
+    withGateInputs(root);
+    const review = addWorktree(root);
+    cpSync(join(root, '.devkit'), join(review, '.devkit'), { recursive: true });
+    const ship = addWorktree(root);
+    symlinkSync(join(root, '.devkit'), join(ship, '.devkit'));
+    const runHook = (wt: string, hooksPath: string) =>
+      testExecFileSync('git', ['-c', `core.hooksPath=${hooksPath}`, 'hook', 'run', 'pre-commit'], {
+        cwd: wt,
+        encoding: 'utf8',
+        env: hookEnv({ DEVKIT_SHIP: '1' }),
+      });
+
+    runHook(review, '.devkit/hooks');
+    runHook(ship, join(ship, '.devkit', 'hooks'));
+
+    expect(devkitCalls()).toEqual([]);
+    for (const wt of [review, ship]) expect(existsSync(join(wt, 'guard.config.json'))).toBe(false);
+    expect(lstatSync(join(ship, '.devkit')).isSymbolicLink()).toBe(true);
+    expect(markerLines()).toEqual([realpathSync(review), realpathSync(ship)]);
   });
 
   it('clean never deletes the home’s baselines through a legacy linked .devkit', async () => {
@@ -443,6 +713,180 @@ describe('overlay hooks in linked worktrees (sc-4157)', () => {
     expect(readFileSync(join(root, '.devkit', 'baselines', 'size-lines.json'), 'utf8')).toBe(
       '{}\n',
     );
-    expect(existsSync(join(wt, '.devkit'))).toBe(false);
+    expect(() => lstatSync(join(wt, '.devkit'))).toThrow(); // the link itself is gone
+  });
+
+  it('doctor fails until a fresh worktree is projected, and --fix projects every registry input', async () => {
+    const root = workRepo();
+    await initOverlay(root);
+    withGateInputs(root);
+    const wt = addWorktree(root);
+
+    expect(await doctorRun([], root)).toBe(1);
+    expect(await doctorRun(['--fix'], root)).toBe(0);
+
+    for (const rel of [
+      '.devkit/config.json',
+      'guard.config.json',
+      '.fallowrc.jsonc',
+      'docs/decisions',
+      '.search-code/index.db',
+    ])
+      expect(lstatSync(join(wt, rel)).isSymbolicLink()).toBe(true);
+    expect(lstatSync(join(wt, '.co-occurrence-allowlist.json')).isFile()).toBe(true);
+    expect(lstatSync(join(wt, 'eslint.config.devkit.mjs')).isFile()).toBe(true);
+    expect(git(wt, 'status', '--porcelain')).toBe('');
+  });
+
+  it('a directory ignored only by a `dir/` line is copied when branch-local and reported when linked', async () => {
+    const root = workRepo();
+    await initOverlay(root);
+    writeFileSync(join(root, 'guard.config.json'), '{}\n');
+    for (const dir of ['docs/decisions', '.fallow', 'fallow-baselines']) {
+      mkdirSync(join(root, dir), { recursive: true });
+      writeFileSync(join(root, dir, 'a'), 'a\n');
+    }
+    const excludeFile = join(root, '.git', 'info', 'exclude');
+    const lines = readFileSync(excludeFile, 'utf8').replace(/^fallow-baselines$/m, '');
+    writeFileSync(excludeFile, `${lines}\ndocs/decisions/\n.fallow/\n`);
+    const wt = addWorktree(root);
+
+    expect(await doctorRun([], root)).toBe(1);
+    expect(await doctorRun(['--fix'], root)).toBe(1);
+
+    expect(lstatSync(join(wt, 'fallow-baselines')).isDirectory()).toBe(true);
+    for (const rel of ['docs/decisions', '.fallow']) expect(existsSync(join(wt, rel))).toBe(false);
+    expect(vi.mocked(console.log).mock.calls.flat().join('\n')).toContain(
+      '.fallow, docs/decisions cannot be linked from the overlay',
+    );
+    expect(git(wt, 'status', '--porcelain')).toBe('');
+
+    exclude(root, '/docs/decisions', '.fallow');
+    expect(await doctorRun(['--fix'], root)).toBe(0);
+    for (const rel of ['docs/decisions', '.fallow'])
+      expect(lstatSync(join(wt, rel)).isSymbolicLink()).toBe(true);
+    expect(git(wt, 'status', '--porcelain')).toBe('');
+  });
+
+  it('a projected worktree that lacks guard.config.json is a gap, and --fix links it', async () => {
+    const root = workRepo();
+    await initOverlay(root);
+    writeFileSync(join(root, 'guard.config.json'), '{}\n');
+    const wt = addWorktree(root);
+    commit(wt, 'link it');
+    rmSync(join(wt, 'guard.config.json'));
+
+    expect(await doctorRun([], root)).toBe(1);
+    await doctorRun(['--fix'], root);
+
+    expect(lstatSync(join(wt, 'guard.config.json')).isSymbolicLink()).toBe(true);
+  });
+
+  it('a worktree with a legacy linked .devkit and no guard.config.json is a gap, and --fix links it', async () => {
+    const root = workRepo();
+    await initOverlay(root);
+    writeFileSync(join(root, 'guard.config.json'), '{}\n');
+    const wt = addWorktree(root);
+    symlinkSync(join(root, '.devkit'), join(wt, '.devkit'));
+
+    expect(await doctorRun([], root)).toBe(1);
+    expect(await doctorRun(['--fix'], root)).toBe(0);
+
+    expect(lstatSync(join(wt, '.devkit')).isSymbolicLink()).toBe(false);
+    expect(lstatSync(join(wt, 'guard.config.json')).isSymbolicLink()).toBe(true);
+  });
+
+  it('doctor leaves a sibling checkout with its own overlay unprojected', async () => {
+    const root = workRepo();
+    await initOverlay(root);
+    writeFileSync(join(root, 'guard.config.json'), '{}\n');
+    const wt = addWorktree(root);
+    mkdirSync(join(wt, '.devkit', 'hooks'), { recursive: true });
+    writeFileSync(join(wt, '.devkit', 'hooks', 'pre-commit'), '#!/bin/sh\n', { mode: 0o755 });
+
+    expect(await doctorRun([], root)).toBe(0);
+    expect(existsSync(join(wt, 'guard.config.json'))).toBe(false);
+  });
+
+  it('projection never links the home’s per-checkout runtime state', async () => {
+    const root = workRepo();
+    await initOverlay(root);
+    const state = [
+      'last-ship-gates-x.log',
+      'comment-firewall-receipts.json',
+      'comment-firewall-receipts.json.generation',
+    ];
+    for (const name of state) writeFileSync(join(root, '.devkit', name), 'x\n');
+    mkdirSync(join(root, '.devkit', 'review-runs'));
+    const wt = addWorktree(root);
+
+    await doctorRun(['--fix'], root);
+
+    expect(lstatSync(join(wt, '.devkit', 'config.json')).isSymbolicLink()).toBe(true);
+    for (const name of [...state, 'review-runs'])
+      expect(existsSync(join(wt, '.devkit', name))).toBe(false);
+  });
+
+  it('a hand-made decisions link in the worktree is left as it is', async () => {
+    const root = workRepo();
+    await initOverlay(root);
+    withGateInputs(root);
+    const wt = addWorktree(root);
+    const elsewhere = mkTmp('overlay-own-decisions-');
+    mkdirSync(join(wt, 'docs'), { recursive: true });
+    symlinkSync(elsewhere, join(wt, 'docs', 'decisions'));
+
+    expect(await doctorRun(['--fix'], root)).toBe(0);
+
+    expect(readlinkSync(join(wt, 'docs', 'decisions'))).toBe(elsewhere);
+    expect(await doctorRun([], root)).toBe(0);
+  });
+
+  it('clean unprojects every registry input and keeps a copy the branch changed', async () => {
+    const root = workRepo();
+    await initOverlay(root);
+    withGateInputs(root);
+    const wt = addWorktree(root);
+    commit(wt, 'link it');
+    writeFileSync(join(wt, '.co-occurrence-allowlist.json'), '{"branch": true}\n');
+
+    await cleanRun(['--yes'], root);
+
+    for (const rel of ['.fallowrc.jsonc', 'docs/decisions'])
+      expect(existsSync(join(wt, rel))).toBe(false);
+    expect(projectionLeftovers(wt)).toEqual([]);
+    expect(readFileSync(join(wt, '.co-occurrence-allowlist.json'), 'utf8')).toBe(
+      '{"branch": true}\n',
+    );
+  });
+
+  it('clean never deletes a gate input the worktree’s branch tracks', async () => {
+    const root = workRepo();
+    writeFileSync(join(root, '.co-occurrence-allowlist.json'), '{}\n');
+    git(root, 'add', '.co-occurrence-allowlist.json');
+    commit(root, 'track the allowlist');
+    await initOverlay(root);
+    const wt = addWorktree(root);
+    commit(wt, 'link it');
+
+    await cleanRun(['--yes'], root);
+
+    expect(git(wt, 'status', '--porcelain')).toBe('');
+  });
+
+  it('clean unprojects worktrees even when guard.config.json does not parse', async () => {
+    const root = workRepo();
+    await initOverlay(root);
+    const wt = addWorktree(root);
+    commit(wt, 'link it');
+    rmSync(addWorktree(root), { recursive: true, force: true }); // pruned: its path is gone
+    writeFileSync(join(root, 'guard.config.json'), '{ not json');
+
+    expect(await cleanRun(['--yes'], root)).toBe(0);
+
+    expect(projectionLeftovers(wt)).toEqual([]);
+    expect(vi.mocked(console.log).mock.calls.flat().join('\n')).toMatch(
+      /not valid JSON.* — links to the paths it configures .* delete them by hand/,
+    );
   });
 });

@@ -11,6 +11,7 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
+  FALLOW_CONFIG_FILES,
   type FallowPathMapping,
   parseDiffHunks,
   rewriteFallowBaseline,
@@ -57,12 +58,6 @@ const METADATA_FILE = 'metadata.json';
 const SOURCE_EXT_RE = /\.(?:[cm]?[jt]sx?)$/i;
 const NEWLINE_RE = /\r?\n/;
 const NUL = '\0';
-const FALLOW_CONFIG_FILES = [
-  '.fallowrc.json',
-  '.fallowrc.jsonc',
-  'fallow.toml',
-  '.fallow.toml',
-] as const;
 
 function fail(message: string): never {
   throw new Error(`devkit review baseline: ${message}`);

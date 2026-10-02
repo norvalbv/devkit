@@ -15,6 +15,12 @@
     "skills/**/scripts/*.mjs", // skill scripts — invoked by the agent harness, never imported
     "gate-engine/**/eval/*.mts", // dev eval harnesses
     "gate-engine/**/bench.mts", // dev benchmarks
+    // Test files fallow's vitest plugin cannot reach: it reads only vitest.config.* / vite.config.*,
+    // so vitest.e2e.config.mjs is never opened, and vitest.config.mjs's e2e/ include is not applied.
+    // cli/__tests__/fallowrc-entries.test.mts keeps these in step with both configs.
+    "e2e/**/*.e2e.test.mts",
+    "e2e/lib/global-setup.mts", // vitest.e2e.config.mjs globalSetup
+    "e2e/lib/**/*.unit.test.mts",
     "eslint.config.mjs", // loaded by eslint; compiles the structure rule from guard.config.json
     ".devkit/baselines/**/*.mjs", // generated grandfather lists — loaded through computed dynamic imports
     ".devkit/structure/*.mjs" // hand-authored structure exceptions loaded through computed dynamic imports

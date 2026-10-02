@@ -6,12 +6,12 @@
  *     ship-mode identities are two incomparable namespaces and every cross-mode rate is a blend.
  *  2. It never throws. It feeds telemetry, and telemetry must never fail a gate.
  */
-import { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { resolveGuardConfig } from '../../config.mts';
-import { consumerChecklistAssetRoot } from '../cascade/consumer-assets.mts';
+import { checklistAssetRoot, OWN_PACKAGE_ROOT } from '../cascade/consumer-assets.mts';
 import {
   checklistAssetPath,
   hasChecklist,
@@ -54,10 +54,11 @@ function assetPaths(reviewer: Reviewer): string[] {
  * `.claude/agents`, every skill asset under `.claude/` per devkit's sync convention. Identical
  * content at both layouts is exactly the case where the two identities must agree.
  */
-function consumerFixture(): { root: string; packaged: string } {
+function consumerFixture() {
   const root = mkdtempSync(join(tmpdir(), 'devkit-consumer-identity-'));
   const packaged = mkdtempSync(join(tmpdir(), 'devkit-packaged-identity-'));
-  ROOTS.push(root, packaged);
+  const bare = mkdtempSync(join(tmpdir(), 'devkit-bare-consumer-'));
+  ROOTS.push(root, packaged, bare);
   writeFileSync(join(root, 'guard.config.json'), JSON.stringify({ scanRoots: ['src'] }));
   for (const reviewer of REVIEWERS) {
     for (const rel of assetPaths(reviewer)) {
@@ -66,18 +67,17 @@ function consumerFixture(): { root: string; packaged: string } {
       write(root, `.claude/${rel}`, body);
     }
   }
-  return { root, packaged };
+  return { root, packaged, bare };
 }
+
+const selectAll = (): ReviewerSelection[] =>
+  REVIEWERS.map((reviewer) => ({ reviewer, files: ['src/example.ts'] }));
 
 describe('consumerReviewerIdentity', () => {
   it('agrees with the packaged review-mode identity when the bytes match', () => {
-    const { root, packaged } = consumerFixture();
+    const { root, packaged, bare } = consumerFixture();
     const cfg = resolveGuardConfig(root);
-    const selected: ReviewerSelection[] = REVIEWERS.map((reviewer) => ({
-      reviewer,
-      files: ['src/example.ts'],
-    }));
-    const packagedIdentities = preflightReviewAssets(packaged, selected, cfg);
+    const packagedIdentities = preflightReviewAssets(bare, packaged, selectAll(), cfg);
 
     for (const reviewer of REVIEWERS) {
       expect(consumerReviewerIdentity(root, cfg, reviewer)).toBe(
@@ -87,19 +87,14 @@ describe('consumerReviewerIdentity', () => {
   });
 
   it('uses a provider-projected skill root for execution identity when Claude skills are absent', () => {
-    const { root, packaged } = consumerFixture();
+    const { root, packaged, bare } = consumerFixture();
     mkdirSync(join(root, '.agents'), { recursive: true });
     renameSync(join(root, '.claude/skills'), join(root, '.agents/skills'));
     const cfg = resolveGuardConfig(root);
-    const selected: ReviewerSelection[] = REVIEWERS.map((reviewer) => ({
-      reviewer,
-      files: ['src/example.ts'],
-    }));
-    const packagedIdentities = preflightReviewAssets(packaged, selected, cfg);
+    const packagedIdentities = preflightReviewAssets(bare, packaged, selectAll(), cfg);
 
     for (const reviewer of REVIEWERS) {
-      if (hasChecklist(reviewer))
-        expect(consumerChecklistAssetRoot(root, reviewer)).toBe('.agents');
+      if (hasChecklist(reviewer)) expect(checklistAssetRoot(root, reviewer)).toBe('.agents');
       expect(consumerReviewerIdentity(root, cfg, reviewer)).toBe(
         packagedIdentities.get(reviewer.name),
       );
@@ -149,20 +144,26 @@ describe('consumerReviewerIdentity', () => {
     );
   });
 
-  it('returns null instead of throwing when an asset is missing', () => {
+  it('returns null instead of throwing when an asset is unreadable', () => {
     const { root } = consumerFixture();
     const cfg = resolveGuardConfig(root);
     const [reviewer] = REVIEWERS;
     rmSync(join(root, `.claude/agents/${reviewer.name}.md`), { force: true });
+    mkdirSync(join(root, `.claude/agents/${reviewer.name}.md`));
 
     expect(consumerReviewerIdentity(root, cfg, reviewer)).toBeNull();
   });
 
-  it('returns null for an empty consumer checkout rather than failing the gate', () => {
-    const bare = mkdtempSync(join(tmpdir(), 'devkit-bare-consumer-'));
-    ROOTS.push(bare);
+  it('resolves a bare checkout from the running package, with the same identity review mode gets', () => {
+    const { bare } = consumerFixture();
     const cfg = resolveGuardConfig(bare);
-    for (const reviewer of REVIEWERS)
-      expect(consumerReviewerIdentity(bare, cfg, reviewer)).toBeNull();
+    const reviewMode = preflightReviewAssets(bare, OWN_PACKAGE_ROOT, selectAll(), cfg);
+    for (const reviewer of REVIEWERS) {
+      if (hasChecklist(reviewer)) {
+        expect(checklistAssetRoot(bare, reviewer)).toBe(OWN_PACKAGE_ROOT);
+        expect(existsSync(join(OWN_PACKAGE_ROOT, checklistAssetPath(reviewer)))).toBe(true);
+      }
+      expect(consumerReviewerIdentity(bare, cfg, reviewer)).toBe(reviewMode.get(reviewer.name));
+    }
   });
 });

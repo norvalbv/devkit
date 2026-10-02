@@ -3,12 +3,16 @@
 // auto-lower a baseline during a commit and need the same two primitives, so they live here as
 // ONE code path rather than duplicated per ratchet.
 
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync, type StdioOptions } from 'node:child_process';
 import { lstatSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { commitIndexEnv, commitIndexKind } from './commit-index.mts';
 
 const INDEX_LOCK_RETRY = new Int32Array(new SharedArrayBuffer(4));
+
+// For a read that stands down on failure (null/false/''): stdout carries the answer, and git's
+// stderr is dropped rather than inherited, or a non-git cwd dumps git's usage text into every log.
+const QUIET_STDIO: StdioOptions = ['ignore', 'pipe', 'ignore'];
 
 // A partial commit's temporary index is dropped after the commit, so a baseline staged into it
 // would be committed yet read as deleted by the real index.
@@ -46,7 +50,7 @@ export function isGitWorktree(root: string): boolean {
         cwd: root,
         env: commitIndexEnv(root),
         encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'ignore'],
+        stdio: QUIET_STDIO,
       }).trim() === 'true'
     );
   } catch {
@@ -158,6 +162,7 @@ export function hasStagedFiles(root: string): boolean {
       cwd: root,
       env: commitIndexEnv(root),
       encoding: 'utf8',
+      stdio: QUIET_STDIO,
     });
     return out.split('\n').some((l) => l.trim().length > 0);
   } catch {
@@ -199,7 +204,7 @@ export function stagedTouchedSet(root: string): Set<string> | null {
     // An ordinary commit has no MERGE_HEAD, and the first-parent set is the whole answer.
     if (!mergeInProgress(root)) return staged;
     try {
-      const fromMergeHead = touchedPaths(root, ['--cached', 'MERGE_HEAD'], true);
+      const fromMergeHead = touchedPaths(root, ['--cached', 'MERGE_HEAD']);
       return new Set([...staged].filter((file) => fromMergeHead.has(file)));
     } catch {
       // A merge IS in progress but its second-parent diff will not resolve, so first-parent scope
@@ -213,14 +218,14 @@ export function stagedTouchedSet(root: string): Set<string> | null {
 
 // No --diff-filter: every status (D and T included) is a path this commit touched. --no-renames so
 // a move reports its SOURCE too, not only the destination a governed-path match would miss.
-function touchedPaths(root: string, range: string[], quiet = false): Set<string> {
+function touchedPaths(root: string, range: string[]): Set<string> {
   return new Set(
     splitNul(
       execFileSync('git', ['diff', '--name-only', '-z', '--no-renames', ...range], {
         cwd: root,
         env: commitIndexEnv(root),
         encoding: 'utf8',
-        ...(quiet && { stdio: ['ignore', 'pipe', 'ignore'] }),
+        stdio: QUIET_STDIO,
       }),
     ),
   );
@@ -232,7 +237,7 @@ export function headTreeish(cwd: string): string {
     return execFileSync('git', ['rev-parse', '--verify', '--quiet', 'HEAD'], {
       cwd,
       encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
+      stdio: QUIET_STDIO,
     }).trim();
   } catch {
     return execFileSync('git', ['hash-object', '-t', 'tree', '--stdin'], {
@@ -292,6 +297,7 @@ export function stagedSet(root: string): Set<string> | null {
       cwd: root,
       env: commitIndexEnv(root),
       encoding: 'utf8',
+      stdio: QUIET_STDIO,
     });
     const staged = new Set(
       out
@@ -307,7 +313,7 @@ export function stagedSet(root: string): Set<string> | null {
           cwd: root,
           env: commitIndexEnv(root),
           encoding: 'utf8',
-          stdio: ['ignore', 'pipe', 'ignore'],
+          stdio: QUIET_STDIO,
         },
       );
       const changedFromMergeHead = new Set(
@@ -333,6 +339,7 @@ export function gitPrefix(root: string): string {
       cwd: root,
       env: commitIndexEnv(root),
       encoding: 'utf8',
+      stdio: QUIET_STDIO,
     }).trimEnd();
   } catch {
     return '';
@@ -346,7 +353,7 @@ export function indexTreeRef(root: string): string | null {
       cwd: root,
       env: commitIndexEnv(root),
       encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
+      stdio: QUIET_STDIO,
     }).trim();
   } catch {
     return null;
@@ -360,7 +367,7 @@ export function treeTextAtRef(root: string, ref: string, relativePath: string): 
       cwd: root,
       env: commitIndexEnv(root),
       encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
+      stdio: QUIET_STDIO,
     });
   } catch {
     return null;
@@ -373,7 +380,7 @@ export function mergeBaseRef(root: string, ref: string): string | null {
       cwd: root,
       env: commitIndexEnv(root),
       encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
+      stdio: QUIET_STDIO,
     }).trim();
   } catch {
     return null;
@@ -388,9 +395,11 @@ export function changedSetSince(root: string, baseRef: string): Set<string> | nu
     execFileSync('git', ['rev-parse', '--verify', `${baseRef}^{commit}`], {
       cwd: root,
       env: commitIndexEnv(root),
-      stdio: ['ignore', 'pipe', 'ignore'],
+      stdio: ['ignore', 'pipe', 'inherit'],
     });
     const prefix = gitPrefix(root);
+    // Stderr stays inherited on purpose: a failure here is pullRequestScope's hard exit 2, and git's
+    // reason (e.g. "no merge base" in a shallow PR clone) is the only cause that exit shows.
     const out = execFileSync(
       'git',
       ['diff', '--name-only', '-z', '--diff-filter=ACMR', `${baseRef}...HEAD`],
@@ -428,6 +437,7 @@ export function indexFiles(root: string): string[] | null {
       cwd: root,
       env: commitIndexEnv(root),
       encoding: 'utf8',
+      stdio: QUIET_STDIO,
     });
     return [...new Set(splitNul(out))];
   } catch {
@@ -444,7 +454,7 @@ export function treeFilesAtRef(root: string, ref = 'HEAD'): string[] | null {
       cwd: root,
       env: commitIndexEnv(root),
       encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
+      stdio: QUIET_STDIO,
     });
     return splitNul(out);
   } catch {

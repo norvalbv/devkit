@@ -107,6 +107,26 @@ describe('computeMigration (electron: backend governance survives the eslint reg
     expect(gc.backends).toEqual({ socketServer: true, vercel: false }); // preserved, not reset
   });
 
+  // sc-3148: an additive CLI grammar tree lives in guard.config.json, so regenerating the electron
+  // eslint.config must leave the consumer's structure.trees and structure.walls exactly as written.
+  it('keeps an additive grammar tree and its walls while replacing the electron eslint.config', () => {
+    const root = tmpRepo();
+    const structure = {
+      trees: [
+        { name: 'cli', root: 'cli', sourceExtensions: ['ts'], grammar: { files: ['{kebab}'] } },
+      ],
+      walls: [{ pattern: 'cli/**', allowImportsFrom: ['cli/**'] }],
+    };
+    write(root, 'eslint.config.mjs', '// OLD electron preset\nexport default [];\n');
+    write(root, 'guard.config.json', JSON.stringify({ scanRoots: ['src'], structure }));
+    const changes = computeMigration(root, 'electron');
+    expect(changes.find((c) => c.file === 'eslint.config.mjs')?.kind).toBe('replace');
+    for (const c of changes) c.write();
+    const gc = JSON.parse(readFileSync(join(root, 'guard.config.json'), 'utf8'));
+    expect(gc.structure).toEqual(structure);
+    expect(gc.scanRoots).toEqual(['src']);
+  });
+
   it('adds backends with the both-on default when an electron consumer lacks the key', () => {
     const root = tmpRepo();
     write(root, 'eslint.config.mjs', '// OLD\n');

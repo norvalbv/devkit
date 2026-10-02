@@ -15,7 +15,7 @@ import {
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { buildStandaloneHook } from '../lib/husky/husky-block.mts';
+import { buildFullHook } from '../lib/husky/husky-block.mts';
 import { buildOverlayPreCommit } from '../lib/overlay.mts';
 import { globalInitPath, installGlobalHook } from '../lib/overlay-global-hook.mts';
 import { captureReviewSetup } from '../lib/ship/review/setup-manifest.mts';
@@ -66,7 +66,7 @@ function fixture(
     write(
       gitRoot,
       '.devkit/hooks/pre-commit',
-      buildOverlayPreCommit(selection, '.git/hooks/pre-commit', targetRel),
+      buildOverlayPreCommit(selection, '.git/hooks/pre-commit', targetRel, { root: gitRoot }),
       true,
     );
   } else {
@@ -80,7 +80,12 @@ function fixture(
       mkdirSync(join(gitRoot, '.husky'), { recursive: true });
       symlinkSync(relative(join(gitRoot, '.husky'), runner), join(gitRoot, '.husky/_'));
     }
-    write(gitRoot, '.husky/pre-commit', buildStandaloneHook(selection, targetRel), true);
+    write(
+      gitRoot,
+      '.husky/pre-commit',
+      buildFullHook(selection, targetRel, 'global-optional'),
+      true,
+    );
   }
   write(
     targetRoot,
@@ -137,7 +142,7 @@ describe('private review setup runtime — husky-reclaimed overlay hooksPath', (
     write(
       gitRoot,
       '.devkit/hooks/pre-commit',
-      buildOverlayPreCommit(selection, '.husky/pre-commit'),
+      buildOverlayPreCommit(selection, '.husky/pre-commit', '', { root: gitRoot }),
       true,
     );
     write(

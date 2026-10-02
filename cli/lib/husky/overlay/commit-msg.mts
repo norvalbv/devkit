@@ -1,5 +1,5 @@
-/** Overlay's local `.devkit/hooks/commit-msg` (sc-1794): devkit's message judges, fail-open global
- *  bins, then the repo's own commit-msg. Rationale: the 2026-09-28 note on overlay-self-heal. */
+/** Overlay's local `.devkit/hooks/commit-msg` (sc-1794): devkit's message judges from the global
+ *  CLI, failing closed without it, then the repo's own commit-msg. Rationale: overlay-self-heal. */
 
 import {
   chmodSync,
@@ -14,8 +14,9 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import { GATE_LOG_FINISH_PASS } from '../gate-policy/commit-gate-log.mts';
 import { buildCommitMsgBlock, COMMIT_MSG_PREAMBLE, commitMsgGuards } from '../commit-msg-block.mts';
-import { buildPassthroughHook, chainWord } from '../husky-block.mts';
+import { buildPassthroughHook, chainWord, GATES_ONLY_STOP } from '../husky-block.mts';
 
 const LOCAL_HOOK = join('.devkit', 'hooks', 'commit-msg');
 const HOOK_MODE = 0o755;
@@ -41,15 +42,18 @@ export function buildOverlayCommitMsgHook(
   chainTarget: string,
   pkgRel = '',
 ): string {
-  const block = buildCommitMsgBlock(selection, pkgRel, { standalone: true, scrubGitEnv: true });
+  const block = buildCommitMsgBlock(selection, pkgRel, 'global');
   const chain = chainWord(chainTarget); // single-quoted: a hooksPath with $(...) must not execute
   return `${COMMIT_MSG_PREAMBLE}
 # devkit OVERLAY commit-msg (LOCAL, git-ignored): devkit's message judges, then the repo's OWN
-# commit-msg unchanged. Global CLI, fail-open when devkit is not installed.
+# commit-msg unchanged. Global CLI; the commit is blocked when devkit is not installed.
 ${block}
 
-# Judges passed — clear the handoff now: \`exec\` replaces this process, so no EXIT trap fires after.
-command -v __dk_clear_commit_state >/dev/null 2>&1 && { __dk_clear_commit_state; trap - EXIT; }
+# Judges passed — run the exit work now: \`exec\` replaces this process, so no EXIT trap fires after.
+trap - EXIT
+command -v __dk_clear_commit_state >/dev/null 2>&1 && { __dk_clear_commit_state || :; }
+${GATE_LOG_FINISH_PASS}
+${GATES_ONLY_STOP}
 
 # Chain to the repo's own commit-msg (exec → its exit code becomes the hook's).
 [ -f ${chain} ] && exec sh ${chain} "$@"

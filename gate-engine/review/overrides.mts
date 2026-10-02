@@ -35,6 +35,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import path from 'node:path';
+import { CORRECTNESS_OVERRIDES_FILE as OVERRIDES_FILE } from '../deterministic/gate-inputs.mts';
 import { diffCacheIdentity } from '../judge/diff-focus.mts';
 import { emitGateEvent } from '../judge/gate-events.mts';
 import { reviewBaseContext, shortSha } from './evidence/base-context.mts';
@@ -46,7 +47,6 @@ import type { LensDisposition } from './evidence/items.mts';
 import type { ReviewerSelection } from './reviewers.mts';
 import type { ChecklistState, ReviewOutcome } from './runtime.mts';
 
-const OVERRIDES_FILE = '.devkit/correctness-overrides.json';
 /** A fingerprint (see `fingerprint` below) is always this shape — shared by the env-var parser and
  * the `waive` CLI's itemId validation, so both channels accept exactly the same ids. */
 export const FINGERPRINT_RE = /^[0-9a-f]{12}$/;

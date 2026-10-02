@@ -1,6 +1,6 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { resolveGuardConfig } from '../../config.mts';
-import { domainsDisabledByEmptyRoots } from '../evidence/scope.mts';
+import { domainsDisabledByEmptyRoots, reportNonRuns } from '../evidence/scope.mts';
 
 // Pure: defaults + explicit roots, no disk. Mirrors reviewers.test.mts's fixture shape.
 const base = resolveGuardConfig('/nonexistent-cwd-defaults-only');
@@ -17,6 +17,7 @@ const reviewers = (staged: string[], cfg = inverted, skip?: ReadonlySet<string>)
 
 afterEach(() => {
   delete process.env.GUARD_REVIEW_NO_TOPOLOGY_WARN;
+  vi.restoreAllMocks();
 });
 
 describe('domainsDisabledByEmptyRoots', () => {
@@ -93,5 +94,24 @@ describe('domainsDisabledByEmptyRoots', () => {
     for (const staged of [['src/server/db.ts'], ['src/ui/App.tsx'], ['src/x.scss', 'src/y.ts']])
       expect(reviewers(staged, make(['src'], [], ['src']))).toEqual([]);
     expect(reviewers(['src/server/db.ts'], make(['src'], [], []))).toEqual([]);
+  });
+});
+
+describe('reportNonRuns', () => {
+  const notices = (alreadyReported: Set<string>) => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    reportNonRuns(['relay/index.ts', 'README.md'], inverted, [], alreadyReported);
+    return spy.mock.calls.map((c) => String(c[0])).filter((l) => l.includes('no reviewer ran'));
+  };
+
+  it('says so when path scope leaves the commit with no reviewer at all', () => {
+    expect(notices(new Set())).toEqual([
+      'guard-review: no reviewer ran — none of the 2 staged file(s) is in review scope ' +
+        '(scanRoots, review roots and review.paths in guard.config.json)',
+    ]);
+  });
+
+  it('stays quiet when another line already named why a reviewer did not run', () => {
+    expect(notices(new Set(['commit-guard']))).toEqual([]);
   });
 });

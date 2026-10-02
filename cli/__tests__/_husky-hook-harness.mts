@@ -11,7 +11,7 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildFullHook, buildOverlayHook, buildStandaloneHook } from '../lib/husky/husky-block.mts';
+import { buildFullHook, buildOverlayHook } from '../lib/husky/husky-block.mts';
 
 // Runs an ASSEMBLED hook under a real `sh -e` with per-tool stubs whose exit codes come from env
 // knobs; every invocation lands in calls.log, so ordering is read off the log.
@@ -144,7 +144,6 @@ esac
     }
   }
   for (const name of missingBins) rmSync(join(bin, name), { force: true });
-  for (const name of missingLocalBins) rmSync(join(packageBin, name), { force: true });
 
   if (realDeterministic) {
     const runner = join(ROOT, 'gate-engine', 'deterministic', 'run.mts');
@@ -190,13 +189,12 @@ esac
 
   if (pkgRel) mkdirSync(join(home, pkgRel), { recursive: true });
   stageOverlayFixtures(home, { bin, packageBin, pkgRel, fallow, staged, eslintOverlay });
+  for (const name of missingLocalBins) rmSync(join(packageBin, name), { force: true });
   const hookPath = join(home, 'pre-commit');
   const hook =
-    builder === 'standalone'
-      ? buildStandaloneHook(selection, pkgRel)
-      : builder === 'overlay'
-        ? buildOverlayHook(selection, '', pkgRel, { fallow })
-        : buildFullHook(selection, pkgRel);
+    builder === 'overlay'
+      ? buildOverlayHook(selection, '', pkgRel, { fallow })
+      : buildFullHook(selection, pkgRel, builder === 'standalone' ? 'global-optional' : 'package');
   writeFileSync(hookPath, hook);
   let status = 0;
   let stdout = '';

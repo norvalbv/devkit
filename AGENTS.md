@@ -186,4 +186,14 @@ what is devkit-specific:
   already fixed this task. Never include credentials or tokens.
 </workflow>
 
+<workflow name="diff_coverage">
+`bun run test:run:coverage:changed` prints per-file coverage for the files changed since the
+remote `main` branch (vitest's `--changed` picks the covering tests). Run `git fetch origin main`
+first, since a stale ref widens the set; `COVERAGE_BASE=<ref>` picks another base (a second
+`--changed` flag makes vitest refuse to start). A file no test imports reads 0%, as it should. Code
+exercised only through a spawned `node cli/index.mts` also reads 0% although it is tested, because
+v8 does not follow child processes. A diff touching `package.json` or `vitest.config.mjs` runs the
+whole suite.
+</workflow>
+
 </workflows>

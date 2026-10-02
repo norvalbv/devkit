@@ -13,6 +13,7 @@ import {
   mkExec,
   passWithArtifact,
   reviewAssets,
+  unprojected,
   writeArtifact,
 } from './run-review-fixtures.mts';
 
@@ -82,6 +83,7 @@ afterEach(() => {
 
 describe('runReviewGate — deferred checklist recovery (sc-1476)', () => {
   const reviewEnv = (repo: string) => {
+    unprojected(repo);
     const assets = reviewAssets();
     process.env.DEVKIT_RUN_MODE = 'review';
     process.env.DEVKIT_REVIEW_ASSET_ROOT = assets;
@@ -310,11 +312,9 @@ describe('runReviewGate — checklist recovery on the strict ship path (sc-2088)
     expect(err.mock.calls.flat().join('\n')).toContain('budget exhausted');
   });
 
-  // A hole is not one fact. An artifact left INCOMPLETE is a judge that engaged and stopped; an
-  // artifact that never EXISTED is (on the commit/ship path, which has no review-mode preflight) a
-  // consumer whose checklist scripts were never synced. The two need different remedies, and the
-  // non-recovery branch has always distinguished them — the recovery path must not flatten them.
-  it('an artifact that never existed keeps the SYNC cause, not response-contract', async () => {
+  // Every checklist script resolves (a consumer projection, else the package), so an artifact that
+  // never existed is the judge skipping its workflow — never a sync gap to send the operator to.
+  it('an artifact that never existed is a response-contract miss, not a sync gap', async () => {
     const repo = consumerRepo({ backend: true });
     shipEnv(repo);
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -328,14 +328,12 @@ describe('runReviewGate — checklist recovery on the strict ship path (sc-2088)
       (e) => e.type === 'review_result' && e.reviewer === 'api-security-reviewer',
     );
     expect(row?.status).toBe('inconclusive');
-    expect(row?.inconclusive_cause).toBe('sync');
-    const out = err.mock.calls.flat().join('\n');
-    expect(out).toContain('devkit sync-agents && devkit sync-skills');
-    expect(out).not.toContain('did not satisfy its declared contract');
+    expect(row?.inconclusive_cause).toBe('response-contract');
+    expect(err.mock.calls.flat().join('\n')).toContain('did not satisfy its declared contract');
   });
 
   it('review mode still BLOCKS an exhausted retry at exit 1, unchanged by the widening', async () => {
-    const repo = consumerRepo({ backend: true });
+    const repo = unprojected(consumerRepo({ backend: true }));
     process.env.DEVKIT_RUN_MODE = 'review';
     process.env.DEVKIT_REVIEW_ASSET_ROOT = reviewAssets();
     process.env.GUARD_AI_STRICT = '1'; // review runs under the same strict shell as ship
@@ -401,7 +399,6 @@ describe('runReviewGate — checklist recovery on the strict ship path (sc-2088)
     const out = err.mock.calls.flat().join('\n');
     expect(out).toContain('CLI auth/quota');
     expect(out).not.toContain('did not satisfy its declared contract');
-    expect(out).not.toContain('devkit sync-agents && devkit sync-skills');
   });
 
   it('a budget consumed by the FIRST recovery makes the SECOND take the named skip', async () => {
@@ -549,57 +546,6 @@ describe('runReviewGate — checklist recovery on the strict ship path (sc-2088)
       { cwd: repo, cfg: resolveGuardConfig(repo), exec, judgeTimeoutMs: 300_000 },
     );
     expect(escalations).toEqual([1]);
-  });
-
-  it('classifies the hole from the SETTLED artifact, not the first attempt stale one', async () => {
-    const repo = consumerRepo({ backend: true });
-    shipEnv(repo);
-    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const attempts = new Map<string, number>();
-    // Wave attempt leaves NO artifact (a sync-shaped hole); the recovery judge engages and leaves a
-    // PENDING one. The remedy must follow the attempt that actually ran last.
-    const exec = mkExec(async ({ label }) => {
-      if (label !== TARGET) {
-        writeArtifact(repo, label);
-        return 'VERDICT: PASS';
-      }
-      const attempt = (attempts.get(label) ?? 0) + 1;
-      attempts.set(label, attempt);
-      if (attempt > 1) writeArtifact(repo, label, { pending: 5 });
-      return 'VERDICT: PASS';
-    });
-    expect(await runReviewGate(repo, { exec })).toBe(3);
-    const row = events(repo).find(
-      (e) => e.type === 'review_result' && e.reviewer === 'api-security-reviewer',
-    );
-    expect(row?.inconclusive_cause).toBe('response-contract');
-    const out = err.mock.calls.flat().join('\n');
-    expect(out).not.toContain('devkit sync-agents && devkit sync-skills');
-  });
-
-  it('an artifact that exists but enumerated nothing is the judge hole, not a sync gap', async () => {
-    const repo = consumerRepo({ backend: true });
-    shipEnv(repo);
-    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const stateFile = String(REVIEWERS.find((r) => r.name === 'api-security-reviewer')?.stateFile);
-    const exec = mkExec(async ({ label }) => {
-      if (label !== TARGET) {
-        writeArtifact(repo, label);
-        return 'VERDICT: PASS';
-      }
-      // The script RAN and enumerated nothing, without the sc-1439 `skipped` reason that would make
-      // an empty artifact valid. Telling this operator to sync skills points at the wrong thing.
-      writeFileSync(join(repo, stateFile), JSON.stringify({ items: [] }));
-      return 'VERDICT: PASS';
-    });
-    expect(await runReviewGate(repo, { exec })).toBe(3);
-    const row = events(repo).find(
-      (e) => e.type === 'review_result' && e.reviewer === 'api-security-reviewer',
-    );
-    expect(row?.inconclusive_cause).toBe('response-contract');
-    expect(err.mock.calls.flat().join('\n')).not.toContain(
-      'devkit sync-agents && devkit sync-skills',
-    );
   });
 
   it('an unparseable deadline falls back to the duration budget instead of disabling the guard', async () => {

@@ -23,13 +23,12 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'n
 import { join } from 'node:path';
 import { defaultSelection, RECOMMENDED_GUARD_IDS, type Selection } from '../components.mts';
 import { readJson } from '../fs-helpers.mts';
-import { REVIEW_FAILURE_FINALIZER } from './gate-policy/block-helpers.mts';
+import { BIN_DIRS, REVIEW_FAILURE_FINALIZER } from './gate-policy/block-helpers.mts';
 import { markEnd } from './husky.mts';
 import {
   buildFullHook,
   buildGuardBlock,
   extractGuardBlock,
-  PACKAGE_BIN_DIR_FRAGMENT,
   replaceGuardBlock,
 } from './husky-block.mts';
 import {
@@ -133,7 +132,7 @@ type SelfHostHookInput = Selection & {
 
 // Matches the package-local `guard-<x>` bins the generator emits. `guard-qavis-advisory` (double hyphen) is
 // covered by `[a-z-]+`. The formatter bin gets its own exact rewrite below, because
-// PACKAGE_BIN_DIR_FRAGMENT is stripped here and `$__dk_package_bin_dir` would expand to ''.
+// the package bin-dir line is stripped here and `$__dk_package_bin_dir` would expand to ''.
 const PACKAGE_GUARD_RE = /"\$__dk_package_bin_dir\/(guard-[a-z-]+)"/g;
 // Devkit formats with Oxfmt unconditionally, so the consumer's config detection is replaced
 // outright rather than left to resolve — no dead biome arm reaches Devkit's own hook.
@@ -190,7 +189,7 @@ export function sourceBinFor(cwd: string, binName: string): string {
 export function toSelfHost(hookText: string, cwd: string): string {
   return (
     hookText
-      .replace(`${PACKAGE_BIN_DIR_FRAGMENT}\n\n`, '')
+      .replace(`${BIN_DIRS.package.open}\n\n`, '')
       .replace(PACKAGE_GUARD_RE, (_m, bin: string) => `node ${sourceBinFor(cwd, bin)}`)
       // Three rewrites, one per genuine self-host difference: bin path, failure policy, scope.
       // Each search string is a generator constant, so it matches the emitted bytes by construction.

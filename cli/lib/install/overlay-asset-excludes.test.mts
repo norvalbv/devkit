@@ -194,4 +194,22 @@ describe('pruneGitExclude', () => {
     expect(pruned).toContain('/consumer-cache/');
     expect(pruned).not.toMatch(/# devkit overlay|\.devkit\/|guard\.config\.json/);
   });
+
+  it('prunes only the devkit lines after its header, wherever an install appended them', () => {
+    const { wt } = repoWithWorktree();
+    const file = gitExcludeFile(wt);
+    writeFileSync(file, '/guard.config.json\n');
+    addToGitExclude(wt, ['.devkit/', 'guard.config.json'], false);
+    writeFileSync(file, '# mine\n/.devkit/\n/fallow-baselines/\n', { flag: 'a' });
+    addToGitExclude(wt, ['.devkit/', 'guard.config.json', 'oxlint.devkit.json'], false);
+
+    pruneGitExclude(wt, false);
+
+    expect(readFileSync(file, 'utf8').split('\n').filter(Boolean)).toEqual([
+      '/guard.config.json',
+      '# mine',
+      '/.devkit/',
+      '/fallow-baselines/',
+    ]);
+  });
 });

@@ -210,6 +210,20 @@ describe('devkit init — concurrent-run lock (sc-2429)', () => {
     expect(existsSync(join(root, '.devkit', 'config.json'))).toBe(false);
   });
 
+  it('serializes overlay doctor --fix, which re-runs the install steps', () => {
+    const root = tmpRepo();
+    execFileSync('git', ['init', '-q'], { cwd: root });
+    expect(devkit(root, 'init', '--stack', 'generic', '--overlay', '--yes').status).toBe(0);
+    const before = configBytes(root);
+    plantInitLock(root);
+
+    const refused = devkit(root, 'doctor', '--fix');
+
+    expect(refused.status).toBe(1);
+    expect(refused.stderr).toMatch(/devkit doctor --fix: another devkit init\/upgrade is running/);
+    expect(configBytes(root)).toBe(before);
+  });
+
   it('locks at the git root, so a monorepo package run waits on a root-level holder', () => {
     const root = tmpRepo();
     execFileSync('git', ['init', '-q'], { cwd: root });
