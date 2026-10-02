@@ -144,7 +144,6 @@ esac
     }
   }
   for (const name of missingBins) rmSync(join(bin, name), { force: true });
-  for (const name of missingLocalBins) rmSync(join(packageBin, name), { force: true });
 
   if (realDeterministic) {
     const runner = join(ROOT, 'gate-engine', 'deterministic', 'run.mts');
@@ -190,6 +189,7 @@ esac
 
   if (pkgRel) mkdirSync(join(home, pkgRel), { recursive: true });
   stageOverlayFixtures(home, { bin, packageBin, pkgRel, fallow, staged, eslintOverlay });
+  for (const name of missingLocalBins) rmSync(join(packageBin, name), { force: true });
   const hookPath = join(home, 'pre-commit');
   const hook =
     builder === 'overlay'

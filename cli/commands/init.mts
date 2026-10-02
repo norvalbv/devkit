@@ -14,7 +14,6 @@ import {
   STRUCTURE_BASELINE_DIR,
   STRUCTURE_EXEMPT,
 } from '../../gate-engine/ratchets/baseline-paths.mts';
-import { loadImportWallExempt } from '../../gate-engine/structure/load-baseline.mts';
 import {
   AGENT_TARGETS,
   applyOverlayConstraints,
@@ -36,8 +35,7 @@ import { reportBaselineStorage } from '../lib/doctor/pin/baseline-reader.mts';
 import { assertRunnerMayWrite, assertRunsFromSource } from '../lib/doctor/pin/runner-identity.mts';
 import { detectStack } from '../lib/detect-stack.mts';
 import { packageDir, readJson, writeIfAbsent } from '../lib/fs-helpers.mts';
-import { generateImportWallBaseline } from '../lib/generate/generate-import-wall-baseline.mts';
-import { generateStructureBaselines } from '../lib/generate/generate-structure-baseline.mts';
+import { cutStructureBaselines } from '../lib/generate/cut-structure-baselines.mts';
 import { INIT_HELP } from '../lib/help/init-help.mts';
 import { installCommitMsgHook, removeCommitMsgBlock } from '../lib/husky/commit-msg-block.mts';
 import {
@@ -362,29 +360,7 @@ async function runStructureBaselines(cwd: string, stack: string, dryRun: boolean
     );
     return;
   }
-  // The generators grandfather electron's process trees (the generator's own DEFAULT_ROOTS).
-  // react-app needs no generated structure baseline: its preset is grandfathered via permissive
-  // rules + EMPTY baselines (the eslint.config loadBaseline() returns [] when absent), and its
-  // structureRoot is derived live from guard.config.json scanRoots — so for a src-rooted app
-  // these calls are no-ops by design (the electron tree names never match).
-  const opts = { log: (m: string) => console.log(m) };
-  try {
-    await generateStructureBaselines(cwd, opts);
-  } catch (e: unknown) {
-    console.log(`  ! structure baseline generator failed: ${firstLine(e)}`);
-  }
-  try {
-    // Honour the consumer's hand-maintained import-wall exemptions:
-    // an exempt file is a permanent architectural allowance, not a violator, so it must be skipped
-    // during the scan — else it would be re-grandfathered every regen.
-    generateImportWallBaseline(cwd, {
-      ...opts,
-      exemptPatterns: await loadImportWallExempt(cwd),
-    });
-  } catch (e: unknown) {
-    console.log(`  ! import-wall baseline generator skipped: ${firstLine(e)}`);
-    console.log(`    (install deps — bun install — then re-run \`devkit init --stack ${stack}\`)`);
-  }
+  await cutStructureBaselines(cwd, stack);
 }
 
 function firstLine(e: unknown): string {
@@ -633,7 +609,7 @@ function applyRemovals(
 // Overlay (local-only) install: invisible to git (.git/info/exclude), non-invasive (extends the
 // repo, edits nothing committed). Self-contained — writes its own git-ignored .devkit/config.json
 // and returns; applyInit's package/standalone path never runs for an overlay.
-function applyOverlay(cwd: string, plan: InitPlan, pkgRel: string, devkitRef: string) {
+async function applyOverlay(cwd: string, plan: InitPlan, pkgRel: string, devkitRef: string) {
   const { stack, selection, force = false, dryRun = false } = plan;
   console.log(
     `devkit init${dryRun ? ' (dry-run)' : ''} — OVERLAY (local-only) — stack=${stack}, devkit=${devkitRef}`,
@@ -641,7 +617,7 @@ function applyOverlay(cwd: string, plan: InitPlan, pkgRel: string, devkitRef: st
   console.log(
     '  invisible to git (.git/info/exclude); extends the repo; edits nothing committed\n',
   );
-  const wired = installOverlay(cwd, selection, stack, force, dryRun);
+  const wired = await installOverlay(cwd, selection, stack, force, dryRun);
   const ownsLineGrowth = upgradeOffers.overlayOwnsLineGrowth(cwd);
   upgradeOffers.applyOverlayMaxLines(cwd, selection, repoAdopted(cwd), ownsLineGrowth, dryRun);
   if (selection.guards?.includes('fanout') || selection.guards?.includes('size')) {
@@ -670,8 +646,7 @@ function applyOverlay(cwd: string, plan: InitPlan, pkgRel: string, devkitRef: st
       agents: Boolean(selection.agents),
       agentHooks: Boolean(selection.agentHooks),
       searchSteering: false, // never wired in overlay (no resolvable bin without the package)
-      fallow: wired.fallowWired,
-      antiSlop: wired.antiSlopWired,
+      ...wired.components,
       lineGrowth: Boolean(selection.lineGrowth),
       adhd: Boolean(selection.adhd),
       priorArtGate: Boolean(selection.priorArtGate),
@@ -1058,7 +1033,7 @@ async function run(args: string[], cwd: string): Promise<number> {
     ({ selection, disabledGuards, undecided } = initFlags.resolveFlagSelection(cwd, args, flags));
   }
 
-  if (mode === 'overlay') selection = applyOverlayConstraints(selection);
+  if (mode === 'overlay') selection = applyOverlayConstraints(selection, stack);
   if (!selfHost && !interactive) {
     const reviewPlan = reviewPlanFromFlags(flags, selection);
     if (reviewPlan.error) {

@@ -42,13 +42,16 @@ const { mkTmp, cleanup } = rootRegistry();
 
 // The recommended guards, so the install writes a real selection's exclude lines; every commit here is
 // empty, so the hook's observable effect is chaining to the team hook's marker.
-const SELECTION = applyOverlayConstraints({
-  ...defaultSelection(),
-  biome: false,
-  skills: false,
-  agents: false,
-  lineGrowth: false,
-});
+const SELECTION = applyOverlayConstraints(
+  {
+    ...defaultSelection(),
+    biome: false,
+    skills: false,
+    agents: false,
+    lineGrowth: false,
+  },
+  'react-app',
+);
 
 const git = (cwd: string, ...args: string[]) =>
   execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();

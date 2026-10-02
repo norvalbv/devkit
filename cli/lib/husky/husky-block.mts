@@ -177,21 +177,35 @@ export function buildFullHook(selection: HookSelection, pkgRel = '', binDir: Bin
 
 // The eslint/biome overlay steps — run the LOCAL devkit configs (which extend the repo's) over
 // STAGED files only (so new changes are checked without flooding on the team's existing code,
-// which can't be grandfathered invisibly). Each step is fail-open: only fires if the local
-// config + the repo's own binary are present.
+// which can't be grandfathered invisibly). Each fires when its local config is present; the binary
+// is the repo's own, so its absence is a visible skip line, never a silent one.
 // `--relative` makes `git diff` emit paths relative to the CURRENT dir, so this works whether
 // the hook runs at the repo root or cd'd into a monorepo package (eslint/biome + their configs
 // are then resolved package-locally).
-const OVERLAY_ESLINT_STAGED = `DK_TS=$(git diff --cached --name-only --relative --diff-filter=ACM | grep -E '\\.(tsx?|jsx?)$' || true)
-if [ -n "$DK_TS" ] && [ -f eslint.config.devkit.mjs ] && [ -x node_modules/.bin/eslint ]; then
-    echo "🧱 devkit eslint overlay (staged)..."
-    echo "$DK_TS" | xargs node_modules/.bin/eslint -c eslint.config.devkit.mjs || exit 1
+const overlayLintStep = (tool: string, label: string, exts: string, config: string, args: string) =>
+  `DK_STAGED=$(git diff --cached --name-only --relative --diff-filter=ACM | grep -E '\\.(${exts})$' || true)
+if [ -n "$DK_STAGED" ] && [ -f ${config} ]; then
+    if [ -x node_modules/.bin/${tool} ]; then
+        echo "${label}"
+        echo "$DK_STAGED" | xargs node_modules/.bin/${tool} ${args} || exit 1
+    else
+        echo "devkit ${tool} overlay: skipped — node_modules/.bin/${tool} not found (install the repo's dependencies)"
+    fi
 fi`;
-const OVERLAY_BIOME = `DK_FMT=$(git diff --cached --name-only --relative --diff-filter=ACM | grep -E '\\.(tsx?|jsx?|css|jsonc?)$' || true)
-if [ -n "$DK_FMT" ] && [ -f biome.devkit.jsonc ] && [ -x node_modules/.bin/biome ]; then
-    echo "🎨 devkit biome overlay (staged)..."
-    echo "$DK_FMT" | xargs node_modules/.bin/biome check --config-path biome.devkit.jsonc || exit 1
-fi`;
+const OVERLAY_ESLINT_STAGED = overlayLintStep(
+  'eslint',
+  '🧱 devkit eslint overlay (staged)...',
+  'tsx?|jsx?',
+  'eslint.config.devkit.mjs',
+  '-c eslint.config.devkit.mjs',
+);
+const OVERLAY_BIOME = overlayLintStep(
+  'biome',
+  '🎨 devkit biome overlay (staged)...',
+  'tsx?|jsx?|css|jsonc?',
+  'biome.devkit.jsonc',
+  'check --config-path biome.devkit.jsonc',
+);
 
 // Overlay shadows fallow's installed hook, so its optional audit must run inline here. Scope the
 // audit to the index: ship refreshes reviewer assets in its worktree AFTER staging, and a base-wide
