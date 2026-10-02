@@ -25,6 +25,10 @@ Docs-, config-, and comment-only changes do not require a test run.
 2. **Write the test next to its peers**, following the project's existing test layout and naming. Reuse existing fixtures and helpers before adding new ones.
 3. **Run the full command**, not a single-file subset, before declaring done — a change can break a sibling.
 
+### Before writing a suite
+
+When the repository runs anti-slop (`.devkit/anti-slop/` exists), write the first test file, then run `devkit anti-slop check <that file>` before writing the rest. Its policy is static, so a violation is visible after one file rather than after a whole suite. Module mocking (`vi.mock`, `jest.mock`) is refused: give the module under test a seam instead, such as an optional `deps` parameter that defaults to the real imports and that the test fills with fakes. With the anti-slop component installed, a PostToolUse hook runs the same check after each edit.
+
 ## Reading a run
 
 Read the runner's summary line (labelled examples: vitest `Test Files … Tests …`; pytest `=== N passed in Ns ===`), the command's exit status, and any error printed *instead of* a summary. Not the last thing on screen.

@@ -127,6 +127,12 @@ specific conditions under which that control is appropriate:
 - `GUARD_DECISIONS_INTEGRITY_OK=1` — assert that a NEW structural finding on a decision record in
   this change is wrong (Devkit's own repo only; findings already present at HEAD never block).
 
+Anti-slop has no one-run control by design: CI's `anti-slop check --base` would still fail the PR,
+so a bypass would only move the failure later. To accept a finding deliberately, add a path-scoped
+`overrides` entry (or change the rule's severity) in the repository Oxlint config, where a reviewer
+sees it in the diff. In an overlay install the baseline is per-clone, so `devkit anti-slop create
+--force <paths>` adopts it locally. The FAIL output names the route for the mode it ran in.
+
 ## Judge outage: re-targeting, not bypassing
 
 A judge that cannot run is not a finding. Under `devkit ship` a dark provider fails the gate closed
