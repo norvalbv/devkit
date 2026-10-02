@@ -21,6 +21,7 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { type CheckResult, check } from '../doctor/check-result.mts';
+import { COMMIT_GATE_LOG_GLOB } from '../husky/gate-policy/commit-gate-log.mts';
 
 // decisions.mts vecIndexPath and the `.tmp` a crashed atomic write leaves; exact shapes, so `.md`
 // records in a `.decisions` decisionsDir stay tracked. Overlay git-excludes the same lines.
@@ -28,7 +29,8 @@ export const DECISIONS_INDEX_IGNORES = ['.decisions/index.json', '.decisions/ind
 
 // Each entry matches its writer verbatim: prefix-cache.mjs STORE_FILE, decisions/verdict-cache.mjs
 // STORE_FILE, review/cache.mjs CACHE_FILE, review/run-review.mjs progress (DEVKIT_REVIEW_PROGRESS),
-// review-target.sh's per-run output, commit-with-gate-capture.sh's log, reconcile-manifest-write,
+// review-target.sh's per-run output, commit-with-gate-capture.sh's log, the plain-commit gate log
+// (husky/gate-policy/commit-gate-log.mts), reconcile-manifest-write,
 // decisions.mts's embedding cache (outside .devkit/),
 // ship-intent.mts (which also PROBES the ignore with `git check-ignore` before writing, so the
 // recorded PR body can never precede its own ignore line as a stageable untracked file).
@@ -40,6 +42,7 @@ export const DEVKIT_CACHE_IGNORES = [
   '.devkit/review-progress-*.json',
   '.devkit/review-runs/',
   '.devkit/last-ship-gates-*.log',
+  COMMIT_GATE_LOG_GLOB,
   '.devkit/ship-intent-*',
   '.devkit/reconcile-manifest.json',
   '.devkit/telemetry/',

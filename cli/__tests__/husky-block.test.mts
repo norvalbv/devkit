@@ -649,7 +649,9 @@ describe('buildCommitMsgHook + installCommitMsgHook (the managed .husky/commit-m
     expect(hook.startsWith('#!/bin/sh')).toBe(true);
     expect(hook).toContain('export PATH');
     expect(hook).toContain('git rev-parse --git-path devkit-commit-attempt');
-    expect(hook).toContain("trap '__dk_clear_commit_state' EXIT");
+    expect(hook).toContain(
+      'command -v __dk_clear_commit_state >/dev/null 2>&1 && { __dk_clear_commit_state "$__dk_x" || :; }',
+    );
     expect(hook.trimEnd().endsWith('exit 0')).toBe(true); // fail-open exit 2 must never propagate
   });
 
