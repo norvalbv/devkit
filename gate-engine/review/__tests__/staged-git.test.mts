@@ -159,4 +159,41 @@ describe('review staged Git evidence', () => {
     ]);
     for (const entry of selected) expect(entry.files).toEqual(['src/a.ts']);
   });
+
+  // An overlay's guard.config.json is git-excluded: absent from the index, so the commit's policy
+  // must come from the working tree, not from defaults that know none of the consumer's roots.
+  const untrackedPolicy = (excluded: boolean) => {
+    const root = mkdtempSync(join(tmpdir(), 'review-overlay-policy-'));
+    roots.push(root);
+    execFileSync('git', ['init', '-q'], { cwd: root });
+    if (excluded) writeFileSync(join(root, '.git', 'info', 'exclude'), 'guard.config.json\n');
+    writeFileSync(
+      join(root, 'guard.config.json'),
+      `${JSON.stringify({
+        scanRoots: ['relay', 'src'],
+        review: { backendRoots: ['relay'], frontendRoots: ['src/renderer'] },
+      })}\n`,
+    );
+    for (const file of ['relay/index.ts', 'src/renderer/App.tsx']) {
+      mkdirSync(dirname(join(root, file)), { recursive: true });
+      writeFileSync(join(root, file), 'export const a = 1;\n');
+    }
+    execFileSync('git', ['add', 'relay/index.ts', 'src/renderer/App.tsx'], { cwd: root });
+    const selected = selectRepositoryReviewers(stagedFiles(root), resolveGuardConfig(root));
+    return Object.fromEntries(selected.map((entry) => [entry.reviewer.name, entry.files]));
+  };
+
+  it("selects by a git-ignored (overlay) config's own roots", () => {
+    const selected = untrackedPolicy(true);
+    expect(selected['api-security-reviewer']).toEqual(['relay/index.ts']);
+    expect(selected['frontend-security-reviewer']).toEqual(['src/renderer/App.tsx']);
+    expect(selected['correctness-reviewer']).toEqual(['relay/index.ts', 'src/renderer/App.tsx']);
+  });
+
+  it('keeps defaults for an untracked config git could still stage', () => {
+    const selected = untrackedPolicy(false);
+    // Default roots: backend is `src`, frontend is empty, and `relay` is outside scope.
+    expect(selected['api-security-reviewer']).toEqual(['src/renderer/App.tsx']);
+    expect(selected['frontend-security-reviewer']).toBeUndefined();
+  });
 });
