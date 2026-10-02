@@ -151,6 +151,8 @@ move utilities to module scope where possible.
 Write code, tests and comments that people and agents can understand years from now. A comment that
 cites "the EC1 edge case we talked about", a Shortcut ticket, or a gitignored local doc means
 nothing to a later reader. Write for an open-source contributor with no access to local context.
+Keep comments succinct: `guard-comments` blocks new comment paragraphs of three or more lines, and
+comments citing tickets or decision records.
 </rule>
 
 <rule name="file_size">
