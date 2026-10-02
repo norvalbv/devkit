@@ -142,10 +142,10 @@ while [ "$#" -gt 0 ]; do
       # mode flag or a misunderstanding. ship.mts rejects it earlier with the same guidance; this arm
       # is the backstop for a direct script invocation (tests, recovery hints).
       echo "--ready applies to --pr (marking an existing draft PR ready) — a new ship opens a ready PR by default; use --draft to open a draft" >&2; exit 1 ;;
-    --wait-ci)
-      # No --resume guard, unlike --base/--link: this changes nothing about WHAT ships. It is also
-      # not recorded, so a resume that wants the wait re-passes the flag (decision record).
-      WAIT_CI=1; shift ;;
+    --wait-ci|--wait-ci-required)
+      # No --resume guard, unlike --base/--link: neither changes WHAT ships. Neither is recorded, so
+      # a resume that wants the wait re-passes the flags (decision record).
+      if [ "$1" = --wait-ci ]; then WAIT_CI=1; else WAIT_CI_REQUIRED=1; fi; shift ;;
     --wait-ci-timeout)
       WAIT_CI_TIMEOUT="${2:?--wait-ci-timeout requires seconds}"; WAIT_CI_TIMEOUT_SET=1; shift 2 ;;
     --resume) echo "--resume must come FIRST: devkit ship --resume <branch> [--] <extra-path...>" >&2; exit 1 ;;
@@ -160,7 +160,7 @@ done
 # A real ship already runs the reviewers, so the modifier alone is a mistaken command, not a no-op.
 [ "$WITH_REVIEWERS" -eq 0 ] || [ "$DRY_GATES" -eq 1 ] || { echo "--with-reviewers requires --dry-gates (a real ship already runs the reviewers)" >&2; exit 1; }
 . "$SCRIPT_DIR/wait-ci/args.sh"
-ship_validate_wait_ci "$WAIT_CI" "$WAIT_CI_TIMEOUT" "$WAIT_CI_TIMEOUT_SET" "$DRY_GATES" || exit 1
+ship_validate_wait_ci "$WAIT_CI" "$WAIT_CI_TIMEOUT" "$WAIT_CI_TIMEOUT_SET" "${WAIT_CI_REQUIRED:-0}" "$DRY_GATES" || exit 1
 
 # Hoisted above the --resume load (which needs it); everything below the worktree ceremony reads it.
 ROOT=$(git rev-parse --show-toplevel)
@@ -1737,4 +1737,4 @@ git update-ref -d "$RECOVERY_GATE_ADDS_REF" 2>/dev/null || true
 
 # --wait-ci runs LAST: the push, PR, manifest, intent release and worktree/branch cleanup above are
 # all durable, so a wait that is killed, times out or reports red cannot cost this ship.
-[ "$WAIT_CI" -eq 0 ] || ship_run_wait_ci "$PR_NUM" "$REPO" "$WAIT_CI_TIMEOUT" "$PR_URL"
+[ "$WAIT_CI" -eq 0 ] || ship_run_wait_ci "$PR_NUM" "$REPO" "$WAIT_CI_TIMEOUT" "$PR_URL" "${WAIT_CI_REQUIRED:-0}"

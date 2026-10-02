@@ -106,14 +106,19 @@ Usage:
   --wait-ci           After the PR is open and every artifact is durable, poll its GitHub checks and
                       end with ONE verdict line on stderr: \`ship: ci-outcome=<passed|failed|
                       cancelled|no-checks|timed-out|unavailable> pr=<n> …\`. Progress prints only when
-                      the tally changes, plus a liveness line each minute. Polls ALL checks, not just
-                      the branch-protection required ones — a repo without branch protection reports
-                      an EMPTY required set, which would render a red PR green.
+                      the tally changes, plus a liveness line each minute. Polls ALL checks by
+                      default — see --wait-ci-required.
                       The verdict NEVER reaches the exit code: a red PR is not a failed ship, and an
                       agent reading non-zero would retry --resume against a record the push deleted.
                       Grep the line, or read the ship_ci telemetry row. Valid for a new ship and for
                       --pr. NOT replayed by --resume: it observes a PR that already exists rather
                       than describing what shipped, so re-request it on the retry.
+  --wait-ci-required  With --wait-ci only: wait on the branch-protection REQUIRED checks alone, so
+                      an advisory check (a review bot) neither holds the wait open nor turns it red.
+                      gh lists only required checks that have already REPORTED (cli/cli#8855): one
+                      that has not started yet is invisible. A branch without protection, or whose
+                      required checks have not reported, therefore ends in no-checks — never passed.
+                      The verdict line carries \`scope=required\`. NOT replayed by --resume.
   --wait-ci-timeout <s>  Bound for --wait-ci, 60..7200, default 900. The floor exists because below
                       it a "this repo has no checks" verdict is unreachable and would surface as a
                       timeout instead. A terminal result is confirmed over ~30s before it is

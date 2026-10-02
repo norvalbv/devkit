@@ -413,3 +413,106 @@ describe('the ephemeral worktree', () => {
     }
   });
 });
+
+describe('--wait-ci-required', () => {
+  /** gh as an UNPROTECTED repo answers: red unfiltered, and exit 1 "no required checks" when narrowed. */
+  const unprotectedStub = (log: string) =>
+    ghStub(
+      `printf '%s\\n' "$*" >> '${log}'
+      case "$2" in
+        checks)
+          case " $* " in *" --required "*) echo "no required checks reported on the 'x' branch" >&2; exit 1 ;; esac
+          printf '%s' '${RED}' ;;
+        *) echo "${PR_URL}" ;;
+      esac`,
+    );
+
+  it.each([
+    ['new ship', undefined],
+    ['re-push', reshipScript],
+  ])('is refused without --wait-ci on a %s', (_label, script) => {
+    const r = buildAndRun('main', 'git@github.com:acme/app.git', {
+      ...(script
+        ? {
+            script,
+            argv: ['feat/x', 't', '--pr', '--wait-ci-required', '--', 'note.txt'],
+          }
+        : { extraArgs: ['--wait-ci-required'] }),
+    });
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/--wait-ci-required has no effect without --wait-ci/);
+    expect(r.stderr).not.toMatch(FLAG_RE);
+  });
+
+  it('is rejected in a positional slot instead of shipping a branch named after it', () => {
+    const r = buildAndRun('main', 'git@github.com:acme/app.git', {
+      argv: ['--wait-ci-required', 'title', 'note.txt'],
+    });
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/must come FIRST, before any flag/);
+  });
+
+  it('is accepted under --resume, where the record cannot carry it', () => {
+    const r = buildAndRun('main', 'git@github.com:acme/app.git', {
+      argv: ['--resume', 'feat/never-shipped', '--wait-ci', '--wait-ci-required'],
+    });
+    expect(r.stderr).not.toMatch(FLAG_RE);
+    expect(r.stderr).not.toMatch(/has no effect without --wait-ci/);
+  });
+
+  it('reports no-checks, never passed, for a red PR on a repo without branch protection', () => {
+    const log = argvLog();
+    const { dir, env } = seedShipRepoLocalRemote();
+    writeFileSync(join(dir, 'note.txt'), 'hello\n');
+    const r = spawnSync(
+      '/bin/bash',
+      [scriptPath, 'feat/req', 't', '--wait-ci', '--wait-ci-required', 'note.txt'],
+      {
+        cwd: dir,
+        input: 'b\n',
+        encoding: 'utf8',
+        env: {
+          ...env,
+          ...FAST,
+          PATH: `${unprotectedStub(log)}:${process.env.PATH}`,
+        },
+      },
+    );
+    expect(r.status, r.stderr).toBe(0);
+    expect(lines(log).find((l) => l.startsWith('pr checks'))).toContain('--required');
+    expect(r.stderr).toContain('ship: ci-outcome=no-checks pr=42 scope=required checks=0');
+    expect(r.stderr).not.toContain('ci-outcome=passed');
+  });
+
+  it.each([
+    ['the plain re-push', []],
+    ['the --ready flip', ['--ready']],
+  ])('reaches gh from %s', (_label, extra) => {
+    const { dir, env, ghLog } = bodyUpdateRepo();
+    writeFileSync(join(dir, 'a.ts'), 'v2\n');
+    const r = spawnSync(
+      '/bin/bash',
+      [
+        reshipScript,
+        'feat/pr',
+        'add v2',
+        '--pr',
+        ...extra,
+        '--wait-ci',
+        '--wait-ci-required',
+        '--no-qavis-publish',
+        '--',
+        'a.ts',
+      ],
+      {
+        cwd: dir,
+        input: 'body\n',
+        encoding: 'utf8',
+        env: { ...process.env, ...env, GH_CHECKS_JSON: GREEN, ...FAST },
+      },
+    );
+    expect(r.status, r.stderr).toBe(0);
+    expect(readFileSync(ghLog, 'utf8')).toMatch(/^pr checks 7 .*--required$/m);
+    expect(r.stderr).toContain('ship: ci-outcome=passed pr=7 scope=required checks=1');
+  });
+});
