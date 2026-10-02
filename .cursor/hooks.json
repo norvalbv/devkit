@@ -12,6 +12,11 @@
         "matcher": "Write",
         "failClosed": false
       }
+    ],
+    "afterFileEdit": [
+      {
+        "command": ".cursor/hooks/anti-slop-preflight.sh"
+      }
     ]
   }
 }

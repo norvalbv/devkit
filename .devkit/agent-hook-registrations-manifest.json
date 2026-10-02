@@ -27,6 +27,18 @@
       }
     },
     {
+      "registrationId": "anti-slop:preflight",
+      "ownerId": "antiSlop",
+      "provider": "claude",
+      "installScope": "shared",
+      "destinationRel": ".claude/settings.json",
+      "native": {
+        "event": "PostToolUse",
+        "matcher": "Edit|Write|MultiEdit",
+        "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/anti-slop-preflight.sh\""
+      }
+    },
+    {
       "registrationId": "decisions:pre-edit",
       "ownerId": "decisions",
       "provider": "claude",
@@ -72,6 +84,18 @@
         "event": "PreToolUse",
         "matcher": "ExitPlanMode|Task|Agent",
         "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/prior-art-gate.mjs\""
+      }
+    },
+    {
+      "registrationId": "anti-slop:preflight",
+      "ownerId": "antiSlop",
+      "provider": "cursor",
+      "installScope": "shared",
+      "destinationRel": ".cursor/hooks.json",
+      "native": {
+        "event": "afterFileEdit",
+        "matcher": null,
+        "command": ".cursor/hooks/anti-slop-preflight.sh"
       }
     },
     {
