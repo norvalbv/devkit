@@ -17,6 +17,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { buildCommitMsgHook } from '../lib/husky/commit-msg-block.mts';
+import { BIN_DIRS } from '../lib/husky/gate-policy/block-helpers.mts';
 import {
   buildOverlayCommitMsgHook,
   describeOverlayCommitMsg,
@@ -39,8 +40,9 @@ interface RunOpts {
   pkgRel?: string;
   scriptDir?: string;
   chain?: string | null; // body of the repo's own commit-msg; null = none
-  compRc?: number | null; // null = guard-review absent from PATH
+  compRc?: number | null; // null = guard-review absent from devkit's bin dir
   sentryRc?: number | null;
+  devkit?: boolean; // false = no global devkit (its guard-deterministic) on PATH
   shell?: string;
   dirPrefix?: string;
   env?: Record<string, string>;
@@ -53,6 +55,7 @@ function runOverlayCommitMsg({
   chain = null,
   compRc = 0,
   sentryRc = 0,
+  devkit = true,
   shell = 'sh',
   dirPrefix = 'dk-ov-cmsg-',
   env = {},
@@ -73,6 +76,7 @@ function runOverlayCommitMsg({
     writeFileSync(p, `#!/bin/sh\necho "${log}" >> "$HOME/calls.log"\nexit ${rc}\n`);
     chmodSync(p, 0o755);
   };
+  stub('guard-deterministic', devkit ? 0 : null);
   stub('guard-review', compRc);
   stub('guard-sentry', sentryRc);
   const chainRel = `${scriptDir}/commit-msg`;
@@ -114,11 +118,11 @@ function runOverlayCommitMsg({
 const CHAIN_LOGS_ARG = '#!/bin/sh\necho "chain $1" >> "$HOME/calls.log"\n[ -f "$1" ] || exit 7\n';
 
 describe('buildOverlayCommitMsgHook — generated shape', () => {
-  it('uses command -v-guarded GLOBAL bins, never the package bin dir (overlay is package-less)', () => {
+  it('resolves the GLOBAL bin dir, fail-closed, never `bun pm bin` (overlay is package-less)', () => {
     const hook = buildOverlayCommitMsgHook({ guards: ['review', 'sentry'] }, '.husky/commit-msg');
-    expect(hook).toContain('command -v guard-review');
-    expect(hook).toContain('command -v guard-sentry');
-    expect(hook).not.toContain('__dk_package_bin_dir');
+    expect(hook).toContain(BIN_DIRS.global.open);
+    expect(hook).not.toContain('bun pm bin');
+    expect(hook).not.toContain('command -v guard-review');
     expect(hook).toContain('# devkit:guard-completeness');
     expect(hook).toContain('# devkit:guard-sentry');
   });
@@ -140,10 +144,16 @@ describe('overlay commit-msg hook — executed under sh -e', () => {
     expect(r.stateExists).toBe(false);
   });
 
-  it('fails OPEN when devkit is not installed globally — the commit and the repo hook proceed', () => {
-    const r = runOverlayCommitMsg({ compRc: null, sentryRc: null, chain: CHAIN_LOGS_ARG });
-    expect(r.status).toBe(0);
-    expect(r.calls).toContain('chain .git/COMMIT_EDITMSG');
+  it('fails CLOSED when devkit is not installed globally — no judge, no repo hook', () => {
+    const r = runOverlayCommitMsg({ devkit: false, chain: CHAIN_LOGS_ARG });
+    expect(r.status).toBe(1);
+    expect(r.calls).toBe('');
+  });
+
+  it('a judge missing from an installed devkit blocks instead of skipping it', () => {
+    const r = runOverlayCommitMsg({ compRc: null, chain: CHAIN_LOGS_ARG });
+    expect(r.status).toBe(1);
+    expect(r.calls).not.toContain('chain ');
   });
 
   it('a judge outage (exit 2) continues to the repo hook', () => {
@@ -234,8 +244,8 @@ describe('overlay commit-msg hook — executed under sh -e', () => {
 
 describe('judgesAlsoInRepoHook — advisory double-run detection only', () => {
   it('recognises the calls in a real package-mode (quoted bin path) or standalone hook', () => {
-    for (const standalone of [false, true]) {
-      const hook = buildCommitMsgHook({ guards: ['review', 'sentry'] }, '', { standalone });
+    for (const binDir of ['package', 'global-optional'] as const) {
+      const hook = buildCommitMsgHook({ guards: ['review', 'sentry'] }, '', binDir);
       expect(judgesAlsoInRepoHook(hook).sort()).toEqual(['review', 'sentry']);
     }
   });

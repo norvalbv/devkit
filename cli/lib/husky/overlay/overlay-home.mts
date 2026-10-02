@@ -28,6 +28,7 @@ import { detectGitRoot } from '../../detect-git-root.mts';
 import { gitOut, isInside, isInsideResolved, sameDir } from '../../doctor/hooks-path.mts';
 import { DEVKIT_CACHE_IGNORES, LEGACY_GITIGNORE_LINES } from '../../install/gitignore-cache.mts';
 import { shQuote } from '../../ship/redact-secrets.mts';
+import { BIN_DIRS } from '../gate-policy/block-helpers.mts';
 
 export const LOCAL_HOOKS = '.devkit/hooks';
 const OURS_ABSOLUTE_RE = /\/\.devkit\/hooks\/?$/;
@@ -391,13 +392,6 @@ const safeList = (dir: string) => {
   }
 };
 
-/** devkit's global bin dir, from its orchestrator; an overlay commit cannot run its gates without it. */
-const DEVKIT_BIN_DIR_FRAGMENT = `__dk_devkit_bin_dir=$(command -v guard-deterministic) || {
-    echo "devkit: not installed on PATH, and every commit here runs devkit's gates — install devkit, then commit again" >&2
-    exit 1
-}
-__dk_devkit_bin_dir=\${__dk_devkit_bin_dir%/*}`;
-
 const shGlob = (glob: string) =>
   glob
     .split('*')
@@ -446,11 +440,11 @@ ${[...globs, ...children].join('\n')}
  * the home's overlay via the one TS projector, or fail. Under the husky shim `../..` is physical. */
 export function projectionPrelude(root: string, pkgRel: string): string {
   const pkg = pkgRel ? ` --pkg ${shQuote(pkgRel)}` : '';
-  return `${DEVKIT_BIN_DIR_FRAGMENT}
+  return `${BIN_DIRS.global.open}
 __dk_home=$(cd \${DEVKIT_VIA_HUSKY_INIT:+-P} "$(dirname -- "$0")/../.." && pwd -P) || exit 1
 if [ "$__dk_home" != "$(pwd -P)" ]; then
 ${projectedTest(root, pkgRel).replace(/^(?=.)/gm, '    ')}
-    __dk_projected || "$__dk_devkit_bin_dir/devkit" sync-worktree --home "$__dk_home"${pkg} || exit 1
+    __dk_projected || "$__dk_package_bin_dir/devkit" sync-worktree --home "$__dk_home"${pkg} || exit 1
 fi`;
 }
 
