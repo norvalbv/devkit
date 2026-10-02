@@ -24,6 +24,7 @@ import {
   replaceGuardBlock,
   wrapGuardBlock,
 } from './husky-block.mts';
+import { hookRunnable } from './husky.mts';
 import { invokeJudge, sentryFragment } from './sentry-fragments.mts';
 
 /** The guard ids whose gates run at commit-msg (not pre-commit), in emit order. */
@@ -205,6 +206,22 @@ export function removeCommitMsgBlock(hookRoot: string, pkgRel: string, dryRun = 
   return true;
 }
 
+/** Whether the installed commit-msg block is exactly the generator's — the only state whose run
+ * order doctor may claim. No commit-msg guard selected → nothing to verify. */
+export function commitMsgBlockMatches(cwd: string, guards: string[], standalone: boolean): boolean {
+  const { gitRoot, pkgRel } = detectGitRoot(cwd);
+  const expected = buildCommitMsgBlock({ guards }, pkgRel, { standalone });
+  if (expected === null) return true;
+  const hookPath = join(gitRoot, '.husky', 'commit-msg');
+  // Standalone git runs the file directly, so it must be executable; husky's wrapper uses `sh`.
+  if (standalone && !hookRunnable(hookPath)) return false;
+  try {
+    return extractGuardBlock(readFileSync(hookPath, 'utf8'), pkgRel)?.trim() === expected.trim();
+  } catch {
+    return false; // missing, or removed by a concurrent init/upgrade since the check above
+  }
+}
+
 /**
  * Doctor check for the managed commit-msg hook — only meaningful when a commit-msg guard is
  * selected (the caller gates on `commitMsgGuards(...).length`). MISSING/DRIFT heal via
@@ -227,7 +244,8 @@ export function checkCommitMsgHook(cwd: string, selectedGuards: string[]): Check
   const block = extractGuardBlock(readFileSync(hookPath, 'utf8'), pkgRel) ?? '';
   // Symmetric sentinel check (same depth as pre-commit's checkHusky): a fragment for a DESELECTED
   // guard lingering in the block is drift too — a stale hard gate would keep blocking commits.
-  const present = [...block.matchAll(/^# devkit:([a-z-]+)$/gm)].map((m) => m[1]);
+  // Only `guard-*` sentinels are gates; infrastructure ones (the commit-index capture) are not.
+  const present = [...block.matchAll(/^# devkit:(guard-[a-z-]+)$/gm)].map((m) => m[1]);
   const extra = present.filter((id) => !wanted.includes(id));
   if (extra.length) {
     return {

@@ -14,8 +14,15 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { REVIEWABLE_GUARD_IDS } from '../components.mts';
 import { detectGitRoot } from '../detect-git-root.mts';
-import { markEnd, markStart } from '../husky/husky.mts';
+import { hookRunnable, markEnd, markStart } from '../husky/husky.mts';
+import { commitMsgBlockMatches } from '../husky/commit-msg-block.mts';
+import {
+  formatGateOrder,
+  type GateOrderSelection,
+  gateRunOrder,
+} from '../husky/gate-policy/gate-order.mts';
 import { extractGuardBlock, QAVIS_ADVISORY_ID } from '../husky/husky-block.mts';
+import { reviewHookDrift } from '../husky/review-drift.mts';
 import { installHealAlias } from '../husky/overlay/heal-alias.mts';
 import { overlayHooksPath } from '../husky/overlay/overlay-home.mts';
 import { firstLine } from '../standalone.mts';
@@ -50,7 +57,8 @@ export function repointHooksPath(gitRoot: string, hookOk: boolean): boolean {
 // Selection-aware: only the SELECTED guards must be present in the block (a deselected
 // guard being absent is correct, not drift). Monorepo: the hook lives at the git root and the
 // block is package-scoped — resolve both from cwd.
-export function checkHusky(cwd: string, selectedGuards: string[]): CheckResult {
+export function checkHusky(cwd: string, sel: GateOrderSelection, standalone = false): CheckResult {
+  const selectedGuards = sel.guards ?? [];
   const { gitRoot, pkgRel } = detectGitRoot(cwd);
   const hookPath = join(gitRoot, '.husky', 'pre-commit');
   if (!existsSync(hookPath)) {
@@ -107,10 +115,20 @@ export function checkHusky(cwd: string, selectedGuards: string[]): CheckResult {
       false,
     );
   }
+  // Presence checks pass a hand-reordered block, so an order is claimed only for exact generator output.
+  if (reviewHookDrift(cwd) !== null || (standalone && !hookRunnable(hookPath)))
+    return check(
+      '.husky/pre-commit',
+      'OK',
+      'block present — gate order not verified: the hook differs from the generator or git cannot execute it (`devkit init --force` regenerates it)',
+    );
+  const order = formatGateOrder(gateRunOrder(sel, standalone ? 'standalone' : 'package', pkgRel), {
+    commitMsgVerified: commitMsgBlockMatches(cwd, selectedGuards, standalone),
+  });
   return check(
     '.husky/pre-commit',
     'OK',
-    gates.length ? `block calls: ${gates.join(', ')}` : 'block present (no guards selected)',
+    order ? `gate order — ${order}` : 'block present (no guards selected)',
   );
 }
 
@@ -464,9 +482,13 @@ export function replaceableHooksPathPin(cwd: string): ReplaceableHooksPathPin | 
  * growing its own call site — cli/commands/doctor.mts sits on its recorded size budget and the
  * ratchet is shrink-only.
  */
-export function hookChecks(cwd: string, guards: string[]): CheckResult[] {
+export function hookChecks(
+  cwd: string,
+  sel: GateOrderSelection,
+  standalone = false,
+): CheckResult[] {
   return [
-    checkHusky(cwd, guards),
+    checkHusky(cwd, sel, standalone),
     checkHookRunner(cwd),
     ...checkHooksPathOwner(cwd),
     checkFailOpenGuards(cwd),

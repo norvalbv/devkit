@@ -20,6 +20,8 @@ import {
 import { selectedHookAssets } from '../install/hook-registration-ledger/selection.mts';
 import { checkOxcCapability } from '../install/oxc/lifecycle.mts';
 import { commitMsgGuards } from '../husky/commit-msg-block.mts';
+import { formatGateOrder, gateRunOrder } from '../husky/gate-policy/gate-order.mts';
+import { hookRunnable } from '../husky/husky.mts';
 import {
   LOCAL_HOOKS,
   overlayHome,
@@ -87,6 +89,16 @@ export async function runOverlayDoctor(
       '  ⚠ .devkit/hooks/pre-commit is STALE (predates the current devkit) — run `devkit doctor --fix` to refresh',
     );
   else console.log('  ✓ .devkit/hooks/pre-commit present');
+  // Claimed only for generator-matching hooks git runs via core.hooksPath on ours; a global shim's
+  // chain is not verified here. A missing/stale/inactive hook is named on its own row.
+  const cm = sync.commitMsg;
+  const hooksDir = join(gitRoot, LOCAL_HOOKS);
+  const order = formatGateOrder(gateRunOrder(cfg.components ?? {}, 'overlay'), {
+    commitMsgVerified:
+      pathOk && (fix || (!cm.missing && !cm.drift)) && hookRunnable(join(hooksDir, 'commit-msg')),
+  });
+  if (order && pathOk && hookRunnable(join(hooksDir, 'pre-commit')) && (fix || !sync.drift))
+    console.log(`    gate order — ${order}`);
   console.log(
     `  ${pathOk ? '✓' : '⚠'} core.hooksPath = ${healed ? `${expected} (re-pointed from ${hooksPath || '(unset)'}; husky reclaims it on every install — make it durable with \`devkit init --overlay --global-commit-gate\`)` : hooksPath || '(unset)'}${hooksPath === LOCAL_HOOKS && !pathOk ? ' — RELATIVE, so every linked worktree runs no hooks at all;' : ''}${pathOk ? '' : ` — heal with \`git ${HEAL_ALIAS_NAME}\` (re-points it), \`devkit doctor --fix\`, or re-run \`devkit init --overlay\``}`,
   );
