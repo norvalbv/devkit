@@ -38,6 +38,7 @@ export interface LegsFixture {
   local: { status: 'reached' | 'unavailable' | 'failed'; declared: number; resolved: number };
   github: 'reached' | 'unavailable' | 'failed';
   web: 'reached' | 'unavailable' | 'failed';
+  papers: 'reached' | 'unavailable' | 'failed';
   'deep-research': 'reached' | 'unavailable' | 'failed';
 }
 
@@ -46,6 +47,7 @@ export const ALL_LEGS_REACHED: LegsFixture = {
   local: { status: 'reached', declared: 1, resolved: 2 },
   github: 'reached',
   web: 'reached',
+  papers: 'reached',
   'deep-research': 'unavailable',
 };
 

@@ -39,15 +39,16 @@ Start by understanding the current project context, then ask questions one at a 
   - SKIP trivial creative turns (a rename, copy tweak, single-component edit) with a one-line note.
   - SKIP with the note `Prior-art: skipped — no reachable research leg` ONLY when the LOCAL leg is
     dark too: no declared `research.referenceCheckouts` glob resolves, AND `gh auth status` fails,
-    AND no web tool, AND no deep-research MCP. A resolved reference checkout is a reachable leg on
-    its own — it is the first leg by rule and the one that decides these calls offline — so external
-    darkness alone is never a reason to skip. (Under total darkness the consumer's own record is
-    still readable, but the `guard-decisions query` above has just surveyed it.)
+    AND no web tool, AND no paper-search tool, AND no deep-research MCP. A resolved reference
+    checkout is a reachable leg on its own — it is the first leg by rule and the one that decides
+    these calls offline — so external darkness alone is never a reason to skip. (Under total
+    darkness the consumer's own record is still readable, but the `guard-decisions query` above has
+    just surveyed it.)
   The verdict is **advisory but must be acknowledged, never dropped**:
   - `SOLVED_ELSEWHERE` / `DISSOLVE_FRAME` → present the cited finding and pose the found
     alternative/reframe as the LEADING option among the 2-3 you offer.
   - `GENUINE_NEW_WORK` → proceed; carry the absence evidence into the plan's context. (Sanity check:
-    if its own `legs` show a dark external leg or zero resolved checkouts, record it as
+    if its own `legs` show no external leg reached, or zero resolved checkouts, record it as
     `INSUFFICIENT_EVIDENCE` instead.)
   - `INSUFFICIENT_EVIDENCE` / `aborted` / invalid JSON → say "prior art unverified" and continue;
     never treat it as clearance or as a blocker.
