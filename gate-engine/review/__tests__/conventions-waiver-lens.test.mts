@@ -240,6 +240,7 @@ describe('applyOverrideValve — conventions waiver across anchor drift (sc-3324
     applyOverrideValve(sel, res2, cwd, io);
     expect(res2.status).toBe('pass');
     expect(res2.waivers?.map((w) => w.fingerprint)).toEqual([fp]);
+    expect(res2.blocking).toBeUndefined();
   });
 
   it('the same waiver does not pass a different rule in the same file', () => {
@@ -270,6 +271,11 @@ describe('applyOverrideValve — conventions waiver across anchor drift (sc-3324
     expect(res.status).toBe('fail');
     expect(res.waivers).toHaveLength(1);
     expect(res.reason).toContain('src/flows.ts@CLAUDE.md:20');
+    // The structured twin of the prose (sc-3212): the digest lists this without parsing `reason`.
+    const lens = 'src/flows.ts@CLAUDE.md:20';
+    expect(res.blocking).toEqual([
+      { lens, fp: fingerprint('conventions-reviewer', lens, 'DIFF-UNCHANGED') },
+    ]);
   });
 
   it('prefers the contract-validated lenses the cascade already computed', () => {
@@ -310,5 +316,20 @@ describe('parseConventionFindings — ruleQuote', () => {
   it('carries the verbatim VIOLATION quote', () => {
     const [f] = parseConventionFindings(transcript(SIZE_RULE, 'x — src/a.ts:4'));
     expect(f?.ruleQuote).toBe('Keep files under 500 lines.');
+  });
+});
+
+describe('shellWord — the one quoting rule every pasteable command shares', () => {
+  it('leaves a plain word bare, including % and a mid-word #', async () => {
+    const { shellWord } = await import('../valve/shell-word.mts');
+    expect(shellWord('correctness-reviewer:src/a%b.ts@CLAUDE.md:1#L2')).toBe(
+      'correctness-reviewer:src/a%b.ts@CLAUDE.md:1#L2',
+    );
+  });
+
+  it('quotes a leading # (a shell comment), spaces and quotes', async () => {
+    const { shellWord } = await import('../valve/shell-word.mts');
+    expect(shellWord('#notes.md')).toBe("'#notes.md'");
+    expect(shellWord("it's here.ts")).toBe("'it'\\''s here.ts'");
   });
 });

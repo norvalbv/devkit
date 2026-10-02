@@ -1,5 +1,6 @@
 import { splitDiffByFile } from '../judge/diff-focus.mts';
 import { unquoteGitPath } from './lens/chunk.mts';
+import { shellWord } from './valve/shell-word.mts';
 // Capped, omission-accounted stdin evidence for a checklist-less gate judge that has no Bash of
 // its own to fetch its own diff (sc-1060's completeness lesson, generalized). The old contract was
 // positionally sliced at a blunt byte cap — every byte past the slice point silently vanished, and
@@ -129,9 +130,6 @@ function segmentPath(seg: string): string {
   }
   return seg.match(SEGMENT_PATH_RE)?.[1] ?? '(unknown path)';
 }
-
-/** One shell word: a plain path stays byte-identical; anything else is single-quoted. */
-const shellWord = (s: string) => (/^[\w@%+=:,./-]+$/.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`);
 
 const diffHint = (label: string) => `run \`git diff --cached -- ${shellWord(label)}\``;
 

@@ -39,6 +39,7 @@ import { CORRECTNESS_OVERRIDES_FILE as OVERRIDES_FILE } from '../deterministic/g
 import { diffCacheIdentity } from '../judge/diff-focus.mts';
 import { emitGateEvent } from '../judge/gate-events.mts';
 import { reviewBaseContext, shortSha } from './evidence/base-context.mts';
+import { shellWord } from './valve/shell-word.mts';
 import {
   conventionWaiverLenses,
   parseConventionFindingCandidates,
@@ -384,15 +385,13 @@ export function applyOverrideValve(
     res.status = 'pass';
     res.reason = `all ${suppressed.length} finding(s) overridden`;
   } else {
-    res.reason = blockingNote(sel.reviewer.name, blocking, reviewBaseContext(cwd).baseSha);
+    const baseSha = reviewBaseContext(cwd).baseSha;
+    res.reason = blockingNote(sel.reviewer.name, blocking, baseSha);
+    const base = baseSha ? shortSha(baseSha) : undefined;
+    res.blocking = blocking.map((b) => ({ ...b, base }));
   }
   return disposition;
 }
-
-// A conventions lens embeds the cited file path, which may hold spaces or shell metacharacters.
-const SHELL_SAFE_WORD_RE = /^[\w@./:#+=,-]+$/;
-const shellWord = (word: string) =>
-  SHELL_SAFE_WORD_RE.test(word) ? word : `'${word.replaceAll("'", "'\\''")}'`;
 
 /** The human-facing block note for un-overridden findings — prints the exact override affordance.
  * The `--base` the command carries is the tree the finding was judged against: it makes the copied
