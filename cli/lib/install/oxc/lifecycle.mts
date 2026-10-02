@@ -133,6 +133,11 @@ export function resolveOxlintEntryConfig(cwd: string): string | null {
   return existsSync(join(cwd, OVERLAY_ENTRY_REL)) ? OVERLAY_ENTRY_REL : null;
 }
 
+/** Overlay install per the manifest stamp alone — true even when the entry file has gone missing. */
+export function isOverlayOxcInstall(cwd: string): boolean {
+  return isOverlayManifest(readManifest(cwd));
+}
+
 /**
  * The read-side mode stamp, as ONE predicate every reader shares. Compared against the only filename
  * devkit writes, so a manifest naming another path cannot redirect a lint's whole ruleset.

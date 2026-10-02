@@ -21,6 +21,7 @@ import {
   withBaseAntiSlopSnapshot,
 } from './git-snapshot.mts';
 import { readManagedAntiSlopActivationEvidence } from './managed-state.mts';
+import { ACCEPT_VIA_OVERRIDE } from './report/remedy.mts';
 import {
   creditRelocatedGrowth,
   formatSources,
@@ -253,8 +254,9 @@ export function checkBaselineEnvelope(
       `BASELINE-GROWTH ${entry.ruleId} ${entry.file} (+${entry.additionalCount} adopted finding(s))`,
     );
   }
+  // Overlay never reaches here (no committed base), so the override route is always the right one.
   failLine(
-    'anti-slop: FAIL — the committed baseline may only shrink; fix the finding instead of adopting it',
+    `anti-slop: FAIL — the committed baseline may only shrink; fix the finding instead of adopting it, or ${ACCEPT_VIA_OVERRIDE}`,
   );
   return 1;
 }
@@ -296,7 +298,7 @@ export function refuseCommittedGrowth(
     );
   }
   console.error(
-    "anti-slop: create refused — baseline unchanged, because the commit gate would reject it for the reason above; `devkit anti-slop check <paths>` lists findings to fix, or change the rule's severity or scoped override in the repository Oxlint config",
+    `anti-slop: create refused — baseline unchanged, because the commit gate would reject it for the reason above; \`devkit anti-slop check <paths>\` lists findings to fix, or ${ACCEPT_VIA_OVERRIDE}`,
   );
   return true;
 }

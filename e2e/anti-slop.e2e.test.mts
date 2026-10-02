@@ -198,6 +198,8 @@ describe('e2e: packed anti-slop capability', () => {
     expect(refusedAdoption.status, out(refusedAdoption)).toBe(2);
     expect(out(refusedAdoption)).toContain('BASELINE-GROWTH');
     expect(out(refusedAdoption)).toContain('the committed baseline may only shrink');
+    // sc-3469: the refusal names the sanctioned acceptance route, not only what is forbidden.
+    expect(out(refusedAdoption)).toMatch(/scoped override in the repository Oxlint config/u);
     expect(readFileSync(baselinePath, 'utf8')).toBe(committedBaseline);
     // Outside Git create cannot see HEAD and writes the growth, so the gates stay the enforcement
     // point for a baseline grown where the pre-check could not run.

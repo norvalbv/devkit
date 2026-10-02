@@ -31,6 +31,7 @@ import {
   ANTI_SLOP_BASELINE_REL,
 } from '../../lib/install/anti-slop/constants.mts';
 import type { FindingGroup } from '../../lib/install/anti-slop/diagnostics.mts';
+import { antiSlopRemedyLines } from '../../lib/install/anti-slop/report/remedy.mts';
 import {
   type GitBaselineEnvelope,
   gitBaselineEnvelope,
@@ -59,7 +60,7 @@ import {
   collectAntiSlopGroups,
   resolveAntiSlopScope,
 } from '../../lib/install/anti-slop/runner.mts';
-import { resolveOxlintEntryConfig } from '../../lib/install/oxc/lifecycle.mts';
+import { isOverlayOxcInstall, resolveOxlintEntryConfig } from '../../lib/install/oxc/lifecycle.mts';
 
 export const meta = {
   name: 'anti-slop',
@@ -298,6 +299,12 @@ function check(
     }
     if (errors.length > 0) {
       failLine(`anti-slop: FAIL — ${newErrorCount} new error finding(s); baseline unchanged`);
+      const overlay = isOverlayOxcInstall(cwd);
+      for (const line of antiSlopRemedyLines(
+        errors.map((group) => group.ruleId),
+        overlay,
+      ))
+        console.error(line);
       // Reported on the FAIL path too: a committer reading a block needs the same standing about
       // what this gate does not enforce — no committed base means no rename forgiveness.
       reportOverlayContract(cwd);

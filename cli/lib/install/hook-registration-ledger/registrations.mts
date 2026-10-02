@@ -217,6 +217,16 @@ export const HOOK_REGISTRATIONS: Record<string, HookRegistration[]> = {
       command: 'bash "$CLAUDE_PROJECT_DIR/.claude/hooks/strategic-compactor.sh"',
     },
   ],
+  // antiSlop: the authoring-time check (sc-3469), owned by the policy it runs. The
+  // Edit|Write|MultiEdit matcher is what the Cursor mirror maps to afterFileEdit.
+  antiSlop: [
+    {
+      registrationId: 'anti-slop:preflight',
+      event: 'PostToolUse',
+      matcher: 'Edit|Write|MultiEdit',
+      command: 'bash "$CLAUDE_PROJECT_DIR/.claude/hooks/anti-slop-preflight.sh"',
+    },
+  ],
   // fallow: devkit's staged-scope wrapper. Bound to the FALLOW component, not agentHooks — a repo
   // can adopt fallow without opting into the agent-hook bundle (the primary consumer does exactly
   // that). Bare runner + path so the Cursor mirror reduces cleanly.
