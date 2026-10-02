@@ -5,10 +5,10 @@
  * did this commit change", so a deletion and a regular-file/symlink swap both count. Every case
  * below is a status an allowlist has already been observed to drop.
  */
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   assertBaselineTrackable,
@@ -266,5 +266,81 @@ describe('assertBaselineTrackable — naming base selection, but only inside a s
     } finally {
       delete process.env.DEVKIT_SHIP_BASE_SHA;
     }
+  });
+});
+
+// sc-2772: a stand-down probe must not also print git's failure. Asserted from a child process,
+// because an inherited fd 2 never passes through this process's stderr stream.
+describe('stand-down probes write nothing to stderr (sc-2772)', () => {
+  const MODULE = new URL('../git-index.mts', import.meta.url).href;
+
+  // GIT_* stripped and a ceiling set, so a hook or ship environment (GIT_INDEX_FILE, GIT_DIR)
+  // cannot resolve the probes into the real repository.
+  function probe(cwd: string, body: string) {
+    const env = Object.fromEntries(
+      Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')),
+    );
+    const script = `const m = await import(${JSON.stringify(MODULE)});\nconst cwd = process.cwd();\n${body}`;
+    const result = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+      cwd,
+      encoding: 'utf8',
+      env: { ...env, GIT_CEILING_DIRECTORIES: dirname(cwd) },
+    });
+    return {
+      status: result.status,
+      out: result.stdout.trim() ? JSON.parse(result.stdout) : undefined,
+      stderr: result.stderr,
+    };
+  }
+
+  const ALL_PROBES = `console.log(JSON.stringify([
+  m.stagedTouchedSet(cwd), m.stagedSet(cwd), m.hasStagedFiles(cwd), m.gitPrefix(cwd), m.indexFiles(cwd),
+]));`;
+
+  it('outside a repository: every probe stands down, silently', () => {
+    const root = mkdtempSync(join(tmpdir(), 'devkit-quiet-nogit-'));
+    cleanup.push(root);
+    const result = probe(root, ALL_PROBES);
+    expect(result.stderr).toBe('');
+    expect(result.status).toBe(0);
+    expect(result.out).toEqual([null, null, false, '', null]);
+  });
+
+  // An interrupted write or a disk fault leaves .git/index unreadable inside a real repository —
+  // the in-repo failure shape, where git prints "index file corrupt" instead of usage text.
+  it('with a corrupt index: the index readers stand down, silently', () => {
+    const root = seed();
+    writeFileSync(join(root, '.git', 'index'), 'not an index\n');
+    const result = probe(
+      root,
+      `console.log(JSON.stringify([m.stagedTouchedSet(cwd), m.stagedSet(cwd), m.hasStagedFiles(cwd), m.indexFiles(cwd)]));`,
+    );
+    expect(result.stderr).toBe('');
+    expect(result.out).toEqual([null, null, false, null]);
+  });
+
+  // The frozen reader shares touchedPaths, whose primary call was the noisy one. A snapshot whose
+  // objects no longer resolve (pruned, or a stale freeze replayed elsewhere) must stand down quietly.
+  it('frozenTouchedSet over objects that no longer resolve: null, silently', () => {
+    const root = seed();
+    const missing = 'f'.repeat(40);
+    const result = probe(
+      root,
+      `console.log(JSON.stringify(m.frozenTouchedSet(cwd, { base: '${missing}', mergeHead: null, tree: '${missing}' })));`,
+    );
+    expect(result.stderr).toBe('');
+    expect(result.out).toBeNull();
+  });
+
+  // Deliberate carve-out (sc-1959): this failure is pullRequestScope's exit 2, and git's reason is
+  // the only cause it shows — a shallow or unrelated PR checkout has no merge base.
+  it("changedSetSince keeps git's reason visible when the three-dot diff fails", () => {
+    const root = seed();
+    const base = git(root, 'rev-parse', 'HEAD');
+    git(root, 'checkout', '-q', '--orphan', 'unrelated');
+    git(root, 'commit', '-qm', 'unrelated root');
+    const result = probe(root, `console.log(JSON.stringify(m.changedSetSince(cwd, '${base}')));`);
+    expect(result.out).toBeNull();
+    expect(result.stderr).toMatch(/no merge base/i);
   });
 });
