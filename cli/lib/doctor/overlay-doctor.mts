@@ -21,11 +21,11 @@ import { selectedHookAssets } from '../install/hook-registration-ledger/selectio
 import { checkOxcCapability } from '../install/oxc/lifecycle.mts';
 import { commitMsgGuards } from '../husky/commit-msg-block.mts';
 import {
+  hasOwnOverlay,
   LOCAL_HOOKS,
   overlayHome,
   overlayHooksPath,
   projectionGaps,
-  projectOverlayIntoWorktree,
   repairProjection,
   worktrees,
 } from '../husky/overlay/overlay-home.mts';
@@ -190,10 +190,10 @@ export async function runOverlayDoctor(
   return hookOk && pathOk && worktreesOk && (fix || (!sync.drift && !sync.commitMsg.drift)) ? 0 : 1;
 }
 
-// sc-4157: a worktree-scoped hooksPath shadows the overlay (unhealthy); an unlinked worktree self-links.
+// sc-4157: a worktree-scoped hooksPath shadows the overlay, and a worktree missing any of the overlay's
+// gate inputs runs its gates without them: both unhealthy. A checkout with its own overlay projects nothing.
 function printLinkedWorktrees(home: string, pkgRel: string, fix: boolean): boolean {
   let ok = true;
-  const pending: string[] = [];
   const expected = overlayHooksPath(home);
   for (const { path, bare } of worktrees(home)) {
     if (bare || sameDir(path, home) || !existsSync(path)) continue;
@@ -204,45 +204,36 @@ function printLinkedWorktrees(home: string, pkgRel: string, fix: boolean): boole
         `  ⚠ ${path}: a worktree-scoped core.hooksPath (${pin}) shadows the overlay — commits there skip devkit's gates`,
       );
     }
-    if (existsSync(join(path, pkgRel, '.devkit', 'config.json'))) {
-      ok = printProjectionGaps(path, home, pkgRel, fix) && ok;
-      continue;
-    }
-    if (!fix) pending.push(path);
-    else ok = linkWorktree(path, home, pkgRel) && ok;
+    if (!hasOwnOverlay(path)) ok = printProjectionGaps(path, home, pkgRel, fix) && ok;
   }
-  if (pending.length)
-    console.log(
-      `  · ${pending.length} linked worktree(s) not yet linked to the overlay — each links on its first commit, or run \`devkit doctor --fix\``,
-    );
   return ok;
 }
 
-function linkWorktree(path: string, home: string, pkgRel: string): boolean {
-  try {
-    if (projectOverlayIntoWorktree(path, home, pkgRel).length)
-      console.log(`  ✓ linked ${path} to this overlay`);
-    return true;
-  } catch (e) {
-    console.log(`  ⚠ ${path}: could not link the overlay: ${e instanceof Error ? e.message : e}`);
-    return false;
-  }
-}
+const MAX_LISTED = 5;
+const listed = (paths: string[]) =>
+  paths.length > MAX_LISTED
+    ? `${paths.slice(0, MAX_LISTED).join(', ')} +${paths.length - MAX_LISTED} more`
+    : paths.join(', ');
 
-// A linked worktree must lint and ratchet as its own branch: its lint config and baselines are copies.
+// Links the shared inputs and copies the branch-local ones (lint config, baselines).
 function printProjectionGaps(path: string, home: string, pkgRel: string, fix: boolean): boolean {
   try {
-    const gaps = fix ? repairProjection(path, home, pkgRel) : projectionGaps(path, home, pkgRel);
-    if (!gaps.length) return true;
-    if (fix) console.log(`  ✓ ${path}: made ${gaps.join(', ')} branch-local`);
-    else
+    const { owed, unlinkable } = fix
+      ? repairProjection(path, home, pkgRel)
+      : projectionGaps(path, home, pkgRel);
+    if (owed.length && fix) console.log(`  ✓ ${path}: projected ${listed(owed)} from the overlay`);
+    else if (owed.length)
       console.log(
-        `  ⚠ ${path}: ${gaps.join(', ')} not branch-local — its lint config or baselines are not the branch's own; run \`devkit doctor --fix\``,
+        `  ⚠ ${path}: ${listed(owed)} not projected from the overlay — gates there run without them; run \`devkit doctor --fix\``,
       );
-    return fix;
+    if (unlinkable.length)
+      console.log(
+        `  ⚠ ${path}: ${listed(unlinkable)} cannot be linked from the overlay — git ignores it only as a directory (a line ending in "/"), and a link is not one; add a line without the slash, such as \`${unlinkable[0]}\`, to .git/info/exclude`,
+      );
+    return (fix || !owed.length) && !unlinkable.length;
   } catch (e) {
     console.log(
-      `  ⚠ ${path}: could not repair the projection: ${e instanceof Error ? e.message : e}`,
+      `  ⚠ ${path}: could not ${fix ? 'repair' : 'check'} the projection: ${e instanceof Error ? e.message : e}`,
     );
     return false;
   }

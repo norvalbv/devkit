@@ -8,6 +8,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -53,6 +54,10 @@ function seedRepository(): {
     mkdirSync(dirname(destination), { recursive: true });
     copyFileSync(join(REPO_ROOT, relativePath), destination);
   }
+  // A link, not a copy: node resolves the overlay-home resolver's imports from the real checkout.
+  const overlayRoot = 'cli/lib/husky/overlay/overlay-root.mts';
+  mkdirSync(dirname(join(root, overlayRoot)), { recursive: true });
+  symlinkSync(join(REPO_ROOT, overlayRoot), join(root, overlayRoot));
   git(root, 'add', 'package.json', 'tracked.mts', 'cli');
   git(root, 'commit', '-qm', 'seed');
   git(root, 'tag', '-a', 'v1.0.0', '-m', 'fixture tag');

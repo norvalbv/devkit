@@ -19,10 +19,9 @@ const OVERLAY_ANTI_SLOP_OWNED = [
   '.devkit/anti-slop',
 ] as const;
 
-/** What `installOverlay` needs back: whether to render the gate, and what to hide from git. */
+/** What `installOverlay` needs back: whether to render the gate. */
 interface OverlayAntiSlopWiring {
   wired: boolean;
-  excludes: string[];
 }
 
 /** Reclaim a half-installed capability so no stranded managed tree outlives its gate. */
@@ -36,10 +35,8 @@ function abandon(cwd: string, reason: string): false {
   return false;
 }
 
-/**
- * RETURNS its exclude entries for `installOverlay`'s one authoritative reconcile, never writing them
- * here — a second call naming only these two paths would prune every agent line it omits.
- */
+/** Never reconciles the exclude: `installOverlay` excludes every overlay-written path in one call, and
+ * a second call naming only these would prune every agent line it omits. */
 export function wireOverlayAntiSlop(
   cwd: string,
   gitRoot: string,
@@ -55,10 +52,7 @@ export function wireOverlayAntiSlop(
     console.log('  anti-slop (deselected — reclaiming)');
     removeAntiSlopCapability(cwd, dryRun, true);
   }
-  const excludes = [OVERLAY_ENTRY_REL, ANTI_SLOP_BASELINE_REL]
-    .filter((rel) => wired || existsSync(join(cwd, rel)))
-    .map((rel) => `${pfx}${rel}`);
-  return { wired, excludes };
+  return { wired };
 }
 
 /**

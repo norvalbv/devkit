@@ -343,7 +343,10 @@ describe('overlay (local-only) install', () => {
     expect(existsSync(join(root, '.devkit', 'hooks', 'pre-commit'))).toBe(true);
     expect(existsSync(join(pkg, '.devkit', 'hooks'))).toBe(false);
     const exclude = readFileSync(join(root, '.git', 'info', 'exclude'), 'utf8');
-    expect(exclude).toContain('.devkit/hooks/');
+    // Both forms: a linked worktree's projection places a link, which a `dir/` line never ignores.
+    expect(exclude.split('\n')).toEqual(
+      expect.arrayContaining(['.devkit/hooks/', '.devkit/hooks']),
+    );
     expect(exclude).toContain('services/webapp/guard.config.json');
 
     // configs in the package; hook cd's into it; core.hooksPath at the root
@@ -903,6 +906,24 @@ describe('overlay (local-only) install', () => {
     ).toBe(true);
   });
 
+  it('a linked worktree’s projected .fallow link is git-ignored, so doctor --fix leaves it clean', async () => {
+    const root = workRepo();
+    await applyInit(root, {
+      stack: 'react-app',
+      selection: overlayAll(),
+      overlay: true,
+      devkitRef: 'v0.21.0',
+    });
+    mkdirSync(join(root, '.fallow'), { recursive: true });
+    const wt = join(mkTmp('overlay-fallow-wt-'), 'wt');
+    execFileSync('git', ['worktree', 'add', '-q', '--detach', wt], { cwd: root });
+
+    await doctorRun(['--fix'], root);
+
+    expect(realpathSync(join(wt, '.fallow'))).toBe(realpathSync(join(root, '.fallow')));
+    expect(execFileSync('git', ['status', '--porcelain'], { cwd: wt, encoding: 'utf8' })).toBe('');
+  });
+
   it('clean reverses the agent-half + fallow (files gone, devkit-created settings gone, exclude pruned)', async () => {
     const root = workRepo();
     await applyInit(root, {
@@ -945,9 +966,9 @@ describe('overlay (local-only) install', () => {
       '.codex/hooks/',
       '.codex/hooks.json',
       'settings.local.json',
-      '.fallow/',
-      'fallow-baselines/',
-      '.decisions/',
+      '.fallow',
+      'fallow-baselines',
+      '.decisions',
       'devkit',
     ]) {
       expect(exclude).not.toContain(line);
@@ -1347,7 +1368,7 @@ describe('overlay anti-slop — refusals that keep the tree clean', () => {
 
   // The damage is a WINDOW — the caller's later reconcile restores what a partial one pruned — so an
   // end-state assertion cannot see it. Asserted at the seam: this writes no exclude line at all.
-  it('wireOverlayAntiSlop returns its excludes and never reconciles the exclude file itself', () => {
+  it('wireOverlayAntiSlop never reconciles the exclude file itself', () => {
     const root = workRepo();
     const git = (...a: string[]) => execFileSync('git', a, { cwd: root });
     writeFileSync(join(root, '.anti-slop-baseline.json'), '{"schemaVersion":1,"entries":[]}\n');
@@ -1370,8 +1391,6 @@ describe('overlay anti-slop — refusals that keep the tree clean', () => {
     expect(wiring.wired).toBe(false);
     // Byte-for-byte: the agent half is the caller's to reconcile, and nothing here may touch it.
     expect(readFileSync(excludePath, 'utf8')).toBe(seeded);
-    // The paths still come back for the caller's one authoritative call — here none, nothing wired.
-    expect(wiring.excludes).toEqual(['.anti-slop-baseline.json']);
   });
 
   // The writer skips assertNoConfigCollisions under overlay because it neither reads nor writes a

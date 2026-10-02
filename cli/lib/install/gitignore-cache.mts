@@ -22,6 +22,10 @@ import {
 import { join } from 'node:path';
 import { type CheckResult, check } from '../doctor/check-result.mts';
 
+// decisions.mts vecIndexPath and the `.tmp` a crashed atomic write leaves; exact shapes, so `.md`
+// records in a `.decisions` decisionsDir stay tracked. Overlay git-excludes the same lines.
+export const DECISIONS_INDEX_IGNORES = ['.decisions/index.json', '.decisions/index.json.*.tmp'];
+
 // Each entry matches its writer verbatim: prefix-cache.mjs STORE_FILE, decisions/verdict-cache.mjs
 // STORE_FILE, review/cache.mjs CACHE_FILE, review/run-review.mjs progress (DEVKIT_REVIEW_PROGRESS),
 // review-target.sh's per-run output, commit-with-gate-capture.sh's log, reconcile-manifest-write,
@@ -42,10 +46,7 @@ export const DEVKIT_CACHE_IGNORES = [
   '.devkit/setup.json',
   '.devkit/anti-slop-baseline-upgrade.json',
   '.devkit/*.lock',
-  // decisions.mts vecIndexPath + the `<path>.<pid>.<ms>.tmp` sidecar a crashed atomic write leaves.
-  // Exact shapes, never a prefix glob, so `.md` records in a `.decisions` decisionsDir stay tracked.
-  '.decisions/index.json',
-  '.decisions/index.json.*.tmp',
+  ...DECISIONS_INDEX_IGNORES,
   // Not a cache — a LOCAL preference (adhd-session-start.mjs reads it as the durable off switch).
   // Ignored for the same reason the caches are: committing it would impose one reader's output
   // preference on everyone who clones the repo.
@@ -80,7 +81,7 @@ export const DEVKIT_TRACKED_UNIGNORES = [
   '!.devkit/vendored-skills/**',
 ];
 const DEVKIT_LOCAL_STATE_IGNORE = '.devkit/*';
-const LEGACY_GITIGNORE_LINES = [
+export const LEGACY_GITIGNORE_LINES = [
   '!.devkit/comment-firewall-rationales.json',
   '.devkit/comment-firewall-receipts.json',
 ];

@@ -42,17 +42,20 @@ export interface GateInput {
   field?: ConfigPathField;
 }
 
-const FIXED: readonly GateInput[] = [
+/** fallow's own cache: fallow writes it, and an overlay that wires fallow git-excludes it. */
+export const FALLOW_CACHE: GateInput = {
+  path: '.fallow',
+  kind: 'dir',
+  share: 'clone',
+  mutable: true,
+  sourceVolatile: true,
+  localCache: true,
+};
+
+export const FIXED_GATE_INPUTS: readonly GateInput[] = [
   { path: CONFIG_FILENAME, kind: 'file', share: 'clone', overlayWrites: true },
   ...FALLOW_CONFIG_FILES.map((path): GateInput => ({ path, kind: 'file', share: 'clone' })),
-  {
-    path: '.fallow',
-    kind: 'dir',
-    share: 'clone',
-    mutable: true,
-    sourceVolatile: true,
-    localCache: true,
-  },
+  FALLOW_CACHE,
   { path: 'fallow-baselines', kind: 'dir', share: 'branch', mutable: true, overlayWrites: true },
   {
     path: '.decisions',
@@ -85,10 +88,14 @@ const FIXED: readonly GateInput[] = [
   { path: CORRECTNESS_OVERRIDES_FILE, kind: 'file', share: 'clone', mutable: true },
 ];
 
+/** The entries an overlay install writes, so the ones it git-excludes and clean removes. */
+export const OVERLAY_WRITTEN = FIXED_GATE_INPUTS.filter((input) => input.overlayWrites);
+
 // Review flags the indexPath SQLite family (db, -wal, -shm) itself, via sqliteFamilyPath.
 const CONFIG_INPUTS: readonly (Omit<GateInput, 'path'> & { field: ConfigPathField })[] = [
   { field: 'indexPath', kind: 'file', share: 'clone', localCache: true },
   // Branch-local, as a tracked allowlist is in package mode: an entry lands with the code it covers.
+  // Never linked: its writer renames a temp over the path, which replaces a link with a real file.
   { field: 'allowlistPath', kind: 'file', share: 'branch' },
   // Linked: records are append-only, so one clone-level store is safe.
   { field: 'decisionsDir', kind: 'dir', share: 'clone' },
@@ -126,7 +133,7 @@ function repoRelative(root: string, abs: string | null): string | null {
  * even when guard.config.json then fails to parse and the config-driven half throws.
  */
 export function* gateInputs(root: string): Generator<GateInput> {
-  for (const input of FIXED) yield* expand(root, input);
+  for (const input of FIXED_GATE_INPUTS) yield* expand(root, input);
   const cfg = resolveGuardConfig(root);
   for (const input of CONFIG_INPUTS) {
     const path = repoRelative(root, resolveFromCwd(cfg, input.field));
@@ -134,7 +141,25 @@ export function* gateInputs(root: string): Generator<GateInput> {
   }
 }
 
+/** `gateInputs`, or with `onConfigError` the fixed entries streamed before a guard.config.json that
+ * fails to parse, so an uninstall can still act on them instead of blocking. */
+export function readableGateInputs(
+  root: string,
+  onConfigError?: (message: string) => void,
+): GateInput[] {
+  const inputs: GateInput[] = [];
+  try {
+    for (const input of gateInputs(root)) inputs.push(input);
+  } catch (e) {
+    if (!onConfigError) throw e;
+    onConfigError(e instanceof Error ? e.message : String(e));
+  }
+  return inputs;
+}
+
 /** The fixed entry at or above a projected `path`, for its flags. */
 export function gateInputFor(path: string): GateInput | undefined {
-  return FIXED.find((input) => path === input.path || path.startsWith(`${input.path}/`));
+  return FIXED_GATE_INPUTS.find(
+    (input) => path === input.path || path.startsWith(`${input.path}/`),
+  );
 }

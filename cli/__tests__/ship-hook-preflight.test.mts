@@ -162,6 +162,38 @@ describe('gate_hook_source_preflight — read-only, before any worktree exists',
     expect(r.stdout.trim()).toBe('REFUSED');
     expect(r.stderr).toMatch(/run 'devkit init --overlay'/);
   });
+
+  it('refuses an overlay config that does not parse instead of gating as package mode', () => {
+    const { dir } = seedShipRepo();
+    addOverlay(dir, 'exit 0');
+    writeFileSync(join(dir, '.devkit/config.json'), '{"overlay": true,');
+
+    const r = preflight(dir, 'HEAD');
+
+    expect(r.stdout.trim()).toBe('REFUSED');
+    expect(r.stderr).toMatch(/could not resolve the overlay home/);
+  });
+
+  it('finds the overlay home past a bare first worktree entry, and refuses its missing hook', () => {
+    const { dir } = seedShipRepo();
+    const base = realpathSync(mkdtempSync(join(tmpdir(), 'hookpre-bare-')));
+    dirs.push(base);
+    const bare = join(base, 'repo.git');
+    const bareGit = (...args: string[]) =>
+      execFileSync('git', ['-C', bare, ...args], { env: { ...process.env, ...GIT_ENV } });
+    execFileSync('git', ['clone', '-q', '--bare', dir, bare], {
+      env: { ...process.env, ...GIT_ENV },
+    });
+    bareGit('worktree', 'add', '-q', '--detach', join(base, 'home'));
+    bareGit('worktree', 'add', '-q', '--detach', join(base, 'task'));
+    addOverlay(join(base, 'home'), null);
+    bareGit('config', 'core.hooksPath', join(base, 'home', '.devkit', 'hooks'));
+
+    const r = preflight(join(base, 'task'), 'HEAD');
+
+    expect(r.stdout.trim()).toBe('REFUSED');
+    expect(r.stderr).toMatch(/run 'devkit init --overlay'/);
+  });
 });
 
 describe('ship-branch.sh — the hook dir is checked before any branch work (sc-3883)', () => {
