@@ -10,6 +10,15 @@ export interface FallowPathMapping {
   hunks: DiffHunk[];
 }
 
+/** In fallow's discovery precedence; the baseline gate reads the first that exists. Here, not in
+ * the gate-input registry that lists them, because the frozen review runtime cannot load config. */
+export const FALLOW_CONFIG_FILES = [
+  '.fallowrc.json',
+  '.fallowrc.jsonc',
+  'fallow.toml',
+  '.fallow.toml',
+] as const;
+
 type FallowMappingEntry = readonly [string, FallowPathMapping];
 const DROP_FALLOW_VALUE = Symbol('drop-fallow-value');
 

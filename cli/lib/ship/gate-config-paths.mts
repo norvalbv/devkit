@@ -1,42 +1,22 @@
 #!/usr/bin/env node
-/**
- * Emit the CONFIG-DRIVEN gate-input paths for `link-gate-configs.sh`, one relative path per line.
- *
- * A `devkit ship` commits inside an ephemeral worktree checked out clean at $BASE, so it holds only
- * TRACKED files. link-gate-configs.sh symlinks gate inputs that live in the repo but aren't in that
- * checkout (an untracked config, a gitignored index) so the worktree gates match a plain commit. The
- * gate inputs whose LOCATION is configurable — `indexPath` (default null, no universal default),
- * `allowlistPath`, and `decisionsDir` — must be READ from guard.config.json, not hardcoded: decision
- * synced-assets-layout-agnostic mandates resolving roots from the consumer's config, never a fixed
- * layout (a custom decisionsDir that isn't committed would otherwise never reach the worktree). The rest
- * (guard.config.json itself, the fallow files, the caches) are devkit's own fixed artifact names and
- * stay hardcoded in the shell.
- *
- * Usage:  gate-config-paths.mjs [<root>] [field] [--null]
- * `field` optionally selects one configured path. `--null` makes review callers filename-safe while
- * the default newline protocol remains compatible with the existing ship/reship helper.
- * Emits nothing (exit 0) when a field is unset/opted-out or resolves outside the repo. A throw from
- * resolveGuardConfig (an unparseable guard.config.json) surfaces as a non-zero exit; the shell caller
- * falls back to its hardcoded set and lets the worktree gate fail loud on the same bad config.
- */
-import { isAbsolute, relative, sep } from 'node:path';
-import { resolveFromCwd, resolveGuardConfig } from '../../../gate-engine/config.mts';
+/** Emit the gate-input registry for shell callers: `<root> [field] [--null] [--cache] [--local-cache] [--each-file]`.
+ * A bad guard.config.json exits 1 after the fixed entries, so ship still links those. */
+import { gateInputs } from '../../../gate-engine/deterministic/gate-inputs.mts';
 
-const root = process.argv[2] ?? process.cwd();
-const cfg = resolveGuardConfig(root);
-const pathFields = ['indexPath', 'allowlistPath', 'decisionsDir'] as const;
-const args = process.argv.slice(3);
-const nullDelimited = args.includes('--null');
-const requestedField = args.find((arg) => arg !== '--null');
-const fields = requestedField ? pathFields.filter((field) => field === requestedField) : pathFields;
+const [root = process.cwd(), ...args] = process.argv.slice(2);
+const field = args.find((arg) => !arg.startsWith('--'));
+const end = args.includes('--null') ? '\0' : '\n';
 
-for (const field of fields) {
-  const abs = resolveFromCwd(cfg, field);
-  if (!abs) continue; // opted-out (indexPath null) → nothing to link
-  const rel = relative(root, abs);
-  // A path inside the repo is what we can symlink into the worktree by the same relative name; an
-  // absolute path elsewhere is the consumer's own business — skip it. A valid in-repo name may begin
-  // with two dots (`..cache`), so only reject the actual parent segment.
-  const escapesRoot = rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel);
-  if (rel && !escapesRoot) process.stdout.write(`${rel}${nullDelimited ? '\0' : '\n'}`);
+try {
+  for (const input of gateInputs(root)) {
+    if (field !== undefined && input.field !== field) continue;
+    if (args.includes('--cache') && !input.cache) continue;
+    if (args.includes('--local-cache') && !input.localCache) continue;
+    if (args.includes('--each-file') && !input.eachFile) continue;
+    process.stdout.write(`${input.path}${end}`);
+  }
+} catch (error) {
+  // exitCode, not a throw: exiting naturally flushes the fixed entries already written to a pipe.
+  console.error(error instanceof Error ? error.message : error);
+  process.exitCode = 1;
 }

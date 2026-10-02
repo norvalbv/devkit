@@ -8,14 +8,22 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
+import {
+  ANTI_SLOP_BASELINE_REL,
+  ANTI_SLOP_MANAGED_REL,
+} from '../lib/install/anti-slop/constants.mts';
+import { OVERLAY_ENTRY_REL } from '../lib/install/oxc/lifecycle.mts';
+import { readManifest } from '../lib/ship/review/projection/manifest.mts';
 import {
   materializeProjectionRuntime,
   mutableProjectionRoots,
   verifyProjectionRuntime,
 } from '../lib/ship/review/projection/runtime.mts';
+import { type GateInput, gateInputs } from '../../gate-engine/deterministic/gate-inputs.mts';
+import { STRUCTURE_BASELINE_DIR } from '../../gate-engine/ratchets/baseline-paths.mts';
 import { rootRegistry } from './_helpers.mts';
 
 const linkScript = fileURLToPath(new URL('../lib/ship/link-gate-configs.sh', import.meta.url));
@@ -80,6 +88,15 @@ function configuredPaths(root: string, ...args: string[]) {
   return result.stdout;
 }
 
+// The review manifest flags a registry entry carries; the runtime flags the index SQLite family itself.
+function reviewFlags(input: GateInput) {
+  const index = input.field === 'indexPath';
+  return {
+    mutable: index || input.mutable === true,
+    sourceVolatile: index || input.sourceVolatile === true,
+  };
+}
+
 describe('gate config projections', () => {
   it('selects one configured path without emitting the other gate inputs', () => {
     const { root } = fixture();
@@ -92,13 +109,71 @@ describe('gate config projections', () => {
       }),
     );
 
-    expect(configuredPaths(root)).toBe('.cache/search.db\n.config/allowlist.json\n..decisions\n');
+    expect(configuredPaths(root, 'allowlistPath')).toBe('.config/allowlist.json\n');
+    expect(configuredPaths(root, 'decisionsDir')).toBe('..decisions\n');
     expect(configuredPaths(root, 'indexPath')).toBe('.cache/search.db\n');
     expect(configuredPaths(root, 'indexPath', '--null')).toBe('.cache/search.db\0');
     expect(configuredPaths(root, 'unknown')).toBe('');
 
     writeFileSync(join(root, 'guard.config.json'), '{"indexPath":"../outside.db"}\n');
     expect(configuredPaths(root, 'indexPath', '--null')).toBe('');
+  });
+
+  it('emits exactly the registry gateInputs yields, filtered by flag on request', () => {
+    const { root } = fixture();
+    writeFileSync(join(root, 'guard.config.json'), '{"decisionsDir":"records"}\n');
+    mkdirSync(join(root, '.devkit/baselines/structure'), { recursive: true });
+    writeFileSync(join(root, '.devkit/baselines/structure/cli.mjs'), '');
+    const registry = [...gateInputs(root)];
+    const lines = (inputs: GateInput[]) => inputs.map((input) => `${input.path}\n`).join('');
+
+    expect(configuredPaths(root)).toBe(lines(registry));
+    expect(configuredPaths(root, '--null')).toBe(lines(registry).replaceAll('\n', '\0'));
+    expect(configuredPaths(root, '--cache')).toBe(lines(registry.filter((input) => input.cache)));
+    expect(configuredPaths(root, '--each-file')).toBe('.devkit/baselines/structure/cli.mjs\n');
+  });
+
+  // gate-engine cannot import cli/, so the registry repeats these cli-owned names; a rename fails here.
+  it('registers the cli-owned anti-slop and oxlint overlay paths', () => {
+    const registry = [...gateInputs(fixture().root)].map((input) => input.path);
+    expect(registry).toEqual(
+      expect.arrayContaining([ANTI_SLOP_BASELINE_REL, ANTI_SLOP_MANAGED_REL, OVERLAY_ENTRY_REL]),
+    );
+  });
+
+  it('projects every registry path into ship and review worktrees with registry flags', () => {
+    const config = '{"indexPath":".search-code/index.db","decisionsDir":"records"}\n';
+    const seed = (root: string) => {
+      writeFileSync(join(root, 'guard.config.json'), config);
+      mkdirSync(join(root, '.devkit/baselines/structure'), { recursive: true });
+      writeFileSync(join(root, '.devkit/baselines/structure/cli.mjs'), '');
+      const registry = [...gateInputs(root)];
+      for (const { kind, path } of registry) {
+        mkdirSync(join(root, kind === 'dir' ? path : dirname(path)), { recursive: true });
+        if (kind === 'file') writeFileSync(join(root, path), '{}\n');
+      }
+      writeFileSync(join(root, 'guard.config.json'), config);
+      return registry;
+    };
+
+    const ship = fixture();
+    const registry = seed(ship.root);
+    expect(project(ship.root, ship.worktree, 'ship').status).toBe(0);
+    for (const { path } of registry) {
+      expect(lstatSync(join(ship.worktree, path)).isSymbolicLink(), path).toBe(true);
+    }
+
+    const review = fixture();
+    seed(review.root);
+    const result = project(review.root, review.worktree);
+    expect(result.status, result.stderr).toBe(0);
+    const manifest = readManifest(join(review.root, '..', 'projection-runtime.json'));
+    for (const input of registry) {
+      expect(lstatSync(join(review.worktree, input.path)).isSymbolicLink(), input.path).toBe(false);
+      expect(manifest.entries, input.path).toContainEqual(
+        expect.objectContaining({ path: input.path, ...reviewFlags(input) }),
+      );
+    }
   });
 
   it('keeps ship projections as symlinks but makes review projections private copies', () => {
@@ -125,6 +200,61 @@ describe('gate config projections', () => {
       '500',
     );
     expect(project(review.root, review.worktree, 'typo').status).toBe(2);
+  });
+
+  it.each(['main', 'linked'])(
+    'ship links structure baselines split across a linked and the main worktree (config in %s)',
+    (configIn) => {
+      const { root: main, worktree } = fixture();
+      execFileSync('git', [
+        '-C',
+        main,
+        '-c',
+        'user.name=t',
+        '-c',
+        'user.email=t@t',
+        'commit',
+        '-q',
+        '--allow-empty',
+        '-m',
+        'base',
+      ]);
+      const linked = join(main, '..', 'linked checkout');
+      execFileSync('git', ['-C', main, 'worktree', 'add', '-q', '--detach', linked]);
+      for (const [root, name] of [
+        [main, 'a.mjs'],
+        [linked, 'b.mjs'],
+      ]) {
+        mkdirSync(join(root, STRUCTURE_BASELINE_DIR), { recursive: true });
+        writeFileSync(join(root, STRUCTURE_BASELINE_DIR, name), '');
+      }
+      writeFileSync(join(configIn === 'main' ? main : linked, 'guard.config.json'), '{}\n');
+
+      const result = project(linked, worktree, 'ship');
+
+      expect(result.status, result.stderr).toBe(0);
+      for (const name of ['a.mjs', 'b.mjs']) {
+        expect(lstatSync(join(worktree, STRUCTURE_BASELINE_DIR, name)).isSymbolicLink(), name).toBe(
+          true,
+        );
+      }
+    },
+  );
+
+  it('fails ship closed when the gate-input registry emits nothing', () => {
+    const { root, worktree } = fixture();
+    writeFileSync(join(root, 'guard.config.json'), '{}\n');
+    const bin = join(root, '..', 'bin');
+    mkdirSync(bin);
+    writeFileSync(join(bin, 'node'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+
+    const result = project(root, worktree, 'ship', { PATH: `${bin}:${process.env.PATH}` });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('gate-input registry emitted nothing');
+    expect(
+      lstatSync(join(worktree, 'guard.config.json'), { throwIfNoEntry: false }),
+    ).toBeUndefined();
   });
 
   // sc-2175: the gitignored `guard-review waive` store must be projected — ship links it, review copies

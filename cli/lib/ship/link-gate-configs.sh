@@ -12,89 +12,36 @@
 # silent. Run AFTER change-application: anything already tracked, --linked, or shipped as a path is
 # present in $WT and skipped — no double-link, no `ln` clobber of a real file under `set -e`.
 #
-# The config-DRIVEN locations (indexPath, allowlistPath) come from gate-config-paths.mts, not a
-# hardcode — decision synced-assets-layout-agnostic mandates resolving roots from guard.config.json.
-# The rest are devkit's own fixed artifact names.
+# The paths come from the gate-input registry (gate-engine/deterministic/gate-inputs.mts) through
+# gate-config-paths.mts; this file keeps no list of its own.
 
-# Devkit config/artifact files the gates read; linked into the throwaway ship/review worktree ($WT)
-# because a fresh checkout lacks the untracked/gitignored ones. All bare names (a test pins the exact
-# list — no inline comments). .qavis/receipt.json is a non-obvious one: it's the gitignored cache qavis
-# writes on a QA pass, read by the ship qavis-advisory gate to clear its block, and never carried in by
-# the staged pathspec — so without this link a real QA pass still blocks the ship. Linked file-level, not the `.qavis/` dir (which holds the tracked recipe.json).
-#
-# .devkit/correctness-overrides.json is the `guard-review waive` store (sc-2175). It is gitignored and
-# the gate's reconcile reads it relative to $WT, so without this link a recorded waive can never clear
-# a ship. It is an audit record, not a content-addressed cache, so it is deliberately not a
-# GATE_PROJECTION_CACHE_CANDIDATES entry. The link also carries an env-channel write-through back to
-# the invoking checkout, so the persisted rationale outlives $WT.
-#
-# The four Oxc/anti-slop entries exist for OVERLAY, where the whole managed capability plus its root
-# entry config and per-clone baseline are git-excluded and therefore absent from any checkout. Without
-# them the anti-slop gate throws a capability error inside $WT, and because that gate is failOpen2:false
-# the throw renders as a violation rather than a skip — a broken ship, not a weaker one. In package mode
-# all four are tracked, so they are already in $WT and the projection skips them.
-GATE_PROJECTION_FIXED_CANDIDATES=(
-  guard.config.json
-  .fallowrc.jsonc
-  .fallowrc.json
-  fallow.toml
-  .fallow.toml
-  .fallow
-  fallow-baselines
-  .decisions
-  .devkit/baselines/fanout.json
-  .devkit/baselines/size-lines.json
-  .devkit/baselines/size.json
-  .devkit/baselines/imports.mjs
-  .devkit/structure/exempt.mjs
-  .devkit/oxc
-  .devkit/anti-slop
-  eslint.config.devkit.mjs
-  biome.devkit.jsonc
-  oxlint.devkit.json
-  .anti-slop-baseline.json
-  .qavis/receipt.json
-  .devkit/correctness-overrides.json
-)
-
-# Candidates that are a content-addressed CACHE, not source. A copy in the base commit is stale by
-# construction — the sha it attests cannot cover the set being shipped — so it must lose to the live
-# one, or the gate reading it can never be cleared by running the tool (sc-1489).
-GATE_PROJECTION_CACHE_CANDIDATES=(
-  .qavis/receipt.json
-)
-
-# Machine-local caches devkit's own tools write and its installers ignore. Never commit-appropriate,
-# so the linked-input notice must not tell anyone to commit one that happens not to be ignored
-# (sc-2274). The configured indexPath joins them at classification time.
-GATE_PROJECTION_LOCAL_CACHES=(
-  .fallow
-  .decisions
-)
-
-# gate_projection_is_local_cache <repo-relative-path> <configured-indexPath> <configured-decisionsDir>
-# A configured decisionsDir holds source records, so a projected path AT it or CONTAINING it is
-# source-owned and wins over the fixed cache names. A decisionsDir that contains the path (`.`) does
-# not: the records sit beside `.decisions`, which then holds only the embedding cache.
+# gate_projection_is_local_cache <repo-relative-path> <configured-decisionsDir> [local-cache...]
+# The registry's local caches (`--local-cache`) are never commit-appropriate, so the linked-input
+# notice must not tell anyone to commit one that happens not to be ignored (sc-2274). A configured
+# decisionsDir holds source records, so a projected path AT it or CONTAINING it is source-owned and
+# wins over the cache names. A decisionsDir that contains the path (`.`) does not: the records sit
+# beside `.decisions`, which then holds only the embedding cache.
 gate_projection_is_local_cache() {
-  local rel=$1 index_rel=$2 decisions_rel=$3 cache
+  local rel=$1 decisions_rel=$2 cache
+  shift 2
   if [ -n "$decisions_rel" ]; then
     case "$decisions_rel" in "$rel" | "$rel"/*) return 1 ;; esac
   fi
-  [ -n "$index_rel" ] && [ "$rel" = "$index_rel" ] && return 0
-  for cache in "${GATE_PROJECTION_LOCAL_CACHES[@]}" "${GATE_PROJECTION_CACHE_CANDIDATES[@]}"; do
+  for cache in "$@"; do
     [ "$rel" = "$cache" ] && return 0
   done
   return 1
 }
 
-# gate_projection_is_stale_cache <worktree> <repo-relative-path>
-# A cache candidate the BASE COMMIT put in $WT and that is still there: not a symlink (we placed that),
+# gate_projection_is_stale_cache <worktree> <repo-relative-path> [cache-path...]
+# A registry cache the BASE COMMIT put in $WT and that is still there: not a symlink (we placed that),
 # not a path change-application already removed (a ship that untracks it), and not one absent from HEAD
-# (change-application put those there from the invoking checkout — already the live bytes).
+# (change-application put those there from the invoking checkout — already the live bytes). A committed
+# cache is stale by construction: the sha it attests cannot cover the set being shipped (sc-1489).
 gate_projection_is_stale_cache() {
   local wt=$1 rel=$2 cache
-  for cache in "${GATE_PROJECTION_CACHE_CANDIDATES[@]}"; do
+  shift 2
+  for cache in "$@"; do
     [ "$rel" = "$cache" ] || continue
     [ -L "$wt/$rel" ] && return 1
     [ -f "$wt/$rel" ] || return 1
@@ -113,14 +60,9 @@ gate_config_path_emitter() {
 }
 
 # emit_gate_projection_candidates <root>
-# NUL-delimited because configured filenames may contain newlines. Callers that need fail-closed
-# config validation should probe the emitter first: process-substitution does not preserve its status.
+# NUL-delimited because configured filenames may contain newlines. Fails on an unparseable config.
 emit_gate_projection_candidates() {
-  local root=$1 emitter rel
-  emitter=$(gate_config_path_emitter)
-  node "$emitter" "$root" >/dev/null 2>&1 || return 1
-  for rel in "${GATE_PROJECTION_FIXED_CANDIDATES[@]}"; do printf '%s\0' "$rel"; done
-  node "$emitter" "$root" --null
+  node "$(gate_config_path_emitter)" "$1" --null
 }
 
 is_review_projection_purpose() {
@@ -164,9 +106,9 @@ gate_projection_source_is_ignored() {
 # link_untracked_gate_configs <worktree> <root> [purpose]
 link_untracked_gate_configs() {
   local wt=$1 root=$2 purpose=${3:-ship} emitter resolved rel line index_rel='' candidate_manifest=''
-  local main_root='' candidate_root=$root source='' stale_hit=''
+  local main_root='' candidate_root=$root other_root='' source='' stale_hit=''
   local projection_manifest=${DEVKIT_REVIEW_PROJECTION_MANIFEST:-} projection_tool=''
-  local linked=() linked_sources=() candidates=() stale=()
+  local linked=() linked_sources=() candidates=() caches=() stale=()
   case "$purpose" in
     ship | review | review-baseline) ;;
     *)
@@ -174,23 +116,10 @@ link_untracked_gate_configs() {
       return 2
       ;;
   esac
-  # devkit's own fixed gate artifacts (guard.config.json is CONFIG_FILENAME — never configurable).
-  # Overlay lint configs are local/gitignored by design; projecting them keeps ship/review parity
-  # with a normal overlay commit, while callers stage their snapshot before this helper runs.
-  # .devkit/baselines/*.json: the ratchet freezes (fanout/size/size-lines). OVERLAY hides .devkit via
-  # .git/info/exclude (overlay.mts) yet init freezes into it, so it is untracked → absent here. Without
-  # it the fanout gate does NOT fail open (that needs guard.config.json absent too, and we just linked
-  # it) — it enforces against an EMPTY freeze and every grandfathered folder reads as new growth.
-  # ship-gates-converge-not-restart (2026-07-07) already records this link as a dependency: the
-  # prefix-cache fingerprint folds in the baseline files and needs real state here. Each file is a
-  # candidate so a tracked freeze cannot hide an untracked sibling from the gate worktree.
-  # Config-driven paths (indexPath / allowlistPath) from the resolver. .mts in source, built .mjs in an
-  # installed consumer (the reconcile-manifest-write.mts dual-ext idiom). A resolver failure (unparseable
-  # guard.config.json → resolveGuardConfig throws) is non-fatal: warn, keep the hardcoded set, and let
-  # the worktree gate fail loud on the same bad config.
+  # Every candidate comes from the gate-input registry. .mts in source, built .mjs in an installed
+  # consumer (the reconcile-manifest-write.mts dual-ext idiom).
   emitter=$(gate_config_path_emitter)
   if is_review_projection_purpose "$purpose"; then
-    candidates=("${GATE_PROJECTION_FIXED_CANDIDATES[@]}")
     candidate_manifest=$(mktemp "${DEVKIT_REVIEW_TEMP_ROOT:-${TMPDIR:-/tmp}}/devkit-review-gate-candidates.XXXXXX") || return 1
     if node "$emitter" "$root" --null > "$candidate_manifest" 2>/dev/null; then
       while IFS= read -r -d '' line; do
@@ -204,7 +133,6 @@ link_untracked_gate_configs() {
       return 1
     fi
   else
-    candidates=("${GATE_PROJECTION_FIXED_CANDIDATES[@]}")
     main_root=$(gate_main_worktree "$root")
     # A linked worktree may lack the untracked guard.config.json that defines indexPath,
     # allowlistPath, and decisionsDir. Resolve that config first so the main-worktree fallback also
@@ -212,21 +140,24 @@ link_untracked_gate_configs() {
     if source=$(gate_link_source "$root" "$main_root" guard.config.json); then
       candidate_root=$(dirname "$source")
     fi
-    if resolved=$(node "$emitter" "$candidate_root" 2>/dev/null); then
-      while IFS= read -r line; do [ -n "$line" ] && candidates+=("$line"); done <<< "$resolved"
-    else
+    # An unparseable guard.config.json still emits the fixed entries first: they link, and the
+    # worktree gate fails loud on the same bad config. No output at all means the registry itself
+    # did not load, so every gate would run on defaults.
+    resolved=$(node "$emitter" "$candidate_root" 2>/dev/null) ||
       echo "⚠️  ship: could not resolve config gate paths (guard.config.json unreadable?) — linking known defaults only" >&2
-    fi
+    [ -n "$resolved" ] || {
+      echo "✗ ship: the gate-input registry emitted nothing ($emitter did not run) — refusing to gate on defaults" >&2
+      return 1
+    }
+    # The other checkout's per-file entries too, so a file only it holds still links.
+    other_root=$main_root
+    [ "$candidate_root" = "$root" ] || other_root=$root
+    resolved+=$'\n'$(node "$emitter" "$other_root" --each-file 2>/dev/null || true)
+    while IFS= read -r line; do [ -n "$line" ] && candidates+=("$line"); done <<< "$resolved"
+    while IFS= read -r line; do [ -n "$line" ] && caches+=("$line"); done < <(
+      node "$emitter" "$root" --cache 2>/dev/null
+    )
   fi
-  # Structure debt is one module per configured tree. Enumerate files rather than projecting the
-  # directory atomically so a tracked tree cannot hide an untracked sibling in overlay consumers.
-  for candidate_source_root in "$root" "${main_root:-$root}"; do
-    for baseline in "$candidate_source_root"/.devkit/baselines/structure/*.mjs; do
-      [ -e "$baseline" ] || continue
-      rel=${baseline#"$candidate_source_root"/}
-      candidates+=("$rel")
-    done
-  done
   if is_review_projection_purpose "$purpose"; then
     IFS= read -r -d '' index_rel < <(node "$emitter" "$root" indexPath --null 2>/dev/null) || index_rel=
     [ -n "$projection_manifest" ] || {
@@ -262,7 +193,7 @@ link_untracked_gate_configs() {
       # has no live copy to link. A stale cache never enters `linked`: it is present in the committed
       # tree, so that notice's wording and count would both be wrong for it.
       stale_hit=
-      if gate_projection_is_stale_cache "$wt" "$rel"; then
+      if gate_projection_is_stale_cache "$wt" "$rel" ${caches[@]+"${caches[@]}"}; then
         rm -f "$wt/$rel"   # worktree only; the shipped commit is asserted unchanged by this file's test
         stale+=("$rel")
         stale_hit=1
@@ -294,11 +225,11 @@ link_untracked_gate_configs() {
   # Guard the empty array BEFORE expanding it (stock-macOS bash 3.2 aborts on "${arr[@]}" when empty
   # under `set -u`; cf. commit-with-gate-capture.sh).
   [ "${#linked[@]}" -eq 0 ] && return 0
-  # Wording only: a resolver failure leaves both empty and the fixed cache names still classify.
-  local decisions_rel=''
-  if [ -z "$index_rel" ]; then
-    IFS= read -r -d '' index_rel < <(node "$emitter" "$candidate_root" indexPath --null 2>/dev/null) || index_rel=
-  fi
+  # Wording only: an unparseable config still emits the fixed local caches, and decisionsDir stays empty.
+  local decisions_rel='' local_caches=()
+  while IFS= read -r -d '' line; do [ -n "$line" ] && local_caches+=("$line"); done < <(
+    node "$emitter" "$candidate_root" --local-cache --null 2>/dev/null
+  )
   IFS= read -r -d '' decisions_rel < <(node "$emitter" "$candidate_root" decisionsDir --null 2>/dev/null) || decisions_rel=
   {
     echo "⚠️  ship: ${#linked[@]} gate config(s) present in the repo but absent from the committed tree —"
@@ -312,7 +243,7 @@ link_untracked_gate_configs() {
       # `check-ignore -q` inside the `if` → its exit-1 "not ignored" is errexit-safe.
       if gate_projection_source_is_ignored "$root" "${linked_sources[$linked_index]}" "$rel"; then
         echo "   - $rel (gitignored cache — normal)"
-      elif gate_projection_is_local_cache "$rel" "$index_rel" "$decisions_rel"; then
+      elif gate_projection_is_local_cache "$rel" "$decisions_rel" ${local_caches[@]+"${local_caches[@]}"}; then
         echo "   - $rel (local cache — linked in, intentionally not committed)"
       else
         echo "   - $rel (untracked — commit it so gates are consistent for everyone)"

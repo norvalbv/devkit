@@ -141,7 +141,7 @@ Committed evidence rejects raw prompts, transcripts, absolute paths, email addre
 | Duplication matcher | shipped | evidence-only | unknown | — | ? unknown | No accepted local checkpoint |
 | Commit-guard retrieval | shipped | evidence-only | unknown | quality | ? unknown | Clone retrieval recall at 10: 59.0% · Semantic retrieval recall at 10: 25.0% |
 | qavis visual QA | shipped | external-required | unknown | — | ? unknown | No accepted local checkpoint |
-| Ship fixture setup cost | experimental | accepted | current | methodology-reset | ? unknown | Fixture CPU candidate/baseline: 19.0% · Fixture elapsed candidate/baseline: 31.4% |
+| Ship fixture setup cost | experimental | accepted | stale | methodology-reset | ? unknown | Fixture CPU candidate/baseline: 19.0% · Fixture elapsed candidate/baseline: 31.4% |
 
 ## Complete subject inventory
 
