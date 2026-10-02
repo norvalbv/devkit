@@ -48,9 +48,9 @@ function spyExec(capture: SpyCapture, delegate: typeof execJudgeAsync): typeof e
     const upstreamObserver = opts.onMcpPrepared;
     capture.raw = await delegate({
       ...opts,
-      onMcpPrepared: (fingerprint) => {
+      onMcpPrepared: (fingerprint, degradedCause) => {
         capture.mcpCapabilityFingerprint = fingerprint;
-        upstreamObserver?.(fingerprint);
+        upstreamObserver?.(fingerprint, degradedCause);
       },
     });
     return capture.raw;

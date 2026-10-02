@@ -5,6 +5,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { z } from 'zod';
+import { emitGateEvent } from '../../judge/gate-events.mts';
 import type { VerdictMeta } from '../../judge/verdict-store.mts';
 import { headHash } from './staged-git.mts';
 
@@ -267,6 +268,36 @@ export function cachedRetrievalDegradation(
   if (reviewer !== RETRIEVAL_REVIEWER || meta.retrieval === 'ok') return undefined;
   const cause = z.string().trim().min(1).safeParse(meta.degraded_cause).data;
   return cause === undefined ? CACHED_RETRIEVAL_UNPROVEN : boundedCause(cause);
+}
+
+/** The remedy a replayed MCP-degraded PASS names: its cache key does not see the registry, so only a
+ * clear forces the re-judge once codebase is back (sc-2837). */
+export const MCP_DEGRADED_REMEDY =
+  'run guard-review clear-cache to re-judge once codebase is available';
+
+/** Why a replayed PASS ran without a verdict-bearing MCP server — any reviewer (sc-2837). */
+export function cachedMcpDegradation(meta: VerdictMeta): string | undefined {
+  return z.string().trim().min(1).safeParse(meta.mcp_degraded_cause).data;
+}
+
+/** Either degradation, as the ` (DEGRADED)` suffix a verdict token carries — never a bare PASS. */
+export function degradedSuffix(res: { degraded?: unknown; mcpDegraded?: unknown }): string {
+  return res.degraded || res.mcpDegraded ? ' (DEGRADED)' : '';
+}
+
+/** A PASS without a verdict-bearing MCP server, on the channels an audit reads: a ⚠️ log line and a
+ * `gate_degraded` event. Here, not in checklist.mts, whose imports cycle back to lens/split.mts. */
+export function reportMcpDegraded(name: string, cause: string, cached = false): void {
+  const detail = cached ? `${cause} — ${MCP_DEGRADED_REMEDY}` : cause;
+  console.error(`⚠️  guard-review: ${name} — DEGRADED: ${detail}`);
+  emitGateEvent({ type: 'gate_degraded', judge: name, cause, detail });
+}
+
+/** A cached PASS line (`tail` = its provenance), marked and reported when it replays MCP-degraded. */
+export function printCachedPass(name: string, meta: VerdictMeta, tail: string): void {
+  const cause = cachedMcpDegradation(meta);
+  console.error(`guard-review: ${name} — cached PASS${cause ? ' (DEGRADED)' : ''} ${tail}`);
+  if (cause) reportMcpDegraded(name, cause, true);
 }
 
 export function cachedBaseState(

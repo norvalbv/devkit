@@ -151,9 +151,9 @@ export function guardedExec({
         ...opts,
         input,
         timeout: receipt.timeout,
-        onMcpPrepared: (value) => {
+        onMcpPrepared: (value, degradedCause) => {
           receipt.capability = value;
-          opts.onMcpPrepared?.(value);
+          opts.onMcpPrepared?.(value, degradedCause);
         },
         onOutage: (value) => {
           receipt.outage = value;

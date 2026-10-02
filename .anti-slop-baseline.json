@@ -563,14 +563,6 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/no-conditional-empty-object-spread",
-      "file": "gate-engine/review/lens/split.mts",
-      "diagnostic": "This conditional spread hides property omission behind an empty object. Build the object in separate statements and add the property only when present.",
-      "context": "...(parts.some((p) => p.retried) ? { retried: true, retry_phase: 'deferred' } : {}),",
-      "fingerprint": "0cf1724c6ff85893c6b5f0e38a7274863cc6b5194dba6b0f014ceb662792e75d",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/no-runtime-typeof",
       "file": "cli/lib/install/anti-slop/diagnostics.mts",
       "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
@@ -2163,14 +2155,6 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/no-conditional-empty-object-spread",
-      "file": "gate-engine/review/lens/split.mts",
-      "diagnostic": "This conditional spread hides property omission behind an empty object. Build the object in separate statements and add the property only when present.",
-      "context": "...(merged.waivers?.length ? { waivers: merged.waivers } : {}),",
-      "fingerprint": "31c5977bf50d0b83d0810f488aa4dd77ee2f856975514651ff05563be209820c",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
       "file": "gate-engine/decisions/__tests__/integrity-bench.test.mts",
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
@@ -2368,14 +2352,6 @@
       "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
       "context": "if (isRecord(value) && typeof value.id === 'string')",
       "fingerprint": "366b2df35118d502587003d549945799eaf730baa0a9d18a5783f5c72577945c",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
-      "file": "gate-engine/review/lens/split.mts",
-      "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
-      "context": "...itemFields(merged as never),",
-      "fingerprint": "366b3dd410b57cf9206d4a6bd79f808617ca3f205264883eefeea7b13fee9c78",
       "count": 1
     },
     {
@@ -2704,14 +2680,6 @@
       "diagnostic": "Parameter `value` leaves input unparsed. Accept a named domain type; run the expected schema or parser at the I/O boundary before calling this function.",
       "context": "export function validatePlanCritiqueRecord(value: unknown): asserts value is PlanCritiqueRecordV1 {",
       "fingerprint": "3cbb34f9a89a0498712108e01c0010408d4e59d21d0df9b676dd4af2839b2e72",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/no-conditional-empty-object-spread",
-      "file": "gate-engine/review/lens/split.mts",
-      "diagnostic": "This conditional spread hides property omission behind an empty object. Build the object in separate statements and add the property only when present.",
-      "context": "...(p.res.model ? { model: p.res.model } : {}),",
-      "fingerprint": "3d3b143b66e62710eac353dda785d27d6d554fc105ad191283ca67e3866cc0f1",
       "count": 1
     },
     {
@@ -3152,14 +3120,6 @@
       "diagnostic": "Parameter `value` leaves input unparsed. Accept a named domain type; run the expected schema or parser at the I/O boundary before calling this function.",
       "context": "export function reviewRepositoryManifestHash(value: unknown): string {",
       "fingerprint": "46d8a35f6e927b0f8b187b2ff2ef822fb85cee4fe33e1d0e3163f4cec0ec7c0c",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
-      "file": "gate-engine/review/lens/split.mts",
-      "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
-      "context": "const merged = mergeLensOutcomes(",
-      "fingerprint": "47138c0f5b7bebba2172a2060beea2bdff9b5e33f68a1e1e33393b07731f3a24",
       "count": 1
     },
     {
@@ -3688,14 +3648,6 @@
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
       "context": "const paths = Object.fromEntries(",
       "fingerprint": "51ceee57bf93d24e485f3d5b5cc873f8fe2698379fc5442cb85dc778137a26fc",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/no-conditional-empty-object-spread",
-      "file": "gate-engine/review/lens/split.mts",
-      "diagnostic": "This conditional spread hides property omission behind an empty object. Build the object in separate statements and add the property only when present.",
-      "context": "...(p.retried ? { retried: true } : {}),",
-      "fingerprint": "51ef25f5667df5362fc002307ba192143721b667277fa50194cefcd0f4467da6",
       "count": 1
     },
     {
@@ -5608,14 +5560,6 @@
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
       "context": "expect(call?.[1] as string[]).toEqual([",
       "fingerprint": "7a01e8e2e7bc2f2b4c9641eafb016b89830659f70e6025c7d6f3716f62783189",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/no-known-value-widening",
-      "file": "gate-engine/review/lens/split.mts",
-      "diagnostic": "The explicit anonymous object type on return value of `planReviewWork` discards known type evidence. Keep inference, validate with `satisfies`, or use a named owner contract.",
-      "context": "return { tasks, scope, fullyCached, cachedLines, splitParts };",
-      "fingerprint": "7a3cc6cebe59abcb719957d9fcb15cbb729330350a17d4aa0ac4c41d2ff28499",
       "count": 1
     },
     {
@@ -10547,14 +10491,6 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
-      "file": "gate-engine/review/lens/split.mts",
-      "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
-      "context": "mergeItemVectors(merged as never, parts.map((p) => p.res) as never);",
-      "fingerprint": "dd37c996095f0a76e007e12729d4172b86c28fdceb7dca7d158ebb0190a8412f",
-      "count": 2
-    },
-    {
       "ruleId": "anti-slop/no-known-value-widening",
       "file": "cli/lib/doctor/guard-config-checks.mts",
       "diagnostic": "The explicit open dictionary type on binding `REQUIRED_DOMAINS` discards known type evidence. Keep inference, validate with `satisfies`, or use a named owner contract.",
@@ -11576,14 +11512,6 @@
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
       "context": "? ((readJson(join(cwd, 'node_modules', DEP, 'package.json')) as { version?: string } | null)",
       "fingerprint": "f17c8011ee8550808f54f7f53f038f0da06439da858f56fac6ac4cf19ead45ab",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/no-conditional-empty-object-spread",
-      "file": "gate-engine/review/lens/split.mts",
-      "diagnostic": "This conditional spread hides property omission behind an empty object. Build the object in separate statements and add the property only when present.",
-      "context": "...(transcriptRef ? { transcript_ref: transcriptRef } : {}),",
-      "fingerprint": "f19d21a3ef66d8285ea7fcb7991d777b8c062e291e45543ddc18d7d093ff10cf",
       "count": 1
     },
     {

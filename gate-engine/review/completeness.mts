@@ -47,9 +47,12 @@ import {
 import { JUDGE_ISOLATION } from '../judge/judge-isolation.mts';
 import {
   judgeMcpCapabilityFingerprint,
+  judgeMcpMissingServers,
   namedAgentMcpProfile,
+  trackMcpSpawns,
   withNamedAgentMcpTools,
 } from '../judge/mcp/profile.mts';
+import { printCachedPass, reportMcpDegraded } from './evidence/base-context.mts';
 import { reportGateInfraFailure } from '../judge/odb-probe.mts';
 import type { JudgeOutage } from '../judge/outage/classify.mts';
 import {
@@ -84,13 +87,12 @@ export function completenessJudgeSetup(
 ) {
   const mcpProfile = namedAgentMcpProfile();
   const allowedTools = withNamedAgentMcpTools(TOOLS, cfg.indexPath ? cfg.searchTool : '');
+  const mcpOptions = { cwd, projectRoots: mcpProjectRoots };
   return {
     allowedTools,
     mcpProfile,
-    capabilityFingerprint: judgeMcpCapabilityFingerprint(mcpProfile, allowedTools, {
-      cwd,
-      projectRoots: mcpProjectRoots,
-    }),
+    capabilityFingerprint: judgeMcpCapabilityFingerprint(mcpProfile, allowedTools, mcpOptions),
+    mcp: judgeMcpMissingServers(mcpProfile, mcpOptions), // what it runs without (sc-2837)
   };
 }
 
@@ -266,6 +268,7 @@ export async function runCompleteness(
   let allowedTools = withNamedAgentMcpTools(TOOLS);
   let mcpProfile = namedAgentMcpProfile();
   let capabilityFingerprint = '';
+  let mcp: ReturnType<typeof completenessJudgeSetup>['mcp'] | undefined;
   let stickyKey = '';
   let messageId = '';
   let stagedIdentity: string | null = null;
@@ -274,7 +277,7 @@ export async function runCompleteness(
     const cfg = resolveGuardConfig(cwd);
     if (cfg.noLlm) return finish(0);
     model = resolveEscalationModel(cfg);
-    ({ allowedTools, mcpProfile, capabilityFingerprint } = completenessJudgeSetup(cfg, cwd, {
+    ({ allowedTools, mcpProfile, capabilityFingerprint, mcp } = completenessJudgeSetup(cfg, cwd, {
       mcpProjectRoots,
     }));
     const message = normalizeCommitMessage(
@@ -312,10 +315,12 @@ export async function runCompleteness(
       // Narration only: the key ignores the diff by ruling (sc-3175). A PASS saved before
       // fingerprints existed, or an unreadable index, cannot vouch.
       const diffMatches = stagedIdentity !== null && sticky.diff_sha === stagedIdentity;
-      console.error(
+      printCachedPass(
+        'completeness',
+        sticky,
         diffMatches
-          ? `guard-review: completeness — cached PASS (same branch + message + staged diff) — message ${messageId}`
-          : `guard-review: completeness — cached PASS (same branch + message; judged on an earlier diff, which is not re-judged) — message ${messageId}`,
+          ? `(same branch + message + staged diff) — message ${messageId}`
+          : `(same branch + message; judged on an earlier diff, which is not re-judged) — message ${messageId}`,
       );
       const stickyDuration =
         typeof sticky.duration_ms === 'number' ? sticky.duration_ms : undefined;
@@ -380,17 +385,16 @@ export async function runCompleteness(
   );
   const hit = loadCache(cwd)[key];
   if (hit) {
-    console.error(
-      `guard-review: completeness — cached PASS (identical judgement) — message ${messageId}`,
-    );
+    printCachedPass('completeness', hit, `(identical judgement) — message ${messageId}`);
     // The most expensive entry in this store: its hit rate is the one that pays.
     const cachedDuration = typeof hit.duration_ms === 'number' ? hit.duration_ms : undefined;
     emitCacheHit('review:completeness', hit.model, cachedDuration);
     return finish(0, 'full', cachedDuration);
   }
 
+  // Its own process (backgrounded by the hook), so it names itself — only once a judge will spawn.
+  const mcpSpawn = trackMcpSpawns(mcp, ['completeness'], capabilityFingerprint);
   let outage: JudgeOutage | undefined;
-  let observedCapabilityFingerprint: string | undefined;
   const raw = await exec({
     label: 'review:completeness',
     args: ['-p', prompt, '--model', model, ...JUDGE_ISOLATION, '--allowedTools', allowedTools],
@@ -400,14 +404,15 @@ export async function runCompleteness(
     mcpProfile,
     mcpProjectRoots,
     codexReadOnly: true,
-    onMcpPrepared: (fingerprint) => {
-      observedCapabilityFingerprint = fingerprint;
+    onMcpPrepared: (fingerprint, cause) => {
+      mcpSpawn.observe(cause, fingerprint);
     },
     onOutage: (kind) => {
       outage = kind;
     },
   });
-  if (observedCapabilityFingerprint && observedCapabilityFingerprint !== capabilityFingerprint) {
+  const mcpCause = mcpSpawn.cause();
+  if (mcpSpawn.drift() === 'unexplained') {
     emitNoRun('mcp_capabilities_changed');
     console.error(
       'guard-review: completeness SKIPPED (MCP capabilities changed while preparing the judge) — rerun with a stable trusted MCP registry.',
@@ -440,7 +445,7 @@ export async function runCompleteness(
   // Only a CONFIDENT PASS is cached — never a FAIL (the author fixes, the evidence changes), never
   // an unparseable verdict, and never the GUARD_COMPLETENESS_HARD=0 soften below (it exits 0 on a
   // FAIL the judge did make; caching it would make one softened run silence every later re-run).
-  if (verdict === 'PASS') {
+  if (verdict === 'PASS' && mcpSpawn.drift() === 'same') {
     const meta: VerdictMeta = {
       at: new Date().toISOString(),
       model,
@@ -448,13 +453,17 @@ export async function runCompleteness(
     };
     // Names the snapshot the judge was shown; absent (no snapshot formed) never vouches.
     if (stagedIdentity) meta.diff_sha = stagedIdentity;
+    if (mcpCause) meta.mcp_degraded_cause = mcpCause;
     // Both identities: the exact byte key (any caller, any order) and the branch+message sticky
     // key that lets a ship retry with a reshaped diff skip this judge (see the lookup above).
     savePasses(cwd, stickyKey ? { [key]: meta, [stickyKey]: meta } : { [key]: meta });
   }
   if (verdict === 'PASS') {
     emitVerdict('pass', reason || 'no gap found');
-    console.error(`guard-review: completeness — PASS — message ${messageId}`);
+    console.error(
+      `guard-review: completeness — PASS${mcpCause ? ' (DEGRADED)' : ''} — message ${messageId}`,
+    );
+    if (mcpCause) reportMcpDegraded('completeness', mcpCause);
     return finish(0);
   }
   if (verdict !== 'FAIL') {

@@ -39,6 +39,7 @@ import {
   type JudgeMcpProfile,
   type PreparedJudgeMcpProfile,
   prepareJudgeMcpProfile,
+  spawnDegradedCause,
 } from './mcp/profile.mts';
 import {
   classifyJudgeOutage,
@@ -125,8 +126,9 @@ interface ExecJudgeOpts {
   transcript?: boolean;
   /** Strict MCP profile. Omitted means a pure/internal judge with no MCP servers. */
   mcpProfile?: JudgeMcpProfile;
-  /** Observes the exact, secret-safe MCP capability identity prepared for this spawn. */
-  onMcpPrepared?: (capabilityFingerprint: string) => void;
+  /** Observes the exact, secret-safe MCP capability identity prepared for this spawn, and why that
+   * spawn is DEGRADED when it lacks a verdict-bearing server (sc-2837). */
+  onMcpPrepared?: (capabilityFingerprint: string, degradedCause?: string) => void;
   /** Trusted-registry project roots; isolated fixtures supply the consumer root they represent. */
   mcpProjectRoots?: readonly string[];
   /** Tool-equipped, write-free Codex judge; required without staged-tree tamper detection. */
@@ -297,10 +299,10 @@ export function execJudge(opts: ExecJudgeOpts): string | null {
     projectRoots: opts.mcpProjectRoots,
   });
   try {
-    opts.onMcpPrepared?.(mcp.capabilityFingerprint);
     // Inside the try on purpose: an argv a codex model cannot express (no prompt) surfaces as ONE
     // outage warning carrying the translation error, keeping this function's never-throws contract.
     const cli = spawnFor(args, mcp, opts.codexReadOnly === true);
+    opts.onMcpPrepared?.(mcp.capabilityFingerprint, spawnDegradedCause(mcp, cli.mcpInjected));
     const out = execFileSync(cli.bin, cli.argv, {
       cwd,
       // Never the caller's env verbatim: git leaks an ABSOLUTE GIT_INDEX_FILE/GIT_DIR into every
@@ -394,10 +396,10 @@ export function execJudgeAsync(opts: ExecJudgeOpts): Promise<string | null> {
       resolve(null);
     };
     try {
-      opts.onMcpPrepared?.(mcp.capabilityFingerprint);
       // See the sync twin: routing inside the try keeps the never-rejects contract when argv
       // translation itself throws.
       const cli = spawnFor(args, mcp, opts.codexReadOnly === true);
+      opts.onMcpPrepared?.(mcp.capabilityFingerprint, spawnDegradedCause(mcp, cli.mcpInjected));
       const child = execFile(
         cli.bin,
         cli.argv,

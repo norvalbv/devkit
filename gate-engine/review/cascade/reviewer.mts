@@ -1,7 +1,7 @@
 import type { GuardConfig } from '../../config.mts';
 import { judgeBinForModel } from '../../judge/codex/result.mts';
 import { JUDGE_ISOLATION } from '../../judge/judge-isolation.mts';
-import { namedAgentMcpProfile } from '../../judge/mcp/profile.mts';
+import { mcpSpawnTracker, namedAgentMcpProfile } from '../../judge/mcp/profile.mts';
 import type { JudgeOutage } from '../../judge/outage/classify.mts';
 import { DEEP_JUDGE_TIMEOUT_MS, execJudgeAsync, remedyCause } from '../../judge/run-judge.mts';
 import { renderGoverningClaudeMd } from '../claude-md.mts';
@@ -78,6 +78,9 @@ export interface CascadeOpts {
   judgeTimeoutMs?: number;
   /** Also attach the off-wire full-text vector (`itemsFull`) — a bench that banks findings. */
   fullItems?: boolean;
+  /** Set when this run's judges spawn without a verdict-bearing MCP server (sc-2837); a PASS then
+   * carries it as `mcpDegraded`. Computed once per gate run by the caller, not per spawn. */
+  mcpDegradedCause?: string;
 }
 
 /** Run one reviewer with checklist verification, override handling, and cleanup. */
@@ -105,7 +108,19 @@ export async function runCascade(
       attachItems(skip, seeded, new Map(), { full: opts.fullItems });
       return skip;
     }
-    let res = await cascadeVerdict(sel, opts, checklistRoot);
+    // The spawns' own MCP profiles decide over the run-level read: the registry can change, or the
+    // private config fail, between the two (sc-2837).
+    const mcpSpawn = mcpSpawnTracker(opts.mcpDegradedCause);
+    const exec = opts.exec ?? execJudgeAsync;
+    const observed: typeof execJudgeAsync = (o) =>
+      exec({
+        ...o,
+        onMcpPrepared: (fingerprint, cause) => {
+          o.onMcpPrepared?.(fingerprint, cause);
+          mcpSpawn.observe(cause);
+        },
+      });
+    let res = await cascadeVerdict(sel, { ...opts, exec: observed }, checklistRoot);
     // Recovery below only schedules/classifies; it deletes this attempt's artifact without
     // running another judge. Keep its exact private evidence for the resulting inconclusive row.
     const captureState = opts.fullItems ? readChecklistState(cwd, sel.reviewer) : null;
@@ -141,6 +156,10 @@ export async function runCascade(
     // Read before the finally deletes the artifact — the flag lives nowhere else (sc-2317).
     const degraded = retrievalDegradation(sel.reviewer.name, finalState, res.status);
     if (degraded) res.degraded = degraded;
+    // A named skip judged nothing, so a missing tool weakened nothing — same rule as retrieval.
+    const mcpCause = mcpSpawn.cause();
+    if (mcpCause && res.status === 'pass' && !isNamedSkip(finalState))
+      res.mcpDegraded = { cause: mcpCause };
     return res;
   } finally {
     cleanupChecklistState(cwd, sel.reviewer);
