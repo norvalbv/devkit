@@ -87,6 +87,10 @@ Making these changes is fixing a broken test, not weakening a real one — the t
 
 A test that asserts a product's **own** timeout (for example, "the ceiling fires and names the stuck step") races setup against that timeout. Have the stuck step print a marker. Before the strict assertions, check for it: if the timeout fired and the marker is absent, the timeout won the race before the step under test ran. Fail with a distinct, greppable label that says so, and include the machine load. Do not reuse the assertion's message. A reached marker with the wrong outcome is a real regression and must keep failing on the strict assertions.
 
+## Coverage of a change
+
+When a coverage bar applies to the files your change touches, and the repo runs vitest, `devkit coverage-run --changed` prints a per-file table for exactly the files changed since the remote default branch; `--changed=<ref>` picks another base. Fetch first, because a stale base widens the set. vitest selects the tests that import those files, and a changed file no test imports reads 0%. Do not hand-assemble `--coverage.include` and test-file lists: a wrong pairing reports 0% for a covered file. The table is printed, never published, so it does not touch the artifact the coverage gate reads.
+
 ## Coverage of code run in a subprocess
 
 V8 coverage measures the test process. Code a test reaches by spawning a CLI (`node cli.mts …`) counts only when the runner attaches child processes, usually by handing each child `NODE_V8_COVERAGE` through its environment (labelled examples: vitest 5 `coverage.autoAttachSubprocess: true` with the `v8` provider). Without it, a CLI module that dozens of tests drive end to end reports near 0%.
