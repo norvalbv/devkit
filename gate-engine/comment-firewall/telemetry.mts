@@ -20,10 +20,18 @@ export interface CommentBudgetTouched {
   text_lines: number;
 }
 
+/** Over-budget paragraphs passed because an earlier attempt showed them, and forbidden references. */
+export interface CommentBudgetCounts {
+  kept: number;
+  refs: number;
+}
+
 export interface CommentBudgetEvent {
   type: typeof COMMENT_BUDGET_EVENT;
   gate: 'comments';
   status: CommentBudgetStatus;
+  kept: number;
+  refs: number;
   files: number;
   paragraphs: CommentInventory['paragraphs'];
   trailing_added: number;
@@ -47,6 +55,7 @@ function build(
   status: CommentBudgetStatus,
   inventory: CommentInventory,
   findings: CommentFinding[],
+  counts: CommentBudgetCounts,
   keepFindings: number,
   keepTouched: number,
 ): CommentBudgetEvent {
@@ -54,6 +63,8 @@ function build(
     type: COMMENT_BUDGET_EVENT,
     gate: 'comments',
     status,
+    kept: counts.kept,
+    refs: counts.refs,
     files: inventory.files,
     paragraphs: inventory.paragraphs,
     trailing_added: inventory.trailingAdded,
@@ -84,19 +95,20 @@ export function commentBudgetEvent(
   status: CommentBudgetStatus,
   inventory: CommentInventory,
   findings: CommentFinding[],
+  counts: CommentBudgetCounts,
   budget = PAYLOAD_BUDGET,
 ): CommentBudgetEvent {
   const maxItems = Math.ceil(Math.max(budget, 0) / 30);
   let keepFindings = Math.min(findings.length, maxItems);
   let keepTouched = Math.min(inventory.touched.length, maxItems);
   for (;;) {
-    const event = build(status, inventory, findings, keepFindings, keepTouched);
+    const event = build(status, inventory, findings, counts, keepFindings, keepTouched);
     if (bytes(JSON.stringify(event)) <= budget) return event;
     if (keepTouched > 0) keepTouched -= 1;
     else if (keepFindings > 0) keepFindings -= 1;
     else {
       return {
-        ...build(status, inventory, [], 0, 0),
+        ...build(status, inventory, [], counts, 0, 0),
         omitted: { findings: findings.length, touched: inventory.touched.length },
         truncated: true,
       };
@@ -110,9 +122,10 @@ export function emitCommentBudget(
   status: CommentBudgetStatus,
   inventory: CommentInventory,
   findings: CommentFinding[],
+  counts: CommentBudgetCounts,
 ): void {
   const envelope = bytes(JSON.stringify({ ...runEnvelope(), ts: new Date().toISOString() }));
-  const event = commentBudgetEvent(status, inventory, findings, LINE_BUDGET - envelope);
+  const event = commentBudgetEvent(status, inventory, findings, counts, LINE_BUDGET - envelope);
   // The envelope is not ours to cap; when even the floor event cannot fit beside it, a missing
   // event beats a torn line in the shared sink.
   if (bytes(JSON.stringify(event)) + envelope > LINE_BUDGET) return;
