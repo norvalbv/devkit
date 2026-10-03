@@ -134,6 +134,9 @@ reference stands for, or move the ticket to the commit message or PR body.
 Exit 4 means the staged evidence was unreadable, a configured pattern does not compile, or a
 configured language has no lexer adapter. It is not a rejection, so follow the printed remedy.
 
+Each `comment_budget` telemetry event carries `policy: "show-once-v1"`, naming the rules it was
+recorded under. No model judges your comments at commit time.
+
 Older installs may still hold `.devkit/comment-firewall-receipts.json` and
 `<git-common-dir>/devkit/comment-firewall-rationales.json` from the retired rationale flow. Nothing
 reads them; both are safe to delete.
@@ -184,7 +187,7 @@ it was mid-flight in and any reviewers missing a completion heartbeat. For more 
 The label means setup ran out of time **before** it reached the step under test. The two
 ceiling-sentinel tests in `cli/__tests__/review.test.mts` (the asset wedge and the
 `preflight-verify:deps-final` wedge) set `DEVKIT_PREFLIGHT_TIMEOUT` and assert that the ceiling fires
-*at the wedge*. When the wedge's marker is absent and review's own ceiling banner names an earlier
+_at the wedge_. When the wedge's marker is absent and review's own ceiling banner names an earlier
 phase, the test fails with `ceiling-timeout: the 90s setup ceiling fired during <phase> before
 reaching <phase>`. There are two possible causes, and the label names the likelier one:
 
@@ -209,7 +212,7 @@ tree and fails if it changes any tracked dist file. Whole-file mirrors such as `
 too. A feature PR may only **add** dist files (new artifacts) or **delete** them.
 
 - **Before shipping:** `devkit ship` lists rebuilt files as `release-only drift from main — leave them
-  out of the brief`. Brief your source, plus only the **new** dist paths the preflight names.
+out of the brief`. Brief your source, plus only the **new** dist paths the preflight names.
 - **Already on the PR:** restore the listed files from the PR's merge-base, which is what CI diffs
   against (`main` may have moved its own dist since). Run
   `git checkout "$(git merge-base origin/main HEAD)" -- <listed paths>`, commit, and `devkit ship --pr`.

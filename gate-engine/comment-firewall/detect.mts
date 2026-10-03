@@ -33,7 +33,7 @@ export const COMMENT_ADAPTER_VERSION = 'typescript-scanner-v2';
 export const COMMENT_FINDING_POLICY = 'changed-comment-paragraph-v6';
 const SUPPORTED_EXTENSIONS = new Set(['js', 'jsx', 'ts', 'tsx', 'mjs', 'cjs', 'mts', 'cts']);
 const MAX_GIT_OUTPUT = 16 * 1024 * 1024;
-const CONTEXT_LINES = 4;
+export const CONTEXT_LINES = 4;
 const LEADING_DOT_SLASH = /^\.\//;
 const TRAILING_SLASH = /\/$/;
 const TRAILING_CARRIAGE_RETURN = /\r$/;
@@ -241,7 +241,7 @@ function insideRoots(file: string, roots: string[]): boolean {
   return roots.some((root) => !root || file === root || file.startsWith(`${root}/`));
 }
 
-function contextFor(source: string, token: CommentToken): string {
+export function contextFor(source: string, token: CommentToken): string {
   const lines = source.split('\n');
   const from = Math.max(0, token.startLine - 1 - CONTEXT_LINES);
   const to = Math.min(lines.length, token.endLine + CONTEXT_LINES);

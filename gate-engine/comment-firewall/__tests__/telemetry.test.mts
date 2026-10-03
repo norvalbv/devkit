@@ -4,7 +4,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EVENT_BUDGET } from '../../judge/odb-probe.mts';
 import { emptyInventory } from '../inventory.mts';
-import { commentBudgetEvent, emitCommentBudget } from '../telemetry.mts';
+import { COMMENT_POLICY, commentBudgetEvent, emitCommentBudget } from '../telemetry.mts';
 import type { CommentFinding, CommentInventory } from '../types.mts';
 
 const finding = (index: number): CommentFinding => ({
@@ -48,6 +48,7 @@ describe('commentBudgetEvent', () => {
     expect(event).toMatchObject({
       type: 'comment_budget',
       gate: 'comments',
+      policy: 'show-once-v1',
       status: 'block',
       kept: 1,
       refs: 3,
@@ -136,6 +137,7 @@ describe('emitCommentBudget', () => {
     expect(lines).toHaveLength(1);
     expect(JSON.parse(lines[0] ?? '')).toMatchObject({
       type: 'comment_budget',
+      policy: COMMENT_POLICY,
       status: 'pass',
       ship_id: 'ship-1',
     });
