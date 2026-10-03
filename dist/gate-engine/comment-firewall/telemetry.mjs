@@ -9,11 +9,13 @@ const PAYLOAD_BUDGET = EVENT_BUDGET - 320;
 function bytes(value) {
     return Buffer.byteLength(value, 'utf8');
 }
-function build(status, inventory, findings, keepFindings, keepTouched) {
+function build(status, inventory, findings, counts, keepFindings, keepTouched) {
     const event = {
         type: COMMENT_BUDGET_EVENT,
         gate: 'comments',
         status,
+        kept: counts.kept,
+        refs: counts.refs,
         files: inventory.files,
         paragraphs: inventory.paragraphs,
         trailing_added: inventory.trailingAdded,
@@ -39,12 +41,12 @@ function build(status, inventory, findings, keepFindings, keepTouched) {
     return event;
 }
 /** Shrinks the two lists, touched first, until the line fits the atomic-append budget. */
-export function commentBudgetEvent(status, inventory, findings, budget = PAYLOAD_BUDGET) {
+export function commentBudgetEvent(status, inventory, findings, counts, budget = PAYLOAD_BUDGET) {
     const maxItems = Math.ceil(Math.max(budget, 0) / 30);
     let keepFindings = Math.min(findings.length, maxItems);
     let keepTouched = Math.min(inventory.touched.length, maxItems);
     for (;;) {
-        const event = build(status, inventory, findings, keepFindings, keepTouched);
+        const event = build(status, inventory, findings, counts, keepFindings, keepTouched);
         if (bytes(JSON.stringify(event)) <= budget)
             return event;
         if (keepTouched > 0)
@@ -53,7 +55,7 @@ export function commentBudgetEvent(status, inventory, findings, budget = PAYLOAD
             keepFindings -= 1;
         else {
             return {
-                ...build(status, inventory, [], 0, 0),
+                ...build(status, inventory, [], counts, 0, 0),
                 omitted: { findings: findings.length, touched: inventory.touched.length },
                 truncated: true,
             };
@@ -62,9 +64,9 @@ export function commentBudgetEvent(status, inventory, findings, budget = PAYLOAD
 }
 /** The line emitGateEvent writes is payload + envelope + ts; measure the envelope it will append
  * so the WHOLE record, not just the payload, stays under the atomic-append line budget. */
-export function emitCommentBudget(status, inventory, findings) {
+export function emitCommentBudget(status, inventory, findings, counts) {
     const envelope = bytes(JSON.stringify({ ...runEnvelope(), ts: new Date().toISOString() }));
-    const event = commentBudgetEvent(status, inventory, findings, LINE_BUDGET - envelope);
+    const event = commentBudgetEvent(status, inventory, findings, counts, LINE_BUDGET - envelope);
     // The envelope is not ours to cap; when even the floor event cannot fit beside it, a missing
     // event beats a torn line in the shared sink.
     if (bytes(JSON.stringify(event)) + envelope > LINE_BUDGET)

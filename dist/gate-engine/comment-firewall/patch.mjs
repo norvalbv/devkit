@@ -25,6 +25,7 @@ function deletedLines(lines) {
 export function parsePatchHunks(diff) {
     const hunks = [];
     let current = null;
+    let run = null;
     let lines = [];
     let newLine = 0;
     let oldLine = 0;
@@ -32,6 +33,14 @@ export function parsePatchHunks(diff) {
         if (current)
             current.deleted = deletedLines(lines);
         lines = [];
+        run = null;
+    };
+    const changeRun = (hunk) => {
+        if (!run) {
+            run = { removed: [], added: new Set() };
+            hunk.runs.push(run);
+        }
+        return run;
     };
     for (const raw of diff.split('\n')) {
         if (raw.startsWith('diff --git ')) {
@@ -47,6 +56,7 @@ export function parsePatchHunks(diff) {
                 newCount: header[3] === undefined ? 1 : Number(header[3]),
                 addedLines: new Set(),
                 deleted: [],
+                runs: [],
                 text: raw,
             };
             oldLine = Number(header[1]);
@@ -60,14 +70,17 @@ export function parsePatchHunks(diff) {
         /* File headers precede hunks; within a hunk `+++value` is source beginning with `++`. */
         if (raw.startsWith('+')) {
             current.addedLines.add(newLine);
+            changeRun(current).added.add(newLine);
             lines.push({ kind: '+', newLine, oldLine });
             newLine += 1;
         }
         else if (raw.startsWith('-')) {
+            changeRun(current).removed.push(oldLine);
             lines.push({ kind: '-', newLine, oldLine });
             oldLine += 1;
         }
         else if (!raw.startsWith('\\')) {
+            run = null;
             lines.push({ kind: ' ', newLine, oldLine });
             newLine += 1;
             oldLine += 1;
