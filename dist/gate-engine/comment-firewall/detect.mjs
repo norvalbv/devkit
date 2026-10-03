@@ -14,6 +14,8 @@ import { resolveGuardConfig, sourceMatchers } from '../config.mjs';
 import { gitPrefix } from '../ratchets/git-index.mjs';
 import { anchorContext, anchorFor, changedTextLineCount, emptyInventory, hunkIntersects, hunkTouches, recordParagraph, textLineCount, } from './inventory.mjs';
 import { commentTouchLines, parsePatchHunks } from './patch.mjs';
+import { loadCommentPolicy } from './policy.mjs';
+import { refFindings } from './refs.mjs';
 export { parsePatchHunks } from './patch.mjs';
 export const COMMENT_ADAPTER_VERSION = 'typescript-scanner-v2';
 export const COMMENT_FINDING_POLICY = 'changed-comment-paragraph-v6';
@@ -175,21 +177,23 @@ function stagedBlob(cwd, file) {
     const repoPath = `${gitPrefix(cwd)}${file}`;
     return git(cwd, ['show', `:${repoPath}`]);
 }
-/** Every line of `ref`'s version of the file that lies inside a comment token; empty when absent. */
-function commentLinesAt(cwd, file, extension, ref) {
-    const lines = new Set();
+/** Each comment line of `ref`'s version of the file, mapped to its parts of every token on it. */
+function commentFragmentsAt(cwd, file, extension, ref) {
+    const fragments = new Map();
     let source;
     try {
         source = git(cwd, ['show', `${ref}:${gitPrefix(cwd)}${file}`]);
     }
     catch {
-        return lines;
+        return fragments;
     }
     for (const token of scanCommentTokens(source, extension)) {
-        for (let line = token.startLine; line <= token.endLine; line += 1)
-            lines.add(line);
+        token.text.split('\n').forEach((part, offset) => {
+            const line = token.startLine + offset;
+            fragments.set(line, [...(fragments.get(line) ?? []), part]);
+        });
     }
-    return lines;
+    return fragments;
 }
 function normalizedRoot(cwd, root) {
     const rel = path.isAbsolute(root) ? path.relative(cwd, root) : root;
@@ -281,10 +285,9 @@ function normalizeComment(text) {
         .map((line) => line.replace(TRAILING_BLANKS, '').replace(LEADING_BLANKS, ''))
         .join('\n');
 }
-function changedParagraphs(file, source, extension, hunks, touchLines, inventory) {
+function changedParagraphs(file, source, tokens, hunks, touchLines, inventory) {
     const lines = source.split('\n');
     const isBlank = (line) => (lines[line - 1] ?? '').trim() === '';
-    const tokens = scanCommentTokens(source, extension);
     const paragraphs = paragraphCommentTokens(tokens, isBlank);
     const addedLines = new Set(hunks.flatMap((hunk) => [...hunk.addedLines]));
     for (const token of tokens) {
@@ -353,7 +356,9 @@ export function detectChangedComments(cwd = process.cwd()) {
     const cfg = resolveGuardConfig(cwd);
     const roots = cfg.scanRoots.map((root) => normalizedRoot(cwd, root));
     const isConfiguredSource = sourceMatchers(cfg.sourceExtensions).isSource;
+    const policy = loadCommentPolicy(cwd);
     const findings = [];
+    const cited = [];
     const unsupported = [];
     const inventory = emptyInventory();
     const decisionsDir = normalizedRoot(cwd, cfg.decisionsDir);
@@ -370,11 +375,12 @@ export function detectChangedComments(cwd = process.cwd()) {
         inventory.files += 1;
         const first = parsePatchHunks(patch(cwd, file));
         let effective = first;
-        let touchLines = commentTouchLines(first, commentLinesAt(cwd, file, extension, 'HEAD'));
+        const headFragments = commentFragmentsAt(cwd, file, extension, 'HEAD');
+        let touchLines = commentTouchLines(first, new Set(headFragments.keys()));
         try {
             const second = parsePatchHunks(patch(cwd, file, 'MERGE_HEAD'));
             const secondLines = new Set(second.flatMap((hunk) => [...hunk.addedLines]));
-            const secondTouch = commentTouchLines(second, commentLinesAt(cwd, file, extension, 'MERGE_HEAD'));
+            const secondTouch = commentTouchLines(second, new Set(commentFragmentsAt(cwd, file, extension, 'MERGE_HEAD').keys()));
             effective = first.map((hunk) => ({
                 ...hunk,
                 addedLines: new Set([...hunk.addedLines].filter((line) => secondLines.has(line))),
@@ -385,10 +391,12 @@ export function detectChangedComments(cwd = process.cwd()) {
             // Ordinary commit: the first-parent staged patch is the complete attribution set.
         }
         const source = stagedBlob(cwd, file);
-        const paragraphs = changedParagraphs(file, source, extension, effective, touchLines, inventory);
+        const tokens = scanCommentTokens(source, extension);
+        cited.push(...refFindings({ file, tokens, hunks: effective, headFragments }, policy.refs));
+        const paragraphs = changedParagraphs(file, source, tokens, effective, touchLines, inventory);
         for (const paragraph of paragraphs) {
             findings.push(findingFor(file, extension, source, paragraph, effective));
         }
     }
-    return { findings, unsupported, inventory };
+    return { findings, refFindings: cited, unsupported, inventory };
 }
