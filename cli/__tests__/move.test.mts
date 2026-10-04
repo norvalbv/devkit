@@ -1,9 +1,6 @@
 /**
- * `devkit move` codemod — verifies it relocates a file and rewrites EVERY reference style
- * (alias importer, relative importer, the moved file's own relative imports, vi.mock + dynamic
- * import string args, colocated test sibling) into `@/` alias form — or relative form when the
- * importer or target lies outside the alias root (sc-3016) — and surgically prunes the
- * structure baseline. Runs the real CLI in a throwaway git repo (git mv needs an index).
+ * `devkit move` end to end in throwaway git repos: every specifier style must survive a move or rename.
+ * The rewrite rules live in docs/decisions/move-rewrites-via-ts-file-rename.md.
  */
 import { execFileSync, spawn } from 'node:child_process';
 import {
@@ -83,8 +80,9 @@ function fixture(tsconfigText = DEFAULT_TSCONFIG) {
 const read = (root, rel) => readFileSync(join(root, rel), 'utf8');
 const runMoveArgs = (cwd, ...args) =>
   testSpawnSync(process.execPath, [CLI, 'move', ...args], { cwd, encoding: 'utf8' });
+// A readiness wait, not a speed assertion: tsconfig is now read and walked before the first git call.
 const waitForPath = async (path) => {
-  for (let attempt = 0; attempt < 100; attempt++) {
+  for (let attempt = 0; attempt < 400; attempt++) {
     if (existsSync(path)) return;
     await new Promise((resolveWait) => setTimeout(resolveWait, 25));
   }
@@ -92,7 +90,7 @@ const waitForPath = async (path) => {
 };
 
 describe('devkit move', () => {
-  it('relocates a file and rewrites all references in alias style + prunes baseline', () => {
+  it('relocates a file and rewrites all references in their own style + prunes baseline', () => {
     const root = fixture();
     execFileSync(
       process.execPath,
@@ -112,12 +110,14 @@ describe('devkit move', () => {
     expect(read(root, 'src/renderer/features/b/use.ts')).toContain("'@/lib/utils/util'");
     expect(read(root, 'src/renderer/features/b/use.ts')).not.toContain('@/features/a/util');
 
-    // relative importer rewritten to alias
-    expect(read(root, 'src/renderer/features/a/sibling.ts')).toContain("'@/lib/utils/util'");
+    // relative importer stays relative, re-pointed at the new home
+    expect(read(root, 'src/renderer/features/a/sibling.ts')).toContain("'../../lib/utils/util'");
     expect(read(root, 'src/renderer/features/a/sibling.ts')).not.toContain("'./util'");
 
-    // moved file's OWN relative import re-anchored to alias (helper stayed put)
-    expect(read(root, 'src/renderer/lib/utils/util.ts')).toContain("'@/features/a/helper'");
+    // moved file's OWN relative import re-anchored, still relative (helper stayed put)
+    expect(read(root, 'src/renderer/lib/utils/util.ts')).toContain("'../../features/a/helper'");
+    // the test sibling moved WITH util, so its './util' is still right and must not churn
+    expect(read(root, 'src/renderer/lib/utils/util.test.ts')).toContain("from './util'");
 
     // vi.mock + dynamic import() string args rewritten
     const cTest = read(root, 'src/renderer/features/c/c.test.ts');
@@ -209,13 +209,13 @@ describe('devkit move — directory and untracked sources', () => {
     expect(r.status, r.stderr).toBe(0);
     expect(existsSync(join(root, 'src/renderer/features/new-rules'))).toBe(false);
     expect(existsSync(join(root, 'src/renderer/lib/new-rules/rule.ts'))).toBe(true);
-    expect(read(root, 'src/renderer/lib/new-rules/rule.ts')).toContain("'@/lib/new-rules/shared'");
+    expect(read(root, 'src/renderer/lib/new-rules/rule.ts')).toContain("'./shared'");
     expect(read(root, 'src/renderer/features/b/use.ts')).toContain("'@/lib/new-rules/rule'");
     expect(git(root, 'ls-files', '--', 'src/renderer/lib/new-rules').toString()).toBe('');
     expect(git(root, 'ls-files', '-s').toString()).toBe(indexBefore);
   });
 
-  it('rewrites a source leaf added while Git starts moving its directory', () => {
+  it('leaves a leaf added while Git starts moving its directory resolving in place', () => {
     const root = fixture();
     const source = join(root, 'src/renderer/features/new-rules');
     writePath(root, 'src/renderer/features/new-rules/rule.ts', 'export const rule = 1;\n');
@@ -243,7 +243,8 @@ describe('devkit move — directory and untracked sources', () => {
     );
 
     expect(r.status, r.stderr).toBe(0);
-    expect(read(root, 'src/renderer/lib/new-rules/late.ts')).toContain("'@/lib/new-rules/rule'");
+    // never planned (it did not exist yet), but its sibling-relative import still resolves
+    expect(read(root, 'src/renderer/lib/new-rules/late.ts')).toContain("'./rule'");
   });
 
   it('rejects an index-only destination without changing the source or index', () => {
@@ -679,7 +680,7 @@ describe('devkit move — directory and untracked sources', () => {
     expect(r.status, r.stderr).toBe(0);
     expect(existsSync(join(root, 'src/renderer/features/a'))).toBe(false);
     expect(read(root, 'src/renderer/features/b/use.ts')).toContain("'@/lib/a/util'");
-    expect(read(root, 'src/renderer/lib/a/util.ts')).toContain("'@/lib/a/helper'");
+    expect(read(root, 'src/renderer/lib/a/util.ts')).toContain("'./helper'");
     const tracked = git(root, 'ls-files', '--', 'src/renderer/lib/a').toString();
     expect(tracked).toContain('src/renderer/lib/a/util.ts');
     expect(tracked).toContain('src/renderer/lib/a/util.test.ts');
@@ -934,22 +935,23 @@ describe('devkit move — tsconfig reading', () => {
     expect(read(root, 'src/renderer/features/b/use.ts')).toContain("'@/lib/utils/util'");
   });
 
-  it('--dry-run still previews when tsconfig declares no alias, but reports the real run cannot run', () => {
+  it('--dry-run previews a repo whose tsconfig declares no alias, counting the rewrites', () => {
     const root = fixture(NO_ALIAS_TSCONFIG);
     const r = runMove(root, '--dry-run');
-    expect(r.status).toBe(1);
+    expect(r.status, r.stderr).toBe(0);
     expect(r.stdout).toContain('[dry] mv src/renderer/features/a/util.ts');
-    expect(r.stdout).toContain('[dry] would rewrite importers');
-    expect(r.stderr).toMatch(/no "@\/\*"-style path alias found/);
+    // sibling + util's own helper import; the alias importers cannot resolve without paths
+    expect(r.stdout).toMatch(/\[dry\] would rewrite 2 specifier\(s\)/);
     expect(existsSync(join(root, 'src/renderer/lib/utils/util.ts'))).toBe(false);
   });
 
-  it('the real run aborts on a missing alias without printing an mv line', () => {
+  it('moves a repo with no alias, keeping relative importers relative', () => {
     const root = fixture(NO_ALIAS_TSCONFIG);
     const r = runMove(root);
-    expect(r.status).toBe(1);
-    expect(r.stderr).toMatch(/no "@\/\*"-style path alias found/);
-    expect(r.stdout).not.toContain('mv '); // nothing moved, so nothing may claim it did
+    expect(r.status, r.stderr).toBe(0);
+    expect(existsSync(join(root, 'src/renderer/lib/utils/util.ts'))).toBe(true);
+    expect(read(root, 'src/renderer/features/a/sibling.ts')).toContain("'../../lib/utils/util'");
+    expect(r.stderr).not.toMatch(/path alias found/);
   });
 
   it('a broken extends chain is diagnosed by name, not reported as a missing alias', () => {
@@ -1021,18 +1023,18 @@ describe('devkit move — tsconfig edge cases', () => {
   it('treats a paths key with an empty target list as no alias, not a crash', () => {
     const root = fixture(JSON.stringify({ compilerOptions: { paths: { '@/*': [] } } }));
     const r = runMove(root);
-    expect(r.status).toBe(1);
-    expect(r.stderr).toMatch(/no "@\/\*"-style path alias found/);
+    expect(r.status, r.stderr).toBe(0);
     expect(r.stderr).not.toMatch(/Cannot read properties of undefined/);
+    expect(read(root, 'src/renderer/features/a/sibling.ts')).toContain("'../../lib/utils/util'");
   });
 
-  it('ignores exact-match paths keys, which this codemod cannot rewrite', () => {
+  it('ignores exact-match paths keys, which name no directory to re-anchor under', () => {
     const root = fixture(
       JSON.stringify({ compilerOptions: { paths: { '@app': ['./src/renderer/app.ts'] } } }),
     );
     const r = runMove(root);
-    expect(r.status).toBe(1);
-    expect(r.stderr).toMatch(/no "@\/\*"-style path alias found/);
+    expect(r.status, r.stderr).toBe(0);
+    expect(read(root, 'src/renderer/features/a/sibling.ts')).toContain("'../../lib/utils/util'");
   });
 
   // --alias short-circuits tsconfig reading, but ts-morph still needs tsconfig to enumerate
@@ -1056,10 +1058,17 @@ describe('devkit move — tsconfig edge cases', () => {
         include: ['src'],
       }),
     );
+    writePath(
+      root,
+      'src/renderer/features/d/tilde.ts',
+      "import { x } from '~/features/a/util';\nexport const t = x;\n",
+    );
+    git(root, 'add', '-A');
     const r = runMove(root);
     expect(r.status, r.stderr).toBe(0);
-    // '~/' was selected, so the relative importer re-anchors to it
-    expect(read(root, 'src/renderer/features/a/sibling.ts')).toContain("'~/lib/utils/util'");
+    // '~/' is the usable alias: an importer written with it stays '~/', relatives stay relative
+    expect(read(root, 'src/renderer/features/a/sibling.ts')).toContain("'../../lib/utils/util'");
+    expect(read(root, 'src/renderer/features/d/tilde.ts')).toContain("'~/lib/utils/util'");
   });
 
   it('resolves paths against baseUrl when baseUrl is declared', () => {
@@ -1309,5 +1318,557 @@ describe('devkit move — outside the alias root', () => {
 
     expect(r.status, r.stderr).toBe(0);
     expect(read(root, 'src/main/lib/sub/deeper/leaf.ts')).toContain("from '../index'");
+  });
+});
+
+// sc-1133: the frink layout that exposed the nesting + dangling-barrel bugs, reproduced as-is.
+const STORY_DIR = 'src/renderer/features/agents/main/active-chat/components';
+function storyFixture() {
+  const root = mkTmp('move-story-');
+  writePath(root, 'tsconfig.json', DEFAULT_TSCONFIG);
+  writePath(root, 'src/renderer/lib/trpc.ts', 'export const trpc = 1;\n');
+  writePath(
+    root,
+    'src/renderer/features/agents/AgentUserQuestion.ts',
+    'export type AgentUserQuestion = string;\n',
+  );
+  writePath(
+    root,
+    `${STORY_DIR}/ParkedQuestionsBar/index.tsx`,
+    "import { trpc } from '../../../../../../lib/trpc';\nimport type { AgentUserQuestion } from '../../../../AgentUserQuestion';\nexport const Bar = (q: AgentUserQuestion) => trpc + q.length;\n",
+  );
+  writePath(
+    root,
+    `${STORY_DIR}/ParkedQuestionsBar/index.test.tsx`,
+    "import { vi } from 'vitest';\nvi.mock('../../../../../../lib/trpc', () => ({}));\nimport { Bar } from './index';\nexport const b = Bar;\n",
+  );
+  writePath(root, `${STORY_DIR}/index.ts`, "export * from './ParkedQuestionsBar';\n");
+  writePath(
+    root,
+    'src/renderer/features/agents/use.ts',
+    "import { Bar } from '@/features/agents/main/active-chat/components/ParkedQuestionsBar';\nexport const u = Bar;\n",
+  );
+  git(root, 'init', '-q');
+  git(root, 'add', '-A');
+  return root;
+}
+
+describe('devkit move — renames (sc-1133)', () => {
+  it('--rename renames a directory in place instead of nesting it, keeping every import resolving', () => {
+    const root = storyFixture();
+    const r = runMoveArgs(
+      root,
+      `${STORY_DIR}/ParkedQuestionsBar`,
+      `${STORY_DIR}/ParkAnswerSurface`,
+      '--rename',
+    );
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(existsSync(join(root, `${STORY_DIR}/ParkAnswerSurface/index.tsx`))).toBe(true);
+    expect(existsSync(join(root, `${STORY_DIR}/ParkAnswerSurface/ParkedQuestionsBar`))).toBe(false);
+    expect(existsSync(join(root, `${STORY_DIR}/ParkedQuestionsBar`))).toBe(false);
+    // the barrel keeps its sibling-relative style instead of a full alias path
+    expect(read(root, `${STORY_DIR}/index.ts`)).toBe("export * from './ParkAnswerSurface';\n");
+    expect(read(root, 'src/renderer/features/agents/use.ts')).toContain(
+      "'@/features/agents/main/active-chat/components/ParkAnswerSurface'",
+    );
+    // same depth, so the moved files' own deep relatives are already right and must not churn
+    const moved = read(root, `${STORY_DIR}/ParkAnswerSurface/index.tsx`);
+    expect(moved).toContain("'../../../../../../lib/trpc'");
+    expect(moved).toContain("'../../../../AgentUserQuestion'");
+    expect(moved).not.toContain('@/features/lib');
+    const movedTest = read(root, `${STORY_DIR}/ParkAnswerSurface/index.test.tsx`);
+    expect(movedTest).toContain("vi.mock('../../../../../../lib/trpc'");
+    expect(movedTest).toContain("from './index'");
+  });
+
+  it('moving a directory INTO a new parent rewrites implicit-index importers and deep relatives', () => {
+    const root = storyFixture();
+    const r = runMoveArgs(
+      root,
+      `${STORY_DIR}/ParkedQuestionsBar`,
+      `${STORY_DIR}/ParkAnswerSurface`,
+    );
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(read(root, `${STORY_DIR}/index.ts`)).toBe(
+      "export * from './ParkAnswerSurface/ParkedQuestionsBar';\n",
+    );
+    const moved = read(root, `${STORY_DIR}/ParkAnswerSurface/ParkedQuestionsBar/index.tsx`);
+    // one level deeper now: each relative gains exactly one '../' and still names the same file
+    expect(moved).toContain("'../../../../../../../lib/trpc'");
+    expect(moved).toContain("'../../../../../AgentUserQuestion'");
+    const movedTest = read(
+      root,
+      `${STORY_DIR}/ParkAnswerSurface/ParkedQuestionsBar/index.test.tsx`,
+    );
+    expect(movedTest).toContain("vi.mock('../../../../../../../lib/trpc'");
+  });
+
+  it('renames a file onto a destination that names a file, instead of nesting it', () => {
+    const root = fixture();
+    writePath(root, 'src/renderer/features/w/index.tsx', 'export const w = 1;\n');
+    writePath(
+      root,
+      'src/renderer/features/w/index.test.tsx',
+      "import { w } from './index';\nexport const t = w;\n",
+    );
+    writePath(
+      root,
+      'src/renderer/features/uses-w.ts',
+      "import { w } from './w';\nexport const u = w;\n",
+    );
+    git(root, 'add', '-A');
+
+    const r = runMoveArgs(
+      root,
+      'src/renderer/features/w/index.tsx',
+      'src/renderer/features/v/index.tsx',
+    );
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(lstatSync(join(root, 'src/renderer/features/v/index.tsx')).isFile()).toBe(true);
+    // the colocated test follows the renamed file, not the old basename
+    expect(existsSync(join(root, 'src/renderer/features/v/index.test.tsx'))).toBe(true);
+    expect(read(root, 'src/renderer/features/uses-w.ts')).toContain("from './v'");
+  });
+
+  it('renames a file to a new basename and carries its test sibling to the matching name', () => {
+    const root = fixture();
+    const r = runMoveArgs(root, 'src/renderer/features/a/util.ts', 'src/renderer/lib/strings.ts');
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(existsSync(join(root, 'src/renderer/lib/strings.ts'))).toBe(true);
+    expect(existsSync(join(root, 'src/renderer/lib/strings.test.ts'))).toBe(true);
+    expect(read(root, 'src/renderer/lib/strings.test.ts')).toContain("from './strings'");
+    expect(read(root, 'src/renderer/features/b/use.ts')).toContain("'@/lib/strings'");
+    expect(read(root, 'src/renderer/features/c/c.test.ts')).toContain("vi.mock('@/lib/strings')");
+  });
+
+  it('rejects --rename with more than one source before moving anything', () => {
+    const root = fixture();
+    const r = runMoveArgs(
+      root,
+      'src/renderer/features/a/util.ts',
+      'src/renderer/features/a/helper.ts',
+      'src/renderer/lib',
+      '--rename',
+    );
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(/a rename takes exactly one source/);
+    expect(existsSync(join(root, 'src/renderer/features/a/util.ts'))).toBe(true);
+  });
+
+  it('moves several sources INTO a destination whose name has an extension', () => {
+    const root = fixture();
+    const r = runMoveArgs(
+      root,
+      'src/renderer/features/a/util.ts',
+      'src/renderer/features/a/helper.ts',
+      'src/renderer/lib/archive.ts',
+    );
+    expect(r.status, r.stderr).toBe(0);
+    expect(existsSync(join(root, 'src/renderer/lib/archive.ts/util.ts'))).toBe(true);
+    expect(existsSync(join(root, 'src/renderer/lib/archive.ts/helper.ts'))).toBe(true);
+  });
+
+  it('rejects --rename on a file, which is renamed by naming the new file instead', () => {
+    const root = fixture();
+    const r = runMoveArgs(root, 'src/renderer/features/a/util.ts', 'src/renderer/lib', '--rename');
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(/--rename renames a directory/);
+    expect(existsSync(join(root, 'src/renderer/lib'))).toBe(false);
+  });
+
+  it('refuses a rename onto an existing file without touching either side', () => {
+    const root = fixture();
+    const helperBefore = read(root, 'src/renderer/features/a/helper.ts');
+    const r = runMoveArgs(
+      root,
+      'src/renderer/features/a/util.ts',
+      'src/renderer/features/a/helper.ts',
+    );
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(/destination already exists/);
+    expect(read(root, 'src/renderer/features/a/helper.ts')).toBe(helperBefore);
+    expect(existsSync(join(root, 'src/renderer/features/a/util.ts'))).toBe(true);
+  });
+
+  it('carries .mts / .cts / .js test siblings, not just .ts / .tsx', () => {
+    const root = fixture();
+    writePath(root, 'src/renderer/features/m/lib.mts', 'export const m = 1;\n');
+    writePath(
+      root,
+      'src/renderer/features/m/lib.test.mts',
+      "import { m } from './lib.mts';\nexport const t = m;\n",
+    );
+    writePath(root, 'src/renderer/features/m/cjs.cts', 'export const c = 1;\n');
+    writePath(root, 'src/renderer/features/m/cjs.spec.cts', "import { c } from './cjs.cts';\n");
+    git(root, 'add', '-A');
+
+    const r = runMoveArgs(
+      root,
+      'src/renderer/features/m/lib.mts',
+      'src/renderer/features/m/cjs.cts',
+      'src/renderer/lib',
+    );
+    expect(r.status, r.stderr).toBe(0);
+    expect(read(root, 'src/renderer/lib/lib.test.mts')).toContain("'./lib.mts'");
+    expect(existsSync(join(root, 'src/renderer/lib/cjs.spec.cts'))).toBe(true);
+  });
+
+  it('moves INTO a destination whose suffix only resembles a source extension', () => {
+    const root = fixture();
+    const r = runMoveArgs(root, 'src/renderer/features/a/util.ts', 'src/renderer/lib/archive.mtsx');
+    expect(r.status, r.stderr).toBe(0);
+    expect(existsSync(join(root, 'src/renderer/lib/archive.mtsx/util.ts'))).toBe(true);
+  });
+
+  it('moves INTO an existing directory even when its name looks like a file', () => {
+    const root = fixture();
+    mkdirSync(join(root, 'src/renderer/lib/odd.ts'), { recursive: true });
+    const r = runMoveArgs(root, 'src/renderer/features/a/util.ts', 'src/renderer/lib/odd.ts');
+    expect(r.status, r.stderr).toBe(0);
+    expect(existsSync(join(root, 'src/renderer/lib/odd.ts/util.ts'))).toBe(true);
+  });
+});
+
+describe('devkit move — specifier style and shapes', () => {
+  it('keeps an explicit ".js" extension and an explicit "/index" as written', () => {
+    const root = fixture();
+    writePath(root, 'src/renderer/features/k/index.ts', 'export const k = 1;\n');
+    writePath(
+      root,
+      'src/renderer/features/uses-k.ts',
+      "import { k } from './k/index';\nimport { x } from './a/util.js';\nexport const u = k + x;\n",
+    );
+    git(root, 'add', '-A');
+
+    const r = runMoveArgs(root, 'src/renderer/features/k', 'src/renderer/lib');
+    expect(r.status, r.stderr).toBe(0);
+    const uses = read(root, 'src/renderer/features/uses-k.ts');
+    expect(uses).toContain("'../lib/k/index'");
+    expect(uses).toContain("'./a/util.js'"); // untouched: util did not move
+
+    const r2 = runMoveArgs(root, 'src/renderer/features/a/util.ts', 'src/renderer/lib/utils');
+    expect(r2.status, r2.stderr).toBe(0);
+    expect(read(root, 'src/renderer/features/uses-k.ts')).toContain("'../lib/utils/util.js'");
+  });
+
+  it('rewrites .js-suffixed imports in a nodenext consumer, keeping the suffix', () => {
+    const root = fixture(
+      JSON.stringify({
+        compilerOptions: { module: 'nodenext', moduleResolution: 'nodenext' },
+        include: ['src'],
+      }),
+    );
+    writePath(
+      root,
+      'src/renderer/features/a/sibling.ts',
+      "import { x } from './util.js';\nexport const y = x;\n",
+    );
+    writePath(
+      root,
+      'src/renderer/features/a/util.ts',
+      "import { helper } from './helper.js';\nexport const x = helper;\n",
+    );
+    git(root, 'add', '-A');
+
+    const r = runMove(root);
+    expect(r.status, r.stderr).toBe(0);
+    expect(read(root, 'src/renderer/features/a/sibling.ts')).toContain("'../../lib/utils/util.js'");
+    expect(read(root, 'src/renderer/lib/utils/util.ts')).toContain("'../../features/a/helper.js'");
+  });
+
+  it('rewrites a relative vi.mock and a require() in a .ts file, which TypeScript leaves alone', () => {
+    const root = fixture();
+    writePath(
+      root,
+      'src/renderer/features/a/mocks.test.ts',
+      "import { vi } from 'vitest';\nvi.mock('./util');\nconst u = require('./util');\nexport const m = u;\n",
+    );
+    git(root, 'add', '-A');
+
+    const r = runMove(root);
+    expect(r.status, r.stderr).toBe(0);
+    const mocks = read(root, 'src/renderer/features/a/mocks.test.ts');
+    expect(mocks).toContain("vi.mock('../../lib/utils/util')");
+    expect(mocks).toContain("require('../../lib/utils/util')");
+  });
+
+  it('follows an import of a file tsconfig does not include when the importer moves', () => {
+    const root = fixture(
+      JSON.stringify({
+        compilerOptions: { paths: { '@/*': ['./src/renderer/*'] } },
+        include: ['src'],
+        exclude: ['src/renderer/features/a/helper.ts'],
+      }),
+    );
+    const r = runMove(root);
+    expect(r.status, r.stderr).toBe(0);
+    expect(read(root, 'src/renderer/lib/utils/util.ts')).toContain("'../../features/a/helper'");
+  });
+
+  it('rewrites a static template-literal vi.mock argument', () => {
+    const root = fixture();
+    writePath(
+      root,
+      'src/renderer/features/a/tpl.test.ts',
+      "import { vi } from 'vitest';\nvi.mock(`./util`);\n",
+    );
+    git(root, 'add', '-A');
+
+    const r = runMove(root);
+    expect(r.status, r.stderr).toBe(0);
+    expect(read(root, 'src/renderer/features/a/tpl.test.ts')).toContain(
+      'vi.mock(`../../lib/utils/util`)',
+    );
+  });
+
+  it('keeps a UTF-8 BOM on an importer it rewrites', () => {
+    const root = fixture();
+    writeFileSync(
+      join(root, 'src/renderer/features/b/use.ts'),
+      "﻿import { x } from '@/features/a/util';\nexport const z = x;\n",
+    );
+    git(root, 'add', '-A');
+
+    const r = runMove(root);
+    expect(r.status, r.stderr).toBe(0);
+    const bytes = readFileSync(join(root, 'src/renderer/features/b/use.ts'));
+    expect([...bytes.subarray(0, 3)]).toEqual([0xef, 0xbb, 0xbf]);
+    expect(bytes.toString('utf8')).toContain("'@/lib/utils/util'");
+  });
+
+  it('keeps CRLF line endings on an importer it rewrites', () => {
+    const root = fixture();
+    writeFileSync(
+      join(root, 'src/renderer/features/b/use.ts'),
+      "import { x } from '@/features/a/util';\r\nexport const z = x;\r\n",
+    );
+    git(root, 'add', '-A');
+
+    const r = runMove(root);
+    expect(r.status, r.stderr).toBe(0);
+    expect(read(root, 'src/renderer/features/b/use.ts')).toBe(
+      "import { x } from '@/lib/utils/util';\r\nexport const z = x;\r\n",
+    );
+  });
+
+  it('warns about relative specifiers in a moved file that never resolved, and leaves them', () => {
+    const root = fixture();
+    writeFileSync(
+      join(root, 'src/renderer/features/a/util.ts'),
+      "import { gone } from './does-not-exist';\nexport const x = gone;\n",
+    );
+    git(root, 'add', '-A');
+
+    const r = runMove(root);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).toMatch(/1 relative specifier\(s\) in moved files did not resolve/);
+    expect(read(root, 'src/renderer/lib/utils/util.ts')).toContain("'./does-not-exist'");
+  });
+});
+
+const fakeGit = (root: string, onMv: string) => {
+  const realGit = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
+  writePath(
+    root,
+    'bin/git',
+    `#!/bin/sh\nif [ "$1" = "mv" ]; then\n${onMv}\nfi\nexec "${realGit}" "$@"\n`,
+  );
+  chmodSync(join(root, 'bin/git'), 0o755);
+  return { ...process.env, PATH: `${join(root, 'bin')}:${process.env.PATH}` };
+};
+
+describe('devkit move — concurrent edits and the post-move self-check', () => {
+  it('keeps an edit made to an importer during git mv, and still rewrites its import', () => {
+    const root = fixture();
+    const use = join(root, 'src/renderer/features/b/use.ts');
+    // git mv runs once per physical move (util + its test), so the edit must be idempotent
+    const env = fakeGit(
+      root,
+      `  printf "import { x } from '@/features/a/util';\\nexport const z = x + 1;\\n" > "${use}"`,
+    );
+
+    const r = testSpawnSync(process.execPath, [CLI, ...MOVE_ARGS], {
+      cwd: root,
+      encoding: 'utf8',
+      env,
+    });
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(read(root, 'src/renderer/features/b/use.ts')).toBe(
+      "import { x } from '@/lib/utils/util';\nexport const z = x + 1;\n",
+    );
+  });
+
+  it('rewrites a file added to a moved directory mid-move, mocks included', () => {
+    const root = fixture();
+    const source = join(root, 'src/renderer/features/new-rules');
+    writePath(root, 'src/renderer/features/new-rules/rule.ts', 'export const rule = 1;\n');
+    const env = fakeGit(
+      root,
+      `  printf '%s\\n' "import { helper } from '../a/helper';" "vi.mock('../a/helper');" > "${source}/late.test.ts"`,
+    );
+
+    const r = testSpawnSync(
+      process.execPath,
+      [CLI, 'move', 'src/renderer/features/new-rules', 'src/renderer/lib'],
+      { cwd: root, encoding: 'utf8', env },
+    );
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(read(root, 'src/renderer/lib/new-rules/late.test.ts')).toBe(
+      "import { helper } from '../../features/a/helper';\nvi.mock('../../features/a/helper');\n",
+    );
+  });
+
+  it('rewrites an importer added outside the moved files while git mv ran', () => {
+    const root = fixture();
+    const late = join(root, 'src/renderer/features/d/late.ts');
+    const env = fakeGit(
+      root,
+      `  mkdir -p "$(dirname "${late}")"; printf "import { x } from '../a/util';\\n" > "${late}"`,
+    );
+
+    const r = testSpawnSync(process.execPath, [CLI, ...MOVE_ARGS], {
+      cwd: root,
+      encoding: 'utf8',
+      env,
+    });
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(read(root, 'src/renderer/features/d/late.ts')).toBe(
+      "import { x } from '../../lib/utils/util';\n",
+    );
+  });
+
+  it('fails loudly, naming the import, when a target disappears mid-move', () => {
+    const root = fixture();
+    const helper = join(root, 'src/renderer/features/a/helper.ts');
+    const env = fakeGit(root, `  rm -f "${helper}"`);
+
+    const r = testSpawnSync(process.execPath, [CLI, ...MOVE_ARGS], {
+      cwd: root,
+      encoding: 'utf8',
+      env,
+    });
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(/specifier\(s\) no longer resolve/);
+    expect(r.stderr).toContain("src/renderer/lib/utils/util.ts: '../../features/a/helper'");
+    expect(r.stdout).not.toMatch(/✓ moved/);
+  });
+});
+
+describe('devkit move — solution-style tsconfig (project references)', () => {
+  const PATHS = { '@/*': ['./src/renderer/*'] };
+
+  it('rewrites importers that only a referenced project includes', () => {
+    const root = fixture(
+      JSON.stringify({ files: [], references: [{ path: './tsconfig.app.json' }] }),
+    );
+    writeCfg(root, 'tsconfig.app.json', {
+      compilerOptions: { composite: true, paths: PATHS },
+      include: ['src'],
+    });
+    git(root, 'add', '-A');
+
+    const r = runMove(root);
+    expect(r.status, r.stderr).toBe(0);
+    expect(read(root, 'src/renderer/features/b/use.ts')).toContain("'@/lib/utils/util'");
+    expect(read(root, 'src/renderer/features/a/sibling.ts')).toContain("'../../lib/utils/util'");
+  });
+
+  it('finishes rewriting when the move itself breaks a project reference', () => {
+    const root = fixture(
+      JSON.stringify({ files: [], references: [{ path: './src/renderer/features/a' }] }),
+    );
+    writeCfg(root, 'src/renderer/features/a/tsconfig.json', {
+      compilerOptions: { composite: true },
+      include: ['.'],
+    });
+    git(root, 'add', '-A');
+
+    const r = runMoveArgs(root, 'src/renderer/features/a', 'src/renderer/lib');
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).toMatch(/could not re-read tsconfig after the move/);
+    expect(existsSync(join(root, 'src/renderer/lib/a/util.ts'))).toBe(true);
+  });
+
+  it("rewrites a file created mid-move in a referenced project with that project's aliases", () => {
+    const root = fixture(
+      JSON.stringify({
+        compilerOptions: { paths: PATHS },
+        include: ['src/renderer/features/a', 'src/renderer/features/c'],
+        references: [{ path: './tsconfig.other.json' }],
+      }),
+    );
+    writeCfg(root, 'tsconfig.other.json', {
+      compilerOptions: { composite: true, paths: { '~/*': ['./src/renderer/*'] } },
+      include: ['src/renderer/features/b'],
+    });
+    git(root, 'add', '-A');
+    const late = join(root, 'src/renderer/features/b/late.ts');
+    const env = fakeGit(root, `  printf "import { x } from '~/features/a/util';\\n" > "${late}"`);
+
+    const r = testSpawnSync(process.execPath, [CLI, ...MOVE_ARGS], {
+      cwd: root,
+      encoding: 'utf8',
+      env,
+    });
+    expect(r.status, r.stderr).toBe(0);
+    expect(read(root, 'src/renderer/features/b/late.ts')).toBe(
+      "import { x } from '~/lib/utils/util';\n",
+    );
+  });
+
+  it('leaves a node_modules file alone even when tsconfig lists it, in the rescan too', () => {
+    const root = fixture(
+      JSON.stringify({
+        compilerOptions: { paths: PATHS },
+        include: ['src'],
+        files: ['node_modules/vendor/dep.ts'],
+      }),
+    );
+    // an alias import resolves from inside node_modules, unlike a relative one (TypeScript calls
+    // that an external library), so only the scope filter keeps this file out of the rewrite
+    const vendored = "import { x } from '@/features/a/util';\nexport const v = x;\n";
+    writePath(root, 'node_modules/vendor/dep.ts', vendored);
+    git(root, 'add', '-A', '-f');
+
+    const r = runMove(root);
+    expect(r.status, r.stderr).toBe(0);
+    expect(read(root, 'node_modules/vendor/dep.ts')).toBe(vendored);
+    expect(read(root, 'src/renderer/features/b/use.ts')).toContain("'@/lib/utils/util'");
+  });
+
+  it('rewrites each referenced project with its own aliases', () => {
+    const root = fixture(
+      JSON.stringify({
+        compilerOptions: { paths: PATHS },
+        include: ['src/renderer/features/a', 'src/renderer/features/c'],
+        references: [{ path: './tsconfig.other.json' }],
+      }),
+    );
+    writeCfg(root, 'tsconfig.other.json', {
+      compilerOptions: { composite: true, paths: { '~/*': ['./src/renderer/*'] } },
+      include: ['src/renderer/features/b'],
+    });
+    writePath(
+      root,
+      'src/renderer/features/b/use.ts',
+      "import { x } from '~/features/a/util';\nexport const z = x;\n",
+    );
+    git(root, 'add', '-A');
+
+    const r = runMove(root);
+    expect(r.status, r.stderr).toBe(0);
+    // the other project's '~/' import resolves only with its own paths, and keeps that prefix
+    expect(read(root, 'src/renderer/features/b/use.ts')).toContain("'~/lib/utils/util'");
+    expect(read(root, 'src/renderer/features/c/c.test.ts')).toContain(
+      "vi.mock('@/lib/utils/util')",
+    );
   });
 });
