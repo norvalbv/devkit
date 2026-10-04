@@ -366,6 +366,23 @@ export function removeFragment(
   return { content: hookContent.slice(0, from) + hookContent.slice(to), removed: true };
 }
 
+// Sentinels that are hook plumbing, not a stage a commit waits on.
+const INFRA_SENTINELS = new Set([
+  'commit-index',
+  'commit-terminal',
+  'gate-log',
+  'review-failure-finalizer',
+]);
+const STAGE_RE = /^# devkit:([a-z-]+)$|^# devkit (lint overlay) — STAGED/gm;
+
+/** The stages a hook's text contains, in the order the file runs them. Read from the installed
+ * text, so a hand-edited or stale block is reported as it is rather than as it was generated. */
+export function hookStages(hookContent: string): string[] {
+  return [...hookContent.matchAll(STAGE_RE)]
+    .map((match) => match[1] ?? match[2])
+    .filter((id) => !INFRA_SENTINELS.has(id));
+}
+
 /** Is a given guard id currently present (by sentinel) in the hook? */
 export function hasFragment(hookContent: string, id: string): boolean {
   return hookContent.includes(`# devkit:${id}`);

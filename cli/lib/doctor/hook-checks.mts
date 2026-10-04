@@ -11,11 +11,11 @@
 
 import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { isAbsolute, join } from 'node:path';
+import { basename, isAbsolute, join } from 'node:path';
 import { REVIEWABLE_GUARD_IDS } from '../components.mts';
 import { detectGitRoot } from '../detect-git-root.mts';
 import { markEnd, markStart } from '../husky/husky.mts';
-import { extractGuardBlock, QAVIS_ADVISORY_ID } from '../husky/husky-block.mts';
+import { extractGuardBlock, hookStages, QAVIS_ADVISORY_ID } from '../husky/husky-block.mts';
 import { installHealAlias } from '../husky/overlay/heal-alias.mts';
 import { overlayHooksPath } from '../husky/overlay/overlay-home.mts';
 import { firstLine } from '../standalone.mts';
@@ -107,11 +107,23 @@ export function checkHusky(cwd: string, selectedGuards: string[]): CheckResult {
       false,
     );
   }
+  const stages = hookStages(block);
   return check(
     '.husky/pre-commit',
     'OK',
-    gates.length ? `block calls: ${gates.join(', ')}` : 'block present (no guards selected)',
+    stages.length ? `block order: ${stages.join(' → ')}` : 'block present (no stages)',
   );
+}
+
+/** Print an installed hook file's stage order under its name; silent when it has no stages or
+ * cannot be read (the hook's own row already reports a missing file). */
+export function printBlockOrder(hookPath: string): void {
+  try {
+    const stages = hookStages(readFileSync(hookPath, 'utf8'));
+    if (stages.length) console.log(`    ${basename(hookPath)} block order: ${stages.join(' → ')}`);
+  } catch {
+    return;
+  }
 }
 
 const RUNNER = 'hook runner (worktree-safe)';

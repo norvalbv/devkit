@@ -46,7 +46,7 @@ import {
 import { checkAgentAssets, checkRegistrations } from './asset-checks.mts';
 import type { CheckResult } from './check-result.mts';
 import { adviseCodexRuntime, adviseSearchIndex } from './guard-config-checks.mts';
-import { repointHooksPath } from './hook-checks.mts';
+import { printBlockOrder, repointHooksPath } from './hook-checks.mts';
 import { hooksDir, sameDir, worktreeScopedPin } from './hooks-path.mts';
 import { printPriorArtAdvisoryHealth } from './qavis-health.mts';
 
@@ -101,6 +101,8 @@ export async function runOverlayDoctor(
       '  ⚠ .devkit/hooks/pre-commit is STALE (predates the current devkit) — run `devkit doctor --fix` to refresh',
     );
   else console.log('  ✓ .devkit/hooks/pre-commit present');
+  for (const hook of ['pre-commit', 'commit-msg'])
+    printBlockOrder(join(gitRoot, '.devkit', 'hooks', hook));
   console.log(
     `  ${pathOk ? '✓' : '⚠'} core.hooksPath = ${healed ? `${expected} (re-pointed from ${hooksPath || '(unset)'}; husky reclaims it on every install — make it durable with \`devkit init --overlay --global-commit-gate\`)` : hooksPath || '(unset)'}${hooksPath === LOCAL_HOOKS && !pathOk ? ' — RELATIVE, so every linked worktree runs no hooks at all;' : ''}${pathOk ? '' : ` — heal with \`git ${HEAL_ALIAS_NAME}\` (re-points it), \`devkit doctor --fix\`, or re-run \`devkit init --overlay\``}`,
   );

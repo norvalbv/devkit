@@ -23,7 +23,7 @@ import { selectedHookAssets } from '../install/hook-registration-ledger/selectio
 import { checkAgentAssets, checkAgents, checkRegistrations, checkSkills } from './asset-checks.mts';
 import { type CheckResult, check } from './check-result.mts';
 import { adviseCodexRuntime, adviseSearchIndex } from './guard-config-checks.mts';
-import { checkHookRunner, checkHooksPathOwner } from './hook-checks.mts';
+import { checkHookRunner, checkHooksPathOwner, printBlockOrder } from './hook-checks.mts';
 import { printStrayGateCalls } from './stray-gate-calls.mts';
 import { inspectHookFailOpen, renderUnguardedGateCalls } from './unguarded-gate-calls.mts';
 
@@ -134,6 +134,7 @@ export async function runSelfHostDoctor(
   if (existsSync(hookPath)) {
     // Self-host never runs checkHusky, so without this the duplicate-gate warning is unreachable in
     // exactly the repo that dogfoods devkit — the one most likely to grow a hand-written gate copy.
+    printBlockOrder(hookPath);
     printStrayGateCalls(readFileSync(hookPath, 'utf8'), pkgRel, cwd);
     // Same reason for the fail-open check (sc-1366): devkit's own generated calls are `-e`-safe,
     // but a hand-added gate below the managed block would not be, and this is the repo where one

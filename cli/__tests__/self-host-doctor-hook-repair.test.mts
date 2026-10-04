@@ -124,6 +124,9 @@ describe('self-host doctor --fix repairs the hook without touching managed state
     expect(snapshot(root)).toEqual(before);
     expect(capability.sync).not.toHaveBeenCalled();
     expect(output()).not.toMatch(/pre-commit.*devkit init/);
+    expect(output()).toMatch(
+      /block order: .*guard-review → guard-qavis-advisory → fallow-advisory/,
+    );
   });
 
   it.skipIf(process.platform === 'win32')(

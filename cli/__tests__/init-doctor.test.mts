@@ -650,7 +650,36 @@ describe('doctor — selection-aware', () => {
     devkit(root, 'init', '--stack', 'generic', '--yes', '--guards', 'fanout,size');
     const r = devkit(root, 'doctor');
     expect(r.status).toBe(0);
-    expect(r.stdout).toMatch(/block calls: fanout, size/);
+    expect(r.stdout).toMatch(/pre-commit: OK — block order: biome-format → deterministic\n/);
+  });
+
+  // The order printed is the installed hook's, not the recorded selection's: qavis-advisory recorded
+  // before review must still print after it, or a reader concludes QA runs before the reviewers.
+  it('prints the overlay hook order, including its staged lint overlay', () => {
+    const root = tmpRepo();
+    expect(spawnSync('git', ['init', '-q'], { cwd: root }).status).toBe(0);
+    devkit(root, 'init', '--overlay', '--stack', 'generic', '--yes', '--guards', 'size,review');
+    const { stdout } = devkit(root, 'doctor');
+    expect(stdout).toMatch(/pre-commit block order: .*deterministic → lint overlay → guard-review/);
+    expect(stdout).toContain('commit-msg block order: guard-completeness');
+  });
+
+  it('prints the stages of a hook whose only guard is the commit-msg sentry judge', () => {
+    const root = tmpRepo();
+    devkit(root, 'init', '--stack', 'generic', '--yes', '--guards', 'sentry');
+    expect(devkit(root, 'doctor').stdout).toContain(
+      'pre-commit: OK — block order: biome-format → guard-sentry-prewarm',
+    );
+  });
+
+  it('prints each hook block in the order it runs, not the recorded guard order', () => {
+    const root = tmpRepo();
+    devkit(root, 'init', '--stack', 'generic', '--yes', '--guards', 'qavis-advisory,review,size');
+    const { stdout } = devkit(root, 'doctor');
+    expect(stdout).toContain(
+      'pre-commit: OK — block order: biome-format → deterministic → guard-review → guard-qavis-advisory',
+    );
+    expect(stdout).toContain('commit-msg: OK — block order: guard-completeness');
   });
 
   // The qavis-advisory gate fails OPEN when qavis can't be reached, so at commit time a missing

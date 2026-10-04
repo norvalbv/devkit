@@ -20,6 +20,7 @@ import type { CheckResult } from '../doctor/check-result.mts';
 import { BIN_DIRS, type BinDir } from './gate-policy/block-helpers.mts';
 import {
   extractGuardBlock,
+  hookStages,
   PATH_SETUP,
   removeGuardBlock,
   replaceGuardBlock,
@@ -228,7 +229,7 @@ export function checkCommitMsgHook(cwd: string, selectedGuards: string[]): Check
   const block = extractGuardBlock(readFileSync(hookPath, 'utf8'), pkgRel) ?? '';
   // Symmetric sentinel check (same depth as pre-commit's checkHusky): a fragment for a DESELECTED
   // guard lingering in the block is drift too — a stale hard gate would keep blocking commits.
-  const present = [...block.matchAll(/^# devkit:([a-z-]+)$/gm)].map((m) => m[1]);
+  const present = hookStages(block);
   const extra = present.filter((id) => !wanted.includes(id));
   if (extra.length) {
     return {
@@ -252,7 +253,7 @@ export function checkCommitMsgHook(cwd: string, selectedGuards: string[]): Check
   return {
     name,
     status: 'OK',
-    detail: `block calls: ${wanted.join(', ')}`,
+    detail: `block order: ${present.join(' → ')}`,
     remediation: '',
     fixable: false,
   };
