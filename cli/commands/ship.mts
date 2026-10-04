@@ -52,6 +52,7 @@ export const POSITIONAL_REJECTED_FLAGS: readonly string[] = [
   '--ready',
   '--wait-ci',
   '--wait-ci-timeout',
+  '--wait-ci-required',
 ];
 
 export const meta = {

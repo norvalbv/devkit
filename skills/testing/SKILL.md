@@ -27,7 +27,7 @@ Docs-, config-, and comment-only changes do not require a test run.
 
 ### Before writing a suite
 
-When the repository runs anti-slop (`.devkit/anti-slop/` exists), write the first test file, then run `devkit anti-slop check <that file>` before writing the rest. Its policy is static, so a violation is visible after one file rather than after a whole suite. Module mocking (`vi.mock`, `jest.mock`) is refused: give the module under test a seam instead, such as an optional `deps` parameter that defaults to the real imports and that the test fills with fakes. With the anti-slop component installed, a PostToolUse hook runs the same check after each edit.
+When the repository runs anti-slop (`.devkit/anti-slop/` exists), write the first test file, then run `devkit anti-slop check <that file>` before writing the rest. Its policy is static, so a violation is visible after one file rather than after a whole suite. Module mocking (labelled examples: `vi.mock`, `jest.mock`) is refused: give the module under test a seam instead, such as an optional `deps` parameter that defaults to the real imports and that the test fills with fakes. With the anti-slop component installed, a PostToolUse hook runs the same check after each edit.
 
 ## Reading a run
 
