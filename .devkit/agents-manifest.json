@@ -1,8 +1,8 @@
 {
   "schemaVersion": 2,
   "kind": "agents",
-  "devkitRef": "v0.66.0",
-  "generatedAt": "2026-10-04T12:37:25.190Z",
+  "devkitRef": "v0.67.0",
+  "generatedAt": "2026-10-04T16:50:25.587Z",
   "files": {
     "api-security-reviewer.md": "bfa4ff0d792a03ec7845dc7c7daf586779bdc76f053551c6d05a2ee11b22a87e",
     "backend-performance-reviewer.md": "ff60c2338a9854fa63104a1b343e1d90f0feecf1126c84c66c5b86d4537c9ba0",
@@ -30,6 +30,21 @@
         "frontend-performance-reviewer.md": "01bf36905b2be06997e10f5c95f2cc5ae5102456965e69d46483f2161a8bdd17",
         "frontend-security-reviewer.md": "2eebe20d291feeae89f9116bb8e5fd0c79d9f7e690e9c9133a162aca042ed8ff",
         "prior-art.md": "830f437b449a40a89b07fe9d05eca208e972a11ee18fc133b8ba14e7226622a3"
+      }
+    },
+    "codex": {
+      "files": {
+        "api-security-reviewer.toml": "237ba77bc122df253c5f9dad42c153543e3f15f6c3f28a0ce472655c98f32feb",
+        "backend-performance-reviewer.toml": "52f59131e99a46f67f11bc97521afdf4267e3e5933b9eaf2fc5b855337c241f2",
+        "commit-guard.toml": "7964f5268448c2417f32f264e2ceb340a9fad9dc82fd647009628e90604f9eb2",
+        "conventions-reviewer.toml": "166f2c7649cb86fd270bda17d1da6bf505d00093811258988fc2a180443ac7f3",
+        "correctness-reviewer.toml": "782aa14f9a4c67f1ed5453ebce60c21aae82819688b6923df3dff13c747bf8bc",
+        "feature-completeness-reviewer.toml": "3a4bd48b5f34e6ffed7d5c2b4786343f5c8233a499a867bde164bfe11654f949",
+        "feature-critique.toml": "24afc5daee6af25e5289fadcef673010297bd4aa05760ebe998b5de1a739f9d9",
+        "frontend-accessibility-reviewer.toml": "b58b33cba9fabc03f298743a7ff3c43b22e14143fc63e1ea74e9a973ca9c5725",
+        "frontend-performance-reviewer.toml": "a9e238644260dedf3820b629cc9ea68a9d540b34dfb3f2c42d1ca4008e5dd8e0",
+        "frontend-security-reviewer.toml": "29e5e704bce0ad73359c1e5376f8aa71e70567f1dcab6333e6ec9bca01791505",
+        "prior-art.toml": "edbaf83ae926cbccb68029cf0fa8d1b5d78aefdaf4ee46cd06dad14088be527c"
       }
     },
     "cursor": {

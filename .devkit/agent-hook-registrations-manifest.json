@@ -39,6 +39,30 @@
       }
     },
     {
+      "registrationId": "base-drift:pre-edit",
+      "ownerId": "baseDrift",
+      "provider": "claude",
+      "installScope": "shared",
+      "destinationRel": ".claude/settings.json",
+      "native": {
+        "event": "PreToolUse",
+        "matcher": "Edit|Write|MultiEdit",
+        "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/base-drift-brief.mjs\""
+      }
+    },
+    {
+      "registrationId": "base-drift:session-start",
+      "ownerId": "baseDrift",
+      "provider": "claude",
+      "installScope": "shared",
+      "destinationRel": ".claude/settings.json",
+      "native": {
+        "event": "SessionStart",
+        "matcher": "startup|resume|clear|compact",
+        "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/base-drift-session.mjs\""
+      }
+    },
+    {
       "registrationId": "decisions:pre-edit",
       "ownerId": "decisions",
       "provider": "claude",
@@ -87,6 +111,114 @@
       }
     },
     {
+      "registrationId": "adhd:prompt-anchor",
+      "ownerId": "adhd",
+      "provider": "codex",
+      "installScope": "shared",
+      "destinationRel": ".codex/hooks.json",
+      "native": {
+        "event": "UserPromptSubmit",
+        "matcher": null,
+        "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/adhd-prompt-anchor.mjs\""
+      }
+    },
+    {
+      "registrationId": "adhd:session-start",
+      "ownerId": "adhd",
+      "provider": "codex",
+      "installScope": "shared",
+      "destinationRel": ".codex/hooks.json",
+      "native": {
+        "event": "SessionStart",
+        "matcher": "startup|resume|clear|compact",
+        "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/adhd-session-start.mjs\""
+      }
+    },
+    {
+      "registrationId": "anti-slop:preflight",
+      "ownerId": "antiSlop",
+      "provider": "codex",
+      "installScope": "shared",
+      "destinationRel": ".codex/hooks.json",
+      "native": {
+        "event": "PostToolUse",
+        "matcher": "Edit|Write|MultiEdit",
+        "command": "bash \"$(git rev-parse --show-toplevel)/.codex/hooks/anti-slop-preflight.sh\""
+      }
+    },
+    {
+      "registrationId": "base-drift:pre-edit",
+      "ownerId": "baseDrift",
+      "provider": "codex",
+      "installScope": "shared",
+      "destinationRel": ".codex/hooks.json",
+      "native": {
+        "event": "PreToolUse",
+        "matcher": "Edit|Write|MultiEdit",
+        "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/base-drift-brief.mjs\""
+      }
+    },
+    {
+      "registrationId": "base-drift:session-start",
+      "ownerId": "baseDrift",
+      "provider": "codex",
+      "installScope": "shared",
+      "destinationRel": ".codex/hooks.json",
+      "native": {
+        "event": "SessionStart",
+        "matcher": "startup|resume|clear|compact",
+        "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/base-drift-session.mjs\""
+      }
+    },
+    {
+      "registrationId": "decisions:pre-edit",
+      "ownerId": "decisions",
+      "provider": "codex",
+      "installScope": "shared",
+      "destinationRel": ".codex/hooks.json",
+      "native": {
+        "event": "PreToolUse",
+        "matcher": "Edit|Write|MultiEdit|Delete",
+        "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/decision-edit-guard.mjs\""
+      }
+    },
+    {
+      "registrationId": "decisions:scope-brief",
+      "ownerId": "decisions",
+      "provider": "codex",
+      "installScope": "shared",
+      "destinationRel": ".codex/hooks.json",
+      "native": {
+        "event": "PreToolUse",
+        "matcher": "Edit|Write|MultiEdit",
+        "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/decision-scope-brief.mjs\""
+      }
+    },
+    {
+      "registrationId": "prior-art-gate:post-task",
+      "ownerId": "priorArtGate",
+      "provider": "codex",
+      "installScope": "shared",
+      "destinationRel": ".codex/hooks.json",
+      "native": {
+        "event": "PostToolUse",
+        "matcher": "Task|Agent",
+        "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/prior-art-gate.mjs\""
+      }
+    },
+    {
+      "registrationId": "prior-art-gate:pre-plan",
+      "ownerId": "priorArtGate",
+      "provider": "codex",
+      "installScope": "shared",
+      "destinationRel": ".codex/hooks.json",
+      "native": {
+        "event": "PreToolUse",
+        "matcher": "ExitPlanMode|Task|Agent",
+        "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/prior-art-gate.mjs\""
+      }
+    },
+    {
       "registrationId": "anti-slop:preflight",
       "ownerId": "antiSlop",
       "provider": "cursor",
@@ -96,6 +228,18 @@
         "event": "afterFileEdit",
         "matcher": null,
         "command": ".cursor/hooks/anti-slop-preflight.sh"
+      }
+    },
+    {
+      "registrationId": "base-drift:pre-edit",
+      "ownerId": "baseDrift",
+      "provider": "cursor",
+      "installScope": "shared",
+      "destinationRel": ".cursor/hooks.json",
+      "native": {
+        "event": "preToolUse",
+        "matcher": "Write",
+        "command": ".cursor/hooks/base-drift-brief.mjs"
       }
     },
     {

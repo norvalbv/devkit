@@ -1,8 +1,8 @@
 {
   "schemaVersion": 2,
   "kind": "skills",
-  "devkitRef": "v0.66.0",
-  "generatedAt": "2026-10-04T16:28:36.529Z",
+  "devkitRef": "v0.67.0",
+  "generatedAt": "2026-10-04T16:50:25.545Z",
   "files": {
     "_devkit/checklist-store.mjs": "c8a6a01fe75bd570953ccc88e3b99b8ac365bb249c4b1db2ce0c32a589c52193",
     "_devkit/review-roots.d.mts": "384d95945ccf04f994d805e78a5507835321ee5bcbd46acbf216c77385238c9e",
@@ -40,6 +40,43 @@
   },
   "providers": {
     "claude": {
+      "files": {
+        "_devkit/checklist-store.mjs": "c8a6a01fe75bd570953ccc88e3b99b8ac365bb249c4b1db2ce0c32a589c52193",
+        "_devkit/review-roots.d.mts": "384d95945ccf04f994d805e78a5507835321ee5bcbd46acbf216c77385238c9e",
+        "_devkit/review-roots.mjs": "2561f3b064f157934c9e1e9396919aaac99792f414bce3e9379891214a47fb71",
+        "api-security/SKILL.md": "5916bc98f288a0b7269ec9df416692509c449274026afc93013388c40c13415e",
+        "api-security/scripts/checklist.mjs": "07840e28ed2756cc2575a4d4f22c3d973b9e6c7059559949cbc50907fa0872ff",
+        "backend-performance/SKILL.md": "5ff0858b34ffc91d677976dd279f27714d934aa5062f0a3f6b38088e7bd10ddb",
+        "backend-performance/scripts/checklist.mjs": "11b0fa63f4b8760408d57235551a6d37d88e927e8397d35314feeab0780b60e3",
+        "brainstorming/SKILL.md": "7ef56113745ad1d504202acc268dd09d4536c0c43d68d0ed7ad73dbb7e7516fa",
+        "commit-gates/SKILL.md": "5d0f3b9408e7dccd21b446116860cd3803d10462b19dc292786dc5cb97c65df7",
+        "commit-guard/SKILL.md": "ec3a823b1f0072e07895e5c95ff8dbf4e49f47dad1e47d68f78518ef1d83bb5e",
+        "commit-guard/references/co-occurrence.md": "0225034aeb87a8be80d59e4121aa67a99129f6ee8388a9605e0db484e7d767d4",
+        "commit-guard/scripts/checklist.mjs": "41147c504bd101a0df3961b53b3596c3fe4852caf0fd525b9e1139170db9fa8d",
+        "correctness/SKILL.md": "d26708b78352a24582528bb6a69cafe9e6a1b566ede7ce85971a70c7f8f3231f",
+        "correctness/scripts/checklist.mjs": "e1151b249ea5e749460a1441484c44b7bcf245cf18053ffec43693064e01ac5c",
+        "decisions/SKILL.md": "e390ab2f600039c53cc686aec07c802012bc29ae44842a26968eb18af161fe9a",
+        "dup-detection/SKILL.md": "74a4964795bbb27ce2bda0e13b91da00f04a01a989bcbf6149d10ff9c3688a4c",
+        "feature-critique/SKILL.md": "0a595267e6dab2fad6e571b3861da4964ccff934d50ac9efaf137a23d3a8efef",
+        "frontend-accessibility/SKILL.md": "d950e1ddc87ec9a090936f05447d2298b25fb5e12e315345d2d9c02912c513a9",
+        "frontend-accessibility/scripts/checklist.mjs": "403eb3a1d1c321229043ecae56322ccf8faf859c1712a1212a3e69d94356c5f6",
+        "frontend-performance/SKILL.md": "6697c6583485c5eea8168437c2faee3f81f9051a0c9f85e739278d13c1c6b628",
+        "frontend-performance/scripts/checklist.mjs": "e4dde9788e35ead1fd8a88746edf4a36212e123ff38735041d28fdbd6ba8b543",
+        "frontend-security/SKILL.md": "b4f097efd4076ebf530d59b2042def53bb51d975c50e6dc12da698d882fe630f",
+        "frontend-security/scripts/checklist.mjs": "c4fa9d4827054b719417ae67edb84efa846d3ea31541040b0464e7d4018ab7d9",
+        "parallel-neon-migration/SKILL.md": "b2c2d90ff77fe8bd4eb6e2dda074dd0c8b5adfc1b179ac136689445a4d2c981e",
+        "prior-art/SKILL.md": "e19c86740f4d61cd7798689aa089a3aa13115b189b57b716244f15f4308b03bb",
+        "structure-governance/SKILL.md": "4e13c0fcdcb4c49ff10409431d3ec5e44270a9f97024a73e08feb2801f5dc239",
+        "structure-governance/references/fixing-lint-errors.md": "710d3f91a4a21c1ae6bcd6338673f38e3d28f04368bcb0329f95035fe51ad556",
+        "structure-governance/references/walls.md": "6abf951adaf7aa71d1d0827bcddc2e9fdc517e622f86c40aa1ffde6deb4e5ecb",
+        "testing/SKILL.md": "949a14ae718c7b58da70a8d5386652702ddce8497c3f41ea834c92277380f82e",
+        "upstream-sync/SKILL.md": "1007c8377ac15393dcc9db5384d80bd38487c85aa465921ae0b49ba5a91bad70",
+        "upstream-sync/scripts/sync.mjs": "218aa7ad7e96f280f281a38f99919f2ce55eace902ed95b1119a0099ddbb3c76",
+        "upstream-sync/scripts/verify-merge.mjs": "afb2977ab8b7a96fac2e93e29a68ae432508ba7e63d03c580fcf03229fcd0676",
+        "using-devkit/SKILL.md": "79d09b68e7cfcab5296cd71ba63241fc518389d2945f15585fc800d78aeddc3d"
+      }
+    },
+    "codex": {
       "files": {
         "_devkit/checklist-store.mjs": "c8a6a01fe75bd570953ccc88e3b99b8ac365bb249c4b1db2ce0c32a589c52193",
         "_devkit/review-roots.d.mts": "384d95945ccf04f994d805e78a5507835321ee5bcbd46acbf216c77385238c9e",
