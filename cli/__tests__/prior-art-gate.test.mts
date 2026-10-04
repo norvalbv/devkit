@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -121,6 +121,21 @@ describe('decide (PreToolUse)', () => {
     expect(decide(ack, root, tmp)).toBeNull();
     expect(existsSync(markerPaths(root, 'sess-1', tmp).snoozed)).toBe(true);
   });
+
+  it.each(['skills', '.claude/skills', '.cursor/skills'])(
+    'accepts the completed-run acknowledgment prescribed by %s/prior-art',
+    (surface) => {
+      const skill = readFileSync(
+        join(import.meta.dirname, '../..', surface, 'prior-art/SKILL.md'),
+        'utf8',
+      );
+      const acknowledgment = skill.match(/records one line: `([^`]+)`/)?.[1];
+      expect(acknowledgment).toBeTruthy();
+      expect(
+        decide({ ...pre('ExitPlanMode'), tool_input: { plan: acknowledgment } }, root, tmp),
+      ).toBeNull();
+    },
+  );
 
   it('still denies when the plan text exists but lacks the token', () => {
     const noAck = {
