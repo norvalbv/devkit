@@ -117,5 +117,11 @@ When judging whether a change is adequately tested, ask:
   the host, so the test command and BOTH refs must be trusted; never point it at an unreviewed
   branch. It captures execution evidence; it does not prove the red failure had the cause you
   claim, so read the retained red output before publishing it.
+- Is the code under test still needed? When a fix sits on top of a workaround (retry, reopen,
+  fallback), `devkit subtraction-trial --baseline <ref> --candidate <ref> --control <ref> --oracle
+  <file> --vitest-report <path> -- <test command>` runs the same tests with the workaround removed
+  (the candidate) and against a deliberately broken control. `tests-preserved` means these tests
+  still pass without it; `oracle_blind` means the control did not fail, so the tests could not have
+  noticed. It never proves the code redundant, and the same trust rule applies.
 - Are the meaningful edge cases (empty, boundary, error) covered, not just the happy path?
 - Do the tests assert on observable behaviour, not implementation detail that will break on any refactor?

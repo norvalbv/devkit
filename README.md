@@ -69,6 +69,7 @@ Package mode is the default. Standalone gates fail open when the pinned global C
 | `devkit sync-skills` / `sync-agents` | Refresh only the selected agent surfaces |
 | `devkit move` | Move source files and rewrite imports safely |
 | `devkit prove-regression` | Capture one exact test command at explicit red/green refs in disposable clones |
+| `devkit subtraction-trial` | Run one test command with a suspected workaround removed, against a failing control |
 | `devkit ship` | Commit from an isolated worktree and run the configured gate chain |
 | `devkit review` | Run the configured gate chain against a trusted checkout without committing |
 | `devkit reconcile` | Refresh a shared checkout after shipped work merges |
