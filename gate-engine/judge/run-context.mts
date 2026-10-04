@@ -58,11 +58,11 @@ export function originatingAgent(): 'claude' | 'codex' | 'unknown' {
 const PARENT_SESSION_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 
 /**
- * The ROOT Claude Code session that caused this run (a Task subagent reports its root's id), or
- * undefined when absent/malformed — omitted, never '', so no fake session bucket forms downstream.
+ * The ROOT agent session that caused this run: Claude Code's session id (a Task subagent reports
+ * its root's), else the Codex thread id. Undefined when absent/malformed — omitted, never ''.
  */
 export function parentSessionId(env: NodeJS.ProcessEnv = process.env): string | undefined {
-  const id = env.CLAUDE_CODE_SESSION_ID;
+  const id = env.CLAUDE_CODE_SESSION_ID || env.CODEX_THREAD_ID;
   return id !== undefined && PARENT_SESSION_ID_RE.test(id) ? id : undefined;
 }
 

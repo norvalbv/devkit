@@ -27,26 +27,42 @@ const VALUES = [
   '$(x)',
 ];
 
-function viaShell(shell: string, script: string, value: string, locale: string): string {
+type SessionEnv = { CLAUDE_CODE_SESSION_ID?: string; CODEX_THREAD_ID?: string };
+
+function viaShell(shell: string, script: string, session: SessionEnv, locale: string): string {
   const env = { PATH: process.env.PATH ?? '/usr/bin:/bin', LC_ALL: locale };
-  const r = spawnSync(shell, ['-c', script], {
-    env: { ...env, CLAUDE_CODE_SESSION_ID: value },
-    encoding: 'utf8',
-  });
+  const r = spawnSync(shell, ['-c', script], { env: { ...env, ...session }, encoding: 'utf8' });
   expect(r.status, r.stderr).toBe(0);
   return r.stdout;
 }
 
+function expectParity(session: SessionEnv, locale: string): void {
+  const id = parentSessionId(session);
+  const expected = id === undefined ? '' : `,"parent_session_id":"${id}"`;
+  const bash = `. "${TELEMETRY_SH}"; devkit_parent_session_json`;
+  expect(viaShell('/bin/bash', bash, session, locale)).toBe(expected);
+  expect(viaShell('sh', `${PARENT_SESSION_SH_FN}\n__dk_parent_session`, session, locale)).toBe(
+    expected,
+  );
+}
+
 describe('parent_session_id predicate parity (node · bash · sh)', () => {
   for (const locale of ['C', 'en_US.UTF-8']) {
-    it.each(VALUES)(`agrees on %j under LC_ALL=${locale}`, (value) => {
-      const id = parentSessionId({ CLAUDE_CODE_SESSION_ID: value });
-      const expected = id === undefined ? '' : `,"parent_session_id":"${id}"`;
-      const bash = `. "${TELEMETRY_SH}"; devkit_parent_session_json`;
-      expect(viaShell('/bin/bash', bash, value, locale)).toBe(expected);
-      expect(viaShell('sh', `${PARENT_SESSION_SH_FN}\n__dk_parent_session`, value, locale)).toBe(
-        expected,
-      );
-    });
+    for (const key of ['CLAUDE_CODE_SESSION_ID', 'CODEX_THREAD_ID'] as const) {
+      it.each(VALUES)(`agrees on ${key}=%j under LC_ALL=${locale}`, (value) => {
+        expectParity({ [key]: value }, locale);
+      });
+    }
   }
+
+  it('prefers the Claude Code session, and falls back to the Codex thread when it is empty', () => {
+    expect(
+      parentSessionId({ CLAUDE_CODE_SESSION_ID: 'claude-1', CODEX_THREAD_ID: 'codex-1' }),
+    ).toBe('claude-1');
+    expect(parentSessionId({ CLAUDE_CODE_SESSION_ID: '', CODEX_THREAD_ID: 'codex-1' })).toBe(
+      'codex-1',
+    );
+    expectParity({ CLAUDE_CODE_SESSION_ID: 'claude-1', CODEX_THREAD_ID: 'codex-1' }, 'C');
+    expectParity({ CLAUDE_CODE_SESSION_ID: '', CODEX_THREAD_ID: 'codex-1' }, 'C');
+  });
 });
