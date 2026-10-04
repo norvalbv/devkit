@@ -4,6 +4,8 @@ import { runEnvelope } from '../judge/run-context.mts';
 import type { CommentFinding, CommentInventory } from './types.mts';
 
 export const COMMENT_BUDGET_EVENT = 'comment_budget';
+/** Names the gate's blocking regime so dashboards can split events recorded under different rules. */
+export const COMMENT_POLICY = 'show-once-v1';
 export type CommentBudgetStatus = 'pass' | 'block' | 'unreadable' | 'unsupported';
 
 export interface CommentBudgetFinding {
@@ -29,6 +31,7 @@ export interface CommentBudgetCounts {
 export interface CommentBudgetEvent {
   type: typeof COMMENT_BUDGET_EVENT;
   gate: 'comments';
+  policy: typeof COMMENT_POLICY;
   status: CommentBudgetStatus;
   kept: number;
   refs: number;
@@ -62,6 +65,7 @@ function build(
   const event: CommentBudgetEvent = {
     type: COMMENT_BUDGET_EVENT,
     gate: 'comments',
+    policy: COMMENT_POLICY,
     status,
     kept: counts.kept,
     refs: counts.refs,
