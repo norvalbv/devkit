@@ -1,6 +1,6 @@
 /**
- * Overlay anti-slop install refusals: overlay never writes into a repo that already tracks an
- * anti-slop path or owns its own Oxlint config, and never touches the exclude file itself.
+ * Overlay anti-slop install: overlay never writes into a repo that already tracks an anti-slop path
+ * or owns an Oxlint config whose ignores it cannot read, honours a JSON one, and never touches excludes.
  */
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -44,10 +44,37 @@ describe('overlay anti-slop — refusals that keep the tree clean', () => {
     expect(porcelain(root)).toBe('');
   });
 
-  it('refuses when the repo owns its own Oxlint config, rather than silently overriding it', async () => {
+  it("honours the repo's own JSON Oxlint ignores instead of refusing, and leaves it untouched", async () => {
     const root = workRepo();
     const git = (...a: string[]) => execFileSync('git', a, { cwd: root });
-    writeFileSync(join(root, '.oxlintrc.json'), '{ "rules": { "eqeqeq": "error" } }\n');
+    const consumer = '{ "rules": { "eqeqeq": "error" }, "ignorePatterns": ["vendor"] }\n';
+    writeFileSync(join(root, '.oxlintrc.json'), consumer);
+    git('add', '-A');
+    git('commit', '-qm', 'consumer oxlint config');
+
+    await applyInit(root, {
+      stack: 'generic',
+      selection: applyOverlayConstraints({ ...defaultSelection(), antiSlop: true }, 'react-app'),
+      overlay: true,
+      devkitRef: 'v0.0.0-test',
+    });
+
+    expect(readCfgComponents(root).antiSlop).toBe(true);
+    expect(JSON.parse(readFileSync(join(root, 'oxlint.devkit.json'), 'utf8'))).toEqual({
+      extends: ['./.devkit/oxc/oxlint.base.json'],
+      ignorePatterns: ['vendor'],
+    });
+    expect(readFileSync(join(root, '.oxlintrc.json'), 'utf8')).toBe(consumer);
+    expect(porcelain(root)).toBe('');
+  });
+
+  it('refuses an Oxlint config whose ignores devkit cannot read, rather than judging excluded paths', async () => {
+    const root = workRepo();
+    const git = (...a: string[]) => execFileSync('git', a, { cwd: root });
+    writeFileSync(
+      join(root, 'oxlint.config.ts'),
+      'export default { rules: { eqeqeq: "error" } };\n',
+    );
     git('add', '-A');
     git('commit', '-qm', 'consumer oxlint config');
 
@@ -59,9 +86,7 @@ describe('overlay anti-slop — refusals that keep the tree clean', () => {
     });
 
     expect(readCfgComponents(root).antiSlop).toBe(false);
-    expect(existsSync(join(root, 'oxlint.devkit.json'))).toBe(false);
-    // The consumer's own config survives byte for byte.
-    expect(readFileSync(join(root, '.oxlintrc.json'), 'utf8')).toContain('"eqeqeq": "error"');
+    expect(existsSync(join(root, '.devkit', 'anti-slop', 'manifest.json'))).toBe(false);
     // Agent surfaces follow what was WIRED, so the refused capability installs no preflight hook.
     expect(existsSync(join(root, '.claude', 'hooks', 'anti-slop-preflight.sh'))).toBe(false);
     const settings = join(root, '.claude', 'settings.json');

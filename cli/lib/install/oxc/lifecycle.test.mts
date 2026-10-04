@@ -445,14 +445,38 @@ describe('Oxc capability lifecycle — overlay geometry', () => {
     );
   });
 
-  // `-c` REPLACES discovery, so a consumer config created after install is silently unread — and
-  // `configCheck`'s name list excludes the entry config, so no collision fires to catch it.
-  it('names a consumer Oxlint config that appears after an overlay install', () => {
+  it('refuses an anti-slop re-sync that cannot honour the consumer ignores, keeping the entry', () => {
     const root = overlayRoot();
-    syncOxcCapability(root, { overlay: true });
+    writeFileSync(join(root, '.oxlintrc.json'), '{ "ignorePatterns": ["vendor"] }\n');
+    syncOxcCapability(root, { overlay: true, antiSlop: true });
+    const entry = readFileSync(join(root, OVERLAY_ENTRY_REL), 'utf8');
+    expect(entry).toContain('vendor');
+
+    writeFileSync(join(root, 'oxlint.config.ts'), 'export default {};\n');
+    expect(() => syncOxcCapability(root, { overlay: true, antiSlop: true })).toThrow(
+      /more than one Oxlint config/u,
+    );
+    expect(readFileSync(join(root, OVERLAY_ENTRY_REL), 'utf8')).toBe(entry);
+    // Deselecting or abandoning anti-slop resets the entry to the plain base, which nothing reads,
+    // and selecting anti-slop again still refuses rather than judging with that entry.
+    syncOxcCapability(root, { overlay: true, antiSlop: false });
+    expect(JSON.parse(readFileSync(join(root, OVERLAY_ENTRY_REL), 'utf8'))).toEqual({
+      extends: ['./.devkit/oxc/oxlint.base.json'],
+    });
+    expect(checkOxcCapability(root).every((r) => r.status === 'OK')).toBe(true);
+    expect(() => syncOxcCapability(root, { overlay: true, antiSlop: true })).toThrow(
+      /more than one Oxlint config/u,
+    );
+  });
+
+  // `-c` REPLACES discovery, so a consumer config created after install goes unhonoured until the
+  // entry is refreshed — and `configCheck`'s name list excludes the entry config, so no collision catches it.
+  it('names a consumer Oxlint config that appears after an overlay anti-slop install', () => {
+    const root = overlayRoot();
+    syncOxcCapability(root, { overlay: true, antiSlop: true });
     expect(checkOxcCapability(root).every((r) => r.status === 'OK')).toBe(true);
 
-    writeFileSync(join(root, '.oxlintrc.json'), '{ "rules": {} }\n');
+    writeFileSync(join(root, '.oxlintrc.json'), '{ "ignorePatterns": ["vendor"] }\n');
 
     const drift = checkOxcCapability(root).find((r) => r.status === 'DRIFT');
     expect(drift?.detail).toContain('.oxlintrc.json');
