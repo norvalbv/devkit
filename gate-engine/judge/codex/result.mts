@@ -84,6 +84,7 @@ export function isCodexModel(model: string | null): boolean {
 const VALUE_FLAGS = new Set([
   '--model',
   '--settings',
+  '--tools',
   '--allowedTools',
   '--disallowedTools',
   '--output-format',

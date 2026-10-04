@@ -32,6 +32,7 @@
  */
 
 import { envFlag, type GuardConfig, resolveGuardConfig } from '../config.mts';
+import { runPriorArtAdvisory } from '../prior-art/advisory.mts';
 import { emitReviewCacheHit } from '../judge/gate-events.mts';
 import { reportGateInfraFailure } from '../judge/odb-probe.mts';
 import { reportFleetMcp } from '../judge/mcp/profile.mts';
@@ -113,12 +114,10 @@ export function describeReviewModels(
     .join('; ');
 }
 
-/**
- * The gate → exit code (see module contract). Selected reviewers run concurrently but BOUNDED to
+/** The gate → exit code (see module contract). Selected reviewers run concurrently but BOUNDED to
  * `reviewConcurrency()` cascades in flight (GUARD_REVIEW_CONCURRENCY, default 6) — so under machine
  * load each judge keeps enough CPU + subscription slots to finish under its timeout. Wall-clock is
- * ceil(N/K) waves of the slowest cascade rather than the single slowest, a deliberate trade.
- */
+ * ceil(N/K) waves of the slowest cascade rather than the single slowest, a deliberate trade. */
 export async function runReviewGate(
   cwd = process.cwd(),
   { exec = execJudgeAsync, only }: { exec?: typeof execJudgeAsync; only?: RecheckTarget } = {},
@@ -208,6 +207,7 @@ export async function runReviewGate(
       return finish(0);
     }
     if (reviewMode) cfg = effectiveReviewConfig(cfg);
+    if (!only) await runPriorArtAdvisory(cwd, cfg, exec);
     const staged = stagedFiles(cwd);
     selected = selectRepositoryReviewers(staged, cfg);
     const skip = skippedReviewers();

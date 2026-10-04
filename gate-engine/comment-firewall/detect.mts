@@ -227,7 +227,7 @@ function commentFragmentsAt(cwd: string, file: string, extension: string, ref: s
   return fragments;
 }
 
-function normalizedRoot(cwd: string, root: string): string {
+export function normalizedRoot(cwd: string, root: string): string {
   const rel = path.isAbsolute(root) ? path.relative(cwd, root) : root;
   const posix = rel
     .split(path.sep)
@@ -237,7 +237,7 @@ function normalizedRoot(cwd: string, root: string): string {
   return posix === '.' ? '' : posix;
 }
 
-function insideRoots(file: string, roots: string[]): boolean {
+export function insideRoots(file: string, roots: string[]): boolean {
   return roots.some((root) => !root || file === root || file.startsWith(`${root}/`));
 }
 
