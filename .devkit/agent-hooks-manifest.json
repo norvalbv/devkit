@@ -1,12 +1,15 @@
 {
   "schemaVersion": 2,
   "kind": "hooks",
-  "devkitRef": "v0.66.0",
-  "generatedAt": "2026-10-03T20:42:41.964Z",
+  "devkitRef": "v0.67.0",
+  "generatedAt": "2026-10-04T16:50:25.609Z",
   "files": {
     "adhd-prompt-anchor.mjs": "002e1ee4dd7f10ccef97babb57b7cf0e01c76433a18b4c8be4aa04ab89288504",
     "adhd-session-start.mjs": "b5257348cb11fe85742178f43bbde30a94d7b58cb8f67281e060c875bbe8bc80",
     "anti-slop-preflight.sh": "8a6eb3cf3c0cd41cff60e484111b98a1610fd46aae8696462ee859ef9bcd9e7a",
+    "base-drift-brief.mjs": "6e1a6649f4ebb48bf26e4ff3adc6877f911d7e5648ddcf18183e84d660ee758d",
+    "base-drift-lib.mjs": "4ba49ab26df20ad74535bfcd46606919c13d208e529f692140ede7c6a518d33b",
+    "base-drift-session.mjs": "3d04656f26b9f470df367b1c5548cf7d932a1e6a24b697b1afc76758076d14bd",
     "decision-edit-guard.mjs": "2b75ae8a59bffe403db710a99177b44dfe63ae190cd3c6cbce8ae08f3fad94cf",
     "decision-scope-brief.mjs": "2bdef738193c4761aa884ff20b28075c0f0aac1e241c3453cfb5d36896049920",
     "prior-art-gate.mjs": "cd203ac92117e29b1f08ec301fc3c799278e8939e79299f9a01902b4a5981a53"
@@ -17,6 +20,22 @@
         "adhd-prompt-anchor.mjs": "002e1ee4dd7f10ccef97babb57b7cf0e01c76433a18b4c8be4aa04ab89288504",
         "adhd-session-start.mjs": "b5257348cb11fe85742178f43bbde30a94d7b58cb8f67281e060c875bbe8bc80",
         "anti-slop-preflight.sh": "8a6eb3cf3c0cd41cff60e484111b98a1610fd46aae8696462ee859ef9bcd9e7a",
+        "base-drift-brief.mjs": "6e1a6649f4ebb48bf26e4ff3adc6877f911d7e5648ddcf18183e84d660ee758d",
+        "base-drift-lib.mjs": "4ba49ab26df20ad74535bfcd46606919c13d208e529f692140ede7c6a518d33b",
+        "base-drift-session.mjs": "3d04656f26b9f470df367b1c5548cf7d932a1e6a24b697b1afc76758076d14bd",
+        "decision-edit-guard.mjs": "2b75ae8a59bffe403db710a99177b44dfe63ae190cd3c6cbce8ae08f3fad94cf",
+        "decision-scope-brief.mjs": "2bdef738193c4761aa884ff20b28075c0f0aac1e241c3453cfb5d36896049920",
+        "prior-art-gate.mjs": "cd203ac92117e29b1f08ec301fc3c799278e8939e79299f9a01902b4a5981a53"
+      }
+    },
+    "codex": {
+      "files": {
+        "adhd-prompt-anchor.mjs": "002e1ee4dd7f10ccef97babb57b7cf0e01c76433a18b4c8be4aa04ab89288504",
+        "adhd-session-start.mjs": "b5257348cb11fe85742178f43bbde30a94d7b58cb8f67281e060c875bbe8bc80",
+        "anti-slop-preflight.sh": "8a6eb3cf3c0cd41cff60e484111b98a1610fd46aae8696462ee859ef9bcd9e7a",
+        "base-drift-brief.mjs": "6e1a6649f4ebb48bf26e4ff3adc6877f911d7e5648ddcf18183e84d660ee758d",
+        "base-drift-lib.mjs": "4ba49ab26df20ad74535bfcd46606919c13d208e529f692140ede7c6a518d33b",
+        "base-drift-session.mjs": "3d04656f26b9f470df367b1c5548cf7d932a1e6a24b697b1afc76758076d14bd",
         "decision-edit-guard.mjs": "2b75ae8a59bffe403db710a99177b44dfe63ae190cd3c6cbce8ae08f3fad94cf",
         "decision-scope-brief.mjs": "2bdef738193c4761aa884ff20b28075c0f0aac1e241c3453cfb5d36896049920",
         "prior-art-gate.mjs": "cd203ac92117e29b1f08ec301fc3c799278e8939e79299f9a01902b4a5981a53"
@@ -27,6 +46,9 @@
         "adhd-prompt-anchor.mjs": "002e1ee4dd7f10ccef97babb57b7cf0e01c76433a18b4c8be4aa04ab89288504",
         "adhd-session-start.mjs": "b5257348cb11fe85742178f43bbde30a94d7b58cb8f67281e060c875bbe8bc80",
         "anti-slop-preflight.sh": "8a6eb3cf3c0cd41cff60e484111b98a1610fd46aae8696462ee859ef9bcd9e7a",
+        "base-drift-brief.mjs": "6e1a6649f4ebb48bf26e4ff3adc6877f911d7e5648ddcf18183e84d660ee758d",
+        "base-drift-lib.mjs": "4ba49ab26df20ad74535bfcd46606919c13d208e529f692140ede7c6a518d33b",
+        "base-drift-session.mjs": "3d04656f26b9f470df367b1c5548cf7d932a1e6a24b697b1afc76758076d14bd",
         "decision-edit-guard.mjs": "2b75ae8a59bffe403db710a99177b44dfe63ae190cd3c6cbce8ae08f3fad94cf",
         "decision-scope-brief.mjs": "2bdef738193c4761aa884ff20b28075c0f0aac1e241c3453cfb5d36896049920",
         "prior-art-gate.mjs": "cd203ac92117e29b1f08ec301fc3c799278e8939e79299f9a01902b4a5981a53"
