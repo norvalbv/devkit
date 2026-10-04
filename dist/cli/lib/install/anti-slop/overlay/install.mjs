@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { createAntiSlopBaseline } from '../../../../commands/oxc/anti-slop.mjs';
 import { trackedPathPredicate } from '../../../git-tracked.mjs';
 import { firstLine } from '../../../standalone.mjs';
-import { OVERLAY_ENTRY_REL, OXLINT_CONFIGS, syncOxcCapability } from '../../oxc/lifecycle.mjs';
+import { OVERLAY_ENTRY_REL, syncOxcCapability } from '../../oxc/lifecycle.mjs';
 import { ANTI_SLOP_BASELINE_REL, ANTI_SLOP_MANIFEST_REL } from '../constants.mjs';
 import { removeAntiSlopCapability, syncAntiSlopCapability } from '../lifecycle.mjs';
 /**
@@ -73,14 +73,6 @@ export function resolveOverlayAntiSlop(cwd, gitRoot, pfx, dryRun) {
     }
     if (ownedPathTracked(gitRoot, pfx, OVERLAY_ANTI_SLOP_OWNED, 'anti-slop'))
         return false;
-    // `-c` replaces discovery outright, so a consumer's own Oxlint config would stop being read;
-    // refusing beats silently overriding a linter config in a repo devkit does not own.
-    const consumerConfig = OXLINT_CONFIGS.find((name) => existsSync(join(cwd, name)));
-    if (consumerConfig) {
-        console.log(`  ! anti-slop skipped — this repo has its own ${consumerConfig}, which an overlay install cannot compose with yet.`);
-        console.log('    Overlay passes `-c oxlint.devkit.json`, and that replaces config discovery rather than extending it.');
-        return false;
-    }
     try {
         syncAntiSlopCapability(cwd, { overlay: true });
     }

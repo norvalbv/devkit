@@ -37,6 +37,7 @@ export const POSITIONAL_REJECTED_FLAGS = [
     '--ready',
     '--wait-ci',
     '--wait-ci-timeout',
+    '--wait-ci-required',
 ];
 export const meta = {
     name: 'ship',

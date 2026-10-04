@@ -22,7 +22,7 @@ import { HEAL_ALIAS_NAME, isHealAlias, resyncOverlayAgentSurfaces, syncOverlayHo
 import { globalHookInstalled, globalHookWired, globalInitPath, installGlobalHook, } from '../overlay-global-hook.mjs';
 import { checkAgentAssets, checkRegistrations } from './asset-checks.mjs';
 import { adviseCodexRuntime, adviseSearchIndex } from './guard-config-checks.mjs';
-import { repointHooksPath } from './hook-checks.mjs';
+import { printBlockOrder, repointHooksPath } from './hook-checks.mjs';
 import { hooksDir, sameDir, worktreeScopedPin } from './hooks-path.mjs';
 import { printPriorArtAdvisoryHealth } from './qavis-health.mjs';
 // Reason: flat signal reporting; the exit code is the conjunction of the gating rows.
@@ -61,6 +61,8 @@ export async function runOverlayDoctor(cwd, cfg, fix, printQavisAdvisoryHealth) 
         console.log('  ⚠ .devkit/hooks/pre-commit is STALE (predates the current devkit) — run `devkit doctor --fix` to refresh');
     else
         console.log('  ✓ .devkit/hooks/pre-commit present');
+    for (const hook of ['pre-commit', 'commit-msg'])
+        printBlockOrder(join(gitRoot, '.devkit', 'hooks', hook));
     console.log(`  ${pathOk ? '✓' : '⚠'} core.hooksPath = ${healed ? `${expected} (re-pointed from ${hooksPath || '(unset)'}; husky reclaims it on every install — make it durable with \`devkit init --overlay --global-commit-gate\`)` : hooksPath || '(unset)'}${hooksPath === LOCAL_HOOKS && !pathOk ? ' — RELATIVE, so every linked worktree runs no hooks at all;' : ''}${pathOk ? '' : ` — heal with \`git ${HEAL_ALIAS_NAME}\` (re-points it), \`devkit doctor --fix\`, or re-run \`devkit init --overlay\``}`);
     const worktreesOk = printLinkedWorktrees(home, pkgRel, fix);
     const judgesWired = printCommitMsgRow(cfg, fix, sync.commitMsg);
