@@ -11,6 +11,7 @@ import {
 import { constants, tmpdir } from 'node:os';
 import { isAbsolute, join, relative, sep } from 'node:path';
 import { writeFileAtomic } from '../atomic-write.mts';
+import { regressionResultReason } from './regression-conclusion.mts';
 import { superviseGateCommand } from '../ship/review/process/gate-supervisor.mts';
 import {
   parseVitestRegressionReport,
@@ -322,44 +323,6 @@ function operandEvidence(
   };
 }
 
-interface RegressionConclusion {
-  status: RegressionEvidence['status'];
-  reason: string;
-}
-
-function resultReason(
-  red: RegressionOperandEvidence,
-  green: RegressionOperandEvidence,
-  callerSamplesMatched: boolean,
-  cleanup: RegressionEvidence['cleanup'],
-): RegressionConclusion {
-  if (!callerSamplesMatched) {
-    return { status: 'inconclusive', reason: 'caller boundary fingerprints differ' };
-  }
-  if (!cleanup.redCloneRemoved || !cleanup.greenCloneRemoved) {
-    return { status: 'inconclusive', reason: 'a disposable clone could not be removed' };
-  }
-  if (red.signal || green.signal) {
-    return { status: 'inconclusive', reason: 'a test command ended from a signal' };
-  }
-  if (red.spawnError || green.spawnError) {
-    return { status: 'inconclusive', reason: 'a test command could not be started' };
-  }
-  if (red.reportError || green.reportError) {
-    return { status: 'inconclusive', reason: 'a requested structured report was unavailable' };
-  }
-  if (red.exitCode === null || red.exitCode === 0 || green.exitCode !== 0) {
-    return {
-      status: 'inconclusive',
-      reason: `expected red nonzero and green zero; got ${String(red.exitCode)}/${String(green.exitCode)}`,
-    };
-  }
-  return {
-    status: 'captured',
-    reason: `the same argv exited ${red.exitCode} on red and 0 on green`,
-  };
-}
-
 function removeClone(path: string): boolean {
   try {
     rmSync(path, { recursive: true, force: true });
@@ -369,7 +332,7 @@ function removeClone(path: string): boolean {
   return !existsSync(path);
 }
 
-function regressionTempBase(callerRoot: string): string {
+export function regressionTempBase(callerRoot: string): string {
   const base = realpathSync(tmpdir());
   const fromCaller = relative(callerRoot, base);
   if (
@@ -381,16 +344,27 @@ function regressionTempBase(callerRoot: string): string {
   return base;
 }
 
-export async function proveRegression(rawArgs: string[], cwd = process.cwd()): Promise<number> {
+export interface RegressionCaptureResult {
+  exitCode: number;
+  evidence?: RegressionEvidence;
+  evidenceDir?: string;
+}
+
+export async function captureRegressionComparison(
+  rawArgs: string[],
+  cwd = process.cwd(),
+  dependencySource?: string | null,
+): Promise<RegressionCaptureResult> {
   let prepared: ReturnType<typeof prepareRegressionRepository>;
   try {
     prepared = prepareRegressionRepository(rawArgs, cwd);
+    if (dependencySource !== undefined) prepared.dependencySource = dependencySource;
   } catch (error) {
     const prefix = error instanceof RegressionUsageError ? 'usage' : 'setup';
     console.error(
       `🚫 prove-regression ${prefix}: ${error instanceof Error ? error.message : error}`,
     );
-    return 1;
+    return { exitCode: 1 };
   }
 
   const signalGuard = new CaptureSignalGuard();
@@ -454,7 +428,7 @@ export async function proveRegression(rawArgs: string[], cwd = process.cwd()): P
       afterSha256: callerAfter,
       matched: callerAfter === prepared.callerBefore,
     };
-    const conclusion = resultReason(red, green, callerBoundarySamples.matched, cleanup);
+    const conclusion = regressionResultReason(red, green, callerBoundarySamples.matched, cleanup);
     const evidence: RegressionEvidence = {
       schema: REGRESSION_EVIDENCE_SCHEMA,
       ...conclusion,
@@ -483,18 +457,22 @@ export async function proveRegression(rawArgs: string[], cwd = process.cwd()): P
     if (red.reportError) console.warn(`⚠️  red Vitest report: ${red.reportError}`);
     if (green.reportError) console.warn(`⚠️  green Vitest report: ${green.reportError}`);
     console.log(`evidence: ${evidenceDir}`);
-    return evidence.status === 'captured' ? 0 : 1;
+    return { exitCode: evidence.status === 'captured' ? 0 : 1, evidence, evidenceDir };
   } catch (error) {
     if (redClone) removeClone(redClone);
     if (greenClone) removeClone(greenClone);
-    if (error instanceof InterruptedError) return error.status;
+    if (error instanceof InterruptedError) return { exitCode: error.status };
     const phase = root === null ? 'setup' : 'failed';
     console.error(
       `🚫 prove-regression ${phase}: ${error instanceof Error ? error.message : error}`,
     );
-    return 1;
+    return { exitCode: 1 };
   } finally {
     if (!completed && root) removeClone(root);
     signalGuard.dispose();
   }
+}
+
+export async function proveRegression(rawArgs: string[], cwd = process.cwd()): Promise<number> {
+  return (await captureRegressionComparison(rawArgs, cwd)).exitCode;
 }
