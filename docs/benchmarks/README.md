@@ -154,7 +154,6 @@ Committed evidence rejects raw prompts, transcripts, absolute paths, email addre
 | Correctness agent | agent | shipped | evidence-only | reviewer-correctness |
 | Feature completeness agent | agent | shipped | accepted | completeness |
 | Feature critique agent | agent | shipped | accepted | critique |
-| Upstream-fix agent | agent | shipped | none | — |
 | Frontend accessibility agent | agent | shipped | none | — |
 | Frontend performance agent | agent | shipped | evidence-only | reviewer-frontend-performance |
 | Frontend security agent | agent | shipped | evidence-only | reviewer-frontend-security |

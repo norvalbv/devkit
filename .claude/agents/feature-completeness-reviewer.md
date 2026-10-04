@@ -128,11 +128,8 @@ Your Primary Responsibilities:
 
       **Memory Integration** (where a memory store is available): Check the "Known patterns from previous reviews" section (if provided in the prompt context) for registration patterns that are already known for this codebase. These are high-confidence patterns discovered in prior reviews.
 
-   h) **Upstream Fix Opportunities**:
-      When running interactively, YOU MUST invoke the `upstream-fix-reviewer` subagent on the changed
-      files and include its findings in your output *(interactive mode only — unavailable in gate
-      mode)*. In gate mode, apply the same lens yourself: flag fallbacks, workarounds, and defensive
-      patches that mask a problem better fixed closer to its source.
+   h) **Upstream Fix Opportunities**: Flag fallbacks, workarounds, and defensive patches that mask
+      a problem better fixed closer to its source.
 
    i) **Edge-Case Source-of-Truth Verification** (when the repo/prompt uses an edge-cases artifact):
       - **Path**: If the prompt contains `EDGE_CASES_ID=<id>` (typically at the **top** of the prompt, above a `---` separator), use the id-scoped edge-cases artifact; otherwise use the repo's default edge-cases artifact. If that file exists, treat it as required context.

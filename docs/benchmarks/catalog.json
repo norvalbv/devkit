@@ -65,15 +65,6 @@
       "canonical": "agents/feature-critique.md"
     },
     {
-      "id": "agent-fix-upstream-reviewer",
-      "label": "Upstream-fix agent",
-      "kind": "agent",
-      "lifecycle": "shipped",
-      "evidence": "none",
-      "suiteIds": [],
-      "canonical": "agents/fix-upstream-reviewer.md"
-    },
-    {
       "id": "agent-frontend-accessibility-reviewer",
       "label": "Frontend accessibility agent",
       "kind": "agent",
