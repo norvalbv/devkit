@@ -11,6 +11,11 @@
         "command": ".cursor/hooks/decision-scope-brief.mjs",
         "matcher": "Write",
         "failClosed": false
+      },
+      {
+        "command": ".cursor/hooks/base-drift-brief.mjs",
+        "matcher": "Write",
+        "failClosed": false
       }
     ],
     "afterFileEdit": [
