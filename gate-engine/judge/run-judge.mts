@@ -17,6 +17,7 @@
 // regex floor still blocks. Each caller describes its own consequence where it differs.
 
 import { execFile, execFileSync } from 'node:child_process';
+import { parsePriorArtResponse } from '../prior-art/response-contract.mts';
 import {
   type JudgeUsage,
   parseJudgeUsage,
@@ -166,8 +167,24 @@ export interface RecordAgentRunOpts {
   /** Omitted entirely from the event when unknown, rather than emitted as a misleading 0. */
   durationMs?: number;
   transcript?: boolean;
-  /** Extra event keys (e.g. a disposition). Spread FIRST so it can never shadow the core shape. */
+  /** Extra event keys (e.g. a disposition); core and derived prior_art_* fields are reserved. */
   extra?: Record<string, unknown>;
+}
+
+/** Keep the validated outcome queryable after its transcript expires, without copying prose. */
+function priorArtTelemetry(output: string) {
+  const parsed = parsePriorArtResponse(output);
+  if (!parsed.ok) return { prior_art_status: 'invalid', prior_art_error: parsed.error.code };
+  const result = parsed.value;
+  if (result.status !== 'reviewed') return { prior_art_status: result.status };
+  return {
+    prior_art_status: result.status,
+    prior_art_verdict: result.verdict,
+    prior_art_framing: result.frameChallenge?.framing,
+    prior_art_boundary: result.frameChallenge?.boundaryMustExist,
+    prior_art_next_step: result.suggestedNextStep?.kind,
+    prior_art_confidence: result.confidence,
+  };
 }
 
 /**
@@ -194,8 +211,13 @@ export function recordAgentRun(opts: RecordAgentRunOpts): string | null {
     outcome === 'ok' && opts.transcript !== false && opts.output
       ? saveTranscriptUnique(opts.label, composeTranscript(opts.input ?? '', opts.output))
       : null;
+  const extra = Object.fromEntries(
+    Object.entries(opts.extra ?? {}).filter(([key]) => !key.startsWith('prior_art_')),
+  );
+  if (opts.label === 'prior-art' && outcome === 'ok')
+    Object.assign(extra, priorArtTelemetry(opts.output ?? ''));
   emitGateEvent({
-    ...(opts.extra ?? {}),
+    ...extra,
     type: 'judge_exec',
     judge: opts.label,
     model: opts.model ?? null,
