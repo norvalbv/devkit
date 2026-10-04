@@ -332,8 +332,11 @@ export default async function move(args: string[], cwd: string): Promise<number>
     else movedSources.push(m.oldAbs);
   }
   const isRewritable = (p: string) => shouldRewriteSourceFile(p, worktreeRoot, gitDir);
+  // One scope for the dry run, the real run and the post-move rescan, so they plan the same files.
+  const inPlanScope = (p: string) =>
+    reviewPathWithin(worktreeRoot, p) && !toPosix(p).includes(NODE_MODULES_SEGMENT);
   const planFiles = [...config.files, ...movedSources.filter((p) => SOURCE_EXT_RE.test(p))].filter(
-    (p) => reviewPathWithin(worktreeRoot, p) && !toPosix(p).includes(NODE_MODULES_SEGMENT),
+    inPlanScope,
   );
   const pathMoves = physicalMoves.map(({ oldAbs, newAbs }) => ({ oldAbs, newAbs }));
   // Every file is named by where it sat before the move; `diskOf` says where it is now.
@@ -419,7 +422,7 @@ export default async function move(args: string[], cwd: string): Promise<number>
   // the run under the path they would have had before it.
   const plannedFinals = new Set(planFiles.map((p) => mapPathTo(p, pathMoves)));
   const late = [...moves.map((m) => m.newAbs), ...(fresh?.files ?? [])].filter(
-    (p) => !plannedFinals.has(p) && SOURCE_EXT_RE.test(p),
+    (p) => !plannedFinals.has(p) && SOURCE_EXT_RE.test(p) && inPlanScope(p),
   );
   movedSources.push(...moves.map((m) => m.oldAbs));
   const virtualFiles = [...planFiles, ...late.map((p) => unmapPath(p, pathMoves))];

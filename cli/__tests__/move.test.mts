@@ -1824,6 +1824,26 @@ describe('devkit move — solution-style tsconfig (project references)', () => {
     );
   });
 
+  it('leaves a node_modules file alone even when tsconfig lists it, in the rescan too', () => {
+    const root = fixture(
+      JSON.stringify({
+        compilerOptions: { paths: PATHS },
+        include: ['src'],
+        files: ['node_modules/vendor/dep.ts'],
+      }),
+    );
+    // an alias import resolves from inside node_modules, unlike a relative one (TypeScript calls
+    // that an external library), so only the scope filter keeps this file out of the rewrite
+    const vendored = "import { x } from '@/features/a/util';\nexport const v = x;\n";
+    writePath(root, 'node_modules/vendor/dep.ts', vendored);
+    git(root, 'add', '-A', '-f');
+
+    const r = runMove(root);
+    expect(r.status, r.stderr).toBe(0);
+    expect(read(root, 'node_modules/vendor/dep.ts')).toBe(vendored);
+    expect(read(root, 'src/renderer/features/b/use.ts')).toContain("'@/lib/utils/util'");
+  });
+
   it('rewrites each referenced project with its own aliases', () => {
     const root = fixture(
       JSON.stringify({
