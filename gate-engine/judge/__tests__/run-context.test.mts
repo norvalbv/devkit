@@ -297,11 +297,13 @@ describe('run-context', () => {
       expect(parentSessionId({ CLAUDE_CODE_SESSION_ID: v })).toBe(v);
     });
 
-    it('stamps Claude only: a Codex thread id alone yields no parent (unverified mapping)', () => {
+    it('stamps a Codex run with its thread id when no Claude Code session is present', () => {
       process.env.CODEX_THREAD_ID = '019fa90e-e812-70c2-ae18-9810c06fa762';
       process.env.DEVKIT_SHIP_ID = 'ship-codex';
-      expect(runEnvelope()).toMatchObject({ source: 'codex' });
-      expect(runEnvelope()).not.toHaveProperty('parent_session_id');
+      expect(runEnvelope()).toMatchObject({
+        source: 'codex',
+        parent_session_id: '019fa90e-e812-70c2-ae18-9810c06fa762',
+      });
     });
   });
 
