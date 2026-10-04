@@ -46,6 +46,9 @@ command. Do not pre-run every gate or replace the managed chain with a hand-writ
 
 ## Managed gate families
 
+- **Run order.** `devkit doctor` prints each installed hook's stages in the order the file runs them
+  (`block order: …`, for pre-commit and commit-msg). Read it before assuming which judge runs first
+  or filing a gate-ordering bug.
 - **Deterministic aggregation** runs the selected structure, size, fan-out, semantic-duplication,
   clone, coverage, anti-slop, and comment-budget checks and lists every failure in one block. Follow the printed repair. Existing ratchet debt may shrink; do not
   re-freeze it merely to admit a new violation. A missing or inherited coverage artifact may use the
