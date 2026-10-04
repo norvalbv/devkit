@@ -16,7 +16,7 @@ import { join } from 'node:path';
 import { detectGitRoot } from '../detect-git-root.mjs';
 import { buildCommitGateLogFragment, exitDispatchTrap } from './gate-policy/commit-gate-log.mjs';
 import { BIN_DIRS } from './gate-policy/block-helpers.mjs';
-import { extractGuardBlock, PATH_SETUP, removeGuardBlock, replaceGuardBlock, wrapGuardBlock, } from './husky-block.mjs';
+import { extractGuardBlock, hookStages, PATH_SETUP, removeGuardBlock, replaceGuardBlock, wrapGuardBlock, } from './husky-block.mjs';
 import { invokeJudge, sentryFragment } from './sentry-fragments.mjs';
 /** The guard ids whose gates run at commit-msg (not pre-commit), in emit order. */
 export const COMMIT_MSG_GUARD_IDS = ['review', 'sentry'];
@@ -196,7 +196,7 @@ export function checkCommitMsgHook(cwd, selectedGuards) {
     const block = extractGuardBlock(readFileSync(hookPath, 'utf8'), pkgRel) ?? '';
     // Symmetric sentinel check (same depth as pre-commit's checkHusky): a fragment for a DESELECTED
     // guard lingering in the block is drift too — a stale hard gate would keep blocking commits.
-    const present = [...block.matchAll(/^# devkit:([a-z-]+)$/gm)].map((m) => m[1]);
+    const present = hookStages(block);
     const extra = present.filter((id) => !wanted.includes(id));
     if (extra.length) {
         return {
@@ -220,7 +220,7 @@ export function checkCommitMsgHook(cwd, selectedGuards) {
     return {
         name,
         status: 'OK',
-        detail: `block calls: ${wanted.join(', ')}`,
+        detail: `block order: ${present.join(' → ')}`,
         remediation: '',
         fixable: false,
     };

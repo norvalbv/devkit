@@ -1,6 +1,6 @@
 /** POSIX twin of run-context.mts parentSessionId(), exported so the parity test runs these bytes. */
 export const PARENT_SESSION_SH_FN = `__dk_parent_session() {
-        __dk_s="\${CLAUDE_CODE_SESSION_ID:-}"
+        __dk_s="\${CLAUDE_CODE_SESSION_ID:-\${CODEX_THREAD_ID:-}}"
         __dk_a=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789
         case $__dk_s in ''|[!$__dk_a]*|*[!$__dk_a._-]*) return 0 ;; esac
         [ "\${#__dk_s}" -le 128 ] || return 0
