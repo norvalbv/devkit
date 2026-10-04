@@ -108,7 +108,7 @@ contract validation checks the response shape and evidence coupling, not whether
    - `GENUINE_NEW_WORK` → proceed; carry the absence evidence into the plan's context.
    - `INSUFFICIENT_EVIDENCE`, `aborted`, or invalid JSON → say "prior art unverified" and continue.
      Never treat it as clearance or as a blocker.
-3. The eventual plan records one line: `Prior-art verdict: <verdict> — <how the plan responds>`.
+3. The eventual plan records one line: `Prior-art: <verdict> — <how the plan responds>`.
    (A skipped run records `Prior-art: skipped — <reason>` instead; keep the two distinguishable.)
 4. At plan-exit, pass `feature-critique` a **bounded 3-line summary only** (verdict,
    `frameChallenge.framing`, one citation) in its Additional Context — never the full JSON.
