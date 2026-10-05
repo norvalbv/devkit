@@ -316,10 +316,6 @@ export async function inspectDistIntegrity(
     }
   }
 
-  // `shipping`, never `required`: briefing cli/new.mts still maps dist/cli/new.mjs into `required`
-  // without putting it in `briefed`, and that asymmetry IS the guard — it is what still catches a
-  // ship that carries source while leaving its build output behind (sc-1199/sc-1246).
-  const untracked = physical.filter((file) => required.has(file) && !willShip(file));
   const added = git(root, [
     'diff-index',
     '--name-only',
@@ -329,6 +325,12 @@ export async function inspectDistIntegrity(
     '--',
     'dist',
   ]);
+  // A file already staged needs briefing, not `git add -f`, so `unbriefed` alone names it.
+  const staged = new Set(added);
+  // `willShip`, never `required`: a briefed source maps its dist into `required` without shipping it.
+  const untracked = physical.filter(
+    (file) => required.has(file) && !willShip(file) && !staged.has(file),
+  );
   const unbriefed = added.filter((file) => required.has(file) && !briefed.has(file)).sort();
   unresolved.sort((a, b) =>
     `${a.importer}\0${a.specifier}`.localeCompare(`${b.importer}\0${b.specifier}`),

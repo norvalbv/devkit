@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -69,6 +69,8 @@ describe('inspectDistIntegrity', () => {
     const report = await inspectDistIntegrity(root, base, ['cli/new.mts']);
 
     expect(report.unbriefed).toEqual(['dist/cli/new.mjs']);
+    // Already staged: the remedy is to brief it, never a redundant `git add -f`.
+    expect(report.untracked).toEqual([]);
   });
 
   it('passes once the new artifact is tracked and explicitly briefed', async () => {
@@ -416,6 +418,43 @@ describe('inspectDistIntegrity', () => {
       { importer: 'dist/cli/late.mjs', specifier: './missing.mjs', target: 'dist/cli/missing.mjs' },
       { importer: 'dist/cli/new.mjs', specifier: './late.mjs', target: 'dist/cli/late.mjs' },
     ]);
+  });
+
+  it('walks an unbriefed importer missing from disk, which still ships at BASE', async () => {
+    const { root } = repo();
+    mkdirSync(join(root, 'dist/cli'));
+    writeFileSync(join(root, 'dist/cli/keep.mjs'), "import '../index.mjs';\n");
+    git(root, 'add', '-f', 'dist/cli/keep.mjs');
+    git(root, 'commit', '-q', '-m', 'importer');
+    const head = git(root, 'rev-parse', 'HEAD');
+    // A clean wiped keep.mjs from disk; its BASE copy still lands and still imports index.mjs.
+    rmSync(join(root, 'dist/cli/keep.mjs'));
+    git(root, 'rm', '-q', '--cached', 'dist/index.mjs');
+    writeFileSync(join(root, 'dist/cli/new.mjs'), "import './keep.mjs';\n");
+
+    const report = await inspectDistIntegrity(root, head, ['dist/cli/new.mjs', 'dist/index.mjs']);
+
+    expect(report.unresolved).toEqual([
+      { importer: 'dist/cli/keep.mjs', specifier: '../index.mjs', target: 'dist/index.mjs' },
+    ]);
+  });
+
+  it('runs in a checkout whose BASE tracks no dist at all', async () => {
+    const root = mkTmp('dist-integrity-');
+    git(root, 'init', '-q', '-b', 'main');
+    git(root, 'config', 'user.email', 'a@b.c');
+    git(root, 'config', 'user.name', 'a');
+    writeFileSync(join(root, 'package.json'), `${JSON.stringify({ name: '@norvalbv/devkit' })}\n`);
+    git(root, 'add', 'package.json');
+    git(root, 'commit', '-q', '-m', 'base');
+    mkdirSync(join(root, 'dist/cli'), { recursive: true });
+    writeFileSync(join(root, 'dist/cli/new.mjs'), 'export {};\n');
+
+    const report = await inspectDistIntegrity(root, git(root, 'rev-parse', 'HEAD'), [
+      'cli/new.mts',
+    ]);
+
+    expect(report).toEqual({ ...CLEAN_ACTIVE, untracked: ['dist/cli/new.mjs'] });
   });
 
   it('walks an unbriefed importer dropped from the index, which still ships at BASE', async () => {
