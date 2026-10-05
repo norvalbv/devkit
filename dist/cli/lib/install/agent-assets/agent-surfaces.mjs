@@ -59,7 +59,7 @@ export function installAgentSurfaces(gitRoot, selection, dryRun, override = () =
         console.log('7b. remove deselected agent-hook scripts');
         removeHookScripts(gitRoot, { dryRun });
     }
-    const hasProviderConfig = targets.some((target) => existsSync(join(gitRoot, hookRegistrationDestination(target, 'shared'))));
+    const hasProviderConfig = targets.some((target) => ['shared', 'overlay'].some((scope) => existsSync(join(gitRoot, hookRegistrationDestination(target, scope)))));
     if (hooks.components.length || hooks.previouslyOwnedComponents.length || hasProviderConfig) {
         console.log('7c. agent hook registrations');
         reconcileHookRegistrations(gitRoot, hooks.components, hooks.previouslyOwnedComponents, {

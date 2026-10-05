@@ -990,6 +990,8 @@ else
 # The pinned parent the worktree was cut from — the PR tip for an append, or the PR base for a
 # rewrite — lets in-chain gates (fallow) diff against it rather than their own main-autodetect.
 export DEVKIT_SHIP_BASE_SHA="$BASE"
+# CI's PR base is known only for a rewrite; an append's PR tip is not it, so the dist extra skips.
+if [ "$REWRITE" -eq 1 ]; then export DEVKIT_SHIP_PR_BASE_SHA="$BASE"; else unset DEVKIT_SHIP_PR_BASE_SHA; fi
 export DEVKIT_SHIP_SOURCE_HEAD="$CALLER_HEAD"   # pinned above, before staging (sc-2480)
 export DEVKIT_SHIP_MODE=reship   # tags the ship_attempt telemetry (retry onto an existing branch)
 export DEVKIT_RUN_MODE=ship      # never inherit a caller's review allowlist into a real ship

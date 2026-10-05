@@ -4,7 +4,7 @@ import { chmodSync, closeSync, fstatSync, mkdirSync, openSync, statSync, readFil
 import { join } from 'node:path';
 import { GATE_LOG_FINISH_PASS } from '../gate-policy/commit-gate-log.mjs';
 import { buildCommitMsgBlock, COMMIT_MSG_PREAMBLE, commitMsgGuards } from '../commit-msg-block.mjs';
-import { buildPassthroughHook, chainWord, GATES_ONLY_STOP } from '../husky-block.mjs';
+import { buildPassthroughHook, chainExec, GATES_ONLY_STOP } from '../husky-block.mjs';
 const LOCAL_HOOK = join('.devkit', 'hooks', 'commit-msg');
 const HOOK_MODE = 0o755;
 // Text that LOOKS like a repo hook already calls a judge. Advisory only (a double-run warning): hook
@@ -21,9 +21,8 @@ export function judgesAlsoInRepoHook(hookContent) {
 }
 /** Judge block, then the chain. `exec` drops the EXIT trap, so clear the handoff first (a no-op in a
  *  monorepo, where the package subshell already cleared it). */
-export function buildOverlayCommitMsgHook(selection, chainTarget, pkgRel = '') {
+export function buildOverlayCommitMsgHook(selection, chainTarget, pkgRel = '', gitRuns = false) {
     const block = buildCommitMsgBlock(selection, pkgRel, 'global');
-    const chain = chainWord(chainTarget); // single-quoted: a hooksPath with $(...) must not execute
     return `${COMMIT_MSG_PREAMBLE}
 # devkit OVERLAY commit-msg (LOCAL, git-ignored): devkit's message judges, then the repo's OWN
 # commit-msg unchanged. Global CLI; the commit is blocked when devkit is not installed.
@@ -36,30 +35,30 @@ ${GATE_LOG_FINISH_PASS}
 ${GATES_ONLY_STOP}
 
 # Chain to the repo's own commit-msg (exec → its exit code becomes the hook's).
-[ -f ${chain} ] && exec sh ${chain} "$@"
+${chainExec(chainTarget, gitRuns)}
 exit 0
 `;
 }
 /** Decide what `.devkit/hooks/commit-msg` must contain (or that it must not exist). */
-export function planOverlayCommitMsg({ gitRoot, scriptDir, existing, selection, pkgRel, }) {
+export function planOverlayCommitMsg({ scriptDir, scriptsAbs, gitRuns, existing, selection, pkgRel, }) {
     const chainTarget = `${scriptDir}/commit-msg`;
     const hasRepoHook = existing.includes('commit-msg');
     const judges = commitMsgGuards(selection.guards);
     if (judges.length) {
         let repoHook = '';
         try {
-            repoHook = hasRepoHook ? readFileSync(join(gitRoot, chainTarget), 'utf8') : '';
+            repoHook = hasRepoHook ? readFileSync(join(scriptsAbs, 'commit-msg'), 'utf8') : '';
         }
         catch {
             repoHook = ''; // unreadable: the warning is advisory, the judges run regardless
         }
         const alsoInRepo = judgesAlsoInRepoHook(repoHook).filter((id) => judges.includes(id));
-        const content = buildOverlayCommitMsgHook({ guards: judges }, chainTarget, pkgRel);
+        const content = buildOverlayCommitMsgHook({ guards: judges }, chainTarget, pkgRel, gitRuns);
         return { kind: 'judges', content, judges, alsoInRepo };
     }
     if (!hasRepoHook)
         return { kind: 'absent' };
-    return { kind: 'passthrough', content: buildPassthroughHook(chainTarget) };
+    return { kind: 'passthrough', content: buildPassthroughHook(chainTarget, gitRuns) };
 }
 // One descriptor, content THEN mode: no check-then-use gap, and a chmod during the read is seen.
 export function readHook(path, readFile = (fd) => readFileSync(fd, 'utf8')) {
@@ -137,7 +136,7 @@ export function syncOverlaySiblingHooks(input, { dryRun }) {
     const dir = join(input.gitRoot, '.devkit', 'hooks');
     for (const h of input.existing.filter((n) => n !== 'pre-commit' && n !== 'commit-msg')) {
         if (!dryRun)
-            writeHookAtomic(join(dir, h), buildPassthroughHook(`${input.scriptDir}/${h}`));
+            writeHookAtomic(join(dir, h), buildPassthroughHook(`${input.scriptDir}/${h}`, input.gitRuns));
     }
     return syncOverlayCommitMsg(input, { dryRun });
 }
