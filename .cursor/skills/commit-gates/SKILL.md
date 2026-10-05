@@ -138,6 +138,9 @@ specific conditions under which that control is appropriate:
   Prefer the base the refusal names: the gate worktree is cut from the base, so overriding makes
   guard-size, guard-clone and structure judge a tree your change was never written against, and
   their findings will look real. Use it only for a deliberate cross-line PR.
+- `GUARD_SHIP_REPLACE_OK=1` — ship your copy of a binary, symlink or submodule path that origin
+  also changed since your checkout forked, replacing the base's version. Prefer the refusal's remedy:
+  rebase onto the base and redo the change on its copy. Use it only when replacing is the intent.
 - `GUARD_HOOK_PARITY_OK=1` — assert that `.husky/pre-commit` drift predates your change (Devkit's
   own repo only; the gate is already advisory when no hook-generator input is staged).
 - `GUARD_DECISIONS_INTEGRITY_OK=1` — assert that a NEW structural finding on a decision record in
