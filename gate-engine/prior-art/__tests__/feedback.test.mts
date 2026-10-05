@@ -183,3 +183,58 @@ describe('guard-review record-feedback prior-art', () => {
     expect(parseLine(r.stdout)).toMatchObject({ telemetry: 'failed' });
   });
 });
+
+describe('record-feedback reference resolution edge cases', () => {
+  const RECORD_AGENT = (input: string) =>
+    spawnSync('node', [CLI, 'record-agent', 'prior-art'], {
+      input,
+      encoding: 'utf8',
+      env: { ...process.env, DEVKIT_GATE_EVENTS: sink, DEVKIT_SHIP_ID: 'ship-fb' },
+    }).stdout;
+
+  it('resolves the invocation_id a real record-agent receipt printed', () => {
+    // Wiring: both commands must agree on the event type, judge and key name.
+    const { invocation_id: id } = parseLine(RECORD_AGENT('{"verdict":"GENUINE_NEW_WORK"}'));
+    const r = feedback([
+      '--run',
+      String(id),
+      ...valid.slice(2),
+      '--reason',
+      'policy says otherwise',
+    ]);
+    expect(r.status).toBe(0);
+    expect(events()).toEqual([expect.objectContaining({ invocation_id: id })]);
+  });
+
+  it('rejects a run recorded under another agent label', () => {
+    const other = randomUUID();
+    const line = { type: 'judge_exec', judge: 'feature-critique', invocation_id: other };
+    writeFileSync(sink, `${JSON.stringify(line)}\n`, { flag: 'a' });
+    const r = feedback(['--run', other, ...valid.slice(2), '--reason', 'r']);
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain(`no prior-art run ${other}`);
+  });
+
+  it('looks past a truncated line and a mere mention of the id to the real run', () => {
+    // A writer killed mid-append leaves a partial line; the id can also sit inside other text.
+    const mention = { type: 'agent_feedback', judge: 'prior-art', reason: `see ${run}` };
+    const real = { type: 'judge_exec', judge: 'prior-art', invocation_id: run };
+    writeFileSync(
+      sink,
+      `{"type":"judge_exec","judge":"prior-art","invocation_id":"${run}\n` +
+        `${JSON.stringify(mention)}\n${JSON.stringify(real)}`, // no trailing newline on the last line
+    );
+    expect(feedback([...valid, '--reason', 'r']).status).toBe(0);
+  });
+
+  it('counts the reason cap in characters, so 400 emoji fit', () => {
+    expect(feedback([...valid, '--reason', '🙂'.repeat(400)]).status).toBe(0);
+    expect(feedback([...valid, '--reason', '🙂'.repeat(401)]).status).toBe(2);
+  });
+
+  it('reports an unreadable sink as unreadable, not as a missing run', () => {
+    const r = feedback([...valid, '--reason', 'r'], { DEVKIT_GATE_EVENTS: dir });
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain('cannot read the telemetry sink');
+  });
+});

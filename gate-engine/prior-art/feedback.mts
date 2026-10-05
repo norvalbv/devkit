@@ -101,10 +101,18 @@ function lineMatches(line: string, fields: Readonly<Record<string, string>>): bo
   }
 }
 
-/** Whether any sink line matches; the substring pre-check skips parsing unrelated lines. */
-function sinkHas(lines: readonly string[], fields: Readonly<Record<string, string>>): boolean {
-  const values = Object.values(fields);
-  return lines.some((line) => values.every((v) => line.includes(v)) && lineMatches(line, fields));
+/** Whether a sink line holding `id` matches. Buffer search: the sink outgrows Node's string limit. */
+function sinkHas(sink: Buffer, id: string, fields: Readonly<Record<string, string>>): boolean {
+  for (let at = sink.indexOf(id); at !== -1; at = sink.indexOf(id, at + id.length)) {
+    const end = sink.indexOf(0x0a, at);
+    const line = sink.toString(
+      'utf8',
+      sink.lastIndexOf(0x0a, at) + 1,
+      end === -1 ? sink.length : end,
+    );
+    if (lineMatches(line, fields)) return true;
+  }
+  return false;
 }
 
 /** Why a reference does not resolve in the sink, or null when it does. */
@@ -112,23 +120,21 @@ function unresolvedReference(event: AgentFeedback): string | null {
   const sink = telemetrySink();
   if (!sink)
     return 'telemetry is off: no recorded run can be resolved, and nothing would be written';
-  let lines: string[];
+  let bytes: Buffer;
   try {
-    lines = readFileSync(sink, 'utf8').split('\n');
+    bytes = readFileSync(sink);
   } catch {
     return `cannot read the telemetry sink ${sink}, so run ${event.invocation_id} cannot be resolved`;
   }
-  if (!sinkHas(lines, { type: 'judge_exec', invocation_id: event.invocation_id }))
-    return `no prior-art run ${event.invocation_id} is recorded in ${sink}`;
+  const run = event.invocation_id;
+  if (!sinkHas(bytes, run, { type: 'judge_exec', invocation_id: run }))
+    return `no prior-art run ${run} is recorded in ${sink}`;
+  const prior = event.supersedes;
   if (
-    event.supersedes &&
-    !sinkHas(lines, {
-      type: 'agent_feedback',
-      feedback_id: event.supersedes,
-      invocation_id: event.invocation_id,
-    })
+    prior &&
+    !sinkHas(bytes, prior, { type: 'agent_feedback', feedback_id: prior, invocation_id: run })
   )
-    return `no feedback ${event.supersedes} on run ${event.invocation_id} is recorded in ${sink}`;
+    return `no feedback ${prior} on run ${run} is recorded in ${sink}`;
   return null;
 }
 
