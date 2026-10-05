@@ -6,10 +6,11 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
@@ -579,7 +580,7 @@ describe('--gate (integration, real git repo)', () => {
       const fake = join(bin, 'claude');
       writeFileSync(
         fake,
-        `#!/bin/sh\necho "$*" >> "${join(repo, 'calls.log')}"\ncat >/dev/null\n${script}`,
+        `#!/bin/sh\necho "$*" >> "${join(repo, 'calls.log')}"\nprintf '%s\\n' "$@" > "${join(repo, 'judge-args.log')}"\ncat > "${join(repo, 'judge-input.log')}"\n${script}`,
       );
       chmodSync(fake, 0o755);
       return bin;
@@ -612,6 +613,132 @@ describe('--gate (integration, real git repo)', () => {
       );
       git('add package.json');
     };
+
+    describe('recorded Targets', () => {
+      const target = (ruling: string, scope = 'package.json', date = '2026-01-01') =>
+        `## Target · ${date} — dependency policy\n\n**Ruling:** ${ruling}\n**Scope:** ${scope}\n`;
+      const recordedLog = (decisionsDir = 'docs/decisions') => {
+        const dir = join(repo, '.git', 'recorded-decisions');
+        mkdirSync(dir, { recursive: true });
+        const link = join(repo, decisionsDir);
+        mkdirSync(dirname(link), { recursive: true });
+        symlinkSync(dir, link, 'dir');
+        writeFileSync(join(repo, '.git', 'info', 'exclude'), `/${decisionsDir}\n`);
+        if (decisionsDir !== 'docs/decisions')
+          writeFileSync(join(repo, 'guard.config.json'), JSON.stringify({ decisionsDir }));
+        expect(git(`check-ignore ${decisionsDir}`).trim()).toBe(decisionsDir);
+        return dir;
+      };
+      const judgeRecordedTarget =
+        'case "$*" in *"Adopt dependency b for the existing direction"*) echo ROUTINE ;; *) echo DECISION ;; esac\n';
+      const capturedArgs = () => readFileSync(join(repo, 'judge-args.log'), 'utf8');
+
+      it.each(['docs/decisions', 'governance/adr'])(
+        'supplies the current Target from an ignored symlink at %s without staging a record',
+        (decisionsDir) => {
+          const dir = recordedLog(decisionsDir);
+          writeFileSync(
+            join(dir, 'dependency-policy.md'),
+            target('Superseded dependency direction', 'keep.ts') +
+              target('Adopt dependency b for the existing direction', 'keep.ts', '2026-02-01'),
+          );
+          stageDepChange();
+          writeFileSync(join(repo, 'keep.ts'), 'export const x = 2;\n');
+          git('add keep.ts');
+          expect(git('diff --cached --name-only').trim().split('\n')).toEqual([
+            'keep.ts',
+            'package.json',
+          ]);
+
+          const result = gateStubbed(judgeRecordedTarget);
+          expect(capturedArgs()).toContain('Adopt dependency b for the existing direction');
+          expect(capturedArgs()).not.toContain('Superseded dependency direction');
+          expect(result.status).toBe(0);
+          expect(result.stderr).toContain('judge cleared as ROUTINE');
+        },
+      );
+
+      it('does not use unrelated recorded Targets to clear a new decision', () => {
+        const dir = recordedLog();
+        writeFileSync(
+          join(dir, 'unrelated.md'),
+          target('Adopt dependency b for the existing direction', 'src/unrelated/**'),
+        );
+        stageDepChange();
+        const result = gateStubbed(judgeRecordedTarget);
+        expect(capturedArgs()).not.toContain('Adopt dependency b for the existing direction');
+        expect(result.status).toBe(1);
+      });
+
+      it('still blocks when the judge returns DECISION with a relevant Target present', () => {
+        const dir = recordedLog();
+        writeFileSync(
+          join(dir, 'policy.md'),
+          target('Adopt dependency b for the existing direction'),
+        );
+        stageDepChange();
+        const result = gateStubbed('echo DECISION\n');
+        expect(capturedArgs()).toContain('Adopt dependency b for the existing direction');
+        expect(result.status).toBe(1);
+      });
+
+      it.each(['', '1'])(
+        'retains the decision block when recorded Targets are unreadable (strict=%s)',
+        (strict) => {
+          const dir = recordedLog();
+          mkdirSync(join(dir, 'unreadable.md'));
+          stageDepChange();
+          const result = gateStubbed('echo DECISION\n', { GUARD_AI_STRICT: strict });
+          expect(result.status).toBe(1);
+          expect(capturedArgs()).toMatch(/RECORDED TARGETS[^\n]*UNAVAILABLE/);
+        },
+      );
+
+      it.each(['edit', 'removal'])(
+        'invalidates an earned ROUTINE after Target %s with an identical staged diff',
+        (change) => {
+          const dir = recordedLog();
+          const file = join(dir, 'policy.md');
+          writeFileSync(file, target('Adopt dependency b for the existing direction'));
+          stageDepChange();
+          const stagedDiff = git('diff --cached');
+          expect(gateStubbed(judgeRecordedTarget).status).toBe(0);
+          const firstCalls = readFileSync(join(repo, 'calls.log'), 'utf8');
+          const cached = gateStubbed(judgeRecordedTarget);
+          expect(cached.status).toBe(0);
+          expect(cached.stderr).toContain('cached ROUTINE');
+          expect(readFileSync(join(repo, 'calls.log'), 'utf8')).toBe(firstCalls);
+
+          if (change === 'edit') writeFileSync(file, target('Use dependency c instead'));
+          else rmSync(file);
+          expect(git('diff --cached')).toBe(stagedDiff);
+          const changed = gateStubbed(judgeRecordedTarget);
+          expect(changed.status).toBe(1);
+          expect(changed.stderr).not.toContain('cached ROUTINE');
+          expect(readFileSync(join(repo, 'calls.log'), 'utf8')).not.toBe(firstCalls);
+          expect(capturedArgs()).not.toContain('Adopt dependency b for the existing direction');
+        },
+      );
+
+      it('names capped Targets without displacing the staged diff evidence', () => {
+        const dir = recordedLog();
+        writeFileSync(
+          join(dir, 'small.md'),
+          target('Adopt dependency b for the existing direction'),
+        );
+        writeFileSync(join(dir, 'large.md'), target('Oversized ruling. '.repeat(600)));
+        stageDepChange();
+        const result = gateStubbed(judgeRecordedTarget);
+        expect(result.status).toBe(0);
+        expect(capturedArgs()).toContain('OMITTED:');
+        expect(capturedArgs()).toContain('large');
+        expect(capturedArgs()).not.toContain('Oversized ruling.');
+        const input = readFileSync(join(repo, 'judge-input.log'), 'utf8');
+        expect(input).toContain('diff --git a/package.json b/package.json');
+        expect(input).toContain('"b": "2.0.0"');
+        expect(input).not.toContain('Adopt dependency b for the existing direction');
+      });
+    });
 
     it('a confident ROUTINE downgrades the regex block (0), judged in isolation', () => {
       stageDepChange();

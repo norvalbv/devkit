@@ -10,6 +10,19 @@ Common failures and what to do. Terms in **bold** are defined in [glossary.md](g
 A devkit command that needs git (init, doctor, clean, move, ship, release, update) couldn't find git.
 Install git (https://git-scm.com/downloads) and re-run. devkit shells out to git for nearly everything.
 
+## The decision gate asks me to record a decision that already exists
+
+The smell judge reads current Targets whose Scope matches any staged file, including records in an
+ignored or symlinked decision directory. Configure `decisionsDir` in `guard.config.json` if the log is
+elsewhere. A record does not need to be staged or published for the judge to consider it.
+
+Check the matches with `guard-decisions scoped-targets --files path/to/changed-file`. Missing or stale
+Scope globs need a `guard-decisions rescope` correction. Targets inform the judge; a scope match alone
+does not clear a new architectural choice. The alignment gate still checks for contradictions.
+Target context is size-capped with explicit omissions, separate from the diff evidence; an omitted
+ruling cannot establish that the change was already decided. Editing the supplied Target context
+invalidates the cached smell verdict.
+
 ## `invalid JSON: …` from `devkit doctor`
 
 A managed config (`biome.jsonc`, `tsconfig.json`) has a syntax error (a trailing comma, a missing brace).
