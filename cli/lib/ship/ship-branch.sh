@@ -695,7 +695,11 @@ if [ "$FROM_BRANCH" -eq 0 ]; then
   if [ "$PATCH_BASE" != "$BASE" ]; then
     ship_classify_whole_file "$ROOT" "$BASE" "$PATCH_BASE" -- "${GIT_PATHS[@]}"
     echo "ship: origin/$BASE_REF moved to ${BASE:0:7} since this checkout forked at ${PATCH_BASE:0:7} — staging is anchored at the fork point and three-way merged." >&2
-    ship_warn_whole_file_drift "$ROOT" "$BASE" "$PATCH_BASE" "$BASE_REF"
+    # A preserved-commit retry only warns, so it still reaches the --resume recovery check.
+    if ! ship_refuse_whole_file_drift "$ROOT" "$BASE" "$PATCH_BASE" "$BASE_REF" ${LOCAL_BRANCH_EXISTS:+--advise}; then
+      echo "ship: preflight — blocked before creating a branch or worktree; nothing was staged or gated." >&2
+      exit 1
+    fi
   fi
 fi
 
