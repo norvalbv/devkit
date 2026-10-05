@@ -22,7 +22,7 @@ Usage:
   --file <path>      answer for one test file, plus the last run in which it passed
   --json             machine-readable output (the intended interface for agents)
   --ref <branch>     branch to read (default: the remote's HEAD, else main)
-  --max-runs <n>     how far back to walk for --file (default: ${DEFAULT_MAX_RUNS})
+  --max-runs <n>     how many commits to walk back (default: ${DEFAULT_MAX_RUNS})
   --workflow <file>  the CI workflow to read (default: guard.config.json, else ${DEFAULT_WORKFLOW})
 
 Reads the per-file summary artifact that \`devkit test-report-run\` uploads from a CI workflow.
@@ -30,6 +30,10 @@ Configure both in guard.config.json — { "baselineStatus": { "workflow": "<file
 "<name>" } } — defaults ${DEFAULT_WORKFLOW} and \`${DEFAULT_ARTIFACT}\`. The workflow must exist on
 the default branch. No log scraping: a CI log interleaves failures from nested test runs, so
 grepping it cannot prove a file passed.
+
+Runs are looked up per commit, walking back from the branch head GitHub reports for the repository
+gh queries, never from GitHub's branch run list (which can serve weeks-old pages). The answer names
+that head and how many commits behind it the answering run sits (commitsBehindHead).
 
 Two verdicts are reported separately, because they differ constantly:
   runStatus     the whole run — lint, typecheck, ratchets AND tests
@@ -44,11 +48,13 @@ killed before the reporter flushed all report \`unknown\` with a named reason �
 is in your CI, a remedy line naming it.
 
 Exit 0 = the query ran, including "no run carries data yet". Exit 2 = it could not be performed at
-all (no gh, not authenticated, no GitHub remote, no such workflow on the default branch). Exit 1 = a
+all (no gh, not authenticated, no GitHub remote, no such workflow on the default branch, no
+readable branch head or history). Exit 1 = a
 bad argument or an unreadable guard.config.json.
 
 \`--file\` history begins at the first run carrying the artifact; before that it reports
-lastPassedReason "no-artifact-history" rather than implying the file never passed.
+lastPassedReason "no-artifact-history" rather than implying the file never passed, and a gh
+failure partway back reports "lookup-failed".
 Set DEVKIT_BASELINE_DEBUG=1 to surface gh's stderr.`,
 };
 
@@ -62,6 +68,8 @@ const UNPERFORMED = new Set([
   'not-a-github-repo',
   'workflow-missing',
   'gh-failed',
+  'head-unknown',
+  'history-unavailable',
 ]);
 
 /**
@@ -92,6 +100,16 @@ function render(answer: BaselineAnswer): void {
   console.log(
     `${icon} ${answer.ref} run ${answer.runId} (attempt ${answer.attempt}, ${answer.sha?.slice(0, 8)})`,
   );
+  if (answer.commitsBehindHead) {
+    console.log(
+      `   ${answer.commitsBehindHead} commit(s) behind ${answer.ref} head ${answer.head?.slice(0, 8)}`,
+    );
+    const noRun = answer.commitsWithoutRun.map((sha) => sha.slice(0, 8));
+    if (noRun.length) console.log(`   no run on: ${noRun.join(', ')}`);
+  }
+  for (const skipped of answer.skippedRuns) {
+    console.log(`   skipped run ${skipped.runId} (${skipped.conclusion}): ${skipped.why}`);
+  }
   console.log(`   run: ${answer.runStatus} · tests: ${answer.testsStatus}`);
   if (answer.failingFiles.length) {
     console.log(`   ${answer.failingFiles.length} failing test file(s):`);

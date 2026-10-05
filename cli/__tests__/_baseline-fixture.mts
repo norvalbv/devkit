@@ -1,0 +1,56 @@
+/** Shared fixtures for the `devkit baseline-status` suites: a real git branch and a per-commit gh stub. */
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, symlinkSync } from 'node:fs';
+import { join } from 'node:path';
+
+/** Turn `dir` into a repo on `main` whose `origin` is itself, so `git ls-remote origin` is offline. */
+export function seedBranch(dir: string): string {
+  const git = (...a: string[]) => execFileSync('git', a, { cwd: dir, stdio: 'ignore' });
+  git('init', '-b', 'main');
+  // Fixtures set their own identity — an inherited-identity fixture is exactly what reddens CI.
+  git('config', 'user.email', 'a@b.c');
+  git('config', 'user.name', 'a');
+  git('commit', '--allow-empty', '-m', 'seed');
+  git('remote', 'add', 'origin', dir);
+  return headOf(dir);
+}
+
+/** Add an empty commit on top of `dir`'s branch and return its sha. */
+export function addCommit(dir: string): string {
+  execFileSync('git', ['commit', '--allow-empty', '-m', 'next'], { cwd: dir, stdio: 'ignore' });
+  return headOf(dir);
+}
+
+export function headOf(dir: string): string {
+  return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim();
+}
+
+/** Inline JS that prints the runs.json entries whose headSha is the queried commit. */
+const FILTER =
+  'const fs=require("fs");const [f,c]=process.argv.slice(1);const raw=fs.readFileSync(f,"utf8");' +
+  'let r;try{r=JSON.parse(raw)}catch{r=null}' +
+  'process.stdout.write(Array.isArray(r)?JSON.stringify(r.filter((x)=>typeof x?.headSha!=="string"||x.headSha===c)):raw)';
+
+/** The stub's `gh run list --commit <sha>` arm: logs the sha, then answers from runs.json. */
+export const RUN_LIST_BY_COMMIT = `commit=""; prev=""
+  for a in "$@"; do if [ "$prev" = "--commit" ]; then commit="$a"; fi; prev="$a"; done
+  echo "$*" >> "$DEVKIT_TEST_FIXTURE/list.log"
+  exec node -e '${FILTER}' "$DEVKIT_TEST_FIXTURE/runs.json" "$commit"`;
+
+/** A PATH holding only git, so a test can remove gh without also removing the head lookup. */
+export function gitOnlyPath(dir: string): string {
+  const bin = join(dir, 'git-only-bin');
+  mkdirSync(bin, { recursive: true });
+  const git = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
+  symlinkSync(git, join(bin, 'git'));
+  return bin;
+}
+
+/** The stub's `gh api …/branches/<ref>` arm: GitHub's head is the stub repo's branch, or `head`. */
+export const API_BRANCH_HEAD = `if [ "$1" = "api" ]; then
+  echo "$*" >> "$DEVKIT_TEST_FIXTURE/api.log"
+  if [ -f "$DEVKIT_TEST_FIXTURE/head" ]; then cat "$DEVKIT_TEST_FIXTURE/head"; exit 0; fi
+  branch=$(printf '%s' "\${2#*/branches/}" | sed 's#%2F#/#g')
+  git rev-parse --verify -q "refs/heads/$branch" && exit 0
+  echo "gh: Branch not found (HTTP 404)" >&2; exit 1
+fi`;

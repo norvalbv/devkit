@@ -10,13 +10,15 @@ import baselineStatus from '../commands/baseline/status.mts';
 import type { RunRef } from '../lib/baseline-status/gh.mts';
 import { workflowSelector } from '../lib/baseline-status/query.mts';
 import { configuredSource } from '../lib/baseline-status/source.mts';
+import { API_BRANCH_HEAD, RUN_LIST_BY_COMMIT, seedBranch } from './_baseline-fixture.mts';
 
 /** gh stub: `list-stderr` makes `run list` fail with that text; argv is appended to `argv.log`. */
 const GH_STUB = `#!/bin/sh
 echo "$*" >> "$DEVKIT_TEST_FIXTURE/argv.log"
+${API_BRANCH_HEAD}
 if [ "$1" = "run" ] && [ "$2" = "list" ]; then
   if [ -f "$DEVKIT_TEST_FIXTURE/list-stderr" ]; then cat "$DEVKIT_TEST_FIXTURE/list-stderr" >&2; exit 1; fi
-  cat "$DEVKIT_TEST_FIXTURE/runs.json"; exit 0
+  ${RUN_LIST_BY_COMMIT}
 fi
 if [ "$1" = "run" ] && [ "$2" = "download" ]; then
   id="$3"; out=""
@@ -32,6 +34,7 @@ exit 1
 describe('baseline-status workflow source (sc-3445)', () => {
   let repo: string;
   let fixture: string;
+  let head: string;
   let out: string[];
   const saved = { PATH: process.env.PATH, fixture: process.env.DEVKIT_TEST_FIXTURE };
 
@@ -40,8 +43,10 @@ describe('baseline-status workflow source (sc-3445)', () => {
     attempt: 1,
     status: 'completed',
     conclusion: 'failure',
-    headSha: 'deadbeefcafe',
+    headSha: head,
     createdAt: '2026-09-28T00:00:00Z',
+    headBranch: 'main',
+    event: 'push',
     ...over,
   });
   const withRuns = (runs: unknown[]) =>
@@ -70,7 +75,7 @@ describe('baseline-status workflow source (sc-3445)', () => {
 
   beforeEach(() => {
     repo = mkdtempSync(join(tmpdir(), 'baseline-cfg-repo-'));
-    mkdirSync(join(repo, '.git')); // detectGitRoot keys on the entry, not on a real repository
+    head = seedBranch(repo);
     fixture = mkdtempSync(join(tmpdir(), 'baseline-cfg-fixture-'));
     const bin = join(fixture, 'bin');
     mkdirSync(bin);
@@ -262,7 +267,7 @@ describe('baseline-status workflow source (sc-3445)', () => {
       expect(baselineStatus(['--json'], repo)).toBe(0);
       const answer = json();
       expect(answer.reason).toBe('no-usable-run');
-      expect(answer.detail).toBe('gate.yml has no runs on main');
+      expect(answer.detail).toBe('gate.yml has no runs on the last 1 commit(s) of main');
       expect(answer.remedy).toContain('pushes to main');
     });
 

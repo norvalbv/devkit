@@ -24,6 +24,8 @@ export type UnknownReason =
   | 'not-a-github-repo'
   | 'workflow-missing'
   | 'gh-failed'
+  | 'head-unknown'
+  | 'history-unavailable'
   | 'no-usable-run'
   | 'no-artifact'
   | 'artifact-unreadable'
@@ -47,10 +49,12 @@ export interface RunRef {
   status: string;
   headSha: string;
   createdAt: string;
+  headBranch: string;
+  event: string;
 }
 
 /**
- * The shape gh emits for `--json databaseId,attempt,conclusion,status,headSha,createdAt`, with every
+ * The shape gh emits for `--json` over RUN_FIELDS, with every
  * field optional so a malformed entry is REJECTED here rather than dereferenced downstream.
  */
 interface RunRefCandidate {
@@ -59,6 +63,8 @@ interface RunRefCandidate {
   conclusion?: unknown;
   status?: unknown;
   headSha?: unknown;
+  headBranch?: unknown;
+  event?: unknown;
 }
 
 /** Every entry must carry the fields this reader dereferences; `[null]` otherwise reaches them. */
@@ -71,8 +77,10 @@ function isRunRef(value: RunRefCandidate | null): value is RunRef {
   );
 }
 
-/** The three fields read as text; compared by round-trip rather than a representation check. */
-const STRING_FIELDS = ['conclusion', 'status', 'headSha'] as const;
+/** The fields read as text; compared by round-trip rather than a representation check. */
+const STRING_FIELDS = ['conclusion', 'status', 'headSha', 'headBranch', 'event'] as const;
+
+const RUN_FIELDS = 'databaseId,attempt,conclusion,status,headSha,createdAt,headBranch,event';
 
 /**
  * A run whose tests actually executed. `status: 'completed'` is NOT the predicate — cancelled,
@@ -99,6 +107,9 @@ function classify(e: ExecFailure): GhUnavailable {
   if (e?.code === 'ENOENT') {
     return new GhUnavailable('gh-missing', 'the `gh` CLI is not on PATH');
   }
+  if (e?.code === 'ETIMEDOUT') {
+    return new GhUnavailable('gh-failed', `gh did not answer within ${GH_TIMEOUT_MS / 1000}s`);
+  }
   const stderr = String(e?.stderr ?? '');
   const msg = stderr.trim() || e?.message || String(e);
   // First: gh echoes the user's workflow name, so a name like "authentication" must not reach the
@@ -119,6 +130,9 @@ function classify(e: ExecFailure): GhUnavailable {
   return new GhUnavailable('gh-failed', msg);
 }
 
+/** One gh call's budget; the walk makes one per commit, so a hung call must not stall the query. */
+export const GH_TIMEOUT_MS = 60_000;
+
 function gh(args: string[], cwd: string): string {
   const debug = process.env.DEVKIT_BASELINE_DEBUG; // surface gh's stderr instead of collapsing it
   try {
@@ -126,6 +140,8 @@ function gh(args: string[], cwd: string): string {
       cwd,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: GH_TIMEOUT_MS,
+      env: process.env, // explicit: Bun's spawn otherwise resolves `gh` against its startup PATH
     });
   } catch (e) {
     // SAFETY: execFileSync rejects with an Error carrying optional `code`/`stderr`; ExecFailure
@@ -136,30 +152,35 @@ function gh(args: string[], cwd: string): string {
   }
 }
 
-/** Candidate runs on `ref`, newest first. Throws GhUnavailable rather than returning a fallback. */
-export function listRuns({
+/**
+ * This commit's runs on `ref`, newest first — by sha, since GitHub's branch listing serves stale pages.
+ *
+ * A pull_request run can share a branch sha, but it tested a merge ref, so it is dropped.
+ */
+export function runsForCommit({
   cwd,
   workflow,
   ref,
-  limit,
+  sha,
 }: {
   cwd: string;
   workflow: string;
   ref: string;
-  limit: number;
+  sha: string;
 }): RunRef[] {
   const out = gh(
+    // One full API page: filtering happens here, so gh's default 20 could cut off the branch's run.
     [
       'run',
       'list',
       '--workflow',
       workflow,
-      '--branch',
-      ref,
+      '--commit',
+      sha,
       '--limit',
-      String(limit),
+      '100',
       '--json',
-      'databaseId,attempt,conclusion,status,headSha,createdAt',
+      RUN_FIELDS,
     ],
     cwd,
   );
@@ -174,7 +195,30 @@ export function listRuns({
   if (!Array.isArray(runs) || !(runs as (RunRefCandidate | null)[]).every(isRunRef)) {
     throw new GhUnavailable('gh-failed', 'gh run list returned JSON this reader cannot use');
   }
-  return runs;
+  return runs.filter((run) => run.headBranch === ref && !run.event.startsWith('pull_request'));
+}
+
+/** The branch head in the repository gh queries, so the head and its runs share one provenance. */
+export function branchHead({ cwd, ref }: { cwd: string; ref: string }): string {
+  let out: string;
+  try {
+    // One encoded parameter: `release/1.x` is a single branch, not two path segments.
+    const path = `repos/{owner}/{repo}/branches/${encodeURIComponent(ref)}`;
+    out = gh(['api', path, '--jq', '.commit.sha'], cwd);
+  } catch (e) {
+    // Only GitHub's own wording: an inaccessible repository is a bare "Not Found (HTTP 404)".
+    if (
+      e instanceof GhUnavailable &&
+      e.reason === 'gh-failed' &&
+      /Branch not found/.test(e.message)
+    ) {
+      throw new GhUnavailable('head-unknown', `GitHub reports no branch ${ref}: ${e.message}`);
+    }
+    throw e;
+  }
+  const sha = out.trim();
+  if (/^([0-9a-f]{40}|[0-9a-f]{64})$/.test(sha)) return sha;
+  throw new GhUnavailable('head-unknown', `gh returned no commit for branch ${ref}`);
 }
 
 /** Admit a summary only if every value in it is one this repo could have written. */
