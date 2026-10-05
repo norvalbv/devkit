@@ -19,24 +19,21 @@ import {
   type UnknownReason,
   downloadSummary,
   isUsableRun,
-  listRuns,
   parseSummary,
   assertProvenance,
 } from './gh.mts';
+import { BranchWalk } from './history.mts';
 import { escapesRoot } from './produce.mts';
 import type { TestReportSummary } from './produce.mts';
 
 export const CACHE_DIR = '.devkit/baseline-status';
 export const DEFAULT_WORKFLOW = 'gate.yml';
 export const DEFAULT_ARTIFACT = 'test-report-summary';
+/** How many first-parent commits the walk-back looks up, one gh call each. */
 export const DEFAULT_MAX_RUNS = 10;
 /**
- * Hard ceiling on the walk-back.
- *
- * `gh run list --limit` does NOT reject an absurd value — it happily returns the branch's whole
- * history (335 runs on this repo today). Without a ceiling, `--max-runs 9007199254740991` turns one
- * question into hundreds of sequential artifact downloads. The bound belongs here, not in an
- * argument check, because every caller of queryBaseline inherits it.
+ * Hard ceiling on the commits walked: without it `--max-runs 9007199254740991` turns one question
+ * into the branch's whole history of gh calls. It lives here so every caller of queryBaseline has it.
  */
 export const MAX_RUNS_CEILING = 50;
 
@@ -53,8 +50,14 @@ export interface BaselineAnswer {
   attempt: number | null;
   sha: string | null;
   failingFiles: string[];
+  /** The branch head as the remote reported it, which `sha` is measured against. */
+  head: string | null;
+  /** First-parent commits between `head` and `sha`; above 0, the newer commits had no usable run. */
+  commitsBehindHead: number | null;
+  /** Walked commits on which the workflow has no run on this branch ([skip ci], path filters). */
+  commitsWithoutRun: string[];
   /** Runs skipped before a usable one was found, each with the conclusion that disqualified it. */
-  skippedRuns: { runId: number; conclusion: string; why: string }[];
+  skippedRuns: { runId: number; sha: string; conclusion: string; why: string }[];
   reason?: UnknownReason;
   detail?: string;
   /** What to change so the next query can answer — set only where the fix is on the consumer side. */
@@ -68,7 +71,7 @@ export interface FileAnswer {
   reason?: string;
   lastPassed: { sha: string; runId: number; attempt: number } | null;
   /** Why lastPassed is null — 'no-artifact-history' is the honest day-one answer, not "never passed". */
-  lastPassedReason: 'found' | 'not-in-scanned-window' | 'no-artifact-history';
+  lastPassedReason: 'found' | 'not-in-scanned-window' | 'no-artifact-history' | 'lookup-failed';
   searchedRuns: number;
   runsWithoutArtifact: number;
 }
@@ -207,18 +210,27 @@ function statusOf({
  */
 function findLastPassed({
   cwd,
-  runs,
+  walk,
   artifact,
   path,
 }: {
   cwd: string;
-  runs: RunRef[];
+  walk: BranchWalk;
   artifact: string;
   path: string;
 }): Pick<FileAnswer, 'lastPassed' | 'lastPassedReason' | 'searchedRuns' | 'runsWithoutArtifact'> {
   let searchedRuns = 0;
   let runsWithoutArtifact = 0;
-  for (const run of runs) {
+  let lookupFailed = false;
+  for (let i = 0; ; i++) {
+    let run: RunRef | undefined;
+    try {
+      run = walk.at(i)?.run;
+    } catch {
+      lookupFailed = true; // a fact about gh, not about CI history
+      break;
+    }
+    if (!run) break;
     if (!isUsableRun(run)) continue;
     searchedRuns++;
     let summary: TestReportSummary;
@@ -243,7 +255,11 @@ function findLastPassed({
   return {
     lastPassed: null,
     // A hole in the window is a fact about the DATA; a complete window is a fact about the FILE.
-    lastPassedReason: runsWithoutArtifact > 0 ? 'no-artifact-history' : 'not-in-scanned-window',
+    lastPassedReason: lookupFailed
+      ? 'lookup-failed'
+      : runsWithoutArtifact > 0
+        ? 'no-artifact-history'
+        : 'not-in-scanned-window',
     searchedRuns,
     runsWithoutArtifact,
   };
@@ -258,6 +274,9 @@ function unknownAnswer(ref: string, reason: UnknownReason, detail: string): Base
     attempt: null,
     sha: null,
     failingFiles: [],
+    head: null,
+    commitsBehindHead: null,
+    commitsWithoutRun: [],
     skippedRuns: [],
     reason,
     detail,
@@ -300,34 +319,33 @@ export function queryBaseline({
 } = {}): BaselineAnswer {
   const branch = resolveRef(cwd, ref);
   workflow = workflowSelector(workflow);
-  let runs: RunRef[];
-  try {
-    runs = listRuns({
-      cwd,
-      workflow,
-      ref: branch,
-      limit: Math.min(Math.max(maxRuns, 1), MAX_RUNS_CEILING),
-    });
-  } catch (e) {
-    // `instanceof` rather than a cast: gh.mts is the only thrower here, but an unexpected throw must
-    // still surface as a named unknown rather than reading a `reason` off something that has none.
-    if (e instanceof GhUnavailable && e.reason === 'workflow-missing') {
-      const unknown = unknownAnswer(branch, e.reason, e.message);
-      unknown.remedy =
-        `No workflow \`${workflow}\` exists on the default branch. ` +
-        producerRemedy(workflow, artifact, branch);
-      return unknown;
-    }
-    if (e instanceof GhUnavailable) return unknownAnswer(branch, e.reason, e.message);
-    return unknownAnswer(branch, 'gh-failed', e instanceof Error ? e.message : String(e));
-  }
-
   const skippedRuns: BaselineAnswer['skippedRuns'] = [];
+  const maxCommits = Math.min(Math.max(maxRuns, 1), MAX_RUNS_CEILING);
+  let walk: BranchWalk | undefined;
   let runsWithoutArtifact = 0;
-  for (const run of runs) {
+  for (let i = 0; ; i++) {
+    let walked: ReturnType<BranchWalk['at']>;
+    try {
+      walk ??= new BranchWalk({ cwd, workflow, ref: branch, maxCommits });
+      walked = walk.at(i);
+    } catch (e) {
+      // Answering from an older commit after a failed lookup would present it as the newest evidence.
+      const failure =
+        e instanceof GhUnavailable
+          ? e
+          : new GhUnavailable('gh-failed', e instanceof Error ? e.message : String(e));
+      return {
+        ...lookupFailure(failure, { branch, workflow, artifact }),
+        ...walkFields(walk),
+        skippedRuns,
+      };
+    }
+    if (!walked) break;
+    const { run, behind } = walked;
     if (!isUsableRun(run)) {
       skippedRuns.push({
         runId: run.databaseId,
+        sha: run.headSha,
         conclusion: run.conclusion || run.status,
         why: 'did not run to a pass/fail conclusion, so it carries no test report',
       });
@@ -338,7 +356,12 @@ export function queryBaseline({
       summary = loadSummary({ cwd, run, artifact });
     } catch (e) {
       const why = e instanceof Error ? e.message : String(e);
-      skippedRuns.push({ runId: run.databaseId, conclusion: run.conclusion, why });
+      skippedRuns.push({
+        runId: run.databaseId,
+        sha: run.headSha,
+        conclusion: run.conclusion,
+        why,
+      });
       // "This run has no artifact" is a fact about the run, so walking on to an older one is right.
       // ANY other failure — including a native EACCES/ENOSPC that is not a GhUnavailable at all —
       // means evidence may exist but could not be read, and answering from an older run would
@@ -347,9 +370,7 @@ export function queryBaseline({
       if (isMissing) runsWithoutArtifact++;
       if (!isMissing) {
         const reason = e instanceof GhUnavailable ? e.reason : 'artifact-unreadable';
-        const unknown = unknownAnswer(branch, reason, why);
-        unknown.skippedRuns = skippedRuns;
-        return unknown;
+        return { ...unknownAnswer(branch, reason, why), ...walkFields(walk), skippedRuns };
       }
       continue;
     }
@@ -365,6 +386,8 @@ export function queryBaseline({
         .filter(([, outcome]) => outcome === 'failed')
         .map(([path]) => path)
         .sort(),
+      ...walkFields(walk),
+      commitsBehindHead: behind,
       skippedRuns,
     };
     if (file) {
@@ -375,26 +398,69 @@ export function queryBaseline({
       answer.file = {
         path,
         ...statusOf({ cwd: gitRoot, summary, run, path }),
-        ...findLastPassed({ cwd, runs, artifact, path }),
+        ...findLastPassed({ cwd, walk, artifact, path }),
       };
+      answer.commitsWithoutRun = [...walk.commitsWithoutRun]; // the walk-back may have gone further
     }
     return answer;
   }
 
-  const answer = unknownAnswer(
-    branch,
-    'no-usable-run',
-    // Zero runs is its own fact — the workflow exists but never ran on this branch (a PR-only
-    // trigger, say) — and "none of the last 0 carried an artifact" would hide that.
-    runs.length === 0
-      ? `${workflow} has no runs on ${branch}`
-      : `no run of ${workflow} on ${branch} in the last ${runs.length} carried a \`${artifact}\` artifact`,
-  );
-  answer.skippedRuns = skippedRuns;
+  const looked = walk?.commitsLooked ?? 0;
+  if (walk?.endedAtShallowBoundary()) {
+    const unknown = unknownAnswer(
+      branch,
+      'history-unavailable',
+      `this clone is shallow: only ${looked} commit(s) of ${branch} are local, none with a usable run`,
+    );
+    unknown.remedy = 'Fetch full history (`git fetch --unshallow`, or `fetch-depth: 0` in CI).';
+    return { ...unknown, ...walkFields(walk), skippedRuns };
+  }
+  const ranAtAll = skippedRuns.length > 0;
+  const answer: BaselineAnswer = {
+    ...unknownAnswer(
+      branch,
+      'no-usable-run',
+      // Zero runs is its own fact — the workflow exists but never ran on this branch (a PR-only
+      // trigger, say) — and "none of the last 0 carried an artifact" would hide that.
+      ranAtAll
+        ? `no run of ${workflow} on the last ${looked} commit(s) of ${branch} carried a \`${artifact}\` artifact`
+        : `${workflow} has no runs on the last ${looked} commit(s) of ${branch}`,
+    ),
+    ...walkFields(walk),
+    skippedRuns,
+  };
   // Only where the producer is the gap: a window of cancelled runs is a CI-history fact that no
   // workflow edit fixes, and telling the reader to rewire CI there would be advice about nothing.
-  if (runs.length === 0 || runsWithoutArtifact > 0) {
+  if (!ranAtAll || runsWithoutArtifact > 0) {
     answer.remedy = producerRemedy(workflow, artifact, branch);
   }
+  // Rebase merges and path filters leave run-less commits; a full window of them says nothing of CI.
+  if (!ranAtAll && looked === maxCommits) {
+    answer.remedy = `Walk further back with --max-runs <n> (up to ${MAX_RUNS_CEILING}). ${answer.remedy}`;
+  }
   return answer;
+}
+
+/** The walk's provenance fields; empty until the remote head has been resolved. */
+function walkFields(
+  walk: BranchWalk | undefined,
+): Pick<BaselineAnswer, 'head' | 'commitsWithoutRun'> {
+  return { head: walk?.head ?? null, commitsWithoutRun: [...(walk?.commitsWithoutRun ?? [])] };
+}
+
+/** A failure to find runs, named; never throws, so the caller always has an answer to render. */
+function lookupFailure(
+  e: GhUnavailable,
+  { branch, workflow, artifact }: { branch: string; workflow: string; artifact: string },
+): BaselineAnswer {
+  const unknown = unknownAnswer(branch, e.reason, e.message);
+  if (e.reason === 'workflow-missing') {
+    unknown.remedy =
+      `No workflow \`${workflow}\` exists on the default branch. ` +
+      producerRemedy(workflow, artifact, branch);
+  }
+  if (e.reason === 'history-unavailable') {
+    unknown.remedy = `Fetch ${branch} from the repository gh queries (\`gh repo set-default --view\`) and retry.`;
+  }
+  return unknown;
 }
