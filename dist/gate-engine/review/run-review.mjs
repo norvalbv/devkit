@@ -37,9 +37,9 @@ import { reportFleetMcp } from '../judge/mcp/profile.mjs';
 import { execJudgeAsync, strictRemedy } from '../judge/run-judge.mjs';
 import { loadCache } from './cache.mjs';
 import { runCascade } from './cascade/reviewer.mjs';
-import { reportRetrievalDegraded } from './contracts/checklist.mjs';
+import { reportCachedHitNotes } from './contracts/checklist.mjs';
 import { ENGINE_ERROR_REMEDY, RESPONSE_CONTRACT_REMEDY } from './contracts/response.mjs';
-import { baseProvenanceLines, cachedBaseState, cachedPassLine, judgedBaseSha, primeReviewBaseContext, reportMcpDegraded, } from './evidence/base-context.mjs';
+import { baseProvenanceLines, cachedBaseState, cachedPassLine, judgedBaseSha, primeReviewBaseContext, } from './evidence/base-context.mjs';
 import { loadReviewerContext } from './evidence/commit-message.mjs';
 import { coverageFields, partialEvidenceNote } from './evidence/packet/coverage.mjs';
 import { omissionHintSalt } from './evidence/packet/omission-hint.mjs';
@@ -251,11 +251,7 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
             partialEvidenceNote(hit.part
                 ? coverageFields([{ diffText: gitCached(cwd, [], hit.files) }])
                 : (plan.fullyCached.find((c) => c.name === hit.label)?.coverage ?? {})));
-        if (hit.degradedCause)
-            reportRetrievalDegraded(hit.label, hit.degradedCause);
-        // A cached split PART is reported once at its reviewer's merge, with the freshly judged groups.
-        if (hit.mcpDegradedCause && !hit.part)
-            reportMcpDegraded(hit.label, hit.mcpDegradedCause, true);
+        reportCachedHitNotes(hit);
     }
     // Before any verdict AND before the fully-cached early return below (sc-2480).
     const fresh = new Set(plan.tasks.map((t) => t.base.reviewer.name)).size;

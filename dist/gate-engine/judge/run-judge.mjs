@@ -90,19 +90,6 @@ function priorArtTelemetry(output) {
         prior_art_confidence: result.confidence,
     };
 }
-/**
- * Record ONE agent invocation into the shared telemetry stream: the durable transcript plus the
- * `judge_exec` line that references it. Exported because not every agent devkit wants visible is
- * spawned through `execJudge` — one dispatched by the assistant via the Task tool (the `prior-art`
- * subagent the brainstorming skill invokes) never enters this module, so its production runs were
- * absent from the dashboard while its BENCH runs, which do go through execJudgeAsync, were recorded
- * in full.
- * `guard-review record-agent` is the entry point for those; this is the one implementation both use,
- * so a Task-dispatched agent and a spawned judge produce the same event shape.
- *
- * Best-effort by construction — emitGateEvent/saveTranscriptUnique never throw and no-op without a
- * sink, so no caller's contract is touched. Returns the transcript ref, or null when none was stored.
- */
 export function recordAgentRun(opts) {
     // Same predicate execJudge applies to a judge's stdout, so both entry points name a no-output run
     // identically rather than one of them calling it a success.
@@ -116,7 +103,7 @@ export function recordAgentRun(opts) {
     const extra = Object.fromEntries(Object.entries(opts.extra ?? {}).filter(([key]) => !key.startsWith('prior_art_')));
     if (opts.label === 'prior-art' && outcome === 'ok')
         Object.assign(extra, priorArtTelemetry(opts.output ?? ''));
-    emitGateEvent({
+    const telemetry = emitGateEvent({
         ...extra,
         type: 'judge_exec',
         judge: opts.label,
@@ -127,7 +114,7 @@ export function recordAgentRun(opts) {
         output_chars: opts.output?.length ?? 0,
         ...(ref ? { transcript_ref: ref } : {}),
     });
-    return ref;
+    return { ref, telemetry };
 }
 /**
  * One `judge_exec` telemetry line per `claude -p` invocation — the SPEND/OUTAGE ledger every judge

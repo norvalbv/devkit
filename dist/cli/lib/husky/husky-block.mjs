@@ -193,7 +193,7 @@ fi`;
  * `chainTarget` is the existing hook, `pkgRel` scopes monorepos, `opts.fallow` adds the inline audit
  * the overlay hooksPath would otherwise shadow, and `opts.prelude` runs before any gate.
  */
-export function buildOverlayHook(selection, chainTarget = '.husky/pre-commit', pkgRel = '', { fallow = false, prelude = '' } = {}) {
+export function buildOverlayHook(selection, chainTarget = '.husky/pre-commit', pkgRel = '', { fallow = false, prelude = '', gitRuns = false, } = {}) {
     const block = buildGuardBlock(selection, pkgRel, {
         binDir: 'global',
         preAi: overlayStagedGates(fallow),
@@ -218,9 +218,17 @@ ${GATES_ONLY_STOP}
 ${PRE_COMMIT_PASS_EXIT}
 
 # Chain to the repo's own pre-commit (exec → its exit code becomes the hook's).
-[ -f ${chainWord(chainTarget)} ] && exec sh ${chainWord(chainTarget)} "$@"
+${chainExec(chainTarget, gitRuns)}
 exit 0
 `;
+}
+/** Hand off to the repo's own hook. git runs its own hooks directly (execute bit, shebang), so a
+ * hook it runs does too; husky's runner hands its scripts to `sh`, so a husky hook keeps that. */
+export function chainExec(target, gitRuns = false) {
+    const w = chainWord(target);
+    return gitRuns
+        ? `[ -f ${w} ] && [ -x ${w} ] && exec ${w} "$@"`
+        : `[ -f ${w} ] && exec sh ${w} "$@"`;
 }
 /** Linked-worktree chain word for the repo's own hook: `.git` is a FILE there, so a `.git/hooks/*`
  * target resolves through the common dir. Anything else stays single-quoted (never executes). */
@@ -237,12 +245,12 @@ export function chainWord(target) {
  *
  * `chainScript` is the repo's existing hook script (git-root-relative).
  */
-export function buildPassthroughHook(chainScript) {
+export function buildPassthroughHook(chainScript, gitRuns = false) {
     return `${HOOK_PREAMBLE}
 # devkit overlay pass-through — git now runs this dir, so we forward to the repo's own hook
 # unchanged (devkit adds nothing to it).
 ${GATES_ONLY_STOP}
-[ -f ${chainWord(chainScript)} ] && exec sh ${chainWord(chainScript)} "$@"
+${chainExec(chainScript, gitRuns)}
 exit 0
 `;
 }

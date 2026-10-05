@@ -6,7 +6,7 @@ import { isTracked } from '../../git-tracked.mjs';
 import { isSafeAgentAssetPath } from '../agent-asset-manifest/lifecycle.mjs';
 import { LEGACY_AGENT_PROVIDERS } from '../agent-assets/agent-providers.mjs';
 import { dataRecord } from './plain-data.mjs';
-import { encodeHookRegistrationLedger, HOOK_REGISTRATION_LEDGER_REL, } from './codec.mjs';
+import { encodeHookRegistrationLedger, HOOK_REGISTRATION_LEDGER_REL, hookRegistrationDestination, } from './codec.mjs';
 import { checkProjectedHookRegistrations, projectHookRegistrations, writeHookRegistrationLedger, } from './lifecycle.mjs';
 export const ledgerOf = (entries = []) => ({
     schemaVersion: 1,
@@ -14,22 +14,23 @@ export const ledgerOf = (entries = []) => ({
     entries,
 });
 export const ownedKey = (entry) => JSON.stringify([entry.provider, entry.destinationRel, entry.registrationId]);
-const RETIRED_COMMANDS = {
-    fallow: {
-        claude: [
-            'bash "$CLAUDE_PROJECT_DIR/.claude/hooks/fallow-gate.sh"',
-            'FALLOW_GATE_COMMIT_ONLY=1 bash "$CLAUDE_PROJECT_DIR/.claude/hooks/fallow-gate.sh"',
-        ],
-        cursor: ['.cursor/hooks/fallow-gate.sh'],
-    },
+// Exact spellings only: devkit's one env prefix, optional bash/sh, then the script bare, as `./`, or
+// under a double-quoted CLAUDE_PROJECT_DIR. Anything else (BASH_ENV=, PATH=) may run consumer code.
+const retiredFallowGate = (dir) => {
+    const script = String.raw `\.${dir}/hooks/fallow-gate\.sh`;
+    const projectDir = String.raw `(?:\$CLAUDE_PROJECT_DIR|\$\{CLAUDE_PROJECT_DIR\})`;
+    const path = String.raw `(?:(?:\./)?${script}|"${projectDir}/${script}"|"${projectDir}"/${script})`;
+    return new RegExp(String.raw `^(?:FALLOW_GATE_COMMIT_ONLY=1 )?(?:(?:ba)?sh )?${path}$`);
 };
-/** Reclaim what a previous devkit release wrote here. RETIRED_COMMANDS accepts the literal anywhere
- * (a pre-ledger config names no location, sc-1321); `owned` stays inside the event its row names. */
+const RETIRED_SCRIPT = new Map([
+    ['claude', retiredFallowGate('claude')],
+    ['cursor', retiredFallowGate('cursor')],
+]);
+const isRetired = (provider, command) => RETIRED_SCRIPT.get(provider)?.test(command) ?? false;
+/** Reclaim fallow's agent gate anywhere, whoever wrote it (devkit's staged wrapper replaces it),
+ * plus what a previous devkit release wrote; `owned` stays inside the event its row names. */
 export function stripReclaimedCommands(document, provider, owned = []) {
-    const commands = new Set(Object.values(RETIRED_COMMANDS).flatMap((commandsByProvider) => commandsByProvider?.[provider] ?? []));
-    // The old `provider === 'codex'` clause was unreachable (no codex arm, so `!commands.size` won),
-    // and codex DOES need the superseded arm.
-    if (!commands.size && !owned.length)
+    if (!RETIRED_SCRIPT.has(provider) && !owned.length)
         return { document, changed: false };
     const root = dataRecord(document);
     const hooks = dataRecord(root?.hooks);
@@ -45,7 +46,7 @@ export function stripReclaimedCommands(document, provider, owned = []) {
                 const item = dataRecord(entry);
                 const command = String(item?.command ?? '');
                 // Cursor keeps a FLAT list per event, so the event alone locates a handler.
-                return (!commands.has(command) &&
+                return (!isRetired(provider, command) &&
                     !owned.some((handler) => handler.event === event && handler.command === command));
             });
             if (list.length === rawList.length)
@@ -68,7 +69,7 @@ export function stripReclaimedCommands(document, provider, owned = []) {
             }
             const kept = handlers.filter((entry) => {
                 const command = String(dataRecord(entry)?.command ?? '');
-                return (!commands.has(command) &&
+                return (!isRetired(provider, command) &&
                     !owned.some((handler) => handler.event === event &&
                         handler.command === command &&
                         // Mirrors lifecycle.mts matcherGroup: null means the group carries no `matcher` key.
@@ -94,6 +95,35 @@ export function stripReclaimedCommands(document, provider, owned = []) {
             delete nextHooks[event];
     }
     return changed ? { document: { ...root, hooks: nextHooks }, changed } : { document, changed };
+}
+/** A retired command in the Claude settings file the scope does NOT own; Claude Code runs both. */
+export function retiredElsewhere(root, provider, scope) {
+    if (provider !== 'claude')
+        return null;
+    const rel = hookRegistrationDestination(provider, scope === 'shared' ? 'overlay' : 'shared');
+    if (!existsSync(join(root, rel)) || !isSafeAgentAssetPath(root, rel, true))
+        return null;
+    let document;
+    try {
+        document = providerDocument(root, provider, rel);
+    }
+    catch {
+        return null; // Not the scope's file: its parse errors are the user's, never a devkit failure.
+    }
+    const stripped = stripReclaimedCommands(document, provider);
+    if (!stripped.changed)
+        return null;
+    // Overlay must stay git-invisible, so a committed settings.json is reported, never edited.
+    const repairable = scope === 'shared' || !isTracked(root, rel);
+    return { rel, document: stripped.document, repairable };
+}
+export function reclaimRetiredElsewhere(root, provider, scope, dryRun) {
+    const elsewhere = retiredElsewhere(root, provider, scope);
+    if (!elsewhere?.repairable)
+        return;
+    if (!dryRun)
+        writeProvider(root, { provider, ...elsewhere, changed: true });
+    console.log(`  ${dryRun ? '[dry-run] strip' : '✓ stripped'} retired hook from ${elsewhere.rel}`);
 }
 export function providerDocument(root, provider, rel) {
     const path = join(root, rel);

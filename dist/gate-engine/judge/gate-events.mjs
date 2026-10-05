@@ -127,7 +127,7 @@ export function emitGateBypass(gate, flag) {
 export function emitGateEvent(ev) {
     const file = telemetrySink();
     if (!file)
-        return;
+        return 'disabled';
     try {
         mkdirSync(path.dirname(file), { recursive: true });
         const line = `${JSON.stringify({
@@ -136,8 +136,10 @@ export function emitGateEvent(ev) {
             ts: new Date().toISOString(),
         })}\n`;
         appendFileSync(file, line, { flag: 'a' });
+        return 'written';
     }
     catch {
         /* telemetry is best-effort — never fail a gate over it */
+        return 'failed';
     }
 }
