@@ -255,9 +255,15 @@ export function prefixCacheScope(scope?: string, effectiveIds?: string[]): strin
   // Same hazard once more, for the self-host `--extra` gates. Sorted and joined so two runs that
   // bypass the same set share a key regardless of the order the flags were exported in.
   const extraBypassed = EXTRA_BYPASS_SUFFIXES.filter(envFlag).sort();
-  return extraBypassed.length
+  const extraBase = extraBypassed.length
     ? `${structureBase ?? 'devkit-guards'}:${extraBypassed.join('+')}-bypassed`
     : structureBase;
+  // The self-host release-only dist extra judges the tree against the PR base and exempts only a
+  // release branch, so a tree's PASS under one base or branch must not authorize another.
+  const prBase = process.env.DEVKIT_SHIP_PR_BASE_SHA;
+  return prBase
+    ? `${extraBase ?? 'devkit-guards'}:pr-base:${prBase}:branch:${process.env.DEVKIT_SHIP_BRANCH ?? ''}`
+    : extraBase;
 }
 
 // Run one gate as a subprocess; return its exit code (0 on success). stdio inherited so the gate's

@@ -13,6 +13,7 @@ import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { assignedNames, ownDirVars, scanShellScript } from '../doctor/hook-gate-scan.mts';
+import { commitIndexEnv } from '../../../gate-engine/ratchets/commit-index.mts';
 import { inspectReleaseOnlyDist, printReleaseOnlyDist } from './preflight/release-only-dist.mts';
 import { ANTI_SLOP_FILES, PACKAGED_ROOT_DIRS, PACKAGED_ROOT_FILES } from '../fs-helpers.mts';
 
@@ -407,9 +408,26 @@ function parseArgs(argv: string[]): Args {
   return { base, branch, paths: argv.slice(i), root, tree };
 }
 
+/** `--ship-staged`: the self-host hook's run inside the ship worktree, judging the staged tree with
+ *  that tree's own copy of this script, as CI does. Without CI's PR base exported it no-ops. */
+function shipStagedArgs(): Args | undefined {
+  const base = process.env.DEVKIT_SHIP_PR_BASE_SHA;
+  if (!base) return undefined;
+  const root = process.cwd();
+  // The hook scrubs GIT_INDEX_FILE; a pathspec commit's index arrives through the commit-index carrier.
+  const tree = execFileSync('git', ['-C', root, 'write-tree'], {
+    encoding: 'utf8',
+    env: commitIndexEnv(root),
+  }).trim();
+  return { base, branch: process.env.DEVKIT_SHIP_BRANCH || undefined, paths: [], root, tree };
+}
+
 async function main(): Promise<void> {
   try {
-    const { base, branch, paths, root, tree } = parseArgs(process.argv.slice(2));
+    const argv = process.argv.slice(2);
+    const args = argv[0] === '--ship-staged' ? shipStagedArgs() : parseArgs(argv);
+    if (args === undefined) return;
+    const { base, branch, paths, root, tree } = args;
     // --tree (CI, on a PR's committed tree) judges release-only only: integrity reads the
     // caller's physical build, which a committed tree does not have.
     const report = tree !== undefined ? undefined : await inspectDistIntegrity(root, base, paths);

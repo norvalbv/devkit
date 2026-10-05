@@ -19,6 +19,7 @@ import {
   printReleaseOnlyDist,
   releaseVersion,
 } from '../lib/ship/preflight/release-only-dist.mts';
+import { SELF_HOST_EXTRAS } from '../lib/husky/self-host.mts';
 import { rootRegistry, testSpawnSync } from './_helpers.mts';
 
 const { mkTmp, cleanup } = rootRegistry();
@@ -478,6 +479,162 @@ describe('dist-integrity CLI', () => {
 
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('--branch');
+  });
+});
+
+describe('--ship-staged: the self-host hook runs CI’s check from the ship worktree', () => {
+  /** The hook's own invocation; ship exports the base and branch, the hook's cwd is the worktree. */
+  function shipStaged(root: string, ship: { base?: string; branch?: string }) {
+    const env: NodeJS.ProcessEnv = { ...process.env, ...GIT_ENV };
+    delete env.DEVKIT_SHIP_PR_BASE_SHA;
+    delete env.DEVKIT_SHIP_BRANCH;
+    if (ship.base) env.DEVKIT_SHIP_PR_BASE_SHA = ship.base;
+    if (ship.branch) env.DEVKIT_SHIP_BRANCH = ship.branch;
+    return testSpawnSync(process.execPath, [preflightScript, '--ship-staged'], {
+      cwd: root,
+      encoding: 'utf8',
+      env,
+    });
+  }
+
+  it('is wired into the self-host hook', () => {
+    expect(SELF_HOST_EXTRAS).toContainEqual({
+      label: 'release-only-dist',
+      cmd: 'node cli/lib/ship/dist-integrity.mts --ship-staged',
+    });
+  });
+
+  it('refuses a staged rewrite of tracked dist, with CI’s message', () => {
+    const { base, root } = repo();
+    rebuild(root, 'dist/README.md');
+    stage(root, 'dist/README.md');
+
+    const result = shipStaged(root, { base, branch: 'feat/x' });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(REFUSED);
+    expect(result.stderr).toContain('dist/README.md');
+  });
+
+  it('exempts a proven release, reading the branch ship exported', () => {
+    const { base, root } = repo();
+    bumpTo(root, '9.9.9');
+    rebuild(root, 'dist/README.md');
+    stage(root, 'package.json', 'dist/README.md');
+
+    const result = shipStaged(root, { base, branch: 'release/v9.9.9' });
+
+    expect(result.status, result.stderr).toBe(0);
+  });
+
+  it('passes a staged new artifact', () => {
+    const { base, root } = repo();
+    write(root, 'dist/cli/new.mjs', 'export {};\n');
+    stage(root, 'dist/cli/new.mjs');
+
+    const result = shipStaged(root, { base, branch: 'feat/x' });
+
+    expect(result.status, result.stderr).toBe(0);
+  });
+
+  /** A real `git commit` whose hook mirrors the generated one: it moves GIT_INDEX_FILE into the
+   *  commit-index carrier and scrubs it before the extra runs, with index.lock held. */
+  function commitThroughHook(root: string, base: string, branch: string, ...commitArgs: string[]) {
+    const hooks = mkTmp('dist-hooks-');
+    write(
+      hooks,
+      'pre-commit',
+      [
+        '#!/bin/sh',
+        'case "$GIT_INDEX_FILE" in /*) ci=$GIT_INDEX_FILE ;; *) ci=$PWD/$GIT_INDEX_FILE ;; esac',
+        'DEVKIT_COMMIT_INDEX_FILE=$ci DEVKIT_COMMIT_GIT_DIR=$(git rev-parse --absolute-git-dir) \\',
+        `  exec env -u GIT_INDEX_FILE "${process.execPath}" "${preflightScript}" --ship-staged`,
+        '',
+      ].join('\n'),
+    );
+    chmodSync(join(hooks, 'pre-commit'), 0o755);
+    git(root, 'config', 'core.hooksPath', hooks);
+    const before = git(root, 'rev-parse', 'HEAD');
+    const result = testSpawnSync('git', ['-C', root, 'commit', '-q', '-m', 'ship', ...commitArgs], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        ...GIT_ENV,
+        DEVKIT_SHIP_PR_BASE_SHA: base,
+        DEVKIT_SHIP_BRANCH: branch,
+      },
+    });
+    return { result, moved: git(root, 'rev-parse', 'HEAD') !== before };
+  }
+
+  it('blocks a real commit of a staged dist rewrite from inside the hook', () => {
+    const { base, root } = repo();
+    rebuild(root, 'dist/README.md');
+    stage(root, 'dist/README.md');
+
+    const { result, moved } = commitThroughHook(root, base, 'feat/x');
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(REFUSED);
+    expect(moved).toBe(false);
+  });
+
+  it('judges the temporary index a pathspec commit hands the hook, not the real one', () => {
+    const { base, root } = repo();
+    rebuild(root, 'dist/README.md');
+
+    const { result, moved } = commitThroughHook(root, base, 'feat/x', '--', 'dist/README.md');
+
+    expect(result.stderr).toContain(REFUSED);
+    expect(moved).toBe(false);
+  });
+
+  it('lets a clean commit through while git holds index.lock (no false block)', () => {
+    const { base, root } = repo();
+    write(root, 'dist/cli/new.mjs', 'export {};\n');
+    stage(root, 'dist/cli/new.mjs');
+
+    const { result, moved } = commitThroughHook(root, base, 'feat/x');
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(moved).toBe(true);
+  });
+
+  it("is fed CI's PR base by ship and a reship rewrite, never by an append reship", () => {
+    const shipDir = fileURLToPath(new URL('../lib/ship/', import.meta.url));
+    const ship = readFileSync(join(shipDir, 'ship-branch.sh'), 'utf8');
+    const reship = readFileSync(join(shipDir, 'reship.sh'), 'utf8');
+    const review = readFileSync(join(shipDir, 'review-target.sh'), 'utf8');
+
+    expect(ship).toContain('export DEVKIT_SHIP_PR_BASE_SHA="$BASE"');
+    // An append's worktree is cut from the PR tip, so judging from it would refuse a later edit of
+    // an artifact the PR itself added, which CI (diffing from the merge-base) accepts.
+    expect(reship).toContain(
+      'if [ "$REWRITE" -eq 1 ]; then export DEVKIT_SHIP_PR_BASE_SHA="$BASE"; else unset DEVKIT_SHIP_PR_BASE_SHA; fi',
+    );
+    expect(review).toMatch(/\bDEVKIT_SHIP_PR_BASE_SHA\b[\s\S]*\bunset "\$name"/);
+  });
+
+  it('judged from the PR base, a later edit of a dist file the PR added stays an addition', () => {
+    const { base, root } = repo();
+    write(root, 'dist/cli/new.mjs', 'export {};\n');
+    stage(root, 'dist/cli/new.mjs');
+    git(root, 'commit', '-q', '-m', 'pr adds an artifact');
+    write(root, 'dist/cli/new.mjs', 'export const v = 2;\n');
+    stage(root, 'dist/cli/new.mjs');
+
+    expect(shipStaged(root, { base, branch: 'feat/x' }).status).toBe(0);
+  });
+
+  it('no-ops outside a ship, where no base is exported', () => {
+    const { root } = repo();
+    rebuild(root, 'dist/README.md');
+    stage(root, 'dist/README.md');
+
+    const result = shipStaged(root, {});
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stderr).toBe('');
   });
 });
 
