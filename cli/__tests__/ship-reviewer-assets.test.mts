@@ -58,6 +58,35 @@ function runReviewerRefresh(worktree, root, packageRoot = '', env = process.env)
   );
 }
 
+function gitIn(dir, args) {
+  const result = spawnSync('git', ['-C', dir, ...args], { encoding: 'utf8' });
+  if (result.status !== 0) throw new Error(result.stderr);
+}
+
+function initCommittedRepo(dir) {
+  mkdirSync(join(dir, '.devkit'), { recursive: true });
+  gitIn(dir, ['init', '-q']);
+  gitIn(dir, [
+    '-c',
+    'user.name=t',
+    '-c',
+    'user.email=t@t',
+    'commit',
+    '-q',
+    '--allow-empty',
+    '-m',
+    'init',
+  ]);
+}
+
+function writeOwnedAgentManifest(dir) {
+  mkdirSync(join(dir, '.devkit'), { recursive: true });
+  writeFileSync(
+    join(dir, '.devkit/agents-manifest.json'),
+    `${JSON.stringify({ files: { 'retired-reviewer.md': '0'.repeat(64) }, targets: ['claude'] })}\n`,
+  );
+}
+
 describe('ship reviewer asset refresh', () => {
   it('preserves consumer skills and overrides while exact-replacing devkit-owned reviewer assets', () => {
     const consumerSkill = '# consumer-owned identity\n';
@@ -188,6 +217,91 @@ describe('ship reviewer asset refresh', () => {
     expect(result.status).not.toBe(0);
     expect(result.stderr).toMatch(/\.claude\/skills must be a real directory/);
     expect(readFileSync(join(external, 'consumer.txt'), 'utf8')).toBe('untouched\n');
+  });
+
+  it('reads ownership from the overlay home when a linked worktree borrows its manifests', () => {
+    const parent = mkdtempSync(join(tmpdir(), 'ship-review-assets-borrowed-'));
+    dirs.push(parent);
+    const home = join(parent, 'home');
+    const linked = join(parent, 'linked');
+    const worktree = join(parent, 'worktree');
+    initCommittedRepo(home);
+    writeFileSync(join(home, '.devkit/config.json'), '{"overlay":true}\n');
+    writeOwnedAgentManifest(home);
+    gitIn(home, ['worktree', 'add', '-q', '--detach', linked]);
+    mkdirSync(join(linked, '.devkit'));
+    for (const file of ['config.json', 'agents-manifest.json'])
+      symlinkSync(join(home, '.devkit', file), join(linked, '.devkit', file));
+    mkdirSync(join(worktree, '.claude/agents'), { recursive: true });
+    writeFileSync(join(worktree, '.claude/agents/retired-reviewer.md'), '# retired\n');
+
+    const result = runReviewerRefresh(worktree, linked, sourcePackageRoot);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(existsSync(join(worktree, '.claude/agents/retired-reviewer.md'))).toBe(false);
+  });
+
+  it('still refuses a symlinked ownership manifest outside overlay mode', () => {
+    const parent = mkdtempSync(join(tmpdir(), 'ship-review-assets-pkg-link-'));
+    dirs.push(parent);
+    const root = join(parent, 'root');
+    const worktree = join(parent, 'worktree');
+    initCommittedRepo(root);
+    writeOwnedAgentManifest(parent);
+    symlinkSync(
+      join(parent, '.devkit/agents-manifest.json'),
+      join(root, '.devkit/agents-manifest.json'),
+    );
+    mkdirSync(worktree);
+
+    const result = runReviewerRefresh(worktree, root, sourcePackageRoot);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toMatch(
+      /agents ownership manifest: agent asset manifest cannot be a symlink/,
+    );
+  });
+
+  it.each([
+    ['a root install', '{"overlay":true}\n'],
+    ['a nested-package install', '{"overlay":true,"pkgRel":"packages/app"}\n'],
+  ])(
+    'reads the git-root manifest of a checkout holding its own overlay: %s',
+    (_install, config) => {
+      const parent = mkdtempSync(join(tmpdir(), 'ship-review-assets-own-overlay-'));
+      dirs.push(parent);
+      const home = join(parent, 'home');
+      const worktree = join(parent, 'worktree');
+      initCommittedRepo(home);
+      writeFileSync(join(home, '.devkit/config.json'), config);
+      writeOwnedAgentManifest(home);
+      mkdirSync(join(worktree, '.claude/agents'), { recursive: true });
+      writeFileSync(join(worktree, '.claude/agents/retired-reviewer.md'), '# retired\n');
+
+      const result = runReviewerRefresh(worktree, home, sourcePackageRoot);
+
+      expect(result.status, result.stderr).toBe(0);
+      expect(existsSync(join(worktree, '.claude/agents/retired-reviewer.md'))).toBe(false);
+    },
+  );
+
+  it('fails closed instead of reading the caller manifest when the overlay cannot be resolved', () => {
+    const parent = mkdtempSync(join(tmpdir(), 'ship-review-assets-bad-overlay-'));
+    dirs.push(parent);
+    const home = join(parent, 'home');
+    const worktree = join(parent, 'worktree');
+    initCommittedRepo(home);
+    writeFileSync(join(home, '.devkit/config.json'), '{not json\n');
+    writeOwnedAgentManifest(home);
+    mkdirSync(join(worktree, '.claude/agents'), { recursive: true });
+    writeFileSync(join(worktree, '.claude/agents/retired-reviewer.md'), '# retired\n');
+
+    const result = runReviewerRefresh(worktree, home, sourcePackageRoot);
+
+    expect(result.status).not.toBe(0);
+    expect(readFileSync(join(worktree, '.claude/agents/retired-reviewer.md'), 'utf8')).toBe(
+      '# retired\n',
+    );
   });
 
   it('rejects a child root swapped to an external symlink after validation', () => {
