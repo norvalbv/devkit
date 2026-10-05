@@ -12,17 +12,19 @@
  *   guard-review waive --list                    show active waives
  *   guard-review transcript <ref>                print a persisted agent transcript by its ref
  *   guard-review record-agent <label>            record one Task-dispatched agent run (stdin)
+ *   guard-review record-feedback prior-art --run <id> ...  claim a correction to a recorded run
  *
  * Everything resolves from resolveGuardConfig(process.cwd()) — the CONSUMER repo, never the
  * package dir (W-3). Exit contract per sub-engine (run-review.mjs / completeness.mjs headers).
  */
 
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { envFlag, resolveGuardConfig } from '../config.mts';
 import { type RecordAgentRunOpts, recordAgentRun } from '../judge/run-judge.mts';
 import { readTranscript } from '../judge/transcript-store.mts';
 import { clearCache, loadCache } from './cache.mts';
+import { runRecordFeedback } from '../prior-art/feedback.mts';
 import { runCompleteness } from './completeness.mts';
 import { gitCached, stagedFiles } from './evidence/staged-git.mts';
 import { loadReviewerTargetsBlocks, reviewerTargetSalts } from './evidence/targets-block.mts';
@@ -88,6 +90,37 @@ async function scanReview(cwd = process.cwd()): Promise<number> {
   return 0;
 }
 
+/** Raw bytes from a path or fd; null when unreadable. Hashing raw bytes keeps CRLF/invalid UTF-8 exact. */
+function readBytes(source: string | number): Buffer | null {
+  try {
+    return readFileSync(source);
+  } catch {
+    return null;
+  }
+}
+
+/** What record-agent prints and stamps on judge_exec; `invocation_id` is what feedback cites. */
+interface AgentRunReceipt {
+  invocation_id: string;
+  output_sha256: string;
+  request_sha256?: string;
+  request_status?: 'unreadable' | 'not_utf8';
+  output_status?: 'not_utf8';
+}
+
+/** Strict UTF-8 text, or null: a lossy decode would store bytes the recorded hash does not cover. */
+function exactText(bytes: Buffer): string | null {
+  try {
+    return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
+  } catch {
+    return null;
+  }
+}
+
+function sha256(bytes: Buffer): string {
+  return createHash('sha256').update(bytes).digest('hex');
+}
+
 /** The dispositions a root agent may report. Anything else is dropped, so the field stays groupable. */
 const DISPOSITIONS = new Set(['followed', 'overridden', 'unverified']);
 
@@ -114,13 +147,17 @@ function recordAgent(label: string, rest: string[]): number {
   // brainstorming — would share an id and merge downstream into a single synthesized commit row.
   // A ship/review that legitimately owns the run still wins: runId() checks those first.
   process.env.DEVKIT_AGENT_RUN_ID ||= `agent-${randomUUID()}`;
-  let output = '';
-  try {
-    output = readFileSync(0, 'utf8');
-  } catch {
-    // A tty or closed pipe — still emit the event. That the agent RAN is the fact the dashboard
-    // needs most, and a run recorded without its transcript beats a run recorded nowhere.
-  }
+  // A tty or closed pipe reads as empty — still emit the event. That the agent RAN is the fact the
+  // dashboard needs most, and a run recorded without its transcript beats a run recorded nowhere.
+  const stdin = readBytes(0) ?? Buffer.alloc(0);
+  const exactOutput = exactText(stdin);
+  const output = exactOutput ?? stdin.toString('utf8');
+  const requestFile = flag('request-file');
+  const request = requestFile === undefined ? null : readBytes(requestFile);
+  if (requestFile !== undefined && !request)
+    console.error(
+      `guard-review: cannot read --request-file "${requestFile}"; recording without it`,
+    );
   const duration = Number.parseInt(flag('duration-ms') ?? '', 10);
   const disposition = flag('disposition');
   const reason = flag('reason');
@@ -129,7 +166,17 @@ function recordAgent(label: string, rest: string[]): number {
       `guard-review: ignoring unknown --disposition "${disposition}" ` +
         `(expected ${[...DISPOSITIONS].join(' | ')})`,
     );
-  const extra: NonNullable<RecordAgentRunOpts['extra']> = {};
+  // Minted HERE, never runId(): a ship/review id is shared, and feedback must cite one run.
+  const receipt: AgentRunReceipt = {
+    invocation_id: randomUUID(),
+    output_sha256: sha256(stdin),
+  };
+  if (exactOutput === null) receipt.output_status = 'not_utf8';
+  const input = request ? exactText(request) : null;
+  if (request) receipt.request_sha256 = sha256(request);
+  if (requestFile !== undefined && input === null)
+    receipt.request_status = request ? 'not_utf8' : 'unreadable';
+  const extra: NonNullable<RecordAgentRunOpts['extra']> = { ...receipt };
   if (disposition !== undefined && DISPOSITIONS.has(disposition)) extra.disposition = disposition;
   if (reason) extra.disposition_reason = reason;
   // Spend flags, mirroring the judge_exec usage keys execJudge emits so a Task-dispatched agent's
@@ -154,13 +201,17 @@ function recordAgent(label: string, rest: string[]): number {
   if (sessionId) extra.session_id = sessionId;
   const billing = flag('billing');
   if (billing) extra.billing = billing;
-  recordAgentRun({
+  const { ref, telemetry } = recordAgentRun({
     label,
     output,
+    input: input ?? undefined,
+    // A lossy response copy would not match output_sha256, so store no transcript at all.
+    transcript: exactOutput !== null,
     model: flag('model') ?? null,
     ...(Number.isFinite(duration) && duration >= 0 ? { durationMs: duration } : {}),
     extra,
   });
+  console.log(JSON.stringify({ ...receipt, transcript_ref: ref, telemetry }));
   return 0;
 }
 
@@ -212,13 +263,21 @@ async function run(argv: string[]): Promise<number> {
     return 0;
   }
   if (cmd === 'record-agent' && rest[0]) return recordAgent(rest[0], rest.slice(1));
+  if (cmd === 'record-feedback' && rest[0] === 'prior-art') {
+    // Same id rule as record-agent and waive: replaces runId()'s fabricated commit-<write-tree>
+    // run; a ship/review that owns the call still wins. invocation_id is the link to the run.
+    process.env.DEVKIT_AGENT_RUN_ID ||= `feedback-${randomUUID()}`;
+    return runRecordFeedback(rest.slice(1));
+  }
   console.error(
     'Usage: guard-review --gate | completeness --gate <msg-file> | scan | lens <reviewer>[:<lens>] | clear-cache | ' +
       'waive <reviewer>[:<lens>] <id> [--base <sha>] "<why>" | waive --list | transcript <ref> | ' +
-      'record-agent <label> [--model <m>] [--duration-ms <n>] ' +
+      'record-agent <label> [--request-file <path>] [--model <m>] [--duration-ms <n>] ' +
       '[--disposition followed|overridden|unverified] [--reason "<why>"] ' +
       '[--input-tokens <n>] [--output-tokens <n>] [--cache-creation <n>] [--cache-read <n>] ' +
-      '[--cost-usd <n>] [--session-id <dispatched-agent-session>] [--billing subscription]',
+      '[--cost-usd <n>] [--session-id <dispatched-agent-session>] [--billing subscription] | ' +
+      'record-feedback prior-art --run <invocation_id> --claimed-verdict <V> [--claimed-framing <F>] ' +
+      '[--supersedes <feedback_id>] --source root|user --reason "<why>"',
   );
   return 2;
 }

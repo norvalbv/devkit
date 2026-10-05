@@ -9,7 +9,8 @@
  * suite-wide, and an explicit DEVKIT_GATE_EVENTS is what opts a run back in.
  */
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -22,18 +23,19 @@ let sink: string;
 
 interface Run {
   status: number;
+  stdout: string;
   stderr: string;
 }
 
 // spawnSync, not execFileSync: the latter returns only stdout and only on success, so the warning
 // path (exit 0 WITH a stderr line) would read as empty.
-function runCli(args: string[], input: string, env: Record<string, string> = {}): Run {
+function runCli(args: string[], input: string | Buffer, env: Record<string, string> = {}): Run {
   const result = spawnSync('node', [CLI, ...args], {
     input,
     encoding: 'utf8',
     env: { ...process.env, DEVKIT_GATE_EVENTS: sink, DEVKIT_SHIP_ID: 'ship-ra', ...env },
   });
-  return { status: result.status ?? -1, stderr: result.stderr ?? '' };
+  return { status: result.status ?? -1, stdout: result.stdout ?? '', stderr: result.stderr ?? '' };
 }
 
 function events(): Record<string, unknown>[] {
@@ -228,5 +230,128 @@ describe('record-agent usage flags', () => {
     expect(ev).not.toHaveProperty('cost_usd');
     expect(ev).not.toHaveProperty('cache_read');
     expect(ev).not.toHaveProperty('cache_creation'); // 1.5: token counters are integers
+  });
+});
+
+describe('record-agent request capture and receipt', () => {
+  const sha = (bytes: Buffer | string) => createHash('sha256').update(bytes).digest('hex');
+  const receipt = (r: Run) => {
+    const lines = r.stdout.trim().split('\n');
+    expect(lines).toHaveLength(1);
+    // SAFETY: the receipt is one flat JSON object of scalars, printed by recordAgent.
+    return JSON.parse(lines[0] ?? '') as Record<string, string | null>;
+  };
+
+  it('stores the exact request beside the response and hashes the raw bytes', () => {
+    // CRLF must survive byte-for-byte: the hash and the stored request describe the same bytes.
+    const request = 'ticket premise\r\nüber\n';
+    const requestFile = path.join(dir, 'request.txt');
+    writeFileSync(requestFile, request);
+    const response = '{"verdict":"DISSOLVE_FRAME"}';
+    const r = runCli(['record-agent', 'prior-art', '--request-file', requestFile], response);
+    expect(r.status).toBe(0);
+
+    const [ev] = events();
+    expect(ev).toMatchObject({ request_sha256: sha(request), output_sha256: sha(response) });
+    expect(ev?.input_chars).toBe(request.length);
+    const transcript = readFileSync(
+      path.join(dir, 'telemetry', String(ev?.transcript_ref)),
+      'utf8',
+    );
+    expect(transcript).toContain(request);
+    expect(transcript).toContain(response);
+    expect(receipt(r)).toEqual({
+      invocation_id: ev?.invocation_id,
+      output_sha256: sha(response),
+      request_sha256: sha(request),
+      transcript_ref: ev?.transcript_ref,
+      telemetry: 'written',
+    });
+  });
+
+  it('hashes a non-UTF-8 request but never stores a lossy copy of it', () => {
+    const request = Buffer.from([...Buffer.from('premise '), 0xff, 0x0a]);
+    const requestFile = path.join(dir, 'request.bin');
+    writeFileSync(requestFile, request);
+    const r = runCli(['record-agent', 'prior-art', '--request-file', requestFile], 'verdict');
+    expect(r.status).toBe(0);
+    const [ev] = events();
+    expect(ev).toMatchObject({
+      request_sha256: sha(request),
+      request_status: 'not_utf8',
+      input_chars: 0,
+    });
+    const transcript = readFileSync(
+      path.join(dir, 'telemetry', String(ev?.transcript_ref)),
+      'utf8',
+    );
+    expect(transcript).not.toContain('premise');
+  });
+
+  it('flags a non-UTF-8 response whose stored transcript cannot match its hash', () => {
+    const response = Buffer.from([...Buffer.from('verdict '), 0xff]);
+    const r = runCli(['record-agent', 'prior-art'], response);
+    expect(r.status).toBe(0);
+    const [ev] = events();
+    expect(ev).toMatchObject({ output_sha256: sha(response), output_status: 'not_utf8' });
+    expect(ev).not.toHaveProperty('transcript_ref');
+  });
+
+  it('keeps a UTF-8 byte-order mark in the stored request', () => {
+    const request = '\uFEFFpremise';
+    const requestFile = path.join(dir, 'bom.txt');
+    writeFileSync(requestFile, request);
+    runCli(['record-agent', 'prior-art', '--request-file', requestFile], 'verdict');
+    const [ev] = events();
+    expect(ev).toMatchObject({ request_sha256: sha(request), input_chars: request.length });
+    const transcript = readFileSync(
+      path.join(dir, 'telemetry', String(ev?.transcript_ref)),
+      'utf8',
+    );
+    expect(transcript).toContain(request);
+  });
+
+  it('gives identical invocations distinct ids even when a ship owns both', () => {
+    const a = receipt(runCli(['record-agent', 'prior-art'], 'same'));
+    const b = receipt(runCli(['record-agent', 'prior-art'], 'same'));
+    expect(a.invocation_id).not.toBe(b.invocation_id);
+    expect(a.output_sha256).toBe(b.output_sha256);
+    const [first, second] = events();
+    expect(first).toMatchObject({ ship_id: 'ship-ra', invocation_id: a.invocation_id });
+    expect(second).toMatchObject({ ship_id: 'ship-ra', invocation_id: b.invocation_id });
+  });
+
+  it('keeps a stdin-only caller working, with no request hash', () => {
+    const r = runCli(['record-agent', 'prior-art', '--model', 'opus'], 'verdict');
+    expect(r.status).toBe(0);
+    const [ev] = events();
+    expect(ev).toMatchObject({ judge: 'prior-art', model: 'opus', input_chars: 0 });
+    expect(ev).not.toHaveProperty('request_sha256');
+    expect(receipt(r)).toMatchObject({ telemetry: 'written', output_sha256: sha('verdict') });
+  });
+
+  it('still records the run when the request file is unreadable', () => {
+    const r = runCli(['record-agent', 'prior-art', '--request-file', path.join(dir, 'gone')], 'v');
+    expect(r.status).toBe(0);
+    expect(r.stderr).toContain('cannot read --request-file');
+    expect(events()[0]).toMatchObject({ request_status: 'unreadable', outcome: 'ok' });
+    expect(receipt(r)).toMatchObject({ request_status: 'unreadable' });
+  });
+
+  it('reports a dark or failing sink in the receipt instead of claiming a write', () => {
+    const off = runCli(['record-agent', 'prior-art'], 'v', {
+      DEVKIT_GATE_EVENTS: '',
+      DEVKIT_NO_TELEMETRY: '1',
+    });
+    expect(off.status).toBe(0);
+    expect(receipt(off)).toMatchObject({ telemetry: 'disabled', transcript_ref: null });
+
+    const notADir = path.join(dir, 'file');
+    writeFileSync(notADir, 'x');
+    const broken = runCli(['record-agent', 'prior-art'], '', {
+      DEVKIT_GATE_EVENTS: path.join(notADir, 'events.jsonl'),
+    });
+    expect(broken.status).toBe(0);
+    expect(receipt(broken)).toMatchObject({ telemetry: 'failed' });
   });
 });
