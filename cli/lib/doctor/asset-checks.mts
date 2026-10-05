@@ -20,7 +20,7 @@ import { readAgentAssetManifest } from '../install/agent-asset-manifest/reader.m
 import { agentAssetDir, projectedAssetRel } from '../install/agent-assets/agent-assets.mts';
 import { PKG, registrationsFor } from '../install/hook-registration-ledger/registrations.mts';
 import type { AgentAssetKind, AgentProvider } from '../install/agent-assets/agent-providers.mts';
-import { checkHookRegistrations } from '../install/install-hooks.mts';
+import { checkHookRegistrations } from '../install/hook-registration-ledger/check.mts';
 import { bundledNames } from '../sync-manifest.mts';
 import { type CheckResult, check } from './check-result.mts';
 
@@ -337,12 +337,21 @@ export function checkRegistrations(
       false,
     );
   }
-  const { ok, missing } = result;
+  const { ok, missing, advisories } = result;
+  if (ok && advisories.length)
+    return check(
+      'hook registrations',
+      'DRIFT',
+      `retired hook in a committed file: ${advisories.join(', ')}`,
+      'remove the fallow-gate.sh hook from that file (overlay never edits a committed file)',
+      false,
+      true,
+    );
   if (ok) return check('hook registrations', 'OK', `${hookComponents.join(', ')} registered`);
   return check(
     'hook registrations',
     'DRIFT',
-    `${missing.length} provider registration issue(s)`,
+    `${missing.length} provider registration issue(s): ${missing.join(', ')}`,
     'run `devkit init` to re-register',
     true,
   );

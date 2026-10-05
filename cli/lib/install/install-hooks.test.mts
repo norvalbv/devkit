@@ -18,13 +18,13 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { checkHookRegistrations } from './hook-registration-ledger/check.mts';
 import {
   projectHookRegistrations,
   writeHookRegistrationLedger,
 } from './hook-registration-ledger/lifecycle.mts';
 import { stripReclaimedCommands } from './hook-registration-ledger/install-support.mts';
 import {
-  checkHookRegistrations,
   installHookRegistrations,
   removeHookRegistrations,
   syncHookScripts,
