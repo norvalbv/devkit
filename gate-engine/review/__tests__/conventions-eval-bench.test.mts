@@ -50,6 +50,8 @@ it('hashes the shared conventions parser as both gate and matcher code', () => {
   // line-ending normalizer, so it invalidates comparability for BOTH the gate and the matcher.
   const response = 'gate-engine/review/contracts/response.mts';
   expect(CONVENTIONS_GATE_HASH_INPUTS).toContain(response);
+  // The codex seam appends judge-visible text that no review/ module carries.
+  expect(CONVENTIONS_GATE_HASH_INPUTS).toContain('gate-engine/judge/codex/result.mts');
   expect(CONVENTIONS_MATCHER_HASH_INPUTS).toContain(response);
   expect(CONVENTIONS_GATE_HASH_INPUTS).toContain('gate-engine/ratchets/size-line-authority.mts');
 });

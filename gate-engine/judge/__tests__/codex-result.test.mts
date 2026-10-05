@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  NO_EXECUTION_RULE,
   codexExecArgs,
   parseModelSpec,
   codexFailure,
@@ -141,7 +142,32 @@ describe('judgeCliFor', () => {
     // Hermetic + parseable, always: no user config, no persisted session, JSONL out.
     for (const flag of ['--ignore-user-config', '--ephemeral', '--json'])
       expect(rw.argv).toContain(flag);
-    expect(rw.argv[rw.argv.length - 1]).toBe('P');
+    expect(rw.argv[rw.argv.length - 1]).toBe(`P\n\n${NO_EXECUTION_RULE}`);
+    // A judge with no tools has nothing to execute with: its prompt stays byte-identical.
+    expect(ro.argv[ro.argv.length - 1]).toBe('P');
+  });
+
+  it('never tells a judge to withhold a verdict or to assume the suite runs elsewhere', () => {
+    // Either sentence can turn a real FAIL into a PASS on a judge with no checklist artifact to
+    // void it, or assert a test stage a consumer's commit hook does not have.
+    expect(NO_EXECUTION_RULE).not.toMatch(/\b(PASS|FAIL|VERDICT)\b/);
+    expect(NO_EXECUTION_RULE).not.toMatch(/suite runs/i);
+  });
+
+  it('puts the execution rule after the task and outside the agent brief', () => {
+    const { argv } = judgeCliFor([
+      '-p',
+      '--model',
+      'gpt-5.6-sol',
+      '--append-system-prompt',
+      'BRIEF',
+      '--allowedTools',
+      'Read',
+      'TASK',
+    ]);
+    expect(argv[argv.length - 1]).toBe(
+      `<agent-brief>\nBRIEF\n</agent-brief>\n\nTASK\n\n${NO_EXECUTION_RULE}`,
+    );
   });
 
   it('refuses (throws) a gpt argv with no extractable prompt — never a silent stdin-as-prompt run', () => {
@@ -241,6 +267,9 @@ describe('judgeCliFor — forced read-only sandbox', () => {
     ];
     const cli = judgeCliFor(argv, {}, true);
     expect(cli.argv[cli.argv.indexOf('--sandbox') + 1]).toBe('read-only');
+    // Read-only removes writes, not the shell: the forced judges (completeness, alignment) can
+    // still run a test there, so they carry the rule too.
+    expect(cli.argv[cli.argv.length - 1]).toBe(`judge this\n\n${NO_EXECUTION_RULE}`);
     // Without the pin the same argv maps to workspace-write — the authority the flag removes.
     expect(judgeCliFor(argv, {}).argv[judgeCliFor(argv, {}).argv.indexOf('--sandbox') + 1]).toBe(
       'workspace-write',
