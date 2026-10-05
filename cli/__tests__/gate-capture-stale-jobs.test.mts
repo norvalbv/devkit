@@ -111,6 +111,22 @@ describe('run_gates_with_capture — timeout attribution', () => {
     expect(result.stderr).not.toContain('NOT the 1s ceiling');
   });
 
+  // The notice path must not reach the gate: a gate holding it could forge "not the ceiling".
+  it('keeps the ceiling banner when the gate looks for the reap notice path in its env', () => {
+    const result = runWithShim(
+      ':',
+      [
+        'const notice = process.env.DEVKIT_GATE_REAP_NOTICE_FILE;',
+        "if (notice) require('node:fs').writeFileSync(notice, '');",
+        'setInterval(() => {}, 1000);',
+      ].join('\n'),
+      1,
+    );
+
+    expect(result.stdout, result.stderr).toContain('RUNNER_RC=124');
+    expect(result.stderr).toContain('hit the 1s ceiling (exit 124)');
+  });
+
   it('claims no landed commit for a reap outside ship', () => {
     const result = runWithShim(
       ':',
