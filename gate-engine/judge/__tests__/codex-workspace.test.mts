@@ -21,7 +21,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { codexExecArgs, judgeCliFor } from '../codex/result.mts';
 import { prepareCodexSandbox } from '../codex/workspace.mts';
-import { execJudge, execJudgeAsync } from '../run-judge.mts';
+import { execJudge, execJudgeAsync, type JudgeOutage } from '../run-judge.mts';
 
 const INVESTIGATING = ['-p', 'P', '--model', 'gpt-5.6-sol', '--allowedTools', 'Read,Grep'];
 const READ_ONLY = ['-p', '--model', 'gpt-5.6-sol', '--disallowedTools', '*', 'P'];
@@ -132,6 +132,40 @@ describe('prepareCodexSandbox', () => {
     sandbox.cleanup();
   });
 
+  // Catches a check that only rejects the checkout itself or its children: `..` grants an ancestor.
+  it('refuses a .claude link onto an ancestor of the checkout', () => {
+    symlinkSync('..', path.join(repo, '.claude'));
+    expect(() => prepareCodexSandbox(INVESTIGATING, false, repo)).toThrow(
+      /make the checkout writable/,
+    );
+  });
+
+  // The reporting swarm's layout: worktrees nested in the main checkout, `.claude` linked to its copy.
+  it('allows a nested worktree whose .claude links to the enclosing main checkout', () => {
+    mkdirSync(path.join(repo, '.claude'));
+    const nested = path.join(repo, '.swarm-worktrees', 'seat-1');
+    mkdirSync(nested, { recursive: true });
+    symlinkSync(path.join(repo, '.claude'), path.join(nested, '.claude'));
+    const sandbox = prepareCodexSandbox(INVESTIGATING, false, nested);
+    expect(sandbox.workspace?.repoRoot).toBe(nested);
+    sandbox.cleanup();
+  });
+
+  // Catches comparing the unresolved cwd with the resolved .claude: through an alias (macOS /tmp and
+  // /var are links) a self-link then looks disjoint and is granted, unconfining the checkout.
+  it('judges a checkout reached through a symlinked path by its real location', () => {
+    const alias = path.join(dir, 'alias');
+    symlinkSync(repo, alias);
+    const sandbox = prepareCodexSandbox(INVESTIGATING, false, alias);
+    expect(sandbox.workspace?.repoRoot).toBe(alias);
+    sandbox.cleanup();
+    rmSync(path.join(repo, '.claude'), { recursive: true });
+    symlinkSync('.', path.join(repo, '.claude'));
+    expect(() => prepareCodexSandbox(INVESTIGATING, false, alias)).toThrow(
+      /make the checkout writable/,
+    );
+  });
+
   it('removes scratch when a present project doc cannot be copied', () => {
     rmSync(path.join(repo, 'AGENTS.md'));
     mkdirSync(path.join(repo, 'AGENTS.md')); // a directory: copyFileSync fails with a non-ENOENT code
@@ -169,6 +203,20 @@ describe('execJudge — scratch lifecycle around a real spawn', () => {
     const killed = fakeCodex("trap '' TERM\nsleep 5");
     expect(await execJudgeAsync(judgeOpts(500))).toBeNull();
     expect(existsSync(spawned(killed).cwd)).toBe(false);
+  });
+});
+
+// Wiring: a refused sandbox must land on both twins' outage path, never throw past them or spawn.
+describe('execJudge — a sandbox that cannot be confined', () => {
+  it('is an outage on both twins, and codex never runs unconfined', async () => {
+    symlinkSync('.', path.join(repo, '.claude'));
+    const record = fakeCodex();
+    const outages: JudgeOutage[] = [];
+    const opts = { ...judgeOpts(), onOutage: (o: JudgeOutage) => outages.push(o) };
+    expect(execJudge(opts)).toBeNull();
+    expect(await execJudgeAsync(opts)).toBeNull();
+    expect(outages).toHaveLength(2);
+    expect(existsSync(record)).toBe(false);
   });
 });
 
