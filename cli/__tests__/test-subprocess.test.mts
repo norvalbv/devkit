@@ -1,5 +1,8 @@
-import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { ChildProcess, spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { PassThrough } from 'node:stream';
 import { afterEach, describe, expect, it } from 'vitest';
 import { superviseGateCommand } from '../lib/ship/review/process/gate-supervisor.mts';
 import {
@@ -10,6 +13,7 @@ import {
   TEST_SUBPROCESS_TIMEOUT_MS,
   testExecFileSync,
   testSpawnSync,
+  waitForPath,
 } from './_helpers.mts';
 
 const { mkTmp, cleanup } = rootRegistry();
@@ -212,5 +216,75 @@ describe('option passthrough the supervised call sites depend on', () => {
   // would refuse the one production caller sitting on the boundary.
   it('accepts a deadline exactly at the 32-bit timer ceiling', async () => {
     await expect(superviseGateCommand(2_147_483_647, ['/bin/sh', '-c', 'exit 0'])).resolves.toBe(0);
+  });
+});
+
+describe('waitForPath with the child expected to write the path', () => {
+  // The timeout message never says "exited 3", so matching it proves the fail-fast path.
+  it('fails as soon as the child exits, quoting its stderr', async () => {
+    const child = spawn('/bin/sh', ['-c', 'echo boom >&2; exit 3'], {
+      stdio: ['ignore', 'ignore', 'pipe'],
+    });
+    const never = join(mkTmp('test-subprocess-wait-'), 'never');
+    await expect(waitForPath(never, 60_000, child)).rejects.toThrow(/child exited 3\nboom/);
+  });
+
+  // Exit 0 is falsy: a truthiness check would miss a clean early exit and wait out the timeout.
+  it('fails on a clean exit that happened before the wait began', async () => {
+    const child = spawn('/bin/sh', ['-c', 'exit 0'], { stdio: ['ignore', 'ignore', 'pipe'] });
+    await once(child, 'exit');
+    const never = join(mkTmp('test-subprocess-wait-'), 'never');
+    await expect(waitForPath(never, 60_000, child)).rejects.toThrow(/child exited 0/);
+  });
+
+  // The exit state is read before the path: this child writes the path just as its exit is read.
+  it('resolves when the child wrote the path in the same instant it exited', async () => {
+    const path = join(mkTmp('test-subprocess-wait-'), 'ready');
+    const child = Object.defineProperty(new ChildProcess(), 'exitCode', {
+      get: () => {
+        writeFileSync(path, 'ready');
+        return 0;
+      },
+    });
+    await expect(waitForPath(path, 60_000, child)).resolves.toBeUndefined();
+  });
+
+  // Exit is observable before stderr drains, so the rejection waits for the pipe to close.
+  it('waits for stderr to drain before quoting it', async () => {
+    const stderr = new PassThrough();
+    const child = Object.defineProperties(new ChildProcess(), {
+      exitCode: { value: 4 },
+      stderr: { value: stderr },
+    });
+    const never = join(mkTmp('test-subprocess-wait-'), 'never');
+    const waiting = waitForPath(never, 60_000, child);
+    setTimeout(() => stderr.end('root-cause\n'), 50);
+    await expect(waiting).rejects.toThrow(/child exited 4\nroot-cause\n$/);
+  });
+
+  // Only a tail is kept, so a flooding child cannot exhaust the worker; the final line survives.
+  it('reports a bounded stderr tail that still ends with the final line', async () => {
+    const child = spawn(
+      '/bin/sh',
+      ['-c', 'yes x | head -c 1000000 >&2; echo root-cause >&2; exit 4'],
+      { stdio: ['ignore', 'ignore', 'pipe'] },
+    );
+    const never = join(mkTmp('test-subprocess-wait-'), 'never');
+    const waiting = waitForPath(never, 60_000, child);
+    await expect(waiting).rejects.toThrow(/child exited 4\n[\s\S]*root-cause\n$/);
+    await expect(waiting).rejects.toThrow(/^[\s\S]{1,70000}$/);
+  });
+
+  // An unread stderr pipe fills at the OS buffer size and blocks the child before it can exit.
+  it('consumes the piped stderr, so a child that floods it can still exit', async () => {
+    const path = join(mkTmp('test-subprocess-wait-'), 'ready');
+    const child = spawn(
+      '/bin/sh',
+      ['-c', 'echo ready > "$1"; head -c 1000000 /dev/zero >&2', 'sh', path],
+      { stdio: ['ignore', 'ignore', 'pipe'] },
+    );
+    const exited = once(child, 'exit');
+    await waitForPath(path, 60_000, child);
+    await expect(exited).resolves.toEqual([0, null]);
   });
 });
