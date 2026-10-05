@@ -57,7 +57,7 @@ function installOverlay(root: string, chain: string, origHooksPath: string): voi
   write(
     root,
     '.devkit/hooks/pre-commit',
-    buildOverlayPreCommit(selection, chain, '', { root }),
+    buildOverlayPreCommit(selection, chain, '', { root, gitRuns: !origHooksPath.endsWith('/_') }),
     true,
   );
   write(root, '.devkit/config.json', `${JSON.stringify(overlayConfig(origHooksPath), null, 2)}\n`);
@@ -85,12 +85,11 @@ function worktreeFixture(
     write(targetRoot, '.husky/_/pre-commit', '#!/bin/sh\nexit 0\n', true);
     write(targetRoot, '.husky/pre-commit', '#!/bin/sh\necho team\n', true);
   }
-  // What `syncOverlayHook` itself would generate here: it chains only to hooks `detectExistingHooks`
-  // can actually see, and `<worktree>/.git/hooks` does not exist to read. A husky chain is in-tree,
-  // so it resolves normally. Getting this wrong trips the generator-drift check before capture runs.
+  // What `syncOverlayHook` itself would generate here, or the generator-drift check trips first.
+  const native = options.nativeHookInSharedDir ? '.git/hooks/pre-commit' : '';
   installOverlay(
     targetRoot,
-    options.husky ? '.husky/pre-commit' : '',
+    options.husky ? '.husky/pre-commit' : native,
     options.origHooksPath ?? (options.husky ? '.husky/_' : ''),
   );
   return {
@@ -287,6 +286,7 @@ describe('review setup capture — native hooks probe', () => {
     writeFileSync(join(fx.mainRoot, '.git/hooks/pre-commit'), '#!/bin/sh\necho native\n', {
       mode: 0o644,
     });
+    installOverlay(fx.targetRoot, '.git/hooks/pre-commit', '');
 
     expect(
       pathRecord(captureReviewSetup(fx.targetRoot, fx.setupManifest), 'overlay-chain')?.fingerprint,
@@ -296,6 +296,7 @@ describe('review setup capture — native hooks probe', () => {
   it('ignores a directory named pre-commit in the shared hooks dir', () => {
     const fx = worktreeFixture('directory-hook');
     mkdirSync(join(fx.mainRoot, '.git/hooks/pre-commit'), { recursive: true });
+    installOverlay(fx.targetRoot, '.git/hooks/pre-commit', '');
 
     expect(
       pathRecord(captureReviewSetup(fx.targetRoot, fx.setupManifest), 'overlay-chain')?.fingerprint,

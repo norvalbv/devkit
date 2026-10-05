@@ -60,7 +60,7 @@ function setup(name: string, overlay = false) {
   const chain = join(root, '.git/hooks/pre-commit');
   if (overlay) writeFileSync(chain, '#!/bin/sh\necho chained\n', { mode: 0o755 });
   const hook = overlay
-    ? buildOverlayPreCommit(selection, '.git/hooks/pre-commit', '', { root })
+    ? buildOverlayPreCommit(selection, '.git/hooks/pre-commit', '', { root, gitRuns: true })
     : buildFullHook(selection, '', 'global-optional');
   write(root, overlay ? '.devkit/hooks/pre-commit' : '.husky/pre-commit', hook, true);
   write(root, '.devkit/config.json', `${JSON.stringify(config(overlay), null, 2)}\n`);
@@ -261,7 +261,7 @@ describe('review setup manifest', () => {
     rmSync(join(root, '.git/hooks/pre-commit'));
     writeFileSync(
       join(root, '.devkit/hooks/pre-commit'),
-      buildOverlayPreCommit(selection, '', '', { root }),
+      buildOverlayPreCommit(selection, '', '', { root, gitRuns: true }),
       {
         mode: 0o755,
       },

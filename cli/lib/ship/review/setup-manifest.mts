@@ -6,7 +6,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { writeFileAtomic } from '../../atomic-write.mts';
 import type { ReviewProfile } from '../../components.mts';
 import { detectGitRoot } from '../../detect-git-root.mts';
-import { gitOut, sameDir } from '../../doctor/hooks-path.mts';
+import { nativeHooksDir, sameDir } from '../../doctor/hooks-path.mts';
 import { reviewHookDrift } from '../../husky/review-drift.mts';
 import { captureOrigHooksPath, overlayHookScriptDir } from '../../overlay.mts';
 import { runDirectReviewCli } from './run-direct.mts';
@@ -331,15 +331,10 @@ function assertNativeHooksAreInTree(gitRoot: string): void {
   // Stripped of the ambient git environment for the reason LOCAL_GIT_ENVIRONMENT exists: an
   // inherited GIT_DIR/GIT_COMMON_DIR steers this answer at a different repository, and `devkit
   // review` is routinely spawned from inside git (a hook, a `rebase --exec`).
-  const common = withoutLocalGitEnvironment(() =>
-    gitOut(gitRoot, ['rev-parse', '--path-format=absolute', '--git-common-dir']),
-  );
-  // gitOut reports EVERY failure as '', and join('', 'hooks') is the cwd-relative 'hooks' — which
-  // reads as in-tree or out-of-tree depending on the caller's cwd. An unprovable answer is fatal,
-  // never a fall-through: falling through is exactly the silent skip this function prevents.
-  if (!common || !isAbsolute(common))
-    fail('could not resolve the target Git common directory; retry.');
-  const realHooks = join(common, 'hooks');
+  const realHooks = withoutLocalGitEnvironment(() => nativeHooksDir(gitRoot));
+  // An unprovable answer is fatal, never a fall-through: falling through is exactly the silent
+  // skip this function prevents.
+  if (!realHooks) fail('could not resolve the target Git common directory; retry.');
   if (sameDir(realHooks, join(gitRoot, '.git', 'hooks'))) return;
   const hook = join(realHooks, 'pre-commit');
   if (!gitWouldExecute(hook)) return;

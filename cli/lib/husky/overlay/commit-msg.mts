@@ -16,7 +16,7 @@ import {
 import { join } from 'node:path';
 import { GATE_LOG_FINISH_PASS } from '../gate-policy/commit-gate-log.mts';
 import { buildCommitMsgBlock, COMMIT_MSG_PREAMBLE, commitMsgGuards } from '../commit-msg-block.mts';
-import { buildPassthroughHook, chainWord, GATES_ONLY_STOP } from '../husky-block.mts';
+import { buildPassthroughHook, chainExec, GATES_ONLY_STOP } from '../husky-block.mts';
 
 const LOCAL_HOOK = join('.devkit', 'hooks', 'commit-msg');
 const HOOK_MODE = 0o755;
@@ -41,9 +41,9 @@ export function buildOverlayCommitMsgHook(
   selection: { guards?: string[] },
   chainTarget: string,
   pkgRel = '',
+  gitRuns = false,
 ): string {
   const block = buildCommitMsgBlock(selection, pkgRel, 'global');
-  const chain = chainWord(chainTarget); // single-quoted: a hooksPath with $(...) must not execute
   return `${COMMIT_MSG_PREAMBLE}
 # devkit OVERLAY commit-msg (LOCAL, git-ignored): devkit's message judges, then the repo's OWN
 # commit-msg unchanged. Global CLI; the commit is blocked when devkit is not installed.
@@ -56,7 +56,7 @@ ${GATE_LOG_FINISH_PASS}
 ${GATES_ONLY_STOP}
 
 # Chain to the repo's own commit-msg (exec → its exit code becomes the hook's).
-[ -f ${chain} ] && exec sh ${chain} "$@"
+${chainExec(chainTarget, gitRuns)}
 exit 0
 `;
 }
@@ -65,6 +65,10 @@ export interface OverlayCommitMsgInput {
   gitRoot: string;
   /** Where the repo's own hook scripts live, git-root-relative (overlayHookScriptDir). */
   scriptDir: string;
+  /** Absolute dir of the repo's hook scripts, as git resolves it for this checkout. */
+  scriptsAbs: string;
+  /** git runs these hooks itself (not husky's runner), so the chain runs them as git would. */
+  gitRuns: boolean;
   /** The repo's existing hook names in scriptDir. */
   existing: string[];
   selection: { guards?: string[] };
@@ -78,8 +82,9 @@ export type OverlayCommitMsgPlan =
 
 /** Decide what `.devkit/hooks/commit-msg` must contain (or that it must not exist). */
 export function planOverlayCommitMsg({
-  gitRoot,
   scriptDir,
+  scriptsAbs,
+  gitRuns,
   existing,
   selection,
   pkgRel,
@@ -90,16 +95,16 @@ export function planOverlayCommitMsg({
   if (judges.length) {
     let repoHook = '';
     try {
-      repoHook = hasRepoHook ? readFileSync(join(gitRoot, chainTarget), 'utf8') : '';
+      repoHook = hasRepoHook ? readFileSync(join(scriptsAbs, 'commit-msg'), 'utf8') : '';
     } catch {
       repoHook = ''; // unreadable: the warning is advisory, the judges run regardless
     }
     const alsoInRepo = judgesAlsoInRepoHook(repoHook).filter((id) => judges.includes(id));
-    const content = buildOverlayCommitMsgHook({ guards: judges }, chainTarget, pkgRel);
+    const content = buildOverlayCommitMsgHook({ guards: judges }, chainTarget, pkgRel, gitRuns);
     return { kind: 'judges', content, judges, alsoInRepo };
   }
   if (!hasRepoHook) return { kind: 'absent' };
-  return { kind: 'passthrough', content: buildPassthroughHook(chainTarget) };
+  return { kind: 'passthrough', content: buildPassthroughHook(chainTarget, gitRuns) };
 }
 
 // One descriptor, content THEN mode: no check-then-use gap, and a chmod during the read is seen.
@@ -182,7 +187,8 @@ export function syncOverlaySiblingHooks(
 ) {
   const dir = join(input.gitRoot, '.devkit', 'hooks');
   for (const h of input.existing.filter((n) => n !== 'pre-commit' && n !== 'commit-msg')) {
-    if (!dryRun) writeHookAtomic(join(dir, h), buildPassthroughHook(`${input.scriptDir}/${h}`));
+    if (!dryRun)
+      writeHookAtomic(join(dir, h), buildPassthroughHook(`${input.scriptDir}/${h}`, input.gitRuns));
   }
   return syncOverlayCommitMsg(input, { dryRun });
 }

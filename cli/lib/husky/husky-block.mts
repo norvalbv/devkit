@@ -273,7 +273,11 @@ export function buildOverlayHook(
   selection: HookSelection,
   chainTarget = '.husky/pre-commit',
   pkgRel = '',
-  { fallow = false, prelude = '' }: { fallow?: boolean; prelude?: string } = {},
+  {
+    fallow = false,
+    prelude = '',
+    gitRuns = false,
+  }: { fallow?: boolean; prelude?: string; gitRuns?: boolean } = {},
 ): string {
   const block = buildGuardBlock(selection, pkgRel, {
     binDir: 'global',
@@ -299,9 +303,18 @@ ${GATES_ONLY_STOP}
 ${PRE_COMMIT_PASS_EXIT}
 
 # Chain to the repo's own pre-commit (exec → its exit code becomes the hook's).
-[ -f ${chainWord(chainTarget)} ] && exec sh ${chainWord(chainTarget)} "$@"
+${chainExec(chainTarget, gitRuns)}
 exit 0
 `;
+}
+
+/** Hand off to the repo's own hook. git runs its own hooks directly (execute bit, shebang), so a
+ * hook it runs does too; husky's runner hands its scripts to `sh`, so a husky hook keeps that. */
+export function chainExec(target: string, gitRuns = false): string {
+  const w = chainWord(target);
+  return gitRuns
+    ? `[ -f ${w} ] && [ -x ${w} ] && exec ${w} "$@"`
+    : `[ -f ${w} ] && exec sh ${w} "$@"`;
 }
 
 /** Linked-worktree chain word for the repo's own hook: `.git` is a FILE there, so a `.git/hooks/*`
@@ -320,12 +333,12 @@ export function chainWord(target: string): string {
  *
  * `chainScript` is the repo's existing hook script (git-root-relative).
  */
-export function buildPassthroughHook(chainScript: string): string {
+export function buildPassthroughHook(chainScript: string, gitRuns = false): string {
   return `${HOOK_PREAMBLE}
 # devkit overlay pass-through — git now runs this dir, so we forward to the repo's own hook
 # unchanged (devkit adds nothing to it).
 ${GATES_ONLY_STOP}
-[ -f ${chainWord(chainScript)} ] && exec sh ${chainWord(chainScript)} "$@"
+${chainExec(chainScript, gitRuns)}
 exit 0
 `;
 }

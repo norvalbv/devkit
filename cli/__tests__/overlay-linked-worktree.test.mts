@@ -25,6 +25,7 @@ import cleanRun from '../commands/clean.mts';
 import doctorRun from '../commands/doctor.mts';
 import { applyInit } from '../commands/init.mts';
 import { applyOverlayConstraints, defaultSelection } from '../lib/components.mts';
+import { nativeHooksDir } from '../lib/doctor/hooks-path.mts';
 import { chainWord } from '../lib/husky/husky-block.mts';
 import { healAliasCmd, isHealAlias } from '../lib/husky/overlay/heal-alias.mts';
 import {
@@ -39,7 +40,7 @@ import {
   eslintOverlayContent,
   legacyEslintOverlayContent,
 } from '../lib/install/overlay-lint-configs.mts';
-import { captureOrigHooksPath } from '../lib/overlay.mts';
+import { captureOrigHooksPath, syncOverlayHook } from '../lib/overlay.mts';
 import { installGlobalHook } from '../lib/overlay-global-hook.mts';
 import { shQuote } from '../lib/ship/redact-secrets.mts';
 import { overlayHooksPathRejection } from '../lib/ship/review/setup/overlay-hooks-path.mts';
@@ -192,6 +193,123 @@ afterEach(() => {
     if (value === undefined) delete process.env[key];
     else process.env[key] = value;
   }
+});
+
+// A repo whose hooks are git's own: no core.hooksPath, scripts in the common dir's hooks/.
+function nativeHooksRepo() {
+  const root = mkTmp('overlay-native-');
+  git(root, 'init', '-q');
+  git(root, 'config', 'user.email', 't@t.t');
+  git(root, 'config', 'user.name', 't');
+  writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'work' }));
+  git(root, 'add', '-A');
+  git(root, 'commit', '-qm', 'init');
+  const hooks = join(root, '.git', 'hooks');
+  writeFileSync(join(hooks, 'pre-commit'), '#!/bin/sh\npwd -P >> "$DK_TEST_MARKER"\n', {
+    mode: 0o755,
+  });
+  writeFileSync(join(hooks, 'pre-push'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  return root;
+}
+
+describe('overlay installed from a linked worktree keeps the native hooks', () => {
+  it('chains the native pre-commit and wraps pre-push', async () => {
+    const wt = addWorktree(nativeHooksRepo());
+    await initOverlay(wt);
+
+    commit(wt, 'from the worktree');
+
+    expect(markerLines()).toEqual([realpathSync(wt)]);
+    expect(readFileSync(join(wt, '.devkit', 'hooks', 'pre-push'), 'utf8')).toContain(
+      chainWord('.git/hooks/pre-push'),
+    );
+  });
+
+  it('doctor --fix rebuilds the pre-commit with the native chain', async () => {
+    const wt = addWorktree(nativeHooksRepo());
+    await initOverlay(wt);
+    rmSync(join(wt, '.devkit', 'hooks', 'pre-commit'));
+
+    await doctorRun(['--fix'], wt);
+
+    expect(readFileSync(join(wt, '.devkit', 'hooks', 'pre-commit'), 'utf8')).toContain(
+      chainWord('.git/hooks/pre-commit'),
+    );
+  });
+
+  it('nativeHooksDir resolves the common hooks dir from a worktree, and is null outside git', () => {
+    const root = nativeHooksRepo();
+    expect(realpathSync(nativeHooksDir(addWorktree(root)) ?? '')).toBe(
+      realpathSync(join(root, '.git', 'hooks')),
+    );
+    expect(nativeHooksDir(mkTmp('overlay-nogit-'))).toBeNull();
+  });
+
+  it('refuses to sync when git cannot resolve the common dir, rather than dropping the hooks', async () => {
+    const root = nativeHooksRepo();
+    const wt = addWorktree(root);
+    await initOverlay(wt);
+    rmSync(join(root, '.git'), { recursive: true, force: true });
+
+    expect(() => syncOverlayHook(wt, wt, { origHooksPath: '' }, { dryRun: true })).toThrow(
+      /could not resolve the git common dir/,
+    );
+  });
+
+  it('warns when the native commit-msg already calls a selected judge', async () => {
+    const root = nativeHooksRepo();
+    writeFileSync(
+      join(root, '.git', 'hooks', 'commit-msg'),
+      '#!/bin/sh\nguard-review completeness --gate "$1"\n',
+      { mode: 0o755 },
+    );
+    const wt = addWorktree(root);
+    const selection = { ...SELECTION, guards: [...SELECTION.guards, 'review'] };
+    await applyInit(wt, { stack: 'react-app', selection, overlay: true, devkitRef: 'v0.9.0' });
+
+    const logged = vi.mocked(console.log).mock.calls.flat().join('\n');
+    expect(logged).toMatch(/also appears to call completeness — it will run twice/);
+  });
+
+  it('a native hook runs only while executable, as git decides at commit time', async () => {
+    const root = nativeHooksRepo();
+    const hook = join(root, '.git', 'hooks', 'pre-commit');
+    chmodSync(hook, 0o644);
+    const wt = addWorktree(root);
+    await initOverlay(wt);
+
+    commit(wt, 'disabled at install');
+    chmodSync(hook, 0o755);
+    commit(wt, 'enabled after install');
+    chmodSync(hook, 0o644);
+    commit(wt, 'disabled again');
+
+    expect(markerLines()).toEqual([realpathSync(wt)]);
+  });
+
+  it('a native hook runs under its own shebang, not sh', async () => {
+    const root = nativeHooksRepo();
+    const script = `#!${process.execPath}\nrequire('fs').appendFileSync(process.env.DK_TEST_MARKER, 'node\\n');\n`;
+    writeFileSync(join(root, '.git', 'hooks', 'pre-commit'), script, { mode: 0o755 });
+    const wt = addWorktree(root);
+    await initOverlay(wt);
+
+    commit(wt, 'node hook');
+
+    expect(markerLines()).toEqual(['node']);
+  });
+
+  it('a native directory named like a hook is never run', async () => {
+    const root = nativeHooksRepo();
+    rmSync(join(root, '.git', 'hooks', 'pre-commit'));
+    mkdirSync(join(root, '.git', 'hooks', 'pre-commit'));
+    const wt = addWorktree(root);
+    await initOverlay(wt);
+
+    commit(wt, 'directory hook');
+
+    expect(markerLines()).toEqual([]);
+  });
 });
 
 describe('overlay hooks in linked worktrees (sc-4157)', () => {
