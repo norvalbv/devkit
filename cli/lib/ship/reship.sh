@@ -133,6 +133,7 @@ REWRITE_RECEIPT_PROVEN=0
 RESUME_ROOT=$(git rev-parse --show-toplevel)
 RESUME_SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 SHIP_INTENT="$RESUME_SCRIPT_DIR/ship-intent.mts"; [ -f "$SHIP_INTENT" ] || SHIP_INTENT="$RESUME_SCRIPT_DIR/ship-intent.mjs"
+. "$RESUME_SCRIPT_DIR/resume-extras-notice.sh"
 RESUME_BODY=
 if [ "$RESUME" -eq 1 ]; then
   SI_OUT=$(mktemp "${TMPDIR:-/tmp}/ship-intent-read.XXXXXX")
@@ -264,13 +265,7 @@ if [ "$RESUME" -eq 1 ]; then
   # Under --pr the body reaches the PR only when a body flag asked for it (now or as recorded).
   if [ "$UPDATE_PR_BODY" -eq 1 ]; then si_pr_effect="commit + PR body"; else si_pr_effect="commit only, PR body kept"; fi
   echo "Resuming recorded invocation for $BR (--pr): \"$TITLE\" — ${#PATHS[@]} paths, $SHIP_BODY_NOTE ($si_pr_effect), recorded $RESUME_CREATED" >&2
-  for p in "${PATHS[@]}"; do
-    si_extra=
-    for q in ${RESUME_EXTRA_PATHS[@]+"${RESUME_EXTRA_PATHS[@]}"}; do [ "$q" = "$p" ] && { si_extra=1; break; }; done
-    if [ -n "$si_extra" ]; then printf '  + %q   (briefed by this retry)\n' "$p" >&2
-    else printf '    %q\n' "$p" >&2
-    fi
-  done
+  ship_resume_brief
 fi
 
 # Test seam: print the resolved target + repo, then exit BEFORE any side effect (no fetch / push).
@@ -297,6 +292,7 @@ REWRITE_PUBLISH_LOCK=""
 REWRITE_PUBLISH_STAMP=""
 REWRITE_PUBLISH_OWNED=0
 rewrite_ref_cleanup() {
+  ship_resume_extras_notice # first: it reads the exit status
   if [ -n "$REWRITE_HEAD_REF" ]; then
     cleanup_oid=${EXPECTED_REMOTE:-$(git rev-parse -q --verify "$REWRITE_HEAD_REF" 2>/dev/null || true)}
     [ -z "$cleanup_oid" ] || git update-ref -d "$REWRITE_HEAD_REF" "$cleanup_oid" 2>/dev/null || true
@@ -663,6 +659,7 @@ fi
 # ship-branch.sh's twin). Serialize this lineage replacement with recovery's locked ownership check:
 # once a recovery proves ownership, no fresher invocation can replace the record before its edit.
 rewrite_publish_lock_acquire || exit 1
+RESUME_EXTRAS_UNRECORDED=0
 SHIP_INTENT_GENERATION=$(printf '%s' "$BODY" | node "$SHIP_INTENT" "${SHIP_INTENT_ARGS[@]}" -- "${PATHS[@]}") \
   || SHIP_INTENT_GENERATION=""
 if [ -z "$SHIP_INTENT_GENERATION" ]; then
