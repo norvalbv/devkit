@@ -11,17 +11,15 @@ Frontend security reviewer. Be minimal - run scripts, don't write verbose summar
 
 <architecture_context>
 The set of frontend code paths this agent reviews is **consumer-defined**, not assumed.
-Read `review.frontendRoots` from `guard.config.json` at the repo root — the directories holding
-client/UI code. Only files under these roots are in scope. When unset/empty, this repo has no
-configured frontend topology: there is nothing for this agent to review, so exit early.
+The gate resolves scope — `review.frontendRoots`, or `scanRoots` when that is empty — and lists
+the in-scope files in your prompt. Do not re-derive scope from `guard.config.json`.
 </architecture_context>
 
 <trigger_conditions>
 Only invoke when staged changes include files under one of `review.frontendRoots`
 (from `guard.config.json`).
 
-Skip if only files outside those roots (e.g. `review.backendRoots`) are modified, or if
-`review.frontendRoots` is unset/empty.
+Once the gate has invoked you, always run the workflow below: the gate already decided scope.
 </trigger_conditions>
 
 <general_rules>
@@ -29,7 +27,7 @@ Skip if only files outside those roots (e.g. `review.backendRoots`) are modified
 - Use local-first discovery first for narrow lookups: `Grep` for exact matches, `Read` for direct inspection, and `Glob` for path discovery.
 - Do NOT start with graphify/searchCode for single symbol/string lookups, one-file checks, or quick exact-text validation — grep is faster.
 - Escalate to graphify (`affected`/`explain`/`path`) only for architecture-level certainty: blast radius, execution-flow mapping, ambiguous cross-module dependency paths.
-- Only review files under `review.frontendRoots`
+- Only review the files `generate` enumerated
 - Skip node_modules, generated files, config files
 - Minimal output - let scripts report results
 - Read skill file for detailed rules
@@ -65,8 +63,8 @@ SCRIPT=".claude/skills/frontend-security/scripts/checklist.mjs"
 node $SCRIPT generate
 node $SCRIPT status
 ```
-`generate` enumerates the review items from the staged files under `review.frontendRoots`
-(`guard.config.json`). If it prints "No staged frontend files", exit early — nothing to review.
+`generate` enumerates the review items from the gate's file list. If it prints "No staged
+frontend files", it has recorded the skip itself — report PASS. Never skip `generate`.
 
 ## 3. Check each item, one at a time
 For each item the checklist enumerated:

@@ -87,24 +87,36 @@ describe('skill checklist script (spawned source)', () => {
     expect(state.items.length).toBeGreaterThan(0);
   });
 
-  it('generate writes a NAMED skip artifact when filters exclude every injected file', () => {
-    const repo = mkdtempSync(join(tmpdir(), 'checklist-override-skip-'));
-    dirs.push(repo);
-    execFileSync('git', ['init', '-q'], { cwd: repo });
-    writeFileSync(join(repo, 'guard.config.json'), JSON.stringify({}));
-    writeFileSync(join(repo, 'README.md'), '# prose only\n');
-    const r = spawnSync('node', [SCRIPT, 'generate'], {
-      cwd: repo,
-      encoding: 'utf8',
-      env: { ...process.env, DEVKIT_REVIEW_STAGED_FILES: JSON.stringify(['README.md']) },
-    });
-    expect(r.status, r.stderr).toBe(0);
-    const state = JSON.parse(
-      readFileSync(join(repo, '.claude', '.api-security-review.json'), 'utf8'),
-    );
-    expect(state.items).toEqual([]);
-    expect(state.skipped).toContain('excluded');
-  });
+  // The frontend briefs tell the judge a "No staged frontend files" exit has already recorded its
+  // skip, so a script that exits without the artifact would void that PASS.
+  it.each([
+    ['api-security', '.api-security-review.json', 'README.md'],
+    ['frontend-security', '.frontend-security-review.json', 'README.md'],
+    ['frontend-performance', '.frontend-performance-review.json', 'README.md'],
+    // accessibility reviews prose, so only its `.pen` filter can empty the list
+    ['frontend-accessibility', '.frontend-accessibility-review.json', 'design.pen'],
+  ])(
+    '%s writes a NAMED skip artifact when filters exclude every injected file',
+    (skill, stateName, excluded) => {
+      const repo = mkdtempSync(join(tmpdir(), 'checklist-override-skip-'));
+      dirs.push(repo);
+      execFileSync('git', ['init', '-q'], { cwd: repo });
+      writeFileSync(join(repo, 'guard.config.json'), JSON.stringify({}));
+      writeFileSync(join(repo, excluded), '# excluded\n');
+      const script = fileURLToPath(
+        new URL(`../../skills/${skill}/scripts/checklist.mjs`, import.meta.url),
+      );
+      const r = spawnSync('node', [script, 'generate'], {
+        cwd: repo,
+        encoding: 'utf8',
+        env: { ...process.env, DEVKIT_REVIEW_STAGED_FILES: JSON.stringify([excluded]) },
+      });
+      expect(r.status, r.stderr).toBe(0);
+      const state = JSON.parse(readFileSync(join(repo, '.claude', stateName), 'utf8'));
+      expect(state.items).toEqual([]);
+      expect(state.skipped).toContain('excluded');
+    },
+  );
 
   it('generate with a $(…)-named staged file: scanned via argv git, no shell side effect', () => {
     const repo = repoWithCraftedFile();
