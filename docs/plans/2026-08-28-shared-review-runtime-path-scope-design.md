@@ -50,8 +50,7 @@ Three shapes were evaluated:
         "**/node_modules/**",
         "dist/**",
         "**/dist/**",
-        "coverage/**",
-        "**/coverage/**"
+        "coverage/**"
       ]
     }
   }
@@ -63,7 +62,9 @@ required and non-empty, `exclude` may be empty, patterns are repository-relative
 exclusion wins. The configured policy is authoritative across the repository and is not intersected
 with `sourceExtensions` as a global eligibility test. The repository-wide `**` sentinel includes
 dot-prefixed files and directories at any depth. Credential-bearing environment files and generated,
-dependency, build, and coverage directories are excluded at both repository and workspace depth.
+dependency, and build directories are excluded at both repository and workspace depth. Coverage output
+is excluded at the repository root only: a `**/coverage/**` glob also matches authored source
+directories named `coverage/`, which would then get no reviewer at all.
 
 After shared eligibility:
 
