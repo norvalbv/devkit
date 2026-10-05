@@ -387,7 +387,7 @@ describe('timeout boundary values (sc-1317 follow-up)', () => {
  */
 describe('recordAgentRun', () => {
   it('emits one judge_exec and stores a transcript the ref resolves to', () => {
-    const ref = recordAgentRun({
+    const { ref, telemetry } = recordAgentRun({
       label: 'prior-art',
       output: '{"verdict":"DISSOLVE_FRAME"}',
       model: 'opus',
@@ -404,6 +404,7 @@ describe('recordAgentRun', () => {
       output_chars: 28,
     });
     expect(ref).toBe(ev?.transcript_ref);
+    expect(telemetry).toBe('written');
     // The ref must resolve through the SAME reader `guard-review transcript <ref>` uses.
     expect(readTranscript(ref as string)).toContain('{"verdict":"DISSOLVE_FRAME"}');
   });
@@ -433,14 +434,14 @@ describe('recordAgentRun', () => {
   it('classifies a no-output run as empty, never as a silent ok', () => {
     // A blanket 'ok' default would make a dead run indistinguishable from a real success except by
     // inferring from the absent transcript_ref, inflating the label's success rate.
-    const ref = recordAgentRun({ label: 'prior-art', model: 'opus' });
+    const { ref } = recordAgentRun({ label: 'prior-art', model: 'opus' });
     expect(ref).toBeNull();
     expect(events()[0]).toMatchObject({ judge: 'prior-art', outcome: 'empty', output_chars: 0 });
     expect(events()[0]).not.toHaveProperty('transcript_ref');
   });
 
   it('treats a whitespace-only response as empty — the same predicate execJudge applies', () => {
-    expect(recordAgentRun({ label: 'prior-art', output: '  \n\t ' })).toBeNull();
+    expect(recordAgentRun({ label: 'prior-art', output: '  \n\t ' }).ref).toBeNull();
     expect(events()[0]).toMatchObject({ outcome: 'empty' });
   });
 
@@ -454,8 +455,18 @@ describe('recordAgentRun', () => {
     // what takes telemetrySink() to undefined. Never restore that env here — afterEach only tracks
     // ENV_KEYS, so clearing it would leak an opted-IN default into every later test file.
     delete process.env.DEVKIT_GATE_EVENTS;
-    expect(recordAgentRun({ label: 'prior-art', output: 'x' })).toBeNull();
+    expect(recordAgentRun({ label: 'prior-art', output: 'x' })).toEqual({
+      ref: null,
+      telemetry: 'disabled',
+    });
     expect(events()).toEqual([]);
+  });
+
+  it('reports a failed append rather than claiming the line was written', () => {
+    const notADir = path.join(dir, 'file');
+    writeFileSync(notADir, 'x');
+    process.env.DEVKIT_GATE_EVENTS = path.join(notADir, 'events.jsonl');
+    expect(recordAgentRun({ label: 'prior-art', output: '' }).telemetry).toBe('failed');
   });
 });
 

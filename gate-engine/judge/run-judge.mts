@@ -33,7 +33,7 @@ import {
   parseCodexUsage,
   unwrapCodexResult,
 } from './codex/result.mts';
-import { emitGateEvent } from './gate-events.mts';
+import { emitGateEvent, type TelemetryStatus } from './gate-events.mts';
 import { trackJudge } from './process/heartbeat.mts';
 import { withoutGitEnv } from './judge-isolation.mts';
 import {
@@ -198,9 +198,15 @@ function priorArtTelemetry(output: string) {
  * so a Task-dispatched agent and a spawned judge produce the same event shape.
  *
  * Best-effort by construction — emitGateEvent/saveTranscriptUnique never throw and no-op without a
- * sink, so no caller's contract is touched. Returns the transcript ref, or null when none was stored.
+ * sink, so no caller's contract is touched. Returns the transcript ref (null when none was stored)
+ * and what became of the event line.
  */
-export function recordAgentRun(opts: RecordAgentRunOpts): string | null {
+export interface AgentRunRecord {
+  ref: string | null;
+  telemetry: TelemetryStatus;
+}
+
+export function recordAgentRun(opts: RecordAgentRunOpts): AgentRunRecord {
   // Same predicate execJudge applies to a judge's stdout, so both entry points name a no-output run
   // identically rather than one of them calling it a success.
   const outcome = opts.outcome ?? (opts.output?.trim() ? 'ok' : 'empty');
@@ -216,7 +222,7 @@ export function recordAgentRun(opts: RecordAgentRunOpts): string | null {
   );
   if (opts.label === 'prior-art' && outcome === 'ok')
     Object.assign(extra, priorArtTelemetry(opts.output ?? ''));
-  emitGateEvent({
+  const telemetry = emitGateEvent({
     ...extra,
     type: 'judge_exec',
     judge: opts.label,
@@ -227,7 +233,7 @@ export function recordAgentRun(opts: RecordAgentRunOpts): string | null {
     output_chars: opts.output?.length ?? 0,
     ...(ref ? { transcript_ref: ref } : {}),
   });
-  return ref;
+  return { ref, telemetry };
 }
 
 /**

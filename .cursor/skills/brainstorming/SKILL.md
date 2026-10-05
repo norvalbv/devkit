@@ -53,19 +53,23 @@ Start by understanding the current project context, then ask questions one at a 
   - `INSUFFICIENT_EVIDENCE` / `aborted` / invalid JSON → say "prior art unverified" and continue;
     never treat it as clearance or as a blocker.
   The eventual plan records one line — `Prior-art: <verdict> · followed | overridden: <reason> |
-  unverified` (or the skip note) — and at plan-exit `feature-critique` receives a bounded 3-line
+  unverified · run=<invocation_id>` (or the skip note) — and at plan-exit `feature-critique` receives a bounded 3-line
   summary only (verdict, framing, one citation), never the full JSON.
   Then RECORD the run. The subagent is dispatched through the Task tool, so no gate spawns it and
   no telemetry captures it otherwise — production prior-art is invisible in the dashboard while its
-  bench runs are fully recorded. Pipe its raw JSON verbatim (quoted heredoc, so no JSON content can
-  be reinterpreted by the shell), passing the SAME disposition you wrote in the plan line:
+  bench runs are fully recorded. Before dispatching, write the exact Task prompt to a temp file and
+  dispatch that same text. Then pipe the raw JSON verbatim (quoted heredoc, so no JSON content can
+  be reinterpreted by the shell), passing the request file and the SAME disposition as the plan line:
 
   ```
-  guard-review record-agent prior-art --model opus \
+  guard-review record-agent prior-art --model opus --request-file "$PRIOR_ART_REQUEST" \
     --disposition followed --reason "<one line>" <<'PRIOR_ART_JSON'
   {…the subagent's response, unmodified…}
   PRIOR_ART_JSON
   ```
+
+  It prints one JSON receipt; copy its `invocation_id` into the plan line as `run=<id>`, so a later
+  correction can cite the run. `request_sha256` covers the file's bytes, not what Task dispatched.
 
   `--model` mirrors the `model:` frontmatter of `agents/prior-art.md` (read it rather than trusting
   this example); every flag is optional and an omitted one is left off the event, never guessed.

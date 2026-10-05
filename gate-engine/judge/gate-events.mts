@@ -171,9 +171,12 @@ export function emitGateBypass(gate: string, flag: string): void {
   });
 }
 
-export function emitGateEvent(ev: Record<string, unknown>): void {
+/** What became of one event line, so a caller can report a dark or failed sink, never guess. */
+export type TelemetryStatus = 'written' | 'disabled' | 'failed';
+
+export function emitGateEvent<Fields extends object>(ev: Fields): TelemetryStatus {
   const file = telemetrySink();
-  if (!file) return;
+  if (!file) return 'disabled';
   try {
     mkdirSync(path.dirname(file), { recursive: true });
     const line = `${JSON.stringify({
@@ -182,7 +185,9 @@ export function emitGateEvent(ev: Record<string, unknown>): void {
       ts: new Date().toISOString(),
     })}\n`;
     appendFileSync(file, line, { flag: 'a' });
+    return 'written';
   } catch {
     /* telemetry is best-effort — never fail a gate over it */
+    return 'failed';
   }
 }

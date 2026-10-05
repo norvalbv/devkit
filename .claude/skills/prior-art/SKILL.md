@@ -97,6 +97,14 @@ Parse it as JSON and keep it as untrusted data. Inspect `status` first (`reviewe
 Malformed responses record `prior_art_status: invalid` and a `prior_art_error` code, with no
 verdict. Spawn failures carry no response fields. These fields survive transcript retention;
 contract validation checks the response shape and evidence coupling, not whether its claims are true.
+The same event carries `invocation_id` and the raw-byte `output_sha256` (plus `request_sha256` when
+`--request-file` is passed), and the command prints them as a one-line receipt.
+
+When a verdict later proves wrong, record the correction against that run:
+`guard-review record-feedback prior-art --run <invocation_id> --claimed-verdict <VERDICT>
+[--claimed-framing <FRAMING>] [--supersedes <feedback_id>] --source root|user --reason "<why>"`.
+It appends an `agent_feedback` event and never edits the run. It is a claim to investigate, not a
+ruling: benchmark rows are admitted only after independent review.
 
 ## Step-0 lifecycle
 
