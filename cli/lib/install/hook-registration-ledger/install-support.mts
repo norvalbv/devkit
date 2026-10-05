@@ -45,16 +45,20 @@ export const ledgerOf = (
 export const ownedKey = (entry: HookRegistrationOwnershipV1) =>
   JSON.stringify([entry.provider, entry.destinationRel, entry.registrationId]);
 
-const RETIRED_COMMANDS: Partial<Record<string, Partial<Record<AgentProvider, readonly string[]>>>> =
-  {
-    fallow: {
-      claude: [
-        'bash "$CLAUDE_PROJECT_DIR/.claude/hooks/fallow-gate.sh"',
-        'FALLOW_GATE_COMMIT_ONLY=1 bash "$CLAUDE_PROJECT_DIR/.claude/hooks/fallow-gate.sh"',
-      ],
-      cursor: ['.cursor/hooks/fallow-gate.sh'],
-    },
-  };
+// Exact spellings only: devkit's one env prefix, optional bash/sh, then the script bare, as `./`, or
+// under a double-quoted CLAUDE_PROJECT_DIR. Anything else (BASH_ENV=, PATH=) may run consumer code.
+const retiredFallowGate = (dir: string) => {
+  const script = String.raw`\.${dir}/hooks/fallow-gate\.sh`;
+  const projectDir = String.raw`(?:\$CLAUDE_PROJECT_DIR|\$\{CLAUDE_PROJECT_DIR\})`;
+  const path = String.raw`(?:(?:\./)?${script}|"${projectDir}/${script}"|"${projectDir}"/${script})`;
+  return new RegExp(String.raw`^(?:FALLOW_GATE_COMMIT_ONLY=1 )?(?:(?:ba)?sh )?${path}$`);
+};
+const RETIRED_SCRIPT = new Map<AgentProvider, RegExp>([
+  ['claude', retiredFallowGate('claude')],
+  ['cursor', retiredFallowGate('cursor')],
+]);
+const isRetired = (provider: AgentProvider, command: string) =>
+  RETIRED_SCRIPT.get(provider)?.test(command) ?? false;
 
 /** One handler a ledger row proves devkit wrote: its command AND where the row says it sits. */
 export interface OwnedHandler {
@@ -63,21 +67,14 @@ export interface OwnedHandler {
   command: string;
 }
 
-/** Reclaim what a previous devkit release wrote here. RETIRED_COMMANDS accepts the literal anywhere
- * (a pre-ledger config names no location, sc-1321); `owned` stays inside the event its row names. */
+/** Reclaim fallow's agent gate anywhere, whoever wrote it (devkit's staged wrapper replaces it),
+ * plus what a previous devkit release wrote; `owned` stays inside the event its row names. */
 export function stripReclaimedCommands(
   document: unknown,
   provider: AgentProvider,
   owned: readonly OwnedHandler[] = [],
 ) {
-  const commands = new Set(
-    Object.values(RETIRED_COMMANDS).flatMap(
-      (commandsByProvider) => commandsByProvider?.[provider] ?? [],
-    ),
-  );
-  // The old `provider === 'codex'` clause was unreachable (no codex arm, so `!commands.size` won),
-  // and codex DOES need the superseded arm.
-  if (!commands.size && !owned.length) return { document, changed: false };
+  if (!RETIRED_SCRIPT.has(provider) && !owned.length) return { document, changed: false };
   const root = dataRecord(document);
   const hooks = dataRecord(root?.hooks);
   if (!root || !hooks) return { document, changed: false };
@@ -91,7 +88,7 @@ export function stripReclaimedCommands(
         const command = String(item?.command ?? '');
         // Cursor keeps a FLAT list per event, so the event alone locates a handler.
         return (
-          !commands.has(command) &&
+          !isRetired(provider, command) &&
           !owned.some((handler) => handler.event === event && handler.command === command)
         );
       });
@@ -113,7 +110,7 @@ export function stripReclaimedCommands(
       const kept = handlers.filter((entry) => {
         const command = String(dataRecord(entry)?.command ?? '');
         return (
-          !commands.has(command) &&
+          !isRetired(provider, command) &&
           !owned.some(
             (handler) =>
               handler.event === event &&
