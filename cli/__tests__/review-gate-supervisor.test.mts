@@ -437,36 +437,35 @@ describe('review gate supervisor', () => {
     // 600s, not 5s: the ceiling must be far enough out that a 124 here can ONLY have come from the
     // post-leader-exit reap. Under the old behaviour this test passed by WAITING for expiry, which
     // is exactly the bug — on a ship the ceiling is an hour (sc-1199).
-    const result = supervisor(
-      '600',
-      '--',
+    const notice = join(dirname(fixture.ready), 'reaped');
+    const result = spawnSync(
       process.execPath,
-      fixture.script,
-      fixture.ready,
-      fixture.signal,
+      [SUPERVISOR, '600', '--', process.execPath, fixture.script, fixture.ready, fixture.signal],
+      { encoding: 'utf8', env: { ...process.env, DEVKIT_GATE_REAP_NOTICE_FILE: notice } },
     );
 
     expect(result.status, result.stderr).toBe(124);
+    // The runner's banner keys on this file to say "not the ceiling" for a 124 that never expired.
+    expect(existsSync(notice)).toBe(true);
     expect(readFileSync(fixture.signal, 'utf8')).toBe('SIGTERM');
     expect(Date.now() - started).toBeLessThan(WAIT_MS);
   });
 
   it('preserves a non-zero leader status while reaping its lingering descendant', () => {
     const fixture = backgroundFixture(mkTmp('devkit-review-rejection-'), 1);
+    const notice = join(dirname(fixture.ready), 'reaped');
     const started = Date.now();
-    const result = supervisor(
-      '600',
-      '--',
+    const result = spawnSync(
       process.execPath,
-      fixture.script,
-      fixture.ready,
-      fixture.signal,
+      [SUPERVISOR, '600', '--', process.execPath, fixture.script, fixture.ready, fixture.signal],
+      { encoding: 'utf8', env: { ...process.env, DEVKIT_GATE_REAP_NOTICE_FILE: notice } },
     );
 
     // The load-bearing assertion of sc-1199: a gate that REJECTED must still report its rejection.
     // Reporting 124 here would tell a shipping agent "re-run to converge" for a verdict that will
     // never converge on its own, and would mis-tag the ship telemetry as a timeout.
     expect(result.status, result.stderr).toBe(1);
+    expect(existsSync(notice)).toBe(false);
     expect(readFileSync(fixture.signal, 'utf8')).toBe('SIGTERM');
     expect(Date.now() - started).toBeLessThan(WAIT_MS);
   });
