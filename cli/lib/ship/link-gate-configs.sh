@@ -53,6 +53,18 @@ gate_projection_listed() {
   return 1
 }
 
+# gate_index_has_no_usable_chunks <local-index> <main-index>
+# True only when the local index is readable and empty while the main one has usable chunks: a
+# schema-only worktree index would otherwise shadow the populated one and the matcher compares nothing.
+gate_index_has_no_usable_chunks() {
+  local emitter local_n main_n
+  emitter=$(gate_config_path_emitter)
+  local_n=$(node "$emitter" "$1" --usable-chunks 2>/dev/null) || return 1
+  [ "$local_n" = 0 ] || return 1
+  main_n=$(node "$emitter" "$2" --usable-chunks 2>/dev/null) || return 1
+  case "$main_n" in '' | 0 | *[!0-9]*) return 1 ;; esac
+}
+
 gate_config_path_emitter() {
   local self_dir emitter
   self_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -162,6 +174,7 @@ link_untracked_gate_configs() {
     while IFS= read -r line; do [ -n "$line" ] && branch_local+=("$line"); done < <(
       node "$emitter" "$candidate_root" --branch 2>/dev/null
     )
+    IFS= read -r -d '' index_rel < <(node "$emitter" "$candidate_root" indexPath --null 2>/dev/null) || index_rel=
   fi
   if is_review_projection_purpose "$purpose"; then
     IFS= read -r -d '' index_rel < <(node "$emitter" "$root" indexPath --null 2>/dev/null) || index_rel=
@@ -206,6 +219,11 @@ link_untracked_gate_configs() {
       from=$main_root
       gate_projection_listed "$rel" ${branch_local[@]+"${branch_local[@]}"} && from=$root
       source=$(gate_link_source "$root" "$from" "$rel" prefer-populated) || continue
+      if [ -n "$index_rel" ] && [ "$rel" = "$index_rel" ] && [ "$source" = "$root/$rel" ] &&
+        [ "$from" != "$root" ] && gate_index_has_no_usable_chunks "$source" "$from/$rel"; then
+        source=$from/$rel
+        echo "↳ ship: $rel in this checkout has no usable chunks — linked the main checkout's populated index instead" >&2
+      fi
       if [ -z "$stale_hit" ]; then
         [ ! -e "$wt/$rel" ] && [ ! -L "$wt/$rel" ] || continue
         linked+=("$rel")
