@@ -36,9 +36,11 @@ import {
 } from 'node:fs';
 import path from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
+import { z } from 'zod';
 import { CORRECTNESS_OVERRIDES_FILE as OVERRIDES_FILE } from '../deterministic/gate-inputs.mts';
 import { diffCacheIdentity } from '../judge/diff-focus.mts';
 import { emitGateEvent } from '../judge/gate-events.mts';
+import type { VerdictMeta } from '../judge/verdict-store.mts';
 import { reviewBaseContext, shortSha } from './evidence/base-context.mts';
 import { shellWord } from './valve/shell-word.mts';
 import {
@@ -106,6 +108,50 @@ export function envOverrides(env: NodeJS.ProcessEnv = process.env): Record<strin
     if (m && value?.trim()) out[m[1]] = value.trim();
   }
   return out;
+}
+
+/** A recorded waiver stands while the store or the env channel still gives it a rationale. */
+export function isLiveWaiver(
+  store: Record<string, OverrideEntry>,
+  envO: Record<string, string>,
+  fp: string,
+): boolean {
+  return Boolean(envO[fp] || store[fp]?.rationale?.trim());
+}
+
+/** A waiver a cached PASS rests on: named when the PASS replays, and voids the PASS once revoked. */
+export interface CachedWaiver {
+  lens: string;
+  fingerprint: string;
+}
+
+const cachedWaiversSchema = z
+  .array(z.object({ lens: z.string(), fingerprint: z.string().regex(FINGERPRINT_RE) }))
+  .default([]);
+
+/** The waivers a cached PASS was earned under: absent → none, malformed → null. */
+export function cachedWaivers(meta: VerdictMeta): CachedWaiver[] | null {
+  return cachedWaiversSchema.safeParse(meta.waivers).data ?? null;
+}
+
+/** A cache-entry predicate: false once a waiver the PASS rests on is revoked or unreadable. */
+export function cachedWaiversLive(
+  cwd: string,
+  env: NodeJS.ProcessEnv = process.env,
+): (meta: VerdictMeta) => boolean {
+  const envO = envOverrides(env);
+  let store: Record<string, OverrideEntry> | undefined;
+  return (meta) => {
+    const waivers = cachedWaivers(meta);
+    if (waivers?.length === 0) return true;
+    store ??= loadOverrides(cwd);
+    return Boolean(waivers?.every((w) => isLiveWaiver(store ?? {}, envO, w.fingerprint)));
+  };
+}
+
+/** The line naming a waiver a PASS rests on; `tail` is the rationale, or the cached-replay note. */
+export function overriddenLine(label: string, lens: string, fp: string, tail: string): string {
+  return stripVTControlCharacters(`guard-review: ${label} — ${lens} overridden [${fp}]${tail}`);
 }
 
 /** Full read-modify-write of the override store. Exported so `waive` (waive.mts) writes through
@@ -250,7 +296,7 @@ export function reconcile(
         changed = true;
       }
       const entry = store[fp];
-      if (entry?.rationale?.trim())
+      if (entry && isLiveWaiver(store, envO, fp))
         suppressed.push({
           lens,
           fingerprint: fp,
@@ -377,9 +423,7 @@ export function applyOverrideValve(
   if (suppressed.length > 0) res.waivers = suppressed;
   for (const s of suppressed) {
     disposition.set(s.lens, 'waived');
-    console.error(
-      `guard-review: ${sel.reviewer.name} — ${s.lens} overridden [${s.fingerprint}]: ${stripVTControlCharacters(s.rationale)}`,
-    );
+    console.error(overriddenLine(sel.reviewer.name, s.lens, s.fingerprint, `: ${s.rationale}`));
   }
   for (const b of blocking) disposition.set(b.lens, 'blocking');
   if (blocking.length === 0) {
