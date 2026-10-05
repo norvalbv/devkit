@@ -18,7 +18,7 @@ import { isSafeAgentAssetPath } from '../install/agent-asset-manifest/lifecycle.
 import { readAgentAssetManifest } from '../install/agent-asset-manifest/reader.mjs';
 import { agentAssetDir, projectedAssetRel } from '../install/agent-assets/agent-assets.mjs';
 import { PKG, registrationsFor } from '../install/hook-registration-ledger/registrations.mjs';
-import { checkHookRegistrations } from '../install/install-hooks.mjs';
+import { checkHookRegistrations } from '../install/hook-registration-ledger/check.mjs';
 import { bundledNames } from '../sync-manifest.mjs';
 import { check } from './check-result.mjs';
 const AGENT_ASSET_CHECKS = {
@@ -249,10 +249,12 @@ export function checkRegistrations(cwd, hookComponents, targets, overlay = false
     catch (error) {
         return check('hook registrations', 'DRIFT', error instanceof Error ? error.message : String(error), 'inspect or remove the invalid hook ownership ledger, then run `devkit init`', false);
     }
-    const { ok, missing } = result;
+    const { ok, missing, advisories } = result;
+    if (ok && advisories.length)
+        return check('hook registrations', 'DRIFT', `retired hook in a committed file: ${advisories.join(', ')}`, 'remove the fallow-gate.sh hook from that file (overlay never edits a committed file)', false, true);
     if (ok)
         return check('hook registrations', 'OK', `${hookComponents.join(', ')} registered`);
-    return check('hook registrations', 'DRIFT', `${missing.length} provider registration issue(s)`, 'run `devkit init` to re-register', true);
+    return check('hook registrations', 'DRIFT', `${missing.length} provider registration issue(s): ${missing.join(', ')}`, 'run `devkit init` to re-register', true);
 }
 /** Resolve on disk the target of every hook command devkit REGISTERS, from `scriptRel` data rather
  * than shell text. The check this replaces went through packageDir(), already inside dist/. */

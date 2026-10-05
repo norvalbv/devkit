@@ -99,8 +99,8 @@ _ship_classify_binary() {
 # it would turn ships that work today into hard aborts. That is the "fires on every legitimate
 # concurrent edit of a shared file" failure base-drift-surfaced-at-read-time refuses, and it would buy
 # nothing: whole-file replacement has no partial-revert hazard, because there is no surviving base
-# region to lose. The residual cost is narrow and booked honestly: when BOTH sides changed such a
-# path there is no merge to attempt, so the caller's copy wins and ship_warn_whole_file_drift says so.
+# region to lose. When BOTH sides changed such a path there is no merge to attempt, so
+# ship_refuse_whole_file_drift refuses it, as git does for a binary conflict.
 # A path only the BASE changed is left alone entirely — see ship_stage_whole_file.
 #
 # Classified from the UNION of BOTH anchorings rather than one. A path can be binary at BASE and text
@@ -235,7 +235,7 @@ _ship_tree_entry() {
 # database before either use, so nothing that happens to the working tree afterwards can change it.
 # The worktree is cut from BASE, so a path this function skips simply keeps the base's version.
 ship_stage_whole_file() {
-  local root=$1 wt=$2 patch_base=$3 path here fork here_rc
+  local root=$1 wt=$2 patch_base=$3 path here fork tip here_rc
   shift 3
   for path in "$@"; do
     here_rc=0
@@ -247,6 +247,12 @@ ship_stage_whole_file() {
     [ "$here_rc" -eq 0 ] || here=
     fork=$(_ship_tree_entry "$root" "$patch_base" "$path") || fork=
     [ "$here" != "$fork" ] || continue          # caller never touched it — leave the base's version
+    # Re-checked here because a late edit can turn a path the preflight passed into a both-sides one.
+    tip=$(_ship_tree_entry "$wt" HEAD "$path") || tip=
+    if [ -z "${WHOLE_REPLACE_ALLOWED:-}" ] && [ "$fork" != "$tip" ] && [ "$here" != "$tip" ]; then
+      echo "ship: $path changed in the caller checkout while it was being staged — retry the same command" >&2
+      return 1
+    fi
     if [ -z "$here" ]; then
       # Present at the fork point, gone from the caller's tree: an explicit deletion to carry over.
       git -C "$wt" update-index --force-remove -- "$path" || return 1
@@ -332,30 +338,46 @@ ship_untracked_matches_base() {
   [ "$base_mode" = "$here_mode" ] && [ "$base_oid" = "$here_oid" ]
 }
 
-# ship_warn_whole_file_drift <root> <base> <patch-base> <base-ref>
-# The carve-out has one knowing gap left: when BOTH sides changed a non-mergeable path there is no
-# merge to attempt, so the caller's copy replaces the base's wholesale and the base's version is lost
-# exactly as it was before sc-2451. A path only the BASE changed is not affected — ship_stage_whole_file
-# leaves those alone — so only the genuine both-sides case is worth saying, and saying more would
-# retrain the reader to ignore it.
+# ship_refuse_whole_file_drift <root> <base> <patch-base> <base-ref> [--advise]
+# Refuse a non-mergeable path BOTH sides changed: staging it whole-file would revert the base's change.
+# Decides with staging's own entry readers, so it refuses exactly what ship_stage_whole_file would replace.
 #
-# Advisory rather than blocking, for the same reason the carve-out exists: a block here would fire on
-# every legitimate concurrent edit of a shared asset. But it must never be SILENT, because a reviewer
-# noticing by luck is the failure this whole ticket is about. Being advisory, it is also allowed to
-# read the working tree a second time — a stale answer here costs a line of output, never content.
-ship_warn_whole_file_drift() {
-  local root=$1 base=$2 patch_base=$3 base_ref=$4 path replaced=()
+# --advise, or GUARD_SHIP_REPLACE_OK, prints the replacement as a warning and proceeds.
+# Sets WHOLE_REPLACE_ALLOWED for that case, which ship_stage_whole_file's own re-check honours.
+ship_refuse_whole_file_drift() {
+  local root=$1 base=$2 patch_base=$3 base_ref=$4 advise=${5:-} path here fork tip here_rc replaced=()
+  WHOLE_REPLACE_ALLOWED=
+  if [ -n "$advise" ] || ship_truthy "${GUARD_SHIP_REPLACE_OK:-}"; then WHOLE_REPLACE_ALLOWED=1; fi
   [ "$patch_base" != "$base" ] || return 0
   for path in ${WHOLE_POSITIVES[@]+"${WHOLE_POSITIVES[@]}"}; do
-    git -C "$root" diff --quiet "$patch_base" -- ":(top,literal)$path" 2>/dev/null && continue
-    git -C "$root" diff --quiet "$patch_base" "$base" -- ":(top,literal)$path" 2>/dev/null && continue
+    here_rc=0
+    here=$(_ship_here_entry "$root" "$path") || here_rc=$?
+    if [ "$here_rc" -gt 1 ]; then
+      echo "ship: $path changed in the caller checkout while it was being staged — retry the same command" >&2
+      return 1
+    fi
+    [ "$here_rc" -eq 0 ] || here=
+    fork=$(_ship_tree_entry "$root" "$patch_base" "$path") || fork=
+    tip=$(_ship_tree_entry "$root" "$base" "$path") || tip=
+    [ "$here" != "$fork" ] && [ "$fork" != "$tip" ] && [ "$here" != "$tip" ] || continue
     replaced+=("$path")
   done
   [ "${#replaced[@]}" -gt 0 ] || return 0
-  echo "⚠️  ship: you and origin/$base_ref both changed these non-mergeable path(s) since ${patch_base:0:7}:" >&2
-  for path in "${replaced[@]}"; do printf '     %q\n' "$path" >&2; done
-  echo "     Binary, symlink and submodule entries cannot be three-way merged, so your copy replaces" >&2
-  echo "     the base's wholesale. Check you are not discarding the base's version of them." >&2
+  if [ -n "$WHOLE_REPLACE_ALLOWED" ]; then
+    [ -n "$advise" ] || echo "GUARD_SHIP_REPLACE_OK: replacing origin/$base_ref's copy of the path(s) below with yours." >&2
+    echo "⚠️  ship: you and origin/$base_ref both changed these non-mergeable path(s) since ${patch_base:0:7}:" >&2
+    for path in "${replaced[@]}"; do printf '     %q\n' "$path" >&2; done
+    echo "     Binary, symlink and submodule entries cannot be three-way merged, so your copy replaces" >&2
+    echo "     the base's wholesale. Check you are not discarding the base's version of them." >&2
+    return 0
+  fi
+  echo "ship: you and origin/$base_ref both changed these non-mergeable path(s) since ${patch_base:0:7}:" >&2
+  for path in "${replaced[@]}"; do _ship_path_with_commits "$root" "$base" "$patch_base" "$path"; done
+  echo "  Binary, symlink and submodule entries cannot be three-way merged — shipping would replace the" >&2
+  echo "  base's version with yours and revert the commits above." >&2
+  echo "  Rebase or merge origin/$base_ref into this checkout and redo your change on top of its copy," >&2
+  echo "  or, if your copy is meant to replace it, re-run with GUARD_SHIP_REPLACE_OK=1." >&2
+  return 1
 }
 
 # ship_apply_text_arm <root> <base> <patch_base> <base_ref> <patch> <err> --worktree <wt> | --index <file>

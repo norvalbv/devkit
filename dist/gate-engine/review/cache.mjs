@@ -9,14 +9,17 @@
  */
 import { emitGateEvent } from '../judge/gate-events.mjs';
 import { clearEntries, devkitDataFile, loadEntries, saveEntries, } from '../judge/verdict-store.mjs';
+import { cachedWaiversLive } from './overrides.mjs';
 const CACHE_FILE = 'review-cache.json';
 /** Absolute cache-file path for a consumer cwd (main-checkout `.devkit/review-cache.json`). */
 export function cachePath(cwd) {
     return devkitDataFile(cwd, CACHE_FILE);
 }
-/** entries map (key → {at, model}); corrupt/absent/foreign-version → {} (fails toward re-review). */
+/** entries map (key → {at, model}); corrupt/absent/foreign-version → {} (fails toward re-review).
+ * A PASS earned under a waiver since revoked is dropped too, so the diff is judged again. */
 export function loadCache(cwd) {
-    return loadEntries(cachePath(cwd));
+    const live = cachedWaiversLive(cwd);
+    return Object.fromEntries(Object.entries(loadEntries(cachePath(cwd))).filter(([, m]) => live(m)));
 }
 /**
  * Record PASS keys (checkpointed per completed cascade). Prunes to the newest entries.

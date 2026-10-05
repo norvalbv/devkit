@@ -13,6 +13,7 @@ import { syncAgents } from '../commands/sync/sync-agents.mjs';
 import { syncSkills } from '../commands/sync/sync-skills.mjs';
 import { AGENT_TARGETS, normalizeSelection, overlayStructureNotice, structureCmdFor, } from './components.mjs';
 import { detectGitRoot } from './detect-git-root.mjs';
+import { hooksDir, nativeHooksDir } from './doctor/hooks-path.mjs';
 import { packageDir, readJson, writeIfAbsent } from './fs-helpers.mjs';
 import { cutStructureBaselines } from './generate/cut-structure-baselines.mjs';
 import { isTracked, trackedPathPredicate } from './git-tracked.mjs';
@@ -94,32 +95,38 @@ export function overlayHookScriptDir(origHooksPath) {
     }
     return '.git/hooks';
 }
-// The repo's existing hooks (names) in `scriptDir` — what we must keep running when we take over
-// core.hooksPath.
-function detectExistingHooks(gitRoot, scriptDir) {
-    const abs = join(gitRoot, scriptDir);
-    if (!existsSync(abs))
-        return [];
-    return readdirSync(abs).filter((f) => GIT_HOOKS.has(f));
+// The repo's own hooks we must keep running once we take over core.hooksPath. `.git/hooks` names
+// git's own dir in the COMMON dir — the one chainWord runs at commit time, linked worktrees included.
+function repoHooks(gitRoot, origHooksPath) {
+    const scriptDir = overlayHookScriptDir(origHooksPath);
+    const native = /^(?:\.\/)?\.git\/hooks\/*$/.test(scriptDir);
+    const scriptsAbs = native ? nativeHooksDir(gitRoot) : hooksDir(gitRoot, scriptDir);
+    // Never "no hooks" on an unanswerable git: that would silently drop the repo's own hooks.
+    if (!scriptsAbs)
+        throw new Error(`could not resolve the git common dir of ${gitRoot}; retry`);
+    const names = existsSync(scriptsAbs) ? readdirSync(scriptsAbs) : [];
+    const gitRuns = !HUSKY_UNDERSCORE_RE.test(origHooksPath);
+    return { scriptDir, scriptsAbs, gitRuns, existing: names.filter((f) => GIT_HOOKS.has(f)) };
 }
 /** The overlay pre-commit as written: the gates plus the linked-worktree prelude (sc-4157), whose
  * projection check is rendered from the gate inputs of the overlay installed at `root`. */
-export function buildOverlayPreCommit(sel, chainTarget, pkgRel, { root, fallow = false, stack = '' }) {
+export function buildOverlayPreCommit(sel, chainTarget, pkgRel, opts) {
+    const { root, fallow = false, stack = '', gitRuns = false } = opts;
     const notice = overlayStructureNotice(stack);
     const prelude = `${projectionPrelude(root, pkgRel)}${notice ? `\necho "${notice}"` : ''}`;
     const structureCmd = sel.structure ? structureCmdFor(stack) : undefined;
-    return buildOverlayHook({ ...sel, structureCmd }, chainTarget, pkgRel, { fallow, prelude });
+    const hookOpts = { fallow, prelude, gitRuns };
+    return buildOverlayHook({ ...sel, structureCmd }, chainTarget, pkgRel, hookOpts);
 }
 // Take over core.hooksPath (at the GIT ROOT — repo-wide) and write our hooks dir. CRITICAL: git
 // then runs ONLY our dir, so we wrap EVERY hook the repo already had (pre-push, commit-msg, …) as
 // a pass-through, or they'd silently stop. pre-commit additionally runs devkit's gates (cd'd into
 // the package for a monorepo) before chaining to the repo's pre-commit.
 function installOverlayHook(gitRoot, pkgRel, sel, origHooksPath, dryRun, { fallow, stack }) {
-    const scriptDir = overlayHookScriptDir(origHooksPath);
-    const existing = detectExistingHooks(gitRoot, scriptDir);
+    const { scriptDir, scriptsAbs, gitRuns, existing } = repoHooks(gitRoot, origHooksPath);
     const preCommitChain = existing.includes('pre-commit') ? `${scriptDir}/pre-commit` : '';
     const passthrough = existing.filter((h) => h !== 'pre-commit' && h !== 'commit-msg');
-    const siblings = { gitRoot, scriptDir, existing, selection: sel, pkgRel };
+    const siblings = { gitRoot, scriptDir, scriptsAbs, gitRuns, existing, selection: sel, pkgRel };
     const commitMsgLine = describeOverlayCommitMsg(syncOverlaySiblingHooks(siblings, { dryRun: true }).plan);
     const hooksPath = overlayHooksPath(gitRoot);
     if (dryRun) {
@@ -130,7 +137,7 @@ function installOverlayHook(gitRoot, pkgRel, sel, origHooksPath, dryRun, { fallo
     mkdirSync(dir, { recursive: true });
     // pre-commit: devkit gates (+ optional fallow gate) + chain to the repo's pre-commit (if any).
     const pre = join(dir, 'pre-commit');
-    writeFileSync(pre, buildOverlayPreCommit(sel, preCommitChain, pkgRel, { root: gitRoot, fallow, stack }));
+    writeFileSync(pre, buildOverlayPreCommit(sel, preCommitChain, pkgRel, { root: gitRoot, fallow, stack, gitRuns }));
     chmodSync(pre, 0o755);
     // every OTHER existing hook → pass-through (commit-msg: devkit's message judges, sc-1794).
     syncOverlaySiblingHooks(siblings, { dryRun: false });
@@ -162,13 +169,13 @@ export function syncOverlayHook(gitRoot, cwd, cfg, { dryRun }) {
     // Use the RECORDED origHooksPath — post-install core.hooksPath is devkit's own, so reading it
     // live would chain the overlay to ITSELF. Fall back to the same recovery init uses.
     const origHooksPath = cfg.origHooksPath ?? captureOrigHooksPath(gitRoot, cwd);
-    const scriptDir = overlayHookScriptDir(origHooksPath);
-    const existing = detectExistingHooks(gitRoot, scriptDir);
+    const { scriptDir, scriptsAbs, gitRuns, existing } = repoHooks(gitRoot, origHooksPath);
     const preCommitChain = existing.includes('pre-commit') ? `${scriptDir}/pre-commit` : '';
     const expected = buildOverlayPreCommit(sel, preCommitChain, pkgRel, {
         root: gitRoot,
         fallow,
         stack: cfg.stack,
+        gitRuns,
     });
     const pre = join(gitRoot, LOCAL_HOOKS, 'pre-commit');
     const current = existsSync(pre) ? readFileSync(pre, 'utf8') : null;
@@ -180,7 +187,7 @@ export function syncOverlayHook(gitRoot, cwd, cfg, { dryRun }) {
         chmodSync(pre, 0o755);
     }
     // Siblings sync on their own: a stale commit-msg must heal even when pre-commit is current.
-    const cm = syncOverlaySiblingHooks({ gitRoot, scriptDir, existing, selection: sel, pkgRel }, { dryRun });
+    const cm = syncOverlaySiblingHooks({ gitRoot, scriptDir, scriptsAbs, gitRuns, existing, selection: sel, pkgRel }, { dryRun });
     return { missing, drift, commitMsg: { missing: cm.missing, drift: cm.drift } };
 }
 // Sync the agent-half (skills + agents + agentHooks) into the git root's selected surfaces, skipping

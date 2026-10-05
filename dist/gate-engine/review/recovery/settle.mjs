@@ -67,6 +67,8 @@ export function settleReviewOutcome(ctx, t, outcome, durationMs, retried = false
                 retrieval: res.name === RETRIEVAL_REVIEWER && !degraded ? 'ok' : undefined,
                 // Its own field (sc-2837): `retrieval` above must keep describing retrieval alone.
                 mcp_degraded_cause: mcpDegraded?.cause,
+                // A replay names the waivers this PASS rests on, and a revoked one voids it (loadCache).
+                waivers: res.waivers?.map(({ lens, fingerprint }) => ({ lens, fingerprint })),
             },
         });
     if (res.status === 'fail')

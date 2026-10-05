@@ -104,6 +104,12 @@ export function isInside(root, target) {
 export function hooksDir(gitRoot, value) {
     return isAbsolute(value) ? value : resolve(gitRoot, value);
 }
+/** Git's own hooks dir when core.hooksPath is unset: the common dir's, shared by every linked
+ * worktree (`<root>/.git/hooks` does not exist where `.git` is a file). null when git cannot say. */
+export function nativeHooksDir(gitRoot) {
+    const common = gitOut(gitRoot, ['rev-parse', '--path-format=absolute', '--git-common-dir']);
+    return common && isAbsolute(common) ? join(common, 'hooks') : null;
+}
 /** `isInside` that also survives macOS's `/tmp`→`/private/tmp` and `/var`→`/private/var` symlinks,
  * which would otherwise make a checkout's own ABSOLUTE path look foreign. Only reached after the
  * lexical test has already said "outside". */
@@ -170,9 +176,8 @@ export function foreignPin(gitRoot) {
     if (isInsideResolved(gitRoot, dir))
         return null;
     // What this checkout would fall back to if the value vanished.
-    const common = gitOut(gitRoot, ['rev-parse', '--path-format=absolute', '--git-common-dir']);
-    const fallback = scoped && shared ? hooksDir(gitRoot, shared) : join(common, 'hooks');
-    if (sameDir(dir, fallback))
+    const fallback = scoped && shared ? hooksDir(gitRoot, shared) : nativeHooksDir(gitRoot);
+    if (fallback && sameDir(dir, fallback))
         return null;
     const scope = scoped ? '--worktree' : '--local';
     const siblingRoot = checkouts(gitRoot).find((wt) => !sameDir(gitRoot, wt) && isInsideResolved(wt, dir));

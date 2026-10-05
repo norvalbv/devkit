@@ -695,7 +695,11 @@ if [ "$FROM_BRANCH" -eq 0 ]; then
   if [ "$PATCH_BASE" != "$BASE" ]; then
     ship_classify_whole_file "$ROOT" "$BASE" "$PATCH_BASE" -- "${GIT_PATHS[@]}"
     echo "ship: origin/$BASE_REF moved to ${BASE:0:7} since this checkout forked at ${PATCH_BASE:0:7} — staging is anchored at the fork point and three-way merged." >&2
-    ship_warn_whole_file_drift "$ROOT" "$BASE" "$PATCH_BASE" "$BASE_REF"
+    # A preserved-commit retry only warns, so it still reaches the --resume recovery check.
+    if ! ship_refuse_whole_file_drift "$ROOT" "$BASE" "$PATCH_BASE" "$BASE_REF" ${LOCAL_BRANCH_EXISTS:+--advise}; then
+      echo "ship: preflight — blocked before creating a branch or worktree; nothing was staged or gated." >&2
+      exit 1
+    fi
   fi
 fi
 
@@ -1455,6 +1459,8 @@ else
 # main-autodetect. Unconditional (not just under --base): even the default case is more precise than
 # a gate auto-detecting main, for any branch that isn't a fresh cut off main (DK-5).
   export DEVKIT_SHIP_BASE_SHA="$BASE"
+# The commit CI diffs this PR against; the release-only dist extra judges the staged tree from it.
+  export DEVKIT_SHIP_PR_BASE_SHA="$BASE"
 # Pinned far above, before staging — see CALLER_HEAD.
   export DEVKIT_SHIP_SOURCE_HEAD="$CALLER_HEAD"
   if [ "$DRY_GATES" -eq 1 ]; then

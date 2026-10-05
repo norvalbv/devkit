@@ -42,6 +42,7 @@ export { CORRECTNESS_LENSES, DEFAULT_LENS_GROUPS, deriveLensReviewer, FOUR_WAY_L
 export { resolveChunkCap } from './chunk-tasks.mjs';
 import { emitReviewChunkPlan } from '../evidence/chunk-plan.mjs';
 import { coverageFields, partialEvidenceNote } from '../evidence/packet/coverage.mjs';
+import { cachedWaivers } from '../overrides.mjs';
 import { parseReviewVerdict } from '../contracts/response.mjs';
 /**
  * The mandatory-checklist paragraph of a judge prompt.
@@ -196,6 +197,7 @@ export function planReviewWork(selected, diffs, cache, salts, keyOf, groups = re
                 part: false,
                 degradedCause,
                 mcpDegradedCause,
+                waivers: parts.flatMap((p) => cachedWaivers(cache[p.key]) ?? []),
             });
             continue;
         }
@@ -210,6 +212,7 @@ export function planReviewWork(selected, diffs, cache, salts, keyOf, groups = re
                 judgedBases: [storedBaseSchema.safeParse(cache[p.key].base_sha).data ?? null],
                 part: true,
                 mcpDegradedCause: cachedMcpDegradation(cache[p.key]),
+                waivers: cachedWaivers(cache[p.key]) ?? [],
             });
             if (!p.splitOf)
                 continue;

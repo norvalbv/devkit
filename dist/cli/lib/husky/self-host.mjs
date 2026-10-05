@@ -46,6 +46,8 @@ export const SELF_HOST_EXTRAS = [
         cmd: 'node cli/lib/husky/format-identity/formatter-identity.mts --gate',
     },
     { label: 'decisions-integrity', cmd: 'node gate-engine/decisions/cli.mts integrity --staged' },
+    // CI's release-only dist check, run by the ship worktree's own copy so a stale caller can't skip it.
+    { label: 'release-only-dist', cmd: 'node cli/lib/ship/dist-integrity.mts --ship-staged' },
     { label: 'benchmarks', cmd: 'bun run benchmarks:check -- --mode staged' },
     // sc-2496: the structural half of `bench.mts validate` (0 model calls, ~1 s); nothing in the
     // benchmark stage opened a cases-*.jsonl before. The deep validate stays manual until sharded.
