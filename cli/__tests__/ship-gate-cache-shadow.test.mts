@@ -93,7 +93,7 @@ function shipIndexFromLinked(local: number, main: number, branch: string) {
   git(['add', '.gitignore', 'guard.config.json'], { stdio: 'ignore' });
   git(['commit', '-q', '--no-verify', '-m', 'config + ignore'], { stdio: 'ignore' });
   writeIndex(join(dir, '.search-code/index.db'), main);
-  const linkedParent = mkdtempSync(join(tmpdir(), 'ship-index-linked-'));
+  const linkedParent = mkdtempSync(join(tmpdir(), 'ship index linked-'));
   shipDirs.push(linkedParent);
   const linked = join(linkedParent, 'checkout');
   git(['worktree', 'add', '-q', '-b', `${branch}-task`, linked], { stdio: 'ignore' });
