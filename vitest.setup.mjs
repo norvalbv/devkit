@@ -19,6 +19,11 @@ for (const k of [
   'GIT_OBJECT_DIRECTORY',
   'GIT_COMMON_DIR',
   'GIT_PREFIX',
+  // `git -c` config a hook inherits outranks a fixture repo's own (e.g. disables its core.hooksPath).
+  // Without GIT_CONFIG_COUNT, git ignores any GIT_CONFIG_KEY_n/VALUE_n pairs.
+  'GIT_CONFIG',
+  'GIT_CONFIG_PARAMETERS',
+  'GIT_CONFIG_COUNT',
   // devkit's own carrier for the commit's index (gate-engine/ratchets/commit-index.mts).
   'DEVKIT_COMMIT_INDEX_FILE',
   'DEVKIT_COMMIT_GIT_DIR',
