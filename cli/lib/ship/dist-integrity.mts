@@ -12,6 +12,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { treeBlobsAtRef } from '../../../gate-engine/ratchets/tree-blobs.mts';
 import { assignedNames, ownDirVars, scanShellScript } from '../doctor/hook-gate-scan.mts';
 import { inspectReleaseOnlyDist, printReleaseOnlyDist } from './preflight/release-only-dist.mts';
 import { ANTI_SLOP_FILES, PACKAGED_ROOT_DIRS, PACKAGED_ROOT_FILES } from '../fs-helpers.mts';
@@ -240,7 +241,6 @@ export async function inspectDistIntegrity(
 
   const physical = filesUnder(root, 'dist');
   const physicalSet = new Set(physical);
-  const tracked = new Set(git(root, ['ls-files', '--cached', '-z', '--', 'dist']));
   const briefed = new Set(briefedPaths.map(briefPath));
   // A briefed path this ship stages as a DELETION is the one case where briefing does NOT put the
   // file in the commit: ship-branch.sh skips the force-add for it on purpose (sc-1489 — otherwise a
@@ -250,13 +250,19 @@ export async function inspectDistIntegrity(
   // Plumbing, not porcelain `git diff`: that refreshes and REWRITES the shared index even under
   // --no-optional-locks, and an A/D answer needs no refresh.
   const deleted = new Set(
-    git(root, ['diff-index', '--name-only', '-z', '--diff-filter=D', base, '--', 'dist']),
+    git(root, ['diff-index', '--name-only', '-z', '--diff-filter=D', base, '--', 'dist']).filter(
+      (file) => briefed.has(file),
+    ),
   );
   // Index membership is not the property that matters — presence in the commit this ship is about
   // to create is. ship-branch.sh and reship.sh `git add -f` every briefed path, so briefing one IS
   // shipping it, and demanding it be pre-staged rejects the artifact a release just generated.
+  // Every unbriefed path lands exactly as BASE has it, whatever the caller's index or disk says.
   const shipping = (file: string): boolean => briefed.has(file) && !deleted.has(file);
-  const willShip = (file: string): boolean => tracked.has(file) || shipping(file);
+  const atBase = treeBlobsAtRef(root, base, ['dist']);
+  if (atBase === null) throw new Error(`cannot read dist/ at ${base}`);
+  const willShip = (file: string): boolean =>
+    briefed.has(file) ? shipping(file) && existsSync(path.join(root, file)) : atBase.has(file);
   // Shared checkouts can contain another agent's generated output. Seed the scan from this ship's
   // explicit source/dist paths, then follow only their reachable physical dist import graph.
   const required = new Set(
@@ -278,8 +284,11 @@ export async function inspectDistIntegrity(
     // Keep discovery inside the explicit roots, but continue through every reachable physical dist
     // module so one report names the whole omitted closure. A deleted artifact is deliberately not
     // a discovery root: its dependencies are leaving with it, not candidates to add back.
-    if (deleted.has(importer) || !physicalSet.has(importer) || !existsSync(absolute)) continue;
-    const text = readFileSync(absolute, 'utf8');
+    if (deleted.has(importer)) continue;
+    const onDisk = physicalSet.has(importer) && existsSync(absolute);
+    const committed = briefed.has(importer) ? undefined : atBase.get(importer)?.toString('utf8');
+    const text = committed ?? (onDisk ? readFileSync(absolute, 'utf8') : undefined);
+    if (text === undefined) continue;
     const edges = importer.endsWith('.sh')
       ? await shellSourceEdges(importer, text)
       : await moduleImportEdges(root, importer, text);
@@ -291,14 +300,12 @@ export async function inspectDistIntegrity(
     }
     for (const { specifier, target } of edges) {
       required.add(target);
-      if (!willShip(target) || !existsSync(path.join(root, target))) {
-        unresolved.push({ importer, specifier, target });
-      }
+      if (!willShip(target)) unresolved.push({ importer, specifier, target });
       if (
         // Shell walks transitively too: ship-branch.sh -> review/worktrees.sh -> its own siblings.
         // Omitting .sh here would report the first hop of a new chain and stop.
         walkable(target) &&
-        physicalSet.has(target) &&
+        (physicalSet.has(target) || Boolean(atBase.get(target))) &&
         !deleted.has(target) &&
         !queued.has(target)
       ) {
@@ -311,9 +318,7 @@ export async function inspectDistIntegrity(
   // `shipping`, never `required`: briefing cli/new.mts still maps dist/cli/new.mjs into `required`
   // without putting it in `briefed`, and that asymmetry IS the guard — it is what still catches a
   // ship that carries source while leaving its build output behind (sc-1199/sc-1246).
-  const untracked = physical.filter(
-    (file) => required.has(file) && !tracked.has(file) && !shipping(file),
-  );
+  const untracked = physical.filter((file) => required.has(file) && !willShip(file));
   const added = git(root, [
     'diff-index',
     '--name-only',

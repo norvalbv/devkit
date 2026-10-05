@@ -337,6 +337,107 @@ describe('inspectDistIntegrity', () => {
     expect(readFileSync(join(root, '.git', 'index')).equals(before)).toBe(true);
   });
 
+  it("ignores a rebuilt tracked importer's new import when this ship does not brief it", async () => {
+    const { base, root } = repo();
+    mkdirSync(join(root, 'dist/cli'));
+    // Another PR's source change: the build rewrote tracked index.mjs, which commits at BASE.
+    writeFileSync(join(root, 'dist/index.mjs'), "import './foreign.mjs';\n");
+    writeFileSync(join(root, 'dist/foreign.mjs'), 'export {};\n');
+    writeFileSync(join(root, 'dist/cli/new.mjs'), "import '../index.mjs';\n");
+
+    const report = await inspectDistIntegrity(root, base, ['dist/cli/new.mjs']);
+
+    expect(report).toEqual(CLEAN_ACTIVE);
+  });
+
+  it("ignores a briefed source's rebuilt tracked dist, which ships at BASE", async () => {
+    const { root } = repo();
+    mkdirSync(join(root, 'dist/cli'));
+    writeFileSync(join(root, 'dist/cli/a.mjs'), 'export {};\n');
+    git(root, 'add', '-f', 'dist/cli/a.mjs');
+    git(root, 'commit', '-q', '-m', 'a');
+    const head = git(root, 'rev-parse', 'HEAD');
+    writeFileSync(join(root, 'dist/cli/a.mjs'), "import './foreign.mjs';\n");
+    writeFileSync(join(root, 'dist/cli/foreign.mjs'), 'export {};\n');
+
+    const report = await inspectDistIntegrity(root, head, ['cli/a.mts']);
+
+    expect(report).toEqual(CLEAN_ACTIVE);
+  });
+
+  it("reads an unbriefed tracked importer's BASE edges to a module this ship deletes", async () => {
+    const { root } = repo();
+    mkdirSync(join(root, 'dist/cli'));
+    writeFileSync(join(root, 'dist/cli/keep.mjs'), "import '../index.mjs';\n");
+    git(root, 'add', '-f', 'dist/cli/keep.mjs');
+    git(root, 'commit', '-q', '-m', 'importer');
+    const head = git(root, 'rev-parse', 'HEAD');
+    git(root, 'rm', '-q', '--cached', 'dist/index.mjs');
+    // The rebuilt bytes no longer import index.mjs, but keep.mjs ships as committed.
+    writeFileSync(join(root, 'dist/cli/keep.mjs'), 'export {};\n');
+    writeFileSync(join(root, 'dist/cli/new.mjs'), "import './keep.mjs';\n");
+
+    const report = await inspectDistIntegrity(root, head, ['dist/cli/new.mjs', 'dist/index.mjs']);
+
+    expect(report.unresolved).toEqual([
+      { importer: 'dist/cli/keep.mjs', specifier: '../index.mjs', target: 'dist/index.mjs' },
+    ]);
+  });
+
+  it('reads BASE blobs correctly behind tracked names holding a newline or space', async () => {
+    const { root } = repo();
+    mkdirSync(join(root, 'dist/cli'));
+    writeFileSync(join(root, 'dist/a\nb.mjs'), 'export {};\n');
+    writeFileSync(join(root, 'dist/a b.mjs'), 'export {};\n');
+    writeFileSync(join(root, 'dist/cli/keep.mjs'), 'export {};\n');
+    git(root, 'add', '-f', 'dist/a\nb.mjs', 'dist/a b.mjs', 'dist/cli/keep.mjs');
+    git(root, 'commit', '-q', '-m', 'odd names');
+    const head = git(root, 'rev-parse', 'HEAD');
+    writeFileSync(join(root, 'dist/cli/keep.mjs'), "import './foreign.mjs';\n");
+    writeFileSync(join(root, 'dist/cli/foreign.mjs'), 'export {};\n');
+    writeFileSync(join(root, 'dist/cli/new.mjs'), "import './keep.mjs';\n");
+
+    const report = await inspectDistIntegrity(root, head, ['dist/cli/new.mjs']);
+
+    expect(report).toEqual(CLEAN_ACTIVE);
+  });
+
+  it('treats an unbriefed file BASE lacks as unshipped, and still walks it from disk', async () => {
+    const { base, root } = repo();
+    mkdirSync(join(root, 'dist/cli'));
+    // Staged in the caller's index but never briefed: ship's worktree, cut at BASE, never sees it.
+    writeFileSync(join(root, 'dist/cli/late.mjs'), "import './missing.mjs';\n");
+    git(root, 'add', '-f', 'dist/cli/late.mjs');
+    writeFileSync(join(root, 'dist/cli/new.mjs'), "import './late.mjs';\n");
+
+    const report = await inspectDistIntegrity(root, base, ['dist/cli/new.mjs']);
+
+    expect(report.unresolved).toEqual([
+      { importer: 'dist/cli/late.mjs', specifier: './missing.mjs', target: 'dist/cli/missing.mjs' },
+      { importer: 'dist/cli/new.mjs', specifier: './late.mjs', target: 'dist/cli/late.mjs' },
+    ]);
+  });
+
+  it('walks an unbriefed importer dropped from the index, which still ships at BASE', async () => {
+    const { root } = repo();
+    mkdirSync(join(root, 'dist/cli'));
+    writeFileSync(join(root, 'dist/cli/keep.mjs'), "import '../index.mjs';\n");
+    git(root, 'add', '-f', 'dist/cli/keep.mjs');
+    git(root, 'commit', '-q', '-m', 'importer');
+    const head = git(root, 'rev-parse', 'HEAD');
+    // Only the briefed removal of index.mjs reaches the commit; keep.mjs's index drop does not.
+    git(root, 'rm', '-q', '--cached', 'dist/cli/keep.mjs', 'dist/index.mjs');
+    writeFileSync(join(root, 'dist/cli/new.mjs'), "import './keep.mjs';\n");
+
+    const report = await inspectDistIntegrity(root, head, ['dist/cli/new.mjs', 'dist/index.mjs']);
+
+    expect(report.unresolved).toEqual([
+      { importer: 'dist/cli/keep.mjs', specifier: '../index.mjs', target: 'dist/index.mjs' },
+    ]);
+    // keep.mjs ships at BASE, so it is never a force-add remedy; the briefed deletion still is.
+    expect(report.untracked).toEqual(['dist/index.mjs']);
+  });
+
   it('does not affect consumer repositories', async () => {
     const { base, root } = repo('consumer');
     writeFileSync(join(root, 'dist/new.mjs'), 'export const value = 1;\n');
