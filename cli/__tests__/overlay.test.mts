@@ -1457,6 +1457,29 @@ describe('overlay hook regeneration (syncOverlayHook + doctor --fix)', () => {
     expect(readHook(root)).toContain('devkit-gates: chain start');
   });
 
+  it("doctor only advises on a retired hook in the team's committed settings.json", async () => {
+    const root = workRepo();
+    await initOverlay(root);
+    const settings = join(root, '.claude', 'settings.json');
+    const command =
+      'FALLOW_GATE_COMMIT_ONLY=1 bash "$CLAUDE_PROJECT_DIR/.claude/hooks/fallow-gate.sh"';
+    writeFileSync(
+      settings,
+      JSON.stringify({
+        hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command }] }] },
+      }),
+    );
+    execFileSync('git', ['add', '.claude/settings.json'], { cwd: root });
+    const before = readFileSync(settings, 'utf8');
+
+    expect(await doctorRun([], root)).toBe(0);
+    expect(vi.mocked(console.log).mock.calls.flat().join('\n')).toMatch(
+      /· hook registrations: retired hook in a committed file: .*\.claude\/settings\.json/,
+    );
+    expect(await doctorRun(['--fix'], root)).toBe(0);
+    expect(readFileSync(settings, 'utf8')).toBe(before);
+  });
+
   // husky's `prepare` reclaims core.hooksPath on every install. `doctor --fix` used to only WARN
   // about that, while `devkit review` told users to run exactly this command to repair it.
   const hooksPathOf = (root) =>

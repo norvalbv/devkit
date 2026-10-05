@@ -85,7 +85,9 @@ export function installAgentSurfaces(
   }
 
   const hasProviderConfig = targets.some((target) =>
-    existsSync(join(gitRoot, hookRegistrationDestination(target, 'shared'))),
+    (['shared', 'overlay'] as const).some((scope) =>
+      existsSync(join(gitRoot, hookRegistrationDestination(target, scope))),
+    ),
   );
   if (hooks.components.length || hooks.previouslyOwnedComponents.length || hasProviderConfig) {
     console.log('7c. agent hook registrations');

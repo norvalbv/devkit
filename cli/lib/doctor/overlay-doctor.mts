@@ -172,9 +172,9 @@ export async function runOverlayDoctor(
   }
   for (const r of agentRows)
     console.log(
-      `  ${r.status === 'OK' ? '✓' : '⚠'} ${r.name}: ${r.detail}${r.status !== 'OK' && r.fixable ? ' — run `devkit doctor --fix`' : ''}`,
+      `  ${r.status === 'OK' ? '✓' : r.advisory ? '·' : '⚠'} ${r.name}: ${r.detail}${r.status !== 'OK' && r.fixable ? ' — run `devkit doctor --fix`' : ''}`,
     );
-  const agentsOk = agentRows.every((r) => r.status === 'OK');
+  const agentsOk = agentRows.every((r) => r.status === 'OK' || r.advisory);
   // Overlay short-circuits before collectResults, so the dup gate's silent opt-out would otherwise
   // be undetectable here. Advisory: never in the exit code.
   await adviseSearchIndex(cwd, sel);

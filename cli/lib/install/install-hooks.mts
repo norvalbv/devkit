@@ -54,13 +54,13 @@ import {
   type ProviderPlan,
   providerDocument,
   publishPlan,
+  reclaimRetiredElsewhere,
   release,
   skipProvider,
   stripReclaimedCommands,
 } from './hook-registration-ledger/install-support.mts';
 import { reconcileLegacyHookCommands } from './hook-registration-ledger/legacy-commands.mts';
 import {
-  checkProjectedHookRegistrations,
   installProjectedHookRegistrations,
   projectHookRegistrations,
   readHookRegistrationLedger,
@@ -330,6 +330,8 @@ export function installHookRegistrations(
     for (const provider of requireAgentProviders(targets)) {
       const rel = hookRegistrationDestination(provider, scope);
       if (skipProvider(root, provider, rel, overlay)) continue;
+      // Not added to `wrote`: overlay git-excludes those paths, and this file is the user's.
+      reclaimRetiredElsewhere(root, provider, scope, dryRun);
       let document = providerDocument(root, provider, rel);
       const legacy = reconcileLegacyHookCommands(entries, provider, rel);
       const retired = stripReclaimedCommands(document, provider, legacy.stripped);
@@ -448,53 +450,4 @@ export function removeHookRegistrations(
     console.log(`  ${dryRun ? '[dry-run] remove' : '✓ removed'} hook registrations`);
     return stripped;
   });
-}
-export function checkHookRegistrations(
-  root: string,
-  componentIds: string[],
-  {
-    overlay = false,
-    targets = AGENT_TARGETS,
-    legacyOwnedComponentIds,
-  }: Pick<HookRegistrationOptions, 'overlay' | 'targets' | 'legacyOwnedComponentIds'> = {},
-) {
-  const scope: HookInstallScope = overlay ? 'overlay' : 'shared';
-  const ledger = readHookRegistrationLedger(root);
-  const missing: string[] = [];
-  for (const provider of requireAgentProviders(targets)) {
-    const rel = hookRegistrationDestination(provider, scope);
-    if (!isSafeAgentAssetPath(root, rel, true)) {
-      missing.push(`${provider}:unsafe-config`);
-      continue;
-    }
-    const document = providerDocument(root, provider, rel);
-    // Reconcile the ledger, but evaluate the ORIGINAL document below — reporting only the ledger
-    // half would hide a settings.json still naming a hook script that does not exist.
-    const legacy = reconcileLegacyHookCommands(ledger?.entries ?? [], provider, rel);
-    if (stripReclaimedCommands(document, provider).changed)
-      missing.push(`${provider}:retired-registration`);
-    if (legacy.ledgerChanged) missing.push(`${provider}:superseded-registration`);
-    const effectiveLedger = legacyOwnedComponentIds?.length
-      ? ledgerOf(
-          adoptExactLegacy(legacy.entries, document, legacyOwnedComponentIds, provider, scope),
-        )
-      : ledgerOf(legacy.entries);
-    const result = checkProjectedHookRegistrations(
-      document,
-      projectHookRegistrations(componentIds, [provider], scope),
-      effectiveLedger,
-      provider,
-      scope,
-    );
-    for (const [reason, candidates] of Object.entries({
-      missing: result.missing,
-      drifted: result.drifted,
-      collision: result.collisions,
-      blocked: result.blocked,
-      'untrusted-ledger': result.untrustedLedgerEntries,
-    }))
-      for (const candidate of candidates)
-        missing.push(`${provider}:${candidate.registrationId}:${reason}`);
-  }
-  return { ok: missing.length === 0, missing };
 }

@@ -3,6 +3,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync }
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { collectResults } from '../commands/doctor.mts';
+import { checkRegistrations } from '../lib/doctor/asset-checks.mts';
 import { CLI, readConfig as config, tmpRepos } from './_helpers.mts';
 
 // --yes (passed by each test) forces the non-interactive path even when the runner has a TTY.
@@ -818,6 +819,45 @@ describe('doctor — selection-aware', () => {
       'FALLOW_GATE_COMMIT_ONLY',
     );
     expect(devkit(root, 'doctor').status).toBe(0);
+  });
+
+  it('names and heals a retired hook in settings.local.json, which shared scope does not own', () => {
+    const root = tmpRepo();
+    const initArgs = ['init', '--stack', 'generic', '--yes', '--guards', 'size'];
+    expect(devkit(root, ...initArgs).status).toBe(0);
+    mkdirSync(join(root, '.claude'), { recursive: true });
+    const local = join(root, '.claude', 'settings.local.json');
+    writeFileSync(local, JSON.stringify(retiredFallowClaudeSettings()));
+
+    const drifted = devkit(root, 'doctor');
+    expect(drifted.status).toBe(1);
+    expect(drifted.stdout).toMatch(
+      /hook registrations: DRIFT .*claude:retired-registration:\.claude\/settings\.local\.json/,
+    );
+
+    expect(devkit(root, 'doctor', '--fix').stdout).toMatch(/--fix applied/);
+    expect(readFileSync(local, 'utf8')).not.toContain('FALLOW_GATE_COMMIT_ONLY');
+    expect(devkit(root, 'doctor').status).toBe(0);
+  });
+});
+
+describe('checkRegistrations — overlay and a committed settings.json', () => {
+  it('reports an advisory row that neither fails doctor nor claims --fix', () => {
+    const root = tmpRepo();
+    expect(spawnSync('git', ['init', '-q'], { cwd: root }).status).toBe(0);
+    mkdirSync(join(root, '.claude'), { recursive: true });
+    writeFileSync(
+      join(root, '.claude', 'settings.json'),
+      JSON.stringify(retiredFallowClaudeSettings()),
+    );
+    expect(spawnSync('git', ['add', '.claude'], { cwd: root }).status).toBe(0);
+
+    expect(checkRegistrations(root, [], ['claude'], true)).toMatchObject({
+      status: 'DRIFT',
+      advisory: true,
+      fixable: false,
+      detail: expect.stringContaining('.claude/settings.json'),
+    });
   });
 });
 
