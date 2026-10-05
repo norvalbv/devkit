@@ -7,7 +7,7 @@
     "cli/lib/generate/generate-structure-baseline.mts": 867,
     "gate-engine/co-occurrence/matcher.mts": 538,
     "gate-engine/critique/eval/bench.mts": 1164,
-    "gate-engine/decisions/detect.mts": 538,
+    "gate-engine/decisions/detect.mts": 534,
     "gate-engine/decisions/eval/bench.mts": 830,
     "gate-engine/edge-cases/eval/lib/sources.mts": 570,
     "gate-engine/review/__tests__/run-review.test.mts": 2285,

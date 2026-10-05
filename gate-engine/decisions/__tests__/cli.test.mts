@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -85,7 +85,7 @@ function runWithFailure(args: string[], preload: string, decisionsDir = dir) {
 }
 
 /** Same contract as run(), with the parser dependency unresolvable. */
-function runWithoutParser(args: string[]) {
+function runWithoutParser(args: string[], env: Record<string, string> = {}) {
   return spawnSync('node', ['--import', HIDE_MDAST, SCRIPT, ...args], {
     cwd: dir,
     encoding: 'utf8',
@@ -95,6 +95,7 @@ function runWithoutParser(args: string[]) {
       DECISIONS_TODAY: '2026-07-26',
       DECISIONS_NO_EMBED: '1',
       DECISIONS_INDEX: join(dir, 'vec-index.json'),
+      ...env,
     },
   });
 }
@@ -377,6 +378,21 @@ describe('retrieval unavailable (the parser dependency cannot resolve)', () => {
     expect(withParser.status, withParser.stderr).toBeGreaterThanOrEqual(0);
     expect(withoutParser.signal, withoutParser.stderr).toBeNull();
     expect(withoutParser.status).toBe(withParser.status);
+  });
+
+  it('still reports a staged dependency smell when the parser cannot load', () => {
+    const git = (args: string[]) => execFileSync('git', args, { cwd: dir, stdio: 'pipe' });
+    git(['init', '-q']);
+    writeFileSync(join(dir, 'package.json'), '{"dependencies":{"a":"1.0.0"}}\n');
+    git(['add', 'package.json']);
+    git(['-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-qm', 'base']);
+    writeFileSync(join(dir, 'package.json'), '{"dependencies":{"a":"1.0.0","b":"2.0.0"}}\n');
+    git(['add', 'package.json']);
+
+    const result = runWithoutParser(['detect', '--gate'], { GUARD_DECISION_NO_LLM: '1' });
+    expectExit(result, 1);
+    expect(result.stderr).toContain('decision smells: dep-change');
+    expect(result.stderr).not.toContain('decision engine UNAVAILABLE');
   });
 });
 

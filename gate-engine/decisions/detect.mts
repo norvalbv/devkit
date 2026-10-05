@@ -12,11 +12,9 @@ import { emitCacheHit, emitGateEvent, finishGateTiming } from '../judge/gate-eve
 import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from '../judge/judge-isolation.mts';
 import { reportGateInfraFailure } from '../judge/odb-probe.mts';
 import { execJudge } from '../judge/run-judge.mts';
-import { renderTargets } from '../review/evidence/targets-block.mts';
 import { resolveReviewModel } from '../review/reviewers.mts';
 import { composeTranscript, saveTranscript } from '../judge/transcript-store.mts';
 import { git, stagedFiles } from './git-io.mts';
-import { scopedTargets } from './scoped-targets.mts';
 import { saveVerdict, verdictKey, verdictMeta } from './verdict-cache.mts';
 
 // 'cached' = staged vs HEAD (the gate); 'working' = whole tree vs HEAD (the Stop reminder).
@@ -322,12 +320,7 @@ export function parseVerdict(raw: string): 'ROUTINE' | 'DECISION' | null {
   return null;
 }
 
-/**
- * One smell-downgrade judge run → raw transcript, or null on outage (execJudge warns once). Model:
- * the light judge (review.model) unless the bench pins one. Pure-text: JUDGE_READ_ONLY strips tools;
- * JUDGE_ISOLATION silences host hooks + skips the session store; READ_ONLY splices BEFORE ISOLATION
- * (variadic `--disallowedTools *` bounded by `--settings`), prompt last. Exported for eval/bench.mjs.
- */
+/** Runs the tool-free smell judge, returning its transcript or null on outage. */
 export function runDetectJudge(
   cwd: string,
   diff: string,
@@ -335,7 +328,7 @@ export function runDetectJudge(
   targets = '',
 ): string | null {
   const judgeModel = model ?? resolveReviewModel(resolveGuardConfig(cwd));
-  const prompt = `${CLAUDE_PROMPT}\n\n${targets}`;
+  const prompt = targets ? `${CLAUDE_PROMPT}\n\n${targets}` : CLAUDE_PROMPT;
   return execJudge({
     label: 'decision-smell',
     args: ['-p', '--model', judgeModel, ...JUDGE_READ_ONLY, ...JUDGE_ISOLATION, prompt],
@@ -413,15 +406,18 @@ async function runGate() {
       entries,
       cfg.boundaries,
     );
-    const targets = await scopedTargets(
-      entries.map((e) => e.path),
-      '',
-      6,
-      cwd,
-    )
-      .then((blocks) =>
+    const targets = await Promise.all([
+      import('./scoped-targets.mts'),
+      import('../review/evidence/targets-block.mts'),
+    ])
+      .then(async ([{ scopedTargets }, { renderTargets }]) =>
         renderTargets(
-          blocks,
+          await scopedTargets(
+            entries.map((e) => e.path),
+            '',
+            6,
+            cwd,
+          ),
           {
             header: '## RECORDED TARGETS (current rulings matching changed files)',
             skipHeader: '## RECORDED TARGETS — NONE',
