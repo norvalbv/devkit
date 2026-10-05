@@ -5,15 +5,14 @@
  *   "test:run:coverage": "devkit coverage-run"
  * and nothing else changes — no vitest.config edit, because the reports directory is overridden on
  * vitest's command line. See gate-engine/coverage/produce.mts for why that isolation is required.
+ * `--changed` is the agent-facing mode: a per-file table for a branch's diff (gate-engine/coverage/changed.mts).
  */
+import { runChangedCoverage, takeChanged } from '../../../gate-engine/coverage/changed.mts';
 import { produceCoverage } from '../../../gate-engine/coverage/produce.mts';
 
 export const meta = {
   name: 'coverage-run',
-  agentFacing: false,
-  notRoutedBecause:
-    "Wired ONCE as the consumer's own test:run:coverage script; the coverage gate consumes" +
-    "the artifact it leaves behind. An agent runs the repo's own test script, not this.",
+  agentFacing: true,
   summary: 'Run vitest with coverage in an isolated reports dir (parallel-agent safe).',
   help: `devkit coverage-run — run the test suite with coverage without racing a sibling agent.
 
@@ -21,6 +20,13 @@ Usage (wire it as the consumer's own coverage script):
   "test:run:coverage": "devkit coverage-run"
 
   devkit coverage-run [...vitest args]     extra args are forwarded to \`vitest run\`
+  devkit coverage-run --changed[=<ref>]    per-file coverage for the files changed since <ref>
+
+--changed[=<ref>] answers "what is the coverage of the files my branch touches". vitest picks the
+tests that import those files; the table lists only the changed source files under guard.config.json
+scanRoots/sourceExtensions, and a changed file no test imports reads 0%. <ref> defaults to
+origin/HEAD (the remote default branch) — fetch first, since a stale ref widens the set. The
+report is printed, never published, so it cannot replace the artifact the coverage gate reads.
 
 Each run gets its own coverage/.runs/<unique> reports directory and republishes to
 coverage/coverage-final.json — the path \`guard-coverage\` reads — so two agents running tests in one
@@ -58,5 +64,6 @@ Exits with vitest's exit code (the re-run's, when one ran). Vitest-only; the gat
 };
 
 export default async function coverageRun(args: string[], cwd: string) {
-  return await produceCoverage(cwd, args);
+  const changed = takeChanged(args);
+  return changed ? await runChangedCoverage(cwd, changed) : await produceCoverage(cwd, args);
 }
