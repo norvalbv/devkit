@@ -319,12 +319,13 @@ export function publishEnvFor(dir, env) {
   };
 }
 
+/** `pr edit` drains stdin first, as real gh does, so reship's pipefail body pipe cannot SIGPIPE. */
 export function ghStub(prBody) {
   const stubBin = mkdtempSync(join(tmpdir(), 'ship-bin-'));
   dirs.push(stubBin);
   writeFileSync(
     join(stubBin, 'gh'),
-    `#!/bin/sh\ncase "$1" in\n  pr) ${prBody} ;;\n  *) exit 0 ;;\nesac\n`,
+    `#!/bin/sh\ncase "$1" in\n  pr) [ "$2" = edit ] && cat >/dev/null; ${prBody} ;;\n  *) exit 0 ;;\nesac\n`,
   );
   chmodSync(join(stubBin, 'gh'), 0o755);
   return stubBin;

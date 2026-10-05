@@ -18,12 +18,13 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { checkHookRegistrations } from './hook-registration-ledger/check.mts';
 import {
   projectHookRegistrations,
   writeHookRegistrationLedger,
 } from './hook-registration-ledger/lifecycle.mts';
+import { stripReclaimedCommands } from './hook-registration-ledger/install-support.mts';
 import {
-  checkHookRegistrations,
   installHookRegistrations,
   removeHookRegistrations,
   syncHookScripts,
@@ -45,6 +46,32 @@ function claudeCommands(root) {
   return Object.values(claude(root).hooks).flatMap((gs) =>
     gs.flatMap((g) => g.hooks.map((h) => h.command)),
   );
+}
+// Seeds one PreToolUse/Bash group (Claude) or one beforeShellExecution list (Cursor).
+function writeProviderHook(root, provider, commands) {
+  mkdirSync(join(root, `.${provider}`), { recursive: true });
+  const document =
+    provider === 'cursor'
+      ? { version: 1, hooks: { beforeShellExecution: commands.map((command) => ({ command })) } }
+      : {
+          hooks: {
+            PreToolUse: [
+              {
+                matcher: 'Bash',
+                hooks: commands.map((command) => ({ type: 'command', command })),
+              },
+            ],
+          },
+        };
+  const file = provider === 'cursor' ? 'hooks.json' : 'settings.json';
+  writeFileSync(join(root, `.${provider}`, file), JSON.stringify(document));
+}
+function providerCommands(root, provider) {
+  return provider === 'cursor'
+    ? Object.values(cursor(root).hooks)
+        .flat()
+        .map((entry) => entry.command)
+    : claudeCommands(root);
 }
 function writeRetiredFallowHooks(root) {
   mkdirSync(join(root, '.claude'), { recursive: true });
@@ -360,6 +387,103 @@ describe('installHookRegistrations', () => {
     installHookRegistrations(root, [], { targets: ['claude'] });
 
     expect(checkHookRegistrations(root, [], { targets: ['claude'] }).ok).toBe(true);
+  });
+
+  it.each([
+    ['claude', 'bash .claude/hooks/fallow-gate.sh'],
+    ['claude', '"$CLAUDE_PROJECT_DIR"/.claude/hooks/fallow-gate.sh'],
+    ['claude', 'bash "${CLAUDE_PROJECT_DIR}/.claude/hooks/fallow-gate.sh"'],
+    ['claude', './.claude/hooks/fallow-gate.sh'],
+    ['claude', 'FALLOW_GATE_COMMIT_ONLY=1 bash "$CLAUDE_PROJECT_DIR/.claude/hooks/fallow-gate.sh"'],
+    ['claude', 'sh .claude/hooks/fallow-gate.sh'],
+    ['cursor', 'bash .cursor/hooks/fallow-gate.sh'],
+  ])('reclaims a %s fallow-gate variant: %s', (provider, command) => {
+    const root = tmpRepo();
+    writeProviderHook(root, provider, [command, 'echo mine']);
+
+    expect(checkHookRegistrations(root, [], { targets: [provider] }).missing).toContain(
+      `${provider}:retired-registration`,
+    );
+    installHookRegistrations(root, [], { targets: [provider] });
+
+    expect(providerCommands(root, provider)).toEqual(['echo mine']);
+    expect(checkHookRegistrations(root, [], { targets: [provider] }).ok).toBe(true);
+  });
+
+  it.each([
+    'bash "$CLAUDE_PROJECT_DIR/.claude/hooks/fallow-staged-gate.sh"',
+    'bash tools/fallow-gate.sh',
+    'bash .claude/hooks/fallow-gate.sh && ./mine.sh',
+    'bash .claude/hooks/fallow-gate.sh; ./mine.sh',
+    '"bash .claude/hooks/fallow-gate.sh"',
+    'SIDE=$(./mine.sh) bash .claude/hooks/fallow-gate.sh',
+    'SIDE=`./mine.sh` bash .claude/hooks/fallow-gate.sh',
+    'bash .claude/hooks/fallow-gate.sh > ./log',
+    "'$CLAUDE_PROJECT_DIR'/.claude/hooks/fallow-gate.sh",
+    '1=x bash .claude/hooks/fallow-gate.sh',
+    'BASH_ENV=mine.sh bash .claude/hooks/fallow-gate.sh',
+    'PATH=. bash .claude/hooks/fallow-gate.sh',
+    'bash $CLAUDE_PROJECT_DIR/.claude/hooks/fallow-gate.sh',
+    'bash\n.claude/hooks/fallow-gate.sh',
+    'bash "${CLAUDE_PROJECT_DIR/.claude/hooks/fallow-gate.sh"',
+    'bash "$CLAUDE_PROJECT_DIR/.claude/hooks/fallow-gate.sh',
+    'bash /.claude/hooks/fallow-gate.sh',
+  ])('never reclaims a handler that is not solely fallow-gate.sh: %s', (command) => {
+    const root = tmpRepo();
+    writeProviderHook(root, 'claude', [command]);
+
+    expect(checkHookRegistrations(root, [], { targets: ['claude'] }).ok).toBe(true);
+    installHookRegistrations(root, [], { targets: ['claude'] });
+
+    expect(providerCommands(root, 'claude')).toEqual([command]);
+  });
+
+  it("reclaims fallow 3.10's verbatim agent install, dropping the emptied group and keeping $schema", () => {
+    const root = tmpRepo();
+    mkdirSync(join(root, '.claude'), { recursive: true });
+    const schema = 'https://json.schemastore.org/claude-code-settings.json';
+    writeFileSync(
+      join(root, '.claude', 'settings.json'),
+      JSON.stringify({
+        $schema: schema,
+        hooks: {
+          PreToolUse: [
+            {
+              matcher: 'Bash',
+              hooks: [
+                { type: 'command', command: '"$CLAUDE_PROJECT_DIR"/.claude/hooks/fallow-gate.sh' },
+              ],
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(checkHookRegistrations(root, [], { targets: ['claude'] }).missing).toContain(
+      'claude:retired-registration',
+    );
+    installHookRegistrations(root, [], { targets: ['claude'] });
+
+    expect(claude(root)).toEqual({ $schema: schema, hooks: {} });
+    expect(checkHookRegistrations(root, [], { targets: ['claude'] }).ok).toBe(true);
+  });
+
+  it('leaves a codex hook document untouched: codex has no retired fallow arm', () => {
+    const document = {
+      hooks: {
+        PreToolUse: [
+          {
+            matcher: 'Bash',
+            hooks: [{ type: 'command', command: 'bash .claude/hooks/fallow-gate.sh' }],
+          },
+        ],
+      },
+    };
+
+    const result = stripReclaimedCommands(document, 'codex');
+
+    expect(result.changed).toBe(false);
+    expect(result.document).toBe(document);
   });
 
   it('does not infer exact unledgered registrations without explicit legacy authority', () => {

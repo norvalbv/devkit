@@ -31,6 +31,8 @@ afterEach(() => {
   delete process.env.GUARD_NO_STRUCTURE;
   delete process.env.GUARD_HOOK_PARITY_OK;
   delete process.env.GUARD_DECISIONS_INTEGRITY_OK;
+  delete process.env.DEVKIT_SHIP_PR_BASE_SHA;
+  delete process.env.DEVKIT_SHIP_BRANCH;
   // Both spellings: envVar() accepts the FRINK_ alias, and `devkit ship` exports strict envs that a
   // pre-push vitest inherits — a leak that would silently flip every fail-open assertion below.
   delete process.env.GUARD_DETERMINISTIC_STRICT;
@@ -715,6 +717,23 @@ describe('prefixCacheScope', () => {
     // Sorted, so exporting the two flags in either order lands on the same key.
     expect(both).toBe('devkit-guards:DECISIONS_INTEGRITY_OK+HOOK_PARITY_OK-bypassed');
   });
+  // The release-only dist extra's verdict depends on the PR base and branch, not the tree alone: a
+  // release/vX PASS must never authorize the same tree shipped from a feature branch or base.
+  it('keys a ship on its PR base and branch, which the release-only dist extra judges', () => {
+    delete process.env.DEVKIT_SHIP_PR_BASE_SHA;
+    expect(prefixCacheScope()).toBeUndefined();
+    process.env.DEVKIT_SHIP_PR_BASE_SHA = 'a'.repeat(40);
+    process.env.DEVKIT_SHIP_BRANCH = 'release/v9.9.9';
+    const release = prefixCacheScope();
+    process.env.DEVKIT_SHIP_BRANCH = 'feat/x';
+    const feature = prefixCacheScope();
+    process.env.DEVKIT_SHIP_PR_BASE_SHA = 'b'.repeat(40);
+    const otherBase = prefixCacheScope();
+
+    expect(release).toBe(`devkit-guards:pr-base:${'a'.repeat(40)}:branch:release/v9.9.9`);
+    expect(new Set([release, feature, otherBase]).size).toBe(3);
+  });
+
   it.each(['GUARD_STRUCTURE_OK', 'GUARD_NO_STRUCTURE'])(
     '%s salts the scope away from a normal structure run',
     (key) => {

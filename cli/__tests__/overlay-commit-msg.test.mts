@@ -266,6 +266,8 @@ describe('planOverlayCommitMsg / syncOverlayCommitMsg', () => {
   const base = (root: string, guards: string[], existing: string[] = []) => ({
     gitRoot: root,
     scriptDir: '.husky',
+    scriptsAbs: join(root, '.husky'),
+    gitRuns: false,
     existing,
     selection: { guards },
     pkgRel: '',

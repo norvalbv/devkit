@@ -398,7 +398,13 @@ describe('planReviewWork — cached PASSes carry the base they were judged again
     const plan = planReviewWork([sel], ['d'], cache, new Map(), key, groups);
     expect(plan.fullyCached[0].judgedBases).toEqual([A, B]);
     expect(plan.cachedHits).toEqual([
-      { label: 'correctness-reviewer', files: ['src/a.ts'], judgedBases: [A, B], part: false },
+      {
+        label: 'correctness-reviewer',
+        files: ['src/a.ts'],
+        judgedBases: [A, B],
+        part: false,
+        waivers: [],
+      },
     ]);
     expect(plan.scope).toEqual([expect.objectContaining({ cached: true, judgedBases: [A, B] })]);
   });
@@ -436,6 +442,28 @@ describe('planReviewWork — cached PASSes carry the base they were judged again
       planReviewWork([sel], ['d'], { [k]: { at: 'n', model: 'opus' } }, new Map(), key, null)
         .fullyCached[0].model,
     ).toBe('opus');
+  });
+
+  it('a fully cached split reviewer replays the waivers of every part', () => {
+    const w = (lens: string, fingerprint: string) => ({ lens, fingerprint });
+    const cache = {
+      [partKey(0)]: { at: 'n', waivers: [w('races', 'a'.repeat(12))] },
+      [partKey(1)]: { at: 'n', waivers: [w('state', 'b'.repeat(12))] },
+    };
+    const plan = planReviewWork([sel], ['d'], cache, new Map(), key, groups);
+    expect(plan.cachedHits[0].waivers).toEqual([
+      w('races', 'a'.repeat(12)),
+      w('state', 'b'.repeat(12)),
+    ]);
+  });
+
+  it('a cached part replays its own waivers alone', () => {
+    const cache = {
+      [partKey(0)]: { at: 'n', waivers: [{ lens: 'races', fingerprint: 'c'.repeat(12) }] },
+    };
+    const plan = planReviewWork([sel], ['d'], cache, new Map(), key, groups);
+    expect(plan.cachedHits).toHaveLength(1);
+    expect(plan.cachedHits[0].waivers).toEqual([{ lens: 'races', fingerprint: 'c'.repeat(12) }]);
   });
 
   it('an uncached reviewer produces no cached hit', () => {

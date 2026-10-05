@@ -2,8 +2,15 @@
 
 import { z } from 'zod';
 import { emitGateEvent } from '../../judge/gate-events.mts';
-import { boundedCause, degradedSuffix, RETRIEVAL_REVIEWER } from '../evidence/base-context.mts';
+import {
+  boundedCause,
+  degradedSuffix,
+  RETRIEVAL_REVIEWER,
+  reportMcpDegraded,
+} from '../evidence/base-context.mts';
 import { attachItems } from '../evidence/items.mts';
+import type { CachedHit } from '../lens/split.mts';
+import { overriddenLine } from '../overrides.mts';
 import type { ReviewerSelection } from '../reviewers.mts';
 import {
   type ChecklistState,
@@ -96,4 +103,13 @@ export function reportRetrievalDegraded(name: string, rawCause: string): void {
   const detail = `semantic retrieval unavailable: ${cause} — only the deterministic matcher and clone gates checked duplication`;
   console.error(`⚠️  guard-review: ${name} — DEGRADED: ${detail}`);
   emitGateEvent({ type: 'gate_degraded', judge: name, cause, detail });
+}
+
+/** What a cached PASS replays beside its line: any degradation, and every waiver it rests on. */
+export function reportCachedHitNotes(hit: CachedHit): void {
+  if (hit.degradedCause) reportRetrievalDegraded(hit.label, hit.degradedCause);
+  // A cached split PART is reported once at its reviewer's merge, with the freshly judged groups.
+  if (hit.mcpDegradedCause && !hit.part) reportMcpDegraded(hit.label, hit.mcpDegradedCause, true);
+  for (const w of hit.waivers)
+    console.error(overriddenLine(hit.label, w.lens, w.fingerprint, ' (cached PASS)'));
 }

@@ -27,6 +27,7 @@ import {
   structureCmdFor,
 } from './components.mts';
 import { detectGitRoot } from './detect-git-root.mts';
+import { hooksDir, nativeHooksDir } from './doctor/hooks-path.mts';
 import { packageDir, readJson, writeIfAbsent } from './fs-helpers.mts';
 import { cutStructureBaselines } from './generate/cut-structure-baselines.mts';
 import { isTracked, trackedPathPredicate } from './git-tracked.mts';
@@ -128,12 +129,17 @@ export function overlayHookScriptDir(origHooksPath: string) {
   return '.git/hooks';
 }
 
-// The repo's existing hooks (names) in `scriptDir` — what we must keep running when we take over
-// core.hooksPath.
-function detectExistingHooks(gitRoot: string, scriptDir: string) {
-  const abs = join(gitRoot, scriptDir);
-  if (!existsSync(abs)) return [];
-  return readdirSync(abs).filter((f) => GIT_HOOKS.has(f));
+// The repo's own hooks we must keep running once we take over core.hooksPath. `.git/hooks` names
+// git's own dir in the COMMON dir — the one chainWord runs at commit time, linked worktrees included.
+function repoHooks(gitRoot: string, origHooksPath: string) {
+  const scriptDir = overlayHookScriptDir(origHooksPath);
+  const native = /^(?:\.\/)?\.git\/hooks\/*$/.test(scriptDir);
+  const scriptsAbs = native ? nativeHooksDir(gitRoot) : hooksDir(gitRoot, scriptDir);
+  // Never "no hooks" on an unanswerable git: that would silently drop the repo's own hooks.
+  if (!scriptsAbs) throw new Error(`could not resolve the git common dir of ${gitRoot}; retry`);
+  const names = existsSync(scriptsAbs) ? readdirSync(scriptsAbs) : [];
+  const gitRuns = !HUSKY_UNDERSCORE_RE.test(origHooksPath);
+  return { scriptDir, scriptsAbs, gitRuns, existing: names.filter((f) => GIT_HOOKS.has(f)) };
 }
 
 /** The overlay pre-commit as written: the gates plus the linked-worktree prelude (sc-4157), whose
@@ -142,12 +148,14 @@ export function buildOverlayPreCommit(
   sel: Parameters<typeof buildOverlayHook>[0] & { structure?: boolean },
   chainTarget: string,
   pkgRel: string,
-  { root, fallow = false, stack = '' }: { root: string; fallow?: boolean; stack?: string },
+  opts: { root: string; fallow?: boolean; stack?: string; gitRuns?: boolean },
 ) {
+  const { root, fallow = false, stack = '', gitRuns = false } = opts;
   const notice = overlayStructureNotice(stack);
   const prelude = `${projectionPrelude(root, pkgRel)}${notice ? `\necho "${notice}"` : ''}`;
   const structureCmd = sel.structure ? structureCmdFor(stack) : undefined;
-  return buildOverlayHook({ ...sel, structureCmd }, chainTarget, pkgRel, { fallow, prelude });
+  const hookOpts = { fallow, prelude, gitRuns };
+  return buildOverlayHook({ ...sel, structureCmd }, chainTarget, pkgRel, hookOpts);
 }
 
 // Take over core.hooksPath (at the GIT ROOT — repo-wide) and write our hooks dir. CRITICAL: git
@@ -162,11 +170,10 @@ function installOverlayHook(
   dryRun: boolean,
   { fallow, stack }: { fallow: boolean; stack: string },
 ) {
-  const scriptDir = overlayHookScriptDir(origHooksPath);
-  const existing = detectExistingHooks(gitRoot, scriptDir);
+  const { scriptDir, scriptsAbs, gitRuns, existing } = repoHooks(gitRoot, origHooksPath);
   const preCommitChain = existing.includes('pre-commit') ? `${scriptDir}/pre-commit` : '';
   const passthrough = existing.filter((h) => h !== 'pre-commit' && h !== 'commit-msg');
-  const siblings = { gitRoot, scriptDir, existing, selection: sel, pkgRel };
+  const siblings = { gitRoot, scriptDir, scriptsAbs, gitRuns, existing, selection: sel, pkgRel };
   const commitMsgLine = describeOverlayCommitMsg(
     syncOverlaySiblingHooks(siblings, { dryRun: true }).plan,
   );
@@ -183,7 +190,7 @@ function installOverlayHook(
   const pre = join(dir, 'pre-commit');
   writeFileSync(
     pre,
-    buildOverlayPreCommit(sel, preCommitChain, pkgRel, { root: gitRoot, fallow, stack }),
+    buildOverlayPreCommit(sel, preCommitChain, pkgRel, { root: gitRoot, fallow, stack, gitRuns }),
   );
   chmodSync(pre, 0o755);
   // every OTHER existing hook → pass-through (commit-msg: devkit's message judges, sc-1794).
@@ -227,13 +234,13 @@ export function syncOverlayHook(
   // Use the RECORDED origHooksPath — post-install core.hooksPath is devkit's own, so reading it
   // live would chain the overlay to ITSELF. Fall back to the same recovery init uses.
   const origHooksPath = cfg.origHooksPath ?? captureOrigHooksPath(gitRoot, cwd);
-  const scriptDir = overlayHookScriptDir(origHooksPath);
-  const existing = detectExistingHooks(gitRoot, scriptDir);
+  const { scriptDir, scriptsAbs, gitRuns, existing } = repoHooks(gitRoot, origHooksPath);
   const preCommitChain = existing.includes('pre-commit') ? `${scriptDir}/pre-commit` : '';
   const expected = buildOverlayPreCommit(sel, preCommitChain, pkgRel, {
     root: gitRoot,
     fallow,
     stack: cfg.stack,
+    gitRuns,
   });
 
   const pre = join(gitRoot, LOCAL_HOOKS, 'pre-commit');
@@ -248,7 +255,7 @@ export function syncOverlayHook(
   }
   // Siblings sync on their own: a stale commit-msg must heal even when pre-commit is current.
   const cm = syncOverlaySiblingHooks(
-    { gitRoot, scriptDir, existing, selection: sel, pkgRel },
+    { gitRoot, scriptDir, scriptsAbs, gitRuns, existing, selection: sel, pkgRel },
     { dryRun },
   );
   return { missing, drift, commitMsg: { missing: cm.missing, drift: cm.drift } };

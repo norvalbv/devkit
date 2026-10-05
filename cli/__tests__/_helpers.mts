@@ -4,6 +4,7 @@
  * subprocess-style CLI test repeated verbatim.
  */
 import {
+  type ChildProcess,
   execFileSync as nodeExecFileSync,
   spawnSync as nodeSpawnSync,
   spawn,
@@ -119,17 +120,36 @@ export function processAlive(pid: number): boolean {
   }
 }
 
-/** Resolve when a fixture path appears, or fail with a path-specific timeout. */
-export function waitForPath(path: string, timeoutMs = 30_000): Promise<void> {
+const STDERR_TAIL_CHARS = 64 * 1024;
+
+/** Resolve when a fixture path appears, or fail with a path-specific timeout. Given the child that
+ * should write it, fail once that child has exited and its stderr has drained, quoting the tail. */
+export function waitForPath(path: string, timeoutMs = 30_000, child?: ChildProcess): Promise<void> {
+  let stderr = '';
+  let stderrClosed = !child?.stderr || child.stderr.closed;
+  // Never detached: it keeps the pipe drained so a chatty child cannot block on a full buffer.
+  child?.stderr?.on('data', (chunk) => {
+    stderr = (stderr + chunk).slice(-STDERR_TAIL_CHARS);
+  });
+  child?.stderr?.once('close', () => {
+    stderrClosed = true;
+  });
   return new Promise((resolve, reject) => {
     const started = Date.now();
     const check = (): void => {
+      // Read before the path, so a child that wrote the path and then exited still resolves.
+      const exit = child && (child.exitCode ?? child.signalCode);
       if (existsSync(path)) {
         resolve();
         return;
       }
+      if (exit != null && stderrClosed) {
+        reject(new Error(`${path} never appeared: child exited ${exit}\n${stderr}`));
+        return;
+      }
       if (Date.now() - started >= timeoutMs) {
-        reject(new Error(`timed out waiting for ${path}`));
+        const exited = exit == null ? '' : ` (child exited ${exit})`;
+        reject(new Error(`timed out waiting for ${path}${exited}${child ? `\n${stderr}` : ''}`));
         return;
       }
       setTimeout(check, 10);
@@ -162,7 +182,7 @@ export async function assertInterruptedGateKeepsWorktree({
 
   const child = spawn('/bin/bash', [script, ...args], {
     cwd: dir,
-    stdio: 'ignore',
+    stdio: ['ignore', 'ignore', 'pipe'],
     env: {
       ...env,
       SHIP_DRY_RUN: '1',
@@ -171,7 +191,7 @@ export async function assertInterruptedGateKeepsWorktree({
       SIGNAL_HOOK_RESULT: result,
     },
   });
-  await waitForPath(ready, 15_000);
+  await waitForPath(ready, 15_000, child);
   if (!child.kill('SIGTERM')) throw new Error('could not signal ship shell');
   const [code, signal] = await once(child, 'exit');
   await waitForPath(result, 15_000);

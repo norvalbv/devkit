@@ -43,3 +43,19 @@ describe('the //review guidance string', () => {
     expect(reviewDoc(COPIES[0])).not.toMatch(/\b\d+ reviewer subagents\b/);
   });
 });
+
+// Review mode widens an empty frontendRoots to scanRoots, so a brief that re-reads the raw config
+// and exits early skips `generate` and the gate voids its PASS as "checklist artifact missing".
+describe('the frontend reviewer briefs', () => {
+  const names = [
+    ...REVIEWERS.filter((r) => r.domain === 'frontend').map((r) => r.name),
+    'frontend-accessibility-reviewer',
+  ];
+
+  it.each(names)('%s always runs generate instead of exiting on empty roots', (name) => {
+    const brief = readFileSync(join(ROOT, 'agents', `${name}.md`), 'utf8');
+    expect(brief).not.toContain('exit early');
+    expect(brief).not.toContain('unset/empty');
+    expect(brief).toContain('Never skip `generate`');
+  });
+});

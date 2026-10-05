@@ -9,7 +9,7 @@
  * skills/_devkit/ is PROJECTED into consumer repos by `devkit sync-skills` — a test file there would
  * ship into every consumer's .claude/.cursor tree as dead weight their runner might pick up.
  */
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -23,6 +23,8 @@ import {
   stagedFilesOverride,
   toGitPathspecs,
 } from '../../../skills/_devkit/review-roots.mjs';
+
+const REPO_ROOT = join(import.meta.dirname, '../../..');
 
 // Save exactly the keys THIS call mutates, derived from the argument — not a hardcoded list. With a
 // fixed list, the first test to pass a key outside it (DEVKIT_REVIEW_FRONTEND_ROOTS, say) would set
@@ -332,6 +334,25 @@ describe('review.paths', () => {
         sourceExtensions: ['mts'],
       }),
     ).toEqual(files.slice(0, -1));
+  });
+
+  it.each([
+    'guard.config.json',
+    'guard.config.example.json',
+    'templates/generic/guard.config.json',
+    'templates/react-app/guard.config.json',
+    'templates/component-lib/guard.config.json',
+    'templates/electron/guard.config.json',
+  ])('%s excludes root coverage output but still reviews source dirs named coverage/', (file) => {
+    const { paths } = JSON.parse(readFileSync(join(REPO_ROOT, file), 'utf8')).review;
+    const files = [
+      'cli/lib/x/coverage/y.mts',
+      'gate-engine/coverage/lines.mts',
+      'coverage/lcov-report/index.html',
+    ];
+    expect(
+      selectReviewFiles(files, { paths, roots: ['elsewhere'], sourceExtensions: ['mts'] }),
+    ).toEqual(files.slice(0, 2));
   });
 
   it('absent scope preserves legacy roots + sourceExtensions + test exclusion', () => {
