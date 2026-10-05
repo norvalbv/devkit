@@ -436,7 +436,7 @@ describe('correctness-reviewer (domain all)', () => {
       'packages/api/.envrc',
       'packages/ui/node_modules/package/index.js',
       'packages/ui/dist/index.mjs',
-      'packages/ui/coverage/coverage-final.json',
+      'coverage/coverage-final.json',
     ];
     const selected = selectReviewers(
       [...authored, ...excluded, 'dist/gate-engine/review/reviewers.mjs', 'bun.lock'],
