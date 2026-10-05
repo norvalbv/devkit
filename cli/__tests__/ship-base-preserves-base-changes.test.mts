@@ -25,6 +25,7 @@ import {
 } from './_ship-branch-fixture.mts';
 
 const PREFLIGHT_BLOCK = 'blocked before creating a branch or worktree';
+const anchorPath = join(scriptPath, '..', 'patch-anchor.sh');
 const TEN_LINES = Array.from({ length: 10 }, (_, i) => `l${i + 1}`).join('\n') + '\n';
 
 /** A checkout parked at the fork point A, plus an origin whose `base` branch is also at A and ready
@@ -109,28 +110,148 @@ describe('ship --base: newer same-file base changes survive a stale caller patch
     expect(git(['show', 'feat/mode:m.sh'])).toContain('l10-BASE');
   });
 
-  it('SUCCEEDS on a binary path both sides changed, taking the caller’s bytes wholesale', () => {
-    // The carve-out. `git apply --3way` cannot merge a binary and would conflict unconditionally, so
-    // routing binaries through it would break ships that work today for no correctness gain — a
-    // whole-file replacement has no surviving base region to lose.
-    const callerBytes = Buffer.from([0x00, 0x01, 0x02, 0xff, 0xfe, 0x43]);
-    const { dir, env, git, bare } = seedForked((d) =>
-      writeFileSync(join(d, 'b.dat'), Buffer.from([0x00, 0x01, 0x02])),
-    );
-    advanceBase(bare, (c) =>
-      writeFileSync(join(c, 'b.dat'), Buffer.from([0x00, 0x09, 0x09, 0x09])),
-    );
-    writeFileSync(join(dir, 'b.dat'), callerBytes);
+  /** A binary b.dat that the base and the caller each changed since the fork point. */
+  function seedBinaryBothSides(callerBytes: Buffer, baseBytes = Buffer.from([0x00, 0x09, 0x09])) {
+    const fx = seedForked((d) => writeFileSync(join(d, 'b.dat'), Buffer.from([0x00, 0x01, 0x02])));
+    advanceBase(fx.bare, (c) => writeFileSync(join(c, 'b.dat'), baseBytes));
+    writeFileSync(join(fx.dir, 'b.dat'), callerBytes);
+    return fx;
+  }
+
+  it('REFUSES before any branch on a binary path both sides changed', () => {
+    // No three-way merge exists for a binary, so staging the caller's copy would revert the base's
+    // change — git merge refuses the same case as a conflict.
+    const { dir, env, git } = seedBinaryBothSides(Buffer.from([0x00, 0xff, 0x43]));
 
     const r = ship(dir, env, 'feat/bin', ['b.dat']);
     dropWorktree(git, r.stderr);
 
-    expect(r.status, r.stderr).toBe(0);
-    const shippedOid = git(['rev-parse', 'feat/bin:b.dat']).trim();
-    const callerOid = git(['hash-object', '--', join(dir, 'b.dat')]).trim();
-    expect(shippedOid).toBe(callerOid);
-    // ...and the operator is told the base's copy was discarded rather than merged.
+    expect(r.status).toBe(1);
     expect(r.stderr).toContain('non-mergeable path');
+    expect(r.stderr).toMatch(/b\.dat\n\s+[0-9a-f]{7,} base advances\n/);
+    expect(r.stderr).toContain('GUARD_SHIP_REPLACE_OK=1');
+    expect(r.stderr).toContain(PREFLIGHT_BLOCK);
+    expect(localBranchExists(git, 'feat/bin')).toBe(false);
+  });
+
+  it('ships the caller’s bytes wholesale on a both-sides binary under GUARD_SHIP_REPLACE_OK', () => {
+    const { dir, env, git } = seedBinaryBothSides(Buffer.from([0x00, 0xff, 0x43]));
+
+    const r = ship(dir, env, 'feat/binok', ['b.dat'], { GUARD_SHIP_REPLACE_OK: '1' });
+    dropWorktree(git, r.stderr);
+
+    expect(r.status, r.stderr).toBe(0);
+    const callerOid = git(['hash-object', '--', join(dir, 'b.dat')]).trim();
+    expect(git(['rev-parse', 'feat/binok:b.dat']).trim()).toBe(callerOid);
+    expect(r.stderr).toContain('GUARD_SHIP_REPLACE_OK:');
+    expect(r.stderr).toContain('non-mergeable path');
+  });
+
+  it('still refuses when GUARD_SHIP_REPLACE_OK=0', () => {
+    const { dir, env, git } = seedBinaryBothSides(Buffer.from([0x00, 0xff, 0x43]));
+
+    const r = ship(dir, env, 'feat/binoff', ['b.dat'], { GUARD_SHIP_REPLACE_OK: '0' });
+    dropWorktree(git, r.stderr);
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(PREFLIGHT_BLOCK);
+  });
+
+  it('ships quietly when both sides changed a binary to IDENTICAL bytes', () => {
+    const same = Buffer.from([0x00, 0x07, 0x07]);
+    const { dir, env, git } = seedBinaryBothSides(same, same);
+    writeFileSync(join(dir, 'f.txt'), 'caller\n'); // so the ship has something to carry
+
+    const r = ship(dir, env, 'feat/binsame', ['b.dat', 'f.txt']);
+    dropWorktree(git, r.stderr);
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).not.toContain('non-mergeable path');
+  });
+
+  it('REFUSES on a symlink both sides retargeted DIFFERENTLY', () => {
+    const { dir, env, git, bare } = seedForked((d) => {
+      writeFileSync(join(d, 'a.txt'), 'a\n');
+      symlinkSync('a.txt', join(d, 'lnk'));
+    });
+    advanceBase(bare, (c) => {
+      unlinkSync(join(c, 'lnk'));
+      symlinkSync('base.txt', join(c, 'lnk'));
+    });
+    unlinkSync(join(dir, 'lnk'));
+    symlinkSync('caller.txt', join(dir, 'lnk'));
+
+    const r = ship(dir, env, 'feat/lnkclash', ['lnk']);
+    dropWorktree(git, r.stderr);
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('non-mergeable path');
+    expect(r.stderr).toContain('lnk');
+    expect(localBranchExists(git, 'feat/lnkclash')).toBe(false);
+  });
+
+  it('REFUSES a binary deleted on one side and modified on the other, in both directions', () => {
+    // An absent entry is the empty string: shipping would resurrect a binary the base deleted, or
+    // carry a deletion over a binary the base just changed.
+    const { dir, env, git, bare } = seedForked((d) => {
+      writeFileSync(join(d, 'gone-on-base.dat'), Buffer.from([0x00, 0x01]));
+      writeFileSync(join(d, 'gone-here.dat'), Buffer.from([0x00, 0x02]));
+    });
+    advanceBase(bare, (c) => {
+      unlinkSync(join(c, 'gone-on-base.dat'));
+      writeFileSync(join(c, 'gone-here.dat'), Buffer.from([0x00, 0x09]));
+    });
+    writeFileSync(join(dir, 'gone-on-base.dat'), Buffer.from([0x00, 0xff]));
+    unlinkSync(join(dir, 'gone-here.dat'));
+
+    const r = ship(dir, env, 'feat/bindel', ['gone-on-base.dat', 'gone-here.dat']);
+    dropWorktree(git, r.stderr);
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(PREFLIGHT_BLOCK);
+    const listing = r.stderr.split('non-mergeable path(s)')[1] ?? '';
+    expect(listing).toContain('gone-on-base.dat');
+    expect(listing).toContain('gone-here.dat');
+  });
+
+  it('staging refuses a both-sides binary the caller edited AFTER the preflight passed', () => {
+    // The checkout is shared: a parallel agent can edit b.dat between the preflight's read and
+    // staging's. Staging must not replace the base's copy just because the preflight saw it untouched.
+    const { dir, git, bare, forkPoint } = seedForked((d) =>
+      writeFileSync(join(d, 'b.dat'), Buffer.from([0x00, 0x01, 0x02])),
+    );
+    advanceBase(bare, (c) => writeFileSync(join(c, 'b.dat'), Buffer.from([0x00, 0x09, 0x09])));
+    git(['fetch', '-q', 'origin', 'base'], { stdio: 'ignore' });
+    const wt = join(dir, '.ship-wt');
+    git(['worktree', 'add', '-q', '--detach', wt, 'FETCH_HEAD'], { stdio: 'ignore' });
+    writeFileSync(join(dir, 'b.dat'), Buffer.from([0x00, 0xff, 0x43])); // the late edit
+
+    const stage = (extra = {}) =>
+      spawnSync(
+        '/bin/bash',
+        [
+          '-c',
+          `. "$1"; ship_stage_whole_file "$2" "$3" "$4" b.dat`,
+          '_',
+          anchorPath,
+          dir,
+          wt,
+          forkPoint,
+        ],
+        { encoding: 'utf8', env: { ...process.env, ...GIT_ENV, ...extra } },
+      );
+    const baseOid = git(['rev-parse', 'FETCH_HEAD:b.dat']).trim();
+    const stagedOid = () =>
+      execFileSync('git', ['-C', wt, 'rev-parse', ':b.dat'], { encoding: 'utf8' }).trim();
+
+    const r = stage();
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('retry the same command');
+    expect(stagedOid()).toBe(baseOid);
+
+    // An approved replacement (the preflight's override, or a preserved-commit retry) still stages it.
+    expect(stage({ WHOLE_REPLACE_ALLOWED: '1' }).status).toBe(0);
+    expect(stagedOid()).not.toBe(baseOid);
   });
 
   it('SUCCEEDS on a symlink both sides retargeted', () => {
@@ -152,6 +273,7 @@ describe('ship --base: newer same-file base changes survive a stale caller patch
 
     expect(r.status, r.stderr).toBe(0);
     expect(git(['show', 'feat/lnk:lnk'])).toBe('b.txt');
+    expect(r.stderr).not.toContain('non-mergeable path'); // same retarget both sides: nothing lost
   });
 
   it('ABORTS before the gate chain when both sides changed the same region', () => {
