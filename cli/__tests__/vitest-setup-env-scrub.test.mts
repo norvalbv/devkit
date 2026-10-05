@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -144,6 +144,41 @@ describe('vitest.setup.mjs scrubs inherited gate policy', () => {
     expect(env.DEVKIT_GATE_EVENTS).not.toBe('/real/telemetry.jsonl');
     expect(env.DEVKIT_GATE_EVENTS).toMatch(/devkit-test-gate-events-\d+\.jsonl$/);
     expect(env.DEVKIT_NO_TELEMETRY).toBe('1');
+  });
+
+  it("drops inherited `git -c` config so a fixture repo's own core.hooksPath applies", () => {
+    // A ship hook runs under `git -c core.hooksPath=/dev/null`; inherited, that silently skips
+    // every fixture hook and the test times out waiting for a marker the hook never writes.
+    const root = mkdtempSync(path.join(os.tmpdir(), 'devkit-suite-git-config-'));
+    // Legacy GIT_CONFIG redirects every `git config` read to one file, hiding the repo's own.
+    const legacy = path.join(root, 'legacy.gitconfig');
+    writeFileSync(legacy, '[core]\n\thooksPath = /dev/null\n');
+    const inherited = {
+      GIT_CONFIG: legacy,
+      GIT_CONFIG_COUNT: '1',
+      GIT_CONFIG_KEY_0: 'core.hooksPath',
+      GIT_CONFIG_VALUE_0: '/dev/null',
+      GIT_CONFIG_PARAMETERS: "'core.hookspath'='/dev/null'",
+    };
+    try {
+      const env = {
+        ...envAfterSetup(inherited),
+        GIT_CONFIG_GLOBAL: '/dev/null',
+        GIT_CONFIG_NOSYSTEM: '1',
+      };
+      for (const name of ['GIT_CONFIG', 'GIT_CONFIG_PARAMETERS', 'GIT_CONFIG_COUNT'])
+        expect(env[name], name).toBeUndefined();
+      execFileSync('git', ['init', '-q', root], { env });
+      execFileSync('git', ['config', 'core.hooksPath', '.husky/_'], { cwd: root, env });
+      const hooksPath = execFileSync('git', ['config', '--get', 'core.hooksPath'], {
+        cwd: root,
+        env,
+        encoding: 'utf8',
+      }).trim();
+      expect(hooksPath).toBe('.husky/_');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('preserves the deliberate invocation knobs the scrub must not reach', () => {
