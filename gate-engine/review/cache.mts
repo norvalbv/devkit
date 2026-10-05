@@ -16,6 +16,7 @@ import {
   saveEntries,
   type VerdictMeta,
 } from '../judge/verdict-store.mts';
+import { cachedWaiversLive } from './overrides.mts';
 
 const CACHE_FILE = 'review-cache.json';
 
@@ -24,9 +25,11 @@ export function cachePath(cwd: string): string {
   return devkitDataFile(cwd, CACHE_FILE);
 }
 
-/** entries map (key → {at, model}); corrupt/absent/foreign-version → {} (fails toward re-review). */
+/** entries map (key → {at, model}); corrupt/absent/foreign-version → {} (fails toward re-review).
+ * A PASS earned under a waiver since revoked is dropped too, so the diff is judged again. */
 export function loadCache(cwd: string): Record<string, VerdictMeta> {
-  return loadEntries(cachePath(cwd));
+  const live = cachedWaiversLive(cwd);
+  return Object.fromEntries(Object.entries(loadEntries(cachePath(cwd))).filter(([, m]) => live(m)));
 }
 
 /**

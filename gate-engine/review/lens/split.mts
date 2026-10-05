@@ -56,6 +56,7 @@ export { resolveChunkCap } from './chunk-tasks.mts';
 import type { ChunkAssignment } from './chunk.mts';
 import { emitReviewChunkPlan } from '../evidence/chunk-plan.mts';
 import { coverageFields, partialEvidenceNote } from '../evidence/packet/coverage.mts';
+import { cachedWaivers, type CachedWaiver } from '../overrides.mts';
 import type { ChecklistReviewer, ReviewerSelection } from '../reviewers.mts';
 import { parseReviewVerdict } from '../contracts/response.mts';
 
@@ -199,6 +200,7 @@ export interface CachedHit {
   part: boolean; // a split part's line has always read `cached PASS (identical)`
   degradedCause?: string; // sc-2317: a DEGRADED PASS replays as DEGRADED, never as a bare PASS
   mcpDegradedCause?: string; // sc-2837: judged without a verdict-bearing MCP server
+  waivers: CachedWaiver[]; // the waivers the stored PASS rests on, named again on replay
 }
 
 /** One scope row's inputs; `judgedBases` = stored bases of whichever parts were served from cache. */
@@ -323,6 +325,7 @@ export function planReviewWork(
         part: false,
         degradedCause,
         mcpDegradedCause,
+        waivers: parts.flatMap((p) => cachedWaivers(cache[p.key]) ?? []),
       });
       continue;
     }
@@ -337,6 +340,7 @@ export function planReviewWork(
         judgedBases: [storedBaseSchema.safeParse(cache[p.key].base_sha).data ?? null],
         part: true,
         mcpDegradedCause: cachedMcpDegradation(cache[p.key]),
+        waivers: cachedWaivers(cache[p.key]) ?? [],
       });
       if (!p.splitOf) continue;
       // Rebuild the part WITH its cached aggregates (sc-1475): a spilled part's items never reach the

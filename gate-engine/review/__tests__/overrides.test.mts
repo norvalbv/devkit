@@ -13,9 +13,12 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   blockingNote,
+  cachedWaivers,
+  cachedWaiversLive,
   envOverrides,
   fingerprint,
   loadOverrides,
+  overriddenLine,
   reconcile,
   withOverridesLock,
 } from '../overrides.mts';
@@ -448,5 +451,56 @@ describe('waiver store reached through a symlink (ship gate worktree)', () => {
     reconcile(worktree, 'correctness-reviewer', ['concurrency-races'], 'D', NOW, env);
     expect(loadOverrides(checkout)[fp]).toMatchObject({ rationale: 'benign' });
     expect(lstatSync(join(worktree, STORE)).isSymbolicLink()).toBe(true);
+  });
+});
+
+describe('cached waivers (a PASS replayed from the review cache)', () => {
+  const FP = 'a'.repeat(12);
+  const meta = { at: NOW, waivers: [{ lens: 'concurrency-races', fingerprint: FP }] };
+  const store = (cwd: string, rationale: string) => {
+    mkdirSync(join(cwd, '.devkit'), { recursive: true });
+    writeFileSync(
+      join(cwd, '.devkit', 'correctness-overrides.json'),
+      JSON.stringify({ [FP]: { rationale } }),
+    );
+  };
+
+  it('parses recorded waivers; absent is none, malformed is null', () => {
+    expect(cachedWaivers(meta)).toEqual(meta.waivers);
+    expect(cachedWaivers({ at: NOW })).toEqual([]);
+    expect(cachedWaivers({ waivers: [{ lens: 'x', fingerprint: 'not-hex' }] })).toBeNull();
+    expect(cachedWaivers({ waivers: 'x' })).toBeNull();
+  });
+
+  it('an entry with no waivers stays live without reading the store', () => {
+    expect(cachedWaiversLive(repo(), {})({ at: NOW })).toBe(true);
+  });
+
+  it('stays live while the store still holds the waiver, and dies once it is revoked', () => {
+    const cwd = repo();
+    store(cwd, 'false positive: the lock is held by the caller');
+    expect(cachedWaiversLive(cwd, {})(meta)).toBe(true);
+    store(cwd, '   ');
+    expect(cachedWaiversLive(cwd, {})(meta)).toBe(false);
+    rmSync(join(cwd, '.devkit'), { recursive: true });
+    expect(cachedWaiversLive(cwd, {})(meta)).toBe(false);
+  });
+
+  it('an env-channel waiver keeps it live with no store entry', () => {
+    const env = { [`OVERRIDE_${FP}_RATIONALE`]: 'reviewed' };
+    expect(cachedWaiversLive(repo(), env)(meta)).toBe(true);
+  });
+
+  it('a malformed waiver record fails toward re-review', () => {
+    expect(cachedWaiversLive(repo(), {})({ waivers: [{ lens: 1 }] })).toBe(false);
+  });
+
+  it('overriddenLine keeps the fresh wording and strips control characters', () => {
+    expect(overriddenLine('correctness-reviewer', 'races', FP, ': why')).toBe(
+      `guard-review: correctness-reviewer — races overridden [${FP}]: why`,
+    );
+    expect(overriddenLine('r', 'l', FP, ': \u001b[31mred')).toBe(
+      `guard-review: r — l overridden [${FP}]: red`,
+    );
   });
 });
