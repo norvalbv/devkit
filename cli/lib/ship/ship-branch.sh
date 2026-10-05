@@ -1455,6 +1455,8 @@ else
 # main-autodetect. Unconditional (not just under --base): even the default case is more precise than
 # a gate auto-detecting main, for any branch that isn't a fresh cut off main (DK-5).
   export DEVKIT_SHIP_BASE_SHA="$BASE"
+# The commit CI diffs this PR against; the release-only dist extra judges the staged tree from it.
+  export DEVKIT_SHIP_PR_BASE_SHA="$BASE"
 # Pinned far above, before staging — see CALLER_HEAD.
   export DEVKIT_SHIP_SOURCE_HEAD="$CALLER_HEAD"
   if [ "$DRY_GATES" -eq 1 ]; then
