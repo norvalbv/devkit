@@ -12,6 +12,7 @@ import {
   type HookInstallScope,
   type HookRegistrationLedgerV1,
   type HookRegistrationOwnershipV1,
+  hookRegistrationDestination,
 } from './codec.mts';
 import {
   checkProjectedHookRegistrations,
@@ -139,6 +140,36 @@ export function stripReclaimedCommands(
     else delete nextHooks[event];
   }
   return changed ? { document: { ...root, hooks: nextHooks }, changed } : { document, changed };
+}
+
+/** A retired command in the Claude settings file the scope does NOT own; Claude Code runs both. */
+export function retiredElsewhere(root: string, provider: AgentProvider, scope: HookInstallScope) {
+  if (provider !== 'claude') return null;
+  const rel = hookRegistrationDestination(provider, scope === 'shared' ? 'overlay' : 'shared');
+  if (!existsSync(join(root, rel)) || !isSafeAgentAssetPath(root, rel, true)) return null;
+  let document: unknown;
+  try {
+    document = providerDocument(root, provider, rel);
+  } catch {
+    return null; // Not the scope's file: its parse errors are the user's, never a devkit failure.
+  }
+  const stripped = stripReclaimedCommands(document, provider);
+  if (!stripped.changed) return null;
+  // Overlay must stay git-invisible, so a committed settings.json is reported, never edited.
+  const repairable = scope === 'shared' || !isTracked(root, rel);
+  return { rel, document: stripped.document, repairable };
+}
+
+export function reclaimRetiredElsewhere(
+  root: string,
+  provider: AgentProvider,
+  scope: HookInstallScope,
+  dryRun: boolean,
+) {
+  const elsewhere = retiredElsewhere(root, provider, scope);
+  if (!elsewhere?.repairable) return;
+  if (!dryRun) writeProvider(root, { provider, ...elsewhere, changed: true });
+  console.log(`  ${dryRun ? '[dry-run] strip' : '✓ stripped'} retired hook from ${elsewhere.rel}`);
 }
 
 export function providerDocument(root: string, provider: AgentProvider, rel: string): unknown {
