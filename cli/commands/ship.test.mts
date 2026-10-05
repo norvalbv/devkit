@@ -224,6 +224,18 @@ describe('devkit ship machine-wide queue wiring (sc-3785)', () => {
     error.mockRestore();
   });
 
+  // The bash scripts' resolve-only test seam must not become an unqueued path for the dispatcher.
+  it('still queues when SHIP_RESOLVE_ONLY is set', async () => {
+    const test = harness();
+    vi.stubEnv('SHIP_RESOLVE_ONLY', '1');
+    try {
+      expect(await ship(['--pr', 'feat/q', 't', 'a.txt'], '/consumer', test.dependencies)).toBe(0);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+    expect(test.events).toEqual(['provenance', 'queue', 'script']);
+  });
+
   it('treats --queue as body text when it is the value of --body', async () => {
     const test = harness();
 
