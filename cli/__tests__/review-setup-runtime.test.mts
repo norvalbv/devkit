@@ -66,7 +66,10 @@ function fixture(
     write(
       gitRoot,
       '.devkit/hooks/pre-commit',
-      buildOverlayPreCommit(selection, '.git/hooks/pre-commit', targetRel, { root: gitRoot }),
+      buildOverlayPreCommit(selection, '.git/hooks/pre-commit', targetRel, {
+        root: gitRoot,
+        gitRuns: true,
+      }),
       true,
     );
   } else {
