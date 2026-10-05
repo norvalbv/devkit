@@ -110,10 +110,19 @@ refresh_ship_reviewer_assets() {
     fi
   done
 
+  # A linked worktree borrowing an overlay holds its manifests as links to the home's files, which
+  # the strict manifest reader refuses, so ownership is read where the overlay really lives.
+  local manifest_root
+  if ! manifest_root=$(gate_overlay_root "$root"); then
+    rm -rf -- "$runtime_parent"
+    return 1
+  fi
+  [ -n "$manifest_root" ] || manifest_root=$physical_root
+
   for sub in agents skills; do
     mkdir -p "$physical_wt/.claude/$sub"
     owned="$runtime_parent/$sub.owned"
-    if ! node "$asset_tool" manifest-owned "$physical_root" "$sub" > "$owned"; then
+    if ! node "$asset_tool" manifest-owned "$manifest_root" "$sub" > "$owned"; then
       rm -rf -- "$runtime_parent"
       return 1
     fi
