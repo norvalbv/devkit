@@ -3,8 +3,8 @@
  * the `claude` CLI. Routing is BY MODEL ID — a `gpt-*` model (e.g. `gpt-5.6-sol`) spawns
  * `codex exec`; every other id keeps the claude path byte-for-byte, so execJudge's five callers
  * never change their argv. Since sc-2054 the gpt path is the SHIPPED DEFAULT (review.model in
- * gate-engine/config.mts), with MCP profiles injected codex-natively and staged-tree tamper
- * detection standing in for claude's tool-allowlist confinement. It originated as a bench-only seam (sc-2048).
+ * gate-engine/config.mts), with MCP profiles injected codex-natively. Staged-tree tamper detection
+ * covers writes and NO_EXECUTION_RULE covers execution: claude's tool allowlist has no codex twin.
  *
  * Why: ship-gate judge volume drains the owner's Claude subscription while the Codex subscription
  * has headroom (sc-2048). The two CLIs are near-isomorphic for a headless judge — prompt as argv,
@@ -98,8 +98,8 @@ export interface ClaudeArgvParts {
   systemPrompt: string | null;
   /** `--disallowedTools *` (JUDGE_READ_ONLY) maps to codex's read-only sandbox; an investigating
    * judge (`--allowedTools …`) needs workspace-write so it can run the checklist script (codex
-   * cannot confine cwd — its writable-roots only ADD). The claude tool-allowlist's cannot-write
-   * contract is replaced by run-review's staged-tree tamper detection (sc-2054). */
+   * cannot confine cwd — its writable-roots only ADD). The allowlist's cannot-write half becomes
+   * run-review's staged-tree tamper detection; its cannot-execute half is NO_EXECUTION_RULE. */
   readOnly: boolean;
   /** The claude `--allowedTools` grants, comma-split — the codex path maps `mcp__<server>__…`
    * entries onto per-server `enabled_tools` allowlists (sc-2054). */
@@ -188,16 +188,26 @@ export function parseModelSpec(spec: string): ModelSpec {
   return { model, effort };
 }
 
+/** Codex exec has no per-command allowlist, so a tool-equipped codex judge can run the project's
+ * tests in a sandbox that cannot run them faithfully. An instruction, not enforcement. */
+export const NO_EXECUTION_RULE =
+  'EXECUTION RULE: you review by reading. Do not execute the code under review: no test suites, ' +
+  'builds, package scripts, or staged files. Commands your instructions name are fine. Your shell ' +
+  'is sandboxed, so a command that failed or was denied there says nothing about the staged ' +
+  'change and is never a finding. Whether the tests pass is not yours to judge.';
+
 export function codexExecArgs(parts: ClaudeArgvParts, mcpArgv: string[] = []): string[] {
   if (!parts.model || !parts.prompt)
     throw new Error('codex judge: argv carries no --model or no prompt — cannot translate');
   const spec = parseModelSpec(parts.model);
+  // Only a judge granted tools gets the rule; a pure-text judge's prompt stays byte-identical.
+  const task = parts.allowedTools ? `${parts.prompt}\n\n${NO_EXECUTION_RULE}` : parts.prompt;
   // Codex exec has no system-prompt flag: an agent brief (`--append-system-prompt`) is prepended
   // to the prompt instead. A labeled block, so the model sees the brief/task boundary the two
   // claude message slots used to provide.
   const prompt = parts.systemPrompt
-    ? `<agent-brief>\n${parts.systemPrompt}\n</agent-brief>\n\n${parts.prompt}`
-    : parts.prompt;
+    ? `<agent-brief>\n${parts.systemPrompt}\n</agent-brief>\n\n${task}`
+    : task;
   // `--json` is the same flag OpenAI's own SDK spawns as `--experimental-json` (an alias,
   // codex-rs/exec/src/cli.rs) — machine-readable but not promised frozen, which is why the parsers
   // here are pinned by a captured fixture and a failure-event test. Web search is disabled the way
