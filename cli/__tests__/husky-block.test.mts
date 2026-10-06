@@ -568,6 +568,8 @@ describe('buildOverlayHook — fallow gate (overlay)', () => {
         ].join('\n'),
       );
       chmodSync(join(binDir, 'fallow'), 0o755);
+      // The overlay opener fails closed unless guard-deterministic resolves on PATH.
+      writeFileSync(join(binDir, 'guard-deterministic'), '#!/bin/sh\n', { mode: 0o755 });
       writeFileSync(hookPath, buildOverlayHook({}, '.husky/missing', '', { fallow: true }));
 
       const out = execFileSync('sh', ['-e', hookPath], {
@@ -575,6 +577,7 @@ describe('buildOverlayHook — fallow gate (overlay)', () => {
         encoding: 'utf8',
         env: {
           ...process.env,
+          HOME: root,
           PATH: `${binDir}:${process.env.PATH}`,
           GIT_DIR: '.git',
           GIT_INDEX_FILE: '.git/index',
