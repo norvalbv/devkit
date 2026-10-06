@@ -177,6 +177,7 @@ function isGrounded(finding: ConventionFinding, forms: QuoteForms, change: FileC
 
 // Markdown emphasis a judge may drop or keep when quoting a rule; stripped from both sides alike.
 const EMPHASIS_RE = /[*_`]/g;
+const ABSOLUTE_PATH_RE = /^(?:\/|[A-Za-z]:\/)/;
 const plainMarkdown = (text: string): string => collapse(text.replace(EMPHASIS_RE, ''));
 
 /** Whether the VIOLATION quotes, near its cited line, a rule from a CLAUDE.md governing `file`. A
@@ -186,18 +187,21 @@ function ruleGrounded(
   file: string,
   ruleLines: (ruleFile: string) => string[] | null,
 ): boolean {
-  const ruleFile = conventionRuleFile(finding.rulePath);
-  const governs = ancestorDirs(file).some(
-    (dir) => ruleFile === (dir ? `${dir}/CLAUDE.md` : 'CLAUDE.md'),
-  );
+  const cited = conventionRuleFile(finding.rulePath);
+  const absolute = ABSOLUTE_PATH_RE.test(cited);
+  // Deepest first, so an absolute citation resolves to the most specific governing file it names.
+  const governing = ancestorDirs(file)
+    .map((dir) => (dir ? `${dir}/CLAUDE.md` : 'CLAUDE.md'))
+    .reverse()
+    .find((rel) => cited === rel || (absolute && cited.endsWith(`/${rel}`)));
   const quote = normalizeQuote(finding.ruleQuote);
-  const lines = governs ? ruleLines(ruleFile) : null;
+  const lines = governing ? ruleLines(governing) : null;
   if (lines === null || quote === null) return false;
   const text = plainMarkdown(quote);
-  const cited = Math.max(finding.ruleLine ?? 1, 1);
-  const low = finding.ruleLine === null ? 1 : Math.max(1, cited - QUOTE_WINDOW);
+  const anchor = Math.max(finding.ruleLine ?? 1, 1);
+  const low = finding.ruleLine === null ? 1 : Math.max(1, anchor - QUOTE_WINDOW);
   const high =
-    finding.ruleLine === null ? lines.length : Math.min(lines.length, cited + QUOTE_WINDOW);
+    finding.ruleLine === null ? lines.length : Math.min(lines.length, anchor + QUOTE_WINDOW);
   for (let line = low; line <= high; line += 1)
     if (spanMatches(lines, line - 1, text, () => true)) return true;
   return false;

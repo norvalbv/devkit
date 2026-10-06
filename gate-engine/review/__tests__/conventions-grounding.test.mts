@@ -424,6 +424,24 @@ describe('groundConventionFindings — the VIOLATION must quote a governing CLAU
     );
   });
 
+  // Judges sometimes cite the absolute path of the checkout they were run in.
+  it('keeps a governing rule cited by its absolute path, and still drops an absolute AGENTS.md', () => {
+    const abs = '/private/var/folders/x/T/repo-Ab12';
+    expect(fail(`Records are appended by the CLI. — ${abs}/CLAUDE.md:3`, onNote)).toHaveLength(1);
+    expect(
+      fail(
+        `Never import from packages/b directly. — C:\\work\\repo\\packages\\a\\CLAUDE.md:3`,
+        onImport,
+      ),
+    ).toHaveLength(1);
+    expect(
+      fail(
+        `Records are written through the CLI — direct edits are declined. — ${abs}/AGENTS.md:3`,
+        onNote,
+      ),
+    ).toEqual([]);
+  });
+
   it.each([
     ['emphasis dropped', 'Never import from packages/b directly.'],
     ['emphasis kept', '**Never** import from `packages/b` directly.'],

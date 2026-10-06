@@ -424,3 +424,55 @@ describe('conventions quote grounding (sc-3580)', () => {
     expect(exec.mock.calls[0][0].args[1]).toContain('carries pre-existing length');
   });
 });
+
+describe('conventions rule grounding — a CLI-appended decision note', () => {
+  const AGENTS_RULE = 'Never hand-edit a decision record; always append through the CLI.';
+  const note = '- 2026-10-06 — Correction: the build cost was measured, not assumed.';
+
+  // The field shape: the hand-edit directive lives in an AGENTS.md the root CLAUDE.md imports.
+  const noteRepo = () => {
+    const repo = consumerRepo();
+    mkdirSync(join(repo, 'src', 'decisions'), { recursive: true });
+    writeFileSync(join(repo, 'CLAUDE.md'), 'Records are appended by the CLI.\n\n@AGENTS.md\n');
+    writeFileSync(join(repo, 'AGENTS.md'), `# Rules\n\n${AGENTS_RULE}\n`);
+    writeFileSync(join(repo, 'src', 'decisions', 'x.md'), '# x\n\n- 2026-10-01 — First note.\n');
+    execSync('git add .', { cwd: repo });
+    execSync(
+      'git -c user.email=devkit@example.test -c user.name="Devkit Test" -c commit.gpgsign=false commit -qm base',
+      { cwd: repo },
+    );
+    writeFileSync(
+      join(repo, 'src', 'decisions', 'x.md'),
+      `# x\n\n- 2026-10-01 — First note.\n${note}\n`,
+    );
+    execSync('git add .', { cwd: repo });
+    return repo;
+  };
+  const agentsFail =
+    `VIOLATION: ${AGENTS_RULE} — AGENTS.md:3\n` +
+    `OFFENDING: ${note} — src/decisions/x.md:4\n` +
+    'VERDICT: FAIL — direct edit to a decision record';
+
+  it('never blocks on a rule the judge read from AGENTS.md', async () => {
+    const repo = noteRepo();
+    const exec = vi.fn(async () => agentsFail);
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    expect(await runReviewGate(repo, { exec })).toBe(2);
+    expect(err.mock.calls.flat().join('\n')).not.toContain('conventions-reviewer FAILED');
+  });
+
+  it('strict mode retries naming the governing files, and passes when the judge drops the citation', async () => {
+    process.env.GUARD_AI_STRICT = '1';
+    const repo = noteRepo();
+    const exec = vi
+      .fn()
+      .mockResolvedValueOnce(agentsFail)
+      .mockResolvedValueOnce('NO_VIOLATIONS\nVERDICT: PASS — no governing rule applies');
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    expect(await runReviewGate(repo, { exec })).toBe(0);
+    expect(exec).toHaveBeenCalledTimes(2);
+    expect(exec.mock.calls[1][0].args[1]).toContain('governing CLAUDE.md files');
+  });
+});
