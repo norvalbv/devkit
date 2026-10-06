@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -13,22 +13,26 @@ import {
 
 const REPO = path.resolve(import.meta.dirname, '../..');
 const SETUP = path.join(REPO, 'vitest.setup.mjs');
-const SHIP_SCRIPTS = [
-  'cli/lib/ship/ship-branch.sh',
-  'cli/lib/ship/run-gates-with-capture.sh',
-  'cli/lib/ship/commit-with-gate-capture.sh',
-];
+// Every ship script, so a new one's exports are checked without anyone listing it.
+const SHIP_SCRIPTS = readdirSync(path.join(REPO, 'cli/lib/ship'))
+  .filter((f) => f.endsWith('.sh'))
+  .map((f) => `cli/lib/ship/${f}`);
 
 const read = (rel: string) => readFileSync(path.join(REPO, rel), 'utf8');
 
-/** Every DEVKIT_/GUARD_ name a shell script `export`s, read off the assignment left-hand sides. */
+/** Every DEVKIT_/GUARD_ name a shell script `export`s, including inline `then export X=…`. */
 function exportedNames(source: string): string[] {
+  // A `#` opens a comment only at line start or after whitespace; `${#var}` is a length, not one.
+  const code = source.replace(/(^|\s)#.*$/gm, '$1');
   const names: string[] = [];
-  for (const [, tail] of source.matchAll(/^\s*export\s+(.+)$/gm)) {
-    const code = tail?.replace(/\s+#.*$/, '') ?? '';
-    const bare = code.match(/^([A-Z][A-Z0-9_]*)\s*$/)?.[1];
-    if (bare) names.push(bare);
-    for (const [, name] of code.matchAll(/\b([A-Z][A-Z0-9_]*)=/g)) if (name) names.push(name);
+  for (const [, tail = ''] of code.matchAll(
+    /(?:^|[;&|]|\b(?:then|do|else))\s*export\s+([^;&|\n]*)/gm,
+  )) {
+    if (tail.startsWith('-n')) continue; // `export -n` un-exports
+    for (const token of tail.split(/\s+/)) {
+      const name = token.match(/^([A-Z][A-Z0-9_]*)(?:=|$)/)?.[1];
+      if (name) names.push(name);
+    }
   }
   return [...new Set(names)].filter((n) => n.startsWith('DEVKIT_') || n.startsWith('GUARD_'));
 }
@@ -53,6 +57,7 @@ const SHIP_ENV = {
   DEVKIT_SHIP_RESUMED: '0',
   DEVKIT_SHIP_ROOT: '/outer/ship/worktree',
   DEVKIT_SHIP_SOURCE_HEAD: 'b'.repeat(40),
+  DEVKIT_TELEMETRY_VERSION: '9.9.9',
   FRINK_AI_STRICT: '1',
   GUARD_AI_STRICT: '1',
   GUARD_DECISIONS_DIR: '/elsewhere/docs/decisions',
@@ -90,6 +95,36 @@ describe('vitest.setup.mjs scrubs inherited gate policy', () => {
     const exported = [...new Set(SHIP_SCRIPTS.flatMap((f) => exportedNames(read(f))))];
     expect(exported.length).toBeGreaterThan(10);
     for (const name of exported) expect(SCRUBBED_ENV, name).toContain(name);
+  });
+
+  it('reads exports that follow a shell keyword or operator, and skips commented ones', () => {
+    const script = [
+      'if x; then export DEVKIT_A=1; fi',
+      'n=${#v}; export DEVKIT_B=1',
+      'true && export DEVKIT_C=1',
+      '  export DEVKIT_I=1',
+      'export DEVKIT_D DEVKIT_E',
+      '# export DEVKIT_F=1',
+      'x # export DEVKIT_G=1',
+      'export -n DEVKIT_H',
+    ].join('\n');
+    expect(exportedNames(script).sort()).toEqual([
+      'DEVKIT_A',
+      'DEVKIT_B',
+      'DEVKIT_C',
+      'DEVKIT_D',
+      'DEVKIT_E',
+      'DEVKIT_I',
+    ]);
+  });
+
+  it('reads the real inline and sourced-library exports, not only synthetic ones', () => {
+    // reship.sh exports its PR base only inside `then`, and telemetry.sh is sourced, never listed:
+    // a parser or script-set regression that drops either still passes on the other scripts' names.
+    expect(exportedNames(read('cli/lib/ship/reship.sh'))).toContain('DEVKIT_SHIP_PR_BASE_SHA');
+    expect(SHIP_SCRIPTS.flatMap((f) => exportedNames(read(f)))).toContain(
+      'DEVKIT_TELEMETRY_VERSION',
+    );
   });
 
   it('leaves no scrubbed name in a process launched from a ship environment', () => {
