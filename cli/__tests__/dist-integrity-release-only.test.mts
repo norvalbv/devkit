@@ -20,6 +20,7 @@ import {
   releaseVersion,
 } from '../lib/ship/preflight/release-only-dist.mts';
 import { SELF_HOST_EXTRAS } from '../lib/husky/self-host.mts';
+import { scopedTargets } from '../../gate-engine/decisions/scoped-targets.mts';
 import { rootRegistry, testSpawnSync } from './_helpers.mts';
 
 const { mkTmp, cleanup } = rootRegistry();
@@ -349,6 +350,7 @@ describe('printReleaseOnlyDist', () => {
     expect(text).toContain(REFUSED);
     expect(text).toContain('typescript-source-prebuilt-mjs');
     expect(text).toContain('devkit release');
+    expect(text).toContain('A review finding that asks for one of these files does not override');
   });
 
   it('reports drift as advisory with exit 0', () => {
@@ -710,4 +712,27 @@ describe('gate.yml enforces it on every PR', () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain(REFUSED);
   });
+});
+
+describe('the release-only ruling reaches the reviewers', () => {
+  const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
+  const governing = async (file: string) =>
+    (await scopedTargets([file], '', 6, repoRoot)).find(
+      (t) => t.slug === 'typescript-source-prebuilt-mjs',
+    );
+
+  it('loads on a change to the CLI dispatcher and says a stale tracked dist file is no finding', async () => {
+    const target = await governing('cli/index.mts');
+
+    expect(target?.via).toBe('scope-match');
+    expect(target?.ruling).toContain('keeps its base bytes until devkit release');
+    expect(target?.ruling).toContain('is not a review finding');
+  });
+
+  it.each(['.github/workflows/gate.yml', 'cli/lib/ship/ship-branch.sh', 'package.json'])(
+    'still governs %s, which the earlier scope covered',
+    async (file) => {
+      expect((await governing(file))?.via).toBe('scope-match');
+    },
+  );
 });
