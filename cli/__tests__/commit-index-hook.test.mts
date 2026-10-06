@@ -44,7 +44,18 @@ interface GateView {
   stagedSet: string[];
 }
 
-function seedHookedRepo(pkgRel = '') {
+// A stand-in `fallow`: records the paths of the diff it was handed on stdin, exits FALLOW_RC.
+const STUB_FALLOW = `#!/bin/sh
+[ "$1" = audit ] || exit 0
+paths=$(sed -n 's|^+++ b/||p' | sort | tr '\\n' ' ')
+printf '{"fallowDiff":"%s"}\\n' "$paths" >> "$STUB_OUT"
+exit \${FALLOW_RC:-0}
+`;
+
+function seedHookedRepo(
+  pkgRel = '',
+  selection: { guards: string[]; fallow?: boolean } = { guards: ['size'] },
+) {
   const root = realpathSync(mkTmp('commit-index-hook-'));
   const home = mkTmp('commit-index-home-');
   const bin = mkTmp('commit-index-bin-');
@@ -52,6 +63,8 @@ function seedHookedRepo(pkgRel = '') {
   writeFileSync(join(bin, 'stub-gate.mjs'), STUB_GATE);
   writeFileSync(join(bin, 'guard-deterministic'), `#!/bin/sh\nexec node "${bin}/stub-gate.mjs"\n`);
   chmodSync(join(bin, 'guard-deterministic'), 0o755);
+  writeFileSync(join(bin, 'fallow'), STUB_FALLOW);
+  chmodSync(join(bin, 'fallow'), 0o755);
   const env = {
     ...process.env,
     HOME: home,
@@ -78,7 +91,7 @@ function seedHookedRepo(pkgRel = '') {
   git(['add', '-A']);
   git(['commit', '-qm', 'base']);
   const hook = join(root, '.git', 'hooks', 'pre-commit');
-  writeFileSync(hook, buildFullHook({ guards: ['size'] }, pkgRel, 'global-optional'));
+  writeFileSync(hook, buildFullHook(selection, pkgRel, 'global-optional'));
   chmodSync(hook, 0o755);
   const views = (): GateView[] =>
     readFileSync(out, 'utf8')
@@ -158,6 +171,45 @@ describe('commit hook carries the commit index to devkit gates', () => {
     git(['commit', '-qm', 'partial', '--', 'f.txt'], { STUB_BASELINE: '1' });
     expect(git(['show', '--name-only', '--format=', 'HEAD']).trim()).toBe('f.txt');
     expect(git(['status', '--porcelain'])).toBe(' M baseline.json\n');
+  });
+});
+
+// The fallow gate rediscovers the repo under a scrubbed git env, so the commit's own index must
+// arrive through the carrier: reading the default index would audit a different set of changes.
+describe('staged fallow gate audits exactly what the commit records', () => {
+  const FALLOW = { guards: [], fallow: true };
+  const audited = (views: () => GateView[]) =>
+    views().flatMap((v) => ('fallowDiff' in v ? [String(v.fallowDiff).trim()] : []));
+
+  it('`commit -am` hands fallow the tracked edit (index.lock carrier)', () => {
+    const { pkg, git, views } = seedHookedRepo('', FALLOW);
+    writeFileSync(join(pkg, 'f.txt'), 'edited\n');
+    git(['commit', '-qam', 'all']);
+    expect(audited(views)).toEqual(['f.txt']);
+  });
+
+  it('`commit -- <path>` audits the pathspec, not another file already staged in the index', () => {
+    const { pkg, git, views } = seedHookedRepo('', FALLOW);
+    writeFileSync(join(pkg, 'f.txt'), 'edited\n');
+    writeFileSync(join(pkg, 'g.txt'), 'staged, not committed\n');
+    git(['add', 'g.txt']);
+    git(['commit', '-qm', 'partial', '--', 'f.txt']);
+    expect(audited(views)).toEqual(['f.txt']);
+  });
+
+  it('a monorepo package block audits the commit from inside the package', () => {
+    const { pkg, git, views } = seedHookedRepo('packages/app', FALLOW);
+    writeFileSync(join(pkg, 'f.txt'), 'edited\n');
+    git(['commit', '-qam', 'pkg']);
+    expect(audited(views)).toEqual(['f.txt']);
+  });
+
+  it('a fail verdict refuses the commit; a fallow error lets it land', () => {
+    const { pkg, git } = seedHookedRepo('', FALLOW);
+    writeFileSync(join(pkg, 'f.txt'), 'edited\n');
+    expect(() => git(['commit', '-qam', 'blocked'], { FALLOW_RC: '1' })).toThrow();
+    git(['commit', '-qam', 'lands'], { FALLOW_RC: '2' });
+    expect(git(['log', '-1', '--format=%s']).trim()).toBe('lands');
   });
 });
 

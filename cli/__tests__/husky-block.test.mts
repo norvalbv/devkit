@@ -11,8 +11,11 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { GUARD_IDS } from '../lib/components.mts';
+import { defaultSelection, GUARD_IDS, normalizeSelection } from '../lib/components.mts';
+import { reviewHookDrift } from '../lib/husky/review-drift.mts';
+import { buildSelfHostHook } from '../lib/husky/self-host.mts';
 import { BIN_DIRS } from '../lib/husky/gate-policy/block-helpers.mts';
+import { fallowGateLine } from '../lib/husky/gate-policy/fallow-staged.mts';
 import {
   buildCommitMsgBlock,
   buildCommitMsgHook,
@@ -24,6 +27,7 @@ import {
   buildOverlayHook,
   findPreambleEnd,
   hasFragment,
+  hookStages,
   removeFragment,
   removeGuardBlock,
   replaceGuardBlock,
@@ -798,5 +802,69 @@ describe('extras (--extra hard gates on the deterministic line)', () => {
     const without = buildGuardBlock({ guards: ['size'] });
     expect(withEmpty).toBe(without);
     expect(without).not.toContain('--extra');
+  });
+});
+
+// One staged audit per consumer hook, and never a ref-range one: `--base` cannot express the index.
+describe('staged fallow gate across the hook builders', () => {
+  const SEL = { guards: [...GUARD_IDS], fallow: true };
+  const audits = (hook: string) => hook.split('fallow audit --diff-stdin').length - 1;
+
+  it.each(['package', 'global-optional'] as const)(
+    'emits the gate iff fallow is selected, ahead of the AI guards (%s)',
+    (binDir) => {
+      const hook = buildFullHook(SEL, '', binDir);
+      expect(audits(hook)).toBe(1);
+      expect(hook.indexOf('# devkit:fallow')).toBeLessThan(
+        hook.indexOf('# devkit:guard-decisions'),
+      );
+      expect(hook).not.toContain('--base');
+      expect(hookStages(hook)).toContain('fallow');
+      // Unselected: byte-identical to a selection that never named fallow, so no existing hook drifts.
+      expect(buildFullHook({ ...SEL, fallow: false }, '', binDir)).toBe(
+        buildFullHook({ guards: [...GUARD_IDS] }, '', binDir),
+      );
+    },
+  );
+
+  // devkit's own hook keeps its advisory: a blocking audit there would gate every devkit commit.
+  it('self-host emits no blocking audit even when its selection carries fallow', () => {
+    const repo = join(import.meta.dirname, '..', '..');
+    expect(audits(buildSelfHostHook(SEL, '', repo))).toBe(0);
+  });
+
+  // An existing consumer that selected fallow before devkit owned the gate: `devkit review` must
+  // name the stale block rather than judge a hook that never runs the audit.
+  it('review drift flags a fallow:true consumer whose block predates the gate', () => {
+    const root = mkdtempSync(join(tmpdir(), 'dk-drift-fallow-'));
+    execFileSync('git', ['init', '-q'], { cwd: root });
+    mkdirSync(join(root, '.devkit'));
+    mkdirSync(join(root, '.husky'));
+    const components = {
+      ...defaultSelection(),
+      guards: ['review'],
+      structure: false,
+      fallow: true,
+    };
+    writeFileSync(join(root, '.devkit', 'config.json'), JSON.stringify({ components }));
+    const hook = (fallow: boolean) => buildFullHook({ ...normalizeSelection(components), fallow });
+    writeFileSync(join(root, '.husky', 'pre-commit'), hook(false));
+    expect(reviewHookDrift(root)).toMatch(/differs from the current generator/);
+    writeFileSync(join(root, '.husky', 'pre-commit'), hook(true));
+    expect(reviewHookDrift(root)).toBeNull();
+  });
+
+  // init must not promise a blocking gate where the hook only carries the advisory.
+  it('names the gate each install shape really gets', () => {
+    expect(fallowGateLine(true, false)).toContain('staged audit');
+    expect(fallowGateLine(true, true)).toContain('advisory');
+    expect(fallowGateLine(false, false)).toContain('not wired');
+  });
+
+  it('overlay runs exactly one audit even when its selection also carries fallow', () => {
+    const hook = buildOverlayHook(SEL, '.husky/pre-commit', '', { fallow: true });
+    expect(audits(hook)).toBe(1);
+    expect(hook).not.toContain('--base');
+    expect(audits(buildOverlayHook(SEL, '.husky/pre-commit'))).toBe(0);
   });
 });
