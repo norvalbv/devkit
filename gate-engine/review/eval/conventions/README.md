@@ -181,7 +181,7 @@ when any of these differ from the run that produced the baseline:
   enforced by the free corpus lint (`lintCases`, run at load time and by `validate`) — an unbacked
   decoy would never tempt the reviewer either way, since it has no checklist/Target-loading
   mechanism of its own and can only find the file via its own Read/Grep/Glob tools.
-- **Provenance: 100% `adapted`, 0% `mined`.** This is not a corner cut — it is structural. Every
+- **Provenance: 26 `adapted`, 1 `mined`.** The near-total adaptation is structural, not a corner cut. Every
   _other_ bench in this repo (completeness-eval, critique-eval, reviewer-eval) mines real findings
   from devkit's OWN history, because those reviewers judge devkit's own source against devkit's own
   conventions. conventions-reviewer's entire charter is the opposite: it checks a **consumer repo's**
@@ -192,7 +192,9 @@ when any of these differ from the run that produced the baseline:
   disguised way, or merely resembles a violation — with **zero verbatim text from any real company
   or personal repo**; every rule is rewritten in this corpus's own words even where a row is inspired
   by a realistic pattern (e.g. "generated files are regenerated, never hand-edited" is a pattern
-  every codegen-using repo eventually writes down, in its own words).
+  every codegen-using repo eventually writes down, in its own words). The one `mined` row,
+  `decision-note-cli-append-pass`, reproduces a field false block in a fictional fixture: it
+  mines the failure shape, not any repo's text.
 - **Nine concepts, 2-4 variant rows each:**
   1. **generated-file edit** (`gen-file-edit-*`) — never hand-edit `app/generated/`.
   2. **forbidden prop** (`forbidden-prop-*`) — components must not accept `className`/`style`;
@@ -210,7 +212,8 @@ when any of these differ from the run that produced the baseline:
      `app/components/` must be kebab-case; the violation is buried among 2-3 correctly-renamed
      sibling files (`working-as-intended` decoys), not `out-of-scope` (they're not off-topic, they
      are simply correct).
-  8. **THE LOAD-BEARING SCOPING ROWS** (`scoping-*`, 3 rows) — a fictional two-service monorepo:
+  8. **THE LOAD-BEARING SCOPING ROWS** (4 rows: three `scoping-*` plus
+     `decision-note-cli-append-pass`) — the `scoping-*` rows share a fictional two-service monorepo:
      `services/orders/CLAUDE.md` forbids calling the payments client directly from a handler;
      `services/inventory/` has **no CLAUDE.md of its own** and there is **no repo-root CLAUDE.md**
      in this fixture. `scoping-orders-violation-with-sibling-decoy` commits the IDENTICAL
@@ -275,8 +278,8 @@ zero claude calls, before any paid run).
   above.
 - **No severity calibration section** (completeness/critique both have one): conventions violations
   aren't severity-tiered; the brief's contract is flat quote-both-or-stay-silent.
-- **100% `adapted` provenance, 0% `mined`** (completeness/critique both mine devkit's own history):
-  structural, not a shortcut — see the dataset card's provenance note above.
+- **Almost entirely `adapted` provenance (26 of 27)** (completeness/critique both mine devkit's own
+  history): structural, not a shortcut — see the dataset card's provenance note above.
 
 ## Matcher-audit labels are still synthetic — a real follow-up
 

@@ -176,7 +176,8 @@ function isGrounded(finding: ConventionFinding, forms: QuoteForms, change: FileC
 }
 
 // Markdown emphasis a judge may drop or keep when quoting a rule; stripped from both sides alike.
-const EMPHASIS_RE = /[*_`]/g;
+// An underscore counts only at a word edge, so `foo_bar` never collapses into `foobar`.
+const EMPHASIS_RE = /[*`]|(?<![\p{L}\p{N}])_+|_+(?![\p{L}\p{N}])/gu;
 const ABSOLUTE_PATH_RE = /^(?:\/|[A-Za-z]:\/)/;
 const plainMarkdown = (text: string): string => collapse(text.replace(EMPHASIS_RE, ''));
 

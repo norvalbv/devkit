@@ -370,7 +370,7 @@ describe('groundConventionFindings — the VIOLATION must quote a governing CLAU
     ['AGENTS.md', '# Rules\n\nRecords are written through the CLI — direct edits are declined.\n'],
     [
       'packages/a/CLAUDE.md',
-      '# a\n\n- **Never** import from `packages/b` directly.\n- Keep handlers thin:\n  move logic into services.\n',
+      '# a\n\n- **Never** import from `packages/b` directly.\n- Keep handlers thin:\n  move logic into services.\n- Never allow foo_bar in _raw_ queries.\n',
     ],
     ['packages/b/CLAUDE.md', '# b\n\nNever hand-edit files under decisions/.\n'],
     [record, `# x\n\n${note}\n`],
@@ -416,6 +416,15 @@ describe('groundConventionFindings — the VIOLATION must quote a governing CLAU
     expect(
       fail('Never import from packages/b directly. — packages/a/CLAUDE.md:40', onImport),
     ).toEqual([]);
+  });
+
+  it('strips _emphasis_ delimiters but never an underscore inside an identifier', () => {
+    expect(
+      fail('Never allow foo_bar in raw queries. — packages/a/CLAUDE.md:6', onImport),
+    ).toHaveLength(1);
+    expect(fail('Never allow foobar in raw queries. — packages/a/CLAUDE.md:6', onImport)).toEqual(
+      [],
+    );
   });
 
   it('keeps a lineless root citation carrying a judge note', () => {
