@@ -92,7 +92,9 @@ reports `BASELINE-RENAME`, run the printed `adopt-renames --base <oid>` remedy, 
 comparison to an immutable object ID, then stage the baseline. An explicit base with no Git-detected
 rename fails rather than silently succeeding; the debt at the new path must then be fixed or
 re-anchored by lint-evidenced relocation, because an unevidenced resnapshot there is growth that
-create and both gates refuse. The base debt is migrated in memory only to verify that the persisted count did not grow.
+create and both gates refuse. The base debt is migrated in memory only to verify that the persisted
+count did not grow. An overlay install supports the staged form only: `adopt-renames` re-keys the
+per-clone baseline, there is nothing to stage, and `--base` stays refused.
 This keeps the baseline valid after merge; checks never write.
 
 The second growth exception is **relocated debt**: declarations moved from one file into another
