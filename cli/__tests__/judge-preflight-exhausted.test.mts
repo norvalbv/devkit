@@ -1,5 +1,5 @@
-/** sc-3207: a codex window at 100% is a lock even without `rateLimitReachedType`, unless usable
- *  credits carry it — codex's own TUI cap test (codex-rs/tui/src/chatwidget/rate_limits.rs). */
+/** A codex window at 100% is a lock even without `rateLimitReachedType`, and usable credits carry a
+ *  spent plan, reached type and all — codex's own TUI rule (chatwidget/rate_limits.rs). */
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -28,8 +28,9 @@ interface WireRateLimits {
   primary?: WireWindow | null;
   secondary?: WireWindow | string | null;
   credits?: { hasCredits?: WireValue; unlimited?: WireValue; balance?: WireValue } | null;
-  rateLimitReachedType?: string;
+  rateLimitReachedType?: string | null;
   planType?: string;
+  spendControlReached?: boolean;
 }
 const reply = (rateLimits: WireRateLimits): string =>
   JSON.stringify({ id: 2, result: { rateLimits: { limitId: 'codex', ...rateLimits } } });
@@ -38,6 +39,26 @@ const reply = (rateLimits: WireRateLimits): string =>
 const WINDOW_FULL_REPLY = reply({
   primary: { usedPercent: 100, windowDurationMins: 10080, resetsAt: PRIMARY_RESET },
   planType: 'pro',
+});
+
+/** The reply a credit-backed account returned while every codex judge was still answering. */
+const CREDITS_LIVE_REPLY = JSON.stringify({
+  id: 2,
+  result: {
+    ordinaryUsageAllowed: false,
+    rateLimits: {
+      limitId: 'codex',
+      limitName: null,
+      normalModelSlug: null,
+      primary: { usedPercent: 100, windowDurationMins: 10080, resetsAt: PRIMARY_RESET },
+      secondary: null,
+      credits: { hasCredits: true, unlimited: false, balance: '46632.1384640000' },
+      individualLimit: null,
+      spendControlReached: false,
+      planType: 'pro',
+      rateLimitReachedType: 'rate_limit_reached',
+    },
+  },
 });
 
 const ENV_KEYS = [
@@ -207,16 +228,67 @@ describe('parseRateLimitsReply — a fully consumed window is a lock', () => {
     }
   });
 
-  it("a provider-reported limit stays reached even with credits — the provider's word wins", () => {
+  it('usable credits carry a provider-reported rate_limit_reached — calls are served', () => {
+    const snap = parseRateLimitsReply(CREDITS_LIVE_REPLY);
+    expect(snap).toMatchObject({
+      reached: false,
+      onCredits: true,
+      reachedType: 'rate_limit_reached',
+      usedPercent: 100,
+    });
+  });
+
+  it('credits do not excuse spend control, a workspace limit, or an unknown reached kind', () => {
+    const credits = { hasCredits: true };
+    for (const extra of [
+      { rateLimitReachedType: 'rate_limit_reached', spendControlReached: true },
+      { rateLimitReachedType: 'workspace_member_credits_depleted' },
+      { rateLimitReachedType: 'some_new_kind' },
+    ]) {
+      const snap = parseRateLimitsReply(reply({ primary: { usedPercent: 20 }, credits, ...extra }));
+      expect(snap?.reached).toBe(true);
+      expect(snap?.onCredits).toBe(false);
+    }
+  });
+
+  it('hasCredits is trusted without reading the balance, as codex itself does', () => {
+    const snap = parseRateLimitsReply(
+      reply({ primary: { usedPercent: 100 }, credits: { hasCredits: true, balance: '0' } }),
+    );
+    expect(snap).toMatchObject({ reached: false, onCredits: true });
+  });
+
+  it('an account with headroom is not on credits, whatever its balance', () => {
+    // The live shape: codex sends an explicit null reached type, never an absent field.
     const snap = parseRateLimitsReply(
       reply({
-        primary: { usedPercent: 20 },
-        rateLimitReachedType: 'rate_limit_reached',
+        primary: { usedPercent: 0, windowDurationMins: 43200 },
+        credits: { hasCredits: true, unlimited: false, balance: '46523.2972840000' },
+        spendControlReached: false,
+        rateLimitReachedType: null,
+        planType: 'free',
+      }),
+    );
+    expect(snap).toMatchObject({ reached: false, onCredits: false, usedPercent: 0 });
+    expect(snap?.reachedType).toBeUndefined();
+  });
+
+  it('credits carrying a spent SECONDARY window report that window, not the healthy primary', () => {
+    const snap = parseRateLimitsReply(
+      reply({
+        primary: { usedPercent: 40, windowDurationMins: 300 },
+        secondary: { usedPercent: 100, windowDurationMins: 10080, resetsAt: SECONDARY_RESET },
         credits: { hasCredits: true },
       }),
     );
-    expect(snap?.reached).toBe(true);
-    expect(snap?.reachedType).toBe('rate_limit_reached');
+    // "running on credits (40% of a 5h window used)" would contradict itself.
+    expect(snap).toMatchObject({
+      reached: false,
+      onCredits: true,
+      exhaustedWindow: 'secondary',
+      usedPercent: 100,
+      windowDurationMins: 10080,
+    });
   });
 
   it('a full window with an implausible reset is still locked; only the time is dropped', () => {
@@ -290,7 +362,20 @@ describe('the preflight report for an exhausted window (sc-3207 acceptance)', ()
       deps(reply({ primary: { usedPercent: 100 }, credits: { unlimited: true } })),
     );
     expect(statuses.every((s) => s.state === 'ok')).toBe(true);
-    expect(renderPreflight(statuses, NOW).join('\n')).not.toContain('⚠️');
+    const out = renderPreflight(statuses, NOW).join('\n');
+    expect(out).toContain('reachable — plan limit reached, running on credits');
+    expect(out).not.toContain('⚠️');
+  });
+
+  it('a credit-backed plan lock prints no lock, fail-closed claim, or family move (sc-4339)', async () => {
+    const statuses = await judgeReachability(repo(CODEX_FAMILY), deps(CREDITS_LIVE_REPLY));
+    expect(statuses.every((s) => s.state === 'ok' && s.onCredits)).toBe(true);
+    const out = renderPreflight(statuses, NOW).join('\n');
+    expect(out).toContain(
+      'gpt-5.6-sol via codex — reachable — plan limit reached, running on credits (100% of a 7d window used)',
+    );
+    for (const absent of ['EXHAUSTED', 'fail closed', 'will not help', '⚠️', 'GUARD_REVIEW_MODEL='])
+      expect(out).not.toContain(absent);
   });
 });
 
