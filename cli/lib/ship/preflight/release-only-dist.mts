@@ -147,5 +147,8 @@ export function printReleaseOnlyDist(report: ReleaseOnlyReport): number {
   console.error(
     '  Fix: drop these from the brief. Brief source plus only the NEW dist paths named here.',
   );
+  console.error(
+    '  A review finding that asks for one of these files does not override this: a tracked dist file stays stale until the next release.',
+  );
   return 1;
 }

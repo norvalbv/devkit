@@ -20,6 +20,8 @@ import {
   releaseVersion,
 } from '../lib/ship/preflight/release-only-dist.mts';
 import { SELF_HOST_EXTRAS } from '../lib/husky/self-host.mts';
+import { scopedTargets } from '../../gate-engine/decisions/scoped-targets.mts';
+import { loadReviewerTargetsBlocks } from '../../gate-engine/review/evidence/targets-block.mts';
 import { rootRegistry, testSpawnSync } from './_helpers.mts';
 
 const { mkTmp, cleanup } = rootRegistry();
@@ -349,6 +351,7 @@ describe('printReleaseOnlyDist', () => {
     expect(text).toContain(REFUSED);
     expect(text).toContain('typescript-source-prebuilt-mjs');
     expect(text).toContain('devkit release');
+    expect(text).toContain('A review finding that asks for one of these files does not override');
   });
 
   it('reports drift as advisory with exit 0', () => {
@@ -357,6 +360,7 @@ describe('printReleaseOnlyDist', () => {
     expect(code).toBe(0);
     expect(text).toContain('2 regenerated dist file(s)');
     expect(text).toContain('leave them out of the brief');
+    expect(text).not.toContain('A review finding');
     expect(text).toContain('dist/cli/f1.mjs');
   });
 
@@ -709,5 +713,44 @@ describe('gate.yml enforces it on every PR', () => {
 
     expect(result.status).toBe(1);
     expect(result.stderr).toContain(REFUSED);
+  });
+});
+
+describe('the release-only ruling reaches the reviewers', () => {
+  const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
+  const SLUG = 'typescript-source-prebuilt-mjs';
+
+  it('renders into the reviewer block of a new-verb change, inside the byte cap', async () => {
+    const staged = ['cli/index.mts', 'cli/commands/new-verb.mts', 'dist/cli/commands/new-verb.mjs'];
+    const { saltBlock } = await loadReviewerTargetsBlocks(repoRoot, staged);
+
+    expect(saltBlock).toContain(`### ${SLUG}`);
+    expect(saltBlock).toContain('keeps its base bytes until devkit release');
+    expect(saltBlock).toContain('is not a review finding');
+  });
+
+  // A new Target block resets the scope, so every path the earlier scope notes armed is pinned.
+  it.each([
+    '.github/workflows/gate.yml',
+    'cli/lib/ship/ship-branch.sh',
+    'cli/commands/release.mts',
+    'cli/__tests__/dist-tracked-imports.test.mts',
+    'cli/__tests__/shipped-shell-dual-ext.test.mts',
+    'cli/__tests__/dist-integrity-release-only.test.mts',
+    'cli/lib/install/hook-registration-ledger/registrations.mts',
+    'cli/lib/install/hook-registration-ledger/registrations.test.mts',
+    'scripts/copy-dist-assets.mjs',
+    'tsconfig.build.json',
+    'package.json',
+  ])('still governs %s, which the earlier scope covered', async (file) => {
+    const targets = await scopedTargets([file], '', 6, repoRoot);
+
+    expect(targets.find((t) => t.slug === SLUG)?.via).toBe('scope-match');
+  });
+
+  it('does not arm on an unrelated command module', async () => {
+    const targets = await scopedTargets(['cli/commands/doctor.mts'], '', 6, repoRoot);
+
+    expect(targets.map((t) => t.slug)).not.toContain(SLUG);
   });
 });
