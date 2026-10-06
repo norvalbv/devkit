@@ -31,7 +31,7 @@ type Side = Entry | null;
 interface Anchor {
   entry: Side;
   since?: string;
-  /** "<op>:<blob>" of the manifest record read, or "-": the writer's compare-and-swap token. */
+  /** "<op>:<mode>:<blob>" of the manifest record read, or "-": the writer's compare-and-swap token. */
   token: string;
 }
 export type Action = 'copy' | 'keep' | 'merge' | 'refuse';
@@ -109,7 +109,7 @@ export function anchorEntry(
   path: string,
 ): Anchor {
   const shipped = loadManifest(root).branches[branch]?.paths.find((e) => e.path === path);
-  const token = shipped ? `${shipped.op}:${shipped.blobSha}` : '-';
+  const token = shipped ? `${shipped.op}:${shipped.mode}:${shipped.blobSha}` : '-';
   // No mode (a chmod on the tip is invisible) or a pruned blob (a merged path's is in no commit):
   // the record cannot be merged from, so it anchors like no record.
   if (shipped?.mode && shipped.op === 'delete') return { entry: null, token };

@@ -259,9 +259,10 @@ describe('reconcile manifest --anchors — a newer record is never regressed', (
       );
     };
     writeFileSync(join(r.dir, 'a.ts'), 'newer\n');
-    expect(write('modify:0000000')).toBe(1); // another ship replaced the record meanwhile
+    expect(write(`modify:${before.mode}:0000000`)).toBe(1); // another ship replaced the blob meanwhile
+    expect(write(`modify:100755:${before.blobSha}`)).toBe(1); // ...or only its mode
     expect(record()).toEqual(before);
-    expect(write(`${before.op}:${before.blobSha}`)).toBe(0);
+    expect(write(`${before.op}:${before.mode}:${before.blobSha}`)).toBe(0);
     expect(record().blobSha).not.toBe(before.blobSha);
   });
 });

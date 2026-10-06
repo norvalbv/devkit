@@ -233,7 +233,7 @@ interface RecordShipOptions {
 
 /** One path's write guard from ship/reship/anchor.mts: the record it anchored on, and what to record. */
 interface AnchorGuard {
-  /** "<op>:<blob>" of the record the anchor read, or "-" for none. */
+  /** "<op>:<mode>:<blob>" of the record the anchor read, or "-" for none. */
   expect: string;
   /** "" leaves the record untouched, "=" records the path as classified, "<mode> <blob>" the caller's. */
   record: string;
@@ -324,7 +324,7 @@ export function recordShip(
         // A concurrent ship that already replaced the record this one anchored on wins.
         const fresh = (p: string) => {
           const cur = byPath.get(p);
-          const token = cur ? `${cur.op}:${cur.blobSha}` : '-';
+          const token = cur ? `${cur.op}:${cur.mode}:${cur.blobSha}` : '-';
           return (guards.get(p)?.expect ?? token) === token;
         };
         let changed = 0;

@@ -73,7 +73,7 @@ export function hereEntry(root, path) {
 /** What this checkout's copy of <path> was taken from. */
 export function anchorEntry(root, branch, tip, head, path) {
     const shipped = loadManifest(root).branches[branch]?.paths.find((e) => e.path === path);
-    const token = shipped ? `${shipped.op}:${shipped.blobSha}` : '-';
+    const token = shipped ? `${shipped.op}:${shipped.mode}:${shipped.blobSha}` : '-';
     // No mode (a chmod on the tip is invisible) or a pruned blob (a merged path's is in no commit):
     // the record cannot be merged from, so it anchors like no record.
     if (shipped?.mode && shipped.op === 'delete')
