@@ -7,8 +7,8 @@ import { installHookRegistrations } from '../install-hooks.mts';
 import { checkHookRegistrations } from './check.mts';
 
 const RETIRED = 'FALLOW_GATE_COMMIT_ONLY=1 bash "$CLAUDE_PROJECT_DIR/.claude/hooks/fallow-gate.sh"';
-// fallow's own `hooks install --target agent` spelling: fallow owns it, devkit must leave it alone.
-const FALLOW_OWNED = '"$CLAUDE_PROJECT_DIR"/.claude/hooks/fallow-gate.sh';
+// A consumer's own script outside the provider hooks dir: devkit must leave it alone.
+const CONSUMER_OWNED = 'bash tools/fallow-gate.sh';
 
 // Claude Code writes "always allow" grants here, so a real settings.local.json carries them.
 const PERMISSIONS = { allow: ['Bash(git status:*)'] };
@@ -88,9 +88,9 @@ describe('checkHookRegistrations — the Claude settings file the scope does not
     expect(readFileSync(join(root, rel), 'utf8')).toBe(before);
   });
 
-  it("leaves fallow's own fallow-gate.sh registration alone", () => {
+  it("leaves a consumer's own fallow-gate.sh outside the hooks dir alone", () => {
     const root = gitRepo();
-    const rel = writeSettings(root, 'settings.local.json', FALLOW_OWNED);
+    const rel = writeSettings(root, 'settings.local.json', CONSUMER_OWNED);
     const before = readFileSync(join(root, rel), 'utf8');
 
     expect(checkHookRegistrations(root, [], { targets: ['claude'] }).ok).toBe(true);

@@ -48,6 +48,7 @@ const SHIP_ENV = {
   DEVKIT_SHIP_INTENT_RECORDED: '1',
   DEVKIT_SHIP_MODE: 'ship',
   DEVKIT_SHIP_PATHS: 'src/a.ts\nsrc/b.ts',
+  DEVKIT_SHIP_PR_BASE_SHA: 'c'.repeat(40),
   DEVKIT_SHIP_REPO: 'benordlabs/devkit',
   DEVKIT_SHIP_RESUMED: '0',
   DEVKIT_SHIP_ROOT: '/outer/ship/worktree',
