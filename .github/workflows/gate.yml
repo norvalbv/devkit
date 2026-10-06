@@ -8,6 +8,12 @@ on:
     branches: [main]
   pull_request:
 
+# A newer push to a pull request supersedes that PR's older run. Every other run gets a group of
+# its own, so each push to main keeps a completed run and the commit that broke it stays findable.
+concurrency:
+  group: gate-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   gate:
     runs-on: ubuntu-latest
