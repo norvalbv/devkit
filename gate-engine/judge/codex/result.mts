@@ -13,6 +13,7 @@
  * second judge pipeline.
  */
 
+import { join } from 'node:path';
 import { type JudgeUsage, withResultArgs } from '../claude-result.mts';
 
 // ── the `codex exec --json` event contract ──────────────────────────────────────────────────────
@@ -97,9 +98,7 @@ export interface ClaudeArgvParts {
    * the closest analog is prepending the brief to the prompt — see codexExecArgs. */
   systemPrompt: string | null;
   /** `--disallowedTools *` (JUDGE_READ_ONLY) maps to codex's read-only sandbox; an investigating
-   * judge (`--allowedTools …`) needs workspace-write so it can run the checklist script (codex
-   * cannot confine cwd — its writable-roots only ADD). The claude tool-allowlist's cannot-write
-   * contract is replaced by run-review's staged-tree tamper detection (sc-2054). */
+   * judge runs workspace-write, confined to a scratch cwd plus `<repo>/.claude` (CodexWorkspace). */
   readOnly: boolean;
   /** The claude `--allowedTools` grants, comma-split — the codex path maps `mcp__<server>__…`
    * entries onto per-server `enabled_tools` allowlists (sc-2054). */
@@ -188,16 +187,37 @@ export function parseModelSpec(spec: string): ModelSpec {
   return { model, effort };
 }
 
-export function codexExecArgs(parts: ClaudeArgvParts, mcpArgv: string[] = []): string[] {
+/** A workspace-write judge's scratch cwd, plus the repo whose `.claude/` alone it may write. */
+export interface CodexWorkspace {
+  scratch: string;
+  repoRoot: string;
+}
+
+/** The workspace confinement for this judge, or null when it runs read-only or unconfined. */
+const confinedWorkspace = (parts: ClaudeArgvParts, workspace?: CodexWorkspace) =>
+  parts.readOnly ? null : (workspace ?? null);
+
+function repoRootNotice(repoRoot: string): string {
+  return `The repository under review is ${repoRoot}. Run every command from there (cd into it first); paths in this task are relative to it. Its working tree is read-only to you except .claude/.\n\n`;
+}
+
+export function codexExecArgs(
+  parts: ClaudeArgvParts,
+  mcpArgv: string[] = [],
+  workspace?: CodexWorkspace,
+): string[] {
   if (!parts.model || !parts.prompt)
     throw new Error('codex judge: argv carries no --model or no prompt — cannot translate');
   const spec = parseModelSpec(parts.model);
+  const confined = confinedWorkspace(parts, workspace);
   // Codex exec has no system-prompt flag: an agent brief (`--append-system-prompt`) is prepended
   // to the prompt instead. A labeled block, so the model sees the brief/task boundary the two
   // claude message slots used to provide.
-  const prompt = parts.systemPrompt
-    ? `<agent-brief>\n${parts.systemPrompt}\n</agent-brief>\n\n${parts.prompt}`
-    : parts.prompt;
+  const prompt =
+    (confined ? repoRootNotice(confined.repoRoot) : '') +
+    (parts.systemPrompt
+      ? `<agent-brief>\n${parts.systemPrompt}\n</agent-brief>\n\n${parts.prompt}`
+      : parts.prompt);
   // `--json` is the same flag OpenAI's own SDK spawns as `--experimental-json` (an alias,
   // codex-rs/exec/src/cli.rs) — machine-readable but not promised frozen, which is why the parsers
   // here are pinned by a captured fixture and a failure-event test. Web search is disabled the way
@@ -210,6 +230,7 @@ export function codexExecArgs(parts: ClaudeArgvParts, mcpArgv: string[] = []): s
   argv.push(
     '--sandbox',
     parts.readOnly ? 'read-only' : 'workspace-write',
+    ...(confined ? ['-C', confined.scratch, '--add-dir', join(confined.repoRoot, '.claude')] : []),
     '-c',
     'web_search="disabled"',
     ...mcpArgv,
@@ -349,19 +370,35 @@ export function judgeCliFor(
   // this, routing it to codex silently upgrades it to workspace-write on a gate (decisions) that
   // has no staged-tree tamper detection. Callers assert read-only; the flag never widens access.
   forceReadOnlySandbox = false,
+  workspace?: CodexWorkspace,
 ): JudgeCli {
-  const parsed = parseClaudeArgv(args);
-  const parts = forceReadOnlySandbox ? { ...parsed, readOnly: true } : parsed;
+  const parts = codexArgvParts(args, forceReadOnlySandbox);
   if (!isCodexModel(parts.model))
     return { bin: 'claude', argv: withResultArgs(args), codex: false };
   const mcp = codexMcpArgs(mcpServers, parts.allowedTools);
+  const confined = confinedWorkspace(parts, workspace);
   return {
     bin: codexBin(),
-    argv: codexExecArgs(parts, mcp.argv),
+    argv: codexExecArgs(parts, mcp.argv, workspace),
     codex: true,
-    extraEnv: mcp.extraEnv,
+    // Checklist scripts chdir here (skills/_devkit/review-roots.mjs): state lands where the gate reads it.
+    extraEnv: confined
+      ? { ...mcp.extraEnv, DEVKIT_JUDGE_REPO_ROOT: confined.repoRoot }
+      : mcp.extraEnv,
     mcpInjected: mcp.injected,
   };
+}
+
+/** The parsed argv as judgeCliFor routes it: the caller's read-only assertion folded in. */
+function codexArgvParts(args: string[], forceReadOnlySandbox: boolean): ClaudeArgvParts {
+  const parsed = parseClaudeArgv(args);
+  return forceReadOnlySandbox ? { ...parsed, readOnly: true } : parsed;
+}
+
+/** True when judgeCliFor would run this argv as a workspace-write codex judge. */
+export function needsCodexWorkspace(args: string[], forceReadOnlySandbox = false): boolean {
+  const parts = codexArgvParts(args, forceReadOnlySandbox);
+  return isCodexModel(parts.model) && !parts.readOnly;
 }
 
 /** The binary NAME for outage wording — must never throw (it runs inside catch blocks, including
