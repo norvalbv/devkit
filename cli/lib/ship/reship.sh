@@ -586,6 +586,8 @@ fi
 
 # Re-pushes pay the same gate cost and can inherit the same stale checkout baseline as new ships.
 . "$SCRIPT_DIR/prepare-gate-worktree.sh"
+# Project before the intent write: a legacy linked .devkit hides the record path from check-ignore.
+gate_project_caller "$ROOT" || true
 . "$SCRIPT_DIR/ship-run-record.sh"
 . "$SCRIPT_DIR/worktree-registry.sh"
 . "$SCRIPT_DIR/reclaim-orphan-worktrees.sh"

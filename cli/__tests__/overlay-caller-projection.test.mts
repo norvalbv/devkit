@@ -4,14 +4,24 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { applyInit } from '../commands/init.mts';
 import { applyOverlayConstraints, defaultSelection } from '../lib/components.mts';
+import { relIntentPath } from '../lib/ship/ship-intent.mts';
 import { CLI, devkitHome, rootRegistry, testSpawnSync } from './_helpers.mts';
-import { addOverlay, scriptPath, seedShipRepo } from './_ship-branch-fixture.mts';
+import { addOverlay, reshipScript, scriptPath, seedShipRepo } from './_ship-branch-fixture.mts';
 
 const overlayRoot = fileURLToPath(
   new URL('../lib/husky/overlay/overlay-root.mts', import.meta.url),
@@ -143,5 +153,73 @@ echo "ESLINT=$(readlink eslint.config.devkit.mjs)" >&2`,
     expect(readFileSync(join(dir, '.devkit', 'baselines', 'size-lines.json'), 'utf8')).toBe(
       'home\n',
     );
+  });
+});
+
+/** An overlay home plus a linked worktree still on the pre-projection layout: `.devkit` is a link. */
+function legacyLinkedWorktree(reship: boolean) {
+  const { dir, env, git } = seedShipRepo();
+  if (reship) {
+    // reship reads owner/repo from the raw URL, then fetches the PR branch through insteadOf.
+    const bare = mkTmp('legacy-linked-bare-');
+    git(['init', '-q', '--bare', bare], { stdio: 'ignore' });
+    git(['config', `url.${bare}.insteadOf`, 'git@github.com:acme/app.git'], { stdio: 'ignore' });
+    git(['push', '-q', 'origin', 'work:pr-open'], { stdio: 'ignore' });
+  }
+  addOverlay(dir, 'exit 0');
+  writeFileSync(join(dir, '.git', 'info', 'exclude'), '.devkit/\n.devkit\n');
+  git(['config', 'core.hooksPath', join(dir, '.devkit', 'hooks')], { stdio: 'ignore' });
+  const linked = join(realpathSync(mkTmp('legacy-linked-')), 'wt');
+  git(['worktree', 'add', '-q', '-b', 'task', linked], { stdio: 'ignore' });
+  symlinkSync(join(dir, '.devkit'), join(linked, '.devkit'));
+  writeFileSync(join(linked, 'note.txt'), 'hello\n');
+  writeFileSync(join(linked, 'body.md'), 'pr body\n');
+  return { dir, env, linked };
+}
+
+describe('devkit ship from a linked worktree whose .devkit is a legacy link into the home', () => {
+  it.each([
+    ['ship', scriptPath, ['feat/legacy', 't', '--body-file', 'body.md', '--', 'note.txt']],
+    [
+      'ship --pr',
+      reshipScript,
+      ['pr-open', 't', '--pr', '--body-file', 'body.md', '--', 'note.txt'],
+    ],
+  ])('%s replaces the link before recording the invocation', (_name, script, args) => {
+    const { dir, env, linked } = legacyLinkedWorktree(script === reshipScript);
+
+    const r = testSpawnSync('/bin/bash', [script, ...args], {
+      cwd: linked,
+      encoding: 'utf8',
+      env: { ...env, SHIP_DRY_RUN: '1' },
+    });
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(lstatSync(join(linked, '.devkit')).isDirectory()).toBe(true);
+    expect(r.stderr).not.toMatch(/ship-intent:|invocation not recorded/);
+    expect(readdirSync(join(dir, '.devkit')).filter((f) => f.startsWith('ship-intent-'))).toEqual(
+      [],
+    );
+  });
+
+  it('still records the invocation when the early projection leaves a gap open', () => {
+    const { dir, env, linked } = legacyLinkedWorktree(true);
+    // Ignored only as a directory, so the home's copy can never be linked: a gap no repair closes.
+    writeFileSync(join(dir, 'guard.config.json'), '{}\n');
+    mkdirSync(join(dir, 'docs', 'decisions'), { recursive: true });
+    writeFileSync(join(dir, 'docs', 'decisions', 'a'), 'a\n');
+    writeFileSync(join(dir, '.git', 'info', 'exclude'), 'guard.config.json\ndocs/decisions/\n', {
+      flag: 'a',
+    });
+
+    const r = testSpawnSync(
+      '/bin/bash',
+      [reshipScript, 'pr-open', 't', '--pr', '--body-file', 'body.md', '--', 'note.txt'],
+      { cwd: linked, encoding: 'utf8', env: { ...env, SHIP_DRY_RUN: '1' } },
+    );
+
+    expect(r.status, r.stderr).not.toBe(0);
+    expect(r.stderr).toContain('docs/decisions cannot be linked from the overlay');
+    expect(existsSync(join(linked, relIntentPath('pr-open')))).toBe(true);
   });
 });

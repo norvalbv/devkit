@@ -733,6 +733,8 @@ if [ "$FROM_BRANCH" -eq 0 ] && [ "$PATCH_BASE" != "$BASE" ] && [ -z "$LOCAL_BRAN
 fi
 
 . "$SCRIPT_DIR/prepare-gate-worktree.sh"
+# Project before the intent write: a legacy linked .devkit hides the record path from check-ignore.
+gate_project_caller "$ROOT" || true
 # Judge reachability does not depend on the staged scope. A plain --dry-gates skips the reviewer gate
 # entirely so it skips this too; --with-reviewers runs that gate, where a dark provider would otherwise
 # surface only as a strict-mode exit 3. Fail-open, so it may run before the invocation is recorded;
