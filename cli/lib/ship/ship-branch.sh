@@ -169,6 +169,9 @@ ROOT=$(git rev-parse --show-toplevel)
 # installed consumer (dist) — same fallback the reconcile writer uses.
 SHIP_INTENT="$SCRIPT_DIR/ship-intent.mts"; [ -f "$SHIP_INTENT" ] || SHIP_INTENT="$SCRIPT_DIR/ship-intent.mjs"
 . "$SCRIPT_DIR/resume-extras-notice.sh"
+. "$SCRIPT_DIR/prepare-gate-worktree.sh"
+# Project before the intent read and write: a legacy linked .devkit resolves the record in the home.
+gate_project_caller "$ROOT" || true
 RESUME_BODY=
 if [ "$RESUME" -eq 1 ]; then
   # NUL-delimited so every field survives byte-exact (a body holds newlines; a path may hold almost
@@ -725,9 +728,6 @@ if [ "$FROM_BRANCH" -eq 0 ] && [ "$PATCH_BASE" != "$BASE" ] && [ -z "$LOCAL_BRAN
   ship_text_arm_trial || exit 1
 fi
 
-. "$SCRIPT_DIR/prepare-gate-worktree.sh"
-# Project before the intent write: a legacy linked .devkit hides the record path from check-ignore.
-gate_project_caller "$ROOT" || true
 # Judge reachability does not depend on the staged scope. A plain --dry-gates skips the reviewer gate
 # entirely so it skips this too; --with-reviewers runs that gate, where a dark provider would otherwise
 # surface only as a strict-mode exit 3. Fail-open, so it may run before the invocation is recorded;
