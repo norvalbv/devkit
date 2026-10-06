@@ -461,7 +461,7 @@ export async function produceCoverage(cwd = process.cwd(), argv: string[] = []):
   }
 
   const first = await runPass(vitest, cwd, argv, []);
-  reportDiagnosis(first.diagnosis, cwd, first.retrying);
+  reportDiagnosis(first.diagnosis, cwd, first.retrying && !first.interrupted);
   let final = first;
 
   if (shouldRerun({ ...first, argv, env: process.env })) {
@@ -473,7 +473,7 @@ export async function produceCoverage(cwd = process.cwd(), argv: string[] = []):
       `--testTimeout=${budget}`,
       `--hookTimeout=${budget}`,
     ]);
-    reportDiagnosis(final.diagnosis, cwd, final.retrying);
+    reportDiagnosis(final.diagnosis, cwd, final.retrying && !final.interrupted);
     if (final.code === 0) {
       reportRerunRescue(first.diagnosis, cwd, budget);
     } else if (first.outcome === 'cleared' && final.outcome === 'kept') {

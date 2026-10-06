@@ -41,7 +41,13 @@ import {
   STALE_RUN_MS,
   snapshotArtifact,
 } from '../produce.mts';
-import { ownsTimeoutBudget, ownsReporter, ownsRetry, resolveVitest } from '../vitest-cli.mts';
+import {
+  ownsReporter,
+  ownsRetry,
+  ownsTimeoutBudget,
+  resolveVitest,
+  runVitestDetailed,
+} from '../vitest-cli.mts';
 import {
   detectVitestVersion,
   supportsRetryCondition,
@@ -911,6 +917,45 @@ describe('a retry devkit cannot report on', () => {
     const out = said({ failedFiles: [], flaky: [] }, true);
     expect(out).not.toMatch(/cannot be reported/);
   });
+
+  // vitest traps SIGTERM and exits 143 with no report: the interruption, not reporter config, is why.
+  it.each([
+    [143, false],
+    [1, true],
+  ])(
+    'a retrying run whose vitest exits %i without a report: blames reporters = %s',
+    (code, blames) => {
+      const root = makeRoot();
+      silentStubVitest(root, `process.exit(${code});`);
+      mkdirSync(join(root, COVERAGE_DIR), { recursive: true });
+      writeFileSync(join(root, COVERAGE_FILE), '{"from-an-earlier-green-run.ts":{}}');
+
+      const result = coverageRun(root);
+
+      expect(result.status).toBe(code);
+      expect(/cannot be reported/.test(result.stderr)).toBe(blames);
+      // Fail-CLOSED either way: the earlier run's artifact is gone and so is the run directory.
+      expect(existsSync(join(root, COVERAGE_FILE))).toBe(false);
+      expect(readdirSync(join(root, RUNS_DIR))).toEqual([]);
+    },
+  );
+});
+
+describe('runVitestDetailed', () => {
+  // vitest traps SIGINT/SIGTERM and exits 128 + signo, so a child-only stop reports no signal.
+  it.each([
+    [143, true],
+    [130, true],
+    [1, false],
+    [0, false],
+  ])('a child exiting %i reads as interrupted = %s', async (code, interrupted) => {
+    const run = await runVitestDetailed(
+      process.execPath,
+      ['-e', `process.exit(${code})`],
+      tmpdir(),
+    );
+    expect(run).toEqual({ code, interrupted });
+  });
 });
 
 describe('a failing run with nothing of its own to discard', () => {
@@ -1169,6 +1214,8 @@ writeFileSync(process.argv[2], JSON.stringify({ code }));
 
     const child = spawn(process.execPath, [probe, observed, root], { cwd: root, stdio: 'pipe' });
     const guard = setTimeout(() => child.kill('SIGKILL'), 60_000);
+    let stderr = '';
+    child.stderr.on('data', (d) => (stderr += d));
     try {
       await waitForPath(ready, 30_000);
       child.kill('SIGINT');
@@ -1180,6 +1227,8 @@ writeFileSync(process.argv[2], JSON.stringify({ code }));
 
     // A child that died on a signal reports 1, not the 0 an untouched stub would have exited with.
     expect(JSON.parse(readFileSync(observed, 'utf8')).code).toBe(1);
+    // The retry was injected and no report exists, but the interruption is why, not reporter config.
+    expect(stderr).not.toMatch(/cannot be reported/);
     expect(existsSync(join(root, COVERAGE_FILE))).toBe(false);
     expect(readdirSync(join(root, RUNS_DIR))).toEqual([]);
   });
@@ -1374,6 +1423,42 @@ process.exit(99);`,
 
     expect(result.status).toBe(1);
     expect(result.stderr).toMatch(/vitest passed but produced no coverage-final\.json/);
+  });
+
+  // A trapped SIGTERM must refuse the re-run as an interruption, even beside a timeout-only report.
+  it('never re-runs a pass whose vitest trapped SIGTERM', () => {
+    const root = makeRoot();
+    const calls = scriptedVitest(
+      root,
+      ['timeout-then-143', 'green'],
+      `if (step === 'timeout-then-143') { report([timedOut('/repo/a.test.ts', 612)]); process.exit(143); }`,
+    );
+    seedArtifact(root);
+
+    const result = run(root);
+
+    expect(result.status).toBe(143);
+    expect(calls()).toHaveLength(1);
+    expect(result.stderr).not.toMatch(/re-running the whole suite/);
+    expect(existsSync(join(root, COVERAGE_FILE))).toBe(false);
+  });
+
+  it('does not blame reporters when the second pass is the one stopped', () => {
+    const root = makeRoot();
+    const calls = scriptedVitest(
+      root,
+      ['timeout', 'sigterm'],
+      `if (step === 'sigterm') process.exit(143);`,
+    );
+    seedArtifact(root);
+
+    const result = run(root);
+
+    expect(result.status).toBe(143);
+    expect(calls()).toHaveLength(2);
+    expect(result.stderr).not.toMatch(/cannot be reported/);
+    expect(existsSync(join(root, COVERAGE_FILE))).toBe(false);
+    expect(readdirSync(join(root, RUNS_DIR))).toEqual([]);
   });
 
   it.each<[string, string[], NodeJS.ProcessEnv]>([
