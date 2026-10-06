@@ -309,6 +309,8 @@ export interface PromptExtras {
   targetsBlock?: string;
   commitMsgBlock?: string;
   lineCountBlock?: string;
+  stagedFiles?: string[]; // every staged path, so a reviewer is told what lies outside its list
+  alsoStagedBlock?: string;
 }
 
 /**
@@ -324,7 +326,7 @@ export function wrapPrompt(
   files: string[],
   assetRoot?: string,
   checklistRecoveryReason?: string,
-  { targetsBlock = '', commitMsgBlock = '' }: PromptExtras = {},
+  { targetsBlock = '', commitMsgBlock = '', alsoStagedBlock = '' }: PromptExtras = {},
   checklistRoot = assetRoot ?? '.claude',
 ): string {
   const effectiveAssetRoot = checklistRoot;
@@ -338,6 +340,7 @@ export function wrapPrompt(
   return (
     'You are running as an automated HEADLESS COMMIT GATE, not an interactive assistant.\n' +
     `Review ONLY the STAGED changes (domain: ${reviewer.domain}). Staged files in scope: ${files.join(', ')}.\n` +
+    (alsoStagedBlock ? `${alsoStagedBlock}\n` : '') +
     'Reviewer selection has already been performed. Treat that staged-file list as authoritative; do not re-evaluate the brief trigger conditions or skip because repository configuration has empty roots.\n' +
     'The file/churn map (--stat) followed by per-file diff evidence is on stdin. Evidence is ' +
     'capped per file and in total; anything the caps dropped is NAMED inline (OMITTED:/[TRUNCATED:). ' +
@@ -379,11 +382,12 @@ export function wrapConventionsPrompt(
   agentBody: string,
   files: string[],
   claudeMdBlock: string,
-  { commitMsgBlock = '', lineCountBlock = '' }: PromptExtras = {},
+  { commitMsgBlock = '', lineCountBlock = '', alsoStagedBlock = '' }: PromptExtras = {},
 ): string {
   return (
     'You are running as an automated HEADLESS COMMIT GATE, not an interactive assistant.\n' +
     `Review ONLY the STAGED changes. Staged files in scope: ${files.join(', ')}.\n` +
+    (alsoStagedBlock ? `${alsoStagedBlock}\n` : '') +
     'You have NO Bash, but Read/Grep/Glob are available. The diff evidence on stdin is capped: ' +
     'an OMITTED/TRUNCATED marker means some staged context was not included. Before returning PASS ' +
     'when such a marker appears, use Read to inspect every available in-scope staged file not shown ' +

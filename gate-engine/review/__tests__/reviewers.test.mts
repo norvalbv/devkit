@@ -1095,6 +1095,15 @@ describe('wrapPrompt / escalatePrompt / stripFrontmatter', () => {
     expect(conventions).toContain('─────\nfeat: x\n─────');
     expect(wrapConventionsPrompt('brief', ['a.ts'], 'rules')).not.toContain('feat: x');
   });
+
+  it('includes the also-staged line in checklist and conventions prompts only when given', () => {
+    const extras = { alsoStagedBlock: 'Also staged in this commit: templates/x.json.' };
+    const checklist = wrapPrompt('body', REVIEWERS[0], ['a.ts'], undefined, undefined, extras);
+    expect(checklist).toContain('in scope: a.ts.\nAlso staged in this commit: templates/x.json.\n');
+    expect(wrapConventionsPrompt('brief', ['a.ts'], 'rules', extras)).toContain('templates/x.json');
+    expect(wrapPrompt('body', REVIEWERS[0], ['a.ts'])).not.toContain('Also staged');
+    expect(wrapConventionsPrompt('brief', ['a.ts'], 'rules')).not.toContain('Also staged');
+  });
   const body = '---\nname: api-security-reviewer\nmodel: opus\n---\nCheck auth on every route.';
   it('keeps exact registered checklist commands in ordinary commit/ship prompts', () => {
     const p = wrapPrompt(body, REVIEWERS[0], ['src/main/a.ts']);
