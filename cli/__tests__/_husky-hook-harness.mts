@@ -5,7 +5,9 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  renameSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -79,6 +81,22 @@ function padStagedDiff(home, file, bytes) {
   if (size() !== bytes) throw new Error(`staged diff is ${size()} bytes, wanted ${bytes}`);
 }
 
+// A ship worktree's shape: node_modules is a LINK to the caller's install. `entry` is eslint's own
+// script; `store` makes eslint a link into an isolated store (pnpm's .pnpm, bun's .bun).
+function linkNodeModules(home, { entry = true, store = '' }) {
+  const real = join(home, 'caller-node_modules');
+  renameSync(join(home, 'node_modules'), real);
+  const pkg = store
+    ? join(real, store, 'eslint@9', 'node_modules', 'eslint')
+    : join(real, 'eslint');
+  if (entry) {
+    mkdirSync(join(pkg, 'bin'), { recursive: true });
+    writeFileSync(join(pkg, 'bin', 'eslint.js'), '');
+  }
+  if (store) symlinkSync(pkg, join(real, 'eslint'));
+  symlinkSync(real, join(home, 'node_modules'));
+}
+
 export function runHook(
   env = {},
   selection = { biome: false, guards: ALL_GUARDS },
@@ -95,6 +113,7 @@ export function runHook(
     staged = false,
     eslintOverlay = false,
     biomeOverlay = false,
+    linkedNodeModules = undefined,
   } = {},
 ) {
   const home = mkdtempSync(join(tmpdir(), dirPrefix));
@@ -226,6 +245,7 @@ esac
     biomeOverlay,
   });
   for (const name of missingLocalBins) rmSync(join(packageBin, name), { force: true });
+  if (linkedNodeModules) linkNodeModules(home, linkedNodeModules);
   const hookPath = join(home, 'pre-commit');
   const hook =
     builder === 'overlay'

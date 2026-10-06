@@ -878,6 +878,9 @@ describe('overlay staged gates run before the AI guards (sc-3020)', () => {
   const REVIEWED = { biome: false, guards: ['comments', 'decisions', 'review'] };
   // sc-2753: comments rides guard-deterministic, which already runs before fallow.
   const AI_CALLS = ['guard-decisions', 'guard-review'];
+  // The overlay harness stubs `node` to log as `baseline`.
+  const PRESERVED =
+    'baseline --preserve-symlinks node_modules/eslint/bin/eslint.js -c eslint.config.devkit.mjs';
   const overlay = (extra = {}) => ({ builder: 'overlay', fallow: true, staged: true, ...extra });
 
   for (const mode of ['', 'ship', 'dry-gates']) {
@@ -931,6 +934,25 @@ describe('overlay staged gates run before the AI guards (sc-3020)', () => {
     expect(r.status).toBe(1);
     expect(r.calls).toContain('eslint -c eslint.config.devkit.mjs');
     for (const ai of AI_CALLS) expect(r.calls).not.toContain(ai);
+  });
+
+  // A plugin that roots at its own real path judges the caller's checkout through a linked
+  // node_modules, so the staged step must run eslint with the link preserved.
+  it.each([
+    ['a real node_modules', undefined, 'eslint -c eslint.config.devkit.mjs'],
+    ['a linked node_modules', {}, PRESERVED],
+    ['a linked pnpm layout', { store: '.pnpm' }, 'eslint -c eslint.config.devkit.mjs'],
+    ['a linked bun isolated layout', { store: '.bun' }, 'eslint -c eslint.config.devkit.mjs'],
+    ['a linked install without eslint.js', { entry: false }, 'eslint -c eslint.config.devkit.mjs'],
+  ])('the eslint overlay preserves symlinks only where it is safe: %s', (_name, linked, call) => {
+    const r = runHook(
+      {},
+      REVIEWED,
+      overlay({ fallow: false, eslintOverlay: true, linkedNodeModules: linked }),
+    );
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.calls).toContain(`${call} src/staged.ts`);
+    expect(r.calls.includes('--preserve-symlinks')).toBe(call === PRESERVED);
   });
 
   it('an eslint overlay whose repo binary is missing says so instead of skipping silently', () => {

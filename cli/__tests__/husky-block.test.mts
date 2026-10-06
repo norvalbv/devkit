@@ -482,7 +482,7 @@ describe('buildOverlayHook — gates-only guard for the global init.sh shim', ()
     });
     expect(withFallow).toContain('__dk_review_baseline_gate eslint');
     expect(withFallow).toContain('__dk_review_baseline_gate fallow');
-    expect(withFallow).toContain('node_modules/.bin/eslint -c eslint.config.devkit.mjs');
+    expect(withFallow).toContain('xargs $DK_ESLINT -c eslint.config.devkit.mjs');
     expect(withFallow).toContain('command -v fallow');
     expect(withFallow).toContain('baseline-gate.mjs');
     expect(withFallow.indexOf('__dk_review_baseline_gate fallow')).toBeLessThan(
@@ -503,16 +503,14 @@ describe('buildOverlayHook — gates-only guard for the global init.sh shim', ()
     const firstAi = hook.indexOf('# devkit:guard-decisions');
     expect(firstAi).toBeGreaterThan(0);
     expect(hook.indexOf('fallow audit --diff-stdin')).toBeLessThan(firstAi);
-    expect(hook.indexOf('node_modules/.bin/eslint -c eslint.config.devkit.mjs')).toBeLessThan(
-      firstAi,
-    );
+    expect(hook.indexOf('xargs $DK_ESLINT -c eslint.config.devkit.mjs')).toBeLessThan(firstAi);
     expect(hook.indexOf('# devkit:guard-qavis-advisory')).toBeGreaterThan(
       hook.indexOf('fallow audit --diff-stdin'),
     );
     expect(hook.indexOf('__dk_review_baseline_gate eslint')).toBeGreaterThan(firstAi);
     expect(hook.indexOf('__dk_review_baseline_gate fallow')).toBeGreaterThan(firstAi);
     // Staged checks never leak into review mode, nor baselines into commit/ship.
-    expect(hook).toContain('if [ "${DEVKIT_RUN_MODE:-}" != "review" ]; then\n    DK_STAGED=');
+    expect(hook).toContain('if [ "${DEVKIT_RUN_MODE:-}" != "review" ]; then\n    DK_ESLINT=');
   });
 });
 

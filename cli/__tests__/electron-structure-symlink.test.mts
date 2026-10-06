@@ -4,6 +4,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { structureCmdFor } from '../lib/components.mts';
+import { buildOverlayHook } from '../lib/husky/husky-block.mts';
+import { eslintOverlayContent } from '../lib/install/overlay-lint-configs.mts';
 import { testSpawnSync as spawnSync } from './_helpers.mts';
 
 const DEVKIT_ROOT = realpathSync(join(dirname(fileURLToPath(import.meta.url)), '../..'));
@@ -91,6 +93,34 @@ export default [{
     expect(structureCmdFor('electron')).toBe('guard-structure staged');
     expect(result.status, `stdout: ${result.stdout}\nstderr: ${result.stderr}`).toBe(1);
     expect(`${result.stdout}\n${result.stderr}`).toContain('wrong.ts');
+  });
+
+  it("the overlay hook's staged eslint step blocks a structure violation through a linked node_modules", () => {
+    const worktree = realpathSync(mkdtempSync(join(tmpdir(), 'overlay-eslint-symlink-')));
+    roots.push(worktree);
+    mkdirSync(join(worktree, 'src'));
+    symlinkSync(join(DEVKIT_ROOT, 'node_modules'), join(worktree, 'node_modules'));
+    writeElectronConfig(worktree, "{ name: 'src', children: [{ name: 'allowed.ts' }] }");
+    writeFileSync(
+      join(worktree, 'eslint.config.devkit.mjs'),
+      eslintOverlayContent('eslint.config.mjs'),
+    );
+    writeFileSync(join(worktree, 'src', 'wrong.ts'), 'export {};\n');
+    initializeGit(worktree);
+    stage(worktree, 'eslint.config.mjs', 'src/wrong.ts');
+
+    // The generated step itself, so a regression in the hook text fails here.
+    const hook = buildOverlayHook({ biome: false, guards: [] });
+    const step = hook.slice(
+      hook.indexOf('# devkit lint overlay — STAGED'),
+      hook.indexOf('# devkit lint overlay — review mode'),
+    );
+    expect(step).toContain('devkit eslint overlay (staged)');
+    const result = spawnSync('sh', ['-e', '-c', step], { cwd: worktree, encoding: 'utf8' });
+
+    expect(result.status, `stdout: ${result.stdout}\nstderr: ${result.stderr}`).toBe(1);
+    expect(result.stdout).toContain('project-structure/folder-structure');
+    expect(result.stdout).toContain('wrong.ts');
   });
 
   it('probes a staged deletion so a missing required index still blocks', () => {

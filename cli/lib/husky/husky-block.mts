@@ -187,12 +187,12 @@ export function buildFullHook(selection: HookSelection, pkgRel = '', binDir: Bin
 // `--relative` makes `git diff` emit paths relative to the CURRENT dir, so this works whether
 // the hook runs at the repo root or cd'd into a monorepo package (eslint/biome + their configs
 // are then resolved package-locally).
-const overlayLintStep = (tool: string, label: string, exts: string, config: string, args: string) =>
+const overlayLintStep = (tool: string, label: string, exts: string, config: string, run: string) =>
   `DK_STAGED=$(git diff --cached --name-only --relative --diff-filter=ACM | grep -E '\\.(${exts})$' || true)
 if [ -n "$DK_STAGED" ] && [ -f ${config} ]; then
     if [ -x node_modules/.bin/${tool} ]; then
         echo "${label}"
-        echo "$DK_STAGED" | xargs node_modules/.bin/${tool} ${args} || {
+        echo "$DK_STAGED" | xargs ${run} || {
 ${shipRehearsalHint('            ')}
             exit 1
         }
@@ -205,15 +205,21 @@ const OVERLAY_ESLINT_STAGED = overlayLintStep(
   '🧱 devkit eslint overlay (staged)...',
   'tsx?|jsx?',
   'eslint.config.devkit.mjs',
-  '-c eslint.config.devkit.mjs',
+  '$DK_ESLINT -c eslint.config.devkit.mjs',
 );
 const OVERLAY_BIOME = overlayLintStep(
   'biome',
   '🎨 devkit biome overlay (staged)...',
   'tsx?|jsx?|css|jsonc?',
   'biome.devkit.jsonc',
-  'check --config-path biome.devkit.jsonc',
+  'node_modules/.bin/biome check --config-path biome.devkit.jsonc',
 );
+
+// Shell twin of eslintNodeFlags: keep a linked node_modules' path so a plugin roots at this worktree.
+// Never for an isolated store (eslint itself linked): the flag breaks its dependency resolution.
+const ESLINT_PRESERVE_SYMLINKS = `DK_ESLINT=node_modules/.bin/eslint
+[ -L node_modules ] && [ ! -L node_modules/eslint ] && [ -f node_modules/eslint/bin/eslint.js ] &&
+    DK_ESLINT="node --preserve-symlinks node_modules/eslint/bin/eslint.js"`;
 
 // Commit, ship and dry-gates: the cheap BLOCKING staged checks run before the AI guards, so a lint
 // or dead-code finding never waits behind the reviewer chain (sc-3020).
@@ -221,6 +227,7 @@ const overlayStagedGates = (
   fallow: boolean,
 ) => `# devkit lint overlay — STAGED files only, against configs that EXTEND the repo's (git-ignored).
 if [ "\${DEVKIT_RUN_MODE:-}" != "review" ]; then
+${indent(ESLINT_PRESERVE_SYMLINKS)}
 ${indent(OVERLAY_ESLINT_STAGED)}
 ${indent(OVERLAY_BIOME)}${fallow ? `\n    # devkit fallow gate (overlay)\n${indent(FALLOW_STAGED)}` : ''}
 fi`;
