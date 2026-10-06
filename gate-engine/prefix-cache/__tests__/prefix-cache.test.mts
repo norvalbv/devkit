@@ -8,6 +8,7 @@ import {
   checkPrefix,
   clearPrefix,
   computeKey,
+  describeCachedPrefix,
   prefixEntry,
   recordPrefix,
 } from '../prefix-cache.mts';
@@ -135,6 +136,25 @@ describe('checkPrefix / recordPrefix', () => {
 
 // The bin contract the hooks script against: exit codes are the API (a wrong code silently
 // skips gates or re-runs them forever), so pin them at the spawned-CLI level.
+describe('describeCachedPrefix', () => {
+  it('names the age and every gate it did not re-run, leaving out coverage, which always runs', () => {
+    const at = new Date(Date.now() - 5 * 60_000).toISOString();
+    expect(describeCachedPrefix(at, ['size', 'coverage'], ['lint'], [])).toBe(
+      '✓ Deterministic gates: passed for this exact staged tree 5m ago — not re-run: guard-size lint',
+    );
+  });
+  it('names no skipped gates when coverage, which always runs, was the only one', () => {
+    expect(describeCachedPrefix(undefined, ['coverage'], [], ['GUARD_STRUCTURE_OK'])).toBe(
+      '✓ Deterministic gates: passed for this exact staged tree; bypassed for this run: GUARD_STRUCTURE_OK',
+    );
+  });
+  it('drops the age rather than printing NaN when the entry has no readable timestamp', () => {
+    expect(describeCachedPrefix(undefined, ['size'], [], [])).toBe(
+      '✓ Deterministic gates: passed for this exact staged tree — not re-run: guard-size',
+    );
+  });
+});
+
 describe('guard-prefix CLI (spawned)', () => {
   const run = (args, cwd, env = {}) =>
     spawnSync('node', [CLI, ...args], {

@@ -21,6 +21,7 @@ import { lineHits } from './lines.mts';
 import { COVERAGE_DIR, COVERAGE_FILE } from './produce.mts';
 import {
   type ArtifactRead,
+  artifactKeysSchema,
   type Classify,
   checkProvenance,
   type Provenance,
@@ -250,9 +251,13 @@ export function runCoverage(cwd = process.cwd()): number {
   // fail CLOSED with a clean message instead of crashing or reading garbage as coverage.
   let computed: Record<Metric, number>;
   let artifact: ArtifactRead;
+  let files: string;
   try {
     artifact = readArtifact(file);
-    computed = computePercentages(JSON.parse(artifact.bytes));
+    const parsed: unknown = JSON.parse(artifact.bytes);
+    computed = computePercentages(parsed);
+    const n = Object.keys(artifactKeysSchema.parse(parsed)).length;
+    files = `${n} file${n === 1 ? '' : 's'}`;
   } catch {
     failLine(`🚫 Coverage gate FAILED — ${COVERAGE_FILE} is present but not valid coverage data.`);
     console.error(artifactLine(file));
@@ -296,7 +301,7 @@ export function runCoverage(cwd = process.cwd()): number {
     (m) => typeof coverage[m] === 'number' && computed[m] < (coverage[m] as number),
   );
   if (shortfalls.length > 0) {
-    failLine('🚫 Coverage below threshold:');
+    failLine(`🚫 Coverage below threshold (${files} measured):`);
     for (const m of shortfalls) {
       failLine(`   ${m}: ${computed[m]}% (min ${coverage[m]}%)`);
     }
@@ -352,7 +357,7 @@ export function runCoverage(cwd = process.cwd()): number {
     provenance.state === 'unknown'
       ? ''
       : ` — artifact run ${provenance.manifest.runId}, measured ${age} ago`;
-  console.log(`✓ Coverage gate passed (${summary})${measured}.`);
+  console.log(`✓ Coverage gate passed (${summary}; ${files})${measured}.`);
   console.log(artifactLine(file));
   return 0;
 }

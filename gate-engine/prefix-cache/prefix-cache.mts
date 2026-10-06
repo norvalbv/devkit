@@ -36,6 +36,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { clearEntries, devkitDataFile, loadEntries, saveEntries } from '../judge/verdict-store.mts';
+import { humanAge } from '../coverage/failures.mts';
 import { gateConfigFingerprint } from './config-fingerprint.mts';
 
 const STORE_FILE = 'prefix-cache.json';
@@ -131,6 +132,25 @@ export function recordPrefix(cwd: string, opts: RecordOpts = {}) {
         : {}),
     },
   });
+}
+
+/** The line a cache hit prints: every gate it did not re-run, and any bypass flag set for this run.
+ * Coverage is absent from the list because a cache hit still runs it. */
+export function describeCachedPrefix(
+  at: string | undefined,
+  gateIds: string[],
+  extras: string[],
+  bypassFlags: string[],
+): string {
+  const ms = at === undefined ? Number.NaN : Date.now() - Date.parse(at);
+  const age = Number.isFinite(ms) ? ` ${humanAge(ms)} ago` : '';
+  const labels = [
+    ...gateIds.filter((id) => id !== 'coverage').map((id) => `guard-${id}`),
+    ...extras,
+  ];
+  const bypassed = bypassFlags.length ? `; bypassed for this run: ${bypassFlags.join(' ')}` : '';
+  const skippedGates = labels.length ? ` — not re-run: ${labels.join(' ')}` : '';
+  return `✓ Deterministic gates: passed for this exact staged tree${age}${skippedGates}${bypassed}`;
 }
 
 /** Drop every cached prefix key (the escape hatch for gitignored-input staleness). */

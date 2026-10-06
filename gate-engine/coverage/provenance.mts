@@ -62,7 +62,7 @@ const manifestSchema = z.object({
 }) satisfies z.ZodType<CoverageManifest>;
 
 // Only the keys matter here; computePercentages has already validated each entry's shape.
-const artifactKeysSchema = z.record(z.string(), z.unknown());
+export const artifactKeysSchema = z.record(z.string(), z.unknown());
 
 export type PathKind = 'production' | 'test' | 'other';
 /** Classify a briefed repo-relative path; `measured` = the artifact carries an entry for it. */

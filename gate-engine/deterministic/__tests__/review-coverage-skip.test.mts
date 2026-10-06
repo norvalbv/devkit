@@ -50,12 +50,14 @@ describe('coverage exit 2 under review', () => {
     expect(err.mock.calls.flat().join('\n')).toContain('guard-coverage');
   });
 
-  it('a measured, green review still records its key (the cache is not disabled wholesale)', () => {
+  it('a measured, green review still records its key, and the hit re-judges coverage', () => {
     review();
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     const exec = coverageExits(0);
     expect(runDeterministic(dir, { exec })).toBe(0);
     expect(runDeterministic(dir, { exec })).toBe(0);
-    expect(coverageRuns(exec)).toBe(1);
+    expect(log.mock.calls.flat().join('\n')).toContain('passed for this exact staged tree');
+    expect(coverageRuns(exec)).toBe(2);
   });
 });
 

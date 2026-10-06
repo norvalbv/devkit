@@ -166,6 +166,18 @@ describe('runCoverage — fail-closed gate', () => {
     expect(text(s.log)).toMatch(/passed/i);
   });
 
+  it('the verdict names how many files the artifact measured, so a one-file sliver is visible', () => {
+    const root = makeRoot();
+    writeCoverage(root, COV);
+    const s = spy();
+    expect(runCoverage(root)).toBe(0);
+    expect(text(s.log)).toMatch(/✓ Coverage gate passed \(.*; 1 file\)/);
+    writeConfig(root, { coverage: { statements: 60 } });
+    writeCoverage(root, { ...COV, '/x/b.ts': FILE });
+    expect(runCoverage(root)).toBe(1);
+    expect(text(s.err)).toContain('Coverage below threshold (2 files measured):');
+  });
+
   it('thresholds met → PASS', () => {
     const root = makeRoot();
     writeConfig(root, { coverage: { statements: 40, functions: 90 } });
