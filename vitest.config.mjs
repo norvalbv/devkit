@@ -24,6 +24,7 @@ const GIT_INTEGRATION_TESTS = [
   'cli/__tests__/prepare-gate-worktree.test.mts',
   'cli/__tests__/reconcile.test.mts',
   'cli/__tests__/reship-anchor.test.mts',
+  'cli/__tests__/reship-pr-state.test.mts',
   'cli/__tests__/reship-publish-lock.test.mts',
   'cli/__tests__/reship-rewrite-pin.test.mts',
   'cli/__tests__/reship.test.mts',
