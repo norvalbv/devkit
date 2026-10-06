@@ -61,6 +61,15 @@ function repo(guards, antiSlop) {
   return d;
 }
 
+// The cache_state of every deterministic gate_timing event written to `sink`.
+const cacheStates = (sink) =>
+  readFileSync(sink, 'utf8')
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line))
+    .filter((e) => e.type === 'gate_timing' && e.gate === 'deterministic')
+    .map((e) => e.cache_state);
+
 // Fake `node <guard-module> <args>` runner: maps a guard module basename → exit code. Throws
 // { status } for non-zero (like execFileSync), returns for 0. argv[0] is the resolved module path.
 function mkExec(codeByModule) {
@@ -371,6 +380,88 @@ describe('runDeterministic — --structure / --extra / --only', () => {
         detail: 'structure-lint(bypassed:GUARD_STRUCTURE_OK)',
       }),
     );
+  });
+
+  it('a prefix-cached retry says which gates it did not re-run, instead of printing nothing', () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const d = repo(['size']);
+    execFileSync('git', ['init', '-q'], { cwd: d });
+    execFileSync('git', ['add', '.'], { cwd: d });
+    const exec = mkExec({});
+    process.env.DEVKIT_SHIP = '1';
+    process.env.DEVKIT_GATE_EVENTS = join(d, 'events.jsonl');
+
+    expect(runDeterministic(d, { exec, extra: [{ label: 'hook-parity', cmd: 'true' }] })).toBe(0);
+    expect(runDeterministic(d, { exec, extra: [{ label: 'hook-parity', cmd: 'true' }] })).toBe(0);
+
+    expect(exec).toHaveBeenCalledTimes(2); // size + the extra, first run only
+    expect(cacheStates(process.env.DEVKIT_GATE_EVENTS)).toEqual(['none', 'full']);
+    const cached = log.mock.calls.flat().filter((l) => String(l).includes('not re-run'));
+    expect(cached).toEqual([expect.stringMatching(/not re-run: guard-size hook-parity$/)]);
+  });
+
+  it('a cached retry of a bypassed run names the bypass, never only that it passed', () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const d = repo(['size', 'coverage']);
+    execFileSync('git', ['init', '-q'], { cwd: d });
+    execFileSync('git', ['add', '.'], { cwd: d });
+    const exec = mkExec({});
+    process.env.DEVKIT_SHIP = '1';
+    process.env.GUARD_STRUCTURE_OK = '1';
+    process.env.GUARD_HOOK_PARITY_OK = '1';
+    process.env.GUARD_NO_COVERAGE = '1'; // the alias spelling is the same bypass
+    const opts = {
+      exec,
+      structure: 'bunx eslint src',
+      extra: [{ label: 'hook-parity', cmd: 'true' }],
+    };
+
+    expect(runDeterministic(d, opts)).toBe(0);
+    expect(runDeterministic(d, opts)).toBe(0);
+
+    const cached = log.mock.calls.flat().filter((l) => String(l).includes('not re-run'));
+    expect(cached).toEqual([
+      expect.stringMatching(
+        /not re-run: guard-size hook-parity structure-lint; bypassed for this run: GUARD_COVERAGE_OK GUARD_STRUCTURE_OK GUARD_HOOK_PARITY_OK$/,
+      ),
+    ]);
+  });
+
+  // A ship repo: coverage selected (plus `extra`), an artifact on disk, staged, DEVKIT_SHIP armed.
+  function coverageShipRepo(extra = []) {
+    const d = repo(['coverage', ...extra]);
+    execFileSync('git', ['init', '-q'], { cwd: d });
+    execFileSync('git', ['add', '.'], { cwd: d });
+    mkdirSync(join(d, 'coverage'));
+    writeFileSync(join(d, 'coverage', 'coverage-final.json'), '{"a":1}');
+    process.env.DEVKIT_SHIP = '1';
+    return { d, artifact: join(d, 'coverage', 'coverage-final.json') };
+  }
+
+  it('a cache hit still judges coverage, against whatever artifact is on disk now', () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { d } = coverageShipRepo(['size']);
+    process.env.DEVKIT_GATE_EVENTS = join(d, 'events.jsonl');
+    const exec = mkExec({});
+    expect(runDeterministic(d, { exec })).toBe(0);
+    expect(exec).toHaveBeenCalledTimes(2);
+    const failing = mkExec({ 'coverage/run': 1 });
+    expect(runDeterministic(d, { exec: failing })).toBe(1);
+    expect(failing).toHaveBeenCalledTimes(1);
+    expect(failing.mock.calls[0][1][0]).toMatch(/coverage[\\/]run\.m?ts$/);
+    expect(cacheStates(process.env.DEVKIT_GATE_EVENTS)).toEqual(['none', 'partial']);
+  });
+
+  it('a run where a gate opted out is not cached, so a retry never calls that gate passed', () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { d } = coverageShipRepo(['dup']);
+    const exec = mkExec({ matcher: 2 });
+    expect(runDeterministic(d, { exec })).toBe(0);
+    expect(runDeterministic(d, { exec })).toBe(0);
+    expect(exec).toHaveBeenCalledTimes(4);
+    expect(log.mock.calls.flat().some((l) => String(l).includes('not re-run'))).toBe(false);
   });
 
   it('re-emits the structure bypass on a prefix-cached retry — every bypassed ATTEMPT counts', () => {

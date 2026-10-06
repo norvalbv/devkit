@@ -123,7 +123,7 @@ export function finishGateTiming(
   gate: string,
   startedAt: number,
   code: number,
-  cacheState: 'none' | 'full' = 'none',
+  cacheState: 'none' | 'partial' | 'full' = 'none',
   effectiveDurationMs?: number,
 ): number {
   const actualDurationMs = Date.now() - startedAt;
