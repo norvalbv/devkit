@@ -30,6 +30,8 @@ interface ModelStatus {
   usedPercent?: number;
   /** The window that percentage is measured over, so "80% used" carries its own urgency. */
   windowMins?: number;
+  /** Plan limit spent but credits serve the calls, so `ok` must not read as plain headroom. */
+  onCredits?: true;
 }
 
 /** Which judge-spawning guards are selected? A repo that runs no judges must be byte-identical to
@@ -85,7 +87,10 @@ export async function judgeReachability(
       if (!codexPresent) status.state = 'absent';
       else if (codexDark) status.state = 'unauthenticated';
       else if (codexLimits?.reached) status.state = 'rate-limited';
-      else if (codexLimits) status.state = 'ok';
+      else if (codexLimits) {
+        status.state = 'ok';
+        if (codexLimits.onCredits) status.onCredits = true;
+      }
       // else: the RPC said nothing this version understands — 'unknown', reported as such.
       if (codexLimits?.resetsAt !== undefined) status.resetsAt = codexLimits.resetsAt;
       if (codexLimits?.usedPercent !== undefined) status.usedPercent = codexLimits.usedPercent;
@@ -128,7 +133,9 @@ export function renderPreflight(statuses: ModelStatus[], now: number = Date.now(
     const suffix = detail.length > 0 ? ` (${detail.join(', ')})` : '';
     const verdict =
       s.state === 'ok'
-        ? 'reachable'
+        ? s.onCredits
+          ? 'reachable — plan limit reached, running on credits'
+          : 'reachable'
         : s.state === 'absent'
           ? `\`${s.bin}\` not installed or not on PATH`
           : s.state === 'unauthenticated'

@@ -27,9 +27,11 @@ export interface CodexRateLimits {
   /** Provider reported a limit reached, or a window is fully spent with no usable credits (sc-3207:
    *  `rateLimitReachedType` is nullable upstream and was absent on a locked account). */
   reached: boolean;
+  /** The plan limit is hit, but usable credits serve calls — codex's TUI treats this as served. */
+  onCredits: boolean;
   /** The provider's own enum value, e.g. `rate_limit_reached`. Reported, never interpreted. */
   reachedType?: string;
-  /** Which window's consumption locked the account, when one did. Reported, never interpreted. */
+  /** Which window is fully spent, when one is. Reported, never interpreted. */
   exhaustedWindow?: 'primary' | 'secondary';
 }
 
@@ -46,6 +48,7 @@ interface RateLimitsPayload {
   planType?: string;
   rateLimitReachedType?: string;
   credits?: { hasCredits?: boolean; unlimited?: boolean } | null;
+  spendControlReached?: boolean;
 }
 interface RateLimitsReply {
   result?: { rateLimits?: RateLimitsPayload | null };
@@ -96,10 +99,12 @@ export function parseRateLimitsReply(line: string): CodexRateLimits | null {
   const reachedType = usableText(limits.rateLimitReachedType);
   const primary = readWindow(limits.primary);
   const secondary = readWindow(limits.secondary);
-  // codex's TUI cap test (rate_limits.rs): either window at 100%, unless credits are usable. Only a
-  // strict `true` excuses it — a garbled credits field is not evidence of headroom.
+  // codex's TUI (rate_limits.rs): usable credits serve past a spent plan unless spend control is
+  // reached. Only a strict `true` counts — a garbled credits field is not evidence of headroom.
   const credits = limits.credits;
-  const creditsUsable = credits?.unlimited === true || credits?.hasCredits === true;
+  const creditsUsable =
+    (credits?.unlimited === true || credits?.hasCredits === true) &&
+    limits.spendControlReached !== true;
   // The lock lasts until the LAST exhausted window clears; an unknown reset ranks latest, so no
   // other window's time is offered as the clearing time.
   let exhaustedWindow: 'primary' | 'secondary' | undefined;
@@ -108,7 +113,7 @@ export function parseRateLimitsReply(line: string): CodexRateLimits | null {
     ['primary', primary],
     ['secondary', secondary],
   ] as const) {
-    if (creditsUsable || w?.usedPercent === undefined || w.usedPercent < 100) continue;
+    if (w?.usedPercent === undefined || w.usedPercent < 100) continue;
     const reset = w.resetsAt ?? Number.POSITIVE_INFINITY;
     if (exhaustedWindow === undefined || reset > latestReset) {
       exhaustedWindow = name;
@@ -116,17 +121,22 @@ export function parseRateLimitsReply(line: string): CodexRateLimits | null {
     }
   }
 
+  // Absent `rateLimitReachedType` alone is NOT "not reached" — the backend maps an unknown kind to
+  // None — so a spent window is the second positive signal.
+  const planLimited = reachedType !== undefined || exhaustedWindow !== undefined;
+  // An allowlist: workspace_* kinds void credits upstream, and an unknown kind stays a lock.
+  const covered =
+    creditsUsable && (reachedType === undefined || reachedType === 'rate_limit_reached');
   const snapshot: CodexRateLimits = {
-    // Absent `rateLimitReachedType` alone is NOT "not reached" — the backend maps an unknown kind to
-    // None — so a spent window is the second positive signal.
-    reached: reachedType !== undefined || exhaustedWindow !== undefined,
+    reached: planLimited && !covered,
+    onCredits: planLimited && covered,
   };
   if (reachedType !== undefined) snapshot.reachedType = reachedType;
   const planType = usableText(limits.planType);
   if (planType !== undefined) snapshot.planType = planType;
   if (exhaustedWindow !== undefined) snapshot.exhaustedWindow = exhaustedWindow;
 
-  // The reported window is the one that locked; with none locked, primary as before.
+  // The reported window is the spent one; with none spent, primary as before.
   const shown = exhaustedWindow === 'secondary' ? secondary : primary;
   if (shown) Object.assign(snapshot, shown);
   return snapshot;
