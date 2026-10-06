@@ -1,6 +1,14 @@
 import { execFile, execFileSync, spawnSync } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -132,6 +140,48 @@ describe('private native source census', () => {
       expect(report.tasks.every((task) => task.required[0].status === 'supplied')).toBe(true);
     } finally {
       planner.mockRestore();
+      fx.cleanup();
+    }
+  });
+  it('computes the staged tree while another process holds the index lock', () => {
+    const fx = fixture();
+    try {
+      const gitDir = path.join(fx.repo, '.git');
+      const index = readFileSync(path.join(gitDir, 'index'));
+      writeFileSync(path.join(gitDir, 'index.lock'), '');
+      const report = censusSource(JSON.stringify(fx.manifest), 'case-001', fx.repo);
+      expect(report.tasks).toHaveLength(4);
+      expect(readFileSync(path.join(gitDir, 'index')).equals(index)).toBe(true);
+      expect(readdirSync(gitDir).filter((name) => name.startsWith('census-index-'))).toEqual([]);
+    } finally {
+      fx.cleanup();
+    }
+  });
+  it('reads the staged tree of a linked worktree from that worktree’s own index', () => {
+    const fx = fixture();
+    const linked = mkdtempSync(path.join(path.dirname(fx.repo), 'census-test-'));
+    const git = (...args) => execFileSync('git', args, { cwd: linked, encoding: 'utf8' });
+    try {
+      execFileSync('git', ['worktree', 'add', '-q', '--detach', linked], { cwd: fx.repo });
+      writeFileSync(path.join(linked, 'src/item.ts'), 'export const value = 2;\n');
+      git('add', '.');
+      const report = censusSource(JSON.stringify(fx.manifest), 'case-001', linked);
+      expect(report.facts.stagedTreeSha).toBe(git('write-tree').trim());
+      const gitDir = git('rev-parse', '--absolute-git-dir').trim();
+      expect(readdirSync(gitDir).filter((name) => name.startsWith('census-index-'))).toEqual([]);
+    } finally {
+      rmSync(linked, { recursive: true, force: true });
+      fx.cleanup();
+    }
+  });
+  it('accepts a source file whose timestamp changed but whose content did not', () => {
+    const fx = fixture();
+    try {
+      const later = new Date(Date.now() + 60_000);
+      utimesSync(path.join(fx.repo, 'src/item.ts'), later, later);
+      const report = censusSource(JSON.stringify(fx.manifest), 'case-001', fx.repo);
+      expect(report.tasks).toHaveLength(4);
+    } finally {
       fx.cleanup();
     }
   });

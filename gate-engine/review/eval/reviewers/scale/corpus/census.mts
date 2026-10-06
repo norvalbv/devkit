@@ -1,5 +1,13 @@
 import { execFileSync } from 'node:child_process';
-import { readFileSync, realpathSync, lstatSync } from 'node:fs';
+import {
+  chmodSync,
+  copyFileSync,
+  lstatSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -12,7 +20,7 @@ import { manifestHash, parseManifest } from './manifest.mts';
 import { measureSpan } from './visibility.mts';
 import { hashLocalModuleClosure } from '../../../module-closure-hash.mts';
 
-const git = (cwd: string, args: string[]) =>
+const git = (cwd: string, args: string[], index?: string) =>
   execFileSync('git', args, {
     cwd,
     encoding: 'utf8',
@@ -23,9 +31,25 @@ const git = (cwd: string, args: string[]) =>
       GIT_DIR: undefined,
       GIT_COMMON_DIR: undefined,
       GIT_WORK_TREE: undefined,
-      GIT_INDEX_FILE: undefined,
+      GIT_INDEX_FILE: index,
+      GIT_OPTIONAL_LOCKS: '0',
     },
   });
+
+// write-tree locks the index it reads, so concurrent runs each write a private copy instead.
+// The copy stays beside the real index because it carries the private source's file paths.
+function stagedTree(cwd: string): string {
+  const index = git(cwd, ['rev-parse', '--path-format=absolute', '--git-path', 'index']).trim();
+  const scratch = mkdtempSync(path.join(path.dirname(index), 'census-index-'));
+  try {
+    chmodSync(scratch, 0o700);
+    const copy = path.join(scratch, 'index');
+    copyFileSync(index, copy);
+    return git(cwd, ['write-tree'], copy).trim();
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+}
 const groups = [
   ['state-transitions'],
   ['concurrency-races'],
@@ -57,7 +81,7 @@ export function censusSource(serialized: string, caseId: string, directory: stri
   const diff = git(cwd, ['diff', '--cached', '--no-ext-diff']);
   if (sha256(diff) !== entry.source.diffSha256) throw new Error('DIFF_MISMATCH');
   if (git(cwd, ['diff', '--name-only']).trim()) throw new Error('WORKTREE_CHANGED');
-  const stagedTreeSha = git(cwd, ['write-tree']).trim();
+  const stagedTreeSha = stagedTree(cwd);
   const frozenDiff = (args: string[], paths: string[]) =>
     git(cwd, [
       'diff',
