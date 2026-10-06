@@ -1,11 +1,13 @@
-/** Quote grounding (sc-3580): an OFFENDING quote blocks only if it is in the cited file and part of
- * this change. Rationale: docs/decisions/reviewer-blocks-require-validated-evidence.md. */
+/** Quote grounding: a finding blocks only if its OFFENDING quote is in the cited file and part of this
+ * change, and its VIOLATION quotes a rule from a CLAUDE.md that governs that file. */
 
 import { execFileSync } from 'node:child_process';
 import { parsePatchHunks } from '../../comment-firewall/patch.mts';
 import { countLines } from '../../ratchets/size-line-authority.mts';
+import { ancestorDirs } from '../claude-md.mts';
 import {
   type ConventionFinding,
+  conventionRuleFile,
   dedupeConventionFindings,
   normalizeCitedPath,
   parseConventionFindingCandidates,
@@ -173,7 +175,35 @@ function isGrounded(finding: ConventionFinding, forms: QuoteForms, change: FileC
   );
 }
 
-/** The findings whose OFFENDING quote is real and part of this change; order preserved. */
+// Markdown emphasis a judge may drop or keep when quoting a rule; stripped from both sides alike.
+const EMPHASIS_RE = /[*_`]/g;
+const plainMarkdown = (text: string): string => collapse(text.replace(EMPHASIS_RE, ''));
+
+/** Whether the VIOLATION quotes, near its cited line, a rule from a CLAUDE.md governing `file`. A
+ * rule the judge read elsewhere (AGENTS.md, a sibling package's CLAUDE.md) never blocks. */
+function ruleGrounded(
+  finding: ConventionFinding,
+  file: string,
+  ruleLines: (ruleFile: string) => string[] | null,
+): boolean {
+  const ruleFile = conventionRuleFile(finding.rulePath);
+  const governs = ancestorDirs(file).some(
+    (dir) => ruleFile === (dir ? `${dir}/CLAUDE.md` : 'CLAUDE.md'),
+  );
+  const quote = normalizeQuote(finding.ruleQuote);
+  const lines = governs ? ruleLines(ruleFile) : null;
+  if (lines === null || quote === null) return false;
+  const text = plainMarkdown(quote);
+  const cited = Math.max(finding.ruleLine ?? 1, 1);
+  const low = finding.ruleLine === null ? 1 : Math.max(1, cited - QUOTE_WINDOW);
+  const high =
+    finding.ruleLine === null ? lines.length : Math.min(lines.length, cited + QUOTE_WINDOW);
+  for (let line = low; line <= high; line += 1)
+    if (spanMatches(lines, line - 1, text, () => true)) return true;
+  return false;
+}
+
+/** The findings grounded on both halves — rule and OFFENDING quote; order preserved. */
 export function groundConventionFindings(
   findings: readonly ConventionFinding[],
   source: GroundingSource,
@@ -181,11 +211,15 @@ export function groundConventionFindings(
   if (source.isCurrent && !source.isCurrent()) return [];
   const reviewed = new Set(source.reviewedFiles);
   const changes = new Map<string, FileChange>();
+  const rules = memo((file) => {
+    const content = safe(() => source.readStaged(file), null);
+    return content === null ? null : content.split(LINE_SPLIT_RE).map(plainMarkdown);
+  });
   const grounded: ConventionFinding[] = [];
   for (const finding of findings) {
     const path = normalizeCitedPath(finding.offendingPath);
     const forms = quoteForms(finding.offendingQuote);
-    if (forms === null || !reviewed.has(path)) continue;
+    if (forms === null || !reviewed.has(path) || !ruleGrounded(finding, path, rules)) continue;
     let change = changes.get(path);
     if (!change) {
       change = fileChange(source, path);

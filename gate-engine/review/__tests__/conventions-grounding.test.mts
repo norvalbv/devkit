@@ -16,6 +16,7 @@ import {
 } from '../contracts/conventions-grounding.mts';
 
 const RULE = 'VIOLATION: Keep every file under 500 lines. — CLAUDE.md:3';
+const RULES_MD = '# Rules\n\nKeep every file under 500 lines.\nNever build SQL by hand.\n';
 const transcript = (...offending: string[]) =>
   [...offending.flatMap((line) => [RULE, `OFFENDING: ${line}`]), 'VERDICT: FAIL — cited'].join(
     '\n',
@@ -46,7 +47,7 @@ function source(files: {
   const path = files.path ?? 'src/flows.ts';
   return {
     reviewedFiles: [path],
-    readStaged: (file) => (file === path ? files.staged : null),
+    readStaged: (file) => (file === path ? files.staged : file === 'CLAUDE.md' ? RULES_MD : null),
     readHead: (file) => (file === path ? files.head : null),
     readDiff: (file) => (file === path ? files.diff : ''),
   };
@@ -361,6 +362,77 @@ describe('groundConventionFindings — removed lines and whole-file changes', ()
   });
 });
 
+describe('groundConventionFindings — the VIOLATION must quote a governing CLAUDE.md', () => {
+  const note = '- 2026-10-06 — the rebuild cost was measured, not assumed.';
+  const record = 'packages/docs/decisions/x.md';
+  const files = new Map([
+    ['CLAUDE.md', '# Routing\n\nRecords are appended by the CLI.\n\n@AGENTS.md\n'],
+    ['AGENTS.md', '# Rules\n\nRecords are written through the CLI — direct edits are declined.\n'],
+    [
+      'packages/a/CLAUDE.md',
+      '# a\n\n- **Never** import from `packages/b` directly.\n- Keep handlers thin:\n  move logic into services.\n',
+    ],
+    ['packages/b/CLAUDE.md', '# b\n\nNever hand-edit files under decisions/.\n'],
+    [record, `# x\n\n${note}\n`],
+    ['packages/a/x.ts', "import { y } from '../b/y';\n"],
+  ]);
+  // No HEAD: every staged line is this change's, so only the rule half decides.
+  const src: GroundingSource = {
+    reviewedFiles: [record, 'packages/a/x.ts'],
+    readStaged: (file) => files.get(file) ?? null,
+    readHead: () => null,
+    readDiff: () => '',
+  };
+  const fail = (violation: string, offending: string) =>
+    grounded(`VIOLATION: ${violation}\nOFFENDING: ${offending}\nVERDICT: FAIL — cited`, src);
+  const onNote = `${note} — ${record}:3`;
+  const onImport = "import { y } from '../b/y'; — packages/a/x.ts:1";
+
+  it('drops a rule the judge read from AGENTS.md, which no CLAUDE.md walk loads', () => {
+    expect(
+      fail(
+        'Records are written through the CLI — direct edits are declined. — AGENTS.md:3',
+        onNote,
+      ),
+    ).toEqual([]);
+  });
+
+  it("drops a rule from a sibling directory's CLAUDE.md", () => {
+    expect(
+      fail('Never hand-edit files under decisions/. — packages/b/CLAUDE.md:3', onNote),
+    ).toEqual([]);
+  });
+
+  it('drops a governing CLAUDE.md citation whose quoted rule is not in that file', () => {
+    expect(
+      fail(
+        'Records are written through the CLI — direct edits are declined. — CLAUDE.md:3',
+        onNote,
+      ),
+    ).toEqual([]);
+  });
+
+  it('drops a real rule cited far from its line', () => {
+    expect(
+      fail('Never import from packages/b directly. — packages/a/CLAUDE.md:40', onImport),
+    ).toEqual([]);
+  });
+
+  it('keeps a lineless root citation carrying a judge note', () => {
+    expect(fail('Records are appended by the CLI. — ./CLAUDE.md (repo root)', onNote)).toHaveLength(
+      1,
+    );
+  });
+
+  it.each([
+    ['emphasis dropped', 'Never import from packages/b directly.'],
+    ['emphasis kept', '**Never** import from `packages/b` directly.'],
+    ['wrapped across lines', 'Keep handlers thin: move logic into services.'],
+  ])('keeps a nested ancestor rule quoted with %s', (_form, rule) => {
+    expect(fail(`${rule} — packages/a/CLAUDE.md:3`, onImport)).toHaveLength(1);
+  });
+});
+
 describe('stagedGroundingSource — real git index', () => {
   const repos: string[] = [];
   afterEach(() => {
@@ -375,6 +447,7 @@ describe('stagedGroundingSource — real git index', () => {
     git('config user.email t@t');
     git('config user.name t');
     git('config commit.gpgsign false');
+    writeFileSync(join(dir, 'CLAUDE.md'), RULES_MD);
     return { dir, git };
   };
 
@@ -481,6 +554,22 @@ describe('stagedGroundingSource — real git index', () => {
     git('add .');
     const src = stagedGroundingSource(dir, ['src/a.ts']);
     expect(grounded(transcript(`${DISABLE} — src/a.ts:1`), src)).toHaveLength(1);
+  });
+
+  it('reads the rule from the staged tree and never from AGENTS.md', () => {
+    const { dir, git } = repo();
+    writeFileSync(join(dir, 'AGENTS.md'), '# Rules\n\nNever hand-edit a record.\n');
+    mkdirSync(join(dir, 'src'));
+    writeFileSync(join(dir, 'src', 'a.ts'), 'const a = 1;\n');
+    git('add .');
+    git('commit -qm base');
+    writeFileSync(join(dir, 'src', 'a.ts'), 'const a = 1;\nconst bad = eval(x);\n');
+    git('add .');
+    const src = stagedGroundingSource(dir, ['src/a.ts']);
+    const cite = (rule: string) =>
+      grounded(`${rule}\nOFFENDING: const bad = eval(x); — src/a.ts:2\nVERDICT: FAIL — x`, src);
+    expect(cite('VIOLATION: Never hand-edit a record. — AGENTS.md:3')).toEqual([]);
+    expect(cite(RULE)).toHaveLength(1);
   });
 
   it('reads each file from git at most once across repeated validations', () => {

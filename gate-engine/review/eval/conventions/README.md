@@ -148,7 +148,7 @@ when any of these differ from the run that produced the baseline:
 
 ## Dataset card (`cases-conventions.jsonl`)
 
-**26 rows · 18 gold slots · 14 decoy slots.** One JSON object per line:
+**27 rows · 18 gold slots · 15 decoy slots.** One JSON object per line:
 
 ```json
 {
@@ -219,7 +219,9 @@ when any of these differ from the run that produced the baseline:
      scoping requirement ("a dir's file applies only at/below it") lives or dies on it.
      `scoping-inventory-only-pass` isolates the same signal with orders untouched entirely.
      `scoping-inventory-nested-pass` pushes the ungoverned pattern two directory levels deeper to
-     exercise the full ancestor walk.
+     exercise the full ancestor walk. `decision-note-cli-append-pass` (mined from a field false
+     block) stages only a CLI-appended note in a decision record; the rule against hand-editing
+     records lives in an AGENTS.md the root CLAUDE.md imports with `@AGENTS.md`, which never governs.
   9. **clean control** (`clean-control-*`, 3 rows) — `gold: []`, a lexical-bait decoy mentioning the
      rule's own keywords ("type hint", "magic number", "forward ref") with zero actual violation,
      `expectedVerdict: "PASS"`. These, together with `root-cause-decoy-pass` and the two
@@ -230,15 +232,15 @@ when any of these differ from the run that produced the baseline:
   `bench.mts` checks the invariance pair lands the same per-slot pattern.
 - **Holdout**: 7 rows (every `*-adversarial` row) marked `holdout: true` — `--dev`/`--only` exclude
   them so prompt iteration can't overfit them; baseline/gate runs always include them.
-- Decoys by kind (from `coverage`): `working-as-intended=9 · out-of-scope=4 · recorded-decision=1`.
+- Decoys by kind (from `coverage`): `working-as-intended=9 · out-of-scope=5 · recorded-decision=1`.
 - `node bench.mts coverage` prints the full category × verdict × difficulty matrix — zero claude
   calls.
 
 ## Cost + outage policy
 
-A budget derived from per-row costs prints before any token is spent: 26 reviewer rows × 20–90s
+A budget derived from per-row costs prints before any token is spent: 27 reviewer rows × 20–90s
 (single-pass haiku, **no cascade** — cheaper per row than completeness's 60–360s opus-with-checklist
-rows) + 32 slots × K=3 matcher ÷ pool 4. Iterate with `--dev --only <id>`; the full tier is the only
+rows) + 33 slots × K=3 matcher ÷ pool 4. Iterate with `--dev --only <id>`; the full tier is the only
 tier whose numbers count.
 
 Outages are alignment-style: a dark reviewer scores the **case** as an outage and continues; a dark

@@ -96,7 +96,7 @@ describe('conventions evidence completeness', () => {
   it('keeps a complete line-range finding blocking', async () => {
     const repo = consumerRepo();
     mkdirSync(join(repo, 'src'), { recursive: true });
-    writeFileSync(join(repo, 'CLAUDE.md'), 'Every config must set flag true.\n');
+    writeFileSync(join(repo, 'CLAUDE.md'), 'OFFENDING: labels in quoted rule text\n');
     writeFileSync(
       join(repo, 'src', 'config.json'),
       '{ "note": "VIOLATION: quoted source label" }\n',
@@ -181,6 +181,8 @@ describe('conventions evidence completeness', () => {
   it('strict mode blocks when the one evidence retry returns a complete finding', async () => {
     process.env.GUARD_AI_STRICT = '1';
     const repo = cappedRepo();
+    writeFileSync(join(repo, 'CLAUDE.md'), 'Every config must set flag true.\n');
+    execSync('git add CLAUDE.md', { cwd: repo });
     const exec = vi
       .fn()
       .mockResolvedValueOnce('VERDICT: FAIL — incomplete evidence')
@@ -350,7 +352,7 @@ describe('conventions quote grounding (sc-3580)', () => {
 
     expect(await runReviewGate(repo, { exec })).toBe(2);
     const printed = err.mock.calls.flat().join('\n');
-    expect(printed).toContain('whose quote is present in the reviewed change');
+    expect(printed).toContain('a line present in the reviewed change');
     expect(printed).not.toContain('conventions-reviewer FAILED');
   });
 
