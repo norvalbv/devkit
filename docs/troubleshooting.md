@@ -223,6 +223,9 @@ too. A feature PR may only **add** dist files (new artifacts) or **delete** them
 
 - **Before shipping:** `devkit ship` lists rebuilt files as `release-only drift from main — leave them
   out of the brief`. Brief your source, plus only the **new** dist paths the preflight names.
+- **A reviewer asks for a rebuilt dist file:** leave it out anyway. A tracked dist file that lags its
+  source (the CLI dispatcher missing a new command, say) is expected until the next release, and
+  briefing the rebuilt file is refused here.
 - **Already on the PR:** restore the listed files from the PR's merge-base, which is what CI diffs
   against (`main` may have moved its own dist since). Run
   `git checkout "$(git merge-base origin/main HEAD)" -- <listed paths>`, commit, and `devkit ship --pr`.
