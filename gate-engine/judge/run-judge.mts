@@ -35,6 +35,7 @@ import {
 } from './codex/result.mts';
 import { emitGateEvent, type TelemetryStatus } from './gate-events.mts';
 import { trackJudge } from './process/heartbeat.mts';
+import { type CodexSandbox, prepareCodexSandbox } from './codex/workspace.mts';
 import { withoutGitEnv } from './judge-isolation.mts';
 import {
   type JudgeMcpProfile,
@@ -312,8 +313,8 @@ function salvageUsage(text: string | undefined, args: string[]): JudgeUsage | nu
  * config with secrets forwarded through the spawn env by NAME (sc-2054 — see codexMcpArgs). Both
  * runtimes now honor the judge-mcp-profiles Target.
  */
-function spawnFor(args: string[], mcp: PreparedJudgeMcpProfile, codexReadOnly = false): JudgeCli {
-  const cli = judgeCliFor(args, mcp.servers, codexReadOnly);
+function spawnFor(args: string[], mcp: PreparedJudgeMcpProfile, ws: CodexSandbox): JudgeCli {
+  const cli = judgeCliFor(args, mcp.servers, ws.codexReadOnly, ws.workspace);
   return cli.codex ? cli : { ...cli, argv: withResultArgs([...mcp.args, ...args]) };
 }
 
@@ -326,10 +327,12 @@ export function execJudge(opts: ExecJudgeOpts): string | null {
     allowedTools: allowedToolsFromArgs(args),
     projectRoots: opts.mcpProjectRoots,
   });
+  let ws: CodexSandbox | undefined;
   try {
     // Inside the try on purpose: an argv a codex model cannot express (no prompt) surfaces as ONE
     // outage warning carrying the translation error, keeping this function's never-throws contract.
-    const cli = spawnFor(args, mcp, opts.codexReadOnly === true);
+    ws = prepareCodexSandbox(args, opts.codexReadOnly === true, cwd ?? process.cwd());
+    const cli = spawnFor(args, mcp, ws);
     opts.onMcpPrepared?.(mcp.capabilityFingerprint, spawnDegradedCause(mcp, cli.mcpInjected));
     const out = execFileSync(cli.bin, cli.argv, {
       cwd,
@@ -376,6 +379,7 @@ export function execJudge(opts: ExecJudgeOpts): string | null {
     return null;
   } finally {
     mcp.cleanup();
+    ws?.cleanup();
   }
 }
 
@@ -399,6 +403,7 @@ export function execJudgeAsync(opts: ExecJudgeOpts): Promise<string | null> {
     allowedTools: allowedToolsFromArgs(args),
     projectRoots: opts.mcpProjectRoots,
   });
+  let ws: CodexSandbox | undefined;
   return new Promise((resolve) => {
     // sc-2422 liveness narration; stopped first on every settle path so no line follows the verdict.
     const stopHeartbeat = trackJudge({ label, timeoutMs: timeout });
@@ -411,6 +416,7 @@ export function execJudgeAsync(opts: ExecJudgeOpts): Promise<string | null> {
     const fail = (err: JudgeError, stdout?: string) => {
       stopHeartbeat();
       mcp.cleanup();
+      ws?.cleanup();
       // The callback's own stdout wins (execFile hands it beside the error); the throw-attached
       // copy covers the synchronous-throw path.
       const streams = stdout ?? err.stdout;
@@ -426,7 +432,8 @@ export function execJudgeAsync(opts: ExecJudgeOpts): Promise<string | null> {
     try {
       // See the sync twin: routing inside the try keeps the never-rejects contract when argv
       // translation itself throws.
-      const cli = spawnFor(args, mcp, opts.codexReadOnly === true);
+      ws = prepareCodexSandbox(args, opts.codexReadOnly === true, cwd ?? process.cwd());
+      const cli = spawnFor(args, mcp, ws);
       opts.onMcpPrepared?.(mcp.capabilityFingerprint, spawnDegradedCause(mcp, cli.mcpInjected));
       const child = execFile(
         cli.bin,
@@ -453,6 +460,7 @@ export function execJudgeAsync(opts: ExecJudgeOpts): Promise<string | null> {
             return;
           }
           mcp.cleanup();
+          ws?.cleanup();
           if (!stdout || !String(stdout).trim()) {
             warnNoOutput(label, judgeBinFor(args));
             emitJudgeExec(opts, 'empty', startedAt);

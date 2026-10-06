@@ -2,6 +2,10 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { isAbsolute, matchesGlob, win32 } from 'node:path';
 
+// A confined codex judge runs from a scratch dir; every checklist imports this module, so its git
+// reads and `.claude/` state writes resolve against the repository under review.
+if (process.env.DEVKIT_JUDGE_REPO_ROOT) process.chdir(process.env.DEVKIT_JUDGE_REPO_ROOT);
+
 const MAX_REVIEW_PATTERNS = 128;
 const MAX_REVIEW_PATTERN_LENGTH = 512;
 const REVIEW_PATH_KEYS = new Set(['include', 'exclude']);

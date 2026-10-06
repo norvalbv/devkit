@@ -254,8 +254,8 @@ export function resolveEscalationModel(cfg: { review: { escalationModel: string 
 /**
  * Comma-joined --allowedTools value for one reviewer: the read-only base, PLUS its own checklist
  * script (the one non-git Bash prefix a judge gets — scoped to that exact script path: a CLAUDE
- * judge cannot write files, stage, or commit; a codex judge is workspace-write, so the same
- * contract is enforced after the fact by run-review's staged-tree tamper check, sc-2054), PLUS the
+ * judge cannot write files, stage, or commit; a codex judge is workspace-write but confined to a
+ * scratch cwd plus `.claude/`, with run-review's staged-tree tamper check as backstop), PLUS the
  * consumer's semantic search tool for commit-guard, plus every named agent's strict MCP baseline.
  */
 export function allowedToolsFor(
