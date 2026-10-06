@@ -2,11 +2,11 @@
   "schemaVersion": 2,
   "kind": "skills",
   "devkitRef": "v0.67.1",
-  "generatedAt": "2026-10-06T11:45:15.297Z",
+  "generatedAt": "2026-10-06T12:27:18.350Z",
   "files": {
     "_devkit/checklist-store.mjs": "c8a6a01fe75bd570953ccc88e3b99b8ac365bb249c4b1db2ce0c32a589c52193",
     "_devkit/review-roots.d.mts": "384d95945ccf04f994d805e78a5507835321ee5bcbd46acbf216c77385238c9e",
-    "_devkit/review-roots.mjs": "2561f3b064f157934c9e1e9396919aaac99792f414bce3e9379891214a47fb71",
+    "_devkit/review-roots.mjs": "036170be63e48203525131264a581dce4e034401ca2325e37ec597b1a6865899",
     "api-security/SKILL.md": "5916bc98f288a0b7269ec9df416692509c449274026afc93013388c40c13415e",
     "api-security/scripts/checklist.mjs": "07840e28ed2756cc2575a4d4f22c3d973b9e6c7059559949cbc50907fa0872ff",
     "backend-performance/SKILL.md": "5ff0858b34ffc91d677976dd279f27714d934aa5062f0a3f6b38088e7bd10ddb",
@@ -36,14 +36,14 @@
     "upstream-sync/SKILL.md": "1007c8377ac15393dcc9db5384d80bd38487c85aa465921ae0b49ba5a91bad70",
     "upstream-sync/scripts/sync.mjs": "218aa7ad7e96f280f281a38f99919f2ce55eace902ed95b1119a0099ddbb3c76",
     "upstream-sync/scripts/verify-merge.mjs": "afb2977ab8b7a96fac2e93e29a68ae432508ba7e63d03c580fcf03229fcd0676",
-    "using-devkit/SKILL.md": "e6ffd8b145e70df16857aa2cb0d44a329abce14655bd14585aea13f1a64f6fde"
+    "using-devkit/SKILL.md": "89c7949131b3c1df56022bddfca38b579edec50a58f96f3c0bea1cba399ad126"
   },
   "providers": {
     "claude": {
       "files": {
         "_devkit/checklist-store.mjs": "c8a6a01fe75bd570953ccc88e3b99b8ac365bb249c4b1db2ce0c32a589c52193",
         "_devkit/review-roots.d.mts": "384d95945ccf04f994d805e78a5507835321ee5bcbd46acbf216c77385238c9e",
-        "_devkit/review-roots.mjs": "2561f3b064f157934c9e1e9396919aaac99792f414bce3e9379891214a47fb71",
+        "_devkit/review-roots.mjs": "036170be63e48203525131264a581dce4e034401ca2325e37ec597b1a6865899",
         "api-security/SKILL.md": "5916bc98f288a0b7269ec9df416692509c449274026afc93013388c40c13415e",
         "api-security/scripts/checklist.mjs": "07840e28ed2756cc2575a4d4f22c3d973b9e6c7059559949cbc50907fa0872ff",
         "backend-performance/SKILL.md": "5ff0858b34ffc91d677976dd279f27714d934aa5062f0a3f6b38088e7bd10ddb",
@@ -73,14 +73,14 @@
         "upstream-sync/SKILL.md": "1007c8377ac15393dcc9db5384d80bd38487c85aa465921ae0b49ba5a91bad70",
         "upstream-sync/scripts/sync.mjs": "218aa7ad7e96f280f281a38f99919f2ce55eace902ed95b1119a0099ddbb3c76",
         "upstream-sync/scripts/verify-merge.mjs": "afb2977ab8b7a96fac2e93e29a68ae432508ba7e63d03c580fcf03229fcd0676",
-        "using-devkit/SKILL.md": "e6ffd8b145e70df16857aa2cb0d44a329abce14655bd14585aea13f1a64f6fde"
+        "using-devkit/SKILL.md": "89c7949131b3c1df56022bddfca38b579edec50a58f96f3c0bea1cba399ad126"
       }
     },
     "codex": {
       "files": {
         "_devkit/checklist-store.mjs": "c8a6a01fe75bd570953ccc88e3b99b8ac365bb249c4b1db2ce0c32a589c52193",
         "_devkit/review-roots.d.mts": "384d95945ccf04f994d805e78a5507835321ee5bcbd46acbf216c77385238c9e",
-        "_devkit/review-roots.mjs": "2561f3b064f157934c9e1e9396919aaac99792f414bce3e9379891214a47fb71",
+        "_devkit/review-roots.mjs": "036170be63e48203525131264a581dce4e034401ca2325e37ec597b1a6865899",
         "api-security/SKILL.md": "5916bc98f288a0b7269ec9df416692509c449274026afc93013388c40c13415e",
         "api-security/scripts/checklist.mjs": "07840e28ed2756cc2575a4d4f22c3d973b9e6c7059559949cbc50907fa0872ff",
         "backend-performance/SKILL.md": "5ff0858b34ffc91d677976dd279f27714d934aa5062f0a3f6b38088e7bd10ddb",
@@ -110,14 +110,14 @@
         "upstream-sync/SKILL.md": "1007c8377ac15393dcc9db5384d80bd38487c85aa465921ae0b49ba5a91bad70",
         "upstream-sync/scripts/sync.mjs": "218aa7ad7e96f280f281a38f99919f2ce55eace902ed95b1119a0099ddbb3c76",
         "upstream-sync/scripts/verify-merge.mjs": "afb2977ab8b7a96fac2e93e29a68ae432508ba7e63d03c580fcf03229fcd0676",
-        "using-devkit/SKILL.md": "e6ffd8b145e70df16857aa2cb0d44a329abce14655bd14585aea13f1a64f6fde"
+        "using-devkit/SKILL.md": "89c7949131b3c1df56022bddfca38b579edec50a58f96f3c0bea1cba399ad126"
       }
     },
     "cursor": {
       "files": {
         "_devkit/checklist-store.mjs": "c8a6a01fe75bd570953ccc88e3b99b8ac365bb249c4b1db2ce0c32a589c52193",
         "_devkit/review-roots.d.mts": "384d95945ccf04f994d805e78a5507835321ee5bcbd46acbf216c77385238c9e",
-        "_devkit/review-roots.mjs": "2561f3b064f157934c9e1e9396919aaac99792f414bce3e9379891214a47fb71",
+        "_devkit/review-roots.mjs": "036170be63e48203525131264a581dce4e034401ca2325e37ec597b1a6865899",
         "api-security/SKILL.md": "5916bc98f288a0b7269ec9df416692509c449274026afc93013388c40c13415e",
         "api-security/scripts/checklist.mjs": "07840e28ed2756cc2575a4d4f22c3d973b9e6c7059559949cbc50907fa0872ff",
         "backend-performance/SKILL.md": "5ff0858b34ffc91d677976dd279f27714d934aa5062f0a3f6b38088e7bd10ddb",
@@ -147,7 +147,7 @@
         "upstream-sync/SKILL.md": "1007c8377ac15393dcc9db5384d80bd38487c85aa465921ae0b49ba5a91bad70",
         "upstream-sync/scripts/sync.mjs": "218aa7ad7e96f280f281a38f99919f2ce55eace902ed95b1119a0099ddbb3c76",
         "upstream-sync/scripts/verify-merge.mjs": "afb2977ab8b7a96fac2e93e29a68ae432508ba7e63d03c580fcf03229fcd0676",
-        "using-devkit/SKILL.md": "e6ffd8b145e70df16857aa2cb0d44a329abce14655bd14585aea13f1a64f6fde"
+        "using-devkit/SKILL.md": "89c7949131b3c1df56022bddfca38b579edec50a58f96f3c0bea1cba399ad126"
       }
     }
   }
