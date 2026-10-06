@@ -9,6 +9,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
@@ -98,6 +99,47 @@ function reviewFlags(input: GateInput) {
 }
 
 describe('gate config projections', () => {
+  // Registry calls run on every ship and review, some with stderr shown to the consumer.
+  it('emits the registry without loading sqlite, so no experimental warning reaches stderr', () => {
+    const { root } = fixture();
+    const result = spawnSync(process.execPath, [pathScript, root, 'indexPath'], {
+      encoding: 'utf8',
+    });
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stderr).toBe('');
+  });
+
+  it('--usable-chunks counts only comparable rows and stays silent when it cannot judge', () => {
+    const { root } = fixture();
+    const chunks =
+      'CREATE TABLE chunks (file_path TEXT, symbol_name TEXT, embedding BLOB, code_embedding BLOB)';
+    const index = (name: string, sql: string) => {
+      const db = new DatabaseSync(join(root, name));
+      db.exec(sql);
+      db.close();
+      return join(root, name);
+    };
+    const blob = "x'00000000'";
+    // Rows present but none embedded: what an interrupted or describe-only index run leaves behind.
+    const unembedded = index(
+      'unembedded.db',
+      `${chunks}; INSERT INTO chunks VALUES ('a.ts', 'f', NULL, NULL)`,
+    );
+    const usable = index(
+      'usable.db',
+      `${chunks}; INSERT INTO chunks VALUES ('a.ts', 'f', ${blob}, ${blob}), ('a.ts', NULL, ${blob}, ${blob})`,
+    );
+    const foreign = index('foreign.db', 'CREATE TABLE other (a)');
+    writeFileSync(join(root, 'junk.db'), 'not sqlite');
+
+    expect(configuredPaths(unembedded, '--usable-chunks')).toBe('0\n');
+    expect(configuredPaths(usable, '--usable-chunks')).toBe('1\n');
+    expect(configuredPaths(foreign, '--usable-chunks')).toBe('\n');
+    expect(configuredPaths(join(root, 'junk.db'), '--usable-chunks')).toBe('\n');
+    expect(configuredPaths(join(root, 'missing.db'), '--usable-chunks')).toBe('\n');
+    expect(lstatSync(join(root, 'junk.db')).size).toBe(10); // probing never rewrites the file
+  });
+
   it('selects one configured path without emitting the other gate inputs', () => {
     const { root } = fixture();
     writeFileSync(
