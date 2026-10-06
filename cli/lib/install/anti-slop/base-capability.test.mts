@@ -137,6 +137,23 @@ function installedRepository(prefix = ''): string {
   return cwd;
 }
 
+/** An overlay install: capability and per-clone baseline git-excluded, so no base tree carries them. */
+function overlayRepository(): string {
+  const root = mkdtempSync(join(tmpdir(), 'devkit-anti-slop-overlay-'));
+  roots.push(root);
+  git(root, ['init', '-q']);
+  mkdirSync(join(root, 'src'), { recursive: true });
+  mkdirSync(join(root, '.devkit'), { recursive: true });
+  writeFileSync(join(root, '.devkit', 'config.json'), `${JSON.stringify({ overlay: true })}\n`);
+  writeFileSync(
+    join(root, '.git', 'info', 'exclude'),
+    `.devkit/\noxlint.devkit.json\n${ANTI_SLOP_BASELINE_REL}\n`,
+  );
+  syncAntiSlopCapability(root);
+  syncOxcCapability(root, { antiSlop: true, overlay: true });
+  return root;
+}
+
 /**
  * Managed state that is internally coherent but mismatches the RUNNING package — the sc-2084 shape.
  * Synthesized, because no older devkit is installable in-test.
@@ -1139,6 +1156,75 @@ describe('inherited base snapshot edge cases', () => {
     expect(out.join('\n')).toContain('ERROR anti-slop/no-object-parameters src/file.ts');
     expect(status).toBe(1);
   });
+
+  it('forgives debt at HEAD on a bootstrap commit that has no committed baseline yet', () => {
+    const cwd = installedRepository();
+    rmSync(join(cwd, ANTI_SLOP_BASELINE_REL));
+    writeFileSync(join(cwd, 'src', 'file.ts'), FINDING_SOURCE);
+    commit(cwd, 'base carrying debt, no baseline');
+
+    writeFileSync(join(cwd, ANTI_SLOP_BASELINE_REL), EMPTY_BASELINE);
+    git(cwd, ['add', '-A']);
+
+    const status = antiSlop(['check', '--staged'], cwd);
+
+    expect(out.join('\n')).toContain('base allowance forgave 1 inherited finding(s)');
+    expect(status).toBe(0);
+  });
+});
+
+describe('overlay inherited base allowance', () => {
+  /** An overlay clone whose per-clone baseline predates debt that later landed on HEAD. */
+  function staleOverlayClone(): string {
+    const root = overlayRepository();
+    writeFileSync(join(root, 'package.json'), '{ "version": "0.1.0" }\n');
+    writeFileSync(join(root, 'src', 'file.ts'), CLEAN_SOURCE);
+    expect(antiSlop(['create'], root)).toBe(0);
+    commit(root, 'clean base');
+    writeFileSync(join(root, 'src', 'other.ts'), FINDING_SOURCE);
+    commit(root, 'debt merged from another clone');
+    writeFileSync(join(root, 'package.json'), '{ "version": "0.2.0" }\n');
+    return root;
+  }
+
+  it('passes a version bump whose whole-repository scan meets debt already at HEAD', () => {
+    const root = staleOverlayClone();
+    git(root, ['add', '-A']);
+
+    const status = antiSlop(['check', '--staged'], root);
+
+    expect(out.join('\n')).toContain(
+      'base allowance forgave 1 inherited finding(s) across 1 rule(s): anti-slop/no-object-parameters',
+    );
+    expect(status).toBe(0);
+  });
+
+  it('still blocks findings the commit introduces, in an edited or a new file', () => {
+    const root = staleOverlayClone();
+    writeFileSync(join(root, 'src', 'other.ts'), `${FINDING_SOURCE}${THIRD_FINDING_SOURCE}`);
+    writeFileSync(join(root, 'src', 'new.ts'), FINDING_SOURCE);
+    git(root, ['add', '-A']);
+
+    const status = antiSlop(['check', '--staged'], root);
+
+    expect(out.join('\n')).toContain('ERROR anti-slop/no-object-parameters src/other.ts');
+    expect(out.join('\n')).toContain('ERROR anti-slop/no-object-parameters src/new.ts');
+    expect(status).toBe(1);
+  });
+
+  it("blocks a first commit's finding against the empty base tree instead of failing to extract it", () => {
+    const root = overlayRepository();
+    writeFileSync(join(root, 'src', 'file.ts'), CLEAN_SOURCE);
+    expect(antiSlop(['create'], root)).toBe(0);
+    writeFileSync(join(root, 'src', 'file.ts'), FINDING_SOURCE);
+    git(root, ['add', '-A']);
+
+    const status = antiSlop(['check', '--staged'], root);
+
+    expect(out.join('\n')).toContain('ERROR anti-slop/no-object-parameters src/file.ts');
+    expect(out.join('\n')).not.toContain('base allowance forgave');
+    expect(status).toBe(1);
+  });
 });
 
 describe('capability pinning against a concurrent sync', () => {
@@ -1514,18 +1600,7 @@ describe('anti-slop relocation across existing files', () => {
 
   /** An overlay install: git-excluded capability and baseline, with committed debt in src/file.ts. */
   function overlayDebtRepository(source = `${CLEAN_SOURCE}${FINDING_SOURCE}`): string {
-    const root = mkdtempSync(join(tmpdir(), 'devkit-anti-slop-overlay-'));
-    roots.push(root);
-    git(root, ['init', '-q']);
-    mkdirSync(join(root, 'src'), { recursive: true });
-    mkdirSync(join(root, '.devkit'), { recursive: true });
-    writeFileSync(join(root, '.devkit', 'config.json'), `${JSON.stringify({ overlay: true })}\n`);
-    writeFileSync(
-      join(root, '.git', 'info', 'exclude'),
-      `.devkit/\noxlint.devkit.json\n${ANTI_SLOP_BASELINE_REL}\n`,
-    );
-    syncAntiSlopCapability(root);
-    syncOxcCapability(root, { antiSlop: true, overlay: true });
+    const root = overlayRepository();
     writeFileSync(join(root, 'src', 'file.ts'), source);
     writeFileSync(join(root, 'src', 'other.ts'), OTHER_SOURCE);
     expect(antiSlop(['create'], root)).toBe(0);
