@@ -53,6 +53,8 @@ because those two differ constantly. A file that is already failing on the defau
 yours to fix; say so instead of burning fix cycles on it. An `unknown` carrying a remedy line
 (`workflow-missing`, or `no-usable-run` with no artifact) means this repo's CI does not produce
 the report yet — follow the remedy (`devkit test-report-run --help`) rather than re-running tests.
+The answer names the branch `head` it walked back from and `commitsBehindHead`; above 0, read
+`skippedRuns` and `commitsWithoutRun` for why the newer commits could not answer.
 
 ## Fixing failures — max 2 cycles
 

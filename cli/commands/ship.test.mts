@@ -51,6 +51,24 @@ describe('devkit ship dispatcher provenance', () => {
       ['feat/runtime', 'ship it', '--wait-ci', '--wait-ci-timeout', '--pr', 'note.txt'],
       'ship-branch.sh',
     ],
+    // A --body value spelled like a mode flag or `--` is opaque text: no rejection, same route.
+    [
+      'reship whose --body is --draft',
+      ['--pr', 'feat/x', 't', '--body', '--draft', '--', 'note.txt'],
+      'reship.sh',
+    ],
+    [
+      'reship whose --body is --from-branch',
+      ['--pr', 'feat/x', 't', '--body', '--from-branch', '--', 'note.txt'],
+      'reship.sh',
+    ],
+    [
+      'reship whose --body is --',
+      ['feat/x', 't', '--body', '--', '--pr', '--', 'note.txt'],
+      'reship.sh',
+    ],
+    // The record supplies the mode under --resume, so --ready without --pr is not rejected there.
+    ['resume with --ready', ['--resume', 'feat/x', '--ready'], 'ship-branch.sh'],
   ])('reports once before dispatching a %s', async (_label, args, script) => {
     const test = harness();
 
@@ -204,6 +222,18 @@ describe('devkit ship machine-wide queue wiring (sc-3785)', () => {
       'could not join the machine-wide ship queue',
     );
     error.mockRestore();
+  });
+
+  // The bash scripts' resolve-only test seam must not become an unqueued path for the dispatcher.
+  it('still queues when SHIP_RESOLVE_ONLY is set', async () => {
+    const test = harness();
+    vi.stubEnv('SHIP_RESOLVE_ONLY', '1');
+    try {
+      expect(await ship(['--pr', 'feat/q', 't', 'a.txt'], '/consumer', test.dependencies)).toBe(0);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+    expect(test.events).toEqual(['provenance', 'queue', 'script']);
   });
 
   it('treats --queue as body text when it is the value of --body', async () => {

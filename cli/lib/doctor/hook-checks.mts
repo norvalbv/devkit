@@ -29,6 +29,7 @@ import {
   worktreeHooksPathState,
   worktreeScopedPin,
 } from './hooks-path.mts';
+import { FALLOW_STAGED_BLOCK } from '../husky/gate-policy/fallow-staged.mts';
 import { strayGateCalls } from './stray-gate-calls.mts';
 import { checkFailOpenGuards } from './unguarded-gate-calls.mts';
 
@@ -50,7 +51,7 @@ export function repointHooksPath(gitRoot: string, hookOk: boolean): boolean {
 // Selection-aware: only the SELECTED guards must be present in the block (a deselected
 // guard being absent is correct, not drift). Monorepo: the hook lives at the git root and the
 // block is package-scoped — resolve both from cwd.
-export function checkHusky(cwd: string, selectedGuards: string[]): CheckResult {
+export function checkHusky(cwd: string, selectedGuards: string[], fallow = false): CheckResult {
   const { gitRoot, pkgRel } = detectGitRoot(cwd);
   const hookPath = join(gitRoot, '.husky', 'pre-commit');
   if (!existsSync(hookPath)) {
@@ -81,6 +82,7 @@ export function checkHusky(cwd: string, selectedGuards: string[]): CheckResult {
   for (const g of gates) {
     if (OWN_FRAGMENT.has(g) && !block.includes(`guard-${g}`)) missing.push(g);
   }
+  if (fallow && !block.includes(FALLOW_STAGED_BLOCK)) missing.push('fallow');
   if (missing.length) {
     return check(
       '.husky/pre-commit',
@@ -476,9 +478,9 @@ export function replaceableHooksPathPin(cwd: string): ReplaceableHooksPathPin | 
  * growing its own call site — cli/commands/doctor.mts sits on its recorded size budget and the
  * ratchet is shrink-only.
  */
-export function hookChecks(cwd: string, guards: string[]): CheckResult[] {
+export function hookChecks(cwd: string, guards: string[], fallow = false): CheckResult[] {
   return [
-    checkHusky(cwd, guards),
+    checkHusky(cwd, guards, fallow),
     checkHookRunner(cwd),
     ...checkHooksPathOwner(cwd),
     checkFailOpenGuards(cwd),

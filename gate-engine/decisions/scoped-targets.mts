@@ -90,17 +90,14 @@ function flag(args: string[], name: string): string | undefined {
   return i !== -1 ? args[i + 1] : undefined;
 }
 
-const invokedDirectly =
-  process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
-if (invokedDirectly) {
-  const args = process.argv.slice(2);
+export async function main(args: string[]): Promise<void> {
   const files = (flag(args, '--files') ?? '')
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean);
   const query = flag(args, '--query') ?? '';
   const top = Number.parseInt(flag(args, '--top') ?? '6', 10) || 6;
-  scopedTargets(files, query, top)
+  await scopedTargets(files, query, top)
     .then((blocks) => process.stdout.write(JSON.stringify(blocks)))
     .catch((e) => {
       // Fail-open: emit [] so a consumer's prep step degrades to a SKIP note, never an error.
@@ -109,3 +106,5 @@ if (invokedDirectly) {
       process.exit(2);
     });
 }
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href)
+  main(process.argv.slice(2));

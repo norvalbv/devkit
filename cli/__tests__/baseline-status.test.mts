@@ -7,6 +7,13 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { type RunRef, isUsableRun } from '../lib/baseline-status/gh.mts';
 import { reservesReporter, summarise } from '../lib/baseline-status/produce.mts';
 import { fileExistsAt, queryBaseline, resolveRef } from '../lib/baseline-status/query.mts';
+import {
+  API_BRANCH_HEAD,
+  RUN_LIST_BY_COMMIT,
+  addCommit,
+  gitOnlyPath,
+  seedBranch,
+} from './_baseline-fixture.mts';
 
 const REPO_ROOT = join(import.meta.dirname, '..', '..');
 
@@ -142,6 +149,7 @@ describe('the package script', () => {
 describe('queryBaseline', () => {
   let dir: string;
   let fixture: string;
+  let head: string;
   const saved = { PATH: process.env.PATH, fixture: process.env.DEVKIT_TEST_FIXTURE };
 
   // runId MUST match the run it is served for — the reader rejects an artifact that names another
@@ -170,13 +178,16 @@ describe('queryBaseline', () => {
     attempt: 1,
     status: 'completed',
     conclusion: 'failure',
-    headSha: 'deadbeefcafe',
+    headSha: head,
     createdAt: '2026-08-29T00:00:00Z',
+    headBranch: 'main',
+    event: 'push',
     ...over,
   });
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'baseline-query-'));
+    head = seedBranch(dir);
     fixture = mkdtempSync(join(tmpdir(), 'baseline-fixture-'));
     const bin = join(dir, 'bin');
     mkdirSync(bin, { recursive: true });
@@ -184,7 +195,10 @@ describe('queryBaseline', () => {
     writeFileSync(
       stub,
       `#!/bin/sh
-if [ "$1" = "run" ] && [ "$2" = "list" ]; then cat "$DEVKIT_TEST_FIXTURE/runs.json"; exit 0; fi
+${API_BRANCH_HEAD}
+if [ "$1" = "run" ] && [ "$2" = "list" ]; then
+  ${RUN_LIST_BY_COMMIT}
+fi
 if [ "$1" = "run" ] && [ "$2" = "download" ]; then
   id="$3"; out=""
   while [ $# -gt 0 ]; do if [ "$1" = "--dir" ]; then out="$2"; fi; shift; done
@@ -280,7 +294,9 @@ exit 1
   });
 
   it('finds the last passing run when the window is complete', () => {
-    withRuns([run({ databaseId: 100 }), run({ databaseId: 99, headSha: 'oldersha1234' })]);
+    const older = head;
+    head = addCommit(dir);
+    withRuns([run({ databaseId: 100 }), run({ databaseId: 99, headSha: older })]);
     writeFileSync(
       join(fixture, 'summary-100.json'),
       summaryFor({ 'cli/a.test.mts': 'failed' }, false),
@@ -290,21 +306,19 @@ exit 1
       summaryFor({ 'cli/a.test.mts': 'passed' }, true, 99),
     );
     const answer = queryBaseline({ cwd: dir, ref: 'main', file: 'cli/a.test.mts' });
-    expect(answer.file?.lastPassed).toMatchObject({ runId: 99, sha: 'oldersha1234' });
+    expect(answer.file?.lastPassed).toMatchObject({ runId: 99, sha: older });
     expect(answer.file?.lastPassedReason).toBe('found');
   });
 
-  it('never reports a file it has no data for as anything but unknown', () => {
-    // The commit is not in this checkout, so "absent" cannot be distinguished from "excluded" —
-    // and a fact about the local clone must not be reported as a fact about the baseline.
+  it('refuses to answer, naming the fetch, when the GitHub head is not in this checkout', () => {
+    // A stale local clone: the head's history cannot be walked, and a fact about the local clone
+    // must not be reported as a fact about the baseline.
+    writeFileSync(join(fixture, 'head'), 'a'.repeat(40));
     withRuns([run()]);
-    writeFileSync(
-      join(fixture, 'summary-100.json'),
-      summaryFor({ 'cli/a.test.mts': 'passed' }, true),
-    );
-    const answer = queryBaseline({ cwd: dir, ref: 'main', file: 'cli/zzz.test.mts' });
-    expect(answer.file?.status).toBe('unknown');
-    expect(answer.file?.reason).toMatch(/not in this checkout/);
+    const answer = queryBaseline({ cwd: dir, ref: 'main', file: 'cli/a.test.mts' });
+    expect(answer.reason).toBe('history-unavailable');
+    expect(answer.remedy).toContain('Fetch main');
+    expect(answer.file).toBeUndefined();
   });
 
   it('returns a named unknown when every run predates the artifact', () => {
@@ -316,7 +330,8 @@ exit 1
   });
 
   it('degrades to a named unknown, not a crash, when gh is absent', () => {
-    process.env.PATH = join(dir, 'empty-bin');
+    // git stays reachable: the branch head is resolved before gh is ever asked anything.
+    process.env.PATH = gitOnlyPath(dir);
     const answer = queryBaseline({ cwd: dir, ref: 'main' });
     expect(answer.reason).toBe('gh-missing');
     expect(answer.runStatus).toBe('unknown');

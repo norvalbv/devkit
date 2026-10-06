@@ -40,6 +40,8 @@ interface FixtureConfig {
 /** Minimal initialised repo pinned ABOVE the running devkit. */
 function skewedRepo(cfg: FixtureConfig = {}, { bin = false } = {}): string {
   const root = mkTmp('skew-wire-');
+  // An overlay install always lives in a git repo; its doctor resolves the repo's hooks dir.
+  if (cfg.overlay) execFileSync('git', ['init', '-q'], { cwd: root });
   mkdirSync(join(root, '.devkit'), { recursive: true });
   writeFileSync(join(root, '.devkit', 'config.json'), JSON.stringify({ stack: 'generic', ...cfg }));
   writeFileSync(

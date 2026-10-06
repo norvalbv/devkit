@@ -482,6 +482,94 @@ describe('detectChangedComments', () => {
     expect(detectChangedComments(root).findings).toEqual([]);
   });
 
+  describe('a move that also edits lines', () => {
+    const DOC = ['// one', '// two', '// three', '// four'];
+    const CODE = Array.from({ length: 8 }, (_, index) => `const v${index} = ${index};`);
+
+    /** Moves `<pkg>src/<name>` into `<pkg>src/d/` and fixes its import; `pkg` models a monorepo package. */
+    function moved(edit: (lines: string[]) => string[], name = 'a.ts', pkg = ''): string {
+      const root = fixture();
+      const src = path.join(root, pkg, 'src');
+      mkdirSync(path.join(src, 'd'), { recursive: true });
+      if (pkg) writeFileSync(path.join(root, pkg, 'guard.config.json'), '{"scanRoots":["src"]}\n');
+      writeFileSync(
+        path.join(src, name),
+        ['import { x } from "./x";', ...DOC, ...CODE, ''].join('\n'),
+      );
+      commitAll(root, 'base');
+      git(root, ['mv', path.join(src, name), path.join(src, 'd', name)]);
+      const lines = ['import { x } from "../x";', ...DOC, ...CODE, ''];
+      writeFileSync(path.join(src, 'd', name), edit(lines).join('\n'));
+      git(root, ['add', '-A']);
+      expect(git(root, ['diff', '--cached', '--name-status'])).toMatch(/^R\d+\s/);
+      return root;
+    }
+
+    it('leaves the untouched comment paragraphs alone', () => {
+      expect(detectChangedComments(moved((lines) => lines)).findings).toEqual([]);
+    });
+
+    it('still reports a paragraph rewritten during the move', () => {
+      const root = moved((lines) => [
+        lines[0] ?? '',
+        '// uno',
+        '// dos',
+        '// tres',
+        ...lines.slice(4),
+      ]);
+      expect(detectChangedComments(root).findings).toHaveLength(1);
+    });
+
+    it('still reports a paragraph added during the move', () => {
+      const root = moved((lines) => [
+        ...lines.slice(0, 9),
+        '// new a',
+        '// new b',
+        '// new c',
+        ...lines.slice(9),
+      ]);
+      expect(detectChangedComments(root).findings).toHaveLength(1);
+    });
+
+    it('reads the old path under the package prefix when the gate runs in a subdirectory', () => {
+      const root = moved((lines) => lines, 'a.ts', 'pkg');
+      expect(detectChangedComments(path.join(root, 'pkg')).findings).toEqual([]);
+    });
+
+    it('treats a bracketed route file name literally, not as a glob over its siblings', () => {
+      const root = moved((lines) => lines, '[id].ts');
+      writeFileSync(path.join(root, 'src/d/i.ts'), 'import { x } from "../x";\n// a\n// b\n// c\n');
+      git(root, ['add', 'src/d/i.ts']);
+      expect(detectChangedComments(root).findings.map((finding) => finding.path)).toEqual([
+        'src/d/i.ts',
+      ]);
+    });
+
+    it('does not attribute a comment edit merged in from the other parent of a move', () => {
+      const root = fixture();
+      const file = (spec: string, doc: string[]) =>
+        [`import { x } from "${spec}";`, ...CODE, ...doc, ''].join('\n');
+      writeFileSync(path.join(root, 'src/a.ts'), file('./x', DOC));
+      commitAll(root, 'base');
+      const trunk = git(root, ['branch', '--show-current']).trim();
+      git(root, ['switch', '-qc', 'move']);
+      mkdirSync(path.join(root, 'src/d'));
+      git(root, ['mv', 'src/a.ts', 'src/d/a.ts']);
+      writeFileSync(path.join(root, 'src/d/a.ts'), file('../x', DOC));
+      commitAll(root, 'move');
+      git(root, ['switch', '-q', trunk]);
+      writeFileSync(
+        path.join(root, 'src/a.ts'),
+        file('./x', ['// uno', '// dos', '// tres', '// four']),
+      );
+      commitAll(root, 'reword');
+      git(root, ['switch', '-q', 'move']);
+      git(root, ['merge', '-q', '--no-ff', '--no-commit', trunk]);
+      expect(git(root, ['show', ':src/d/a.ts'])).toContain('// uno');
+      expect(detectChangedComments(root).findings).toEqual([]);
+    });
+  });
+
   it('reports a configured staged extension with no lexer adapter', () => {
     const root = fixture('py');
     writeFileSync(path.join(root, 'src/a.py'), '# explanation\nvalue = 1\n');

@@ -394,6 +394,14 @@ export function bodyUpdateRepo({ hookBody = 'exit 0' } = {}) {
       'printf \'%s\\n\' "$*" >> "$GH_LOG"',
       'if [ "$1" = pr ] && [ "$2" = view ]; then',
       '  [ "${GH_VIEW_STATUS:-0}" -eq 0 ] || exit "$GH_VIEW_STATUS"',
+      // PR identity TSV for the state check. GH_PR_STATE_AFTER answers from view GH_PR_FLIP_AT (default
+      // 2) on; GH_PR_HEAD_REPO may be empty, as for a deleted fork.
+      '  case " $* " in *" --json number,state,"*) if [ -n "${GH_PR_STATE:-}" ]; then',
+      '    echo v >> "$GH_LOG.views"; n=$(wc -l < "$GH_LOG.views"); s=$GH_PR_STATE',
+      '    if [ -n "${GH_PR_STATE_AFTER:-}" ] && [ "$n" -ge "${GH_PR_FLIP_AT:-2}" ]; then s=$GH_PR_STATE_AFTER; fi',
+      '    printf \'7\\t%s\\tfeat/pr\\t0\\t%s\\tmain\\thttps://github.com/acme/app/pull/7\\n\' "$s" "${GH_PR_HEAD_REPO-acme/app}"',
+      '    exit 0',
+      '  fi ;; esac',
       "  printf '%s\\n' 'https://github.com/acme/app/pull/7'",
       '  exit 0',
       'fi',

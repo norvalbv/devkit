@@ -17,6 +17,14 @@ import baselineStatus from '../commands/baseline/status.mts';
 import { type RunRef, isUsableRun } from '../lib/baseline-status/gh.mts';
 import { produceTestReport, summarise } from '../lib/baseline-status/produce.mts';
 import {
+  API_BRANCH_HEAD,
+  RUN_LIST_BY_COMMIT,
+  addCommit,
+  gitOnlyPath,
+  headOf,
+  seedBranch,
+} from './_baseline-fixture.mts';
+import {
   DEFAULT_ARTIFACT,
   MAX_RUNS_CEILING,
   cacheName,
@@ -25,6 +33,9 @@ import {
 } from '../lib/baseline-status/query.mts';
 
 const FIXTURES = join(import.meta.dirname, 'fixtures');
+
+/** The head of the newest ghHarness branch; runRef points at it unless told otherwise. */
+let harnessHead = '';
 
 describe('summarise — a real vitest report, not a hand-built stand-in', () => {
   // Captured from a real `devkit test-report-run`. Hand-built objects agree with whatever the code
@@ -119,10 +130,11 @@ describe('produceTestReport — the guard branches', () => {
   });
 });
 
-/** The stubbed-gh harness, shared by the query and command cases below. */
+/** The stubbed-gh harness on a real one-commit branch, shared by the query and command cases. */
 function ghHarness() {
   const dir = mkdtempSync(join(tmpdir(), 'edge-query-'));
   const fixture = mkdtempSync(join(tmpdir(), 'edge-fixture-'));
+  harnessHead = seedBranch(dir);
   const bin = join(dir, 'bin');
   mkdirSync(bin, { recursive: true });
   const stub = join(bin, 'gh');
@@ -130,9 +142,9 @@ function ghHarness() {
     stub,
     `#!/bin/sh
 if [ -n "$DEVKIT_GH_FAIL" ]; then echo "$DEVKIT_GH_FAIL" >&2; exit 1; fi
+${API_BRANCH_HEAD}
 if [ "$1" = "run" ] && [ "$2" = "list" ]; then
-  while [ $# -gt 0 ]; do if [ "$1" = "--limit" ]; then echo "$2" > "$DEVKIT_TEST_FIXTURE/limit"; fi; shift; done
-  cat "$DEVKIT_TEST_FIXTURE/runs.json"; exit 0
+  ${RUN_LIST_BY_COMMIT}
 fi
 if [ "$1" = "run" ] && [ "$2" = "download" ]; then
   if [ -n "$DEVKIT_GH_DOWNLOAD_FAIL" ]; then echo "$DEVKIT_GH_DOWNLOAD_FAIL" >&2; exit 1; fi
@@ -173,8 +185,10 @@ const runRef = (over: Partial<RunRef> = {}): RunRef => ({
   attempt: 1,
   status: 'completed',
   conclusion: 'failure',
-  headSha: 'deadbeefcafe',
+  headSha: harnessHead,
   createdAt: '2026-08-29T00:00:00Z',
+  headBranch: 'main',
+  event: 'push',
   ...over,
 });
 
@@ -191,17 +205,14 @@ describe('--file path shapes', () => {
     process.env.PATH = `${h.bin}:${saved.PATH ?? ''}`;
     process.env.DEVKIT_TEST_FIXTURE = fixture;
 
-    // A REAL repo containing the file, so `absent` vs `excluded` is decided by real git, not by the
-    // absence of a commit. This is what makes a wrong answer here confident rather than unknown.
+    // A REAL commit containing the file, so `absent` vs `excluded` is decided by real git, not by
+    // the absence of a commit. This is what makes a wrong answer here confident rather than unknown.
     const git = (...a: string[]) => execFileSync('git', a, { cwd: dir, stdio: 'ignore' });
-    git('init', '-b', 'main');
-    git('config', 'user.email', 'a@b.c');
-    git('config', 'user.name', 'a');
     mkdirSync(join(dir, 'cli'), { recursive: true });
     writeFileSync(join(dir, 'cli', 'a.test.mts'), '');
     git('add', '-A');
-    git('commit', '-m', 'seed');
-    sha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim();
+    git('commit', '-m', 'add a');
+    sha = headOf(dir);
     writeFileSync(join(fixture, 'runs.json'), JSON.stringify([runRef({ headSha: sha })]));
     writeFileSync(
       join(fixture, 'summary-100.json'),
@@ -258,7 +269,6 @@ describe('--file path shapes', () => {
   });
 
   it('reads the default branch from the remote HEAD when one is set', () => {
-    execFileSync('git', ['remote', 'add', 'origin', dir], { cwd: dir, stdio: 'ignore' });
     execFileSync('git', ['symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/trunk'], {
       cwd: dir,
       stdio: 'ignore',
@@ -313,20 +323,25 @@ describe('command-layer argument handling', () => {
     }
   });
 
-  it('clamps an absurd --max-runs before it reaches gh', () => {
-    // Measured: real `gh run list --limit` does NOT reject a huge value, it returns all 335 runs.
-    expect(
-      baselineStatus(
-        ['--max-runs', String(Number.MAX_SAFE_INTEGER), '--json', '--ref', 'main'],
-        dir,
-      ),
-    ).toBe(0);
-    expect(Number(readFileSync(join(fixture, 'limit'), 'utf8').trim())).toBe(MAX_RUNS_CEILING);
+  /** Commits looked up with gh, one `run list --commit` each. */
+  const lookups = () => readFileSync(join(fixture, 'list.log'), 'utf8').trim().split('\n');
+
+  it('clamps an absurd --max-runs to the commit ceiling', () => {
+    // Without the clamp one question walks the branch's whole history, one gh call per commit.
+    execFileSync(
+      'sh',
+      ['-c', `for i in $(seq ${MAX_RUNS_CEILING + 2}); do git commit -q --allow-empty -m x; done`],
+      { cwd: dir },
+    );
+    const absurd = String(Number.MAX_SAFE_INTEGER);
+    expect(baselineStatus(['--max-runs', absurd, '--json', '--ref', 'main'], dir)).toBe(0);
+    expect(lookups()).toHaveLength(MAX_RUNS_CEILING);
   });
 
-  it('passes a reasonable --max-runs through unchanged', () => {
+  it('walks no further back than a reasonable --max-runs', () => {
+    for (let i = 0; i < 4; i++) addCommit(dir);
     expect(baselineStatus(['--max-runs', '3', '--json', '--ref', 'main'], dir)).toBe(0);
-    expect(Number(readFileSync(join(fixture, 'limit'), 'utf8').trim())).toBe(3);
+    expect(lookups()).toHaveLength(3);
   });
 
   it('renders the human view without --json, naming the failing files', () => {
@@ -346,7 +361,7 @@ describe('command-layer argument handling', () => {
   it('exits NON-ZERO when the query could not be performed at all', () => {
     // The documented contract, previously contradicted by an unconditional 0: a shell caller must be
     // able to tell "gh is missing" from "main is green".
-    process.env.PATH = join(dir, 'empty-bin');
+    process.env.PATH = gitOnlyPath(dir);
     expect(baselineStatus(['--json', '--ref', 'main'], dir)).toBe(2);
     expect(JSON.parse(out.join('\n')).reason).toBe('gh-missing');
   });
@@ -1108,5 +1123,348 @@ describe('a report that is valid JSON but not a vitest report', () => {
   it('refuses a payload with no run-level success flag', async () => {
     fakeVitest('{"testResults":[]}');
     expect(await produceTestReport(dir, [])).toBe(1);
+  });
+});
+
+describe('runs come from the remote head, one commit at a time (stale run listing)', () => {
+  let dir: string;
+  let fixture: string;
+  let older: string;
+  let head: string;
+  let out: string[];
+  const saved = { PATH: process.env.PATH, fx: process.env.DEVKIT_TEST_FIXTURE };
+  const log = console.log;
+
+  beforeEach(() => {
+    const h = ghHarness();
+    dir = h.dir;
+    fixture = h.fixture;
+    process.env.PATH = `${h.bin}:${saved.PATH ?? ''}`;
+    process.env.DEVKIT_TEST_FIXTURE = fixture;
+    older = harnessHead;
+    head = addCommit(dir);
+    out = [];
+    console.log = (...a: unknown[]) => void out.push(a.join(' '));
+  });
+
+  afterEach(() => {
+    console.log = log;
+    process.env.PATH = saved.PATH;
+    if (saved.fx === undefined) delete process.env.DEVKIT_TEST_FIXTURE;
+    else process.env.DEVKIT_TEST_FIXTURE = saved.fx;
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(fixture, { recursive: true, force: true });
+  });
+
+  const withRuns = (runs: RunRef[]) =>
+    writeFileSync(join(fixture, 'runs.json'), JSON.stringify(runs));
+  const withSummary = (runId: number, outcome: string) =>
+    writeFileSync(
+      join(fixture, `summary-${runId}.json`),
+      summaryFor({ 'cli/a.test.mts': outcome }, outcome === 'passed', runId),
+    );
+  const lookups = () => readFileSync(join(fixture, 'list.log'), 'utf8').trim().split('\n');
+
+  it("answers from the head's own run, never from a branch listing that can serve weeks-old pages", () => {
+    withRuns([
+      runRef({ databaseId: 200, headSha: head, conclusion: 'success' }),
+      runRef({ databaseId: 100, headSha: older }),
+    ]);
+    withSummary(200, 'passed');
+    withSummary(100, 'failed');
+    const answer = queryBaseline({ cwd: dir, ref: 'main', file: 'cli/a.test.mts' });
+    expect(answer).toMatchObject({ runId: 200, sha: head, head, commitsBehindHead: 0 });
+    expect(answer.file?.status).toBe('passed');
+    // A full page, since filtering is ours: gh's default 20 could cut off the branch's own run.
+    expect(lookups()[0]).toContain('--limit 100');
+    expect(lookups().every((l) => l.includes(`--commit ${head}`) && !l.includes('--branch'))).toBe(
+      true,
+    );
+  });
+
+  it('falls back past an in-flight head run and says how far behind the head the answer is', () => {
+    withRuns([
+      runRef({ databaseId: 200, headSha: head, status: 'in_progress', conclusion: '' }),
+      runRef({ databaseId: 100, headSha: older }),
+    ]);
+    withSummary(100, 'failed');
+    expect(baselineStatus(['--json', '--ref', 'main'], dir)).toBe(0);
+    const answer = JSON.parse(out.join('\n'));
+    expect(answer).toMatchObject({ runId: 100, sha: older, head, commitsBehindHead: 1 });
+    expect(answer.skippedRuns[0]).toMatchObject({ runId: 200, sha: head });
+    out = [];
+    baselineStatus(['--ref', 'main'], dir);
+    expect(out.join('\n')).toContain(`1 commit(s) behind main head ${head.slice(0, 8)}`);
+  });
+
+  it('names a head commit the workflow never ran on', () => {
+    withRuns([runRef({ databaseId: 100, headSha: older })]);
+    withSummary(100, 'failed');
+    const answer = queryBaseline({ cwd: dir, ref: 'main' });
+    expect(answer).toMatchObject({ runId: 100, commitsBehindHead: 1, commitsWithoutRun: [head] });
+  });
+
+  it('ignores a pull_request run that shares a branch commit sha', () => {
+    withRuns([
+      runRef({ databaseId: 300, headSha: head, event: 'pull_request', headBranch: 'feature' }),
+      runRef({ databaseId: 200, headSha: head, conclusion: 'success' }),
+    ]);
+    withSummary(300, 'failed');
+    withSummary(200, 'passed');
+    expect(queryBaseline({ cwd: dir, ref: 'main' }).runId).toBe(200);
+  });
+
+  it('accepts a workflow_dispatch run on the branch, as the branch filter did', () => {
+    withRuns([runRef({ databaseId: 200, headSha: head, event: 'workflow_dispatch' })]);
+    withSummary(200, 'passed');
+    expect(queryBaseline({ cwd: dir, ref: 'main' }).runId).toBe(200);
+  });
+
+  it('exits 2 with head-unknown when origin has no such branch', () => {
+    withRuns([]);
+    expect(baselineStatus(['--json', '--ref', 'nope'], dir)).toBe(2);
+    expect(JSON.parse(out.join('\n')).reason).toBe('head-unknown');
+  });
+
+  it('exits 2 naming the fetch when the GitHub head is not in this checkout', () => {
+    writeFileSync(join(fixture, 'head'), 'a'.repeat(40));
+    withRuns([]);
+    expect(baselineStatus(['--json', '--ref', 'main'], dir)).toBe(2);
+    expect(JSON.parse(out.join('\n'))).toMatchObject({
+      reason: 'history-unavailable',
+      head: 'a'.repeat(40), // the head GitHub named is still reported, so the fetch is actionable
+      remedy: expect.stringContaining('Fetch main'),
+    });
+  });
+
+  it('blames a shallow clone, not the CI wiring, when its few commits carry no usable run', () => {
+    const shallow = mkdtempSync(join(tmpdir(), 'edge-shallow-'));
+    try {
+      execFileSync('git', ['clone', '-q', '--depth', '1', `file://${dir}`, shallow]);
+      withRuns([]);
+      const answer = queryBaseline({ cwd: shallow, ref: 'main' });
+      expect(answer.reason).toBe('history-unavailable');
+      expect(answer.remedy).toContain('--unshallow');
+      expect(answer.remedy).not.toContain('test-report-run');
+    } finally {
+      rmSync(shallow, { recursive: true, force: true });
+    }
+  });
+
+  it('looks up only the head for a run-level answer, and never the same commit twice', () => {
+    withRuns([
+      runRef({ databaseId: 200, headSha: head }),
+      runRef({ databaseId: 100, headSha: older }),
+    ]);
+    withSummary(200, 'failed');
+    withSummary(100, 'passed');
+    queryBaseline({ cwd: dir, ref: 'main' });
+    expect(lookups()).toHaveLength(1);
+    rmSync(join(fixture, 'list.log'));
+    const answer = queryBaseline({ cwd: dir, ref: 'main', file: 'cli/a.test.mts' });
+    expect(answer.file?.lastPassed).toMatchObject({ runId: 100, sha: older });
+    expect(lookups()).toHaveLength(2);
+  });
+});
+
+describe('head resolution and run filtering at the boundaries', () => {
+  let dir: string;
+  let fixture: string;
+  let older: string;
+  let head: string;
+  const saved = {
+    PATH: process.env.PATH,
+    fx: process.env.DEVKIT_TEST_FIXTURE,
+  };
+
+  beforeEach(() => {
+    const h = ghHarness();
+    dir = h.dir;
+    fixture = h.fixture;
+    process.env.PATH = `${h.bin}:${saved.PATH ?? ''}`;
+    process.env.DEVKIT_TEST_FIXTURE = fixture;
+    older = harnessHead;
+    head = addCommit(dir);
+  });
+
+  afterEach(() => {
+    process.env.PATH = saved.PATH;
+    if (saved.fx === undefined) delete process.env.DEVKIT_TEST_FIXTURE;
+    else process.env.DEVKIT_TEST_FIXTURE = saved.fx;
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(fixture, { recursive: true, force: true });
+  });
+
+  const withRuns = (runs: unknown[]) =>
+    writeFileSync(join(fixture, 'runs.json'), JSON.stringify(runs));
+  const withSummary = (runId: number, outcome: string) =>
+    writeFileSync(
+      join(fixture, `summary-${runId}.json`),
+      summaryFor({ 'cli/a.test.mts': outcome }, outcome === 'passed', runId),
+    );
+
+  it("takes the head from the repository gh queries, not from origin, so a fork's runs never mix", () => {
+    // origin is a fork whose main has moved on; runs come from gh's repository, so its head must too.
+    const fork = mkdtempSync(join(tmpdir(), 'edge-fork-'));
+    try {
+      seedBranch(fork);
+      execFileSync('git', ['commit', '-q', '--allow-empty', '-m', 'fork only'], { cwd: fork });
+      execFileSync('git', ['remote', 'set-url', 'origin', fork], { cwd: dir });
+      withRuns([runRef({ databaseId: 200, headSha: head })]);
+      withSummary(200, 'passed');
+      expect(queryBaseline({ cwd: dir, ref: 'main' })).toMatchObject({ head, runId: 200 });
+      expect(readFileSync(join(fixture, 'api.log'), 'utf8')).toContain('branches/main');
+    } finally {
+      rmSync(fork, { recursive: true, force: true });
+    }
+  });
+
+  it('asks for a slash-named branch as ONE encoded ref, not as two path segments', () => {
+    execFileSync('git', ['branch', 'release/1.x', head], { cwd: dir });
+    withRuns([runRef({ databaseId: 200, headSha: head, headBranch: 'release/1.x' })]);
+    withSummary(200, 'passed');
+    expect(queryBaseline({ cwd: dir, ref: 'release/1.x' })).toMatchObject({ head, runId: 200 });
+    expect(readFileSync(join(fixture, 'api.log'), 'utf8')).toContain('branches/release%2F1.x');
+  });
+
+  it("keeps an inaccessible repository's bare 404 a gh failure, not a missing branch", () => {
+    process.env.DEVKIT_GH_FAIL = 'gh: Not Found (HTTP 404)';
+    try {
+      expect(queryBaseline({ cwd: dir, ref: 'main' }).reason).toBe('gh-failed');
+    } finally {
+      delete process.env.DEVKIT_GH_FAIL;
+    }
+  });
+
+  it('lists the run-less commits the --file walk-back crossed, not only the run-level ones', () => {
+    const grand = older;
+    const parent = head;
+    head = addCommit(dir);
+    withRuns([
+      runRef({ databaseId: 200, headSha: head }),
+      runRef({ databaseId: 100, headSha: grand }),
+    ]);
+    withSummary(200, 'failed');
+    withSummary(100, 'passed');
+    const answer = queryBaseline({ cwd: dir, ref: 'main', file: 'cli/a.test.mts' });
+    expect(answer.file?.lastPassed).toMatchObject({ runId: 100 });
+    expect(answer.commitsWithoutRun).toEqual([parent]);
+  });
+
+  it('names a branch GitHub does not have, and a malformed head, as head-unknown', () => {
+    expect(queryBaseline({ cwd: dir, ref: 'gone' }).reason).toBe('head-unknown');
+    writeFileSync(join(fixture, 'head'), 'not-a-sha');
+    expect(queryBaseline({ cwd: dir, ref: 'main' }).reason).toBe('head-unknown');
+  });
+
+  it.each([
+    ['a fork PR from its own main', { event: 'pull_request', headBranch: 'main' }],
+    ['a push to another branch at the same sha', { event: 'push', headBranch: 'release' }],
+  ])('drops %s, which --branch semantics never counted as the branch', (_, over) => {
+    withRuns([
+      runRef({ databaseId: 300, headSha: head, ...over }),
+      runRef({ databaseId: 200, headSha: head, conclusion: 'success' }),
+    ]);
+    withSummary(300, 'failed');
+    withSummary(200, 'passed');
+    expect(queryBaseline({ cwd: dir, ref: 'main' }).runId).toBe(200);
+  });
+
+  it('stops with a named unknown, not an older answer, when a lookup fails mid-walk', () => {
+    // The head run is in flight; the parent's lookup then fails. Walking on past it, or reporting
+    // "no usable run" (exit 0), would both hide that the current answer is unavailable.
+    withRuns([
+      runRef({ databaseId: 200, headSha: head, status: 'in_progress', conclusion: '' }),
+      { headSha: older, databaseId: 'not-a-number' },
+    ]);
+    const answer = queryBaseline({ cwd: dir, ref: 'main' });
+    expect(answer.reason).toBe('gh-failed');
+    expect(answer).toMatchObject({ head, skippedRuns: [{ runId: 200, sha: head }] });
+  });
+
+  it('names a lookup failure in the --file walk-back rather than calling it missing history', () => {
+    withRuns([runRef({ databaseId: 200, headSha: head }), { headSha: older, databaseId: 'x' }]);
+    withSummary(200, 'failed');
+    const answer = queryBaseline({ cwd: dir, ref: 'main', file: 'cli/a.test.mts' });
+    expect(answer.file).toMatchObject({
+      status: 'failed',
+      lastPassedReason: 'lookup-failed',
+    });
+  });
+
+  it('points at --max-runs, not at the CI wiring, when every walked commit lacked a run', () => {
+    // A rebase-merged PR or a path-filtered workflow leaves runs only on some commits; a window of
+    // run-less commits says nothing about whether CI produces the artifact.
+    withRuns([runRef({ databaseId: 100, headSha: older })]);
+    const answer = queryBaseline({ cwd: dir, ref: 'main', maxRuns: 1 });
+    expect(answer.reason).toBe('no-usable-run');
+    expect(answer.remedy).toContain('--max-runs');
+  });
+});
+
+describe('reviewer round: shallow state and the fallback narration', () => {
+  let dir: string;
+  let fixture: string;
+  let older: string;
+  let head: string;
+  let out: string[];
+  const saved = { PATH: process.env.PATH, fx: process.env.DEVKIT_TEST_FIXTURE };
+  const log = console.log;
+
+  beforeEach(() => {
+    const h = ghHarness();
+    dir = h.dir;
+    fixture = h.fixture;
+    process.env.PATH = `${h.bin}:${saved.PATH ?? ''}`;
+    process.env.DEVKIT_TEST_FIXTURE = fixture;
+    older = harnessHead;
+    head = addCommit(dir);
+    out = [];
+    console.log = (...a: unknown[]) => void out.push(a.join(' '));
+  });
+
+  afterEach(() => {
+    console.log = log;
+    process.env.PATH = saved.PATH;
+    if (saved.fx === undefined) delete process.env.DEVKIT_TEST_FIXTURE;
+    else process.env.DEVKIT_TEST_FIXTURE = saved.fx;
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(fixture, { recursive: true, force: true });
+  });
+
+  it('does not blame a complete branch history for a shallow fetch of an unrelated branch', () => {
+    const other = mkdtempSync(join(tmpdir(), 'edge-other-'));
+    try {
+      seedBranch(other);
+      execFileSync('git', ['commit', '-q', '--allow-empty', '-m', 'side 1'], { cwd: other });
+      execFileSync('git', ['commit', '-q', '--allow-empty', '-m', 'side 2'], { cwd: other });
+      execFileSync('git', ['fetch', '-q', '--depth=1', other, 'main:side'], { cwd: dir });
+      writeFileSync(join(fixture, 'runs.json'), '[]');
+      const answer = queryBaseline({ cwd: dir, ref: 'main' });
+      expect(answer.reason).toBe('no-usable-run');
+    } finally {
+      rmSync(other, { recursive: true, force: true });
+    }
+  });
+
+  it('names the newer run that was skipped, not "no usable run", when only its artifact is missing', () => {
+    writeFileSync(
+      join(fixture, 'runs.json'),
+      JSON.stringify([
+        runRef({ databaseId: 200, headSha: head }),
+        runRef({ databaseId: 100, headSha: older }),
+      ]),
+    );
+    writeFileSync(
+      join(fixture, 'summary-100.json'),
+      summaryFor({ 'cli/a.test.mts': 'failed' }, false),
+    );
+    expect(baselineStatus(['--ref', 'main'], dir)).toBe(0);
+    const text = out.join('\n');
+    expect(text).toContain(`1 commit(s) behind main head ${head.slice(0, 8)}`);
+    expect(text).toMatch(
+      /skipped run 200 \(failure\): run 200 has no `test-report-summary` artifact/,
+    );
+    expect(text).not.toContain('usable run');
   });
 });
