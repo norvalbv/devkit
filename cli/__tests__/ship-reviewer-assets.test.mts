@@ -87,6 +87,27 @@ function writeOwnedAgentManifest(dir) {
   );
 }
 
+const CHECKLIST_SKILL_PATH = 'skills/commit-guard/scripts/checklist.mjs';
+const WORKTREE_CHECKLIST = "// the worktree commit's own checklist\n";
+
+/** A ship worktree whose projected checklist script differs from the running package's. */
+function seedProjectedChecklist(manifest) {
+  const parent = mkdtempSync(join(tmpdir(), 'ship-review-assets-self-host-'));
+  dirs.push(parent);
+  const worktree = join(parent, 'worktree');
+  const root = join(parent, 'root');
+  const script = join(worktree, '.claude', CHECKLIST_SKILL_PATH);
+  mkdirSync(join(script, '..'), { recursive: true });
+  mkdirSync(join(root, '.devkit'), { recursive: true });
+  writeFileSync(
+    join(root, '.devkit/skills-manifest.json'),
+    `${JSON.stringify({ files: { 'commit-guard/scripts/checklist.mjs': '0'.repeat(64) }, targets: ['claude'] })}\n`,
+  );
+  writeFileSync(join(worktree, 'package.json'), manifest);
+  writeFileSync(script, WORKTREE_CHECKLIST);
+  return { worktree, root, script };
+}
+
 describe('ship reviewer asset refresh', () => {
   it('preserves consumer skills and overrides while exact-replacing devkit-owned reviewer assets', () => {
     const consumerSkill = '# consumer-owned identity\n';
@@ -161,6 +182,32 @@ describe('ship reviewer asset refresh', () => {
     } finally {
       dropWorktree(git, result.stderr);
     }
+  });
+
+  it("keeps devkit's own tracked projection instead of the running package's", () => {
+    const { worktree, root, script } = seedProjectedChecklist('{"name":"@norvalbv/devkit"}');
+
+    const result = runReviewerRefresh(worktree, root, sourcePackageRoot);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stderr).toContain("self-host — using the worktree's own tracked reviewer");
+    expect(result.stderr).not.toContain('refreshed reviewer agents');
+    expect(readFileSync(script, 'utf8')).toBe(WORKTREE_CHECKLIST);
+  });
+
+  it.each([
+    ['a consumer package', '{"name":"consumer"}'],
+    ['an unreadable manifest', '{not json'],
+  ])('refreshes from the running package for %s', (_label, manifest) => {
+    const { worktree, root, script } = seedProjectedChecklist(manifest);
+
+    const result = runReviewerRefresh(worktree, root, sourcePackageRoot);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stderr).toContain('refreshed reviewer agents');
+    expect(readFileSync(script, 'utf8')).toBe(
+      readFileSync(join(sourcePackageRoot, CHECKLIST_SKILL_PATH), 'utf8'),
+    );
   });
 
   it('fails before stale consumer bytes can mask a missing packaged reviewer asset', () => {

@@ -49,11 +49,8 @@ gate_package_root() {
   printf '%s\n' "$package_root"
 }
 
-# Refresh only the throwaway ship worktree from the CURRENT running devkit package. The fixed
-# .claude/agents target is the reader-side twin of SHIP_AGENTS_PROJECTION (consumer-assets.mts): in a
-# ship lane the gate reads briefs from here, never from a custom review.agentsDir (sc-1882). The caller's
-# synced .claude projection may lag the installed package (sc-1300); trusting it makes a clean ship
-# fail closed as "checklist artifact missing" until the shared checkout is manually mutated.
+# Refresh a consumer's throwaway ship worktree from the CURRENT running devkit package: its synced
+# .claude projection may lag, and the gate reads briefs from the fixed .claude/agents target here.
 refresh_ship_reviewer_assets() {
   local wt=$1 root=$2 purpose=$3 package_root physical_wt physical_root sub
   physical_wt=$(cd -P "$wt" && pwd) || return 1
@@ -62,6 +59,11 @@ refresh_ship_reviewer_assets() {
     echo "devkit ship: refusing to refresh reviewer assets in the caller checkout" >&2
     return 1
   }
+  # devkit's own worktree runs gate code from its own source, which its tracked projection matches.
+  if node -e 'process.exit(require(process.argv[1]).name === "@norvalbv/devkit" ? 0 : 1)' "$physical_wt/package.json" 2>/dev/null; then
+    echo "  ↳ $purpose: self-host — using the worktree's own tracked reviewer agents + skills" >&2
+    return 0
+  fi
   package_root=$(gate_package_root) || {
     echo "devkit ship: running package is missing reviewer agents/skills — reinstall or rebuild devkit" >&2
     return 1
@@ -637,10 +639,8 @@ prepare_gate_worktree() {
     return 1
   fi
 
-  # Reviewer briefs/checklists may be absent, tracked, or ignored projection artifacts. All three
-  # states can lag the running package, so refresh every throwaway release-gate worktree instead of
-  # trusting the caller copy (or treating its absence as an opt-out). Tag validation shares this
-  # preparation helper but does not run the reviewer gate, so keep its minimal worktree unchanged.
+  # Reviewer briefs/checklists may be absent, tracked, or ignored, and each can lag the running
+  # package, so refresh rather than trust the caller copy. Tag validation runs no reviewer gate.
   if [ "$purpose" = shipping ]; then
     # `|| return 1` keeps the reviewer refresh FAIL-CLOSED: it used to be the last statement, so its
     # status was this function's, and a bare second call below would silently swallow it.
