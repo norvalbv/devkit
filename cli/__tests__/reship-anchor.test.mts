@@ -1,5 +1,7 @@
 import {
   chmodSync,
+  existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -11,7 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
-import { decide, hereEntry } from '../lib/ship/reship/anchor.mts';
+import { decide, hereEntry, stageAppend } from '../lib/ship/reship/anchor.mts';
 import { recordShip } from '../lib/ship/reconcile-manifest-write.mts';
 import { testExecFileSync as execFileSync, testSpawnSync as spawnSync } from './_helpers.mts';
 import { manifestOf } from './_ship-branch-fixture.mts';
@@ -139,6 +141,104 @@ describe('reship-anchor — hereEntry', () => {
     });
     expect(target).toBe('run.sh');
     expect(hereEntry(dir, 'gone')).toBeNull();
+  });
+});
+
+/** In-process staging: a checkout at the first ship, a `pr` tip, and a worktree cut at that tip. */
+function stageRepo(tipEdit: (dir: string) => void = () => {}) {
+  const dir = tmp('reship-anchor-stage-');
+  const wt = join(tmp('reship-anchor-stagewt-'), 'wt');
+  const env = { ...process.env, ...GENV };
+  const git = (cwd: string, a: string[]) =>
+    execFileSync('git', ['-C', cwd, ...a], { env, encoding: 'utf8' }).trim();
+  git(dir, ['init', '-q', '-b', 'work']);
+  git(dir, ['config', 'user.email', 'a@b.c']);
+  git(dir, ['config', 'user.name', 'a']);
+  writeFileSync(join(dir, '.gitignore'), '.devkit/\nanchors\n');
+  writeFileSync(join(dir, 'a.ts'), text());
+  writeFileSync(join(dir, 'old.ts'), 'old\n');
+  git(dir, ['add', '.']);
+  git(dir, ['commit', '-q', '-m', 'first ship']);
+  const head = git(dir, ['rev-parse', 'HEAD']);
+  const ship = { root: dir, branch: 'pr', repo: 'acme/app', baseRef: 'work', baseSha: head };
+  expect(recordShip(ship, ['a.ts', 'old.ts'])).toBe(0);
+  git(dir, ['checkout', '-q', '-b', 'pr']);
+  tipEdit(dir);
+  git(dir, ['add', '-A']);
+  git(dir, ['commit', '-q', '--allow-empty', '-m', 'foreign change']);
+  const tip = git(dir, ['rev-parse', 'HEAD']);
+  git(dir, ['checkout', '-q', 'work']);
+  git(dir, ['worktree', 'add', '-q', '--detach', wt, tip]);
+  const run = (paths: string[]) =>
+    stageAppend({ root: dir, wt, branch: 'pr', tip, head, out: join(dir, 'anchors') }, paths);
+  /** "<mode> <blob>" of the staged entry, or '' when the path is staged as absent. */
+  const staged = (path: string) => git(wt, ['ls-files', '-s', '--', path]).split(' 0\t')[0];
+  const diff = () => git(wt, ['diff', '--cached', '--name-status']);
+  return { dir, wt, git, run, staged, diff };
+}
+
+describe('reship-anchor — stageAppend stages what the copy loop staged', () => {
+  it('stages a nested new file, a symlink, a ./-spelled path and a deletion over an unmoved tip', () => {
+    const r = stageRepo();
+    mkdirSync(join(r.dir, 'deep/er'), { recursive: true });
+    writeFileSync(join(r.dir, 'deep/er/new.ts'), 'new\n');
+    symlinkSync('a.ts', join(r.dir, 'link'));
+    writeFileSync(join(r.dir, 'a.ts'), text({ 0: 'edited' }));
+    rmSync(join(r.dir, 'old.ts'));
+
+    expect(r.run(['deep/er/new.ts', 'link', './a.ts', 'old.ts'])).toBe(0);
+    expect(r.diff().split('\n').sort()).toEqual([
+      'A\tdeep/er/new.ts',
+      'A\tlink',
+      'D\told.ts',
+      'M\ta.ts',
+    ]);
+    expect(r.staged('link').startsWith('120000 ')).toBe(true);
+    expect(lstatSync(join(r.wt, 'link')).isSymbolicLink()).toBe(true);
+    expect(readFileSync(join(r.wt, 'deep/er/new.ts'), 'utf8')).toBe('new\n');
+    expect(existsSync(join(r.wt, 'old.ts'))).toBe(false);
+  });
+
+  it('stages nothing when one path merges and another must be refused', () => {
+    const r = stageRepo((dir) => {
+      writeFileSync(join(dir, 'a.ts'), text({ 9: 'foreign' }));
+      writeFileSync(join(dir, 'old.ts'), 'foreign\n');
+    });
+    writeFileSync(join(r.dir, 'a.ts'), text({ 0: 'mine' }));
+    writeFileSync(join(r.dir, 'old.ts'), 'mine\n');
+    expect(r.run(['a.ts', 'old.ts'])).toBe(1);
+    expect(r.diff()).toBe('');
+  });
+
+  it('falls back to the fork point when the recorded blob was garbage-collected', () => {
+    const r = stageRepo((dir) => writeFileSync(join(dir, 'a.ts'), text({ 9: 'foreign' })));
+    const file = join(r.dir, '.devkit/reconcile-manifest.json');
+    const m = manifestOf(r.dir);
+    const pruned = execFileSync('git', ['-C', r.dir, 'hash-object', '--stdin'], {
+      input: 'bytes no commit ever held\n',
+      encoding: 'utf8',
+    }).trim();
+    m.branches.pr.paths.find((p) => p.path === 'a.ts').blobSha = pruned;
+    writeFileSync(file, JSON.stringify(m));
+    writeFileSync(join(r.dir, 'a.ts'), text({ 0: 'mine' }));
+    expect(r.run(['a.ts'])).toBe(0);
+    expect(readFileSync(join(r.wt, 'a.ts'), 'utf8')).toBe(text({ 0: 'mine', 9: 'foreign' }));
+  });
+
+  it('keeps a chmod from either side through a merge', () => {
+    const tipChmod = stageRepo((dir) => chmodSync(join(dir, 'a.ts'), 0o755));
+    writeFileSync(join(tipChmod.dir, 'a.ts'), text({ 0: 'mine' }));
+    expect(tipChmod.run(['a.ts'])).toBe(0);
+    expect(tipChmod.staged('a.ts').startsWith('100755 ')).toBe(true);
+    expect(readFileSync(join(tipChmod.wt, 'a.ts'), 'utf8')).toBe(text({ 0: 'mine' }));
+
+    const callerChmod = stageRepo((dir) =>
+      writeFileSync(join(dir, 'a.ts'), text({ 9: 'foreign' })),
+    );
+    chmodSync(join(callerChmod.dir, 'a.ts'), 0o755);
+    expect(callerChmod.run(['a.ts'])).toBe(0);
+    expect(callerChmod.staged('a.ts').startsWith('100755 ')).toBe(true);
+    expect(readFileSync(join(callerChmod.wt, 'a.ts'), 'utf8')).toBe(text({ 9: 'foreign' }));
   });
 });
 

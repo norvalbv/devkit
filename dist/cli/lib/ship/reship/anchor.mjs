@@ -4,7 +4,7 @@
 import { spawnSync } from 'node:child_process';
 import { closeSync, constants, fstatSync, mkdtempSync, openSync, readFileSync, readlinkSync, realpathSync, rmSync, writeFileSync, } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, posix } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { envFlag } from '../../../../gate-engine/config.mjs';
 import { loadManifest } from '../../reconcile.mjs';
@@ -74,10 +74,12 @@ export function hereEntry(root, path) {
 export function anchorEntry(root, branch, tip, head, path) {
     const shipped = loadManifest(root).branches[branch]?.paths.find((e) => e.path === path);
     const token = shipped ? `${shipped.op}:${shipped.blobSha}` : '-';
-    // A record without a mode cannot tell a chmod on the tip apart, so it anchors like no record.
-    if (shipped?.mode) {
-        const entry = shipped.op === 'delete' ? null : { blob: shipped.blobSha, mode: shipped.mode };
-        return { entry, token };
+    // No mode (a chmod on the tip is invisible) or a pruned blob (a merged path's is in no commit):
+    // the record cannot be merged from, so it anchors like no record.
+    if (shipped?.mode && shipped.op === 'delete')
+        return { entry: null, token };
+    if (shipped?.mode && git(root, ['cat-file', '-e', shipped.blobSha])) {
+        return { entry: { blob: shipped.blobSha, mode: shipped.mode }, token };
     }
     const fork = head ? git(root, ['merge-base', tip, head])?.toString('utf8').trim() : '';
     // Unrelated histories: nothing to anchor on, so the tip stands in and the path is copied as before.
@@ -156,14 +158,15 @@ function report(branch, heading, plans) {
 }
 /** Stage <entry> at <path> in the worktree's index and files; null removes it. */
 function stageEntry(wt, path, entry) {
+    const name = posix.normalize(path); // the index takes a tree path, not a pathspec: no `./`
     const ok = entry
-        ? git(wt, ['update-index', '--add', '--cacheinfo', `${entry.mode},${entry.blob},${path}`]) &&
-            git(wt, ['checkout-index', '-f', '--', path])
-        : git(wt, ['update-index', '--force-remove', '--', path]);
+        ? git(wt, ['update-index', '--add', '--cacheinfo', `${entry.mode},${entry.blob},${name}`]) &&
+            git(wt, ['checkout-index', '-f', '--', name])
+        : git(wt, ['update-index', '--force-remove', '--', name]);
     if (!ok)
         throw new Error(`could not stage ${shown(path)}`);
     if (!entry)
-        rmSync(join(wt, path), { force: true });
+        rmSync(join(wt, name), { force: true });
 }
 /** Plan every path, then stage each from the bytes it was judged on. Returns the exit code. */
 export function stageAppend({ root, wt, branch, tip, head, out }, paths) {
