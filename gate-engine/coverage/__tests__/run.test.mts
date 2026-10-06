@@ -166,6 +166,18 @@ describe('runCoverage — fail-closed gate', () => {
     expect(text(s.log)).toMatch(/passed/i);
   });
 
+  it('the verdict names how many files the artifact measured, so a one-file sliver is visible', () => {
+    const root = makeRoot();
+    writeCoverage(root, COV);
+    const s = spy();
+    expect(runCoverage(root)).toBe(0);
+    expect(text(s.log)).toMatch(/✓ Coverage gate passed \(.*; 1 file\)/);
+    writeConfig(root, { coverage: { statements: 60 } });
+    writeCoverage(root, { ...COV, '/x/b.ts': FILE });
+    expect(runCoverage(root)).toBe(1);
+    expect(text(s.err)).toContain('Coverage below threshold (2 files measured):');
+  });
+
   it('thresholds met → PASS', () => {
     const root = makeRoot();
     writeConfig(root, { coverage: { statements: 40, functions: 90 } });
@@ -232,6 +244,30 @@ describe('runCoverage — fail-closed gate', () => {
     const s = spy();
     expect(runCoverage(root)).toBe(1);
     expect(text(s.err)).toMatch(/not valid coverage data/i);
+  });
+
+  it('an artifact that measured no files → FAIL, never the vacuous 100% an empty total scores', () => {
+    const root = makeRoot();
+    writeConfig(root, { coverage: { statements: 80 } });
+    writeCoverage(root, {});
+    const s = spy();
+    expect(runCoverage(root)).toBe(1);
+    expect(text(s.err)).toMatch(/measured no files/);
+    expect(text(s.err)).toContain(
+      `read ${realpathSync(join(root, 'coverage', 'coverage-final.json'))}`,
+    );
+    expect(text(s.err)).toContain('GUARD_COVERAGE_OK=1');
+    // A package with nothing to measure needs the permanent opt-out, not only the one-run bypass.
+    expect(text(s.err)).toContain('"coverage": false in guard.config.json');
+    expect(text(s.log)).not.toMatch(/passed/i);
+  });
+
+  it('an empty artifact fails even with no thresholds — presence alone is not enough', () => {
+    const root = makeRoot();
+    writeCoverage(root, {});
+    const s = spy();
+    expect(runCoverage(root)).toBe(1);
+    expect(text(s.err)).toMatch(/measured no files/);
   });
 
   it('parseable but malformed shape (garbage entry) → FAIL, never a silent 100% pass', () => {

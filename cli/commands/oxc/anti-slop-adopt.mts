@@ -63,7 +63,12 @@ function lockableBase(baseRef: string, baseRefName: string | null): boolean {
   return baseRefName !== null || /^(?:HEAD(?:[~^]\d*)*|[0-9a-f]{40}|[0-9a-f]{64})$/u.test(baseRef);
 }
 
-export function adoptRenames(cwd: string, baseRef = 'HEAD', requireRenames = false): number {
+export function adoptRenames(
+  cwd: string,
+  overlay: boolean,
+  baseRef = 'HEAD',
+  requireRenames = false,
+): number {
   if (!capabilityReady(cwd)) return 2;
   return withLock(join(cwd, ANTI_SLOP_BASELINE_LOCK_REL), () => {
     const baseline = baselineOrExplain(cwd);
@@ -97,7 +102,7 @@ export function adoptRenames(cwd: string, baseRef = 'HEAD', requireRenames = fal
       () => {
         writeBaseline(cwd, next);
         console.log(
-          `anti-slop: adopted ${count(affected)} finding(s) across ${new Set(affected.map((entry) => entry.file)).size} staged rename(s); stage ${ANTI_SLOP_BASELINE_REL}`,
+          `anti-slop: adopted ${count(affected)} finding(s) across ${new Set(affected.map((entry) => entry.file)).size} staged rename(s)${overlay ? '' : `; stage ${ANTI_SLOP_BASELINE_REL}`}`,
         );
         return 0;
       },
@@ -136,10 +141,9 @@ function planRelocations(
       if (snapshot.skipped) {
         return { relocated: [], bound, staged: snapshot.changedFiles.length > 0 };
       }
-      const pin =
-        snapshot.base && snapshot.baseTree
-          ? mkdtempSync(join(tmpdir(), 'devkit-anti-slop-capability-'))
-          : null;
+      const pin = snapshot.baseTree
+        ? mkdtempSync(join(tmpdir(), 'devkit-anti-slop-capability-'))
+        : null;
       try {
         const groups = collectAntiSlopGroups(snapshot.cwd, snapshot.paths, pin ?? undefined);
         const scope = resolveAntiSlopScope(snapshot.cwd, snapshot.paths);

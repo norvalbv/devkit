@@ -9,6 +9,7 @@ import {
   realpathSync,
   rmSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -54,10 +55,14 @@ function seedRepository(): {
     mkdirSync(dirname(destination), { recursive: true });
     copyFileSync(join(REPO_ROOT, relativePath), destination);
   }
-  // A link, not a copy: node resolves the overlay-home resolver's imports from the real checkout.
-  const overlayRoot = 'cli/lib/husky/overlay/overlay-root.mts';
-  mkdirSync(dirname(join(root, overlayRoot)), { recursive: true });
-  symlinkSync(join(REPO_ROOT, overlayRoot), join(root, overlayRoot));
+  // Links, not copies: node resolves each module's imports from the real checkout.
+  for (const linked of [
+    'cli/lib/husky/overlay/overlay-root.mts',
+    'cli/lib/husky/pre-push/failing-test-files.mts',
+  ]) {
+    mkdirSync(dirname(join(root, linked)), { recursive: true });
+    symlinkSync(join(REPO_ROOT, linked), join(root, linked));
+  }
   git(root, 'add', 'package.json', 'tracked.mts', 'cli');
   git(root, 'commit', '-qm', 'seed');
   git(root, 'tag', '-a', 'v1.0.0', '-m', 'fixture tag');
@@ -430,5 +435,190 @@ describe('pre-push failure attribution', () => {
     expect(result.status).not.toBe(0);
     expect(result.stderr).not.toContain('pre-date your push');
     expect(tagOid).toBeTruthy();
+  });
+});
+
+/** Write a vitest results cache into the fixture, `ageSeconds` old (negative = newer than the push). */
+function seedResultsCache(root: string, entries: [string, boolean][], ageSeconds = -60): string {
+  const cacheDir = join(root, 'node_modules/.vite/vitest/fixture');
+  mkdirSync(cacheDir, { recursive: true });
+  const path = join(cacheDir, 'results.json');
+  const results = entries.map(([key, failed]) => [key, { duration: 1, failed }]);
+  writeFileSync(path, JSON.stringify({ version: 'fixture', results }));
+  const stamp = Date.now() / 1000 - ageSeconds;
+  utimesSync(path, stamp, stamp);
+  return path;
+}
+
+/** A fixture whose suite fails, with `a.test.mts` and `b.test.mts` present on disk. */
+function seedFailingSuite() {
+  const seeded = seedRepository();
+  for (const name of ['a.test.mts', 'b.test.mts']) writeFileSync(join(seeded.root, name), '');
+  writeFileSync(join(seeded.root, 'fail-tests'), '');
+  const head = git(seeded.root, 'rev-parse', 'HEAD');
+  const branch = git(seeded.root, 'symbolic-ref', '--short', 'HEAD');
+  return {
+    ...seeded,
+    input: `refs/heads/${branch} ${head} refs/heads/${branch} ${ZERO_OID}\n`,
+    log: join(seeded.root, `.devkit/last-pre-push-${branch}.log`),
+  };
+}
+
+describe('pre-push failing-file list', () => {
+  it('persists the failing files and names them and the log as its last lines', () => {
+    const { fakeBin, input, log, logPath, root } = seedFailingSuite();
+    seedResultsCache(root, [
+      ['parallel:b.test.mts', true],
+      ['parallel:a.test.mts', true],
+      ['git-integration:a.test.mts', true],
+      ['parallel:tracked.mts', false],
+    ]);
+    const result = runPrePush(root, fakeBin, logPath, input);
+
+    expect(result.status).toBe(7);
+    expect(result.stderr.trimEnd().split('\n').slice(-4)).toEqual([
+      "Failing test files (per vitest's results cache):",
+      '  a.test.mts',
+      '  b.test.mts',
+      `Full list: ${realpathSync(log)}`,
+    ]);
+    const persisted = readFileSync(log, 'utf8');
+    expect(persisted).toContain(`(exit 7) at ${git(root, 'rev-parse', 'HEAD')}`);
+    expect(persisted.trimEnd().split('\n').slice(-2)).toEqual(['a.test.mts', 'b.test.mts']);
+  });
+
+  it('ignores entries this suite cannot have written: an unnamed project or a deleted file', () => {
+    const { fakeBin, input, log, logPath, root } = seedFailingSuite();
+    seedResultsCache(root, [
+      [':b.test.mts', true],
+      ['parallel:gone.test.mts', true],
+      ['parallel:a.test.mts', true],
+    ]);
+    const result = runPrePush(root, fakeBin, logPath, input);
+
+    expect(result.stderr).toContain('  a.test.mts');
+    expect(result.stderr).not.toContain('b.test.mts');
+    expect(readFileSync(log, 'utf8')).not.toContain('gone.test.mts');
+  });
+
+  it('says nothing from a cache older than the push, and drops the previous attempt’s log', () => {
+    const { fakeBin, input, log, logPath, root } = seedFailingSuite();
+    seedResultsCache(root, [['parallel:a.test.mts', true]], 3600);
+    mkdirSync(dirname(log), { recursive: true });
+    writeFileSync(log, 'an earlier attempt\n');
+    const result = runPrePush(root, fakeBin, logPath, input);
+
+    expect(result.status).toBe(7);
+    expect(result.stderr).not.toContain('Failing test files');
+    expect(existsSync(log)).toBe(false);
+  });
+
+  it('says nothing when the cache is unreadable', () => {
+    const { fakeBin, input, log, logPath, root } = seedFailingSuite();
+    const cache = seedResultsCache(root, []);
+    writeFileSync(cache, '{"results":[["parallel:a.test.mts",{"fai');
+    const result = runPrePush(root, fakeBin, logPath, input);
+
+    expect(result.status).toBe(7);
+    expect(result.stderr).not.toContain('Failing test files');
+    expect(existsSync(log)).toBe(false);
+  });
+
+  it('says nothing when node_modules is a link to an install other checkouts share', () => {
+    const { fakeBin, input, log, logPath, root } = seedFailingSuite();
+    seedResultsCache(root, [['parallel:a.test.mts', true]]);
+    const shared = join(root, 'shared-install');
+    execFileSync('mv', [join(root, 'node_modules'), shared]);
+    symlinkSync(shared, join(root, 'node_modules'));
+    const result = runPrePush(root, fakeBin, logPath, input);
+
+    expect(result.status).toBe(7);
+    expect(result.stderr).not.toContain('Failing test files');
+    expect(existsSync(log)).toBe(false);
+  });
+
+  it('says nothing after a typecheck failure or when turned off', () => {
+    const { fakeBin, input, log, logPath, root } = seedFailingSuite();
+    seedResultsCache(root, [['parallel:a.test.mts', true]]);
+    const off = runPrePush(root, fakeBin, logPath, input, { DEVKIT_PREPUSH_ATTRIBUTION: '0' });
+    // A typecheck block has no list of its own, so an earlier attempt's must not outlive it.
+    mkdirSync(dirname(log), { recursive: true });
+    writeFileSync(log, 'an earlier attempt\n');
+    writeFileSync(join(root, 'fail-typecheck'), '');
+    const typecheck = runPrePush(root, fakeBin, logPath, input);
+
+    for (const result of [off, typecheck]) {
+      expect(result.status).toBe(7);
+      expect(result.stderr).not.toContain('Failing test files');
+    }
+    expect(existsSync(log)).toBe(false);
+  });
+
+  // A file moved between projects keeps its old key forever; which verdict is current is unknowable.
+  it('does not name a file whose projects disagree about it', () => {
+    const { fakeBin, input, logPath, root } = seedFailingSuite();
+    seedResultsCache(root, [
+      ['parallel:a.test.mts', true],
+      ['git-integration:a.test.mts', false],
+      ['parallel:b.test.mts', true],
+    ]);
+    const result = runPrePush(root, fakeBin, logPath, input);
+
+    expect(result.stderr).toContain('  b.test.mts');
+    expect(result.stderr).not.toContain('a.test.mts');
+  });
+
+  it('prints at most twenty names and keeps the whole list in the log', () => {
+    const { fakeBin, input, log, logPath, root } = seedFailingSuite();
+    const names = Array.from({ length: 21 }, (_, i) => `f${String(i).padStart(2, '0')}.test.mts`);
+    for (const name of names) writeFileSync(join(root, name), '');
+    seedResultsCache(
+      root,
+      names.map((name) => [`parallel:${name}`, true]),
+    );
+    const result = runPrePush(root, fakeBin, logPath, input);
+
+    expect(result.status).toBe(7);
+    expect(result.stderr).toContain('  f19.test.mts\n  ... and 1 more\nFull list: ');
+    expect(result.stderr).not.toContain('f20.test.mts');
+    expect(readFileSync(log, 'utf8')).toContain('f20.test.mts');
+  });
+
+  it('keeps the verdict and says nothing when the reader cannot run', () => {
+    const { fakeBin, input, log, logPath, root } = seedFailingSuite();
+    seedResultsCache(root, [['parallel:a.test.mts', true]]);
+    rmSync(join(root, 'cli/lib/husky/pre-push/failing-test-files.mts'));
+    const result = runPrePush(root, fakeBin, logPath, input);
+
+    expect(result.status).toBe(7);
+    expect(result.stderr).toBe('');
+    expect(existsSync(log)).toBe(false);
+  });
+
+  it('leaves a green push untouched even when the cache holds old failures', () => {
+    const { fakeBin, input, log, logPath, root } = seedFailingSuite();
+    rmSync(join(root, 'fail-tests'));
+    seedResultsCache(root, [['parallel:a.test.mts', true]]);
+    const result = runPrePush(root, fakeBin, logPath, input);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stderr).toBe('');
+    expect(existsSync(log)).toBe(false);
+    expect(readLog(logPath)).toHaveLength(2);
+  });
+
+  it('names the log after a slashed branch, or the short sha on a detached HEAD', () => {
+    const { fakeBin, logPath, root } = seedFailingSuite();
+    seedResultsCache(root, [['parallel:a.test.mts', true]]);
+    const head = git(root, 'rev-parse', 'HEAD');
+    const input = `refs/heads/x ${head} refs/heads/x ${ZERO_OID}\n`;
+    git(root, 'checkout', '-q', '-b', 'team/topic');
+    runPrePush(root, fakeBin, logPath, input);
+    git(root, 'checkout', '-q', '--detach');
+    runPrePush(root, fakeBin, logPath, input);
+
+    expect(existsSync(join(root, '.devkit/last-pre-push-team-topic.log'))).toBe(true);
+    const short = git(root, 'rev-parse', '--short', 'HEAD');
+    expect(existsSync(join(root, `.devkit/last-pre-push-${short}.log`))).toBe(true);
   });
 });

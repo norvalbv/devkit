@@ -47,7 +47,7 @@ devkit command.
 | You're in a **linked worktree, already on a branch**, and need a PR | `devkit ship <new-branch> "<title>" --base <base> -- <paths>` | you don't need — and must not create — another branch: `ship` makes the PR branch itself. An unrelated existing branch is rejected; only the exact local commit with a gate receipt from a prior post-commit failure can resume. |
 | You already ran `git switch -c <branch>` and now want to ship **that same branch** — ship says it *is checked out in THIS worktree* | `git branch -m <branch> <the-name-ship-prints>`, then re-run ship **with `--base <branch-on-origin>`**. Ship prints both commands, filled in — run them verbatim | `ship` CREATES the branch, so it cannot already be checked out here. It tells you to RENAME, never to delete: a rename cannot lose a commit however the refs change under it, and it carries this worktree onto the new name without touching a file (a `git switch` can refuse when your uncommitted work collides with the base). HEAD then sits on a branch origin does not have, which is why the re-run must name `--base`. Never `git worktree remove --force` the tree you are running in. Drop the renamed branch once the PR is open |
 | Ship refuses with **`base '<x>' is not on origin`** | `devkit ship <branch> "<title>" --base <branch-on-origin> -- <paths>` | the PR base defaults to the branch this checkout is on, and a provisioned worktree's scratch branch exists only locally — GitHub cannot open a PR against it. Ship now refuses **before** it pushes, so nothing is left on origin to clean up |
-| Ship reports the branch **already exists on origin** (an open PR uses it) | `devkit ship <branch> "<title>" --pr -- <paths>` | picking a new name orphans the existing PR; `--pr` fast-forwards a new commit onto that branch instead |
+| Ship reports the branch **already exists on origin** (an open PR uses it) | `devkit ship <branch> "<title>" --pr -- <paths>` | picking a new name orphans the existing PR; `--pr` fast-forwards a new commit onto that branch instead. A path the PR branch changed since your last ship (an Update-branch merge, a review suggestion) is merged with your copy, or refused naming the commit when the same lines changed — fetch the branch and merge before re-running |
 | The work is **not ready for review** — you want a visible PR running CI, but no reviewers pinged yet | `devkit ship <branch> "<title>" --draft -- <paths>` | ship opens a **ready-for-review** PR by default, which requests review the moment it lands; `--draft` opens a draft instead. The bit is recorded with the invocation, so a gate-blocked draft ship still opens a draft under `--resume`. To make **every guard-suggested** ship in a repo a draft, set `.devkit/config.json` → `{ "ship": { "command": "devkit ship", "extraArgs": ["--draft"] } }` — the `command` key is required or `extraArgs` is ignored, and the guard drops `--draft` from its `--pr` suggestions, where it cannot apply |
 | A **draft** PR is finished and you are pushing the final commit | `devkit ship <branch> "<title>" --pr --ready -- <paths>` | one command instead of a re-push followed by a hand-run `gh pr ready`. The flip runs **last**, so a gh failure never costs the pushed commit — it names the exact `gh pr ready` to re-run. `--ready` requires `--pr` (a new ship is ready already); to go the other way, `gh pr ready --undo <branch>` |
 | You need the PR's **CI verdict**, not just its URL — an end-to-end status before handing off | `devkit ship <branch> "<title>" --wait-ci -- <paths>` (add `--wait-ci-timeout <60..7200>`, default 900) | ship otherwise returns while the checks are still pending. The wait runs **last**, after every artifact is durable, so it cannot cost the ship: it prints progress only when the tally changes plus a liveness line each minute, then one verdict line on stderr — `ship: ci-outcome=<passed\|failed\|cancelled\|no-checks\|timed-out\|unavailable\|not-run> pr=<n> …` (`not-run` when the wait was requested but could not run — a failed `--ready` flip, an unresolvable PR number, or `SHIP_DRY_RUN`; it always carries a `reason=`). Grep that line; the verdict **never** reaches the exit code, so a red PR is not a failed ship and must not be retried with `--resume`. Valid with `--pr` too. **Not** replayed by `--resume` — re-pass it on a retry. For a one-off check without waiting, `gh pr checks <n> --json bucket,name,state,link` is the quiet one-shot (`gh run watch` needs a run id and redraws) |
@@ -97,6 +97,10 @@ devkit command.
 - **`branch already exists` → ship to a different name; on ORIGIN → `--pr`.** Do not detach HEAD,
   delete the branch, or switch to the base branch to free the name. In a linked worktree all three
   fail (`already used by worktree at …`) and none of them is necessary.
+- **`PR #N for origin/<branch> is MERGED` (or CLOSED) → ship a new PR; never re-push that branch.**
+  A push onto a merged PR's branch never reaches its base, so `--pr` refuses before gates and again
+  before the push. Run the two printed commands: merge `origin/<base>` into this checkout, then
+  `devkit ship <new-branch> … --base <base>`.
 - **A `--pr` re-ship changes the existing PR description only with explicit `--body` or
   `--body-file`.** Omitting both preserves it; piped stdin remains commit-only. Use `--body ""` to
   clear the description deliberately.
@@ -184,6 +188,13 @@ devkit command.
   does nothing** under ship (it reads that file from the committed tree, not your working tree), and
   re-running the full coverage suite to manufacture the artifact can take tens of minutes and still
   produce nothing if the base's tests are already failing — don't idle on it.
+- **Stopping a coverage run: stop your own, never match on `devkit coverage-run`.** That command
+  line is identical in every worktree, so a pattern kill on it stops other sessions' runs too. Stop
+  the background job you started — the only handle that exists while a package-manager-launched run
+  is still queued. Otherwise, from the directory the run was started in:
+  `pkill -TERM -f "reportsDirectory=$(pwd -P)/coverage/.runs/"`. No match means nothing of this
+  directory's is running; do not widen the pattern. A stopped run clears the coverage artifact, so
+  the gate blocks until a run completes or the bypass above is exported.
 - **"Coverage of the new diff" means the lines you ADDED — measure it with `devkit coverage-diff`.**
   A whole-file percentage on a large existing file mostly measures code your change never touched,
   so 40% there can be 80%+ of what you added. Run `devkit coverage-run` first; the report names the

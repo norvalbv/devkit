@@ -28,6 +28,7 @@ import {
   sourceMatchers,
 } from '../config.mts';
 import { exitGate } from '../deterministic/reason.mts';
+import { overlayInstall } from '../overlay-mode.mts';
 import type { GrammarNode, TreeSpec } from '../structure/compile.mts';
 import { childGrammarNode } from '../structure/walk.mts';
 import {
@@ -321,6 +322,7 @@ function runCli(cmd: string) {
     // Every grandfathered folder healed (baseline had over-cap dirs, none remain) → self-delete the
     // stale baseline in a real commit so it doesn't linger.
     if (
+      !overlayInstall(root) &&
       hasBaseline &&
       Object.keys(frozen.dirs).length > 0 &&
       Object.keys(over).length === 0 &&

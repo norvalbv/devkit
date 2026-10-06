@@ -13,8 +13,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const fallowSpies = vi.hoisted(() => ({
   installFallow: vi.fn(() => ({ ok: true, method: 'bun', message: 'installed fallow' })),
   ensureFallowGitignore: vi.fn(),
-  wireFallowHooks: vi.fn(() => ({ ok: true, log: ['wired'] })),
-  saveFallowBaselines: vi.fn(() => ({ ok: true })),
 }));
 vi.mock('../lib/install/install-fallow.mts', () => fallowSpies);
 
@@ -772,8 +770,9 @@ describe('structure is stack-generic (react-app un-gated)', () => {
 });
 
 describe('fallow apply step (mocked installer — never shells out)', () => {
-  it('selection.fallow drives install → gitignore → gate in order + records it', async () => {
+  it('selection.fallow installs fallow, and says no hook gates commits when husky is off', async () => {
     const root = tmpRepo();
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     await applyInit(root, {
       stack: 'generic',
       selection: {
@@ -789,13 +788,31 @@ describe('fallow apply step (mocked installer — never shells out)', () => {
     });
     expect(fallowSpies.installFallow).toHaveBeenCalledTimes(1);
     expect(fallowSpies.ensureFallowGitignore).toHaveBeenCalledTimes(1);
-    expect(fallowSpies.wireFallowHooks).toHaveBeenCalledTimes(1);
-    // install runs before the gate is wired.
-    expect(fallowSpies.installFallow.mock.invocationCallOrder[0]).toBeLessThan(
-      fallowSpies.wireFallowHooks.mock.invocationCallOrder[0],
-    );
+    expect(log.mock.calls.flat().join('\n')).toContain('fallow gate not wired');
+    expect(existsSync(join(root, 'fallow-baselines'))).toBe(false);
     expect(config(root).components.fallow).toBe(true);
   });
+
+  // fallow's git installer refuses an existing pre-commit and prints a merge-base paste block, so
+  // the gate has to live in devkit's own block: scoped to the index, in both tracked modes.
+  it.each([false, true])(
+    'writes the staged fallow gate into an EXISTING hook (standalone: %s)',
+    async (standalone) => {
+      const root = tmpRepo();
+      mkdirSync(join(root, '.husky'), { recursive: true });
+      writeFileSync(join(root, '.husky', 'pre-commit'), '#!/bin/sh\necho consumer-own\n');
+      await applyInit(root, {
+        stack: 'generic',
+        standalone,
+        selection: { ...defaultSelection(), skills: false, fallow: true },
+        devkitRef: 'v0.3.0',
+      });
+      const hook = readFileSync(join(root, '.husky', 'pre-commit'), 'utf8');
+      expect(hook).toContain('fallow audit --diff-stdin');
+      expect(hook).not.toContain('--base');
+      expect(hook).toContain('echo consumer-own');
+    },
+  );
 
   it('does NOT run any fallow step when fallow is unselected, records fallow:false', async () => {
     const root = tmpRepo();
@@ -805,7 +822,7 @@ describe('fallow apply step (mocked installer — never shells out)', () => {
       devkitRef: 'v0.3.0',
     });
     expect(fallowSpies.installFallow).not.toHaveBeenCalled();
-    expect(fallowSpies.wireFallowHooks).not.toHaveBeenCalled();
+    expect(readFileSync(join(root, '.husky', 'pre-commit'), 'utf8')).not.toContain('fallow');
     expect(config(root).components.fallow).toBe(false);
   });
 });

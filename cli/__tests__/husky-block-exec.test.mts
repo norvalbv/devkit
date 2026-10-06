@@ -1080,3 +1080,77 @@ describe('overlay lint blocks name the ship --dry-gates rehearsal (sc-2695)', ()
     expect(`${r.stdout}${r.stderr}`).toContain(`     ${raw}\n`);
   });
 });
+
+// Package and standalone hooks carry the staged audit; it blocks only on a finding.
+describe.each(['package', 'standalone'])('staged fallow gate (%s hook)', (builder) => {
+  const SEL = { biome: false, guards: ['review'], fallow: true };
+  const run = (env = {}, opts = {}) =>
+    runHook(env, SEL, { builder, fallow: true, staged: true, ...opts });
+
+  it('blocks on a fail verdict (exit 1) before the AI guards run', () => {
+    const r = run({ FALLOW_RC: '1' });
+    expect(r.status).toBe(1);
+    expect(r.calls).toContain('fallow audit --diff-stdin');
+    expect(r.calls).not.toContain('guard-review');
+  });
+
+  it('does not block when fallow errors (exit 2: no detectable base branch, bad config)', () => {
+    const r = run({ FALLOW_RC: '2' });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain('fallow exited 2 without a verdict');
+    expect(r.calls).toContain('guard-review');
+  });
+
+  it('skips the audit when nothing is staged', () => {
+    const r = run({ FALLOW_RC: '1' }, { staged: 'empty' });
+    expect(r.status).toBe(0);
+    expect(r.calls).not.toContain('fallow');
+  });
+
+  it("skips the audit above fallow's 10 MiB stdin cap, where it would report the whole project", () => {
+    const r = run({ FALLOW_RC: '1' }, { staged: 'huge' });
+    expect(r.status).toBe(0);
+    expect(r.calls).not.toContain('fallow');
+    expect(r.stdout).toContain('audit skipped');
+  });
+
+  // fallow's own cap message: "--diff-stdin is at least 10485761 bytes (cap 10485760)".
+  it('audits a diff of exactly 10485760 bytes and skips one byte more', () => {
+    expect(run({ FALLOW_RC: '1' }, { staged: 10485760 }).calls).toContain('fallow audit');
+    expect(run({ FALLOW_RC: '1' }, { staged: 10485761 }).calls).not.toContain('fallow');
+  });
+
+  it('skips the audit in review mode and when fallow is not installed', () => {
+    expect(run({ FALLOW_RC: '1', DEVKIT_RUN_MODE: 'review' }).calls).not.toContain('fallow');
+    const absent = run({ FALLOW_RC: '1' }, { fallow: false });
+    expect(absent.status).toBe(0);
+    expect(absent.calls).toContain('guard-review');
+  });
+
+  // git exports GIT_INDEX_FILE relative to the repo top; the package subshell must still read it.
+  it.each([
+    {},
+    { GIT_INDEX_FILE: '.git/index' },
+    { GIT_DIR: '.git', GIT_INDEX_FILE: '.git/index' },
+  ])(
+    'audits the commit index from a monorepo package subshell and propagates its block (%o)',
+    (env) => {
+      const r = run({ FALLOW_RC: '1', ...env }, { pkgRel: 'packages/app' });
+      expect(r.status).toBe(1);
+      expect(r.calls).toContain('fallow audit --diff-stdin');
+      expect(r.calls).not.toContain('guard-review');
+    },
+  );
+
+  it('skips, never blocks, when the staged diff cannot be captured', () => {
+    const r = run({ FALLOW_RC: '1', GIT_INDEX_FILE: tmpdir() }); // an index path that is a directory
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain('could not capture the staged diff');
+    expect(r.calls).not.toContain('fallow');
+  });
+
+  it.skipIf(!hasDash)('runs under dash', () => {
+    expect(run({ FALLOW_RC: '2' }, { shell: '/bin/dash' }).status).toBe(0);
+    expect(run({ FALLOW_RC: '1' }, { shell: '/bin/dash' }).status).toBe(1);
+  });
+});

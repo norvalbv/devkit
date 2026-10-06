@@ -1,8 +1,17 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import type { ResolvedConfig, Vitest } from 'vitest/node';
 import {
   type ClearMarker,
   formatClearMarker,
@@ -19,8 +28,10 @@ import {
   RERUN_FLOOR_MS,
   raisedTimeoutMs,
   TIMEOUT_FINGERPRINT,
+  type UnhandledError,
   writeClearMarker,
 } from '../failures.mts';
+import UnhandledReporter, { UNHANDLED_NAME } from '../unhandled-reporter.mts';
 
 let roots: string[] = [];
 const makeRoot = () => {
@@ -773,5 +784,185 @@ describe('what the re-run says', () => {
 
   it('says nothing when there was nothing to rescue', () => {
     expect(formatRerunRescue(null, '/repo', 25_000)).toEqual([]);
+  });
+});
+
+describe('a run that exits non-zero with no failed test', () => {
+  const green = [
+    {
+      name: '/repo/a.test.ts',
+      status: 'passed',
+      assertionResults: [{ fullName: 'a', status: 'passed', failureMessages: [] }],
+    },
+  ];
+  const unhandledFile = (root: string, entries: UnhandledError[]) =>
+    writeFileSync(join(root, UNHANDLED_NAME), JSON.stringify(entries));
+
+  it('reads the reporter errors once each, as vitest projects repeat them', () => {
+    const root = makeRoot();
+    const boom = { file: '/repo/late.test.ts', message: 'Error: boom' };
+    unhandledFile(root, [boom, boom, { file: null, message: 'Error: no path' }]);
+
+    expect(readDiagnosis(results(root, green), 1)?.unhandled).toEqual([
+      boom,
+      { file: null, message: 'Error: no path' },
+    ]);
+  });
+
+  it('falls back to a generic cause when the reporter wrote nothing', () => {
+    const root = makeRoot();
+    const unhandled = readDiagnosis(results(root, green), 1)?.unhandled;
+
+    expect(unhandled).toHaveLength(1);
+    expect(unhandled?.[0]).toMatchObject({ file: null });
+    expect(unhandled?.[0]?.message).toMatch(/vitest exited 1 with no failed test/);
+  });
+
+  // `vitest run <filter>` matching nothing exits 1 with an empty, green report — no error, no threshold.
+  it('does not blame an unhandled error when no test file matched', () => {
+    const root = makeRoot();
+    const [entry] = readDiagnosis(results(root, []), 1)?.unhandled ?? [];
+
+    expect(entry?.message).toMatch(/no test files matched/);
+  });
+
+  it('says nothing about unhandled errors on a green exit or when a test failed', () => {
+    const root = makeRoot();
+    unhandledFile(root, [{ file: '/repo/late.test.ts', message: 'Error: boom' }]);
+    const failing = [{ name: '/repo/a.test.ts', status: 'failed', assertionResults: [] }];
+
+    expect(readDiagnosis(results(root, green), 0)?.unhandled).toBeUndefined();
+    expect(readDiagnosis(results(root, failing), 1)?.unhandled).toBeUndefined();
+  });
+
+  it('prints the cause, whether it is staged, and why the artifact went', () => {
+    const lines = formatDiagnosis(
+      {
+        failedFiles: [],
+        flaky: [],
+        unhandled: [
+          { file: '/repo/late.test.ts', message: 'Error: boom' },
+          { file: null, message: 'Error: no path' },
+        ],
+      },
+      '/repo',
+      [],
+    );
+
+    expect(lines).toEqual([
+      '🚫 vitest exited non-zero, but no test failed — the run ended on:',
+      '     late.test.ts — Error: boom',
+      '     file unknown — Error: no path',
+      '   None of them are in your staged diff.',
+      '   The coverage artifact was discarded: devkit publishes only from a run vitest calls green.',
+    ]);
+  });
+
+  // A 17k-test suite with one leaking import can raise the same teardown error from many files.
+  it('caps a flood of errors and counts the rest', () => {
+    const unhandled = Array.from({ length: 11 }, (_, i) => ({ file: null, message: `E${i}` }));
+    const lines = formatDiagnosis({ failedFiles: [], flaky: [], unhandled }, '/repo', null);
+
+    expect(lines.filter((l) => l.includes('file unknown'))).toHaveLength(10);
+    expect(lines).toContain('     …and 1 more');
+  });
+
+  it('round-trips the cause through the marker and names it at the gate', () => {
+    const root = realpathSync(makeRoot());
+    const unhandledErrors = [{ file: join(root, 'late.test.ts'), message: 'Error: boom' }];
+    writeClearMarker(root, {
+      clearedAt: new Date().toISOString(),
+      previousMtime: null,
+      head: null,
+      failedFiles: [],
+      unhandledErrors,
+    });
+
+    const marker = readClearMarker(root);
+    if (!marker) throw new Error('the marker written above must read back');
+    expect(marker.unhandledErrors).toEqual(unhandledErrors);
+    expect(formatClearMarker(marker, root).slice(-2)).toEqual([
+      '   No test failed; the run ended on:',
+      '     late.test.ts — Error: boom',
+    ]);
+  });
+
+  it('reads a marker written before the field existed', () => {
+    const root = makeRoot();
+    writeFileSync(
+      join(root, '.last-clear.json'),
+      JSON.stringify({ clearedAt: new Date().toISOString(), failedFiles: [] }),
+    );
+
+    expect(readClearMarker(root)?.unhandledErrors).toBeUndefined();
+  });
+});
+
+describe('a marker whose unhandledErrors we did not write', () => {
+  // coverage/ is shared and symlinked into ship worktrees; a hand-edited entry must not crash the gate
+  // message that explains the block.
+  it('keeps only well-formed entries', () => {
+    const root = makeRoot();
+    const good = { file: null, message: 'Error: boom' };
+    writeFileSync(
+      join(root, '.last-clear.json'),
+      JSON.stringify({
+        clearedAt: '2026-10-06T09:00:00.000Z',
+        failedFiles: [],
+        unhandledErrors: [null, 'Error: bare string', { file: 3, message: 'x' }, good],
+      }),
+    );
+
+    const marker = readClearMarker(root);
+    expect(marker?.unhandledErrors).toEqual([good]);
+  });
+});
+
+describe('the reporter devkit injects into the consumer vitest', () => {
+  const vitestWith = (outputFile: ResolvedConfig['outputFile']) =>
+    // SAFETY: onInit reads only config.outputFile; the rest of Vitest is never touched.
+    ({ config: { outputFile } }) as Vitest;
+  const errors = (...list: Parameters<UnhandledReporter['onTestRunEnd']>[1][number][]) => list;
+
+  it('writes the file and first message line of each error beside the json report', () => {
+    const root = makeRoot();
+    const reporter = new UnhandledReporter();
+    reporter.onInit(vitestWith({ json: join(root, 'results.json') }));
+    reporter.onTestRunEnd(
+      [],
+      errors(
+        {
+          name: 'EnvironmentTeardownError',
+          message: 'Cannot load x\n  at y',
+          VITEST_TEST_PATH: '/r/a.test.ts',
+        },
+        { message: 'no name, no path' },
+      ),
+    );
+
+    expect(JSON.parse(readFileSync(join(root, UNHANDLED_NAME), 'utf8'))).toEqual([
+      { file: '/r/a.test.ts', message: 'EnvironmentTeardownError: Cannot load x' },
+      { file: null, message: 'Error: no name, no path' },
+    ]);
+  });
+
+  // Loaded into the consumer's run: a throw here would turn their green run red.
+  it.each([
+    ['a string outputFile', 'junit.xml'],
+    ['no outputFile', undefined],
+    ['an output directory that does not exist', { json: '/nonexistent-devkit-dir/results.json' }],
+  ])('neither throws nor writes with %s', (_label, outputFile) => {
+    const reporter = new UnhandledReporter();
+    reporter.onInit(vitestWith(outputFile));
+    expect(() => reporter.onTestRunEnd([], errors({ message: 'boom' }))).not.toThrow();
+  });
+
+  it('writes nothing for a run with no unhandled error', () => {
+    const root = makeRoot();
+    const reporter = new UnhandledReporter();
+    reporter.onInit(vitestWith({ json: join(root, 'results.json') }));
+    reporter.onTestRunEnd([], errors());
+
+    expect(existsSync(join(root, UNHANDLED_NAME))).toBe(false);
   });
 });

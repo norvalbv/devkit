@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { failLine } from '../../../gate-engine/deterministic/reason.mts';
 import { withLock } from '../../lib/atomic-write.mts';
 import {
-  overlayBaseRefusal,
+  OVERLAY_BASE_REFUSAL,
   reportOverlayContract,
 } from '../../lib/install/anti-slop/overlay/contract.mts';
 import {
@@ -93,8 +93,8 @@ gate would reject against HEAD, so a new finding is fixed, not adopted. Prune re
 new error-severity findings exist.
 
 In an OVERLAY install the baseline is per-clone and git-ignored, so no committed tree carries one to
-compare against: --base and adopt-renames are unavailable there, and adopt-activation is how a devkit
-release's newly activated rules are adopted without re-snapshotting unrelated debt.`,
+compare against: --base is unavailable there, adopt-renames re-keys staged renames only, and
+adopt-activation adopts a devkit release's newly activated rules without re-snapshotting other debt.`,
 };
 
 /**
@@ -244,10 +244,9 @@ function check(
   };
   // The base comparison must judge the SAME capability the candidate was linted with; pinning it
   // inside that lint's own lock keeps a concurrent capability sync from swapping it underneath.
-  const pin =
-    envelope?.base && envelope.baseTree
-      ? mkdtempSync(join(tmpdir(), 'devkit-anti-slop-capability-'))
-      : null;
+  const pin = envelope?.baseTree
+    ? mkdtempSync(join(tmpdir(), 'devkit-anti-slop-capability-'))
+    : null;
   try {
     const envelopeArgs = envelope?.activatedRuleIds.size ? [] : args;
     const envelopeGroups = collectAntiSlopGroups(cwd, envelopeArgs, pin ?? undefined);
@@ -266,7 +265,10 @@ function check(
       baseRef,
       relocation,
     );
-    if (envelopeStatus !== 0) return envelopeStatus;
+    if (envelopeStatus !== 0) {
+      reportOverlayContract(cwd);
+      return envelopeStatus;
+    }
     const allowance = inheritedBaseAllowance(cwd, pin, selected, candidateGroups, envelope);
     const comparison = compareBaseline(allowance, candidateGroups);
     const vacated =
@@ -306,7 +308,7 @@ function check(
       ))
         console.error(line);
       // Reported on the FAIL path too: a committer reading a block needs the same standing about
-      // what this gate does not enforce — no committed base means no rename forgiveness.
+      // what this gate does not enforce — no committed base means no shrink-only ratchet.
       reportOverlayContract(cwd);
       return 1;
     }
@@ -434,9 +436,8 @@ export default function run(args: string[], cwd: string): number {
   // The manifest STAMP, not the repository marker: `.devkit/config.json` is absent from every review
   // projection, so a marker read drops the capability from the snapshot exactly where it exists.
   const overlay = resolveOxlintEntryConfig(cwd) !== null;
-  const refusal = overlay ? overlayBaseRefusal(operation, baseRef !== undefined) : null;
-  if (refusal) {
-    console.error(refusal);
+  if (overlay && baseRef !== undefined) {
+    console.error(OVERLAY_BASE_REFUSAL);
     return 2;
   }
   if (operation === 'create')
@@ -453,7 +454,7 @@ export default function run(args: string[], cwd: string): number {
       console.error('anti-slop adopt-renames accepts no flags or paths');
       return 2;
     }
-    return adoptRenames(cwd, baseRef ?? 'HEAD', baseRef !== undefined);
+    return adoptRenames(cwd, overlay, baseRef ?? 'HEAD', baseRef !== undefined);
   }
   if (operation === 'adopt-relocations') {
     if (paths.length > 0) {

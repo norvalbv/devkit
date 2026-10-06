@@ -14,8 +14,8 @@ afterEach(() => {
   for (const dir of created.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-// Runs the real runner with one shell function shadowing a builtin, and a gate that prints `marker`.
-function runWithShim(shim: string, gateSource: string) {
+// Runs the real runner with one shell function shadowing a builtin, and a node gate running `gateSource`.
+function runWithShim(shim: string, gateSource: string, timeoutSeconds = 30, label = 'gate') {
   const root = mkdtempSync(join(tmpdir(), 'devkit-capture-shim-'));
   created.push(root);
   const log = join(root, 'gate.log');
@@ -25,8 +25,8 @@ function runWithShim(shim: string, gateSource: string) {
     'shift 4',
     'gate_signal_handoff_init',
     shim,
-    'export DEVKIT_RUN_MODE=ship SHIP_COMMIT_TIMEOUT=30',
-    'if run_gates_with_capture "$root" "$root" gate "$log" "$root/progress.json" -- "$@"; then rc=0; else rc=$?; fi',
+    `export DEVKIT_RUN_MODE=ship SHIP_COMMIT_TIMEOUT=${timeoutSeconds}`,
+    `if run_gates_with_capture "$root" "$root" '${label}' "$log" "$root/progress.json" -- "$@"; then rc=0; else rc=$?; fi`,
     'printf "RUNNER_RC=%s\\n" "$rc"',
   ].join('\n');
   const result = testSpawnSync(
@@ -43,7 +43,7 @@ function runWithShim(shim: string, gateSource: string) {
       '-e',
       gateSource,
     ],
-    { encoding: 'utf8' },
+    { encoding: 'utf8', timeout: 60_000 },
   );
   return { ...result, log };
 }
@@ -74,5 +74,85 @@ describe('run_gates_with_capture — child liveness', () => {
     expect(result.stdout, result.stderr).toContain('RUNNER_RC=0');
     expect(result.stderr).not.toMatch(/WAITED_ON_LIVE/);
     expect(readFileSync(result.log, 'utf8')).toContain('slow gate output');
+  });
+});
+
+describe('run_gates_with_capture — timeout attribution', () => {
+  it('names a reaped leftover process, not the ceiling, when the gate exits 0 early', () => {
+    const result = runWithShim(
+      ':',
+      [
+        'console.log("🛰️ Sentry gate (commit-msg judge)...");',
+        "const { spawn } = require('node:child_process');",
+        "spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'inherit' }).unref();",
+      ].join('\n'),
+      30,
+      'ship',
+    );
+
+    expect(result.stdout, result.stderr).toContain('RUNNER_RC=124');
+    expect(result.stderr).toMatch(
+      /exited cleanly, .*reaped after \d+s \(exit 124\) — NOT the 30s ceiling/,
+    );
+    expect(result.stderr).toContain('Last stage started: 🛰️ Sentry gate (commit-msg judge)...');
+    expect(result.stderr).toContain('The commit may already have landed.');
+    expect(result.stderr).not.toMatch(/hit the 30s ceiling|export SHIP_COMMIT_TIMEOUT/);
+  });
+
+  it('keeps the ceiling banner when gate output imitates the reap notice', () => {
+    const result = runWithShim(
+      ':',
+      'console.log("gate-supervisor: the command exited 0 and was reaped"); setInterval(() => {}, 1000);',
+      1,
+    );
+
+    expect(result.stdout, result.stderr).toContain('RUNNER_RC=124');
+    expect(result.stderr).toContain('hit the 1s ceiling (exit 124)');
+    expect(result.stderr).not.toContain('NOT the 1s ceiling');
+  });
+
+  // The notice path must not reach the gate: a gate holding it could forge "not the ceiling".
+  it('keeps the ceiling banner when the gate looks for the reap notice path in its env', () => {
+    const result = runWithShim(
+      ':',
+      [
+        'const notice = process.env.DEVKIT_GATE_REAP_NOTICE_FILE;',
+        "if (notice) require('node:fs').writeFileSync(notice, '');",
+        'setInterval(() => {}, 1000);',
+      ].join('\n'),
+      1,
+    );
+
+    expect(result.stdout, result.stderr).toContain('RUNNER_RC=124');
+    expect(result.stderr).toContain('hit the 1s ceiling (exit 124)');
+  });
+
+  it('claims no landed commit for a reap outside ship', () => {
+    const result = runWithShim(
+      ':',
+      "require('node:child_process').spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'inherit' }).unref();",
+    );
+
+    expect(result.stdout, result.stderr).toContain('RUNNER_RC=124');
+    expect(result.stderr).toContain('NOT the 30s ceiling');
+    expect(result.stderr).not.toContain('commit may already have landed');
+  });
+
+  it('names the running stage header, not an earlier finding line, when the ceiling fires', () => {
+    const result = runWithShim(
+      ':',
+      [
+        'console.log("✗ 2 unused dependencies (4.98s)");',
+        'console.log("🛰️ Sentry gate (commit-msg judge)...");',
+        'setInterval(() => {}, 1000);',
+      ].join('\n'),
+      1,
+    );
+
+    expect(result.stdout, result.stderr).toContain('RUNNER_RC=124');
+    expect(result.stderr).toContain(
+      'hit the 1s ceiling (exit 124) DURING: 🛰️ Sentry gate (commit-msg judge)...',
+    );
+    expect(result.stderr).toContain('More room per attempt: export SHIP_COMMIT_TIMEOUT.');
   });
 });
