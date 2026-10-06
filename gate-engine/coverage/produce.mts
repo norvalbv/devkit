@@ -42,6 +42,7 @@ import {
   formatRerunNotice,
   formatRerunRescue,
   headSha,
+  markerCause,
   raisedTimeoutMs,
   readClearMarker,
   readDiagnosis,
@@ -50,6 +51,7 @@ import {
   RETRY_CONDITION,
   type RunDiagnosis,
   stagedFiles,
+  UNHANDLED_REPORTER,
   writeClearMarker,
 } from './failures.mts';
 import {
@@ -167,7 +169,7 @@ export function publishCoverage(
   runDir: string,
   cwd: string,
   before: number | null,
-  failedFiles: string[] = [],
+  diagnosis: RunDiagnosis | null = null,
   source: SourceSnapshot | null = null,
 ): PublishOutcome {
   const fresh = join(runDir, REPORT_NAME);
@@ -220,7 +222,7 @@ export function publishCoverage(
     clearedAt: new Date().toISOString(),
     previousMtime: before,
     head: headSha(cwd),
-    failedFiles,
+    ...markerCause(diagnosis),
   });
   rmSync(claimed, { force: true });
   return 'cleared';
@@ -284,8 +286,13 @@ export function buildInjectedArgs(
   }
   if (!ownsReporter(argv) && !process.env[NO_DIAGNOSIS_ENV]) {
     // `default` is kept so console output is byte-for-byte what the consumer already sees; the json
-    // reporter is additive and writes only into our run directory.
-    injected.push('--reporter=default', '--reporter=json', `--outputFile.json=${resultsFile}`);
+    // reporter is additive and writes only into our run directory; ours names unhandled errors beside it.
+    injected.push(
+      '--reporter=default',
+      '--reporter=json',
+      `--outputFile.json=${resultsFile}`,
+      `--reporter=${UNHANDLED_REPORTER}`,
+    );
   }
   return injected;
 }
@@ -389,12 +396,12 @@ async function runPass(
       ],
       cwd,
     );
-    diagnosis = readDiagnosis(resultsFile);
+    diagnosis = readDiagnosis(resultsFile, run.interrupted ? 0 : run.code);
     // A failed run's report (the consumer's `coverage.reportOnFailure`) is partial: never publish it.
     if (run.code !== 0) rmSync(join(runDir, REPORT_NAME), { force: true });
     const measured =
       source && markTouchedDuringRun(cwd, source, startedAt, join(runDir, REPORT_NAME));
-    outcome = publishCoverage(runDir, cwd, before, diagnosis?.failedFiles ?? [], measured);
+    outcome = publishCoverage(runDir, cwd, before, diagnosis, measured);
   } finally {
     rmSync(runDir, { recursive: true, force: true });
   }
@@ -417,11 +424,11 @@ function reportRerunRescue(first: RunDiagnosis | null, cwd: string, budget: numb
 }
 
 /** Keep the marker's clearedAt (when the artifact went) but name the failures that ended the run. */
-function refreshClearMarker(cwd: string, failedFiles: string[]): void {
+function refreshClearMarker(cwd: string, diagnosis: RunDiagnosis | null): void {
   const coverageDir = join(cwd, COVERAGE_DIR);
   if (existsSync(join(cwd, COVERAGE_FILE))) return; // a sibling published in between — not ours
   const marker = readClearMarker(coverageDir);
-  if (marker) writeClearMarker(coverageDir, { ...marker, failedFiles });
+  if (marker) writeClearMarker(coverageDir, { ...marker, ...markerCause(diagnosis) });
 }
 
 /**
@@ -472,7 +479,7 @@ export async function produceCoverage(cwd = process.cwd(), argv: string[] = []):
     } else if (first.outcome === 'cleared' && final.outcome === 'kept') {
       // Pass 2 found nothing left to clear because pass 1 already had. The marker still names pass
       // 1's failures; the run that actually ended was pass 2.
-      refreshClearMarker(cwd, final.diagnosis?.failedFiles ?? []);
+      refreshClearMarker(cwd, final.diagnosis);
     }
   }
   const { code, outcome } = final;

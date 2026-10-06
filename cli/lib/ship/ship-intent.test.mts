@@ -3,16 +3,18 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
 import {
   deleteIntent,
   ownsIntentGeneration,
@@ -428,8 +430,26 @@ describe('ship-intent write/read round trip', () => {
 
   it('skips the write (exit 0, nothing on disk) when git does not ignore the manifest path', () => {
     const opts = base({ root: seedRepo({ ignored: false }) });
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
     expect(writeIntent(opts, ['p.txt'])).toBe(0);
     expect(existsSync(join(opts.root, relIntentPath('feat/x')))).toBe(false);
+    expect(err.mock.calls.join('\n')).toMatch(/is not gitignored here.*devkit doctor --fix/);
+    err.mockRestore();
+  });
+
+  it('names an unanswerable ignore probe (a linked .devkit) instead of calling it unignored', () => {
+    const root = seedRepo({ ignored: false });
+    writeFileSync(join(root, '.gitignore'), '.devkit\n');
+    const target = mkdtempSync(join(tmpdir(), 'ship-intent-home-'));
+    dirs.push(target);
+    symlinkSync(target, join(root, '.devkit'));
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(writeIntent(base({ root }), ['p.txt'])).toBe(0);
+    expect(readdirSync(target)).toEqual([]);
+    const said = err.mock.calls.join('\n');
+    err.mockRestore();
+    expect(said).toMatch(/could not be checked: \S.*devkit doctor --fix/);
+    expect(said).not.toContain('not gitignored');
   });
 });
 

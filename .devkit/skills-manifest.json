@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "kind": "skills",
   "devkitRef": "v0.67.1",
-  "generatedAt": "2026-10-06T09:47:14.387Z",
+  "generatedAt": "2026-10-06T11:45:15.297Z",
   "files": {
     "_devkit/checklist-store.mjs": "c8a6a01fe75bd570953ccc88e3b99b8ac365bb249c4b1db2ce0c32a589c52193",
     "_devkit/review-roots.d.mts": "384d95945ccf04f994d805e78a5507835321ee5bcbd46acbf216c77385238c9e",
@@ -12,7 +12,7 @@
     "backend-performance/SKILL.md": "5ff0858b34ffc91d677976dd279f27714d934aa5062f0a3f6b38088e7bd10ddb",
     "backend-performance/scripts/checklist.mjs": "11b0fa63f4b8760408d57235551a6d37d88e927e8397d35314feeab0780b60e3",
     "brainstorming/SKILL.md": "63ceaa9a90895c39801ef7a8d6f2e6a3be58361ee8d24fae1779f0f4b595a294",
-    "commit-gates/SKILL.md": "e3b238d1b7b95ea45614904ba5f9fe11b2b845cb9d93d42bd5d8450f02f2f990",
+    "commit-gates/SKILL.md": "eedbd7d1bdb4386efd96887d41706ba37b1b0372c5f7995d530fd0ba752aba71",
     "commit-guard/SKILL.md": "ec3a823b1f0072e07895e5c95ff8dbf4e49f47dad1e47d68f78518ef1d83bb5e",
     "commit-guard/references/co-occurrence.md": "0225034aeb87a8be80d59e4121aa67a99129f6ee8388a9605e0db484e7d767d4",
     "commit-guard/scripts/checklist.mjs": "41147c504bd101a0df3961b53b3596c3fe4852caf0fd525b9e1139170db9fa8d",
@@ -36,7 +36,7 @@
     "upstream-sync/SKILL.md": "1007c8377ac15393dcc9db5384d80bd38487c85aa465921ae0b49ba5a91bad70",
     "upstream-sync/scripts/sync.mjs": "218aa7ad7e96f280f281a38f99919f2ce55eace902ed95b1119a0099ddbb3c76",
     "upstream-sync/scripts/verify-merge.mjs": "afb2977ab8b7a96fac2e93e29a68ae432508ba7e63d03c580fcf03229fcd0676",
-    "using-devkit/SKILL.md": "bae4c9c0e4e46a4af0eb8c66a35e1050ff2b752b1a25d3cadf130b19fb4f9a4d"
+    "using-devkit/SKILL.md": "e6ffd8b145e70df16857aa2cb0d44a329abce14655bd14585aea13f1a64f6fde"
   },
   "providers": {
     "claude": {
@@ -49,7 +49,7 @@
         "backend-performance/SKILL.md": "5ff0858b34ffc91d677976dd279f27714d934aa5062f0a3f6b38088e7bd10ddb",
         "backend-performance/scripts/checklist.mjs": "11b0fa63f4b8760408d57235551a6d37d88e927e8397d35314feeab0780b60e3",
         "brainstorming/SKILL.md": "63ceaa9a90895c39801ef7a8d6f2e6a3be58361ee8d24fae1779f0f4b595a294",
-        "commit-gates/SKILL.md": "e3b238d1b7b95ea45614904ba5f9fe11b2b845cb9d93d42bd5d8450f02f2f990",
+        "commit-gates/SKILL.md": "eedbd7d1bdb4386efd96887d41706ba37b1b0372c5f7995d530fd0ba752aba71",
         "commit-guard/SKILL.md": "ec3a823b1f0072e07895e5c95ff8dbf4e49f47dad1e47d68f78518ef1d83bb5e",
         "commit-guard/references/co-occurrence.md": "0225034aeb87a8be80d59e4121aa67a99129f6ee8388a9605e0db484e7d767d4",
         "commit-guard/scripts/checklist.mjs": "41147c504bd101a0df3961b53b3596c3fe4852caf0fd525b9e1139170db9fa8d",
@@ -73,7 +73,7 @@
         "upstream-sync/SKILL.md": "1007c8377ac15393dcc9db5384d80bd38487c85aa465921ae0b49ba5a91bad70",
         "upstream-sync/scripts/sync.mjs": "218aa7ad7e96f280f281a38f99919f2ce55eace902ed95b1119a0099ddbb3c76",
         "upstream-sync/scripts/verify-merge.mjs": "afb2977ab8b7a96fac2e93e29a68ae432508ba7e63d03c580fcf03229fcd0676",
-        "using-devkit/SKILL.md": "bae4c9c0e4e46a4af0eb8c66a35e1050ff2b752b1a25d3cadf130b19fb4f9a4d"
+        "using-devkit/SKILL.md": "e6ffd8b145e70df16857aa2cb0d44a329abce14655bd14585aea13f1a64f6fde"
       }
     },
     "codex": {
@@ -86,7 +86,7 @@
         "backend-performance/SKILL.md": "5ff0858b34ffc91d677976dd279f27714d934aa5062f0a3f6b38088e7bd10ddb",
         "backend-performance/scripts/checklist.mjs": "11b0fa63f4b8760408d57235551a6d37d88e927e8397d35314feeab0780b60e3",
         "brainstorming/SKILL.md": "63ceaa9a90895c39801ef7a8d6f2e6a3be58361ee8d24fae1779f0f4b595a294",
-        "commit-gates/SKILL.md": "e3b238d1b7b95ea45614904ba5f9fe11b2b845cb9d93d42bd5d8450f02f2f990",
+        "commit-gates/SKILL.md": "eedbd7d1bdb4386efd96887d41706ba37b1b0372c5f7995d530fd0ba752aba71",
         "commit-guard/SKILL.md": "ec3a823b1f0072e07895e5c95ff8dbf4e49f47dad1e47d68f78518ef1d83bb5e",
         "commit-guard/references/co-occurrence.md": "0225034aeb87a8be80d59e4121aa67a99129f6ee8388a9605e0db484e7d767d4",
         "commit-guard/scripts/checklist.mjs": "41147c504bd101a0df3961b53b3596c3fe4852caf0fd525b9e1139170db9fa8d",
@@ -110,7 +110,7 @@
         "upstream-sync/SKILL.md": "1007c8377ac15393dcc9db5384d80bd38487c85aa465921ae0b49ba5a91bad70",
         "upstream-sync/scripts/sync.mjs": "218aa7ad7e96f280f281a38f99919f2ce55eace902ed95b1119a0099ddbb3c76",
         "upstream-sync/scripts/verify-merge.mjs": "afb2977ab8b7a96fac2e93e29a68ae432508ba7e63d03c580fcf03229fcd0676",
-        "using-devkit/SKILL.md": "bae4c9c0e4e46a4af0eb8c66a35e1050ff2b752b1a25d3cadf130b19fb4f9a4d"
+        "using-devkit/SKILL.md": "e6ffd8b145e70df16857aa2cb0d44a329abce14655bd14585aea13f1a64f6fde"
       }
     },
     "cursor": {
@@ -123,7 +123,7 @@
         "backend-performance/SKILL.md": "5ff0858b34ffc91d677976dd279f27714d934aa5062f0a3f6b38088e7bd10ddb",
         "backend-performance/scripts/checklist.mjs": "11b0fa63f4b8760408d57235551a6d37d88e927e8397d35314feeab0780b60e3",
         "brainstorming/SKILL.md": "63ceaa9a90895c39801ef7a8d6f2e6a3be58361ee8d24fae1779f0f4b595a294",
-        "commit-gates/SKILL.md": "e3b238d1b7b95ea45614904ba5f9fe11b2b845cb9d93d42bd5d8450f02f2f990",
+        "commit-gates/SKILL.md": "eedbd7d1bdb4386efd96887d41706ba37b1b0372c5f7995d530fd0ba752aba71",
         "commit-guard/SKILL.md": "ec3a823b1f0072e07895e5c95ff8dbf4e49f47dad1e47d68f78518ef1d83bb5e",
         "commit-guard/references/co-occurrence.md": "0225034aeb87a8be80d59e4121aa67a99129f6ee8388a9605e0db484e7d767d4",
         "commit-guard/scripts/checklist.mjs": "41147c504bd101a0df3961b53b3596c3fe4852caf0fd525b9e1139170db9fa8d",
@@ -147,7 +147,7 @@
         "upstream-sync/SKILL.md": "1007c8377ac15393dcc9db5384d80bd38487c85aa465921ae0b49ba5a91bad70",
         "upstream-sync/scripts/sync.mjs": "218aa7ad7e96f280f281a38f99919f2ce55eace902ed95b1119a0099ddbb3c76",
         "upstream-sync/scripts/verify-merge.mjs": "afb2977ab8b7a96fac2e93e29a68ae432508ba7e63d03c580fcf03229fcd0676",
-        "using-devkit/SKILL.md": "bae4c9c0e4e46a4af0eb8c66a35e1050ff2b752b1a25d3cadf130b19fb4f9a4d"
+        "using-devkit/SKILL.md": "e6ffd8b145e70df16857aa2cb0d44a329abce14655bd14585aea13f1a64f6fde"
       }
     }
   }

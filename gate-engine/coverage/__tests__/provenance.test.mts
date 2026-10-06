@@ -67,7 +67,7 @@ describe('producer — the manifest', () => {
     const mtime = statSync(join(root, 'coverage/coverage-final.json')).mtimeMs;
     const runDir = join(root, 'coverage', '.runs', 'failed');
     mkdirSync(runDir, { recursive: true });
-    expect(publishCoverage(runDir, root, mtime, [])).toBe('cleared');
+    expect(publishCoverage(runDir, root, mtime, null)).toBe('cleared');
     expect(readManifest(join(root, 'coverage'))).toEqual(sibling);
   });
 
@@ -388,7 +388,7 @@ describe('edge cases — concurrent producers', () => {
     const runDir = join(root, 'coverage', '.runs', 'ours-failed');
     mkdirSync(runDir, { recursive: true });
     // before === null: the artifact appeared during our run, so it is the sibling's.
-    expect(publishCoverage(runDir, root, null, [])).toBe('kept');
+    expect(publishCoverage(runDir, root, null, null)).toBe('kept');
     expect(readManifest(join(root, 'coverage'))).toEqual(sibling);
   });
 });
