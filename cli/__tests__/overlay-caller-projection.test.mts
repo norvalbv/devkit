@@ -19,7 +19,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { applyInit } from '../commands/init.mts';
 import { applyOverlayConstraints, defaultSelection } from '../lib/components.mts';
-import { relIntentPath } from '../lib/ship/ship-intent.mts';
+import { relIntentPath, writeIntent } from '../lib/ship/ship-intent.mts';
 import { CLI, devkitHome, rootRegistry, testSpawnSync } from './_helpers.mts';
 import { addOverlay, reshipScript, scriptPath, seedShipRepo } from './_ship-branch-fixture.mts';
 
@@ -177,6 +177,24 @@ function legacyLinkedWorktree(reship: boolean) {
   return { dir, env, linked };
 }
 
+/** Ignored only as a directory, so the home's copy can never be linked: a gap no repair closes. */
+function openProjectionGap(dir: string) {
+  writeFileSync(join(dir, 'guard.config.json'), '{}\n');
+  mkdirSync(join(dir, 'docs', 'decisions'), { recursive: true });
+  writeFileSync(join(dir, 'docs', 'decisions', 'a'), 'a\n');
+  writeFileSync(join(dir, '.git', 'info', 'exclude'), 'guard.config.json\ndocs/decisions/\n', {
+    flag: 'a',
+  });
+}
+
+/** A recorded invocation titled "home", written straight into the home checkout's `.devkit`. */
+function plantHomeRecord(dir: string, script: string, branch: string) {
+  const mode = script === reshipScript ? 'reship' : 'ship';
+  const home = { root: dir, branch, mode, title: 'home', links: [], body: Buffer.from('home\n') };
+  const flags = { noQavisPublish: false, updatePrBody: false, draft: false, resumed: false };
+  expect(writeIntent({ ...home, ...flags, mergePaths: false }, ['note.txt'])).toBe(0);
+}
+
 describe('devkit ship from a linked worktree whose .devkit is a legacy link into the home', () => {
   it.each([
     ['ship', scriptPath, ['feat/legacy', 't', '--body-file', 'body.md', '--', 'note.txt']],
@@ -202,15 +220,50 @@ describe('devkit ship from a linked worktree whose .devkit is a legacy link into
     );
   });
 
+  it.each([
+    ['ship', scriptPath, 'feat/legacy', false],
+    ['ship --pr', reshipScript, 'pr-open', false],
+    ['ship --pr with a projection gap', reshipScript, 'pr-open', true],
+  ])(
+    '%s --resume replaces the link before reading, so a home-only record is not replayed',
+    (_name, script, branch, gap) => {
+      const { dir, env, linked } = legacyLinkedWorktree(script === reshipScript);
+      if (gap) openProjectionGap(dir);
+      plantHomeRecord(dir, script, branch);
+
+      const r = testSpawnSync('/bin/bash', [script, '--resume', branch], {
+        cwd: linked,
+        encoding: 'utf8',
+        env: { ...env, SHIP_DRY_RUN: '1' },
+      });
+
+      expect(r.status, r.stderr).not.toBe(0);
+      expect(r.stderr).toContain(`no recorded ship invocation for '${branch}'`);
+      expect(lstatSync(join(linked, '.devkit')).isDirectory()).toBe(true);
+      expect(existsSync(join(dir, relIntentPath(branch)))).toBe(true);
+    },
+  );
+
+  it.each([
+    ['ship', scriptPath, 'feat/legacy'],
+    ['ship --pr', reshipScript, 'pr-open'],
+  ])('%s --resume in the home still replays its own record', (_name, script, branch) => {
+    const { dir, env } = legacyLinkedWorktree(script === reshipScript);
+    plantHomeRecord(dir, script, branch);
+
+    const r = testSpawnSync('/bin/bash', [script, '--resume', branch], {
+      cwd: dir,
+      encoding: 'utf8',
+      env: { ...env, SHIP_DRY_RUN: '1' },
+    });
+
+    expect(r.stderr).toContain(`Resuming recorded invocation for ${branch}`);
+    expect(r.stderr).toContain('"home"');
+  });
+
   it('still records the invocation when the early projection leaves a gap open', () => {
     const { dir, env, linked } = legacyLinkedWorktree(true);
-    // Ignored only as a directory, so the home's copy can never be linked: a gap no repair closes.
-    writeFileSync(join(dir, 'guard.config.json'), '{}\n');
-    mkdirSync(join(dir, 'docs', 'decisions'), { recursive: true });
-    writeFileSync(join(dir, 'docs', 'decisions', 'a'), 'a\n');
-    writeFileSync(join(dir, '.git', 'info', 'exclude'), 'guard.config.json\ndocs/decisions/\n', {
-      flag: 'a',
-    });
+    openProjectionGap(dir);
 
     const r = testSpawnSync(
       '/bin/bash',
