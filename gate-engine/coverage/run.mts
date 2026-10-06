@@ -100,6 +100,13 @@ const BYPASS_REMEDY = [
   '   ship without coverage for this run:  export GUARD_COVERAGE_OK=1',
 ];
 
+// States its condition: ship reads guard.config.json from the committed base, so a local-only
+// `coverage: false` silently no-ops there, and an agent once burned an approved bypass on that.
+const OPT_OUT_REMEDY = [
+  '   Repo-wide opt-out: "coverage": false in guard.config.json — but `devkit ship`',
+  '   reads that file from the COMMITTED tree, so a local-only edit changes nothing.',
+];
+
 const MAX_LISTED = 10;
 
 function listPaths(paths: string[], cwd: string, top: string): string[] {
@@ -160,7 +167,7 @@ function artifactLine(file: string): string {
 
 /** Tell review-target.sh's verdict line that coverage went unmeasured. Written only into this review's
  * own temp root, so a nested run cannot reach an outer review's file. Advisory: never throws. */
-function recordReviewNotice(reason: 'absent' | 'stale'): void {
+function recordReviewNotice(reason: 'absent' | 'stale' | 'empty'): void {
   const file = process.env.DEVKIT_REVIEW_NOTICES;
   const root = process.env.DEVKIT_REVIEW_TEMP_ROOT;
   if (!file || !root || !isAbsolute(file) || !isAbsolute(root)) return;
@@ -184,6 +191,16 @@ function reviewNotMeasuredAbsent(cwd: string): number {
   console.log('   Measure it: run `devkit coverage-run` in the target, then review again.');
   console.log('   `devkit ship` and commits still BLOCK without it.');
   recordReviewNotice('absent');
+  return 2;
+}
+
+function reviewNotMeasuredEmpty(): number {
+  console.log(
+    `⚠️  Coverage NOT MEASURED in this review — the target's ${COVERAGE_FILE} measured no files.`,
+  );
+  console.log('   Measure it: run `devkit coverage-run` in the target, then review again.');
+  console.log('   `devkit ship` and commits still BLOCK on an empty artifact.');
+  recordReviewNotice('empty');
   return 2;
 }
 
@@ -233,16 +250,7 @@ export function runCoverage(cwd = process.cwd()): number {
       '   coverage-run` — concurrent plain `vitest --coverage` runs delete each other.',
     );
     for (const line of BYPASS_REMEDY) console.error(line);
-    // The old text said only "set coverage: false in guard.config.json" — which SILENTLY NO-OPS under
-    // ship, because the ship worktree reads that file from the committed base, not your working tree.
-    // Field transcripts show an agent burning a user-APPROVED bypass on exactly this, then having to
-    // go back and re-ask. Advice that cannot work must not be offered without its condition.
-    console.error(
-      '   Repo-wide opt-out: "coverage": false in guard.config.json — but `devkit ship`',
-    );
-    console.error(
-      '   reads that file from the COMMITTED tree, so a local-only edit changes nothing.',
-    );
+    for (const line of OPT_OUT_REMEDY) console.error(line);
     return 1;
   }
 
@@ -251,13 +259,14 @@ export function runCoverage(cwd = process.cwd()): number {
   // fail CLOSED with a clean message instead of crashing or reading garbage as coverage.
   let computed: Record<Metric, number>;
   let artifact: ArtifactRead;
+  let fileCount: number;
   let files: string;
   try {
     artifact = readArtifact(file);
     const parsed: unknown = JSON.parse(artifact.bytes);
     computed = computePercentages(parsed);
-    const n = Object.keys(artifactKeysSchema.parse(parsed)).length;
-    files = `${n} file${n === 1 ? '' : 's'}`;
+    fileCount = Object.keys(artifactKeysSchema.parse(parsed)).length;
+    files = `${fileCount} file${fileCount === 1 ? '' : 's'}`;
   } catch {
     failLine(`🚫 Coverage gate FAILED — ${COVERAGE_FILE} is present but not valid coverage data.`);
     console.error(artifactLine(file));
@@ -265,6 +274,18 @@ export function runCoverage(cwd = process.cwd()): number {
       '   Unparseable or malformed coverage data is not verification. Re-run `bun run test:run:coverage`.',
     );
     for (const line of BYPASS_REMEDY) console.error(line);
+    return 1;
+  }
+  // pct() scores an empty total as 100%, so a report that measured nothing would clear any floor.
+  if (fileCount === 0) {
+    if (reviewMode) return reviewNotMeasuredEmpty();
+    failLine(`🚫 Coverage gate FAILED — ${COVERAGE_FILE} measured no files.`);
+    console.error(artifactLine(file));
+    console.error(
+      "   An empty report verifies nothing. Check the runner's coverage include, then re-run `bun run test:run:coverage`.",
+    );
+    for (const line of BYPASS_REMEDY) console.error(line);
+    for (const line of OPT_OUT_REMEDY) console.error(line);
     return 1;
   }
   const top = repoTop(cwd);
