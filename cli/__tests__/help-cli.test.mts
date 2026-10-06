@@ -2,8 +2,8 @@ import { spawnSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
 import { CLI } from './_helpers.mts';
 
-// Run the CLI with an explicit env (so a test can strip git from PATH). cwd is the repo itself —
-// these paths only read help / preflight, they never mutate anything.
+// Run the CLI with an explicit env (so a test can strip git from PATH). An argv that dispatches a
+// ship takes a real machine-wide ship slot, so routing cases live in commands/ship.test.mts.
 const run = (args, env) =>
   spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf8', env: env ?? process.env });
 
@@ -63,65 +63,12 @@ describe('devkit help surface', () => {
     expect(r.stderr).toContain('gh pr ready --undo');
   });
 
-  it('allows --ready under --resume, where the record supplies the mode', () => {
-    const r = run(['ship', '--resume', 'feat/never-shipped', '--ready']);
-    expect(r.stderr).not.toContain('--ready marks an EXISTING PR ready and requires --pr');
-  });
-
   it('rejects --ready without --pr, pointing at --draft', () => {
     const r = run(['ship', 'feat/x', 't', '--ready', '--', 'note.txt']);
     expect(r.status).toBe(1);
     expect(r.stderr).toContain('--ready marks an EXISTING PR ready and requires --pr');
     expect(r.stderr).toContain('--draft');
     expect(r.stderr).not.toContain('unknown flag');
-  });
-
-  // Same trap the --from-branch case guards: a --body VALUE spelled like a mode flag must stay
-  // opaque text, not trip the new cross-flag rejections.
-  it('does not reinterpret a body value that resembles --draft/--ready as a flag', () => {
-    const r = run(['ship', '--pr', 'feat/x', 't', '--body', '--draft', '--', 'note.txt'], {
-      ...process.env,
-      SHIP_RESOLVE_ONLY: '1',
-    });
-    expect(r.status, r.stderr).toBe(0);
-    expect(r.stdout).toContain('BR=feat/x');
-    expect(r.stderr).not.toContain('--draft applies to a NEW ship');
-  });
-
-  it('does not reinterpret a body value that resembles --from-branch as a mode flag', () => {
-    const r = run(['ship', '--pr', 'feat/x', 't', '--body', '--from-branch', '--', 'note.txt'], {
-      ...process.env,
-      SHIP_RESOLVE_ONLY: '1',
-    });
-    expect(r.status, r.stderr).toBe(0);
-    expect(r.stdout).toContain('BR=feat/x');
-    expect(r.stderr).not.toContain('--from-branch is only valid for a new ship');
-  });
-
-  it('does not mistake an opaque --body value for the option terminator', () => {
-    const r = run(['ship', 'feat/x', 't', '--body', '--', '--pr', '--', 'note.txt'], {
-      ...process.env,
-      SHIP_RESOLVE_ONLY: '1',
-    });
-    expect(r.status, r.stderr).toBe(0);
-    expect(r.stdout).toContain('BR=feat/x');
-    expect(r.stderr).not.toContain('unknown flag: --pr');
-  });
-
-  // sc-2485: the generic help check ran before ship's parser and read a value-flag's opaque value
-  // as a Devkit help request, so the ship silently became a help page with exit 0.
-  it.each([
-    ['--body', '--help'],
-    ['--body-file', '-h'],
-  ])('does not read a %s value spelled %s as a help request', (flag, value) => {
-    // --pr resolves without a current branch, so this holds on a detached CI checkout too.
-    const r = run(['ship', '--pr', 'feat/x', 't', flag, value, '--', 'note.txt'], {
-      ...process.env,
-      SHIP_RESOLVE_ONLY: '1',
-    });
-    expect(r.stdout).not.toMatch(/devkit ship —/);
-    expect(r.status, r.stderr).toBe(0);
-    expect(r.stdout).toContain('BR=feat/x');
   });
 
   it('a value flag misplaced in the title slot does not swallow a following --help', () => {
@@ -213,6 +160,17 @@ describe('git preflight (require-git)', () => {
     const r = run(['ship', '--help'], noGitEnv);
     expect(r.status).toBe(0);
     expect(r.stdout).toMatch(/devkit ship —/);
+  });
+
+  // An opaque value spelled like a help flag is not a help request, so the git preflight runs.
+  it.each([
+    ['--body', '--help'],
+    ['--body-file', '-h'],
+  ])('a %s value spelled %s gets past the help check to the git preflight', (flag, value) => {
+    const r = run(['ship', '--pr', 'feat/x', 't', flag, value, '--', 'note.txt'], noGitEnv);
+    expect(r.status).toBe(1);
+    expect(r.stdout).not.toMatch(/devkit ship —/);
+    expect(r.stderr).toMatch(/git is not installed or not on PATH/);
   });
 
   it('a non-git command (sync-skills) is unaffected by missing git', () => {
