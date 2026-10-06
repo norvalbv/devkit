@@ -17,3 +17,4 @@ created: 2026-07-27
 **Scope:** agents-hooks/decision-scope-brief.mjs,skills/brainstorming/**,gate-engine/decisions/scoped-targets.mts
 **Category:** decision-log
 **Source:** manual
+- 2026-10-06 — Correction to the Context sentence 'check-alignment flags a contradiction at commit' and to the Positive that effectiveness is observable through its scoped-contradiction flag rate. No devkit-generated hook runs check-alignment (axis alignment-judge-on-demand), so that flag rate only reflects on-demand and hand-wired runs. This makes the pre-edit brief more load-bearing than the record assumed: for an architectural ruling it is the main surface that reaches an agent before the change is committed.
