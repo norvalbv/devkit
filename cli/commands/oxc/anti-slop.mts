@@ -244,10 +244,9 @@ function check(
   };
   // The base comparison must judge the SAME capability the candidate was linted with; pinning it
   // inside that lint's own lock keeps a concurrent capability sync from swapping it underneath.
-  const pin =
-    envelope?.base && envelope.baseTree
-      ? mkdtempSync(join(tmpdir(), 'devkit-anti-slop-capability-'))
-      : null;
+  const pin = envelope?.baseTree
+    ? mkdtempSync(join(tmpdir(), 'devkit-anti-slop-capability-'))
+    : null;
   try {
     const envelopeArgs = envelope?.activatedRuleIds.size ? [] : args;
     const envelopeGroups = collectAntiSlopGroups(cwd, envelopeArgs, pin ?? undefined);
