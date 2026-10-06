@@ -76,6 +76,37 @@ describe('forbidden references in changed comments', () => {
     ]);
   });
 
+  it('keeps a code-only edit in a moved file excused against its old path', () => {
+    const tail = Array.from({ length: 6 }, (_, index) => `const v${index} = ${index};`);
+    const before = ['const a = 1; // (sc-3836)', ...tail, ''].join('\n');
+    const root = staged(before, before);
+    mkdirSync(path.join(root, 'src/d'));
+    git(root, ['mv', 'src/a.tsx', 'src/d/a.tsx']);
+    writeFileSync(path.join(root, 'src/d/a.tsx'), before.replace('a = 1', 'a = 2'));
+    git(root, ['add', '-A']);
+    expect(cited(root)).toEqual([]);
+  });
+
+  it('lexes the old blob of an extension-changing rename with its own extension', () => {
+    const tail = Array.from({ length: 6 }, (_, index) => `const v${index} = ${index};`);
+    const before = ['const el = <p>text // (sc-3836)</p>;', ...tail, ''].join('\n');
+    const root = staged(before, before);
+    writeFileSync(
+      path.join(root, 'guard.config.json'),
+      JSON.stringify({
+        scanRoots: ['src'],
+        sourceExtensions: ['ts', 'tsx'],
+        comments: DEVKIT_REFS,
+      }),
+    );
+    git(root, ['mv', 'src/a.tsx', 'src/a.ts']);
+    const after = ['const el = 1; // (sc-3836)</p>;', ...tail, ''];
+    writeFileSync(path.join(root, 'src/a.ts'), after.join('\n'));
+    git(root, ['add', '-A']);
+    expect(git(root, ['diff', '--cached', '--name-status'])).toMatch(/R\d+\s+src\/a\.tsx/);
+    expect(cited(root)).toEqual(['sc-3836']);
+  });
+
   it.each([
     [
       'a code-only edit beside an unchanged trailing reference',
