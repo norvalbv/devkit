@@ -73,6 +73,18 @@ describe('gate — review arms', () => {
     expect(noticeText()).toBe('coverage=not-measured reason=absent\n');
   });
 
+  it('an artifact that measured no files → NOT MEASURED, exit 2, and an empty notice', () => {
+    const { root } = repo('', { statements: 80 });
+    write(root, 'coverage/coverage-final.json', '{}');
+    reviewMode();
+    const { code, out } = gate(root);
+    expect(code).toBe(2);
+    expect(out).toContain('measured no files');
+    expect(out).not.toContain('FAILED');
+    expect(out).not.toContain('passed');
+    expect(noticeText()).toBe('coverage=not-measured reason=empty\n');
+  });
+
   it('the same absent artifact outside review still fails closed', () => {
     const { root } = repo();
     const { code, out } = gate(root);
