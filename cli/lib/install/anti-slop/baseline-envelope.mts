@@ -351,7 +351,7 @@ export function inheritedBaseAllowance(
   candidateGroups: readonly FindingGroup[],
   envelope: GitBaselineEnvelope | null,
 ): AntiSlopBaseline {
-  if (!envelope?.base || !envelope.baseTree) return selected;
+  if (!envelope?.baseTree) return selected;
   const candidateNew = compareBaseline(selected, candidateGroups).newGroups.filter(
     (group) => !envelope.activatedRuleIds.has(group.ruleId),
   );

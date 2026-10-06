@@ -141,10 +141,9 @@ function planRelocations(
       if (snapshot.skipped) {
         return { relocated: [], bound, staged: snapshot.changedFiles.length > 0 };
       }
-      const pin =
-        snapshot.base && snapshot.baseTree
-          ? mkdtempSync(join(tmpdir(), 'devkit-anti-slop-capability-'))
-          : null;
+      const pin = snapshot.baseTree
+        ? mkdtempSync(join(tmpdir(), 'devkit-anti-slop-capability-'))
+        : null;
       try {
         const groups = collectAntiSlopGroups(snapshot.cwd, snapshot.paths, pin ?? undefined);
         const scope = resolveAntiSlopScope(snapshot.cwd, snapshot.paths);
