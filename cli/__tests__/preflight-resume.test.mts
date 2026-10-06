@@ -121,6 +121,11 @@ describe.each(PREFLIGHTS)('ship-branch.sh — a blocking $name preflight is resu
       paths: ['src/big.ts', 'src/other.ts'],
       body: 'b',
     });
+    expect(second.stderr).not.toContain('NOT recorded');
+
+    const third = run(scriptPath, s, ['--resume', branch]);
+    expect(third.stderr).toContain('2 paths');
+    expect(third.stderr).toContain('    src/other.ts\n');
   });
 
   it('--dry-gates never records, even when the preflight blocks', () => {
@@ -170,6 +175,50 @@ describe.each(PREFLIGHTS)('reship.sh — a blocking $name preflight is resumable
     } finally {
       dropWorktree(s.git, retry.stderr);
     }
+  });
+});
+
+describe('a --resume that exits before its record write names the extra paths it lost', () => {
+  const NOTICE = (branch: string) =>
+    '1 path(s) briefed by this retry were NOT recorded — a bare --resume will not carry them: src/other.ts\n' +
+    `  re-pass them: devkit ship --resume ${branch} -- src/other.ts\n`;
+
+  it('ship-branch.sh: a directory refusal leaves the record narrow and says so', () => {
+    const s = seedShipRepo();
+    capLines(s);
+    writeFileSync(join(s.dir, 'src/big.ts'), lines(20));
+    writeFileSync(join(s.dir, 'src/other.ts'), lines(2));
+    const branch = 'feat/pre-lost-extra';
+    expect(run(scriptPath, s, [branch, 't', '--', 'src/big.ts'], {}, 'b\n').status).toBe(1);
+
+    const retry = run(scriptPath, s, ['--resume', branch, '--', 'src/other.ts', 'src']);
+
+    expect(retry.status, retry.stderr).toBe(1);
+    expect(retry.stderr).toContain('  + src/other.ts   (briefed by this retry)');
+    expect(retry.stderr).toContain(NOTICE(branch));
+    expect(recorded(s.dir, branch).paths).toEqual(['src/big.ts']);
+  });
+
+  it('reship.sh: an unreadable --body-file leaves the record narrow and says so', () => {
+    const s = seedReshipRepo();
+    capLines(s, 'pr-open');
+    writeFileSync(join(s.dir, 'src/big.ts'), lines(20));
+    writeFileSync(join(s.dir, 'src/other.ts'), lines(2));
+    const first = run(reshipScript, s, ['pr-open', 't', '--pr', '--', 'src/big.ts'], {}, 'b\n');
+    expect(first.status, first.stderr).toBe(1);
+
+    const retry = run(scriptPath, s, [
+      '--resume',
+      'pr-open',
+      '--body-file',
+      join(s.dir, 'absent.md'),
+      '--',
+      'src/other.ts',
+    ]);
+
+    expect(retry.status, retry.stderr).not.toBe(0);
+    expect(retry.stderr).toContain(NOTICE('pr-open'));
+    expect(recorded(s.dir, 'pr-open').paths).toEqual(['src/big.ts']);
   });
 });
 

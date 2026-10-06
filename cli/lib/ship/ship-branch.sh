@@ -168,6 +168,7 @@ ROOT=$(git rev-parse --show-toplevel)
 # devkit's own modules are .mts in the source tree (Node strips types) and compiled .mjs in an
 # installed consumer (dist) — same fallback the reconcile writer uses.
 SHIP_INTENT="$SCRIPT_DIR/ship-intent.mts"; [ -f "$SHIP_INTENT" ] || SHIP_INTENT="$SCRIPT_DIR/ship-intent.mjs"
+. "$SCRIPT_DIR/resume-extras-notice.sh"
 RESUME_BODY=
 if [ "$RESUME" -eq 1 ]; then
   # NUL-delimited so every field survives byte-exact (a body holds newlines; a path may hold almost
@@ -251,15 +252,7 @@ if [ "$RESUME" -eq 1 ]; then
   # Explicit mode only. A --from-branch resume prints the same frozen array at its derivation site
   # below (the `--from-branch: N committed path(s)` block), and RESUME skips re-derivation, so an
   # unconditional listing here would print one identical set twice — which reads as two different ones.
-  if [ "$FROM_BRANCH" -eq 0 ]; then
-    for p in "${PATHS[@]}"; do
-      si_extra=
-      for q in ${RESUME_EXTRA_PATHS[@]+"${RESUME_EXTRA_PATHS[@]}"}; do [ "$q" = "$p" ] && { si_extra=1; break; }; done
-      if [ -n "$si_extra" ]; then printf '  + %q   (briefed by this retry)\n' "$p" >&2
-      else printf '    %q\n' "$p" >&2
-      fi
-    done
-  fi
+  [ "$FROM_BRANCH" -eq 1 ] || ship_resume_brief
 fi
 
 [ "$FROM_BRANCH" -eq 0 ] || [ -n "$BASE_FLAG" ] || { echo "--from-branch requires --base <remote-branch>" >&2; exit 1; }
@@ -875,6 +868,7 @@ if [ "$DRY_GATES" -eq 0 ]; then
 fi
 
 record_ship_intent() {
+  RESUME_EXTRAS_UNRECORDED=0
   [ "$DRY_GATES" -eq 0 ] || return 0
   # Capture the record's ownership token (write prints a per-attempt random generation): success may delete ONLY the
   # record this attempt wrote — a concurrent attempt's newer record must survive for ITS --resume.
@@ -939,6 +933,7 @@ RECOVERY_GATE_ADDS_REF="refs/devkit/ship-gate-adds/$BR"
 GATE_ADDS_FILE=$(mktemp "${TMPDIR:-/tmp}/ship-gate-adds.XXXXXX")
 BRANCH_CREATED= # only this invocation's branch may be auto-deleted on an empty/failed commit
 cleanup() {
+  ship_resume_extras_notice # first: it reads the exit status
   rm -f "$PATCH" "$APPLY_ERR" "$STAGED_STATE" "$GATE_ADDS_FILE"
   [ -z "$RECOVERY_INDEX" ] || rm -f "$RECOVERY_INDEX"
   [ -z "$RECOVERY_PATHS_ALL" ] || rm -f "$RECOVERY_PATHS_ALL"
