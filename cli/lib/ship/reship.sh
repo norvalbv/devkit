@@ -215,6 +215,29 @@ rewrite_pr_identity() {
     --json number,state,headRefName,headRefOid,headRepository,baseRefName,url \
     --jq '[.number,.state,.headRefName,.headRefOid,(.headRepository.nameWithOwner // ""),.baseRefName,.url] | @tsv' 2>/dev/null
 }
+# An append onto a MERGED or CLOSED PR's branch reaches no base, so it must never report success.
+# Fail-open when gh cannot answer: the append path has always treated gh as best-effort.
+# usage: reship_refuse_closed_pr <when> <outcome>
+reship_refuse_closed_pr() {
+  local fields num state base p paths=
+  fields=$(rewrite_pr_identity) || fields=
+  # A non-whitespace IFS keeps empty fields (a deleted fork's head repo); tabs would collapse them.
+  IFS=$'\x1f' read -r num state _ _ _ base _ <<< "${fields//$'\t'/$'\x1f'}"
+  case "$num" in
+    *[!0-9]*|'') echo "could not verify PR state for origin/$BR; continuing" >&2; return 0 ;;
+  esac
+  [ "$state" != "OPEN" ] || return 0
+  for p in "${PATHS[@]}"; do paths="$paths $(printf '%q' "$p")"; done
+  echo "ship --pr: PR #$num for origin/$BR is $state$1 — a push there never reaches $base; $2" >&2
+  # The merge anchors the new ship's patch past the squash; the override only skips the refusal that
+  # origin/<base> lacks the PR's pre-squash commits, which the merge already accounted for.
+  echo "  bring origin/$base into this checkout, then ship this change as a new PR:" >&2
+  echo "    git fetch origin $(printf '%q' "$base") && git merge origin/$(printf '%q' "$base")" >&2
+  echo "    GUARD_SHIP_BASE_OK=1 devkit ship <new-branch> $(printf '%q' "$TITLE") --base $(printf '%q' "$base") --$paths" >&2
+  echo "  (GUARD_SHIP_BASE_OK=1 is needed only after a squash or rebase merge)" >&2
+  [ "$state" != "CLOSED" ] || echo "  or reopen it: gh pr reopen $num --repo $REPO, then re-run this command" >&2
+  return 1
+}
 # Resolve owner/repo from origin (best-effort — only used for the final PR-URL print, which falls
 # back to a plain message; a non-GitHub origin still re-pushes fine).
 ORIGIN_URL=$(git config --get remote.origin.url || git remote get-url origin)
@@ -583,6 +606,8 @@ else
     echo "no remote branch origin/$BR to re-push to — open the PR first (ship without --pr)" >&2; exit 1
   }
   BASE=$(git rev-parse FETCH_HEAD)
+  # Before the intent write too: no later push can reach a non-open PR, so nothing is worth resuming.
+  [ -n "${SHIP_DRY_RUN:-}" ] || reship_refuse_closed_pr "" "nothing pushed" || exit 1
 fi
 
 # Re-pushes pay the same gate cost and can inherit the same stale checkout baseline as new ships.
@@ -1099,10 +1124,16 @@ if [ "$REWRITE" -eq 1 ]; then
   fi
   echo "replaced origin/$BR (${EXPECTED_REMOTE:0:7} → ${SHIP_COMMIT:0:7}) with one gated commit on $BASE_REF" >&2
 else
+  # Gates can run for many minutes; auto-merge landing inside them must not orphan this commit.
+  reship_refuse_closed_pr " (it changed during gates)" "nothing pushed" || exit 1
   DEVKIT_SHIP_PREPUSH_SKIP_SHA="$SHIP_COMMIT" git -C "$WT" push origin "HEAD:$BR" || {
     echo "push to origin/$BR rejected (not a fast-forward — the branch advanced). Re-run after fetching." >&2
     exit 1
   }
+  # A plain push cannot lease on PR state, so a close landing between the read above and the push
+  # fails loudly here. Head equality cannot prove the merge took this commit, so none is assumed.
+  reship_refuse_closed_pr " (it closed as this run pushed)" \
+    "${SHIP_COMMIT:0:7} landed on origin/$BR — confirm origin/<base> has it before re-shipping" || exit 1
 fi
 fi
 

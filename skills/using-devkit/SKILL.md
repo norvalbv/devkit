@@ -97,6 +97,10 @@ devkit command.
 - **`branch already exists` → ship to a different name; on ORIGIN → `--pr`.** Do not detach HEAD,
   delete the branch, or switch to the base branch to free the name. In a linked worktree all three
   fail (`already used by worktree at …`) and none of them is necessary.
+- **`PR #N for origin/<branch> is MERGED` (or CLOSED) → ship a new PR; never re-push that branch.**
+  A push onto a merged PR's branch never reaches its base, so `--pr` refuses before gates and again
+  before the push. Run the two printed commands: merge `origin/<base>` into this checkout, then
+  `devkit ship <new-branch> … --base <base>`.
 - **A `--pr` re-ship changes the existing PR description only with explicit `--body` or
   `--body-file`.** Omitting both preserves it; piped stdin remains commit-only. Use `--body ""` to
   clear the description deliberately.
