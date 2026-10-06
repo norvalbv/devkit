@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { relIntentPath } from '../lib/ship/ship-intent.mts';
+import { relIntentPath, writeIntent } from '../lib/ship/ship-intent.mts';
 import { testExecFileSync, testSpawnSync } from './_helpers.mts';
 import { bodyUpdateRepo, GIT_ENV, reshipScript, scriptPath } from './_ship-branch-fixture.mts';
 
@@ -257,5 +257,135 @@ describe('reship — refuses a PR that is no longer open', () => {
     expect(r.status).not.toBe(0);
     expect(r.stderr).toContain('is CLOSED (it closed as this run pushed)');
     expect(r.stderr).toContain('gh pr reopen 7');
+  });
+});
+
+// A new ship onto an existing remote branch is refused; once that branch's PR is merged or closed,
+// --pr would only refuse in turn, so the refusal names the new-branch remedy instead.
+const NEW_SHIP_ARGV = ['feat/pr', 'add v2', '--base', 'main', '--no-qavis-publish', '--', 'a.ts'];
+
+function newShip(dir, env, extra, argv = NEW_SHIP_ARGV) {
+  return testSpawnSync('/bin/bash', [scriptPath, ...argv], {
+    cwd: dir,
+    input: 'body\n',
+    encoding: 'utf8',
+    env: { ...process.env, ...GIT_ENV, ...env, ...extra },
+  });
+}
+
+describe('new ship — an existing remote branch whose PR is no longer open', () => {
+  it('names the MERGED state and the new-branch remedy, not --pr', () => {
+    const { dir, env, mark, tip } = fixture();
+    const before = tip();
+    writeFileSync(join(dir, 'a.ts'), 'v2\n');
+
+    const r = newShip(dir, env, { GH_PR_STATE: 'MERGED' });
+
+    expect(r.status).not.toBe(0);
+    expect(tip()).toBe(before);
+    expect(existsSync(mark)).toBe(false);
+    expect(r.stderr).toContain('remote branch already exists: origin/feat/pr');
+    expect(r.stderr).toContain('its PR #7 is MERGED');
+    expect(r.stderr).toMatch(MERGE_RE);
+    expect(r.stderr).toMatch(REMEDY_RE);
+    expect(r.stderr).not.toContain('--pr');
+  });
+
+  it('points a CLOSED PR reopen back at --pr', () => {
+    const { dir, env } = fixture();
+    writeFileSync(join(dir, 'a.ts'), 'v2\n');
+
+    const r = newShip(dir, env, { GH_PR_STATE: 'CLOSED' });
+
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain('gh pr reopen 7 --repo acme/app, then re-run with --pr');
+  });
+
+  it('keeps --from-branch in the remedy, whose paths are not yet derived', () => {
+    const { dir, env } = fixture();
+
+    const r = newShip(dir, env, { GH_PR_STATE: 'MERGED' }, [
+      'feat/pr',
+      'add v2',
+      '--base',
+      'main',
+      '--from-branch',
+    ]);
+
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/devkit ship <new-branch> .+ --base main --from-branch\n/);
+  });
+
+  it("targets the ship's own default base, not the merged PR's", () => {
+    const { dir, env } = fixture();
+    writeFileSync(join(dir, 'a.ts'), 'v2\n');
+
+    const r = newShip(dir, env, { GH_PR_STATE: 'MERGED' }, ['feat/pr', 'add v2', '--', 'a.ts']);
+
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain('never reaches main');
+    expect(r.stderr).toContain('git fetch origin work && git merge origin/work');
+    expect(r.stderr).toMatch(/devkit ship <new-branch> .+ --base work -- a\.ts\n/);
+  });
+
+  it('quotes a briefed path holding a space so the remedy pastes as one argument', () => {
+    const { dir, env } = fixture();
+    writeFileSync(join(dir, 'my file.ts'), 'v2\n');
+
+    const r = newShip(dir, env, { GH_PR_STATE: 'MERGED' }, [
+      'feat/pr',
+      'add v2',
+      '--base',
+      'main',
+      '--',
+      'my file.ts',
+    ]);
+
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain('--base main -- my\\ file.ts\n');
+  });
+
+  it('keeps a --from-branch resume remedy free of its recorded paths', () => {
+    const { dir, env } = fixture();
+    const intent = {
+      root: dir,
+      branch: 'feat/pr',
+      mode: 'ship',
+      sourceMode: 'branch',
+      sourceAttemptId: 'attempt-a',
+      title: 'add v2',
+      base: 'main',
+      links: [],
+      noQavisPublish: false,
+      updatePrBody: false,
+      draft: false,
+      resumed: false,
+      mergePaths: false,
+      body: Buffer.alloc(0),
+    };
+    expect(writeIntent(intent, ['a.ts'])).toBe(0);
+
+    const r = newShip(dir, env, { GH_PR_STATE: 'MERGED' }, ['--resume', 'feat/pr']);
+
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain('its PR #7 is MERGED');
+    expect(r.stderr).toMatch(/--base main --from-branch\n/);
+  });
+
+  it.each([
+    ['OPEN', { GH_PR_STATE: 'OPEN' }],
+    ['unreadable', { GH_PR_STATE: 'MERGED', GH_VIEW_STATUS: '1' }],
+  ])('keeps the re-run with --pr advice when the PR is %s', (_, extra) => {
+    const { dir, env, mark } = fixture();
+    writeFileSync(join(dir, 'a.ts'), 'v2\n');
+
+    const r = newShip(dir, env, extra);
+
+    expect(r.status).not.toBe(0);
+    expect(existsSync(mark)).toBe(false);
+    expect(r.stderr).toContain(
+      "to add these changes to that branch's existing PR, re-run with --pr",
+    );
+    expect(r.stderr).not.toContain('devkit ship <new-branch>');
   });
 });
