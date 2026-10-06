@@ -1,4 +1,5 @@
-import { readFileSync, writeFileSync } from 'node:fs';
+import { execSync } from 'node:child_process';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { loadCache } from '../cache.mts';
@@ -558,5 +559,31 @@ describe('runReviewGate — checklist recovery on the strict ship path (sc-2088)
     expect(await runReviewGate(repo, { exec })).toBe(3);
     expect(exec.mock.calls.filter(([o]) => o.label === TARGET)).toHaveLength(1);
     expect(err.mock.calls.flat().join('\n')).toContain('budget exhausted');
+  });
+});
+
+describe('runReviewGate — staged paths outside a reviewer list reach its judges', () => {
+  it('names an out-of-root staged template as staged in the first pass AND the escalation', async () => {
+    const repo = consumerRepo({ backend: true });
+    const template = 'templates/electron/guard.config.json';
+    mkdirSync(join(repo, 'templates', 'electron'), { recursive: true });
+    writeFileSync(join(repo, template), '{}\n');
+    execSync(`git add ${template}`, { cwd: repo });
+    const prompts = new Map<string, string>();
+    const exec = mkExec(async ({ label, args }) => {
+      prompts.set(label, args[1]);
+      if (label === 'review:api-security-reviewer') {
+        writeArtifact(repo, label, { failed: 1 });
+        return 'src/main/db.ts:1 reads an unstaged template\nVERDICT: FAIL — unstaged dependency';
+      }
+      writeArtifact(repo, label.replace(/:escalate$/, ''));
+      return 'VERDICT: PASS';
+    });
+    await runReviewGate(repo, { exec });
+    for (const label of ['review:api-security-reviewer', 'review:api-security-reviewer:escalate']) {
+      const also = (prompts.get(label) ?? '').split('\n').find((l) => l.startsWith('Also staged'));
+      expect(also, label).toContain(template);
+      expect(also, label).not.toContain('src/main/db.ts');
+    }
   });
 });
