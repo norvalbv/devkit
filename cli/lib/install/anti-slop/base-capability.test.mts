@@ -1,5 +1,6 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import {
+  appendFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -1511,8 +1512,9 @@ describe('anti-slop relocation across existing files', () => {
     expect(readFileSync(path, 'utf8')).toBe(before);
   });
 
-  it('relocates and re-anchors in an overlay install, where --base stays refused', () => {
-    const root = mkdtempSync(join(tmpdir(), 'devkit-anti-slop-overlay-relocation-'));
+  /** An overlay install: git-excluded capability and baseline, with committed debt in src/file.ts. */
+  function overlayDebtRepository(source = `${CLEAN_SOURCE}${FINDING_SOURCE}`): string {
+    const root = mkdtempSync(join(tmpdir(), 'devkit-anti-slop-overlay-'));
     roots.push(root);
     git(root, ['init', '-q']);
     mkdirSync(join(root, 'src'), { recursive: true });
@@ -1524,10 +1526,15 @@ describe('anti-slop relocation across existing files', () => {
     );
     syncAntiSlopCapability(root);
     syncOxcCapability(root, { antiSlop: true, overlay: true });
-    writeFileSync(join(root, 'src', 'file.ts'), `${CLEAN_SOURCE}${FINDING_SOURCE}`);
+    writeFileSync(join(root, 'src', 'file.ts'), source);
     writeFileSync(join(root, 'src', 'other.ts'), OTHER_SOURCE);
     expect(antiSlop(['create'], root)).toBe(0);
     commit(root, 'overlay debt');
+    return root;
+  }
+
+  it('relocates and re-anchors in an overlay install, where --base stays refused', () => {
+    const root = overlayDebtRepository();
     moveFinding(root);
 
     expect(antiSlop(['check', '--staged'], root)).toBe(1);
@@ -1537,6 +1544,43 @@ describe('anti-slop relocation across existing files', () => {
     expect(err.join('\n')).toContain('--base is unavailable in an overlay install');
     expect(antiSlop(['adopt-relocations'], root)).toBe(0);
     expect(antiSlop(['check', '--staged'], root)).toBe(0);
+  });
+
+  it('re-keys overlay debt across a staged rename, without adopting a new finding', () => {
+    const root = overlayDebtRepository();
+    const debt = debtAt(root, 'src/file.ts');
+    git(root, ['mv', 'src/file.ts', 'src/renamed.ts']);
+
+    expect(antiSlop(['check', '--staged'], root)).toBe(1);
+    expect(err.join('\n')).toContain('persist renamed debt with `devkit anti-slop adopt-renames`');
+    expect(err.join('\n')).not.toContain('stage the baseline');
+    expect(out.join('\n')).toContain('anti-slop: overlay');
+    expect(antiSlop(['adopt-renames', '--base', 'HEAD'], root)).toBe(2);
+    expect(err.join('\n')).toContain('--base is unavailable in an overlay install');
+    expect(antiSlop(['adopt-renames'], root)).toBe(0);
+    expect(out.join('\n')).not.toContain(`stage ${ANTI_SLOP_BASELINE_REL}`);
+    expect(debtAt(root, 'src/file.ts')).toBe(0);
+    expect(debtAt(root, 'src/renamed.ts')).toBe(debt);
+    expect(antiSlop(['check', '--staged'], root)).toBe(0);
+    expect(antiSlop(['check', 'src/renamed.ts'], root)).toBe(0);
+
+    appendFileSync(join(root, 'src', 'renamed.ts'), DICTIONARY_FINDING_SOURCE);
+    git(root, ['add', '-A']);
+    expect(antiSlop(['check', '--staged'], root)).toBe(1);
+    expect(err.join('\n')).toContain('1 new error finding(s)');
+    expect(debtAt(root, 'src/renamed.ts')).toBe(debt);
+  });
+
+  it('passes an overlay rename that also fixes the debt, with nothing left to re-key', () => {
+    const root = overlayDebtRepository(`${FILLER}${FINDING_SOURCE}`);
+    git(root, ['mv', 'src/file.ts', 'src/renamed.ts']);
+    writeFileSync(join(root, 'src', 'renamed.ts'), FILLER);
+    git(root, ['add', '-A']);
+    expect(git(root, ['diff', '--cached', '--name-status', '-M'])).toContain('src/renamed.ts');
+    expect(git(root, ['diff', '--cached', '--name-status', '-M'])).toMatch(/^R/u);
+
+    expect(antiSlop(['check', '--staged'], root)).toBe(0);
+    expect(err.join('\n')).not.toContain('BASELINE-RENAME');
   });
 });
 
