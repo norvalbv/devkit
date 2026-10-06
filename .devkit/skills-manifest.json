@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "kind": "skills",
   "devkitRef": "v0.67.1",
-  "generatedAt": "2026-10-05T14:20:50.471Z",
+  "generatedAt": "2026-10-06T09:47:14.387Z",
   "files": {
     "_devkit/checklist-store.mjs": "c8a6a01fe75bd570953ccc88e3b99b8ac365bb249c4b1db2ce0c32a589c52193",
     "_devkit/review-roots.d.mts": "384d95945ccf04f994d805e78a5507835321ee5bcbd46acbf216c77385238c9e",
@@ -32,11 +32,11 @@
     "structure-governance/SKILL.md": "4e13c0fcdcb4c49ff10409431d3ec5e44270a9f97024a73e08feb2801f5dc239",
     "structure-governance/references/fixing-lint-errors.md": "710d3f91a4a21c1ae6bcd6338673f38e3d28f04368bcb0329f95035fe51ad556",
     "structure-governance/references/walls.md": "6abf951adaf7aa71d1d0827bcddc2e9fdc517e622f86c40aa1ffde6deb4e5ecb",
-    "testing/SKILL.md": "949a14ae718c7b58da70a8d5386652702ddce8497c3f41ea834c92277380f82e",
+    "testing/SKILL.md": "0747844b04cdf8f66619111709dbd2f47955a26341540493e17cdee52e3734a1",
     "upstream-sync/SKILL.md": "1007c8377ac15393dcc9db5384d80bd38487c85aa465921ae0b49ba5a91bad70",
     "upstream-sync/scripts/sync.mjs": "218aa7ad7e96f280f281a38f99919f2ce55eace902ed95b1119a0099ddbb3c76",
     "upstream-sync/scripts/verify-merge.mjs": "afb2977ab8b7a96fac2e93e29a68ae432508ba7e63d03c580fcf03229fcd0676",
-    "using-devkit/SKILL.md": "79d09b68e7cfcab5296cd71ba63241fc518389d2945f15585fc800d78aeddc3d"
+    "using-devkit/SKILL.md": "bae4c9c0e4e46a4af0eb8c66a35e1050ff2b752b1a25d3cadf130b19fb4f9a4d"
   },
   "providers": {
     "claude": {
@@ -69,11 +69,11 @@
         "structure-governance/SKILL.md": "4e13c0fcdcb4c49ff10409431d3ec5e44270a9f97024a73e08feb2801f5dc239",
         "structure-governance/references/fixing-lint-errors.md": "710d3f91a4a21c1ae6bcd6338673f38e3d28f04368bcb0329f95035fe51ad556",
         "structure-governance/references/walls.md": "6abf951adaf7aa71d1d0827bcddc2e9fdc517e622f86c40aa1ffde6deb4e5ecb",
-        "testing/SKILL.md": "949a14ae718c7b58da70a8d5386652702ddce8497c3f41ea834c92277380f82e",
+        "testing/SKILL.md": "0747844b04cdf8f66619111709dbd2f47955a26341540493e17cdee52e3734a1",
         "upstream-sync/SKILL.md": "1007c8377ac15393dcc9db5384d80bd38487c85aa465921ae0b49ba5a91bad70",
         "upstream-sync/scripts/sync.mjs": "218aa7ad7e96f280f281a38f99919f2ce55eace902ed95b1119a0099ddbb3c76",
         "upstream-sync/scripts/verify-merge.mjs": "afb2977ab8b7a96fac2e93e29a68ae432508ba7e63d03c580fcf03229fcd0676",
-        "using-devkit/SKILL.md": "79d09b68e7cfcab5296cd71ba63241fc518389d2945f15585fc800d78aeddc3d"
+        "using-devkit/SKILL.md": "bae4c9c0e4e46a4af0eb8c66a35e1050ff2b752b1a25d3cadf130b19fb4f9a4d"
       }
     },
     "codex": {
@@ -106,11 +106,11 @@
         "structure-governance/SKILL.md": "4e13c0fcdcb4c49ff10409431d3ec5e44270a9f97024a73e08feb2801f5dc239",
         "structure-governance/references/fixing-lint-errors.md": "710d3f91a4a21c1ae6bcd6338673f38e3d28f04368bcb0329f95035fe51ad556",
         "structure-governance/references/walls.md": "6abf951adaf7aa71d1d0827bcddc2e9fdc517e622f86c40aa1ffde6deb4e5ecb",
-        "testing/SKILL.md": "949a14ae718c7b58da70a8d5386652702ddce8497c3f41ea834c92277380f82e",
+        "testing/SKILL.md": "0747844b04cdf8f66619111709dbd2f47955a26341540493e17cdee52e3734a1",
         "upstream-sync/SKILL.md": "1007c8377ac15393dcc9db5384d80bd38487c85aa465921ae0b49ba5a91bad70",
         "upstream-sync/scripts/sync.mjs": "218aa7ad7e96f280f281a38f99919f2ce55eace902ed95b1119a0099ddbb3c76",
         "upstream-sync/scripts/verify-merge.mjs": "afb2977ab8b7a96fac2e93e29a68ae432508ba7e63d03c580fcf03229fcd0676",
-        "using-devkit/SKILL.md": "79d09b68e7cfcab5296cd71ba63241fc518389d2945f15585fc800d78aeddc3d"
+        "using-devkit/SKILL.md": "bae4c9c0e4e46a4af0eb8c66a35e1050ff2b752b1a25d3cadf130b19fb4f9a4d"
       }
     },
     "cursor": {
@@ -143,11 +143,11 @@
         "structure-governance/SKILL.md": "4e13c0fcdcb4c49ff10409431d3ec5e44270a9f97024a73e08feb2801f5dc239",
         "structure-governance/references/fixing-lint-errors.md": "710d3f91a4a21c1ae6bcd6338673f38e3d28f04368bcb0329f95035fe51ad556",
         "structure-governance/references/walls.md": "6abf951adaf7aa71d1d0827bcddc2e9fdc517e622f86c40aa1ffde6deb4e5ecb",
-        "testing/SKILL.md": "949a14ae718c7b58da70a8d5386652702ddce8497c3f41ea834c92277380f82e",
+        "testing/SKILL.md": "0747844b04cdf8f66619111709dbd2f47955a26341540493e17cdee52e3734a1",
         "upstream-sync/SKILL.md": "1007c8377ac15393dcc9db5384d80bd38487c85aa465921ae0b49ba5a91bad70",
         "upstream-sync/scripts/sync.mjs": "218aa7ad7e96f280f281a38f99919f2ce55eace902ed95b1119a0099ddbb3c76",
         "upstream-sync/scripts/verify-merge.mjs": "afb2977ab8b7a96fac2e93e29a68ae432508ba7e63d03c580fcf03229fcd0676",
-        "using-devkit/SKILL.md": "79d09b68e7cfcab5296cd71ba63241fc518389d2945f15585fc800d78aeddc3d"
+        "using-devkit/SKILL.md": "bae4c9c0e4e46a4af0eb8c66a35e1050ff2b752b1a25d3cadf130b19fb4f9a4d"
       }
     }
   }
