@@ -228,6 +228,25 @@ interface RecordShipOptions {
   pr?: string | null;
   merge?: boolean;
   literalPaths?: boolean;
+  anchors?: string;
+}
+
+/** One path's write guard from ship/reship/anchor.mts: the record it anchored on, and what to record. */
+interface AnchorGuard {
+  /** "<op>:<blob>" of the record the anchor read, or "-" for none. */
+  expect: string;
+  /** "" leaves the record untouched, "=" records the path as classified, "<mode> <blob>" the caller's. */
+  record: string;
+}
+
+/** `--anchors`: "<expect>\0<record>\0<path>\0" triples; a path is written only while its record is unchanged. */
+function readAnchors(file: string): Map<string, AnchorGuard> {
+  const fields = readFileSync(file, 'utf8').split('\0');
+  const guards = new Map<string, AnchorGuard>();
+  for (let i = 0; i + 2 < fields.length; i += 3) {
+    guards.set(fields[i + 2], { expect: fields[i], record: fields[i + 1] });
+  }
+  return guards;
 }
 
 /**
@@ -250,6 +269,7 @@ export function recordShip(
     pr,
     merge = false,
     literalPaths = false,
+    anchors,
   }: RecordShipOptions,
   paths: string[],
 ): number {
@@ -269,9 +289,24 @@ export function recordShip(
     if (!tip || !base) return fail('could not read the pinned tip/base trees');
     classified = paths.map((p) => classifyLiteral(p, tip, base));
   } else classified = paths.map((p) => classify(hashRoot, baseSha, p));
-  const entries = classified.filter((e): e is ReconcilePath => e !== null);
+  const guards = anchors ? readAnchors(anchors) : new Map<string, AnchorGuard>();
+  const entries = classified
+    .filter((e): e is ReconcilePath => e !== null && guards.get(e.path)?.record !== '')
+    .map((e) => {
+      const [mode, blobSha] = guards.get(e.path)?.record.split(' ') ?? [];
+      return blobSha ? { ...e, mode, blobSha } : e;
+    });
+  // Absent at the pinned base and the worktree, and not merely kept at the tip: the caller deleted it too.
+  const gone =
+    merge && !literalPaths
+      ? paths.filter(
+          (p, i) =>
+            !classified[i] && guards.get(p)?.record !== '' && !existsSync(join(hashRoot, p)),
+        )
+      : [];
   // Before the lock (and before the no-entry throw below): an all-unresolvable merge is a benign no-op.
-  if (entries.length === 0) return fail('no recordable paths (all empty/unresolvable)');
+  if (entries.length === 0 && gone.length === 0)
+    return fail('no recordable paths (all empty/unresolvable)');
 
   const prNumber = pr && PR_DIGITS.test(pr) ? Number(pr) : null;
   const file = join(root, '.devkit', 'reconcile-manifest.json');
@@ -286,7 +321,24 @@ export function recordShip(
         // `modify` with its `delete`), keep the PR metadata, refresh shippedAt.
         if (!existing) throw new Error(`no manifest entry for ${branch} to merge into`);
         const byPath = new Map(existing.paths.map((e): [string, ReconcilePath] => [e.path, e]));
-        for (const e of entries) byPath.set(e.path, e);
+        // A concurrent ship that already replaced the record this one anchored on wins.
+        const fresh = (p: string) => {
+          const cur = byPath.get(p);
+          const token = cur ? `${cur.op}:${cur.blobSha}` : '-';
+          return (guards.get(p)?.expect ?? token) === token;
+        };
+        let changed = 0;
+        for (const e of entries.filter((e) => fresh(e.path))) {
+          byPath.set(e.path, e);
+          changed++;
+        }
+        for (const p of gone) {
+          const prev = byPath.get(p);
+          if (!prev || prev.op === 'delete' || !fresh(p)) continue;
+          byPath.set(p, { ...prev, op: 'delete' });
+          changed++;
+        }
+        if (changed === 0) throw new Error('no recordable paths');
         manifest.branches[branch] = {
           ...existing,
           shippedAt: new Date().toISOString(),
@@ -329,6 +381,7 @@ function main(): number {
       pr: strFlag(flags.pr),
       merge: flags.merge === true, // reship's --pr re-push extends the existing entry instead of overwriting
       literalPaths: flags['literal-paths'] === true, // branch-source paths are concrete identities
+      anchors: strFlag(flags.anchors),
     },
     paths,
   );
