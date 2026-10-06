@@ -7,7 +7,8 @@
 # (origin/<branch>), not this checkout's HEAD; the branch must already exist (the opposite preflight);
 # the new commit is the DELTA between that tip and your current files (so we copy current content
 # over the fetched tip rather than replay a HEAD-relative patch, which could conflict with the
-# first ship's content); and we push ff to the branch (no -u, no new PR). The shared worktree +
+# first ship's content — except a path the PR branch changed since your copy was taken, which
+# reship/anchor.mts merges instead); and we push ff to the branch (no -u, no new PR). The shared worktree +
 # symlink + marker ceremony is duplicated rather than shared so this flow can't perturb new-ship.
 # fallow-ignore-next-line code-duplication
 #
@@ -708,6 +709,7 @@ cleanup() {
   rewrite_publish_lock_release
   rewrite_ref_cleanup
   rm -f "$STAGED_STATE"
+  [ -z "${ANCHOR_OUT:-}" ] || rm -f "$ANCHOR_OUT"
   [ -z "$BODY_RECOVERY_INDEX" ] || rm -f "$BODY_RECOVERY_INDEX"
   [ -z "$BODY_RECOVERY_PATCH" ] || rm -f "$BODY_RECOVERY_PATCH"
   if [ -n "$KEEP_WT" ]; then
@@ -738,25 +740,10 @@ git -c core.hooksPath=/dev/null worktree add -q --detach "$WT" "$BASE" >&2
 # that made it, the same way new-ship's is.
 ship_run_record_begin "$WT" "$BR" "$BASE" 0 reship
 
-# Copy the CURRENT content of each path over the pinned parent (add/modify), or delete it. For an
-# append that parent is the PR tip; for a rewrite it is the current PR base and the complete-scope
-# preflight above ensures rewritten-away old-PR paths cannot be silently omitted.
-for p in "${PATHS[@]}"; do
-  if [ -e "$ROOT/$p" ]; then
-    mkdir -p "$WT/$(dirname "$p")"
-    cp -Pp "$ROOT/$p" "$WT/$p"
-    # -f: a briefed path can be TRACKED on the PR branch yet sit under a gitignored dir (a tracked
-    # `dist/` build artifact is the case that bit us). A plain `git add` STAGES it but still exits
-    # nonzero with "The following paths are ignored", and set -e (top of file) would abort the whole
-    # re-push before the staged-set snapshot, gates, commit, and push. Every PATHS entry is
-    # caller-explicit (positional after --; directories already rejected above), so forcing it is
-    # exactly what was asked — same reasoning as husky-block.mts's `git add -f`.
-    git -C "$WT" add -f -- ":(literal)$p"
-  else
-    # Literal: a glob-named path that is gone must remove only itself, never the files it matches.
-    git -C "$WT" rm -q --ignore-unmatch -- ":(literal)$p" || true
-  fi
-done
+# Stage the briefed paths: a rewrite copies them over the PR base, an append merges them onto the tip.
+ANCHOR_OUT=
+. "$SCRIPT_DIR/reship/stage.sh"
+reship_stage_paths "$SCRIPT_DIR"
 
 # A retained rewrite intent may resume after its force-push succeeded but before the PR body edit.
 # Only a private receipt written after THIS exact commit passed gates is provenance. Rebuild its
@@ -801,6 +788,7 @@ fi
 
 # Nothing to add? Abort before an empty commit (a re-push with no delta is a no-op, not a commit).
 if git -C "$WT" diff --cached --quiet; then
+  reship_refresh_anchors "$SCRIPT_DIR"
   # A lost push response leaves the exact body-bearing intent in place even though the remote now
   # contains its commit. Resume must finish that recorded metadata mutation before spending the
   # intent. The same arm makes an explicit no-delta invocation a safe body-only repair. Serialize
@@ -1171,7 +1159,8 @@ else
     [ -z "${SHIP_INTENT_GENERATION:-}" ] || node "$SHIP_INTENT" delete --root "$ROOT" --branch "$BR" --generation "$SHIP_INTENT_GENERATION" -- ${PATHS[@]+"${PATHS[@]}"} || true
   fi
   node "$RMW" \
-    --root "$ROOT" --git-root "$WT" --branch "$BR" --base-sha "$BASE" --tip-sha "$SHIP_COMMIT" --merge -- "${PATHS[@]}" \
+    --root "$ROOT" --git-root "$WT" --branch "$BR" --base-sha "$BASE" --tip-sha "$SHIP_COMMIT" \
+    --anchors "$ANCHOR_OUT" --merge -- "${PATHS[@]}" \
     || echo "reship: reconcile manifest not updated (non-fatal)" >&2
   PR_URL=$(gh pr view "$BR" --repo "$REPO" --json url -q .url 2>/dev/null) || PR_URL=""
 fi
