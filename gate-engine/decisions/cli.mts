@@ -20,8 +20,8 @@
  *                                                     --staged judges only the records THIS commit
  *                                                     touches, against HEAD (integrity/staged-gate.mts)
  *
- * `detect`, `check-alignment` and `scoped-targets` are thin re-dispatches into their .mjs by
- * re-importing them with a synthesised argv (so their own run-as-main dispatch fires); `categories`
+ * `detect`, `check-alignment` and `scoped-targets` are called through their exported `main(argv)`
+ * (never their run-as-main guard, which an already-loaded module skips); `categories`
  * and `integrity` are plain function calls (neither has a --gate/scan sub-dispatch of its own);
  * everything else routes to decisions.mjs `main`.
  *
@@ -30,7 +30,7 @@
  * this layer.
  */
 
-import { readdirSync, realpathSync } from 'node:fs';
+import { readdirSync } from 'node:fs';
 import { resolveFromCwd, resolveGuardConfig } from '../config.mts';
 // Type-only: erased at compile, so naming the envelope here does NOT re-link decisions.mts — the
 // module that is unloadable in exactly the case this file has to answer for.
@@ -71,10 +71,7 @@ async function run(argv: string[]) {
   }
   const sub = SUB_ENGINES[cmd];
   if (sub) {
-    // Re-enter the sub-engine as if invoked directly: it inspects process.argv and self-dispatches
-    // (--gate / scan). process.argv[1] must equal the sub-engine path so its run-as-main guard fires.
-    process.argv = [process.argv[0], realpathSync(sub), ...rest];
-    await import(sub.href);
+    await (await import(sub.href)).main(rest);
     return;
   }
   const { main: decisionsMain } = await import('./decisions.mts');
@@ -167,8 +164,6 @@ function reportUnavailable(dependency: string, cmd: string | undefined) {
   );
 }
 
-// Captured BEFORE run(): the SUB_ENGINES dispatch rewrites process.argv to re-enter its engine, so
-// by the time a failed import rejects, process.argv[2] is that engine's first flag, not the command.
 const argv = process.argv.slice(2);
 
 run(argv).catch((error) => {

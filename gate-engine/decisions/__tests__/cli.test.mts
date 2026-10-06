@@ -1,7 +1,7 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { parseIndex, renderIndex } from '../decision-format.mts';
@@ -16,8 +16,8 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-function run(args: string[]) {
-  return spawnSync('node', [SCRIPT, ...args], {
+function run(args: string[], script = SCRIPT) {
+  return spawnSync('node', [script, ...args], {
     cwd: dir,
     encoding: 'utf8',
     env: {
@@ -194,6 +194,75 @@ describe('guard-decisions categories (via cli.mts, the real bin)', () => {
 
   it('still dispatches ordinary commands (unaffected by the new branch)', () => {
     expect(run(['list']).stdout).toContain('No decisions recorded.');
+  });
+});
+
+// The bin must CALL each sub-engine, never rely on its run-as-main guard: a module some import
+// chain already loaded skips the guard, and the gate exits 0 having judged nothing.
+describe('guard-decisions sub-engine dispatch (via cli.mts, the real bin)', () => {
+  const engine = (name: string) => fileURLToPath(new URL(`../${name}.mts`, import.meta.url));
+  const stage = (rel: string, body: string) => {
+    mkdirSync(join(dir, dirname(rel)), { recursive: true });
+    writeFileSync(join(dir, rel), body);
+    execFileSync('git', ['add', rel], { cwd: dir, stdio: 'pipe' });
+  };
+  const writeScopedAxis = () =>
+    writeFileSync(
+      join(dir, 'axis.md'),
+      '---\nslug: axis\ncreated: 2026-01-01\n---\n\n# axis\n\n## Target · 2026-01-01 — r\n\n' +
+        '**Context:** c\n**Ruling:** r\n**Vision-fit:** v\n**Scope:** src/**\n',
+    );
+  beforeEach(() => execFileSync('git', ['init', '-q'], { cwd: dir, stdio: 'pipe' }));
+
+  it('check-alignment scan names the scoped Target a staged file falls under, as a direct run does', () => {
+    writeScopedAxis();
+    stage('src/a.ts', 'export {};\n');
+    const wrapped = run(['check-alignment', 'scan']);
+    expectExit(wrapped, 0);
+    expect(wrapped.stdout).toContain('axis: src/a.ts');
+    expect(wrapped.stdout).toBe(run(['scan'], engine('check-alignment')).stdout);
+  });
+
+  // Inherited Object.prototype names are unknown subcommands too, not commands that pass silently.
+  it.each(['bogus', 'toString', 'constructor'])(
+    'check-alignment %s prints usage and exits 2, not a silent pass',
+    (cmd) => {
+      const r = run(['check-alignment', cmd]);
+      expectExit(r, 2);
+      expect(r.stderr).toContain('Usage: check-alignment.mjs --gate | scan');
+    },
+  );
+
+  it('detect scan --files reads its flags from the bin argv, matching a direct run', () => {
+    stage('package.json', '{"dependencies":{"a":"1.0.0"}}\n');
+    const wrapped = run(['detect', 'scan', '--files']);
+    expectExit(wrapped, 0);
+    expect(wrapped.stdout).toBe('dep-change\ta\n');
+    expect(wrapped.stdout).toBe(run(['scan', '--files'], engine('detect')).stdout);
+  });
+
+  // decision-stop-check.sh runs `detect scan --working --files`: a dropped flag scans the index only
+  // and the Stop hook stops nudging on every unstaged smell.
+  it('detect scan honours --working from the bin argv, seeing an unstaged dep change', () => {
+    stage('package.json', '{"dependencies":{"a":"1.0.0"}}\n');
+    execFileSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@e.x', 'commit', '-qm', 'base'], {
+      cwd: dir,
+      stdio: 'pipe',
+    });
+    writeFileSync(join(dir, 'package.json'), '{"dependencies":{"a":"1.0.0","b":"2.0.0"}}\n');
+    expect(run(['detect', 'scan', '--working', '--files']).stdout).toBe('dep-change\tb\n');
+    expect(run(['detect', 'scan', '--files']).stdout).toBe('');
+  });
+
+  // decision-scope-brief.mjs reads this JSON; its own tests stub the bin, so only this proves the
+  // real bin waits for the async engine and prints the scope-matched Target.
+  it('scoped-targets prints the governing Target as JSON through the bin', () => {
+    writeScopedAxis();
+    const r = run(['scoped-targets', '--files', 'src/a.ts']);
+    expectExit(r, 0);
+    expect(JSON.parse(r.stdout)).toEqual([
+      { slug: 'axis', ruling: 'r', scope: 'src/**', via: 'scope-match' },
+    ]);
   });
 });
 
@@ -424,8 +493,7 @@ describe('retrieval unavailable — failure shapes and the contract other caller
     expectRefusal(r);
     expect(r.stdout).toBe('');
     expect(r.stderr).toContain('decision engine UNAVAILABLE');
-    // scoped-targets ANSWERS from the log, so it keeps the caveat. Its dispatch rewrites
-    // process.argv before importing, so the command must be captured before run() to survive.
+    // scoped-targets ANSWERS from the log, so it keeps the caveat.
     expect(r.stderr).toContain('no governing Target');
     expect(r.stderr).toContain('not a ranking');
   });

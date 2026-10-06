@@ -377,14 +377,15 @@ function runScan() {
   process.exit(0);
 }
 
-const invokedDirectly =
-  process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
-if (invokedDirectly) {
-  const cmd = process.argv[2];
-  if (cmd === '--gate') runGate();
-  else if (cmd === 'scan') runScan();
-  else {
-    console.error('Usage: check-alignment.mjs --gate | scan');
-    process.exit(2);
+export function main([cmd]: string[]): void {
+  switch (cmd) {
+    case '--gate':
+      return runGate();
+    case 'scan':
+      return runScan();
   }
+  console.error('Usage: check-alignment.mjs --gate | scan');
+  process.exit(2);
 }
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href)
+  main(process.argv.slice(2));

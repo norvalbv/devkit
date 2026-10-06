@@ -497,14 +497,14 @@ async function runGate() {
   }
 }
 
-function runScan(mode: DiffMode): void {
+function runScan(args: string[]): void {
   const cwd = process.cwd();
   // Reason: two independent decision-gate CLIs (alignment flip-flop vs architectural smell); the resolve-scan-exit shape rhymes but each scans a different thing; sharing would add the cross-engine dependency the engines avoid
   // fallow-ignore-next-line code-duplication
   try {
     const cfg = resolveGuardConfig(cwd);
-    const entries = gatherEntries(cwd, mode);
-    if (process.argv.includes('--files')) {
+    const entries = gatherEntries(cwd, args.includes('--working') ? 'working' : 'cached');
+    if (args.includes('--files')) {
       // (label, contributing-file) pairs for the Stop-hook seen-set — sorted+deduped so membership
       // (grep -vxF) is stable: re-arm keys on a never-seen pair, not on the cumulative set changing.
       const pairs = [
@@ -521,14 +521,13 @@ function runScan(mode: DiffMode): void {
   process.exit(0);
 }
 
-const invokedDirectly =
-  process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
-if (invokedDirectly) {
-  const cmd = process.argv[2];
-  if (cmd === '--gate') runGate();
-  else if (cmd === 'scan') runScan(process.argv.includes('--working') ? 'working' : 'cached');
+export function main([cmd, ...rest]: string[]): Promise<void> | void {
+  if (cmd === '--gate') return runGate();
+  else if (cmd === 'scan') runScan(rest);
   else {
     console.error('Usage: detect.mjs --gate | scan [--working] [--files]');
     process.exit(2);
   }
 }
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href)
+  main(process.argv.slice(2));
