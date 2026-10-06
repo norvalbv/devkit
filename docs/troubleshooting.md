@@ -296,10 +296,17 @@ by a command-rewriting shell hook, exactly as with `SHIP_COMMIT_TIMEOUT` below.
 ## A reviewer shows `PASS over an incomplete packet` (or `partial evidence`)
 
 Each AI reviewer reads a capped diff packet. On a large diff, files past the budget are OMITTED or
-TRUNCATED. Only the correctness reviewer is chunked so that every file reaches some judge. Every other
-reviewer's PASS on a large diff may cover only part of it, so the ship digest lists that PASS as
-unverified (`·`) with the files it was not shown. The review run's completion line appends `partial
-evidence: N/M file(s) omitted`. The row does not block.
+TRUNCATED. The correctness reviewer is the only one that can be chunked: when its chunk cap
+(`review.correctnessChunkLoc`, or `GUARD_CORRECTNESS_CHUNK`) is non-zero, its lens split is on (the
+default), and the diff is over 1.5x that cap, its lenses run once per group of files, so every file
+reaches one of them. The lens group carrying `writer-reader-contracts` is the exception: it needs both
+sides of a cross-file contract, so it always reads the whole capped diff, and a line naming that lens
+means only its packet was incomplete. With the cap at 0 (the claude family default) or the split off,
+every correctness lens reads the whole capped diff.
+
+Any reviewer's PASS on a large diff may therefore cover only part of it, so the ship digest lists that
+PASS as unverified (`·`) with the files it was not shown. The review run's completion line appends
+`partial evidence: N/M file(s) omitted`. The row does not block.
 
 The judge was told to inspect the omitted files before passing, but the verdict alone cannot show that
 it did. To get a full review:
