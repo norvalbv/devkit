@@ -20,6 +20,7 @@ import {
   shipRehearsalHint,
 } from './gate-policy/block-helpers.mts';
 import { buildPreCommitExit, PRE_COMMIT_PASS_EXIT } from './gate-policy/commit-gate-log.mts';
+import { FALLOW_STAGED, FALLOW_STAGED_BLOCK, indent } from './gate-policy/fallow-staged.mts';
 import { formatFragment } from './format-fragment.mts';
 import { markEnd, markStart } from './husky.mts';
 import {
@@ -39,6 +40,8 @@ interface HookSelection {
   biome?: boolean;
   guards?: string[];
   antiSlop?: boolean;
+  /** Package and standalone: emit the staged fallow gate. Overlay wires its own via `opts.fallow`. */
+  fallow?: boolean;
   structureCmd?: string;
   // Extra arbitrary hard gates folded into the deterministic orchestrator via `--extra "label=cmd"`
   // (any non-zero blocks). Empty/undefined for a normal consumer → no `--extra` emitted, so the
@@ -147,6 +150,7 @@ export function buildGuardBlock(
       DK_DETERMINISTIC_GATE_HELPER,
       deterministicFragment(selection.structureCmd, selection.extras),
     );
+  if (selection.fallow) pieces.push(FALLOW_STAGED_BLOCK);
   if (preAi) pieces.push(preAi);
   for (const id of AI_GUARD_IDS) {
     if (selection.guards?.includes(id)) pieces.push(selectedFragment(id, GUARD_FRAGMENTS[id]));
@@ -211,31 +215,6 @@ const OVERLAY_BIOME = overlayLintStep(
   'check --config-path biome.devkit.jsonc',
 );
 
-// Overlay shadows fallow's installed hook, so its optional audit must run inline here. Scope the
-// audit to the index: ship refreshes reviewer assets in its worktree AFTER staging, and a base-wide
-// audit would otherwise attribute those unstaged runtime files to the caller's commit (sc-1549).
-// Normal commits fail-open if fallow isn't installed.
-const FALLOW_OVERLAY_STAGED = `if command -v fallow >/dev/null 2>&1; then
-    DK_FALLOW_DIFF="$(mktemp)" || exit 1
-    if ! git diff --cached --binary --full-index --find-renames --relative >"$DK_FALLOW_DIFF"; then
-        rm -f "$DK_FALLOW_DIFF"
-        exit 1
-    fi
-    # __dk_no_git_env: fallow's snapshot machinery has clobbered a ship worktree before. The
-    # staged diff is already captured with the committing index's git environment intact.
-    DK_FALLOW_RC=0
-    __dk_no_git_env fallow audit --diff-stdin <"$DK_FALLOW_DIFF" || DK_FALLOW_RC=$?
-    rm -f "$DK_FALLOW_DIFF"
-    [ "$DK_FALLOW_RC" -eq 0 ] || {
-${shipRehearsalHint('        ')}
-        exit 1
-    }
-fi`;
-
-// Hoisted (perf: no per-call regex compile).
-const LINE_START_RE = /^(?=.)/gm;
-const indent = (body: string) => body.replace(LINE_START_RE, '    ');
-
 // Commit, ship and dry-gates: the cheap BLOCKING staged checks run before the AI guards, so a lint
 // or dead-code finding never waits behind the reviewer chain (sc-3020).
 const overlayStagedGates = (
@@ -243,7 +222,7 @@ const overlayStagedGates = (
 ) => `# devkit lint overlay — STAGED files only, against configs that EXTEND the repo's (git-ignored).
 if [ "\${DEVKIT_RUN_MODE:-}" != "review" ]; then
 ${indent(OVERLAY_ESLINT_STAGED)}
-${indent(OVERLAY_BIOME)}${fallow ? `\n    # devkit fallow gate (overlay)\n${indent(FALLOW_OVERLAY_STAGED)}` : ''}
+${indent(OVERLAY_BIOME)}${fallow ? `\n    # devkit fallow gate (overlay)\n${indent(FALLOW_STAGED)}` : ''}
 fi`;
 
 /** Under the global husky shim (cli/lib/overlay-global-hook.mts) an overlay hook stops before its
@@ -279,7 +258,7 @@ export function buildOverlayHook(
     gitRuns = false,
   }: { fallow?: boolean; prelude?: string; gitRuns?: boolean } = {},
 ): string {
-  const block = buildGuardBlock(selection, pkgRel, {
+  const block = buildGuardBlock({ ...selection, fallow: false }, pkgRel, {
     binDir: 'global',
     preAi: overlayStagedGates(fallow),
     postGuards: overlayReviewBaseline(fallow),

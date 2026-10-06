@@ -1,4 +1,9 @@
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { checkHusky } from '../lib/doctor/hook-checks.mts';
 import { strayGateCalls } from '../lib/doctor/stray-gate-calls.mts';
 import { buildFullHook } from '../lib/husky/husky-block.mts';
 
@@ -182,5 +187,34 @@ describe('strayGateCalls', () => {
     const found = strayGateCalls(monorepo, 'services/web');
     expect(found).toHaveLength(1);
     expect(found[0].line).toBe(8);
+  });
+});
+
+// A consumer who selected fallow before devkit owned the gate has a block without it: doctor must
+// report that as fixable drift, so `doctor --fix` regenerates it.
+describe('checkHusky — fallow', () => {
+  const doctorOn = (hookText: string, fallow: boolean) => {
+    const root = mkdtempSync(join(tmpdir(), 'dk-doctor-fallow-'));
+    try {
+      execFileSync('git', ['init', '-q'], { cwd: root });
+      mkdirSync(join(root, '.husky'));
+      writeFileSync(join(root, '.husky', 'pre-commit'), hookText);
+      return checkHusky(root, ['review'], fallow);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  };
+
+  it('reports a selected fallow gate missing from the block as fixable drift', () => {
+    const r = doctorOn(buildFullHook({ guards: ['review'] }), true);
+    expect(r).toMatchObject({ status: 'DRIFT', fixable: true });
+    expect(r.detail).toContain('fallow');
+    expect(doctorOn(buildFullHook({ guards: ['review'], fallow: true }), true).status).toBe('OK');
+    // The sentinel alone is not the gate: a hand-emptied fragment still needs regenerating.
+    const gutted = buildFullHook({ guards: ['review'], fallow: true }).replace(
+      'fallow audit --diff-stdin',
+      'true',
+    );
+    expect(doctorOn(gutted, true)).toMatchObject({ status: 'DRIFT', fixable: true });
   });
 });

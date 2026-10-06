@@ -54,9 +54,29 @@ function stageOverlayFixtures(
   // ordering assertion would pass vacuously.
   const src = join(pkgRel ? join(home, pkgRel) : home, 'src');
   mkdirSync(src, { recursive: true });
-  writeFileSync(join(src, 'staged.ts'), 'export const unused = 1;\n');
   execFileSync('git', ['init', '-q'], { cwd: home });
+  // `staged: 'empty'` is a repo with nothing staged; `'huge'` is past fallow's 10 MiB stdin cap; a
+  // number is the exact byte size of the staged diff the hook captures.
+  if (staged === 'empty') return;
+  const body = staged === 'huge' ? 'x'.repeat(11 * 1024 * 1024) : 'export const unused = 1;\n';
+  writeFileSync(join(src, 'staged.ts'), body);
   execFileSync('git', ['add', join(src, 'staged.ts')], { cwd: home });
+  if (Number.isInteger(staged)) padStagedDiff(home, join(src, 'staged.ts'), staged);
+}
+
+// One long line grows the diff byte-for-byte, so a single correction lands the exact size.
+function padStagedDiff(home, file, bytes) {
+  const size = () =>
+    execFileSync(
+      'git',
+      ['diff', '--cached', '--binary', '--full-index', '--find-renames', '--relative'],
+      { cwd: home, maxBuffer: 64 * 1024 * 1024 },
+    ).length;
+  writeFileSync(file, 'x'.repeat(bytes));
+  execFileSync('git', ['add', file], { cwd: home });
+  writeFileSync(file, 'x'.repeat(bytes + bytes - size()));
+  execFileSync('git', ['add', file], { cwd: home });
+  if (size() !== bytes) throw new Error(`staged diff is ${size()} bytes, wanted ${bytes}`);
 }
 
 export function runHook(
