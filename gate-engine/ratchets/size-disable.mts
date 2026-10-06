@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { CONFIG_FILENAME, resolveGuardConfig, sourceMatchers } from '../config.mts';
 import { exitGate } from '../deterministic/reason.mts';
+import { overlayInstall } from '../overlay-mode.mts';
 import {
   readRatchetBaseline,
   removeRatchetBaseline,
@@ -285,7 +286,7 @@ function runLinesGate(
     for (const line of [...report, ...hints]) console.error(line);
     exitGate(1, report);
   }
-  if (ciScope || !inCommit || !staged) return; // CI never tightens/stages
+  if (ciScope || !inCommit || !staged || overlayInstall(root)) return; // no commit carries it
 
   // Tighten only the committing files' ceilings; every other recorded count is preserved as-is,
   // so a concurrent agent's uncommitted shrink is never locked in.
@@ -380,6 +381,7 @@ function runDisableGate(
     exitGate(1, why);
   }
 
+  if (overlayInstall(root)) return;
   if (ciScope || !inCommit || !staged) {
     // No commit in progress → never mutate. Nudge a re-freeze if anything shrank or a legacy file lingers.
     if (legacy) {

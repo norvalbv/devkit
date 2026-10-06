@@ -214,6 +214,28 @@ describe('CLI freeze/gate contract', () => {
     expect(r.stderr).toContain('src/new-pile');
   });
 
+  it('an overlay gate keeps the shared fanout.json when this branch has no pile left', () => {
+    const root = makeRoot();
+    gitInit(root);
+    mkdirSync(join(root, '.git/info'), { recursive: true });
+    writeFileSync(join(root, '.git/info/exclude'), '/.devkit\n');
+    mkdirSync(join(root, '.devkit'));
+    writeFileSync(join(root, '.devkit/config.json'), '{"overlay":true}\n');
+    writeConfig(root, {});
+    fill(root, 'src/pile', 20);
+    run(root, 'freeze');
+    const frozen = readFileSync(join(root, '.devkit/baselines/fanout.json'), 'utf8');
+    gitAdd(root, 'guard.config.json', 'src/pile');
+    execFileSync('git', ['commit', '-qm', 'seed'], { cwd: root });
+    rmSync(join(root, 'src/pile'), { recursive: true });
+    fill(root, 'src/pile', 5);
+    gitAdd(root, 'src/pile');
+    const r = run(root, 'gate');
+    expect(r.status).toBe(0);
+    expect(r.stdout).not.toContain('removed & staged');
+    expect(readFileSync(join(root, '.devkit/baselines/fanout.json'), 'utf8')).toBe(frozen);
+  });
+
   it('gate heal-deletes + stages fanout.json when the last pile heals in a real commit', () => {
     const root = makeRoot();
     gitInit(root);

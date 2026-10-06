@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -1534,5 +1534,135 @@ describe('per-file disable ratchet (auto-lower, migration, net-zero)', () => {
     );
     expect(run(root, 'freeze').status).toBe(0);
     expect(readBaseline(root).files['src/a.ts']).toEqual({ file: 1, fn: 0 }); // stayed 1, NOT raised to 2
+  });
+});
+
+// An overlay baseline is untracked and shared by every linked worktree, so no commit carries a
+// gate-time write: it would outlive a blocked attempt and bind branches that never made it.
+describe('overlay install: a commit-time gate leaves the shared baseline alone', () => {
+  const LINES = '.devkit/baselines/size-lines.json';
+  const SIZE = '.devkit/baselines/size.json';
+  const run = (root, cmd, env = {}) => {
+    const { DEVKIT_OVERLAY: _inherited, ...clean } = process.env;
+    return spawnSync(process.execPath, [SCRIPT, cmd], {
+      cwd: root,
+      encoding: 'utf8',
+      env: { ...clean, ...env },
+    });
+  };
+  const big = (n) => Array(n).fill('const x = 1;').join('\n');
+  const dis = (n) => `${Array(n).fill('/* eslint-disable max-lines */').join('\n')}\nexport {};\n`;
+  const bytes = (root, rel) => readFileSync(join(root, rel), 'utf8');
+  const overlayRoot = (cfg) => {
+    const root = makeRoot();
+    gitInit(root);
+    write(root, '.git/info/exclude', '/.devkit\n');
+    write(root, '.devkit/config.json', '{"overlay":true}\n');
+    writeConfig(root, cfg);
+    return root;
+  };
+  const LINE_CFG = { scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 50 };
+
+  it('keeps the line ceiling when a staged file shrinks, so its original count still passes', () => {
+    const root = overlayRoot(LINE_CFG);
+    write(root, 'src/legacy.ts', big(80));
+    run(root, 'freeze');
+    const frozen = bytes(root, LINES);
+    write(root, 'src/legacy.ts', big(60));
+    gitAdd(root, 'src/legacy.ts');
+    const shrunk = run(root, 'gate');
+    expect(shrunk.status).toBe(0);
+    expect(bytes(root, LINES)).toBe(frozen);
+    expect(shrunk.stdout).not.toContain('lowered & staged');
+    // A bare freeze from a feature branch would rewrite every shared ceiling from that branch.
+    expect(shrunk.stdout).not.toContain('guard-size freeze');
+    write(root, 'src/legacy.ts', big(80));
+    gitAdd(root, 'src/legacy.ts');
+    expect(run(root, 'gate').status).toBe(0);
+  });
+
+  it('keeps the line baseline file when its last oversized file heals', () => {
+    const root = overlayRoot(LINE_CFG);
+    write(root, 'src/legacy.ts', big(80));
+    run(root, 'freeze');
+    const frozen = bytes(root, LINES);
+    write(root, 'src/legacy.ts', big(40));
+    gitAdd(root, 'src/legacy.ts');
+    expect(run(root, 'gate').status).toBe(0);
+    expect(bytes(root, LINES)).toBe(frozen);
+  });
+
+  it('still blocks growth past the stored line ceiling', () => {
+    const root = overlayRoot(LINE_CFG);
+    write(root, 'src/legacy.ts', big(80));
+    run(root, 'freeze');
+    write(root, 'src/legacy.ts', big(81));
+    gitAdd(root, 'src/legacy.ts');
+    const r = run(root, 'gate');
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('src/legacy.ts: 81 lines (max 80)');
+  });
+
+  it.each([
+    ['shrink', 1],
+    ['heal', 0],
+  ])("keeps the disable baseline when a staged file's disables %s", (_label, remaining) => {
+    const root = overlayRoot({ scanRoots: ['src'] });
+    write(root, 'src/a.ts', dis(2));
+    run(root, 'freeze');
+    const frozen = bytes(root, SIZE);
+    write(root, 'src/a.ts', dis(remaining));
+    gitAdd(root, 'src/a.ts');
+    const r = run(root, 'gate');
+    expect(r.status).toBe(0);
+    expect(bytes(root, SIZE)).toBe(frozen);
+    expect(r.stdout).not.toContain('guard-size freeze');
+  });
+
+  it('still blocks a staged file that adds a disable', () => {
+    const root = overlayRoot({ scanRoots: ['src'] });
+    write(root, 'src/a.ts', dis(1));
+    run(root, 'freeze');
+    write(root, 'src/a.ts', dis(2));
+    gitAdd(root, 'src/a.ts');
+    const r = run(root, 'gate');
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('src/a.ts');
+  });
+
+  // Ship projects the whole directory; a hand-linked worktree may carry only the baseline file.
+  it.each([
+    ['its whole .devkit symlinked', '.devkit'],
+    ['only the baseline symlinked and no config of its own', LINES],
+  ])('a linked worktree with %s leaves the primary checkout baseline alone', (_label, linked) => {
+    const primary = overlayRoot(LINE_CFG);
+    write(primary, 'src/legacy.ts', big(80));
+    run(primary, 'freeze');
+    const frozen = bytes(primary, LINES);
+    gitAdd(primary, 'guard.config.json', 'src/legacy.ts');
+    execFileSync('git', ['commit', '-qm', 'seed'], { cwd: primary });
+    const worktree = join(makeRoot(), 'linked');
+    execFileSync('git', ['worktree', 'add', '-q', '--detach', worktree], { cwd: primary });
+    mkdirSync(dirname(join(worktree, linked)), { recursive: true });
+    symlinkSync(join(primary, linked), join(worktree, linked));
+    write(worktree, 'src/legacy.ts', big(60));
+    gitAdd(worktree, 'src/legacy.ts');
+    expect(run(worktree, 'gate').status).toBe(0);
+    expect(bytes(primary, LINES)).toBe(frozen);
+  });
+
+  it('DEVKIT_OVERLAY=1 stops the write on a tracked root; without it the gate still auto-lowers', () => {
+    const root = makeRoot();
+    gitInit(root);
+    writeConfig(root, LINE_CFG);
+    write(root, 'src/legacy.ts', big(80));
+    run(root, 'freeze');
+    const frozen = bytes(root, LINES);
+    write(root, 'src/legacy.ts', big(60));
+    gitAdd(root, 'src/legacy.ts');
+    expect(run(root, 'gate', { DEVKIT_OVERLAY: '1' }).status).toBe(0);
+    expect(bytes(root, LINES)).toBe(frozen);
+    expect(run(root, 'gate').status).toBe(0);
+    expect(JSON.parse(bytes(root, LINES)).files['src/legacy.ts']).toBe(60);
   });
 });
