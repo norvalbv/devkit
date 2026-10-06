@@ -418,6 +418,11 @@ describe('groundConventionFindings — the VIOLATION must quote a governing CLAU
     ).toEqual([]);
   });
 
+  it('drops a rule quote that is too short once its emphasis is stripped', () => {
+    expect(fail('**a** — packages/a/CLAUDE.md:3', onImport)).toEqual([]);
+    expect(fail('`__` — packages/a/CLAUDE.md:3', onImport)).toEqual([]);
+  });
+
   it('strips _emphasis_ delimiters but never an underscore inside an identifier', () => {
     expect(
       fail('Never allow foo_bar in raw queries. — packages/a/CLAUDE.md:6', onImport),

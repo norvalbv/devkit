@@ -195,10 +195,10 @@ function ruleGrounded(
     .map((dir) => (dir ? `${dir}/CLAUDE.md` : 'CLAUDE.md'))
     .reverse()
     .find((rel) => cited === rel || (absolute && cited.endsWith(`/${rel}`)));
-  const quote = normalizeQuote(finding.ruleQuote);
+  // Length is checked after emphasis is stripped, so `**a**` cannot ground on any line holding `a`.
+  const text = normalizeQuote(plainMarkdown(finding.ruleQuote));
   const lines = governing ? ruleLines(governing) : null;
-  if (lines === null || quote === null) return false;
-  const text = plainMarkdown(quote);
+  if (lines === null || text === null) return false;
   const anchor = Math.max(finding.ruleLine ?? 1, 1);
   const low = finding.ruleLine === null ? 1 : Math.max(1, anchor - QUOTE_WINDOW);
   const high =
