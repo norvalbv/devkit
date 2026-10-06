@@ -131,6 +131,9 @@ No single command covers everything — the walls split across two mechanisms:
 The ratchet gates fire via husky (and a **CI mirror** — `--no-verify` is bypassable, so a load-bearing
 gate must run on the server too). A `gate` that finds *growth* exits 1 and blocks the commit (split,
 don't disable); one whose last grandfathered entry *heals* in the commit self-deletes the baseline.
+An **overlay** baseline is the exception: it is untracked and shared by every worktree, so no commit
+carries a change to it and the gate never tightens or deletes it. It moves only by an explicit
+`guard-size freeze` / `guard-fanout freeze` in the primary checkout on the base branch.
 A missing baseline means "no grandfathered debt": a **governed** repo (one with `guard.config.json` —
 every adopted repo, CI included) still **enforces the cap from config**, and only an ungoverned repo
 fails open, so an unadopted checkout never wedges. Baselines are cut once at adoption and never
