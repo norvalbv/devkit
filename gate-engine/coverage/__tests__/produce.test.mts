@@ -22,7 +22,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CLI, testSpawnSync, waitForPath } from '../../../cli/__tests__/_helpers.mts';
-import { CLEAR_MARKER_NAME, readClearMarker } from '../failures.mts';
+import { CLEAR_MARKER_NAME, readClearMarker, UNHANDLED_REPORTER } from '../failures.mts';
 import {
   buildInjectedArgs,
   COVERAGE_DIR,
@@ -482,6 +482,8 @@ describe('the flags devkit adds on the consumer behalf', () => {
     expect(args).toContain('--reporter=default');
     expect(args).toContain('--reporter=json');
     expect(args).toContain('--outputFile.json=/tmp/results.json');
+    expect(args).toContain(`--reporter=${UNHANDLED_REPORTER}`);
+    expect(existsSync(UNHANDLED_REPORTER)).toBe(true);
   });
 
   it('reads the version of the vitest installed beside the binary it will actually run', () => {
@@ -748,6 +750,23 @@ ${HONOURS_REPORTS_DIR_FLAG_SILENTLY}
 });
 
 describe('the marker a cleared artifact leaves behind', () => {
+  const failed = (...failedFiles: string[]) => ({ failedFiles, flaky: [] });
+
+  it('records the unhandled error that ended a run with no failed test', () => {
+    const root = makeRoot();
+    mkdirSync(join(root, COVERAGE_DIR), { recursive: true });
+    writeFileSync(join(root, COVERAGE_FILE), '{"stale.ts":{}}');
+    const unhandled = [{ file: '/repo/late.test.ts', message: 'Error: boom' }];
+
+    const diagnosis = { failedFiles: [], flaky: [], unhandled };
+    expect(publishCoverage(runDirWith(root, 'runA'), root, snapshotArtifact(root), diagnosis)).toBe(
+      'cleared',
+    );
+    const marker = readClearMarker(join(root, COVERAGE_DIR));
+    expect(marker?.failedFiles).toEqual([]);
+    expect(marker?.unhandledErrors).toEqual(unhandled);
+  });
+
   it('is not written when a sibling report was preserved', () => {
     const root = makeRoot();
     mkdirSync(join(root, COVERAGE_DIR), { recursive: true });
@@ -756,7 +775,7 @@ describe('the marker a cleared artifact leaves behind', () => {
     const mtimeNow = snapshotArtifact(root);
     if (mtimeNow === null) throw new Error('the artifact written above must have an mtime');
 
-    expect(publishCoverage(dir, root, mtimeNow - 5_000, ['a.test.ts'])).toBe('kept');
+    expect(publishCoverage(dir, root, mtimeNow - 5_000, failed('a.test.ts'))).toBe('kept');
     expect(readClearMarker(join(root, COVERAGE_DIR))).toBeNull();
   });
 
@@ -767,7 +786,7 @@ describe('the marker a cleared artifact leaves behind', () => {
     const dir = runDirWith(root, 'runA');
     const before = snapshotArtifact(root);
 
-    expect(publishCoverage(dir, root, before, ['/repo/a.test.ts'])).toBe('cleared');
+    expect(publishCoverage(dir, root, before, failed('/repo/a.test.ts'))).toBe('cleared');
     const marker = readClearMarker(join(root, COVERAGE_DIR));
     expect(marker?.failedFiles).toEqual(['/repo/a.test.ts']);
     expect(marker?.previousMtime).toBe(before);
@@ -780,7 +799,7 @@ describe('the marker a cleared artifact leaves behind', () => {
     const root = makeRoot();
     mkdirSync(join(root, COVERAGE_DIR), { recursive: true });
     writeFileSync(join(root, COVERAGE_FILE), '{"stale.ts":{}}');
-    publishCoverage(runDirWith(root, 'runA'), root, snapshotArtifact(root), ['a.test.ts']);
+    publishCoverage(runDirWith(root, 'runA'), root, snapshotArtifact(root), failed('a.test.ts'));
     expect(readClearMarker(join(root, COVERAGE_DIR))).not.toBeNull();
 
     const good = runDirWith(root, 'runB');
@@ -1268,6 +1287,12 @@ if (step === 'bug') {
 }
 if (step === 'green') green();
 if (step === 'green-no-report') { report([]); process.exit(0); }
+if (step === 'unhandled') {
+  report([{ name: '/repo/a.test.ts', status: 'passed', assertionResults: [] }]);
+  fs.writeFileSync(out.replace(/[^/]+$/, 'unhandled.json'),
+    JSON.stringify([{ file: '/repo/late.test.ts', message: 'Error: boom' }]));
+  process.exit(1);
+}
 process.exit(99);`,
     );
     // SAFETY: every line was written by the stub above as JSON.stringify(process.argv.slice(2)),
@@ -1395,6 +1420,24 @@ process.exit(99);`,
       spy.mockRestore();
     }
     expect(readClearMarker(join(root, COVERAGE_DIR))?.failedFiles).toEqual(['/repo/b.test.ts']);
+  });
+
+  // Pass 1's marker names a.test.ts; pass 2 failed on something else entirely, and only that is true.
+  it('refreshes the marker with an unhandled error that ended the second pass', async () => {
+    const root = makeRoot();
+    scriptedVitest(root, ['timeout', 'unhandled']);
+    seedArtifact(root);
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      expect(await produceCoverage(root)).toBe(1);
+    } finally {
+      spy.mockRestore();
+    }
+    const marker = readClearMarker(join(root, COVERAGE_DIR));
+    expect(marker?.failedFiles).toEqual([]);
+    expect(marker?.unhandledErrors).toEqual([
+      { file: '/repo/late.test.ts', message: 'Error: boom' },
+    ]);
   });
 
   // `coverage.reportOnFailure` makes a failed run write a report anyway. It is partial, so trusting it
@@ -1526,5 +1569,72 @@ describe('a load flake the retry cannot rescue, against real vitest', () => {
     expect(result.stderr).toMatch(/re-running the whole suite ONCE/);
     expect(result.stderr).toMatch(/starved under load/);
     expect(result.stderr).toMatch(/passed only at the raised timeout/);
+  });
+});
+
+describe('a run that exits non-zero with no failed test, against real vitest', () => {
+  // The shape that discarded an artifact in silence: every test green, one unhandled rejection.
+  const consumerRepo = (root: string, thresholds = '') => {
+    symlinkSync(join(DEVKIT_ROOT, 'node_modules'), join(root, 'node_modules'));
+    writeFileSync(
+      join(root, 'vitest.config.mjs'),
+      `export default {
+        test: {
+          include: ['*.test.mjs'],
+          coverage: { provider: 'v8', reporter: ['json'], reportsDirectory: './coverage'${thresholds} },
+        },
+      };\n`,
+    );
+    mkdirSync(join(root, COVERAGE_DIR), { recursive: true });
+    writeFileSync(join(root, COVERAGE_FILE), '{"from-an-earlier-green-run.ts":{}}');
+    writeFileSync(
+      join(root, 'late.test.mjs'),
+      `import { expect, it } from 'vitest';
+      it('passes but leaks a rejection', () => {
+        setTimeout(() => Promise.reject(new Error('boom after the test')), 0);
+        expect(1).toBe(1);
+      });
+      it('outlives the rejection', async () => {
+        await new Promise((r) => setTimeout(r, 50));
+      });\n`,
+    );
+  };
+
+  it('names the unhandled error and its test file, and records both in the marker', () => {
+    const root = makeRoot();
+    consumerRepo(root);
+
+    const result = coverageRun(root);
+
+    expect(result.status).toBe(1);
+    expect(existsSync(join(root, COVERAGE_FILE))).toBe(false);
+    expect(result.stderr).toMatch(/no test failed — the run ended on:/);
+    expect(result.stderr).toMatch(/late\.test\.mjs — Error: boom after the test/);
+    const marker = readClearMarker(join(root, COVERAGE_DIR));
+    expect(marker?.unhandledErrors).toEqual([
+      { file: expect.stringMatching(/late\.test\.mjs$/), message: 'Error: boom after the test' },
+    ]);
+  });
+
+  // No unhandled error to name: vitest exits 1 on a missed coverage threshold with every test green.
+  it('gives the generic cause when no error was reported', () => {
+    const root = makeRoot();
+    consumerRepo(root, ', thresholds: { functions: 100 }');
+    writeFileSync(
+      join(root, 'late.test.mjs'),
+      `import { expect, it } from 'vitest';
+      import { used } from './src.mjs';
+      it('covers half', () => expect(used()).toBe(1));\n`,
+    );
+    writeFileSync(
+      join(root, 'src.mjs'),
+      'export const used = () => 1;\nexport const unused = () => 2;\n',
+    );
+
+    const result = coverageRun(root);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toMatch(/file unknown — vitest exited 1 with no failed test/);
+    expect(readClearMarker(join(root, COVERAGE_DIR))?.unhandledErrors).toHaveLength(1);
   });
 });
