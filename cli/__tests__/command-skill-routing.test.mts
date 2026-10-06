@@ -7,6 +7,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { RESERVED_FLAG, resolveRunDir } from '../../gate-engine/coverage/produce.mts';
 import type { CommandMeta } from '../lib/help/render.mts';
 import { CLI, testSpawnSync } from './_helpers.mts';
 
@@ -317,5 +318,28 @@ describe('the routing predicate', () => {
       ({ body }) => bareWord.test(body) && !namedInSkills('review').test(body),
     );
     expect(prosePassers.length).toBeGreaterThan(0);
+  });
+});
+
+describe('the coverage-run stop pattern using-devkit documents', () => {
+  // A renamed flag or run directory would make the documented pkill match nothing, and an empty
+  // result is exactly what tempts an agent to widen the kill to every worktree's run.
+  const skill = readFileSync(join(SKILLS_DIR, 'using-devkit', 'SKILL.md'), 'utf8');
+  const documented = /pkill -TERM -f "([^"]+)"/.exec(skill)?.[1] ?? '';
+  const patternIn = (cwd: string) => new RegExp(documented.replace('$(pwd -P)', cwd));
+  const childArg = (cwd: string) => `${RESERVED_FLAG}=${resolveRunDir(cwd)}`;
+
+  it("matches the argument devkit gives this directory's vitest child", () => {
+    expect(documented).toContain('$(pwd -P)');
+    expect(patternIn('/repo/wt').test(childArg('/repo/wt'))).toBe(true);
+  });
+
+  it.each([
+    ['a sibling checkout sharing the path as a prefix', childArg('/repo/wt-2')],
+    ['a checkout whose path merely ends the same way', childArg('/other/repo/wt')],
+    ['a package directory below it', childArg('/repo/wt/packages/api')],
+    ['the host command line every worktree shares', 'node /usr/local/bin/devkit coverage-run'],
+  ])('does not match %s', (_case, commandLine) => {
+    expect(patternIn('/repo/wt').test(commandLine)).toBe(false);
   });
 });

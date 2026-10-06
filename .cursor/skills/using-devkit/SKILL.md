@@ -184,6 +184,13 @@ devkit command.
   does nothing** under ship (it reads that file from the committed tree, not your working tree), and
   re-running the full coverage suite to manufacture the artifact can take tens of minutes and still
   produce nothing if the base's tests are already failing — don't idle on it.
+- **Stopping a coverage run: stop your own, never match on `devkit coverage-run`.** That command
+  line is identical in every worktree, so a pattern kill on it stops other sessions' runs too. Stop
+  the background job you started — the only handle that exists while a package-manager-launched run
+  is still queued. Otherwise, from the directory the run was started in:
+  `pkill -TERM -f "reportsDirectory=$(pwd -P)/coverage/.runs/"`. No match means nothing of this
+  directory's is running; do not widen the pattern. A stopped run clears the coverage artifact, so
+  the gate blocks until a run completes or the bypass above is exported.
 - **"Coverage of the new diff" means the lines you ADDED — measure it with `devkit coverage-diff`.**
   A whole-file percentage on a large existing file mostly measures code your change never touched,
   so 40% there can be 80%+ of what you added. Run `devkit coverage-run` first; the report names the
