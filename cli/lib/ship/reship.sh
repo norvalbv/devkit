@@ -135,6 +135,10 @@ RESUME_ROOT=$(git rev-parse --show-toplevel)
 RESUME_SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 SHIP_INTENT="$RESUME_SCRIPT_DIR/ship-intent.mts"; [ -f "$SHIP_INTENT" ] || SHIP_INTENT="$RESUME_SCRIPT_DIR/ship-intent.mjs"
 . "$RESUME_SCRIPT_DIR/resume-extras-notice.sh"
+# Re-pushes pay the same gate cost and can inherit the same stale checkout baseline as new ships.
+. "$RESUME_SCRIPT_DIR/prepare-gate-worktree.sh"
+# Project before the intent read and write: a legacy linked .devkit resolves the record in the home.
+gate_project_caller "$RESUME_ROOT" || true
 RESUME_BODY=
 if [ "$RESUME" -eq 1 ]; then
   SI_OUT=$(mktemp "${TMPDIR:-/tmp}/ship-intent-read.XXXXXX")
@@ -606,10 +610,6 @@ else
   [ -n "${SHIP_DRY_RUN:-}" ] || reship_refuse_closed_pr "" "nothing pushed" || exit 1
 fi
 
-# Re-pushes pay the same gate cost and can inherit the same stale checkout baseline as new ships.
-. "$SCRIPT_DIR/prepare-gate-worktree.sh"
-# Project before the intent write: a legacy linked .devkit hides the record path from check-ignore.
-gate_project_caller "$ROOT" || true
 . "$SCRIPT_DIR/ship-run-record.sh"
 . "$SCRIPT_DIR/worktree-registry.sh"
 . "$SCRIPT_DIR/reclaim-orphan-worktrees.sh"
