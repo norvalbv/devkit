@@ -30,6 +30,8 @@ TAG_WORKTREE=
 TAG_COMMITS=()
 HAS_UPDATES=0
 HAS_NON_TAG_UPDATE=0
+FAILING_FILES=
+FAILING_LOG=
 
 . "$SCRIPT_DIR/../ship/prepare-gate-worktree.sh"
 
@@ -197,6 +199,60 @@ attribute_push_failure() {
   return 0
 }
 
+# collect_failing_files
+# Read the failing test files out of the cache vitest itself wrote during the run just judged, and
+# persist them. Same contract as attribute_push_failure: after the verdict, no `exit`, silent on doubt.
+collect_failing_files() {
+  local branch log reader results files=
+
+  [ "${DEVKIT_PREPUSH_ATTRIBUTION:-1}" = 0 ] && return 1
+
+  branch=$(git -C "$ROOT" symbolic-ref --short -q HEAD 2>/dev/null \
+    || git -C "$ROOT" rev-parse --short HEAD 2>/dev/null) || return 1
+  log="$ROOT/.devkit/last-pre-push-$(printf '%s' "$branch" | tr '/' '-').log"
+  # An earlier attempt's list must never read as this one's.
+  rm -f -- "$log" 2>/dev/null || return 1
+  [ "$GATE_PHASE" = test ] || return 1
+
+  # A linked node_modules shares one cache between checkouts, whose entries are indistinguishable.
+  [ -L "$ROOT/node_modules" ] && return 1
+
+  reader="$SCRIPT_DIR/pre-push/failing-test-files.mts"
+  [ -f "$reader" ] || reader="$SCRIPT_DIR/pre-push/failing-test-files.mjs"
+  for results in "$ROOT"/node_modules/.vite/vitest/*/results.json; do
+    [ -f "$results" ] || continue
+    # UPDATES_FILE was written before the suite started, so a cache older than it is a previous run's.
+    files="$files$(node "$reader" "$results" "$UPDATES_FILE" "$ROOT" 2>/dev/null)
+"
+  done
+  files=$(printf '%s' "$files" | sort -u | sed '/^$/d')
+  [ -n "$files" ] || return 1
+
+  mkdir -p "$ROOT/.devkit" 2>/dev/null || return 1
+  {
+    echo "devkit pre-push: test:run failed (exit $gate_rc) at ${GATE_HEAD_OID:-unknown}, $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    echo "Failing test files (per vitest's results cache):"
+    printf '%s\n' "$files"
+  } > "$log" 2>/dev/null || return 1
+  FAILING_FILES=$files
+  FAILING_LOG=$log
+}
+
+# print_failing_files
+# The hook's last words, so a `tail` of a blocked push names what failed and where the list lives.
+print_failing_files() {
+  local count
+  [ -n "$FAILING_FILES" ] || return 1
+  count=$(printf '%s\n' "$FAILING_FILES" | wc -l | tr -d ' ')
+  {
+    echo ""
+    echo "Failing test files (per vitest's results cache):"
+    printf '%s\n' "$FAILING_FILES" | head -20 | sed 's/^/  /'
+    [ "$count" -le 20 ] || echo "  ... and $((count - 20)) more"
+    echo "Full list: $FAILING_LOG"
+  } >&2
+}
+
 cat > "$UPDATES_FILE"
 while read -r local_ref local_oid remote_ref remote_oid; do
   [ -n "${remote_ref:-}" ] || continue
@@ -234,7 +290,10 @@ if [ "$HAS_UPDATES" -eq 0 ] || [ "$HAS_NON_TAG_UPDATE" -eq 1 ]; then
     # `|| true` is the safety argument: it supplies a zero status so `set -e` cannot abort here, AND
     # it suppresses errexit for the whole call, so nothing inside can short-circuit the script. The
     # verdict was captured before it ran, and signal_exit already prefers it over any signal code.
+    # The cache is read first: attribution may wait on the network while another run rewrites it.
+    collect_failing_files || true
     attribute_push_failure || true
+    print_failing_files || true
     exit "$gate_rc"
   fi
   exit 0
