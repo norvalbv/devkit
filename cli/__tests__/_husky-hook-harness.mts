@@ -44,7 +44,9 @@ function stageOverlayFixtures(
 ) {
   if (fallow) writeStub(join(bin, 'fallow'), 'fallow', 'FALLOW_RC');
   if (eslintOverlay) {
-    writeFileSync(join(home, 'eslint.config.devkit.mjs'), 'export default [];\n');
+    // A string is the overlay config's own content; `true` is an empty config.
+    const content = eslintOverlay === true ? 'export default [];\n' : eslintOverlay;
+    writeFileSync(join(home, 'eslint.config.devkit.mjs'), content);
     writeStub(join(packageBin, 'eslint'), 'eslint', 'ESLINT_RC');
   }
   if (biomeOverlay) {

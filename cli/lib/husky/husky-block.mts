@@ -30,6 +30,10 @@ import {
   selectedFragment,
 } from './review-fragments.mts';
 import { sentryShipPrewarmFragment } from './sentry-fragments.mts';
+import {
+  ESLINT_OVERLAY_FILE,
+  LEGACY_ESLINT_OVERLAY_MARKER,
+} from './overlay/eslint-overlay-marker.mts';
 import { shQuote } from '../ship/redact-secrets.mts';
 
 /**
@@ -187,13 +191,20 @@ export function buildFullHook(selection: HookSelection, pkgRel = '', binDir: Bin
 // `--relative` makes `git diff` emit paths relative to the CURRENT dir, so this works whether
 // the hook runs at the repo root or cd'd into a monorepo package (eslint/biome + their configs
 // are then resolved package-locally).
-const overlayLintStep = (tool: string, label: string, exts: string, config: string, run: string) =>
+const overlayLintStep = (
+  tool: string,
+  label: string,
+  exts: string,
+  config: string,
+  run: string,
+  failHint = '',
+) =>
   `DK_STAGED=$(git diff --cached --name-only --relative --diff-filter=ACM | grep -E '\\.(${exts})$' || true)
 if [ -n "$DK_STAGED" ] && [ -f ${config} ]; then
     if [ -x node_modules/.bin/${tool} ]; then
         echo "${label}"
         echo "$DK_STAGED" | xargs ${run} || {
-${shipRehearsalHint('            ')}
+${failHint}${shipRehearsalHint('            ')}
             exit 1
         }
     else
@@ -204,8 +215,13 @@ const OVERLAY_ESLINT_STAGED = overlayLintStep(
   'eslint',
   '🧱 devkit eslint overlay (staged)...',
   'tsx?|jsx?',
-  'eslint.config.devkit.mjs',
-  '$DK_ESLINT -c eslint.config.devkit.mjs',
+  ESLINT_OVERLAY_FILE,
+  `$DK_ESLINT -c ${ESLINT_OVERLAY_FILE}`,
+  // A parse error from the legacy caps block names no cause; point at the command that does.
+  `            if grep -qF "${LEGACY_ESLINT_OVERLAY_MARKER}" ${ESLINT_OVERLAY_FILE} 2>/dev/null; then
+                echo "   ${ESLINT_OVERLAY_FILE} derives from an outdated devkit template — run \\\`devkit doctor\\\` for the fix" >&2
+            fi
+`,
 );
 const OVERLAY_BIOME = overlayLintStep(
   'biome',

@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   ESLINT_OVERLAY_FILE,
   eslintOverlayContent,
+  isLegacyEslintOverlay,
   legacyEslintOverlayContent,
   writeEslintOverlay,
 } from '../lib/install/overlay-lint-configs.mts';
@@ -292,16 +293,32 @@ describe('writeEslintOverlay — never overwrites unattended', () => {
     expect(vi.mocked(console.log).mock.calls.flat().join('\n')).toContain('delete it and re-run');
   });
 
-  it('preserves a consumer-edited overlay and names --force; --force replaces it', () => {
+  it('an overlay edited from the outdated template names the cause, not --force; --force replaces it', () => {
     const root = repoWith();
-    const edited = `${legacyEslintOverlayContent('eslint.config.mjs')}// team tweak\n`;
+    const legacy = legacyEslintOverlayContent('eslint.config.mjs');
+    // Hand-edited and reformatted: no longer byte-identical, still the widening caps block.
+    const edited = `${legacy.replace("['**/*.{ts,tsx,js,jsx}']", '["**/*.{ts,tsx,js,jsx}"]')}// team tweak\n`;
+    expect(isLegacyEslintOverlay(edited)).toBe(true);
+    writeFileSync(join(root, ESLINT_OVERLAY_FILE), edited);
+    writeEslintOverlay(root, false, false);
+    expect(read(root)).toBe(edited);
+    const out = vi.mocked(console.log).mock.calls.flat().join('\n');
+    expect(out).toContain('derives from an outdated devkit template');
+    expect(out).toContain('delete it and re-run (hand edits are lost)');
+    expect(out).not.toContain('--force');
+
+    writeEslintOverlay(root, true, false);
+    expect(read(root)).toBe(eslintOverlayContent('eslint.config.mjs'));
+  });
+
+  it('preserves an overlay edited from the current template and names --force', () => {
+    const root = repoWith();
+    const edited = `${eslintOverlayContent('eslint.config.mjs')}// team tweak\n`;
+    expect(isLegacyEslintOverlay(edited)).toBe(false);
     writeFileSync(join(root, ESLINT_OVERLAY_FILE), edited);
     writeEslintOverlay(root, false, false);
     expect(read(root)).toBe(edited);
     expect(vi.mocked(console.log).mock.calls.flat().join('\n')).toContain('--force');
-
-    writeEslintOverlay(root, true, false);
-    expect(read(root)).toBe(eslintOverlayContent('eslint.config.mjs'));
   });
 
   it('an unreadable overlay path (a dangling link) gets a remedy that actually works', () => {

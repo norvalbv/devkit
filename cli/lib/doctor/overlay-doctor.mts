@@ -30,7 +30,8 @@ import {
   overlayHooksPath,
   worktrees,
 } from '../husky/overlay/overlay-home.mts';
-import { printProjectionGaps } from '../husky/overlay/projection-report.mts';
+import { listed, printProjectionGaps } from '../husky/overlay/projection-report.mts';
+import { ESLINT_OVERLAY_FILE, isLegacyEslintOverlay } from '../install/overlay-lint-configs.mts';
 import {
   HEAL_ALIAS_NAME,
   isHealAlias,
@@ -107,6 +108,7 @@ export async function runOverlayDoctor(
     `  ${pathOk ? '✓' : '⚠'} core.hooksPath = ${healed ? `${expected} (re-pointed from ${hooksPath || '(unset)'}; husky reclaims it on every install — make it durable with \`devkit init --overlay --global-commit-gate\`)` : hooksPath || '(unset)'}${hooksPath === LOCAL_HOOKS && !pathOk ? ' — RELATIVE, so every linked worktree runs no hooks at all;' : ''}${pathOk ? '' : ` — heal with \`git ${HEAL_ALIAS_NAME}\` (re-points it), \`devkit doctor --fix\`, or re-run \`devkit init --overlay\``}`,
   );
   const worktreesOk = printLinkedWorktrees(home, pkgRel, fix);
+  printLegacyEslintOverlays(home, pkgRel);
   const judgesWired = printCommitMsgRow(cfg, fix, sync.commitMsg);
   if (judgesWired && !pathOk && !globalHookInstalled())
     console.log(
@@ -261,6 +263,38 @@ function printLinkedWorktrees(home: string, pkgRel: string, fix: boolean): boole
     if (!hasOwnOverlay(path)) ok = printProjectionGaps(path, home, pkgRel, fix) && ok;
   }
   return ok;
+}
+
+const hasLegacyEslintOverlay = (root: string, pkgRel: string) => {
+  try {
+    return isLegacyEslintOverlay(readFileSync(join(root, pkgRel, ESLINT_OVERLAY_FILE), 'utf8'));
+  } catch {
+    return false; // absent or unreadable: the projection rows already cover it
+  }
+};
+
+// Advisory, never in the exit code: devkit does not rewrite an overlay it did not just create.
+export function printLegacyEslintOverlays(home: string, pkgRel: string) {
+  const why = `derives from an outdated devkit template whose size-caps block lints files the repo config does not, so a staged file such as a root *.ts fails to parse`;
+  const stale = worktrees(home)
+    .filter(
+      ({ path, bare }) => !bare && !sameDir(path, home) && hasLegacyEslintOverlay(path, pkgRel),
+    )
+    .map(({ path }) => path);
+  // A checkout with its own overlay is never projected into, so only its own upgrade rewrites it.
+  for (const own of stale.filter(hasOwnOverlay))
+    console.log(
+      `  ⚠ ${ESLINT_OVERLAY_FILE} in ${own} ${why} — delete it (hand edits are lost) and run \`devkit upgrade\` there`,
+    );
+  const borrowed = stale.filter((path) => !hasOwnOverlay(path));
+  if (hasLegacyEslintOverlay(home, pkgRel))
+    console.log(
+      `  ⚠ ${ESLINT_OVERLAY_FILE} ${why} — delete it (hand edits are lost) and run \`devkit upgrade\`; then delete each linked worktree's copy and run \`devkit doctor --fix\``,
+    );
+  else if (borrowed.length)
+    console.log(
+      `  ⚠ ${ESLINT_OVERLAY_FILE} in ${listed(borrowed)} ${why} — delete each copy and run \`devkit doctor --fix\``,
+    );
 }
 
 // sc-1794: the commit-msg judges (completeness, sentry) — a silently dropped message gate is

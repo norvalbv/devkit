@@ -5,7 +5,7 @@ import { sameDir } from '../../doctor/hooks-path.mts';
 import { hasOwnOverlay, projectionGaps, repairProjection } from './overlay-home.mts';
 
 const MAX_LISTED = 5;
-const listed = (paths: string[]) =>
+export const listed = (paths: string[]) =>
   paths.length > MAX_LISTED
     ? `${paths.slice(0, MAX_LISTED).join(', ')} +${paths.length - MAX_LISTED} more`
     : paths.join(', ');
