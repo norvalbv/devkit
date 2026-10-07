@@ -26,6 +26,7 @@ import doctorRun from '../commands/doctor.mts';
 import { applyInit } from '../commands/init.mts';
 import { applyOverlayConstraints, defaultSelection } from '../lib/components.mts';
 import { nativeHooksDir } from '../lib/doctor/hooks-path.mts';
+import { printLegacyEslintOverlays } from '../lib/doctor/overlay-doctor.mts';
 import { chainWord } from '../lib/husky/husky-block.mts';
 import { healAliasCmd, isHealAlias } from '../lib/husky/overlay/heal-alias.mts';
 import {
@@ -1030,5 +1031,89 @@ describe('overlay eslint config across re-init (sc-3791)', () => {
     await initOverlay(root);
     expect(readFileSync(overlayCfg, 'utf8')).toBe(edited);
     expect(git(root, 'status', '--porcelain')).toBe('');
+  });
+
+  // The frink-oss shape: the outdated template plus a hand-added block, so init never refreshes it.
+  const HAND_EDITED_LEGACY = `${legacyEslintOverlayContent('eslint.config.mjs')}// team tweak\n`;
+  const doctorOut = async (root: string) => {
+    vi.mocked(console.log).mockClear();
+    const code = await doctorRun([], root);
+    return { code, out: vi.mocked(console.log).mock.calls.flat().join('\n') };
+  };
+
+  it('doctor names a home overlay edited from the outdated template, home remedy first', async () => {
+    const root = workRepo();
+    await initOverlay(root);
+    const healthy = await doctorOut(root);
+    expect(healthy.out).not.toContain('outdated devkit template');
+
+    writeFileSync(join(root, ESLINT_OVERLAY_FILE), HAND_EDITED_LEGACY);
+    const { code, out } = await doctorOut(root);
+    expect(code).toBe(healthy.code); // advisory: never in the exit code
+    expect(out).toMatch(
+      /eslint\.config\.devkit\.mjs derives from an outdated devkit template.*run `devkit upgrade`; then delete each linked worktree's copy/,
+    );
+
+    rmSync(join(root, ESLINT_OVERLAY_FILE));
+    await initOverlay(root); // what `devkit upgrade` re-runs
+    expect(readFileSync(join(root, ESLINT_OVERLAY_FILE), 'utf8')).toBe(
+      eslintOverlayContent('eslint.config.mjs'),
+    );
+    expect((await doctorOut(root)).out).not.toContain('outdated devkit template');
+  });
+
+  it('doctor names a worktree copy left on the outdated template; deleting it and --fix heals', async () => {
+    const root = workRepo();
+    await initOverlay(root);
+    const wt = addWorktree(root);
+    commit(wt, 'link it');
+    const healthy = await doctorOut(root);
+    writeFileSync(join(wt, ESLINT_OVERLAY_FILE), HAND_EDITED_LEGACY);
+
+    const { code, out } = await doctorOut(root);
+    expect(code).toBe(healthy.code);
+    expect(out).toContain(`${ESLINT_OVERLAY_FILE} in ${realpathSync(wt)} derives from`);
+    expect(out).toContain('delete each copy and run `devkit doctor --fix`');
+
+    rmSync(join(wt, ESLINT_OVERLAY_FILE));
+    await doctorRun(['--fix'], root);
+    expect(readFileSync(join(wt, ESLINT_OVERLAY_FILE), 'utf8')).toBe(
+      eslintOverlayContent('eslint.config.mjs'),
+    );
+    expect((await doctorOut(root)).out).not.toContain('outdated devkit template');
+
+    // Home legacy too: only the home row, because --fix would re-project the home's legacy bytes.
+    writeFileSync(join(wt, ESLINT_OVERLAY_FILE), HAND_EDITED_LEGACY);
+    writeFileSync(join(root, ESLINT_OVERLAY_FILE), HAND_EDITED_LEGACY);
+    const both = (await doctorOut(root)).out;
+    expect(both).toContain("run `devkit upgrade`; then delete each linked worktree's copy");
+    expect(both).not.toContain('delete each copy and run `devkit doctor --fix`');
+  });
+
+  it('a monorepo package reads the overlay under the package, not the git root', () => {
+    const root = mkTmp('overlay-legacy-pkg-');
+    git(root, 'init', '-q');
+    mkdirSync(join(root, 'pkg'));
+    writeFileSync(join(root, ESLINT_OVERLAY_FILE), HAND_EDITED_LEGACY); // not the package's
+    printLegacyEslintOverlays(root, 'pkg');
+    expect(vi.mocked(console.log)).not.toHaveBeenCalled();
+
+    writeFileSync(join(root, 'pkg', ESLINT_OVERLAY_FILE), HAND_EDITED_LEGACY);
+    printLegacyEslintOverlays(root, 'pkg');
+    expect(vi.mocked(console.log).mock.calls.flat().join('\n')).toContain('derives from');
+  });
+
+  it('a sibling checkout with its own overlay is told to upgrade there, not to doctor --fix', async () => {
+    const root = workRepo();
+    await initOverlay(root);
+    const wt = addWorktree(root);
+    mkdirSync(join(wt, '.devkit', 'hooks'), { recursive: true });
+    writeFileSync(join(wt, '.devkit', 'hooks', 'pre-commit'), '#!/bin/sh\n', { mode: 0o755 });
+    writeFileSync(join(wt, ESLINT_OVERLAY_FILE), HAND_EDITED_LEGACY);
+
+    const { out } = await doctorOut(root);
+    expect(out).toContain(`${ESLINT_OVERLAY_FILE} in ${realpathSync(wt)} derives from`);
+    expect(out).toContain('run `devkit upgrade` there');
+    expect(out).not.toContain('devkit doctor --fix`');
   });
 });

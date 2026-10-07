@@ -11,9 +11,18 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { packageDir } from '../fs-helpers.mts';
+import {
+  ESLINT_OVERLAY_FILE,
+  LEGACY_ESLINT_OVERLAY_MARKER,
+} from '../husky/overlay/eslint-overlay-marker.mts';
 
-export const ESLINT_OVERLAY_FILE = 'eslint.config.devkit.mjs';
+export { ESLINT_OVERLAY_FILE, LEGACY_ESLINT_OVERLAY_MARKER };
 const REPO_CONFIGS = ['eslint.config.mjs', 'eslint.config.js'];
+
+/** True for the legacy template and anything edited from it: its caps block widens the lint. */
+export function isLegacyEslintOverlay(content: string) {
+  return content.includes(LEGACY_ESLINT_OVERLAY_MARKER);
+}
 
 /** The repo's flat eslint config to extend (overlay supports flat ESM/JS configs only). */
 export function repoEslintConfig(cwd: string) {
@@ -71,7 +80,7 @@ export default [
 // to refresh; anything else is the consumer's and is preserved.
 export function legacyEslintOverlayContent(repo: string) {
   return `// devkit OVERLAY eslint config (LOCAL, git-ignored) — extends the repo's own config and
-// adds devkit's built-in size caps (no plugin). The overlay hook runs THIS over staged files.
+// ${LEGACY_ESLINT_OVERLAY_MARKER}. The overlay hook runs THIS over staged files.
 import repoConfig from './${repo}';
 
 const base = Array.isArray(repoConfig) ? repoConfig : [repoConfig];
@@ -113,6 +122,8 @@ function existingOverlayStatus(dest: string, content: string) {
   if (existing === content) return `• ${ESLINT_OVERLAY_FILE} is current`;
   if (isDevkitWrittenOverlay(existing))
     return `! ${ESLINT_OVERLAY_FILE} is an outdated devkit template — delete it and re-run`;
+  if (isLegacyEslintOverlay(existing))
+    return `! ${ESLINT_OVERLAY_FILE} derives from an outdated devkit template whose size-caps block lints files the repo config does not — delete it and re-run (hand edits are lost)`;
   return `• ${ESLINT_OVERLAY_FILE} exists (use --force to refresh)`;
 }
 

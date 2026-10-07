@@ -12,6 +12,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { buildFullHook } from '../lib/husky/husky-block.mts';
+import {
+  eslintOverlayContent,
+  legacyEslintOverlayContent,
+} from '../lib/install/overlay-lint-configs.mts';
 import { ALL_GUARDS, cleanupHomes, hasDash, homes, runHook } from './_husky-hook-harness.mts';
 
 // The hook's SHELL contract: commit/ship fail fast, review/dry-gates defer per lane, and it all
@@ -953,6 +957,27 @@ describe('overlay staged gates run before the AI guards (sc-3020)', () => {
     expect(r.status, r.stderr).toBe(0);
     expect(r.calls).toContain(`${call} src/staged.ts`);
     expect(r.calls.includes('--preserve-symlinks')).toBe(call === PRESERVED);
+  });
+
+  it('a failing eslint overlay names an outdated overlay template, and only then', () => {
+    const HINT = 'derives from an outdated devkit template — run `devkit doctor` for the fix';
+    const current = runHook(
+      { ESLINT_RC: '1' },
+      REVIEWED,
+      overlay({ fallow: false, eslintOverlay: eslintOverlayContent('eslint.config.mjs') }),
+    );
+    expect(current.status).toBe(1);
+    expect(`${current.stdout}${current.stderr}`).not.toContain(HINT);
+
+    // Hand-edited, so init never refreshes it. A plain commit replays the gate log on stdout.
+    const edited = `${legacyEslintOverlayContent('eslint.config.mjs')}// team tweak\n`;
+    const legacy = runHook(
+      { ESLINT_RC: '1' },
+      REVIEWED,
+      overlay({ fallow: false, eslintOverlay: edited }),
+    );
+    expect(legacy.status).toBe(1);
+    expect(`${legacy.stdout}${legacy.stderr}`).toContain(HINT);
   });
 
   it('an eslint overlay whose repo binary is missing says so instead of skipping silently', () => {
