@@ -2,10 +2,10 @@
  * Drift: has a decision record lost its grip on the code — or the ruling — it governs?
  *
  * A decision RECORD does not rot. It is append-only, one file per axis, and its content reads the
- * same in a century. What rots is ENFORCEMENT. `check-alignment` only judges a Target whose
+ * same in a century. What rots is its REACH. `check-alignment` only judges a Target whose
  * `**Scope:**` glob matches a staged file; a Target matching nothing is free-skipped and the gate
  * exits 0. So when a scope glob stops resolving — a directory reorganised, an extension migrated,
- * a file moved — the ruling stays perfectly readable and silently stops being enforced, and the
+ * a file moved — the ruling stays perfectly readable and silently stops being loaded, and the
  * green gate is indistinguishable from a gate that looked and found nothing wrong.
  *
  * Measured on this repo when the check was written: 5 of 28 scoped records pointed at no path
@@ -44,7 +44,7 @@ const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'coverage', '.next', 
 /**
  * Repo-relative paths of tracked-ish files. Walks the tree rather than shelling out to git so the
  * check works in a fixture or an unstaged worktree, and skips the usual generated/vendored trees —
- * a scope that only matches inside node_modules is not enforced in any meaningful sense.
+ * a scope that only matches inside node_modules governs nothing in any meaningful sense.
  */
 export function repoFiles(root: string, max = 20000): string[] {
   const out: string[] = [];
@@ -78,8 +78,8 @@ export function repoFiles(root: string, max = 20000): string[] {
  * Every scoped axis whose globs match no file in the tree.
  *
  * Reuses the gate's own `matchScope`, so the question asked here is EXACTLY the question the gate
- * asks at commit time. A separate glob implementation could disagree with the gate and report an
- * axis as enforced when it is not — which is the failure this exists to catch.
+ * asks when it runs. A separate glob implementation could disagree with the gate and report an
+ * axis as live when it is not — which is the failure this exists to catch.
  */
 export function findDrift(root: string, decisionsDir?: string | null): DriftedAxis[] {
   const targets = loadScopedTargets(decisionsDir);
@@ -91,7 +91,7 @@ export function findDrift(root: string, decisionsDir?: string | null): DriftedAx
     .map((t) => ({ slug: t.slug, globs: t.scopeGlobs }));
 }
 
-/** `guard-decisions drift` — exit 1 when any ruling has silently stopped being enforced, a
+/** `guard-decisions drift` — exit 1 when any ruling has silently stopped being loaded, a
  * `**Supersedes:**` id resolves to nothing, or an axis carries more than one un-superseded Target. */
 export function runDrift(root: string, decisionsDir?: string | null): number {
   if (!existsSync(root)) {
@@ -107,7 +107,7 @@ export function runDrift(root: string, decisionsDir?: string | null): number {
   if (drifted.length) {
     console.error(
       `🚫 ${drifted.length} decision record(s) scope code that no longer exists — these rulings are ` +
-        'NO LONGER ENFORCED (check-alignment free-skips a Target whose scope matches nothing):',
+        'NO LONGER LOADED BY SCOPE (the pre-edit brief and check-alignment skip a Target whose scope matches nothing):',
     );
     for (const d of drifted) console.error(`   ${d.slug}\n     Scope: ${d.globs.join(',')}`);
     console.error(

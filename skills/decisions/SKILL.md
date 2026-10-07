@@ -44,7 +44,7 @@ research-backed, vision-tied). If it's a local implementation choice under an ex
 
 frink **adopts the Nygard / MADR ADR spine** (don't reinvent — rule #6): **Context** (the forcing
 problem) → **Decision / Ruling** (the mechanism) → **Consequences** (value protected + cost paid),
-plus frink's own extensions (Vision-fit, Scope alignment-gate, Anchored-bet). The named failure this
+plus frink's own extensions (Vision-fit, Scope, Anchored-bet). The named failure this
 prevents is *architectural knowledge vaporization* (Jansen & Bosch 2005) — the *why* left implicit
 evaporates on the next refactor.
 
@@ -70,8 +70,9 @@ guard-decisions add <slug> --target \
   Context = the *problem* (WHY-now), Ruling = the *mechanism* (WHAT), Consequences/Tradeoff = the
   *value + cost* (SO-THAT). Vision-fit names ONLY the North Star — never restate the symptom (that's
   Context) or the value (that's Consequences).
-- **`--scope`** = files/area this target governs (comma-separated globs) → arms the **alignment gate**
-  (Capture C): a later code change in that scope that contradicts the target is blocked at commit.
+- **`--scope`** = files/area this target governs (comma-separated globs) → decides where the ruling is
+  loaded: the pre-edit brief, the commit-time decision and reviewer judges, and the on-demand
+  **alignment check** (Capture C). Without one, only a semantic match can surface it.
 - **`--anchored-bet`** = the `frink-identity` confidence the target rests on; `[BET]` = cheap to
   revisit. `[VALIDATED]` asserts the originating failure (Context) no longer occurs.
 - **`--revisit-when`** = the 100-year test made mechanical: the concrete condition under which this
@@ -89,8 +90,8 @@ guard-decisions add <slug> --target \
 - **Never bury the Negative.** An empty `--tradeoff` is how a future simplifier silently re-introduces the original failure.
 
 **Writing with DEPTH — the rubric you are judged against.** A Target can fill every required field and
-still be shallow (a non-empty field can still say nothing). A warn-only **depth judge** runs at commit
-(Capture C) against this rubric — but write to it, don't wait to be warned. Self-interview *one
+still be shallow (a non-empty field can still say nothing). A warn-only **depth judge** checks this
+rubric when you run Capture C — but write to it, don't wait to be warned. Self-interview *one
 question at a time* (the adr-agent technique) until all of these hold:
 1. **Context = the forcing COST, not a restatement.** What did the old state actually *cost* — the
    failure, the symptom, who it hurt — that made the status quo untenable? If your Context merely
@@ -164,16 +165,27 @@ legacy deletion) with **no decision staged**; `claude -p` clears a routine chang
 ("record a Target, or `GUARD_NO_LOG=1` if minor"). A Stop hook also nudges at turn-end while the
 *why* is live (snoozed once per session).
 
-## Capture C — alignment gate (`guard-decisions check-alignment`) — the flip-flop guard
+## Capture C — alignment check (`guard-decisions check-alignment --gate`) — the flip-flop guard
+
+**On demand: no devkit-generated hook runs it.** Run it yourself on a staged change before you commit,
+or add it to your hook outside the devkit-managed block (below). It is kept out of the generated hook
+because it costs one agentic judge per matching Target, and a false CONTRADICT would block a commit.
+
+```
+arc=0
+guard-decisions check-alignment --gate || arc=$?
+# 0 = aligned, 2 = could not run (fail-open); anything else blocks the commit.
+[ "$arc" -eq 0 ] || [ "$arc" -eq 2 ] || exit 1
+```
 
 For every Target with a `--scope`, when a staged file matches that scope, an **agentic judge**
 (headless, with read-only tools: Read/Grep/Glob/`git diff --cached`) *investigates* the staged
 changes itself — no stuffed/truncated diff — then rules **ALIGN / CONTRADICT / UNCLEAR** with a
 rationale + final `VERDICT:` line (tool-equipped judges beat single-shot on code — Agent-as-a-Judge,
 arXiv:2410.10934). **Cascade:** the light judge (`review.model`, default gpt-5.6-terra@high) judges
-every scoped commit; only its CONTRADICT escalates to the escalation model (`review.escalationModel`,
+every matching Target; only its CONTRADICT escalates to the escalation model (`review.escalationModel`,
 default gpt-5.6-sol), which gets the full transcript + the same tools and confirms or overturns
-(gpt-* judges run through the codex CLI in its read-only sandbox). A **block requires an
+(gpt-* judges run through the codex CLI in its read-only sandbox). A **block (exit 1) requires an
 escalation-confirmed CONTRADICT** (realign, or re-target with `--evidence-change`). This
 catches the real flip-flop — code silently deviating from an existing target — deterministically
 (the scope glob is the match, the LLM only judges contradiction). Bounded block; fail-open at every
@@ -182,7 +194,7 @@ step if the judge runtime (codex for gpt-* models, `claude` otherwise) is absent
 Recording a Target **alongside its first implementation** in one commit is fine — a normal step toward
 the target judges ALIGN; if a false CONTRADICT ever blocks that combined commit, `GUARD_NO_LOG=1`.
 
-**The same gate also runs a WARN-ONLY depth pass.** For every staged `docs/decisions/*.md`, `claude -p`
+**The same command also runs a WARN-ONLY depth pass.** For every staged `docs/decisions/*.md`, `claude -p`
 judges the Target block against the depth rubric above (Context not circular · each rejected road
 paired with its losing criterion · the Negative concrete) → **PASS / THIN**. A **THIN warns** and names
 the weak spot so you deepen the still-uncommitted block — it does **not** block (the schema already
@@ -200,7 +212,7 @@ params, which provably do not help (a Target can satisfy all five required field
 | Recording an implementation step as a new `--target` | It's a `--note`. A target moves only on an evidence change (`--evidence-change`), not impl pain. |
 | Deleting a non-epic entry | **Archive** it (`## [archived …]`). Never delete — it breaks append-only trust. |
 | Logging a bug fix / pure refactor / one local choice | Below the bar — not an epic, no viable opposite. Don't log (or `--note` under an existing target). |
-| Omitting `--scope` on a product-facing target | Then the alignment gate can't guard it. Set the glob so deviations get caught. |
+| Omitting `--scope` on a product-facing target | Then the pre-edit brief and the alignment check never load it. Set the glob so deviations get caught. |
 | Inventing a new slug for an existing axis | `query` first; reuse the slug. |
 
 **REQUIRED TRIGGER:** Use `brainstorming` — that is where Capture A fires. This skill is the mechanics.

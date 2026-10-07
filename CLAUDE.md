@@ -29,7 +29,7 @@ A consumer reaches the same surface as `guard-decisions`. The source rewrite is 
 ## What a record contains
 
 Context (the forcing problem) → Ruling (the mechanism) → Consequences (value protected, cost paid),
-plus devkit's own extensions: Tradeoff, Vision-fit, and a Scope glob that arms the alignment gate.
+plus devkit's own extensions: Tradeoff, Vision-fit, and a Scope glob naming the files a ruling governs.
 Optional fields carry Researched, Rejected, Anchored-bet, Revisit-when and Category.
 
 Records are written through the `guard-decisions` CLI and the `skills/decisions/SKILL.md` playbook.

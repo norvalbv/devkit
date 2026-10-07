@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { findDrift, repoFiles, runDrift } from '../drift.mts';
 import { resolveSupersession } from '../recall/supersession.mts';
 
@@ -47,7 +47,7 @@ describe('decision drift (scope no longer resolves)', () => {
   });
 
   // The real-world cause: the repo migrated .mjs -> .mts and every scope naming a .mjs file stopped
-  // matching. The ruling is still correct and still readable; it is simply no longer enforced.
+  // matching. The ruling is still correct and still readable; it is simply no longer loaded.
   it('catches the extension-migration case', () => {
     writeFileSync(join(decisions, 'migrated.md'), target('migrated', 'src/live/kept.mjs'));
     expect(findDrift(root, decisions).map((d) => d.slug)).toEqual(['migrated']);
@@ -119,6 +119,17 @@ describe('decision drift (scope no longer resolves)', () => {
 
     writeFileSync(join(decisions, 'rotted.md'), target('rotted', 'src/gone/**'));
     expect(runDrift(root, decisions)).toBe(1);
+  });
+
+  // No generated hook judges a Target, so a drifted scope costs loading, not enforcement.
+  it('reports a drifted ruling as no longer loaded by scope, never as no longer enforced', () => {
+    writeFileSync(join(decisions, 'rotted.md'), target('rotted', 'src/gone/**'));
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    runDrift(root, decisions);
+    const printed = error.mock.calls.flat().join('\n');
+    error.mockRestore();
+    expect(printed).toContain('NO LONGER LOADED BY SCOPE');
+    expect(printed).not.toMatch(/enforced/i);
   });
 
   it('runDrift returns the could-not-run code for a missing root', () => {
