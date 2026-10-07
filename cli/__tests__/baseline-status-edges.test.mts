@@ -518,6 +518,19 @@ describe('wiring', () => {
       'timeout-minutes at job level would put the if: always() uploads at the mercy of cancellation',
     ).toBeNull();
   });
+
+  // The reader answers from one completed push run per commit. A group two pushes can share lets
+  // GitHub cancel or replace one of them, so only a pull request may share its group.
+  it('supersedes runs per pull request and never groups two pushes together', () => {
+    const gate = readFileSync(
+      join(import.meta.dirname, '..', '..', '.github/workflows/gate.yml'),
+      'utf8',
+    );
+    const block = /^concurrency:\n {2}group: (.+)\n {2}cancel-in-progress: (.+)$/m.exec(gate);
+    expect(block?.[1]).toContain('github.event.pull_request.number || github.run_id');
+    // Without cancellation a shared group only queues: the newer head waits behind the stale run.
+    expect(block?.[2]).toBe("${{ github.event_name == 'pull_request' }}");
+  });
 });
 
 describe('artifact validation and transient failures (correctness-reviewer findings)', () => {
