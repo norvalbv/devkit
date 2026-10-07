@@ -89,7 +89,7 @@ export const INHERITED_RUN_ENV = [
 ];
 
 // review-target.sh guards a review ENTRYPOINT, so its list is NOT a superset of what a ship exports
-// downstream — these twelve reach the suite unscrubbed by it. They are not inert: qavis-advisory's
+// downstream — these names reach the suite unscrubbed by it. They are not inert: qavis-advisory's
 // shipMode() branches on DEVKIT_SHIP_ROOT and then runs git against that path, and completeness's
 // verdictBranch() scopes a sticky verdict to DEVKIT_SHIP_BRANCH, so an inherited pair makes a test
 // answer for the OUTER ship's repository. A parity test derives this set from the ship scripts.
@@ -106,6 +106,9 @@ export const SHIP_EXPORTED_ENV = [
   'DEVKIT_SHIP_REPO',
   'DEVKIT_SHIP_RESUMED',
   'DEVKIT_SHIP_ROOT',
+  // A version label rather than authority, but wait-ci and ship telemetry read it: inherited, a test
+  // would report the OUTER ship's version.
+  'DEVKIT_TELEMETRY_VERSION',
 ];
 
 // FRINK_AI_STRICT is the legacy alias gate-engine reads alongside GUARD_AI_STRICT; no devkit path
