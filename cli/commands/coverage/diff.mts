@@ -3,9 +3,9 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { resolveGuardConfig, sourceMatchers } from '../../../gate-engine/config.mts';
-import { parsePatchHunks } from '../../../gate-engine/comment-firewall/patch.mts';
 import {
   addedLineCoverage,
+  addedLinesOf,
   type LineCoverageEntry,
   lineRanges,
 } from '../../../gate-engine/coverage/lines.mts';
@@ -18,7 +18,8 @@ import {
   readManifest,
   sha256,
 } from '../../../gate-engine/coverage/provenance.mts';
-import { computePercentages, TEST_PATH } from '../../../gate-engine/coverage/run.mts';
+import { TEST_PATH } from '../../../gate-engine/coverage/gate-shared.mts';
+import { computePercentages } from '../../../gate-engine/coverage/run.mts';
 import { type GitRun, gitRunner, line, ok } from '../../lib/ship/base-drift/git-run.mts';
 import { resolveBase } from '../../lib/ship/base-drift/resolve-base.mts';
 
@@ -40,6 +41,9 @@ Reads ${COVERAGE_FILE} as \`devkit coverage-run\` left it; it never runs tests. 
 committed, staged and unstaged changes since the merge-base, plus untracked source files. A line
 counts when a statement starts on it (istanbul's line rule, as guard-coverage uses), so comments,
 braces and types are neither covered nor uncovered.
+
+guard-coverage enforces this same measure at commit time when guard.config.json sets
+"coverage": { "scope": "diff", "addedLines": <pct> }.
 
 Use this when a brief asks for coverage of "the new diff": whole-file percentages on a large
 existing file mostly measure code the change never touched.
@@ -118,9 +122,7 @@ function addedLines(run: GitRun, mergeBase: string, path: string): Set<number> {
     '--',
     path,
   ]);
-  const added = new Set<number>();
-  for (const hunk of parsePatchHunks(diff.stdout)) for (const n of hunk.addedLines) added.add(n);
-  return added;
+  return addedLinesOf(diff.stdout);
 }
 
 /** Every line of an untracked file is added. */

@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, vi } from 'vitest';
+import type { CoverageConfig } from '../../config.mts';
 import { publishCoverage } from '../produce.mts';
 import { snapshotSource } from '../provenance.mts';
 import { runCoverage } from '../run.mts';
@@ -30,8 +31,8 @@ export const COV = JSON.stringify({
 });
 
 /** A committed repo: one source file, its test, a README, and a coverage-selecting config. */
-/** The guard.config.json `coverage` thresholds a fixture repo enforces. */
-export type Thresholds = Partial<Record<'statements' | 'functions' | 'branches' | 'lines', number>>;
+/** The guard.config.json `coverage` object a fixture repo enforces. */
+export type Thresholds = Exclude<CoverageConfig, false>;
 
 export function repo(pkg = '', coverage: Thresholds = {}) {
   const root = mkdtempSync(join(tmpdir(), 'coverage-provenance-'));
