@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -327,6 +327,38 @@ describe('runReviewGate({ only }) — the recheck lane', () => {
     expect(await runReviewGate(repo, { exec, only })).toBe(1);
     expect(exec).not.toHaveBeenCalled();
     expect(stderr()).toContain('dropped by GUARD_REVIEW_SKIP');
+  });
+});
+
+describe('unrouted-files notice wiring', () => {
+  const NOTICE = 'reached no security/performance reviewer';
+  const stageShared = (repo: string) => {
+    mkdirSync(join(repo, 'src', 'shared'), { recursive: true });
+    writeFileSync(join(repo, 'src', 'shared', 'validate.ts'), 'export const v = 1;\n');
+    spawnSync('git', ['add', 'src/shared/validate.ts'], { cwd: repo });
+  };
+
+  it('a full gate names a staged src/shared file no domain root routes', async () => {
+    const repo = consumerRepo({ backend: true });
+    stageShared(repo);
+    expect(await runReviewGate(repo, { exec: lensExec(repo) })).toBe(0);
+    expect(stderr()).toContain(`1 source file(s) ${NOTICE} (src/shared/validate.ts)`);
+  });
+
+  it('a recheck never prints it — the narrowed lane is not a topology audit', async () => {
+    const repo = consumerRepo({ backend: true });
+    stageShared(repo);
+    const only = { reviewer: CORRECTNESS, lens: TARGET_LENS };
+    expect(await runReviewGate(repo, { exec: lensExec(repo), only })).toBe(0);
+    expect(stderr()).not.toContain(NOTICE);
+  });
+
+  it('a GUARD_REVIEW_SKIP of the domain reviewers does not turn routed files into unrouted ones', async () => {
+    process.env.GUARD_REVIEW_SKIP = 'api-security-reviewer,backend-performance-reviewer';
+    const repo = consumerRepo({ backend: true });
+    expect(await runReviewGate(repo, { exec: lensExec(repo) })).toBe(0);
+    expect(stderr()).toContain('api-security-reviewer skipped (GUARD_REVIEW_SKIP)');
+    expect(stderr()).not.toContain(NOTICE);
   });
 });
 
