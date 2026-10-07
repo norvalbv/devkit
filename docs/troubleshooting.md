@@ -18,7 +18,8 @@ elsewhere. A record does not need to be staged or published for the judge to con
 
 Check the matches with `guard-decisions scoped-targets --files path/to/changed-file`. Missing or stale
 Scope globs need a `guard-decisions rescope` correction. Targets inform the judge; a scope match alone
-does not clear a new architectural choice. The alignment gate still checks for contradictions.
+does not clear a new architectural choice. To check a staged change for contradictions, run
+`guard-decisions check-alignment --gate`; no generated hook runs it.
 Target context is size-capped with explicit omissions, separate from the diff evidence; an omitted
 ruling cannot establish that the change was already decided. Editing the supplied Target context
 invalidates the cached smell verdict.

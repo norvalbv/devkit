@@ -138,8 +138,9 @@ so I did Y".
   Never silently flip a past call.
 - **After** it settles: record a Target if a product and engineering team would make it an epic; a
   local implementation step is a `--note`. Append, never mutate or delete.
-- `guard-decisions detect --gate` blocks an unrecorded decision; `guard-decisions check-alignment
-  --gate` blocks code that contradicts a scoped Target.
+- `guard-decisions detect --gate` blocks an unrecorded decision at commit. `guard-decisions
+  check-alignment --gate` judges staged code against the scoped Targets it matches, but only when
+  you run it: no generated hook calls it.
 </rule>
 
 <rule name="avoidance_of_nested_utilities">

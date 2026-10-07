@@ -2,7 +2,7 @@
 /**
  * Pre-edit BRIEF: surface the rulings that already govern a file, before an agent writes to it.
  *
- * The decision log was enforcement-only. `check-alignment` catches a contradiction at COMMIT, and
+ * The decision log was enforcement-only. `check-alignment` catches a contradiction once staged, and
  * `decision-stop-check` nudges you to RECORD one at turn end — both after the work is done. Nothing
  * told an agent "this area is already settled" while it could still act on that. So an agent could
  * re-solve a decided problem from the code alone and only learn at commit, if the ruling happened to
@@ -146,7 +146,9 @@ function main() {
     return `- **${a.slug}** — ${clipped}`;
   });
   const more =
-    axes.length > MAX_AXES ? `\n(${axes.length - MAX_AXES} more — \`guard-decisions scoped-targets --files ${rel}\`)` : '';
+    axes.length > MAX_AXES
+      ? `\n(${axes.length - MAX_AXES} more — \`guard-decisions scoped-targets --files ${rel}\`)`
+      : '';
 
   const brief =
     `Decision records already govern \`${rel}\`. These are settled rulings, not suggestions — ` +
