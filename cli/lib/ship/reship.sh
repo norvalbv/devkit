@@ -212,35 +212,17 @@ rewrite_remote() {
   fi
   node "$REWRITE_REMOTE_SUPERVISOR" 60 -- "$@"
 }
-# The open PR's identity for the rewrite lease. baseRefOid is deliberately absent: GitHub snapshots
-# it at the PR's last head push and never advances it as the base moves, so it cannot be compared
-# with a live base tip and must not make two reads of an unchanged PR differ (sc-2739).
-rewrite_pr_identity() {
-  rewrite_remote gh pr view "$BR" --repo "$REPO" \
-    --json number,state,headRefName,headRefOid,headRepository,baseRefName,url \
-    --jq '[.number,.state,.headRefName,.headRefOid,(.headRepository.nameWithOwner // ""),.baseRefName,.url] | @tsv' 2>/dev/null
-}
+. "$SCRIPT_DIR/closed-pr-remedy.sh"
 # An append onto a MERGED or CLOSED PR's branch reaches no base, so it must never report success.
 # Fail-open when gh cannot answer: the append path has always treated gh as best-effort.
 # usage: reship_refuse_closed_pr <when> <outcome>
 reship_refuse_closed_pr() {
-  local fields num state base p paths=
-  fields=$(rewrite_pr_identity) || fields=
-  # A non-whitespace IFS keeps empty fields (a deleted fork's head repo); tabs would collapse them.
-  IFS=$'\x1f' read -r num state _ _ _ base _ <<< "${fields//$'\t'/$'\x1f'}"
-  case "$num" in
-    *[!0-9]*|'') echo "could not verify PR state for origin/$BR; continuing" >&2; return 0 ;;
-  esac
-  [ "$state" != "OPEN" ] || return 0
+  local p paths=
+  read_pr_state || { echo "could not verify PR state for origin/$BR; continuing" >&2; return 0; }
+  [ "$PR_SEEN_STATE" != "OPEN" ] || return 0
   for p in "${PATHS[@]}"; do paths="$paths $(printf '%q' "$p")"; done
-  echo "ship --pr: PR #$num for origin/$BR is $state$1 — a push there never reaches $base; $2" >&2
-  # The merge anchors the new ship's patch past the squash; the override only skips the refusal that
-  # origin/<base> lacks the PR's pre-squash commits, which the merge already accounted for.
-  echo "  bring origin/$base into this checkout, then ship this change as a new PR:" >&2
-  echo "    git fetch origin $(printf '%q' "$base") && git merge origin/$(printf '%q' "$base")" >&2
-  echo "    GUARD_SHIP_BASE_OK=1 devkit ship <new-branch> $(printf '%q' "$TITLE") --base $(printf '%q' "$base") --$paths" >&2
-  echo "  (GUARD_SHIP_BASE_OK=1 is needed only after a squash or rebase merge)" >&2
-  [ "$state" != "CLOSED" ] || echo "  or reopen it: gh pr reopen $num --repo $REPO, then re-run this command" >&2
+  echo "ship --pr: PR #$PR_SEEN_NUM for origin/$BR is $PR_SEEN_STATE$1 — a push there never reaches $PR_SEEN_BASE; $2" >&2
+  print_closed_pr_remedy "$PR_SEEN_BASE" "--$paths" "then re-run this command"
   return 1
 }
 # Resolve owner/repo from origin (best-effort — only used for the final PR-URL print, which falls
@@ -530,7 +512,7 @@ if [ "$REWRITE" -eq 1 ]; then
     [ "$BODY_RECEIPT" != "$EXPECTED_REMOTE" ] || REWRITE_RECEIPT_PROVEN=1
   fi
 
-  PR_FIELDS=$(rewrite_pr_identity) || {
+  PR_FIELDS=$(pr_identity) || {
       echo "cannot inspect the open PR for origin/$BR" >&2; exit 1
     }
   IFS=$'\t' read -r PR_NUM PR_STATE PR_HEAD_REF PR_HEAD_OID PR_HEAD_REPO PR_BASE_REF PR_URL <<< "$PR_FIELDS"
@@ -980,7 +962,7 @@ if [ "$REWRITE_ALREADY_PUBLISHED" -eq 1 ]; then
     echo "reship: recorded rewrite recovery refused: its intent was superseded" >&2
     exit 1
   }
-  RECOVERY_PR_FIELDS=$(rewrite_pr_identity) || {
+  RECOVERY_PR_FIELDS=$(pr_identity) || {
       echo "reship: recorded rewrite recovery refused: cannot re-check PR identity" >&2
       exit 1
     }
@@ -1052,7 +1034,7 @@ if [ "$UPDATE_PR_BODY" -eq 1 ]; then
   fi
 fi
 if [ "$REWRITE" -eq 1 ]; then
-  CURRENT_PR_FIELDS=$(rewrite_pr_identity) || {
+  CURRENT_PR_FIELDS=$(pr_identity) || {
       echo "rewrite rejected: cannot re-check PR identity before push" >&2; exit 1
     }
   [ "$CURRENT_PR_FIELDS" = "$PR_FIELDS" ] || {
