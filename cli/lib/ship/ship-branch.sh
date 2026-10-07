@@ -287,6 +287,7 @@ LINK_DIRS=()
 . "$SCRIPT_DIR/worktree-registry.sh"
 . "$SCRIPT_DIR/ship-run-record.sh"
 . "$SCRIPT_DIR/reclaim-orphan-worktrees.sh"
+. "$SCRIPT_DIR/closed-pr-remedy.sh"
 PREFLIGHT_HINT=
 PREFLIGHT_SELF=   # set when the branch's holder is THIS worktree; changes the closing advice below
 # SHIP_RESOLVE_ONLY promises no side effects, so it must not reclaim anything.
@@ -326,7 +327,23 @@ if [ -z "${SHIP_DRY_RUN:-}" ] && [ "$DRY_GATES" -eq 0 ]; then
   # is a safe "branch absent"; any other failure must fail closed, or push -u could append to a PR.
   case "$remote_check" in
     0) echo "remote branch already exists: origin/$BR" >&2
-       echo "  to add these changes to that branch's existing PR, re-run with --pr" >&2
+       # A merged or closed PR's branch reaches no base, so --pr would only refuse in turn.
+       REPO=$( (git config --get remote.origin.url || git remote get-url origin) | sed -E 's#^.*github\.com[^:/]*[:/]##; s#\.git$##')
+       if read_pr_state && [ "$PR_SEEN_STATE" != "OPEN" ]; then
+         echo "  its PR #$PR_SEEN_NUM is $PR_SEEN_STATE — a push there never reaches $PR_SEEN_BASE" >&2
+         # The new PR targets this ship's own base, which the base resolution below derives the same way.
+         remedy_base=${BASE_FLAG#origin/}
+         [ -n "$remedy_base" ] || remedy_base=$(git symbolic-ref --quiet --short HEAD) || remedy_base=$PR_SEEN_BASE
+         # A --from-branch ship derives its paths (a resume replays them), so its remedy names none.
+         remedy_tail=--from-branch
+         if [ "$FROM_BRANCH" -eq 0 ]; then
+           remedy_tail=--
+           for p in ${PATHS[@]+"${PATHS[@]}"}; do remedy_tail="$remedy_tail $(printf '%q' "$p")"; done
+         fi
+         print_closed_pr_remedy "$remedy_base" "$remedy_tail" "then re-run with --pr"
+       else
+         echo "  to add these changes to that branch's existing PR, re-run with --pr" >&2
+       fi
        exit 1 ;;
     2) ;; # no matching remote branch → safe to create it
     *) echo "could not verify remote branch (ls-remote exit $remote_check) — refusing to push" >&2; exit 1 ;;
