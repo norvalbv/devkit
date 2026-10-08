@@ -1624,7 +1624,7 @@ process.exit(99);`,
 
 describe('a load flake the retry cannot rescue, against real vitest', () => {
   // Starves on EVERY attempt at 300ms — the field report's shape, where the retry at the same
-  // ceiling failed too. Only a bigger budget gets it through.
+  // ceiling failed too. Only a bigger budget gets it through, and only it carries the wait scale.
   it('goes green on the one re-run and keeps the artifact', () => {
     const root = makeRoot();
     symlinkSync(join(DEVKIT_ROOT, 'node_modules'), join(root, 'node_modules'));
@@ -1643,7 +1643,7 @@ describe('a load flake the retry cannot rescue, against real vitest', () => {
       `import { expect, it } from 'vitest';
       it('starved under load', async () => {
         await new Promise((r) => setTimeout(r, 600));
-        expect(1).toBe(1);
+        expect(process.env.DEVKIT_COVERAGE_RERUN_SCALE).toBe('5');
       });\n`,
     );
 

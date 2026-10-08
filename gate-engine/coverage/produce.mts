@@ -43,6 +43,7 @@ import {
   formatRerunRescue,
   headSha,
   markerCause,
+  passEnv,
   raisedTimeoutMs,
   readClearMarker,
   readDiagnosis,
@@ -352,14 +353,16 @@ interface Pass extends VitestRun {
   retrying: boolean;
 }
 
-/** One full, isolated coverage run. All per-run state is made fresh here, so a second pass can never
- * read or clear on the strength of the first one's. */
+/** One full, isolated coverage run; `budgetMs` makes it the raised-timeout re-run. All per-run state is
+ * made fresh here, so a second pass can never read or clear on the strength of the first one's. */
 async function runPass(
   vitest: string,
   cwd: string,
   argv: string[],
-  budget: string[],
+  budgetMs: number | null,
 ): Promise<Pass> {
+  const budget =
+    budgetMs === null ? [] : [`--testTimeout=${budgetMs}`, `--hookTimeout=${budgetMs}`];
   pruneStaleRuns(cwd);
   const runDir = resolveRunDir(cwd);
   mkdirSync(runDir, { recursive: true });
@@ -395,6 +398,7 @@ async function runPass(
         ...argv,
       ],
       cwd,
+      passEnv(budgetMs !== null),
     );
     diagnosis = readDiagnosis(resultsFile, run.interrupted ? 0 : run.code);
     // A failed run's report (the consumer's `coverage.reportOnFailure`) is partial: never publish it.
@@ -460,7 +464,7 @@ export async function produceCoverage(cwd = process.cwd(), argv: string[] = []):
     return 1;
   }
 
-  const first = await runPass(vitest, cwd, argv, []);
+  const first = await runPass(vitest, cwd, argv, null);
   reportDiagnosis(first.diagnosis, cwd, first.retrying && !first.interrupted);
   let final = first;
 
@@ -469,10 +473,7 @@ export async function produceCoverage(cwd = process.cwd(), argv: string[] = []):
     // anywhere in pass 2 still leaves the gate failing CLOSED with the reason on disk.
     const budget = raisedTimeoutMs(first.diagnosis?.failures);
     for (const line of formatRerunNotice(budget)) console.error(line);
-    final = await runPass(vitest, cwd, argv, [
-      `--testTimeout=${budget}`,
-      `--hookTimeout=${budget}`,
-    ]);
+    final = await runPass(vitest, cwd, argv, budget);
     reportDiagnosis(final.diagnosis, cwd, final.retrying && !final.interrupted);
     if (final.code === 0) {
       reportRerunRescue(first.diagnosis, cwd, budget);
