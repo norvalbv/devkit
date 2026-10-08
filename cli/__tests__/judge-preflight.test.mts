@@ -285,7 +285,7 @@ describe('renderPreflight', () => {
       },
     ];
     const out = renderPreflight(loggedOut, now).join('\n');
-    expect(out).toContain('GUARD_REVIEW_MODEL=haiku');
+    expect(out).toContain('GUARD_REVIEW_MODEL=sonnet');
     expect(out).not.toContain('devkit doctor --fix');
   });
 
@@ -295,7 +295,7 @@ describe('renderPreflight', () => {
     ];
     const out = renderPreflight(absent, now).join('\n');
     expect(out).toContain('devkit doctor --fix');
-    expect(out).toContain('GUARD_REVIEW_MODEL=haiku');
+    expect(out).toContain('GUARD_REVIEW_MODEL=sonnet');
   });
 
   // sc-2689: the redirect is only honest when ONE family is dark. With both blocked there is
@@ -312,7 +312,7 @@ describe('renderPreflight', () => {
     ];
     const out = renderPreflight(bothDark, now).join('\n');
     expect(out).toContain('Both judge CLIs are dark');
-    expect(out).not.toContain('GUARD_REVIEW_MODEL=haiku');
+    expect(out).not.toContain('GUARD_REVIEW_MODEL=sonnet');
     expect(out).not.toContain('move the judges to the claude family');
   });
 
@@ -322,7 +322,7 @@ describe('renderPreflight', () => {
     ];
     const out = renderPreflight(claudeDark, now).join('\n');
     expect(out).toContain('the packaged codex family');
-    expect(out).not.toContain('GUARD_REVIEW_MODEL=haiku');
+    expect(out).not.toContain('GUARD_REVIEW_MODEL=sonnet');
   });
 
   it('warns that the gates STILL RUN — it is a report, never a decision', () => {

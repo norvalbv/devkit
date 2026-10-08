@@ -8,7 +8,8 @@ import { judgeProviderOfBin } from '../codex/result.mts';
 /** The complete claude family, chunking off included: cap 400 is benched for gpt-5.6-sol, not
  *  sonnet, so a partial move runs the correctness reviewer at an un-benched cap (sc-2193). */
 export const CLAUDE_FAMILY_SET = {
-  model: 'haiku',
+  // Not haiku: its checklist reviewers left items unresolved even on the serial recovery retry.
+  model: 'sonnet',
   escalationModel: 'opus',
   correctnessModel: 'sonnet',
   correctnessChunkLoc: 0,

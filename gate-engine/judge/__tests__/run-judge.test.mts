@@ -139,7 +139,7 @@ describe('strictRemedy', () => {
   // bind cannot apply there; the full env move stays, the dead doctor lever and absent clause go.
   it('a genuine outage names the family move in full, never the doctor route', () => {
     const r = strictRemedy('outage', 'codex');
-    expect(r).toContain('GUARD_REVIEW_MODEL=haiku');
+    expect(r).toContain('GUARD_REVIEW_MODEL=sonnet');
     expect(r).toContain('GUARD_CORRECTNESS_CHUNK=off');
     expect(r).toContain('cached PASS is discarded');
     expect(r).not.toContain('devkit doctor --fix');
@@ -236,7 +236,7 @@ describe('strictRemedy', () => {
     expect(r).toContain('no family move is safe yet');
     expect(r).not.toContain('move the judges to the claude family');
     expect(r).not.toContain('the packaged codex family');
-    expect(r).not.toContain('GUARD_REVIEW_MODEL=haiku');
+    expect(r).not.toContain('GUARD_REVIEW_MODEL=sonnet');
   });
 
   // Both directions must move a PINNED sentry judge too, or following the remedy is a partial move.
@@ -262,7 +262,7 @@ describe('strictRemedy', () => {
     });
     expect(set.some((l) => /^(GUARD|FRINK)_SENTRY_MODEL=/.test(l))).toBe(false);
     for (const pair of [
-      'GUARD_REVIEW_MODEL=haiku',
+      'GUARD_REVIEW_MODEL=sonnet',
       'GUARD_REVIEW_ESCALATION_MODEL=opus',
       'GUARD_CORRECTNESS_MODEL=sonnet',
       'GUARD_CORRECTNESS_CHUNK=off',
@@ -306,7 +306,7 @@ describe('strictRemedy', () => {
   it('the claude direction always names all four knobs together', () => {
     const r = familyOverrideRemedy('codex');
     for (const knob of [
-      'GUARD_REVIEW_MODEL=haiku',
+      'GUARD_REVIEW_MODEL=sonnet',
       'GUARD_REVIEW_ESCALATION_MODEL=opus',
       'GUARD_CORRECTNESS_MODEL=sonnet',
       'GUARD_CORRECTNESS_CHUNK=off',

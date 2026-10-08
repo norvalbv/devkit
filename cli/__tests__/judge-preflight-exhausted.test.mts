@@ -311,7 +311,7 @@ describe('the preflight report for an exhausted window (sc-3207 acceptance)', ()
     expect(out).toContain('resets in 4d');
     expect(out).toContain('re-running will not help');
     for (const knob of [
-      'GUARD_REVIEW_MODEL=haiku',
+      'GUARD_REVIEW_MODEL=sonnet',
       'GUARD_REVIEW_ESCALATION_MODEL=opus',
       'GUARD_CORRECTNESS_MODEL=sonnet',
       'GUARD_CORRECTNESS_CHUNK=off',
