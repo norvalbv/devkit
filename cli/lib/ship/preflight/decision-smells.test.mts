@@ -50,6 +50,14 @@ describe('decision advisory', () => {
     expect(lines[1]).toMatch(/GUARD_NO_LOG=1 needs the user's OK/);
   });
 
+  it('names the configured decisionsDir when an overlay ignores it through .git/info/exclude', () => {
+    seedDeletion();
+    writeFileSync(join(dir, 'guard.config.json'), '{"decisionsDir": ".devkit/decisions"}\n');
+    writeFileSync(join(dir, '.git/info/exclude'), '.devkit\n');
+    const lines = adviseStaged(dir, dir);
+    expect(lines[1]).toMatch(/^ {3}\.devkit\/decisions is git-ignored here/);
+  });
+
   it('is silent when a decision record is staged, as the real gate would pass', () => {
     seedDeletion();
     mkdirSync(join(dir, 'docs/decisions'), { recursive: true });
