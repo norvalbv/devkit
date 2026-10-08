@@ -15,6 +15,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
+import { publishManifest, stageManifest } from '../../../../gate-engine/coverage/provenance.mts';
 import { computePercentages } from '../../../../gate-engine/coverage/run.mts';
 import {
   coverageMapSchema,
@@ -193,7 +194,7 @@ describe('rebaseWorktreeCoverage — a private rekeyed copy for fallow', () => {
     const { wt, source, report } = seed('/Users/dev/checkout');
     const out = outFor(wt);
 
-    expect(rebaseWorktreeCoverage(wt, source, out)).toBe('/Users/dev/checkout');
+    expect(rebaseWorktreeCoverage(wt, source, out)).toEqual({ root: '/Users/dev/checkout' });
 
     const rebased = coverageMapSchema.parse(JSON.parse(readFileSync(out, 'utf8')));
     expect(Object.keys(rebased)).toEqual([`${realpathSync(wt)}/src/a.ts`]);
@@ -227,7 +228,7 @@ describe('rebaseWorktreeCoverage — a private rekeyed copy for fallow', () => {
     const report = JSON.stringify(artifact);
     writeFileSync(join(source, 'coverage-final.json'), report);
 
-    expect(rebaseWorktreeCoverage(wt, source, outFor(wt))).toBe('/Users/dev/checkout');
+    expect(rebaseWorktreeCoverage(wt, source, outFor(wt))).toEqual({ root: '/Users/dev/checkout' });
 
     const rebased = coverageMapSchema.parse(JSON.parse(readFileSync(outFor(wt), 'utf8')));
     expect(rebased[`${realpathSync(wt)}/src/a.ts`]).toMatchObject({
@@ -245,6 +246,53 @@ describe('rebaseWorktreeCoverage — a private rekeyed copy for fallow', () => {
 
     expect(rebaseWorktreeCoverage(wt, source, outFor(wt))).toBeNull();
     expect(existsSync(outFor(wt))).toBe(false);
+  });
+});
+
+/** Bind a coverage-run manifest recording `args` to the report currently in `source`. */
+function bindManifest(source: string, args: string[]) {
+  const report = join(source, 'coverage-final.json');
+  const snapshot = { roots: [], head: '', dirty: {}, args };
+  publishManifest(stageManifest(join(source, '.runs'), report, snapshot, 'run-1'), source);
+}
+
+describe('rebaseWorktreeCoverage — a scoped run hands fallow an empty map', () => {
+  it('writes {} for a scoped run, even when the keys already sit at the worktree', () => {
+    const { wt, source } = seed('');
+    const key = `${realpathSync(wt)}/src/a.ts`;
+    writeFileSync(join(source, 'coverage-final.json'), JSON.stringify({ [key]: entry(key, 0) }));
+    bindManifest(source, ['src/a.test.ts']);
+
+    expect(rebaseWorktreeCoverage(wt, source, outFor(wt))).toEqual({
+      scopedArgs: ['src/a.test.ts'],
+    });
+    expect(readFileSync(outFor(wt), 'utf8')).toBe('{}');
+  });
+
+  it('rekeys a full run exactly as before', () => {
+    const { wt, source } = seed('/Users/dev/checkout');
+    bindManifest(source, []);
+
+    expect(rebaseWorktreeCoverage(wt, source, outFor(wt))).toEqual({ root: '/Users/dev/checkout' });
+  });
+
+  it("ignores a scoped manifest bound to other bytes (provenance unknown keeps today's copy)", () => {
+    const { wt, source } = seed('/Users/dev/checkout');
+    bindManifest(source, ['src/a.test.ts']);
+    const key = '/Users/dev/checkout/src/a.ts';
+    writeFileSync(join(source, 'coverage-final.json'), JSON.stringify({ [key]: entry(key, 3) }));
+
+    expect(rebaseWorktreeCoverage(wt, source, outFor(wt))).toEqual({ root: '/Users/dev/checkout' });
+  });
+
+  it('prints the scoped args on stdout for the ship script', () => {
+    const { wt, source } = seed('/Users/dev/checkout');
+    bindManifest(source, ['src/a.test.ts', '-t', 'renders']);
+
+    const r = runCli(wt, source, outFor(wt));
+
+    expect(r.status).toBe(0);
+    expect(r.stdout).toBe('scoped src/a.test.ts -t renders\n');
   });
 });
 
@@ -314,6 +362,45 @@ const FALLOW_ENV = Object.fromEntries(
   Object.entries(GIT_ENV).filter(([name]) => !name.startsWith('FALLOW_')),
 );
 
+const CRAP_SRC =
+  'export function f(a,b,c,d){ if(a){ if(b){ return 1 } else if(c){ return 2 } } else if(d){ return 3 } for(let i=0;i<a;i++){ if(i%2&&b||c&&d){ return 4 } } return a?b?5:6:c?7:8 }\n';
+
+/** A seeded worktree staging a complex `f`, with a report keyed under `producer` (wt root when ''). */
+function seedFallowCheckout(producer: string, hits: number, arms: number[]) {
+  const { wt, source } = seed(producer);
+  const git = (...args: string[]) => execFileSync('git', args, { cwd: wt, env: GIT_ENV });
+  writeFileSync(join(wt, 'package.json'), '{"name":"x","version":"1.0.0","main":"src/a.js"}\n');
+  writeFileSync(join(wt, 'src/a.js'), 'export const z = 1;\n');
+  git('add', 'package.json', 'src/a.js');
+  git('-c', 'user.email=a@b.c', '-c', 'user.name=a', 'commit', '-qm', 'base');
+  writeFileSync(join(wt, 'src/a.js'), CRAP_SRC);
+  git('add', 'src/a.js');
+  const key = `${producer || realpathSync(wt)}/src/a.js`;
+  const loc = { start: { line: 1, column: 0 }, end: { line: 1, column: 200 } };
+  const decl = { start: { line: 1, column: 16 }, end: { line: 1, column: 17 } };
+  writeFileSync(
+    join(source, 'coverage-final.json'),
+    JSON.stringify({
+      [key]: {
+        path: key,
+        statementMap: { 0: loc },
+        fnMap: { 0: { name: 'f', decl, loc, line: 1 } },
+        branchMap: { 0: { type: 'if', loc: decl, locations: [decl, decl], line: 1 } },
+        s: { 0: hits },
+        f: { 0: hits },
+        b: { 0: arms },
+      },
+    }),
+  );
+  const audit = (extra: Record<string, string>) =>
+    spawnSync('fallow', ['audit', '--base', 'HEAD', '--no-cache', '--format', 'json'], {
+      cwd: wt,
+      encoding: 'utf8',
+      env: { ...FALLOW_ENV, ...extra },
+    }).stdout;
+  return { wt, source, audit };
+}
+
 describe.skipIf(!hasFallow)('coverage-rebase against the real fallow binary', () => {
   // A negative count (from vitest's v8→istanbul conversion) makes fallow reject the whole file.
   it.each([
@@ -322,43 +409,11 @@ describe.skipIf(!hasFallow)('coverage-rebase against the real fallow binary', ()
   ])(
     'turns an estimated CRAP finding into a measured one through FALLOW_COVERAGE (%s)',
     (_label, arms) => {
-      const src =
-        'export function f(a,b,c,d){ if(a){ if(b){ return 1 } else if(c){ return 2 } } else if(d){ return 3 } for(let i=0;i<a;i++){ if(i%2&&b||c&&d){ return 4 } } return a?b?5:6:c?7:8 }\n';
-      const key = '/other/checkout/src/a.js';
-      const { wt, source } = seed('/other/checkout');
-      const git = (...args: string[]) => execFileSync('git', args, { cwd: wt, env: GIT_ENV });
-      writeFileSync(join(wt, 'package.json'), '{"name":"x","version":"1.0.0","main":"src/a.js"}\n');
-      writeFileSync(join(wt, 'src/a.js'), 'export const z = 1;\n');
-      git('add', 'package.json', 'src/a.js');
-      git('-c', 'user.email=a@b.c', '-c', 'user.name=a', 'commit', '-qm', 'base');
-      writeFileSync(join(wt, 'src/a.js'), src);
-      git('add', 'src/a.js');
-      const loc = { start: { line: 1, column: 0 }, end: { line: 1, column: 200 } };
-      const decl = { start: { line: 1, column: 16 }, end: { line: 1, column: 17 } };
-      writeFileSync(
-        join(source, 'coverage-final.json'),
-        JSON.stringify({
-          [key]: {
-            path: key,
-            statementMap: { 0: loc },
-            fnMap: { 0: { name: 'f', decl, loc, line: 1 } },
-            branchMap: { 0: { type: 'if', loc: decl, locations: [decl, decl], line: 1 } },
-            s: { 0: 5 },
-            f: { 0: 5 },
-            b: { 0: arms },
-          },
-        }),
-      );
-      const audit = (extra: Record<string, string>) =>
-        spawnSync('fallow', ['audit', '--base', 'HEAD', '--no-cache', '--format', 'json'], {
-          cwd: wt,
-          encoding: 'utf8',
-          env: { ...FALLOW_ENV, ...extra },
-        }).stdout;
+      const { wt, source, audit } = seedFallowCheckout('/other/checkout', 5, arms);
 
       const before = audit({});
       const out = outFor(wt);
-      expect(rebaseWorktreeCoverage(wt, source, out)).toBe('/other/checkout');
+      expect(rebaseWorktreeCoverage(wt, source, out)).toEqual({ root: '/other/checkout' });
       const after = audit({ FALLOW_COVERAGE: out });
 
       expect(before).toContain('"coverage_source":"estimated"');
@@ -367,4 +422,20 @@ describe.skipIf(!hasFallow)('coverage-rebase against the real fallow binary', ()
       expect(after).not.toContain('cognitive_crap');
     },
   );
+
+  // fallow reads <cwd>/coverage when FALLOW_COVERAGE is unset, so only the empty map stops the 0%.
+  it("scores a scoped run's loaded-but-unrun function from estimates, not as measured 0%", () => {
+    const { wt, source, audit } = seedFallowCheckout('', 0, [0, 0]);
+    bindManifest(source, ['src/other.test.ts']);
+
+    const discovered = audit({});
+    expect(rebaseWorktreeCoverage(wt, source, outFor(wt))).toEqual({
+      scopedArgs: ['src/other.test.ts'],
+    });
+    const after = audit({ FALLOW_COVERAGE: outFor(wt) });
+
+    expect(discovered).not.toContain('"coverage_source":"estimated"');
+    expect(after).not.toContain('"error":true');
+    expect(after).toContain('"coverage_source":"estimated"');
+  });
 });

@@ -16,6 +16,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
+import { publishManifest, stageManifest } from '../../gate-engine/coverage/provenance.mts';
 import { coverageMapSchema } from '../lib/ship/coverage/coverage-rebase.mts';
 import { testExecFileSync as execFileSync, testSpawnSync as spawnSync } from './_helpers.mts';
 
@@ -828,6 +829,25 @@ describe('prepare_gate_worktree — fallow gets rekeyed coverage, the gate keeps
     expect(r.stderr).not.toContain('rekeyed');
     expect(r.exported).toBe('');
     expect(linkTarget(join(wt, 'coverage'))).toBe(join(main, 'coverage'));
+  });
+
+  it('hands fallow an empty map when the linked coverage came from a scoped run', () => {
+    const { main, wt } = seedShipWorktree((m) => m);
+    const cov = join(main, 'coverage');
+    const snapshot = { roots: [], head: '', dirty: {}, args: ['src/a.test.ts'] };
+    mkdirSync(join(cov, '.runs'), { recursive: true });
+    publishManifest(
+      stageManifest(join(cov, '.runs'), join(cov, 'coverage-final.json'), snapshot, 'run-1'),
+      cov,
+    );
+
+    const r = prepareExported(wt, main);
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).toContain(
+      'fallow scores CRAP from static estimates — the linked coverage came from a scoped run (devkit coverage-run src/a.test.ts)',
+    );
+    expect(readFileSync(r.exported ?? '', 'utf8')).toBe('{}');
   });
 
   it("leaves an operator's FALLOW_COVERAGE in place and says so", () => {
