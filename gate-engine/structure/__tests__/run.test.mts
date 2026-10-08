@@ -449,12 +449,34 @@ describe('guard-structure staged execution', () => {
       expect(result.text).toContain('New.ts');
     });
 
+    it('a file added from a package subdirectory still blocks, not misread as an edit', async () => {
+      const root = repo();
+      const pkg = join(root, 'packages', 'lib');
+      write(pkg, 'guard.config.json', JSON.stringify(config));
+      write(pkg, 'src/bad-name.ts');
+      initializeGit(root);
+      git(root, 'add', '-A');
+      git(root, 'commit', '-qm', 'debt');
+      write(pkg, 'src/bad-name.ts', 'export const y = 2;\n');
+      write(pkg, 'src/also-bad.ts');
+      git(root, 'add', '-A');
+      const result = await runStagedStructureGate(pkg);
+      expect(result.code).toBe(1);
+      expect(result.text).toContain('also-bad.ts');
+      expect(result.text).toContain(`pre-existing structure violation(s) at ${head(root)}`);
+    });
+
     it.each([
       [
         'a structure policy edit',
         (root: string) => write(root, 'guard.config.json', `${JSON.stringify(config)}\n`),
       ],
       ['a deletion', (root: string) => git(root, 'rm', '-q', '--', 'src/Other.ts')],
+      // A rename destination is a new placement, never an edit of HEAD's debt.
+      [
+        'a rename into an invalid name',
+        (root: string) => git(root, 'mv', 'src/Other.ts', 'src/moved-bad.ts'),
+      ],
     ])('%s staged with the edit keeps the edited debt blocking', async (_label, stage) => {
       const root = debtRepo(['src/bad-name.ts', 'src/Other.ts']);
       write(root, 'src/bad-name.ts', 'export const y = 2;\n');
