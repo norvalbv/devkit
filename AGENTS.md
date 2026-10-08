@@ -118,6 +118,8 @@ prefer established libraries over custom implementations. Before building custom
 and evaluate existing options. Before extending existing custom code, check whether replacing it
 with an established solution is the better path; prefer a ticket to "investigate and adopt X" over
 adding more custom code.
+Writing a whole file into a consumer repo: create it with `writeIfAbsent` (`cli/lib/fs-helpers.mts`,
+exclusive create), and replace one only with `writeFileAtomic` (`cli/lib/atomic-write.mts`).
 </rule>
 
 <rule name="research_is_key" severity="EXTREME">

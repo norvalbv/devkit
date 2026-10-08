@@ -83,8 +83,8 @@ function isSymlink(path: string) {
 }
 
 /**
- * Write `content` to `path` only if the file is absent (idempotent create). With
- * `{ force: true }` it overwrites. Creates parent dirs. Returns one of:
+ * Create `path` exclusively (`wx`): a file, live symlink or dir already there is kept as 'exists'.
+ * `{ force: true }` overwrites. Creates parent dirs. Returns one of:
  *   'created'   — file did not exist, written
  *   'forced'    — file existed, overwritten (force)
  *   'exists'    — file existed, left untouched (no force)
@@ -102,9 +102,15 @@ export function writeIfAbsent(
   // dangling-symlink dir, and a live one would route the write outside devkit's tree. Only the leaf
   // is touched — never an ancestor the user may have symlinked on purpose.
   const dir = dirname(path);
-  if (isSymlink(dir)) rmSync(dir, { force: true });
+  if (force && isSymlink(dir)) rmSync(dir, { force: true });
   mkdirSync(dir, { recursive: true });
-  if (isSymlink(path)) rmSync(path, { force: true });
-  writeFileSync(path, content);
+  if (isSymlink(path) && (force || !existsSync(path))) rmSync(path, { force: true });
+  // Exclusive create unless forced: a file appearing since the check above is kept, never clobbered.
+  try {
+    writeFileSync(path, content, { flag: force ? 'w' : 'wx' });
+  } catch (e) {
+    if (!force && e instanceof Error && 'code' in e && e.code === 'EEXIST') return 'exists';
+    throw e;
+  }
   return present ? 'forced' : 'created';
 }
