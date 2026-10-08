@@ -31,6 +31,7 @@ import {
   withOverridesLock,
 } from '../overrides.mts';
 import { REVIEWERS, type Reviewer } from '../reviewers.mts';
+import { WAIVE_BASE_RE, WAIVE_RATIONALE_PLACEHOLDER } from './shell-word.mts';
 
 // REVIEWERS is a frozen literal-typed tuple (each entry's own field set, not a common `Reviewer`
 // shape), so `.find` on it directly can't be read through the shared `model` field below — every
@@ -42,7 +43,7 @@ const RATIONALE_MIN_CHARS = 15;
 // waive — envOverrides already treats a blank rationale as "no silent waive"; this extends the
 // same intent to a non-blank but content-free one.
 const PLACEHOLDER_RATIONALES = new Set([
-  'why this is not a real defect',
+  WAIVE_RATIONALE_PLACEHOLDER,
   'not a real defect',
   'false positive',
   'n/a',
@@ -64,8 +65,19 @@ function takeBaseFlag(rest: string[]) {
   const i = rest.indexOf('--base');
   if (i === -1) return { rest, baseSha: null, bad: false };
   const value = rest[i + 1]?.trim() ?? '';
-  if (!/^[0-9a-f]{7,40}$/.test(value)) return { rest, baseSha: null, bad: true };
+  if (!WAIVE_BASE_RE.test(value)) return { rest, baseSha: null, bad: true };
   return { rest: [...rest.slice(0, i), ...rest.slice(i + 2)], baseSha: value, bad: false };
+}
+
+/** The argv of `guard-review waive <target> <itemId> [--base <sha>] <rationale…>`, unvalidated
+ * beyond shape; the round-trip test parses a printed command through this same function. */
+export function parseWaiveArgs(rest: string[]) {
+  const flag = takeBaseFlag(rest);
+  if (flag.bad) return { error: 'base' as const };
+  const [target, itemId, ...rationaleParts] = flag.rest;
+  const rationale = rationaleParts.join(' ').trim();
+  if (!target || !itemId || !rationale) return { error: 'usage' as const };
+  return { target, itemId, rationale, baseSha: flag.baseSha };
 }
 
 /** Best-effort git identity for the audit trail: user.name, then user.email, then $USER — never
@@ -133,17 +145,16 @@ export function runWaive(
   resolveAuthor: (cwd: string) => string = resolveWaiveAuthor,
 ): number {
   if (rest[0] === '--list') return listWaives(cwd);
-  const flag = takeBaseFlag(rest);
-  if (flag.bad) {
-    console.error('guard-review: waive — --base needs the base sha the FAIL output printed');
+  const args = parseWaiveArgs(rest);
+  if ('error' in args) {
+    console.error(
+      args.error === 'base'
+        ? 'guard-review: waive — --base needs the base sha the FAIL output printed'
+        : USAGE,
+    );
     return 2;
   }
-  const [target, itemId, ...rationaleParts] = flag.rest;
-  const rationale = rationaleParts.join(' ').trim();
-  if (!target || !itemId || !rationale) {
-    console.error(USAGE);
-    return 2;
-  }
+  const { target, itemId, rationale, baseSha } = args;
   const { reviewer, lens } = parseWaiveTarget(target);
   const known = REVIEWER_TABLE.find((r) => r.name === reviewer);
   if (!known) {
@@ -190,7 +201,7 @@ export function runWaive(
       at: new Date().toISOString(),
       by: 'cli',
     };
-    if (flag.baseSha) entry.baseSha = flag.baseSha;
+    if (baseSha) entry.baseSha = baseSha;
     store[itemId] = entry;
     persist(cwd, store);
     // A changed BASE is a new fact about an existing waiver, not a no-op: without an event the
@@ -207,7 +218,7 @@ export function runWaive(
       rationale: rationale.slice(0, WAIVER_RATIONALE_EVENT_CAP),
       recorded_at: recordedAt,
       by: 'cli',
-      base_sha: flag.baseSha,
+      base_sha: baseSha,
     });
   console.error(
     `guard-review: waived ${reviewer}:${lens} [${itemId}] — ${stripVTControlCharacters(rationale)}`,

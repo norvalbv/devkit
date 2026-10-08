@@ -1,14 +1,12 @@
 // Coercions for sink fields: a row is arbitrary JSON, so each helper degrades a wrong-typed value
 // to '' or 0 instead of throwing — the digest's "every failure prints nothing" rule.
 import { stripVTControlCharacters } from 'node:util';
+import { UNSAFE_TEXT_RE } from '../../../../gate-engine/review/valve/shell-word.mts';
 
 export const DETAIL_CHARS = 140;
 
-// C0/C1 controls a bare byte can carry past stripVTControlCharacters (a lone ESC, BEL, CSI).
-const isControl = (ch: string) => {
-  const code = ch.codePointAt(0) ?? 0;
-  return code < 32 || (code >= 127 && code < 160);
-};
+// Controls a bare byte can carry past stripVTControlCharacters (a lone ESC, BEL, CSI), and bidi.
+const isControl = (ch: string) => ch.search(UNSAFE_TEXT_RE) !== -1;
 
 export const oneLine = (text: string | undefined = ''): string => {
   // Template coercion: unvalidated JSON can hold a number here. Control bytes are stripped because a
