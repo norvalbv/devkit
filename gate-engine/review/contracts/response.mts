@@ -48,8 +48,8 @@ export function parseReviewVerdict(raw: string): ReviewVerdict {
 }
 
 // Same guarded dressing as VERDICT_LINE_RE: the marker must open its line, never sit inside prose.
-const ADVISORY_LINE_RE = /^(?:(?![\r\n])[\s*#>-])*ADVISORY:\**\s*(.+)$/gim;
-const ADVISORY_CAP = 5;
+const ADVISORY_LINE_RE = /^(?:(?![\r\n])[\s*#>-])*ADVISORY:\**[^\S\r\n]*(.+)$/gim;
+export const ADVISORY_CAP = 5;
 const ADVISORY_CHARS = 200;
 
 /** The judge's `ADVISORY:` lines citing a code location — non-blocking, to resolve before merge. */

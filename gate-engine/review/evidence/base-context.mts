@@ -8,6 +8,7 @@ import { z } from 'zod';
 import { emitAdvisoryResult } from '../../judge/advisory/emit.mts';
 import { emitGateEvent } from '../../judge/gate-events.mts';
 import type { VerdictMeta } from '../../judge/verdict-store.mts';
+import { ADVISORY_CAP } from '../contracts/response.mts';
 import { headHash } from './staged-git.mts';
 
 export type BaseSource = 'ship base' | 'review merge-base' | 'local HEAD';
@@ -299,7 +300,7 @@ const storedAdvisories = z.array(z.string().min(1));
 /** The advisories the cached PASS entries stored (every part of a split); malformed reads as none. */
 export function cachedAdvisories(...metas: VerdictMeta[]): string[] | undefined {
   const all = metas.flatMap((m) => storedAdvisories.safeParse(m.advisories).data ?? []);
-  return all.length ? all : undefined;
+  return all.length ? [...new Set(all)].slice(0, ADVISORY_CAP) : undefined;
 }
 
 /** A PASS's `ADVISORY:` findings: self-labelled lines (a split merge prints no verdict line to sit

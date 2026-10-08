@@ -101,6 +101,12 @@ describe('parseAdvisories — the marker without a finding behind it', () => {
       'ADVISORY: <file:line> — <one-line finding>\nVERDICT: PASS — clean';
     expect(parseAdvisories(raw)).toEqual([]);
   });
+
+  it('never lets a bare marker borrow the next line as its finding', () => {
+    expect(
+      parseAdvisories('ADVISORY:\n- `a.ts:1` reasoning, not an advisory\nVERDICT: PASS'),
+    ).toEqual([]);
+  });
 });
 
 describe('a PASS carrying advisories', () => {
@@ -158,9 +164,12 @@ describe('outcomes that carry no advisory', () => {
     expect(advisoryRows()).toEqual([]);
   });
 
-  it('a malformed cached field reads as none', () => {
+  it('a malformed cached field reads as none; parts dedupe and cap like a live PASS', () => {
     expect(cachedAdvisories({ advisories: 'not-an-array' })).toBeUndefined();
     expect(cachedAdvisories({ advisories: [] })).toBeUndefined();
+    // Split parts judge the same diff, so their stored advisories overlap; replay holds the live cap.
+    const many = Array.from({ length: 6 }, (_, i) => `a.ts:${i} — finding`);
+    expect(cachedAdvisories({ advisories: many }, { advisories: many })).toEqual(many.slice(0, 5));
   });
 });
 
