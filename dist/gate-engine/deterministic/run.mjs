@@ -26,7 +26,8 @@
  *                         any other command (electron's `bunx eslint src`, devkit's own
  *                         `bun run lint:structure`) spawns via PATH and BLOCKS on every non-zero
  *                         code (eslint's exit 2 is a fatal config error, not an opt-out).
- *   --extra "<label>=<cmd>"  (repeatable) an arbitrary deterministic gate; non-zero blocks.
+ *   --extra "<label>=<cmd>"  (repeatable) an arbitrary deterministic gate; non-zero blocks. A
+ *                         repo declares more the same way in guard.config.json `extraGates`.
  *   --only "<id,id>"      restrict the built-in set (overrides .devkit/config.json selection) —
  *                         for repos whose gate set is declared in the hook, not a config.
  * Exit contract: 0 = clean or prefix-skip, 1 = one or more real failures.
@@ -43,10 +44,11 @@ import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseJsonObject } from '../config-json.mjs';
-import { coverageBypassed, deterministicStrict, envFlag, structureBypassed } from '../config.mjs';
+import { coverageBypassed, deterministicStrict, envFlag } from '../config.mjs';
 import { emitGateBypass, emitGateEvent, finishGateTiming } from '../judge/gate-events.mjs';
-import { prefixEntry, recordPrefix } from '../prefix-cache/prefix-cache.mjs';
+import { describeCachedPrefix, prefixEntry, recordPrefix } from '../prefix-cache/prefix-cache.mjs';
 import { gateEnv, readGateReason, reasonDetail, reasonReport, withReasonFiles, } from './reason.mjs';
+import { configExtraGates, structureBypassed } from './command-gates.mjs';
 import { printRecheckFooter, recheckCommand, recheckLines, registryRecheck } from './recheck.mjs';
 import { DETERMINISTIC } from './registry.mjs';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -248,6 +250,7 @@ export function runDeterministic(cwd = process.cwd(), opts = {}) {
     const startedAt = Date.now();
     const finish = (code, cacheState = 'none', effectiveMs) => finishGateTiming('deterministic', startedAt, code, cacheState, effectiveMs);
     const { exec = execFileSync } = opts;
+    const extra = [...(opts.extra ?? []), ...configExtraGates(cwd)];
     // `--only` is an execution narrowing request, never an authority grant. Validate it before cache
     // lookup, then intersect it with review's positive allowlist so a crafted hook cannot re-enable a
     // guard excluded by local review policy.
@@ -276,7 +279,7 @@ export function runDeterministic(cwd = process.cwd(), opts = {}) {
     // Deterministic-prefix cache (ship only — a no-op otherwise): a cached all-green staged tree skips
     // every gate. checkPrefix returns true = skip, false = run.
     const cachedPrefix = prefixEntry(cwd, { hookPath: opts.hookPath, scope: cacheScope });
-    const skip = Boolean(cachedPrefix);
+    const skip = Boolean(cachedPrefix) && extra.every((x) => x.cmd);
     const bypassStructure = Boolean(opts.structure) && structureBypassed();
     // Emitted BEFORE the prefix-cache short-circuit: a cached all-green tree skips the gate runs, but
     // a bypassed ATTEMPT must still count in telemetry — the bypassed run caches under its own scope,
@@ -297,54 +300,63 @@ export function runDeterministic(cwd = process.cwd(), opts = {}) {
     // Gates that opted out (exit 2 where that IS an opt-out) and so proved nothing. Reported even on a
     // green run — the whole defect this exists for is a skipped gate reading like a passed one.
     const skipped = [];
-    if (!skip) {
-        if (bypassStructure) {
-            console.log('⚠️  Structure lint BYPASSED for this run (GUARD_STRUCTURE_OK=1).');
-            console.log('   Repository structure was NOT verified for this commit.');
-        }
-        const ids = new Set(effectiveIds);
-        const gates = DETERMINISTIC.filter((g) => ids.has(g.id)).map((g) => {
-            const argv = ['node', path.resolve(HERE, g.module.replace(MJS_EXT_RE, SELF_EXT)), ...g.args];
-            return {
-                id: g.id,
-                label: `guard-${g.id}`,
-                argv,
-                failOpen2: !('failOpen2' in g) || (g.failOpen2 === 'review' ? reviewMode : g.failOpen2 !== false),
-                rcLabels: 'rcLabels' in g ? g.rcLabels : undefined,
-                ...registryRecheck(g, argv, cwd),
-            };
-        });
-        for (const x of opts.extra ?? [])
-            gates.push(commandGate(x.label, cwd, x.cmd));
-        if (opts.structure && !bypassStructure) {
-            gates.push(commandGate('structure-lint', cwd, opts.structure));
-        }
-        withReasonFiles((fileFor) => {
-            gates.forEach((gate, i) => {
-                if (!gate.argv) {
-                    fail(gate, '(unrunnable: empty command)', true);
-                    return;
-                }
-                const reasonFile = fileFor(i);
-                const rc = runArgv(cwd, gate.argv, exec, reasonFile);
-                const failRc = (suffix = '') => fail(gate, suffix, undefined, readGateReason(reasonFile));
-                // failOpen2 belongs to the GATE (exit 2 = opt-out), strict to the RUN: so an `--extra`'s
-                // fatal exit 2 (never an opt-out) stays `(unexpected:2)` under strict, not a skip.
-                if (rc === 1)
-                    failRc();
-                else if (gate.rcLabels && Object.hasOwn(gate.rcLabels, rc))
-                    failRc(gate.rcLabels[rc]);
-                else if (rc === 2 && gate.failOpen2) {
-                    if (deterministicStrict())
-                        failRc(COULD_NOT_RUN);
-                    else
-                        skipped.push(gate.label);
-                }
-                else if (rc !== 0)
-                    failRc(`(unexpected:${rc})`);
-            });
-        });
+    if (skip) {
+        const extras = extra.map((x) => x.label);
+        const flags = EXTRA_BYPASS_SUFFIXES.filter(envFlag).map((f) => `GUARD_${f}`);
+        if (bypassStructure)
+            flags.unshift('GUARD_STRUCTURE_OK');
+        if (effectiveIds.includes('coverage') && coverageBypassed())
+            flags.unshift('GUARD_COVERAGE_OK');
+        const labels = opts.structure ? [...extras, 'structure-lint'] : extras;
+        console.log(describeCachedPrefix(cachedPrefix?.at, effectiveIds, labels, flags));
     }
+    else if (bypassStructure) {
+        console.log('⚠️  Structure lint BYPASSED for this run (GUARD_STRUCTURE_OK=1).');
+        console.log('   Repository structure was NOT verified for this commit.');
+    }
+    // Coverage reads an artifact outside the cached key, so it is judged afresh even on a cache hit.
+    const ids = new Set(skip ? effectiveIds.filter((id) => id === 'coverage') : effectiveIds);
+    const gates = DETERMINISTIC.filter((g) => ids.has(g.id)).map((g) => {
+        const argv = ['node', path.resolve(HERE, g.module.replace(MJS_EXT_RE, SELF_EXT)), ...g.args];
+        return {
+            id: g.id,
+            label: `guard-${g.id}`,
+            argv,
+            failOpen2: !('failOpen2' in g) || (g.failOpen2 === 'review' ? reviewMode : g.failOpen2 !== false),
+            rcLabels: 'rcLabels' in g ? g.rcLabels : undefined,
+            ...registryRecheck(g, argv, cwd),
+        };
+    });
+    for (const x of skip ? [] : extra)
+        gates.push(commandGate(x.label, cwd, x.cmd));
+    if (!skip && opts.structure && !bypassStructure) {
+        gates.push(commandGate('structure-lint', cwd, opts.structure));
+    }
+    withReasonFiles((fileFor) => {
+        gates.forEach((gate, i) => {
+            if (!gate.argv) {
+                fail(gate, '(unrunnable: empty command)', true);
+                return;
+            }
+            const reasonFile = fileFor(i);
+            const rc = runArgv(cwd, gate.argv, exec, reasonFile);
+            const failRc = (suffix = '') => fail(gate, suffix, undefined, readGateReason(reasonFile));
+            // failOpen2 belongs to the GATE (exit 2 = opt-out), strict to the RUN: so an `--extra`'s
+            // fatal exit 2 (never an opt-out) stays `(unexpected:2)` under strict, not a skip.
+            if (rc === 1)
+                failRc();
+            else if (gate.rcLabels && Object.hasOwn(gate.rcLabels, rc))
+                failRc(gate.rcLabels[rc]);
+            else if (rc === 2 && gate.failOpen2) {
+                if (deterministicStrict())
+                    failRc(COULD_NOT_RUN);
+                else
+                    skipped.push(gate.label);
+            }
+            else if (rc !== 0)
+                failRc(`(unexpected:${rc})`);
+        });
+    });
     // Before the failure branch, so this prints on a GREEN run too — the case that motivated it: a
     // fail-open gate's own stderr scrolls past at the same visual weight as a gate that passed.
     if (skipped.length > 0) {
@@ -398,20 +410,20 @@ export function runDeterministic(cwd = process.cwd(), opts = {}) {
             console.error('   ephemeral worktree whose dependencies are symlinked in; check the "↳ linked …" lines');
             console.error('   above for where each one actually resolved to.');
         }
-        return finish(1);
+        return finish(1, skip ? 'partial' : 'none');
     }
     // All green (or a prefix-skip, already recorded): record the key so an identical staged tree skips
     // next time (ship only — recordPrefix is a no-op otherwise).
     if (!skip) {
         const durationMs = Date.now() - startedAt;
-        // A review skip (coverage NOT MEASURED) proved nothing, so it must not authorise a later review.
-        if (!(reviewMode && skipped.length > 0)) {
+        // An opted-out gate proved nothing, so a cache hit on its run would replay a verdict never reached.
+        if (skipped.length === 0) {
             recordPrefix(cwd, { hookPath: opts.hookPath, scope: cacheScope, durationMs });
         }
         return finish(0);
     }
     const cachedDuration = typeof cachedPrefix?.duration_ms === 'number' ? cachedPrefix.duration_ms : undefined;
-    return finish(0, 'full', cachedDuration);
+    return finish(0, gates.length ? 'partial' : 'full', cachedDuration);
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
     process.exit(runDeterministic(process.cwd(), parseOpts(process.argv.slice(2))));

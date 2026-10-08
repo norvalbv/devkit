@@ -29,7 +29,7 @@
 import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, } from 'node:fs';
 import { basename, join } from 'node:path';
 import { emitGateEvent } from '../judge/gate-events.mjs';
-import { formatDiagnosis, formatRerunNotice, formatRerunRescue, headSha, raisedTimeoutMs, readClearMarker, readDiagnosis, removeClearMarker, RESULTS_NAME, RETRY_CONDITION, stagedFiles, writeClearMarker, } from './failures.mjs';
+import { formatDiagnosis, formatRerunNotice, formatRerunRescue, headSha, markerCause, raisedTimeoutMs, readClearMarker, readDiagnosis, removeClearMarker, RESULTS_NAME, RETRY_CONDITION, stagedFiles, UNHANDLED_REPORTER, writeClearMarker, } from './failures.mjs';
 import { ownsReporter, ownsRetry, ownsTimeoutBudget, resolveVitest, runVitestDetailed, } from './vitest-cli.mjs';
 import { detectVitestVersion, RETRY_MIN_VITEST, supportsRetryCondition, } from './vitest-version.mjs';
 import { markTouchedDuringRun, publishManifest, snapshotSource, stageManifest, } from './provenance.mjs';
@@ -118,7 +118,7 @@ export function snapshotArtifact(cwd) {
  * gap and we would delete the good report it just wrote. `rename` is atomic, so the claim has exactly
  * one winner and nothing arriving afterwards can be destroyed by us.
  */
-export function publishCoverage(runDir, cwd, before, failedFiles = [], source = null) {
+export function publishCoverage(runDir, cwd, before, diagnosis = null, source = null) {
     const fresh = join(runDir, REPORT_NAME);
     const stable = join(cwd, COVERAGE_FILE);
     const coverageDir = join(cwd, COVERAGE_DIR);
@@ -173,7 +173,7 @@ export function publishCoverage(runDir, cwd, before, failedFiles = [], source = 
         clearedAt: new Date().toISOString(),
         previousMtime: before,
         head: headSha(cwd),
-        failedFiles,
+        ...markerCause(diagnosis),
     });
     rmSync(claimed, { force: true });
     return 'cleared';
@@ -218,8 +218,8 @@ export function buildInjectedArgs(vitest, argv, resultsFile, cwd) {
     }
     if (!ownsReporter(argv) && !process.env[NO_DIAGNOSIS_ENV]) {
         // `default` is kept so console output is byte-for-byte what the consumer already sees; the json
-        // reporter is additive and writes only into our run directory.
-        injected.push('--reporter=default', '--reporter=json', `--outputFile.json=${resultsFile}`);
+        // reporter is additive and writes only into our run directory; ours names unhandled errors beside it.
+        injected.push('--reporter=default', '--reporter=json', `--outputFile.json=${resultsFile}`, `--reporter=${UNHANDLED_REPORTER}`);
     }
     return injected;
 }
@@ -273,7 +273,7 @@ async function runPass(vitest, cwd, argv, budget) {
     // Also BEFORE vitest (sc-3225); anything whose mtime moves during the run is marked unmeasured
     // after it, which catches an edit-then-restore the start hashes alone cannot see.
     const startedAt = Date.now();
-    const source = snapshotSource(cwd);
+    const source = snapshotSource(cwd, argv);
     // Inside runDir, which only this run may touch; results.json also keeps it non-empty, so vitest's
     // cleanAfterRun() has nothing to sweep (the v0.43.1 fail-open).
     const resultsFile = join(runDir, RESULTS_NAME);
@@ -294,12 +294,12 @@ async function runPass(vitest, cwd, argv, budget) {
             ...budget,
             ...argv,
         ], cwd);
-        diagnosis = readDiagnosis(resultsFile);
+        diagnosis = readDiagnosis(resultsFile, run.interrupted ? 0 : run.code);
         // A failed run's report (the consumer's `coverage.reportOnFailure`) is partial: never publish it.
         if (run.code !== 0)
             rmSync(join(runDir, REPORT_NAME), { force: true });
         const measured = source && markTouchedDuringRun(cwd, source, startedAt, join(runDir, REPORT_NAME));
-        outcome = publishCoverage(runDir, cwd, before, diagnosis?.failedFiles ?? [], measured);
+        outcome = publishCoverage(runDir, cwd, before, diagnosis, measured);
     }
     finally {
         rmSync(runDir, { recursive: true, force: true });
@@ -323,13 +323,13 @@ function reportRerunRescue(first, cwd, budget) {
     });
 }
 /** Keep the marker's clearedAt (when the artifact went) but name the failures that ended the run. */
-function refreshClearMarker(cwd, failedFiles) {
+function refreshClearMarker(cwd, diagnosis) {
     const coverageDir = join(cwd, COVERAGE_DIR);
     if (existsSync(join(cwd, COVERAGE_FILE)))
         return; // a sibling published in between — not ours
     const marker = readClearMarker(coverageDir);
     if (marker)
-        writeClearMarker(coverageDir, { ...marker, failedFiles });
+        writeClearMarker(coverageDir, { ...marker, ...markerCause(diagnosis) });
 }
 /**
  * Run the consumer's vitest suite with coverage in an isolated reports directory, publish the report,
@@ -355,7 +355,7 @@ export async function produceCoverage(cwd = process.cwd(), argv = []) {
         return 1;
     }
     const first = await runPass(vitest, cwd, argv, []);
-    reportDiagnosis(first.diagnosis, cwd, first.retrying);
+    reportDiagnosis(first.diagnosis, cwd, first.retrying && !first.interrupted);
     let final = first;
     if (shouldRerun({ ...first, argv, env: process.env })) {
         // Pass 1 has fully settled — artifact cleared, marker written — before pass 2 starts, so a kill
@@ -367,14 +367,14 @@ export async function produceCoverage(cwd = process.cwd(), argv = []) {
             `--testTimeout=${budget}`,
             `--hookTimeout=${budget}`,
         ]);
-        reportDiagnosis(final.diagnosis, cwd, final.retrying);
+        reportDiagnosis(final.diagnosis, cwd, final.retrying && !final.interrupted);
         if (final.code === 0) {
             reportRerunRescue(first.diagnosis, cwd, budget);
         }
         else if (first.outcome === 'cleared' && final.outcome === 'kept') {
             // Pass 2 found nothing left to clear because pass 1 already had. The marker still names pass
             // 1's failures; the run that actually ended was pass 2.
-            refreshClearMarker(cwd, final.diagnosis?.failedFiles ?? []);
+            refreshClearMarker(cwd, final.diagnosis);
         }
     }
     const { code, outcome } = final;

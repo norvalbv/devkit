@@ -59,7 +59,8 @@ function stagedPaths(cwd, ref) {
         args.push(ref);
     return new Set(splitNul(git(cwd, args)));
 }
-function pureRenames(cwd, ref) {
+/** Staged renames keyed by new path, so a moved file is diffed against its pre-move blob. */
+function stagedRenames(cwd, ref) {
     const args = [
         'diff',
         '--cached',
@@ -73,31 +74,34 @@ function pureRenames(cwd, ref) {
     if (ref)
         args.push(ref);
     const fields = splitNul(git(cwd, args));
-    const renamed = new Set();
+    const renamed = new Map();
     for (let i = 0; i < fields.length;) {
         const status = fields[i++] ?? '';
-        const _oldPath = fields[i++];
+        const from = fields[i++];
         const newPath = fields[i++];
-        if (status === 'R100' && newPath)
-            renamed.add(newPath);
+        if (from && newPath)
+            renamed.set(newPath, { from, pure: status === 'R100' });
     }
     return renamed;
 }
-/** Merge resolutions are attributed only when they differ from both parents. */
+/** Merge resolutions are attributed only when they differ from both parents. Paths are read before
+ * renames, so an edit staged in between widens the set instead of hiding behind a stale R100. */
 function changedPaths(cwd) {
-    const firstParent = stagedPaths(cwd);
-    const firstPureRenames = pureRenames(cwd);
+    const firstParent = [...stagedPaths(cwd)];
+    const head = stagedRenames(cwd);
     try {
         const mergeParent = stagedPaths(cwd, 'MERGE_HEAD');
-        const mergePureRenames = pureRenames(cwd, 'MERGE_HEAD');
-        return [...firstParent].filter((file) => mergeParent.has(file) && !(firstPureRenames.has(file) && mergePureRenames.has(file)));
+        const merge = stagedRenames(cwd, 'MERGE_HEAD');
+        const files = firstParent.filter((file) => mergeParent.has(file) && !(head.get(file)?.pure && merge.get(file)?.pure));
+        return { files, head, merge };
     }
     catch {
-        return [...firstParent].filter((file) => !firstPureRenames.has(file));
+        return { files: firstParent.filter((file) => !head.get(file)?.pure), head, merge: null };
     }
 }
-function patch(cwd, file, ref) {
+function patch(cwd, file, ref, from) {
     const args = [
+        '--literal-pathspecs',
         'diff',
         '--cached',
         '--no-color',
@@ -109,7 +113,7 @@ function patch(cwd, file, ref) {
     ];
     if (ref)
         args.push(ref);
-    args.push('--', file);
+    args.push('--', ...(from ? [from, file] : [file]));
     return git(cwd, args);
 }
 function lineStarts(source) {
@@ -177,9 +181,13 @@ function stagedBlob(cwd, file) {
     const repoPath = `${gitPrefix(cwd)}${file}`;
     return git(cwd, ['show', `:${repoPath}`]);
 }
-/** Each comment line of `ref`'s version of the file, mapped to its parts of every token on it. */
-function commentFragmentsAt(cwd, file, extension, ref) {
+const extensionOf = (file) => path.extname(file).slice(1).toLowerCase();
+/** Each comment line of `ref`'s version of the file, lexed by that path's own extension. */
+function commentFragmentsAt(cwd, file, ref) {
     const fragments = new Map();
+    const extension = extensionOf(file);
+    if (!SUPPORTED_EXTENSIONS.has(extension))
+        return fragments;
     let source;
     try {
         source = git(cwd, ['show', `${ref}:${gitPrefix(cwd)}${file}`]);
@@ -364,23 +372,26 @@ export function detectChangedComments(cwd = process.cwd()) {
     const decisionsDir = normalizedRoot(cwd, cfg.decisionsDir);
     inventory.decisionsStaged =
         decisionsDir !== '' && [...stagedPaths(cwd)].some((file) => insideRoots(file, [decisionsDir]));
-    for (const file of changedPaths(cwd).sort()) {
+    const { files, head: headRenames, merge: mergeRenamed } = changedPaths(cwd);
+    for (const file of files.sort()) {
         if (!insideRoots(file, roots) || !isConfiguredSource(file))
             continue;
-        const extension = path.extname(file).slice(1).toLowerCase();
+        const extension = extensionOf(file);
         if (!SUPPORTED_EXTENSIONS.has(extension)) {
             unsupported.push({ extension, path: file });
             continue;
         }
         inventory.files += 1;
-        const first = parsePatchHunks(patch(cwd, file));
+        const headFrom = headRenames.get(file)?.from;
+        const first = parsePatchHunks(patch(cwd, file, undefined, headFrom));
         let effective = first;
-        const headFragments = commentFragmentsAt(cwd, file, extension, 'HEAD');
+        const headFragments = commentFragmentsAt(cwd, headFrom ?? file, 'HEAD');
         let touchLines = commentTouchLines(first, new Set(headFragments.keys()));
         try {
-            const second = parsePatchHunks(patch(cwd, file, 'MERGE_HEAD'));
+            const mergeFrom = mergeRenamed?.get(file)?.from;
+            const second = parsePatchHunks(patch(cwd, file, 'MERGE_HEAD', mergeFrom));
             const secondLines = new Set(second.flatMap((hunk) => [...hunk.addedLines]));
-            const secondTouch = commentTouchLines(second, new Set(commentFragmentsAt(cwd, file, extension, 'MERGE_HEAD').keys()));
+            const secondTouch = commentTouchLines(second, new Set(commentFragmentsAt(cwd, mergeFrom ?? file, 'MERGE_HEAD').keys()));
             effective = first.map((hunk) => ({
                 ...hunk,
                 addedLines: new Set([...hunk.addedLines].filter((line) => secondLines.has(line))),

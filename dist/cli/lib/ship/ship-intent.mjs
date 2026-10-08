@@ -2,7 +2,7 @@
 /** Recorded ship invocation behind `devkit ship --resume`: Buffer → base64 keeps body bytes exact
  * (a UTF-8 hop substitutes U+FFFD). Commit-only writes are best-effort; body side effects require
  * an owned record, and reads fail closed. */
-import { execFileSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -40,12 +40,11 @@ export function writeIntent(opts, paths) {
     if (paths.length === 0)
         return fail('no paths given');
     const rel = relIntentPath(opts.branch);
-    try {
-        execFileSync('git', ['-C', opts.root, 'check-ignore', '-q', '--', rel], { stdio: 'ignore' });
-    }
-    catch {
-        // Not ignored (or check-ignore itself failed): skip rather than create a stageable secret.
-        console.error(`ship-intent: ${rel} is not gitignored here — not recording the invocation (run devkit doctor to refresh .gitignore; retries need the full command until then)`);
+    const probe = spawnSync('git', ['-C', opts.root, 'check-ignore', '-q', '--', rel]);
+    if (probe.status !== 0) {
+        // 1: not ignored; else git could not answer (beyond a linked .devkit). Never stage a secret.
+        const why = probe.status === 1 ? 'is not gitignored here' : `could not be checked: ${probe.stderr}`;
+        console.error(`ship-intent: ${rel} ${why.trim()} — not recording the invocation (run devkit doctor --fix; retries need the full command until then)`);
         return 0;
     }
     const generation = randomUUID();

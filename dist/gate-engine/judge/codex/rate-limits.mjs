@@ -54,10 +54,11 @@ export function parseRateLimitsReply(line) {
     const reachedType = usableText(limits.rateLimitReachedType);
     const primary = readWindow(limits.primary);
     const secondary = readWindow(limits.secondary);
-    // codex's TUI cap test (rate_limits.rs): either window at 100%, unless credits are usable. Only a
-    // strict `true` excuses it — a garbled credits field is not evidence of headroom.
+    // codex's TUI (rate_limits.rs): usable credits serve past a spent plan unless spend control is
+    // reached. Only a strict `true` counts — a garbled credits field is not evidence of headroom.
     const credits = limits.credits;
-    const creditsUsable = credits?.unlimited === true || credits?.hasCredits === true;
+    const creditsUsable = (credits?.unlimited === true || credits?.hasCredits === true) &&
+        limits.spendControlReached !== true;
     // The lock lasts until the LAST exhausted window clears; an unknown reset ranks latest, so no
     // other window's time is offered as the clearing time.
     let exhaustedWindow;
@@ -66,7 +67,7 @@ export function parseRateLimitsReply(line) {
         ['primary', primary],
         ['secondary', secondary],
     ]) {
-        if (creditsUsable || w?.usedPercent === undefined || w.usedPercent < 100)
+        if (w?.usedPercent === undefined || w.usedPercent < 100)
             continue;
         const reset = w.resetsAt ?? Number.POSITIVE_INFINITY;
         if (exhaustedWindow === undefined || reset > latestReset) {
@@ -74,10 +75,14 @@ export function parseRateLimitsReply(line) {
             latestReset = reset;
         }
     }
+    // Absent `rateLimitReachedType` alone is NOT "not reached" — the backend maps an unknown kind to
+    // None — so a spent window is the second positive signal.
+    const planLimited = reachedType !== undefined || exhaustedWindow !== undefined;
+    // An allowlist: workspace_* kinds void credits upstream, and an unknown kind stays a lock.
+    const covered = creditsUsable && (reachedType === undefined || reachedType === 'rate_limit_reached');
     const snapshot = {
-        // Absent `rateLimitReachedType` alone is NOT "not reached" — the backend maps an unknown kind to
-        // None — so a spent window is the second positive signal.
-        reached: reachedType !== undefined || exhaustedWindow !== undefined,
+        reached: planLimited && !covered,
+        onCredits: planLimited && covered,
     };
     if (reachedType !== undefined)
         snapshot.reachedType = reachedType;
@@ -86,7 +91,7 @@ export function parseRateLimitsReply(line) {
         snapshot.planType = planType;
     if (exhaustedWindow !== undefined)
         snapshot.exhaustedWindow = exhaustedWindow;
-    // The reported window is the one that locked; with none locked, primary as before.
+    // The reported window is the spent one; with none spent, primary as before.
     const shown = exhaustedWindow === 'secondary' ? secondary : primary;
     if (shown)
         Object.assign(snapshot, shown);

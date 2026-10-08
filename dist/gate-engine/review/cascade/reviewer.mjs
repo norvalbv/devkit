@@ -17,6 +17,19 @@ import { allowedToolsFor, escalatePrompt, hasChecklist, resolveEscalationModel, 
 import { enforceChecklistContract, retrievalDegradation } from '../contracts/checklist.mjs';
 import { agentBody, cleanupChecklistState, initializeCommitGuardChecklist, isNamedSkip, readChecklistState, withStagedFiles, } from '../runtime.mjs';
 import { checklistAssetRoot } from './consumer-assets.mjs';
+const ALSO_STAGED_MAX = 40;
+/** Names the staged paths outside a reviewer's file list, so it never reads one as unstaged. */
+export function renderAlsoStaged(files, stagedFiles) {
+    const inList = new Set(files);
+    const others = stagedFiles.filter((f) => !inList.has(f));
+    if (others.length === 0)
+        return '';
+    const more = others.length - ALSO_STAGED_MAX;
+    const named = others.slice(0, ALSO_STAGED_MAX).join(', ') + (more > 0 ? `, and ${more} more` : '');
+    return (`Also staged in this commit, outside this review's file list (paths only, not in your evidence): ${named}. ` +
+        'They ARE staged (any edit or deletion is in this commit): never call them unstaged. They are ' +
+        'not yours to judge; inspect one only if an in-scope change depends on it.');
+}
 /** Reason + machine cause for an inconclusive outcome, both naming what the PROVIDER said: a usage
  *  lock collapsed into "judge outage" sends the reader to the one remedy that cannot work. */
 function outageReason(outage, pass = 'judge') {
@@ -114,17 +127,21 @@ async function cascadeVerdict({ reviewer, files }, { cwd, cfg, exec = execJudgeA
         : Math.max(0, Math.min(DEEP_JUDGE_TIMEOUT_MS, cascadeDeadline - Date.now()));
     const env = withStagedFiles(judgeEnv ?? process.env, reviewer, files);
     const body = agentBody(cwd, cfg, reviewer.name, assetRoot);
-    // Both forms name every staged file; only the checklist reviewers have the Bash to verify a churn
+    // Both forms name every in-scope staged file; only the checklist reviewers have the Bash to verify a churn
     // count, so the Bash-less one is given the inventory without it.
     // The index the judge's evidence is cut from; grounding refuses a tree restaged after this point.
     const evidenceTree = responseContractFor(reviewer.responseContract) ? stagedTreeHash(cwd) : null;
     const inventory = hasChecklist(reviewer)
         ? gitCached(cwd, ['--stat'], files)
-        : `STAGED FILES (complete inventory):\n${gitCached(cwd, ['--name-only'], files)}`;
+        : `STAGED FILES (in scope):\n${gitCached(cwd, ['--name-only'], files)}`;
+    const extras = {
+        ...promptExtras,
+        alsoStagedBlock: renderAlsoStaged(files, promptExtras?.stagedFiles ?? []),
+    };
     const prompt = hasChecklist(reviewer)
-        ? wrapPrompt(body, reviewer, files, assetRoot, checklistRecoveryReason, promptExtras, checklistRoot)
+        ? wrapPrompt(body, reviewer, files, assetRoot, checklistRecoveryReason, extras, checklistRoot)
         : wrapConventionsPrompt(body, files, renderGoverningClaudeMd(cwd, files), {
-            ...promptExtras,
+            ...extras,
             lineCountBlock: renderStagedLineCounts(cwd, files),
         });
     const responseContract = responseContractFor(reviewer.responseContract);

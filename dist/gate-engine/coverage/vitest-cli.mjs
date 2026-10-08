@@ -5,6 +5,8 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 /** Forwarded to the vitest child so a Ctrl-C'd run leaves no run directory and no stale report. */
 const INTERRUPT_SIGNALS = ['SIGINT', 'SIGTERM'];
+/** 128 + SIGINT/SIGTERM: vitest traps both and exits with these instead of dying on the signal. */
+const TRAPPED_SIGNAL_EXIT_CODES = new Set([130, 143]);
 /** The consumer's vitest binary, or null when this repo doesn't have one. */
 export function resolveVitest(cwd) {
     const bin = join(cwd, 'node_modules', '.bin', 'vitest');
@@ -12,7 +14,7 @@ export function resolveVitest(cwd) {
 }
 /**
  * Run vitest to completion and report how it ended. `interrupted` exists so a caller never mistakes
- * a Ctrl-C for a failure worth acting on — the exit code alone cannot tell them apart.
+ * a Ctrl-C for a failure worth acting on — the code alone cannot tell them apart once a test failed.
  */
 export async function runVitestDetailed(bin, args, cwd) {
     const child = spawn(bin, args, { cwd, stdio: 'inherit' });
@@ -36,7 +38,10 @@ export async function runVitestDetailed(bin, args, cwd) {
             });
             // `signal ? 1` matters: a killed child reports exitCode null, which `?? 1` alone would keep,
             // but an explicit 0 from a child that was ALSO signalled must not read as success.
-            child.on('close', (exitCode, signal) => done({ code: signal ? 1 : (exitCode ?? 1), interrupted: interrupted || signal !== null }));
+            child.on('close', (exitCode, signal) => done({
+                code: signal ? 1 : (exitCode ?? 1),
+                interrupted: interrupted || signal !== null || TRAPPED_SIGNAL_EXIT_CODES.has(exitCode ?? 0),
+            }));
         });
     }
     finally {

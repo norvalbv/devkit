@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { failLine } from '../../../gate-engine/deterministic/reason.mjs';
 import { withLock } from '../../lib/atomic-write.mjs';
-import { overlayBaseRefusal, reportOverlayContract, } from '../../lib/install/anti-slop/overlay/contract.mjs';
+import { OVERLAY_BASE_REFUSAL, reportOverlayContract, } from '../../lib/install/anti-slop/overlay/contract.mjs';
 import { adoptBaselineRuleFindings, baselineFromGroups, compareBaseline, pruneBaseline, readBaseline, writeBaseline, } from '../../lib/install/anti-slop/baseline.mjs';
 import { checkBaselineEnvelope, inheritedBaseAllowance, printNewAntiSlopFindings, refuseCommittedGrowth, relocationEvidence, reportInheritedForgiveness, } from '../../lib/install/anti-slop/baseline-envelope.mjs';
 import { ANTI_SLOP_BASELINE_LOCK_REL, ANTI_SLOP_BASELINE_REL, } from '../../lib/install/anti-slop/constants.mjs';
@@ -45,8 +45,8 @@ gate would reject against HEAD, so a new finding is fixed, not adopted. Prune re
 new error-severity findings exist.
 
 In an OVERLAY install the baseline is per-clone and git-ignored, so no committed tree carries one to
-compare against: --base and adopt-renames are unavailable there, and adopt-activation is how a devkit
-release's newly activated rules are adopted without re-snapshotting unrelated debt.`,
+compare against: --base is unavailable there, adopt-renames re-keys staged renames only, and
+adopt-activation adopts a devkit release's newly activated rules without re-snapshotting other debt.`,
 };
 /**
  * Exported so an overlay install adopts existing debt through the SAME path the CLI verb uses,
@@ -165,7 +165,7 @@ function check(cwd, args, envelope = null, baseRef) {
     };
     // The base comparison must judge the SAME capability the candidate was linted with; pinning it
     // inside that lint's own lock keeps a concurrent capability sync from swapping it underneath.
-    const pin = envelope?.base && envelope.baseTree
+    const pin = envelope?.baseTree
         ? mkdtempSync(join(tmpdir(), 'devkit-anti-slop-capability-'))
         : null;
     try {
@@ -180,8 +180,10 @@ function check(cwd, args, envelope = null, baseRef) {
             inLintScope: resolveAntiSlopScope(cwd, envelopeArgs).includes,
         };
         const envelopeStatus = checkBaselineEnvelope(baseline, envelope, envelopeGroups, baseRef, relocation);
-        if (envelopeStatus !== 0)
+        if (envelopeStatus !== 0) {
+            reportOverlayContract(cwd);
             return envelopeStatus;
+        }
         const allowance = inheritedBaseAllowance(cwd, pin, selected, candidateGroups, envelope);
         const comparison = compareBaseline(allowance, candidateGroups);
         const vacated = envelope && comparison.newGroups.length > 0
@@ -205,7 +207,7 @@ function check(cwd, args, envelope = null, baseRef) {
             for (const line of antiSlopRemedyLines(errors.map((group) => group.ruleId), overlay))
                 console.error(line);
             // Reported on the FAIL path too: a committer reading a block needs the same standing about
-            // what this gate does not enforce — no committed base means no rename forgiveness.
+            // what this gate does not enforce — no committed base means no shrink-only ratchet.
             reportOverlayContract(cwd);
             return 1;
         }
@@ -322,9 +324,8 @@ export default function run(args, cwd) {
     // The manifest STAMP, not the repository marker: `.devkit/config.json` is absent from every review
     // projection, so a marker read drops the capability from the snapshot exactly where it exists.
     const overlay = resolveOxlintEntryConfig(cwd) !== null;
-    const refusal = overlay ? overlayBaseRefusal(operation, baseRef !== undefined) : null;
-    if (refusal) {
-        console.error(refusal);
+    if (overlay && baseRef !== undefined) {
+        console.error(OVERLAY_BASE_REFUSAL);
         return 2;
     }
     if (operation === 'create')
@@ -341,7 +342,7 @@ export default function run(args, cwd) {
             console.error('anti-slop adopt-renames accepts no flags or paths');
             return 2;
         }
-        return adoptRenames(cwd, baseRef ?? 'HEAD', baseRef !== undefined);
+        return adoptRenames(cwd, overlay, baseRef ?? 'HEAD', baseRef !== undefined);
     }
     if (operation === 'adopt-relocations') {
         if (paths.length > 0) {

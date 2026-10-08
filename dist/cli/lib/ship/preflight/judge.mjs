@@ -51,8 +51,11 @@ export async function judgeReachability(root, deps = DEFAULT_DEPS, guards = { re
                 status.state = 'unauthenticated';
             else if (codexLimits?.reached)
                 status.state = 'rate-limited';
-            else if (codexLimits)
+            else if (codexLimits) {
                 status.state = 'ok';
+                if (codexLimits.onCredits)
+                    status.onCredits = true;
+            }
             // else: the RPC said nothing this version understands — 'unknown', reported as such.
             if (codexLimits?.resetsAt !== undefined)
                 status.resetsAt = codexLimits.resetsAt;
@@ -99,7 +102,9 @@ export function renderPreflight(statuses, now = Date.now()) {
             detail.push(`resets in ${formatResetDelta(s.resetsAt, now)}`);
         const suffix = detail.length > 0 ? ` (${detail.join(', ')})` : '';
         const verdict = s.state === 'ok'
-            ? 'reachable'
+            ? s.onCredits
+                ? 'reachable — plan limit reached, running on credits'
+                : 'reachable'
             : s.state === 'absent'
                 ? `\`${s.bin}\` not installed or not on PATH`
                 : s.state === 'unauthenticated'

@@ -3,7 +3,7 @@
 import { sameDir } from '../../doctor/hooks-path.mjs';
 import { hasOwnOverlay, projectionGaps, repairProjection } from './overlay-home.mjs';
 const MAX_LISTED = 5;
-const listed = (paths) => paths.length > MAX_LISTED
+export const listed = (paths) => paths.length > MAX_LISTED
     ? `${paths.slice(0, MAX_LISTED).join(', ')} +${paths.length - MAX_LISTED} more`
     : paths.join(', ');
 /** Report `path`'s projection gaps, or with `fix` close them (links the shared inputs, copies the

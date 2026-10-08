@@ -196,6 +196,15 @@ function fail(msg) {
     console.error(`reconcile-manifest-write: ${msg}`);
     return 1;
 }
+/** `--anchors`: "<expect>\0<record>\0<path>\0" triples; a path is written only while its record is unchanged. */
+function readAnchors(file) {
+    const fields = readFileSync(file, 'utf8').split('\0');
+    const guards = new Map();
+    for (let i = 0; i + 2 < fields.length; i += 3) {
+        guards.set(fields[i + 2], { expect: fields[i], record: fields[i + 1] });
+    }
+    return guards;
+}
 /**
  * Record one branch's shipped paths into the manifest (atomic, locked). Exported so the core is
  * directly unit-testable, not only via the CLI subprocess. Returns 0 on success, 1 on a usage error.
@@ -204,7 +213,7 @@ function fail(msg) {
  * is where blobs are hashed — ship-branch passes the EPHEMERAL commit worktree so the manifest
  * records what the PR actually committed, not a parallel agent's later edit to the shared tree.
  */
-export function recordShip({ root, gitRoot, branch, repo, baseRef, baseSha, tipSha, pr, merge = false, literalPaths = false, }, paths) {
+export function recordShip({ root, gitRoot, branch, repo, baseRef, baseSha, tipSha, pr, merge = false, literalPaths = false, anchors, }, paths) {
     // baseSha is always required (it drives classify); repo/baseRef only when writing a FRESH entry —
     // in --merge mode they are kept from the existing branch entry (a re-push to an open PR, same metadata).
     if (!root || !branch || !baseSha)
@@ -227,9 +236,19 @@ export function recordShip({ root, gitRoot, branch, repo, baseRef, baseSha, tipS
     }
     else
         classified = paths.map((p) => classify(hashRoot, baseSha, p));
-    const entries = classified.filter((e) => e !== null);
+    const guards = anchors ? readAnchors(anchors) : new Map();
+    const entries = classified
+        .filter((e) => e !== null && guards.get(e.path)?.record !== '')
+        .map((e) => {
+        const [mode, blobSha] = guards.get(e.path)?.record.split(' ') ?? [];
+        return blobSha ? { ...e, mode, blobSha } : e;
+    });
+    // Absent at the pinned base and the worktree, and not merely kept at the tip: the caller deleted it too.
+    const gone = merge && !literalPaths
+        ? paths.filter((p, i) => !classified[i] && guards.get(p)?.record !== '' && !existsSync(join(hashRoot, p)))
+        : [];
     // Before the lock (and before the no-entry throw below): an all-unresolvable merge is a benign no-op.
-    if (entries.length === 0)
+    if (entries.length === 0 && gone.length === 0)
         return fail('no recordable paths (all empty/unresolvable)');
     const prNumber = pr && PR_DIGITS.test(pr) ? Number(pr) : null;
     const file = join(root, '.devkit', 'reconcile-manifest.json');
@@ -245,8 +264,26 @@ export function recordShip({ root, gitRoot, branch, repo, baseRef, baseSha, tipS
                 if (!existing)
                     throw new Error(`no manifest entry for ${branch} to merge into`);
                 const byPath = new Map(existing.paths.map((e) => [e.path, e]));
-                for (const e of entries)
+                // A concurrent ship that already replaced the record this one anchored on wins.
+                const fresh = (p) => {
+                    const cur = byPath.get(p);
+                    const token = cur ? `${cur.op}:${cur.mode}:${cur.blobSha}` : '-';
+                    return (guards.get(p)?.expect ?? token) === token;
+                };
+                let changed = 0;
+                for (const e of entries.filter((e) => fresh(e.path))) {
                     byPath.set(e.path, e);
+                    changed++;
+                }
+                for (const p of gone) {
+                    const prev = byPath.get(p);
+                    if (!prev || prev.op === 'delete' || !fresh(p))
+                        continue;
+                    byPath.set(p, { ...prev, op: 'delete' });
+                    changed++;
+                }
+                if (changed === 0)
+                    throw new Error('no recordable paths');
                 manifest.branches[branch] = {
                     ...existing,
                     shippedAt: new Date().toISOString(),
@@ -287,6 +324,7 @@ function main() {
         pr: strFlag(flags.pr),
         merge: flags.merge === true, // reship's --pr re-push extends the existing entry instead of overwriting
         literalPaths: flags['literal-paths'] === true, // branch-source paths are concrete identities
+        anchors: strFlag(flags.anchors),
     }, paths);
 }
 // Run only as a CLI entrypoint — importing the module (e.g. a test importing recordShip) must not

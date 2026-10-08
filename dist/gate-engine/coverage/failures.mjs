@@ -1,7 +1,9 @@
 import { execFileSync } from 'node:child_process';
 import { commitIndexEnv } from '../ratchets/commit-index.mjs';
 import { existsSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { join, relative, resolve } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { UNHANDLED_NAME } from './unhandled-reporter.mjs';
 /**
  * The regex handed to vitest's `--retry.condition`, which retries ONLY errors whose message matches.
  *
@@ -14,6 +16,9 @@ import { join, relative, resolve } from 'node:path';
 export const RETRY_CONDITION = '(Test|Hook) timed out';
 /** vitest's json-reporter output. Lands in the run directory, which only this run may touch. */
 export const RESULTS_NAME = 'results.json';
+/** devkit's own reporter, injected beside the json one. The compiled sibling under dist: Node will not
+ * strip types from a file inside a consumer's node_modules. */
+export const UNHANDLED_REPORTER = fileURLToPath(new URL(`./unhandled-reporter${import.meta.url.endsWith('.mts') ? '.mts' : '.mjs'}`, import.meta.url));
 /** The advisory sidecar a CLEARING run leaves beside the artifact it removed. */
 export const CLEAR_MARKER_NAME = '.last-clear.json';
 /** vitest 4.1.10's json spelling of a test timeout (an upstream quirk, pinned by tests). Not unique
@@ -42,7 +47,7 @@ const canonical = (p) => {
  * `--reporter` never got ours, so "no report" is an ordinary outcome rather than an error. The gate
  * is unaffected either way: this is diagnosis, never verification.
  */
-export function readDiagnosis(resultsFile) {
+export function readDiagnosis(resultsFile, exitCode = 0) {
     try {
         const report = JSON.parse(readFileSync(resultsFile, 'utf8'));
         if (!Array.isArray(report?.testResults))
@@ -113,6 +118,9 @@ export function readDiagnosis(resultsFile) {
         if (failedFiles.size > 0) {
             diagnosis.failures = { tests: [...failedTests.values()], allTimedOut, timeoutMs };
         }
+        else if (exitCode !== 0) {
+            diagnosis.unhandled = readUnhandled(join(dirname(resultsFile), UNHANDLED_NAME), exitCode);
+        }
         return diagnosis;
     }
     catch {
@@ -120,6 +128,25 @@ export function readDiagnosis(resultsFile) {
         // there is nothing to say — and none of them may cost somebody their test run.
         return null;
     }
+}
+/** The reporter's errors, once each (vitest projects repeat them), or one generic entry when it wrote
+ * none: a threshold miss or an empty filter is no error at all, and an older vitest never calls it. */
+function readUnhandled(file, exitCode) {
+    try {
+        const parsed = JSON.parse(readFileSync(file, 'utf8'));
+        const unique = new Map(parsed.map((e) => [`${e.file}\0${e.message}`, e]));
+        if (unique.size > 0)
+            return [...unique.values()];
+    }
+    catch {
+        /* absent or torn — fall through to the generic cause */
+    }
+    return [
+        {
+            file: null,
+            message: `vitest exited ${exitCode} with no failed test — its output above names why: an unhandled error, a coverage threshold, or no test files matched`,
+        },
+    ];
 }
 /**
  * Absolute paths of the staged files, or null when git cannot answer.
@@ -210,6 +237,18 @@ export function removeClearMarker(coverageDir) {
         /* see writeClearMarker */
     }
 }
+/** The part of a marker that says why the run ended. Every key is set, so spreading it over an older
+ * marker replaces a stale unhandled list too (an undefined value is dropped on write). */
+export function markerCause(diagnosis) {
+    return {
+        failedFiles: diagnosis?.failedFiles ?? [],
+        unhandledErrors: diagnosis?.unhandled,
+    };
+}
+/** A marker entry we could have written; anything else came from a hand edit and is dropped. */
+const isUnhandledError = (e) => e?.constructor === Object &&
+    String(e.message) === e.message &&
+    (e.file === null || String(e.file) === e.file);
 /** The marker, or null when absent/corrupt. Never throws — the gate's verdict cannot depend on it. */
 export function readClearMarker(coverageDir) {
     const file = markerPath(coverageDir);
@@ -226,6 +265,9 @@ export function readClearMarker(coverageDir) {
             previousMtime: parsed.previousMtime ?? null,
             head: parsed.head ?? null,
             failedFiles: Array.isArray(parsed.failedFiles) ? parsed.failedFiles : [],
+            ...(Array.isArray(parsed.unhandledErrors) && {
+                unhandledErrors: parsed.unhandledErrors.filter(isUnhandledError),
+            }),
         };
     }
     catch {
@@ -251,12 +293,7 @@ export function formatDiagnosis(diagnosis, cwd, staged) {
         const hidden = diagnosis.failedFiles.length - MAX_LISTED_FILES;
         if (hidden > 0)
             lines.push(`     …and ${hidden} more`);
-        const mine = stagedIntersection(diagnosis.failedFiles, staged);
-        if (mine !== null) {
-            lines.push(mine.length === 0
-                ? '   None of them are in your staged diff.'
-                : `   In your staged diff: ${mine.map((f) => displayPath(f, cwd)).join(', ')}`);
-        }
+        lines.push(...stagedSentence(diagnosis.failedFiles, staged, cwd));
         // Said HERE, where the run failed — not only after a rescue — so the remedy arrives before the
         // next full run is spent rather than after it (sc-3473).
         if (diagnosis.failures?.allTimedOut) {
@@ -264,8 +301,31 @@ export function formatDiagnosis(diagnosis, cwd, staged) {
             lines.push(`   Re-run with a bigger budget: -- --testTimeout=${raisedTimeoutMs(diagnosis.failures)} --maxWorkers=50%`);
         }
     }
+    if (diagnosis.unhandled) {
+        lines.push('🚫 vitest exited non-zero, but no test failed — the run ended on:');
+        lines.push(...formatUnhandled(diagnosis.unhandled, cwd).slice(0, MAX_LISTED_FILES));
+        const hidden = diagnosis.unhandled.length - MAX_LISTED_FILES;
+        if (hidden > 0)
+            lines.push(`     …and ${hidden} more`);
+        const files = diagnosis.unhandled.flatMap((e) => (e.file ? [e.file] : []));
+        if (files.length > 0)
+            lines.push(...stagedSentence(files, staged, cwd));
+        lines.push('   The coverage artifact was discarded: devkit publishes only from a run vitest calls green.');
+    }
     return lines;
 }
+/** Whether the named files are yours. Silent when git cannot answer: unknown is never "none". */
+function stagedSentence(files, staged, cwd) {
+    const mine = stagedIntersection(files, staged);
+    if (mine === null)
+        return [];
+    return [
+        mine.length === 0
+            ? '   None of them are in your staged diff.'
+            : `   In your staged diff: ${mine.map((f) => displayPath(f, cwd)).join(', ')}`,
+    ];
+}
+const formatUnhandled = (errors, cwd) => errors.map((e) => `     ${e.file ? displayPath(e.file, cwd) : 'file unknown'} — ${e.message}`);
 /** The gate's extra lines when the artifact is absent BECAUSE a failed run discarded it. */
 export function formatClearMarker(marker, cwd, now = Date.now()) {
     const age = humanAge(now - Date.parse(marker.clearedAt));
@@ -277,6 +337,10 @@ export function formatClearMarker(marker, cwd, now = Date.now()) {
     ];
     if (marker.failedFiles.length > 0) {
         lines.push(`   Failed: ${marker.failedFiles.map((f) => displayPath(f, cwd)).join(', ')}`);
+    }
+    if (marker.unhandledErrors?.length) {
+        lines.push('   No test failed; the run ended on:');
+        lines.push(...formatUnhandled(marker.unhandledErrors, cwd).slice(0, MAX_LISTED_FILES));
     }
     return lines;
 }

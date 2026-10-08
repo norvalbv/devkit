@@ -75,7 +75,7 @@ run_gates_with_capture() {
   local supervisor="$(dirname "${BASH_SOURCE[0]}")/review/process/gate-supervisor.mts"
   [ -f "$supervisor" ] || supervisor="$(dirname "${BASH_SOURCE[0]}")/review/process/gate-supervisor.mjs"
   local capture_dir capture_fifo tee_pid supervisor_pid tee_status running
-  local capture_failed cleanup_status drain_deadline drain_stage ownership_token
+  local capture_failed cleanup_status drain_deadline drain_stage ownership_token gate_started reaped=0
   capture_dir=$(mktemp -d "${TMPDIR:-/tmp}/devkit-review-capture.XXXXXX") || {
     echo "$label: could not create private gate output capture" >&2
     return 1
@@ -125,7 +125,8 @@ run_gates_with_capture() {
   # DEVKIT_REVIEW_*: named when review was the only supervised mode; ship/reship use them too now.
   # Left as-is deliberately — the token is the supervisor's process-ownership proof, and churning
   # that contract across the shell and gate-supervisor.mts buys nothing but risk.
-  DEVKIT_REVIEW_SUPERVISOR_OWNER_TOKEN="$ownership_token" \
+  gate_started=$SECONDS
+  DEVKIT_REVIEW_SUPERVISOR_OWNER_TOKEN="$ownership_token" DEVKIT_GATE_REAP_NOTICE_FILE="$capture_dir/reaped" \
     node "$supervisor" "$secs" -- "${cmd[@]}" >&8 2>&1 &
   supervisor_pid=$!
   exec 8>&-
@@ -199,6 +200,7 @@ run_gates_with_capture() {
   if declare -F review_gate_finished >/dev/null 2>&1; then
     review_gate_finished "$supervisor_pid"
   fi
+  [ ! -e "$capture_dir/reaped" ] || reaped=1
   rm -rf -- "$capture_dir"
   if [ "$rc" -eq 0 ] && { [ "$tee_status" -ne 0 ] || [ "$capture_failed" -ne 0 ]; }; then
     echo "$label: could not persist gate output to $log" >&2
@@ -206,14 +208,22 @@ run_gates_with_capture() {
   fi
   set -e
 
-  # 124 is the supervisor's expiry status and now the ONLY way to reach this banner. It used to also
-  # accept 137 off the coreutils path, guarded by mode so a SIGKILLed supervisor wasn't mislabelled;
-  # with one mechanism left, 137 unambiguously means the supervisor itself was killed — not a ceiling.
+  # 124 is the supervisor's status for two causes: the expiry ceiling, or a command that exited 0 while a
+  # process it started was still running and had to be reaped. The supervisor marks the second in the
+  # private capture dir, where gate output cannot forge it. 137 means the supervisor itself was killed.
   if [ "$rc" -eq 124 ]; then
     local last_stage unfinished
-    last_stage=$(grep -E '^(🎨|📏|🗂|🔁|🧭|🔍|⚡|✗)|^guard-prefix:|[Gg]ate\.\.\.[[:space:]]*$' "$log" 2>/dev/null | tail -1 || true)
+    last_stage=$(grep -E '^(🎨|📏|🗂|🔁|🧭|🔍|⚡)|^guard-prefix:|[Gg]ates?( \([^)]*\))?\.\.\.[[:space:]]*$' "$log" 2>/dev/null | tail -1 || true)
     {
-      echo "⏱  $label: gate chain hit the ${secs}s ceiling (exit $rc) DURING: ${last_stage:-unknown stage}"
+      if [ "$reaped" -eq 1 ]; then
+        echo "⏱  $label: the gate chain exited cleanly, but a process it started outlived it and was reaped after $((SECONDS - gate_started))s (exit 124) — NOT the ${secs}s ceiling."
+        echo "   Last stage started: ${last_stage:-unknown stage}"
+        [ "$label" != ship ] || echo "   The commit may already have landed."
+        echo "   Raising SHIP_COMMIT_TIMEOUT will not help."
+      else
+        echo "⏱  $label: gate chain hit the ${secs}s ceiling (exit $rc) DURING: ${last_stage:-unknown stage}"
+        echo "   More room per attempt: export SHIP_COMMIT_TIMEOUT."
+      fi
       unfinished=$(node "$progress_reader" unfinished "$progress" 2>/dev/null || true)
       [ -n "$unfinished" ] && echo "   Reviewers with no completion heartbeat (unfinished): $unfinished"
       echo "   Completed reviewer verdicts, cleared decisions judgements and the deterministic prefix are CACHED."
@@ -228,7 +238,7 @@ run_gates_with_capture() {
       else
         echo "   Re-run the same devkit review command to converge (only unfinished work re-runs)."
       fi
-      echo "   More room per attempt: export SHIP_COMMIT_TIMEOUT. Full log: $log"
+      echo "   Full log: $log"
     } >&2
   fi
   return "$rc"

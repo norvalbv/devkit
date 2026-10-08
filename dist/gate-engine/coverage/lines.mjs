@@ -1,5 +1,6 @@
 /** Line coverage from an istanbul/V8 coverage-final.json entry, and its intersection with the lines a
  * change added — the unit a "coverage of the new diff" target means (sc-3228). */
+import { parsePatchHunks } from '../comment-firewall/patch.mjs';
 /** istanbul's line definition: a line is executable when a statement STARTS on it, and covered when
  * ANY statement starting on it ran. Shared with the gate's `lines` metric so the two never disagree. */
 export function lineHits(file) {
@@ -12,6 +13,15 @@ export function lineHits(file) {
         hits.set(line, (hits.get(line) ?? false) || ran);
     }
     return hits;
+}
+/** New-side line numbers a `-U0` patch adds. Read one path's patch at a time: the hunks carry no
+ * path, and header spelling depends on the user's diff config. */
+export function addedLinesOf(patch) {
+    const added = new Set();
+    for (const hunk of parsePatchHunks(patch))
+        for (const n of hunk.addedLines)
+            added.add(n);
+    return added;
 }
 /** Coverage over the ADDED lines only. An added line with no statement (a comment, a brace, a type)
  * is not executable and counts for neither side. */

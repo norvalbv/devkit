@@ -168,6 +168,10 @@ ROOT=$(git rev-parse --show-toplevel)
 # devkit's own modules are .mts in the source tree (Node strips types) and compiled .mjs in an
 # installed consumer (dist) — same fallback the reconcile writer uses.
 SHIP_INTENT="$SCRIPT_DIR/ship-intent.mts"; [ -f "$SHIP_INTENT" ] || SHIP_INTENT="$SCRIPT_DIR/ship-intent.mjs"
+. "$SCRIPT_DIR/resume-extras-notice.sh"
+. "$SCRIPT_DIR/prepare-gate-worktree.sh"
+# Project before the intent read and write: a legacy linked .devkit resolves the record in the home.
+gate_project_caller "$ROOT" || true
 RESUME_BODY=
 if [ "$RESUME" -eq 1 ]; then
   # NUL-delimited so every field survives byte-exact (a body holds newlines; a path may hold almost
@@ -251,15 +255,7 @@ if [ "$RESUME" -eq 1 ]; then
   # Explicit mode only. A --from-branch resume prints the same frozen array at its derivation site
   # below (the `--from-branch: N committed path(s)` block), and RESUME skips re-derivation, so an
   # unconditional listing here would print one identical set twice — which reads as two different ones.
-  if [ "$FROM_BRANCH" -eq 0 ]; then
-    for p in "${PATHS[@]}"; do
-      si_extra=
-      for q in ${RESUME_EXTRA_PATHS[@]+"${RESUME_EXTRA_PATHS[@]}"}; do [ "$q" = "$p" ] && { si_extra=1; break; }; done
-      if [ -n "$si_extra" ]; then printf '  + %q   (briefed by this retry)\n' "$p" >&2
-      else printf '    %q\n' "$p" >&2
-      fi
-    done
-  fi
+  [ "$FROM_BRANCH" -eq 1 ] || ship_resume_brief
 fi
 
 [ "$FROM_BRANCH" -eq 0 ] || [ -n "$BASE_FLAG" ] || { echo "--from-branch requires --base <remote-branch>" >&2; exit 1; }
@@ -291,6 +287,7 @@ LINK_DIRS=()
 . "$SCRIPT_DIR/worktree-registry.sh"
 . "$SCRIPT_DIR/ship-run-record.sh"
 . "$SCRIPT_DIR/reclaim-orphan-worktrees.sh"
+. "$SCRIPT_DIR/closed-pr-remedy.sh"
 PREFLIGHT_HINT=
 PREFLIGHT_SELF=   # set when the branch's holder is THIS worktree; changes the closing advice below
 # SHIP_RESOLVE_ONLY promises no side effects, so it must not reclaim anything.
@@ -330,7 +327,23 @@ if [ -z "${SHIP_DRY_RUN:-}" ] && [ "$DRY_GATES" -eq 0 ]; then
   # is a safe "branch absent"; any other failure must fail closed, or push -u could append to a PR.
   case "$remote_check" in
     0) echo "remote branch already exists: origin/$BR" >&2
-       echo "  to add these changes to that branch's existing PR, re-run with --pr" >&2
+       # A merged or closed PR's branch reaches no base, so --pr would only refuse in turn.
+       REPO=$( (git config --get remote.origin.url || git remote get-url origin) | sed -E 's#^.*github\.com[^:/]*[:/]##; s#\.git$##')
+       if read_pr_state && [ "$PR_SEEN_STATE" != "OPEN" ]; then
+         echo "  its PR #$PR_SEEN_NUM is $PR_SEEN_STATE — a push there never reaches $PR_SEEN_BASE" >&2
+         # The new PR targets this ship's own base, which the base resolution below derives the same way.
+         remedy_base=${BASE_FLAG#origin/}
+         [ -n "$remedy_base" ] || remedy_base=$(git symbolic-ref --quiet --short HEAD) || remedy_base=$PR_SEEN_BASE
+         # A --from-branch ship derives its paths (a resume replays them), so its remedy names none.
+         remedy_tail=--from-branch
+         if [ "$FROM_BRANCH" -eq 0 ]; then
+           remedy_tail=--
+           for p in ${PATHS[@]+"${PATHS[@]}"}; do remedy_tail="$remedy_tail $(printf '%q' "$p")"; done
+         fi
+         print_closed_pr_remedy "$remedy_base" "$remedy_tail" "then re-run with --pr"
+       else
+         echo "  to add these changes to that branch's existing PR, re-run with --pr" >&2
+       fi
        exit 1 ;;
     2) ;; # no matching remote branch → safe to create it
     *) echo "could not verify remote branch (ls-remote exit $remote_check) — refusing to push" >&2; exit 1 ;;
@@ -732,7 +745,6 @@ if [ "$FROM_BRANCH" -eq 0 ] && [ "$PATCH_BASE" != "$BASE" ] && [ -z "$LOCAL_BRAN
   ship_text_arm_trial || exit 1
 fi
 
-. "$SCRIPT_DIR/prepare-gate-worktree.sh"
 # Judge reachability does not depend on the staged scope. A plain --dry-gates skips the reviewer gate
 # entirely so it skips this too; --with-reviewers runs that gate, where a dark provider would otherwise
 # surface only as a strict-mode exit 3. Fail-open, so it may run before the invocation is recorded;
@@ -873,6 +885,7 @@ if [ "$DRY_GATES" -eq 0 ]; then
 fi
 
 record_ship_intent() {
+  RESUME_EXTRAS_UNRECORDED=0
   [ "$DRY_GATES" -eq 0 ] || return 0
   # Capture the record's ownership token (write prints a per-attempt random generation): success may delete ONLY the
   # record this attempt wrote — a concurrent attempt's newer record must survive for ITS --resume.
@@ -937,6 +950,7 @@ RECOVERY_GATE_ADDS_REF="refs/devkit/ship-gate-adds/$BR"
 GATE_ADDS_FILE=$(mktemp "${TMPDIR:-/tmp}/ship-gate-adds.XXXXXX")
 BRANCH_CREATED= # only this invocation's branch may be auto-deleted on an empty/failed commit
 cleanup() {
+  ship_resume_extras_notice # first: it reads the exit status
   rm -f "$PATCH" "$APPLY_ERR" "$STAGED_STATE" "$GATE_ADDS_FILE"
   [ -z "$RECOVERY_INDEX" ] || rm -f "$RECOVERY_INDEX"
   [ -z "$RECOVERY_PATHS_ALL" ] || rm -f "$RECOVERY_PATHS_ALL"

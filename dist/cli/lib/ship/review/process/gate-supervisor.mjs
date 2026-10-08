@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
+import { writeFile } from 'node:fs';
 import { constants } from 'node:os';
 import { runDirectReviewCli } from '../run-direct.mjs';
 import { readProcessTable } from './process-table.mjs';
@@ -18,6 +19,8 @@ const FORWARDED_SIGNALS = ['SIGHUP', 'SIGINT', 'SIGQUIT', 'SIGTERM'];
 const LEGACY_PID_FILE_ENV = 'DEVKIT_REVIEW_SUPERVISOR_PID_FILE';
 const OWNERSHIP_TOKEN_ENV = 'DEVKIT_REVIEW_GATE_OWNER';
 const OWNERSHIP_SEED_ENV = 'DEVKIT_REVIEW_SUPERVISOR_OWNER_TOKEN';
+// Created when a clean leader's leftover group is reaped; read by run-gates-with-capture.sh.
+const REAP_NOTICE_ENV = 'DEVKIT_GATE_REAP_NOTICE_FILE';
 // Absolute epoch (ms) at which this supervisor kills the gate chain. Read by
 // gate-engine/review/recovery/settle.mts; keep the two spellings in sync.
 const GATE_DEADLINE_ENV = 'DEVKIT_GATE_DEADLINE_MS';
@@ -215,7 +218,7 @@ function signalKnownProcesses(identities, signal) {
         throw signalFailure;
 }
 /** Run one gate command and own the lifetime of its complete POSIX process group. */
-export function superviseGateCommand(timeoutMs, command, inspectProcesses = readProcessTable, seededOwnershipToken, normalizeReservedStatuses = true) {
+export function superviseGateCommand(timeoutMs, command, inspectProcesses = readProcessTable, seededOwnershipToken, normalizeReservedStatuses = true, reapNoticeFile) {
     if (process.platform === 'win32') {
         return Promise.reject(new Error('gate-supervisor requires POSIX process-group signals'));
     }
@@ -350,6 +353,9 @@ export function superviseGateCommand(timeoutMs, command, inspectProcesses = read
             if (childDone && forcedStatus === undefined && lingerTimer === undefined) {
                 lingerTimer = setTimeout(() => {
                     lingerTimer = undefined;
+                    // Async, so a failed write can never stop the reap; the banner then reads as a ceiling.
+                    if (childStatus === 0 && reapNoticeFile)
+                        writeFile(reapNoticeFile, '', () => undefined);
                     beginForcedCleanup(lingerStatus());
                 }, LINGER_GRACE_MS);
             }
@@ -476,7 +482,9 @@ async function runCli(args) {
     delete process.env[LEGACY_PID_FILE_ENV];
     const token = process.env[OWNERSHIP_SEED_ENV];
     delete process.env[OWNERSHIP_SEED_ENV];
-    process.exitCode = await superviseGateCommand(timeoutMs, args.slice(2), readProcessTable, token);
+    const reapNotice = process.env[REAP_NOTICE_ENV];
+    delete process.env[REAP_NOTICE_ENV];
+    process.exitCode = await superviseGateCommand(timeoutMs, args.slice(2), readProcessTable, token, true, reapNotice);
 }
 runDirectReviewCli(import.meta.url, (args) => {
     void runCli(args).catch((cause) => {
