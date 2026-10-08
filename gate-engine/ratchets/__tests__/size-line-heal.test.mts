@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
+import { indexTreeRef, stagedSet } from '../git-index.mts';
+import { lineBaselineForGate, tightenLineBaseline } from '../size-line-authority.mts';
 
 const SCRIPT = join(dirname(fileURLToPath(import.meta.url)), '..', 'size-disable.mts');
 const BASELINE = '.devkit/baselines/size-lines.json';
@@ -97,15 +99,33 @@ describe('guard-size heals ceilings a picked-side resolution raised', () => {
     expect(stagedEntries(root)).toEqual({ 'src/f1.ts': 100, 'src/f2.ts': 110 });
   });
 
-  it('judges the index, never an unstaged shrink of a file outside the commit', () => {
-    const root = repo('f1', 'f2', 'f3');
+  it('heals a raised entry to the index count, never a parallel agent’s unstaged shrink', () => {
+    const root = repo('f1', 'f2');
     shrinkOn(root, 'a', 'f1', 100);
     shrinkOn(root, 'b', 'f2', 90);
     mergeTakingOurs(root, 'b', 'a');
-    write(root, 'src/f3.ts', lines(60));
+    write(root, 'src/f1.ts', lines(60));
+    const candidate = indexTreeRef(root)!;
+
+    const { files } = tightenLineBaseline(
+      root,
+      candidate,
+      stagedSet(root)!,
+      lineBaselineForGate(root, candidate),
+      () => 50,
+    );
+    expect(files).toEqual({ 'src/f1.ts': 100, 'src/f2.ts': 90 });
+  });
+
+  it('keeps a `guard-size freeze` refresh of drift already committed at HEAD', () => {
+    const root = repo('f1');
+    write(root, 'src/f1.ts', lines(130));
+    git(root, 'commit', '-qam', 'drift landed without the gate');
+    expect(spawnSync(process.execPath, [SCRIPT, 'freeze'], { cwd: root }).status).toBe(0);
+    git(root, 'add', BASELINE);
 
     expect(gate(root).status).toBe(0);
-    expect(stagedEntries(root)['src/f3.ts']).toBe(120);
+    expect(stagedEntries(root)).toEqual({ 'src/f1.ts': 130 });
   });
 
   it('drops a raised entry whose file is now within the cap', () => {
