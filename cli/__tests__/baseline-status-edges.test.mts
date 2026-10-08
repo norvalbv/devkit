@@ -532,8 +532,9 @@ describe('wiring', () => {
     expect(checks.length).toBeGreaterThan(0);
     for (const step of checks) {
       const name = step.slice(0, step.indexOf('\n'));
-      expect(step, name).toContain('!cancelled()');
-      expect(step, name).toContain("steps.install.outcome == 'success'");
+      // The step's own `if:` line, so a guard in a comment or `||` instead of `&&` cannot pass.
+      const guard = step.split('\n').find((line) => line.startsWith('        if: '));
+      expect(guard ?? '', name).toContain("!cancelled() && steps.install.outcome == 'success'");
     }
   });
 
