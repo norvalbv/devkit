@@ -1,9 +1,9 @@
 import { spawnSync } from 'node:child_process';
-import { writeFileSync } from 'node:fs';
+import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, describe, expect, it } from 'vitest';
-import { collectShellArrays, scanShell, scanTs } from '../../scripts/git-pathspec-check.mts';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { collectShellArrays, main, scanShell, scanTs } from '../../scripts/git-pathspec-check.mts';
 import { rootRegistry } from './_helpers.mts';
 
 const ASSERT_STAGED_SET = join(
@@ -13,8 +13,30 @@ const ASSERT_STAGED_SET = join(
   'ship',
   'assert-staged-set.sh',
 );
+const SCRIPT = join(
+  dirname(fileURLToPath(import.meta.url)),
+  '..',
+  '..',
+  'scripts',
+  'git-pathspec-check.mts',
+);
 const { mkTmp, cleanup } = rootRegistry();
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
+
+/** A git repo whose tracked files are `files`; `untracked` are written but never added. */
+function repo(files: Record<string, string>, untracked: Record<string, string> = {}): string {
+  const dir = mkTmp('pathspec-repo-');
+  spawnSync('git', ['init', '-q'], { cwd: dir });
+  for (const [name, body] of Object.entries({ ...files, ...untracked })) {
+    mkdirSync(dirname(join(dir, name)), { recursive: true });
+    writeFileSync(join(dir, name), body);
+  }
+  spawnSync('git', ['add', '--', ...Object.keys(files).map((f) => `:(literal)${f}`)], { cwd: dir });
+  return dir;
+}
 
 const shell = (text: string, others: string[] = []) =>
   scanShell(text, 'x.sh', collectShellArrays([text, ...others])).map((h) => `${h.line} ${h.kind}`);
@@ -68,6 +90,19 @@ describe('scanShell', () => {
     expect(shell('# pathspec: callers pass literal paths\ngit diff -- "$@"')).toEqual([]);
     expect(shell('git diff -- "$@" # pathspec:')).toEqual(['1 raw']);
   });
+
+  it('does not let a marker trailing one call exempt the call on the next line', () => {
+    expect(
+      shell('git diff -- "$@" # pathspec: callers pass literal paths\ngit add -- "$f"'),
+    ).toEqual(['2 raw']);
+  });
+
+  it('flags a variable behind magic that is neither literal nor glob, since it still globs', () => {
+    expect(shell('git add -- ":(top)$f"')).toEqual(['1 raw']);
+    expect(shell('git diff -- ":(exclude)$f"')).toEqual(['1 raw']);
+    expect(shell('git diff -- ":(top,exclude,literal)$f"')).toEqual([]);
+    expect(shell('git --literal-pathspecs diff -- ":(top)$f"')).toEqual(['1 mixed']);
+  });
 });
 
 describe('scanTs', () => {
@@ -116,10 +151,56 @@ describe('scanTs', () => {
     ).toEqual([]);
   });
 
+  it('does not let a trailing marker exempt the next line, nor a non-literal template prefix', () => {
+    expect(
+      tsHits(
+        "spawnSync('git', ['add', '--', a]); // pathspec: fixed name\nspawnSync('git', ['add', '--', b]);",
+      ),
+    ).toEqual(['2 raw b']);
+    expect(tsHits("spawnSync('git', ['add', '--', `:(top)${f}`]);")).toEqual([
+      '1 raw `:(top)${f}`',
+    ]);
+  });
+
   it('does not see argv pushed after construction (known limit)', () => {
     expect(
       tsHits("const args = ['diff'];\nargs.push('--', file);\nspawnSync('git', args);"),
     ).toEqual([]);
+  });
+});
+
+describe('main', () => {
+  it('scans tracked roots only, resolves arrays across files and skips __tests__', () => {
+    const dir = repo(
+      {
+        'cli/build.sh': 'P=()\nfor p in "$@"; do P+=(":(literal)$p"); done\n',
+        'cli/use.sh': 'git diff -- "${P[@]}"\n',
+        'cli/__tests__/fixture.sh': 'git add -- "$f"\n',
+        'scripts/run.mts':
+          "import { spawnSync } from 'node:child_process';\nspawnSync('git', ['add', '--', f]);\n",
+        'docs/outside.sh': 'git add -- "$f"\n',
+      },
+      { 'cli/untracked.sh': 'git add -- "$f"\n' },
+    );
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    expect(main(dir)).toBe(1);
+    const rows = errors.mock.calls
+      .map(([line]) => String(line))
+      .filter((l) => !l.startsWith('git-pathspec:'));
+    expect(rows).toEqual(['scripts/run.mts:2  raw pathspec  git add -- f']);
+  });
+
+  it('runs as a script from a path containing a space, so the gate cannot silently pass', () => {
+    const dir = repo({ 'cli/x.sh': 'git status -- "$p"\n' });
+    const spaced = join(mkTmp('pathspec-link-'), 'with space');
+    mkdirSync(spaced);
+    symlinkSync(dirname(SCRIPT), join(spaced, 'scripts'));
+    const run = spawnSync(process.execPath, [join(spaced, 'scripts', 'git-pathspec-check.mts')], {
+      cwd: dir,
+      encoding: 'utf8',
+    });
+    expect(run.status, run.stderr).toBe(1);
+    expect(run.stderr).toContain('cli/x.sh:1  raw pathspec');
   });
 });
 

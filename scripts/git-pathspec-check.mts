@@ -41,19 +41,22 @@ const SHELL_MARKER = /#\s*pathspec:\s*\S/;
 const TS_MARKER = /\/\/\s*pathspec:\s*\S/;
 const LITERAL_ENV = /GIT_LITERAL_PATHSPECS['"]?\s*[:=]\s*['"]?1/;
 const LITERAL_MAGIC = /^:\([^)]*\bliteral\b/;
+const SAFE_MAGIC = /^:\([^)]*\b(?:literal|glob)\b/;
 const ARRAY_REF = /^\$\{(\w+)\[@\]\}$|^\$\{(\w+)\[@\]\+"\$\{\2\[@\]\}"\}$/;
 const DECLARED_ARRAY = /^(\w+)\+?=\((.*)\)$/s;
 
-type Safety = 'const' | 'magic' | 'raw';
+/** `loose`: a magic prefix that neither makes the variable literal nor declares a glob. */
+type Safety = 'const' | 'magic' | 'loose' | 'raw';
 
 function lineAt(text: string, pos: number): number {
   return text.slice(0, pos).split('\n').length;
 }
 
-/** A `pathspec: <reason>` marker on the hit's line or the line above (where a formatter puts it). */
+/** A `pathspec: <reason>` marker on the hit's line, or alone on the line above (a formatter's spot). */
 function marked(text: string, line: number, marker: RegExp): boolean {
   const lines = text.split('\n');
-  return marker.test(lines[line - 1] ?? '') || marker.test(lines[line - 2] ?? '');
+  const ownLine = new RegExp(`^\\s*${marker.source}`);
+  return marker.test(lines[line - 1] ?? '') || ownLine.test(lines[line - 2] ?? '');
 }
 
 /** Index of the git subcommand: skips `-C <dir>`, `-c <k=v>` and any other leading flag. */
@@ -138,7 +141,7 @@ export function collectShellArrays(texts: string[]): Map<string, boolean[]> {
 }
 
 function shellArgSafety(arg: string, arrays: Map<string, boolean[]>): Safety {
-  if (arg.startsWith(':')) return 'magic';
+  if (arg.startsWith(':')) return !arg.includes('$') || SAFE_MAGIC.test(arg) ? 'magic' : 'loose';
   if (!arg.includes('$')) return 'const';
   const ref = ARRAY_REF.exec(arg);
   const assigned = ref ? arrays.get(ref[1] ?? ref[2]!) : undefined;
@@ -173,13 +176,14 @@ export function scanShell(text: string, file: string, arrays: Map<string, boolea
 }
 
 function classify(safety: Safety, literalMode: boolean, marked: boolean): Hit['kind'] | null {
-  if (literalMode) return safety === 'magic' ? 'mixed' : null;
-  return safety === 'raw' && !marked ? 'raw' : null;
+  if (literalMode) return safety === 'magic' || safety === 'loose' ? 'mixed' : null;
+  return (safety === 'raw' || safety === 'loose') && !marked ? 'raw' : null;
 }
 
+const SEVERITY: Safety[] = ['raw', 'loose', 'magic', 'const'];
+
 function worst(parts: Safety[]): Safety {
-  if (parts.includes('raw')) return 'raw';
-  return parts.includes('magic') ? 'magic' : 'const';
+  return SEVERITY.find((level) => parts.includes(level)) ?? 'const';
 }
 
 function calleeName(call: ts.CallExpression): string {
@@ -236,7 +240,10 @@ export function tsSafety(sf: ts.SourceFile, expr: ts.Expression, depth = 0): Saf
   if (ts.isStringLiteral(expr) || ts.isNoSubstitutionTemplateLiteral(expr)) {
     return expr.text.startsWith(':') ? 'magic' : 'const';
   }
-  if (ts.isTemplateExpression(expr)) return expr.head.text.startsWith(':') ? 'magic' : 'raw';
+  if (ts.isTemplateExpression(expr)) {
+    if (!expr.head.text.startsWith(':')) return 'raw';
+    return SAFE_MAGIC.test(expr.head.text) ? 'magic' : 'loose';
+  }
   if (ts.isParenthesizedExpression(expr) || ts.isAsExpression(expr) || ts.isSpreadElement(expr)) {
     return tsSafety(sf, expr.expression, depth);
   }
@@ -377,7 +384,10 @@ export function main(root = process.cwd()): number {
   }));
   const relevant = sources.filter((s) => s.text.includes('git'));
   const shell = relevant.filter((s) => s.file.endsWith('.sh'));
-  const arrays = collectShellArrays(shell.map((s) => s.text));
+  // An array is often built in a file with no git call of its own, so every shell file feeds it.
+  const arrays = collectShellArrays(
+    sources.filter((s) => s.file.endsWith('.sh')).map((s) => s.text),
+  );
   const hits = [
     ...shell.flatMap((s) => scanShell(s.text, s.file, arrays)),
     ...relevant
