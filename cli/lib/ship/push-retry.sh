@@ -16,6 +16,8 @@ ship_push_with_retry() {
   local supervisor="$SCRIPT_DIR/review/process/gate-supervisor.mts"
   [ -f "$supervisor" ] || supervisor="$SCRIPT_DIR/review/process/gate-supervisor.mjs"
   shift 3
+  case "$attempts" in ''|*[!0-9]*) attempts=4 ;; esac
+  case "$delay" in ''|*[!0-9]*) delay=10 ;; esac
   err=$(mktemp)
   while :; do
     rc=0

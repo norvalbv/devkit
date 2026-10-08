@@ -2,6 +2,7 @@
 import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { testExecFileSync as execFileSync, testSpawnSync as spawnSync } from './_helpers.mts';
 import {
@@ -14,6 +15,8 @@ import {
   scriptPath,
   seedShipRepoLocalRemote,
 } from './_ship-branch-fixture.mts';
+
+const pushRetryScript = fileURLToPath(new URL('../lib/ship/push-retry.sh', import.meta.url));
 
 const REAL_GIT = execFileSync('/bin/sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
 const SERVER_ERROR = ' ! [remote rejected] feat/x -> feat/x (Internal Server Error)';
@@ -31,6 +34,7 @@ for a in "$@"; do
   [ "$a" = push ] || continue
   n=$(($(cat "$SHIM_COUNT" 2>/dev/null || echo 0) + 1)); echo "$n" > "$SHIM_COUNT"
   if [ "$n" -le "\${SHIM_FAILS:-0}" ]; then
+    [ -z "\${SHIM_LAND:-}" ] || '${REAL_GIT}' "$@" >/dev/null 2>&1
     printf 'To github.com:acme/app.git\\n%s\\nerror: failed to push some refs\\n' '${reason}' >&2; exit 1
   fi
   break
@@ -59,9 +63,9 @@ function shipEnv(dir, env, { reason = SERVER_ERROR, fails = 0, attempts = '4', g
   };
 }
 
-function ship(dir, env, branch) {
+function ship(dir, env, branch, title = 'ship it') {
   writeFileSync(join(dir, 'note.txt'), 'hi\n');
-  return spawnSync('/bin/bash', [scriptPath, branch, 'ship it', '--', 'note.txt'], {
+  return spawnSync('/bin/bash', [scriptPath, branch, title, '--', 'note.txt'], {
     cwd: dir,
     input: 'pr body\n',
     encoding: 'utf8',
@@ -119,6 +123,62 @@ describe('ship-branch.sh — transient push failures', () => {
     expect(retry.stderr).toContain('gate receipt verified');
     expect(remoteBranchExists(bare, 'feat/outage')).toBe(true);
   });
+
+  it('treats a failed push whose commit reached origin as landed, without a retry', () => {
+    const { dir, env, bare } = seedShipRepoLocalRemote();
+    const { count, env: runEnv } = shipEnv(dir, env, { fails: 1 });
+
+    const r = ship(dir, { ...runEnv, SHIM_LAND: '1' }, 'feat/lost-response');
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(pushes(count)).toBe(1);
+    expect(r.stderr).toMatch(/push response failed after origin accepted \w{7}/);
+    expect(remoteBranchExists(bare, 'feat/lost-response')).toBe(true);
+  });
+
+  // A malformed knob must fall back to the default budget, never retry without bound.
+  it('caps retries at the default when DEVKIT_PUSH_ATTEMPTS is not a number', () => {
+    const { dir, env } = seedShipRepoLocalRemote();
+    const { count, env: runEnv } = shipEnv(dir, env, { fails: 99, attempts: 'many' });
+
+    const r = ship(dir, runEnv, 'feat/bad-knob');
+
+    expect(r.status, r.stderr).toBe(1);
+    expect(pushes(count)).toBe(4);
+  });
+});
+
+describe('ship_push_transient', () => {
+  const transient = (line) => {
+    const file = join(mkdtempSync(join(tmpdir(), 'push-err-')), 'err');
+    writeFileSync(file, `To github.com:acme/app.git\n${line}\nerror: failed to push some refs\n`);
+    return (
+      spawnSync('/bin/bash', ['-c', `. '${pushRetryScript}'; ship_push_transient '${file}'`])
+        .status === 0
+    );
+  };
+
+  it.each([
+    ' ! [remote rejected] main -> main (Internal Server Error)',
+    ' ! [remote rejected] main -> main (502 Bad Gateway)',
+    ' ! [remote rejected] main -> main (Service Unavailable)',
+    ' ! [remote rejected] main -> main (Gateway Timeout)',
+    "fatal: unable to access 'https://github.com/a/b.git/': The requested URL returned error: 503",
+    'fatal: the remote end hung up unexpectedly',
+    'fatal: early EOF',
+  ])('retries %s', (line) => {
+    expect(transient(line)).toBe(true);
+  });
+
+  it.each([
+    ' ! [remote rejected] main -> main (pre-receive hook declined)',
+    ' ! [rejected]        main -> main (non-fast-forward)',
+    'remote: Internal Server Error while running tests',
+    "fatal: Authentication failed for 'https://github.com/a/b.git/'",
+    "fatal: unable to access 'https://github.com/a/b.git/': The requested URL returned error: 403",
+  ])('does not retry %s', (line) => {
+    expect(transient(line)).toBe(false);
+  });
 });
 
 describe('ship-branch.sh — origin already holds the preserved commit', () => {
@@ -140,12 +200,13 @@ describe('ship-branch.sh — origin already holds the preserved commit', () => {
     const { dir, env, git } = seedShipRepoLocalRemote();
     preservedOnOrigin(dir, env, git, 'feat/adopt-open');
     const created = join(dir, 'pr-created');
-    const gh = `case "$2" in view) printf '7\\tOPEN\\tfeat/adopt-open\\tx\\tacme/app\\twork\\tu\\n' ;; create) touch '${created}' ;; esac`;
+    const url = 'https://ghe.example.com/acme/app/pull/7';
+    const gh = `case "$2" in view) printf '7\\tOPEN\\tfeat/adopt-open\\tx\\tacme/app\\twork\\t${url}\\n' ;; create) touch '${created}' ;; esac`;
 
     const r = ship(dir, shipEnv(dir, env, { gh }).env, 'feat/adopt-open');
 
     expect(r.status, r.stderr).toBe(0);
-    expect(r.stdout).toContain('https://github.com/acme/app/pull/7');
+    expect(r.stdout).toContain(url); // gh's own URL, so a GitHub Enterprise host is not rewritten
     expect(existsSync(created)).toBe(false);
   });
 
@@ -158,5 +219,31 @@ describe('ship-branch.sh — origin already holds the preserved commit', () => {
 
     expect(r.status, r.stderr).toBe(1);
     expect(r.stderr).toContain('remote branch already exists: origin/feat/diverged');
+  });
+
+  it("keeps the closed-PR refusal when the adopted branch's PR already merged", () => {
+    const { dir, env, git } = seedShipRepoLocalRemote();
+    preservedOnOrigin(dir, env, git, 'feat/adopt-merged');
+    const created = join(dir, 'pr-created');
+    const gh = `case "$2" in view) printf '7\\tMERGED\\tfeat/adopt-merged\\tx\\tacme/app\\twork\\tu\\n' ;; create) touch '${created}' ;; esac`;
+
+    const r = ship(dir, shipEnv(dir, env, { gh }).env, 'feat/adopt-merged');
+
+    expect(r.status, r.stderr).toBe(1);
+    expect(r.stderr).toContain('its PR #7 is MERGED');
+    expect(existsSync(created)).toBe(false);
+  });
+
+  it('never publishes an adopted commit the receipt checks reject', () => {
+    const { dir, env, git } = seedShipRepoLocalRemote();
+    preservedOnOrigin(dir, env, git, 'feat/adopt-retitled');
+    const created = join(dir, 'pr-created');
+    const gh = `case "$2" in create) touch '${created}' ;; esac`;
+
+    const r = ship(dir, shipEnv(dir, env, { gh }).env, 'feat/adopt-retitled', 'a different title');
+
+    expect(r.status, r.stderr).toBe(1);
+    expect(r.stderr).toContain('cannot safely resume it');
+    expect(existsSync(created)).toBe(false);
   });
 });
