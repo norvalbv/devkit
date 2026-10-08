@@ -298,6 +298,11 @@ export function seedReshipRepo() {
  *  then returns 124 while reaping that descendant — the Story #1550 state, verbatim. */
 export const LEAKING_HOOK = 'echo run >> "$TEST_HOOK_COUNT"\nsleep 30 &';
 
+/** Ship's banner when a leaking hook's child is reaped under SHIP_COMMIT_TIMEOUT=15: it proves the
+ *  124 came from our supervisor, not from spawnSync's own deadline. */
+export const REAPED_15S_BANNER =
+  /exited cleanly, .*reaped after \d+s \(exit 124\) — NOT the 15s ceiling/;
+
 /** Swap the hook in AFTER seeding: a seeder's own commits would run LEAKING_HOOK with TEST_HOOK_COUNT
  *  unset, and the failed append fails the commit. */
 export function installHook(dir, body) {
