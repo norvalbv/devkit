@@ -49,6 +49,13 @@ describe('antiSlopRemedyLines', () => {
     expect(hints[0]).toMatch(/`Boolean\(x\)`, `!!x`\) is not a replacement/u);
   });
 
+  it('offers only the schema route for runtime typeof in overlay, where no rule option persists', () => {
+    const text = antiSlopRemedyLines(['anti-slop/no-runtime-typeof'], true).join('\n');
+    expect(text).toMatch(/safeParse/u);
+    expect(text).toMatch(/is not a replacement/u);
+    expect(text).not.toMatch(/allowInTypeGuards|Oxlint config/u);
+  });
+
   it('still names the acceptance route when no rule has a hint', () => {
     const lines = antiSlopRemedyLines(['anti-slop/no-reflect-get', 'eslint/no-undef'], false);
     expect(lines.join('\n')).toContain(ACCEPT_VIA_OVERRIDE);
@@ -123,6 +130,17 @@ describe('anti-slop check FAIL output (wiring)', () => {
     expect(stderr).toMatch(/FAIL — [1-9]\d* new error finding\(s\)/u);
     expect(stderr).toMatch(/deps/u);
     expect(stderr).toContain(ACCEPT_VIA_OVERRIDE);
+  });
+
+  it('prints the typeof hint for a real no-runtime-typeof diagnostic', () => {
+    const cwd = repository(false);
+    writeFileSync(
+      join(cwd, 'src', 'skip.ts'),
+      "export const named = (x: string | number) => typeof x === 'string';\n",
+    );
+    git(cwd, ['add', '-A']);
+    expect(antiSlop(['check', '--staged'], cwd)).toBe(1);
+    expect(err.join('\n')).toMatch(/hint — no-runtime-typeof: .*safeParse/u);
   });
 
   it('prints the overlay route, not the Oxlint config, in an overlay install', () => {
