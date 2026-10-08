@@ -1,13 +1,10 @@
-/**
- * withLock ownership safety. The mutex must never hand two read-modify-write callers the manifest
- * at once, which means a stale lock may only be reaped when its holder is PROVABLY gone — age alone
- * would evict a live-but-paused writer — and a release may only remove the caller's OWN acquisition.
- * Every case below drives the real filesystem: the lock dir, its holder stamp, and its mtime.
- */
+// withLock ownership safety: a lock is reaped only when its holder is PROVABLY gone (never by age),
+// and a release removes only the caller's own acquisition. Every case drives the real filesystem.
 import fs, {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   utimesSync,
@@ -17,6 +14,8 @@ import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { processStartIdentity } from '../../gate-engine/judge/process/identity.mts';
+import { reapIfDead } from '../../gate-engine/judge/process/process-lock.mts';
 import { LockHeldError, withLock, withLockAsync } from '../lib/atomic-write.mts';
 
 const roots: string[] = [];
@@ -30,75 +29,71 @@ afterEach(() => {
   for (const d of roots.splice(0)) rmSync(d, { recursive: true, force: true });
 });
 
-/** Plant a held lock: dir + `<pid>:<uuid>` stamp, aged `ageMs` into the past (mtime set LAST). */
-const plantLock = (
-  lockDir: string,
-  { pid, ageMs, stamped = true }: { pid: number; ageMs: number; stamped?: boolean },
-) => {
-  mkdirSync(lockDir);
-  if (stamped) writeFileSync(join(lockDir, 'holder'), `${pid}:planted-uuid`, 'utf8');
-  const when = new Date(Date.now() - ageMs);
-  utimesSync(lockDir, when, when);
-};
-
 /** 2^22 + 1: above Linux's PID_MAX_LIMIT and macOS's pid ceiling, so no process can ever hold it. */
 const deadPid = () => 4_194_305;
 
-const STALE_MS = 90_000; // > the 60s LOCK_STALE_MS
-const FRESH_MS = 1_000;
+/** Plant a held lock: one file named by the holder's nonce, holding its pid and start identity. */
+const plantHolder = (lockDir: string, pid: number, nonce = 'planted') => {
+  mkdirSync(lockDir, { recursive: true });
+  const identity = pid === process.pid ? processStartIdentity() : 'ps:gone';
+  writeFileSync(join(lockDir, nonce), `${pid}\n${identity}`);
+};
+
+/** Plant a lock as an older devkit wrote it: a `holder` file stamped `<pid>:<uuid>`. */
+const plantLegacy = (lockDir: string, pid: number) => {
+  mkdirSync(lockDir, { recursive: true });
+  writeFileSync(join(lockDir, 'holder'), `${pid}:planted-uuid`, 'utf8');
+};
 
 describe('withLock', () => {
   it('runs the callback under the lock and releases it afterwards', () => {
     const lockDir = join(mkTmp(), 'manifest.json.lock');
-    const seen = withLock(lockDir, () => {
-      expect(existsSync(lockDir)).toBe(true);
-      return readFileSync(join(lockDir, 'holder'), 'utf8');
-    });
-    expect(seen.startsWith(`${process.pid}:`)).toBe(true);
+    const seen = withLock(lockDir, () =>
+      readdirSync(lockDir).map((nonce) => readFileSync(join(lockDir, nonce), 'utf8')),
+    );
+    expect(seen).toEqual([`${process.pid}\n${processStartIdentity()}`]);
     expect(existsSync(lockDir)).toBe(false);
   });
 
-  it('reaps a stale lock whose holder is gone', () => {
+  it('reaps a lock whose holder is gone', () => {
     const lockDir = join(mkTmp(), 'manifest.json.lock');
-    plantLock(lockDir, { pid: deadPid(), ageMs: STALE_MS });
+    plantHolder(lockDir, deadPid());
     expect(withLock(lockDir, () => 'acquired')).toBe('acquired');
     expect(existsSync(lockDir)).toBe(false);
   });
 
-  it('does NOT reap a stale lock whose holder is still alive', () => {
-    // The reviewer's case: a live writer paused past the stale window still owns its lock. Our own
-    // pid stands in for it — reaping here would run a second read-modify-write concurrently.
+  it('never reaps a live holder by age, however old its lock looks', () => {
+    // A live writer paused (SIGSTOP, a suspended laptop) still owns its lock; reaping would admit a second.
     const lockDir = join(mkTmp(), 'manifest.json.lock');
-    plantLock(lockDir, { pid: process.pid, ageMs: STALE_MS });
+    plantHolder(lockDir, process.pid);
+    const aged = new Date(Date.now() - 600_000);
+    utimesSync(lockDir, aged, aged);
     expect(() => withLock(lockDir, () => 'acquired')).toThrow(/timed out acquiring manifest lock/);
-    expect(existsSync(lockDir)).toBe(true);
+    expect(readdirSync(lockDir)).toEqual(['planted']);
+  });
+
+  it('reaps a legacy holder stamp whose pid is gone', () => {
+    const lockDir = join(mkTmp(), 'manifest.json.lock');
+    plantLegacy(lockDir, deadPid());
+    expect(withLock(lockDir, () => 'acquired')).toBe('acquired');
+    expect(existsSync(lockDir)).toBe(false);
+  });
+
+  it('keeps a legacy holder stamp whose pid is alive', () => {
+    const lockDir = join(mkTmp(), 'manifest.json.lock');
+    plantLegacy(lockDir, process.pid);
+    expect(() => withLock(lockDir, () => 'acquired')).toThrow(/timed out acquiring manifest lock/);
     expect(readFileSync(join(lockDir, 'holder'), 'utf8')).toBe(`${process.pid}:planted-uuid`);
   });
 
-  it('does NOT reap a fresh lock even when its holder is gone', () => {
-    // A young lock is presumed live: the holder may be mid-acquire, and the caller can afford to wait.
-    const lockDir = join(mkTmp(), 'manifest.json.lock');
-    plantLock(lockDir, { pid: deadPid(), ageMs: FRESH_MS });
-    expect(() => withLock(lockDir, () => 'acquired')).toThrow(/timed out acquiring manifest lock/);
-    expect(existsSync(lockDir)).toBe(true);
-  });
-
-  it('reaps a stale UNSTAMPED lock (acquirer died between its mkdir and its stamp write)', () => {
-    const lockDir = join(mkTmp(), 'manifest.json.lock');
-    plantLock(lockDir, { pid: 0, ageMs: STALE_MS, stamped: false });
-    expect(withLock(lockDir, () => 'acquired')).toBe('acquired');
-    expect(existsSync(lockDir)).toBe(false);
-  });
-
   it('does not release a lock that is no longer ours', () => {
-    // Simulates being wrongly reaped mid-section: another holder now owns lockDir. An unconditional
-    // rmSync in the finally would strip THEIR lock and admit a third writer.
+    // Being wrongly reaped mid-section: another holder now owns lockDir and must survive our release.
     const lockDir = join(mkTmp(), 'manifest.json.lock');
     withLock(lockDir, () => {
-      writeFileSync(join(lockDir, 'holder'), '999999:someone-elses-uuid', 'utf8');
+      for (const nonce of readdirSync(lockDir)) rmSync(join(lockDir, nonce));
+      writeFileSync(join(lockDir, 'someone-else'), '999999\nps:x');
     });
-    expect(existsSync(lockDir)).toBe(true);
-    expect(readFileSync(join(lockDir, 'holder'), 'utf8')).toBe('999999:someone-elses-uuid');
+    expect(readdirSync(lockDir)).toEqual(['someone-else']);
   });
 
   it('releases the lock when the callback throws', () => {
@@ -117,25 +112,50 @@ describe('withLockAsync', () => {
 
   it('rejects with LockHeldError naming a live holder, leaving its lock intact', async () => {
     const lockDir = join(mkTmp(), 'init.lock');
-    plantLock(lockDir, { pid: process.pid, ageMs: STALE_MS });
+    plantHolder(lockDir, process.pid);
     const run = withLockAsync(lockDir, async () => 'acquired', WAIT);
     await expect(run).rejects.toBeInstanceOf(LockHeldError);
     await expect(run).rejects.toMatchObject({ holderPid: process.pid });
-    expect(readFileSync(join(lockDir, 'holder'), 'utf8')).toBe(`${process.pid}:planted-uuid`);
+    expect(readdirSync(lockDir)).toEqual(['planted']);
   });
 
-  it('reports an unknown holder (not NaN) for a fresh unstamped lock', async () => {
-    // The acquirer died between mkdir and its stamp write, inside the fresh window.
+  it('reports an unknown holder (not NaN) for a lock with no readable holder', async () => {
     const lockDir = join(mkTmp(), 'init.lock');
-    plantLock(lockDir, { pid: 0, ageMs: FRESH_MS, stamped: false });
+    mkdirSync(lockDir);
+    writeFileSync(join(lockDir, 'torn'), 'not a holder');
     const run = withLockAsync(lockDir, async () => 'acquired', WAIT);
     await expect(run).rejects.toMatchObject({ holderPid: null });
   });
 
-  it('reaps a crashed holder (stale lock, dead pid) and runs the callback', async () => {
+  it('reaps a crashed holder and runs the callback', async () => {
     const lockDir = join(mkTmp(), 'init.lock');
-    plantLock(lockDir, { pid: deadPid(), ageMs: STALE_MS });
+    plantHolder(lockDir, deadPid());
     await expect(withLockAsync(lockDir, async () => 'acquired', WAIT)).resolves.toBe('acquired');
+    expect(existsSync(lockDir)).toBe(false);
+  });
+
+  it('never lets a late reaper delete a fresh holder of the lock it judged dead', async () => {
+    // Reapers A and B both read dead nonce N; B reaps it, C takes the lock, then A acts on its stale read.
+    const lockDir = join(mkTmp(), 'init.lock');
+    plantHolder(lockDir, deadPid(), 'dead');
+    let open: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      open = resolve;
+    });
+    let fresh: Promise<string> | undefined;
+    reapIfDead(lockDir, () => {
+      reapIfDead(lockDir, () => true);
+      fresh = withLockAsync(lockDir, async () => {
+        await gate;
+        return 'fresh finished';
+      });
+      return true;
+    });
+    const held = readdirSync(lockDir);
+    expect(held).toHaveLength(1);
+    expect(held).not.toContain('dead');
+    open();
+    await expect(fresh).resolves.toBe('fresh finished');
     expect(existsSync(lockDir)).toBe(false);
   });
 
@@ -192,27 +212,30 @@ describe('withLockAsync — lock parent directory', () => {
     expect(existsSync(lockDir)).toBe(false);
   });
 
-  it('retries when the parent vanishes between its creation and the lock mkdir', async () => {
+  it('retries when the parent vanishes mid-take, staging under an ignored *.lock name', async () => {
     const lockDir = join(mkTmp(), '.devkit', 'init.lock');
-    const realMkdirSync = fs.mkdirSync;
-    let vanished = false;
-    // SAFETY: the wrapper forwards every argument to the real mkdirSync and returns its value.
-    fs.mkdirSync = ((...args: Parameters<typeof fs.mkdirSync>) => {
-      if (!vanished && String(args[0]) === lockDir) {
-        vanished = true; // a concurrent run's cleanup removed the empty parent just now
-        rmSync(join(lockDir, '..'), { recursive: true, force: true });
+    const realRenameSync = fs.renameSync;
+    const staged: string[] = [];
+    // SAFETY: the wrapper forwards every argument to the real renameSync and returns its value.
+    fs.renameSync = ((...args: Parameters<typeof fs.renameSync>) => {
+      if (String(args[1]) === lockDir) {
+        staged.push(String(args[0]));
+        // A concurrent run's cleanup removes the parent (and our staged dir) on the first take.
+        if (staged.length === 1) rmSync(join(lockDir, '..'), { recursive: true, force: true });
       }
-      return realMkdirSync(...args);
-    }) as typeof fs.mkdirSync;
-    syncBuiltinESMExports(); // atomic-write.mts binds mkdirSync by name
+      return realRenameSync(...args);
+    }) as typeof fs.renameSync;
+    syncBuiltinESMExports(); // process-lock.mts binds renameSync by name
     try {
       await expect(withLockAsync(lockDir, async () => 'acquired', { waitMs: 2_000 })).resolves.toBe(
         'acquired',
       );
     } finally {
-      fs.mkdirSync = realMkdirSync;
+      fs.renameSync = realRenameSync;
       syncBuiltinESMExports();
     }
-    expect(vanished).toBe(true);
+    expect(staged.length).toBeGreaterThan(1);
+    // Crash litter must match a consumer's `.devkit/*.lock` ignore rule.
+    for (const path of staged) expect(path).toMatch(/\.new-[\w-]+\.lock$/);
   });
 });
