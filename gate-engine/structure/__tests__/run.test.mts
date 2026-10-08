@@ -12,7 +12,7 @@ import {
   runStagedStructureGate,
   runStructureGate,
 } from '../run.mts';
-import { withUncompiledWalls } from '../verdict.mts';
+import { preExisting, withUncompiledWalls } from '../verdict.mts';
 
 const DEVKIT_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
@@ -409,6 +409,61 @@ describe('guard-structure staged execution', () => {
     await expect(runStagedStructureGate(root)).resolves.toMatchObject({ code: 0 });
   });
 
+  describe('debt already at HEAD', () => {
+    const git = (root: string, ...args: string[]) => execFileSync('git', args, { cwd: root });
+    function debtRepo(files: string[]) {
+      const root = repo();
+      write(root, 'guard.config.json', JSON.stringify(config));
+      for (const file of files) write(root, file);
+      initializeGit(root);
+      git(root, 'add', '-A');
+      git(root, 'commit', '-qm', 'debt');
+      return root;
+    }
+    const head = (root: string) => git(root, 'rev-parse', '--short', 'HEAD').toString().trim();
+
+    it('an edited file whose violation exists at HEAD passes with an advisory naming HEAD', async () => {
+      const root = debtRepo(['src/bad-name.ts']);
+      write(root, 'src/bad-name.ts', 'export const y = 2;\n');
+      git(root, 'add', '--', 'src/bad-name.ts');
+      const result = await runStagedStructureGate(root);
+      expect(result.code).toBe(0);
+      expect(result.text).toContain(`pre-existing structure violation(s) at ${head(root)}`);
+      expect(result.text).toContain('bad-name.ts');
+    });
+
+    it('a file the change adds still blocks on a base with debt', async () => {
+      const root = debtRepo(['src/bad-name.ts']);
+      write(root, 'src/also-bad.ts');
+      git(root, 'add', '--', 'src/also-bad.ts');
+      expect((await runStagedStructureGate(root)).code).toBe(1);
+    });
+
+    it('an added file cannot hide behind an edited debt file in the same broken folder', async () => {
+      const root = debtRepo(['src/junk/Old.ts']);
+      write(root, 'src/junk/Old.ts', 'export const y = 2;\n');
+      write(root, 'src/junk/New.ts');
+      git(root, 'add', '--', 'src/junk');
+      const result = await runStagedStructureGate(root);
+      expect(result.code).toBe(1);
+      expect(result.text).toContain('New.ts');
+    });
+
+    it.each([
+      [
+        'a structure policy edit',
+        (root: string) => write(root, 'guard.config.json', `${JSON.stringify(config)}\n`),
+      ],
+      ['a deletion', (root: string) => git(root, 'rm', '-q', '--', 'src/Other.ts')],
+    ])('%s staged with the edit keeps the edited debt blocking', async (_label, stage) => {
+      const root = debtRepo(['src/bad-name.ts', 'src/Other.ts']);
+      write(root, 'src/bad-name.ts', 'export const y = 2;\n');
+      stage(root);
+      git(root, 'add', '--', 'guard.config.json', 'src/bad-name.ts');
+      expect((await runStagedStructureGate(root)).code).toBe(1);
+    });
+  });
+
   it('exit 2, not 1, when the electron path has no locally pinned eslint binary', async () => {
     const root = repo({ scanRoots: ['src'], sourceExtensions: ['ts'] });
     write(root, 'src/whatever.ts');
@@ -801,6 +856,35 @@ describe('combineStructureResults', () => {
     expect(combined).toMatchObject({ code: 1, errorCount: 3 });
     expect(combined.text).toContain('first');
     expect(combined.text).toContain('second');
+  });
+});
+
+describe('preExisting advisories', () => {
+  const advisory = preExisting({ code: 1, errorCount: 2, text: 'src/bad.ts' }, 'abc1234');
+
+  it('turns a violation into a passing advisory naming the HEAD sha', () => {
+    expect(advisory).toMatchObject({ code: 0, errorCount: 0 });
+    expect(advisory.text).toContain('2 pre-existing structure violation(s) at abc1234');
+    expect(advisory.text).toContain('src/bad.ts');
+    expect(preExisting({ code: 2, errorCount: 0, text: 'x' }, 'abc1234').code).toBe(2);
+  });
+
+  it.each([
+    ['clean', [], 0],
+    ['fail-open', [{ code: 2 as const, errorCount: 0, text: 'leg did NOT run' }], 2],
+    ['violation', [{ code: 1 as const, errorCount: 1, text: 'new.ts' }], 1],
+  ])('survives a %s fold', (_label, others, code) => {
+    const combined = combineStructureResults([...others, advisory]);
+    expect(combined.code).toBe(code);
+    expect(combined.text).toContain('at abc1234');
+  });
+
+  it('survives a declared but uncompiled wall', () => {
+    const wall = { pattern: 'src/**', allowImportsFrom: ['src/**'] };
+    const root = repo({ scanRoots: ['src'], structure: { trees: [], walls: [wall] } });
+    const result = withUncompiledWalls(root, advisory);
+    expect(result.code).toBe(2);
+    expect(result.text).toContain('at abc1234');
   });
 });
 
