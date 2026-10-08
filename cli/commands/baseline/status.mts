@@ -210,6 +210,9 @@ export default function baselineStatus(args: string[], cwd: string) {
       throw new UsageError(`--max-runs must be a positive whole number (got ${maxRunsRaw})`);
     }
     const against = flag(args, '--against');
+    if (against && args.includes('--file')) {
+      throw new UsageError('--file and --against answer different questions; pass one');
+    }
     if (against) {
       pr = readPrSummary(cwd, against);
       if (!pr) return 2;

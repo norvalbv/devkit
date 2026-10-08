@@ -106,6 +106,22 @@ describe('parseSummary — the optional failedTests map', () => {
   const raw = (extra: { failedTests?: unknown }) =>
     JSON.stringify({ schema: 1, testsPassed: false, files: { 'a.test.mts': 'failed' }, ...extra });
 
+  it('reads back what the producer writes, still as schema 1 for pinned readers', () => {
+    const written = summarise(
+      {
+        success: false,
+        testResults: [
+          { name: '/repo/a.test.mts', status: 'failed', assertionResults: [failed('t')] },
+        ],
+      },
+      '/repo',
+      {},
+    );
+    const read = parseSummary(JSON.stringify(written), 'x');
+    expect(read.schema).toBe(1);
+    expect(read.failedTests).toEqual({ 'a.test.mts': ['t'] });
+  });
+
   it('admits a summary without names and one with well-formed names', () => {
     expect(parseSummary(raw({}), 'x').failedTests).toBeUndefined();
     expect(parseSummary(raw({ failedTests: { 'a.test.mts': ['t'] } }), 'x').failedTests).toEqual({
@@ -289,6 +305,42 @@ describe('baseline-status --at / --against', () => {
     expect(code).toBe(0);
     expect(out).toContain('baseline unknown on main');
     expect(existsSync(stepSummary)).toBe(false);
+  });
+
+  it("names the older run it fell back to when the base commit's own run is still in flight", () => {
+    const older = seedBranch(dir);
+    const baseSha = addCommit(dir);
+    serveBase(older);
+    const runs = JSON.parse(readFileSync(join(fixture, 'runs.json'), 'utf8'));
+    const inFlight = { ...runs[0], databaseId: 101, status: 'in_progress', conclusion: '' };
+    runs.push({ ...inFlight, headSha: baseSha });
+    writeFileSync(join(fixture, 'runs.json'), JSON.stringify(runs));
+    const { out } = run(['--ref', 'main', '--at', baseSha, '--against', 'pr.json']);
+    expect(out).toContain(
+      `compared with main @ ${older.slice(0, 8)} (run 100, 1 commit(s) before the PR base)`,
+    );
+  });
+
+  it('emits the comparison beside the base answer under --json', () => {
+    serveBase(seedBranch(dir));
+    const { out } = run(['--ref', 'main', '--at', 'HEAD', '--against', 'pr.json', '--json']);
+    expect(JSON.parse(out)).toMatchObject({
+      runId: 100,
+      failingTests: { 's.test.mts': ['old'] },
+      comparison: { fresh: [{ file: 's.test.mts', test: 'new' }], namesKnown: true },
+    });
+  });
+
+  it('refuses --file with --against rather than silently answering only one', () => {
+    serveBase(seedBranch(dir));
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const { code } = run(['--ref', 'main', '--file', 's.test.mts', '--against', 'pr.json']);
+      expect(code).toBe(1);
+      expect(String(error.mock.calls[0]?.[0])).toContain('--file and --against');
+    } finally {
+      error.mockRestore();
+    }
   });
 
   it('refuses an --at that is not a commit here, and a missing PR summary', () => {
