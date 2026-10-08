@@ -213,6 +213,18 @@ describe('judgeReachability', () => {
     }
   });
 
+  // The hint must stop once the move is taken, or a resume loops on advice it already followed.
+  it('the family move clears once fully exported, and survives a partial export', async () => {
+    const dir = repo(['review'], CODEX_FAMILY);
+    const locked = deps({ rateLimits: async () => parseRateLimitsReply(LOCKED_REPLY) });
+    expect(familyRemedy(await judgeReachability(dir, locked))).toContain(claudeFamilyEnvLine());
+    process.env.GUARD_REVIEW_MODEL = 'haiku';
+    expect(familyRemedy(await judgeReachability(dir, locked))).toContain(claudeFamilyEnvLine());
+    process.env.GUARD_REVIEW_ESCALATION_MODEL = 'opus';
+    process.env.GUARD_CORRECTNESS_MODEL = 'sonnet';
+    expect(familyRemedy(await judgeReachability(dir, locked))).toBe('');
+  });
+
   it('never spends a rate-limit call on a claude family — there is no such query to make', async () => {
     let calls = 0;
     const statuses = await judgeReachability(
