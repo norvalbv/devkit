@@ -1105,8 +1105,9 @@ if [ "$REWRITE" -eq 1 ]; then
 else
   # Gates can run for many minutes; auto-merge landing inside them must not orphan this commit.
   reship_refuse_closed_pr " (it changed during gates)" "nothing pushed" || exit 1
-  DEVKIT_SHIP_PREPUSH_SKIP_SHA="$SHIP_COMMIT" git -C "$WT" push origin "HEAD:$BR" || {
-    echo "push to origin/$BR rejected (not a fast-forward — the branch advanced). Re-run after fetching." >&2
+  . "$SCRIPT_DIR/push-retry.sh"
+  ship_push_with_retry "$WT" "$SHIP_COMMIT" "$BR" origin "HEAD:$BR" || {
+    echo "push to origin/$BR failed — see git's error above (a non-fast-forward means the branch advanced). Re-run after fetching." >&2
     exit 1
   }
   # A plain push cannot lease on PR state, so a close landing between the read above and the push

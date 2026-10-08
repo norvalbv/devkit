@@ -299,6 +299,7 @@ PREFLIGHT_SELF=   # set when the branch's holder is THIS worktree; changes the c
 # unrelated local branch. Dry runs deliberately keep their worktree for inspection and never publish,
 # so they retain the strict new-branch precondition.
 LOCAL_BRANCH_EXISTS=
+REMOTE_HOLDS_PRESERVED=
 if git show-ref --verify -q "refs/heads/$BR"; then
   if [ -n "${SHIP_DRY_RUN:-}" ] || [ "$DRY_GATES" -eq 1 ]; then
     echo "branch already exists: $BR" >&2; exit 1
@@ -320,9 +321,15 @@ if [ -z "${SHIP_DRY_RUN:-}" ] && [ "$DRY_GATES" -eq 0 ]; then
   set +e
   # Fully-qualified, NOT a bare `$BR`: a bare pattern tail-matches on path segments, so shipping `x`
   # would read `refs/heads/feat/x` as "this branch already exists" and refuse a legitimate name.
-  bounded_remote_git ls-remote --exit-code --heads origin "refs/heads/$BR" >/dev/null 2>&1
+  remote_line=$(bounded_remote_git ls-remote --exit-code --heads origin "refs/heads/$BR" 2>/dev/null)
   remote_check=$?
   set -e
+  # A preserved commit that already reached origin (a push whose response was lost, or a manual push)
+  # is adopted; the receipt checks below still decide whether it may be published.
+  if [ "$remote_check" -eq 0 ] && [ -n "$LOCAL_BRANCH_EXISTS" ] &&
+    [ "${remote_line%%[[:space:]]*}" = "$(git rev-parse -q --verify "refs/heads/$BR")" ]; then
+    REMOTE_HOLDS_PRESERVED=1; remote_check=2
+  fi
   # ls-remote exits 2 for "no matching ref" but ALSO non-zero on auth/network error — only exit 2
   # is a safe "branch absent"; any other failure must fail closed, or push -u could append to a PR.
   case "$remote_check" in
@@ -1588,11 +1595,15 @@ fi
 # typecheck + test:run for this one commit (CI's gate.yml re-runs both on the PR). Command-scoped —
 # nothing else inherits it — and content-keyed: the hook fails closed and runs the full suite for any
 # ref whose oid is not this sha, so a plain `git push` (no env) is unchanged.
-if [ -n "$LOCAL_BRANCH_EXISTS" ]; then
-  DEVKIT_SHIP_PREPUSH_SKIP_SHA="$RECOVERY_COMMIT" \
-    git -C "$WT" push origin "$RECOVERY_COMMIT:refs/heads/$BR"
+. "$SCRIPT_DIR/push-retry.sh"
+if [ -n "$REMOTE_HOLDS_PRESERVED" ]; then
+  echo "origin/$BR already holds gated commit ${RECOVERY_COMMIT:0:7}; skipping push" >&2
+elif [ -n "$LOCAL_BRANCH_EXISTS" ]; then
+  ship_push_with_retry "$WT" "$RECOVERY_COMMIT" "$BR" origin "$RECOVERY_COMMIT:refs/heads/$BR" ||
+    { echo "push failed — gated commit preserved on $BR; retry: devkit ship --resume $BR" >&2; exit 1; }
 else
-  DEVKIT_SHIP_PREPUSH_SKIP_SHA="$(git -C "$WT" rev-parse HEAD)" git -C "$WT" push -u origin "$BR"
+  ship_push_with_retry "$WT" "$(git -C "$WT" rev-parse HEAD)" "$BR" -u origin "$BR" ||
+    { echo "push failed — gated commit preserved on $BR; retry: devkit ship --resume $BR" >&2; exit 1; }
 fi
 
 # Push succeeded → the branch is live on the remote and reconcilable NOW, whatever the PR step does.
@@ -1606,7 +1617,11 @@ PR_CREATE_FAILED=
 # unbound-variable error under `set -u`, and a plain "$VAR" would pass an empty argument to gh.
 PR_DRAFT_ARGS=()
 [ "$DRAFT" -eq 0 ] || PR_DRAFT_ARGS=(--draft)
-PR_URL=$( cd "$WT" && gh pr create --repo "$REPO" --base "$BASE_REF" --head "$BR" --title "$TITLE" --body "$BODY" ${PR_DRAFT_ARGS[@]+"${PR_DRAFT_ARGS[@]}"} ) || PR_CREATE_FAILED=1
+if [ -n "$REMOTE_HOLDS_PRESERVED" ] && read_pr_state && [ "$PR_SEEN_STATE" = OPEN ]; then
+  PR_URL="https://github.com/$REPO/pull/$PR_SEEN_NUM"
+else
+  PR_URL=$( cd "$WT" && gh pr create --repo "$REPO" --base "$BASE_REF" --head "$BR" --title "$TITLE" --body "$BODY" ${PR_DRAFT_ARGS[@]+"${PR_DRAFT_ARGS[@]}"} ) || PR_CREATE_FAILED=1
+fi
 PR_NUM=""
 if [ -z "$PR_CREATE_FAILED" ]; then
   echo "$PR_URL"   # surface the PR URL (we captured gh's stdout to recover the PR number below)
