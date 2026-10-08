@@ -60,7 +60,7 @@ import {
   collectAntiSlopGroups,
   resolveAntiSlopScope,
 } from '../../lib/install/anti-slop/runner.mts';
-import { isOverlayOxcInstall, resolveOxlintEntryConfig } from '../../lib/install/oxc/lifecycle.mts';
+import { isOverlayOxcInstall } from '../../lib/install/oxc/lifecycle.mts';
 
 export const meta = {
   name: 'anti-slop',
@@ -435,7 +435,7 @@ export default function run(args: string[], cwd: string): number {
   }
   // The manifest STAMP, not the repository marker: `.devkit/config.json` is absent from every review
   // projection, so a marker read drops the capability from the snapshot exactly where it exists.
-  const overlay = resolveOxlintEntryConfig(cwd) !== null;
+  const overlay = isOverlayOxcInstall(cwd);
   if (overlay && baseRef !== undefined) {
     console.error(OVERLAY_BASE_REFUSAL);
     return 2;
