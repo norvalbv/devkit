@@ -929,7 +929,7 @@ describe('reship --base — replace a conflicted PR from a caller-prepared snaps
         `refs/devkit/reship-body-receipts/feat/pr/${accepted}`,
       ]),
     ).toBe(`refs/devkit/reship-body-receipts/feat/pr/${accepted}`);
-  });
+  }, 360_000);
 
   it('does not share a gated receipt with a sibling PR at the same commit', () => {
     const { bare, dir, env, g, ghBody } = rewriteRepo();

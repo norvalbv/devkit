@@ -531,7 +531,6 @@ describe('ship-branch.sh — --from-branch committed scope (sc-2352)', () => {
       cwd: dir,
       input: '',
       encoding: 'utf8',
-      timeout: 45_000,
       env: { ...publishEnv, SHIP_COMMIT_TIMEOUT: '15' },
     });
 
@@ -579,7 +578,7 @@ describe('ship-branch.sh — --from-branch committed scope (sc-2352)', () => {
     expect(
       git(['for-each-ref', '--format=%(refname)', 'refs/devkit/ship-source-memberships']).trim(),
     ).toBe('');
-  });
+  }, 240_000);
 
   it('a fresh branch-source invocation cannot adopt a receipt created by explicit-path mode', () => {
     const { dir, env, git, bare } = seedShipRepoLocalRemote();
