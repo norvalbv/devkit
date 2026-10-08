@@ -100,7 +100,8 @@ describe('bindClaudeFamily', () => {
     process.env.PATH = binDir('claude');
     expect(bindClaudeFamily(repo)).toBe(true);
     const review = resolveGuardConfig(repo).review;
-    expect(review.model).toBe('haiku');
+    // A haiku first pass leaves checklist reviewers INCONCLUSIVE, failing every strict ship closed.
+    expect(review.model).toBe('sonnet');
     expect(review.escalationModel).toBe('opus');
     expect(review.correctnessModel).toBe('sonnet');
     expect(review.correctnessChunkLoc).toBe(0);
