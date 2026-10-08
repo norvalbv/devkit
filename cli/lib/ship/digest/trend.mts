@@ -181,7 +181,7 @@ export function renderTrend(lines: TrendLine[]): string {
       const series = `${counts.length > SHOWN ? '… → ' : ''}${shown.join(' → ')}`;
       return [
         `   ↻ ${reviewer}: ${counts.length} blocking rounds on this branch with no pass between — ${series} findings, not converging`,
-        '     The blocking-finding count is not falling: fix and test the whole class, or use the waive / skip remedies printed above.',
+        '     The blocking-finding count is not falling: fix and test the whole class, cut or narrow the change if the failing code is not an acceptance criterion, or use the waive / skip remedies printed above.',
       ].join('\n');
     })
     .join('\n');

@@ -32,6 +32,12 @@ describe('prior-art agent: reference checkouts resolve from a linked worktree', 
     expect(phase0).toContain('skipped silently and counts only as declared');
   });
 
+  it('Q6 carries what an earlier attempt at the same problem cost', () => {
+    const q6 = read('agents/prior-art.md').split('**Q6 — Cost symmetry.**')[1]?.split('**Q7')[0];
+    expect(q6).toContain('earlier PR, branch or commit');
+    expect(q6).toContain('review rounds, rewrites or');
+  });
+
   it('ships the same text to every synced agent surface', () => {
     const source = read('agents/prior-art.md');
     expect(read('.claude/agents/prior-art.md')).toBe(source);
