@@ -33,6 +33,7 @@ import {
   isOverlayHooksValue,
   overlayCommandCwd,
   overlayHome,
+  ownsOverlayConfig,
   unprojectOverlay,
   worktrees,
 } from '../lib/husky/overlay/overlay-home.mts';
@@ -1108,6 +1109,18 @@ describe('overlay eslint config across re-init (sc-3791)', () => {
     const both = (await doctorOut(root)).out;
     expect(both).toContain("run `devkit upgrade`; then delete each linked worktree's copy");
     expect(both).not.toContain('delete each copy and run `devkit doctor --fix`');
+  });
+
+  it('a monorepo checkout owns its overlay only through the package config, not the git root', () => {
+    const root = mkTmp('overlay-owns-pkg-');
+    mkdirSync(join(root, '.devkit'));
+    writeFileSync(join(root, '.devkit', 'config.json'), '{"overlay":true}\n');
+    expect(ownsOverlayConfig(root, 'pkg')).toBe(false);
+
+    mkdirSync(join(root, 'pkg', '.devkit'), { recursive: true });
+    writeFileSync(join(root, 'pkg', '.devkit', 'config.json'), '{"overlay":true}\n');
+    rmSync(join(root, '.devkit'), { recursive: true });
+    expect(ownsOverlayConfig(root, 'pkg')).toBe(true);
   });
 
   it('a monorepo package reads the overlay under the package, not the git root', () => {
