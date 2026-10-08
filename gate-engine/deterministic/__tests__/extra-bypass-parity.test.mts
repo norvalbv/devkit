@@ -84,6 +84,21 @@ describe('a prefix-cached retry still records an extra bypass', () => {
     ]);
   });
 
+  it('names each bypass canonically, including one exported under the FRINK_ alias', () => {
+    vi.stubEnv('FRINK_DECISIONS_INTEGRITY_OK', '1');
+    const extra = [
+      { label: 'hook-parity', cmd: 'true' },
+      { label: 'decisions-integrity', cmd: 'true' },
+    ];
+    const opts = { exec: vi.fn(), extra };
+    expect(runDeterministic(dir, opts)).toBe(0);
+    expect(runDeterministic(dir, opts)).toBe(0);
+    expect(bypasses().map((e) => `${e.gate}:${e.bypass}`)).toEqual([
+      'hook-parity:GUARD_HOOK_PARITY_OK',
+      'decisions-integrity:GUARD_DECISIONS_INTEGRITY_OK',
+    ]);
+  });
+
   it('emits nothing for a bypassed extra that is not part of this invocation', () => {
     const opts = { exec: vi.fn(), extra: [{ label: 'lint', cmd: 'true' }] };
     expect(runDeterministic(dir, opts)).toBe(0);
