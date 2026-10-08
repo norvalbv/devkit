@@ -1,4 +1,5 @@
 /** Shared reviewer response primitives. Domain-specific evidence contracts depend on this module. */
+import { issueLocations } from '../evidence/findings.mts';
 
 /** `rate-limited` is split out of `outage` because its remedy inverts the generic one: re-running
  *  is exactly what cannot succeed until the provider's window resets (sc-2538). `engine` is the
@@ -44,6 +45,20 @@ export function parseReviewVerdict(raw: string): ReviewVerdict {
     verdict: last[1].toUpperCase(),
     reason: (last[2] ?? '').replace(/\*+/g, '').trim(),
   };
+}
+
+// Same guarded dressing as VERDICT_LINE_RE: the marker must open its line, never sit inside prose.
+const ADVISORY_LINE_RE = /^(?:(?![\r\n])[\s*#>-])*ADVISORY:\**\s*(.+)$/gim;
+const ADVISORY_CAP = 5;
+const ADVISORY_CHARS = 200;
+
+/** The judge's `ADVISORY:` lines citing a code location — non-blocking, to resolve before merge. */
+export function parseAdvisories(raw: string): string[] {
+  const texts = [...normalizeLineEndings(raw).matchAll(ADVISORY_LINE_RE)]
+    .map((m) => m[1].replace(/\*+/g, '').replace(/\s+/g, ' ').trim().slice(0, ADVISORY_CHARS))
+    // The contract asks for a file:line, so `none` or an echoed `<file:line>` is not a finding.
+    .filter((text) => issueLocations(text).length > 0);
+  return [...new Set(texts)].slice(0, ADVISORY_CAP);
 }
 
 /** Remedy for a cascade that THREW: the gate failed before or around the judge, so pointing the

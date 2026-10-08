@@ -5,6 +5,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { z } from 'zod';
+import { emitAdvisoryResult } from '../../judge/advisory/emit.mts';
 import { emitGateEvent } from '../../judge/gate-events.mts';
 import type { VerdictMeta } from '../../judge/verdict-store.mts';
 import { headHash } from './staged-git.mts';
@@ -291,6 +292,28 @@ export function reportMcpDegraded(name: string, cause: string, cached = false): 
   const detail = cached ? `${cause} — ${MCP_DEGRADED_REMEDY}` : cause;
   console.error(`⚠️  guard-review: ${name} — DEGRADED: ${detail}`);
   emitGateEvent({ type: 'gate_degraded', judge: name, cause, detail });
+}
+
+const storedAdvisories = z.array(z.string().min(1));
+
+/** The advisories the cached PASS entries stored (every part of a split); malformed reads as none. */
+export function cachedAdvisories(...metas: VerdictMeta[]): string[] | undefined {
+  const all = metas.flatMap((m) => storedAdvisories.safeParse(m.advisories).data ?? []);
+  return all.length ? all : undefined;
+}
+
+/** A PASS's `ADVISORY:` findings: self-labelled lines (a split merge prints no verdict line to sit
+ * under), where the full reasoning lives, and ONE advisory_result — the digest keeps one per gate. */
+export function reportAdvisories(
+  name: string,
+  advisories: string[] | undefined,
+  ref?: string | null,
+): void {
+  if (!advisories?.length) return;
+  for (const a of advisories)
+    console.error(`guard-review: ${name} — advisory (non-blocking): ${a}`);
+  if (ref) console.error(`guard-review: ${name} — full reasoning: guard-review transcript ${ref}`);
+  emitAdvisoryResult(`review:${name}`, 'finding', advisories.join(' | '));
 }
 
 /** A cached PASS line (`tail` = its provenance), marked and reported when it replays MCP-degraded. */

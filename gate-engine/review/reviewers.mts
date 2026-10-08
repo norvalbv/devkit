@@ -369,7 +369,8 @@ export function wrapPrompt(
     'Judge ONLY the staged diff; pre-existing issues in code this commit does not touch are not ' +
     'findings. List findings (file:line, one line each), then END with exactly one line:\n' +
     'VERDICT: PASS | FAIL — <one-line reason>\n' +
-    'FAIL only for a finding that must block THIS commit.'
+    'FAIL only for a finding that must block THIS commit. A non-blocking finding to resolve ' +
+    'before merge goes on its own line before the verdict: ADVISORY: <file:line> — <finding>'
   );
 }
 
