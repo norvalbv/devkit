@@ -451,6 +451,7 @@ export async function runReviewGate(
   if (!only?.lens) emitMergedLensResults(splitParts, firstModel); // never a recheck's partial vector
   const fails = results.filter((r) => r.status === 'fail');
   const findingsPrinted = new Set<string>();
+  let hinted = false;
   for (const f of fails) {
     console.error(
       `guard-review: ${f.name} FAILED${f.escalated ? ' (escalation-confirmed)' : ''} — ${f.reason || 'see findings below'}`,
@@ -460,11 +461,10 @@ export async function runReviewGate(
     const firstFindingForReviewer = !findingsPrinted.has(f.name);
     if (firstFindingForReviewer) {
       findingsPrinted.add(f.name);
-      const findings = renderFindingsBlockForParts(
-        f.name,
-        fails.filter((r) => r.name === f.name),
-      );
+      const parts = fails.filter((r) => r.name === f.name);
+      const findings = renderFindingsBlockForParts(f.name, parts, undefined, !hinted);
       if (findings) console.error(findings);
+      hinted ||= Boolean(findings);
     }
     if (f.transcript) console.error(f.transcript.trim());
     if (firstFindingForReviewer) printRemedy(f, splitParts, only);

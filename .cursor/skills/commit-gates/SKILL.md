@@ -86,12 +86,17 @@ command. Do not pre-run every gate or replace the managed chain with a hand-writ
   judges only that reviewer (or that one correctness lens) on your staged index, with the gate's
   prompt, model and cache key. Its PASS is cached, so the next `devkit ship --resume` skips that lens
   — but only when the same paths ship briefed are staged and the `GUARD_REVIEW_*` model env matches.
-- **A counterexample stands for a class.** A correctness finding against a matcher, parser,
-  predicate or validator names ONE input the check gets wrong. Before re-shipping, name the property
+- **A finding stands for a class.** A finding against a matcher, parser, predicate or validator
+  names ONE input the check gets wrong. Before re-shipping, name the property
   that makes it wrong, list the other inputs that share it (every character that continues a path,
   not just the `.` quoted), and fix the class: an allowlist or grammar instead of a longer
   blocklist, or a narrower check on an exact token. Pin the fix with a table-driven test over that
   class. A second finding of the same shape means the first fix covered an instance, not the class.
+  The same holds for a finding that names ONE site breaking a rule the change states ("reads only
+  the index", "never fails open"). Take the union of every reviewer's findings in the attempt, name
+  the rule they share, and check every site in the diff that touches it — each file read, env read,
+  git call and parse — not only the cited lines. Reviewers sample: fix only the cited sites and the
+  next attempt reports the next one.
 - **A `↻ … not converging` line** under a blocked ship's digest means the same reviewer has blocked
   three or more rounds on this branch with no pass between, and its latest blocking-finding count is
   no better than its best earlier round. It says the count is not falling, not which findings recur.
