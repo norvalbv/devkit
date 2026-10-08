@@ -57,6 +57,7 @@
     "devkit": "node cli/index.mts",
     "test": "vitest",
     "test:run": "vitest run",
+    "test:linux-bash": "bash scripts/test-linux-bash.sh",
     "test:run:report": "node cli/index.mts test-report-run",
     "test:run:coverage:changed": "vitest run --changed=${COVERAGE_BASE:-origin/main} --coverage.enabled --coverage.include='{cli,gate-engine,anti-slop}/**/*.mts' --coverage.reporter=text --coverage.reportsDirectory=coverage/.changed/$$",
     "test:e2e": "vitest run -c vitest.e2e.config.mjs",

@@ -11,6 +11,7 @@ import {
   testSpawnSync as spawnSync,
   waitForPath,
 } from './_helpers.mts';
+import { MODERN_BASH_SKIP_NOTE } from './_modern-bash.mts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SUPERVISOR = join(HERE, '../lib/ship/review/process/gate-supervisor.mts');
@@ -897,14 +898,13 @@ describe('review gate supervisor', () => {
   // blamed a log that persisted fine, and ship-branch.sh then withheld the receipt for a landed
   // commit. teeExit 1 is the fail-closed half, and the reason the fix reads the status twice instead
   // of discarding any >128 — discarding fails OPEN here.
-  (MODERN_BASH ? it : it.skip).each([
+  it.for([
     { teeExit: 0, wantRc: 0 },
     { teeExit: 1, wantRc: 1 },
   ])(
-    `keeps tee exit $teeExit distinguishable through a pending-trap signal${
-      MODERN_BASH ? '' : ' (skipped: no bash >= 4)'
-    }`,
-    ({ teeExit, wantRc }) => {
+    `keeps tee exit $teeExit distinguishable through a pending-trap signal`,
+    ({ teeExit, wantRc }, { skip }) => {
+      skip(!MODERN_BASH, MODERN_BASH_SKIP_NOTE);
       const root = mkTmp('devkit-review-pending-trap-');
       const result = deferredSignalGateHarness(root, { teeExit });
 
@@ -922,32 +922,27 @@ describe('review gate supervisor', () => {
   // Every signal the handoff traps, not just TERM. Ctrl-C is SIGINT and a harness terminating a task
   // may send any of them; ship-branch.sh's receipt case list admits 129/130/131 alongside 143, so the
   // >128 test in the runner has to be signal-agnostic rather than TERM-shaped.
-  (MODERN_BASH ? it : it.skip).each([
+  it.for([
     { signal: 'HUP', status: 129 },
     { signal: 'INT', status: 130 },
     { signal: 'QUIT', status: 131 },
-  ])(
-    `survives a pending-trap $signal signal, not only TERM${
-      MODERN_BASH ? '' : ' (skipped: no bash >= 4)'
-    }`,
-    ({ signal, status }) => {
-      const result = deferredSignalGateHarness(mkTmp('devkit-review-pending-trap-sig-'), {
-        signal,
-      });
+  ])(`survives a pending-trap $signal signal, not only TERM`, ({ signal, status }, { skip }) => {
+    skip(!MODERN_BASH, MODERN_BASH_SKIP_NOTE);
+    const result = deferredSignalGateHarness(mkTmp('devkit-review-pending-trap-sig-'), {
+      signal,
+    });
 
-      expect(result.stdout, result.stderr).toContain(`SIGNAL_STATUS=${status}`);
-      expect(result.stdout, result.stderr).toContain('RUNNER_RC=0');
-      expect(result.stderr).not.toMatch(/could not persist gate output/);
-    },
-  );
+    expect(result.stdout, result.stderr).toContain(`SIGNAL_STATUS=${status}`);
+    expect(result.stdout, result.stderr).toContain('RUNNER_RC=0');
+    expect(result.stderr).not.toMatch(/could not persist gate output/);
+  });
 
   // sc-1896: the supervisor wait has the tee wait's window; its re-read must return the gate's own
   // status. 127 is also bash's "not a child" status, so it must survive the re-read too.
-  (MODERN_BASH ? it : it.skip).each([{ gateExit: 7 }, { gateExit: 127 }])(
-    `reports a failing gate's own status $gateExit through a pending-trap signal${
-      MODERN_BASH ? '' : ' (skipped: no bash >= 4)'
-    }`,
-    ({ gateExit }) => {
+  it.for([{ gateExit: 7 }, { gateExit: 127 }])(
+    `reports a failing gate's own status $gateExit through a pending-trap signal`,
+    ({ gateExit }, { skip }) => {
+      skip(!MODERN_BASH, MODERN_BASH_SKIP_NOTE);
       const result = deferredSignalGateHarness(mkTmp('devkit-review-pending-trap-fail-'), {
         gateExit,
       });
@@ -959,21 +954,17 @@ describe('review gate supervisor', () => {
 
   // A tee that really died (SIGKILL: it ignores HUP/TERM) cannot prove the log whole, so the runner
   // fails closed — no receipt. SIGNAL_STATUS=0: only tee was signalled, never the shell.
-  (MODERN_BASH ? it : it.skip)(
-    `fails closed when the signal kills tee itself rather than the shell${
-      MODERN_BASH ? '' : ' (skipped: no bash >= 4)'
-    }`,
-    () => {
-      const result = deferredSignalGateHarness(mkTmp('devkit-review-tee-signalled-'), {
-        target: 'self',
-        signal: 'KILL',
-      });
+  it(`fails closed when the signal kills tee itself rather than the shell`, ({ skip }) => {
+    skip(!MODERN_BASH, MODERN_BASH_SKIP_NOTE);
+    const result = deferredSignalGateHarness(mkTmp('devkit-review-tee-signalled-'), {
+      target: 'self',
+      signal: 'KILL',
+    });
 
-      expect(result.stdout, result.stderr).toContain('SIGNAL_STATUS=0');
-      expect(result.stdout, result.stderr).toContain('RUNNER_RC=1');
-      expect(result.stderr).toMatch(/could not persist gate output/);
-    },
-  );
+    expect(result.stdout, result.stderr).toContain('SIGNAL_STATUS=0');
+    expect(result.stdout, result.stderr).toContain('RUNNER_RC=1');
+    expect(result.stderr).toMatch(/could not persist gate output/);
+  });
 
   // A process-GROUP HUP/TERM (managed CLI forwarding, a harness kill) reaches tee as well as the shell.
   // tee ignores both, so the log drains whole and a commit that already landed keeps its receipt.
