@@ -126,5 +126,6 @@ export function printReleaseOnlyDist(report) {
         console.error(`    ${file}`);
     console.error('  Regenerated dist ships only with `devkit release` (docs/decisions/typescript-source-prebuilt-mjs.md, 2026-07-26).');
     console.error('  Fix: drop these from the brief. Brief source plus only the NEW dist paths named here.');
+    console.error('  A review finding that asks for one of these files does not override this: a tracked dist file stays stale until the next release.');
     return 1;
 }

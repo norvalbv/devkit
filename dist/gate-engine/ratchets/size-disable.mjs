@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { CONFIG_FILENAME, resolveGuardConfig, sourceMatchers } from '../config.mjs';
 import { exitGate } from '../deterministic/reason.mjs';
+import { overlayInstall } from '../overlay-mode.mjs';
 import { readRatchetBaseline, removeRatchetBaseline, SIZE_BASELINE, writeRatchetBaseline, } from './baseline-paths.mjs';
 import { fanoutSplitHints } from './folder-fanout.mjs';
 import { hasStagedFiles, indexTreeRef, mergeBaseRef, pullRequestScope, stagedSet, } from './git-index.mjs';
@@ -210,8 +211,8 @@ function runLinesGate(root, cfg, ciScope) {
             console.error(line);
         exitGate(1, report);
     }
-    if (ciScope || !inCommit || !staged)
-        return; // CI never tightens/stages
+    if (ciScope || !inCommit || !staged || overlayInstall(root))
+        return; // no commit carries it
     // Tighten only the committing files' ceilings; every other recorded count is preserved as-is,
     // so a concurrent agent's uncommitted shrink is never locked in.
     if (!candidate)
@@ -281,6 +282,8 @@ function runDisableGate(root, baselineContents, current, ciScope) {
         }
         exitGate(1, why);
     }
+    if (overlayInstall(root))
+        return;
     if (ciScope || !inCommit || !staged) {
         // No commit in progress → never mutate. Nudge a re-freeze if anything shrank or a legacy file lingers.
         if (legacy) {

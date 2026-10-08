@@ -16,6 +16,7 @@ import { cutStructureBaselines } from '../lib/generate/cut-structure-baselines.m
 import { INIT_HELP } from '../lib/help/init-help.mjs';
 import { installCommitMsgHook, removeCommitMsgBlock } from '../lib/husky/commit-msg-block.mjs';
 import { buildFullHook, buildGuardBlock, extractGuardBlock, hasFragment, removeFragment, removeGuardBlock, replaceGuardBlock, } from '../lib/husky/husky-block.mjs';
+import { fallowGateLine } from '../lib/husky/gate-policy/fallow-staged.mjs';
 import { installSelfHostHook, isDevkitRepo, selfHostSelection } from '../lib/husky/self-host.mjs';
 import { ADHD_SKILL_DIR, syncAdhdSkill } from '../lib/install/adhd-skill.mjs';
 import { installAgentSurfaces as syncSurfaces } from '../lib/install/agent-assets/agent-surfaces.mjs';
@@ -26,7 +27,7 @@ import { lockedCommand } from '../lib/install/init/init-lock.mjs';
 import { applyScanRoots } from '../lib/install/init/scan-roots.mjs';
 import { reviewPlanFromFlags } from '../lib/install/flags/review-profile.mjs';
 import { ensureDevkitCacheGitignore } from '../lib/install/gitignore-cache.mjs';
-import { ensureFallowGitignore, installFallow, saveFallowBaselines, wireFallowHooks, } from '../lib/install/install-fallow.mjs';
+import { ensureFallowGitignore, installFallow } from '../lib/install/install-fallow.mjs';
 import { installSearchCode } from '../lib/install/install-search-code.mjs';
 import * as oxcLifecycle from '../lib/install/oxc/lifecycle.mjs';
 import { patchPackageJson } from '../lib/install/package-json.mjs';
@@ -263,25 +264,22 @@ async function subConfirm(message, { interactive, fallback }) {
     const v = await confirm({ message, initialValue: fallback });
     return isCancel(v) ? fallback : v;
 }
-// Does the repo carry fallow debt? `fallow audit` exits non-zero when it finds NEW issues
-// against (absent) baselines — i.e. there's something to grandfather. Fail-open: any throw
-// (missing binary, etc.) is treated as "no debt" so we never save empty baselines.
-function fallowHasDebt(cwd) {
+// The optional `fallow init`: fail-open, returns its progress line.
+function runFallowInit(cwd, dryRun) {
+    if (dryRun)
+        return '[dry-run] fallow init';
     try {
-        execFileSync('fallow', ['audit'], { cwd, stdio: 'pipe' });
-        return false; // exit 0 → clean → nothing to baseline
+        execFileSync('fallow', ['init'], { cwd, stdio: 'inherit' });
+        return '✓ fallow init';
     }
     catch (e) {
-        return e.status != null; // non-zero exit → debt; ENOENT (status null) → treat as none
+        return `! fallow init skipped: ${firstLine(e)}`;
     }
 }
-// Apply the OPTIONAL fallow component. Every step is fail-open (install-fallow never throws);
-// order: install → gitignore (always) → optional `fallow init` (sub-confirm, default NO —
-// fallow is zero-config) → wire fallow's own git hook → save baselines ONLY if the gate wired
-// AND the repo has debt to grandfather. dryRun prints + writes nothing throughout.
-// Reason: flat fail-open orchestration: each fallow step (install → gitignore → optional init → wire gate → save baselines) is a sequential guarded call with its own dryRun/ok branch; the branch COUNT is the step count, no nesting
+// Reason: flat fail-open steps (install → gitignore → optional init → gate line), no nesting
 // fallow-ignore-next-line complexity
-async function applyFallow(cwd, dryRun, interactive) {
+async function applyFallow(cwd, dryRun, interactive, gateLine) {
+    // The gate is the staged audit in devkit's hook block (step 3); fallow's installer is never run.
     const r = installFallow({ cwd, dryRun });
     console.log(`  ${r.ok ? '✓' : '!'} ${r.message}`);
     ensureFallowGitignore({ cwd, dryRun });
@@ -290,26 +288,9 @@ async function applyFallow(cwd, dryRun, interactive) {
         interactive,
         fallback: false,
     });
-    if (doInit) {
-        if (dryRun)
-            console.log('  [dry-run] fallow init');
-        else {
-            try {
-                execFileSync('fallow', ['init'], { cwd, stdio: 'inherit' });
-                console.log('  ✓ fallow init');
-            }
-            catch (e) {
-                console.log(`  ! fallow init skipped: ${firstLine(e)}`);
-            }
-        }
-    }
-    const gate = wireFallowHooks({ cwd, dryRun });
-    for (const line of gate.log)
-        console.log(`  ${line}`);
-    if (gate.ok && (dryRun || fallowHasDebt(cwd))) {
-        const saved = saveFallowBaselines({ cwd, dryRun });
-        console.log(`  ${saved.ok ? '✓ saved' : '! some'} fallow baselines (grandfather debt)`);
-    }
+    if (doInit)
+        console.log(`  ${runFallowInit(cwd, dryRun)}`);
+    console.log(`  ${gateLine}`);
 }
 // ── removal steps (SAFE: never delete a file devkit didn't create) ───────────
 // Reason: CRAP-flagged thin package.json mutator: two near-identical key-delete loops (devDeps, scripts) each gated on existence + dryRun; exercised end-to-end via every remove* caller, not unit-isolated
@@ -689,7 +670,7 @@ export async function applyInit(cwd, plan) {
     const agentTargets = syncSurfaces(gitRoot, assets, dryRun, override, prevConfig?.components);
     if (selection.fallow) {
         console.log('8. fallow (optional code-health layer)');
-        await applyFallow(cwd, dryRun, interactive);
+        await applyFallow(cwd, dryRun, interactive, fallowGateLine(Boolean(selection.husky), selfHost));
     }
     if (selection.searchCode) {
         console.log('8b. search-code (opt-in semantic search)');

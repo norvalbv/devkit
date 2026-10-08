@@ -12,10 +12,12 @@
 import { GUARD_FRAGMENTS } from './ai-guard-fragments.mjs';
 import { BIN_DIRS, DK_DETERMINISTIC_GATE_HELPER, DK_GATE_BLOCK_HELPERS, REVIEW_FAILURE_FINALIZER, shipRehearsalHint, } from './gate-policy/block-helpers.mjs';
 import { buildPreCommitExit, PRE_COMMIT_PASS_EXIT } from './gate-policy/commit-gate-log.mjs';
+import { FALLOW_STAGED, FALLOW_STAGED_BLOCK, indent } from './gate-policy/fallow-staged.mjs';
 import { formatFragment } from './format-fragment.mjs';
 import { markEnd, markStart } from './husky.mjs';
 import { DK_COMMIT_INDEX_CAPTURE, DK_HOOK_HELPERS, DK_REVIEW_BASELINE_HELPER, selectedFragment, } from './review-fragments.mjs';
 import { sentryShipPrewarmFragment } from './sentry-fragments.mjs';
+import { ESLINT_OVERLAY_FILE, LEGACY_ESLINT_OVERLAY_MARKER, } from './overlay/eslint-overlay-marker.mjs';
 import { shQuote } from '../ship/redact-secrets.mjs';
 // The ONE deterministic line: `guard-deterministic` (gate-engine/deterministic/run.mjs) owns the
 // prefix-cache check/record, runs the selected guards (.devkit/config.json components.guards),
@@ -92,6 +94,8 @@ export function buildGuardBlock(selection, pkgRel = '', { binDir = 'package', pr
         pieces.push(formatFragment(BIN_DIRS[binDir].formatter));
     if (wantsDeterministic(selection))
         pieces.push(DK_DETERMINISTIC_GATE_HELPER, deterministicFragment(selection.structureCmd, selection.extras));
+    if (selection.fallow)
+        pieces.push(FALLOW_STAGED_BLOCK);
     if (preAi)
         pieces.push(preAi);
     for (const id of AI_GUARD_IDS) {
@@ -130,49 +134,37 @@ export function buildFullHook(selection, pkgRel = '', binDir = 'package') {
 // `--relative` makes `git diff` emit paths relative to the CURRENT dir, so this works whether
 // the hook runs at the repo root or cd'd into a monorepo package (eslint/biome + their configs
 // are then resolved package-locally).
-const overlayLintStep = (tool, label, exts, config, args) => `DK_STAGED=$(git diff --cached --name-only --relative --diff-filter=ACM | grep -E '\\.(${exts})$' || true)
+const overlayLintStep = (tool, label, exts, config, run, failHint = '') => `DK_STAGED=$(git diff --cached --name-only --relative --diff-filter=ACM | grep -E '\\.(${exts})$' || true)
 if [ -n "$DK_STAGED" ] && [ -f ${config} ]; then
     if [ -x node_modules/.bin/${tool} ]; then
         echo "${label}"
-        echo "$DK_STAGED" | xargs node_modules/.bin/${tool} ${args} || {
-${shipRehearsalHint('            ')}
+        echo "$DK_STAGED" | xargs ${run} || {
+${failHint}${shipRehearsalHint('            ')}
             exit 1
         }
     else
         echo "devkit ${tool} overlay: skipped — node_modules/.bin/${tool} not found (install the repo's dependencies)"
     fi
 fi`;
-const OVERLAY_ESLINT_STAGED = overlayLintStep('eslint', '🧱 devkit eslint overlay (staged)...', 'tsx?|jsx?', 'eslint.config.devkit.mjs', '-c eslint.config.devkit.mjs');
-const OVERLAY_BIOME = overlayLintStep('biome', '🎨 devkit biome overlay (staged)...', 'tsx?|jsx?|css|jsonc?', 'biome.devkit.jsonc', 'check --config-path biome.devkit.jsonc');
-// Overlay shadows fallow's installed hook, so its optional audit must run inline here. Scope the
-// audit to the index: ship refreshes reviewer assets in its worktree AFTER staging, and a base-wide
-// audit would otherwise attribute those unstaged runtime files to the caller's commit (sc-1549).
-// Normal commits fail-open if fallow isn't installed.
-const FALLOW_OVERLAY_STAGED = `if command -v fallow >/dev/null 2>&1; then
-    DK_FALLOW_DIFF="$(mktemp)" || exit 1
-    if ! git diff --cached --binary --full-index --find-renames --relative >"$DK_FALLOW_DIFF"; then
-        rm -f "$DK_FALLOW_DIFF"
-        exit 1
-    fi
-    # __dk_no_git_env: fallow's snapshot machinery has clobbered a ship worktree before. The
-    # staged diff is already captured with the committing index's git environment intact.
-    DK_FALLOW_RC=0
-    __dk_no_git_env fallow audit --diff-stdin <"$DK_FALLOW_DIFF" || DK_FALLOW_RC=$?
-    rm -f "$DK_FALLOW_DIFF"
-    [ "$DK_FALLOW_RC" -eq 0 ] || {
-${shipRehearsalHint('        ')}
-        exit 1
-    }
-fi`;
-// Hoisted (perf: no per-call regex compile).
-const LINE_START_RE = /^(?=.)/gm;
-const indent = (body) => body.replace(LINE_START_RE, '    ');
+const OVERLAY_ESLINT_STAGED = overlayLintStep('eslint', '🧱 devkit eslint overlay (staged)...', 'tsx?|jsx?', ESLINT_OVERLAY_FILE, `$DK_ESLINT -c ${ESLINT_OVERLAY_FILE}`, 
+// A parse error from the legacy caps block names no cause; point at the command that does.
+`            if grep -qF "${LEGACY_ESLINT_OVERLAY_MARKER}" ${ESLINT_OVERLAY_FILE} 2>/dev/null; then
+                echo "   ${ESLINT_OVERLAY_FILE} derives from an outdated devkit template — run \\\`devkit doctor\\\` for the fix" >&2
+            fi
+`);
+const OVERLAY_BIOME = overlayLintStep('biome', '🎨 devkit biome overlay (staged)...', 'tsx?|jsx?|css|jsonc?', 'biome.devkit.jsonc', 'node_modules/.bin/biome check --config-path biome.devkit.jsonc');
+// Shell twin of eslintNodeFlags: keep a linked node_modules' path so a plugin roots at this worktree.
+// Never for an isolated store (eslint itself linked): the flag breaks its dependency resolution.
+const ESLINT_PRESERVE_SYMLINKS = `DK_ESLINT=node_modules/.bin/eslint
+[ -L node_modules ] && [ ! -L node_modules/eslint ] && [ -f node_modules/eslint/bin/eslint.js ] &&
+    DK_ESLINT="node --preserve-symlinks node_modules/eslint/bin/eslint.js"`;
 // Commit, ship and dry-gates: the cheap BLOCKING staged checks run before the AI guards, so a lint
 // or dead-code finding never waits behind the reviewer chain (sc-3020).
 const overlayStagedGates = (fallow) => `# devkit lint overlay — STAGED files only, against configs that EXTEND the repo's (git-ignored).
 if [ "\${DEVKIT_RUN_MODE:-}" != "review" ]; then
+${indent(ESLINT_PRESERVE_SYMLINKS)}
 ${indent(OVERLAY_ESLINT_STAGED)}
-${indent(OVERLAY_BIOME)}${fallow ? `\n    # devkit fallow gate (overlay)\n${indent(FALLOW_OVERLAY_STAGED)}` : ''}
+${indent(OVERLAY_BIOME)}${fallow ? `\n    # devkit fallow gate (overlay)\n${indent(FALLOW_STAGED)}` : ''}
 fi`;
 /** Under the global husky shim (cli/lib/overlay-global-hook.mts) an overlay hook stops before its
  * chain: husky's _/h runs the repo's own hook itself, so chaining would run it twice. */
@@ -194,7 +186,7 @@ fi`;
  * the overlay hooksPath would otherwise shadow, and `opts.prelude` runs before any gate.
  */
 export function buildOverlayHook(selection, chainTarget = '.husky/pre-commit', pkgRel = '', { fallow = false, prelude = '', gitRuns = false, } = {}) {
-    const block = buildGuardBlock(selection, pkgRel, {
+    const block = buildGuardBlock({ ...selection, fallow: false }, pkgRel, {
         binDir: 'global',
         preAi: overlayStagedGates(fallow),
         postGuards: overlayReviewBaseline(fallow),

@@ -94,8 +94,8 @@ reviewer. Reading existing code to validate a still-unimplemented plan remains v
      finding**. Quote the prior ruling and name the conflict. New evidence can justify a re-target,
      but it must be explicit, never silent.
    - A recorded Target the proposal **relies on or restates** → NOT a completeness gap; don't re-litigate.
-   This is the single most expensive miss — a silent flip-flop survives critique and only surfaces at
-   the commit-time alignment gate (or after the code ships). Surface it here. **If the repo has no
+   This is the single most expensive miss — a silent flip-flop that survives critique surfaces only
+   when a commit-time judge happens to load that Target, or after the code ships. Surface it here. **If the repo has no
    decision log, skip this step** and note it.
 2. Search the codebase (its `scanRoots` / `structure.trees`) for existing patterns, gates, and
    systems the proposal interacts with or replaces.
@@ -124,7 +124,7 @@ Evaluate the proposal through each lens. Skip lenses that don't apply.
 - **Decompose-then-verify (do NOT give one holistic verdict).** Break the change into atomic claims (one per behaviour / file-effect). For EACH claim, classify it against the loaded Targets (when a log exists): *implements · contradicts · band-aids-an-unbuilt-Target · neutral*. Your verdict is the **aggregate** of these per-claim checks. (Verify-against-spec, decomposed: arXiv:2403.18802.)
 - **Decision log** (source of truth for *why*, when present): proposal contradicts, reverses, or quietly broadens a recorded **Target**? → **CRITICAL finding**: quote the Target, name the conflict. (Re-target only with explicit new evidence — never a silent reversal.) No log → skip; note "alignment unverified".
 - Rely on / restate a settled Target, or align cleanly? → NOT a gap; don't re-litigate.
-- Cross-check every `--scope`'d Target (those arm the commit-time alignment gate) against the files the proposal will touch — a scoped contradiction blocks the commit, so catch it now.
+- Cross-check every `--scope`'d Target against the files the proposal will touch — no dedicated per-Target judge runs at commit, so catch a scoped contradiction now.
 
 **Feasibility**: Is this technically possible as described? Platform/tool limitations that block it? What assumptions may be wrong?
 
@@ -164,7 +164,7 @@ Rules:
 
 Before you write a verdict, get an INDEPENDENT check on the frame — the one thing a first-pass critique is biased to miss (you inherited the proposal's framing).
 
-1. **Run the deterministic alignment gate IF the repo has a decision log**: `guard-decisions check-alignment` — flags a change that contradicts a scoped Target. A deterministic flag here is a CRITICAL finding; do not rely on memory alone. (No decision log / bin absent → skip this step.)
+1. **Map the scoped Targets IF the repo has a decision log**: `guard-decisions scoped-targets --files <comma-separated paths the proposal will touch>` — prints, as JSON, each Target whose Scope matches one of those paths (deterministic, no model, nothing needs to be staged). Read every listed ruling against the proposal; a contradiction is a CRITICAL finding. Do not rely on memory alone. (No decision log / bin absent → skip this step.)
 2. **Self-administer a frame second-opinion, then classify the frame.** In your own reasoning, argue the OPPOSITE of your draft verdict for one paragraph: assume the frame is wrong (wrong problem, wrong layer, contradicts a recorded direction). Adopt it if it holds (verdict → RETHINK/REJECT); rebut it explicitly with evidence if it doesn't. Never silently soften. Then set the response's `frameMeta` field to **exactly one** of: `BANDAID` (the fix hides a symptom of an unbuilt or contradicted Target), `NOTABUG` (the reported "bug" is expected behaviour / a recorded Target's intent), `UXHARM` (technically correct but degrades the experience), `SOUND` (frame holds — right problem, right layer), or `SKIP` (frame check not applicable). A pure alignment contradiction whose *frame* is otherwise sound is `SOUND` (the Alignment lens, not the frame, catches it).
 3. **UX / DX impact — mandatory, surfaced.** State in one line whether the change DEGRADES the experience of the people this repo serves (more friction, a worse default, a lost affordance, a gate that now misfires). A technically-correct fix that worsens DX is a finding, not a pass.
 

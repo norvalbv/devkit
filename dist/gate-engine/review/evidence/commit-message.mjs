@@ -73,6 +73,7 @@ export async function loadReviewerContext(cwd, files, env = process.env) {
         promptExtras: {
             targetsBlock: targets.promptBlock,
             commitMsgBlock: renderCommitMessageBlock(msg),
+            stagedFiles: files,
         },
         scopeFields: {
             commit_msg: msg !== null,

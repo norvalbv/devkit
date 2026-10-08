@@ -320,8 +320,8 @@ function cleanPackage(cwd, cfg, dryRun) {
     rm(join(cwd, 'eslint'), 'eslint/ (domains + baselines)', dryRun);
     if (allowlist)
         rm(join(cwd, allowlist.path), allowlist.path, dryRun);
-    // fallow component: devkit added the `.fallow/` gitignore line (install-fallow). fallow's OWN
-    // hook + .fallowrc are fallow's to remove (`fallow hooks uninstall`) — not devkit-created.
+    // fallow component: devkit added the `.fallow/` gitignore line (install-fallow); its staged gate
+    // lives in the hook block removed above. A .fallowrc is the consumer's, never devkit-created.
     if (cfg.components?.fallow)
         pruneGitignoreLine(gitRoot, '.fallow/', dryRun);
     // search-code: remove the devkit-written opt-in config + the `.search-code/` gitignore line.
@@ -340,7 +340,7 @@ function cleanPackage(cwd, cfg, dryRun) {
     pruneDevkitCacheGitignore(cwd, dryRun);
     rm(join(cwd, '.devkit'), '.devkit/', dryRun);
     depesc(cwd, dryRun);
-    console.log("  (left your own biome/husky/eslint deps + fallow's own files in place — `fallow hooks uninstall` to remove those)");
+    console.log('  (left your own biome/husky/eslint deps and any fallow config in place)');
 }
 export const meta = {
     name: 'clean',

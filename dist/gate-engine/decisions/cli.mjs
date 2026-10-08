@@ -19,8 +19,8 @@
  *                                                     --staged judges only the records THIS commit
  *                                                     touches, against HEAD (integrity/staged-gate.mts)
  *
- * `detect`, `check-alignment` and `scoped-targets` are thin re-dispatches into their .mjs by
- * re-importing them with a synthesised argv (so their own run-as-main dispatch fires); `categories`
+ * `detect`, `check-alignment` and `scoped-targets` are called through their exported `main(argv)`
+ * (never their run-as-main guard, which an already-loaded module skips); `categories`
  * and `integrity` are plain function calls (neither has a --gate/scan sub-dispatch of its own);
  * everything else routes to decisions.mjs `main`.
  *
@@ -36,7 +36,7 @@ var __rewriteRelativeImportExtension = (this && this.__rewriteRelativeImportExte
     }
     return path;
 };
-import { readdirSync, realpathSync } from 'node:fs';
+import { readdirSync } from 'node:fs';
 import { resolveFromCwd, resolveGuardConfig } from '../config.mjs';
 /**
  * Sub-engines load dynamically so a missing parser is catchable, and only via STRING LITERALS so the
@@ -71,10 +71,7 @@ async function run(argv) {
     }
     const sub = SUB_ENGINES[cmd];
     if (sub) {
-        // Re-enter the sub-engine as if invoked directly: it inspects process.argv and self-dispatches
-        // (--gate / scan). process.argv[1] must equal the sub-engine path so its run-as-main guard fires.
-        process.argv = [process.argv[0], realpathSync(sub), ...rest];
-        await import(__rewriteRelativeImportExtension(sub.href));
+        await (await import(__rewriteRelativeImportExtension(sub.href))).main(rest);
         return;
     }
     const { main: decisionsMain } = await import('./decisions.mjs');
@@ -153,8 +150,6 @@ function reportUnavailable(dependency, cmd) {
     console.error('  2. cat <decisionsDir>/<slug>.md');
     console.error("  3. grep -n '^## ' <decisionsDir>/<slug>.md — a LATER `## Target ·` block supersedes an earlier one");
 }
-// Captured BEFORE run(): the SUB_ENGINES dispatch rewrites process.argv to re-enter its engine, so
-// by the time a failed import rejects, process.argv[2] is that engine's first flag, not the command.
 const argv = process.argv.slice(2);
 run(argv).catch((error) => {
     // Narrowed as gate-engine/structure/load-baseline.mts does: a non-Error throw carries no code.

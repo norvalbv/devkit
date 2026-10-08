@@ -185,8 +185,8 @@ export function resolveEscalationModel(cfg) {
 /**
  * Comma-joined --allowedTools value for one reviewer: the read-only base, PLUS its own checklist
  * script (the one non-git Bash prefix a judge gets — scoped to that exact script path: a CLAUDE
- * judge cannot write files, stage, or commit; a codex judge is workspace-write, so the same
- * contract is enforced after the fact by run-review's staged-tree tamper check, sc-2054), PLUS the
+ * judge cannot write files, stage, or commit; a codex judge is workspace-write but confined to a
+ * scratch cwd plus `.claude/`, with run-review's staged-tree tamper check as backstop), PLUS the
  * consumer's semantic search tool for commit-guard, plus every named agent's strict MCP baseline.
  */
 export function allowedToolsFor(reviewer, cfg, assetRoot = '.claude') {
@@ -223,7 +223,7 @@ export function loadAgentSource(mdPath) {
  * preamble re-scopes it (staged-only, checklist-driven, no marker/approve machinery) and the
  * postamble pins the machine-parseable verdict line.
  */
-export function wrapPrompt(agentBody, reviewer, files, assetRoot, checklistRecoveryReason, { targetsBlock = '', commitMsgBlock = '' } = {}, checklistRoot = assetRoot ?? '.claude') {
+export function wrapPrompt(agentBody, reviewer, files, assetRoot, checklistRecoveryReason, { targetsBlock = '', commitMsgBlock = '', alsoStagedBlock = '' } = {}, checklistRoot = assetRoot ?? '.claude') {
     const effectiveAssetRoot = checklistRoot;
     const skillPrefix = `${effectiveAssetRoot.replace(TRAILING_SLASH_RE, '')}/skills/`;
     const brief = ['.agents/skills/', '.claude/skills/', '.cursor/skills/'].reduce((body, providerPrefix) => body.replaceAll(providerPrefix, skillPrefix), stripFrontmatter(agentBody));
@@ -231,6 +231,7 @@ export function wrapPrompt(agentBody, reviewer, files, assetRoot, checklistRecov
     const checklistContract = checklistContractFor(reviewer, script, assetRoot);
     return ('You are running as an automated HEADLESS COMMIT GATE, not an interactive assistant.\n' +
         `Review ONLY the STAGED changes (domain: ${reviewer.domain}). Staged files in scope: ${files.join(', ')}.\n` +
+        (alsoStagedBlock ? `${alsoStagedBlock}\n` : '') +
         'Reviewer selection has already been performed. Treat that staged-file list as authoritative; do not re-evaluate the brief trigger conditions or skip because repository configuration has empty roots.\n' +
         'The file/churn map (--stat) followed by per-file diff evidence is on stdin. Evidence is ' +
         'capped per file and in total; anything the caps dropped is NAMED inline (OMITTED:/[TRUNCATED:). ' +
@@ -266,9 +267,10 @@ export function wrapPrompt(agentBody, reviewer, files, assetRoot, checklistRecov
  * on stdin, while Read/Grep/Glob resolve a capped current file or rule without changing verdict or
  * stable override-fingerprint contracts.
  */
-export function wrapConventionsPrompt(agentBody, files, claudeMdBlock, { commitMsgBlock = '', lineCountBlock = '' } = {}) {
+export function wrapConventionsPrompt(agentBody, files, claudeMdBlock, { commitMsgBlock = '', lineCountBlock = '', alsoStagedBlock = '' } = {}) {
     return ('You are running as an automated HEADLESS COMMIT GATE, not an interactive assistant.\n' +
         `Review ONLY the STAGED changes. Staged files in scope: ${files.join(', ')}.\n` +
+        (alsoStagedBlock ? `${alsoStagedBlock}\n` : '') +
         'You have NO Bash, but Read/Grep/Glob are available. The diff evidence on stdin is capped: ' +
         'an OMITTED/TRUNCATED marker means some staged context was not included. Before returning PASS ' +
         'when such a marker appears, use Read to inspect every available in-scope staged file not shown ' +
