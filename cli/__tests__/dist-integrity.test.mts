@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -19,6 +19,7 @@ const CLEAN_ACTIVE = {
   unbriefed: [],
   untracked: [],
   unlexable: [],
+  missing: [],
 };
 const { mkTmp, cleanup } = rootRegistry();
 afterEach(cleanup);
@@ -39,8 +40,9 @@ function repo(name = '@norvalbv/devkit'): { base: string; root: string } {
   writeFileSync(join(root, '.gitignore'), 'dist/\n');
   mkdirSync(join(root, 'dist'));
   writeFileSync(join(root, 'dist/index.mjs'), 'export const ready = true;\n');
+  writeFileSync(join(root, 'dist/package.json'), `${JSON.stringify({ name })}\n`);
   git(root, 'add', 'package.json', '.gitignore');
-  git(root, 'add', '-f', 'dist/index.mjs');
+  git(root, 'add', '-f', 'dist/index.mjs', 'dist/package.json');
   git(root, 'commit', '-q', '-m', 'base');
   return { base: git(root, 'rev-parse', 'HEAD'), root };
 }
@@ -448,7 +450,87 @@ describe('inspectDistIntegrity', () => {
       unbriefed: [],
       untracked: [],
       unlexable: [],
+      missing: [],
     });
+  });
+});
+
+describe('inspectDistIntegrity — never-built sources', () => {
+  function source(root: string, file: string): void {
+    mkdirSync(join(root, file, '..'), { recursive: true });
+    writeFileSync(join(root, file), 'export {};\n');
+  }
+
+  it('names the artifact of a new source the build never ran for', async () => {
+    const { base, root } = repo();
+    source(root, 'cli/new.mts');
+    source(root, 'cli/lib/new.sh');
+    source(root, 'templates/new.md');
+
+    const report = await inspectDistIntegrity(root, base, [
+      'cli/new.mts',
+      'cli/lib/new.sh',
+      'templates/new.md',
+    ]);
+
+    expect(report.missing).toEqual([
+      'dist/cli/lib/new.sh',
+      'dist/cli/new.mjs',
+      'dist/templates/new.md',
+    ]);
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(printDistIntegrityFailure(report)).toBe(1);
+    expect(errors.mock.calls.flat().join('\n')).toContain(
+      "run `bun run build`, then brief ONLY these (ordinary dist churn stays release-only): -- 'dist/cli/lib/new.sh'",
+    );
+    errors.mockRestore();
+  });
+
+  it('passes once the built artifact is briefed', async () => {
+    const { base, root } = repo();
+    source(root, 'cli/new.mts');
+    source(root, 'dist/cli/new.mjs');
+
+    const report = await inspectDistIntegrity(root, base, ['cli/new.mts', 'dist/cli/new.mjs']);
+
+    expect(report).toEqual(CLEAN_ACTIVE);
+  });
+
+  it('demands nothing for a modified source whose artifact is at base', async () => {
+    const { root } = repo();
+    source(root, 'cli/index.mts');
+    source(root, 'dist/cli/index.mjs');
+    git(root, 'add', 'cli/index.mts');
+    git(root, 'add', '-f', 'dist/cli/index.mjs');
+    git(root, 'commit', '-q', '-m', 'tracked');
+    const tracked = git(root, 'rev-parse', 'HEAD');
+    writeFileSync(join(root, 'cli/index.mts'), 'export const edited = 1;\n');
+    rmSync(join(root, 'dist/cli/index.mjs'));
+
+    const report = await inspectDistIntegrity(root, tracked, ['cli/index.mts']);
+
+    expect(report).toEqual(CLEAN_ACTIVE);
+  });
+
+  it('demands nothing for sources the build never emits, or a deleted source', async () => {
+    const { base, root } = repo();
+    // Each emits nothing: excluded trees, test files, and a declaration file tsc never emits.
+    const devOnly = [
+      'cli/x/eval/a.mts',
+      'cli/__tests__/a.test.mts',
+      'cli/lib/a.test.mts',
+      'cli/lib/types.d.mts',
+    ];
+    for (const file of devOnly) source(root, file);
+    source(root, 'gate-engine/notes.md');
+
+    const report = await inspectDistIntegrity(root, base, [
+      ...devOnly,
+      'gate-engine/notes.md',
+      'cli/deleted.mts',
+    ]);
+
+    expect(report).toEqual(CLEAN_ACTIVE);
   });
 });
 
@@ -469,6 +551,7 @@ describe('printDistIntegrityFailure', () => {
       unbriefed: ['dist/added.mjs'],
       unresolved: [{ importer: 'dist/a.mjs', specifier: './b.mjs', target: 'dist/b.mjs' }],
       unlexable: [],
+      missing: [],
     });
 
     expect(code).toBe(1);
@@ -488,6 +571,7 @@ describe('printDistIntegrityFailure', () => {
       unbriefed: [],
       unresolved: [],
       unlexable: ['dist/asset.mjs'],
+      missing: [],
     });
 
     expect(code).toBe(1);
@@ -503,6 +587,7 @@ describe('printDistIntegrityFailure', () => {
       unbriefed: [],
       unresolved: [],
       unlexable: ['dist/y.mjs'],
+      missing: [],
     });
 
     expect(code).toBe(0);

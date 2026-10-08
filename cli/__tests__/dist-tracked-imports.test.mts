@@ -6,6 +6,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
+  distArtifact,
   type ImportEdge,
   moduleImportEdges,
   shellSourceEdges,
@@ -27,6 +28,19 @@ function git(args: string[]): string {
 const indexBlob = (file: string): string => git(['cat-file', 'blob', `:${file}`]);
 
 describe('tracked dist import closure', () => {
+  it('tracks the build output of every tracked source the build emits', () => {
+    const tracked = git(['ls-files', '--cached', '-z']).split('\0').filter(Boolean);
+    const trackedSet = new Set(tracked);
+    if (!tracked.some((file) => file.startsWith('dist/'))) return;
+
+    // A source committed without its artifact bypassed ship's preflight; CI's --tree mode skips it.
+    const sources = tracked.filter((file) => !file.startsWith('dist/') && distArtifact(file));
+    const missing = sources.map((file) => distArtifact(file)!).filter((d) => !trackedSet.has(d));
+
+    expect(missing).toEqual([]);
+    expect(sources.length).toBeGreaterThan(300);
+  });
+
   it('resolves every relative import to another tracked file', async () => {
     const tracked = git(['ls-files', '--cached', '-z', '--', 'dist']).split('\0').filter(Boolean);
     // A consumer checkout, or a clone whose history carries no release commit, tracks no dist at
