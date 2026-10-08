@@ -178,7 +178,7 @@ function stageRepo(tipEdit: (dir: string) => void = () => {}) {
 }
 
 describe('reship-anchor — stageAppend stages what the copy loop staged', () => {
-  it('stages a nested new file, a symlink, a ./-spelled path and a deletion over an unmoved tip', () => {
+  it('stages a nested new file, a symlink, an edit and a deletion over an unmoved tip', () => {
     const r = stageRepo();
     mkdirSync(join(r.dir, 'deep/er'), { recursive: true });
     writeFileSync(join(r.dir, 'deep/er/new.ts'), 'new\n');
@@ -186,7 +186,7 @@ describe('reship-anchor — stageAppend stages what the copy loop staged', () =>
     writeFileSync(join(r.dir, 'a.ts'), text({ 0: 'edited' }));
     rmSync(join(r.dir, 'old.ts'));
 
-    expect(r.run(['deep/er/new.ts', 'link', './a.ts', 'old.ts'])).toBe(0);
+    expect(r.run(['deep/er/new.ts', 'link', 'a.ts', 'old.ts'])).toBe(0);
     expect(r.diff().split('\n').sort()).toEqual([
       'A\tdeep/er/new.ts',
       'A\tlink',
@@ -284,6 +284,23 @@ describe('reship --pr — what reached the PR branch survives a re-push (sc-4607
 
     writeFileSync(join(r.dir, 'a.ts'), text({ 0: 'caller edit', 3: 'second edit' }));
     const second = r.reship();
+    expect(second.status, second.stderr).toBe(0);
+    expect(r.remote('a.ts')).toBe(
+      text({ 0: 'caller edit', 3: 'second edit', 9: 'merged from main' }).trim(),
+    );
+  });
+
+  it('a ./-spelled re-push anchors on the recorded ship and records the tree path', () => {
+    const r = prRepo();
+    r.foreign('a.ts', text({ 9: 'merged from main' }), 'Merge main into feat/pr');
+    writeFileSync(join(r.dir, 'a.ts'), text({ 0: 'caller edit' }));
+    const first = r.reship({}, ['./a.ts']);
+    expect(first.status, first.stderr).toBe(0);
+    const paths = manifestOf(r.dir).branches['feat/pr'].paths.map((p) => p.path);
+    expect(paths.sort()).toEqual(['a.ts', 'bin.dat']);
+
+    writeFileSync(join(r.dir, 'a.ts'), text({ 0: 'caller edit', 3: 'second edit' }));
+    const second = r.reship({}, ['./a.ts']);
     expect(second.status, second.stderr).toBe(0);
     expect(r.remote('a.ts')).toBe(
       text({ 0: 'caller edit', 3: 'second edit', 9: 'merged from main' }).trim(),
