@@ -11,8 +11,8 @@
 
   "//review": "paths.include/exclude defines the shared reviewable repository universe for every reviewer; backendRoots/frontendRoots then route eligible files to domain reviewers. An EMPTY frontendRoots array means frontend-security-reviewer and frontend-performance-reviewer are never selected; an EMPTY backendRoots array similarly disables backend domain reviewers. Omit paths to preserve legacy reviewer selection. trustBoundaries, shortcutTracking, and accessibility configure reviewer context.",
   "review": {
-    "backendRoots": ["src/main", "socket-server", "vercel-serverless"],
-    "frontendRoots": ["src/renderer", "src/preload"],
+    "backendRoots": ["src/main", "src/shared", "socket-server", "vercel-serverless"],
+    "frontendRoots": ["src/renderer", "src/preload", "src/shared"],
     "paths": {
       "include": ["**"],
       "exclude": [

@@ -209,6 +209,7 @@ export async function runReviewGate(
     if (reviewMode) cfg = effectiveReviewConfig(cfg);
     const staged = stagedFiles(cwd);
     selected = selectRepositoryReviewers(staged, cfg);
+    const routing = selected;
     const skip = skippedReviewers();
     const knobDropped = new Set<string>();
     if (skip.size > 0) {
@@ -222,7 +223,7 @@ export async function runReviewGate(
     }
     if (only) selected = narrowSelection(selected, only, knobDropped);
     // Before the early return: name what an empty domain root dropped, then record every non-run.
-    reportNonRuns(staged, cfg, selected, knobDropped, skip);
+    reportNonRuns(staged, cfg, selected, knobDropped, skip, only ? [] : routing);
     if (selected.length === 0) return finish(only ? 1 : 0); // an empty recheck is never a PASS
     if (reviewMode) {
       assetRoot = process.env.DEVKIT_REVIEW_ASSET_ROOT;

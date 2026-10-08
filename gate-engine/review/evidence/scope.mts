@@ -127,7 +127,8 @@ export function domainsDisabledByEmptyRoots(
  * Name every reviewer that will produce no verdict — to the human on stderr AND to telemetry —
  * BEFORE the gate's nothing-selected early return (a .scss-only diff selects nothing at all, and
  * would otherwise return before anyone was told why). Mirrors the GUARD_REVIEW_SKIP precedent in
- * run-review.mts: never a silent cap.
+ * run-review.mts: never a silent cap. `routing` is the selection before skip/recheck narrowing
+ * (empty on a recheck), read only for the advisory unrouted-files line.
  */
 export function reportNonRuns(
   staged: string[],
@@ -135,8 +136,10 @@ export function reportNonRuns(
   selected: ReviewerSelection[],
   alreadyReported: Set<string>,
   skip: ReadonlySet<string> = new Set(),
+  routing: ReviewerSelection[] = [],
 ): void {
   const disabled = domainsDisabledByEmptyRoots(staged, cfg, skip);
+  reportUnroutedFiles(routing, cfg, new Set(disabled[0]?.evidence));
   for (const d of disabled) {
     console.error(
       `guard-review: ${d.reviewer} skipped (${d.rootsKey} is empty in guard.config.json)`,
@@ -159,6 +162,39 @@ export function reportNonRuns(
         '(scanRoots, review roots and review.paths in guard.config.json)',
     );
   emitUnselected(selected, alreadyReported);
+}
+
+const DOMAIN_REVIEWED = new Set(['backend', 'frontend']);
+
+/** Source files commit-guard received that no backend/frontend reviewer did, read off the real
+ * selection so it never disagrees with routing. */
+export function filesRoutedToNoDomain(selection: ReviewerSelection[], cfg: GuardConfig): string[] {
+  const { backendRoots, frontendRoots } = cfg.review;
+  if (backendRoots.length + frontendRoots.length === 0 || envFlag('REVIEW_NO_TOPOLOGY_WARN'))
+    return [];
+  const routed = new Set(
+    selection.filter((s) => DOMAIN_REVIEWED.has(s.reviewer.domain)).flatMap((s) => s.files),
+  );
+  return selection
+    .filter((s) => s.reviewer.domain === 'code')
+    .flatMap((s) => s.files)
+    .filter((f) => !routed.has(f));
+}
+
+/** Advisory stderr line naming source files no security/performance reviewer will see. */
+function reportUnroutedFiles(
+  selection: ReviewerSelection[],
+  cfg: GuardConfig,
+  alreadyNamed: ReadonlySet<string>,
+): void {
+  const files = filesRoutedToNoDomain(selection, cfg).filter((f) => !alreadyNamed.has(f));
+  if (files.length === 0) return;
+  const more = files.length > EVIDENCE_NAMES ? ', …' : '';
+  console.error(
+    `guard-review: ${files.length} source file(s) reached no security/performance reviewer ` +
+      `(${files.slice(0, EVIDENCE_NAMES).join(', ')}${more}) — add their directory to ` +
+      'review.backendRoots/frontendRoots in guard.config.json',
+  );
 }
 
 /**

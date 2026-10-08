@@ -1,6 +1,15 @@
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { resolveGuardConfig } from '../../config.mts';
-import { domainsDisabledByEmptyRoots, reportNonRuns } from '../evidence/scope.mts';
+import { resolveGuardConfig, resolveGuardConfigJson } from '../../config.mts';
+import {
+  domainsDisabledByEmptyRoots,
+  filesRoutedToNoDomain,
+  reportNonRuns,
+} from '../evidence/scope.mts';
+import { selectReviewers } from '../reviewers.mts';
+
+const REPO_ROOT = join(import.meta.dirname, '../../..');
 
 // Pure: defaults + explicit roots, no disk. Mirrors reviewers.test.mts's fixture shape.
 const base = resolveGuardConfig('/nonexistent-cwd-defaults-only');
@@ -114,4 +123,83 @@ describe('reportNonRuns', () => {
   it('stays quiet when another line already named why a reviewer did not run', () => {
     expect(notices(new Set(['commit-guard']))).toEqual([]);
   });
+});
+
+describe('filesRoutedToNoDomain', () => {
+  // The electron topology before src/shared was routed: scanRoots covers it, no domain root does.
+  const electron = make(['src'], ['src/main'], ['src/renderer', 'src/preload']);
+  const unrouted = (staged: string[], cfg = electron, baseline?: typeof electron) =>
+    filesRoutedToNoDomain(selectReviewers(staged, cfg, baseline), cfg);
+
+  it('names a source file under scanRoots that no domain root routes', () => {
+    expect(unrouted(['src/shared/validate.ts', 'src/main/ipc.ts'])).toEqual([
+      'src/shared/validate.ts',
+    ]);
+  });
+
+  it('prints one advisory line through reportNonRuns', () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const staged = ['src/shared/validate.ts'];
+    const selection = selectReviewers(staged, electron);
+    reportNonRuns(staged, electron, selection, new Set(), new Set(), selection);
+    expect(spy.mock.calls.map((c) => String(c[0]))).toContain(
+      'guard-review: 1 source file(s) reached no security/performance reviewer ' +
+        '(src/shared/validate.ts) — add their directory to review.backendRoots/frontendRoots ' +
+        'in guard.config.json',
+    );
+  });
+
+  it('truncates past three names so a wide diff stays one bounded line', () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const staged = ['a', 'b', 'c', 'd'].map((n) => `src/shared/${n}.ts`);
+    const selection = selectReviewers(staged, electron);
+    reportNonRuns(staged, electron, selection, new Set(), new Set(), selection);
+    const line = spy.mock.calls.map((c) => String(c[0])).find((l) => l.includes('4 source'));
+    expect(line).toContain('(src/shared/a.ts, src/shared/b.ts, src/shared/c.ts, …)');
+  });
+
+  it('never re-names a file the empty-frontendRoots line already named', () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const cfg = make(['src'], ['src/main'], []);
+    const staged = ['src/ui/App.tsx'];
+    const selection = selectReviewers(staged, cfg);
+    reportNonRuns(staged, cfg, selection, new Set(), new Set(), selection);
+    const lines = spy.mock.calls.map((c) => String(c[0]));
+    expect(lines.filter((l) => l.includes('src/ui/App.tsx'))).toHaveLength(1);
+  });
+
+  it('stays silent for prose and non-source files', () => {
+    expect(unrouted(['src/shared/README.md', 'src/shared/data.json'])).toEqual([]);
+  });
+
+  it('stays silent when the topology declares no domain roots, or under the opt-out', () => {
+    expect(unrouted(['src/shared/validate.ts'], make(['src'], [], []))).toEqual([]);
+    process.env.GUARD_REVIEW_NO_TOPOLOGY_WARN = '1';
+    expect(unrouted(['src/shared/validate.ts'])).toEqual([]);
+  });
+
+  it('counts a file the HEAD policy routes as routed', () => {
+    const head = make(['src'], ['src/main', 'src/shared'], ['src/renderer']);
+    expect(unrouted(['src/shared/validate.ts'], electron, head)).toEqual([]);
+  });
+
+  it("devkit's own self-host config routes every scanRoot, so dogfood commits stay quiet", () => {
+    const raw = readFileSync(join(REPO_ROOT, 'guard.config.json'), 'utf8');
+    const cfg = resolveGuardConfigJson(raw, '/nonexistent-cwd-defaults-only');
+    expect(
+      unrouted(
+        cfg.scanRoots.map((r) => `${r}/x.mts`),
+        cfg,
+      ),
+    ).toEqual([]);
+  });
+
+  it.each(readdirSync(join(REPO_ROOT, 'templates')).filter((t) => !t.startsWith('_')))(
+    'templates/%s routes src/shared to a domain reviewer',
+    (template) => {
+      const raw = readFileSync(join(REPO_ROOT, 'templates', template, 'guard.config.json'), 'utf8');
+      const cfg = resolveGuardConfigJson(raw, '/nonexistent-cwd-defaults-only');
+      expect(unrouted(['src/shared/x.ts'], cfg)).toEqual([]);
+    },
+  );
 });
