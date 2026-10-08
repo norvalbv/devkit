@@ -16,6 +16,10 @@ const RULE_REMEDIES = new Map([
     'anti-slop/no-module-mocking',
     'no-module-mocking: give the module a seam instead of mocking its imports — e.g. an optional `deps = { spawn, existsSync }` parameter (defaulting to the real imports) that the test passes fakes through',
   ],
+  [
+    'anti-slop/no-runtime-typeof',
+    "no-runtime-typeof: decode the value where it enters with a schema (e.g. zod `z.string().trim().min(1).safeParse(x)`), or keep the check in an `x is T` predicate and enable the rule's `allowInTypeGuards` option in the repository Oxlint config. Truthiness (`Boolean(x)`, `!!x`) is not a replacement: it accepts every truthy non-string",
+  ],
 ]);
 
 /** One hint per distinct rule, then the acceptance route this install mode actually supports. */
