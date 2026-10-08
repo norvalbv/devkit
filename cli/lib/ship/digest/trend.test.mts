@@ -288,6 +288,18 @@ describe('summariseTrend — streak boundaries', () => {
     expect(trendOf(events, 's4')).toBe('');
   });
 
+  it('goes silent when a displaced attempt was not killed and finishes after its successor closed', () => {
+    const events = [
+      ...attempt('s1', [fail(4)]),
+      { type: 'ship_attempt', ship_id: 's2', ...where },
+      ...attempt('s3', [fail(4)]),
+      { ship_id: 's2', ...where, ...pass() },
+      { type: 'ship_result', ship_id: 's2', ...where, exit_code: 1 },
+      ...attempt('s4', [fail(4)]),
+    ];
+    expect(trendOf(events, 's4')).toBe('');
+  });
+
   it('goes silent when two same-branch attempts with DISTINCT ids overlap — they are not rounds in order', () => {
     const events = [
       ...attempt('s1', [fail(4)]),
