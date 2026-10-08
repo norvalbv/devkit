@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
-import { isAbsolute, matchesGlob, win32 } from 'node:path';
+import { isAbsolute, win32 } from 'node:path';
 
 // A confined codex judge runs from a scratch dir; every checklist imports this module, so its git
 // reads and `.claude/` state writes resolve against the repository under review.
@@ -9,7 +9,9 @@ if (process.env.DEVKIT_JUDGE_REPO_ROOT) process.chdir(process.env.DEVKIT_JUDGE_R
 const MAX_REVIEW_PATTERNS = 128;
 const MAX_REVIEW_PATTERN_LENGTH = 512;
 const REVIEW_PATH_KEYS = new Set(['include', 'exclude']);
-const RE_GLOB_META = /[*?[\]{}()]/;
+const RE_GLOB_META = /[*?]/;
+const RE_UNSUPPORTED_GLOB = /[[\]{}]|[@!+?*]\(/;
+const RE_REGEX_SPECIAL = /[.*+?^${}()|[\]\\]/g;
 const RE_WILDCARD_SEGMENT = /^\*{1,2}$/;
 const RE_TEST_INFIX = /\.(test|spec)\./;
 const RE_INVALID_REPOSITORY_FILE = /(?:^\/|\/$|\/\/|\\|\0|(?:^|\/)\.{1,2}(?:\/|$))/;
@@ -95,12 +97,43 @@ export function authoritativeStagedFilesOverride() {
   return [...new Set(files.map((file) => normalizeRepositoryFile(file)))];
 }
 
+// devkit's one repository glob grammar: a dot is an ordinary character, `*`/`?` stay within one
+// segment, a whole `**` segment spans any depth, everything else is literal. Compiling never throws.
+const segmentSource = (seg) =>
+  [...seg]
+    .map((ch) =>
+      ch === '*' ? '[^/]*' : ch === '?' ? '[^/]' : ch.replace(RE_REGEX_SPECIAL, '\\$&'),
+    )
+    .join('');
+
+export function compileRepoGlob(glob) {
+  const segs = glob.split('/');
+  const source = segs
+    .map((seg, i) => {
+      const slash = i > 0 && segs[i - 1] !== '**' ? '/' : '';
+      if (seg !== '**') return slash + segmentSource(seg);
+      return slash + (i === segs.length - 1 ? '.+' : '(?:[^/]+/)*');
+    })
+    .join('');
+  return new RegExp(`^${source}$`, 'su');
+}
+
+const compiledGlobs = new Map();
+
+export function matchesRepoGlob(path, glob) {
+  let re = compiledGlobs.get(glob);
+  if (!re) compiledGlobs.set(glob, (re = compileRepoGlob(glob)));
+  return re.test(path);
+}
+
+/** True when a glob uses syntax the grammar does not support: classes, braces or extglob groups. */
+export const hasUnsupportedGlobSyntax = (glob) => RE_UNSUPPORTED_GLOB.test(glob);
+
 function validateReviewGlob(pattern, name) {
-  try {
-    matchesGlob('devkit-glob-validation-probe', pattern);
-  } catch {
-    throw new Error(`${name} contains an invalid glob`);
-  }
+  if (hasUnsupportedGlobSyntax(pattern))
+    throw new Error(
+      `${name} pattern '${pattern}': only *, ? and whole-segment ** are supported; list each alternative as its own pattern`,
+    );
 }
 
 function rejectMissingIncludes(length, name, allowEmpty) {
@@ -156,7 +189,7 @@ function broadSubtreePrefix(pattern) {
 
 function excludeCoversInclude(include, exclude) {
   if (include === exclude) return true;
-  if (!RE_GLOB_META.test(include) && matchesGlob(include, exclude)) return true;
+  if (!RE_GLOB_META.test(include) && matchesRepoGlob(include, exclude)) return true;
   const prefix = broadSubtreePrefix(exclude);
   if (prefix === null) return false;
   return [prefix === '', include === prefix, include.startsWith(`${prefix}/`)].includes(true);
@@ -171,11 +204,6 @@ function rejectFullyExcludedScope(include, exclude, name) {
       `${name}.exclude must not disable the entire review scope; leave at least one include scope reviewable`,
     );
 }
-
-// `node:path.matchesGlob` follows dotfile glob rules, so bare `**` misses any path containing a
-// dot-prefixed segment. In review scope, `**` is the explicit repository-wide sentinel; consumers
-// should not need to enumerate every authored tool directory merely to keep it reviewable.
-const matchesReviewPath = (file, pattern) => pattern === '**' || matchesGlob(file, pattern);
 
 /** Strict, canonical config boundary for review.paths. */
 export function normalizeReviewPaths(value, name = 'review.paths') {
@@ -212,8 +240,8 @@ export function selectReviewFiles(files, { paths, roots, sourceExtensions }) {
       normalizeRepositoryFile(file);
       if (RE_OPAQUE_BINARY.test(file)) return false;
       return (
-        scope.include.some((pattern) => matchesReviewPath(file, pattern)) &&
-        !scope.exclude.some((pattern) => matchesReviewPath(file, pattern))
+        scope.include.some((pattern) => matchesRepoGlob(file, pattern)) &&
+        !scope.exclude.some((pattern) => matchesRepoGlob(file, pattern))
       );
     });
   }

@@ -13,9 +13,14 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { classifyGenerated } from '../../../cli/lib/ship/generated-paths/registry.mts';
+import { matchScope } from '../../decisions/check-alignment.mts';
+import { hashPaths } from '../../eval/source.mts';
 import {
   authoritativeStagedFilesOverride,
+  compileRepoGlob,
   isNonEmptyStringArray,
+  matchesRepoGlob,
   normalizeReviewPaths,
   normalizeReviewRoots,
   parseInjectedReviewRoots,
@@ -336,6 +341,45 @@ describe('review.paths', () => {
     ).toEqual(files.slice(0, -1));
   });
 
+  it('a narrow include such as src/** keeps files under dot-directories in scope', () => {
+    expect(
+      selectReviewFiles(['src/.gen/x.ts', 'src/a/x.ts', 'lib/x.ts'], {
+        paths: { include: ['src/**'], exclude: [] },
+        roots: ['elsewhere'],
+        sourceExtensions: ['mts'],
+      }),
+    ).toEqual(['src/.gen/x.ts', 'src/a/x.ts']);
+  });
+
+  it('an exclude reaches files under dot-directories too', () => {
+    expect(
+      selectReviewFiles(['.tool/dist/a.mjs', '.tool/src/a.mjs'], {
+        paths: { include: ['**'], exclude: ['**/dist/**'] },
+        roots: ['elsewhere'],
+        sourceExtensions: ['mts'],
+      }),
+    ).toEqual(['.tool/src/a.mjs']);
+  });
+
+  it.each(['src/*.{ts,tsx}', '*.[jt]s', 'src/@(a|b)/**', 'src/!(x).ts'])(
+    'rejects unsupported glob syntax in %s and names the pattern',
+    (pattern) => {
+      expect(() => normalizeReviewPaths({ include: [pattern] })).toThrow(
+        `review.paths.include pattern '${pattern}': only *, ? and whole-segment ** are supported`,
+      );
+    },
+  );
+
+  it('accepts a parenthesised directory as a literal name', () => {
+    expect(
+      selectReviewFiles(['app/(marketing)/page.tsx', 'app/marketing/page.tsx'], {
+        paths: { include: ['app/(marketing)/**'], exclude: [] },
+        roots: ['elsewhere'],
+        sourceExtensions: ['mts'],
+      }),
+    ).toEqual(['app/(marketing)/page.tsx']);
+  });
+
   it.each([
     'guard.config.json',
     'guard.config.example.json',
@@ -389,4 +433,55 @@ describe('authoritativeStagedFilesOverride', () => {
       ).toThrow(/DEVKIT_REVIEW_STAGED_FILES|repository-relative/);
     },
   );
+});
+
+const hashSelects = (path: string, glob: string) => {
+  const source = (files: Record<string, string>) => ({
+    mode: 'working' as const,
+    root: '/fake',
+    listFiles: () => Object.keys(files),
+    read: (p: string) => files[p] ?? null,
+  });
+  return hashPaths(source({ [path]: 'x' }), [glob]) !== hashPaths(source({}), [glob]);
+};
+
+describe('repository glob grammar — one answer for every config glob', () => {
+  it.each([
+    ['src/.gen/x.ts', 'src/**', true],
+    ['src/.gen/x.ts', 'src/**/*.ts', true],
+    ['.github/w.yml', '**', true],
+    ['gen/.a.json', 'gen/*.json', true],
+    ['gen/.x/a.json', 'gen/*.json', false],
+    ['a/b', 'a/**/b', true],
+    ['a/x/y/b', 'a/**/b', true],
+    ['dist', 'dist/**', false],
+    ['abc', 'a?c', true],
+    ['a.c', 'a?c', true],
+    ['a/c', 'a?c', false],
+    ['aXts', 'a.ts', false],
+    ['dist/x\ny', 'dist/**', true],
+    ['fooXbar', 'foo**bar', true],
+    ['foo/x/bar', 'foo**bar', false],
+    ['app/(marketing)/page.tsx', 'app/(marketing)/**', true],
+  ])(
+    '%j against %j is %s for review.paths, Scope, eval hashes and generated paths',
+    (path, glob, want) => {
+      expect(matchesRepoGlob(path, glob)).toBe(want);
+      const reviewed = selectReviewFiles([path], {
+        paths: { include: [glob], exclude: [] },
+        roots: ['elsewhere'],
+        sourceExtensions: ['mts'],
+      });
+      expect(reviewed.length === 1).toBe(want);
+      expect(matchScope([path], [glob])).toBe(want);
+      expect(hashSelects(path, glob)).toBe(want);
+      expect(classifyGenerated([path], [{ glob, command: 'r' }]).generated.length === 1).toBe(want);
+    },
+  );
+
+  it('compiles unsupported syntax literally instead of throwing, so an unvalidated Scope never crashes', () => {
+    expect(() => compileRepoGlob('src/{a,b}/[x]/**')).not.toThrow();
+    expect(matchScope(['src/{a,b}/[x]/y.ts'], ['src/{a,b}/[x]/**'])).toBe(true);
+    expect(matchScope(['src/a/x/y.ts'], ['src/{a,b}/[x]/**'])).toBe(false);
+  });
 });
