@@ -264,6 +264,9 @@ describe('DK_COMMIT_INDEX_CAPTURE', () => {
 
 // Allowed index readers that do not call commitIndexEnv themselves, with the reason.
 const ROUTED_ELSEWHERE = {
+  'gate-engine/comment-firewall/detect.mts':
+    'argv routed through comment-firewall/staged.mts git()',
+  'gate-engine/comment-firewall/moved.mts': 'argv routed through comment-firewall/staged.mts git()',
   'gate-engine/coverage/diff-gate.mts': 'argv routed through coverage/provenance.mts git()',
   'gate-engine/decisions/check-alignment.mts': 'argv routed through decisions/git-io.mts git()',
   'gate-engine/decisions/depth/depth-pass.mts': 'argv routed through decisions/git-io.mts git()',
