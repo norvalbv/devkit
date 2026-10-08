@@ -106,7 +106,8 @@ devkit command.
   clear the description deliberately.
 - **`another ship for <branch> is still running` → wait or stop that run; never force-remove it.**
   Ship reclaims the worktree and branch a KILLED ship left behind automatically, so a refusal means
-  it proved the owner is alive. When the message says the shell is gone but the gate tree survives,
+  it proved the owner is alive. A leftover branch the base already contains is deleted and recreated
+  too, with one `held no commit of its own` line naming the old tip. When the message says the shell is gone but the gate tree survives,
   the pid it names is the gate supervisor — reviewers are still working inside that worktree, and
   removing it corrupts the run. The remove/delete pair it prints applies only once nothing is running
   there.
