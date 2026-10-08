@@ -109,13 +109,17 @@ export function partialEvidenceNote(c: CoverageFields): string {
 
 const NAMES_SHOWN = 3;
 
-// JSON-quoted so a committer-controlled path cannot split or forge the one-line gate log.
+// JSON quoting escapes C0 controls but leaves C1 (e.g. U+009B, a one-byte CSI) raw.
+const quotedPath = (p: string): string =>
+  JSON.stringify(p).replace(
+    /[\u0080-\u009f]/g,
+    (ch) => `\\u${ch.charCodeAt(0).toString(16).padStart(4, '0')}`,
+  );
+
+// Quoted so a committer-controlled path cannot split or forge the one-line gate log.
 function truncatedNames(c: CoverageFields): string {
   const paths = c.evidence_truncated_paths ?? [];
   if (paths.length === 0) return '';
   const more = (c.evidence_truncated_files ?? 0) > NAMES_SHOWN ? ', …' : '';
-  return ` — truncated: ${paths
-    .slice(0, NAMES_SHOWN)
-    .map((p) => JSON.stringify(p))
-    .join(', ')}${more}`;
+  return ` — truncated: ${paths.slice(0, NAMES_SHOWN).map(quotedPath).join(', ')}${more}`;
 }

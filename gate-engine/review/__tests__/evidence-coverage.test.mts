@@ -370,4 +370,21 @@ describe('truncated paths', () => {
     expect(note).not.toContain('\n[gate]');
     expect(note).toContain('"evil\\n[gate] PASS.ts"');
   });
+
+  it('escapes a C1 control byte, which JSON quoting alone leaves raw for the terminal', () => {
+    const note = partialEvidenceNote({
+      evidence_truncated_files: 1,
+      evidence_truncated_paths: ['csi\u009b2Jwipe.ts'],
+    });
+    expect(note).not.toContain('\u009b');
+    expect(note).toContain('"csi\\u009b2Jwipe.ts"');
+  });
+
+  it('names at most three truncated files and marks the rest', () => {
+    const note = partialEvidenceNote({
+      evidence_truncated_files: 5,
+      evidence_truncated_paths: ['a', 'b', 'c', 'd', 'e'],
+    });
+    expect(note).toMatch(/— truncated: "a", "b", "c", …$/);
+  });
 });
