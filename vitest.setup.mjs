@@ -120,7 +120,23 @@ export const TEST_ONLY_ADDITIONS = [
   'DEVKIT_REVIEW_STAGED_FILES_PATH',
 ];
 
-export const SCRUBBED_ENV = [...INHERITED_RUN_ENV, ...SHIP_EXPORTED_ENV, ...TEST_ONLY_ADDITIONS];
+// One-run bypasses `devkit ship --help` documents, in both spellings envFlag reads. Exported before a
+// ship, they would otherwise reach pre-push test:run and flip gate tests. Parity-tested against the help.
+export const BYPASS_ENV = [
+  'COVERAGE_OK',
+  'NO_COVERAGE',
+  'STRUCTURE_OK',
+  'NO_STRUCTURE',
+  'HOOK_PARITY_OK',
+  'DECISIONS_INTEGRITY_OK',
+].flatMap((suffix) => [`GUARD_${suffix}`, `FRINK_${suffix}`]);
+
+export const SCRUBBED_ENV = [
+  ...INHERITED_RUN_ENV,
+  ...SHIP_EXPORTED_ENV,
+  ...TEST_ONLY_ADDITIONS,
+  ...BYPASS_ENV,
+];
 
 // Ordering is load-bearing: DEVKIT_GATE_EVENTS is scrubbed here and reassigned below, so a scrub
 // placed after that assignment would delete the per-worker redirect and let test ships write to the

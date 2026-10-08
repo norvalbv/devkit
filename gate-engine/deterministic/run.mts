@@ -204,7 +204,10 @@ export function selectedIds(cwd: string): string[] {
 // Bypass flags owned by `--extra` gates rather than by the registry. A bypassed run must not record
 // a key a later un-bypassed run of the same tree would hit — the same anti-laundering property the
 // coverage and structure salts below exist for.
-const EXTRA_BYPASS_SUFFIXES = ['HOOK_PARITY_OK', 'DECISIONS_INTEGRITY_OK'] as const;
+export const EXTRA_BYPASSES = {
+  'hook-parity': 'HOOK_PARITY_OK',
+  'decisions-integrity': 'DECISIONS_INTEGRITY_OK',
+} as const;
 
 export function prefixCacheScope(scope?: string, effectiveIds?: string[]): string | undefined {
   const reviewMode = process.env.DEVKIT_RUN_MODE === 'review';
@@ -249,7 +252,7 @@ export function prefixCacheScope(scope?: string, effectiveIds?: string[]): strin
     : coverageBase;
   // Same hazard once more, for the self-host `--extra` gates. Sorted and joined so two runs that
   // bypass the same set share a key regardless of the order the flags were exported in.
-  const extraBypassed = EXTRA_BYPASS_SUFFIXES.filter(envFlag).sort();
+  const extraBypassed = Object.values(EXTRA_BYPASSES).filter(envFlag).sort();
   const extraBase = extraBypassed.length
     ? `${structureBase ?? 'devkit-guards'}:${extraBypassed.join('+')}-bypassed`
     : structureBase;
@@ -359,7 +362,11 @@ export function runDeterministic(cwd = process.cwd(), opts: RunDeterministicOpts
   const skipped: string[] = [];
   if (skip) {
     const extras = extra.map((x) => x.label);
-    const flags = EXTRA_BYPASS_SUFFIXES.filter(envFlag).map((f) => `GUARD_${f}`);
+    const bypassed = Object.entries(EXTRA_BYPASSES).filter(([, suffix]) => envFlag(suffix));
+    // A cache hit runs no extra, so the extra's own bypass emission never fires; emit it here instead.
+    for (const [label, suffix] of bypassed)
+      if (extras.includes(label)) emitGateBypass(label, `GUARD_${suffix}`);
+    const flags = bypassed.map(([, suffix]) => `GUARD_${suffix}`);
     if (bypassStructure) flags.unshift('GUARD_STRUCTURE_OK');
     if (effectiveIds.includes('coverage') && coverageBypassed()) flags.unshift('GUARD_COVERAGE_OK');
     const labels = opts.structure ? [...extras, 'structure-lint'] : extras;

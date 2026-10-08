@@ -19,7 +19,7 @@ import { checkAxis, type IntegrityFinding, integrityFindingKey } from './checks.
 
 // envFlag prepends GUARD_/FRINK_, so it takes the bare suffix; every message prints the full
 // canonical name, which is the only spelling a remedy line may show.
-const BYPASS_SUFFIX = 'DECISIONS_INTEGRITY_OK';
+export const BYPASS_SUFFIX = 'DECISIONS_INTEGRITY_OK';
 const BYPASS_FLAG = `GUARD_${BYPASS_SUFFIX}`;
 const BYPASS_REMEDY =
   '   Believe the finding is wrong? Assert it for THIS run only:\n' +
