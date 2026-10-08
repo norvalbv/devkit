@@ -1,6 +1,7 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { installSearchCode } from '../lib/install/install-search-code.mts';
 import { tmpRepos } from './_helpers.mts';
 
 const { tmpRepo, devkit, cleanup } = tmpRepos('sc-');
@@ -20,6 +21,16 @@ describe('search-code opt-in component', () => {
     // recorded so clean knows to reverse it.
     const cfg = JSON.parse(readFileSync(join(root, '.devkit/config.json'), 'utf8'));
     expect(cfg.components.searchCode).toBe(true);
+  });
+
+  it("keeps a consumer's existing search-code.config.json byte for byte", () => {
+    const root = tmpRepo();
+    writeFileSync(join(root, 'search-code.config.json'), '{"mine":true}\n');
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    installSearchCode(root, false);
+    expect(readFileSync(join(root, 'search-code.config.json'), 'utf8')).toBe('{"mine":true}\n');
+    expect(log.mock.calls.flat().join('\n')).toContain('• kept search-code.config.json');
+    log.mockRestore();
   });
 
   it('is off by default (no --search-code → no config)', () => {
