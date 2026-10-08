@@ -352,6 +352,24 @@ describe('tickets and acquisition', () => {
     handle.release();
   });
 
+  it('retries a contended queue lock at the next poll instead of failing the ship', async () => {
+    // The wait loop must swallow the lock's LockHeldError; letting it escape stops a queued ship.
+    const root = tempRoot();
+    mkdirSync(join(root, 'slot.lock'), { recursive: true });
+    writeFileSync(join(root, 'slot.lock', 'busy'), `${process.pid}\n${processStartIdentity()}`);
+    setTimeout(() => rmSync(join(root, 'slot.lock'), { recursive: true, force: true }), 0);
+    const handle = await acquireShipSlot({
+      repo: '/r',
+      branch: 'feat/contended',
+      mode: 'test',
+      root,
+      pollMs: 10,
+      log: () => undefined,
+    });
+    expect(existsSync(join(root, 'slot'))).toBe(true);
+    handle.release();
+  }, 30_000);
+
   it('leaves the queue at acquire time and releases only its own claim', async () => {
     const root = tempRoot();
     const handle = await acquireShipSlot({
@@ -810,6 +828,22 @@ describe('queue lock', () => {
     ).toThrow(LockHeldError);
     expect(ran).toBe(false);
   }, 20_000);
+
+  it('re-checks a live holder at the reap interval, not on every retry', () => {
+    // Each check can fork `ps`: per-retry checks fork ~60 times here, a single check never recovers.
+    const lock = join(tempRoot(), 'l.lock');
+    seatLock(lock, process.pid, processStartIdentity(), 'held');
+    let checks = 0;
+    const isGone = () => {
+      checks += 1;
+      return false;
+    };
+    expect(() => withProcessLock(lock, () => 1, { ...QUEUE, waitMs: 600, isGone })).toThrow(
+      LockHeldError,
+    );
+    expect(checks).toBeGreaterThanOrEqual(2);
+    expect(checks).toBeLessThanOrEqual(4);
+  });
 
   it('takes over a dead holder lock and releases only its own acquisition', () => {
     const lock = join(tempRoot(), 'l.lock');
