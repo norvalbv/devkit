@@ -10,7 +10,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
-import { packageDir } from '../fs-helpers.mts';
+import { packageDir, writeIfAbsent } from '../fs-helpers.mts';
 import {
   ESLINT_OVERLAY_FILE,
   LEGACY_ESLINT_OVERLAY_MARKER,
@@ -175,11 +175,10 @@ export function writeBiomeOverlay(cwd: string, stack: string, force: boolean, dr
     2,
   )}\n`;
   const dest = join(cwd, 'biome.devkit.jsonc');
-  if (existsSync(dest) && !force) {
+  if (writeIfAbsent(dest, content, { force }) === 'exists') {
     console.log('  • biome.devkit.jsonc exists (use --force to refresh)');
     return true;
   }
-  writeFileSync(dest, content);
   console.log(`  ✓ wrote biome.devkit.jsonc (extends ${repoBiome} + devkit ${variant})`);
   return true;
 }
