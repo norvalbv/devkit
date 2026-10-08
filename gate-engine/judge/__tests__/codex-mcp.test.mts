@@ -112,6 +112,15 @@ describe('judgeCliFor with servers', () => {
     expect(claude.codex).toBe(false);
     expect(claude.argv.join(' ')).not.toContain('mcp_servers');
   });
+
+  it("approves a reviewer's wildcard grant end to end, so its MCP calls are not refused", () => {
+    // commit-guard's real grant shape; a lost grant parse would revert to "approval policy is never".
+    const argv = [...argvFor('gpt-5.6-terra').slice(0, -1), 'Read,mcp__codebase__*'];
+    const codex = judgeCliFor(argv, SERVERS);
+    expect(codex.argv).toContain('mcp_servers.codebase.default_tools_approval_mode="approve"');
+    expect(codex.argv.join(' ')).not.toContain('mcp_servers.codebase.enabled_tools');
+    expect(codex.argv.join(' ')).not.toContain('mcp_servers.context7');
+  });
 });
 
 describe('judgeCliFor MCP injection report (sc-2837)', () => {
