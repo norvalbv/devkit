@@ -295,8 +295,8 @@ describe('resolveVitest', () => {
  * testSpawnSync over a bare spawn for the kill path: 90s, then SIGTERM to the process group, then
  * SIGKILL, reported as 124.
  */
-const coverageRun = (root: string) =>
-  testSpawnSync(process.execPath, [CLI, 'coverage-run'], { cwd: root, encoding: 'utf8' });
+const coverageRun = (root: string, env: NodeJS.ProcessEnv = process.env) =>
+  testSpawnSync(process.execPath, [CLI, 'coverage-run'], { cwd: root, encoding: 'utf8', env });
 
 describe('a run that verified nothing', () => {
   // The gate already fails CLOSED on an absent artifact, so this is diagnosis rather than a
@@ -1640,14 +1640,18 @@ describe('a load flake the retry cannot rescue, against real vitest', () => {
     );
     writeFileSync(
       join(root, 'starved.test.mjs'),
-      `import { expect, it } from 'vitest';
+      `import { appendFileSync } from 'node:fs';
+      import { expect, it } from 'vitest';
       it('starved under load', async () => {
+        appendFileSync('scale.log', String(process.env.DEVKIT_COVERAGE_RERUN_SCALE) + '\\n');
         await new Promise((r) => setTimeout(r, 600));
         expect(process.env.DEVKIT_COVERAGE_RERUN_SCALE).toBe('5');
       });\n`,
     );
 
-    const result = coverageRun(root);
+    // An exported scale must not leak into pass 1: both of its attempts see none, the re-run sees 5.
+    const result = coverageRun(root, { ...process.env, DEVKIT_COVERAGE_RERUN_SCALE: '99' });
+    expect(readFileSync(join(root, 'scale.log'), 'utf8')).toBe('undefined\nundefined\n5\n');
 
     expect(result.status).toBe(0);
     expect(existsSync(join(root, COVERAGE_FILE))).toBe(true);
