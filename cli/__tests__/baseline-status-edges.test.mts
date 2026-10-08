@@ -519,6 +519,24 @@ describe('wiring', () => {
     ).toBeNull();
   });
 
+  // Ship's pre-push leaves typecheck + test:run to CI, so an early red step must never skip them.
+  it('runs every check step once Install succeeds, whatever failed before it', () => {
+    const gate = readFileSync(
+      join(import.meta.dirname, '..', '..', '.github/workflows/gate.yml'),
+      'utf8',
+    );
+    const steps = gate.split(/^ {6}- /m);
+    const install = steps.findIndex((step) => step.startsWith('name: Install\n'));
+    expect(steps[install]).toContain('id: install');
+    const checks = steps.slice(install + 1).filter((step) => !step.includes('if: always()'));
+    expect(checks.length).toBeGreaterThan(0);
+    for (const step of checks) {
+      const name = step.slice(0, step.indexOf('\n'));
+      expect(step, name).toContain('!cancelled()');
+      expect(step, name).toContain("steps.install.outcome == 'success'");
+    }
+  });
+
   // The reader answers from one completed push run per commit. A group two pushes can share lets
   // GitHub cancel or replace one of them, so only a pull request may share its group.
   it('supersedes runs per pull request and never groups two pushes together', () => {

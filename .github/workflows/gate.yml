@@ -27,15 +27,20 @@ jobs:
           bun-version: latest
 
       - name: Install
+        id: install
         run: bun install --frozen-lockfile
 
+      # Each check runs once Install succeeds, so an early red never hides Typecheck or Tests.
       - name: Format (Oxfmt)
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: bun run format:check
 
       - name: Lint (Oxlint)
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: bun run lint
 
       - name: Anti-slop (Oxlint, baseline-aware)
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         env:
           ANTI_SLOP_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
           ANTI_SLOP_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -48,23 +53,29 @@ jobs:
           node cli/index.mts anti-slop check --base "$ANTI_SLOP_BASE"
 
       - name: Structure governance (folder-structure)
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: bun run lint:structure
 
       - name: Ratchet — folder fan-out
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: node gate-engine/ratchets/folder-fanout.mts gate
 
       - name: Ratchet — size-disable
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         env:
           GUARD_RATCHET_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
         run: node gate-engine/ratchets/size-disable.mts gate
 
       - name: Typecheck
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: bun run typecheck
 
       - name: Benchmark tracker typecheck
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: bun run benchmarks:typecheck
 
       - name: Benchmark evidence (committed tree + append-only base)
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         env:
           BENCHMARK_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: bun run benchmarks:check -- --mode tree --tree HEAD --base "$BENCHMARK_BASE"
@@ -72,7 +83,7 @@ jobs:
       # Regenerated dist is release-only (typescript-source-prebuilt-mjs, sc-2467). Judged on the PR's
       # committed tree because every path a commit takes to a PR passes here, whichever tool made it.
       - name: Release-only dist (a PR may add or delete dist, never rewrite it)
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && !cancelled() && steps.install.outcome == 'success'
         env:
           DIST_BASE: ${{ github.event.pull_request.base.sha }}
           DIST_HEAD: ${{ github.event.pull_request.head.sha }}
@@ -93,6 +104,7 @@ jobs:
       # was meant to catch — raise it if a legitimate run ever approaches it, and never lower it to
       # make a slow run fail faster.
       - name: Tests
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         timeout-minutes: 90
         # The runner is dedicated, unlike a dev box: 3 workers on its 4 vCPUs instead of '50%' = 2.
         env:
