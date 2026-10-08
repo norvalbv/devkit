@@ -175,7 +175,11 @@ export function moveUntrackedWithGit(
     const sourceIsDirectory = lstatSync(source).isDirectory();
     if (sourceIsDirectory && !hasFilesystemLeaf(source))
       throw new Error('cannot move an empty untracked directory safely');
-    execFileSync('git', ['add', '-N', '-f', '--', source], { cwd: gitRoot, env, stdio: 'pipe' });
+    execFileSync('git', ['add', '-N', '-f', '--', `:(literal)${source}`], {
+      cwd: gitRoot,
+      env,
+      stdio: 'pipe',
+    });
     assertSourceIdentity(source, expectedSource);
     mkdirSync(dirname(target), { recursive: true });
     execFileSync('git', ['mv', '--', source, target], { cwd: gitRoot, env, stdio: 'pipe' });

@@ -27,6 +27,7 @@ function stagePathStrict(
 ): void {
   if (commitIndexKind(root) === 'partial') throw new Error(partialCommitRemedy(rel));
   for (let attempt = 0; attempt < 50; attempt += 1) {
+    // pathspec: devkit-owned baseline path
     const result = spawnSync('git', ['add', '--', rel], {
       cwd: root,
       env: commitIndexEnv(root),
@@ -60,6 +61,7 @@ export function isGitWorktree(root: string): boolean {
 
 export function indexTracksBaseline(root: string, rel: string): boolean {
   if (!isGitWorktree(root)) return false;
+  // pathspec: devkit-owned baseline path
   const result = spawnSync('git', ['ls-files', '--error-unmatch', '--', rel], {
     cwd: root,
     env: commitIndexEnv(root),
@@ -135,6 +137,7 @@ export function stageBaseline(root: string, rel: string): void {
     return;
   }
   try {
+    // pathspec: devkit-owned baseline path
     execFileSync('git', ['add', '--', rel], {
       cwd: root,
       env: commitIndexEnv(root),
