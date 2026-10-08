@@ -67,3 +67,4 @@ created: 2026-07-19
 **Scope:** gate-engine/coverage/**
 **Source:** shortcut · sc-4934
 **Evidence-change:** Field measurement on 2026-10-04: under parallel agents the whole-repo gate queued 13 coverage runs, 11 of them full 20-35 minute runs, at a load average of 285 on 10 cores; consumers (frink-oss) responded by moving the repo-wide floor into CI and setting coverage:false locally, leaving no local check at all.
+- 2026-10-08 — Self-host now runs the tests related to the staged paths before any judge: the extraGates entry related-tests (cli/lib/husky/gate-policy/related-tests.mts) runs vitest related --run on the commit index's ACMR paths. It drops package.json and the vitest config and setup, which would select the whole suite. This is self-host only, it does not feed the coverage artifact, and the scope-diff ruling is unchanged. A consumer-facing built-in is still open.
