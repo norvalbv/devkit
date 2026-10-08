@@ -14,7 +14,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { materializeReviewCoverage } from '../../../cli/lib/ship/coverage/review-coverage-copy.mts';
-import { MANIFEST_NAME } from '../provenance.mts';
+import { MANIFEST_NAME, snapshotSource } from '../provenance.mts';
 import {
   cleanupRepos,
   gate,
@@ -201,5 +201,17 @@ describe('materializeReviewCoverage — private copy', () => {
     writeFileSync(join(root, 'coverage/.last-clear.json'), '{}');
     expect(materializeReviewCoverage(root, wt)).toBe('marker-only');
     expect(existsSync(join(wt, 'coverage/coverage-final.json'))).toBe(false);
+  });
+});
+
+describe('review copy — scoped runs', () => {
+  it('keeps the recorded args, so a scoped artifact is still NOT MEASURED after the copy', () => {
+    const { root } = repo();
+    measure(root, snapshotSource(root, ['src/a.test.mts']));
+    const wt = reviewWorktree(root);
+    expect(materializeReviewCoverage(root, wt)).toBe('copied-rebound');
+    reviewMode();
+    expect(gate(wt).code).toBe(2);
+    expect(noticeText()).toBe('coverage=not-measured reason=scoped\n');
   });
 });

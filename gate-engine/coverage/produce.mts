@@ -369,7 +369,7 @@ async function runPass(
   // Also BEFORE vitest (sc-3225); anything whose mtime moves during the run is marked unmeasured
   // after it, which catches an edit-then-restore the start hashes alone cannot see.
   const startedAt = Date.now();
-  const source = snapshotSource(cwd);
+  const source = snapshotSource(cwd, argv);
 
   // Inside runDir, which only this run may touch; results.json also keeps it non-empty, so vitest's
   // cleanAfterRun() has nothing to sweep (the v0.43.1 fail-open).

@@ -41,14 +41,12 @@ export interface Thresholds {
   minTokens: number;
 }
 
-/**
- * Coverage-gate config. `false` = the consumer explicitly opts out (bypass). An object enforces the
- * threshold KEYS present in it and ignores the rest — `{}` (the default) enforces no percentage floor
- * but still fails hard when coverage data is absent (the anti-fail-open contract). See coverage/run.mts.
- */
+/** Coverage gate config: `false` opts out; an object enforces the KEYS present (`{}` still fails on
+ * absent data); `scope: "diff"` with `addedLines` judges only added lines. See coverage/run.mts. */
+type CoverageKey = 'addedLines' | 'statements' | 'functions' | 'lines' | 'branches';
 export type CoverageConfig =
   | false
-  | { statements?: number; functions?: number; lines?: number; branches?: number };
+  | ({ scope?: 'repo' | 'diff' } & Partial<Record<CoverageKey, number>>);
 
 /** Review-agent topology block of a resolved config (the reviewer subagents read this). */
 export interface ReviewConfig {
@@ -204,7 +202,7 @@ export const DEFAULTS = Object.freeze({
   testCommand: null,
   // Coverage-gate config: `{}` = active-strict (no % floor, but absent coverage data FAILS HARD —
   // a selected gate never silently passes unverified); `false` = explicit opt-out;
-  // `{ statements, ... }` enforces the keys present. See coverage/run.mts.
+  // `{ statements, ... }` enforces the keys present; `{ scope: 'diff', addedLines }` judges added lines.
   coverage: Object.freeze({}) as CoverageConfig,
   // Review-agent topology (the reviewer subagents READ these). Generic defaults: `src` as the only
   // backend root, NO frontend topology (empty array = selectReviewers never picks that domain; the

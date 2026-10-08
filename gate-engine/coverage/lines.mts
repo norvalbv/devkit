@@ -1,6 +1,8 @@
 /** Line coverage from an istanbul/V8 coverage-final.json entry, and its intersection with the lines a
  * change added — the unit a "coverage of the new diff" target means (sc-3228). */
 
+import { parsePatchHunks } from '../comment-firewall/patch.mts';
+
 /** One istanbul per-file coverage entry (only the fields line coverage reads). */
 export interface LineCoverageEntry {
   s?: Record<string, number>;
@@ -18,6 +20,14 @@ export function lineHits(file: LineCoverageEntry): Map<number, boolean> {
     hits.set(line, (hits.get(line) ?? false) || ran);
   }
   return hits;
+}
+
+/** New-side line numbers a `-U0` patch adds. Read one path's patch at a time: the hunks carry no
+ * path, and header spelling depends on the user's diff config. */
+export function addedLinesOf(patch: string): Set<number> {
+  const added = new Set<number>();
+  for (const hunk of parsePatchHunks(patch)) for (const n of hunk.addedLines) added.add(n);
+  return added;
 }
 
 export interface AddedLineCoverage {
