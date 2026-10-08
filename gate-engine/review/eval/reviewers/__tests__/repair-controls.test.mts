@@ -249,6 +249,36 @@ describe('sc-2500 executable repair controls', () => {
       expect(exercise(files, interleave)).toBe('queued');
   });
 
+  it('reclaim pair: only the grammar deletes hooks fallow never wrote (sc-4588)', () => {
+    const gold = rows.find((r) => r.id === 'corr-reclaim-permissive-env-prefix');
+    const allowlist = rows.find((r) => r.id === 'corr-decoy-reclaim-exact-allowlist');
+    expect([allowlist.variantOf, allowlist.holdout]).toEqual([gold.id, gold.holdout]);
+    expect(allowlist.repo.base).toEqual(gold.repo.base);
+    const written = [
+      'bash .claude/hooks/fallow-gate.sh',
+      '"$CLAUDE_PROJECT_DIR"/.claude/hooks/fallow-gate.sh',
+    ];
+    const users = [
+      'BASH_ENV=./mine.sh bash .claude/hooks/fallow-gate.sh',
+      'PATH=. sh .claude/hooks/fallow-gate.sh',
+      'sh .claude/hooks/fallow-gate.sh',
+      'npm test',
+    ];
+    const control = `const { readFileSync, writeFileSync } = await import('node:fs');
+      const { reclaimFallowGate } = await import('./src/install/reclaim.ts');
+      const run = (cmds) => { writeFileSync('s.json', JSON.stringify({ hooks: cmds && { PreToolUse: cmds.map((command) => ({ command })) } }));
+        reclaimFallowGate('s.json'); return JSON.parse(readFileSync('s.json', 'utf8')).hooks.PreToolUse.map((h) => h.command); };
+      console.log(JSON.stringify({ kept: run(${JSON.stringify([...written, ...users])}), empty: run([]) }));`;
+    expect(exercise({ ...gold.repo.base, ...gold.repo.staged }, control)).toEqual({
+      kept: ['npm test'],
+      empty: [],
+    });
+    expect(exercise({ ...allowlist.repo.base, ...allowlist.repo.staged }, control)).toEqual({
+      kept: users,
+      empty: [],
+    });
+  });
+
   for (const [index, id] of ids.entries())
     it(id, () => {
       const gold = rows.find((r) => r.id === id),

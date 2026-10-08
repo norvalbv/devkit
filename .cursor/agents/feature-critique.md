@@ -140,6 +140,7 @@ Evaluate the proposal through each lens. Skip lenses that don't apply.
 - Trace data from source to sink: does the transformation produce the correct output for ALL input scenarios?
 - Identify implicit assumptions about data shape, ordering, or priority (e.g., hardcoded directory lists / sort orders that should be config-driven).
 - Who writes this data? Who reads it? Are readers and writers aligned on format and semantics?
+- A matcher that deletes or rewrites data the change does not own must prove ownership by provenance (a ledger row, its own marker); failing that, by an allowlist of the writer's measured, version-pinned output — never by a grammar of the input language. Recommending such a grammar is itself a finding: its accepted set is open-ended, so each fix only names the next false match.
 - For a synced/shared asset: does it read layout from `guard.config.json`, or hardcode a stack tree? (A hardcoded layout is a portability anti-pattern.)
 
 **Runtime Behavior Across Configurations**:
