@@ -9,12 +9,13 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { stagedSet } from '../../../../gate-engine/ratchets/git-index.mts';
 
-// vitest's forceRerunTriggers: any of these selects the whole suite, which CI already runs.
-const RERUN_TRIGGERS = new Set(['package.json', 'vitest.config.mjs', 'vitest.setup.mjs']);
+// vitest's forceRerunTriggers (**/package.json, **/{vitest,vite}.config.*, setupFiles) select the
+// whole suite, which CI already runs.
+const RERUN_TRIGGER_RE = /(^|\/)(package\.json|(vitest|vite)\.config\.[^/]*)$|^vitest\.setup\.mjs$/;
 
 /** The staged paths handed to `vitest related`, sorted, minus the full-suite triggers. */
 export function relatedPaths(staged: Iterable<string>): string[] {
-  return [...staged].filter((p) => !RERUN_TRIGGERS.has(p)).sort();
+  return [...staged].filter((p) => !RERUN_TRIGGER_RE.test(p)).sort();
 }
 
 type Exec = (

@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -14,11 +14,26 @@ function fakeExec(status: number | null) {
 const dirs: string[] = [];
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
 });
 
 function git(cwd: string, ...args: string[]) {
   execFileSync('git', args, { cwd, stdio: 'ignore' });
+}
+
+// A committed a.mts + b.mts, both then edited on disk, with nothing staged yet.
+function editedRepo(): string {
+  const repo = realpathSync(mkdtempSync(join(tmpdir(), 'related-tests-')));
+  dirs.push(repo);
+  git(repo, 'init', '-q');
+  writeFileSync(join(repo, 'a.mts'), 'export const a = 1;\n');
+  writeFileSync(join(repo, 'b.mts'), 'export const b = 1;\n');
+  git(repo, 'add', '.');
+  git(repo, '-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'init');
+  writeFileSync(join(repo, 'a.mts'), 'export const a = 2;\n');
+  writeFileSync(join(repo, 'b.mts'), 'export const b = 2;\n');
+  return repo;
 }
 
 describe('relatedPaths', () => {
@@ -32,6 +47,18 @@ describe('relatedPaths', () => {
         'vitest.setup.mjs',
       ]),
     ).toEqual(['src/a.mts', 'src/b.mts']);
+  });
+
+  // vitest's triggers are `**/package.json` and `**/{vitest,vite}.config.*`; every release stages dist/package.json.
+  it('drops nested trigger files too, keeping look-alikes', () => {
+    expect(
+      relatedPaths([
+        'dist/package.json',
+        'templates/app/vite.config.ts',
+        'vitest.e2e.config.mjs',
+        'cli/package-json.mts',
+      ]),
+    ).toEqual(['cli/package-json.mts', 'vitest.e2e.config.mjs']);
   });
 });
 
@@ -64,21 +91,38 @@ describe('runRelatedTests', () => {
 
   it('selects from the index, never from unstaged edits', () => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
-    const repo = mkdtempSync(join(tmpdir(), 'related-tests-'));
-    dirs.push(repo);
-    git(repo, 'init', '-q');
-    writeFileSync(join(repo, 'a.mts'), 'export const a = 1;\n');
-    writeFileSync(join(repo, 'b.mts'), 'export const b = 1;\n');
-    git(repo, 'add', '.');
-    git(repo, '-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'init');
-    writeFileSync(join(repo, 'a.mts'), 'export const a = 2;\n');
-    writeFileSync(join(repo, 'b.mts'), 'export const b = 2;\n');
+    const repo = editedRepo();
     git(repo, 'add', 'a.mts');
     const exec = fakeExec(0);
     runRelatedTests(repo, { exec });
     expect(exec).toHaveBeenCalledWith(
       expect.any(String),
       ['related', '--run', '--reporter=dot', 'a.mts'],
+      expect.anything(),
+    );
+  });
+
+  // `commit -a` / `commit <path>` stage into an alternate index the hook hands over via the carrier.
+  it('selects from the commit index the hook carries, not the default index', () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const repo = editedRepo();
+    git(repo, 'add', 'a.mts');
+    const alt = join(repo, '.git', 'next-index');
+    execFileSync('git', ['read-tree', 'HEAD'], {
+      cwd: repo,
+      env: { ...process.env, GIT_INDEX_FILE: alt },
+    });
+    execFileSync('git', ['add', 'b.mts'], {
+      cwd: repo,
+      env: { ...process.env, GIT_INDEX_FILE: alt },
+    });
+    vi.stubEnv('DEVKIT_COMMIT_INDEX_FILE', alt);
+    vi.stubEnv('DEVKIT_COMMIT_GIT_DIR', join(repo, '.git'));
+    const exec = fakeExec(0);
+    runRelatedTests(repo, { exec });
+    expect(exec).toHaveBeenCalledWith(
+      expect.any(String),
+      ['related', '--run', '--reporter=dot', 'b.mts'],
       expect.anything(),
     );
   });
