@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { findDrift, repoFiles, runDrift } from '../drift.mts';
+import { findDrift, findPartialDrift, repoFiles, runDrift } from '../drift.mts';
 import { resolveSupersession } from '../recall/supersession.mts';
 
 /** A Target block with a Scope — the only shape drift cares about. */
@@ -134,6 +134,69 @@ describe('decision drift (scope no longer resolves)', () => {
 
   it('runDrift returns the could-not-run code for a missing root', () => {
     expect(runDrift(join(root, 'no-such-dir'), decisions)).toBe(2);
+  });
+
+  it('reports only the dead glob of a partially-live scope, and never a wholly dead axis twice', () => {
+    writeFileSync(join(decisions, 'partial.md'), target('partial', 'src/gone.mts,src/live/**'));
+    writeFileSync(join(decisions, 'rotted.md'), target('rotted', 'src/nope/**'));
+    expect(findPartialDrift(root, decisions)).toEqual([
+      { slug: 'partial', deadGlobs: ['src/gone.mts'] },
+    ]);
+    expect(findDrift(root, decisions).map((d) => d.slug)).toEqual(['rotted']);
+  });
+
+  // matchScope treats a bare directory name as an exact path, so it never covers the files inside.
+  it('reports a bare directory glob as dead', () => {
+    writeFileSync(join(decisions, 'bare.md'), target('bare', 'src/live,src/live/**'));
+    expect(findPartialDrift(root, decisions)).toEqual([{ slug: 'bare', deadGlobs: ['src/live'] }]);
+  });
+
+  it('walks a dot-directory a scope names, and still skips the ones none name', () => {
+    mkdirSync(join(root, '.github', 'workflows'), { recursive: true });
+    writeFileSync(join(root, '.github', 'workflows', 'gate.yml'), 'on: push\n');
+    mkdirSync(join(root, '.venv'), { recursive: true });
+    writeFileSync(join(root, '.venv', 'x.py'), '\n');
+    writeFileSync(join(decisions, 'ci.md'), target('ci', '.github/workflows/gate.yml,src/live/**'));
+    expect(findPartialDrift(root, decisions)).toEqual([]);
+    expect(repoFiles(root, undefined, new Set(['.github']))).not.toContain('.venv/x.py');
+  });
+
+  it('walks a dot-directory a scope names below the root, and a dot-file a glob names', () => {
+    mkdirSync(join(root, 'src', '.storybook'), { recursive: true });
+    writeFileSync(join(root, 'src', '.storybook', 'main.ts'), '\n');
+    writeFileSync(join(root, 'src', '.env.example'), '\n');
+    const scope = 'src/.storybook/**,src/.env.example,src/live/**';
+    writeFileSync(join(decisions, 'nested.md'), target('nested', scope));
+    expect(findPartialDrift(root, decisions)).toEqual([]);
+  });
+
+  // A walk cut short at the file cap never saw the rest of the tree, so it cannot call a glob dead.
+  it('concludes no partial drift when the walk hit its file cap', () => {
+    // Whichever top-level dir the walk reads first, the other glob was simply never reached.
+    writeFileSync(join(decisions, 'capped.md'), target('capped', 'docs/**,src/**'));
+    expect(findPartialDrift(root, decisions, 1)).toEqual([]);
+    expect(findPartialDrift(root, decisions)).toEqual([]);
+  });
+
+  it('concludes no partial drift on an empty tree', () => {
+    const empty = mkdtempSync(join(tmpdir(), 'dk-drift-empty-'));
+    writeFileSync(join(decisions, 'partial.md'), target('partial', 'src/gone.mts,src/live/**'));
+    expect(findPartialDrift(empty, decisions)).toEqual([]);
+    rmSync(empty, { recursive: true, force: true });
+  });
+
+  it('prints partial drift as report-only: runDrift still exits 0', () => {
+    writeFileSync(join(decisions, 'partial.md'), target('partial', 'src/gone.mts,src/live/**'));
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const code = runDrift(root, decisions);
+    const printed = error.mock.calls.flat().join('\n');
+    const logged = log.mock.calls.flat().join('\n');
+    error.mockRestore();
+    log.mockRestore();
+    expect(code).toBe(0);
+    expect(printed).toContain('Dead: src/gone.mts');
+    expect(logged).not.toContain('✓');
   });
 });
 
