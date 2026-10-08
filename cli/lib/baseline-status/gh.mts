@@ -257,6 +257,14 @@ export function parseSummary(raw: string, label: string): TestReportSummary {
       throw new GhUnavailable('schema-mismatch', `${label} records "${outcome}" for ${file}`);
     }
   }
+  // Optional and newer than schema 1: absent means "names unknown", but a present map must be clean.
+  const named = parsed.failedTests;
+  if (named !== undefined) {
+    const lists = Object(named) === named && !Array.isArray(named) ? Object.values(named) : null;
+    if (!lists?.every((l) => Array.isArray(l) && l.every((n) => n === String(n)))) {
+      throw new GhUnavailable('schema-mismatch', `${label} has a malformed failedTests map`);
+    }
+  }
   return parsed;
 }
 

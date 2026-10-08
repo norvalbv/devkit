@@ -44,6 +44,8 @@ export interface TestReportSummary {
   /** Did the TEST STEP pass? The run's overall red/green also covers lint, typecheck, ratchets. */
   testsPassed: boolean;
   files: Record<string, FileOutcome>;
+  /** Failed test names per failed file, capped. Optional: an empty or absent list means names unknown. */
+  failedTests?: Record<string, string[]>;
   /** Entries resolving outside the repo root — nested-run leakage, dropped rather than reported. */
   droppedForeignPaths: number;
 }
@@ -63,7 +65,27 @@ const OUTCOME_RANK = { skipped: 0, passed: 1, failed: 2 } satisfies Record<FileO
 /** The subset of vitest's Jest-compatible JSON this reads. Everything else in it is ignored. */
 interface VitestJsonReport {
   success?: boolean;
-  testResults?: { name?: string; status?: string }[];
+  testResults?: {
+    name?: string;
+    status?: string;
+    assertionResults?: { fullName?: string; status?: string }[];
+  }[];
+}
+
+/** Per-file bound on recorded failed test names, so a mass failure cannot bloat the summary. */
+export const FAILED_TESTS_CAP = 50;
+
+/** The failed test names one report entry carries, appended to `into` without duplicates. */
+function collectFailedNames(
+  assertions: { fullName?: string; status?: string }[] | undefined,
+  into: string[],
+): void {
+  if (!Array.isArray(assertions)) return;
+  for (const a of assertions) {
+    if (a?.status === 'failed' && a.fullName && !into.includes(a.fullName)) {
+      into.push(a.fullName);
+    }
+  }
 }
 
 /** True when a repo-relative path leaves the root. Segment-wise: `..smoke.mts` is a real filename. */
@@ -111,6 +133,7 @@ export function summarise(
   // read back as an inherited Object.prototype member and be compared against as if it were an
   // outcome.
   const files: Record<string, FileOutcome> = Object.create(null);
+  const names: Record<string, string[]> = Object.create(null);
   let droppedForeignPaths = 0;
 
   for (const result of report.testResults ?? []) {
@@ -134,6 +157,11 @@ export function summarise(
     // Fixed precedence, not arrival order — a file can be reported once per vitest project.
     const existing = files[rel];
     files[rel] = !existing || OUTCOME_RANK[outcome] > OUTCOME_RANK[existing] ? outcome : existing;
+    if (outcome === 'failed') collectFailedNames(result.assertionResults, (names[rel] ??= []));
+  }
+  const failedTests: Record<string, string[]> = Object.create(null);
+  for (const [rel, list] of Object.entries(names)) {
+    failedTests[rel] = list.sort().slice(0, FAILED_TESTS_CAP);
   }
 
   const runId = Number(env.GITHUB_RUN_ID);
@@ -147,6 +175,7 @@ export function summarise(
     // and deriving "everything passed" from whatever entries survived is the fabricated green.
     testsPassed: report.success === true,
     files,
+    failedTests,
     droppedForeignPaths,
   };
 }
