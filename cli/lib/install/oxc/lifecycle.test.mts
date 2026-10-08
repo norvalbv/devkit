@@ -49,7 +49,7 @@ const LOCK_HOLDER_SCRIPT = [
   "writeFileSync(join(lock, 'holder'), stamp);",
   'const before = snapshot();',
   "writeFileSync(held, 'held');",
-  // No timer. `release` exists ONLY because withLock took EEXIST on this exact directory, so the
+  // No timer. `release` exists ONLY because withLock's rename onto this directory was refused, so the
   // hold lasts exactly as long as the contention does — however long the machine takes to get there.
   'while (!existsSync(release)) Atomics.wait(idle, 0, 0, 2);',
   // The contender is provably parked in withLock's retry loop right now. Anything that moved the
@@ -70,13 +70,8 @@ let lockGateSeq = 0;
 /**
  * Run `action` against an Oxc lock a FOREIGN process holds, and prove the lock was honoured.
  *
- * `action` is synchronous: withLock parks the calling thread in `Atomics.wait` (atomic-write.mts),
- * so while it is contended NOTHING on this thread runs — no setTimeout, no microtask, no fake timer.
- * The release signal therefore cannot come from the test body; it has to come from INSIDE the
- * blocking call. `mkdirSync` is the syscall withLock uses to attempt acquisition, so a one-shot hook
- * on the EEXIST it takes against this lock directory is an exact, CAUSAL "the product is now blocked
- * behind the holder" event — and that is what releases the holder. Same idiom as
- * gate-engine/critique/__tests__/persistence-lock.test.mts (`signalMainLockAttempt`).
+ * `action` is synchronous and withLock parks this thread, so the release comes from INSIDE the blocking
+ * call: a hook on the rename refused against this lock is the causal "product is blocked" event.
  *
  * Nothing here measures elapsed time. The only test-side deadline is waitForPath's hang detector.
  * The previous shape asserted `Date.now() - started >= 100` after a fixed 300ms hold, which failed
@@ -111,29 +106,28 @@ async function runWhileOxcLockIsHeld(root: string, action: () => void): Promise<
   expect(existsSync(lock)).toBe(true);
 
   let contended = false;
-  const realMkdirSync = fs.mkdirSync;
-  // SAFETY: the wrapper forwards every argument to the real mkdirSync and returns its value
-  // unchanged, so it is call-compatible with the overloaded signature; only the throw path is
-  // observed. The narrowing inside is likewise safe: a caught value is only read for `.code`, and
-  // Node's fs errors are ErrnoException — a non-Error cause yields undefined and fails the ===.
-  fs.mkdirSync = ((...args: Parameters<typeof fs.mkdirSync>) => {
+  const realRenameSync = fs.renameSync;
+  // SAFETY: the wrapper forwards every argument to the real renameSync and returns its value
+  // unchanged, so it is call-compatible with the overloaded signature.
+  fs.renameSync = ((...args: Parameters<typeof fs.renameSync>) => {
     try {
-      return realMkdirSync(...args);
+      return realRenameSync(...args);
     } catch (cause: unknown) {
-      if (String(args[0]) === lock && (cause as NodeJS.ErrnoException).code === 'EEXIST') {
+      // SAFETY: Node's fs errors are ErrnoException; a non-Error cause yields undefined and never matches.
+      const code = (cause as NodeJS.ErrnoException).code;
+      if (String(args[1]) === lock && (code === 'ENOTEMPTY' || code === 'EEXIST')) {
         contended = true;
         if (!existsSync(release)) writeFileSync(release, 'release');
       }
       throw cause;
     }
-  }) as typeof fs.mkdirSync;
-  // atomic-write.mts imports mkdirSync as a NAMED ESM binding, so assigning fs.mkdirSync alone is
-  // invisible to withLock without this re-sync — `contended` would silently stay false.
+  }) as typeof fs.renameSync;
+  // process-lock.mts imports renameSync as a NAMED ESM binding, so this re-sync is required.
   syncBuiltinESMExports();
   try {
     action();
   } finally {
-    fs.mkdirSync = realMkdirSync;
+    fs.renameSync = realRenameSync;
     syncBuiltinESMExports();
     // In the finally, so a THROW from action() cannot skip it: the holder spins until this file
     // appears, and leaving it unwritten wedges the worker until vitest's close timeout instead of

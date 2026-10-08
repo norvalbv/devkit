@@ -10,7 +10,10 @@ import {
 } from '../../../../gate-engine/judge/process/identity.mts';
 import { z } from 'zod';
 import { writeFileAtomic } from '../../atomic-write.mts';
-import { LOCK_TIMEOUT_PREFIX, withQueueLock } from './queue-lock.mts';
+import {
+  LockHeldError,
+  withProcessLock,
+} from '../../../../gate-engine/judge/process/process-lock.mts';
 import { readSlotCount, slotDirs, takeFreeSlot } from './slots.mts';
 
 /** An empty claim (acquirer died between mkdir and its holder write) is reclaimable after this. */
@@ -69,6 +72,7 @@ export function queueRoot(home: string = userInfo().homedir): string {
 }
 
 const slotLock = (root: string) => join(root, 'slot.lock');
+const QUEUE_LOCK = { label: 'queue' };
 const holderFile = (slot: string) => join(slot, 'holder.json');
 const ticketsDir = (root: string) => join(root, 'tickets');
 
@@ -195,7 +199,7 @@ export function liveTickets(root: string, probe: QueueProbe = DEFAULT_PROBE): Qu
 
 /** Every mutation of the slot (claim, reap, release, group update) runs under this one lock. */
 export function withSlotLock<T>(root: string, fn: () => T): T {
-  return withQueueLock(slotLock(root), fn);
+  return withProcessLock(slotLock(root), fn, QUEUE_LOCK);
 }
 
 /** A contended lock is "not now" inside the wait loop: the next poll retries it. */
@@ -203,7 +207,7 @@ function unlessContended<T>(fn: () => T): T | undefined {
   try {
     return fn();
   } catch (cause) {
-    if (cause instanceof Error && cause.message.startsWith(LOCK_TIMEOUT_PREFIX)) return undefined;
+    if (cause instanceof LockHeldError) return undefined;
     throw cause;
   }
 }
@@ -282,22 +286,26 @@ type TicketFields = Omit<QueueTicket, 'seq'>;
  * see an empty queue while an earlier number is still unpublished.
  */
 export function enqueue(root: string, fields: TicketFields): { ticket: QueueTicket; path: string } {
-  return withQueueLock(join(root, 'seq.lock'), () => {
-    const counter = join(root, 'seq');
-    // Only plain digits count: a negative, fractional or torn counter restarts from the live tickets
-    // instead of handing out a number at or below 0 that liveTickets would never see.
-    const text = readFileSync(counter, 'utf8').trim();
-    let last = /^\d+$/.test(text) && Number.isSafeInteger(Number(text)) ? Number(text) : 0;
-    for (const ticket of liveTickets(root)) last = Math.max(last, ticket.seq);
-    const ticket: QueueTicket = { ...fields, seq: last + 1 };
-    const path = join(
-      ticketsDir(root),
-      `${String(ticket.seq).padStart(12, '0')}-${ticket.pid}.json`,
-    );
-    writeFileAtomic(path, JSON.stringify(ticket));
-    writeFileAtomic(counter, `${ticket.seq}\n`);
-    return { ticket, path };
-  });
+  return withProcessLock(
+    join(root, 'seq.lock'),
+    () => {
+      const counter = join(root, 'seq');
+      // Only plain digits count: a negative, fractional or torn counter restarts from the live tickets
+      // instead of handing out a number at or below 0 that liveTickets would never see.
+      const text = readFileSync(counter, 'utf8').trim();
+      let last = /^\d+$/.test(text) && Number.isSafeInteger(Number(text)) ? Number(text) : 0;
+      for (const ticket of liveTickets(root)) last = Math.max(last, ticket.seq);
+      const ticket: QueueTicket = { ...fields, seq: last + 1 };
+      const path = join(
+        ticketsDir(root),
+        `${String(ticket.seq).padStart(12, '0')}-${ticket.pid}.json`,
+      );
+      writeFileAtomic(path, JSON.stringify(ticket));
+      writeFileAtomic(counter, `${ticket.seq}\n`);
+      return { ticket, path };
+    },
+    QUEUE_LOCK,
+  );
 }
 
 export function ensureRoot(root: string): void {
