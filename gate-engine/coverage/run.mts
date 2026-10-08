@@ -1,20 +1,29 @@
 #!/usr/bin/env node
 
-/** guard-coverage: enforce guard.config.json `coverage` thresholds on coverage-final.json, fail-CLOSED.
+/** guard-coverage: enforce guard.config.json `coverage` thresholds (or, `scope: "diff"`, added-line
+ * coverage via diff-gate.mts) on coverage-final.json, fail-CLOSED.
  * Exit 0 pass/bypass, 1 fail, 2 NOT MEASURED (review only). Rulings: docs/decisions/coverage-gate.md. */
-import { execFileSync } from 'node:child_process';
-import { appendFileSync, existsSync, realpathSync } from 'node:fs';
-import { isAbsolute, relative, resolve } from 'node:path';
+import { existsSync, realpathSync } from 'node:fs';
+import { relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import {
-  type CoverageConfig,
-  coverageBypassed,
-  resolveGuardConfig,
-  sourceMatchers,
-} from '../config.mts';
+import { type CoverageConfig, coverageBypassed, resolveGuardConfig } from '../config.mts';
 import { failLine } from '../deterministic/reason.mts';
 import { emitGateEvent } from '../judge/gate-events.mts';
-import { displayPath, formatClearMarker, humanAge, readClearMarker } from './failures.mts';
+import { humanAge, readClearMarker, formatClearMarker } from './failures.mts';
+import {
+  artifactLine,
+  BYPASS_REMEDY,
+  canonicalPath,
+  classifier,
+  emitProvenance,
+  listPaths,
+  OPT_OUT_REMEDY,
+  recordReviewNotice,
+  repoTop,
+  reviewNotMeasuredAbsent,
+  reviewNotMeasuredEmpty,
+} from './gate-shared.mts';
+import { resolveScope, runDiffCoverage } from './diff-gate.mts';
 import { lineHits } from './lines.mts';
 // Shared with the PRODUCER (`devkit coverage-run`) so the path this gate reads and the path that
 // runner writes can never drift apart.
@@ -22,8 +31,9 @@ import { COVERAGE_DIR, COVERAGE_FILE } from './produce.mts';
 import {
   type ArtifactRead,
   artifactKeysSchema,
-  type Classify,
+  boundManifest,
   checkProvenance,
+  isScopedRun,
   type Provenance,
   readArtifact,
 } from './provenance.mts';
@@ -89,121 +99,6 @@ export function computePercentages(cov: unknown): Record<Metric, number> {
   };
 }
 
-// Printed by EVERY failure arm. A gate that blocks without naming its own escape hatch is the bug
-// this fixes: agents met a hard block, found no knob (unlike decisions/review/qavis, which all print
-// theirs), and either fixed out-of-scope coverage or gave up. `export` on its own line, NOT an inline
-// `GUARD_COVERAGE_OK=1 devkit ship …` prefix — skills/using-devkit/SKILL.md documents that inline env
-// prefixes on a ship can be silently stripped by command-rewriting shell hooks (the
-// SHIP_COMMIT_TIMEOUT lesson), which would make the bypass look broken.
-const BYPASS_REMEDY = [
-  '   Not your debt? If the BASE branch already fails this and your diff did not cause it,',
-  '   ship without coverage for this run:  export GUARD_COVERAGE_OK=1',
-];
-
-// States its condition: ship reads guard.config.json from the committed base, so a local-only
-// `coverage: false` silently no-ops there, and an agent once burned an approved bypass on that.
-const OPT_OUT_REMEDY = [
-  '   Repo-wide opt-out: "coverage": false in guard.config.json — but `devkit ship`',
-  '   reads that file from the COMMITTED tree, so a local-only edit changes nothing.',
-];
-
-const MAX_LISTED = 10;
-
-function listPaths(paths: string[], cwd: string, top: string): string[] {
-  const lines = paths.slice(0, MAX_LISTED).map((p) => `     ${displayPath(resolve(top, p), cwd)}`);
-  if (paths.length > MAX_LISTED) lines.push(`     …and ${paths.length - MAX_LISTED} more`);
-  return lines;
-}
-
-export const TEST_PATH = /\.(test|spec)\.|(^|\/)__tests__\//;
-
-/** production / test / other; a MEASURED path is source whatever sourceExtensions says, and a package
- * gate owns only its subtree plus what its artifact measured. `other` is never drift. */
-function classifier(extensions: string[], pkgPrefix: string): Classify {
-  const { isSource } = sourceMatchers(extensions);
-  return (path, measured) => {
-    if (!measured && pkgPrefix && !path.startsWith(`${pkgPrefix}/`)) return 'other';
-    if (!measured && !isSource(path)) return 'other';
-    return TEST_PATH.test(path) ? 'test' : 'production';
-  };
-}
-
-const canonicalPath = (p: string): string => {
-  try {
-    return realpathSync(p);
-  } catch {
-    return resolve(p);
-  }
-};
-
-/** The repo root the provenance paths are relative to; cwd itself when git cannot say. */
-function repoTop(cwd: string): string {
-  try {
-    return execFileSync('git', ['rev-parse', '--show-toplevel'], {
-      cwd,
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    }).trim();
-  } catch {
-    return cwd;
-  }
-}
-
-function emitProvenance(p: Provenance): void {
-  emitGateEvent({
-    type: 'coverage_provenance',
-    gate: 'coverage',
-    state: p.state,
-    production_count: p.state === 'drift' ? p.production.length : 0,
-    test_count: p.state === 'drift' ? p.tests.length : 0,
-    detail: p.state === 'unknown' ? p.reason : p.manifest.runId,
-  });
-}
-
-// Names the PHYSICAL artifact so a borrowed verdict is visible (sc-3491).
-function artifactLine(file: string): string {
-  return `   read ${canonicalPath(file)}`;
-}
-
-/** Tell review-target.sh's verdict line that coverage went unmeasured. Written only into this review's
- * own temp root, so a nested run cannot reach an outer review's file. Advisory: never throws. */
-function recordReviewNotice(reason: 'absent' | 'stale' | 'empty'): void {
-  const file = process.env.DEVKIT_REVIEW_NOTICES;
-  const root = process.env.DEVKIT_REVIEW_TEMP_ROOT;
-  if (!file || !root || !isAbsolute(file) || !isAbsolute(root)) return;
-  if (!resolve(file).startsWith(`${resolve(root)}/`)) return;
-  try {
-    appendFileSync(file, `coverage=not-measured reason=${reason}\n`);
-  } catch {
-    // The deterministic runner's skip banner still names the gate.
-  }
-}
-
-function reviewNotMeasuredAbsent(cwd: string): number {
-  console.log(
-    `⚠️  Coverage NOT MEASURED in this review — no ${COVERAGE_FILE} in the target checkout.`,
-  );
-  const marker = readClearMarker(resolve(cwd, COVERAGE_DIR));
-  if (marker) for (const line of formatClearMarker(marker, cwd)) console.log(line);
-  console.log(
-    "   `devkit review` copies the target's artifact when one exists; it never makes one.",
-  );
-  console.log('   Measure it: run `devkit coverage-run` in the target, then review again.');
-  console.log('   `devkit ship` and commits still BLOCK without it.');
-  recordReviewNotice('absent');
-  return 2;
-}
-
-function reviewNotMeasuredEmpty(): number {
-  console.log(
-    `⚠️  Coverage NOT MEASURED in this review — the target's ${COVERAGE_FILE} measured no files.`,
-  );
-  console.log('   Measure it: run `devkit coverage-run` in the target, then review again.');
-  console.log('   `devkit ship` and commits still BLOCK on an empty artifact.');
-  recordReviewNotice('empty');
-  return 2;
-}
-
 /** Run the coverage gate against `cwd`. Returns the exit code (0 pass/bypass, 1 fail, 2 review-only
  * NOT MEASURED). */
 export function runCoverage(cwd = process.cwd()): number {
@@ -231,6 +126,12 @@ export function runCoverage(cwd = process.cwd()): number {
   }
 
   const reviewMode = process.env.DEVKIT_RUN_MODE === 'review';
+  const scope = resolveScope(coverage);
+  if ('error' in scope) {
+    failLine(`🚫 Coverage gate FAILED — ${scope.error} in guard.config.json.`);
+    return 1;
+  }
+  if (scope.scope === 'diff') return runDiffCoverage(cwd, coverage, scope.min, reviewMode);
   const file = resolve(cwd, COVERAGE_FILE);
   if (!existsSync(file)) {
     if (reviewMode) return reviewNotMeasuredAbsent(cwd);
@@ -286,6 +187,27 @@ export function runCoverage(cwd = process.cwd()): number {
     );
     for (const line of BYPASS_REMEDY) console.error(line);
     for (const line of OPT_OUT_REMEDY) console.error(line);
+    return 1;
+  }
+  // A run limited to some tests measured only the files they load; its percentages are not the repo's.
+  const scopedArgs = boundManifest(resolve(cwd, COVERAGE_DIR), artifact)?.args ?? [];
+  if (isScopedRun(scopedArgs)) {
+    const ran = `\`devkit coverage-run ${scopedArgs.join(' ')}\``;
+    if (reviewMode) {
+      console.log(
+        `⚠️  Coverage NOT MEASURED in this review — the artifact came from a scoped run (${ran}).`,
+      );
+      recordReviewNotice('scoped');
+      return 2;
+    }
+    failLine(`🚫 Coverage gate FAILED — the artifact came from a scoped run (${ran}).`);
+    console.error(artifactLine(file));
+    console.error('   A run limited to some tests cannot satisfy a whole-repo threshold. Run');
+    console.error(
+      '   `devkit coverage-run` with no test filters, or judge only the lines you add with',
+    );
+    console.error('   "coverage": { "scope": "diff", "addedLines": <pct> } in guard.config.json.');
+    for (const line of BYPASS_REMEDY) console.error(line);
     return 1;
   }
   const top = repoTop(cwd);

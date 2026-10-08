@@ -1,7 +1,7 @@
 /** Added-line coverage (gate-engine/coverage/lines.mts): istanbul's line rule restricted to the lines
  * a change added — the unit `devkit coverage-diff` reports. */
 import { describe, expect, it } from 'vitest';
-import { addedLineCoverage, lineHits, lineRanges } from '../lines.mts';
+import { addedLineCoverage, addedLinesOf, lineHits, lineRanges } from '../lines.mts';
 
 /** statements as [startLine, hits] pairs → one istanbul file entry. */
 const entry = (...stmts: [number, number][]) => ({
@@ -66,5 +66,25 @@ describe('lineRanges', () => {
     [[8, 9, 20, 21, 22], '8-9, 20-22'],
   ])('%j → %s', (lines, out) => {
     expect(lineRanges(lines)).toBe(out);
+  });
+});
+
+describe('addedLinesOf — one path patch at -U0', () => {
+  it('collects new-side added lines across hunks and ignores removals', () => {
+    const patch = [
+      'diff --git a/x.ts b/x.ts',
+      '--- a/x.ts',
+      '+++ b/x.ts',
+      '@@ -1,0 +2,2 @@',
+      '+one',
+      '+two',
+      '@@ -9 +10,0 @@',
+      '-gone',
+      '@@ -12 +14 @@',
+      '-old',
+      '+new',
+      '',
+    ].join('\n');
+    expect([...addedLinesOf(patch)]).toEqual([2, 3, 14]);
   });
 });
