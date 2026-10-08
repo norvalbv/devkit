@@ -283,6 +283,10 @@ describe('review.paths', () => {
     ['disable all equivalent', { include: ['src/**'], exclude: ['**/**'] }],
     ['exclude literal include with wildcard', { include: ['src/a.mts'], exclude: ['src/*.mts'] }],
     [
+      'exclude a dot-directory literal include',
+      { include: ['.github/ci.yml'], exclude: ['**/*.yml'] },
+    ],
+    [
       'exclude every include',
       {
         include: ['src/**', 'scripts/**'],
