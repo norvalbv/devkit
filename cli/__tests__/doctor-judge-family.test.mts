@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { resolveGuardConfig } from '../../gate-engine/config.mts';
+import { FAMILY_ENV_KEYS } from '../../gate-engine/judge/outage/family-override.mts';
 import {
   bindClaudeFamily,
   binResolvable,
@@ -182,6 +183,14 @@ describe('bindClaudeFamily', () => {
       expect(readFileSync(join(__dirname, '..', '..', doc), 'utf8')).toContain(
         FAMILY_PROVENANCE_TEXT,
       );
+  });
+
+  // The docs hand-copy the escape-hatch export; a stale copy sends operators to the old family.
+  it('both operator docs quote every family knob at its current value', () => {
+    for (const doc of ['docs/troubleshooting.md', 'skills/commit-gates/SKILL.md']) {
+      const text = readFileSync(join(__dirname, '..', '..', doc), 'utf8');
+      for (const k of FAMILY_ENV_KEYS) expect(text).toContain(`${k.env}=${k.envValue}`);
+    }
   });
 
   it('the claude set matches the documented claude-era example values', () => {
@@ -371,6 +380,21 @@ describe('familyStaleResult', () => {
     expect(r?.status).toBe('DRIFT');
     expect(r?.advisory).toBe(true);
     expect(r?.detail).toContain('outlived');
+  });
+
+  // A bind an older devkit wrote still carries haiku; upgrading must not orphan it from the advisory.
+  it('a pin written with the previous family values is still called stale', () => {
+    const repo = repoWith({
+      ...TEMPLATE_CONFIG,
+      review: {
+        ...TEMPLATE_CONFIG.review,
+        ...CLAUDE_FAMILY_SET,
+        [FAMILY_PROVENANCE_KEY]: FAMILY_PROVENANCE_TEXT,
+        model: 'haiku',
+      },
+    });
+    process.env.PATH = binDir('claude', 'codex');
+    expect(familyStaleResult(repo)?.status).toBe('DRIFT');
   });
 
   it('a user-authored note under the provenance key is NOT a devkit pin — exact marker required', () => {
