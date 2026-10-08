@@ -403,8 +403,10 @@ export function lineViolationReport(
 // Entries this commit raised above the strictest parent, e.g. one side of a baseline conflict
 // taken whole, which reverts the other side's lowering for a file the merge never touches.
 function raisedEntries(root: string, grandfathered: LinesBaseline, cap: (file: string) => number) {
-  const prior = lineBaselineParents(root).map((parent) => baselineAt(root, parent));
-  if (prior.some((baseline) => baseline.error || !baseline.present)) return [];
+  const prior = lineBaselineParents(root)
+    .map((parent) => baselineAt(root, parent))
+    .filter((baseline) => baseline.present);
+  if (!prior.length || prior.some((baseline) => baseline.error)) return [];
   return Object.keys(grandfathered.files).filter(
     (file) =>
       grandfathered.files[file] >

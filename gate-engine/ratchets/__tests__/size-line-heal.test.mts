@@ -117,6 +117,29 @@ describe('guard-size heals ceilings a picked-side resolution raised', () => {
     expect(files).toEqual({ 'src/f1.ts': 100, 'src/f2.ts': 90 });
   });
 
+  it('heals against the baselined parent when the merged branch predates the baseline', () => {
+    const root = repo();
+    for (const f of ['f1', 'f2']) write(root, `src/${f}.ts`, lines(120));
+    git(root, 'add', '-A');
+    git(root, 'commit', '-qm', 'debt before any baseline');
+    git(root, 'switch', '-qc', 'old');
+    write(root, 'README.md', 'old branch\n');
+    git(root, 'add', '-A');
+    git(root, 'commit', '-qm', 'old');
+    git(root, 'switch', '-q', 'main');
+    expect(spawnSync(process.execPath, [SCRIPT, 'freeze'], { cwd: root }).status).toBe(0);
+    git(root, 'add', '-A');
+    git(root, 'commit', '-qm', 'baseline');
+    shrinkOn(root, 'shrunk', 'f1', 100);
+    git(root, 'merge', '--no-commit', '--no-ff', 'old');
+    const head = JSON.parse(git(root, 'show', `HEAD:${BASELINE}`));
+    write(root, BASELINE, JSON.stringify({ ...head, files: { ...head.files, 'src/f1.ts': 120 } }));
+    git(root, 'add', BASELINE);
+
+    expect(gate(root).status).toBe(0);
+    expect(stagedEntries(root)).toEqual({ 'src/f1.ts': 100, 'src/f2.ts': 120 });
+  });
+
   it('keeps a `guard-size freeze` refresh of drift already committed at HEAD', () => {
     const root = repo('f1');
     write(root, 'src/f1.ts', lines(130));
