@@ -27,7 +27,8 @@
  *                         any other command (electron's `bunx eslint src`, devkit's own
  *                         `bun run lint:structure`) spawns via PATH and BLOCKS on every non-zero
  *                         code (eslint's exit 2 is a fatal config error, not an opt-out).
- *   --extra "<label>=<cmd>"  (repeatable) an arbitrary deterministic gate; non-zero blocks.
+ *   --extra "<label>=<cmd>"  (repeatable) an arbitrary deterministic gate; non-zero blocks. A
+ *                         repo declares more the same way in guard.config.json `extraGates`.
  *   --only "<id,id>"      restrict the built-in set (overrides .devkit/config.json selection) —
  *                         for repos whose gate set is declared in the hook, not a config.
  * Exit contract: 0 = clean or prefix-skip, 1 = one or more real failures.
@@ -44,7 +45,7 @@ import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseJsonObject } from '../config-json.mts';
-import { coverageBypassed, deterministicStrict, envFlag, structureBypassed } from '../config.mts';
+import { coverageBypassed, deterministicStrict, envFlag } from '../config.mts';
 import { emitGateBypass, emitGateEvent, finishGateTiming } from '../judge/gate-events.mts';
 import { describeCachedPrefix, prefixEntry, recordPrefix } from '../prefix-cache/prefix-cache.mts';
 import {
@@ -55,6 +56,7 @@ import {
   reasonReport,
   withReasonFiles,
 } from './reason.mts';
+import { configExtraGates, type ExtraGate, structureBypassed } from './command-gates.mts';
 import { printRecheckFooter, recheckCommand, recheckLines, registryRecheck } from './recheck.mts';
 import { type ConfigComponent, DETERMINISTIC, type RawDevkitComponents } from './registry.mts';
 
@@ -119,13 +121,6 @@ const WHITESPACE_RE = /\s+/;
 // Rewrites a sibling gate module's `.mjs` literal to the runtime extension. Hoisted (perf: no
 // per-gate regex compile).
 const MJS_EXT_RE = /\.mjs$/;
-
-// A single `--extra` gate spec. `cmd` is absent for a malformed spec (no `=`), which is
-// reported as unrunnable rather than silently dropped.
-interface ExtraGate {
-  label: string;
-  cmd?: string;
-}
 
 // The parsed `parseOpts` shape. `extra` is always present (built up in the loop); the rest
 // appear only when their flag was passed.
@@ -309,6 +304,7 @@ export function runDeterministic(cwd = process.cwd(), opts: RunDeterministicOpts
     effectiveMs?: number,
   ) => finishGateTiming('deterministic', startedAt, code, cacheState, effectiveMs);
   const { exec = execFileSync } = opts;
+  const extra = [...(opts.extra ?? []), ...configExtraGates(cwd)];
   // `--only` is an execution narrowing request, never an authority grant. Validate it before cache
   // lookup, then intersect it with review's positive allowlist so a crafted hook cannot re-enable a
   // guard excluded by local review policy.
@@ -341,7 +337,7 @@ export function runDeterministic(cwd = process.cwd(), opts: RunDeterministicOpts
   // Deterministic-prefix cache (ship only — a no-op otherwise): a cached all-green staged tree skips
   // every gate. checkPrefix returns true = skip, false = run.
   const cachedPrefix = prefixEntry(cwd, { hookPath: opts.hookPath, scope: cacheScope });
-  const skip = Boolean(cachedPrefix);
+  const skip = Boolean(cachedPrefix) && extra.every((x) => x.cmd);
   const bypassStructure = Boolean(opts.structure) && structureBypassed();
   // Emitted BEFORE the prefix-cache short-circuit: a cached all-green tree skips the gate runs, but
   // a bypassed ATTEMPT must still count in telemetry — the bypassed run caches under its own scope,
@@ -362,7 +358,7 @@ export function runDeterministic(cwd = process.cwd(), opts: RunDeterministicOpts
   // green run — the whole defect this exists for is a skipped gate reading like a passed one.
   const skipped: string[] = [];
   if (skip) {
-    const extras = (opts.extra ?? []).map((x) => x.label);
+    const extras = extra.map((x) => x.label);
     const flags = EXTRA_BYPASS_SUFFIXES.filter(envFlag).map((f) => `GUARD_${f}`);
     if (bypassStructure) flags.unshift('GUARD_STRUCTURE_OK');
     if (effectiveIds.includes('coverage') && coverageBypassed()) flags.unshift('GUARD_COVERAGE_OK');
@@ -386,7 +382,7 @@ export function runDeterministic(cwd = process.cwd(), opts: RunDeterministicOpts
       ...registryRecheck(g, argv, cwd),
     };
   });
-  for (const x of skip ? [] : (opts.extra ?? [])) gates.push(commandGate(x.label, cwd, x.cmd));
+  for (const x of skip ? [] : extra) gates.push(commandGate(x.label, cwd, x.cmd));
   if (!skip && opts.structure && !bypassStructure) {
     gates.push(commandGate('structure-lint', cwd, opts.structure));
   }

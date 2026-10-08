@@ -531,6 +531,79 @@ describe('runDeterministic — --structure / --extra / --only', () => {
     expect(err.mock.calls.flat().join('\n')).toContain('lint(unrunnable: empty command)');
   });
 
+  it('guard.config.json extraGates run after the --extra gates and block on non-zero', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const d = repo(['size']);
+    writeFileSync(
+      join(d, 'guard.config.json'),
+      JSON.stringify({ extraGates: { knip: 'bun run knip', types: 'tsc --noEmit' } }),
+    );
+    const exec = vi.fn((bin, argv) => {
+      if (bin === 'bun' && argv.includes('knip'))
+        throw Object.assign(new Error('x'), { status: 1 });
+    });
+    const extra = [{ label: 'lint', cmd: 'oxlint' }];
+    expect(runDeterministic(d, { exec, extra })).toBe(1);
+    const ran = exec.mock.calls.map(([bin, argv]) => [bin, ...argv].join(' ')).slice(1);
+    expect(ran).toEqual(['oxlint', 'bun run knip', 'tsc --noEmit']);
+    expect(err.mock.calls.flat().join('\n')).toContain('deterministic gates failed: knip');
+  });
+
+  // Raw JSON text: a `__proto__` key in an object literal would never reach the file.
+  it.each([
+    ['a non-string command', '{ "knip": 42 }', 'extraGates.knip:'],
+    ['an empty command', '{ "knip": "  " }', 'extraGates.knip:'],
+    ['a non-object block', '["bun run knip"]', 'extraGates:'],
+    ['a __proto__ label', '{ "__proto__": "bun run knip" }', 'extraGates.__proto__:'],
+    ['an empty label', '{ "": "bun run knip" }', 'extraGates.:'],
+    ['a built-in gate name', '{ "structure-lint": "eslint src" }', 'extraGates.structure-lint:'],
+    ['a guard- prefix', '{ "guard-size": "true" }', 'extraGates.guard-size:'],
+  ])('extraGates with %s BLOCKS as unrunnable — never silently skipped', (_, gates, where) => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const d = repo(['size']);
+    writeFileSync(join(d, 'guard.config.json'), `{ "extraGates": ${gates} }`);
+    const exec = mkExec({});
+    expect(runDeterministic(d, { exec })).toBe(1);
+    const out = err.mock.calls.flat().join('\n');
+    expect(out).toContain(`guard.config.json ${where}`);
+    expect(out).toContain('extraGates(unrunnable: empty command)');
+    expect(exec.mock.calls.map(([bin]) => bin)).toEqual(['node']); // size only, no partial set
+  });
+
+  it('an unreadable guard.config.json blocks instead of dropping its extraGates', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const d = repo(['size']);
+    writeFileSync(join(d, 'guard.config.json'), '{ "extraGates": ');
+    expect(runDeterministic(d, { exec: mkExec({}) })).toBe(1);
+    expect(err.mock.calls.flat().join('\n')).toContain('guard.config.json(unreadable)');
+  });
+
+  it('declaring a new extraGate invalidates a cached all-green tree', () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const d = repo(['size']);
+    execFileSync('git', ['init', '-q'], { cwd: d });
+    execFileSync('git', ['add', '.'], { cwd: d });
+    process.env.DEVKIT_SHIP = '1';
+    const exec = mkExec({});
+    expect(runDeterministic(d, { exec })).toBe(0);
+    writeFileSync(join(d, 'guard.config.json'), JSON.stringify({ extraGates: { knip: 'knip' } }));
+    expect(runDeterministic(d, { exec })).toBe(0);
+    expect(exec.mock.calls.map(([bin]) => bin)).toEqual(['node', 'node', 'knip']);
+  });
+
+  it('a malformed extraGates block blocks even when the tree is cached green', () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const d = repo(['size']);
+    execFileSync('git', ['init', '-q'], { cwd: d });
+    execFileSync('git', ['add', '.'], { cwd: d });
+    process.env.DEVKIT_SHIP = '1';
+    expect(runDeterministic(d, { exec: mkExec({}) })).toBe(0);
+    // An untracked config leaves `git write-tree` unchanged, and null fingerprints like absent.
+    writeFileSync(join(d, 'guard.config.json'), '{ "extraGates": null }');
+    expect(runDeterministic(d, { exec: mkExec({}) })).toBe(1);
+  });
+
   it('--only restricts the built-in set, overriding the config selection', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const d = repo(['size', 'fanout', 'dup', 'clone']);

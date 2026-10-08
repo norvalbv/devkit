@@ -12,6 +12,10 @@
 
   "//generated": "Generated paths and the command that regenerates each. When `devkit ship` cannot three-way merge one of these, it names the command instead of asking you to hand-merge a file whose correct content is derived. devkit only PRINTS the command, never runs it. devkit's own .devkit/skills-manifest.json and .devkit/agents-manifest.json are built in; an entry with the same glob overrides one. Globs are repo-relative; the first matching entry wins. Default: [].",
   "generated": [{ "glob": "src/generated/**", "command": "npm run codegen" }],
+
+  "//extraGates": "Repo-specific deterministic gates, label → command. guard-deterministic runs each on every commit and devkit ship, beside the built-in gates and before the AI judges; any non-zero exit blocks (a `guard-structure …` command keeps its exit-2 opt-out). A label starts with a letter or digit, then uses only letters, digits, `.`, `_` and `-`; it may not be a built-in gate name or start with `guard-`. The command is split on whitespace and run without a shell, so put pipes, && or env assignments in a package script. Default: none.",
+  "extraGates": { "knip": "npm run knip", "typecheck": "npm run typecheck" },
+
   "//maxLines": "Raw line cap for implementation files. Existing oversized files are grandfathered shrink-only. 0 = off.",
   "maxLines": 500,
 
