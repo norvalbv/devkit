@@ -535,6 +535,9 @@ SHIP_HOOK_WRAPPER
         [ "${DEVKIT_SHIP_RESUMED:-0}" != "1" ] ||
           echo "      Full brief: the 'Resuming recorded invocation' listing above."
       fi
+      # Last line on purpose: the preflight printed this at the top, and a blocked ship is read by tailing.
+      [ -z "${SHIP_JUDGE_REMEDY:-}" ] ||
+        echo "ship: the judge preflight found a dark judge — every uncached reviewer will fail closed on the retry. To ship inside this window, $SHIP_JUDGE_REMEDY."
     } >&2 || true
     ;;
   esac

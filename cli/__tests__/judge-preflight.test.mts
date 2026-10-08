@@ -1,14 +1,21 @@
 /** The ship-time judge reachability report (sc-2538). The property that matters most is NEGATIVE:
  *  this check may never change what a ship does — a dark provider is not a doomed ship. */
-import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { testSpawnSync } from './_helpers.mts';
 import {
   parseRateLimitsReply,
   readCodexRateLimits,
 } from '../../gate-engine/judge/codex/rate-limits.mts';
 import {
+  claudeFamilyEnvLine,
+  judgeEnvUnsetLine,
+} from '../../gate-engine/judge/outage/family-override.mts';
+import {
+  familyRemedy,
   judgeReachability,
   type PreflightDeps,
   renderPreflight,
@@ -325,6 +332,25 @@ describe('renderPreflight', () => {
     expect(out).not.toContain('GUARD_REVIEW_MODEL=haiku');
   });
 
+  // Ship repeats this at the tail of a blocked attempt, so it exists only when ONE move helps.
+  it('familyRemedy names the claude move for a dark codex and the codex move for a dark claude', () => {
+    expect(familyRemedy(locked)).toContain(claudeFamilyEnvLine());
+    const claudeDark = [
+      { role: 'review' as const, model: 'haiku', bin: 'claude', state: 'unauthenticated' as const },
+    ];
+    expect(familyRemedy(claudeDark)).toContain(judgeEnvUnsetLine());
+  });
+
+  it('familyRemedy is empty when nothing is dark, both CLIs are dark, or the bin is compound', () => {
+    const ok = { role: 'review' as const, model: 'haiku', bin: 'claude', state: 'ok' as const };
+    const unknown = { ...locked[0], state: 'unknown' as const };
+    const claudeOut = { ...ok, role: 'correctness' as const, state: 'unauthenticated' as const };
+    const compound = { ...locked[0], bin: 'codex+claude' };
+    expect(familyRemedy([ok, unknown])).toBe('');
+    expect(familyRemedy([...locked, claudeOut])).toBe('');
+    expect(familyRemedy([compound])).toBe('');
+  });
+
   it('warns that the gates STILL RUN — it is a report, never a decision', () => {
     expect(renderPreflight(locked, now).join('\n')).toContain('the gates below will still run');
   });
@@ -561,5 +587,29 @@ describe('concurrent preflights', () => {
     expect(healthy.every((s) => s.state === 'ok')).toBe(true);
     // No shared module state leaked the locked run's reset into the healthy one.
     expect(healthy.every((s) => s.resetsAt === undefined)).toBe(true);
+  });
+});
+
+describe('ship_judge_preflight — the remedy reaches the shell, the report stays on stderr', () => {
+  const helper = resolve(
+    fileURLToPath(new URL('.', import.meta.url)),
+    '../lib/ship/prepare-gate-worktree.sh',
+  );
+
+  it('captures stdout into SHIP_JUDGE_REMEDY and never echoes it onto ship stdout', () => {
+    const bin = mkdtempSync(join(tmpdir(), 'judge-preflight-stub-'));
+    writeFileSync(join(bin, 'node'), '#!/bin/sh\necho REMEDY\necho REPORT >&2\n');
+    chmodSync(join(bin, 'node'), 0o755);
+    const script =
+      '. "$1"; SHIP_JUDGE_REMEDY=stale; ship_judge_preflight "$2"; printf "[%s]" "$SHIP_JUDGE_REMEDY" >&2';
+    const r = testSpawnSync('/bin/bash', ['-c', script, 'sh', helper, bin], {
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ''}` },
+      encoding: 'utf8',
+    });
+    rmSync(bin, { recursive: true, force: true });
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout).toBe('');
+    expect(r.stderr).toContain('REPORT');
+    expect(r.stderr).toContain('[REMEDY]');
   });
 });

@@ -5,7 +5,11 @@ import { realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { resolveGuardConfig } from '../../../../gate-engine/config.mts';
 import { readCodexRateLimits } from '../../../../gate-engine/judge/codex/rate-limits.mts';
-import { isCodexModel, judgeBinForModel } from '../../../../gate-engine/judge/codex/result.mts';
+import {
+  isCodexModel,
+  judgeBinForModel,
+  judgeProviderOfBin,
+} from '../../../../gate-engine/judge/codex/result.mts';
 import { formatResetDelta } from '../../../../gate-engine/judge/outage/classify.mts';
 import { familyOverrideRemedy } from '../../../../gate-engine/judge/outage/family-override.mts';
 import { claudeLoggedOut, codexLoggedOut } from '../../doctor/judge/judge-auth.mts';
@@ -146,7 +150,7 @@ export function renderPreflight(statuses: ModelStatus[], now: number = Date.now(
     lines.push(`  ${s.role}: ${s.model} via ${s.bin} — ${verdict}${suffix}`);
   }
 
-  const blocked = statuses.filter((s) => s.state !== 'ok' && s.state !== 'unknown');
+  const blocked = darkStatuses(statuses);
   if (blocked.length === 0) return lines;
 
   const locked = blocked.filter((s) => s.state === 'rate-limited');
@@ -165,15 +169,32 @@ export function renderPreflight(statuses: ModelStatus[], now: number = Date.now(
     );
   // Naming the override, never taking it: a runtime cross-family swap moves spend to an unwatched
   // subscription and puts its verdicts outside the model-keyed cache salt (review-gate-in-chain).
-  const dark = [...new Set(blocked.map((s) => s.bin))];
-  // Presence is resolved once per provider, so one absent row speaks for every role on that bin.
-  const present = !blocked.some((s) => s.bin === dark[0] && s.state === 'absent');
+  const dark = singleDarkBin(blocked);
   lines.push(
-    dark.length > 1
+    dark === undefined
       ? '   Both judge CLIs are dark, so no family move helps — install or authenticate one of them.'
-      : `   To ship inside this window, ${familyOverrideRemedy(dark[0] ?? 'codex', present)}.`,
+      : `   To ship inside this window, ${familyOverrideRemedy(dark.bin, dark.present)}.`,
   );
   return lines;
+}
+
+const darkStatuses = (statuses: ModelStatus[]): ModelStatus[] =>
+  statuses.filter((s) => s.state !== 'ok' && s.state !== 'unknown');
+
+/** The one dark judge CLI, or undefined when both are dark. */
+function singleDarkBin(blocked: ModelStatus[]): { bin: string; present: boolean } | undefined {
+  const dark = [...new Set(blocked.map((s) => s.bin))];
+  if (dark.length !== 1) return undefined;
+  // Presence is resolved once per provider, so one absent row speaks for every role on that bin.
+  return { bin: dark[0], present: !blocked.some((s) => s.state === 'absent') };
+}
+
+/** The family move ship repeats at the tail of a blocked attempt, or '' when no single move helps
+ *  (nothing dark, both CLIs dark, or a compound bin whose dark family is unknown). */
+export function familyRemedy(statuses: ModelStatus[]): string {
+  const dark = singleDarkBin(darkStatuses(statuses));
+  if (dark === undefined || judgeProviderOfBin(dark.bin) === null) return '';
+  return familyOverrideRemedy(dark.bin, dark.present);
 }
 
 async function main(argv: string[]): Promise<number> {
@@ -186,6 +207,9 @@ async function main(argv: string[]): Promise<number> {
   if (!guards.review && !guards.sentry) return 0;
   const statuses = await judgeReachability(root, DEFAULT_DEPS, guards);
   for (const line of renderPreflight(statuses)) console.error(line);
+  // stdout carries ONLY the remedy: ship captures it for the blocked-attempt tail.
+  const remedy = familyRemedy(statuses);
+  if (remedy) console.log(remedy);
   return 0;
 }
 
