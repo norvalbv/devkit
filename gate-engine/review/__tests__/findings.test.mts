@@ -1,7 +1,9 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   CLASS_FIX_HINT,
   CLASSIFICATION_LENS,
+  INPUT_VALIDATION_LENS,
   issueLocations,
   renderFindingsBlock,
   renderFindingsBlockForParts,
@@ -227,6 +229,42 @@ describe('class-fix hint for classification findings', () => {
     const block = renderFindingsBlock(res, readRef);
     expect(refsRead).toEqual(['items-spill']);
     expect(countHint(block)).toBe(1);
+  });
+
+  it('pins the input-validation lens to the security checklist vocabulary', () => {
+    for (const reviewer of ['api-security', 'frontend-security']) {
+      const path = new URL(`../../../skills/${reviewer}/scripts/checklist.mjs`, import.meta.url);
+      const checklist = readFileSync(path, 'utf8');
+      expect(checklist).toMatch(new RegExp(`name: '${INPUT_VALIDATION_LENS}'`, 'u'));
+    }
+  });
+
+  it('hints once when a security reviewer blocks on input validation', () => {
+    const block = renderFindingsBlock(
+      correctness(
+        [item(INPUT_VALIDATION_LENS, ['truthy non-string `skipped` passes at src/run.mts:40'])],
+        { name: 'api-security-reviewer' },
+      ),
+    );
+    expect(block).toContain('api-security-reviewer: 1 finding(s):');
+    expect(countHint(block)).toBe(1);
+    expect(block.trimEnd().endsWith(CLASS_FIX_HINT)).toBe(true);
+  });
+
+  it('omits the hint when a security reviewer blocks only outside input validation', () => {
+    const block = renderFindingsBlock(
+      correctness(
+        [
+          item(INPUT_VALIDATION_LENS, ['empty reason at src/run.mts:40'], {
+            disposition: 'waived',
+          }),
+          item('jwt-security', ['alg none accepted at src/auth.mts:9']),
+        ],
+        { name: 'api-security-reviewer' },
+      ),
+    );
+    expect(block).toContain('jwt-security · src/auth.mts:9');
+    expect(countHint(block)).toBe(0);
   });
 
   it('reports blocking lenses sorted and deduplicated, including lines past the cap', () => {

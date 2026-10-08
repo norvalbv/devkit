@@ -38,6 +38,17 @@ describe('antiSlopRemedyLines', () => {
     expect(hints).toHaveLength(1);
   });
 
+  it('names a schema parse or an opted-in type guard for runtime typeof, never truthiness', () => {
+    const typeofRule = 'anti-slop/no-runtime-typeof';
+    const hints = antiSlopRemedyLines([typeofRule, typeofRule], false).filter((line) =>
+      line.includes('no-runtime-typeof:'),
+    );
+    expect(hints).toHaveLength(1);
+    expect(hints[0]).toMatch(/safeParse/u);
+    expect(hints[0]).toMatch(/enable the rule's `allowInTypeGuards`/u);
+    expect(hints[0]).toMatch(/`Boolean\(x\)`, `!!x`\) is not a replacement/u);
+  });
+
   it('still names the acceptance route when no rule has a hint', () => {
     const lines = antiSlopRemedyLines(['anti-slop/no-reflect-get', 'eslint/no-undef'], false);
     expect(lines.join('\n')).toContain(ACCEPT_VIA_OVERRIDE);

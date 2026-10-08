@@ -10,6 +10,9 @@ const LOCATION_RE =
 const LINE_BUCKET = 5;
 /** The correctness lens whose single counterexample stands for a class (mirrors CORRECTNESS_LENSES). */
 export const CLASSIFICATION_LENS = 'error-and-edge-classification';
+/** The security checklist lens (api- and frontend-security) whose findings target a validator. */
+export const INPUT_VALIDATION_LENS = 'input-validation';
+const CLASS_HINT_LENSES = new Set([CLASSIFICATION_LENS, INPUT_VALIDATION_LENS]);
 export const CLASS_FIX_HINT =
   '  ↳ If a finding names one input to a matcher/parser/predicate/validator, derive why it fails and fix + test the whole class (commit-gates skill).';
 
@@ -103,7 +106,9 @@ export function renderFindingsBlockForParts(
   const folded = deduped > 0 ? `, ${deduped} duplicate(s) folded` : '';
   const more =
     total > lines.length ? `\n  …and ${total - lines.length} more in the transcript` : '';
-  const hint = blockingLenses.includes(CLASSIFICATION_LENS) ? `\n${CLASS_FIX_HINT}` : '';
+  const hint = blockingLenses.some((lens) => CLASS_HINT_LENSES.has(lens))
+    ? `\n${CLASS_FIX_HINT}`
+    : '';
   return `${name}: ${total} finding(s)${folded}:\n${lines.join('\n')}${more}${hint}`;
 }
 
