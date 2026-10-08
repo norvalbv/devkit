@@ -102,7 +102,7 @@ Before treating a low number on a CLI module as untested code, rule out the meas
 - **The child's environment.** A spawn that replaces `env` (`{ HOME, PATH }`) instead of spreading `process.env` drops `NODE_V8_COVERAGE`, so that child is never measured.
 - **How the child ended.** Node writes the profile on a normal exit. A child killed with `SIGKILL`, or still running when the test file finishes, contributes nothing.
 - **The path.** The child reports its real path. A project root reached through a symlink (macOS `/tmp` is `/private/tmp`) matches none of it and scores 0%.
-- **A module both imported and spawned.** A runner can merge the in-process profile and the child's profile of the same file before converting them, so the combined number under-reports (labelled examples: vitest 5.0.3). Read such a file's number as a floor, not a measurement.
+- **A module both imported and spawned.** A runner can merge the in-process profile and the child's profile of the same file before converting them, so the combined number is wrong in either direction: real hits are lost and phantom hits appear (labelled examples: vitest 5.0.3). It is neither a floor nor a ceiling; don't use it as evidence for or against a coverage target.
 
 A number explained by one of these is a measurement gap. Say so in the report rather than writing tests to chase it.
 
