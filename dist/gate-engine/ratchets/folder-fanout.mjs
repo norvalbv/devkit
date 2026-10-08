@@ -22,6 +22,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { CONFIG_FILENAME, resolveGuardConfig, resolveTreeExtensions, sourceMatchers, } from '../config.mjs';
 import { exitGate } from '../deterministic/reason.mjs';
+import { overlayInstall } from '../overlay-mode.mjs';
 import { childGrammarNode } from '../structure/walk.mjs';
 import { FANOUT_BASELINE, readRatchetBaseline, removeRatchetBaseline, writeRatchetBaseline, } from './baseline-paths.mjs';
 import { hasStagedFiles, indexFiles, treeFilesAtRef } from './git-index.mjs';
@@ -264,7 +265,8 @@ function runCli(cmd) {
         }
         // Every grandfathered folder healed (baseline had over-cap dirs, none remain) → self-delete the
         // stale baseline in a real commit so it doesn't linger.
-        if (hasBaseline &&
+        if (!overlayInstall(root) &&
+            hasBaseline &&
             Object.keys(frozen.dirs).length > 0 &&
             Object.keys(over).length === 0 &&
             hasStagedFiles(root)) {

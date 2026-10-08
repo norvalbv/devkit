@@ -29,7 +29,7 @@ export function capabilityReady(cwd) {
 function lockableBase(baseRef, baseRefName) {
     return baseRefName !== null || /^(?:HEAD(?:[~^]\d*)*|[0-9a-f]{40}|[0-9a-f]{64})$/u.test(baseRef);
 }
-export function adoptRenames(cwd, baseRef = 'HEAD', requireRenames = false) {
+export function adoptRenames(cwd, overlay, baseRef = 'HEAD', requireRenames = false) {
     if (!capabilityReady(cwd))
         return 2;
     return withLock(join(cwd, ANTI_SLOP_BASELINE_LOCK_REL), () => {
@@ -54,7 +54,7 @@ export function adoptRenames(cwd, baseRef = 'HEAD', requireRenames = false) {
         }
         return withStableGitIndex(cwd, { oid: headOid, symbolicRef: headRef }, { expression: baseRef, oid: baseOid, symbolicRef: baseRefName }, candidateTree, () => {
             writeBaseline(cwd, next);
-            console.log(`anti-slop: adopted ${count(affected)} finding(s) across ${new Set(affected.map((entry) => entry.file)).size} staged rename(s); stage ${ANTI_SLOP_BASELINE_REL}`);
+            console.log(`anti-slop: adopted ${count(affected)} finding(s) across ${new Set(affected.map((entry) => entry.file)).size} staged rename(s)${overlay ? '' : `; stage ${ANTI_SLOP_BASELINE_REL}`}`);
             return 0;
         });
     });
@@ -74,7 +74,7 @@ function planRelocations(cwd, baseline, overlay, baseRef, expectedTree) {
         if (snapshot.skipped) {
             return { relocated: [], bound, staged: snapshot.changedFiles.length > 0 };
         }
-        const pin = snapshot.base && snapshot.baseTree
+        const pin = snapshot.baseTree
             ? mkdtempSync(join(tmpdir(), 'devkit-anti-slop-capability-'))
             : null;
         try {

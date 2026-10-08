@@ -21,11 +21,12 @@ const manifestSchema = z.object({
     dirty: z.record(z.string(), z.string()),
     artifactSha256: z.string(),
     artifactIdentity: z.string(),
+    args: z.array(z.string()).optional(),
 });
 // Only the keys matter here; computePercentages has already validated each entry's shape.
-const artifactKeysSchema = z.record(z.string(), z.unknown());
+export const artifactKeysSchema = z.record(z.string(), z.unknown());
 // The commit's own index, not the default one: a pathspec or `-a` commit stages into a temp index.
-const git = (cwd, args, input) => execFileSync('git', ['--literal-pathspecs', ...args], {
+export const git = (cwd, args, input) => execFileSync('git', ['--literal-pathspecs', ...args], {
     cwd,
     env: commitIndexEnv(cwd),
     encoding: 'utf8',
@@ -51,7 +52,7 @@ export function checkoutRoots(cwd, top) {
 }
 /** HEAD plus a blob id per path that differs from it, taken at run START; null when git cannot answer.
  * `--stdin-paths` applies `git add`'s clean filters, so ids compare directly with tree entries. */
-export function snapshotSource(cwd) {
+export function snapshotSource(cwd, args = []) {
     try {
         const top = git(cwd, ['rev-parse', '--show-toplevel']).trim();
         const head = git(top, ['rev-parse', 'HEAD']).trim();
@@ -91,7 +92,7 @@ export function snapshotSource(cwd) {
         for (const p of toHash.filter((q) => q.includes('\n'))) {
             dirty[p] = git(top, ['hash-object', '--', p]).trim();
         }
-        return { roots: checkoutRoots(cwd, top), head, dirty };
+        return { roots: checkoutRoots(cwd, top), head, dirty, args };
     }
     catch {
         return null;
@@ -149,6 +150,7 @@ export function stageManifest(runDir, artifact, snapshot, runId) {
         dirty: snapshot.dirty,
         artifactSha256: sha256(readFileSync(artifact)),
         artifactIdentity: fileIdentity(statSync(artifact, { bigint: true })),
+        args: snapshot.args,
     };
     const staged = join(runDir, MANIFEST_NAME);
     writeFileSync(staged, `${JSON.stringify(manifest)}\n`);
@@ -182,6 +184,66 @@ export function readManifest(coverageDir) {
     catch {
         return null;
     }
+}
+// Flags that narrow which tests run, so the report cannot speak for the whole repo.
+const NARROWING = new Set([
+    '-t',
+    '--testNamePattern',
+    '--project',
+    '--shard',
+    '--changed',
+    '--dir',
+    '--root',
+    '--exclude',
+]);
+// Non-narrowing flags whose value may follow as a separate token (`--reporter json`).
+const VALUED = new Set([
+    '--reporter',
+    '--outputFile',
+    '--maxWorkers',
+    '--minWorkers',
+    '--pool',
+    '--testTimeout',
+    '--hookTimeout',
+    '--teardownTimeout',
+    '--retry',
+    '--bail',
+    '--config',
+    '-c',
+    '--environment',
+    '--mode',
+    '--browser',
+    '--maxConcurrency',
+    '--slowTestThreshold',
+]);
+const VALUED_PREFIX = /^--(coverage|outputFile|retry|poolOptions|browser|sequence)\./;
+const SILENT_VALUE = new Set(['true', 'false', 'passed-only']);
+/** Did these forwarded vitest args narrow the run? Any bare token not known to be a flag's value is a
+ * test filter, so an unrecognised `--flag value` errs toward scoped. */
+export function isScopedRun(args) {
+    for (let i = 0; i < args.length; i += 1) {
+        const arg = args[i] ?? '';
+        if (!arg.startsWith('-') || NARROWING.has(arg.split('=')[0] ?? ''))
+            return true;
+        if (arg.includes('='))
+            continue;
+        const next = args[i + 1] ?? '';
+        if (VALUED.has(arg) || VALUED_PREFIX.test(arg))
+            i += 1;
+        else if (arg === '--silent' && SILENT_VALUE.has(next))
+            i += 1;
+    }
+    return false;
+}
+/** The manifest, only when it describes exactly these artifact bytes from this very file. */
+export function boundManifest(coverageDir, artifact) {
+    const manifest = readManifest(coverageDir);
+    // Hash AND file identity: byte-identical output from another run is a different measurement.
+    return manifest &&
+        sha256(artifact.bytes) === manifest.artifactSha256 &&
+        artifact.identity === manifest.artifactIdentity
+        ? manifest
+        : null;
 }
 /** path → blob id for `paths` in `treeish`. A path absent from the tree is absent from the map. */
 export function blobsIn(top, treeish, paths) {
@@ -217,13 +279,11 @@ function measuredPaths(artifact, roots) {
 /** Compare each briefed blob with the one the manifest says was measured. `artifact` is the exact
  * bytes the verdict came from; `classify` routes a path to production / test / other (never drift). */
 export function checkProvenance(cwd, coverageDir, artifact, classify) {
-    const manifest = readManifest(coverageDir);
-    if (!manifest) {
+    if (!readManifest(coverageDir)) {
         return { state: 'unknown', reason: 'no manifest — not produced by `devkit coverage-run`' };
     }
-    // Hash AND file identity: byte-identical output from another run is a different measurement.
-    if (sha256(artifact.bytes) !== manifest.artifactSha256 ||
-        artifact.identity !== manifest.artifactIdentity) {
+    const manifest = boundManifest(coverageDir, artifact);
+    if (!manifest) {
         return { state: 'unknown', reason: 'the artifact was replaced after its manifest was written' };
     }
     try {

@@ -20,6 +20,7 @@ import { overlayHooksPath } from '../husky/overlay/overlay-home.mjs';
 import { firstLine } from '../standalone.mjs';
 import { check } from './check-result.mjs';
 import { foreignPin, hooksDir, isInside, isInsideResolved, sharedHooksPath, worktreeHooksPathState, worktreeScopedPin, } from './hooks-path.mjs';
+import { FALLOW_STAGED_BLOCK } from '../husky/gate-policy/fallow-staged.mjs';
 import { strayGateCalls } from './stray-gate-calls.mjs';
 import { checkFailOpenGuards } from './unguarded-gate-calls.mjs';
 // doctor --fix: re-point core.hooksPath at the overlay's ABSOLUTE hooks dir (sc-4157), never ahead
@@ -41,7 +42,7 @@ export function repointHooksPath(gitRoot, hookOk) {
 // Selection-aware: only the SELECTED guards must be present in the block (a deselected
 // guard being absent is correct, not drift). Monorepo: the hook lives at the git root and the
 // block is package-scoped — resolve both from cwd.
-export function checkHusky(cwd, selectedGuards) {
+export function checkHusky(cwd, selectedGuards, fallow = false) {
     const { gitRoot, pkgRel } = detectGitRoot(cwd);
     const hookPath = join(gitRoot, '.husky', 'pre-commit');
     if (!existsSync(hookPath)) {
@@ -67,6 +68,8 @@ export function checkHusky(cwd, selectedGuards) {
         if (OWN_FRAGMENT.has(g) && !block.includes(`guard-${g}`))
             missing.push(g);
     }
+    if (fallow && !block.includes(FALLOW_STAGED_BLOCK))
+        missing.push('fallow');
     if (missing.length) {
         return check('.husky/pre-commit', 'DRIFT', `block missing gate(s): ${missing.join(', ')}`, 'run `devkit init --force` (or `devkit upgrade`) to regenerate the block', true);
     }
@@ -355,9 +358,9 @@ export function replaceableHooksPathPin(cwd) {
  * growing its own call site — cli/commands/doctor.mts sits on its recorded size budget and the
  * ratchet is shrink-only.
  */
-export function hookChecks(cwd, guards) {
+export function hookChecks(cwd, guards, fallow = false) {
     return [
-        checkHusky(cwd, guards),
+        checkHusky(cwd, guards, fallow),
         checkHookRunner(cwd),
         ...checkHooksPathOwner(cwd),
         checkFailOpenGuards(cwd),

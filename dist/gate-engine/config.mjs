@@ -98,7 +98,7 @@ export const DEFAULTS = Object.freeze({
     testCommand: null,
     // Coverage-gate config: `{}` = active-strict (no % floor, but absent coverage data FAILS HARD —
     // a selected gate never silently passes unverified); `false` = explicit opt-out;
-    // `{ statements, ... }` enforces the keys present. See coverage/run.mts.
+    // `{ statements, ... }` enforces the keys present; `{ scope: 'diff', addedLines }` judges added lines.
     coverage: Object.freeze({}),
     // Review-agent topology (the reviewer subagents READ these). Generic defaults: `src` as the only
     // backend root, NO frontend topology (empty array = selectReviewers never picks that domain; the
@@ -166,18 +166,6 @@ export function envFlag(name) {
  */
 export function coverageBypassed() {
     return envFlag('COVERAGE_OK') || envFlag('NO_COVERAGE');
-}
-/**
- * Is structure lint bypassed for THIS run? The orchestrator owns this predicate rather than
- * guard-structure because Electron consumers supply their own arbitrary eslint command through
- * `--structure`; putting the bypass inside guard-structure would leave those consumers wedged.
- *
- * `GUARD_STRUCTURE_OK` is the canonical operator assertion. `GUARD_NO_STRUCTURE` is the accepted
- * guessable alias, matching coverageBypassed. guard-deterministic banners + telemeters the skip and
- * salts its prefix-cache scope so this one-run assertion cannot authorise a later normal run.
- */
-export function structureBypassed() {
-    return envFlag('STRUCTURE_OK') || envFlag('NO_STRUCTURE');
 }
 /**
  * Does THIS run refuse to accept a deterministic gate's fail-open? Lives beside coverageBypassed for
@@ -298,6 +286,7 @@ function resolveLoadedGuardConfig(file, cwd) {
         // Prior-art reference-checkout globs; declared-only, never a scan of undeclared siblings.
         // Resolve against cwd (W-3), then the main worktree's same dir (skills/prior-art/SKILL.md).
         research: { referenceCheckouts: globs(file.research?.referenceCheckouts) },
+        extraGates: file.extraGates,
         noLog: noLogEnv ?? Boolean(file.noLog ?? DEFAULTS.noLog),
         noLlm: noLlmEnv ?? Boolean(file.noLlm ?? DEFAULTS.noLlm),
         // Echo the resolution base so engines never have to re-derive it (and never reach

@@ -7,7 +7,8 @@
 # (origin/<branch>), not this checkout's HEAD; the branch must already exist (the opposite preflight);
 # the new commit is the DELTA between that tip and your current files (so we copy current content
 # over the fetched tip rather than replay a HEAD-relative patch, which could conflict with the
-# first ship's content); and we push ff to the branch (no -u, no new PR). The shared worktree +
+# first ship's content — except a path the PR branch changed since your copy was taken, which
+# reship/anchor.mts merges instead); and we push ff to the branch (no -u, no new PR). The shared worktree +
 # symlink + marker ceremony is duplicated rather than shared so this flow can't perturb new-ship.
 # fallow-ignore-next-line code-duplication
 #
@@ -133,6 +134,11 @@ REWRITE_RECEIPT_PROVEN=0
 RESUME_ROOT=$(git rev-parse --show-toplevel)
 RESUME_SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 SHIP_INTENT="$RESUME_SCRIPT_DIR/ship-intent.mts"; [ -f "$SHIP_INTENT" ] || SHIP_INTENT="$RESUME_SCRIPT_DIR/ship-intent.mjs"
+. "$RESUME_SCRIPT_DIR/resume-extras-notice.sh"
+# Re-pushes pay the same gate cost and can inherit the same stale checkout baseline as new ships.
+. "$RESUME_SCRIPT_DIR/prepare-gate-worktree.sh"
+# Project before the intent read and write: a legacy linked .devkit resolves the record in the home.
+gate_project_caller "$RESUME_ROOT" || true
 RESUME_BODY=
 if [ "$RESUME" -eq 1 ]; then
   SI_OUT=$(mktemp "${TMPDIR:-/tmp}/ship-intent-read.XXXXXX")
@@ -206,13 +212,18 @@ rewrite_remote() {
   fi
   node "$REWRITE_REMOTE_SUPERVISOR" 60 -- "$@"
 }
-# The open PR's identity for the rewrite lease. baseRefOid is deliberately absent: GitHub snapshots
-# it at the PR's last head push and never advances it as the base moves, so it cannot be compared
-# with a live base tip and must not make two reads of an unchanged PR differ (sc-2739).
-rewrite_pr_identity() {
-  rewrite_remote gh pr view "$BR" --repo "$REPO" \
-    --json number,state,headRefName,headRefOid,headRepository,baseRefName,url \
-    --jq '[.number,.state,.headRefName,.headRefOid,(.headRepository.nameWithOwner // ""),.baseRefName,.url] | @tsv' 2>/dev/null
+. "$SCRIPT_DIR/closed-pr-remedy.sh"
+# An append onto a MERGED or CLOSED PR's branch reaches no base, so it must never report success.
+# Fail-open when gh cannot answer: the append path has always treated gh as best-effort.
+# usage: reship_refuse_closed_pr <when> <outcome>
+reship_refuse_closed_pr() {
+  local p paths=
+  read_pr_state || { echo "could not verify PR state for origin/$BR; continuing" >&2; return 0; }
+  [ "$PR_SEEN_STATE" != "OPEN" ] || return 0
+  for p in "${PATHS[@]}"; do paths="$paths $(printf '%q' "$p")"; done
+  echo "ship --pr: PR #$PR_SEEN_NUM for origin/$BR is $PR_SEEN_STATE$1 — a push there never reaches $PR_SEEN_BASE; $2" >&2
+  print_closed_pr_remedy "$PR_SEEN_BASE" "--$paths" "then re-run this command"
+  return 1
 }
 # Resolve owner/repo from origin (best-effort — only used for the final PR-URL print, which falls
 # back to a plain message; a non-GitHub origin still re-pushes fine).
@@ -264,13 +275,7 @@ if [ "$RESUME" -eq 1 ]; then
   # Under --pr the body reaches the PR only when a body flag asked for it (now or as recorded).
   if [ "$UPDATE_PR_BODY" -eq 1 ]; then si_pr_effect="commit + PR body"; else si_pr_effect="commit only, PR body kept"; fi
   echo "Resuming recorded invocation for $BR (--pr): \"$TITLE\" — ${#PATHS[@]} paths, $SHIP_BODY_NOTE ($si_pr_effect), recorded $RESUME_CREATED" >&2
-  for p in "${PATHS[@]}"; do
-    si_extra=
-    for q in ${RESUME_EXTRA_PATHS[@]+"${RESUME_EXTRA_PATHS[@]}"}; do [ "$q" = "$p" ] && { si_extra=1; break; }; done
-    if [ -n "$si_extra" ]; then printf '  + %q   (briefed by this retry)\n' "$p" >&2
-    else printf '    %q\n' "$p" >&2
-    fi
-  done
+  ship_resume_brief
 fi
 
 # Test seam: print the resolved target + repo, then exit BEFORE any side effect (no fetch / push).
@@ -297,6 +302,7 @@ REWRITE_PUBLISH_LOCK=""
 REWRITE_PUBLISH_STAMP=""
 REWRITE_PUBLISH_OWNED=0
 rewrite_ref_cleanup() {
+  ship_resume_extras_notice # first: it reads the exit status
   if [ -n "$REWRITE_HEAD_REF" ]; then
     cleanup_oid=${EXPECTED_REMOTE:-$(git rev-parse -q --verify "$REWRITE_HEAD_REF" 2>/dev/null || true)}
     [ -z "$cleanup_oid" ] || git update-ref -d "$REWRITE_HEAD_REF" "$cleanup_oid" 2>/dev/null || true
@@ -506,7 +512,7 @@ if [ "$REWRITE" -eq 1 ]; then
     [ "$BODY_RECEIPT" != "$EXPECTED_REMOTE" ] || REWRITE_RECEIPT_PROVEN=1
   fi
 
-  PR_FIELDS=$(rewrite_pr_identity) || {
+  PR_FIELDS=$(pr_identity) || {
       echo "cannot inspect the open PR for origin/$BR" >&2; exit 1
     }
   IFS=$'\t' read -r PR_NUM PR_STATE PR_HEAD_REF PR_HEAD_OID PR_HEAD_REPO PR_BASE_REF PR_URL <<< "$PR_FIELDS"
@@ -582,10 +588,10 @@ else
     echo "no remote branch origin/$BR to re-push to — open the PR first (ship without --pr)" >&2; exit 1
   }
   BASE=$(git rev-parse FETCH_HEAD)
+  # Before the intent write too: no later push can reach a non-open PR, so nothing is worth resuming.
+  [ -n "${SHIP_DRY_RUN:-}" ] || reship_refuse_closed_pr "" "nothing pushed" || exit 1
 fi
 
-# Re-pushes pay the same gate cost and can inherit the same stale checkout baseline as new ships.
-. "$SCRIPT_DIR/prepare-gate-worktree.sh"
 . "$SCRIPT_DIR/ship-run-record.sh"
 . "$SCRIPT_DIR/worktree-registry.sh"
 . "$SCRIPT_DIR/reclaim-orphan-worktrees.sh"
@@ -663,6 +669,7 @@ fi
 # ship-branch.sh's twin). Serialize this lineage replacement with recovery's locked ownership check:
 # once a recovery proves ownership, no fresher invocation can replace the record before its edit.
 rewrite_publish_lock_acquire || exit 1
+RESUME_EXTRAS_UNRECORDED=0
 SHIP_INTENT_GENERATION=$(printf '%s' "$BODY" | node "$SHIP_INTENT" "${SHIP_INTENT_ARGS[@]}" -- "${PATHS[@]}") \
   || SHIP_INTENT_GENERATION=""
 if [ -z "$SHIP_INTENT_GENERATION" ]; then
@@ -706,6 +713,7 @@ cleanup() {
   rewrite_publish_lock_release
   rewrite_ref_cleanup
   rm -f "$STAGED_STATE"
+  [ -z "${ANCHOR_OUT:-}" ] || rm -f "$ANCHOR_OUT"
   [ -z "$BODY_RECOVERY_INDEX" ] || rm -f "$BODY_RECOVERY_INDEX"
   [ -z "$BODY_RECOVERY_PATCH" ] || rm -f "$BODY_RECOVERY_PATCH"
   if [ -n "$KEEP_WT" ]; then
@@ -736,25 +744,10 @@ git -c core.hooksPath=/dev/null worktree add -q --detach "$WT" "$BASE" >&2
 # that made it, the same way new-ship's is.
 ship_run_record_begin "$WT" "$BR" "$BASE" 0 reship
 
-# Copy the CURRENT content of each path over the pinned parent (add/modify), or delete it. For an
-# append that parent is the PR tip; for a rewrite it is the current PR base and the complete-scope
-# preflight above ensures rewritten-away old-PR paths cannot be silently omitted.
-for p in "${PATHS[@]}"; do
-  if [ -e "$ROOT/$p" ]; then
-    mkdir -p "$WT/$(dirname "$p")"
-    cp -Pp "$ROOT/$p" "$WT/$p"
-    # -f: a briefed path can be TRACKED on the PR branch yet sit under a gitignored dir (a tracked
-    # `dist/` build artifact is the case that bit us). A plain `git add` STAGES it but still exits
-    # nonzero with "The following paths are ignored", and set -e (top of file) would abort the whole
-    # re-push before the staged-set snapshot, gates, commit, and push. Every PATHS entry is
-    # caller-explicit (positional after --; directories already rejected above), so forcing it is
-    # exactly what was asked — same reasoning as husky-block.mts's `git add -f`.
-    git -C "$WT" add -f -- ":(literal)$p"
-  else
-    # Literal: a glob-named path that is gone must remove only itself, never the files it matches.
-    git -C "$WT" rm -q --ignore-unmatch -- ":(literal)$p" || true
-  fi
-done
+# Stage the briefed paths: a rewrite copies them over the PR base, an append merges them onto the tip.
+ANCHOR_OUT=
+. "$SCRIPT_DIR/reship/stage.sh"
+reship_stage_paths "$SCRIPT_DIR"
 
 # A retained rewrite intent may resume after its force-push succeeded but before the PR body edit.
 # Only a private receipt written after THIS exact commit passed gates is provenance. Rebuild its
@@ -799,6 +792,7 @@ fi
 
 # Nothing to add? Abort before an empty commit (a re-push with no delta is a no-op, not a commit).
 if git -C "$WT" diff --cached --quiet; then
+  reship_refresh_anchors "$SCRIPT_DIR"
   # A lost push response leaves the exact body-bearing intent in place even though the remote now
   # contains its commit. Resume must finish that recorded metadata mutation before spending the
   # intent. The same arm makes an explicit no-delta invocation a safe body-only repair. Serialize
@@ -968,7 +962,7 @@ if [ "$REWRITE_ALREADY_PUBLISHED" -eq 1 ]; then
     echo "reship: recorded rewrite recovery refused: its intent was superseded" >&2
     exit 1
   }
-  RECOVERY_PR_FIELDS=$(rewrite_pr_identity) || {
+  RECOVERY_PR_FIELDS=$(pr_identity) || {
       echo "reship: recorded rewrite recovery refused: cannot re-check PR identity" >&2
       exit 1
     }
@@ -1040,7 +1034,7 @@ if [ "$UPDATE_PR_BODY" -eq 1 ]; then
   fi
 fi
 if [ "$REWRITE" -eq 1 ]; then
-  CURRENT_PR_FIELDS=$(rewrite_pr_identity) || {
+  CURRENT_PR_FIELDS=$(pr_identity) || {
       echo "rewrite rejected: cannot re-check PR identity before push" >&2; exit 1
     }
   [ "$CURRENT_PR_FIELDS" = "$PR_FIELDS" ] || {
@@ -1109,10 +1103,16 @@ if [ "$REWRITE" -eq 1 ]; then
   fi
   echo "replaced origin/$BR (${EXPECTED_REMOTE:0:7} → ${SHIP_COMMIT:0:7}) with one gated commit on $BASE_REF" >&2
 else
+  # Gates can run for many minutes; auto-merge landing inside them must not orphan this commit.
+  reship_refuse_closed_pr " (it changed during gates)" "nothing pushed" || exit 1
   DEVKIT_SHIP_PREPUSH_SKIP_SHA="$SHIP_COMMIT" git -C "$WT" push origin "HEAD:$BR" || {
     echo "push to origin/$BR rejected (not a fast-forward — the branch advanced). Re-run after fetching." >&2
     exit 1
   }
+  # A plain push cannot lease on PR state, so a close landing between the read above and the push
+  # fails loudly here. Head equality cannot prove the merge took this commit, so none is assumed.
+  reship_refuse_closed_pr " (it closed as this run pushed)" \
+    "${SHIP_COMMIT:0:7} landed on origin/$BR — confirm origin/<base> has it before re-shipping" || exit 1
 fi
 fi
 
@@ -1169,7 +1169,8 @@ else
     [ -z "${SHIP_INTENT_GENERATION:-}" ] || node "$SHIP_INTENT" delete --root "$ROOT" --branch "$BR" --generation "$SHIP_INTENT_GENERATION" -- ${PATHS[@]+"${PATHS[@]}"} || true
   fi
   node "$RMW" \
-    --root "$ROOT" --git-root "$WT" --branch "$BR" --base-sha "$BASE" --tip-sha "$SHIP_COMMIT" --merge -- "${PATHS[@]}" \
+    --root "$ROOT" --git-root "$WT" --branch "$BR" --base-sha "$BASE" --tip-sha "$SHIP_COMMIT" \
+    --anchors "$ANCHOR_OUT" --merge -- "${PATHS[@]}" \
     || echo "reship: reconcile manifest not updated (non-fatal)" >&2
   PR_URL=$(gh pr view "$BR" --repo "$REPO" --json url -q .url 2>/dev/null) || PR_URL=""
 fi

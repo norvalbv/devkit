@@ -19,6 +19,10 @@ Usage (wire it as the consumer's own coverage script):
   "test:run:coverage": "devkit coverage-run"
 
   devkit coverage-run [...vitest args]     extra args are forwarded to \`vitest run\`
+  devkit coverage-run src/a.test.ts        a scoped run: seconds, enough for "scope": "diff"
+
+The forwarded args are recorded with the report. A run narrowed to some tests (test files, -t,
+--project, --shard, --changed) feeds only the diff-scope gate; the whole-repo gate refuses it.
 
 Each run gets its own coverage/.runs/<unique> reports directory and republishes to
 coverage/coverage-final.json — the path \`guard-coverage\` reads — so two agents running tests in one

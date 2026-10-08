@@ -3,11 +3,11 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { resolveGuardConfig, sourceMatchers } from '../../../gate-engine/config.mjs';
-import { parsePatchHunks } from '../../../gate-engine/comment-firewall/patch.mjs';
-import { addedLineCoverage, lineRanges, } from '../../../gate-engine/coverage/lines.mjs';
+import { addedLineCoverage, addedLinesOf, lineRanges, } from '../../../gate-engine/coverage/lines.mjs';
 import { COVERAGE_DIR, COVERAGE_FILE } from '../../../gate-engine/coverage/produce.mjs';
 import { blobsIn, checkoutRoots, keysByPath, readArtifact, readManifest, sha256, } from '../../../gate-engine/coverage/provenance.mjs';
-import { computePercentages, TEST_PATH } from '../../../gate-engine/coverage/run.mjs';
+import { TEST_PATH } from '../../../gate-engine/coverage/gate-shared.mjs';
+import { computePercentages } from '../../../gate-engine/coverage/run.mjs';
 import { gitRunner, line, ok } from '../../lib/ship/base-drift/git-run.mjs';
 import { resolveBase } from '../../lib/ship/base-drift/resolve-base.mjs';
 export const meta = {
@@ -28,6 +28,9 @@ Reads ${COVERAGE_FILE} as \`devkit coverage-run\` left it; it never runs tests. 
 committed, staged and unstaged changes since the merge-base, plus untracked source files. A line
 counts when a statement starts on it (istanbul's line rule, as guard-coverage uses), so comments,
 braces and types are neither covered nor uncovered.
+
+guard-coverage enforces this same measure at commit time when guard.config.json sets
+"coverage": { "scope": "diff", "addedLines": <pct> }.
 
 Use this when a brief asks for coverage of "the new diff": whole-file percentages on a large
 existing file mostly measure code the change never touched.
@@ -95,11 +98,7 @@ function addedLines(run, mergeBase, path) {
         '--',
         path,
     ]);
-    const added = new Set();
-    for (const hunk of parsePatchHunks(diff.stdout))
-        for (const n of hunk.addedLines)
-            added.add(n);
-    return added;
+    return addedLinesOf(diff.stdout);
 }
 /** Every line of an untracked file is added. */
 function allLines(top, path) {

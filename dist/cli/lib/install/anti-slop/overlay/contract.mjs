@@ -7,15 +7,10 @@ import { resolveOxlintEntryConfig } from '../../oxc/lifecycle.mjs';
 export function reportOverlayContract(cwd) {
     if (resolveOxlintEntryConfig(cwd) === null)
         return;
-    console.log('anti-slop: overlay — judged against a per-clone, git-ignored baseline; no committed base, so no shrink-only ratchet or rename/receipt enforcement');
+    console.log('anti-slop: overlay — judged against a per-clone, git-ignored baseline; no committed base, so no shrink-only ratchet or receipt enforcement');
 }
 /**
- * Why a base-tree comparison cannot run here, or null when it can. Refusing beats a vacuous pass:
- * `baselineAtTree` is always null in overlay, so the envelope's checks go inert, not satisfied.
+ * Why a base-tree comparison cannot run here. Refusing beats a vacuous pass: `baselineAtTree` is
+ * always null in overlay, so the envelope's checks go inert, not satisfied.
  */
-export function overlayBaseRefusal(operation, hasBaseRef) {
-    if (!hasBaseRef && operation !== 'adopt-renames')
-        return null;
-    const subject = operation === 'adopt-renames' ? 'adopt-renames is' : '--base is';
-    return `anti-slop: ${subject} unavailable in an overlay install — the baseline is per-clone and git-ignored, so no committed base tree carries one to compare against. Use \`devkit anti-slop check --staged\` (the pre-commit gate) or a plain working-tree \`check\`.`;
-}
+export const OVERLAY_BASE_REFUSAL = 'anti-slop: --base is unavailable in an overlay install — the baseline is per-clone and git-ignored, so no committed base tree carries one to compare against. Use `devkit anti-slop check --staged` (the pre-commit gate) or a plain working-tree `check`.';

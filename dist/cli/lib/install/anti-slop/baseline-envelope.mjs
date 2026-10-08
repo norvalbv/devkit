@@ -63,9 +63,35 @@ export function printNewAntiSlopFindings(groups) {
         console.log(`      ${group.diagnostic}`);
     }
 }
+/**
+ * Baseline debt still keyed at a path Git renamed. Without a committed baseline only debt that
+ * survives at the new path counts: a stale local entry is harmless and must not block the commit.
+ */
+function staleRenameFailure(candidate, envelope, candidateGroups, baseRef) {
+    const live = new Set(candidateGroups.map((group) => `${group.file}\0${relocationKey(group)}`));
+    const staleRenames = candidate.entries.flatMap((entry) => {
+        const nextFile = envelope.renames.get(entry.file);
+        if (!nextFile)
+            return [];
+        const survives = envelope.base || live.has(`${nextFile}\0${relocationKey(entry)}`);
+        return survives ? [{ ...entry, nextFile }] : [];
+    });
+    if (staleRenames.length === 0)
+        return false;
+    for (const entry of staleRenames) {
+        console.error(`BASELINE-RENAME ${entry.ruleId} ${entry.file} -> ${entry.nextFile} (${entry.count} adopted finding(s))`);
+    }
+    const remedy = baseRef
+        ? `devkit anti-slop adopt-renames --base ${baseRef}`
+        : 'devkit anti-slop adopt-renames';
+    failLine(`anti-slop: FAIL — persist renamed debt with \`${remedy}\`${envelope.base ? ', then stage the baseline' : ''}`);
+    return true;
+}
 export function checkBaselineEnvelope(candidate, envelope, candidateGroups, baseRef, relocation) {
-    if (!envelope?.base)
-        return 0; // one-time bootstrap: the base commit has no baseline
+    // No committed baseline (bootstrap, overlay): nothing to ratchet against, but renames still apply.
+    if (!envelope?.base) {
+        return envelope && staleRenameFailure(candidate, envelope, candidateGroups, baseRef) ? 1 : 0;
+    }
     const removedMigrationReceipts = removedBaselineMigrationReceipts(envelope.base, candidate);
     if (removedMigrationReceipts.length > 0) {
         for (const receipt of removedMigrationReceipts) {
@@ -97,20 +123,8 @@ export function checkBaselineEnvelope(candidate, envelope, candidateGroups, base
         failLine('anti-slop: FAIL — record the release activation receipt even when the newly activated rules have zero findings');
         return 1;
     }
-    const staleRenames = candidate.entries.flatMap((entry) => {
-        const nextFile = envelope.renames.get(entry.file);
-        return nextFile ? [{ ...entry, nextFile }] : [];
-    });
-    if (staleRenames.length > 0) {
-        for (const entry of staleRenames) {
-            console.error(`BASELINE-RENAME ${entry.ruleId} ${entry.file} -> ${entry.nextFile} (${entry.count} adopted finding(s))`);
-        }
-        const remedy = baseRef
-            ? `devkit anti-slop adopt-renames --base ${baseRef}`
-            : 'devkit anti-slop adopt-renames';
-        failLine(`anti-slop: FAIL — persist renamed debt with \`${remedy}\`, then stage the baseline`);
+    if (staleRenameFailure(candidate, envelope, candidateGroups, baseRef))
         return 1;
-    }
     const omittedActivatedFindings = compareBaseline(candidate, candidateGroups).newGroups.filter((group) => envelope.activatedRuleIds.has(group.ruleId) && group.severity === 'error');
     if (omittedActivatedFindings.length > 0) {
         printNewAntiSlopFindings(omittedActivatedFindings);
@@ -193,7 +207,7 @@ export function reportInheritedForgiveness(before, after) {
     console.log(`anti-slop: base allowance forgave ${total} inherited finding(s) across ${rules.length} rule(s): ${rules.join(', ')}`);
 }
 export function inheritedBaseAllowance(cwd, capabilityCwd, selected, candidateGroups, envelope) {
-    if (!envelope?.base || !envelope.baseTree)
+    if (!envelope?.baseTree)
         return selected;
     const candidateNew = compareBaseline(selected, candidateGroups).newGroups.filter((group) => !envelope.activatedRuleIds.has(group.ruleId));
     if (candidateNew.length === 0)

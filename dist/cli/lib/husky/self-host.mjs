@@ -55,8 +55,8 @@ export const SELF_HOST_EXTRAS = [
 ];
 // The hand hook ended with an ADVISORY fallow audit (dead-code / duplication / complexity on the
 // changed set; command-v-guarded so it no-ops without fallow, `|| true` so it never blocks). The
-// package generator emits no fallow fragment and `fallow: false` keeps fallow an opt-in COMPONENT
-// (no installer / no wireFallowGate), so this preserves JUST the advisory line — injected as the last
+// builders below pin `fallow: false`, so the generator's BLOCKING staged gate is never emitted here
+// and this preserves JUST the advisory line — injected as the last
 // fragment INSIDE the devkit-guards block (a sentinel'd fragment). Inside, not a trailing tail: an
 // out-of-block line gets mis-absorbed into the preamble by replaceGuardBlock's findPreambleEnd on a
 // re-run (splitting the comment from its command), and being in-block means the parity/doctor check
@@ -218,11 +218,11 @@ function withSelfHostAdvisories(text, pkgRel) {
 }
 /** The self-host guard BLOCK (markers inclusive) — the shared source of truth for install, doctor, and the parity test. */
 export function buildSelfHostBlock(sel, pkgRel, cwd) {
-    return withSelfHostAdvisories(toSelfHost(buildGuardBlock(sel, pkgRel), cwd), pkgRel);
+    return withSelfHostAdvisories(toSelfHost(buildGuardBlock({ ...sel, fallow: false }, pkgRel), cwd), pkgRel);
 }
 /** A full fresh self-host hook (preamble + rewritten block incl. self-host advisories + exit 0). */
 export function buildSelfHostHook(sel, pkgRel, cwd) {
-    return withSelfHostAdvisories(toSelfHost(buildFullHook(sel, pkgRel), cwd), pkgRel);
+    return withSelfHostAdvisories(toSelfHost(buildFullHook({ ...sel, fallow: false }, pkgRel), cwd), pkgRel);
 }
 /**
  * Write/refresh the self-host `.husky/pre-commit`. Fresh (or a MARKER-LESS hand-authored hook — the
