@@ -7,6 +7,7 @@ import {
   eslintOverlayContent,
   isLegacyEslintOverlay,
   legacyEslintOverlayContent,
+  writeBiomeOverlay,
   writeEslintOverlay,
 } from '../lib/install/overlay-lint-configs.mts';
 import { rootRegistry, testSpawnSync as spawnSync } from './_helpers.mts';
@@ -339,5 +340,23 @@ describe('writeEslintOverlay — never overwrites unattended', () => {
     expect(read(root)).toBe(legacyEslintOverlayContent('eslint.config.mjs'));
 
     expect(writeEslintOverlay(mkTmp('overlay-eslint-none-'), false, false)).toBe(false);
+  });
+});
+
+describe('biome overlay — a consumer copy is kept without --force', () => {
+  it('keeps an edited biome.devkit.jsonc, and --force replaces it', () => {
+    const root = mkTmp('overlay-biome-');
+    writeFileSync(join(root, 'biome.jsonc'), '{}\n');
+    const dest = join(root, 'biome.devkit.jsonc');
+    writeFileSync(dest, 'edited');
+    expect(writeBiomeOverlay(root, 'generic', false, false)).toBe(true);
+    expect(readFileSync(dest, 'utf8')).toBe('edited');
+    expect(vi.mocked(console.log).mock.calls.flat().join('\n')).toContain('use --force');
+
+    writeBiomeOverlay(root, 'generic', true, false);
+    expect(JSON.parse(readFileSync(dest, 'utf8')).extends).toEqual([
+      './biome.jsonc',
+      './.devkit/biome/base.jsonc',
+    ]);
   });
 });

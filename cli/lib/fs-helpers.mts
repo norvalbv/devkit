@@ -102,7 +102,7 @@ export function writeIfAbsent(
   // dangling-symlink dir, and a live one would route the write outside devkit's tree. Only the leaf
   // is touched — never an ancestor the user may have symlinked on purpose.
   const dir = dirname(path);
-  if (force && isSymlink(dir)) rmSync(dir, { force: true });
+  if (isSymlink(dir) && (force || !existsSync(dir))) rmSync(dir, { force: true });
   mkdirSync(dir, { recursive: true });
   if (isSymlink(path) && (force || !existsSync(path))) rmSync(path, { force: true });
   // Exclusive create unless forced: a file appearing since the check above is kept, never clobbered.

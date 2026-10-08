@@ -137,6 +137,17 @@ describe('writeIfAbsent — exclusive create without force', () => {
     expect(readFileSync(join(root, 'shared-husky', 'pre-commit'), 'utf8')).toBe('hook');
   });
 
+  it('replaces a DANGLING parent-dir symlink rather than crashing in mkdir', () => {
+    const root = tmp();
+    symlinkSync('missing-dir', join(root, 'eslint'));
+    expect(writeIfAbsent(join(root, 'eslint', 'domains.mjs'), 'x')).toBe('created');
+    expect(lstatSync(join(root, 'eslint')).isDirectory()).toBe(true);
+  });
+
+  it('rethrows a write failure other than EEXIST instead of reporting the file as kept', () => {
+    expect(() => writeIfAbsent(join(tmp(), 'x'.repeat(300)), 'x')).toThrow(/ENAMETOOLONG/);
+  });
+
   it('reports a directory at the path as existing, untouched', () => {
     const root = tmp();
     mkdirSync(join(root, 'taken', 'inner'), { recursive: true });
