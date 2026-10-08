@@ -19,6 +19,7 @@ import {
   syncAntiSlopCapability,
 } from './lifecycle.mts';
 import {
+  antiSlopPluginSource,
   captureAntiSlopBaselineActivation,
   clearPendingAntiSlopBaselineActivation,
   readActiveAntiSlopRuleIds,
@@ -64,8 +65,10 @@ describe('anti-slop capability lifecycle', () => {
     expect(readFileSync(join(cwd, '.devkit/anti-slop/plugin/package.json'), 'utf8')).toContain(
       '"#oxlint-plugins"',
     );
-    expect(existsSync(join(cwd, '.devkit/anti-slop/plugin/index.devkit-active.ts'))).toBe(true);
-    expect(readFileSync(join(cwd, '.devkit/anti-slop/plugin/index.ts'), 'utf8')).toContain(
+    const entry = antiSlopPluginSource().entry;
+    const ext = entry.slice(entry.lastIndexOf('.'));
+    expect(existsSync(join(cwd, `.devkit/anti-slop/plugin/index.devkit-active${ext}`))).toBe(true);
+    expect(readFileSync(join(cwd, '.devkit/anti-slop', entry), 'utf8')).toContain(
       'DEVKIT_INTERNAL_ANTI_SLOP_MODE',
     );
     expect(existsSync(join(cwd, '.devkit/anti-slop/probe.ts'))).toBe(true);
