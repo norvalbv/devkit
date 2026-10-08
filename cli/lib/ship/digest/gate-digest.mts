@@ -52,6 +52,7 @@ export interface GateEvent {
   evidence_omitted_files?: number;
   evidence_truncated_files?: number;
   evidence_omitted_paths?: string[];
+  evidence_truncated_paths?: string[];
   evidence_lens?: string;
   /** review_result FAIL only (sc-3212): every finding the override valve left blocking, one per
    * fingerprint. Absent on a cascade-confirmed FAIL (no valve) and on an emitter predating it. */
@@ -323,23 +324,29 @@ function partialPacket(e: GateEvent): boolean {
 
 const PATHS_SHOWN = 3;
 
-function partialPacketDetail(e: GateEvent): string {
-  const omitted = count(e.evidence_omitted_files);
-  const lensName = textOf(e.evidence_lens);
-  const lens = lensName ? ` (${oneLine(lensName)} lens)` : '';
-  const total = count(e.evidence_file_count) ? `/${count(e.evidence_file_count)}` : '';
-  const paths = (Array.isArray(e.evidence_omitted_paths) ? e.evidence_omitted_paths : [])
-    .map(textOf)
-    .filter(Boolean);
-  const more = paths.length > PATHS_SHOWN || omitted > PATHS_SHOWN ? ', …' : '';
-  const named = paths.length
-    ? ` — not shown: ${paths
+/** ` — <label>: a, b, c, …` over an untrusted path list, or '' when it holds no usable path. */
+function namedPaths(label: string, list: string[] | undefined, total: number): string {
+  const paths = (Array.isArray(list) ? list : []).map(textOf).filter(Boolean);
+  const more = paths.length > PATHS_SHOWN || total > PATHS_SHOWN ? ', …' : '';
+  return paths.length
+    ? ` — ${label}: ${paths
         .slice(0, PATHS_SHOWN)
         .map((p) => oneLine(p))
         .join(', ')}${more}`
     : '';
+}
+
+function partialPacketDetail(e: GateEvent): string {
+  const omitted = count(e.evidence_omitted_files);
+  const truncated = count(e.evidence_truncated_files);
+  const lensName = textOf(e.evidence_lens);
+  const lens = lensName ? ` (${oneLine(lensName)} lens)` : '';
+  const total = count(e.evidence_file_count) ? `/${count(e.evidence_file_count)}` : '';
+  const named =
+    namedPaths('not shown', e.evidence_omitted_paths, omitted) +
+    namedPaths('truncated', e.evidence_truncated_paths, truncated);
   const cached = e.type === 'cache_hit' ? 'cached ' : '';
-  return `${cached}PASS over an incomplete packet${lens}: ${omitted}${total} file(s) omitted, ${count(e.evidence_truncated_files)} truncated${named}`;
+  return `${cached}PASS over an incomplete packet${lens}: ${omitted}${total} file(s) omitted, ${truncated} truncated${named}`;
 }
 
 /** The first row per state+gate, in event order. */
