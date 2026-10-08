@@ -111,7 +111,7 @@ or repeated inline JSX. The jscpd-backed clone detector catches those (verbatim,
 ```bash
 node $SCRIPT finalize --retrieval ok
 # or, when no semantic search query could run:
-node $SCRIPT finalize --retrieval unavailable --cause "<what failed, e.g. remote embeddings unreachable>"
+node $SCRIPT finalize --retrieval unavailable --cause "<the search tool's exact error text>"
 ```
 A passing `finalize` removes the checklist file itself; when the environment needs it kept (gate verification, review evidence) it stays automatically. Never delete it by hand.
 `--retrieval` is how the gate learns whether the semantic check ran: a PASS finalized without it, or

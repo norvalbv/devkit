@@ -344,6 +344,9 @@ export function codexMcpArgs(
     if (grants.length > 0 && !grants.includes('*'))
       serverArgv.push('-c', `mcp_servers.${name}.enabled_tools=[${grants.map(tomlStr).join(',')}]`);
     serverArgv.push('-c', `mcp_servers.${name}.startup_timeout_sec=10`);
+    // Exec's approval policy is `never`, so an unapproved MCP call is refused; a grant is the approval.
+    if (allowedTools !== null)
+      serverArgv.push('-c', `mcp_servers.${name}.default_tools_approval_mode="approve"`);
     argv.push(...serverArgv);
     Object.assign(extraEnv, serverEnv);
     injected.push(name);
