@@ -61,7 +61,9 @@ function repo(base: Record<string, string>): string {
 function stage(root: string, files: Record<string, string | null>): void {
   const entries = Object.entries(files);
   for (const [name, contents] of entries) {
-    if (contents !== null) writeFileSync(path.join(root, 'src', name), contents);
+    if (contents === null) continue;
+    mkdirSync(path.dirname(path.join(root, 'src', name)), { recursive: true });
+    writeFileSync(path.join(root, 'src', name), contents);
   }
   for (const [name, contents] of entries) {
     if (contents === null) git(root, ['rm', '-q', `src/${name}`]);
@@ -69,6 +71,7 @@ function stage(root: string, files: Record<string, string | null>): void {
   git(root, ['add', '-A']);
 }
 
+const indent = (text: string) => text.replace(/^(?=.)/gm, '  ');
 const flagged = (root: string) => {
   const { findings, refFindings } = detectChangedComments(root);
   return {
@@ -154,9 +157,53 @@ describe('comments moved verbatim between staged files', () => {
     const root = repo({
       'a.ts': filler('v') + helper(),
       'blob.bin': huge,
-      'big.ts': `export const s = "${huge.trim()}";\n`,
+      'big.ts': `${RATIONALE[0]}\nexport const s = "${huge.trim()}";\n`,
     });
     stage(root, { 'a.ts': filler('v'), 'b.ts': helper(), 'blob.bin': null, 'big.ts': null });
+    expect(flagged(root)).toEqual(clean);
+  });
+
+  it('finds the source in a package subdirectory even when grep.fullName is configured', () => {
+    const config = { scanRoots: ['src'], comments: { forbiddenRefs: ['\\bsc-\\d+\\b'] } };
+    const root = repo({
+      'pkg/guard.config.json': JSON.stringify(config),
+      'pkg/src/a.ts': filler('v') + helper(),
+    });
+    git(root, ['config', 'grep.fullName', 'true']);
+    stage(root, { 'pkg/src/a.ts': filler('v'), 'pkg/src/b.ts': helper() });
+    expect(flagged(path.join(root, 'src', 'pkg'))).toEqual(clean);
+  });
+
+  it('reads removals from the old side of a source file renamed in the same commit', () => {
+    const root = repo({ 'a.ts': filler('v') + helper() });
+    stage(root, { 'a.ts': null, 'a2.ts': filler('v'), 'b.ts': helper() });
+    expect(git(root, ['diff', '--cached', '--name-status'])).toMatch(
+      /^R\d+\tsrc\/a\.ts\tsrc\/a2\.ts$/m,
+    );
+    expect(flagged(root)).toEqual(clean);
+  });
+
+  it('ignores CRLF line endings and re-indentation of a moved JSDoc block', () => {
+    const doc = ['/**', ...RATIONALE.map((line) => line.replace('//', ' *')), ' */'];
+    const crlf = (text: string) => text.replaceAll('\n', '\r\n');
+    const root = repo({ 'a.ts': crlf(filler('v') + helper(doc)) });
+    stage(root, {
+      'a.ts': crlf(filler('v')),
+      'b.ts': `export namespace N {\n${indent(helper(doc))}}\n`,
+    });
+    expect(flagged(root)).toEqual(clean);
+  });
+
+  it('matches comment text literally, never as a pattern', () => {
+    const moved = '// -x [a-z]+ $HOME \\d (sc-1)\nexport const A = 1;\n';
+    const root = repo({ 'a.ts': filler('v') + moved });
+    stage(root, { 'a.ts': filler('v'), 'b.ts': moved });
+    expect(flagged(root)).toEqual(clean);
+  });
+
+  it('excuses text moved in from outside the scanned roots', () => {
+    const root = repo({ '../lib/a.ts': filler('v') + helper() });
+    stage(root, { '../lib/a.ts': filler('v'), 'b.ts': helper() });
     expect(flagged(root)).toEqual(clean);
   });
 
