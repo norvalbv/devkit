@@ -6,17 +6,9 @@
  * user-visible change, not an internal one.
  */
 import { execFileSync } from 'node:child_process';
-import {
-  copyFileSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, dirname, join, relative, resolve } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BIN_DIRS, type BinDir } from '../lib/husky/gate-policy/block-helpers.mts';
@@ -36,6 +28,7 @@ import {
   SELF_HOST_STRUCTURE_CMD,
   selfHostSelection,
 } from '../lib/husky/self-host.mts';
+import { moduleImportEdges } from '../lib/ship/dist-integrity.mts';
 import { testSpawnSync } from './_helpers.mts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -198,18 +191,17 @@ describe('isHookGeneratorPath', () => {
   // generator input out of cli/lib/husky/ would silently downgrade every real drift from a block
   // to an advisory — a missed catch nobody would notice, because the gate would still be "passing".
   // Walking the generator's own import graph makes that refactor fail HERE instead.
-  it('covers every file the self-host generator can reach', () => {
+  it('covers every file the self-host generator can reach', async () => {
     const seen = new Set<string>();
     const queue = ['cli/lib/husky/self-host.mts'];
     while (queue.length) {
       const rel = queue.pop();
       if (rel === undefined || seen.has(rel)) continue;
       seen.add(rel);
-      const abs = join(ROOT, rel);
-      if (!existsSync(abs)) continue;
-      for (const [, spec] of readFileSync(abs, 'utf8').matchAll(/from\s+'(\.[^']+)'/g)) {
-        queue.push(relative(ROOT, resolve(dirname(abs), spec)).replaceAll('\\', '/'));
-      }
+      // A lexer, not a regex: import text inside a template literal is not an edge.
+      const edges = await moduleImportEdges(ROOT, rel, readFileSync(join(ROOT, rel), 'utf8'));
+      if (!edges) throw new Error(`unparseable generator input: ${rel}`);
+      queue.push(...edges.map((edge) => edge.target));
     }
     const uncovered = [...seen].filter((p) => !isHookGeneratorPath(p)).sort();
     expect(

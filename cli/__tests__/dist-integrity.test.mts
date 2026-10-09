@@ -3,7 +3,11 @@ import { chmodSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from 'n
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { inspectDistIntegrity, printDistIntegrityFailure } from '../lib/ship/dist-integrity.mts';
+import {
+  inspectDistIntegrity,
+  moduleImportEdges,
+  printDistIntegrityFailure,
+} from '../lib/ship/dist-integrity.mts';
 import { rootRegistry } from './_helpers.mts';
 
 const GIT_ENV = { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' };
@@ -449,6 +453,14 @@ describe('inspectDistIntegrity', () => {
       untracked: [],
       unlexable: [],
     });
+  });
+});
+
+describe('moduleImportEdges', () => {
+  it('follows real imports and ignores import text inside a template literal', async () => {
+    const source = "const t = `import x from './${repo}';`;\nimport './b.mts';\n";
+    const edges = await moduleImportEdges('/repo', 'cli/a.mts', source);
+    expect(edges?.map((edge) => edge.target)).toEqual(['cli/b.mts']);
   });
 });
 
