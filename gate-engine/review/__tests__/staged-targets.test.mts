@@ -7,15 +7,17 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { wrapCompleteness } from '../completeness.mts';
+import { runCompleteness } from '../completeness.mts';
+import { renderChangedTargets, stagedTargetChanges } from '../evidence/targets-block.mts';
 import {
-  renderChangedTargets,
-  renderTargets,
-  stagedTargetChanges,
-} from '../evidence/targets-block.mts';
+  cleanupReviewFixtures,
+  consumerRepo,
+  messageFile,
+  mkExec,
+} from './run-review-fixtures.mts';
 
 const target = (ruling: string): string =>
-  `## Target · 2026-10-01 — Heading\n\n**Context:** c\n**Ruling:** ${ruling}\n**Consequences:**\n- Positive: p\n`;
+  `## Target · 2026-10-01 — Heading\n\n**Context:** c\n**Ruling:** ${ruling}\n**Consequences:**\n- Positive: p\n**Scope:** src/**\n`;
 const axis = (slug: string, body: string): string =>
   `---\nslug: ${slug}\ncreated: 2026-10-01\n---\n\n# ${slug}\n\n${body}`;
 
@@ -44,6 +46,8 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.unstubAllEnvs();
+  vi.restoreAllMocks();
+  cleanupReviewFixtures();
   rmSync(repo, { recursive: true, force: true });
 });
 
@@ -77,6 +81,22 @@ describe('stagedTargetChanges', () => {
     expect(renderChangedTargets([])).toBe('');
   });
 
+  it('treats every staged Target as changed on a first commit (unborn HEAD)', () => {
+    repo = mkdtempSync(path.join(tmpdir(), 'staged-targets-unborn-'));
+    git('init', '-q');
+    write('guard.config.json', JSON.stringify({ decisionsDir: 'docs/decisions' }));
+    write('docs/decisions/first.md', axis('first', target('Initial claim.')));
+    git('add', '.');
+    expect(stagedTargetChanges(staged(), repo)).toEqual(['first']);
+  });
+
+  it('returns [] without throwing when the configured decisions dir does not exist', () => {
+    write('guard.config.json', JSON.stringify({ decisionsDir: 'governance/adr' }));
+    write('governance/notes.md', 'x\n');
+    git('add', '.');
+    expect(stagedTargetChanges(staged(), repo)).toEqual([]);
+  });
+
   it('resolves the decisions dir from a package subdirectory against toplevel-relative paths', () => {
     const pkg = path.join(repo, 'packages/app');
     write('packages/app/guard.config.json', JSON.stringify({ decisionsDir: 'adr' }));
@@ -86,13 +106,46 @@ describe('stagedTargetChanges', () => {
   });
 });
 
-describe('completeness prompt with a changed Target', () => {
-  it('keeps the changed Target out of the authority block and names it in its own note', () => {
-    const block = renderTargets([]) + renderChangedTargets(['fresh']);
-    const prompt = wrapCompleteness('brief', 'feat: x', ['docs/decisions/fresh.md'], block);
-    expect(prompt).toContain('## RELEVANT RECORDED TARGETS — SKIP');
-    expect(prompt).not.toContain('### fresh');
-    expect(prompt).toContain('## TARGETS THIS DIFF ADDS OR CHANGES — NOT AUTHORITY: fresh');
-    expect(prompt).toContain('report the Target, not the files that disagree with it');
+async function judgedPrompt(dir: string): Promise<string> {
+  const exec = mkExec(async () => 'VERDICT: PASS');
+  vi.spyOn(console, 'error').mockImplementation(() => {});
+  await runCompleteness(messageFile(dir, 'feat: retry policy'), dir, { exec });
+  return JSON.stringify(exec.mock.calls[0]?.[0] ?? null);
+}
+
+describe('runCompleteness — Targets the commit changes', () => {
+  const fixture = (staged: string): string => {
+    const dir = consumerRepo({ backend: true });
+    repo = dir;
+    write('docs/decisions/kept.md', axis('kept', target('The old ruling.')));
+    git('add', 'docs/decisions');
+    git(
+      '-c',
+      'user.email=t@t',
+      '-c',
+      'user.name=t',
+      'commit',
+      '-qm',
+      'axis',
+      '--',
+      'docs/decisions',
+    );
+    write('docs/decisions/kept.md', axis('kept', staged));
+    git('add', 'docs/decisions/kept.md');
+    return dir;
+  };
+
+  it('moves a superseded Target out of the authority block into the NOT AUTHORITY note', async () => {
+    const prompt = await judgedPrompt(
+      fixture(`${target('The old ruling.')}\n${target('A false new claim.')}`),
+    );
+    expect(prompt).not.toContain('### kept');
+    expect(prompt).toContain('NOT AUTHORITY: kept');
+  });
+
+  it('keeps a note-only append under the authority block with no NOT AUTHORITY note', async () => {
+    const prompt = await judgedPrompt(fixture(`${target('The old ruling.')}- 2026-10-02 — note\n`));
+    expect(prompt).toContain('### kept');
+    expect(prompt).not.toContain('NOT AUTHORITY');
   });
 });
