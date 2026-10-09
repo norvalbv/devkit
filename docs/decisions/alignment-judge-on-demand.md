@@ -19,3 +19,4 @@ created: 2026-10-06
 **Revisit-when:** The alignment bench's CONTRADICT precision lower bound reaches about 0.9 AND per-commit cost is bounded (parallel or batched judging, or a cap on Targets judged per commit). Then ship it as an opt-in guard component, never a default-on change for pinned consumers.
 **Scope:** cli/lib/husky/ai-guard-fragments.mts,gate-engine/decisions/check-alignment.mts,cli/__tests__/doc-gate-claims.test.mts
 **Source:** shortcut · sc-4805
+- 2026-10-09 — The scoped-Target readers named in this Target are now a table in the decisions skill, pinned by cli/__tests__/scoped-target-readers.test.mts against the loader calls and both generated hooks. That table also records what the prose omitted: on the ship path the completeness judge starts in pre-commit as well as commit-msg.

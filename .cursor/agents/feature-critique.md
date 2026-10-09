@@ -125,6 +125,7 @@ Evaluate the proposal through each lens. Skip lenses that don't apply.
 - **Decision log** (source of truth for *why*, when present): proposal contradicts, reverses, or quietly broadens a recorded **Target**? → **CRITICAL finding**: quote the Target, name the conflict. (Re-target only with explicit new evidence — never a silent reversal.) No log → skip; note "alignment unverified".
 - Rely on / restate a settled Target, or align cleanly? → NOT a gap; don't re-litigate.
 - Cross-check every `--scope`'d Target against the files the proposal will touch — no dedicated per-Target judge runs at commit, so catch a scoped contradiction now.
+- A claim that a gate does, or does not, run at commit must cite its call in BOTH generated hooks (`.husky/pre-commit` and `.husky/commit-msg`), or the "Which gates read scoped Targets" table in the decisions skill.
 
 **Feasibility**: Is this technically possible as described? Platform/tool limitations that block it? What assumptions may be wrong?
 
