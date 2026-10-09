@@ -50,7 +50,11 @@ artifact CI uploads, not from log scraping — a CI log interleaves failures fro
 grepping it cannot prove a file passed. It reports `passed` / `failed` / `skipped` / `excluded` /
 `absent` / `unknown` separately, and reports the whole run's status apart from the test step's,
 because those two differ constantly. A file that is already failing on the default branch is not
-yours to fix; say so instead of burning fix cycles on it. An `unknown` carrying a remedy line
+yours to fix; say so instead of burning fix cycles on it. A red FILE does not make every failing
+test in it pre-existing: add `--test "<name>"` (as the console prints it) for that one test.
+`failed` means it is red on the default branch too. `passed` means it passed there, so suspect your
+change or this machine's load, not main. `file-passed` (the file passed, names not recorded) is
+file-level only. `unknown` is never a pass. An `unknown` carrying a remedy line
 (`workflow-missing`, or `no-usable-run` with no artifact) means this repo's CI does not produce
 the report yet — follow the remedy (`devkit test-report-run --help`) rather than re-running tests.
 The answer names the branch `head` it walked back from and `commitsBehindHead`; above 0, read
