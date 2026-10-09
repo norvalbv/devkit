@@ -284,8 +284,15 @@ describe('parseRateLimitsReply — a fully consumed window is a lock', () => {
       planType: 'go',
     });
     expect(parseRateLimitsReply(go)).toMatchObject({ reached: true, onCredits: false });
-    const unnamed = reply({ primary: { usedPercent: 100 }, credits: { hasCredits: true } });
-    expect(parseRateLimitsReply(unnamed)).toMatchObject({ reached: false, onCredits: true });
+    // codex serializes an unrecognized plan as "unknown"; it is no evidence against credits.
+    for (const planType of [undefined, 'unknown']) {
+      const unnamed = reply({
+        primary: { usedPercent: 100 },
+        credits: { hasCredits: true },
+        planType,
+      });
+      expect(parseRateLimitsReply(unnamed)).toMatchObject({ reached: false, onCredits: true });
+    }
   });
 
   it('hasCredits is trusted without reading the balance, as codex itself does', () => {
@@ -419,7 +426,10 @@ describe('the preflight report for an exhausted window (sc-3207 acceptance)', ()
     const statuses = await judgeReachability(repo(CODEX_FAMILY), deps(FREE_PLAN_CREDITS_REPLY));
     expect(statuses.every((s) => s.state === 'rate-limited')).toBe(true);
     const out = renderPreflight(statuses, NOW).join('\n');
-    expect(out).toContain('EXHAUSTED — USAGE LIMIT REACHED (100% of a 30d window used');
+    expect(out).toContain(
+      'EXHAUSTED — USAGE LIMIT REACHED (100% of a 30d window used, resets in 4d',
+    );
+    expect(out).toContain('re-running will not help for another 4d');
     expect(out).toContain('GUARD_REVIEW_MODEL=haiku');
     expect(out).not.toContain('— reachable');
   });
