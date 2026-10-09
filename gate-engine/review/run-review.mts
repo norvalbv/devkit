@@ -35,11 +35,10 @@ import { envFlag, type GuardConfig, resolveGuardConfig } from '../config.mts';
 import { emitReviewCacheHit } from '../judge/gate-events.mts';
 import { reportGateInfraFailure } from '../judge/odb-probe.mts';
 import { reportFleetMcp } from '../judge/mcp/profile.mts';
-import { execJudgeAsync, strictRemedy } from '../judge/run-judge.mts';
+import { execJudgeAsync } from '../judge/run-judge.mts';
 import { loadCache } from './cache.mts';
 import { type CascadeResult, runCascade } from './cascade/reviewer.mts';
 import { reportCachedHitNotes } from './contracts/checklist.mts';
-import { ENGINE_ERROR_REMEDY, RESPONSE_CONTRACT_REMEDY } from './contracts/response.mts';
 import {
   baseProvenanceLines,
   cachedBaseState,
@@ -57,6 +56,7 @@ import { assertNoMassDeletion } from './integrity/mass-deletion.mts';
 import { gitCached, headHash, stagedFiles, stagedTreeHash } from './evidence/staged-git.mts';
 import { reviewerTargetSalts } from './evidence/targets-block.mts';
 import { emitMergedLensResults } from './lens/merge-results.mts';
+import { reportInconclusive } from './valve/inconclusive.mts';
 import { narrowSelection, narrowTasks, printRemedy, type RecheckTarget } from './valve/recheck.mts';
 import {
   mapLimit,
@@ -476,23 +476,7 @@ export async function runReviewGate(
   }
   if (fails.length > 0 || errors.length > 0) return finish(1);
   const inconclusive = results.filter((r) => r.status === 'inconclusive');
-  for (const r of inconclusive) {
-    // Producers carry the machine cause; human-readable reasons are never parsed as an API.
-    const cause = r.inconclusiveCause ?? 'outage';
-    const remedy =
-      cause === 'response-contract'
-        ? RESPONSE_CONTRACT_REMEDY
-        : cause === 'engine'
-          ? ENGINE_ERROR_REMEDY
-          : strictRemedy(cause, r.outageBin, r.outageResetsAt);
-    console.error(
-      strict
-        ? `guard-review: ${r.name} INCONCLUSIVE (${r.reason}) — strict ship mode fails closed.\n` +
-            `   Remedy: ${remedy} (completed verdicts are cached).`
-        : `guard-review: ${r.name} inconclusive — ${r.reason} (fail-open, not cached)`,
-    );
-    if (cause === 'response-contract' && r.transcript) console.error(r.transcript.trim());
-  }
+  reportInconclusive(inconclusive, strict);
   if (inconclusive.length > 0) return finish(strict ? 3 : 2);
   return finish(0);
 }
