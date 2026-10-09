@@ -78,6 +78,31 @@ describe('reportInconclusive prints one Remedy per cause and binary', () => {
     expect(remedies[1]).toContain('`claude` reports');
   });
 
+  it('a binary-independent remedy prints once across binaries', () => {
+    const lines = captureStderr();
+    const timeout = { inconclusiveCause: 'timeout' } as const;
+    reportInconclusive(
+      [
+        row('a', { ...timeout, outageBin: 'codex' }),
+        row('b', { ...timeout, outageBin: 'claude' }),
+        row('c', { inconclusiveCause: 'engine', outageBin: '`codex`' }),
+        row('d', { inconclusiveCause: 'engine', outageBin: '`claude`' }),
+      ],
+      true,
+    );
+    const remedies = lines().filter((l) => l.startsWith('   Remedy:'));
+    expect(remedies).toHaveLength(2);
+    expect(remedies[0]).toContain('time cap');
+    expect(remedies[1]).toContain('gate itself failed');
+  });
+
+  it('a usage limit with no reset says until it resets, never a bogus window', () => {
+    const lines = captureStderr();
+    reportInconclusive([row('a', { inconclusiveCause: 'rate-limited', outageBin: 'codex' })], true);
+    const [remedy] = lines().filter((l) => l.startsWith('   Remedy:'));
+    expect(remedy).toContain('re-running cannot succeed until the limit resets');
+  });
+
   it('fail-open prints no Remedy and keeps its row wording', () => {
     const lines = captureStderr();
     reportInconclusive([limited('a', 'codex', Date.now() + HOUR)], false);
@@ -103,7 +128,10 @@ describe('a strict gate whose codex judges all go dark', () => {
     });
     expect(await runReviewGate(repo, { exec })).toBe(3);
     const out = lines();
-    expect(out.filter((l) => l.includes('see Remedy below'))).toHaveLength(7);
+    const rows = out.filter((l) => l.includes('see Remedy below'));
+    expect(rows).toHaveLength(7);
+    // commit-with-gate-capture.sh attributes the ship block to review with this exact grep.
+    for (const l of rows) expect(l).toMatch(/guard-review: .* (FAILED|INCONCLUSIVE)/);
     const remedies = out.filter((l) => l.startsWith('   Remedy:'));
     expect(remedies).toHaveLength(2);
     expect(remedies.filter((l) => l.includes('check `codex` CLI auth/quota'))).toHaveLength(1);
