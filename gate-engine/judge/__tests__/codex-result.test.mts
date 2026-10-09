@@ -132,6 +132,13 @@ describe('judgeCliFor', () => {
     expect(cli.argv).toEqual(['--output-format', 'json', ...args]);
   });
 
+  it('keeps ambient project instructions out of both families: CLAUDE.md memory and AGENTS.md', () => {
+    const claude = judgeCliFor(['-p', '--model', 'haiku', '--disallowedTools', '*', 'P']);
+    expect(claude.extraEnv).toEqual({ CLAUDE_CODE_DISABLE_CLAUDE_MDS: '1' });
+    const codex = judgeCliFor(['-p', '--model', 'gpt-5.6-sol', '--disallowedTools', '*', 'P']);
+    expect(codex.argv.join(' ')).toContain('-c project_doc_max_bytes=0');
+  });
+
   it('maps a read-only gpt judge onto the read-only sandbox and an investigating one onto workspace-write', () => {
     const ro = judgeCliFor(['-p', '--model', 'gpt-5.6-sol', '--disallowedTools', '*', 'P']);
     expect(ro.bin).toBe('codex');

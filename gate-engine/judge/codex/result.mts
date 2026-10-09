@@ -233,6 +233,9 @@ export function codexExecArgs(
     ...(confined ? ['-C', confined.scratch, '--add-dir', join(confined.repoRoot, '.claude')] : []),
     '-c',
     'web_search="disabled"',
+    // No AGENTS.md project docs, matching the claude judge's disabled CLAUDE.md memory.
+    '-c',
+    'project_doc_max_bytes=0',
     ...mcpArgv,
     '--ignore-user-config',
     '--ignore-rules',
@@ -360,7 +363,7 @@ const codexBin = (): string => process.env.GUARD_CODEX_BIN || 'codex';
  * The ONE routing decision, taken from the caller's untouched claude-shaped argv — every consumer
  * (spawn, outage wording, output parsing) derives from this, so first-vs-last `--model` ambiguity
  * cannot make two call sites disagree about which binary ran. The claude branch reproduces the
- * pre-adapter spawn exactly (withResultArgs included), which the routing test pins.
+ * pre-adapter argv exactly (withResultArgs included), which the routing test pins.
  */
 export function judgeCliFor(
   args: string[],
@@ -373,8 +376,14 @@ export function judgeCliFor(
   workspace?: CodexWorkspace,
 ): JudgeCli {
   const parts = codexArgvParts(args, forceReadOnlySandbox);
+  // A judge's rules are only what the gate feeds it: no ambient CLAUDE.md, @imports or user memory.
   if (!isCodexModel(parts.model))
-    return { bin: 'claude', argv: withResultArgs(args), codex: false };
+    return {
+      bin: 'claude',
+      argv: withResultArgs(args),
+      codex: false,
+      extraEnv: { CLAUDE_CODE_DISABLE_CLAUDE_MDS: '1' },
+    };
   const mcp = codexMcpArgs(mcpServers, parts.allowedTools);
   const confined = confinedWorkspace(parts, workspace);
   return {
