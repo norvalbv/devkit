@@ -22,7 +22,7 @@ import {
 } from './inventory.mts';
 import { commentTouchLines, type PatchHunk, parsePatchHunks } from './patch.mts';
 import { loadCommentPolicy } from './policy.mts';
-import { meaningfulLine, movedLines, movedPool } from './moved.mts';
+import { addedCommentText, meaningfulLine, movedLines, movedPool } from './moved.mts';
 import { refFindings } from './refs.mts';
 import { git, patch, type Renames, stagedPaths, stagedRenames } from './staged.mts';
 import type { CommentFinding, CommentInventory, DetectionResult } from './types.mts';
@@ -356,6 +356,52 @@ function findingFor(
   };
 }
 
+interface StagedFile {
+  file: string;
+  extension: string;
+  source: string;
+  tokens: CommentToken[];
+  effective: PatchHunk[];
+  added: Set<number>;
+  touchLines: Set<number>;
+  headFragments: Map<number, string[]>;
+}
+
+/** One staged file's comments and the added lines attributed to this change. */
+function attributed(
+  cwd: string,
+  file: string,
+  extension: string,
+  headRenames: Renames,
+  mergeRenamed: Renames | null,
+): StagedFile {
+  const headFrom = headRenames.get(file)?.from;
+  const first = parsePatchHunks(patch(cwd, file, undefined, headFrom));
+  let effective = first;
+  const headFragments = commentFragmentsAt(cwd, headFrom ?? file, 'HEAD');
+  let touchLines = commentTouchLines(first, new Set(headFragments.keys()));
+  try {
+    const mergeFrom = mergeRenamed?.get(file)?.from;
+    const second = parsePatchHunks(patch(cwd, file, 'MERGE_HEAD', mergeFrom));
+    const secondLines = new Set(second.flatMap((hunk) => [...hunk.addedLines]));
+    const secondTouch = commentTouchLines(
+      second,
+      new Set(commentFragmentsAt(cwd, mergeFrom ?? file, 'MERGE_HEAD').keys()),
+    );
+    effective = first.map((hunk) => ({
+      ...hunk,
+      addedLines: new Set([...hunk.addedLines].filter((line) => secondLines.has(line))),
+    }));
+    touchLines = new Set([...touchLines].filter((line) => secondTouch.has(line)));
+  } catch {
+    // Ordinary commit: the first-parent staged patch is the complete attribution set.
+  }
+  const source = stagedBlob(cwd, file);
+  const tokens = scanCommentTokens(source, extension);
+  const added = new Set(effective.flatMap((hunk) => [...hunk.addedLines]));
+  return { file, extension, source, tokens, effective, added, touchLines, headFragments };
+}
+
 export function detectChangedComments(cwd = process.cwd()): DetectionResult {
   const cfg = resolveGuardConfig(cwd);
   const roots = cfg.scanRoots.map((root) => normalizedRoot(cwd, root));
@@ -369,7 +415,7 @@ export function detectChangedComments(cwd = process.cwd()): DetectionResult {
   inventory.decisionsStaged =
     decisionsDir !== '' && [...stagedPaths(cwd)].some((file) => insideRoots(file, [decisionsDir]));
   const { files, head: headRenames, merge: mergeRenamed } = changedPaths(cwd);
-  const pool = mergeRenamed ? new Map<string, number>() : movedPool(cwd, lexerFor);
+  const staged: StagedFile[] = [];
   for (const file of files.sort()) {
     if (!insideRoots(file, roots) || !isConfiguredSource(file)) continue;
     const extension = extensionOf(file);
@@ -378,30 +424,22 @@ export function detectChangedComments(cwd = process.cwd()): DetectionResult {
       continue;
     }
     inventory.files += 1;
-    const headFrom = headRenames.get(file)?.from;
-    const first = parsePatchHunks(patch(cwd, file, undefined, headFrom));
-    let effective = first;
-    const headFragments = commentFragmentsAt(cwd, headFrom ?? file, 'HEAD');
-    let touchLines = commentTouchLines(first, new Set(headFragments.keys()));
-    try {
-      const mergeFrom = mergeRenamed?.get(file)?.from;
-      const second = parsePatchHunks(patch(cwd, file, 'MERGE_HEAD', mergeFrom));
-      const secondLines = new Set(second.flatMap((hunk) => [...hunk.addedLines]));
-      const secondTouch = commentTouchLines(
-        second,
-        new Set(commentFragmentsAt(cwd, mergeFrom ?? file, 'MERGE_HEAD').keys()),
-      );
-      effective = first.map((hunk) => ({
-        ...hunk,
-        addedLines: new Set([...hunk.addedLines].filter((line) => secondLines.has(line))),
-      }));
-      touchLines = new Set([...touchLines].filter((line) => secondTouch.has(line)));
-    } catch {
-      // Ordinary commit: the first-parent staged patch is the complete attribution set.
-    }
-    const source = stagedBlob(cwd, file);
-    const tokens = scanCommentTokens(source, extension);
-    const added = new Set(effective.flatMap((hunk) => [...hunk.addedLines]));
+    staged.push(attributed(cwd, file, extension, headRenames, mergeRenamed));
+  }
+  const candidates = new Set(
+    staged.flatMap(({ source, tokens, added }) => addedCommentText(source, tokens, added)),
+  );
+  const pool = mergeRenamed ? new Map<string, number>() : movedPool(cwd, lexerFor, candidates);
+  for (const {
+    file,
+    extension,
+    source,
+    tokens,
+    effective,
+    added,
+    touchLines,
+    headFragments,
+  } of staged) {
     const moved = movedLines(source, tokens, added, pool);
     const hunks = effective.map((hunk) => ({
       ...hunk,

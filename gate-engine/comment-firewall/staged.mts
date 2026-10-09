@@ -4,13 +4,14 @@ import { commitIndexEnv } from '../ratchets/commit-index.mts';
 
 const MAX_GIT_OUTPUT = 16 * 1024 * 1024;
 
-export function git(cwd: string, args: string[]): string {
+export function git(cwd: string, args: string[], input?: string): string {
   return execFileSync('git', args, {
     cwd,
     env: commitIndexEnv(cwd),
     encoding: 'utf8',
+    input,
     maxBuffer: MAX_GIT_OUTPUT,
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
   });
 }
 

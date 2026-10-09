@@ -109,9 +109,36 @@ function removedText(
   }
 }
 
-/** Every standalone comment line the staged change removes from HEAD, across modified, renamed-away
+/** HEAD paths whose text contains any candidate line, so a large deletion is never lexed whole. */
+function headPathsCiting(cwd: string, candidates: ReadonlySet<string>): Set<string> {
+  const args = ['grep', '-I', '-l', '-z', '-F', '--no-full-name', '--no-color', '-f', '-', 'HEAD'];
+  try {
+    const hits = splitNul(git(cwd, args, [...candidates].join('\n')));
+    return new Set(hits.map((hit) => hit.slice('HEAD:'.length)));
+  } catch {
+    return new Set();
+  }
+}
+
+/** Added standalone comment text: the only lines the pool can ever need to match. */
+export function addedCommentText(
+  source: string,
+  tokens: readonly CommentToken[],
+  added: ReadonlySet<number>,
+): string[] {
+  return commentRuns(source, tokens, (line) => added.has(line)).flatMap((run) => run.parts);
+}
+
+/** Every candidate comment line the staged change removes from HEAD, across modified, renamed-away
  * and deleted files. */
-export function movedPool(cwd: string, lexerFor: LexerFor): MovedPool {
+export function movedPool(
+  cwd: string,
+  lexerFor: LexerFor,
+  candidates: ReadonlySet<string>,
+): MovedPool {
+  const pool: MovedPool = new Map();
+  if (candidates.size === 0) return pool;
+  const citing = headPathsCiting(cwd, candidates);
   const fields = splitNul(
     git(cwd, [
       'diff',
@@ -125,11 +152,11 @@ export function movedPool(cwd: string, lexerFor: LexerFor): MovedPool {
     ]),
   );
   const prefix = gitPrefix(cwd);
-  const pool: MovedPool = new Map();
   for (let i = 0; i < fields.length;) {
     const status = fields[i++] ?? '';
     const from = fields[i++] ?? '';
     const to = status.startsWith('R') ? fields[i++] : undefined;
+    if (!citing.has(from)) continue;
     for (const part of removedText(cwd, prefix, { status, from, to }, lexerFor)) {
       pool.set(part, (pool.get(part) ?? 0) + 1);
     }
