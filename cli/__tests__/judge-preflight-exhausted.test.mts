@@ -61,6 +61,26 @@ const CREDITS_LIVE_REPLY = JSON.stringify({
   },
 });
 
+/** A Free-plan account's live reply, identical in kind but for planType, while every judge was refused. */
+const FREE_PLAN_CREDITS_REPLY = JSON.stringify({
+  id: 2,
+  result: {
+    ordinaryUsageAllowed: false,
+    rateLimits: {
+      limitId: 'codex',
+      limitName: null,
+      normalModelSlug: null,
+      primary: { usedPercent: 100, windowDurationMins: 43200, resetsAt: PRIMARY_RESET },
+      secondary: null,
+      credits: { hasCredits: true, unlimited: false, balance: '45587.1300000000' },
+      individualLimit: null,
+      spendControlReached: false,
+      planType: 'free',
+      rateLimitReachedType: 'rate_limit_reached',
+    },
+  },
+});
+
 const ENV_KEYS = [
   'GUARD_REVIEW_MODEL',
   'FRINK_REVIEW_MODEL',
@@ -251,6 +271,23 @@ describe('parseRateLimitsReply — a fully consumed window is a lock', () => {
     }
   });
 
+  it('Free and Go credits do not carry a spent plan; an unnamed plan still does', () => {
+    expect(parseRateLimitsReply(FREE_PLAN_CREDITS_REPLY)).toMatchObject({
+      reached: true,
+      onCredits: false,
+      planType: 'free',
+      windowDurationMins: 43200,
+    });
+    const go = reply({
+      primary: { usedPercent: 100 },
+      credits: { hasCredits: true },
+      planType: 'go',
+    });
+    expect(parseRateLimitsReply(go)).toMatchObject({ reached: true, onCredits: false });
+    const unnamed = reply({ primary: { usedPercent: 100 }, credits: { hasCredits: true } });
+    expect(parseRateLimitsReply(unnamed)).toMatchObject({ reached: false, onCredits: true });
+  });
+
   it('hasCredits is trusted without reading the balance, as codex itself does', () => {
     const snap = parseRateLimitsReply(
       reply({ primary: { usedPercent: 100 }, credits: { hasCredits: true, balance: '0' } }),
@@ -376,6 +413,15 @@ describe('the preflight report for an exhausted window (sc-3207 acceptance)', ()
     );
     for (const absent of ['EXHAUSTED', 'fail closed', 'will not help', '⚠️', 'GUARD_REVIEW_MODEL='])
       expect(out).not.toContain(absent);
+  });
+
+  it('a Free-plan lock with credits is EXHAUSTED and names the family move before the chain', async () => {
+    const statuses = await judgeReachability(repo(CODEX_FAMILY), deps(FREE_PLAN_CREDITS_REPLY));
+    expect(statuses.every((s) => s.state === 'rate-limited')).toBe(true);
+    const out = renderPreflight(statuses, NOW).join('\n');
+    expect(out).toContain('EXHAUSTED — USAGE LIMIT REACHED (100% of a 30d window used');
+    expect(out).toContain('GUARD_REVIEW_MODEL=haiku');
+    expect(out).not.toContain('— reachable');
   });
 });
 

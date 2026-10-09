@@ -14,6 +14,8 @@ const MAX_OUTPUT = 512 * 1024;
 
 const INITIALIZE_ID = 1;
 const READ_ID = 2;
+/** Plans whose credits are not trusted to serve `codex exec` past a spent plan limit. */
+const UNCREDITED_PLANS = new Set(['free', 'go']);
 
 export interface CodexRateLimits {
   /** Percentage of the primary window consumed, when the payload carried one. */
@@ -27,7 +29,7 @@ export interface CodexRateLimits {
   /** Provider reported a limit reached, or a window is fully spent with no usable credits (sc-3207:
    *  `rateLimitReachedType` is nullable upstream and was absent on a locked account). */
   reached: boolean;
-  /** The plan limit is hit, but usable credits serve calls — codex's TUI treats this as served. */
+  /** The plan limit is hit, but usable credits on a paid plan serve calls. */
   onCredits: boolean;
   /** The provider's own enum value, e.g. `rate_limit_reached`. Reported, never interpreted. */
   reachedType?: string;
@@ -124,15 +126,18 @@ export function parseRateLimitsReply(line: string): CodexRateLimits | null {
   // Absent `rateLimitReachedType` alone is NOT "not reached" — the backend maps an unknown kind to
   // None — so a spent window is the second positive signal.
   const planLimited = reachedType !== undefined || exhaustedWindow !== undefined;
+  const planType = usableText(limits.planType);
   // An allowlist: workspace_* kinds void credits upstream, and an unknown kind stays a lock.
+  // Free/Go credits did not serve codex exec on a live account; paid plans' did (a heuristic).
   const covered =
-    creditsUsable && (reachedType === undefined || reachedType === 'rate_limit_reached');
+    creditsUsable &&
+    (reachedType === undefined || reachedType === 'rate_limit_reached') &&
+    !(planType !== undefined && UNCREDITED_PLANS.has(planType));
   const snapshot: CodexRateLimits = {
     reached: planLimited && !covered,
     onCredits: planLimited && covered,
   };
   if (reachedType !== undefined) snapshot.reachedType = reachedType;
-  const planType = usableText(limits.planType);
   if (planType !== undefined) snapshot.planType = planType;
   if (exhaustedWindow !== undefined) snapshot.exhaustedWindow = exhaustedWindow;
 
