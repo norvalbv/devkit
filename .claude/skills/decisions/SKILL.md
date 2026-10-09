@@ -202,6 +202,23 @@ forces the *fields*; this audits whether they *say* anything). `GUARD_DEPTH_HARD
 confident THIN to a block. This is the soft-lint pattern from `adrs` + `adr-agent` — not more required
 params, which provably do not help (a Target can satisfy all five required fields and still be shallow).
 
+## Which gates read scoped Targets
+
+Every piece of code that loads scoped Targets, the hook stage it runs in, and whether it can block.
+`cli/__tests__/scoped-target-readers.test.mts` fails when a loader call or a generated hook disagrees with this table.
+
+| Code (devkit package) | Stage | Call | Blocks |
+|---|---|---|---|
+| `gate-engine/decisions/detect.mts` | pre-commit | `guard-decisions detect --gate` | yes: an unrecorded decision |
+| `gate-engine/review/evidence/targets-block.mts` | pre-commit | `guard-review --gate` | yes: security and performance reviewers' Targets block |
+| `gate-engine/review/evidence/commit-message.mts` | pre-commit | `guard-review --gate` | yes: same reviewer fleet |
+| `gate-engine/review/completeness.mts` | commit-msg, and pre-commit on the ship path (review guard only) | `guard-review completeness --gate` | yes: top 6 Targets, a contradicted one is a finding |
+| `gate-engine/review/cli.mts` | on-demand | `guard-review scan` | no |
+| `gate-engine/decisions/scoped-targets.mts` | on-demand (feature-critique) | `guard-decisions scoped-targets` | no |
+| `agents-hooks/decision-scope-brief.mjs` | pre-edit | `guard-decisions scoped-targets` | no |
+| `gate-engine/decisions/check-alignment.mts` | on-demand | `guard-decisions check-alignment --gate` | no |
+| `gate-engine/decisions/drift.mts` | on-demand | `guard-decisions drift` | no |
+
 ## Common mistakes
 
 | Mistake | Fix |
