@@ -203,6 +203,8 @@ describe('isHookGeneratorPath', () => {
       if (!edges) throw new Error(`unparseable generator input: ${rel}`);
       queue.push(...edges.map((edge) => edge.target));
     }
+    // An extractor that found no edges would leave only the (covered) entry and pass vacuously.
+    expect(seen).toContain('cli/lib/husky/husky-block.mts');
     const uncovered = [...seen].filter((p) => !isHookGeneratorPath(p)).sort();
     expect(
       uncovered,

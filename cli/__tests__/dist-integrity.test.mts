@@ -457,8 +457,13 @@ describe('inspectDistIntegrity', () => {
 });
 
 describe('moduleImportEdges', () => {
-  it('follows real imports and ignores import text inside a template literal', async () => {
-    const source = "const t = `import x from './${repo}';`;\nimport './b.mts';\n";
+  it('follows real imports and ignores import text in templates, comments and dynamic templates', async () => {
+    const source = [
+      "const t = `import x from './${repo}';`;",
+      "// import y from './commented.mts';",
+      'await import(`./${name}.mts`);',
+      "import './b.mts';",
+    ].join('\n');
     const edges = await moduleImportEdges('/repo', 'cli/a.mts', source);
     expect(edges?.map((edge) => edge.target)).toEqual(['cli/b.mts']);
   });
