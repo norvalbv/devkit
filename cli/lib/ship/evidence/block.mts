@@ -15,8 +15,9 @@ export const EVIDENCE_END = '<!-- devkit:evidence:end -->';
 export const VERDICT_SLOT = '<!-- devkit:evidence:verdict -->';
 const DATA_OPEN = '<!-- devkit:evidence:data ';
 const DATA_CLOSE = ' -->';
-const BLOCK = /<!-- devkit:evidence:begin -->[\s\S]*?<!-- devkit:evidence:end -->/;
-const BLOCKS = new RegExp(BLOCK.source, 'g');
+// Whole marker lines only: ship writes them that way, and prose quoting a marker inline is not a block.
+const BLOCK = /^<!-- devkit:evidence:begin -->\r?\n[\s\S]*?\n<!-- devkit:evidence:end -->(?=\r?$)/m;
+const BLOCKS = new RegExp(BLOCK.source, 'gm');
 const MARKER = /<!-- devkit:evidence:/g;
 const SHOWN_FAILURES = 3;
 const SHOWN_ARGS = 40;

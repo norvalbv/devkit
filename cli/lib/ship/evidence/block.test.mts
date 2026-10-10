@@ -121,6 +121,15 @@ describe('evidence block', () => {
     expect(upsertEvidenceBlock('text\n\n', next)).toBe(`text\n\n${next}\n`);
   });
 
+  it('treats markers quoted inline in prose as text, never as the block', () => {
+    const prose = `Ship writes between \`${EVIDENCE_BEGIN}\` and \`${EVIDENCE_END}\` in the body.\n`;
+    const block = renderEvidenceBlock(captured, evidence);
+
+    expect(readEvidenceBlock(prose, HEAD)).toBeNull();
+    expect(upsertEvidenceBlock(prose, block)).toBe(`${prose}\n${block}\n`);
+    expect(upsertEvidenceBlock(`${prose}\n${block}\n`, block)).toBe(`${prose}\n${block}\n`);
+  });
+
   it('drops a pasted block from caller text and defuses a stray marker', () => {
     const pasted = renderEvidenceBlock(captured, evidence);
     const cleaned = callerText(`keep\n${pasted}\nquote <!-- devkit:evidence:begin --> here`);
