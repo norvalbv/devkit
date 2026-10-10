@@ -413,6 +413,8 @@ describe('correctness-reviewer (domain all)', () => {
     const authored = [
       'agents-hooks/decision-stop-check.sh',
       'cli/index.mts',
+      // Source under a coverage/ directory: an unanchored `**/coverage/**` exclude once hid it.
+      'gate-engine/coverage/produce.mts',
       'skills/_devkit/review-roots.mjs',
       'skills/correctness/scripts/checklist.mjs',
       'gate-engine/review/__tests__/reviewers.test.mts',
