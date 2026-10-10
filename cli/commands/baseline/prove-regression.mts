@@ -15,15 +15,20 @@ unregistered disposable clones. Both refs must already contain the test and supp
 normal workflow is an explicit test-only red commit followed by the fixed green commit.
 
 Exit 0 means the same argv exited nonzero at red and zero at green, the caller's two sampled boundary
-fingerprints matched, and the clone cleanup checks passed. The samples detect ordinary caller
-mutation but are not an atomic filesystem snapshot. This is CAPTURED execution evidence, not
-automatic proof that the red failure was caused by the ticket or that the whole suite is healthy.
-Review the retained red output before publishing the Markdown.
+fingerprints matched, and the clone cleanup checks passed. The samples cover the caller's files, its
+status, HEAD, its per-worktree refs and the config that shapes it; sibling worktrees' refs and branch
+config are outside them. The samples are not an atomic filesystem snapshot; they detect ordinary
+caller mutation. This is CAPTURED execution evidence, not automatic proof that the red failure was
+caused by the ticket or that the whole suite is healthy. Review the retained red output before
+publishing the Markdown.
 
 --vitest-report optionally names a report file that the command writes inside each clone using
 Vitest's built-in JSON reporter. Devkit records its exact test counts and bounded red failure
 messages; when this adapter is requested, a missing or malformed report makes the capture
-inconclusive without replacing the recorded process exits. Example:
+inconclusive without replacing the recorded process exits. The report also tightens CAPTURED: at
+least one test must fail an assertion at red and pass at green. A file that fails to load or whose
+hook throws is listed but never counts as red, and a test skipped at green never counts as passing.
+Example:
 
   devkit prove-regression --red <test-only-sha> --green <fixed-sha> \\
     --vitest-report .proof.json -- node_modules/.bin/vitest run path/to/test.mts \\

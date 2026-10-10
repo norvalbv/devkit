@@ -16,7 +16,7 @@ import {
 } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { digest } from '../fs-helpers.mts';
-import { reviewRepositoryConfigFingerprint } from '../ship/review/repository/state.mts';
+import { reviewRepositorySnapshotFingerprint } from '../ship/review/repository/state.mts';
 import { gitEnvironment } from '../ship/review/shared/common.mts';
 
 const MAX_GIT_OUTPUT = 64 * 1024 * 1024;
@@ -209,15 +209,10 @@ export function snapshotRegressionCaller(root: string): string {
   }
   return digest(
     JSON.stringify({
-      head: git(root, ['rev-parse', '--verify', 'HEAD']).trim(),
-      refs: gitBytes(root, ['for-each-ref', '--format=%(refname)%00%(objectname)']).toString(
-        'base64',
-      ),
+      snapshot: reviewRepositorySnapshotFingerprint(root),
       status: gitBytes(root, ['status', '--porcelain=v2', '-z', '--untracked-files=all']).toString(
         'base64',
       ),
-      worktrees: gitBytes(root, ['worktree', 'list', '--porcelain']).toString('base64'),
-      config: reviewRepositoryConfigFingerprint(root),
       content: content.digest('hex'),
     }),
   );

@@ -250,43 +250,30 @@ function gitDirectory(root: string, flag: '--git-common-dir' | '--git-dir', labe
   return canonicalReviewDirectory(path, `target ${label}`);
 }
 
-/** `exact` hashes shared config bytes (prove-regression: did a command touch the caller?);
- *  `review` hashes only entries that can shape this checkout (sc-4171). */
-function configFingerprint(context: RepositoryContext, mode: 'exact' | 'review'): string {
+/** Hashes only config entries that can shape this checkout; sibling branch config is dropped. */
+function configFingerprint(context: RepositoryContext): string {
   const commonConfig = join(context.gitCommonDir, 'config');
   const worktreeConfig = join(context.gitDir, 'config.worktree');
-  const shared =
-    mode === 'exact'
-      ? configFileState(commonConfig, 'shared repository config')
-      : configEntryState(commonConfig, 'shared repository config');
+  const shared = configEntryState(commonConfig, 'shared repository config');
   const selectedWorktree = configFileState(worktreeConfig, 'worktree repository config');
-  const localEffective = shared.readable
-    ? effectiveConfigState(context.gitRoot, '--local')
+  const sharedEffective = shared.readable
+    ? withoutSiblingBranchConfig(
+        effectiveConfigState(context.gitRoot, '--local'),
+        headSymref(context.gitRoot),
+      )
     : Buffer.alloc(0);
-  const sharedEffective =
-    mode === 'exact' || !shared.readable
-      ? localEffective
-      : withoutSiblingBranchConfig(localEffective, headSymref(context.gitRoot));
   const worktreeEffective =
     selectedWorktree.readable && worktreeConfigEnabled(context.gitRoot)
       ? effectiveConfigState(context.gitRoot, '--worktree')
       : Buffer.alloc(0);
-  return framedHash(
-    mode === 'exact' ? 'review-repository-config-v2' : 'review-repository-config-v3',
-    [
-      Buffer.from(commonConfig),
-      ...shared.parts,
-      sharedEffective,
-      Buffer.from(worktreeConfig),
-      ...selectedWorktree.parts,
-      worktreeEffective,
-    ],
-  );
-}
-
-/** Fingerprint repository-owned common/worktree config bytes plus their effective includes. */
-export function reviewRepositoryConfigFingerprint(targetRoot: string): string {
-  return configFingerprint(repositoryContext(targetRoot), 'exact');
+  return framedHash('review-repository-config-v3', [
+    Buffer.from(commonConfig),
+    ...shared.parts,
+    sharedEffective,
+    Buffer.from(worktreeConfig),
+    ...selectedWorktree.parts,
+    worktreeEffective,
+  ]);
 }
 
 function metadataBuffer(stat: BigIntStats): Buffer {
@@ -359,8 +346,15 @@ function captureState(context: RepositoryContext): ReviewRepositoryState {
     headOid,
     headSymrefBase64: headSymref(root),
     refsSha256: framedHash('review-repository-worktree-refs-v1', [worktreeRefsState(root)]),
-    configSha256: configFingerprint(context, 'review'),
+    configSha256: configFingerprint(context),
   };
+}
+
+/** The snapshot authority as one hash: sibling sessions' refs, worktrees and branch config are
+ *  outside it, so their churn cannot read as a change to this checkout. */
+export function reviewRepositorySnapshotFingerprint(targetRoot: string): string {
+  const state = captureState(repositoryContext(targetRoot));
+  return framedHash('review-repository-snapshot-v1', [Buffer.from(JSON.stringify(state))]);
 }
 
 /** Every logical-state field and evidence label that differs between two capture passes. */

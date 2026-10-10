@@ -13,6 +13,7 @@ import { isAbsolute, join, relative, sep } from 'node:path';
 import { writeFileAtomic } from '../atomic-write.mts';
 import { superviseGateCommand } from '../ship/review/process/gate-supervisor.mts';
 import {
+  concludeRegression,
   parseVitestRegressionReport,
   REGRESSION_EVIDENCE_SCHEMA,
   renderRegressionEvidence,
@@ -21,10 +22,12 @@ import {
   type RegressionFailureSummary,
   type RegressionOperandEvidence,
   type RegressionTestCounts,
+  type RegressionTestOutcomes,
 } from './regression-evidence.mts';
 import {
   createRegressionClone,
   linkRegressionDependencies,
+  type PreparedRegressionRepository,
   prepareRegressionReportPath,
   prepareRegressionRepository,
   readRegressionReport,
@@ -57,7 +60,24 @@ interface OperandRun extends ManagedResult {
   reportError: string | null;
   testCounts: RegressionTestCounts | null;
   failures: RegressionFailureSummary[];
+  fileErrors: RegressionFailureSummary[];
+  tests: RegressionTestOutcomes | null;
 }
+
+type OperandReport = Pick<
+  OperandRun,
+  'reportFile' | 'reportSha256' | 'reportError' | 'testCounts' | 'failures' | 'fileErrors' | 'tests'
+>;
+
+const NO_REPORT: OperandReport = {
+  reportFile: null,
+  reportSha256: null,
+  reportError: null,
+  testCounts: null,
+  failures: [],
+  fileErrors: [],
+  tests: null,
+};
 
 class InterruptedError extends Error {
   readonly status: number;
@@ -215,7 +235,7 @@ function captureVitestReport(
   evidenceDir: string,
   dependencySource: string | null,
   exitCode: number | null,
-): Pick<OperandRun, 'reportFile' | 'reportSha256' | 'reportError' | 'testCounts' | 'failures'> {
+): OperandReport {
   let outputName: string | null = null;
   let reportSha256: string | null = null;
   try {
@@ -236,14 +256,15 @@ function captureVitestReport(
       reportError: null,
       testCounts: parsed.counts,
       failures: parsed.failures,
+      fileErrors: parsed.fileErrors,
+      tests: parsed.tests,
     };
   } catch (error) {
     return {
+      ...NO_REPORT,
       reportFile: outputName,
       reportSha256,
       reportError: error instanceof Error ? error.message : String(error),
-      testCounts: null,
-      failures: [],
     };
   }
 }
@@ -283,13 +304,7 @@ async function runOperand(
         dependencySource,
         result.exitCode,
       )
-    : {
-        reportFile: null,
-        reportSha256: null,
-        reportError: null,
-        testCounts: null,
-        failures: [],
-      };
+    : NO_REPORT;
   return { ...result, stdoutPath, stderrPath, ...report };
 }
 
@@ -319,44 +334,7 @@ function operandEvidence(
     reportError: run.reportError,
     testCounts: run.testCounts,
     failures: run.failures,
-  };
-}
-
-interface RegressionConclusion {
-  status: RegressionEvidence['status'];
-  reason: string;
-}
-
-function resultReason(
-  red: RegressionOperandEvidence,
-  green: RegressionOperandEvidence,
-  callerSamplesMatched: boolean,
-  cleanup: RegressionEvidence['cleanup'],
-): RegressionConclusion {
-  if (!callerSamplesMatched) {
-    return { status: 'inconclusive', reason: 'caller boundary fingerprints differ' };
-  }
-  if (!cleanup.redCloneRemoved || !cleanup.greenCloneRemoved) {
-    return { status: 'inconclusive', reason: 'a disposable clone could not be removed' };
-  }
-  if (red.signal || green.signal) {
-    return { status: 'inconclusive', reason: 'a test command ended from a signal' };
-  }
-  if (red.spawnError || green.spawnError) {
-    return { status: 'inconclusive', reason: 'a test command could not be started' };
-  }
-  if (red.reportError || green.reportError) {
-    return { status: 'inconclusive', reason: 'a requested structured report was unavailable' };
-  }
-  if (red.exitCode === null || red.exitCode === 0 || green.exitCode !== 0) {
-    return {
-      status: 'inconclusive',
-      reason: `expected red nonzero and green zero; got ${String(red.exitCode)}/${String(green.exitCode)}`,
-    };
-  }
-  return {
-    status: 'captured',
-    reason: `the same argv exited ${red.exitCode} on red and 0 on green`,
+    fileErrors: run.fileErrors,
   };
 }
 
@@ -381,18 +359,15 @@ function regressionTempBase(callerRoot: string): string {
   return base;
 }
 
-export async function proveRegression(rawArgs: string[], cwd = process.cwd()): Promise<number> {
-  let prepared: ReturnType<typeof prepareRegressionRepository>;
-  try {
-    prepared = prepareRegressionRepository(rawArgs, cwd);
-  } catch (error) {
-    const prefix = error instanceof RegressionUsageError ? 'usage' : 'setup';
-    console.error(
-      `🚫 prove-regression ${prefix}: ${error instanceof Error ? error.message : error}`,
-    );
-    return 1;
-  }
+export interface CapturedRegression {
+  evidence: RegressionEvidence;
+  evidenceDir: string;
+}
 
+/** Throws on interruption or a clone/setup failure, after removing every clone. */
+export async function captureRegressionEvidence(
+  prepared: PreparedRegressionRepository,
+): Promise<CapturedRegression> {
   const signalGuard = new CaptureSignalGuard();
   let root: string | null = null;
   let redClone = '';
@@ -449,12 +424,15 @@ export async function proveRegression(rawArgs: string[], cwd = process.cwd()): P
       greenCloneRemoved: removeClone(greenClone),
     };
     const callerAfter = snapshotRegressionCaller(prepared.root);
+    const matched = callerAfter === prepared.callerBefore;
     const callerBoundarySamples = {
       beforeSha256: prepared.callerBefore,
       afterSha256: callerAfter,
-      matched: callerAfter === prepared.callerBefore,
+      matched,
     };
-    const conclusion = resultReason(red, green, callerBoundarySamples.matched, cleanup);
+    const tests =
+      redRun.tests && greenRun.tests ? { red: redRun.tests, green: greenRun.tests } : null;
+    const conclusion = concludeRegression(red, green, tests, matched, cleanup);
     const evidence: RegressionEvidence = {
       schema: REGRESSION_EVIDENCE_SCHEMA,
       ...conclusion,
@@ -477,24 +455,44 @@ export async function proveRegression(rawArgs: string[], cwd = process.cwd()): P
     writeFileAtomic(join(evidenceDir, 'evidence.md'), renderRegressionEvidence(evidence));
     await signalGuard.checkpoint();
     completed = true;
-
-    console.log(`red: ${red.sha} → ${red.signal ?? red.exitCode}`);
-    console.log(`green: ${green.sha} → ${green.signal ?? green.exitCode}`);
-    if (red.reportError) console.warn(`⚠️  red Vitest report: ${red.reportError}`);
-    if (green.reportError) console.warn(`⚠️  green Vitest report: ${green.reportError}`);
-    console.log(`evidence: ${evidenceDir}`);
-    return evidence.status === 'captured' ? 0 : 1;
+    return { evidence, evidenceDir };
   } catch (error) {
     if (redClone) removeClone(redClone);
     if (greenClone) removeClone(greenClone);
-    if (error instanceof InterruptedError) return error.status;
-    const phase = root === null ? 'setup' : 'failed';
-    console.error(
-      `🚫 prove-regression ${phase}: ${error instanceof Error ? error.message : error}`,
-    );
-    return 1;
+    throw error;
   } finally {
     if (!completed && root) removeClone(root);
     signalGuard.dispose();
   }
+}
+
+export async function proveRegression(rawArgs: string[], cwd = process.cwd()): Promise<number> {
+  let prepared: PreparedRegressionRepository;
+  try {
+    prepared = prepareRegressionRepository(rawArgs, cwd);
+  } catch (error) {
+    const prefix = error instanceof RegressionUsageError ? 'usage' : 'setup';
+    console.error(
+      `🚫 prove-regression ${prefix}: ${error instanceof Error ? error.message : error}`,
+    );
+    return 1;
+  }
+  let captured: CapturedRegression;
+  try {
+    captured = await captureRegressionEvidence(prepared);
+  } catch (error) {
+    if (error instanceof InterruptedError) return error.status;
+    const phase = error instanceof RegressionUsageError ? 'setup' : 'failed';
+    console.error(
+      `🚫 prove-regression ${phase}: ${error instanceof Error ? error.message : error}`,
+    );
+    return 1;
+  }
+  const { red, green, status } = captured.evidence;
+  console.log(`red: ${red.sha} → ${red.signal ?? red.exitCode}`);
+  console.log(`green: ${green.sha} → ${green.signal ?? green.exitCode}`);
+  if (red.reportError) console.warn(`⚠️  red Vitest report: ${red.reportError}`);
+  if (green.reportError) console.warn(`⚠️  green Vitest report: ${green.reportError}`);
+  console.log(`evidence: ${captured.evidenceDir}`);
+  return status === 'captured' ? 0 : 1;
 }
