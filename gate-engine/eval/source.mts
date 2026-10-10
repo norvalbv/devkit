@@ -2,6 +2,7 @@ import { type SpawnSyncReturns, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { relative, resolve } from 'node:path';
+import { matchesRepoGlob } from '../../skills/_devkit/review-roots.mjs';
 import { explainStagedAbsence, probe } from './snapshot/absence.mts';
 import {
   assertBlobMatches,
@@ -12,8 +13,6 @@ import {
 } from './snapshot/integrity.mts';
 import type { HashSet, TrackerMode } from './types.mts';
 
-const DOUBLE_STAR_TOKEN = '___DEVKIT_DOUBLE_STAR___';
-const DOUBLE_STAR_DIRECTORY_TOKEN = '___DEVKIT_DOUBLE_STAR_DIRECTORY___';
 // A submodule's index/tree entry. Not a blob: `git show :<gitlink>` is `fatal: bad object`, so it
 // must never enter a listing whose contract is "these paths can be read".
 const GITLINK_MODE = '160000';
@@ -222,21 +221,10 @@ export function repositorySource(cwd: string, mode: TrackerMode, ref?: string): 
   };
 }
 
-function matchGlob(path: string, glob: string): boolean {
-  const escaped = glob
-    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
-    .replace(/\*\*\//g, DOUBLE_STAR_DIRECTORY_TOKEN)
-    .replace(/\*\*/g, DOUBLE_STAR_TOKEN)
-    .replace(/\*/g, '[^/]*')
-    .replaceAll(DOUBLE_STAR_DIRECTORY_TOKEN, '(?:.*/)?')
-    .replaceAll(DOUBLE_STAR_TOKEN, '.*');
-  return new RegExp(`^${escaped}$`).test(path);
-}
-
 export function hashPaths(source: RepositorySource, globs: string[]): string {
   const paths = source
     .listFiles()
-    .filter((path) => globs.some((glob) => matchGlob(path, glob)))
+    .filter((path) => globs.some((glob) => matchesRepoGlob(path, glob)))
     .sort();
   const hash = createHash('sha256');
   for (const path of paths) {

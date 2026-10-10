@@ -43,6 +43,7 @@
 import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { matchesRepoGlob } from '../../skills/_devkit/review-roots.mjs';
 import { envFlag, resolveFromCwd, resolveGuardConfig } from '../config.mts';
 import { emitCacheHit } from '../judge/gate-events.mts';
 import { judgeBinForModel } from '../judge/codex/result.mts';
@@ -81,9 +82,6 @@ interface JudgeDetail {
   outage?: JudgeOutage & { bin: string };
 }
 
-// glob → regex literals. ** = any incl. `/`; * = any non-slash; ? = one non-slash.
-const GLOB_ESC_RE = /[.+^${}()|[\]\\]/g;
-const GLOB_STARS_RE = /\*\*|\*|\?/g; // wildcards in ONE pass (** before *; ? is single-char, no placeholder)
 const ALIGN_RE = { CONTRADICT: /\bCONTRADICT\b/, ALIGN: /\bALIGN\b/, UNCLEAR: /\bUNCLEAR\b/ };
 // Tolerates markdown dressing (bold/bullet/heading) around the line — a judge that formats its
 // verdict must not silently fall through to the ambiguous-word fallback and lose a block.
@@ -121,18 +119,10 @@ const ESCALATE_PROMPT = (ruling: string, vision: string, files: string[], firstP
 
 // ─── Pure logic (testable without git/claude) ───────────────────────────────────
 
-function globToRe(glob: string): RegExp {
-  const re = glob
-    .trim()
-    .replace(GLOB_ESC_RE, '\\$&')
-    .replace(GLOB_STARS_RE, (m) => (m === '**' ? '.*' : m === '*' ? '[^/]*' : '[^/]'));
-  return new RegExp(`^${re}$`);
-}
-
 /** Deterministic: does any changed file match any of the Target's scope globs? */
 export function matchScope(files: string[], globs: string[]): boolean {
-  const res = globs.map(globToRe);
-  return files.some((f) => res.some((re) => re.test(f)));
+  const trimmed = globs.map((g) => g.trim());
+  return files.some((f) => trimmed.some((g) => matchesRepoGlob(f, g)));
 }
 
 /**

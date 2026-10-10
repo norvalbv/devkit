@@ -1,12 +1,12 @@
 {
   "schemaVersion": 2,
   "kind": "skills",
-  "devkitRef": "v0.67.1",
-  "generatedAt": "2026-10-07T15:16:03.297Z",
+  "devkitRef": "v0.68.0",
+  "generatedAt": "2026-10-08T13:27:31.664Z",
   "files": {
     "_devkit/checklist-store.mjs": "c8a6a01fe75bd570953ccc88e3b99b8ac365bb249c4b1db2ce0c32a589c52193",
-    "_devkit/review-roots.d.mts": "384d95945ccf04f994d805e78a5507835321ee5bcbd46acbf216c77385238c9e",
-    "_devkit/review-roots.mjs": "036170be63e48203525131264a581dce4e034401ca2325e37ec597b1a6865899",
+    "_devkit/review-roots.d.mts": "ef04d721fdb4841e5ee6867b8b6d48769655eabb89d18f60cf7a117b6cb224db",
+    "_devkit/review-roots.mjs": "ce1fc40d466fe52557509ae3a0dc5ab05bca589146e4cdfed50c5dcf35dcc092",
     "api-security/SKILL.md": "5916bc98f288a0b7269ec9df416692509c449274026afc93013388c40c13415e",
     "api-security/scripts/checklist.mjs": "07840e28ed2756cc2575a4d4f22c3d973b9e6c7059559949cbc50907fa0872ff",
     "backend-performance/SKILL.md": "5ff0858b34ffc91d677976dd279f27714d934aa5062f0a3f6b38088e7bd10ddb",
@@ -42,8 +42,8 @@
     "claude": {
       "files": {
         "_devkit/checklist-store.mjs": "c8a6a01fe75bd570953ccc88e3b99b8ac365bb249c4b1db2ce0c32a589c52193",
-        "_devkit/review-roots.d.mts": "384d95945ccf04f994d805e78a5507835321ee5bcbd46acbf216c77385238c9e",
-        "_devkit/review-roots.mjs": "036170be63e48203525131264a581dce4e034401ca2325e37ec597b1a6865899",
+        "_devkit/review-roots.d.mts": "ef04d721fdb4841e5ee6867b8b6d48769655eabb89d18f60cf7a117b6cb224db",
+        "_devkit/review-roots.mjs": "ce1fc40d466fe52557509ae3a0dc5ab05bca589146e4cdfed50c5dcf35dcc092",
         "api-security/SKILL.md": "5916bc98f288a0b7269ec9df416692509c449274026afc93013388c40c13415e",
         "api-security/scripts/checklist.mjs": "07840e28ed2756cc2575a4d4f22c3d973b9e6c7059559949cbc50907fa0872ff",
         "backend-performance/SKILL.md": "5ff0858b34ffc91d677976dd279f27714d934aa5062f0a3f6b38088e7bd10ddb",
@@ -79,8 +79,8 @@
     "codex": {
       "files": {
         "_devkit/checklist-store.mjs": "c8a6a01fe75bd570953ccc88e3b99b8ac365bb249c4b1db2ce0c32a589c52193",
-        "_devkit/review-roots.d.mts": "384d95945ccf04f994d805e78a5507835321ee5bcbd46acbf216c77385238c9e",
-        "_devkit/review-roots.mjs": "036170be63e48203525131264a581dce4e034401ca2325e37ec597b1a6865899",
+        "_devkit/review-roots.d.mts": "ef04d721fdb4841e5ee6867b8b6d48769655eabb89d18f60cf7a117b6cb224db",
+        "_devkit/review-roots.mjs": "ce1fc40d466fe52557509ae3a0dc5ab05bca589146e4cdfed50c5dcf35dcc092",
         "api-security/SKILL.md": "5916bc98f288a0b7269ec9df416692509c449274026afc93013388c40c13415e",
         "api-security/scripts/checklist.mjs": "07840e28ed2756cc2575a4d4f22c3d973b9e6c7059559949cbc50907fa0872ff",
         "backend-performance/SKILL.md": "5ff0858b34ffc91d677976dd279f27714d934aa5062f0a3f6b38088e7bd10ddb",
@@ -116,8 +116,8 @@
     "cursor": {
       "files": {
         "_devkit/checklist-store.mjs": "c8a6a01fe75bd570953ccc88e3b99b8ac365bb249c4b1db2ce0c32a589c52193",
-        "_devkit/review-roots.d.mts": "384d95945ccf04f994d805e78a5507835321ee5bcbd46acbf216c77385238c9e",
-        "_devkit/review-roots.mjs": "036170be63e48203525131264a581dce4e034401ca2325e37ec597b1a6865899",
+        "_devkit/review-roots.d.mts": "ef04d721fdb4841e5ee6867b8b6d48769655eabb89d18f60cf7a117b6cb224db",
+        "_devkit/review-roots.mjs": "ce1fc40d466fe52557509ae3a0dc5ab05bca589146e4cdfed50c5dcf35dcc092",
         "api-security/SKILL.md": "5916bc98f288a0b7269ec9df416692509c449274026afc93013388c40c13415e",
         "api-security/scripts/checklist.mjs": "07840e28ed2756cc2575a4d4f22c3d973b9e6c7059559949cbc50907fa0872ff",
         "backend-performance/SKILL.md": "5ff0858b34ffc91d677976dd279f27714d934aa5062f0a3f6b38088e7bd10ddb",
