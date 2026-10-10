@@ -168,6 +168,7 @@ ROOT=$(git rev-parse --show-toplevel)
 # devkit's own modules are .mts in the source tree (Node strips types) and compiled .mjs in an
 # installed consumer (dist) — same fallback the reconcile writer uses.
 SHIP_INTENT="$SCRIPT_DIR/ship-intent.mts"; [ -f "$SHIP_INTENT" ] || SHIP_INTENT="$SCRIPT_DIR/ship-intent.mjs"
+DECISION_ADVISORY="$SCRIPT_DIR/preflight/decision-smells.mts"; [ -f "$DECISION_ADVISORY" ] || DECISION_ADVISORY="$SCRIPT_DIR/preflight/decision-smells.mjs"
 . "$SCRIPT_DIR/resume-extras-notice.sh"
 . "$SCRIPT_DIR/prepare-gate-worktree.sh"
 # Project before the intent read and write: a legacy linked .devkit resolves the record in the home.
@@ -1487,12 +1488,12 @@ else
       export DEVKIT_REVIEW_GUARDS=comments,review
       export DEVKIT_SHIP_DRY_REVIEWERS=1
       echo "🧪 Ship dry gates: exact base/path staging; running formatter, configured deterministic/structure/extra gates (comment budget included), and the domain reviewers." >&2
-      echo "   Skipping decision, Qavis, completeness, commit, push, and PR creation." >&2
+      echo "   Skipping the decision judge (regex smells shown as advisory), Qavis, completeness, commit, push, and PR creation." >&2
     else
       export DEVKIT_REVIEW_GUARDS=comments
       unset DEVKIT_SHIP_DRY_REVIEWERS
       echo "🧪 Ship dry gates: exact base/path staging; running formatter, configured deterministic/structure/extra gates (comment budget included)." >&2
-      echo "   Skipping decision, Qavis, domain reviewer, completeness, commit, push, and PR creation." >&2
+      echo "   Skipping the decision judge (regex smells shown as advisory), Qavis, domain reviewer, completeness, commit, push, and PR creation." >&2
     fi
   else
     export DEVKIT_SHIP_MODE=ship   # tags the ship_attempt telemetry (new-ship vs reship retry)
@@ -1508,6 +1509,12 @@ else
   GATE_SIGNAL_DEFER_EXIT=1
   COMMIT_STATUS=0
   commit_with_gate_capture "$WT" "$ROOT" "$BR" "$TITLE" "$BODY" || COMMIT_STATUS=$?
+  # --dry-gates skips the decision judge but names its regex smells, pass or fail (sc-4978).
+  if [ "$DRY_GATES" -eq 1 ] && [ "$REQUESTED_SIGNAL_STATUS" -eq 0 ] &&
+    case "$COMMIT_STATUS" in 124|129|130|131|137|143) false ;; *) true ;; esac &&
+    grep -qs 'guard-decisions' "$(gate_worktree_pre_commit "$WT" "$ROOT")" "$WT/.husky/pre-commit"; then
+    (cd "$WT" && node "$DECISION_ADVISORY" --root "$ROOT") >&2 || true
+  fi
 # Post-commit, pre-push: the gate chain ran with this worktree's index reachable through the
 # GIT_INDEX_FILE git exported into the hook. Prove the commit still contains the briefed work before
 # anything leaves the machine — dry runs included, so the check is exercised on every ship path.
