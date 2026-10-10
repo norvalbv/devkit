@@ -246,7 +246,7 @@ Move every judge **away from the CLI the message names**, in the shell the ship 
 **`codex` is dark** — move to the claude family. Set all four knobs, never a subset:
 
 ```
-export GUARD_REVIEW_MODEL=haiku GUARD_REVIEW_ESCALATION_MODEL=opus \
+export GUARD_REVIEW_MODEL=sonnet GUARD_REVIEW_ESCALATION_MODEL=opus \
   GUARD_CORRECTNESS_MODEL=sonnet GUARD_CORRECTNESS_CHUNK=off
 unset GUARD_SENTRY_MODEL FRINK_SENTRY_MODEL
 devkit ship --resume <branch>

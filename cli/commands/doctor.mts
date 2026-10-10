@@ -30,7 +30,7 @@ import {
   CODEX_RUNTIME_CHECK,
   SEARCH_INDEX_CHECK,
 } from '../lib/doctor/guard-config-checks.mts';
-import { bindClaudeFamily } from '../lib/doctor/judge/judge-family.mts';
+import { bindClaudeFamily, CLAUDE_FAMILY_SET as FAM } from '../lib/doctor/judge/judge-family.mts';
 import {
   printPriorArtAdvisoryHealth,
   printQavisAdvisoryHealth,
@@ -228,7 +228,7 @@ function applyFix(
   const codexRow = results.find((r) => r.name === CODEX_RUNTIME_CHECK);
   if (codexRow?.fixable && codexRow.status !== 'OK' && bindClaudeFamily(cwd)) {
     console.log(
-      '  ✓ bound the claude judge family (haiku/opus/sonnet, chunking off) into guard.config.json',
+      `  ✓ bound the claude judge family (${FAM.model}/${FAM.escalationModel}/${FAM.correctnessModel}, chunking off) into guard.config.json`,
     );
   }
 
