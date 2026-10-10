@@ -305,7 +305,11 @@ if git show-ref --verify -q "refs/heads/$BR"; then
   fi
   LOCAL_BRANCH_EXISTS=1
 fi
-if [ -n "$LOCAL_BRANCH_EXISTS" ] && [ "$FROM_BRANCH" -eq 1 ] && [ "$RESUME" -eq 0 ]; then
+SELF_DEFER=
+if [ -n "$LOCAL_BRANCH_EXISTS" ] && [ "$FROM_BRANCH" -eq 1 ] && [ "$RESUME" -eq 0 ] && [ -n "$PREFLIGHT_SELF" ]; then
+  # The rename remedy is already printed; run the ancestry and hook-dir checks so one attempt names all.
+  SELF_DEFER=1; LOCAL_BRANCH_EXISTS=
+elif [ -n "$LOCAL_BRANCH_EXISTS" ] && [ "$FROM_BRANCH" -eq 1 ] && [ "$RESUME" -eq 0 ]; then
   echo "branch already exists: $BR" >&2
   echo "  a fresh --from-branch invocation cannot adopt a prior receipt; use devkit ship --resume '$BR' to replay its recorded v3 branch source, or choose a new branch name" >&2
   exit 1
@@ -542,9 +546,14 @@ if [ "$FROM_BRANCH" -eq 1 ]; then
     set -e
     case "$ancestry_status" in
       0) ;;
-      1) echo "--from-branch: origin/$BASE_REF (${BASE:0:7}) is not an ancestor of HEAD (${SOURCE_HEAD:0:7}); rebase/merge the base, or deepen a shallow checkout, then retry" >&2; exit 1 ;;
+      1) echo "${SELF_DEFER:+ship: also blocked — }--from-branch: origin/$BASE_REF (${BASE:0:7}) is not an ancestor of HEAD (${SOURCE_HEAD:0:7}); rebase/merge the base, or deepen a shallow checkout, then retry" >&2
+         [ -n "$SELF_DEFER" ] || exit 1 ;;
       *) echo "--from-branch: could not verify ancestry (git exit $ancestry_status); fetch/deepen the repository and retry" >&2; exit 1 ;;
     esac
+    if [ -n "$SELF_DEFER" ]; then
+      gate_hook_source_preflight "$ROOT" "$BASE" shipping || true   # read-only; prints its own blocker
+      exit 1
+    fi
 
     if [ "$RESUME" -eq 0 ]; then
       BRANCH_PATHS_FILE=$(mktemp "${TMPDIR:-/tmp}/ship-branch-paths.XXXXXX")

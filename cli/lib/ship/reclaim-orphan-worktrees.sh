@@ -319,7 +319,9 @@ _ship_orphan_report_self() {
   echo "  free the name by renaming it — this moves this worktree with it, and touches no file:" >&2
   echo "    git branch -m $(ship_shell_quote "$br") \"$freed\"" >&2
   echo "  then re-run ship, naming the PR base (HEAD is then on a branch origin does not have):" >&2
-  echo "    devkit ship $(ship_shell_quote "$br") \"<title>\" --base $(ship_shell_quote "${base:-<branch-on-origin>}") -- <paths>" >&2
+  local tail='-- <paths>'
+  [ "${FROM_BRANCH:-0}" -ne 1 ] || tail=--from-branch
+  echo "    devkit ship $(ship_shell_quote "$br") \"<title>\" --base $(ship_shell_quote "${base:-<branch-on-origin>}") $tail" >&2
   echo "  (renaming keeps every commit; drop the renamed branch once the PR is open)" >&2
 }
 
