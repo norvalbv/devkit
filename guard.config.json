@@ -132,5 +132,41 @@
   "//maxLines": "Raw line cap per source file (guard-size ratchet enforces it; existing giants grandfathered shrink-only). 0 = off. Per-FUNCTION caps need a parser — not yet.",
   "maxLines": 500,
   "//maxTestLines": "Loose raw line cap per test file; existing oversized tests are grandfathered shrink-only. 0 = off.",
-  "maxTestLines": 2000
+  "maxTestLines": 2000,
+  "//mergeVerdict": "Hand-curated: what devkit ships to consumers (synced assets, templates, skills, the published build, CLI entry points and flags, guard.config.json schema owners) and the verdict's own code, so a change to it keeps a human reviewer. Thresholds keep their defaults.",
+  "mergeVerdict": {
+    "consumerSurface": [
+      "agents/**",
+      "agents-hooks/**",
+      "anti-slop/**",
+      "biome/**",
+      "oxc/**",
+      "tsconfig/**",
+      "skills/**",
+      "templates/**",
+      "dist/**",
+      "cli/index.mts",
+      "cli/commands/**",
+      "cli/lib/husky/**",
+      "gate-engine/**/cli.mts",
+      "gate-engine/deterministic/run.mts",
+      "gate-engine/co-occurrence/matcher.mts",
+      "gate-engine/co-occurrence/allowlist-cli.mts",
+      "gate-engine/co-occurrence/clone-detector.mts",
+      "gate-engine/ratchets/folder-fanout.mts",
+      "gate-engine/ratchets/size-disable.mts",
+      "gate-engine/coverage/run.mts",
+      "gate-engine/structure/run.mts",
+      "gate-engine/sentry/check-sentry.mts",
+      "gate-engine/config.mts",
+      "gate-engine/config-json.mts",
+      "gate-engine/structure/grammar.mts",
+      "gate-engine/deterministic/gate-inputs.mts",
+      "gate-engine/deterministic/command-gates.mts",
+      "gate-engine/comment-firewall/policy.mts",
+      "cli/lib/ship/generated-paths/registry.mts",
+      "guard.config.example.json",
+      "cli/lib/ship/merge-verdict/**"
+    ]
+  }
 }

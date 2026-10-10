@@ -46,8 +46,8 @@ interface PackageManifest {
   optionalDependencies?: DepMap;
 }
 
-const LOCKFILE_RE = /(^|\/)(bun\.lockb?|package-lock\.json|yarn\.lock|pnpm-lock\.yaml)$/;
-const PKG_RE = /(^|\/)package\.json$/;
+export const LOCKFILE_RE = /(^|\/)(bun\.lockb?|package-lock\.json|yarn\.lock|pnpm-lock\.yaml)$/;
+export const PKG_RE = /(^|\/)package\.json$/;
 const DEP_KEYS: (keyof PackageManifest)[] = [
   'dependencies',
   'devDependencies',
@@ -76,7 +76,7 @@ const CLAUDE_PROMPT =
 
 // Match any staged file under the consumer's decision-log dir (relative to cwd). Built per-run
 // from cfg.decisionsDir so a consumer that relocates the log still has its records counted.
-function decisionFileRe(decisionsRel: string): RegExp {
+export function decisionFileRe(decisionsRel: string): RegExp {
   const esc = decisionsRel.replace(/[.+^${}()|[\]\\]/g, '\\$&');
   return new RegExp(`(^|/)${esc}/.+\\.md$`);
 }
