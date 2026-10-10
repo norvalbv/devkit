@@ -915,6 +915,17 @@ describe('a reviewer blocking on several fingerprints (sc-3212)', () => {
     expect(rows[0].detail).toMatch(/\[0123456789ab\] — the waive command is in the log$/);
   });
 
+  it('strips a bidi override, which no C0/C1 check catches, from the label too', () => {
+    const lens = `src/${String.fromCodePoint(0x202e)}evil.ts@CLAUDE.md:1`;
+    const rows = summarise(
+      [blockingFail([{ lens, fp: '0123456789ab' }]), shipResult('review')],
+      SHIP,
+    );
+    expect(rows[0].detail).toBe(
+      'src/ evil.ts@CLAUDE.md:1 [0123456789ab] — the waive command is in the log',
+    );
+  });
+
   it('builds no waive command from a lens the emitter had to cut', () => {
     // Through the emitter's own serialization: a 130-char lens fits the digest's line, so only the
     // emitter's `…` marker can tell the reader the label no longer matches the finding.
