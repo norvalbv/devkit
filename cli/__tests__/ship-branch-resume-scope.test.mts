@@ -76,7 +76,6 @@ describe('ship-branch.sh — resume past a gate-widened scope', () => {
       cwd: dir,
       input: 'pr body\n',
       encoding: 'utf8',
-      timeout: 45_000,
       env: { ...publishEnv, SHIP_COMMIT_TIMEOUT: '15' },
     });
 
@@ -113,7 +112,7 @@ describe('ship-branch.sh — resume past a gate-widened scope', () => {
     // Both private refs are retired together once the work is on the remote.
     expect(localBranchExists(git, 'refs/devkit/ship-gate-adds/feat/gate-widened')).toBe(false);
     expect(localBranchExists(git, 'refs/devkit/ship-receipts/feat/gate-widened')).toBe(false);
-  });
+  }, 240_000);
 
   // Why the record is keyed on PROVENANCE: a path the caller briefed itself is absent from it, so
   // narrowing the brief on a retry cannot smuggle that change into the PR.
@@ -380,7 +379,6 @@ describe('ship-branch.sh — resume scope edge cases', () => {
       cwd: dir,
       input: 'pr body\n',
       encoding: 'utf8',
-      timeout: 45_000,
       env: { ...publishEnv, SHIP_COMMIT_TIMEOUT: '15' },
     });
 
@@ -408,7 +406,7 @@ describe('ship-branch.sh — resume scope edge cases', () => {
     expect(retry.stderr).not.toContain('outside the requested scope');
     expect(bareSha(bare, 'feat/gate-deleted')).toBe(preserved);
     expect(readFileSync(hookCount, 'utf8').trim().split('\n')).toHaveLength(1);
-  });
+  }, 240_000);
 
   // Without `literal`, a record entry's glob matches its neighbours, the add-filter skips a
   // caller-owned path as commit-authoritative, and a DRIFTED tree passes the comparison.

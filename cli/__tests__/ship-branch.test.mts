@@ -760,14 +760,12 @@ describe('ship-branch.sh — worktree integration', () => {
       cwd: dir,
       input: 'b\n',
       encoding: 'utf8',
-      timeout: 45_000, // belt-and-suspenders: a broken impl would hang ~30s; cap it under the suite timeout
       env: { ...env, SHIP_DRY_RUN: '1', SHIP_COMMIT_TIMEOUT: '15' },
     });
     dropWorktree(git, r.stderr);
 
     expect(r.status, r.stderr).not.toBe(0); // bounded — the timed-out commit aborts the ship
-    // The make-or-break: the group-kill closes the pipe and the supervisor reports its own expiry.
-    // A leader-only signal leaves the background sleep holding the pipe and spawnSync hits its 45s cap.
+    // Ship's own expiry banner: the harness's deadline also returns 124, but prints no banner.
     expect(r.stderr).toMatch(/gate chain hit the 15s ceiling \(exit 124\)/);
     expect(r.stderr).toMatch(/devkit ship --resume .+ to converge/); // resume hint
     expect(r.stderr).toMatch(/export SHIP_COMMIT_TIMEOUT/); // the knob, with the exported-env caveat
@@ -796,7 +794,6 @@ describe('ship-branch.sh — worktree integration', () => {
         cwd: dir,
         input: 'pr body  \n', // Git strips these spaces; the identical retry must normalize likewise.
         encoding: 'utf8',
-        timeout: 45_000,
         env: { ...publishEnv, SHIP_COMMIT_TIMEOUT: '15' },
       },
     );
@@ -829,7 +826,7 @@ describe('ship-branch.sh — worktree integration', () => {
     expect(localBranchExists(git, 'feat/post-commit-timeout')).toBe(false);
     expect(readFileSync(hookCount, 'utf8').trim().split('\n')).toHaveLength(1);
     expect(manifestOf(dir).branches['feat/post-commit-timeout'].prNumber).toBe(42);
-  });
+  }, 240_000);
 
   it('does not treat a matching hand-made commit as proof that ship gates ran', () => {
     const { dir, env, git } = seedShipRepoLocalRemote();

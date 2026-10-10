@@ -186,12 +186,13 @@ export async function assertInterruptedGateKeepsWorktree({
     env: {
       ...env,
       SHIP_DRY_RUN: '1',
-      SHIP_COMMIT_TIMEOUT: '3',
+      // The test TERMs on ready, so no run waits this out; a tight value lost to load before the hook.
+      SHIP_COMMIT_TIMEOUT: '30',
       SIGNAL_HOOK_READY: ready,
       SIGNAL_HOOK_RESULT: result,
     },
   });
-  await waitForPath(ready, 15_000, child);
+  await waitForPath(ready, 60_000, child);
   if (!child.kill('SIGTERM')) throw new Error('could not signal ship shell');
   const [code, signal] = await once(child, 'exit');
   await waitForPath(result, 15_000);
