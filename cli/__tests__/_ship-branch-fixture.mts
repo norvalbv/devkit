@@ -434,7 +434,9 @@ export function bodyUpdateRepo({ hookBody = 'exit 0' } = {}) {
       '#!/bin/sh',
       'if [ "${FAIL_AFTER_PUSH:-0}" -eq 1 ]; then',
       '  case " $* " in',
-      `    *' push origin HEAD:feat/pr '*) '${realGit}' "$@" || exit $?; exit 9 ;;`,
+      `    *' push origin HEAD:feat/pr '*) '${realGit}' "$@" || exit $?; : > "$(dirname "$0")/pushed"; exit 9 ;;`,
+      // Origin stays unverifiable after the lost response, so ship cannot adopt and must resume.
+      `    *' ls-remote '*) [ ! -e "$(dirname "$0")/pushed" ] || exit 128 ;;`,
       '  esac',
       'fi',
       `exec '${realGit}' "$@"`,

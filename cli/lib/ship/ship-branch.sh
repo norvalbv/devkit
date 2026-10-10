@@ -299,6 +299,7 @@ PREFLIGHT_SELF=   # set when the branch's holder is THIS worktree; changes the c
 # unrelated local branch. Dry runs deliberately keep their worktree for inspection and never publish,
 # so they retain the strict new-branch precondition.
 LOCAL_BRANCH_EXISTS=
+REMOTE_HOLDS_PRESERVED=
 if git show-ref --verify -q "refs/heads/$BR"; then
   if [ -n "${SHIP_DRY_RUN:-}" ] || [ "$DRY_GATES" -eq 1 ]; then
     echo "branch already exists: $BR" >&2; exit 1
@@ -320,31 +321,39 @@ if [ -z "${SHIP_DRY_RUN:-}" ] && [ "$DRY_GATES" -eq 0 ]; then
   set +e
   # Fully-qualified, NOT a bare `$BR`: a bare pattern tail-matches on path segments, so shipping `x`
   # would read `refs/heads/feat/x` as "this branch already exists" and refuse a legitimate name.
-  bounded_remote_git ls-remote --exit-code --heads origin "refs/heads/$BR" >/dev/null 2>&1
+  remote_line=$(bounded_remote_git ls-remote --exit-code --heads origin "refs/heads/$BR" 2>/dev/null)
   remote_check=$?
   set -e
   # ls-remote exits 2 for "no matching ref" but ALSO non-zero on auth/network error — only exit 2
   # is a safe "branch absent"; any other failure must fail closed, or push -u could append to a PR.
   case "$remote_check" in
-    0) echo "remote branch already exists: origin/$BR" >&2
-       # A merged or closed PR's branch reaches no base, so --pr would only refuse in turn.
+    0) # A merged or closed PR's branch reaches no base, so --pr would only refuse in turn.
        REPO=$( (git config --get remote.origin.url || git remote get-url origin) | sed -E 's#^.*github\.com[^:/]*[:/]##; s#\.git$##')
-       if read_pr_state && [ "$PR_SEEN_STATE" != "OPEN" ]; then
-         echo "  its PR #$PR_SEEN_NUM is $PR_SEEN_STATE — a push there never reaches $PR_SEEN_BASE" >&2
-         # The new PR targets this ship's own base, which the base resolution below derives the same way.
-         remedy_base=${BASE_FLAG#origin/}
-         [ -n "$remedy_base" ] || remedy_base=$(git symbolic-ref --quiet --short HEAD) || remedy_base=$PR_SEEN_BASE
-         # A --from-branch ship derives its paths (a resume replays them), so its remedy names none.
-         remedy_tail=--from-branch
-         if [ "$FROM_BRANCH" -eq 0 ]; then
-           remedy_tail=--
-           for p in ${PATHS[@]+"${PATHS[@]}"}; do remedy_tail="$remedy_tail $(printf '%q' "$p")"; done
-         fi
-         print_closed_pr_remedy "$remedy_base" "$remedy_tail" "then re-run with --pr"
+       PR_CLOSED=; ! read_pr_state || [ "$PR_SEEN_STATE" = OPEN ] || PR_CLOSED=1
+       # A preserved commit already on origin (lost push response, manual push) is adopted; the
+       # receipt checks below still decide whether it may be published.
+       if [ -z "$PR_CLOSED" ] && [ -n "$LOCAL_BRANCH_EXISTS" ] &&
+         [ "${remote_line%%[[:space:]]*}" = "$(git rev-parse -q --verify "refs/heads/$BR")" ]; then
+         REMOTE_HOLDS_PRESERVED=1
        else
-         echo "  to add these changes to that branch's existing PR, re-run with --pr" >&2
-       fi
-       exit 1 ;;
+         echo "remote branch already exists: origin/$BR" >&2
+         if [ -n "$PR_CLOSED" ]; then
+           echo "  its PR #$PR_SEEN_NUM is $PR_SEEN_STATE — a push there never reaches $PR_SEEN_BASE" >&2
+           # The new PR targets this ship's own base, which the base resolution below derives the same way.
+           remedy_base=${BASE_FLAG#origin/}
+           [ -n "$remedy_base" ] || remedy_base=$(git symbolic-ref --quiet --short HEAD) || remedy_base=$PR_SEEN_BASE
+           # A --from-branch ship derives its paths (a resume replays them), so its remedy names none.
+           remedy_tail=--from-branch
+           if [ "$FROM_BRANCH" -eq 0 ]; then
+             remedy_tail=--
+             for p in ${PATHS[@]+"${PATHS[@]}"}; do remedy_tail="$remedy_tail $(printf '%q' "$p")"; done
+           fi
+           print_closed_pr_remedy "$remedy_base" "$remedy_tail" "then re-run with --pr"
+         else
+           echo "  to add these changes to that branch's existing PR, re-run with --pr" >&2
+         fi
+         exit 1
+       fi ;;
     2) ;; # no matching remote branch → safe to create it
     *) echo "could not verify remote branch (ls-remote exit $remote_check) — refusing to push" >&2; exit 1 ;;
   esac
@@ -1588,11 +1597,15 @@ fi
 # typecheck + test:run for this one commit (CI's gate.yml re-runs both on the PR). Command-scoped —
 # nothing else inherits it — and content-keyed: the hook fails closed and runs the full suite for any
 # ref whose oid is not this sha, so a plain `git push` (no env) is unchanged.
-if [ -n "$LOCAL_BRANCH_EXISTS" ]; then
-  DEVKIT_SHIP_PREPUSH_SKIP_SHA="$RECOVERY_COMMIT" \
-    git -C "$WT" push origin "$RECOVERY_COMMIT:refs/heads/$BR"
+. "$SCRIPT_DIR/push-retry.sh"
+if [ -n "$REMOTE_HOLDS_PRESERVED" ]; then
+  echo "origin/$BR already holds gated commit ${RECOVERY_COMMIT:0:7}; skipping push" >&2
+elif [ -n "$LOCAL_BRANCH_EXISTS" ]; then
+  ship_push_with_retry "$WT" "$RECOVERY_COMMIT" "$BR" origin "$RECOVERY_COMMIT:refs/heads/$BR" ||
+    { echo "push failed — gated commit preserved on $BR; retry: devkit ship --resume $BR" >&2; exit 1; }
 else
-  DEVKIT_SHIP_PREPUSH_SKIP_SHA="$(git -C "$WT" rev-parse HEAD)" git -C "$WT" push -u origin "$BR"
+  ship_push_with_retry "$WT" "$(git -C "$WT" rev-parse HEAD)" "$BR" -u origin "$BR" ||
+    { echo "push failed — gated commit preserved on $BR; retry: devkit ship --resume $BR" >&2; exit 1; }
 fi
 
 # Push succeeded → the branch is live on the remote and reconcilable NOW, whatever the PR step does.
@@ -1606,7 +1619,11 @@ PR_CREATE_FAILED=
 # unbound-variable error under `set -u`, and a plain "$VAR" would pass an empty argument to gh.
 PR_DRAFT_ARGS=()
 [ "$DRAFT" -eq 0 ] || PR_DRAFT_ARGS=(--draft)
-PR_URL=$( cd "$WT" && gh pr create --repo "$REPO" --base "$BASE_REF" --head "$BR" --title "$TITLE" --body "$BODY" ${PR_DRAFT_ARGS[@]+"${PR_DRAFT_ARGS[@]}"} ) || PR_CREATE_FAILED=1
+if [ -n "$REMOTE_HOLDS_PRESERVED" ] && read_pr_state && [ "$PR_SEEN_STATE" = OPEN ]; then
+  PR_URL=$PR_SEEN_URL
+else
+  PR_URL=$( cd "$WT" && gh pr create --repo "$REPO" --base "$BASE_REF" --head "$BR" --title "$TITLE" --body "$BODY" ${PR_DRAFT_ARGS[@]+"${PR_DRAFT_ARGS[@]}"} ) || PR_CREATE_FAILED=1
+fi
 PR_NUM=""
 if [ -z "$PR_CREATE_FAILED" ]; then
   echo "$PR_URL"   # surface the PR URL (we captured gh's stdout to recover the PR number below)
