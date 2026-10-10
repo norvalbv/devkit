@@ -90,6 +90,8 @@ const VERDICT_LINE_RE = /^[\s*#>-]*VERDICT:\s*\**\s*(ALIGN|CONTRADICT|UNCLEAR)\b
 // Read-only investigation surface for the judge. `git diff` (pattern-scoped Bash) is how it reads
 // STAGED hunks — worktree Reads alone would miss partial staging.
 const JUDGE_TOOLS = 'Read,Grep,Glob,Bash(git diff:*)';
+// Staged names are root-relative while cwd may be a subdirectory; a filename is never a glob.
+const topLiteral = (file: string) => `:(top,literal)${file}`;
 // One uninterrupted 240s budget for either alignment pass. The old 120s haiku cap killed 9/288
 // observed runs while healthy completions reached 116s (sc-1195). A timeout is deliberately not
 // retried: restarting would discard the first run's investigation for the same 240s worst case.
@@ -228,7 +230,7 @@ export function judgeDetailed(
 ): JudgeDetail | null {
   const cfg = resolveGuardConfig(cwd);
   if (cfg.noLlm || files.length === 0) return null;
-  const stat = git(cwd, ['diff', '--cached', '--stat', '--', ...files]);
+  const stat = git(cwd, ['diff', '--cached', '--stat', '--', ...files.map(topLiteral)]);
   // Gate semantics follow the review knobs (env > guard.config.json > default): the light judge
   // model investigates, the escalation model confirms. The bench passes both explicitly.
   const firstM = firstModel ?? resolveReviewModel(cfg);
@@ -292,7 +294,7 @@ function alignmentPass(cwd: string, cfg: GuardConfig, changed: string[]): void {
     if (matched.length === 0) continue;
     // An earned ALIGN is cached on (target, exact staged bytes in its scope): a ship retry
     // with an unchanged diff clears this target without re-spending the haiku/opus cascade.
-    const domainDiff = git(cwd, ['diff', '--cached', '--', ...matched]);
+    const domainDiff = git(cwd, ['diff', '--cached', '--', ...matched.map(topLiteral)]);
     // Key on EVERY judge input: slug + ruling + vision (both feed ALIGN_PROMPT) + the exact
     // staged bytes — editing a Target's Vision-fit must invalidate its cached ALIGN.
     const key = verdictKey('align', t.slug, t.ruling, t.vision, domainDiff);
