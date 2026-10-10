@@ -224,7 +224,7 @@ describe('ship-branch.sh — resume when the base moved', () => {
     expect(remoteBranchExists(bare, 'feat/already-merged')).toBe(false);
   });
 
-  it('names the zero-commit state even when the tip is a ROOT commit', () => {
+  it('reclaims an unheld branch whose ROOT-commit tip the base contains, naming the old tip', () => {
     const { dir, env, git, bare } = seedShipRepoLocalRemote();
     const root = git(['rev-list', '--max-parents=0', 'HEAD']).trim();
     advanceSharedHead(dir, git, 'first.txt'); // so the base is genuinely AHEAD of the root
@@ -239,12 +239,13 @@ describe('ship-branch.sh — resume when the base moved', () => {
       env: publishEnv,
     });
 
-    expect(r.status, r.stderr).toBe(1);
-    expect(r.stderr).toContain('carries no commit of its own over');
-    expect(r.stderr).not.toContain('is not a single commit');
-    expect(r.stderr).not.toContain('diverges from it');
-    expect(remoteBranchExists(bare, 'feat/root-tip')).toBe(false);
-    expect(localBranchExists(git, 'feat/root-tip')).toBe(true); // kept for the operator
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).toContain(
+      `ship: feat/root-tip held no commit of its own over origin/work (tip ${root.slice(0, 7)})`,
+    );
+    expect(r.stderr).toContain(`restore: git branch 'feat/root-tip' ${root.slice(0, 7)}`);
+    expect(r.stderr).not.toContain('cannot safely resume');
+    expect(remoteBranchExists(bare, 'feat/root-tip')).toBe(true);
   });
 
   // The other is-ancestor fail-open: BASE == RECOVERY_COMMIT and BASE_REF == BR. Accepting it pushes

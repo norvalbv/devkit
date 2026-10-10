@@ -972,9 +972,9 @@ describe('ship-branch.sh — worktree integration', () => {
   it('still rejects an unrelated existing local branch', () => {
     const { dir, env, git } = seedShipRepoLocalRemote();
     const stubBin = ghStub('echo should-not-run; exit 9');
-    git(['branch', 'feat/unrelated']);
+    const own = git(['commit-tree', 'work^{tree}', '-p', 'work', '-m', 'unrelated']).trim();
+    git(['branch', 'feat/unrelated', own]);
     writeFileSync(join(dir, 'note.txt'), 'hi\n');
-
     const r = spawnSync('/bin/bash', [scriptPath, 'feat/unrelated', 'ship it', 'note.txt'], {
       cwd: dir,
       input: 'pr body\n',
@@ -986,7 +986,7 @@ describe('ship-branch.sh — worktree integration', () => {
     expect(r.stderr).toContain('branch already exists: feat/unrelated');
     expect(r.stderr).toContain('cannot safely resume it');
     expect(r.stdout).not.toContain('should-not-run');
-    expect(git(['rev-parse', 'feat/unrelated']).trim()).toBe(git(['rev-parse', 'work']).trim());
+    expect(git(['rev-parse', 'feat/unrelated']).trim()).toBe(own);
   });
 
   it('keeps the new-ship worktree alive until an interrupted gate is fully reaped', async () => {
