@@ -1,4 +1,4 @@
-import {
+import fs, {
   existsSync,
   lstatSync,
   mkdirSync,
@@ -8,6 +8,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
@@ -87,5 +88,70 @@ describe('writeIfAbsent — symlink dest is replaced with a real entry, never fo
     writeIfAbsent(join(root, 'real', 'new.txt'), 'new', { force: true });
     expect(readFileSync(join(root, 'real', 'keep.txt'), 'utf8')).toBe('keep'); // sibling untouched
     expect(readFileSync(join(root, 'real', 'new.txt'), 'utf8')).toBe('new');
+  });
+});
+
+describe('writeIfAbsent — exclusive create without force', () => {
+  it('keeps a file another writer creates between the call and the write', () => {
+    const f = join(tmp(), 'cfg', 'guard.config.json');
+    const realMkdirSync = fs.mkdirSync;
+    // SAFETY: the wrapper forwards every argument to the real mkdirSync and returns its value.
+    fs.mkdirSync = ((...args: Parameters<typeof fs.mkdirSync>) => {
+      const made = realMkdirSync(...args);
+      writeFileSync(f, 'theirs'); // a concurrent writer lands inside the window
+      return made;
+    }) as typeof fs.mkdirSync;
+    syncBuiltinESMExports(); // fs-helpers.mts binds mkdirSync by name
+    try {
+      expect(writeIfAbsent(f, 'ours')).toBe('exists');
+    } finally {
+      fs.mkdirSync = realMkdirSync;
+      syncBuiltinESMExports();
+    }
+    expect(readFileSync(f, 'utf8')).toBe('theirs');
+  });
+
+  it('leaves a LIVE leaf symlink and its target untouched', () => {
+    const root = tmp();
+    writeFileSync(join(root, 'mine.json'), 'mine');
+    symlinkSync('mine.json', join(root, 'link.json'));
+    expect(writeIfAbsent(join(root, 'link.json'), 'ours')).toBe('exists');
+    expect(lstatSync(join(root, 'link.json')).isSymbolicLink()).toBe(true);
+    expect(readFileSync(join(root, 'mine.json'), 'utf8')).toBe('mine');
+  });
+
+  it('replaces a DANGLING leaf symlink with a real file', () => {
+    const root = tmp();
+    symlinkSync('missing-target', join(root, 'f.json'));
+    expect(writeIfAbsent(join(root, 'f.json'), '{}')).toBe('created');
+    expect(lstatSync(join(root, 'f.json')).isSymbolicLink()).toBe(false);
+    expect(readFileSync(join(root, 'f.json'), 'utf8')).toBe('{}');
+  });
+
+  it('writes through a consumer-symlinked parent dir instead of replacing it', () => {
+    const root = tmp();
+    mkdirSync(join(root, 'shared-husky'));
+    symlinkSync('shared-husky', join(root, '.husky'));
+    expect(writeIfAbsent(join(root, '.husky', 'pre-commit'), 'hook')).toBe('created');
+    expect(lstatSync(join(root, '.husky')).isSymbolicLink()).toBe(true);
+    expect(readFileSync(join(root, 'shared-husky', 'pre-commit'), 'utf8')).toBe('hook');
+  });
+
+  it('replaces a DANGLING parent-dir symlink rather than crashing in mkdir', () => {
+    const root = tmp();
+    symlinkSync('missing-dir', join(root, 'eslint'));
+    expect(writeIfAbsent(join(root, 'eslint', 'domains.mjs'), 'x')).toBe('created');
+    expect(lstatSync(join(root, 'eslint')).isDirectory()).toBe(true);
+  });
+
+  it('rethrows a write failure other than EEXIST instead of reporting the file as kept', () => {
+    expect(() => writeIfAbsent(join(tmp(), 'x'.repeat(300)), 'x')).toThrow(/ENAMETOOLONG/);
+  });
+
+  it('reports a directory at the path as existing, untouched', () => {
+    const root = tmp();
+    mkdirSync(join(root, 'taken', 'inner'), { recursive: true });
+    expect(writeIfAbsent(join(root, 'taken'), 'x')).toBe('exists');
+    expect(lstatSync(join(root, 'taken', 'inner')).isDirectory()).toBe(true);
   });
 });

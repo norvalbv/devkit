@@ -281,11 +281,11 @@ function installHusky(sel: HookSelectionInput, hookRoot: string, pkgRel: string,
       console.log(`  [dry-run] write .husky/pre-commit${where} (assembled from selection)`);
       return;
     }
-    mkdirSync(join(hookRoot, '.husky'), { recursive: true });
-    writeFileSync(hookPath, buildFullHook(sel, pkgRel));
-    chmodSync(hookPath, 0o755);
-    console.log(`  ✓ created .husky/pre-commit${where}`);
-    return;
+    if (writeIfAbsent(hookPath, buildFullHook(sel, pkgRel)) === 'created') {
+      chmodSync(hookPath, 0o755);
+      console.log(`  ✓ created .husky/pre-commit${where}`);
+      return;
+    }
   }
   const current = readText(hookPath);
   const block = buildGuardBlock(sel, pkgRel);
