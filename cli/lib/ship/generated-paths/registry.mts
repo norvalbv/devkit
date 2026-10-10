@@ -52,12 +52,15 @@ function isRepoRelativeGlob(glob: string): boolean {
   );
 }
 
+/** A guard.config.json glob: repository-relative, in the `*`, `**` and `?` grammar only. */
+export const repoGlobSchema = z
+  .string()
+  // Never trimmed: whitespace is part of the Git path the glob must match.
+  .transform((g) => g.replace(LEADING_DOT_SLASH, ''))
+  .refine(isRepoRelativeGlob, 'must be a repository-relative glob using only *, ** and ?');
+
 const entrySchema = z.strictObject({
-  glob: z
-    .string()
-    // Never trimmed: whitespace is part of the Git path the glob must match.
-    .transform((g) => g.replace(LEADING_DOT_SLASH, ''))
-    .refine(isRepoRelativeGlob, 'must be a repository-relative glob using only *, ** and ?'),
+  glob: repoGlobSchema,
   command: z
     .string()
     .trim()

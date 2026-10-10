@@ -16,6 +16,13 @@
   "//extraGates": "Repo-specific deterministic gates, label → command. guard-deterministic runs each on every commit and devkit ship, beside the built-in gates and before the AI judges; any non-zero exit blocks (a `guard-structure …` command keeps its exit-2 opt-out). A label starts with a letter or digit, then uses only letters, digits, `.`, `_` and `-`; it may not be a built-in gate name or start with `guard-`. The command is split on whitespace and run without a shell, so put pipes, && or env assignments in a package script. Default: none.",
   "extraGates": { "knip": "npm run knip", "typecheck": "npm run typecheck" },
 
+  "//mergeVerdict": "Inputs to the deterministic merge verdict: auto-merge-eligible, human-review (<reason>) or policy (<reason>). devkit ship does not print it yet, and nothing merges on it. consumerSurface lists repo-relative globs (*, ** and ?) for what your repo ships to its users: synced assets, templates, CLI command and flag definitions, config schema. A change there needs human review. Default: []. A test-only change is eligible at any size. A source change is eligible only with red/green evidence captured at the PR head and at most maxSourceLines changed lines (added plus deleted, default 50) across at most maxSourceFiles files (default 4); maxSourceLines 0 leaves only test-only changes eligible. Built in, whatever this key says: changes to CI and gate configuration (.github/**, .husky/**, guard.config.json, .devkit/config.json, ratchet baselines, waiver stores) and to dependency manifests and lockfiles (package.json, the JS lockfiles, Cargo.*, go.mod, pyproject.toml and the other files GitHub's dependency graph reads) are policy; decision records and any GUARD_* bypass or waived finding are human-review.",
+  "mergeVerdict": {
+    "consumerSurface": ["templates/**", "src/cli/commands/**"],
+    "maxSourceLines": 50,
+    "maxSourceFiles": 4
+  },
+
   "//maxLines": "Raw line cap for implementation files. Existing oversized files are grandfathered shrink-only. 0 = off.",
   "maxLines": 500,
 
