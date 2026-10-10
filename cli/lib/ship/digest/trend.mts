@@ -65,11 +65,16 @@ export function parseTrendRow(line: string): TrendRow | undefined {
 function attemptsOf(rows: TrendRow[], key: ShipKey): Attempt[] | null {
   const done: Attempt[] = [];
   let current: Attempt | undefined;
+  const displaced = new Set<string>();
   for (const row of rows) {
-    if (row.repo !== key.repo || row.branch !== key.branch) continue;
+    // ship_intent precedes its own marker, so it would read as foreign inside a killed open attempt.
+    if (row.repo !== key.repo || row.branch !== key.branch || row.type === 'ship_intent') continue;
+    // A displaced attempt that writes again was not killed: it overlapped, so rounds are out of order.
+    if (displaced.has(row.ship_id)) return null;
     if (row.type === 'ship_attempt') {
-      // A second open attempt: an overlapping ship, or a killed run's retry.
-      if (current) return null;
+      // Same id while open: an inherited id cannot tell a kill from an overlap. A new id: the open one died.
+      if (current?.shipId === row.ship_id) return null;
+      if (current) displaced.add(current.shipId);
       current = { shipId: row.ship_id, rows: [] };
     } else if (!current) {
       // Outside any seen attempt: one the backward read cut off. Dropped, never guessed at.
