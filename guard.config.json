@@ -5,6 +5,8 @@
   "indexPath": ".search-code/index.db",
   "//generated": "Paths ship's three-way staging abort points at a generator instead of a hand-merge (sc-2770). .devkit/*-manifest.json are built-in defaults.",
   "generated": [{ "glob": "dist/**", "command": "bun run build" }],
+  "//extraGates": "related-tests runs the tests vitest relates to the staged paths, so a test the change breaks blocks before any AI judge runs.",
+  "extraGates": { "related-tests": "node cli/lib/husky/gate-policy/related-tests.mts" },
   "//comments": "devkit is open source: a comment citing a private Shortcut ticket, an autonomous report id or a decision record means nothing to an outside reader, so guard-comments blocks changed comments that do.",
   "comments": {
     "forbiddenRefs": ["\\bsc-\\d+\\b", "\\breport-[0-9a-f]{6,}\\b"],
