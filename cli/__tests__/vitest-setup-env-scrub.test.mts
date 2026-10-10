@@ -4,7 +4,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { meta } from '../commands/ship.mts';
 import {
+  BYPASS_ENV,
   INHERITED_RUN_ENV,
   SCRUBBED_ENV,
   SHIP_EXPORTED_ENV,
@@ -61,6 +63,8 @@ const SHIP_ENV = {
   FRINK_AI_STRICT: '1',
   GUARD_AI_STRICT: '1',
   GUARD_DECISIONS_DIR: '/elsewhere/docs/decisions',
+  GUARD_STRUCTURE_OK: '1',
+  FRINK_HOOK_PARITY_OK: '1',
 };
 
 /** Loads vitest.setup.mjs in a clean node process and reports the env it leaves behind. */
@@ -159,6 +163,17 @@ describe('vitest.setup.mjs scrubs inherited gate policy', () => {
       'DEVKIT_SHIP_REPO',
     ]) {
       expect(env[name], name).toBeUndefined();
+    }
+  });
+
+  it('covers every one-run bypass `devkit ship --help` documents, in both envFlag spellings', () => {
+    const envBlock = meta.help.split('\nEnv:\n')[1]?.split('\n\n')[0] ?? '';
+    const flags = [...envBlock.matchAll(/\bGUARD_([A-Z_]+)=1/g)].map((m) => m[1]);
+    expect(flags).toContain('HOOK_PARITY_OK');
+    for (const suffix of flags) {
+      for (const name of [`GUARD_${suffix}`, `FRINK_${suffix}`]) {
+        expect(BYPASS_ENV, `${name}: add it to vitest.setup.mjs BYPASS_ENV`).toContain(name);
+      }
     }
   });
 
