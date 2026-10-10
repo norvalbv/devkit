@@ -313,6 +313,37 @@ describe('commit_with_gate_capture — executable hook proof', () => {
     expect(result.stderr).not.toContain('Gate findings this run');
   });
 
+  // The preflight's family move must survive to the tail, where a blocked ship is read.
+  const REMEDY = 'move the judges to the claude family: run `export GUARD_REVIEW_MODEL=haiku`';
+  const darkJudge = {
+    SHIP_JUDGE_REMEDY: REMEDY,
+    DK_TEST_CALLER_VARS: `BASE_FLAG=main; PATHS=(src/a.ts)`,
+  };
+
+  it('a blocked attempt ends with both the block and the judge-family move in its last 10 lines', () => {
+    const { root, wt, base } = fixture(true, BLOCKED_HOOK);
+
+    const result = runCommit(root, wt, base, false, false, '', darkJudge);
+
+    expect(result.status).not.toBe(0);
+    const tail = result.stderr.trimEnd().split('\n').slice(-10).join('\n');
+    expect(tail).toContain('✗ review:correctness — BLOCKED this run');
+    expect(tail).toContain('found a dark judge');
+    expect(tail).toContain(REMEDY);
+  });
+
+  it('says nothing about judges when the preflight found none dark, or when the commit passed', () => {
+    const blocked = fixture(true, BLOCKED_HOOK);
+    const green = fixture(true);
+
+    const quiet = runCommit(blocked.root, blocked.wt, blocked.base);
+    const passed = runCommit(green.root, green.wt, green.base, false, false, '', darkJudge);
+
+    expect(quiet.stderr).not.toContain('dark judge');
+    expect(passed.status, passed.stderr).toBe(0);
+    expect(passed.stderr).not.toContain('dark judge');
+  });
+
   // sc-3175: both retained logs must end with the terminal's block — a reviewer reads them later.
   const retainedLogs = (root: string) => [
     join(root, '.devkit/last-ship-gates-feat-sc1537.log'),
