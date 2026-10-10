@@ -10,6 +10,18 @@
     "forbiddenRefs": ["\\bsc-\\d+\\b", "\\breport-[0-9a-f]{6,}\\b"],
     "forbidDecisionRefs": true
   },
+  "//evidence": "devkit ship runs a PR's added or changed test files on red (the PR base plus those files) and green (the PR head) after the PR opens, and writes the outcome into the PR body.",
+  "evidence": {
+    "command": [
+      "node_modules/.bin/vitest",
+      "run",
+      "--reporter=json",
+      "--outputFile.json={report}",
+      "{files}"
+    ],
+    "supportPaths": ["**/__tests__/**"],
+    "timeoutSeconds": 300
+  },
   "//research": "Sibling clones the prior-art agent may read (agents/prior-art.md). Unresolved entries are skipped, so a clone without them stays valid.",
   "research": {
     "referenceCheckouts": ["../bug-mcp", "../claude-usage-dashboard", "../frink", "../qavis"]
