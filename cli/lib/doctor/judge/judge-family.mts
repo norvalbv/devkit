@@ -11,7 +11,7 @@
  * values — block the write (raw-file check) and stay authoritative, as do GUARD_* envs.
  *
  * The family unit is the complete SET including correctnessChunkLoc: cap 400 was benched for
- * gpt-5.6-sol only, so a trio-only bind would run a sonnet correctness reviewer chunked at an
+ * gpt-5.6-sol only, so a trio-only bind would run a claude correctness reviewer chunked at an
  * un-benched cap (docs/decisions/correctness-chunking-ships-dark.md, 2026-08-28 note).
  */
 

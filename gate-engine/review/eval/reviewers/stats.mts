@@ -361,9 +361,17 @@ export function estimateEscalations(plan, cascade) {
  * table entry is named as unpriced rather than silently costed as the default (sc-2494 probe-first). */
 export function runBannerLines(
   plan,
-  { model, cascade, concurrency, dev, resuming, table, escalateSecs },
+  {
+    model,
+    cascade,
+    concurrency,
+    dev,
+    resuming,
+    table,
+    escalateSecs,
+    effModel = (r) => r.model ?? model,
+  },
 ) {
-  const effModel = (r) => r.model ?? model;
   const totalRows = plan.reduce((s, p) => s + p.rows.length, 0);
   const goldRows = plan.reduce((s, p) => s + p.rows.filter((r) => r.expected === 'FAIL').length, 0);
   const budget = estimateMinutes(
@@ -371,7 +379,7 @@ export function runBannerLines(
     { estEscalations: estimateEscalations(plan, cascade), escalateSecs, concurrency, table },
   );
   const allPinned = plan.every((p) => p.reviewer.model);
-  const modelLabel = allPinned ? [...new Set(plan.map((p) => p.reviewer.model))].join('/') : model;
+  const modelLabel = [...new Set(plan.map((p) => effModel(p.reviewer)))].join('/');
   const cascadeLabel = allPinned ? 'single-pass' : cascade ? 'on' : 'off';
   const lines = [
     `reviewer-eval: ${totalRows} rows (${goldRows} gold) · model ${modelLabel} · cascade ${cascadeLabel} · ` +
