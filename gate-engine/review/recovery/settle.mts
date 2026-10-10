@@ -23,10 +23,12 @@
  */
 
 import { reportRetrievalDegraded, verdictToken } from '../contracts/checklist.mts';
+import { parseAdvisories } from '../contracts/response.mts';
 import { emitGateEvent } from '../../judge/gate-events.mts';
 import { composeTranscript, saveTranscript } from '../../judge/transcript-store.mts';
 import { savePasses } from '../cache.mts';
 import {
+  reportAdvisories,
   reportMcpDegraded,
   RETRIEVAL_REVIEWER,
   reviewBaseContext,
@@ -85,6 +87,7 @@ export function settleReviewOutcome(
   // Only a PASS can be degraded: asset re-verification may have voided the verdict since.
   const degraded = res.status === 'pass' ? res.degraded : undefined;
   const mcpDegraded = res.status === 'pass' ? res.mcpDegraded : undefined;
+  const advisories = res.status === 'pass' ? parseAdvisories(res.transcript ?? '') : [];
   if (res.status === 'pass')
     // res.model = the model that actually judged (a Reviewer.model pin wins over the cascade
     // default) — recording firstModel here mislabeled every pinned reviewer's cached PASS.
@@ -104,6 +107,8 @@ export function settleReviewOutcome(
         mcp_degraded_cause: mcpDegraded?.cause,
         // A replay names the waivers this PASS rests on, and a revoked one voids it (loadCache).
         waivers: res.waivers?.map(({ lens, fingerprint }) => ({ lens, fingerprint })),
+        // Replayed on a cache hit, so a re-ship still shows what to resolve before merge.
+        advisories: advisories.length ? advisories : undefined,
       },
     });
   if (res.status === 'fail') archiveFailedDiff(t.diffText);
@@ -157,7 +162,8 @@ export function settleReviewOutcome(
   // dedicated block below, with the full transcript — don't double-print it here).
   const tail =
     (!['fail', 'error'].includes(res.status) && res.reason ? ` — ${res.reason}` : '') +
-    (res.status === 'pass' ? partialEvidenceNote(coverage) : '');
+    (res.status === 'pass' ? partialEvidenceNote(coverage) : '') +
+    (res.status === 'pass' && transcriptRef ? ` · transcript ${transcriptRef}` : '');
   console.error(
     `guard-review: ${res.name} — ${verdictToken({ status: res.status, degraded, mcpDegraded })}${res.escalated ? ' (escalated)' : ''} in ${secs}s${res.status === 'pass' ? ' (checkpointed)' : ''}${tail}`,
   );
@@ -165,6 +171,7 @@ export function settleReviewOutcome(
   // retrieval report; an MCP-degraded split reviewer is reported once at its merge (lens/split.mts).
   if (degraded) reportRetrievalDegraded(res.name, degraded.cause);
   if (mcpDegraded) reportMcpDegraded(res.name, mcpDegraded.cause);
+  reportAdvisories(res.name, advisories, transcriptRef);
   return res;
 }
 

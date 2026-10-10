@@ -466,6 +466,23 @@ describe('planReviewWork — cached PASSes carry the base they were judged again
     expect(plan.cachedHits[0].waivers).toEqual([{ lens: 'races', fingerprint: 'c'.repeat(12) }]);
   });
 
+  it('a fully cached split reviewer replays the advisories of every part', () => {
+    const cache = {
+      [partKey(0)]: { at: 'n', advisories: ['a.ts:1 — first'] },
+      [partKey(1)]: { at: 'n', advisories: ['b.ts:2 — second'] },
+    };
+    const plan = planReviewWork([sel], ['d'], cache, new Map(), key, groups);
+    expect(plan.cachedHits[0].advisories).toEqual(['a.ts:1 — first', 'b.ts:2 — second']);
+  });
+
+  it('a cached part replays its own advisories alone, while its siblings re-judge', () => {
+    const cache = { [partKey(1)]: { at: 'n', advisories: ['a.ts:1 — first'] } };
+    const plan = planReviewWork([sel], ['d'], cache, new Map(), key, groups);
+    expect(plan.cachedHits).toHaveLength(1);
+    expect(plan.cachedHits[0].part).toBe(true);
+    expect(plan.cachedHits[0].advisories).toEqual(['a.ts:1 — first']);
+  });
+
   it('an uncached reviewer produces no cached hit', () => {
     const plan = planReviewWork([sel], ['d'], {}, new Map(), key, null);
     expect(plan.cachedHits).toEqual([]);

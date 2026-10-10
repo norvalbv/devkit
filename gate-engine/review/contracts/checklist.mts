@@ -5,8 +5,9 @@ import { emitGateEvent } from '../../judge/gate-events.mts';
 import {
   boundedCause,
   degradedSuffix,
-  RETRIEVAL_REVIEWER,
+  reportAdvisories,
   reportMcpDegraded,
+  RETRIEVAL_REVIEWER,
 } from '../evidence/base-context.mts';
 import { attachItems } from '../evidence/items.mts';
 import type { CachedHit } from '../lens/split.mts';
@@ -112,4 +113,5 @@ export function reportCachedHitNotes(hit: CachedHit): void {
   if (hit.mcpDegradedCause && !hit.part) reportMcpDegraded(hit.label, hit.mcpDegradedCause, true);
   for (const w of hit.waivers)
     console.error(overriddenLine(hit.label, w.lens, w.fingerprint, ' (cached PASS)'));
+  reportAdvisories(hit.label, hit.advisories);
 }
