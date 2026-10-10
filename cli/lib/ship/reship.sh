@@ -382,18 +382,23 @@ rewrite_publish_lock_release() {
   REWRITE_PUBLISH_OWNED=0
 }
 
+. "$SCRIPT_DIR/publish-evidence.sh"
 # The Git commit is already remote at every call site. Treat the GitHub mutation as a truthful
 # partial-success boundary and name only a manual recovery command: normal successful pushes spend
 # their retry intent before this runs, while the no-delta recovery arm spends it immediately after.
 publish_requested_pr_body() {
-  local published_commit=$1
+  local published_commit=$1 body=$BODY carried
   if [ -z "$PR_URL" ]; then
     echo "reship: PR body was not updated: could not resolve the open PR after the push" >&2
     echo "  the commit is already on origin/$BR at $published_commit; no rollback was attempted" >&2
     echo "  resolve the PR, then pipe the intended body to: gh pr edit <url> --repo '$REPO' --body-file -" >&2
     return 1
   fi
-  if ! printf '%s' "$BODY" | gh pr edit "$PR_URL" --repo "$REPO" --body-file - >/dev/null; then
+  # The caller owns the text, ship owns the evidence block: carry the PR's current block across.
+  if carried=$(printf '%s' "$BODY" | evidence_caller_body "$REPO" "$PR_URL" && printf .); then
+    body=${carried%.}
+  fi
+  if ! printf '%s' "$body" | gh pr edit "$PR_URL" --repo "$REPO" --body-file - >/dev/null; then
     echo "reship: PR body was not updated after the push" >&2
     echo "  the commit is already on origin/$BR at $published_commit; no rollback was attempted" >&2
     echo "  pipe the intended body to: gh pr edit '$PR_URL' --repo '$REPO' --body-file -" >&2
@@ -1222,6 +1227,7 @@ if [ -n "$PR_URL" ]; then
   READY_STATUS=0
   reship_mark_ready "${PR_NUM:-}" || READY_STATUS=1
   echo "$PR_URL"
+  if [[ "$PR_NUM" =~ ^[0-9]+$ ]]; then publish_evidence_block "$WT" "$PR_NUM" "$REPO" "$SHIP_COMMIT"; fi
   # The wait comes after the ready flip so it observes the check set that flip triggers — but a
   # FAILED flip skips it: the operator has an actionable remedy above, and burying it under up to two
   # hours of polling on a PR that is in the wrong state helps nobody.
