@@ -21,7 +21,7 @@ import {
 } from './gate-policy/block-helpers.mts';
 import { buildPreCommitExit, PRE_COMMIT_PASS_EXIT } from './gate-policy/commit-gate-log.mts';
 import { FALLOW_STAGED, FALLOW_STAGED_BLOCK, indent } from './gate-policy/fallow-staged.mts';
-import { formatFragment } from './format-fragment.mts';
+import { formatFragment, overlayFormatters, type StepFormatter } from './format-fragment.mts';
 import { markEnd, markStart } from './husky.mts';
 import {
   DK_COMMIT_INDEX_CAPTURE,
@@ -130,6 +130,8 @@ interface BlockOptions {
   preAi?: string;
   /** Diagnostics that must not hide a guard's report, so they run after every guard. */
   postGuards?: string;
+  /** Overlay's config-probed formatter chain; other modes render biome alone when selected. */
+  formatChain?: StepFormatter[];
 }
 
 /** The ONE gate body for every install mode: format (the prefix-cache key hashes the post-format
@@ -137,7 +139,7 @@ interface BlockOptions {
 export function buildGuardBlock(
   selection: HookSelection,
   pkgRel = '',
-  { binDir = 'package', preAi, postGuards }: BlockOptions = {},
+  { binDir = 'package', preAi, postGuards, formatChain }: BlockOptions = {},
 ): string {
   const handoff = selection.guards?.some((id) => id === 'review' || id === 'sentry') ?? false;
   const pieces = [
@@ -148,7 +150,8 @@ export function buildGuardBlock(
     DK_GATE_BLOCK_HELPERS,
   ];
   // First so a first-gate block still records the run's terminal (the trap covers every exit path).
-  if (!pkgRel && selection.biome) pieces.push(formatFragment(BIN_DIRS[binDir].formatter));
+  if (!pkgRel && (selection.biome || formatChain))
+    pieces.push(formatFragment(BIN_DIRS[binDir].formatter, formatChain));
   if (wantsDeterministic(selection))
     pieces.push(
       DK_DETERMINISTIC_GATE_HELPER,
@@ -285,6 +288,7 @@ export function buildOverlayHook(
     binDir: 'global',
     preAi: overlayStagedGates(fallow),
     postGuards: overlayReviewBaseline(fallow),
+    formatChain: overlayFormatters(selection),
   });
   return `${HOOK_PREAMBLE}
 # devkit OVERLAY (LOCAL, git-ignored). Runs devkit's gates + lint overlay on this commit, then

@@ -87,6 +87,8 @@ describe('one gate-body renderer for every install mode', () => {
       .split('\n\n')
       .filter((chunk) => chunk !== BIN_DIRS[binDir].open);
   const lintSlot = (chunk: string) => chunk.startsWith('# devkit lint overlay');
+  // Overlay's format step probes the repo's own Oxfmt config too, so it is a named slot as well.
+  const fmtSlot = (chunk: string) => chunk.startsWith('# devkit:biome-format');
 
   it.each(['', 'packages/a b'])('differs only by bin dir and named slots (pkgRel %j)', (pkgRel) => {
     const pkg = body(buildGuardBlock(SEL, pkgRel), 'package');
@@ -97,8 +99,13 @@ describe('one gate-body renderer for every install mode', () => {
 
     expect(body(standalone.replace(close, '\n'), 'global-optional')).toEqual(pkg);
     expect(overlay.filter(lintSlot)).toHaveLength(2);
-    expect(overlay.filter((chunk) => !lintSlot(chunk))).toEqual(pkg);
+    expect(overlay.filter((c) => !lintSlot(c) && !fmtSlot(c))).toEqual(
+      pkg.filter((c) => !fmtSlot(c)),
+    );
     expect(hook.includes('"node_modules/.bin/biome" format --write')).toBe(!pkgRel);
+    expect(hook.includes('"node_modules/.bin/oxfmt" --no-error-on-unmatched-pattern --write')).toBe(
+      !pkgRel,
+    );
   });
 });
 
