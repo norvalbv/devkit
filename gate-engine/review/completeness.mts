@@ -32,7 +32,11 @@ import path from 'node:path';
 import { envBool, envFlag, resolveGuardConfig, type GuardConfig } from '../config.mts';
 import { scopedTargets } from '../decisions/scoped-targets.mts';
 import { judgeBinForModel } from '../judge/codex/result.mts';
-import { renderTargets } from './evidence/targets-block.mts';
+import {
+  renderChangedTargets,
+  renderTargets,
+  stagedTargetChanges,
+} from './evidence/targets-block.mts';
 
 export { renderTargets, type TargetBlock } from './evidence/targets-block.mts';
 
@@ -333,9 +337,10 @@ export async function runCompleteness(
       });
       return finish(0, 'full', stickyDuration);
     }
-    const targets = await scopedTargets(files, message.split('\n')[0] ?? '', 6, cwd).catch(
-      () => [],
-    );
+    const changed = stagedTargetChanges(files, cwd);
+    const targets = (
+      await scopedTargets(files, message.split('\n')[0] ?? '', 6, cwd).catch(() => [])
+    ).filter((t) => !changed.includes(t.slug));
     // The FULL --stat rides uncapped ahead of the evidence: on a branch-sized commit the caps
     // drop whole files, but the judge must at least SEE the complete file/churn map of what it
     // is being asked to gap-check. Diff prefixes are forced ON-config so a consumer's
@@ -360,7 +365,12 @@ export async function runCompleteness(
       ),
       stat,
     );
-    prompt = wrapCompleteness(body, message, files, renderTargets(targets));
+    prompt = wrapCompleteness(
+      body,
+      message,
+      files,
+      renderTargets(targets) + renderChangedTargets(changed),
+    );
   } catch (e: unknown) {
     // sc-1366: distinguish an unreadable staged object from an inconclusive judge before the exit
     // code turns it into a misleading judge-auth outage.
