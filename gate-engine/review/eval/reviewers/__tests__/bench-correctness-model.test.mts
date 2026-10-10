@@ -7,7 +7,10 @@ const OVERRIDE = 'claude-sonnet-5-5';
 
 async function loadBench(model?: string) {
   vi.resetModules();
-  if (model) vi.stubEnv('BENCH_CORRECTNESS_MODEL', model);
+  // Stubbed BEFORE the import pins them, so cleanup restores the values this test started with.
+  vi.stubEnv('GUARD_CORRECTNESS_MODEL', undefined);
+  vi.stubEnv('GUARD_REVIEW_ESCALATION_MODEL', undefined);
+  if (model !== undefined) vi.stubEnv('BENCH_CORRECTNESS_MODEL', model);
   return { ...(await import('../bench.mts')), ...(await import('../corpus/chunk-guard.mts')) };
 }
 
@@ -23,11 +26,11 @@ describe('BENCH_CORRECTNESS_MODEL', () => {
     const bench = await loadBench(OVERRIDE);
     const reviewer = correctnessOf(bench.BENCH_REVIEWERS);
     expect(bench.effModel(reviewer)).toBe(OVERRIDE);
+    expect(process.env.GUARD_CORRECTNESS_MODEL).toBe(OVERRIDE);
 
     const env: NodeJS.ProcessEnv = {};
     bench.pinBenchModels(env);
     expect(env.GUARD_CORRECTNESS_MODEL).toBe(OVERRIDE);
-    vi.stubEnv('GUARD_CORRECTNESS_MODEL', env.GUARD_CORRECTNESS_MODEL);
 
     const row = loadRows(reviewer, { only: 'corr-only-selector-silent-drop' })[0];
     const models: string[] = [];
@@ -41,13 +44,22 @@ describe('BENCH_CORRECTNESS_MODEL', () => {
     expect(new Set(models)).toEqual(new Set([OVERRIDE]));
   });
 
-  it('leaves the shipped pin in place when unset', async () => {
-    const bench = await loadBench();
+  it.each([undefined, '', '   '])('leaves the shipped pin in place for %j', async (value) => {
+    const bench = await loadBench(value);
     const reviewer = correctnessOf(bench.BENCH_REVIEWERS);
     expect(bench.effModel(reviewer)).toBe(reviewer?.model);
+    expect(process.env.GUARD_CORRECTNESS_MODEL).toBeUndefined();
 
     const env: NodeJS.ProcessEnv = {};
     bench.pinBenchModels(env);
     expect(env.GUARD_CORRECTNESS_MODEL).toBeUndefined();
+  });
+
+  it('restores the judge environment it started with', async () => {
+    const before = process.env.GUARD_CORRECTNESS_MODEL;
+    await loadBench(OVERRIDE);
+    expect(process.env.GUARD_CORRECTNESS_MODEL).toBe(OVERRIDE);
+    vi.unstubAllEnvs();
+    expect(process.env.GUARD_CORRECTNESS_MODEL).toBe(before);
   });
 });

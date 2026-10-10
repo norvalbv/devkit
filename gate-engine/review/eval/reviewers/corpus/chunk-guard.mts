@@ -16,7 +16,7 @@ export const BENCH_LENS_GROUPS = resolveLensGroups();
 export const BENCH_MODEL = process.env.BENCH_MODEL ?? 'sonnet';
 export const BENCH_ESCALATION_MODEL = process.env.BENCH_ESCALATE_MODEL ?? 'opus';
 // Unset measures the shipped correctness pin.
-const BENCH_CORRECTNESS_MODEL = process.env.BENCH_CORRECTNESS_MODEL || undefined;
+const BENCH_CORRECTNESS_MODEL = process.env.BENCH_CORRECTNESS_MODEL?.trim() || undefined;
 
 /** The model a reviewer runs: the correctness override, else its pin (always single-pass), else the
  *  swept default. Runs are reported and keyed by this, never by the swept knobs. */

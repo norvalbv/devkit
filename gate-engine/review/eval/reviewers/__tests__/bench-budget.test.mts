@@ -57,7 +57,7 @@ describe('runBannerLines', () => {
       },
     );
     expect(lines).toHaveLength(2);
-    expect(lines[0]).toMatch(/153 rows \(82 gold\) · model haiku · cascade on/);
+    expect(lines[0]).toMatch(/153 rows \(82 gold\) · model gpt-5.6-sol\/haiku · cascade on/);
     // 13 rows × 60s + (7 gold + round(6×0.15)=1) escalations × 60s = 1260s, over 2 workers → 10.5 → 11 min
     expect(lines[0]).toMatch(/est ≈ 11 min/);
     expect(lines[1]).toMatch(/no cost entry for gpt-5.6-sol — estimate excludes 140 row\(s\)/);
@@ -81,20 +81,23 @@ describe('runBannerLines', () => {
       /--dev \(holdouts excluded\) · resuming \(3 checkpointed row\(s\) on disk\)/,
     );
   });
-  it('labels a pinned reviewer with the overridden model the run is keyed on', () => {
+  it('labels every selected reviewer with the model it runs, override included', () => {
     const [line] = runBannerLines(
-      [{ reviewer: { name: 'correctness-reviewer', model: 'gpt-5.6-sol' }, rows: rows(2, 1) }],
+      [
+        { reviewer: { name: 'correctness-reviewer', model: 'gpt-5.6-sol' }, rows: rows(2, 1) },
+        { reviewer: { name: 'backend-performance-reviewer' }, rows: rows(2, 1) },
+      ],
       {
-        model: 'sonnet',
+        model: 'haiku',
         cascade: false,
         concurrency: 2,
         dev: false,
         resuming: 0,
         table: TABLE,
         escalateSecs: 60,
-        effModel: () => 'claude-sonnet-5-5',
+        effModel: (r) => (r.model ? 'claude-sonnet-5-5' : 'haiku'),
       },
     );
-    expect(line).toMatch(/model claude-sonnet-5-5 · cascade single-pass/);
+    expect(line).toMatch(/model claude-sonnet-5-5\/haiku · cascade off/);
   });
 });

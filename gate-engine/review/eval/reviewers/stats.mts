@@ -379,9 +379,7 @@ export function runBannerLines(
     { estEscalations: estimateEscalations(plan, cascade), escalateSecs, concurrency, table },
   );
   const allPinned = plan.every((p) => p.reviewer.model);
-  const modelLabel = allPinned
-    ? [...new Set(plan.map((p) => effModel(p.reviewer)))].join('/')
-    : model;
+  const modelLabel = [...new Set(plan.map((p) => effModel(p.reviewer)))].join('/');
   const cascadeLabel = allPinned ? 'single-pass' : cascade ? 'on' : 'off';
   const lines = [
     `reviewer-eval: ${totalRows} rows (${goldRows} gold) · model ${modelLabel} · cascade ${cascadeLabel} · ` +
