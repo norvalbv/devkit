@@ -1,7 +1,9 @@
 /** Shared fixtures for the `devkit baseline-status` suites: a real git branch and a per-commit gh stub. */
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, symlinkSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { RunRef } from '../lib/baseline-status/gh.mts';
 
 /** Turn `dir` into a repo on `main` whose `origin` is itself, so `git ls-remote origin` is offline. */
 export function seedBranch(dir: string): string {
@@ -54,3 +56,68 @@ export const API_BRANCH_HEAD = `if [ "$1" = "api" ]; then
   git rev-parse --verify -q "refs/heads/$branch" && exit 0
   echo "gh: Branch not found (HTTP 404)" >&2; exit 1
 fi`;
+
+/** The head of the newest ghHarness branch; runRef points at it unless told otherwise. */
+let harnessHead = '';
+
+/** The stubbed-gh harness on a real one-commit branch, shared by the query and command cases. */
+export function ghHarness() {
+  const dir = mkdtempSync(join(tmpdir(), 'edge-query-'));
+  const fixture = mkdtempSync(join(tmpdir(), 'edge-fixture-'));
+  harnessHead = seedBranch(dir);
+  const bin = join(dir, 'bin');
+  mkdirSync(bin, { recursive: true });
+  const stub = join(bin, 'gh');
+  writeFileSync(
+    stub,
+    `#!/bin/sh
+if [ -n "$DEVKIT_GH_FAIL" ]; then echo "$DEVKIT_GH_FAIL" >&2; exit 1; fi
+${API_BRANCH_HEAD}
+if [ "$1" = "run" ] && [ "$2" = "list" ]; then
+  ${RUN_LIST_BY_COMMIT}
+fi
+if [ "$1" = "run" ] && [ "$2" = "download" ]; then
+  if [ -n "$DEVKIT_GH_DOWNLOAD_FAIL" ]; then echo "$DEVKIT_GH_DOWNLOAD_FAIL" >&2; exit 1; fi
+  id="$3"; out=""
+  while [ $# -gt 0 ]; do if [ "$1" = "--dir" ]; then out="$2"; fi; shift; done
+  if [ -f "$DEVKIT_TEST_FIXTURE/empty-$id" ]; then exit 0; fi
+  if [ -f "$DEVKIT_TEST_FIXTURE/summary-$id.json" ]; then
+    mkdir -p "$out/run-$id"; cp "$DEVKIT_TEST_FIXTURE/summary-$id.json" "$out/run-$id/summary.json"; exit 0
+  fi
+  echo "no artifact matches any of the names or patterns provided" >&2; exit 1
+fi
+exit 1
+`,
+  );
+  chmodSync(stub, 0o755);
+  return { dir, fixture, bin, head: harnessHead };
+}
+
+// runId must match the run it is served for; the reader rejects a mismatched artifact by design.
+export const summaryFor = (
+  files: Record<string, string>,
+  testsPassed: boolean,
+  runId = 100,
+  attempt = 1,
+) =>
+  JSON.stringify({
+    schema: 1,
+    sha: 'sha1',
+    runId,
+    attempt,
+    testsPassed,
+    files,
+    droppedForeignPaths: 0,
+  });
+
+export const runRef = (over: Partial<RunRef> = {}): RunRef => ({
+  databaseId: 100,
+  attempt: 1,
+  status: 'completed',
+  conclusion: 'failure',
+  headSha: harnessHead,
+  createdAt: '2026-08-29T00:00:00Z',
+  headBranch: 'main',
+  event: 'push',
+  ...over,
+});
