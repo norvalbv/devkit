@@ -113,6 +113,8 @@ export default defineConfig({
     include: TEST_INCLUDE,
     // Root only, never per project: it stamps machine load once at each end of the run (sc-2785).
     globalSetup: ['./vitest.global-setup.mjs'],
+    // Root only: one summary line when bash >= 4-only tests skipped. --reporter flags replace it.
+    reporters: ['default', './cli/__tests__/_modern-bash.mts'],
     // Root only: coverage resolves once per run. Most CLI modules are tested by spawning
     // `node <module>.mts`, which the worker alone never sees; autoAttachSubprocess (vitest 5) hands
     // children NODE_V8_COVERAGE through process.env and merges their profiles (sc-3321).
