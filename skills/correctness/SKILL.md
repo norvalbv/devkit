@@ -118,6 +118,11 @@ const ANCHOR_RE = /^\s*(Failed to authenticate|API Error:)/;
 ```
 
 - Boundary conditions: near-expiry ≠ expired, 0 ≠ absent, empty string ≠ missing.
+- Git path identity: a pathname is exact bytes, so any `git diff`/`ls-files` path consumer must:
+  read with `-z` (plain output C-quotes tab, newline and non-ASCII names); never trim; decode
+  strictly (`new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })`) and stand down on
+  invalid UTF-8; never `tr '\0' '\n'` after `-z` (bash: `while IFS= read -r -d ''`); escape
+  control, bidi and U+2028 characters before printing a name.
 
 ## Verdict bar
 

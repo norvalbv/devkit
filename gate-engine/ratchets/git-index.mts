@@ -6,6 +6,7 @@
 import { execFileSync, spawnSync, type StdioOptions } from 'node:child_process';
 import { lstatSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { readGitPaths } from './git-paths.mts';
 import { commitIndexEnv, commitIndexKind } from './commit-index.mts';
 
 const INDEX_LOCK_RETRY = new Int32Array(new SharedArrayBuffer(4));
@@ -282,48 +283,35 @@ export function frozenTouchedSet(root: string, frozen: FrozenIndex): Set<string>
 // The repo-root-relative paths ADDED/COPIED/MODIFIED/RENAMED in the pending commit (the git index).
 // During a merge, a first-parent diff also includes every path inherited unchanged from MERGE_HEAD;
 // intersect both parent diffs so ratchets govern only merge resolutions that differ from BOTH
-// parents. Returns null when git is unavailable (temp-dir tests, a non-git checkout) so the caller
-// falls back to whole-tree. Excludes deletions by design — callers scope per-file work (an oversized
+// parents. Returns null when git is unavailable (temp-dir tests, a non-git checkout) or a staged
+// name is not valid UTF-8, so the caller falls back to whole-tree. Excludes deletions by design — callers scope per-file work (an oversized
 // file to re-check) to files that still exist. For "is a commit in progress?" use hasStagedFiles.
 export function stagedSet(root: string): Set<string> | null {
+  let staged: string[] | null;
   try {
-    const out = execFileSync('git', ['diff', '--cached', '--name-only', '--diff-filter=ACMR'], {
-      cwd: root,
-      env: commitIndexEnv(root),
-      encoding: 'utf8',
-      stdio: QUIET_STDIO,
-    });
-    const staged = new Set(
-      out
-        .split('\n')
-        .map((l) => l.trim())
-        .filter(Boolean),
-    );
-    try {
-      const mergeOut = execFileSync(
-        'git',
-        ['diff', '--cached', '--name-only', '--diff-filter=ACMR', 'MERGE_HEAD'],
-        {
-          cwd: root,
-          env: commitIndexEnv(root),
-          encoding: 'utf8',
-          stdio: QUIET_STDIO,
-        },
-      );
-      const changedFromMergeHead = new Set(
-        mergeOut
-          .split('\n')
-          .map((l) => l.trim())
-          .filter(Boolean),
-      );
-      return new Set([...staged].filter((file) => changedFromMergeHead.has(file)));
-    } catch {
-      // Ordinary commit, or merge metadata Git cannot resolve: preserve first-parent staged scope.
-      return staged;
-    }
+    staged = stagedPaths(root);
   } catch {
     return null;
   }
+  if (!staged) return null;
+  let changedFromMergeHead: string[] | null;
+  try {
+    changedFromMergeHead = stagedPaths(root, 'MERGE_HEAD');
+  } catch {
+    // Ordinary commit, or merge metadata Git cannot resolve: preserve first-parent staged scope.
+    return new Set(staged);
+  }
+  if (!changedFromMergeHead) return null;
+  const fromMergeHead = new Set(changedFromMergeHead);
+  return new Set(staged.filter((file) => fromMergeHead.has(file)));
+}
+
+// ACMR paths staged against `ref` (default HEAD); null when a name is not valid UTF-8.
+function stagedPaths(root: string, ...ref: string[]): string[] | null {
+  const args = ['diff', '--cached', '--name-only', '-z', '--diff-filter=ACMR', ...ref];
+  return readGitPaths(
+    execFileSync('git', args, { cwd: root, env: commitIndexEnv(root), stdio: QUIET_STDIO }),
+  );
 }
 
 // The CWD path inside its repository, slash-terminated (empty at the repository root).
