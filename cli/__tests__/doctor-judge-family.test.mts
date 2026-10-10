@@ -102,7 +102,7 @@ describe('bindClaudeFamily', () => {
     const review = resolveGuardConfig(repo).review;
     expect(review.model).toBe('haiku');
     expect(review.escalationModel).toBe('opus');
-    expect(review.correctnessModel).toBe('sonnet');
+    expect(review.correctnessModel).toBe('claude-haiku-5-5');
     expect(review.correctnessChunkLoc).toBe(0);
     const raw = JSON.parse(readFileSync(join(repo, 'guard.config.json'), 'utf8'));
     expect(raw.review[FAMILY_PROVENANCE_KEY]).toContain('devkit doctor --fix');

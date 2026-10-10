@@ -64,7 +64,7 @@
   "review": {
     "model": "haiku",
     "escalationModel": "opus",
-    "correctnessModel": "sonnet",
+    "correctnessModel": "claude-haiku-5-5",
     "correctnessChunkLoc": 0,
     "paths": {
       "include": ["**"],

@@ -81,4 +81,20 @@ describe('runBannerLines', () => {
       /--dev \(holdouts excluded\) · resuming \(3 checkpointed row\(s\) on disk\)/,
     );
   });
+  it('labels a pinned reviewer with the overridden model the run is keyed on', () => {
+    const [line] = runBannerLines(
+      [{ reviewer: { name: 'correctness-reviewer', model: 'gpt-5.6-sol' }, rows: rows(2, 1) }],
+      {
+        model: 'sonnet',
+        cascade: false,
+        concurrency: 2,
+        dev: false,
+        resuming: 0,
+        table: TABLE,
+        escalateSecs: 60,
+        effModel: () => 'claude-sonnet-5-5',
+      },
+    );
+    expect(line).toMatch(/model claude-sonnet-5-5 · cascade single-pass/);
+  });
 });

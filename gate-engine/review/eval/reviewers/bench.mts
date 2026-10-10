@@ -12,7 +12,7 @@
  *   node bench.mts coverage          # 0 LLM calls: catalog/type coverage of the corpus
  *
  * Knobs: BENCH_MODEL first pass (default sonnet; a model-pinned reviewer ignores it) ·
- * BENCH_CASCADE=off skips escalation · BENCH_ESCALATE_MODEL pins the escalator (default opus — changing it changes the measured condition) · BENCH_CONCURRENCY · GUARD_CORRECTNESS_SPLIT arm.
+ * BENCH_CASCADE=off skips escalation · BENCH_ESCALATE_MODEL pins the escalator (default opus — changing it changes the measured condition) · BENCH_CORRECTNESS_MODEL overrides the correctness pin · BENCH_CONCURRENCY · GUARD_CORRECTNESS_SPLIT arm.
  *
  * Scoring is DETERMINISTIC (no LLM matcher): expected verdict vs the captured first-pass verdict +
  * the cascade outcome + the checklist artifact snapshotted per judge pass (runCascade deletes it
@@ -40,9 +40,13 @@ import { BenchAbort, cleanBenchEnv, materializeFixture } from '../../../decision
 import { lensArmSuffix } from '../../lens/split.mts';
 import {
   BENCH_CHUNK_LOC,
+  BENCH_ESCALATION_MODEL as ESCALATION_MODEL,
   BENCH_LENS_GROUPS,
+  BENCH_MODEL as MODEL,
+  effModel,
   executionHash,
   isolateBenchTelemetry,
+  pinBenchModels,
   planFixture,
   preflightPlans,
 } from './corpus/chunk-guard.mts';
@@ -95,9 +99,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 // gate-engine/review/eval/reviewers → repo root is four levels up.
 const repoRoot = path.resolve(here, '../../../..');
 
-const MODEL = process.env.BENCH_MODEL ?? 'sonnet';
-const ESCALATION_MODEL = process.env.BENCH_ESCALATE_MODEL ?? 'opus';
-process.env.GUARD_REVIEW_ESCALATION_MODEL = ESCALATION_MODEL; // pinned — sectionKey/meta record only the first-pass model; an ambient escalator would blend conditions
+pinBenchModels(); // sectionKey/meta record only the first-pass model; an ambient escalator would blend conditions
 const CASCADE = (process.env.BENCH_CASCADE ?? 'on') !== 'off';
 const CONCURRENCY = Math.max(1, Number.parseInt(process.env.BENCH_CONCURRENCY ?? '2', 10) || 2);
 
@@ -141,9 +143,6 @@ function preflightClaude() {
 const sectionKey = (reviewerName, model, cascade) =>
   `${reviewerName}@${model}@${cascade ? 'cascade-on' : 'cascade-off'}${lensArmSuffix(reviewerName, BENCH_LENS_GROUPS)}`;
 
-// A model-pinned reviewer (correctness) runs single-pass at its pin regardless of BENCH_MODEL /
-// BENCH_CASCADE; report and key it by what actually ran, not the swept knobs.
-const effModel = (reviewer) => reviewer.model ?? MODEL;
 const effCascade = (reviewer) => (reviewer.model ? false : CASCADE);
 
 function loadBaseline() {
@@ -355,7 +354,7 @@ function coverage() {
 
 async function runBench(targets, { dev, only, writeBaseline, failMode, fresh, against }) {
   cleanBenchEnv();
-  process.env.GUARD_REVIEW_ESCALATION_MODEL = ESCALATION_MODEL;
+  pinBenchModels();
   const abMode = !!against;
   if (abMode && writeBaseline)
     throw new BenchAbort(2, 'reviewer-eval: --against is a read-only A/B; drop --baseline');
@@ -380,6 +379,7 @@ async function runBench(targets, { dev, only, writeBaseline, failMode, fresh, ag
     resuming: progress.length,
     table: EST_FIRST_SECS,
     escalateSecs: EST_ESCALATE_SECS,
+    effModel,
   }))
     console.log(line);
 
