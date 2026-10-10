@@ -65,6 +65,8 @@ const UNAUTHENTICATED =
 const ORDINAL = /(\d{1,2})(?:st|nd|rd|th)\b/gi;
 /** "try again at Sep 8th, 2026 3:38 PM" / "resets at …" / "retry after …". */
 const RESET_PHRASE = /(?:try again|resets?|retry)\s+(?:at|on|after)\s+([^.\n]{4,60})/i;
+/** "10:21 PM" — codex drops the date when the reset falls on the same LOCAL day. */
+const CLOCK_ONLY = /^\d{1,2}:\d{2}\s*[AP]M$/i;
 /** The HTTP header, when a CLI passes it through verbatim. Seconds. */
 const RETRY_AFTER_SECONDS = /retry-after:\s*(\d{1,7})\b/i;
 /** A reset further out than this is a parse artifact, not a quota window. */
@@ -102,7 +104,10 @@ export function parseResetTime(
   if (!phraseMatch) return undefined;
   // A trailing "to purchase more credits or try again at X" leaves X clean; ordinals are the only
   // routine token Date.parse refuses.
-  const parsed = Date.parse(phraseMatch[1].replace(ORDINAL, '$1').trim());
+  const when = phraseMatch[1].replace(ORDINAL, '$1').trim();
+  const parsed = Date.parse(
+    CLOCK_ONLY.test(when) ? `${new Date(now).toDateString()} ${when}` : when,
+  );
   return plausibleReset(parsed, now) ? parsed : undefined;
 }
 
