@@ -40,6 +40,10 @@ export const PACKAGED_ROOT_DIRS: readonly string[] = [
 export const PACKAGED_ROOT_FILES: readonly string[] = ['package.json', 'README.md'];
 /** Copied beside anti-slop's tsc-compiled src/, which the build emits as .js. */
 export const ANTI_SLOP_FILES: readonly string[] = ['LICENSE', 'UPSTREAM.md'];
+/** Non-TS files under cli/ and gate-engine/ that the build mirrors into dist/. */
+export const MIRRORED_EXT = /\.(sh|json|jsonc)$/;
+/** Dev-only trees tsconfig.build.json excludes: nothing under dist/ may come from them. */
+export const isDevOnly = (rel: string): boolean => /(^|[\\/])(__tests__|eval)[\\/]/.test(rel);
 
 /**
  * The canonical form of a path for identity comparison: symlinks resolved (macOS `/tmp` →
