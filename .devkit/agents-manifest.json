@@ -1,8 +1,8 @@
 {
   "schemaVersion": 2,
   "kind": "agents",
-  "devkitRef": "v0.67.1",
-  "generatedAt": "2026-10-06T18:04:28.078Z",
+  "devkitRef": "v0.68.0",
+  "generatedAt": "2026-10-08T13:54:23.009Z",
   "files": {
     "api-security-reviewer.md": "bfa4ff0d792a03ec7845dc7c7daf586779bdc76f053551c6d05a2ee11b22a87e",
     "backend-performance-reviewer.md": "ff60c2338a9854fa63104a1b343e1d90f0feecf1126c84c66c5b86d4537c9ba0",
@@ -10,11 +10,11 @@
     "conventions-reviewer.md": "8c77420d3538c245c2605f022670c16f41ce4b1075ce76b6add3c9696304321a",
     "correctness-reviewer.md": "8c96f896be0859f9089444ee6a41de7ff0d8cf1a5abeece4f819b4a173351d94",
     "feature-completeness-reviewer.md": "8cafdf41bdf2260e34ee8e2c1a1afbcb614743da3e06eb8760b9e799c729da7d",
-    "feature-critique.md": "f2c549c56372f755f31d13db3ee1a591f523565441957e5efb8a6d125b3606e8",
+    "feature-critique.md": "d0035aaf97a563916339b9add519ab5d09f181008d2a51cd601d54133becd2ce",
     "frontend-accessibility-reviewer.md": "8ba6f4e030246aa403641b03f35dd27b7dcaf97977d60b2ae5e94fe334220682",
     "frontend-performance-reviewer.md": "44df4a1cbe58a46891dd4588f60494858d4774cb0fa508414b7bbcf84dd25f6a",
     "frontend-security-reviewer.md": "db11f0df4827f574068776f9630c26e8eb000e499e211cb7462e3f155bb4258f",
-    "prior-art.md": "830f437b449a40a89b07fe9d05eca208e972a11ee18fc133b8ba14e7226622a3"
+    "prior-art.md": "93e7dd640f4c8e61daaeea82eb98e6ff815c668b7e86fa4653199199b870e0dc"
   },
   "providers": {
     "claude": {
@@ -25,11 +25,11 @@
         "conventions-reviewer.md": "8c77420d3538c245c2605f022670c16f41ce4b1075ce76b6add3c9696304321a",
         "correctness-reviewer.md": "8c96f896be0859f9089444ee6a41de7ff0d8cf1a5abeece4f819b4a173351d94",
         "feature-completeness-reviewer.md": "8cafdf41bdf2260e34ee8e2c1a1afbcb614743da3e06eb8760b9e799c729da7d",
-        "feature-critique.md": "f2c549c56372f755f31d13db3ee1a591f523565441957e5efb8a6d125b3606e8",
+        "feature-critique.md": "d0035aaf97a563916339b9add519ab5d09f181008d2a51cd601d54133becd2ce",
         "frontend-accessibility-reviewer.md": "8ba6f4e030246aa403641b03f35dd27b7dcaf97977d60b2ae5e94fe334220682",
         "frontend-performance-reviewer.md": "44df4a1cbe58a46891dd4588f60494858d4774cb0fa508414b7bbcf84dd25f6a",
         "frontend-security-reviewer.md": "db11f0df4827f574068776f9630c26e8eb000e499e211cb7462e3f155bb4258f",
-        "prior-art.md": "830f437b449a40a89b07fe9d05eca208e972a11ee18fc133b8ba14e7226622a3"
+        "prior-art.md": "93e7dd640f4c8e61daaeea82eb98e6ff815c668b7e86fa4653199199b870e0dc"
       }
     },
     "codex": {
@@ -40,11 +40,11 @@
         "conventions-reviewer.toml": "166f2c7649cb86fd270bda17d1da6bf505d00093811258988fc2a180443ac7f3",
         "correctness-reviewer.toml": "782aa14f9a4c67f1ed5453ebce60c21aae82819688b6923df3dff13c747bf8bc",
         "feature-completeness-reviewer.toml": "3a4bd48b5f34e6ffed7d5c2b4786343f5c8233a499a867bde164bfe11654f949",
-        "feature-critique.toml": "da3b8b7f034a72899ad7b26416670cb056d45f7250edaeb767f0a414bd6078f5",
+        "feature-critique.toml": "cba010300b8a008f6b3d3e486bae90aa6a254732d53d6f76691e0ba8eb8f8027",
         "frontend-accessibility-reviewer.toml": "d7d6c5b721ed450336548c9f2c29b977ceec7de7319bacb1a8098fcc0cf50529",
         "frontend-performance-reviewer.toml": "8eed5ef1b1485aed2c0de1ef51d0f966f32a93d19d53288a1c78a7587ae32d15",
         "frontend-security-reviewer.toml": "2956c05b7d0b226aa7d1f67cc076c350302a39d0e85f77776d75d2695c92677d",
-        "prior-art.toml": "edbaf83ae926cbccb68029cf0fa8d1b5d78aefdaf4ee46cd06dad14088be527c"
+        "prior-art.toml": "d2d5e9ccd30d098fb7d8744bad47d51998d8bbd1f62480e7f6513793be5763b4"
       }
     },
     "cursor": {
@@ -55,11 +55,11 @@
         "conventions-reviewer.md": "8c77420d3538c245c2605f022670c16f41ce4b1075ce76b6add3c9696304321a",
         "correctness-reviewer.md": "8c96f896be0859f9089444ee6a41de7ff0d8cf1a5abeece4f819b4a173351d94",
         "feature-completeness-reviewer.md": "8cafdf41bdf2260e34ee8e2c1a1afbcb614743da3e06eb8760b9e799c729da7d",
-        "feature-critique.md": "f2c549c56372f755f31d13db3ee1a591f523565441957e5efb8a6d125b3606e8",
+        "feature-critique.md": "d0035aaf97a563916339b9add519ab5d09f181008d2a51cd601d54133becd2ce",
         "frontend-accessibility-reviewer.md": "8ba6f4e030246aa403641b03f35dd27b7dcaf97977d60b2ae5e94fe334220682",
         "frontend-performance-reviewer.md": "44df4a1cbe58a46891dd4588f60494858d4774cb0fa508414b7bbcf84dd25f6a",
         "frontend-security-reviewer.md": "db11f0df4827f574068776f9630c26e8eb000e499e211cb7462e3f155bb4258f",
-        "prior-art.md": "830f437b449a40a89b07fe9d05eca208e972a11ee18fc133b8ba14e7226622a3"
+        "prior-art.md": "93e7dd640f4c8e61daaeea82eb98e6ff815c668b7e86fa4653199199b870e0dc"
       }
     }
   }

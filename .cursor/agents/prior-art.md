@@ -175,8 +175,10 @@ makes the response invalid):
 
 ### Phase 4: Return the Closed Response Contract
 
-Return **exactly one JSON object** as the final subagent message. Do not wrap it in a Markdown
-fence, add prose before or after it, or write any repository/provider-directory file.
+Return **exactly one JSON object** as your report: pass it verbatim to your harness's report tool
+(such as `SubagentHandback`) when one exists, because plain final text is then never delivered;
+otherwise make it your final message. Do not wrap it in a Markdown fence, add prose before or after
+it, or write any repository/provider-directory file.
 
 Use exactly these root fields (no additions). **Every nested object is closed too** — never add
 fields beyond those listed (no `note`, no `comment`, anywhere); commentary belongs in `summary` or
@@ -245,5 +247,5 @@ and a `summary` explaining what blocked completion and how to recover.
 - **Do not re-litigate settled axes.** Rulings passed in as Settled Axes (or found in the decision
   log) are given context. If the problem's frame contradicts one, surface that as the finding —
   the resolution belongs to the caller's conversation, not this response.
-- **Return only the closed JSON contract.** Its first character is `{` and its last character is
-  `}`. No lead-in, fence, or trailing commentary.
+- **Return only the closed JSON contract**, delivered as Phase 4 says. Its first character is `{`
+  and its last character is `}`. No lead-in, fence, or trailing commentary.

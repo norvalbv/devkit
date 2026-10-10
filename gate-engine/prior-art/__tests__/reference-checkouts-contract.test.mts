@@ -37,6 +37,12 @@ describe('prior-art agent: reference checkouts resolve from a linked worktree', 
     expect(read('.claude/agents/prior-art.md')).toBe(source);
     expect(read('.cursor/agents/prior-art.md')).toBe(source);
   });
+
+  it('delivers its report through the harness report tool, falling back to the final message', () => {
+    const agent = read('agents/prior-art.md');
+    expect(agent).toContain("pass it verbatim to your harness's report tool");
+    expect(agent).toContain('otherwise make it your final message');
+  });
 });
 
 describe('resolveGuardConfig: research.referenceCheckouts', () => {
