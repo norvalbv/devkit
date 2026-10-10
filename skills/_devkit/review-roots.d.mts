@@ -2,6 +2,9 @@ export function isNonEmptyStringArray(value: unknown): value is string[];
 export function stagedFilesOverride(): string[] | null;
 export function authoritativeStagedFilesOverride(): string[] | null;
 export function normalizeRepositoryFile(file: string, name?: string): string;
+export function compileRepoGlob(glob: string): RegExp;
+export function matchesRepoGlob(path: string, glob: string): boolean;
+export function hasUnsupportedGlobSyntax(glob: string): boolean;
 export interface ReviewPaths {
   readonly include: readonly string[];
   readonly exclude: readonly string[];

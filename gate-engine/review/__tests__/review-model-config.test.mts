@@ -148,6 +148,12 @@ describe('shared review path config resolution', () => {
       }),
     ).toThrow(/disable the entire review scope/);
   });
+
+  it('fails config load naming a brace pattern the old matcher accepted', () => {
+    expect(() => cfgIn({ review: { paths: { include: ['src/*.{ts,tsx}'] } } })).toThrow(
+      "review.paths.include pattern 'src/*.{ts,tsx}': only *, ? and whole-segment ** are supported",
+    );
+  });
 });
 
 describe('selectReviewers applies the config-resolved correctness pin', () => {

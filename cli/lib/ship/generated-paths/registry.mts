@@ -3,6 +3,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { isAbsolute, join, win32 } from 'node:path';
 import { parseJsonObject } from '../../../../gate-engine/config-json.mts';
+import { compileRepoGlob } from '../../../../skills/_devkit/review-roots.mjs';
 import { z } from 'zod';
 import { isDevkitRepo } from '../../husky/self-host.mts';
 
@@ -37,7 +38,6 @@ const UNSAFE_CHARS = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu;
 const DEVKIT_RUNNER = /^devkit(?=\s)/;
 const NEEDS_QUOTING = /[\s"\\]/;
 const UNSUPPORTED_SYNTAX = /[[\]{}]/;
-const REGEX_SPECIAL = /[.*+?^${}()|[\]\\]/g;
 
 function isRepoRelativeGlob(glob: string): boolean {
   return !(
@@ -105,32 +105,13 @@ export function renderCommand(command: string, root: string): string {
   return isDevkitRepo(root) ? selfHostCommand(command) : command;
 }
 
-// devkit's own glob grammar, so a dot is an ordinary character: `*`/`?` stay within one segment, a
-// whole `**` segment spans any depth, everything else is literal. Parsing rejects `[]` and `{}`.
-const segmentSource = (seg: string): string =>
-  [...seg]
-    .map((ch) => (ch === '*' ? '[^/]*' : ch === '?' ? '[^/]' : ch.replace(REGEX_SPECIAL, '\\$&')))
-    .join('');
-
-function compileGlob(glob: string): RegExp {
-  const segs = glob.split('/');
-  const source = segs
-    .map((seg, i) => {
-      const slash = i > 0 && segs[i - 1] !== '**' ? '/' : '';
-      if (seg !== '**') return slash + segmentSource(seg);
-      return slash + (i === segs.length - 1 ? '.+' : '(?:[^/]+/)*');
-    })
-    .join('');
-  return new RegExp(`^${source}$`, 'su');
-}
-
 export function classifyGenerated(
   paths: readonly string[],
   entries: readonly GeneratedEntry[],
 ): Classified {
   const out: Classified = { generated: [], other: [] };
   const seen = new Set<string>();
-  const compiled = entries.map((e) => ({ re: compileGlob(e.glob), command: e.command }));
+  const compiled = entries.map((e) => ({ re: compileRepoGlob(e.glob), command: e.command }));
   // No trimming: a Git path is an exact identity, and ` dist/x` is not `dist/x`.
   for (const path of paths) {
     if (path === '' || seen.has(path)) continue;
