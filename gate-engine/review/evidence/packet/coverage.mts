@@ -9,6 +9,8 @@ export interface CoverageFields {
   evidence_omitted_files?: number;
   evidence_truncated_files?: number;
   evidence_omitted_paths?: string[];
+  /** Files the judge saw only up to the per-file cap — they read as reviewed but were not whole. */
+  evidence_truncated_paths?: string[];
   /** The lens group whose packet was the incomplete one, when the reviewer fanned out. */
   evidence_lens?: string;
 }
@@ -29,16 +31,19 @@ const gap = (m: Measured): number => m.omitted_files + m.truncated_files;
 const PATHS_MAX = 10;
 const PATHS_BYTES = 1_000;
 
-function boundedPaths(paths: readonly string[]): string[] {
+function boundedPaths(paths: readonly string[], budget = PATHS_BYTES): string[] {
   const kept: string[] = [];
   let bytes = 0;
   for (const p of paths.slice(0, PATHS_MAX)) {
     bytes += Buffer.byteLength(p, 'utf8');
-    if (bytes > PATHS_BYTES) break;
+    if (bytes > budget) break;
     kept.push(p);
   }
   return kept;
 }
+
+const pathBytes = (paths: readonly string[]): number =>
+  paths.reduce((n, p) => n + Buffer.byteLength(p, 'utf8'), 0);
 
 /** One reviewer's WORST packet: chunk parts partition files so their counts sum; whole-diff parts
  * are measured once per distinct diff, and a lens is named only beside a chunk plan. */
@@ -54,6 +59,7 @@ export function coverageFields(tasks: readonly CoverageTask[]): CoverageFields {
       omitted_files: 0,
       truncated_files: 0,
       omitted_paths: [],
+      truncated_paths: [],
     };
     for (const t of chunks) {
       const m = measureDiffCoverage(t.diffText);
@@ -61,6 +67,7 @@ export function coverageFields(tasks: readonly CoverageTask[]): CoverageFields {
       sum.omitted_files += m.omitted_files;
       sum.truncated_files += m.truncated_files;
       sum.omitted_paths.push(...m.omitted_paths);
+      sum.truncated_paths.push(...m.truncated_paths);
     }
     candidates.push(sum);
   }
@@ -77,12 +84,18 @@ export function coverageFields(tasks: readonly CoverageTask[]): CoverageFields {
     undefined,
   );
   if (!worst || gap(worst) === 0) return {};
+  // Both lists share one byte budget; truncated paths claim it first.
+  const truncatedPaths = boundedPaths(worst.truncated_paths);
   const fields: CoverageFields = {
     evidence_file_count: worst.file_count,
     evidence_omitted_files: worst.omitted_files,
     evidence_truncated_files: worst.truncated_files,
-    evidence_omitted_paths: boundedPaths(worst.omitted_paths),
+    evidence_omitted_paths: boundedPaths(
+      worst.omitted_paths,
+      PATHS_BYTES - pathBytes(truncatedPaths),
+    ),
   };
+  if (truncatedPaths.length > 0) fields.evidence_truncated_paths = truncatedPaths;
   if (worst.lens) fields.evidence_lens = worst.lens;
   return fields;
 }
@@ -91,5 +104,22 @@ export function coverageFields(tasks: readonly CoverageTask[]): CoverageFields {
 export function partialEvidenceNote(c: CoverageFields): string {
   if (!c.evidence_omitted_files && !c.evidence_truncated_files) return '';
   const lens = c.evidence_lens ? ` (${c.evidence_lens} lens)` : '';
-  return ` — partial evidence${lens}: ${c.evidence_omitted_files ?? 0}/${c.evidence_file_count ?? '?'} file(s) omitted, ${c.evidence_truncated_files ?? 0} truncated from the packet`;
+  return ` — partial evidence${lens}: ${c.evidence_omitted_files ?? 0}/${c.evidence_file_count ?? '?'} file(s) omitted, ${c.evidence_truncated_files ?? 0} truncated from the packet${truncatedNames(c)}`;
+}
+
+const NAMES_SHOWN = 3;
+
+// JSON quoting escapes C0 controls but leaves C1 (e.g. U+009B, a one-byte CSI) raw.
+const quotedPath = (p: string): string =>
+  JSON.stringify(p).replace(
+    /[\u0080-\u009f]/g,
+    (ch) => `\\u${ch.charCodeAt(0).toString(16).padStart(4, '0')}`,
+  );
+
+// Quoted so a committer-controlled path cannot split or forge the one-line gate log.
+function truncatedNames(c: CoverageFields): string {
+  const paths = c.evidence_truncated_paths ?? [];
+  if (paths.length === 0) return '';
+  const more = (c.evidence_truncated_files ?? 0) > NAMES_SHOWN ? ', …' : '';
+  return ` — truncated: ${paths.slice(0, NAMES_SHOWN).map(quotedPath).join(', ')}${more}`;
 }
