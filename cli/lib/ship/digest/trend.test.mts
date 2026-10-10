@@ -68,6 +68,9 @@ describe('summariseTrend — when it fires', () => {
     expect(text).toContain(`${CR}: 5 blocking rounds on this branch with no pass between`);
     expect(text).toContain('7 → 6 → 2 → 7 → 4 findings');
     expect(text).toContain('not converging');
+    expect(text).toContain(
+      'cut or narrow the change if the failing code is not an acceptance criterion',
+    );
   });
 
   it('fires at exactly 3 and stays silent at 2 (boundary)', () => {
