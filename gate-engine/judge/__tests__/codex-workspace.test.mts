@@ -106,11 +106,11 @@ describe('codex judge argv — workspace confinement', () => {
 });
 
 describe('prepareCodexSandbox', () => {
-  it('creates a scratch dir carrying the root AGENTS.md, ensures .claude, and removes scratch', () => {
+  it('creates a scratch dir without the root AGENTS.md, ensures .claude, and removes scratch', () => {
     const sandbox = prepareCodexSandbox(INVESTIGATING, false, repo);
     const scratch = sandbox.workspace?.scratch ?? '';
     expect(sandbox.workspace?.repoRoot).toBe(repo);
-    expect(readFileSync(path.join(scratch, 'AGENTS.md'), 'utf8')).toBe('# rules\n');
+    expect(readdirSync(scratch)).toEqual([]);
     expect(existsSync(path.join(repo, '.claude'))).toBe(true);
     sandbox.cleanup();
     expect(existsSync(scratch)).toBe(false);
@@ -166,15 +166,6 @@ describe('prepareCodexSandbox', () => {
     );
   });
 
-  it('removes scratch when a present project doc cannot be copied', () => {
-    rmSync(path.join(repo, 'AGENTS.md'));
-    mkdirSync(path.join(repo, 'AGENTS.md')); // a directory: copyFileSync fails with a non-ENOENT code
-    const before = new Set(readdirSync(tmpdir()).filter((n) => n.startsWith('devkit-judge-')));
-    expect(() => prepareCodexSandbox(INVESTIGATING, false, repo)).toThrow();
-    const after = readdirSync(tmpdir()).filter((n) => n.startsWith('devkit-judge-'));
-    expect(after.filter((n) => !before.has(n))).toEqual([]);
-  });
-
   it('makes no workspace for a read-only, forced read-only or claude judge', () => {
     for (const [args, ro] of [
       [READ_ONLY, false],
@@ -192,7 +183,7 @@ describe('execJudge — scratch lifecycle around a real spawn', () => {
     const run = spawned(record);
     expect(run.cwd).toMatch(/devkit-judge-/);
     expect(run.repoEnv).toBe(repo);
-    expect(run.listing).toContain('AGENTS.md');
+    expect(run.listing).not.toContain('AGENTS.md');
     expect(existsSync(run.cwd)).toBe(false);
   });
 
