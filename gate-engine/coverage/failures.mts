@@ -42,6 +42,10 @@ const ATTEMPT_TIMEOUT = /^Error: (?:Test|Hook) timed out in (\d+)ms\b/;
 const isTimeoutAttempt = (message: string) =>
   message.startsWith(TIMEOUT_FINGERPRINT) || ATTEMPT_TIMEOUT.test(message);
 
+/** A failed Testing Library findBy/waitFor, as vitest 4.1.10 and 5.0.3 write it to the json report.
+ * Identical to a genuine absence (dom-testing-library#1085), so it only earns a hint, never a re-run. */
+const TL_ASYNC_MISS = /^Error: (?:Unable to find |Timed out in waitFor)|\bat waitForWrapper\b/;
+
 /** A whole-file beforeAll/afterAll timeout lands on the suite, value intact. */
 const HOOK_TIMEOUT = /^Hook timed out in (\d+)ms/;
 
@@ -60,6 +64,8 @@ export interface FailureVerdict {
   allTimedOut: boolean;
   /** The longest observed per-attempt timeout, in ms. null when no failure recorded one. */
   timeoutMs: number | null;
+  /** Some failure is a Testing Library findBy/waitFor miss, whose wait --testTimeout cannot raise. */
+  testingLibrary?: true;
 }
 
 /** What ended a run that exited non-zero with no failed test. `file` is null when vitest did not say. */
@@ -137,6 +143,7 @@ export function readDiagnosis(resultsFile: string, exitCode = 0): RunDiagnosis |
     const failedTests = new Map<string, FlakyTest>();
     let allTimedOut = true;
     let timeoutMs: number | null = null;
+    let testingLibrary = false;
     const observe = (ms: number) => {
       if (Number.isFinite(ms) && ms > 0) timeoutMs = Math.max(timeoutMs ?? 0, Math.round(ms));
     };
@@ -150,6 +157,7 @@ export function readDiagnosis(resultsFile: string, exitCode = 0): RunDiagnosis |
           failed = true;
           const name = a.fullName ?? a.title ?? '';
           failedTests.set(`${file}\0${name}`, { file, name });
+          if (messages.some((m) => TL_ASYNC_MISS.test(m))) testingLibrary = true;
           if (messages.length >= 2 && messages.every(isTimeoutAttempt)) {
             const budgets = messages.map((m) => ATTEMPT_TIMEOUT.exec(m)?.[1]);
             if (budgets.every(Boolean)) {
@@ -183,6 +191,7 @@ export function readDiagnosis(resultsFile: string, exitCode = 0): RunDiagnosis |
     const diagnosis: RunDiagnosis = { failedFiles: [...failedFiles], flaky };
     if (failedFiles.size > 0) {
       diagnosis.failures = { tests: [...failedTests.values()], allTimedOut, timeoutMs };
+      if (testingLibrary) diagnosis.failures.testingLibrary = true;
     } else if (exitCode !== 0) {
       diagnosis.unhandled = readUnhandled(join(dirname(resultsFile), UNHANDLED_NAME), exitCode);
     }
@@ -280,6 +289,17 @@ export function humanAge(ms: number): string {
 export const RERUN_FLOOR_MS = 25_000;
 /** How far above the observed ceiling a load-starved re-run is given. */
 export const RERUN_MULTIPLIER = 5;
+/** Set to RERUN_MULTIPLIER on the re-run only, for a consumer setup file to scale its own waits by. */
+export const RERUN_SCALE_ENV = 'DEVKIT_COVERAGE_RERUN_SCALE';
+
+/** The env a pass runs under. Pass 1 strips the scale so an inherited value cannot raise its waits. */
+export function passEnv(rerun: boolean, env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const { [RERUN_SCALE_ENV]: _inherited, ...rest } = env;
+  return rerun ? { ...rest, [RERUN_SCALE_ENV]: String(RERUN_MULTIPLIER) } : rest;
+}
+
+/** The consumer-side line that lets a re-run raise Testing Library's findBy/waitFor wait too. */
+export const TL_SCALE_SNIPPET = `configure({ asyncUtilTimeout: 1000 * (Number(process.env.${RERUN_SCALE_ENV}) || 1) })`;
 
 /** The re-run's timeout: observed ceiling × RERUN_MULTIPLIER, never below RERUN_FLOOR_MS. Observed,
  * not read from config — see the coverage-gate decision (sc-3473). */
@@ -384,6 +404,13 @@ export function formatDiagnosis(
         `   Re-run with a bigger budget: -- --testTimeout=${raisedTimeoutMs(diagnosis.failures)} --maxWorkers=50%`,
       );
     }
+    if (diagnosis.failures?.testingLibrary) {
+      lines.push(
+        '   A Testing Library findBy/waitFor gave up. If it passes alone, it may be load: its wait',
+        '   (asyncUtilTimeout) is not raised by --testTimeout. To let the re-run raise it too, add to',
+        `   your vitest setup file: ${TL_SCALE_SNIPPET}`,
+      );
+    }
   }
   if (diagnosis.unhandled) {
     lines.push('🚫 vitest exited non-zero, but no test failed — the run ended on:');
@@ -439,6 +466,7 @@ export function formatRerunNotice(budgetMs: number): string[] {
     '   A retry cannot help here: vitest re-runs a timed-out test at the same ceiling, and under',
     '   load it starves again. The artifact is published only if this complete run passes.',
     '   Opt out with DEVKIT_COVERAGE_NO_RERUN=1 or --retry=0, or pass your own --testTimeout.',
+    `   ${RERUN_SCALE_ENV}=${RERUN_MULTIPLIER} is set for this run, for setup files that scale their waits.`,
     '   Still starving? Also lower parallelism: -- --maxWorkers=50%',
   ];
 }
