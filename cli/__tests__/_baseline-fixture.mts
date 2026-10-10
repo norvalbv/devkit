@@ -54,3 +54,13 @@ export const API_BRANCH_HEAD = `if [ "$1" = "api" ]; then
   git rev-parse --verify -q "refs/heads/$branch" && exit 0
   echo "gh: Branch not found (HTTP 404)" >&2; exit 1
 fi`;
+
+/** The stub's `gh run download <id>` arm: serves `summary-<id>.json` from the fixture dir. */
+export const RUN_DOWNLOAD_SUMMARY = `if [ "$1" = "run" ] && [ "$2" = "download" ]; then
+  id="$3"; out=""
+  while [ $# -gt 0 ]; do if [ "$1" = "--dir" ]; then out="$2"; fi; shift; done
+  if [ -f "$DEVKIT_TEST_FIXTURE/summary-$id.json" ]; then
+    mkdir -p "$out/run-$id"; cp "$DEVKIT_TEST_FIXTURE/summary-$id.json" "$out/run-$id/summary.json"; exit 0
+  fi
+  echo "no artifact matches any of the names or patterns provided" >&2; exit 1
+fi`;

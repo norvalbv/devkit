@@ -17,6 +17,10 @@ concurrency:
 jobs:
   gate:
     runs-on: ubuntu-latest
+    # actions: read lets the new-vs-inherited step below fetch the base run's summary artifact.
+    permissions:
+      contents: read
+      actions: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -125,3 +129,14 @@ jobs:
           path: .devkit/test-reports/*/report.json
           include-hidden-files: true
           if-no-files-found: ignore
+
+      # Narration only: splits this PR's failing tests into NEW and inherited from the run on the
+      # commit it merged onto (HEAD^1 of the tested merge ref). `|| true`: no answer is silence.
+      - name: Failures new in this PR (narration only)
+        if: always() && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          node cli/index.mts baseline-status --ref "$BASE_REF" --at "$(git rev-parse HEAD^1)" \
+            --against .devkit/test-reports/*/summary.json || true

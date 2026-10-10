@@ -50,6 +50,8 @@ export interface BaselineAnswer {
   attempt: number | null;
   sha: string | null;
   failingFiles: string[];
+  /** The answering run's failed test names per file, when its producer recorded them. */
+  failingTests?: Record<string, string[]>;
   /** The branch head as the remote reported it, which `sha` is measured against. */
   head: string | null;
   /** First-parent commits between `head` and `sha`; above 0, the newer commits had no usable run. */
@@ -305,6 +307,7 @@ function producerRemedy(workflow: string, artifact: string, branch: string): str
 export function queryBaseline({
   cwd = process.cwd(),
   ref,
+  at,
   file,
   workflow = DEFAULT_WORKFLOW,
   artifact = DEFAULT_ARTIFACT,
@@ -312,6 +315,7 @@ export function queryBaseline({
 }: {
   cwd?: string;
   ref?: string;
+  at?: string;
   file?: string;
   workflow?: string;
   artifact?: string;
@@ -326,7 +330,7 @@ export function queryBaseline({
   for (let i = 0; ; i++) {
     let walked: ReturnType<BranchWalk['at']>;
     try {
-      walk ??= new BranchWalk({ cwd, workflow, ref: branch, maxCommits });
+      walk ??= new BranchWalk({ cwd, workflow, ref: branch, maxCommits, at });
       walked = walk.at(i);
     } catch (e) {
       // Answering from an older commit after a failed lookup would present it as the newest evidence.
@@ -386,6 +390,7 @@ export function queryBaseline({
         .filter(([, outcome]) => outcome === 'failed')
         .map(([path]) => path)
         .sort(),
+      ...(summary.failedTests && { failingTests: summary.failedTests }),
       ...walkFields(walk),
       commitsBehindHead: behind,
       skippedRuns,
