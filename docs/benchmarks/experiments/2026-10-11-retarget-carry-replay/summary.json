@@ -1,0 +1,840 @@
+{
+  "corpus": "c29e78e6",
+  "models": {
+    "opus": "claude-opus-5-5",
+    "haiku": "claude-haiku-5-5"
+  },
+  "calls": 56,
+  "gating": {
+    "opusMajorityK3": {
+      "C1": "34/34",
+      "C2text": "8/18",
+      "c1Pass": true,
+      "c2Pass": false,
+      "pass": false
+    }
+  },
+  "reported": {
+    "opusClasses": {
+      "excluded": {
+        "n": 2,
+        "carried": 1,
+        "unlisted": 0
+      },
+      "D-T": {
+        "n": 83,
+        "carried": 81,
+        "unlisted": 1
+      },
+      "B": {
+        "n": 30,
+        "carried": 18,
+        "unlisted": 0
+      },
+      "C1": {
+        "n": 34,
+        "carried": 34,
+        "unlisted": 0
+      },
+      "C2-text": {
+        "n": 18,
+        "carried": 8,
+        "unlisted": 0
+      },
+      "A-repo": {
+        "n": 7,
+        "carried": 2,
+        "unlisted": 0
+      },
+      "S": {
+        "n": 4,
+        "carried": 0,
+        "unlisted": 0
+      }
+    },
+    "haikuK1": {
+      "excluded": {
+        "n": 2,
+        "carried": 1,
+        "unlisted": 0
+      },
+      "D-T": {
+        "n": 83,
+        "carried": 77,
+        "unlisted": 1
+      },
+      "B": {
+        "n": 30,
+        "carried": 18,
+        "unlisted": 0
+      },
+      "C1": {
+        "n": 34,
+        "carried": 34,
+        "unlisted": 0
+      },
+      "C2-text": {
+        "n": 18,
+        "carried": 5,
+        "unlisted": 0
+      },
+      "A-repo": {
+        "n": 7,
+        "carried": 7,
+        "unlisted": 0
+      },
+      "S": {
+        "n": 4,
+        "carried": 0,
+        "unlisted": 0
+      }
+    },
+    "immediatelyPriorTarget": {
+      "opus": {
+        "D-T": {
+          "n": 45,
+          "carried": 45,
+          "unlisted": 0
+        },
+        "B": {
+          "n": 15,
+          "carried": 13,
+          "unlisted": 0
+        },
+        "A-repo": {
+          "n": 2,
+          "carried": 2,
+          "unlisted": 0
+        },
+        "C1": {
+          "n": 20,
+          "carried": 20,
+          "unlisted": 0
+        },
+        "C2-text": {
+          "n": 6,
+          "carried": 3,
+          "unlisted": 0
+        }
+      },
+      "haiku": {
+        "D-T": {
+          "n": 45,
+          "carried": 42,
+          "unlisted": 0
+        },
+        "B": {
+          "n": 15,
+          "carried": 14,
+          "unlisted": 0
+        },
+        "A-repo": {
+          "n": 2,
+          "carried": 2,
+          "unlisted": 0
+        },
+        "C1": {
+          "n": 20,
+          "carried": 20,
+          "unlisted": 0
+        },
+        "C2-text": {
+          "n": 6,
+          "carried": 2,
+          "unlisted": 0
+        }
+      }
+    },
+    "opusPerRep": [
+      {
+        "excluded": {
+          "n": 2,
+          "carried": 1,
+          "unlisted": 0
+        },
+        "D-T": {
+          "n": 83,
+          "carried": 81,
+          "unlisted": 1
+        },
+        "B": {
+          "n": 30,
+          "carried": 19,
+          "unlisted": 0
+        },
+        "C1": {
+          "n": 34,
+          "carried": 34,
+          "unlisted": 0
+        },
+        "C2-text": {
+          "n": 18,
+          "carried": 7,
+          "unlisted": 0
+        },
+        "A-repo": {
+          "n": 7,
+          "carried": 2,
+          "unlisted": 0
+        },
+        "S": {
+          "n": 4,
+          "carried": 0,
+          "unlisted": 0
+        }
+      },
+      {
+        "excluded": {
+          "n": 2,
+          "carried": 1,
+          "unlisted": 0
+        },
+        "D-T": {
+          "n": 83,
+          "carried": 82,
+          "unlisted": 1
+        },
+        "B": {
+          "n": 30,
+          "carried": 18,
+          "unlisted": 0
+        },
+        "C1": {
+          "n": 34,
+          "carried": 34,
+          "unlisted": 0
+        },
+        "C2-text": {
+          "n": 18,
+          "carried": 7,
+          "unlisted": 0
+        },
+        "A-repo": {
+          "n": 7,
+          "carried": 2,
+          "unlisted": 0
+        },
+        "S": {
+          "n": 4,
+          "carried": 0,
+          "unlisted": 0
+        }
+      },
+      {
+        "excluded": {
+          "n": 2,
+          "carried": 1,
+          "unlisted": 0
+        },
+        "D-T": {
+          "n": 83,
+          "carried": 81,
+          "unlisted": 1
+        },
+        "B": {
+          "n": 30,
+          "carried": 18,
+          "unlisted": 0
+        },
+        "C1": {
+          "n": 34,
+          "carried": 33,
+          "unlisted": 0
+        },
+        "C2-text": {
+          "n": 18,
+          "carried": 8,
+          "unlisted": 0
+        },
+        "A-repo": {
+          "n": 7,
+          "carried": 2,
+          "unlisted": 0
+        },
+        "S": {
+          "n": 4,
+          "carried": 0,
+          "unlisted": 0
+        }
+      }
+    ],
+    "perAxis": [
+      {
+        "slug": "agent-comment-firewall",
+        "listed": 9,
+        "opus": {
+          "D-T": {
+            "n": 2,
+            "carried": 2,
+            "unlisted": 0
+          },
+          "A-repo": {
+            "n": 5,
+            "carried": 0,
+            "unlisted": 0
+          },
+          "B": {
+            "n": 1,
+            "carried": 1,
+            "unlisted": 0
+          },
+          "excluded": {
+            "n": 1,
+            "carried": 1,
+            "unlisted": 0
+          }
+        },
+        "haiku": {
+          "D-T": {
+            "n": 2,
+            "carried": 2,
+            "unlisted": 0
+          },
+          "A-repo": {
+            "n": 5,
+            "carried": 5,
+            "unlisted": 0
+          },
+          "B": {
+            "n": 1,
+            "carried": 1,
+            "unlisted": 0
+          },
+          "excluded": {
+            "n": 1,
+            "carried": 1,
+            "unlisted": 0
+          }
+        }
+      },
+      {
+        "slug": "benchmarks-grow-from-telemetry",
+        "listed": 8,
+        "opus": {
+          "B": {
+            "n": 3,
+            "carried": 2,
+            "unlisted": 0
+          },
+          "C2-text": {
+            "n": 3,
+            "carried": 1,
+            "unlisted": 0
+          },
+          "D-T": {
+            "n": 2,
+            "carried": 2,
+            "unlisted": 0
+          },
+          "C1": {
+            "n": 1,
+            "carried": 1,
+            "unlisted": 0
+          }
+        },
+        "haiku": {
+          "B": {
+            "n": 3,
+            "carried": 2,
+            "unlisted": 0
+          },
+          "C2-text": {
+            "n": 3,
+            "carried": 0,
+            "unlisted": 0
+          },
+          "D-T": {
+            "n": 2,
+            "carried": 2,
+            "unlisted": 0
+          },
+          "C1": {
+            "n": 1,
+            "carried": 1,
+            "unlisted": 0
+          }
+        }
+      },
+      {
+        "slug": "coverage-gate",
+        "listed": 21,
+        "opus": {
+          "D-T": {
+            "n": 9,
+            "carried": 8,
+            "unlisted": 1
+          },
+          "C1": {
+            "n": 9,
+            "carried": 9,
+            "unlisted": 0
+          },
+          "A-repo": {
+            "n": 1,
+            "carried": 1,
+            "unlisted": 0
+          },
+          "B": {
+            "n": 3,
+            "carried": 3,
+            "unlisted": 0
+          },
+          "S": {
+            "n": 1,
+            "carried": 0,
+            "unlisted": 0
+          }
+        },
+        "haiku": {
+          "D-T": {
+            "n": 9,
+            "carried": 7,
+            "unlisted": 1
+          },
+          "C1": {
+            "n": 9,
+            "carried": 9,
+            "unlisted": 0
+          },
+          "A-repo": {
+            "n": 1,
+            "carried": 1,
+            "unlisted": 0
+          },
+          "B": {
+            "n": 3,
+            "carried": 3,
+            "unlisted": 0
+          },
+          "S": {
+            "n": 1,
+            "carried": 0,
+            "unlisted": 0
+          }
+        }
+      },
+      {
+        "slug": "fallow-gate-owned-by-fallow",
+        "listed": 5,
+        "opus": {
+          "B": {
+            "n": 2,
+            "carried": 1,
+            "unlisted": 0
+          },
+          "D-T": {
+            "n": 4,
+            "carried": 4,
+            "unlisted": 0
+          }
+        },
+        "haiku": {
+          "B": {
+            "n": 2,
+            "carried": 1,
+            "unlisted": 0
+          },
+          "D-T": {
+            "n": 4,
+            "carried": 4,
+            "unlisted": 0
+          }
+        }
+      },
+      {
+        "slug": "gate-opt-out-is-visible-and-detectable",
+        "listed": 6,
+        "opus": {
+          "A-repo": {
+            "n": 1,
+            "carried": 1,
+            "unlisted": 0
+          },
+          "D-T": {
+            "n": 2,
+            "carried": 2,
+            "unlisted": 0
+          },
+          "B": {
+            "n": 4,
+            "carried": 2,
+            "unlisted": 0
+          },
+          "C1": {
+            "n": 1,
+            "carried": 1,
+            "unlisted": 0
+          }
+        },
+        "haiku": {
+          "A-repo": {
+            "n": 1,
+            "carried": 1,
+            "unlisted": 0
+          },
+          "D-T": {
+            "n": 2,
+            "carried": 2,
+            "unlisted": 0
+          },
+          "B": {
+            "n": 4,
+            "carried": 2,
+            "unlisted": 0
+          },
+          "C1": {
+            "n": 1,
+            "carried": 1,
+            "unlisted": 0
+          }
+        }
+      },
+      {
+        "slug": "overlay-self-heal",
+        "listed": 7,
+        "opus": {
+          "C1": {
+            "n": 2,
+            "carried": 2,
+            "unlisted": 0
+          },
+          "B": {
+            "n": 1,
+            "carried": 1,
+            "unlisted": 0
+          },
+          "D-T": {
+            "n": 4,
+            "carried": 4,
+            "unlisted": 0
+          }
+        },
+        "haiku": {
+          "C1": {
+            "n": 2,
+            "carried": 2,
+            "unlisted": 0
+          },
+          "B": {
+            "n": 1,
+            "carried": 1,
+            "unlisted": 0
+          },
+          "D-T": {
+            "n": 4,
+            "carried": 4,
+            "unlisted": 0
+          }
+        }
+      },
+      {
+        "slug": "oxc-toolchain-migration",
+        "listed": 24,
+        "opus": {
+          "C2-text": {
+            "n": 7,
+            "carried": 3,
+            "unlisted": 0
+          },
+          "D-T": {
+            "n": 13,
+            "carried": 13,
+            "unlisted": 0
+          },
+          "C1": {
+            "n": 3,
+            "carried": 3,
+            "unlisted": 0
+          },
+          "S": {
+            "n": 2,
+            "carried": 0,
+            "unlisted": 0
+          },
+          "B": {
+            "n": 2,
+            "carried": 1,
+            "unlisted": 0
+          }
+        },
+        "haiku": {
+          "C2-text": {
+            "n": 7,
+            "carried": 2,
+            "unlisted": 0
+          },
+          "D-T": {
+            "n": 13,
+            "carried": 12,
+            "unlisted": 0
+          },
+          "C1": {
+            "n": 3,
+            "carried": 3,
+            "unlisted": 0
+          },
+          "S": {
+            "n": 2,
+            "carried": 0,
+            "unlisted": 0
+          },
+          "B": {
+            "n": 2,
+            "carried": 1,
+            "unlisted": 0
+          }
+        }
+      },
+      {
+        "slug": "prior-art-before-plan",
+        "listed": 4,
+        "opus": {
+          "C2-text": {
+            "n": 1,
+            "carried": 0,
+            "unlisted": 0
+          },
+          "D-T": {
+            "n": 2,
+            "carried": 2,
+            "unlisted": 0
+          },
+          "B": {
+            "n": 1,
+            "carried": 1,
+            "unlisted": 0
+          }
+        },
+        "haiku": {
+          "C2-text": {
+            "n": 1,
+            "carried": 0,
+            "unlisted": 0
+          },
+          "D-T": {
+            "n": 2,
+            "carried": 2,
+            "unlisted": 0
+          },
+          "B": {
+            "n": 1,
+            "carried": 0,
+            "unlisted": 0
+          }
+        }
+      },
+      {
+        "slug": "reconcile-manifest-accumulates-per-ship",
+        "listed": 3,
+        "opus": {
+          "D-T": {
+            "n": 3,
+            "carried": 3,
+            "unlisted": 0
+          },
+          "B": {
+            "n": 1,
+            "carried": 0,
+            "unlisted": 0
+          }
+        },
+        "haiku": {
+          "D-T": {
+            "n": 3,
+            "carried": 2,
+            "unlisted": 0
+          },
+          "B": {
+            "n": 1,
+            "carried": 0,
+            "unlisted": 0
+          }
+        }
+      },
+      {
+        "slug": "review-gate-in-chain",
+        "listed": 50,
+        "opus": {
+          "D-T": {
+            "n": 32,
+            "carried": 31,
+            "unlisted": 0
+          },
+          "C1": {
+            "n": 12,
+            "carried": 12,
+            "unlisted": 0
+          },
+          "C2-text": {
+            "n": 4,
+            "carried": 3,
+            "unlisted": 0
+          },
+          "B": {
+            "n": 2,
+            "carried": 1,
+            "unlisted": 0
+          },
+          "S": {
+            "n": 1,
+            "carried": 0,
+            "unlisted": 0
+          }
+        },
+        "haiku": {
+          "D-T": {
+            "n": 32,
+            "carried": 31,
+            "unlisted": 0
+          },
+          "C1": {
+            "n": 12,
+            "carried": 12,
+            "unlisted": 0
+          },
+          "C2-text": {
+            "n": 4,
+            "carried": 3,
+            "unlisted": 0
+          },
+          "B": {
+            "n": 2,
+            "carried": 2,
+            "unlisted": 0
+          },
+          "S": {
+            "n": 1,
+            "carried": 0,
+            "unlisted": 0
+          }
+        }
+      },
+      {
+        "slug": "ship-base-must-contain-branch-point",
+        "listed": 5,
+        "opus": {
+          "D-T": {
+            "n": 2,
+            "carried": 2,
+            "unlisted": 0
+          },
+          "B": {
+            "n": 3,
+            "carried": 2,
+            "unlisted": 0
+          }
+        },
+        "haiku": {
+          "D-T": {
+            "n": 2,
+            "carried": 2,
+            "unlisted": 0
+          },
+          "B": {
+            "n": 3,
+            "carried": 2,
+            "unlisted": 0
+          }
+        }
+      },
+      {
+        "slug": "ship-patch-anchored-at-fork-point",
+        "listed": 2,
+        "opus": {
+          "C1": {
+            "n": 2,
+            "carried": 2,
+            "unlisted": 0
+          }
+        },
+        "haiku": {
+          "C1": {
+            "n": 2,
+            "carried": 2,
+            "unlisted": 0
+          }
+        }
+      },
+      {
+        "slug": "suite-hangs-bound-at-the-spawn-site",
+        "listed": 6,
+        "opus": {
+          "D-T": {
+            "n": 1,
+            "carried": 1,
+            "unlisted": 0
+          },
+          "C2-text": {
+            "n": 3,
+            "carried": 1,
+            "unlisted": 0
+          },
+          "B": {
+            "n": 2,
+            "carried": 1,
+            "unlisted": 0
+          }
+        },
+        "haiku": {
+          "D-T": {
+            "n": 1,
+            "carried": 1,
+            "unlisted": 0
+          },
+          "C2-text": {
+            "n": 3,
+            "carried": 0,
+            "unlisted": 0
+          },
+          "B": {
+            "n": 2,
+            "carried": 1,
+            "unlisted": 0
+          }
+        }
+      },
+      {
+        "slug": "typescript-source-prebuilt-mjs",
+        "listed": 13,
+        "opus": {
+          "D-T": {
+            "n": 7,
+            "carried": 7,
+            "unlisted": 0
+          },
+          "B": {
+            "n": 5,
+            "carried": 2,
+            "unlisted": 0
+          },
+          "C1": {
+            "n": 4,
+            "carried": 4,
+            "unlisted": 0
+          }
+        },
+        "haiku": {
+          "D-T": {
+            "n": 7,
+            "carried": 6,
+            "unlisted": 0
+          },
+          "B": {
+            "n": 5,
+            "carried": 2,
+            "unlisted": 0
+          },
+          "C1": {
+            "n": 4,
+            "carried": 4,
+            "unlisted": 0
+          }
+        }
+      }
+    ],
+    "opusAllRepsAgree": "158/163",
+    "invalidAnswers": 0,
+    "unansweredItems": 1,
+    "costUsd": 3.8732735999999997
+  }
+}

@@ -1,0 +1,179 @@
+q7_id	slug	note_id	label	guard	scored_as
+plan-critique-evidence-loop#3.0	plan-critique-evidence-loop	note:2026-07-27	A		excluded
+reconcile-manifest-accumulates-per-ship#1.0	reconcile-manifest-accumulates-per-ship	note:2026-07-25	D	T	D-T
+reconcile-manifest-accumulates-per-ship#1.1	reconcile-manifest-accumulates-per-ship	note:2026-08-26	D	T	D-T
+reconcile-manifest-accumulates-per-ship#1.2	reconcile-manifest-accumulates-per-ship	note:2026-08-26~2	B		B
+reconcile-manifest-accumulates-per-ship#1.3	reconcile-manifest-accumulates-per-ship	note:2026-08-26~3	D	T	D-T
+ship-patch-anchored-at-fork-point#1.0	ship-patch-anchored-at-fork-point	note:2026-09-01	D	N	C1
+ship-patch-anchored-at-fork-point#1.1	ship-patch-anchored-at-fork-point	note:2026-09-30	D	N	C1
+prior-art-before-plan#1.0	prior-art-before-plan	note:2026-08-06	A		C2-text
+prior-art-before-plan#1.1	prior-art-before-plan	note:2026-08-06~2	D	T	D-T
+prior-art-before-plan#1.2	prior-art-before-plan	note:2026-08-06~3	D	T	D-T
+prior-art-before-plan#1.3	prior-art-before-plan	note:2026-08-07	B		B
+ship-base-must-contain-branch-point#1.0	ship-base-must-contain-branch-point	note:2026-09-04	D	T	D-T
+ship-base-must-contain-branch-point#1.1	ship-base-must-contain-branch-point	note:2026-09-04~2	D	T	D-T
+ship-base-must-contain-branch-point#1.2	ship-base-must-contain-branch-point	note:2026-09-04~3	B		B
+ship-base-must-contain-branch-point#1.3	ship-base-must-contain-branch-point	note:2026-09-04~4	B		B
+ship-base-must-contain-branch-point#1.4	ship-base-must-contain-branch-point	note:2026-09-04~5	B		B
+suite-hangs-bound-at-the-spawn-site#1.0	suite-hangs-bound-at-the-spawn-site	note:2026-09-04	D	T	D-T
+suite-hangs-bound-at-the-spawn-site#1.1	suite-hangs-bound-at-the-spawn-site	note:2026-09-06	C		C2-text
+suite-hangs-bound-at-the-spawn-site#1.2	suite-hangs-bound-at-the-spawn-site	note:2026-09-06~2	B		B
+suite-hangs-bound-at-the-spawn-site#1.3	suite-hangs-bound-at-the-spawn-site	note:2026-09-06~3	A		C2-text
+suite-hangs-bound-at-the-spawn-site#1.4	suite-hangs-bound-at-the-spawn-site	note:2026-09-06~4	B		B
+suite-hangs-bound-at-the-spawn-site#1.5	suite-hangs-bound-at-the-spawn-site	note:2026-09-06~5	A		C2-text
+fallow-gate-owned-by-fallow#2.0	fallow-gate-owned-by-fallow	note:2026-07-31	B		B
+fallow-gate-owned-by-fallow#2.1	fallow-gate-owned-by-fallow	note:2026-08-04	D	T	D-T
+fallow-gate-owned-by-fallow#2.2	fallow-gate-owned-by-fallow	note:2026-09-04	D	T	D-T
+fallow-gate-owned-by-fallow#2.3	fallow-gate-owned-by-fallow	note:2026-09-04~2	B		B
+fallow-gate-owned-by-fallow#2.4	fallow-gate-owned-by-fallow	note:2026-09-28	D	T	D-T
+fallow-gate-owned-by-fallow#2.5	fallow-gate-owned-by-fallow	note:2026-10-05	D	T	D-T
+gate-opt-out-is-visible-and-detectable#1.0	gate-opt-out-is-visible-and-detectable	note:2026-08-07	A		A-repo
+gate-opt-out-is-visible-and-detectable#1.1	gate-opt-out-is-visible-and-detectable	note:2026-08-09	D	T	D-T
+gate-opt-out-is-visible-and-detectable#1.2	gate-opt-out-is-visible-and-detectable	note:2026-08-24	B		B
+gate-opt-out-is-visible-and-detectable#1.3	gate-opt-out-is-visible-and-detectable	note:2026-08-24~2	B		B
+gate-opt-out-is-visible-and-detectable#1.4	gate-opt-out-is-visible-and-detectable	note:2026-08-29	D	T	D-T
+gate-opt-out-is-visible-and-detectable#1.5	gate-opt-out-is-visible-and-detectable	note:2026-09-28	D	N	C1
+gate-opt-out-is-visible-and-detectable#1.6	gate-opt-out-is-visible-and-detectable	note:2026-10-01	B		B
+gate-opt-out-is-visible-and-detectable#1.7	gate-opt-out-is-visible-and-detectable	note:2026-10-01~2	B		B
+overlay-self-heal#6.0	overlay-self-heal	note:2026-09-03	D	N	C1
+overlay-self-heal#6.1	overlay-self-heal	note:2026-09-28	D	N	C1
+overlay-self-heal#10.0	overlay-self-heal	note:2026-09-30	B		B
+overlay-self-heal#10.1	overlay-self-heal	note:2026-09-30~2	D	T	D-T
+overlay-self-heal#10.2	overlay-self-heal	note:2026-09-30~3	D	T	D-T
+overlay-self-heal#11.0	overlay-self-heal	note:2026-10-01	D	T	D-T
+overlay-self-heal#11.1	overlay-self-heal	note:2026-10-01~2	D	T	D-T
+benchmarks-grow-from-telemetry#1.0	benchmarks-grow-from-telemetry	note:2026-08-01	B		B
+benchmarks-grow-from-telemetry#1.1	benchmarks-grow-from-telemetry	note:2026-08-02	A		C2-text
+benchmarks-grow-from-telemetry#1.2	benchmarks-grow-from-telemetry	note:2026-08-02~2	A		C2-text
+benchmarks-grow-from-telemetry#1.3	benchmarks-grow-from-telemetry	note:2026-08-02~3	A		C2-text
+benchmarks-grow-from-telemetry#1.4	benchmarks-grow-from-telemetry	note:2026-08-03	D	T	D-T
+benchmarks-grow-from-telemetry#1.5	benchmarks-grow-from-telemetry	note:2026-08-03~2	D	T	D-T
+benchmarks-grow-from-telemetry#1.6	benchmarks-grow-from-telemetry	note:2026-08-03~3	B		B
+benchmarks-grow-from-telemetry#1.7	benchmarks-grow-from-telemetry	note:2026-08-03~4	B		B
+benchmarks-grow-from-telemetry#1.8	benchmarks-grow-from-telemetry	note:2026-08-03~5	D	N	C1
+agent-comment-firewall#2.0	agent-comment-firewall	note:2026-08-21	D	T	D-T
+agent-comment-firewall#2.1	agent-comment-firewall	note:2026-08-22	A		A-repo
+agent-comment-firewall#2.2	agent-comment-firewall	note:2026-08-24	A		A-repo
+agent-comment-firewall#2.3	agent-comment-firewall	note:2026-08-27	A		A-repo
+agent-comment-firewall#2.4	agent-comment-firewall	note:2026-08-29	A		A-repo
+agent-comment-firewall#3.0	agent-comment-firewall	note:2026-08-29~2	A		A-repo
+agent-comment-firewall#4.0	agent-comment-firewall	note:2026-09-02	B		B
+agent-comment-firewall#4.1	agent-comment-firewall	note:2026-09-29	C		excluded
+agent-comment-firewall#5.0	agent-comment-firewall	note:2026-09-30	D	T	D-T
+typescript-source-prebuilt-mjs#2.0	typescript-source-prebuilt-mjs	note:2026-08-26	D	T	D-T
+typescript-source-prebuilt-mjs#2.1	typescript-source-prebuilt-mjs	note:2026-09-02	D	T	D-T
+typescript-source-prebuilt-mjs#2.2	typescript-source-prebuilt-mjs	note:2026-09-02~2	D	T	D-T
+typescript-source-prebuilt-mjs#2.3	typescript-source-prebuilt-mjs	note:2026-09-04	D	T	D-T
+typescript-source-prebuilt-mjs#2.4	typescript-source-prebuilt-mjs	note:2026-09-04~2	B		B
+typescript-source-prebuilt-mjs#2.5	typescript-source-prebuilt-mjs	note:2026-09-04~3	D	N	C1
+typescript-source-prebuilt-mjs#2.6	typescript-source-prebuilt-mjs	note:2026-09-04~4	D	N	C1
+typescript-source-prebuilt-mjs#2.7	typescript-source-prebuilt-mjs	note:2026-09-04~5	D	T	D-T
+typescript-source-prebuilt-mjs#2.8	typescript-source-prebuilt-mjs	note:2026-09-04~6	D	T	D-T
+typescript-source-prebuilt-mjs#2.9	typescript-source-prebuilt-mjs	note:2026-09-04~7	B		B
+typescript-source-prebuilt-mjs#2.10	typescript-source-prebuilt-mjs	note:2026-10-01	D	T	D-T
+typescript-source-prebuilt-mjs#2.11	typescript-source-prebuilt-mjs	note:2026-10-01~2	B		B
+typescript-source-prebuilt-mjs#2.12	typescript-source-prebuilt-mjs	note:2026-10-01~3	B		B
+typescript-source-prebuilt-mjs#2.13	typescript-source-prebuilt-mjs	note:2026-10-01~4	D	N	C1
+typescript-source-prebuilt-mjs#2.14	typescript-source-prebuilt-mjs	note:2026-10-05	B		B
+typescript-source-prebuilt-mjs#2.15	typescript-source-prebuilt-mjs	note:2026-10-05~2	D	N	C1
+coverage-gate#1.0	coverage-gate	-	D	T	D-T
+coverage-gate#1.1	coverage-gate	note:2026-07-21	D	T	D-T
+coverage-gate#1.2	coverage-gate	note:2026-07-25	D	N	C1
+coverage-gate#1.3	coverage-gate	note:2026-08-30	D	N	C1
+coverage-gate#1.4	coverage-gate	note:2026-08-30~2	D	N	C1
+coverage-gate#1.5	coverage-gate	note:2026-08-30~3	A		A-repo
+coverage-gate#1.6	coverage-gate	note:2026-09-27	D	T	D-T
+coverage-gate#1.7	coverage-gate	note:2026-09-28	B		B
+coverage-gate#1.8	coverage-gate	note:2026-09-28~2	D	N	C1
+coverage-gate#1.9	coverage-gate	note:2026-09-28~3	D	N	C1
+coverage-gate#1.10	coverage-gate	note:2026-09-28~4	D	N	C1
+coverage-gate#1.11	coverage-gate	note:2026-09-28~5	D	N	C1
+coverage-gate#1.12	coverage-gate	note:2026-09-28~6	D	T	D-T
+coverage-gate#1.13	coverage-gate	note:2026-09-28~7	D	N	C1
+coverage-gate#1.14	coverage-gate	note:2026-09-28~8	D	N	C1
+coverage-gate#1.15	coverage-gate	note:2026-09-29	D	T	D-T
+coverage-gate#1.16	coverage-gate	note:2026-09-30	D	T	D-T
+coverage-gate#1.17	coverage-gate	note:2026-09-30~2	S		S
+coverage-gate#1.18	coverage-gate	note:2026-10-01	D	T	D-T
+coverage-gate#1.19	coverage-gate	note:2026-10-02	D	T	D-T
+coverage-gate#1.20	coverage-gate	note:2026-10-06	B		B
+coverage-gate#1.21	coverage-gate	note:2026-10-06~2	D	T	D-T
+coverage-gate#1.22	coverage-gate	note:2026-10-06~3	B		B
+oxc-toolchain-migration#1.0	oxc-toolchain-migration	note:2026-08-15	A		C2-text
+oxc-toolchain-migration#1.1	oxc-toolchain-migration	note:2026-08-16	C		C2-text
+oxc-toolchain-migration#1.2	oxc-toolchain-migration	note:2026-08-16~2	D	T	D-T
+oxc-toolchain-migration#1.3	oxc-toolchain-migration	note:2026-08-16~3	A		C2-text
+oxc-toolchain-migration#1.4	oxc-toolchain-migration	note:2026-08-16~4	D	T	D-T
+oxc-toolchain-migration#1.5	oxc-toolchain-migration	note:2026-08-16~5	D	N	C1
+oxc-toolchain-migration#1.6	oxc-toolchain-migration	note:2026-08-16~6	A		C2-text
+oxc-toolchain-migration#1.7	oxc-toolchain-migration	note:2026-08-18	D	T	D-T
+oxc-toolchain-migration#1.8	oxc-toolchain-migration	note:2026-08-22	A		C2-text
+oxc-toolchain-migration#1.9	oxc-toolchain-migration	note:2026-08-23	A		C2-text
+oxc-toolchain-migration#1.10	oxc-toolchain-migration	note:2026-08-24	D	N	C1
+oxc-toolchain-migration#1.11	oxc-toolchain-migration	note:2026-08-25	D	T	D-T
+oxc-toolchain-migration#1.12	oxc-toolchain-migration	note:2026-08-25~2	S		S
+oxc-toolchain-migration#1.13	oxc-toolchain-migration	note:2026-08-30	D	T	D-T
+oxc-toolchain-migration#1.14	oxc-toolchain-migration	note:2026-08-31	D	T	D-T
+oxc-toolchain-migration#1.15	oxc-toolchain-migration	note:2026-09-03	D	T	D-T
+oxc-toolchain-migration#2.0	oxc-toolchain-migration	note:2026-09-03~2	D	T	D-T
+oxc-toolchain-migration#2.1	oxc-toolchain-migration	note:2026-09-03~3	B		B
+oxc-toolchain-migration#2.2	oxc-toolchain-migration	note:2026-09-03~4	S		S
+oxc-toolchain-migration#2.3	oxc-toolchain-migration	note:2026-09-03~5	D	T	D-T
+oxc-toolchain-migration#2.4	oxc-toolchain-migration	note:2026-09-03~6	A		C2-text
+oxc-toolchain-migration#2.5	oxc-toolchain-migration	note:2026-09-14	D	T	D-T
+oxc-toolchain-migration#2.6	oxc-toolchain-migration	note:2026-09-14~2	D	N	C1
+oxc-toolchain-migration#2.7	oxc-toolchain-migration	note:2026-09-28	D	T	D-T
+oxc-toolchain-migration#2.8	oxc-toolchain-migration	note:2026-09-30	D	T	D-T
+oxc-toolchain-migration#2.9	oxc-toolchain-migration	note:2026-10-01	B		B
+oxc-toolchain-migration#2.10	oxc-toolchain-migration	note:2026-10-02	D	T	D-T
+review-gate-in-chain#1.0	review-gate-in-chain	note:2026-07-06	D	T	D-T
+review-gate-in-chain#1.1	review-gate-in-chain	note:2026-07-06~2	D	N	C1
+review-gate-in-chain#1.2	review-gate-in-chain	note:2026-07-07	D	T	D-T
+review-gate-in-chain#1.3	review-gate-in-chain	note:2026-07-09	D	T	D-T
+review-gate-in-chain#2.0	review-gate-in-chain	note:2026-07-12	D	T	D-T
+review-gate-in-chain#2.1	review-gate-in-chain	note:2026-07-17	D	T	D-T
+review-gate-in-chain#2.2	review-gate-in-chain	note:2026-07-15	D	N	C1
+review-gate-in-chain#2.3	review-gate-in-chain	note:2026-07-15~2	D	T	D-T
+review-gate-in-chain#2.4	review-gate-in-chain	note:2026-07-15~3	D	T	D-T
+review-gate-in-chain#2.5	review-gate-in-chain	note:2026-07-16	C		C2-text
+review-gate-in-chain#2.6	review-gate-in-chain	note:2026-07-16~2	D	T	D-T
+review-gate-in-chain#2.7	review-gate-in-chain	note:2026-07-18	D	T	D-T
+review-gate-in-chain#2.8	review-gate-in-chain	note:2026-07-21	D	N	C1
+review-gate-in-chain#2.9	review-gate-in-chain	note:2026-07-23	D	T	D-T
+review-gate-in-chain#2.10	review-gate-in-chain	note:2026-07-25	D	T	D-T
+review-gate-in-chain#2.11	review-gate-in-chain	note:2026-08-01	B		B
+review-gate-in-chain#2.12	review-gate-in-chain	note:2026-08-04	D	T	D-T
+review-gate-in-chain#2.13	review-gate-in-chain	note:2026-08-04~2	D	N	C1
+review-gate-in-chain#2.14	review-gate-in-chain	note:2026-08-04~3	D	T	D-T
+review-gate-in-chain#2.15	review-gate-in-chain	note:2026-08-04~4	D	T	D-T
+review-gate-in-chain#2.16	review-gate-in-chain	note:2026-08-04~5	D	T	D-T
+review-gate-in-chain#2.17	review-gate-in-chain	note:2026-08-04~6	D	T	D-T
+review-gate-in-chain#2.18	review-gate-in-chain	note:2026-08-04~7	D	T	D-T
+review-gate-in-chain#2.19	review-gate-in-chain	note:2026-08-04~8	D	N	C1
+review-gate-in-chain#2.20	review-gate-in-chain	note:2026-08-04~9	C		C2-text
+review-gate-in-chain#2.21	review-gate-in-chain	note:2026-08-05	D	T	D-T
+review-gate-in-chain#2.22	review-gate-in-chain	note:2026-08-07	D	N	C1
+review-gate-in-chain#2.23	review-gate-in-chain	note:2026-08-09	D	T	D-T
+review-gate-in-chain#2.24	review-gate-in-chain	note:2026-08-21	D	T	D-T
+review-gate-in-chain#2.25	review-gate-in-chain	note:2026-08-26	D	T	D-T
+review-gate-in-chain#2.26	review-gate-in-chain	note:2026-08-27	D	T	D-T
+review-gate-in-chain#3.0	review-gate-in-chain	note:2026-08-27~2	S		S
+review-gate-in-chain#4.0	review-gate-in-chain	note:2026-08-28	D	T	D-T
+review-gate-in-chain#4.1	review-gate-in-chain	note:2026-08-28~2	D	N	C1
+review-gate-in-chain#4.2	review-gate-in-chain	note:2026-08-30	D	T	D-T
+review-gate-in-chain#4.3	review-gate-in-chain	note:2026-08-30~2	D	N	C1
+review-gate-in-chain#5.0	review-gate-in-chain	note:2026-08-31	A		C2-text
+review-gate-in-chain#5.1	review-gate-in-chain	note:2026-08-29	D	N	C1
+review-gate-in-chain#5.2	review-gate-in-chain	note:2026-09-01	D	N	C1
+review-gate-in-chain#5.3	review-gate-in-chain	note:2026-09-01~2	D	T	D-T
+review-gate-in-chain#5.4	review-gate-in-chain	note:2026-09-02	A		C2-text
+review-gate-in-chain#5.5	review-gate-in-chain	note:2026-09-04	D	T	D-T
+review-gate-in-chain#5.6	review-gate-in-chain	note:2026-09-04~2	D	T	D-T
+review-gate-in-chain#5.7	review-gate-in-chain	note:2026-09-27	D	T	D-T
+review-gate-in-chain#5.8	review-gate-in-chain	note:2026-09-27~2	D	T	D-T
+review-gate-in-chain#5.9	review-gate-in-chain	note:2026-09-29	D	T	D-T
+review-gate-in-chain#5.10	review-gate-in-chain	note:2026-09-29~2	D	T	D-T
+review-gate-in-chain#5.11	review-gate-in-chain	note:2026-09-29~3	D	N	C1
+review-gate-in-chain#5.12	review-gate-in-chain	note:2026-09-29~4	D	T	D-T
+review-gate-in-chain#5.13	review-gate-in-chain	note:2026-09-30	D	N	C1
+review-gate-in-chain#5.14	review-gate-in-chain	note:2026-09-30~2	B		B
