@@ -20,3 +20,19 @@ created: 2026-10-10
 **Scope:** cli/commands/release.mts
 **Category:** self-host-release
 **Source:** shortcut · sc-5179
+
+## Target · 2026-10-11 — A green base commit skips devkit release's local suite; an overridden base still runs it
+
+**Context:** The 2026-10-10 Target kept the local test suite after the CI read. Cutting v0.69.0 on 2026-10-11 showed what that costs: CI had passed gate.yml on the exact base commit in 48 minutes, the local re-run of the same suite then took over an hour on a loaded 10-core machine and failed twice on things the commit did not cause (ten timing-bound git-integration tests under load, six tests that break in a checkout path containing a space). Each failure refused the release, and the owner cut v0.69.0 by hand with --no-verify — the bypass path the earlier Target names as the thing to end.
+**Ruling:** When the base commit's CI verdict is green, devkit release does not run the local suite: it prints that CI passed it on this commit, and the release PR body says the suite passed in CI and was not re-run. Under --ci-override (a red, missing or pending verdict that was read) the local suite runs exactly as before and a failure refuses the release, because that base has no other proof. Everything else is unchanged: the tip check, the CI read, the build, the dist smoke checks, the re-read of origin's tip before publishing, and ship's own gates on the release PR.
+**Consequences:**
+- Positive: A release from a green base takes minutes instead of over an hour, so the checked path is cheaper than --no-verify and there is less reason to leave it. The suite that gates a release is the one that ran on the exact commit in a clean CI environment, not one perturbed by the maintainer's machine load or checkout path.
+- Negative: A green release no longer exercises the suite on the maintainer's OS, so a macOS-only regression that Linux CI cannot see is not caught at release time; devkit ships platform-neutral .mjs, and commit and ship gates still run on that machine. The local run also used to cover whatever differed between the checkout and the CI'd commit; the tip check already requires HEAD to be origin's tip on a clean tree, so that difference is empty by construction.
+**Vision-fit:** n/a — internal tooling (devkit's own release path)
+**Researched:** release.mts (baseCiLines, the test step); the v0.69.0 release attempts on 2026-10-11 (CI run 38165008203: 18:43 to 19:31 UTC green on cb955163; local run: 16 of 10624 failed, all environment); cli/__tests__/release.test.mts.
+**Rejected:** (a) Keep the local suite always (the 2026-10-10 ruling): it duplicated a verdict already read and pushed the release back to --no-verify within one day. (b) A --skip-tests flag: a second bypass to remember, with no evidence behind it; the green verdict is the evidence. (c) Run only a smoke subset locally: the build, built-bin version check, stdin-body wiring check and dist completeness already are that subset. (d) Skip the suite under --ci-override too: that base has no passing run, so the local suite is the only check left.
+**Anchored-bet:** [BET]
+**Revisit-when:** A release ships a regression that a local suite run on the maintainer's machine would have caught and CI did not; or releases move to a CI workflow.
+**Scope:** cli/commands/release.mts
+**Source:** collab
+**Evidence-change:** One day of use: the local suite repeated a green CI verdict at over an hour per attempt, failed on environment-only causes twice, and the owner released with --no-verify; the owner then delegated the fix.
