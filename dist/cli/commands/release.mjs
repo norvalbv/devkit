@@ -3,7 +3,7 @@
  * bump the version → run tests → build dist → open a release PR. After its squash merge, tag the
  * merge commit (never the release branch commit, which does not land on main).
  *
- *   devkit release [patch|minor|major|<x.y.z>] [--dry-run] [--yes]
+ *   devkit release [patch|minor|major|<x.y.z>] [--dry-run] [--yes] [--ci-override "<reason>"]
  *
  * Refuses outside the devkit repo (it would bump a consumer's package.json) and refuses on a
  * dirty tree (feature work must be committed first — release only bumps the version + dist).
@@ -16,7 +16,10 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { parseArgs } from 'node:util';
 import { cancel, confirm, isCancel } from '@clack/prompts';
+import { branchHead, commitCi, GhUnavailable } from '../lib/baseline-status/gh.mjs';
+import { configuredSource } from '../lib/baseline-status/source.mjs';
 import ship from './ship.mjs';
 const SEMVER_RE = /^\d+\.\d+\.\d+$/;
 /** Compute the next version. `bump` is patch|minor|major, or an explicit x.y.z. */
@@ -56,21 +59,82 @@ export function remoteTagExists(tag, cwd) {
         return false;
     }
 }
+/** Whether GitHub's tip of `base` is `sha`, printing why not: CI is read for that tip. */
+function onOriginTip(cwd, base, sha) {
+    let tip;
+    try {
+        tip = branchHead({ cwd, ref: base });
+    }
+    catch (e) {
+        if (!(e instanceof GhUnavailable))
+            throw e;
+        console.error(`devkit release: cannot read origin's ${base} — ${e.reason}: ${e.message}`);
+        return false;
+    }
+    if (tip === sha)
+        return true;
+    console.error(`devkit release: HEAD is ${sha} but origin's ${base} is ${tip}; CI and the build must ` +
+        `describe the commit the release PR lands on. Check out ${base} at ${tip} and re-run.`);
+    return false;
+}
+const VERDICT_SAID = {
+    green: 'passed',
+    red: 'failed',
+    pending: 'has not finished',
+    missing: 'has no verdict',
+    unreadable: 'could not be read',
+};
+const OVERRIDABLE = 'Fix or re-run CI on the base, or pass --ci-override "<reason>"; the release PR records it.';
+const REMEDY = {
+    red: OVERRIDABLE,
+    missing: OVERRIDABLE,
+    pending: 'Wait for that run to finish, then re-run devkit release.',
+    unreadable: 'Re-run once gh can read the runs; --ci-override does not waive an unread verdict.',
+};
+/**
+ * The release PR's record of the base commit's CI, or null after refusing. Only green proceeds
+ * unaided; `override` (the --ci-override reason) waives red, missing or pending and is recorded.
+ */
+function baseCiLines(cwd, base, sha, override) {
+    const { workflow } = configuredSource(cwd);
+    const ci = commitCi({ cwd, workflow, ref: base, sha });
+    const finding = `${workflow} ${VERDICT_SAID[ci.verdict]} on ${sha}` +
+        (ci.detail ? ` (${ci.detail})` : '') +
+        (ci.url ? ` — ${ci.url}` : '');
+    if (ci.verdict === 'green') {
+        if (override)
+            console.log('devkit release: base CI is green; --ci-override is not recorded.');
+        return [`Base CI: ${finding}`];
+    }
+    if (override && ci.verdict !== 'unreadable') {
+        console.log(`devkit release: ${finding} — releasing under --ci-override.`);
+        return ['## Base CI override', '', finding, '', `Reason given with --ci-override: ${override}`];
+    }
+    console.error(`devkit release: base CI is not green — ${finding}`);
+    console.error(REMEDY[ci.verdict]);
+    return null;
+}
 export const meta = {
     name: 'release',
     agentFacing: false,
     notRoutedBecause: 'MAINTAINER-ONLY, run by a human inside the devkit repo itself. Not a consumer-repo verb ' +
         'at all, so no consumer-facing skill should route to it.',
     summary: 'MAINTAINER-ONLY: bump version, test, and open a release PR.',
+    valueFlags: ['--ci-override'],
     help: `devkit release — MAINTAINER-ONLY (run inside the devkit repo): bump version, test, build, and open a release PR.
 
 Usage:
-  devkit release [patch|minor|major|<x.y.z>] [--dry-run] [--yes]
+  devkit release [patch|minor|major|<x.y.z>] [--dry-run] [--yes] [--ci-override "<reason>"]
 
-  --dry-run   Print the plan; change nothing.
-  --yes       Skip the release-PR confirm prompt.
+  --dry-run      Print the plan; change nothing.
+  --yes          Skip the release-PR confirm prompt.
+  --ci-override  Release although the base commit's CI is not green. The reason is required and is
+                 recorded in the release PR body.
 
-Refuses outside the devkit repo, on a dirty tree, or if the target tag already exists. The tag is
+Refuses outside the devkit repo, on a dirty tree, or if the target tag already exists. It also
+refuses unless HEAD is origin's tip of the base branch and that commit's newest completed run of the
+CI workflow (guard.config.json baselineStatus.workflow, default gate.yml) passed; that needs an
+authenticated gh, and a base branch the workflow never runs on needs --ci-override. The tag is
 created only after the PR is squash-merged; the command prints the exact post-merge steps. Release
 files remain in the working tree until \`devkit reconcile --apply\` after the PR merges.`,
 };
@@ -78,9 +142,21 @@ files remain in the working tree until \`devkit reconcile --apply\` after the PR
 // test · bump · build · ship steps; high branch COUNT comes from stacked shallow guards.
 // fallow-ignore-next-line complexity
 export default async function release(args, cwd) {
-    const dryRun = args.includes('--dry-run');
-    const yes = args.includes('--yes');
-    const bump = args.find((a) => !a.startsWith('-')) || 'patch';
+    const { values, positionals } = parseArgs({
+        args,
+        allowPositionals: true,
+        options: {
+            'dry-run': { type: 'boolean' },
+            yes: { type: 'boolean' },
+            'ci-override': { type: 'string' },
+        },
+    });
+    const bump = positionals[0] || 'patch';
+    const override = values['ci-override'];
+    if (override?.trim() === '') {
+        console.error('devkit release: --ci-override needs a reason; it is recorded in the release PR.');
+        return 1;
+    }
     const pkgPath = join(cwd, 'package.json');
     if (!existsSync(pkgPath)) {
         console.error('devkit release: no package.json in the current directory.');
@@ -121,15 +197,19 @@ export default async function release(args, cwd) {
         console.error(`devkit release: tag ${tag} is already published on origin.`);
         return 1;
     }
+    const sha = git(['rev-parse', 'HEAD'], cwd);
+    const ciLines = onOriginTip(cwd, baseBranch, sha) && baseCiLines(cwd, baseBranch, sha, override);
+    if (!ciLines)
+        return 1;
     const releaseBranch = `release/${tag}`;
     console.log(`devkit release: ${current} → ${target} (${bump})`);
     console.log(`  bump package.json + README pins · run tests · build dist · open PR ${releaseBranch} → ${baseBranch}`);
     console.log(`  tag ${tag} only after the PR is squash-merged`);
-    if (dryRun) {
+    if (values['dry-run']) {
         console.log('  --dry-run: nothing written.');
         return 0;
     }
-    if (!yes) {
+    if (!values.yes) {
         if (!process.stdout.isTTY) {
             console.error('devkit release: non-interactive — pass --yes to confirm the release PR.');
             return 1;
@@ -219,7 +299,14 @@ export default async function release(args, cwd) {
         'before this PR was opened.',
         '',
         `Do not tag the release branch commit. After squash-merging, tag the merge commit as ${tag}.`,
+        '',
+        ...ciLines,
     ].join('\n');
+    // ship cuts the PR from origin's tip, so a base that moved since the CI read is refused.
+    if (!onOriginTip(cwd, baseBranch, sha)) {
+        console.error('devkit release: nothing was published; release files remain in the working tree.');
+        return 1;
+    }
     // `await`: ship runs its script through the managed spawn and returns a Promise. Without this the
     // comparison below reads a Promise object, is always truthy, and release reports a failed publish
     // for every successful one.

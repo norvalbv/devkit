@@ -3,7 +3,7 @@ import path from 'node:path';
 import { currentTarget, parseDecision, parseIndex } from '../decision-format.mjs';
 import { axisHash, cosine, EMBED_MODEL, embed, embedDisabled, loadVecIndex, saveVecIndex, } from './embeddings.mjs';
 import { sections } from './markdown.mjs';
-import { axisNotes } from './note-relations.mjs';
+import { axisNotes, lastTaggedNote } from './note-relations.mjs';
 import { corpusIdf, orderQualifiers, tokenize } from './qualifiers.mjs';
 export { cosine, EMBED_MODEL, EMBED_URL, embed } from './embeddings.mjs';
 // Re-exported so retrieval stays the single entry point for the recall path.
@@ -151,7 +151,7 @@ export function axisEntries(body, liveRulingId) {
 }
 // Tag a `rescope` note writes (decisions.mts cmdRescope): `- <date> — **Scope:** <globs> — <reason>`.
 // Non-greedy up to the em-dash boundary so a reason-less note (just the globs) still parses in full.
-const SCOPE_NOTE_RE = /^\*\*Scope:\*\*\s*(.+?)(?:\s+—\s+.+)?$/;
+export const SCOPE_NOTE_RE = /^\*\*Scope:\*\*\s*(.+?)(?:\s+—\s+.+)?$/;
 /**
  * The scope an axis's CURRENT section actually resolves to — the Target's own `**Scope:**` field,
  * or a later `rescope` note if one exists. `currentTarget` deliberately stops at the first note
@@ -162,17 +162,10 @@ const SCOPE_NOTE_RE = /^\*\*Scope:\*\*\s*(.+?)(?:\s+—\s+.+)?$/;
 export function effectiveScope(body) {
     const target = currentTarget(body);
     const entries = axisEntries(body, liveRulingIdOf(body, Boolean(target)));
-    for (let i = entries.length - 1; i >= 0; i -= 1) {
-        if (entries[i].kind !== 'note')
-            continue;
-        const m = entries[i].text.match(SCOPE_NOTE_RE);
-        if (m)
-            return m[1].trim();
-    }
-    return target?.scope ?? '';
+    return lastTaggedNote(entries, SCOPE_NOTE_RE) ?? target?.scope ?? '';
 }
 /** Name the block a ruling was read from: `target:<date>`, `entry:<date>` (legacy), or null. */
-function liveRulingIdOf(body, hasTarget) {
+export function liveRulingIdOf(body, hasTarget) {
     const re = hasTarget ? TARGET_HEADING_RE : LEGACY_HEADING_RE;
     const dates = [...body.matchAll(re)].map((m) => m[1]);
     // Last heading wins, matching currentTarget's rule — append order IS chronological order here.
