@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { countDisables } from '../size-disable.mts';
+import { countDisables, countOversized, freezeLines } from '../size-disable.mts';
 
 const SCRIPT = join(dirname(fileURLToPath(import.meta.url)), '..', 'size-disable.mts');
 const LINES = '.devkit/baselines/size-lines.json';
@@ -20,17 +20,16 @@ function script(lines: number): string {
 }
 
 /** A committed repo whose 60-line shell script sits over a 50-line cap, baselined at 60. */
-function seed(maxLinesExtensions?: string[]): string {
+function seed(
+  maxLinesExtensions?: string[],
+  files: Record<string, number> = { 'src/big.sh': 60 },
+): string {
   const root = mkdtempSync(join(tmpdir(), 'size-line-ext-'));
   roots.push(root);
   const config = { scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 50, maxLinesExtensions };
   write(root, 'guard.config.json', JSON.stringify(config));
   write(root, 'src/big.sh', script(60));
-  write(
-    root,
-    LINES,
-    JSON.stringify({ lineCountVersion: 2, maxLines: 50, files: { 'src/big.sh': 60 } }),
-  );
+  write(root, LINES, JSON.stringify({ lineCountVersion: 2, maxLines: 50, files }));
   for (const args of [
     ['init', '-q'],
     ['add', '-A'],
@@ -83,7 +82,11 @@ describe('maxLinesExtensions', () => {
     const root = seed(['sh']);
     write(root, 'src/big.ts', script(70));
 
-    expect(run(root, 'freeze').status).toBe(0);
+    expect(countOversized(root)).toEqual([
+      { file: 'src/big.sh', lines: 60 },
+      { file: 'src/big.ts', lines: 70 },
+    ]);
+    expect(freezeLines(root, 'refresh')).toBe(2);
     expect(JSON.parse(baseline(root)).files).toEqual({ 'src/big.sh': 60, 'src/big.ts': 70 });
   });
 
@@ -103,5 +106,28 @@ describe('maxLinesExtensions', () => {
     const gate = run(root, 'gate');
     expect(gate.status, gate.stderr).toBe(0);
     expect(JSON.parse(baseline(root)).files).toEqual({ 'src/big.sh': 55 });
+  });
+
+  it('blocks an edit to an unlisted oversized script until a freeze lists it', () => {
+    const root = seed(['sh'], { 'src/other.ts': 60 });
+    stage(root, 'src/big.sh', script(60).replace('echo hi', 'echo yo'));
+    expect(run(root, 'gate').status).toBe(1);
+
+    expect(run(root, 'freeze').status).toBe(0);
+    execFileSync('git', ['add', LINES], { cwd: root });
+    const gate = run(root, 'gate');
+    expect(gate.status, gate.stdout + gate.stderr).toBe(0);
+  });
+
+  it('enforces a committed overgrowth on a clean-index audit', () => {
+    const root = seed(['sh']);
+    stage(root, 'src/big.sh', script(61));
+    execFileSync('git', ['-c', 'user.email=t@t.t', '-c', 'user.name=t', 'commit', '-qm', 'grow'], {
+      cwd: root,
+    });
+
+    const gate = run(root, 'gate');
+    expect(gate.status, gate.stdout).toBe(1);
+    expect(gate.stdout + gate.stderr).toContain('src/big.sh');
   });
 });
