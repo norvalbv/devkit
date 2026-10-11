@@ -5,6 +5,7 @@ import { readFileSync, realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { classifyGenerated, generatedPathsFor, renderCommand, renderConflictAbort, } from './registry.mjs';
 import { errorMessage } from '../review/shared/common.mjs';
+import { readGitPaths } from '../../../../gate-engine/ratchets/git-paths.mjs';
 export function parseArgs(argv) {
     let root;
     let baseRef;
@@ -30,10 +31,13 @@ export function renderAbort(paths, { root, baseRef }) {
     }));
     return renderConflictAbort(classified, baseRef).join('\n');
 }
-// Strict: two distinct non-UTF-8 names would decode alike, so throw and let ship print git's listing.
-// ignoreBOM keeps a leading U+FEFF: it is part of a Git name, not a byte-order mark.
-const UTF8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
-const readPaths = (stdin) => UTF8.decode(stdin).split('\0');
+// A non-UTF-8 name throws, so ship prints git's own listing instead.
+function readPaths(stdin) {
+    const paths = readGitPaths(stdin);
+    if (!paths)
+        throw new Error('a conflicted path is not valid UTF-8');
+    return paths;
+}
 function main() {
     try {
         const args = parseArgs(process.argv.slice(2));

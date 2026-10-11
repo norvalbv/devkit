@@ -10,7 +10,7 @@
  * own package.json name is `@norvalbv/devkit`. It adds NO self-dep and generates a SOURCE-mode
  * hook by taking the ordinary generated hook and rewriting each package-local `guard-<x>` to
  * `node gate-engine/<x>.mts`. Only four bins ever appear in the hook (`guard-deterministic`,
- * `guard-decisions`, `guard-review`, `guard-qavis-advisory`) — dup/clone/size/fanout/structure run
+ * `guard-decisions`, `guard-review`, `guard-ui-evidence`) — dup/clone/size/fanout/structure run
  * INSIDE the source-launched `guard-deterministic`, which resolves its own sub-gates by `SELF_EXT`
  * (gate-engine/deterministic/run.mts) → everything runs from source, nothing leaks to dist.
  *
@@ -111,7 +111,7 @@ if [ "\${DEVKIT_RUN_MODE:-}" != "review" ]; then
     fi
 fi
 # /devkit:self-host-skill-projection-advisory`;
-// Matches the package-local `guard-<x>` bins the generator emits. `guard-qavis-advisory` (double hyphen) is
+// Matches the package-local `guard-<x>` bins the generator emits. `guard-ui-evidence` (inner hyphen) is
 // covered by `[a-z-]+`. The formatter bin gets its own exact rewrite below, because
 // the package bin-dir line is stripped here and `$__dk_package_bin_dir` would expand to ''.
 const PACKAGE_GUARD_RE = /"\$__dk_package_bin_dir\/(guard-[a-z-]+)"/g;

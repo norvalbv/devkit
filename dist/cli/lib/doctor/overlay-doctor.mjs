@@ -25,10 +25,10 @@ import { checkAgentAssets, checkRegistrations } from './asset-checks.mjs';
 import { adviseCodexRuntime, adviseSearchIndex } from './guard-config-checks.mjs';
 import { printBlockOrder, repointHooksPath } from './hook-checks.mjs';
 import { hooksDir, sameDir, worktreeScopedPin } from './hooks-path.mjs';
-import { printPriorArtAdvisoryHealth } from './qavis-health.mjs';
+import { printPriorArtAdvisoryHealth } from './prior-art-health.mjs';
 // Reason: flat signal reporting; the exit code is the conjunction of the gating rows.
 // fallow-ignore-next-line complexity
-export async function runOverlayDoctor(cwd, cfg, fix, printQavisAdvisoryHealth) {
+export async function runOverlayDoctor(cwd, cfg, fix) {
     // hooksPath and its alias are repo-wide, including for a monorepo package.
     const { gitRoot, pkgRel } = detectGitRoot(cwd);
     const gitGet = (key) => {
@@ -121,7 +121,6 @@ export async function runOverlayDoctor(cwd, cfg, fix, printQavisAdvisoryHealth) 
     // be undetectable here. Advisory: never in the exit code.
     await adviseSearchIndex(cwd, sel);
     await adviseCodexRuntime(cwd, sel);
-    printQavisAdvisoryHealth(cwd, sel.guards ?? []);
     printPriorArtAdvisoryHealth(cwd, sel);
     if (sel.fallow) {
         const wired = hookOk &&

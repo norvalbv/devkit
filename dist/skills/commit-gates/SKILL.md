@@ -50,7 +50,7 @@ command. Do not pre-run every gate or replace the managed chain with a hand-writ
   (`block order: …`, for pre-commit and commit-msg). Read it before assuming which judge runs first
   or filing a gate-ordering bug.
 - **Deterministic aggregation** runs the selected structure, size, fan-out, semantic-duplication,
-  clone, coverage, anti-slop, and comment-budget checks and lists every failure in one block. Follow the printed repair. Existing ratchet debt may shrink; do not
+  clone, coverage, anti-slop, comment-budget and decision checks and lists every failure in one block. Follow the printed repair. Existing ratchet debt may shrink; do not
   re-freeze it merely to admit a new violation. A missing or inherited coverage artifact may use the
   documented one-run `GUARD_COVERAGE_OK=1` assertion only when the change did not cause the shortfall.
 - **Comment budget** (`guard-comments`) blocks a new standalone comment paragraph with three or
@@ -59,6 +59,10 @@ command. Do not pre-run every gate or replace the managed chain with a hand-writ
   states something the code cannot, retry unchanged: the same paragraph never blocks twice. When
   `guard.config.json` sets `comments.forbiddenRefs` or `comments.forbidDecisionRefs`, a changed
   comment citing a ticket or decision record blocks on every attempt until the reference is gone.
+- **Decision checks** (`decision-checks`, armed by the `decisions` guard) run the command linked to
+  a decision Target when the commit touches its Scope, and print the ruling on failure. Fix the code;
+  do not weaken the check. If the ruling itself changed, commit the new Target or the unlink
+  (`guard-decisions enforce link <slug> --check none --reason "<why>"`) on its own first.
 - **Local pre-ship loop.** Stage the paths (`git add <paths>`), then run `guard-deterministic`
   (in devkit itself: `node gate-engine/deterministic/run.mts`). It runs the same aggregated set
   a ship attempt runs, without the ship round. Single checks: `guard-comments gate` (reads the
@@ -100,10 +104,15 @@ command. Do not pre-run every gate or replace the managed chain with a hand-writ
   names. `--no-verify` is never the landing path.
 - **Sentry gate** judges commit-message intent for newly introduced runtime error classes. Add the
   capture on the named surface, or surface a disputed verdict to the user before any bypass.
-- **Qavis advisory** can recommend visual QA but does not turn a non-UI change into UI work. Ship
-  first, QA second: on a ship every judge that can demand an edit runs before the advisory, so run
-  `qavis qa` only when the advisory asks, or ship with `DEVKIT_SHIP_QA=1` to QA the gate tree in the
-  same run. A QA pass taken before `devkit ship` is voided by any judge-forced fix.
+- **UI evidence** (`ui-evidence`) runs on every commit, plain or shipped, and never blocks. It
+  fires when a staged file has a UI extension (tsx, jsx, vue, svelte, astro, html, css, scss, sass,
+  less; tests, stories and fixtures excluded) or matches `guard.config.json` `uiEvidence.paths`;
+  otherwise the light review model reads the staged diff and fires when a user could see the
+  change. It then says: add before (base branch) and after (this branch) screenshots when you open
+  or update the PR, or say there that nothing visible changed, followed by why. A judge outage
+  means no advice, and the judge can miss: when a change showed in the UI, attach the screenshots
+  even if the reminder stayed silent. `uiEvidence.paths` adds globs to the defaults, for backend or
+  `.ts` files whose output a repo knows the UI renders.
 
 ## Comment budget
 
@@ -130,10 +139,6 @@ specific conditions under which that control is appropriate:
   guard-review otherwise blocks it as a clobbered index. Check `git diff --cached --stat` first: an
   unexpected whole-repo deletion means the index was overwritten, so run `git reset` rather than
   bypass.
-- `GUARD_QAVIS_OK=1` — ship this change without the advised visual QA. Prefer the audited path the
-  advisory prints: `qavis qa`, then `qavis waive --staged --reason '…'` when the verdict is uncertain
-  and the gap is accepted, so the reason is bound to the tree. `GUARD_NO_QAVIS_ADVISORY=1` disables
-  the advisory entirely.
 - `GUARD_SHIP_BASE_OK=1` — ship into a `--base` that does not contain this work's branch point.
   Prefer the base the refusal names: the gate worktree is cut from the base, so overriding makes
   guard-size, guard-clone and structure judge a tree your change was never written against, and
@@ -170,7 +175,7 @@ authorization those require. Run it in the shell the ship runs in.
 
 ```
 export GUARD_REVIEW_MODEL=haiku GUARD_REVIEW_ESCALATION_MODEL=opus \
-  GUARD_CORRECTNESS_MODEL=sonnet GUARD_CORRECTNESS_CHUNK=off
+  GUARD_CORRECTNESS_MODEL=claude-haiku-5-5 GUARD_CORRECTNESS_CHUNK=off
 unset GUARD_SENTRY_MODEL FRINK_SENTRY_MODEL
 devkit ship --resume <branch>
 ```

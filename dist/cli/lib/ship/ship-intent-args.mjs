@@ -13,8 +13,7 @@ export function parseArgs(argv) {
         // Every value-less flag MUST be listed here: the `startsWith('--')` fallback below treats an
         // unlisted flag as value-taking and consumes the NEXT argv entry as its value, silently eating a
         // real argument (`--draft --resumed` would swallow `--resumed`).
-        if (a === '--no-qavis-publish' ||
-            a === '--update-pr-body' ||
+        if (a === '--update-pr-body' ||
             a === '--draft' ||
             a === '--resumed' ||
             a === '--merge-paths' ||

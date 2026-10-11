@@ -72,6 +72,7 @@ import { envBool, envVar, resolveGuardConfig } from '../config.mjs';
 import { emitGateBypass, emitGateEvent } from '../judge/gate-events.mjs';
 import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from '../judge/judge-isolation.mjs';
 import { reportGateInfraFailure } from '../judge/odb-probe.mjs';
+import { markGateRun } from '../judge/run-context.mjs';
 import { execJudge } from '../judge/run-judge.mjs';
 import { resolveSentryModel } from '../review/reviewers.mjs';
 import { buildEvidence, degradeCause, renderInventory } from './evidence.mjs';
@@ -432,6 +433,5 @@ export function run(gate) {
         process.exit(reportGateInfraFailure('sentry', 'sentry-gate', e, CWD, 2)); // 2 = fail-open
     }
 }
-const invokedDirectly = process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
-if (invokedDirectly)
-    run(process.argv.includes('--gate'));
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href)
+    run(markGateRun(process.argv.includes('--gate')));

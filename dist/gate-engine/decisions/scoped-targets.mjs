@@ -18,6 +18,8 @@ import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { resolveFromCwd, resolveGuardConfig } from '../config.mjs';
+import { emitGateEvent } from '../judge/gate-events.mjs';
+import { clip, EVENT_BUDGET } from '../judge/odb-probe.mjs';
 import { loadScopedTargets, matchScope } from './check-alignment.mjs';
 import { currentTarget, parseDecision, rankAxes } from './decisions.mjs';
 // The current Target's full ruling + scope for an axis, read from its file (not the clamped INDEX row).
@@ -74,18 +76,68 @@ function flag(args, name) {
     const i = args.indexOf(name);
     return i !== -1 ? args[i + 1] : undefined;
 }
+/** The pre-edit hook's `<tool>,<int>…` flag value. Null when malformed, so no row is written. */
+function hookSpec(raw, arity, min) {
+    const [tool = '', ...nums] = raw?.split(',') ?? [];
+    const valid = /^[A-Za-z]{1,32}$/.test(tool) &&
+        nums.length === arity &&
+        nums.every((n) => /^\d{1,9}$/.test(n) && Number(n) >= min);
+    return valid ? { tool, ints: nums.map(Number) } : null;
+}
+/** The brief the hook prints: the first `max_axes` slugs, with each ruling's full length. */
+export function briefShownEvent(file, blocks, spec) {
+    const [maxAxes, cap] = spec.ints;
+    const shown = blocks.slice(0, maxAxes);
+    const hidden = blocks.slice(maxAxes).map((b) => b.slug);
+    const event = {
+        type: 'brief_shown',
+        file: clip(file),
+        tool: spec.tool,
+        shown: shown.map((b) => b.slug),
+        lengths: shown.map((b) => b.ruling.trim().length),
+        hidden,
+        hidden_count: hidden.length,
+        cap,
+        max_axes: maxAxes,
+    };
+    // hidden[] is the one unbounded field; hidden_count keeps the row honest once it is dropped.
+    return Buffer.byteLength(JSON.stringify(event)) > EVENT_BUDGET
+        ? { ...event, hidden: undefined }
+        : event;
+}
 export async function main(args) {
-    const files = (flag(args, '--files') ?? '')
+    const fileArg = flag(args, '--files') ?? '';
+    const files = fileArg
         .split(',')
         .map((s) => s.trim())
         .filter(Boolean);
+    // The hook's first return to a file it already briefed: recorded, never retrieved, nothing printed.
+    if (args.includes('--brief-again')) {
+        const again = hookSpec(flag(args, '--brief-again'), 1, 0);
+        if (again) {
+            emitGateEvent({
+                type: 'brief_edited_again',
+                file: clip(fileArg),
+                tool: again.tool,
+                secs_since_brief: again.ints[0],
+            });
+        }
+        return;
+    }
+    const brief = hookSpec(flag(args, '--brief'), 2, 1);
     const query = flag(args, '--query') ?? '';
     const top = Number.parseInt(flag(args, '--top') ?? '6', 10) || 6;
     await scopedTargets(files, query, top)
-        .then((blocks) => process.stdout.write(JSON.stringify(blocks)))
+        .then((blocks) => {
+        process.stdout.write(JSON.stringify(blocks));
+        if (brief && blocks.length)
+            emitGateEvent(briefShownEvent(fileArg, blocks, brief));
+    })
         .catch((e) => {
         // Fail-open: emit [] so a consumer's prep step degrades to a SKIP note, never an error.
         console.error(`scoped-targets: ${e?.message ?? e}`);
+        if (brief)
+            emitGateEvent({ type: 'brief_unavailable', file: clip(fileArg), reason: 'error' });
         process.stdout.write('[]');
         process.exit(2);
     });

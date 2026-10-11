@@ -1,17 +1,18 @@
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
+import { readGitPaths } from '../ratchets/git-paths.mjs';
 import { commitIndexEnv } from '../ratchets/commit-index.mjs';
-// Splits MATCHER_CHANGED_FILES / `git diff` output into individual paths.
+// Splits the MATCHER_CHANGED_FILES comma/newline list into individual paths.
 const PATH_SEP = /[\n,]/;
 const split = (raw) => raw
     .split(PATH_SEP)
     .map((s) => s.trim())
     .filter(Boolean);
-const gitLines = (cmd, cwd) => {
+const gitPaths = (args, cwd) => {
     try {
-        return split(execSync(cmd, { cwd, env: commitIndexEnv(cwd), encoding: 'utf8' }));
+        return readGitPaths(execFileSync('git', args, { cwd, env: commitIndexEnv(cwd) }));
     }
     catch {
-        return [];
+        return null;
     }
 };
 /**
@@ -26,14 +27,17 @@ const gitLines = (cmd, cwd) => {
  * scoped gate honest, but means partially-staged files are explicitly not semantically verified;
  * callers that require that coverage must stage the whole file before committing.
  *
- * A git failure → empty set (nothing scoped in).
+ * A git failure or a non-UTF-8 name → empty set (nothing scoped in).
  * @param cwd repo root for the git fallback.
  */
 export function loadChangedSet(cwd) {
     const env = process.env.MATCHER_CHANGED_FILES;
     if (env != null)
         return new Set(split(env));
-    const staged = gitLines('git diff --cached --name-only --diff-filter=ACM', cwd);
-    const unstaged = new Set(gitLines('git diff --name-only', cwd));
-    return new Set(staged.filter((f) => !unstaged.has(f)));
+    const staged = gitPaths(['diff', '--cached', '--name-only', '-z', '--diff-filter=ACM'], cwd);
+    const unstaged = gitPaths(['diff', '--name-only', '-z'], cwd);
+    if (!staged || !unstaged)
+        return new Set();
+    const dirty = new Set(unstaged);
+    return new Set(staged.filter((f) => !dirty.has(f)));
 }

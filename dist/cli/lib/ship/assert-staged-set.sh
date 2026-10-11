@@ -48,7 +48,7 @@ _ship_nul_count() { tr -cd '\0' | wc -c | tr -d ' '; }
 _ship_path_matches_base() {
   local wt=$1 base=$2 path=$3 status
   git -C "$wt" cat-file -e "$base:$path" 2>/dev/null || return 1
-  status=$(git -C "$wt" status --porcelain=v1 --untracked-files=all --ignored=matching -- "$path") \
+  status=$(git -C "$wt" status --porcelain=v1 --untracked-files=all --ignored=matching -- ":(top,literal)$path") \
     || return 2
   [ -z "$status" ]
 }

@@ -11,7 +11,7 @@ import { check } from '../lib/doctor/check-result.mjs';
 import { checkExtends, EXTENDS_REPAIRABLE, expectedExtends, repairExtends, } from '../lib/doctor/extends-checks.mjs';
 import { checkGuardConfig, judgeGuardsOf, CODEX_RUNTIME_CHECK, SEARCH_INDEX_CHECK, } from '../lib/doctor/guard-config-checks.mjs';
 import { bindClaudeFamily } from '../lib/doctor/judge/judge-family.mjs';
-import { printPriorArtAdvisoryHealth, printQavisAdvisoryHealth, } from '../lib/doctor/qavis-health.mjs';
+import { printPriorArtAdvisoryHealth } from '../lib/doctor/prior-art-health.mjs';
 import { hookChecks } from '../lib/doctor/hook-checks.mjs';
 import { runOverlayDoctor } from '../lib/doctor/overlay-doctor.mjs';
 import { checkLockPin, checkPin } from '../lib/doctor/pin/pin-checks.mjs';
@@ -350,7 +350,7 @@ export default async function run(args, cwd) {
     // report 0 where package mode reports 1 for the identical condition.
     const skewed = skew.kind === 'older';
     if (cfg.overlay) {
-        const overlay = () => runOverlayDoctor(cwd, cfg, fix, printQavisAdvisoryHealth);
+        const overlay = () => runOverlayDoctor(cwd, cfg, fix);
         // --fix re-runs install's own steps, so it holds init's lock, as package mode's spawned init does.
         return (await (fix ? withInitLock(cwd, 'doctor --fix', overlay) : overlay())) || +skewed;
     }
@@ -371,7 +371,6 @@ export default async function run(args, cwd) {
             line += `\n      → ${r.remediation}`;
         console.log(line);
     }
-    printQavisAdvisoryHealth(cwd, sel.guards ?? []);
     printPriorArtAdvisoryHealth(cwd, sel);
     const drifted = results.some((r) => r.status !== 'OK' && !r.advisory); // see CheckResult.advisory
     if (fix && drifted) {

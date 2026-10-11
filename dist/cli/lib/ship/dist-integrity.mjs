@@ -15,13 +15,14 @@ import { treeBlobsAtRef } from '../../../gate-engine/ratchets/tree-blobs.mjs';
 import { assignedNames, ownDirVars, scanShellScript } from '../doctor/hook-gate-scan.mjs';
 import { commitIndexEnv } from '../../../gate-engine/ratchets/commit-index.mjs';
 import { inspectReleaseOnlyDist, printReleaseOnlyDist } from './preflight/release-only-dist.mjs';
-import { ANTI_SLOP_FILES, PACKAGED_ROOT_DIRS, PACKAGED_ROOT_FILES } from '../fs-helpers.mjs';
+import { ANTI_SLOP_FILES, isDevOnly, MIRRORED_EXT, PACKAGED_ROOT_DIRS, PACKAGED_ROOT_FILES, } from '../fs-helpers.mjs';
 const CLEAN_REPORT = {
     active: false,
     unresolved: [],
     unbriefed: [],
     untracked: [],
     unlexable: [],
+    missing: [],
 };
 function git(root, args) {
     const raw = execFileSync('git', ['-C', root, '--no-optional-locks', ...args]);
@@ -75,9 +76,9 @@ function importTarget(root, importer, specifier) {
     const importerUrl = pathToFileURL(path.join(root, importer));
     return repoPath(root, fileURLToPath(new URL(specifier, importerUrl)));
 }
-/** The dist path a briefed source builds to. Mirrored assets map verbatim, before the tsc rewrite;
- * only a NEW artifact is ever demanded (typescript-source-prebuilt-mjs, sc-2266). */
-function generatedPath(briefedPath) {
+/** The dist path the build emits for a source, `undefined` when it emits none. Only a NEW
+ * artifact is ever demanded: a modified source's stale output stays release-only. */
+export function distArtifact(briefedPath) {
     const normalized = briefedPath.split(path.sep).join('/');
     if (normalized.startsWith('dist/'))
         return normalized;
@@ -95,9 +96,11 @@ function generatedPath(briefedPath) {
     }
     if (!normalized.startsWith('cli/') && !normalized.startsWith('gate-engine/'))
         return undefined;
-    return normalized.endsWith('.mts')
-        ? `dist/${normalized.slice(0, -'.mts'.length)}.mjs`
-        : `dist/${normalized}`;
+    if (isDevOnly(normalized) || /\.(test|d)\.mts$/.test(normalized))
+        return undefined;
+    if (normalized.endsWith('.mts'))
+        return `dist/${normalized.slice(0, -'.mts'.length)}.mjs`;
+    return MIRRORED_EXT.test(normalized) ? `dist/${normalized}` : undefined;
 }
 /**
  * Relative-import edges of ONE emitted module. `undefined` means unparseable — a hole every caller
@@ -228,7 +231,7 @@ export async function inspectDistIntegrity(root, base, briefedPaths) {
     const willShip = (file) => briefed.has(file) ? shipping(file) && existsSync(path.join(root, file)) : atBase.has(file);
     // Shared checkouts can contain another agent's generated output. Seed the scan from this ship's
     // explicit source/dist paths, then follow only their reachable physical dist import graph.
-    const required = new Set([...briefed].map(generatedPath).filter((file) => file !== undefined));
+    const required = new Set([...briefed].map(distArtifact).filter((file) => file !== undefined));
     const unresolved = [];
     const unlexable = [];
     const walkable = (file) => file.endsWith('.mjs') || file.endsWith('.sh');
@@ -291,8 +294,16 @@ export async function inspectDistIntegrity(root, base, briefedPaths) {
         'dist',
     ]);
     const unbriefed = added.filter((file) => required.has(file) && !briefed.has(file)).sort();
+    // `untracked` sees only built files. A source on disk whose artifact is nowhere was never built;
+    // a source absent from disk is a deletion, whose stale artifact waits for the release.
+    const missing = [...briefed]
+        .filter((file) => !file.startsWith('dist/') && existsSync(path.join(root, file)))
+        .map(distArtifact)
+        .filter((file) => file !== undefined && !physicalSet.has(file))
+        .filter((file) => !willShip(file))
+        .sort();
     unresolved.sort((a, b) => `${a.importer}\0${a.specifier}`.localeCompare(`${b.importer}\0${b.specifier}`));
-    return { active: true, unresolved, unbriefed, untracked, unlexable: unlexable.sort() };
+    return { active: true, unresolved, unbriefed, untracked, unlexable: unlexable.sort(), missing };
 }
 export function shellQuote(value) {
     return `'${value.replaceAll("'", "'\\''")}'`;
@@ -303,7 +314,8 @@ export function printDistIntegrityFailure(report) {
     const failed = report.untracked.length > 0 ||
         report.unbriefed.length > 0 ||
         report.unresolved.length > 0 ||
-        report.unlexable.length > 0;
+        report.unlexable.length > 0 ||
+        report.missing.length > 0;
     if (!failed)
         return 0;
     console.error('✗ devkit ship: dist integrity preflight failed.');
@@ -329,6 +341,12 @@ export function printDistIntegrityFailure(report) {
         for (const item of report.unresolved) {
             console.error(`    ${item.importer}: ${item.specifier} -> ${item.target}`);
         }
+    }
+    if (report.missing.length > 0) {
+        console.error('  New sources whose build output exists nowhere:');
+        for (const file of report.missing)
+            console.error(`    ${file}`);
+        console.error(`  Fix: run \`bun run build\`, then brief ONLY these (ordinary dist churn stays release-only): -- ${report.missing.map(shellQuote).join(' ')}`);
     }
     if (report.untracked.length > 0 || report.unbriefed.length > 0) {
         const paths = [...new Set([...report.untracked, ...report.unbriefed])];

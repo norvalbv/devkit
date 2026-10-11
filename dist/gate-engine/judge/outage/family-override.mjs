@@ -3,12 +3,12 @@
 // Here rather than in cli/lib/doctor because strictRemedy needs it and gate-engine never imports
 // cli; judge-family.mts re-exports the set so the binder keeps a single definition.
 import { judgeProviderOfBin } from '../codex/result.mjs';
-/** The complete claude family, chunking off included: cap 400 is benched for gpt-5.6-sol, not
- *  sonnet, so a partial move runs the correctness reviewer at an un-benched cap (sc-2193). */
+/** The complete claude family, chunking off included: cap 400 is benched for gpt-5.6-sol only, so
+ *  a partial move runs the claude correctness model at an un-benched cap. */
 export const CLAUDE_FAMILY_SET = {
     model: 'haiku',
     escalationModel: 'opus',
-    correctnessModel: 'sonnet',
+    correctnessModel: 'claude-haiku-5-5',
     correctnessChunkLoc: 0,
 };
 /** env spelling, config key and claude value in ONE table, so the remedy, the doctor's refusal and
@@ -82,7 +82,7 @@ export function familyOverrideRemedy(dark, binPresent) {
             'guard.config.json instead, which a ship reads only once that file is committed. ';
     return (`move the judges to the claude family: run \`${claudeFamilyEnvLine()}\` in the shell that ` +
         `ships, then resume the ship. Set all ${FAMILY_ENV_KEYS.length} — the correctness chunk cap is ` +
-        'benched for gpt-5.6-sol only, so a partial move runs sonnet at an un-benched cap; the command ' +
+        'benched for gpt-5.6-sol only, so a partial move runs it at an un-benched cap; the command ' +
         'also clears any sentry pin, so that judge follows GUARD_REVIEW_MODEL rather than staying ' +
         `behind. ${doctorRoute}Every cached PASS is discarded, ` +
         'because a verdict is keyed on its judging model, and remaining claude headroom cannot be ' +
