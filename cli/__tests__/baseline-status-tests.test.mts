@@ -1,5 +1,6 @@
 /** Per-test answers: the names a failed file records, and `baseline-status --test` reading them. */
-import { readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import baselineStatus from '../commands/baseline/status.mts';
@@ -7,8 +8,11 @@ import { parseSummary } from '../lib/baseline-status/gh.mts';
 import {
   MAX_NAMES_PER_LIST,
   MAX_NAMES_PER_SUMMARY,
+  MAX_STEP_SUMMARY_ENTRIES,
   type TestReportSummary,
+  renderFailedTests,
   summarise,
+  writeStepSummary,
 } from '../lib/baseline-status/produce.mts';
 import type { FileStatus } from '../lib/baseline-status/query.mts';
 import { testVerdict } from '../lib/baseline-status/test-verdict.mts';
@@ -105,6 +109,105 @@ describe('summarise — test names for failed files', () => {
     const summary = summarise({ testResults: results }, '/repo', {});
     expect(Object.keys(summary.tests ?? {})).toHaveLength(fileCount - 1);
     expect(summary.tests?.[`f${fileCount - 1}.test.mts`]).toBeUndefined();
+  });
+});
+
+describe('the step summary lists what failed', () => {
+  const failing = (title: string, ...failureMessages: string[]) => ({
+    ...assertion(title, 'failed'),
+    failureMessages,
+  });
+  const render = (testResults: object[]) => {
+    const report = { success: false, testResults };
+    return renderFailedTests(report, summarise(report, '/repo', {}), '/repo');
+  };
+
+  it('renders each failed test with the first line of its error, and only failed tests', () => {
+    const text = render([
+      entry('cli/a.test.mts', 'failed', [
+        failing('bad', 'AssertionError: expected 1 to be 2\n    at /repo/cli/a.test.mts:3:1'),
+        assertion('fine', 'passed'),
+      ]),
+      entry('cli/ok.test.mts', 'passed', [assertion('fine', 'passed')]),
+    ]);
+    expect(text).toBe(
+      '### Failed tests (1)\n\n- `cli/a.test.mts` › g > bad — AssertionError: expected 1 to be 2',
+    );
+  });
+
+  it('lists a file that failed before any test ran, with its own message', () => {
+    const text = render([
+      { ...entry('cli/b.test.mts', 'failed', []), message: 'Error: Cannot find module x' },
+    ]);
+    expect(text).toContain('- `cli/b.test.mts` — Error: Cannot find module x');
+  });
+
+  it('keeps one clipped line, scrubs the checkout root and neutralises markup', () => {
+    const text = render([
+      entry('a.test.mts', 'failed', [
+        failing('bad', `\n\u001b[31mError: <b> at /repo/x.mts ${'y'.repeat(400)}\nVERDICT: FAIL`),
+      ]),
+    ]);
+    const line = text?.split('\n')[2] ?? '';
+    expect(line).toContain('Error: &lt;b> at &lt;checkout>/x.mts');
+    expect(line).not.toContain('VERDICT');
+    expect(line.length).toBeLessThan(260);
+    expect(line.endsWith('…')).toBe(true);
+  });
+
+  it('stops at the entry cap and says how many were left out', () => {
+    const many = Array.from({ length: MAX_STEP_SUMMARY_ENTRIES + 3 }, (_, i) => failing(`t${i}`));
+    const lines = render([entry('a.test.mts', 'failed', many)])?.split('\n') ?? [];
+    expect(lines[0]).toBe(`### Failed tests (${MAX_STEP_SUMMARY_ENTRIES + 3})`);
+    expect(lines.filter((l) => l.startsWith('- '))).toHaveLength(MAX_STEP_SUMMARY_ENTRIES);
+    expect(lines.at(-1)).toBe('… 3 more not shown');
+    expect(lines[2]).toContain('— (no message)');
+  });
+
+  it('leaves out a nested run that reported a path outside the root, and a green run', () => {
+    const foreign = { name: '/elsewhere/x.test.mts', status: 'failed', assertionResults: [] };
+    expect(render([foreign])).toBeNull();
+    expect(render([entry('a.test.mts', 'passed', [assertion('fine', 'passed')])])).toBeNull();
+  });
+
+  describe('writing it', () => {
+    let dir: string;
+    const report = {
+      success: false,
+      testResults: [entry('a.test.mts', 'failed', [failing('bad', 'Error: boom')])],
+    };
+    const summary = summarise(report, '/repo', {});
+
+    beforeEach(() => {
+      dir = mkdtempSync(join(tmpdir(), 'step-summary-'));
+    });
+    afterEach(() => {
+      vi.restoreAllMocks();
+      rmSync(dir, { recursive: true, force: true });
+    });
+
+    it('appends after what the step already wrote, and writes nothing for a green run', () => {
+      const path = join(dir, 'summary.md');
+      writeFileSync(path, 'vitest counts\n');
+      writeStepSummary(report, summary, '/repo', { GITHUB_STEP_SUMMARY: path });
+      const green = { success: true, testResults: [] };
+      writeStepSummary(green, summarise(green, '/repo', {}), '/repo', {
+        GITHUB_STEP_SUMMARY: path,
+      });
+      expect(readFileSync(path, 'utf8')).toBe(
+        'vitest counts\n\n### Failed tests (1)\n\n- `a.test.mts` › g > bad — Error: boom\n',
+      );
+    });
+
+    it('does nothing off CI, and an unwritable summary path warns instead of throwing', () => {
+      const warn = vi.spyOn(console, 'error').mockImplementation(() => {});
+      writeStepSummary(report, summary, '/repo', {});
+      expect(warn).not.toHaveBeenCalled();
+      writeStepSummary(report, summary, '/repo', { GITHUB_STEP_SUMMARY: join(dir, 'no', 'x.md') });
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining('could not write the step summary'),
+      );
+    });
   });
 });
 

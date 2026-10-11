@@ -203,7 +203,8 @@ function scrubRoots(value: string, checkoutRoot?: string, dependencySource?: str
   return scrubbed;
 }
 
-function boundedText(
+/** `value` on one line: ANSI stripped, checkout roots scrubbed, clipped to `limit` characters. */
+export function boundedText(
   value: string,
   limit: number,
   checkoutRoot?: string,
