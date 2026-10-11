@@ -57,3 +57,18 @@ created: 2026-07-07
 **Source:** brainstorm
 **Evidence-change:** Qavis QA proved unreliable in use (frink bypassed 237 of 238 gate events; 41 of 64 runs uncertain) and frink removed the integration on 2026-10-03, while root agents capturing their own screenshots worked.
 - 2026-10-11 — No compatibility shims: devkit's only consumer is its owner, so the qavis-advisory→ui-evidence rename map and the no-op --no-qavis-publish flag (with its recorded ship-intent field) are removed outright; local consumer configs are migrated by hand.
+
+## Target · 2026-10-11 — Qavis removal carries no compatibility shims: the old guard id and ship flag are gone outright
+
+**Context:** The 2026-10-11 Target kept two shims for a migration window: the qavis-advisory guard id read as ui-evidence, and --no-qavis-publish stayed an accepted no-op (recorded in ship intents) for one release. Each shim was code and tests to maintain for consumers who, it turned out, do not exist.
+**Ruling:** devkit no longer calls Qavis: route, qa, waive, publish, the receipt and its cache shadowing, DEVKIT_SHIP_QA, DEVKIT_SHIP_ROOT/DEVKIT_SHIP_PATHS and the doctor's qavis health line are removed. The `ui-evidence` guard (bin guard-ui-evidence) speaks only at `devkit ship`, keyed on DEVKIT_COMMIT_MSG_FILE, and stays silent on plain `git commit`, `devkit review` and dry-gates. Its hook fragment is `guard-ui-evidence || true`, so it never blocks. It fires on either of two deterministic rules: (1) a staged path matches UI extension globs (tsx, jsx, vue, svelte, astro, html, css, scss, sass, less, minus tests, stories, snapshots, mocks, fixtures and .d.ts), plus globs that guard.config.json `uiEvidence.paths` ADDS; (2) the commit subject, never the body, names a visible symptom as a whole word, which catches a backend bug whose symptom showed in the UI. On fire it emits one advisory row that the ship terminus renders as "advisory, did NOT block this run", leading with the action: add before (base branch) and after (this branch) screenshots to the PR description, or say there that nothing visible changed. The `qavis-advisory` guard id and the `--no-qavis-publish` ship flag are removed outright, with no compatibility shim: devkit's only consumer is its owner, whose local configs are migrated by hand.
+**Consequences:**
+- Positive: devkit carries no rename map, no dead flag and no dead ship-intent field; the removal is complete in one change. The owner's local configs that still name qavis-advisory are rewritten to ui-evidence by hand when devkit is upgraded there.
+- Negative: A repo whose config still lists qavis-advisory fails review setup ('unknown guards') and loses the reminder until its config is edited, and an agent that passes --no-qavis-publish gets an unknown-flag error. Acceptable only because every such repo is the owner's, on one machine.
+**Vision-fit:** n/a — internal tooling
+**Rejected:** Keeping the rename map and the no-op flag for one release (the 2026-10-11 ruling): a migration window protects external consumers, and devkit has none.
+**Anchored-bet:** [VALIDATED]
+**Revisit-when:** devkit gains a consumer outside the owner's machine; from then on a removed id or flag needs a migration path again.
+**Scope:** gate-engine/ui-evidence/**,cli/lib/husky/husky-block.mts,cli/lib/components.mts
+**Source:** collab
+**Evidence-change:** The owner confirmed devkit has no consumers besides their own local repos, so the migration window the previous ruling paid for protects nobody.
