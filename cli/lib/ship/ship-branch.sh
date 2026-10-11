@@ -1606,6 +1606,11 @@ PR_CREATE_FAILED=
 # unbound-variable error under `set -u`, and a plain "$VAR" would pass an empty argument to gh.
 PR_DRAFT_ARGS=()
 [ "$DRAFT" -eq 0 ] || PR_DRAFT_ARGS=(--draft)
+. "$SCRIPT_DIR/publish-evidence.sh"
+# Only ship writes evidence: a block pasted into the caller's body (copied from another PR) is dropped.
+if PR_BODY_CLEAN=$(printf '%s' "$BODY" | evidence_caller_body "$REPO" && printf .); then
+  BODY=${PR_BODY_CLEAN%.}
+fi
 PR_URL=$( cd "$WT" && gh pr create --repo "$REPO" --base "$BASE_REF" --head "$BR" --title "$TITLE" --body "$BODY" ${PR_DRAFT_ARGS[@]+"${PR_DRAFT_ARGS[@]}"} ) || PR_CREATE_FAILED=1
 PR_NUM=""
 if [ -z "$PR_CREATE_FAILED" ]; then
@@ -1724,9 +1729,9 @@ if [ -n "$PR_CREATE_FAILED" ]; then
 fi
 
 # Success: the branch is on the remote with its PR, so the local copy is redundant.
-# Drop it now (worktree first — a branch checked out in a worktree can't be deleted).
+# Drop it now; detaching first frees the branch while the evidence step below still uses $WT.
 # Only reached on full success; any earlier failure keeps the branch for recovery.
-git worktree remove --force "$WT" 2>/dev/null || true
+git -C "$WT" checkout -q --detach 2>/dev/null || true
 if [ -n "$LOCAL_BRANCH_EXISTS" ]; then
   # The preserved local branch is redundant only while it still names the commit just published.
   # A concurrent update belongs to somebody else and must survive this retry's cleanup.
@@ -1742,6 +1747,9 @@ git update-ref -d "$RECOVERY_RECEIPT_REF" "${RECOVERY_COMMIT:-${SHIP_COMMIT:-}}"
 # concurrent actor could legitimately advance, whereas this blob is devkit-private, rewritten whole
 # on every ship to this branch, and worthless once the commit it describes is published.
 git update-ref -d "$RECOVERY_GATE_ADDS_REF" 2>/dev/null || true
+# After every ref is settled, so a ship killed during the bounded test runs loses no recovery state.
+[ -z "$PR_NUM" ] || publish_evidence_block "$WT" "$PR_NUM" "$REPO" "${RECOVERY_COMMIT:-$SHIP_COMMIT}"
+git worktree remove --force "$WT" 2>/dev/null || true
 
 # --wait-ci runs LAST: the push, PR, manifest, intent release and worktree/branch cleanup above are
 # all durable, so a wait that is killed, times out or reports red cannot cost this ship.

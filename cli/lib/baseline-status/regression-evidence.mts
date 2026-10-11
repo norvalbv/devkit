@@ -375,14 +375,14 @@ function renderExit(operand: RegressionOperandEvidence): string {
   return operand.signal ? `signal ${operand.signal}` : String(operand.exitCode);
 }
 
-function inlineJson(value: string): string {
+export function inlineJson(value: string): string {
   const json = JSON.stringify(stripVTControlCharacters(value));
   const longest = Math.max(0, ...(json.match(/`+/g)?.map((run) => run.length) ?? []));
   const fence = '`'.repeat(longest + 1);
   return `${fence}${json}${fence}`;
 }
 
-function fencedJson(value: readonly string[]): string {
+export function fencedJson(value: readonly string[]): string {
   const json = JSON.stringify(value, null, 2);
   const longest = Math.max(0, ...(json.match(/~+/g)?.map((run) => run.length) ?? []));
   const fence = '~'.repeat(Math.max(3, longest + 1));
