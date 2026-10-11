@@ -74,7 +74,16 @@ function hasHead(cwd: string): boolean {
 // `git grep` exits 1 when nothing matches.
 function grepLinked(cwd: string, source: '--cached' | 'HEAD', paths: string[]): string[] {
   try {
-    return git(cwd, ['grep', '-lz', '-E', '-e', NOTE_LINE, source, '--', ...paths])
+    return git(cwd, [
+      'grep',
+      '-lz',
+      '-E',
+      '-e',
+      NOTE_LINE,
+      source,
+      '--',
+      ...paths.map((p) => `:(literal)${p}`),
+    ])
       .split('\0')
       .filter(Boolean)
       .map((p) => p.replace(HEAD_PREFIX_RE, ''));

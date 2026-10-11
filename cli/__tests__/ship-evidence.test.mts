@@ -149,7 +149,6 @@ describe('devkit ship evidence block', () => {
       '--pr',
       '--body',
       'reworded',
-      '--no-qavis-publish',
       '--',
       'src/value.mjs',
     ]);
@@ -167,7 +166,6 @@ describe('devkit ship evidence block', () => {
       'feat/fix',
       'fix',
       '--pr',
-      '--no-qavis-publish',
       '--',
       'src/value.test.mjs',
     ]);
@@ -215,7 +213,7 @@ describe('devkit ship evidence block', () => {
   it('bounds a hung test run: ship exits 0, the block says so, and no test process survives', () => {
     const pidFile = join(mkdtempSync(join(tmpdir(), 'evidence-pid-')), 'pid');
     dirs.push(dirname(pidFile));
-    const repo = shipRepo({ command: COMMAND, timeoutSeconds: 3 }, 'feat/slow');
+    const repo = shipRepo({ command: COMMAND, timeoutSeconds: 10 }, 'feat/slow');
     const slow = `import { writeFileSync } from 'node:fs';\nit('waits', async () => {\n  writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));\n  await new Promise((done) => setTimeout(done, 120_000));\n}, 200_000);\n`;
     write(repo.dir, { 'src/value.mjs': FIXED, 'src/slow.test.mjs': slow });
 
@@ -232,7 +230,7 @@ describe('devkit ship evidence block', () => {
     expect(Date.now() - started).toBeLessThan(110_000);
     const body = readFileSync(repo.state, 'utf8');
     expect(readEvidenceBlock(body, tipOf(repo.bare, 'feat/slow'))?.status).toBe('inconclusive');
-    expect(body).toContain('did not finish within 3s');
+    expect(body).toContain('did not finish within 10s');
     const pid = Number(readFileSync(pidFile, 'utf8'));
     expect(() => process.kill(pid, 0)).toThrow();
   }, 240_000);
