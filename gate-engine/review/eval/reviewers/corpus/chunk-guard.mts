@@ -101,18 +101,7 @@ export function preflightPlans(rows, options = {}) {
   });
 }
 
-/** Standalone bench calls must never inherit a ship's production event sink or correlation IDs. */
-export function isolateBenchTelemetry(env = process.env) {
-  for (const key of [
-    'DEVKIT_GATE_EVENTS',
-    'DEVKIT_SHIP_ID',
-    'DEVKIT_COMMIT_ID',
-    'DEVKIT_REVIEW_ID',
-    'DEVKIT_AGENT_RUN_ID',
-  ])
-    delete env[key];
-  env.DEVKIT_NO_TELEMETRY = '1';
-}
+export { isolateBenchTelemetry } from '../../../../judge/run-context.mts';
 
 /** Persist native tasks sequentially within the global row pool, including every quality miss.
  * Resume retries incomplete execution only. */

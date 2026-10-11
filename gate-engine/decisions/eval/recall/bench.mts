@@ -29,6 +29,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { isolateBenchTelemetry } from '../../../judge/run-context.mts';
 import { BenchAbort, parseCasesText } from '../cases.mts';
 import { wilson } from '../compare.mts';
 import { type RecallCase, type Scored, scoreCase, summarize } from './scoring.mts';
@@ -398,6 +399,7 @@ function coverage(corpus: string, cases: RecallCase[]) {
 }
 
 export async function main(argv: string[]) {
+  isolateBenchTelemetry();
   const args = new Set(argv);
   const at = argv.indexOf('--corpus');
   const corpus = at !== -1 && argv[at + 1] ? path.resolve(argv[at + 1]) : SEED_CORPUS;

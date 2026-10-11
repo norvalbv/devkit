@@ -47,6 +47,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseJsonObject } from '../config-json.mts';
 import { coverageBypassed, deterministicStrict, envFlag } from '../config.mts';
 import { emitGateBypass, emitGateEvent, finishGateTiming } from '../judge/gate-events.mts';
+import { markGateRun } from '../judge/run-context.mts';
 import { describeCachedPrefix, prefixEntry, recordPrefix } from '../prefix-cache/prefix-cache.mts';
 import {
   type GateFailure,
@@ -489,5 +490,6 @@ export function runDeterministic(cwd = process.cwd(), opts: RunDeterministicOpts
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
+  markGateRun(process.argv.includes('--hook')); // a manual guard-deterministic run stays unmarked
   process.exit(runDeterministic(process.cwd(), parseOpts(process.argv.slice(2))));
 }
