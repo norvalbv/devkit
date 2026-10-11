@@ -1,11 +1,12 @@
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 const HOOK = fileURLToPath(new URL('../../agents-hooks/decision-scope-brief.mjs', import.meta.url));
+const CLI = fileURLToPath(new URL('../../gate-engine/decisions/cli.mts', import.meta.url));
 
 let root: string;
 let n = 0;
@@ -29,7 +30,22 @@ function rawStubBin(script: string) {
   writeFileSync(bin, script, { mode: 0o755 });
 }
 
-function run(toolInput: Record<string, unknown>, toolName = 'Edit', session?: string) {
+/** Stub the CLI and log each spawn's argv to argv.log, one line per call. */
+function loggingStubBin(stdout: string) {
+  const log = join(root, 'argv.log');
+  rawStubBin(`#!/bin/sh\necho "$*" >> '${log}'\ncat <<'EOF'\n${stdout}\nEOF\n`);
+}
+
+function loggedCalls() {
+  return readFileSync(join(root, 'argv.log'), 'utf8').trim().split('\n');
+}
+
+function run(
+  toolInput: Record<string, string>,
+  toolName = 'Edit',
+  session?: string,
+  env: NodeJS.ProcessEnv = {},
+) {
   let sessionId = session;
   if (sessionId === undefined) {
     n += 1;
@@ -38,7 +54,7 @@ function run(toolInput: Record<string, unknown>, toolName = 'Edit', session?: st
   return spawnSync('node', [HOOK], {
     cwd: root,
     encoding: 'utf8',
-    env: { ...process.env, CLAUDE_PROJECT_DIR: root },
+    env: { ...process.env, CLAUDE_PROJECT_DIR: root, ...env },
     input: JSON.stringify({ tool_name: toolName, session_id: sessionId, tool_input: toolInput }),
   }).stdout.trim();
 }
@@ -195,7 +211,6 @@ describe('decision-scope-brief — failure shapes and the real CLI behind it', (
 
   // Wiring, not units: an outage on the CLI side must arrive as an outage on the hook side.
   it('reports the outage when the real guard-decisions cannot load its parser', () => {
-    const CLI = fileURLToPath(new URL('../../gate-engine/decisions/cli.mts', import.meta.url));
     const preload = join(root, 'hide-parser.mjs');
     writeFileSync(
       preload,
@@ -214,5 +229,65 @@ describe('decision-scope-brief — failure shapes and the real CLI behind it', (
     rawStubBin(`#!/bin/sh\nexec node --import ${preload} ${CLI} "$@"\n`);
 
     expect(run({ file_path: 'src/a.ts' })).toContain('DID NOT RUN');
+  });
+});
+
+describe('decision-scope-brief — what it asks the CLI to record', () => {
+  it('passes --brief on the first edit, --brief-again once on the second, and nothing after', () => {
+    loggingStubBin(GOVERNED);
+    for (let i = 0; i < 4; i += 1) run({ file_path: 'src/a.ts' }, 'Edit', 'argv-session');
+    expect(loggedCalls()).toEqual([
+      'scoped-targets --files src/a.ts --brief Edit,3,320',
+      expect.stringMatching(/^scoped-targets --files src\/a\.ts --brief-again Edit,\d+$/),
+    ]);
+  });
+
+  it('asks afresh on every edit to an ungoverned file, since no stamp is written', () => {
+    loggingStubBin('[]');
+    for (let i = 0; i < 3; i += 1) run({ file_path: 'src/a.ts' }, 'Write', 'ungoverned');
+    expect(loggedCalls()).toEqual(
+      Array(3).fill('scoped-targets --files src/a.ts --brief Write,3,320'),
+    );
+  });
+
+  it('still briefs when the stamp directory cannot be read', () => {
+    stubBin(GOVERNED);
+    const stamps = join(root, 'tmp', 'devkit-decision-brief');
+    mkdirSync(stamps, { recursive: true });
+    chmodSync(stamps, 0o000);
+    try {
+      const out = run({ file_path: 'src/a.ts' }, 'Edit', 'locked', { TMPDIR: join(root, 'tmp') });
+      expect(out).toContain('retrieval-candidate-set');
+    } finally {
+      chmodSync(stamps, 0o755);
+    }
+  });
+
+  it('logs the lengths it printed: each shown ruling is min(length, cap) long', () => {
+    const dir = join(root, 'docs', 'decisions');
+    mkdirSync(dir, { recursive: true });
+    for (const [slug, ruling] of [
+      ['a-short', 'Short.'],
+      ['b-long', 'r'.repeat(500)],
+    ]) {
+      writeFileSync(
+        join(dir, `${slug}.md`),
+        `---\nslug: ${slug}\ncreated: 2026-01-01\n---\n\n## Target · 2026-01-01 — ${slug}\n\n` +
+          `**Ruling:** ${ruling}\n**Scope:** src/**\n`,
+      );
+    }
+    rawStubBin(`#!/bin/sh\nexec node '${CLI}' "$@"\n`);
+    const sink = join(root, 'events.jsonl');
+    const out = run({ file_path: 'src/a.ts' }, 'Edit', 'parity', { DEVKIT_GATE_EVENTS: sink });
+    const ctx: string = JSON.parse(out).hookSpecificOutput.additionalContext;
+    const printed = [...ctx.matchAll(/^- \*\*(.+?)\*\* — (.*?)…?$/gm)].map((m) => [
+      m[1],
+      m[2].length,
+    ]);
+    const row: { shown: string[]; lengths: number[]; cap: number } = JSON.parse(
+      readFileSync(sink, 'utf8'),
+    );
+    expect(row.lengths).toContain(500);
+    expect(printed).toEqual(row.lengths.map((len, i) => [row.shown.at(i), Math.min(len, row.cap)]));
   });
 });
