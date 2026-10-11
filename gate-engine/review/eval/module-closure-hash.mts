@@ -111,6 +111,15 @@ export function hashLocalModuleClosure(
   throw new Error('Local module closure changed while hashing; retry after writes settle');
 }
 
+/** Absolute paths of every file in the roots' transitive local-module closure. */
+export function localModuleClosureFiles(roots: readonly string[]): string[] {
+  const files = captureLocalModuleClosure(
+    roots.map((file) => path.resolve(file)),
+    readFileSync,
+  );
+  return [...files.keys()];
+}
+
 function captureLocalModuleClosure(
   roots: readonly string[],
   readSource: (file: string, encoding: 'utf8') => string,

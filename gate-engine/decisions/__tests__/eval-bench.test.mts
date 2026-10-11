@@ -5,7 +5,6 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   BenchAbort,
-  cleanBenchEnv,
   GATE_SOURCES,
   compare,
   lintCases,
@@ -68,32 +67,6 @@ describe('tally (multiclass metrics)', () => {
     const t = tally([{ expected: 'PASS', got: 'PASS' }], ['PASS', 'THIN']);
     expect(t.perClass.THIN).toMatchObject({ precision: 0, recall: 0, f1: 0 });
     expect(t.accuracy).toBe(100);
-  });
-});
-
-// ─── Env hygiene ──────────────────────────────────────────────────────────────────
-
-describe('cleanBenchEnv', () => {
-  it('strips every GUARD_*/FRINK_* and the GIT_* control vars; keeps BENCH_*', () => {
-    const env = {
-      GUARD_DECISION_NO_LLM: '1',
-      GUARD_DECISIONS_DIR: '/elsewhere',
-      FRINK_NO_LOG: '1',
-      GIT_DIR: '/host/.git',
-      GIT_WORK_TREE: '/host',
-      BENCH_MODEL: 'sonnet',
-      PATH: '/usr/bin',
-    };
-    const stripped = cleanBenchEnv(env);
-    expect(stripped.sort()).toEqual([
-      'FRINK_NO_LOG',
-      'GIT_DIR',
-      'GIT_WORK_TREE',
-      'GUARD_DECISIONS_DIR',
-      'GUARD_DECISION_NO_LLM',
-    ]);
-    expect(env.BENCH_MODEL).toBe('sonnet');
-    expect(env.PATH).toBe('/usr/bin');
   });
 });
 

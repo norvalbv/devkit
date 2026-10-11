@@ -74,6 +74,7 @@ import { envBool, envVar, resolveGuardConfig } from '../config.mts';
 import { emitGateBypass, emitGateEvent } from '../judge/gate-events.mts';
 import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from '../judge/judge-isolation.mts';
 import { reportGateInfraFailure } from '../judge/odb-probe.mts';
+import { markGateRun } from '../judge/run-context.mts';
 import { execJudge } from '../judge/run-judge.mts';
 import { resolveSentryModel } from '../review/reviewers.mts';
 import { buildEvidence, degradeCause, renderInventory, type SentryEvidence } from './evidence.mts';
@@ -495,6 +496,5 @@ export function run(gate: boolean): void {
   }
 }
 
-const invokedDirectly =
-  process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
-if (invokedDirectly) run(process.argv.includes('--gate'));
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href)
+  run(markGateRun(process.argv.includes('--gate')));

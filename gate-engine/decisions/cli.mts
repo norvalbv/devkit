@@ -35,6 +35,7 @@ import { readdirSync } from 'node:fs';
 import { resolveFromCwd, resolveGuardConfig } from '../config.mts';
 import { emitGateEvent } from '../judge/gate-events.mts';
 import { clip } from '../judge/odb-probe.mts';
+import { markGateRun } from '../judge/run-context.mts';
 // Type-only: erased at compile, so naming the envelope here does NOT re-link decisions.mts — the
 // module that is unloadable in exactly the case this file has to answer for.
 import type { QueryEnvelope } from './decisions.mts';
@@ -91,6 +92,8 @@ async function run(argv: string[]) {
   }
   const sub = SUB_ENGINES[cmd];
   if (sub) {
+    // The hook runs only `detect --gate`; check-alignment is an on-demand run and stays unmarked.
+    if (cmd === 'detect' && rest[0] === '--gate') markGateRun();
     await (await import(sub.href)).main(rest);
     return;
   }

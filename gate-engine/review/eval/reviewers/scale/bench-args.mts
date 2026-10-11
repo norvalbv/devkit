@@ -24,9 +24,4 @@ export function argInt(name: string, fallback: number, min = 1): number {
   return value;
 }
 
-export function silenceBenchTelemetry(): void {
-  process.env.DEVKIT_NO_TELEMETRY = '1';
-  delete process.env.DEVKIT_GATE_EVENTS;
-  delete process.env.DEVKIT_SHIP_ID;
-  delete process.env.DEVKIT_RUN_MODE;
-}
+export { isolateBenchTelemetry as silenceBenchTelemetry } from '../../../../judge/run-context.mts';

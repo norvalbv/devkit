@@ -162,6 +162,12 @@ describe('vitest.setup.mjs scrubs inherited gate policy', () => {
     }
   });
 
+  it('scrubs an inherited run origin but leaves it off the review entrypoint list', () => {
+    // The coverage gate runs the suite under a 'gate' mark; `devkit review` must keep a bench's mark.
+    expect(envAfterSetup({ DEVKIT_RUN_ORIGIN: 'gate' }).DEVKIT_RUN_ORIGIN).toBeUndefined();
+    expect(INHERITED_RUN_ENV).not.toContain('DEVKIT_RUN_ORIGIN');
+  });
+
   it('declares each name once, in exactly one provenance list', () => {
     expect(SCRUBBED_ENV).toEqual([...new Set(SCRUBBED_ENV)]);
     const overlap = SHIP_EXPORTED_ENV.filter((n: string) => INHERITED_RUN_ENV.includes(n));

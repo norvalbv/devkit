@@ -25,6 +25,7 @@ import { homedir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from '../../judge/judge-isolation.mts';
+import { isolateBenchTelemetry } from '../../judge/run-context.mts';
 import { execJudgeAsync } from '../../judge/run-judge.mts';
 import { excerptDiff } from './lib/excerpt.mts';
 import { CATEGORIES, DEGENERATE_REASONS, EVIDENCE_TIERS, SEVERITIES, sha8 } from './lib/schema.mts';
@@ -233,6 +234,7 @@ if (audit) {
 }
 
 // ── labeling run ─────────────────────────────────────────────────────────────────────────────────
+isolateBenchTelemetry();
 const candidates = readJsonl(candidatesPath);
 const done = new Set(readJsonl(proposalsPath).map((p) => p.id));
 const todo = candidates
