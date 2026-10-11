@@ -1,12 +1,13 @@
 /**
- * At `devkit ship`, remind the agent to add before/after PR screenshots when the UI can change.
- * Advisory: always exits 0, no model call, silent outside ship (no DEVKIT_COMMIT_MSG_FILE).
+ * At every commit, remind the agent to add before/after PR screenshots when the UI can change.
+ * Advisory: always exits 0. UI extensions speak free; any other code diff asks the light judge.
  */
-import { readFileSync } from 'node:fs';
 import { matchesRepoGlob } from '../../skills/_devkit/review-roots.mjs';
 import { resolveGuardConfig } from '../config.mts';
-import { stagedFiles } from '../decisions/git-io.mts';
+import { git, stagedFiles } from '../decisions/git-io.mts';
 import { emitAdvisoryResult } from '../judge/advisory/emit.mts';
+import { resolveReviewModel } from '../review/reviewers.mts';
+import { DIFF_CAP, judgeUiVisible } from './judge.mts';
 
 export const UI_EVIDENCE = 'ui-evidence';
 
@@ -39,9 +40,8 @@ const NON_UI_PATHS = [
   '**/*.d.ts',
 ];
 
-/** Whole words only: a hyphen also ends the token, so `ui-kit` or `layout-agnostic` never match. */
-const SYMPTOM_RE =
-  /(?<![\w-])(ui|display(?:s|ed|ing)?|visible|visual(?:ly)?|glitch(?:es|y)?|render(?:s|ed|ing)?|flicker(?:s|ing)?|misalign(?:ed|ment)?|layout|screen(?:s)?|blank page)(?![\w-])/i;
+/** Never worth a model call: prose and generated dependency pins. */
+const NOT_JUDGED = ['**/*.md', '**/*.lock', '**/package-lock.json', '**/pnpm-lock.yaml'];
 
 const PATHS_SHOWN = 3;
 
@@ -50,39 +50,48 @@ export function uiPaths(staged: string[], globs: string[]): string[] {
   return staged.filter((path) => any(path, globs) && !any(path, NON_UI_PATHS));
 }
 
-/** The symptom word the subject names, or null. The body is excluded: prose there is too noisy. */
-export function symptomWord(message: string): string | null {
-  const subject = message.split('\n', 1)[0] ?? '';
-  return SYMPTOM_RE.exec(subject)?.[1] ?? null;
+/** Why this commit deserves screenshots by path alone, or null when no UI file is staged. */
+export function uiPathReason(staged: string[], globs: string[]): string | null {
+  const paths = uiPaths(staged, [...DEFAULT_UI_PATHS, ...globs]);
+  if (paths.length === 0) return null;
+  const more = paths.length > PATHS_SHOWN ? `, +${paths.length - PATHS_SHOWN} more` : '';
+  return `UI paths changed: ${paths.slice(0, PATHS_SHOWN).join(', ')}${more}`;
 }
 
-/** Why this ship deserves screenshots, or null when nothing points at the UI. */
-export function uiEvidenceReason(
-  staged: string[],
-  message: string,
-  globs: string[],
-): string | null {
-  const paths = uiPaths(staged, [...DEFAULT_UI_PATHS, ...globs]);
-  if (paths.length > 0) {
-    const more = paths.length > PATHS_SHOWN ? `, +${paths.length - PATHS_SHOWN} more` : '';
-    return `UI paths changed: ${paths.slice(0, PATHS_SHOWN).join(', ')}${more}`;
-  }
-  const word = symptomWord(message);
-  return word ? `the commit subject names a visible symptom ("${word}")` : null;
+/** The judged paths, listed in full, then their staged diff capped at DIFF_CAP; '' when none. */
+export function judgeInput(cwd: string, staged: string[]): string {
+  const skip = [...NON_UI_PATHS, ...NOT_JUDGED];
+  const paths = staged.filter((path) => !skip.some((g) => matchesRepoGlob(path, g)));
+  if (paths.length === 0) return '';
+  const prefixes = ['-c', 'diff.noprefix=false', '-c', 'diff.mnemonicPrefix=false'];
+  const pathspecs = paths.map((path) => `:(literal)${path}`);
+  const diff = git(cwd, [...prefixes, 'diff', '--cached', '--', ...pathspecs]);
+  return `Changed files:\n${paths.join('\n')}\n\n${diff.slice(0, DIFF_CAP)}`;
+}
+
+/** Why this commit deserves screenshots, or null when neither the paths nor the judge say so. */
+function uiEvidenceReason(cwd: string): string | null {
+  const cfg = resolveGuardConfig(cwd);
+  const staged = stagedFiles(cwd);
+  const byPath = uiPathReason(staged, cfg.uiEvidence.paths);
+  if (byPath) return byPath;
+  const input = judgeInput(cwd, staged);
+  const verdict = input ? judgeUiVisible(cwd, input, resolveReviewModel(cfg)) : null;
+  return verdict?.visible
+    ? `the staged diff could change what users see${verdict.why ? `: ${verdict.why}` : ''}`
+    : null;
 }
 
 /** Action first: the ship digest cuts a detail at 140 characters, so only the reason may be lost. */
 export const instruction = (reason: string): string =>
-  `Add before (base branch) and after (this branch) screenshots to the PR description, or say there that nothing visible changed — ${reason}`;
+  `Add before (base branch) and after (this branch) screenshots when you open or update the PR, or say there that nothing visible changed — ${reason}`;
 
 /** The gate. Every unreadable input means silence: a reminder that cannot tell stays quiet. */
 export function runUiEvidence(env: NodeJS.ProcessEnv = process.env, cwd = process.cwd()): number {
-  const msgFile = env.DEVKIT_COMMIT_MSG_FILE;
-  if (!msgFile || env.DEVKIT_RUN_MODE === 'review' || env.DEVKIT_RUN_MODE === 'dry-gates') return 0;
+  if (env.DEVKIT_RUN_MODE === 'review' || env.DEVKIT_RUN_MODE === 'dry-gates') return 0;
   let reason: string | null;
   try {
-    const globs = resolveGuardConfig(cwd).uiEvidence.paths;
-    reason = uiEvidenceReason(stagedFiles(cwd), readFileSync(msgFile, 'utf8'), globs);
+    reason = uiEvidenceReason(cwd);
   } catch {
     return 0;
   }

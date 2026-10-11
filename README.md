@@ -139,7 +139,7 @@ not accumulate in this config; they remain Markdown under `decisionsDir`.
 - Deterministic gate checkpointing for safe ship retries
 - Sentry-capture review for swallowed runtime failures
 - Changed-comment paragraph budget gate (deterministic, no model)
-- Optional ship-time reminder to attach before/after screenshots for UI changes
+- Optional commit-time reminder to attach before/after screenshots for UI changes
 
 Every path the engine touches resolves from the consumer repository’s working directory. devkit ships mechanisms, not a consumer’s baselines, allowlists, decision history, or `guard.config.json`.
 

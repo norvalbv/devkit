@@ -164,7 +164,7 @@ export const GUARD_OPTIONS = [
   {
     id: 'ui-evidence',
     label: 'ui-evidence',
-    hint: 'at ship, remind the agent to add before/after screenshots to the PR when UI changed (never blocks)',
+    hint: 'at every commit, remind the agent to add before/after screenshots to the PR when UI changed (never blocks)',
   },
   {
     id: 'coverage',
