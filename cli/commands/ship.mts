@@ -156,8 +156,10 @@ Usage:
                       reported, so a workflow_run-chained job that registers late cannot be missed.
   --dry-gates         Rehearse the exact ship base + selected source staging in an ephemeral worktree.
                       Runs the formatter, configured deterministic/structure/extra gates, and the
-                      deterministic comment budget gate; skips decisions, Qavis, domain/completeness
-                      review, commit, push, and PR creation. With --base, refreshes and uses the
+                      deterministic comment budget gate; skips the decision judge, Qavis,
+                      domain/completeness review, commit, push, and PR creation. The decision gate's
+                      regex smells (e.g. legacy-deletion) print as an advisory with the remedy this
+                      repo allows; they never change the exit code. With --base, refreshes and uses the
                       current origin tip just like ship.
                       Never leaves a local branch or commit. Cannot be combined with --resume.
   --with-reviewers    With --dry-gates only: also run the configured domain reviewers on that same

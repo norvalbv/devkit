@@ -4,6 +4,7 @@ import {
   mkdirSync,
   readFileSync,
   realpathSync,
+  rmSync,
   writeFileSync,
 } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
@@ -156,6 +157,47 @@ echo DRY_GATES_LOCKED_OK`,
   });
 });
 
+describe('ship-branch.sh — --dry-gates decision-smell advisory', () => {
+  const BIG = `${Array.from({ length: 150 }, (_, i) => `line ${i}`).join('\n')}\n`;
+
+  /** Commits a 150-line file, then rehearses its deletion: the legacy-deletion smell. */
+  function rehearseDeletion(hookBody: string) {
+    const seeded = seedShipRepo({ hookBody });
+    writeFileSync(join(seeded.dir, 'old.ts'), BIG);
+    seeded.git(['add', 'old.ts']);
+    seeded.git(['commit', '-q', '--no-verify', '-m', 'old module']);
+    seeded.git(['rm', '-q', '--cached', 'old.ts']);
+    rmSync(join(seeded.dir, 'old.ts'));
+    const r = spawnSync(
+      '/bin/bash',
+      [scriptPath, 'feat/dry-smell', 'drop old', '--dry-gates', '--', 'old.ts'],
+      { cwd: seeded.dir, input: '', encoding: 'utf8', env: { ...seeded.env, GUARD_NO_LOG: '' } },
+    );
+    return { ...seeded, r };
+  }
+
+  it('names the smell and its file without the judge, and keeps the exit code', () => {
+    const { r, git } = rehearseDeletion('# devkit:guard-decisions\nexit 0');
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).toMatch(
+      /decision smell \(regex only — the judge did not run\): legacy-deletion — old\.ts/,
+    );
+    expect(localBranchExists(git, 'feat/dry-smell')).toBe(false);
+  });
+
+  it('still prints the advisory when a gate blocks the rehearsal', () => {
+    const { r } = rehearseDeletion('# devkit:guard-decisions\necho BLOCKED >&2\nexit 1');
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(/legacy-deletion — old\.ts/);
+  });
+
+  it('stays silent when the hook does not run the decisions gate', () => {
+    const { r } = rehearseDeletion('exit 0');
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).not.toMatch(/decision smell/);
+  });
+});
+
 // The marker the generated review fragment prints before the fleet runs (ai-guard-fragments.mts).
 const REVIEWER_GATE_LINE = 'echo "🔍 Reviewer gate (headless domain judges)..."';
 
@@ -242,7 +284,9 @@ printf 'DRY_REVIEW_HOOK_OK\\n'
 
     expect(r.status, r.stderr).toBe(0);
     expect(r.stderr).toMatch(/dry gates.*domain reviewers/is);
-    expect(r.stderr).toMatch(/Skipping decision, Qavis, completeness/);
+    expect(r.stderr).toMatch(
+      /Skipping the decision judge \(regex smells shown as advisory\), Qavis, completeness/,
+    );
     expect(r.stderr).toMatch(/dry gates \+ reviewers passed/);
     expect(git(['rev-parse', 'HEAD']).trim()).toBe(headBefore);
     expect(localBranchExists(git, 'feat/dry-review')).toBe(false);
