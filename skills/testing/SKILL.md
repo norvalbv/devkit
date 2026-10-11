@@ -54,7 +54,9 @@ yours to fix; say so instead of burning fix cycles on it. An `unknown` carrying 
 (`workflow-missing`, or `no-usable-run` with no artifact) means this repo's CI does not produce
 the report yet — follow the remedy (`devkit test-report-run --help`) rather than re-running tests.
 The answer names the branch `head` it walked back from and `commitsBehindHead`; above 0, read
-`skippedRuns` and `commitsWithoutRun` for why the newer commits could not answer.
+`skippedRuns` and `commitsWithoutRun` for why the newer commits could not answer. For a whole run,
+`devkit baseline-status --at <base sha> --against <run's summary.json>` splits its failures into
+NEW (not failing at the base run) and inherited, by test name where both runs recorded names.
 
 ## Fixing failures — max 2 cycles
 

@@ -20,6 +20,22 @@ function git(cwd: string, args: string[]): string | null {
   return ok(result) ? line(result).trim() : null;
 }
 
+/** `at` anchors the walk at a local commit (a PR's base) instead of the branch's GitHub head. */
+interface WalkOptions {
+  cwd: string;
+  workflow: string;
+  ref: string;
+  maxCommits: number;
+  at?: string;
+}
+
+/** `at` as a full commit sha; a revspec this checkout cannot resolve is a history fact, not a guess. */
+function anchor(cwd: string, at: string): string {
+  const sha = git(cwd, ['rev-parse', '--verify', '--quiet', `${at}^{commit}`]);
+  if (sha) return sha;
+  throw new GhUnavailable('history-unavailable', `--at ${at} is not a commit in this checkout`);
+}
+
 /** Runs newest-first across the head's first-parent history, looked up one commit at a time. */
 export class BranchWalk {
   readonly head: string;
@@ -27,12 +43,12 @@ export class BranchWalk {
   /** null when the head is not in this checkout; the first lookup then reports it. */
   private readonly commits: string[] | null;
   private readonly runs: WalkedRun[] = [];
-  private readonly opts: { cwd: string; workflow: string; ref: string; maxCommits: number };
+  private readonly opts: WalkOptions;
   private looked = 0;
 
-  constructor(opts: { cwd: string; workflow: string; ref: string; maxCommits: number }) {
+  constructor(opts: WalkOptions) {
     this.opts = opts;
-    this.head = branchHead({ cwd: opts.cwd, ref: opts.ref });
+    this.head = opts.at ? anchor(opts.cwd, opts.at) : branchHead({ cwd: opts.cwd, ref: opts.ref });
     const list = git(opts.cwd, [
       'rev-list',
       '--first-parent',

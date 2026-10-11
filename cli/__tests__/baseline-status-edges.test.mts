@@ -491,7 +491,10 @@ describe('wiring', () => {
     expect(gate).toContain('bun run test:run:report');
     expect(gate).toContain('name: test-report-summary');
     expect(gate).toContain('name: test-report');
-    const uploads = gate.slice(gate.indexOf('Upload test report summary'));
+    const uploads = gate.slice(
+      gate.indexOf('Upload test report summary'),
+      gate.indexOf('Failures new in this PR'),
+    );
     expect(uploads.match(/if: always\(\)/g)).toHaveLength(2);
     // `.devkit` is a dot-folder and upload-artifact skips "files within folders beginning with `.`"
     // unless told otherwise, so without this BOTH artifacts upload nothing — silently, because
