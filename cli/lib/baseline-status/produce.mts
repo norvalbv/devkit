@@ -259,8 +259,9 @@ export function renderFailedTests(
     if (!failed.length) lines.add(`- \`${rel}\` — ${firstErrorLine(result.message, cwd)}`);
     for (const a of failed) {
       if (!a) continue;
-      const name = [...a.ancestorTitles, a.title].join(' > ').replaceAll('<', '&lt;');
-      lines.add(`- \`${rel}\` › ${name} — ${firstErrorLine(a.failureMessages[0], cwd)}`);
+      const name = [...a.ancestorTitles, a.title].join(' > ');
+      const safe = boundedText(name, MAX_ERROR_CHARS, cwd).replaceAll('<', '&lt;');
+      lines.add(`- \`${rel}\` › ${safe} — ${firstErrorLine(a.failureMessages[0], cwd)}`);
     }
   }
   if (!lines.size) return null;

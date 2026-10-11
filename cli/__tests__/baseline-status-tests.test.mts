@@ -1,5 +1,5 @@
 /** Per-test answers: the names a failed file records, and `baseline-status --test` reading them. */
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -10,6 +10,7 @@ import {
   MAX_NAMES_PER_SUMMARY,
   MAX_STEP_SUMMARY_ENTRIES,
   type TestReportSummary,
+  produceTestReport,
   renderFailedTests,
   summarise,
   writeStepSummary,
@@ -162,6 +163,23 @@ describe('the step summary lists what failed', () => {
     expect(lines.filter((l) => l.startsWith('- '))).toHaveLength(MAX_STEP_SUMMARY_ENTRIES);
     expect(lines.at(-1)).toBe('… 3 more not shown');
     expect(lines[2]).toContain('— (no message)');
+    const exact = Array.from({ length: MAX_STEP_SUMMARY_ENTRIES }, (_, i) => failing(`t${i}`));
+    expect(render([entry('a.test.mts', 'failed', exact)])).not.toContain('more not shown');
+  });
+
+  it('clips a huge test name, so 100 entries cannot reach the 1 MiB step-summary limit', () => {
+    const text = render([entry('a.test.mts', 'failed', [failing('x'.repeat(50_000), 'Error')])]);
+    expect(text?.length).toBeLessThan(1000);
+  });
+
+  it('lists a test once when several vitest projects report the same failure', () => {
+    const bad = failing('bad', 'Error: boom');
+    const text = render([
+      entry('a.test.mts', 'failed', [bad]),
+      entry('a.test.mts', 'failed', [bad]),
+    ]);
+    expect(text?.split('\n').filter((l) => l.startsWith('- '))).toHaveLength(1);
+    expect(text).toContain('### Failed tests (1)');
   });
 
   it('leaves out a nested run that reported a path outside the root, and a green run', () => {
@@ -197,6 +215,38 @@ describe('the step summary lists what failed', () => {
       expect(readFileSync(path, 'utf8')).toBe(
         'vitest counts\n\n### Failed tests (1)\n\n- `a.test.mts` › g > bad — Error: boom\n',
       );
+    });
+
+    it('is wired into test-report-run, which still exits with the runner code', async () => {
+      // A stub runner writing a real-shaped report where the json reporter was told to.
+      const bin = join(dir, 'node_modules', '.bin');
+      mkdirSync(bin, { recursive: true });
+      const failed = {
+        success: false,
+        testResults: [
+          {
+            ...entry('x', 'failed', []),
+            name: join(dir, 'a.test.mts'),
+            assertionResults: [failing('bad', 'Error: boom')],
+          },
+        ],
+      };
+      writeFileSync(join(dir, 'report.json'), JSON.stringify(failed));
+      writeFileSync(
+        join(bin, 'vitest'),
+        `#!/bin/sh\nfor a in "$@"; do case "$a" in --outputFile.json=*) cp report.json "\${a#*=}";; esac; done\nexit 1\n`,
+      );
+      chmodSync(join(bin, 'vitest'), 0o755);
+      const path = join(dir, 'step.md');
+      const saved = process.env.GITHUB_STEP_SUMMARY;
+      process.env.GITHUB_STEP_SUMMARY = path;
+      try {
+        expect(await produceTestReport(dir, [])).toBe(1);
+      } finally {
+        if (saved === undefined) delete process.env.GITHUB_STEP_SUMMARY;
+        else process.env.GITHUB_STEP_SUMMARY = saved;
+      }
+      expect(readFileSync(path, 'utf8')).toContain('- `a.test.mts` › g > bad — Error: boom');
     });
 
     it('does nothing off CI, and an unwritable summary path warns instead of throwing', () => {
