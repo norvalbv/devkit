@@ -13,6 +13,23 @@ import { FIXTURE_CONFIG } from '../corpus.mts';
 // Freeze BEFORE cleanBenchEnv removes GUARD_*; planning, checkpoints and reports use one condition.
 export const BENCH_CHUNK_LOC = resolveChunkCap();
 export const BENCH_LENS_GROUPS = resolveLensGroups();
+export const BENCH_MODEL = process.env.BENCH_MODEL ?? 'sonnet';
+export const BENCH_ESCALATION_MODEL = process.env.BENCH_ESCALATE_MODEL ?? 'opus';
+// Unset measures the shipped correctness pin.
+const BENCH_CORRECTNESS_MODEL = process.env.BENCH_CORRECTNESS_MODEL?.trim() || undefined;
+
+/** The model a reviewer runs: the correctness override, else its pin (always single-pass), else the
+ *  swept default. Runs are reported and keyed by this, never by the swept knobs. */
+export const effModel = (reviewer) =>
+  reviewer.name === 'correctness-reviewer' && BENCH_CORRECTNESS_MODEL
+    ? BENCH_CORRECTNESS_MODEL
+    : (reviewer.model ?? BENCH_MODEL);
+
+/** Re-arm the model pins cleanBenchEnv stripped, so judges run the condition the run is keyed on. */
+export function pinBenchModels(env = process.env) {
+  env.GUARD_REVIEW_ESCALATION_MODEL = BENCH_ESCALATION_MODEL;
+  if (BENCH_CORRECTNESS_MODEL) env.GUARD_CORRECTNESS_MODEL = BENCH_CORRECTNESS_MODEL;
+}
 const hash = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 export function executionHash({
   gateHash,

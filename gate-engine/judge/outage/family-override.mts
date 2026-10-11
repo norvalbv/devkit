@@ -5,12 +5,12 @@
 
 import { judgeProviderOfBin } from '../codex/result.mts';
 
-/** The complete claude family, chunking off included: cap 400 is benched for gpt-5.6-sol, not
- *  sonnet, so a partial move runs the correctness reviewer at an un-benched cap (sc-2193). */
+/** The complete claude family, chunking off included: cap 400 is benched for gpt-5.6-sol only, so
+ *  a partial move runs the claude correctness model at an un-benched cap. */
 export const CLAUDE_FAMILY_SET = {
   model: 'haiku',
   escalationModel: 'opus',
-  correctnessModel: 'sonnet',
+  correctnessModel: 'claude-haiku-5-5',
   correctnessChunkLoc: 0,
 } as const;
 
@@ -101,7 +101,7 @@ export function familyOverrideRemedy(dark: string, binPresent?: boolean): string
   return (
     `move the judges to the claude family: run \`${claudeFamilyEnvLine()}\` in the shell that ` +
     `ships, then resume the ship. Set all ${FAMILY_ENV_KEYS.length} — the correctness chunk cap is ` +
-    'benched for gpt-5.6-sol only, so a partial move runs sonnet at an un-benched cap; the command ' +
+    'benched for gpt-5.6-sol only, so a partial move runs it at an un-benched cap; the command ' +
     'also clears any sentry pin, so that judge follows GUARD_REVIEW_MODEL rather than staying ' +
     `behind. ${doctorRoute}Every cached PASS is discarded, ` +
     'because a verdict is keyed on its judging model, and remaining claude headroom cannot be ' +
