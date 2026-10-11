@@ -355,6 +355,14 @@
       "suiteIds": ["decisions-save-quality"]
     },
     {
+      "id": "benchmark-decisions-brief",
+      "label": "Decision brief: rule kept on edit",
+      "kind": "benchmark",
+      "lifecycle": "experimental",
+      "evidence": "accepted",
+      "suiteIds": ["decisions-brief"]
+    },
+    {
       "id": "benchmark-search-tool",
       "label": "Semantic search retrieval",
       "kind": "benchmark",
@@ -797,6 +805,36 @@
           "gate-engine/decisions/eval/save-quality/bench.mts",
           "gate-engine/decisions/eval/save-quality/scoring.mts",
           "gate-engine/decisions/integrity/perturb.mts"
+        ]
+      }
+    },
+    {
+      "id": "decisions-brief",
+      "label": "Decision brief: rule kept on edit",
+      "adapter": "deterministic",
+      "baseline": "gate-engine/decisions/eval/brief/results.baseline.json",
+      "subjectIds": ["benchmark-decisions-brief"],
+      "runner": "gate-engine/decisions/eval/brief/bench.mts",
+      "lifecycle": "experimental",
+      "acceptance": "claude-haiku-5-5 edits frozen tasks at K=5 (8 clause tasks in three arms, 9 floor tasks in two) through the shipped decision hooks, with only guard-decisions stubbed. floorsMet needs every cell at K, every hook-arm edit of the task file briefed with the target and no outage notice, the none-arm screens (clause kept at most 10%, floor good at least 90%) and one model and claude version. Metrics carry a 15-point noise floor; the per-cluster `bench.mts report` is the before/after decision rule",
+      "hashes": {
+        "implementation": [
+          "agents-hooks/decision-scope-brief.mjs",
+          "agents-hooks/decision-edit-guard.mjs",
+          "cli/lib/install/hook-registration-ledger/registrations.mts"
+        ],
+        "corpus": ["docs/benchmarks/decisions-brief/**"],
+        "scorer": [
+          "gate-engine/decisions/eval/brief/bench.mts",
+          "gate-engine/decisions/eval/brief/score.mts",
+          "gate-engine/decisions/eval/compare.mts",
+          "gate-engine/eval/statistics.mts"
+        ],
+        "runner": [
+          "gate-engine/decisions/eval/brief/bench.mts",
+          "gate-engine/decisions/eval/brief/tap.mts",
+          "gate-engine/decisions/eval/brief/stub.mts",
+          "gate-engine/decisions/eval/checkpoint.mts"
         ]
       }
     },

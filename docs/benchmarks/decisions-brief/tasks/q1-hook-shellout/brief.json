@@ -1,0 +1,14 @@
+[
+ {
+  "slug": "base-drift-surfaced-at-read-time",
+  "ruling": "Base drift is surfaced at READ time, advisory, and never blocks. One shared core (cli/lib/ship/base-drift/) answers 'has origin/<base> moved, and does what moved overlap these paths'; four surfaces consume it — devkit base-status (exit 0/3/4), a SessionStart brief, a PreToolUse advisory, and a print inside devkit ship's --base arm. The trigger is PATH OVERLAP with a caller-supplied set, never a commit count. Freshness is three-valued and a failed fetch degrades to a LOUD 'unknown', never silence. The dedup token folds in the base SHA so a second move re-arms every path. The synced hooks shell out to 'devkit base-status --json' rather than importing the package, and no-op when it is absent."
+ },
+ {
+  "slug": "decision-records-cli-owned-writes",
+  "ruling": "Decision records are a guard-owned capability: selecting the decisions guard installs a native pre-edit deny hook on every selected agent surface, and selecting skills projects the decisions playbook only while that guard remains enabled. Agents author and correct records through the guard-decisions CLI, whose draft amendment path may replace the newest uncommitted note, or the newest uncommitted Target with the draft notes under it kept byte-for-byte; committed history remains append-only."
+ },
+ {
+  "slug": "devkit-gates-repo-not-harness",
+  "ruling": "The carve-out widens one precise notch: the priorArtGate hook may additionally substring-match devkit OWN prescribed acknowledgment token (a `Prior-art:` line) in the gated call text — ExitPlanMode tool_input.plan and the feature-critique Task tool_input.prompt. A gated call carrying the token passes silently and marks the session acknowledged; one without it is denied once as before. This is recognition of a devkit workflow token, not validation of a foreign tool argument shape: no schema checks, no length or content heuristics, no judgment of foreign args. Everything outside that token match stays rejected exactly as this axis has always ruled."
+ }
+]
