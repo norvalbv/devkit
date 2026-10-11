@@ -16,6 +16,7 @@
  *   guard-decisions check-alignment --gate | scan     scope-matched alignment + depth gate (capture C)
  *   guard-decisions scoped-targets --files <a,b> [--query "<text>" --top K]   governing Targets → JSON
  *   guard-decisions categories                        per-category view (recall/category-report.mts)
+ *   guard-decisions enforce [link <slug> --check …]   Checks linked to Targets (ruling-checks/)
  *   guard-decisions integrity [--staged]              structural-integrity scan (integrity/scan.mts);
  *                                                     --staged judges only the records THIS commit
  *                                                     touches, against HEAD (integrity/staged-gate.mts)
@@ -52,6 +53,7 @@ const SUB_ENGINES: Record<string, URL> = {
   detect: new URL(`./detect${SELF_EXT}`, import.meta.url),
   'check-alignment': new URL(`./check-alignment${SELF_EXT}`, import.meta.url),
   'scoped-targets': new URL(`./scoped-targets${SELF_EXT}`, import.meta.url),
+  enforce: new URL(`./ruling-checks/enforce${SELF_EXT}`, import.meta.url),
 };
 
 /** An agent's reads of the log. Each is its own agent run, so no `git write-tree` and no commit row. */

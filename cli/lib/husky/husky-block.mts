@@ -116,7 +116,8 @@ ${PATH_SETUP}
 // .devkit/config.json at commit time), or a structure command joined via --structure.
 function wantsDeterministic(selection: HookSelection): boolean {
   if (selection.antiSlop || selection.structureCmd) return true;
-  return DETERMINISTIC_GUARD_IDS.some((id) => selection.guards?.includes(id));
+  // decisions arms the orchestrator's decision-checks gate, which runs Checks linked to Targets.
+  return [...DETERMINISTIC_GUARD_IDS, 'decisions'].some((id) => selection.guards?.includes(id));
 }
 
 /** Install-mode slots around the shared gate order; overlay's lint checks are the only filler. */
