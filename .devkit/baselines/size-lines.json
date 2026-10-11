@@ -5,6 +5,12 @@
   "files": {
     "cli/commands/init.mts": 1065,
     "cli/lib/generate/generate-structure-baseline.mts": 867,
+    "cli/lib/ship/commit-with-gate-capture.sh": 542,
+    "cli/lib/ship/patch-anchor.sh": 523,
+    "cli/lib/ship/prepare-gate-worktree.sh": 704,
+    "cli/lib/ship/reship.sh": 1234,
+    "cli/lib/ship/review-target.sh": 1018,
+    "cli/lib/ship/ship-branch.sh": 1730,
     "gate-engine/co-occurrence/matcher.mts": 538,
     "gate-engine/critique/eval/bench.mts": 1164,
     "gate-engine/decisions/detect.mts": 533,

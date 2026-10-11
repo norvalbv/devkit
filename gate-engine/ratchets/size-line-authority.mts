@@ -2,11 +2,10 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { resolveGuardConfig } from '../config.mts';
-import { sourceMatchers } from '../config.mts';
 import { LINES_BASELINE, readRatchetBaseline } from './baseline-paths.mts';
 import { fanoutSplitHints } from './folder-fanout.mts';
 import { mergeBaseRef, treeTextAtRef } from './git-index.mts';
-import { SIZE_SKIP_DIRS } from './size-policy.mts';
+import { lineMatchers, SIZE_SKIP_DIRS } from './size-policy.mts';
 
 export type LineCountVersion = 1 | 2;
 
@@ -257,7 +256,7 @@ function governed(file: string, cfg: GuardConfig): boolean {
   ) {
     return false;
   }
-  const match = sourceMatchers(cfg.sourceExtensions);
+  const match = lineMatchers(cfg);
   return (
     match.isSource(file) &&
     cfg.scanRoots.some((root: string) => file === root || file.startsWith(`${root}/`))
@@ -322,7 +321,7 @@ export function lineCeilingChanges(
     (file) => snapshotText(root, candidate, file),
   );
   if (current.error) throw new LineAuthorityError(current.error);
-  const match = sourceMatchers(cfg.sourceExtensions);
+  const match = lineMatchers(cfg);
   const cap = (file: string) => (match.isTest(file) ? cfg.maxTestLines : cfg.maxLines);
   const files = new Set(prior.flatMap((baseline) => Object.keys(baseline.files)));
   const changes: LineCeilingChange[] = [];
