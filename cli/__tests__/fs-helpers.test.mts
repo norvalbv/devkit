@@ -11,7 +11,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { writeIfAbsent } from '../lib/fs-helpers.mts';
+import { isDevOnly, writeIfAbsent } from '../lib/fs-helpers.mts';
 
 // writeIfAbsent must materialize a REAL file at the literal path it is given — even when a sibling
 // tool left the dest dir (or file) as a symlink. The reported crash: `devkit init` aborted in
@@ -87,5 +87,18 @@ describe('writeIfAbsent — symlink dest is replaced with a real entry, never fo
     writeIfAbsent(join(root, 'real', 'new.txt'), 'new', { force: true });
     expect(readFileSync(join(root, 'real', 'keep.txt'), 'utf8')).toBe('keep'); // sibling untouched
     expect(readFileSync(join(root, 'real', 'new.txt'), 'utf8')).toBe('new');
+  });
+});
+
+describe('isDevOnly — the trees tsconfig.build.json excludes', () => {
+  it('matches whole __tests__ and eval segments under either path separator', () => {
+    // shippedTreeFiles feeds it path.relative output, which is backslashed on Windows.
+    const devOnly = [
+      'cli/__tests__/a.json',
+      'cli\\__tests__\\a.json',
+      'gate-engine\\x\\eval\\a.sh',
+    ];
+    expect(devOnly.filter(isDevOnly)).toEqual(devOnly);
+    expect(['gate-engine/retrieval/a.sh', 'cli/evaluate.mts'].filter(isDevOnly)).toEqual([]);
   });
 });

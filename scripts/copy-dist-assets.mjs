@@ -14,7 +14,13 @@
 import { cpSync, existsSync, readdirSync, realpathSync, rmSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { ANTI_SLOP_FILES, ROOT_DIRS, ROOT_FILES, shippedTreeFiles } from './shipped-assets.mjs';
+import {
+  ANTI_SLOP_FILES,
+  MIRRORED_EXT,
+  ROOT_DIRS,
+  ROOT_FILES,
+  shippedTreeFiles,
+} from './shipped-assets.mjs';
 
 /** `p` with symlinks resolved through its nearest existing ancestor (the rest may not exist yet). */
 function physicalPath(p) {
@@ -90,8 +96,7 @@ export function copyDistAssets(root, dist) {
 
   // Non-TS files that live UNDER cli/ or gate-engine/ (the .sh ship scripts, config .json) — mirror
   // each to its dist/ path. tsc never emits these. Skip tests + eval (dev-only, not shipped-run).
-  const COPY_EXT = /\.(sh|json|jsonc)$/;
-  for (const rel of shippedTreeFiles(root, COPY_EXT)) cpSync(join(root, rel), join(dist, rel));
+  for (const rel of shippedTreeFiles(root, MIRRORED_EXT)) cpSync(join(root, rel), join(dist, rel));
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
