@@ -14,8 +14,12 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { z } from 'zod';
 import type { TestReportSummary } from './produce.mts';
-import { FILE_OUTCOMES, SUMMARY_NAME, SUMMARY_SCHEMA } from './produce.mts';
+import { FILE_OUTCOMES, SUMMARY_NAME, SUMMARY_SCHEMA, fileTestsSchema } from './produce.mts';
+
+/** Per-test names are optional evidence: malformed, they are dropped and the file answers stand. */
+const testsSchema = z.record(z.string(), fileTestsSchema);
 
 /** Every way this can fail to produce data, each distinguishable by a consumer. */
 export type UnknownReason =
@@ -257,6 +261,9 @@ export function parseSummary(raw: string, label: string): TestReportSummary {
       throw new GhUnavailable('schema-mismatch', `${label} records "${outcome}" for ${file}`);
     }
   }
+  const tests = testsSchema.safeParse(parsed.tests);
+  if (tests.success) parsed.tests = tests.data;
+  else delete parsed.tests;
   return parsed;
 }
 
