@@ -384,13 +384,14 @@ reviewer or correctness lens on your staged index, and its PASS seeds the cache 
 
 ## `📸 ui-evidence:` asks for screenshots on a change with no visible effect
 
-The reminder is advisory: this line never changes the ship's outcome. It fires on a shipped file
-with a UI extension or matching `uiEvidence.paths` (tests, stories and fixtures are excluded), or on
-a commit subject naming a visible symptom, and the line names which one matched. When nothing a
-user sees changed, say so in the PR description rather than attaching screenshots. To be reminded
-about backend or `.ts` files whose output your UI renders, add their globs to `uiEvidence.paths` in
-`guard.config.json`; to drop the reminder entirely, deselect the `ui-evidence` guard with
-`devkit init --guards <the guards you keep>`.
+The reminder is advisory: this line never blocks a commit or a ship. It runs on every commit. It
+fires on a staged file with a UI extension or matching `uiEvidence.paths` (tests, stories and
+fixtures are excluded) with no model call. Otherwise a light judge reads the staged diff and fires
+when the change could alter a rendered screen, and the line gives its one-line reason. The verdict is
+cached per diff, and a judge outage or timeout (30 s) means no reminder. When nothing a user sees
+changed, say so in the PR description rather than attaching screenshots. To be reminded about paths
+the judge misses, add their globs to `uiEvidence.paths` in `guard.config.json`; to drop the reminder
+entirely, deselect the `ui-evidence` guard with `devkit init --guards <the guards you keep>`.
 
 ## `bun install` fails: `no commit matching "<sha>" found for "@norvalbv/devkit"`
 

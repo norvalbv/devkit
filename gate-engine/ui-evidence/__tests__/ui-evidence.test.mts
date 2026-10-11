@@ -1,10 +1,18 @@
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { render, summarise } from '../../../cli/lib/ship/digest/gate-digest.mts';
-import { DEFAULT_UI_PATHS, symptomWord, uiEvidenceReason, uiPaths } from '../check.mts';
+import { DEFAULT_UI_PATHS, uiPathReason, uiPaths } from '../check.mts';
+import { parseUiVerdict } from '../judge.mts';
 
 const CLI = path.resolve(import.meta.dirname, '../cli.mts');
 
@@ -33,57 +41,36 @@ describe('uiPaths', () => {
   });
 });
 
-describe('symptomWord', () => {
-  it.each([
-    ['fix: price displays NaN on checkout', 'displays'],
-    ['fix: modal flickers when the API is slow', 'flickers'],
-    ['fix(ui): wrong total', 'ui'],
-    ['fix: API returns empty list, so the screen is blank', 'screen'],
-  ])('names the symptom in %j', (subject, word) => {
-    expect(symptomWord(subject)).toBe(word);
-  });
-
-  it.each([
-    'build: bump the guide for the queue',
-    'fix(ui-kit): export map',
-    'docs: synced assets stay layout-agnostic',
-    'fix: retry on 503 from the billing API',
-  ])('stays silent on %j', (subject) => {
-    expect(symptomWord(subject)).toBeNull();
-  });
-
-  it('reads the subject only, never the body', () => {
-    expect(
-      symptomWord('fix: retry on 503\n\nThe dashboard displayed a spinner forever.'),
-    ).toBeNull();
-  });
-});
-
-describe('uiEvidenceReason', () => {
+describe('uiPathReason', () => {
   it('names at most three UI files and counts the rest', () => {
     const staged = ['a.tsx', 'b.tsx', 'c.tsx', 'd.css', 'e.css'];
-    expect(uiEvidenceReason(staged, 'feat: x', [])).toBe(
-      'UI paths changed: a.tsx, b.tsx, c.tsx, +2 more',
-    );
+    expect(uiPathReason(staged, [])).toBe('UI paths changed: a.tsx, b.tsx, c.tsx, +2 more');
   });
 
   it('adds uiEvidence.paths to the extension defaults rather than replacing them', () => {
-    expect(uiEvidenceReason(['src/api/price.ts'], 'fix: x', ['src/api/**'])).toBe(
+    expect(uiPathReason(['src/api/price.ts'], ['src/api/**'])).toBe(
       'UI paths changed: src/api/price.ts',
     );
-    expect(uiEvidenceReason(['App.tsx'], 'fix: x', ['src/api/**'])).toBe(
-      'UI paths changed: App.tsx',
-    );
+    expect(uiPathReason(['App.tsx'], ['src/api/**'])).toBe('UI paths changed: App.tsx');
+    expect(uiPathReason(['server/price.ts'], [])).toBeNull();
+  });
+});
+
+describe('parseUiVerdict', () => {
+  it('reads the verdict from the first line and the why from the rest', () => {
+    expect(parseUiVerdict('VISIBLE\nthe checkout total shows two decimals')).toEqual({
+      visible: true,
+      why: 'the checkout total shows two decimals',
+    });
+    expect(parseUiVerdict('NONE\nretry policy only')).toEqual({
+      visible: false,
+      why: 'retry policy only',
+    });
   });
 
-  it('fires on a backend-only change whose subject names a visible symptom', () => {
-    expect(uiEvidenceReason(['server/price.ts'], 'fix: checkout displays NaN', [])).toBe(
-      'the commit subject names a visible symptom ("displays")',
-    );
-  });
-
-  it('is silent for a backend-only change with a neutral subject', () => {
-    expect(uiEvidenceReason(['server/price.ts'], 'fix: round half-even', [])).toBeNull();
+  it('is null when the reply names neither or both verdicts', () => {
+    expect(parseUiVerdict('maybe')).toBeNull();
+    expect(parseUiVerdict('VISIBLE or NONE')).toBeNull();
   });
 });
 
@@ -109,11 +96,29 @@ function gitFreeEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
   return { ...env, ...extra };
 }
 
+/** A fake `claude` on PATH that counts its calls in `dir/calls` and runs `script`. */
+function judgeStub(dir: string, script: string) {
+  const bin = path.join(dir, 'stub-bin');
+  mkdirSync(bin);
+  writeFileSync(
+    path.join(bin, 'claude'),
+    `#!/bin/sh\ncat >"${dir}/.git/judged"\necho x >> "${dir}/calls"\n${script}`,
+  );
+  chmodSync(path.join(bin, 'claude'), 0o755);
+  // The repo default judge family is codex; pin a claude model so the stub is the one spawned.
+  return { PATH: `${bin}:${process.env.PATH}`, GUARD_REVIEW_MODEL: 'haiku' };
+}
+
+const judgeCalls = (dir: string) =>
+  existsSync(path.join(dir, 'calls'))
+    ? readFileSync(path.join(dir, 'calls'), 'utf8').split('\n').length - 1
+    : 0;
+
 function runGate(dir: string, subject: string | null, extra: Record<string, string> = {}) {
-  const sink = path.join(dir, 'events.jsonl');
+  const sink = path.join(dir, '.git', 'events.jsonl');
   const env = gitFreeEnv({ DEVKIT_GATE_EVENTS: sink, DEVKIT_SHIP_ID: 'ship-ui', ...extra });
   if (subject !== null) {
-    env.DEVKIT_COMMIT_MSG_FILE = path.join(dir, 'msg.txt');
+    env.DEVKIT_COMMIT_MSG_FILE = path.join(dir, '.git', 'msg.txt');
     writeFileSync(env.DEVKIT_COMMIT_MSG_FILE, `${subject}\n\nbody\n`);
   }
   const r = spawnSync(process.execPath, [CLI], { cwd: dir, env, encoding: 'utf8' });
@@ -122,7 +127,8 @@ function runGate(dir: string, subject: string | null, extra: Record<string, stri
     events = readFileSync(sink, 'utf8')
       .trim()
       .split('\n')
-      .map((l) => JSON.parse(l));
+      .map((l) => JSON.parse(l))
+      .filter((e) => e.type === 'advisory_result');
   } catch {
     // no sink file = the gate emitted nothing
   }
@@ -130,15 +136,23 @@ function runGate(dir: string, subject: string | null, extra: Record<string, stri
 }
 
 describe('guard-ui-evidence CLI', () => {
-  it('at ship, a staged UI file prints the screenshot instruction and records an advisory row', () => {
-    const r = runGate(stagedRepo({ 'src/Card.tsx': 'x' }), 'feat: card');
+  it('a staged UI file prints the screenshot instruction without asking the judge', () => {
+    const dir = stagedRepo({ 'src/Card.tsx': 'x' });
+    const r = runGate(dir, 'feat: card', judgeStub(dir, 'echo VISIBLE'));
     expect(r.code).toBe(0);
     expect(r.stderr).toContain('📸 ui-evidence: Add before (base branch) and after (this branch)');
     expect(r.stderr).toContain('— UI paths changed: src/Card.tsx');
     expect(r.events).toEqual([
       expect.objectContaining({ type: 'advisory_result', gate: 'ui-evidence', status: 'finding' }),
     ]);
-    expect(r.events[0]).not.toHaveProperty('family');
+    expect(judgeCalls(dir)).toBe(0);
+  });
+
+  it('a plain git commit (no ship message) speaks exactly as ship does', () => {
+    const atShip = runGate(stagedRepo({ 'src/Card.tsx': 'x' }), 'feat: card');
+    const atCommit = runGate(stagedRepo({ 'src/Card.tsx': 'x' }), null);
+    expect(atCommit.stderr).toBe(atShip.stderr);
+    expect(atCommit.events).toHaveLength(1);
   });
 
   it('the ship digest keeps where the screenshots go, even when it cuts the detail', () => {
@@ -147,23 +161,61 @@ describe('guard-ui-evidence CLI', () => {
     );
     const line = render(summarise(runGate(stagedRepo(many), 'feat: panels').events, 'ship-ui'));
     expect(line).toContain('ui-evidence — advisory, did NOT block this run');
-    expect(line).toContain('to the PR description, or say there that nothing visible changed');
+    expect(line).toContain(
+      'when you open or update the PR, or say there that nothing visible changed',
+    );
   });
 
-  it('at ship, a backend-only change whose subject names a symptom gets the same advice', () => {
-    const r = runGate(stagedRepo({ 'server/price.ts': 'x' }), 'fix: checkout displays NaN');
+  it('a backend change the judge reads as visible gets the same advice, with its why', () => {
+    const dir = stagedRepo({ 'server/price.ts': 'export const fmt = (n) => n.toFixed(2);' });
+    const r = runGate(dir, null, judgeStub(dir, 'printf "VISIBLE\\nprices show two decimals\\n"'));
     expect(r.code).toBe(0);
-    expect(r.stderr).toContain('the commit subject names a visible symptom ("displays")');
+    expect(r.stderr).toContain(
+      '— the staged diff could change what users see: prices show two decimals',
+    );
+    expect(r.events).toHaveLength(1);
+    expect(readFileSync(path.join(dir, '.git', 'judged'), 'utf8')).toMatch(
+      /^Changed files:\nserver\/price\.ts\n\ndiff --git a\/server\/price\.ts b\/server\/price\.ts\n/,
+    );
   });
 
-  it('at ship, a backend-only change with a neutral subject stays silent', () => {
-    const r = runGate(stagedRepo({ 'server/price.ts': 'x' }), 'fix: round half-even');
+  it('a backend change the judge reads as invisible stays silent', () => {
+    const dir = stagedRepo({ 'server/retry.ts': 'export const tries = 3;' });
+    const r = runGate(dir, null, judgeStub(dir, 'echo NONE'));
     expect(r).toMatchObject({ code: 0, stderr: '', events: [] });
+    expect(judgeCalls(dir)).toBe(1);
   });
 
-  it('a plain git commit (no ship message) stays silent even with UI files staged', () => {
-    const r = runGate(stagedRepo({ 'src/Card.tsx': 'x' }), null);
+  it('a second run over the same staged diff replays the verdict without a judge call', () => {
+    const dir = stagedRepo({ 'server/price.ts': 'export const fmt = 2;' });
+    const stub = judgeStub(dir, 'printf "VISIBLE\\nprices change\\n"');
+    const first = runGate(dir, null, stub);
+    const second = runGate(dir, 'fix: price', stub);
+    expect(judgeCalls(dir)).toBe(1);
+    expect(second.stderr).toBe(first.stderr);
+  });
+
+  it('a judge outage gives no advice and exits 0', () => {
+    const dir = stagedRepo({ 'server/price.ts': 'export const fmt = 2;' });
+    const r = runGate(dir, null, judgeStub(dir, 'echo "rate limited" >&2; exit 1'));
+    expect(r.code).toBe(0);
+    expect(r.stderr).not.toContain('📸');
+    expect(r.events).toEqual([]);
+  });
+
+  it('a judge killed mid-call, as the timeout does, gives no advice and exits 0', () => {
+    const dir = stagedRepo({ 'server/price.ts': 'export const fmt = 2;' });
+    const r = runGate(dir, null, judgeStub(dir, 'kill -9 $$'));
+    expect(r.code).toBe(0);
+    expect(r.stderr).not.toContain('📸');
+    expect(r.events).toEqual([]);
+  });
+
+  it('a diff of only docs, lockfiles and tests never asks the judge', () => {
+    const dir = stagedRepo({ 'README.md': 'x', 'bun.lock': 'x', 'src/a.test.ts': 'x' });
+    const r = runGate(dir, null, judgeStub(dir, 'echo VISIBLE'));
     expect(r).toMatchObject({ code: 0, stderr: '', events: [] });
+    expect(judgeCalls(dir)).toBe(0);
   });
 
   it('devkit review stays silent even with UI files staged', () => {
@@ -173,17 +225,11 @@ describe('guard-ui-evidence CLI', () => {
     expect(r).toMatchObject({ code: 0, stderr: '', events: [] });
   });
 
-  it('a stale message path is silent, never a crash', () => {
-    const dir = stagedRepo({ 'src/Card.tsx': 'x' });
-    const r = runGate(dir, null, { DEVKIT_COMMIT_MSG_FILE: path.join(dir, 'gone.txt') });
-    expect(r).toMatchObject({ code: 0, stderr: '', events: [] });
-  });
-
   it('reads uiEvidence.paths from guard.config.json', () => {
     const dir = stagedRepo({
       'guard.config.json': JSON.stringify({ uiEvidence: { paths: ['src/api/**'] } }),
       'src/api/price.ts': 'x',
     });
-    expect(runGate(dir, 'fix: rounding').stderr).toContain('UI paths changed: src/api/price.ts');
+    expect(runGate(dir, null).stderr).toContain('UI paths changed: src/api/price.ts');
   });
 });

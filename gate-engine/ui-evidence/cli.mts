@@ -1,16 +1,14 @@
 #!/usr/bin/env node
 
 /**
- * guard-ui-evidence — the ship-time screenshot reminder (see check.mts). Always exits 0: a crash
+ * guard-ui-evidence — the commit-time screenshot reminder (see check.mts). Always exits 0: a crash
  * in a reminder must never block a commit or a ship.
  */
 
 import { runUiEvidence } from './check.mts';
 
 if (process.argv[2] === '--help') {
-  console.log(
-    'Usage: guard-ui-evidence   (run by the pre-commit hook; speaks only during devkit ship)',
-  );
+  console.log('Usage: guard-ui-evidence   (run by the pre-commit hook; never blocks a commit)');
   process.exit(0);
 }
 

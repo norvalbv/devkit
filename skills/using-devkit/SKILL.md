@@ -135,7 +135,7 @@ devkit command.
   the paths you will ship, that is the rehearsal worth paying for. `devkit review` reviews the whole
   branch range plus your dirty tree with no brief, publishing nothing, but keeps its verdicts in a
   separate checkout-external store the ship never reads. `devkit ship` is the publication step.
-  Decisions, UI evidence and completeness run only at ship in every lane. On a feature branch **an ordinary
+  Decisions and completeness run only at ship in every lane; UI evidence stays silent in both rehearsals. On a feature branch **an ordinary
   `git commit` already runs the same reviewer fleet** — so just commit. After a ship BLOCKS, use
   `--resume`, never a rehearsal: resume replays every checkpointed PASS. Both reviewer rehearsals pay
   the same fan-out as ship, so run them in the BACKGROUND too (`SHIP_COMMIT_TIMEOUT` defaults to 3600s
