@@ -183,6 +183,7 @@ Committed evidence rejects raw prompts, transcripts, absolute paths, email addre
 | Feature critique judge | judge | shipped | accepted | critique |
 | Completeness judge | judge | shipped | accepted | completeness |
 | Decision detect/alignment/depth judges | judge | shipped | evidence-only | decisions |
+| UI-evidence visible-change judge | judge | shipped | evidence-only | — |
 | Sentry commit-message judge | judge | shipped | evidence-only | sentry |
 | Decision-log retrieval recall | benchmark | experimental | none | decisions-recall |
 | Decision-log save quality | benchmark | experimental | none | decisions-save-quality |

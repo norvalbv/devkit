@@ -104,14 +104,15 @@ command. Do not pre-run every gate or replace the managed chain with a hand-writ
   names. `--no-verify` is never the landing path.
 - **Sentry gate** judges commit-message intent for newly introduced runtime error classes. Add the
   capture on the named surface, or surface a disputed verdict to the user before any bypass.
-- **UI evidence** (`ui-evidence`) speaks only at `devkit ship` and never blocks. It fires when a
-  shipped file has a UI extension (tsx, jsx, vue, svelte, astro, html, css, scss, sass, less; tests,
-  stories and fixtures excluded) or matches `guard.config.json` `uiEvidence.paths`, or when the
-  commit subject names a visible symptom. The ship digest then says: add before (base branch) and
-  after (this branch) screenshots to the PR description, or say there that nothing visible changed,
-  followed by what matched. When a backend fix's bug showed in the UI,
-  attach the screenshots even if the advisory stayed silent. `uiEvidence.paths` adds globs to the
-  defaults, for backend or `.ts` files whose output a repo knows the UI renders.
+- **UI evidence** (`ui-evidence`) runs on every commit, plain or shipped, and never blocks. It
+  fires when a staged file has a UI extension (tsx, jsx, vue, svelte, astro, html, css, scss, sass,
+  less; tests, stories and fixtures excluded) or matches `guard.config.json` `uiEvidence.paths`;
+  otherwise the light review model reads the staged diff and fires when a user could see the
+  change. It then says: add before (base branch) and after (this branch) screenshots when you open
+  or update the PR, or say there that nothing visible changed, followed by why. A judge outage
+  means no advice, and the judge can miss: when a change showed in the UI, attach the screenshots
+  even if the reminder stayed silent. `uiEvidence.paths` adds globs to the defaults, for backend or
+  `.ts` files whose output a repo knows the UI renders.
 
 ## Comment budget
 

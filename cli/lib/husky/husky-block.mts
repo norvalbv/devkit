@@ -72,8 +72,8 @@ __dk_gate_deterministic "$__dk_package_bin_dir/guard-deterministic" --hook "\${D
 // a doomed commit never pays for a judge. Explicit lists — never rely on object-key order.
 const DETERMINISTIC_GUARD_IDS = ['size', 'fanout', 'dup', 'clone', 'coverage', 'comments'];
 const AI_GUARD_IDS = ['decisions', 'review'] as const;
-// ui-evidence runs last: a reminder about the final staged set, which never blocks. The bin
-// itself stays silent outside `devkit ship`, and `|| true` keeps a missing bin fail-open.
+// ui-evidence runs last: a reminder about the final staged set, which never blocks. It speaks on a
+// plain commit and a ship alike, and `|| true` keeps a missing bin fail-open.
 export const UI_EVIDENCE_ID = 'ui-evidence';
 const UI_EVIDENCE_FRAGMENT = `# devkit:guard-ui-evidence
 __dk_no_git_env "$__dk_package_bin_dir/guard-ui-evidence" || true

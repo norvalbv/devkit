@@ -331,6 +331,14 @@
       "suiteIds": ["decisions"]
     },
     {
+      "id": "judge-ui-evidence",
+      "label": "UI-evidence visible-change judge",
+      "kind": "judge",
+      "lifecycle": "shipped",
+      "evidence": "evidence-only",
+      "suiteIds": []
+    },
+    {
       "id": "judge-sentry",
       "label": "Sentry commit-message judge",
       "kind": "judge",
@@ -907,6 +915,7 @@
     "judge-completeness",
     "judge-decisions",
     "judge-sentry",
+    "judge-ui-evidence",
     "benchmark-search-tool",
     "benchmark-edge-cases"
   ],
