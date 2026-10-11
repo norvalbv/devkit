@@ -12,6 +12,7 @@ import {
   remoteBranchExists,
   scriptPath,
   seedShipRepoLocalRemote,
+  REAPED_15S_BANNER,
 } from './_ship-branch-fixture.mts';
 
 function commit(git, paths: string[], message: string): void {
@@ -536,7 +537,7 @@ describe('ship-branch.sh — --from-branch committed scope (sc-2352)', () => {
     });
 
     expect(first.status, first.stderr).toBe(124);
-    expect(first.stderr).toMatch(/gate chain hit the 15s ceiling \(exit 124\)/);
+    expect(first.stderr).toMatch(REAPED_15S_BANNER);
     const preserved = git(['rev-parse', 'feat/from-branch-formatter']).trim();
     expect(git(['show', `${preserved}:note.txt`])).toBe('gate-formatted\n');
     expect(git(['show', 'HEAD:note.txt'])).toBe('committed source bytes\n');
