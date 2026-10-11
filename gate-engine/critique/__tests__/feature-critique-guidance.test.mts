@@ -38,6 +38,8 @@ describe('feature-critique guidance', () => {
       'Frame Second-Opinion + Deterministic Gate',
       'Burden of proof for blockers',
       'FABRICATED BLOCKER',
+      'Prior-attempt cost needs a disposition',
+      'cheaper hand-rolled re-implementation',
     ];
     for (const marker of preservedGuidance) expect(agent).toContain(marker);
   });

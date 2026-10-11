@@ -7,9 +7,8 @@
  * caller. Everything else stays with its own check: the two have opposite tolerance for ambiguity
  * (see unguarded-gate-calls.mts) and sharing the decision logic would force one bias on both.
  *
- * This is deliberately NOT a shell parser. It handles the constructs that appear in real husky
- * hooks — quotes, comments, line continuations, `;` separators — and each check declares what it
- * cannot see.
+ * The quote walker is NOT a shell parser: it handles quotes, comments, continuations and `;`.
+ * Classifying commands beyond that goes through scanShellScript's unbash AST walk.
  */
 
 const WHITESPACE = /\s/;
