@@ -42,7 +42,9 @@ function plantInitLock(
 ) {
   const dir = lockDir(gitRoot);
   mkdirSync(dir, { recursive: true });
+  // A stamp in an older devkit's `holder` format; unstamped leaves a file no reader can parse.
   if (stamped) writeFileSync(join(dir, 'holder'), `${pid}:planted-uuid`, 'utf8');
+  else writeFileSync(join(dir, 'torn'), 'not a holder', 'utf8');
   const when = new Date(Date.now() - ageMs);
   utimesSync(dir, when, when);
 }
@@ -141,7 +143,7 @@ describe('devkit init — concurrent-run lock (sc-2429)', () => {
     expect(existsSync(lockDir(root))).toBe(false);
   });
 
-  it('names an unknown holder (not NaN) for a fresh unstamped lock', () => {
+  it('names an unknown holder (not NaN) for a lock with no readable holder', () => {
     const root = tmpRepo();
     plantInitLock(root, { stamped: false });
 
