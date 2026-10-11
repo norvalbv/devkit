@@ -4,6 +4,7 @@
  */
 import { z } from 'zod';
 import { CONFIG_FILENAME, envFlag, resolveGuardConfig } from '../config.mts';
+import { emitGateBypass } from '../judge/gate-events.mts';
 import { DETERMINISTIC } from './registry.mts';
 
 /** One command gate. A missing `cmd` marks a malformed spec, which blocks as unrunnable. */
@@ -58,4 +59,29 @@ export function configExtraGates(cwd: string): ExtraGate[] {
  */
 export function structureBypassed(): boolean {
   return envFlag('STRUCTURE_OK') || envFlag('NO_STRUCTURE');
+}
+
+// Gate label or id → the bypass flag that gate reads in its own process. A bypassed run must not
+// record a prefix key a later clean run of the same tree would hit, so run.mts salts on these.
+export const GATE_BYPASSES = {
+  'hook-parity': 'HOOK_PARITY_OK',
+  'decisions-integrity': 'DECISIONS_INTEGRITY_OK',
+  'decision-checks': 'DECISION_CHECKS_OK',
+} as const;
+
+/** The bypass suffixes set for this run, sorted so the prefix-cache salt ignores export order. */
+export function bypassedSuffixes(): string[] {
+  return Object.values(GATE_BYPASSES).filter(envFlag).sort();
+}
+
+/**
+ * A cache hit runs no gate, so a gate's own bypass emission never fires: emit it here for each
+ * bypassed gate in `ran`. Returns every bypassed flag under its canonical name, for the banner.
+ */
+export function reportCachedBypasses(ran: string[]): string[] {
+  const bypassed = Object.entries(GATE_BYPASSES).filter(([, suffix]) => envFlag(suffix));
+  for (const [gate, suffix] of bypassed) {
+    if (ran.includes(gate)) emitGateBypass(gate, `GUARD_${suffix}`);
+  }
+  return bypassed.map(([, suffix]) => `GUARD_${suffix}`);
 }

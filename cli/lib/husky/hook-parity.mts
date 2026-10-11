@@ -308,7 +308,7 @@ export function judgeHookParity(
 
 // envFlag prepends GUARD_/FRINK_, so it takes the bare suffix; every message prints the full
 // canonical name, which is the only spelling a remedy line may show.
-const BYPASS_SUFFIX = 'HOOK_PARITY_OK';
+export const BYPASS_SUFFIX = 'HOOK_PARITY_OK';
 const BYPASS_FLAG = `GUARD_${BYPASS_SUFFIX}`;
 
 /** Print the verdict and return the exit code the hook propagates. */
