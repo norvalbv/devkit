@@ -25,6 +25,12 @@ import {
 import { BranchWalk } from './history.mts';
 import { escapesRoot } from './produce.mts';
 import type { TestReportSummary } from './produce.mts';
+import {
+  type FailingTests,
+  type TestAnswer,
+  failingTestsOf,
+  testVerdict,
+} from './test-verdict.mts';
 
 export const CACHE_DIR = '.devkit/baseline-status';
 export const DEFAULT_WORKFLOW = 'gate.yml';
@@ -65,7 +71,7 @@ export interface BaselineAnswer {
   file?: FileAnswer;
 }
 
-export interface FileAnswer {
+export interface FileAnswer extends FailingTests {
   path: string;
   status: FileStatus;
   reason?: string;
@@ -74,6 +80,8 @@ export interface FileAnswer {
   lastPassedReason: 'found' | 'not-in-scanned-window' | 'no-artifact-history' | 'lookup-failed';
   searchedRuns: number;
   runsWithoutArtifact: number;
+  /** Set only for `--test`: that one test's verdict in the same run. */
+  test?: TestAnswer;
 }
 
 /** The default branch, preferring what the remote actually says over a guess at its name. */
@@ -306,6 +314,7 @@ export function queryBaseline({
   cwd = process.cwd(),
   ref,
   file,
+  test,
   workflow = DEFAULT_WORKFLOW,
   artifact = DEFAULT_ARTIFACT,
   maxRuns = DEFAULT_MAX_RUNS,
@@ -313,6 +322,7 @@ export function queryBaseline({
   cwd?: string;
   ref?: string;
   file?: string;
+  test?: string;
   workflow?: string;
   artifact?: string;
   maxRuns?: number;
@@ -395,11 +405,14 @@ export function queryBaseline({
       const path = normaliseFilePath(cwd, file);
       // git resolves `<sha>:<path>` from the REPO ROOT, so the existence probe must run there too.
       const { gitRoot } = detectGitRoot(cwd);
+      const verdict = statusOf({ cwd: gitRoot, summary, run, path });
       answer.file = {
         path,
-        ...statusOf({ cwd: gitRoot, summary, run, path }),
+        ...verdict,
+        ...failingTestsOf(summary, path),
         ...findLastPassed({ cwd, walk, artifact, path }),
       };
+      if (test) answer.file.test = testVerdict(summary, verdict.status, path, test);
       answer.commitsWithoutRun = [...walk.commitsWithoutRun]; // the walk-back may have gone further
     }
     return answer;
