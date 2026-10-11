@@ -111,7 +111,9 @@ describe('maxLinesExtensions', () => {
   it('blocks an edit to an unlisted oversized script until a freeze lists it', () => {
     const root = seed(['sh'], { 'src/other.ts': 60 });
     stage(root, 'src/big.sh', script(60).replace('echo hi', 'echo yo'));
-    expect(run(root, 'gate').status).toBe(1);
+    const blocked = run(root, 'gate');
+    expect(blocked.status, blocked.stderr).toBe(1);
+    expect(blocked.stdout + blocked.stderr).toContain('src/big.sh: 60 lines (max 50)');
 
     expect(run(root, 'freeze').status).toBe(0);
     execFileSync('git', ['add', LINES], { cwd: root });
