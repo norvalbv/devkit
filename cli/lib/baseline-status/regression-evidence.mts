@@ -4,7 +4,9 @@ import { stripVTControlCharacters } from 'node:util';
 
 // Schema 1 described the superseded custom-reporter proof payload on the original PR branch.
 // Schema 2 overclaimed caller preservation beyond the two samples the portable command observes.
-export const REGRESSION_EVIDENCE_SCHEMA = 3;
+// Schema 3 counted a red file that failed to load as red evidence.
+export const REGRESSION_EVIDENCE_SCHEMA = 4;
+export const SKIPPED_ON_GREEN = 'every red-failing test was skipped on green';
 
 export interface RegressionTestCounts {
   total: number;
@@ -19,10 +21,18 @@ export interface RegressionFailureSummary {
   message: string;
 }
 
+/** One test's outcome keyed by checkout-relative file and full name; skips and todos read skipped. */
+export type RegressionTestOutcomes = Map<string, 'passed' | 'failed' | 'skipped'>;
+
+// A repeated name keeps its worst outcome, so a later pass never hides an earlier failure.
+const OUTCOME_RANK = { passed: 0, skipped: 1, failed: 2 } as const;
+
 export interface RegressionReportSummary {
   success: boolean;
   counts: RegressionTestCounts;
   failures: RegressionFailureSummary[];
+  fileErrors: RegressionFailureSummary[];
+  tests: RegressionTestOutcomes;
 }
 
 export interface RegressionOperandEvidence {
@@ -42,6 +52,7 @@ export interface RegressionOperandEvidence {
   reportError: string | null;
   testCounts: RegressionTestCounts | null;
   failures: RegressionFailureSummary[];
+  fileErrors: RegressionFailureSummary[];
 }
 
 export interface RegressionEvidence {
@@ -69,11 +80,16 @@ interface JsonRecord {
 
 type NonFailureVitestStatus = 'passed' | 'todo' | 'skipped' | 'pending' | 'disabled';
 
-type ParsedVitestAssertion =
-  | { status: NonFailureVitestStatus }
-  | { status: 'failed'; fullName: string; failureMessages: string[] };
+interface ParsedVitestAssertion {
+  status: NonFailureVitestStatus | 'failed';
+  fullName: string;
+  failureMessages: string[];
+}
 
 interface ParsedVitestFile {
+  name: string;
+  status: string;
+  message: string;
   assertionResults: ParsedVitestAssertion[];
 }
 
@@ -132,19 +148,23 @@ function parseVitestAssertion(value: JsonValue): ParsedVitestAssertion {
   ) {
     throw new Error('Vitest report contains a malformed assertion');
   }
-  if (status !== 'failed') return { status };
-  return {
-    status,
-    fullName: value.fullName,
-    failureMessages: value.failureMessages,
-  };
+  return { status, fullName: value.fullName, failureMessages: value.failureMessages };
 }
 
 function parseVitestFile(value: JsonValue): ParsedVitestFile {
   if (!isJsonRecord(value) || !Array.isArray(value.assertionResults)) {
     throw new Error('Vitest report assertionResults is not an array');
   }
-  return { assertionResults: value.assertionResults.map(parseVitestAssertion) };
+  const message = value.message ?? '';
+  if (!isJsonString(value.name) || !isJsonString(value.status) || !isJsonString(message)) {
+    throw new Error('Vitest report contains a malformed test file result');
+  }
+  return {
+    name: value.name,
+    status: value.status,
+    message,
+    assertionResults: value.assertionResults.map(parseVitestAssertion),
+  };
 }
 
 function parseVitestReport(json: string): ParsedVitestReport {
@@ -169,12 +189,7 @@ function parseVitestReport(json: string): ParsedVitestReport {
   };
 }
 
-function boundedText(
-  value: string,
-  limit: number,
-  checkoutRoot?: string,
-  dependencySource?: string | null,
-): string {
+function scrubRoots(value: string, checkoutRoot?: string, dependencySource?: string | null) {
   let scrubbed = stripVTControlCharacters(value);
   for (const [root, replacement] of [
     [checkoutRoot, '<checkout>'],
@@ -185,8 +200,28 @@ function boundedText(
       scrubbed = scrubbed.split(spelling).join(replacement);
     }
   }
-  const normalized = scrubbed.replace(/\s+/g, ' ').trim();
+  return scrubbed;
+}
+
+function boundedText(
+  value: string,
+  limit: number,
+  checkoutRoot?: string,
+  dependencySource?: string | null,
+): string {
+  const normalized = scrubRoots(value, checkoutRoot, dependencySource).replace(/\s+/g, ' ').trim();
   return normalized.length > limit ? `${normalized.slice(0, limit - 1)}…` : normalized;
+}
+
+/** A file that failed with no failed assertion: it did not load, or a hook threw before any test. */
+function fileError(file: ParsedVitestFile, root: string, dependencySource: string | null) {
+  if (file.status !== 'failed' || file.assertionResults.some((a) => a.status === 'failed')) {
+    return null;
+  }
+  return {
+    fullName: boundedText(file.name, MAX_FAILURE_NAME_CHARS, root, dependencySource),
+    message: boundedText(file.message || '(no message)', MAX_FAILURE_CHARS, root, dependencySource),
+  };
 }
 
 /** Parse Vitest's built-in JSON reporter, used only as an optional reviewer-facing adapter. */
@@ -202,6 +237,8 @@ export function parseVitestRegressionReport(
   }
 
   const failures: RegressionFailureSummary[] = [];
+  const fileErrors: RegressionFailureSummary[] = [];
+  const tests: RegressionTestOutcomes = new Map();
   const assertionCounts: RegressionTestCounts = {
     total: 0,
     passed: 0,
@@ -210,18 +247,20 @@ export function parseVitestRegressionReport(
     todo: 0,
   };
   for (const file of report.testResults) {
+    const error = fileError(file, checkoutRoot, dependencySource);
+    if (error) fileErrors.push(error);
+    const fileKey = scrubRoots(file.name, checkoutRoot);
     for (const assertion of file.assertionResults) {
+      const { status } = assertion;
+      const outcome = status === 'passed' || status === 'failed' ? status : 'skipped';
+      const key = `${fileKey}\0${assertion.fullName}`;
+      const prior = tests.get(key);
+      if (!prior || OUTCOME_RANK[outcome] > OUTCOME_RANK[prior]) tests.set(key, outcome);
       assertionCounts.total += 1;
-      if (assertion?.status === 'passed') assertionCounts.passed += 1;
-      else if (assertion?.status === 'failed') assertionCounts.failed += 1;
-      else if (assertion?.status === 'todo') assertionCounts.todo += 1;
-      else if (
-        assertion?.status === 'skipped' ||
-        assertion?.status === 'pending' ||
-        assertion?.status === 'disabled'
-      ) {
-        assertionCounts.skipped += 1;
-      }
+      if (assertion.status === 'passed') assertionCounts.passed += 1;
+      else if (assertion.status === 'failed') assertionCounts.failed += 1;
+      else if (assertion.status === 'todo') assertionCounts.todo += 1;
+      else assertionCounts.skipped += 1;
       if (assertion.status !== 'failed') continue;
       const raw = assertion.failureMessages[0];
       failures.push({
@@ -249,7 +288,78 @@ export function parseVitestRegressionReport(
   if (report.success && counts.failed > 0) {
     throw new Error('Vitest report success is true despite failed assertion results');
   }
-  return { success: report.success, counts, failures: failures.slice(0, MAX_FAILURES) };
+  return {
+    success: report.success,
+    counts,
+    failures: failures.slice(0, MAX_FAILURES),
+    fileErrors: fileErrors.slice(0, MAX_FAILURES),
+    tests,
+  };
+}
+
+export interface RegressionConclusion {
+  status: RegressionEvidence['status'];
+  reason: string;
+}
+
+/** With a report, only an assertion that failed on red and passed on green is red evidence. */
+function concludeFromTests(
+  red: RegressionOperandEvidence,
+  tests: { red: RegressionTestOutcomes; green: RegressionTestOutcomes },
+): RegressionConclusion {
+  const failing = [...tests.red].filter(([, outcome]) => outcome === 'failed').map(([id]) => id);
+  if (failing.length === 0) {
+    const reason = red.fileErrors.length
+      ? 'red failed only at file level (a load, collection or hook error), never in an assertion'
+      : 'red exited nonzero without a failed assertion';
+    return { status: 'inconclusive', reason };
+  }
+  const fixed = failing.filter((id) => tests.green.get(id) === 'passed').length;
+  if (fixed > 0) {
+    return {
+      status: 'captured',
+      reason: `${fixed} of ${failing.length} red-failing tests passed on green`,
+    };
+  }
+  if (failing.every((id) => tests.green.get(id) === 'skipped')) {
+    return { status: 'inconclusive', reason: SKIPPED_ON_GREEN };
+  }
+  return { status: 'inconclusive', reason: 'no red-failing test passed on green' };
+}
+
+export function concludeRegression(
+  red: RegressionOperandEvidence,
+  green: RegressionOperandEvidence,
+  tests: { red: RegressionTestOutcomes; green: RegressionTestOutcomes } | null,
+  callerSamplesMatched: boolean,
+  cleanup: RegressionEvidence['cleanup'],
+): RegressionConclusion {
+  if (!callerSamplesMatched) {
+    return { status: 'inconclusive', reason: 'caller boundary fingerprints differ' };
+  }
+  if (!cleanup.redCloneRemoved || !cleanup.greenCloneRemoved) {
+    return { status: 'inconclusive', reason: 'a disposable clone could not be removed' };
+  }
+  if (red.signal || green.signal) {
+    return { status: 'inconclusive', reason: 'a test command ended from a signal' };
+  }
+  if (red.spawnError || green.spawnError) {
+    return { status: 'inconclusive', reason: 'a test command could not be started' };
+  }
+  if (red.reportError || green.reportError) {
+    return { status: 'inconclusive', reason: 'a requested structured report was unavailable' };
+  }
+  if (red.exitCode === null || red.exitCode === 0 || green.exitCode !== 0) {
+    return {
+      status: 'inconclusive',
+      reason: `expected red nonzero and green zero; got ${String(red.exitCode)}/${String(green.exitCode)}`,
+    };
+  }
+  if (tests) return concludeFromTests(red, tests);
+  return {
+    status: 'captured',
+    reason: `the same argv exited ${red.exitCode} on red and 0 on green`,
+  };
 }
 
 export function sha256(value: Uint8Array | string): string {
@@ -279,8 +389,8 @@ function fencedJson(value: readonly string[]): string {
   return `${fence}json\n${json}\n${fence}`;
 }
 
-function renderFailures(failures: RegressionFailureSummary[]): string {
-  if (failures.length === 0) return '- No structured red failure details supplied.';
+function renderFailures(failures: RegressionFailureSummary[], none: string): string {
+  if (failures.length === 0) return `- ${none}`;
   return failures
     .map((item) => `- ${inlineJson(item.fullName)} — ${inlineJson(item.message)}`)
     .join('\n');
@@ -327,7 +437,11 @@ ${fencedJson(evidence.command.argv)}
 
 ## Structured red failures
 
-${renderFailures(evidence.red.failures)}
+${renderFailures(evidence.red.failures, 'No structured red failure details supplied.')}
+
+Red file-level errors (not counted as red evidence):
+
+${renderFailures(evidence.red.fileErrors, 'None.')}
 
 This is attributable execution evidence for the selected command, not automatic proof of causality
 or whole-suite health. Review the red failure against the ticket before publishing this Markdown.
