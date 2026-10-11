@@ -711,7 +711,7 @@ describe('selectedIds', () => {
   });
 
   it('intersects components.guards with the deterministic set in fixed order, dropping AI ids', () => {
-    const d = repo(['clone', 'size', 'review', 'decisions']); // review/decisions are AI (fail-fast)
+    const d = repo(['clone', 'size', 'review']); // review is AI (fail-fast)
     expect(selectedIds(d)).toEqual(['size', 'clone']);
   });
 
@@ -738,7 +738,7 @@ describe('selectedIds', () => {
 
   it('selects comments from components.guards, but keeps it out of both fallbacks (opt-in)', () => {
     expect(selectedIds(repo(['size', 'comments']))).toEqual(['size', 'comments']);
-    expect(selectedIds(repo(['review', 'decisions']))).toEqual([]);
+    expect(selectedIds(repo(['review']))).toEqual([]);
     expect(selectedIds(repo(null))).not.toContain('comments');
     const d = repo(['comments']);
     writeFileSync(join(d, '.devkit', 'config.json'), '{ nope');
@@ -757,7 +757,7 @@ describe('selectedIds', () => {
   it('uses the explicit review allowlist instead of components.guards in review mode', () => {
     const d = repo(['size', 'fanout', 'dup', 'clone'], true);
     process.env.DEVKIT_RUN_MODE = 'review';
-    process.env.DEVKIT_REVIEW_GUARDS = ' clone, size ,decisions, anti-slop ';
+    process.env.DEVKIT_REVIEW_GUARDS = ' clone, size ,review, anti-slop ';
     expect(selectedIds(d)).toEqual(['size', 'clone']);
     process.env.DEVKIT_REVIEW_GUARDS = '';
     expect(selectedIds(d)).toEqual([]);
@@ -788,7 +788,7 @@ describe('prefixCacheScope', () => {
     expect(prefixCacheScope()).toBeUndefined();
     expect(prefixCacheScope('custom')).toBe('custom');
     process.env.DEVKIT_RUN_MODE = 'review';
-    process.env.DEVKIT_REVIEW_GUARDS = 'size,decisions';
+    process.env.DEVKIT_REVIEW_GUARDS = 'size,review';
     expect(prefixCacheScope()).toBe('devkit-guards:review:size:base:unmanaged:runtime:unmanaged');
     expect(prefixCacheScope('custom')).toBe('custom:review:size:base:unmanaged:runtime:unmanaged');
   });

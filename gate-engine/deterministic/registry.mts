@@ -53,4 +53,13 @@ export const DETERMINISTIC = [
     failOpen2: false,
     rcLabels: { 4: UNREADABLE_EVIDENCE },
   },
+  // Armed by the decisions guard, not its own id: it runs the Checks linked to decision Targets.
+  {
+    id: 'decision-checks',
+    module: '../decisions/ruling-checks/enforce.mjs',
+    args: ['gate'],
+    optIn: true,
+    withGuard: 'decisions',
+    failOpen2: false,
+  },
 ];

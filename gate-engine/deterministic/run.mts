@@ -97,7 +97,10 @@ function componentEnabled(
 }
 
 const ALL_IDS = DETERMINISTIC.map((g) => g.id);
-const GUARD_COMPONENT_IDS = DETERMINISTIC.filter((g) => !('configComponent' in g)).map((g) => g.id);
+const GUARD_COMPONENTS = DETERMINISTIC.filter((g) => !('configComponent' in g));
+// A selected guard arms a gate by its own id, or one that rides it (decisions → decision-checks).
+const armed = (gate: (typeof DETERMINISTIC)[number], guards: Set<string>) =>
+  guards.has(gate.id) || (!!gate.withGuard && guards.has(gate.withGuard));
 // The set the missing/unreadable-config fallback runs: every guard EXCEPT the opt-in ones. `--only`
 // and an explicit components.guards selection can still run opt-in guards (they're in ALL_IDS).
 const DEFAULT_IDS = DETERMINISTIC.filter((g) => !('optIn' in g && g.optIn)).map((g) => g.id);
@@ -113,7 +116,7 @@ function reviewIds(): string[] {
     .map((guard) => guard.trim())
     .filter(Boolean);
   const selected = new Set(configured);
-  return GUARD_COMPONENT_IDS.filter((id) => selected.has(id));
+  return GUARD_COMPONENTS.filter((g) => armed(g, selected)).map((g) => g.id);
 }
 
 // Split a `--structure` / `--extra` command string into argv tokens. Hoisted (perf: no per-call
@@ -195,17 +198,16 @@ export function selectedIds(cwd: string): string[] {
     const selectedGuards = new Set(guards);
     return DETERMINISTIC.filter((gate) => {
       const component = 'configComponent' in gate ? gate.configComponent : undefined;
-      return component ? componentEnabled(components, component) : selectedGuards.has(gate.id);
+      return component ? componentEnabled(components, component) : armed(gate, selectedGuards);
     }).map((gate) => gate.id);
   } catch {
     return DEFAULT_IDS;
   }
 }
 
-// Bypass flags owned by `--extra` gates rather than by the registry. A bypassed run must not record
-// a key a later un-bypassed run of the same tree would hit — the same anti-laundering property the
-// coverage and structure salts below exist for.
-const EXTRA_BYPASS_SUFFIXES = ['HOOK_PARITY_OK', 'DECISIONS_INTEGRITY_OK'] as const;
+// Bypass flags a gate reads in its own process. A bypassed run must not record a key a later
+// un-bypassed run of the same tree would hit — the anti-laundering the salts below exist for.
+const EXTRA_BYPASS_SUFFIXES = ['HOOK_PARITY_OK', 'DECISIONS_INTEGRITY_OK', 'DECISION_CHECKS_OK'];
 
 export function prefixCacheScope(scope?: string, effectiveIds?: string[]): string | undefined {
   const reviewMode = process.env.DEVKIT_RUN_MODE === 'review';

@@ -50,7 +50,7 @@ command. Do not pre-run every gate or replace the managed chain with a hand-writ
   (`block order: …`, for pre-commit and commit-msg). Read it before assuming which judge runs first
   or filing a gate-ordering bug.
 - **Deterministic aggregation** runs the selected structure, size, fan-out, semantic-duplication,
-  clone, coverage, anti-slop, and comment-budget checks and lists every failure in one block. Follow the printed repair. Existing ratchet debt may shrink; do not
+  clone, coverage, anti-slop, comment-budget and decision checks and lists every failure in one block. Follow the printed repair. Existing ratchet debt may shrink; do not
   re-freeze it merely to admit a new violation. A missing or inherited coverage artifact may use the
   documented one-run `GUARD_COVERAGE_OK=1` assertion only when the change did not cause the shortfall.
 - **Comment budget** (`guard-comments`) blocks a new standalone comment paragraph with three or
@@ -59,6 +59,10 @@ command. Do not pre-run every gate or replace the managed chain with a hand-writ
   states something the code cannot, retry unchanged: the same paragraph never blocks twice. When
   `guard.config.json` sets `comments.forbiddenRefs` or `comments.forbidDecisionRefs`, a changed
   comment citing a ticket or decision record blocks on every attempt until the reference is gone.
+- **Decision checks** (`decision-checks`, armed by the `decisions` guard) run the command linked to
+  a decision Target when the commit touches its Scope, and print the ruling on failure. Fix the code;
+  do not weaken the check. If the ruling itself changed, commit the new Target or the unlink
+  (`guard-decisions enforce link <slug> --check none --reason "<why>"`) on its own first.
 - **Local pre-ship loop.** Stage the paths (`git add <paths>`), then run `guard-deterministic`
   (in devkit itself: `node gate-engine/deterministic/run.mts`). It runs the same aggregated set
   a ship attempt runs, without the ship round. Single checks: `guard-comments gate` (reads the

@@ -163,9 +163,15 @@ describe('buildGuardBlock', () => {
     expect(block).not.toContain('guard-review');
   });
 
-  it('emits NO deterministic line when only AI guards are selected', () => {
-    const block = buildGuardBlock({ guards: ['decisions'] });
+  it('emits NO deterministic line when only the review guard is selected', () => {
+    const block = buildGuardBlock({ guards: ['review'] });
     expect(block).not.toContain('guard-deterministic');
+    expect(block).toContain('"$__dk_package_bin_dir/guard-review"');
+  });
+
+  it('emits the deterministic block for decisions alone, which arms decision-checks', () => {
+    const block = buildGuardBlock({ guards: ['decisions'] });
+    expect(block).toContain('# devkit:deterministic');
     expect(block).toContain('"$__dk_package_bin_dir/guard-decisions"');
   });
 
@@ -179,7 +185,7 @@ describe('buildGuardBlock', () => {
   });
 
   it('emits the deterministic line for structure even with NO deterministic guard selected', () => {
-    const block = buildGuardBlock({ guards: ['decisions'], structureCmd: 'guard-structure gate' });
+    const block = buildGuardBlock({ guards: ['review'], structureCmd: 'guard-structure gate' });
     expect(block).toContain('"$__dk_package_bin_dir/guard-deterministic" --hook');
     expect(block).toContain('--structure "guard-structure gate"');
   });
@@ -296,8 +302,8 @@ describe('replaceGuardBlock — relocate after the preamble (reachability)', () 
   });
   it('swaps content on re-run (markers present) without duplicating', () => {
     const once = replaceGuardBlock(FRINK_HOOK, buildGuardBlock(ALL));
-    const next = replaceGuardBlock(once, buildGuardBlock({ guards: ['decisions'] }));
-    expect(next).toContain('$__dk_package_bin_dir/guard-decisions');
+    const next = replaceGuardBlock(once, buildGuardBlock({ guards: ['review'] }));
+    expect(next).toContain('$__dk_package_bin_dir/guard-review');
     expect(next).not.toContain('guard-deterministic'); // only an AI guard now → no det line
     expect((next.match(/# >>> devkit-guards/g) || []).length).toBe(1);
   });
@@ -329,8 +335,8 @@ describe('hasFragment', () => {
     const det = buildFullHook({ guards: ['dup'] });
     expect(hasFragment(det, 'deterministic')).toBe(true);
     expect(hasFragment(det, 'guard-decisions')).toBe(false);
-    const ai = buildFullHook({ guards: ['decisions'] });
-    expect(hasFragment(ai, 'guard-decisions')).toBe(true);
+    const ai = buildFullHook({ guards: ['review'] });
+    expect(hasFragment(ai, 'guard-review')).toBe(true);
     expect(hasFragment(ai, 'deterministic')).toBe(false);
   });
 });

@@ -120,6 +120,18 @@ export function axisNotes(body: string): AxisNote[] {
   return out;
 }
 
+/** The first capture of the NEWEST note whose text matches `re` — a `rescope` or a linked Check. */
+export function lastTaggedNote(
+  entries: readonly { kind: string; text: string }[],
+  re: RegExp,
+): string | undefined {
+  for (let i = entries.length - 1; i >= 0; i -= 1) {
+    const m = entries[i].kind === 'note' ? entries[i].text.match(re) : null;
+    if (m) return m[1].trim();
+  }
+  return undefined;
+}
+
 export interface AmendsFinding {
   slug: string;
   /** The id of the note DECLARING the relation — the one to fix. */
