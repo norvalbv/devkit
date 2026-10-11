@@ -26,6 +26,50 @@ function writeShipDistFixture(
 vi.mock('node:child_process', () => ({ execFileSync: vi.fn() }));
 vi.mock('../commands/ship.mts', () => ({ default: vi.fn() }));
 
+const SHA = 'a'.repeat(40);
+const RUN_URL = 'https://github.com/norvalbv/devkit/actions/runs/7';
+
+/** How the fake gh answers: origin's tips in call order (then SHA), and the base commit's one run. */
+interface FakeCi {
+  tips?: string[];
+  status?: string;
+  conclusion?: string;
+  noRuns?: boolean;
+  /** The status of a newer, unfinished run of the same commit, listed first as gh lists it. */
+  newer?: string;
+  fail?: object;
+  listFail?: object;
+  /** Raw `gh run view` output in place of the well-formed page. */
+  view?: string;
+}
+
+/** A fake `gh` behind the mocked execFileSync, printing what gh 2.96 prints for these three calls. */
+function fakeGh(args: string[], ci: FakeCi): string {
+  if (ci.fail) throw ci.fail;
+  if (args[0] === 'api') return `${ci.tips?.shift() ?? SHA}\n`;
+  if (ci.listFail) throw ci.listFail;
+  const conclusion = ci.conclusion ?? 'success';
+  if (args[1] === 'view') {
+    if (ci.view !== undefined) return ci.view;
+    const jobs = [{ name: 'gate', conclusion, steps: [{ name: 'Tests', conclusion }] }];
+    return JSON.stringify({ url: RUN_URL, jobs });
+  }
+  const run = {
+    databaseId: 7,
+    attempt: 1,
+    status: ci.status ?? 'completed',
+    conclusion,
+    headSha: SHA,
+    createdAt: '2026-10-10T00:00:00Z',
+    headBranch: 'main',
+    event: 'push',
+  };
+  const runs = ci.newer
+    ? [{ ...run, databaseId: 8, status: ci.newer, conclusion: '' }, run]
+    : [run];
+  return JSON.stringify(ci.noRuns ? [] : runs);
+}
+
 describe('nextVersion', () => {
   it('bumps patch/minor/major', () => {
     expect(nextVersion('0.9.0', 'patch')).toBe('0.9.1');
@@ -73,17 +117,21 @@ describe('release publishing', () => {
   const mockExec = vi.mocked(execFileSync);
   const mockShip = vi.mocked(ship);
   let builtVersion: string;
+  let ci: FakeCi;
 
   beforeEach(() => {
     builtVersion = '0.48.0';
+    ci = {};
     mockExec.mockReset();
     mockShip.mockReset();
     mockShip.mockReturnValue(0);
     mockExec.mockImplementation((command: string, args: string[]) => {
       if (command === 'node') return `${builtVersion}\n`;
+      if (command === 'gh') return fakeGh(args, ci);
       if (command !== 'git') return '';
       if (args[0] === 'status') return '';
       if (args.join(' ') === 'rev-parse --abbrev-ref HEAD') return 'main\n';
+      if (args.join(' ') === 'rev-parse HEAD') return `${SHA}\n`;
       if (args.join(' ') === 'tag --list v0.48.0') return '';
       if (args.join(' ') === 'ls-files -- dist') {
         return 'dist/cli/index.mjs\ndist/package.json\n';
@@ -210,9 +258,11 @@ describe('release publishing', () => {
     const build = (lsRemote: () => string) => {
       mockExec.mockImplementation((command: string, args: string[]) => {
         if (command === 'node') return `${builtVersion}\n`;
+        if (command === 'gh') return fakeGh(args, ci);
         if (command !== 'git') return '';
         if (args[0] === 'status') return '';
         if (args.join(' ') === 'rev-parse --abbrev-ref HEAD') return 'main\n';
+        if (args.join(' ') === 'rev-parse HEAD') return `${SHA}\n`;
         if (args[0] === 'ls-remote') return lsRemote();
         return '';
       });
@@ -230,7 +280,7 @@ describe('release publishing', () => {
     expect(await release(['minor', '--yes'], remote)).toBe(1);
     expect(mockShip).not.toHaveBeenCalled();
 
-    // Offline must not block a maintainer — the check can only ever add certainty.
+    // An unreachable git remote does not block: the tag check can only ever add certainty.
     const offline = mkdtempSync(join(tmpdir(), 'devkit-release-'));
     made.push(offline);
     writeFileSync(
@@ -314,5 +364,169 @@ describe('release publishing', () => {
     await expect(release(['minor', '--yes'], cwd)).resolves.toBe(1);
     expect(errors).toHaveBeenCalledWith(expect.stringMatching(/missing from the build/));
     expect(mockShip).not.toHaveBeenCalled();
+  });
+
+  describe('base CI', () => {
+    /** A clean devkit checkout at 0.47.1 whose build would pass the dist smoke checks. */
+    const checkout = () => {
+      const cwd = mkdtempSync(join(tmpdir(), 'devkit-release-'));
+      made.push(cwd);
+      writeFileSync(
+        join(cwd, 'package.json'),
+        '{\n  "name": "@norvalbv/devkit",\n  "version": "0.47.1"\n}\n',
+      );
+      writeShipDistFixture(cwd);
+      return cwd;
+    };
+    const shipBody = () => {
+      const args = mockShip.mock.calls[0]?.[0] ?? [];
+      return args[args.indexOf('--body') + 1];
+    };
+    const stderr = () => {
+      const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+      return () => errors.mock.calls.map((c) => String(c[0])).join('\n');
+    };
+    const refusedEarly = (cwd: string) => {
+      expect(mockShip).not.toHaveBeenCalled();
+      expect(mockExec.mock.calls.some(([cmd]) => cmd === 'bun')).toBe(false);
+      expect(readFileSync(join(cwd, 'package.json'), 'utf8')).toContain('"version": "0.47.1"');
+    };
+
+    it('proceeds on a green base and records the run in the release PR', async () => {
+      const cwd = checkout();
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      expect(await release(['minor', '--yes'], cwd)).toBe(0);
+      expect(shipBody()).toContain(`Base CI: gate.yml passed on ${SHA} — ${RUN_URL}`);
+    });
+
+    it('refuses a red base before any test, build or bump, naming the failed step and run', async () => {
+      const cwd = checkout();
+      ci.conclusion = 'failure';
+      const errors = stderr();
+
+      expect(await release(['minor', '--yes'], cwd)).toBe(1);
+      expect(errors()).toContain(`gate.yml failed on ${SHA} (gate › Tests) — ${RUN_URL}`);
+      expect(errors()).toContain('--ci-override');
+      refusedEarly(cwd);
+      expect(await release(['minor', '--dry-run'], cwd)).toBe(1);
+    });
+
+    it.each([
+      ['no run', { noRuns: true }, 'no-usable-run: no gate.yml run for this commit'],
+      ['a cancelled run', { conclusion: 'cancelled' }, 'no-usable-run: run 7 concluded cancelled'],
+    ])('refuses a base with %s as missing CI', async (_name, world, reason) => {
+      const cwd = checkout();
+      Object.assign(ci, world);
+      const errors = stderr();
+
+      expect(await release(['minor', '--yes'], cwd)).toBe(1);
+      expect(errors()).toContain(reason);
+      expect(errors()).toContain('--ci-override');
+      refusedEarly(cwd);
+    });
+
+    it('decides by the newest completed run, not a newer one still running', async () => {
+      const cwd = checkout();
+      ci.newer = 'in_progress';
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      expect(await release(['minor', '--yes'], cwd)).toBe(0);
+      expect(shipBody()).toContain('Base CI: gate.yml passed');
+    });
+
+    it('tells a maintainer to wait for an unfinished run rather than override it', async () => {
+      const cwd = checkout();
+      Object.assign(ci, { status: 'in_progress', conclusion: '' });
+      const errors = stderr();
+
+      expect(await release(['minor', '--yes'], cwd)).toBe(1);
+      expect(errors()).toContain('has not finished on');
+      expect(errors()).toContain('Wait for that run to finish');
+      expect(errors()).not.toContain('--ci-override');
+      refusedEarly(cwd);
+    });
+
+    it.each([
+      ['gh is not installed', { fail: { code: 'ENOENT' } }, 'gh-missing'],
+      [
+        'gh is offline',
+        { fail: { stderr: 'error connecting to api.github.com' } },
+        'gh-failed: error connecting',
+      ],
+      ["HEAD is not origin's tip", { tips: ['b'.repeat(40)] }, 'Check out main at bbbb'],
+      [
+        'gh cannot find the workflow',
+        { listFail: { stderr: 'could not find any workflows named gate.yml' } },
+        'gate.yml could not be read on',
+      ],
+      ['gh garbles the run page', { view: 'not json' }, 'gh-failed: gh run view 7 returned JSON'],
+    ])('refuses when %s, even with --ci-override', async (_name, world, said) => {
+      const cwd = checkout();
+      Object.assign(ci, world);
+      const errors = stderr();
+
+      expect(await release(['minor', '--yes', '--ci-override', 'flaky'], cwd)).toBe(1);
+      expect(errors()).toContain(said);
+      refusedEarly(cwd);
+    });
+
+    it('refuses to publish when origin moved while the release built', async () => {
+      const cwd = checkout();
+      ci.tips = [SHA, 'b'.repeat(40)];
+      const errors = stderr();
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      expect(await release(['minor', '--yes'], cwd)).toBe(1);
+      expect(errors()).toContain('nothing was published');
+      expect(mockShip).not.toHaveBeenCalled();
+    });
+
+    it('releases a red base under --ci-override and records the reason, sha and run', async () => {
+      const cwd = checkout();
+      ci.conclusion = 'failure';
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+      const reason = 'main red: Linux-only flake';
+
+      expect(await release(['minor', '--ci-override', reason, '--yes'], cwd)).toBe(0);
+      expect(readFileSync(join(cwd, 'package.json'), 'utf8')).toContain('"version": "0.48.0"');
+      expect(shipBody()).toContain('## Base CI override');
+      expect(shipBody()).toContain(`gate.yml failed on ${SHA} (gate › Tests) — ${RUN_URL}`);
+      expect(shipBody()).toContain(`Reason given with --ci-override: ${reason}`);
+    });
+
+    it('does not record an override the green base did not need', async () => {
+      const cwd = checkout();
+      const logs = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      expect(await release(['minor', '--ci-override=unneeded', '--yes'], cwd)).toBe(0);
+      expect(shipBody()).not.toContain('unneeded');
+      expect(logs.mock.calls.flat().join('\n')).toContain('--ci-override is not recorded');
+    });
+
+    it('requires a reason with --ci-override', async () => {
+      const cwd = checkout();
+      const errors = stderr();
+
+      expect(await release(['minor', '--ci-override', ' ', '--yes'], cwd)).toBe(1);
+      expect(await release(['minor', '--ci-override=', '--yes'], cwd)).toBe(1);
+      expect(errors()).toContain('--ci-override needs a reason');
+      await expect(release(['minor', '--yes', '--ci-override'], cwd)).rejects.toThrow(/argument/);
+      refusedEarly(cwd);
+    });
+
+    it('reads the workflow guard.config.json names for baseline-status', async () => {
+      const cwd = checkout();
+      writeFileSync(
+        join(cwd, 'guard.config.json'),
+        JSON.stringify({ baselineStatus: { workflow: 'ci.yml' } }),
+      );
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      expect(await release(['minor', '--yes'], cwd)).toBe(0);
+      const list = mockExec.mock.calls.find(([cmd, args]) => cmd === 'gh' && args?.[1] === 'list');
+      expect(list?.[1]).toEqual(expect.arrayContaining(['--workflow', 'ci.yml']));
+      expect(shipBody()).toContain('Base CI: ci.yml passed');
+    });
   });
 });
