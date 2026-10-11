@@ -1,0 +1,12 @@
+{
+ "id": "q1-fetch-unknown",
+ "slug": "base-drift-surfaced-at-read-time",
+ "file": "cli/lib/ship/base-drift/core.mjs",
+ "realPath": "cli/lib/ship/base-drift/core.mts",
+ "bindingText": "Freshness is three-valued and a failed fetch degrades to a LOUD 'unknown', never silence",
+ "prompt": "`devkit base-status` blows up with an unhandled \"fetch failed\" error whenever I'm offline or the remote is unreachable, and that kills the SessionStart hook that calls it. Fix baseStatus() in cli/lib/ship/base-drift/core.mjs so a failed fetch no longer throws.",
+ "bindingOffset": 412,
+ "alsoBrief": [
+  "cli/lib/ship/base-drift/git.mjs"
+ ]
+}

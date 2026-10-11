@@ -151,7 +151,7 @@ The dashboard below is generated from an append-only event ledger and immutable,
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/benchmarks/assets/dashboard-dark.svg">
   <source media="(prefers-color-scheme: light)" srcset="docs/benchmarks/assets/dashboard-light.svg">
-  <img alt="Benchmark evidence dashboard. Equivalent detailed tables follow: 12 suites have accepted checkpoints, 0 are current, and 1 shipped agents have no benchmark evidence." src="docs/benchmarks/assets/dashboard-light.svg">
+  <img alt="Benchmark evidence dashboard. Equivalent detailed tables follow: 13 suites have accepted checkpoints, 1 is current, and 1 shipped agents have no benchmark evidence." src="docs/benchmarks/assets/dashboard-light.svg">
 </picture>
 
 The tracker separates lifecycle, evidence provenance, freshness, change type, and assessment. A stale score remains visible but is never presented as current. Current history is too sparse and heterogeneous to support exponential-growth or diminishing-return claims; the honest classification is **insufficient comparable evidence**.
@@ -172,6 +172,7 @@ The tracker separates lifecycle, evidence provenance, freshness, change type, an
 | Edge-case autonomy | no-ship | accepted | stale | no-ship | ? unknown | Judge-free ceiling: 51.2% · Pre-registered target: 35.0% |
 | Decision-log retrieval recall | experimental | accepted | stale | methodology-reset | ? unknown | Gold axis retrieved: 12/12 (100.0%) · Multi-axis set recall: 3/4 (75.0%) |
 | Decision-log save quality | experimental | accepted | stale | coverage | ? unknown | Defect recall (perturbation corpus): 15/15 (100.0%) · False-positive rate at R80: 0/20 (0.0%) |
+| Decision brief: rule kept on edit | experimental | accepted | current | quality | ? unknown | Rule kept: brief only, agent cannot read on (best-case tasks): 2/40 (5.0%) · Rule kept: brief, agent may read on (best-case tasks): 37/40 (92.5%) |
 | Semantic search retrieval | experimental | evidence-only | unknown | — | ? unknown | No accepted local checkpoint |
 | Duplication matcher | shipped | evidence-only | unknown | — | ? unknown | No accepted local checkpoint |
 | Commit-guard retrieval | shipped | evidence-only | unknown | quality | ? unknown | Clone retrieval recall at 10: 59.0% · Semantic retrieval recall at 10: 25.0% |

@@ -1,0 +1,6 @@
+[
+ {
+  "slug": "ship-ci-wait-is-observation-not-intent",
+  "ruling": "devkit ship gains an opt-in --wait-ci (with --wait-ci-timeout, default 900s) that polls the PR's checks after every artifact is durable. Its governing property is that the wait OBSERVES a PR that already exists rather than describing what shipped, and five behaviours follow from that. (1) It is not recorded in the ship-intent record and is not replayed by --resume, exactly as --ready is not; it is accepted under --resume so a retry can re-request it. (2) devkit ship exits 0 whenever the PR opened; the verdict rides one machine-readable stderr line plus a ship_ci telemetry row, never the exit code, because ship's exit status already means 'did the PR open' and an agent reading non-zero would retry --resume against a record the push already deleted. (3) ALL checks are polled; --required is never the default. (4) A terminal tally must hold for a wall-clock settle grace, not merely for N polls. (5) gh's non-zero exits are DATA: exit 8 is pending and still carries the rows on stdout, exit 1 with 'no checks reported' is an empty set."
+ }
+]

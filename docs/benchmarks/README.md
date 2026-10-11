@@ -137,6 +137,7 @@ Committed evidence rejects raw prompts, transcripts, absolute paths, email addre
 | Edge-case autonomy | no-ship | accepted | stale | no-ship | ? unknown | Judge-free ceiling: 51.2% · Pre-registered target: 35.0% |
 | Decision-log retrieval recall | experimental | accepted | stale | methodology-reset | ? unknown | Gold axis retrieved: 12/12 (100.0%) · Multi-axis set recall: 3/4 (75.0%) |
 | Decision-log save quality | experimental | accepted | stale | coverage | ? unknown | Defect recall (perturbation corpus): 15/15 (100.0%) · False-positive rate at R80: 0/20 (0.0%) |
+| Decision brief: rule kept on edit | experimental | accepted | current | quality | ? unknown | Rule kept: brief only, agent cannot read on (best-case tasks): 2/40 (5.0%) · Rule kept: brief, agent may read on (best-case tasks): 37/40 (92.5%) |
 | Semantic search retrieval | experimental | evidence-only | unknown | — | ? unknown | No accepted local checkpoint |
 | Duplication matcher | shipped | evidence-only | unknown | — | ? unknown | No accepted local checkpoint |
 | Commit-guard retrieval | shipped | evidence-only | unknown | quality | ? unknown | Clone retrieval recall at 10: 59.0% · Semantic retrieval recall at 10: 25.0% |
@@ -185,6 +186,7 @@ Committed evidence rejects raw prompts, transcripts, absolute paths, email addre
 | Sentry commit-message judge | judge | shipped | evidence-only | sentry |
 | Decision-log retrieval recall | benchmark | experimental | none | decisions-recall |
 | Decision-log save quality | benchmark | experimental | none | decisions-save-quality |
+| Decision brief: rule kept on edit | benchmark | experimental | accepted | decisions-brief |
 | Semantic search retrieval | benchmark | experimental | evidence-only | search-tool |
 | Edge-case autonomy study | benchmark | no-ship | accepted | edge-cases |
 | Vitest ship fixture setup | benchmark | experimental | accepted | vitest-fixture-setup |

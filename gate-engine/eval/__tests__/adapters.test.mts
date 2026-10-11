@@ -14,6 +14,7 @@ import {
   wilson,
 } from '../adapters.mts';
 
+import { metricAssessment } from '../cli.mts';
 import { reviewerPairMetrics } from '../metric-ratio.mts';
 
 const ROOT = join(import.meta.dirname, '..', '..', '..');
@@ -342,4 +343,24 @@ it('reports shared repair edges descriptively and uncertainty over whole paired 
     interval: { method: 'wilson-95' },
   });
   expect(reviewerPairMetrics('old', { k: 21, n: 50 })[0].interval?.method).toBe('wilson-95');
+});
+
+it('carries a declared noiseFloor through the deterministic adapter into the assessment', () => {
+  const declared = (k: number, noiseFloor?: number) => {
+    const metric = { id: 'kept', label: 'kept', k, n: 40, noiseFloor };
+    const input = { metrics: [metric], rows: { a: {} }, floorsMet: true };
+    return parseBaseline('deterministic', input).metrics[0];
+  };
+  expect(declared(1, 0.15).noiseFloor).toBe(0.15);
+  expect(metricAssessment(declared(1, 0.15), declared(2, 0.15))).toBe('flat');
+  expect(metricAssessment(declared(1, 0.15), declared(37, 0.15))).toBe('improved');
+  expect(declared(1)).not.toHaveProperty('noiseFloor');
+  expect(metricAssessment(declared(1), declared(2))).toBe('improved');
+  for (const path of [
+    'gate-engine/decisions/eval/recall/results.baseline.json',
+    'gate-engine/decisions/eval/save-quality/results.baseline.json',
+    'docs/benchmarks/vitest-fixture-results.json',
+  ])
+    for (const metric of parseBaseline('deterministic', json(path)).metrics)
+      expect(metric).not.toHaveProperty('noiseFloor');
 });
