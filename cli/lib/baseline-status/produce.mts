@@ -8,11 +8,12 @@
  * Vitest-only; the SUMMARY shape below is not, and `devkit baseline-status` reads only that.
  */
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import { z } from 'zod';
 import { resolveVitest, runVitest } from '../../../gate-engine/coverage/vitest-cli.mts';
 import { writeFileAtomic } from '../atomic-write.mts';
+import { boundedText } from './regression-evidence.mts';
 
 /**
  * Every run writes into its OWN directory under here and nothing is ever published to a shared path.
@@ -79,7 +80,7 @@ const OUTCOME_RANK = { skipped: 0, passed: 1, failed: 2 } satisfies Record<FileO
 /** The subset of vitest's Jest-compatible JSON this reads. Everything else in it is ignored. */
 interface VitestJsonReport {
   success?: boolean;
-  testResults?: { name?: string; status?: string; assertionResults?: unknown }[];
+  testResults?: { name?: string; status?: string; message?: string; assertionResults?: unknown }[];
 }
 
 /** The slice of one vitest assertion a test name needs. */
@@ -87,6 +88,7 @@ const assertionSchema = z.object({
   ancestorTitles: z.array(z.string()),
   title: z.string(),
   status: z.string(),
+  failureMessages: z.array(z.string()).catch([]),
 });
 type VitestAssertion = z.infer<typeof assertionSchema>;
 
@@ -137,6 +139,16 @@ export function escapesRoot(rel: string): boolean {
   return rel === '' || rel === '..' || rel.startsWith('../') || rel.startsWith(`..${sep}`);
 }
 
+/** A report entry's path relative to the root, or null when it escaped it (nested-run leakage). */
+function repoRelative(cwd: string, name: string): string | null {
+  // POSIX separators always: the artifact is written by CI on Linux and may be read anywhere, so
+  // one convention has to win and it is the artifact's.
+  const rel = relative(cwd, resolve(cwd, name)).split(sep).join('/');
+  // A leading `..` SEGMENT (or an absolute result) means the path escaped the root. Tested as a
+  // segment, not a prefix: `..smoke.test.mts` is an ordinary filename, not an escape.
+  return escapesRoot(rel) || resolve(cwd, rel) !== resolve(cwd, name) ? null : rel;
+}
+
 /**
  * Admit only a payload that carries vitest's two run-level guarantees.
  *
@@ -182,12 +194,8 @@ export function summarise(
 
   for (const result of report.testResults ?? []) {
     if (!result?.name) continue;
-    // POSIX separators always: the artifact is written by CI on Linux and may be read anywhere, so
-    // one convention has to win and it is the artifact's.
-    const rel = relative(cwd, resolve(cwd, result.name)).split(sep).join('/');
-    // A leading `..` SEGMENT (or an absolute result) means the path escaped the root. Tested as a
-    // segment, not a prefix: `..smoke.test.mts` is an ordinary filename, not an escape.
-    if (escapesRoot(rel) || resolve(cwd, rel) !== resolve(cwd, result.name)) {
+    const rel = repoRelative(cwd, result.name);
+    if (rel === null) {
       droppedForeignPaths++;
       continue;
     }
@@ -219,6 +227,67 @@ export function summarise(
     tests: capNames(files, names),
     droppedForeignPaths,
   };
+}
+
+/** Step-summary bounds: enough to triage a red run, far below GitHub's 1 MiB per-step limit. */
+export const MAX_STEP_SUMMARY_ENTRIES = 100;
+const MAX_ERROR_CHARS = 200;
+
+/** The first non-empty line of a failure message, on the same terms as regression evidence. */
+function firstErrorLine(message: string | undefined, cwd: string): string {
+  const line = (message ?? '').split('\n').find((l) => l.trim()) ?? '';
+  return (boundedText(line, MAX_ERROR_CHARS, cwd) || '(no message)').replaceAll('<', '&lt;');
+}
+
+/**
+ * The failed-tests list for the run page: `file › suite > test — first error line`, or null when
+ * nothing failed. Driven by the summary's files, so a nested run's leaked entries cannot appear.
+ */
+export function renderFailedTests(
+  report: VitestJsonReport,
+  summary: TestReportSummary,
+  cwd: string,
+): string | null {
+  const lines = new Set<string>();
+  for (const result of report.testResults ?? []) {
+    const rel = result?.name ? repoRelative(cwd, result.name) : null;
+    if (rel === null || summary.files[rel] !== 'failed' || result.status !== 'failed') continue;
+    const failed = assertionsSchema
+      .parse(result.assertionResults)
+      .filter((a) => a?.status === 'failed');
+    // No failed assertion means the file did not load or a hook threw: list the file itself.
+    if (!failed.length) lines.add(`- \`${rel}\` — ${firstErrorLine(result.message, cwd)}`);
+    for (const a of failed) {
+      if (!a) continue;
+      const name = [...a.ancestorTitles, a.title].join(' > ').replaceAll('<', '&lt;');
+      lines.add(`- \`${rel}\` › ${name} — ${firstErrorLine(a.failureMessages[0], cwd)}`);
+    }
+  }
+  if (!lines.size) return null;
+  const shown = [...lines].sort().slice(0, MAX_STEP_SUMMARY_ENTRIES);
+  const more = lines.size - shown.length;
+  return [
+    `### Failed tests (${lines.size})`,
+    '',
+    ...shown,
+    ...(more ? ['', `… ${more} more not shown`] : []),
+  ].join('\n');
+}
+
+/** Append the failed-tests list to GitHub's step summary. Best-effort: it never fails the run. */
+export function writeStepSummary(
+  report: VitestJsonReport,
+  summary: TestReportSummary,
+  cwd: string,
+  env: NodeJS.ProcessEnv = process.env,
+): void {
+  if (!env.GITHUB_STEP_SUMMARY) return;
+  try {
+    const markdown = renderFailedTests(report, summary, cwd);
+    if (markdown) appendFileSync(env.GITHUB_STEP_SUMMARY, `\n${markdown}\n`);
+  } catch (e) {
+    console.error(`⚠️  could not write the step summary: ${e instanceof Error ? e.message : e}`);
+  }
 }
 
 /**
@@ -272,10 +341,9 @@ export async function produceTestReport(cwd = process.cwd(), argv: string[] = []
     // SAFETY: unverified at this point BY DESIGN — assertVitestReport below is what admits it.
     const parsed = JSON.parse(readFileSync(reportPath, 'utf8')) as VitestJsonReport;
     const report = assertVitestReport(parsed);
-    writeFileAtomic(
-      join(runDir, SUMMARY_NAME),
-      `${JSON.stringify(summarise(report, cwd), null, 2)}\n`,
-    );
+    const summary = summarise(report, cwd);
+    writeFileAtomic(join(runDir, SUMMARY_NAME), `${JSON.stringify(summary, null, 2)}\n`);
+    writeStepSummary(report, summary, cwd);
   } catch (e) {
     console.error(`⚠️  could not summarise the test report: ${e instanceof Error ? e.message : e}`);
     rmSync(runDir, { recursive: true, force: true });
