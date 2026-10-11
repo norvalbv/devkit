@@ -133,7 +133,7 @@ const OTHER_DEPENDENCY_RE = new RegExp(
 
 // What configures the gates or CI a merge relies on, so a change to it can never certify itself.
 const GOVERNANCE_GLOBS = [
-  ...FIXED_GATE_INPUTS.filter((input) => !input.cache && !input.localCache).map((input) =>
+  ...FIXED_GATE_INPUTS.filter((input) => !input.localCache).map((input) =>
     input.kind === 'dir' ? `${input.path}/**` : input.path,
   ),
   '.devkit/config.json',
