@@ -227,9 +227,13 @@ export const PATH_LIKE_RE =
   /[\w.-]+(?:\/[\w.-]+)+\.(?:[mc]?[jt]sx?|json|jsonc|sh|bash|py|rb|go|java|kt|rs|vue|svelte|md|ya?ml|toml|css|scss|html|sql|graphql|prisma|tf|xml|txt|env)\b/;
 const MAX_LABEL_LEN = 80;
 export function assertCountsOnly(report: LensHoleReport): void {
+  assertCountsOnlyJson(JSON.stringify(report));
+}
+
+/** The same check over any serialised report, for benches whose report is not a lens-hole one. */
+export function assertCountsOnlyJson(text: string): void {
   // Keys AND string values are checked: a category or lens label that carried finding text or a
   // file path would leak just as surely as a forbidden key.
-  const text = JSON.stringify(report);
   const key = text.match(FORBIDDEN_KEY_RE);
   if (key) throw new Error(`lens-hole report is counts-only; found key '${key[1]}'`);
   for (const [, value] of text.replace(/https?:\/\/\S+/g, '').matchAll(/"([^"\\]*)"/g)) {

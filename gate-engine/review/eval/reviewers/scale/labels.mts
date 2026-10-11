@@ -42,6 +42,17 @@ export function extractLocations(text: string): IssueLocation[] {
   return out;
 }
 
+const FILE_RANGE_RE = /([\w@./-]+\.[A-Za-z]{1,5})(?::~?(\d+)(?:-~?(\d+))?)?/g;
+
+/** Every `file:a-b` citation with its last line (`line` when single); `~` marks an approximate line. */
+export function extractRanges(text: string): Array<IssueLocation & { endLine: number | null }> {
+  return [...String(text).matchAll(FILE_RANGE_RE)].map((m) => ({
+    file: m[1],
+    line: m[2] ? Number(m[2]) : null,
+    endLine: m[3] ? Number(m[3]) : m[2] ? Number(m[2]) : null,
+  }));
+}
+
 /** Resolve a mentioned location to a path in a CLOSED staged-file set: exact match, else a
  * whole-segment suffix match that is UNIQUE within the set. Ambiguity (two packages sharing a
  * trailing subpath, several same-named files) resolves to nothing — cross-attribution between
