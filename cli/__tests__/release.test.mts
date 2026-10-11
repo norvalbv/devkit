@@ -482,6 +482,43 @@ describe('release publishing', () => {
       expect(mockShip).not.toHaveBeenCalled();
     });
 
+    const ranBun = (script: string) =>
+      mockExec.mock.calls.some(
+        ([cmd, args]) => cmd === 'bun' && args.join(' ') === `run ${script}`,
+      );
+
+    it('skips the local suite on a green base, still builds, and says so in the release PR', async () => {
+      const cwd = checkout();
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      expect(await release(['minor', '--yes'], cwd)).toBe(0);
+      expect(ranBun('test:run')).toBe(false);
+      expect(ranBun('build')).toBe(true);
+      expect(shipBody()).toContain('passed in CI on the base commit; it was not re-run locally');
+    });
+
+    it('runs the local suite under --ci-override, and a failing suite stops the release', async () => {
+      const cwd = checkout();
+      ci.conclusion = 'failure';
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      expect(await release(['minor', '--ci-override', 'main red', '--yes'], cwd)).toBe(0);
+      expect(ranBun('test:run')).toBe(true);
+      expect(shipBody()).toContain('The full test suite ran locally');
+
+      mockShip.mockClear();
+      const base = mockExec.getMockImplementation();
+      mockExec.mockImplementation((command: string, args: string[]) => {
+        if (command === 'bun' && args.join(' ') === 'run test:run') throw new Error('suite red');
+        return base?.(command, args) ?? '';
+      });
+      const read = stderr();
+      const again = checkout();
+      expect(await release(['minor', '--ci-override', 'main red', '--yes'], again)).toBe(1);
+      expect(read()).toContain('tests failed');
+      expect(mockShip).not.toHaveBeenCalled();
+    });
+
     it('releases a red base under --ci-override and records the reason, sha and run', async () => {
       const cwd = checkout();
       ci.conclusion = 'failure';
