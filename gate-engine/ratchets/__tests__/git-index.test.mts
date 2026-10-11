@@ -15,6 +15,7 @@ import {
   freezeIndex,
   frozenTouchedSet,
   indexFiles,
+  stagedSet,
   stagedTouchedSet,
   treeFilesAtRef,
 } from '../git-index.mts';
@@ -105,6 +106,46 @@ describe('stagedTouchedSet', () => {
     // The resolution differs from both parents; the cleanly-inherited file differs only from HEAD.
     expect(touched).toContain('kept.txt');
     expect(touched).not.toContain('side-only.txt');
+  });
+});
+
+describe('stagedSet path identity', () => {
+  it('keeps non-ASCII and space-edged names verbatim even with core.quotePath on', () => {
+    const root = seed();
+    git(root, 'config', 'core.quotePath', 'true');
+    for (const name of ['café.ts', ' lead.ts', 'tab\tname.ts'])
+      writeFileSync(join(root, name), 'x\n');
+    git(root, 'add', '-A');
+    expect(stagedSet(root)).toEqual(new Set(['café.ts', ' lead.ts', 'tab\tname.ts']));
+  });
+
+  it('returns null, so the caller stands down, when a staged name is not valid UTF-8', () => {
+    const root = seed();
+    const blob = execFileSync('git', ['hash-object', '-w', '--stdin'], { cwd: root, input: 'x\n' });
+    const record = Buffer.concat([
+      Buffer.from(`100644 ${blob.toString().trim()}\t`),
+      Buffer.from([0xff, 0x2e, 0x74, 0x73, 0]),
+    ]);
+    execFileSync('git', ['update-index', '-z', '--index-info'], { cwd: root, input: record });
+    expect(stagedSet(root)).toBeNull();
+  });
+
+  // HEAD carries a non-UTF-8 name that MERGE_HEAD lacks: the first-parent list decodes, the
+  // MERGE_HEAD list does not. Falling back to first-parent scope would govern inherited files.
+  it('returns null when only the MERGE_HEAD comparison holds a non-UTF-8 name', () => {
+    const root = seed();
+    const mergeHead = git(root, 'rev-parse', 'HEAD');
+    const blob = execFileSync('git', ['hash-object', '-w', '--stdin'], { cwd: root, input: 'x\n' });
+    const record = Buffer.concat([
+      Buffer.from(`100644 ${blob.toString().trim()}\t`),
+      Buffer.from([0xff, 0x2e, 0x74, 0x73, 0]),
+    ]);
+    execFileSync('git', ['update-index', '-z', '--index-info'], { cwd: root, input: record });
+    git(root, 'commit', '-qm', 'non-utf8 on HEAD only');
+    writeFileSync(join(root, '.git', 'MERGE_HEAD'), `${mergeHead}\n`);
+    writeFileSync(join(root, 'kept.txt'), 'resolved\n');
+    git(root, 'add', 'kept.txt');
+    expect(stagedSet(root)).toBeNull();
   });
 });
 
