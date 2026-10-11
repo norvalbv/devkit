@@ -1,0 +1,8 @@
+{
+ "id": "q2-shipci",
+ "slug": "ship-ci-wait-is-observation-not-intent",
+ "file": "cli/lib/ship/wait-ci.mjs",
+ "prompt": "In cli/lib/ship/wait-ci.mjs, waitCi polls CI after ship has opened the PR but then ignores the result. Make it report a failed CI run to whoever invoked ship. Keep the change small and do not add new files.",
+ "bindingOffset": 459,
+ "bindingText": "devkit ship exits 0 whenever"
+}

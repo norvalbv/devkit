@@ -1,0 +1,14 @@
+[
+ {
+  "slug": "decision-records-cli-owned-writes",
+  "ruling": "Decision records are a guard-owned capability: selecting the decisions guard installs a native pre-edit deny hook on every selected agent surface, and selecting skills projects the decisions playbook only while that guard remains enabled. Agents author and correct records through the guard-decisions CLI, whose draft amendment path may replace the newest uncommitted note, or the newest uncommitted Target with the draft notes under it kept byte-for-byte; committed history remains append-only."
+ },
+ {
+  "slug": "decision-retrieval-candidate-set",
+  "ruling": "Retrieval candidates come from the decisions DIRECTORY (loadAxisRows in gate-engine/decisions/retrieval.mts), reading both the Target and the legacy pre-Target schema; INDEX.md is demoted to a rendered view that supplies ruling/why only as a fallback for a file we cannot parse. A searched-but-unmatched query ABSTAINS: RankResult.source distinguishes 'empty' (nothing recorded) from 'none' (searched, nothing rules) and returns no rows, replacing the alphabetical first-k fallback."
+ },
+ {
+  "slug": "decision-retrieval-tier-fusion",
+  "ruling": "Both tiers run over the same candidates and are fused by Reciprocal Rank Fusion (score = SUM of 1/(60+rank)), K=60 from Cormack et al. 2009 and deliberately untuned at this corpus size. Fusion is strictly better than either tier on the suite: containment SINGLE 8/8, Buried-by-rank 1/8, SetRecall 3/4, PartialRecall 87.5% — beating BOTH parents on multi-axis. Abstention, however, is computed from the PRE-FUSION lexical top-1 score, never the fused score: RRF is rank-only by construction and throws away the magnitude a confidence threshold needs. Degradation to a single tier is announced on stderr, and the result's source field reports hybrid, lexical or semantic so a caller can see which path ran."
+ }
+]

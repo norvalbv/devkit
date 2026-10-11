@@ -34,18 +34,12 @@ export function parseDeterministic(
     if (!metric || typeof metric !== 'object' || typeof metric.id !== 'string') continue;
     const label = String(metric.label ?? metric.id);
     const direction = metric.direction === 'lower' ? 'lower' : 'higher';
+    const extra: Partial<MetricObservation> = { inferenceUnit: 'case' };
+    if (Number.isFinite(metric.noiseFloor)) extra.noiseFloor = metric.noiseFloor;
     if (typeof metric.k === 'number' && typeof metric.n === 'number' && metric.n > 0)
-      metrics.push(
-        helpers.ratio(metric.id, label, metric.k, metric.n, direction, {
-          inferenceUnit: 'case',
-        }),
-      );
+      metrics.push(helpers.ratio(metric.id, label, metric.k, metric.n, direction, extra));
     else if (typeof metric.value === 'number')
-      metrics.push(
-        helpers.scalar(metric.id, label, metric.value, direction, 'ratio', {
-          inferenceUnit: 'case',
-        }),
-      );
+      metrics.push(helpers.scalar(metric.id, label, metric.value, direction, 'ratio', extra));
   }
   const rows = input.rows && typeof input.rows === 'object' ? (input.rows as Json) : {};
   const floorsMet = input.floorsMet === true;

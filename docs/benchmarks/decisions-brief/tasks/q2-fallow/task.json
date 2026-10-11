@@ -1,0 +1,8 @@
+{
+ "id": "q2-fallow",
+ "slug": "fallow-gate-owned-by-fallow",
+ "file": "gate-engine/fallow/gate.mjs",
+ "prompt": "When fallow itself crashes (status 2 or higher), fallowGate in gate-engine/fallow/gate.mjs kills the commit and the developer gets no explanation. Fix that case so the developer knows what happened. Keep the change small and do not add new files.",
+ "bindingOffset": 418,
+ "bindingText": "any fallow error (exit 2 or higher) skip"
+}

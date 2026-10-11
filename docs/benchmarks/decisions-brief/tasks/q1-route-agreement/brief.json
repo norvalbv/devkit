@@ -1,0 +1,14 @@
+[
+ {
+  "slug": "correctness-reviewer-precision",
+  "ruling": "Correctness precision is a DESIGN problem, not a model problem. RECALL comes from the model (single-pass sonnet finder, the model-pinned exception to the domain-reviewer cascade). PRECISION comes from SAMPLING, not self-critique: K-sample self-consistency with an asymmetric 'unanimous-to-block, lenient-to-pass' rule, routed by sample AGREEMENT (never the model's stated confidence), which never asks the model to second-guess its own finding. Cross-domain leaks are trimmed by a one-sided deterministic keyword drop (domainExclusivityDrop) that can only REMOVE a block, biased to under-fire — the ONLY acceptable matcher use. Explicitly forbidden: a same-family generate->verify/refute pass."
+ },
+ {
+  "slug": "judge-mcp-profiles",
+  "ruling": "Every Devkit-spawned claude -p judge uses Claude Code strict MCP configuration. Pure and internal judges receive an empty profile. Named reviewer agents receive trusted machine-local codebase, Context7, and autonomous_bugs definitions when configured, and the full autonomous_bugs server permission includes report and amend. Definitions come only from user-owned Claude configuration or an explicit machine-local override, never repository-controlled .mcp.json. Task-dispatched agents use provider-native named server references and retain role-specific research capabilities. Secret-bearing definitions travel through private temporary files, not process arguments."
+ },
+ {
+  "slug": "reviewer-blocks-require-validated-evidence",
+  "ruling": "A checklist-free reviewer's prose verdict never blocks by itself. Blocking authority requires the gate to mechanically parse at least one complete finding that satisfies the reviewer's declared evidence contract. A `FAIL` without such a finding is inconclusive, preserving strict ship's fail-closed boundary without misreporting a repository-rule violation."
+ }
+]

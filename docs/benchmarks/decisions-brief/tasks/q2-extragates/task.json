@@ -1,0 +1,8 @@
+{
+ "id": "q2-extragates",
+ "slug": "consumer-extra-gates",
+ "file": "gate-engine/deterministic/extra-gates.mjs",
+ "prompt": "A user had \"extraGates\": { \"lint\": 42 } in guard.config.json and runExtraGates in gate-engine/deterministic/extra-gates.mjs crashed with a TypeError. Make it cope with a malformed entry. Keep the change small and do not add new files.",
+ "bindingOffset": 378,
+ "bindingText": "blocks as unrunnable instead of being dropped"
+}

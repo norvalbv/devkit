@@ -1,0 +1,12 @@
+{
+ "id": "q1-abstain-prefusion",
+ "slug": "decision-retrieval-tier-fusion",
+ "file": "gate-engine/decisions/recall/fuse.mjs",
+ "realPath": "gate-engine/decisions/recall/fuse.mts",
+ "bindingText": "Abstention, however, is computed from the PRE-FUSION lexical top-1 score",
+ "prompt": "`guard-decisions query` returns k decisions even for a query that has nothing to do with any of them, which misleads people. Add abstention to fuse() in gate-engine/decisions/recall/fuse.mjs: accept a third argument `{ minScore }` and, when the best match is not confident enough (its score is below minScore), return `{ rows: [], source: 'none' }` instead. Leave the behaviour unchanged when minScore is not given.",
+ "bindingOffset": 360,
+ "alsoBrief": [
+  "gate-engine/decisions/recall/query.mjs"
+ ]
+}

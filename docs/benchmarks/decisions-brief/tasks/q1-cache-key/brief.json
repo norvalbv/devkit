@@ -1,0 +1,10 @@
+[
+ {
+  "slug": "ci-emits-per-file-test-results",
+  "ruling": "Fix the PRODUCER, not the reader. 'devkit test-report-run' runs vitest with default + github-actions + json reporters and emits two artifacts: the full report and a few-KB per-file summary, uploaded separately with if: always(). 'devkit baseline-status' answers from the summary and NEVER parses log text. It reports runStatus (the whole run) separately from testsStatus (the test step), because a red run whose tests passed is devkit's actual steady state. Per-file answers split into passed/failed/skipped/excluded/absent/unknown; gh is a SOFT dependency degrading to a named unknown per the detectMerged precedent in cli/lib/reconcile.mts. The cache keys on runId+attempt, never on the commit sha. lastPassed is forward-facing: it reports no-artifact-history rather than implying a file never passed."
+ },
+ {
+  "slug": "decision-records-cli-owned-writes",
+  "ruling": "Decision records are a guard-owned capability: selecting the decisions guard installs a native pre-edit deny hook on every selected agent surface, and selecting skills projects the decisions playbook only while that guard remains enabled. Agents author and correct records through the guard-decisions CLI, whose draft amendment path may replace the newest uncommitted note, or the newest uncommitted Target with the draft notes under it kept byte-for-byte; committed history remains append-only."
+ }
+]

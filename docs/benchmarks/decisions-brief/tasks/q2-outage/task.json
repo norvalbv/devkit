@@ -1,0 +1,8 @@
+{
+ "id": "q2-outage",
+ "slug": "judge-outage-classified-not-blocked",
+ "file": "gate-engine/judge/outage.mjs",
+ "prompt": "Extend classifyJudgeOutage in gate-engine/judge/outage.mjs: recognise an unauthenticated judge (stderr mentions 401 or 'not logged in') and an absent one ('command not found' or ENOENT), and make sure it always returns a classification instead of undefined. Keep the change small and do not add new files.",
+ "bindingOffset": 504,
+ "bindingText": "an unrecognised failure stays transient"
+}

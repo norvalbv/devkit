@@ -5,7 +5,10 @@
   "jsPlugins": [],
   "overrides": [
     {
-      "files": ["docs/benchmarks/experiments/2026-09-13-corpus-growth/qualification/**/*.{js,mjs,cjs}"],
+      "files": [
+        "docs/benchmarks/experiments/2026-09-13-corpus-growth/qualification/**/*.{js,mjs,cjs}",
+        "docs/benchmarks/decisions-brief/tasks/**/*.{js,mjs,cjs}"
+      ],
       "rules": {
         "anti-slop/no-runtime-typeof": "warn",
         "anti-slop/no-shape-in-symbol-names": "warn",

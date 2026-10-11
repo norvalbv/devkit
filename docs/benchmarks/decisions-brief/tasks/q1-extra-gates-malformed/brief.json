@@ -1,0 +1,6 @@
+[
+ {
+  "slug": "consumer-extra-gates",
+  "ruling": "A repo declares extra deterministic gates in guard.config.json as extraGates, a label-to-command map. guard-deterministic reads them at run time and runs them after any --extra gates, under the same contract: each command's argv is split on whitespace, runs without a shell, and any non-zero exit blocks. A malformed entry, a non-object block or an unreadable guard.config.json blocks as unrunnable instead of being dropped. The value is a resolved GuardConfig field, so the prefix-cache config fingerprint changes when the declared set changes."
+ }
+]

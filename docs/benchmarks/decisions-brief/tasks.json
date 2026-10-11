@@ -1,0 +1,74 @@
+{
+  "q1-abstain-prefusion": {
+    "role": "clause",
+    "cluster": "abstain-prefusion"
+  },
+  "q1-cache-key": {
+    "role": "floor",
+    "cluster": "cache-key"
+  },
+  "q1-checkpoint-reader": {
+    "role": "floor",
+    "cluster": "checkpoint-null-torn"
+  },
+  "q1-extra-gates-malformed": {
+    "role": "floor",
+    "cluster": "extra-gates-unrunnable"
+  },
+  "q1-fetch-unknown": {
+    "role": "clause",
+    "cluster": "fetch-unknown"
+  },
+  "q1-hook-shellout": {
+    "role": "clause",
+    "cluster": "hook-shellout"
+  },
+  "q1-qavis-outage": {
+    "role": "floor",
+    "cluster": "qavis-outage"
+  },
+  "q1-route-agreement": {
+    "role": "clause",
+    "cluster": "route-agreement"
+  },
+  "q1-store-exit4": {
+    "role": "clause",
+    "cluster": "store-exit4"
+  },
+  "q1-uncategorised": {
+    "role": "floor",
+    "cluster": "uncategorised"
+  },
+  "q2-ckpt": {
+    "role": "floor",
+    "cluster": "checkpoint-null-torn"
+  },
+  "q2-drift": {
+    "role": "floor",
+    "cluster": "fetch-unknown"
+  },
+  "q2-extragates": {
+    "role": "floor",
+    "cluster": "extra-gates-unrunnable"
+  },
+  "q2-fallow": {
+    "role": "clause",
+    "cluster": "fallow"
+  },
+  "q2-optout": {
+    "role": "floor",
+    "cluster": "optout"
+  },
+  "q2-outage": {
+    "role": "probe",
+    "cluster": "outage"
+  },
+  "q2-shipci": {
+    "role": "clause",
+    "cluster": "shipci"
+  },
+  "q2-telemetry": {
+    "role": "clause",
+    "cluster": "telemetry"
+  }
+}

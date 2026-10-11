@@ -1,0 +1,12 @@
+{
+ "id": "q1-checkpoint-reader",
+ "slug": "bench-runs-resume-from-checkpoint",
+ "file": "gate-engine/decisions/eval/checkpoint.mjs",
+ "realPath": "gate-engine/decisions/eval/checkpoint.mjs",
+ "bindingText": "outage verdicts (NULL) are never replayed",
+ "prompt": "Benchmark runs take 20 minutes and start from zero whenever one is interrupted. gate-engine/decisions/eval/checkpoint.mjs already appends every finished row to a progress file (appendRow). Implement loadCheckpoint(file, key) there so bench.mjs can resume: it returns the rows from the progress file that this run can reuse instead of judging them again.",
+ "bindingOffset": 321,
+ "alsoBrief": [
+  "gate-engine/decisions/eval/bench.mjs"
+ ]
+}

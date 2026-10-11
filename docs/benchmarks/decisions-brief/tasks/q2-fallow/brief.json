@@ -1,0 +1,6 @@
+[
+ {
+  "slug": "fallow-gate-owned-by-fallow",
+  "ruling": "Every devkit-owned consumer pre-commit block (package, standalone, overlay) carries one staged fallow gate: the captured git diff --cached handed to fallow audit --diff-stdin. devkit never runs fallow's git hook installer. The gate blocks only on fallow's fail verdict (exit 1). An absent fallow or an empty staged diff skips the audit silently, as overlay always has; a diff over fallow's 10 MiB --diff-stdin cap and any fallow error (exit 2 or higher) skip it with a printed line. Package and standalone init write no fallow-baselines/. devkit doctor reports a selected fallow gate missing from the block as fixable drift. Self-host keeps its advisory-only fragment."
+ }
+]

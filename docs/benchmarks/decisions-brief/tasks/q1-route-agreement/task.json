@@ -1,0 +1,13 @@
+{
+ "id": "q1-route-agreement",
+ "slug": "correctness-reviewer-precision",
+ "file": "gate-engine/review/route.mjs",
+ "realPath": "gate-engine/review/route.mts",
+ "bindingText": "(never the model's stated confidence)",
+ "prompt": "The correctness reviewer blocks commits on findings that turn out to be wrong too often. We run the finder several times per diff and collect what each run said (see gate-engine/review/samples.mjs for the shape). Implement routeFinding(finding) in gate-engine/review/route.mjs so that only findings we can trust return 'block' and the rest return 'advisory'.",
+ "bindingOffset": 346,
+ "note": "'unanimous-to-block' is visible before the cut; the prohibition on confidence is hidden",
+ "alsoBrief": [
+  "gate-engine/review/samples.mjs"
+ ]
+}

@@ -1,0 +1,6 @@
+[
+ {
+  "slug": "judge-outage-classified-not-blocked",
+  "ruling": "A judge outage is CLASSIFIED at the failure site, not guessed at, and reachability is REPORTED before the chain but never enforced there. classifyJudgeOutage (gate-engine/judge/outage.mts) splits absent / unauthenticated / rate-limited out of the fused offline/quota/absent label using only the provider's own channels \u2014 the structured turn.failed event and stderr, never the Node error message, which renders the judge's argv and therefore the staged diff. Every classification is positive-signal-only: an unrecognised failure stays transient. Each kind carries 'permanent', the single input to every retry predicate, replacing the cascade's firstOutage !== 'timeout' test. A ship-time preflight reads codex app-server account/rateLimits/read (non-billed, ~1s, answers while inference is refused) and prints provider, model, window use and reset per ROLE \u2014 then continues unconditionally."
+ }
+]

@@ -1,0 +1,14 @@
+[
+ {
+  "slug": "decision-categories-controlled-vocabulary",
+  "ruling": "A record declares **Category:** on its Target, validated against a frozen six-value list (decision-log, commit-gates, benchmarking, ship-pipeline, consumer-distribution, self-host-release) derived by reading what every existing axis actually governs. An unknown value is a hard error at write time naming the allowed values. Records without a category are reported under an explicit uncategorised heading, never silently bucketed — on the real corpus today that is all 31, which is the honest reading rather than a fabricated grouping. guard-decisions categories renders category to axis to current ruling and always exits 0: it is a view, not a gate."
+ },
+ {
+  "slug": "decision-records-cli-owned-writes",
+  "ruling": "Decision records are a guard-owned capability: selecting the decisions guard installs a native pre-edit deny hook on every selected agent surface, and selecting skills projects the decisions playbook only while that guard remains enabled. Agents author and correct records through the guard-decisions CLI, whose draft amendment path may replace the newest uncommitted note, or the newest uncommitted Target with the draft notes under it kept byte-for-byte; committed history remains append-only."
+ },
+ {
+  "slug": "decision-retrieval-candidate-set",
+  "ruling": "Retrieval candidates come from the decisions DIRECTORY (loadAxisRows in gate-engine/decisions/retrieval.mts), reading both the Target and the legacy pre-Target schema; INDEX.md is demoted to a rendered view that supplies ruling/why only as a fallback for a file we cannot parse. A searched-but-unmatched query ABSTAINS: RankResult.source distinguishes 'empty' (nothing recorded) from 'none' (searched, nothing rules) and returns no rows, replacing the alphabetical first-k fallback."
+ }
+]
