@@ -24,7 +24,7 @@ export function trackReviewFixtureDir(dir: string): string {
 
 export function cleanupReviewFixtures(): void {
   for (let dir = trackedDirs.pop(); dir; dir = trackedDirs.pop())
-    rmSync(dir, { recursive: true, force: true, maxRetries: 5 });
+    rmSync(dir, { recursive: true, force: true });
   for (const key of Object.keys(pinnedEnv)) {
     if (pinnedEnv[key] === undefined) delete process.env[key];
     else process.env[key] = pinnedEnv[key];
@@ -64,7 +64,8 @@ export function consumerRepo({
 } = {}): string {
   pinLegacyJudgeEnv();
   const repo = trackReviewFixtureDir(mkdtempSync(join(tmpdir(), 'guard-review-gate-')));
-  execSync('git init -q', { cwd: repo });
+  // git >= 2.54 auto-maintenance detaches from `git commit` and repacks into .git while cleanup runs.
+  execSync('git init -q && git config maintenance.auto false', { cwd: repo });
   writeFileSync(
     join(repo, 'guard.config.json'),
     JSON.stringify({
