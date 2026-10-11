@@ -39,7 +39,7 @@ function compile(source: string, index: number): RegExp {
  * Single-word names are skipped: they collide with ordinary prose. */
 function decisionPattern(cwd: string, decisionsDir: string): RegExp | null {
   const dir = path.relative(cwd, path.resolve(cwd, decisionsDir)).split(path.sep).join('/') || '.';
-  const listed = execFileSync('git', ['ls-files', '-z', '--', dir], {
+  const listed = execFileSync('git', ['ls-files', '-z', '--', `:(literal)${dir}`], {
     cwd,
     env: commitIndexEnv(cwd),
     encoding: 'utf8',

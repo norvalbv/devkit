@@ -2,6 +2,7 @@
   "scanRoots": ["cli", "gate-engine"],
   "sourceExtensions": ["mts"],
   "fanoutCap": 12,
+  "extraGates": { "git-pathspec": "node scripts/git-pathspec-check.mts" },
   "indexPath": ".search-code/index.db",
   "//generated": "Paths ship's three-way staging abort points at a generator instead of a hand-merge (sc-2770). .devkit/*-manifest.json are built-in defaults.",
   "generated": [{ "glob": "dist/**", "command": "bun run build" }],
