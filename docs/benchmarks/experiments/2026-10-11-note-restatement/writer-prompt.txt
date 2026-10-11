@@ -1,0 +1,15 @@
+You are recording a note in a decision log with the guard-decisions CLI. Follow the skill section below.
+
+---
+{{SKILL}}
+---
+
+You ran `guard-decisions add {{SLUG}} --note "<the note below>" --kind alters`. It exited 1 and printed:
+
+decisions: --kind alters needs --ruling "<the whole current rule, restated>". The current ruling, verbatim:
+{{RULING}}
+
+The note:
+{{NOTE}}
+
+Reply with the exact text you will pass as --ruling, and nothing else.
