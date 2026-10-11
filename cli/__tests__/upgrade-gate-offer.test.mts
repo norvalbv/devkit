@@ -151,42 +151,6 @@ describe('devkit upgrade — gate reconcile', () => {
     expect(config(root).components.disabledGuards).not.toContain('comments');
   });
 
-  it('migrates a recorded qavis-advisory to ui-evidence in the config and the hook', () => {
-    const root = tmpRepo(CLIB_PKG);
-    const init = run(root, 'init', '--stack', 'component-lib', '--yes', '--no-cursor');
-    expect(init.status, init.stderr || init.stdout).toBe(0);
-    const cfgPath = join(root, '.devkit', 'config.json');
-    const legacy = readFileSync(cfgPath, 'utf8').replaceAll('"ui-evidence"', '"qavis-advisory"');
-    writeFileSync(cfgPath, legacy);
-    const hookPath = join(root, '.husky', 'pre-commit');
-    writeFileSync(hookPath, hook(root).replaceAll('ui-evidence', 'qavis-advisory'));
-
-    const up = run(root, 'upgrade');
-    expect(up.status, up.stderr || up.stdout).toBe(0);
-    expect(readFileSync(cfgPath, 'utf8')).not.toContain('qavis-advisory');
-    expect(guards(root)).toContain('ui-evidence');
-    expect(hook(root)).toContain('guard-ui-evidence');
-    expect(hook(root)).not.toContain('qavis');
-  });
-
-  it('keeps a recorded qavis-advisory decline as a ui-evidence decline', () => {
-    const root = tmpRepo(CLIB_PKG);
-    expect(run(root, 'init', '--stack', 'component-lib', '--yes', '--no-cursor').status).toBe(0);
-    const cfgPath = join(root, '.devkit', 'config.json');
-    const cfg = JSON.parse(readFileSync(cfgPath, 'utf8'));
-    cfg.components.guards = cfg.components.guards.filter((g: string) => g !== 'ui-evidence');
-    cfg.components.disabledGuards = GUARD_IDS.filter((g) => !cfg.components.guards.includes(g)).map(
-      (g) => (g === 'ui-evidence' ? 'qavis-advisory' : g),
-    );
-    writeFileSync(cfgPath, `${JSON.stringify(cfg, null, 2)}\n`);
-
-    const up = run(root, 'upgrade');
-    expect(up.status, up.stderr || up.stdout).toBe(0);
-    expect(up.stdout.split('devkit doctor')[0]).not.toMatch(/ui-evidence/);
-    expect(guards(root)).not.toContain('ui-evidence');
-    expect(config(root).components.disabledGuards).toContain('ui-evidence');
-  });
-
   it('does NOT re-nag about opt-in gates that were already recorded as declined', () => {
     // Default init includes every recommended gate and excludes opt-in gates. Record those omissions
     // as explicit declines to distinguish them from never-seen gates that upgrade should offer.

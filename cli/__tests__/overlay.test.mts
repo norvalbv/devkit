@@ -1773,7 +1773,7 @@ describe('overlay commit-msg judges (sc-1794)', () => {
     expect(hook).toContain('# devkit:guard-sentry');
     expect(hook).toContain('command -v guard-deterministic'); // global bins: package-less
     expect(hook).toContain('exec sh .husky/commit-msg "$@"');
-    // A ship judges sentry at pre-commit, before the qavis advisory, as package mode does.
+    // A ship judges sentry at pre-commit, as package mode does.
     expect(readFileSync(join(root, '.devkit', 'hooks', 'pre-commit'), 'utf8')).toContain(
       '# devkit:guard-sentry-prewarm',
     );

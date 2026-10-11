@@ -1,12 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  GUARD_IDS,
-  newBundledGates,
-  normalizeReviewProfile,
-  normalizeSelection,
-  RECOMMENDED_GUARD_IDS,
-} from '../lib/components.mts';
-import { parseFlags } from '../lib/install/flags/init-flags.mts';
+import { GUARD_IDS, newBundledGates, RECOMMENDED_GUARD_IDS } from '../lib/components.mts';
 
 describe('gate registry', () => {
   it('ui-evidence is recommended and GUARD_IDS carries it exactly once', () => {
@@ -52,21 +45,5 @@ describe('newBundledGates', () => {
     const { recommended, optIn } = newBundledGates(selected, ['comments']);
     expect(recommended).toEqual([]);
     expect(optIn).toEqual(['review', 'sentry', 'coverage']);
-  });
-});
-
-describe('renamed guard ids', () => {
-  it('a recorded qavis-advisory reads as ui-evidence, once', () => {
-    const guards = ['size', 'qavis-advisory', 'ui-evidence'];
-    expect(normalizeSelection({ guards }).guards).toEqual(['size', 'ui-evidence']);
-    expect(normalizeReviewProfile({ guards }, ['size', 'ui-evidence']).guards).toEqual([
-      'size',
-      'ui-evidence',
-    ]);
-  });
-
-  it('init accepts the old id in --guards and --no-<guard>', () => {
-    expect(parseFlags(['--guards', 'size,qavis-advisory']).guards).toEqual(['size', 'ui-evidence']);
-    expect(parseFlags(['--no-qavis-advisory']).no.has('ui-evidence')).toBe(true);
   });
 });

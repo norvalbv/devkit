@@ -201,7 +201,7 @@ The tracker separates lifecycle, evidence provenance, freshness, change type, an
 - LLM benchmarks consume real tokens and never run in CI. CI validates published evidence and generated views without making model or network calls.
 - Several shipped agents and deterministic tools do not yet have an accepted benchmark. They remain visible as evidence gaps rather than being counted as covered.
 - A changed implementation, corpus, scorer, or runner hash makes the prior score stale until a suite adapter accepts a new checkpoint.
-- External systems such as qavis retain their own evidence; the local catalog marks them `external-required`.
+- A subject whose evidence lives outside this repository is marked `external-required` rather than scored locally.
 - The package is installed from Git releases rather than a public package registry.
 
 ## Developing this repository

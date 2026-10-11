@@ -24,13 +24,6 @@ export const RECOMMENDED_GUARD_IDS = [
   'ui-evidence',
 ];
 
-/** Published guard ids that were renamed: a recorded old id reads as its successor. */
-const RENAMED_GUARD_IDS = new Map([['qavis-advisory', 'ui-evidence']]);
-
-export const migrateGuardIds = (ids: string[]): string[] => [
-  ...new Set(ids.map((id) => RENAMED_GUARD_IDS.get(id) ?? id)),
-];
-
 /**
  * Every selectable sub-gate inside the husky `# devkit-guards` block. Three are selectable-but-OFF
  * by default: `review` (the in-chain headless reviewer judges) spends real model budget on every
@@ -67,7 +60,7 @@ export function normalizeReviewProfile(
   { enabledDefault = false, available = true }: NormalizeReviewProfileOptions = {},
 ): ReviewProfile {
   const installed = installedGuards.filter((g) => REVIEWABLE_GUARD_IDS.includes(g));
-  const requested = Array.isArray(partial?.guards) ? migrateGuardIds(partial.guards) : installed;
+  const requested = Array.isArray(partial?.guards) ? partial.guards : installed;
   return {
     enabled: available && (partial?.enabled ?? enabledDefault),
     guards: installed.filter((g) => requested.includes(g)),
@@ -317,9 +310,7 @@ export function normalizeSelection(partial: Partial<Selection> = {}): Selection 
     agentTargets: Array.isArray(partial.agentTargets)
       ? normalizeAgentProviders(partial.agentTargets)
       : base.agentTargets,
-    guards: partial.guards
-      ? migrateGuardIds(partial.guards).filter((g) => GUARD_IDS.includes(g))
-      : base.guards,
+    guards: partial.guards ? partial.guards.filter((g) => GUARD_IDS.includes(g)) : base.guards,
   };
 }
 

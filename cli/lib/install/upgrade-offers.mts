@@ -30,7 +30,6 @@ import { isTracked } from '../git-tracked.mts';
 import {
   GUARD_IDS,
   GUARD_OPTIONS,
-  migrateGuardIds,
   newBundledGates,
   type Selection,
   unofferedComponents,
@@ -51,9 +50,8 @@ export async function offerNewGates(
   dryRun: boolean,
   options: GateOfferOptions = {},
 ): Promise<string[]> {
-  const declined = migrateGuardIds(recordedDisabled ?? []);
   const disabled = GUARD_IDS.filter(
-    (guard) => declined.includes(guard) && !sel.guards.includes(guard),
+    (guard) => recordedDisabled?.includes(guard) && !sel.guards.includes(guard),
   );
   console.log('\n3. gates');
   if (!sel.husky) {

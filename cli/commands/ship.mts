@@ -47,7 +47,6 @@ export const POSITIONAL_REJECTED_FLAGS: readonly string[] = [
   '--dry-gates',
   '--with-reviewers',
   '--from-branch',
-  '--no-qavis-publish',
   '--draft',
   '--ready',
   '--wait-ci',
@@ -170,7 +169,6 @@ Usage:
                       last gate line) and the waiters, next up first — then exit. Takes no slot.
   --link <d>          Extra gitignored gate-dep dir to symlink into the worktree (repeatable;
                       the base .husky/_ + node_modules are always linked).
-  --no-qavis-publish  Accepted and ignored (Qavis publication was removed); kept for one release.
   --pr                Re-push: add changes to the EXISTING PR on <branch> as a new commit
                       (fast-forward, never --force). Pair with --base only when replacing a PR whose
                       conflicts you already resolved; that explicit mode rewrites under an exact

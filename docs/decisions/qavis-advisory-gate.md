@@ -56,3 +56,4 @@ created: 2026-07-07
 **Scope:** gate-engine/ui-evidence/**,cli/lib/husky/husky-block.mts,cli/lib/components.mts,cli/lib/install/upgrade-offers.mts,cli/lib/install/flags/init-flags.mts
 **Source:** brainstorm
 **Evidence-change:** Qavis QA proved unreliable in use (frink bypassed 237 of 238 gate events; 41 of 64 runs uncertain) and frink removed the integration on 2026-10-03, while root agents capturing their own screenshots worked.
+- 2026-10-11 — No compatibility shims: devkit's only consumer is its owner, so the qavis-advisory→ui-evidence rename map and the no-op --no-qavis-publish flag (with its recorded ship-intent field) are removed outright; local consumer configs are migrated by hand.

@@ -82,7 +82,6 @@ BODY_SET=0         # --body given? else --body-file, else stdin (back-compat)
 BODY_FILE_SET=0    # --body-file <path>: author the body once in a file; survives every retry
 BODY_FILE_PREREAD_SET=0  # --resume banner's one --body-file read: 1 = bytes kept, 2 = failed (latched)
 UPDATE_PR_BODY=0   # explicit body flag? Refresh the existing PR too; recorded across --resume
-QAVIS_PUBLISH=1    # --no-qavis-publish is an accepted no-op kept for one release; the value is only replayed
 READY=0            # --ready marks the PR ready-for-review after the push lands
 WAIT_CI=0          # --wait-ci polls the PR's checks after the re-push is durable
 WAIT_CI_TIMEOUT=900
@@ -98,7 +97,6 @@ while [ "$#" -gt 0 ]; do
       BASE_FLAG="${2:?--base requires a branch}"; shift 2 ;;
     --body) BODY_FLAG="${2?--body requires text}"; BODY_SET=1; UPDATE_PR_BODY=1; shift 2 ;;
     --body-file) BODY_FILE_FLAG="${2:?--body-file requires a path}"; BODY_FILE_SET=1; UPDATE_PR_BODY=1; shift 2 ;;
-    --no-qavis-publish) QAVIS_PUBLISH=0; shift ;;
     --ready)
       # Deliberately NOT recorded across --resume: unlike the body/base, this is a one-shot state
       # transition on the PR, not a property of the invocation. A retry of a blocked re-push should
@@ -148,11 +146,9 @@ if [ "$RESUME" -eq 1 ]; then
   SI_FIELDS=()
   while IFS= read -r -d '' si_field; do SI_FIELDS+=("$si_field"); done < "$SI_OUT"
   rm -f "$SI_OUT"
-  # ship-intent.mts field order: mode, sourceMode, title, base, qavis, updatePrBody, draft,
-  # createdAt, generation, sourceAttemptId (empty for this explicit mode), nlinks, links..., body,
-  # paths... Field 6 (draft) is new-ship-only — read past it here, but keep these POSITIONAL indices
-  # in lockstep with ship-branch.sh:139, which decodes the same stream.
-  [ "${#SI_FIELDS[@]}" -ge 13 ] || { echo "recorded invocation is malformed — run the full devkit ship --pr command" >&2; exit 1; }
+  # emitFields order as in ship-branch.sh's reader (positional, keep in lockstep); field 5 (draft)
+  # is new-ship-only and skipped here.
+  [ "${#SI_FIELDS[@]}" -ge 12 ] || { echo "recorded invocation is malformed — run the full devkit ship --pr command" >&2; exit 1; }
   SI_MODE=${SI_FIELDS[0]}
   if [ "$SI_MODE" = "ship" ]; then
     # The blocked attempt was a NEW ship; hand over. Positive match + one-shot marker — an
@@ -164,14 +160,13 @@ if [ "$RESUME" -eq 1 ]; then
   [ "${SI_FIELDS[1]}" = "explicit" ] || { echo "recorded reship invocation has unsupported source mode '${SI_FIELDS[1]}'" >&2; exit 1; }
   TITLE=${SI_FIELDS[2]}
   BASE_FLAG=${SI_FIELDS[3]}
-  [ "${SI_FIELDS[4]}" != "1" ] || QAVIS_PUBLISH=0
-  [ "${SI_FIELDS[5]}" != "1" ] || UPDATE_PR_BODY=1
-  RESUME_CREATED=${SI_FIELDS[7]}
-  RESUME_GENERATION=${SI_FIELDS[8]}
-  SI_NLINKS=${SI_FIELDS[10]}
+  [ "${SI_FIELDS[4]}" != "1" ] || UPDATE_PR_BODY=1
+  RESUME_CREATED=${SI_FIELDS[6]}
+  RESUME_GENERATION=${SI_FIELDS[7]}
+  SI_NLINKS=${SI_FIELDS[9]}
   case "$SI_NLINKS" in *[!0-9]*|'') echo "recorded invocation is malformed (nlinks '$SI_NLINKS')" >&2; exit 1 ;; esac
-  si_i=11
-  si_body_at=$((11 + SI_NLINKS))
+  si_i=10
+  si_body_at=$((10 + SI_NLINKS))
   [ "${#SI_FIELDS[@]}" -gt $((si_body_at + 1)) ] || { echo "recorded invocation is malformed (missing body/paths)" >&2; exit 1; }
   while [ "$si_i" -lt "$si_body_at" ]; do LINK_EXTRA+=("${SI_FIELDS[$si_i]}"); si_i=$((si_i + 1)); done
   RESUME_BODY=${SI_FIELDS[$si_body_at]}
@@ -645,7 +640,6 @@ export DEVKIT_SHIP_RESUMED=$RESUME
 SHIP_INTENT_ARGS=(write --root "$ROOT" --branch "$BR" --mode reship --title "$TITLE")
 [ "$REWRITE" -eq 0 ] || SHIP_INTENT_ARGS+=(--base "$BASE_REF")
 for d in ${LINK_EXTRA[@]+"${LINK_EXTRA[@]}"}; do SHIP_INTENT_ARGS+=(--link "$d"); done
-[ "$QAVIS_PUBLISH" -eq 1 ] || SHIP_INTENT_ARGS+=(--no-qavis-publish)
 [ "$UPDATE_PR_BODY" -eq 0 ] || SHIP_INTENT_ARGS+=(--update-pr-body)
 # See ship-branch.sh: the body file's path rides the record for the resume drift warning (sc-2527).
 [ "$BODY_FILE_SET" -eq 0 ] || SHIP_INTENT_ARGS+=(--body-file-path "$BODY_FILE_FLAG")

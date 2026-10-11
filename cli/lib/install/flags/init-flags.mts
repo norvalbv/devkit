@@ -9,7 +9,6 @@ import { join } from 'node:path';
 import {
   defaultSelection,
   GUARD_IDS,
-  migrateGuardIds,
   normalizeSelection,
   type Selection,
   STRUCTURE_STACKS,
@@ -101,8 +100,7 @@ export function parseFlags(args: string[]): InitFlags {
     else if (a === '--global-commit-gate') flags.globalCommitGate = true;
     else if (a === '--baselines-only') flags.baselinesOnly = true;
     else if (a === '--stack') flags.stack = args[++i];
-    else if (a === '--guards')
-      flags.guards = migrateGuardIds((args[++i] ?? '').split(',').map((g) => g.trim()));
+    else if (a === '--guards') flags.guards = (args[++i] ?? '').split(',').map((g) => g.trim());
     // --scan-root <comma-list>: override guard.config.json scanRoots up front, so the freezes
     // + the react-app structureRoot grandfather a non-standard tree (e.g. services/webapp/src).
     else if (a === '--scan-root' || a === '--scan-roots')
@@ -110,8 +108,7 @@ export function parseFlags(args: string[]): InitFlags {
         .split(',')
         .map((r) => r.trim())
         .filter(Boolean);
-    else if (a.startsWith('--no-'))
-      for (const id of migrateGuardIds([a.slice('--no-'.length)])) flags.no.add(id);
+    else if (a.startsWith('--no-')) flags.no.add(a.slice('--no-'.length));
   }
   return flags;
 }

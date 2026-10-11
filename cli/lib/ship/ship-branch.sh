@@ -98,7 +98,6 @@ BODY_FILE_SET=0    # --body-file <path>: author the body ONCE in a file; survive
 BODY_FILE_PREREAD_SET=0  # --resume banner's one --body-file read: 1 = bytes kept, 2 = failed (latched)
 BASE_FLAG=""       # --base <branch>? else base off this checkout's HEAD/current branch
 FROM_BRANCH=0      # derive a frozen committed path set from origin/<base>..HEAD
-QAVIS_PUBLISH=1     # --no-qavis-publish is an accepted no-op kept for one release; the value is only replayed
 DRAFT=0            # --draft opens the PR as a draft; default stays ready-for-review
 RESUME_READY=0     # --ready seen under --resume, before the record reveals ship-vs-reship mode
 WAIT_CI=0          # --wait-ci polls the PR's checks after everything else is durable
@@ -125,13 +124,9 @@ while [ "$#" -gt 0 ]; do
     --from-branch)
       [ "$RESUME" -eq 0 ] || { echo "--resume replays the recorded source mode — omit --from-branch" >&2; exit 1; }
       FROM_BRANCH=1; shift ;;
-    --no-qavis-publish) QAVIS_PUBLISH=0; shift ;;
     --draft)
-      # Allowed under --resume, unlike --base/--link: those change WHAT is shipped, this only changes
-      # how the PR is published. The resume restore below can only turn draft ON (same polarity as
-      # QAVIS_PUBLISH), so a recorded draft replays as one, and an explicit --draft on the retry can
-      # additionally upgrade a recorded NON-draft — which is then re-recorded for the next resume.
-      # There is deliberately no --no-draft: once the PR exists, `gh pr ready` owns that direction.
+      # Allowed under --resume: the restore below only turns draft ON, so a retry can upgrade a
+      # recorded non-draft. No --no-draft: once the PR exists, `gh pr ready` owns that direction.
       DRAFT=1; shift ;;
     --ready)
       # Under --resume the MODE is not known yet: a recorded reship arrives here first and execs into
@@ -184,11 +179,9 @@ if [ "$RESUME" -eq 1 ]; then
   SI_FIELDS=()
   while IFS= read -r -d '' si_field; do SI_FIELDS+=("$si_field"); done < "$SI_OUT"
   rm -f "$SI_OUT"
-  # Field order is ship-intent.mts's emitFields contract:
-  #   mode, sourceMode, title, base, noQavisPublish, updatePrBody, draft, createdAt, generation,
-  #   sourceAttemptId, nlinks, <links...>, body, <paths...>. New-ship ignores updatePrBody.
-  # The indices below are POSITIONAL: reship.sh:106 decodes the same stream and must move in lockstep.
-  [ "${#SI_FIELDS[@]}" -ge 13 ] || { echo "recorded invocation is malformed — run the full devkit ship command" >&2; exit 1; }
+  # emitFields order: mode sourceMode title base updatePrBody draft createdAt generation sourceAttemptId
+  # nlinks links... body paths... — positional, in lockstep with reship.sh's reader.
+  [ "${#SI_FIELDS[@]}" -ge 12 ] || { echo "recorded invocation is malformed — run the full devkit ship command" >&2; exit 1; }
   SI_MODE=${SI_FIELDS[0]}
   if [ "$SI_MODE" = "reship" ]; then
     # The blocked attempt was a `--pr` re-push; hand over so the agent needn't remember which form
@@ -209,18 +202,16 @@ if [ "$RESUME" -eq 1 ]; then
   esac
   TITLE=${SI_FIELDS[2]}
   BASE_FLAG=${SI_FIELDS[3]}
-  [ "${SI_FIELDS[4]}" != "1" ] || QAVIS_PUBLISH=0
-  # Field 6 is draft. Restoring it is load-bearing: --resume replays a gate-blocked ship all the way
-  # through `gh pr create`, so dropping the bit here would silently open a READY PR from an
-  # invocation the operator asked to be a draft.
-  [ "${SI_FIELDS[6]}" != "1" ] || DRAFT=1
-  RESUME_CREATED=${SI_FIELDS[7]}
-  RESUME_GENERATION=${SI_FIELDS[8]}
-  RESUME_SOURCE_ATTEMPT_ID=${SI_FIELDS[9]}
-  SI_NLINKS=${SI_FIELDS[10]}
+  # Field 5 is draft: --resume replays through `gh pr create`, so dropping it would open a READY PR
+  # the operator asked to be a draft.
+  [ "${SI_FIELDS[5]}" != "1" ] || DRAFT=1
+  RESUME_CREATED=${SI_FIELDS[6]}
+  RESUME_GENERATION=${SI_FIELDS[7]}
+  RESUME_SOURCE_ATTEMPT_ID=${SI_FIELDS[8]}
+  SI_NLINKS=${SI_FIELDS[9]}
   case "$SI_NLINKS" in *[!0-9]*|'') echo "recorded invocation is malformed (nlinks '$SI_NLINKS')" >&2; exit 1 ;; esac
-  si_i=11
-  si_body_at=$((11 + SI_NLINKS))
+  si_i=10
+  si_body_at=$((10 + SI_NLINKS))
   [ "${#SI_FIELDS[@]}" -gt $((si_body_at + 1)) ] || { echo "recorded invocation is malformed (missing body/paths)" >&2; exit 1; }
   while [ "$si_i" -lt "$si_body_at" ]; do LINK_EXTRA+=("${SI_FIELDS[$si_i]}"); si_i=$((si_i + 1)); done
   RESUME_BODY=${SI_FIELDS[$si_body_at]}
@@ -844,7 +835,6 @@ if [ "$DRY_GATES" -eq 0 ]; then
   [ "$FROM_BRANCH" -eq 0 ] || SHIP_INTENT_ARGS+=(--source-mode branch)
   [ -z "$BASE_FLAG" ] || SHIP_INTENT_ARGS+=(--base "$BASE_FLAG")
   for d in ${LINK_EXTRA[@]+"${LINK_EXTRA[@]}"}; do SHIP_INTENT_ARGS+=(--link "$d"); done
-  [ "$QAVIS_PUBLISH" -eq 1 ] || SHIP_INTENT_ARGS+=(--no-qavis-publish)
   # Any boolean added here must ALSO join the allowlist in ship-intent-args.mts:16-22, or its
   # `--flag` is treated as value-taking and silently eats the next argv entry.
   [ "$DRAFT" -eq 0 ] || SHIP_INTENT_ARGS+=(--draft)

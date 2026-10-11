@@ -4,7 +4,6 @@ import { isAbsolute } from 'node:path';
 import {
   DEFAULT_REVIEW_DECISIONS_DIR,
   GUARD_IDS,
-  migrateGuardIds,
   normalizeReviewProfile,
   normalizeSelection,
   REVIEWABLE_GUARD_IDS,
@@ -100,7 +99,7 @@ function parseInstalledSelection(config: RawReviewConfig): Selection {
   const recordedGuards =
     components.guards === undefined
       ? undefined
-      : migrateGuardIds(stringArray(components.guards, '.devkit/config.json components.guards'));
+      : stringArray(components.guards, '.devkit/config.json components.guards');
   const recordedHusky = booleanField(components.husky, '.devkit/config.json components.husky');
   const unknownInstalled = (recordedGuards ?? []).filter((guard) => !GUARD_IDS.includes(guard));
   if (unknownInstalled.length)
