@@ -11,12 +11,7 @@ import {
   STRUCTURE_BASELINE_DIR,
   STRUCTURE_EXEMPT,
 } from '../../ratchets/baseline-paths.mts';
-import {
-  CORRECTNESS_OVERRIDES_FILE,
-  gateInputFor,
-  gateInputs,
-  QAVIS_RECEIPT,
-} from '../gate-inputs.mts';
+import { CORRECTNESS_OVERRIDES_FILE, gateInputFor, gateInputs } from '../gate-inputs.mts';
 
 const roots: string[] = [];
 afterEach(() => {
@@ -56,7 +51,6 @@ describe('gate-input registry', () => {
       'biome.devkit.jsonc',
       'oxlint.devkit.json',
       '.anti-slop-baseline.json',
-      QAVIS_RECEIPT,
       CORRECTNESS_OVERRIDES_FILE,
       '.co-occurrence-allowlist.json',
       'docs/decisions',
@@ -123,8 +117,8 @@ describe('gate-input registry', () => {
   });
 
   // These sets are the review projection's drift contract; gateInputFor serves them to runtime.mts.
-  it('pins the mutable, source-volatile, cache and local-cache flags, inherited by paths below an entry', () => {
-    const flagged = (flag: 'mutable' | 'sourceVolatile' | 'cache' | 'localCache') =>
+  it('pins the mutable, source-volatile and local-cache flags, inherited by paths below an entry', () => {
+    const flagged = (flag: 'mutable' | 'sourceVolatile' | 'localCache') =>
       paths(repo()).filter((path) => gateInputFor(path)?.[flag]);
     expect(flagged('mutable')).toEqual([
       '.fallow',
@@ -137,8 +131,7 @@ describe('gate-input registry', () => {
       CORRECTNESS_OVERRIDES_FILE,
     ]);
     expect(flagged('sourceVolatile')).toEqual(['.fallow', '.decisions']);
-    expect(flagged('cache')).toEqual([QAVIS_RECEIPT]);
-    expect(flagged('localCache')).toEqual(['.fallow', '.decisions', QAVIS_RECEIPT]);
+    expect(flagged('localCache')).toEqual(['.fallow', '.decisions']);
     expect(gateInputFor(`${STRUCTURE_BASELINE_DIR}/cli.mjs`)?.mutable).toBe(true);
     expect(gateInputFor('.fallow/cache.bin')?.path).toBe('.fallow');
     expect(gateInputFor('.anti-slop-baseline.json')?.mutable).toBeUndefined();

@@ -73,6 +73,8 @@ export interface DigestRow {
   fp?: string;
   /** How many findings this row stands for, when not one: the emitter's omitted-blocking tally. */
   findings?: number;
+  /** From a stage that holds no exit: the reader acts on it, but never by retrying the ship. */
+  advisory?: true;
 }
 
 /** A row that COULD have stopped the run, so its blocking status must be computed, never assumed. */
@@ -228,6 +230,7 @@ export function summarise(events: GateEvent[], shipId: string): DigestRow[] {
         state: e.status === 'could_not_run' ? 'could-not-run' : 'finding',
         blocking: false,
         detail: oneLine(e.detail),
+        advisory: true,
       });
     } else if (e.type === 'gate_degraded') {
       // A judge that stripped its own blocking authority (sentry on insufficient capture evidence).
@@ -376,6 +379,7 @@ export function render(rows: DigestRow[], logPath = ''): string {
   for (const r of [...blockers, ...others.slice(0, MAX_FINDINGS)]) {
     const tail = r.detail ? `: ${r.detail}` : '';
     if (r.blocking === true) out.push(`   ✗ ${r.gate} — BLOCKED this run${tail}`);
+    else if (r.advisory) out.push(`   ⚠ ${r.gate} — advisory, did NOT block this run${tail}`);
     else if (r.blocking === null) {
       // No "did NOT block" claim: the blocking gate is unknowable on this run.
       out.push(`   ⚠ ${r.gate} — finding recorded — read it before retrying${tail}`);

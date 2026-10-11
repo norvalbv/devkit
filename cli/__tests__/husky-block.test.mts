@@ -495,7 +495,7 @@ describe('buildOverlayHook — gates-only guard for the global init.sh shim', ()
 
   it('emits the staged blocking gates before the first AI guard and review baselines after (sc-3020)', () => {
     const hook = buildOverlayHook(
-      { guards: [...GUARD_IDS, 'qavis-advisory'] },
+      { guards: [...GUARD_IDS, 'ui-evidence'] },
       '.husky/pre-commit',
       '',
       { fallow: true },
@@ -504,7 +504,7 @@ describe('buildOverlayHook — gates-only guard for the global init.sh shim', ()
     expect(firstAi).toBeGreaterThan(0);
     expect(hook.indexOf('fallow audit --diff-stdin')).toBeLessThan(firstAi);
     expect(hook.indexOf('xargs $DK_ESLINT -c eslint.config.devkit.mjs')).toBeLessThan(firstAi);
-    expect(hook.indexOf('# devkit:guard-qavis-advisory')).toBeGreaterThan(
+    expect(hook.indexOf('# devkit:guard-ui-evidence')).toBeGreaterThan(
       hook.indexOf('fallow audit --diff-stdin'),
     );
     expect(hook.indexOf('__dk_review_baseline_gate eslint')).toBeGreaterThan(firstAi);
@@ -599,7 +599,7 @@ describe('buildOverlayHook — fallow gate (overlay)', () => {
 // ── the managed .husky/commit-msg (commit-msg judges: review→completeness, sentry) ──────────────
 describe('buildCommitMsgBlock', () => {
   it('returns null when no commit-msg guard is selected (pre-commit-only guards)', () => {
-    expect(buildCommitMsgBlock({ guards: ['size', 'decisions', 'qavis-advisory'] })).toBeNull();
+    expect(buildCommitMsgBlock({ guards: ['size', 'decisions', 'ui-evidence'] })).toBeNull();
     expect(buildCommitMsgBlock({})).toBeNull();
   });
 

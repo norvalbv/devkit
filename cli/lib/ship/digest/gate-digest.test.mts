@@ -125,9 +125,9 @@ describe('summarise', () => {
       [
         ev({
           type: 'gate_result',
-          gate: 'qavis-advisory',
+          gate: 'coverage',
           status: 'could_not_run',
-          bypass: 'GUARD_QAVIS_OK',
+          bypass: 'GUARD_COVERAGE_OK',
         }),
         ev({ type: 'gate_infra_failure', gate: 'completeness' }),
         ev({ type: 'cache_hit', judge: 'review:correctness' }),
@@ -137,7 +137,7 @@ describe('summarise', () => {
     );
     expect(rows.filter((r) => r.state === 'finding')).toHaveLength(0);
     expect(rows.filter((r) => r.state === 'could-not-run')).toHaveLength(2);
-    expect(rows.find((r) => r.gate === 'qavis-advisory')?.detail).toContain('verified nothing');
+    expect(rows.find((r) => r.gate === 'coverage')?.detail).toContain('verified nothing');
     expect(rows.filter((r) => r.state === 'cached')).toHaveLength(1);
   });
 
@@ -196,14 +196,14 @@ describe('summarise', () => {
     expect(render(rows)).toContain('✗ dup — BLOCKED this run');
   });
 
-  it('leaves an advisory bypass non-blocking when another family stopped the run', () => {
+  it('leaves a bypass non-blocking when another family stopped the run', () => {
     const rows = summarise(
       [
         ev({
           type: 'gate_result',
-          gate: 'qavis-advisory',
+          gate: 'coverage',
           status: 'could_not_run',
-          bypass: 'GUARD_QAVIS_OK',
+          bypass: 'GUARD_COVERAGE_OK',
         }),
         shipResult('review'),
       ],
@@ -211,7 +211,7 @@ describe('summarise', () => {
     );
 
     expect(rows[0].blocking).toBe(false);
-    expect(render(rows)).toContain('· qavis-advisory');
+    expect(render(rows)).toContain('· coverage');
   });
 
   it('returns nothing for an empty stream', () => {
@@ -432,9 +432,29 @@ describe('advisory_result', () => {
         state: 'finding',
         blocking: false,
         detail: 'verdict=warn · 1 duplication introduced',
+        advisory: true,
       },
     ]);
-    expect(render(rows)).toContain('⚠ fallow-advisory — finding recorded, did NOT block this run');
+    expect(render(rows)).toContain('⚠ fallow-advisory — advisory, did NOT block this run');
+  });
+
+  it('never tells the reader to retry over an advisory, even on a failed ship', () => {
+    // An instruction such as "add screenshots to the PR" is acted on, not cleared by re-shipping.
+    const detail = 'UI files changed: src/App.tsx. Capture before and after screenshots';
+    for (const exit_code of [0, 1]) {
+      const text = render(
+        summarise(
+          [
+            ev({ type: 'ship_attempt' }),
+            advisory('ui-evidence', 'finding', detail),
+            ev({ type: 'ship_result', exit_code, blocked_gate: exit_code ? 'unknown' : null }),
+          ],
+          SHIP,
+        ),
+      );
+      expect(text).toContain(`⚠ ui-evidence — advisory, did NOT block this run: ${detail}`);
+      expect(text).not.toContain('retrying');
+    }
   });
 
   it('can never be rendered as the blocker, even when the run failed unattributably', () => {

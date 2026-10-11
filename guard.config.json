@@ -24,7 +24,7 @@
   },
   "//research": "Sibling clones the prior-art agent may read (agents/prior-art.md). Unresolved entries are skipped, so a clone without them stays valid.",
   "research": {
-    "referenceCheckouts": ["../bug-mcp", "../claude-usage-dashboard", "../frink", "../qavis"]
+    "referenceCheckouts": ["../bug-mcp", "../claude-usage-dashboard", "../frink"]
   },
   "review": {
     "backendRoots": ["cli", "gate-engine"],
@@ -116,12 +116,12 @@
             "markdown",
             "prefix-cache",
             "prior-art",
-            "qavis-advisory",
             "ratchets",
             "review",
             "search-tool",
             "sentry",
             "structure",
+            "ui-evidence",
             "critique"
           ]
         },
