@@ -1439,7 +1439,7 @@ describe('per-file disable ratchet (auto-lower, migration, net-zero)', () => {
     expect(pr.stderr).not.toContain('src/inherited.ts');
   });
 
-  it('a stale {0,0} legacy baseline self-deletes + stages in a commit (the qavis case)', () => {
+  it('a stale {0,0} legacy baseline self-deletes + stages in a commit', () => {
     const root = makeRoot();
     gitInit(root);
     writeConfig(root, { scanRoots: ['src'] });

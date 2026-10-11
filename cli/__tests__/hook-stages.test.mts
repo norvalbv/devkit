@@ -23,14 +23,14 @@ const PRE_COMMIT = [
   'guard-decisions',
   'guard-review',
   'guard-sentry-prewarm',
-  'guard-qavis-advisory',
+  'guard-ui-evidence',
 ];
 const ALL = { biome: true, guards: GUARD_IDS };
 
 // Pins the stage order each builder emits. A reorder, or a new `# devkit:` sentinel that is neither
 // listed here nor declared infrastructure in hookStages, fails here before doctor prints it.
 describe('hookStages reads the order the generated hooks run', () => {
-  it('package and standalone: reviewers and the sentry prewarm run before the qavis advisory', () => {
+  it('package and standalone: reviewers and the sentry prewarm run before the ui-evidence reminder', () => {
     expect(hookStages(buildGuardBlock(ALL))).toEqual(PRE_COMMIT);
     expect(hookStages(buildGuardBlock(ALL, '', { binDir: 'global-optional' }))).toEqual(PRE_COMMIT);
   });
@@ -52,7 +52,7 @@ describe('hookStages reads the order the generated hooks run', () => {
     };
     const stages = hookStages(buildSelfHostBlock(sel, '', process.cwd()));
     expect(stages.slice(-2)).toEqual(['fallow-advisory', 'self-host-skill-projection-advisory']);
-    expect(stages.indexOf('guard-review')).toBeLessThan(stages.indexOf('guard-qavis-advisory'));
+    expect(stages.indexOf('guard-review')).toBeLessThan(stages.indexOf('guard-ui-evidence'));
   });
 
   it('commit-msg: completeness, then sentry', () => {
@@ -66,8 +66,8 @@ describe('hookStages reads the order the generated hooks run', () => {
 describe('hookStages reports the text it is given', () => {
   it('follows a hand-reordered block instead of the generator', () => {
     const edited =
-      '# devkit:guard-qavis-advisory\n# /devkit:guard-qavis-advisory\n# devkit:guard-review\n';
-    expect(hookStages(edited)).toEqual(['guard-qavis-advisory', 'guard-review']);
+      '# devkit:guard-ui-evidence\n# /devkit:guard-ui-evidence\n# devkit:guard-review\n';
+    expect(hookStages(edited)).toEqual(['guard-ui-evidence', 'guard-review']);
   });
 
   it('is empty for a block with no stages, and never lists hook infrastructure', () => {

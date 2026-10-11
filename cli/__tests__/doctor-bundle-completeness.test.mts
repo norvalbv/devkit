@@ -99,28 +99,28 @@ const huskyLine = (root: string) =>
     .stdout.split('\n')
     .find((l) => l.includes('.husky/pre-commit')) ?? '';
 
-describe('doctor gate fragment verification (qavis-advisory)', () => {
-  it('flags DRIFT when a SELECTED qavis gate is missing its husky fragment', () => {
+describe('doctor gate fragment verification (ui-evidence)', () => {
+  it('flags DRIFT when a SELECTED ui-evidence gate is missing its husky fragment', () => {
     const root = tmpRepo();
-    // --yes now selects qavis (recommended) → the block carries its `guard-qavis-advisory` fragment.
+    // --yes now selects ui-evidence (recommended) → the block carries its `guard-ui-evidence` fragment.
     expect(devkit(root, 'init', '--stack', 'generic', '--yes').status).toBe(0);
     const p = join(root, '.husky', 'pre-commit');
-    // Strip just the qavis fragment (marker-to-marker) — every `guard-qavis-advisory` mention lives in it.
+    // Strip just the ui-evidence fragment (marker-to-marker) — every `guard-ui-evidence` mention lives in it.
     const stripped = readFileSync(p, 'utf8').replace(
-      /# devkit:guard-qavis-advisory[\s\S]*?# \/devkit:guard-qavis-advisory\n?/,
+      /# devkit:guard-ui-evidence[\s\S]*?# \/devkit:guard-ui-evidence\n?/,
       '',
     );
-    expect(stripped).not.toContain('guard-qavis-advisory');
+    expect(stripped).not.toContain('guard-ui-evidence');
     writeFileSync(p, stripped);
 
     const line = huskyLine(root);
     expect(line).toMatch(/DRIFT/);
-    expect(line).toContain('qavis-advisory');
+    expect(line).toContain('ui-evidence');
   });
 
-  it('stays selection-aware: an UNSELECTED qavis (legacy repo) is not flagged as drift', () => {
+  it('stays selection-aware: an UNSELECTED ui-evidence (legacy repo) is not flagged as drift', () => {
     const root = tmpRepo();
-    // A pre-qavis selection — qavis absent by design, so its absence in the block is correct, not drift.
+    // A pre-ui-evidence selection — ui-evidence absent by design, so its absence in the block is correct, not drift.
     expect(
       devkit(
         root,
@@ -134,7 +134,7 @@ describe('doctor gate fragment verification (qavis-advisory)', () => {
     ).toBe(0);
     const line = huskyLine(root);
     expect(line).toMatch(/OK/);
-    expect(line).not.toContain('qavis-advisory');
+    expect(line).not.toContain('ui-evidence');
   });
 });
 

@@ -31,10 +31,7 @@ import {
   SEARCH_INDEX_CHECK,
 } from '../lib/doctor/guard-config-checks.mts';
 import { bindClaudeFamily } from '../lib/doctor/judge/judge-family.mts';
-import {
-  printPriorArtAdvisoryHealth,
-  printQavisAdvisoryHealth,
-} from '../lib/doctor/qavis-health.mts';
+import { printPriorArtAdvisoryHealth } from '../lib/doctor/prior-art-health.mts';
 import { hookChecks } from '../lib/doctor/hook-checks.mts';
 import { runOverlayDoctor } from '../lib/doctor/overlay-doctor.mts';
 import { checkLockPin, checkPin } from '../lib/doctor/pin/pin-checks.mts';
@@ -456,7 +453,7 @@ export default async function run(args: string[], cwd: string): Promise<number> 
   // report 0 where package mode reports 1 for the identical condition.
   const skewed = skew.kind === 'older';
   if (cfg.overlay) {
-    const overlay = () => runOverlayDoctor(cwd, cfg, fix, printQavisAdvisoryHealth);
+    const overlay = () => runOverlayDoctor(cwd, cfg, fix);
     // --fix re-runs install's own steps, so it holds init's lock, as package mode's spawned init does.
     return (await (fix ? withInitLock(cwd, 'doctor --fix', overlay) : overlay())) || +skewed;
   }
@@ -475,7 +472,6 @@ export default async function run(args: string[], cwd: string): Promise<number> 
     if (r.status !== 'OK' && r.remediation) line += `\n      → ${r.remediation}`;
     console.log(line);
   }
-  printQavisAdvisoryHealth(cwd, sel.guards ?? []);
   printPriorArtAdvisoryHealth(cwd, sel);
 
   const drifted = results.some((r) => r.status !== 'OK' && !r.advisory); // see CheckResult.advisory

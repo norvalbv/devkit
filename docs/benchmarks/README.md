@@ -140,7 +140,6 @@ Committed evidence rejects raw prompts, transcripts, absolute paths, email addre
 | Semantic search retrieval | experimental | evidence-only | unknown | — | ? unknown | No accepted local checkpoint |
 | Duplication matcher | shipped | evidence-only | unknown | — | ? unknown | No accepted local checkpoint |
 | Commit-guard retrieval | shipped | evidence-only | unknown | quality | ? unknown | Clone retrieval recall at 10: 59.0% · Semantic retrieval recall at 10: 25.0% |
-| qavis visual QA | shipped | external-required | unknown | — | ? unknown | No accepted local checkpoint |
 | Ship fixture setup cost | experimental | accepted | stale | methodology-reset | ? unknown | Fixture CPU candidate/baseline: 19.0% · Fixture elapsed candidate/baseline: 31.4% |
 
 ## Complete subject inventory
@@ -168,7 +167,7 @@ Committed evidence rejects raw prompts, transcripts, absolute paths, email addre
 | Duplication allowlist CLI | bin | shipped | none | — |
 | Folder fan-out ratchet | bin | shipped | none | — |
 | Prefix cache gate | bin | shipped | none | — |
-| qavis advisory gate | bin | shipped | external-required | qavis |
+| Ship-time screenshot reminder for UI changes | bin | shipped | none | — |
 | Reviewer gate | bin | shipped | accepted | completeness, conventions, reviewer-api-security, reviewer-backend-performance, reviewer-frontend-security, reviewer-frontend-performance, reviewer-correctness |
 | Sentry judge gate | bin | shipped | evidence-only | sentry |
 | Size ratchet | bin | shipped | none | — |
@@ -184,7 +183,6 @@ Committed evidence rejects raw prompts, transcripts, absolute paths, email addre
 | Completeness judge | judge | shipped | accepted | completeness |
 | Decision detect/alignment/depth judges | judge | shipped | evidence-only | decisions |
 | Sentry commit-message judge | judge | shipped | evidence-only | sentry |
-| qavis visual QA | judge | shipped | external-required | qavis |
 | Decision-log retrieval recall | benchmark | experimental | none | decisions-recall |
 | Decision-log save quality | benchmark | experimental | none | decisions-save-quality |
 | Semantic search retrieval | benchmark | experimental | evidence-only | search-tool |

@@ -139,7 +139,7 @@ not accumulate in this config; they remain Markdown under `decisionsDir`.
 - Deterministic gate checkpointing for safe ship retries
 - Sentry-capture review for swallowed runtime failures
 - Changed-comment paragraph budget gate (deterministic, no model)
-- Optional qavis advisory routing for UI changes
+- Optional ship-time reminder to attach before/after screenshots for UI changes
 
 Every path the engine touches resolves from the consumer repository’s working directory. devkit ships mechanisms, not a consumer’s baselines, allowlists, decision history, or `guard.config.json`.
 
@@ -175,7 +175,6 @@ The tracker separates lifecycle, evidence provenance, freshness, change type, an
 | Semantic search retrieval | experimental | evidence-only | unknown | — | ? unknown | No accepted local checkpoint |
 | Duplication matcher | shipped | evidence-only | unknown | — | ? unknown | No accepted local checkpoint |
 | Commit-guard retrieval | shipped | evidence-only | unknown | quality | ? unknown | Clone retrieval recall at 10: 59.0% · Semantic retrieval recall at 10: 25.0% |
-| qavis visual QA | shipped | external-required | unknown | — | ? unknown | No accepted local checkpoint |
 | Ship fixture setup cost | experimental | accepted | stale | methodology-reset | ? unknown | Fixture CPU candidate/baseline: 19.0% · Fixture elapsed candidate/baseline: 31.4% |
 
 ### Shipped-agent coverage
@@ -202,7 +201,7 @@ The tracker separates lifecycle, evidence provenance, freshness, change type, an
 - LLM benchmarks consume real tokens and never run in CI. CI validates published evidence and generated views without making model or network calls.
 - Several shipped agents and deterministic tools do not yet have an accepted benchmark. They remain visible as evidence gaps rather than being counted as covered.
 - A changed implementation, corpus, scorer, or runner hash makes the prior score stale until a suite adapter accepts a new checkpoint.
-- External systems such as qavis retain their own evidence; the local catalog marks them `external-required`.
+- A subject whose evidence lives outside this repository is marked `external-required` rather than scored locally.
 - The package is installed from Git releases rather than a public package registry.
 
 ## Developing this repository

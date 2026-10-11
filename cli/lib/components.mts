@@ -21,7 +21,7 @@ export const RECOMMENDED_GUARD_IDS = [
   'clone',
   'comments',
   'decisions',
-  'qavis-advisory',
+  'ui-evidence',
 ];
 
 /**
@@ -162,9 +162,9 @@ export const GUARD_OPTIONS = [
     hint: 'commit-msg judge: flags silent runtime error-classes lacking a Sentry capture (hard-block, diff-tier)',
   },
   {
-    id: 'qavis-advisory',
-    label: 'qavis-advisory',
-    hint: 'nudge to run qavis QA on UI diffs (needs qavis on PATH + .qavis/recipe.json)',
+    id: 'ui-evidence',
+    label: 'ui-evidence',
+    hint: 'at ship, remind the agent to add before/after screenshots to the PR when UI changed (never blocks)',
   },
   {
     id: 'coverage',

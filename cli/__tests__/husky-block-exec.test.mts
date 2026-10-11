@@ -83,10 +83,10 @@ describe('assembled hook execution (stubbed bins, sh -e)', () => {
     expect(r.calls).not.toContain('guard-comments');
     expect(r.calls).not.toContain('guard-decisions');
     expect(r.calls).not.toContain('guard-review');
-    expect(r.calls).not.toContain('guard-qavis-advisory');
+    expect(r.calls).not.toContain('guard-ui-evidence');
   });
 
-  it('dry-gates with reviewers runs the fleet after a deterministic failure, never decisions or Qavis', () => {
+  it('dry-gates with reviewers runs the fleet after a deterministic failure, never decisions or ui-evidence', () => {
     const r = runHook({
       DET_RC: '1',
       DEVKIT_RUN_MODE: 'dry-gates',
@@ -96,7 +96,7 @@ describe('assembled hook execution (stubbed bins, sh -e)', () => {
     expect(r.calls).toContain('guard-deterministic');
     expect(r.calls).toContain('guard-review --gate');
     expect(r.calls).not.toContain('guard-decisions');
-    expect(r.calls).not.toContain('guard-qavis-advisory');
+    expect(r.calls).not.toContain('guard-ui-evidence');
   });
 
   it('dry-gates with reviewers never arms the completeness judge, even with a message file present', () => {
@@ -766,13 +766,13 @@ describe('commit-terminal telemetry (real temp git repo)', () => {
   });
 });
 
-// sc-3012: a judge that can demand an edit must never follow the qavis advisory, whose pass receipt
-// any source fix voids. commit-msg's sentry replays this verdict from cache (check-sentry tests).
-describe('ship: sentry is judged before the qavis advisory', () => {
-  const SHIP = { biome: false, guards: ['review', 'sentry', 'qavis-advisory'] };
+// ui-evidence reminds about the FINAL staged set, so every judge that can demand an edit runs first.
+// commit-msg's sentry replays this verdict from cache (check-sentry tests).
+describe('ship: sentry is judged before the ui-evidence reminder', () => {
+  const SHIP = { biome: false, guards: ['review', 'sentry', 'ui-evidence'] };
 
   it.each(['package', 'standalone', 'overlay'])(
-    '%s: review → sentry on the ship message → qavis',
+    '%s: review → sentry on the ship message → ui-evidence',
     (builder) => {
       const r = runHook({}, SHIP, { shipMsg: true, builder, dirPrefix: 'dk hook exec sentry ' });
       expect(r.status).toBe(0);
@@ -780,7 +780,7 @@ describe('ship: sentry is judged before the qavis advisory', () => {
       const sentry = r.calls.indexOf('guard-sentry --gate');
       expect(review).toBeGreaterThan(-1);
       expect(review).toBeLessThan(sentry);
-      expect(sentry).toBeLessThan(r.calls.indexOf('guard-qavis-advisory --gate'));
+      expect(sentry).toBeLessThan(r.calls.indexOf('guard-ui-evidence'));
       expect(r.calls).toContain('ship-msg.txt');
       expect(r.calls).toContain('guard-sentry-argc 2'); // a temp path with spaces stays ONE argument
     },
@@ -790,7 +790,7 @@ describe('ship: sentry is judged before the qavis advisory', () => {
     const r = runHook({}, SHIP);
     expect(r.status).toBe(0);
     expect(r.calls).not.toContain('guard-sentry');
-    expect(r.calls).toContain('guard-qavis-advisory --gate');
+    expect(r.calls).toContain('guard-ui-evidence');
   });
 
   it('a stale DEVKIT_COMMIT_MSG_FILE whose file is gone never arms it', () => {
@@ -800,11 +800,7 @@ describe('ship: sentry is judged before the qavis advisory', () => {
   });
 
   it('sentry not selected → pre-commit never calls it, even on a ship', () => {
-    const r = runHook(
-      {},
-      { biome: false, guards: ['review', 'qavis-advisory'] },
-      { shipMsg: true },
-    );
+    const r = runHook({}, { biome: false, guards: ['review', 'ui-evidence'] }, { shipMsg: true });
     expect(r.status).toBe(0);
     expect(r.calls).not.toContain('guard-sentry');
   });
@@ -813,7 +809,7 @@ describe('ship: sentry is judged before the qavis advisory', () => {
     const r = runHook({ SENTRY_RC: '1' }, SHIP, { shipMsg: true });
     expect(r.status).toBe(1);
     expect(r.stdout).toContain('un-monitored runtime error-class');
-    expect(r.calls).not.toContain('guard-qavis-advisory');
+    expect(r.calls).not.toContain('guard-ui-evidence');
   });
 
   it('an unreadable staged set (exit 4) blocks without naming a defect, before the advisory', () => {
@@ -821,20 +817,26 @@ describe('ship: sentry is judged before the qavis advisory', () => {
     expect(r.status).toBe(1);
     expect(r.stdout).toContain('NOT a gate rejection');
     expect(r.stdout).not.toContain('un-monitored runtime error-class');
-    expect(r.calls).not.toContain('guard-qavis-advisory');
+    expect(r.calls).not.toContain('guard-ui-evidence');
   });
 
   it('an exit outside the contract (3) blocks before the advisory instead of falling through', () => {
     const r = runHook({ SENTRY_RC: '3' }, SHIP, { shipMsg: true });
     expect(r.status).toBe(1);
     expect(r.stdout).toContain('unexpected exit 3');
-    expect(r.calls).not.toContain('guard-qavis-advisory');
+    expect(r.calls).not.toContain('guard-ui-evidence');
   });
 
   it('a fail-open sentry (exit 2) continues to the advisory', () => {
     const r = runHook({ SENTRY_RC: '2' }, SHIP, { shipMsg: true });
     expect(r.status).toBe(0);
-    expect(r.calls).toContain('guard-qavis-advisory --gate');
+    expect(r.calls).toContain('guard-ui-evidence');
+  });
+
+  it.each(['1', '3', '127'])('ui-evidence exiting %s never blocks the ship', (rc) => {
+    const r = runHook({ UI_EVIDENCE_RC: rc }, SHIP, { shipMsg: true });
+    expect(r.status).toBe(0);
+    expect(r.calls).toContain('guard-ui-evidence');
   });
 
   it('a reviewer FAIL blocks first — sentry is never paid for on a doomed tree', () => {
@@ -845,7 +847,7 @@ describe('ship: sentry is judged before the qavis advisory', () => {
 
   it('devkit review exports the same message file but never runs the commit judge', () => {
     const r = runHook(
-      { DEVKIT_RUN_MODE: 'review', DEVKIT_REVIEW_GUARDS: 'review,sentry,qavis-advisory' },
+      { DEVKIT_RUN_MODE: 'review', DEVKIT_REVIEW_GUARDS: 'review,sentry,ui-evidence' },
       SHIP,
       { shipMsg: true },
     );
@@ -856,7 +858,7 @@ describe('ship: sentry is judged before the qavis advisory', () => {
   it('package mode: a missing pinned guard-sentry blocks instead of skipping silently', () => {
     const r = runHook({}, SHIP, { shipMsg: true, missingLocalBins: ['guard-sentry'] });
     expect(r.status).toBe(1);
-    expect(r.calls).not.toContain('guard-qavis-advisory');
+    expect(r.calls).not.toContain('guard-ui-evidence');
   });
 
   it.each(['standalone', 'overlay'])(
@@ -864,7 +866,7 @@ describe('ship: sentry is judged before the qavis advisory', () => {
     (builder) => {
       const r = runHook({}, SHIP, { shipMsg: true, builder, missingBins: ['guard-sentry'] });
       expect(r.status).toBe(1);
-      expect(r.calls).not.toContain('guard-qavis-advisory');
+      expect(r.calls).not.toContain('guard-ui-evidence');
     },
   );
 
@@ -872,7 +874,7 @@ describe('ship: sentry is judged before the qavis advisory', () => {
     const r = runHook({ SENTRY_RC: '1' }, SHIP, { shipMsg: true, pkgRel: 'pkg/a' });
     expect(r.status).toBe(1);
     expect(r.calls).toContain('guard-sentry --gate');
-    expect(r.calls).not.toContain('guard-qavis-advisory');
+    expect(r.calls).not.toContain('guard-ui-evidence');
   });
 });
 

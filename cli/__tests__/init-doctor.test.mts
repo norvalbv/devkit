@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { collectResults } from '../commands/doctor.mts';
@@ -221,7 +221,7 @@ describe('init --yes (all recommended)', () => {
       'clone',
       'comments',
       'decisions',
-      'qavis-advisory',
+      'ui-evidence',
     ]);
     expect(cfg.components.structure).toBe(false);
   });
@@ -654,7 +654,7 @@ describe('doctor — selection-aware', () => {
     expect(r.stdout).toMatch(/pre-commit: OK — block order: biome-format → deterministic\n/);
   });
 
-  // The order printed is the installed hook's, not the recorded selection's: qavis-advisory recorded
+  // The order printed is the installed hook's, not the recorded selection's: ui-evidence recorded
   // before review must still print after it, or a reader concludes QA runs before the reviewers.
   it('prints the overlay hook order, including its staged lint overlay', () => {
     const root = tmpRepo();
@@ -675,82 +675,12 @@ describe('doctor — selection-aware', () => {
 
   it('prints each hook block in the order it runs, not the recorded guard order', () => {
     const root = tmpRepo();
-    devkit(root, 'init', '--stack', 'generic', '--yes', '--guards', 'qavis-advisory,review,size');
+    devkit(root, 'init', '--stack', 'generic', '--yes', '--guards', 'ui-evidence,review,size');
     const { stdout } = devkit(root, 'doctor');
     expect(stdout).toContain(
-      'pre-commit: OK — block order: biome-format → deterministic → guard-review → guard-qavis-advisory',
+      'pre-commit: OK — block order: biome-format → deterministic → guard-review → guard-ui-evidence',
     );
     expect(stdout).toContain('commit-msg: OK — block order: guard-completeness');
-  });
-
-  // The qavis-advisory gate fails OPEN when qavis can't be reached, so at commit time a missing
-  // binary is indistinguishable from a healthy "nothing to QA". Doctor names the state — advisorily,
-  // because a repo that keeps the guard but skips installing qavis is a choice, not drift.
-  it('reports qavis-advisory health without ever gating the exit code', () => {
-    const root = tmpRepo();
-    devkit(root, 'init', '--stack', 'generic', '--yes', '--guards', 'size,qavis-advisory');
-
-    const inert = devkit(root, 'doctor');
-    expect(inert.status, inert.stderr).toBe(0);
-    expect(inert.stdout).toMatch(/qavis-advisory: no .*recipe\.json — gate inert/);
-
-    // A recipe with no qavis on PATH — the silently-dead gate this check exists to surface.
-    mkdirSync(join(root, '.qavis'), { recursive: true });
-    writeFileSync(join(root, '.qavis', 'recipe.json'), '{}');
-    const pathWithoutQavisOrCodex = '/usr/bin:/bin';
-    const claudeFamilyJudgePins = {
-      GUARD_REVIEW_MODEL: 'haiku',
-      GUARD_REVIEW_ESCALATION_MODEL: 'opus',
-      GUARD_CORRECTNESS_MODEL: 'opus',
-    };
-    const dead = spawnSync(process.execPath, [CLI, 'doctor'], {
-      cwd: root,
-      encoding: 'utf8',
-      env: { ...process.env, PATH: pathWithoutQavisOrCodex, ...claudeFamilyJudgePins },
-    });
-    expect(dead.stdout).toMatch(/qavis-advisory: .*present but qavis is NOT on PATH/);
-    expect(dead.status, dead.stderr).toBe(0);
-  });
-
-  // sc-2028: ship's post-push evidence hand-off is inert on a qavis with no publication subcommand,
-  // and it says so only in post-push stderr — a stream a headless shipping agent may never read. So
-  // doctor names it on the HEALTHY arm too, where the recipe and the binary are both proven present.
-  it('reports whether the installed qavis can publish PR evidence, without gating the exit code', () => {
-    const root = tmpRepo();
-    devkit(root, 'init', '--stack', 'generic', '--yes', '--guards', 'size,qavis-advisory');
-    mkdirSync(join(root, '.qavis'), { recursive: true });
-    writeFileSync(join(root, '.qavis', 'recipe.json'), '{}');
-    const stubBin = join(root, 'stub-bin');
-    mkdirSync(stubBin, { recursive: true });
-
-    const doctorWith = (script: string) => {
-      writeFileSync(join(stubBin, 'qavis'), `#!/bin/sh\n${script}\n`);
-      chmodSync(join(stubBin, 'qavis'), 0o755);
-      return spawnSync(process.execPath, [CLI, 'doctor'], {
-        cwd: root,
-        encoding: 'utf8',
-        env: { ...process.env, PATH: `${stubBin}:${process.env.PATH}` },
-      });
-    };
-    const qavisStub = (commands: string) => doctorWith(`printf 'Commands:\\n${commands}'`);
-
-    const noPublish = qavisStub('  qa [options]  x\\n  route [options]  x\\n');
-    expect(noPublish.stdout).toMatch(/qavis-advisory: qavis on PATH .*cannot publish PR evidence/);
-
-    const withPublish = qavisStub('  qa [options]  x\\n  publish [options]  x\\n');
-    expect(withPublish.stdout).toMatch(/qavis-advisory: qavis on PATH .*publishes on ship/);
-
-    // A qavis whose --help cannot be read is a THIRD state. Reporting it as "no publication
-    // subcommand" would state a fact about a binary doctor never managed to interrogate.
-    const unreadable = doctorWith('echo "boom" >&2; exit 3');
-    expect(unreadable.stdout).toMatch(
-      /qavis-advisory: qavis on PATH .*publication support UNKNOWN/,
-    );
-    expect(unreadable.stdout).not.toMatch(/has no publication subcommand/);
-
-    // Advisory to the end: which of the three a repo is in must never move doctor's exit code.
-    expect(withPublish.status, withPublish.stderr).toBe(noPublish.status);
-    expect(unreadable.status, unreadable.stderr).toBe(noPublish.status);
   });
 
   it('reports invalid JSON in a managed config as drift (not a silent pass)', () => {

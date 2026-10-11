@@ -122,8 +122,7 @@ ddrc=0
 __dk_no_git_env bunx guard-decisions detect --gate || ddrc=$?
 rrc=0
 __dk_no_git_env bunx guard-review --gate || rrc=$?
-qarc=0
-__dk_no_git_env bunx guard-qavis-advisory --gate || qarc=$?
+__dk_no_git_env bunx guard-ui-evidence || true
 cat x | bash .claude/hooks/fallow-gate.sh && fgrc=0 || fgrc=$?
 guard-decisions detect --gate || ddrc=$?
 guard-review --gate || rrc=$?

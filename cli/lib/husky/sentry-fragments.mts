@@ -34,11 +34,11 @@ ${invokeJudge(binDir, 'guard-sentry', 'src')}
 ${SENTRY_ARMS}
 # /devkit:guard-sentry`;
 
-// sc-3012: on a ship, judge sentry BEFORE the qavis advisory (a later fix voids a QA receipt);
-// commit-msg replays the verdict from the diff-tier cache.
+// On a ship, judge sentry at pre-commit with the other judges; commit-msg replays the verdict from
+// the diff-tier cache.
 export const sentryShipPrewarmFragment = (binDir: BinDir) => `# devkit:guard-sentry-prewarm
 if [ "\${DEVKIT_RUN_MODE:-}" != "review" ] && [ -n "\${DEVKIT_COMMIT_MSG_FILE:-}" ] && [ -f "\${DEVKIT_COMMIT_MSG_FILE:-}" ]; then
-echo "🛰️ Sentry gate (ship: judged before the qavis advisory; commit-msg replays the verdict)..."
+echo "🛰️ Sentry gate (ship: judged at pre-commit; commit-msg replays the verdict)..."
 src=0
 ${invokeJudge(binDir, 'guard-sentry', 'src', '"$DEVKIT_COMMIT_MSG_FILE"')}
 ${SENTRY_ARMS}

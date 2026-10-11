@@ -49,7 +49,7 @@ import type { CheckResult } from './check-result.mts';
 import { adviseCodexRuntime, adviseSearchIndex } from './guard-config-checks.mts';
 import { printBlockOrder, repointHooksPath } from './hook-checks.mts';
 import { hooksDir, sameDir, worktreeScopedPin } from './hooks-path.mts';
-import { printPriorArtAdvisoryHealth } from './qavis-health.mts';
+import { printPriorArtAdvisoryHealth } from './prior-art-health.mts';
 
 /** The recorded `.devkit/config.json` fields the overlay doctor consults. */
 export interface OverlayDoctorConfig {
@@ -63,7 +63,6 @@ export async function runOverlayDoctor(
   cwd: string,
   cfg: OverlayDoctorConfig,
   fix: boolean,
-  printQavisAdvisoryHealth: (cwd: string, guards: string[]) => void,
 ): Promise<number> {
   // hooksPath and its alias are repo-wide, including for a monorepo package.
   const { gitRoot, pkgRel } = detectGitRoot(cwd);
@@ -181,7 +180,6 @@ export async function runOverlayDoctor(
   // be undetectable here. Advisory: never in the exit code.
   await adviseSearchIndex(cwd, sel);
   await adviseCodexRuntime(cwd, sel);
-  printQavisAdvisoryHealth(cwd, sel.guards ?? []);
   printPriorArtAdvisoryHealth(cwd, sel);
   if (sel.fallow) {
     const wired =

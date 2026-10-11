@@ -171,7 +171,6 @@ describe('gate config projections', () => {
 
     expect(configuredPaths(root)).toBe(lines(registry));
     expect(configuredPaths(root, '--null')).toBe(lines(registry).replaceAll('\n', '\0'));
-    expect(configuredPaths(root, '--cache')).toBe(lines(registry.filter((input) => input.cache)));
     expect(configuredPaths(root, '--each-file')).toBe('.devkit/baselines/structure/cli.mjs\n');
   });
 
@@ -353,12 +352,7 @@ describe('gate config projections', () => {
     type ProjectionConfig = { indexPath?: string; decisionsDir?: string };
     const seed = (root: string, config: ProjectionConfig) => {
       writeFileSync(join(root, 'guard.config.json'), JSON.stringify(config));
-      for (const rel of [
-        '.decisions/index.json',
-        '.fallow/cache.bin',
-        '.cache/search index.db',
-        '.qavis/receipt.json',
-      ]) {
+      for (const rel of ['.decisions/index.json', '.fallow/cache.bin', '.cache/search index.db']) {
         mkdirSync(join(root, rel, '..'), { recursive: true });
         writeFileSync(join(root, rel), 'x');
       }
@@ -372,12 +366,7 @@ describe('gate config projections', () => {
         const result = project(root, worktree, purpose);
 
         expect(result.status, result.stderr).toBe(0);
-        for (const rel of [
-          '.decisions',
-          '.fallow',
-          '.cache/search index.db',
-          '.qavis/receipt.json',
-        ]) {
+        for (const rel of ['.decisions', '.fallow', '.cache/search index.db']) {
           expect(noticeLine(result.stderr, rel)).toContain('local cache');
           expect(noticeLine(result.stderr, rel)).not.toContain(COMMIT_HINT);
         }

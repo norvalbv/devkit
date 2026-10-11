@@ -287,7 +287,7 @@ export function devkitHome(home: string): string {
   const devkit = `#!/bin/sh\necho "$*" >> "$HOME/devkit-calls"\nexec node ${shQuote(CLI)} "$@"\n`;
   writeFileSync(join(bin, 'devkit'), devkit, { mode: 0o755 });
   const gate = '#!/bin/sh\necho "${0##*/} $*" >> "$HOME/gate-calls"\n';
-  for (const name of ['deterministic', 'comments', 'decisions', 'review', 'qavis-advisory'])
+  for (const name of ['deterministic', 'comments', 'decisions', 'review', 'ui-evidence'])
     writeFileSync(join(bin, `guard-${name}`), gate, { mode: 0o755 });
   return home;
 }

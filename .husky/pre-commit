@@ -419,14 +419,10 @@ fi
 # /devkit:guard-review
 fi
 
-if __dk_gate_selected qavis-advisory; then
-# devkit:guard-qavis-advisory
-qarc=0
-__dk_no_git_env node gate-engine/qavis-advisory/cli.mts --gate || qarc=$?
-[ "$qarc" -eq 3 ] && exit 1
-# qarc 0 = continue (SILENT / advisory-only / receipt-cleared / qavis absent); 3 = strict-ship block
-# (the remedy — run qavis, or export GUARD_QAVIS_OK=1 — is printed by the bin).
-# /devkit:guard-qavis-advisory
+if __dk_gate_selected ui-evidence; then
+# devkit:guard-ui-evidence
+__dk_no_git_env node gate-engine/ui-evidence/cli.mts || true
+# /devkit:guard-ui-evidence
 fi
 
 

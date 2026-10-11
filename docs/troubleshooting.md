@@ -370,8 +370,7 @@ at a time, by design.
 `devkit review` runs every selected gate even after one blocks, then prints this line and exits 1.
 The deterministic stage (guard-comments included) defers under `--dry-gates` too, where the line
 reads `✗ dry-gates: …`. A confirmed AI finding from guard-decisions or guard-review defers only in review. A
-judge outage (exit 3) or unreadable evidence (exit 4) from an AI gate, or a Qavis strict block, still
-stops the run at once.
+judge outage (exit 3) or unreadable evidence (exit 4) from an AI gate still stops the run at once.
 Each named gate's findings appear above the line.
 
 To check a fix without another commit or ship, stage it and run the per-gate command the block prints
@@ -382,6 +381,16 @@ fallow) and devkit's own formatter print the same invocation under `devkit ship`
 deterministic block.
 A reviewer FAIL prints `guard-review lens <reviewer>[:<lens>]` the same way: it re-judges only that
 reviewer or correctness lens on your staged index, and its PASS seeds the cache the next ship reads.
+
+## `📸 ui-evidence:` asks for screenshots on a change with no visible effect
+
+The reminder is advisory: this line never changes the ship's outcome. It fires on a shipped file
+with a UI extension or matching `uiEvidence.paths` (tests, stories and fixtures are excluded), or on
+a commit subject naming a visible symptom, and the line names which one matched. When nothing a
+user sees changed, say so in the PR description rather than attaching screenshots. To be reminded
+about backend or `.ts` files whose output your UI renders, add their globs to `uiEvidence.paths` in
+`guard.config.json`; to drop the reminder entirely, deselect the `ui-evidence` guard with
+`devkit init --guards <the guards you keep>`.
 
 ## `bun install` fails: `no commit matching "<sha>" found for "@norvalbv/devkit"`
 

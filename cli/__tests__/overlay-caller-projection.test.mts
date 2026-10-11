@@ -191,7 +191,7 @@ function openProjectionGap(dir: string) {
 function plantHomeRecord(dir: string, script: string, branch: string) {
   const mode = script === reshipScript ? 'reship' : 'ship';
   const home = { root: dir, branch, mode, title: 'home', links: [], body: Buffer.from('home\n') };
-  const flags = { noQavisPublish: false, updatePrBody: false, draft: false, resumed: false };
+  const flags = { updatePrBody: false, draft: false, resumed: false };
   expect(writeIntent({ ...home, ...flags, mergePaths: false }, ['note.txt'])).toBe(0);
 }
 

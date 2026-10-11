@@ -172,7 +172,7 @@ case "$tool" in
         [ -n "\${COMP_SLOW_TERM:-}" ] && sleep 0.1; exit \${REVIEW_RC:-0};;
     esac;;
   guard-sentry) echo "guard-sentry-argc $#" >> "$HOME/calls.log"; exit \${SENTRY_RC:-0};;
-  guard-qavis-advisory) exit \${QAVIS_RC:-0};;
+  guard-ui-evidence) exit \${UI_EVIDENCE_RC:-0};;
   *) exit 0;;
 esac
 `;
@@ -182,7 +182,7 @@ esac
     'guard-comments',
     'guard-decisions',
     'guard-review',
-    'guard-qavis-advisory',
+    'guard-ui-evidence',
     'guard-sentry',
   ]) {
     writeFileSync(join(bin, name), gateStub);

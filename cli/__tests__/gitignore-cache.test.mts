@@ -208,8 +208,8 @@ describe('pruneDevkitCacheGitignore', () => {
   });
 });
 
-// sc-2333: a consumer whose .gitignore predates a managed rule (qavis lacked `.devkit/ship-intent-*`)
-// only learned of it from ship's inline warning, after the invocation had already gone unrecorded.
+// A consumer whose .gitignore predates a managed rule (e.g. `.devkit/ship-intent-*`) only learned of
+// it from ship's inline warning, after the invocation had already gone unrecorded.
 describe('checkDevkitCacheGitignore', () => {
   const gitRepo = () => {
     const d = tmp();

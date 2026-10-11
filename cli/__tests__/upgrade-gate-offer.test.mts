@@ -2,7 +2,7 @@
  * `devkit upgrade` gate reconcile — the fix for a newly-bundled gate being silently dropped.
  *
  * Subprocess-style (no TTY → the non-interactive branch): a repo whose recorded selection predates a
- * now-recommended gate (qavis-advisory) gets it HEALED into the config + husky block on upgrade, and a
+ * now-recommended gate (ui-evidence) gets it HEALED into the config + husky block on upgrade, and a
  * bundled opt-in gate (review) it never selected is surfaced as a one-line NOTICE but never auto-added.
  * A repo already current on recommended gates is NOT re-nagged about the opt-in one. DEVKIT_REPO points
  * at a bogus URL so the version step's `git ls-remote` fails fast (no network).
@@ -40,9 +40,9 @@ const run = (root: string, ...args: string[]) =>
 const hook = (root: string) => readFileSync(join(root, '.husky', 'pre-commit'), 'utf8');
 const guards = (root: string) => config(root).components.guards as string[];
 
-// A component-lib repo whose recorded guard selection excludes qavis-advisory (a pre-promotion
+// A component-lib repo whose recorded guard selection excludes ui-evidence (a pre-promotion
 // install) and review — so upgrade sees a recommended gate to heal.
-function preQavisFixture() {
+function preUiEvidenceFixture() {
   const root = tmpRepo(CLIB_PKG);
   const r = run(
     root,
@@ -70,26 +70,26 @@ describe('devkit upgrade — gate reconcile', () => {
     // ON PURPOSE: frink hand-places `decisions` after its free deterministic gates, so devkit
     // re-adding it to the managed block meant a second LLM judge on every commit. Silently healing
     // also left .devkit/config.json saying one thing while the hook did another.
-    const root = preQavisFixture();
+    const root = preUiEvidenceFixture();
     const before = guards(root);
-    expect(before).not.toContain('qavis-advisory');
-    expect(hook(root)).not.toContain('guard-qavis-advisory');
+    expect(before).not.toContain('ui-evidence');
+    expect(hook(root)).not.toContain('guard-ui-evidence');
 
     const up = run(root, 'upgrade');
     expect(up.status, up.stderr || up.stdout).toBe(0);
 
     // Surfaced loudly...
-    expect(up.stdout).toMatch(/qavis-advisory.*recommended/i);
+    expect(up.stdout).toMatch(/ui-evidence.*recommended/i);
     expect(up.stdout).toMatch(/review.*opt-in/i);
     // ...but neither the config nor the hook was mutated behind the consumer's back.
     expect(guards(root)).toEqual(before);
-    expect(hook(root)).not.toContain('guard-qavis-advisory');
+    expect(hook(root)).not.toContain('guard-ui-evidence');
   });
 
   it('a gate deliberately removed from guards STAYS removed across repeated upgrades', () => {
     // The regression this exists for: remove a recommended gate, upgrade twice, and it must not
     // reappear. The non-TTY path used to heal it back on the very next run.
-    const root = preQavisFixture();
+    const root = preUiEvidenceFixture();
     const cfgPath = join(root, '.devkit', 'config.json');
     const cfg = JSON.parse(readFileSync(cfgPath, 'utf8'));
     cfg.components.guards = (cfg.components.guards as string[]).filter(
@@ -136,7 +136,7 @@ describe('devkit upgrade — gate reconcile', () => {
       'generic',
       '--yes',
       '--guards',
-      'size,fanout,dup,clone,decisions,qavis-advisory',
+      'size,fanout,dup,clone,decisions,ui-evidence',
     );
     expect(init.status, init.stderr || init.stdout).toBe(0);
     const cfgPath = join(root, '.devkit', 'config.json');
@@ -156,7 +156,7 @@ describe('devkit upgrade — gate reconcile', () => {
     // as explicit declines to distinguish them from never-seen gates that upgrade should offer.
     const root = tmpRepo(CLIB_PKG);
     expect(run(root, 'init', '--stack', 'component-lib', '--yes', '--no-cursor').status).toBe(0);
-    expect(guards(root)).toContain('qavis-advisory');
+    expect(guards(root)).toContain('ui-evidence');
 
     const before = guards(root);
     const cfgPath = join(root, '.devkit', 'config.json');

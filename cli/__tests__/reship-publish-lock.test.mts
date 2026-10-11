@@ -56,17 +56,7 @@ describe('reship.sh — the rewrite publication lock', () => {
   const reship = (dir: string, env: Record<string, string>, body: string) =>
     spawnSync(
       '/bin/bash',
-      [
-        reshipScript,
-        'feat/pr',
-        'add v2',
-        '--pr',
-        '--body',
-        body,
-        '--no-qavis-publish',
-        '--',
-        'a.ts',
-      ],
+      [reshipScript, 'feat/pr', 'add v2', '--pr', '--body', body, '--', 'a.ts'],
       {
         cwd: dir,
         input: 'body\n',

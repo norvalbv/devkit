@@ -14,7 +14,6 @@ export function parseArgs(argv: string[]) {
     // unlisted flag as value-taking and consumes the NEXT argv entry as its value, silently eating a
     // real argument (`--draft --resumed` would swallow `--resumed`).
     if (
-      a === '--no-qavis-publish' ||
       a === '--update-pr-body' ||
       a === '--draft' ||
       a === '--resumed' ||

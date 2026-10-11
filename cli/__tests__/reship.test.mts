@@ -256,11 +256,7 @@ describe('reship — explicit bodies refresh the existing PR (sc-2414)', () => {
     writeFileSync(join(dir, 'a.ts'), 'v2\n');
     writeFileSync(join(dir, 'body.md'), body);
 
-    const r = run(
-      ['feat/pr', 'add v2', '--pr', '--body-file', 'body.md', '--no-qavis-publish', '--', 'a.ts'],
-      dir,
-      env,
-    );
+    const r = run(['feat/pr', 'add v2', '--pr', '--body-file', 'body.md', '--', 'a.ts'], dir, env);
 
     expect(r.status, r.stderr).toBe(0);
     expect(existsSync(ghBody), 'gh pr edit should receive a body').toBe(true);
@@ -274,11 +270,7 @@ describe('reship — explicit bodies refresh the existing PR (sc-2414)', () => {
     const { dir, env, ghBody } = bodyUpdateRepo();
     writeFileSync(join(dir, 'a.ts'), 'v2\n');
 
-    const r = run(
-      ['feat/pr', 'add v2', '--pr', '--body', '', '--no-qavis-publish', '--', 'a.ts'],
-      dir,
-      env,
-    );
+    const r = run(['feat/pr', 'add v2', '--pr', '--body', '', '--', 'a.ts'], dir, env);
 
     expect(r.status, r.stderr).toBe(0);
     expect(existsSync(ghBody), 'an explicit empty body is still an update').toBe(true);
@@ -289,7 +281,7 @@ describe('reship — explicit bodies refresh the existing PR (sc-2414)', () => {
     const { dir, env, ghLog, ghBody } = bodyUpdateRepo();
     writeFileSync(join(dir, 'a.ts'), 'v2\n');
 
-    const r = run(['feat/pr', 'add v2', '--pr', '--no-qavis-publish', '--', 'a.ts'], dir, env, {
+    const r = run(['feat/pr', 'add v2', '--pr', '--', 'a.ts'], dir, env, {
       input: 'legacy piped commit body\n',
     });
 
@@ -352,16 +344,7 @@ describe('reship — explicit bodies refresh the existing PR (sc-2414)', () => {
     writeFileSync(join(dir, 'a.ts'), 'v2\n');
 
     const oldRun = runAsync(
-      [
-        'feat/pr',
-        'old publication',
-        '--pr',
-        '--body',
-        'old body',
-        '--no-qavis-publish',
-        '--',
-        'a.ts',
-      ],
+      ['feat/pr', 'old publication', '--pr', '--body', 'old body', '--', 'a.ts'],
       dir,
       { ...env, GATE_PAUSE_MARKER: oldPaused, GATE_PAUSE_RELEASE: oldRelease },
     );
@@ -414,7 +397,7 @@ describe('reship — explicit bodies refresh the existing PR (sc-2414)', () => {
     writeFileSync(join(dir, 'a.ts'), 'v2\n');
     writeFileSync(join(dir, 'body.md'), body);
     const blocked = run(
-      ['feat/pr', 'add v2', '--pr', '--body-file', 'body.md', '--no-qavis-publish', '--', 'a.ts'],
+      ['feat/pr', 'add v2', '--pr', '--body-file', 'body.md', '--', 'a.ts'],
       dir,
       env,
     );
@@ -435,11 +418,10 @@ describe('reship — explicit bodies refresh the existing PR (sc-2414)', () => {
     const body = 'publish this after recovery\n';
     writeFileSync(join(dir, 'a.ts'), 'v2\n');
 
-    const lostResponse = run(
-      ['feat/pr', 'add v2', '--pr', '--body', body, '--no-qavis-publish', '--', 'a.ts'],
-      dir,
-      { ...env, FAIL_AFTER_PUSH: '1' },
-    );
+    const lostResponse = run(['feat/pr', 'add v2', '--pr', '--body', body, '--', 'a.ts'], dir, {
+      ...env,
+      FAIL_AFTER_PUSH: '1',
+    });
     const accepted = g(['--git-dir', bare, 'rev-parse', 'refs/heads/feat/pr']);
     expect(lostResponse.status).not.toBe(0);
     expect(accepted).not.toBe(before);
@@ -457,11 +439,10 @@ describe('reship — explicit bodies refresh the existing PR (sc-2414)', () => {
     const body = 'survive the metadata crash\n';
     writeFileSync(join(dir, 'a.ts'), 'v2\n');
 
-    const interrupted = run(
-      ['feat/pr', 'add v2', '--pr', '--body', body, '--no-qavis-publish', '--', 'a.ts'],
-      dir,
-      { ...env, GH_EDIT_KILL_PARENT: '1' },
-    );
+    const interrupted = run(['feat/pr', 'add v2', '--pr', '--body', body, '--', 'a.ts'], dir, {
+      ...env,
+      GH_EDIT_KILL_PARENT: '1',
+    });
     const accepted = g(['--git-dir', bare, 'rev-parse', 'refs/heads/feat/pr']);
     expect(interrupted.status).not.toBe(0);
     expect(accepted).not.toBe(before);
@@ -483,11 +464,10 @@ describe('reship — explicit bodies refresh the existing PR (sc-2414)', () => {
     const before = g(['--git-dir', bare, 'rev-parse', 'refs/heads/feat/pr']);
     writeFileSync(join(dir, 'a.ts'), 'v2\n');
 
-    const r = run(
-      ['feat/pr', 'add v2', '--pr', '--body', 'new proof', '--no-qavis-publish', '--', 'a.ts'],
-      dir,
-      { ...env, GH_EDIT_STATUS: '9' },
-    );
+    const r = run(['feat/pr', 'add v2', '--pr', '--body', 'new proof', '--', 'a.ts'], dir, {
+      ...env,
+      GH_EDIT_STATUS: '9',
+    });
     const after = g(['--git-dir', bare, 'rev-parse', 'refs/heads/feat/pr']);
 
     expect(r.status).not.toBe(0);
@@ -503,20 +483,10 @@ describe('reship — explicit bodies refresh the existing PR (sc-2414)', () => {
     const intentLock = join(dir, `${relIntentPath('feat/pr')}.lock`);
     writeFileSync(join(dir, 'a.ts'), 'v2\n');
 
-    const r = run(
-      [
-        'feat/pr',
-        'add v2',
-        '--pr',
-        '--body',
-        'published proof',
-        '--no-qavis-publish',
-        '--',
-        'a.ts',
-      ],
-      dir,
-      { ...env, GH_INTENT_LOCK: intentLock },
-    );
+    const r = run(['feat/pr', 'add v2', '--pr', '--body', 'published proof', '--', 'a.ts'], dir, {
+      ...env,
+      GH_INTENT_LOCK: intentLock,
+    });
 
     expect(r.status).not.toBe(0);
     expect(readFileSync(ghBody, 'utf8')).toBe('published proof');
@@ -529,11 +499,10 @@ describe('reship — explicit bodies refresh the existing PR (sc-2414)', () => {
     const before = g(['--git-dir', bare, 'rev-parse', 'refs/heads/feat/pr']);
     writeFileSync(join(dir, 'a.ts'), 'v2\n');
 
-    const r = run(
-      ['feat/pr', 'add v2', '--pr', '--body', 'new proof', '--no-qavis-publish', '--', 'a.ts'],
-      dir,
-      { ...env, GH_VIEW_STATUS: '7' },
-    );
+    const r = run(['feat/pr', 'add v2', '--pr', '--body', 'new proof', '--', 'a.ts'], dir, {
+      ...env,
+      GH_VIEW_STATUS: '7',
+    });
     const after = g(['--git-dir', bare, 'rev-parse', 'refs/heads/feat/pr']);
 
     expect(r.status).not.toBe(0);
@@ -551,11 +520,7 @@ describe('reship — --ready marks the PR ready for review', () => {
     const before = g(['--git-dir', bare, 'rev-parse', 'refs/heads/feat/pr']);
     writeFileSync(join(dir, 'a.ts'), 'v2\n');
 
-    const r = run(
-      ['feat/pr', 'add v2', '--pr', '--ready', '--no-qavis-publish', '--', 'a.ts'],
-      dir,
-      env,
-    );
+    const r = run(['feat/pr', 'add v2', '--pr', '--ready', '--', 'a.ts'], dir, env);
 
     expect(r.status, r.stderr).toBe(0);
     expect(g(['--git-dir', bare, 'rev-parse', 'refs/heads/feat/pr'])).not.toBe(before); // push landed
@@ -569,7 +534,7 @@ describe('reship — --ready marks the PR ready for review', () => {
     const { dir, env, ghLog } = bodyUpdateRepo();
     writeFileSync(join(dir, 'a.ts'), 'v2\n');
 
-    const r = run(['feat/pr', 'add v2', '--pr', '--no-qavis-publish', '--', 'a.ts'], dir, env);
+    const r = run(['feat/pr', 'add v2', '--pr', '--', 'a.ts'], dir, env);
 
     expect(r.status, r.stderr).toBe(0);
     expect(readFileSync(ghLog, 'utf8')).not.toContain('pr ready');
@@ -582,14 +547,10 @@ describe('reship — --ready marks the PR ready for review', () => {
     const before = g(['--git-dir', bare, 'rev-parse', 'refs/heads/feat/pr']);
     writeFileSync(join(dir, 'a.ts'), 'v2\n');
 
-    const r = run(
-      ['feat/pr', 'add v2', '--pr', '--ready', '--no-qavis-publish', '--', 'a.ts'],
-      dir,
-      {
-        ...env,
-        GH_READY_STATUS: '3',
-      },
-    );
+    const r = run(['feat/pr', 'add v2', '--pr', '--ready', '--', 'a.ts'], dir, {
+      ...env,
+      GH_READY_STATUS: '3',
+    });
 
     expect(r.status).not.toBe(0);
     expect(g(['--git-dir', bare, 'rev-parse', 'refs/heads/feat/pr'])).not.toBe(before); // push KEPT
@@ -605,14 +566,10 @@ describe('reship — --ready marks the PR ready for review', () => {
     const { dir, env } = bodyUpdateRepo();
     writeFileSync(join(dir, 'a.ts'), 'v2\n');
 
-    const r = run(
-      ['feat/pr', 'add v2', '--pr', '--ready', '--no-qavis-publish', '--', 'a.ts'],
-      dir,
-      {
-        ...env,
-        GH_VIEW_STATUS: '7', // gh pr view fails → no PR_URL
-      },
-    );
+    const r = run(['feat/pr', 'add v2', '--pr', '--ready', '--', 'a.ts'], dir, {
+      ...env,
+      GH_VIEW_STATUS: '7', // gh pr view fails → no PR_URL
+    });
 
     expect(r.status).not.toBe(0);
     expect(r.stderr).toContain('--ready could not resolve the PR');
@@ -623,17 +580,7 @@ describe('reship — --ready marks the PR ready for review', () => {
     const { dir, env, ghLog, ghBody } = bodyUpdateRepo();
     // a.ts is left byte-identical to origin/feat/pr → no delta, so only the body can change.
     const r = run(
-      [
-        'feat/pr',
-        'same content',
-        '--pr',
-        '--body',
-        'fresh body',
-        '--ready',
-        '--no-qavis-publish',
-        '--',
-        'a.ts',
-      ],
+      ['feat/pr', 'same content', '--pr', '--body', 'fresh body', '--ready', '--', 'a.ts'],
       dir,
       env,
     );
@@ -647,7 +594,7 @@ describe('reship — --ready marks the PR ready for review', () => {
     const { bare, dir, env, g, ghLog } = bodyUpdateRepo();
     const before = g(['--git-dir', bare, 'rev-parse', 'refs/heads/feat/pr']);
     writeFileSync(join(dir, 'a.ts'), 'v2\n');
-    const argv = ['feat/pr', 'add v2', '--pr', '--ready', '--no-qavis-publish', '--', 'a.ts'];
+    const argv = ['feat/pr', 'add v2', '--pr', '--ready', '--', 'a.ts'];
 
     const first = run(argv, dir, { ...env, GH_READY_STATUS: '3' }); // push lands, flip fails
     expect(first.status).not.toBe(0);
@@ -741,7 +688,6 @@ describe('reship --base — replace a conflicted PR from a caller-prepared snaps
         'main',
         '--body',
         body,
-        '--no-qavis-publish',
         '--',
         'conflict.txt',
       ],
@@ -825,7 +771,6 @@ describe('reship --base — replace a conflicted PR from a caller-prepared snaps
           'main',
           '--body',
           'proof body',
-          '--no-qavis-publish',
           '--',
           'conflict.txt',
         ],
@@ -864,7 +809,6 @@ describe('reship --base — replace a conflicted PR from a caller-prepared snaps
         'main',
         '--body',
         'line\nnext',
-        '--no-qavis-publish',
         '--',
         'conflict.txt',
       ],
@@ -902,7 +846,6 @@ describe('reship --base — replace a conflicted PR from a caller-prepared snaps
         'main',
         '--body',
         'line  \nnext',
-        '--no-qavis-publish',
         '--',
         'conflict.txt',
       ],
@@ -942,7 +885,6 @@ describe('reship --base — replace a conflicted PR from a caller-prepared snaps
         'main',
         '--body',
         'same body',
-        '--no-qavis-publish',
         '--',
         'conflict.txt',
       ],
@@ -968,7 +910,6 @@ describe('reship --base — replace a conflicted PR from a caller-prepared snaps
         'main',
         '--body',
         'same body',
-        '--no-qavis-publish',
         '--',
         'conflict.txt',
       ],
@@ -1003,7 +944,6 @@ describe('reship --base — replace a conflicted PR from a caller-prepared snaps
         'main',
         '--body',
         'old body',
-        '--no-qavis-publish',
         '--',
         'conflict.txt',
       ],
@@ -1047,7 +987,6 @@ describe('reship --base — replace a conflicted PR from a caller-prepared snaps
         'main',
         '--body',
         'new body',
-        '--no-qavis-publish',
         '--',
         'conflict.txt',
       ],
@@ -1272,14 +1211,7 @@ describe('reship --base — a moved PR base never strands the rewrite (sc-2739)'
   it('resumes a published rewrite after origin/main advanced, without re-running gates', () => {
     const repo = rewriteRepo();
     const { bare, dir, env, g, mainTip, ghBody } = repo;
-    const argv = [
-      ...rewrite.slice(0, 5),
-      '--body',
-      'resume body\n',
-      '--no-qavis-publish',
-      '--',
-      'conflict.txt',
-    ];
+    const argv = [...rewrite.slice(0, 5), '--body', 'resume body\n', '--', 'conflict.txt'];
     const interrupted = run(argv, dir, { ...env, GH_EDIT_KILL_PARENT: '1' });
     expect(interrupted.status).not.toBe(0);
     const accepted = head(repo);

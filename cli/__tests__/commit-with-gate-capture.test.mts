@@ -395,8 +395,6 @@ describe('commit_with_gate_capture — executable hook proof', () => {
     ['✗ deterministic gates failed: guard-anti-slop guard-comments', 'deterministic'],
     ['✗ deterministic gates failed: guard-comments guard-anti-slop', 'deterministic'],
     ['✗ deterministic gates failed: guard-comments-lint', 'deterministic'],
-    ['qavis-advisory: strict gate blocked', 'qavis-advisory'],
-    ['qavis-advisory: UI-affecting change with no qavis QA on this staged tree.', 'unknown'],
   ])('attributes terminal hook output %s to %s', (message, blockedGate) => {
     const { root, wt, base } = fixture(
       true,

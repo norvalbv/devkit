@@ -645,7 +645,6 @@ describe('ship-branch.sh — --from-branch committed scope (sc-2352)', () => {
           title: 'ship committed branch scope',
           base: 'work',
           links: [],
-          noQavisPublish: false,
           updatePrBody: false,
           draft: false,
           resumed: false,

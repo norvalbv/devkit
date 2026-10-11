@@ -2,7 +2,7 @@
 
 > **Standing use:** this document is the house reference for DESIGNING AND UPGRADING ALL agent
 > benchmarks (sentry-eval, claude-md-eval, correctness-bench, reviewer-eval, decisions-eval,
-> search-tool-eval, qavis, edge-cases-eval, and future ones). Read the retrofit checklist first;
+> search-tool-eval, edge-cases-eval, and future ones). Read the retrofit checklist first;
 > read the full audit report when a checklist item needs its evidence. The OPERATIONAL runbook
 > for the reviewer corpus-growth loop (tools, cadence, capture points, current state) is
 > [`corpus-growth.md`](corpus-growth.md).
@@ -90,8 +90,8 @@ Distilled from the report + its sources; each item names the failure it prevents
   by design ✓ — but no κ, no label-noise floor, labeler==judge family unblinded.
 - **correctness-bench / reviewer-eval**: multi-finding matching = items 1, 18, 19 (sc-1061
   matcher unification is exactly item 18).
-- **decisions-eval / search-tool-eval / qavis**: audit against items 5-8 (labeling) and 9-11
-  (judge bias); qavis vision verdicts additionally style-bias-prone (item 10).
+- **decisions-eval / search-tool-eval**: audit against items 5-8 (labeling) and 9-11
+  (judge bias).
 
 ---
 

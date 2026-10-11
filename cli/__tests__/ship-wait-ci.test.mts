@@ -196,7 +196,7 @@ describe('reship.sh — --wait-ci after a real re-push', () => {
 
     const r = spawnSync(
       '/bin/bash',
-      [reshipScript, 'feat/pr', 'add v2', '--pr', '--wait-ci', '--no-qavis-publish', '--', 'a.ts'],
+      [reshipScript, 'feat/pr', 'add v2', '--pr', '--wait-ci', '--', 'a.ts'],
       { cwd: dir, input: 'body\n', encoding: 'utf8', env: { ...process.env, ...env, ...CHECKS } },
     );
 
@@ -213,17 +213,7 @@ describe('reship.sh — --wait-ci after a real re-push', () => {
 
     const r = spawnSync(
       '/bin/bash',
-      [
-        reshipScript,
-        'feat/pr',
-        'add v2',
-        '--pr',
-        '--ready',
-        '--wait-ci',
-        '--no-qavis-publish',
-        '--',
-        'a.ts',
-      ],
+      [reshipScript, 'feat/pr', 'add v2', '--pr', '--ready', '--wait-ci', '--', 'a.ts'],
       {
         cwd: dir,
         input: 'body\n',
@@ -500,7 +490,6 @@ describe('--wait-ci-required', () => {
         ...extra,
         '--wait-ci',
         '--wait-ci-required',
-        '--no-qavis-publish',
         '--',
         'a.ts',
       ],

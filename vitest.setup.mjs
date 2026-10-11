@@ -89,9 +89,8 @@ export const INHERITED_RUN_ENV = [
 ];
 
 // review-target.sh guards a review ENTRYPOINT, so its list is NOT a superset of what a ship exports
-// downstream — these names reach the suite unscrubbed by it. They are not inert: qavis-advisory's
-// shipMode() branches on DEVKIT_SHIP_ROOT and then runs git against that path, and completeness's
-// verdictBranch() scopes a sticky verdict to DEVKIT_SHIP_BRANCH, so an inherited pair makes a test
+// downstream — these names reach the suite unscrubbed by it. They are not inert: completeness's
+// verdictBranch() scopes a sticky verdict to DEVKIT_SHIP_BRANCH, so an inherited value makes a test
 // answer for the OUTER ship's repository. A parity test derives this set from the ship scripts.
 export const SHIP_EXPORTED_ENV = [
   'DEVKIT_SHIP_BRANCH',

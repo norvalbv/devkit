@@ -145,7 +145,7 @@ describe('self-host bin rewrite', () => {
     expect(sourceBinFor(ROOT, 'guard-review')).toBe('gate-engine/review/cli.mts');
     expect(sourceBinFor(ROOT, 'guard-comments')).toBe('gate-engine/comment-firewall/cli.mts');
     expect(sourceBinFor(ROOT, 'guard-deterministic')).toBe('gate-engine/deterministic/run.mts');
-    expect(sourceBinFor(ROOT, 'guard-qavis-advisory')).toBe('gate-engine/qavis-advisory/cli.mts');
+    expect(sourceBinFor(ROOT, 'guard-ui-evidence')).toBe('gate-engine/ui-evidence/cli.mts');
   });
 
   it('sourceBinFor throws on an unknown bin', () => {
@@ -191,7 +191,7 @@ describe('selfHostSelection', () => {
       'clone',
       'comments',
       'decisions',
-      'qavis-advisory',
+      'ui-evidence',
       'review',
     ])
       expect(sel.guards).toContain(g);
@@ -231,7 +231,7 @@ describe('selfHostSelection', () => {
       'clone',
       'comments',
       'decisions',
-      'qavis-advisory',
+      'ui-evidence',
       'review',
     ])
       expect(sel.guards).toContain(g);
