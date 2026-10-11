@@ -46,6 +46,8 @@ export interface EvidenceOutcome {
 
 export interface ShipChange {
   headSha: string;
+  /** The PR title or squash subject; its Conventional Commits type picks the size limit. */
+  subject: string;
   paths: readonly ChangedPath[];
   /** GUARD_* bypasses and waived findings; 'unknown' when they could not be read. */
   bypasses: readonly string[] | 'unknown';
@@ -71,13 +73,21 @@ type PathClass =
   | 'consumer-surface'
   | 'source';
 
+interface Limit {
+  maxSourceLines: number;
+  maxSourceFiles: number;
+}
+
 interface Policy {
   governance: RegExp[];
   decisionRecord: RegExp;
   consumerSurface: RegExp[];
-  maxSourceLines: number;
-  maxSourceFiles: number;
+  limits: Record<string, Partial<Limit>>;
 }
+
+const BUILT_IN_LIMIT: Limit = { maxSourceLines: 50, maxSourceFiles: 4 };
+// A breaking `type!:` subject does not match, so it gets the default limit.
+const COMMIT_TYPE = /^([a-z]+)(?:\([^)]*\))?:/i;
 
 const CLASS_REASONS = [
   'dependency',
@@ -135,8 +145,15 @@ const policySchema = z.looseObject({
   mergeVerdict: z
     .strictObject({
       consumerSurface: z.array(repoGlobSchema).default([]),
-      maxSourceLines: z.int().min(0).default(50),
-      maxSourceFiles: z.int().min(0).default(4),
+      limits: z
+        .record(
+          z.string().regex(/^[a-z]+$/, 'a lowercase commit type or "default"'),
+          z.strictObject({
+            maxSourceLines: z.int().min(0).optional(),
+            maxSourceFiles: z.int().min(0).optional(),
+          }),
+        )
+        .default({}),
     })
     .prefault({}),
 });
@@ -153,15 +170,21 @@ function parsePolicy(configText: string | null): Policy {
     const issue = parsed.error.issues[0];
     throw new Error(`${CONFIG_FILENAME} ${issue.path.join('.')}: ${issue.message}`);
   }
-  const { consumerSurface, maxSourceLines, maxSourceFiles } = parsed.data.mergeVerdict;
+  const { consumerSurface, limits } = parsed.data.mergeVerdict;
   const { decisionsDir, allowlistPath } = resolveGuardConfigJson(configText);
   return {
     governance: [...GOVERNANCE_GLOBS, allowlistPath.replace(LEADING_DOT_SLASH, '')].map(anyDepth),
     decisionRecord: decisionFileRe(decisionsDir),
     consumerSurface: consumerSurface.map((glob) => compileRepoGlob(glob)),
-    maxSourceLines,
-    maxSourceFiles,
+    limits,
   };
+}
+
+/** The size limit for `subject`'s commit type: its entry, then `default`, then the built-in limit. */
+function limitFor(subject: string, limits: Policy['limits']) {
+  const type = COMMIT_TYPE.exec(subject)?.[1].toLowerCase();
+  const name = type && Object.hasOwn(limits, type) ? type : 'default';
+  return { name, limit: { ...BUILT_IN_LIMIT, ...limits.default, ...limits[name] } };
 }
 
 // Governance outranks the test name, so `.github/workflows/x.test.yml` still counts as CI.
@@ -190,12 +213,13 @@ function proofReason({ evidence, headSha }: ShipChange): VerdictReason {
 }
 
 function sourceReasons(change: ShipChange, source: ChangedPath[], policy: Policy): VerdictReason[] {
-  const { maxSourceLines, maxSourceFiles } = policy;
+  const { name, limit } = limitFor(change.subject, policy.limits);
+  const { maxSourceLines, maxSourceFiles } = limit;
   const uncounted = source.some((p) => !counted(p.added) || !counted(p.deleted));
   const lines = source.reduce((sum, p) => sum + (p.added ?? 0) + (p.deleted ?? 0), 0);
   const size = uncounted
     ? 'unknown line count'
-    : `${lines}/${maxSourceLines} lines, ${source.length}/${maxSourceFiles} files`;
+    : `${lines}/${maxSourceLines} lines, ${source.length}/${maxSourceFiles} files, ${name} limit`;
   const over = uncounted || lines > maxSourceLines || source.length > maxSourceFiles;
   return [...(over ? [{ code: 'over-size' as const, detail: size }] : []), proofReason(change)];
 }

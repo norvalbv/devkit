@@ -21,21 +21,30 @@ const p = (path: string, added: number | null = 1, deleted: number | null = 0): 
 });
 const change = (paths: ChangedPath[], over: Partial<ShipChange> = {}): ShipChange => ({
   headSha: HEAD,
+  subject: 'Untyped subject',
   paths,
   bypasses: [],
   evidence: captured,
   ...over,
 });
 const fix = p('src/fix.mts', 10, 2);
-/** A `mergeVerdict` value as written in guard.config.json; `maxSourceLine` is a deliberate typo. */
-interface PolicyFixture {
-  consumerSurface?: string[];
+interface LimitFixture {
   maxSourceLines?: number;
   maxSourceFiles?: number;
   maxSourceLine?: number;
 }
+/** A `mergeVerdict` value as written in guard.config.json; `maxSourceLine` is a deliberate typo. */
+interface PolicyFixture {
+  consumerSurface?: string[];
+  limits?: Record<string, LimitFixture>;
+  maxSourceLines?: number;
+}
 const config = (mergeVerdict: PolicyFixture) => JSON.stringify({ mergeVerdict });
 const SURFACE = config({ consumerSurface: ['./cli/commands/**', 'skills/**'] });
+const TYPED = config({
+  limits: { fix: { maxSourceLines: 500, maxSourceFiles: 10 }, feat: { maxSourceLines: 200 } },
+});
+const big = p('src/big.mts', 300, 100);
 
 interface Row {
   name: string;
@@ -196,13 +205,19 @@ const ROWS: Row[] = [
     name: '51 lines',
     change: change([p('a.mts', 51, 0)]),
     verdict: 'human-review',
-    reasons: [{ code: 'over-size', detail: '51/50 lines, 1/4 files' }, { code: 'captured-proof' }],
+    reasons: [
+      { code: 'over-size', detail: '51/50 lines, 1/4 files, default limit' },
+      { code: 'captured-proof' },
+    ],
   },
   {
     name: '5 files',
     change: change(['a', 'b', 'c', 'd', 'e'].map((n) => p(`${n}.mts`))),
     verdict: 'human-review',
-    reasons: [{ code: 'over-size', detail: '5/50 lines, 5/4 files' }, { code: 'captured-proof' }],
+    reasons: [
+      { code: 'over-size', detail: '5/50 lines, 5/4 files, default limit' },
+      { code: 'captured-proof' },
+    ],
   },
   {
     name: 'binary source',
@@ -217,11 +232,71 @@ const ROWS: Row[] = [
     reasons: [{ code: 'over-size', detail: 'unknown line count' }, { code: 'captured-proof' }],
   },
   {
-    name: 'maxSourceLines 0 admits only test-only changes',
+    name: 'a default maxSourceLines of 0 admits only test-only changes',
     change: change([fix]),
-    config: config({ maxSourceLines: 0 }),
+    config: config({ limits: { default: { maxSourceLines: 0 } } }),
     verdict: 'human-review',
-    reasons: [{ code: 'over-size', detail: '12/0 lines, 1/4 files' }, { code: 'captured-proof' }],
+    reasons: [
+      { code: 'over-size', detail: '12/0 lines, 1/4 files, default limit' },
+      { code: 'captured-proof' },
+    ],
+  },
+  {
+    name: 'a fix subject gets the fix limit',
+    change: change([big], { subject: 'fix(ship): keep the block' }),
+    config: TYPED,
+    verdict: 'auto-merge-eligible',
+    reasons: [{ code: 'captured-proof' }],
+  },
+  {
+    name: 'a feat subject gets the feat limit, its files falling back to the built-in 4',
+    change: change([big], { subject: 'feat: a new verb' }),
+    config: TYPED,
+    verdict: 'human-review',
+    reasons: [
+      { code: 'over-size', detail: '400/200 lines, 1/4 files, feat limit' },
+      { code: 'captured-proof' },
+    ],
+  },
+  {
+    name: 'the commit type is case-insensitive',
+    change: change([big], { subject: 'FIX: shout' }),
+    config: TYPED,
+    verdict: 'auto-merge-eligible',
+    reasons: [{ code: 'captured-proof' }],
+  },
+  ...[
+    ['a breaking change', 'fix(ship)!: drop a flag'],
+    ['a type with no entry', 'chore: tidy'],
+    ['no type', 'Release v1.2.3'],
+  ].map(([name, subject]): Row => ({
+    name: `${name} gets the default limit`,
+    change: change([big], { subject }),
+    config: TYPED,
+    verdict: 'human-review',
+    reasons: [
+      { code: 'over-size', detail: '400/50 lines, 1/4 files, default limit' },
+      { code: 'captured-proof' },
+    ],
+  })),
+  {
+    name: 'a type entry inherits the fields it omits from the default entry',
+    change: change([big, p('src/b.mts'), p('src/c.mts')], { subject: 'fix: x' }),
+    config: config({
+      limits: { default: { maxSourceFiles: 2 }, fix: { maxSourceLines: 500 } },
+    }),
+    verdict: 'human-review',
+    reasons: [
+      { code: 'over-size', detail: '402/500 lines, 3/2 files, fix limit' },
+      { code: 'captured-proof' },
+    ],
+  },
+  {
+    name: 'a fix subject never stands in for captured proof',
+    change: change([fix], { subject: 'fix: x', evidence: null }),
+    config: TYPED,
+    verdict: 'human-review',
+    reasons: [{ code: 'no-captured-proof', detail: 'missing' }],
   },
   ...[
     ['evidence at another head', HEAD, 'b'.repeat(40)],
@@ -267,13 +342,23 @@ const ROWS: Row[] = [
     reasons: [
       { code: 'decision-record' },
       { code: 'consumer-surface' },
-      { code: 'over-size', detail: '60/50 lines, 1/4 files' },
+      { code: 'over-size', detail: '60/50 lines, 1/4 files, default limit' },
       { code: 'no-captured-proof', detail: 'missing' },
     ],
   },
   ...[
-    ['an unknown key', config({ maxSourceLine: 10 }), 'mergeVerdict'],
-    ['a fractional threshold', config({ maxSourceLines: 1.5 }), 'mergeVerdict.maxSourceLines'],
+    ['a removed top-level threshold', config({ maxSourceLines: 50 }), 'mergeVerdict'],
+    [
+      'an unknown limit key',
+      config({ limits: { fix: { maxSourceLine: 10 } } }),
+      'mergeVerdict.limits.fix',
+    ],
+    [
+      'a fractional limit',
+      config({ limits: { default: { maxSourceLines: 1.5 } } }),
+      'mergeVerdict.limits.default.maxSourceLines',
+    ],
+    ['an uppercase type', config({ limits: { Fix: {} } }), 'mergeVerdict.limits.Fix'],
     ['an escaping glob', config({ consumerSurface: ['../x'] }), 'mergeVerdict.consumerSurface.0'],
     [
       'a character class',
@@ -318,11 +403,24 @@ describe('mergeVerdict', () => {
     );
   });
 
-  it.each(['guard.config.json', 'guard.config.example.json'])('parses the shipped %s', (file) => {
-    const text = readFileSync(new URL(`../../../../${file}`, import.meta.url), 'utf8');
-    expect(mergeVerdict(change([p('templates/x.md')]), text).reasons).toEqual([
+  const shipped = (file: string) =>
+    readFileSync(new URL(`../../../../${file}`, import.meta.url), 'utf8');
+
+  it.each([
+    ['guard.config.json', 'cli/lib/ship/merge-verdict/verdict.mts'],
+    ['guard.config.example.json', 'templates/x.md'],
+  ])('parses the shipped %s', (file, surface) => {
+    expect(mergeVerdict(change([p(surface)]), shipped(file)).reasons).toEqual([
       { code: 'consumer-surface' },
     ]);
+  });
+
+  it("devkit's own limits pass a 400-line fix and hold a 400-line feat", () => {
+    const text = shipped('guard.config.json');
+    expect(mergeVerdict(change([big], { subject: 'fix: x' }), text).verdict).toBe(
+      'auto-merge-eligible',
+    );
+    expect(mergeVerdict(change([big], { subject: 'feat: x' }), text).verdict).toBe('human-review');
   });
 
   it('honours an env-relocated decision log, as every other gate does', () => {
@@ -336,7 +434,7 @@ describe('mergeVerdict', () => {
 describe('verdictLine', () => {
   it('prints the deciding reason and its detail', () => {
     expect(verdictLine(mergeVerdict(change([p('a.mts', 51)]), null))).toBe(
-      'human-review (over-size: 51/50 lines, 1/4 files)',
+      'human-review (over-size: 51/50 lines, 1/4 files, default limit)',
     );
     expect(verdictLine(mergeVerdict(change([p('a.test.mts')]), null))).toBe(
       'auto-merge-eligible (test-only)',

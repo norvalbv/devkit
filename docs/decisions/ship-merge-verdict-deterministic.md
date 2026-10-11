@@ -20,3 +20,4 @@ created: 2026-10-10
 **Scope:** cli/lib/ship/merge-verdict/**
 **Category:** ship-pipeline
 **Source:** web · sc-5176
+- 2026-10-11 — The size limit is now chosen by the PR subject's Conventional Commits type: mergeVerdict.limits.<type>, falling back field by field to limits.default and then the built-in 50 lines / 4 files. A breaking type!: subject or an untyped one uses the default. The type never replaces captured red/green proof, which still decides every source change. Evidence: over devkit's 150 PRs merged 2026-09-30 to 2026-10-08, 33% of fix PRs (n=92) took commits after opening against 57% of feat PRs (n=26), though feat PRs were 3x larger (median 727 vs 222 changed lines). devkit's own config narrows consumerSurface to the verdict module, because devkit release (which needs green CI) is the consumer boundary rather than the merge, and sets fix 500/10 and feat 200/6.
