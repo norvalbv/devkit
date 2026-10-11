@@ -230,6 +230,31 @@ Not available: precision, which needs the non-Claude re-judge, and the chunked a
 Counts only: [`s1-r1r2-haiku-sonnet5.json`](reviewbench/s1-r1r2-haiku-sonnet5.json),
 [`s2-r1r2-haiku-sonnet5.json`](reviewbench/s2-r1r2-haiku-sonnet5.json).
 
+## AACR-Bench (narrow) — `external/aacr/`
+
+Source: [AACR-Bench](https://github.com/alibaba/aacr-bench) at `68a56975` (Apache-2.0, arXiv
+2601.19494). Rule frozen before the scored run: [`aacr/pre-registration.md`](aacr/pre-registration.md)
+(v5). Same reviewer and runner as ReviewBench (`external/pr-run.mts`), on the TS/JS pull requests
+carrying expert-verified Code Defect references (189 references: Diff 104, File 51, Repo 34). The
+benchmark's own `evaluation/judge.py` scores it, unmodified, with the paper's judge
+(Qwen3-235B-A22B-Instruct-2507, via OpenRouter, so a re-run spends OpenRouter credit), `line_k` 1.
+
+Every AACR PR is under 1,000 changed lines, so it says nothing about capacity; it measures recall by
+the human-annotated context level a defect needs.
+
+**Results, 2026-10-11** (r1 only; r2 did not run because OpenRouter credit ran out; 156/156 lens tasks
+terminal; three judge rounds agree):
+
+| r1, Code Defect references caught | all | Diff | File | Repo |
+|---|---:|---:|---:|---:|
+| all references | 17 / 189 | 12 / 104 | 3 / 51 | 2 / 34 |
+| in reviewed files | 17 / 177 | 12 / 101 | 3 / 48 | 2 / 28 |
+| non-Claude references | 13 / 161 | | | |
+| repository-clustered bootstrap 95% CI (all) | 0.06–0.13 | 0.06–0.19 | 0.00–0.10 | 0.00–0.11 |
+
+Sensitivity at `line_k` 10: 22–23 / 189. False flags: findings matched to an expert-rejected comment,
+7–8 of 66. Counts only: [`aacr/r1-haiku-qwen.json`](aacr/r1-haiku-qwen.json).
+
 ## Reproducing
 
 ```
@@ -258,4 +283,10 @@ R=~/.devkit/research/reviewbench/runs/claude-haiku-5-5-whole-r1
   --repo-dir ~/.devkit/research/reviewbench/judge-repos --concurrency 3)
 bun gate-engine/review/eval/reviewers/external/reviewbench/reviewbench-report.mts \
   --golden $U/golden --runs $R,<r2 run dir> --scoring scoring-cli
+
+# AACR-Bench (data under ~/.devkit/research/aacr; the judge needs OPENROUTER_API_KEY and spends credit)
+git clone https://github.com/alibaba/aacr-bench ~/.devkit/research/aacr/upstream
+git -C ~/.devkit/research/aacr/upstream checkout 68a56975
+CLAUDE_CODE_EFFORT_LEVEL=medium bun gate-engine/review/eval/reviewers/external/aacr/aacr-bench.mts --run r1
+bun gate-engine/review/eval/reviewers/external/aacr/aacr-score.mts --runs r1,r2 --out <report.json>
 ```
