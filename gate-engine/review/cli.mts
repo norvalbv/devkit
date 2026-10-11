@@ -21,6 +21,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { envFlag, resolveGuardConfig } from '../config.mts';
+import { markGateRun } from '../judge/run-context.mts';
 import { type RecordAgentRunOpts, recordAgentRun } from '../judge/run-judge.mts';
 import { readTranscript } from '../judge/transcript-store.mts';
 import { clearCache, loadCache } from './cache.mts';
@@ -217,6 +218,7 @@ function recordAgent(label: string, rest: string[]): number {
 
 async function run(argv: string[]): Promise<number> {
   const [cmd, ...rest] = argv;
+  if (cmd === '--gate' || (cmd === 'completeness' && rest[0] === '--gate')) markGateRun();
   if (cmd === '--gate') return runReviewGate();
   if (cmd === 'completeness' && rest[0] === '--gate' && rest[1]) return runCompleteness(rest[1]);
   if (cmd === 'scan') return scanReview();
