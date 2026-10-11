@@ -82,6 +82,23 @@ guard-decisions add <slug> --target \
   Revisit-when says what would flip it.
 - INDEX shows the ruling + a hook of the **Context**.
 
+**Linking a Check** (`guard-decisions enforce`). When a fast, deterministic command the repo already
+runs pins a scoped ruling (usually one test file), link it so a violation fails at commit with the
+ruling printed:
+```
+guard-decisions enforce link <slug> --check "bun run test:run path/to/x.test.mts" --reason "<why>"
+```
+- Linking refuses, writing nothing, an unknown slug, an axis with no Target or no Scope, and a command
+  that fails on the current tree. The command runs argv-split: no shell, no stdin, a 120 s timeout.
+- With the `decisions` guard selected, guard-deterministic's `decision-checks` gate runs each Check
+  whose Scope matches a staged file, or whose command names one. `guard-decisions enforce` lists
+  enforced vs prose-only axes, and links that can never run.
+- A new Target drops the link; re-link under it if the Check still applies.
+- Changing a ruling a Check enforces takes two commits: the new Target or
+  `enforce link <slug> --check none --reason "<why>"` on its own first, then the code. A commit that
+  unlinks and violates at once still runs HEAD's Check.
+- Never weaken a linked Check to get a commit through: fix the code. If its path moved, re-link it.
+
 **Authoring discipline** (adopted from the multica ADR persona — `cloned-projects/multica/.../adr-writer.json`):
 - **One decision per Target.** If you're writing "we also decided …", that's a second axis — split it.
 - **Name 1–3 rejected alternatives.** A Target with an empty `--rejected` reads like there was no real choice.

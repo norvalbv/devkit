@@ -10,6 +10,7 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
+import { z } from 'zod';
 import { resolveVitest, runVitest } from '../../../gate-engine/coverage/vitest-cli.mjs';
 import { writeFileAtomic } from '../atomic-write.mjs';
 /**
@@ -28,6 +29,16 @@ export const SUMMARY_NAME = 'summary.json';
 export const SUMMARY_SCHEMA = 1;
 /** What the report says happened to one test FILE. Not the same as the run's overall conclusion. */
 export const FILE_OUTCOMES = ['passed', 'failed', 'skipped'];
+/** One FAILED file's test names, as vitest's console prints them: `describe > test`. */
+export const fileTestsSchema = z.object({
+    failed: z.array(z.string()),
+    passed: z.array(z.string()),
+    /** A list hit MAX_NAMES_PER_LIST, so a name missing from it proves nothing. */
+    truncated: z.literal(true).optional(),
+});
+/** Keep the summary few-KB however much of the suite fails; a name past either cap reads unknown. */
+export const MAX_NAMES_PER_LIST = 200;
+export const MAX_NAMES_PER_SUMMARY = 2000;
 /** vitest's suite-level statuses, mapped to this artifact's vocabulary. Anything else is omitted. */
 const REPORT_STATUS = {
     passed: 'passed',
@@ -38,6 +49,46 @@ const REPORT_STATUS = {
 };
 /** Merge precedence when one file is reported by several projects: failed > passed > skipped. */
 const OUTCOME_RANK = { skipped: 0, passed: 1, failed: 2 };
+/** The slice of one vitest assertion a test name needs. */
+const assertionSchema = z.object({
+    ancestorTitles: z.array(z.string()),
+    title: z.string(),
+    status: z.string(),
+});
+/** A malformed entry is dropped alone and a malformed list yields no names — never a throw. */
+const assertionsSchema = z.array(assertionSchema.nullable().catch(null)).catch([]);
+/** Fold one report entry's assertions into `into`, keyed the way the console prints them. */
+function collectNames(assertions, into) {
+    for (const a of assertions) {
+        if (!a)
+            continue;
+        const list = a.status === 'failed' ? into.failed : a.status === 'passed' ? into.passed : null;
+        list?.add([...a.ancestorTitles, a.title].join(' > '));
+    }
+}
+/** The `tests` map: failed files only, in path order, within both caps. Failed beats passed. */
+function capNames(files, names) {
+    const tests = Object.create(null);
+    let budget = MAX_NAMES_PER_SUMMARY;
+    for (const path of Object.keys(names).sort()) {
+        if (files[path] !== 'failed')
+            continue;
+        const all = { failed: [...names[path].failed], passed: [...names[path].passed] };
+        all.passed = all.passed.filter((name) => !names[path].failed.has(name));
+        const entry = {
+            failed: all.failed.slice(0, MAX_NAMES_PER_LIST),
+            passed: all.passed.slice(0, MAX_NAMES_PER_LIST),
+        };
+        const size = entry.failed.length + entry.passed.length;
+        if (size > budget)
+            continue;
+        budget -= size;
+        if (size < all.failed.length + all.passed.length)
+            entry.truncated = true;
+        tests[path] = entry;
+    }
+    return tests;
+}
 /** True when a repo-relative path leaves the root. Segment-wise: `..smoke.mts` is a real filename. */
 export function escapesRoot(rel) {
     return rel === '' || rel === '..' || rel.startsWith('../') || rel.startsWith(`..${sep}`);
@@ -73,6 +124,7 @@ export function summarise(report, cwd, env = process.env) {
     // read back as an inherited Object.prototype member and be compared against as if it were an
     // outcome.
     const files = Object.create(null);
+    const names = Object.create(null);
     let droppedForeignPaths = 0;
     for (const result of report.testResults ?? []) {
         if (!result?.name)
@@ -97,6 +149,8 @@ export function summarise(report, cwd, env = process.env) {
         // Fixed precedence, not arrival order — a file can be reported once per vitest project.
         const existing = files[rel];
         files[rel] = !existing || OUTCOME_RANK[outcome] > OUTCOME_RANK[existing] ? outcome : existing;
+        names[rel] ??= { failed: new Set(), passed: new Set() };
+        collectNames(assertionsSchema.parse(result.assertionResults), names[rel]);
     }
     const runId = Number(env.GITHUB_RUN_ID);
     const attempt = Number(env.GITHUB_RUN_ATTEMPT);
@@ -109,6 +163,7 @@ export function summarise(report, cwd, env = process.env) {
         // and deriving "everything passed" from whatever entries survived is the fabricated green.
         testsPassed: report.success === true,
         files,
+        tests: capNames(files, names),
         droppedForeignPaths,
     };
 }

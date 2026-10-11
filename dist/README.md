@@ -139,7 +139,7 @@ not accumulate in this config; they remain Markdown under `decisionsDir`.
 - Deterministic gate checkpointing for safe ship retries
 - Sentry-capture review for swallowed runtime failures
 - Changed-comment paragraph budget gate (deterministic, no model)
-- Optional qavis advisory routing for UI changes
+- Optional commit-time reminder to attach before/after screenshots for UI changes
 
 Every path the engine touches resolves from the consumer repository’s working directory. devkit ships mechanisms, not a consumer’s baselines, allowlists, decision history, or `guard.config.json`.
 
@@ -151,7 +151,7 @@ The dashboard below is generated from an append-only event ledger and immutable,
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/benchmarks/assets/dashboard-dark.svg">
   <source media="(prefers-color-scheme: light)" srcset="docs/benchmarks/assets/dashboard-light.svg">
-  <img alt="Benchmark evidence dashboard. Equivalent detailed tables follow: 12 suites have accepted checkpoints, 0 are current, and 1 shipped agents have no benchmark evidence." src="docs/benchmarks/assets/dashboard-light.svg">
+  <img alt="Benchmark evidence dashboard. Equivalent detailed tables follow: 13 suites have accepted checkpoints, 1 is current, and 1 shipped agents have no benchmark evidence." src="docs/benchmarks/assets/dashboard-light.svg">
 </picture>
 
 The tracker separates lifecycle, evidence provenance, freshness, change type, and assessment. A stale score remains visible but is never presented as current. Current history is too sparse and heterogeneous to support exponential-growth or diminishing-return claims; the honest classification is **insufficient comparable evidence**.
@@ -172,10 +172,10 @@ The tracker separates lifecycle, evidence provenance, freshness, change type, an
 | Edge-case autonomy | no-ship | accepted | stale | no-ship | ? unknown | Judge-free ceiling: 51.2% · Pre-registered target: 35.0% |
 | Decision-log retrieval recall | experimental | accepted | stale | methodology-reset | ? unknown | Gold axis retrieved: 12/12 (100.0%) · Multi-axis set recall: 3/4 (75.0%) |
 | Decision-log save quality | experimental | accepted | stale | coverage | ? unknown | Defect recall (perturbation corpus): 15/15 (100.0%) · False-positive rate at R80: 0/20 (0.0%) |
+| Decision brief: rule kept on edit | experimental | accepted | current | quality | ? unknown | Rule kept: brief only, agent cannot read on (best-case tasks): 2/40 (5.0%) · Rule kept: brief, agent may read on (best-case tasks): 37/40 (92.5%) |
 | Semantic search retrieval | experimental | evidence-only | unknown | — | ? unknown | No accepted local checkpoint |
 | Duplication matcher | shipped | evidence-only | unknown | — | ? unknown | No accepted local checkpoint |
 | Commit-guard retrieval | shipped | evidence-only | unknown | quality | ? unknown | Clone retrieval recall at 10: 59.0% · Semantic retrieval recall at 10: 25.0% |
-| qavis visual QA | shipped | external-required | unknown | — | ? unknown | No accepted local checkpoint |
 | Ship fixture setup cost | experimental | accepted | stale | methodology-reset | ? unknown | Fixture CPU candidate/baseline: 19.0% · Fixture elapsed candidate/baseline: 31.4% |
 
 ### Shipped-agent coverage
@@ -202,7 +202,7 @@ The tracker separates lifecycle, evidence provenance, freshness, change type, an
 - LLM benchmarks consume real tokens and never run in CI. CI validates published evidence and generated views without making model or network calls.
 - Several shipped agents and deterministic tools do not yet have an accepted benchmark. They remain visible as evidence gaps rather than being counted as covered.
 - A changed implementation, corpus, scorer, or runner hash makes the prior score stale until a suite adapter accepts a new checkpoint.
-- External systems such as qavis retain their own evidence; the local catalog marks them `external-required`.
+- A subject whose evidence lives outside this repository is marked `external-required` rather than scored locally.
 - The package is installed from Git releases rather than a public package registry.
 
 ## Developing this repository

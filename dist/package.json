@@ -1,6 +1,6 @@
 {
   "name": "@norvalbv/devkit",
-  "version": "0.68.0",
+  "version": "0.69.0",
   "private": true,
   "type": "module",
   "license": "MIT",
@@ -38,7 +38,7 @@
     "guard-decisions": "./dist/gate-engine/decisions/cli.mjs",
     "guard-comments": "./dist/gate-engine/comment-firewall/cli.mjs",
     "guard-review": "./dist/gate-engine/review/cli.mjs",
-    "guard-qavis-advisory": "./dist/gate-engine/qavis-advisory/cli.mjs",
+    "guard-ui-evidence": "./dist/gate-engine/ui-evidence/cli.mjs",
     "guard-prefix": "./dist/gate-engine/prefix-cache/cli.mjs",
     "guard-deterministic": "./dist/gate-engine/deterministic/run.mjs",
     "guard-dup": "./dist/gate-engine/co-occurrence/matcher.mjs",
