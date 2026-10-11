@@ -1,0 +1,263 @@
+{
+  "schemaVersion": 1,
+  "solCheckpoint": "462cd5e99ad1147c3897521ef9ff02c0b7624093e547f13aa4d86d2bb8ec6fc8.json",
+  "models": {
+    "claude-sonnet-5-5": {
+      "measuredRows": 284,
+      "notMeasured": [
+        "corr-eslint-no-extra-semi-clean"
+      ],
+      "bugsCaught": {
+        "k": 84,
+        "n": 105
+      },
+      "cleanPassed": {
+        "k": 150,
+        "n": 179
+      },
+      "development": {
+        "bugsCaught": {
+          "k": 40,
+          "n": 51
+        },
+        "cleanPassed": {
+          "k": 103,
+          "n": 125
+        }
+      },
+      "holdout": {
+        "bugsCaught": {
+          "k": 44,
+          "n": 54
+        },
+        "cleanPassed": {
+          "k": 47,
+          "n": 54
+        }
+      },
+      "versusSol": {
+        "bugs": {
+          "rows": 105,
+          "a": {
+            "k": 102,
+            "n": 105
+          },
+          "b": {
+            "k": 84,
+            "n": 105
+          },
+          "aOnly": 18,
+          "bOnly": 0,
+          "p": 0.000007,
+          "aOnlyIds": [
+            "corr-broadcast-fanout-no-dedup",
+            "corr-command-block-argument-boundary",
+            "corr-deleted-branch-attribution",
+            "corr-diagnostic-column-contract",
+            "corr-early-exit-status-bypassed",
+            "corr-failed-audio-cooldown",
+            "corr-parameter-cache-loses-outcome",
+            "corr-pr1-return-exit-3-for-detect",
+            "corr-pr200-ref-mutated-during-render-move",
+            "corr-pr26-do-not-let-terminal-signals",
+            "corr-pr28-include-bun-lock-in-the",
+            "corr-pr38-check-the-full-r2-credential",
+            "corr-pr48-cn-ts-src",
+            "corr-pr59-expand-knip-config-detection",
+            "corr-query-punctuation-routing",
+            "corr-repopulation-error-loses-documents",
+            "corr-stale-checklist-artifact",
+            "corr-version-save-callback-error-escape"
+          ]
+        },
+        "clean": {
+          "rows": 179,
+          "a": {
+            "k": 116,
+            "n": 179
+          },
+          "b": {
+            "k": 150,
+            "n": 179
+          },
+          "aOnly": 10,
+          "bOnly": 44,
+          "p": 0.000003,
+          "aOnlyIds": [
+            "corr-eslint-init-declarations-clean",
+            "corr-eslint-object-curly-spacing-clean",
+            "corr-initial-file-change-notification-clean",
+            "corr-missing-parent-value-contract-clean",
+            "corr-missing-population-position-clean",
+            "corr-pr59-use-a-portable-whitespace-class-pair",
+            "corr-relative-social-image-url-clean",
+            "corr-unregistered-population-model-clean",
+            "corr-xdomain-sqli",
+            "corr-xdomain-xss"
+          ]
+        }
+      }
+    },
+    "claude-haiku-5-5": {
+      "measuredRows": 285,
+      "notMeasured": [],
+      "bugsCaught": {
+        "k": 92,
+        "n": 105
+      },
+      "cleanPassed": {
+        "k": 130,
+        "n": 180
+      },
+      "development": {
+        "bugsCaught": {
+          "k": 43,
+          "n": 51
+        },
+        "cleanPassed": {
+          "k": 89,
+          "n": 126
+        }
+      },
+      "holdout": {
+        "bugsCaught": {
+          "k": 49,
+          "n": 54
+        },
+        "cleanPassed": {
+          "k": 41,
+          "n": 54
+        }
+      },
+      "versusSol": {
+        "bugs": {
+          "rows": 105,
+          "a": {
+            "k": 102,
+            "n": 105
+          },
+          "b": {
+            "k": 92,
+            "n": 105
+          },
+          "aOnly": 11,
+          "bOnly": 1,
+          "p": 0.006347,
+          "aOnlyIds": [
+            "corr-broadcast-fanout-no-dedup",
+            "corr-deleted-branch-attribution",
+            "corr-parameter-cache-loses-outcome",
+            "corr-population-projection-token-prefix",
+            "corr-pr200-ref-mutated-during-render-move",
+            "corr-pr28-include-bun-lock-in-the",
+            "corr-pr38-check-the-full-r2-credential",
+            "corr-pr59-expand-knip-config-detection",
+            "corr-query-punctuation-routing",
+            "corr-reply-draft-expiration",
+            "corr-stale-checklist-artifact"
+          ]
+        },
+        "clean": {
+          "rows": 180,
+          "a": {
+            "k": 117,
+            "n": 180
+          },
+          "b": {
+            "k": 130,
+            "n": 180
+          },
+          "aOnly": 18,
+          "bOnly": 31,
+          "p": 0.085433,
+          "aOnlyIds": [
+            "corr-child-save-event-payload-clean",
+            "corr-connection-parser-reset-clean",
+            "corr-decoy-cas-guarded-write",
+            "corr-decoy-reset-failure-reasons",
+            "corr-eslint-comma-dangle-clean",
+            "corr-eslint-init-declarations-clean",
+            "corr-eslint-newline-before-return-clean",
+            "corr-eslint-no-fallthrough-clean",
+            "corr-eslint-object-curly-spacing-clean",
+            "corr-missing-parent-value-contract-clean",
+            "corr-pipeline-buffer-preservation-clean",
+            "corr-processed-file-extension-clean",
+            "corr-query-projection-slice-clean",
+            "corr-relative-social-image-url-clean",
+            "corr-top-level-version-schema-clean",
+            "corr-unregistered-population-model-clean",
+            "corr-xdomain-render",
+            "corr-xdomain-xss"
+          ]
+        }
+      }
+    }
+  },
+  "haikuVersusSonnet": {
+    "bugs": {
+      "rows": 105,
+      "a": {
+        "k": 92,
+        "n": 105
+      },
+      "b": {
+        "k": 84,
+        "n": 105
+      },
+      "aOnly": 10,
+      "bOnly": 2,
+      "p": 0.038574,
+      "aOnlyIds": [
+        "corr-asymmetric-flip-classifier",
+        "corr-command-block-argument-boundary",
+        "corr-diagnostic-column-contract",
+        "corr-early-exit-status-bypassed",
+        "corr-failed-audio-cooldown",
+        "corr-pr1-return-exit-3-for-detect",
+        "corr-pr26-do-not-let-terminal-signals",
+        "corr-pr48-cn-ts-src",
+        "corr-repopulation-error-loses-documents",
+        "corr-version-save-callback-error-escape"
+      ]
+    },
+    "clean": {
+      "rows": 179,
+      "a": {
+        "k": 129,
+        "n": 179
+      },
+      "b": {
+        "k": 150,
+        "n": 179
+      },
+      "aOnly": 7,
+      "bOnly": 28,
+      "p": 0.000508,
+      "aOnlyIds": [
+        "corr-initial-file-change-notification-clean",
+        "corr-missing-population-position-clean",
+        "corr-pr59-guard-config-json-pair",
+        "corr-pr59-use-a-portable-whitespace-class-pair",
+        "corr-reply-draft-expiration-repaired",
+        "corr-tel-validate-after-lint-rejected-shape-pair",
+        "corr-xdomain-sqli"
+      ]
+    }
+  },
+  "missedByBothClaudeCaughtBySol": [
+    "corr-broadcast-fanout-no-dedup",
+    "corr-deleted-branch-attribution",
+    "corr-parameter-cache-loses-outcome",
+    "corr-pr200-ref-mutated-during-render-move",
+    "corr-pr28-include-bun-lock-in-the",
+    "corr-pr38-check-the-full-r2-credential",
+    "corr-pr59-expand-knip-config-detection",
+    "corr-query-punctuation-routing",
+    "corr-stale-checklist-artifact"
+  ],
+  "missedByAllThree": [
+    "corr-delete-reserved-prefix-recovery",
+    "corr-pr52-don-t-down-rank-recorded"
+  ]
+}

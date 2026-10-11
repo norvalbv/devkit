@@ -264,7 +264,7 @@ describe('strictRemedy', () => {
     for (const pair of [
       'GUARD_REVIEW_MODEL=haiku',
       'GUARD_REVIEW_ESCALATION_MODEL=opus',
-      'GUARD_CORRECTNESS_MODEL=sonnet',
+      'GUARD_CORRECTNESS_MODEL=claude-haiku-5-5',
       'GUARD_CORRECTNESS_CHUNK=off',
     ])
       expect(set).toContain(pair);
@@ -308,7 +308,7 @@ describe('strictRemedy', () => {
     for (const knob of [
       'GUARD_REVIEW_MODEL=haiku',
       'GUARD_REVIEW_ESCALATION_MODEL=opus',
-      'GUARD_CORRECTNESS_MODEL=sonnet',
+      'GUARD_CORRECTNESS_MODEL=claude-haiku-5-5',
       'GUARD_CORRECTNESS_CHUNK=off',
     ])
       expect(r).toContain(knob);

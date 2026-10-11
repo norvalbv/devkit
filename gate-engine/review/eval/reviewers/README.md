@@ -31,7 +31,9 @@ node bench.mts run <reviewer> --against <before.json>   # A/B a prompt edit (dir
 
 Knobs: `BENCH_MODEL` (first-pass model, default `sonnet` = production) · `BENCH_CASCADE=off`
 (short-circuit the opus escalation: first-pass metrics only, zero opus spend) ·
-`BENCH_CONCURRENCY` (default 2, the gate's own judge-contention default).
+`BENCH_CONCURRENCY` (default 2, the gate's own judge-contention default) ·
+`BENCH_CORRECTNESS_MODEL` (overrides the correctness reviewer's pinned model, e.g.
+`claude-sonnet-5-5`; the run and its checkpoints are keyed on it).
 
 **Checkpoint/resume.** Each completed native task and row enters an ignored progress ledger.
 The same command reuses matching completed tasks, including quality misses; it retries only
