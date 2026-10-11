@@ -26,6 +26,7 @@ import { ESLint, type Linter } from 'eslint'; // devkit's OWN eslint (now a depe
 import { z } from 'zod';
 import { resolveGuardConfig } from '../config.mts';
 import { gitPrefix, splitNul } from '../ratchets/git-index.mts';
+import { lintAttributed } from './attribution.mts';
 import { buildStructureConfigs } from './eslint-config.mts';
 import { eslintNodeFlags } from './eslint-node-flags.mts';
 import {
@@ -66,6 +67,7 @@ interface StagedPlan {
 // in a present tree is ignored — both mean "nothing to lint" (clean), not a failure. Hoisted (perf).
 const NOTHING_TO_LINT_RE = /No files matching|are ignored/i;
 const ELECTRON_SOURCE_EXTENSIONS = ['ts', 'tsx', 'css'];
+const STAGED_NAMES = ['diff', '--cached', '--name-only', '-z'];
 const POLICY_PATH_RE =
   /^(?:(?:eslint\.config\.mjs|guard\.config\.json|eslint\/domains\.mjs|\.devkit\/(?:config\.json|structure\/exempt\.mjs|baselines\/imports\.mjs))$|eslint\/baselines\/|\.devkit\/baselines\/structure\/)/;
 
@@ -294,10 +296,7 @@ export async function runStagedStructureGate(cwd = process.cwd()): Promise<Struc
     // `unstaged` below and defers as policy, instead of silently routing on bytes nobody staged.
     const stack = electronPreset(cwd);
     const prefix = gitPrefix(cwd);
-    const changed = toCwdPaths(
-      gitPaths(cwd, ['diff', '--cached', '--name-only', '-z', '--diff-filter=ACMR']),
-      prefix,
-    );
+    const changed = toCwdPaths(gitPaths(cwd, [...STAGED_NAMES, '--diff-filter=ACMR']), prefix);
     // Name-status preserves both sides of a rename, unlike name-only. Either side can remove a
     // required sibling, so either must probe its containing structure root.
     const destructive = toCwdPaths(destructivePaths(cwd), prefix);
@@ -349,7 +348,13 @@ export async function runStagedStructureGate(cwd = process.cwd()): Promise<Struc
     const presetFiles = legFiles('preset');
     const grammarFiles = legFiles('grammar');
     if (presetFiles.length) results.push(runPresetLint(cwd, presetFiles));
-    if (grammarFiles.length) results.push(await runGrammarLint(cwd, grammarFiles));
+    const added = toCwdPaths(gitPaths(cwd, [...STAGED_NAMES, '--diff-filter=AC']), prefix);
+    // A staged policy edit, deletion or rename can change an edited file's verdict too.
+    const stable =
+      !destructive.length && !changed.some((f) => isPolicyPath(f) || routingInputs.includes(f));
+    results.push(
+      ...(await lintAttributed(cwd, grammarFiles, new Set(added), stable, runGrammarLint)),
+    );
     return withUncompiledWalls(cwd, combineStructureResults(results));
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
@@ -460,8 +465,8 @@ export async function runCli(cmd = 'gate') {
     console.error(
       '🚫 Structure violations (folder-structure). Rename/relocate the file(s) to match the declared grammar, or (if intentional) re-grandfather via `devkit init`.',
     );
-  } else if (code === 2 && text) {
-    console.error(text); // fail-open notice on stderr; still exits 2 (pass)
+  } else if (text) {
+    console.error(text); // fail-open notice or pre-existing advisory; both pass
   }
   process.exit(code);
 }

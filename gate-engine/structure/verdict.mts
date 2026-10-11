@@ -33,12 +33,21 @@ export function combineStructureResults(results: StructureGateResult[]): Structu
       .join('\n');
   const blocked = results.filter((result) => result.code === 1);
   const skipped = results.filter((result) => result.code === 2);
+  const advisories = results.filter((result) => result.code === 0);
   if (blocked.length) {
     const errorCount = blocked.reduce((n, result) => n + result.errorCount, 0);
-    return violations(errorCount, texts([...blocked, ...skipped]));
+    return violations(errorCount, texts([...blocked, ...skipped, ...advisories]));
   }
-  if (skipped.length) return { code: 2, errorCount: 0, text: texts(skipped) };
-  return clean();
+  if (skipped.length) return { code: 2, errorCount: 0, text: texts([...skipped, ...advisories]) };
+  const text = texts(advisories);
+  return text ? { code: 0, errorCount: 0, text } : clean();
+}
+
+/** Violations already present at HEAD in files the change only edits: reported, never blocking. */
+export function preExisting(result: StructureGateResult, sha: string): StructureGateResult {
+  if (result.code !== 1) return result;
+  const head = `⚠ ${result.errorCount} pre-existing structure violation(s) at ${sha}, not caused by this change (advisory; CI lints the whole tree):`;
+  return { code: 0, errorCount: 0, text: [head, result.text].filter(Boolean).join('\n') };
 }
 
 /** Nothing compiles structure.walls yet (sc-3148), so a declared wall rides every gate run — preset
