@@ -149,7 +149,6 @@ describe('devkit ship evidence block', () => {
       '--pr',
       '--body',
       'reworded',
-      '--no-qavis-publish',
       '--',
       'src/value.mjs',
     ]);
@@ -167,7 +166,6 @@ describe('devkit ship evidence block', () => {
       'feat/fix',
       'fix',
       '--pr',
-      '--no-qavis-publish',
       '--',
       'src/value.test.mjs',
     ]);

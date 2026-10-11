@@ -153,7 +153,7 @@ function unlinkProjectionSymlinks(devkitRoot: string, wt: string): void {
 function restoreProjectionSymlinks(devkitRoot: string, wt: string): void {
   if (!existsSync(path.join(wt, '.scale-probe-base'))) return;
   for (const rel of projectionAncestors(devkitRoot, wt)) {
-    const tracked = git(wt, ['ls-files', '-s', '--', rel]).trim();
+    const tracked = git(wt, ['ls-files', '-s', '--', `:(literal)${rel}`]).trim();
     if (!tracked.startsWith('120000 ') || !tracked.endsWith(`\t${rel}`)) continue;
     rmSync(path.join(wt, rel), { recursive: true, force: true });
     git(wt, ['checkout-index', '-f', '-u', '--', rel]);
