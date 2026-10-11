@@ -6,7 +6,7 @@
 import { execFileSync } from 'node:child_process';
 // Reason: test scenario setup is intentionally explicit + self-contained per install mode (package/standalone/overlay/monorepo); shared bits already live in __tests__/_helpers.mjs
 // fallow-ignore-next-line code-duplication
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import doctorRun from '../commands/doctor.mts';
@@ -60,6 +60,7 @@ describe('standalone (no-package) install', () => {
 
     // hook: fail-open GLOBAL gates (no bunx / node_modules), valid POSIX sh
     const hook = readFileSync(join(root, '.husky/pre-commit'), 'utf8');
+    expect(statSync(join(root, '.husky/pre-commit')).mode & 0o111, 'executable').not.toBe(0);
     expect(hook).toContain('command -v guard-deterministic'); // fail-open global orchestrator
     expect(hook).toContain('--structure "guard-structure staged"'); // config-driven structure via Devkit's staged runner
     expect(hook).not.toContain('bunx guard'); // gates call global bins, not bunx/node_modules

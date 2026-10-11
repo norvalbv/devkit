@@ -4,7 +4,7 @@
  * simulating a clack TTY: it covers the same install/remove logic the wizard drives.
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -208,6 +208,10 @@ describe('applyInit (direct chosen map — the wizard seam)', () => {
     expect(existsSync(join(root, 'tsconfig.json'))).toBe(true);
     expect(existsSync(join(root, '.claude/skills'))).toBe(false);
     expect(existsSync(join(root, '.husky/pre-commit'))).toBe(true);
+    expect(
+      statSync(join(root, '.husky/pre-commit')).mode & 0o111,
+      'git runs only an executable hook',
+    ).not.toBe(0);
     expect(existsSync(join(root, '.devkit/oxc/manifest.json'))).toBe(true);
     expect(existsSync(join(root, '.oxlintrc.json'))).toBe(true);
     expect(existsSync(join(root, '.oxfmtrc.json'))).toBe(true);
