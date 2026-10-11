@@ -191,13 +191,13 @@
       "canonical": "package.json#bin:guard-prefix"
     },
     {
-      "id": "bin-guard-qavis-advisory",
-      "label": "qavis advisory gate",
+      "id": "bin-guard-ui-evidence",
+      "label": "Ship-time screenshot reminder for UI changes",
       "kind": "bin",
       "lifecycle": "shipped",
-      "evidence": "external-required",
-      "suiteIds": ["qavis"],
-      "canonical": "package.json#bin:guard-qavis-advisory"
+      "evidence": "none",
+      "suiteIds": [],
+      "canonical": "package.json#bin:guard-ui-evidence"
     },
     {
       "id": "bin-guard-review",
@@ -337,15 +337,6 @@
       "lifecycle": "shipped",
       "evidence": "evidence-only",
       "suiteIds": ["sentry"]
-    },
-    {
-      "id": "judge-qavis",
-      "label": "qavis visual QA",
-      "kind": "judge",
-      "lifecycle": "shipped",
-      "evidence": "external-required",
-      "suiteIds": ["qavis"],
-      "externalUrl": "https://github.com/norvalbv/qavis"
     },
     {
       "id": "benchmark-decisions-recall",
@@ -854,20 +845,6 @@
       }
     },
     {
-      "id": "qavis",
-      "label": "qavis visual QA",
-      "adapter": "reviewer",
-      "subjectIds": ["judge-qavis", "bin-guard-qavis-advisory"],
-      "lifecycle": "shipped",
-      "acceptance": "External evidence required",
-      "hashes": {
-        "implementation": ["gate-engine/qavis-advisory/**"],
-        "corpus": [],
-        "scorer": [],
-        "runner": []
-      }
-    },
-    {
       "id": "vitest-fixture-setup",
       "label": "Ship fixture setup cost",
       "adapter": "deterministic",
@@ -892,7 +869,6 @@
     "judge-completeness",
     "judge-decisions",
     "judge-sentry",
-    "judge-qavis",
     "benchmark-search-tool",
     "benchmark-edge-cases"
   ],

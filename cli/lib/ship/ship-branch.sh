@@ -98,7 +98,7 @@ BODY_FILE_SET=0    # --body-file <path>: author the body ONCE in a file; survive
 BODY_FILE_PREREAD_SET=0  # --resume banner's one --body-file read: 1 = bytes kept, 2 = failed (latched)
 BASE_FLAG=""       # --base <branch>? else base off this checkout's HEAD/current branch
 FROM_BRANCH=0      # derive a frozen committed path set from origin/<base>..HEAD
-QAVIS_PUBLISH=1     # passed staged evidence is published after the PR exists; explicit opt-out only
+QAVIS_PUBLISH=1     # --no-qavis-publish is an accepted no-op kept for one release; the value is only replayed
 DRAFT=0            # --draft opens the PR as a draft; default stays ready-for-review
 RESUME_READY=0     # --ready seen under --resume, before the record reveals ship-vs-reship mode
 WAIT_CI=0          # --wait-ci polls the PR's checks after everything else is durable
@@ -833,18 +833,7 @@ exec 0</dev/null
 . "$SCRIPT_DIR/repo-identity.sh"
 export DEVKIT_SHIP_ID="${DEVKIT_SHIP_ID:-$(uuidgen 2>/dev/null || echo "${BR//\//-}-$$-$(date +%s)")}"
 export DEVKIT_SHIP_REPO="$(devkit_repo_identity "$ROOT")" DEVKIT_SHIP_BRANCH="$BR"
-# The caller's checkout and the exact shipped paths, for gates that must tell the operator what to
-# run OUTSIDE the ephemeral worktree (qavis-advisory: `qavis qa --staged` must see these staged in
-# ROOT, where the receipt it writes is linked back into the gate worktree — sc-2487).
-export DEVKIT_SHIP_ROOT="$ROOT"
 export DEVKIT_SHIP_FROM_BRANCH="$FROM_BRANCH"
-# Each path base64-encoded and ':'-joined: env values cannot carry NUL, and a newline or colon in a
-# valid filename must survive the round trip into the printed remedy.
-DEVKIT_SHIP_PATHS=""
-for __dk_p in ${PATHS[@]+"${PATHS[@]}"}; do
-  DEVKIT_SHIP_PATHS="${DEVKIT_SHIP_PATHS}$(printf '%s' "$__dk_p" | base64 | tr -d '\n'):"
-done
-export DEVKIT_SHIP_PATHS
 export DEVKIT_SHIP_RESUMED=$RESUME
 SHIP_INTENT_GENERATION=""
 SHIP_INTENT_START_GENERATION=
@@ -1487,12 +1476,12 @@ else
       export DEVKIT_REVIEW_GUARDS=comments,review
       export DEVKIT_SHIP_DRY_REVIEWERS=1
       echo "🧪 Ship dry gates: exact base/path staging; running formatter, configured deterministic/structure/extra gates (comment budget included), and the domain reviewers." >&2
-      echo "   Skipping decision, Qavis, completeness, commit, push, and PR creation." >&2
+      echo "   Skipping decision, completeness, commit, push, and PR creation." >&2
     else
       export DEVKIT_REVIEW_GUARDS=comments
       unset DEVKIT_SHIP_DRY_REVIEWERS
       echo "🧪 Ship dry gates: exact base/path staging; running formatter, configured deterministic/structure/extra gates (comment budget included)." >&2
-      echo "   Skipping decision, Qavis, domain reviewer, completeness, commit, push, and PR creation." >&2
+      echo "   Skipping decision, domain reviewer, completeness, commit, push, and PR creation." >&2
     fi
   else
     export DEVKIT_SHIP_MODE=ship   # tags the ship_attempt telemetry (new-ship vs reship retry)
@@ -1633,11 +1622,6 @@ if [ -z "$PR_CREATE_FAILED" ]; then
       "$(devkit_parent_session_json)" \
       "$(devkit_json_escape "$PR_URL")" "${PR_NUM:-null}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
       >> "$DEVKIT_GATE_EVENTS" 2>/dev/null || true
-  fi
-  if [ "$QAVIS_PUBLISH" -eq 1 ] && [ -n "$PR_NUM" ]; then
-    . "$SCRIPT_DIR/publish-qavis.sh"
-    publish_qavis_receipt \
-      "$ROOT" "$PR_NUM" "${RECOVERY_PARENT:-$BASE}" "${RECOVERY_COMMIT:-$SHIP_COMMIT}"
   fi
 fi
 

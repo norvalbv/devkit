@@ -69,16 +69,7 @@ describe('one gate-body renderer for every install mode', () => {
     biome: true,
     antiSlop: true,
     structureCmd: 'guard-structure gate',
-    guards: [
-      'size',
-      'dup',
-      'coverage',
-      'comments',
-      'decisions',
-      'review',
-      'sentry',
-      'qavis-advisory',
-    ],
+    guards: ['size', 'dup', 'coverage', 'comments', 'decisions', 'review', 'sentry', 'ui-evidence'],
   };
   const body = (block: string, binDir: BinDir) =>
     block

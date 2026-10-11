@@ -100,10 +100,14 @@ command. Do not pre-run every gate or replace the managed chain with a hand-writ
   names. `--no-verify` is never the landing path.
 - **Sentry gate** judges commit-message intent for newly introduced runtime error classes. Add the
   capture on the named surface, or surface a disputed verdict to the user before any bypass.
-- **Qavis advisory** can recommend visual QA but does not turn a non-UI change into UI work. Ship
-  first, QA second: on a ship every judge that can demand an edit runs before the advisory, so run
-  `qavis qa` only when the advisory asks, or ship with `DEVKIT_SHIP_QA=1` to QA the gate tree in the
-  same run. A QA pass taken before `devkit ship` is voided by any judge-forced fix.
+- **UI evidence** (`ui-evidence`) speaks only at `devkit ship` and never blocks. It fires when a
+  shipped file has a UI extension (tsx, jsx, vue, svelte, astro, html, css, scss, sass, less; tests,
+  stories and fixtures excluded) or matches `guard.config.json` `uiEvidence.paths`, or when the
+  commit subject names a visible symptom. The ship digest then says: add before (base branch) and
+  after (this branch) screenshots to the PR description, or say there that nothing visible changed,
+  followed by what matched. When a backend fix's bug showed in the UI,
+  attach the screenshots even if the advisory stayed silent. `uiEvidence.paths` adds globs to the
+  defaults, for backend or `.ts` files whose output a repo knows the UI renders.
 
 ## Comment budget
 
@@ -130,10 +134,6 @@ specific conditions under which that control is appropriate:
   guard-review otherwise blocks it as a clobbered index. Check `git diff --cached --stat` first: an
   unexpected whole-repo deletion means the index was overwritten, so run `git reset` rather than
   bypass.
-- `GUARD_QAVIS_OK=1` — ship this change without the advised visual QA. Prefer the audited path the
-  advisory prints: `qavis qa`, then `qavis waive --staged --reason '…'` when the verdict is uncertain
-  and the gap is accepted, so the reason is bound to the tree. `GUARD_NO_QAVIS_ADVISORY=1` disables
-  the advisory entirely.
 - `GUARD_SHIP_BASE_OK=1` — ship into a `--base` that does not contain this work's branch point.
   Prefer the base the refusal names: the gate worktree is cut from the base, so overriding makes
   guard-size, guard-clone and structure judge a tree your change was never written against, and

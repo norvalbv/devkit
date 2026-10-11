@@ -147,9 +147,9 @@ describe('vitest.setup.mjs scrubs inherited gate policy', () => {
     }
   });
 
-  it('scrubs the ship state qavis-advisory and completeness read at runtime', () => {
-    // shipMode() branches on DEVKIT_SHIP_ROOT and then runs git against it; verdictBranch() scopes
-    // a sticky verdict to DEVKIT_SHIP_BRANCH. Inherited, both answer for the OUTER ship.
+  it('scrubs the ship state the gates read at runtime', () => {
+    // verdictBranch() scopes a sticky verdict to DEVKIT_SHIP_BRANCH; inherited, it answers for the
+    // OUTER ship.
     const env = envAfterSetup(SHIP_ENV);
     for (const name of [
       'DEVKIT_SHIP_ROOT',

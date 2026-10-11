@@ -6,7 +6,7 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { printPriorArtAdvisoryHealth, printQavisAdvisoryHealth } from './qavis-health.mts';
+import { printPriorArtAdvisoryHealth } from './prior-art-health.mts';
 import type { Selection } from '../components.mts';
 import { detectGitRoot } from '../detect-git-root.mts';
 import { selfHostHookParity } from '../husky/hook-parity.mts';
@@ -173,7 +173,6 @@ export async function runSelfHostDoctor(
   // to drift out of guard.config.json. Advisory: the exit code stays gated on hook + runner.
   await adviseSearchIndex(cwd, sel);
   await adviseCodexRuntime(cwd, sel);
-  printQavisAdvisoryHealth(cwd, sel.guards ?? []);
   printPriorArtAdvisoryHealth(cwd, sel);
 
   // The dogfood repo is gated by the same mechanism devkit ships to consumers, so it owes itself the

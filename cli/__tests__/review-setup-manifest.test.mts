@@ -355,6 +355,19 @@ describe('review setup manifest', () => {
     expect(() => captureReviewSetup(root, manifest)).toThrow(expected);
   });
 
+  it('reads a recorded qavis-advisory guard as ui-evidence instead of rejecting it', () => {
+    const { root, manifest } = setup('renamed-guard');
+    const legacy = {
+      components: { ...selection, guards: [...selection.guards, 'qavis-advisory'] },
+    };
+    writeFileSync(
+      join(root, '.devkit/config.json'),
+      `${JSON.stringify(config(false, legacy), null, 2)}\n`,
+    );
+
+    expect(() => captureReviewSetup(root, manifest)).not.toThrow(/unknown guards/);
+  });
+
   it('detects setup mutation both during capture and after the manifest is written', () => {
     const during = setup('during');
     expect(() =>

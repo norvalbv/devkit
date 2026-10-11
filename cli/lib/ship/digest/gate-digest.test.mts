@@ -432,9 +432,29 @@ describe('advisory_result', () => {
         state: 'finding',
         blocking: false,
         detail: 'verdict=warn · 1 duplication introduced',
+        advisory: true,
       },
     ]);
-    expect(render(rows)).toContain('⚠ fallow-advisory — finding recorded, did NOT block this run');
+    expect(render(rows)).toContain('⚠ fallow-advisory — advisory, did NOT block this run');
+  });
+
+  it('never tells the reader to retry over an advisory, even on a failed ship', () => {
+    // An instruction such as "add screenshots to the PR" is acted on, not cleared by re-shipping.
+    const detail = 'UI files changed: src/App.tsx. Capture before and after screenshots';
+    for (const exit_code of [0, 1]) {
+      const text = render(
+        summarise(
+          [
+            ev({ type: 'ship_attempt' }),
+            advisory('ui-evidence', 'finding', detail),
+            ev({ type: 'ship_result', exit_code, blocked_gate: exit_code ? 'unknown' : null }),
+          ],
+          SHIP,
+        ),
+      );
+      expect(text).toContain(`⚠ ui-evidence — advisory, did NOT block this run: ${detail}`);
+      expect(text).not.toContain('retrying');
+    }
   });
 
   it('can never be rendered as the blocker, even when the run failed unattributably', () => {

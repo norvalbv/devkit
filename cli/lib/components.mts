@@ -21,7 +21,14 @@ export const RECOMMENDED_GUARD_IDS = [
   'clone',
   'comments',
   'decisions',
-  'qavis-advisory',
+  'ui-evidence',
+];
+
+/** Published guard ids that were renamed: a recorded old id reads as its successor. */
+const RENAMED_GUARD_IDS = new Map([['qavis-advisory', 'ui-evidence']]);
+
+export const migrateGuardIds = (ids: string[]): string[] => [
+  ...new Set(ids.map((id) => RENAMED_GUARD_IDS.get(id) ?? id)),
 ];
 
 /**
@@ -60,7 +67,7 @@ export function normalizeReviewProfile(
   { enabledDefault = false, available = true }: NormalizeReviewProfileOptions = {},
 ): ReviewProfile {
   const installed = installedGuards.filter((g) => REVIEWABLE_GUARD_IDS.includes(g));
-  const requested = Array.isArray(partial?.guards) ? partial.guards : installed;
+  const requested = Array.isArray(partial?.guards) ? migrateGuardIds(partial.guards) : installed;
   return {
     enabled: available && (partial?.enabled ?? enabledDefault),
     guards: installed.filter((g) => requested.includes(g)),
@@ -162,9 +169,9 @@ export const GUARD_OPTIONS = [
     hint: 'commit-msg judge: flags silent runtime error-classes lacking a Sentry capture (hard-block, diff-tier)',
   },
   {
-    id: 'qavis-advisory',
-    label: 'qavis-advisory',
-    hint: 'nudge to run qavis QA on UI diffs (needs qavis on PATH + .qavis/recipe.json)',
+    id: 'ui-evidence',
+    label: 'ui-evidence',
+    hint: 'at ship, remind the agent to add before/after screenshots to the PR when UI changed (never blocks)',
   },
   {
     id: 'coverage',
@@ -310,7 +317,9 @@ export function normalizeSelection(partial: Partial<Selection> = {}): Selection 
     agentTargets: Array.isArray(partial.agentTargets)
       ? normalizeAgentProviders(partial.agentTargets)
       : base.agentTargets,
-    guards: partial.guards ? partial.guards.filter((g) => GUARD_IDS.includes(g)) : base.guards,
+    guards: partial.guards
+      ? migrateGuardIds(partial.guards).filter((g) => GUARD_IDS.includes(g))
+      : base.guards,
   };
 }
 

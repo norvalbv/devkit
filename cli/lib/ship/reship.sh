@@ -82,7 +82,7 @@ BODY_SET=0         # --body given? else --body-file, else stdin (back-compat)
 BODY_FILE_SET=0    # --body-file <path>: author the body once in a file; survives every retry
 BODY_FILE_PREREAD_SET=0  # --resume banner's one --body-file read: 1 = bytes kept, 2 = failed (latched)
 UPDATE_PR_BODY=0   # explicit body flag? Refresh the existing PR too; recorded across --resume
-QAVIS_PUBLISH=1    # suppresses only the post-push description write, never the staged gate
+QAVIS_PUBLISH=1    # --no-qavis-publish is an accepted no-op kept for one release; the value is only replayed
 READY=0            # --ready marks the PR ready-for-review after the push lands
 WAIT_CI=0          # --wait-ci polls the PR's checks after the re-push is durable
 WAIT_CI_TIMEOUT=900
@@ -640,18 +640,7 @@ exec 0</dev/null
 . "$SCRIPT_DIR/repo-identity.sh"
 export DEVKIT_SHIP_ID="${DEVKIT_SHIP_ID:-$(uuidgen 2>/dev/null || echo "${BR//\//-}-$$-$(date +%s)")}"
 export DEVKIT_SHIP_REPO="$(devkit_repo_identity "$ROOT")" DEVKIT_SHIP_BRANCH="$BR"
-# The caller's checkout and the exact shipped paths, for gates that must tell the operator what to
-# run OUTSIDE the ephemeral worktree (qavis-advisory: `qavis qa --staged` must see these staged in
-# ROOT, where the receipt it writes is linked back into the gate worktree — sc-2487).
-export DEVKIT_SHIP_ROOT="$ROOT"
 export DEVKIT_SHIP_FROM_BRANCH="${FROM_BRANCH:-0}"
-# Each path base64-encoded and ':'-joined: env values cannot carry NUL, and a newline or colon in a
-# valid filename must survive the round trip into the printed remedy.
-DEVKIT_SHIP_PATHS=""
-for __dk_p in ${PATHS[@]+"${PATHS[@]}"}; do
-  DEVKIT_SHIP_PATHS="${DEVKIT_SHIP_PATHS}$(printf '%s' "$__dk_p" | base64 | tr -d '\n'):"
-done
-export DEVKIT_SHIP_PATHS
 export DEVKIT_SHIP_RESUMED=$RESUME
 SHIP_INTENT_ARGS=(write --root "$ROOT" --branch "$BR" --mode reship --title "$TITLE")
 [ "$REWRITE" -eq 0 ] || SHIP_INTENT_ARGS+=(--base "$BASE_REF")
@@ -1213,10 +1202,6 @@ rewrite_publish_lock_release
 
 if [ -n "$PR_URL" ]; then
   [ "$REWRITE" -eq 1 ] || PR_NUM=${PR_URL##*/}
-  if [[ "$PR_NUM" =~ ^[0-9]+$ ]] && [ "$QAVIS_PUBLISH" -eq 1 ]; then
-    . "$SCRIPT_DIR/publish-qavis.sh"
-    publish_qavis_receipt "$ROOT" "$PR_NUM" "$BASE" "$SHIP_COMMIT"
-  fi
   # Flip out of draft LAST, once the commit, the reconcile record and any body publication are all
   # durable — a gh failure here can never cost work that already landed.
   READY_STATUS=0
