@@ -11,7 +11,14 @@ import { rootRegistry } from './_helpers.mts';
 
 const GIT_ENV = { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' };
 const SCRIPT_DIR = 'SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)';
-const CLEAN = { active: true, unresolved: [], unbriefed: [], untracked: [], unlexable: [] };
+const CLEAN = {
+  active: true,
+  unresolved: [],
+  unbriefed: [],
+  untracked: [],
+  unlexable: [],
+  missing: [],
+};
 const { mkTmp, cleanup } = rootRegistry();
 afterEach(cleanup);
 
