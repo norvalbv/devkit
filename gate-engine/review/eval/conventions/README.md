@@ -11,8 +11,8 @@ every departure from both is listed at the bottom.
 The bench drives `runCascade()` **from the gate** — the exact function `runReviewGate` calls per
 selected reviewer — through its injectable-`exec` seam, with a spy that delegates to the real judge
 runner: prompt construction (`wrapConventionsPrompt`), the governing-CLAUDE.md render
-(`renderGoverningClaudeMd`), the capped diff evidence (`buildCappedDiffEvidence`), the pinned haiku
-model, and the isolation flags all run **inside** the gate; the spy only observes the transcript.
+(`renderGoverningClaudeMd`), the capped diff evidence (`buildCappedDiffEvidence`), the resolved
+judge model, and the isolation flags all run **inside** the gate; the spy only observes the transcript.
 Each corpus row materialises as a disposable git repo (base committed — including whatever
 CLAUDE.md file(s) the row needs — staged in the index) plus the two gate assets every fixture needs
 (`guard.config.json`, `.claude/agents/conventions-reviewer.md`), and the judge investigates that
@@ -76,6 +76,7 @@ node bench.mts --baseline      # write results.baseline.json (committed here, on
 node bench.mts --fail          # exit 1 on floor breach / significant stable case flips
 node bench.mts --dev           # prompt-iteration tier: holdout rows excluded
 node bench.mts --only <id>     # id-prefix subset (iteration; usage lands in runs.log)
+node bench.mts --strict        # ship's strict path: one same-model contract retry (retryFirst)
 node bench.mts validate        # 0 LLM calls: corpus + selection linter
 node bench.mts coverage        # 0 LLM calls: corpus coverage matrix
 node bench.mts matcher-audit   # matcher agreement vs committed hand-labels (percent + Cohen's κ)
@@ -85,16 +86,19 @@ Exit `0` = ran (no regression under `--fail`) · `1` = regression (with `--fail`
 bad rows · `2` = could not run. Sweeps: `BENCH_MATCH_MODEL=haiku|sonnet` (matcher, default haiku) ·
 `BENCH_MATCH_RUNS=1|3` (matcher votes, default 3).
 
-**The reviewer has NO model sweep, for a different underlying reason than completeness-eval's.**
-Completeness-eval's gate hardcodes opus by a **bench-external user ruling** ("the gap-finder gets
-the strongest model or it isn't worth running") — a choice this bench measures the _consequences_
-of but did not itself decide. conventions-reviewer's single-pass haiku, no-cascade execution is a
-**ticket mandate** baked directly into `reviewers.mts`'s `REVIEWERS` table (`model: 'haiku'`, no
-`skill`) — see that file's own `Reviewer.model` docstring: _"Also used by conventions-reviewer, per
-the ticket's own haiku mandate."_ There is no cascade to turn on and no alternate model the gate
-would ever run in production, so a bench-only sweep knob would measure a configuration that never
-ships — exactly completeness-eval's own "no model sweep on purpose" reasoning, applied here to a
-prompt-conditioned pin rather than a bench-external ruling.
+**The reviewer model resolves exactly as the gate resolves it, and there is no bench-only knob.**
+Before the bench strips `GUARD_*`/`FRINK_*` from the fixture environment, it reads
+`resolveReviewModel` against the invoking repository: `GUARD_REVIEW_MODEL` / `FRINK_REVIEW_MODEL`,
+then that repository's `guard.config.json` `review.model`, then the shipped light-judge default.
+To measure the claude family when codex is the default, run
+`GUARD_REVIEW_MODEL=haiku node bench.mts …`. This is completeness-eval's "no model sweep on purpose"
+rule (`../README.md`): a separate bench knob would measure a configuration the gate never runs.
+
+**Strict vs non-strict.** A plain `git commit` reviews non-strict, which is single-pass. `devkit ship`
+reviews strict: an unsubstantiated `FAIL` gets one same-model contract retry before it stays
+inconclusive. `--strict` measures the ship path. Neither mode is a superset of the other, so a
+baseline records which mode produced it. `--strict` does not rescue a quota-dark provider, because
+a rate-limit outage is permanent and is never retried. Switching the model is the remedy for that.
 
 ## The matcher is an instrument, and instruments get calibrated
 
@@ -134,6 +138,8 @@ A comparison against `results.baseline.json` is **mechanically skipped** (never 
 when any of these differ from the run that produced the baseline:
 
 - `matchModel` / `matchRuns` (matcher config)
+- `judgeModel` / `strict` (the reviewer model and mode). The 2026-07-09 baseline predates both
+  fields, so it reads as a mismatch.
 - `gateHash` — `reviewers.mts` + `run-review.mts` + `claude-md.mts` + `diff-evidence.mts` + the
   reviewer's `evidence/*.mts` inputs (including the shared conventions parser) +
   `contracts/response.mts` (it owns `VERDICT_LINE_RE`, which bounds the evidence slice, and the
@@ -237,7 +243,7 @@ when any of these differ from the run that produced the baseline:
 ## Cost + outage policy
 
 A budget derived from per-row costs prints before any token is spent: 26 reviewer rows × 20–90s
-(single-pass haiku, **no cascade** — cheaper per row than completeness's 60–360s opus-with-checklist
+(single-pass, **no cascade** — cheaper per row than completeness's 60–360s opus-with-checklist
 rows) + 32 slots × K=3 matcher ÷ pool 4. Iterate with `--dev --only <id>`; the full tier is the only
 tier whose numbers count.
 
@@ -261,13 +267,10 @@ zero claude calls, before any paid run).
   row's staged files actually reach the reviewer) and `runCascade` (the exact function
   `runReviewGate` calls). `gateHash` is built from the cascade + selection + evidence modules
   accordingly, not from a single gate-function file.
-- **Single-pass haiku, no cascade, no model sweep — pinned by the TICKET, not bench-decided.** See
-  the "Run" section above. Every other reviewer this bench's siblings measure either cascades
-  (reviewer-eval's four domain reviewers escalate haiku→opus on FAIL) or is pinned by a **bench
-  finding** the ticket then encoded (correctness-reviewer: reviewer-eval measured that the opus
-  escalation _subtracts_ recall and the pin followed from that measurement). conventions-reviewer's
-  pin came first, from its own AC ("No Bash… single-pass"), not from a bench result — so there is no
-  A/B this bench could ever run to justify sweeping it.
+- **Single-pass, no cascade, and no bench-only model knob.** See the "Run" section above. The
+  reviewer is pinned single-pass by its own AC ("No Bash… single-pass"). Its model follows the
+  config-owned light judge (`review.model`), so the bench resolves it the same way the gate does
+  instead of sweeping it.
 - **An LLM matcher sits between judge output and metrics** (decisions parses closed labels): forced
   by the open-ended output format, exactly completeness/critique's reasoning — see "The hard part"
   above.
