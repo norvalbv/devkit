@@ -152,9 +152,19 @@ checkout, record the checkout's root in `repoRoot` so provenance is auditable.
 ### Phase 3: Verdict synthesis (counter-argument first)
 
 Before writing the verdict, argue the OPPOSITE for one paragraph in your own reasoning: if you lean
-SOLVED_ELSEWHERE, argue the found artifact does not actually fit; if you lean GENUINE_NEW_WORK,
-argue you searched with the wrong question (the historical failure is researching "how do others
-bound X?" when the right question was "must X exist?"). Adopt the counter-argument if it holds.
+SOLVED_ELSEWHERE, argue the found artifact does not actually fit, or fixes only the named trigger
+and not the whole symptom class; if you lean GENUINE_NEW_WORK, argue you searched with the wrong
+question (the historical failure is researching "how do others bound X?" when the right question
+was "must X exist?"). Adopt the counter-argument if it holds.
+
+**Partial fixes are not SOLVED_ELSEWHERE.** The found artifact must cover the whole symptom class
+and every acceptance-criterion clause in the request, not just the reproduction trigger. If any Q
+finding or evidence item names a path that still reproduces, or an acceptance clause stays unmet,
+set `frameChallenge.framing: "NARROWS"` and return `GENUINE_NEW_WORK` scoped to that residual (or
+`INSUFFICIENT_EVIDENCE` when its coupling below does not hold). Cite the partial fix as a `local`
+or `github` evidence item, and name both the residual path and that fix in the first `summary`
+sentence and in `suggestedNextStep.detail`. A residual buried in a Q finding while the headline
+says solved closes real work: callers act on the verdict alone.
 
 Then apply the **burden-of-proof coupling** (the response contract enforces these; violating them
 makes the response invalid):
