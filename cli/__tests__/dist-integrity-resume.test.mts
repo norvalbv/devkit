@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { readIntent } from '../lib/ship/ship-intent.mts';
-import { rootRegistry } from './_helpers.mts';
+import { buildableFixture, rootRegistry } from './_helpers.mts';
 
 const GIT_ENV = { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' };
 const shipScript = fileURLToPath(new URL('../lib/ship/ship-branch.sh', import.meta.url));
@@ -36,6 +36,7 @@ function repo(): string {
   mkdirSync(join(root, '.husky/_'), { recursive: true });
   writeFileSync(join(root, '.husky/_/pre-commit'), '#!/bin/sh\nexit 0\n');
   chmodSync(join(root, '.husky/_/pre-commit'), 0o755);
+  buildableFixture(root);
   writeFileSync(join(root, 'cli/new.mts'), 'export const value = 1;\n');
   writeFileSync(join(root, 'dist/cli/new.mjs'), 'export const value = 1;\n');
   return root;

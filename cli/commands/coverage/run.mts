@@ -6,6 +6,7 @@
  * and nothing else changes — no vitest.config edit, because the reports directory is overridden on
  * vitest's command line. See gate-engine/coverage/produce.mts for why that isolation is required.
  */
+import { formatMissingRootDependencies } from '../../../gate-engine/coverage/dependencies.mts';
 import { produceCoverage } from '../../../gate-engine/coverage/produce.mts';
 
 export const meta = {
@@ -58,9 +59,16 @@ and anything that passed only there is reported as flaky. Worst case the suite r
 it(name, fn, ms) timeouts are not raised by --testTimeout. Opt out with DEVKIT_COVERAGE_NO_RERUN=1 or
 --retry=0; passing your own --testTimeout, --hookTimeout or --maxWorkers also disables it.
 
+The re-run alone also sets DEVKIT_COVERAGE_RERUN_SCALE=5. --testTimeout cannot raise a library's own
+wait, such as Testing Library's findBy/waitFor (asyncUtilTimeout, 1000ms), so a setup file opts in:
+  configure({ asyncUtilTimeout: 1000 * (Number(process.env.DEVKIT_COVERAGE_RERUN_SCALE) || 1) })
+Use your own base for 1000 and keep the product below the re-run's testTimeout.
+
 Exits with vitest's exit code (the re-run's, when one ran). Vitest-only; the gate itself accepts any istanbul-shaped report.`,
 };
 
 export default async function coverageRun(args: string[], cwd: string) {
+  // Seconds now instead of a suite of import failures later. Warns only: not every run needs them all.
+  for (const line of formatMissingRootDependencies(cwd)) console.error(line);
   return await produceCoverage(cwd, args);
 }

@@ -20,13 +20,16 @@ import {
   formatRerunRescue,
   headSha,
   humanAge,
+  passEnv,
   readClearMarker,
   readDiagnosis,
   removeClearMarker,
   stagedFiles,
   stagedIntersection,
   RERUN_FLOOR_MS,
+  RERUN_SCALE_ENV,
   raisedTimeoutMs,
+  TL_SCALE_SNIPPET,
   TIMEOUT_FINGERPRINT,
   type UnhandledError,
   writeClearMarker,
@@ -728,6 +731,7 @@ describe('what the re-run says', () => {
     expect(text).toContain('DEVKIT_COVERAGE_NO_RERUN=1');
     expect(text).toContain('--retry=0');
     expect(text).toContain('--maxWorkers=50%');
+    expect(text).toContain('DEVKIT_COVERAGE_RERUN_SCALE=5');
   });
 
   it('names the tests only the raised budget got through', () => {
@@ -964,5 +968,64 @@ describe('the reporter devkit injects into the consumer vitest', () => {
     reporter.onTestRunEnd([], errors());
 
     expect(existsSync(join(root, UNHANDLED_NAME))).toBe(false);
+  });
+});
+
+describe('the wait scale a re-run hands to consumer setup files', () => {
+  it('strips an inherited scale from pass 1 and sets it only on the re-run', () => {
+    const parent = { PATH: '/bin', [RERUN_SCALE_ENV]: '99' };
+    expect(passEnv(false, parent)).toEqual({ PATH: '/bin' });
+    expect(passEnv(true, parent)).toEqual({ PATH: '/bin', [RERUN_SCALE_ENV]: '5' });
+    expect(parent[RERUN_SCALE_ENV]).toBe('99');
+  });
+
+  // An empty export must not scale every findBy to a 0ms wait, which `?? 1` would.
+  it('documents a snippet that falls back to 1 on an empty value', () => {
+    expect(TL_SCALE_SNIPPET).toContain('|| 1');
+    expect(TL_SCALE_SNIPPET).not.toContain('??');
+  });
+});
+
+// Messages captured from real vitest 4.1.10 and 5.0.3 json output (identical on both) with
+// jsdom and @testing-library/dom 10.4.1.
+describe('a Testing Library findBy/waitFor that gave up', () => {
+  const FIND_BY =
+    'Error: Unable to find role="complementary" and name "New theme"\n\nIgnored nodes: comments, script, style\n<body />\n    at waitForWrapper (/repo/node_modules/@testing-library/dom/dist/wait-for.js:163:27)';
+  const WAIT_FOR =
+    'Error: Timed out in waitFor.\n    at waitForWrapper (/repo/node_modules/@testing-library/dom/dist/wait-for.js:163:27)';
+  const GET_BY =
+    'TestingLibraryElementError: Unable to find an accessible element with the role "complementary"';
+  const diagnose = (message: string) =>
+    readDiagnosis(
+      results(makeRoot(), [
+        {
+          name: '/repo/theme.test.tsx',
+          status: 'failed',
+          assertionResults: [{ fullName: 'opens', status: 'failed', failureMessages: [message] }],
+        },
+      ]),
+      1,
+    );
+
+  it.each([
+    ['findBy', FIND_BY],
+    ['waitFor', WAIT_FOR],
+  ])('a %s miss earns one hint, never a timeout verdict', (_, message) => {
+    const d = diagnose(message);
+    expect(d?.failures).toMatchObject({ allTimedOut: false, testingLibrary: true });
+    const text = formatDiagnosis(d!, '/repo', null).join('\n');
+    expect(text).toContain(TL_SCALE_SNIPPET);
+    expect(text.split('asyncUtilTimeout:')).toHaveLength(2);
+    expect(text).not.toMatch(/Every failure timed out/);
+  });
+
+  // A synchronous getBy does not wait, so asyncUtilTimeout cannot be its cause.
+  it.each([
+    ['a getBy miss', GET_BY],
+    ['a plain assertion', 'AssertionError: expected 2 to be 99'],
+  ])('%s earns no hint', (_, message) => {
+    const d = diagnose(message);
+    expect(d?.failures?.testingLibrary).toBeUndefined();
+    expect(formatDiagnosis(d!, '/repo', null).join('\n')).not.toContain('asyncUtilTimeout');
   });
 });
