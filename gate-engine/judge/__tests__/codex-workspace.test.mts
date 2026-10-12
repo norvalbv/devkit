@@ -19,7 +19,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { codexExecArgs, judgeCliFor } from '../codex/result.mts';
+import { codexExecArgs, judgeCliFor, NO_TEST_RUNS } from '../codex/result.mts';
 import { prepareCodexSandbox } from '../codex/workspace.mts';
 import { execJudge, execJudgeAsync, type JudgeOutage } from '../run-judge.mts';
 
@@ -87,6 +87,7 @@ describe('codex judge argv — workspace confinement', () => {
     expect(argAfter(cli.argv, '-C')).toBe('/tmp/scratch');
     expect(argAfter(cli.argv, '--add-dir')).toBe('/work/repo/.claude');
     expect(cli.argv[cli.argv.length - 1]).toMatch(/^The repository under review is \/work\/repo\./);
+    expect(cli.argv[cli.argv.length - 1]).toContain(NO_TEST_RUNS);
     expect(cli.argv[cli.argv.length - 1].endsWith('P')).toBe(true);
     expect(cli.extraEnv).toEqual({ DEVKIT_JUDGE_REPO_ROOT: '/work/repo' });
   });
