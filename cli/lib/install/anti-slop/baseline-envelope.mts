@@ -2,7 +2,7 @@
 
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { failLine } from '../../../../gate-engine/deterministic/reason.mts';
+import { failLine, writeGateReason } from '../../../../gate-engine/deterministic/reason.mts';
 import { AntiSlopCapabilityError } from './base-capability.mts';
 import {
   type AntiSlopBaseline,
@@ -130,6 +130,18 @@ export function printNewAntiSlopFindings(
     );
     console.log(`      ${group.diagnostic}`);
   }
+}
+
+/** Record each new error's rule and location, so the aggregated verdict names what to fix. */
+export function recordErrorLocations(
+  groups: ReadonlyArray<FindingGroup & { additionalCount: number }>,
+): void {
+  writeGateReason(
+    groups.map(
+      (group) =>
+        `ERROR ${group.ruleId} ${group.file}:${group.line}:${group.column} (+${group.additionalCount})`,
+    ),
+  );
 }
 
 /**

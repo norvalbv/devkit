@@ -22,6 +22,7 @@ import {
   checkBaselineEnvelope,
   inheritedBaseAllowance,
   printNewAntiSlopFindings,
+  recordErrorLocations,
   refuseCommittedGrowth,
   relocationEvidence,
   reportInheritedForgiveness,
@@ -296,11 +297,13 @@ function check(
     const newErrorCount = errors.reduce((sum, group) => sum + group.additionalCount, 0);
     if (relocated.some((group) => group.severity === 'error')) {
       reportRelocatedFailure(newErrorCount, relocated, baseRef);
+      recordErrorLocations(errors);
       reportOverlayContract(cwd);
       return 1;
     }
     if (errors.length > 0) {
       failLine(`anti-slop: FAIL — ${newErrorCount} new error finding(s); baseline unchanged`);
+      recordErrorLocations(errors);
       const overlay = isOverlayOxcInstall(cwd);
       for (const line of antiSlopRemedyLines(
         errors.map((group) => group.ruleId),

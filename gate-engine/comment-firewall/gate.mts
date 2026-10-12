@@ -1,3 +1,4 @@
+import { failLine, writeGateReason } from '../deterministic/reason.mts';
 import { detectChangedComments } from './detect.mts';
 import { emptyInventory } from './inventory.mts';
 import { recordShown, shownAnchors } from './shown.mts';
@@ -46,6 +47,12 @@ const REF_REMEDY = [
 function printParagraphs(findings: CommentFinding[]): void {
   for (const finding of findings) printFinding(finding);
   console.error(PARAGRAPH_REMEDY);
+  writeGateReason(
+    findings.map(
+      (f) =>
+        `${findingLocation(f)} [${f.id}] — 3+-line comment paragraph: shorten it, or retry unchanged (blocks once)`,
+    ),
+  );
 }
 
 function printRefs(findings: RefFinding[]): void {
@@ -53,12 +60,18 @@ function printRefs(findings: RefFinding[]): void {
     console.error(`  • ${path}:${line} cites ${refs.join(', ')} — ${comment}`);
   }
   console.error(REF_REMEDY);
+  writeGateReason(
+    findings.map(
+      ({ path, line, refs }) =>
+        `${path}:${line} cites ${refs.join(', ')} — state the fact or drop the reference`,
+    ),
+  );
 }
 
 /** The first line is the collector's classification key; keep it byte-stable. */
 function printBlock(paragraphs: CommentFinding[], refs: RefFinding[]): void {
   const total = paragraphs.length + refs.length;
-  console.error(
+  failLine(
     `guard-comments: ${total} added/modified comment paragraph${total === 1 ? '' : 's'} need a decision.`,
   );
   if (paragraphs.length > 0) printParagraphs(paragraphs);
@@ -69,16 +82,15 @@ function printBlock(paragraphs: CommentFinding[], refs: RefFinding[]): void {
 const reviewing = () => process.env.DEVKIT_RUN_MODE === 'review';
 
 function printUnsupported(unsupported: DetectionResult['unsupported']): void {
-  console.error('guard-comments: configured staged source uses unsupported comment syntax:');
-  for (const item of unsupported)
-    console.error(`  • .${item.extension || '(none)'} — ${item.path}`);
+  failLine('guard-comments: configured staged source uses unsupported comment syntax:');
+  for (const item of unsupported) failLine(`  • .${item.extension || '(none)'} — ${item.path}`);
   console.error(
     'Add an explicit lexer adapter or exclude that extension from sourceExtensions; no regex fallback was used.',
   );
 }
 
 function unreadable(cause: unknown, deps: FirewallDeps): 4 {
-  console.error(
+  failLine(
     `guard-comments: comment evidence unreadable — ${cause instanceof Error ? cause.message : cause}`,
   );
   deps.emit('unreadable', emptyInventory(), [], { kept: 0, refs: 0 });
