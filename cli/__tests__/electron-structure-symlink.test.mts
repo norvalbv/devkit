@@ -7,6 +7,7 @@ import { structureCmdFor } from '../lib/components.mts';
 import { buildOverlayHook } from '../lib/husky/husky-block.mts';
 import { eslintOverlayContent } from '../lib/install/overlay-lint-configs.mts';
 import { testSpawnSync as spawnSync } from './_helpers.mts';
+import { linkStubIsolatedInstall } from './_install-layouts.mts';
 
 const DEVKIT_ROOT = realpathSync(join(dirname(fileURLToPath(import.meta.url)), '../..'));
 const roots: string[] = [];
@@ -121,6 +122,21 @@ export default [{
     expect(result.status, `stdout: ${result.stdout}\nstderr: ${result.stderr}`).toBe(1);
     expect(result.stdout).toContain('project-structure/folder-structure');
     expect(result.stdout).toContain('wrong.ts');
+  });
+
+  // Without --preserve-symlinks the plugin roots at the linked checkout and finds nothing here.
+  it('names a linked isolated install could-not-run instead of passing a lint that roots elsewhere', () => {
+    const worktree = realpathSync(mkdtempSync(join(tmpdir(), 'electron-structure-isolated-')));
+    roots.push(worktree, linkStubIsolatedInstall(worktree));
+    mkdirSync(join(worktree, 'src'));
+    writeElectronConfig(worktree, "{ name: 'src', children: [{ name: 'allowed.ts' }] }");
+    writeFileSync(join(worktree, 'src', 'wrong.ts'), 'export {};\n');
+    initializeGit(worktree);
+    stage(worktree, 'package.json', 'guard.config.json', 'eslint.config.mjs', 'src/wrong.ts');
+
+    const result = stagedGate(worktree);
+    expect(result.status, `stdout: ${result.stdout}\nstderr: ${result.stderr}`).toBe(2);
+    expect(`${result.stdout}\n${result.stderr}`).toContain('linked isolated install');
   });
 
   it('probes a staged deletion so a missing required index still blocks', () => {

@@ -27,7 +27,11 @@ import { z } from 'zod';
 import { resolveGuardConfig } from '../config.mts';
 import { gitPrefix, splitNul } from '../ratchets/git-index.mts';
 import { buildStructureConfigs } from './eslint-config.mts';
-import { eslintNodeFlags } from './eslint-node-flags.mts';
+import {
+  eslintNodeFlags,
+  LINKED_ISOLATED_STORE,
+  linkedIsolatedStore,
+} from './eslint-node-flags.mts';
 import {
   clean,
   combineStructureResults,
@@ -250,6 +254,7 @@ function runPresetLint(cwd: string, targets: string[]): StructureGateResult {
   if (!existsSync(eslintBin)) {
     return couldNotRun('electron structure lint needs the locally pinned eslint binary');
   }
+  if (linkedIsolatedStore(cwd)) return couldNotRun(LINKED_ISOLATED_STORE);
   // An empty root is clean, not ESLint's exit-2 "no files matching".
   const args = [...eslintNodeFlags(cwd), eslintBin, '--no-error-on-unmatched-pattern', '--'];
   try {
