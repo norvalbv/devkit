@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { inspectDistIntegrity, printDistIntegrityFailure } from '../lib/ship/dist-integrity.mts';
-import { rootRegistry } from './_helpers.mts';
+import { buildableFixture, rootRegistry } from './_helpers.mts';
 
 const GIT_ENV = { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' };
 const preflightScript = fileURLToPath(new URL('../lib/ship/dist-integrity.mts', import.meta.url));
@@ -20,6 +20,7 @@ const CLEAN_ACTIVE = {
   untracked: [],
   unlexable: [],
   missing: [],
+  stale: [],
 };
 const { mkTmp, cleanup } = rootRegistry();
 afterEach(cleanup);
@@ -451,6 +452,7 @@ describe('inspectDistIntegrity', () => {
       untracked: [],
       unlexable: [],
       missing: [],
+      stale: [],
     });
   });
 });
@@ -488,6 +490,7 @@ describe('inspectDistIntegrity — never-built sources', () => {
 
   it('passes once the built artifact is briefed', async () => {
     const { base, root } = repo();
+    buildableFixture(root);
     source(root, 'cli/new.mts');
     source(root, 'dist/cli/new.mjs');
 
@@ -552,6 +555,7 @@ describe('printDistIntegrityFailure', () => {
       unresolved: [{ importer: 'dist/a.mjs', specifier: './b.mjs', target: 'dist/b.mjs' }],
       unlexable: [],
       missing: [],
+      stale: [],
     });
 
     expect(code).toBe(1);
@@ -572,6 +576,7 @@ describe('printDistIntegrityFailure', () => {
       unresolved: [],
       unlexable: ['dist/asset.mjs'],
       missing: [],
+      stale: [],
     });
 
     expect(code).toBe(1);
@@ -588,6 +593,7 @@ describe('printDistIntegrityFailure', () => {
       unresolved: [],
       unlexable: ['dist/y.mjs'],
       missing: [],
+      stale: [],
     });
 
     expect(code).toBe(0);
@@ -597,6 +603,7 @@ describe('printDistIntegrityFailure', () => {
 
 function seedShipRepo(): { base: string; root: string } {
   const fixture = repo();
+  buildableFixture(fixture.root);
   mkdirSync(join(fixture.root, 'cli'));
   mkdirSync(join(fixture.root, 'dist/cli'));
   writeFileSync(join(fixture.root, 'cli/new.mts'), 'export const value = 1;\n');
