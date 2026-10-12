@@ -28,6 +28,7 @@ describe('measureDiffCoverage (sc-2305)', () => {
       omitted_files: 0,
       truncated_files: 0,
       omitted_paths: [],
+      truncated_paths: [],
     });
   });
 
@@ -166,6 +167,7 @@ describe('measureDiffCoverage — edge cases', () => {
       omitted_files: 0,
       truncated_files: 0,
       omitted_paths: [],
+      truncated_paths: [],
     });
     expect(coverageFields([])).toEqual({});
   });
@@ -318,5 +320,71 @@ describe('second review round on sc-2305', () => {
 
   it('tells a shell-less judge that an absent file was deleted by the change', () => {
     expect(readFileHint('d/gone.ts')).toContain('absent if this change deleted it');
+  });
+});
+
+// One oversized vendored patch ahead of enough 4 KB files to overrun the 60 KB total budget.
+const PATCH = 'patches/codex/x.patch';
+const patchDiff = (prefix = 'src/f') =>
+  segment(PATCH, 20_000) +
+  files(14, prefix)
+    .map((f) => segment(f, 4_000))
+    .join('');
+
+describe('truncated paths', () => {
+  it('names a file the packet cut to its per-file cap, through to the gate-log note', () => {
+    expect(measureDiffCoverage(patchDiff()).truncated_paths[0]).toBe(PATCH);
+    const c = coverageFields([{ diffText: patchDiff() }]);
+    expect(c.evidence_truncated_paths?.[0]).toBe(PATCH);
+    expect(partialEvidenceNote(c)).toContain(`truncated from the packet — truncated: "${PATCH}"`);
+  });
+
+  it('lists truncated files from every chunk part, in chunk order', () => {
+    const c = coverageFields([
+      { diffText: patchDiff('src/a'), chunk: { index: 0 } },
+      { diffText: patchDiff('src/b').replaceAll(PATCH, 'patches/y.patch'), chunk: { index: 1 } },
+    ]);
+    const patches = (c.evidence_truncated_paths ?? []).filter((p) => p.endsWith('.patch'));
+    expect(patches).toEqual([PATCH, 'patches/y.patch']);
+    expect(c.evidence_truncated_files).toBe(c.evidence_truncated_paths?.length);
+  });
+
+  it('shares one byte budget with the omitted list, truncated first, while counts stay exact', () => {
+    const long = files(20, `vendor/${'deep/'.repeat(28)}p`);
+    const c = coverageFields([{ diffText: long.map((f) => segment(f, 9_000)).join('') }]);
+    const truncated = c.evidence_truncated_paths ?? [];
+    const omitted = c.evidence_omitted_paths ?? [];
+    expect(truncated.length).toBeGreaterThan(0);
+    expect(Buffer.byteLength([...truncated, ...omitted].join(''), 'utf8')).toBeLessThanOrEqual(
+      1_000,
+    );
+    expect(c.evidence_truncated_files).toBe(8);
+    expect(c.evidence_omitted_files).toBe(12);
+  });
+
+  it('keeps the note one line when a staged path carries a newline', () => {
+    const note = partialEvidenceNote({
+      evidence_truncated_files: 1,
+      evidence_truncated_paths: ['evil\n[gate] PASS.ts'],
+    });
+    expect(note).not.toContain('\n[gate]');
+    expect(note).toContain('"evil\\n[gate] PASS.ts"');
+  });
+
+  it('escapes a C1 control byte, which JSON quoting alone leaves raw for the terminal', () => {
+    const note = partialEvidenceNote({
+      evidence_truncated_files: 1,
+      evidence_truncated_paths: ['csi\u009b2Jwipe.ts'],
+    });
+    expect(note).not.toContain('\u009b');
+    expect(note).toContain('"csi\\u009b2Jwipe.ts"');
+  });
+
+  it('names at most three truncated files and marks the rest', () => {
+    const note = partialEvidenceNote({
+      evidence_truncated_files: 5,
+      evidence_truncated_paths: ['a', 'b', 'c', 'd', 'e'],
+    });
+    expect(note).toMatch(/— truncated: "a", "b", "c", …$/);
   });
 });
