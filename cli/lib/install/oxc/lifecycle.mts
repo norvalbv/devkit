@@ -14,8 +14,9 @@ import {
   readConsumerIgnores,
 } from './overlay-entry.mts';
 import { probeOxcRuntime } from './runtime.mts';
+import { OXFMT_CONFIGS } from '../../husky/format-fragment.mts';
 
-export { OVERLAY_ENTRY_REL };
+export { OVERLAY_ENTRY_REL, OXFMT_CONFIGS };
 
 // Exactly the names Oxlint discovers (measured on 1.78 and 1.85): `oxlint.config.{js,mjs,cjs,cts}` is
 // never read as a config, so it carries no ignores to honour.
@@ -24,12 +25,6 @@ export const OXLINT_CONFIGS = [
   '.oxlintrc.jsonc',
   'oxlint.config.ts',
   'oxlint.config.mts',
-];
-export const OXFMT_CONFIGS = [
-  '.oxfmtrc.json',
-  '.oxfmtrc.jsonc',
-  'oxfmt.config.ts',
-  'oxfmt.config.mts',
 ];
 const OXLINT_STARTER = `${JSON.stringify(
   { extends: ['./.devkit/oxc/oxlint.base.json'], jsPlugins: [], overrides: [], rules: {} },
