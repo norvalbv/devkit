@@ -5,7 +5,11 @@ import { realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { resolveGuardConfig } from '../../../../gate-engine/config.mts';
 import { readCodexRateLimits } from '../../../../gate-engine/judge/codex/rate-limits.mts';
-import { isCodexModel, judgeBinForModel } from '../../../../gate-engine/judge/codex/result.mts';
+import {
+  isCodexModel,
+  judgeBinForModel,
+  parseModelSpec,
+} from '../../../../gate-engine/judge/codex/result.mts';
 import { formatResetDelta } from '../../../../gate-engine/judge/outage/classify.mts';
 import { familyOverrideRemedy } from '../../../../gate-engine/judge/outage/family-override.mts';
 import { claudeLoggedOut, codexLoggedOut } from '../../doctor/judge/judge-auth.mts';
@@ -17,7 +21,13 @@ import {
   resolvedJudgeRoles,
 } from '../../doctor/judge/judge-family.mts';
 
-type Reachability = 'ok' | 'absent' | 'unauthenticated' | 'rate-limited' | 'unknown';
+type Reachability =
+  | 'ok'
+  | 'absent'
+  | 'unauthenticated'
+  | 'rate-limited'
+  | 'unavailable'
+  | 'unknown';
 
 interface ModelStatus {
   role: JudgeRole;
@@ -32,6 +42,26 @@ interface ModelStatus {
   windowMins?: number;
   /** Plan limit spent but credits serve the calls, so `ok` must not read as plain headroom. */
   onCredits?: true;
+  /** The account's plan, named on an `unavailable` row. */
+  planType?: string;
+  /** The models the account does serve, listed on an `unavailable` row as the move targets. */
+  served?: string[];
+}
+
+/** The env that moves ONE role's model — a refused model needs only its own role moved. */
+const ROLE_ENV = {
+  review: 'GUARD_REVIEW_MODEL',
+  escalation: 'GUARD_REVIEW_ESCALATION_MODEL',
+  // The chunk cap is benched for gpt-5.6-sol only, as in the family move.
+  correctness: 'GUARD_CORRECTNESS_MODEL (with GUARD_CORRECTNESS_CHUNK=off)',
+  sentry: 'GUARD_SENTRY_MODEL',
+} satisfies Record<JudgeRole, string>;
+
+/** True only when a FETCHED list omits the model. planType proves ChatGPT auth reached the backend;
+ *  without it codex may serve its bundled catalog, which can omit a model the account has. */
+function servedNowhere(model: string, limits: CodexLimits): boolean {
+  if (limits?.planType === undefined || limits.models === undefined) return false;
+  return !limits.models.includes(parseModelSpec(model).model);
 }
 
 /** Which judge-spawning guards are selected? A repo that runs no judges must be byte-identical to
@@ -42,6 +72,8 @@ export function selectedJudgeGuards(root: string): JudgeGuards {
 }
 
 export const reviewGuardSelected = (root: string): boolean => selectedJudgeGuards(root).review;
+
+type CodexLimits = Awaited<ReturnType<typeof readCodexRateLimits>> | undefined;
 
 export interface PreflightDeps {
   resolvable: (name: 'codex' | 'claude', cwd: string) => boolean;
@@ -71,7 +103,7 @@ export async function judgeReachability(
 
   // Resolved once per provider, not per model: three roles on one subscription share one answer,
   // and asking three times would triple the latency of the thing meant to save time.
-  let codexLimits: Awaited<ReturnType<typeof readCodexRateLimits>> | undefined;
+  let codexLimits: CodexLimits;
   const codexNeeded = models.some((m) => isCodexModel(m));
   const codexPresent = codexNeeded && deps.resolvable('codex', root);
   const codexDark = codexPresent && deps.codexOut();
@@ -87,7 +119,11 @@ export async function judgeReachability(
       if (!codexPresent) status.state = 'absent';
       else if (codexDark) status.state = 'unauthenticated';
       else if (codexLimits?.reached) status.state = 'rate-limited';
-      else if (codexLimits) {
+      else if (servedNowhere(model, codexLimits)) {
+        status.state = 'unavailable';
+        status.planType = codexLimits?.planType;
+        status.served = codexLimits?.visibleModels;
+      } else if (codexLimits) {
         status.state = 'ok';
         if (codexLimits.onCredits) status.onCredits = true;
       }
@@ -142,7 +178,9 @@ export function renderPreflight(statuses: ModelStatus[], now: number = Date.now(
             ? `\`${s.bin}\` not authenticated`
             : s.state === 'rate-limited'
               ? 'EXHAUSTED — USAGE LIMIT REACHED'
-              : 'not verified';
+              : s.state === 'unavailable'
+                ? `NOT AVAILABLE ON THIS ACCOUNT (plan ${s.planType})`
+                : 'not verified';
     lines.push(`  ${s.role}: ${s.model} via ${s.bin} — ${verdict}${suffix}`);
   }
 
@@ -163,6 +201,15 @@ export function renderPreflight(statuses: ModelStatus[], now: number = Date.now(
         ? '   A usage limit does not clear on its own — re-running will not help.'
         : `   A usage limit does not clear on its own — re-running will not help for another ${formatResetDelta(reset, now)}.`,
     );
+  const refused = blocked.filter((s) => s.state === 'unavailable');
+  for (const model of new Set(refused.map((s) => s.model))) {
+    const rows = refused.filter((s) => s.model === model);
+    const knobs = rows.map((s) => `${s.role} via ${ROLE_ENV[s.role]}`).join('; ');
+    lines.push(
+      `   This plan does not serve ${model}, so re-running will not help. Move ${knobs} — to a ` +
+        `model the account serves: ${rows[0].served?.join(', ')}.`,
+    );
+  }
   // Naming the override, never taking it: a runtime cross-family swap moves spend to an unwatched
   // subscription and puts its verdicts outside the model-keyed cache salt (review-gate-in-chain).
   const dark = [...new Set(blocked.map((s) => s.bin))];
