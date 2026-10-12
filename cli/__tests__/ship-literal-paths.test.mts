@@ -264,6 +264,30 @@ describe('reship.sh --pr — explicit paths are literal files (sc-2425)', () => 
     git(['worktree', 'remove', '--force', wt!], { stdio: 'ignore' });
   });
 
+  // The index takes tree paths, so `./a.ts` must normalise before staging, as `git add` did.
+  it('the ./ spelling re-pushes the root file', () => {
+    const { dir, env, git } = seedPr({ 'a.ts': 'a\n', 'b.ts': 'a\n' });
+    writeFileSync(join(dir, 'a.ts'), 'b\n');
+    writeFileSync(join(dir, 'b.ts'), 'b\n');
+
+    const { r, wt } = reship(dir, env, ['./a.ts']);
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(stacked(env, wt!)).toEqual(['M', 'a.ts']);
+    git(['worktree', 'remove', '--force', wt!], { stdio: 'ignore' });
+  });
+
+  it('the ./ spelling deletes only the named file', () => {
+    const { dir, env, git } = seedPr({ 'old.ts': 'a\n', 'keep.ts': 'a\n' });
+    rmSync(join(dir, 'old.ts'));
+
+    const { r, wt } = reship(dir, env, ['./old.ts']);
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(stacked(env, wt!)).toEqual(['D', 'old.ts']);
+    git(['worktree', 'remove', '--force', wt!], { stdio: 'ignore' });
+  });
+
   it('refuses a root-level directory even when invoked from a subdirectory', () => {
     const { dir, env } = seedPr({ 'lib/one.ts': '1\n', 'sub/keep': '' });
     const args = [reshipScript, 'pr-open', 'again', '--pr', '--', 'lib', 'lib/one.ts', 'sub'];
