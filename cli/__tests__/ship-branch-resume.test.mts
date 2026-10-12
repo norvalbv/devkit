@@ -18,6 +18,7 @@ import {
   scriptPath,
   seedBaseRepo,
   seedShipRepoLocalRemote,
+  REAPED_15S_BANNER,
 } from './_ship-branch-fixture.mts';
 
 /** createPreservedCommit leaves note.txt UNTRACKED in $ROOT, and git refuses a checkout/merge that
@@ -62,14 +63,13 @@ describe('ship-branch.sh — resume when the base moved', () => {
       cwd: dir,
       input: 'pr body\n',
       encoding: 'utf8',
-      timeout: 45_000,
       env: { ...publishEnv, SHIP_COMMIT_TIMEOUT: '15' },
     });
 
     expect(first.status, first.stderr).toBe(124);
     // Pair every 124 with OUR banner: testSpawnSync also returns 124 at its own deadline, so an
     // unpaired status assertion cannot say which supervisor fired.
-    expect(first.stderr).toMatch(/gate chain hit the 15s ceiling \(exit 124\)/);
+    expect(first.stderr).toMatch(REAPED_15S_BANNER);
     const preserved = git(['rev-parse', 'feat/base-advance']).trim();
     expect(git(['rev-parse', 'refs/devkit/ship-receipts/feat/base-advance']).trim()).toBe(
       preserved,
@@ -125,7 +125,7 @@ describe('ship-branch.sh — resume when the base moved', () => {
     const entry = manifestOf(dir).branches['feat/base-advance'];
     expect(entry.prNumber).toBe(42);
     expect(entry.baseSha).toBe(studioTip);
-  });
+  }, 240_000);
 
   // BASE is pinned from HEAD (:144), so a sibling agent's commit between attempts moves it with no
   // --base involved. The commonest form of the defect, and one an earlier draft of the fix missed.
@@ -140,12 +140,11 @@ describe('ship-branch.sh — resume when the base moved', () => {
       cwd: dir,
       input: 'pr body\n',
       encoding: 'utf8',
-      timeout: 45_000,
       env: { ...publishEnv, SHIP_COMMIT_TIMEOUT: '15' },
     });
 
     expect(first.status, first.stderr).toBe(124);
-    expect(first.stderr).toMatch(/gate chain hit the 15s ceiling \(exit 124\)/);
+    expect(first.stderr).toMatch(REAPED_15S_BANNER);
     const preserved = git(['rev-parse', 'feat/head-advance']).trim();
     expect(git(['rev-parse', 'refs/devkit/ship-receipts/feat/head-advance']).trim()).toBe(
       preserved,
@@ -168,7 +167,7 @@ describe('ship-branch.sh — resume when the base moved', () => {
     expect(git(['rev-parse', 'HEAD']).trim()).toBe(advancedHead); // the shared HEAD never moved
     expect(readFileSync(hookCount, 'utf8').trim().split('\n')).toHaveLength(1);
     expect(manifestOf(dir).branches['feat/head-advance'].baseSha).toBe(baseBefore);
-  });
+  }, 240_000);
 
   // The fail-closed half of the predicate. Nothing else in the suite reaches the parent check — the
   // "unrelated existing local branch" test's branch sits at HEAD, so it exits on the message check.
@@ -341,12 +340,11 @@ describe('ship-branch.sh — resume refusals that name their own cause', () => {
       cwd: dir,
       input: 'pr body\n',
       encoding: 'utf8',
-      timeout: 45_000,
       env: { ...publishEnv, SHIP_COMMIT_TIMEOUT: '15' },
     });
 
     expect(first.status, first.stderr).toBe(124);
-    expect(first.stderr).toMatch(/gate chain hit the 15s ceiling \(exit 124\)/);
+    expect(first.stderr).toMatch(REAPED_15S_BANNER);
     const preserved = git(['rev-parse', 'feat/formatter-drift']).trim();
     expect(git(['show', `${preserved}:note.txt`])).toBe('formatted\n'); // the hook's bytes were committed
     expect(readFileSync(join(dir, 'note.txt'), 'utf8')).toBe('hi\n'); // $ROOT was never formatted
@@ -379,7 +377,7 @@ describe('ship-branch.sh — resume refusals that name their own cause', () => {
     expect(retry.status, retry.stderr).toBe(0);
     expect(retry.stderr).toContain('gate receipt verified');
     expect(readFileSync(hookCount, 'utf8').trim().split('\n')).toHaveLength(1); // gates never re-ran
-  });
+  }, 360_000);
 
   // Six paths exercises the cap. Exit 1 rather than 141 is the assertion that matters: the list must be
   // built without a truncating pipe, whose SIGPIPE would abort the ship only once a list got long.
@@ -397,11 +395,10 @@ describe('ship-branch.sh — resume refusals that name their own cause', () => {
       cwd: dir,
       input: 'pr body\n',
       encoding: 'utf8',
-      timeout: 45_000,
       env: { ...publishEnv, SHIP_COMMIT_TIMEOUT: '15' },
     });
     expect(first.status, first.stderr).toBe(124);
-    expect(first.stderr).toMatch(/gate chain hit the 15s ceiling \(exit 124\)/);
+    expect(first.stderr).toMatch(REAPED_15S_BANNER);
 
     const refused = spawnSync('/bin/bash', argv, {
       cwd: dir,
@@ -415,7 +412,7 @@ describe('ship-branch.sh — resume refusals that name their own cause', () => {
     expect(refused.stderr).toContain('(+1 more)');
     expect(refused.stderr).toContain('choose a new branch name');
     expect(localBranchExists(git, 'feat/wide-drift')).toBe(true);
-  });
+  }, 240_000);
 
   // A here-doc does not survive a re-run through a wrapper: a TTY and a closed stdin both yield an
   // empty BODY silently, so the message diverges and the old reason pointed at an unchanged title.

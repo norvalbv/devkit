@@ -155,6 +155,25 @@ const DEPRIVED: Deprivation[] = [
     expected: 4,
   },
   {
+    id: 'decision-checks',
+    bin: 'guard-decisions',
+    args: ['enforce', 'gate'],
+    // Withhold the Check's COMMAND, not the link: with nothing linked, nothing is due and 0 is honest.
+    because: "the linked Check's command cannot be spawned, so the ruling was never checked",
+    config: true,
+    speaks: true,
+    expected: 1,
+    setup: (repoDir) => {
+      mkdirSync(join(repoDir, 'docs', 'decisions'), { recursive: true });
+      writeFileSync(
+        join(repoDir, 'docs', 'decisions', 'demo.md'),
+        '---\nslug: demo\ncreated: 2026-10-11\n---\n\n# demo\n\n## Target · 2026-10-11 — demo\n\n' +
+          '**Ruling:** src stays clean.\n**Scope:** src/**\n' +
+          '- 2026-10-11 — **Check:** devkit-e2e-missing-check — never on PATH\n',
+      );
+    },
+  },
+  {
     id: 'structure',
     bin: 'guard-structure',
     args: ['gate'],

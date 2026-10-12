@@ -9,15 +9,22 @@
 // being stricter than the brief's actual contract tolerates. Keeping the exact raw text as a fixed
 // fixture (not a paraphrase) is the point: it is the regression, verbatim.
 
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { resolveGuardConfig } from '../../config.mts';
+import { LIGHT_JUDGE_MODEL } from '../../judge/judge-isolation.mts';
+import { appendLedger, preflightJudge } from '../../decisions/eval/bench-runtime.mts';
 import {
+  baselineMismatch,
   buildAssets,
   CEILING_FALSE_FLAG,
   type ConventionsCase,
   compareConventions,
   FLOOR_GAP_RECALL,
   lintCases,
+  prepareBenchEnv,
   runCase,
   summarize,
   validateRow,
@@ -515,6 +522,65 @@ describe('compareConventions', () => {
     expect(cmp.regressed).toBe(false);
     expect(cmp.lines.join(' ')).toContain('gate code');
   });
+  it('a judge model or strict-mode mismatch skips the comparison', () => {
+    const prev = { ...base, judgeModel: 'gpt-5.6-terra@high', strict: false };
+    expect(baselineMismatch({ ...prev, judgeModel: 'haiku' }, prev)).toContain('judgeModel');
+    expect(baselineMismatch({ ...prev, strict: true }, prev)).toContain('strict');
+    expect(compareConventions({ ...prev, strict: true }, prev).lines.join(' ')).toContain('strict');
+    expect(baselineMismatch(prev, prev)).toBeNull();
+  });
+  it('a legacy baseline without judgeModel/strict is never comparable with a recorded run', () => {
+    expect(baselineMismatch({ ...base, judgeModel: 'haiku', strict: false }, base)).toContain(
+      'judgeModel',
+    );
+    expect(baselineMismatch(base, undefined)).toBe('no baseline');
+  });
+  it('a matcher or corpus hash mismatch is reported, because it also gates the discordance retry', () => {
+    const prev = { ...base, matcherHash: 'm1', corpusHash: 'c1' };
+    expect(baselineMismatch({ ...prev, matcherHash: 'm2' }, prev)).toContain('matcher');
+    expect(baselineMismatch({ ...prev, corpusHash: 'c2' }, prev)).toContain('corpus');
+  });
+});
+
+describe('prepareBenchEnv', () => {
+  const withEnv = (vars: Record<string, string>, fn: () => void) => {
+    const saved = { ...process.env };
+    Object.assign(process.env, vars);
+    try {
+      fn();
+    } finally {
+      for (const k of Object.keys(process.env)) if (!(k in saved)) delete process.env[k];
+      Object.assign(process.env, saved);
+    }
+  };
+  const repoWith = (config: string | null) => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'conv-bench-env-'));
+    if (config !== null) writeFileSync(path.join(dir, 'guard.config.json'), config);
+    return dir;
+  };
+
+  it('captures GUARD_REVIEW_MODEL before the strip deletes it (the hand-patch regression)', () => {
+    withEnv({ GUARD_REVIEW_MODEL: 'haiku', GIT_CONFIG_GLOBAL: '/dev/null' }, () => {
+      const { caseOpts, stripped } = prepareBenchEnv(['--only', 'x'], repoWith(null));
+      expect(caseOpts).toEqual({ judgeModel: 'haiku', strict: false });
+      expect(stripped).toEqual(expect.arrayContaining(['GUARD_REVIEW_MODEL', 'GIT_CONFIG_GLOBAL']));
+      expect(process.env.GUARD_REVIEW_MODEL).toBeUndefined();
+      expect(process.env.GIT_CONFIG_GLOBAL).toBeUndefined();
+    });
+  });
+
+  it("falls back to the invoking repo's review.model, then the shipped default", () => {
+    withEnv({}, () => {
+      delete process.env.GUARD_REVIEW_MODEL;
+      delete process.env.FRINK_REVIEW_MODEL;
+      const cwd = repoWith(JSON.stringify({ review: { model: 'sonnet' } }));
+      expect(prepareBenchEnv(['--strict'], cwd).caseOpts).toEqual({
+        judgeModel: 'sonnet',
+        strict: true,
+      });
+      expect(prepareBenchEnv([], repoWith(null)).caseOpts.judgeModel).toBe(LIGHT_JUDGE_MODEL);
+    });
+  });
 });
 
 // ─── runCase through the real gate (stub judges) ───────────────────────────────────
@@ -581,5 +647,92 @@ describe('runCase', () => {
     });
     expect(res.outage).toBe(true);
     expect(res.score).toBeNull();
+  });
+
+  const LINELESS_FAIL =
+    'VIOLATION: Never call console.log directly. Use the structured logger. — app/CLAUDE.md:1\n' +
+    "OFFENDING: console.log('leaked'); — app/handler.ts\n" +
+    'VERDICT: FAIL — direct console.log call\n';
+  const CITED_FAIL = LINELESS_FAIL.replace('app/handler.ts', 'app/handler.ts:1');
+
+  it('judgeModel reaches the judge argv although the fixture config names no model', async () => {
+    const models: string[] = [];
+    await runCase(makeRow(), {
+      judgeModel: 'haiku',
+      reviewerExec: async ({ args }) => {
+        models.push(args[args.indexOf('--model') + 1]);
+        return 'NO_VIOLATIONS\nVERDICT: PASS';
+      },
+      matcherExec: async () => 'SLOT: NONE',
+      matchRuns: 1,
+      saveTranscript: false,
+    });
+    expect(models).toEqual(['haiku']);
+  });
+
+  it('strict retries a FAIL without blocking evidence once and scores the retried transcript', async () => {
+    const replies = [LINELESS_FAIL, CITED_FAIL];
+    const opts = {
+      matcherExec: async () => 'SLOT: F1',
+      matchRuns: 1,
+      saveTranscript: false,
+    };
+    let calls = 0;
+    const strictRes = await runCase(makeRow(), {
+      ...opts,
+      strict: true,
+      reviewerExec: async () => replies[calls++],
+    });
+    expect(calls).toBe(2);
+    expect(strictRes.blockingAuthority).toEqual({ g1: true });
+
+    let lenientCalls = 0;
+    const lenient = await runCase(makeRow(), {
+      ...opts,
+      reviewerExec: async () => (lenientCalls++, LINELESS_FAIL),
+    });
+    expect(lenientCalls).toBe(1);
+    expect(lenient.blockingAuthority).toEqual({ g1: false });
+  });
+
+  it('a strict contract retry that goes dark is an outage, never scored from the first transcript', async () => {
+    const replies = [LINELESS_FAIL, null];
+    let calls = 0;
+    const res = await runCase(makeRow(), {
+      strict: true,
+      reviewerExec: async () => replies[calls++],
+      saveTranscript: false,
+    });
+    expect(calls).toBe(2);
+    expect(res.outage).toBe(true);
+    expect(res.score).toBeNull();
+  });
+});
+
+describe('preflightJudge', () => {
+  it('probes the CLI that actually runs the model — codex for a gpt spec, claude for an alias', () => {
+    const probed: string[] = [];
+    preflightJudge('conventions-eval', 'reviewer', LIGHT_JUDGE_MODEL, (bin) => probed.push(bin));
+    preflightJudge('conventions-eval', 'matcher', 'haiku', (bin) => probed.push(bin));
+    expect(probed).toEqual(['codex', 'claude']);
+  });
+
+  it('a missing judge CLI aborts with exit 2, naming the model and the binary', () => {
+    const missing = () => {
+      throw new Error('ENOENT');
+    };
+    expect(() => preflightJudge('conventions-eval', 'reviewer', 'haiku', missing)).toThrow(
+      /reviewer model haiku requires `claude`/,
+    );
+  });
+});
+
+describe('appendLedger', () => {
+  it('appends one JSON line per run and never throws when the ledger cannot be written', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'conv-bench-ledger-'));
+    appendLedger(dir, { run: 1 });
+    appendLedger(dir, { run: 2 });
+    expect(readFileSync(path.join(dir, 'runs.log'), 'utf8')).toBe('{"run":1}\n{"run":2}\n');
+    expect(() => appendLedger(path.join(dir, 'missing', 'deeper'), { run: 3 })).not.toThrow();
   });
 });

@@ -14,7 +14,10 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { FILE_OUTCOMES, SUMMARY_NAME, SUMMARY_SCHEMA } from './produce.mjs';
+import { z } from 'zod';
+import { FILE_OUTCOMES, SUMMARY_NAME, SUMMARY_SCHEMA, fileTestsSchema } from './produce.mjs';
+/** Per-test names are optional evidence: malformed, they are dropped and the file answers stand. */
+const testsSchema = z.record(z.string(), fileTestsSchema);
 export class GhUnavailable extends Error {
     reason;
     constructor(reason, message) {
@@ -172,6 +175,11 @@ export function parseSummary(raw, label) {
             throw new GhUnavailable('schema-mismatch', `${label} records "${outcome}" for ${file}`);
         }
     }
+    const tests = testsSchema.safeParse(parsed.tests);
+    if (tests.success)
+        parsed.tests = tests.data;
+    else
+        delete parsed.tests;
     return parsed;
 }
 /**
@@ -264,5 +272,59 @@ export function downloadSummary({ cwd, runId, attempt, artifact, }) {
     }
     finally {
         rmSync(dir, { recursive: true, force: true });
+    }
+}
+/** A run's page and each failed `job › step`; a job that failed outside any step is named alone. */
+function runView(cwd, runId) {
+    const out = gh(['run', 'view', String(runId), '--json', 'url,jobs'], cwd);
+    let view;
+    try {
+        view = JSON.parse(out);
+    }
+    catch {
+        view = null;
+    }
+    if (`${view?.url}` !== view?.url || !Array.isArray(view?.jobs)) {
+        throw new GhUnavailable('gh-failed', `gh run view ${runId} returned JSON this reader cannot use`);
+    }
+    const failing = view.jobs
+        .filter((job) => job?.conclusion === 'failure')
+        .flatMap((job) => {
+        const steps = Array.isArray(job.steps) ? job.steps : [];
+        const failed = steps.filter((step) => step?.conclusion === 'failure');
+        return failed.length ? failed.map((step) => `${job.name} › ${step.name}`) : [`${job.name}`];
+    });
+    return { url: `${view.url}`, failing };
+}
+/**
+ * Only a newest completed run that succeeded is green, and only one that failed is red. No run or a
+ * cancelled or timed-out one is `missing`; a gh failure is `unreadable`, named, never a throw.
+ */
+export function commitCi(opts) {
+    try {
+        const runs = runsForCommit(opts);
+        const run = runs.find((r) => r.status === 'completed') ?? runs[0];
+        if (!run) {
+            return {
+                verdict: 'missing',
+                detail: `no-usable-run: no ${opts.workflow} run for this commit`,
+            };
+        }
+        const { url, failing } = runView(opts.cwd, run.databaseId);
+        if (run.status !== 'completed') {
+            return { verdict: 'pending', detail: `run ${run.databaseId} is ${run.status}`, url };
+        }
+        if (run.conclusion === 'success')
+            return { verdict: 'green', detail: '', url };
+        if (run.conclusion === 'failure') {
+            return { verdict: 'red', detail: failing.join(', ') || 'no failed job named', url };
+        }
+        const detail = `no-usable-run: run ${run.databaseId} concluded ${run.conclusion}`;
+        return { verdict: 'missing', detail, url };
+    }
+    catch (e) {
+        if (!(e instanceof GhUnavailable))
+            throw e;
+        return { verdict: 'unreadable', detail: `${e.reason}: ${e.message}` };
     }
 }

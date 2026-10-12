@@ -319,7 +319,6 @@ describe('ship-intent generation snapshot', () => {
     mode: 'ship',
     title: 't',
     links: [],
-    noQavisPublish: false,
     updatePrBody: false,
     draft: false,
     resumed: false,

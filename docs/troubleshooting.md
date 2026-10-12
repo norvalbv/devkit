@@ -154,14 +154,16 @@ reads them; both are safe to delete.
 
 ## The dup gate names a symbol my file doesn't define (extract refactor blocked)
 
-It can't any more, and if you see it on an older devkit: **the search-code index is stale, not your code.**
-`guard-dup` now verifies every pair against the working tree first — a side whose indexed body is no
-longer on disk drops the pair and is printed as `Stale index — dropped N candidate pair(s) …`. That is a
+**The search-code index is stale, not your code.** `guard-dup` verifies every pair against the
+working tree first — a side whose indexed body is no longer on disk drops the pair and is printed as `Stale index — dropped N candidate pair(s) …`. That is a
 _withheld_ finding: re-index those files (`search-code index --seed-files "<files>"`) and re-run to get
 coverage back. **Never** paste the `guard-dup-allowlist add` command for such a pair — it would record a
 permanent approval for a duplication that does not co-exist. A `Freshness NOT verified` line means the
 index carries no `raw_code`/`id` (or its paths don't resolve here), so the pairs above it were reported
-unchecked — eyeball the ranges before approving. `GUARD_DUP_VERIFY_TREE=0` disables the check.
+unchecked — eyeball the ranges before approving. A `Could not check N side(s) above` block names the
+sides of a reported pair whose indexed body was too short or missing to compare: the stale-index block
+can still happen for exactly those, so open the named file and re-index if the symbol is gone.
+`GUARD_DUP_VERIFY_TREE=0` disables the check.
 
 ## `devkit doctor` reports `search-code index: DRIFT` or `MISSING`
 
@@ -214,6 +216,21 @@ investigate the named phase. Raise the ceiling only when setup is legitimately s
 it and never serialise the file (`suite-hangs-bound-at-the-spawn-site`,
 `test-deadlines-are-hang-detectors`).
 
+## A devkit test run printed `devkit test bash: N tests need bash >= 4 and were skipped`
+
+macOS ships bash 3.2 as `/bin/bash`. Some of devkit's shell runs differently on bash 4 and later,
+which is what Linux CI uses: a `wait` interrupted by a trap, and `"${arr[@]}"` on an empty array
+under `set -u`. The tests for that behaviour skip when no bash >= 4 is found, so a green local run
+has not executed them. Two ways to run them:
+
+- `brew install bash`. The tests find `/opt/homebrew/bin/bash` or `/usr/local/bin/bash` on their own.
+- `bun run test:linux-bash <test file>...` runs the named files under bash 5 in a
+  `node:24-bookworm` container. It needs Docker running and at least one file. Run it for the files
+  that print the line, not the whole suite: a few cases need `gh` or devkit's own git repository,
+  and the container has neither.
+
+`bun run test:run:report` passes its own reporters, so this line does not appear there.
+
 ## CI `Release-only dist` failed: `this ship rewrites tracked dist, which is release-only`
 
 This applies only in devkit's own repo. Between releases, `bun run build` rewrites tracked `dist/` files
@@ -247,7 +264,7 @@ Move every judge **away from the CLI the message names**, in the shell the ship 
 
 ```
 export GUARD_REVIEW_MODEL=haiku GUARD_REVIEW_ESCALATION_MODEL=opus \
-  GUARD_CORRECTNESS_MODEL=sonnet GUARD_CORRECTNESS_CHUNK=off
+  GUARD_CORRECTNESS_MODEL=claude-haiku-5-5 GUARD_CORRECTNESS_CHUNK=off
 unset GUARD_SENTRY_MODEL FRINK_SENTRY_MODEL
 devkit ship --resume <branch>
 ```
@@ -278,8 +295,8 @@ be the dark one. Find out first with `devkit doctor` or the ship preflight, then
 Export or unset in the shell; never prefix the command. An inline `VAR=x devkit ship` can be stripped
 by a command-rewriting shell hook, exactly as with `SHIP_COMMIT_TIMEOUT` below.
 
-- The chunk cap matters: 400 LOC is benched for `gpt-5.6-sol` only, so moving three knobs runs the
-  correctness reviewer at a cap never measured for the model now judging.
+- The chunk cap matters: the package default chunks correctness review at 400 LOC, and no large-diff
+  bench has measured `claude-haiku-5-5` chunked, so moving three knobs runs it in an unmeasured shape.
 - A sentry pin (`GUARD_SENTRY_MODEL` or `FRINK_SENTRY_MODEL`) stays where it points until cleared, which
   is why both blocks unset it. `devkit doctor --fix` refuses to bind while one pins codex, rather than
   reporting a move that left a judge behind.
@@ -370,8 +387,7 @@ at a time, by design.
 `devkit review` runs every selected gate even after one blocks, then prints this line and exits 1.
 The deterministic stage (guard-comments included) defers under `--dry-gates` too, where the line
 reads `✗ dry-gates: …`. A confirmed AI finding from guard-decisions or guard-review defers only in review. A
-judge outage (exit 3) or unreadable evidence (exit 4) from an AI gate, or a Qavis strict block, still
-stops the run at once.
+judge outage (exit 3) or unreadable evidence (exit 4) from an AI gate still stops the run at once.
 Each named gate's findings appear above the line.
 
 To check a fix without another commit or ship, stage it and run the per-gate command the block prints
@@ -382,6 +398,17 @@ fallow) and devkit's own formatter print the same invocation under `devkit ship`
 deterministic block.
 A reviewer FAIL prints `guard-review lens <reviewer>[:<lens>]` the same way: it re-judges only that
 reviewer or correctness lens on your staged index, and its PASS seeds the cache the next ship reads.
+
+## `📸 ui-evidence:` asks for screenshots on a change with no visible effect
+
+The reminder is advisory: this line never blocks a commit or a ship. It runs on every commit. It
+fires on a staged file with a UI extension or matching `uiEvidence.paths` (tests, stories and
+fixtures are excluded) with no model call. Otherwise a light judge reads the staged diff and fires
+when the change could alter a rendered screen, and the line gives its one-line reason. The verdict is
+cached per diff, and a judge outage or timeout (30 s) means no reminder. When nothing a user sees
+changed, say so in the PR description rather than attaching screenshots. To be reminded about paths
+the judge misses, add their globs to `uiEvidence.paths` in `guard.config.json`; to drop the reminder
+entirely, deselect the `ui-evidence` guard with `devkit init --guards <the guards you keep>`.
 
 ## `bun install` fails: `no commit matching "<sha>" found for "@norvalbv/devkit"`
 

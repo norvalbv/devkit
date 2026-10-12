@@ -129,7 +129,7 @@ describe('native benchmark planning', () => {
       KEEP: 'yes',
     };
     isolateBenchTelemetry(env);
-    expect(env).toEqual({ KEEP: 'yes', DEVKIT_NO_TELEMETRY: '1' });
+    expect(env).toEqual({ KEEP: 'yes', DEVKIT_NO_TELEMETRY: '1', DEVKIT_RUN_ORIGIN: 'bench' });
   });
 });
 

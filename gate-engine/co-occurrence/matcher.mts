@@ -319,7 +319,7 @@ function runScan() {
   // Working-tree freshness, LAST filter before anything is counted or printed: a pair whose indexed
   // code is no longer on disk is an artefact of a stale/reverted index, not a duplication. Drop-only,
   // and every drop is named below rather than "fixed" by allowlisting a pair that does not co-exist.
-  const { fresh, dropped } = partitionFresh(pairs, verifier);
+  const { fresh, dropped, unchecked } = partitionFresh(pairs, verifier);
   pairs = fresh;
   const byTier = { exact: 0, near: 0, drifted: 0 };
   for (const p of pairs) byTier[p.tier]++;
@@ -364,13 +364,13 @@ function runScan() {
     if (pairs.length > displayed.length) {
       console.log(`  (+${pairs.length - displayed.length} more — re-run after addressing these)`);
     }
-    console.log('');
-    // Blocking on evidence nobody could check: say so, so a symbol that isn't at its printed range
-    // reads as a stale index (re-index) rather than as something to approve.
-    for (const l of freshnessNotice([], { verified: verifier.enabled, blocking: true }))
-      console.log(l);
+    const sides = displayed.flatMap((p) => unchecked.get(p) ?? []);
+    // Blocking on evidence nobody could check: say so, so it reads as a stale index, not an approval.
+    const notice = freshnessNotice([], { verified: verifier.enabled, blocking: true }, sides);
+    console.log(['', ...notice].join('\n'));
+    exitGate(1, [...displayed.map(pairName), ...notice]);
   }
-  if (GATE) exitGate(pairs.length ? 1 : 0, displayed.map(pairName));
+  if (GATE) exitGate(0, []);
 }
 
 // Reason: the branches ARE the confusion-matrix algorithm: the TP/FP/FN/TN four-way classification plus precision/recall/F1 derivation over labels.json; CRAP-flagged because this is dev-only bench tooling exercised end-to-end against fixtures, not unit-tested

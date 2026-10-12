@@ -59,6 +59,7 @@ function seedRepository(): {
   for (const linked of [
     'cli/lib/husky/overlay/overlay-root.mts',
     'cli/lib/husky/pre-push/failing-test-files.mts',
+    'gate-engine/coverage/dependencies.mts',
   ]) {
     mkdirSync(dirname(join(root, linked)), { recursive: true });
     symlinkSync(join(REPO_ROOT, linked), join(root, linked));

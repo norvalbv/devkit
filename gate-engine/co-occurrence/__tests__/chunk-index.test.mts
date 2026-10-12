@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -27,6 +27,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const MATCHER = resolve(here, '..', 'matcher.mts');
 const NOT_FOUND_ON_DISK_RE = /indexed body not found on disk/;
 const NOT_VERIFIED_RE = /Freshness NOT verified/;
+const UNCHECKED_RE = /Could not check \d+ side\(s\) above against the working tree/;
 
 // A symbol as search-code stores it: an import PRELUDE (which survives an extract refactor
 // untouched — the reason whole-raw_code comparison misses 17% of extractions) plus the BODY.
@@ -239,10 +240,12 @@ describe('createVerifier', () => {
     // An index rooted somewhere else (monorepo subdir, indexer run from the wrong cwd) would
     // otherwise drop every pair and take the gate permanently dark.
     const { verifier } = fakeVerifier({ 1: chunkAt(rawCode), 2: chunkAt(rawCode) }, {});
-    const { fresh, dropped } = partitionFresh([pair()], verifier);
+    const { fresh, dropped, unchecked } = partitionFresh([pair()], verifier);
     expect(verifier.enabled).toBe(false);
     expect(dropped).toHaveLength(0);
     expect(fresh).toHaveLength(1);
+    // Every side read "stale" before the fuse blew; none of that may be reported per side.
+    expect(unchecked.size).toBe(0);
   });
 });
 
@@ -307,6 +310,40 @@ describe('partitionFresh — drop-only', () => {
     expect(partitionFresh([pair()], verifier).fresh).toHaveLength(1);
   });
 
+  it('names the unverifiable side of a kept pair, and only that side', () => {
+    // A two-line helper whose second line changed on disk: one of two distinctive lines aligned.
+    const helper = 'export const widgetLabel = (item) =>\n  `${item.identifier}: ${item.value}`;';
+    const edited = 'export const widgetLabel = (item) =>\n  `${item.identifier} = ${item.total}`;';
+    const { verifier } = fakeVerifier(
+      { 1: chunkAt(rawCode), 2: { rawCode: helper, startLine: 1, endLine: 2 } },
+      { '/repo/src/alpha.ts': body, '/repo/src/beta.ts': edited },
+    );
+    const kept = pair();
+    const { fresh, unchecked } = partitionFresh([kept], verifier);
+    expect(fresh).toEqual([kept]);
+    expect(unchecked.get(kept)?.map((s) => s.file)).toEqual(['src/beta.ts']);
+  });
+
+  it('never names a side of a pair it dropped as unchecked', () => {
+    // Side A is gone (stale) and side B has no stored body (unverifiable): the pair is withheld,
+    // so pointing at B under "above" would refer to a pair that was never printed.
+    const { verifier } = fakeVerifier(
+      { 1: chunkAt(rawCode), 2: chunkAt(null), 3: chunkAt(rawCode) },
+      { '/repo/src/alpha.ts': 'gone\n', '/repo/src/gamma.ts': body },
+    );
+    const { dropped, unchecked } = partitionFresh([pair()], verifier);
+    expect(dropped).toHaveLength(1);
+    expect(unchecked.size).toBe(0);
+  });
+
+  it('reports no unchecked side when both bodies are on disk', () => {
+    const { verifier } = fakeVerifier(fresh2, {
+      '/repo/src/alpha.ts': body,
+      '/repo/src/beta.ts': body,
+    });
+    expect(partitionFresh([pair()], verifier).unchecked.size).toBe(0);
+  });
+
   it('never returns more pairs than it received (it can only turn a block into a pass)', () => {
     const { verifier } = fakeVerifier(fresh2, { '/repo/src/alpha.ts': body });
     const pairs = [pair(), pair({ fileB: 'src/gamma.ts' })];
@@ -332,7 +369,10 @@ describe('freshnessNotice', () => {
     // Approving a pair that does not co-exist writes a falsehood into the allowlist — the exact
     // trap the reported incident fell into. A caller scanning output for a paste-able `add` must
     // not find one here.
-    const text = freshnessNotice(dropped, { verified: false, blocking: true }).join('\n');
+    const text = freshnessNotice(dropped, { verified: false, blocking: true }, [
+      { chunkId: 2, symbol: 'widgetLabel', file: 'src/beta.ts' },
+    ]).join('\n');
+    expect(text).toMatch(UNCHECKED_RE);
     expect(text).not.toContain('guard-dup-allowlist add ');
     expect(text).not.toContain(' add "');
   });
@@ -343,6 +383,24 @@ describe('freshnessNotice', () => {
     );
     expect(freshnessNotice([], { verified: true, blocking: true })).toEqual([]);
     expect(freshnessNotice([], { verified: false, blocking: false })).toEqual([]);
+  });
+
+  it('names an unchecked side with a re-index remedy, on a blocking run only', () => {
+    const side = [{ chunkId: 2, symbol: 'widgetLabel', file: 'src/beta.ts' }];
+    const text = freshnessNotice([], { verified: true, blocking: true }, side).join('\n');
+    expect(text).toMatch(UNCHECKED_RE);
+    expect(text).toContain('  widgetLabel  src/beta.ts');
+    expect(text).toMatch(/re-index it instead of approving/);
+    expect(freshnessNotice([], { verified: true, blocking: false }, side)).toEqual([]);
+  });
+
+  it('names a chunk once when several reported pairs share it', () => {
+    // A short helper copied into three files yields pairs AB, AC and BC: each chunk arrives twice.
+    const a = { chunkId: 1, symbol: 'widgetLabel', file: 'src/alpha.ts' };
+    const b = { chunkId: 2, symbol: 'widgetLabel', file: 'src/beta.ts' };
+    const lines = freshnessNotice([], { verified: true, blocking: true }, [a, b, a, b]);
+    expect(lines[0]).toMatch(/Could not check 2 side\(s\)/);
+    expect(lines.filter((l) => l.includes('widgetLabel'))).toHaveLength(2);
   });
 });
 
@@ -457,6 +515,28 @@ describe('dup gate vs a stale index (the reported failure)', () => {
     expect(status).toBe(1);
     expect(stdout).toContain('add "collectWidgetTotals"');
     expect(stdout).not.toMatch(NOT_VERIFIED_RE);
+    expect(stdout).not.toMatch(UNCHECKED_RE);
+  });
+
+  it('names a side too short to check, on stdout and in the recorded gate reason', () => {
+    // Indexed as a two-line helper; on disk its second line has since changed. One of two
+    // distinctive lines still aligns, so the side is neither provably fresh nor provably stale.
+    const helper = 'export const widgetLabel = (item) =>\n  `${item.identifier}: ${item.value}`;';
+    const edited =
+      'export const widgetLabel = (item) =>\n  `${item.identifier} = ${item.total}`;\n';
+    const s = scenario({ 'src/alpha.ts': fileWithBody, 'src/beta.ts': edited }, [
+      dupChunk('src/alpha.ts'),
+      { file: 'src/beta.ts', symbol: 'widgetLabel', startLine: 1, raw: helper },
+    ]);
+    const reasonFile = join(s.dir, 'reason.txt');
+    const { status, stdout } = gate(s, 'src/alpha.ts', { DEVKIT_GATE_REASON_FILE: reasonFile });
+    expect(status).toBe(1);
+    expect(stdout).toMatch(UNCHECKED_RE);
+    expect(stdout).toContain('  widgetLabel  src/beta.ts');
+    expect(stdout).not.toMatch(NOT_VERIFIED_RE);
+    const reason = readFileSync(reasonFile, 'utf8');
+    expect(reason).toContain('collectWidgetTotals <> widgetLabel');
+    expect(reason).toContain('  widgetLabel  src/beta.ts');
   });
 
   it('does not drop on LINE DRIFT — a symbol pushed down the file is still real', () => {
@@ -488,6 +568,7 @@ describe('dup gate vs a stale index (the reported failure)', () => {
     const { status, stdout } = gate(s, 'elsewhere/alpha.ts');
     expect(status).toBe(1);
     expect(stdout).toMatch(NOT_VERIFIED_RE);
+    expect(stdout).not.toMatch(UNCHECKED_RE);
   });
 
   it('GUARD_DUP_VERIFY_TREE=0 restores the unverified behaviour, and says the block is unverified', () => {
@@ -498,6 +579,7 @@ describe('dup gate vs a stale index (the reported failure)', () => {
     const { status, stdout } = gate(s, 'src/alpha.ts', { GUARD_DUP_VERIFY_TREE: '0' });
     expect(status).toBe(1);
     expect(stdout).toMatch(NOT_VERIFIED_RE);
+    expect(stdout).not.toMatch(UNCHECKED_RE);
   });
 
   it('a legacy index without raw_code/id still blocks (verification never fails a gate closed)', () => {
@@ -518,5 +600,6 @@ describe('dup gate vs a stale index (the reported failure)', () => {
     const { status, stdout } = gate({ dir, dbPath }, 'src/alpha.ts');
     expect(status).toBe(1);
     expect(stdout).toMatch(NOT_VERIFIED_RE);
+    expect(stdout).not.toMatch(UNCHECKED_RE);
   });
 });

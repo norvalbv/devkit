@@ -27,6 +27,11 @@ describe('prior-art agent: reference checkouts resolve from a linked worktree', 
     expect(phase0).toContain('`bare`');
   });
 
+  it('runs the deterministic resolver first, keeping the hand rule as its fallback', () => {
+    expect(phase0).toContain('`guard-review reference-checkouts --json`');
+    expect(phase0).toContain('absent or exits non-zero');
+  });
+
   it('counts only non-blank string patterns, and skips an unresolved one silently', () => {
     expect(phase0).toContain('non-blank string patterns');
     expect(phase0).toContain('skipped silently and counts only as declared');
@@ -36,6 +41,12 @@ describe('prior-art agent: reference checkouts resolve from a linked worktree', 
     const source = read('agents/prior-art.md');
     expect(read('.claude/agents/prior-art.md')).toBe(source);
     expect(read('.cursor/agents/prior-art.md')).toBe(source);
+  });
+
+  it('delivers its report through the harness report tool, falling back to the final message', () => {
+    const agent = read('agents/prior-art.md');
+    expect(agent).toContain("pass it verbatim to your harness's report tool");
+    expect(agent).toContain('otherwise make it your final message');
   });
 });
 

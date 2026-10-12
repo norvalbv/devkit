@@ -1,0 +1,6 @@
+[
+ {
+  "slug": "bench-runs-resume-from-checkpoint",
+  "ruling": "Every completed row is appended to a gitignored progress-<sub>.jsonl the moment it lands, and re-running the SAME command replays those rows for free. A row is replayed only when config (model/K/cascade) AND gateHash AND corpusHash all match, so a stale checkpoint is inert rather than quietly blending two measurements; outage verdicts (NULL) are never replayed. Cost and stability aggregates are derived from the ROWS (per-row inputChars/rawChars/judged/outage) rather than counters incremented in the loop, so a resumed run reports what the whole run cost. The reader drops torn trailing lines instead of failing the load. --fresh discards and re-measures."
+ }
+]

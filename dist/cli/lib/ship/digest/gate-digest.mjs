@@ -152,6 +152,7 @@ export function summarise(events, shipId) {
                 state: e.status === 'could_not_run' ? 'could-not-run' : 'finding',
                 blocking: false,
                 detail: oneLine(e.detail),
+                advisory: true,
             });
         }
         else if (e.type === 'gate_degraded') {
@@ -295,6 +296,8 @@ export function render(rows, logPath = '') {
         const tail = r.detail ? `: ${r.detail}` : '';
         if (r.blocking === true)
             out.push(`   ✗ ${r.gate} — BLOCKED this run${tail}`);
+        else if (r.advisory)
+            out.push(`   ⚠ ${r.gate} — advisory, did NOT block this run${tail}`);
         else if (r.blocking === null) {
             // No "did NOT block" claim: the blocking gate is unknowable on this run.
             out.push(`   ⚠ ${r.gate} — finding recorded — read it before retrying${tail}`);

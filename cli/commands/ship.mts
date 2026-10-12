@@ -47,7 +47,6 @@ export const POSITIONAL_REJECTED_FLAGS: readonly string[] = [
   '--dry-gates',
   '--with-reviewers',
   '--from-branch',
-  '--no-qavis-publish',
   '--draft',
   '--ready',
   '--wait-ci',
@@ -79,14 +78,17 @@ Usage:
 
   <branch> and "<title>" are POSITIONAL and must come FIRST, before any flag. The bracketed flags
   below are optional, NOT free-floating: \`ship --base main <branch> "<title>"\` binds the branch
-  name to --base and is rejected. Ship CREATES <branch>. An unrelated local branch is rejected; an
-  exact commit preserved by a prior post-commit failure is resumed after its ship gate receipt, base,
-  message, and paths are verified. Explicit-path recovery also rebuilds the current scoped tree;
-  branch-source recovery instead publishes the already-gated immutable commit. Before any commit
-  lands, branch-source resume keeps frozen membership but refreshes those paths from current HEAD.
-  Paths that ship's OWN gates added to a commit (a ratchet baseline it lowered) are exempt from the
-  path and explicit-tree checks — recorded when the commit landed, so narrowing <path...> on the
-  retry still refuses. On origin, use --pr to append to the existing PR branch instead.
+  name to --base and is rejected. Ship CREATES <branch>. An unrelated local branch is rejected, and
+  so is <branch> checked out in this worktree (say, a story branch made with git switch -c): ship
+  refuses it and prints a \`git branch -m\` that frees the name without touching a file, then the
+  re-run with --base. An exact commit preserved by a prior post-commit failure is resumed after its
+  ship gate receipt, base, message, and paths are verified. Explicit-path recovery also rebuilds the
+  current scoped tree; branch-source recovery instead publishes the already-gated immutable commit.
+  Before any commit lands, branch-source resume keeps frozen membership but refreshes those paths
+  from current HEAD. Paths that ship's OWN gates added to a commit (a ratchet baseline it lowered)
+  are exempt from the path and explicit-tree checks — recorded when the commit landed, so narrowing
+  <path...> on the retry still refuses. On origin, use --pr to append to the existing PR branch
+  instead.
 
   --base <branch>     For a new ship, branch off origin/<branch> and target the PR at it instead of
                       this checkout's HEAD/current branch. With --pr, explicitly replace the open
@@ -139,6 +141,12 @@ Usage:
                       cancelled|no-checks|timed-out|unavailable> pr=<n> …\`. Progress prints only when
                       the tally changes, plus a liveness line each minute. Polls ALL checks by
                       default — see --wait-ci-required.
+                      On failed, the line also says which failures the base already had:
+                      \`attribution=<inherited-only|new|unknown> inherited=<n> new=<m> new-failing=…
+                      new-steps=… base-run=<id> base-ci=<red|green>\`, from the per-file test
+                      summaries of the PR run and of the run on the commit CI merged it onto. "new"
+                      means not failing on that base run, so a flake reads as new; unknown names a
+                      reason= or counts unsure= files whose test names cannot settle it.
                       The verdict NEVER reaches the exit code: a red PR is not a failed ship, and an
                       agent reading non-zero would retry --resume against a record the push deleted.
                       Grep the line, or read the ship_ci telemetry row. Valid for a new ship and for
@@ -156,12 +164,12 @@ Usage:
                       reported, so a workflow_run-chained job that registers late cannot be missed.
   --dry-gates         Rehearse the exact ship base + selected source staging in an ephemeral worktree.
                       Runs the formatter, configured deterministic/structure/extra gates, and the
-                      deterministic comment budget gate; skips decisions, Qavis, domain/completeness
+                      deterministic comment budget gate; skips decisions, domain/completeness
                       review, commit, push, and PR creation. With --base, refreshes and uses the
                       current origin tip just like ship.
                       Never leaves a local branch or commit. Cannot be combined with --resume.
   --with-reviewers    With --dry-gates only: also run the configured domain reviewers on that same
-                      staging. Decisions, Qavis and completeness stay off (there is no commit
+                      staging. Decisions and completeness stay off (there is no commit
                       message to judge). Reviewer PASSes land in the cache the real ship reads, so
                       the identical devkit ship reuses them; a block exits with the reviewer's code.
                       Costs judge time. For reviewer feedback when a decisions block would stop a
@@ -170,11 +178,6 @@ Usage:
                       last gate line) and the waiters, next up first — then exit. Takes no slot.
   --link <d>          Extra gitignored gate-dep dir to symlink into the worktree (repeatable;
                       the base .husky/_ + node_modules are always linked).
-  --no-qavis-publish  Skip the post-push step that hands a passed staged Qavis result to qavis for
-                      publication. The Qavis gate still runs; only the post-push hand-off is skipped.
-                      Publication needs a qavis exposing \`publish\` (qavis #85). Against an older
-                      one the hand-off is inert: ship names the gap once and prints the
-                      \`qavis qa --pr … --annotate description\` remedy instead.
   --pr                Re-push: add changes to the EXISTING PR on <branch> as a new commit
                       (fast-forward, never --force). Pair with --base only when replacing a PR whose
                       conflicts you already resolved; that explicit mode rewrites under an exact
