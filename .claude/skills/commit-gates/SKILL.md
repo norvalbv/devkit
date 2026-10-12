@@ -82,6 +82,10 @@ command. Do not pre-run every gate or replace the managed chain with a hand-writ
   the reviewed code gives the correct result, waive it with the command and its output as the
   rationale. Do not add tests or edits only to change the diff and re-sample the judge: any real
   change voids the waiver and proves nothing. A race that did not reproduce is not disproved.
+  Before complying with a finding that changes existing behaviour, search the tests for that
+  behaviour. A test asserting the opposite is a question, not an answer: read why it exists, then
+  either change it with the fix and tell the user, or waive explaining why the finding's premise is
+  wrong. A disagreeing test alone is not a rationale.
   A lens PASS is one sample from a nondeterministic judge, not a certificate that its concern is
   clean. A later attempt can fail the same lens on code you did not touch. Treat that as an
   ordinary finding and fix it: it was missed, not caused by your last edit.
