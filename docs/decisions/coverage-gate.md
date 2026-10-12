@@ -67,3 +67,4 @@ created: 2026-07-19
 **Scope:** gate-engine/coverage/**
 **Source:** shortcut · sc-4934
 **Evidence-change:** Field measurement on 2026-10-04: under parallel agents the whole-repo gate queued 13 coverage runs, 11 of them full 20-35 minute runs, at a load average of 285 on 10 cores; consumers (frink-oss) responded by moving the repo-wide floor into CI and setting coverage:false locally, leaving no local check at all.
+- 2026-10-12 — coverage-run prints a collection failure's first cause and, for a module-not-found error, the install command of the nearest package.json+lockfile dir above the importer; before the suite it only WARNS on missing root dependencies. A repo-wide manifest preflight was rejected: it would false-block on tracked fixture lockfiles (devkit itself carries 75 un-installed ones).

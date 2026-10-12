@@ -1,8 +1,9 @@
 import { execFileSync } from 'node:child_process';
 import { commitIndexEnv } from '../ratchets/commit-index.mts';
-import { existsSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, join, relative, resolve } from 'node:path';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { canonicalPath, type CollectionError, collectionRemedy } from './dependencies.mts';
 import { UNHANDLED_NAME } from './unhandled-reporter.mts';
 
 /**
@@ -76,6 +77,8 @@ export interface RunDiagnosis {
   failures?: FailureVerdict;
   /** Present only when vitest exited non-zero yet no test or file failed. */
   unhandled?: UnhandledError[];
+  /** Files that failed before any test ran (an import error), with vitest's file-level message. */
+  collection?: CollectionError[];
 }
 
 /** What a run that cleared the artifact leaves behind so the next reader knows what happened. */
@@ -85,6 +88,7 @@ export interface ClearMarker {
   head: string | null;
   failedFiles: string[];
   unhandledErrors?: UnhandledError[];
+  collectionErrors?: CollectionError[];
 }
 
 interface VitestAssertion {
@@ -105,15 +109,6 @@ interface VitestReport {
   testResults?: VitestSuite[];
 }
 
-/** realpath where possible — vitest reports /private/tmp for a file created under /tmp on macOS. */
-const canonical = (p: string): string => {
-  try {
-    return realpathSync(p);
-  } catch {
-    return resolve(p);
-  }
-};
-
 /**
  * Read vitest's json report into the two facts worth printing.
  *
@@ -133,6 +128,7 @@ export function readDiagnosis(resultsFile: string, exitCode = 0): RunDiagnosis |
     // failed: a.test.ts, a.test.ts" reads as two problems. Insertion order is preserved, so the list
     // still matches the order vitest reported.
     const failedFiles = new Set<string>();
+    const collection = new Map<string, CollectionError>();
     const flaky: FlakyTest[] = [];
     const failedTests = new Map<string, FlakyTest>();
     let allTimedOut = true;
@@ -177,10 +173,15 @@ export function readDiagnosis(resultsFile: string, exitCode = 0): RunDiagnosis |
         const hook = HOOK_TIMEOUT.exec(suite.message ?? '');
         if (hook) observe(Number(hook[1]));
         else if (suite.message || !failed) allTimedOut = false;
+        // No assertion results at all: nothing ran, so the message is why the file never loaded.
+        if (!hook && suite.message && !suite.assertionResults?.length) {
+          collection.set(file, { file, message: suite.message.slice(0, 2000) });
+        }
       }
       if (failed || suite.status === 'failed') failedFiles.add(file);
     }
     const diagnosis: RunDiagnosis = { failedFiles: [...failedFiles], flaky };
+    if (collection.size > 0) diagnosis.collection = [...collection.values()];
     if (failedFiles.size > 0) {
       diagnosis.failures = { tests: [...failedTests.values()], allTimedOut, timeoutMs };
     } else if (exitCode !== 0) {
@@ -229,11 +230,11 @@ export function stagedFiles(cwd: string): string[] | null {
       stdio: ['ignore', 'pipe', 'ignore'],
     });
   try {
-    const top = canonical(git(['rev-parse', '--show-toplevel']).trim());
+    const top = canonicalPath(git(['rev-parse', '--show-toplevel']).trim());
     return git(['diff', '--cached', '--name-only', '-z'])
       .split('\0')
       .filter(Boolean)
-      .map((p) => canonical(join(top, p)));
+      .map((p) => canonicalPath(join(top, p)));
   } catch {
     return null;
   }
@@ -259,12 +260,12 @@ export function stagedIntersection(
 ): string[] | null {
   if (staged === null) return null;
   const set = new Set(staged);
-  return failedFiles.map(canonical).filter((f) => set.has(f));
+  return failedFiles.map(canonicalPath).filter((f) => set.has(f));
 }
 
 /** Repo-relative where that is shorter and inside cwd; absolute otherwise. Paths are for humans. */
 export function displayPath(file: string, cwd: string): string {
-  const rel = relative(canonical(cwd), canonical(file));
+  const rel = relative(canonicalPath(cwd), canonicalPath(file));
   return rel && !rel.startsWith('..') ? rel : file;
 }
 
@@ -314,10 +315,11 @@ export function removeClearMarker(coverageDir: string): void {
  * marker replaces a stale unhandled list too (an undefined value is dropped on write). */
 export function markerCause(
   diagnosis: RunDiagnosis | null,
-): Pick<ClearMarker, 'failedFiles' | 'unhandledErrors'> {
+): Pick<ClearMarker, 'failedFiles' | 'unhandledErrors' | 'collectionErrors'> {
   return {
     failedFiles: diagnosis?.failedFiles ?? [],
     unhandledErrors: diagnosis?.unhandled,
+    collectionErrors: diagnosis?.collection,
   };
 }
 
@@ -343,6 +345,11 @@ export function readClearMarker(coverageDir: string): ClearMarker | null {
       failedFiles: Array.isArray(parsed.failedFiles) ? parsed.failedFiles : [],
       ...(Array.isArray(parsed.unhandledErrors) && {
         unhandledErrors: parsed.unhandledErrors.filter(isUnhandledError),
+      }),
+      ...(Array.isArray(parsed.collectionErrors) && {
+        collectionErrors: parsed.collectionErrors.filter(
+          (e): e is CollectionError => isUnhandledError(e) && e.file !== null,
+        ),
       }),
     };
   } catch {
@@ -376,6 +383,7 @@ export function formatDiagnosis(
     const hidden = diagnosis.failedFiles.length - MAX_LISTED_FILES;
     if (hidden > 0) lines.push(`     …and ${hidden} more`);
     lines.push(...stagedSentence(diagnosis.failedFiles, staged, cwd));
+    lines.push(...formatCollectionErrors(diagnosis.collection ?? [], cwd));
     // Said HERE, where the run failed — not only after a rescue — so the remedy arrives before the
     // next full run is spent rather than after it (sc-3473).
     if (diagnosis.failures?.allTimedOut) {
@@ -410,6 +418,20 @@ function stagedSentence(files: string[], staged: string[] | null, cwd: string): 
   ];
 }
 
+/** Files vitest could not load: the first cause, and the install that fixes it when one is named. */
+function formatCollectionErrors(errors: CollectionError[], cwd: string): string[] {
+  const [first] = errors;
+  if (!first) return [];
+  const cause = first.message.split('\n')[0];
+  const lines = [
+    `🚫 ${errors.length} test file(s) failed to COLLECT — no test in them ran. First cause:`,
+    `     ${displayPath(first.file, cwd)} — ${cause}`,
+  ];
+  const remedy = collectionRemedy(first.message, cwd);
+  if (remedy) lines.push(`   A dependency is not installed. Run: ${remedy}`);
+  return lines;
+}
+
 const formatUnhandled = (errors: UnhandledError[], cwd: string): string[] =>
   errors.map((e) => `     ${e.file ? displayPath(e.file, cwd) : 'file unknown'} — ${e.message}`);
 
@@ -425,6 +447,7 @@ export function formatClearMarker(marker: ClearMarker, cwd: string, now = Date.n
   if (marker.failedFiles.length > 0) {
     lines.push(`   Failed: ${marker.failedFiles.map((f) => displayPath(f, cwd)).join(', ')}`);
   }
+  lines.push(...formatCollectionErrors(marker.collectionErrors ?? [], cwd));
   if (marker.unhandledErrors?.length) {
     lines.push('   No test failed; the run ended on:');
     lines.push(...formatUnhandled(marker.unhandledErrors, cwd).slice(0, MAX_LISTED_FILES));
