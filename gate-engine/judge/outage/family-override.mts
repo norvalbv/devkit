@@ -5,19 +5,18 @@
 
 import { judgeProviderOfBin } from '../codex/result.mts';
 
-/** The complete claude family, chunking off included: cap 400 is benched for gpt-5.6-sol, not
- *  sonnet, so a partial move runs the correctness reviewer at an un-benched cap (sc-2193). */
+/** The complete claude family. Chunking stays off: no large-diff bench compares chunked with whole
+ *  review for claude-haiku-5-5 (its 2026-10-10 run chunked 4 of 285 cases). */
 export const CLAUDE_FAMILY_SET = {
   model: 'haiku',
   escalationModel: 'opus',
-  correctnessModel: 'sonnet',
+  correctnessModel: 'claude-haiku-5-5',
   correctnessChunkLoc: 0,
 } as const;
 
 /** env spelling, config key and claude value in ONE table, so the remedy, the doctor's refusal and
  *  the binder cannot drift apart. */
-// envValue differs from the config value for the chunk cap alone: the env parser takes 'off', the
-// file takes 0 (review/lens/chunk-tasks.mts).
+// The chunk cap's env spelling for 0 is 'off', the kill-switch word resolveChunkCap names.
 export const FAMILY_ENV_KEYS = [
   {
     env: 'GUARD_REVIEW_MODEL',
@@ -41,7 +40,10 @@ export const FAMILY_ENV_KEYS = [
     env: 'GUARD_CORRECTNESS_CHUNK',
     alias: undefined,
     key: 'correctnessChunkLoc',
-    envValue: 'off',
+    envValue:
+      CLAUDE_FAMILY_SET.correctnessChunkLoc === 0
+        ? 'off'
+        : String(CLAUDE_FAMILY_SET.correctnessChunkLoc),
   },
 ] as const;
 
@@ -100,8 +102,9 @@ export function familyOverrideRemedy(dark: string, binPresent?: boolean): string
         'guard.config.json instead, which a ship reads only once that file is committed. ';
   return (
     `move the judges to the claude family: run \`${claudeFamilyEnvLine()}\` in the shell that ` +
-    `ships, then resume the ship. Set all ${FAMILY_ENV_KEYS.length} — the correctness chunk cap is ` +
-    'benched for gpt-5.6-sol only, so a partial move runs sonnet at an un-benched cap; the command ' +
+    `ships, then resume the ship. Set all ${FAMILY_ENV_KEYS.length} — the package default chunks ` +
+    'correctness review at 400 LOC, and no large-diff bench has measured the claude correctness ' +
+    'model chunked, so a partial move runs it in an unmeasured shape; the command ' +
     'also clears any sentry pin, so that judge follows GUARD_REVIEW_MODEL rather than staying ' +
     `behind. ${doctorRoute}Every cached PASS is discarded, ` +
     'because a verdict is keyed on its judging model, and remaining claude headroom cannot be ' +

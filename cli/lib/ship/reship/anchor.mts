@@ -15,7 +15,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, posix } from 'node:path';
+import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { envFlag } from '../../../../gate-engine/config.mts';
 import { loadManifest } from '../../reconcile.mts';
@@ -229,13 +229,12 @@ interface StageOptions {
 
 /** Stage <entry> at <path> in the worktree's index and files; null removes it. */
 function stageEntry(wt: string, path: string, entry: Side): void {
-  const name = posix.normalize(path); // the index takes a tree path, not a pathspec: no `./`
   const ok = entry
-    ? git(wt, ['update-index', '--add', '--cacheinfo', `${entry.mode},${entry.blob},${name}`]) &&
-      git(wt, ['checkout-index', '-f', '--', name])
-    : git(wt, ['update-index', '--force-remove', '--', name]);
+    ? git(wt, ['update-index', '--add', '--cacheinfo', `${entry.mode},${entry.blob},${path}`]) &&
+      git(wt, ['checkout-index', '-f', '--', path])
+    : git(wt, ['update-index', '--force-remove', '--', path]);
   if (!ok) throw new Error(`could not stage ${shown(path)}`);
-  if (!entry) rmSync(join(wt, name), { force: true });
+  if (!entry) rmSync(join(wt, path), { force: true });
 }
 
 /** Plan every path, then stage each from the bytes it was judged on. Returns the exit code. */

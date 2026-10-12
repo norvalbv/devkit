@@ -85,13 +85,16 @@ Reading existing code to understand a still-unplanned problem is valid step-0 wo
 
 1. Read `guard.config.json` (see `<architecture_context>`). Resolve `research.referenceCheckouts`
    globs and COUNT them: `declaredCheckouts` = number of non-blank string patterns declared,
-   `resolvedCheckouts` = number of existing directories they resolve to. Resolve each pattern
-   against the config's directory first. If it matches nothing and the cwd is a LINKED worktree,
-   retry that pattern once against the same directory inside the main worktree — the first
-   `worktree` entry of `git worktree list --porcelain`, skipped when that entry is `bare` — since
-   sibling clones sit beside the main checkout, not beside a worktree. A pattern matching from
-   neither base is skipped silently and counts only as declared. These counts go in the response
-   verbatim.
+   `resolvedCheckouts` = number of existing directories they resolve to. Run
+   `guard-review reference-checkouts --json` from the config's directory FIRST and copy its
+   `declaredCheckouts`, `resolvedCheckouts` and `resolved` paths verbatim — it applies the rule
+   below deterministically. Only when that command is absent or exits non-zero, resolve by hand:
+   resolve each pattern against the config's directory first. If it matches nothing and the cwd
+   is a LINKED worktree, retry that pattern once against the same directory inside the main
+   worktree — the first `worktree` entry of `git worktree list --porcelain`, skipped when that
+   entry is `bare` — since sibling clones sit beside the main checkout, not beside a worktree. A
+   pattern matching from neither base is skipped silently and counts only as declared. These
+   counts go in the response verbatim.
 2. If a decision log exists, query it for the axes the problem touches — unless the caller already
    supplied Settled Axes, in which case use those and do not re-run the query.
 
@@ -152,9 +155,19 @@ checkout, record the checkout's root in `repoRoot` so provenance is auditable.
 ### Phase 3: Verdict synthesis (counter-argument first)
 
 Before writing the verdict, argue the OPPOSITE for one paragraph in your own reasoning: if you lean
-SOLVED_ELSEWHERE, argue the found artifact does not actually fit; if you lean GENUINE_NEW_WORK,
-argue you searched with the wrong question (the historical failure is researching "how do others
-bound X?" when the right question was "must X exist?"). Adopt the counter-argument if it holds.
+SOLVED_ELSEWHERE, argue the found artifact does not actually fit, or fixes only the named trigger
+and not the whole symptom class; if you lean GENUINE_NEW_WORK, argue you searched with the wrong
+question (the historical failure is researching "how do others bound X?" when the right question
+was "must X exist?"). Adopt the counter-argument if it holds.
+
+**Partial fixes are not SOLVED_ELSEWHERE.** The found artifact must cover the whole symptom class
+and every acceptance-criterion clause in the request, not just the reproduction trigger. If any Q
+finding or evidence item names a path that still reproduces, or an acceptance clause stays unmet,
+set `frameChallenge.framing: "NARROWS"` and return `GENUINE_NEW_WORK` scoped to that residual (or
+`INSUFFICIENT_EVIDENCE` when its coupling below does not hold). Cite the partial fix as a `local`
+or `github` evidence item, and name both the residual path and that fix in the first `summary`
+sentence and in `suggestedNextStep.detail`. A residual buried in a Q finding while the headline
+says solved closes real work: callers act on the verdict alone.
 
 Then apply the **burden-of-proof coupling** (the response contract enforces these; violating them
 makes the response invalid):

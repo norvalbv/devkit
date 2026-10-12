@@ -1,0 +1,371 @@
+{
+  "metrics": [
+    {
+      "id": "clause-kept-brief-only",
+      "label": "Rule kept: brief only, agent cannot read on (best-case tasks)",
+      "k": 2,
+      "n": 40,
+      "noiseFloor": 0.15
+    },
+    {
+      "id": "clause-kept-read-on",
+      "label": "Rule kept: brief, agent may read on (best-case tasks)",
+      "k": 37,
+      "n": 40,
+      "noiseFloor": 0.15
+    },
+    {
+      "id": "floor-good-brief-only",
+      "label": "Edit still correct where no clause binds: brief only (best-case tasks)",
+      "k": 37,
+      "n": 45,
+      "noiseFloor": 0.15
+    },
+    {
+      "id": "clause-shown-brief-only",
+      "label": "Binding clause inside the delivered brief",
+      "k": 0,
+      "n": 40,
+      "noiseFloor": 0.15
+    }
+  ],
+  "rows": {
+    "q1-abstain-prefusion@none": {
+      "kept": 0,
+      "broken": 5,
+      "notDone": 0,
+      "n": 5,
+      "model": "claude-haiku-5-5",
+      "claudeVersion": "2.1.296"
+    },
+    "q1-abstain-prefusion@brief-only": {
+      "kept": 0,
+      "broken": 5,
+      "notDone": 0,
+      "n": 5,
+      "model": "claude-haiku-5-5",
+      "claudeVersion": "2.1.296"
+    },
+    "q1-abstain-prefusion@read-on": {
+      "kept": 5,
+      "broken": 0,
+      "notDone": 0,
+      "n": 5,
+      "model": "claude-haiku-5-5",
+      "claudeVersion": "2.1.296"
+    },
+    "q1-cache-key@none": {
+      "kept": 5,
+      "broken": 0,
+      "notDone": 0,
+      "n": 5,
+      "model": "claude-haiku-5-5",
+      "claudeVersion": "2.1.296"
+    },
+    "q1-cache-key@brief-only": {
+      "kept": 5,
+      "broken": 0,
+      "notDone": 0,
+      "n": 5,
+      "model": "claude-haiku-5-5",
+      "claudeVersion": "2.1.296"
+    },
+    "q1-checkpoint-reader@none": {
+      "kept": 5,
+      "broken": 0,
+      "notDone": 0,
+      "n": 5,
+      "model": "claude-haiku-5-5",
+      "claudeVersion": "2.1.296"
+    },
+    "q1-checkpoint-reader@brief-only": {
+      "kept": 5,
+      "broken": 0,
+      "notDone": 0,
+      "n": 5,
+      "model": "claude-haiku-5-5",
+      "claudeVersion": "2.1.296"
+    },
+    "q1-extra-gates-malformed@none": {
+      "kept": 5,
+      "broken": 0,
+      "notDone": 0,
+      "n": 5,
+      "model": "claude-haiku-5-5",
+      "claudeVersion": "2.1.296"
+    },
+    "q1-extra-gates-malformed@brief-only": {
+      "kept": 5,
+      "broken": 0,
+      "notDone": 0,
+      "n": 5,
+      "model": "claude-haiku-5-5",
+      "claudeVersion": "2.1.296"
+    },
+    "q1-fetch-unknown@none": {
+      "kept": 2,
+      "broken": 3,
+      "notDone": 0,
+      "n": 5,
+      "model": "claude-haiku-5-5",
+      "claudeVersion": "2.1.296"
+    },
+    "q1-fetch-unknown@brief-only": {
+      "kept": 0,
+      "broken": 5,
+      "notDone": 0,
+      "n": 5,
+      "model": "claude-haiku-5-5",
+      "claudeVersion": "2.1.296"
+    },
+    "q1-fetch-unknown@read-on": {
+      "kept": 5,
+      "broken": 0,
+      "notDone": 0,
+      "n": 5,
+      "model": "claude-haiku-5-5",
+      "claudeVersion": "2.1.296"
+    },
+    "q1-hook-shellout@none": {
+      "kept": 0,
+      "broken": 3,
+      "notDone": 2,
+      "n": 5,
+      "model": "claude-haiku-5-5",
+      "claudeVersion": "2.1.296"
+    },
+    "q1-hook-shellout@brief-only": {
+      "kept": 1,
+      "broken": 4,
+      "notDone": 0,
+      "n": 5,
+      "model": "claude-haiku-5-5",
+      "claudeVersion": "2.1.296"
+    },
+    "q1-hook-shellout@read-on": {
+      "kept": 4,
+      "broken": 1,
+      "notDone": 0,
+      "n": 5,
+      "model": "claude-haiku-5-5",
+      "claudeVersion": "2.1.296"
+    },
+    "q1-qavis-outage@none": {
+      "kept": 5,
+      "broken": 0,
+      "notDone": 0,
+      "n": 5,
+      "model": "claude-haiku-5-5",
+      "claudeVersion": "2.1.296"
+    },
+    "q1-qavis-outage@brief-only": {
+      "kept": 5,
+      "broken": 0,
+      "notDone": 0,
+      "n": 5,
+      "model": "claude-haiku-5-5",
+      "claudeVersion": "2.1.296"
+    },
+    "q1-route-agreement@none": {
+      "kept": 0,
+      "broken": 5,
+      "notDone": 0,
+      "n": 5,
+      "model": "claude-haiku-5-5",
+      "claudeVersion": "2.1.296"
+    },
+    "q1-route-agreement@brief-only": {
+      "kept": 1,
+      "broken": 4,
+      "notDone": 0,
+      "n": 5,
+      "model": "claude-haiku-5-5",
+      "claudeVersion": "2.1.296"
+    },
+    "q1-route-agreement@read-on": {
+      "kept": 5,
+      "broken": 0,
+      "notDone": 0,
+      "n": 5,
+      "model": "claude-haiku-5-5",
+      "claudeVersion": "2.1.296"
+    },
+    "q1-store-exit4@none": {
+      "kept": 0,
+      "broken": 5,
+      "notDone": 0,
+      "n": 5,
+      "model": "claude-haiku-5-5",
+      "claudeVersion": "2.1.296"
+    },
+    "q1-store-exit4@brief-only": {
+      "kept": 0,
+      "broken": 5,
+      "notDone": 0,
+      "n": 5,
+      "model": "claude-haiku-5-5",
+      "claudeVersion": "2.1.296"
+    },
+    "q1-store-exit4@read-on": {
+      "kept": 5,
+      "broken": 0,
+      "notDone": 0,
+      "n": 5,
+      "model": "claude-haiku-5-5",
+      "claudeVersion": "2.1.296"
+    },
+    "q1-uncategorised@none": {
+      "kept": 5,
+      "broken": 0,
+      "notDone": 0,
+      "n": 5,
+      "model": "claude-haiku-5-5",
+      "claudeVersion": "2.1.296"
+    },
+    "q1-uncategorised@brief-only": {
+      "kept": 5,
+      "broken": 0,
+      "notDone": 0,
+      "n": 5,
+      "model": "claude-haiku-5-5",
+      "claudeVersion": "2.1.296"
+    },
+    "q2-ckpt@none": {
+      "kept": 5,
+      "broken": 0,
+      "notDone": 0,
+      "n": 5,
+      "model": "claude-haiku-5-5",
+      "claudeVersion": "2.1.296"
+    },
+    "q2-ckpt@brief-only": {
+      "kept": 1,
+      "broken": 0,
+      "notDone": 4,
+      "n": 5,
+      "model": "claude-haiku-5-5",
+      "claudeVersion": "2.1.296"
+    },
+    "q2-drift@none": {
+      "kept": 5,
+      "broken": 0,
+      "notDone": 0,
+      "n": 5,
+      "model": "claude-haiku-5-5",
+      "claudeVersion": "2.1.296"
+    },
+    "q2-drift@brief-only": {
+      "kept": 5,
+      "broken": 0,
+      "notDone": 0,
+      "n": 5,
+      "model": "claude-haiku-5-5",
+      "claudeVersion": "2.1.296"
+    },
+    "q2-extragates@none": {
+      "kept": 5,
+      "broken": 0,
+      "notDone": 0,
+      "n": 5,
+      "model": "claude-haiku-5-5",
+      "claudeVersion": "2.1.296"
+    },
+    "q2-extragates@brief-only": {
+      "kept": 2,
+      "broken": 0,
+      "notDone": 3,
+      "n": 5,
+      "model": "claude-haiku-5-5",
+      "claudeVersion": "2.1.296"
+    },
+    "q2-fallow@none": {
+      "kept": 0,
+      "broken": 5,
+      "notDone": 0,
+      "n": 5,
+      "model": "claude-haiku-5-5",
+      "claudeVersion": "2.1.296"
+    },
+    "q2-fallow@brief-only": {
+      "kept": 0,
+      "broken": 5,
+      "notDone": 0,
+      "n": 5,
+      "model": "claude-haiku-5-5",
+      "claudeVersion": "2.1.296"
+    },
+    "q2-fallow@read-on": {
+      "kept": 5,
+      "broken": 0,
+      "notDone": 0,
+      "n": 5,
+      "model": "claude-haiku-5-5",
+      "claudeVersion": "2.1.296"
+    },
+    "q2-optout@none": {
+      "kept": 5,
+      "broken": 0,
+      "notDone": 0,
+      "n": 5,
+      "model": "claude-haiku-5-5",
+      "claudeVersion": "2.1.296"
+    },
+    "q2-optout@brief-only": {
+      "kept": 4,
+      "broken": 0,
+      "notDone": 1,
+      "n": 5,
+      "model": "claude-haiku-5-5",
+      "claudeVersion": "2.1.296"
+    },
+    "q2-shipci@none": {
+      "kept": 0,
+      "broken": 5,
+      "notDone": 0,
+      "n": 5,
+      "model": "claude-haiku-5-5",
+      "claudeVersion": "2.1.296"
+    },
+    "q2-shipci@brief-only": {
+      "kept": 0,
+      "broken": 5,
+      "notDone": 0,
+      "n": 5,
+      "model": "claude-haiku-5-5",
+      "claudeVersion": "2.1.296"
+    },
+    "q2-shipci@read-on": {
+      "kept": 3,
+      "broken": 0,
+      "notDone": 2,
+      "n": 5,
+      "model": "claude-haiku-5-5",
+      "claudeVersion": "2.1.296"
+    },
+    "q2-telemetry@none": {
+      "kept": 0,
+      "broken": 5,
+      "notDone": 0,
+      "n": 5,
+      "model": "claude-haiku-5-5",
+      "claudeVersion": "2.1.296"
+    },
+    "q2-telemetry@brief-only": {
+      "kept": 0,
+      "broken": 5,
+      "notDone": 0,
+      "n": 5,
+      "model": "claude-haiku-5-5",
+      "claudeVersion": "2.1.296"
+    },
+    "q2-telemetry@read-on": {
+      "kept": 5,
+      "broken": 0,
+      "notDone": 0,
+      "n": 5,
+      "model": "claude-haiku-5-5",
+      "claudeVersion": "2.1.296"
+    }
+  },
+  "floorsMet": true
+}

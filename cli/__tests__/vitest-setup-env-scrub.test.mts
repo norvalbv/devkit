@@ -1,10 +1,13 @@
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { meta } from '../commands/ship.mts';
 import {
+  BYPASS_ENV,
   INHERITED_RUN_ENV,
   SCRUBBED_ENV,
   SHIP_EXPORTED_ENV,
@@ -61,6 +64,8 @@ const SHIP_ENV = {
   FRINK_AI_STRICT: '1',
   GUARD_AI_STRICT: '1',
   GUARD_DECISIONS_DIR: '/elsewhere/docs/decisions',
+  GUARD_STRUCTURE_OK: '1',
+  FRINK_HOOK_PARITY_OK: '1',
 };
 
 /** Loads vitest.setup.mjs in a clean node process and reports the env it leaves behind. */
@@ -147,9 +152,9 @@ describe('vitest.setup.mjs scrubs inherited gate policy', () => {
     }
   });
 
-  it('scrubs the ship state qavis-advisory and completeness read at runtime', () => {
-    // shipMode() branches on DEVKIT_SHIP_ROOT and then runs git against it; verdictBranch() scopes
-    // a sticky verdict to DEVKIT_SHIP_BRANCH. Inherited, both answer for the OUTER ship.
+  it('scrubs the ship state the gates read at runtime', () => {
+    // verdictBranch() scopes a sticky verdict to DEVKIT_SHIP_BRANCH; inherited, it answers for the
+    // OUTER ship.
     const env = envAfterSetup(SHIP_ENV);
     for (const name of [
       'DEVKIT_SHIP_ROOT',
@@ -159,6 +164,23 @@ describe('vitest.setup.mjs scrubs inherited gate policy', () => {
       'DEVKIT_SHIP_REPO',
     ]) {
       expect(env[name], name).toBeUndefined();
+    }
+  });
+
+  it('scrubs an inherited run origin but leaves it off the review entrypoint list', () => {
+    // The coverage gate runs the suite under a 'gate' mark; `devkit review` must keep a bench's mark.
+    expect(envAfterSetup({ DEVKIT_RUN_ORIGIN: 'gate' }).DEVKIT_RUN_ORIGIN).toBeUndefined();
+    expect(INHERITED_RUN_ENV).not.toContain('DEVKIT_RUN_ORIGIN');
+  });
+
+  it('covers every one-run bypass `devkit ship --help` documents, in both envFlag spellings', () => {
+    const envBlock = meta.help.split('\nEnv:\n')[1]?.split('\n\n')[0] ?? '';
+    const flags = [...envBlock.matchAll(/\bGUARD_([A-Z_]+)=1/g)].map((m) => m[1]);
+    expect(flags).toContain('HOOK_PARITY_OK');
+    for (const suffix of flags) {
+      for (const name of [`GUARD_${suffix}`, `FRINK_${suffix}`]) {
+        expect(BYPASS_ENV, `${name}: add it to vitest.setup.mjs BYPASS_ENV`).toContain(name);
+      }
     }
   });
 
@@ -264,6 +286,44 @@ describe('vitest.setup.mjs pins a git identity', () => {
       expect(author).toBe(
         `${SUITE_GIT_IDENTITY.GIT_AUTHOR_NAME} <${SUITE_GIT_IDENTITY.GIT_AUTHOR_EMAIL}>`,
       );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('vitest.setup.mjs keeps git auto-maintenance out of fixture repos', () => {
+  it('a fixture commit and a push into a bare remote leave both object stores unpacked', () => {
+    // A hermetic global config and a local-transport push both drop env-level git config.
+    const root = mkdtempSync(path.join(os.tmpdir(), 'devkit-suite-maintenance-'));
+    try {
+      const env = {
+        ...envAfterSetup({}),
+        GIT_CONFIG_GLOBAL: '/dev/null',
+        GIT_CONFIG_NOSYSTEM: '1',
+      };
+      const git = (cwd: string, ...args: string[]) =>
+        execFileSync('git', args, { cwd, env, encoding: 'utf8' }).trim();
+      const repo = path.join(root, 'repo');
+      const remote = path.join(root, 'remote.git');
+      git(root, 'init', '-q', repo);
+      git(root, 'init', '-q', '--bare', remote);
+      // Two loose objects in objects/17 meet the geometric-repack auto threshold of git >= 2.54.
+      for (let i = 0, found = 0; found < 2; i++) {
+        const body = `${i}\n`;
+        const id = createHash('sha1').update(`blob ${body.length}\0${body}`).digest('hex');
+        if (id.startsWith('17')) writeFileSync(path.join(repo, `shard-17-${found++}.txt`), body);
+      }
+      // Foreground maintenance, so a repack lands before the assertions instead of racing them.
+      git(remote, 'config', 'maintenance.autoDetach', 'false');
+      git(repo, 'add', '-A');
+      git(repo, '-c', 'maintenance.autoDetach=false', 'commit', '-qm', 'shard');
+      git(repo, 'push', '-q', remote, 'HEAD:refs/heads/main');
+      for (const gitDir of [path.join(repo, '.git'), remote]) {
+        const auto = git(gitDir, 'config', '--type=bool', '--default=true', 'maintenance.auto');
+        expect(auto, gitDir).toBe('false');
+        expect(readdirSync(path.join(gitDir, 'objects', 'pack')), gitDir).toEqual([]);
+      }
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

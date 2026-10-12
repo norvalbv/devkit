@@ -182,6 +182,79 @@ F2 0.49 lands beside Claude Code and Macroscope on this slice — with only the 
 reviewer running (no api-security / performance reviewers), which is where the api and perf
 goldens would have gone.
 
+## ReviewBench (adopted) — `external/reviewbench/`
+
+Source: [ReviewBench](https://github.com/review-bench/ReviewBench) at `e7d0683507b2`. The rule was
+signed before any judge call: [`reviewbench/pre-registration.md`](reviewbench/pre-registration.md)
+(v8). `external/pr-run.mts` materialises each PR at merge-base with `git diff base...head` staged
+and runs devkit's unchanged four-lens correctness reviewer (claude-haiku-5-5, effort medium, issue
+cap 3 per lens, whole diff, Read/Grep/Glob in the PR worktree, no codebase MCP).
+`reviewbench-export.mts` writes ReviewBench's judging input; ReviewBench's own judge scores it
+(Claude Sonnet 5, never `--ingest`); `reviewbench-report.mts` reduces the output to counts.
+
+- **Catch.** A golden TP in correctness or reliability, introduced by the PR, that a candidate
+  covers in the judge's raw match (grounded recall). A finding without a `file:line` that
+  resolves to a staged path is withheld and counted, never matched.
+- **Family split.** 1,434 of 2,623 golden TPs are Claude-written and the judge is Claude, so only
+  the non-Claude figure is quotable as an absolute recall.
+- **Judge transport (v8).** OpenRouter credit ran out mid S1 r2, so judging moved to `claude -p`
+  via [`reviewbench/claude-cli-transport.patch`](reviewbench/claude-cli-transport.patch): same
+  model and prompt hashes. On 6 PRs judged both ways, 17/17 candidates matched the same goldens.
+- **Scope.** The adapter reviews code extensions only, so labels on `.tf`, `.yaml`, `.md` or
+  `.scss` files are out of scope by construction; production scope follows the repository's
+  configured roots instead.
+
+**What ReviewBench cannot tell us.** The PRs are public and predate the model's training cutoff,
+so numbers rank arms of the same model on the same PRs only, not devkit against the leaderboard.
+The judge matches within one file, so a catch named from another file goes uncredited
+(`namedElsewhere`). Goldens are not exhaustive, and some are defensible passes.
+
+**Results, 2026-10-11** (two reviewer runs each; gateHash `bf3d530a9997`; golden/ hash
+`1e8eb5f8d1aa` before and after every judged run; 0 inconclusive lens tasks):
+
+| grounded recall, r1 / r2 | S1: 25-PR test set (24 judged) | S2: 24 TS/JS PRs by size (23 judged) |
+|---|---:|---:|
+| all labels | 33 / 31 of 167 | 18 / 24 of 187 |
+| labels in reviewed files | 33 / 31 of 152 | 18 / 24 of 116 |
+| non-Claude labels | 11 / 9 of 63 | 5 / 7 of 97 |
+| PR-clustered bootstrap 95% CI (all) | 0.13–0.25 | 0.06–0.19 |
+| labels flipped between runs | 16 / 167 | 16 / 187 |
+| named from another file (uncredited) | 24 / 15 | 18 / 27 |
+
+S2 by size, labels in reviewed files only (r1 / r2): <200 lines 5 / 2 of 12; 200–999 2 / 5 of
+24; 1,000–2,999 7 / 12 of 47; ≥3,000 4 / 5 of 33. Of the ≥3,000 band's 88 labels, 55 sit in
+out-of-scope files, so its all-label recall (4 / 5 of 88) measures scope, not size. Cross-PR
+bands confound size with repository and label density, so they are descriptive only.
+
+Not available: precision, which needs the non-Claude re-judge, and the chunked arm (S3).
+Counts only: [`s1-r1r2-haiku-sonnet5.json`](reviewbench/s1-r1r2-haiku-sonnet5.json),
+[`s2-r1r2-haiku-sonnet5.json`](reviewbench/s2-r1r2-haiku-sonnet5.json).
+
+## AACR-Bench (narrow) — `external/aacr/`
+
+Source: [AACR-Bench](https://github.com/alibaba/aacr-bench) at `68a56975` (Apache-2.0, arXiv
+2601.19494). Rule frozen before the scored run: [`aacr/pre-registration.md`](aacr/pre-registration.md)
+(v5). Same reviewer and runner as ReviewBench (`external/pr-run.mts`), on the TS/JS pull requests
+carrying expert-verified Code Defect references (189 references: Diff 104, File 51, Repo 34). The
+benchmark's own `evaluation/judge.py` scores it, unmodified, with the paper's judge
+(Qwen3-235B-A22B-Instruct-2507, via OpenRouter, so a re-run spends OpenRouter credit), `line_k` 1.
+
+Every AACR PR is under 1,000 changed lines, so it says nothing about capacity; it measures recall by
+the human-annotated context level a defect needs.
+
+**Results, 2026-10-11** (r1 only; r2 did not run because OpenRouter credit ran out; 156/156 lens tasks
+terminal; three judge rounds agree):
+
+| r1, Code Defect references caught | all | Diff | File | Repo |
+|---|---:|---:|---:|---:|
+| all references | 17 / 189 | 12 / 104 | 3 / 51 | 2 / 34 |
+| in reviewed files | 17 / 177 | 12 / 101 | 3 / 48 | 2 / 28 |
+| non-Claude references | 13 / 161 | | | |
+| repository-clustered bootstrap 95% CI (all) | 0.06–0.13 | 0.06–0.19 | 0.00–0.10 | 0.00–0.11 |
+
+Sensitivity at `line_k` 10: 22–23 / 189. False flags: findings matched to an expert-rejected comment,
+7–8 of 66. Counts only: [`aacr/r1-haiku-qwen.json`](aacr/r1-haiku-qwen.json).
+
 ## Reproducing
 
 ```
@@ -194,4 +267,26 @@ bun gate-engine/review/eval/reviewers/external/martian-bench.mts --repo cal_dot_
 bun gate-engine/review/eval/reviewers/external/martian-bench.mts --repo cal_dot_com --model sonnet
 # then the printed Martian commands, then:
 bun gate-engine/review/eval/reviewers/external/martian-report.mts --repo cal_dot_com --model sonnet --evaluations <evaluations.json>
+
+# ReviewBench (all data under ~/.devkit/research/reviewbench, mode 0700)
+U=~/.devkit/research/reviewbench/upstream
+git clone https://github.com/review-bench/ReviewBench $U
+git -C $U checkout e7d0683507b227ff20a9230120240d8ab2a97bbe
+git -C $U apply "$PWD/docs/benchmarks/external/reviewbench/claude-cli-transport.patch"
+(cd $U && npm ci)
+# S1 is the default test set; S2 adds --set full --pr <comma-separated pr keys>
+CLAUDE_CODE_EFFORT_LEVEL=medium bun gate-engine/review/eval/reviewers/external/reviewbench/reviewbench-bench.mts --run r1
+R=~/.devkit/research/reviewbench/runs/claude-haiku-5-5-whole-r1
+# re-run to resume from the judge's checkpoint; hash golden/ before and after; never --ingest
+(cd $U && REVIEW_BENCH_JUDGE_TIMEOUT_MS=3600000 npm run judge -- --candidate $R/findings \
+  --provider claude-cli --model claude-sonnet-5 --output $R/scoring-cli/results.json \
+  --repo-dir ~/.devkit/research/reviewbench/judge-repos --concurrency 3)
+bun gate-engine/review/eval/reviewers/external/reviewbench/reviewbench-report.mts \
+  --golden $U/golden --runs $R,<r2 run dir> --scoring scoring-cli
+
+# AACR-Bench (data under ~/.devkit/research/aacr; the judge needs OPENROUTER_API_KEY and spends credit)
+git clone https://github.com/alibaba/aacr-bench ~/.devkit/research/aacr/upstream
+git -C ~/.devkit/research/aacr/upstream checkout 68a56975
+CLAUDE_CODE_EFFORT_LEVEL=medium bun gate-engine/review/eval/reviewers/external/aacr/aacr-bench.mts --run r1
+bun gate-engine/review/eval/reviewers/external/aacr/aacr-score.mts --runs r1,r2 --out <report.json>
 ```

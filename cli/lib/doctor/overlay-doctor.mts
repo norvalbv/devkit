@@ -27,6 +27,7 @@ import {
   hasOwnOverlay,
   LOCAL_HOOKS,
   overlayHome,
+  ownsOverlayConfig,
   overlayHooksPath,
   worktrees,
 } from '../husky/overlay/overlay-home.mts';
@@ -49,7 +50,7 @@ import type { CheckResult } from './check-result.mts';
 import { adviseCodexRuntime, adviseSearchIndex } from './guard-config-checks.mts';
 import { printBlockOrder, repointHooksPath } from './hook-checks.mts';
 import { hooksDir, sameDir, worktreeScopedPin } from './hooks-path.mts';
-import { printPriorArtAdvisoryHealth } from './qavis-health.mts';
+import { printPriorArtAdvisoryHealth } from './prior-art-health.mts';
 
 /** The recorded `.devkit/config.json` fields the overlay doctor consults. */
 export interface OverlayDoctorConfig {
@@ -63,7 +64,6 @@ export async function runOverlayDoctor(
   cwd: string,
   cfg: OverlayDoctorConfig,
   fix: boolean,
-  printQavisAdvisoryHealth: (cwd: string, guards: string[]) => void,
 ): Promise<number> {
   // hooksPath and its alias are repo-wide, including for a monorepo package.
   const { gitRoot, pkgRel } = detectGitRoot(cwd);
@@ -181,7 +181,6 @@ export async function runOverlayDoctor(
   // be undetectable here. Advisory: never in the exit code.
   await adviseSearchIndex(cwd, sel);
   await adviseCodexRuntime(cwd, sel);
-  printQavisAdvisoryHealth(cwd, sel.guards ?? []);
   printPriorArtAdvisoryHealth(cwd, sel);
   if (sel.fallow) {
     const wired =
@@ -260,7 +259,7 @@ function printLinkedWorktrees(home: string, pkgRel: string, fix: boolean): boole
         `  ⚠ ${path}: a worktree-scoped core.hooksPath (${pin}) shadows the overlay — commits there skip devkit's gates`,
       );
     }
-    if (!hasOwnOverlay(path)) ok = printProjectionGaps(path, home, pkgRel, fix) && ok;
+    if (!ownsOverlayConfig(path, pkgRel)) ok = printProjectionGaps(path, home, pkgRel, fix) && ok;
   }
   return ok;
 }
@@ -282,11 +281,11 @@ export function printLegacyEslintOverlays(home: string, pkgRel: string) {
     )
     .map(({ path }) => path);
   // A checkout with its own overlay is never projected into, so only its own upgrade rewrites it.
-  for (const own of stale.filter(hasOwnOverlay))
+  for (const own of stale.filter((path) => ownsOverlayConfig(path, pkgRel)))
     console.log(
       `  ⚠ ${ESLINT_OVERLAY_FILE} in ${own} ${why} — delete it (hand edits are lost) and run \`devkit upgrade\` there`,
     );
-  const borrowed = stale.filter((path) => !hasOwnOverlay(path));
+  const borrowed = stale.filter((path) => !ownsOverlayConfig(path, pkgRel));
   if (hasLegacyEslintOverlay(home, pkgRel))
     console.log(
       `  ⚠ ${ESLINT_OVERLAY_FILE} ${why} — delete it (hand edits are lost) and run \`devkit upgrade\`; then delete each linked worktree's copy and run \`devkit doctor --fix\``,

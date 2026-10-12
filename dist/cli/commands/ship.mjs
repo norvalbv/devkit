@@ -32,7 +32,6 @@ export const POSITIONAL_REJECTED_FLAGS = [
     '--dry-gates',
     '--with-reviewers',
     '--from-branch',
-    '--no-qavis-publish',
     '--draft',
     '--ready',
     '--wait-ci',
@@ -141,12 +140,12 @@ Usage:
                       reported, so a workflow_run-chained job that registers late cannot be missed.
   --dry-gates         Rehearse the exact ship base + selected source staging in an ephemeral worktree.
                       Runs the formatter, configured deterministic/structure/extra gates, and the
-                      deterministic comment budget gate; skips decisions, Qavis, domain/completeness
+                      deterministic comment budget gate; skips decisions, domain/completeness
                       review, commit, push, and PR creation. With --base, refreshes and uses the
                       current origin tip just like ship.
                       Never leaves a local branch or commit. Cannot be combined with --resume.
   --with-reviewers    With --dry-gates only: also run the configured domain reviewers on that same
-                      staging. Decisions, Qavis and completeness stay off (there is no commit
+                      staging. Decisions and completeness stay off (there is no commit
                       message to judge). Reviewer PASSes land in the cache the real ship reads, so
                       the identical devkit ship reuses them; a block exits with the reviewer's code.
                       Costs judge time. For reviewer feedback when a decisions block would stop a
@@ -155,11 +154,6 @@ Usage:
                       last gate line) and the waiters, next up first — then exit. Takes no slot.
   --link <d>          Extra gitignored gate-dep dir to symlink into the worktree (repeatable;
                       the base .husky/_ + node_modules are always linked).
-  --no-qavis-publish  Skip the post-push step that hands a passed staged Qavis result to qavis for
-                      publication. The Qavis gate still runs; only the post-push hand-off is skipped.
-                      Publication needs a qavis exposing \`publish\` (qavis #85). Against an older
-                      one the hand-off is inert: ship names the gap once and prints the
-                      \`qavis qa --pr … --annotate description\` remedy instead.
   --pr                Re-push: add changes to the EXISTING PR on <branch> as a new commit
                       (fast-forward, never --force). Pair with --base only when replacing a PR whose
                       conflicts you already resolved; that explicit mode rewrites under an exact

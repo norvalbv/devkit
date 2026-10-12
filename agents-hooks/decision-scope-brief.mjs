@@ -27,7 +27,7 @@
  * noise an agent learns to skip. Each (session, file) is briefed at most once.
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -60,16 +60,29 @@ function resolveBin(root) {
   return found || null;
 }
 
-/** One brief per (session, file). Best-effort: a failure here must never cost the edit. */
-function alreadyBriefed(sessionId, root, file) {
+/** One brief per (session, file): the stamp marking that `key` was briefed in this session. */
+function stampPath(sessionId, root, key) {
+  const id = Buffer.from(`${root}\x00${key}`).toString('base64url').slice(-64);
+  return path.join(
+    tmpdir(),
+    'devkit-decision-brief',
+    `${String(sessionId || 'unknown').replace(/[^\w-]/g, '')}-${id}`,
+  );
+}
+
+/** When `stamp` was claimed, else null. Any read error counts as unbriefed, so the brief still runs. */
+function claimedAt(stamp) {
   try {
-    const dir = path.join(tmpdir(), 'devkit-decision-brief');
-    mkdirSync(dir, { recursive: true });
-    const key = `${root}\x00${file}`;
-    const stamp = path.join(
-      dir,
-      `${String(sessionId || 'unknown').replace(/[^\w-]/g, '')}-${Buffer.from(key).toString('base64url').slice(-64)}`,
-    );
+    return statSync(stamp).mtimeMs;
+  } catch {
+    return null;
+  }
+}
+
+/** True when `stamp` was already claimed. Best-effort: a failure here must never cost the edit. */
+function claimed(stamp) {
+  try {
+    mkdirSync(path.dirname(stamp), { recursive: true });
     // Atomic claim: 'wx' fails EEXIST when the stamp exists, so two concurrent hooks in one session
     // cannot both observe it absent and both emit. An existsSync probe first would be a TOCTOU.
     writeFileSync(stamp, '', { flag: 'wx' });
@@ -98,10 +111,28 @@ function main() {
   // Outside the project (or above it) is not ours to brief on.
   if (!rel || rel.startsWith('..')) return;
 
+  const tool = input.tool_name;
+  const stamp = stampPath(input.session_id, root, rel);
+  const briefedAt = claimedAt(stamp);
+  if (briefedAt !== null) {
+    // Briefed already, so no retrieval. Only the first return to the file is recorded, with its age.
+    const bin = claimed(`${stamp}.again`) ? null : resolveBin(root);
+    if (bin) {
+      const secs = Math.max(0, Math.round((Date.now() - briefedAt) / 1000));
+      spawnSync(bin, ['scoped-targets', '--files', rel, '--brief-again', `${tool},${secs}`], {
+        cwd: root,
+        stdio: 'ignore',
+        timeout: 10_000,
+      });
+    }
+    return;
+  }
+
   const bin = resolveBin(root);
   if (!bin) return;
 
-  const run = spawnSync(bin, ['scoped-targets', '--files', rel], {
+  const spec = `${tool},${MAX_AXES},${RULING_CHARS}`;
+  const run = spawnSync(bin, ['scoped-targets', '--files', rel, '--brief', spec], {
     cwd: root,
     encoding: 'utf8',
     timeout: 10_000,
@@ -122,11 +153,9 @@ function main() {
     }
   }
   if (axes === null) {
-    // Stamped under a sentinel that can never be a relative path, so the notice is once per session
-    // WITHOUT consuming this file's brief slot. alreadyBriefed writes on read: stamping `rel` here
-    // would make the first governed edit AFTER the tool is fixed vanish silently for this file —
-    // re-creating this very defect one layer up.
-    if (alreadyBriefed(input.session_id, root, '\u0000retrieval-unavailable')) return;
+    // A sentinel key, never a relative path: the notice fires once per session WITHOUT burning this
+    // file's brief slot, so the first governed edit after the tool is fixed is still briefed.
+    if (claimed(stampPath(input.session_id, root, '\u0000retrieval-unavailable'))) return;
     emit(
       `Decision retrieval DID NOT RUN for \`${rel}\` — \`guard-decisions scoped-targets\` failed, so ` +
         `this edit is UNBRIEFED, not ungoverned. Do not read the absence of a brief as "nothing rules ` +
@@ -138,7 +167,7 @@ function main() {
   }
   if (axes.length === 0) return; // nothing governs this file — stay quiet
 
-  if (alreadyBriefed(input.session_id, root, rel)) return;
+  if (claimed(stamp)) return;
 
   const lines = axes.slice(0, MAX_AXES).map((a) => {
     const ruling = String(a.ruling ?? '').trim();

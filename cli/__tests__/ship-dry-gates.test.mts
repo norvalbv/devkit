@@ -242,7 +242,7 @@ printf 'DRY_REVIEW_HOOK_OK\\n'
 
     expect(r.status, r.stderr).toBe(0);
     expect(r.stderr).toMatch(/dry gates.*domain reviewers/is);
-    expect(r.stderr).toMatch(/Skipping decision, Qavis, completeness/);
+    expect(r.stderr).toMatch(/Skipping decision, completeness/);
     expect(r.stderr).toMatch(/dry gates \+ reviewers passed/);
     expect(git(['rev-parse', 'HEAD']).trim()).toBe(headBefore);
     expect(localBranchExists(git, 'feat/dry-review')).toBe(false);
