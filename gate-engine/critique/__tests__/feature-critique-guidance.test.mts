@@ -91,6 +91,8 @@ describe('feature-critique guidance', () => {
     for (const text of [agent, skill])
       for (const marker of forbidden) expect(text).not.toContain(marker);
     expect(agent).toContain('Return **exactly one JSON object**');
+    expect(agent).toContain("pass it verbatim to your harness's report tool");
+    expect(agent).toContain('otherwise make it your final message');
     expect(agent).toContain('Do not write a separate artifact');
   });
 
