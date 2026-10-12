@@ -368,6 +368,38 @@ test -z "\${DEVKIT_SHIP_DRY_REVIEWERS:-}" || exit 92`,
     });
   }
 
+  // Wiring, not units: the preflight's remedy must survive from ship_judge_preflight to the commit tail.
+  it('a deterministic block ends with the dark-judge family move the preflight printed', () => {
+    const { dir, env } = seedShipRepo({
+      hookBody: `echo '✗ deterministic gates failed: guard-fanout' >&2\nexit 1`,
+    });
+    writeFileSync(join(dir, 'note.txt'), 'blocked\n');
+    const bin = join(dir, 'dark-judge-bin');
+    mkdirSync(bin);
+    writeFileSync(
+      join(bin, 'node'),
+      '#!/bin/bash\nif [[ $1 == */preflight/judge.* ]]; then echo DARK_JUDGE_REMEDY; exit 0; fi\nexec "$REAL_NODE" "$@"\n',
+    );
+    chmodSync(join(bin, 'node'), 0o755);
+
+    const r = spawnSync(
+      '/bin/bash',
+      [scriptPath, 'feat/dark-judge', 't', '--dry-gates', '--with-reviewers', '--', 'note.txt'],
+      {
+        cwd: dir,
+        input: '',
+        encoding: 'utf8',
+        env: { ...env, PATH: `${bin}:${env.PATH ?? ''}`, REAL_NODE: process.execPath },
+      },
+    );
+
+    expect(r.status).toBe(1);
+    expect(r.stdout).not.toContain('DARK_JUDGE_REMEDY');
+    const tail = r.stderr.trimEnd().split('\n').slice(-10).join('\n');
+    expect(tail).toContain('found a dark judge');
+    expect(tail).toContain('DARK_JUDGE_REMEDY');
+  });
+
   it('a timeout mid-reviewer names the unfinished reviewer, mints no receipt, and keeps nothing', () => {
     const { dir, env, git } = seedShipRepo();
     writeFileSync(join(dir, 'note.txt'), 'slow\n');
