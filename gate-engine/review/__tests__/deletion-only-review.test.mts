@@ -1,7 +1,8 @@
 // sc-3400: a deletion-only review-root change must not fail closed. These drive the REAL
 // commit-guard checklist script through runReviewGate, so the env→script wiring is under test.
 import { execSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { copyFileSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -517,6 +518,19 @@ describe('mass deletion — a clobbered index blocks at the review gate (sc-3400
     process.env.GUARD_NO_REVIEW = '1';
     vi.spyOn(console, 'error').mockImplementation(() => {});
     expect(await runReviewGate(repo, { exec: recordingPassExec(repo) })).toBe(0);
+  });
+
+  it('a fixture commit starts no git auto-maintenance, which would repack .git under cleanup', () => {
+    const repo = consumerRepo();
+    // Two loose objects in objects/17 meet the geometric-repack auto threshold of git >= 2.54.
+    for (let i = 0, found = 0; found < 2; i++) {
+      const body = `${i}\n`;
+      if (createHash('sha1').update(`blob ${body.length}\0${body}`).digest('hex').startsWith('17'))
+        writeFileSync(join(repo, `shard-17-${found++}.txt`), body);
+    }
+    git(repo, 'add -A');
+    git(repo, '-c maintenance.autoDetach=false -c commit.gpgsign=false commit -qm shard');
+    expect(readdirSync(join(repo, '.git', 'objects', 'pack'))).toEqual([]);
   });
 
   it('an unborn HEAD (first commit) never trips it', async () => {

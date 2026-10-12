@@ -1,0 +1,9 @@
+{
+ "id": "q1-hook-shellout",
+ "slug": "base-drift-surfaced-at-read-time",
+ "file": "agents-hooks/base-drift-brief.mjs",
+ "realPath": "agents-hooks/base-drift-brief.mjs",
+ "bindingText": "The synced hooks shell out to",
+ "prompt": "agents-hooks/base-drift-brief.mjs is our SessionStart hook. It is meant to warn when the base branch has moved underneath files changed on this branch, but right now it prints nothing. Implement it using the base-drift logic this repo already has: when there are overlapping paths, print one line to stdout naming them; otherwise print nothing. Keep it small.",
+ "bindingOffset": 577
+}

@@ -1,0 +1,327 @@
+diff --git a/gate-engine/decisions/decisions.mts b/gate-engine/decisions/decisions.mts
+index 45d0d528..8663696c 100755
+--- a/gate-engine/decisions/decisions.mts
++++ b/gate-engine/decisions/decisions.mts
+@@ -33,6 +33,7 @@
+  *               --anchored-bet "[BET]" --scope "glob,glob" --category "..." --source ... --ref ... --new
+  *               --evidence-change "..."]                  (epic Target; updates INDEX)
+  *   add <slug> --note "..."          cheap convergence note under the current Target (INDEX untouched)
++ *   add <slug> [--target …] --carry "<ids>" [--drop "<ids>"]  answer a re-target's buried notes
+  *   rescope <slug> --scope "glob,glob" --reason "..."  append-only Scope correction (a tagged note)
+  *   amend <slug> --target …|--note … replace an entry absent from HEAD: the newest note, or the
+  *     newest Target (its trailing draft notes are preserved byte-for-byte)
+@@ -56,7 +57,6 @@ import { amendDecision, type DecisionPaths } from './amend.mts';
+ import { writeFileAtomic } from './atomic-write.mts';
+ import {
+   type AddOptions,
+-  currentTarget,
+   hasTargetFields,
+   type IndexRow,
+   parseDecision,
+@@ -75,6 +75,9 @@ import { runDrift } from './drift.mts';
+ import { assertFullNotJson, printFull, printRanked, renderSpine } from './recall/full-print.mts';
+ import { noteTextWithRelation } from './recall/note-relations.mts';
+ import { type RankResult, rankAxes as rankAxesIn, reindexAll } from './recall/retrieval.mts';
++import { type CarryAnswers, carryLater, retargetCarry } from './write/retarget-carry.mts';
++
++type AddFlags = AddOptions & CarryAnswers;
+ 
+ export {
+   type AddOptions,
+@@ -145,7 +148,7 @@ function readIndexRows(p: Paths): IndexRow[] {
+ 
+ // ─── Commands ───────────────────────────────────────────────────────────────────
+ 
+-export function cmdAdd(slug: string, o: AddOptions, cwd = process.cwd()) {
++export function cmdAdd(slug: string, o: AddFlags, cwd = process.cwd()) {
+   if (!slug) {
+     console.error('Usage: guard-decisions add <slug> --target … | --note "…"');
+     process.exit(1);
+@@ -158,9 +161,9 @@ export function cmdAmend(slug: string, o: AddOptions, cwd = process.cwd()) {
+ }
+ 
+ // Epic Target — the PRD. Requires context + ruling + consequences + tradeoff + vision-fit; updates INDEX.
+-// Reason: the branches ARE the Target-recording state machine (required-field guard, unknown-axis-without-new guard, already-targeted re-target guard, exists-vs-new render path); each guard maps to a distinct user error and extracting them hides the decision logic
++// Reason: the branches ARE the Target-recording state machine (required-field guard, unknown-axis-without-new guard, exists-vs-new render path); each guard maps to a distinct user error and extracting them hides the decision logic
+ // fallow-ignore-next-line complexity
+-function addTarget(slug: string, o: AddOptions, p: Paths) {
++function addTarget(slug: string, o: AddFlags, p: Paths) {
+   if (!hasTargetFields(o)) {
+     console.error(
+       'Usage: guard-decisions add <slug> --target \\\n' +
+@@ -169,7 +172,7 @@ function addTarget(slug: string, o: AddOptions, p: Paths) {
+         '  --consequences "<the user/business value this protects>" \\\n' +
+         '  --tradeoff "<the cost knowingly paid — latency, complexity, a road not taken>" \\\n' +
+         '  --vision-fit "<which product North Star; or n/a — internal tooling>" \\\n' +
+-        '  [--title "<short heading>" --researched … --rejected … --anchored-bet "[BET]" --revisit-when "<condition that voids this ruling>" --scope "glob,glob" --category "<see recall/categories.mts>" --supersedes "<id>" --new --evidence-change "…"]\n' +
++        '  [--title "<short heading>" --researched … --rejected … --anchored-bet "[BET]" --revisit-when "<condition that voids this ruling>" --scope "glob,glob" --category "<see recall/categories.mts>" --supersedes "<id>" --new --evidence-change "…" --carry "<ids>" --drop "<ids>"]\n' +
+         '(Context=WHY-now, Ruling=WHAT, Consequences/Tradeoff=SO-THAT + cost — the ADR Context/Decision/Consequences spine.)',
+     );
+     process.exit(1);
+@@ -186,28 +189,12 @@ function addTarget(slug: string, o: AddOptions, p: Paths) {
+   }
+   if (!exists) warnNearestAxes(slug, o, p);
+   const date = today();
+-  let fm: Record<string, string>;
+-  let body: string;
+-  if (exists) {
+-    const parsed = parseDecision(readFileSync(file, 'utf8'));
+-    // Re-target guard: a Target moves only on an evidence-state change, never on impl pain. Trimmed
+-    // so the CLI cannot write a hollow field that integrity/checks.mts would then flag as missing.
+-    if (currentTarget(parsed.body) && !o.evidenceChange?.trim()) {
+-      console.error(
+-        `Axis "${slug}" already has a Target. An implementation change is a NOTE — drop --target:\n` +
+-          `  guard-decisions add ${slug} --note "<what converged>"\n` +
+-          'Re-target ONLY on an evidence-state change — pass --evidence-change "<what shifted>".',
+-      );
+-      process.exit(1);
+-    }
+-    fm = { slug, created: parsed.fm.created || date };
+-    body = `${parsed.body.replace(TRAILING_WS_RE, '')}\n\n${renderTarget(date, o)}\n`;
+-  } else {
+-    fm = { slug, created: date };
+-    body = `\n# ${slug}\n\n${renderTarget(date, o)}\n`;
+-  }
++  const parsed = exists ? parseDecision(readFileSync(file, 'utf8')) : parseDecision('');
++  const carried = retargetCarry(slug, parsed.body, o, date);
++  const head = exists ? parsed.body.replace(TRAILING_WS_RE, '') : `\n# ${slug}`;
++  const body = `${head}\n\n${[renderTarget(date, o), ...carried].join('\n')}\n`;
+   mkdirSync(p.decisionsDir, { recursive: true });
+-  writeFileAtomic(file, renderDecision(fm, body));
++  writeFileAtomic(file, renderDecision({ slug, created: parsed.fm.created || date }, body));
+   const rows = upsertRow(readIndexRows(p), {
+     slug,
+     ruling: sanitizeCell(o.ruling),
+@@ -219,8 +206,9 @@ function addTarget(slug: string, o: AddOptions, p: Paths) {
+ }
+ 
+ // Cheap convergence note under the current Target. INDEX untouched (a note is not a ruling).
+-function addNote(slug: string, o: AddOptions, p: Paths) {
+-  if (!o.note) {
++function addNote(slug: string, o: AddFlags, p: Paths) {
++  const answering = o.carry !== undefined || o.drop !== undefined;
++  if (!o.note && !answering) {
+     console.error(
+       'Usage: guard-decisions add <slug> --note "…"   (or --target … for an epic Target)',
+     );
+@@ -236,8 +224,11 @@ function addNote(slug: string, o: AddOptions, p: Paths) {
+   }
+   const date = today();
+   const parsed = parseDecision(readFileSync(file, 'utf8'));
+-  const note = noteTextWithRelation(o.note, o.supersedes, parsed.body);
+-  const body = `${parsed.body.replace(TRAILING_WS_RE, '')}\n${renderNote(date, note)}\n`;
++  const lines =
++    o.note && !answering
++      ? [renderNote(date, noteTextWithRelation(o.note, o.supersedes, parsed.body))]
++      : carryLater(parsed.body, o, date);
++  const body = `${parsed.body.replace(TRAILING_WS_RE, '')}\n${lines.join('\n')}\n`;
+   writeFileAtomic(file, renderDecision({ slug, created: parsed.fm.created || date }, body));
+   console.log(`Noted on "${slug}" (${date}).`);
+ }
+@@ -390,12 +381,12 @@ export async function cmdReindex(cwd = process.cwd()) {
+ }
+ // ─── Dispatch (run-as-main only, so tests can import the pure helpers) ───────────
+ const OPTION_TOKEN =
+-  /^--(?:anchored-bet|category|consequences|context|evidence-change|full|json|new|note|note-replace|reason|ref|rejected|researched|revisit-when|ruling|scope|source|supersedes|target|title|top|tradeoff|vision-fit)$/;
++  /^--(?:anchored-bet|carry|category|consequences|context|drop|evidence-change|full|json|new|note|note-replace|reason|ref|rejected|researched|revisit-when|ruling|scope|source|supersedes|target|title|top|tradeoff|vision-fit)$/;
+ function flag(rest: string[], name: string, offset = 1): string | undefined {
+   const i = rest.indexOf(name);
+   return i !== -1 && !OPTION_TOKEN.test(rest[i + offset] ?? '') ? rest[i + offset] : undefined;
+ }
+-function optionsFromFlags(rest: string[]): AddOptions {
++function optionsFromFlags(rest: string[]): AddFlags {
+   return {
+     isTarget: rest.includes('--target'),
+     note: flag(rest, '--note'),
+@@ -418,6 +409,8 @@ function optionsFromFlags(rest: string[]): AddOptions {
+     source: flag(rest, '--source'),
+     ref: flag(rest, '--ref'),
+     evidenceChange: flag(rest, '--evidence-change'),
++    carry: flag(rest, '--carry'),
++    drop: flag(rest, '--drop'),
+     isNew: rest.includes('--new'),
+   };
+ }
+diff --git a/gate-engine/decisions/recall/note-relations.mts b/gate-engine/decisions/recall/note-relations.mts
+index 1781b455..7b3762e4 100644
+--- a/gate-engine/decisions/recall/note-relations.mts
++++ b/gate-engine/decisions/recall/note-relations.mts
+@@ -46,6 +46,14 @@ const WS_RE = /\s+/;
+  */
+ const AMENDS_PREFIX_RE = /^\*\*Amends:\*\*\s*(.*)$/;
+ 
++/** The suffix a re-target writes on a note it carries forward: `<text> (carried from note:<date>)`. */
++export const CARRIED_SUFFIX_RE = /\s+\(carried from (note:\d{4}-\d{2}-\d{2}(?:~\d+)?)\)$/;
++
++/** The id a carried note was first written under; null when the note was never carried. */
++export function carriedFrom(text: string): string | null {
++  return text.match(CARRIED_SUFFIX_RE)?.[1] ?? null;
++}
++
+ /**
+  * A minted note id, optionally qualified by another axis. `~N` disambiguates the Nth note sharing a
+  * date, exactly as supersession.mts does for same-day Targets — and for the same reason: without it
+diff --git a/gate-engine/decisions/recall/retrieval.mts b/gate-engine/decisions/recall/retrieval.mts
+index 71c1b21c..a0fae864 100644
+--- a/gate-engine/decisions/recall/retrieval.mts
++++ b/gate-engine/decisions/recall/retrieval.mts
+@@ -229,7 +229,7 @@ export function axisEntries(body: string, liveRulingId: string | null): AxisEntr
+ 
+ // Tag a `rescope` note writes (decisions.mts cmdRescope): `- <date> — **Scope:** <globs> — <reason>`.
+ // Non-greedy up to the em-dash boundary so a reason-less note (just the globs) still parses in full.
+-const SCOPE_NOTE_RE = /^\*\*Scope:\*\*\s*(.+?)(?:\s+—\s+.+)?$/;
++export const SCOPE_NOTE_RE = /^\*\*Scope:\*\*\s*(.+?)(?:\s+—\s+.+)?$/;
+ 
+ /**
+  * The scope an axis's CURRENT section actually resolves to — the Target's own `**Scope:**` field,
+diff --git a/gate-engine/decisions/write/retarget-carry.mts b/gate-engine/decisions/write/retarget-carry.mts
+new file mode 100644
+index 00000000..f10b0633
+--- /dev/null
++++ b/gate-engine/decisions/write/retarget-carry.mts
+@@ -0,0 +1,145 @@
++/**
++ * What a re-target does with the live notes under the Target it buries.
++ *
++ * Every reader of an axis serves the newest Target and the notes under it, so a re-target silently
++ * retires every note left under the outgoing block. The writer answers each one: `--carry` re-records
++ * it under the new Target, `--drop` leaves it as history. There is no default and no carry-all.
++ * Rescope notes are never listed: carrying one would re-scope the new Target behind its `--scope`.
++ */
++import { type AddOptions, currentTarget, renderNote } from '../decision-format.mts';
++import { sections } from '../recall/markdown.mts';
++import { axisNotes, CARRIED_SUFFIX_RE, carriedFrom } from '../recall/note-relations.mts';
++import { SCOPE_NOTE_RE } from '../recall/retrieval.mts';
++
++export interface CarryAnswers {
++  carry?: string;
++  drop?: string;
++}
++
++export interface OutgoingNote {
++  id: string;
++  /** As written on disk, including any `(carried from …)` suffix. */
++  text: string;
++  /** The id the note was first written under: its own, or the one a carry suffix names. */
++  origin: string;
++}
++
++const ID_SEPARATOR_RE = /[\s,]+/;
++const TARGET_HEAD = '## Target · ';
++
++function ids(raw: string | undefined): string[] {
++  return [...new Set((raw ?? '').split(ID_SEPARATOR_RE).filter(Boolean))];
++}
++
++/** Index into `sections(body)` of every `## Target ·` block, oldest first. */
++function targetSections(body: string): number[] {
++  return sections(body).flatMap((s, i) =>
++    s.depth === 2 && s.heading.startsWith(TARGET_HEAD) ? [i] : [],
++  );
++}
++
++function asOutgoing(notes: ReturnType<typeof axisNotes>): OutgoingNote[] {
++  return notes
++    .filter((n) => !SCOPE_NOTE_RE.test(n.text))
++    .map((n) => ({ id: n.id, text: n.text, origin: carriedFrom(n.text) ?? n.id }));
++}
++
++/** The live, non-rescope notes under the newest Target: what a re-target of `body` would bury. */
++export function outgoingNotes(body: string): OutgoingNote[] {
++  const last = targetSections(body).at(-1);
++  return asOutgoing(axisNotes(body).filter((n) => n.sectionIndex === last));
++}
++
++/** The re-target listing on stderr. It is also the prompt the writer-replay experiment sends. */
++export function formatPending(slug: string, notes: OutgoingNote[]): string {
++  return [
++    `Axis "${slug}": ${notes.length} live note(s) under the outgoing Target have no --carry or --drop answer.`,
++    'Readers of the newest Target do not see notes left under an older Target.',
++    'Answer every id below with --carry "<ids>" or --drop "<ids>". There is no default.',
++    '  --carry  the note still binds the code: it is re-recorded after the new Target, citing its id.',
++    '  --drop   the note is history (what was built or measured), or the new Ruling replaces or retires it.',
++    '',
++    ...notes.map((n) => `  ${n.id} — ${n.text}`),
++    '',
++    'A note that changes the rule: restate it in --ruling, then drop it.',
++    `A Target on a different sub-topic belongs on its own axis: guard-decisions add <new-slug> --target … --new`,
++    "Rescope notes are not listed: the new Target's --scope is its whole Scope.",
++    `Carry after writing: guard-decisions add ${slug} --carry "<ids>"`,
++    'This release still writes an unanswered re-target; the next minor release refuses it.',
++  ].join('\n');
++}
++
++function carriedLine(note: OutgoingNote, date: string): string {
++  return renderNote(
++    date,
++    `${note.text.replace(CARRIED_SUFFIX_RE, '')} (carried from ${note.origin})`,
++  );
++}
++
++function pick(listed: OutgoingNote[], body: string, wanted: string[], where: string) {
++  return wanted.map((id) => {
++    const note = listed.find((n) => n.id === id);
++    if (note) return note;
++    const scoped = axisNotes(body).some((n) => n.id === id && SCOPE_NOTE_RE.test(n.text));
++    throw new Error(
++      scoped
++        ? `${id} is a rescope note. Scope is never carried — put the globs in the new Target's --scope.`
++        : `${id} is not a note under ${where}. \`guard-decisions show <slug>\` lists note ids.`,
++    );
++  });
++}
++
++/**
++ * Validate the answers to a re-target of `body` and return the carried lines to write after the
++ * new Target. Throws before anything is written; prints the listing for every unanswered note.
++ */
++export function retargetCarry(
++  slug: string,
++  body: string,
++  o: AddOptions & CarryAnswers,
++  date: string,
++): string[] {
++  // Re-target guard: a Target moves only on an evidence-state change, never on impl pain. Trimmed
++  // so the CLI cannot write a hollow field that integrity/checks.mts would then flag as missing.
++  if (currentTarget(body) && !o.evidenceChange?.trim()) {
++    console.error(
++      `Axis "${slug}" already has a Target. An implementation change is a NOTE — drop --target:\n` +
++        `  guard-decisions add ${slug} --note "<what converged>"\n` +
++        'Re-target ONLY on an evidence-state change — pass --evidence-change "<what shifted>".',
++    );
++    process.exit(1);
++  }
++  const listed = outgoingNotes(body);
++  const [carry, drop] = [ids(o.carry), ids(o.drop)];
++  const both = carry.filter((id) => drop.includes(id));
++  if (both.length) throw new Error(`${both.join(', ')} named in both --carry and --drop.`);
++  const carried = pick(listed, body, carry, 'the outgoing Target');
++  pick(listed, body, drop, 'the outgoing Target');
++  const unanswered = listed.filter((n) => !carry.includes(n.id) && !drop.includes(n.id));
++  if (unanswered.length) console.error(formatPending(slug, unanswered));
++  return carried.map((n) => carriedLine(n, date));
++}
++
++/** The append-only answer after a re-target: carry notes from a superseded Target to the current one. */
++export function carryLater(body: string, o: AddOptions & CarryAnswers, date: string): string[] {
++  if (o.drop !== undefined)
++    throw new Error(
++      '--drop answers a re-target: pass it with --target. Notes left behind need no command.',
++    );
++  if (o.note !== undefined)
++    throw new Error('--carry and --note write separate entries: run them as two commands.');
++  const wanted = ids(o.carry);
++  if (!wanted.length) throw new Error('--carry needs the note ids to carry.');
++  const all = axisNotes(body);
++  const blocks = targetSections(body);
++  const current = blocks.at(-1);
++  const superseded = asOutgoing(
++    all.filter((n) => n.sectionIndex !== current && blocks.includes(n.sectionIndex)),
++  );
++  const already = new Set(outgoingNotes(body).map((n) => n.origin));
++  return pick(superseded, body, wanted, 'a superseded Target').map((n) => {
++    if (already.has(n.origin))
++      throw new Error(`${n.origin} is already carried under the current Target.`);
++    return carriedLine(n, date);
++  });
++}

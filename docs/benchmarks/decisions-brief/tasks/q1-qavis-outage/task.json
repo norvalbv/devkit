@@ -1,0 +1,10 @@
+{
+ "id": "q1-qavis-outage",
+ "slug": "qavis-advisory-gate",
+ "file": "gate-engine/qavis-advisory/run.mjs",
+ "realPath": "gate-engine/qavis-advisory/run.mts",
+ "bindingText": "There is NO exit 1 and NO fail-closed on outage",
+ "note": "cut640 shows 'fail-OPENS (exit 0) when qavis or a recipe is absent' — a neighbouring case, not the outage case",
+ "prompt": "gate-engine/qavis-advisory/run.mjs dumps a raw \"SyntaxError: Unexpected token\" stack trace into people's commits whenever the qavis service is having an outage (qavis then prints an error message like \"503 Service Unavailable\" instead of JSON and exits 2). Handle that case properly instead of crashing.",
+ "bindingOffset": 861
+}

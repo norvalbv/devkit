@@ -49,7 +49,7 @@ describe('selection helpers', () => {
       'clone',
       'comments',
       'decisions',
-      'qavis-advisory',
+      'ui-evidence',
     ]);
     expect(s.agentTargets).toEqual(['claude', 'codex', 'cursor']);
   });
@@ -1031,7 +1031,7 @@ describe('self-host mode (devkit dogfooding itself)', () => {
             'guard-comments': './dist/gate-engine/comment-firewall/cli.mjs',
             'guard-decisions': './dist/gate-engine/decisions/cli.mjs',
             'guard-review': './dist/gate-engine/review/cli.mjs',
-            'guard-qavis-advisory': './dist/gate-engine/qavis-advisory/cli.mjs',
+            'guard-ui-evidence': './dist/gate-engine/ui-evidence/cli.mjs',
           },
         },
         null,

@@ -23,7 +23,8 @@ export function trackReviewFixtureDir(dir: string): string {
 }
 
 export function cleanupReviewFixtures(): void {
-  while (trackedDirs.length) rmSync(trackedDirs.pop() as string, { recursive: true, force: true });
+  for (let dir = trackedDirs.pop(); dir; dir = trackedDirs.pop())
+    rmSync(dir, { recursive: true, force: true });
   for (const key of Object.keys(pinnedEnv)) {
     if (pinnedEnv[key] === undefined) delete process.env[key];
     else process.env[key] = pinnedEnv[key];

@@ -62,6 +62,23 @@ describe('parseReviewVerdict', () => {
     expect(parseReviewVerdict('notes\n**VERDICT: PASS**').verdict).toBe('PASS');
     expect(parseReviewVerdict('- VERDICT: **FAIL** - missing auth check').verdict).toBe('FAIL');
   });
+  it('emoji-dressed verdict lines parse; a mid-line mention still does not', () => {
+    expect(parseReviewVerdict('notes\n✅ **VERDICT: PASS** — clean')).toEqual({
+      verdict: 'PASS',
+      reason: 'clean',
+    });
+    expect(parseReviewVerdict('notes\r\n⚠️ VERDICT: FAIL - races').verdict).toBe('FAIL');
+    expect(parseReviewVerdict('the verdict ✅ VERDICT: PASS').verdict).toBe(null);
+    expect(parseReviewVerdict('Reply with `✅ VERDICT: PASS` when clean.').verdict).toBe(null);
+  });
+  it('a bare verdict never swallows the next line, so the LAST verdict still wins', () => {
+    expect(parseReviewVerdict('❌ VERDICT: FAIL\n✅ VERDICT: PASS').verdict).toBe('PASS');
+    expect(parseReviewVerdict('VERDICT: FAIL\r\nVERDICT: PASS').verdict).toBe('PASS');
+    expect(parseReviewVerdict('VERDICT: PASS\nfollow-up prose')).toEqual({
+      verdict: 'PASS',
+      reason: '',
+    });
+  });
   it('prose full of pass/fail words WITHOUT a VERDICT line is null — no bare-word fallback', () => {
     expect(
       parseReviewVerdict('The tests pass but the check could fail under load. Looks fine.').verdict,
@@ -413,6 +430,8 @@ describe('correctness-reviewer (domain all)', () => {
     const authored = [
       'agents-hooks/decision-stop-check.sh',
       'cli/index.mts',
+      // Source under a coverage/ directory: an unanchored `**/coverage/**` exclude once hid it.
+      'gate-engine/coverage/produce.mts',
       'skills/_devkit/review-roots.mjs',
       'skills/correctness/scripts/checklist.mjs',
       'gate-engine/review/__tests__/reviewers.test.mts',

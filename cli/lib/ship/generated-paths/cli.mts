@@ -11,6 +11,7 @@ import {
   renderConflictAbort,
 } from './registry.mts';
 import { errorMessage } from '../review/shared/common.mts';
+import { readGitPaths } from '../../../../gate-engine/ratchets/git-paths.mts';
 
 export interface AbortArgs {
   root: string;
@@ -40,10 +41,12 @@ export function renderAbort(paths: readonly string[], { root, baseRef }: AbortAr
   return renderConflictAbort(classified, baseRef).join('\n');
 }
 
-// Strict: two distinct non-UTF-8 names would decode alike, so throw and let ship print git's listing.
-// ignoreBOM keeps a leading U+FEFF: it is part of a Git name, not a byte-order mark.
-const UTF8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
-const readPaths = (stdin: Buffer): string[] => UTF8.decode(stdin).split('\0');
+// A non-UTF-8 name throws, so ship prints git's own listing instead.
+function readPaths(stdin: Buffer): string[] {
+  const paths = readGitPaths(stdin);
+  if (!paths) throw new Error('a conflicted path is not valid UTF-8');
+  return paths;
+}
 
 function main(): void {
   try {

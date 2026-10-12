@@ -1,5 +1,5 @@
 /** sc-2261 — ship's PR-base preflight and its self-checkout remedy. */
-import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -208,6 +208,8 @@ describe('ship-branch.sh — the branch is checked out in THIS worktree (sc-2261
     expect(r.stderr).toMatch(/git branch -m 'story' "devkit-freed-[0-9a-f]+-\$\$"/);
     // No delete of any shape: a rename cannot lose a commit under any interleaving.
     expect(r.stderr).not.toMatch(/branch -[dD] |update-ref -d /);
+    // An explicit-path caller re-runs with paths; only a --from-branch caller drops them.
+    expect(r.stderr).toMatch(/^ {4}devkit ship 'story' .* -- <paths>$/m);
   });
 
   it('closes on the same remedy the preflight opened with, not "choose a new branch name"', () => {
@@ -306,6 +308,96 @@ describe('ship-branch.sh — the branch is checked out in THIS worktree (sc-2261
     expect(retry.stderr).not.toMatch(/is checked out in THIS worktree/);
     expect(retry.status, retry.stderr).toBe(0);
     expect(remoteBranchExists(bare, 'story')).toBe(true);
+  });
+
+  describe('--from-branch names every cheap blocker in one attempt', () => {
+    const FROM_BRANCH_ARGS = ['story', 't', '--base', 'work', '--body', 'b', '--from-branch'];
+
+    /** `story` carries one commit of its own; `behind` also advances origin/work past the fork. */
+    function seedFromBranch({ behind }) {
+      const seeded = seedSelfCheckout();
+      const wtGit = (a) =>
+        execFileSync('git', a, {
+          cwd: seeded.wt,
+          env: { ...process.env, ...GIT_ENV },
+          encoding: 'utf8',
+        });
+      writeFileSync(join(seeded.wt, 'own.txt'), 'x\n');
+      wtGit(['add', 'own.txt']);
+      wtGit(['commit', '-q', '-m', 'a commit only story has']);
+      if (behind) {
+        writeFileSync(join(seeded.dir, 'moved.txt'), 'base moved\n');
+        seeded.git(['add', 'moved.txt'], { stdio: 'ignore' });
+        seeded.git(['commit', '-q', '-m', 'base moves on'], { stdio: 'ignore' });
+        seeded.git(['push', '-q', 'origin', 'work:work'], { stdio: 'ignore' });
+      }
+      return { ...seeded, wtGit, tip: wtGit(['rev-parse', 'story']).trim() };
+    }
+
+    const ship = (wt, env) =>
+      spawnSync('/bin/bash', [scriptPath, ...FROM_BRANCH_ARGS], { cwd: wt, encoding: 'utf8', env });
+
+    it('also names a missing hook runner, after the ancestry blocker, still creating nothing', () => {
+      const { dir, env, git, wt } = seedFromBranch({ behind: true });
+      rmSync(join(dir, '.husky/_'), { recursive: true, force: true });
+
+      const r = ship(wt, env);
+
+      expect(r.status, r.stderr).not.toBe(0);
+      const order = [
+        /git branch -m 'story'/,
+        /also blocked — --from-branch: .* is not an ancestor/,
+        /missing \.husky\/_ in /,
+      ].map((re) => r.stderr.search(re));
+      expect(order[0], r.stderr).toBeGreaterThan(-1);
+      expect(order, r.stderr).toEqual([...order].sort((a, b) => a - b));
+      expect(git(['worktree', 'list'], { encoding: 'utf8' })).not.toMatch(EPHEMERAL_WT_RE);
+    });
+
+    it('reports the rename AND the ancestry blocker when the worktree is also behind its base', () => {
+      const { env, git, wt, wtGit, tip } = seedFromBranch({ behind: true });
+
+      const r = ship(wt, env);
+
+      expect(r.status, r.stderr).not.toBe(0);
+      const rename = r.stderr.search(/git branch -m 'story' "devkit-freed-/);
+      const ancestry = r.stderr.search(
+        /also blocked — --from-branch: origin\/work \(\w+\) is not an ancestor of HEAD/,
+      );
+      expect(rename, r.stderr).toBeGreaterThan(-1);
+      expect(ancestry, r.stderr).toBeGreaterThan(rename);
+      expect(r.stderr).not.toMatch(/choose a new branch name|--resume/);
+      expect(localBranchExists(git, 'story')).toBe(true);
+      expect(wtGit(['rev-parse', 'story']).trim()).toBe(tip);
+      expect(git(['worktree', 'list'], { encoding: 'utf8' })).not.toMatch(EPHEMERAL_WT_RE);
+    });
+
+    it('closes on the rename remedy, with a --from-branch re-run line, when the base is current', () => {
+      const { env, wt } = seedFromBranch({ behind: false });
+
+      const r = ship(wt, env);
+
+      expect(r.status, r.stderr).not.toBe(0);
+      expect(r.stderr).not.toMatch(/not an ancestor|choose a new branch name|--resume/);
+      expect(r.stderr).toMatch(/^ {4}devkit ship 'story' "<title>" --base 'work' --from-branch$/m);
+      expect(r.stderr.trimEnd().split('\n').at(-1)).toMatch(/renaming keeps every commit/);
+    });
+
+    it('the two printed remedies, applied in order, let the same ship through', () => {
+      const { env, wt, wtGit, bare } = seedFromBranch({ behind: true });
+
+      const refused = ship(wt, env);
+      const ren = refused.stderr.match(/^ {4}(git branch -m .*)$/m);
+      expect(ren, refused.stderr).toBeTruthy();
+      execFileSync('/bin/bash', ['-c', ren[1]], { cwd: wt, env: { ...process.env, ...GIT_ENV } });
+      wtGit(['fetch', '-q', 'origin', 'work']);
+      wtGit(['rebase', '-q', 'origin/work']);
+
+      const retry = ship(wt, { ...env, PATH: `${ghStub('exit 0')}:${process.env.PATH}` });
+
+      expect(retry.status, retry.stderr).toBe(0);
+      expect(remoteBranchExists(bare, 'story')).toBe(true);
+    });
   });
 });
 
