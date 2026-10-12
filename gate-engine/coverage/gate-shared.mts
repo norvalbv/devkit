@@ -1,12 +1,15 @@
 /** What both coverage gate modes print and classify with: remedies, path listing, review notices. */
 import { execFileSync } from 'node:child_process';
-import { appendFileSync, realpathSync } from 'node:fs';
+import { appendFileSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 import { sourceMatchers } from '../config.mts';
 import { emitGateEvent } from '../judge/gate-events.mts';
+import { canonicalPath } from './dependencies.mts';
 import { displayPath, formatClearMarker, readClearMarker } from './failures.mts';
 import { COVERAGE_DIR, COVERAGE_FILE } from './produce.mts';
 import type { Classify, Provenance } from './provenance.mts';
+
+export { canonicalPath };
 
 // Every failure arm names its escape hatch. `export` on its own line, never an inline env prefix,
 // which command-rewriting shell hooks can silently strip from a ship.
@@ -42,14 +45,6 @@ export function classifier(extensions: string[], pkgPrefix: string): Classify {
     return TEST_PATH.test(path) ? 'test' : 'production';
   };
 }
-
-export const canonicalPath = (p: string): string => {
-  try {
-    return realpathSync(p);
-  } catch {
-    return resolve(p);
-  }
-};
 
 /** The repo root the provenance paths are relative to; cwd itself when git cannot say. */
 export function repoTop(cwd: string): string {
