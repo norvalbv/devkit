@@ -42,7 +42,7 @@ import { diffCacheIdentity } from '../judge/diff-focus.mts';
 import { emitGateEvent } from '../judge/gate-events.mts';
 import type { VerdictMeta } from '../judge/verdict-store.mts';
 import { reviewBaseContext, shortSha } from './evidence/base-context.mts';
-import { shellWord } from './valve/shell-word.mts';
+import { UNSAFE_TEXT_RE, waiveCommand } from './valve/shell-word.mts';
 import {
   conventionWaiverLenses,
   parseConventionFindingCandidates,
@@ -448,13 +448,15 @@ export function blockingNote(
   baseSha: string | null = null,
 ): string {
   if (blocking.length === 0) return '';
-  const base = baseSha ? ` --base ${shortSha(baseSha)}` : '';
-  const lines = blocking.map(
-    (b) =>
-      `  • ${b.lens} [${b.fp}] — fix it, or waive with a reason:\n` +
-      `      guard-review waive ${shellWord(`${reviewerName}:${b.lens}`)} ${b.fp}${base} "why this is not a real defect"\n` +
-      `      (or OVERRIDE_${b.fp}_RATIONALE="…" / add it to ${OVERRIDES_FILE})`,
-  );
+  const base = baseSha ? shortSha(baseSha) : null;
+  const lines = blocking.map((b) => {
+    const command = waiveCommand({ reviewer: reviewerName, lens: b.lens, fp: b.fp, base });
+    return (
+      `  • ${b.lens.replace(UNSAFE_TEXT_RE, ' ')} [${b.fp}] — fix it, or waive with a reason:\n` +
+      (command ? `      ${command}\n` : '') +
+      `      (or OVERRIDE_${b.fp}_RATIONALE="…" / add it to ${OVERRIDES_FILE})`
+    );
+  });
   return (
     `${reviewerName}: ${blocking.length} un-overridden finding(s) block this commit.\n` +
     `${lines.join('\n')}`

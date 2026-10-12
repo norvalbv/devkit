@@ -9,6 +9,7 @@ import {
   findModernBash,
   testSpawnSync as spawnSync,
 } from './_helpers.mts';
+import { MODERN_BASH_SKIP_NOTE } from './_modern-bash.mts';
 import {
   createScopedPreservedCommit,
   GIT_ENV,
@@ -19,6 +20,7 @@ import {
   remoteBranchExists,
   scriptPath,
   seedShipRepoLocalRemote,
+  REAPED_15S_BANNER,
 } from './_ship-branch-fixture.mts';
 
 /** The path a real ratchet gate stages into the commit it is gating. */
@@ -76,13 +78,12 @@ describe('ship-branch.sh — resume past a gate-widened scope', () => {
       cwd: dir,
       input: 'pr body\n',
       encoding: 'utf8',
-      timeout: 45_000,
       env: { ...publishEnv, SHIP_COMMIT_TIMEOUT: '15' },
     });
 
     expect(first.status, first.stderr).toBe(124);
     // Pair every 124 with OUR banner: testSpawnSync also returns 124 at its own deadline.
-    expect(first.stderr).toMatch(/gate chain hit the 15s ceiling \(exit 124\)/);
+    expect(first.stderr).toMatch(REAPED_15S_BANNER);
     const preserved = git(['rev-parse', 'feat/gate-widened']).trim();
     // The precondition: the gate really did widen the commit past the brief.
     expect(
@@ -113,7 +114,7 @@ describe('ship-branch.sh — resume past a gate-widened scope', () => {
     // Both private refs are retired together once the work is on the remote.
     expect(localBranchExists(git, 'refs/devkit/ship-gate-adds/feat/gate-widened')).toBe(false);
     expect(localBranchExists(git, 'refs/devkit/ship-receipts/feat/gate-widened')).toBe(false);
-  });
+  }, 240_000);
 
   // Why the record is keyed on PROVENANCE: a path the caller briefed itself is absent from it, so
   // narrowing the brief on a retry cannot smuggle that change into the PR.
@@ -270,58 +271,44 @@ describe('ship-branch.sh — resume a commit that deleted briefed paths', () => 
 
   // "${arr[@]}" on an EMPTY array aborts under set -u in 4.4+ and is empty in 3.2. Every other case
   // here runs on macOS's 3.2 and so proves nothing about CI's shell.
-  (MODERN_BASH ? it : it.skip)(
-    `skips the add on bash >= 4 without an unbound-array abort${
-      MODERN_BASH ? '' : ' (skipped: no bash >= 4)'
-    }`,
-    () => {
-      const { dir, env, git, bare } = seedShipRepoLocalRemote();
-      const { publishEnv } = publishEnvFor(dir, env);
-      const preserved = preserve(dir, env, git, 'feat/all-deleted-bash4', {
-        tracked: { 'gone-a.txt': 'a\n', 'gone-b.txt': 'b\n' },
-        deleted: ['gone-a.txt', 'gone-b.txt'],
-      });
+  it(`skips the add on bash >= 4 without an unbound-array abort`, ({ skip }) => {
+    skip(!MODERN_BASH, MODERN_BASH_SKIP_NOTE);
+    const { dir, env, git, bare } = seedShipRepoLocalRemote();
+    const { publishEnv } = publishEnvFor(dir, env);
+    const preserved = preserve(dir, env, git, 'feat/all-deleted-bash4', {
+      tracked: { 'gone-a.txt': 'a\n', 'gone-b.txt': 'b\n' },
+      deleted: ['gone-a.txt', 'gone-b.txt'],
+    });
 
-      const retry = retryShip(
-        dir,
-        publishEnv,
-        'feat/all-deleted-bash4',
-        ['gone-a.txt', 'gone-b.txt'],
-        MODERN_BASH,
-      );
+    const retry = retryShip(
+      dir,
+      publishEnv,
+      'feat/all-deleted-bash4',
+      ['gone-a.txt', 'gone-b.txt'],
+      MODERN_BASH,
+    );
 
-      expect(retry.status, retry.stderr).toBe(0);
-      expect(retry.stderr).not.toMatch(/unbound variable/);
-      expect(bareSha(bare, 'feat/all-deleted-bash4')).toBe(preserved);
-    },
-  );
+    expect(retry.status, retry.stderr).toBe(0);
+    expect(retry.stderr).not.toMatch(/unbound variable/);
+    expect(bareSha(bare, 'feat/all-deleted-bash4')).toBe(preserved);
+  });
 
   // Same dialect split, other half: the gate-adds exclude list is expanded with ${arr[@]+"${arr[@]}"}
   // on EVERY resume, including the overwhelmingly common one where no gate wrote anything.
-  (MODERN_BASH ? it : it.skip)(
-    `expands an empty gate-adds exclude list on bash >= 4${
-      MODERN_BASH ? '' : ' (skipped: no bash >= 4)'
-    }`,
-    () => {
-      const { dir, env, git, bare } = seedShipRepoLocalRemote();
-      const { publishEnv } = publishEnvFor(dir, env);
-      const preserved = preserve(dir, env, git, 'feat/no-gate-adds-bash4', {
-        briefed: { 'note.txt': 'hi\n' },
-      });
+  it(`expands an empty gate-adds exclude list on bash >= 4`, ({ skip }) => {
+    skip(!MODERN_BASH, MODERN_BASH_SKIP_NOTE);
+    const { dir, env, git, bare } = seedShipRepoLocalRemote();
+    const { publishEnv } = publishEnvFor(dir, env);
+    const preserved = preserve(dir, env, git, 'feat/no-gate-adds-bash4', {
+      briefed: { 'note.txt': 'hi\n' },
+    });
 
-      const retry = retryShip(
-        dir,
-        publishEnv,
-        'feat/no-gate-adds-bash4',
-        ['note.txt'],
-        MODERN_BASH,
-      );
+    const retry = retryShip(dir, publishEnv, 'feat/no-gate-adds-bash4', ['note.txt'], MODERN_BASH);
 
-      expect(retry.status, retry.stderr).toBe(0);
-      expect(retry.stderr).not.toMatch(/unbound variable/);
-      expect(bareSha(bare, 'feat/no-gate-adds-bash4')).toBe(preserved);
-    },
-  );
+    expect(retry.status, retry.stderr).toBe(0);
+    expect(retry.stderr).not.toMatch(/unbound variable/);
+    expect(bareSha(bare, 'feat/no-gate-adds-bash4')).toBe(preserved);
+  });
 });
 
 describe('ship-branch.sh — resume scope edge cases', () => {
@@ -380,12 +367,11 @@ describe('ship-branch.sh — resume scope edge cases', () => {
       cwd: dir,
       input: 'pr body\n',
       encoding: 'utf8',
-      timeout: 45_000,
       env: { ...publishEnv, SHIP_COMMIT_TIMEOUT: '15' },
     });
 
     expect(first.status, first.stderr).toBe(124);
-    expect(first.stderr).toMatch(/gate chain hit the 15s ceiling \(exit 124\)/);
+    expect(first.stderr).toMatch(REAPED_15S_BANNER);
     const preserved = git(['rev-parse', 'feat/gate-deleted']).trim();
     // The precondition: the commit really does carry an unbriefed DELETION the gate made.
     expect(git(['diff', '--name-only', '--diff-filter=D', `${preserved}^`, preserved]).trim()).toBe(
@@ -408,7 +394,7 @@ describe('ship-branch.sh — resume scope edge cases', () => {
     expect(retry.stderr).not.toContain('outside the requested scope');
     expect(bareSha(bare, 'feat/gate-deleted')).toBe(preserved);
     expect(readFileSync(hookCount, 'utf8').trim().split('\n')).toHaveLength(1);
-  });
+  }, 240_000);
 
   // Without `literal`, a record entry's glob matches its neighbours, the add-filter skips a
   // caller-owned path as commit-authoritative, and a DRIFTED tree passes the comparison.

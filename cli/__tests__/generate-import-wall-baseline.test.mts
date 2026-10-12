@@ -3,11 +3,16 @@
 // the debug format fails these tests AND the generator's own loud-failure guard, so the
 // baseline can never silently widen. (Ported from the frink-local generator, which is being
 // deleted in favour of this devkit port — coverage must live where the generator lives.)
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   classifyWidening,
+  computeImportWallBaseline,
   parseImportPath,
 } from '../lib/generate/generate-import-wall-baseline.mts';
+import { linkStubIsolatedInstall } from './_install-layouts.mts';
 
 describe('parseImportPath', () => {
   it('extracts the import path from the plugin debugMode format', () => {
@@ -36,5 +41,18 @@ describe('classifyWidening', () => {
   it('returns null for an unknown wall class (generator exits 1)', () => {
     expect(classifyWidening('src/weird/place.ts')).toBeNull();
     expect(classifyWidening('socket-server/src/index.ts')).toBeNull();
+  });
+});
+
+describe('computeImportWallBaseline', () => {
+  // A blind scan returns no violations, which would rewrite the baseline to empty.
+  it('refuses a linked isolated install rather than scanning a tree it cannot root at', () => {
+    const cwd = realpathSync(mkdtempSync(join(tmpdir(), 'import-wall-isolated-')));
+    const donor = linkStubIsolatedInstall(cwd);
+    try {
+      expect(() => computeImportWallBaseline(cwd)).toThrow(/linked isolated install/);
+    } finally {
+      for (const dir of [cwd, donor]) rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

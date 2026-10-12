@@ -6,7 +6,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { runSelfHostDoctor } from '../lib/doctor/self-host-doctor.mts';
-import { printPriorArtAdvisoryHealth } from '../lib/doctor/qavis-health.mts';
+import { printPriorArtAdvisoryHealth } from '../lib/doctor/prior-art-health.mts';
 import { rootRegistry, tmpRepos } from './_helpers.mts';
 
 const { mkTmp, cleanup } = rootRegistry();

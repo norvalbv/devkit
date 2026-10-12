@@ -231,7 +231,6 @@ export function emitFields(intent) {
         intent.sourceMode ?? 'explicit',
         intent.title,
         intent.base ?? '',
-        intent.noQavisPublish ? '1' : '0',
         intent.updatePrBody ? '1' : '0',
         intent.draft ? '1' : '0',
         intent.createdAt,

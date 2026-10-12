@@ -60,7 +60,6 @@ export function writeIntent(
     title: string;
     base?: string;
     links: string[];
-    noQavisPublish: boolean;
     updatePrBody: boolean;
     draft: boolean;
     resumed: boolean;
@@ -115,7 +114,6 @@ export function writeIntent(
     base: opts.base || null,
     links: opts.links,
     paths,
-    noQavisPublish: opts.noQavisPublish,
     updatePrBody: opts.updatePrBody,
     draft: opts.draft,
     bodyB64: opts.body.toString('base64'),
@@ -381,8 +379,6 @@ export function readIntent(
   // false (a ready PR) — refusing would strand an in-flight blocked ship mid---resume. Only
   // `undefined` is absence: `?? false` would also swallow a PRESENT null and publish ready.
   const legacy = storedVersion === LEGACY_EXPLICIT_SCHEMA_VERSION;
-  const noQavisPublish = provenBool(r.noQavisPublish);
-  if (noQavisPublish === null) return { reason: malformedField('noQavisPublish') };
   const updatePrBody = provenBool(legacy ? false : r.updatePrBody);
   if (updatePrBody === null) return { reason: malformedField('updatePrBody') };
   const draft = provenBool(r.draft === undefined ? false : r.draft);
@@ -418,7 +414,6 @@ export function readIntent(
     base: provenString(r.base),
     links,
     paths,
-    noQavisPublish,
     updatePrBody,
     draft,
     bodyB64,
@@ -453,7 +448,6 @@ function main(): number {
         title,
         base: values.get('base'),
         links,
-        noQavisPublish: booleans.has('no-qavis-publish'),
         updatePrBody: booleans.has('update-pr-body'),
         draft: booleans.has('draft'),
         resumed: booleans.has('resumed'),

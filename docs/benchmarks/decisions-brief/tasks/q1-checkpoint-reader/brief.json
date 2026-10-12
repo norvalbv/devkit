@@ -1,0 +1,14 @@
+[
+ {
+  "slug": "bench-runs-resume-from-checkpoint",
+  "ruling": "Every completed row is appended to a gitignored progress-<sub>.jsonl the moment it lands, and re-running the SAME command replays those rows for free. A row is replayed only when config (model/K/cascade) AND gateHash AND corpusHash all match, so a stale checkpoint is inert rather than quietly blending two measurements; outage verdicts (NULL) are never replayed. Cost and stability aggregates are derived from the ROWS (per-row inputChars/rawChars/judged/outage) rather than counters incremented in the loop, so a resumed run reports what the whole run cost. The reader drops torn trailing lines instead of failing the load. --fresh discards and re-measures."
+ },
+ {
+  "slug": "decision-records-cli-owned-writes",
+  "ruling": "Decision records are a guard-owned capability: selecting the decisions guard installs a native pre-edit deny hook on every selected agent surface, and selecting skills projects the decisions playbook only while that guard remains enabled. Agents author and correct records through the guard-decisions CLI, whose draft amendment path may replace the newest uncommitted note, or the newest uncommitted Target with the draft notes under it kept byte-for-byte; committed history remains append-only."
+ },
+ {
+  "slug": "decision-retrieval-candidate-set",
+  "ruling": "Retrieval candidates come from the decisions DIRECTORY (loadAxisRows in gate-engine/decisions/retrieval.mts), reading both the Target and the legacy pre-Target schema; INDEX.md is demoted to a rendered view that supplies ruling/why only as a fallback for a file we cannot parse. A searched-but-unmatched query ABSTAINS: RankResult.source distinguishes 'empty' (nothing recorded) from 'none' (searched, nothing rules) and returns no rows, replacing the alphabetical first-k fallback."
+ }
+]

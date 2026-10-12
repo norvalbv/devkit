@@ -13,6 +13,7 @@
  *   guard-review transcript <ref>                print a persisted agent transcript by its ref
  *   guard-review record-agent <label>            record one Task-dispatched agent run (stdin)
  *   guard-review record-feedback prior-art --run <id> ...  claim a correction to a recorded run
+ *   guard-review reference-checkouts [--json]    resolve research.referenceCheckouts to directories
  *
  * Everything resolves from resolveGuardConfig(process.cwd()) — the CONSUMER repo, never the
  * package dir (W-3). Exit contract per sub-engine (run-review.mjs / completeness.mjs headers).
@@ -21,10 +22,16 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { envFlag, resolveGuardConfig } from '../config.mts';
+import { markGateRun } from '../judge/run-context.mts';
 import { type RecordAgentRunOpts, recordAgentRun } from '../judge/run-judge.mts';
 import { readTranscript } from '../judge/transcript-store.mts';
 import { clearCache, loadCache } from './cache.mts';
 import { runRecordFeedback } from '../prior-art/feedback.mts';
+import {
+  type CheckoutsCheck,
+  checkReferenceCheckouts,
+  resolveReferenceCheckouts,
+} from '../prior-art/reference-checkouts.mts';
 import { runCompleteness } from './completeness.mts';
 import { gitCached, stagedFiles } from './evidence/staged-git.mts';
 import { loadReviewerTargetsBlocks, reviewerTargetSalts } from './evidence/targets-block.mts';
@@ -201,6 +208,15 @@ function recordAgent(label: string, rest: string[]): number {
   if (sessionId) extra.session_id = sessionId;
   const billing = flag('billing');
   if (billing) extra.billing = billing;
+  // The local leg's counts are self-reported, so a wrong 0 would otherwise read as an honest one.
+  const checkouts: Partial<CheckoutsCheck> =
+    label === 'prior-art' ? checkReferenceCheckouts(output) : {};
+  Object.assign(extra, checkouts);
+  if (checkouts.checkouts_check === 'mismatch')
+    console.error(
+      `guard-review: prior-art reported ${JSON.stringify(checkouts.checkouts_claimed)} reference ` +
+        `checkouts; \`guard-review reference-checkouts\` resolves ${JSON.stringify(checkouts.checkouts_actual)}`,
+    );
   const { ref, telemetry } = recordAgentRun({
     label,
     output,
@@ -211,12 +227,27 @@ function recordAgent(label: string, rest: string[]): number {
     ...(Number.isFinite(duration) && duration >= 0 ? { durationMs: duration } : {}),
     extra,
   });
-  console.log(JSON.stringify({ ...receipt, transcript_ref: ref, telemetry }));
+  console.log(JSON.stringify({ ...receipt, ...checkouts, transcript_ref: ref, telemetry }));
+  return 0;
+}
+
+/** `guard-review reference-checkouts [--json]` — what the prior-art local leg may read. */
+function printReferenceCheckouts(json: boolean): number {
+  const { declared, resolved } = resolveReferenceCheckouts();
+  const counts = { declaredCheckouts: declared.length, resolvedCheckouts: resolved.length };
+  if (json) console.log(JSON.stringify({ ...counts, resolved }));
+  else
+    console.log(
+      [`${counts.resolvedCheckouts} resolved from ${counts.declaredCheckouts} declared`]
+        .concat(resolved)
+        .join('\n'),
+    );
   return 0;
 }
 
 async function run(argv: string[]): Promise<number> {
   const [cmd, ...rest] = argv;
+  if (cmd === '--gate' || (cmd === 'completeness' && rest[0] === '--gate')) markGateRun();
   if (cmd === '--gate') return runReviewGate();
   if (cmd === 'completeness' && rest[0] === '--gate' && rest[1]) return runCompleteness(rest[1]);
   if (cmd === 'scan') return scanReview();
@@ -269,6 +300,7 @@ async function run(argv: string[]): Promise<number> {
     process.env.DEVKIT_AGENT_RUN_ID ||= `feedback-${randomUUID()}`;
     return runRecordFeedback(rest.slice(1));
   }
+  if (cmd === 'reference-checkouts') return printReferenceCheckouts(rest.includes('--json'));
   console.error(
     'Usage: guard-review --gate | completeness --gate <msg-file> | scan | lens <reviewer>[:<lens>] | clear-cache | ' +
       'waive <reviewer>[:<lens>] <id> [--base <sha>] "<why>" | waive --list | transcript <ref> | ' +
@@ -277,7 +309,7 @@ async function run(argv: string[]): Promise<number> {
       '[--input-tokens <n>] [--output-tokens <n>] [--cache-creation <n>] [--cache-read <n>] ' +
       '[--cost-usd <n>] [--session-id <dispatched-agent-session>] [--billing subscription] | ' +
       'record-feedback prior-art --run <invocation_id> --claimed-verdict <V> [--claimed-framing <F>] ' +
-      '[--supersedes <feedback_id>] --source root|user --reason "<why>"',
+      '[--supersedes <feedback_id>] --source root|user --reason "<why>" | reference-checkouts [--json]',
   );
   return 2;
 }

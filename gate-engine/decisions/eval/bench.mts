@@ -88,6 +88,7 @@ import { judgeDetailed, matchScope } from '../check-alignment.mts';
 import { currentTarget, parseDecision } from '../decisions.mts';
 import { parseDepthVerdict, runDepthJudge } from '../depth/depth-pass.mts';
 import { buildDetectJudgeInput, detectSmells, parseVerdict, runDetectJudge } from '../detect.mts';
+import { cleanBenchEnv } from './bench-env.mts';
 import { BenchAbort, loadCases, SUBS } from './cases.mts';
 import { NO_CHECKPOINT, openCheckpoint } from './checkpoint.mts';
 import { compare, wilson } from './compare.mts';
@@ -105,6 +106,7 @@ import {
 } from './report.mts';
 
 // Re-exported: sibling benches (review, critique) and the unit tests import these from here.
+export { cleanBenchEnv } from './bench-env.mts';
 export { BenchAbort, lintCases, parseCasesText } from './cases.mts';
 export { compare, mcnemarMidP, wilson } from './compare.mts';
 
@@ -119,32 +121,7 @@ const CASCADE = (process.env.BENCH_CASCADE ?? 'on') !== 'off';
 // Alignment stays K=1 (rows cost 10x) and retries only baseline-discordant rows instead.
 const RUNS = Math.max(1, Number.parseInt(process.env.BENCH_RUNS ?? '1', 10) || 1);
 
-// ─── Environment hygiene ──────────────────────────────────────────────────────────
-// GUARD_*/FRINK_* leak straight into the judges via resolveGuardConfig (NO_LLM nulls every row;
-// DECISIONS_DIR redirects fixture config). The GIT_* control vars are the documented repo-corruption
-// class: inherited by a hook-launched process, they point fixture `git init/commit` at the HOST
-// repo's .git. Strip both families; bench knobs are all BENCH_* so a wholesale strip is safe.
-const GUARD_ENV_RE = /^(GUARD|FRINK)_/;
 const REVISIT_LINE_RE = /^\*\*Revisit-when:\*\*/m;
-const GIT_CONTROL_VARS = [
-  'GIT_DIR',
-  'GIT_WORK_TREE',
-  'GIT_INDEX_FILE',
-  'GIT_OBJECT_DIRECTORY',
-  'GIT_COMMON_DIR',
-  'GIT_PREFIX',
-];
-
-export function cleanBenchEnv(env = process.env) {
-  const stripped = [];
-  for (const key of Object.keys(env)) {
-    if (GUARD_ENV_RE.test(key) || GIT_CONTROL_VARS.includes(key)) {
-      delete env[key];
-      stripped.push(key);
-    }
-  }
-  return stripped;
-}
 
 function preflightClaude() {
   try {
