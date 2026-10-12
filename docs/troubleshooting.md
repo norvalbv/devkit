@@ -154,14 +154,16 @@ reads them; both are safe to delete.
 
 ## The dup gate names a symbol my file doesn't define (extract refactor blocked)
 
-It can't any more, and if you see it on an older devkit: **the search-code index is stale, not your code.**
-`guard-dup` now verifies every pair against the working tree first — a side whose indexed body is no
-longer on disk drops the pair and is printed as `Stale index — dropped N candidate pair(s) …`. That is a
+**The search-code index is stale, not your code.** `guard-dup` verifies every pair against the
+working tree first — a side whose indexed body is no longer on disk drops the pair and is printed as `Stale index — dropped N candidate pair(s) …`. That is a
 _withheld_ finding: re-index those files (`search-code index --seed-files "<files>"`) and re-run to get
 coverage back. **Never** paste the `guard-dup-allowlist add` command for such a pair — it would record a
 permanent approval for a duplication that does not co-exist. A `Freshness NOT verified` line means the
 index carries no `raw_code`/`id` (or its paths don't resolve here), so the pairs above it were reported
-unchecked — eyeball the ranges before approving. `GUARD_DUP_VERIFY_TREE=0` disables the check.
+unchecked — eyeball the ranges before approving. A `Could not check N side(s) above` block names the
+sides of a reported pair whose indexed body was too short or missing to compare: the stale-index block
+can still happen for exactly those, so open the named file and re-index if the symbol is gone.
+`GUARD_DUP_VERIFY_TREE=0` disables the check.
 
 ## `devkit doctor` reports `search-code index: DRIFT` or `MISSING`
 
