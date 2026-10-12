@@ -10,9 +10,8 @@
  * DEFAULTS. Explicit review.* keys — which resolveGuardConfig collapses into the same resolved
  * values — block the write (raw-file check) and stay authoritative, as do GUARD_* envs.
  *
- * The family unit is the complete SET including correctnessChunkLoc: cap 400 was benched for
- * gpt-5.6-sol only, so a trio-only bind would run a claude correctness reviewer chunked at an
- * un-benched cap (docs/decisions/correctness-chunking-ships-dark.md, 2026-08-28 note).
+ * The family unit is the complete SET including correctnessChunkLoc: a trio-only bind would chunk a
+ * claude correctness reviewer at the package default 400, a shape no large-diff bench has measured.
  */
 
 import {

@@ -278,8 +278,8 @@ be the dark one. Find out first with `devkit doctor` or the ship preflight, then
 Export or unset in the shell; never prefix the command. An inline `VAR=x devkit ship` can be stripped
 by a command-rewriting shell hook, exactly as with `SHIP_COMMIT_TIMEOUT` below.
 
-- The chunk cap matters: 400 LOC is benched for `gpt-5.6-sol` only, so moving three knobs runs the
-  correctness reviewer at a cap never measured for the model now judging.
+- The chunk cap matters: the package default chunks correctness review at 400 LOC, and no large-diff
+  bench has measured `claude-haiku-5-5` chunked, so moving three knobs runs it in an unmeasured shape.
 - A sentry pin (`GUARD_SENTRY_MODEL` or `FRINK_SENTRY_MODEL`) stays where it points until cleared, which
   is why both blocks unset it. `devkit doctor --fix` refuses to bind while one pins codex, rather than
   reporting a move that left a judge behind.
