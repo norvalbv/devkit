@@ -268,6 +268,7 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
             judgedBaseSha: judgedBaseSha(base),
             baseState: base.state,
             coverage: c.coverage,
+            waivers: c.waivers,
         });
     }
     if (plan.tasks.length === 0)
