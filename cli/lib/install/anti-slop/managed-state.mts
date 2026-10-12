@@ -1,7 +1,7 @@
 /** Read managed anti-slop identity and preserve baseline activation evidence across upgrades. */
 
-import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { join, relative } from 'node:path';
 import { withLock, writeFileAtomic } from '../../atomic-write.mts';
 import { digest, packageDir } from '../../fs-helpers.mts';
 import { adoptBaselineRuleFindings, readBaseline, writeBaseline } from './baseline.mts';
@@ -46,10 +46,26 @@ export interface PendingAntiSlopBaselineActivation {
   activatedRuleIds: Set<string>;
 }
 
-export function antiSlopPluginSource() {
-  const root = join(packageDir(), 'anti-slop', 'src');
+function moduleFiles(root: string, ext: string): string[] {
+  return readdirSync(root, { recursive: true, withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith(ext))
+    .map((entry) => relative(root, join(entry.parentPath, entry.name)).slice(0, -ext.length))
+    .sort();
+}
+
+export function antiSlopPluginSource(pkg: string = packageDir()) {
+  const root = join(pkg, 'anti-slop', 'src');
   if (existsSync(join(root, 'index.mjs'))) return { root, entry: './plugin/index.mjs' };
   if (existsSync(join(root, 'index.js'))) return { root, entry: './plugin/index.js' };
+  // A source checkout projects its tracked dist build, the committed .js form, while that build
+  // still mirrors source; a rule added since the release falls back to the .ts source.
+  const built = join(pkg, 'dist', 'anti-slop', 'src');
+  if (
+    existsSync(join(built, 'index.js')) &&
+    moduleFiles(built, '.js').join('\0') === moduleFiles(root, '.ts').join('\0')
+  ) {
+    return { root: built, entry: './plugin/index.js' };
+  }
   if (existsSync(join(root, 'index.ts'))) return { root, entry: './plugin/index.ts' };
   throw new Error('bundled anti-slop plugin entry is missing');
 }
