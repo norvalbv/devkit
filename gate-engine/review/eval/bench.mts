@@ -8,15 +8,14 @@
  * size ratchet remains an architectural boundary rather than a raised threshold.
  */
 
-import { execFileSync } from 'node:child_process';
-import { appendFileSync, existsSync, readFileSync, realpathSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { BenchAbort, cleanBenchEnv } from '../../decisions/eval/bench.mts';
 import { resolveGuardConfig, type GuardConfig } from '../../config.mts';
-import { judgeBinForModel } from '../../judge/codex/result.mts';
 import type { SlotOutcome } from '../../judge/matcher-core.mts';
 import { resolveEscalationModel } from '../reviewers.mts';
+import { appendLedger, preflightJudge } from '../../decisions/eval/bench-runtime.mts';
 import {
   type AuditCheckpointValue,
   completenessAuditInputHash,
@@ -127,26 +126,6 @@ export {
   variantConsistency,
   writeCompletenessBaseline,
 };
-
-function appendLedger(entry: object) {
-  try {
-    appendFileSync(path.join(here, 'runs.log'), `${JSON.stringify(entry)}\n`);
-  } catch {
-    // The ledger is telemetry; never let it break a run.
-  }
-}
-
-function preflightJudge(role: 'reviewer' | 'matcher', model: string) {
-  const bin = judgeBinForModel(model);
-  try {
-    execFileSync(bin, ['--version'], { encoding: 'utf8', timeout: 30000 });
-  } catch {
-    throw new BenchAbort(
-      2,
-      `completeness-eval: ${role} model ${model} requires \`${bin}\`, but that CLI is not available`,
-    );
-  }
-}
 
 function configuredReviewerModel(config: GuardConfig): string {
   return resolveEscalationModel(config);
@@ -299,8 +278,8 @@ async function main(argv: string[]) {
   if (consumerConfig.noLlm)
     throw new BenchAbort(2, 'completeness-eval: noLlm is enabled — the gate cannot be measured');
   const expectedReviewerModel = configuredReviewerModel(consumerConfig);
-  preflightJudge('reviewer', expectedReviewerModel);
-  preflightJudge('matcher', MATCH_MODEL);
+  preflightJudge('completeness-eval', 'reviewer', expectedReviewerModel);
+  preflightJudge('completeness-eval', 'matcher', MATCH_MODEL);
   if (!existsSync(AGENT_MD))
     throw new BenchAbort(2, `completeness-eval: ${AGENT_MD} missing — nothing to measure`);
   if (fresh) {
@@ -634,7 +613,7 @@ async function main(argv: string[]) {
   const { regressed, lines } = compareCompleteness(s, baseline.completeness);
   if (existsSync(baselinePath)) for (const l of lines) console.log(l);
 
-  appendLedger({
+  appendLedger(here, {
     ts: new Date().toISOString(),
     args: [...args],
     reviewerModel: s.reviewerModel,
