@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -163,6 +163,17 @@ export const SUITE_GIT_IDENTITY = {
   GIT_COMMITTER_EMAIL: 'test@devkit.invalid',
 };
 Object.assign(process.env, SUITE_GIT_IDENTITY);
+
+// git >= 2.54 detaches an auto-maintenance repack from fixture commits and pushes, racing cleanup.
+// This template bakes maintenance.auto=false into every new repo's own config; no env can drop it.
+{
+  const template = mkdtempSync(path.join(os.tmpdir(), 'devkit-test-git-template-'));
+  mkdirSync(path.join(template, 'hooks'));
+  mkdirSync(path.join(template, 'info'));
+  writeFileSync(path.join(template, 'info', 'exclude'), '');
+  writeFileSync(path.join(template, 'config'), '[maintenance]\n\tauto = false\n');
+  process.env.GIT_TEMPLATE_DIR = template;
+}
 
 // The ship-path tests (ship-branch / reship / reconcile / …) spawn a REAL commit-with-gate-capture.sh
 // whose gate-events emitter defaults its sink to ~/.devkit/telemetry/gate-events.jsonl — the

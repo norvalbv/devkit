@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -285,6 +286,44 @@ describe('vitest.setup.mjs pins a git identity', () => {
       expect(author).toBe(
         `${SUITE_GIT_IDENTITY.GIT_AUTHOR_NAME} <${SUITE_GIT_IDENTITY.GIT_AUTHOR_EMAIL}>`,
       );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('vitest.setup.mjs keeps git auto-maintenance out of fixture repos', () => {
+  it('a fixture commit and a push into a bare remote leave both object stores unpacked', () => {
+    // A hermetic global config and a local-transport push both drop env-level git config.
+    const root = mkdtempSync(path.join(os.tmpdir(), 'devkit-suite-maintenance-'));
+    try {
+      const env = {
+        ...envAfterSetup({}),
+        GIT_CONFIG_GLOBAL: '/dev/null',
+        GIT_CONFIG_NOSYSTEM: '1',
+      };
+      const git = (cwd: string, ...args: string[]) =>
+        execFileSync('git', args, { cwd, env, encoding: 'utf8' }).trim();
+      const repo = path.join(root, 'repo');
+      const remote = path.join(root, 'remote.git');
+      git(root, 'init', '-q', repo);
+      git(root, 'init', '-q', '--bare', remote);
+      // Two loose objects in objects/17 meet the geometric-repack auto threshold of git >= 2.54.
+      for (let i = 0, found = 0; found < 2; i++) {
+        const body = `${i}\n`;
+        const id = createHash('sha1').update(`blob ${body.length}\0${body}`).digest('hex');
+        if (id.startsWith('17')) writeFileSync(path.join(repo, `shard-17-${found++}.txt`), body);
+      }
+      // Foreground maintenance, so a repack lands before the assertions instead of racing them.
+      git(remote, 'config', 'maintenance.autoDetach', 'false');
+      git(repo, 'add', '-A');
+      git(repo, '-c', 'maintenance.autoDetach=false', 'commit', '-qm', 'shard');
+      git(repo, 'push', '-q', remote, 'HEAD:refs/heads/main');
+      for (const gitDir of [path.join(repo, '.git'), remote]) {
+        const auto = git(gitDir, 'config', '--type=bool', '--default=true', 'maintenance.auto');
+        expect(auto, gitDir).toBe('false');
+        expect(readdirSync(path.join(gitDir, 'objects', 'pack')), gitDir).toEqual([]);
+      }
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

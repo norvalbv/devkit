@@ -64,8 +64,7 @@ export function consumerRepo({
 } = {}): string {
   pinLegacyJudgeEnv();
   const repo = trackReviewFixtureDir(mkdtempSync(join(tmpdir(), 'guard-review-gate-')));
-  // git >= 2.54 auto-maintenance detaches from `git commit` and repacks into .git while cleanup runs.
-  execSync('git init -q && git config maintenance.auto false', { cwd: repo });
+  execSync('git init -q', { cwd: repo });
   writeFileSync(
     join(repo, 'guard.config.json'),
     JSON.stringify({
