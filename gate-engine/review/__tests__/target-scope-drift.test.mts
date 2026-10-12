@@ -127,7 +127,7 @@ describe('renderFindingsBlockForParts with scope drift', () => {
       escalated: false,
       items: [item([cite(`${CAPTURE}:475`)])],
     };
-    const lines = renderFindingsBlockForParts('r', [res], () => null, d).split('\n');
+    const lines = renderFindingsBlockForParts('r', [res], () => null, false, d).split('\n');
     expect(lines[0]).toBe('r: 1 finding(s):');
     expect(lines[1]).toContain('• gate-narration');
     expect(lines[2]).toContain(`↳ Target ${SLUG} was enforced outside its Scope`);
