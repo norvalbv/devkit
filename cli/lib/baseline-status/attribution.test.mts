@@ -113,6 +113,7 @@ describe('compareSummaries and capped', () => {
     expect(capped([])).toBe('none');
     expect(capped(['a b', 'c\nd'])).toBe('a b,c d');
     expect(capped(['1', '2', '3', '4', '5', '6', '7'])).toBe('1,2,3,4,5,+2');
+    expect(capped(['1', '2', '3', '4', '5'])).toBe('1,2,3,4,5');
   });
 });
 
@@ -239,6 +240,26 @@ describe('attributeFailures against a stubbed gh', () => {
   it('leaves a failing check from outside the workflow unattributed, never inherited', () => {
     const line = attribute([PR_CHECK, check('CodeRabbit', '')]).line;
     expect(line).toContain('unattributed=CodeRabbit');
+  });
+
+  it('attributes every job of the workflow run, skipping another workflow listed first', () => {
+    // gate.yml's `required` job fails beside `gate` on every red run; it is the same run, not a stray.
+    const a = { 'a.test.mts': names(['x > broke']) };
+    put('summary-200.json', JSON.stringify(summary({ 'a.test.mts': 'failed' }, a, 200)));
+    put('run-300.tsv', '.github/workflows/lint.yml\t1\n');
+    const lint = check('lint', 'https://github.com/o/r/actions/runs/300/job/9');
+    const required = check('required', 'https://github.com/o/r/actions/runs/200/job/2');
+    const line = attribute([lint, PR_CHECK, required]).line;
+    expect(line).toMatch(/^attribution=unknown inherited=1 new=0 /);
+    expect(line).toContain(' unattributed=lint base-run=100');
+  });
+
+  it("reads the consumer's configured workflow, not devkit's gate.yml", () => {
+    writeFileSync(join(cwd, 'guard.config.json'), '{"baselineStatus":{"workflow":"ci.yml"}}');
+    execFileSync('git', ['init', '-q'], { cwd });
+    expect(attribute().line).toBe('attribution=unknown reason=no-workflow-run');
+    put('run-200.tsv', '.github/workflows/ci.yml\t1\n');
+    expect(attribute().line).toMatch(/^attribution=new inherited=1 new=1 /);
   });
 
   it('names every input it cannot read instead of guessing', () => {
