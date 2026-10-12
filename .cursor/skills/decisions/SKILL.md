@@ -255,6 +255,7 @@ Every piece of code that loads scoped Targets, the hook stage it runs in, and wh
 | `gate-engine/decisions/detect.mts` | pre-commit | `guard-decisions detect --gate` | yes: an unrecorded decision |
 | `gate-engine/review/evidence/targets-block.mts` | pre-commit | `guard-review --gate` | yes: security and performance reviewers' Targets block |
 | `gate-engine/review/evidence/commit-message.mts` | pre-commit | `guard-review --gate` | yes: same reviewer fleet |
+| `gate-engine/review/evidence/findings.mts` | pre-commit | `guard-review --gate` | no: an advisory hint when a failed reviewer cites a Target outside its Scope |
 | `gate-engine/review/completeness.mts` | commit-msg, and pre-commit on the ship path (review guard only) | `guard-review completeness --gate` | yes: top 6 Targets, a contradicted one is a finding |
 | `gate-engine/review/cli.mts` | on-demand | `guard-review scan` | no |
 | `gate-engine/decisions/scoped-targets.mts` | on-demand (feature-critique) | `guard-decisions scoped-targets` | no |
