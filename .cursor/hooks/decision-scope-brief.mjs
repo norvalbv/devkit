@@ -33,8 +33,8 @@ import path from 'node:path';
 
 const MUTATING_TOOLS = new Set(['Edit', 'Write', 'MultiEdit']);
 const PATH_KEYS = ['file_path', 'path', 'target_file', 'target_path'];
-/** Keep a brief short enough to be read: the ruling is the payload, the rest is a pointer. */
-const RULING_CHARS = 320;
+/** The ruling is the payload: a clause cut from view goes unkept, so only outlier rulings are cut. */
+const RULING_CHARS = 2000;
 const MAX_AXES = 3;
 
 function readInput() {
