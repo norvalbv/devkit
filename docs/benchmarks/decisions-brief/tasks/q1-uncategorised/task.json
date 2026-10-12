@@ -1,0 +1,12 @@
+{
+ "id": "q1-uncategorised",
+ "slug": "decision-categories-controlled-vocabulary",
+ "file": "gate-engine/decisions/recall/category-report.mjs",
+ "realPath": "gate-engine/decisions/recall/category-report.mts",
+ "bindingText": "Records without a category are reported under an explicit uncategorised heading",
+ "prompt": "`node gate-engine/decisions/recall/cli.mjs categories` crashes with \"TypeError: Cannot read properties of undefined (reading 'push')\" on our decision log. Find the cause in gate-engine/decisions/recall/category-report.mjs and fix it so the command works.",
+ "bindingOffset": 325,
+ "alsoBrief": [
+  "gate-engine/decisions/recall/categories.mjs"
+ ]
+}

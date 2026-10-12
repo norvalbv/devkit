@@ -59,6 +59,39 @@ describe('loadChangedSet', () => {
     expect(loadChangedSet(repo).has('partial.ts')).toBe(false);
   });
 
+  it('keeps non-ASCII and space-edged staged names verbatim even with core.quotePath on', () => {
+    git('config', 'core.quotePath', 'true');
+    write('naïve.ts', 'export const n = 1;\n');
+    write(' edge.ts', 'export const e = 1;\n');
+    git('add', 'naïve.ts', ' edge.ts');
+    const changed = loadChangedSet(repo);
+    expect(changed.has('naïve.ts')).toBe(true);
+    expect(changed.has(' edge.ts')).toBe(true);
+  });
+
+  // A tracked non-UTF-8 name missing from disk shows only in the UNSTAGED list. Treating that
+  // unreadable list as empty would keep partially-staged files and widen the scoped gate.
+  it('stands down to an empty set when the unstaged list holds a non-UTF-8 name', () => {
+    const root = mkdtempSync(join(tmpdir(), 'changed-files-nonutf8-'));
+    const g = (args: string[], input?: Buffer) =>
+      execFileSync('git', args, { cwd: root, input, stdio: ['pipe', 'pipe', 'ignore'] });
+    try {
+      g(['init', '-q']);
+      const blob = g(['hash-object', '-w', '--stdin'], Buffer.from('x\n')).toString().trim();
+      const name = Buffer.from([0xff, 0x2e, 0x74, 0x73]);
+      g(
+        ['update-index', '-z', '--index-info'],
+        Buffer.concat([Buffer.from(`100644 ${blob}\t`), name, Buffer.from([0])]),
+      );
+      g(['-c', 'user.email=t@e', '-c', 'user.name=t', 'commit', '-qm', 'base']);
+      writeFileSync(join(root, 'staged.ts'), 'export const s = 1;\n');
+      g(['add', 'staged.ts']);
+      expect(loadChangedSet(root)).toEqual(new Set());
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('returns an empty set outside a git repo rather than throwing', () => {
     const notARepo = mkdtempSync(join(tmpdir(), 'not-a-repo-'));
     try {

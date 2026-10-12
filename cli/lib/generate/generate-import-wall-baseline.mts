@@ -31,7 +31,11 @@ import { existsSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { resolveGuardConfig } from '../../../gate-engine/config.mts';
-import { eslintNodeFlags } from '../../../gate-engine/structure/eslint-node-flags.mts';
+import {
+  eslintNodeFlags,
+  LINKED_ISOLATED_STORE,
+  linkedIsolatedStore,
+} from '../../../gate-engine/structure/eslint-node-flags.mts';
 import {
   IMPORT_WALL_BASELINE,
   LEGACY_IMPORT_WALL_BASELINE,
@@ -170,6 +174,7 @@ export function computeImportWallBaseline(cwd: string, opts: ComputeImportWallOp
       'import-wall generator: eslint not found in consumer node_modules — install deps first (bun install).',
     );
   }
+  if (linkedIsolatedStore(cwd)) throw new Error(`import-wall generator: ${LINKED_ISOLATED_STORE}`);
 
   const widenings = new Map<string, Set<string>>(); // file -> Set<widening>
   const failures: string[] = [];

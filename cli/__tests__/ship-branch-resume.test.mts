@@ -18,6 +18,7 @@ import {
   scriptPath,
   seedBaseRepo,
   seedShipRepoLocalRemote,
+  REAPED_15S_BANNER,
 } from './_ship-branch-fixture.mts';
 
 /** createPreservedCommit leaves note.txt UNTRACKED in $ROOT, and git refuses a checkout/merge that
@@ -69,7 +70,7 @@ describe('ship-branch.sh — resume when the base moved', () => {
     expect(first.status, first.stderr).toBe(124);
     // Pair every 124 with OUR banner: testSpawnSync also returns 124 at its own deadline, so an
     // unpaired status assertion cannot say which supervisor fired.
-    expect(first.stderr).toMatch(/gate chain hit the 15s ceiling \(exit 124\)/);
+    expect(first.stderr).toMatch(REAPED_15S_BANNER);
     const preserved = git(['rev-parse', 'feat/base-advance']).trim();
     expect(git(['rev-parse', 'refs/devkit/ship-receipts/feat/base-advance']).trim()).toBe(
       preserved,
@@ -145,7 +146,7 @@ describe('ship-branch.sh — resume when the base moved', () => {
     });
 
     expect(first.status, first.stderr).toBe(124);
-    expect(first.stderr).toMatch(/gate chain hit the 15s ceiling \(exit 124\)/);
+    expect(first.stderr).toMatch(REAPED_15S_BANNER);
     const preserved = git(['rev-parse', 'feat/head-advance']).trim();
     expect(git(['rev-parse', 'refs/devkit/ship-receipts/feat/head-advance']).trim()).toBe(
       preserved,
@@ -346,7 +347,7 @@ describe('ship-branch.sh — resume refusals that name their own cause', () => {
     });
 
     expect(first.status, first.stderr).toBe(124);
-    expect(first.stderr).toMatch(/gate chain hit the 15s ceiling \(exit 124\)/);
+    expect(first.stderr).toMatch(REAPED_15S_BANNER);
     const preserved = git(['rev-parse', 'feat/formatter-drift']).trim();
     expect(git(['show', `${preserved}:note.txt`])).toBe('formatted\n'); // the hook's bytes were committed
     expect(readFileSync(join(dir, 'note.txt'), 'utf8')).toBe('hi\n'); // $ROOT was never formatted
@@ -401,7 +402,7 @@ describe('ship-branch.sh — resume refusals that name their own cause', () => {
       env: { ...publishEnv, SHIP_COMMIT_TIMEOUT: '15' },
     });
     expect(first.status, first.stderr).toBe(124);
-    expect(first.stderr).toMatch(/gate chain hit the 15s ceiling \(exit 124\)/);
+    expect(first.stderr).toMatch(REAPED_15S_BANNER);
 
     const refused = spawnSync('/bin/bash', argv, {
       cwd: dir,

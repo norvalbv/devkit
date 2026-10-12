@@ -6,7 +6,7 @@ import { basename, dirname, join, relative, resolve } from 'node:path';
 import {
   dependencyInstallRemedy,
   missingDeclaredDependencies,
-} from '../../dependency-preflight.mts';
+} from '../../../../../gate-engine/coverage/dependencies.mts';
 import { reviewPathWithin } from '../runtime-paths.mts';
 import { fail, gitEnvironment } from '../shared/common.mts';
 

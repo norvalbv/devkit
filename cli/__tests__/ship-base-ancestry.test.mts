@@ -104,6 +104,7 @@ describe('ship base relatedness — the refusal (sc-2357)', () => {
     expect(r.stderr).toContain(
       "the branch this work sits on top of is 'release' — pass --base 'release'",
     );
+    expect(r.stderr).toContain('to stack on origin/main instead, redo only this change');
     expect(r.stderr).toContain('GUARD_SHIP_BASE_OK=1');
   });
 
@@ -118,6 +119,8 @@ describe('ship base relatedness — the refusal (sc-2357)', () => {
     expect(r.status).toBe(1);
     expect(r.stderr).toContain('is not contained in origin/main');
     expect(r.stderr).not.toContain('pass --base');
+    // Stacking on the requested base does not depend on the candidate still existing.
+    expect(r.stderr).toContain('to stack on origin/main instead');
   });
 
   it('drops the remedy when the candidate was FORCE-PUSHED off the history it was chosen on', () => {
@@ -148,6 +151,7 @@ describe('ship base relatedness — the refusal (sc-2357)', () => {
     // "pass --base release" would be no remedy at all when release IS what was passed.
     expect(r.stderr).toContain("origin/release moved off this work's branch point");
     expect(r.stderr).not.toContain('pass --base');
+    expect(r.stderr).not.toContain('to stack on');
   });
 
   it('judges the PINNED head, not whatever HEAD happens to be by the time it runs', () => {
@@ -177,6 +181,7 @@ describe('ship base relatedness — the refusal (sc-2357)', () => {
 
     expect(r.status).toBe(0);
     expect(r.stderr).toContain('GUARD_SHIP_BASE_OK:');
+    expect(r.stderr).not.toContain('to stack on');
     // Naming the cost is the point. The incident's agent answered twelve phantom clone findings with
     // twelve permanent allowlist entries; an override that says nothing invites exactly that again.
     expect(r.stderr).toMatch(
@@ -329,6 +334,33 @@ describe('ship base relatedness — message shapes the fixtures do not otherwise
     expect(r.status).toBe(1);
     expect(r.stderr).toContain('(origin/line/1.0) is not contained in origin/hotfix/2.0');
     expect(r.stderr).toContain("pass --base 'line/1.0'");
+  });
+
+  it('names the stacking path when an open parent branch was MERGED into main-based work', () => {
+    // The shape a follow-up takes when its parent PR is still open: `--base main` would ship the
+    // parent's files, so the refusal has to name the parent branch as somewhere the work can go.
+    const { dir, git } = seedTwoLines();
+    const commit = (file: string) => {
+      writeFileSync(join(dir, file), `${file}\n`);
+      git(['add', file]);
+      git(['commit', '-q', '-m', file]);
+    };
+    git(['switch', '-q', '-c', 'parent', 'origin/main']);
+    commit('p1.txt');
+    git(['push', '-q', 'origin', 'HEAD:parent']);
+    const parent = git(['rev-parse', 'HEAD']).trim();
+    git(['switch', '-q', '-c', 'story', 'origin/main']);
+    commit('m1.txt');
+    commit('m2.txt'); // main is two ahead, so it stays the nearer ancestor after the merge
+    git(['push', '-q', 'origin', 'HEAD:main']);
+    git(['merge', '-q', '--no-edit', 'parent']);
+    git(['fetch', '-q', 'origin']);
+
+    const r = relatedness(dir, 'parent', parent);
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('(origin/main) is not contained in origin/parent');
+    expect(r.stderr).toContain('to stack on origin/parent instead, redo only this change');
   });
 
   it('caps the contained-by list at four and counts the rest, never listing origin/HEAD', () => {

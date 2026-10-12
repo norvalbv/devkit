@@ -9,10 +9,13 @@ afterEach(cleanupHomes);
 
 const BUILDERS = ['package', 'standalone', 'overlay'];
 const AI_CHAIN = { biome: false, guards: ['comments', 'decisions', 'review'] };
-const WITH_QAVIS = { biome: false, guards: ['comments', 'decisions', 'review', 'qavis-advisory'] };
+const WITH_UI_EVIDENCE = {
+  biome: false,
+  guards: ['comments', 'decisions', 'review', 'ui-evidence'],
+};
 const review = (extra = {}) => ({
   DEVKIT_RUN_MODE: 'review',
-  DEVKIT_REVIEW_GUARDS: 'comments,decisions,review,qavis-advisory',
+  DEVKIT_REVIEW_GUARDS: 'comments,decisions,review,ui-evidence',
   ...extra,
 });
 
@@ -41,9 +44,9 @@ describe.each(BUILDERS)('%s hook, review mode', (builder) => {
     expect(r.status).toBe(1);
   });
 
-  it('a reviewer finding is deferred past the qavis advisory', () => {
-    const r = runHook(review({ REVIEW_RC: '1' }), WITH_QAVIS, { builder });
-    expect(r.calls).toContain('guard-qavis-advisory');
+  it('a reviewer finding is deferred past the ui-evidence reminder', () => {
+    const r = runHook(review({ REVIEW_RC: '1' }), WITH_UI_EVIDENCE, { builder });
+    expect(r.calls).toContain('guard-ui-evidence');
     expect(r.status).toBe(1);
   });
 
@@ -51,11 +54,6 @@ describe.each(BUILDERS)('%s hook, review mode', (builder) => {
     const r = runHook(review({ DEC_RC: rc }), AI_CHAIN, { builder });
     expect(r.calls).toContain('guard-decisions');
     expect(r.calls).not.toContain('guard-review');
-    expect(r.status).toBe(1);
-  });
-
-  it('a qavis strict block (3) still exits at once', () => {
-    const r = runHook(review({ QAVIS_RC: '3' }), WITH_QAVIS, { builder });
     expect(r.status).toBe(1);
   });
 
@@ -122,18 +120,18 @@ describe.each(BUILDERS)('%s hook, commit and dry-gates keep their policy', (buil
     expect(r.status).toBe(1);
   });
 
-  it('dry-gates keeps a reviewer finding fail-fast before the qavis advisory', () => {
+  it('dry-gates keeps a reviewer finding fail-fast before the ui-evidence reminder', () => {
     const r = runHook(
       {
         REVIEW_RC: '1',
         DEVKIT_RUN_MODE: 'dry-gates',
-        DEVKIT_REVIEW_GUARDS: 'review,qavis-advisory',
+        DEVKIT_REVIEW_GUARDS: 'review,ui-evidence',
       },
-      WITH_QAVIS,
+      WITH_UI_EVIDENCE,
       { builder },
     );
     expect(r.calls).toContain('guard-review --gate');
-    expect(r.calls).not.toContain('guard-qavis-advisory');
+    expect(r.calls).not.toContain('guard-ui-evidence');
     expect(r.status).toBe(1);
   });
 });

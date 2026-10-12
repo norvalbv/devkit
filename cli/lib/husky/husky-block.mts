@@ -21,7 +21,7 @@ import {
 } from './gate-policy/block-helpers.mts';
 import { buildPreCommitExit, PRE_COMMIT_PASS_EXIT } from './gate-policy/commit-gate-log.mts';
 import { FALLOW_STAGED, FALLOW_STAGED_BLOCK, indent } from './gate-policy/fallow-staged.mts';
-import { formatFragment } from './format-fragment.mts';
+import { formatFragment, overlayFormatters, type StepFormatter } from './format-fragment.mts';
 import { markEnd, markStart } from './husky.mts';
 import {
   DK_COMMIT_INDEX_CAPTURE,
@@ -72,16 +72,12 @@ __dk_gate_deterministic "$__dk_package_bin_dir/guard-deterministic" --hook "\${D
 // a doomed commit never pays for a judge. Explicit lists — never rely on object-key order.
 const DETERMINISTIC_GUARD_IDS = ['size', 'fanout', 'dup', 'clone', 'coverage', 'comments'];
 const AI_GUARD_IDS = ['decisions', 'review'] as const;
-// qavis-advisory runs after every judge that can demand an edit (sc-3012), own 0/3 exit contract.
-// This wrapper stays fail-open when qavis/the bin is absent, matching the fallow precedent.
-export const QAVIS_ADVISORY_ID = 'qavis-advisory';
-const QAVIS_FRAGMENT = `# devkit:guard-qavis-advisory
-qarc=0
-__dk_no_git_env "$__dk_package_bin_dir/guard-qavis-advisory" --gate || qarc=$?
-[ "$qarc" -eq 3 ] && exit 1
-# qarc 0 = continue (SILENT / advisory-only / receipt-cleared / qavis absent); 3 = strict-ship block
-# (the remedy — run qavis, or export GUARD_QAVIS_OK=1 — is printed by the bin).
-# /devkit:guard-qavis-advisory`;
+// ui-evidence runs last: a reminder about the final staged set, which never blocks. It speaks on a
+// plain commit and a ship alike, and `|| true` keeps a missing bin fail-open.
+export const UI_EVIDENCE_ID = 'ui-evidence';
+const UI_EVIDENCE_FRAGMENT = `# devkit:guard-ui-evidence
+__dk_no_git_env "$__dk_package_bin_dir/guard-ui-evidence" || true
+# /devkit:guard-ui-evidence`;
 // Inject user bins before gates when a GUI client's minimal PATH omits bun/bunx.
 export const PATH_SETUP = `# GUI git clients launch with a minimal PATH that omits user bin dirs, so \`bun\`/\`bunx\`
 # can go missing → the hook fails. Prepend the standard user install locations.
@@ -120,7 +116,8 @@ ${PATH_SETUP}
 // .devkit/config.json at commit time), or a structure command joined via --structure.
 function wantsDeterministic(selection: HookSelection): boolean {
   if (selection.antiSlop || selection.structureCmd) return true;
-  return DETERMINISTIC_GUARD_IDS.some((id) => selection.guards?.includes(id));
+  // decisions arms the orchestrator's decision-checks gate, which runs Checks linked to Targets.
+  return [...DETERMINISTIC_GUARD_IDS, 'decisions'].some((id) => selection.guards?.includes(id));
 }
 
 /** Install-mode slots around the shared gate order; overlay's lint checks are the only filler. */
@@ -130,6 +127,8 @@ interface BlockOptions {
   preAi?: string;
   /** Diagnostics that must not hide a guard's report, so they run after every guard. */
   postGuards?: string;
+  /** Overlay's config-probed formatter chain; other modes render biome alone when selected. */
+  formatChain?: StepFormatter[];
 }
 
 /** The ONE gate body for every install mode: format (the prefix-cache key hashes the post-format
@@ -137,7 +136,7 @@ interface BlockOptions {
 export function buildGuardBlock(
   selection: HookSelection,
   pkgRel = '',
-  { binDir = 'package', preAi, postGuards }: BlockOptions = {},
+  { binDir = 'package', preAi, postGuards, formatChain }: BlockOptions = {},
 ): string {
   const handoff = selection.guards?.some((id) => id === 'review' || id === 'sentry') ?? false;
   const pieces = [
@@ -148,7 +147,8 @@ export function buildGuardBlock(
     DK_GATE_BLOCK_HELPERS,
   ];
   // First so a first-gate block still records the run's terminal (the trap covers every exit path).
-  if (!pkgRel && selection.biome) pieces.push(formatFragment(BIN_DIRS[binDir].formatter));
+  if (!pkgRel && (selection.biome || formatChain))
+    pieces.push(formatFragment(BIN_DIRS[binDir].formatter, formatChain));
   if (wantsDeterministic(selection))
     pieces.push(
       DK_DETERMINISTIC_GATE_HELPER,
@@ -161,8 +161,8 @@ export function buildGuardBlock(
   }
   if (selection.guards?.includes('sentry'))
     pieces.push(selectedFragment('sentry', sentryShipPrewarmFragment(binDir)));
-  if (selection.guards?.includes(QAVIS_ADVISORY_ID))
-    pieces.push(selectedFragment(QAVIS_ADVISORY_ID, QAVIS_FRAGMENT));
+  if (selection.guards?.includes(UI_EVIDENCE_ID))
+    pieces.push(selectedFragment(UI_EVIDENCE_ID, UI_EVIDENCE_FRAGMENT));
   if (postGuards) pieces.push(postGuards);
   pieces.push(REVIEW_FAILURE_FINALIZER);
   if (BIN_DIRS[binDir].close) pieces.push(BIN_DIRS[binDir].close);
@@ -285,6 +285,7 @@ export function buildOverlayHook(
     binDir: 'global',
     preAi: overlayStagedGates(fallow),
     postGuards: overlayReviewBaseline(fallow),
+    formatChain: overlayFormatters(selection),
   });
   return `${HOOK_PREAMBLE}
 # devkit OVERLAY (LOCAL, git-ignored). Runs devkit's gates + lint overlay on this commit, then

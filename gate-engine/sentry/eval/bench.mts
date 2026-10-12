@@ -36,8 +36,10 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isolateBenchTelemetry } from '../../judge/run-context.mts';
 import { buildContext, buildPrompt, judge, shouldJudge } from '../check-sentry.mts';
 
+isolateBenchTelemetry();
 const here = path.dirname(fileURLToPath(import.meta.url));
 const casesPath = path.join(here, 'cases.jsonl');
 const baselinePath = path.join(here, 'results.baseline.json');

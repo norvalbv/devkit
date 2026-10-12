@@ -1,0 +1,8 @@
+{
+ "id": "q2-drift",
+ "slug": "base-drift-surfaced-at-read-time",
+ "file": "cli/lib/ship/base-drift/freshness.mjs",
+ "prompt": "freshness in cli/lib/ship/base-drift/freshness.mjs crashes `devkit base-status` when the machine is offline, because fetchBase rejects. Make it survive a failed fetch. Keep the change small and do not add new files.",
+ "bindingOffset": 442,
+ "bindingText": "a failed fetch degrades to a LOUD 'unknown'"
+}
