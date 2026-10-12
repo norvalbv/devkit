@@ -5,6 +5,10 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  GATE_REASON_ENV,
+  readGateReason,
+} from '../../../../../gate-engine/deterministic/reason.mts';
 import antiSlop from '../../../../commands/oxc/anti-slop.mts';
 import {
   isOverlayOxcInstall,
@@ -77,6 +81,7 @@ describe('anti-slop check FAIL output (wiring)', () => {
   });
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
     for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
   });
 
@@ -112,6 +117,20 @@ describe('anti-slop check FAIL output (wiring)', () => {
     expect(stderr).toMatch(/FAIL — [1-9]\d* new error finding\(s\)/u);
     expect(stderr).toMatch(/deps/u);
     expect(stderr).toContain(ACCEPT_VIA_OVERRIDE);
+  });
+
+  it('records the FAIL line, then the rule and location, for the aggregated verdict', () => {
+    const cwd = repository(false);
+    const reason = join(mkdtempSync(join(tmpdir(), 'devkit-anti-slop-reason-')), 'reason.txt');
+    roots.push(join(reason, '..'));
+    vi.stubEnv(GATE_REASON_ENV, reason);
+    expect(antiSlop(['check', '--staged'], cwd)).toBe(1);
+    const [summary, ...locations] = readGateReason(reason);
+    expect(summary).toMatch(/^anti-slop: FAIL — 1 new error finding\(s\)/u);
+    expect(locations).toEqual([
+      expect.stringMatching(/^ERROR \S+ src\/a\.test\.ts:3:\d+ \(\+1\)$/u),
+    ]);
+    expect(locations[0]).toContain(MOCKING);
   });
 
   it('prints the overlay route, not the Oxlint config, in an overlay install', () => {

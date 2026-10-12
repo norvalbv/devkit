@@ -170,9 +170,11 @@ Before you write a verdict, get an INDEPENDENT check on the frame — the one th
 
 ### Phase 4: Return the Closed Response Contract
 
-Return **exactly one JSON object** as the final subagent message. Do not wrap it in a Markdown fence,
-add prose before or after it, or write any repository/provider-directory file. The provider hook
-captures the final message outside the repository.
+Return **exactly one JSON object** as your report: pass it verbatim to your harness's report tool
+(such as `SubagentHandback`) when one exists, because plain final text is then never delivered;
+otherwise make it your final message. Do not wrap it in a Markdown fence, add prose before or after
+it, or write any repository/provider-directory file. The provider hook captures the delivered report
+outside the repository.
 
 Use exactly these root fields (no additions):
 
@@ -247,5 +249,5 @@ If the critique cannot complete, return `aborted` with the same neutral fields, 
 - **Reference project context**. Ground the critique in `guard.config.json`, the codebase, and (when present) the decision log — THIS project, not abstract best practices.
 - **Return only the closed JSON contract.** Never write runtime critique output into the repository
   or a provider directory; findings and edge cases live in the final response for external capture.
-- **Make the final message machine-parseable.** Its first character is `{` and its last character is
-  `}`. Remove any lead-in, confirmation, Markdown fence, or trailing commentary before returning it.
+- **Make the delivered report machine-parseable.** Its first character is `{` and its last character
+  is `}`. Remove any lead-in, confirmation, Markdown fence, or trailing commentary before returning it.

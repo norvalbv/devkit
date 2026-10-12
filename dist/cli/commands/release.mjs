@@ -104,11 +104,18 @@ function baseCiLines(cwd, base, sha, override) {
     if (ci.verdict === 'green') {
         if (override)
             console.log('devkit release: base CI is green; --ci-override is not recorded.');
-        return [`Base CI: ${finding}`];
+        return { green: true, lines: [`Base CI: ${finding}`] };
     }
     if (override && ci.verdict !== 'unreadable') {
         console.log(`devkit release: ${finding} — releasing under --ci-override.`);
-        return ['## Base CI override', '', finding, '', `Reason given with --ci-override: ${override}`];
+        const lines = [
+            '## Base CI override',
+            '',
+            finding,
+            '',
+            `Reason given with --ci-override: ${override}`,
+        ];
+        return { green: false, lines };
     }
     console.error(`devkit release: base CI is not green — ${finding}`);
     console.error(REMEDY[ci.verdict]);
@@ -130,6 +137,8 @@ Usage:
   --yes          Skip the release-PR confirm prompt.
   --ci-override  Release although the base commit's CI is not green. The reason is required and is
                  recorded in the release PR body.
+
+The local test suite runs only under --ci-override: a green base commit already passed it in CI.
 
 Refuses outside the devkit repo, on a dirty tree, or if the target tag already exists. It also
 refuses unless HEAD is origin's tip of the base branch and that commit's newest completed run of the
@@ -198,12 +207,13 @@ export default async function release(args, cwd) {
         return 1;
     }
     const sha = git(['rev-parse', 'HEAD'], cwd);
-    const ciLines = onOriginTip(cwd, baseBranch, sha) && baseCiLines(cwd, baseBranch, sha, override);
-    if (!ciLines)
+    const baseCi = onOriginTip(cwd, baseBranch, sha) && baseCiLines(cwd, baseBranch, sha, override);
+    if (!baseCi)
         return 1;
+    const suite = baseCi.green ? 'tests already passed in CI' : 'run tests';
     const releaseBranch = `release/${tag}`;
     console.log(`devkit release: ${current} → ${target} (${bump})`);
-    console.log(`  bump package.json + README pins · run tests · build dist · open PR ${releaseBranch} → ${baseBranch}`);
+    console.log(`  bump package.json + README pins · ${suite} · build dist · open PR ${releaseBranch} → ${baseBranch}`);
     console.log(`  tag ${tag} only after the PR is squash-merged`);
     if (values['dry-run']) {
         console.log('  --dry-run: nothing written.');
@@ -220,13 +230,19 @@ export default async function release(args, cwd) {
             return 0;
         }
     }
-    console.log('Running tests…');
-    try {
-        execFileSync('bun', ['run', 'test:run'], { cwd, stdio: 'inherit' });
+    // CI ran this suite on this exact commit; an overridden base has no such proof, so it runs here.
+    if (baseCi.green) {
+        console.log('Skipping the local test suite: CI passed it on this commit.');
     }
-    catch {
-        console.error('devkit release: tests failed — not releasing.');
-        return 1;
+    else {
+        console.log('Running tests…');
+        try {
+            execFileSync('bun', ['run', 'test:run'], { cwd, stdio: 'inherit' });
+        }
+        catch {
+            console.error('devkit release: tests failed — not releasing.');
+            return 1;
+        }
     }
     // Bump via targeted string replace (preserves exact formatting; no re-serialize).
     const bumped = pkgRaw.replace(`"version": "${current}"`, `"version": "${target}"`);
@@ -295,12 +311,15 @@ export default async function release(args, cwd) {
     const prBody = [
         `Automated release PR for ${tag}.`,
         '',
-        'The version bump, README pins, full test suite, rebuilt dist, and dist smoke check completed',
-        'before this PR was opened.',
+        baseCi.green
+            ? 'The test suite passed in CI on the base commit; it was not re-run locally.'
+            : 'The full test suite ran locally, because the base commit had no green CI run.',
+        'The version bump, README pins, rebuilt dist, and dist smoke check completed before this PR',
+        'was opened.',
         '',
         `Do not tag the release branch commit. After squash-merging, tag the merge commit as ${tag}.`,
         '',
-        ...ciLines,
+        ...baseCi.lines,
     ].join('\n');
     // ship cuts the PR from origin's tip, so a base that moved since the CI read is refused.
     if (!onOriginTip(cwd, baseBranch, sha)) {

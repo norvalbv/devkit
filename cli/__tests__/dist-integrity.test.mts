@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { inspectDistIntegrity, printDistIntegrityFailure } from '../lib/ship/dist-integrity.mts';
-import { rootRegistry } from './_helpers.mts';
+import { buildableFixture, rootRegistry } from './_helpers.mts';
 
 const GIT_ENV = { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' };
 const preflightScript = fileURLToPath(new URL('../lib/ship/dist-integrity.mts', import.meta.url));
@@ -20,6 +20,7 @@ const CLEAN_ACTIVE = {
   untracked: [],
   unlexable: [],
   missing: [],
+  stale: [],
 };
 const { mkTmp, cleanup } = rootRegistry();
 afterEach(cleanup);
@@ -71,6 +72,8 @@ describe('inspectDistIntegrity', () => {
     const report = await inspectDistIntegrity(root, base, ['cli/new.mts']);
 
     expect(report.unbriefed).toEqual(['dist/cli/new.mjs']);
+    // Already staged: the remedy is to brief it, never a redundant `git add -f`.
+    expect(report.untracked).toEqual([]);
   });
 
   it('passes once the new artifact is tracked and explicitly briefed', async () => {
@@ -420,6 +423,43 @@ describe('inspectDistIntegrity', () => {
     ]);
   });
 
+  it('walks an unbriefed importer missing from disk, which still ships at BASE', async () => {
+    const { root } = repo();
+    mkdirSync(join(root, 'dist/cli'));
+    writeFileSync(join(root, 'dist/cli/keep.mjs'), "import '../index.mjs';\n");
+    git(root, 'add', '-f', 'dist/cli/keep.mjs');
+    git(root, 'commit', '-q', '-m', 'importer');
+    const head = git(root, 'rev-parse', 'HEAD');
+    // A clean wiped keep.mjs from disk; its BASE copy still lands and still imports index.mjs.
+    rmSync(join(root, 'dist/cli/keep.mjs'));
+    git(root, 'rm', '-q', '--cached', 'dist/index.mjs');
+    writeFileSync(join(root, 'dist/cli/new.mjs'), "import './keep.mjs';\n");
+
+    const report = await inspectDistIntegrity(root, head, ['dist/cli/new.mjs', 'dist/index.mjs']);
+
+    expect(report.unresolved).toEqual([
+      { importer: 'dist/cli/keep.mjs', specifier: '../index.mjs', target: 'dist/index.mjs' },
+    ]);
+  });
+
+  it('runs in a checkout whose BASE tracks no dist at all', async () => {
+    const root = mkTmp('dist-integrity-');
+    git(root, 'init', '-q', '-b', 'main');
+    git(root, 'config', 'user.email', 'a@b.c');
+    git(root, 'config', 'user.name', 'a');
+    writeFileSync(join(root, 'package.json'), `${JSON.stringify({ name: '@norvalbv/devkit' })}\n`);
+    git(root, 'add', 'package.json');
+    git(root, 'commit', '-q', '-m', 'base');
+    mkdirSync(join(root, 'dist/cli'), { recursive: true });
+    writeFileSync(join(root, 'dist/cli/new.mjs'), 'export {};\n');
+
+    const report = await inspectDistIntegrity(root, git(root, 'rev-parse', 'HEAD'), [
+      'cli/new.mts',
+    ]);
+
+    expect(report).toEqual({ ...CLEAN_ACTIVE, untracked: ['dist/cli/new.mjs'] });
+  });
+
   it('walks an unbriefed importer dropped from the index, which still ships at BASE', async () => {
     const { root } = repo();
     mkdirSync(join(root, 'dist/cli'));
@@ -451,6 +491,7 @@ describe('inspectDistIntegrity', () => {
       untracked: [],
       unlexable: [],
       missing: [],
+      stale: [],
     });
   });
 });
@@ -488,6 +529,7 @@ describe('inspectDistIntegrity — never-built sources', () => {
 
   it('passes once the built artifact is briefed', async () => {
     const { base, root } = repo();
+    buildableFixture(root);
     source(root, 'cli/new.mts');
     source(root, 'dist/cli/new.mjs');
 
@@ -552,6 +594,7 @@ describe('printDistIntegrityFailure', () => {
       unresolved: [{ importer: 'dist/a.mjs', specifier: './b.mjs', target: 'dist/b.mjs' }],
       unlexable: [],
       missing: [],
+      stale: [],
     });
 
     expect(code).toBe(1);
@@ -572,6 +615,7 @@ describe('printDistIntegrityFailure', () => {
       unresolved: [],
       unlexable: ['dist/asset.mjs'],
       missing: [],
+      stale: [],
     });
 
     expect(code).toBe(1);
@@ -588,6 +632,7 @@ describe('printDistIntegrityFailure', () => {
       unresolved: [],
       unlexable: ['dist/y.mjs'],
       missing: [],
+      stale: [],
     });
 
     expect(code).toBe(0);
@@ -597,6 +642,7 @@ describe('printDistIntegrityFailure', () => {
 
 function seedShipRepo(): { base: string; root: string } {
   const fixture = repo();
+  buildableFixture(fixture.root);
   mkdirSync(join(fixture.root, 'cli'));
   mkdirSync(join(fixture.root, 'dist/cli'));
   writeFileSync(join(fixture.root, 'cli/new.mts'), 'export const value = 1;\n');
@@ -628,6 +674,15 @@ describe('dist-integrity CLI', () => {
 
     expect(result.status, result.stderr).toBe(0);
     expect(result.stderr).not.toContain('dist integrity preflight failed');
+  });
+
+  it('resolves the checkout compiler from a relative --root', () => {
+    const { base, root } = seedShipRepo();
+
+    const result = preflight(root, ['--root', '.', '--base', base, '--', 'dist/cli/new.mjs']);
+
+    expect(result.stderr).not.toContain('no TypeScript compiler');
+    expect(result.status, result.stderr).toBe(0);
   });
 
   it('exits 1 for a brief that leaves its generated artifact behind', () => {

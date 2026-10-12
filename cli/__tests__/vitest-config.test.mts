@@ -129,4 +129,44 @@ describe('devkit vitest config under vitest 5', () => {
     expect(hits.get(2)).toBeGreaterThan(0);
     expect(hits.get(6)).toBe(0);
   });
+
+  // Piped, vitest clamps the table to 80 columns, and under an agent it hides fully covered files.
+  it('gives test:run:coverage:changed a whole-name row for a fully covered file', () => {
+    const root = realpathSync(scratch);
+    const name = 'a-module-with-a-long-name.mts';
+    writeFileSync(path.join(root, name), 'export const one = (): number => 1;\n');
+    writeFileSync(
+      path.join(root, 'one.test.mts'),
+      [
+        "import { expect, it } from 'vitest';",
+        `import { one } from './${name}';`,
+        "it('covers it', () => expect(one()).toBe(1));",
+        '',
+      ].join('\n'),
+    );
+    writeFileSync(
+      path.join(root, 'vitest.config.mjs'),
+      `import base from ${JSON.stringify(pathToFileURL(path.join(REPO, 'vitest.config.mjs')).href)};\n` +
+        "export default { test: { include: ['one.test.mts'], coverage: base.test.coverage } };\n",
+    );
+    const result = testSpawnSync(
+      process.execPath,
+      [
+        VITEST,
+        'run',
+        '--root',
+        root,
+        '--coverage.enabled',
+        `--coverage.include=${name}`,
+        `--coverage.reportsDirectory=${path.join(root, 'coverage')}`,
+      ],
+      {
+        cwd: root,
+        encoding: 'utf8',
+        env: { ...process.env, CI: '1', AI_AGENT: '1', DEVKIT_COVERAGE_CHANGED: '1' },
+      },
+    );
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toMatch(/^ a-module-with-a-long-name\.mts +\| +100 /m);
+  });
 });

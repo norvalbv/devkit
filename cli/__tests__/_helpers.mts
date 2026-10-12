@@ -12,11 +12,13 @@ import {
 import { once } from 'node:events';
 import {
   chmodSync,
+  copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { availableParallelism, loadavg, tmpdir } from 'node:os';
@@ -27,6 +29,7 @@ import { shQuote } from '../lib/ship/redact-secrets.mts';
 
 /** Absolute path to the devkit CLI entry (cli/index.mjs). */
 export const CLI = join(dirname(fileURLToPath(import.meta.url)), '..', 'index.mts');
+const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const TEST_SUBPROCESS = fileURLToPath(new URL('./test-subprocess.mts', import.meta.url));
 export const TEST_SUBPROCESS_TIMEOUT_MS = 90_000;
 /** Exported alongside the deadline so test-subprocess.test.mts can pin the resolved outer budget. */
@@ -186,12 +189,13 @@ export async function assertInterruptedGateKeepsWorktree({
     env: {
       ...env,
       SHIP_DRY_RUN: '1',
-      SHIP_COMMIT_TIMEOUT: '3',
+      // The test TERMs on ready, so no run waits this out; a tight value lost to load before the hook.
+      SHIP_COMMIT_TIMEOUT: '30',
       SIGNAL_HOOK_READY: ready,
       SIGNAL_HOOK_RESULT: result,
     },
   });
-  await waitForPath(ready, 15_000, child);
+  await waitForPath(ready, 60_000, child);
   if (!child.kill('SIGTERM')) throw new Error('could not signal ship shell');
   const [code, signal] = await once(child, 'exit');
   await waitForPath(result, 15_000);
@@ -367,4 +371,12 @@ export function ceilingTimeoutMessage({
     `${expected} (wedge marker ${marker} absent; ${formatLoad(load, cpus)}). ${cause}. ` +
     `Re-run this file alone to tell load from a regression.\n\n${output}`
   );
+}
+
+/** Lets a tmp devkit-shaped repo run the real build: this checkout's tsconfigs and node_modules. */
+export function buildableFixture(root: string): void {
+  for (const file of ['tsconfig.json', 'tsconfig.build.json']) {
+    copyFileSync(join(REPO_ROOT, file), join(root, file));
+  }
+  symlinkSync(join(REPO_ROOT, 'node_modules'), join(root, 'node_modules'));
 }

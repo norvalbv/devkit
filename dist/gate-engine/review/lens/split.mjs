@@ -178,12 +178,14 @@ export function planReviewWork(selected, diffs, cache, salts, keyOf, groups = re
                 const d = cache[p.key].duration_ms;
                 return sum + (typeof d === 'number' ? d : 0);
             }, 0);
+            const waivers = parts.flatMap((p) => cachedWaivers(cache[p.key]) ?? []);
             fullyCached.push({
                 name,
                 duration,
                 model: z.string().min(1).safeParse(cache[parts[0].key].model).data,
                 judgedBases,
                 coverage: coverageFields(parts),
+                waivers,
             });
             const degradedCause = cachedRetrievalDegradation(name, cache[parts[0].key]);
             // Every part: a split replays DEGRADED when any one of its groups was judged degraded.
@@ -197,7 +199,7 @@ export function planReviewWork(selected, diffs, cache, salts, keyOf, groups = re
                 part: false,
                 degradedCause,
                 mcpDegradedCause,
-                waivers: parts.flatMap((p) => cachedWaivers(cache[p.key]) ?? []),
+                waivers,
             });
             continue;
         }
@@ -231,6 +233,7 @@ export function planReviewWork(selected, diffs, cache, salts, keyOf, groups = re
                         : undefined,
                     // A cached degraded group keeps the merged row DEGRADED beside freshly judged ones.
                     mcpDegraded: ((cause) => (cause ? { cause, cached: true } : undefined))(cachedMcpDegradation(e)),
+                    waivers: cachedWaivers(e) ?? [],
                 },
                 secs: 0,
                 task: p,
