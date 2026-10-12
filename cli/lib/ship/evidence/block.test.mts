@@ -95,9 +95,28 @@ describe('evidence block', () => {
     expect(readEvidenceBlock(block, HEAD)?.reason).toBe('docs-only');
   });
 
-  it('fills the reserved verdict line when given one', () => {
-    const block = renderEvidenceBlock(captured, evidence, '**Verdict:** human-review');
-    expect(block).toContain(`${VERDICT_SLOT} **Verdict:** human-review\n`);
+  it('prints the verdict line and records every reason in the data line', () => {
+    const mergeVerdict = {
+      verdict: 'human-review' as const,
+      reasons: [
+        { code: 'over-size' as const, detail: '60/50 lines' },
+        { code: 'captured-proof' as const },
+      ],
+    };
+    const line = '**Merge verdict:** human-review (over-size: 60/50 lines) · advisory';
+    const block = renderEvidenceBlock(captured, evidence, { line, verdict: mergeVerdict });
+
+    expect(block).toContain(`${VERDICT_SLOT} ${line}\n`);
+    expect(readEvidenceBlock(block, HEAD)).toEqual({ ...captured, mergeVerdict, stale: false });
+  });
+
+  it('keeps an unavailable verdict on one line, with no data, and never ends the block', () => {
+    const line = `**Merge verdict:** unavailable (git failed\n${EVIDENCE_END} <!-- x -->)`;
+    const block = renderEvidenceBlock(captured, evidence, { line });
+
+    expect(block).toContain(`${VERDICT_SLOT} **Merge verdict:** unavailable (git failed &lt;!--`);
+    expect(block.split(EVIDENCE_END)).toHaveLength(2);
+    expect(readEvidenceBlock(block, HEAD)).toEqual({ ...captured, stale: false });
   });
 
   it('keeps marker text and comment closers in content from ending the block or its data', () => {

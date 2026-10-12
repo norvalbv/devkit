@@ -218,6 +218,7 @@ export interface FullyCachedReviewer {
   model: string | undefined;
   judgedBases: (string | null)[];
   coverage: ReturnType<typeof coverageFields>;
+  waivers: CachedWaiver[];
 }
 
 export interface ReviewWorkPlan {
@@ -306,12 +307,14 @@ export function planReviewWork(
         const d = cache[p.key].duration_ms;
         return sum + (typeof d === 'number' ? d : 0);
       }, 0);
+      const waivers = parts.flatMap((p) => cachedWaivers(cache[p.key]) ?? []);
       fullyCached.push({
         name,
         duration,
         model: z.string().min(1).safeParse(cache[parts[0].key].model).data,
         judgedBases,
         coverage: coverageFields(parts),
+        waivers,
       });
       const degradedCause = cachedRetrievalDegradation(name, cache[parts[0].key]);
       // Every part: a split replays DEGRADED when any one of its groups was judged degraded.
@@ -325,7 +328,7 @@ export function planReviewWork(
         part: false,
         degradedCause,
         mcpDegradedCause,
-        waivers: parts.flatMap((p) => cachedWaivers(cache[p.key]) ?? []),
+        waivers,
       });
       continue;
     }
@@ -361,6 +364,7 @@ export function planReviewWork(
           mcpDegraded: ((cause) => (cause ? { cause, cached: true } : undefined))(
             cachedMcpDegradation(e),
           ),
+          waivers: cachedWaivers(e) ?? [],
         } as LensPart['res'],
         secs: 0,
         task: p,
