@@ -3,7 +3,6 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { loadCache, savePasses } from '../cache.mts';
 import { RETRIEVAL_UNRECORDED } from '../contracts/checklist.mts';
-import { CACHED_RETRIEVAL_UNPROVEN } from '../evidence/base-context.mts';
 import { runReviewGate } from '../run-review.mts';
 import {
   cleanupReviewFixtures,
@@ -13,8 +12,8 @@ import {
   writeArtifact,
 } from './run-review-fixtures.mts';
 
-// sc-2317: commit-guard's PASS without semantic retrieval must never read as a clean PASS — not on
-// the live completion line, not in telemetry, and not when a later run replays it from the cache.
+// commit-guard's PASS without semantic retrieval never reads as a clean PASS, and is never replayed
+// from the cache: a later run re-attempts retrieval instead.
 
 const ENV_KEYS = [
   'GUARD_AI_STRICT',
@@ -93,8 +92,8 @@ function captureEvents(repo: string): () => SinkRow[] {
       .map((l): SinkRow => JSON.parse(l));
 }
 
-const commitGuardCacheEntry = (repo: string) =>
-  Object.values(loadCache(repo)).filter((m) => 'degraded_cause' in m);
+const commitGuardCacheEntries = (repo: string) =>
+  Object.keys(loadCache(repo)).filter((k) => k.startsWith('commit-guard:'));
 
 // A commit-guard completion or cache line whose PASS is NOT immediately marked (DEGRADED).
 const bareCommitGuardPass = (lines: string[]) =>
@@ -131,24 +130,36 @@ describe('commit-guard PASS without semantic retrieval (sc-2317)', () => {
     expect(row).toMatchObject({ status: 'pass', degraded_cause: 'remote embeddings unreachable' });
   });
 
-  it('a cache hit on the same diff replays DEGRADED and re-emits gate_degraded', async () => {
+  it('the same diff re-judges commit-guard instead of replaying the DEGRADED PASS', async () => {
     const repo = consumerRepo({ backend: true });
     await runReviewGate(repo, { exec: passRecording(repo, UNREACHABLE) });
-    expect(commitGuardCacheEntry(repo)).toHaveLength(1);
+    expect(commitGuardCacheEntries(repo)).toEqual([]);
     stderr.length = 0;
     const events = captureEvents(repo);
-    const exec = mkExec(async () => 'VERDICT: PASS');
+    const exec = passRecording(repo, UNREACHABLE);
     expect(await runReviewGate(repo, { exec })).toBe(0);
-    expect(exec).not.toHaveBeenCalled();
+    expect(exec.mock.calls.map(([o]) => o.label)).toContain('review:commit-guard');
     expect(stderr).toContainEqual(
-      expect.stringMatching(
-        /^guard-review: commit-guard — cached PASS \(DEGRADED\) \(identical diff/,
-      ),
+      expect.stringMatching(/^guard-review: commit-guard — PASS \(DEGRADED\) in \d+s/),
     );
+    expect(stderr.join('\n')).not.toMatch(/commit-guard — cached PASS/);
     expect(bareCommitGuardPass(stderr)).toEqual([]);
     expect(events().filter((e) => e.type === 'gate_degraded')).toEqual([
       expect.objectContaining({ judge: 'commit-guard', cause: 'remote embeddings unreachable' }),
     ]);
+  });
+
+  it('once retrieval recovers the re-judge lands a clean PASS, which later runs replay', async () => {
+    const repo = consumerRepo({ backend: true });
+    await runReviewGate(repo, { exec: passRecording(repo, UNREACHABLE) });
+    expect(await runReviewGate(repo, { exec: passRecording(repo, { status: 'ok' }) })).toBe(0);
+    expect(commitGuardCacheEntries(repo)).toHaveLength(1);
+    stderr.length = 0;
+    const exec = mkExec(async () => 'VERDICT: PASS');
+    expect(await runReviewGate(repo, { exec })).toBe(0);
+    expect(exec).not.toHaveBeenCalled();
+    expect(stderr).toContain('guard-review: commit-guard — cached PASS (identical diff)');
+    expect(stderr.join('\n')).not.toContain('DEGRADED');
   });
 
   it('an unrecorded retrieval (stale synced script / forgetful judge) degrades — never assumed ok', async () => {
@@ -179,7 +190,6 @@ describe('commit-guard PASS without semantic retrieval (sc-2317)', () => {
     expect(await runReviewGate(repo, { exec: passRecording(repo, { status: 'ok' }) })).toBe(0);
     expect(stderr.join('\n')).not.toContain('DEGRADED');
     expect(events().filter((e) => e.type === 'gate_degraded')).toEqual([]);
-    expect(commitGuardCacheEntry(repo)).toEqual([]);
     expect(Object.values(loadCache(repo)).filter((m) => m.retrieval === 'ok')).toHaveLength(1);
     stderr.length = 0;
     await runReviewGate(repo, { exec: mkExec(async () => 'VERDICT: PASS') });
@@ -214,7 +224,7 @@ describe('commit-guard PASS without semantic retrieval (sc-2317)', () => {
     });
     await runReviewGate(repo, { exec });
     expect(stderr.join('\n')).not.toContain('DEGRADED');
-    expect(commitGuardCacheEntry(repo)).toEqual([]);
+    expect(commitGuardCacheEntries(repo)).toEqual([]);
   });
 
   it('a strict-ship checklist-contract recovery that lands on unavailable still reports DEGRADED', async () => {
@@ -238,25 +248,10 @@ describe('commit-guard PASS without semantic retrieval (sc-2317)', () => {
       degraded_cause: 'remote embeddings unreachable',
     });
     expect(bareCommitGuardPass(stderr)).toEqual([]);
-    expect(commitGuardCacheEntry(repo)).toHaveLength(1);
+    expect(commitGuardCacheEntries(repo)).toEqual([]);
   });
 
-  it('a malformed cached degraded_cause replays DEGRADED (unproven), never a bare PASS', async () => {
-    const repo = consumerRepo({ backend: true });
-    await runReviewGate(repo, { exec: passRecording(repo, UNREACHABLE) });
-    const degradedEntries = Object.entries(loadCache(repo)).filter(
-      ([, m]) => 'degraded_cause' in m,
-    );
-    expect(degradedEntries).toHaveLength(1);
-    for (const [key, meta] of degradedEntries)
-      savePasses(repo, { [key]: { ...meta, degraded_cause: 42 } });
-    stderr.length = 0;
-    expect(await runReviewGate(repo, { exec: mkExec(async () => 'VERDICT: PASS') })).toBe(0);
-    expect(stderr).toContainEqual(expect.stringContaining(CACHED_RETRIEVAL_UNPROVEN));
-    expect(bareCommitGuardPass(stderr)).toEqual([]);
-  });
-
-  it('a legacy cached PASS without a retrieval stamp replays DEGRADED, never a bare PASS', async () => {
+  it('a cached commit-guard PASS without a retrieval stamp is re-judged, never replayed', async () => {
     const repo = consumerRepo({ backend: true });
     await runReviewGate(repo, { exec: passRecording(repo, { status: 'ok' }) });
     const stamped = Object.entries(loadCache(repo)).filter(([, m]) => m.retrieval === 'ok');
@@ -265,8 +260,10 @@ describe('commit-guard PASS without semantic retrieval (sc-2317)', () => {
     for (const [key, { retrieval: _dropped, ...legacy }] of stamped)
       savePasses(repo, { [key]: legacy });
     stderr.length = 0;
-    expect(await runReviewGate(repo, { exec: mkExec(async () => 'VERDICT: PASS') })).toBe(0);
-    expect(stderr).toContainEqual(expect.stringMatching(/commit-guard — cached PASS \(DEGRADED\)/));
+    const exec = passRecording(repo, UNREACHABLE);
+    expect(await runReviewGate(repo, { exec })).toBe(0);
+    expect(exec.mock.calls.map(([o]) => o.label)).toContain('review:commit-guard');
+    expect(stderr.join('\n')).not.toMatch(/commit-guard — cached PASS/);
     expect(bareCommitGuardPass(stderr)).toEqual([]);
   });
 });
