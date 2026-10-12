@@ -208,7 +208,7 @@ export function normalizeCitedPath(path: string): string {
 const RULE_LOCATION_NOTE_RE = /^(.*?)\s+\([^()]*\)$/;
 
 /** The rule's CLAUDE.md: fences unwrapped around the whole location or its file part, note dropped. */
-function ruleFile(location: string): string {
+export function conventionRuleFile(location: string): string {
   const whole = normalizeCitedPath(location);
   const note = whole.match(RULE_LOCATION_NOTE_RE);
   const file = note && /CLAUDE\.md`*$/i.test(note[1]) ? note[1] : whole;
@@ -219,7 +219,7 @@ function ruleFile(location: string): string {
  * A lineless rule is told apart from its siblings by its quoted text. */
 export function conventionWaiverLens(finding: ConventionFinding): string {
   const file = normalizeCitedPath(finding.offendingPath);
-  const rule = ruleFile(finding.rulePath);
+  const rule = conventionRuleFile(finding.rulePath);
   if (finding.ruleLine !== null) return `${file}@${rule}:${finding.ruleLine}`;
   const text = finding.ruleQuote.toLowerCase().replace(/\s+/g, ' ').trim();
   const digest = createHash('sha256').update(`${rule}\0${text}`).digest('hex').slice(0, 8);

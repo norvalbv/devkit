@@ -143,10 +143,13 @@ describe('conventionWaiverLens', () => {
 describe('conventions blockingLenses contract (grounded, registry wiring)', () => {
   const contract = responseContractFor('conventions-v1');
   // A new 50-line file wholly added by the change, so every quote below grounds at its cited line.
+  // The two rules the transcripts below cite, at the lines they cite.
+  const RULES_MD = `${'\n'.repeat(11)}Keep files under 500 lines.\n${'\n'.repeat(7)}Never use console.log.\n`;
   const lines = Array.from({ length: 50 }, (_, i) => `const v${i + 1} = ${i + 1};`);
   const source: GroundingSource = {
     reviewedFiles: ['src/flows.ts'],
-    readStaged: (f) => (f === 'src/flows.ts' ? `${lines.join('\n')}\n` : null),
+    readStaged: (f) =>
+      f === 'src/flows.ts' ? `${lines.join('\n')}\n` : f === 'CLAUDE.md' ? RULES_MD : null,
     readHead: () => null,
     readDiff: (f) =>
       f === 'src/flows.ts'
