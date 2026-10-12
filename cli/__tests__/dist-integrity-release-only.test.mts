@@ -3,6 +3,7 @@
 import { execFileSync } from 'node:child_process';
 import {
   chmodSync,
+  existsSync,
   mkdirSync,
   readFileSync,
   rmSync,
@@ -22,6 +23,11 @@ import {
 import { SELF_HOST_EXTRAS } from '../lib/husky/self-host.mts';
 import { scopedTargets } from '../../gate-engine/decisions/scoped-targets.mts';
 import { loadReviewerTargetsBlocks } from '../../gate-engine/review/evidence/targets-block.mts';
+import {
+  readGateReason,
+  REASON_LINES,
+  reasonExcerpt,
+} from '../../gate-engine/deterministic/reason.mts';
 import { rootRegistry, testSpawnSync } from './_helpers.mts';
 
 const { mkTmp, cleanup } = rootRegistry();
@@ -380,6 +386,37 @@ describe('printReleaseOnlyDist', () => {
     expect(text).toContain('+1 more');
   });
 
+  it('records the refusal and its remedy as the gate reason, never advisory drift', () => {
+    const reasonFile = join(mkTmp('dist-reason-'), 'reason.txt');
+    vi.stubEnv('DEVKIT_GATE_REASON_FILE', reasonFile);
+    try {
+      capture({ active: true, releaseOnly: [], drift: drift(2) });
+      expect(existsSync(reasonFile)).toBe(false);
+
+      capture({ active: true, releaseOnly: ['dist/README.md'], drift: [] });
+      const reason = readFileSync(reasonFile, 'utf8');
+      expect(reason).toContain(REFUSED);
+      expect(reason).toContain('Fix: drop these from the brief');
+      expect(reason).toContain('devkit release');
+      expect(reason).toContain('dist/README.md');
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('keeps the remedy inside the runner excerpt when the file list overflows it', () => {
+    const reasonFile = join(mkTmp('dist-reason-'), 'reason.txt');
+    vi.stubEnv('DEVKIT_GATE_REASON_FILE', reasonFile);
+    try {
+      capture({ active: true, releaseOnly: drift(REASON_LINES + 5), drift: [] });
+      const { shown, omitted } = reasonExcerpt(readGateReason(reasonFile));
+      expect(omitted).toBeGreaterThan(0);
+      expect(shown.join('\n')).toContain('Fix: drop these from the brief');
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it('is silent when there is nothing to say or the repo is a consumer', () => {
     expect(capture({ active: true, releaseOnly: [], drift: [] })).toEqual({ code: 0, text: '' });
     expect(capture({ active: false, releaseOnly: ['dist/x.mjs'], drift: ['dist/y.mjs'] })).toEqual({
@@ -488,8 +525,12 @@ describe('dist-integrity CLI', () => {
 
 describe('--ship-staged: the self-host hook runs CI’s check from the ship worktree', () => {
   /** The hook's own invocation; ship exports the base and branch, the hook's cwd is the worktree. */
-  function shipStaged(root: string, ship: { base?: string; branch?: string }) {
-    const env: NodeJS.ProcessEnv = { ...process.env, ...GIT_ENV };
+  function shipStaged(
+    root: string,
+    ship: { base?: string; branch?: string },
+    extra: NodeJS.ProcessEnv = {},
+  ) {
+    const env: NodeJS.ProcessEnv = { ...process.env, ...GIT_ENV, ...extra };
     delete env.DEVKIT_SHIP_PR_BASE_SHA;
     delete env.DEVKIT_SHIP_BRANCH;
     if (ship.base) env.DEVKIT_SHIP_PR_BASE_SHA = ship.base;
@@ -518,6 +559,38 @@ describe('--ship-staged: the self-host hook runs CI’s check from the ship work
     expect(result.status).toBe(1);
     expect(result.stderr).toContain(REFUSED);
     expect(result.stderr).toContain('dist/README.md');
+  });
+
+  it('hands the deterministic runner a reason naming the file and the fix', () => {
+    const { base, root } = repo();
+    rebuild(root, 'dist/README.md');
+    stage(root, 'dist/README.md');
+    const reasonFile = join(mkTmp('dist-reason-'), 'reason.txt');
+
+    const result = shipStaged(
+      root,
+      { base, branch: 'feat/x' },
+      { DEVKIT_GATE_REASON_FILE: reasonFile },
+    );
+
+    expect(result.status).toBe(1);
+    const reason = readFileSync(reasonFile, 'utf8');
+    expect(reason).toContain('Fix: drop these from the brief');
+    expect(reason).toContain('dist/README.md');
+  });
+
+  it('records why it could not run, so a crash is not reported as "no reason"', () => {
+    const notARepo = mkTmp('dist-not-repo-');
+    const reasonFile = join(mkTmp('dist-reason-'), 'reason.txt');
+
+    const result = shipStaged(
+      notARepo,
+      { base: 'deadbeef', branch: 'feat/x' },
+      { DEVKIT_GATE_REASON_FILE: reasonFile },
+    );
+
+    expect(result.status).toBe(1);
+    expect(readFileSync(reasonFile, 'utf8')).toContain('dist integrity preflight could not run');
   });
 
   it('exempts a proven release, reading the branch ship exported', () => {

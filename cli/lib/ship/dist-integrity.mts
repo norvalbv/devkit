@@ -15,6 +15,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { treeBlobsAtRef } from '../../../gate-engine/ratchets/tree-blobs.mts';
 import { assignedNames, ownDirVars, scanShellScript } from '../doctor/hook-gate-scan.mts';
 import { commitIndexEnv } from '../../../gate-engine/ratchets/commit-index.mts';
+import { failLine } from '../../../gate-engine/deterministic/reason.mts';
 import { inspectReleaseOnlyDist, printReleaseOnlyDist } from './preflight/release-only-dist.mts';
 import { staleNewDist } from './preflight/stale-new-dist.mts';
 import {
@@ -486,7 +487,7 @@ async function main(): Promise<void> {
     const releaseOnly = printReleaseOnlyDist(inspectReleaseOnlyDist(root, base, branch, { tree }));
     process.exitCode = integrity || releaseOnly;
   } catch (error) {
-    console.error(
+    failLine(
       `✗ devkit ship: dist integrity preflight could not run — ${error instanceof Error ? error.message : String(error)}`,
     );
     process.exitCode = 1;
