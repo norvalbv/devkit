@@ -34,10 +34,22 @@ export interface DriftedAxis {
   globs: string[];
 }
 
+/** A still-loaded axis carrying individual Scope globs that match nothing. */
+export interface PartialDrift {
+  slug: string;
+  deadGlobs: string[];
+}
+
 // Filesystem walks yield OS-native separators; scope globs are ALWAYS authored repo-root-relative
 // with forward slashes. Without this, every scoped axis misreports as drifted on Windows — the same
 // normalization clone-detector.mts already applies to walk-produced paths.
 const BACKSLASH_RE = /\\/g;
+
+const RESCOPE_REMEDY =
+  'Fix with `guard-decisions rescope <slug> --scope "<live-glob>" --reason "<why>"` — an ' +
+  'append-only correction that leaves the original Scope line untouched.';
+
+const MAX_FILES = 20000;
 
 const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'coverage', '.next', '.turbo']);
 
@@ -46,7 +58,7 @@ const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'coverage', '.next', 
  * check works in a fixture or an unstaged worktree, and skips the usual generated/vendored trees —
  * a scope that only matches inside node_modules governs nothing in any meaningful sense.
  */
-export function repoFiles(root: string, max = 20000): string[] {
+export function repoFiles(root: string, max = MAX_FILES, dotDirs = new Set<string>()): string[] {
   const out: string[] = [];
   const walk = (dir: string) => {
     if (out.length >= max) return;
@@ -57,7 +69,7 @@ export function repoFiles(root: string, max = 20000): string[] {
       return; // unreadable dir is not drift evidence — skip it rather than fail the check
     }
     for (const name of entries) {
-      if (SKIP_DIRS.has(name) || name.startsWith('.')) continue;
+      if (SKIP_DIRS.has(name) || (name.startsWith('.') && !dotDirs.has(name))) continue;
       const full = path.join(dir, name);
       let isDir: boolean;
       try {
@@ -74,6 +86,28 @@ export function repoFiles(root: string, max = 20000): string[] {
   return out;
 }
 
+// Only dot-entries a Scope names are walked: a blanket walk would spend the file cap on `.venv`.
+function scopeHealth(root: string, decisionsDir?: string | null, max = MAX_FILES) {
+  const targets = loadScopedTargets(decisionsDir).filter((t) => t.scopeGlobs.length);
+  const dotDirs = new Set(
+    targets.flatMap((t) =>
+      t.scopeGlobs.flatMap((g) => g.split('/').filter((s) => s.startsWith('.'))),
+    ),
+  );
+  const files = targets.length ? repoFiles(root, max, dotDirs) : [];
+  if (!files.length) return { drifted: [], partial: [] }; // nothing to match against → no conclusion
+  const drifted: DriftedAxis[] = [];
+  const partial: PartialDrift[] = [];
+  const capped = files.length >= max; // an unwalked remainder may hold the "dead" glob's file
+  for (const t of targets) {
+    const deadGlobs = t.scopeGlobs.filter((g) => !matchScope(files, [g]));
+    if (deadGlobs.length === t.scopeGlobs.length)
+      drifted.push({ slug: t.slug, globs: t.scopeGlobs });
+    else if (deadGlobs.length && !capped) partial.push({ slug: t.slug, deadGlobs });
+  }
+  return { drifted, partial };
+}
+
 /**
  * Every scoped axis whose globs match no file in the tree.
  *
@@ -82,13 +116,16 @@ export function repoFiles(root: string, max = 20000): string[] {
  * axis as live when it is not — which is the failure this exists to catch.
  */
 export function findDrift(root: string, decisionsDir?: string | null): DriftedAxis[] {
-  const targets = loadScopedTargets(decisionsDir);
-  if (!targets.length) return [];
-  const files = repoFiles(root);
-  if (!files.length) return []; // nothing to match against → cannot conclude drift
-  return targets
-    .filter((t) => t.scopeGlobs.length && !matchScope(files, t.scopeGlobs))
-    .map((t) => ({ slug: t.slug, globs: t.scopeGlobs }));
+  return scopeHealth(root, decisionsDir).drifted;
+}
+
+/** Axes still loaded through one live glob whose other globs match nothing — a file they moved. */
+export function findPartialDrift(
+  root: string,
+  decisionsDir?: string | null,
+  max?: number,
+): PartialDrift[] {
+  return scopeHealth(root, decisionsDir, max).partial;
 }
 
 /** `guard-decisions drift` — exit 1 when any ruling has silently stopped being loaded, a
@@ -98,10 +135,18 @@ export function runDrift(root: string, decisionsDir?: string | null): number {
     console.error(`guard-decisions drift: no such directory ${root}`);
     return 2;
   }
-  const drifted = findDrift(root, decisionsDir);
+  const { drifted, partial } = scopeHealth(root, decisionsDir);
   const { unresolved, multipleLive } = resolveSupersession(decisionsDir);
+  if (partial.length) {
+    console.error(
+      `⚠ ${partial.length} live decision record(s) carry Scope globs that match nothing — files they ` +
+        'govern may have moved out of reach (report-only):',
+    );
+    for (const p of partial) console.error(`   ${p.slug}\n     Dead: ${p.deadGlobs.join(',')}`);
+    console.error(`   ${RESCOPE_REMEDY}`);
+  }
   if (!drifted.length && !unresolved.length && !multipleLive.length) {
-    console.log('decision drift: every scoped ruling still matches code ✓');
+    if (!partial.length) console.log('decision drift: every scoped ruling still matches code ✓');
     return 0;
   }
   if (drifted.length) {
@@ -110,10 +155,7 @@ export function runDrift(root: string, decisionsDir?: string | null): number {
         'NO LONGER LOADED BY SCOPE (the pre-edit brief and check-alignment skip a Target whose scope matches nothing):',
     );
     for (const d of drifted) console.error(`   ${d.slug}\n     Scope: ${d.globs.join(',')}`);
-    console.error(
-      '\n   Fix with `guard-decisions rescope <slug> --scope "<live-glob>" --reason "<why>"` — an ' +
-        'append-only correction that leaves the original Scope line untouched.',
-    );
+    console.error(`\n   ${RESCOPE_REMEDY}`);
   }
   if (unresolved.length) {
     console.error(`🚫 ${unresolved.length} **Supersedes:** reference(s) resolve to no real entry:`);
