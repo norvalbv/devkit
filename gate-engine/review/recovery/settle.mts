@@ -160,7 +160,7 @@ export function settleReviewOutcome(
     (!['fail', 'error'].includes(res.status) && res.reason ? ` — ${res.reason}` : '') +
     (res.status === 'pass' ? partialEvidenceNote(coverage) : '');
   console.error(
-    `guard-review: ${res.name} — ${verdictToken({ status: res.status, degraded, mcpDegraded })}${res.escalated ? ' (escalated)' : ''} in ${secs}s${res.status === 'pass' ? ' (checkpointed)' : ''}${tail}`,
+    `guard-review: ${res.name} — ${verdictToken({ status: res.status, degraded, mcpDegraded })}${res.escalated ? ' (escalated)' : ''} in ${secs}s${res.status === 'pass' && !degraded ? ' (checkpointed)' : ''}${tail}`,
   );
   // commit-guard never lens-splits (only correctness does), so the split branch above needs no
   // retrieval report; an MCP-degraded split reviewer is reported once at its merge (lens/split.mts).

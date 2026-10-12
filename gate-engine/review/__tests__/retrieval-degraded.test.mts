@@ -104,7 +104,9 @@ describe('commit-guard PASS without semantic retrieval (sc-2317)', () => {
     const repo = consumerRepo({ backend: true });
     expect(await runReviewGate(repo, { exec: passRecording(repo, UNREACHABLE) })).toBe(0);
     expect(stderr).toContainEqual(
-      expect.stringMatching(/^guard-review: commit-guard — PASS \(DEGRADED\) in \d+s/),
+      expect.stringMatching(
+        /^guard-review: commit-guard — PASS \(DEGRADED\) in \d+s(?! \(checkpointed\))/,
+      ),
     );
     expect(stderr).toContainEqual(
       expect.stringMatching(
