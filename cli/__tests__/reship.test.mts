@@ -741,6 +741,7 @@ describe('reship --base — replace a conflicted PR from a caller-prepared snaps
     );
     expect(drifted.status).not.toBe(0);
     expect(drifted.stderr).toContain('rewrite brief omits paths from the existing PR');
+    expect(drifted.stderr).not.toContain('to ADD a commit');
     expect(existsSync(gateRanOnResume), 'drifted recovery must refuse before gates').toBe(false);
     expect(g(['--git-dir', bare, 'rev-parse', 'refs/heads/feat/pr'])).toBe(accepted);
     writeFileSync(join(dir, 'conflict.txt'), 'main + feature\n');
@@ -1025,6 +1026,10 @@ describe('reship --base — replace a conflicted PR from a caller-prepared snaps
     expect(r.stderr).toContain('rewrite brief omits paths from the existing PR');
     expect(r.stderr).toContain('extra.txt');
     expect(r.stderr).not.toMatch(/\n  conflict\.txt/);
+    const addLine = r.stderr.split('\n').find((l) => l.includes('to ADD a commit'));
+    expect(addLine).toContain('devkit ship feat/pr incomplete\\ rewrite --pr -- conflict.txt');
+    expect(addLine).not.toMatch(/devkit ship.*--base/);
+    expect(r.stderr).toContain('to REWRITE the PR as one commit');
     expect(r.stderr).not.toContain('GATE_RAN');
   });
 
