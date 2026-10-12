@@ -172,6 +172,9 @@ Do not invoke reviewers, run approval scripts, or touch marker files by hand. Wr
 commit (via `devkit ship` on a protected branch); react only when a gate blocks: read the finding,
 fix it, re-commit. Every bypass needs the user's explicit OK.
 
+Tracked `dist/` is rebuilt only by `devkit release`: brief your source plus only NEW dist artifacts,
+never a rebuilt existing one (`docs/troubleshooting.md`, "CI `Release-only dist` failed").
+
 Gate diagnosis and one-run controls: `skills/commit-gates/SKILL.md`. Shipping mechanics:
 `skills/using-devkit/SKILL.md`.
 </workflow>
