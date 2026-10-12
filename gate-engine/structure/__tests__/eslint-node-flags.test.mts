@@ -22,12 +22,24 @@ const scratch = () => {
 };
 
 describe('eslintNodeFlags', () => {
-  it('preserves symlinks when node_modules is a symlink (gate worktree shape)', () => {
+  it('preserves symlinks when node_modules links a hoisted install (gate worktree shape)', () => {
     const donor = scratch();
     const cwd = scratch();
-    mkdirSync(join(donor, 'node_modules'));
+    mkdirSync(join(donor, 'node_modules', 'eslint', 'bin'), { recursive: true });
+    writeFileSync(join(donor, 'node_modules', 'eslint', 'bin', 'eslint.js'), '');
     symlinkSync(join(donor, 'node_modules'), join(cwd, 'node_modules'), 'dir');
     expect(eslintNodeFlags(cwd)).toEqual(['--preserve-symlinks']);
+  });
+
+  it('adds nothing when node_modules links an isolated store (eslint itself a link)', () => {
+    const donor = scratch();
+    const cwd = scratch();
+    const store = join(donor, 'node_modules', '.bun', 'eslint@9', 'node_modules', 'eslint');
+    mkdirSync(join(store, 'bin'), { recursive: true });
+    writeFileSync(join(store, 'bin', 'eslint.js'), '');
+    symlinkSync(store, join(donor, 'node_modules', 'eslint'), 'dir');
+    symlinkSync(join(donor, 'node_modules'), join(cwd, 'node_modules'), 'dir');
+    expect(eslintNodeFlags(cwd)).toEqual([]);
   });
 
   it('adds nothing for a physical node_modules (npm/bun hoisted, and pnpm isolated)', () => {
@@ -41,10 +53,10 @@ describe('eslintNodeFlags', () => {
     expect(eslintNodeFlags(scratch())).toEqual([]);
   });
 
-  it('still preserves a DANGLING node_modules symlink (the link, not its target, decides)', () => {
+  it('adds nothing for a DANGLING node_modules symlink (no eslint to preserve)', () => {
     const cwd = scratch();
     symlinkSync(join(cwd, 'gone'), join(cwd, 'node_modules'), 'dir');
-    expect(eslintNodeFlags(cwd)).toEqual(['--preserve-symlinks']);
+    expect(eslintNodeFlags(cwd)).toEqual([]);
   });
 
   it('adds nothing when node_modules is a plain file', () => {
