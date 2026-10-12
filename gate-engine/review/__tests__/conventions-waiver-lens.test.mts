@@ -339,14 +339,14 @@ describe('parseConventionFindings — ruleQuote', () => {
 });
 
 describe('shellWord — the one quoting rule every pasteable command shares', () => {
-  it('leaves a plain word bare, including % and a mid-word #', async () => {
+  it('leaves a plain word bare, including %', async () => {
     const { shellWord } = await import('../valve/shell-word.mts');
-    expect(shellWord('correctness-reviewer:src/a%b.ts@CLAUDE.md:1#L2')).toBe(
-      'correctness-reviewer:src/a%b.ts@CLAUDE.md:1#L2',
+    expect(shellWord('correctness-reviewer:src/a%b.ts@CLAUDE.md:1')).toBe(
+      'correctness-reviewer:src/a%b.ts@CLAUDE.md:1',
     );
   });
 
-  it('quotes a leading # (a shell comment), spaces and quotes', async () => {
+  it('quotes any # (a comment, or an extendedglob operator), spaces and quotes', async () => {
     const { shellWord } = await import('../valve/shell-word.mts');
     expect(shellWord('#notes.md')).toBe("'#notes.md'");
     expect(shellWord("it's here.ts")).toBe("'it'\\''s here.ts'");
