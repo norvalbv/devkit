@@ -31,8 +31,9 @@ export async function runVitestDetailed(
   bin: string,
   args: string[],
   cwd: string,
+  env: NodeJS.ProcessEnv = process.env,
 ): Promise<VitestRun> {
-  const child = spawn(bin, args, { cwd, stdio: 'inherit' });
+  const child = spawn(bin, args, { cwd, env, stdio: 'inherit' });
   let interrupted = false;
   // Forwarded so a Ctrl-C leaves no run dir or stale report; removed in `finally`, since a leaked
   // listener stops the host answering SIGTERM (sc-2228).
