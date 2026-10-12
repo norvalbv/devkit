@@ -637,6 +637,15 @@ describe('dist-integrity CLI', () => {
     expect(result.stderr).not.toContain('dist integrity preflight failed');
   });
 
+  it('resolves the checkout compiler from a relative --root', () => {
+    const { base, root } = seedShipRepo();
+
+    const result = preflight(root, ['--root', '.', '--base', base, '--', 'dist/cli/new.mjs']);
+
+    expect(result.stderr).not.toContain('no TypeScript compiler');
+    expect(result.status, result.stderr).toBe(0);
+  });
+
   it('exits 1 for a brief that leaves its generated artifact behind', () => {
     const { base, root } = seedShipRepo();
 

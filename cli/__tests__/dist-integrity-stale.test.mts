@@ -89,6 +89,27 @@ describe('inspectDistIntegrity — stale new artifacts', () => {
     expect(report.stale).toEqual(['dist/cli/new.mjs']);
   });
 
+  it('maps an anti-slop .js artifact back to its .ts source', async () => {
+    const { base, root } = repo();
+    write(root, 'anti-slop/src/new.ts', 'export const value = 2;\n');
+    write(root, 'dist/anti-slop/src/new.js', 'export const value = 1;\n');
+
+    const report = await inspectDistIntegrity(root, base, ['dist/anti-slop/src/new.js']);
+
+    expect(report.stale).toEqual(['dist/anti-slop/src/new.js']);
+  });
+
+  it('fails closed when the fresh build emits nothing for the artifact', async () => {
+    const { base, root } = repo();
+    write(root, 'tsconfig.build.json', '{ "include": [] }\n');
+    write(root, 'cli/new.mts', 'export const value = 2;\n');
+    write(root, 'dist/cli/new.mjs', 'export const value = 2;\n');
+
+    const report = await inspectDistIntegrity(root, base, NEW);
+
+    expect(report.stale).toEqual(['dist/cli/new.mjs']);
+  });
+
   it('never compares a tracked artifact, so needs no compiler for it', async () => {
     const { base, root } = repo({ buildable: false });
     write(root, 'cli/old.mts', 'export const old = 2;\n');
