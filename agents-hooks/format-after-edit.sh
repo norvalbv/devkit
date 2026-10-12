@@ -1,5 +1,5 @@
 #!/bin/bash
-# PostToolUse hook (Edit|Write|MultiEdit) — format + lint the just-edited file.
+# PostToolUse hook (Edit|Write|MultiEdit; Cursor: afterFileEdit) — format + lint the just-edited file.
 #   1. Biome `check --write` auto-fixes formatting/lint on the single edited file.
 #   2. ESLint surfaces structure/size violations EARLY (before pre-commit blocks). A
 #      non-zero ESLint exit + stderr + exit 2 feeds the message back into the conversation.
@@ -11,7 +11,10 @@
 
 input=$(cat)
 
-file_path=$(echo "$input" | grep -o '"file_path":"[^"]*"' | head -1 | sed 's/"file_path":"//;s/"$//')
+# bun first (sc-1043: a bun-only toolchain must not lose the hook). No runtime → empty path → {}.
+js=$(command -v bun || command -v node)
+# Claude sends tool_input.file_path; Cursor afterFileEdit sends it top-level.
+file_path=$(printf '%s' "$input" | "$js" -e 'const p=JSON.parse(require("fs").readFileSync(0,"utf8"));const f=p?.tool_input?.file_path??p?.file_path;if(typeof f==="string")process.stdout.write(f)' 2>/dev/null)
 
 if [ -z "$file_path" ] || [ ! -f "$file_path" ]; then
   echo '{}'
@@ -62,13 +65,7 @@ fi
 # consumption @norvalbv/devkit is not a node_modules dependency. Absent/corrupt config → skip.
 if [[ "$file_path" =~ \.(tsx?|css)$ ]] && [ -x "./node_modules/.bin/eslint" ]; then
   RESOLVER='const fs=require("fs");try{const c=JSON.parse(fs.readFileSync("guard.config.json","utf8"));const r=Array.isArray(c&&c.scanRoots)?c.scanRoots:["src"];process.stdout.write(r.join("\n"))}catch(e){process.exit(1)}'
-  # Resolve via whichever JS runtime exists — this block runs the eslint binary directly (not via
-  # `bun run`), so it must not hard-require either bun or node. RESOLVER is plain CJS (runs in both).
-  if command -v bun &>/dev/null; then
-    scan_roots=$(bun -e "$RESOLVER" 2>/dev/null)
-  else
-    scan_roots=$(node -e "$RESOLVER" 2>/dev/null)
-  fi
+  scan_roots=$("$js" -e "$RESOLVER" 2>/dev/null)
   in_scope=""
   if [ -n "$scan_roots" ]; then
     # Match whole path segments (sc-1053): a substring match let `src` cover `src2/`, and a project
