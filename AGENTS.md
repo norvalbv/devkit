@@ -193,14 +193,20 @@ what is devkit-specific:
 </workflow>
 
 <workflow name="diff_coverage">
-`bun run test:run:coverage:changed` prints per-file coverage for the files changed since the
-remote `main` branch (vitest's `--changed` picks the covering tests). Run `git fetch origin main`
+Coverage of a diff means the lines the change added. `node cli/index.mts coverage-run <test files>`
+followed by `node cli/index.mts coverage-diff` prints, per file, how many added executable lines ran
+and which did not. Scope the run to your own test files: a failed run publishes no
+report.
+
+`bun run test:run:coverage:changed` prints whole-file coverage for the files changed since the
+remote `main` branch (vitest's `--changed` picks the covering tests). It still prints when a test
+fails, exits non-zero, and under-reports the files whose tests failed. Run `git fetch origin main`
 first, since a stale ref widens the set; `COVERAGE_BASE=<ref>` picks another base (a second
 `--changed` flag makes vitest refuse to start). Untracked files count as changed, and every changed
 file gets a row under its full name, fully covered ones included. A file no test imports reads 0%,
-as it should. Code exercised only through a spawned `node cli/index.mts` also reads 0% although it
-is tested, because v8 does not follow child processes. A diff touching `package.json` or
-`vitest.config.mjs` runs the whole suite.
+as it should. Spawned `node cli/index.mts` children are counted, but a module that is both imported
+and spawned under-reports. A diff touching `package.json` or `vitest.config.mjs` runs the whole
+suite.
 </workflow>
 
 </workflows>
