@@ -69,6 +69,15 @@ describe('parseReviewVerdict', () => {
     });
     expect(parseReviewVerdict('notes\r\n⚠️ VERDICT: FAIL - races').verdict).toBe('FAIL');
     expect(parseReviewVerdict('the verdict ✅ VERDICT: PASS').verdict).toBe(null);
+    expect(parseReviewVerdict('Reply with `✅ VERDICT: PASS` when clean.').verdict).toBe(null);
+  });
+  it('a bare verdict never swallows the next line, so the LAST verdict still wins', () => {
+    expect(parseReviewVerdict('❌ VERDICT: FAIL\n✅ VERDICT: PASS').verdict).toBe('PASS');
+    expect(parseReviewVerdict('VERDICT: FAIL\r\nVERDICT: PASS').verdict).toBe('PASS');
+    expect(parseReviewVerdict('VERDICT: PASS\nfollow-up prose')).toEqual({
+      verdict: 'PASS',
+      reason: '',
+    });
   });
   it('prose full of pass/fail words WITHOUT a VERDICT line is null — no bare-word fallback', () => {
     expect(
