@@ -60,6 +60,11 @@ const SHARED_TEST_CONFIG = {
 const SUITE_WORKERS = '50%';
 // Files proven to fail only when pooled; a later 1-worker group runs them. Empty since the poll fix.
 const POOLED_FAILURES = [];
+const COVERAGE = { provider: 'v8', autoAttachSubprocess: true };
+// test:run:coverage:changed: full names when piped, and a row even for a 100%-covered file.
+if (process.env.DEVKIT_COVERAGE_CHANGED) {
+  COVERAGE.reporter = [['text', { maxCols: 200, skipFull: false }]];
+}
 
 // The devkit test surface is the gate engines only. Skills under skills/ may
 // carry helper scripts (incl. *.test.mjs) that are repo-coupled and not part of
@@ -118,7 +123,7 @@ export default defineConfig({
     // Root only: coverage resolves once per run. Most CLI modules are tested by spawning
     // `node <module>.mts`, which the worker alone never sees; autoAttachSubprocess (vitest 5) hands
     // children NODE_V8_COVERAGE through process.env and merges their profiles (sc-3321).
-    coverage: { provider: 'v8', autoAttachSubprocess: true },
+    coverage: COVERAGE,
     // Strip leaked git control vars (GIT_DIR, …) so a hook-launched run can't make the
     // git-integration tests operate on devkit's own repo. See vitest.setup.mjs.
     setupFiles: SHARED_TEST_CONFIG.setupFiles,
