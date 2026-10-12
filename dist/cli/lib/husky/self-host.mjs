@@ -29,6 +29,7 @@ import { FORMAT_EXTENSION_FILTER, FORMAT_FAILURE_REPORT, FORMAT_TOOL_SETUP, } fr
 // Structure-lint and the hard Biome lint/assist gate fold into the deterministic orchestrator via
 // `--extra`. Self-host-only for formatting: its SCOPE (proven allowlist) and hard FAILURE POLICY.
 export const SELF_HOST_STRUCTURE_CMD = 'bun run lint:structure';
+// An extra with a GUARD_*_OK bypass also needs a GATE_BYPASSES entry (command-gates.mts).
 export const SELF_HOST_EXTRAS = [
     { label: 'lint', cmd: 'bun run lint' },
     // sc-2198. Both are pure content comparisons — no spawn, no tmp dir, no model call — and both

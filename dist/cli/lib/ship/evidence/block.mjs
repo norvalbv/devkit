@@ -5,8 +5,13 @@ import { fencedJson, inlineJson, } from '../../baseline-status/regression-eviden
 import { EVIDENCE_ABSTENTIONS, EVIDENCE_STATUSES } from './outcome.mjs';
 export const EVIDENCE_BEGIN = '<!-- devkit:evidence:begin -->';
 export const EVIDENCE_END = '<!-- devkit:evidence:end -->';
-/** Reserved line for the merge verdict; renderEvidenceBlock fills it when given one. */
+/** The merge verdict's line; the data line carries its full reason list for later re-scoring. */
 export const VERDICT_SLOT = '<!-- devkit:evidence:verdict -->';
+export const VERDICT_LABEL = '**Merge verdict:**';
+/** No verdict is never a reason to drop the block: the slot says why instead. */
+export const verdictUnavailable = (why) => ({
+    line: `${VERDICT_LABEL} unavailable (${why})`,
+});
 const DATA_OPEN = '<!-- devkit:evidence:data ';
 const DATA_CLOSE = ' -->';
 // Whole marker lines only: ship writes them that way, and prose quoting a marker inline is not a block.
@@ -23,6 +28,12 @@ const outcomeSchema = z.strictObject({
     detail: z.string(),
     headSha: z.string(),
     baseSha: z.string().nullable(),
+    mergeVerdict: z
+        .strictObject({
+        verdict: z.string(),
+        reasons: z.array(z.strictObject({ code: z.string(), detail: z.string().optional() })),
+    })
+        .optional(),
 });
 /** A zero-width space after the namespace keeps quoted marker text from ever parsing as a marker. */
 const defuse = (text) => text.replace(MARKER, '<!-- devkit:evidence​:');
@@ -69,7 +80,7 @@ function runLines(evidence) {
         '',
     ];
 }
-export function renderEvidenceBlock(outcome, evidence, verdict = '') {
+export function renderEvidenceBlock(outcome, evidence, verdict) {
     const label = outcome.reason ? `${outcome.status} (${outcome.reason})` : outcome.status;
     const content = [
         `**${label}**: ${plain(outcome.detail)}`,
@@ -79,11 +90,12 @@ export function renderEvidenceBlock(outcome, evidence, verdict = '') {
         "Captured runs, not proof of causality. Dependencies are the shipping checkout's installed " +
             `packages. Stale unless the PR head is \`${outcome.headSha}\`.`,
     ].join('\n');
-    const data = JSON.stringify(outcome).replaceAll('<', '\\u003c').replaceAll('>', '\\u003e');
+    const record = verdict?.verdict ? { ...outcome, mergeVerdict: verdict.verdict } : outcome;
+    const data = JSON.stringify(record).replaceAll('<', '\\u003c').replaceAll('>', '\\u003e');
     return [
         EVIDENCE_BEGIN,
         '#### Regression evidence (devkit ship)',
-        `${VERDICT_SLOT}${verdict ? ` ${defuse(verdict)}` : ''}`,
+        `${VERDICT_SLOT}${verdict ? ` ${plain(verdict.line)}` : ''}`,
         defuse(content),
         `${DATA_OPEN}${data}${DATA_CLOSE}`,
         EVIDENCE_END,

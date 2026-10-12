@@ -59,6 +59,8 @@ export function emitReviewCacheHit(hit) {
         judged_base_sha: hit.judgedBaseSha,
         base_state: hit.baseState,
         ...hit.coverage,
+        // Omitted, like an unknown model, when the PASS rests on no waiver.
+        waivers: hit.waivers?.length ? hit.waivers : undefined,
     });
 }
 /** cache_hit for completeness's branch+message sticky key, which a reshaped diff can reuse. Same

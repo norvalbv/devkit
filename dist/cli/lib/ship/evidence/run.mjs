@@ -7,7 +7,7 @@ import { parseArgs } from 'node:util';
 import { captureRegressionEvidence } from '../../baseline-status/regression-proof.mjs';
 import { prepareRegressionRepository, } from '../../baseline-status/regression-repository.mjs';
 import { errorMessage } from '../review/shared/common.mjs';
-import { carryEvidenceBlock, readEvidenceBlock, renderEvidenceBlock } from './block.mjs';
+import { carryEvidenceBlock, readEvidenceBlock, renderEvidenceBlock, verdictUnavailable, } from './block.mjs';
 import { expandCommand, readEvidenceConfig } from './config.mjs';
 import { inconclusive, notRun, outcomeFromRegression } from './outcome.mjs';
 import { publishEvidenceBlock, readPull } from './pr-body.mjs';
@@ -56,6 +56,16 @@ async function produce(cwd, head, baseRefOid, config) {
     const evidence = await captureWithin(prepared, config.timeoutSeconds);
     return { outcome: outcomeFromRegression(evidence, head, base), evidence };
 }
+/** Loaded only once a block is being written, so a ship that writes none never pays for it. */
+async function shipVerdict(input) {
+    try {
+        const { printVerdict } = await import('../merge-verdict/ship-change.mjs');
+        return printVerdict(input);
+    }
+    catch (error) {
+        return verdictUnavailable(errorMessage(error));
+    }
+}
 async function publish({ cwd, repo, pr, head, failed }) {
     const pull = readPull(repo, pr);
     if (pull.headRefOid !== head) {
@@ -69,6 +79,7 @@ async function publish({ cwd, repo, pr, head, failed }) {
     const config = readEvidenceConfig(cwd);
     if (!config)
         return;
+    const env = { ...process.env };
     let produced = { outcome: inconclusive(failed ?? '', head, null), evidence: null };
     if (!failed) {
         try {
@@ -79,7 +90,16 @@ async function publish({ cwd, repo, pr, head, failed }) {
             produced = { outcome: inconclusive(detail, head, null), evidence: null };
         }
     }
-    const block = renderEvidenceBlock(produced.outcome, produced.evidence);
+    const { title, baseRefOid } = pull;
+    const verdict = await shipVerdict({
+        cwd,
+        head,
+        baseRefOid,
+        title,
+        outcome: produced.outcome,
+        env,
+    });
+    const block = renderEvidenceBlock(produced.outcome, produced.evidence, verdict);
     const result = publishEvidenceBlock(repo, pr, head, block);
     const { status, reason, detail } = produced.outcome;
     console.error(`evidence: ${status}${reason ? ` (${reason})` : ''}: ${detail} [PR body ${result}]`);
