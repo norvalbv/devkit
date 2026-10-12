@@ -38,7 +38,28 @@ const TURN_FAILED = JSON.stringify({
   error: { message: 'usage limit reached' },
 });
 
+// Captured VERBATIM from `codex exec --json` (codex-cli 0.162.1, gpt-5.6-terra, 2026-10-12).
+const REAL_STREAM = [
+  '{"type":"thread.started","thread_id":"01a12dbb-5a28-7392-8c0a-4e2a74720e2d"}',
+  '{"type":"turn.started"}',
+  '{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"Running the two commands in order."}}',
+  `{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"/bin/zsh -lc 'echo hello'","aggregated_output":"","exit_code":null,"status":"in_progress"}}`,
+  `{"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"/bin/zsh -lc 'echo hello'","aggregated_output":"hello\\n","exit_code":0,"status":"completed"}}`,
+  `{"type":"item.started","item":{"id":"item_2","type":"command_execution","command":"/bin/zsh -lc 'ls /definitely-missing-dir'","aggregated_output":"","exit_code":null,"status":"in_progress"}}`,
+  `{"type":"item.completed","item":{"id":"item_2","type":"command_execution","command":"/bin/zsh -lc 'ls /definitely-missing-dir'","aggregated_output":"ls: /definitely-missing-dir: No such file or directory\\n","exit_code":1,"status":"failed"}}`,
+  '{"type":"item.completed","item":{"id":"item_3","type":"agent_message","text":"DONE"}}',
+  '{"type":"turn.completed","usage":{"input_tokens":57541,"cached_input_tokens":36352,"cache_write_input_tokens":0,"output_tokens":216,"reasoning_output_tokens":34}}',
+].join('\n');
+
 describe('codexCommandLines', () => {
+  it('reads a real codex stream: started/completed pairs collapse, no whitespace-only tail line', () => {
+    expect(codexCommandLines(REAL_STREAM)).toEqual([
+      "[exit 0] /bin/zsh -lc 'echo hello'",
+      "[exit 1] /bin/zsh -lc 'ls /definitely-missing-dir'\n    ls: /definitely-missing-dir: No such file or directory",
+    ]);
+    expect(unwrapCodexResult(REAL_STREAM)).toBe('DONE');
+  });
+
   it('lists every command, output only for a failed one and capped at 200 chars', () => {
     const lines = codexCommandLines([PASSING, FAILING, VERDICT].join('\n'));
     expect(lines).toHaveLength(2);
@@ -138,11 +159,28 @@ describe('commands_ref on judge_exec', () => {
     expect(stored(lastEvent().commands_ref)).toContain('[exit 1]');
 
     const killed = fakeBin('codex-killed', [PASSING, STARTED]);
-    writeFileSync(killed, `${readFileSync(killed, 'utf8')}sleep 5\n`);
+    writeFileSync(killed, `${readFileSync(killed, 'utf8')}sleep 10\n`);
     process.env.GUARD_CODEX_BIN = killed;
-    expect(execJudge({ ...codexOpts, timeout: 1000 })).toBeNull();
-    expect(lastEvent().outcome).toBe('timeout');
-    expect(stored(lastEvent().commands_ref)).toContain("[in_progress] bash -lc 'ps aux'");
+    // Both spawn paths: reviewers run async, where the partial stdout arrives via the callback.
+    for (const run of [execJudge, execJudgeAsync]) {
+      expect(await run({ ...codexOpts, timeout: 3000 })).toBeNull();
+      expect(lastEvent().outcome).toBe('timeout');
+      expect(stored(lastEvent().commands_ref)).toContain("[in_progress] bash -lc 'ps aux'");
+    }
+  });
+
+  it('concurrent lens parts sharing one reviewer label never overwrite each other', async () => {
+    process.env.GUARD_CODEX_BIN = fakeBin('codex-lens', [FAILING, VERDICT]);
+    const lenses = ['concurrency-races', 'state-transitions'];
+    await Promise.all(lenses.map((lens) => execJudgeAsync({ ...codexOpts, lens })));
+    const rows = readFileSync(sink, 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l));
+    const refs = rows.map((r: JudgeExecRow) => r.commands_ref);
+    expect(new Set(refs).size).toBe(2);
+    const headers = refs.map((ref: string | undefined) => stored(ref).split('\n')[0]);
+    expect(headers.sort()).toEqual(lenses.map((l) => `lens: ${l}`));
   });
 
   it('a claude judge stamps no commands_ref', () => {

@@ -8,9 +8,10 @@ const FAILED_OUTPUT_CHARS = 200;
 function commandLine(item) {
     const code = item.exit_code ?? null;
     const line = `[${code === null ? (item.status ?? 'unknown') : `exit ${code}`}] ${item.command ?? ''}`;
-    if (code === null || code === 0 || !item.aggregated_output)
+    const output = (item.aggregated_output ?? '').slice(0, FAILED_OUTPUT_CHARS).trimEnd();
+    if (code === null || code === 0 || !output)
         return line;
-    return `${line}\n    ${item.aggregated_output.slice(0, FAILED_OUTPUT_CHARS).replaceAll('\n', '\n    ')}`;
+    return `${line}\n    ${output.replaceAll('\n', '\n    ')}`;
 }
 /** One line per command, in first-seen order; a started-but-never-completed one reads `[in_progress]`. */
 export function codexCommandLines(raw) {
