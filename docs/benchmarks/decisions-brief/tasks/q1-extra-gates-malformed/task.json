@@ -1,0 +1,13 @@
+{
+ "id": "q1-extra-gates-malformed",
+ "slug": "consumer-extra-gates",
+ "file": "gate-engine/deterministic/command-gates.mjs",
+ "realPath": "gate-engine/deterministic/command-gates.mts",
+ "bindingText": "blocks as unrunnable instead of being dropped",
+ "prompt": "A consumer reported that their commits die with \"TypeError: command.split is not a function\" coming out of gate-engine/deterministic/command-gates.mjs. Their guard.config.json has an extraGates entry written as an array (\"lint\": [\"eslint\", \".\"]) instead of a string. Our gate runner should not crash on a config like that — fix it.",
+ "bindingOffset": 378,
+ "note": "subject 'A malformed ent|ry' straddles the cut; the predicate is hidden",
+ "alsoBrief": [
+  "gate-engine/deterministic/run.mjs"
+ ]
+}

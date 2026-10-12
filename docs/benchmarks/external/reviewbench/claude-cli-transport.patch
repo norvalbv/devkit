@@ -1,0 +1,356 @@
+diff --git a/scripts/classifier/classify.ts b/scripts/classifier/classify.ts
+index ec9a561..5e4fcf8 100644
+--- a/scripts/classifier/classify.ts
++++ b/scripts/classifier/classify.ts
+@@ -31,6 +31,7 @@ import {
+   CLASSIFIER_SYSTEM_PROMPT,
+ } from "./prompts.js";
+ import { renderJudgeSystemPrompt } from "../eval/prompt-format.js";
++import { CLAUDE_CLI_PROVIDER, createClaudeCliSession } from "../lib/claude-cli-session.js";
+ 
+ // ---------------------------------------------------------------------------
+ // Configuration
+@@ -91,6 +92,17 @@ export interface PRSessionResult {
+  * to build context and avoid redundant exploration.
+  */
+ export async function classifyPR(opts: PRSessionOptions): Promise<PRSessionResult> {
++  if (opts.config.provider === CLAUDE_CLI_PROVIDER) {
++    const session = createClaudeCliSession({
++      model: opts.config.modelId,
++      systemPrompt: renderJudgeSystemPrompt(CLASSIFIER_SYSTEM_PROMPT),
++      thinkingLevel: "medium",
++      cwd: opts.config?.repoDir ?? process.cwd(),
++      tools: CLASSIFIER_TOOLS,
++      jsonFromTurn: 1,
++    });
++    return runClassifierSession(session, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, opts);
++  }
+   const authStorage = AuthStorage.create();
+   if (opts.config.apiKey) {
+     authStorage.setRuntimeApiKey(opts.config.provider, opts.config.apiKey);
+@@ -137,22 +149,12 @@ export async function classifyPR(opts: PRSessionOptions): Promise<PRSessionResul
+     }),
+     tools: CLASSIFIER_TOOLS,
+   });
+-  const abortSession = () => {
+-    void session.abort();
+-  };
+-  opts.signal?.addEventListener("abort", abortSession, { once: true });
+-  if (opts.signal?.aborted) abortSession();
+ 
+   // Log session file location for debugging
+   if (session.sessionFile) {
+     console.log(`  Session log: ${session.sessionFile}`);
+   }
+ 
+-  // Track token usage across the session
+-  const usage = { input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0, estimated_cost_usd: 0, elapsed_seconds: 0 };
+-  const toolCalls: Record<string, number> = {};
+-  const sessionStart = Date.now();
+-
+   // Resolve per-token rates: use the model's own rates, or look up the same
+   // model name under a provider that has pricing (e.g. anthropic, bedrock)
+   let modelCost = model.cost;
+@@ -165,6 +167,25 @@ export async function classifyPR(opts: PRSessionOptions): Promise<PRSessionResul
+     );
+     if (ref) modelCost = ref.cost;
+   }
++  return runClassifierSession(session, modelCost, opts);
++}
++
++/** Drives one PR's classification turns on a session (pi or claude-cli). */
++async function runClassifierSession(
++  session: any,
++  modelCost: { input: number; output: number; cacheRead: number; cacheWrite: number },
++  opts: PRSessionOptions,
++): Promise<PRSessionResult> {
++  const abortSession = () => {
++    void session.abort();
++  };
++  opts.signal?.addEventListener("abort", abortSession, { once: true });
++  if (opts.signal?.aborted) abortSession();
++
++  // Track token usage across the session
++  const usage = { input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0, estimated_cost_usd: 0, elapsed_seconds: 0 };
++  const toolCalls: Record<string, number> = {};
++  const sessionStart = Date.now();
+ 
+   session.subscribe((event: any) => {
+     if (event.type === "tool_execution_start") {
+diff --git a/scripts/eval/matcher.ts b/scripts/eval/matcher.ts
+index 5874fdd..bb1e214 100644
+--- a/scripts/eval/matcher.ts
++++ b/scripts/eval/matcher.ts
+@@ -21,6 +21,7 @@ import {
+   SettingsManager,
+ } from "@earendil-works/pi-coding-agent";
+ 
++import { CLAUDE_CLI_PROVIDER, createClaudeCliSession } from "../lib/claude-cli-session.js";
+ import type { Finding } from "../lib/types.js";
+ import type { RawCorrespondence } from "../lib/match-types.js";
+ import {
+@@ -231,6 +232,41 @@ export interface MatchResult {
+   stats: MatcherStats;
+ }
+ 
++/** The upstream pi session, unchanged. */
++async function createPiMatcherSession(config: MatcherConfig) {
++  const authStorage = AuthStorage.create();
++  const modelRegistry = ModelRegistry.create(authStorage);
++  const model = resolveModel(modelRegistry, config.provider, config.modelId);
++
++  if (!model) {
++    throw new Error(`Requested matcher model is unavailable: ${config.provider}/${config.modelId}`);
++  }
++
++  const agentDir = getAgentDir();
++  const loader = new DefaultResourceLoader({
++    cwd: process.cwd(),
++    agentDir,
++    systemPrompt: renderJudgeSystemPrompt(MATCHER_SYSTEM_PROMPT),
++  });
++  await loader.reload();
++
++  const { session } = await createAgentSession({
++    cwd: process.cwd(),
++    model,
++    thinkingLevel: "low",
++    authStorage,
++    modelRegistry,
++    resourceLoader: loader,
++    sessionManager: SessionManager.inMemory(),
++    settingsManager: SettingsManager.inMemory({
++      compaction: { enabled: true },
++      retry: { enabled: true, maxRetries: 2 },
++    }),
++    noTools: "all",
++  });
++  return session;
++}
++
+ /**
+  * Match all candidate findings against all golden findings for a single PR.
+  *
+@@ -272,36 +308,16 @@ export async function matchFindings(
+   });
+ 
+   // Create a single session for all matching
+-  const authStorage = AuthStorage.create();
+-  const modelRegistry = ModelRegistry.create(authStorage);
+-  const model = resolveModel(modelRegistry, config.provider, config.modelId);
+-
+-  if (!model) {
+-    throw new Error(`Requested matcher model is unavailable: ${config.provider}/${config.modelId}`);
+-  }
+-
+-  const agentDir = getAgentDir();
+-  const loader = new DefaultResourceLoader({
+-    cwd: process.cwd(),
+-    agentDir,
+-    systemPrompt: renderJudgeSystemPrompt(MATCHER_SYSTEM_PROMPT),
+-  });
+-  await loader.reload();
+-
+-  const { session } = await createAgentSession({
+-    cwd: process.cwd(),
+-    model,
+-    thinkingLevel: "low",
+-    authStorage,
+-    modelRegistry,
+-    resourceLoader: loader,
+-    sessionManager: SessionManager.inMemory(),
+-    settingsManager: SettingsManager.inMemory({
+-      compaction: { enabled: true },
+-      retry: { enabled: true, maxRetries: 2 },
+-    }),
+-    noTools: "all",
+-  });
++  const session: any = config.provider === CLAUDE_CLI_PROVIDER
++    ? createClaudeCliSession({
++      model: config.modelId,
++      systemPrompt: renderJudgeSystemPrompt(MATCHER_SYSTEM_PROMPT),
++      thinkingLevel: "low",
++      cwd: process.cwd(),
++      tools: [],
++      jsonFromTurn: 0,
++    })
++    : await createPiMatcherSession(config);
+ 
+   const stats: MatcherStats = { llm_calls: 0, input_tokens: 0, output_tokens: 0 };
+   const abortSession = () => {
+diff --git a/scripts/lib/claude-cli-session.ts b/scripts/lib/claude-cli-session.ts
+new file mode 100644
+index 0000000..e8c2648
+--- /dev/null
++++ b/scripts/lib/claude-cli-session.ts
+@@ -0,0 +1,170 @@
++/**
++ * `--provider claude-cli`: the judge's pi session, carried over the `claude -p` CLI instead.
++ *
++ * Same prompts, same model, same turn order: each prompt() resumes a fork of the last good turn,
++ * so a failed or rate-limited turn is retried from unchanged history. The CLI runs in safe mode
++ * (no CLAUDE.md, hooks, skills or MCP from the judged repo) with only the tools pi was given.
++ */
++import { spawn, type ChildProcess } from "child_process";
++
++export const CLAUDE_CLI_PROVIDER = "claude-cli";
++
++/** pi tool names -> the Claude Code built-ins that do the same job. */
++const TOOL_MAP: Record<string, string> = { read: "Read", grep: "Grep", find: "Glob", ls: "Glob" };
++
++/** Waits before each retry; a usage-limit drop is ridden out while cswap moves to another account. */
++const RETRY_WAIT_S = (process.env.CLAUDE_CLI_RETRY_WAITS ?? "30,60,120,240,300,300,300")
++  .split(",")
++  .map(Number);
++
++export interface ClaudeCliSessionOptions {
++  model: string;
++  systemPrompt: string;
++  thinkingLevel: "low" | "medium" | "high";
++  cwd: string;
++  tools: string[];
++  /** First turn whose reply must hold a JSON object; a reply without one is re-asked. */
++  jsonFromTurn: number;
++}
++
++/** Claude Code appends its own context after the prompt, and a reply sometimes answers that. */
++const NO_JSON_REASKS = 2;
++
++interface Turn {
++  text: string;
++  sessionId: string;
++  tools: string[];
++  usage: { input: number; output: number; cacheRead: number; cacheWrite: number; cost: { total: number } };
++}
++
++export function cliArgs(o: ClaudeCliSessionOptions, resumeFrom: string | null): string[] {
++  const tools = [...new Set(o.tools.map((t) => TOOL_MAP[t] ?? t))];
++  return [
++    "-p",
++    "--model", o.model,
++    "--effort", o.thinkingLevel,
++    "--safe-mode",
++    "--strict-mcp-config",
++    "--settings", '{"disableAllHooks":true}',
++    "--system-prompt", o.systemPrompt,
++    "--output-format", "stream-json",
++    "--verbose",
++    ...(resumeFrom ? ["--resume", resumeFrom, "--fork-session"] : []),
++    ...(tools.length ? ["--allowedTools", tools.join(",")] : []),
++    "--tools", tools.join(","),
++  ];
++}
++
++/** Reads one CLI turn's stream-json; throws on anything that is not a successful answer. */
++export function parseTurn(stdout: string): Turn {
++  const tools: string[] = [];
++  let result: any = null;
++  for (const line of stdout.split("\n")) {
++    if (!line.trim()) continue;
++    let event: any;
++    try {
++      event = JSON.parse(line);
++    } catch {
++      continue;
++    }
++    if (event.type === "assistant")
++      for (const block of event.message?.content ?? [])
++        if (block?.type === "tool_use") tools.push(String(block.name));
++    if (event.type === "result") result = event;
++  }
++  if (!result) throw new Error("claude-cli: no result event");
++  if (result.is_error || result.subtype !== "success" || typeof result.result !== "string")
++    throw new Error(`claude-cli: ${result.subtype}: ${String(result.result ?? "").slice(0, 300)}`);
++  const u = result.usage ?? {};
++  return {
++    text: result.result,
++    sessionId: result.session_id,
++    tools,
++    usage: {
++      input: u.input_tokens ?? 0,
++      output: u.output_tokens ?? 0,
++      cacheRead: u.cache_read_input_tokens ?? 0,
++      cacheWrite: u.cache_creation_input_tokens ?? 0,
++      cost: { total: result.total_cost_usd ?? 0 },
++    },
++  };
++}
++
++function runOnce(o: ClaudeCliSessionOptions, resumeFrom: string | null, prompt: string, track: (c: ChildProcess | null) => void): Promise<Turn> {
++  return new Promise((resolveTurn, reject) => {
++    const env = { ...process.env };
++    delete env.OPENROUTER_API_KEY;
++    delete env.ANTHROPIC_API_KEY;
++    // A host harness's config dir (e.g. Frink's) adds session context the judge answers instead.
++    delete env.CLAUDE_CONFIG_DIR;
++    const child = spawn("claude", cliArgs(o, resumeFrom), { cwd: o.cwd, env, stdio: ["pipe", "pipe", "pipe"] });
++    track(child);
++    let out = "";
++    let err = "";
++    child.stdout.on("data", (d) => (out += d));
++    child.stderr.on("data", (d) => (err += d));
++    child.on("error", reject);
++    child.on("close", (code, signal) => {
++      track(null);
++      if (signal) return reject(new Error(`claude-cli: killed by ${signal}`));
++      try {
++        resolveTurn(parseTurn(out));
++      } catch (e) {
++        reject(new Error(`${(e as Error).message} (exit ${code}) ${err.slice(0, 200)}`));
++      }
++    });
++    child.stdin.end(prompt);
++  });
++}
++
++export function createClaudeCliSession(o: ClaudeCliSessionOptions) {
++  const messages: any[] = [];
++  const listeners: Array<(event: any) => void> = [];
++  let lastGood: string | null = null;
++  let turns = 0;
++  let child: ChildProcess | null = null;
++  let aborted = false;
++  const emit = (event: any) => listeners.forEach((l) => l(event));
++  return {
++    messages,
++    sessionFile: undefined as string | undefined,
++    subscribe(listener: (event: any) => void) {
++      listeners.push(listener);
++    },
++    async prompt(text: string): Promise<void> {
++      messages.push({ role: "user", content: [{ type: "text", text }] });
++      const wantsJson = turns++ >= o.jsonFromTurn;
++      let reasks = 0;
++      for (let attempt = 0; ; attempt++) {
++        if (aborted) throw new Error("claude-cli: aborted");
++        try {
++          const turn = await runOnce(o, lastGood, text, (c) => (child = c));
++          if (wantsJson && !/\{[\s\S]*\}/.test(turn.text) && reasks < NO_JSON_REASKS) {
++            reasks += 1;
++            attempt -= 1;
++            console.error(`  claude-cli: reply held no JSON object, re-asking (${reasks}/${NO_JSON_REASKS}): ${JSON.stringify(turn.text.slice(0, 80))}`);
++            continue;
++          }
++          lastGood = turn.sessionId;
++          for (const name of turn.tools) emit({ type: "tool_execution_start", toolName: name });
++          const message = { role: "assistant", content: [{ type: "text", text: turn.text }], usage: turn.usage };
++          messages.push(message);
++          emit({ type: "turn_end", message });
++          return;
++        } catch (e) {
++          if (aborted || attempt >= RETRY_WAIT_S.length) throw e;
++          const wait = RETRY_WAIT_S[attempt];
++          console.error(`  claude-cli retry ${attempt + 1}/${RETRY_WAIT_S.length} in ${wait}s: ${(e as Error).message.slice(0, 160)}`);
++          await new Promise((r) => setTimeout(r, wait * 1000));
++        }
++      }
++    },
++    async abort() {
++      aborted = true;
++      child?.kill("SIGTERM");
++    },
++    dispose() {
++      child?.kill("SIGTERM");
++    },
++  };
++}

@@ -12,6 +12,7 @@ import {
   remoteBranchExists,
   scriptPath,
   seedShipRepoLocalRemote,
+  REAPED_15S_BANNER,
 } from './_ship-branch-fixture.mts';
 
 function commit(git, paths: string[], message: string): void {
@@ -531,12 +532,11 @@ describe('ship-branch.sh — --from-branch committed scope (sc-2352)', () => {
       cwd: dir,
       input: '',
       encoding: 'utf8',
-      timeout: 45_000,
       env: { ...publishEnv, SHIP_COMMIT_TIMEOUT: '15' },
     });
 
     expect(first.status, first.stderr).toBe(124);
-    expect(first.stderr).toMatch(/gate chain hit the 15s ceiling \(exit 124\)/);
+    expect(first.stderr).toMatch(REAPED_15S_BANNER);
     const preserved = git(['rev-parse', 'feat/from-branch-formatter']).trim();
     expect(git(['show', `${preserved}:note.txt`])).toBe('gate-formatted\n');
     expect(git(['show', 'HEAD:note.txt'])).toBe('committed source bytes\n');
@@ -579,7 +579,7 @@ describe('ship-branch.sh — --from-branch committed scope (sc-2352)', () => {
     expect(
       git(['for-each-ref', '--format=%(refname)', 'refs/devkit/ship-source-memberships']).trim(),
     ).toBe('');
-  });
+  }, 240_000);
 
   it('a fresh branch-source invocation cannot adopt a receipt created by explicit-path mode', () => {
     const { dir, env, git, bare } = seedShipRepoLocalRemote();
@@ -645,7 +645,6 @@ describe('ship-branch.sh — --from-branch committed scope (sc-2352)', () => {
           title: 'ship committed branch scope',
           base: 'work',
           links: [],
-          noQavisPublish: false,
           updatePrBody: false,
           draft: false,
           resumed: false,

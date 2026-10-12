@@ -264,7 +264,7 @@ describe('strictRemedy', () => {
     for (const pair of [
       'GUARD_REVIEW_MODEL=haiku',
       'GUARD_REVIEW_ESCALATION_MODEL=opus',
-      'GUARD_CORRECTNESS_MODEL=sonnet',
+      'GUARD_CORRECTNESS_MODEL=claude-haiku-5-5',
       'GUARD_CORRECTNESS_CHUNK=off',
     ])
       expect(set).toContain(pair);
@@ -302,13 +302,13 @@ describe('strictRemedy', () => {
       expect(familyOverrideRemedy(unknown)).toContain('no family move is safe yet');
   });
 
-  // Never a subset: a three-knob move runs the correctness reviewer at a cap benched for sol only.
+  // Never a subset: a three-knob move chunks the claude correctness reviewer at the default 400.
   it('the claude direction always names all four knobs together', () => {
     const r = familyOverrideRemedy('codex');
     for (const knob of [
       'GUARD_REVIEW_MODEL=haiku',
       'GUARD_REVIEW_ESCALATION_MODEL=opus',
-      'GUARD_CORRECTNESS_MODEL=sonnet',
+      'GUARD_CORRECTNESS_MODEL=claude-haiku-5-5',
       'GUARD_CORRECTNESS_CHUNK=off',
     ])
       expect(r).toContain(knob);

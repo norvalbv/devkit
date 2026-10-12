@@ -1,0 +1,12 @@
+{
+ "id": "q1-store-exit4",
+ "slug": "agent-comment-firewall",
+ "file": "gate-engine/comment-firewall/store.mjs",
+ "realPath": "gate-engine/comment-firewall/store.mts",
+ "bindingText": "A store that cannot be read or written exits 4",
+ "prompt": "guard-comments (gate-engine/comment-firewall/cli.mjs) crashes with an uncaught ENOTDIR / EACCES stack trace from gate-engine/comment-firewall/store.mjs when its sightings directory cannot be created or written, e.g. on a read-only checkout. Handle that failure cleanly instead of crashing with a stack trace.",
+ "bindingOffset": 730,
+ "alsoBrief": [
+  "gate-engine/comment-firewall/cli.mjs"
+ ]
+}

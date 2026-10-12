@@ -19,8 +19,11 @@ import { pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { CLI, testSpawnSync } from './_helpers.mts';
 import {
+  concludeRegression,
   parseVitestRegressionReport,
   type RegressionEvidence,
+  type RegressionOperandEvidence,
+  SKIPPED_ON_GREEN,
 } from '../lib/baseline-status/regression-evidence.mts';
 import * as windowsSupervisor from '../lib/baseline-status/regression-windows-supervisor.mts';
 import {
@@ -72,7 +75,8 @@ function fixture(prefix = ''): Fixture {
   write(
     root,
     `${prefix}check.mjs`,
-    `import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
+    `import { execFileSync } from 'node:child_process';
+import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 const actual = readFileSync('value.txt', 'utf8').trim();
 const passed = actual === 'fixed';
 if (process.env.MUTATE_CALLER) writeFileSync(process.env.MUTATE_CALLER, 'mutated\\n');
@@ -89,8 +93,16 @@ if (process.env.MUTATE_GIT_CONFIG) {
   const config = readFileSync(process.env.MUTATE_GIT_CONFIG);
   writeFileSync(
     process.env.MUTATE_GIT_CONFIG,
-    Buffer.concat([config, Buffer.from('\\n# mutated by exact proof command\\n')]),
+    Buffer.concat([config, Buffer.from('\\n[proof]\\n\\tmutated = ' + passed + '\\n')]),
   );
+}
+if (process.env.SIBLING_ROOT) {
+  const sibling = (...args) => execFileSync('git', ['-C', process.env.SIBLING_ROOT, ...args]);
+  const id = process.pid;
+  sibling('update-ref', 'refs/heads/sibling-' + id, 'HEAD');
+  sibling('update-ref', 'refs/remotes/origin/main', 'HEAD');
+  sibling('config', 'branch.sibling-' + id + '.remote', 'origin');
+  sibling('worktree', 'add', '--quiet', '--detach', process.env.SIBLING_WORKTREES + '/' + id);
 }
 if (!process.argv.includes('--no-report')) {
   const badCounts = process.argv.includes('--bad-counts');
@@ -100,19 +112,27 @@ if (!process.argv.includes('--no-report')) {
   const impossibleSuccess = process.argv.includes('--impossible-success');
   const falseSuccess = process.argv.includes('--false-success');
   const suiteFailure = process.argv.includes('--suite-failure') && !passed;
+  const hookFailure = process.argv.includes('--hook-failure') && !passed;
+  const skipped = (process.argv.includes('--skip-on-green') && passed) || hookFailure;
+  const status = skipped ? 'skipped' : passed ? 'passed' : 'failed';
   const message = 'AssertionError: expected ' + actual + ' to equal fixed at ' + process.cwd();
   writeFileSync('.proof.json', JSON.stringify({
     success: falseSuccess ? false : impossibleSuccess ? !passed : passed,
     numTotalTests: suiteFailure ? 0 : badCounts ? 2 : 1,
-    numPassedTests: suiteFailure ? 0 : passed ? 1 : 0,
-    numFailedTests: suiteFailure ? 0 : passed ? 0 : 1,
-    numPendingTests: 0,
+    numPassedTests: suiteFailure || skipped ? 0 : passed ? 1 : 0,
+    numFailedTests: suiteFailure || skipped ? 0 : passed ? 0 : 1,
+    numPendingTests: skipped ? 1 : 0,
     numTodoTests: 0,
-    testResults: [{ assertionResults: emptyAssertions || suiteFailure ? [] : [{
-      fullName: hostile ? 'ticket **\\n\\n## forged \`heading\`' : 'ticket behavior returns the fixed value',
+    testResults: [{
+      name: process.cwd() + '/ticket.test.mjs',
       status: passed ? 'passed' : 'failed',
-      failureMessages: malformedFailureMessages ? [message, 7] : passed ? [] : [message],
-    }] }],
+      message: suiteFailure ? 'Cannot find module ./fix.mjs from ' + process.cwd() : hookFailure ? 'beforeAll threw' : '',
+      assertionResults: emptyAssertions || suiteFailure ? [] : [{
+        fullName: hostile ? 'ticket **\\n\\n## forged \`heading\`' : 'ticket behavior returns the fixed value',
+        status,
+        failureMessages: malformedFailureMessages ? [message, 7] : status === 'failed' ? [message] : [],
+      }],
+    }],
   }));
 }
 console.log(passed ? 'PASS ticket behavior' : 'FAIL ticket behavior');
@@ -187,6 +207,28 @@ function runProof(
     ],
     { cwd: fx.cwd, encoding: 'utf8', env: options.env ?? process.env, timeout: 90_000 },
   );
+}
+
+function operand(exitCode: number): RegressionOperandEvidence {
+  return {
+    requestedRef: 'ref',
+    sha: 'sha',
+    exitCode,
+    signal: null,
+    spawnError: false,
+    stdoutFile: '',
+    stderrFile: '',
+    commandResultFile: '',
+    stdoutSha256: '',
+    stderrSha256: '',
+    commandResultSha256: '',
+    reportFile: null,
+    reportSha256: null,
+    reportError: null,
+    testCounts: null,
+    failures: [],
+    fileErrors: [],
+  };
 }
 
 function readEvidence(stdout: string): EvidenceCapture {
@@ -384,7 +426,7 @@ describe('devkit prove-regression', () => {
 
     expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
     const { evidence, directory } = readEvidence(result.stdout);
-    expect(evidence.schema).toBe(3);
+    expect(evidence.schema).toBe(4);
     expect(evidence.status).toBe('captured');
     expect(evidence.red).toMatchObject({
       sha: fx.red,
@@ -524,13 +566,14 @@ describe('devkit prove-regression', () => {
     expect(evidence.red.testCounts).toBeNull();
   });
 
-  it('admits success false with no failed assertions for a failing suite', () => {
+  it('never counts a red test file that failed to load as red evidence', () => {
     const fx = fixture();
     const result = runProof(fx, { commandArgs: ['--suite-failure'] });
 
-    expect(result.status, result.stderr).toBe(0);
-    const { evidence } = readEvidence(result.stdout);
-    expect(evidence.status).toBe('captured');
+    expect(result.status, result.stderr).toBe(1);
+    const { evidence, directory } = readEvidence(result.stdout);
+    expect(evidence.status).toBe('inconclusive');
+    expect(evidence.reason).toMatch(/red failed only at file level/);
     expect(evidence.red.reportError).toBeNull();
     expect(evidence.red.testCounts).toEqual({
       total: 0,
@@ -539,6 +582,52 @@ describe('devkit prove-regression', () => {
       skipped: 0,
       todo: 0,
     });
+    expect(evidence.red.fileErrors).toEqual([
+      {
+        fullName: '<checkout>/ticket.test.mjs',
+        message: 'Cannot find module ./fix.mjs from <checkout>',
+      },
+    ]);
+    expect(readFileSync(join(directory, 'evidence.md'), 'utf8')).toContain(
+      'Cannot find module ./fix.mjs',
+    );
+  });
+
+  it('never counts a red hook failure as red evidence', () => {
+    const fx = fixture();
+    const result = runProof(fx, { commandArgs: ['--hook-failure'] });
+
+    expect(result.status, result.stderr).toBe(1);
+    const { evidence } = readEvidence(result.stdout);
+    expect(evidence.status).toBe('inconclusive');
+    expect(evidence.reason).toMatch(/red failed only at file level/);
+    expect(evidence.red.fileErrors[0]?.message).toBe('beforeAll threw');
+  });
+
+  it('never counts a test skipped on green as passing', () => {
+    const fx = fixture();
+    const result = runProof(fx, { commandArgs: ['--skip-on-green'] });
+
+    expect(result.status, result.stderr).toBe(1);
+    const { evidence } = readEvidence(result.stdout);
+    expect(evidence.status).toBe('inconclusive');
+    expect(evidence.reason).toBe(SKIPPED_ON_GREEN);
+    expect(evidence.green.testCounts).toMatchObject({ passed: 0, skipped: 1 });
+  });
+
+  it('captures while sibling sessions write shared refs, branch config and worktrees', () => {
+    const fx = fixture();
+    const worktrees = mkdtempSync(join(tmpdir(), 'prove-regression-siblings-'));
+    roots.push(worktrees);
+    const result = runProof(fx, {
+      env: { ...process.env, SIBLING_ROOT: fx.root, SIBLING_WORKTREES: worktrees },
+    });
+
+    expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+    const { evidence } = readEvidence(result.stdout);
+    expect(evidence.status).toBe('captured');
+    expect(evidence.reason).toBe('1 of 1 red-failing tests passed on green');
+    expect(readdirSync(worktrees)).toHaveLength(2);
   });
 
   it('makes a passing command with Vitest success false inconclusive', () => {
@@ -554,26 +643,35 @@ describe('devkit prove-regression', () => {
     expect(evidence.green.testCounts).toBeNull();
   });
 
-  it('scrubs checkout and shared dependency paths from structured failure summaries', () => {
+  it('scrubs paths from failure summaries and keeps a repeated name at its worst outcome', () => {
     const checkout = '/tmp/proof clone';
     const dependency = '/Users/example/shared dependencies';
     const report = parseVitestRegressionReport(
       JSON.stringify({
         success: false,
-        numTotalTests: 1,
-        numPassedTests: 0,
+        numTotalTests: 2,
+        numPassedTests: 1,
         numFailedTests: 1,
         numPendingTests: 0,
         numTodoTests: 0,
         testResults: [
           {
+            name: `${checkout}/a.test.mts`,
+            status: 'failed',
             assertionResults: [
               {
                 fullName: `fails at ${checkout}`,
                 status: 'failed',
                 failureMessages: [`at ${pathToFileURL(dependency).href}/vitest.js`],
               },
+              { fullName: `fails at ${checkout}`, status: 'passed', failureMessages: [] },
             ],
+          },
+          {
+            name: `${checkout}/b.test.mts`,
+            status: 'failed',
+            message: `Cannot find module ${dependency}/x imported from ${checkout}/b.test.mts`,
+            assertionResults: [],
           },
         ],
       }),
@@ -587,6 +685,30 @@ describe('devkit prove-regression', () => {
         message: 'at <dependency-store>/vitest.js',
       },
     ]);
+    expect(report.fileErrors).toEqual([
+      {
+        fullName: '<checkout>/b.test.mts',
+        message: 'Cannot find module <dependency-store>/x imported from <checkout>/b.test.mts',
+      },
+    ]);
+    expect([...report.tests]).toEqual([[`<checkout>/a.test.mts\0fails at ${checkout}`, 'failed']]);
+  });
+
+  it.each([
+    ['one of two red failures passes', ['failed', 'failed'], ['passed', 'failed'], 'captured'],
+    ['the red failure is renamed on green', ['failed'], [], 'inconclusive'],
+    ['red has no failed assertion', ['passed'], ['passed'], 'inconclusive'],
+  ] as const)('concludes from per-test outcomes when %s', (_case, red, green, status) => {
+    const outcomes = (list: readonly ('passed' | 'failed')[]) =>
+      new Map(list.map((outcome, index) => [`t${index}`, outcome]));
+    const conclusion = concludeRegression(
+      operand(1),
+      operand(0),
+      { red: outcomes(red), green: outcomes(green) },
+      true,
+      { redCloneRemoved: true, greenCloneRemoved: true },
+    );
+    expect(conclusion.status).toBe(status);
   });
 
   it('returns inconclusive unless red is nonzero and green is zero', () => {

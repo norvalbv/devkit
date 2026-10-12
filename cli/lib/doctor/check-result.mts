@@ -19,7 +19,7 @@ export interface CheckResult {
   /**
    * Reported, but deliberately OUTSIDE the exit code — a real finding that is not a reason to call
    * the repo unhealthy. Until this existed the only way to express that tier was to bypass
-   * CheckResult entirely and print from `run()` (printQavisAdvisoryHealth), which put the signal
+   * CheckResult entirely and print from `run()` (printPriorArtAdvisoryHealth), which put the signal
    * beyond the reach of every consumer that reads `results`.
    *
    * An advisory still renders with its true status glyph — a warning that prints as `✓` teaches the

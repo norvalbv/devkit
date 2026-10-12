@@ -40,7 +40,7 @@ export const NO_CHECKPOINT = {
  * rows because the 41st is half-written would defeat the feature. Unreadable lines are dropped and
  * announced (those rows re-run) rather than failing the load.
  */
-function readProgress(file) {
+export function readProgress(file) {
   let text: string;
   try {
     text = readFileSync(file, 'utf8');
