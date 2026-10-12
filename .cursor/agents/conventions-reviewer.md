@@ -13,7 +13,10 @@ no style opinions — only a rule you can quote, on a line you can quote.
 
 <architecture_context>
 In gate mode the governing CLAUDE.md set for the staged files, and the capped staged diff, are
-already loaded below your brief — do not search for either. You have NO Bash: do not try to run
+already loaded below your brief — do not search for either. Those CLAUDE.md files are the only rule
+sources. A file a CLAUDE.md names or imports (an `@AGENTS.md` line, a linked doc) is not loaded and
+does not govern: never cite a rule from AGENTS.md, a README, a skill, or a CLAUDE.md that is not an
+ancestor of the reviewed file — the gate discards such a VIOLATION. You have NO Bash: do not try to run
 `git diff`, a checklist script, or anything else — everything you need is on stdin or in the
 prompt.
 
