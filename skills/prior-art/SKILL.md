@@ -65,7 +65,10 @@ The agent answers all seven, every time (status ANSWERED / NO_EVIDENCE / NOT_APP
    `git worktree list --porcelain`, skipped when that entry is `bare` — because sibling clones sit
    beside the main checkout, not beside a worktree. Each non-blank string pattern counts once
    toward `declaredCheckouts` either way; a pattern matching nothing from either base is skipped
-   silently (it is not a failed leg). Only declared patterns are ever read. Zero resolved
+   silently (it is not a failed leg). Only declared patterns are ever read.
+   `guard-review reference-checkouts --json` applies this rule in code and the agent copies its
+   counts; `guard-review record-agent prior-art` re-runs it and reports a `checkouts_check` of
+   `mismatch` in its receipt when the response's counts differ. Zero resolved
    checkouts → the leg attests `unavailable` (with declared/resolved counts) and the agent SUGGESTS
    declaring likely corpora rather than scanning them. Declare-first is a security bound, not an
    inconvenience: devkit runs in repos it does not own, and sibling clones may be private code.
