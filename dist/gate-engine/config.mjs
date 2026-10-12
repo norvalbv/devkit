@@ -153,7 +153,7 @@ export function envFlag(name) {
  * because guard-deterministic must ask the same question to salt its prefix-cache scope, and a
  * second copy of the predicate is exactly what the dup/clone gates exist to stop.
  *
- * Two spellings, deliberately. `GUARD_COVERAGE_OK` is canonical: the GUARD_QAVIS_OK analogue ("ship
+ * Two spellings, deliberately. `GUARD_COVERAGE_OK` is canonical: the one-run override ("ship
  * this change without the verification"), and the ONLY one any remedy line prints. `GUARD_NO_COVERAGE`
  * is an accepted alias because it is the name agents actually guess — blocked ship attempts in the
  * field grepped devkit's dist for `GUARD_NO_COVERAGE|SKIP_COVERAGE|NO_COVERAGE|COVERAGE_SKIP` and
@@ -286,6 +286,7 @@ function resolveLoadedGuardConfig(file, cwd) {
         // Prior-art reference-checkout globs; declared-only, never a scan of undeclared siblings.
         // Resolve against cwd (W-3), then the main worktree's same dir (skills/prior-art/SKILL.md).
         research: { referenceCheckouts: globs(file.research?.referenceCheckouts) },
+        uiEvidence: { paths: globs(file.uiEvidence?.paths) },
         extraGates: file.extraGates,
         noLog: noLogEnv ?? Boolean(file.noLog ?? DEFAULTS.noLog),
         noLlm: noLlmEnv ?? Boolean(file.noLlm ?? DEFAULTS.noLlm),

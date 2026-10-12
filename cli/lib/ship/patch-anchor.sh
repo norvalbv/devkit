@@ -53,7 +53,7 @@ _ship_classify_modes() {
   local root=$1 anchor=$2 raw meta path src rest dst
   shift 2
   raw=$(mktemp "${TMPDIR:-/tmp}/ship-classify-raw.XXXXXX") || return 1
-  git -C "$root" diff --raw -z --no-renames "$anchor" -- "$@" > "$raw" || { rm -f "$raw"; return 1; }
+  git -C "$root" diff --raw -z --no-renames "$anchor" -- "$@" > "$raw" || { rm -f "$raw"; return 1; } # pathspec: callers pass literal GIT_PATHS
   while IFS= read -r -d '' meta; do
     IFS= read -r -d '' path || break
     meta=${meta#:}
@@ -75,7 +75,7 @@ _ship_classify_binary() {
   local root=$1 anchor=$2 num record path
   shift 2
   num=$(mktemp "${TMPDIR:-/tmp}/ship-classify-num.XXXXXX") || return 1
-  git -C "$root" diff --numstat -z --no-renames "$anchor" -- "$@" > "$num" || { rm -f "$num"; return 1; }
+  git -C "$root" diff --numstat -z --no-renames "$anchor" -- "$@" > "$num" || { rm -f "$num"; return 1; } # pathspec: callers pass literal GIT_PATHS
   while IFS= read -r -d '' record; do
     case $record in
       '-'$'\t''-'$'\t'*)

@@ -6,6 +6,7 @@
  * and nothing else changes — no vitest.config edit, because the reports directory is overridden on
  * vitest's command line. See gate-engine/coverage/produce.mts for why that isolation is required.
  */
+import { formatMissingRootDependencies } from '../../../gate-engine/coverage/dependencies.mts';
 import { produceCoverage } from '../../../gate-engine/coverage/produce.mts';
 
 export const meta = {
@@ -67,5 +68,7 @@ Exits with vitest's exit code (the re-run's, when one ran). Vitest-only; the gat
 };
 
 export default async function coverageRun(args: string[], cwd: string) {
+  // Seconds now instead of a suite of import failures later. Warns only: not every run needs them all.
+  for (const line of formatMissingRootDependencies(cwd)) console.error(line);
   return await produceCoverage(cwd, args);
 }

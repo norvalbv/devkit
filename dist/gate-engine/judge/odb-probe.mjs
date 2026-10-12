@@ -167,7 +167,7 @@ function bytes(v) {
  * Clip to a BYTE cap. `.length` would count UTF-16 code units, and JSON.stringify does not escape
  * non-ASCII — so a path of 3-byte characters measures 512 "long" and serializes to ~1.5KB.
  */
-function clip(v, cap = FIELD_CAP) {
+export function clip(v, cap = FIELD_CAP) {
     if (bytes(v) <= cap)
         return v;
     let end = Math.min(v.length, cap);

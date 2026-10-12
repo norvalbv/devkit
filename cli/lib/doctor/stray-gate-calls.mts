@@ -23,7 +23,7 @@ const DEVKIT_GATE_BINS = [
   'guard-comments',
   'guard-decisions',
   'guard-review',
-  'guard-qavis-advisory',
+  'guard-ui-evidence',
   'guard-size',
   'guard-fanout',
   'guard-dup',

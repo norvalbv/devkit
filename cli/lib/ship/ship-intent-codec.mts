@@ -18,7 +18,6 @@ export interface ShipIntent {
   base: string | null;
   links: string[];
   paths: string[];
-  noQavisPublish: boolean;
   updatePrBody: boolean;
   /** `--draft`: open the PR as a draft. New-ship only; a reship's PR already exists. */
   draft: boolean;
@@ -43,7 +42,6 @@ export interface StoredIntent {
   base?: string | null;
   links?: string[];
   paths?: string[];
-  noQavisPublish?: boolean;
   updatePrBody?: boolean;
   draft?: boolean;
   bodyB64?: string;
@@ -337,7 +335,6 @@ export function emitFields(intent: ShipIntent): void {
     intent.sourceMode ?? 'explicit',
     intent.title,
     intent.base ?? '',
-    intent.noQavisPublish ? '1' : '0',
     intent.updatePrBody ? '1' : '0',
     intent.draft ? '1' : '0',
     intent.createdAt,

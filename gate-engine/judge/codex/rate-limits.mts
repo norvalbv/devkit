@@ -1,5 +1,5 @@
-/** Read the codex account's rate-limit state without spending a token: `account/rateLimits/read`
- *  answers in ~1s while `codex exec` refuses. Advisory-only; every failure mode returns null. */
+/** Read the codex account's rate-limit state and model list without spending a token: both RPCs
+ *  answer in ~1s while `codex exec` refuses. Advisory-only; every failure mode returns null. */
 import { spawn } from 'node:child_process';
 import { plausibleReset } from '../outage/classify.mts';
 
@@ -14,6 +14,7 @@ const MAX_OUTPUT = 512 * 1024;
 
 const INITIALIZE_ID = 1;
 const READ_ID = 2;
+const MODEL_LIST_ID = 3;
 
 export interface CodexRateLimits {
   /** Percentage of the primary window consumed, when the payload carried one. */
@@ -33,6 +34,10 @@ export interface CodexRateLimits {
   reachedType?: string;
   /** Which window is fully spent, when one is. Reported, never interpreted. */
   exhaustedWindow?: 'primary' | 'secondary';
+  /** Every model id `model/list` returned, hidden ones included. Absent when it proved nothing. */
+  models?: string[];
+  /** The non-hidden subset: the ones worth suggesting as a move target. */
+  visibleModels?: string[];
 }
 
 /** The wire shape — every field optional (codexEventsOf's contract in result.mts). Values are
@@ -142,6 +147,39 @@ export function parseRateLimitsReply(line: string): CodexRateLimits | null {
   return snapshot;
 }
 
+interface ModelListReply {
+  id?: number;
+  result?: {
+    data?: Array<{ id?: string; model?: string; hidden?: boolean }> | null;
+    nextCursor?: string | null;
+  };
+}
+
+/** The `model/list` reply as `{ models }`, or null when the line is not that reply. `models` is
+ *  absent for an error (an older codex) or a partial page: neither proves a model is missing. */
+export function parseModelListReply(
+  line: string,
+): Pick<CodexRateLimits, 'models' | 'visibleModels'> | null {
+  let parsed: ModelListReply;
+  try {
+    // SAFETY: every field is optional and re-checked below, as in parseRateLimitsReply.
+    parsed = JSON.parse(line) as ModelListReply;
+  } catch {
+    return null;
+  }
+  if (parsed.id !== MODEL_LIST_ID) return null;
+  const data = parsed.result?.data;
+  if (!Array.isArray(data) || parsed.result?.nextCursor) return {};
+  const ids = (list: typeof data): string[] => [
+    ...new Set(
+      list
+        .flatMap((m) => [usableText(m?.id), usableText(m?.model)])
+        .filter((id) => id !== undefined),
+    ),
+  ];
+  return { models: ids(data), visibleModels: ids(data.filter((m) => m?.hidden !== true)) };
+}
+
 /** Ask the local codex install for its rate-limit state. Resolves null for every unhappy path;
  *  never throws, never blocks, never spends. */
 export function readCodexRateLimits(
@@ -169,7 +207,10 @@ export function readCodexRateLimits(
 
     let settled = false;
     let buffered = '';
-    const finish = (value: CodexRateLimits | null): void => {
+    let snapshot: CodexRateLimits | null = null;
+    let modelList: ReturnType<typeof parseModelListReply> = null;
+    // A slow or unknown model/list must not erase a rate-limit answer that already arrived.
+    const finish = (): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
@@ -179,19 +220,19 @@ export function readCodexRateLimits(
       } catch {
         /* already gone */
       }
-      resolve(value);
+      resolve(snapshot && modelList?.models ? { ...snapshot, ...modelList } : snapshot);
     };
 
-    const timer = setTimeout(() => finish(null), timeoutMs);
+    const timer = setTimeout(finish, timeoutMs);
     // A daemon that never answers must not keep the ship's event loop alive past its own timeout.
     timer.unref?.();
 
-    child.on('error', () => finish(null));
+    child.on('error', finish);
     // A child that exits before reading gets EPIPE as an async stream 'error', which the write's try
     // cannot catch; unhandled, it is an uncaught exception that fails the whole run.
-    child.stdin?.on('error', () => finish(null));
-    // Exiting before the reply arrived is itself an answer: we learned nothing.
-    child.on('close', () => finish(null));
+    child.stdin?.on('error', finish);
+    // Exiting early is itself an answer: whatever arrived before it is all we learned.
+    child.on('close', finish);
     child.stderr?.on('data', () => {
       /* diagnostics only; the reply is on stdout */
     });
@@ -199,19 +240,20 @@ export function readCodexRateLimits(
     child.stdout?.on('data', (chunk: Buffer) => {
       buffered += chunk.toString();
       if (buffered.length > MAX_OUTPUT) {
-        finish(null);
+        finish();
         return;
       }
       const lines = buffered.split('\n');
       buffered = lines.pop() ?? '';
       for (const line of lines) {
         if (!line.trim()) continue;
-        const snapshot = parseRateLimitsReply(line);
-        if (snapshot) finish(snapshot);
+        snapshot = parseRateLimitsReply(line) ?? snapshot;
+        modelList = parseModelListReply(line) ?? modelList;
+        if (snapshot && modelList) finish();
       }
     });
 
-    // The two JSON-RPC requests this module ever sends; a named shape keeps the writer typed.
+    // The three JSON-RPC requests this module ever sends; a named shape keeps the writer typed.
     const send = (payload: {
       jsonrpc: string;
       id: number;
@@ -221,7 +263,7 @@ export function readCodexRateLimits(
       try {
         child.stdin?.write(`${JSON.stringify(payload)}\n`);
       } catch {
-        finish(null);
+        finish();
       }
     };
     // `initialize` is mandatory before any other method; the server replies with its own identity,
@@ -233,5 +275,11 @@ export function readCodexRateLimits(
       params: { clientInfo: { name: 'devkit', title: 'devkit ship preflight', version: '1' } },
     });
     send({ jsonrpc: '2.0', id: READ_ID, method: 'account/rateLimits/read', params: {} });
+    send({
+      jsonrpc: '2.0',
+      id: MODEL_LIST_ID,
+      method: 'model/list',
+      params: { includeHidden: true, limit: 200 },
+    });
   });
 }

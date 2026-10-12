@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -89,9 +89,8 @@ export const INHERITED_RUN_ENV = [
 ];
 
 // review-target.sh guards a review ENTRYPOINT, so its list is NOT a superset of what a ship exports
-// downstream — these names reach the suite unscrubbed by it. They are not inert: qavis-advisory's
-// shipMode() branches on DEVKIT_SHIP_ROOT and then runs git against that path, and completeness's
-// verdictBranch() scopes a sticky verdict to DEVKIT_SHIP_BRANCH, so an inherited pair makes a test
+// downstream — these names reach the suite unscrubbed by it. They are not inert: completeness's
+// verdictBranch() scopes a sticky verdict to DEVKIT_SHIP_BRANCH, so an inherited value makes a test
 // answer for the OUTER ship's repository. A parity test derives this set from the ship scripts.
 export const SHIP_EXPORTED_ENV = [
   'DEVKIT_SHIP_BRANCH',
@@ -118,9 +117,29 @@ export const TEST_ONLY_ADDITIONS = [
   'FRINK_AI_STRICT',
   'DEVKIT_REVIEW_STAGED_FILES',
   'DEVKIT_REVIEW_STAGED_FILES_PATH',
+  // The coverage gate runs this suite inside a 'gate'-marked process. Kept out of INHERITED_RUN_ENV
+  // because `devkit review` must keep an inherited 'bench'.
+  'DEVKIT_RUN_ORIGIN',
 ];
 
-export const SCRUBBED_ENV = [...INHERITED_RUN_ENV, ...SHIP_EXPORTED_ENV, ...TEST_ONLY_ADDITIONS];
+// One-run gate bypasses, in both spellings envFlag reads: everything `devkit ship --help` documents,
+// plus the unadvertised decision-checks one. Inherited, they would flip gate tests. Parity-tested.
+export const BYPASS_ENV = [
+  'COVERAGE_OK',
+  'NO_COVERAGE',
+  'STRUCTURE_OK',
+  'NO_STRUCTURE',
+  'HOOK_PARITY_OK',
+  'DECISIONS_INTEGRITY_OK',
+  'DECISION_CHECKS_OK',
+].flatMap((suffix) => [`GUARD_${suffix}`, `FRINK_${suffix}`]);
+
+export const SCRUBBED_ENV = [
+  ...INHERITED_RUN_ENV,
+  ...SHIP_EXPORTED_ENV,
+  ...TEST_ONLY_ADDITIONS,
+  ...BYPASS_ENV,
+];
 
 // Ordering is load-bearing: DEVKIT_GATE_EVENTS is scrubbed here and reassigned below, so a scrub
 // placed after that assignment would delete the per-worker redirect and let test ships write to the
@@ -144,6 +163,17 @@ export const SUITE_GIT_IDENTITY = {
   GIT_COMMITTER_EMAIL: 'test@devkit.invalid',
 };
 Object.assign(process.env, SUITE_GIT_IDENTITY);
+
+// git >= 2.54 detaches an auto-maintenance repack from fixture commits and pushes, racing cleanup.
+// This template bakes maintenance.auto=false into every new repo's own config; no env can drop it.
+{
+  const template = mkdtempSync(path.join(os.tmpdir(), 'devkit-test-git-template-'));
+  mkdirSync(path.join(template, 'hooks'));
+  mkdirSync(path.join(template, 'info'));
+  writeFileSync(path.join(template, 'info', 'exclude'), '');
+  writeFileSync(path.join(template, 'config'), '[maintenance]\n\tauto = false\n');
+  process.env.GIT_TEMPLATE_DIR = template;
+}
 
 // The ship-path tests (ship-branch / reship / reconcile / …) spawn a REAL commit-with-gate-capture.sh
 // whose gate-events emitter defaults its sink to ~/.devkit/telemetry/gate-events.jsonl — the

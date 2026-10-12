@@ -7,8 +7,6 @@ import { FANOUT_BASELINE, IMPORT_WALL_BASELINE, LINES_BASELINE, SIZE_BASELINE, S
 import { FALLOW_CONFIG_FILES } from '../review/baseline-fallow-paths.mjs';
 /** The `guard-review waive` store; the correctness override valve reads and writes it. */
 export const CORRECTNESS_OVERRIDES_FILE = '.devkit/correctness-overrides.json';
-/** qavis writes it on a QA pass for this checkout's HEAD; the qavis-advisory gate reads it. */
-export const QAVIS_RECEIPT = '.qavis/receipt.json';
 /** fallow's own cache: fallow writes it, and an overlay that wires fallow git-excludes it. */
 export const FALLOW_CACHE = {
     path: '.fallow',
@@ -46,8 +44,6 @@ export const FIXED_GATE_INPUTS = [
     // A ratchet ceiling lowered on one branch must not move the others. Only explicit anti-slop
     // commands write it, never a gate run, so it is not mutable.
     { path: '.anti-slop-baseline.json', kind: 'file', share: 'branch', overlayWrites: true },
-    // File-level: `.qavis/` also holds the tracked recipe.json.
-    { path: QAVIS_RECEIPT, kind: 'file', share: 'checkout', cache: true, localCache: true },
     // The correctness reconcile persists an override into it mid-run.
     { path: CORRECTNESS_OVERRIDES_FILE, kind: 'file', share: 'clone', mutable: true },
 ];

@@ -15,7 +15,7 @@ Usage:
   --no-<guard>           Turn off one guard without restating the full guard list; for example
                          --no-comments. Use --no-review-gate for the review guard.
   --guards <a,b,…>       Only these guards (subset of size,fanout,dup,clone,comments,decisions,
-                         qavis-advisory,review,sentry,coverage; review/sentry/coverage are opt-in).
+                         ui-evidence,review,sentry,coverage; review/sentry/coverage are opt-in).
   --review               Enable \`devkit review\` with an explicit local gate profile.
   --no-review            Disable \`devkit review\` for this installation.
   --review-guards <a,b>  With --review: guard allowlist (default: installed guard selection).
