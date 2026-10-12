@@ -16,6 +16,7 @@ const GIT_INTEGRATION_TESTS = [
   'cli/__tests__/dist-integrity-release-only.test.mts',
   'cli/__tests__/electron-cli-grammar-mixed.test.mts',
   'cli/__tests__/doctor-hookspath-owner.test.mts',
+  'cli/__tests__/fallow-staged-coverage.test.mts',
   'cli/__tests__/guard-branch.test.mts',
   'cli/__tests__/hook-parity.test.mts',
   'cli/__tests__/overlay-anti-slop.test.mts',

@@ -16,8 +16,8 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 import { computePercentages } from '../../../../gate-engine/coverage/run.mts';
+import { coverageMapSchema } from '../../../../gate-engine/coverage/fallow-copy.mts';
 import {
-  coverageMapSchema,
   deriveForeignRoot,
   rebaseCoverageMap,
   rebaseWorktreeCoverage,
