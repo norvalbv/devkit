@@ -7,6 +7,7 @@ import {
   claudeFamilyEnvLine,
   claudeFamilyKeyLine,
   FAMILY_ENV_KEYS,
+  familyOverrideRemedy,
 } from '../../gate-engine/judge/outage/family-override.mts';
 import { resolveChunkCap } from '../../gate-engine/review/lens/chunk-tasks.mts';
 import {
@@ -199,6 +200,18 @@ describe('bindClaudeFamily', () => {
       correctnessModel: example.review.correctnessModel,
       correctnessChunkLoc: example.review.correctnessChunkLoc,
     });
+  });
+
+  it('no family surface claims the chunk cap is benched for gpt-5.6-sol only', () => {
+    const surfaces = [
+      familyOverrideRemedy('codex'),
+      ...[
+        'docs/troubleshooting.md',
+        'skills/commit-gates/SKILL.md',
+        'guard.config.example.json',
+      ].map((doc) => readFileSync(join(__dirname, '..', '..', doc), 'utf8')),
+    ];
+    for (const text of surfaces) expect(text).not.toMatch(/benched for `?gpt-5\.6-sol`? only/);
   });
 
   it('the remedy env line and key line carry the claude set on all four keys', () => {
