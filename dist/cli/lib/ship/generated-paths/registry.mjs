@@ -3,6 +3,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { isAbsolute, join, win32 } from 'node:path';
 import { parseJsonObject } from '../../../../gate-engine/config-json.mjs';
+import { compileRepoGlob } from '../../../../skills/_devkit/review-roots.mjs';
 import { z } from 'zod';
 import { isDevkitRepo } from '../../husky/self-host.mjs';
 export const SYNC_SKILLS = 'devkit sync-skills';
@@ -19,7 +20,6 @@ const UNSAFE_CHARS = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu;
 const DEVKIT_RUNNER = /^devkit(?=\s)/;
 const NEEDS_QUOTING = /[\s"\\]/;
 const UNSUPPORTED_SYNTAX = /[[\]{}]/;
-const REGEX_SPECIAL = /[.*+?^${}()|[\]\\]/g;
 function isRepoRelativeGlob(glob) {
     return !(glob === '' ||
         UNSAFE_CHAR.test(glob) ||
@@ -30,12 +30,14 @@ function isRepoRelativeGlob(glob) {
         glob.startsWith('!') ||
         glob.split('/').some((seg) => seg === '' || seg === '.' || seg === '..'));
 }
+/** A guard.config.json glob: repository-relative, in the `*`, `**` and `?` grammar only. */
+export const repoGlobSchema = z
+    .string()
+    // Never trimmed: whitespace is part of the Git path the glob must match.
+    .transform((g) => g.replace(LEADING_DOT_SLASH, ''))
+    .refine(isRepoRelativeGlob, 'must be a repository-relative glob using only *, ** and ?');
 const entrySchema = z.strictObject({
-    glob: z
-        .string()
-        // Never trimmed: whitespace is part of the Git path the glob must match.
-        .transform((g) => g.replace(LEADING_DOT_SLASH, ''))
-        .refine(isRepoRelativeGlob, 'must be a repository-relative glob using only *, ** and ?'),
+    glob: repoGlobSchema,
     command: z
         .string()
         .trim()
@@ -74,27 +76,10 @@ export const selfHostCommand = (command) => command.replace(DEVKIT_RUNNER, 'node
 export function renderCommand(command, root) {
     return isDevkitRepo(root) ? selfHostCommand(command) : command;
 }
-// devkit's own glob grammar, so a dot is an ordinary character: `*`/`?` stay within one segment, a
-// whole `**` segment spans any depth, everything else is literal. Parsing rejects `[]` and `{}`.
-const segmentSource = (seg) => [...seg]
-    .map((ch) => (ch === '*' ? '[^/]*' : ch === '?' ? '[^/]' : ch.replace(REGEX_SPECIAL, '\\$&')))
-    .join('');
-function compileGlob(glob) {
-    const segs = glob.split('/');
-    const source = segs
-        .map((seg, i) => {
-        const slash = i > 0 && segs[i - 1] !== '**' ? '/' : '';
-        if (seg !== '**')
-            return slash + segmentSource(seg);
-        return slash + (i === segs.length - 1 ? '.+' : '(?:[^/]+/)*');
-    })
-        .join('');
-    return new RegExp(`^${source}$`, 'su');
-}
 export function classifyGenerated(paths, entries) {
     const out = { generated: [], other: [] };
     const seen = new Set();
-    const compiled = entries.map((e) => ({ re: compileGlob(e.glob), command: e.command }));
+    const compiled = entries.map((e) => ({ re: compileRepoGlob(e.glob), command: e.command }));
     // No trimming: a Git path is an exact identity, and ` dist/x` is not `dist/x`.
     for (const path of paths) {
         if (path === '' || seen.has(path))

@@ -1,0 +1,6 @@
+[
+ {
+  "slug": "gate-telemetry-self-describing",
+  "ruling": "Gate telemetry is self-describing. (1) Every emitted event identifies its origin: the ship envelope stamps repo/branch from DEVKIT_SHIP_REPO/DEVKIT_SHIP_BRANCH exported by the ship script, degrading to empty strings rather than guessing. (2) Every judgement outcome emits \u2014 INCLUDING the non-outcomes: a cache hit emits cache_hit, a lost cache write emits cache_write_failed. (3) Those cheap outcomes get their OWN event type, never a synthetic row on an existing one, and carry the SAME judge label judge_exec uses \u2014 so hit rate is cache_hit/(cache_hit+judge_exec) grouped by judge, with no join and no inference."
+ }
+]

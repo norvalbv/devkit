@@ -98,7 +98,6 @@ BODY_FILE_SET=0    # --body-file <path>: author the body ONCE in a file; survive
 BODY_FILE_PREREAD_SET=0  # --resume banner's one --body-file read: 1 = bytes kept, 2 = failed (latched)
 BASE_FLAG=""       # --base <branch>? else base off this checkout's HEAD/current branch
 FROM_BRANCH=0      # derive a frozen committed path set from origin/<base>..HEAD
-QAVIS_PUBLISH=1     # passed staged evidence is published after the PR exists; explicit opt-out only
 DRAFT=0            # --draft opens the PR as a draft; default stays ready-for-review
 RESUME_READY=0     # --ready seen under --resume, before the record reveals ship-vs-reship mode
 WAIT_CI=0          # --wait-ci polls the PR's checks after everything else is durable
@@ -125,13 +124,9 @@ while [ "$#" -gt 0 ]; do
     --from-branch)
       [ "$RESUME" -eq 0 ] || { echo "--resume replays the recorded source mode — omit --from-branch" >&2; exit 1; }
       FROM_BRANCH=1; shift ;;
-    --no-qavis-publish) QAVIS_PUBLISH=0; shift ;;
     --draft)
-      # Allowed under --resume, unlike --base/--link: those change WHAT is shipped, this only changes
-      # how the PR is published. The resume restore below can only turn draft ON (same polarity as
-      # QAVIS_PUBLISH), so a recorded draft replays as one, and an explicit --draft on the retry can
-      # additionally upgrade a recorded NON-draft — which is then re-recorded for the next resume.
-      # There is deliberately no --no-draft: once the PR exists, `gh pr ready` owns that direction.
+      # Allowed under --resume: the restore below only turns draft ON, so a retry can upgrade a
+      # recorded non-draft. No --no-draft: once the PR exists, `gh pr ready` owns that direction.
       DRAFT=1; shift ;;
     --ready)
       # Under --resume the MODE is not known yet: a recorded reship arrives here first and execs into
@@ -184,11 +179,9 @@ if [ "$RESUME" -eq 1 ]; then
   SI_FIELDS=()
   while IFS= read -r -d '' si_field; do SI_FIELDS+=("$si_field"); done < "$SI_OUT"
   rm -f "$SI_OUT"
-  # Field order is ship-intent.mts's emitFields contract:
-  #   mode, sourceMode, title, base, noQavisPublish, updatePrBody, draft, createdAt, generation,
-  #   sourceAttemptId, nlinks, <links...>, body, <paths...>. New-ship ignores updatePrBody.
-  # The indices below are POSITIONAL: reship.sh:106 decodes the same stream and must move in lockstep.
-  [ "${#SI_FIELDS[@]}" -ge 13 ] || { echo "recorded invocation is malformed — run the full devkit ship command" >&2; exit 1; }
+  # emitFields order: mode sourceMode title base updatePrBody draft createdAt generation sourceAttemptId
+  # nlinks links... body paths... — positional, in lockstep with reship.sh's reader.
+  [ "${#SI_FIELDS[@]}" -ge 12 ] || { echo "recorded invocation is malformed — run the full devkit ship command" >&2; exit 1; }
   SI_MODE=${SI_FIELDS[0]}
   if [ "$SI_MODE" = "reship" ]; then
     # The blocked attempt was a `--pr` re-push; hand over so the agent needn't remember which form
@@ -209,18 +202,16 @@ if [ "$RESUME" -eq 1 ]; then
   esac
   TITLE=${SI_FIELDS[2]}
   BASE_FLAG=${SI_FIELDS[3]}
-  [ "${SI_FIELDS[4]}" != "1" ] || QAVIS_PUBLISH=0
-  # Field 6 is draft. Restoring it is load-bearing: --resume replays a gate-blocked ship all the way
-  # through `gh pr create`, so dropping the bit here would silently open a READY PR from an
-  # invocation the operator asked to be a draft.
-  [ "${SI_FIELDS[6]}" != "1" ] || DRAFT=1
-  RESUME_CREATED=${SI_FIELDS[7]}
-  RESUME_GENERATION=${SI_FIELDS[8]}
-  RESUME_SOURCE_ATTEMPT_ID=${SI_FIELDS[9]}
-  SI_NLINKS=${SI_FIELDS[10]}
+  # Field 5 is draft: --resume replays through `gh pr create`, so dropping it would open a READY PR
+  # the operator asked to be a draft.
+  [ "${SI_FIELDS[5]}" != "1" ] || DRAFT=1
+  RESUME_CREATED=${SI_FIELDS[6]}
+  RESUME_GENERATION=${SI_FIELDS[7]}
+  RESUME_SOURCE_ATTEMPT_ID=${SI_FIELDS[8]}
+  SI_NLINKS=${SI_FIELDS[9]}
   case "$SI_NLINKS" in *[!0-9]*|'') echo "recorded invocation is malformed (nlinks '$SI_NLINKS')" >&2; exit 1 ;; esac
-  si_i=11
-  si_body_at=$((11 + SI_NLINKS))
+  si_i=10
+  si_body_at=$((10 + SI_NLINKS))
   [ "${#SI_FIELDS[@]}" -gt $((si_body_at + 1)) ] || { echo "recorded invocation is malformed (missing body/paths)" >&2; exit 1; }
   while [ "$si_i" -lt "$si_body_at" ]; do LINK_EXTRA+=("${SI_FIELDS[$si_i]}"); si_i=$((si_i + 1)); done
   RESUME_BODY=${SI_FIELDS[$si_body_at]}
@@ -833,18 +824,7 @@ exec 0</dev/null
 . "$SCRIPT_DIR/repo-identity.sh"
 export DEVKIT_SHIP_ID="${DEVKIT_SHIP_ID:-$(uuidgen 2>/dev/null || echo "${BR//\//-}-$$-$(date +%s)")}"
 export DEVKIT_SHIP_REPO="$(devkit_repo_identity "$ROOT")" DEVKIT_SHIP_BRANCH="$BR"
-# The caller's checkout and the exact shipped paths, for gates that must tell the operator what to
-# run OUTSIDE the ephemeral worktree (qavis-advisory: `qavis qa --staged` must see these staged in
-# ROOT, where the receipt it writes is linked back into the gate worktree — sc-2487).
-export DEVKIT_SHIP_ROOT="$ROOT"
 export DEVKIT_SHIP_FROM_BRANCH="$FROM_BRANCH"
-# Each path base64-encoded and ':'-joined: env values cannot carry NUL, and a newline or colon in a
-# valid filename must survive the round trip into the printed remedy.
-DEVKIT_SHIP_PATHS=""
-for __dk_p in ${PATHS[@]+"${PATHS[@]}"}; do
-  DEVKIT_SHIP_PATHS="${DEVKIT_SHIP_PATHS}$(printf '%s' "$__dk_p" | base64 | tr -d '\n'):"
-done
-export DEVKIT_SHIP_PATHS
 export DEVKIT_SHIP_RESUMED=$RESUME
 SHIP_INTENT_GENERATION=""
 SHIP_INTENT_START_GENERATION=
@@ -855,7 +835,6 @@ if [ "$DRY_GATES" -eq 0 ]; then
   [ "$FROM_BRANCH" -eq 0 ] || SHIP_INTENT_ARGS+=(--source-mode branch)
   [ -z "$BASE_FLAG" ] || SHIP_INTENT_ARGS+=(--base "$BASE_FLAG")
   for d in ${LINK_EXTRA[@]+"${LINK_EXTRA[@]}"}; do SHIP_INTENT_ARGS+=(--link "$d"); done
-  [ "$QAVIS_PUBLISH" -eq 1 ] || SHIP_INTENT_ARGS+=(--no-qavis-publish)
   # Any boolean added here must ALSO join the allowlist in ship-intent-args.mts:16-22, or its
   # `--flag` is treated as value-taking and silently eats the next argv entry.
   [ "$DRAFT" -eq 0 ] || SHIP_INTENT_ARGS+=(--draft)
@@ -1487,12 +1466,12 @@ else
       export DEVKIT_REVIEW_GUARDS=comments,review
       export DEVKIT_SHIP_DRY_REVIEWERS=1
       echo "🧪 Ship dry gates: exact base/path staging; running formatter, configured deterministic/structure/extra gates (comment budget included), and the domain reviewers." >&2
-      echo "   Skipping decision, Qavis, completeness, commit, push, and PR creation." >&2
+      echo "   Skipping decision, completeness, commit, push, and PR creation." >&2
     else
       export DEVKIT_REVIEW_GUARDS=comments
       unset DEVKIT_SHIP_DRY_REVIEWERS
       echo "🧪 Ship dry gates: exact base/path staging; running formatter, configured deterministic/structure/extra gates (comment budget included)." >&2
-      echo "   Skipping decision, Qavis, domain reviewer, completeness, commit, push, and PR creation." >&2
+      echo "   Skipping decision, domain reviewer, completeness, commit, push, and PR creation." >&2
     fi
   else
     export DEVKIT_SHIP_MODE=ship   # tags the ship_attempt telemetry (new-ship vs reship retry)
@@ -1606,6 +1585,11 @@ PR_CREATE_FAILED=
 # unbound-variable error under `set -u`, and a plain "$VAR" would pass an empty argument to gh.
 PR_DRAFT_ARGS=()
 [ "$DRAFT" -eq 0 ] || PR_DRAFT_ARGS=(--draft)
+. "$SCRIPT_DIR/publish-evidence.sh"
+# Only ship writes evidence: a block pasted into the caller's body (copied from another PR) is dropped.
+if PR_BODY_CLEAN=$(printf '%s' "$BODY" | evidence_caller_body "$REPO" && printf .); then
+  BODY=${PR_BODY_CLEAN%.}
+fi
 PR_URL=$( cd "$WT" && gh pr create --repo "$REPO" --base "$BASE_REF" --head "$BR" --title "$TITLE" --body "$BODY" ${PR_DRAFT_ARGS[@]+"${PR_DRAFT_ARGS[@]}"} ) || PR_CREATE_FAILED=1
 PR_NUM=""
 if [ -z "$PR_CREATE_FAILED" ]; then
@@ -1633,11 +1617,6 @@ if [ -z "$PR_CREATE_FAILED" ]; then
       "$(devkit_parent_session_json)" \
       "$(devkit_json_escape "$PR_URL")" "${PR_NUM:-null}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
       >> "$DEVKIT_GATE_EVENTS" 2>/dev/null || true
-  fi
-  if [ "$QAVIS_PUBLISH" -eq 1 ] && [ -n "$PR_NUM" ]; then
-    . "$SCRIPT_DIR/publish-qavis.sh"
-    publish_qavis_receipt \
-      "$ROOT" "$PR_NUM" "${RECOVERY_PARENT:-$BASE}" "${RECOVERY_COMMIT:-$SHIP_COMMIT}"
   fi
 fi
 
@@ -1724,9 +1703,9 @@ if [ -n "$PR_CREATE_FAILED" ]; then
 fi
 
 # Success: the branch is on the remote with its PR, so the local copy is redundant.
-# Drop it now (worktree first — a branch checked out in a worktree can't be deleted).
+# Drop it now; detaching first frees the branch while the evidence step below still uses $WT.
 # Only reached on full success; any earlier failure keeps the branch for recovery.
-git worktree remove --force "$WT" 2>/dev/null || true
+git -C "$WT" checkout -q --detach 2>/dev/null || true
 if [ -n "$LOCAL_BRANCH_EXISTS" ]; then
   # The preserved local branch is redundant only while it still names the commit just published.
   # A concurrent update belongs to somebody else and must survive this retry's cleanup.
@@ -1742,6 +1721,9 @@ git update-ref -d "$RECOVERY_RECEIPT_REF" "${RECOVERY_COMMIT:-${SHIP_COMMIT:-}}"
 # concurrent actor could legitimately advance, whereas this blob is devkit-private, rewritten whole
 # on every ship to this branch, and worthless once the commit it describes is published.
 git update-ref -d "$RECOVERY_GATE_ADDS_REF" 2>/dev/null || true
+# After every ref is settled, so a ship killed during the bounded test runs loses no recovery state.
+[ -z "$PR_NUM" ] || publish_evidence_block "$WT" "$PR_NUM" "$REPO" "${RECOVERY_COMMIT:-$SHIP_COMMIT}"
+git worktree remove --force "$WT" 2>/dev/null || true
 
 # --wait-ci runs LAST: the push, PR, manifest, intent release and worktree/branch cleanup above are
 # all durable, so a wait that is killed, times out or reports red cannot cost this ship.

@@ -3,6 +3,7 @@
  * committed tree in `cli/__tests__/self-host.test.mts`; everything here is a shape that repo cannot
  * produce — an unconfigured surface, a never-synced dir, a symlinked projection, a codex target.
  */
+import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -97,8 +98,8 @@ describe('projectionDrift', () => {
     ]);
   });
 
-  // codex relocates skills to `.agents/skills` and renames agents to `.toml`. Nothing in devkit's
-  // own repo exercises it (agentTargets is claude+cursor), so without this the routing is untested.
+  // codex relocates skills to `.agents/skills` and renames agents to `.toml`. devkit gitignores its
+  // own codex projections, so without this the routing is untested.
   it('routes a codex target to .agents/skills rather than .codex/skills', () => {
     const root = tempRoot();
     seedSkills(root);
@@ -116,6 +117,32 @@ describe('projectionDrift', () => {
     write(root, 'agents/reviewer.md', '---\nname: reviewer\ndescription: "r"\n---\n\nBody\n');
     const drift = projectionDrift({ root, kind: 'agents', srcDir: 'agents', targets: ['codex'] });
     expect(drift).toEqual(['missing .codex/agents/reviewer.toml']);
+  });
+});
+
+describe('projectionDrift in a git repository', () => {
+  const gitRoot = (ignore: string): string => {
+    const root = tempRoot();
+    spawnSync('git', ['init', '-q', root]);
+    write(root, '.gitignore', ignore);
+    seedSkills(root);
+    return root;
+  };
+
+  it('skips a target whose projection git ignores, and still checks the rest', () => {
+    const root = gitRoot('.agents/\n');
+    expect(projectionDrift(skillsInput(root, ['claude', 'codex']))).toEqual([]);
+    write(root, '.claude/skills/alpha/SKILL.md', '# edited\n');
+    expect(projectionDrift(skillsInput(root, ['claude', 'codex']))).toEqual([
+      'stale .claude/skills/alpha/SKILL.md',
+    ]);
+  });
+
+  it('reports unchecked, never a clean pass, when every target is ignored', () => {
+    const root = gitRoot('.agents/\n.claude/\n');
+    expect(projectionDrift(skillsInput(root, ['claude', 'codex']))).toEqual([
+      'unchecked skills/ — every agentTarget projection is gitignored',
+    ]);
   });
 });
 

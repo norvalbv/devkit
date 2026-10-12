@@ -313,7 +313,7 @@ describe('the preflight report for an exhausted window (sc-3207 acceptance)', ()
     for (const knob of [
       'GUARD_REVIEW_MODEL=haiku',
       'GUARD_REVIEW_ESCALATION_MODEL=opus',
-      'GUARD_CORRECTNESS_MODEL=sonnet',
+      'GUARD_CORRECTNESS_MODEL=claude-haiku-5-5',
       'GUARD_CORRECTNESS_CHUNK=off',
     ])
       expect(out).toContain(knob);

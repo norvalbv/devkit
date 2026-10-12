@@ -35,8 +35,6 @@ else {
         for (const input of gateInputs(root)) {
             if (field !== undefined && input.field !== field)
                 continue;
-            if (args.includes('--cache') && !input.cache)
-                continue;
             if (args.includes('--local-cache') && !input.localCache)
                 continue;
             if (args.includes('--each-file') && !input.eachFile)

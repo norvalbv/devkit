@@ -9,7 +9,7 @@ import { bodyUpdateRepo, GIT_ENV, reshipScript, scriptPath } from './_ship-branc
 // `devkit ship --pr` appends onto an existing PR's branch. A MERGED or CLOSED PR's branch reaches no
 // base, so the append must refuse before gates and again before the push, never print success.
 
-const ARGV = ['feat/pr', 'add v2', '--pr', '--no-qavis-publish', '--', 'a.ts'];
+const ARGV = ['feat/pr', 'add v2', '--pr', '--', 'a.ts'];
 const MERGE_RE = /git fetch origin main && git merge origin\/main/;
 const REMEDY_RE = /GUARD_SHIP_BASE_OK=1 devkit ship <new-branch> .+ --base main -- a\.ts/;
 const marks = [];
@@ -262,7 +262,7 @@ describe('reship — refuses a PR that is no longer open', () => {
 
 // A new ship onto an existing remote branch is refused; once that branch's PR is merged or closed,
 // --pr would only refuse in turn, so the refusal names the new-branch remedy instead.
-const NEW_SHIP_ARGV = ['feat/pr', 'add v2', '--base', 'main', '--no-qavis-publish', '--', 'a.ts'];
+const NEW_SHIP_ARGV = ['feat/pr', 'add v2', '--base', 'main', '--', 'a.ts'];
 
 function newShip(dir, env, extra, argv = NEW_SHIP_ARGV) {
   return testSpawnSync('/bin/bash', [scriptPath, ...argv], {
@@ -356,7 +356,6 @@ describe('new ship — an existing remote branch whose PR is no longer open', ()
       title: 'add v2',
       base: 'main',
       links: [],
-      noQavisPublish: false,
       updatePrBody: false,
       draft: false,
       resumed: false,

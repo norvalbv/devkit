@@ -276,7 +276,7 @@ cwd = process.cwd(), guards) {
  *
  * Advisory by construction. Those modes gate their exit code on the hook being in sync, and an
  * unwired index is a real finding but not a reason to call an overlay unhealthy — the same tier
- * printQavisAdvisoryHealth occupies.
+ * printPriorArtAdvisoryHealth occupies.
  */
 export async function adviseSearchIndex(cwd, sel) {
     if (!sel.guards?.includes('dup'))

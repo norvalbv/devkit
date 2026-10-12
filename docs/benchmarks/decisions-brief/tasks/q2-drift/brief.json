@@ -1,0 +1,6 @@
+[
+ {
+  "slug": "base-drift-surfaced-at-read-time",
+  "ruling": "Base drift is surfaced at READ time, advisory, and never blocks. One shared core (cli/lib/ship/base-drift/) answers 'has origin/<base> moved, and does what moved overlap these paths'; four surfaces consume it \u2014 devkit base-status (exit 0/3/4), a SessionStart brief, a PreToolUse advisory, and a print inside devkit ship's --base arm. The trigger is PATH OVERLAP with a caller-supplied set, never a commit count. Freshness is three-valued and a failed fetch degrades to a LOUD 'unknown', never silence. The dedup token folds in the base SHA so a second move re-arms every path. The synced hooks shell out to 'devkit base-status --json' rather than importing the package, and no-op when it is absent."
+ }
+]

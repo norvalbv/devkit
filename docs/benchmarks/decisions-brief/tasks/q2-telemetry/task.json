@@ -1,0 +1,8 @@
+{
+ "id": "q2-telemetry",
+ "slug": "gate-telemetry-self-describing",
+ "file": "gate-engine/telemetry/judge-cache.mjs",
+ "prompt": "Cache hits in gate-engine/telemetry/judge-cache.mjs leave no trace in telemetry, so we cannot work out the hit rate per judge. Make hits show up in telemetry. Keep the change small and do not add new files.",
+ "bindingOffset": 376,
+ "bindingText": "(3) Those cheap outcomes get their OWN event type"
+}
