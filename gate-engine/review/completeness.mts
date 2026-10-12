@@ -214,6 +214,7 @@ const SKIP_WORDING = {
   timeout: 'judge timed out',
   'rate-limited': 'judge hit the provider usage limit',
   absent: 'judge CLI is not installed',
+  'model-unavailable': 'judge model is not available on this account',
   outage: 'judge outage',
 } satisfies Record<CompletenessCause, string>;
 
