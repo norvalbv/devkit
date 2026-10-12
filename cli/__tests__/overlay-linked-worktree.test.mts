@@ -33,6 +33,7 @@ import {
   isOverlayHooksValue,
   overlayCommandCwd,
   overlayHome,
+  ownsOverlayConfig,
   unprojectOverlay,
   worktrees,
 } from '../lib/husky/overlay/overlay-home.mts';
@@ -535,6 +536,25 @@ describe('overlay hooks in linked worktrees (sc-4157)', () => {
     expect(git(wt, 'status', '--porcelain')).toBe('');
   });
 
+  it('a worktree whose .devkit holds only a copied hook still borrows, so its baselines are projected', async () => {
+    const root = workRepo();
+    await initOverlay(root);
+    mkdirSync(join(root, '.devkit', 'baselines'), { recursive: true });
+    writeFileSync(join(root, '.devkit', 'baselines', 'size-lines.json'), '{"a.ts":400}\n');
+    const wt = addWorktree(root);
+    // Worktree tooling copies the hook into a real .devkit, then nests its link to the home inside.
+    cpSync(join(root, '.devkit', 'hooks'), join(wt, '.devkit', 'hooks'), { recursive: true });
+    symlinkSync(join(root, '.devkit'), join(wt, '.devkit', '.devkit'));
+
+    expect(await doctorRun([], root)).toBe(1);
+    commit(wt, 'borrows despite the copied hook');
+
+    const baseline = join(wt, '.devkit', 'baselines', 'size-lines.json');
+    expect(lstatSync(baseline).isFile()).toBe(true);
+    expect(readFileSync(baseline, 'utf8')).toBe('{"a.ts":400}\n');
+    expect(git(wt, 'status', '--porcelain')).toBe('');
+  });
+
   it('doctor flags a worktree linked by the first sc-4157 projection, and --fix makes it branch-local', async () => {
     const root = workRepo();
     await initOverlay(root);
@@ -927,6 +947,7 @@ describe('overlay hooks in linked worktrees (sc-4157)', () => {
     const wt = addWorktree(root);
     mkdirSync(join(wt, '.devkit', 'hooks'), { recursive: true });
     writeFileSync(join(wt, '.devkit', 'hooks', 'pre-commit'), '#!/bin/sh\n', { mode: 0o755 });
+    writeFileSync(join(wt, '.devkit', 'config.json'), '{"overlay":true}\n');
 
     expect(await doctorRun([], root)).toBe(0);
     expect(existsSync(join(wt, 'guard.config.json'))).toBe(false);
@@ -1090,6 +1111,18 @@ describe('overlay eslint config across re-init (sc-3791)', () => {
     expect(both).not.toContain('delete each copy and run `devkit doctor --fix`');
   });
 
+  it('a monorepo checkout owns its overlay only through the package config, not the git root', () => {
+    const root = mkTmp('overlay-owns-pkg-');
+    mkdirSync(join(root, '.devkit'));
+    writeFileSync(join(root, '.devkit', 'config.json'), '{"overlay":true}\n');
+    expect(ownsOverlayConfig(root, 'pkg')).toBe(false);
+
+    mkdirSync(join(root, 'pkg', '.devkit'), { recursive: true });
+    writeFileSync(join(root, 'pkg', '.devkit', 'config.json'), '{"overlay":true}\n');
+    rmSync(join(root, '.devkit'), { recursive: true });
+    expect(ownsOverlayConfig(root, 'pkg')).toBe(true);
+  });
+
   it('a monorepo package reads the overlay under the package, not the git root', () => {
     const root = mkTmp('overlay-legacy-pkg-');
     git(root, 'init', '-q');
@@ -1109,6 +1142,7 @@ describe('overlay eslint config across re-init (sc-3791)', () => {
     const wt = addWorktree(root);
     mkdirSync(join(wt, '.devkit', 'hooks'), { recursive: true });
     writeFileSync(join(wt, '.devkit', 'hooks', 'pre-commit'), '#!/bin/sh\n', { mode: 0o755 });
+    writeFileSync(join(wt, '.devkit', 'config.json'), '{"overlay":true}\n');
     writeFileSync(join(wt, ESLINT_OVERLAY_FILE), HAND_EDITED_LEGACY);
 
     const { out } = await doctorOut(root);

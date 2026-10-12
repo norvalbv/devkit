@@ -177,6 +177,13 @@ const declaresOverlay = (root: string) =>
   isRealFile(join(root, '.devkit', 'config.json')) &&
   overlayConfigured(root);
 
+/** Is `wt` an install of its own rather than a borrower? Only a config.json inside it says so: a
+ * hook copied into a real `.devkit` (worktree tooling does this) still borrows the home's inputs. */
+export const ownsOverlayConfig = (wt: string, pkgRel: string) => {
+  const config = join(wt, pkgDevkit(pkgRel), 'config.json');
+  return isRealFile(config) && isInsideResolved(realpathSync(wt), realpathSync(config));
+};
+
 /** The one home resolver (ship's via overlay-root.mts): the worktree an absolute hooksPath names,
  * else the first non-bare worktree that `owns` an overlay. */
 export function overlayHome(gitRoot: string, owns = hasOwnOverlay): string | null {
