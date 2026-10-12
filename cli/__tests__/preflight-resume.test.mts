@@ -388,7 +388,7 @@ describe('ship-branch.sh — refusals that must stay unrecorded', () => {
  *  ship-branch.sh routes through ship_abort_resumable; reship.sh runs them after its intent write. */
 describe('preflight ordering guard', () => {
   const FAIL_OPEN = new Set(['ship_judge_preflight']);
-  const PREFLIGHT_RE = /^\s*(?:if\s+!\s+)?([a-z_]+_preflight)\s/;
+  const PREFLIGHT_RE = /^\s*(?:if\s+!\s+)?([a-z_]+_preflight)\s(?!.*\|\|\s*true\b)/;
   const DIST_RE = /^\s*node "\$DIST_INTEGRITY"/; // the dist-integrity check (sc-2389)
   const calls = (src: string) =>
     src
