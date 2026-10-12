@@ -14,8 +14,8 @@ import { resolveReviewModel } from '../review/reviewers.mjs';
 import { composeTranscript, saveTranscript } from '../judge/transcript-store.mjs';
 import { git, stagedFiles } from './git-io.mjs';
 import { saveVerdict, verdictKey, verdictMeta } from './verdict-cache.mjs';
-const LOCKFILE_RE = /(^|\/)(bun\.lockb?|package-lock\.json|yarn\.lock|pnpm-lock\.yaml)$/;
-const PKG_RE = /(^|\/)package\.json$/;
+export const LOCKFILE_RE = /(^|\/)(bun\.lockb?|package-lock\.json|yarn\.lock|pnpm-lock\.yaml)$/;
+export const PKG_RE = /(^|\/)package\.json$/;
 const DEP_KEYS = [
     'dependencies',
     'devDependencies',
@@ -42,7 +42,7 @@ const CLAUDE_PROMPT = 'A staged git diff (on stdin) tripped an architectural-dec
     'word: DECISION or ROUTINE.';
 // Match any staged file under the consumer's decision-log dir (relative to cwd). Built per-run
 // from cfg.decisionsDir so a consumer that relocates the log still has its records counted.
-function decisionFileRe(decisionsRel) {
+export function decisionFileRe(decisionsRel) {
     const esc = decisionsRel.replace(/[.+^${}()|[\]\\]/g, '\\$&');
     return new RegExp(`(^|/)${esc}/.+\\.md$`);
 }

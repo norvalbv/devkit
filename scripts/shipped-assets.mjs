@@ -7,7 +7,7 @@
  */
 import { readdirSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import { PACKAGED_ROOT_DIRS as ROOT_DIRS } from '../cli/lib/fs-helpers.mts';
+import { isDevOnly, PACKAGED_ROOT_DIRS as ROOT_DIRS } from '../cli/lib/fs-helpers.mts';
 
 /**
  * Whole root asset dirs + files consumed via packageDir() / the exports map. Owned by
@@ -15,6 +15,7 @@ import { PACKAGED_ROOT_DIRS as ROOT_DIRS } from '../cli/lib/fs-helpers.mts';
  */
 export {
   ANTI_SLOP_FILES,
+  MIRRORED_EXT,
   PACKAGED_ROOT_DIRS as ROOT_DIRS,
   PACKAGED_ROOT_FILES as ROOT_FILES,
 } from '../cli/lib/fs-helpers.mts';
@@ -22,9 +23,6 @@ export {
 /** The two trees tsc compiles, and the only ones carrying non-TS files worth mirroring. */
 export const TREE_ROOTS = ['cli', 'gate-engine'];
 
-// Dev-only: tsconfig.build.json excludes both, so nothing under dist/ may reference them.
-const isDevOnly = (rel) =>
-  rel.includes('__tests__') || rel.includes(`${'eval'}/`) || rel.includes('/eval/');
 
 function walk(root, dir, matchRe, skip) {
   const found = [];

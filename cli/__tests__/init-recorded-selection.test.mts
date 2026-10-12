@@ -56,8 +56,8 @@ describe('selectionFromFlags — recorded re-run precedence', () => {
 describe('devkit init --yes — recorded selection re-run', () => {
   it('enables one component without changing other components, review, or provider hooks', () => {
     const root = tmpRepo();
-    const guards = 'size,fanout,dup,clone,comments,decisions,qavis-advisory,review,sentry,coverage';
-    const reviewGuards = 'size,fanout,dup,clone,decisions,qavis-advisory,review,coverage';
+    const guards = 'size,fanout,dup,clone,comments,decisions,ui-evidence,review,sentry,coverage';
+    const reviewGuards = 'size,fanout,dup,clone,decisions,ui-evidence,review,coverage';
     const first = devkit(
       root,
       'init',

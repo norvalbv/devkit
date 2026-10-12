@@ -37,7 +37,6 @@ import { z } from 'zod';
 import { diffCacheIdentity } from '../../judge/diff-focus.mts';
 import {
   cachedMcpDegradation,
-  cachedRetrievalDegradation,
   degradedSuffix,
   storedBaseSchema,
 } from '../evidence/base-context.mts';
@@ -198,7 +197,6 @@ export interface CachedHit {
   files: string[];
   judgedBases: (string | null)[];
   part: boolean; // a split part's line has always read `cached PASS (identical)`
-  degradedCause?: string; // sc-2317: a DEGRADED PASS replays as DEGRADED, never as a bare PASS
   mcpDegradedCause?: string; // sc-2837: judged without a verdict-bearing MCP server
   waivers: CachedWaiver[]; // the waivers the stored PASS rests on, named again on replay
 }
@@ -218,6 +216,7 @@ export interface FullyCachedReviewer {
   model: string | undefined;
   judgedBases: (string | null)[];
   coverage: ReturnType<typeof coverageFields>;
+  waivers: CachedWaiver[];
 }
 
 export interface ReviewWorkPlan {
@@ -306,14 +305,15 @@ export function planReviewWork(
         const d = cache[p.key].duration_ms;
         return sum + (typeof d === 'number' ? d : 0);
       }, 0);
+      const waivers = parts.flatMap((p) => cachedWaivers(cache[p.key]) ?? []);
       fullyCached.push({
         name,
         duration,
         model: z.string().min(1).safeParse(cache[parts[0].key].model).data,
         judgedBases,
         coverage: coverageFields(parts),
+        waivers,
       });
-      const degradedCause = cachedRetrievalDegradation(name, cache[parts[0].key]);
       // Every part: a split replays DEGRADED when any one of its groups was judged degraded.
       const mcpDegradedCause = parts
         .map((p) => cachedMcpDegradation(cache[p.key]))
@@ -323,9 +323,8 @@ export function planReviewWork(
         files: sel.files,
         judgedBases,
         part: false,
-        degradedCause,
         mcpDegradedCause,
-        waivers: parts.flatMap((p) => cachedWaivers(cache[p.key]) ?? []),
+        waivers,
       });
       continue;
     }
@@ -361,6 +360,7 @@ export function planReviewWork(
           mcpDegraded: ((cause) => (cause ? { cause, cached: true } : undefined))(
             cachedMcpDegradation(e),
           ),
+          waivers: cachedWaivers(e) ?? [],
         } as LensPart['res'],
         secs: 0,
         task: p,

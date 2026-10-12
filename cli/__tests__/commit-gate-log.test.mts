@@ -367,12 +367,15 @@ describe('generated builders wire the capture end to end', () => {
     mkdirSync(bin);
     mkdirSync(pkgBin);
     writeFileSync(join(bin, 'bun'), `#!/bin/sh\nprintf '%s\\n' "${pkgBin}"\n`);
-    const gate = `#!/bin/sh\necho "STUB \${0##*/} $*"\nexit \${DEC_RC:-0}\n`;
+    const gate = (rc: string) => `#!/bin/sh\necho "STUB \${0##*/} $*"\nexit \${${rc}:-0}\n`;
     chmodSync(join(bin, 'bun'), 0o755);
     // guard-deterministic is how the global (overlay) block locates devkit's bin dir.
-    for (const name of ['guard-decisions', 'guard-deterministic']) {
+    for (const [name, rc] of [
+      ['guard-decisions', 'DEC_RC'],
+      ['guard-deterministic', 'DET_RC'],
+    ]) {
       for (const dir of [pkgBin, bin]) {
-        writeFileSync(join(dir, name), gate);
+        writeFileSync(join(dir, name), gate(rc));
         chmodSync(join(dir, name), 0o755);
       }
     }

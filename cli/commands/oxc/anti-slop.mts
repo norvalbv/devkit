@@ -22,6 +22,7 @@ import {
   checkBaselineEnvelope,
   inheritedBaseAllowance,
   printNewAntiSlopFindings,
+  recordErrorLocations,
   refuseCommittedGrowth,
   relocationEvidence,
   reportInheritedForgiveness,
@@ -60,7 +61,7 @@ import {
   collectAntiSlopGroups,
   resolveAntiSlopScope,
 } from '../../lib/install/anti-slop/runner.mts';
-import { isOverlayOxcInstall, resolveOxlintEntryConfig } from '../../lib/install/oxc/lifecycle.mts';
+import { isOverlayOxcInstall } from '../../lib/install/oxc/lifecycle.mts';
 
 export const meta = {
   name: 'anti-slop',
@@ -296,11 +297,13 @@ function check(
     const newErrorCount = errors.reduce((sum, group) => sum + group.additionalCount, 0);
     if (relocated.some((group) => group.severity === 'error')) {
       reportRelocatedFailure(newErrorCount, relocated, baseRef);
+      recordErrorLocations(errors);
       reportOverlayContract(cwd);
       return 1;
     }
     if (errors.length > 0) {
       failLine(`anti-slop: FAIL — ${newErrorCount} new error finding(s); baseline unchanged`);
+      recordErrorLocations(errors);
       const overlay = isOverlayOxcInstall(cwd);
       for (const line of antiSlopRemedyLines(
         errors.map((group) => group.ruleId),
@@ -435,7 +438,7 @@ export default function run(args: string[], cwd: string): number {
   }
   // The manifest STAMP, not the repository marker: `.devkit/config.json` is absent from every review
   // projection, so a marker read drops the capability from the snapshot exactly where it exists.
-  const overlay = resolveOxlintEntryConfig(cwd) !== null;
+  const overlay = isOverlayOxcInstall(cwd);
   if (overlay && baseRef !== undefined) {
     console.error(OVERLAY_BASE_REFUSAL);
     return 2;

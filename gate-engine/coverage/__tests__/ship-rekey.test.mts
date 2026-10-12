@@ -4,10 +4,8 @@ import { mkdtempSync, readFileSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  coverageMapSchema,
-  rebaseWorktreeCoverage,
-} from '../../../cli/lib/ship/coverage/coverage-rebase.mts';
+import { rebaseWorktreeCoverage } from '../../../cli/lib/ship/coverage/coverage-rebase.mts';
+import { coverageMapSchema } from '../fallow-copy.mts';
 import {
   cleanupRepos,
   gate,

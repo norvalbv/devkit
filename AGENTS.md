@@ -172,6 +172,9 @@ Do not invoke reviewers, run approval scripts, or touch marker files by hand. Wr
 commit (via `devkit ship` on a protected branch); react only when a gate blocks: read the finding,
 fix it, re-commit. Every bypass needs the user's explicit OK.
 
+Tracked `dist/` is rebuilt only by `devkit release`: brief your source plus only NEW dist artifacts,
+never a rebuilt existing one (`docs/troubleshooting.md`, "CI `Release-only dist` failed").
+
 Gate diagnosis and one-run controls: `skills/commit-gates/SKILL.md`. Shipping mechanics:
 `skills/using-devkit/SKILL.md`.
 </workflow>
@@ -193,10 +196,11 @@ what is devkit-specific:
 `bun run test:run:coverage:changed` prints per-file coverage for the files changed since the
 remote `main` branch (vitest's `--changed` picks the covering tests). Run `git fetch origin main`
 first, since a stale ref widens the set; `COVERAGE_BASE=<ref>` picks another base (a second
-`--changed` flag makes vitest refuse to start). A file no test imports reads 0%, as it should. Code
-exercised only through a spawned `node cli/index.mts` also reads 0% although it is tested, because
-v8 does not follow child processes. A diff touching `package.json` or `vitest.config.mjs` runs the
-whole suite.
+`--changed` flag makes vitest refuse to start). Untracked files count as changed, and every changed
+file gets a row under its full name, fully covered ones included. A file no test imports reads 0%,
+as it should. Code exercised only through a spawned `node cli/index.mts` also reads 0% although it
+is tested, because v8 does not follow child processes. A diff touching `package.json` or
+`vitest.config.mjs` runs the whole suite.
 </workflow>
 
 </workflows>

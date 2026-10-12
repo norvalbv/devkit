@@ -5,6 +5,7 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { lstatSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { readGitPaths } from './git-paths.mjs';
 import { commitIndexEnv, commitIndexKind } from './commit-index.mjs';
 const INDEX_LOCK_RETRY = new Int32Array(new SharedArrayBuffer(4));
 // For a read that stands down on failure (null/false/''): stdout carries the answer, and git's
@@ -19,6 +20,7 @@ function stagePathStrict(root, rel, { missingIsSuccess = false } = {}) {
     if (commitIndexKind(root) === 'partial')
         throw new Error(partialCommitRemedy(rel));
     for (let attempt = 0; attempt < 50; attempt += 1) {
+        // pathspec: devkit-owned baseline path
         const result = spawnSync('git', ['add', '--', rel], {
             cwd: root,
             env: commitIndexEnv(root),
@@ -52,6 +54,7 @@ export function isGitWorktree(root) {
 export function indexTracksBaseline(root, rel) {
     if (!isGitWorktree(root))
         return false;
+    // pathspec: devkit-owned baseline path
     const result = spawnSync('git', ['ls-files', '--error-unmatch', '--', rel], {
         cwd: root,
         env: commitIndexEnv(root),
@@ -124,6 +127,7 @@ export function stageBaseline(root, rel) {
         return;
     }
     try {
+        // pathspec: devkit-owned baseline path
         execFileSync('git', ['add', '--', rel], {
             cwd: root,
             env: commitIndexEnv(root),
@@ -259,42 +263,36 @@ export function frozenTouchedSet(root, frozen) {
 // The repo-root-relative paths ADDED/COPIED/MODIFIED/RENAMED in the pending commit (the git index).
 // During a merge, a first-parent diff also includes every path inherited unchanged from MERGE_HEAD;
 // intersect both parent diffs so ratchets govern only merge resolutions that differ from BOTH
-// parents. Returns null when git is unavailable (temp-dir tests, a non-git checkout) so the caller
-// falls back to whole-tree. Excludes deletions by design — callers scope per-file work (an oversized
+// parents. Returns null when git is unavailable (temp-dir tests, a non-git checkout) or a staged
+// name is not valid UTF-8, so the caller falls back to whole-tree. Excludes deletions by design — callers scope per-file work (an oversized
 // file to re-check) to files that still exist. For "is a commit in progress?" use hasStagedFiles.
 export function stagedSet(root) {
+    let staged;
     try {
-        const out = execFileSync('git', ['diff', '--cached', '--name-only', '--diff-filter=ACMR'], {
-            cwd: root,
-            env: commitIndexEnv(root),
-            encoding: 'utf8',
-            stdio: QUIET_STDIO,
-        });
-        const staged = new Set(out
-            .split('\n')
-            .map((l) => l.trim())
-            .filter(Boolean));
-        try {
-            const mergeOut = execFileSync('git', ['diff', '--cached', '--name-only', '--diff-filter=ACMR', 'MERGE_HEAD'], {
-                cwd: root,
-                env: commitIndexEnv(root),
-                encoding: 'utf8',
-                stdio: QUIET_STDIO,
-            });
-            const changedFromMergeHead = new Set(mergeOut
-                .split('\n')
-                .map((l) => l.trim())
-                .filter(Boolean));
-            return new Set([...staged].filter((file) => changedFromMergeHead.has(file)));
-        }
-        catch {
-            // Ordinary commit, or merge metadata Git cannot resolve: preserve first-parent staged scope.
-            return staged;
-        }
+        staged = stagedPaths(root);
     }
     catch {
         return null;
     }
+    if (!staged)
+        return null;
+    let changedFromMergeHead;
+    try {
+        changedFromMergeHead = stagedPaths(root, 'MERGE_HEAD');
+    }
+    catch {
+        // Ordinary commit, or merge metadata Git cannot resolve: preserve first-parent staged scope.
+        return new Set(staged);
+    }
+    if (!changedFromMergeHead)
+        return null;
+    const fromMergeHead = new Set(changedFromMergeHead);
+    return new Set(staged.filter((file) => fromMergeHead.has(file)));
+}
+// ACMR paths staged against `ref` (default HEAD); null when a name is not valid UTF-8.
+function stagedPaths(root, ...ref) {
+    const args = ['diff', '--cached', '--name-only', '-z', '--diff-filter=ACMR', ...ref];
+    return readGitPaths(execFileSync('git', args, { cwd: root, env: commitIndexEnv(root), stdio: QUIET_STDIO }));
 }
 // The CWD path inside its repository, slash-terminated (empty at the repository root).
 export function gitPrefix(root) {
