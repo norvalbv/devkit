@@ -34,7 +34,7 @@ export function normalizeLineEndings(raw: string): string {
 // matches immediately after a bare `\r`, so an unguarded `[\s*#>-]*` swallows the `\n` of a CRLF
 // and every consumer that slices on `.index` gets a fragment ending in a dangling `\r`.
 export const VERDICT_LINE_RE =
-  /^(?:(?![\r\n])[\s*#>-])*VERDICT:\s*\**\s*(PASS|FAIL)\b\**\s*(?:[—–:-]+\s*)?(.*)$/gim;
+  /^(?:(?![\r\n])[\s*#>\-\p{Extended_Pictographic}\u{FE0F}\u{200D}])*VERDICT:\s*\**\s*(PASS|FAIL)\b\**\s*(?:[—–:-]+\s*)?(.*)$/gimu;
 
 export function parseReviewVerdict(raw: string): ReviewVerdict {
   const lines = [...String(raw).matchAll(VERDICT_LINE_RE)];
