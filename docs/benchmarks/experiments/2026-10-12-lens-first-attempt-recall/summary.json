@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-12",
+  "devkitVersion": "0.69.0",
+  "devkitCommit": "c66b887b",
+  "condition": {
+    "path": "guard-review lens correctness-reviewer:<lens>, one fresh judge call per run, caches cleared",
+    "mcp": "absent (DEGRADED), as in both incidents",
+    "chunking": "off",
+    "base": "d23f297d"
+  },
+  "hitRule": "lens FAILs, cites a defect file and names the defect (regexes in probe.sh); a run with no verdict is an error",
+  "verdicts": { "p1-haiku": { "PASS": 20, "FAIL": 0 }, "p2-haiku": { "PASS": 20, "FAIL": 0 } },
+  "decisionRule": "both probes >= 18/20: criterion met at K=1; otherwise stop before any K-sample work",
+  "probes": [
+    {
+      "id": "p1-dropped-promise",
+      "source": "PR #826 tree with detect.mts main() not returning runGate()'s promise",
+      "lens": "writer-reader-contracts",
+      "arms": [
+        { "model": "claude-haiku-5-5", "hits": 0, "runs": 20, "ci95": [0, 0.168] },
+        { "model": "claude-opus-5-5", "hits": 0, "runs": 3, "ci95": [0, 0.708], "role": "positive control" }
+      ],
+      "fixedTreeControl": { "model": "claude-haiku-5-5", "verdict": "PASS" }
+    },
+    {
+      "id": "p2-rename-extension",
+      "source": "PR #824 at 1be5551e, the commit that opened the PR with the defect",
+      "lens": "error-and-edge-classification",
+      "arms": [{ "model": "claude-haiku-5-5", "hits": 0, "runs": 20, "ci95": [0, 0.168] }],
+      "fixedTreeControl": { "model": "claude-haiku-5-5", "verdict": "PASS" }
+    }
+  ],
+  "harnessCheck": {
+    "tree": "p1 with detect.mts main renamed to mainEntry",
+    "model": "claude-haiku-5-5",
+    "verdict": "FAIL",
+    "citedSite": "gate-engine/decisions/cli.mts:74",
+    "scoredHit": true
+  },
+  "outcome": "below the decision rule; per-sample recall on both real defects is 0, so K-sampling these judges cannot reach the criterion"
+}
