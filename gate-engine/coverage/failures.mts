@@ -4,7 +4,7 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { canonicalPath, type CollectionError, collectionRemedy } from './dependencies.mts';
-import { UNHANDLED_NAME } from './unhandled-reporter.mts';
+import { readUnhandled, UNHANDLED_NAME, type UnhandledError } from './unhandled-reporter.mts';
 
 /**
  * The regex handed to vitest's `--retry.condition`, which retries ONLY errors whose message matches.
@@ -67,12 +67,6 @@ export interface FailureVerdict {
   timeoutMs: number | null;
   /** Some failure is a Testing Library findBy/waitFor miss, whose wait --testTimeout cannot raise. */
   testingLibrary?: true;
-}
-
-/** What ended a run that exited non-zero with no failed test. `file` is null when vitest did not say. */
-export interface UnhandledError {
-  file: string | null;
-  message: string;
 }
 
 export interface RunDiagnosis {
@@ -202,24 +196,6 @@ export function readDiagnosis(resultsFile: string, exitCode = 0): RunDiagnosis |
     // there is nothing to say — and none of them may cost somebody their test run.
     return null;
   }
-}
-
-/** The reporter's errors, once each (vitest projects repeat them), or one generic entry when it wrote
- * none: a threshold miss or an empty filter is no error at all, and an older vitest never calls it. */
-function readUnhandled(file: string, exitCode: number): UnhandledError[] {
-  try {
-    const parsed: UnhandledError[] = JSON.parse(readFileSync(file, 'utf8'));
-    const unique = new Map(parsed.map((e) => [`${e.file}\0${e.message}`, e]));
-    if (unique.size > 0) return [...unique.values()];
-  } catch {
-    /* absent or torn — fall through to the generic cause */
-  }
-  return [
-    {
-      file: null,
-      message: `vitest exited ${exitCode} with no failed test — its output above names why: an unhandled error, a coverage threshold, or no test files matched`,
-    },
-  ];
 }
 
 /**

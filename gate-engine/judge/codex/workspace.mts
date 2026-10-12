@@ -3,7 +3,13 @@
 import { copyFileSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative, resolve } from 'node:path';
-import { type CodexWorkspace, needsCodexWorkspace } from './result.mts';
+import { needsCodexWorkspace } from './result.mts';
+
+/** A workspace-write judge's scratch cwd, plus the repo whose `.claude/` alone it may write. */
+export interface CodexWorkspace {
+  scratch: string;
+  repoRoot: string;
+}
 
 export interface CodexSandbox {
   codexReadOnly: boolean;
