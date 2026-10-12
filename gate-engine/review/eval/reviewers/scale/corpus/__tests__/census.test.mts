@@ -1,6 +1,7 @@
 import { execFile, execFileSync, spawnSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -77,6 +78,34 @@ function fixture() {
     ],
   };
   return { repo, manifest, cleanup: () => rmSync(repo, { recursive: true, force: true }) };
+}
+
+function cliRunner(fx) {
+  const file = path.join(fx.repo, 'input.json');
+  writeFileSync(file, JSON.stringify(fx.manifest));
+  const cli = fileURLToPath(new URL('../census-cli.mts', import.meta.url));
+  const args = [cli, file, 'case-001', fx.repo, fx.repo];
+  const run = () => spawnSync(process.execPath, args, { encoding: 'utf8', timeout: 30000 });
+  return { file, args, run };
+}
+
+function privateDiagnostics(repo) {
+  const found = readdirSync(repo)
+    .filter((name) => name.startsWith('census-'))
+    .map((name) => path.join(repo, name, 'error.private.txt'))
+    .filter((file) => existsSync(file))
+    .map((file) => `${path.basename(path.dirname(file))}: ${readFileSync(file, 'utf8')}`);
+  return found.length ? found.join('\n') : 'no census-* private diagnostic found';
+}
+
+// The CLI's stderr is sanitized and cleanup deletes the private diagnostic, so attach it first.
+async function withPrivateDiagnostics(repo, fn) {
+  try {
+    return await fn();
+  } catch (error) {
+    error.message += `\n${privateDiagnostics(repo)}`;
+    throw error;
+  }
 }
 
 describe('private native source census', () => {
@@ -188,32 +217,60 @@ describe('private native source census', () => {
   it('gives concurrent CLI invocations separate outputs and sanitizes errors', async () => {
     const fx = fixture();
     try {
-      const file = path.join(fx.repo, 'input.json');
-      writeFileSync(file, JSON.stringify(fx.manifest));
-      const cli = fileURLToPath(new URL('../census-cli.mts', import.meta.url));
-      const args = [cli, file, 'case-001', fx.repo, fx.repo];
-      const run = () => spawnSync(process.execPath, args, { encoding: 'utf8', timeout: 30000 });
-      const [first, second] = await Promise.all([
-        promisify(execFile)(process.execPath, args, { encoding: 'utf8', timeout: 30000 }),
-        promisify(execFile)(process.execPath, args, { encoding: 'utf8', timeout: 30000 }),
-      ]);
-      expect(JSON.parse(first.stdout)).toEqual(JSON.parse(second.stdout));
-      writeFileSync(file, '{ "privateClaim": "SECRET_FILE_NAME" }');
-      const invalid = run();
-      expect(invalid.status).toBe(1);
-      expect(invalid.stdout).toBe('');
-      expect(invalid.stderr).toContain('CENSUS_FAILED');
-      expect(invalid.stderr).not.toContain('SECRET_FILE_NAME');
-      expect(invalid.stderr).not.toContain(fx.repo);
-      expect(readFileSync(file, 'utf8')).toContain('SECRET_FILE_NAME');
-      fx.manifest.entries[0].spans[0].file = 'src/SECRET_FILE_NAME.ts';
-      writeFileSync(file, JSON.stringify(fx.manifest));
-      const missingSource = run();
-      expect(missingSource.status).toBe(1);
-      expect(missingSource.stdout).toBe('');
-      expect(missingSource.stderr).toContain('CENSUS_FAILED');
-      expect(missingSource.stderr).not.toContain('SECRET_FILE_NAME');
-      expect(missingSource.stderr).not.toContain(fx.repo);
+      await withPrivateDiagnostics(fx.repo, async () => {
+        const { file, args, run } = cliRunner(fx);
+        const [first, second] = await Promise.all([
+          promisify(execFile)(process.execPath, args, { encoding: 'utf8', timeout: 30000 }),
+          promisify(execFile)(process.execPath, args, { encoding: 'utf8', timeout: 30000 }),
+        ]);
+        expect(JSON.parse(first.stdout)).toEqual(JSON.parse(second.stdout));
+        writeFileSync(file, '{ "privateClaim": "SECRET_FILE_NAME" }');
+        const invalid = run();
+        expect(invalid.status).toBe(1);
+        expect(invalid.stdout).toBe('');
+        expect(invalid.stderr).toContain('CENSUS_FAILED');
+        expect(invalid.stderr).not.toContain('SECRET_FILE_NAME');
+        expect(invalid.stderr).not.toContain(fx.repo);
+        expect(readFileSync(file, 'utf8')).toContain('SECRET_FILE_NAME');
+        fx.manifest.entries[0].spans[0].file = 'src/SECRET_FILE_NAME.ts';
+        writeFileSync(file, JSON.stringify(fx.manifest));
+        const missingSource = run();
+        expect(missingSource.status).toBe(1);
+        expect(missingSource.stdout).toBe('');
+        expect(missingSource.stderr).toContain('CENSUS_FAILED');
+        expect(missingSource.stderr).not.toContain('SECRET_FILE_NAME');
+        expect(missingSource.stderr).not.toContain(fx.repo);
+      });
+    } finally {
+      fx.cleanup();
+    }
+  });
+  it('attaches the private run diagnostic to a failing CLI assertion', async () => {
+    const fx = fixture();
+    try {
+      const { run } = cliRunner(fx);
+      writeFileSync(path.join(fx.repo, '.git', 'index'), 'garbage');
+      await expect(
+        withPrivateDiagnostics(fx.repo, () => expect(run().status).toBe(0)),
+      ).rejects.toThrow(/fatal:/);
+      const failed = run();
+      expect(failed.stderr).toContain('CENSUS_FAILED');
+      expect(failed.stderr).not.toContain('fatal:');
+      expect(failed.stderr).not.toContain(fx.repo);
+    } finally {
+      fx.cleanup();
+    }
+  });
+  it('says so when a failing assertion has no private diagnostic to attach', async () => {
+    const fx = fixture();
+    try {
+      const { run } = cliRunner(fx);
+      expect(run().status).toBe(0);
+      await expect(
+        withPrivateDiagnostics(fx.repo, () => {
+          throw new Error('report mismatch');
+        }),
+      ).rejects.toThrow(/report mismatch\nno census-\* private diagnostic found$/);
     } finally {
       fx.cleanup();
     }
