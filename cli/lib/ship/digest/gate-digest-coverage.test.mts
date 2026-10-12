@@ -111,7 +111,7 @@ describe('summarise — partial evidence packets', () => {
     const sink = sinkWith([
       `{"ship_id":"${SHIP}","type":"review_result","reviewer":"conventions-reviewer","status":"pass","evidence_omitted_files":${hostile},"evidence_truncated_files":"3","evidence_file_count":${hostile},"evidence_omitted_paths":[{"toString":1},42,"src/ok.mts"],"evidence_lens":{"toString":1}}`,
       `{"ship_id":"${SHIP}","type":"review_result","reviewer":"commit-guard","status":"pass","evidence_omitted_files":2,"evidence_omitted_paths":"src/a.mts","evidence_lens":["x"]}`,
-      `{"ship_id":"${SHIP}","type":"review_result","reviewer":"api-security-reviewer","status":"pass","evidence_omitted_files":1.5,"evidence_truncated_files":1,"evidence_omitted_paths":[{"toString":1},"src/b.mts"]}`,
+      `{"ship_id":"${SHIP}","type":"review_result","reviewer":"api-security-reviewer","status":"pass","evidence_omitted_files":1.5,"evidence_truncated_files":1,"evidence_omitted_paths":[{"toString":1},"src/b.mts"],"evidence_truncated_paths":[{"toString":1},"p.patch"]}`,
     ]);
     // Non-integer counts read as absent, so the first row adds nothing; the others keep their real
     // counts, drop the non-string paths, and never name a non-string lens.
@@ -127,7 +127,7 @@ describe('summarise — partial evidence packets', () => {
         state: 'unverified',
         blocking: false,
         detail:
-          'PASS over an incomplete packet: 0 file(s) omitted, 1 truncated — not shown: src/b.mts',
+          'PASS over an incomplete packet: 0 file(s) omitted, 1 truncated — not shown: src/b.mts — truncated: p.patch',
       },
     ]);
   });
@@ -196,6 +196,24 @@ describe('summarise — partial evidence packets', () => {
       SHIP,
     );
     expect(row.detail).toBe('PASS over an incomplete packet: 0/5 file(s) omitted, 1 truncated');
+  });
+
+  it('names truncated files after the omitted ones, sanitising untrusted entries', () => {
+    const [row] = summarise(
+      [
+        ev({
+          type: 'review_result',
+          reviewer: 'correctness-reviewer',
+          status: 'pass',
+          ...partial,
+          evidence_truncated_paths: ['patches/codex/x.patch', 'evil\nline.ts'],
+        }),
+      ],
+      SHIP,
+    );
+    expect(row.detail).toBe(
+      'PASS over an incomplete packet: 14/32 file(s) omitted, 2 truncated — not shown: src/a.mts, src/b.mts, src/c.mts, … — truncated: patches/codex/x.patch, evil line.ts',
+    );
   });
 
   it('ignores a partial PASS from the previous attempt under an inherited ship id', () => {
