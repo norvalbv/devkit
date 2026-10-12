@@ -7,7 +7,7 @@ retrieval. Retrieval belongs to the Phase-3 workflow tier (fixture repos with de
 `research.referenceCheckouts`); the live network legs (`gh`, web, papers, deep-research) are **unbenchmarked
 departures**, same idiom as the critique bench's deep-research gap.
 
-## Corpus (`cases-prior-art.jsonl`, 15 rows)
+## Corpus (`cases-prior-art.jsonl`, 16 rows)
 
 | slice | rows | gold |
 |---|---|---|
@@ -17,9 +17,10 @@ departures**, same idiom as the critique bench's deep-research gap.
 | Insufficient-evidence control (private vendor dep) | 1 | INSUFFICIENT_EVIDENCE |
 | Legs-degradation rows (all-dark · undeclared checkouts · gh-failed) | 3 | INSUFFICIENT_EVIDENCE |
 | Legs positive control (declared-and-searched-empty + upstream wontfix) | 1 | GENUINE_NEW_WORK |
+| Partial-fix haystack (merged PR fixes the named trigger; other exits still reproduce) | 1 | GENUINE_NEW_WORK or INSUFFICIENT_EVIDENCE |
 
 Haystack rows bury one probative excerpt among near-misses (watchdogs, retries, renderer dedups) so
-recognition is earned, not handed over. Decoy slots are spread across 11 rows — slot flips cluster
+recognition is earned, not handed over. Decoy slots are spread across 12 rows — slot flips cluster
 by CASE, so decoys concentrated in one row would be n=1 (`open-ended-reviewer-gold-slots`).
 
 ## Metrics

@@ -109,6 +109,34 @@ describe('parsePriorArtResponse — reviewed happy paths', () => {
     );
     expect(result.ok).toBe(true);
   });
+
+  it('accepts the partial-fix shape: NARROWS + GENUINE_NEW_WORK citing the PR that fixed the trigger', () => {
+    // The agent's partial-fix rule prescribes exactly this response; if the contract rejected it,
+    // every residual would read INVALID and callers would fall back to the bare headline.
+    const result = parsePriorArtResponse(
+      raw(
+        reviewed({
+          verdict: 'GENUINE_NEW_WORK',
+          confidence: 'medium',
+          evidence: [
+            {
+              kind: 'github',
+              source: 'merged PR #701',
+              repoRoot: null,
+              claim: 'Fixes the guard-size exit only; other preflight exits still drop the extras.',
+              quote: 'records resume extras before the guard-size refusal',
+            },
+          ],
+          suggestedNextStep: {
+            kind: 'proceed_to_plan',
+            detail: 'Residual: directory and --body-file exits; PR #701 already fixed guard-size.',
+          },
+        }),
+      ),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.frameChallenge?.framing).toBe('NARROWS');
+  });
 });
 
 describe('parsePriorArtResponse — absence-laundering guards', () => {

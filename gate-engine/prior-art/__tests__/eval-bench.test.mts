@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { aggregate, regressionFlips } from '../eval/bench.mts';
+import { loadRows } from '../eval/cases.mts';
 
 // The prior-art bench is excluded from every tsconfig project (`**/eval/**`), so its scoring
 // arithmetic has no other guard: these cover the classifications that decide whether a baseline
@@ -101,5 +102,15 @@ describe('regressionFlips', () => {
   it('ignores baseline rows absent from the current run', () => {
     const before = baseline([row(), row({ id: 'int-gone' })]);
     expect(regressionFlips(aggregate([row()], AGENT, HASHES, 2), before)).toEqual([]);
+  });
+});
+
+describe('committed corpus', () => {
+  it('lints clean and keeps the partial-fix row from accepting SOLVED_ELSEWHERE', () => {
+    // A trigger-only fix scored as solved is the exact miss this row exists to catch.
+    const row = loadRows().find((candidate) => candidate.id === 'int-ship-resume-partial-fix');
+    expect(row?.expectVerdict).not.toContain('SOLVED_ELSEWHERE');
+    expect(row?.expectFraming).toEqual(['NARROWS']);
+    expect(row?.legs.local).toMatchObject({ status: 'reached', resolved: 1 });
   });
 });
