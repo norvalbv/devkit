@@ -257,6 +257,49 @@ describe('summariseTrend — streak boundaries', () => {
     expect(trendOf(events, 'same')).toBe('');
   });
 
+  it('drops a killed attempt whose retry has a new id and keeps counting the rounds around it', () => {
+    const killed = [
+      { type: 'ship_attempt', ship_id: 's2', ...where },
+      { ship_id: 's2', ...where, ...fail(9) },
+    ];
+    const events = [
+      ...attempt('s1', [fail(4)]),
+      ...killed,
+      // A real retry records its intent before its marker, while the killed attempt is still open.
+      { type: 'ship_intent', ship_id: 's3', ...where },
+      ...attempt('s3', [fail(4)]),
+      ...attempt('s4', [fail(4)]),
+    ];
+    const text = trendOf(events, 's4');
+    expect(text).toContain(`${CR}: 3 blocking rounds`);
+    expect(text).toContain('4 → 4 → 4 findings');
+  });
+
+  it('goes silent when a killed attempt with a new-id retry writes a late row inside that retry', () => {
+    const events = [
+      ...attempt('s1', [fail(4)]),
+      { type: 'ship_attempt', ship_id: 's2', ...where },
+      { type: 'ship_attempt', ship_id: 's3', ...where },
+      { ship_id: 's2', ...where, ...fail(9) },
+      { ship_id: 's3', ...where, ...fail(4) },
+      { type: 'ship_result', ship_id: 's3', ...where, exit_code: 1 },
+      ...attempt('s4', [fail(4)]),
+    ];
+    expect(trendOf(events, 's4')).toBe('');
+  });
+
+  it('goes silent when a displaced attempt was not killed and finishes after its successor closed', () => {
+    const events = [
+      ...attempt('s1', [fail(4)]),
+      { type: 'ship_attempt', ship_id: 's2', ...where },
+      ...attempt('s3', [fail(4)]),
+      { ship_id: 's2', ...where, ...pass() },
+      { type: 'ship_result', ship_id: 's2', ...where, exit_code: 1 },
+      ...attempt('s4', [fail(4)]),
+    ];
+    expect(trendOf(events, 's4')).toBe('');
+  });
+
   it('goes silent when two same-branch attempts with DISTINCT ids overlap — they are not rounds in order', () => {
     const events = [
       ...attempt('s1', [fail(4)]),
