@@ -16,6 +16,10 @@ const RULE_REMEDIES = new Map([
     'anti-slop/no-module-mocking',
     'no-module-mocking: give the module a seam instead of mocking its imports — e.g. an optional `deps = { spawn, existsSync }` parameter (defaulting to the real imports) that the test passes fakes through',
   ],
+  [
+    'anti-slop/require-safety-comment-for-type-assertion',
+    'require-safety-comment-for-type-assertion: if the value comes from I/O (JSON.parse, env, argv, a file or network body), decode it where it enters with a schema (e.g. zod `Schema.safeParse(JSON.parse(text))`) instead of casting; otherwise state the invariant on a `// SAFETY:` line directly above the assertion',
+  ],
 ]);
 
 /** One hint per distinct rule, then the acceptance route this install mode actually supports. */

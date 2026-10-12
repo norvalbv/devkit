@@ -22,6 +22,7 @@ import { collectAntiSlopGroups } from '../runner.mts';
 import { ACCEPT_VIA_OVERRIDE, antiSlopRemedyLines } from './remedy.mts';
 
 const MOCKING = 'anti-slop/no-module-mocking';
+const ASSERTION = 'anti-slop/require-safety-comment-for-type-assertion';
 const EMPTY_BASELINE = `${JSON.stringify(
   { schemaVersion: 1, upstreamCommit: ANTI_SLOP_UPSTREAM, entries: [] },
   null,
@@ -40,6 +41,25 @@ describe('antiSlopRemedyLines', () => {
     const lines = antiSlopRemedyLines([MOCKING, MOCKING, MOCKING], false);
     const hints = lines.filter((line) => /deps/u.test(line));
     expect(hints).toHaveLength(1);
+  });
+
+  it('points a type assertion at schema parsing for I/O and at a SAFETY line otherwise', () => {
+    const hints = antiSlopRemedyLines([ASSERTION, ASSERTION], false).filter((line) =>
+      line.includes('hint —'),
+    );
+    expect(hints).toHaveLength(1);
+    expect(hints[0]).toMatch(/zod `Schema\.safeParse\(JSON\.parse\(text\)\)`/u);
+    expect(hints[0]).toMatch(/\/\/ SAFETY:/u);
+  });
+
+  it('never matches the bare rule name, and orders hints by first appearance', () => {
+    const bare = antiSlopRemedyLines(['require-safety-comment-for-type-assertion'], false);
+    expect(bare.some((line) => line.includes('hint —'))).toBe(false);
+    const lines = antiSlopRemedyLines([ASSERTION, MOCKING], false);
+    expect(lines).toHaveLength(3);
+    expect(lines[0]).toContain('require-safety-comment-for-type-assertion:');
+    expect(lines[1]).toContain('no-module-mocking:');
+    expect(lines[2]).toContain(ACCEPT_VIA_OVERRIDE);
   });
 
   it('still names the acceptance route when no rule has a hint', () => {
@@ -131,6 +151,21 @@ describe('anti-slop check FAIL output (wiring)', () => {
       expect.stringMatching(/^ERROR \S+ src\/a\.test\.ts:3:\d+ \(\+1\)$/u),
     ]);
     expect(locations[0]).toContain(MOCKING);
+  });
+
+  it('prints the schema-parse hint when the real rule blocks a cast on JSON.parse output', () => {
+    // Guards the key: the hint only prints if the plugin's emitted ruleId matches the table entry.
+    const cwd = repository(false);
+    writeFileSync(join(cwd, 'src', 'a.test.ts'), 'export const clean = 1;\n');
+    writeFileSync(
+      join(cwd, 'src', 'read.ts'),
+      "export const x = JSON.parse('{}') as { a: number };\n",
+    );
+    git(cwd, ['add', '-A']);
+
+    expect(antiSlop(['check', '--staged'], cwd)).toBe(1);
+    expect(out.join('\n')).toContain(ASSERTION);
+    expect(err.join('\n')).toMatch(/hint — require-safety-comment-for-type-assertion: .*zod/u);
   });
 
   it('prints the overlay route, not the Oxlint config, in an overlay install', () => {
