@@ -357,7 +357,6 @@ export async function inspectDistIntegrity(
   unresolved.sort((a, b) =>
     `${a.importer}\0${a.specifier}`.localeCompare(`${b.importer}\0${b.specifier}`),
   );
-  const stale = staleNewDist(root, [...briefed].filter(shipping), atBase, distArtifact);
   return {
     active: true,
     unresolved,
@@ -365,7 +364,7 @@ export async function inspectDistIntegrity(
     untracked,
     unlexable: unlexable.sort(),
     missing,
-    stale,
+    stale: staleNewDist(root, [...briefed].filter(shipping), atBase, distArtifact),
   };
 }
 
