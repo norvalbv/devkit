@@ -563,6 +563,9 @@ if [ "$REWRITE" -eq 1 ]; then
   if [ "${#MISSING_SCOPE[@]}" -gt 0 ] && [ "$REWRITE_RECEIPT_PROVEN" -eq 0 ]; then
     echo "rewrite brief omits paths from the existing PR:" >&2
     for p in "${MISSING_SCOPE[@]}"; do printf '  %q\n' "$p" >&2; done
+    brief_paths=; for p in "${PATHS[@]}"; do brief_paths="$brief_paths $(printf '%q' "$p")"; done
+    echo "  to ADD a commit on top of the PR instead, drop --base: devkit ship $(printf '%q' "$BR") $(printf '%q' "$TITLE") --pr --$brief_paths" >&2
+    echo "  to REWRITE the PR as one commit, re-run with every listed path added to the brief" >&2
     exit 1
   fi
 
