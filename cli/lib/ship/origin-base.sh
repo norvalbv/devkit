@@ -451,6 +451,7 @@ ship_base_contains_branch_point() {
   elif ship_origin_branch_exists "$repo" "$cand" "$cand_oid"; then
     echo "  the branch this work sits on top of is '$cand' — pass --base $(ship_shell_quote "$cand")" >&2
   fi
+  [ "$cand" = "$base_ref" ] || echo "  to stack on origin/$base_ref instead, redo only this change on a checkout of origin/$base_ref (do not merge it in), then ship again." >&2
   echo "  to target origin/$base_ref anyway: GUARD_SHIP_BASE_OK=1 — the gate worktree is then cut from" >&2
   echo "  a different line, so guard-size, guard-clone and structure results are not about your change." >&2
   return 1
