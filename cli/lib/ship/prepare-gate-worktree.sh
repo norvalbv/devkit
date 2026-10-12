@@ -264,10 +264,12 @@ gate_rebase_coverage() {
   out=$(git -C "$wt" rev-parse --absolute-git-dir 2>/dev/null) || return 0
   out="$out/devkit-fallow-coverage.json"
   root=$(node "$tool" "$wt" "$source" "$out") || root=''
-  if [ -n "$root" ] && [ -f "$out" ]; then
-    export FALLOW_COVERAGE="$out"
-    echo "  ↳ $purpose: fallow reads coverage rekeyed from $root (FALLOW_COVERAGE); the coverage gate reads coverage/ unchanged" >&2
-  fi
+  [ -n "$root" ] && [ -f "$out" ] || return 0
+  export FALLOW_COVERAGE="$out"
+  case "$root" in
+    scoped\ *) echo "  ↳ $purpose: fallow scores CRAP from static estimates — the linked coverage came from a scoped run (devkit coverage-run ${root#scoped })" >&2 ;;
+    *) echo "  ↳ $purpose: fallow reads coverage rekeyed from $root (FALLOW_COVERAGE); the coverage gate reads coverage/ unchanged" >&2 ;;
+  esac
   return 0
 }
 

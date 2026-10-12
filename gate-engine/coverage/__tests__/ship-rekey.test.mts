@@ -48,7 +48,7 @@ function shipWorktree() {
   git(root, 'worktree', 'add', '-q', '--detach', wt, 'HEAD');
   symlinkSync(join(root, 'coverage'), join(wt, 'coverage'));
   const out = join(wt, '..', 'fallow-coverage.json');
-  expect(rebaseWorktreeCoverage(wt, join(root, 'coverage'), out)).toBe(root);
+  expect(rebaseWorktreeCoverage(wt, join(root, 'coverage'), out)).toEqual({ root });
   return { root, wt, out };
 }
 
