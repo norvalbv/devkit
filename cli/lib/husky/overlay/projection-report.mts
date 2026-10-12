@@ -2,7 +2,7 @@
  * sync-worktree) and devkit review and ship. Rationale: docs/decisions/overlay-self-heal.md. */
 
 import { sameDir } from '../../doctor/hooks-path.mts';
-import { hasOwnOverlay, projectionGaps, repairProjection } from './overlay-home.mts';
+import { ownsOverlayConfig, projectionGaps, repairProjection } from './overlay-home.mts';
 
 const MAX_LISTED = 5;
 export const listed = (paths: string[]) =>
@@ -41,7 +41,11 @@ export function printProjectionGaps(
 }
 
 /** Project `home`'s overlay into the checkout `wt` that borrows it; false while a gap stays open. The
- * home itself, and a checkout with an overlay of its own, are left as they are. */
+ * home itself, and a checkout with its own overlay config, are left as they are. */
 export function projectBorrowedOverlay(wt: string, home: string, pkgRel: string): boolean {
-  return sameDir(home, wt) || hasOwnOverlay(wt) || printProjectionGaps(wt, home, pkgRel, true);
+  return (
+    sameDir(home, wt) ||
+    ownsOverlayConfig(wt, pkgRel) ||
+    printProjectionGaps(wt, home, pkgRel, true)
+  );
 }

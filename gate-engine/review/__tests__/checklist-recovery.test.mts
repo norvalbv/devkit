@@ -237,6 +237,22 @@ describe('runReviewGate — checklist recovery on the strict ship path (sc-2088)
     expect(exec.mock.calls.filter(([o]) => o.label === TARGET)).toHaveLength(2);
   });
 
+  it('an emoji-dressed PASS from a claude-family judge passes the strict ship (sc-4635)', async () => {
+    const repo = consumerRepo({ backend: true });
+    shipEnv(repo);
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exec = mkExec(async ({ label }) => {
+      writeArtifact(repo, label);
+      return 'No duplicates found.\n✅ **VERDICT: PASS** — clean';
+    });
+    expect(await runReviewGate(repo, { exec })).toBe(0);
+    const row = events(repo).find(
+      (e) => e.type === 'review_result' && e.reviewer === 'commit-guard',
+    );
+    expect(row?.status).toBe('pass');
+    expect(err.mock.calls.flat().join('\n')).not.toContain('no VERDICT line');
+  });
+
   it('a recovered PASS caches under the SAME key as a first-attempt PASS', async () => {
     const recovered = consumerRepo({ backend: true });
     shipEnv(recovered);

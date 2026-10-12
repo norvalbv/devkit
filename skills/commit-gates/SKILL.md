@@ -203,8 +203,8 @@ dark; find which with `devkit doctor` before moving anything.
 
 - Export or unset; never prefix the command. A command-rewriting shell hook can strip an inline
   `VAR=x devkit ship`, the same rule that governs `SHIP_COMMIT_TIMEOUT`.
-- All four, because the correctness chunk cap is benched for `gpt-5.6-sol` only; a three-knob move
-  runs the correctness reviewer at a cap never measured for it.
+- All four, because the package default chunks correctness review at 400 LOC and no large-diff
+  bench has measured the claude correctness model chunked; a three-knob move runs it that way.
 - A sentry pin under either spelling stays where it points until cleared, so both blocks unset it;
   doctor will not bind while one pins codex.
 - `devkit doctor --fix` writes the same four keys into `guard.config.json`, which a ship reads from
