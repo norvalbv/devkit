@@ -449,6 +449,15 @@ describe('effectiveScope (rescope resolution)', () => {
     expect(effectiveScope(body)).toBe('src/old/**');
   });
 
+  // The decisions skill tells authors this ("What the gates read"); a change here must update it.
+  it('a re-target inherits neither the old Target Scope nor its rescope notes', () => {
+    const old = withTrailer('- 2026-02-01 — **Scope:** src/new/** — directory renamed\n');
+    const retarget = (scope: string) =>
+      `${old}\n## Target · 2026-03-01 — R2\n\n**Context:** c\n**Ruling:** R2\n${scope}**Source:** manual\n`;
+    expect(effectiveScope(retarget('**Scope:** src/only/**\n'))).toBe('src/only/**');
+    expect(effectiveScope(retarget(''))).toBe('');
+  });
+
   it('no Target at all: empty string, never throws', () => {
     expect(effectiveScope('\n# ax\n\nno heading structure a Target could be read from\n')).toBe('');
   });
