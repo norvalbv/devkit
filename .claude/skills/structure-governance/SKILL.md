@@ -77,6 +77,7 @@ HARD STOPS (lint errors, not guidelines):
     can suggest clusters). Existing piles are grandfathered shrink-only (.devkit/baselines/fanout.json).
     A SIZE split (1) adds a sibling here, so guard-size prints the folder's fan-out headroom
     beside an over-cap file; at 0 the split belongs in a subfolder.
+    Before placing a new file, `guard-fanout preflight -- <new-path>` says whether its folder has room.
  4. PROCESS: renderer never imports src/main — not even types (cross-process types live in
     src/shared/types; existing offenders are grandfathered shrink-only in .devkit/baselines/imports.mjs;
     sole permanent exempt: lib/trpc.ts AppRouter). No Node builtins in renderer (bare `path` OK —

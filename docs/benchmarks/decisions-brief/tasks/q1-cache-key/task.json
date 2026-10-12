@@ -1,0 +1,9 @@
+{
+ "id": "q1-cache-key",
+ "slug": "ci-emits-per-file-test-results",
+ "file": "cli/lib/baseline-status/cache.mjs",
+ "realPath": "cli/lib/baseline-status/cache.mts",
+ "bindingText": "The cache keys on runId+attempt",
+ "prompt": "`devkit baseline-status` downloads the per-file test summary artifact from CI every time it runs, which takes several seconds. Add a small on-disk cache: implement getCached(run, fetchSummary) in cli/lib/baseline-status/cache.mjs (the stub is there) so that a summary we already downloaded is read from .cache/baseline/ instead of fetched again, and wire it into cli/commands/baseline-status.mjs.",
+ "bindingOffset": 643
+}

@@ -1,6 +1,6 @@
 /** Relocated anti-slop debt: findings a partial move carried between files Git sees only as edits. */
 
-import { failLine } from '../../../../gate-engine/deterministic/reason.mts';
+import { failLine, writeGateReason } from '../../../../gate-engine/deterministic/reason.mts';
 import type { AntiSlopBaseline, BaselineEntry, BaselineIncrease } from './baseline.mts';
 import { ANTI_SLOP_BASELINE_REL } from './constants.mts';
 import type { FindingGroup } from './diagnostics.mts';
@@ -242,8 +242,14 @@ export function reportRelocatedFailure(
   failLine(
     `anti-slop: FAIL — ${newErrorCount} new, ${moved} relocated from ${formatSources(errors.flatMap((group) => group.sources))}; baseline unchanged`,
   );
-  console.error(
+  failLine(
     `anti-slop: re-anchor relocated debt with \`${relocationRemedy(baseRef)}\`, then stage ${ANTI_SLOP_BASELINE_REL}`,
+  );
+  writeGateReason(
+    errors.map(
+      (group) =>
+        `RELOCATED ${group.ruleId} ${group.file}:${group.line}:${group.column} (+${group.relocatedCount})`,
+    ),
   );
 }
 

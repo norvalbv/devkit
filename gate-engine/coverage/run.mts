@@ -24,6 +24,7 @@ import {
   reviewNotMeasuredEmpty,
 } from './gate-shared.mts';
 import { resolveScope, runDiffCoverage } from './diff-gate.mts';
+import { writeFallowCopy } from './fallow-copy.mts';
 import { lineHits } from './lines.mts';
 // Shared with the PRODUCER (`devkit coverage-run`) so the path this gate reads and the path that
 // runner writes can never drift apart.
@@ -305,9 +306,23 @@ export function runCoverage(cwd = process.cwd()): number {
   return 0;
 }
 
+/** `fallow-copy`: print the path of a clamped coverage copy for FALLOW_COVERAGE, or nothing when
+ * fallow reads the artifact unaided. Exit 1 (reason on stderr) when the artifact is unusable. */
+function runFallowCopy(cwd: string): number {
+  try {
+    const out = writeFallowCopy(repoTop(cwd), cwd);
+    if (out !== null) console.log(out);
+    return 0;
+  } catch (error) {
+    console.error(`guard-coverage fallow-copy: ${error instanceof Error ? error.message : error}`);
+    return 1;
+  }
+}
+
 function runCli(cmd?: string): void {
+  if (cmd === 'fallow-copy') process.exit(runFallowCopy(process.cwd()));
   if (cmd !== undefined && cmd !== 'gate') {
-    console.error('usage: guard-coverage [gate]');
+    console.error('usage: guard-coverage [gate|fallow-copy]');
     process.exit(2);
   }
   process.exit(runCoverage(process.cwd()));

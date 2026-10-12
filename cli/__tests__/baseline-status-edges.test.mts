@@ -17,12 +17,13 @@ import baselineStatus from '../commands/baseline/status.mts';
 import { type RunRef, isUsableRun } from '../lib/baseline-status/gh.mts';
 import { produceTestReport, summarise } from '../lib/baseline-status/produce.mts';
 import {
-  API_BRANCH_HEAD,
-  RUN_LIST_BY_COMMIT,
   addCommit,
+  ghHarness,
   gitOnlyPath,
   headOf,
+  runRef,
   seedBranch,
+  summaryFor,
 } from './_baseline-fixture.mts';
 import {
   DEFAULT_ARTIFACT,
@@ -33,9 +34,6 @@ import {
 } from '../lib/baseline-status/query.mts';
 
 const FIXTURES = join(import.meta.dirname, 'fixtures');
-
-/** The head of the newest ghHarness branch; runRef points at it unless told otherwise. */
-let harnessHead = '';
 
 describe('summarise — a real vitest report, not a hand-built stand-in', () => {
   // Captured from a real `devkit test-report-run`. Hand-built objects agree with whatever the code
@@ -128,68 +126,6 @@ describe('produceTestReport — the guard branches', () => {
     expect(await produceTestReport(dir, [])).toBe(1);
     expect(() => readFileSync(join(dir, '.devkit/test-report-summary.json'))).toThrow();
   });
-});
-
-/** The stubbed-gh harness on a real one-commit branch, shared by the query and command cases. */
-function ghHarness() {
-  const dir = mkdtempSync(join(tmpdir(), 'edge-query-'));
-  const fixture = mkdtempSync(join(tmpdir(), 'edge-fixture-'));
-  harnessHead = seedBranch(dir);
-  const bin = join(dir, 'bin');
-  mkdirSync(bin, { recursive: true });
-  const stub = join(bin, 'gh');
-  writeFileSync(
-    stub,
-    `#!/bin/sh
-if [ -n "$DEVKIT_GH_FAIL" ]; then echo "$DEVKIT_GH_FAIL" >&2; exit 1; fi
-${API_BRANCH_HEAD}
-if [ "$1" = "run" ] && [ "$2" = "list" ]; then
-  ${RUN_LIST_BY_COMMIT}
-fi
-if [ "$1" = "run" ] && [ "$2" = "download" ]; then
-  if [ -n "$DEVKIT_GH_DOWNLOAD_FAIL" ]; then echo "$DEVKIT_GH_DOWNLOAD_FAIL" >&2; exit 1; fi
-  id="$3"; out=""
-  while [ $# -gt 0 ]; do if [ "$1" = "--dir" ]; then out="$2"; fi; shift; done
-  if [ -f "$DEVKIT_TEST_FIXTURE/empty-$id" ]; then exit 0; fi
-  if [ -f "$DEVKIT_TEST_FIXTURE/summary-$id.json" ]; then
-    mkdir -p "$out/run-$id"; cp "$DEVKIT_TEST_FIXTURE/summary-$id.json" "$out/run-$id/summary.json"; exit 0
-  fi
-  echo "no artifact matches any of the names or patterns provided" >&2; exit 1
-fi
-exit 1
-`,
-  );
-  chmodSync(stub, 0o755);
-  return { dir, fixture, bin };
-}
-
-// runId must match the run it is served for; the reader rejects a mismatched artifact by design.
-const summaryFor = (
-  files: Record<string, string>,
-  testsPassed: boolean,
-  runId = 100,
-  attempt = 1,
-) =>
-  JSON.stringify({
-    schema: 1,
-    sha: 'sha1',
-    runId,
-    attempt,
-    testsPassed,
-    files,
-    droppedForeignPaths: 0,
-  });
-
-const runRef = (over: Partial<RunRef> = {}): RunRef => ({
-  databaseId: 100,
-  attempt: 1,
-  status: 'completed',
-  conclusion: 'failure',
-  headSha: harnessHead,
-  createdAt: '2026-08-29T00:00:00Z',
-  headBranch: 'main',
-  event: 'push',
-  ...over,
 });
 
 describe('--file path shapes', () => {
@@ -1154,7 +1090,7 @@ describe('runs come from the remote head, one commit at a time (stale run listin
     fixture = h.fixture;
     process.env.PATH = `${h.bin}:${saved.PATH ?? ''}`;
     process.env.DEVKIT_TEST_FIXTURE = fixture;
-    older = harnessHead;
+    older = h.head;
     head = addCommit(dir);
     out = [];
     console.log = (...a: unknown[]) => void out.push(a.join(' '));
@@ -1296,7 +1232,7 @@ describe('head resolution and run filtering at the boundaries', () => {
     fixture = h.fixture;
     process.env.PATH = `${h.bin}:${saved.PATH ?? ''}`;
     process.env.DEVKIT_TEST_FIXTURE = fixture;
-    older = harnessHead;
+    older = h.head;
     head = addCommit(dir);
   });
 
@@ -1430,7 +1366,7 @@ describe('reviewer round: shallow state and the fallback narration', () => {
     fixture = h.fixture;
     process.env.PATH = `${h.bin}:${saved.PATH ?? ''}`;
     process.env.DEVKIT_TEST_FIXTURE = fixture;
-    older = harnessHead;
+    older = h.head;
     head = addCommit(dir);
     out = [];
     console.log = (...a: unknown[]) => void out.push(a.join(' '));

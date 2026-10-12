@@ -12,7 +12,7 @@ import {
   type VecIndex,
 } from './embeddings.mts';
 import { sections } from './markdown.mts';
-import { axisNotes } from './note-relations.mts';
+import { axisNotes, lastTaggedNote } from './note-relations.mts';
 import { corpusIdf, orderQualifiers, tokenize } from './qualifiers.mts';
 
 export { cosine, EMBED_MODEL, EMBED_URL, embed } from './embeddings.mts';
@@ -229,7 +229,7 @@ export function axisEntries(body: string, liveRulingId: string | null): AxisEntr
 
 // Tag a `rescope` note writes (decisions.mts cmdRescope): `- <date> — **Scope:** <globs> — <reason>`.
 // Non-greedy up to the em-dash boundary so a reason-less note (just the globs) still parses in full.
-const SCOPE_NOTE_RE = /^\*\*Scope:\*\*\s*(.+?)(?:\s+—\s+.+)?$/;
+export const SCOPE_NOTE_RE = /^\*\*Scope:\*\*\s*(.+?)(?:\s+—\s+.+)?$/;
 
 /**
  * The scope an axis's CURRENT section actually resolves to — the Target's own `**Scope:**` field,
@@ -241,16 +241,11 @@ const SCOPE_NOTE_RE = /^\*\*Scope:\*\*\s*(.+?)(?:\s+—\s+.+)?$/;
 export function effectiveScope(body: string): string {
   const target = currentTarget(body);
   const entries = axisEntries(body, liveRulingIdOf(body, Boolean(target)));
-  for (let i = entries.length - 1; i >= 0; i -= 1) {
-    if (entries[i].kind !== 'note') continue;
-    const m = entries[i].text.match(SCOPE_NOTE_RE);
-    if (m) return m[1].trim();
-  }
-  return target?.scope ?? '';
+  return lastTaggedNote(entries, SCOPE_NOTE_RE) ?? target?.scope ?? '';
 }
 
 /** Name the block a ruling was read from: `target:<date>`, `entry:<date>` (legacy), or null. */
-function liveRulingIdOf(body: string, hasTarget: boolean): string | null {
+export function liveRulingIdOf(body: string, hasTarget: boolean): string | null {
   const re = hasTarget ? TARGET_HEADING_RE : LEGACY_HEADING_RE;
   const dates = [...body.matchAll(re)].map((m) => m[1]);
   // Last heading wins, matching currentTarget's rule — append order IS chronological order here.

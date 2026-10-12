@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { constants as fsConstants, cpSync, existsSync, lstatSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync, } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { digest } from '../fs-helpers.mjs';
-import { reviewRepositoryConfigFingerprint } from '../ship/review/repository/state.mjs';
+import { reviewRepositorySnapshotFingerprint } from '../ship/review/repository/state.mjs';
 import { gitEnvironment } from '../ship/review/shared/common.mjs';
 const MAX_GIT_OUTPUT = 64 * 1024 * 1024;
 const MAX_REPORT_BYTES = 64 * 1024 * 1024;
@@ -169,11 +169,8 @@ export function snapshotRegressionCaller(root) {
         content.update(digest(bytes));
     }
     return digest(JSON.stringify({
-        head: git(root, ['rev-parse', '--verify', 'HEAD']).trim(),
-        refs: gitBytes(root, ['for-each-ref', '--format=%(refname)%00%(objectname)']).toString('base64'),
+        snapshot: reviewRepositorySnapshotFingerprint(root),
         status: gitBytes(root, ['status', '--porcelain=v2', '-z', '--untracked-files=all']).toString('base64'),
-        worktrees: gitBytes(root, ['worktree', 'list', '--porcelain']).toString('base64'),
-        config: reviewRepositoryConfigFingerprint(root),
         content: content.digest('hex'),
     }));
 }

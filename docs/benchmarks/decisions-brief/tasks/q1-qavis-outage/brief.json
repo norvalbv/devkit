@@ -1,0 +1,6 @@
+[
+ {
+  "slug": "qavis-advisory-gate",
+  "ruling": "Split by ownership. (1) qavis owns the classifier (`route --staged|--diff --gate`, a haiku judge that reads the diff — bench-picked at recall 0.96 / false-advise 0.00, clearing the floors regex can't) and a content-addressed pass-receipt (`.qavis/receipt.json`, sha256 over each changed file's blob sha, so a staged index and an identical committed tree match). (2) devkit is a THIN CHANNEL: `gate-engine/qavis-advisory` shells `qavis route --staged --gate`, and fail-OPENS (exit 0) when qavis or a `.qavis/recipe.json` is absent — the fallow precedent, zero weight for non-qavis consumers. (3) The exit contract is advisory: 0 = continue (SILENT / advisory-only on a normal commit / receipt-cleared / qavis absent), 3 = ADVISE under a strict ship (`GUARD_AI_STRICT`) — the ship blocks until qavis runs (writing a receipt that clears it) or an override is set. There is NO exit 1 and NO fail-closed on outage (unlike completeness): an advisor's own failure must never block a ship. Overrides: `GUARD_QAVIS_OK=1` ships without QA, `GUARD_NO_QAVIS_ADVISORY=1` disables. Wired as its own husky fragment (bunx/standalone/overlay) with its own remedy line, NOT an AI_GUARD (different exit contract)."
+ }
+]

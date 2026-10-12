@@ -201,7 +201,7 @@ describe('reconcile-manifest-write — classifies shipped paths', () => {
     const r = write(root, base, ['--pr', '7', '--', './old.ts']);
     expect(r.status, r.stderr).toBe(0);
     expect(readManifest(root).branches['feat/x'].paths).toEqual([
-      { path: './old.ts', op: 'delete', mode: '100644', blobSha: g('rev-parse', `${base}:old.ts`) },
+      { path: 'old.ts', op: 'delete', mode: '100644', blobSha: g('rev-parse', `${base}:old.ts`) },
     ]);
   });
 
@@ -473,6 +473,13 @@ describe('parseArgs — manifest mode flags are valueless booleans', () => {
     const { flags, paths } = parseArgs(['--literal-paths', '--', ':(exclude)*']);
     expect(flags['literal-paths']).toBe(true);
     expect(paths).toEqual([':(exclude)*']);
+  });
+  it('normalises a path to the tree spelling the manifest keys on', () => {
+    expect(parseArgs(['--', './a.ts', 'sub//b.ts', 'sub/./c.ts']).paths).toEqual([
+      'a.ts',
+      'sub/b.ts',
+      'sub/c.ts',
+    ]);
   });
 });
 

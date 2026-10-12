@@ -166,12 +166,41 @@ export function runId() {
         return null;
     return commitRunContext()?.id ?? null;
 }
+function runOrigin() {
+    const origin = process.env.DEVKIT_RUN_ORIGIN;
+    return origin === 'gate' || origin === 'bench' ? origin : undefined;
+}
+/** A bench is never a production run: drop the inherited sink and run ids, silence the default
+ * sink, and claim the origin first so a gate CLI the bench spawns cannot relabel it 'gate'. */
+export function isolateBenchTelemetry(env = process.env) {
+    for (const key of [
+        'DEVKIT_GATE_EVENTS',
+        'DEVKIT_SHIP_ID',
+        'DEVKIT_COMMIT_ID',
+        'DEVKIT_REVIEW_ID',
+        'DEVKIT_AGENT_RUN_ID',
+        'DEVKIT_RUN_MODE',
+    ])
+        delete env[key];
+    env.DEVKIT_NO_TELEMETRY = '1';
+    env.DEVKIT_RUN_ORIGIN = 'bench';
+}
+/** Stamps 'gate' on this process and everything it spawns; an inherited 'bench' wins. Call it only
+ * at an entry the generated hook runs. Returns isGate so a caller can use it inline. */
+export function markGateRun(isGate = true) {
+    if (isGate)
+        process.env.DEVKIT_RUN_ORIGIN ||= 'gate';
+    return isGate;
+}
 export function runEnvelope() {
     const identity = { source: originatingAgent(), devkit_version: devkitVersion() };
     // parent_session_id is envelope-owned; an event's own `session_id` (a judge's session) is distinct.
     const parent = parentSessionId();
     if (parent)
         identity.parent_session_id = parent;
+    const origin = runOrigin();
+    if (origin)
+        identity.run_origin = origin;
     const ship = process.env.DEVKIT_SHIP_ID;
     if (ship && process.env.DEVKIT_SHIP_MODE === 'dry-gates')
         identity.ship_mode = 'dry-gates';

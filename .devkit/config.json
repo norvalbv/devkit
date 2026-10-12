@@ -1,6 +1,6 @@
 {
   "stack": "node-service",
-  "devkitRef": "v0.67.1",
+  "devkitRef": "v0.70.0",
   "initVersion": 2,
   "pkgRel": "",
   "standalone": false,
@@ -33,7 +33,7 @@
       "clone",
       "comments",
       "decisions",
-      "qavis-advisory",
+      "ui-evidence",
       "review"
     ],
     "disabledGuards": []
@@ -47,7 +47,7 @@
       "clone",
       "comments",
       "decisions",
-      "qavis-advisory",
+      "ui-evidence",
       "review"
     ],
     "decisionsDir": "docs/decisions"

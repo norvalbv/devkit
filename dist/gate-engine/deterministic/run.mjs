@@ -44,11 +44,12 @@ import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseJsonObject } from '../config-json.mjs';
-import { coverageBypassed, deterministicStrict, envFlag } from '../config.mjs';
+import { coverageBypassed, deterministicStrict } from '../config.mjs';
 import { emitGateBypass, emitGateEvent, finishGateTiming } from '../judge/gate-events.mjs';
+import { markGateRun } from '../judge/run-context.mjs';
 import { describeCachedPrefix, prefixEntry, recordPrefix } from '../prefix-cache/prefix-cache.mjs';
 import { gateEnv, readGateReason, reasonDetail, reasonReport, withReasonFiles, } from './reason.mjs';
-import { configExtraGates, structureBypassed } from './command-gates.mjs';
+import { bypassedSuffixes, configExtraGates, reportCachedBypasses, structureBypassed, } from './command-gates.mjs';
 import { printRecheckFooter, recheckCommand, recheckLines, registryRecheck } from './recheck.mjs';
 import { DETERMINISTIC } from './registry.mjs';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -77,7 +78,9 @@ function componentEnabled(components, name) {
     return components !== undefined && Object.hasOwn(components, name) && components[name] === true;
 }
 const ALL_IDS = DETERMINISTIC.map((g) => g.id);
-const GUARD_COMPONENT_IDS = DETERMINISTIC.filter((g) => !('configComponent' in g)).map((g) => g.id);
+const GUARD_COMPONENTS = DETERMINISTIC.filter((g) => !('configComponent' in g));
+// A selected guard arms a gate by its own id, or one that rides it (decisions → decision-checks).
+const armed = (gate, guards) => guards.has(gate.id) || (!!gate.withGuard && guards.has(gate.withGuard));
 // The set the missing/unreadable-config fallback runs: every guard EXCEPT the opt-in ones. `--only`
 // and an explicit components.guards selection can still run opt-in guards (they're in ALL_IDS).
 const DEFAULT_IDS = DETERMINISTIC.filter((g) => !('optIn' in g && g.optIn)).map((g) => g.id);
@@ -91,7 +94,7 @@ function reviewIds() {
         .map((guard) => guard.trim())
         .filter(Boolean);
     const selected = new Set(configured);
-    return GUARD_COMPONENT_IDS.filter((id) => selected.has(id));
+    return GUARD_COMPONENTS.filter((g) => armed(g, selected)).map((g) => g.id);
 }
 // Split a `--structure` / `--extra` command string into argv tokens. Hoisted (perf: no per-call
 // regex compile).
@@ -146,17 +149,13 @@ export function selectedIds(cwd) {
         const selectedGuards = new Set(guards);
         return DETERMINISTIC.filter((gate) => {
             const component = 'configComponent' in gate ? gate.configComponent : undefined;
-            return component ? componentEnabled(components, component) : selectedGuards.has(gate.id);
+            return component ? componentEnabled(components, component) : armed(gate, selectedGuards);
         }).map((gate) => gate.id);
     }
     catch {
         return DEFAULT_IDS;
     }
 }
-// Bypass flags owned by `--extra` gates rather than by the registry. A bypassed run must not record
-// a key a later un-bypassed run of the same tree would hit — the same anti-laundering property the
-// coverage and structure salts below exist for.
-const EXTRA_BYPASS_SUFFIXES = ['HOOK_PARITY_OK', 'DECISIONS_INTEGRITY_OK'];
 export function prefixCacheScope(scope, effectiveIds) {
     const reviewMode = process.env.DEVKIT_RUN_MODE === 'review';
     const mergeBase = process.env.DEVKIT_REVIEW_MERGE_BASE;
@@ -200,7 +199,7 @@ export function prefixCacheScope(scope, effectiveIds) {
         : coverageBase;
     // Same hazard once more, for the self-host `--extra` gates. Sorted and joined so two runs that
     // bypass the same set share a key regardless of the order the flags were exported in.
-    const extraBypassed = EXTRA_BYPASS_SUFFIXES.filter(envFlag).sort();
+    const extraBypassed = bypassedSuffixes();
     const extraBase = extraBypassed.length
         ? `${structureBase ?? 'devkit-guards'}:${extraBypassed.join('+')}-bypassed`
         : structureBase;
@@ -302,7 +301,7 @@ export function runDeterministic(cwd = process.cwd(), opts = {}) {
     const skipped = [];
     if (skip) {
         const extras = extra.map((x) => x.label);
-        const flags = EXTRA_BYPASS_SUFFIXES.filter(envFlag).map((f) => `GUARD_${f}`);
+        const flags = reportCachedBypasses([...extras, ...effectiveIds]);
         if (bypassStructure)
             flags.unshift('GUARD_STRUCTURE_OK');
         if (effectiveIds.includes('coverage') && coverageBypassed())
@@ -426,5 +425,6 @@ export function runDeterministic(cwd = process.cwd(), opts = {}) {
     return finish(0, gates.length ? 'partial' : 'full', cachedDuration);
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
+    markGateRun(process.argv.includes('--hook')); // a manual guard-deterministic run stays unmarked
     process.exit(runDeterministic(process.cwd(), parseOpts(process.argv.slice(2))));
 }

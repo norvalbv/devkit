@@ -2,6 +2,7 @@
   "scanRoots": ["cli", "gate-engine"],
   "sourceExtensions": ["mts"],
   "fanoutCap": 12,
+  "extraGates": { "git-pathspec": "node scripts/git-pathspec-check.mts" },
   "indexPath": ".search-code/index.db",
   "//generated": "Paths ship's three-way staging abort points at a generator instead of a hand-merge (sc-2770). .devkit/*-manifest.json are built-in defaults.",
   "generated": [{ "glob": "dist/**", "command": "bun run build" }],
@@ -12,9 +13,21 @@
     "forbiddenRefs": ["\\bsc-\\d+\\b", "\\breport-[0-9a-f]{6,}\\b"],
     "forbidDecisionRefs": true
   },
+  "//evidence": "devkit ship runs a PR's added or changed test files on red (the PR base plus those files) and green (the PR head) after the PR opens, and writes the outcome into the PR body.",
+  "evidence": {
+    "command": [
+      "node_modules/.bin/vitest",
+      "run",
+      "--reporter=json",
+      "--outputFile.json={report}",
+      "{files}"
+    ],
+    "supportPaths": ["**/__tests__/**"],
+    "timeoutSeconds": 300
+  },
   "//research": "Sibling clones the prior-art agent may read (agents/prior-art.md). Unresolved entries are skipped, so a clone without them stays valid.",
   "research": {
-    "referenceCheckouts": ["../bug-mcp", "../claude-usage-dashboard", "../frink", "../qavis"]
+    "referenceCheckouts": ["../bug-mcp", "../claude-usage-dashboard", "../frink"]
   },
   "review": {
     "backendRoots": ["cli", "gate-engine"],
@@ -35,7 +48,8 @@
         "**/dist/**",
         "coverage/**",
         "*.lock",
-        "**/*.lock"
+        "**/*.lock",
+        "docs/benchmarks/decisions-brief/tasks/**"
       ]
     },
     "trustBoundaries": "devkit is a CLI + portable gate-engine, not a hosted app — no server/client split. Its trust model is W-3: devkit ships inside the consumer's node_modules and EXECUTES in a repo it does not own, so every path it resolves must be consumer-cwd-relative, never __dirname, and synced assets (skills/agents/gate scripts) must read layout from the consumer's guard.config.json, never hardcode a stack's directory tree."
@@ -106,12 +120,12 @@
             "markdown",
             "prefix-cache",
             "prior-art",
-            "qavis-advisory",
             "ratchets",
             "review",
             "search-tool",
             "sentry",
             "structure",
+            "ui-evidence",
             "critique"
           ]
         },
@@ -134,5 +148,13 @@
   "//maxLines": "Raw line cap per source file (guard-size ratchet enforces it; existing giants grandfathered shrink-only). 0 = off. Per-FUNCTION caps need a parser — not yet.",
   "maxLines": 500,
   "//maxTestLines": "Loose raw line cap per test file; existing oversized tests are grandfathered shrink-only. 0 = off.",
-  "maxTestLines": 2000
+  "maxTestLines": 2000,
+  "//mergeVerdict": "devkit reaches consumers only through devkit release, which needs green CI, so merging to main is not the consumer boundary. The verdict's own code stays human-reviewed so a change cannot certify itself. fix and feat get larger limits than the built-in 50 lines / 4 files.",
+  "mergeVerdict": {
+    "consumerSurface": ["cli/lib/ship/merge-verdict/**"],
+    "limits": {
+      "fix": { "maxSourceLines": 500, "maxSourceFiles": 10 },
+      "feat": { "maxSourceLines": 200, "maxSourceFiles": 6 }
+    }
+  }
 }
