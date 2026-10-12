@@ -31,10 +31,9 @@ import {
   raisedTimeoutMs,
   TL_SCALE_SNIPPET,
   TIMEOUT_FINGERPRINT,
-  type UnhandledError,
   writeClearMarker,
 } from '../failures.mts';
-import UnhandledReporter, { UNHANDLED_NAME } from '../unhandled-reporter.mts';
+import UnhandledReporter, { UNHANDLED_NAME, type UnhandledError } from '../unhandled-reporter.mts';
 
 let roots: string[] = [];
 const makeRoot = () => {
