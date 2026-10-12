@@ -343,3 +343,19 @@ describe('the coverage-run stop pattern using-devkit documents', () => {
     expect(patternIn('/repo/wt').test(commandLine)).toBe(false);
   });
 });
+
+// The from-source form devkit's own root docs give agents; a renamed verb would leave it dead.
+describe('verbs the root docs run from source', () => {
+  it('are all dispatched by cli/index.mts', () => {
+    const named = ['AGENTS.md', 'CLAUDE.md'].flatMap((doc) =>
+      [
+        ...readFileSync(join(ROOT, doc), 'utf8').matchAll(
+          /node cli\/index\.mts ([a-z][a-z0-9-]*)/g,
+        ),
+      ].map((m) => m[1]),
+    );
+    expect(named).toEqual(expect.arrayContaining(['coverage-run', 'coverage-diff']));
+    const keys = dispatchKeys();
+    expect(named.filter((verb) => !keys.has(verb))).toEqual([]);
+  });
+});

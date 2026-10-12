@@ -45,6 +45,11 @@ describe('test:run:coverage:changed', () => {
     expect(script).toContain('--changed=${COVERAGE_BASE:-origin/main}');
   });
 
+  it('still prints the table when a test in the changed set fails', () => {
+    // vitest skips the coverage report on a failed run unless this is set.
+    expect(script).toContain('--coverage.reportOnFailure');
+  });
+
   it("writes its report outside the coverage gate's artifact dir and coverage-run's run dirs", () => {
     // vitest cleans its reports directory at startup; the default would delete coverage-final.json.
     const dir = reportsDir();
