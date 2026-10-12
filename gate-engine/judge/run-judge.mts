@@ -79,6 +79,8 @@ function reportOutage(
   usage?: JudgeUsage | null,
 ): JudgeOutage {
   const outage = classifyJudgeOutage(e);
+  const model = modelFromArgs(opts.args);
+  if (outage.kind === 'model-unavailable' && model !== null) outage.model = model;
   console.error(unavailableMessage(opts.label, e, opts.timeout, bin));
   emitJudgeExec(opts, outage.kind, startedAt, undefined, usage, outage.detail, e.stdout);
   opts.onOutage?.(outage);
