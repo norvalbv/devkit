@@ -51,6 +51,7 @@ import {
 } from './outage/classify.mts';
 import { unavailableMessage, warnNoOutput } from './outage/wording.mts';
 
+import { saveCodexCommands } from './codex/commands.mts';
 import { composeTranscript, saveTranscriptUnique } from './transcript-store.mts';
 
 // Re-exported so the gates that already import their remedy wording from here keep ONE import path,
@@ -81,7 +82,7 @@ function reportOutage(
   const model = modelFromArgs(opts.args);
   if (outage.kind === 'model-unavailable' && model !== null) outage.model = model;
   console.error(unavailableMessage(opts.label, e, opts.timeout, bin));
-  emitJudgeExec(opts, outage.kind, startedAt, undefined, usage, outage.detail);
+  emitJudgeExec(opts, outage.kind, startedAt, undefined, usage, outage.detail, e.stdout);
   opts.onOutage?.(outage);
   return outage;
 }
@@ -254,16 +255,21 @@ function emitJudgeExec(
   usage?: JudgeUsage | null,
   /** The provider's own failure sentence, so the ledger records WHY, not just that it failed. */
   outageDetail?: string,
+  stdout?: string,
 ): void {
   // Omitted entirely when unreadable — see parseJudgeUsage on why a zero-filled row is worse
   // than an absent one.
-  const extra: Partial<JudgeUsage> & { lens?: string; outage_detail?: string } = usage
-    ? { ...usage }
-    : {};
+  const extra: Partial<JudgeUsage> & {
+    lens?: string;
+    outage_detail?: string;
+    commands_ref?: string;
+  } = usage ? { ...usage } : {};
   if (opts.lens !== undefined) extra.lens = opts.lens;
   // The sc-2538 evidence sat in a stderr line nobody kept. On the ledger it is queryable: the
   // dashboard can answer "which outage, and until when" without re-running the ship.
   if (outageDetail !== undefined) extra.outage_detail = outageDetail;
+  const commandsRef = saveCodexCommands(opts.label, stdout, opts.lens);
+  if (commandsRef) extra.commands_ref = commandsRef;
   recordAgentRun({
     label: opts.label,
     output,
@@ -287,12 +293,13 @@ function emitJudgeExec(
 function readJudgeOutput(
   stdout: string,
   cli: JudgeCli,
-): { text: string; usage: JudgeUsage | null } | { failure: string; usage: JudgeUsage | null } {
+): { text: string; usage: JudgeUsage | null } | { failure: JudgeError; usage: JudgeUsage | null } {
   if (cli.codex) {
     const failure = codexFailure(stdout);
     // A failed turn's stream can still carry its usage event — those tokens were burned whether or
     // not a verdict arrived, and dropping them under-counts exactly the most expensive failures.
-    if (failure !== null) return { failure, usage: parseCodexUsage(stdout) };
+    if (failure !== null)
+      return { failure: { providerFailure: failure, stdout }, usage: parseCodexUsage(stdout) };
     return { text: unwrapCodexResult(stdout) ?? stdout, usage: parseCodexUsage(stdout) };
   }
   return { text: unwrapClaudeResult(stdout) ?? stdout, usage: parseJudgeUsage(stdout) };
@@ -365,10 +372,10 @@ export function execJudge(opts: ExecJudgeOpts): string | null {
     if ('failure' in parsed) {
       // The stream reported the turn failed (exit 0 notwithstanding). This was hardcoded
       // `transient` while HOLDING the message that proves a usage lock is not transient.
-      reportOutage(opts, { providerFailure: parsed.failure }, cli.bin, startedAt, parsed.usage);
+      reportOutage(opts, parsed.failure, cli.bin, startedAt, parsed.usage);
       return null;
     }
-    emitJudgeExec(opts, 'ok', startedAt, parsed.text, parsed.usage);
+    emitJudgeExec(opts, 'ok', startedAt, parsed.text, parsed.usage, undefined, String(out));
     return parsed.text;
   } catch (e) {
     reportOutage(
@@ -470,20 +477,15 @@ export function execJudgeAsync(opts: ExecJudgeOpts): Promise<string | null> {
             resolve(null);
             return;
           }
-          const parsed = readJudgeOutput(String(stdout), cli);
+          const raw = String(stdout);
+          const parsed = readJudgeOutput(raw, cli);
           if ('failure' in parsed) {
             // See the sync twin: a stream-reported failed turn is classified, not assumed.
-            reportOutage(
-              opts,
-              { providerFailure: parsed.failure },
-              cli.bin,
-              startedAt,
-              parsed.usage,
-            );
+            reportOutage(opts, parsed.failure, cli.bin, startedAt, parsed.usage);
             resolve(null);
             return;
           }
-          emitJudgeExec(opts, 'ok', startedAt, parsed.text, parsed.usage);
+          emitJudgeExec(opts, 'ok', startedAt, parsed.text, parsed.usage, undefined, raw);
           resolve(parsed.text);
         },
       );

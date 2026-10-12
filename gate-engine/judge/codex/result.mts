@@ -22,9 +22,14 @@ import { type JudgeUsage, withResultArgs } from '../claude-result.mts';
 // — a judge that works must never start failing because its accounting could not be read. The
 // shape is pinned by a fixture captured VERBATIM from a real codex-cli 0.149 run (see the tests).
 
-interface CodexEventItem {
+export interface CodexEventItem {
+  id?: string;
   type?: string;
   text?: string;
+  command?: string;
+  aggregated_output?: string;
+  exit_code?: number | null;
+  status?: string;
 }
 
 interface CodexUsagePayload {
@@ -49,7 +54,7 @@ interface CodexEvent {
 
 /** Parse the JSONL stream ONCE at the I/O boundary; the verdict/usage/failure readers below all
  * branch on these domain events rather than re-scanning raw lines. */
-function codexEventsOf(raw: string): CodexEvent[] {
+export function codexEventsOf(raw: string): CodexEvent[] {
   const events: CodexEvent[] = [];
   for (const line of raw.split('\n')) {
     const trimmed = line.trim();
