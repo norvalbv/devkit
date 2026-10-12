@@ -1031,6 +1031,18 @@ describe('reship --base — replace a conflicted PR from a caller-prepared snaps
     expect(addLine).not.toMatch(/devkit ship.*--base/);
     expect(r.stderr).toContain('to REWRITE the PR as one commit');
     expect(r.stderr).not.toContain('GATE_RAN');
+    // The remedy must survive a shell round-trip and select append mode, not just read well.
+    const argv = spawnSync(
+      '/bin/bash',
+      ['-c', 'eval "set -- $1"; printf "%s\\0" "$@"', '_', addLine.split('devkit ship ')[1]],
+      { encoding: 'utf8' },
+    )
+      .stdout.split('\0')
+      .slice(0, -1);
+    expect(argv).toEqual(['feat/pr', 'incomplete rewrite', '--pr', '--', 'conflict.txt']);
+    expect(run(argv, dir, { ...env, SHIP_DRY_RUN: '1' }).stderr).not.toContain(
+      'rewrite brief omits',
+    );
   });
 
   it('requires both halves of an old-PR rename', () => {
