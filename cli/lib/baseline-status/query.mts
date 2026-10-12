@@ -141,7 +141,7 @@ export function loadSummary({
   artifact,
 }: {
   cwd: string;
-  run: RunRef;
+  run: Pick<RunRef, 'databaseId' | 'attempt'>;
   artifact: string;
 }): TestReportSummary {
   const cacheFile = join(cwd, CACHE_DIR, cacheName(run.databaseId, run.attempt, artifact));

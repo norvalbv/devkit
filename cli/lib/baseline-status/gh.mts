@@ -137,7 +137,7 @@ function classify(e: ExecFailure): GhUnavailable {
 /** One gh call's budget; the walk makes one per commit, so a hung call must not stall the query. */
 export const GH_TIMEOUT_MS = 60_000;
 
-function gh(args: string[], cwd: string): string {
+export function gh(args: string[], cwd: string): string {
   const debug = process.env.DEVKIT_BASELINE_DEBUG; // surface gh's stderr instead of collapsing it
   try {
     return execFileSync('gh', args, {
@@ -384,6 +384,9 @@ export interface CommitCi {
   detail: string;
   /** The deciding run's page; absent when there is no run to name. */
   url?: string;
+  /** The deciding run and its failed `job › step` list, present on green and red. */
+  run?: RunRef;
+  failing?: string[];
 }
 
 /** `gh run view --json url,jobs`, every field optional so a malformed answer is rejected, not read. */
@@ -393,7 +396,7 @@ interface RunViewCandidate {
 }
 
 /** A run's page and each failed `job › step`; a job that failed outside any step is named alone. */
-function runView(cwd: string, runId: number) {
+export function runView(cwd: string, runId: number) {
   const out = gh(['run', 'view', String(runId), '--json', 'url,jobs'], cwd);
   let view: RunViewCandidate | null;
   try {
@@ -440,9 +443,10 @@ export function commitCi(opts: {
     if (run.status !== 'completed') {
       return { verdict: 'pending', detail: `run ${run.databaseId} is ${run.status}`, url };
     }
-    if (run.conclusion === 'success') return { verdict: 'green', detail: '', url };
+    if (run.conclusion === 'success') return { verdict: 'green', detail: '', url, run, failing };
     if (run.conclusion === 'failure') {
-      return { verdict: 'red', detail: failing.join(', ') || 'no failed job named', url };
+      const detail = failing.join(', ') || 'no failed job named';
+      return { verdict: 'red', detail, url, run, failing };
     }
     const detail = `no-usable-run: run ${run.databaseId} concluded ${run.conclusion}`;
     return { verdict: 'missing', detail, url };

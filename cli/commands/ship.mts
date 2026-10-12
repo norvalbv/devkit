@@ -141,6 +141,12 @@ Usage:
                       cancelled|no-checks|timed-out|unavailable> pr=<n> …\`. Progress prints only when
                       the tally changes, plus a liveness line each minute. Polls ALL checks by
                       default — see --wait-ci-required.
+                      On failed, the line also says which failures the base already had:
+                      \`attribution=<inherited-only|new|unknown> inherited=<n> new=<m> new-failing=…
+                      new-steps=… base-run=<id> base-ci=<red|green>\`, from the per-file test
+                      summaries of the PR run and of the run on the commit CI merged it onto. "new"
+                      means not failing on that base run, so a flake reads as new; unknown names a
+                      reason= or counts unsure= files whose test names cannot settle it.
                       The verdict NEVER reaches the exit code: a red PR is not a failed ship, and an
                       agent reading non-zero would retry --resume against a record the push deleted.
                       Grep the line, or read the ship_ci telemetry row. Valid for a new ship and for
