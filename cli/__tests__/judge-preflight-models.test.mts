@@ -127,6 +127,33 @@ describe('judgeReachability — model availability', () => {
     const statuses = await reach({ ...HEALTHY, planType: 'free' }, SOL_ON_CORRECTNESS);
     expect(statuses.every((s) => s.state === 'ok')).toBe(true);
   });
+
+  it('outranks a usage lock: waiting out the window would still leave the model refused', async () => {
+    const locked: CodexRateLimits = {
+      reached: true,
+      onCredits: false,
+      planType: 'free',
+      ...fetched,
+    };
+    const statuses = await reach(locked, SOL_ON_CORRECTNESS);
+    expect(statuses.map((s) => s.state)).toEqual(['rate-limited', 'rate-limited', 'unavailable']);
+  });
+
+  it('a malformed @effort spec costs only its own claim, never the whole report', async () => {
+    const review = { ...SOL_ON_CORRECTNESS, correctnessModel: 'gpt-5.6-sol@bogus' };
+    const statuses = await reach({ ...HEALTHY, planType: 'free', ...fetched }, review);
+    expect(statuses.map((s) => s.state)).toEqual(['ok', 'ok', 'ok']);
+  });
+
+  it('groups every role refused on one model into a single remedy line', async () => {
+    const review = { ...SOL_ON_CORRECTNESS, escalationModel: 'gpt-5.6-sol' };
+    const out = renderPreflight(await reach({ ...HEALTHY, planType: 'free', ...fetched }, review));
+    expect(out.filter((l) => l.includes('This plan does not serve'))).toEqual([
+      expect.stringContaining(
+        'Move escalation via GUARD_REVIEW_ESCALATION_MODEL; correctness via GUARD_CORRECTNESS_MODEL',
+      ),
+    ]);
+  });
 });
 
 describe('readCodexRateLimits — the model/list leg of the spawn', () => {
@@ -150,6 +177,17 @@ describe('readCodexRateLimits — the model/list leg of the spawn', () => {
     expect(snap).toMatchObject({
       planType: 'free',
       models: ['gpt-6-luna', 'gpt-reserve', 'gpt-5.6-terra'],
+    });
+  });
+
+  it('resolves whichever reply arrives first: both RPCs hit the network', async () => {
+    const snap = await withFake(
+      [`echo '${listReply(FREE_PLAN_DATA)}'`, LIMITS, 'sleep 30'].join('\n'),
+      10_000,
+    );
+    expect(snap).toMatchObject({
+      planType: 'free',
+      visibleModels: ['gpt-6-luna', 'gpt-5.6-terra'],
     });
   });
 

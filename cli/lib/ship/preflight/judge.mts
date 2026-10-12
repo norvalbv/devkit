@@ -61,7 +61,12 @@ const ROLE_ENV = {
  *  without it codex may serve its bundled catalog, which can omit a model the account has. */
 function servedNowhere(model: string, limits: CodexLimits): boolean {
   if (limits?.planType === undefined || limits.models === undefined) return false;
-  return !limits.models.includes(parseModelSpec(model).model);
+  try {
+    return !limits.models.includes(parseModelSpec(model).model);
+  } catch {
+    // A malformed spec fails at its own spawn; it must not take the whole report down with it.
+    return false;
+  }
 }
 
 /** Which judge-spawning guards are selected? A repo that runs no judges must be byte-identical to
@@ -118,12 +123,13 @@ export async function judgeReachability(
     if (isCodexModel(model)) {
       if (!codexPresent) status.state = 'absent';
       else if (codexDark) status.state = 'unauthenticated';
-      else if (codexLimits?.reached) status.state = 'rate-limited';
+      // A refusal outranks a lock: the window resets, the plan's model list does not.
       else if (servedNowhere(model, codexLimits)) {
         status.state = 'unavailable';
         status.planType = codexLimits?.planType;
         status.served = codexLimits?.visibleModels;
-      } else if (codexLimits) {
+      } else if (codexLimits?.reached) status.state = 'rate-limited';
+      else if (codexLimits) {
         status.state = 'ok';
         if (codexLimits.onCredits) status.onCredits = true;
       }
