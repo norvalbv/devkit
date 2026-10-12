@@ -4,6 +4,12 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { resolveGuardConfig } from '../../gate-engine/config.mts';
 import {
+  claudeFamilyEnvLine,
+  claudeFamilyKeyLine,
+  FAMILY_ENV_KEYS,
+} from '../../gate-engine/judge/outage/family-override.mts';
+import { resolveChunkCap } from '../../gate-engine/review/lens/chunk-tasks.mts';
+import {
   bindClaudeFamily,
   binResolvable,
   CLAUDE_FAMILY_SET,
@@ -193,6 +199,20 @@ describe('bindClaudeFamily', () => {
       correctnessModel: example.review.correctnessModel,
       correctnessChunkLoc: example.review.correctnessChunkLoc,
     });
+  });
+
+  it('the remedy env line and key line carry the claude set on all four keys', () => {
+    const exported = claudeFamilyEnvLine()
+      .split(';')[0]
+      .replace(/^export /, '');
+    const env = Object.fromEntries(exported.split(' ').map((kv) => kv.split('=')));
+    for (const { env: name, key } of FAMILY_ENV_KEYS) {
+      const value = CLAUDE_FAMILY_SET[key];
+      expect(claudeFamilyKeyLine()).toContain(`review.${key}=${value}`);
+      if (key === 'correctnessChunkLoc')
+        expect(resolveChunkCap(env[name], 400)).toBe(resolveChunkCap(undefined, value));
+      else expect(env[name]).toBe(value);
+    }
   });
 });
 
