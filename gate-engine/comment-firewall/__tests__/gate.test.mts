@@ -1,4 +1,8 @@
+import { existsSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { GATE_REASON_ENV, readGateReason } from '../../deterministic/reason.mts';
 import { runCommentCli } from '../cli.mts';
 import { runCommentFirewall } from '../gate.mts';
 import { emptyInventory } from '../inventory.mts';
@@ -253,6 +257,44 @@ describe('runCommentFirewall', () => {
     expect(emit).toHaveBeenCalledTimes(1);
     expect(emit.mock.calls[0]?.[0]).toBe(status);
     expect(emit.mock.calls[0]?.[2]).toHaveLength(findingCount);
+  });
+});
+
+describe('runCommentFirewall — reason for the aggregated verdict', () => {
+  function reasonFile(): string {
+    const file = join(mkdtempSync(join(tmpdir(), 'comment-reason-')), 'reason.txt');
+    vi.stubEnv(GATE_REASON_ENV, file);
+    return file;
+  }
+
+  it('records the header first, then each location and rule, without the comment body', () => {
+    capture();
+    const file = reasonFile();
+    const detect = () => detection([finding], [ref]);
+    expect(runCommentFirewall('/repo', { ...fresh(), detect })).toBe(1);
+    expect(readGateReason(file)).toEqual([
+      'guard-comments: 2 added/modified comment paragraphs need a decision.',
+      'src/a.ts:2-4 [a1b2c3d4e5f6] — 3+-line comment paragraph: shorten it, or retry unchanged (blocks once)',
+      'src/c.ts:7 cites sc-3836 — state the fact or drop the reference',
+    ]);
+  });
+
+  it('records why an unsupported language exits 4', () => {
+    capture();
+    const file = reasonFile();
+    const detect = () => ({ ...detection(), unsupported: [{ extension: 'py', path: 'src/a.py' }] });
+    expect(runCommentFirewall('/repo', { ...fresh(), detect })).toBe(4);
+    expect(readGateReason(file)).toEqual([
+      'guard-comments: configured staged source uses unsupported comment syntax:',
+      '  • .py — src/a.py',
+    ]);
+  });
+
+  it('records nothing on a pass', () => {
+    capture();
+    const file = reasonFile();
+    expect(runCommentFirewall('/repo', { ...fresh(), detect: () => detection([]) })).toBe(0);
+    expect(existsSync(file)).toBe(false);
   });
 });
 
