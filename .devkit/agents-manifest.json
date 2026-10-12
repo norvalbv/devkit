@@ -1,65 +1,65 @@
 {
   "schemaVersion": 2,
   "kind": "agents",
-  "devkitRef": "v0.68.0",
-  "generatedAt": "2026-10-09T00:18:12.480Z",
+  "devkitRef": "v0.70.0",
+  "generatedAt": "2026-10-12T19:54:07.415Z",
   "files": {
     "api-security-reviewer.md": "bfa4ff0d792a03ec7845dc7c7daf586779bdc76f053551c6d05a2ee11b22a87e",
     "backend-performance-reviewer.md": "ff60c2338a9854fa63104a1b343e1d90f0feecf1126c84c66c5b86d4537c9ba0",
-    "commit-guard.md": "c3e9d6674b12ab122191c2b788f4b3d355ce5e97cb8ca7d27fc302bdae30484f",
+    "commit-guard.md": "1fc980915573d315977830e4f9ad689bbb207f7c6b4be75358d96168ff1e60a9",
     "conventions-reviewer.md": "8c77420d3538c245c2605f022670c16f41ce4b1075ce76b6add3c9696304321a",
     "correctness-reviewer.md": "8c96f896be0859f9089444ee6a41de7ff0d8cf1a5abeece4f819b4a173351d94",
     "feature-completeness-reviewer.md": "8cafdf41bdf2260e34ee8e2c1a1afbcb614743da3e06eb8760b9e799c729da7d",
-    "feature-critique.md": "eb641d6ff603c7fbd70f021eb07a65aa541b9496220a1dd02f3c98f0273258ec",
+    "feature-critique.md": "0e1ad8de2a38725c7acad0f186334036dd50d644d3bc0da7f59324f54cebd118",
     "frontend-accessibility-reviewer.md": "8ba6f4e030246aa403641b03f35dd27b7dcaf97977d60b2ae5e94fe334220682",
     "frontend-performance-reviewer.md": "44df4a1cbe58a46891dd4588f60494858d4774cb0fa508414b7bbcf84dd25f6a",
     "frontend-security-reviewer.md": "db11f0df4827f574068776f9630c26e8eb000e499e211cb7462e3f155bb4258f",
-    "prior-art.md": "830f437b449a40a89b07fe9d05eca208e972a11ee18fc133b8ba14e7226622a3"
+    "prior-art.md": "db782963bc4a7a544cf0389afcdb0a03b4141da441211e612b7d6ef889fe4a76"
   },
   "providers": {
     "claude": {
       "files": {
         "api-security-reviewer.md": "bfa4ff0d792a03ec7845dc7c7daf586779bdc76f053551c6d05a2ee11b22a87e",
         "backend-performance-reviewer.md": "ff60c2338a9854fa63104a1b343e1d90f0feecf1126c84c66c5b86d4537c9ba0",
-        "commit-guard.md": "c3e9d6674b12ab122191c2b788f4b3d355ce5e97cb8ca7d27fc302bdae30484f",
+        "commit-guard.md": "1fc980915573d315977830e4f9ad689bbb207f7c6b4be75358d96168ff1e60a9",
         "conventions-reviewer.md": "8c77420d3538c245c2605f022670c16f41ce4b1075ce76b6add3c9696304321a",
         "correctness-reviewer.md": "8c96f896be0859f9089444ee6a41de7ff0d8cf1a5abeece4f819b4a173351d94",
         "feature-completeness-reviewer.md": "8cafdf41bdf2260e34ee8e2c1a1afbcb614743da3e06eb8760b9e799c729da7d",
-        "feature-critique.md": "eb641d6ff603c7fbd70f021eb07a65aa541b9496220a1dd02f3c98f0273258ec",
+        "feature-critique.md": "0e1ad8de2a38725c7acad0f186334036dd50d644d3bc0da7f59324f54cebd118",
         "frontend-accessibility-reviewer.md": "8ba6f4e030246aa403641b03f35dd27b7dcaf97977d60b2ae5e94fe334220682",
         "frontend-performance-reviewer.md": "44df4a1cbe58a46891dd4588f60494858d4774cb0fa508414b7bbcf84dd25f6a",
         "frontend-security-reviewer.md": "db11f0df4827f574068776f9630c26e8eb000e499e211cb7462e3f155bb4258f",
-        "prior-art.md": "830f437b449a40a89b07fe9d05eca208e972a11ee18fc133b8ba14e7226622a3"
+        "prior-art.md": "db782963bc4a7a544cf0389afcdb0a03b4141da441211e612b7d6ef889fe4a76"
       }
     },
     "codex": {
       "files": {
         "api-security-reviewer.toml": "237ba77bc122df253c5f9dad42c153543e3f15f6c3f28a0ce472655c98f32feb",
         "backend-performance-reviewer.toml": "52f59131e99a46f67f11bc97521afdf4267e3e5933b9eaf2fc5b855337c241f2",
-        "commit-guard.toml": "7964f5268448c2417f32f264e2ceb340a9fad9dc82fd647009628e90604f9eb2",
+        "commit-guard.toml": "b5452cccf1b917eef2ab7c508ada23b3bcb4eaa21580eb684cbdbfd3914327ac",
         "conventions-reviewer.toml": "166f2c7649cb86fd270bda17d1da6bf505d00093811258988fc2a180443ac7f3",
         "correctness-reviewer.toml": "782aa14f9a4c67f1ed5453ebce60c21aae82819688b6923df3dff13c747bf8bc",
         "feature-completeness-reviewer.toml": "3a4bd48b5f34e6ffed7d5c2b4786343f5c8233a499a867bde164bfe11654f949",
-        "feature-critique.toml": "dbb89ffd46002ce85f9bc01004a9461986db999a4abeb88e4cb01f46c15a52e0",
+        "feature-critique.toml": "223f7bdaaf50cca9a1e6c94c0ed8971b0063cd0ddd3a118cc4c08f558183c98e",
         "frontend-accessibility-reviewer.toml": "d7d6c5b721ed450336548c9f2c29b977ceec7de7319bacb1a8098fcc0cf50529",
         "frontend-performance-reviewer.toml": "8eed5ef1b1485aed2c0de1ef51d0f966f32a93d19d53288a1c78a7587ae32d15",
         "frontend-security-reviewer.toml": "2956c05b7d0b226aa7d1f67cc076c350302a39d0e85f77776d75d2695c92677d",
-        "prior-art.toml": "edbaf83ae926cbccb68029cf0fa8d1b5d78aefdaf4ee46cd06dad14088be527c"
+        "prior-art.toml": "cce9aecaad6d0f3bb11626733065ad9980fd8f543aad019b5d45693509d78f73"
       }
     },
     "cursor": {
       "files": {
         "api-security-reviewer.md": "bfa4ff0d792a03ec7845dc7c7daf586779bdc76f053551c6d05a2ee11b22a87e",
         "backend-performance-reviewer.md": "ff60c2338a9854fa63104a1b343e1d90f0feecf1126c84c66c5b86d4537c9ba0",
-        "commit-guard.md": "c3e9d6674b12ab122191c2b788f4b3d355ce5e97cb8ca7d27fc302bdae30484f",
+        "commit-guard.md": "1fc980915573d315977830e4f9ad689bbb207f7c6b4be75358d96168ff1e60a9",
         "conventions-reviewer.md": "8c77420d3538c245c2605f022670c16f41ce4b1075ce76b6add3c9696304321a",
         "correctness-reviewer.md": "8c96f896be0859f9089444ee6a41de7ff0d8cf1a5abeece4f819b4a173351d94",
         "feature-completeness-reviewer.md": "8cafdf41bdf2260e34ee8e2c1a1afbcb614743da3e06eb8760b9e799c729da7d",
-        "feature-critique.md": "eb641d6ff603c7fbd70f021eb07a65aa541b9496220a1dd02f3c98f0273258ec",
+        "feature-critique.md": "0e1ad8de2a38725c7acad0f186334036dd50d644d3bc0da7f59324f54cebd118",
         "frontend-accessibility-reviewer.md": "8ba6f4e030246aa403641b03f35dd27b7dcaf97977d60b2ae5e94fe334220682",
         "frontend-performance-reviewer.md": "44df4a1cbe58a46891dd4588f60494858d4774cb0fa508414b7bbcf84dd25f6a",
         "frontend-security-reviewer.md": "db11f0df4827f574068776f9630c26e8eb000e499e211cb7462e3f155bb4258f",
-        "prior-art.md": "830f437b449a40a89b07fe9d05eca208e972a11ee18fc133b8ba14e7226622a3"
+        "prior-art.md": "db782963bc4a7a544cf0389afcdb0a03b4141da441211e612b7d6ef889fe4a76"
       }
     }
   }

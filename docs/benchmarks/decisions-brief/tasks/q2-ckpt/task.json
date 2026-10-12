@@ -1,0 +1,8 @@
+{
+ "id": "q2-ckpt",
+ "slug": "bench-runs-resume-from-checkpoint",
+ "file": "gate-engine/bench/checkpoint.mjs",
+ "prompt": "Implement loadCheckpoint in gate-engine/bench/checkpoint.mjs so that re-running a bench reuses the rows already recorded in the progress file. Keep the change small and do not add new files.",
+ "bindingOffset": 560,
+ "bindingText": "The reader drops torn trailing lines"
+}

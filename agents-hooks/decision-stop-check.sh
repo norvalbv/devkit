@@ -117,7 +117,7 @@ PAIRS=$(printf '%s\n' "$PAIRS" | awk -F'\t' 'NR==FNR { if ($0 != "") e[$0] = 1; 
 # so a consumer that RELOCATED it isn't nagged while editing its real record. Pure-bash extract (no
 # node: type:module vs commonjs across consumers would break a `require`).
 DECISIONS_DIR="${DECISIONS_DIR:-$(grep -oE '"decisionsDir"[[:space:]]*:[[:space:]]*"[^"]*"' guard.config.json 2>/dev/null | head -1 | sed -E 's/.*"([^"]+)"$/\1/')}"
-git status --porcelain -- "${DECISIONS_DIR:-docs/decisions}/" 2>/dev/null | grep -q . && exit 0
+git status --porcelain -- ":(literal)${DECISIONS_DIR:-docs/decisions}/" 2>/dev/null | grep -q . && exit 0
 
 # Which smelled pairs are NEW this session? (grep -vxF against the seen-set; missing file → all new.)
 mkdir -p "$SNOOZE_DIR"

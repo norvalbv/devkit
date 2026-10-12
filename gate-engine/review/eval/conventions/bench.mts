@@ -10,8 +10,8 @@
  * labelled corpus so an edit is a delta, not a vibe. The bench calls `runCascade()` — the SAME
  * function `runReviewGate` calls per selected reviewer — with a spy `exec` that delegates to the
  * real judge runner: prompt construction (`wrapConventionsPrompt`), the governing-CLAUDE.md render
- * (`renderGoverningClaudeMd`), the capped diff evidence (`buildCappedDiffEvidence`), the pinned
- * haiku model, and the isolation flags all run INSIDE the gate; the spy only observes the
+ * (`renderGoverningClaudeMd`), the capped diff evidence (`buildCappedDiffEvidence`), the resolved
+ * judge model, and the isolation flags all run INSIDE the gate; the spy only observes the
  * transcript. Bench and gate cannot drift.
  *
  * Unlike reviewer-eval (../reviewers/bench.mts), conventions-reviewer is SKILL-LESS — no checklist
@@ -36,11 +36,8 @@
  *   node bench.mts coverage        # 0 LLM calls: corpus coverage matrix
  *   node bench.mts matcher-audit   # matcher agreement vs committed hand-labels (percent + Cohen's κ)
  *
- * Sweeps: BENCH_MATCH_MODEL=haiku|sonnet (matcher; default haiku) · BENCH_MATCH_RUNS=1|3 (matcher
- * votes; default 3). The REVIEWER has NO model sweep — unlike completeness (whose gate hardcodes
- * opus by a BENCH-independent user ruling) this reviewer's single-pass haiku, no-cascade execution
- * is a TICKET MANDATE (reviewers.mts Reviewer.model docstring: "per the ticket's own haiku
- * mandate"), not a choice this bench measured its way into — so there is nothing to sweep FROM.
+ * Matcher: BENCH_MATCH_MODEL, BENCH_MATCH_RUNS. Reviewer model: env > guard.config.json > default, as
+ * in the gate. `--strict` adds ship's contract retry; baselines record both, never compared across.
  *
  * Headline metrics — one per failure mode:
  *   gap recall        H/G  — a missed rule violation is what the reviewer exists to prevent → HARD FLOOR
@@ -69,16 +66,8 @@
  * rows · 2 = could not run.
  */
 
-import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import {
-  appendFileSync,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  realpathSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { resolveGuardConfig } from '../../../config.mts';
@@ -91,8 +80,14 @@ import {
   wilson,
 } from '../../../decisions/eval/bench.mts';
 import { execJudgeAsync } from '../../../judge/run-judge.mts';
-import { parseReviewVerdict, REVIEWERS, selectReviewers } from '../../reviewers.mts';
+import {
+  parseReviewVerdict,
+  resolveReviewModel,
+  REVIEWERS,
+  selectReviewers,
+} from '../../reviewers.mts';
 import { runCascade } from '../../run-review.mts';
+import { appendLedger, preflightJudge } from '../../../decisions/eval/bench-runtime.mts';
 import { parseConventionFindings } from '../../evidence/conventions.mts';
 import { CONVENTIONS_GATE_HASH_INPUTS, CONVENTIONS_MATCHER_HASH_INPUTS } from './hash-inputs.mts';
 import {
@@ -330,18 +325,23 @@ export async function runCase(
     matchModel = MATCH_MODEL,
     matchRuns = MATCH_RUNS,
     saveTranscript = true,
+    judgeModel,
+    strict = false,
   }: {
     reviewerExec?: typeof execJudgeAsync;
     matcherExec?: typeof execJudgeAsync;
     matchModel?: string;
     matchRuns?: number;
     saveTranscript?: boolean;
+    judgeModel?: string;
+    strict?: boolean;
   } = {},
 ): Promise<CaseResult> {
   const fx = materializeConventionsFixture(row);
   activeCleanup = fx.cleanup;
   try {
     const cfg = resolveGuardConfig(fx.repo);
+    if (judgeModel) cfg.review = { ...cfg.review, model: judgeModel };
     const sel = selectReviewers(fx.staged, cfg).find((s) => s.reviewer.name === REVIEWER.name);
     if (!sel)
       throw new BenchAbort(
@@ -351,7 +351,8 @@ export async function runCase(
       );
     const capture: SpyCapture = { called: false, args: null, raw: null };
     // The injectable exec is the seam runCascade's own tests use; everything else is the gate.
-    const cas = await runCascade(sel, { cwd: fx.repo, cfg, exec: spyExec(capture, reviewerExec) });
+    const exec = spyExec(capture, reviewerExec);
+    const cas = await runCascade(sel, { cwd: fx.repo, cfg, exec, retryFirst: strict });
     if (!capture.called)
       throw new BenchAbort(
         2,
@@ -421,6 +422,8 @@ let activeCleanup: (() => void) | null = null;
 export interface BenchSummary {
   matchModel: string;
   matchRuns: number;
+  judgeModel?: string;
+  strict?: boolean;
   cases: number;
   caseOutages: number;
   slotOutages: number;
@@ -493,6 +496,20 @@ export function summarize(
 
 // ─── Baseline comparison — floors + case-level flip gate ──────────────────────────
 
+/** Why `base` cannot be compared with `cur` (run config, gate/matcher/corpus hash), or null. */
+export function baselineMismatch(cur: Partial<BenchSummary>, base?: BenchSummary): string | null {
+  if (!base) return 'no baseline';
+  for (const k of ['matchModel', 'matchRuns', 'judgeModel', 'strict'] as const)
+    if (cur[k] !== base[k]) return `baseline config differs (${k})`;
+  if (base.gateHash && cur.gateHash && base.gateHash !== cur.gateHash)
+    return 'gate code / agent brief changed since the baseline';
+  if (base.matcherHash && cur.matcherHash && base.matcherHash !== cur.matcherHash)
+    return 'matcher changed since the baseline';
+  if (base.corpusHash && cur.corpusHash && base.corpusHash !== cur.corpusHash)
+    return 'corpus changed since the baseline';
+  return null;
+}
+
 /**
  * Statistically honest at small n, decisions-eval/completeness-eval order of evaluation:
  * (1) comparability preconditions (config, gateHash, matcherHash, corpusHash, outages) skip rather
@@ -505,14 +522,8 @@ export function compareConventions(summary: BenchSummary, base: BenchSummary | u
     regressed: false,
     lines: [`  ${why} — regenerate with --baseline; comparison skipped`],
   });
-  for (const k of ['matchModel', 'matchRuns'] as const)
-    if (summary[k] !== base[k]) return skip(`baseline config differs (${k})`);
-  if (base.gateHash && summary.gateHash && base.gateHash !== summary.gateHash)
-    return skip('gate code / agent brief changed since the baseline');
-  if (base.matcherHash && summary.matcherHash && base.matcherHash !== summary.matcherHash)
-    return skip('matcher changed since the baseline');
-  if (base.corpusHash && summary.corpusHash && base.corpusHash !== summary.corpusHash)
-    return skip('corpus changed since the baseline');
+  const mismatch = baselineMismatch(summary, base);
+  if (mismatch) return skip(mismatch);
   if (summary.outages > 0) return skip(`${summary.outages} outage(s) this run — score is suspect`);
 
   const lines: string[] = [];
@@ -707,17 +718,8 @@ export function matcherAudit(
 
 // ─── Cost estimate + ledger ─────────────────────────────────────────────────────────
 
-function preflightClaude() {
-  try {
-    execFileSync('claude', ['--version'], { encoding: 'utf8', timeout: 30000 });
-  } catch {
-    throw new BenchAbort(2, 'conventions-eval: `claude` CLI not available — cannot benchmark');
-  }
-}
-
-/** Budget from per-row costs, printed BEFORE any token is spent. Reviewer rows are cheap relative
- * to completeness's (single-pass haiku, no cascade, no checklist workflow — just one judge call
- * against pre-rendered evidence) — 20–90s vs completeness's 60–360s. */
+/** Budget from per-row costs, printed BEFORE any token is spent. A reviewer row is one single-pass
+ * judge call on pre-rendered evidence (20–90s), plus one contract retry under --strict. */
 function printEstimate(rows: ConventionsCase[], matchRuns: number) {
   const slots = rows.reduce((n, r) => n + r.gold.length + r.decoys.length, 0);
   const revLo = rows.length * 20;
@@ -725,19 +727,23 @@ function printEstimate(rows: ConventionsCase[], matchRuns: number) {
   const matcher = Math.round((slots * matchRuns * 15) / MATCH_CONCURRENCY);
   console.log(
     `conventions-eval: budget ≈ ${Math.round((revLo + matcher) / 60)}–${Math.round((revHi + matcher) / 60)} min  ` +
-      `(${rows.length} reviewer rows × 20–90s (single-pass haiku, no cascade) · ${slots} slots × K=${matchRuns} matcher ÷ pool ${MATCH_CONCURRENCY})`,
+      `(${rows.length} reviewer rows × 20–90s (single-pass, no cascade) · ${slots} slots × K=${matchRuns} matcher ÷ pool ${MATCH_CONCURRENCY})`,
   );
 }
 
-function appendLedger(entry: object) {
-  try {
-    appendFileSync(path.join(here, 'runs.log'), `${JSON.stringify(entry)}\n`);
-  } catch {
-    // The ledger is telemetry; never let it break a run.
-  }
-}
-
 // ─── Orchestration ──────────────────────────────────────────────────────────────────
+
+/** Resolve the judge model as the gate does (env > guard.config.json > default), THEN strip env. */
+export function prepareBenchEnv(argv: string[], cwd = process.cwd()) {
+  const judgeModel = resolveReviewModel(resolveGuardConfig(cwd));
+  const stripped = cleanBenchEnv();
+  for (const k of ['GIT_CONFIG_GLOBAL', 'GIT_CONFIG_SYSTEM'])
+    if (process.env[k] !== undefined) {
+      delete process.env[k];
+      stripped.push(k);
+    }
+  return { caseOpts: { judgeModel, strict: argv.includes('--strict') }, stripped };
+}
 
 async function main(argv: string[]) {
   const args = new Set(argv);
@@ -757,12 +763,7 @@ async function main(argv: string[]) {
     activeCleanup?.();
     process.exit(130);
   });
-  const stripped = cleanBenchEnv();
-  for (const k of ['GIT_CONFIG_GLOBAL', 'GIT_CONFIG_SYSTEM'])
-    if (process.env[k] !== undefined) {
-      delete process.env[k];
-      stripped.push(k);
-    }
+  const { caseOpts, stripped } = prepareBenchEnv(argv);
   if (stripped.length)
     console.log(`conventions-eval: stripped env for a clean run: ${stripped.join(', ')}`);
 
@@ -811,7 +812,8 @@ async function main(argv: string[]) {
   if (only) rows = rows.filter((r) => r.id.startsWith(only));
   if (!rows.length) throw new BenchAbort(2, 'conventions-eval: no rows after filtering');
 
-  preflightClaude();
+  preflightJudge('conventions-eval', 'reviewer', caseOpts.judgeModel);
+  preflightJudge('conventions-eval', 'matcher', MATCH_MODEL);
   if (!existsSync(AGENT_MD))
     throw new BenchAbort(2, `conventions-eval: ${AGENT_MD} missing — nothing to measure`);
   printEstimate(rows, MATCH_RUNS);
@@ -821,18 +823,21 @@ async function main(argv: string[]) {
   const baseline: { conventions?: BenchSummary } = existsSync(baselinePath)
     ? JSON.parse(readFileSync(baselinePath, 'utf8'))
     : {};
-  const retryAgainst = baseline.conventions ?? null;
+  const corpusHash = sha12(JSON.stringify(rows));
+  const runConfig = { matchModel: MATCH_MODEL, matchRuns: MATCH_RUNS, ...caseOpts };
+  const runId = { ...runConfig, gateHash: gh, matcherHash: mh, corpusHash };
+  const retryAgainst = baselineMismatch(runId, baseline.conventions) ? null : baseline.conventions;
 
   const results: CaseResult[] = [];
   for (const row of rows) {
-    const res = await runCase(row);
+    const res = await runCase(row, caseOpts);
     // Alignment convention: a case whose outcome disagrees with the baseline re-runs ONCE.
     // 1-of-2 disagreement = instability (never a counted flip); 2-of-2 = a real flip.
     if (!res.outage && res.score && retryAgainst?.rows?.[row.id]) {
       const caseOk = res.score.slots.every((sl) => sl.outage || sl.ok);
       if (caseOk !== retryAgainst.rows[row.id].ok) {
         console.log(`  ${row.id.padEnd(46)} …disagrees with baseline — retrying once`);
-        const res2 = await runCase(row, { saveTranscript: false });
+        const res2 = await runCase(row, { ...caseOpts, saveTranscript: false });
         if (!res2.outage && res2.score) {
           const byId = new Map(res2.score.slots.map((sl) => [sl.slotId, sl]));
           for (const sl of res.score.slots) {
@@ -860,12 +865,10 @@ async function main(argv: string[]) {
     throw new BenchAbort(2, 'conventions-eval: every case was an outage');
 
   const s = summarize(rows, results);
-  s.gateHash = gh;
-  s.matcherHash = mh;
-  s.corpusHash = sha12(JSON.stringify(rows));
+  Object.assign(s, runId);
 
   console.log(
-    `\nconventions: ${results.length} case(s)  [matcher=${s.matchModel} K=${s.matchRuns} · reviewer=haiku single-pass, no cascade]`,
+    `\nconventions: ${results.length} case(s)  [matcher=${s.matchModel} K=${s.matchRuns} · reviewer=${s.judgeModel} single-pass, ${s.strict ? 'strict' : 'non-strict'}]`,
   );
   console.log(
     `  headline: gap recall ${fmtCi(s.gold.hit, s.gold.total)}  (floor ${FLOOR_GAP_RECALL})`,
@@ -896,14 +899,10 @@ async function main(argv: string[]) {
   const { regressed, lines } = compareConventions(s, baseline.conventions);
   if (existsSync(baselinePath)) for (const l of lines) console.log(l);
 
-  appendLedger({
+  appendLedger(here, {
     ts: new Date().toISOString(),
     args: [...args],
-    matchModel: s.matchModel,
-    matchRuns: s.matchRuns,
-    gateHash: gh,
-    matcherHash: mh,
-    corpusHash: s.corpusHash,
+    ...runId,
     cases: s.cases,
     gapRecall: Number(s.gapRecall.toFixed(3)),
     blockingAuthorityRecall: Number(s.blockingAuthorityRecall.toFixed(3)),

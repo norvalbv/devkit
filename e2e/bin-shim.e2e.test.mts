@@ -45,14 +45,14 @@ const CASES: Case[] = [
   { bin: 'guard-dup', args: [], expect: 'co-occurrence matcher' },
   { bin: 'guard-fanout', args: [], expect: 'usage: guard-fanout' },
   { bin: 'guard-prefix', args: [], expect: 'Usage: guard-prefix' },
-  { bin: 'guard-qavis-advisory', args: [], expect: 'Usage: guard-qavis-advisory' },
-  { bin: 'guard-review', args: [], expect: 'Usage: guard-review' },
+    { bin: 'guard-review', args: [], expect: 'Usage: guard-review' },
   { bin: 'guard-sentry', args: [], expect: 'sentry-judge' },
   { bin: 'guard-size', args: [], expect: 'usage: guard-size' },
   // Bare `guard-structure` defaults to `gate`. It used to be silent here — a fixture declares no
   // structure grammar, and the gate answered 0 with no output, which is indistinguishable from a
   // dead shim. It now names the opt-out, so the real verb is the stronger probe.
   { bin: 'guard-structure', args: [], expect: 'did NOT run' },
+  { bin: 'guard-ui-evidence', args: ['--help'], expect: 'Usage: guard-ui-evidence' },
 ];
 
 const created: Fixture[] = [];

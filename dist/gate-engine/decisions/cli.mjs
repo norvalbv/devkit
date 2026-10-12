@@ -15,6 +15,7 @@
  *   guard-decisions check-alignment --gate | scan     scope-matched alignment + depth gate (capture C)
  *   guard-decisions scoped-targets --files <a,b> [--query "<text>" --top K]   governing Targets → JSON
  *   guard-decisions categories                        per-category view (recall/category-report.mts)
+ *   guard-decisions enforce [link <slug> --check …]   Checks linked to Targets (ruling-checks/)
  *   guard-decisions integrity [--staged]              structural-integrity scan (integrity/scan.mts);
  *                                                     --staged judges only the records THIS commit
  *                                                     touches, against HEAD (integrity/staged-gate.mts)
@@ -36,8 +37,12 @@ var __rewriteRelativeImportExtension = (this && this.__rewriteRelativeImportExte
     }
     return path;
 };
+import { randomUUID } from 'node:crypto';
 import { readdirSync } from 'node:fs';
 import { resolveFromCwd, resolveGuardConfig } from '../config.mjs';
+import { emitGateEvent } from '../judge/gate-events.mjs';
+import { clip } from '../judge/odb-probe.mjs';
+import { markGateRun } from '../judge/run-context.mjs';
 /**
  * Sub-engines load dynamically so a missing parser is catchable, and only via STRING LITERALS so the
  * dist rewrite and dist-integrity both see them. Why: decision-retrieval-candidate-set (sc-2692).
@@ -49,9 +54,27 @@ const SUB_ENGINES = {
     detect: new URL(`./detect${SELF_EXT}`, import.meta.url),
     'check-alignment': new URL(`./check-alignment${SELF_EXT}`, import.meta.url),
     'scoped-targets': new URL(`./scoped-targets${SELF_EXT}`, import.meta.url),
+    enforce: new URL(`./ruling-checks/enforce${SELF_EXT}`, import.meta.url),
 };
+/** An agent's reads of the log. Each is its own agent run, so no `git write-tree` and no commit row. */
+const AGENT_READS = new Set(['show', 'query', 'scoped-targets']);
+function flagValue(args, name) {
+    const i = args.indexOf(name);
+    return i === -1 ? undefined : args[i + 1];
+}
+/** Only show and query are logged: an older synced hook's scoped-targets calls write nothing. */
+function emitDecisionRead(cmd, rest) {
+    if (cmd === 'show')
+        emitGateEvent({ type: 'decision_read', command: 'show', slugs: [rest[0]] });
+    if (cmd !== 'query')
+        return;
+    const top = Number.parseInt(flagValue(rest, '--top') ?? '', 10);
+    emitGateEvent({ type: 'decision_read', command: 'query', top: top > 0 ? top : 5 });
+}
 async function run(argv) {
     const [cmd, ...rest] = argv;
+    if (AGENT_READS.has(cmd))
+        process.env.DEVKIT_AGENT_RUN_ID ||= `decisions-${randomUUID()}`;
     if (cmd === 'categories') {
         // recall/category-report.mts's import closure never reaches markdown.mts, so this command works
         // on a tree with no mdast installed. It only ever failed because of the static link above.
@@ -71,11 +94,15 @@ async function run(argv) {
     }
     const sub = SUB_ENGINES[cmd];
     if (sub) {
+        // The hook runs only `detect --gate`; check-alignment is an on-demand run and stays unmarked.
+        if (cmd === 'detect' && rest[0] === '--gate')
+            markGateRun();
         await (await import(__rewriteRelativeImportExtension(sub.href))).main(rest);
         return;
     }
     const { main: decisionsMain } = await import('./decisions.mjs');
     await decisionsMain(argv);
+    emitDecisionRead(cmd, rest);
 }
 /** The one string a caller can grep for to tell an outage from an answer. */
 const UNAVAILABLE_MARKER = 'decision engine UNAVAILABLE';
@@ -156,6 +183,10 @@ run(argv).catch((error) => {
     const dependency = error instanceof Error ? missingModule(error) : null;
     if (dependency) {
         reportUnavailable(dependency, argv[0]);
+        if (argv.includes('--brief')) {
+            const file = clip(flagValue(argv, '--files') ?? '');
+            emitGateEvent({ type: 'brief_unavailable', file, reason: 'unloadable', dependency });
+        }
         // --json gets the envelope; every other invocation leaves stdout EMPTY, because a `[]` here is
         // exactly how an outage gets read as "nothing governs".
         if (argv[0] === 'query' && argv.includes('--json')) {

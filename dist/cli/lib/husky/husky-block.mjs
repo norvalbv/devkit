@@ -33,16 +33,12 @@ __dk_gate_deterministic "$__dk_package_bin_dir/guard-deterministic" --hook "\${D
 // a doomed commit never pays for a judge. Explicit lists — never rely on object-key order.
 const DETERMINISTIC_GUARD_IDS = ['size', 'fanout', 'dup', 'clone', 'coverage', 'comments'];
 const AI_GUARD_IDS = ['decisions', 'review'];
-// qavis-advisory runs after every judge that can demand an edit (sc-3012), own 0/3 exit contract.
-// This wrapper stays fail-open when qavis/the bin is absent, matching the fallow precedent.
-export const QAVIS_ADVISORY_ID = 'qavis-advisory';
-const QAVIS_FRAGMENT = `# devkit:guard-qavis-advisory
-qarc=0
-__dk_no_git_env "$__dk_package_bin_dir/guard-qavis-advisory" --gate || qarc=$?
-[ "$qarc" -eq 3 ] && exit 1
-# qarc 0 = continue (SILENT / advisory-only / receipt-cleared / qavis absent); 3 = strict-ship block
-# (the remedy — run qavis, or export GUARD_QAVIS_OK=1 — is printed by the bin).
-# /devkit:guard-qavis-advisory`;
+// ui-evidence runs last: a reminder about the final staged set, which never blocks. It speaks on a
+// plain commit and a ship alike, and `|| true` keeps a missing bin fail-open.
+export const UI_EVIDENCE_ID = 'ui-evidence';
+const UI_EVIDENCE_FRAGMENT = `# devkit:guard-ui-evidence
+__dk_no_git_env "$__dk_package_bin_dir/guard-ui-evidence" || true
+# /devkit:guard-ui-evidence`;
 // Inject user bins before gates when a GUI client's minimal PATH omits bun/bunx.
 export const PATH_SETUP = `# GUI git clients launch with a minimal PATH that omits user bin dirs, so \`bun\`/\`bunx\`
 # can go missing → the hook fails. Prepend the standard user install locations.
@@ -76,7 +72,8 @@ ${PATH_SETUP}
 function wantsDeterministic(selection) {
     if (selection.antiSlop || selection.structureCmd)
         return true;
-    return DETERMINISTIC_GUARD_IDS.some((id) => selection.guards?.includes(id));
+    // decisions arms the orchestrator's decision-checks gate, which runs Checks linked to Targets.
+    return [...DETERMINISTIC_GUARD_IDS, 'decisions'].some((id) => selection.guards?.includes(id));
 }
 /** The ONE gate body for every install mode: format (the prefix-cache key hashes the post-format
  *  index) → deterministic → preAi → AI guards → postGuards. */
@@ -104,8 +101,8 @@ export function buildGuardBlock(selection, pkgRel = '', { binDir = 'package', pr
     }
     if (selection.guards?.includes('sentry'))
         pieces.push(selectedFragment('sentry', sentryShipPrewarmFragment(binDir)));
-    if (selection.guards?.includes(QAVIS_ADVISORY_ID))
-        pieces.push(selectedFragment(QAVIS_ADVISORY_ID, QAVIS_FRAGMENT));
+    if (selection.guards?.includes(UI_EVIDENCE_ID))
+        pieces.push(selectedFragment(UI_EVIDENCE_ID, UI_EVIDENCE_FRAGMENT));
     if (postGuards)
         pieces.push(postGuards);
     pieces.push(REVIEW_FAILURE_FINALIZER);

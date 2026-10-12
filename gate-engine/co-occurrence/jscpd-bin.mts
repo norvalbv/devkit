@@ -25,7 +25,7 @@ export const JSCPD_PATH_TERMINAL = 'jscpd';
  *   JSCPD_BIN env (verbatim — used even if it doesn't exist, so a test can force the fail-open path)
  *   → devkit-own / hoist / consumer `.bin/jscpd`
  *   → bare `'jscpd'` (execFileSync PATH-resolves a GLOBAL install via execvp — house idiom, cf. the
- *     git/gh/qavis/claude spawns; a truly-missing binary throws ENOENT → the caller fails OPEN).
+ *     git/gh/claude spawns; a truly-missing binary throws ENOENT → the caller fails OPEN).
  * `'jscpd'` is the `??` terminal, never a `.find` candidate — `exists('jscpd')` is cwd-relative and
  * would misfire on a stray file. `exists` is injectable so the order can be unit-tested without fs.
  */

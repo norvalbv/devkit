@@ -8,6 +8,7 @@ import {
   workflowSelector,
 } from '../../lib/baseline-status/query.mts';
 import { type BaselineSource, configuredSource } from '../../lib/baseline-status/source.mts';
+import type { TestStatus } from '../../lib/baseline-status/test-verdict.mts';
 
 export const meta = {
   name: 'baseline-status',
@@ -16,10 +17,12 @@ export const meta = {
   help: `devkit baseline-status — decompose a red default branch into per-file facts.
 
 Usage:
-  devkit baseline-status [--file <path>] [--json] [--ref <branch>] [--max-runs <n>]
-                         [--workflow <file>]
+  devkit baseline-status [--file <path> [--test <name>]] [--json] [--ref <branch>]
+                         [--max-runs <n>] [--workflow <file>]
 
   --file <path>      answer for one test file, plus the last run in which it passed
+  --test <name>      with --file: answer for one test, named as the console prints it
+                     (\`describe > test\`; a leading \`<file> > \` is stripped)
   --json             machine-readable output (the intended interface for agents)
   --ref <branch>     branch to read (default: the remote's HEAD, else main)
   --max-runs <n>     how many commits to walk back (default: ${DEFAULT_MAX_RUNS})
@@ -51,6 +54,12 @@ Exit 0 = the query ran, including "no run carries data yet". Exit 2 = it could n
 all (no gh, not authenticated, no GitHub remote, no such workflow on the default branch, no
 readable branch head or history). Exit 1 = a
 bad argument or an unreadable guard.config.json.
+
+A failed file also lists its failing tests. \`--test\` answers failed / passed only from the
+names a FAILED file recorded in that run; a passed file answers file-passed (test names are not
+recorded for passed files, and vitest reports a file passed even when some of its tests were
+skipped). Anything else is unknown with a reason, including a name that is in neither list. Unknown
+is never a pass.
 
 \`--file\` history begins at the first run carrying the artifact; before that it reports
 lastPassedReason "no-artifact-history" rather than implying the file never passed, and a gh
@@ -85,6 +94,13 @@ function flag(args: string[], name: string): string | undefined {
   if (!value || value.startsWith('--')) throw new UsageError(`${name} needs a value`);
   return value;
 }
+
+const TEST_LABEL = {
+  failed: 'FAILED in CI',
+  passed: 'PASSED in CI',
+  'file-passed': 'file PASSED in CI (test names not recorded)',
+  unknown: 'UNKNOWN',
+} satisfies Record<TestStatus, string>;
 
 function render(answer: BaselineAnswer): void {
   if (answer.reason) {
@@ -122,6 +138,12 @@ function render(answer: BaselineAnswer): void {
   console.log(
     `\n   ${file.path}: ${file.status.toUpperCase()}${file.reason ? ` — ${file.reason}` : ''}`,
   );
+  for (const name of file.failingTests ?? []) console.log(`     ✗ ${name}`);
+  if (file.failingTestsTruncated) console.log('     … (list capped)');
+  if (file.test)
+    console.log(
+      `   test "${file.test.name}": ${TEST_LABEL[file.test.status]}${file.test.reason ? ` — ${file.test.reason}` : ''}`,
+    );
   if (file.lastPassed) {
     console.log(
       `   last passed: ${file.lastPassed.sha.slice(0, 8)} (run ${file.lastPassed.runId})`,
@@ -135,8 +157,8 @@ function render(answer: BaselineAnswer): void {
 }
 
 /** Every option this command accepts, and which of them consume the argument after them. */
-const KNOWN_FLAGS = new Set(['--file', '--json', '--ref', '--max-runs', '--workflow']);
-const VALUED_FLAGS = new Set(['--file', '--ref', '--max-runs', '--workflow']);
+const KNOWN_FLAGS = new Set(['--file', '--test', '--json', '--ref', '--max-runs', '--workflow']);
+const VALUED_FLAGS = new Set(['--file', '--test', '--ref', '--max-runs', '--workflow']);
 
 /** Flag > guard.config.json > default. A corrupt config is a usage error, not a stack trace. */
 function source(args: string[], cwd: string): BaselineSource {
@@ -178,6 +200,9 @@ export default function baselineStatus(args: string[], cwd: string) {
   let answer: BaselineAnswer;
   try {
     assertOnlyKnownArgs(args);
+    const file = flag(args, '--file');
+    const test = flag(args, '--test');
+    if (test && !file) throw new UsageError('--test needs --file <path> (the file the test is in)');
     const maxRunsRaw = flag(args, '--max-runs');
     const maxRuns = maxRunsRaw ? Number(maxRunsRaw) : DEFAULT_MAX_RUNS;
     // Integer, not merely finite: `--limit 1.5` fails inside gh, so a bad ARGUMENT would surface as
@@ -188,7 +213,8 @@ export default function baselineStatus(args: string[], cwd: string) {
     answer = queryBaseline({
       cwd,
       ref: flag(args, '--ref'),
-      file: flag(args, '--file'),
+      file,
+      test,
       maxRuns,
       ...source(args, cwd),
     });

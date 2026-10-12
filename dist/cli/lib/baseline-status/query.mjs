@@ -16,6 +16,7 @@ import { detectGitRoot } from '../detect-git-root.mjs';
 import { GhUnavailable, downloadSummary, isUsableRun, parseSummary, assertProvenance, } from './gh.mjs';
 import { BranchWalk } from './history.mjs';
 import { escapesRoot } from './produce.mjs';
+import { failingTestsOf, testVerdict, } from './test-verdict.mjs';
 export const CACHE_DIR = '.devkit/baseline-status';
 export const DEFAULT_WORKFLOW = 'gate.yml';
 export const DEFAULT_ARTIFACT = 'test-report-summary';
@@ -216,7 +217,7 @@ function producerRemedy(workflow, artifact, branch) {
         `{ "baselineStatus": { "workflow": "<file>" } } in guard.config.json.`);
 }
 /** The whole query. Never throws for a knowable-unknown; the caller renders whatever comes back. */
-export function queryBaseline({ cwd = process.cwd(), ref, file, workflow = DEFAULT_WORKFLOW, artifact = DEFAULT_ARTIFACT, maxRuns = DEFAULT_MAX_RUNS, } = {}) {
+export function queryBaseline({ cwd = process.cwd(), ref, file, test, workflow = DEFAULT_WORKFLOW, artifact = DEFAULT_ARTIFACT, maxRuns = DEFAULT_MAX_RUNS, } = {}) {
     const branch = resolveRef(cwd, ref);
     workflow = workflowSelector(workflow);
     const skippedRuns = [];
@@ -297,11 +298,15 @@ export function queryBaseline({ cwd = process.cwd(), ref, file, workflow = DEFAU
             const path = normaliseFilePath(cwd, file);
             // git resolves `<sha>:<path>` from the REPO ROOT, so the existence probe must run there too.
             const { gitRoot } = detectGitRoot(cwd);
+            const verdict = statusOf({ cwd: gitRoot, summary, run, path });
             answer.file = {
                 path,
-                ...statusOf({ cwd: gitRoot, summary, run, path }),
+                ...verdict,
+                ...failingTestsOf(summary, path),
                 ...findLastPassed({ cwd, walk, artifact, path }),
             };
+            if (test)
+                answer.file.test = testVerdict(summary, verdict.status, path, test);
             answer.commitsWithoutRun = [...walk.commitsWithoutRun]; // the walk-back may have gone further
         }
         return answer;

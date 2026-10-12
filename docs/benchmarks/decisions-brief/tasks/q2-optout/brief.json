@@ -1,0 +1,6 @@
+[
+ {
+  "slug": "gate-opt-out-is-visible-and-detectable",
+  "ruling": "Unchanged for a single gate that cannot run (no index, no jscpd, a judge outage): it keeps the visible fail-open of the 2026-08-05 Target, named on green runs, counted as could_not_run and blockable with GUARD_DETERMINISTIC_STRICT or GUARD_AI_STRICT. Narrowed for the chain itself in overlay mode: when guard-deterministic is not on PATH, or a linked worktree's projection cannot be completed, the overlay pre-commit exits 1 with a one-line remedy, and there is no fail-open path for either. Standalone installs keep their documented contract that their gates fail open when the pinned global CLI is unavailable."
+ }
+]

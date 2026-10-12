@@ -20,7 +20,7 @@ local patch ("flow editor got a modal") *churns*. Write the durable thing.
 - `docs/decisions/INDEX.md` — derived spine: current **Target** per axis. Shows the Target, never a
   note. Regenerable; holds no history.
 
-CLI: `guard-decisions` (`add --target` · `add --note` · `amend --target` · `amend --note` · `amend --note-replace` · `query` · `list` · `show` · `check` · `reindex`).
+CLI: `guard-decisions` (`add --target` · `add --note` · `amend --target` · `amend --note` · `amend --note-replace` · `rescope` · `query` · `list` · `show` · `check` · `reindex`).
 
 ## The bar — is this log-worthy, and at what altitude? (LAYERED)
 
@@ -72,7 +72,8 @@ guard-decisions add <slug> --target \
   Context) or the value (that's Consequences).
 - **`--scope`** = files/area this target governs (comma-separated globs) → decides where the ruling is
   loaded: the pre-edit brief, the commit-time decision and reviewer judges, and the on-demand
-  **alignment check** (Capture C). Without one, only a semantic match can surface it.
+  **alignment check** (Capture C). Without one, only a semantic match can surface it. What each
+  of those is shown: "What the gates read" below.
 - **`--anchored-bet`** = the `frink-identity` confidence the target rests on; `[BET]` = cheap to
   revisit. `[VALIDATED]` asserts the originating failure (Context) no longer occurs.
 - **`--revisit-when`** = the 100-year test made mechanical: the concrete condition under which this
@@ -81,6 +82,23 @@ guard-decisions add <slug> --target \
   record states its own expiry condition. Pairs with Anchored-bet: `[BET]` says how confident,
   Revisit-when says what would flip it.
 - INDEX shows the ruling + a hook of the **Context**.
+
+**Linking a Check** (`guard-decisions enforce`). When a fast, deterministic command the repo already
+runs pins a scoped ruling (usually one test file), link it so a violation fails at commit with the
+ruling printed:
+```
+guard-decisions enforce link <slug> --check "bun run test:run path/to/x.test.mts" --reason "<why>"
+```
+- Linking refuses, writing nothing, an unknown slug, an axis with no Target or no Scope, and a command
+  that fails on the current tree. The command runs argv-split: no shell, no stdin, a 120 s timeout.
+- With the `decisions` guard selected, guard-deterministic's `decision-checks` gate runs each Check
+  whose Scope matches a staged file, or whose command names one. `guard-decisions enforce` lists
+  enforced vs prose-only axes, and links that can never run.
+- A new Target drops the link; re-link under it if the Check still applies.
+- Changing a ruling a Check enforces takes two commits: the new Target or
+  `enforce link <slug> --check none --reason "<why>"` on its own first, then the code. A commit that
+  unlinks and violates at once still runs HEAD's Check.
+- Never weaken a linked Check to get a commit through: fix the code. If its path moved, re-link it.
 
 **Authoring discipline** (adopted from the multica ADR persona — `cloned-projects/multica/.../adr-writer.json`):
 - **One decision per Target.** If you're writing "we also decided …", that's a second axis — split it.
@@ -131,6 +149,31 @@ guard-decisions add <slug> --note "flat→raw payload because the extractor was 
 ```
 A `- <date> — …` bullet under the current Target. Not a ruling, doesn't touch the INDEX. This is
 where implementation churn lives — so it never masquerades as a target flip.
+
+## What the gates read
+
+Every consumer reads the **current (last) Target block** of an axis. None is shown note text.
+
+| Consumer | Sees | Limit |
+|---|---|---|
+| Pre-edit brief | Ruling | 3 axes, first 320 chars of each Ruling |
+| Decision judge (`detect`) | Ruling of scope-matched axes | 4,096-byte block |
+| Domain reviewers | Ruling of scope-matched axes, plus semantic hits | 8,192-byte block |
+| Completeness judge | Ruling of scope-matched axes, plus semantic hits | none |
+| `check-alignment` | Ruling, plus Vision-fit (Context when there is none) | per Target |
+| `decision-checks` | the linked Check and the effective Scope | per link |
+
+- A block over its byte limit drops whole Rulings and names them in an `OMITTED:` line. The brief
+  clips instead, so put the operative wording first in the Ruling.
+- A note can help retrieval find an axis and prints in `query`, but a clarification written as a
+  note changes nothing a judge reads. Only tagged notes are parsed: `**Scope:**` (from `rescope`),
+  `**Check:**` (from `enforce link`) and `**Amends:**` (from `--supersedes`).
+- Wording the gates must act on lives in the Ruling. `amend --target` fixes an uncommitted Target; a
+  committed one moves only by a re-target, which still needs a real `--evidence-change`.
+- A Scope-only correction is `guard-decisions rescope <slug> --scope "<globs>" --reason "<why>"`,
+  not a re-target. It replaces the effective Scope of the current Target.
+- A new Target starts from its own `--scope`. Nothing is inherited from the previous block or its
+  `rescope` notes, and omitting `--scope` leaves the axis unscoped. Run `show <slug>` first.
 
 ## Append-only — the core invariant (incl. migration)
 
