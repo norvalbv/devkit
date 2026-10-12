@@ -16,6 +16,7 @@ import { treeBlobsAtRef } from '../../../gate-engine/ratchets/tree-blobs.mts';
 import { assignedNames, ownDirVars, scanShellScript } from '../doctor/hook-gate-scan.mts';
 import { commitIndexEnv } from '../../../gate-engine/ratchets/commit-index.mts';
 import { inspectReleaseOnlyDist, printReleaseOnlyDist } from './preflight/release-only-dist.mts';
+import { staleNewDist } from './preflight/stale-new-dist.mts';
 import {
   ANTI_SLOP_FILES,
   isDevOnly,
@@ -43,6 +44,8 @@ export interface DistIntegrityReport {
   unlexable: string[];
   /** Artifacts of briefed new sources that exist nowhere: the build never ran for them. */
   missing: string[];
+  /** Briefed new artifacts that differ from a fresh build of their source. */
+  stale: string[];
 }
 
 const CLEAN_REPORT: DistIntegrityReport = {
@@ -52,6 +55,7 @@ const CLEAN_REPORT: DistIntegrityReport = {
   untracked: [],
   unlexable: [],
   missing: [],
+  stale: [],
 };
 
 function git(root: string, args: string[]): string[] {
@@ -350,7 +354,16 @@ export async function inspectDistIntegrity(
   unresolved.sort((a, b) =>
     `${a.importer}\0${a.specifier}`.localeCompare(`${b.importer}\0${b.specifier}`),
   );
-  return { active: true, unresolved, unbriefed, untracked, unlexable: unlexable.sort(), missing };
+  const stale = staleNewDist(root, [...briefed].filter(shipping), atBase, distArtifact);
+  return {
+    active: true,
+    unresolved,
+    unbriefed,
+    untracked,
+    unlexable: unlexable.sort(),
+    missing,
+    stale,
+  };
 }
 
 export function shellQuote(value: string): string {
@@ -364,7 +377,8 @@ export function printDistIntegrityFailure(report: DistIntegrityReport): number {
     report.unbriefed.length > 0 ||
     report.unresolved.length > 0 ||
     report.unlexable.length > 0 ||
-    report.missing.length > 0;
+    report.missing.length > 0 ||
+    report.stale.length > 0;
   if (!failed) return 0;
 
   console.error('✗ devkit ship: dist integrity preflight failed.');
@@ -397,6 +411,13 @@ export function printDistIntegrityFailure(report: DistIntegrityReport): number {
     for (const file of report.missing) console.error(`    ${file}`);
     console.error(
       `  Fix: run \`bun run build\`, then brief ONLY these (ordinary dist churn stays release-only): -- ${report.missing.map(shellQuote).join(' ')}`,
+    );
+  }
+  if (report.stale.length > 0) {
+    console.error('  New dist artifacts that differ from a fresh build of their source:');
+    for (const file of report.stale) console.error(`    ${file}`);
+    console.error(
+      `  Fix: run \`bun run build\`, then re-brief these: -- ${report.stale.map(shellQuote).join(' ')}`,
     );
   }
   if (report.untracked.length > 0 || report.unbriefed.length > 0) {
