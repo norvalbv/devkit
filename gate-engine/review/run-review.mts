@@ -323,7 +323,7 @@ export async function runReviewGate(
         hit.label,
         baseOf.get(hit.label) ?? cachedBaseState(cwd, hit.judgedBases, hit.files),
         hit.part ? 'identical' : 'identical diff',
-        hit.degradedCause !== undefined || hit.mcpDegradedCause !== undefined,
+        hit.mcpDegradedCause !== undefined,
       ) +
         // A part's packet is cut from its own files (a chunk's, or the whole scope for a lens).
         partialEvidenceNote(
