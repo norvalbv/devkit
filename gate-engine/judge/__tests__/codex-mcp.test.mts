@@ -44,6 +44,25 @@ describe('codexMcpArgs', () => {
     expect(bench.argv.join(' ')).toContain('mcp_servers.context7.command');
   });
 
+  it('auto-approves exactly the granted servers; a null grant list approves nothing', () => {
+    const approval = (name: string) => `mcp_servers.${name}.default_tools_approval_mode="approve"`;
+    const granted = codexMcpArgs(SERVERS, ['mcp__codebase__searchCode']).argv;
+    expect(granted).toContain(approval('codebase'));
+    expect(granted).not.toContain(approval('context7'));
+    expect(codexMcpArgs(SERVERS, null).argv.join(' ')).not.toContain('default_tools_approval_mode');
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const collide = codexMcpArgs(
+        { a: { command: 'x', env: { TOKEN: 'one' } }, b: { command: 'y', env: { TOKEN: 'two' } } },
+        ['mcp__a__*', 'mcp__b__*'],
+      );
+      expect(collide.argv).toContain(approval('a'));
+      expect(collide.argv).not.toContain(approval('b'));
+    } finally {
+      err.mockRestore();
+    }
+  });
+
   it('refuses what codex config cannot express: dotted names and cross-server env collisions', () => {
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
@@ -92,6 +111,15 @@ describe('judgeCliFor with servers', () => {
     const claude = judgeCliFor(argvFor('sonnet'), SERVERS);
     expect(claude.codex).toBe(false);
     expect(claude.argv.join(' ')).not.toContain('mcp_servers');
+  });
+
+  it("approves a reviewer's wildcard grant end to end, so its MCP calls are not refused", () => {
+    // commit-guard's real grant shape; a lost grant parse would revert to "approval policy is never".
+    const argv = [...argvFor('gpt-5.6-terra').slice(0, -1), 'Read,mcp__codebase__*'];
+    const codex = judgeCliFor(argv, SERVERS);
+    expect(codex.argv).toContain('mcp_servers.codebase.default_tools_approval_mode="approve"');
+    expect(codex.argv.join(' ')).not.toContain('mcp_servers.codebase.enabled_tools');
+    expect(codex.argv.join(' ')).not.toContain('mcp_servers.context7');
   });
 });
 
