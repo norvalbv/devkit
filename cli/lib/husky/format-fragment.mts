@@ -1,7 +1,4 @@
-/**
- * The biome format-staged-files step, emitted when the `biome` component is selected.
- * Rationale: the 2026-09-03 note in docs/decisions/oxc-toolchain-migration.md.
- */
+/** The format-staged-files step: biome when selected; overlay also runs the repo's own Oxfmt. */
 
 // The consumer formatter, stated once (sc-2701). The step below, the agent-hook fragments and the
 // package.json scripts are all RENDERED from it, so they agree by construction rather than by review.
@@ -27,6 +24,28 @@ export const CONSUMER_FORMATTER = {
   scripts: { lint: 'biome check .', format: 'biome check --write .' },
 } as const satisfies ConsumerFormatter;
 
+/** The part of a formatter the pre-commit step renders. */
+export type StepFormatter = Pick<ConsumerFormatter, 'tool' | 'configProbes' | 'stepArgs'>;
+
+// Exactly the names Oxfmt discovers; the Oxc lifecycle manages the same set.
+export const OXFMT_CONFIGS: [string, ...string[]] = [
+  '.oxfmtrc.json',
+  '.oxfmtrc.jsonc',
+  'oxfmt.config.ts',
+  'oxfmt.config.mts',
+];
+
+// Overlay writes no Oxfmt config, so one present is the repo's own; outside formatter-identity.
+export const OXFMT_STEP: StepFormatter = {
+  tool: 'oxfmt',
+  configProbes: OXFMT_CONFIGS,
+  stepArgs: '--no-error-on-unmatched-pattern --write',
+};
+
+/** Overlay's formatters in priority order: biome only when selected, then the repo's own Oxfmt. */
+export const overlayFormatters = (selection: { biome?: boolean }): StepFormatter[] =>
+  selection.biome ? [CONSUMER_FORMATTER, OXFMT_STEP] : [OXFMT_STEP];
+
 // The three constants toSelfHost re-points (tool setup, failure policy, scope) are interpolated
 // below, so its search strings are the emitted bytes by construction, not a hand-copied duplicate.
 
@@ -34,7 +53,7 @@ export const CONSUMER_FORMATTER = {
  * Run the formatter only where its CONFIG exists, the rule 10bcb1a7 already applied to the agent
  * hooks. Configless biome formats to its own defaults, rewriting bytes a repo's real gate rejects.
  */
-export function renderToolSetup(f: ConsumerFormatter, binDir = '$__dk_package_bin_dir'): string {
+export function renderToolSetup(f: StepFormatter, binDir = '$__dk_package_bin_dir'): string {
   const bin = `"${binDir}/${f.tool}"`;
   return `    if ${f.configProbes.map((p) => `[ ! -f ${p} ]`).join(' && ')}; then
         echo "🎨 No ${f.tool} config here (${f.configProbes.join(' / ')}) — staged files left as authored."
@@ -45,6 +64,26 @@ export function renderToolSetup(f: ConsumerFormatter, binDir = '$__dk_package_bi
 }
 
 export const FORMAT_TOOL_SETUP = renderToolSetup(CONSUMER_FORMATTER);
+
+/** The first formatter whose config exists wins; a missing binary stands down rather than fail. */
+export function renderToolChain(fs: StepFormatter[], binDir: string): string {
+  const arms = fs.map((f) => {
+    const bin = `"${binDir}/${f.tool}"`;
+    return `if ${f.configProbes.map((p) => `[ -f ${p} ]`).join(' || ')}; then
+        if [ ! -x ${bin} ]; then
+            echo "🎨 Found the ${f.tool} config but ${binDir}/${f.tool} is missing — install this repo's dependencies; staged files left as authored."
+            return 0
+        fi
+        FMT_TOOL=${f.tool}; FMT_BIN=${bin}
+        __dk_fmt_run() { xargs -0 ${bin} ${f.stepArgs}; }`;
+  });
+  const probes = fs.flatMap((f) => f.configProbes).join(' / ');
+  return `    ${arms.join('\n    el')}
+    else
+        echo "🎨 No formatter config here (${probes}) — staged files left as authored."
+        return 0
+    fi`;
+}
 
 /** The exact lines each agent hook must carry for the consumer formatter: its config gate, binary
  *  check, invocation and fix hint — whole lines, rendered here and compared verbatim by the gate. */
@@ -90,7 +129,7 @@ export const FORMAT_FAILURE_REPORT = `        if [ "$FMT_RC" -eq 127 ]; then
         fi`;
 
 /** The format step, running the consumer formatter from `binDir`, the consumer's own bin dir. */
-export const formatFragment = (binDir: string) => `# devkit:biome-format
+export const formatFragment = (binDir: string, chain?: StepFormatter[]) => `# devkit:biome-format
 # Format staged files, then re-stage exactly those (scoped — never a blanket \`git add -u\`, which
 # would sweep unrelated working-tree changes into the commit). Only re-add files with NO unstaged
 # edits, so partially-staged files commit exactly as staged.
@@ -113,7 +152,7 @@ export const formatFragment = (binDir: string) => `# devkit:biome-format
 # A function so the "no formatter here" arm is an early \`return\`, not a branch wrapping the whole
 # body — self-host replaces the setup outright, and an unreachable arm must not survive into it.
 __dk_format_staged() {
-${renderToolSetup(CONSUMER_FORMATTER, binDir)}
+${chain ? renderToolChain(chain, binDir) : renderToolSetup(CONSUMER_FORMATTER, binDir)}
 STAGED_FMT=$(git diff --cached --name-only -z --diff-filter=ACM | tr '\\0' '\\n' | ${FORMAT_EXTENSION_FILTER} || true)
 if [ -z "$STAGED_FMT" ]; then
     echo "🎨 $FMT_TOOL: no staged formattable path — nothing to format."

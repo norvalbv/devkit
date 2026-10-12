@@ -6,12 +6,13 @@ import { upsertEvidenceBlock } from './block.mjs';
 const GH_TIMEOUT_MS = 60_000;
 const ATTEMPTS = 3;
 const pullSchema = z.object({
+    title: z.string().optional(),
     body: z.string(),
     headRefOid: z.string(),
     baseRefOid: z.string(),
 });
 export function readPull(repo, pr) {
-    const json = execFileSync('gh', ['pr', 'view', pr, '--repo', repo, '--json', 'body,headRefOid,baseRefOid'], { encoding: 'utf8', timeout: GH_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024 });
+    const json = execFileSync('gh', ['pr', 'view', pr, '--repo', repo, '--json', 'title,body,headRefOid,baseRefOid'], { encoding: 'utf8', timeout: GH_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024 });
     return pullSchema.parse(JSON.parse(json));
 }
 function writeBody(repo, pr, body) {

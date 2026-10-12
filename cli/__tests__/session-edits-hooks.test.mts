@@ -38,9 +38,9 @@ const writeExec = (root, rel, body) => {
   chmodSync(join(root, rel), 0o755);
 };
 
-const runHook = (hook, root, payload, tmp, extraEnv = {}) =>
+const runHookRaw = (hook, root, input, tmp, extraEnv = {}) =>
   spawnSync('bash', [hook], {
-    input: JSON.stringify(payload),
+    input,
     env: {
       ...process.env,
       CLAUDE_PROJECT_DIR: root,
@@ -51,6 +51,8 @@ const runHook = (hook, root, payload, tmp, extraEnv = {}) =>
     },
     encoding: 'utf8',
   });
+const runHook = (hook, root, payload, tmp, extraEnv = {}) =>
+  runHookRaw(hook, root, JSON.stringify(payload), tmp, extraEnv);
 
 describe('format-after-edit.sh — session-edits ledger writer', () => {
   it('records the repo-relative path keyed by the payload session_id', () => {
@@ -80,6 +82,58 @@ describe('format-after-edit.sh — session-edits ledger writer', () => {
       tmp,
     );
     expect(r.status).toBe(0);
+    expect(existsSync(join(tmp, 'devkit-session-edits', `${repoKey(root)}-s1`))).toBe(false);
+  });
+
+  // Claude sends tool_input.file_path; Cursor afterFileEdit sends a top-level file_path.
+  const PROVIDER_PAYLOADS = [
+    [
+      'Claude compact',
+      (abs) => JSON.stringify({ session_id: 's1', tool_input: { file_path: abs } }),
+    ],
+    [
+      'Claude pretty-printed',
+      (abs) => JSON.stringify({ session_id: 's1', tool_input: { file_path: abs } }, null, 2),
+    ],
+    [
+      'Cursor afterFileEdit',
+      (abs) =>
+        JSON.stringify({
+          session_id: 's1',
+          file_path: abs,
+          edits: [{ old_string: 'a', new_string: 'b' }],
+        }),
+    ],
+    [
+      'decoy-first',
+      (abs, root) =>
+        JSON.stringify({
+          session_id: 's1',
+          tool_response: { file_path: join(root, 'src/decoy.ts') },
+          tool_input: { file_path: abs },
+        }),
+    ],
+  ];
+  const CASES = PROVIDER_PAYLOADS.flatMap(([label, payloadFor]) =>
+    ['src/mine.ts', 'src/a "b".ts'].map((rel) => [label, rel, payloadFor]),
+  );
+  it.each(CASES)('records the edited file from a %s payload (%s)', (_label, rel, payloadFor) => {
+    const root = mkTmp('sesw-');
+    write(root, rel);
+    write(root, 'src/decoy.ts');
+    const tmp = seedSessionLedger(root, 's1', null);
+    const r = runHookRaw(FORMAT_HOOK, root, payloadFor(join(root, rel), root), tmp);
+    expect(r.status).toBe(0);
+    const ledger = join(tmp, 'devkit-session-edits', `${repoKey(root)}-s1`);
+    expect(readFileSync(ledger, 'utf8')).toBe(`${rel}\n`);
+  });
+
+  it('fails open on a payload that is not JSON', () => {
+    const root = mkTmp('sesw-');
+    const tmp = seedSessionLedger(root, 's1', null);
+    const r = runHookRaw(FORMAT_HOOK, root, '{"session_id":"s1","file_path":', tmp);
+    expect(r.status).toBe(0);
+    expect(r.stdout.trim()).toBe('{}');
     expect(existsSync(join(tmp, 'devkit-session-edits', `${repoKey(root)}-s1`))).toBe(false);
   });
 });

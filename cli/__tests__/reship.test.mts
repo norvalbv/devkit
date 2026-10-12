@@ -741,6 +741,7 @@ describe('reship --base — replace a conflicted PR from a caller-prepared snaps
     );
     expect(drifted.status).not.toBe(0);
     expect(drifted.stderr).toContain('rewrite brief omits paths from the existing PR');
+    expect(drifted.stderr).not.toContain('to ADD a commit');
     expect(existsSync(gateRanOnResume), 'drifted recovery must refuse before gates').toBe(false);
     expect(g(['--git-dir', bare, 'rev-parse', 'refs/heads/feat/pr'])).toBe(accepted);
     writeFileSync(join(dir, 'conflict.txt'), 'main + feature\n');
@@ -872,7 +873,7 @@ describe('reship --base — replace a conflicted PR from a caller-prepared snaps
         `refs/devkit/reship-body-receipts/feat/pr/${accepted}`,
       ]),
     ).toBe(`refs/devkit/reship-body-receipts/feat/pr/${accepted}`);
-  });
+  }, 360_000);
 
   it('does not share a gated receipt with a sibling PR at the same commit', () => {
     const { bare, dir, env, g, ghBody } = rewriteRepo();
@@ -1025,7 +1026,23 @@ describe('reship --base — replace a conflicted PR from a caller-prepared snaps
     expect(r.stderr).toContain('rewrite brief omits paths from the existing PR');
     expect(r.stderr).toContain('extra.txt');
     expect(r.stderr).not.toMatch(/\n  conflict\.txt/);
+    const addLine = r.stderr.split('\n').find((l) => l.includes('to ADD a commit'));
+    expect(addLine).toContain('devkit ship feat/pr incomplete\\ rewrite --pr -- conflict.txt');
+    expect(addLine).not.toMatch(/devkit ship.*--base/);
+    expect(r.stderr).toContain('to REWRITE the PR as one commit');
     expect(r.stderr).not.toContain('GATE_RAN');
+    // The remedy must survive a shell round-trip and select append mode, not just read well.
+    const argv = spawnSync(
+      '/bin/bash',
+      ['-c', 'eval "set -- $1"; printf "%s\\0" "$@"', '_', addLine.split('devkit ship ')[1]],
+      { encoding: 'utf8' },
+    )
+      .stdout.split('\0')
+      .slice(0, -1);
+    expect(argv).toEqual(['feat/pr', 'incomplete rewrite', '--pr', '--', 'conflict.txt']);
+    expect(run(argv, dir, { ...env, SHIP_DRY_RUN: '1' }).stderr).not.toContain(
+      'rewrite brief omits',
+    );
   });
 
   it('requires both halves of an old-PR rename', () => {

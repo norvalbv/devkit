@@ -21,6 +21,7 @@ const CLEAN = {
   untracked: [],
   unlexable: [],
   missing: [],
+  stale: [],
 };
 const { mkTmp, cleanup } = rootRegistry();
 afterEach(cleanup);

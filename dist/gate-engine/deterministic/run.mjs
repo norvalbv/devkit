@@ -44,12 +44,12 @@ import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseJsonObject } from '../config-json.mjs';
-import { coverageBypassed, deterministicStrict, envFlag } from '../config.mjs';
+import { coverageBypassed, deterministicStrict } from '../config.mjs';
 import { emitGateBypass, emitGateEvent, finishGateTiming } from '../judge/gate-events.mjs';
 import { markGateRun } from '../judge/run-context.mjs';
 import { describeCachedPrefix, prefixEntry, recordPrefix } from '../prefix-cache/prefix-cache.mjs';
 import { gateEnv, readGateReason, reasonDetail, reasonReport, withReasonFiles, } from './reason.mjs';
-import { configExtraGates, structureBypassed } from './command-gates.mjs';
+import { bypassedSuffixes, configExtraGates, reportCachedBypasses, structureBypassed, } from './command-gates.mjs';
 import { printRecheckFooter, recheckCommand, recheckLines, registryRecheck } from './recheck.mjs';
 import { DETERMINISTIC } from './registry.mjs';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -156,9 +156,6 @@ export function selectedIds(cwd) {
         return DEFAULT_IDS;
     }
 }
-// Bypass flags a gate reads in its own process. A bypassed run must not record a key a later
-// un-bypassed run of the same tree would hit — the anti-laundering the salts below exist for.
-const EXTRA_BYPASS_SUFFIXES = ['HOOK_PARITY_OK', 'DECISIONS_INTEGRITY_OK', 'DECISION_CHECKS_OK'];
 export function prefixCacheScope(scope, effectiveIds) {
     const reviewMode = process.env.DEVKIT_RUN_MODE === 'review';
     const mergeBase = process.env.DEVKIT_REVIEW_MERGE_BASE;
@@ -202,7 +199,7 @@ export function prefixCacheScope(scope, effectiveIds) {
         : coverageBase;
     // Same hazard once more, for the self-host `--extra` gates. Sorted and joined so two runs that
     // bypass the same set share a key regardless of the order the flags were exported in.
-    const extraBypassed = EXTRA_BYPASS_SUFFIXES.filter(envFlag).sort();
+    const extraBypassed = bypassedSuffixes();
     const extraBase = extraBypassed.length
         ? `${structureBase ?? 'devkit-guards'}:${extraBypassed.join('+')}-bypassed`
         : structureBase;
@@ -304,7 +301,7 @@ export function runDeterministic(cwd = process.cwd(), opts = {}) {
     const skipped = [];
     if (skip) {
         const extras = extra.map((x) => x.label);
-        const flags = EXTRA_BYPASS_SUFFIXES.filter(envFlag).map((f) => `GUARD_${f}`);
+        const flags = reportCachedBypasses([...extras, ...effectiveIds]);
         if (bypassStructure)
             flags.unshift('GUARD_STRUCTURE_OK');
         if (effectiveIds.includes('coverage') && coverageBypassed())
