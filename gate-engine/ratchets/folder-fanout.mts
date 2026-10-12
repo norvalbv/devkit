@@ -20,7 +20,7 @@
 // read/written under the CONSUMER cwd, never the package dir.
 
 import { type Dirent, existsSync, readdirSync, realpathSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
   CONFIG_FILENAME,
@@ -245,6 +245,21 @@ function parent(file: string): string {
   return file.split('/').slice(0, -1).join('/');
 }
 
+// A CLI path (./-prefixed, absolute, symlinked, OS separators) in the tally's repo-relative form.
+// The nearest existing ancestor is realpath'd; the leaf never is, since git tracks a symlink itself.
+function toRepoPath(realRoot: string, file: string): string {
+  const abs = resolve(realRoot, file);
+  let existing = dirname(abs);
+  const missing = [basename(abs)];
+  while (!existsSync(existing) && dirname(existing) !== existing) {
+    missing.unshift(basename(existing));
+    existing = dirname(existing);
+  }
+  return relative(realRoot, join(realpathSync(existing), ...missing))
+    .split(sep)
+    .join('/');
+}
+
 // Whether the gate's tally would count this one path at all (in scope, impl, not exempt).
 function isCounted(root: string, file: string): boolean {
   return countFanoutFrom(root, [file])?.[parent(file)] !== undefined;
@@ -257,7 +272,9 @@ export function fanoutGrew(n: number, allowed: number, head: number, inCommit: b
 
 // Answers "would adding these paths trip the gate?" before they exist: tracked index plus the paths,
 // judged against HEAD exactly as a commit of them would be. Exit 0 ok, 1 blocks, 2 unavailable.
-export function preflightFanout(root: string, requested: string[]): number {
+export function preflightFanout(root: string, paths: string[]): number {
+  const realRoot = realpathSync(root);
+  const requested = paths.map((file) => toRepoPath(realRoot, file));
   const cfg = resolveGuardConfig(root);
   const judged = judgeFanout(root, cfg.fanoutCap);
   if (judged.failOpen) {
