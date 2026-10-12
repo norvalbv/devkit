@@ -6,28 +6,11 @@ import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
+import {
+  type CoverageMap,
+  coverageMapSchema,
+} from '../../../../gate-engine/coverage/fallow-copy.mts';
 import { REPORT_NAME } from '../../../../gate-engine/coverage/produce.mts';
-
-/** vitest's v8→istanbul conversion can emit a negative hit count, which fails fallow's u32 parse
- * of the whole file. A negative hit is a miss and the gate counts only hits > 0: 0 keeps totals. */
-const hitSchema = z.int().transform((hits) => Math.max(0, hits));
-const hitsSchema = z.record(z.string(), hitSchema).optional();
-
-/**
- * One istanbul file entry. `path` is rekeyed and the s/f/b hit counts are clamped; every other field
- * (statementMap, fnMap, branchMap, …) passes through untouched.
- */
-const coverageEntrySchema = z.looseObject({
-  path: z.string().optional(),
-  s: hitsSchema,
-  f: hitsSchema,
-  b: z.record(z.string(), z.array(hitSchema)).optional(),
-});
-
-/** coverage-final.json: file key → istanbul entry. A map that does not parse is never rebased, so
- * fallow is never handed counts it cannot read and scores CRAP from estimates instead. */
-export const coverageMapSchema = z.record(z.string(), coverageEntrySchema);
-export type CoverageMap = z.infer<typeof coverageMapSchema>;
 
 /** `/a/b` → `/a/b/`, and `/` stays `/` — the boundary a key must start with to sit under `root`. */
 const boundary = (root: string): string => `${root.replace(/\/+$/, '')}/`;
