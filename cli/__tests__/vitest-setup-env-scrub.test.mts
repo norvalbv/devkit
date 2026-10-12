@@ -5,10 +5,15 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import {
+  FAMILY_ENV_KEYS,
+  SENTRY_MODEL_ENVS,
+} from '../../gate-engine/judge/outage/family-override.mts';
 import { meta } from '../commands/ship.mts';
 import {
   BYPASS_ENV,
   INHERITED_RUN_ENV,
+  JUDGE_ROUTING_ENV,
   SCRUBBED_ENV,
   SHIP_EXPORTED_ENV,
   SUITE_GIT_IDENTITY,
@@ -182,6 +187,16 @@ describe('vitest.setup.mjs scrubs inherited gate policy', () => {
         expect(BYPASS_ENV, `${name}: add it to vitest.setup.mjs BYPASS_ENV`).toContain(name);
       }
     }
+  });
+
+  it('scrubs every judge-routing knob the outage remedy exports', () => {
+    const knobs = [
+      ...FAMILY_ENV_KEYS.flatMap((k) => (k.alias ? [k.env, k.alias] : [k.env])),
+      ...SENTRY_MODEL_ENVS,
+    ];
+    expect([...JUDGE_ROUTING_ENV].sort()).toEqual([...knobs].sort());
+    const env = envAfterSetup(Object.fromEntries(knobs.map((name) => [name, 'haiku'])));
+    for (const name of knobs) expect(env[name], name).toBeUndefined();
   });
 
   it('declares each name once, in exactly one provenance list', () => {

@@ -134,11 +134,24 @@ export const BYPASS_ENV = [
   'DECISION_CHECKS_OK',
 ].flatMap((suffix) => [`GUARD_${suffix}`, `FRINK_${suffix}`]);
 
+// The judge-family move an outage remedy exports for a ship (family-override.mts). Inherited through
+// the related-tests gate, it re-routes the judges a test stubs. Parity-tested.
+export const JUDGE_ROUTING_ENV = [
+  'GUARD_REVIEW_MODEL',
+  'FRINK_REVIEW_MODEL',
+  'GUARD_REVIEW_ESCALATION_MODEL',
+  'GUARD_CORRECTNESS_MODEL',
+  'GUARD_CORRECTNESS_CHUNK',
+  'GUARD_SENTRY_MODEL',
+  'FRINK_SENTRY_MODEL',
+];
+
 export const SCRUBBED_ENV = [
   ...INHERITED_RUN_ENV,
   ...SHIP_EXPORTED_ENV,
   ...TEST_ONLY_ADDITIONS,
   ...BYPASS_ENV,
+  ...JUDGE_ROUTING_ENV,
 ];
 
 // Ordering is load-bearing: DEVKIT_GATE_EVENTS is scrubbed here and reassigned below, so a scrub
