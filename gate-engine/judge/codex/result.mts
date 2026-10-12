@@ -236,6 +236,7 @@ export function codexExecArgs(
   // TOML string, the same quoting the bench's effort wrappers used (`-c model_reasoning_effort="high"`).
   if (spec.effort !== null)
     argv.push('-c', `model_reasoning_effort=${JSON.stringify(spec.effort)}`);
+  // skills/commit-gates/SKILL.md replays this sandbox via `codex sandbox`; keep it in step.
   argv.push(
     '--sandbox',
     parts.readOnly ? 'read-only' : 'workspace-write',
