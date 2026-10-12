@@ -20,3 +20,12 @@ export function eslintNodeFlags(cwd: string): string[] {
     existsSync(join(modules, 'eslint', 'bin', 'eslint.js'));
   return preserve ? ['--preserve-symlinks'] : [];
 }
+
+export const LINKED_ISOLATED_STORE =
+  'a linked isolated install (pnpm, bun --linker isolated) cannot root structure lint at this worktree — run it where node_modules is installed';
+
+/** A linked node_modules whose eslint is itself a link: no spawn can root the plugin at this worktree. */
+export function linkedIsolatedStore(cwd: string): boolean {
+  const modules = join(cwd, 'node_modules');
+  return isLink(modules) && isLink(join(modules, 'eslint'));
+}

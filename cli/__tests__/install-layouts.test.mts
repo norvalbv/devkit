@@ -112,8 +112,12 @@ describe.skipIf(!INSTALL_LAYOUTS_ENABLED)('spawned eslint across real install la
           expect(result.status, output).toBe(1);
           expect(output).toContain('project-structure/folder-structure');
           expect(output).toContain('project-structure/independent-modules');
+        } else if (site === 'guard-structure preset') {
+          // An isolated store cannot take --preserve-symlinks, so the gate says it did not run.
+          expect(result.status, output).toBe(2);
+          expect(output).toContain('linked isolated install');
         } else {
-          // An isolated store cannot take --preserve-symlinks; the plugin then roots at the caller.
+          // The overlay runs the repo's whole eslint config, so it lints on without the flag.
           expect(result.status, output).toBe(0);
         }
       });

@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, unlinkSync, writeFileSync 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { eslintNodeFlags } from '../eslint-node-flags.mts';
+import { eslintNodeFlags, linkedIsolatedStore } from '../eslint-node-flags.mts';
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -29,6 +29,7 @@ describe('eslintNodeFlags', () => {
     writeFileSync(join(donor, 'node_modules', 'eslint', 'bin', 'eslint.js'), '');
     symlinkSync(join(donor, 'node_modules'), join(cwd, 'node_modules'), 'dir');
     expect(eslintNodeFlags(cwd)).toEqual(['--preserve-symlinks']);
+    expect(linkedIsolatedStore(cwd)).toBe(false);
   });
 
   it('adds nothing when node_modules links an isolated store (eslint itself a link)', () => {
@@ -40,6 +41,7 @@ describe('eslintNodeFlags', () => {
     symlinkSync(store, join(donor, 'node_modules', 'eslint'), 'dir');
     symlinkSync(join(donor, 'node_modules'), join(cwd, 'node_modules'), 'dir');
     expect(eslintNodeFlags(cwd)).toEqual([]);
+    expect(linkedIsolatedStore(cwd)).toBe(true);
   });
 
   it('adds nothing for a physical node_modules (npm/bun hoisted, and pnpm isolated)', () => {

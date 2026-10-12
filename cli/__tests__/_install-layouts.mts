@@ -1,7 +1,7 @@
 // Real installs of the structure-lint stack in each layout a consumer may use, cached across runs.
 // Network-bound, so opt-in: DEVKIT_INSTALL_LAYOUTS=1 bun run test:run -- install-layouts
 
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { testSpawnSync as spawnSync } from './_helpers.mts';
@@ -34,4 +34,15 @@ export function installLayout(layout: InstallLayout): string {
   }
   writeFileSync(ready, '');
   return join(dir, 'node_modules');
+}
+
+/** Links cwd/node_modules to a stub isolated store (eslint itself a link); returns the donor to clean up. */
+export function linkStubIsolatedInstall(cwd: string): string {
+  const donor = mkdtempSync(join(tmpdir(), 'isolated-store-'));
+  const eslint = join(donor, 'node_modules', '.bun', 'eslint', 'node_modules', 'eslint');
+  mkdirSync(join(eslint, 'bin'), { recursive: true });
+  writeFileSync(join(eslint, 'bin', 'eslint.js'), "process.stdout.write('[]');\n");
+  symlinkSync(eslint, join(donor, 'node_modules', 'eslint'));
+  symlinkSync(join(donor, 'node_modules'), join(cwd, 'node_modules'));
+  return donor;
 }
