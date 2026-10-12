@@ -257,19 +257,6 @@ export function boundedCause(cause: string): string {
   return flat.length > MAX_CAUSE_CHARS ? `${flat.slice(0, MAX_CAUSE_CHARS - 1)}…` : flat;
 }
 
-export const CACHED_RETRIEVAL_UNPROVEN =
-  'cached PASS carries no retrieval record (written before sc-2317, or the record is malformed)';
-
-/** Why a replayed commit-guard PASS is DEGRADED; only an entry stamped `retrieval: 'ok'` is clean. */
-export function cachedRetrievalDegradation(
-  reviewer: string,
-  meta: VerdictMeta,
-): string | undefined {
-  if (reviewer !== RETRIEVAL_REVIEWER || meta.retrieval === 'ok') return undefined;
-  const cause = z.string().trim().min(1).safeParse(meta.degraded_cause).data;
-  return cause === undefined ? CACHED_RETRIEVAL_UNPROVEN : boundedCause(cause);
-}
-
 /** The remedy a replayed MCP-degraded PASS names: its cache key does not see the registry, so only a
  * clear forces the re-judge once codebase is back (sc-2837). */
 export const MCP_DEGRADED_REMEDY =

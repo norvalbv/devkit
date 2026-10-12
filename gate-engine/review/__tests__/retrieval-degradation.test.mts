@@ -4,11 +4,7 @@ import {
   reportRetrievalDegraded,
   retrievalDegradation,
 } from '../contracts/checklist.mts';
-import {
-  CACHED_RETRIEVAL_UNPROVEN,
-  cachedPassLine,
-  cachedRetrievalDegradation,
-} from '../evidence/base-context.mts';
+import { cachedPassLine } from '../evidence/base-context.mts';
 
 const files = [{ path: 'src/a.ts', status: 'pass', issues: [] }];
 
@@ -99,31 +95,6 @@ describe('cachedPassLine DEGRADED marker', () => {
         'guard-review: commit-guard — cached PASS (DEGRADED) (identical diff; judged against',
       ),
     ).toBe(true);
-  });
-});
-
-describe('cachedRetrievalDegradation — a replay must prove retrieval ran (sc-2317)', () => {
-  it.each([
-    ['stamped ok', { retrieval: 'ok' }, undefined],
-    ['stamped degraded', { degraded_cause: 'index missing' }, 'index missing'],
-    ['legacy entry with neither field', { model: 'haiku' }, CACHED_RETRIEVAL_UNPROVEN],
-    ['non-string degraded_cause', { degraded_cause: 42 }, CACHED_RETRIEVAL_UNPROVEN],
-    ['blank degraded_cause', { degraded_cause: '  ' }, CACHED_RETRIEVAL_UNPROVEN],
-    ['retrieval not literally ok', { retrieval: 'OK' }, CACHED_RETRIEVAL_UNPROVEN],
-  ])('commit-guard, %s', (_, meta, expected) => {
-    expect(cachedRetrievalDegradation('commit-guard', meta)).toBe(expected);
-  });
-
-  it('a replayed cause is normalised like a fresh one: one line, bounded', () => {
-    expect(cachedRetrievalDegradation('commit-guard', { degraded_cause: 'a\n\tb\r\n c' })).toBe(
-      'a b c',
-    );
-    const long = cachedRetrievalDegradation('commit-guard', { degraded_cause: 'x'.repeat(5000) });
-    expect(long?.length).toBe(200);
-  });
-
-  it('other reviewers replay clean without any retrieval record', () => {
-    expect(cachedRetrievalDegradation('correctness-reviewer', {})).toBeUndefined();
   });
 });
 

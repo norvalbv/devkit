@@ -85,7 +85,9 @@ export function settleReviewOutcome(
   // Only a PASS can be degraded: asset re-verification may have voided the verdict since.
   const degraded = res.status === 'pass' ? res.degraded : undefined;
   const mcpDegraded = res.status === 'pass' ? res.mcpDegraded : undefined;
-  if (res.status === 'pass')
+  // A retrieval-DEGRADED PASS describes the environment, not the diff: never cached, so a retry
+  // re-attempts retrieval instead of replaying the outage.
+  if (res.status === 'pass' && !degraded)
     // res.model = the model that actually judged (a Reviewer.model pin wins over the cascade
     // default) — recording firstModel here mislabeled every pinned reviewer's cached PASS.
     savePasses(ctx.cwd, {
@@ -97,9 +99,8 @@ export function settleReviewOutcome(
         // so a later replay can name it instead of borrowing its own run's base (sc-3468).
         base_sha: reviewBaseContext(ctx.cwd).baseSha,
         ...(t.splitOf ? cachedLensFields(res) : {}), // spill-safe lens re-seed (sc-1475)
-        // A cache hit must replay DEGRADED, not a bare PASS (sc-2317). Undefined → dropped by JSON.
-        degraded_cause: degraded?.cause,
-        retrieval: res.name === RETRIEVAL_REVIEWER && !degraded ? 'ok' : undefined,
+        // loadCache serves a commit-guard PASS only with this stamp. Undefined → dropped by JSON.
+        retrieval: res.name === RETRIEVAL_REVIEWER ? 'ok' : undefined,
         // Its own field (sc-2837): `retrieval` above must keep describing retrieval alone.
         mcp_degraded_cause: mcpDegraded?.cause,
         // A replay names the waivers this PASS rests on, and a revoked one voids it (loadCache).
@@ -159,7 +160,7 @@ export function settleReviewOutcome(
     (!['fail', 'error'].includes(res.status) && res.reason ? ` — ${res.reason}` : '') +
     (res.status === 'pass' ? partialEvidenceNote(coverage) : '');
   console.error(
-    `guard-review: ${res.name} — ${verdictToken({ status: res.status, degraded, mcpDegraded })}${res.escalated ? ' (escalated)' : ''} in ${secs}s${res.status === 'pass' ? ' (checkpointed)' : ''}${tail}`,
+    `guard-review: ${res.name} — ${verdictToken({ status: res.status, degraded, mcpDegraded })}${res.escalated ? ' (escalated)' : ''} in ${secs}s${res.status === 'pass' && !degraded ? ' (checkpointed)' : ''}${tail}`,
   );
   // commit-guard never lens-splits (only correctness does), so the split branch above needs no
   // retrieval report; an MCP-degraded split reviewer is reported once at its merge (lens/split.mts).

@@ -107,7 +107,6 @@ export function reportRetrievalDegraded(name: string, rawCause: string): void {
 
 /** What a cached PASS replays beside its line: any degradation, and every waiver it rests on. */
 export function reportCachedHitNotes(hit: CachedHit): void {
-  if (hit.degradedCause) reportRetrievalDegraded(hit.label, hit.degradedCause);
   // A cached split PART is reported once at its reviewer's merge, with the freshly judged groups.
   if (hit.mcpDegradedCause && !hit.part) reportMcpDegraded(hit.label, hit.mcpDegradedCause, true);
   for (const w of hit.waivers)

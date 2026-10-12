@@ -64,8 +64,10 @@ describe('cachePath', () => {
     execSync(`git worktree add -q ${JSON.stringify(wt)} -b tmp-branch`, { cwd: repo });
     // The path STRING may differ in symlink form (macOS /var → /private/var) — the contract is
     // that both endpoints hit the same file. Save from the worktree, read from the main tree.
-    savePasses(wt, { 'commit-guard:shared': { at: '2026-01-01T00:00:00Z', model: 'sonnet' } });
-    expect(loadCache(repo)['commit-guard:shared']).toMatchObject({ model: 'sonnet' });
+    savePasses(wt, {
+      'conventions-reviewer:shared': { at: '2026-01-01T00:00:00Z', model: 'sonnet' },
+    });
+    expect(loadCache(repo)['conventions-reviewer:shared']).toMatchObject({ model: 'sonnet' });
     expect(realpathSync(cachePath(wt))).toBe(realpathSync(cachePath(repo)));
   });
   it('non-repo cwd falls back to the cwd itself', () => {
@@ -77,9 +79,29 @@ describe('cachePath', () => {
 describe('loadCache / savePasses / clearCache', () => {
   it('round-trips a PASS entry', () => {
     const repo = gitRepo();
-    savePasses(repo, { 'commit-guard:abc': { at: '2026-01-01T00:00:00Z', model: 'sonnet' } });
-    expect(loadCache(repo)['commit-guard:abc']).toMatchObject({ model: 'sonnet' });
+    savePasses(repo, {
+      'conventions-reviewer:abc': { at: '2026-01-01T00:00:00Z', model: 'sonnet' },
+    });
+    expect(loadCache(repo)['conventions-reviewer:abc']).toMatchObject({ model: 'sonnet' });
   });
+  it('serves a commit-guard PASS only when stamped retrieval ok (sc-4689)', () => {
+    const r = gitRepo();
+    const at = '2026-01-01T00:00:00Z';
+    savePasses(r, {
+      'commit-guard:ok': { at, retrieval: 'ok' },
+      'commit-guard:legacy': { at },
+      'commit-guard:typo': { at, retrieval: 'OK' },
+      'commit-guard:degraded': { at, degraded_cause: 'embeddings unreachable' },
+      'correctness-reviewer:x': { at },
+      'commit-guard-lite:y': { at },
+    });
+    expect(Object.keys(loadCache(r)).sort()).toEqual([
+      'commit-guard-lite:y',
+      'commit-guard:ok',
+      'correctness-reviewer:x',
+    ]);
+  });
+
   it('absent file → empty (re-review, never skip)', () => {
     expect(loadCache(gitRepo())).toEqual({});
   });

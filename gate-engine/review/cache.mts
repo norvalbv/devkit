@@ -16,6 +16,7 @@ import {
   saveEntries,
   type VerdictMeta,
 } from '../judge/verdict-store.mts';
+import { RETRIEVAL_REVIEWER } from './evidence/base-context.mts';
 import { cachedWaiversLive } from './overrides.mts';
 
 const CACHE_FILE = 'review-cache.json';
@@ -26,10 +27,14 @@ export function cachePath(cwd: string): string {
 }
 
 /** entries map (key → {at, model}); corrupt/absent/foreign-version → {} (fails toward re-review).
- * A PASS earned under a waiver since revoked is dropped too, so the diff is judged again. */
+ * Re-judged instead: a PASS on a revoked waiver, a commit-guard PASS without `retrieval: 'ok'`. */
 export function loadCache(cwd: string): Record<string, VerdictMeta> {
   const live = cachedWaiversLive(cwd);
-  return Object.fromEntries(Object.entries(loadEntries(cachePath(cwd))).filter(([, m]) => live(m)));
+  return Object.fromEntries(
+    Object.entries(loadEntries(cachePath(cwd))).filter(
+      ([key, m]) => live(m) && (!key.startsWith(`${RETRIEVAL_REVIEWER}:`) || m.retrieval === 'ok'),
+    ),
+  );
 }
 
 /**
