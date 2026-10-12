@@ -1,6 +1,14 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { z } from 'zod';
 
 // Git exports control vars (GIT_DIR, GIT_WORK_TREE, …) into every hook's environment. devkit's
 // git-integration tests spawn `git init` / commits in throwaway temp repos via the INHERITED env;
@@ -225,4 +233,43 @@ process.env.DEVKIT_NO_TELEMETRY = '1';
     { mode: 0o600 },
   );
   process.env.DEVKIT_JUDGE_MCP_CONFIG = file;
+}
+
+// A developer's global devkit (e.g. ~/.bun/bin/guard-deterministic) made hook tests green locally and red
+// on CI. Drop PATH dirs holding a devkit bin; the shim re-exposes only the runtimes they also held.
+export function hermeticPath(pathValue, binNames, shimDir) {
+  const dirs = pathValue.split(path.delimiter);
+  const hosts = dirs.filter((dir) => binNames.some((bin) => existsSync(path.join(dir, bin))));
+  if (hosts.length === 0) return pathValue;
+  mkdirSync(shimDir, { recursive: true });
+  for (const dir of hosts) {
+    for (const tool of ['bun', 'bunx', 'node']) {
+      if (!existsSync(path.join(dir, tool))) continue;
+      try {
+        symlinkSync(path.join(dir, tool), path.join(shimDir, tool));
+      } catch (err) {
+        if (err.code !== 'EEXIST') throw err;
+      }
+    }
+  }
+  return [shimDir, ...dirs.filter((dir) => !hosts.includes(dir))].join(path.delimiter);
+}
+
+// Hooks prepend $HOME/.bun/bin, so HOME must not be the developer's either. One fresh dir per process:
+// setupFiles re-runs before every test file, and the pid marker stops a child reusing its parent's.
+{
+  const { bin } = z
+    .object({ bin: z.record(z.string(), z.string()) })
+    .parse(JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')));
+  const owned = process.env.DEVKIT_SUITE_HOME_PID === String(process.pid);
+  const home =
+    (owned && process.env.DEVKIT_SUITE_HOME) ||
+    mkdtempSync(path.join(os.tmpdir(), 'devkit-test-home-'));
+  process.env.DEVKIT_SUITE_HOME_PID = String(process.pid);
+  process.env.DEVKIT_SUITE_HOME = home;
+  process.env.HOME = home;
+  process.env.USERPROFILE = home;
+  delete process.env.XDG_CONFIG_HOME;
+  process.env.GIT_CONFIG_NOSYSTEM = '1';
+  process.env.PATH = hermeticPath(process.env.PATH ?? '', Object.keys(bin), `${home}-bin`);
 }
