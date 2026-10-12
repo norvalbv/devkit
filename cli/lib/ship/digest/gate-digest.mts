@@ -163,13 +163,16 @@ function isBlocking(finding: Attributable, blocked: string, siblings: Attributab
  *  inconclusive is a judge that answered, so an earlier failed spawn's words would mislead. */
 const OUTAGE_CAUSES = new Set(['outage', 'rate-limited', 'transient', 'unauthenticated', 'absent']);
 
-/** A provider error envelope's `error.message` (codex prints its HTTP error as one JSON line), else
+/** A codex error envelope's message (`error.message` or `detail`, one JSON line), else
  *  the text as given — the envelope alone would spend the whole detail budget before the cause. */
 function providerMessage(text: string): string {
   try {
     // SAFETY: a shape, not a type — `?.` survives null or a primitive, and textOf drops a non-string.
-    const parsed = JSON.parse(text.split('\n')[0] ?? '') as { error?: { message?: string } };
-    return textOf(parsed?.error?.message) || text;
+    const parsed = JSON.parse(text.split('\n')[0] ?? '') as {
+      error?: { message?: string };
+      detail?: string;
+    };
+    return textOf(parsed?.error?.message) || textOf(parsed?.detail) || text;
   } catch {
     return text;
   }

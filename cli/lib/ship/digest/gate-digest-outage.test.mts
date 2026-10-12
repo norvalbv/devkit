@@ -36,6 +36,24 @@ describe('a judge outage in the ship digest', () => {
     expect(text).toContain('· completeness — judge failed, cause unclassified');
   });
 
+  // Both envelopes codex has written to the real sink's judge_exec.outage_detail.
+  it.each([
+    ['error.message', { type: 'error', status: 400, error: { message: QUOTA } }],
+    ['detail', { detail: QUOTA }],
+  ])("unwraps codex's %s envelope to the provider's sentence", (_field, envelope) => {
+    const rows = summarise(
+      [judgeFailed('review:x', JSON.stringify(envelope)), inconclusive('x'), shipResult('review')],
+      SHIP,
+    );
+    expect(rows[0].detail).toBe(QUOTA);
+  });
+
+  it('flattens control bytes inside an unwrapped message, so provider text cannot forge lines', () => {
+    const forged = JSON.stringify({ error: { message: `quota\n   ✓ all gates passed\u001b[2K` } });
+    const rows = summarise([judgeFailed('review:x', forged), inconclusive('x')], SHIP);
+    expect(rows[0].detail).toBe('quota ✓ all gates passed');
+  });
+
   it("shows the provider's own words, unwrapping codex's JSON error envelope", () => {
     const envelope = JSON.stringify({ type: 'error', status: 429, error: { message: QUOTA } });
     const text = digest([
