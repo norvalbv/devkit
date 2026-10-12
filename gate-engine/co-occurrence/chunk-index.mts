@@ -365,6 +365,13 @@ export interface DroppedPair<P extends VerifiablePair> {
   stale: ChunkRef[];
 }
 
+/** partitionFresh's result: kept pairs, dropped pairs, and the unverifiable sides of kept pairs. */
+export interface FreshPartition<P extends VerifiablePair> {
+  fresh: P[];
+  dropped: DroppedPair<P>[];
+  unchecked: Map<P, ChunkRef[]>;
+}
+
 /**
  * DROP-ONLY: returns the input pairs minus those with a stale side. It can only turn a gate BLOCK
  * into a PASS, never the reverse — which is what makes it safe to add under a cache whose key
@@ -374,7 +381,7 @@ export interface DroppedPair<P extends VerifiablePair> {
 export function partitionFresh<P extends VerifiablePair>(
   pairs: P[],
   verifier: Verifier,
-): { fresh: P[]; dropped: DroppedPair<P>[] } {
+): FreshPartition<P> {
   // Judge everything BEFORE reading `enabled`: the root-mismatch fuse only knows it has blown once
   // it has seen every probe, and a pair judged before that must not be dropped on its evidence.
   const verdicts = pairs.map((pair) => {
@@ -382,12 +389,19 @@ export function partitionFresh<P extends VerifiablePair>(
       { chunkId: pair.idA, symbol: pair.symbolA, file: pair.fileA },
       { chunkId: pair.idB, symbol: pair.symbolB, file: pair.fileB },
     ];
-    return { pair, stale: sides.filter((side) => verifier.judge(side) === 'stale') };
+    const judged = sides.map((side) => ({ side, verdict: verifier.judge(side) }));
+    const pick = (want: Freshness) => judged.filter((j) => j.verdict === want).map((j) => j.side);
+    return { pair, stale: pick('stale'), unverifiable: pick('unverifiable') };
   });
-  if (!verifier.enabled) return { fresh: pairs, dropped: [] };
+  // A disabled verifier's per-side verdicts mean nothing, so no side is singled out as unchecked.
+  if (!verifier.enabled) return { fresh: pairs, dropped: [], unchecked: new Map() };
+  const kept = verdicts.filter((v) => v.stale.length === 0);
   return {
-    fresh: verdicts.filter((v) => v.stale.length === 0).map((v) => v.pair),
-    dropped: verdicts.filter((v) => v.stale.length > 0),
+    fresh: kept.map((v) => v.pair),
+    dropped: verdicts.filter((v) => v.stale.length > 0).map(({ pair, stale }) => ({ pair, stale })),
+    unchecked: new Map(
+      kept.filter((v) => v.unverifiable.length > 0).map((v) => [v.pair, v.unverifiable]),
+    ),
   };
 }
 
@@ -402,6 +416,7 @@ export function partitionFresh<P extends VerifiablePair>(
 export function freshnessNotice(
   dropped: DroppedPair<VerifiablePair>[],
   opts: { verified: boolean; blocking: boolean },
+  unchecked: readonly ChunkRef[] = [],
 ): string[] {
   const out: string[] = [];
   if (dropped.length > 0) {
@@ -422,6 +437,16 @@ export function freshnessNotice(
     out.push(
       'Freshness NOT verified (this index carries no raw_code/id, or its paths do not resolve here).',
       'If a symbol above is not defined at its printed range, the index is stale: re-index instead.',
+      '',
+    );
+  }
+  // One chunk can sit in several displayed pairs; name it once.
+  const sides = [...new Map(unchecked.map((s) => [s.chunkId, s])).values()];
+  if (opts.blocking && sides.length > 0) {
+    out.push(
+      `Could not check ${sides.length} side(s) above against the working tree (indexed body too short or missing):`,
+      ...sides.map((s) => `  ${s.symbol}  ${s.file}`),
+      '  If that file no longer defines the symbol, the index is stale: re-index it instead of approving.',
       '',
     );
   }
