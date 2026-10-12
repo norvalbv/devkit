@@ -1,6 +1,12 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  EVIDENCE_ABSTENTIONS,
+  EVIDENCE_STATUSES,
+  inconclusive,
+  notRun,
+} from '../evidence/outcome.mts';
+import {
   type ChangedPath,
   type EvidenceOutcome,
   type MergeVerdict,
@@ -54,14 +60,6 @@ interface Row {
   reasons: VerdictReason[];
 }
 
-const ABSTENTIONS = [
-  'no-test-change',
-  'docs-only',
-  'declared-no-behaviour-change',
-  'platform-skipped',
-  'not-configured',
-];
-
 const ROWS: Row[] = [
   {
     name: 'empty diff',
@@ -71,9 +69,9 @@ const ROWS: Row[] = [
   },
   {
     name: 'unreadable bypass record',
-    change: change([fix], { bypasses: 'unknown' }),
+    change: change([fix], { bypasses: { unknown: 'no ship record' } }),
     verdict: 'human-review',
-    reasons: [{ code: 'bypass-unknown' }, { code: 'captured-proof' }],
+    reasons: [{ code: 'bypass-unknown', detail: 'no ship record' }, { code: 'captured-proof' }],
   },
   {
     name: 'a bypass and a waived finding, deduplicated',
@@ -314,11 +312,11 @@ const ROWS: Row[] = [
     verdict: 'human-review',
     reasons: [{ code: 'no-captured-proof', detail: 'inconclusive' }],
   },
-  ...ABSTENTIONS.map((abstention): Row => ({
-    name: `not-run: ${abstention}`,
-    change: change([fix], { evidence: { status: 'not-run', headSha: HEAD, abstention } }),
+  ...EVIDENCE_ABSTENTIONS.map((reason): Row => ({
+    name: `not-run: ${reason}`,
+    change: change([fix], { evidence: notRun(reason, 'why', HEAD, null) }),
     verdict: 'human-review',
-    reasons: [{ code: 'no-captured-proof', detail: `not-run: ${abstention}` }],
+    reasons: [{ code: 'no-captured-proof', detail: `not-run: ${reason}` }],
   })),
   {
     name: 'no evidence',
@@ -390,6 +388,22 @@ describe('mergeVerdict', () => {
     expect(verdictLine(result)).toMatch(
       new RegExp(`^${row.verdict} \\(${result.reasons[0].code}[:)]`),
     );
+  });
+
+  it('treats only a capture at this head as proof, for every evidence status', () => {
+    const proof = EVIDENCE_STATUSES.map((status) => {
+      const evidence = { status, reason: null, detail: '', headSha: HEAD, baseSha: null };
+      return [status, mergeVerdict(change([fix], { evidence }), null).reasons.at(-1)?.code];
+    });
+    expect(proof).toEqual([
+      ['captured', 'captured-proof'],
+      ['inconclusive', 'no-captured-proof'],
+      ['not-run', 'no-captured-proof'],
+    ]);
+    expect(mergeVerdict(change([fix], { evidence: inconclusive('x', HEAD, null) }), null)).toEqual({
+      verdict: 'human-review',
+      reasons: [{ code: 'no-captured-proof', detail: 'inconclusive' }],
+    });
   });
 
   it('has a row for every reason code', () => {

@@ -455,6 +455,7 @@ describe('planReviewWork — cached PASSes carry the base they were judged again
       w('races', 'a'.repeat(12)),
       w('state', 'b'.repeat(12)),
     ]);
+    expect(plan.fullyCached[0].waivers).toEqual(plan.cachedHits[0].waivers);
   });
 
   it('a cached part replays its own waivers alone', () => {
@@ -464,6 +465,10 @@ describe('planReviewWork — cached PASSes carry the base they were judged again
     const plan = planReviewWork([sel], ['d'], cache, new Map(), key, groups);
     expect(plan.cachedHits).toHaveLength(1);
     expect(plan.cachedHits[0].waivers).toEqual([{ lens: 'races', fingerprint: 'c'.repeat(12) }]);
+    // The held part rides into the merged review_result, so its waiver reaches telemetry too.
+    expect(plan.splitParts.get('correctness-reviewer')?.[0].res.waivers).toEqual([
+      { lens: 'races', fingerprint: 'c'.repeat(12) },
+    ]);
   });
 
   it('an uncached reviewer produces no cached hit', () => {

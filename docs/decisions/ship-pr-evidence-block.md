@@ -19,3 +19,4 @@ created: 2026-10-10
 **Revisit-when:** A merge step needs tamper-evident evidence (move it to a commit status or check run), or the shadow measurement shows more than half of test-changing devkit PRs reading inconclusive.
 **Scope:** cli/lib/ship/evidence/**,cli/lib/ship/publish-evidence.sh
 **Source:** shortcut · sc-5175
+- 2026-10-11 — sc-5176: the reserved verdict line is now filled. The line reads '**Merge verdict:** <verdict> (<reason>) · advisory, at <head>', and the data line gains an optional mergeVerdict object holding the verdict and every reason that fired. A block written before this still reads; a reader that predates the key treats the block as absent and recomputes it.

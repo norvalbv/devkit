@@ -60,6 +60,8 @@ export interface ReviewCacheHit {
   baseState: string;
   /** evidence_* coverage of the packet the PASS was judged on; {} when complete (sc-2305). */
   coverage?: object;
+  /** The waived findings the replayed PASS rests on; omitted when there are none. */
+  waivers?: { lens: string; fingerprint: string }[];
 }
 
 /** cache_hit for a domain reviewer. Other emitters keep emitCacheHit, whose rows carry no base
@@ -74,6 +76,8 @@ export function emitReviewCacheHit(hit: ReviewCacheHit): void {
     judged_base_sha: hit.judgedBaseSha,
     base_state: hit.baseState,
     ...hit.coverage,
+    // Omitted, like an unknown model, when the PASS rests on no waiver.
+    waivers: hit.waivers?.length ? hit.waivers : undefined,
   });
 }
 

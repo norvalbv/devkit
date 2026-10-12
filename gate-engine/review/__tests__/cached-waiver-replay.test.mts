@@ -1,5 +1,5 @@
 import { execSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -138,6 +138,12 @@ describe('runReviewGate — a waived correctness FAIL on an identical re-run', (
     expect(await runReviewGate(repo, { exec })).toBe(0);
     expect(judged()).toBe(before);
     expect(printed()).toContain(`${REVIEWER} — check-fail-1 overridden [${fp}] (cached PASS)`);
+    const hits = readFileSync(process.env.DEVKIT_GATE_EVENTS ?? '', 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line))
+      .filter((row) => row.type === 'cache_hit' && row.judge === `review:${REVIEWER}`);
+    expect(hits.at(-1)?.waivers).toEqual([{ lens: 'check-fail-1', fingerprint: fp }]);
 
     persist(repo, {});
     expect(await runReviewGate(repo, { exec })).toBe(1);

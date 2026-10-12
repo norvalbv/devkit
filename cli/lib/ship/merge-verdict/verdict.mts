@@ -7,7 +7,7 @@ import { TEST_PATH } from '../../../../gate-engine/coverage/gate-shared.mts';
 import { decisionFileRe, LOCKFILE_RE, PKG_RE } from '../../../../gate-engine/decisions/detect.mts';
 import { FIXED_GATE_INPUTS } from '../../../../gate-engine/deterministic/gate-inputs.mts';
 import { compileRepoGlob } from '../../../../skills/_devkit/review-roots.mjs';
-import type { RegressionEvidence } from '../../baseline-status/regression-evidence.mts';
+import type { EvidenceOutcome as BlockOutcome } from '../evidence/outcome.mts';
 import { repoGlobSchema } from '../generated-paths/registry.mts';
 
 export type Verdict = 'auto-merge-eligible' | 'human-review' | 'policy';
@@ -37,20 +37,17 @@ export interface ChangedPath {
   deleted: number | null;
 }
 
-export interface EvidenceOutcome {
-  status: RegressionEvidence['status'] | 'not-run';
-  headSha: string;
-  /** Why no proof was attempted, when status is 'not-run'. */
-  abstention?: string;
-}
+/** The evidence block's own outcome, of which the verdict reads only these fields. */
+export type EvidenceOutcome = Pick<BlockOutcome, 'status' | 'headSha'> &
+  Partial<Pick<BlockOutcome, 'reason'>>;
 
 export interface ShipChange {
   headSha: string;
   /** The PR title or squash subject; its Conventional Commits type picks the size limit. */
   subject: string;
   paths: readonly ChangedPath[];
-  /** GUARD_* bypasses and waived findings; 'unknown' when they could not be read. */
-  bypasses: readonly string[] | 'unknown';
+  /** GUARD_* bypasses and waived findings, or why they could not be read. */
+  bypasses: readonly string[] | { unknown: string };
   evidence: EvidenceOutcome | null;
 }
 
@@ -202,7 +199,7 @@ function proofReason({ evidence, headSha }: ShipChange): VerdictReason {
   if (evidence.status !== 'captured') {
     const why =
       evidence.status === 'not-run'
-        ? `not-run: ${evidence.abstention ?? 'unspecified'}`
+        ? `not-run: ${evidence.reason ?? 'unspecified'}`
         : evidence.status;
     return { code: 'no-captured-proof', detail: printable(why) };
   }
@@ -242,7 +239,8 @@ export function mergeVerdict(change: ShipChange, configText: string | null): Mer
     return decide([{ code: 'config-invalid', detail: printable(message) }]);
   }
   const reasons: VerdictReason[] = [];
-  if (change.bypasses === 'unknown') reasons.push({ code: 'bypass-unknown' });
+  if ('unknown' in change.bypasses)
+    reasons.push({ code: 'bypass-unknown', detail: printable(change.bypasses.unknown) });
   else if (change.bypasses.length)
     reasons.push({
       code: 'gate-bypassed',

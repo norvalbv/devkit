@@ -353,6 +353,7 @@ export async function runReviewGate(
       judgedBaseSha: judgedBaseSha(base),
       baseState: base.state,
       coverage: c.coverage,
+      waivers: c.waivers,
     });
   }
   if (plan.tasks.length === 0) return finish(0);

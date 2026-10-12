@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { EVIDENCE_BEGIN, readEvidenceBlock } from '../lib/ship/evidence/block.mts';
+import { EVIDENCE_BEGIN, readEvidenceBlock, VERDICT_SLOT } from '../lib/ship/evidence/block.mts';
 import { testSpawnSync as spawnSync } from './_helpers.mts';
 import {
   dirs,
@@ -49,9 +49,14 @@ appendFileSync(env.GH_LOG, args.join(' ') + '\\n');
 const url = 'https://github.com/acme/app/pull/42';
 const tip = (branch) => execFileSync('git', ['-C', env.GH_BARE, 'rev-parse', 'refs/heads/' + branch], { encoding: 'utf8' }).trim();
 const json = args.includes('--json') ? args[args.indexOf('--json') + 1] : '';
-if (args[1] === 'create') { writeFileSync(env.GH_STATE, args[args.indexOf('--body') + 1]); console.log(url); }
+if (args[1] === 'create') {
+  writeFileSync(env.GH_STATE, args[args.indexOf('--body') + 1]);
+  writeFileSync(env.GH_STATE + '.title', args[args.indexOf('--title') + 1]);
+  console.log(url);
+}
 else if (args[1] === 'edit') writeFileSync(env.GH_STATE, readFileSync(0, 'utf8'));
-else if (json === 'body,headRefOid,baseRefOid') process.stdout.write(JSON.stringify({
+else if (json === 'title,body,headRefOid,baseRefOid') process.stdout.write(JSON.stringify({
+  title: existsSync(env.GH_STATE + '.title') ? readFileSync(env.GH_STATE + '.title', 'utf8') : 'fix: value',
   body: existsSync(env.GH_STATE) ? readFileSync(env.GH_STATE, 'utf8') : '',
   headRefOid: env.GH_HEAD_OID || tip(env.GH_HEAD), baseRefOid: env.GH_BASE_OID || tip(env.GH_BASE) }));
 else if (json.startsWith('number,state')) console.log(['42', 'OPEN', env.GH_HEAD, tip(env.GH_HEAD), 'acme/app', env.GH_BASE, url].join('\\t'));
@@ -64,7 +69,7 @@ function ghEnv(extra: Record<string, string>) {
   writeFileSync(join(bin, 'gh'), GH_STUB);
   chmodSync(join(bin, 'gh'), 0o755);
   const inherited = Object.fromEntries(
-    Object.entries(process.env).filter(([key]) => !key.startsWith('VITEST')),
+    Object.entries(process.env).filter(([key]) => !/^(VITEST|GUARD_|FRINK_|HUSKY$)/.test(key)),
   );
   return {
     log: join(bin, 'gh.log'),
@@ -140,6 +145,14 @@ describe('devkit ship evidence block', () => {
     });
     expect(block).toContain('"src/value.test.mjs"');
     expect(block).toMatch(/\| red \| PR base \+ PR test files `\w+` \| 1 \| 0 \| 1 \| 0 \|/);
+    // One small source file with proof captured at this head, gated by this ship with no bypass.
+    expect(block).toContain(
+      `${VERDICT_SLOT} **Merge verdict:** auto-merge-eligible (captured-proof) · advisory, at \`${head.slice(0, 12)}\`\n`,
+    );
+    expect(readEvidenceBlock(block, head)?.mergeVerdict).toEqual({
+      verdict: 'auto-merge-eligible',
+      reasons: [{ code: 'captured-proof' }],
+    });
 
     // An explicit body with no new commit swaps the caller text and carries the block unchanged.
     const reworded = bash(repo.dir, repo.env, [
@@ -174,6 +187,19 @@ describe('devkit ship evidence block', () => {
     const body = readFileSync(repo.state, 'utf8');
     expect(body.replace(BLOCK, 'BLOCK')).toBe(`reworded\n\nBLOCK\n\n${QAVIS}\n`);
     expect(readEvidenceBlock(body, next)).toMatchObject({ status: 'captured', stale: false });
+    // Recomputed for the new head: the first commit was gated by an earlier ship, so no clean record.
+    expect(body).toContain(`· advisory, at \`${next.slice(0, 12)}\``);
+    expect(body).not.toContain(head.slice(0, 12));
+    expect(readEvidenceBlock(body, next)?.mergeVerdict).toEqual({
+      verdict: 'human-review',
+      reasons: [
+        {
+          code: 'bypass-unknown',
+          detail: '2 commits since the PR base, only a one-commit run is on record',
+        },
+        { code: 'captured-proof' },
+      ],
+    });
   }, 600_000);
 
   it('makes no PR-body call at all when the repository has not configured evidence', () => {
@@ -231,6 +257,7 @@ describe('devkit ship evidence block', () => {
     const body = readFileSync(repo.state, 'utf8');
     expect(readEvidenceBlock(body, tipOf(repo.bare, 'feat/slow'))?.status).toBe('inconclusive');
     expect(body).toContain('did not finish within 10s');
+    expect(body).toContain('**Merge verdict:** human-review (no-captured-proof: inconclusive)');
     const pid = Number(readFileSync(pidFile, 'utf8'));
     expect(() => process.kill(pid, 0)).toThrow();
   }, 240_000);
@@ -262,12 +289,12 @@ function publishRun(
   const base = commit({ 'guard.config.json': config, 'src/value.mjs': BROKEN, ...baseFiles });
   const head = commit(headFiles);
   const gh = ghEnv({ GH_HEAD_OID: head, GH_BASE_OID: base });
-  const publish = (headArg = head) =>
+  const publish = (headArg = head, extra: Record<string, string> = {}) =>
     spawnSync(
       process.execPath,
       [RUN, 'publish', '--cwd', root, '--repo', 'acme/app', '--pr', '42', '--head', headArg],
       {
-        env: gh.env,
+        env: { ...gh.env, ...extra },
         encoding: 'utf8',
         timeout: 200_000,
       },
@@ -322,6 +349,40 @@ describe('evidence outcomes', () => {
       reason,
     });
     expect(existsSync(marker)).toBe(false);
+  });
+
+  it('names a bypass exported for the ship, and reads the record as unknown outside one', () => {
+    const run = publishRun({}, { 'src/value.mjs': FIXED });
+    const sink = join(mkdtempSync(join(tmpdir(), 'evidence-sink-')), 'gate-events.jsonl');
+    dirs.push(dirname(sink));
+    const row = (type: string, extra = {}) => JSON.stringify({ ship_id: 's1', type, ...extra });
+    writeFileSync(sink, `${row('ship_attempt')}\n${row('ship_result', { exit_code: 0 })}\n`);
+    const shipped = { DEVKIT_SHIP_ID: 's1', DEVKIT_GATE_EVENTS: sink };
+    const verdictOf = () =>
+      readEvidenceBlock(readFileSync(run.gh.state, 'utf8'), run.head)?.mergeVerdict?.reasons;
+
+    expect(run.publish(run.head, { ...shipped, GUARD_COVERAGE_OK: '1' }).status).toBe(0);
+    expect(readFileSync(run.gh.state, 'utf8')).toContain(
+      '**Merge verdict:** human-review (gate-bypassed: GUARD_COVERAGE_OK) · advisory',
+    );
+
+    writeFileSync(run.gh.state, '');
+    expect(run.publish(run.head, shipped).status).toBe(0);
+    expect(verdictOf()).toEqual([{ code: 'no-captured-proof', detail: 'not-run: no-test-change' }]);
+
+    writeFileSync(run.gh.state, '');
+    expect(run.publish().status).toBe(0);
+    expect(verdictOf()?.[0]).toEqual({ code: 'bypass-unknown', detail: 'no devkit ship gate run' });
+  });
+
+  it('still writes the block when the verdict cannot be computed, and says why', () => {
+    const run = publishRun({}, { 'src/value.mjs': FIXED });
+    const r = run.publish(run.head, { GH_BASE_OID: 'f'.repeat(40) });
+    expect(r.status, r.stderr).toBe(0);
+    const body = readFileSync(run.gh.state, 'utf8');
+    expect(body).toMatch(/\*\*Merge verdict:\*\* unavailable \(Command failed: git /);
+    expect(readEvidenceBlock(body, run.head)).toMatchObject({ status: 'inconclusive' });
+    expect(readEvidenceBlock(body, run.head)?.mergeVerdict).toBeUndefined();
   });
 
   it('writes nothing once the PR head has moved past the evidence head', () => {
