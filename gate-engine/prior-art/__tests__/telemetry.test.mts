@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -184,6 +184,85 @@ describe('validated prior-art judge_exec telemetry', () => {
     });
     expect(run.status, run.stderr).toBe(0);
     expect(events()[0]).toMatchObject({ run_mode: 'agent', prior_art_verdict: 'DISSOLVE_FRAME' });
+  });
+
+  it('flags local-leg counts that disagree with the resolver, without failing the call', () => {
+    writeFileSync(
+      path.join(dir, 'guard.config.json'),
+      JSON.stringify({ research: { referenceCheckouts: ['sib'] } }),
+    );
+    mkdirSync(path.join(dir, 'sib'));
+    const record = (input: string) => {
+      const run = spawnSync('node', [CLI, 'record-agent', 'prior-art'], {
+        input,
+        cwd: dir,
+        encoding: 'utf8',
+      });
+      expect(run.status, run.stderr).toBe(0);
+      return { receipt: JSON.parse(run.stdout), stderr: run.stderr };
+    };
+    const zero = response();
+    zero.legs[0] = { ...zero.legs[0], status: 'unavailable', resolvedCheckouts: 0 };
+
+    expect(record(JSON.stringify(response())).receipt.checkouts_check).toBe('match');
+    const flagged = record(JSON.stringify(zero));
+    expect(flagged.receipt).toMatchObject({
+      checkouts_check: 'mismatch',
+      checkouts_claimed: { declared: 1, resolved: 0 },
+      checkouts_actual: { declared: 1, resolved: 1 },
+    });
+    expect(flagged.stderr).toContain('guard-review reference-checkouts');
+    expect(record('not JSON').receipt.checkouts_check).toBe('unchecked');
+    writeFileSync(path.join(dir, 'guard.config.json'), '{"research": ');
+    expect(record(JSON.stringify(zero)).receipt.checkouts_check).toBe('unchecked');
+    expect(events().map((event) => event.checkouts_check)).toEqual([
+      'match',
+      'mismatch',
+      'unchecked',
+      'unchecked',
+    ]);
+    expect(events()[1]).toHaveProperty('prior_art_status', 'reviewed');
+  });
+
+  it('leaves every other agent label without a checkout check', () => {
+    writeFileSync(
+      path.join(dir, 'guard.config.json'),
+      JSON.stringify({ research: { referenceCheckouts: ['gone'] } }),
+    );
+    const run = spawnSync('node', [CLI, 'record-agent', 'feature-critique'], {
+      input: JSON.stringify(response()),
+      cwd: dir,
+      encoding: 'utf8',
+    });
+    expect(run.status, run.stderr).toBe(0);
+    expect(JSON.parse(run.stdout)).not.toHaveProperty('checkouts_check');
+    expect(events()[0]).not.toHaveProperty('checkouts_check');
+    expect(run.stderr).not.toContain('reference checkouts');
+  });
+
+  it('prints the resolver result through the real CLI', () => {
+    mkdirSync(path.join(dir, 'sib'));
+    writeFileSync(
+      path.join(dir, 'guard.config.json'),
+      JSON.stringify({ research: { referenceCheckouts: ['sib', 'gone'] } }),
+    );
+    const run = spawnSync('node', [CLI, 'reference-checkouts', '--json'], {
+      cwd: dir,
+      encoding: 'utf8',
+    });
+    expect(run.status, run.stderr).toBe(0);
+    expect(JSON.parse(run.stdout)).toEqual({
+      declaredCheckouts: 2,
+      resolvedCheckouts: 1,
+      resolved: [realpathSync(path.join(dir, 'sib'))],
+    });
+    writeFileSync(path.join(dir, 'guard.config.json'), '{"research": ');
+    const broken = spawnSync('node', [CLI, 'reference-checkouts', '--json'], {
+      cwd: dir,
+      encoding: 'utf8',
+    });
+    expect(broken.status).not.toBe(0);
+    expect(broken.stdout).toBe('');
   });
 
   it('records the unwrapped verdict for both spawned judge paths', async () => {

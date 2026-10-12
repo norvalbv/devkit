@@ -154,14 +154,16 @@ reads them; both are safe to delete.
 
 ## The dup gate names a symbol my file doesn't define (extract refactor blocked)
 
-It can't any more, and if you see it on an older devkit: **the search-code index is stale, not your code.**
-`guard-dup` now verifies every pair against the working tree first — a side whose indexed body is no
-longer on disk drops the pair and is printed as `Stale index — dropped N candidate pair(s) …`. That is a
+**The search-code index is stale, not your code.** `guard-dup` verifies every pair against the
+working tree first — a side whose indexed body is no longer on disk drops the pair and is printed as `Stale index — dropped N candidate pair(s) …`. That is a
 _withheld_ finding: re-index those files (`search-code index --seed-files "<files>"`) and re-run to get
 coverage back. **Never** paste the `guard-dup-allowlist add` command for such a pair — it would record a
 permanent approval for a duplication that does not co-exist. A `Freshness NOT verified` line means the
 index carries no `raw_code`/`id` (or its paths don't resolve here), so the pairs above it were reported
-unchecked — eyeball the ranges before approving. `GUARD_DUP_VERIFY_TREE=0` disables the check.
+unchecked — eyeball the ranges before approving. A `Could not check N side(s) above` block names the
+sides of a reported pair whose indexed body was too short or missing to compare: the stale-index block
+can still happen for exactly those, so open the named file and re-index if the symbol is gone.
+`GUARD_DUP_VERIFY_TREE=0` disables the check.
 
 ## `devkit doctor` reports `search-code index: DRIFT` or `MISSING`
 
@@ -213,6 +215,21 @@ the file alone: `bun run test:run -- cli/__tests__/review.test.mts`. If it still
 investigate the named phase. Raise the ceiling only when setup is legitimately slower; never lower
 it and never serialise the file (`suite-hangs-bound-at-the-spawn-site`,
 `test-deadlines-are-hang-detectors`).
+
+## A devkit test run printed `devkit test bash: N tests need bash >= 4 and were skipped`
+
+macOS ships bash 3.2 as `/bin/bash`. Some of devkit's shell runs differently on bash 4 and later,
+which is what Linux CI uses: a `wait` interrupted by a trap, and `"${arr[@]}"` on an empty array
+under `set -u`. The tests for that behaviour skip when no bash >= 4 is found, so a green local run
+has not executed them. Two ways to run them:
+
+- `brew install bash`. The tests find `/opt/homebrew/bin/bash` or `/usr/local/bin/bash` on their own.
+- `bun run test:linux-bash <test file>...` runs the named files under bash 5 in a
+  `node:24-bookworm` container. It needs Docker running and at least one file. Run it for the files
+  that print the line, not the whole suite: a few cases need `gh` or devkit's own git repository,
+  and the container has neither.
+
+`bun run test:run:report` passes its own reporters, so this line does not appear there.
 
 ## CI `Release-only dist` failed: `this ship rewrites tracked dist, which is release-only`
 
@@ -278,8 +295,8 @@ be the dark one. Find out first with `devkit doctor` or the ship preflight, then
 Export or unset in the shell; never prefix the command. An inline `VAR=x devkit ship` can be stripped
 by a command-rewriting shell hook, exactly as with `SHIP_COMMIT_TIMEOUT` below.
 
-- The chunk cap matters: 400 LOC is benched for `gpt-5.6-sol` only, so moving three knobs runs the
-  correctness reviewer at a cap never measured for the model now judging.
+- The chunk cap matters: the package default chunks correctness review at 400 LOC, and no large-diff
+  bench has measured `claude-haiku-5-5` chunked, so moving three knobs runs it in an unmeasured shape.
 - A sentry pin (`GUARD_SENTRY_MODEL` or `FRINK_SENTRY_MODEL`) stays where it points until cleared, which
   is why both blocks unset it. `devkit doctor --fix` refuses to bind while one pins codex, rather than
   reporting a move that left a judge behind.

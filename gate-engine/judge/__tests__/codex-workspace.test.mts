@@ -19,7 +19,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { codexExecArgs, judgeCliFor } from '../codex/result.mts';
+import { codexExecArgs, judgeCliFor, NO_TEST_RUNS } from '../codex/result.mts';
 import { prepareCodexSandbox } from '../codex/workspace.mts';
 import { execJudge, execJudgeAsync, type JudgeOutage } from '../run-judge.mts';
 
@@ -87,6 +87,7 @@ describe('codex judge argv — workspace confinement', () => {
     expect(argAfter(cli.argv, '-C')).toBe('/tmp/scratch');
     expect(argAfter(cli.argv, '--add-dir')).toBe('/work/repo/.claude');
     expect(cli.argv[cli.argv.length - 1]).toMatch(/^The repository under review is \/work\/repo\./);
+    expect(cli.argv[cli.argv.length - 1]).toContain(NO_TEST_RUNS);
     expect(cli.argv[cli.argv.length - 1].endsWith('P')).toBe(true);
     expect(cli.extraEnv).toEqual({ DEVKIT_JUDGE_REPO_ROOT: '/work/repo' });
   });
@@ -235,5 +236,48 @@ describe('checklist scripts under a confined judge', () => {
       { cwd: dir, env: { ...process.env, DEVKIT_JUDGE_REPO_ROOT: repo }, encoding: 'utf8' },
     );
     expect(out.trim()).toBe(repo);
+  });
+});
+
+describe('the commit-gates skill replay of a workspace-write judge sandbox', () => {
+  const skill = fileURLToPath(new URL('../../../skills/commit-gates/SKILL.md', import.meta.url));
+
+  /** Run the skill's documented one-liner from the repo root against a codex stand-in that records its view. */
+  function replay() {
+    const line = /`(r=\$PWD .*?echo "exit \$\?")`/.exec(readFileSync(skill, 'utf8'))?.[1];
+    if (!line) throw new Error('commit-gates SKILL.md lost its codex sandbox one-liner');
+    const bin = path.join(dir, 'bin');
+    const record = path.join(dir, 'seen');
+    mkdirSync(bin);
+    writeFileSync(
+      path.join(bin, 'codex'),
+      `#!/bin/sh\n{ pwd -P; ls -A "$CODEX_HOME" | wc -l; ls; for a; do echo "ARG:$a"; done; } > '${record}'\n`,
+    );
+    chmodSync(path.join(bin, 'codex'), 0o755);
+    const out = execFileSync('bash', ['-c', line.replace('<cmd>', 'true')], {
+      cwd: repo,
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, SHELL: '/bin/sh' },
+      encoding: 'utf8',
+    });
+    return { out, seen: readFileSync(record, 'utf8').trim().split('\n') };
+  }
+
+  it('grants the same <repo>/.claude root and sandbox mode the judge argv does, not the scratch dir', () => {
+    const { out, seen } = replay();
+    const judge = judgeCliFor(INVESTIGATING, {}, false, { scratch: '/s', repoRoot: repo }).argv;
+    const args = seen.filter((l) => l.startsWith('ARG:')).map((l) => l.slice(4));
+    expect(args).toContain(`sandbox_mode="${argAfter(judge, '--sandbox')}"`);
+    expect(args).toContain(
+      `sandbox_workspace_write.writable_roots=["${argAfter(judge, '--add-dir')}"]`,
+    );
+    expect(args.slice(-3)).toEqual(['/bin/sh', '-lc', 'true']);
+    expect(out.trim()).toBe('exit 0');
+  });
+
+  it('runs from a scratch cwd holding the root AGENTS.md, with an empty CODEX_HOME', () => {
+    const [cwd, homeEntries, ...listing] = replay().seen;
+    expect(cwd).not.toBe(repo);
+    expect(listing).toContain('AGENTS.md');
+    expect(homeEntries.trim()).toBe('0');
   });
 });

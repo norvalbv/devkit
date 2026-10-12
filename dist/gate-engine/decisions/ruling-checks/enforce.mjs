@@ -17,7 +17,7 @@ const CHECK_TAG = '**Check:**';
 // A Check NOTE line, never prose that merely mentions the tag: one pattern for git grep, one for JS.
 const NOTE_LINE = '^- [0-9]{4}-[0-9]{2}-[0-9]{2} — \\*\\*Check:\\*\\*';
 const NOTE_LINE_RE = /^- \d{4}-\d{2}-\d{2} — \*\*Check:\*\*/m;
-const BYPASS = 'DECISION_CHECKS_OK';
+export const BYPASS_SUFFIX = 'DECISION_CHECKS_OK';
 const TIMEOUT_MS = 120_000;
 const RULING_CAP = 2000;
 const WS_RE = /\s+/;
@@ -140,9 +140,9 @@ function printRemedy() {
 }
 /** The decision-checks gate: 0 when every Check this commit touches passes, else 1. */
 export async function runGate(cwd = process.cwd(), spawn = spawnSync) {
-    if (envFlag(BYPASS)) {
-        emitGateBypass(GATE, `GUARD_${BYPASS}`);
-        console.log(`⚠️  Decision checks BYPASSED for this run (GUARD_${BYPASS}=1): no Check ran.`);
+    if (envFlag(BYPASS_SUFFIX)) {
+        emitGateBypass(GATE, `GUARD_${BYPASS_SUFFIX}`);
+        console.log(`⚠️  Decision checks BYPASSED for this run (GUARD_${BYPASS_SUFFIX}=1): no Check ran.`);
         return 0;
     }
     const staged = changedFiles(cwd, ['--cached', '--no-renames']);

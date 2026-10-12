@@ -22,9 +22,14 @@ import { type JudgeUsage, withResultArgs } from '../claude-result.mts';
 // — a judge that works must never start failing because its accounting could not be read. The
 // shape is pinned by a fixture captured VERBATIM from a real codex-cli 0.149 run (see the tests).
 
-interface CodexEventItem {
+export interface CodexEventItem {
+  id?: string;
   type?: string;
   text?: string;
+  command?: string;
+  aggregated_output?: string;
+  exit_code?: number | null;
+  status?: string;
 }
 
 interface CodexUsagePayload {
@@ -49,7 +54,7 @@ interface CodexEvent {
 
 /** Parse the JSONL stream ONCE at the I/O boundary; the verdict/usage/failure readers below all
  * branch on these domain events rather than re-scanning raw lines. */
-function codexEventsOf(raw: string): CodexEvent[] {
+export function codexEventsOf(raw: string): CodexEvent[] {
   const events: CodexEvent[] = [];
   for (const line of raw.split('\n')) {
     const trimmed = line.trim();
@@ -197,8 +202,12 @@ export interface CodexWorkspace {
 const confinedWorkspace = (parts: ClaudeArgvParts, workspace?: CodexWorkspace) =>
   parts.readOnly ? null : (workspace ?? null);
 
+// Claude judges cannot run tests (BASE_TOOLS); codex judges have a shell, so they are told instead.
+export const NO_TEST_RUNS =
+  'Do not run tests, test runners or package-manager scripts (bun run, npm run); review by reading. Test execution belongs to the pre-push suite.';
+
 function repoRootNotice(repoRoot: string): string {
-  return `The repository under review is ${repoRoot}. Run every command from there (cd into it first); paths in this task are relative to it. Its working tree is read-only to you except .claude/.\n\n`;
+  return `The repository under review is ${repoRoot}. Run every command from there (cd into it first); paths in this task are relative to it. Its working tree is read-only to you except .claude/. ${NO_TEST_RUNS}\n\n`;
 }
 
 export function codexExecArgs(
@@ -227,6 +236,7 @@ export function codexExecArgs(
   // TOML string, the same quoting the bench's effort wrappers used (`-c model_reasoning_effort="high"`).
   if (spec.effort !== null)
     argv.push('-c', `model_reasoning_effort=${JSON.stringify(spec.effort)}`);
+  // skills/commit-gates/SKILL.md replays this sandbox via `codex sandbox`; keep it in step.
   argv.push(
     '--sandbox',
     parts.readOnly ? 'read-only' : 'workspace-write',
@@ -344,6 +354,9 @@ export function codexMcpArgs(
     if (grants.length > 0 && !grants.includes('*'))
       serverArgv.push('-c', `mcp_servers.${name}.enabled_tools=[${grants.map(tomlStr).join(',')}]`);
     serverArgv.push('-c', `mcp_servers.${name}.startup_timeout_sec=10`);
+    // Exec's approval policy is `never`, so an unapproved MCP call is refused; a grant is the approval.
+    if (allowedTools !== null)
+      serverArgv.push('-c', `mcp_servers.${name}.default_tools_approval_mode="approve"`);
     argv.push(...serverArgv);
     Object.assign(extraEnv, serverEnv);
     injected.push(name);

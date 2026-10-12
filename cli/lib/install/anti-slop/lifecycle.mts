@@ -20,6 +20,8 @@ import { type CheckResult, check } from '../../doctor/check-result.mts';
 import { digest, packageDir } from '../../fs-helpers.mts';
 import {
   assertOxcCapabilityReady,
+  isOverlayOxcInstall,
+  OVERLAY_ENTRY_REL,
   oxcBaseCapabilityIssue,
   resolveOxlintEntryConfig,
   syncOxcCapability,
@@ -324,6 +326,12 @@ function probeIntegration(cwd: string): { ok: boolean; detail: string } {
   }
 }
 
+/** A stamped overlay lints through its root entry config; without it no lint judges the repo. */
+function overlayEntryIssue(cwd: string): string | null {
+  if (!isOverlayOxcInstall(cwd) || resolveOxlintEntryConfig(cwd) !== null) return null;
+  return `overlay entry ${OVERLAY_ENTRY_REL} is missing — run \`devkit doctor --fix\``;
+}
+
 function capabilityHealth(cwd: string): CapabilityHealth {
   const manifest = readAntiSlopManifest(cwd);
   if (!manifest) {
@@ -353,7 +361,7 @@ function capabilityHealth(cwd: string): CapabilityHealth {
     digest(readFileSync(config)) === manifest.configDigest &&
     digest(readFileSync(probe)) === manifest.probeDigest &&
     digest(readFileSync(probeConfig)) === manifest.probeConfigDigest;
-  const baseIssue = oxcBaseCapabilityIssue(cwd);
+  const baseIssue = oxcBaseCapabilityIssue(cwd) ?? overlayEntryIssue(cwd);
   const baseIntegrated = baseIssue === null;
   const runtime =
     rulesComplete && bytesOk && baseIntegrated

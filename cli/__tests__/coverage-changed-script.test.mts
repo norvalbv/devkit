@@ -18,6 +18,23 @@ const reportsDir = (): string => {
   return match[1];
 };
 
+// A fresh process per env: other test files import vitest.config.mjs, so setting it here is too late.
+type CoverageBlock = { reporter?: [string, { maxCols: number; skipFull: boolean }][] };
+const coverageBlock = (marker?: string): CoverageBlock => {
+  const env = { ...process.env };
+  delete env.DEVKIT_COVERAGE_CHANGED;
+  if (marker) env.DEVKIT_COVERAGE_CHANGED = marker;
+  const code = "import c from './vitest.config.mjs'; console.log(JSON.stringify(c.test.coverage));";
+  const run = testSpawnSync(process.execPath, ['--input-type=module', '-e', code], {
+    cwd: ROOT,
+    env,
+    encoding: 'utf8',
+  });
+  if (run.status !== 0) throw new Error(`config import failed: ${run.stderr}`);
+  const block: CoverageBlock = JSON.parse(run.stdout);
+  return block;
+};
+
 const ignored = (path: string): boolean =>
   testSpawnSync('git', ['check-ignore', '--no-index', '-q', path], { cwd: ROOT }).status === 0;
 
@@ -40,6 +57,20 @@ describe('test:run:coverage:changed', () => {
     // vitest removes <reportsDirectory>/.tmp when a run finishes; a shared dir lets the first run to
     // finish delete a sibling's in-flight coverage files. `$$` is the script shell's PID.
     expect(reportsDir().endsWith('/$$')).toBe(true);
+  });
+
+  it('leaves the reporter to the config, which only this script switches on', () => {
+    // A CLI --coverage.reporter replaces the config tuple, and the CLI cannot carry its options.
+    expect(script.startsWith('DEVKIT_COVERAGE_CHANGED=1 vitest run ')).toBe(true);
+    expect(script).not.toContain('--coverage.reporter');
+  });
+
+  it('prints full file names when piped, and a row for a fully covered file under an agent', () => {
+    expect(coverageBlock('1').reporter).toEqual([['text', { maxCols: 200, skipFull: false }]]);
+  });
+
+  it("leaves vitest's default reporters, including the gate's json, to every other run", () => {
+    expect(coverageBlock()).not.toHaveProperty('reporter');
   });
 
   it('leaves its report gitignored without ignoring the gate-engine/coverage source dir', () => {
