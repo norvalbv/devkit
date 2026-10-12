@@ -1,16 +1,20 @@
 /** classifyJudgeOutage picks the cause the operator chases and whether the cascade pays a second
  *  spawn. The non-regressions matter as much: unknown stays `transient`, Node's message is unread. */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   classifyJudgeOutage,
   formatResetDelta,
   parseResetTime,
   plausibleReset,
 } from '../outage/classify.mts';
+import { strictRemedy, unavailableMessage } from '../outage/wording.mts';
 
 /** The exact wording codex 0.152.0 emits on a quota lock, captured 2026-09-03. */
 const CODEX_QUOTA =
   "You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at Sep 8th, 2026 3:38 PM.";
+/** A same-day 5h-window lock, captured from a 2026-10-06 ship: the reset carries no date. */
+const CODEX_SAME_DAY =
+  'You’ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at 10:21 PM.';
 const codexStream = (message: string): string =>
   JSON.stringify({ type: 'turn.failed', error: { message } });
 
@@ -109,6 +113,47 @@ describe('parseResetTime', () => {
   it('rejects a time in the past or absurdly far ahead rather than reporting it', () => {
     expect(parseResetTime('try again at Jan 1st, 2020 3:00 PM', now)).toBeUndefined();
     expect(parseResetTime('try again at Jan 1st, 2999 3:00 PM', now)).toBeUndefined();
+  });
+});
+
+describe('parseResetTime — the same-day clock form codex prints without a date', () => {
+  // Local-time `now` and expectations, so the suite holds in every TZ.
+  const evening = new Date(2026, 9, 6, 19, 0).getTime();
+
+  it('resolves "try again at 10:21 PM" to that time on the local day of `now`', () => {
+    expect(parseResetTime(CODEX_SAME_DAY, evening)).toBe(new Date(2026, 9, 6, 22, 21).getTime());
+  });
+
+  it('reads 12 AM as midnight and 12 PM as noon', () => {
+    const justAfterMidnight = new Date(2026, 9, 6, 0, 0, 30).getTime();
+    expect(parseResetTime('try again at 12:05 AM.', justAfterMidnight)).toBe(
+      new Date(2026, 9, 6, 0, 5).getTime(),
+    );
+    expect(parseResetTime('try again at 12:30 PM.', justAfterMidnight)).toBe(
+      new Date(2026, 9, 6, 12, 30).getTime(),
+    );
+  });
+
+  it('drops a clock time already past, as a message read across midnight would be', () => {
+    expect(parseResetTime('try again at 6:30 PM.', evening)).toBeUndefined();
+  });
+
+  it('reaches the warning and the strict remedy as a real wait', () => {
+    // The classifier has no clock seam, so pin the system clock to the evening `now`.
+    vi.useFakeTimers({ now: evening });
+    try {
+      const failure = { status: 1, stdout: codexStream(CODEX_SAME_DAY) };
+      const outage = classifyJudgeOutage(failure);
+      expect(outage.resetsAt).toBe(new Date(2026, 9, 6, 22, 21).getTime());
+      expect(unavailableMessage('review:commit-guard', failure, undefined, 'codex')).toContain(
+        'usage limit reached, resets in 3h 21m',
+      );
+      expect(strictRemedy('rate-limited', 'codex', outage.resetsAt)).toContain(
+        'for another 3h 21m',
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
