@@ -36,6 +36,11 @@ export interface GateEvent {
   detail?: string;
   cause?: string;
   reason?: string;
+  /** review_result inconclusive only: the machine cause (`outage`, `rate-limited`, `timeout`, …). */
+  inconclusive_cause?: string;
+  /** judge_exec only: `ok` or the classified outage kind, and on failure the provider's own words. */
+  outcome?: string;
+  outage_detail?: string;
   bypass?: string;
   blocked_gate?: string | null;
   exit_code?: number;
@@ -94,6 +99,9 @@ const COMPLETENESS = 'completeness';
 /** Caps on what one terminus prints: past these the digest is the wall of text it replaces. */
 const MAX_FINDINGS = 8;
 const MAX_MISSING = 3;
+/** Never the bare word "transient": it reads as "a retry clears it", and a usage lock wore it. */
+const UNCLASSIFIED =
+  'judge failed, cause unclassified — read the guard-judge preflight lines at the top of the log';
 
 /**
  * The I/O boundary: one JSONL line in, this ship's event or nothing. Every downstream function
@@ -151,6 +159,36 @@ function isBlocking(finding: Attributable, blocked: string, siblings: Attributab
   return !siblings.some((s) => s.family === 'review' && s.gate !== COMPLETENESS);
 }
 
+/** Causes whose judge_exec ledger row holds the words that explain them; a response-contract
+ *  inconclusive is a judge that answered, so an earlier failed spawn's words would mislead. */
+const OUTAGE_CAUSES = new Set(['outage', 'rate-limited', 'transient', 'unauthenticated', 'absent']);
+
+/** A codex error envelope's message (`error.message` or `detail`, one JSON line), else
+ *  the text as given — the envelope alone would spend the whole detail budget before the cause. */
+function providerMessage(text: string): string {
+  try {
+    // SAFETY: a shape, not a type — `?.` survives null or a primitive, and textOf drops a non-string.
+    const parsed = JSON.parse(text.split('\n')[0] ?? '') as {
+      error?: { message?: string };
+      detail?: string;
+    };
+    return textOf(parsed?.error?.message) || textOf(parsed?.detail) || text;
+  } catch {
+    return text;
+  }
+}
+
+/** The provider's own words per judge — the LAST failed spawn's, keyed by reviewer, not by pass. */
+function outageWordsByJudge(events: GateEvent[]): Map<string, string> {
+  const words = new Map<string, string>();
+  for (const e of events) {
+    const detail = oneLine(providerMessage(textOf(e.outage_detail)));
+    if (e.type !== 'judge_exec' || e.outcome === 'ok' || !detail) continue;
+    words.set(textOf(e.judge).replace(/:escalate$/, ''), detail);
+  }
+  return words;
+}
+
 /** Pure: events → the rows the terminus should show. No IO, so the interesting cases unit-test. */
 export function summarise(events: GateEvent[], shipId: string): DigestRow[] {
   const all = events.filter((e) => e.ship_id === shipId);
@@ -179,6 +217,7 @@ export function summarise(events: GateEvent[], shipId: string): DigestRow[] {
   // Held OUT of attributable[], not merely marked non-blocking: a stage holding no exit is then
   // structurally ineligible for isBlocking(), whatever family token it carries.
   const advisory: DigestRow[] = [];
+  const outageWords = outageWordsByJudge(mine);
   // Held out of attributable[] for the same reason: a downgrade or a reused PASS holds no exit.
   const unverified: DigestRow[] = [];
   for (const e of mine) {
@@ -187,6 +226,17 @@ export function summarise(events: GateEvent[], shipId: string): DigestRow[] {
       for (const f of blockingFindings(e)) {
         attributable.push({ gate, family: 'review', state: 'finding', ...f });
       }
+    } else if (e.type === 'review_result' && e.status === 'inconclusive') {
+      // Strict ship fails closed on every one of these, so omitting them hid most of what blocked.
+      const gate = `review:${e.reviewer ?? 'unknown'}`;
+      const cause = textOf(e.inconclusive_cause);
+      const words = OUTAGE_CAUSES.has(cause) ? outageWords.get(gate) : undefined;
+      attributable.push({
+        gate,
+        family: 'review',
+        detail: (words ?? oneLine(e.reason)) || oneLine(cause) || 'could not run',
+        state: 'could-not-run',
+      });
     } else if (e.type === 'gate_result' && e.status === 'fail') {
       const gate = e.gate ?? 'unknown';
       // A row without its own family IS its family — only the deterministic chain reports finer
@@ -219,7 +269,11 @@ export function summarise(events: GateEvent[], shipId: string): DigestRow[] {
         // unauthenticated / rate-limited / response_contract — see classifyJudgeOutage).
         // Reading only `detail` collapsed every one of them to "could not run" and threw away the
         // field that decides whether an operator checks quota or simply re-runs.
-        detail: oneLine(e.detail) || oneLine(e.cause) || 'could not run',
+        detail:
+          oneLine(e.detail) ||
+          (OUTAGE_CAUSES.has(textOf(e.cause)) ? outageWords.get(`review:${gate}`) : '') ||
+          (e.cause === 'transient' ? UNCLASSIFIED : oneLine(e.cause)) ||
+          'could not run',
         state: 'could-not-run',
       });
     } else if (e.type === 'advisory_result') {
@@ -392,15 +446,18 @@ export function render(rows: DigestRow[], logPath = ''): string {
   if (others.length > MAX_FINDINGS) {
     out.push(`   … ${others.length - MAX_FINDINGS} more finding(s) — all of them are in the log`);
   }
-  for (const r of missing.slice(0, MAX_MISSING)) {
+  // Blockers are never capped, as with findings: each fail-closed reviewer is one more to clear.
+  const missingBlockers = missing.filter((r) => r.blocking === true);
+  const missingOthers = missing.filter((r) => r.blocking !== true);
+  for (const r of [...missingBlockers, ...missingOthers.slice(0, MAX_MISSING)]) {
     // A gate that could not run is normally advisory context, but under GUARD_DETERMINISTIC_STRICT
     // an opt-out IS the block — so this marker follows the computed status, never the row's kind.
     const mark = r.blocking === true ? '✗' : '·';
     const tail = r.blocking === true ? ' — BLOCKED this run' : '';
     out.push(`   ${mark} ${r.gate}${tail} — ${r.detail}`);
   }
-  if (missing.length > MAX_MISSING) {
-    out.push(`   … ${missing.length - MAX_MISSING} more gate(s) that could not run`);
+  if (missingOthers.length > MAX_MISSING) {
+    out.push(`   … ${missingOthers.length - MAX_MISSING} more gate(s) that could not run`);
   }
   // Uncapped: at most one row per judge survives the dedupe, and a cut one would be the silent
   // omission this section exists to end. The same `·` a bypass wears, because it carries that weight.
