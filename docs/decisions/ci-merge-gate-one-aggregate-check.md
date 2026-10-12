@@ -20,3 +20,4 @@ created: 2026-10-10
 **Scope:** .github/workflows/gate.yml
 **Category:** self-host-release
 **Source:** web · https://app.shortcut.com/benordlabs/story/5174
+- 2026-10-11 — pull_request runs test refs/pull/N/merge as of the PR's last push, so a PR can merge green against a main that moved since (#797 merged after #805 on 2026-10-05 without a re-test). When required is switched on, the strict up-to-date policy stays OFF: each merge would invalidate every open PR's 25-35 min Tests run at ~20 merges/day, and merge queue is unavailable to a personal-account repo. A stale-green break is accepted and caught by main's push run within one Tests run. Revisit when one is measured after required is on, or the repo moves to an organization.
