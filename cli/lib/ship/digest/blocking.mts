@@ -1,19 +1,17 @@
 // One digest row per blocking fingerprint (sc-3212): cut to one line, `reason` named only the
 // first, so waiving it still left the ship blocked. See the gate-verdict-attribution note.
-import { shellWord } from '../../../../gate-engine/review/valve/shell-word.mts';
+import { waiveCommand } from '../../../../gate-engine/review/valve/shell-word.mts';
 import { count, oneLine, textOf } from './fields.mts';
 import type { GateEvent } from './gate-digest.mts';
 
 const FINGERPRINT = /^[0-9a-f]{12}$/;
-const SHA = /^[0-9a-f]{7,64}$/;
 
 /** The detail of each row a review_result FAIL contributes, with the fingerprint it names. */
 export function blockingFindings(
   e: GateEvent,
 ): { detail: string; fp?: string; findings?: number }[] {
   const reviewer = oneLine(textOf(e.reviewer)) || 'unknown';
-  const sha = textOf(e.blocking_base);
-  const base = SHA.test(sha) ? ` --base ${sha}` : '';
+  const base = textOf(e.blocking_base);
   const rows: { detail: string; fp?: string; findings?: number }[] = entries(e).map((b) => ({
     detail: detail(reviewer, b, base),
     fp: b.fp,
@@ -57,8 +55,7 @@ interface Entry {
  * any other label waives nothing. oneLine capped the lens, so the hint stays bounded. */
 function detail(reviewer: string, b: Entry, base: string): string {
   const head = `${b.lens} [${b.fp}]`;
-  if (!b.exact) return `${head} — the waive command is in the log`;
-  // The same command shape blockingNote prints, so a copied hint records the waiver it names.
-  const target = shellWord(`${reviewer}:${b.lens}`);
-  return `${head} — fix it, or: guard-review waive ${target} ${b.fp}${base} "why this is not a real defect"`;
+  // The same renderer blockingNote uses, so a copied hint records the waiver it names.
+  const command = b.exact && waiveCommand({ reviewer, lens: b.lens, fp: b.fp, base });
+  return command ? `${head} — fix it, or: ${command}` : `${head} — the waive command is in the log`;
 }
