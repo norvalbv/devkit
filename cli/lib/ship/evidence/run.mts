@@ -12,7 +12,14 @@ import {
   prepareRegressionRepository,
 } from '../../baseline-status/regression-repository.mts';
 import { errorMessage } from '../review/shared/common.mts';
-import { carryEvidenceBlock, readEvidenceBlock, renderEvidenceBlock } from './block.mts';
+import type { VerdictInput } from '../merge-verdict/ship-change.mts';
+import {
+  carryEvidenceBlock,
+  type PrintedVerdict,
+  readEvidenceBlock,
+  renderEvidenceBlock,
+  verdictUnavailable,
+} from './block.mts';
 import { type EvidenceConfig, expandCommand, readEvidenceConfig } from './config.mts';
 import { type EvidenceOutcome, inconclusive, notRun, outcomeFromRegression } from './outcome.mts';
 import { publishEvidenceBlock, readPull } from './pr-body.mts';
@@ -78,6 +85,16 @@ async function produce(
   return { outcome: outcomeFromRegression(evidence, head, base), evidence };
 }
 
+/** Loaded only once a block is being written, so a ship that writes none never pays for it. */
+async function shipVerdict(input: VerdictInput): Promise<PrintedVerdict> {
+  try {
+    const { printVerdict } = await import('../merge-verdict/ship-change.mts');
+    return printVerdict(input);
+  } catch (error) {
+    return verdictUnavailable(errorMessage(error));
+  }
+}
+
 interface PublishArgs {
   cwd: string;
   repo: string;
@@ -98,6 +115,7 @@ async function publish({ cwd, repo, pr, head, failed }: PublishArgs): Promise<vo
   }
   const config = readEvidenceConfig(cwd);
   if (!config) return;
+  const env = { ...process.env };
   let produced: Produced = { outcome: inconclusive(failed ?? '', head, null), evidence: null };
   if (!failed) {
     try {
@@ -107,7 +125,16 @@ async function publish({ cwd, repo, pr, head, failed }: PublishArgs): Promise<vo
       produced = { outcome: inconclusive(detail, head, null), evidence: null };
     }
   }
-  const block = renderEvidenceBlock(produced.outcome, produced.evidence);
+  const { title, baseRefOid } = pull;
+  const verdict = await shipVerdict({
+    cwd,
+    head,
+    baseRefOid,
+    title,
+    outcome: produced.outcome,
+    env,
+  });
+  const block = renderEvidenceBlock(produced.outcome, produced.evidence, verdict);
   const result = publishEvidenceBlock(repo, pr, head, block);
   const { status, reason, detail } = produced.outcome;
   console.error(

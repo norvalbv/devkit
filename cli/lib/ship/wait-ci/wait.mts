@@ -4,11 +4,12 @@
  * only; stdout belongs to the PR URL. Why: docs/decisions/ship-ci-wait-is-observation-not-intent.md.
  */
 import { execFileSync } from 'node:child_process';
-import { appendFileSync, realpathSync } from 'node:fs';
+import { realpathSync } from 'node:fs';
 import { setTimeout as sleepFor } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
-import { parentSessionId } from '../../../../gate-engine/judge/run-context.mts';
+import type { Attribution } from '../../baseline-status/attribution.mts';
 import type { UnknownReason } from '../../baseline-status/gh.mts';
+import { recordCiEvent } from './telemetry.mts';
 
 /** The five states gh collapses `state` into. Ordered for stable rendering, not by severity. */
 export const CHECK_BUCKETS = ['pass', 'fail', 'pending', 'skipping', 'cancel'] as const;
@@ -146,7 +147,7 @@ export function verdictLine(result: WaitCiResult, pr: string): string {
   const head = `${VERDICT_PREFIX}${result.outcome} pr=${pr}${result.required ? ' scope=required' : ''}`;
   switch (result.outcome) {
     case 'failed':
-      return `${head} failing=${linked(result.failures)}`;
+      return `${head} failing=${linked(result.failures)}${result.attribution ? ` ${result.attribution.line}` : ''}`;
     case 'cancelled':
       return `${head} cancelled=${linked(result.cancelled)}`;
     case 'timed-out':
@@ -224,6 +225,8 @@ export interface WaitCiResult {
   unavailableMessage?: string;
   /** Narrowed to branch-protection required checks: only those that have REPORTED (cli/cli#8855). */
   required?: boolean;
+  /** On `failed` only: which failures the base already had. */
+  attribution?: Attribution;
 }
 
 /**
@@ -433,34 +436,18 @@ function flagValue(argv: string[], name: string): string | undefined {
   return i === -1 ? undefined : argv[i + 1];
 }
 
-/**
- * The queryable half of the verdict, beside ship_pr on the same JSONL stream. Best-effort: telemetry
- * must never be the thing that fails a ship (ship-branch.sh writes its own rows under `|| true`).
- */
-export function recordCiEvent(result: WaitCiResult, pr: string, env = process.env): void {
-  const file = env.DEVKIT_GATE_EVENTS;
-  const shipId = env.DEVKIT_SHIP_ID;
-  if (!file || !shipId) return;
-  const row = {
-    type: 'ship_ci',
-    ship_id: shipId,
-    devkit_version: env.DEVKIT_TELEMETRY_VERSION ?? null,
-    pr_number: /^\d+$/.test(pr) ? Number(pr) : null,
-    outcome: result.outcome,
-    failing: result.failures.map((f) => f.name),
-    pending: result.pending.map((p) => p.name),
-    waited_s: Math.round(result.elapsedMs / 1000),
-    polls: result.polls,
-    reason: result.unavailableReason ?? null,
-    required: result.required ?? false,
-    ts: new Date().toISOString(),
-  };
-  const parent = parentSessionId(env);
-  const stamped = parent ? { ...row, parent_session_id: parent } : row;
+/** Loaded lazily, so a broken import can never cost the verdict line of any outcome. */
+async function attribute(pr: string, failures: CheckRow[]): Promise<Attribution> {
   try {
-    appendFileSync(file, `${JSON.stringify(stamped)}\n`);
+    const { attributeFailures } = await import('../../baseline-status/attribution.mts');
+    return attributeFailures({ cwd: process.cwd(), pr, failures });
   } catch {
-    // A telemetry miss costs a queryable row, never the ship.
+    return {
+      token: 'unknown',
+      inherited: null,
+      fresh: null,
+      line: 'attribution=unknown reason=attribution-error',
+    };
   }
 }
 
@@ -488,6 +475,7 @@ async function main(argv: string[]): Promise<number> {
     intervalMs,
     settleGraceMs,
   }).then((r) => ({ ...r, required }));
+  if (result.outcome === 'failed') result.attribution = await attribute(pr, result.failures);
   console.error(verdictLine(result, pr));
   recordCiEvent(result, pr);
   return 0; // the ship already succeeded; this process never speaks for it

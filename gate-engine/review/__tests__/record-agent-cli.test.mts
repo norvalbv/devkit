@@ -264,6 +264,7 @@ describe('record-agent request capture and receipt', () => {
       invocation_id: ev?.invocation_id,
       output_sha256: sha(response),
       request_sha256: sha(request),
+      checkouts_check: 'unchecked',
       transcript_ref: ev?.transcript_ref,
       telemetry: 'written',
     });

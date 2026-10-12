@@ -128,7 +128,7 @@ function proofReason({ evidence, headSha }) {
         return { code: 'no-captured-proof', detail: 'missing' };
     if (evidence.status !== 'captured') {
         const why = evidence.status === 'not-run'
-            ? `not-run: ${evidence.abstention ?? 'unspecified'}`
+            ? `not-run: ${evidence.reason ?? 'unspecified'}`
             : evidence.status;
         return { code: 'no-captured-proof', detail: printable(why) };
     }
@@ -166,8 +166,8 @@ export function mergeVerdict(change, configText) {
         return decide([{ code: 'config-invalid', detail: printable(message) }]);
     }
     const reasons = [];
-    if (change.bypasses === 'unknown')
-        reasons.push({ code: 'bypass-unknown' });
+    if ('unknown' in change.bypasses)
+        reasons.push({ code: 'bypass-unknown', detail: printable(change.bypasses.unknown) });
     else if (change.bypasses.length)
         reasons.push({
             code: 'gate-bypassed',
