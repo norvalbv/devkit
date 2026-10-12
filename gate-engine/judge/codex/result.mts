@@ -15,6 +15,7 @@
 
 import { join } from 'node:path';
 import { type JudgeUsage, withResultArgs } from '../claude-result.mts';
+import type { CodexWorkspace } from './workspace.mts';
 
 // ── the `codex exec --json` event contract ──────────────────────────────────────────────────────
 // One ThreadEvent per stdout line (codex-rs/exec/src/exec_events.rs). Only the fields devkit reads
@@ -190,12 +191,6 @@ export function parseModelSpec(spec: string): ModelSpec {
       `codex judge: unknown reasoning effort ${JSON.stringify(effort)} in model spec ${JSON.stringify(spec)} — expected <model>@${[...REASONING_EFFORTS].join('|')}`,
     );
   return { model, effort };
-}
-
-/** A workspace-write judge's scratch cwd, plus the repo whose `.claude/` alone it may write. */
-export interface CodexWorkspace {
-  scratch: string;
-  repoRoot: string;
 }
 
 /** The workspace confinement for this judge, or null when it runs read-only or unconfined. */
