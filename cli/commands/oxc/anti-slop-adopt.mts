@@ -234,7 +234,7 @@ export function adoptRelocations(
           group.from.map((credit) => credit.source),
         );
         console.log(
-          `anti-slop: re-anchored ${moved} relocated finding(s) from ${formatSources(sources)} into ${formatSources(plan.relocated.map((group) => group.file))}; stage ${ANTI_SLOP_BASELINE_REL}`,
+          `anti-slop: re-anchored ${moved} relocated finding(s) from ${formatSources(sources)} into ${formatSources(plan.relocated.map((group) => group.file))}${overlay ? '' : `; stage ${ANTI_SLOP_BASELINE_REL}`}`,
         );
         return 0;
       },

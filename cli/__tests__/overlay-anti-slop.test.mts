@@ -3,10 +3,12 @@
  * or owns an Oxlint config whose ignores it cannot read, honours a JSON one, and never touches excludes.
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
+import doctorRun from '../commands/doctor.mts';
 import { applyInit } from '../commands/init.mts';
+import antiSlop from '../commands/oxc/anti-slop.mts';
 import { applyOverlayConstraints, defaultSelection } from '../lib/components.mts';
 import { wireOverlayAntiSlop } from '../lib/install/anti-slop/overlay/install.mts';
 import { rootRegistry } from './_helpers.mts';
@@ -151,5 +153,26 @@ describe('overlay anti-slop — refusals that keep the tree clean', () => {
     expect(readCfgComponents(root).antiSlop).toBe(true);
     expect(existsSync(join(root, 'oxlint.devkit.json'))).toBe(true);
     expect(porcelain(root)).toBe('');
+  });
+});
+
+describe('overlay anti-slop — the missing-entry refusal names a remedy that works', () => {
+  it('doctor --fix restores a deleted oxlint.devkit.json, and the refused check then runs', async () => {
+    const root = workRepo();
+    await applyInit(root, {
+      stack: 'generic',
+      selection: applyOverlayConstraints({ ...defaultSelection(), antiSlop: true }, 'react-app'),
+      overlay: true,
+      devkitRef: 'v0.0.0-test',
+    });
+    rmSync(join(root, 'oxlint.devkit.json'));
+    expect(() => antiSlop(['check'], root)).toThrow(
+      'overlay entry oxlint.devkit.json is missing — run `devkit doctor --fix`',
+    );
+
+    await doctorRun(['--fix'], root);
+
+    expect(existsSync(join(root, 'oxlint.devkit.json'))).toBe(true);
+    expect(antiSlop(['check'], root)).toBe(0);
   });
 });
