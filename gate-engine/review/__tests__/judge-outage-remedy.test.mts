@@ -133,3 +133,42 @@ describe('an ABSENT judge binary', () => {
     expect(out).toContain('is not installed or not on PATH — this is NOT an auth/quota problem');
   });
 });
+
+// A plan that does not serve the model refuses every call in ~2s. Retrying it, or sending the
+// operator to auth/quota, is the wiring this pins at both gates.
+describe('a MODEL the account does not serve', () => {
+  const msg = (repo, text) => {
+    const f = join(repo, '.git', 'COMMIT_EDITMSG_TEST');
+    writeFileSync(f, text);
+    return f;
+  };
+  const refused = () =>
+    mkExec(async (opts) => {
+      opts.onOutage?.({ kind: 'model-unavailable', permanent: true, model: 'gpt-5.6-sol' });
+      return null;
+    });
+
+  it('the review gate spawns once per reviewer and names the refused model', async () => {
+    const repo = consumerRepo({ backend: true });
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    process.env.GUARD_AI_STRICT = '1';
+    const exec = refused();
+    expect(await runReviewGate(repo, { exec })).toBe(3);
+    expect(exec).toHaveBeenCalledTimes(5);
+    const out = err.mock.calls.flat().join('\n');
+    expect(out).toContain('judge model `gpt-5.6-sol` is not available on this account');
+    expect(out).toContain('plan does not serve it, so re-running cannot succeed');
+    expect(out).not.toContain('retrying once');
+    expect(out).not.toContain('CLI auth/quota, then re-run devkit ship');
+  });
+
+  it('completeness names it in its SKIP line', async () => {
+    const repo = consumerRepo({ backend: true });
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    process.env.GUARD_AI_STRICT = '1';
+    expect(await runCompleteness(msg(repo, 'feat: x'), repo, { exec: refused() })).toBe(3);
+    const out = err.mock.calls.flat().join('\n');
+    expect(out).toContain('SKIPPED (judge model is not available on this account)');
+    expect(out).toContain('plan does not serve it, so re-running cannot succeed');
+  });
+});

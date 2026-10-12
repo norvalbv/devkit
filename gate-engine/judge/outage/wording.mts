@@ -39,6 +39,8 @@ export function unavailableMessage(
     return `${prefix} unavailable — \`${bin}\` is not installed or not on PATH — judgement skipped`;
   if (outage.kind === 'unauthenticated')
     return `${prefix} unavailable — \`${bin}\` is not authenticated — judgement skipped`;
+  if (outage.kind === 'model-unavailable')
+    return `${prefix} unavailable — the account's plan does not serve this model — judgement skipped`;
   if (outage.kind === 'rate-limited') {
     // The word a six-day lock must never carry is "transient"; the fact it must carry is WHEN.
     const resets =
@@ -52,12 +54,17 @@ export function unavailableMessage(
 }
 
 /** The outage causes whose remedies differ; every other classified kind shares the generic one. */
-export type RemedyCause = 'timeout' | 'rate-limited' | 'absent' | 'outage';
+export type RemedyCause = 'timeout' | 'rate-limited' | 'absent' | 'model-unavailable' | 'outage';
 
 /** ONE outage→cause mapper for every fail-closed gate (sc-2769), so no gate keeps a private copy. */
 export function remedyCause(outage?: JudgeOutage): RemedyCause {
   const kind = outage?.kind;
-  return kind === 'timeout' || kind === 'rate-limited' || kind === 'absent' ? kind : 'outage';
+  return kind === 'timeout' ||
+    kind === 'rate-limited' ||
+    kind === 'absent' ||
+    kind === 'model-unavailable'
+    ? kind
+    : 'outage';
 }
 
 /** The remedy a fail-closed gate prints when a judge produced no verdict — ONE wording seam for
@@ -92,6 +99,12 @@ export function strictRemedy(cause: RemedyCause, bin = 'claude', resetsAt?: numb
       return `${install} Otherwise ${familyOverrideRemedy(bin)}`;
     return `${install} If the other judge CLI is installed, you can instead ${familyOverrideRemedy(bin, false)}`;
   }
+  if (cause === 'model-unavailable')
+    return (
+      `\`${bin}\` refused the configured model: the account's plan does not serve it, so ` +
+      're-running cannot succeed. The ship preflight names the role and the models the account ' +
+      `does serve; set that role's model env to one of them, or ${familyOverrideRemedy(bin, true)}`
+    );
   // Every binary reaching this arm ran (only ENOENT reads as absent), so doctor's bind cannot apply.
   return (
     `check \`${bin}\` CLI auth/quota, then re-run devkit ship. If the account stays dark longer ` +

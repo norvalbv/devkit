@@ -69,6 +69,8 @@ function outageReason(
   if (outage?.kind === 'rate-limited') return `${subject} hit the provider usage limit`;
   if (outage?.kind === 'unauthenticated') return `${subject} CLI is not authenticated`;
   if (outage?.kind === 'absent') return `${subject} CLI is not installed`;
+  if (outage?.kind === 'model-unavailable')
+    return `${subject} model \`${outage.model ?? 'unknown'}\` is not available on this account`;
   return `${subject} outage`;
 }
 

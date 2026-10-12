@@ -34,6 +34,7 @@ export type JudgeOutageKind =
   | 'absent'
   | 'unauthenticated'
   | 'rate-limited'
+  | 'model-unavailable'
   | 'transient'
   | 'empty';
 
@@ -45,6 +46,8 @@ export interface JudgeOutage {
   resetsAt?: number;
   /** True only for a kind a re-spawn cannot clear. The sole input to every retry predicate. */
   permanent: boolean;
+  /** The refused model spec, set by the runner for `model-unavailable` so a remedy can name it. */
+  model?: string;
 }
 
 /** Long enough for any real provider diagnostic; short enough that no regex here can be walked. */
@@ -56,6 +59,11 @@ const DETAIL_CAP = 200;
  *  text is deliberately NOT matched: codex exits 1 for quota, so a code alone proves nothing. */
 const RATE_LIMITED =
   /\b(?:usage limit|rate limit|rate-limit|quota (?:exceeded|exhausted)|too many requests|out of credits|credits? (?:depleted|exhausted))\b/i;
+
+/** The account's plan does not serve the requested model — codex's 400 on a ChatGPT free plan, and
+ *  the OpenAI API's not-found wording for a key without access. */
+const MODEL_UNAVAILABLE =
+  /\b(?:model is not supported|model_not_found|does not exist or you do not have access)\b/i;
 
 /** Logged-out / credential wordings. `invalid api key` covers the key-auth path both CLIs support. */
 const UNAUTHENTICATED =
@@ -164,6 +172,8 @@ export function classifyJudgeOutage(e: JudgeError): JudgeOutage {
     if (resetsAt !== undefined) outage.resetsAt = resetsAt;
     return outage;
   }
+  if (MODEL_UNAVAILABLE.test(text))
+    return { kind: 'model-unavailable', permanent: true, detail: firstSentence(text) };
   if (UNAUTHENTICATED.test(text))
     return { kind: 'unauthenticated', permanent: true, detail: firstSentence(text) };
 

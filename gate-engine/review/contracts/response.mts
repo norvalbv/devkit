@@ -9,6 +9,7 @@ export type ReviewInconclusiveCause =
   | 'outage'
   | 'rate-limited'
   | 'absent'
+  | 'model-unavailable'
   | 'engine';
 
 /** A parsed VERDICT line: the token (null when absent) plus its markdown-stripped reason. */
