@@ -91,13 +91,16 @@ command. Do not pre-run every gate or replace the managed chain with a hand-writ
   prompt, model and cache key. Its PASS is cached, so the next `devkit ship --resume` skips that lens
   — but only when the same paths ship briefed are staged and the `GUARD_REVIEW_*` model env matches.
 - **Reproduce a codex judge's sandbox before trusting a "the sandbox denies X" claim.** `codex
-  sandbox` applies the same seatbelt policy as the judge's `codex exec`, with no model call. From
-  the repo root, a workspace-write (investigating) judge's view is:
-  `r=$PWD s=$(mktemp -d); cp AGENTS.md "$s"; (cd "$s" && CODEX_HOME=$(mktemp -d) codex sandbox --log-denials -c 'sandbox_mode="workspace-write"' -c "sandbox_workspace_write.writable_roots=[\"$r/.claude\"]" -- zsh -lc '<cmd>'); echo "exit $?"`.
-  A read-only judge runs in the repo root itself: drop the `cd` and the `writable_roots`, and set
-  `sandbox_mode="read-only"`. Both modes read the whole disk and have no network. Workspace-write
-  can write only the scratch cwd, `<repo>/.claude`, `/tmp` and `$TMPDIR`. Run the bare command, not
-  a pipeline, since a pipe's exit status hides the denial. Cite the output in a waive rationale.
+  sandbox` applies the same host sandbox as the judge's `codex exec` (Seatbelt on macOS, Landlock on
+  Linux), with no model call, and runs the command in your login shell as the judge does. From the
+  repo root, a workspace-write (investigating) judge's view is:
+  `r=$PWD s=$(mktemp -d); cp AGENTS.md "$s"; (cd "$s" && CODEX_HOME=$(mktemp -d) codex sandbox -c 'sandbox_mode="workspace-write"' -c "sandbox_workspace_write.writable_roots=[\"$r/.claude\"]" -- "$SHELL" -lc '<cmd>'); echo "exit $?"`.
+  On macOS, add `--log-denials` after `sandbox` to name each denied operation; Linux has no such
+  flag. A read-only judge runs in the repo root itself: drop the `cd` and the `writable_roots`, and
+  set `sandbox_mode="read-only"`. Both modes read the whole disk and have no network.
+  Workspace-write can write only the scratch cwd, `<repo>/.claude`, `/tmp` and `$TMPDIR`. Run the
+  bare command, not a pipeline, since a pipe's exit status hides the denial. Cite the output in a
+  waive rationale.
 - **A counterexample stands for a class.** A correctness finding against a matcher, parser,
   predicate or validator names ONE input the check gets wrong. Before re-shipping, name the property
   that makes it wrong, list the other inputs that share it (every character that continues a path,
