@@ -58,6 +58,14 @@ describe('resolveReferenceCheckouts', () => {
     });
   });
 
+  it('retries only a pattern that matched nothing, as the agent hand rule does', () => {
+    mkdirSync(path.join(root, 'elsewhere', 'sib-a'));
+    declare(['../sib-*'], linked);
+    expect(resolveReferenceCheckouts(linked).resolved).toEqual([
+      path.join(root, 'elsewhere', 'sib-a'),
+    ]);
+  });
+
   it('resolves from the config directory itself without any retry', () => {
     declare(['../sib-a'], main);
     expect(resolveReferenceCheckouts(main).resolved).toEqual([sibling('sib-a')]);

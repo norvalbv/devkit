@@ -224,6 +224,22 @@ describe('validated prior-art judge_exec telemetry', () => {
     expect(events()[1]).toHaveProperty('prior_art_status', 'reviewed');
   });
 
+  it('leaves every other agent label without a checkout check', () => {
+    writeFileSync(
+      path.join(dir, 'guard.config.json'),
+      JSON.stringify({ research: { referenceCheckouts: ['gone'] } }),
+    );
+    const run = spawnSync('node', [CLI, 'record-agent', 'feature-critique'], {
+      input: JSON.stringify(response()),
+      cwd: dir,
+      encoding: 'utf8',
+    });
+    expect(run.status, run.stderr).toBe(0);
+    expect(JSON.parse(run.stdout)).not.toHaveProperty('checkouts_check');
+    expect(events()[0]).not.toHaveProperty('checkouts_check');
+    expect(run.stderr).not.toContain('reference checkouts');
+  });
+
   it('prints the resolver result through the real CLI', () => {
     mkdirSync(path.join(dir, 'sib'));
     writeFileSync(
