@@ -260,8 +260,10 @@ export function familyRemedy(statuses: ModelStatus[]): string {
   return familyOverrideRemedy(dark.bin, dark.present);
 }
 
-/** Bounds a provider-supplied string: the sink's rows stay intact only as one small append. */
-const clip = (text: string | undefined): string | undefined => text?.slice(0, 64);
+/** Bounds a provider-supplied value, which the wire can send as a non-string: the sink's rows stay
+ *  intact only as one small append. */
+const clip = (text: string | undefined): string | undefined =>
+  text === undefined ? undefined : `${text}`.slice(0, 64);
 
 /** The telemetry row: what the preflight read and concluded, so a later reader can join it to the
  *  same ship's judge_exec rows. `served` stays out to keep the row one small append. */

@@ -531,6 +531,16 @@ describe('preflightEvent — the reading is recorded, not only printed', () => {
     expect(JSON.stringify(row).length).toBeLessThan(4096);
   });
 
+  it('records a plan or reached type the wire sent as a number instead of losing the row', async () => {
+    const garbled = JSON.stringify({
+      id: 2,
+      result: {
+        rateLimits: { planType: 123, rateLimitReachedType: 7, primary: { usedPercent: 100 } },
+      },
+    });
+    expect(await event(garbled)).toMatchObject({ plan_type: '123', reached_type: '7' });
+  });
+
   it('leaves the served-model list out, so the row stays one small append', async () => {
     const statuses = await judgeReachability(repo(CODEX_FAMILY), {
       ...deps(''),
