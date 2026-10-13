@@ -36,6 +36,7 @@
 import { z } from 'zod';
 import { diffCacheIdentity } from '../../judge/diff-focus.mts';
 import {
+  cachedAdvisories,
   cachedMcpDegradation,
   degradedSuffix,
   storedBaseSchema,
@@ -198,6 +199,7 @@ export interface CachedHit {
   judgedBases: (string | null)[];
   part: boolean; // a split part's line has always read `cached PASS (identical)`
   mcpDegradedCause?: string; // sc-2837: judged without a verdict-bearing MCP server
+  advisories?: string[]; // the stored PASS's non-blocking findings, shown again on replay
   waivers: CachedWaiver[]; // the waivers the stored PASS rests on, named again on replay
 }
 
@@ -324,6 +326,7 @@ export function planReviewWork(
         judgedBases,
         part: false,
         mcpDegradedCause,
+        advisories: cachedAdvisories(...parts.map((p) => cache[p.key])),
         waivers,
       });
       continue;
@@ -339,6 +342,7 @@ export function planReviewWork(
         judgedBases: [storedBaseSchema.safeParse(cache[p.key].base_sha).data ?? null],
         part: true,
         mcpDegradedCause: cachedMcpDegradation(cache[p.key]),
+        advisories: cachedAdvisories(cache[p.key]),
         waivers: cachedWaivers(cache[p.key]) ?? [],
       });
       if (!p.splitOf) continue;
