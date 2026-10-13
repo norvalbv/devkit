@@ -18,8 +18,9 @@
  * never start failing because its accounting could not be read.
  */
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
+import { z } from 'zod';
+import { isRecord } from '../eval/schema.mts';
+import { saveTranscriptUnique } from './transcript-store.mts';
 
 /** Ask for the JSON envelope. Exported so bench runners and the spawn layer request it identically. */
 export const CLAUDE_RESULT_ARGS = ['--output-format', 'json'] as const;
@@ -97,4 +98,67 @@ export function parseJudgeUsage(raw: string | null): JudgeUsage | null {
       ? { session_id: envelope.session_id }
       : {}),
   };
+}
+
+const WHITESPACE_RUN_RE = /\s+/g;
+const DENIED_LINE_CHARS = 500;
+
+const denialSchema = z.object({
+  tool_name: z.string().catch('unknown'),
+  tool_input: z.looseObject({ command: z.string().optional() }).catch({}),
+});
+const denialsEnvelopeSchema = z.object({
+  type: z.literal('result'),
+  permission_denials: z.array(denialSchema),
+});
+
+function deniedLine(denial: z.infer<typeof denialSchema>): string {
+  const what = denial.tool_input.command ?? JSON.stringify(denial.tool_input);
+  return `${denial.tool_name}: ${what}`.replace(WHITESPACE_RUN_RE, ' ').slice(0, DENIED_LINE_CHARS);
+}
+
+/**
+ * The tool calls the headless permission gate refused, one `<tool>: <command>` line each. Null when
+ * the bytes carry no `permission_denials` list (codex, a test double): not measured, never zero.
+ */
+export function parsePermissionDenials(raw: string | null | undefined): string[] | null {
+  if (!raw) return null;
+  let json: unknown;
+  try {
+    json = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  const envelope = denialsEnvelopeSchema.safeParse(json);
+  return envelope.success ? envelope.data.permission_denials.map(deniedLine) : null;
+}
+
+/** The spawn facts a denial record needs: where the sidecar goes and who is listening. */
+export interface DenialSink {
+  label: string;
+  lens?: string;
+  /** Fires once per measured spawn with the refused tool calls; empty when none was refused. */
+  onPermissionDenials?: (denied: string[]) => void;
+}
+
+/** The `judge_exec` fields a measured spawn adds: the count inline, the command text by ref. */
+export interface DenialFields {
+  permission_denials?: number;
+  denials_ref?: string;
+}
+
+/** Hand a spawn's denials to its caller and store their text in a `<label>.denied` sidecar. */
+export function recordPermissionDenials(
+  sink: DenialSink,
+  raw: string | null | undefined,
+): DenialFields {
+  const denied = parsePermissionDenials(raw);
+  if (denied === null) return {};
+  sink.onPermissionDenials?.(denied);
+  const fields: DenialFields = { permission_denials: denied.length };
+  if (denied.length === 0) return fields;
+  const text = `${sink.lens ? `lens: ${sink.lens}\n` : ''}${denied.join('\n')}\n`;
+  const ref = saveTranscriptUnique(`${sink.label}.denied`, text);
+  if (ref) fields.denials_ref = ref;
+  return fields;
 }
