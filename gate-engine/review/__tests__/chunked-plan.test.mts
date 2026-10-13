@@ -199,7 +199,10 @@ describe('chunked mode', () => {
 // The operator doc once said chunking shows every file to every correctness judge; a reader then
 // took a writer-reader-contracts partial PASS for a chunking failure.
 it('the troubleshooting doc names the whole-diff lens and the knobs that arm chunking', () => {
-  const doc = readFileSync(join(__dirname, '..', '..', '..', 'docs', 'troubleshooting.md'), 'utf8');
+  const doc = readFileSync(
+    join(import.meta.dirname, '..', '..', '..', 'docs', 'troubleshooting.md'),
+    'utf8',
+  );
   const section = doc.slice(doc.indexOf('## A reviewer shows `PASS over an incomplete packet`'));
   for (const named of ['writer-reader-contracts', 'correctnessChunkLoc', 'GUARD_CORRECTNESS_CHUNK'])
     expect(section.slice(0, section.indexOf('\n## ', 1))).toContain(named);

@@ -15,7 +15,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { HOOK_REGISTRATIONS } from '../lib/install/hook-registration-ledger/registrations.mjs';
+import { HOOK_REGISTRATIONS } from '../lib/install/hook-registration-ledger/registrations.mts';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const FAIL_VERDICT = '{"verdict":"fail","attribution":{"duplication_introduced":0}}';

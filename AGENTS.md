@@ -204,9 +204,9 @@ fails, exits non-zero, and under-reports the files whose tests failed. Run `git 
 first, since a stale ref widens the set; `COVERAGE_BASE=<ref>` picks another base (a second
 `--changed` flag makes vitest refuse to start). Untracked files count as changed, and every changed
 file gets a row under its full name, fully covered ones included. A file no test imports reads 0%,
-as it should. Spawned `node cli/index.mts` children are counted, but a module that is both imported
-and spawned under-reports. A diff touching `package.json` or `vitest.config.mjs` runs the whole
-suite.
+as it should. Spawned `node cli/index.mts` children are counted, and their hits add to the
+in-process hits of the same module. A diff touching `package.json` or `vitest.config.mjs` runs the
+whole suite.
 </workflow>
 
 </workflows>

@@ -185,14 +185,14 @@ describe('bindClaudeFamily', () => {
   // paraphrase there sends the reader comparing against a string doctor never writes.
   it('both operator docs quote the provenance marker verbatim', () => {
     for (const doc of ['docs/troubleshooting.md', 'skills/commit-gates/SKILL.md'])
-      expect(readFileSync(join(__dirname, '..', '..', doc), 'utf8')).toContain(
+      expect(readFileSync(join(import.meta.dirname, '..', '..', doc), 'utf8')).toContain(
         FAMILY_PROVENANCE_TEXT,
       );
   });
 
   it('the claude set matches the documented claude-era example values', () => {
     const example = JSON.parse(
-      readFileSync(join(__dirname, '..', '..', 'guard.config.example.json'), 'utf8'),
+      readFileSync(join(import.meta.dirname, '..', '..', 'guard.config.example.json'), 'utf8'),
     );
     expect(CLAUDE_FAMILY_SET).toEqual({
       model: example.review.model,
@@ -209,7 +209,7 @@ describe('bindClaudeFamily', () => {
         'docs/troubleshooting.md',
         'skills/commit-gates/SKILL.md',
         'guard.config.example.json',
-      ].map((doc) => readFileSync(join(__dirname, '..', '..', doc), 'utf8')),
+      ].map((doc) => readFileSync(join(import.meta.dirname, '..', '..', doc), 'utf8')),
     ];
     for (const text of surfaces) expect(text).not.toMatch(/benched for `?gpt-5\.6-sol`? only/);
   });
