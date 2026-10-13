@@ -93,8 +93,9 @@ export interface GuardConfig {
   research: { referenceCheckouts: string[] };
   /** Extra globs, beyond its extension defaults, that mark a staged path as UI for ui-evidence. */
   uiEvidence: { paths: string[] };
-  /** Validated where it runs: deterministic/command-gates.mts configExtraGates. */
+  /** Both validated where they run: deterministic/command-gates.mts. */
   extraGates: unknown;
+  gateTimeoutMs: unknown;
   noLog: boolean;
   noLlm: boolean;
   cwd: string;
@@ -131,6 +132,7 @@ interface RawGuardConfigFile {
   research?: { referenceCheckouts?: string[] };
   uiEvidence?: { paths?: string[] };
   extraGates?: unknown;
+  gateTimeoutMs?: unknown;
   noLog?: boolean;
   noLlm?: boolean;
 }
@@ -412,6 +414,7 @@ function resolveLoadedGuardConfig(file: RawGuardConfigFile, cwd: string): GuardC
     research: { referenceCheckouts: globs(file.research?.referenceCheckouts) },
     uiEvidence: { paths: globs(file.uiEvidence?.paths) },
     extraGates: file.extraGates,
+    gateTimeoutMs: file.gateTimeoutMs,
     noLog: noLogEnv ?? Boolean(file.noLog ?? DEFAULTS.noLog),
     noLlm: noLlmEnv ?? Boolean(file.noLlm ?? DEFAULTS.noLlm),
     // Echo the resolution base so engines never have to re-derive it (and never reach
