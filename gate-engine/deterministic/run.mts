@@ -51,7 +51,6 @@ import { markGateRun } from '../judge/run-context.mts';
 import { describeCachedPrefix, prefixEntry, recordPrefix } from '../prefix-cache/prefix-cache.mts';
 import {
   type GateFailure,
-  gateEnv,
   readGateReason,
   reasonDetail,
   reasonReport,
@@ -60,9 +59,13 @@ import {
 import {
   bypassedSuffixes,
   configExtraGates,
+  gateTimeoutMs,
   reportCachedBypasses,
+  runArgv,
   type ExtraGate,
   structureBypassed,
+  TIMED_OUT,
+  timeoutReason,
 } from './command-gates.mts';
 import { printRecheckFooter, recheckCommand, recheckLines, registryRecheck } from './recheck.mts';
 import { type ConfigComponent, DETERMINISTIC, type RawDevkitComponents } from './registry.mts';
@@ -266,21 +269,6 @@ export function prefixCacheScope(scope?: string, effectiveIds?: string[]): strin
     : extraBase;
 }
 
-// Run one gate as a subprocess; return its exit code (0 on success). stdio inherited so the gate's
-// output reaches the user as if run directly; its failure reason returns via `reasonFile`.
-function runArgv(cwd: string, argv: string[], exec: typeof execFileSync, reasonFile: string) {
-  try {
-    exec(argv[0], argv.slice(1), { cwd, stdio: 'inherit', env: gateEnv(reasonFile) });
-    return 0;
-  } catch (e: unknown) {
-    // spawn failure / kill → treat as a real fail
-    if (e && typeof e === 'object' && 'status' in e && typeof e.status === 'number') {
-      return e.status;
-    }
-    return 1;
-  }
-}
-
 // A `--structure` / `--extra` command → a runnable gate descriptor. `guard-structure …` resolves to
 // the sibling module (same no-bunx resolution as the built-ins) and keeps the trichotomy (its exit
 // 2 = could-not-run → fail-open); any other command spawns its own argv[0] via PATH and BLOCKS on
@@ -391,6 +379,7 @@ export function runDeterministic(cwd = process.cwd(), opts: RunDeterministicOpts
   if (!skip && opts.structure && !bypassStructure) {
     gates.push(commandGate('structure-lint', cwd, opts.structure));
   }
+  const timeoutMs = gateTimeoutMs(cwd);
   withReasonFiles((fileFor) => {
     gates.forEach((gate, i) => {
       if (!gate.argv) {
@@ -398,7 +387,12 @@ export function runDeterministic(cwd = process.cwd(), opts: RunDeterministicOpts
         return;
       }
       const reasonFile = fileFor(i);
-      const rc = runArgv(cwd, gate.argv, exec, reasonFile);
+      const rc = runArgv(cwd, gate.argv, exec, reasonFile, timeoutMs);
+      // Its own outcome, not an exit code: no rcLabel, opt-out or strict rule applies to it.
+      if (rc === TIMED_OUT) {
+        fail(gate, `(timed-out:${timeoutMs / 1000}s)`, false, timeoutReason(timeoutMs));
+        return;
+      }
       const failRc = (suffix = '') => fail(gate, suffix, undefined, readGateReason(reasonFile));
       // failOpen2 belongs to the GATE (exit 2 = opt-out), strict to the RUN: so an `--extra`'s
       // fatal exit 2 (never an opt-out) stays `(unexpected:2)` under strict, not a skip.

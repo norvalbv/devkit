@@ -8,6 +8,8 @@
   "generated": [{ "glob": "dist/**", "command": "bun run build" }],
   "//extraGates": "related-tests runs the tests vitest relates to the staged paths, so a test the change breaks blocks before any AI judge runs.",
   "extraGates": { "related-tests": "node cli/lib/husky/gate-policy/related-tests.mts" },
+  "//gateTimeoutMs": "Per-gate deadline for guard-deterministic (default 30 min). Raised here because related-tests has legitimately run for about 32 minutes on a loaded machine before reporting a real failure.",
+  "gateTimeoutMs": 3000000,
   "//comments": "devkit is open source: a comment citing a private Shortcut ticket, an autonomous report id or a decision record means nothing to an outside reader, so guard-comments blocks changed comments that do.",
   "comments": {
     "forbiddenRefs": ["\\bsc-\\d+\\b", "\\breport-[0-9a-f]{6,}\\b"],
