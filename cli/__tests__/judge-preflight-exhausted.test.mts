@@ -8,6 +8,7 @@ import { parseRateLimitsReply } from '../../gate-engine/judge/codex/rate-limits.
 import {
   judgeReachability,
   type PreflightDeps,
+  preflightEvent,
   renderPreflight,
 } from '../lib/ship/preflight/judge.mts';
 
@@ -416,7 +417,7 @@ describe('the preflight report for an exhausted window (sc-3207 acceptance)', ()
     expect(statuses.every((s) => s.state === 'ok' && s.onCredits)).toBe(true);
     const out = renderPreflight(statuses, NOW).join('\n');
     expect(out).toContain(
-      'gpt-5.6-sol via codex — reachable — plan limit reached, running on credits (100% of a 7d window used)',
+      'gpt-5.6-sol via codex — reachable — plan limit reached, running on credits (plan pro, 100% of a 7d window used)',
     );
     for (const absent of ['EXHAUSTED', 'fail closed', 'will not help', '⚠️', 'GUARD_REVIEW_MODEL='])
       expect(out).not.toContain(absent);
@@ -427,11 +428,125 @@ describe('the preflight report for an exhausted window (sc-3207 acceptance)', ()
     expect(statuses.every((s) => s.state === 'rate-limited')).toBe(true);
     const out = renderPreflight(statuses, NOW).join('\n');
     expect(out).toContain(
-      'EXHAUSTED — USAGE LIMIT REACHED (100% of a 30d window used, resets in 4d',
+      'EXHAUSTED — USAGE LIMIT REACHED (plan free, 100% of a 30d window used, resets in 4d',
     );
     expect(out).toContain('re-running will not help for another 4d');
     expect(out).toContain('GUARD_REVIEW_MODEL=haiku');
     expect(out).not.toContain('— reachable');
+  });
+});
+
+/** The row a later reader joins to the same ship's judge_exec rows: raw facts beside the verdict. */
+describe('preflightEvent — the reading is recorded, not only printed', () => {
+  const event = async (payload: string, review = CODEX_FAMILY) =>
+    preflightEvent(await judgeReachability(repo(review), deps(payload)));
+
+  it('a Free-plan lock with credits records the credits the verdict set aside', async () => {
+    const row = await event(FREE_PLAN_CREDITS_REPLY);
+    expect(row).toMatchObject({
+      type: 'judge_preflight',
+      plan_type: 'free',
+      credits_usable: true,
+      reached_type: 'rate_limit_reached',
+      ordinary_usage_allowed: false,
+      used_percent: 100,
+      window_mins: 43200,
+      resets_at: PRIMARY_RESET * 1000,
+    });
+    // The verdict's own reading is absent, so the two shapes stay distinguishable.
+    expect(row.on_credits).toBeUndefined();
+    expect(row.roles).toEqual([
+      { role: 'review', model: 'gpt-5.6-terra', bin: 'codex', state: 'rate-limited' },
+      { role: 'escalation', model: 'gpt-5.6-sol', bin: 'codex', state: 'rate-limited' },
+      { role: 'correctness', model: 'gpt-5.6-sol', bin: 'codex', state: 'rate-limited' },
+    ]);
+  });
+
+  it('a paid plan on credits records the same payload shape with the opposite verdict', async () => {
+    const row = await event(CREDITS_LIVE_REPLY);
+    expect(row).toMatchObject({ plan_type: 'pro', credits_usable: true, on_credits: true });
+    expect(row.roles.map((r) => r.state)).toEqual(['ok', 'ok', 'ok']);
+  });
+
+  it('an account with no credits object records no credits fact at all', async () => {
+    const row = await event(WINDOW_FULL_REPLY);
+    expect(row.credits_usable).toBeUndefined();
+    expect(row.ordinary_usage_allowed).toBeUndefined();
+    expect(row.plan_type).toBe('pro');
+  });
+
+  it('an RPC that said nothing still records each role as unknown', async () => {
+    const statuses = await judgeReachability(repo(CODEX_FAMILY), {
+      ...deps(''),
+      rateLimits: async () => null,
+    });
+    // toEqual ignores undefined fields, which is also what the sink's JSON line drops.
+    expect(preflightEvent(statuses)).toEqual({
+      type: 'judge_preflight',
+      roles: [
+        { role: 'review', model: 'gpt-5.6-terra', bin: 'codex', state: 'unknown' },
+        { role: 'escalation', model: 'gpt-5.6-sol', bin: 'codex', state: 'unknown' },
+        { role: 'correctness', model: 'gpt-5.6-sol', bin: 'codex', state: 'unknown' },
+      ],
+    });
+  });
+
+  it('a claude-only install records its roles and no account facts', async () => {
+    const claude = { model: 'haiku', escalationModel: 'opus', correctnessModel: 'sonnet' };
+    expect(await event(FREE_PLAN_CREDITS_REPLY, claude)).toEqual({
+      type: 'judge_preflight',
+      roles: [
+        { role: 'review', model: 'haiku', bin: 'claude', state: 'ok' },
+        { role: 'escalation', model: 'opus', bin: 'claude', state: 'ok' },
+        { role: 'correctness', model: 'sonnet', bin: 'claude', state: 'ok' },
+      ],
+    });
+  });
+
+  it('records credits the payload names but does not call spendable as false, not absent', async () => {
+    const spent = { primary: { usedPercent: 100 }, planType: 'pro' };
+    const none = await event(reply({ ...spent, credits: { hasCredits: false } }));
+    expect(none.credits_usable).toBe(false);
+    const capped = await event(
+      reply({ ...spent, credits: { hasCredits: true }, spendControlReached: true }),
+    );
+    expect(capped.credits_usable).toBe(false);
+  });
+
+  it('bounds provider-supplied strings, so an oversized reply cannot tear a neighbouring row', async () => {
+    const huge = 'x'.repeat(100_000);
+    const statuses = await judgeReachability(repo(CODEX_FAMILY), {
+      ...deps(''),
+      rateLimits: async () => ({
+        reached: true,
+        onCredits: false,
+        planType: huge,
+        reachedType: huge,
+        cliVersion: huge,
+      }),
+    });
+    const row = preflightEvent(statuses);
+    expect(row.plan_type).toHaveLength(64);
+    // One append under 4KB is what keeps concurrent writers' lines whole.
+    expect(JSON.stringify(row).length).toBeLessThan(4096);
+  });
+
+  it('leaves the served-model list out, so the row stays one small append', async () => {
+    const statuses = await judgeReachability(repo(CODEX_FAMILY), {
+      ...deps(''),
+      rateLimits: async () => ({
+        reached: false,
+        onCredits: false,
+        planType: 'free',
+        cliVersion: '0.162.1',
+        models: ['gpt-5.6-terra'],
+        visibleModels: ['gpt-5.6-terra'],
+      }),
+    });
+    const row = JSON.stringify(preflightEvent(statuses));
+    expect(row).toContain('"state":"unavailable"');
+    expect(row).toContain('"codex_version":"0.162.1"');
+    expect(row).not.toContain('served');
   });
 });
 
@@ -460,5 +575,9 @@ describe('renderPreflight — the percentage never contradicts the verdict', () 
 
   it('a fractional low value floors too — 0.4% is 0%, not a rounding surprise', () => {
     expect(at(0.4)).toContain('0% of a 7d window used');
+  });
+
+  it('a row with no plan renders no plan label', () => {
+    expect(at(10)).toContain('— reachable (10% of a 7d window used)');
   });
 });
