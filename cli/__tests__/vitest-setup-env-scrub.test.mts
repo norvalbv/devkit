@@ -1,6 +1,15 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -13,6 +22,7 @@ import { meta } from '../commands/ship.mts';
 import { SLOT_DIR_ENV, SLOT_ENV, SLOT_RELEASE_ENV } from '../lib/ship/queue/enter.mts';
 import {
   BYPASS_ENV,
+  hermeticPath,
   INHERITED_RUN_ENV,
   JUDGE_ROUTING_ENV,
   SCRUBBED_ENV,
@@ -351,5 +361,119 @@ describe('vitest.setup.mjs keeps git auto-maintenance out of fixture repos', () 
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+});
+
+describe('vitest.setup.mjs hides the host devkit install', () => {
+  const which = (pathValue: string, bin: string) =>
+    pathValue.split(path.delimiter).some((dir) => existsSync(path.join(dir, bin)));
+
+  it('points HOME at a per-process temp dir and drops XDG_CONFIG_HOME', () => {
+    const env = envAfterSetup({
+      HOME: '/Users/someone',
+      XDG_CONFIG_HOME: '/Users/someone/.config',
+    });
+    expect(env.HOME).toMatch(/devkit-test-home-[A-Za-z0-9]+$/);
+    expect(env.HOME?.startsWith(os.tmpdir())).toBe(true);
+    expect(env.XDG_CONFIG_HOME).toBeUndefined();
+  });
+
+  it('starts from an empty HOME even when an earlier run left one for the same pid', () => {
+    // Pids recur. A name derived from the pid would hand this run the last one's git config and
+    // caches; so would trusting the markers a nested vitest run inherits from its parent worker.
+    const url = pathToFileURL(SETUP).href;
+    const stdout = execFileSync(
+      process.execPath,
+      [
+        '--input-type=module',
+        '-e',
+        `import { mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+         import os from 'node:os';
+         import path from 'node:path';
+         const stale = path.join(os.tmpdir(), 'devkit-test-home-' + process.pid);
+         mkdirSync(stale, { recursive: true });
+         writeFileSync(path.join(stale, '.gitconfig'), '');
+         await import(${JSON.stringify(url)});
+         const seen = readdirSync(process.env.HOME);
+         rmSync(stale, { recursive: true, force: true });
+         process.stdout.write(JSON.stringify(seen));`,
+      ],
+      {
+        cwd: REPO,
+        encoding: 'utf8',
+        env: { ...process.env, DEVKIT_SUITE_HOME_PID: '1', DEVKIT_SUITE_HOME: '/Users/someone' },
+      },
+    );
+    expect(JSON.parse(stdout)).toEqual([]);
+  });
+
+  it('restores the same HOME when the setup re-runs after a test file polluted it', () => {
+    const url = pathToFileURL(SETUP).href;
+    const stdout = execFileSync(
+      process.execPath,
+      [
+        '--input-type=module',
+        '-e',
+        `await import(${JSON.stringify(url)});
+         const first = process.env.HOME;
+         process.env.HOME = '/polluted';
+         await import(${JSON.stringify(`${url}?again`)});
+         process.stdout.write(JSON.stringify([first, process.env.HOME]));`,
+      ],
+      { cwd: REPO, encoding: 'utf8' },
+    );
+    const [first, second] = JSON.parse(stdout);
+    expect(second).toBe(first);
+  });
+
+  it('applies the PATH filter to the real environment, using the package bin names', () => {
+    // hermeticPath can be right while the setup feeds it the wrong names or never assigns PATH.
+    const root = mkdtempSync(path.join(os.tmpdir(), 'devkit-suite-wiring-'));
+    try {
+      writeFileSync(path.join(root, 'guard-deterministic'), '', { mode: 0o755 });
+      const env = envAfterSetup({ PATH: `${root}${path.delimiter}/usr/bin` });
+      expect(env.PATH?.split(path.delimiter)).not.toContain(root);
+      expect(env.PATH?.split(path.delimiter)).toContain('/usr/bin');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps bun resolvable but no devkit bin or host-only tool from a global bin dir', () => {
+    // A laptop's global install: devkit, guard-* and fallow beside the bun runtime.
+    const root = mkdtempSync(path.join(os.tmpdir(), 'devkit-suite-path-'));
+    try {
+      const global = path.join(root, 'bun-bin');
+      const npmGlobal = path.join(root, 'node-bin');
+      const system = path.join(root, 'usr-bin');
+      for (const [dir, bins] of [
+        [global, ['bun', 'bunx', 'devkit', 'guard-deterministic', 'fallow']],
+        // An `npm i -g` install puts devkit beside node, and a second bun must not throw.
+        [npmGlobal, ['node', 'bun', 'devkit']],
+        [system, ['git']],
+      ] as const) {
+        mkdirSync(dir, { recursive: true });
+        for (const bin of bins) writeFileSync(path.join(dir, bin), '', { mode: 0o755 });
+      }
+      const result = hermeticPath(
+        [global, npmGlobal, system].join(path.delimiter),
+        ['devkit', 'guard-deterministic'],
+        path.join(root, 'shim'),
+      );
+      for (const bin of ['bun', 'bunx', 'node', 'git']) expect(which(result, bin), bin).toBe(true);
+      expect(realpathSync(path.join(root, 'shim', 'bun'))).toBe(
+        realpathSync(path.join(global, 'bun')),
+      );
+      for (const bin of ['devkit', 'guard-deterministic', 'fallow'])
+        expect(which(result, bin), bin).toBe(false);
+      // setupFiles re-runs per test file: a second pass must neither throw nor change the result.
+      expect(hermeticPath(result, ['devkit'], path.join(root, 'shim'))).toBe(result);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves a PATH without devkit bins unchanged, as on a CI runner', () => {
+    expect(hermeticPath('/usr/bin:/bin', ['devkit'], '/nonexistent/shim')).toBe('/usr/bin:/bin');
   });
 });
