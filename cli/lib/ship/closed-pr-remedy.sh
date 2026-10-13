@@ -12,12 +12,12 @@ pr_identity() {
     --jq '[.number,.state,.headRefName,.headRefOid,(.headRepository.nameWithOwner // ""),.baseRefName,.url] | @tsv' 2>/dev/null
 }
 
-# Sets PR_SEEN_NUM, PR_SEEN_STATE and PR_SEEN_BASE; returns 1 when gh cannot answer.
+# Sets PR_SEEN_NUM, PR_SEEN_STATE, PR_SEEN_BASE and PR_SEEN_URL; returns 1 when gh cannot answer.
 read_pr_state() {
   local fields
   fields=$(pr_identity) || fields=
   # A non-whitespace IFS keeps empty fields (a deleted fork's head repo); tabs would collapse them.
-  IFS=$'\x1f' read -r PR_SEEN_NUM PR_SEEN_STATE _ _ _ PR_SEEN_BASE _ <<< "${fields//$'\t'/$'\x1f'}"
+  IFS=$'\x1f' read -r PR_SEEN_NUM PR_SEEN_STATE _ _ _ PR_SEEN_BASE PR_SEEN_URL <<< "${fields//$'\t'/$'\x1f'}"
   case "$PR_SEEN_NUM" in *[!0-9]*|'') return 1 ;; esac
 }
 
