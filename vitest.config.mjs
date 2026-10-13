@@ -56,6 +56,9 @@ const SHARED_TEST_CONFIG = {
   // terminated after 90s and may use up to 30s more to reap their process tree; leave enough margin
   // for that cleanup to finish and report exit 124 instead of racing Vitest's own timeout.
   testTimeout: 150_000,
+  // The worker must load the same module text a spawned `node x.mts` child does, or the two V8
+  // profiles of one file merge with mismatched offsets and its coverage is wrong.
+  experimental: { viteModuleRunner: false },
 };
 // One value for both projects: vitest throws when one groupOrder mixes maxWorkers.
 // Leaves headroom for concurrent local development; VITEST_MAX_WORKERS overrides it per run.

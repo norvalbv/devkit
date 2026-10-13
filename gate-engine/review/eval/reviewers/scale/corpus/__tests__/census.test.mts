@@ -13,8 +13,8 @@ import {
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it, vi } from 'vitest';
-import * as nativePlanner from '../../../corpus/chunk-guard.mts';
+import { describe, expect, it } from 'vitest';
+import { planFixture } from '../../../corpus/chunk-guard.mts';
 import { censusSource } from '../census.mts';
 import { sha256 } from '../../claim-inventory.mts';
 
@@ -147,28 +147,26 @@ describe('private native source census', () => {
   });
   it('plans from the pinned tree when the live index changes and changes back', () => {
     const fx = fixture();
-    const original = nativePlanner.planFixture;
     const file = path.join(fx.repo, 'src/item.ts');
     const stage = (value) => {
       writeFileSync(file, `export const value = ${value};\n`);
       execFileSync('git', ['add', 'src/item.ts'], { cwd: fx.repo });
     };
-    const planner = vi.spyOn(nativePlanner, 'planFixture').mockImplementation((...args) => {
+    const planner = (...args) => {
       stage(3);
       try {
-        return original(...args);
+        return planFixture(...args);
       } finally {
         stage(2);
       }
-    });
+    };
     try {
-      const report = censusSource(JSON.stringify(fx.manifest), 'case-001', fx.repo);
+      const report = censusSource(JSON.stringify(fx.manifest), 'case-001', fx.repo, planner);
       expect(
         report.tasks.every((task) => task.diffSha256 === fx.manifest.entries[0].source.diffSha256),
       ).toBe(true);
       expect(report.tasks.every((task) => task.required[0].status === 'supplied')).toBe(true);
     } finally {
-      planner.mockRestore();
       fx.cleanup();
     }
   });

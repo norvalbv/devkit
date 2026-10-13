@@ -31,15 +31,18 @@ import { type CheckResult, check } from '../check-result.mts';
 // A devkit dep ref counts as "pinned" when it ends in a #v<digit> tag.
 const PINNED_TAG = /#v\d/;
 
-const DEP_IN_RE = DEP.replace(/[/\\^$*+?.()|[\]{}]/g, '\\$&');
+// Built on use, not at import: `DEP` is unbound while update.mts is still initialising, which an
+// import cycle or a test's module mock can both cause.
+const depInRe = () => DEP.replace(/[/\\^$*+?.()|[\]{}]/g, '\\$&');
 // bun.lock is JSONC — real lockfiles carry trailing commas, so JSON.parse throws on them. Every
 // `packages` entry is exactly one line, so read it line-anchored instead. Requiring `[` after the
 // key is the discriminator that excludes BOTH the `workspaces` block's requested-range line (key →
 // string) and devkit's own `"name": "@norvalbv/devkit"` (the dep name as a VALUE). The optional
 // path prefix matches a workspace-scoped duplicate key ("apps/web/@norvalbv/devkit").
-const LOCK_ENTRY_RE = new RegExp(`^\\s*"(?:[^"]*/)?${DEP_IN_RE}"\\s*:\\s*\\[\\s*"([^"]+)"`, 'gm');
+const lockEntryRe = () =>
+  new RegExp(`^\\s*"(?:[^"]*/)?${depInRe()}"\\s*:\\s*\\[\\s*"([^"]+)"`, 'gm');
 // The same key followed by a STRING — bun's record of what package.json asked for at install time.
-const LOCK_REQUEST_RE = new RegExp(`^\\s*"(?:[^"]*/)?${DEP_IN_RE}"\\s*:\\s*"([^"]+)"`, 'm');
+const lockRequestRe = () => new RegExp(`^\\s*"(?:[^"]*/)?${depInRe()}"\\s*:\\s*"([^"]+)"`, 'm');
 const RESOLVED_SHA_RE = /#([0-9a-f]{7,40})$/i;
 const LS_REF_RE = /^([0-9a-f]{40})\s+(\S+?)(\^\{\})?$/gm;
 // devkit executes inside repos it does not own, and package.json is consumer-controlled. git's
@@ -127,11 +130,11 @@ export function checkLockPin(cwd: string, env = process.env): CheckResult | null
 
   // A lockfile whose recorded REQUEST disagrees with package.json is merely stale: bun re-resolves
   // on the next install because the request changed, so its recorded object proves nothing.
-  const requested = lock.match(LOCK_REQUEST_RE)?.[1];
+  const requested = lock.match(lockRequestRe())?.[1];
   if (requested && requested !== ref) return null;
 
   const shas = new Set(
-    [...lock.matchAll(LOCK_ENTRY_RE)]
+    [...lock.matchAll(lockEntryRe())]
       .map((m) => m[1].match(RESOLVED_SHA_RE)?.[1]?.toLowerCase())
       .filter((s): s is string => !!s),
   );

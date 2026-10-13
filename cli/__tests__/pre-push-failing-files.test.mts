@@ -43,6 +43,32 @@ describe('readFailingTestFiles', () => {
     expect(readFailingTestFiles(cache, mtimeMs + 1, root)).toEqual([]);
   });
 
+  // The nested shape keeps project and file apart, so a project name may itself hold a colon.
+  it('reads the nested cache across a colon-named, an unnamed and a disagreeing project', () => {
+    const root = makeRoot();
+    const cache = join(root, 'results.json');
+    for (const name of ['a.test.mts', 'b.test.mts', 'c.test.mts'])
+      writeFileSync(join(root, name), '');
+    const files = (verdicts: Record<string, boolean>) => ({
+      files: Object.fromEntries(
+        Object.entries(verdicts).map(([file, failed]) => [file, { duration: 1, failed }]),
+      ),
+    });
+    writeFileSync(
+      cache,
+      JSON.stringify({
+        version: 1,
+        projects: {
+          'web:unit': files({ 'a.test.mts': true, 'b.test.mts': true }),
+          api: files({ 'b.test.mts': false }),
+          '': files({ 'c.test.mts': true }),
+        },
+      }),
+    );
+
+    expect(readFailingTestFiles(cache, 0, root)).toEqual(['a.test.mts']);
+  });
+
   // The cache format is undocumented, so this runs the installed vitest and reads what it wrote: a
   // vitest upgrade that moves or reshapes the file fails here rather than silencing the hook.
   it('reads the cache the installed vitest writes for a failing file', () => {
@@ -69,7 +95,7 @@ describe('readFailingTestFiles', () => {
     );
     expect(run.status, run.stderr).toBe(1);
 
-    const [hash] = readdirSync(join(root, 'cache/vitest'));
+    const hash = readdirSync(join(root, 'cache/vitest')).find((name) => name !== 'CACHEDIR.TAG');
     const cache = join(root, 'cache/vitest', hash ?? '', 'results.json');
     expect(readFailingTestFiles(cache, 0, root)).toEqual(['boom.test.mjs']);
   });
