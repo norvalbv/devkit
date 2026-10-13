@@ -10,12 +10,14 @@ import {
   SENTRY_MODEL_ENVS,
 } from '../../gate-engine/judge/outage/family-override.mts';
 import { meta } from '../commands/ship.mts';
+import { SLOT_DIR_ENV, SLOT_ENV, SLOT_RELEASE_ENV } from '../lib/ship/queue/enter.mts';
 import {
   BYPASS_ENV,
   INHERITED_RUN_ENV,
   JUDGE_ROUTING_ENV,
   SCRUBBED_ENV,
   SHIP_EXPORTED_ENV,
+  SHIP_QUEUE_ENV,
   SUITE_GIT_IDENTITY,
 } from '../../vitest.setup.mjs';
 
@@ -197,6 +199,13 @@ describe('vitest.setup.mjs scrubs inherited gate policy', () => {
     expect([...JUDGE_ROUTING_ENV].sort()).toEqual([...knobs].sort());
     const env = envAfterSetup(Object.fromEntries(knobs.map((name) => [name, 'haiku'])));
     for (const name of knobs) expect(env[name], name).toBeUndefined();
+  });
+
+  it('scrubs the queue slot of the ship running the suite', () => {
+    const slot = [SLOT_ENV, SLOT_DIR_ENV, SLOT_RELEASE_ENV];
+    expect([...SHIP_QUEUE_ENV].sort()).toEqual([...slot].sort());
+    const env = envAfterSetup(Object.fromEntries(slot.map((name) => [name, '1'])));
+    for (const name of slot) expect(env[name], name).toBeUndefined();
   });
 
   it('declares each name once, in exactly one provenance list', () => {

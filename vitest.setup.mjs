@@ -146,12 +146,21 @@ export const JUDGE_ROUTING_ENV = [
   'FRINK_SENTRY_MODEL',
 ];
 
+// The machine-wide queue slot of the ship running this suite (queue/enter.mts). Inherited, every
+// fixture ship tries to register on that slot as its acquirer and refuses to start. Parity-tested.
+export const SHIP_QUEUE_ENV = [
+  'DEVKIT_SHIP_SLOT',
+  'DEVKIT_SHIP_SLOT_DIR',
+  'DEVKIT_SHIP_SLOT_RELEASE',
+];
+
 export const SCRUBBED_ENV = [
   ...INHERITED_RUN_ENV,
   ...SHIP_EXPORTED_ENV,
   ...TEST_ONLY_ADDITIONS,
   ...BYPASS_ENV,
   ...JUDGE_ROUTING_ENV,
+  ...SHIP_QUEUE_ENV,
 ];
 
 // Ordering is load-bearing: DEVKIT_GATE_EVENTS is scrubbed here and reassigned below, so a scrub
