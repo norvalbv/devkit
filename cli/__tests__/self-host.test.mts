@@ -652,20 +652,20 @@ describe('committed agent-asset projection parity', () => {
         readFileSync(join(ROOT, '.devkit', 'config.json'), 'utf8'),
       ) as { components: { agentTargets: string[]; guards: string[] } };
 
-      const drift = projectionDrift({
-        root: ROOT,
-        kind,
-        srcDir,
-        targets: components.agentTargets,
-        selection: components,
-      });
+      // One target per call, so a gitignored projection reports `unchecked` instead of riding its
+      // siblings' pass; an empty list keeps one `[]` call, which reports `unchecked` too.
+      const { agentTargets } = components;
+      const drift = (agentTargets.length ? agentTargets.map((t) => [t]) : [[]]).flatMap((targets) =>
+        projectionDrift({ root: ROOT, kind, srcDir, targets, selection: components }),
+      );
       // The classes need different repairs: sync rewrites a stale file but can NEVER prune an
       // orphan (it only removes what the manifest records), so one blanket "re-run sync" would
       // send the next reader to a command that does nothing.
       expect(
         drift,
         `stale/missing → run \`node cli/index.mts sync-${kind}\` and commit; ` +
-          'orphan → `git rm` it (sync never prunes unmanifested files)',
+          'orphan → `git rm` it, or `rm` it when untracked (sync never prunes unmanifested files); ' +
+          'unchecked → the projection dir is gitignored here: un-ignore it and commit the projection',
       ).toEqual([]);
     });
   }

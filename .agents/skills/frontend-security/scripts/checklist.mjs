@@ -1,0 +1,313 @@
+#!/usr/bin/env node
+
+/**
+ * Frontend Security Review Checklist
+ *
+ * Checks frontend code against security best practices.
+ * Only runs on frontend files (src/renderer/, src/preload/).
+ */
+
+import { execFileSync } from 'node:child_process';
+import { createChecklistStore } from '../../_devkit/checklist-store.mjs';
+import {
+  assertStagedSetSane,
+  resolveReviewRoots,
+  stagedFilesOverride,
+  toGitPathspecs,
+} from '../../_devkit/review-roots.mjs';
+
+const CHECKLIST_PATH = '.claude/.frontend-security-review.json';
+
+// Top-level regex patterns for performance
+const RE_DANGEROUS_HTML = /dangerouslySetInnerHTML/i;
+const RE_INNER_HTML = /\.(innerHTML|outerHTML)\s*=/i;
+const RE_DOC_WRITE = /document\.write/i;
+const RE_URL = /\b(href|src|url|link)[\s]*[=:]/i;
+const RE_LOCALSTORAGE = /\b(localStorage|sessionStorage)\.setItem/i;
+const RE_TOKEN = /\b(token|credential|password|secret|apiKey|api_key|API_KEY)/i;
+const RE_FETCH = /\b(fetch|axios|\.post|\.put|\.delete|\.patch)\s*\(/i;
+// Bare `value` matched every React diff; only the attribute form is form-input evidence.
+const RE_INPUT = /\b(input|onChange|onSubmit|formData|useForm)|\bvalue\s*=\s*[{"']/i;
+const RE_BLANK = /target\s*=\s*["']_blank/i;
+const RE_WINDOW_OPEN = /window\.open/i;
+const RE_EVAL = /\b(eval\s*\(|new\s+Function\s*\(|setTimeout\s*\(\s*["']|setInterval\s*\(\s*["'])/i;
+const RE_URL_PARAMS = /\b(window\.location|searchParams|URLSearchParams|queryString)/i;
+const RE_SANITIZE = /\b(DOMPurify|sanitize|xss)/i;
+const RE_COOKIE = /\b(document\.cookie|Cookies\.|cookie)/i;
+const RE_JWT = /\b(jwt|jsonwebtoken|expiresIn|decode|verify|sign)\b/i;
+// `state`/`scope` as bare words matched every React diff (useState, block scope).
+const RE_OAUTH = /\b(oauth|authorize|redirect_uri|grant_type|client_id)\b/i;
+const RE_HARDCODED = /\b(users|pass|key|secret|token)\s*[:=]\s*["'][^"']{8,}["']/i;
+const RE_DEBUG_LOG = /\bconsole\.(log|debug|info|warn|error)\s*\(/i;
+// Cross-origin messaging (coverage from OWASP ASVS v5 V3 — see SKILL.md Provenance).
+const RE_POSTMESSAGE =
+  /\bpostMessage\s*\(|addEventListener\s*\(\s*['"]message['"]|\bonmessage\s*=/i;
+
+// Prose files under a root ride along with source commits; their text trips the item
+// regexes (a README mentioning "password") and hands the judge prose to hallucinate on.
+const RE_PROSE_FILE = /\.(md|mdx|markdown|txt)$/i;
+
+const log = console.log;
+
+const store = createChecklistStore({
+  path: CHECKLIST_PATH,
+  label: 'Frontend Security',
+  log,
+});
+const { save: saveChecklist, status, checkItem, finalize } = store;
+
+// Frontend roots to review — from guard.config.json `review.frontendRoots` (NOT hardcoded), so the
+// checklist scopes to ANY repo's layout. No/unreadable config, a non-object config, or an absent
+// review.frontendRoots → all staged files (the gate never silently no-ops). A PRESENT but invalid
+// value (not an array of non-empty strings) warns loudly and falls back to scan-all, rather than
+// letting a bad entry crash the git call into an empty result that would wave the commit through.
+function frontendRoots() {
+  return resolveReviewRoots({
+    envName: 'DEVKIT_REVIEW_FRONTEND_ROOTS',
+    configKey: 'frontendRoots',
+    reviewerName: 'frontend-security',
+  });
+}
+
+function getStagedFiles() {
+  const override = stagedFilesOverride();
+  if (override) return override.filter((f) => !f.endsWith('.pen') && !RE_PROSE_FILE.test(f));
+  const pathspecs = toGitPathspecs(frontendRoots());
+  try {
+    const output = execFileSync(
+      'git',
+      ['diff', '--cached', '--name-only', '--diff-filter=ACMR', '--', ...pathspecs],
+      { encoding: 'utf-8' },
+    );
+    // ACMR hides deletions, so an all-deletions index reads as "nothing staged" here. Never report
+    // that as zero items — a reviewer that examined nothing must not read as a pass.
+    if (!output.trim()) assertStagedSetSane(pathspecs, 'frontend-security');
+    return output
+      .trim()
+      .split('\n')
+      .filter((f) => f.length > 0 && !f.endsWith('.pen'))
+      .filter((f) => !RE_PROSE_FILE.test(f));
+  } catch {
+    return [];
+  }
+}
+
+function getFileDiff(file) {
+  try {
+    return execFileSync('git', ['diff', '--cached', '--', file], { encoding: 'utf-8' });
+  } catch {
+    return '';
+  }
+}
+
+function detectSecurityPatterns(_files, diffs) {
+  const items = [];
+  const fullDiff = diffs.join('\n');
+
+  if (RE_DANGEROUS_HTML.test(fullDiff)) {
+    items.push({
+      name: 'xss-innerhtml',
+      category: 'XSS Prevention',
+      status: 'pending',
+      issues: [],
+    });
+  }
+  if (RE_INNER_HTML.test(fullDiff)) {
+    items.push({
+      name: 'xss-innerhtml-direct',
+      category: 'XSS Prevention',
+      status: 'pending',
+      issues: [],
+    });
+  }
+  if (RE_DOC_WRITE.test(fullDiff)) {
+    items.push({
+      name: 'xss-document-write',
+      category: 'XSS Prevention',
+      status: 'pending',
+      issues: [],
+    });
+  }
+  if (RE_URL.test(fullDiff)) {
+    items.push({
+      name: 'url-validation',
+      category: 'XSS Prevention',
+      status: 'pending',
+      issues: [],
+    });
+  }
+  if (RE_LOCALSTORAGE.test(fullDiff)) {
+    items.push({
+      name: 'token-storage-localstorage',
+      category: 'Secure Storage',
+      status: 'pending',
+      issues: [],
+    });
+  }
+  if (RE_TOKEN.test(fullDiff)) {
+    items.push({
+      name: 'token-handling',
+      category: 'Secure Storage',
+      status: 'pending',
+      issues: [],
+    });
+  }
+  if (RE_FETCH.test(fullDiff)) {
+    items.push({ name: 'csrf-protection', category: 'CSRF', status: 'pending', issues: [] });
+  }
+  if (RE_INPUT.test(fullDiff)) {
+    items.push({
+      name: 'input-validation',
+      category: 'Input Validation',
+      status: 'pending',
+      issues: [],
+    });
+  }
+  if (RE_BLANK.test(fullDiff)) {
+    items.push({
+      name: 'external-links',
+      category: 'XSS Prevention',
+      status: 'pending',
+      issues: [],
+    });
+  }
+  if (RE_WINDOW_OPEN.test(fullDiff)) {
+    items.push({ name: 'window-open', category: 'XSS Prevention', status: 'pending', issues: [] });
+  }
+  if (RE_POSTMESSAGE.test(fullDiff)) {
+    items.push({
+      name: 'postmessage-origin',
+      category: 'Cross-Origin',
+      status: 'pending',
+      issues: [],
+    });
+  }
+  if (RE_EVAL.test(fullDiff)) {
+    items.push({
+      name: 'code-injection',
+      category: 'XSS Prevention',
+      status: 'pending',
+      issues: [],
+    });
+  }
+  if (RE_URL_PARAMS.test(fullDiff)) {
+    items.push({
+      name: 'url-sensitive-data',
+      category: 'Secure Storage',
+      status: 'pending',
+      issues: [],
+    });
+  }
+  if (RE_SANITIZE.test(fullDiff)) {
+    items.push({
+      name: 'sanitization-check',
+      category: 'XSS Prevention',
+      status: 'pending',
+      issues: [],
+    });
+  }
+  if (RE_COOKIE.test(fullDiff)) {
+    items.push({
+      name: 'cookie-security',
+      category: 'Secure Storage',
+      status: 'pending',
+      issues: [],
+    });
+  }
+  if (RE_JWT.test(fullDiff)) {
+    items.push({
+      name: 'jwt-handling',
+      category: 'Authentication',
+      status: 'pending',
+      issues: [],
+    });
+  }
+  if (RE_OAUTH.test(fullDiff)) {
+    items.push({
+      name: 'oauth-security',
+      category: 'Authentication',
+      status: 'pending',
+      issues: [],
+    });
+  }
+  if (RE_HARDCODED.test(fullDiff)) {
+    items.push({
+      name: 'hardcoded-secrets',
+      category: 'Secure Storage',
+      status: 'pending',
+      issues: [],
+    });
+  }
+  if (RE_DEBUG_LOG.test(fullDiff)) {
+    items.push({
+      name: 'debug-logging',
+      category: 'Security Hygiene',
+      status: 'pending',
+      issues: [],
+    });
+  }
+  if (items.length === 0) {
+    items.push({ name: 'general-security', category: 'General', status: 'pending', issues: [] });
+  }
+  return items;
+}
+
+function generate() {
+  const stagedFiles = getStagedFiles();
+  if (stagedFiles.length === 0) {
+    log(
+      '⏭️  No staged frontend files under review.frontendRoots (guard.config.json). Skipping security review.',
+    );
+    // sc-1439: the GATE selected this reviewer, so an artifact must exist — a named skip, never
+    // an absence (verifyChecklist voids a PASS on a missing artifact).
+    if (stagedFilesOverride())
+      saveChecklist({
+        items: [],
+        skipped:
+          "gate-selected files were all excluded by this checklist's own filters (prose/tests/extensions/deletions) — deliberate skip, not an unfinished review",
+      });
+    process.exit(0);
+  }
+  const diffs = stagedFiles.map((f) => getFileDiff(f));
+  const items = detectSecurityPatterns(stagedFiles, diffs);
+  const data = { generated: new Date().toISOString(), files: stagedFiles, items };
+  saveChecklist(data);
+  log(`✅ Frontend Security: ${stagedFiles.length} files, ${items.length} checks`);
+  log('');
+  log('Items to review:');
+  for (const item of items) log(`  - [${item.category}] ${item.name}`);
+}
+
+const args = process.argv.slice(2);
+const cmd = args[0];
+switch (cmd) {
+  case 'generate':
+    generate();
+    break;
+  case 'status':
+    status();
+    break;
+  case 'check-item': {
+    const name = args[1];
+    const pass = args.includes('--pass');
+    const failIdx = args.indexOf('--fail');
+    const failReason = failIdx !== -1 ? args[failIdx + 1] : null;
+    if (!name || (!pass && failIdx === -1)) {
+      log('Usage: check-item <name> --pass OR --fail "reason"');
+      process.exit(1);
+    }
+    checkItem(name, pass, failReason);
+    break;
+  }
+  case 'finalize':
+    finalize();
+    break;
+  default:
+    log('Frontend Security Review Commands:');
+    log('  generate                    Create checklist');
+    log('  status                      Show progress');
+    log('  check-item <name> --pass    Mark passed');
+    log('  check-item <name> --fail    Mark failed');
+    log('  finalize                    Verify every item was resolved');
+    process.exit(1);
+}
