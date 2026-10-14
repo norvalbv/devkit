@@ -3,7 +3,7 @@
  * Ship pins the base without writing that shared ref, so the lock cannot fail it.
  */
 import { writeFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { testSpawnSync as spawnSync } from './_helpers.mts';
 import { rewriteRepo } from './_reship-rewrite-fixture.mts';
@@ -25,6 +25,27 @@ function holdStaleTrackingRef(
   git(['update-ref', ref, staleOid]);
   writeFileSync(resolve(dir, git(['rev-parse', '--git-path', `${ref}.lock`]).trim()), '');
 }
+
+describe('ship names an unreachable origin as unverifiable, never as a missing branch', () => {
+  it.each([
+    ['--base', ['--', 'note.txt']],
+    ['--from-branch', ['--from-branch']],
+  ])('%s', (label, tail) => {
+    const { bare, dir, env, git } = seedBaseRepo();
+    git(['remote', 'set-url', 'origin', join(dirname(bare), 'gone.git')]);
+
+    const r = spawnSync('/bin/bash', [scriptPath, 'feat/x', 't', '--base', 'studio', ...tail], {
+      cwd: dir,
+      input: '',
+      encoding: 'utf8',
+      env: { ...env, SHIP_DRY_RUN: '1' },
+    });
+
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain(`${label}: could not verify origin/studio (ls-remote exit 128)`);
+    expect(r.stderr).not.toMatch(/no branch origin/);
+  });
+});
 
 describe('ship pins the base while a sibling fetch holds its tracking-ref lock', () => {
   it('--base resolves origin’s tip instead of reporting a missing branch', () => {

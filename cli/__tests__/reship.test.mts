@@ -1194,6 +1194,18 @@ describe('reship --base — a moved PR base never strands the rewrite (sc-2739)'
     expect(repo.g(['for-each-ref', '--format=%(refname)', 'refs/devkit/reship-rewrite'])).toBe('');
   });
 
+  it('re-pins the advanced base while a sibling fetch holds its tracking-ref lock', () => {
+    const repo = rewriteRepo();
+    // A stale tracking ref is one a plain fetch must rewrite, so its held lock would fail the re-pin.
+    repo.g(['update-ref', 'refs/remotes/origin/main', repo.oldBase]);
+    writeFileSync(join(repo.dir, '.git/refs/remotes/origin/main.lock'), '');
+    gateHook(repo.dir, advanceMain(repo));
+    const r = run(rewrite, repo.dir, repo.env);
+    expect(r.stderr).not.toContain('could not be verified');
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).toContain('advanced during gates');
+  });
+
   it.each([
     [
       'rewound',
