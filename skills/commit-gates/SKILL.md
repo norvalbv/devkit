@@ -179,6 +179,11 @@ so a bypass would only move the failure later. To accept a finding deliberately,
 sees it in the diff. In an overlay install the baseline is per-clone, so `devkit anti-slop create
 --force <paths>` adopts it locally. The FAIL output names the route for the mode it ran in.
 
+Code moved between files is not new debt, so do not rewrite it to pass. Delete it at the source,
+`git add` both files, then run `devkit anti-slop adopt-relocations` for a partial move, or
+`devkit anti-slop adopt-renames` when Git reports a rename, and stage the baseline where it is
+tracked. The FAIL output names the source file when a new finding repeats debt baselined elsewhere.
+
 ## Judge outage: re-targeting, not bypassing
 
 A judge that cannot run is not a finding. Under `devkit ship` a dark provider fails the gate closed
