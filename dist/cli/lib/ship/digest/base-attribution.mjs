@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /** Narrates which failed config `extraGates` commands also exit 1 at the commit the gate worktree
- * was cut from. Prints lines or nothing and always exits 0: the gate that blocked already decided. */
+ * was cut from. A run it could not finish prints nothing and exits non-zero; the caller ignores it. */
 import { execFileSync, spawn } from 'node:child_process';
 import { closeSync, lstatSync, mkdirSync, mkdtempSync, openSync, readlinkSync, rmSync, symlinkSync, } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -9,7 +9,7 @@ import { configExtraGates } from '../../../../gate-engine/deterministic/command-
 import { emitGateEvent } from '../../../../gate-engine/judge/gate-events.mjs';
 import { telemetrySink } from '../../../../gate-engine/judge/run-context.mjs';
 import { readShipEvents } from './gate-digest.mjs';
-/** One budget for the worktree, its links and every rerun: a blocked ship waits no longer than this. */
+/** One budget for the worktree, its links and every rerun. Removing the worktree has its own bound. */
 const CAP_MS = 120_000;
 const KILL_GRACE_MS = 2_000;
 const CLEANUP_MS = 30_000;
@@ -163,7 +163,7 @@ export async function attributeToBase(wt, outPrefix, capMs = CAP_MS) {
         mirrorLinks(wt, baseWt, deadline);
         const alsoFailing = await rerunAtBase(gates, baseWt, outPrefix, deadline);
         if (interrupted)
-            return [];
+            throw new Error('interrupted before every rerun finished');
         return [...alsoFailing].map(([label, outFile]) => `ship: ${label} also exits 1 at ${sha.slice(0, 7)}, the commit this gate worktree was cut from (run with this checkout's linked node_modules). Base run output: ${outFile}`);
     }
     finally {
@@ -179,11 +179,13 @@ export async function attributeToBase(wt, outPrefix, capMs = CAP_MS) {
     }
 }
 // CLI: `node base-attribution.mjs <gate-worktree> <output-prefix>`, shelled by
-// commit-with-gate-capture.sh. Any failure prints nothing: a blocked run gains no noise from here.
+// commit-with-gate-capture.sh. A failure prints nothing and exits 1, never a partial answer.
 if (/[/\\]base-attribution\.m[jt]s$/.test(process.argv[1] ?? '')) {
     const [wt = '', outPrefix = ''] = process.argv.slice(2);
     attributeToBase(wt, outPrefix).then((lines) => {
         if (lines.length > 0)
             process.stdout.write(`${lines.join('\n')}\n`);
-    }, () => { });
+    }, () => {
+        process.exitCode = 1;
+    });
 }
