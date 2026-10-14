@@ -159,7 +159,7 @@ describe('commands_ref on judge_exec', () => {
     expect(stored(lastEvent().commands_ref)).toContain('[exit 1]');
 
     const killed = fakeBin('codex-killed', [PASSING, STARTED]);
-    writeFileSync(killed, `${readFileSync(killed, 'utf8')}sleep 10\n`);
+    writeFileSync(killed, `${readFileSync(killed, 'utf8')}exec sleep 10\n`);
     process.env.GUARD_CODEX_BIN = killed;
     // Both spawn paths: reviewers run async, where the partial stdout arrives via the callback.
     for (const run of [execJudge, execJudgeAsync]) {
