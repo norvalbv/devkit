@@ -343,8 +343,8 @@ describe('parallel completeness prewarm (ship message file present)', () => {
     expect(r.status).toBe(1);
     expect(r.stdout).toContain('escalation-confirmed');
     expect(r.stdout).not.toContain('ALREADY recorded');
-    // The judge exited on its own, so its outcome line is in the log; it was not cancelled.
-    expect(r.stdout).not.toContain('completeness judge cancelled');
+    // The judge exited on its own, so its outcome line is in the log; no signal is claimed.
+    expect(r.stdout).not.toContain('completeness judge ended by a signal');
   });
 
   it('narrates nothing when the fleet passes — the crc dispatch owns that path unchanged', () => {
@@ -395,8 +395,8 @@ describe('parallel completeness prewarm (ship message file present)', () => {
     // 143 is a judge killed MID-judgement: it reached no verdict, so there is nothing honest to
     // report. A fabricated one is worse than silence.
     expect(r.stdout).not.toContain('ALREADY recorded');
-    // But the log must not end at "started": the cancellation is named, below the fleet's block.
-    expect(r.stdout.indexOf('completeness judge cancelled before a verdict')).toBeGreaterThan(
+    // But the log must not end at "started": the signal is named, below the fleet's block.
+    expect(r.stdout.indexOf('completeness judge ended by a signal (status 143)')).toBeGreaterThan(
       r.stdout.indexOf('escalation-confirmed'),
     );
   });

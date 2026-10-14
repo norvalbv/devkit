@@ -356,9 +356,9 @@ comp_observed_rc=0
 # run then ends with the fleet's remediation and the --resume line. An agent reading the tail — the
 # documented next step — misses it and rediscovers it rounds later. Only a CONFIRMED finding (1) is
 # worth a line here: an unavailable judge (3) or an unreadable staged set (4) tells a reader nothing
-# they can act on before the retry that re-judges anyway. A killed judge (>=128) is only named.
+# they can act on before the retry that re-judges anyway. A signalled judge (>=128) is only named.
 __dk_comp_observed() {
-    [ "$comp_observed_rc" -lt 128 ] || echo "   · completeness judge cancelled before a verdict — the fleet blocked first; the retry re-judges it."
+    [ "$comp_observed_rc" -lt 128 ] || echo "   · completeness judge ended by a signal (status $comp_observed_rc); any verdict it reached is above, and the retry re-judges it."
     [ "$comp_observed_rc" -eq 1 ] || return 0
     echo "   ⚠ ALSO, not the reason this run stopped: the completeness judge had ALREADY recorded a"
     echo "     finding when the fleet blocked. Read it above before retrying — it is the most"
@@ -381,7 +381,7 @@ if [ -n "$comp_pid" ]; then
         # The wait KEEPS that status now (sc-2488) instead of discarding it. It is genuinely
         # available: when the judge had already exited, the kill fails harmlessly and wait returns
         # the judge's own code; only a judge killed MID-judgement reads 143, and that one reached no
-        # verdict, so __dk_comp_observed names the cancellation and never a finding. A fabricated
+        # verdict, so __dk_comp_observed names the signal and never a finding. A fabricated
         # verdict is worse than none.
         kill "$comp_pid" 2>/dev/null || true
         wait "$comp_pid" 2>/dev/null || comp_observed_rc=$?
