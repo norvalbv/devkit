@@ -38,7 +38,8 @@ export function runRelatedTests(root: string, opts: RunOpts = {}): number {
   }
   console.log(`related-tests: ${paths.length} staged path(s)`);
   const vitest = join(root, 'node_modules', '.bin', 'vitest');
-  const args = ['related', '--run', '--reporter=dot', ...paths];
+  // A passing ship or reviewer test's console output would echo the ship's own progress lines.
+  const args = ['related', '--run', '--reporter=dot', '--silent=passed-only', ...paths];
   const result = (opts.exec ?? spawnSync)(vitest, args, { cwd: root, stdio: 'inherit' });
   if (result.error) console.error(`✗ related-tests could not run vitest: ${result.error.message}`);
   // A null status is a signal kill or a failed spawn: nothing passed, so block.

@@ -78,7 +78,7 @@ describe('runRelatedTests', () => {
     expect(runRelatedTests('/repo', { staged: ['cli/a.mts'], exec })).toBe(1);
     expect(exec).toHaveBeenCalledWith(
       join('/repo', 'node_modules', '.bin', 'vitest'),
-      ['related', '--run', '--reporter=dot', 'cli/a.mts'],
+      ['related', '--run', '--reporter=dot', '--silent=passed-only', 'cli/a.mts'],
       { cwd: '/repo', stdio: 'inherit' },
     );
   });
@@ -97,7 +97,7 @@ describe('runRelatedTests', () => {
     runRelatedTests(repo, { exec });
     expect(exec).toHaveBeenCalledWith(
       expect.any(String),
-      ['related', '--run', '--reporter=dot', 'a.mts'],
+      ['related', '--run', '--reporter=dot', '--silent=passed-only', 'a.mts'],
       expect.anything(),
     );
   });
@@ -122,7 +122,7 @@ describe('runRelatedTests', () => {
     runRelatedTests(repo, { exec });
     expect(exec).toHaveBeenCalledWith(
       expect.any(String),
-      ['related', '--run', '--reporter=dot', 'b.mts'],
+      ['related', '--run', '--reporter=dot', '--silent=passed-only', 'b.mts'],
       expect.anything(),
     );
   });

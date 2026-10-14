@@ -147,10 +147,17 @@ devkit command.
   only` warning is expected when the target is your own repo.
 - **Run `devkit ship` in the BACKGROUND** (`run_in_background`), never as a foreground tool call: the
   gate chain's worst case (AI reviewer cascades) exceeds the 10-minute foreground Bash cap, which kills
-  the ship mid-gates as exit 143 with no banner. Poll the shell output for the per-reviewer heartbeat
-  lines (`guard-review: <name> — PASS … (checkpointed)`). A judge still in flight (completeness can
-  take many minutes) prints `guard-review: still running — <lane> <elapsed> (killed in ≤<bound>) · log:
-  <path>` about every 45s; while those keep arriving the gate is alive, not hung.
+  the ship mid-gates as exit 143 with no banner. The shell output is for humans: a gate's subprocess
+  (a test run) can print `guard-review: <name> — PASS` lines and stage banners identical to the real
+  ones, so never read the stage from it. Read `.devkit/review-progress-<branch>.json` instead
+  (`/` in the branch becomes `-`; a `--dry-gates` rehearsal writes `…-<branch>-dry-*.json`), and
+  only once its mtime is newer than your launch, since a killed attempt leaves its file until the
+  next gate chain starts. Present, `running` lists every reviewer this run judges (queued ones too)
+  and `completed` the ones done; absent, the reviewer gate has not started or has finished — and
+  with every reviewer cached it never appears, so absence is never a PASS. The outcome is the task's
+  exit plus the `ship_exit=` line and the tail. A judge still in flight (completeness can take many
+  minutes) prints `guard-review: still running — <lane> <elapsed> (killed in ≤<bound>) · log:
+  <path>` about every 45s: a liveness hint that the gate is not hung, not evidence of its stage.
 - **A blocked or timed-out ship retries with `devkit ship --resume <branch>` — never re-type the
   invocation.** Reviewer PASSes checkpoint as they land, cleared decisions judgements and the
   deterministic gate prefix are cached, so a retry only pays for the unfinished work; `--resume`
