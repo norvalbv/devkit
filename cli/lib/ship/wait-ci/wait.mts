@@ -349,14 +349,15 @@ export function classifyChecksFailure(e: ExecFailure): PollResult {
   // gh exits 1 both for a PR with no checks and for --required on an unprotected branch. Both are
   // an empty check set — an answer — not a failure to reach gh.
   if (/no (required )?checks reported/i.test(stderr)) return { kind: 'rows', rows: [] };
+  // Before the auth test: gh echoes the branch, and a branch name may contain "authentication".
+  if (/could not resolve to a pullrequest|no pull requests found/i.test(stderr))
+    return { kind: 'unavailable', reason: 'pr-not-found', message: msg };
   if (/gh auth login|authentication|not logged/i.test(stderr))
     return {
       kind: 'unavailable',
       reason: 'gh-unauthenticated',
       message: `gh is not authenticated: ${msg}`,
     };
-  if (/could not resolve to a pullrequest|no pull requests found/i.test(stderr))
-    return { kind: 'unavailable', reason: 'pr-not-found', message: msg };
   if (
     /no git remotes|not a git repository|could not determine|none of the git remotes/i.test(stderr)
   )
@@ -371,8 +372,8 @@ export function classifyChecksFailure(e: ExecFailure): PollResult {
 /** The gh invocation, injectable so the mapping above is testable without a network or a PR. */
 export type ChecksExec = (args: string[], cwd: string) => string;
 
-const defaultExec =
-  (timeout: number): ChecksExec =>
+export const defaultExec =
+  (timeout = DEFAULT_EXEC_TIMEOUT_MS): ChecksExec =>
   (args, cwd) =>
     execFileSync('gh', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout });
 
@@ -389,7 +390,7 @@ export interface ChecksPollerOptions {
 
 /** Build the poller `waitForChecks` drives. It never throws: every outcome is a PollResult. */
 export function ghChecksPoller(options: ChecksPollerOptions): () => PollResult {
-  const exec = options.exec ?? defaultExec(options.execTimeoutMs ?? DEFAULT_EXEC_TIMEOUT_MS);
+  const exec = options.exec ?? defaultExec(options.execTimeoutMs);
   const args = ['pr', 'checks', options.pr, '--repo', options.repo, '--json', CHECKS_JSON_FIELDS];
   if (options.required) args.push('--required');
   const unparseable = (raw: string): PollResult => ({
@@ -436,11 +437,20 @@ function flagValue(argv: string[], name: string): string | undefined {
   return i === -1 ? undefined : argv[i + 1];
 }
 
+/** The attribution engine's signature, injectable so a caller's tests need no gh. */
+export type AttributeFn = (input: { cwd: string; pr: string; failures: CheckRow[] }) => Attribution;
+
 /** Loaded lazily, so a broken import can never cost the verdict line of any outcome. */
-async function attribute(pr: string, failures: CheckRow[]): Promise<Attribution> {
+export async function attribute(
+  pr: string,
+  failures: CheckRow[],
+  cwd = process.cwd(),
+  run?: AttributeFn,
+): Promise<Attribution> {
   try {
-    const { attributeFailures } = await import('../../baseline-status/attribution.mts');
-    return attributeFailures({ cwd: process.cwd(), pr, failures });
+    const attributeFailures =
+      run ?? (await import('../../baseline-status/attribution.mts')).attributeFailures;
+    return attributeFailures({ cwd, pr, failures });
   } catch {
     return {
       token: 'unknown',
