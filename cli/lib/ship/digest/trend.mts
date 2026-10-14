@@ -14,6 +14,7 @@ const SHOWN = 8;
 const text = z.string().optional().catch(undefined);
 // Strict per lens: a lens that does not parse makes its round's count unknown, never blocking.
 const lensSchema = z.object({
+  lens: text,
   status: z.enum(['pending', 'pass', 'fail']),
   disposition: z.enum(['blocking', 'waived', 'dropped_out_of_charter']).optional(),
   issues: z.array(z.string()).optional(),
@@ -118,6 +119,22 @@ function countOf(row: TrendRow): number | null {
     if (isBlocking(lens.data)) count += Math.max(1, lens.data.issues?.length ?? 0);
   }
   return count;
+}
+
+/** Issues under the ONE blocking item named `lens`; null when the vector is absent, spilled or
+ * unparseable, or when no item or several carry that lens (chunked parts each bring their own). */
+export function issuesUnder(row: Pick<TrendRow, 'items'>, lens: string): number | null {
+  // The digest's rows are cast, not parsed, so a hostile `items` can be any JSON value here.
+  if (!Array.isArray(row.items)) return null;
+  const counts: number[] = [];
+  for (const raw of row.items) {
+    const item = lensSchema.safeParse(raw);
+    if (!item.success) return null;
+    if (isBlocking(item.data) && item.data.lens === lens) {
+      counts.push(item.data.issues?.length ?? 0);
+    }
+  }
+  return counts.length === 1 ? counts[0] : null;
 }
 
 /** This branch's finished attempts up to the current one, or null when the ship cannot be keyed. */
