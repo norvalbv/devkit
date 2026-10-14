@@ -60,6 +60,9 @@ export function parseTrendRow(line: string): TrendRow | undefined {
   }
 }
 
+/** Rows a ship writes before its own marker; inside a killed open attempt they would read as foreign. */
+const PRE_MARKER = new Set(['ship_intent', 'judge_preflight']);
+
 /** This branch's rows → its attempts in order, or null when two overlap (completion order is then not
  * round order). Markers open attempts: an inherited DEVKIT_SHIP_ID can span several. */
 function attemptsOf(rows: TrendRow[], key: ShipKey): Attempt[] | null {
@@ -67,8 +70,8 @@ function attemptsOf(rows: TrendRow[], key: ShipKey): Attempt[] | null {
   let current: Attempt | undefined;
   const displaced = new Set<string>();
   for (const row of rows) {
-    // ship_intent precedes its own marker, so it would read as foreign inside a killed open attempt.
-    if (row.repo !== key.repo || row.branch !== key.branch || row.type === 'ship_intent') continue;
+    if (row.repo !== key.repo || row.branch !== key.branch || PRE_MARKER.has(row.type ?? ''))
+      continue;
     // A displaced attempt that writes again was not killed: it overlapped, so rounds are out of order.
     if (displaced.has(row.ship_id)) return null;
     if (row.type === 'ship_attempt') {

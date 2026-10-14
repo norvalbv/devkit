@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { testSpawnSync } from './_helpers.mts';
 import {
+  parseInitializeReply,
   parseRateLimitsReply,
   readCodexRateLimits,
 } from '../../gate-engine/judge/codex/rate-limits.mts';
@@ -124,6 +125,25 @@ describe('parseRateLimitsReply', () => {
       '',
     ])
       expect(parseRateLimitsReply(line)).toBeNull();
+  });
+});
+
+describe('parseInitializeReply', () => {
+  it('reads the version after the client name, whatever the client is called', () => {
+    const reply = (userAgent: string) => JSON.stringify({ id: 1, result: { userAgent } });
+    expect(parseInitializeReply(reply('devkit/0.162.1 (Mac OS 26.5.1; arm64)'))).toBe('0.162.1');
+    expect(parseInitializeReply(reply('codex_cli_rs/1.0.0-beta.2'))).toBe('1.0.0-beta.2');
+  });
+
+  it('names no version for any line that is not a versioned handshake reply', () => {
+    for (const line of [
+      JSON.stringify({ id: 1, result: { userAgent: 'x' } }), // no version to read
+      JSON.stringify({ id: 1, result: {} }),
+      JSON.stringify({ id: 2, result: { userAgent: 'devkit/0.162.1' } }), // another reply's id
+      'null',
+      'not json at all',
+    ])
+      expect(parseInitializeReply(line)).toBeUndefined();
   });
 });
 
@@ -483,6 +503,37 @@ describe('readCodexRateLimits — the spawn, not just the parser', () => {
     expect(snap?.reached).toBe(true);
   });
 
+  it('reports the CLI version from the handshake reply, and the account-level usage flag', async () => {
+    const snap = await withFake(
+      [
+        `echo '{"id":1,"result":{"userAgent":"devkit/0.162.1 (Mac OS 26.5.1; arm64) ghostty/1.3.1"}}'`,
+        `echo '{"id":2,"result":{"ordinaryUsageAllowed":false,"rateLimits":{"credits":{"hasCredits":true},"primary":{"usedPercent":10}}}}'`,
+        'sleep 5',
+      ].join('\n'),
+      700,
+    );
+    expect(snap).toMatchObject({
+      cliVersion: '0.162.1',
+      ordinaryUsageAllowed: false,
+      creditsUsable: true,
+    });
+  });
+
+  it('reports no CLI version when the handshake names none', async () => {
+    const snap = await withFake(
+      [
+        `echo '{"id":1,"result":{"userAgent":"x"}}'`,
+        `echo '{"id":2,"result":{"ordinaryUsageAllowed":"yes","rateLimits":{"primary":{"usedPercent":10}}}}'`,
+        'sleep 5',
+      ].join('\n'),
+      700,
+    );
+    expect(snap?.usedPercent).toBe(10);
+    expect(snap).not.toHaveProperty('cliVersion');
+    expect(snap).not.toHaveProperty('ordinaryUsageAllowed');
+    expect(snap).not.toHaveProperty('creditsUsable');
+  });
+
   it('reassembles a reply split across chunk boundaries', async () => {
     // A pipe read can land mid-line. Parsing per-chunk instead of per-line loses the whole answer.
     const snap = await withFake(
@@ -623,5 +674,25 @@ describe('ship_judge_preflight — the remedy reaches the shell, the report stay
     expect(r.stdout).toBe('');
     expect(r.stderr).toContain('REPORT');
     expect(r.stderr).toContain('[REMEDY]');
+  });
+
+  it('still reports and hands over the remedy when the telemetry sink cannot be written', () => {
+    const root = repo(['review']);
+    // A sink path under a regular file: every append fails.
+    const blocker = join(root, 'not-a-directory');
+    writeFileSync(blocker, '');
+    const script = '. "$1"; ship_judge_preflight "$2"; printf "[%s]" "$SHIP_JUDGE_REMEDY" >&2';
+    const r = testSpawnSync('/bin/bash', ['-c', script, 'sh', helper, root], {
+      env: {
+        ...process.env,
+        DEVKIT_GATE_EVENTS: join(blocker, 'gate-events.jsonl'),
+        DEVKIT_SHIP_ID: 'unwritable-sink',
+        GUARD_CODEX_BIN: join(root, 'no-codex'),
+      },
+      encoding: 'utf8',
+    });
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).toContain('guard-judge preflight');
+    expect(r.stderr).toMatch(/\[[^\]]*GUARD_REVIEW_MODEL=[^\]]*\]/);
   });
 });

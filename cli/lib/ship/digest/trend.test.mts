@@ -275,6 +275,24 @@ describe('summariseTrend — streak boundaries', () => {
     expect(text).toContain('4 → 4 → 4 findings');
   });
 
+  it('reads the judge preflight row a retry writes before its marker as that retry, not a foreigner', () => {
+    const killed = [
+      { type: 'ship_attempt', ship_id: 's2', ...where },
+      { ship_id: 's2', ...where, ...fail(9) },
+    ];
+    const events = [
+      ...attempt('s1', [fail(4)]),
+      ...killed,
+      // The preflight reports under the retry's id while the killed attempt is still open.
+      { type: 'judge_preflight', ship_id: 's3', ...where },
+      ...attempt('s3', [fail(4)]),
+      ...attempt('s4', [fail(4)]),
+    ];
+    const text = trendOf(events, 's4');
+    expect(text).toContain(`${CR}: 3 blocking rounds`);
+    expect(text).toContain('4 → 4 → 4 findings');
+  });
+
   it('goes silent when a killed attempt with a new-id retry writes a late row inside that retry', () => {
     const events = [
       ...attempt('s1', [fail(4)]),
