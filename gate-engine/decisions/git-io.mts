@@ -42,8 +42,9 @@ export function git(cwd: string, args: string[]): string {
  * decisionFileRe (a trailing `"` breaks the `\.md$` anchor, so a staged decision reads as absent
  * and the gate blocks claiming none was recorded).
  */
-export function stagedFiles(cwd: string): string[] {
-  return git(cwd, ['diff', '--cached', '--name-only', '-z'])
+export function stagedFiles(cwd: string, diffFilter?: string): string[] {
+  const filter = diffFilter ? [`--diff-filter=${diffFilter}`] : [];
+  return git(cwd, ['diff', '--cached', '--name-only', '-z', ...filter])
     .split('\0')
     .filter((s) => s.length > 0);
 }

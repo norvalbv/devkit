@@ -449,6 +449,34 @@ describe('retrieval unavailable (the parser dependency cannot resolve)', () => {
     expect(withoutParser.status).toBe(withParser.status);
   });
 
+  it('drops the scope-miss advisory, and nothing else, when the parser cannot load', () => {
+    const git = (args: string[]) => execFileSync('git', args, { cwd: dir, stdio: 'pipe' });
+    git(['init', '-q']);
+    writeFileSync(join(dir, 'package.json'), '{}\n');
+    git(['add', 'package.json']);
+    git(['-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-qm', 'base']);
+    writeFileSync(
+      join(dir, 'a.md'),
+      '# a\n\n## Target · 2026-07-01 — h\n\n**Ruling:** r\n**Scope:** src/a/**\n',
+    );
+    mkdirSync(join(dir, 'src'));
+    writeFileSync(join(dir, 'src/b.mts'), 'export const b = 1;\n');
+    git(['add', '.']);
+
+    const env = { GUARD_DECISION_NO_LLM: '1', DEVKIT_NO_TELEMETRY: '1' };
+    const withParser = spawnSync('node', [SCRIPT, 'detect', '--gate'], {
+      cwd: dir,
+      encoding: 'utf8',
+      env: { ...process.env, GUARD_DECISIONS_DIR: dir, ...env },
+    });
+    const withoutParser = runWithoutParser(['detect', '--gate'], env);
+    expectExit(withParser, 0);
+    expect(withParser.stderr).toContain('decision-gate: a');
+    expectExit(withoutParser, 0);
+    expect(withoutParser.stderr).not.toContain('decision-gate: a');
+    expect(withoutParser.stderr).not.toContain('UNAVAILABLE');
+  });
+
   it('still reports a staged dependency smell when the parser cannot load', () => {
     const git = (args: string[]) => execFileSync('git', args, { cwd: dir, stdio: 'pipe' });
     git(['init', '-q']);

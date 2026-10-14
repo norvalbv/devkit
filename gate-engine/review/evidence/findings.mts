@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { loadScopedTargets, matchScope } from '../../decisions/check-alignment.mts';
+import { rescopeCommand } from '../../decisions/scope/scope-miss.mts';
 import { emitGateEvent } from '../../judge/gate-events.mts';
 import { readTranscript } from '../../judge/transcript-store.mts';
 import { issueLocations, LOCATION_RE } from '../contracts/response.mts';
@@ -196,7 +197,7 @@ export function renderScopeDriftHints(reviewer: string, drifts: ScopeDrift[]): s
       const scope = globs.join(',');
       return (
         `  ↳ Target ${slug} was enforced outside its Scope (${scope}) on ${p}. If it governs this file: ` +
-        `guard-decisions rescope ${slug} --scope "${scope},${p}" --reason "enforced on ${p} by ${reviewer}"; ` +
+        `${rescopeCommand(slug, globs, [p], `enforced on ${p} by ${reviewer}`)}; ` +
         'if not, the finding applies a ruling outside its Scope.'
       );
     })
