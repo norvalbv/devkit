@@ -12,6 +12,7 @@ import {
   prepareRegressionRepository,
 } from '../../baseline-status/regression-repository.mts';
 import { UI_EVIDENCE } from '../../../../gate-engine/ui-evidence/check.mts';
+import { textOf } from '../digest/fields.mts';
 import { ATTEMPT, readShipEvents } from '../digest/gate-digest.mts';
 import { errorMessage } from '../review/shared/common.mts';
 import type { VerdictInput } from '../merge-verdict/ship-change.mts';
@@ -153,7 +154,8 @@ function uiEvidenceDetail(env: NodeJS.ProcessEnv): string | null {
   const opened = events.map((e) => e.type).lastIndexOf(ATTEMPT);
   const mine = opened < 0 ? [] : events.slice(opened);
   const rows = mine.filter((e) => e.type === 'advisory_result' && e.gate === UI_EVIDENCE);
-  return rows[rows.length - 1]?.detail || null;
+  // A sink row is arbitrary JSON, so a non-string detail reads as no reminder instead of throwing.
+  return textOf(rows[rows.length - 1]?.detail) || null;
 }
 
 function required(values: Record<string, string | undefined>, name: string): string {

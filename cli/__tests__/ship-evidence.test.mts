@@ -277,10 +277,10 @@ describe('devkit ship evidence block', () => {
   it('the body step reads the reminder from the newest attempt of its own ship id only', () => {
     const sink = join(mkdtempSync(join(tmpdir(), 'evidence-sink-')), 'events.jsonl');
     dirs.push(dirname(sink));
-    const row = (shipId: string, fields: Record<string, string>) =>
+    const row = (shipId: string, fields: Record<string, string | number>) =>
       `${JSON.stringify({ ship_id: shipId, ...fields })}\n`;
     const attempt = row('ship-1', { type: 'ship_attempt' });
-    const reminder = (shipId: string, detail: string) =>
+    const reminder = (shipId: string, detail: string | number) =>
       row(shipId, { type: 'advisory_result', gate: 'ui-evidence', status: 'finding', detail });
     const body = (events: string) => {
       writeFileSync(sink, events);
@@ -296,6 +296,8 @@ describe('devkit ship evidence block', () => {
     expect(
       body(attempt + reminder('ship-1', 'stale') + attempt + reminder('ship-1', 'fresh')),
     ).toBe(`mine\n\n${UI_ITEM_BEGIN}\n- [ ] 📸 fresh\n${UI_ITEM_END}\n`);
+    // A sink row is arbitrary JSON: a non-string detail adds nothing and must not fail the step.
+    expect(body(attempt + reminder('ship-1', 7))).toBe('mine\n');
     // No attempt marker: the row cannot be told apart from an earlier run's, so it adds nothing.
     expect(body(reminder('ship-1', 'unattributed'))).toBe('mine\n');
     // The sink is per machine: a parallel ship's reminder is not this ship's.
