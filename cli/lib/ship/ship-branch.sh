@@ -1566,7 +1566,7 @@ if [ -z "$PR_CREATE_FAILED" ]; then
   # agent reached for `gh run watch`, which needs a run id and redraws the whole job every 3s.
   if [ "$WAIT_CI" -eq 0 ] && [ -n "$PR_NUM" ]; then
     echo "  checks so far: gh pr checks $PR_NUM --repo $REPO --json bucket,name,state,link" >&2
-    echo "  or wait for a bounded verdict next time: devkit ship … --wait-ci" >&2
+    echo "  or wait for a bounded verdict with attribution: devkit ci-verdict $PR_NUM" >&2
   fi
   # Telemetry: tie this ship's id to the PR it opened, so the usage tracker links a ship row to its
   # PR directly (no gh-by-branch lookup needed). ship_result already fired during the gate chain —
