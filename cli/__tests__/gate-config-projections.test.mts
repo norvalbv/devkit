@@ -27,6 +27,9 @@ import { type GateInput, gateInputs } from '../../gate-engine/deterministic/gate
 import { STRUCTURE_BASELINE_DIR } from '../../gate-engine/ratchets/baseline-paths.mts';
 import { rootRegistry } from './_helpers.mts';
 
+// Never called: declares the spawned module to vitest's graph, so `vitest related` selects this file.
+void (() => import('../lib/ship/gate-config-paths.mts'));
+
 const linkScript = fileURLToPath(new URL('../lib/ship/link-gate-configs.sh', import.meta.url));
 const prepareScript = fileURLToPath(
   new URL('../lib/ship/prepare-gate-worktree.sh', import.meta.url),

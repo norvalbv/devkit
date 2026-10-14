@@ -14,6 +14,9 @@ import { render, summarise } from '../../../cli/lib/ship/digest/gate-digest.mts'
 import { DEFAULT_UI_PATHS, uiPathReason, uiPaths } from '../check.mts';
 import { parseUiVerdict } from '../judge.mts';
 
+// Never called: declares the spawned module to vitest's graph, so `vitest related` selects this file.
+void (() => import('../cli.mts'));
+
 const CLI = path.resolve(import.meta.dirname, '../cli.mts');
 
 describe('uiPaths', () => {

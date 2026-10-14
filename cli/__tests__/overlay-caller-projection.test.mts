@@ -23,6 +23,9 @@ import { relIntentPath, writeIntent } from '../lib/ship/ship-intent.mts';
 import { CLI, devkitHome, rootRegistry, testSpawnSync } from './_helpers.mts';
 import { addOverlay, reshipScript, scriptPath, seedShipRepo } from './_ship-branch-fixture.mts';
 
+// Never called: declares the spawned module to vitest's graph, so `vitest related` selects this file.
+void (() => import('../lib/husky/overlay/overlay-root.mts'));
+
 const overlayRoot = fileURLToPath(
   new URL('../lib/husky/overlay/overlay-root.mts', import.meta.url),
 );

@@ -34,6 +34,10 @@ import {
   splitNulPathBytes,
 } from '../lib/baseline-status/regression-repository.mts';
 
+// Never called: declares the spawned module to vitest's graph, so `vitest related` selects this file.
+void (() => import('../commands/baseline/prove-regression.mts'));
+void (() => import('../lib/baseline-status/regression-exec.mts'));
+
 const roots: string[] = [];
 
 function git(root: string, ...args: string[]): string {

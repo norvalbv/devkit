@@ -14,6 +14,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ffBlockers, loadManifest, reconcileBranch, reconcilePath } from '../lib/reconcile.mts';
 import { testExecFileSync as execFileSync, testSpawnSync as spawnSync } from './_helpers.mts';
 
+// Never called: declares the spawned module to vitest's graph, so `vitest related` selects this file.
+void (() => import('../commands/reconcile.mts'));
+
 const CLI = join(dirname(fileURLToPath(import.meta.url)), '..', 'index.mts');
 const GENV = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' };
 const roots = [];
