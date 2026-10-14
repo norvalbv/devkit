@@ -1,6 +1,6 @@
 /** The ship-time judge reachability report (sc-2538). The property that matters most is NEGATIVE:
  *  this check may never change what a ship does — a dark provider is not a doomed ship. */
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -416,6 +416,54 @@ describe('renderPreflight', () => {
     expect(out).toContain('not verified');
     // Unknown is not a finding: it must not drag in the remedy block.
     expect(out).not.toContain('devkit doctor --fix');
+  });
+
+  // The skills tell an agent to act on these exact strings before a first attempt pays for reviewers.
+  it('every dark state prints the lines the shipping skills tell an agent to act on', () => {
+    const skill = (name: string) =>
+      readFileSync(
+        resolve(fileURLToPath(new URL('.', import.meta.url)), `../../skills/${name}/SKILL.md`),
+        'utf8',
+      );
+    const using = skill('using-devkit');
+    const gates = skill('commit-gates');
+    const failClosed = 'every reviewer that is not already cached will fail closed';
+    const window = 'To ship inside this window,';
+    const bothDark = 'Both judge CLIs are dark';
+    for (const doc of [using, gates]) {
+      expect(doc).toContain('guard-judge preflight');
+      expect(doc).toContain(failClosed);
+    }
+    expect(using).toContain(window);
+    expect(using).toContain(bothDark);
+
+    const dark = (state: 'unauthenticated' | 'absent') => [
+      { role: 'review' as const, model: 'gpt-5.6-sol', bin: 'codex', state },
+    ];
+    const claudeOut = { ...dark('unauthenticated')[0], model: 'sonnet', bin: 'claude' };
+    // The reported shape: one role refused by a free plan while the others stay reachable.
+    const freePlan = [
+      { role: 'review' as const, model: 'gpt-5.6-terra', bin: 'codex', state: 'ok' as const },
+      {
+        role: 'correctness' as const,
+        model: 'gpt-5.6-sol',
+        bin: 'codex',
+        state: 'unavailable' as const,
+        planType: 'free',
+        served: ['gpt-5.6-terra'],
+      },
+    ];
+    for (const statuses of [locked, dark('unauthenticated'), dark('absent'), freePlan]) {
+      for (const informational of [false, true]) {
+        const out = renderPreflight(statuses, now, informational).join('\n');
+        expect(out).toContain('guard-judge preflight');
+        expect(out).toContain(failClosed);
+        expect(out).toContain(window);
+      }
+    }
+    const both = renderPreflight([...locked, claudeOut], now).join('\n');
+    expect(both).toContain(failClosed);
+    expect(both).toContain(bothDark);
   });
 });
 
