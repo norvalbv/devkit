@@ -6,7 +6,7 @@ import { scanBackward } from './tail.mts';
 /** Below this many consecutive blocks a re-ship is ordinary iteration, not a loop. */
 const MIN_STREAK = 3;
 /** How far back one branch is walked; also bounds the backward read. */
-const HISTORY_CAP = 20;
+export const HISTORY_CAP = 20;
 /** Counts shown before the series is elided at its old end. */
 const SHOWN = 8;
 
@@ -27,6 +27,10 @@ const trendRowSchema = z.object({
   judge: text,
   repo: text,
   branch: text,
+  gate: text,
+  detail: text,
+  transcript_ref: text,
+  ts: text,
   exit_code: z.number().optional().catch(undefined),
   items: z.array(z.unknown()).optional().catch(undefined),
 });
@@ -45,7 +49,7 @@ export interface ShipKey {
   branch: string;
 }
 
-interface Attempt {
+export interface Attempt {
   shipId: string;
   rows: TrendRow[];
   result?: TrendRow;
@@ -66,7 +70,7 @@ const PRE_MARKER = new Set(['ship_intent', 'judge_preflight']);
 
 /** This branch's rows → its attempts in order, or null when two overlap (completion order is then not
  * round order). Markers open attempts: an inherited DEVKIT_SHIP_ID can span several. */
-function attemptsOf(rows: TrendRow[], key: ShipKey): Attempt[] | null {
+export function attemptsOf(rows: TrendRow[], key: Omit<ShipKey, 'shipId'>): Attempt[] | null {
   const done: Attempt[] = [];
   let current: Attempt | undefined;
   const displaced = new Set<string>();
@@ -138,7 +142,7 @@ export function issuesUnder(row: Pick<TrendRow, 'items'>, lens: string): number 
 }
 
 /** This branch's finished attempts up to the current one, or null when the ship cannot be keyed. */
-function branchAttempts(rows: TrendRow[], key: ShipKey) {
+export function branchAttempts(rows: TrendRow[], key: ShipKey) {
   // Never key on an empty repo or branch: that would blend every unkeyed ship on the machine.
   if (!key.shipId || !key.repo || !key.branch) return null;
   const all = attemptsOf(rows, key);

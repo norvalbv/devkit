@@ -61,6 +61,7 @@ describe('wantsCommandHelp (sc-2485)', () => {
     ['--draft with --pr', ['--pr', 'b', 't', '--draft', '--body-file', '-h'], true],
     ['--from-branch with --pr', ['b', 't', '--pr', '--from-branch', '--body', '--help'], true],
     ['--queue with other args', ['--queue', '--body', '--help'], true],
+    ['--advisories with other args', ['--advisories', '--body', '--help'], true],
     ['--ready under --resume is accepted', ['--resume', 'b', '--ready', '--body', '--help'], false],
   ])('%s', (_label, args, expected) => {
     expect(wantsCommandHelp(args, shipMeta.valueFlagsFor(args))).toBe(expected);
