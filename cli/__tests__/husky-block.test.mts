@@ -422,7 +422,7 @@ describe('exit 4 renders as an object-database fault, never as a verdict', () =>
     expect(out).toContain('unexpected exit 4');
     // The lines it must NOT print — each names a cause that did not happen.
     expect(out).not.toContain('auth/quota');
-    expect(out).not.toContain('Record the decision target');
+    expect(out).not.toContain('GUARD_NO_LOG=1 git commit');
   });
 
   it('the review gate does not call it a reviewer verdict', () => {
