@@ -2,6 +2,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { stripVTControlCharacters } from 'node:util';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   listRelated,
@@ -203,7 +204,8 @@ describe('related-tests gate process', () => {
     git(root, 'add', 'a.mts');
     const r = runGate(root);
     expect(r.stdout).toContain('related-tests: 1 test file(s) for 1 staged path(s)');
-    expect(r.stdout).toMatch(/Tests\s+1 passed/);
+    // CI forces colour, so vitest's summary carries ANSI codes between its words.
+    expect(stripVTControlCharacters(r.stdout)).toMatch(/Tests\s+1 passed/);
     expect(r.status).toBe(0);
   }, 90_000);
 });
