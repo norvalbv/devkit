@@ -52,6 +52,8 @@ import {
   WT_RE,
 } from './_ship-branch-fixture.mts';
 
+const SIZE_PREVIEW_CONTINUES = "continuing — ship's gate chain judges this";
+
 describe('ship-branch.sh — origin → owner/repo resolution (the fork-upstream bug)', () => {
   const urls = [
     ['custom SSH host alias', 'git@github.com-personal:acme/app.git', 'acme/app'],
@@ -165,8 +167,8 @@ describe('ship-branch.sh — --base <branch>', () => {
     expect(git(['rev-parse', 'feat/fresh^']).trim()).toBe(advancedTip); // fetched, not the stale local
   });
 
-  it('fails before creating a worktree when the base has a tighter size ceiling than the checkout', () => {
-    const { dir, env, git, bare } = seedShipRepoLocalRemote();
+  it('previews a tighter base size ceiling, then leaves the verdict to the gate chain', () => {
+    const { dir, env, git } = seedShipRepoLocalRemote({ hookBody: 'echo GATE_RAN >&2; exit 0' });
     mkdirSync(join(dir, 'src'), { recursive: true });
     mkdirSync(join(dir, '.devkit/baselines'), { recursive: true });
     writeFileSync(
@@ -193,12 +195,12 @@ describe('ship-branch.sh — --base <branch>', () => {
       [scriptPath, 'feat/size-preflight', 't', '--base', 'studio', '--', 'src/hot.ts'],
       { cwd: join(dir, 'src'), input: '', encoding: 'utf8', env: { ...env, SHIP_DRY_RUN: '1' } },
     );
+    dropWorktree(git, r.stderr);
 
-    expect(r.status).toBe(1);
     expect(r.stderr).toContain('working-tree baseline would allow 80');
-    expect(localBranchExists(git, 'feat/size-preflight')).toBe(false);
-    expect(remoteBranchExists(bare, 'feat/size-preflight')).toBe(false);
-    expect(r.stderr).not.toMatch(EPHEMERAL_WT_RE);
+    expect(r.stderr).toContain(SIZE_PREVIEW_CONTINUES);
+    expect(r.stderr).toMatch(GATE_RAN_RE); // the stub hook stands in for the authoritative gate
+    expect(r.status, r.stderr).toBe(0);
   });
 
   it('rejects a --base branch that does not exist on origin', () => {
@@ -1230,7 +1232,7 @@ describe('ship-branch.sh — overlay-mode gate chain', () => {
 });
 
 describe('reship.sh (ship --pr) — overlay-mode gate chain', () => {
-  it('runs the base-aware size preflight before creating a reship worktree', () => {
+  it('previews the base-aware size ceiling and continues into the reship gate chain', () => {
     const { dir, env, git } = seedReshipRepo();
     mkdirSync(join(dir, 'src'), { recursive: true });
     mkdirSync(join(dir, '.devkit/baselines'), { recursive: true });
@@ -1258,10 +1260,11 @@ describe('reship.sh (ship --pr) — overlay-mode gate chain', () => {
       encoding: 'utf8',
       env: { ...env, SHIP_DRY_RUN: '1' },
     });
+    dropWorktree(git, r.stderr);
 
-    expect(r.status).toBe(1);
     expect(r.stderr).toContain('working-tree baseline would allow 80');
-    expect(r.stderr).not.toMatch(EPHEMERAL_WT_RE);
+    expect(r.stderr).toContain(SIZE_PREVIEW_CONTINUES);
+    expect(r.status, r.stderr).toBe(0);
   });
 
   it('forces ship mode when the caller inherits review mode', () => {

@@ -947,13 +947,10 @@ gate_signal_handoff_init
 # Identity and collision refusals above stay unrecorded: the record is keyed per branch, and writing
 # one for a branch this attempt may not own could clobber a live ship's resume record.
 
-# Preview the raw-line ratchet against the exact base baseline. NOTE: this measures the CALLER's files
-# against BASE, while a fork-point-anchored ship commits the three-way MERGE of those files with the
-# base — so when PATCH_BASE differs the preview can UNDER-count a file the base grew. It fails CLOSED
-# (the authoritative in-worktree ratchet still runs and still blocks), and it is already --exit-zero
-# advisory, so the imprecision is accepted rather than chased.
+# Advisory raw-line preview against BASE: it measures the caller's pre-merge bytes, so it never blocks.
+# The in-worktree guard-size reports an overrun together with the other deterministic gates.
 if [ "$FROM_BRANCH" -eq 0 ] || [ -z "$LOCAL_BRANCH_EXISTS" ]; then
-  ship_size_preflight "$ROOT" "$BASE" "${PATHS[@]}" || ship_abort_resumable $?
+  ship_size_preflight "$ROOT" "$BASE" "${PATHS[@]}"
 fi
 # Before `git worktree add -b` (sc-3883): a missing hook dir used to surface only inside
 # prepare_gate_worktree, after the branch existed. When this worktree also holds $BR, name that blocker

@@ -168,6 +168,32 @@ describe('runDeterministic — aggregation + trichotomy', () => {
   });
 });
 
+const PROSE_3 =
+  '// first line of prose\n// second line of prose\n// third line of prose\nexport const a = 1;\n';
+
+// Commit `guards` (and an optional guard.config.json) as the base, stage `files`, then spawn the
+// real run.mts against the index.
+function runRealGates(guards, files, guardConfig) {
+  const d = repo(guards);
+  const git = (...a) => execFileSync('git', a, { cwd: d, stdio: 'pipe' });
+  git('init', '-q');
+  git('config', 'user.email', 't@example.com');
+  git('config', 'user.name', 'T');
+  if (guardConfig) writeFileSync(join(d, 'guard.config.json'), JSON.stringify(guardConfig));
+  git('add', '.');
+  git('commit', '-q', '-m', 'base');
+  mkdirSync(join(d, 'src'), { recursive: true });
+  for (const [file, text] of Object.entries(files)) writeFileSync(join(d, file), text);
+  git('add', 'src');
+  const runner = join(import.meta.dirname, '..', 'run.mts');
+  try {
+    execFileSync(process.execPath, [runner], { cwd: d, stdio: 'pipe', encoding: 'utf8' });
+    return { status: 0, stderr: '' };
+  } catch (e) {
+    return { status: e.status, stderr: `${e.stderr}` };
+  }
+}
+
 // sc-2753: the judge-free comment budget aggregates here, so one fix pass sees every cheap finding.
 describe('runDeterministic — comments joins the aggregated set', () => {
   const eventsOf = (sink) =>
@@ -285,32 +311,23 @@ describe('runDeterministic — comments joins the aggregated set', () => {
   });
 
   it('runs the REAL firewall end-to-end: a staged 3-line comment paragraph blocks in the aggregate', () => {
-    const d = repo(['comments']);
-    const git = (...a) => execFileSync('git', a, { cwd: d, stdio: 'pipe' });
-    git('init', '-q');
-    git('config', 'user.email', 't@example.com');
-    git('config', 'user.name', 'T');
-    git('add', '.devkit/config.json');
-    git('commit', '-q', '-m', 'base');
-    mkdirSync(join(d, 'src'), { recursive: true });
-    writeFileSync(
-      join(d, 'src', 'a.ts'),
-      '// first line of prose\n// second line of prose\n// third line of prose\nexport const a = 1;\n',
-    );
-    git('add', 'src/a.ts');
-    const runner = join(import.meta.dirname, '..', 'run.mts');
-    let status = 0;
-    let stderr = '';
-    try {
-      execFileSync(process.execPath, [runner], { cwd: d, stdio: 'pipe', encoding: 'utf8' });
-    } catch (e) {
-      status = e.status;
-      stderr = `${e.stderr}`;
-    }
+    const { status, stderr } = runRealGates(['comments'], { 'src/a.ts': PROSE_3 });
     expect(status).toBe(1);
     // The child's own first line stays byte-stable for the collector, then the aggregate names it.
     expect(stderr).toContain('guard-comments: 1 added/modified comment paragraph need a decision.');
     expect(stderr).toContain('✗ deterministic gates failed: guard-comments\n');
+  });
+
+  it('a size overrun and a comment paragraph fail together in ONE real aggregated run', () => {
+    const big = 'export const v = 1;\n'.repeat(20);
+    const { status, stderr } = runRealGates(
+      ['size', 'comments'],
+      { 'src/a.ts': PROSE_3, 'src/big.ts': big },
+      { maxLines: 5 },
+    );
+    expect(status).toBe(1);
+    expect(stderr).toContain('src/big.ts');
+    expect(stderr).toContain('✗ deterministic gates failed: guard-size guard-comments\n');
   });
 });
 
@@ -752,6 +769,13 @@ describe('selectedIds', () => {
     expect(selectedIds(d)).toEqual(['comments']);
     process.env.DEVKIT_REVIEW_GUARDS = 'size,review';
     expect(selectedIds(d)).toEqual(['size']);
+  });
+
+  it('dry-gates keeps the configured size gate: only review mode narrows to the allowlist', () => {
+    const d = repo(['size', 'comments']);
+    process.env.DEVKIT_RUN_MODE = 'dry-gates';
+    process.env.DEVKIT_REVIEW_GUARDS = 'comments';
+    expect(selectedIds(d)).toEqual(['size', 'comments']);
   });
 
   it('uses the explicit review allowlist instead of components.guards in review mode', () => {

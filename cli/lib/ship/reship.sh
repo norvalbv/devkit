@@ -685,10 +685,11 @@ rewrite_publish_lock_release
 # for an attempt that was never recorded.
 export DEVKIT_SHIP_INTENT_RECORDED=$([ -n "$SHIP_INTENT_GENERATION" ] && echo 1 || echo 0)
 
+# Advisory raw-line preview; it never refuses (the in-worktree guard-size decides).
+ship_size_preflight "$ROOT" "$BASE" "${PATHS[@]}"
 # The blocking preflights, after recording like new-ship's (sc-2389, sc-2535): a refusal leaves this
 # invocation replayable via `devkit ship --resume <branch>`, and each still runs against the caller
 # checkout before the detached worktree exists. See ship-branch.sh (sc-3883) for the hook-dir check.
-ship_size_preflight "$ROOT" "$BASE" "${PATHS[@]}"
 gate_hook_source_preflight "$ROOT" "$BASE" shipping || exit 1
 # An omitted artifact rides `--resume <branch> -- <artifact>`; dist integrity runs before the detached
 # worktree hides ignored dist output. The helper remains a no-op for every consumer repo.

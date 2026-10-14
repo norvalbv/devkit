@@ -1,6 +1,6 @@
 /** sc-3411 — a --resume banner names the body that will ship; an override sized as the record
  *  looked exactly like the stale-body failure. */
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -136,15 +136,22 @@ describe('ship --resume banner: body source (new-ship)', () => {
   });
 });
 
-/** Block a reship once on the base-aware size preflight, then fix the cause. */
+/** Remove the hook runner so the hook-source preflight refuses before any worktree exists. */
+function breakHook(s) {
+  mkdirSync(join(s.dir, 'src'), { recursive: true });
+  writeFileSync(join(s.dir, 'src/big.ts'), 'export const a = 1;\n');
+  rmSync(join(s.dir, '.husky/_'), { recursive: true, force: true });
+}
+
+function fixHook(s) {
+  mkdirSync(join(s.dir, '.husky/_'), { recursive: true });
+  installHook(s.dir, 'exit 0');
+}
+
+/** Block a reship once on the hook-source preflight, then fix the cause. */
 function seedBlockedReship(argv, input) {
   const s = seedReshipRepo();
-  writeFileSync(join(s.dir, 'guard.config.json'), '{"maxLines":5}\n');
-  s.git(['add', 'guard.config.json'], { stdio: 'ignore' });
-  s.git(['commit', '-qm', 'cap'], { stdio: 'ignore' });
-  s.git(['push', '-qf', 'origin', 'work:pr-open'], { stdio: 'ignore' });
-  mkdirSync(join(s.dir, 'src'), { recursive: true });
-  writeFileSync(join(s.dir, 'src/big.ts'), 'export const a = 1;\n'.repeat(20));
+  breakHook(s);
   const first = run(
     reshipScript,
     s,
@@ -154,7 +161,7 @@ function seedBlockedReship(argv, input) {
     },
   );
   expect(first.status, first.stderr).toBe(1);
-  writeFileSync(join(s.dir, 'src/big.ts'), 'export const a = 1;\n');
+  fixHook(s);
   return s;
 }
 
@@ -202,12 +209,7 @@ describe('ship --resume banner: body source + PR effect (reship --pr)', () => {
 });
 
 function seedBlockedReshipWithFile(s) {
-  writeFileSync(join(s.dir, 'guard.config.json'), '{"maxLines":5}\n');
-  s.git(['add', 'guard.config.json'], { stdio: 'ignore' });
-  s.git(['commit', '-qm', 'cap'], { stdio: 'ignore' });
-  s.git(['push', '-qf', 'origin', 'work:pr-open'], { stdio: 'ignore' });
-  mkdirSync(join(s.dir, 'src'), { recursive: true });
-  writeFileSync(join(s.dir, 'src/big.ts'), 'export const a = 1;\n'.repeat(20));
+  breakHook(s);
   writeFileSync(join(s.dir, 'body.md'), 'file body\n');
   const first = run(reshipScript, s, [
     'pr-open',
@@ -219,7 +221,7 @@ function seedBlockedReshipWithFile(s) {
     'src/big.ts',
   ]);
   expect(first.status, first.stderr).toBe(1);
-  writeFileSync(join(s.dir, 'src/big.ts'), 'export const a = 1;\n');
+  fixHook(s);
   return s;
 }
 

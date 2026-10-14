@@ -1,5 +1,5 @@
-/** sc-2535 — a blocked guard-size / hook-source preflight still records, so `--resume` replays it.
- *  dist-integrity-resume.test.mts owns the dist-integrity case (sc-2389). */
+/** A blocked hook-source preflight still records, so `--resume` replays it.
+ *  dist-integrity-resume.test.mts owns the dist-integrity case. */
 import type { ExecFileSyncOptions } from 'node:child_process';
 import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -11,6 +11,7 @@ import { testSpawnSync as spawnSync } from './_helpers.mts';
 import {
   dirs,
   dropWorktree,
+  installHook,
   NOTHING_RE,
   reshipScript,
   scriptPath,
@@ -19,7 +20,6 @@ import {
   seedShipRepoLocalRemote,
 } from './_ship-branch-fixture.mts';
 
-const SIZE_RE = /exceed the line limit/;
 const MISSING_RUNNER_RE = /missing \.husky\/_ in /;
 const lines = (n: number) =>
   Array.from({ length: n }, (_, i) => `export const v${i} = ${i};`).join('\n') + '\n';
@@ -30,13 +30,16 @@ type Seeded = {
   git: (a: string[], o?: ExecFileSyncOptions) => string;
 };
 
-/** A 5-line cap committed at the base, so the base-aware size preflight has a ceiling to enforce. */
-function capLines(seeded: Seeded, push?: string): void {
-  writeFileSync(join(seeded.dir, 'guard.config.json'), '{"maxLines":5}\n');
-  seeded.git(['add', 'guard.config.json'], { stdio: 'ignore' });
-  seeded.git(['commit', '-qm', 'cap'], { stdio: 'ignore' });
-  if (push) seeded.git(['push', '-qf', 'origin', `work:${push}`], { stdio: 'ignore' });
+/** Remove the hook runner, so the hook-source preflight refuses before any worktree exists. */
+function breakHook(seeded: Seeded): void {
   mkdirSync(join(seeded.dir, 'src'), { recursive: true });
+  writeFileSync(join(seeded.dir, 'src/big.ts'), lines(3));
+  rmSync(join(seeded.dir, '.husky/_'), { recursive: true, force: true });
+}
+
+function fixHook(seeded: Seeded): void {
+  mkdirSync(join(seeded.dir, '.husky/_'), { recursive: true });
+  installHook(seeded.dir, 'exit 0');
 }
 
 function recorded(dir: string, branch: string) {
@@ -55,30 +58,12 @@ const run = (script: string, s: Seeded, args: string[], env: NodeJS.ProcessEnv =
 
 /** Each blocking preflight: how to make it fail, and how to fix the cause before the retry. */
 const PREFLIGHTS = [
-  {
-    name: 'guard-size',
-    stderr: SIZE_RE,
-    break: (s: Seeded) => writeFileSync(join(s.dir, 'src/big.ts'), lines(20)),
-    fix: (s: Seeded) => writeFileSync(join(s.dir, 'src/big.ts'), lines(3)),
-  },
-  {
-    name: 'hook source',
-    stderr: MISSING_RUNNER_RE,
-    break: (s: Seeded) => {
-      writeFileSync(join(s.dir, 'src/big.ts'), lines(3));
-      rmSync(join(s.dir, '.husky/_'), { recursive: true, force: true });
-    },
-    fix: (s: Seeded) => {
-      mkdirSync(join(s.dir, '.husky/_'), { recursive: true });
-      writeFileSync(join(s.dir, '.husky/_/pre-commit'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
-    },
-  },
+  { name: 'hook source', stderr: MISSING_RUNNER_RE, break: breakHook, fix: fixHook },
 ];
 
 describe.each(PREFLIGHTS)('ship-branch.sh — a blocking $name preflight is resumable', (pf) => {
   it('records title/body/paths, creates no branch, and --resume replays after the fix', () => {
     const s = seedShipRepo();
-    capLines(s);
     pf.break(s);
     const branch = 'feat/pre-resume';
 
@@ -107,7 +92,6 @@ describe.each(PREFLIGHTS)('ship-branch.sh — a blocking $name preflight is resu
 
   it('a --resume that is blocked AGAIN keeps the chain alive and merges the donated path', () => {
     const s = seedShipRepo();
-    capLines(s);
     pf.break(s);
     writeFileSync(join(s.dir, 'src/other.ts'), lines(2));
     const branch = 'feat/pre-chain';
@@ -130,7 +114,6 @@ describe.each(PREFLIGHTS)('ship-branch.sh — a blocking $name preflight is resu
 
   it('--dry-gates never records, even when the preflight blocks', () => {
     const s = seedShipRepo();
-    capLines(s);
     pf.break(s);
     const branch = 'feat/pre-dry-gates';
 
@@ -146,7 +129,6 @@ describe.each(PREFLIGHTS)('ship-branch.sh — a blocking $name preflight is resu
 describe.each(PREFLIGHTS)('reship.sh — a blocking $name preflight is resumable', (pf) => {
   it('records a reship intent and --resume cross-dispatches after the fix', () => {
     const s = seedReshipRepo();
-    capLines(s, 'pr-open');
     pf.break(s);
 
     const first = run(
@@ -185,8 +167,7 @@ describe('a --resume that exits before its record write names the extra paths it
 
   it('ship-branch.sh: a directory refusal leaves the record narrow and says so', () => {
     const s = seedShipRepo();
-    capLines(s);
-    writeFileSync(join(s.dir, 'src/big.ts'), lines(20));
+    breakHook(s);
     writeFileSync(join(s.dir, 'src/other.ts'), lines(2));
     const branch = 'feat/pre-lost-extra';
     expect(run(scriptPath, s, [branch, 't', '--', 'src/big.ts'], {}, 'b\n').status).toBe(1);
@@ -201,8 +182,7 @@ describe('a --resume that exits before its record write names the extra paths it
 
   it('reship.sh: an unreadable --body-file leaves the record narrow and says so', () => {
     const s = seedReshipRepo();
-    capLines(s, 'pr-open');
-    writeFileSync(join(s.dir, 'src/big.ts'), lines(20));
+    breakHook(s);
     writeFileSync(join(s.dir, 'src/other.ts'), lines(2));
     const first = run(reshipScript, s, ['pr-open', 't', '--pr', '--', 'src/big.ts'], {}, 'b\n');
     expect(first.status, first.stderr).toBe(1);
@@ -223,18 +203,17 @@ describe('a --resume that exits before its record write names the extra paths it
 });
 
 describe('ship-branch.sh — --from-branch source mode', () => {
-  it('a size refusal records a branch-source intent that --resume replays once the fix is committed', () => {
+  it('a hook-source refusal records a branch-source intent that --resume replays once fixed', () => {
     const s = seedShipRepoLocalRemote();
-    capLines(s, 'work');
-    writeFileSync(join(s.dir, 'src/big.ts'), lines(20));
+    breakHook(s);
     s.git(['add', 'src/big.ts'], { stdio: 'ignore' });
-    s.git(['commit', '-qm', 'over cap'], { stdio: 'ignore' });
+    s.git(['commit', '-qm', 'change'], { stdio: 'ignore' });
     const branch = 'feat/pre-from-branch';
 
     const first = run(scriptPath, s, [branch, 't', '--base', 'work', '--from-branch'], {}, 'b\n');
 
     expect(first.status, first.stderr).toBe(1);
-    expect(first.stderr).toMatch(SIZE_RE);
+    expect(first.stderr).toMatch(MISSING_RUNNER_RE);
     expect(recorded(s.dir, branch)).toMatchObject({
       sourceMode: 'branch',
       base: 'work',
@@ -242,8 +221,7 @@ describe('ship-branch.sh — --from-branch source mode', () => {
     });
     expect(s.git(['branch', '--list', branch]).trim()).toBe('');
 
-    writeFileSync(join(s.dir, 'src/big.ts'), lines(3));
-    s.git(['commit', '-qam', 'trim'], { stdio: 'ignore' });
+    fixHook(s);
     const retry = run(scriptPath, s, ['--resume', branch]);
     try {
       expect(retry.status, retry.stderr).toBe(0);
@@ -254,33 +232,64 @@ describe('ship-branch.sh — --from-branch source mode', () => {
   });
 });
 
+/** A `node` on PATH that runs `onSizePreview` (bash) when the size preview starts, else real node. */
+function sizePreviewShim(s: Seeded, onSizePreview: string): NodeJS.ProcessEnv {
+  const bin = join(s.dir, 'shim-node-bin');
+  mkdirSync(bin);
+  dirs.push(bin);
+  writeFileSync(
+    join(bin, 'node'),
+    [
+      '#!/bin/bash',
+      `case " $* " in *size-disable*) ${onSizePreview} ;; esac`,
+      `exec "${process.execPath}" "$@"`,
+    ].join('\n'),
+  );
+  chmodSync(join(bin, 'node'), 0o755);
+  return { PATH: `${bin}:${s.env.PATH ?? process.env.PATH ?? ''}` };
+}
+
+describe('the size preview is advisory: a crash in it never ends the ship', () => {
+  it.each([
+    {
+      name: 'ship-branch.sh',
+      seed: seedShipRepo,
+      script: scriptPath,
+      argv: ['feat/pre-crash', 't'],
+    },
+    {
+      name: 'reship.sh',
+      seed: seedReshipRepo,
+      script: reshipScript,
+      argv: ['pr-open', 't', '--pr'],
+    },
+  ])('$name continues past a preview that exits 7', ({ seed, script, argv }) => {
+    const s = seed();
+    mkdirSync(join(s.dir, 'src'), { recursive: true });
+    writeFileSync(join(s.dir, 'src/big.ts'), lines(3));
+
+    const r = run(script, s, [...argv, '--', 'src/big.ts'], sizePreviewShim(s, 'exit 7'), 'b\n');
+    dropWorktree(s.git, r.stderr);
+
+    expect(r.stderr).toContain('guard-size preflight failed unexpectedly (exit 7) — continuing');
+    expect(r.status, r.stderr).toBe(0);
+  });
+});
+
 describe('ship-branch.sh — a fresh failure record never clobbers a concurrent attempt (sc-2535)', () => {
   const shipIntent = fileURLToPath(new URL('../lib/ship/ship-intent.mts', import.meta.url));
 
-  /** A `node` on PATH that records a competing attempt the moment the size preflight starts — after
-   *  this attempt took its generation snapshot, before its failure-path write. */
-  function competitorEnv(s: Seeded, branch: string): NodeJS.ProcessEnv {
-    const bin = join(s.dir, 'race-node-bin');
-    mkdirSync(bin);
-    dirs.push(bin);
-    writeFileSync(
-      join(bin, 'node'),
-      [
-        '#!/bin/bash',
-        'case " $* " in *size-disable*)',
-        `  printf 'competitor body' | "${process.execPath}" "${shipIntent}" write --root "$PWD" --branch '${branch}' --mode ship --title competitor -- src/big.ts >/dev/null ;;`,
-        'esac',
-        `exec "${process.execPath}" "$@"`,
-      ].join('\n'),
+  /** Records a competing attempt the moment the size preview starts — after this attempt took its
+   *  generation snapshot, before its failure-path write. */
+  const competitorEnv = (s: Seeded, branch: string) =>
+    sizePreviewShim(
+      s,
+      `printf 'competitor body' | "${process.execPath}" "${shipIntent}" write --root "$PWD" --branch '${branch}' --mode ship --title competitor -- src/big.ts >/dev/null`,
     );
-    chmodSync(join(bin, 'node'), 0o755);
-    return { PATH: `${bin}:${s.env.PATH ?? process.env.PATH ?? ''}` };
-  }
 
   it('keeps the record a concurrent attempt wrote after this one snapshotted', () => {
     const s = seedShipRepo();
-    capLines(s);
-    writeFileSync(join(s.dir, 'src/big.ts'), lines(20));
+    breakHook(s);
     const branch = 'feat/pre-race';
 
     const r = run(
@@ -292,15 +301,14 @@ describe('ship-branch.sh — a fresh failure record never clobbers a concurrent 
     );
 
     expect(r.status, r.stderr).toBe(1);
-    expect(r.stderr).toMatch(SIZE_RE);
+    expect(r.stderr).toMatch(MISSING_RUNNER_RE);
     expect(r.stderr).toContain('record superseded by a concurrent attempt');
     expect(recorded(s.dir, branch)).toMatchObject({ title: 'competitor', body: 'competitor body' });
   });
 
   it('a sequential full re-run still replaces the previous attempt record', () => {
     const s = seedShipRepo();
-    capLines(s);
-    writeFileSync(join(s.dir, 'src/big.ts'), lines(20));
+    breakHook(s);
     const branch = 'feat/pre-rerun';
 
     expect(run(scriptPath, s, [branch, 'first', '--', 'src/big.ts'], {}, 'one\n').status).toBe(1);
@@ -356,10 +364,9 @@ describe('ship-intent generation snapshot', () => {
 });
 
 describe('ship-branch.sh — refusals that must stay unrecorded', () => {
-  it('an existing local branch refuses without writing an intent, even with an over-cap file', () => {
+  it('an existing local branch refuses without writing an intent, even with a broken hook', () => {
     const s = seedShipRepo();
-    capLines(s);
-    writeFileSync(join(s.dir, 'src/big.ts'), lines(20));
+    breakHook(s);
     s.git(['branch', 'feat/taken'], { stdio: 'ignore' });
 
     const r = run(scriptPath, s, ['feat/taken', 't', '--', 'src/big.ts'], {}, 'b\n');
@@ -371,8 +378,7 @@ describe('ship-branch.sh — refusals that must stay unrecorded', () => {
 
   it('nothing-to-commit refuses without writing an intent', () => {
     const s = seedShipRepo();
-    capLines(s);
-    writeFileSync(join(s.dir, 'src/big.ts'), lines(20));
+    breakHook(s);
     s.git(['add', 'src/big.ts'], { stdio: 'ignore' });
     s.git(['commit', '-qm', 'already'], { stdio: 'ignore' });
 
@@ -387,7 +393,7 @@ describe('ship-branch.sh — refusals that must stay unrecorded', () => {
 /** A blocking preflight placed ahead of the record would silently reintroduce sc-2535.
  *  ship-branch.sh routes through ship_abort_resumable; reship.sh runs them after its intent write. */
 describe('preflight ordering guard', () => {
-  const FAIL_OPEN = new Set(['ship_judge_preflight']);
+  const FAIL_OPEN = new Set(['ship_judge_preflight', 'ship_size_preflight']);
   const PREFLIGHT_RE = /^\s*(?:if\s+!\s+)?([a-z_]+_preflight)\s(?!.*\|\|\s*true\b)/;
   const DIST_RE = /^\s*node "\$DIST_INTEGRITY"/; // the dist-integrity check (sc-2389)
   const calls = (src: string) =>
@@ -406,11 +412,7 @@ describe('preflight ordering guard', () => {
     expect(helper, 'ship_abort_resumable() must exist').toBeGreaterThan(-1);
     const found = calls(src);
     expect(found.map((c) => c.name)).toEqual(
-      expect.arrayContaining([
-        'ship_size_preflight',
-        'gate_hook_source_preflight',
-        'DIST_INTEGRITY',
-      ]),
+      expect.arrayContaining(['gate_hook_source_preflight', 'DIST_INTEGRITY']),
     );
     for (const c of found) {
       expect(c.i, `${c.name} at line ${c.i + 1} runs before the record helper`).toBeGreaterThan(
@@ -429,11 +431,7 @@ describe('preflight ordering guard', () => {
     expect(write).toBeGreaterThan(-1);
     const found = calls(src);
     expect(found.map((c) => c.name)).toEqual(
-      expect.arrayContaining([
-        'ship_size_preflight',
-        'gate_hook_source_preflight',
-        'DIST_INTEGRITY',
-      ]),
+      expect.arrayContaining(['gate_hook_source_preflight', 'DIST_INTEGRITY']),
     );
     for (const c of found) {
       expect(c.i, `${c.name} at line ${c.i + 1} runs before the intent write`).toBeGreaterThan(
