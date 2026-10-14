@@ -126,6 +126,7 @@ describe('commit-guard PASS without semantic retrieval (sc-2317)', () => {
     expect(degraded[0]).toMatchObject({
       judge: 'commit-guard',
       cause: 'remote embeddings unreachable',
+      kind: 'unclassified',
     });
     expect(String(degraded[0].detail)).toContain('semantic retrieval unavailable');
     const row = all.find((e) => e.type === 'review_result' && e.reviewer === 'commit-guard');
@@ -171,7 +172,19 @@ describe('commit-guard PASS without semantic retrieval (sc-2317)', () => {
     expect(events().find((e) => e.type === 'gate_degraded')).toMatchObject({
       judge: 'commit-guard',
       cause: RETRIEVAL_UNRECORDED,
+      kind: 'unrecorded',
     });
+    expect(bareCommitGuardPass(stderr)).toEqual([]);
+  });
+
+  it('a judge that chose not to search reads as skipped, never as unavailable', async () => {
+    const repo = consumerRepo({ backend: true });
+    const events = captureEvents(repo);
+    const skipped = { status: 'skipped', cause: 'test-only diff' };
+    expect(await runReviewGate(repo, { exec: passRecording(repo, skipped) })).toBe(0);
+    const row = events().find((e) => e.type === 'gate_degraded');
+    expect(row).toMatchObject({ judge: 'commit-guard', cause: 'test-only diff', kind: 'skipped' });
+    expect(String(row?.detail)).toMatch(/^semantic retrieval skipped by the judge: test-only diff/);
     expect(bareCommitGuardPass(stderr)).toEqual([]);
   });
 

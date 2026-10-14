@@ -11,6 +11,7 @@
  */
 import { blockingFindings } from './blocking.mts';
 import { count, oneLine, textOf } from './fields.mts';
+import { withRecurrence } from './recurrence.mts';
 import { scanBackward } from './tail.mts';
 import { readBranchHistory, renderTrend, summariseTrend } from './trend.mts';
 
@@ -489,7 +490,7 @@ if (/[/\\]gate-digest\.m[jt]s$/.test(process.argv[1] ?? '') && process.argv[2] =
   const { DEVKIT_SHIP_REPO: repo = '', DEVKIT_SHIP_BRANCH: branch = '' } = process.env;
   const key = { shipId, repo, branch };
   const text = [
-    render(summarise(readShipEvents(sink, shipId), shipId), logPath),
+    render(withRecurrence(summarise(readShipEvents(sink, shipId), shipId), sink, key), logPath),
     renderTrend(summariseTrend(readBranchHistory(sink, key), key)),
   ]
     .filter(Boolean)

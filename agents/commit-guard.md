@@ -123,13 +123,15 @@ or repeated inline JSX. The jscpd-backed clone detector catches those (verbatim,
 ## 4. Finalize
 ```bash
 node $SCRIPT finalize --retrieval ok
-# or, when no semantic search query could run:
+# or, when you decided not to run a query:
+node $SCRIPT finalize --retrieval skipped --cause "<why you chose not to search>"
+# or, when you tried and the search tool failed:
 node $SCRIPT finalize --retrieval unavailable --cause "<the search tool's exact error text>"
 ```
 A passing `finalize` removes the checklist file itself; when the environment needs it kept (gate verification, review evidence) it stays automatically. Never delete it by hand.
 `--retrieval` is how the gate learns whether the semantic check ran: a PASS finalized without it, or
-with `unavailable`, is reported as DEGRADED rather than as a clean PASS. Use `ok` only when your
-search queries actually returned results.
+with `skipped` or `unavailable`, is reported as DEGRADED rather than as a clean PASS. Searching is the
+default; `skipped` is still DEGRADED. Use `ok` only when your search queries actually returned results.
 `finalize` verifies every staged file was marked — it refuses (exits non-zero) an incomplete or failed checklist, so coverage can't be claimed without doing the work. Report the unapproved pairs/clones you surfaced (or state that none were found). No verbose summary.
 </workflow>
 

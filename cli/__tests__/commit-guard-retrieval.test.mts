@@ -59,6 +59,14 @@ describe('commit-guard finalize --retrieval (sc-2317)', () => {
     expect(r.stdout).toContain('Semantic retrieval unavailable: embeddings 503');
   });
 
+  it('records a skip the judge chose, with its cause', () => {
+    const { repo, stateFile } = repoWith(resolved);
+    const r = finalize(repo, ['--retrieval', 'skipped', '--cause', 'test-only diff']);
+    expect(r.status, r.stdout).toBe(0);
+    expect(stored(stateFile).retrieval).toEqual({ status: 'skipped', cause: 'test-only diff' });
+    expect(r.stdout).toContain('Semantic retrieval skipped: test-only diff');
+  });
+
   it('accepts --cause before --retrieval (flag order is not significant)', () => {
     const { repo, stateFile } = repoWith(resolved);
     const r = finalize(repo, ['--cause', 'index missing', '--retrieval', 'unavailable']);
@@ -68,6 +76,8 @@ describe('commit-guard finalize --retrieval (sc-2317)', () => {
 
   it.each([
     ['unavailable without --cause', ['--retrieval', 'unavailable']],
+    ['skipped without --cause', ['--retrieval', 'skipped']],
+    ['skipped with a blank cause', ['--retrieval', 'skipped', '--cause', '  ']],
     ['unavailable with a blank cause', ['--retrieval', 'unavailable', '--cause', '   ']],
     ['--cause swallowing the next flag', ['--retrieval', 'unavailable', '--cause', '--verbose']],
     ['--cause as the last token', ['--retrieval', 'unavailable', '--cause']],
