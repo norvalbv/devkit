@@ -682,8 +682,8 @@ ship_judge_preflight() {
   esac
 }
 
-# Preview the raw-line ratchet before creating a gate worktree. Exit 2 means the optional preview is
-# unavailable; the authoritative worktree gate still runs. Exit 1 is a proven size violation.
+# Preview the raw-line ratchet before creating a gate worktree; it never blocks. The in-worktree
+# guard-size judges an overrun alongside every other deterministic gate, so one attempt sees them all.
 ship_size_preflight() {
   local root=${1:?root} base=${2:?base} size_guard rc
   shift 2
@@ -700,8 +700,8 @@ ship_size_preflight() {
   fi
   case "$rc" in
     0) return 0 ;;
-    1) return 1 ;;
+    1) echo "ℹ️  ship: continuing — ship's gate chain judges this with the other deterministic gates" >&2; return 0 ;;
     2) echo "⚠️  ship: guard-size base-aware preflight unavailable — continuing to the authoritative worktree gate" >&2; return 0 ;;
-    *) echo "ship: guard-size preflight failed unexpectedly (exit $rc)" >&2; return 1 ;;
+    *) echo "⚠️  ship: guard-size preflight failed unexpectedly (exit $rc) — continuing" >&2; return 0 ;;
   esac
 }
