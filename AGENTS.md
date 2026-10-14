@@ -209,4 +209,23 @@ and spawned under-reports. A diff touching `package.json` or `vitest.config.mjs`
 suite.
 </workflow>
 
+<workflow name="replaying_a_ship_digest">
+A ship digest change proves itself on one past ship, rendered from a checkout of the remote `main`
+and from the branch. The id is the first line of that ship's gate log
+(`devkit-ship-hook-start:<id>`):
+
+```
+node cli/lib/ship/digest/gate-digest.mts digest "$HOME"/.devkit/telemetry/gate-events.jsonl <id>
+```
+
+The reader scans only the sink's last 16 MB, so an older ship prints nothing, or only its newest
+rows. Extract its rows first and pass that file in place of the sink:
+
+```
+rg -F '<id>' "$HOME"/.devkit/telemetry/gate-events.jsonl > /tmp/ship.jsonl
+```
+
+The trend line also needs `DEVKIT_SHIP_REPO`, `DEVKIT_SHIP_BRANCH` and the full sink.
+</workflow>
+
 </workflows>
