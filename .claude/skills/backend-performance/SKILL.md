@@ -92,12 +92,16 @@ await queue.add('processVideo', { videoId, userId })
   request-serving path — each call blocks every concurrent request on the event loop.
 - PASS the same calls at module init, in CLI entry points, in build scripts, or in test code:
   blocking is harmless where there's no concurrency to block.
+- That latitude covers blocking, not cost that grows with the input. In CLI code too, FAIL a child
+  process spawned per element of a caller-sized collection (staged files, rows, request items), or
+  a file read for elements the code then discards, when one batched call or an earlier filter
+  serves; name it. PASS a loop that must read each file it processes.
 
 ## Code Optimization (`streaming`, `batching`, `timeout-retry`)
 
 - `streaming`: FAIL buffering a large file/result fully into memory to send it, when a stream
   pipe serves; watch `Buffer.concat`/`readFile` on user-sized payloads.
-- `batching`: FAIL N sequential round-trips (HTTP or DB) that a documented batch API covers.
+- `batching`: FAIL N sequential round-trips (HTTP, DB or child process) that a batch API covers.
 - `timeout-retry`: FAIL new outbound calls with no timeout/abort path (a hung dependency hangs
   the handler); FAIL retry loops with no cap or backoff — they amplify outages.
 

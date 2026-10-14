@@ -17,3 +17,4 @@ created: 2026-08-30
 **Revisit-when:** The anti-slop deadline rule ships, or a third recurrence appears before it does
 **Scope:** skills/testing/SKILL.md,anti-slop
 **Source:** manual
+- 2026-10-14 — Gate cost that grows with the staged set is asserted as a count, not a time: gate-engine/deterministic/__tests__/staged-set-scaling.test.mts counts the git processes each deterministic gate starts (GIT_TRACE2_EVENT start events) at two staged-set sizes. Out-of-scope deletions and renames must start none per file; in-scope edits stay at or under a pinned per-gate slope. This follows git's own t3500 pattern. A wall-clock budget or a ratio against origin/main was rejected under this Target. Blind spot: in-process O(N) work, e.g. one cat-file --batch that lexes every blob.

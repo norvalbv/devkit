@@ -105,7 +105,8 @@ For each item the checklist enumerated:
 - Proper async/await usage
 - No blocking operations
 - No sync fs/process calls (readFileSync, execSync, …) on request-serving paths — module init,
-  CLI, and test code get latitude (sync-io)
+  CLI, and test code get latitude (sync-io), but not for a child process per item of a
+  caller-sized collection (staged files) that one batched call or an earlier filter would replace
 
 **API Response:**
 - Reasonable payload sizes
