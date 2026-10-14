@@ -386,7 +386,7 @@ publish_requested_pr_body() {
   if [ -z "$PR_URL" ]; then
     echo "reship: PR body was not updated: could not resolve the open PR after the push" >&2
     echo "  the commit is already on origin/$BR at $published_commit; no rollback was attempted" >&2
-    echo "  resolve the PR, then pipe the intended body to: gh pr edit <url> --repo '$REPO' --body-file -" >&2
+    echo "  resolve the PR, then pipe the intended body to: devkit pr-body <url> --body-file -" >&2
     return 1
   fi
   # The caller owns the text, ship owns the evidence block: carry the PR's current block across.
@@ -396,7 +396,7 @@ publish_requested_pr_body() {
   if ! printf '%s' "$body" | gh pr edit "$PR_URL" --repo "$REPO" --body-file - >/dev/null; then
     echo "reship: PR body was not updated after the push" >&2
     echo "  the commit is already on origin/$BR at $published_commit; no rollback was attempted" >&2
-    echo "  pipe the intended body to: gh pr edit '$PR_URL' --repo '$REPO' --body-file -" >&2
+    echo "  pipe the intended body to: devkit pr-body '$PR_URL' --body-file -" >&2
     return 1
   fi
 }
@@ -803,7 +803,7 @@ if git -C "$WT" diff --cached --quiet; then
     fi
     if [ -z "${SHIP_INTENT_GENERATION:-}" ]; then
       echo "reship: PR body was not updated: this no-delta attempt does not own a recorded intent" >&2
-      echo "  no PR metadata was changed; run the full command again or use gh pr edit manually" >&2
+      echo "  no PR metadata was changed; run the full command again or use devkit pr-body" >&2
       BODY_UPDATE_STATUS=1
     else
       rewrite_publish_lock_acquire || exit 1
@@ -813,7 +813,7 @@ if git -C "$WT" diff --cached --quiet; then
     if [ "$BODY_UPDATE_STATUS" -eq 0 ] && \
        ! node "$SHIP_INTENT" owns --root "$ROOT" --branch "$BR" --generation "$SHIP_INTENT_GENERATION"; then
       echo "reship: PR body was not updated: the recorded intent was superseded" >&2
-      echo "  no PR metadata was changed; resume the current record or use gh pr edit manually" >&2
+      echo "  no PR metadata was changed; resume the current record or use devkit pr-body" >&2
       BODY_UPDATE_STATUS=1
     fi
     REMOTE_BODY_HEAD=""
@@ -824,7 +824,7 @@ if git -C "$WT" diff --cached --quiet; then
     if [ "$BODY_UPDATE_STATUS" -eq 0 ] && [ "$REMOTE_BODY_HEAD" != "$REMOTE_BODY_EXPECTED" ]; then
       echo "reship: PR body was not updated: origin/$BR changed after the recovery fetch" >&2
       echo "  the recorded commit is already remote; no rollback was attempted" >&2
-      echo "  resolve the current PR, then pipe the intended body to: gh pr edit <url> --repo '$REPO' --body-file -" >&2
+      echo "  resolve the current PR, then pipe the intended body to: devkit pr-body <url> --body-file -" >&2
       BODY_UPDATE_STATUS=1
     elif [ "$BODY_UPDATE_STATUS" -eq 0 ]; then
       PR_URL=$(gh pr view "$BR" --repo "$REPO" --json url -q .url 2>/dev/null) || PR_URL=""

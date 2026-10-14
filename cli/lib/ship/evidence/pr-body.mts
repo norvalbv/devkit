@@ -2,7 +2,7 @@
 // so the upsert re-reads after writing and refuses once the PR head is no longer the evidence head.
 import { execFileSync } from 'node:child_process';
 import { z } from 'zod';
-import { upsertEvidenceBlock } from './block.mts';
+import { carryEvidenceBlock, upsertEvidenceBlock } from './block.mts';
 
 const GH_TIMEOUT_MS = 60_000;
 const ATTEMPTS = 3;
@@ -34,6 +34,23 @@ function writeBody(repo: string, pr: string, body: string): void {
   });
 }
 
+/** Rewrite the body from a fresh read each attempt; `edit` returns null once the head has moved. */
+function rewriteBody(
+  repo: string,
+  pr: string,
+  edit: (pull: PullState) => string | null,
+): PublishResult {
+  for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
+    const pull = readPull(repo, pr);
+    const next = edit(pull);
+    if (next === null) return 'head-moved';
+    if (next === pull.body) return 'unchanged';
+    writeBody(repo, pr, next);
+    if (readPull(repo, pr).body.trimEnd() === next.trimEnd()) return 'written';
+  }
+  return 'contended';
+}
+
 /** Upsert `block` while the PR head is still `head`; a lost concurrent write is retried, bounded. */
 export function publishEvidenceBlock(
   repo: string,
@@ -41,13 +58,12 @@ export function publishEvidenceBlock(
   head: string,
   block: string,
 ): PublishResult {
-  for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
-    const pull = readPull(repo, pr);
-    if (pull.headRefOid !== head) return 'head-moved';
-    const next = upsertEvidenceBlock(pull.body, block);
-    if (next === pull.body) return 'unchanged';
-    writeBody(repo, pr, next);
-    if (readPull(repo, pr).body.trimEnd() === next.trimEnd()) return 'written';
-  }
-  return 'contended';
+  return rewriteBody(repo, pr, (pull) =>
+    pull.headRefOid === head ? upsertEvidenceBlock(pull.body, block) : null,
+  );
+}
+
+/** Replace the caller-authored text and keep the PR's evidence block; a failed read writes nothing. */
+export function replaceCallerText(repo: string, pr: string, caller: string): PublishResult {
+  return rewriteBody(repo, pr, (pull) => carryEvidenceBlock(caller, pull.body));
 }

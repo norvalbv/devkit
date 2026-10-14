@@ -135,6 +135,10 @@ describe('devkit ship evidence block', () => {
       'src/value.test.mjs',
     ]);
     expect(shipped.status, shipped.stderr).toBe(0);
+    // The written line must name the verb that keeps the block, for the PR ship just opened.
+    expect(shipped.stderr).toContain(
+      '[PR body written; edit it with devkit pr-body 42 --body-file',
+    );
     const head = tipOf(repo.bare, 'feat/fix');
     const block = BLOCK.exec(readFileSync(repo.state, 'utf8'))?.[0] ?? '';
     expect(readEvidenceBlock(block, head)).toMatchObject({
