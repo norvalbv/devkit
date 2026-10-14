@@ -39,7 +39,9 @@ export function makeSpyExec(capture, { reviewer, cascade, delegate = execJudgeAs
     } catch {
       /* missing/corrupt artifact = null snapshot; scoring buckets it */
     }
-    capture.push({ label: opts.label, out, ms: Date.now() - t0, snapshot });
+    const modelAt = opts.args?.indexOf('--model') ?? -1;
+    const model = modelAt === -1 ? null : opts.args[modelAt + 1];
+    capture.push({ label: opts.label, out, ms: Date.now() - t0, snapshot, model });
     return out;
   };
 }

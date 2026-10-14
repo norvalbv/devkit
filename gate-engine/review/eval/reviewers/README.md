@@ -161,6 +161,20 @@ mid-p 0.06), don't gate acceptance on the pooled p-value: accept an edit when it
 flip miss→hit and no decoy flips into a block**, confirm on a K≥3 rerun of the touched golds, then
 re-`--baseline` and run `--fail` for the pooled no-regression check.
 
+### Replay one archived ship diff — `scale/replay/replay.mts`
+
+To prove a brief edit on the incident that motivated it, rather than on corpus rows:
+
+```bash
+node scale/replay/replay.mts <diff-sha256|ship-id> --reviewer commit-guard --brief edited.md --runs 3 [--dry-run]
+```
+
+It rebuilds the recorded base plus the archived diff in a throwaway worktree, then runs the real
+cascade with the control brief and the `--brief` file interleaved. Per run it prints each pass's
+model, verdict and failed items, plus a counts-only `summary:` line safe for a PR body. It never
+touches the review cache or a telemetry sink. Only FAIL diffs are archived, and correctness-reviewer
+replays go through `scale/scale-bench.mts`.
+
 ## Pre-registered haiku decision rule
 
 Written BEFORE the first sweep; the sweep does not get to move the goalposts. Haiku is the
