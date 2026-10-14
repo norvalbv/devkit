@@ -12,10 +12,11 @@
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { resolveGuardConfig } from '../../config.mts';
 import { LIGHT_JUDGE_MODEL } from '../../judge/judge-isolation.mts';
 import { appendLedger, preflightJudge } from '../../decisions/eval/bench-runtime.mts';
+import { parseCasesText } from '../../decisions/eval/bench.mts';
 import {
   baselineMismatch,
   buildAssets,
@@ -30,6 +31,11 @@ import {
   validateRow,
   variantConsistency,
 } from '../eval/conventions/bench.mts';
+import {
+  DECLARED_CATEGORIES,
+  printCoverage,
+  uncoveredCategories,
+} from '../eval/conventions/coverage.mts';
 import {
   CONVENTIONS_GATE_HASH_INPUTS,
   CONVENTIONS_MATCHER_HASH_INPUTS,
@@ -64,7 +70,7 @@ it('hashes the shared conventions parser as both gate and matcher code', () => {
 function makeRow(overrides: Partial<ConventionsCase> = {}): ConventionsCase {
   return {
     id: 'test-row',
-    category: 'test',
+    category: 'logging-discipline',
     difficulty: 'clear',
     provenance: 'adapted',
     note: 'unit-test fixture',
@@ -311,11 +317,45 @@ describe('lintCases', () => {
     const bad = makeRow({ difficulty: 'impossible' as ConventionsCase['difficulty'] });
     expect(lintCases([bad]).some((e) => e.includes('bad difficulty'))).toBe(true);
   });
+  it('a category missing from DECLARED_CATEGORIES is caught', () => {
+    const bad = makeRow({ category: 'file-szie' });
+    expect(lintCases([bad]).some((e) => e.includes('undeclared category file-szie'))).toBe(true);
+  });
+  it('the committed corpus lints clean', () => {
+    const corpus = path.join(import.meta.dirname, '../eval/conventions/cases-conventions.jsonl');
+    expect(lintCases(parseCasesText(readFileSync(corpus, 'utf8')))).toEqual([]);
+  });
   it('a recorded-decision decoy with no backing Target file in repo.base is caught', () => {
     const bad = makeRow({
       decoys: [{ id: 'd1', kind: 'recorded-decision', targetSlug: 'missing-target', desc: 'x' }],
     });
     expect(lintCases([bad]).some((e) => e.includes('not in repo.base'))).toBe(true);
+  });
+});
+
+describe('uncoveredCategories', () => {
+  it('lists exactly the declared categories no row exercises', () => {
+    const rows = [{ category: 'file-size' }, { category: 'logging-discipline' }];
+    expect(uncoveredCategories(rows)).toEqual(
+      DECLARED_CATEGORIES.filter((c) => c !== 'file-size' && c !== 'logging-discipline'),
+    );
+  });
+  it('is empty once every declared category has a row', () => {
+    expect(uncoveredCategories(DECLARED_CATEGORIES.map((category) => ({ category })))).toEqual([]);
+  });
+  it('printCoverage ends the matrix with the UNCOVERED categories', () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      printCoverage([makeRow({ category: 'file-size' })]);
+      const out = log.mock.calls.map((c) => String(c[0])).join('\n');
+      expect(out).toContain('file-size                FAIL   clear  1');
+      expect(out).toContain(
+        `UNCOVERED: ${uncoveredCategories([{ category: 'file-size' }]).join(', ')}`,
+      );
+      expect(out).not.toMatch(/UNCOVERED:.*\bfile-size\b/);
+    } finally {
+      log.mockRestore();
+    }
   });
 });
 

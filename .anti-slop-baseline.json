@@ -843,14 +843,6 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/no-known-value-widening",
-      "file": "gate-engine/review/eval/conventions/bench.mts",
-      "diagnostic": "The explicit anonymous object type on binding `tag` discards known type evidence. Keep inference, validate with `satisfies`, or use a named owner contract.",
-      "context": "} = { provenance: {}, holdout: 0, variants: 0, decoyKinds: {} };",
-      "fingerprint": "132898b98d5d58eebf4b3d9ddaadc5f87bedc100ccba920a986f3a75018fe7a7",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/no-conditional-empty-object-spread",
       "file": "gate-engine/eval/cli.mts",
       "diagnostic": "This conditional spread hides property omission behind an empty object. Build the object in separate statements and add the property only when present.",
@@ -2408,6 +2400,14 @@
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
       "context": ".update(readAsset(brief as string))",
       "fingerprint": "379a7c2c599e69be970bf0a757eb2f121bf7be55640190b753b13f1a1141e5ee",
+      "count": 1
+    },
+    {
+      "fingerprint": "37a6a334d23bba23de8ba7d73a5242471ee9533d85cef158d450c6447ab63236",
+      "ruleId": "anti-slop/no-known-value-widening",
+      "file": "gate-engine/review/eval/conventions/coverage.mts",
+      "diagnostic": "The explicit anonymous object type on binding `tag` discards known type evidence. Keep inference, validate with `satisfies`, or use a named owner contract.",
+      "context": "} = { provenance: {}, holdout: 0, variants: 0, decoyKinds: {} };",
       "count": 1
     },
     {
