@@ -593,6 +593,11 @@ else
   BASE=$(git rev-parse FETCH_HEAD)
   # Before the intent write too: no later push can reach a non-open PR, so nothing is worth resuming.
   [ -n "${SHIP_DRY_RUN:-}" ] || reship_refuse_closed_pr "" "nothing pushed" || exit 1
+  # Tracked-dist drift is named against the PR's fork point, where CI judges it, not the PR tip,
+  # which already carries the PR's own new artifacts. Dry runs never ask gh, so fall back to origin/HEAD.
+  DRIFT_REF=${PR_SEEN_BASE:+origin/$PR_SEEN_BASE}
+  [ -n "$DRIFT_REF" ] || DRIFT_REF=$(git symbolic-ref -q --short refs/remotes/origin/HEAD) || DRIFT_REF=
+  DRIFT_TARGET=$([ -n "$DRIFT_REF" ] && git merge-base "$BASE" "$DRIFT_REF" 2>/dev/null) || DRIFT_TARGET=
 fi
 
 . "$SCRIPT_DIR/ship-run-record.sh"
@@ -695,7 +700,7 @@ gate_hook_source_preflight "$ROOT" "$BASE" shipping || exit 1
 # worktree hides ignored dist output. The helper remains a no-op for every consumer repo.
 DIST_INTEGRITY="$SCRIPT_DIR/dist-integrity.mts"
 [ -f "$DIST_INTEGRITY" ] || DIST_INTEGRITY="$SCRIPT_DIR/dist-integrity.mjs"
-node "$DIST_INTEGRITY" --root "$ROOT" --base "$BASE" -- "${PATHS[@]}"
+node "$DIST_INTEGRITY" --root "$ROOT" --base "$BASE" ${DRIFT_TARGET:+--target "$DRIFT_TARGET"} -- "${PATHS[@]}"
 
 STAGED_STATE=$(mktemp "${TMPDIR:-/tmp}/reship-staged.XXXXXX")
 BODY_RECOVERY_INDEX=

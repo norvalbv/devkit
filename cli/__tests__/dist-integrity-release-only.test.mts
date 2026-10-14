@@ -94,6 +94,16 @@ function judgeStaged(root: string, base: string, branch = 'feat/x') {
   return inspectReleaseOnlyDist(root, base, branch, { tree: snapshot(root) });
 }
 
+/** An append re-ship's shape: the PR tip carries an artifact its first commit added, rebuilt since. */
+function appendReship() {
+  const { base: forkPoint, root } = repo();
+  write(root, 'dist/cli/new.mjs', 'export const v = 1;\n');
+  stage(root, 'dist/cli/new.mjs');
+  git(root, 'commit', '-q', '-m', 'PR commit 1 adds an artifact');
+  rebuild(root, 'dist/cli/new.mjs', 'dist/cli/a.mjs');
+  return { forkPoint, prTip: git(root, 'rev-parse', 'HEAD'), root };
+}
+
 describe('releaseVersion', () => {
   // devkit release only cuts x.y.z (cli/commands/release.mts SEMVER_RE), so nothing else qualifies.
   it.each([
@@ -281,7 +291,24 @@ describe('inspectReleaseOnlyDist — caller pass, advisory only', () => {
       active: true,
       releaseOnly: [],
       drift: ['dist/cli/a.mjs', 'dist/cli/b.mjs'],
+      against: base,
     });
+  });
+
+  it('names only dist the PR fork point tracks, never an artifact the PR itself added', () => {
+    const { forkPoint, prTip, root } = appendReship();
+
+    expect(inspectReleaseOnlyDist(root, prTip, 'feat/x', { target: forkPoint })).toEqual({
+      active: true,
+      releaseOnly: [],
+      drift: ['dist/cli/a.mjs'],
+      against: forkPoint,
+    });
+    // Measured against the PR tip alone, the PR's own rebuilt artifact reads as a rewrite.
+    expect(inspectReleaseOnlyDist(root, prTip, 'feat/x').drift).toEqual([
+      'dist/cli/a.mjs',
+      'dist/cli/new.mjs',
+    ]);
   });
 
   it('neither rewrites the shared index nor names a byte-identical rebuild as drift', () => {
@@ -370,6 +397,14 @@ describe('printReleaseOnlyDist', () => {
     expect(text).toContain('dist/cli/f1.mjs');
   });
 
+  it('names the commit drift is measured against, not a branch it never read', () => {
+    const against = 'a'.repeat(40);
+    const { text } = capture({ active: true, releaseOnly: [], drift: drift(1), against });
+
+    expect(text).toContain(`release-only drift from ${'a'.repeat(12)} — leave them out`);
+    expect(text).not.toContain('from main');
+  });
+
   it('lists exactly ten drift paths with no overflow line', () => {
     const { text } = capture({ active: true, releaseOnly: [], drift: drift(10) });
 
@@ -451,6 +486,20 @@ describe('dist-integrity CLI', () => {
     expect(result.status, result.stderr).toBe(0);
     expect(result.stderr).toContain('1 regenerated dist file(s)');
     expect(result.stderr).not.toContain(REFUSED);
+  });
+
+  it("caller pass: --target leaves the PR's own rebuilt artifact out of the drift", () => {
+    const { forkPoint, prTip, root } = appendReship();
+
+    const brief = ['--target', forkPoint, '--', 'dist/cli/new.mjs'];
+    const result = preflight(root, args(root, prTip, '--branch', 'feat/x', ...brief));
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stderr).toContain(
+      `1 regenerated dist file(s) are release-only drift from ${forkPoint.slice(0, 12)}`,
+    );
+    expect(result.stderr).toContain('    dist/cli/a.mjs');
+    expect(result.stderr).not.toContain('    dist/cli/new.mjs');
   });
 
   it('tree pass: exits 1 when the snapshot rewrites tracked dist', () => {

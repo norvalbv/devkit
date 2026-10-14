@@ -434,31 +434,26 @@ interface Args {
   branch: string | undefined;
   paths: string[];
   root: string;
+  target?: string;
   tree: string | undefined;
 }
 
+const FLAG = /^--(root|base|branch|tree|target)$/;
+
 function parseArgs(argv: string[]): Args {
-  let root = '';
-  let base = '';
-  let branch: string | undefined;
-  let tree: string | undefined;
+  const flags: Partial<Record<string, string>> = {};
   let i = 0;
-  for (; i < argv.length; i++) {
-    if (argv[i] === '--') {
-      i++;
-      break;
-    }
-    if (argv[i] === '--root' && argv[i + 1]) root = argv[++i];
-    else if (argv[i] === '--base' && argv[i + 1]) base = argv[++i];
-    else if (argv[i] === '--branch' && argv[i + 1]) branch = argv[++i];
-    else if (argv[i] === '--tree' && argv[i + 1]) tree = argv[++i];
-    else throw new Error(`unknown or incomplete argument: ${argv[i]}`);
+  for (; i < argv.length && argv[i] !== '--'; i++) {
+    const name = FLAG.exec(argv[i]!)?.[1];
+    if (!name || !argv[i + 1]) throw new Error(`unknown or incomplete argument: ${argv[i]}`);
+    flags[name] = argv[++i];
   }
+  const { base, branch, root, target, tree } = flags;
   if (!root || !base)
     throw new Error(
-      'usage: dist-integrity --root <root> --base <sha> [--branch <name>] [--tree <sha>] -- <paths>',
+      'usage: dist-integrity --root <root> --base <sha> [--branch <name>] [--tree|--target <sha>] -- <paths>',
     );
-  return { base, branch, paths: argv.slice(i), root, tree };
+  return { base, branch, paths: argv.slice(i + 1), root, target, tree };
 }
 
 /** `--ship-staged`: the self-host hook's run inside the ship worktree, judging the staged tree with
@@ -485,7 +480,7 @@ async function main(): Promise<void> {
     // caller's physical build, which a committed tree does not have.
     const report = tree !== undefined ? undefined : await inspectDistIntegrity(root, base, paths);
     const integrity = report === undefined ? 0 : printDistIntegrityFailure(report);
-    const releaseOnly = printReleaseOnlyDist(inspectReleaseOnlyDist(root, base, branch, { tree }));
+    const releaseOnly = printReleaseOnlyDist(inspectReleaseOnlyDist(root, base, branch, args));
     process.exitCode = integrity || releaseOnly;
   } catch (error) {
     failLine(
