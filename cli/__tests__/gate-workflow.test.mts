@@ -55,3 +55,10 @@ describe('gate.yml required job', () => {
     expect(result.status, result.stderr).toBe(status);
   });
 });
+
+describe('gate.yml triggers', () => {
+  it('can be dispatched, so devkit ci-probe can run the suite on a branch without a PR', () => {
+    const on = text.slice(text.indexOf('\non:\n'), text.indexOf('\nconcurrency:'));
+    expect(on).toMatch(/^ {2}workflow_dispatch:$/m);
+  });
+});
