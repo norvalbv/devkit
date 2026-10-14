@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { loadCache } from '../cache.mts';
 import { reportCachedHitNotes } from '../contracts/checklist.mts';
-import { parseAdvisories } from '../contracts/response.mts';
+import { parseAdvisories, parseSeverityFindings } from '../contracts/response.mts';
 import { cachedAdvisories, resetReviewBaseContext } from '../evidence/base-context.mts';
 import { emitMergedLensResults } from '../lens/merge-results.mts';
 import { type LensPart, planReviewWork } from '../lens/split.mts';
@@ -84,13 +84,29 @@ describe('parseAdvisories', () => {
     expect(parseAdvisories(raw)).toEqual(['a.ts:1 — first', 'b.ts:2 — second']);
   });
 
-  it('caps the count and the length of each line', () => {
+  it('keeps every line whole; the print cap belongs to reportAdvisories', () => {
     const raw = Array.from({ length: 8 }, (_, i) => `ADVISORY: a.ts:${i} ${'x'.repeat(300)}`).join(
       '\n',
     );
     const got = parseAdvisories(raw);
-    expect(got).toHaveLength(5);
-    expect(got.every((a) => a.length === 200)).toBe(true);
+    expect(got).toHaveLength(8);
+    expect(got.every((a) => a.endsWith('x'.repeat(300)))).toBe(true);
+  });
+});
+
+describe('parseSeverityFindings', () => {
+  it('reads a finding ending in CRLF or a lone CR, which an unnormalized line regex drops', () => {
+    expect(
+      parseSeverityFindings('LOW: a gap | a.ts\r\nIMPORTANT: another | b.ts\rVERDICT: PASS'),
+    ).toEqual(['LOW: a gap | a.ts', 'IMPORTANT: another | b.ts']);
+  });
+
+  it('never reads the self-tally or a severity word in prose as a finding', () => {
+    // Real judge shapes: a mixed-case tally line and the brief's uppercase one.
+    const raw =
+      'Critical: 1, Important: 0, Low: 1.\nISSUES: 0 critical, 0 important, 1 low\n' +
+      'This is a CRITICAL: gap in prose.\nVERDICT: PASS — complete';
+    expect(parseSeverityFindings(raw)).toEqual([]);
   });
 });
 
@@ -164,12 +180,12 @@ describe('outcomes that carry no advisory', () => {
     expect(advisoryRows()).toEqual([]);
   });
 
-  it('a malformed cached field reads as none; parts dedupe and cap like a live PASS', () => {
+  it('a malformed cached field reads as none; parts dedupe like a live PASS', () => {
     expect(cachedAdvisories({ advisories: 'not-an-array' })).toBeUndefined();
     expect(cachedAdvisories({ advisories: [] })).toBeUndefined();
-    // Split parts judge the same diff, so their stored advisories overlap; replay holds the live cap.
+    // Split parts judge the same diff, so their stored advisories overlap.
     const many = Array.from({ length: 6 }, (_, i) => `a.ts:${i} — finding`);
-    expect(cachedAdvisories({ advisories: many }, { advisories: many })).toEqual(many.slice(0, 5));
+    expect(cachedAdvisories({ advisories: many }, { advisories: many })).toEqual(many);
   });
 });
 

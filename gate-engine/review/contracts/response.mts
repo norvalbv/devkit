@@ -63,15 +63,30 @@ export function parseReviewVerdict(raw: string): ReviewVerdict {
 // Same guarded dressing as VERDICT_LINE_RE: the marker must open its line, never sit inside prose.
 const ADVISORY_LINE_RE = /^(?:(?![\r\n])[\s*#>-])*ADVISORY:\**[^\S\r\n]*(.+)$/gim;
 export const ADVISORY_CAP = 5;
-const ADVISORY_CHARS = 200;
+
+const flatten = (text: string): string => text.replace(/\*+/g, '').replace(/\s+/g, ' ').trim();
 
 /** The judge's `ADVISORY:` lines citing a code location — non-blocking, to resolve before merge. */
 export function parseAdvisories(raw: string): string[] {
   const texts = [...normalizeLineEndings(raw).matchAll(ADVISORY_LINE_RE)]
-    .map((m) => m[1].replace(/\*+/g, '').replace(/\s+/g, ' ').trim().slice(0, ADVISORY_CHARS))
+    .map((m) => flatten(m[1]))
     // The contract asks for a file:line, so `none` or an echoed `<file:line>` is not a finding.
     .filter((text) => issueLocations(text).length > 0);
-  return [...new Set(texts)].slice(0, ADVISORY_CAP);
+  return [...new Set(texts)];
+}
+
+// The completeness brief's finding line through markdown dressing (`**CRITICAL**:`, `- LOW:`). The
+// colon is required, so a bare severity word in prose ("a CRITICAL gap") never starts a finding.
+export const FINDING_LINE_RE = /^[\s>*#-]*\**(CRITICAL|IMPORTANT|LOW)\**\s*:\s*(.+)$/;
+
+/** The completeness brief's one-line `SEVERITY: desc | paths` findings, located or not. */
+export function parseSeverityFindings(raw: string): string[] {
+  const texts = normalizeLineEndings(raw)
+    .split('\n')
+    .map((line) => line.match(FINDING_LINE_RE))
+    .filter((m) => m !== null)
+    .map((m) => `${m[1]}: ${flatten(m[2])}`);
+  return [...new Set(texts)];
 }
 
 /** Remedy for a cascade that THREW: the gate failed before or around the judge, so pointing the

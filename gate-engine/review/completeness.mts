@@ -56,7 +56,7 @@ import {
   trackMcpSpawns,
   withNamedAgentMcpTools,
 } from '../judge/mcp/profile.mts';
-import { printCachedPass, reportMcpDegraded } from './evidence/base-context.mts';
+import { printCachedPass, reportAdvisories, reportMcpDegraded } from './evidence/base-context.mts';
 import { reportGateInfraFailure } from '../judge/odb-probe.mts';
 import type { JudgeOutage } from '../judge/outage/classify.mts';
 import {
@@ -71,7 +71,9 @@ import { loadCache, savePasses } from './cache.mts';
 import { buildCappedDiffEvidence } from './diff-evidence.mts';
 import { commitIndexEnv } from '../ratchets/commit-index.mts';
 import { headTreeish } from '../ratchets/git-index.mts';
+import { judgedMessageId, normalizeCommitMessage } from './evidence/commit-message.mts';
 import { stagedTreeHash } from './evidence/staged-git.mts';
+import { parseSeverityFindings } from './contracts/response.mts';
 import {
   cacheKey,
   parseReviewVerdict,
@@ -98,28 +100,6 @@ export function completenessJudgeSetup(
     capabilityFingerprint: judgeMcpCapabilityFingerprint(mcpProfile, allowedTools, mcpOptions),
     mcp: judgeMcpMissingServers(mcpProfile, mcpOptions), // what it runs without (sc-2837)
   };
-}
-
-// Trailing whitespace + blank-run normalisation, mirroring git's `--cleanup=whitespace` (the mode
-// a `-m`/`-F` commit gets). The gate is now judged from TWO message sources that must produce the
-// SAME cache key: the sc-1442 ship temp file at pre-commit (raw composed message) and git's
-// cleaned COMMIT_EDITMSG at commit-msg. Without this, a message with a trailing space or a double
-// blank line keys differently per hook and the pre-commit prewarm's cached PASS silently misses —
-// re-paying the full strong-model judgement the prewarm existed to avoid.
-const TRAILING_WS_RE = /[ \t]+$/gm;
-const BLANK_RUN_RE = /\n{3,}/g;
-export function normalizeCommitMessage(raw: string): string {
-  return raw.replace(TRAILING_WS_RE, '').replace(BLANK_RUN_RE, '\n\n').trim();
-}
-
-/** Which message a PASS covers (sc-3411): subject, size, short sha of the normalised bytes. The
- *  sticky PASS is diff-blind, so this is the log's only proof of which --resume body was judged. */
-function judgedMessageId(message: string): string {
-  const subject = message.split('\n', 1)[0] ?? '';
-  const chars = Array.from(subject); // code points: a UTF-16 slice can split an emoji's surrogates
-  const shown = chars.length > 60 ? `${chars.slice(0, 57).join('')}...` : subject;
-  const sha = createHash('sha256').update(message).digest('hex').slice(0, 12);
-  return `${JSON.stringify(shown)} ${Buffer.byteLength(message)}B sha:${sha}`;
 }
 
 /** The branch a sticky verdict is scoped to: the ship's exported branch, else the checkout's. */
@@ -406,6 +386,7 @@ export async function runCompleteness(
   // Its own process (backgrounded by the hook), so it names itself — only once a judge will spawn.
   const mcpSpawn = trackMcpSpawns(mcp, ['completeness'], capabilityFingerprint);
   let outage: JudgeOutage | undefined;
+  let transcriptRef: string | null = null;
   const raw = await exec({
     label: 'review:completeness',
     args: ['-p', prompt, '--model', model, ...JUDGE_ISOLATION, '--allowedTools', allowedTools],
@@ -420,6 +401,9 @@ export async function runCompleteness(
     },
     onOutage: (kind) => {
       outage = kind;
+    },
+    onTranscript: (ref) => {
+      transcriptRef = ref;
     },
   });
   const mcpCause = mcpSpawn.cause();
@@ -453,6 +437,7 @@ export async function runCompleteness(
     return finish(2); // fail-open on a normal commit
   }
   const { verdict, reason } = parseReviewVerdict(raw);
+  const findings = verdict === 'PASS' ? parseSeverityFindings(raw) : [];
   // Only a CONFIDENT PASS is cached — never a FAIL (the author fixes, the evidence changes), never
   // an unparseable verdict, and never the GUARD_COMPLETENESS_HARD=0 soften below (it exits 0 on a
   // FAIL the judge did make; caching it would make one softened run silence every later re-run).
@@ -465,6 +450,7 @@ export async function runCompleteness(
     // Names the snapshot the judge was shown; absent (no snapshot formed) never vouches.
     if (stagedIdentity) meta.diff_sha = stagedIdentity;
     if (mcpCause) meta.mcp_degraded_cause = mcpCause;
+    if (findings.length) meta.advisories = findings;
     // Both identities: the exact byte key (any caller, any order) and the branch+message sticky
     // key that lets a ship retry with a reshaped diff skip this judge (see the lookup above).
     savePasses(cwd, stickyKey ? { [key]: meta, [stickyKey]: meta } : { [key]: meta });
@@ -472,9 +458,11 @@ export async function runCompleteness(
   if (verdict === 'PASS') {
     emitVerdict('pass', reason || 'no gap found');
     console.error(
-      `guard-review: completeness — PASS${mcpCause ? ' (DEGRADED)' : ''} — message ${messageId}`,
+      `guard-review: completeness — PASS${mcpCause ? ' (DEGRADED)' : ''} — message ${messageId}` +
+        (transcriptRef ? ` · transcript ${transcriptRef}` : ''),
     );
     if (mcpCause) reportMcpDegraded('completeness', mcpCause);
+    reportAdvisories('completeness', findings, transcriptRef);
     return finish(0);
   }
   if (verdict !== 'FAIL') {
