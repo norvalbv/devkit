@@ -4659,14 +4659,6 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/no-runtime-typeof",
-      "file": "gate-engine/deterministic/run.mts",
-      "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
-      "context": "if (e && typeof e === 'object' && 'status' in e && typeof e.status === 'number') {",
-      "fingerprint": "682b15f60d16789c86edf600fea6fd003ed0f588c5c57050fe20e72ac13edc5b",
-      "count": 2
-    },
-    {
       "ruleId": "anti-slop/no-conditional-empty-object-spread",
       "file": "cli/lib/install/package-json.mts",
       "diagnostic": "This conditional spread hides property omission behind an empty object. Build the object in separate statements and add the property only when present.",
@@ -11345,6 +11337,14 @@
       "context": "const afterOk = (current as { ok?: unknown }).ok;",
       "fingerprint": "ee9e6d3bc84e96cd37a7b39f9fa7d47d3b384a0b62e39dbc2389753bcaebd3e7",
       "count": 1
+    },
+    {
+      "fingerprint": "eea18f2284fde1a564ba40f7257d3d962ab34ade2e48cb222754a489cc3f3b2a",
+      "ruleId": "anti-slop/no-runtime-typeof",
+      "file": "gate-engine/deterministic/command-gates.mts",
+      "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
+      "context": "if (e && typeof e === 'object' && 'status' in e && typeof e.status === 'number') {",
+      "count": 2
     },
     {
       "ruleId": "anti-slop/no-unsafe-dictionary-type",
