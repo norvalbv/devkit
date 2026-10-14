@@ -82,6 +82,10 @@ command. Do not pre-run every gate or replace the managed chain with a hand-writ
   the reviewed code gives the correct result, waive it with the command and its output as the
   rationale. Do not add tests or edits only to change the diff and re-sample the judge: any real
   change voids the waiver and proves nothing. A race that did not reproduce is not disproved.
+  Before complying with a finding that changes existing behaviour, search the tests for that
+  behaviour. A test asserting the opposite is a question, not an answer: read why it exists, then
+  either change it with the fix and tell the user, or waive explaining why the finding's premise is
+  wrong. A disagreeing test alone is not a rationale.
   A lens PASS is one sample from a nondeterministic judge, not a certificate that its concern is
   clean. A later attempt can fail the same lens on code you did not touch. Treat that as an
   ordinary finding and fix it: it was missed, not caused by your last edit.
@@ -90,12 +94,28 @@ command. Do not pre-run every gate or replace the managed chain with a hand-writ
   judges only that reviewer (or that one correctness lens) on your staged index, with the gate's
   prompt, model and cache key. Its PASS is cached, so the next `devkit ship --resume` skips that lens
   — but only when the same paths ship briefed are staged and the `GUARD_REVIEW_*` model env matches.
-- **A counterexample stands for a class.** A correctness finding against a matcher, parser,
-  predicate or validator names ONE input the check gets wrong. Before re-shipping, name the property
+- **Reproduce a codex judge's sandbox before trusting a "the sandbox denies X" claim.** `codex
+  sandbox` applies the same host sandbox as the judge's `codex exec` (Seatbelt on macOS, Landlock on
+  Linux), with no model call, and runs the command in your login shell as the judge does. From the
+  repo root, a workspace-write (investigating) judge's view is:
+  `r=$PWD s=$(mktemp -d); cp AGENTS.md "$s"; (cd "$s" && CODEX_HOME=$(mktemp -d) codex sandbox -c 'sandbox_mode="workspace-write"' -c "sandbox_workspace_write.writable_roots=[\"$r/.claude\"]" -- "$SHELL" -lc '<cmd>'); echo "exit $?"`.
+  On macOS, add `--log-denials` after `sandbox` to name each denied operation; Linux has no such
+  flag. A read-only judge runs in the repo root itself: drop the `cd` and the `writable_roots`, and
+  set `sandbox_mode="read-only"`. Both modes read the whole disk and have no network.
+  Workspace-write can write only the scratch cwd, `<repo>/.claude`, `/tmp` and `$TMPDIR`. Run the
+  bare command, not a pipeline, since a pipe's exit status hides the denial. Cite the output in a
+  waive rationale.
+- **A finding stands for a class.** A finding against a matcher, parser, predicate or validator
+  names ONE input the check gets wrong. Before re-shipping, name the property
   that makes it wrong, list the other inputs that share it (every character that continues a path,
   not just the `.` quoted), and fix the class: an allowlist or grammar instead of a longer
   blocklist, or a narrower check on an exact token. Pin the fix with a table-driven test over that
   class. A second finding of the same shape means the first fix covered an instance, not the class.
+  The same holds for a finding that names ONE site breaking a rule the change states ("reads only
+  the index", "never fails open"). Take the union of every reviewer's findings in the attempt, name
+  the rule they share, and check every site in the diff that touches it — each file read, env read,
+  git call and parse — not only the cited lines. Reviewers sample: fix only the cited sites and the
+  next attempt reports the next one.
 - **A `↻ … not converging` line** under a blocked ship's digest means the same reviewer has blocked
   three or more rounds on this branch with no pass between, and its latest blocking-finding count is
   no better than its best earlier round. It says the count is not falling, not which findings recur.
@@ -159,6 +179,11 @@ so a bypass would only move the failure later. To accept a finding deliberately,
 sees it in the diff. In an overlay install the baseline is per-clone, so `devkit anti-slop create
 --force <paths>` adopts it locally. The FAIL output names the route for the mode it ran in.
 
+Code moved between files is not new debt, so do not rewrite it to pass. Delete it at the source,
+`git add` both files, then run `devkit anti-slop adopt-relocations` for a partial move, or
+`devkit anti-slop adopt-renames` when Git reports a rename, and stage the baseline where it is
+tracked. The FAIL output names the source file when a new finding repeats debt baselined elsewhere.
+
 ## Judge outage: re-targeting, not bypassing
 
 A judge that cannot run is not a finding. Under `devkit ship` a dark provider fails the gate closed
@@ -203,8 +228,8 @@ dark; find which with `devkit doctor` before moving anything.
 
 - Export or unset; never prefix the command. A command-rewriting shell hook can strip an inline
   `VAR=x devkit ship`, the same rule that governs `SHIP_COMMIT_TIMEOUT`.
-- All four, because the correctness chunk cap is benched for `gpt-5.6-sol` only; a three-knob move
-  runs the correctness reviewer at a cap never measured for it.
+- All four, because the package default chunks correctness review at 400 LOC and no large-diff
+  bench has measured the claude correctness model chunked; a three-knob move runs it that way.
 - A sentry pin under either spelling stays where it points until cleared, so both blocks unset it;
   doctor will not bind while one pins codex.
 - `devkit doctor --fix` writes the same four keys into `guard.config.json`, which a ship reads from

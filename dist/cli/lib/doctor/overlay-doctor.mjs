@@ -16,7 +16,7 @@ import { checkAntiSlopCapability, syncAntiSlopCapability, } from '../install/ant
 import { selectedHookAssets } from '../install/hook-registration-ledger/selection.mjs';
 import { checkOxcCapability, syncOxcCapability } from '../install/oxc/lifecycle.mjs';
 import { commitMsgGuards } from '../husky/commit-msg-block.mjs';
-import { hasOwnOverlay, LOCAL_HOOKS, overlayHome, overlayHooksPath, worktrees, } from '../husky/overlay/overlay-home.mjs';
+import { hasOwnOverlay, LOCAL_HOOKS, overlayHome, ownsOverlayConfig, overlayHooksPath, worktrees, } from '../husky/overlay/overlay-home.mjs';
 import { listed, printProjectionGaps } from '../husky/overlay/projection-report.mjs';
 import { ESLINT_OVERLAY_FILE, isLegacyEslintOverlay } from '../install/overlay-lint-configs.mjs';
 import { HEAL_ALIAS_NAME, isHealAlias, resyncOverlayAgentSurfaces, syncOverlayHook, } from '../overlay.mjs';
@@ -189,7 +189,7 @@ function printLinkedWorktrees(home, pkgRel, fix) {
             ok = false;
             console.log(`  ⚠ ${path}: a worktree-scoped core.hooksPath (${pin}) shadows the overlay — commits there skip devkit's gates`);
         }
-        if (!hasOwnOverlay(path))
+        if (!ownsOverlayConfig(path, pkgRel))
             ok = printProjectionGaps(path, home, pkgRel, fix) && ok;
     }
     return ok;
@@ -209,9 +209,9 @@ export function printLegacyEslintOverlays(home, pkgRel) {
         .filter(({ path, bare }) => !bare && !sameDir(path, home) && hasLegacyEslintOverlay(path, pkgRel))
         .map(({ path }) => path);
     // A checkout with its own overlay is never projected into, so only its own upgrade rewrites it.
-    for (const own of stale.filter(hasOwnOverlay))
+    for (const own of stale.filter((path) => ownsOverlayConfig(path, pkgRel)))
         console.log(`  ⚠ ${ESLINT_OVERLAY_FILE} in ${own} ${why} — delete it (hand edits are lost) and run \`devkit upgrade\` there`);
-    const borrowed = stale.filter((path) => !hasOwnOverlay(path));
+    const borrowed = stale.filter((path) => !ownsOverlayConfig(path, pkgRel));
     if (hasLegacyEslintOverlay(home, pkgRel))
         console.log(`  ⚠ ${ESLINT_OVERLAY_FILE} ${why} — delete it (hand edits are lost) and run \`devkit upgrade\`; then delete each linked worktree's copy and run \`devkit doctor --fix\``);
     else if (borrowed.length)

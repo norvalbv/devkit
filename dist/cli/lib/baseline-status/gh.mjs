@@ -68,7 +68,7 @@ function classify(e) {
 }
 /** One gh call's budget; the walk makes one per commit, so a hung call must not stall the query. */
 export const GH_TIMEOUT_MS = 60_000;
-function gh(args, cwd) {
+export function gh(args, cwd) {
     const debug = process.env.DEVKIT_BASELINE_DEBUG; // surface gh's stderr instead of collapsing it
     try {
         return execFileSync('gh', args, {
@@ -275,7 +275,7 @@ export function downloadSummary({ cwd, runId, attempt, artifact, }) {
     }
 }
 /** A run's page and each failed `job › step`; a job that failed outside any step is named alone. */
-function runView(cwd, runId) {
+export function runView(cwd, runId) {
     const out = gh(['run', 'view', String(runId), '--json', 'url,jobs'], cwd);
     let view;
     try {
@@ -315,9 +315,10 @@ export function commitCi(opts) {
             return { verdict: 'pending', detail: `run ${run.databaseId} is ${run.status}`, url };
         }
         if (run.conclusion === 'success')
-            return { verdict: 'green', detail: '', url };
+            return { verdict: 'green', detail: '', url, run, failing };
         if (run.conclusion === 'failure') {
-            return { verdict: 'red', detail: failing.join(', ') || 'no failed job named', url };
+            const detail = failing.join(', ') || 'no failed job named';
+            return { verdict: 'red', detail, url, run, failing };
         }
         const detail = `no-usable-run: run ${run.databaseId} concluded ${run.conclusion}`;
         return { verdict: 'missing', detail, url };

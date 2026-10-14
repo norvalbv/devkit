@@ -40,6 +40,13 @@ function readPackagedReviewAsset(assetRoot, relativePath) {
 }
 // Parsed, never truthiness-checked (sc-3400): a non-string or whitespace-only reason explains nothing.
 const skipReasonSchema = z.string().trim().min(1);
+export const deniedCalls = (denied) => `${denied.length} tool call(s) were denied by the judge's tool allowlist`;
+/** Why a PASS left no artifact, from the spawn's measured denials; unmeasured keeps the bare text. */
+function missingArtifactCause(denied) {
+    if (denied?.length)
+        return `${deniedCalls(denied)}; run the checklist commands exactly as written`;
+    return `the judge skipped the checklist workflow${denied ? ' (no tool call was denied)' : ''}`;
+}
 /**
  * Independent verification of the checklist artifact the judge's workflow left behind — the
  * gate-side half of the anti-hallucination contract. Returns null when the artifact is complete
@@ -48,8 +55,9 @@ const skipReasonSchema = z.string().trim().min(1);
  *
  * @param state parsed state-file JSON (null = missing/unreadable)
  * @param verdict the judge's parsed verdict
+ * @param denied the spawn's refused tool calls (null/absent = not measured)
  */
-export function verifyChecklist(state, verdict) {
+export function verifyChecklist(state, verdict, denied) {
     if (verdict === 'FAIL')
         return null;
     const items = state?.items ?? state?.files; // domain reviewers use items[]; commit-guard files[]
@@ -61,12 +69,12 @@ export function verifyChecklist(state, verdict) {
         skipReasonSchema.safeParse(state?.skipped).success)
         return null;
     if (!Array.isArray(items) || items.length === 0)
-        return 'checklist artifact missing — the judge skipped the checklist workflow';
+        return `checklist artifact missing — ${missingArtifactCause(denied)}`;
     const pending = items.filter((i) => i.status === 'pending');
     if (pending.length > 0)
         return `checklist incomplete — ${pending.length} item(s) never resolved: ${pending
             .map((i) => i.name ?? i.path)
-            .join(', ')}`;
+            .join(', ')}${denied?.length ? `; ${deniedCalls(denied)}` : ''}`;
     const failed = items.filter((i) => i.status === 'fail');
     if (failed.length > 0)
         return `checklist has ${failed.length} FAILED item(s) but the verdict says PASS: ${failed

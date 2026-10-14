@@ -136,7 +136,7 @@ export function adoptRelocations(cwd, overlay, baseRef = 'HEAD', explicitBase = 
             writeBaseline(cwd, next);
             const moved = plan.relocated.reduce((sum, group) => sum + group.relocatedCount, 0);
             const sources = plan.relocated.flatMap((group) => group.from.map((credit) => credit.source));
-            console.log(`anti-slop: re-anchored ${moved} relocated finding(s) from ${formatSources(sources)} into ${formatSources(plan.relocated.map((group) => group.file))}; stage ${ANTI_SLOP_BASELINE_REL}`);
+            console.log(`anti-slop: re-anchored ${moved} relocated finding(s) from ${formatSources(sources)} into ${formatSources(plan.relocated.map((group) => group.file))}${overlay ? '' : `; stage ${ANTI_SLOP_BASELINE_REL}`}`);
             return 0;
         });
     });

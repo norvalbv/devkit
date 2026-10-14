@@ -26,7 +26,7 @@ import { z } from 'zod';
 import { resolveGuardConfig } from '../config.mjs';
 import { gitPrefix, splitNul } from '../ratchets/git-index.mjs';
 import { buildStructureConfigs } from './eslint-config.mjs';
-import { eslintNodeFlags } from './eslint-node-flags.mjs';
+import { eslintNodeFlags, LINKED_ISOLATED_STORE, linkedIsolatedStore, } from './eslint-node-flags.mjs';
 import { clean, combineStructureResults, couldNotRun, violations, withUncompiledWalls, } from './verdict.mjs';
 export { combineStructureResults };
 // ESLint throws "No files matching the pattern" for an absent tree and "…are ignored" when every file
@@ -192,6 +192,8 @@ function runPresetLint(cwd, targets) {
     if (!existsSync(eslintBin)) {
         return couldNotRun('electron structure lint needs the locally pinned eslint binary');
     }
+    if (linkedIsolatedStore(cwd))
+        return couldNotRun(LINKED_ISOLATED_STORE);
     // An empty root is clean, not ESLint's exit-2 "no files matching".
     const args = [...eslintNodeFlags(cwd), eslintBin, '--no-error-on-unmatched-pattern', '--'];
     try {

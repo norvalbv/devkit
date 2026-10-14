@@ -16,13 +16,22 @@ export const FALLOW_STAGED = `if command -v fallow >/dev/null 2>&1; then
         # Above its --diff-stdin cap fallow drops the line filter and reports the whole project.
         echo "devkit fallow gate: staged diff exceeds fallow's 10 MiB --diff-stdin cap — audit skipped."
     else
+        # fallow rejects a map holding a negative hit and looks only under its cwd, so it is handed
+        # a clamped copy of the repo's artifact. Ship's own FALLOW_COVERAGE is left in place.
+        DK_FALLOW_COV=""
+        if [ -z "\${FALLOW_COVERAGE:-}" ] && [ -x "\${__dk_package_bin_dir:-}/guard-coverage" ]; then
+            DK_FALLOW_COV="$(__dk_no_git_env "$__dk_package_bin_dir/guard-coverage" fallow-copy)" ||
+                echo "devkit fallow gate: no measured coverage for this audit — CRAP is estimated here and measured at ship."
+        fi
         # __dk_no_git_env: fallow's snapshot machinery has clobbered a ship worktree before.
-        __dk_no_git_env fallow audit --diff-stdin <"$DK_FALLOW_DIFF" || DK_FALLOW_RC=$?
+        __dk_no_git_env env \${DK_FALLOW_COV:+"FALLOW_COVERAGE=$DK_FALLOW_COV"} \\
+            fallow audit --diff-stdin <"$DK_FALLOW_DIFF" || DK_FALLOW_RC=$?
+        [ -z "$DK_FALLOW_COV" ] || rm -f "$DK_FALLOW_COV"
     fi
     [ -z "$DK_FALLOW_DIFF" ] || rm -f "$DK_FALLOW_DIFF"
     if [ "$DK_FALLOW_RC" -eq 1 ]; then
 ${shipRehearsalHint('        ')}
-        exit 1
+        __dk_block_deterministic fallow
     elif [ "$DK_FALLOW_RC" -ne 0 ]; then
         # Exit 2+ is a fallow error (no detectable base branch, bad config), never a finding.
         echo "devkit fallow gate: fallow exited $DK_FALLOW_RC without a verdict (its message is above) — audit skipped, commit not blocked."

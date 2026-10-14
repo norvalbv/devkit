@@ -174,7 +174,7 @@ export function normalizeCitedPath(path) {
 // A judge's ` (repo root)` after a CLAUDE.md is its own prose, and varies run to run.
 const RULE_LOCATION_NOTE_RE = /^(.*?)\s+\([^()]*\)$/;
 /** The rule's CLAUDE.md: fences unwrapped around the whole location or its file part, note dropped. */
-function ruleFile(location) {
+export function conventionRuleFile(location) {
     const whole = normalizeCitedPath(location);
     const note = whole.match(RULE_LOCATION_NOTE_RE);
     const file = note && /CLAUDE\.md`*$/i.test(note[1]) ? note[1] : whole;
@@ -184,7 +184,7 @@ function ruleFile(location) {
  * A lineless rule is told apart from its siblings by its quoted text. */
 export function conventionWaiverLens(finding) {
     const file = normalizeCitedPath(finding.offendingPath);
-    const rule = ruleFile(finding.rulePath);
+    const rule = conventionRuleFile(finding.rulePath);
     if (finding.ruleLine !== null)
         return `${file}@${rule}:${finding.ruleLine}`;
     const text = finding.ruleQuote.toLowerCase().replace(/\s+/g, ' ').trim();

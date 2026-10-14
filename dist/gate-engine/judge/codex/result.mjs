@@ -16,7 +16,7 @@ import { join } from 'node:path';
 import { withResultArgs } from '../claude-result.mjs';
 /** Parse the JSONL stream ONCE at the I/O boundary; the verdict/usage/failure readers below all
  * branch on these domain events rather than re-scanning raw lines. */
-function codexEventsOf(raw) {
+export function codexEventsOf(raw) {
     const events = [];
     for (const line of raw.split('\n')) {
         const trimmed = line.trim();
@@ -134,8 +134,10 @@ export function parseModelSpec(spec) {
 }
 /** The workspace confinement for this judge, or null when it runs read-only or unconfined. */
 const confinedWorkspace = (parts, workspace) => parts.readOnly ? null : (workspace ?? null);
+// Claude judges cannot run tests (BASE_TOOLS); codex judges have a shell, so they are told instead.
+export const NO_TEST_RUNS = 'Do not run tests, test runners or package-manager scripts (bun run, npm run); review by reading. Test execution belongs to the pre-push suite.';
 function repoRootNotice(repoRoot) {
-    return `The repository under review is ${repoRoot}. Run every command from there (cd into it first); paths in this task are relative to it. Its working tree is read-only to you except .claude/.\n\n`;
+    return `The repository under review is ${repoRoot}. Run every command from there (cd into it first); paths in this task are relative to it. Its working tree is read-only to you except .claude/. ${NO_TEST_RUNS}\n\n`;
 }
 export function codexExecArgs(parts, mcpArgv = [], workspace) {
     if (!parts.model || !parts.prompt)
@@ -158,6 +160,7 @@ export function codexExecArgs(parts, mcpArgv = [], workspace) {
     // TOML string, the same quoting the bench's effort wrappers used (`-c model_reasoning_effort="high"`).
     if (spec.effort !== null)
         argv.push('-c', `model_reasoning_effort=${JSON.stringify(spec.effort)}`);
+    // skills/commit-gates/SKILL.md replays this sandbox via `codex sandbox`; keep it in step.
     argv.push('--sandbox', parts.readOnly ? 'read-only' : 'workspace-write', ...(confined ? ['-C', confined.scratch, '--add-dir', join(confined.repoRoot, '.claude')] : []), '-c', 'web_search="disabled"', ...mcpArgv, '--ignore-user-config', '--ignore-rules', '--skip-git-repo-check', '--ephemeral', '--color', 'never', '--json', prompt);
     return argv;
 }
@@ -226,6 +229,9 @@ export function codexMcpArgs(servers, allowedTools) {
         if (grants.length > 0 && !grants.includes('*'))
             serverArgv.push('-c', `mcp_servers.${name}.enabled_tools=[${grants.map(tomlStr).join(',')}]`);
         serverArgv.push('-c', `mcp_servers.${name}.startup_timeout_sec=10`);
+        // Exec's approval policy is `never`, so an unapproved MCP call is refused; a grant is the approval.
+        if (allowedTools !== null)
+            serverArgv.push('-c', `mcp_servers.${name}.default_tools_approval_mode="approve"`);
         argv.push(...serverArgv);
         Object.assign(extraEnv, serverEnv);
         injected.push(name);

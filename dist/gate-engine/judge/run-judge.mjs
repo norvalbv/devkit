@@ -17,7 +17,7 @@
 // regex floor still blocks. Each caller describes its own consequence where it differs.
 import { execFile, execFileSync } from 'node:child_process';
 import { parsePriorArtResponse } from '../prior-art/response-contract.mjs';
-import { parseJudgeUsage, unwrapClaudeResult, withResultArgs, } from './claude-result.mjs';
+import { parseJudgeUsage, recordPermissionDenials, unwrapClaudeResult, withResultArgs, } from './claude-result.mjs';
 import { codexFailure, judgeBinFor, judgeCliFor, parseClaudeArgv, parseCodexUsage, unwrapCodexResult, } from './codex/result.mjs';
 import { emitGateEvent } from './gate-events.mjs';
 import { trackJudge } from './process/heartbeat.mjs';
@@ -26,6 +26,7 @@ import { withoutGitEnv } from './judge-isolation.mjs';
 import { prepareJudgeMcpProfile, spawnDegradedCause, } from './mcp/profile.mjs';
 import { classifyJudgeOutage, } from './outage/classify.mjs';
 import { unavailableMessage, warnNoOutput } from './outage/wording.mjs';
+import { saveCodexCommands } from './codex/commands.mjs';
 import { composeTranscript, saveTranscriptUnique } from './transcript-store.mjs';
 // Re-exported so the gates that already import their remedy wording from here keep ONE import path,
 // while the wording itself lives beside the classifier that decides it.
@@ -39,8 +40,11 @@ function judgeErr(e) {
  *  classify keeps the wording a pure function of the error, hence unit-testable. */
 function reportOutage(opts, e, bin, startedAt, usage) {
     const outage = classifyJudgeOutage(e);
+    const model = modelFromArgs(opts.args);
+    if (outage.kind === 'model-unavailable' && model !== null)
+        outage.model = model;
     console.error(unavailableMessage(opts.label, e, opts.timeout, bin));
-    emitJudgeExec(opts, outage.kind, startedAt, undefined, usage, outage.detail);
+    emitJudgeExec(opts, outage.kind, startedAt, undefined, usage, outage.detail, e.stdout);
     opts.onOutage?.(outage);
     return outage;
 }
@@ -126,18 +130,20 @@ export function recordAgentRun(opts) {
  */
 function emitJudgeExec(opts, outcome, startedAt, output, usage, 
 /** The provider's own failure sentence, so the ledger records WHY, not just that it failed. */
-outageDetail) {
+outageDetail, stdout) {
     // Omitted entirely when unreadable — see parseJudgeUsage on why a zero-filled row is worse
     // than an absent one.
-    const extra = usage
-        ? { ...usage }
-        : {};
+    const extra = usage ? { ...usage } : {};
     if (opts.lens !== undefined)
         extra.lens = opts.lens;
     // The sc-2538 evidence sat in a stderr line nobody kept. On the ledger it is queryable: the
     // dashboard can answer "which outage, and until when" without re-running the ship.
     if (outageDetail !== undefined)
         extra.outage_detail = outageDetail;
+    const commandsRef = saveCodexCommands(opts.label, stdout, opts.lens);
+    if (commandsRef)
+        extra.commands_ref = commandsRef;
+    Object.assign(extra, recordPermissionDenials(opts, stdout));
     recordAgentRun({
         label: opts.label,
         output,
@@ -163,7 +169,7 @@ function readJudgeOutput(stdout, cli) {
         // A failed turn's stream can still carry its usage event — those tokens were burned whether or
         // not a verdict arrived, and dropping them under-counts exactly the most expensive failures.
         if (failure !== null)
-            return { failure, usage: parseCodexUsage(stdout) };
+            return { failure: { providerFailure: failure, stdout }, usage: parseCodexUsage(stdout) };
         return { text: unwrapCodexResult(stdout) ?? stdout, usage: parseCodexUsage(stdout) };
     }
     return { text: unwrapClaudeResult(stdout) ?? stdout, usage: parseJudgeUsage(stdout) };
@@ -234,10 +240,10 @@ export function execJudge(opts) {
         if ('failure' in parsed) {
             // The stream reported the turn failed (exit 0 notwithstanding). This was hardcoded
             // `transient` while HOLDING the message that proves a usage lock is not transient.
-            reportOutage(opts, { providerFailure: parsed.failure }, cli.bin, startedAt, parsed.usage);
+            reportOutage(opts, parsed.failure, cli.bin, startedAt, parsed.usage);
             return null;
         }
-        emitJudgeExec(opts, 'ok', startedAt, parsed.text, parsed.usage);
+        emitJudgeExec(opts, 'ok', startedAt, parsed.text, parsed.usage, undefined, String(out));
         return parsed.text;
     }
     catch (e) {
@@ -256,9 +262,6 @@ export function execJudge(opts) {
  * count). Callback-form execFile because the promisified variant cannot take stdin: the prompt's
  * evidence (diffstat) goes to the child's stdin by hand. maxBuffer is explicit — an investigating
  * judge's transcript (tool output included) can exceed the 1 MB default.
- *
- * @param {{ label: string, args: string[], input?: string, timeout: number, cwd?: string, onOutage?: (outage: JudgeOutage) => void }} opts
- * @returns {Promise<string|null>}
  */
 export function execJudgeAsync(opts) {
     const { label, args, input, timeout, cwd, env, onOutage } = opts;
@@ -322,14 +325,15 @@ export function execJudgeAsync(opts) {
                     resolve(null);
                     return;
                 }
-                const parsed = readJudgeOutput(String(stdout), cli);
+                const raw = String(stdout);
+                const parsed = readJudgeOutput(raw, cli);
                 if ('failure' in parsed) {
                     // See the sync twin: a stream-reported failed turn is classified, not assumed.
-                    reportOutage(opts, { providerFailure: parsed.failure }, cli.bin, startedAt, parsed.usage);
+                    reportOutage(opts, parsed.failure, cli.bin, startedAt, parsed.usage);
                     resolve(null);
                     return;
                 }
-                emitJudgeExec(opts, 'ok', startedAt, parsed.text, parsed.usage);
+                emitJudgeExec(opts, 'ok', startedAt, parsed.text, parsed.usage, undefined, raw);
                 resolve(parsed.text);
             });
             // EPIPE guard: claude may exit (ENOENT wrapper, early crash) before stdin is consumed.

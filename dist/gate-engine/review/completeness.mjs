@@ -31,7 +31,7 @@ import path from 'node:path';
 import { envBool, envFlag, resolveGuardConfig } from '../config.mjs';
 import { scopedTargets } from '../decisions/scoped-targets.mjs';
 import { judgeBinForModel } from '../judge/codex/result.mjs';
-import { renderTargets } from './evidence/targets-block.mjs';
+import { renderChangedTargets, renderTargets, stagedTargetChanges, } from './evidence/targets-block.mjs';
 export { renderTargets } from './evidence/targets-block.mjs';
 import { emitCacheHit, emitGateBypass, emitGateEvent, emitGateInfraFailure, emitIntentCacheHit, finishGateTiming, } from '../judge/gate-events.mjs';
 import { JUDGE_ISOLATION } from '../judge/judge-isolation.mjs';
@@ -154,6 +154,7 @@ const SKIP_WORDING = {
     timeout: 'judge timed out',
     'rate-limited': 'judge hit the provider usage limit',
     absent: 'judge CLI is not installed',
+    'model-unavailable': 'judge model is not available on this account',
     outage: 'judge outage',
 };
 /** The gate → exit code (see module contract). `exec` injectable for tests. */
@@ -253,7 +254,8 @@ export async function runCompleteness(msgFile, cwd = process.cwd(), { exec = exe
             });
             return finish(0, 'full', stickyDuration);
         }
-        const targets = await scopedTargets(files, message.split('\n')[0] ?? '', 6, cwd).catch(() => []);
+        const changed = stagedTargetChanges(files, cwd);
+        const targets = (await scopedTargets(files, message.split('\n')[0] ?? '', 6, cwd).catch(() => [])).filter((t) => !changed.includes(t.slug));
         // The FULL --stat rides uncapped ahead of the evidence: on a branch-sized commit the caps
         // drop whole files, but the judge must at least SEE the complete file/churn map of what it
         // is being asked to gap-check. Diff prefixes are forced ON-config so a consumer's
@@ -271,7 +273,7 @@ export async function runCompleteness(msgFile, cwd = process.cwd(), { exec = exe
             encoding: 'utf8',
             maxBuffer: 64 * 1024 * 1024,
         }), stat);
-        prompt = wrapCompleteness(body, message, files, renderTargets(targets));
+        prompt = wrapCompleteness(body, message, files, renderTargets(targets) + renderChangedTargets(changed));
     }
     catch (e) {
         // sc-1366: distinguish an unreadable staged object from an inconclusive judge before the exit

@@ -30,7 +30,7 @@ import { existsSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { resolveGuardConfig } from '../../../gate-engine/config.mjs';
-import { eslintNodeFlags } from '../../../gate-engine/structure/eslint-node-flags.mjs';
+import { eslintNodeFlags, LINKED_ISOLATED_STORE, linkedIsolatedStore, } from '../../../gate-engine/structure/eslint-node-flags.mjs';
 import { IMPORT_WALL_BASELINE, LEGACY_IMPORT_WALL_BASELINE, } from '../../../gate-engine/ratchets/baseline-paths.mjs';
 const OUT = IMPORT_WALL_BASELINE;
 const RULE = 'project-structure/independent-modules';
@@ -111,6 +111,8 @@ export function computeImportWallBaseline(cwd, opts = {}) {
     if (!eslintBin) {
         throw new Error('import-wall generator: eslint not found in consumer node_modules — install deps first (bun install).');
     }
+    if (linkedIsolatedStore(cwd))
+        throw new Error(`import-wall generator: ${LINKED_ISOLATED_STORE}`);
     const widenings = new Map(); // file -> Set<widening>
     const failures = [];
     for (const file of runScan(cwd, eslintBin, walls.lintGlobs)) {

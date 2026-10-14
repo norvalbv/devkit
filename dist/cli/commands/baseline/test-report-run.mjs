@@ -1,5 +1,6 @@
 /** `devkit test-report-run` (sc-2245) — see `meta.help` below for the consumer wiring. */
 import { REPORT_NAME, RUNS_DIR, SUMMARY_NAME, produceTestReport, } from '../../lib/baseline-status/produce.mjs';
+import { withoutSeparators } from '../../../gate-engine/coverage/vitest-cli.mjs';
 export const meta = {
     name: 'test-report-run',
     agentFacing: false,
@@ -45,5 +46,5 @@ The console summary and the GitHub PR annotations are preserved — the json rep
 alongside them, never in place of them. Vitest-only; \`devkit baseline-status\` is not.`,
 };
 export default async function testReportRun(args, cwd) {
-    return await produceTestReport(cwd, args);
+    return await produceTestReport(cwd, withoutSeparators(args));
 }

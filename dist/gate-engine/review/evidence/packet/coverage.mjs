@@ -6,17 +6,18 @@ const gap = (m) => m.omitted_files + m.truncated_files;
 // path list is bounded in count AND bytes; evidence_omitted_files keeps the exact count.
 const PATHS_MAX = 10;
 const PATHS_BYTES = 1_000;
-function boundedPaths(paths) {
+function boundedPaths(paths, budget = PATHS_BYTES) {
     const kept = [];
     let bytes = 0;
     for (const p of paths.slice(0, PATHS_MAX)) {
         bytes += Buffer.byteLength(p, 'utf8');
-        if (bytes > PATHS_BYTES)
+        if (bytes > budget)
             break;
         kept.push(p);
     }
     return kept;
 }
+const pathBytes = (paths) => paths.reduce((n, p) => n + Buffer.byteLength(p, 'utf8'), 0);
 /** One reviewer's WORST packet: chunk parts partition files so their counts sum; whole-diff parts
  * are measured once per distinct diff, and a lens is named only beside a chunk plan. */
 export function coverageFields(tasks) {
@@ -31,6 +32,7 @@ export function coverageFields(tasks) {
             omitted_files: 0,
             truncated_files: 0,
             omitted_paths: [],
+            truncated_paths: [],
         };
         for (const t of chunks) {
             const m = measureDiffCoverage(t.diffText);
@@ -38,6 +40,7 @@ export function coverageFields(tasks) {
             sum.omitted_files += m.omitted_files;
             sum.truncated_files += m.truncated_files;
             sum.omitted_paths.push(...m.omitted_paths);
+            sum.truncated_paths.push(...m.truncated_paths);
         }
         candidates.push(sum);
     }
@@ -53,12 +56,16 @@ export function coverageFields(tasks) {
     const worst = candidates.reduce((w, c) => (!w || gap(c) > gap(w) || (gap(c) === gap(w) && c.lens && !w.lens) ? c : w), undefined);
     if (!worst || gap(worst) === 0)
         return {};
+    // Both lists share one byte budget; truncated paths claim it first.
+    const truncatedPaths = boundedPaths(worst.truncated_paths);
     const fields = {
         evidence_file_count: worst.file_count,
         evidence_omitted_files: worst.omitted_files,
         evidence_truncated_files: worst.truncated_files,
-        evidence_omitted_paths: boundedPaths(worst.omitted_paths),
+        evidence_omitted_paths: boundedPaths(worst.omitted_paths, PATHS_BYTES - pathBytes(truncatedPaths)),
     };
+    if (truncatedPaths.length > 0)
+        fields.evidence_truncated_paths = truncatedPaths;
     if (worst.lens)
         fields.evidence_lens = worst.lens;
     return fields;
@@ -68,5 +75,16 @@ export function partialEvidenceNote(c) {
     if (!c.evidence_omitted_files && !c.evidence_truncated_files)
         return '';
     const lens = c.evidence_lens ? ` (${c.evidence_lens} lens)` : '';
-    return ` — partial evidence${lens}: ${c.evidence_omitted_files ?? 0}/${c.evidence_file_count ?? '?'} file(s) omitted, ${c.evidence_truncated_files ?? 0} truncated from the packet`;
+    return ` — partial evidence${lens}: ${c.evidence_omitted_files ?? 0}/${c.evidence_file_count ?? '?'} file(s) omitted, ${c.evidence_truncated_files ?? 0} truncated from the packet${truncatedNames(c)}`;
+}
+const NAMES_SHOWN = 3;
+// JSON quoting escapes C0 controls but leaves C1 (e.g. U+009B, a one-byte CSI) raw.
+const quotedPath = (p) => JSON.stringify(p).replace(/[\u0080-\u009f]/g, (ch) => `\\u${ch.charCodeAt(0).toString(16).padStart(4, '0')}`);
+// Quoted so a committer-controlled path cannot split or forge the one-line gate log.
+function truncatedNames(c) {
+    const paths = c.evidence_truncated_paths ?? [];
+    if (paths.length === 0)
+        return '';
+    const more = (c.evidence_truncated_files ?? 0) > NAMES_SHOWN ? ', …' : '';
+    return ` — truncated: ${paths.slice(0, NAMES_SHOWN).map(quotedPath).join(', ')}${more}`;
 }
