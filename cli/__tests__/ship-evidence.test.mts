@@ -69,7 +69,7 @@ function ghEnv(extra: Record<string, string>) {
   writeFileSync(join(bin, 'gh'), GH_STUB);
   chmodSync(join(bin, 'gh'), 0o755);
   const inherited = Object.fromEntries(
-    Object.entries(process.env).filter(([key]) => !/^(VITEST|GUARD_|FRINK_|HUSKY$)/.test(key)),
+    Object.entries(process.env).filter(([key]) => !/^(GUARD_|FRINK_|HUSKY$)/.test(key)),
   );
   return {
     log: join(bin, 'gh.log'),
