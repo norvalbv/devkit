@@ -177,7 +177,8 @@ export async function runProbe(opts) {
         const probe = loadSummary({ cwd, run, artifact });
         admitProbe(probe, sha);
         const base = baseSummary(cwd, workflow, artifact);
-        const tree = git(cwd, ['ls-tree', '-r', '--full-tree', '--name-only', '-z', sha]);
+        const listTree = ['ls-tree', '-r', '--full-tree', '--name-only', '-z', sha];
+        const tree = gitStep('snapshot-failed', () => git(cwd, listTree));
         const tracked = new Set(tree.split('\0'));
         return answer({ ...result, baseRun: base.run }, probe, base.summary, tracked);
     }

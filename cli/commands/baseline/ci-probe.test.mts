@@ -11,6 +11,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { testSpawnSync } from '../../__tests__/_helpers.mts';
 import type { TestReportSummary } from '../../lib/baseline-status/produce.mts';
 import ciProbe, { type ProbeResult, runProbe } from './ci-probe.mts';
 
@@ -299,12 +300,14 @@ describe('devkit ci-probe', () => {
   );
 
   it('exits 0 with the verdict line once answered, through the CLI entry', () => {
-    const out = execFileSync('node', [join(import.meta.dirname, '../../index.mts'), 'ci-probe'], {
+    const cli = join(import.meta.dirname, '../../index.mts');
+    const { status, stdout } = testSpawnSync(process.execPath, [cli, 'ci-probe'], {
       cwd: repo,
       encoding: 'utf8',
       env: process.env,
     });
-    expect(out).toMatch(
+    expect(status).toBe(0);
+    expect(stdout).toMatch(
       /^ci-probe: new=2 lost=1 inherited=1 unsure=0 new-failing=b.test.mts,c.test.mts /,
     );
     expect(existsSync(join(fixture, 'probe-sha'))).toBe(true);
