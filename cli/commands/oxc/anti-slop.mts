@@ -32,7 +32,7 @@ import {
   ANTI_SLOP_BASELINE_REL,
 } from '../../lib/install/anti-slop/constants.mts';
 import type { FindingGroup } from '../../lib/install/anti-slop/diagnostics.mts';
-import { antiSlopRemedyLines } from '../../lib/install/anti-slop/report/remedy.mts';
+import { antiSlopFailRemedy } from '../../lib/install/anti-slop/report/remedy.mts';
 import {
   type GitBaselineEnvelope,
   gitBaselineEnvelope,
@@ -305,10 +305,7 @@ function check(
       failLine(`anti-slop: FAIL — ${newErrorCount} new error finding(s); baseline unchanged`);
       recordErrorLocations(errors);
       const overlay = isOverlayOxcInstall(cwd);
-      for (const line of antiSlopRemedyLines(
-        errors.map((group) => group.ruleId),
-        overlay,
-      ))
+      for (const line of antiSlopFailRemedy(errors, baseline, overlay, baseRef))
         console.error(line);
       // Reported on the FAIL path too: a committer reading a block needs the same standing about
       // what this gate does not enforce — no committed base means no shrink-only ratchet.

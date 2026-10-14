@@ -1,6 +1,13 @@
 /** What a blocked anti-slop run tells its author to do next (sc-3469). Hints never go in a rule
  * message: the diagnostic is part of the baseline fingerprint (see oxc-toolchain-migration). */
 
+import type { AntiSlopBaseline, BaselineEntry } from '../baseline.mts';
+import { ANTI_SLOP_BASELINE_REL } from '../constants.mts';
+import type { FindingGroup } from '../diagnostics.mts';
+import { formatSources, relocationKey, relocationRemedy } from '../relocations.mts';
+
+type NewErrorGroup = FindingGroup & { additionalCount: number };
+
 /** Acceptance route with a committed baseline. No one-run bypass: CI's `check --base` would still
  * fail the PR, while an override is durable and visible in the diff. */
 export const ACCEPT_VIA_OVERRIDE =
@@ -29,4 +36,50 @@ export function antiSlopRemedyLines(ruleIds: readonly string[], overlay: boolean
     return hint === undefined ? [] : [`anti-slop: hint — ${hint}`];
   });
   return [...hints, `anti-slop: ${overlay ? ACCEPT_IN_OVERLAY : ACCEPT_VIA_OVERRIDE}`];
+}
+
+/** Names the move route when new findings repeat debt baselined under another file. A check
+ * without Git evidence cannot tell a move from new code, so the line states both outcomes. */
+export function relocationHint(
+  errors: readonly NewErrorGroup[],
+  baseline: AntiSlopBaseline,
+  overlay: boolean,
+  baseRef?: string,
+): string[] {
+  const entriesByKey = new Map<string, BaselineEntry[]>();
+  for (const entry of baseline.entries) {
+    const key = relocationKey(entry);
+    entriesByKey.set(key, [...(entriesByKey.get(key) ?? []), entry]);
+  }
+  let matched = 0;
+  const sources: string[] = [];
+  for (const group of errors) {
+    const entries = entriesByKey.get(relocationKey(group)) ?? [];
+    const elsewhere = entries.filter((entry) => entry.file !== group.file);
+    const units = elsewhere.reduce((sum, entry) => sum + entry.count, 0);
+    if (units === 0) continue;
+    matched += Math.min(group.additionalCount, units);
+    sources.push(...elsewhere.map((entry) => entry.file));
+  }
+  if (matched === 0) return [];
+  const stage = overlay ? '' : `, then stage ${ANTI_SLOP_BASELINE_REL}`;
+  return [
+    `anti-slop: ${matched} of these finding(s) are identical (rule and source line) to debt already baselined in ${formatSources(sources)}. If you moved this code from there, do not rewrite it: delete it there, git add both files, run \`${relocationRemedy(baseRef)}\`${stage}. New or copied code is not a move: fix it as below`,
+  ];
+}
+
+/** Everything a new-finding FAIL prints after its verdict line: the move route, then the hints. */
+export function antiSlopFailRemedy(
+  errors: readonly NewErrorGroup[],
+  baseline: AntiSlopBaseline,
+  overlay: boolean,
+  baseRef?: string,
+): string[] {
+  return [
+    ...relocationHint(errors, baseline, overlay, baseRef),
+    ...antiSlopRemedyLines(
+      errors.map((group) => group.ruleId),
+      overlay,
+    ),
+  ];
 }

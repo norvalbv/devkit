@@ -1,7 +1,7 @@
 /** sc-3469: a commit-time anti-slop FAIL names a per-rule hint and the acceptance route its install
  * mode supports (see the oxc-toolchain-migration note for why hints live in the CLI). */
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -15,11 +15,17 @@ import {
   resolveOxlintEntryConfig,
   syncOxcCapability,
 } from '../../oxc/lifecycle.mts';
-import { baselineFromGroups, writeBaseline } from '../baseline.mts';
+import {
+  type AntiSlopBaseline,
+  type BaselineEntry,
+  baselineFromGroups,
+  writeBaseline,
+} from '../baseline.mts';
 import { ANTI_SLOP_BASELINE_REL, ANTI_SLOP_UPSTREAM } from '../constants.mts';
 import { syncAntiSlopCapability } from '../lifecycle.mts';
+import type { FindingGroup } from '../diagnostics.mts';
 import { collectAntiSlopGroups } from '../runner.mts';
-import { ACCEPT_VIA_OVERRIDE, antiSlopRemedyLines } from './remedy.mts';
+import { ACCEPT_VIA_OVERRIDE, antiSlopFailRemedy, antiSlopRemedyLines } from './remedy.mts';
 
 const MOCKING = 'anti-slop/no-module-mocking';
 const ASSERTION = 'anti-slop/require-safety-comment-for-type-assertion';
@@ -81,6 +87,88 @@ describe('antiSlopRemedyLines', () => {
     expect(text).toMatch(/create --force/u);
     // The per-rule hint is mode-independent.
     expect(text).toMatch(/deps/u);
+  });
+});
+
+const debt = (file: string, context: string, count = 1): BaselineEntry => ({
+  fingerprint: `${file}\0${context}`,
+  ruleId: ASSERTION,
+  file,
+  diagnostic: 'This type assertion has no `SAFETY:` justification.',
+  context,
+  count,
+});
+const baselineOf = (...entries: BaselineEntry[]): AntiSlopBaseline => ({
+  schemaVersion: 1,
+  upstreamCommit: ANTI_SLOP_UPSTREAM,
+  entries,
+});
+const newError = (
+  file: string,
+  context: string,
+  additionalCount = 1,
+): FindingGroup & { additionalCount: number } => ({
+  ...debt(file, context, additionalCount),
+  severity: 'error',
+  line: 1,
+  column: 1,
+  additionalCount,
+});
+
+describe('antiSlopFailRemedy', () => {
+  const CAST = 'return value as Thing;';
+
+  it('names the source and the move route before the rule hints when debt matches elsewhere', () => {
+    const lines = antiSlopFailRemedy(
+      [newError('src/dest.ts', CAST)],
+      baselineOf(debt('src/source.ts', CAST)),
+      false,
+    );
+    expect(lines[0]).toContain('1 of these finding(s) are identical');
+    expect(lines[0]).toContain('baselined in src/source.ts.');
+    expect(lines[0]).toContain('do not rewrite it');
+    expect(lines[0]).toContain('git add both files');
+    expect(lines[0]).toContain(
+      `run \`devkit anti-slop adopt-relocations\`, then stage ${ANTI_SLOP_BASELINE_REL}.`,
+    );
+    expect(lines[0]).toContain('New or copied code is not a move: fix it as below');
+    expect(lines.slice(1)).toEqual(antiSlopRemedyLines([ASSERTION], false));
+  });
+
+  it('adds nothing when the only matching debt is in the same file, or nothing matches', () => {
+    const errors = [newError('src/dest.ts', CAST)];
+    const plain = antiSlopRemedyLines([ASSERTION], false);
+    expect(antiSlopFailRemedy(errors, baselineOf(debt('src/dest.ts', CAST)), false)).toEqual(plain);
+    expect(
+      antiSlopFailRemedy(errors, baselineOf(debt('src/source.ts', 'other line')), false),
+    ).toEqual(plain);
+  });
+
+  it('counts at most as many findings as the debt elsewhere could have supplied', () => {
+    const unmatched = newError('src/dest.ts', 'const fresh = input as Fresh;');
+    const [twoUnits] = antiSlopFailRemedy(
+      [newError('src/dest.ts', CAST, 3), unmatched],
+      baselineOf(debt('src/b.ts', CAST), debt('src/a.ts', CAST)),
+      false,
+    );
+    expect(twoUnits).toContain('2 of these finding(s)');
+    expect(twoUnits).toContain('baselined in src/a.ts, src/b.ts.');
+    const [plenty] = antiSlopFailRemedy(
+      [newError('src/dest.ts', CAST, 3), unmatched],
+      baselineOf(debt('src/a.ts', CAST, 5)),
+      false,
+    );
+    expect(plenty).toContain('3 of these finding(s)');
+  });
+
+  it('drops the baseline-staging step in overlay and carries the base ref when given one', () => {
+    const errors = [newError('src/dest.ts', CAST)];
+    const baseline = baselineOf(debt('src/source.ts', CAST));
+    const [overlay] = antiSlopFailRemedy(errors, baseline, true);
+    expect(overlay).toContain('run `devkit anti-slop adopt-relocations`. New or copied');
+    expect(overlay).not.toContain(ANTI_SLOP_BASELINE_REL);
+    const [based] = antiSlopFailRemedy(errors, baseline, false, 'abc123');
+    expect(based).toContain('`devkit anti-slop adopt-relocations --base abc123`');
   });
 });
 
@@ -215,5 +303,55 @@ describe('anti-slop check FAIL output (wiring)', () => {
     git(cwd, ['add', '-A']);
     expect(antiSlop(['check', '--staged'], cwd)).toBe(0);
     expect(err.join('\n')).not.toContain(ACCEPT_VIA_OVERRIDE);
+  });
+
+  it('routes code moved verbatim into a new file to adopt-relocations, with no rewrite', () => {
+    const cwd = repository(false);
+    const moved = 'function moved(value: object) { return value; }\n';
+    const hint =
+      /identical \(rule and source line\) to debt already baselined in src\/source\.ts\./u;
+    writeFileSync(join(cwd, 'src', 'a.test.ts'), 'export const clean = 1;\n');
+    writeFileSync(join(cwd, 'src', 'source.ts'), `export const kept = true;\n${moved}`);
+    writeBaseline(cwd, baselineFromGroups(collectAntiSlopGroups(cwd, [])));
+    git(cwd, ['add', '-A']);
+    git(cwd, [
+      '-c',
+      'user.name=Devkit test',
+      '-c',
+      'user.email=devkit@test.invalid',
+      'commit',
+      '-qm',
+      'adopt debt',
+    ]);
+
+    // Paste first: the destination exists while the source still carries the code.
+    writeFileSync(join(cwd, 'src', 'dest.ts'), moved);
+    expect(antiSlop(['check', '--', 'src/dest.ts'], cwd)).toBe(1);
+    expect(err.join('\n')).toMatch(hint);
+    expect(err.join('\n')).toContain('`devkit anti-slop adopt-relocations`');
+
+    // The commit-time and CI forms see the same unfinished move; CI must name the frozen base.
+    git(cwd, ['add', 'src/dest.ts']);
+    err = [];
+    expect(antiSlop(['check', '--staged'], cwd)).toBe(1);
+    expect(err.join('\n')).toMatch(hint);
+    err = [];
+    expect(antiSlop(['check', '--base', 'HEAD'], cwd)).toBe(1);
+    expect(err.join('\n')).toContain(
+      `\`devkit anti-slop adopt-relocations --base ${git(cwd, ['rev-parse', 'HEAD'])}\``,
+    );
+
+    // Removing the source copy alone changes nothing for a check without Git evidence.
+    err = [];
+    writeFileSync(join(cwd, 'src', 'source.ts'), 'export const kept = true;\n');
+    expect(antiSlop(['check', '--', 'src/dest.ts'], cwd)).toBe(1);
+    expect(err.join('\n')).toMatch(hint);
+
+    git(cwd, ['add', '-A']);
+    expect(antiSlop(['adopt-relocations'], cwd)).toBe(0);
+    git(cwd, ['add', ANTI_SLOP_BASELINE_REL]);
+    expect(antiSlop(['check', '--', 'src/dest.ts'], cwd)).toBe(0);
+    expect(antiSlop(['check', '--staged'], cwd)).toBe(0);
+    expect(readFileSync(join(cwd, 'src', 'dest.ts'), 'utf8')).toBe(moved);
   });
 });

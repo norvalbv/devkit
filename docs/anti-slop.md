@@ -148,6 +148,13 @@ hint for each rule that has one (for example, a `deps` parameter instead of modu
 acceptance route for the install mode: a path-scoped override in the repository Oxlint config, or a
 local `create --force` in overlay. Anti-slop deliberately has no `GUARD_*` one-run bypass.
 
+A check of one file has no Git evidence, so it cannot tell a move from new code. When a new finding
+has the same rule and source line as debt baselined under another file, the FAIL output names that
+file and the move route first: delete the code at the source, `git add` both files, run
+`devkit anti-slop adopt-relocations`, then stage the baseline (an overlay baseline is git-ignored, so
+there is nothing to stage). Do not rewrite moved code to clear the check. The finding still fails
+until the move is adopted, and new or copied code is not a move.
+
 ## Rule configuration and overrides
 
 All rules default to error. Ordinary Oxlint precedence applies, so a repository can change one
