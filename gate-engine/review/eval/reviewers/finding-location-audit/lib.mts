@@ -4,7 +4,7 @@
  * already passed unchanged? Method, limits: docs/benchmarks/experiments/2026-10-01-lens-stability. */
 
 import { z } from 'zod';
-import { issueLocations } from '../../../evidence/findings.mts';
+import { issueLocations } from '../../../contracts/response.mts';
 import { identityByPath } from '../../../lens/chunk.mts';
 import { groupShipsByRepoBranch, isSameDiff } from '../mine-telemetry-lib.mts';
 
