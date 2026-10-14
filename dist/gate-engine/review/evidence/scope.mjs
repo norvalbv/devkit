@@ -15,7 +15,8 @@
  * still holds: stderr does not.
  */
 import { createHash } from 'node:crypto';
-import { envFlag } from '../../config.mjs';
+import { envFlag, JS_TS_SOURCE_RE, sourceMatchers, TEST_INFIX, } from '../../config.mjs';
+import { emitAdvisoryResult } from '../../judge/advisory/emit.mjs';
 import { emitGateEvent } from '../../judge/gate-events.mjs';
 import { saveTranscript } from '../../judge/transcript-store.mjs';
 import { measureDiffEvidenceCap } from '../diff-evidence.mjs';
@@ -105,27 +106,37 @@ export function reportNonRuns(staged, cfg, selected, alreadyReported, skip = new
     emitUnselected(selected, alreadyReported);
 }
 const DOMAIN_REVIEWED = new Set(['backend', 'frontend']);
-/** Source files commit-guard received that no backend/frontend reviewer did, read off the real
+/** The gate label of the unrouted-files advisory row, shared by the emitter and its tests. */
+export const REVIEW_ROUTING_ADVISORY = 'review-routing';
+/** Implementation code: a declared source extension or any JS/TS file, never a test file. */
+function isRoutableCode(file, cfg) {
+    const name = file.split('/').pop() ?? '';
+    if (TEST_INFIX.test(name))
+        return false;
+    return JS_TS_SOURCE_RE.test(name) || sourceMatchers(cfg.sourceExtensions).isSource(name);
+}
+/** Code files some reviewer received that no backend/frontend reviewer did, read off the real
  * selection so it never disagrees with routing. */
 export function filesRoutedToNoDomain(selection, cfg) {
     const { backendRoots, frontendRoots } = cfg.review;
     if (backendRoots.length + frontendRoots.length === 0 || envFlag('REVIEW_NO_TOPOLOGY_WARN'))
         return [];
     const routed = new Set(selection.filter((s) => DOMAIN_REVIEWED.has(s.reviewer.domain)).flatMap((s) => s.files));
-    return selection
-        .filter((s) => s.reviewer.domain === 'code')
-        .flatMap((s) => s.files)
-        .filter((f) => !routed.has(f));
+    const received = new Set(selection.flatMap((s) => s.files));
+    return [...received].filter((f) => !routed.has(f) && isRoutableCode(f, cfg));
 }
-/** Advisory stderr line naming source files no security/performance reviewer will see. */
+/** Names code files no security/performance reviewer will see: on stderr and as one advisory row. */
 function reportUnroutedFiles(selection, cfg, alreadyNamed) {
     const files = filesRoutedToNoDomain(selection, cfg).filter((f) => !alreadyNamed.has(f));
     if (files.length === 0)
         return;
     const more = files.length > EVIDENCE_NAMES ? ', …' : '';
-    console.error(`guard-review: ${files.length} source file(s) reached no security/performance reviewer ` +
-        `(${files.slice(0, EVIDENCE_NAMES).join(', ')}${more}) — add their directory to ` +
+    const fact = `${files.length} source file(s) reached no security/performance reviewer ` +
+        `(${files.slice(0, EVIDENCE_NAMES).join(', ')}${more})`;
+    console.error(`guard-review: ${fact} — add each path or its directory to ` +
         'review.backendRoots/frontendRoots in guard.config.json');
+    // The fact alone: the ship digest cuts a detail short, and the remedy stays in the log line.
+    emitAdvisoryResult(REVIEW_ROUTING_ADVISORY, 'finding', fact);
 }
 /**
  * True added/removed line counts from unified-diff text. Only lines INSIDE an `@@` hunk count —

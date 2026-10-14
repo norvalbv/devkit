@@ -16,8 +16,8 @@ export function resolveVitest(cwd) {
  * Run vitest to completion and report how it ended. `interrupted` exists so a caller never mistakes
  * a Ctrl-C for a failure worth acting on — the code alone cannot tell them apart once a test failed.
  */
-export async function runVitestDetailed(bin, args, cwd) {
-    const child = spawn(bin, args, { cwd, stdio: 'inherit' });
+export async function runVitestDetailed(bin, args, cwd, env = process.env) {
+    const child = spawn(bin, args, { cwd, env, stdio: 'inherit' });
     let interrupted = false;
     // Forwarded so a Ctrl-C leaves no run dir or stale report; removed in `finally`, since a leaked
     // listener stops the host answering SIGTERM (sc-2228).
@@ -56,6 +56,10 @@ export async function runVitestDetailed(bin, args, cwd) {
  */
 export async function runVitest(bin, args, cwd) {
     return (await runVitestDetailed(bin, args, cwd)).code;
+}
+/** `vitest run` ignores every token after a `--`, so a forwarded one would silently drop the filters. */
+export function withoutSeparators(argv) {
+    return argv.filter((arg) => arg !== '--');
 }
 /** ANY retry spelling means the consumer owns it (`--retry=0` is the opt-out); vitest 4.1.10 crashes
  * on `--retry=1` alongside `--retry.condition`, so every spelling must count. */

@@ -290,13 +290,18 @@ PREFLIGHT_SELF=   # set when the branch's holder is THIS worktree; changes the c
 # unrelated local branch. Dry runs deliberately keep their worktree for inspection and never publish,
 # so they retain the strict new-branch precondition.
 LOCAL_BRANCH_EXISTS=
+REMOTE_HOLDS_PRESERVED=
 if git show-ref --verify -q "refs/heads/$BR"; then
   if [ -n "${SHIP_DRY_RUN:-}" ] || [ "$DRY_GATES" -eq 1 ]; then
     echo "branch already exists: $BR" >&2; exit 1
   fi
   LOCAL_BRANCH_EXISTS=1
 fi
-if [ -n "$LOCAL_BRANCH_EXISTS" ] && [ "$FROM_BRANCH" -eq 1 ] && [ "$RESUME" -eq 0 ]; then
+SELF_DEFER=
+if [ -n "$LOCAL_BRANCH_EXISTS" ] && [ "$FROM_BRANCH" -eq 1 ] && [ "$RESUME" -eq 0 ] && [ -n "$PREFLIGHT_SELF" ]; then
+  # The rename remedy is already printed; run the ancestry and hook-dir checks so one attempt names all.
+  SELF_DEFER=1; LOCAL_BRANCH_EXISTS=
+elif [ -n "$LOCAL_BRANCH_EXISTS" ] && [ "$FROM_BRANCH" -eq 1 ] && [ "$RESUME" -eq 0 ]; then
   echo "branch already exists: $BR" >&2
   echo "  a fresh --from-branch invocation cannot adopt a prior receipt; use devkit ship --resume '$BR' to replay its recorded v3 branch source, or choose a new branch name" >&2
   exit 1
@@ -311,31 +316,39 @@ if [ -z "${SHIP_DRY_RUN:-}" ] && [ "$DRY_GATES" -eq 0 ]; then
   set +e
   # Fully-qualified, NOT a bare `$BR`: a bare pattern tail-matches on path segments, so shipping `x`
   # would read `refs/heads/feat/x` as "this branch already exists" and refuse a legitimate name.
-  bounded_remote_git ls-remote --exit-code --heads origin "refs/heads/$BR" >/dev/null 2>&1
+  remote_line=$(bounded_remote_git ls-remote --exit-code --heads origin "refs/heads/$BR" 2>/dev/null)
   remote_check=$?
   set -e
   # ls-remote exits 2 for "no matching ref" but ALSO non-zero on auth/network error — only exit 2
   # is a safe "branch absent"; any other failure must fail closed, or push -u could append to a PR.
   case "$remote_check" in
-    0) echo "remote branch already exists: origin/$BR" >&2
-       # A merged or closed PR's branch reaches no base, so --pr would only refuse in turn.
+    0) # A merged or closed PR's branch reaches no base, so --pr would only refuse in turn.
        REPO=$( (git config --get remote.origin.url || git remote get-url origin) | sed -E 's#^.*github\.com[^:/]*[:/]##; s#\.git$##')
-       if read_pr_state && [ "$PR_SEEN_STATE" != "OPEN" ]; then
-         echo "  its PR #$PR_SEEN_NUM is $PR_SEEN_STATE — a push there never reaches $PR_SEEN_BASE" >&2
-         # The new PR targets this ship's own base, which the base resolution below derives the same way.
-         remedy_base=${BASE_FLAG#origin/}
-         [ -n "$remedy_base" ] || remedy_base=$(git symbolic-ref --quiet --short HEAD) || remedy_base=$PR_SEEN_BASE
-         # A --from-branch ship derives its paths (a resume replays them), so its remedy names none.
-         remedy_tail=--from-branch
-         if [ "$FROM_BRANCH" -eq 0 ]; then
-           remedy_tail=--
-           for p in ${PATHS[@]+"${PATHS[@]}"}; do remedy_tail="$remedy_tail $(printf '%q' "$p")"; done
-         fi
-         print_closed_pr_remedy "$remedy_base" "$remedy_tail" "then re-run with --pr"
+       PR_CLOSED=; ! read_pr_state || [ "$PR_SEEN_STATE" = OPEN ] || PR_CLOSED=1
+       # A preserved commit already on origin (lost push response, manual push) is adopted; the
+       # receipt checks below still decide whether it may be published.
+       if [ -z "$PR_CLOSED" ] && [ -n "$LOCAL_BRANCH_EXISTS" ] &&
+         [ "${remote_line%%[[:space:]]*}" = "$(git rev-parse -q --verify "refs/heads/$BR")" ]; then
+         REMOTE_HOLDS_PRESERVED=1
        else
-         echo "  to add these changes to that branch's existing PR, re-run with --pr" >&2
-       fi
-       exit 1 ;;
+         echo "remote branch already exists: origin/$BR" >&2
+         if [ -n "$PR_CLOSED" ]; then
+           echo "  its PR #$PR_SEEN_NUM is $PR_SEEN_STATE — a push there never reaches $PR_SEEN_BASE" >&2
+           # The new PR targets this ship's own base, which the base resolution below derives the same way.
+           remedy_base=${BASE_FLAG#origin/}
+           [ -n "$remedy_base" ] || remedy_base=$(git symbolic-ref --quiet --short HEAD) || remedy_base=$PR_SEEN_BASE
+           # A --from-branch ship derives its paths (a resume replays them), so its remedy names none.
+           remedy_tail=--from-branch
+           if [ "$FROM_BRANCH" -eq 0 ]; then
+             remedy_tail=--
+             for p in ${PATHS[@]+"${PATHS[@]}"}; do remedy_tail="$remedy_tail $(printf '%q' "$p")"; done
+           fi
+           print_closed_pr_remedy "$remedy_base" "$remedy_tail" "then re-run with --pr"
+         else
+           echo "  to add these changes to that branch's existing PR, re-run with --pr" >&2
+         fi
+         exit 1
+       fi ;;
     2) ;; # no matching remote branch → safe to create it
     *) echo "could not verify remote branch (ls-remote exit $remote_check) — refusing to push" >&2; exit 1 ;;
   esac
@@ -410,68 +423,10 @@ if [ "$FROM_BRANCH" -eq 1 ]; then
   # not an input. Pre-commit/new runs pin it before the network step and never chase a moving HEAD.
   [ -n "$LOCAL_BRANCH_EXISTS" ] || SOURCE_HEAD=$(git -C "$ROOT" rev-parse HEAD)
 
-  # Pin the advertised branch OID, then fetch its objects without a destination or FETCH_HEAD. This
-  # uses the normal fetch transport (including HTTPS remote helpers) while creating no ref that can
-  # survive SIGKILL. A force-update between the two calls can make the advertised object unavailable;
-  # one retry obtains a new coherent advertisement rather than guessing.
-  BASE_ADVERTISEMENT=$(mktemp "${TMPDIR:-/tmp}/ship-base-advertisement.XXXXXX")
-  BASE=""
-  base_attempt=0
-  while [ "$base_attempt" -lt 2 ] && [ -z "$BASE" ]; do
-    base_attempt=$((base_attempt + 1))
-    set +e
-    bounded_remote_git -C "$ROOT" ls-remote --exit-code --heads origin "refs/heads/$BASE_REF" > "$BASE_ADVERTISEMENT" 2>/dev/null
-    base_advertise_status=$?
-    set -e
-    case "$base_advertise_status" in
-      0) ;;
-      2) rm -f "$BASE_ADVERTISEMENT"
-         echo "--base: no branch origin/$BASE_REF (a PR base must be a remote branch — not a sha or a tag)" >&2
-         exit 1 ;;
-      *) rm -f "$BASE_ADVERTISEMENT"
-         echo "--from-branch: could not verify origin/$BASE_REF (ls-remote exit $base_advertise_status)" >&2
-         exit 1 ;;
-    esac
-    advertised_oid=""
-    advertised_ref=""
-    advertised_extra=""
-    advertised_lines=0
-    while read -r candidate_oid candidate_ref candidate_extra; do
-      advertised_lines=$((advertised_lines + 1))
-      advertised_oid=$candidate_oid
-      advertised_ref=$candidate_ref
-      advertised_extra=$candidate_extra
-    done < "$BASE_ADVERTISEMENT"
-    if [ "$advertised_lines" -ne 1 ] || [ "$advertised_ref" != "refs/heads/$BASE_REF" ] || [ -n "$advertised_extra" ]; then
-      rm -f "$BASE_ADVERTISEMENT"
-      echo "--from-branch: origin/$BASE_REF returned an invalid advertised identity; refusing to guess" >&2
-      exit 1
-    fi
-    bounded_remote_git -C "$ROOT" fetch -q --no-tags --no-write-fetch-head --refmap= origin "refs/heads/$BASE_REF" 2>/dev/null || {
-      rm -f "$BASE_ADVERTISEMENT"
-      echo "--from-branch: could not fetch the advertised origin/$BASE_REF commit" >&2
-      exit 1
-    }
-    if git -C "$ROOT" cat-file -e "$advertised_oid^{commit}" 2>/dev/null; then BASE=$advertised_oid; fi
-  done
-  rm -f "$BASE_ADVERTISEMENT"
-  [ -n "$BASE" ] || {
-    echo "--from-branch: origin/$BASE_REF moved incompatibly during both pin attempts; retry" >&2
-    exit 1
-  }
+  BASE=$(ship_pin_origin_base "$ROOT" "$BASE_REF" --from-branch) || exit 1
 elif [ -n "$BASE_FLAG" ]; then
-  # origin's tip, not the local copy: in a shared parallel-agent checkout the local base branch is
-  # routinely stale, and a worktree cut from a stale base makes the gates judge code GitHub will never
-  # merge into. (The PR DIFF would still be right — GitHub diffs from the merge-base — so this buys
-  # gate accuracy, not diff accuracy.) reship.sh sets the precedent: it fetches its base the same way.
-  # The source ref is fully-qualified `refs/heads/` — NOT a bare ref, which would also match a tag: a
-  # PR base must be a BRANCH, so a sha or tag has to fail HERE, not at `gh pr create` after the push.
-  # One round-trip proves both (the branch exists AND it is a branch).
-  git fetch -q origin "refs/heads/$BASE_REF" 2>/dev/null || {
-    echo "--base: no branch origin/$BASE_REF (a PR base must be a remote branch — not a sha or a tag)" >&2
-    exit 1
-  }
-  BASE=$(git rev-parse FETCH_HEAD)
+  # origin's tip, not a stale local copy, and a branch (a sha or tag fails here, before the push).
+  BASE=$(ship_pin_origin_base "$ROOT" "$BASE_REF" --base) || exit 1
 
   # Is this base RELATED to the work at all — does it contain the commit this checkout is built on?
   # BLOCKING, and deliberately a different question from the advisory below it (sc-2357). Drift asks
@@ -533,9 +488,14 @@ if [ "$FROM_BRANCH" -eq 1 ]; then
     set -e
     case "$ancestry_status" in
       0) ;;
-      1) echo "--from-branch: origin/$BASE_REF (${BASE:0:7}) is not an ancestor of HEAD (${SOURCE_HEAD:0:7}); rebase/merge the base, or deepen a shallow checkout, then retry" >&2; exit 1 ;;
+      1) echo "${SELF_DEFER:+ship: also blocked — }--from-branch: origin/$BASE_REF (${BASE:0:7}) is not an ancestor of HEAD (${SOURCE_HEAD:0:7}); rebase/merge the base, or deepen a shallow checkout, then retry" >&2
+         [ -n "$SELF_DEFER" ] || exit 1 ;;
       *) echo "--from-branch: could not verify ancestry (git exit $ancestry_status); fetch/deepen the repository and retry" >&2; exit 1 ;;
     esac
+    if [ -n "$SELF_DEFER" ]; then
+      gate_hook_source_preflight "$ROOT" "$BASE" shipping || true   # read-only; prints its own blocker
+      exit 1
+    fi
 
     if [ "$RESUME" -eq 0 ]; then
       BRANCH_PATHS_FILE=$(mktemp "${TMPDIR:-/tmp}/ship-branch-paths.XXXXXX")
@@ -736,14 +696,6 @@ if [ "$FROM_BRANCH" -eq 0 ] && [ "$PATCH_BASE" != "$BASE" ] && [ -z "$LOCAL_BRAN
   ship_text_arm_trial || exit 1
 fi
 
-# Judge reachability does not depend on the staged scope. A plain --dry-gates skips the reviewer gate
-# entirely so it skips this too; --with-reviewers runs that gate, where a dark provider would otherwise
-# surface only as a strict-mode exit 3. Fail-open, so it may run before the invocation is recorded;
-# the BLOCKING preflights (size, hook source, dist integrity) run after record_ship_intent exists.
-if [ "$DRY_GATES" -eq 0 ] || [ "$WITH_REVIEWERS" -eq 1 ]; then
-  ship_judge_preflight "$ROOT"
-fi
-
 # Nothing to commit → say so NOW. Staging (below) has exactly three inputs: the tracked diff vs
 # BASE, the untracked files in scope, and the untracked-but-IGNORED files in scope (a briefed path
 # under a gitignored, force-tracked tree such as devkit's own dist/). All empty ⇒ an empty index — which git only reports AFTER the
@@ -826,6 +778,11 @@ export DEVKIT_SHIP_ID="${DEVKIT_SHIP_ID:-$(uuidgen 2>/dev/null || echo "${BR//\/
 export DEVKIT_SHIP_REPO="$(devkit_repo_identity "$ROOT")" DEVKIT_SHIP_BRANCH="$BR"
 export DEVKIT_SHIP_FROM_BRANCH="$FROM_BRANCH"
 export DEVKIT_SHIP_RESUMED=$RESUME
+# Advisory judge reachability, after the exports above so its telemetry row carries this ship's id.
+# A plain --dry-gates runs no judge, so its report is informational; a rehearsal labels its row as one.
+if [ "$DRY_GATES" -eq 0 ]; then ship_judge_preflight "$ROOT"
+elif [ "$WITH_REVIEWERS" -eq 1 ]; then DEVKIT_SHIP_MODE=dry-gates ship_judge_preflight "$ROOT"
+else DEVKIT_SHIP_MODE=dry-gates ship_judge_preflight "$ROOT" --informational; fi
 SHIP_INTENT_GENERATION=""
 SHIP_INTENT_START_GENERATION=
 SHIP_SOURCE_ATTEMPT_ID=
@@ -991,13 +948,10 @@ gate_signal_handoff_init
 # Identity and collision refusals above stay unrecorded: the record is keyed per branch, and writing
 # one for a branch this attempt may not own could clobber a live ship's resume record.
 
-# Preview the raw-line ratchet against the exact base baseline. NOTE: this measures the CALLER's files
-# against BASE, while a fork-point-anchored ship commits the three-way MERGE of those files with the
-# base — so when PATCH_BASE differs the preview can UNDER-count a file the base grew. It fails CLOSED
-# (the authoritative in-worktree ratchet still runs and still blocks), and it is already --exit-zero
-# advisory, so the imprecision is accepted rather than chased.
+# Advisory raw-line preview against BASE: it measures the caller's pre-merge bytes, so it never blocks.
+# The in-worktree guard-size reports an overrun together with the other deterministic gates.
 if [ "$FROM_BRANCH" -eq 0 ] || [ -z "$LOCAL_BRANCH_EXISTS" ]; then
-  ship_size_preflight "$ROOT" "$BASE" "${PATHS[@]}" || ship_abort_resumable $?
+  ship_size_preflight "$ROOT" "$BASE" "${PATHS[@]}"
 fi
 # Before `git worktree add -b` (sc-3883): a missing hook dir used to surface only inside
 # prepare_gate_worktree, after the branch existed. When this worktree also holds $BR, name that blocker
@@ -1553,6 +1507,9 @@ if [ "$DRY_GATES" -eq 1 ]; then
     echo "✓ Ship dry gates passed; no commit, branch, push, or PR was kept." >&2
     echo "⚠️  --with-reviewers: no reviewer gate ran — this repo's pre-commit hook has no guard-review block (enable the review component with devkit init)." >&2
   fi
+  # Last on purpose: a rehearsal is read by tailing, and the head may have scrolled away.
+  [ -z "${SHIP_JUDGE_REMEDY:-}" ] ||
+    echo "⚠️  ship: the judge preflight found a dark judge — the real ship's uncached judges will fail closed. To ship inside this window, $SHIP_JUDGE_REMEDY." >&2
   exit 0
 fi
 
@@ -1567,11 +1524,15 @@ fi
 # typecheck + test:run for this one commit (CI's gate.yml re-runs both on the PR). Command-scoped —
 # nothing else inherits it — and content-keyed: the hook fails closed and runs the full suite for any
 # ref whose oid is not this sha, so a plain `git push` (no env) is unchanged.
-if [ -n "$LOCAL_BRANCH_EXISTS" ]; then
-  DEVKIT_SHIP_PREPUSH_SKIP_SHA="$RECOVERY_COMMIT" \
-    git -C "$WT" push origin "$RECOVERY_COMMIT:refs/heads/$BR"
+. "$SCRIPT_DIR/push-retry.sh"
+if [ -n "$REMOTE_HOLDS_PRESERVED" ]; then
+  echo "origin/$BR already holds gated commit ${RECOVERY_COMMIT:0:7}; skipping push" >&2
+elif [ -n "$LOCAL_BRANCH_EXISTS" ]; then
+  ship_push_with_retry "$WT" "$RECOVERY_COMMIT" "$BR" origin "$RECOVERY_COMMIT:refs/heads/$BR" ||
+    { echo "push failed — gated commit preserved on $BR; retry: devkit ship --resume $BR" >&2; exit 1; }
 else
-  DEVKIT_SHIP_PREPUSH_SKIP_SHA="$(git -C "$WT" rev-parse HEAD)" git -C "$WT" push -u origin "$BR"
+  ship_push_with_retry "$WT" "$(git -C "$WT" rev-parse HEAD)" "$BR" -u origin "$BR" ||
+    { echo "push failed — gated commit preserved on $BR; retry: devkit ship --resume $BR" >&2; exit 1; }
 fi
 
 # Push succeeded → the branch is live on the remote and reconcilable NOW, whatever the PR step does.
@@ -1590,7 +1551,11 @@ PR_DRAFT_ARGS=()
 if PR_BODY_CLEAN=$(printf '%s' "$BODY" | evidence_caller_body "$REPO" && printf .); then
   BODY=${PR_BODY_CLEAN%.}
 fi
-PR_URL=$( cd "$WT" && gh pr create --repo "$REPO" --base "$BASE_REF" --head "$BR" --title "$TITLE" --body "$BODY" ${PR_DRAFT_ARGS[@]+"${PR_DRAFT_ARGS[@]}"} ) || PR_CREATE_FAILED=1
+if [ -n "$REMOTE_HOLDS_PRESERVED" ] && read_pr_state && [ "$PR_SEEN_STATE" = OPEN ]; then
+  PR_URL=$PR_SEEN_URL
+else
+  PR_URL=$( cd "$WT" && gh pr create --repo "$REPO" --base "$BASE_REF" --head "$BR" --title "$TITLE" --body "$BODY" ${PR_DRAFT_ARGS[@]+"${PR_DRAFT_ARGS[@]}"} ) || PR_CREATE_FAILED=1
+fi
 PR_NUM=""
 if [ -z "$PR_CREATE_FAILED" ]; then
   echo "$PR_URL"   # surface the PR URL (we captured gh's stdout to recover the PR number below)

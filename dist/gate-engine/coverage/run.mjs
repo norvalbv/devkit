@@ -11,6 +11,7 @@ import { emitGateEvent } from '../judge/gate-events.mjs';
 import { humanAge, readClearMarker, formatClearMarker } from './failures.mjs';
 import { artifactLine, BYPASS_REMEDY, canonicalPath, classifier, emitProvenance, listPaths, OPT_OUT_REMEDY, recordReviewNotice, repoTop, reviewNotMeasuredAbsent, reviewNotMeasuredEmpty, } from './gate-shared.mjs';
 import { resolveScope, runDiffCoverage } from './diff-gate.mjs';
+import { writeFallowCopy } from './fallow-copy.mjs';
 import { lineHits } from './lines.mjs';
 // Shared with the PRODUCER (`devkit coverage-run`) so the path this gate reads and the path that
 // runner writes can never drift apart.
@@ -236,9 +237,25 @@ export function runCoverage(cwd = process.cwd()) {
     console.log(artifactLine(file));
     return 0;
 }
+/** `fallow-copy`: print the path of a clamped coverage copy for FALLOW_COVERAGE, or nothing when
+ * fallow reads the artifact unaided. Exit 1 (reason on stderr) when the artifact is unusable. */
+function runFallowCopy(cwd) {
+    try {
+        const out = writeFallowCopy(repoTop(cwd), cwd);
+        if (out !== null)
+            console.log(out);
+        return 0;
+    }
+    catch (error) {
+        console.error(`guard-coverage fallow-copy: ${error instanceof Error ? error.message : error}`);
+        return 1;
+    }
+}
 function runCli(cmd) {
+    if (cmd === 'fallow-copy')
+        process.exit(runFallowCopy(process.cwd()));
     if (cmd !== undefined && cmd !== 'gate') {
-        console.error('usage: guard-coverage [gate]');
+        console.error('usage: guard-coverage [gate|fallow-copy]');
         process.exit(2);
     }
     process.exit(runCoverage(process.cwd()));

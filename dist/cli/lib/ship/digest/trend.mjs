@@ -12,6 +12,7 @@ const SHOWN = 8;
 const text = z.string().optional().catch(undefined);
 // Strict per lens: a lens that does not parse makes its round's count unknown, never blocking.
 const lensSchema = z.object({
+    lens: text,
     status: z.enum(['pending', 'pass', 'fail']),
     disposition: z.enum(['blocking', 'waived', 'dropped_out_of_charter']).optional(),
     issues: z.array(z.string()).optional(),
@@ -37,18 +38,26 @@ export function parseTrendRow(line) {
         return undefined;
     }
 }
+/** Rows a ship writes before its own marker; inside a killed open attempt they would read as foreign. */
+const PRE_MARKER = new Set(['ship_intent', 'judge_preflight']);
 /** This branch's rows → its attempts in order, or null when two overlap (completion order is then not
  * round order). Markers open attempts: an inherited DEVKIT_SHIP_ID can span several. */
 function attemptsOf(rows, key) {
     const done = [];
     let current;
+    const displaced = new Set();
     for (const row of rows) {
-        if (row.repo !== key.repo || row.branch !== key.branch)
+        if (row.repo !== key.repo || row.branch !== key.branch || PRE_MARKER.has(row.type ?? ''))
             continue;
+        // A displaced attempt that writes again was not killed: it overlapped, so rounds are out of order.
+        if (displaced.has(row.ship_id))
+            return null;
         if (row.type === 'ship_attempt') {
-            // A second open attempt: an overlapping ship, or a killed run's retry.
-            if (current)
+            // Same id while open: an inherited id cannot tell a kill from an overlap. A new id: the open one died.
+            if (current?.shipId === row.ship_id)
                 return null;
+            if (current)
+                displaced.add(current.shipId);
             current = { shipId: row.ship_id, rows: [] };
         }
         else if (!current) {
@@ -95,6 +104,23 @@ function countOf(row) {
             count += Math.max(1, lens.data.issues?.length ?? 0);
     }
     return count;
+}
+/** Issues under the ONE blocking item named `lens`; null when the vector is absent, spilled or
+ * unparseable, or when no item or several carry that lens (chunked parts each bring their own). */
+export function issuesUnder(row, lens) {
+    // The digest's rows are cast, not parsed, so a hostile `items` can be any JSON value here.
+    if (!Array.isArray(row.items))
+        return null;
+    const counts = [];
+    for (const raw of row.items) {
+        const item = lensSchema.safeParse(raw);
+        if (!item.success)
+            return null;
+        if (isBlocking(item.data) && item.data.lens === lens) {
+            counts.push(item.data.issues?.length ?? 0);
+        }
+    }
+    return counts.length === 1 ? counts[0] : null;
 }
 /** This branch's finished attempts up to the current one, or null when the ship cannot be keyed. */
 function branchAttempts(rows, key) {

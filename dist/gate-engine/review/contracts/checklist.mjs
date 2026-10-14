@@ -1,27 +1,27 @@
 /** The CHECKLIST half of the reviewer response contract, beside response.mts (the prose half). */
 import { z } from 'zod';
 import { emitGateEvent } from '../../judge/gate-events.mjs';
-import { boundedCause, degradedSuffix, RETRIEVAL_REVIEWER, reportMcpDegraded, } from '../evidence/base-context.mjs';
+import { boundedCause, degradedSuffix, reportAdvisories, reportMcpDegraded, RETRIEVAL_REVIEWER, } from '../evidence/base-context.mjs';
 import { attachItems } from '../evidence/items.mjs';
+import { lensGroupId } from '../lens/groups.mjs';
 import { overriddenLine } from '../overrides.mjs';
-import { cleanupChecklistState, isNamedSkip, readChecklistState, verifyChecklist, } from '../runtime.mjs';
+import { cleanupChecklistState, deniedCalls, isNamedSkip, readChecklistState, verifyChecklist, } from '../runtime.mjs';
 /**
  * Verify the artifact behind a PASS and, when the caller SCHEDULED a recovery, hand the hole to it.
  * Eligibility is the caller's `recovery` mode, never `assetRoot` (sc-2088).
  */
-export async function enforceChecklistContract(selection, initial, cwd, recoveryScheduled, retry) {
+export async function enforceChecklistContract(selection, initial, cwd, recoveryScheduled, retry, denied) {
     // No stateFile means no artifact to verify; that reviewer's brief carries its own contract.
     if (initial.status !== 'pass' || !selection.reviewer.stateFile)
         return initial;
     let result = initial;
     const initialState = readChecklistState(cwd, selection.reviewer);
-    const hole = verifyChecklist(initialState, 'PASS');
+    const hole = verifyChecklist(initialState, 'PASS', denied);
     if (hole && recoveryScheduled) {
-        console.error(`guard-review: ${selection.reviewer.name} — checklist contract not satisfied; retrying once (${hole})`);
+        // No "retrying" here: the callback runs no judge, and the solo phase announces itself.
+        console.error(`guard-review: ${selection.reviewer.name} — checklist contract not satisfied (${hole})`);
         cleanupChecklistState(cwd, selection.reviewer);
         result = await retry(hole);
-        if (initial.transcript && result.transcript)
-            result.transcript = `${initial.transcript}\n\n───── CHECKLIST-CONTRACT RETRY ─────\n${result.transcript}`;
         // The freshest artifact wins: a callback that ran its own judge left one, and classifying that
         // attempt from the pre-cleanup state would report the FIRST attempt's items. Falls back
         // to the captured state for today's callbacks, which run no judge and leave nothing.
@@ -39,6 +39,16 @@ export async function enforceChecklistContract(selection, initial, cwd, recovery
         result.inconclusiveCause = 'response-contract';
     }
     return result;
+}
+const DENIED_SHOWN = 3;
+/** Name the refused tool calls beside a non-pass outcome; a PASS that lost a test run stays quiet. */
+export function reportDeniedCalls(reviewer, status, denied) {
+    if (status === 'pass' || !denied?.length)
+        return;
+    const lens = reviewer.lens?.length ? ` [${lensGroupId(reviewer.lens)}]` : '';
+    const more = denied.length > DENIED_SHOWN ? ` (+${denied.length - DENIED_SHOWN} more)` : '';
+    const shown = denied.slice(0, DENIED_SHOWN).map(boundedCause).join(' | ');
+    console.error(`⚠️  guard-review: ${reviewer.name}${lens} — ${deniedCalls(denied)}: ${shown}${more}`);
 }
 /** The recorded retrieval outcome. Anything else — absent, a typo'd status, a blank cause — is not
  * evidence that retrieval ran, so the gate reads it as DEGRADED rather than as `ok`. */
@@ -74,11 +84,10 @@ export function reportRetrievalDegraded(name, rawCause) {
 }
 /** What a cached PASS replays beside its line: any degradation, and every waiver it rests on. */
 export function reportCachedHitNotes(hit) {
-    if (hit.degradedCause)
-        reportRetrievalDegraded(hit.label, hit.degradedCause);
     // A cached split PART is reported once at its reviewer's merge, with the freshly judged groups.
     if (hit.mcpDegradedCause && !hit.part)
         reportMcpDegraded(hit.label, hit.mcpDegradedCause, true);
     for (const w of hit.waivers)
         console.error(overriddenLine(hit.label, w.lens, w.fingerprint, ' (cached PASS)'));
+    reportAdvisories(hit.label, hit.advisories);
 }

@@ -662,12 +662,16 @@ prepare_gate_worktree() {
 ship_judge_preflight() {
   local root=${1:?root} tool rc
   local script_dir
+  # Global, not local: the gate-capture tail repeats this family move when a gate blocks the attempt.
+  SHIP_JUDGE_REMEDY=""
   script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
   tool="$script_dir/preflight/judge.mts"
   [ -f "$tool" ] || tool="$script_dir/preflight/judge.mjs"
   # A package built without this tool is not a reason to say anything at all.
   [ -f "$tool" ] || return 0
-  if (cd "$root" && node "$tool" "$root"); then
+  # The report streams on stderr; stdout carries only the remedy, so ship's stdout stays the PR URL.
+  # $2 is an optional --informational, for a rehearsal that runs no judge.
+  if SHIP_JUDGE_REMEDY=$(cd "$root" && node "$tool" "$root" ${2:+"$2"}); then
     rc=0
   else
     rc=$?
@@ -679,8 +683,8 @@ ship_judge_preflight() {
   esac
 }
 
-# Preview the raw-line ratchet before creating a gate worktree. Exit 2 means the optional preview is
-# unavailable; the authoritative worktree gate still runs. Exit 1 is a proven size violation.
+# Preview the raw-line ratchet before creating a gate worktree; it never blocks. The in-worktree
+# guard-size judges an overrun alongside every other deterministic gate, so one attempt sees them all.
 ship_size_preflight() {
   local root=${1:?root} base=${2:?base} size_guard rc
   shift 2
@@ -697,8 +701,8 @@ ship_size_preflight() {
   fi
   case "$rc" in
     0) return 0 ;;
-    1) return 1 ;;
+    1) echo "ℹ️  ship: continuing — ship's gate chain judges this with the other deterministic gates" >&2; return 0 ;;
     2) echo "⚠️  ship: guard-size base-aware preflight unavailable — continuing to the authoritative worktree gate" >&2; return 0 ;;
-    *) echo "ship: guard-size preflight failed unexpectedly (exit $rc)" >&2; return 1 ;;
+    *) echo "⚠️  ship: guard-size preflight failed unexpectedly (exit $rc) — continuing" >&2; return 0 ;;
   esac
 }

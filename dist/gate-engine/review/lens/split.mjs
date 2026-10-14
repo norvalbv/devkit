@@ -34,7 +34,7 @@
  */
 import { z } from 'zod';
 import { diffCacheIdentity } from '../../judge/diff-focus.mjs';
-import { cachedMcpDegradation, cachedRetrievalDegradation, degradedSuffix, storedBaseSchema, } from '../evidence/base-context.mjs';
+import { cachedAdvisories, cachedMcpDegradation, degradedSuffix, storedBaseSchema, } from '../evidence/base-context.mjs';
 import { planChunkedParts, resolveChunkCap } from './chunk-tasks.mjs';
 import { deriveLensReviewer, lensGroupId, resolveLensGroups } from './groups.mjs';
 // Re-exported so every existing importer's path keeps working after the guard-size split.
@@ -187,7 +187,6 @@ export function planReviewWork(selected, diffs, cache, salts, keyOf, groups = re
                 coverage: coverageFields(parts),
                 waivers,
             });
-            const degradedCause = cachedRetrievalDegradation(name, cache[parts[0].key]);
             // Every part: a split replays DEGRADED when any one of its groups was judged degraded.
             const mcpDegradedCause = parts
                 .map((p) => cachedMcpDegradation(cache[p.key]))
@@ -197,8 +196,8 @@ export function planReviewWork(selected, diffs, cache, salts, keyOf, groups = re
                 files: sel.files,
                 judgedBases,
                 part: false,
-                degradedCause,
                 mcpDegradedCause,
+                advisories: cachedAdvisories(...parts.map((p) => cache[p.key])),
                 waivers,
             });
             continue;
@@ -214,6 +213,7 @@ export function planReviewWork(selected, diffs, cache, salts, keyOf, groups = re
                 judgedBases: [storedBaseSchema.safeParse(cache[p.key].base_sha).data ?? null],
                 part: true,
                 mcpDegradedCause: cachedMcpDegradation(cache[p.key]),
+                advisories: cachedAdvisories(cache[p.key]),
                 waivers: cachedWaivers(cache[p.key]) ?? [],
             });
             if (!p.splitOf)

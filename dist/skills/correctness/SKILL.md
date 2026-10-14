@@ -123,6 +123,11 @@ const ANCHOR_RE = /^\s*(Failed to authenticate|API Error:)/;
   strictly (`new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })`) and stand down on
   invalid UTF-8; never `tr '\0' '\n'` after `-z` (bash: `while IFS= read -r -d ''`); escape
   control, bidi and U+2028 characters before printing a name.
+- A predicate that deletes or rewrites data the code does not own (user config, another tool's
+  entries): FAIL with one concrete input it wrongly matches, e.g. `BASH_ENV=x.sh bash <hook>`.
+  Name the remedy as ownership by provenance (ledger row, own marker) or an allowlist of the
+  writer's exact output — not a patch for that input; a grammar's accepted set has no end. Read-only
+  parsers and deletes of data the code itself recorded are out of scope.
 
 ## Verdict bar
 

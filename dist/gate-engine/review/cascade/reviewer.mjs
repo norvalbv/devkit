@@ -14,8 +14,9 @@ import { gitCached, stagedTreeHash } from '../evidence/staged-git.mjs';
 import { lensGroupId } from '../lens/groups.mjs';
 import { applyOverrideValve } from '../overrides.mjs';
 import { allowedToolsFor, escalatePrompt, hasChecklist, resolveEscalationModel, resolveReviewModel, wrapConventionsPrompt, wrapPrompt, } from '../reviewers.mjs';
-import { enforceChecklistContract, retrievalDegradation } from '../contracts/checklist.mjs';
+import { enforceChecklistContract, reportDeniedCalls, retrievalDegradation, } from '../contracts/checklist.mjs';
 import { agentBody, cleanupChecklistState, initializeCommitGuardChecklist, isNamedSkip, readChecklistState, withStagedFiles, } from '../runtime.mjs';
+import { retryableReason } from '../recovery/settle.mjs';
 import { checklistAssetRoot } from './consumer-assets.mjs';
 const ALSO_STAGED_MAX = 40;
 /** Names the staged paths outside a reviewer's file list, so it never reads one as unstaged. */
@@ -42,6 +43,8 @@ function outageReason(outage, pass = 'judge') {
         return `${subject} CLI is not authenticated`;
     if (outage?.kind === 'absent')
         return `${subject} CLI is not installed`;
+    if (outage?.kind === 'model-unavailable')
+        return `${subject} model \`${outage.model ?? 'unknown'}\` is not available on this account`;
     return `${subject} outage`;
 }
 /** Run one reviewer with checklist verification, override handling, and cleanup. */
@@ -70,13 +73,21 @@ export async function runCascade(sel, opts) {
         // private config fail, between the two (sc-2837).
         const mcpSpawn = mcpSpawnTracker(opts.mcpDegradedCause);
         const exec = opts.exec ?? execJudgeAsync;
-        const observed = (o) => exec({
-            ...o,
-            onMcpPrepared: (fingerprint, cause) => {
-                o.onMcpPrepared?.(fingerprint, cause);
-                mcpSpawn.observe(cause);
-            },
-        });
+        // Reset per exec: only the spawn that produced the verdict may explain it.
+        const spawn = { denied: null };
+        const observed = (o) => {
+            spawn.denied = null;
+            return exec({
+                ...o,
+                onMcpPrepared: (fingerprint, cause) => {
+                    o.onMcpPrepared?.(fingerprint, cause);
+                    mcpSpawn.observe(cause);
+                },
+                onPermissionDenials: (denied) => {
+                    spawn.denied = denied;
+                },
+            });
+        };
         let res = await cascadeVerdict(sel, { ...opts, exec: observed }, checklistRoot);
         // Recovery below only schedules/classifies; it deletes this attempt's artifact without
         // running another judge. Keep its exact private evidence for the resulting inconclusive row.
@@ -97,7 +108,9 @@ export async function runCascade(sel, opts) {
             // Unreachable from the three direct callers (the reviewer/conventions/scale benches): they
             // schedule no recovery, so enforceChecklistContract never invokes this callback at all.
             throw new Error(`checklist recovery has no scheduling mode — ${reason}`);
-        });
+        }, spawn.denied);
+        if (!retryableReason(res))
+            reportDeniedCalls(sel.reviewer, res.status, spawn.denied);
         const disposition = applyOverrideValve(sel, res, cwd, {
             readState: () => readChecklistState(cwd, sel.reviewer),
             stagedDiff: () => gitCached(cwd, [], sel.files),

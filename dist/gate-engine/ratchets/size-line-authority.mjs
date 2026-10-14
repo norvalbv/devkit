@@ -272,10 +272,21 @@ export function lineViolationReport(root, cfg, scoped, cap, grandfathered, scope
     }
     return { error: null, lines: report, hints: fanoutSplitHints(root, violations.keys()) };
 }
+// Entries this commit raised above the strictest parent, e.g. one side of a baseline conflict
+// taken whole, which reverts the other side's lowering for a file the merge never touches.
+function raisedEntries(root, grandfathered, cap) {
+    const prior = lineBaselineParents(root)
+        .map((parent) => baselineAt(root, parent))
+        .filter((baseline) => baseline.present);
+    if (!prior.length || prior.some((baseline) => baseline.error))
+        return [];
+    return Object.keys(grandfathered.files).filter((file) => grandfathered.files[file] >
+        Math.min(...prior.map((baseline) => effectiveLineCeiling(baseline, file, cap(file)))));
+}
 export function tightenLineBaseline(root, snapshot, staged, grandfathered, cap) {
     const files = { ...grandfathered.files };
     let tightened = false;
-    for (const file of staged) {
+    for (const file of new Set([...staged, ...raisedEntries(root, grandfathered, cap)])) {
         if (!(file in grandfathered.files))
             continue;
         const lines = sourceLines(root, snapshot, file);

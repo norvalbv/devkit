@@ -17,7 +17,9 @@
  * a truncated buffer) falls back to the raw string and reports no usage. A judge that works must
  * never start failing because its accounting could not be read.
  */
-const isRecord = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
+import { z } from 'zod';
+import { isRecord } from '../eval/schema.mjs';
+import { saveTranscriptUnique } from './transcript-store.mjs';
 /** Ask for the JSON envelope. Exported so bench runners and the spawn layer request it identically. */
 export const CLAUDE_RESULT_ARGS = ['--output-format', 'json'];
 /**
@@ -79,4 +81,50 @@ export function parseJudgeUsage(raw) {
             ? { session_id: envelope.session_id }
             : {}),
     };
+}
+const WHITESPACE_RUN_RE = /\s+/g;
+const DENIED_LINE_CHARS = 500;
+const denialSchema = z.object({
+    tool_name: z.string().catch('unknown'),
+    tool_input: z.looseObject({ command: z.string().optional() }).catch({}),
+});
+const denialsEnvelopeSchema = z.object({
+    type: z.literal('result'),
+    permission_denials: z.array(denialSchema),
+});
+function deniedLine(denial) {
+    const what = denial.tool_input.command ?? JSON.stringify(denial.tool_input);
+    return `${denial.tool_name}: ${what}`.replace(WHITESPACE_RUN_RE, ' ').slice(0, DENIED_LINE_CHARS);
+}
+/**
+ * The tool calls the headless permission gate refused, one `<tool>: <command>` line each. Null when
+ * the bytes carry no `permission_denials` list (codex, a test double): not measured, never zero.
+ */
+export function parsePermissionDenials(raw) {
+    if (!raw)
+        return null;
+    let json;
+    try {
+        json = JSON.parse(raw);
+    }
+    catch {
+        return null;
+    }
+    const envelope = denialsEnvelopeSchema.safeParse(json);
+    return envelope.success ? envelope.data.permission_denials.map(deniedLine) : null;
+}
+/** Hand a spawn's denials to its caller and store their text in a `<label>.denied` sidecar. */
+export function recordPermissionDenials(sink, raw) {
+    const denied = parsePermissionDenials(raw);
+    if (denied === null)
+        return {};
+    sink.onPermissionDenials?.(denied);
+    const fields = { permission_denials: denied.length };
+    if (denied.length === 0)
+        return fields;
+    const text = `${sink.lens ? `lens: ${sink.lens}\n` : ''}${denied.join('\n')}\n`;
+    const ref = saveTranscriptUnique(`${sink.label}.denied`, text);
+    if (ref)
+        fields.denials_ref = ref;
+    return fields;
 }

@@ -31,7 +31,7 @@ import { CORRECTNESS_OVERRIDES_FILE as OVERRIDES_FILE } from '../deterministic/g
 import { diffCacheIdentity } from '../judge/diff-focus.mjs';
 import { emitGateEvent } from '../judge/gate-events.mjs';
 import { reviewBaseContext, shortSha } from './evidence/base-context.mjs';
-import { shellWord } from './valve/shell-word.mjs';
+import { UNSAFE_TEXT_RE, waiveCommand } from './valve/shell-word.mjs';
 import { conventionWaiverLenses, parseConventionFindingCandidates, } from './evidence/conventions.mjs';
 /** A fingerprint (see `fingerprint` below) is always this shape — shared by the env-var parser and
  * the `waive` CLI's itemId validation, so both channels accept exactly the same ids. */
@@ -358,10 +358,13 @@ export function applyOverrideValve(sel, res, cwd, io) {
 export function blockingNote(reviewerName, blocking, baseSha = null) {
     if (blocking.length === 0)
         return '';
-    const base = baseSha ? ` --base ${shortSha(baseSha)}` : '';
-    const lines = blocking.map((b) => `  • ${b.lens} [${b.fp}] — fix it, or waive with a reason:\n` +
-        `      guard-review waive ${shellWord(`${reviewerName}:${b.lens}`)} ${b.fp}${base} "why this is not a real defect"\n` +
-        `      (or OVERRIDE_${b.fp}_RATIONALE="…" / add it to ${OVERRIDES_FILE})`);
+    const base = baseSha ? shortSha(baseSha) : null;
+    const lines = blocking.map((b) => {
+        const command = waiveCommand({ reviewer: reviewerName, lens: b.lens, fp: b.fp, base });
+        return (`  • ${b.lens.replace(UNSAFE_TEXT_RE, ' ')} [${b.fp}] — fix it, or waive with a reason:\n` +
+            (command ? `      ${command}\n` : '') +
+            `      (or OVERRIDE_${b.fp}_RATIONALE="…" / add it to ${OVERRIDES_FILE})`);
+    });
     return (`${reviewerName}: ${blocking.length} un-overridden finding(s) block this commit.\n` +
         `${lines.join('\n')}`);
 }

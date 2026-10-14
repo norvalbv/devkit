@@ -38,7 +38,7 @@
  */
 import { execFileSync } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, posix } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { withLock, writeFileAtomic } from '../atomic-write.mjs';
 const WS_SPLIT = /\s+/; // split a `git ls-tree` line into its mode/type/sha/path columns
@@ -76,7 +76,7 @@ export function parseArgs(argv) {
     const paths = [];
     for (let i = 0; i < argv.length; i++) {
         if (argv[i] === '--') {
-            paths.push(...argv.slice(i + 1));
+            paths.push(...argv.slice(i + 1).map((p) => posix.normalize(p))); // `./a.ts` records as `a.ts`
             break;
         }
         if (argv[i] === '--merge' || argv[i] === '--literal-paths')
