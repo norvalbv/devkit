@@ -85,7 +85,7 @@ export function reportFailedItems(reviewer: Reviewer, state: ChecklistState | nu
   for (const item of failed.slice(0, FAILED_SHOWN)) {
     const issue = Array.isArray(item.issues) ? boundedCause(String(item.issues[0] ?? '')) : '';
     console.error(
-      `⚠️  guard-review: ${reviewer.name}${lensTag(reviewer)} — FAILED checklist item under a PASS verdict: ${item.name ?? item.path}${issue ? ` — ${issue}` : ''}`,
+      `⚠️  guard-review: ${reviewer.name}${lensTag(reviewer)} — FAILED checklist item under a PASS verdict: ${boundedCause(String(item.name ?? item.path))}${issue ? ` — ${issue}` : ''}`,
     );
   }
   if (failed.length > FAILED_SHOWN)
