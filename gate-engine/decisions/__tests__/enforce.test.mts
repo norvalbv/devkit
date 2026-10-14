@@ -2,7 +2,7 @@
  * guard-decisions enforce: Check links on decision Targets and the decision-checks commit gate, run
  * against real git fixture repos so HEAD, the index and the working tree each say what they say.
  */
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -143,15 +143,56 @@ describe('decision-checks gate', () => {
     expect(text).not.toContain('unlinked in this commit');
   });
 
+  // A Check's own exit code is never forwarded: its exit 2 is a failure, not this gate's no-verdict 2.
+  it('blocks a Check that exits 2 as a violation, exit 1 with the full remedy', async () => {
+    const root = repo();
+    stage(root, { 'src/a.txt': 'fine\n' });
+    expect(await runGate(root, stubSpawn(2))).toBe(1);
+    const text = err.join('\n');
+    expect(text).toContain(`demo: \`${CHECK}\` exited 2`);
+    expect(text).toContain('do not weaken the check');
+  });
+
   it.each([
     ['a missing command', 'ENOENT', 'could not run: command not found'],
     ['a timeout', 'ETIMEDOUT', 'could not run: no exit within 120s'],
     ['any other spawn error', 'EACCES', 'could not run: EACCES'],
-  ])('blocks %s as unrunnable, naming the Check', async (_, code, said) => {
+    ['a signal kill', '', 'could not run: killed by a signal'],
+  ])('blocks %s as no verdict, never blaming the code', async (_, code, said) => {
     const root = repo();
     stage(root, { 'src/a.txt': 'fine\n' });
-    expect(await runGate(root, stubSpawn(null, code))).toBe(1);
-    expect(err.join('\n')).toContain(`demo: \`${CHECK}\` ${said}`);
+    expect(await runGate(root, stubSpawn(null, code))).toBe(2);
+    const text = err.join('\n');
+    expect(text).toContain(`demo: \`${CHECK}\` ${said}`);
+    expect(text).toContain('Ruling (demo): Never ship a bad a.txt (2026-10-01).');
+    expect(text).toContain('not a finding against your code');
+    expect(text).toContain('re-link it with the new command');
+    expect(text).not.toContain('do not weaken the check');
+    expect(text).not.toContain('--check none');
+  });
+
+  it('a failing Check outranks one that could not run: exit 1 and the full remedy', async () => {
+    const root = repo();
+    const other = record(target('2026-10-01', 'src/**', ['**Check:** slow-check — hangs']));
+    stage(root, { 'docs/decisions/other.md': other, 'src/a.txt': 'bad\n' });
+    const timeout = Object.assign(new Error('ETIMEDOUT'), { code: 'ETIMEDOUT' });
+    const exec = vi.fn<Spawn>((bin) =>
+      bin === 'slow-check' ? { status: null, error: timeout } : { status: 1 },
+    );
+    expect(await runGate(root, exec)).toBe(1);
+    const text = err.join('\n');
+    expect(text).toContain(`demo: \`${CHECK}\` exited 1`);
+    expect(text).toContain('other: `slow-check` could not run: no exit within 120s');
+    expect(text).toContain('do not weaken the check');
+  });
+
+  it('exits 2, not 1, when the gate itself throws before any Check ran', () => {
+    const root = repo();
+    write(root, { 'guard.config.json': '{ not json' });
+    const cli = join(import.meta.dirname, '..', 'ruling-checks', 'enforce.mts');
+    const r = spawnSync(process.execPath, [cli, 'gate'], { cwd: root, encoding: 'utf8' });
+    expect(r.stderr).toContain('decision-checks:');
+    expect(r.status).toBe(2);
   });
 
   it('runs a Check whose argv names a staged file, and says the commit edits it', async () => {
