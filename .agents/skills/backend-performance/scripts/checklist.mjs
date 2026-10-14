@@ -1,0 +1,249 @@
+#!/usr/bin/env node
+
+/**
+ * Backend Performance Review Checklist
+ *
+ * Checks backend code against performance best practices.
+ * Only runs on backend files (src/main/, vercel-serverless/, socket-server/).
+ */
+
+import { execFileSync } from 'node:child_process';
+import { createChecklistStore } from '../../_devkit/checklist-store.mjs';
+import {
+  assertStagedSetSane,
+  resolveReviewRoots,
+  stagedFilesOverride,
+  toGitPathspecs,
+} from '../../_devkit/review-roots.mjs';
+
+const CHECKLIST_PATH = '.claude/.backend-performance-review.json';
+
+// Top-level regex patterns for performance
+// Statement-shaped SQL or qualified ORM/raw invocations — bare `query`/`select` matched nearly
+// every diff, and unqualified `execute`/`sql` matched non-database calls like command.execute().
+const RE_DB_QUERY =
+  /\bselect\b[\s\S]{0,120}?\bfrom\b|\binsert\s+into\b|\bupdate\b[\s\S]{0,80}?\bset\b|\bdelete\s+from\b|\$(query|execute)Raw|\.(query|execute)Raw\s*\(|\.execute\s*\(\s*['"`]|\bsql\s*[`(]|\b(findMany|findUnique|findFirst)\b/i;
+const RE_SELECT_STAR = /select\s*\*/i;
+// Gaps are bounded: the diffs of ALL staged files are joined into one blob, so an unbounded
+// [\s\S]*? couples a loop in one file with a find/await in an unrelated file.
+const RE_N_PLUS_ONE_FOR = /for\s*\(.*\)[\s\S]{0,300}?(find|query|select)/i;
+const RE_N_PLUS_ONE_MAP = /\.map\s*\([\s\S]{0,300}?(find|query|await)/i;
+// Bare `skip|take|page|limit` matched loop vars and UI copy; keep unambiguous markers.
+const RE_PAGINATION = /\b(offset|cursor|pagination|paginate)/i;
+// Bare `index` matched the a/…/index.ts paths in every diff header.
+const RE_INDEXING = /\b(createIndex|ensureIndex|orderBy)/i;
+const RE_CACHING = /\b(cache|redis|memcache|lru|ttl|expire|invalidate)/i;
+const RE_POOL = /\b(pool|connection)/i;
+// Bare `async|await|Promise` matched every backend diff. What the async-handling lens is
+// actually for is sequential awaits (loop + await) and offload infrastructure — Promise.all
+// stays out: it is RE_BATCH's trigger and would double-generate.
+const RE_ASYNC =
+  /\b(for|while)\b[\s\S]{0,200}?\bawait\b|\bfor\s+await\b|\.(map|forEach)\s*\(\s*async\b|\b(queue|worker|job|bull|agenda)\b/i;
+const RE_STREAM = /\b(stream|pipe|chunk|buffer|createReadStream|createWriteStream)/i;
+const RE_BATCH = /\b(batch|bulk|Promise\.all|in:\s*\[)/i;
+const RE_TIMEOUT = /\b(timeout|retry|backoff|AbortController)/i;
+const RE_RESPONSE = /\b(json\(|send\(|Response|gzip|brotli|compress)/i;
+const RE_NETWORK = /\b(cdn|cloudfront|cloudflare|edge|prefetch|preload)/i;
+// `\blog` matched login/logic; `info|warn|error|debug` matched any prose or variable.
+const RE_LOGGING = /\b(logger|console\.|pino|winston)/i;
+// Event-loop + memory-lifetime items (coverage refresh — see SKILL.md Provenance). existsSync is
+// excluded from the sync-IO trigger: it is cheap and ubiquitous in startup/config code.
+const RE_SYNC_IO =
+  /\b(readFileSync|writeFileSync|appendFileSync|execSync|spawnSync|readdirSync|statSync|execFileSync)\b/;
+const RE_UNBOUNDED =
+  /\b\w*(cache|memo|registry|store|buffer|queue)\w*\s*[:=]\s*(new\s+(Map|Set)\b|\{\}|\[\])/i;
+
+// Prose files under a root ride along with source commits; their text trips the item
+// regexes (a README mentioning "password") and hands the judge prose to hallucinate on.
+const RE_PROSE_FILE = /\.(md|mdx|markdown|txt)$/i;
+
+const log = console.log;
+
+const store = createChecklistStore({
+  path: CHECKLIST_PATH,
+  label: 'Backend Performance',
+  log,
+});
+const { save: saveChecklist, status, checkItem, finalize } = store;
+
+// Backend roots to review — from guard.config.json `review.backendRoots` (NOT hardcoded), so the
+// checklist scopes to ANY repo's layout. No/unreadable config, a non-object config, or an absent
+// review.backendRoots → all staged files (the gate never silently no-ops). A PRESENT but invalid
+// value (not an array of non-empty strings) warns loudly and falls back to scan-all, rather than
+// letting a bad entry crash the git call into an empty result that would wave the commit through.
+function backendRoots() {
+  return resolveReviewRoots({
+    envName: 'DEVKIT_REVIEW_BACKEND_ROOTS',
+    configKey: 'backendRoots',
+    reviewerName: 'backend-performance',
+  });
+}
+
+function getStagedFiles() {
+  const override = stagedFilesOverride();
+  if (override) return override.filter((f) => !RE_PROSE_FILE.test(f));
+  const pathspecs = toGitPathspecs(backendRoots());
+  try {
+    const output = execFileSync(
+      'git',
+      ['diff', '--cached', '--name-only', '--diff-filter=ACMR', '--', ...pathspecs],
+      { encoding: 'utf-8' },
+    );
+    // ACMR hides deletions, so an all-deletions index reads as "nothing staged" here. Never report
+    // that as zero items — a reviewer that examined nothing must not read as a pass.
+    if (!output.trim()) assertStagedSetSane(pathspecs, 'backend-performance');
+    return output
+      .trim()
+      .split('\n')
+      .filter((f) => f.length > 0)
+      .filter((f) => !RE_PROSE_FILE.test(f));
+  } catch {
+    return [];
+  }
+}
+
+function getFileDiff(file) {
+  try {
+    return execFileSync('git', ['diff', '--cached', '--', file], { encoding: 'utf-8' });
+  } catch {
+    return '';
+  }
+}
+
+function detectPerformancePatterns(_files, diffs) {
+  const items = [];
+  const fullDiff = diffs.join('\n');
+
+  if (RE_DB_QUERY.test(fullDiff)) {
+    items.push({
+      name: 'db-query-optimization',
+      category: 'Database',
+      status: 'pending',
+      issues: [],
+    });
+  }
+  if (RE_SELECT_STAR.test(fullDiff)) {
+    items.push({ name: 'select-star', category: 'Database', status: 'pending', issues: [] });
+  }
+  if (RE_N_PLUS_ONE_FOR.test(fullDiff) || RE_N_PLUS_ONE_MAP.test(fullDiff)) {
+    items.push({ name: 'n-plus-one', category: 'Database', status: 'pending', issues: [] });
+  }
+  if (RE_PAGINATION.test(fullDiff)) {
+    items.push({ name: 'pagination', category: 'Database', status: 'pending', issues: [] });
+  }
+  if (RE_INDEXING.test(fullDiff)) {
+    items.push({ name: 'indexing', category: 'Database', status: 'pending', issues: [] });
+  }
+  if (RE_CACHING.test(fullDiff)) {
+    items.push({ name: 'caching-strategy', category: 'Caching', status: 'pending', issues: [] });
+  }
+  if (RE_UNBOUNDED.test(fullDiff)) {
+    items.push({ name: 'unbounded-cache', category: 'Caching', status: 'pending', issues: [] });
+  }
+  if (RE_POOL.test(fullDiff)) {
+    items.push({ name: 'connection-pooling', category: 'Database', status: 'pending', issues: [] });
+  }
+  if (RE_ASYNC.test(fullDiff)) {
+    items.push({ name: 'async-handling', category: 'Asynchronism', status: 'pending', issues: [] });
+  }
+  if (RE_STREAM.test(fullDiff)) {
+    items.push({ name: 'streaming', category: 'Code Optimization', status: 'pending', issues: [] });
+  }
+  if (RE_BATCH.test(fullDiff)) {
+    items.push({ name: 'batching', category: 'Code Optimization', status: 'pending', issues: [] });
+  }
+  if (RE_SYNC_IO.test(fullDiff)) {
+    items.push({ name: 'sync-io', category: 'Code Optimization', status: 'pending', issues: [] });
+  }
+  if (RE_TIMEOUT.test(fullDiff)) {
+    items.push({
+      name: 'timeout-retry',
+      category: 'Code Optimization',
+      status: 'pending',
+      issues: [],
+    });
+  }
+  if (RE_RESPONSE.test(fullDiff)) {
+    items.push({
+      name: 'response-optimization',
+      category: 'API Response',
+      status: 'pending',
+      issues: [],
+    });
+  }
+  if (RE_NETWORK.test(fullDiff)) {
+    items.push({
+      name: 'network-optimization',
+      category: 'Network',
+      status: 'pending',
+      issues: [],
+    });
+  }
+  if (RE_LOGGING.test(fullDiff)) {
+    items.push({ name: 'logging-overhead', category: 'Monitoring', status: 'pending', issues: [] });
+  }
+  if (items.length === 0) {
+    items.push({ name: 'general-performance', category: 'General', status: 'pending', issues: [] });
+  }
+  return items;
+}
+
+function generate() {
+  const stagedFiles = getStagedFiles();
+  if (stagedFiles.length === 0) {
+    log(
+      '⏭️  No staged backend files under review.backendRoots (guard.config.json). Skipping performance review.',
+    );
+    // sc-1439: the GATE selected this reviewer, so an artifact must exist — a named skip, never
+    // an absence (verifyChecklist voids a PASS on a missing artifact).
+    if (stagedFilesOverride())
+      saveChecklist({
+        items: [],
+        skipped:
+          "gate-selected files were all excluded by this checklist's own filters (prose/tests/extensions/deletions) — deliberate skip, not an unfinished review",
+      });
+    process.exit(0);
+  }
+  const diffs = stagedFiles.map((f) => getFileDiff(f));
+  const items = detectPerformancePatterns(stagedFiles, diffs);
+  const data = { generated: new Date().toISOString(), files: stagedFiles, items };
+  saveChecklist(data);
+  log(`✅ Backend Performance: ${stagedFiles.length} files, ${items.length} checks`);
+  log('');
+  log('Items to review:');
+  for (const item of items) log(`  - [${item.category}] ${item.name}`);
+}
+
+const args = process.argv.slice(2);
+const cmd = args[0];
+switch (cmd) {
+  case 'generate':
+    generate();
+    break;
+  case 'status':
+    status();
+    break;
+  case 'check-item': {
+    const name = args[1];
+    const pass = args.includes('--pass');
+    const failIdx = args.indexOf('--fail');
+    const failReason = failIdx !== -1 ? args[failIdx + 1] : null;
+    if (!name || (!pass && failIdx === -1)) {
+      log('Usage: check-item <name> --pass OR --fail "reason"');
+      process.exit(1);
+    }
+    checkItem(name, pass, failReason);
+    break;
+  }
+  case 'finalize':
+    finalize();
+    break;
+  default:
+    log('Backend Performance Review Commands:');
+    log('  generate                    Create checklist');
+    log('  status                      Show progress');
+    log('  check-item <name> --pass    Mark passed');
+    log('  check-item <name> --fail    Mark failed');
+    log('  finalize                    Verify every item was resolved');
+    process.exit(1);
+}
