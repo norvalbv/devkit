@@ -12,7 +12,7 @@ import {
   prepareRegressionRepository,
 } from '../../baseline-status/regression-repository.mts';
 import { UI_EVIDENCE } from '../../../../gate-engine/ui-evidence/check.mts';
-import { readShipEvents } from '../digest/gate-digest.mts';
+import { ATTEMPT, readShipEvents } from '../digest/gate-digest.mts';
 import { errorMessage } from '../review/shared/common.mts';
 import type { VerdictInput } from '../merge-verdict/ship-change.mts';
 import {
@@ -148,7 +148,9 @@ async function publish({ cwd, repo, pr, head, failed }: PublishArgs): Promise<vo
 /** This ship attempt's screenshot reminder, read from its own gate events; null when it was quiet. */
 function uiEvidenceDetail(env: NodeJS.ProcessEnv): string | null {
   const events = readShipEvents(env.DEVKIT_GATE_EVENTS ?? '', env.DEVKIT_SHIP_ID ?? '');
-  const rows = events.filter((e) => e.type === 'advisory_result' && e.gate === UI_EVIDENCE);
+  // One ship id can span attempts; rows before the newest attempt marker belong to an earlier run.
+  const mine = events.slice(events.map((e) => e.type).lastIndexOf(ATTEMPT) + 1);
+  const rows = mine.filter((e) => e.type === 'advisory_result' && e.gate === UI_EVIDENCE);
   return rows[rows.length - 1]?.detail || null;
 }
 

@@ -94,7 +94,7 @@ interface Attributable {
 }
 
 /** The ship_attempt row opens this attempt's span, so finding it bounds the backward read exactly. */
-const ATTEMPT = 'ship_attempt';
+export const ATTEMPT = 'ship_attempt';
 /** The parallel judge's gate name — a `gate_result` row, not a fleet `review_result`. */
 const COMPLETENESS = 'completeness';
 /** Caps on what one terminus prints: past these the digest is the wall of text it replaces. */
