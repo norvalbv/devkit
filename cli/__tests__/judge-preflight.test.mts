@@ -387,6 +387,17 @@ describe('renderPreflight', () => {
     expect(renderPreflight(locked, now).join('\n')).toContain('the gates below will still run');
   });
 
+  it('a rehearsal that runs no judge says so, and points the consequence at the real ship', () => {
+    const out = renderPreflight(locked, now, true);
+    expect(out[0]).toContain('informational: this rehearsal runs no judge');
+    const text = out.join('\n');
+    expect(text).toContain(
+      'on the real ship every reviewer that is not already cached will fail closed',
+    );
+    expect(text).not.toContain('the gates below will still run');
+    expect(text).toContain('EXHAUSTED — USAGE LIMIT REACHED');
+  });
+
   it('a healthy provider gets one quiet line per role and no warning at all', () => {
     const out = renderPreflight(
       [{ role: 'review' as const, model: 'haiku', bin: 'claude', state: 'ok' as const }],

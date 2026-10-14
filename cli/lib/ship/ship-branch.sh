@@ -779,9 +779,10 @@ export DEVKIT_SHIP_REPO="$(devkit_repo_identity "$ROOT")" DEVKIT_SHIP_BRANCH="$B
 export DEVKIT_SHIP_FROM_BRANCH="$FROM_BRANCH"
 export DEVKIT_SHIP_RESUMED=$RESUME
 # Advisory judge reachability, after the exports above so its telemetry row carries this ship's id.
-# A plain --dry-gates runs no reviewer gate and skips it; a rehearsal labels its row as one.
+# A plain --dry-gates runs no judge, so its report is informational; a rehearsal labels its row as one.
 if [ "$DRY_GATES" -eq 0 ]; then ship_judge_preflight "$ROOT"
-elif [ "$WITH_REVIEWERS" -eq 1 ]; then DEVKIT_SHIP_MODE=dry-gates ship_judge_preflight "$ROOT"; fi
+elif [ "$WITH_REVIEWERS" -eq 1 ]; then DEVKIT_SHIP_MODE=dry-gates ship_judge_preflight "$ROOT"
+else DEVKIT_SHIP_MODE=dry-gates ship_judge_preflight "$ROOT" --informational; fi
 SHIP_INTENT_GENERATION=""
 SHIP_INTENT_START_GENERATION=
 SHIP_SOURCE_ATTEMPT_ID=
@@ -1506,6 +1507,9 @@ if [ "$DRY_GATES" -eq 1 ]; then
     echo "✓ Ship dry gates passed; no commit, branch, push, or PR was kept." >&2
     echo "⚠️  --with-reviewers: no reviewer gate ran — this repo's pre-commit hook has no guard-review block (enable the review component with devkit init)." >&2
   fi
+  # Last on purpose: a rehearsal is read by tailing, and the head may have scrolled away.
+  [ -z "${SHIP_JUDGE_REMEDY:-}" ] ||
+    echo "⚠️  ship: the judge preflight found a dark judge — the real ship's uncached judges will fail closed. To ship inside this window, $SHIP_JUDGE_REMEDY." >&2
   exit 0
 fi
 

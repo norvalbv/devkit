@@ -670,7 +670,8 @@ ship_judge_preflight() {
   # A package built without this tool is not a reason to say anything at all.
   [ -f "$tool" ] || return 0
   # The report streams on stderr; stdout carries only the remedy, so ship's stdout stays the PR URL.
-  if SHIP_JUDGE_REMEDY=$(cd "$root" && node "$tool" "$root"); then
+  # $2 is an optional --informational, for a rehearsal that runs no judge.
+  if SHIP_JUDGE_REMEDY=$(cd "$root" && node "$tool" "$root" ${2:+"$2"}); then
     rc=0
   else
     rc=$?
