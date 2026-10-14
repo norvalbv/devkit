@@ -311,6 +311,35 @@ by a command-rewriting shell hook, exactly as with `SHIP_COMMIT_TIMEOUT` below.
 
 `devkit doctor` reports the same models per role, and says which env is blocking an automatic bind.
 
+## The judge preflight said one thing and the judges did another
+
+`devkit ship` opens with `guard-judge preflight`, an advisory reading of the codex account. Each
+attempt records that reading as one `judge_preflight` row in `~/.devkit/telemetry/gate-events.jsonl`,
+under the same `ship_id` as the attempt's `judge_exec` rows. The row holds what the provider
+reported (`plan_type`, `credits_usable`, `reached_type`, `used_percent`, `window_mins`, `resets_at`,
+`ordinary_usage_allowed`, `codex_version`) beside the state the preflight printed for each role.
+
+To see how each payload shape turned out, join the two row types:
+
+```
+rg --no-filename '"type":"judge_(preflight|exec)"' ~/.devkit/telemetry/gate-events.jsonl | jq -rs '
+  (map(select(.type == "judge_preflight")) | INDEX(.ship_id)) as $read
+  | map(select(.type == "judge_exec" and .ship_id != null) | . as $call | $read[.ship_id] // empty
+      | [.plan_type, .credits_usable, .reached_type,
+         (first(.roles[] | select(.model == $call.model) | .state) // "no role"), $call.outcome])
+  | group_by(.) | map("\(length)\t\(.[0] | map(tostring) | join("\t"))") | .[]'
+```
+
+Each line is a count, then plan, usable credits, the provider's reached type, the state the
+preflight printed for that model, and what the judge call returned. A `rate-limited` or
+`unavailable` state beside an `ok` outcome is a reading the provider contradicted; so is an `ok`
+state beside `rate-limited` when `credits_usable` is true.
+
+Two pairs are not misreads. An `ok` state followed by a refusal on an account without usable
+credits is usually the shared window crossing 100% while the ship ran. An answer later than the
+row's `resets_at` (epoch milliseconds) is the window clearing. `no role` marks a judge on a model the preflight did
+not list. A ship id reused across attempts joins to its newest reading.
+
 ## A reviewer shows `PASS over an incomplete packet` (or `partial evidence`)
 
 Each AI reviewer reads a capped diff packet. On a large diff, files past the budget are OMITTED or

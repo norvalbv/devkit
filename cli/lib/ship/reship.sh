@@ -607,9 +607,6 @@ PREFLIGHT_HINT=
 # ship it never needs refs/heads/$BR free — and being checked out on the branch being re-pushed is
 # the normal way to reach `--pr`, not a problem to report.
 ship_reclaim_orphan_worktrees "$PWD" "$BR" reship || exit 1
-# See ship-branch.sh: advisory judge reachability, before the deterministic chain is paid. Fail-open;
-# the BLOCKING preflights run after the intent write below so a refusal stays resumable (sc-2535).
-ship_judge_preflight "$ROOT"
 
 WT="${TMPDIR:-/tmp}/devkit-reship-${BR//\//-}-$$"
 # Body: --body "<text>" wins (explicit, no temp file); then --body-file; then — on --resume — the
@@ -645,6 +642,9 @@ export DEVKIT_SHIP_ID="${DEVKIT_SHIP_ID:-$(uuidgen 2>/dev/null || echo "${BR//\/
 export DEVKIT_SHIP_REPO="$(devkit_repo_identity "$ROOT")" DEVKIT_SHIP_BRANCH="$BR"
 export DEVKIT_SHIP_FROM_BRANCH="${FROM_BRANCH:-0}"
 export DEVKIT_SHIP_RESUMED=$RESUME
+# See ship-branch.sh: advisory judge reachability, placed after the exports so its row carries the
+# ship id. Fail-open; the BLOCKING preflights run after the intent write below (sc-2535).
+ship_judge_preflight "$ROOT"
 SHIP_INTENT_ARGS=(write --root "$ROOT" --branch "$BR" --mode reship --title "$TITLE")
 [ "$REWRITE" -eq 0 ] || SHIP_INTENT_ARGS+=(--base "$BASE_REF")
 for d in ${LINK_EXTRA[@]+"${LINK_EXTRA[@]}"}; do SHIP_INTENT_ARGS+=(--link "$d"); done

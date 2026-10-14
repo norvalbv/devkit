@@ -40,6 +40,12 @@ export interface CodexRateLimits {
   models?: string[];
   /** The non-hidden subset: the ones worth suggesting as a move target. */
   visibleModels?: string[];
+  /** Credits the payload calls spendable, whether or not `onCredits` trusts them on this plan. */
+  creditsUsable?: boolean;
+  /** The backend's own word on included usage; it says nothing about credit-served calls. */
+  ordinaryUsageAllowed?: boolean;
+  /** The codex CLI version, from the handshake reply. */
+  cliVersion?: string;
 }
 
 /** The wire shape — every field optional (codexEventsOf's contract in result.mts). Values are
@@ -58,7 +64,7 @@ interface RateLimitsPayload {
   spendControlReached?: boolean;
 }
 interface RateLimitsReply {
-  result?: { rateLimits?: RateLimitsPayload | null };
+  result?: { rateLimits?: RateLimitsPayload | null; ordinaryUsageAllowed?: boolean | null };
   id?: number;
 }
 
@@ -145,11 +151,28 @@ export function parseRateLimitsReply(line: string): CodexRateLimits | null {
   if (reachedType !== undefined) snapshot.reachedType = reachedType;
   if (planType !== undefined) snapshot.planType = planType;
   if (exhaustedWindow !== undefined) snapshot.exhaustedWindow = exhaustedWindow;
+  // Raw facts for the telemetry row. With a credits field, false means it named none spendable.
+  if (credits) snapshot.creditsUsable = creditsUsable;
+  const ordinary = parsed.result?.ordinaryUsageAllowed;
+  if (ordinary === true || ordinary === false) snapshot.ordinaryUsageAllowed = ordinary;
 
   // The reported window is the spent one; with none spent, primary as before.
   const shown = exhaustedWindow === 'secondary' ? secondary : primary;
   if (shown) Object.assign(snapshot, shown);
   return snapshot;
+}
+
+/** The codex CLI version from the `initialize` reply's `userAgent` ("<client>/<version> (…)"), or
+ *  undefined when the line is not that reply or names no version. */
+export function parseInitializeReply(line: string): string | undefined {
+  try {
+    // SAFETY: every field is optional and re-checked below, as in parseRateLimitsReply.
+    const parsed = JSON.parse(line) as { id?: number; result?: { userAgent?: string } };
+    if (parsed?.id !== INITIALIZE_ID) return undefined;
+    return /^[^/\s]+\/(\d[^\s]*)/.exec(usableText(parsed.result?.userAgent) ?? '')?.[1];
+  } catch {
+    return undefined;
+  }
 }
 
 interface ModelListReply {
@@ -214,6 +237,7 @@ export function readCodexRateLimits(
     let buffered = '';
     let snapshot: CodexRateLimits | null = null;
     let modelList: ReturnType<typeof parseModelListReply> = null;
+    let cliVersion: string | undefined;
     // A slow or unknown model/list must not erase a rate-limit answer that already arrived.
     const finish = (): void => {
       if (settled) return;
@@ -225,6 +249,7 @@ export function readCodexRateLimits(
       } catch {
         /* already gone */
       }
+      if (snapshot && cliVersion !== undefined) snapshot = { ...snapshot, cliVersion };
       resolve(snapshot && modelList?.models ? { ...snapshot, ...modelList } : snapshot);
     };
 
@@ -252,6 +277,7 @@ export function readCodexRateLimits(
       buffered = lines.pop() ?? '';
       for (const line of lines) {
         if (!line.trim()) continue;
+        cliVersion = parseInitializeReply(line) ?? cliVersion;
         snapshot = parseRateLimitsReply(line) ?? snapshot;
         modelList = parseModelListReply(line) ?? modelList;
         if (snapshot && modelList) finish();
@@ -271,8 +297,7 @@ export function readCodexRateLimits(
         finish();
       }
     };
-    // `initialize` is mandatory before any other method; the server replies with its own identity,
-    // which we ignore — the handshake is the point, not the answer.
+    // `initialize` is mandatory before any other method; its reply names the CLI version.
     send({
       jsonrpc: '2.0',
       id: INITIALIZE_ID,

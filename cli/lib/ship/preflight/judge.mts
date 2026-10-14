@@ -5,6 +5,7 @@ import { realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { resolveGuardConfig } from '../../../../gate-engine/config.mts';
 import { readCodexRateLimits } from '../../../../gate-engine/judge/codex/rate-limits.mts';
+import { emitGateEvent } from '../../../../gate-engine/judge/gate-events.mts';
 import {
   isCodexModel,
   judgeBinForModel,
@@ -43,8 +44,13 @@ interface ModelStatus {
   windowMins?: number;
   /** Plan limit spent but credits serve the calls, so `ok` must not read as plain headroom. */
   onCredits?: true;
-  /** The account's plan, named on an `unavailable` row. */
+  /** The account's plan, when the provider named one. */
   planType?: string;
+  /** Raw account facts for the telemetry row; never read by the verdict. */
+  reachedType?: string;
+  creditsUsable?: boolean;
+  ordinaryUsageAllowed?: boolean;
+  cliVersion?: string;
   /** The models the account does serve, listed on an `unavailable` row as the move targets. */
   served?: string[];
 }
@@ -127,7 +133,6 @@ export async function judgeReachability(
       // A refusal outranks a lock: the window resets, the plan's model list does not.
       else if (servedNowhere(model, codexLimits)) {
         status.state = 'unavailable';
-        status.planType = codexLimits?.planType;
         status.served = codexLimits?.visibleModels;
       } else if (codexLimits?.reached) status.state = 'rate-limited';
       else if (codexLimits) {
@@ -139,6 +144,12 @@ export async function judgeReachability(
       if (codexLimits?.usedPercent !== undefined) status.usedPercent = codexLimits.usedPercent;
       if (codexLimits?.windowDurationMins !== undefined)
         status.windowMins = codexLimits.windowDurationMins;
+      if (codexLimits) {
+        const { planType, reachedType, creditsUsable, ordinaryUsageAllowed, cliVersion } =
+          codexLimits;
+        const facts = { planType, reachedType, creditsUsable, ordinaryUsageAllowed, cliVersion };
+        Object.assign(status, facts);
+      }
     } else if (!claudePresent) status.state = 'absent';
     else if (claudeDark) status.state = 'unauthenticated';
     else {
@@ -165,6 +176,8 @@ export function renderPreflight(statuses: ModelStatus[], now: number = Date.now(
   const lines = ['guard-judge preflight — judge reachability, before the gate chain'];
   for (const s of statuses) {
     const detail: string[] = [];
+    // The unavailable verdict names the plan itself.
+    if (s.planType !== undefined && s.state !== 'unavailable') detail.push(`plan ${s.planType}`);
     if (s.usedPercent !== undefined) {
       const window =
         s.windowMins === undefined ? 'window' : `${describeWindow(s.windowMins)} window`;
@@ -247,6 +260,30 @@ export function familyRemedy(statuses: ModelStatus[]): string {
   return familyOverrideRemedy(dark.bin, dark.present);
 }
 
+/** Bounds a provider-supplied value, which the wire can send as a non-string: the sink's rows stay
+ *  intact only as one small append. */
+const clip = (text: string | undefined): string | undefined =>
+  text === undefined ? undefined : `${text}`.slice(0, 64);
+
+/** The telemetry row: what the preflight read and concluded, so a later reader can join it to the
+ *  same ship's judge_exec rows. `served` stays out to keep the row one small append. */
+export function preflightEvent(statuses: ModelStatus[]) {
+  const codex = statuses.find((s) => isCodexModel(s.model));
+  return {
+    type: 'judge_preflight',
+    roles: statuses.map(({ role, model, bin, state }) => ({ role, model, bin, state })),
+    plan_type: clip(codex?.planType),
+    credits_usable: codex?.creditsUsable,
+    on_credits: codex?.onCredits,
+    reached_type: clip(codex?.reachedType),
+    used_percent: codex?.usedPercent,
+    window_mins: codex?.windowMins,
+    resets_at: codex?.resetsAt,
+    ordinary_usage_allowed: codex?.ordinaryUsageAllowed,
+    codex_version: clip(codex?.cliVersion),
+  };
+}
+
 async function main(argv: string[]): Promise<number> {
   const root = argv[0];
   if (!root) {
@@ -260,6 +297,8 @@ async function main(argv: string[]): Promise<number> {
   // stdout carries ONLY the remedy: ship captures it for the blocked-attempt tail.
   const remedy = familyRemedy(statuses);
   if (remedy) console.log(remedy);
+  // Last, so a telemetry fault can never cost the report or the remedy.
+  emitGateEvent(preflightEvent(statuses));
   return 0;
 }
 

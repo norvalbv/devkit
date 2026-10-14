@@ -754,14 +754,6 @@ if [ "$FROM_BRANCH" -eq 0 ] && [ "$PATCH_BASE" != "$BASE" ] && [ -z "$LOCAL_BRAN
   ship_text_arm_trial || exit 1
 fi
 
-# Judge reachability does not depend on the staged scope. A plain --dry-gates skips the reviewer gate
-# entirely so it skips this too; --with-reviewers runs that gate, where a dark provider would otherwise
-# surface only as a strict-mode exit 3. Fail-open, so it may run before the invocation is recorded;
-# the BLOCKING preflights (size, hook source, dist integrity) run after record_ship_intent exists.
-if [ "$DRY_GATES" -eq 0 ] || [ "$WITH_REVIEWERS" -eq 1 ]; then
-  ship_judge_preflight "$ROOT"
-fi
-
 # Nothing to commit → say so NOW. Staging (below) has exactly three inputs: the tracked diff vs
 # BASE, the untracked files in scope, and the untracked-but-IGNORED files in scope (a briefed path
 # under a gitignored, force-tracked tree such as devkit's own dist/). All empty ⇒ an empty index — which git only reports AFTER the
@@ -844,6 +836,10 @@ export DEVKIT_SHIP_ID="${DEVKIT_SHIP_ID:-$(uuidgen 2>/dev/null || echo "${BR//\/
 export DEVKIT_SHIP_REPO="$(devkit_repo_identity "$ROOT")" DEVKIT_SHIP_BRANCH="$BR"
 export DEVKIT_SHIP_FROM_BRANCH="$FROM_BRANCH"
 export DEVKIT_SHIP_RESUMED=$RESUME
+# Advisory judge reachability, after the exports above so its telemetry row carries this ship's id.
+# A plain --dry-gates runs no reviewer gate and skips it; a rehearsal labels its row as one.
+if [ "$DRY_GATES" -eq 0 ]; then ship_judge_preflight "$ROOT"
+elif [ "$WITH_REVIEWERS" -eq 1 ]; then DEVKIT_SHIP_MODE=dry-gates ship_judge_preflight "$ROOT"; fi
 SHIP_INTENT_GENERATION=""
 SHIP_INTENT_START_GENERATION=
 SHIP_SOURCE_ATTEMPT_ID=
