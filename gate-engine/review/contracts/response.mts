@@ -1,5 +1,17 @@
 /** Shared reviewer response primitives. Domain-specific evidence contracts depend on this module. */
-import { issueLocations } from '../evidence/findings.mts';
+
+// A real code location, not any dotted-name:port — the extension allowlist keeps `db.internal:5432`
+// out of the file:line bucket so unrelated findings never fold together.
+export const LOCATION_RE =
+  /([\w@./-]+\.(?:tsx?|mts|cts|jsx?|mjs|cjs|py|go|rs|java|rb|swift|kt|sh|bash|zsh|sql|css|scss|html|vue|svelte|json|ya?ml|toml|md)):(\d+)\b/i;
+
+/** Every `file:line` an issue string cites, in order — the same allowlist as the fold key. */
+export function issueLocations(issue: string): { file: string; line: number }[] {
+  return [...String(issue).matchAll(new RegExp(LOCATION_RE.source, 'gi'))].map((m) => ({
+    file: m[1],
+    line: Number(m[2]),
+  }));
+}
 
 /** `rate-limited` is split out of `outage` because its remedy inverts the generic one: re-running
  *  is exactly what cannot succeed until the provider's window resets (sc-2538). `engine` is the

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { issueLocations } from '../contracts/response.mts';
 import {
   CLASS_FIX_HINT,
-  issueLocations,
   renderFindingsBlock,
   renderFindingsBlockForParts,
   summarizeFindings,
