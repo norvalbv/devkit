@@ -6,6 +6,7 @@ import {
   renderFindingsBlockForParts,
   summarizeFindings,
 } from '../evidence/findings.mts';
+import { attachItems } from '../evidence/items.mts';
 import type { ReviewItem, ReviewOutcome } from '../runtime.mts';
 
 const item = (lens: string, issues: string[], over: Partial<ReviewItem> = {}): ReviewItem => ({
@@ -39,6 +40,59 @@ describe('summarizeFindings', () => {
     ]);
     expect(s.total).toBe(2);
     expect(s.deduped).toBe(2);
+  });
+
+  it('keeps two findings a few lines apart when the lens is the cited file itself', () => {
+    const s = summarizeFindings([
+      item('gate-engine/coverage/dependencies.mts', [
+        'canonical gate-engine/coverage/dependencies.mts:141 copies canonicalPath, verbatim',
+        'shellWord gate-engine/coverage/dependencies.mts:143 copies shellWord in shell-word.mts:7',
+      ]),
+    ]);
+    expect(s.total).toBe(2);
+    expect(s.deduped).toBe(0);
+    expect(s.lines[1]).toContain('dependencies.mts:143');
+  });
+
+  it('still folds a file-keyed finding restated at the same line', () => {
+    const s = summarizeFindings([
+      item('src/util.ts', [
+        'fmt src/util.ts:9 copies format in src/fmt.ts:2',
+        'fmt at src/util.ts:9 is a second copy of format',
+      ]),
+    ]);
+    expect(s.total).toBe(1);
+    expect(s.deduped).toBe(1);
+  });
+
+  it.each([
+    ['a ./ prefix', 'src/util.ts', './src/util.ts'],
+    ['a bare file name', 'src/util.ts', 'util.ts'],
+    [
+      'a route-group path the location pattern truncates',
+      'app/(shop)/page.tsx',
+      'app/(shop)/page.tsx',
+    ],
+  ])('reads %s as the file-keyed lens itself', (_, lens, cited) => {
+    const s = summarizeFindings([
+      item(lens, [`fmt ${cited}:141 copies format`, `pad ${cited}:143 copies leftPad`]),
+    ]);
+    expect(s.total).toBe(2);
+  });
+
+  it('keeps the 5-line bucket when the cited file only shares a name suffix with the lens', () => {
+    const s = summarizeFindings([
+      item('src/autil.ts', ['fmt util.ts:141 copies format', 'same copy, seen at util.ts:143']),
+    ]);
+    expect(s.total).toBe(1);
+    expect(s.deduped).toBe(1);
+  });
+
+  it('folds a same-line restatement even when the file is spelled differently', () => {
+    const s = summarizeFindings([
+      item('src/util.ts', ['fmt src/util.ts:9 copies format', 'fmt ./src/util.ts:9 again']),
+    ]);
+    expect(s.total).toBe(1);
   });
 
   it('does not mistake host:port for file:line — distinct findings stay distinct', () => {
@@ -105,6 +159,23 @@ describe('renderFindingsBlock', () => {
     if (items) res.items = items;
     return res;
   };
+
+  it("prints both duplicates a files artifact records on one path (commit-guard's shape)", () => {
+    const res = outcome();
+    res.name = 'commit-guard';
+    const files = [
+      {
+        path: 'src/dep.ts',
+        status: 'fail',
+        issues: ['a src/dep.ts:2 copies x', 'b src/dep.ts:4 copies y'],
+      },
+      { path: 'src/ok.ts', status: 'pass', issues: [] },
+    ];
+    attachItems(res, { files }, new Map());
+    const block = renderFindingsBlock(res);
+    expect(block).toContain('commit-guard: 2 finding(s):');
+    expect(block).toContain('src/dep.ts · src/dep.ts:4');
+  });
 
   it('is empty when the artifact carried no issues', () => {
     expect(renderFindingsBlock(outcome(undefined))).toBe('');
