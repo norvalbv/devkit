@@ -78,6 +78,11 @@ export async function runVitest(bin: string, args: string[], cwd: string): Promi
   return (await runVitestDetailed(bin, args, cwd)).code;
 }
 
+/** `vitest run` ignores every token after a `--`, so a forwarded one would silently drop the filters. */
+export function withoutSeparators(argv: string[]): string[] {
+  return argv.filter((arg) => arg !== '--');
+}
+
 /** ANY retry spelling means the consumer owns it (`--retry=0` is the opt-out); vitest 4.1.10 crashes
  * on `--retry=1` alongside `--retry.condition`, so every spelling must count. */
 export function ownsRetry(argv: string[]): boolean {
