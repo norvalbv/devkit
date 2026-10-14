@@ -84,7 +84,7 @@ BODY_FILE_PREREAD_SET=0  # --resume banner's one --body-file read: 1 = bytes kep
 UPDATE_PR_BODY=0   # explicit body flag? Refresh the existing PR too; recorded across --resume
 READY=0            # --ready marks the PR ready-for-review after the push lands
 WAIT_CI=0          # --wait-ci polls the PR's checks after the re-push is durable
-WAIT_CI_TIMEOUT=900
+WAIT_CI_TIMEOUT=""   # defaults to SHIP_WAIT_CI_DEFAULT_S once wait-ci/args.sh is sourced
 WAIT_CI_TIMEOUT_SET=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -117,6 +117,7 @@ while [ "$#" -gt 0 ]; do
 done
 [ "$BODY_SET" -eq 0 ] || [ "$BODY_FILE_SET" -eq 0 ] || { echo "--body and --body-file are mutually exclusive" >&2; exit 1; }
 . "$(dirname "${BASH_SOURCE[0]}")/wait-ci/args.sh"
+[ "$WAIT_CI_TIMEOUT_SET" -eq 1 ] || WAIT_CI_TIMEOUT=$SHIP_WAIT_CI_DEFAULT_S
 ship_validate_wait_ci "$WAIT_CI" "$WAIT_CI_TIMEOUT" "$WAIT_CI_TIMEOUT_SET" "${WAIT_CI_REQUIRED:-0}" || exit 1
 # Every git selector below is built as `:(literal)<path>` (sc-2425). Ambient Git pathspec modes
 # either reinterpret that prefix as plain text or conflict with it, so they are not inputs.

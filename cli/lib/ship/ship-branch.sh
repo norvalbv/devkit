@@ -101,7 +101,7 @@ FROM_BRANCH=0      # derive a frozen committed path set from origin/<base>..HEAD
 DRAFT=0            # --draft opens the PR as a draft; default stays ready-for-review
 RESUME_READY=0     # --ready seen under --resume, before the record reveals ship-vs-reship mode
 WAIT_CI=0          # --wait-ci polls the PR's checks after everything else is durable
-WAIT_CI_TIMEOUT=900
+WAIT_CI_TIMEOUT=""   # defaults to SHIP_WAIT_CI_DEFAULT_S once wait-ci/args.sh is sourced
 WAIT_CI_TIMEOUT_SET=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -155,6 +155,7 @@ done
 # A real ship already runs the reviewers, so the modifier alone is a mistaken command, not a no-op.
 [ "$WITH_REVIEWERS" -eq 0 ] || [ "$DRY_GATES" -eq 1 ] || { echo "--with-reviewers requires --dry-gates (a real ship already runs the reviewers)" >&2; exit 1; }
 . "$SCRIPT_DIR/wait-ci/args.sh"
+[ "$WAIT_CI_TIMEOUT_SET" -eq 1 ] || WAIT_CI_TIMEOUT=$SHIP_WAIT_CI_DEFAULT_S
 ship_validate_wait_ci "$WAIT_CI" "$WAIT_CI_TIMEOUT" "$WAIT_CI_TIMEOUT_SET" "${WAIT_CI_REQUIRED:-0}" "$DRY_GATES" || exit 1
 
 # Hoisted above the --resume load (which needs it); everything below the worktree ceremony reads it.
