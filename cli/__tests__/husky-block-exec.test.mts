@@ -911,6 +911,25 @@ describe('overlay staged gates run before the AI guards (sc-3020)', () => {
     expect(r.stdout).toContain('✗ dry-gates: failed gates: fallow (findings above).');
   });
 
+  // The reported sequence: a deferred deterministic failure, then the overlay flags the same file.
+  it('a deterministic failure followed by a failing eslint overlay still reaches the reviewers', () => {
+    const r = runHook(
+      {
+        DET_RC: '1',
+        ESLINT_RC: '1',
+        DEVKIT_RUN_MODE: 'dry-gates',
+        DEVKIT_REVIEW_GUARDS: 'comments,review',
+      },
+      REVIEWED,
+      overlay({ fallow: false, eslintOverlay: true }),
+    );
+    expect(r.status).toBe(1);
+    expect(r.calls).toContain('guard-review --gate');
+    expect(r.stdout).toContain(
+      'failed gates: deterministic-gates eslint-overlay (findings above).',
+    );
+  });
+
   it('a failing biome overlay in review mode still exits 1, through the finalizer', () => {
     const r = runHook(
       { BIOME_RC: '1', DEVKIT_RUN_MODE: 'review', DEVKIT_REVIEW_GUARDS: 'review' },
@@ -1022,6 +1041,18 @@ describe('overlay staged gates run before the AI guards (sc-3020)', () => {
     expect(r.status).toBe(1);
     expect(r.calls).toContain('fallow audit');
     for (const ai of AI_CALLS) expect(r.calls).not.toContain(ai);
+  });
+
+  // The deferred flag and the finalizer share the package subshell, or a rehearsal would exit 0.
+  it('a monorepo package subshell keeps a deferred dry-gates failure and still exits 1', () => {
+    const r = runHook(
+      { FALLOW_RC: '1', DEVKIT_RUN_MODE: 'dry-gates', DEVKIT_REVIEW_GUARDS: 'comments,review' },
+      REVIEWED,
+      overlay({ pkgRel: 'pkg/a' }),
+    );
+    expect(r.status).toBe(1);
+    expect(r.calls).toContain('guard-review --gate');
+    expect(r.stdout).toContain('✗ dry-gates: failed gates: fallow (findings above).');
   });
 
   it('fallow absent stays fail-open: the AI guards still run and the commit passes', () => {
@@ -1162,6 +1193,14 @@ describe('overlay lint blocks name the ship --dry-gates rehearsal (sc-2695)', ()
     );
     expect(r.status).toBe(1);
     expect(`${r.stdout}${r.stderr}`).toContain(`     ${CMD}\n`);
+    // The deferring arm returns 0 inside `|| { … }`; under dash -e the chain must carry on.
+    const rehearsal = runHook(
+      { ESLINT_RC: '1', DEVKIT_RUN_MODE: 'dry-gates', DEVKIT_REVIEW_GUARDS: 'comments,review' },
+      REVIEWED,
+      overlay({ eslintOverlay: true, shell: 'dash' }),
+    );
+    expect(rehearsal.status).toBe(1);
+    expect(rehearsal.calls).toContain('guard-review --gate');
   });
 
   it.skipIf(!hasDash)("dash's echo would expand backslashes — the command still prints raw", () => {
@@ -1254,5 +1293,11 @@ describe.each(['package', 'standalone'])('staged fallow gate (%s hook)', (builde
   it.skipIf(!hasDash)('runs under dash', () => {
     expect(run({ FALLOW_RC: '2' }, { shell: '/bin/dash' }).status).toBe(0);
     expect(run({ FALLOW_RC: '1' }, { shell: '/bin/dash' }).status).toBe(1);
+    const rehearsal = run(
+      { FALLOW_RC: '1', DEVKIT_RUN_MODE: 'dry-gates', DEVKIT_REVIEW_GUARDS: 'review' },
+      { shell: '/bin/dash' },
+    );
+    expect(rehearsal.status).toBe(1);
+    expect(rehearsal.calls).toContain('guard-review --gate');
   });
 });
