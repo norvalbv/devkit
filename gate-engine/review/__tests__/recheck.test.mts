@@ -1,9 +1,10 @@
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { loadCache } from '../cache.mts';
+import { REVIEW_ROUTING_ADVISORY } from '../evidence/scope.mts';
 import {
   DEFAULT_LENS_GROUPS,
   FOUR_WAY_LENS_GROUPS,
@@ -337,28 +338,49 @@ describe('unrouted-files notice wiring', () => {
     writeFileSync(join(repo, 'src', 'shared', 'validate.ts'), 'export const v = 1;\n');
     spawnSync('git', ['add', 'src/shared/validate.ts'], { cwd: repo });
   };
+  // Inside .git so the sink is neither staged nor left behind when the fixture repo is removed.
+  const captureEvents = (repo: string) => {
+    process.env.DEVKIT_GATE_EVENTS = join(repo, '.git', 'gate-events.jsonl');
+  };
+  const routingRows = (repo: string) => {
+    const sink = join(repo, '.git', 'gate-events.jsonl');
+    if (!existsSync(sink)) return [];
+    return readFileSync(sink, 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line))
+      .filter((event) => event.gate === REVIEW_ROUTING_ADVISORY);
+  };
 
   it('a full gate names a staged src/shared file no domain root routes', async () => {
     const repo = consumerRepo({ backend: true });
     stageShared(repo);
+    captureEvents(repo);
     expect(await runReviewGate(repo, { exec: lensExec(repo) })).toBe(0);
     expect(stderr()).toContain(`1 source file(s) ${NOTICE} (src/shared/validate.ts)`);
+    expect(routingRows(repo)).toEqual([
+      expect.objectContaining({ type: 'advisory_result', status: 'finding' }),
+    ]);
   });
 
   it('a recheck never prints it — the narrowed lane is not a topology audit', async () => {
     const repo = consumerRepo({ backend: true });
     stageShared(repo);
+    captureEvents(repo);
     const only = { reviewer: CORRECTNESS, lens: TARGET_LENS };
     expect(await runReviewGate(repo, { exec: lensExec(repo), only })).toBe(0);
     expect(stderr()).not.toContain(NOTICE);
+    expect(routingRows(repo)).toEqual([]);
   });
 
   it('a GUARD_REVIEW_SKIP of the domain reviewers does not turn routed files into unrouted ones', async () => {
     process.env.GUARD_REVIEW_SKIP = 'api-security-reviewer,backend-performance-reviewer';
     const repo = consumerRepo({ backend: true });
+    captureEvents(repo);
     expect(await runReviewGate(repo, { exec: lensExec(repo) })).toBe(0);
     expect(stderr()).toContain('api-security-reviewer skipped (GUARD_REVIEW_SKIP)');
     expect(stderr()).not.toContain(NOTICE);
+    expect(routingRows(repo)).toEqual([]);
   });
 });
 
