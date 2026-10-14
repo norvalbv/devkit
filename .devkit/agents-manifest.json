@@ -1,8 +1,8 @@
 {
   "schemaVersion": 2,
   "kind": "agents",
-  "devkitRef": "v0.70.0",
-  "generatedAt": "2026-10-14T13:56:19.025Z",
+  "devkitRef": "v0.71.0",
+  "generatedAt": "2026-10-14T14:09:11.161Z",
   "files": {
     "api-security-reviewer.md": "bfa4ff0d792a03ec7845dc7c7daf586779bdc76f053551c6d05a2ee11b22a87e",
     "backend-performance-reviewer.md": "a2e5bd6b4f9e5b216abf24eb1e431deca61b5260952e250ba9c57063b2604bb7",
