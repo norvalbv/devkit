@@ -1,4 +1,5 @@
-import { readdirSync, readFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { resolveGuardConfig, resolveGuardConfigJson } from '../../config.mts';
@@ -6,6 +7,7 @@ import {
   domainsDisabledByEmptyRoots,
   filesRoutedToNoDomain,
   reportNonRuns,
+  REVIEW_ROUTING_ADVISORY,
 } from '../evidence/scope.mts';
 import { selectReviewers } from '../reviewers.mts';
 
@@ -24,9 +26,13 @@ const inverted = make(['src'], ['src'], []);
 const reviewers = (staged: string[], cfg = inverted, skip?: ReadonlySet<string>) =>
   domainsDisabledByEmptyRoots(staged, cfg, skip).map((d) => d.reviewer);
 
+let sinkDir = '';
 afterEach(() => {
   delete process.env.GUARD_REVIEW_NO_TOPOLOGY_WARN;
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
+  if (sinkDir) rmSync(sinkDir, { recursive: true, force: true });
+  sinkDir = '';
 });
 
 describe('domainsDisabledByEmptyRoots', () => {
@@ -144,7 +150,7 @@ describe('filesRoutedToNoDomain', () => {
     reportNonRuns(staged, electron, selection, new Set(), new Set(), selection);
     expect(spy.mock.calls.map((c) => String(c[0]))).toContain(
       'guard-review: 1 source file(s) reached no security/performance reviewer ' +
-        '(src/shared/validate.ts) — add their directory to review.backendRoots/frontendRoots ' +
+        '(src/shared/validate.ts) — add each path or its directory to review.backendRoots/frontendRoots ' +
         'in guard.config.json',
     );
   });
@@ -183,15 +189,89 @@ describe('filesRoutedToNoDomain', () => {
     expect(unrouted(['src/shared/validate.ts'], electron, head)).toEqual([]);
   });
 
-  it("devkit's own self-host config routes every scanRoot, so dogfood commits stay quiet", () => {
-    const raw = readFileSync(join(REPO_ROOT, 'guard.config.json'), 'utf8');
-    const cfg = resolveGuardConfigJson(raw, '/nonexistent-cwd-defaults-only');
+  const selfHost = () =>
+    resolveGuardConfigJson(
+      readFileSync(join(REPO_ROOT, 'guard.config.json'), 'utf8'),
+      '/nonexistent-cwd-defaults-only',
+    );
+
+  it("devkit's own self-host config routes every scanRoot, so a commit inside them stays quiet", () => {
+    const cfg = selfHost();
     expect(
       unrouted(
         cfg.scanRoots.map((r) => `${r}/x.mts`),
         cfg,
       ),
     ).toEqual([]);
+  });
+
+  it('names a root-level implementation file shipped beside a test under a domain root', () => {
+    const staged = ['vitest.setup.mjs', 'cli/__tests__/vitest-setup-env-scrub.test.mts'];
+    expect(unrouted(staged, selfHost())).toEqual(['vitest.setup.mjs']);
+  });
+
+  it('stays silent for prose, data and test files outside the domain roots', () => {
+    expect(unrouted(['README.md', 'package.json', 'scripts/x.test.mts'], selfHost())).toEqual([]);
+  });
+
+  it('names a declared source extension outside the JS/TS family', () => {
+    const python = { ...electron, sourceExtensions: ['py'] };
+    expect(unrouted(['src/shared/validate.py', 'src/shared/notes.txt'], python)).toEqual([
+      'src/shared/validate.py',
+    ]);
+  });
+
+  it('never names a file no reviewer received', () => {
+    const cfg = make(['app', 'lib'], ['app/api', 'lib'], ['app']);
+    expect(unrouted(['.claude/skills/x/scripts/checklist.mjs', 'app/api/x.ts'], cfg)).toEqual([]);
+  });
+
+  const advisoryRows = (staged: string[]) => {
+    sinkDir = mkdtempSync(join(tmpdir(), 'review-routing-'));
+    const sink = join(sinkDir, 'events.jsonl');
+    vi.stubEnv('DEVKIT_GATE_EVENTS', sink);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const selection = selectReviewers(staged, electron);
+    reportNonRuns(staged, electron, selection, new Set(), new Set(), selection);
+    return readFileSync(sink, 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line))
+      .filter((event) => event.type === 'advisory_result');
+  };
+
+  it('writes one bounded advisory row, so the ship digest carries the notice', () => {
+    const rows = advisoryRows(
+      Array.from({ length: 40 }, (_, i) => `src/shared/${'n'.repeat(200)}${i}.ts`),
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ gate: REVIEW_ROUTING_ADVISORY, status: 'finding' });
+    expect(rows[0].detail).toContain('40 source file(s) reached no security/performance reviewer');
+    expect(rows[0].detail).toHaveLength(500);
+  });
+
+  it('keeps the advisory row to the fact: the digest cuts a detail short, and a remedy would not fit', () => {
+    const [row] = advisoryRows(['src/shared/validate.ts']);
+    expect(row.detail).toBe(
+      '1 source file(s) reached no security/performance reviewer (src/shared/validate.ts)',
+    );
+  });
+
+  it('a remedy the notice names routes the file: an exact path under backendRoots', () => {
+    const cfg = selfHost();
+    const routed = {
+      ...cfg,
+      review: { ...cfg.review, backendRoots: [...cfg.review.backendRoots, 'vitest.setup.mjs'] },
+    };
+    const selection = selectReviewers(['vitest.setup.mjs'], routed);
+    expect(selection.find((s) => s.reviewer.name === 'api-security-reviewer')?.files).toEqual([
+      'vitest.setup.mjs',
+    ]);
+    expect(filesRoutedToNoDomain(selection, routed)).toEqual([]);
+  });
+
+  it('writes no advisory row when every code file reached a domain reviewer', () => {
+    expect(advisoryRows(['src/main/ipc.ts', 'src/shared/README.md'])).toEqual([]);
   });
 
   it.each(readdirSync(join(REPO_ROOT, 'templates')).filter((t) => !t.startsWith('_')))(
