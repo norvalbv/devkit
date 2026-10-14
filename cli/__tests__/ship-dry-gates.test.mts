@@ -166,8 +166,9 @@ function linkedWorktrees(git, dir) {
     .filter((path) => path && realpathSync(path) !== realpathSync(dir));
 }
 
-/** A `node` shim that records each judge-preflight invocation, then runs the real node. */
-function preflightSpyEnv(dir, env) {
+/** A `node` shim that records each judge-preflight invocation's args. With `remedy`, the preflight
+ *  prints it as a dark judge's family move instead of running; otherwise the real node runs. */
+function preflightSpyEnv(dir, env, remedy?: string) {
   const bin = join(dir, 'preflight-spy-bin');
   const calls = join(dir, 'preflight-calls.log');
   mkdirSync(bin);
@@ -175,7 +176,10 @@ function preflightSpyEnv(dir, env) {
     join(bin, 'node'),
     [
       '#!/bin/bash',
-      'if [[ $1 == */preflight/judge.* ]]; then echo judge >> "$PREFLIGHT_CALLS"; fi',
+      'if [[ $1 == */preflight/judge.* ]]; then',
+      '  echo "${*:2}" >> "$PREFLIGHT_CALLS"',
+      remedy === undefined ? '' : `  echo ${remedy}; exit 0`,
+      'fi',
       'exec "$REAL_NODE" "$@"',
     ].join('\n'),
   );
@@ -187,7 +191,7 @@ function preflightSpyEnv(dir, env) {
       REAL_NODE: process.execPath,
       PREFLIGHT_CALLS: calls,
     },
-    ran: () => existsSync(calls),
+    calls: () => (existsSync(calls) ? readFileSync(calls, 'utf8').trim().split('\n') : []),
   };
 }
 
@@ -304,17 +308,17 @@ test -z "\${DEVKIT_SHIP_DRY_REVIEWERS:-}" || exit 92`,
     expect(localBranchExists(git, 'feat/dry-no-review')).toBe(false);
   });
 
-  it('reports judge reachability only when reviewers will actually run', () => {
+  it('reports judge reachability on every rehearsal, informational only when no judge runs', () => {
     const plain = seedShipRepo();
     writeFileSync(join(plain.dir, 'note.txt'), 'x\n');
     const plainSpy = preflightSpyEnv(plain.dir, plain.env);
     const a = spawnSync(
       '/bin/bash',
-      [scriptPath, 'feat/dry-preflight-off', 't', '--dry-gates', '--', 'note.txt'],
+      [scriptPath, 'feat/dry-preflight-plain', 't', '--dry-gates', '--', 'note.txt'],
       { cwd: plain.dir, input: '', encoding: 'utf8', env: plainSpy.env },
     );
     expect(a.status, a.stderr).toBe(0);
-    expect(plainSpy.ran()).toBe(false);
+    expect(plainSpy.calls()).toEqual([`${realpathSync(plain.dir)} --informational`]);
 
     const withReviewers = seedShipRepo();
     writeFileSync(join(withReviewers.dir, 'note.txt'), 'x\n');
@@ -333,7 +337,50 @@ test -z "\${DEVKIT_SHIP_DRY_REVIEWERS:-}" || exit 92`,
       { cwd: withReviewers.dir, input: '', encoding: 'utf8', env: spy.env },
     );
     expect(b.status, b.stderr).toBe(0);
-    expect(spy.ran()).toBe(true);
+    expect(spy.calls()).toEqual([realpathSync(withReviewers.dir)]);
+  });
+
+  it('a green plain rehearsal ends with the dark judge family move, and still exits 0', () => {
+    const { dir, env } = seedShipRepo();
+    writeFileSync(join(dir, 'note.txt'), 'x\n');
+    const spy = preflightSpyEnv(dir, env, 'DARK_JUDGE_REMEDY');
+    const r = spawnSync(
+      '/bin/bash',
+      [scriptPath, 'feat/dry-dark', 't', '--dry-gates', '--', 'note.txt'],
+      {
+        cwd: dir,
+        input: '',
+        encoding: 'utf8',
+        env: spy.env,
+      },
+    );
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout).not.toContain('DARK_JUDGE_REMEDY');
+    const tail = r.stderr.trimEnd().split('\n').slice(-2).join('\n');
+    expect(tail).toContain('Ship dry gates passed');
+    expect(tail).toContain("found a dark judge — the real ship's uncached judges will fail closed");
+    expect(tail).toContain('DARK_JUDGE_REMEDY');
+  });
+
+  it('a reachable judge — credit-backed included — adds nothing to the rehearsal tail', () => {
+    const { dir, env } = seedShipRepo();
+    writeFileSync(join(dir, 'note.txt'), 'x\n');
+    const spy = preflightSpyEnv(dir, env, '');
+    const r = spawnSync(
+      '/bin/bash',
+      [scriptPath, 'feat/dry-lit', 't', '--dry-gates', '--', 'note.txt'],
+      {
+        cwd: dir,
+        input: '',
+        encoding: 'utf8',
+        env: spy.env,
+      },
+    );
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(spy.calls()).toHaveLength(1);
+    expect(r.stderr).not.toContain('dark judge');
   });
 
   for (const rc of [1, 3]) {
@@ -374,23 +421,12 @@ test -z "\${DEVKIT_SHIP_DRY_REVIEWERS:-}" || exit 92`,
       hookBody: `echo '✗ deterministic gates failed: guard-fanout' >&2\nexit 1`,
     });
     writeFileSync(join(dir, 'note.txt'), 'blocked\n');
-    const bin = join(dir, 'dark-judge-bin');
-    mkdirSync(bin);
-    writeFileSync(
-      join(bin, 'node'),
-      '#!/bin/bash\nif [[ $1 == */preflight/judge.* ]]; then echo DARK_JUDGE_REMEDY; exit 0; fi\nexec "$REAL_NODE" "$@"\n',
-    );
-    chmodSync(join(bin, 'node'), 0o755);
+    const spy = preflightSpyEnv(dir, env, 'DARK_JUDGE_REMEDY');
 
     const r = spawnSync(
       '/bin/bash',
       [scriptPath, 'feat/dark-judge', 't', '--dry-gates', '--with-reviewers', '--', 'note.txt'],
-      {
-        cwd: dir,
-        input: '',
-        encoding: 'utf8',
-        env: { ...env, PATH: `${bin}:${env.PATH ?? ''}`, REAL_NODE: process.execPath },
-      },
+      { cwd: dir, input: '', encoding: 'utf8', env: spy.env },
     );
 
     expect(r.status).toBe(1);
