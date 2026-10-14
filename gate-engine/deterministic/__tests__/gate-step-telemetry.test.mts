@@ -91,12 +91,13 @@ describe('gate_step telemetry', () => {
 
   it('times the gate itself', () => {
     selectGuards(['size']);
+    let now = 1_000_000;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
     const exec = vi.fn(() => {
-      const until = Date.now() + 30;
-      while (Date.now() < until);
+      now += 1234;
     });
     expect(runDeterministic(dir, { exec })).toBe(0);
-    expect(rows('gate_step')[0].duration_ms).toBeGreaterThanOrEqual(30);
+    expect(rows('gate_step')[0].duration_ms).toBe(1234);
   });
 
   // Date.now() is wall-clock: an NTP step backwards mid-gate must not publish a negative duration.
