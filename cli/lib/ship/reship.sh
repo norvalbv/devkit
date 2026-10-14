@@ -485,7 +485,7 @@ if [ "$REWRITE" -eq 1 ]; then
   trap rewrite_ref_cleanup EXIT
   REWRITE_FETCH_ERR=$(mktemp "${TMPDIR:-/tmp}/reship-pin-fetch.XXXXXX")
   pin_rc=0
-  rewrite_remote git fetch -q origin \
+  rewrite_remote git fetch -q --refmap= origin \
     "+refs/heads/$BR:$REWRITE_HEAD_REF" \
     "+refs/heads/$BASE_REF:$REWRITE_BASE_REF" 2>"$REWRITE_FETCH_ERR" || pin_rc=$?
   if [ "$pin_rc" -ne 0 ]; then
@@ -1043,7 +1043,7 @@ if [ "$REWRITE" -eq 1 ]; then
     base_rc=0
     # Any fetch failure is "unverifiable", never a verdict: fetch exits 1 on ordinary remote errors,
     # and that must not read as merge-base's "not an ancestor" (= rewound) below.
-    rewrite_remote git fetch -q origin "+refs/heads/$BASE_REF:$REWRITE_BASE_REF" >/dev/null 2>&1 || base_rc=2
+    rewrite_remote git fetch -q --refmap= origin "+refs/heads/$BASE_REF:$REWRITE_BASE_REF" >/dev/null 2>&1 || base_rc=2
     # The fetch may land a tip newer than ls-remote saw; judge whatever it pinned.
     [ "$base_rc" -ne 0 ] || { CURRENT_BASE=$(git rev-parse "$REWRITE_BASE_REF"); REWRITE_BASE_PIN=$CURRENT_BASE; }
     [ "$base_rc" -ne 0 ] || git merge-base --is-ancestor "$BASE" "$CURRENT_BASE" || base_rc=$?
