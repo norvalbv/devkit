@@ -70,11 +70,11 @@ export function judgeInput(cwd: string, staged: string[]): string {
 }
 
 /** Why this commit deserves screenshots, or null when neither the paths nor the judge say so. */
-function uiEvidenceReason(cwd: string): string | null {
+function uiEvidenceReason(cwd: string, judge: boolean): string | null {
   const cfg = resolveGuardConfig(cwd);
   const staged = stagedFiles(cwd);
   const byPath = uiPathReason(staged, cfg.uiEvidence.paths);
-  if (byPath) return byPath;
+  if (byPath || !judge) return byPath;
   const input = judgeInput(cwd, staged);
   const verdict = input ? judgeUiVisible(cwd, input, resolveReviewModel(cfg)) : null;
   return verdict?.visible
@@ -88,10 +88,11 @@ export const instruction = (reason: string): string =>
 
 /** The gate. Every unreadable input means silence: a reminder that cannot tell stays quiet. */
 export function runUiEvidence(env: NodeJS.ProcessEnv = process.env, cwd = process.cwd()): number {
-  if (env.DEVKIT_RUN_MODE === 'review' || env.DEVKIT_RUN_MODE === 'dry-gates') return 0;
+  if (env.DEVKIT_RUN_MODE === 'review') return 0;
   let reason: string | null;
   try {
-    reason = uiEvidenceReason(cwd);
+    // A dry-gates rehearsal stays model-free: the path rule only.
+    reason = uiEvidenceReason(cwd, env.DEVKIT_RUN_MODE !== 'dry-gates');
   } catch {
     return 0;
   }
