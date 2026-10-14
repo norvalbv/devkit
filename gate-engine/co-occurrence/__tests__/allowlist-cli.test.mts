@@ -137,6 +137,40 @@ describe('guard-dup-allowlist clone lifecycle', () => {
     expect(file.pairs).toHaveLength(1);
     expect(file.clones).toHaveLength(1);
   });
+
+  // The fragment hash pins a clone approval to its code, so the gate's printed command (which
+  // carries no --decay-days) must not write an entry that lapses a week later on unchanged code.
+  it('add-clone is durable by default; --decay-days N opts into a temporary waiver', () => {
+    const al = freshPath();
+    run(al, ['add-clone', 'durable', 'a.ts', 'b.ts', '--description', 'by design']);
+    run(al, ['add-clone', 'waiver', 'a.ts', 'b.ts', '--description', 'x', '--decay-days', '30']);
+    expect(read(al).clones.map((c: { decayDays: number }) => c.decayDays)).toEqual([3650, 30]);
+  });
+
+  it('add-clone over a lapsed entry replaces it with a live one (no duplicate)', () => {
+    const al = freshPath();
+    writeFileSync(
+      al,
+      JSON.stringify({ pairs: [], clones: [{ fragmentHash: 'lapsed', date: '2000-01-01' }] }),
+    );
+    expect(run(al, ['check-clone', 'lapsed']).status).toBe(1);
+    run(al, ['add-clone', 'lapsed', 'a.ts', 'b.ts', '--description', 'by design']);
+    expect(read(al).clones).toHaveLength(1);
+    expect(run(al, ['check-clone', 'lapsed']).status).toBe(0);
+  });
+
+  it('add-clone over a baseline-frozen clone keeps its 3650-day freeze', () => {
+    const al = freshPath();
+    const baseline = {
+      fragmentHash: 'frozen',
+      description: 'baseline 2020-01-01 — pre-existing clone, frozen by guard-clone',
+      date: '2020-01-01',
+      decayDays: 3650,
+    };
+    writeFileSync(al, JSON.stringify({ pairs: [], clones: [baseline] }));
+    run(al, ['add-clone', 'frozen', 'a.ts', 'b.ts', '--description', 'looks intentional']);
+    expect(read(al).clones[0].decayDays).toBe(3650);
+  });
 });
 
 describe('guard-dup-allowlist guardrails', () => {
@@ -234,11 +268,15 @@ describe('guard-dup-allowlist prune + baseline guard', () => {
     expect(read(al).pairs).toEqual([baseline]);
   });
 
-  it('add / add-clone reject a decay of < 1 day (would be instantly expired) — exit 1, no write', () => {
+  it('add / add-clone reject a decay < 1 day or a malformed one — exit 1, no write', () => {
     for (const args of [
       ['add', 'symA', 'a.ts', 'symB', 'b.ts', '--description', 'x', '--decay-days', '0'],
       ['add', 'symA', 'a.ts', 'symB', 'b.ts', '--description', 'x', '--decay-days', '-1'],
       ['add-clone', 'deadbeef', 'a.ts', 'b.ts', '--description', 'x', '--decay-days', '0'],
+      // A malformed waiver must not fall through to the durable default.
+      ['add-clone', 'deadbeef', 'a.ts', 'b.ts', '--description', 'x', '--decay-days', '30d'],
+      ['add-clone', 'deadbeef', 'a.ts', 'b.ts', '--description', 'x', '--decay-days', 'Infinity'],
+      ['add-clone', 'deadbeef', 'a.ts', 'b.ts', '--description', 'x', '--decay-days'],
     ]) {
       const al = freshPath();
       expect(run(al, args).status).toBe(1);

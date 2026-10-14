@@ -325,6 +325,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
       if (novel.length > APPROVE_CAP) {
         console.log(`  (+${novel.length - APPROVE_CAP} more — re-run after addressing these)`);
       }
+      console.log(
+        'An approval lasts until the duplicated code changes; append --decay-days N for a temporary waiver.',
+      );
     } else {
       console.log('clone gate: no new clones ✓');
     }
