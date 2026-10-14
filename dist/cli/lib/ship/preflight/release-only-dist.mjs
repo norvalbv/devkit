@@ -4,6 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, readlinkSync } from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
+import { writeGateReason } from '../../../../gate-engine/deterministic/reason.mjs';
 /** The branch `devkit release` opens (cli/commands/release.mts): `release/v<x.y.z>`, never more. */
 const RELEASE_BRANCH = /^release\/v(\d+\.\d+\.\d+)$/;
 const VersionedPackage = z.object({ version: z.string().regex(/^\d+\.\d+\.\d+$/) });
@@ -121,11 +122,16 @@ export function printReleaseOnlyDist(report) {
     }
     if (report.releaseOnly.length === 0)
         return 0;
-    console.error('✗ devkit ship: this ship rewrites tracked dist, which is release-only.');
-    for (const file of report.releaseOnly)
-        console.error(`    ${file}`);
-    console.error('  Regenerated dist ships only with `devkit release` (docs/decisions/typescript-source-prebuilt-mjs.md, 2026-07-26).');
-    console.error('  Fix: drop these from the brief. Brief source plus only the NEW dist paths named here.');
-    console.error('  A review finding that asks for one of these files does not override this: a tracked dist file stays stale until the next release.');
+    // Remedy before the file list, so the runner's capped reason excerpt still carries it.
+    const lines = [
+        '✗ devkit ship: this ship rewrites tracked dist, which is release-only.',
+        '  Fix: drop these from the brief. Brief source plus only the NEW dist paths named here.',
+        '  Regenerated dist ships only with `devkit release` (docs/decisions/typescript-source-prebuilt-mjs.md, 2026-07-26).',
+        '  A review finding that asks for one of these files does not override this: a tracked dist file stays stale until the next release.',
+        ...report.releaseOnly.map((file) => `    ${file}`),
+    ];
+    for (const line of lines)
+        console.error(line);
+    writeGateReason(lines);
     return 1;
 }

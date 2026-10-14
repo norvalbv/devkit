@@ -13,7 +13,7 @@ import { GUARD_FRAGMENTS } from './ai-guard-fragments.mjs';
 import { BIN_DIRS, DK_DETERMINISTIC_GATE_HELPER, DK_GATE_BLOCK_HELPERS, REVIEW_FAILURE_FINALIZER, shipRehearsalHint, } from './gate-policy/block-helpers.mjs';
 import { buildPreCommitExit, PRE_COMMIT_PASS_EXIT } from './gate-policy/commit-gate-log.mjs';
 import { FALLOW_STAGED, FALLOW_STAGED_BLOCK, indent } from './gate-policy/fallow-staged.mjs';
-import { formatFragment } from './format-fragment.mjs';
+import { formatFragment, overlayFormatters } from './format-fragment.mjs';
 import { markEnd, markStart } from './husky.mjs';
 import { DK_COMMIT_INDEX_CAPTURE, DK_HOOK_HELPERS, DK_REVIEW_BASELINE_HELPER, selectedFragment, } from './review-fragments.mjs';
 import { sentryShipPrewarmFragment } from './sentry-fragments.mjs';
@@ -77,7 +77,7 @@ function wantsDeterministic(selection) {
 }
 /** The ONE gate body for every install mode: format (the prefix-cache key hashes the post-format
  *  index) → deterministic → preAi → AI guards → postGuards. */
-export function buildGuardBlock(selection, pkgRel = '', { binDir = 'package', preAi, postGuards } = {}) {
+export function buildGuardBlock(selection, pkgRel = '', { binDir = 'package', preAi, postGuards, formatChain } = {}) {
     const handoff = selection.guards?.some((id) => id === 'review' || id === 'sentry') ?? false;
     const pieces = [
         buildPreCommitExit(handoff),
@@ -87,8 +87,8 @@ export function buildGuardBlock(selection, pkgRel = '', { binDir = 'package', pr
         DK_GATE_BLOCK_HELPERS,
     ];
     // First so a first-gate block still records the run's terminal (the trap covers every exit path).
-    if (!pkgRel && selection.biome)
-        pieces.push(formatFragment(BIN_DIRS[binDir].formatter));
+    if (!pkgRel && (selection.biome || formatChain))
+        pieces.push(formatFragment(BIN_DIRS[binDir].formatter, formatChain));
     if (wantsDeterministic(selection))
         pieces.push(DK_DETERMINISTIC_GATE_HELPER, deterministicFragment(selection.structureCmd, selection.extras));
     if (selection.fallow)
@@ -137,7 +137,7 @@ if [ -n "$DK_STAGED" ] && [ -f ${config} ]; then
         echo "${label}"
         echo "$DK_STAGED" | xargs ${run} || {
 ${failHint}${shipRehearsalHint('            ')}
-            exit 1
+            __dk_block_deterministic ${tool}-overlay
         }
     else
         echo "devkit ${tool} overlay: skipped — node_modules/.bin/${tool} not found (install the repo's dependencies)"
@@ -187,6 +187,7 @@ export function buildOverlayHook(selection, chainTarget = '.husky/pre-commit', p
         binDir: 'global',
         preAi: overlayStagedGates(fallow),
         postGuards: overlayReviewBaseline(fallow),
+        formatChain: overlayFormatters(selection),
     });
     return `${HOOK_PREAMBLE}
 # devkit OVERLAY (LOCAL, git-ignored). Runs devkit's gates + lint overlay on this commit, then

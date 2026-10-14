@@ -25,9 +25,11 @@ is unset, treat all staged source files as in scope.
   exact-name lookups grep is faster and more reliable.
 - If the configured MCP search tool is unavailable, run `search-code search "<natural-language query>" --json`
   from the repo root. `search-code` is an externally installed engine, not a vendored project file.
-  If the executable or repository index is unavailable, semantic retrieval is unavailable: do not
-  substitute grep, continue with the deterministic matcher and clone checks, and record it at
-  finalize (`--retrieval unavailable --cause "<why>"`) so the gate reports the PASS as DEGRADED.
+  If the executable or repository index is unavailable, or the command is denied, semantic
+  retrieval is unavailable: do not retry it, and record it at finalize (`--retrieval unavailable
+  --cause "<why>"`) so the gate reports the PASS as DEGRADED. Grep never changes that status, but
+  still Grep each added symbol's distinctive body tokens: a duplicate confirmed by reading both
+  bodies is a valid finding.
 - Retrieval is hybrid (dense description embedding + sparse BM25 over raw code, RRF-fused). The
   similarity threshold below applies to the dense channel score returned in `similarity`.
 - Similarity threshold: 0.82. Hits below this or in the same file are ignored.
@@ -81,19 +83,30 @@ node $SCRIPT status
 `init` enumerates one checklist item per staged source file under `scanRoots`. If it prints
 "No staged files", exit early — nothing to review.
 
-## 3. Check each staged file
+## 3. Check each staged file — report every duplicate, not only the first
 For each staged file under `scanRoots`:
-- Call the configured search tool with a natural-language description of what the staged symbol DOES
-  (its behaviour/purpose/domain), NOT its name. Run multiple queries per file if it adds multiple
-  symbols. Example good query: "rate-limits concurrent agent executions to prevent heap exhaustion";
-  bad query: "boundedExecuteHandler".
+- List every top-level symbol the staged diff ADDS in the file (`git diff --cached -- <file>`), then
+  check EACH one. When you find a duplicate, record it and KEEP SCANNING the rest of the file and
+  the remaining files: one run names every duplicate, so the author fixes them in one pass.
+- Call the configured search tool with a natural-language description of what the added symbol DOES
+  (its behaviour/purpose/domain), NOT its name — one query per added symbol. Example good query:
+  "rate-limits concurrent agent executions to prevent heap exhaustion"; bad query:
+  "boundedExecuteHandler".
 - Filter results for hits in OTHER files with similarity >= 0.82.
-- For each hit, run `guard-dup-allowlist check <symA> <fileA> <symB> <fileB>` — skip (exit 0) if already allowlisted.
+- For each hit, run `guard-dup-allowlist check <symA> <fileA> <symB> <fileB>` — skip (exit 0) if
+  already allowlisted. If that command cannot run, Grep the file named by `guard.config.json`
+  `allowlistPath` (default `.co-occurrence-allowlist.json`) for both symbol names instead.
+- Read BOTH bodies before failing. A symbol whose old definition this same staged set deletes is a
+  move, not a duplicate.
 - Surface unapproved pairs (symbolA, fileA, symbolB, fileB, similarity) to the root agent — it asks
   the human to approve (enter a description) or fix.
 - If the human approves: `guard-dup-allowlist add <symA> <fileA> <symB> <fileB> --description "<reason>" --range-a <startA-endA> --range-b <startB-endB>` (line ranges from the search hits — findability metadata).
 - Review the file against the DRY rules below.
-- Mark the file resolved: `node $SCRIPT check-file <path> --pass` or `--fail "reason"`.
+- Mark the file resolved: `node $SCRIPT check-file <path> --pass`, or `--fail "reason"` once per
+  DISTINCT duplicate — repeated `--fail` calls APPEND (up to 3 per file by default;
+  GUARD_REVIEW_MAX_ISSUES_PER_LENS). Every reason starts with the added symbol and its file:line,
+  then the existing symbol and its file:line, then `verbatim` or the concrete difference. Never
+  restate one duplicate twice.
 
 ## 3b. Token clones (sub-chunk + molecule dupes the semantic search misses)
 In HEADLESS COMMIT GATE mode, the deterministic matcher and clone gates already ran before this
@@ -111,7 +124,7 @@ or repeated inline JSX. The jscpd-backed clone detector catches those (verbatim,
 ```bash
 node $SCRIPT finalize --retrieval ok
 # or, when no semantic search query could run:
-node $SCRIPT finalize --retrieval unavailable --cause "<what failed, e.g. remote embeddings unreachable>"
+node $SCRIPT finalize --retrieval unavailable --cause "<the search tool's exact error text>"
 ```
 A passing `finalize` removes the checklist file itself; when the environment needs it kept (gate verification, review evidence) it stays automatically. Never delete it by hand.
 `--retrieval` is how the gate learns whether the semantic check ran: a PASS finalized without it, or

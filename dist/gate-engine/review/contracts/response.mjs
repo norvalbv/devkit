@@ -1,4 +1,14 @@
 /** Shared reviewer response primitives. Domain-specific evidence contracts depend on this module. */
+// A real code location, not any dotted-name:port — the extension allowlist keeps `db.internal:5432`
+// out of the file:line bucket so unrelated findings never fold together.
+export const LOCATION_RE = /([\w@./-]+\.(?:tsx?|mts|cts|jsx?|mjs|cjs|py|go|rs|java|rb|swift|kt|sh|bash|zsh|sql|css|scss|html|vue|svelte|json|ya?ml|toml|md)):(\d+)\b/i;
+/** Every `file:line` an issue string cites, in order — the same allowlist as the fold key. */
+export function issueLocations(issue) {
+    return [...String(issue).matchAll(new RegExp(LOCATION_RE.source, 'gi'))].map((m) => ({
+        file: m[1],
+        line: Number(m[2]),
+    }));
+}
 /**
  * Collapse CRLF and bare CR to LF before any line-oriented contract reads a transcript. `\r\n?`
  * rather than `\r\n`: a judge quoting a line out of a CRLF-checked-out file emits a LONE `\r`,
@@ -14,7 +24,7 @@ export function normalizeLineEndings(raw) {
 // leading dressing class is guarded so it can never consume a line terminator: multiline `^`
 // matches immediately after a bare `\r`, so an unguarded `[\s*#>-]*` swallows the `\n` of a CRLF
 // and every consumer that slices on `.index` gets a fragment ending in a dangling `\r`.
-export const VERDICT_LINE_RE = /^(?:(?![\r\n])[\s*#>-])*VERDICT:\s*\**\s*(PASS|FAIL)\b\**\s*(?:[—–:-]+\s*)?(.*)$/gim;
+export const VERDICT_LINE_RE = /^(?:(?![\r\n])[\s*#>\-\p{Extended_Pictographic}\u{FE0F}\u{200D}])*VERDICT:\s*\**\s*(PASS|FAIL)\b\**[ \t]*(?:[—–:-]+[ \t]*)?(.*)$/gimu;
 export function parseReviewVerdict(raw) {
     const lines = [...String(raw).matchAll(VERDICT_LINE_RE)];
     if (lines.length === 0)
@@ -24,6 +34,18 @@ export function parseReviewVerdict(raw) {
         verdict: last[1].toUpperCase(),
         reason: (last[2] ?? '').replace(/\*+/g, '').trim(),
     };
+}
+// Same guarded dressing as VERDICT_LINE_RE: the marker must open its line, never sit inside prose.
+const ADVISORY_LINE_RE = /^(?:(?![\r\n])[\s*#>-])*ADVISORY:\**[^\S\r\n]*(.+)$/gim;
+export const ADVISORY_CAP = 5;
+const ADVISORY_CHARS = 200;
+/** The judge's `ADVISORY:` lines citing a code location — non-blocking, to resolve before merge. */
+export function parseAdvisories(raw) {
+    const texts = [...normalizeLineEndings(raw).matchAll(ADVISORY_LINE_RE)]
+        .map((m) => m[1].replace(/\*+/g, '').replace(/\s+/g, ' ').trim().slice(0, ADVISORY_CHARS))
+        // The contract asks for a file:line, so `none` or an echoed `<file:line>` is not a finding.
+        .filter((text) => issueLocations(text).length > 0);
+    return [...new Set(texts)].slice(0, ADVISORY_CAP);
 }
 /** Remedy for a cascade that THREW: the gate failed before or around the judge, so pointing the
  *  operator at a judge CLI's auth/quota sends them after a healthy binary (sc-3400). */

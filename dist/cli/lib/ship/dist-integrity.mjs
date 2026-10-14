@@ -14,7 +14,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { treeBlobsAtRef } from '../../../gate-engine/ratchets/tree-blobs.mjs';
 import { assignedNames, ownDirVars, scanShellScript } from '../doctor/hook-gate-scan.mjs';
 import { commitIndexEnv } from '../../../gate-engine/ratchets/commit-index.mjs';
+import { failLine } from '../../../gate-engine/deterministic/reason.mjs';
 import { inspectReleaseOnlyDist, printReleaseOnlyDist } from './preflight/release-only-dist.mjs';
+import { staleNewDist } from './preflight/stale-new-dist.mjs';
 import { ANTI_SLOP_FILES, isDevOnly, MIRRORED_EXT, PACKAGED_ROOT_DIRS, PACKAGED_ROOT_FILES, } from '../fs-helpers.mjs';
 const CLEAN_REPORT = {
     active: false,
@@ -23,6 +25,7 @@ const CLEAN_REPORT = {
     untracked: [],
     unlexable: [],
     missing: [],
+    stale: [],
 };
 function git(root, args) {
     const raw = execFileSync('git', ['-C', root, '--no-optional-locks', ...args]);
@@ -280,10 +283,6 @@ export async function inspectDistIntegrity(root, base, briefedPaths) {
             }
         }
     }
-    // `shipping`, never `required`: briefing cli/new.mts still maps dist/cli/new.mjs into `required`
-    // without putting it in `briefed`, and that asymmetry IS the guard — it is what still catches a
-    // ship that carries source while leaving its build output behind (sc-1199/sc-1246).
-    const untracked = physical.filter((file) => required.has(file) && !willShip(file));
     const added = git(root, [
         'diff-index',
         '--name-only',
@@ -293,6 +292,10 @@ export async function inspectDistIntegrity(root, base, briefedPaths) {
         '--',
         'dist',
     ]);
+    // A file already staged needs briefing, not `git add -f`, so `unbriefed` alone names it.
+    const staged = new Set(added);
+    // `willShip`, never `required`: a briefed source maps its dist into `required` without shipping it.
+    const untracked = physical.filter((file) => required.has(file) && !willShip(file) && !staged.has(file));
     const unbriefed = added.filter((file) => required.has(file) && !briefed.has(file)).sort();
     // `untracked` sees only built files. A source on disk whose artifact is nowhere was never built;
     // a source absent from disk is a deletion, whose stale artifact waits for the release.
@@ -303,7 +306,15 @@ export async function inspectDistIntegrity(root, base, briefedPaths) {
         .filter((file) => !willShip(file))
         .sort();
     unresolved.sort((a, b) => `${a.importer}\0${a.specifier}`.localeCompare(`${b.importer}\0${b.specifier}`));
-    return { active: true, unresolved, unbriefed, untracked, unlexable: unlexable.sort(), missing };
+    return {
+        active: true,
+        unresolved,
+        unbriefed,
+        untracked,
+        unlexable: unlexable.sort(),
+        missing,
+        stale: staleNewDist(root, [...briefed].filter(shipping), atBase, distArtifact),
+    };
 }
 export function shellQuote(value) {
     return `'${value.replaceAll("'", "'\\''")}'`;
@@ -315,7 +326,8 @@ export function printDistIntegrityFailure(report) {
         report.unbriefed.length > 0 ||
         report.unresolved.length > 0 ||
         report.unlexable.length > 0 ||
-        report.missing.length > 0;
+        report.missing.length > 0 ||
+        report.stale.length > 0;
     if (!failed)
         return 0;
     console.error('✗ devkit ship: dist integrity preflight failed.');
@@ -347,6 +359,12 @@ export function printDistIntegrityFailure(report) {
         for (const file of report.missing)
             console.error(`    ${file}`);
         console.error(`  Fix: run \`bun run build\`, then brief ONLY these (ordinary dist churn stays release-only): -- ${report.missing.map(shellQuote).join(' ')}`);
+    }
+    if (report.stale.length > 0) {
+        console.error('  New dist artifacts that differ from a fresh build of their source:');
+        for (const file of report.stale)
+            console.error(`    ${file}`);
+        console.error(`  Fix: run \`bun run build\`, then re-brief these: -- ${report.stale.map(shellQuote).join(' ')}`);
     }
     if (report.untracked.length > 0 || report.unbriefed.length > 0) {
         const paths = [...new Set([...report.untracked, ...report.unbriefed])];
@@ -409,7 +427,7 @@ async function main() {
         process.exitCode = integrity || releaseOnly;
     }
     catch (error) {
-        console.error(`✗ devkit ship: dist integrity preflight could not run — ${error instanceof Error ? error.message : String(error)}`);
+        failLine(`✗ devkit ship: dist integrity preflight could not run — ${error instanceof Error ? error.message : String(error)}`);
         process.exitCode = 1;
     }
 }

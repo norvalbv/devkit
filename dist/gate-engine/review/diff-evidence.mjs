@@ -5,8 +5,8 @@ export function capNamedSegments(segments, { totalCap, segmentCap, hint }) {
     const kept = [];
     const omitted = [];
     const omittedLabels = [];
+    const truncatedLabels = [];
     let used = 0;
-    let truncated = 0;
     let shownBytes = 0;
     for (const seg of segments) {
         const room = totalCap - used;
@@ -22,18 +22,19 @@ export function capNamedSegments(segments, { totalCap, segmentCap, hint }) {
             shownBytes += Buffer.byteLength(seg.content, 'utf8');
         }
         else {
-            truncated += 1;
+            truncatedLabels.push(seg.label);
             shownBytes += Buffer.byteLength(seg.content.slice(0, cap), 'utf8');
             kept.push(`${seg.content.slice(0, cap)}\n[TRUNCATED: ${seg.label} — ${cap} of ${seg.content.length} chars shown; ${hint(seg.label)} for the rest]\n`);
             used += cap;
         }
     }
-    return { kept, omitted, omittedLabels, truncated, shownBytes };
+    return { kept, omitted, omittedLabels, truncatedLabels, shownBytes };
 }
 /** `capNamedSegments` + the OMITTED-list cutoff + the trailing INCOMPLETE-evidence warning —
  * everything after the caller's own leading context (e.g. a `--stat` map) rides first. */
 export function renderCappedSegments(segments, opts) {
-    const { kept, omitted, truncated } = capNamedSegments(segments, opts);
+    const { kept, omitted, truncatedLabels } = capNamedSegments(segments, opts);
+    const truncated = truncatedLabels.length;
     const omittedBlock = omitted.length > opts.omittedListMax
         ? `${omitted.slice(0, opts.omittedListMax).join('\n')}\n…and ${omitted.length - opts.omittedListMax} more OMITTED segment(s) — ${opts.omittedFooterHint}`
         : omitted.join('\n');
@@ -99,24 +100,31 @@ export function measureDiffEvidenceCap(fullDiff) {
             omitted_files: 0,
             truncated_files: 0,
         };
-    const { omitted, truncated, shownBytes } = capDiffSegments(namedDiffSegments(diff));
+    const { omitted, truncatedLabels, shownBytes } = capDiffSegments(namedDiffSegments(diff));
     return {
         evidence_bytes_shown: shownBytes,
         omitted_files: omitted.length,
-        truncated_files: truncated,
+        truncated_files: truncatedLabels.length,
     };
 }
 export function measureDiffCoverage(fullDiff) {
     const diff = String(fullDiff);
     const segments = namedDiffSegments(diff);
     if (diff.length <= EVIDENCE_TOTAL_CAP)
-        return { file_count: segments.length, omitted_files: 0, truncated_files: 0, omitted_paths: [] };
-    const { omittedLabels, truncated } = capDiffSegments(segments);
+        return {
+            file_count: segments.length,
+            omitted_files: 0,
+            truncated_files: 0,
+            omitted_paths: [],
+            truncated_paths: [],
+        };
+    const { omittedLabels, truncatedLabels } = capDiffSegments(segments);
     return {
         file_count: segments.length,
         omitted_files: omittedLabels.length,
-        truncated_files: truncated,
+        truncated_files: truncatedLabels.length,
         omitted_paths: omittedLabels.slice(0, OMITTED_LIST_MAX),
+        truncated_paths: truncatedLabels.slice(0, OMITTED_LIST_MAX),
     };
 }
 /** Per-file capped diff evidence + explicit omission accounting. `inventory` (the full `--stat`

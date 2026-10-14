@@ -20,7 +20,7 @@ local patch ("flow editor got a modal") *churns*. Write the durable thing.
 - `docs/decisions/INDEX.md` — derived spine: current **Target** per axis. Shows the Target, never a
   note. Regenerable; holds no history.
 
-CLI: `guard-decisions` (`add --target` · `add --note` · `amend --target` · `amend --note` · `amend --note-replace` · `query` · `list` · `show` · `check` · `reindex`).
+CLI: `guard-decisions` (`add --target` · `add --note` · `amend --target` · `amend --note` · `amend --note-replace` · `rescope` · `query` · `list` · `show` · `check` · `reindex`).
 
 ## The bar — is this log-worthy, and at what altitude? (LAYERED)
 
@@ -72,7 +72,8 @@ guard-decisions add <slug> --target \
   Context) or the value (that's Consequences).
 - **`--scope`** = files/area this target governs (comma-separated globs) → decides where the ruling is
   loaded: the pre-edit brief, the commit-time decision and reviewer judges, and the on-demand
-  **alignment check** (Capture C). Without one, only a semantic match can surface it.
+  **alignment check** (Capture C). Without one, only a semantic match can surface it. What each
+  of those is shown: "What the gates read" below.
 - **`--anchored-bet`** = the `frink-identity` confidence the target rests on; `[BET]` = cheap to
   revisit. `[VALIDATED]` asserts the originating failure (Context) no longer occurs.
 - **`--revisit-when`** = the 100-year test made mechanical: the concrete condition under which this
@@ -149,6 +150,31 @@ guard-decisions add <slug> --note "flat→raw payload because the extractor was 
 A `- <date> — …` bullet under the current Target. Not a ruling, doesn't touch the INDEX. This is
 where implementation churn lives — so it never masquerades as a target flip.
 
+## What the gates read
+
+Every consumer reads the **current (last) Target block** of an axis. None is shown note text.
+
+| Consumer | Sees | Limit |
+|---|---|---|
+| Pre-edit brief | Ruling | 3 axes, first 320 chars of each Ruling |
+| Decision judge (`detect`) | Ruling of scope-matched axes | 4,096-byte block |
+| Domain reviewers | Ruling of scope-matched axes, plus semantic hits | 8,192-byte block |
+| Completeness judge | Ruling of scope-matched axes, plus semantic hits | none |
+| `check-alignment` | Ruling, plus Vision-fit (Context when there is none) | per Target |
+| `decision-checks` | the linked Check and the effective Scope | per link |
+
+- A block over its byte limit drops whole Rulings and names them in an `OMITTED:` line. The brief
+  clips instead, so put the operative wording first in the Ruling.
+- A note can help retrieval find an axis and prints in `query`, but a clarification written as a
+  note changes nothing a judge reads. Only tagged notes are parsed: `**Scope:**` (from `rescope`),
+  `**Check:**` (from `enforce link`) and `**Amends:**` (from `--supersedes`).
+- Wording the gates must act on lives in the Ruling. `amend --target` fixes an uncommitted Target; a
+  committed one moves only by a re-target, which still needs a real `--evidence-change`.
+- A Scope-only correction is `guard-decisions rescope <slug> --scope "<globs>" --reason "<why>"`,
+  not a re-target. It replaces the effective Scope of the current Target.
+- A new Target starts from its own `--scope`. Nothing is inherited from the previous block or its
+  `rescope` notes, and omitting `--scope` leaves the axis unscoped. Run `show <slug>` first.
+
 ## Append-only — the core invariant (incl. migration)
 
 **Never mutate or delete a written block.** A→B→A is preserved; the *why* of each survives. The
@@ -218,6 +244,24 @@ the weak spot so you deepen the still-uncommitted block — it does **not** bloc
 forces the *fields*; this audits whether they *say* anything). `GUARD_DEPTH_HARD=1` escalates a
 confident THIN to a block. This is the soft-lint pattern from `adrs` + `adr-agent` — not more required
 params, which provably do not help (a Target can satisfy all five required fields and still be shallow).
+
+## Which gates read scoped Targets
+
+Every piece of code that loads scoped Targets, the hook stage it runs in, and whether it can block.
+`cli/__tests__/scoped-target-readers.test.mts` fails when a loader call or a generated hook disagrees with this table.
+
+| Code (devkit package) | Stage | Call | Blocks |
+|---|---|---|---|
+| `gate-engine/decisions/detect.mts` | pre-commit | `guard-decisions detect --gate` | yes: an unrecorded decision |
+| `gate-engine/review/evidence/targets-block.mts` | pre-commit | `guard-review --gate` | yes: security and performance reviewers' Targets block |
+| `gate-engine/review/evidence/commit-message.mts` | pre-commit | `guard-review --gate` | yes: same reviewer fleet |
+| `gate-engine/review/evidence/findings.mts` | pre-commit | `guard-review --gate` | no: an advisory hint when a failed reviewer cites a Target outside its Scope |
+| `gate-engine/review/completeness.mts` | commit-msg, and pre-commit on the ship path (review guard only) | `guard-review completeness --gate` | yes: top 6 Targets, a contradicted one is a finding |
+| `gate-engine/review/cli.mts` | on-demand | `guard-review scan` | no |
+| `gate-engine/decisions/scoped-targets.mts` | on-demand (feature-critique) | `guard-decisions scoped-targets` | no |
+| `agents-hooks/decision-scope-brief.mjs` | pre-edit | `guard-decisions scoped-targets` | no |
+| `gate-engine/decisions/check-alignment.mts` | on-demand | `guard-decisions check-alignment --gate` | no |
+| `gate-engine/decisions/drift.mts` | on-demand | `guard-decisions drift` | no |
 
 ## Common mistakes
 

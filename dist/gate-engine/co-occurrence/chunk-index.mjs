@@ -302,13 +302,18 @@ export function partitionFresh(pairs, verifier) {
             { chunkId: pair.idA, symbol: pair.symbolA, file: pair.fileA },
             { chunkId: pair.idB, symbol: pair.symbolB, file: pair.fileB },
         ];
-        return { pair, stale: sides.filter((side) => verifier.judge(side) === 'stale') };
+        const judged = sides.map((side) => ({ side, verdict: verifier.judge(side) }));
+        const pick = (want) => judged.filter((j) => j.verdict === want).map((j) => j.side);
+        return { pair, stale: pick('stale'), unverifiable: pick('unverifiable') };
     });
+    // A disabled verifier's per-side verdicts mean nothing, so no side is singled out as unchecked.
     if (!verifier.enabled)
-        return { fresh: pairs, dropped: [] };
+        return { fresh: pairs, dropped: [], unchecked: new Map() };
+    const kept = verdicts.filter((v) => v.stale.length === 0);
     return {
-        fresh: verdicts.filter((v) => v.stale.length === 0).map((v) => v.pair),
-        dropped: verdicts.filter((v) => v.stale.length > 0),
+        fresh: kept.map((v) => v.pair),
+        dropped: verdicts.filter((v) => v.stale.length > 0).map(({ pair, stale }) => ({ pair, stale })),
+        unchecked: new Map(kept.filter((v) => v.unverifiable.length > 0).map((v) => [v.pair, v.unverifiable])),
     };
 }
 /**
@@ -319,7 +324,7 @@ export function partitionFresh(pairs, verifier) {
  * than an approval candidate). Deliberately never contains the allowlist `add` command: a caller
  * scanning the output for a paste-able remedy must not find one here.
  */
-export function freshnessNotice(dropped, opts) {
+export function freshnessNotice(dropped, opts, unchecked = []) {
     const out = [];
     if (dropped.length > 0) {
         const files = [...new Set(dropped.flatMap((d) => d.stale.map((s) => s.file)))];
@@ -332,6 +337,11 @@ export function freshnessNotice(dropped, opts) {
     }
     if (opts.blocking && !opts.verified) {
         out.push('Freshness NOT verified (this index carries no raw_code/id, or its paths do not resolve here).', 'If a symbol above is not defined at its printed range, the index is stale: re-index instead.', '');
+    }
+    // One chunk can sit in several displayed pairs; name it once.
+    const sides = [...new Map(unchecked.map((s) => [s.chunkId, s])).values()];
+    if (opts.blocking && sides.length > 0) {
+        out.push(`Could not check ${sides.length} side(s) above against the working tree (indexed body too short or missing):`, ...sides.map((s) => `  ${s.symbol}  ${s.file}`), '  If that file no longer defines the symbol, the index is stale: re-index it instead of approving.', '');
     }
     return out;
 }

@@ -4,10 +4,10 @@
  * only; stdout belongs to the PR URL. Why: docs/decisions/ship-ci-wait-is-observation-not-intent.md.
  */
 import { execFileSync } from 'node:child_process';
-import { appendFileSync, realpathSync } from 'node:fs';
+import { realpathSync } from 'node:fs';
 import { setTimeout as sleepFor } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
-import { parentSessionId } from '../../../../gate-engine/judge/run-context.mjs';
+import { recordCiEvent } from './telemetry.mjs';
 /** The five states gh collapses `state` into. Ordered for stable rendering, not by severity. */
 export const CHECK_BUCKETS = ['pass', 'fail', 'pending', 'skipping', 'cancel'];
 /** The `--json` fields this reader dereferences, as one gh argument. */
@@ -84,7 +84,7 @@ export function verdictLine(result, pr) {
     const head = `${VERDICT_PREFIX}${result.outcome} pr=${pr}${result.required ? ' scope=required' : ''}`;
     switch (result.outcome) {
         case 'failed':
-            return `${head} failing=${linked(result.failures)}`;
+            return `${head} failing=${linked(result.failures)}${result.attribution ? ` ${result.attribution.line}` : ''}`;
         case 'cancelled':
             return `${head} cancelled=${linked(result.cancelled)}`;
         case 'timed-out':
@@ -298,36 +298,19 @@ function flagValue(argv, name) {
     const i = argv.indexOf(name);
     return i === -1 ? undefined : argv[i + 1];
 }
-/**
- * The queryable half of the verdict, beside ship_pr on the same JSONL stream. Best-effort: telemetry
- * must never be the thing that fails a ship (ship-branch.sh writes its own rows under `|| true`).
- */
-export function recordCiEvent(result, pr, env = process.env) {
-    const file = env.DEVKIT_GATE_EVENTS;
-    const shipId = env.DEVKIT_SHIP_ID;
-    if (!file || !shipId)
-        return;
-    const row = {
-        type: 'ship_ci',
-        ship_id: shipId,
-        devkit_version: env.DEVKIT_TELEMETRY_VERSION ?? null,
-        pr_number: /^\d+$/.test(pr) ? Number(pr) : null,
-        outcome: result.outcome,
-        failing: result.failures.map((f) => f.name),
-        pending: result.pending.map((p) => p.name),
-        waited_s: Math.round(result.elapsedMs / 1000),
-        polls: result.polls,
-        reason: result.unavailableReason ?? null,
-        required: result.required ?? false,
-        ts: new Date().toISOString(),
-    };
-    const parent = parentSessionId(env);
-    const stamped = parent ? { ...row, parent_session_id: parent } : row;
+/** Loaded lazily, so a broken import can never cost the verdict line of any outcome. */
+async function attribute(pr, failures) {
     try {
-        appendFileSync(file, `${JSON.stringify(stamped)}\n`);
+        const { attributeFailures } = await import('../../baseline-status/attribution.mjs');
+        return attributeFailures({ cwd: process.cwd(), pr, failures });
     }
     catch {
-        // A telemetry miss costs a queryable row, never the ship.
+        return {
+            token: 'unknown',
+            inherited: null,
+            fresh: null,
+            line: 'attribution=unknown reason=attribution-error',
+        };
     }
 }
 async function main(argv) {
@@ -350,6 +333,8 @@ async function main(argv) {
         intervalMs,
         settleGraceMs,
     }).then((r) => ({ ...r, required }));
+    if (result.outcome === 'failed')
+        result.attribution = await attribute(pr, result.failures);
     console.error(verdictLine(result, pr));
     recordCiEvent(result, pr);
     return 0; // the ship already succeeded; this process never speaks for it

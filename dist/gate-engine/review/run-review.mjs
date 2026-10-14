@@ -34,11 +34,10 @@ import { envFlag, resolveGuardConfig } from '../config.mjs';
 import { emitReviewCacheHit } from '../judge/gate-events.mjs';
 import { reportGateInfraFailure } from '../judge/odb-probe.mjs';
 import { reportFleetMcp } from '../judge/mcp/profile.mjs';
-import { execJudgeAsync, strictRemedy } from '../judge/run-judge.mjs';
+import { execJudgeAsync } from '../judge/run-judge.mjs';
 import { loadCache } from './cache.mjs';
 import { runCascade } from './cascade/reviewer.mjs';
 import { reportCachedHitNotes } from './contracts/checklist.mjs';
-import { ENGINE_ERROR_REMEDY, RESPONSE_CONTRACT_REMEDY } from './contracts/response.mjs';
 import { baseProvenanceLines, cachedBaseState, cachedPassLine, judgedBaseSha, primeReviewBaseContext, } from './evidence/base-context.mjs';
 import { loadReviewerContext } from './evidence/commit-message.mjs';
 import { coverageFields, partialEvidenceNote } from './evidence/packet/coverage.mjs';
@@ -50,6 +49,7 @@ import { assertNoMassDeletion } from './integrity/mass-deletion.mjs';
 import { gitCached, headHash, stagedFiles, stagedTreeHash } from './evidence/staged-git.mjs';
 import { reviewerTargetSalts } from './evidence/targets-block.mjs';
 import { emitMergedLensResults } from './lens/merge-results.mjs';
+import { reportInconclusive } from './valve/inconclusive.mjs';
 import { narrowSelection, narrowTasks, printRemedy } from './valve/recheck.mjs';
 import { mapLimit, planReviewWork, resolveChunkCap, resolveLensGroups, taskLabel, } from './lens/split.mjs';
 import { clearProgress, writeProgress } from './progress.mjs';
@@ -247,7 +247,7 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
             cachedBase: baseOf.get(s.sel.reviewer.name) ?? null,
         });
     for (const hit of plan.cachedHits) {
-        console.error(cachedPassLine(hit.label, baseOf.get(hit.label) ?? cachedBaseState(cwd, hit.judgedBases, hit.files), hit.part ? 'identical' : 'identical diff', hit.degradedCause !== undefined || hit.mcpDegradedCause !== undefined) +
+        console.error(cachedPassLine(hit.label, baseOf.get(hit.label) ?? cachedBaseState(cwd, hit.judgedBases, hit.files), hit.part ? 'identical' : 'identical diff', hit.mcpDegradedCause !== undefined) +
             // A part's packet is cut from its own files (a chunk's, or the whole scope for a lens).
             partialEvidenceNote(hit.part
                 ? coverageFields([{ diffText: gitCached(cwd, [], hit.files) }])
@@ -358,6 +358,7 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
         emitMergedLensResults(splitParts, firstModel); // never a recheck's partial vector
     const fails = results.filter((r) => r.status === 'fail');
     const findingsPrinted = new Set();
+    let hinted = false;
     for (const f of fails) {
         console.error(`guard-review: ${f.name} FAILED${f.escalated ? ' (escalation-confirmed)' : ''} — ${f.reason || 'see findings below'}`);
         // A split reviewer fails as several lens-part results under one name: render its block ONCE,
@@ -365,9 +366,11 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
         const firstFindingForReviewer = !findingsPrinted.has(f.name);
         if (firstFindingForReviewer) {
             findingsPrinted.add(f.name);
-            const findings = renderFindingsBlockForParts(f.name, fails.filter((r) => r.name === f.name));
+            const parts = fails.filter((r) => r.name === f.name);
+            const findings = renderFindingsBlockForParts(f.name, parts, undefined, !hinted);
             if (findings)
                 console.error(findings);
+            hinted ||= Boolean(findings);
         }
         if (f.transcript)
             console.error(f.transcript.trim());
@@ -383,21 +386,7 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
     if (fails.length > 0 || errors.length > 0)
         return finish(1);
     const inconclusive = results.filter((r) => r.status === 'inconclusive');
-    for (const r of inconclusive) {
-        // Producers carry the machine cause; human-readable reasons are never parsed as an API.
-        const cause = r.inconclusiveCause ?? 'outage';
-        const remedy = cause === 'response-contract'
-            ? RESPONSE_CONTRACT_REMEDY
-            : cause === 'engine'
-                ? ENGINE_ERROR_REMEDY
-                : strictRemedy(cause, r.outageBin, r.outageResetsAt);
-        console.error(strict
-            ? `guard-review: ${r.name} INCONCLUSIVE (${r.reason}) — strict ship mode fails closed.\n` +
-                `   Remedy: ${remedy} (completed verdicts are cached).`
-            : `guard-review: ${r.name} inconclusive — ${r.reason} (fail-open, not cached)`);
-        if (cause === 'response-contract' && r.transcript)
-            console.error(r.transcript.trim());
-    }
+    reportInconclusive(inconclusive, strict);
     if (inconclusive.length > 0)
         return finish(strict ? 3 : 2);
     return finish(0);

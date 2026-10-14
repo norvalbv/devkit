@@ -6,15 +6,15 @@ import { failLine } from '../../../gate-engine/deterministic/reason.mjs';
 import { withLock } from '../../lib/atomic-write.mjs';
 import { OVERLAY_BASE_REFUSAL, reportOverlayContract, } from '../../lib/install/anti-slop/overlay/contract.mjs';
 import { adoptBaselineRuleFindings, baselineFromGroups, compareBaseline, pruneBaseline, readBaseline, writeBaseline, } from '../../lib/install/anti-slop/baseline.mjs';
-import { checkBaselineEnvelope, inheritedBaseAllowance, printNewAntiSlopFindings, refuseCommittedGrowth, relocationEvidence, reportInheritedForgiveness, } from '../../lib/install/anti-slop/baseline-envelope.mjs';
+import { checkBaselineEnvelope, inheritedBaseAllowance, printNewAntiSlopFindings, recordErrorLocations, refuseCommittedGrowth, relocationEvidence, reportInheritedForgiveness, } from '../../lib/install/anti-slop/baseline-envelope.mjs';
 import { ANTI_SLOP_BASELINE_LOCK_REL, ANTI_SLOP_BASELINE_REL, } from '../../lib/install/anti-slop/constants.mjs';
-import { antiSlopRemedyLines } from '../../lib/install/anti-slop/report/remedy.mjs';
+import { antiSlopFailRemedy } from '../../lib/install/anti-slop/report/remedy.mjs';
 import { gitBaselineEnvelope, withStagedAntiSlopSnapshot, } from '../../lib/install/anti-slop/git-snapshot.mjs';
 import { classifyRelocations, printRelocatedAntiSlopFindings, relocatedWarningNote, relocationKey, reportRelocatedFailure, } from '../../lib/install/anti-slop/relocations.mjs';
 import { adoptRelocations, adoptRenames, baselineOrExplain, capabilityReady, count, } from './anti-slop-adopt.mjs';
 import { clearPendingAntiSlopBaselineActivation, readInstalledAntiSlopBaselineMigrationId, readPendingAntiSlopBaselineActivation, } from '../../lib/install/anti-slop/managed-state.mjs';
 import { collectAntiSlopGroups, resolveAntiSlopScope, } from '../../lib/install/anti-slop/runner.mjs';
-import { isOverlayOxcInstall, resolveOxlintEntryConfig } from '../../lib/install/oxc/lifecycle.mjs';
+import { isOverlayOxcInstall } from '../../lib/install/oxc/lifecycle.mjs';
 export const meta = {
     name: 'anti-slop',
     agentFacing: false,
@@ -198,13 +198,15 @@ function check(cwd, args, envelope = null, baseRef) {
         const newErrorCount = errors.reduce((sum, group) => sum + group.additionalCount, 0);
         if (relocated.some((group) => group.severity === 'error')) {
             reportRelocatedFailure(newErrorCount, relocated, baseRef);
+            recordErrorLocations(errors);
             reportOverlayContract(cwd);
             return 1;
         }
         if (errors.length > 0) {
             failLine(`anti-slop: FAIL — ${newErrorCount} new error finding(s); baseline unchanged`);
+            recordErrorLocations(errors);
             const overlay = isOverlayOxcInstall(cwd);
-            for (const line of antiSlopRemedyLines(errors.map((group) => group.ruleId), overlay))
+            for (const line of antiSlopFailRemedy(errors, baseline, overlay, baseRef))
                 console.error(line);
             // Reported on the FAIL path too: a committer reading a block needs the same standing about
             // what this gate does not enforce — no committed base means no shrink-only ratchet.
@@ -323,7 +325,7 @@ export default function run(args, cwd) {
     }
     // The manifest STAMP, not the repository marker: `.devkit/config.json` is absent from every review
     // projection, so a marker read drops the capability from the snapshot exactly where it exists.
-    const overlay = resolveOxlintEntryConfig(cwd) !== null;
+    const overlay = isOverlayOxcInstall(cwd);
     if (overlay && baseRef !== undefined) {
         console.error(OVERLAY_BASE_REFUSAL);
         return 2;

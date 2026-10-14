@@ -4,7 +4,8 @@
  */
 import { emitGateEvent } from '../../judge/gate-events.mjs';
 import { composeTranscript, saveTranscript } from '../../judge/transcript-store.mjs';
-import { reportMcpDegraded } from '../evidence/base-context.mjs';
+import { parseAdvisories } from '../contracts/response.mjs';
+import { reportAdvisories, reportMcpDegraded } from '../evidence/base-context.mjs';
 import { itemFields, mergeItemVectors } from '../evidence/items.mjs';
 import { coverageFields } from '../evidence/packet/coverage.mjs';
 import { lensGroupId } from './groups.mjs';
@@ -76,5 +77,8 @@ export function emitMergedLensResults(splitParts, firstModel) {
         // Once per reviewer, not per group: the digest renders one unverified row per event.
         if (mcpCause)
             reportMcpDegraded(name, mcpCause, mcp?.mcpDegraded?.cached === true);
+        // Live parts only: a cached part's advisories replay with its own cache line.
+        if (merged.status === 'pass')
+            reportAdvisories(name, parseAdvisories(transcript), transcriptRef);
     }
 }

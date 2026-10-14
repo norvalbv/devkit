@@ -485,7 +485,7 @@ if [ "$REWRITE" -eq 1 ]; then
   trap rewrite_ref_cleanup EXIT
   REWRITE_FETCH_ERR=$(mktemp "${TMPDIR:-/tmp}/reship-pin-fetch.XXXXXX")
   pin_rc=0
-  rewrite_remote git fetch -q origin \
+  rewrite_remote git fetch -q --refmap= origin \
     "+refs/heads/$BR:$REWRITE_HEAD_REF" \
     "+refs/heads/$BASE_REF:$REWRITE_BASE_REF" 2>"$REWRITE_FETCH_ERR" || pin_rc=$?
   if [ "$pin_rc" -ne 0 ]; then
@@ -563,6 +563,9 @@ if [ "$REWRITE" -eq 1 ]; then
   if [ "${#MISSING_SCOPE[@]}" -gt 0 ] && [ "$REWRITE_RECEIPT_PROVEN" -eq 0 ]; then
     echo "rewrite brief omits paths from the existing PR:" >&2
     for p in "${MISSING_SCOPE[@]}"; do printf '  %q\n' "$p" >&2; done
+    brief_paths=; for p in "${PATHS[@]}"; do brief_paths="$brief_paths $(printf '%q' "$p")"; done
+    echo "  to ADD a commit on top of the PR instead, drop --base: devkit ship $(printf '%q' "$BR") $(printf '%q' "$TITLE") --pr --$brief_paths" >&2
+    echo "  to REWRITE the PR as one commit, re-run with every listed path added to the brief" >&2
     exit 1
   fi
 
@@ -604,9 +607,6 @@ PREFLIGHT_HINT=
 # ship it never needs refs/heads/$BR free — and being checked out on the branch being re-pushed is
 # the normal way to reach `--pr`, not a problem to report.
 ship_reclaim_orphan_worktrees "$PWD" "$BR" reship || exit 1
-# See ship-branch.sh: advisory judge reachability, before the deterministic chain is paid. Fail-open;
-# the BLOCKING preflights run after the intent write below so a refusal stays resumable (sc-2535).
-ship_judge_preflight "$ROOT"
 
 WT="${TMPDIR:-/tmp}/devkit-reship-${BR//\//-}-$$"
 # Body: --body "<text>" wins (explicit, no temp file); then --body-file; then — on --resume — the
@@ -642,6 +642,9 @@ export DEVKIT_SHIP_ID="${DEVKIT_SHIP_ID:-$(uuidgen 2>/dev/null || echo "${BR//\/
 export DEVKIT_SHIP_REPO="$(devkit_repo_identity "$ROOT")" DEVKIT_SHIP_BRANCH="$BR"
 export DEVKIT_SHIP_FROM_BRANCH="${FROM_BRANCH:-0}"
 export DEVKIT_SHIP_RESUMED=$RESUME
+# See ship-branch.sh: advisory judge reachability, placed after the exports so its row carries the
+# ship id. Fail-open; the BLOCKING preflights run after the intent write below (sc-2535).
+ship_judge_preflight "$ROOT"
 SHIP_INTENT_ARGS=(write --root "$ROOT" --branch "$BR" --mode reship --title "$TITLE")
 [ "$REWRITE" -eq 0 ] || SHIP_INTENT_ARGS+=(--base "$BASE_REF")
 for d in ${LINK_EXTRA[@]+"${LINK_EXTRA[@]}"}; do SHIP_INTENT_ARGS+=(--link "$d"); done
@@ -682,10 +685,11 @@ rewrite_publish_lock_release
 # for an attempt that was never recorded.
 export DEVKIT_SHIP_INTENT_RECORDED=$([ -n "$SHIP_INTENT_GENERATION" ] && echo 1 || echo 0)
 
+# Advisory raw-line preview; it never refuses (the in-worktree guard-size decides).
+ship_size_preflight "$ROOT" "$BASE" "${PATHS[@]}"
 # The blocking preflights, after recording like new-ship's (sc-2389, sc-2535): a refusal leaves this
 # invocation replayable via `devkit ship --resume <branch>`, and each still runs against the caller
 # checkout before the detached worktree exists. See ship-branch.sh (sc-3883) for the hook-dir check.
-ship_size_preflight "$ROOT" "$BASE" "${PATHS[@]}"
 gate_hook_source_preflight "$ROOT" "$BASE" shipping || exit 1
 # An omitted artifact rides `--resume <branch> -- <artifact>`; dist integrity runs before the detached
 # worktree hides ignored dist output. The helper remains a no-op for every consumer repo.
@@ -1040,7 +1044,7 @@ if [ "$REWRITE" -eq 1 ]; then
     base_rc=0
     # Any fetch failure is "unverifiable", never a verdict: fetch exits 1 on ordinary remote errors,
     # and that must not read as merge-base's "not an ancestor" (= rewound) below.
-    rewrite_remote git fetch -q origin "+refs/heads/$BASE_REF:$REWRITE_BASE_REF" >/dev/null 2>&1 || base_rc=2
+    rewrite_remote git fetch -q --refmap= origin "+refs/heads/$BASE_REF:$REWRITE_BASE_REF" >/dev/null 2>&1 || base_rc=2
     # The fetch may land a tip newer than ls-remote saw; judge whatever it pinned.
     [ "$base_rc" -ne 0 ] || { CURRENT_BASE=$(git rev-parse "$REWRITE_BASE_REF"); REWRITE_BASE_PIN=$CURRENT_BASE; }
     [ "$base_rc" -ne 0 ] || git merge-base --is-ancestor "$BASE" "$CURRENT_BASE" || base_rc=$?
@@ -1093,8 +1097,9 @@ if [ "$REWRITE" -eq 1 ]; then
 else
   # Gates can run for many minutes; auto-merge landing inside them must not orphan this commit.
   reship_refuse_closed_pr " (it changed during gates)" "nothing pushed" || exit 1
-  DEVKIT_SHIP_PREPUSH_SKIP_SHA="$SHIP_COMMIT" git -C "$WT" push origin "HEAD:$BR" || {
-    echo "push to origin/$BR rejected (not a fast-forward — the branch advanced). Re-run after fetching." >&2
+  . "$SCRIPT_DIR/push-retry.sh"
+  ship_push_with_retry "$WT" "$SHIP_COMMIT" "$BR" origin "HEAD:$BR" || {
+    echo "push to origin/$BR failed — see git's error above (a non-fast-forward means the branch advanced). Re-run after fetching." >&2
     exit 1
   }
   # A plain push cannot lease on PR state, so a close landing between the read above and the push

@@ -1,3 +1,4 @@
+import { failLine, writeGateReason } from '../deterministic/reason.mjs';
 import { detectChangedComments } from './detect.mjs';
 import { emptyInventory } from './inventory.mjs';
 import { recordShown, shownAnchors } from './shown.mjs';
@@ -31,17 +32,19 @@ function printParagraphs(findings) {
     for (const finding of findings)
         printFinding(finding);
     console.error(PARAGRAPH_REMEDY);
+    writeGateReason(findings.map((f) => `${findingLocation(f)} [${f.id}] — 3+-line comment paragraph: shorten it, or retry unchanged (blocks once)`));
 }
 function printRefs(findings) {
     for (const { path, line, refs, comment } of findings) {
         console.error(`  • ${path}:${line} cites ${refs.join(', ')} — ${comment}`);
     }
     console.error(REF_REMEDY);
+    writeGateReason(findings.map(({ path, line, refs }) => `${path}:${line} cites ${refs.join(', ')} — state the fact or drop the reference`));
 }
 /** The first line is the collector's classification key; keep it byte-stable. */
 function printBlock(paragraphs, refs) {
     const total = paragraphs.length + refs.length;
-    console.error(`guard-comments: ${total} added/modified comment paragraph${total === 1 ? '' : 's'} need a decision.`);
+    failLine(`guard-comments: ${total} added/modified comment paragraph${total === 1 ? '' : 's'} need a decision.`);
     if (paragraphs.length > 0)
         printParagraphs(paragraphs);
     if (refs.length > 0)
@@ -50,13 +53,13 @@ function printBlock(paragraphs, refs) {
 /** A review reports every finding and spends no block, so it never touches the store. */
 const reviewing = () => process.env.DEVKIT_RUN_MODE === 'review';
 function printUnsupported(unsupported) {
-    console.error('guard-comments: configured staged source uses unsupported comment syntax:');
+    failLine('guard-comments: configured staged source uses unsupported comment syntax:');
     for (const item of unsupported)
-        console.error(`  • .${item.extension || '(none)'} — ${item.path}`);
+        failLine(`  • .${item.extension || '(none)'} — ${item.path}`);
     console.error('Add an explicit lexer adapter or exclude that extension from sourceExtensions; no regex fallback was used.');
 }
 function unreadable(cause, deps) {
-    console.error(`guard-comments: comment evidence unreadable — ${cause instanceof Error ? cause.message : cause}`);
+    failLine(`guard-comments: comment evidence unreadable — ${cause instanceof Error ? cause.message : cause}`);
     deps.emit('unreadable', emptyInventory(), [], { kept: 0, refs: 0 });
     return 4;
 }

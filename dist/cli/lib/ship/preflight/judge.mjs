@@ -5,11 +5,33 @@ import { realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { resolveGuardConfig } from '../../../../gate-engine/config.mjs';
 import { readCodexRateLimits } from '../../../../gate-engine/judge/codex/rate-limits.mjs';
-import { isCodexModel, judgeBinForModel } from '../../../../gate-engine/judge/codex/result.mjs';
+import { emitGateEvent } from '../../../../gate-engine/judge/gate-events.mjs';
+import { isCodexModel, judgeBinForModel, judgeProviderOfBin, parseModelSpec, } from '../../../../gate-engine/judge/codex/result.mjs';
 import { formatResetDelta } from '../../../../gate-engine/judge/outage/classify.mjs';
 import { familyOverrideRemedy } from '../../../../gate-engine/judge/outage/family-override.mjs';
 import { claudeLoggedOut, codexLoggedOut } from '../../doctor/judge/judge-auth.mjs';
 import { binResolvable, recordedJudgeGuards, resolvedJudgeRoles, } from '../../doctor/judge/judge-family.mjs';
+/** The env that moves ONE role's model — a refused model needs only its own role moved. */
+const ROLE_ENV = {
+    review: 'GUARD_REVIEW_MODEL',
+    escalation: 'GUARD_REVIEW_ESCALATION_MODEL',
+    // The chunk cap is benched for gpt-5.6-sol only, as in the family move.
+    correctness: 'GUARD_CORRECTNESS_MODEL (with GUARD_CORRECTNESS_CHUNK=off)',
+    sentry: 'GUARD_SENTRY_MODEL',
+};
+/** True only when a FETCHED list omits the model. planType proves ChatGPT auth reached the backend;
+ *  without it codex may serve its bundled catalog, which can omit a model the account has. */
+function servedNowhere(model, limits) {
+    if (limits?.planType === undefined || limits.models === undefined)
+        return false;
+    try {
+        return !limits.models.includes(parseModelSpec(model).model);
+    }
+    catch {
+        // A malformed spec fails at its own spawn; it must not take the whole report down with it.
+        return false;
+    }
+}
 /** Which judge-spawning guards are selected? A repo that runs no judges must be byte-identical to
  *  before. Mirrors the `reviewSelected` gating in cli/lib/doctor/guard-config-checks.mts. */
 export function selectedJudgeGuards(root) {
@@ -49,6 +71,11 @@ export async function judgeReachability(root, deps = DEFAULT_DEPS, guards = { re
                 status.state = 'absent';
             else if (codexDark)
                 status.state = 'unauthenticated';
+            // A refusal outranks a lock: the window resets, the plan's model list does not.
+            else if (servedNowhere(model, codexLimits)) {
+                status.state = 'unavailable';
+                status.served = codexLimits?.visibleModels;
+            }
             else if (codexLimits?.reached)
                 status.state = 'rate-limited';
             else if (codexLimits) {
@@ -63,6 +90,11 @@ export async function judgeReachability(root, deps = DEFAULT_DEPS, guards = { re
                 status.usedPercent = codexLimits.usedPercent;
             if (codexLimits?.windowDurationMins !== undefined)
                 status.windowMins = codexLimits.windowDurationMins;
+            if (codexLimits) {
+                const { planType, reachedType, creditsUsable, ordinaryUsageAllowed, cliVersion } = codexLimits;
+                const facts = { planType, reachedType, creditsUsable, ordinaryUsageAllowed, cliVersion };
+                Object.assign(status, facts);
+            }
         }
         else if (!claudePresent)
             status.state = 'absent';
@@ -87,12 +119,19 @@ function describeWindow(mins) {
 }
 /** Render the report, in the style of `guard-size preflight`. The consequence and remedy appear
  *  only when something is wrong, phrased so an agent cannot read it as "retry and it will work". */
-export function renderPreflight(statuses, now = Date.now()) {
+export function renderPreflight(statuses, now = Date.now(), informational = false) {
     if (statuses.length === 0)
         return [];
-    const lines = ['guard-judge preflight — judge reachability, before the gate chain'];
+    const lines = [
+        informational
+            ? 'guard-judge preflight — judge reachability (informational: this rehearsal runs no judge)'
+            : 'guard-judge preflight — judge reachability, before the gate chain',
+    ];
     for (const s of statuses) {
         const detail = [];
+        // The unavailable verdict names the plan itself.
+        if (s.planType !== undefined && s.state !== 'unavailable')
+            detail.push(`plan ${s.planType}`);
         if (s.usedPercent !== undefined) {
             const window = s.windowMins === undefined ? 'window' : `${describeWindow(s.windowMins)} window`;
             // Floor, never round: 99.6 rendered as "100% … reachable" contradicts itself (sc-3207).
@@ -111,44 +150,101 @@ export function renderPreflight(statuses, now = Date.now()) {
                     ? `\`${s.bin}\` not authenticated`
                     : s.state === 'rate-limited'
                         ? 'EXHAUSTED — USAGE LIMIT REACHED'
-                        : 'not verified';
+                        : s.state === 'unavailable'
+                            ? `NOT AVAILABLE ON THIS ACCOUNT (plan ${s.planType})`
+                            : 'not verified';
         lines.push(`  ${s.role}: ${s.model} via ${s.bin} — ${verdict}${suffix}`);
     }
-    const blocked = statuses.filter((s) => s.state !== 'ok' && s.state !== 'unknown');
+    const blocked = darkStatuses(statuses);
     if (blocked.length === 0)
         return lines;
     const locked = blocked.filter((s) => s.state === 'rate-limited');
     const reset = locked.find((s) => s.resetsAt !== undefined)?.resetsAt;
-    lines.push('⚠️  guard-judge preflight: the gates below will still run, but every reviewer that is not ' +
-        'already cached will fail closed.');
+    lines.push(informational
+        ? '⚠️  guard-judge preflight: this rehearsal runs no judge, but on the real ship every reviewer ' +
+            'that is not already cached will fail closed.'
+        : '⚠️  guard-judge preflight: the gates below will still run, but every reviewer that is not ' +
+            'already cached will fail closed.');
     // Avoids the word "transient" rather than negating it: an agent grepping for that label must
     // not find it here, since a six-day lock wearing it is why this line exists.
     if (locked.length > 0)
         lines.push(reset === undefined
             ? '   A usage limit does not clear on its own — re-running will not help.'
             : `   A usage limit does not clear on its own — re-running will not help for another ${formatResetDelta(reset, now)}.`);
+    const refused = blocked.filter((s) => s.state === 'unavailable');
+    for (const model of new Set(refused.map((s) => s.model))) {
+        const rows = refused.filter((s) => s.model === model);
+        const knobs = rows.map((s) => `${s.role} via ${ROLE_ENV[s.role]}`).join('; ');
+        lines.push(`   This plan does not serve ${model}, so re-running will not help. Move ${knobs} — to a ` +
+            `model the account serves: ${rows[0].served?.join(', ')}.`);
+    }
     // Naming the override, never taking it: a runtime cross-family swap moves spend to an unwatched
     // subscription and puts its verdicts outside the model-keyed cache salt (review-gate-in-chain).
-    const dark = [...new Set(blocked.map((s) => s.bin))];
-    // Presence is resolved once per provider, so one absent row speaks for every role on that bin.
-    const present = !blocked.some((s) => s.bin === dark[0] && s.state === 'absent');
-    lines.push(dark.length > 1
+    const dark = singleDarkBin(blocked);
+    lines.push(dark === undefined
         ? '   Both judge CLIs are dark, so no family move helps — install or authenticate one of them.'
-        : `   To ship inside this window, ${familyOverrideRemedy(dark[0] ?? 'codex', present)}.`);
+        : `   To ship inside this window, ${familyOverrideRemedy(dark.bin, dark.present)}.`);
     return lines;
+}
+const darkStatuses = (statuses) => statuses.filter((s) => s.state !== 'ok' && s.state !== 'unknown');
+/** The one dark judge CLI, or undefined when both are dark. */
+function singleDarkBin(blocked) {
+    const dark = [...new Set(blocked.map((s) => s.bin))];
+    if (dark.length !== 1)
+        return undefined;
+    // Presence is resolved once per provider, so one absent row speaks for every role on that bin.
+    return { bin: dark[0], present: !blocked.some((s) => s.state === 'absent') };
+}
+/** The family move ship repeats at the tail of a blocked attempt, or '' when no single move helps
+ *  (nothing dark, both CLIs dark, or a compound bin whose dark family is unknown). */
+export function familyRemedy(statuses) {
+    const dark = singleDarkBin(darkStatuses(statuses));
+    if (dark === undefined || judgeProviderOfBin(dark.bin) === null)
+        return '';
+    return familyOverrideRemedy(dark.bin, dark.present);
+}
+/** Bounds a provider-supplied value, which the wire can send as a non-string: the sink's rows stay
+ *  intact only as one small append. */
+const clip = (text) => text === undefined ? undefined : `${text}`.slice(0, 64);
+/** The telemetry row: what the preflight read and concluded, so a later reader can join it to the
+ *  same ship's judge_exec rows. `served` stays out to keep the row one small append. */
+export function preflightEvent(statuses) {
+    const codex = statuses.find((s) => isCodexModel(s.model));
+    return {
+        type: 'judge_preflight',
+        roles: statuses.map(({ role, model, bin, state }) => ({ role, model, bin, state })),
+        plan_type: clip(codex?.planType),
+        credits_usable: codex?.creditsUsable,
+        on_credits: codex?.onCredits,
+        reached_type: clip(codex?.reachedType),
+        used_percent: codex?.usedPercent,
+        window_mins: codex?.windowMins,
+        resets_at: codex?.resetsAt,
+        ordinary_usage_allowed: codex?.ordinaryUsageAllowed,
+        codex_version: clip(codex?.cliVersion),
+    };
 }
 async function main(argv) {
     const root = argv[0];
     if (!root) {
-        console.error('usage: ship preflight judge <consumer-root>');
+        console.error('usage: ship preflight judge <consumer-root> [--informational]');
         return 2;
     }
     const guards = selectedJudgeGuards(root);
     if (!guards.review && !guards.sentry)
         return 0;
     const statuses = await judgeReachability(root, DEFAULT_DEPS, guards);
-    for (const line of renderPreflight(statuses))
+    const informational = argv.includes('--informational');
+    for (const line of renderPreflight(statuses, Date.now(), informational))
         console.error(line);
+    // stdout carries ONLY the remedy: ship captures it for the blocked-attempt and dry-gates tails.
+    const remedy = familyRemedy(statuses);
+    if (remedy)
+        console.log(remedy);
+    // Last, so a telemetry fault can never cost the report or the remedy. An informational reading
+    // predicts no judge run, so it has no outcome to be joined with and records no row.
+    if (!informational)
+        emitGateEvent(preflightEvent(statuses));
     return 0;
 }
 // Entry only when this file IS the entry point: a substring test on argv[1] would also fire for

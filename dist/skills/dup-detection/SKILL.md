@@ -120,4 +120,9 @@ carries no `raw_code`/`id`, or its paths don't resolve in this checkout, so the 
 reported unchecked. Verify the ranges by eye before approving anything. `GUARD_DUP_VERIFY_TREE=0`
 turns the check off.
 
+A block may also end with `Could not check N side(s) above against the working tree`, naming a symbol
+and file. That side's indexed body was too short or missing to compare, so the pair was kept without
+proof: open the file, and if it no longer defines the symbol, re-index instead of approving. No such
+line means both sides of every reported pair were found on disk.
+
 **Full reference:** `guard-dup --help` / `guard-dup-allowlist --help`.

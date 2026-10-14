@@ -1,9 +1,10 @@
 import { execFileSync } from 'node:child_process';
 import { commitIndexEnv } from '../ratchets/commit-index.mjs';
-import { existsSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, join, relative, resolve } from 'node:path';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { UNHANDLED_NAME } from './unhandled-reporter.mjs';
+import { canonicalPath, collectionRemedy } from './dependencies.mjs';
+import { readUnhandled, UNHANDLED_NAME } from './unhandled-reporter.mjs';
 /**
  * The regex handed to vitest's `--retry.condition`, which retries ONLY errors whose message matches.
  *
@@ -28,17 +29,11 @@ export const TIMEOUT_FINGERPRINT = 'Error: STACK_TRACE_ERROR';
  * assertion that merely quotes this text is not read as one. */
 const ATTEMPT_TIMEOUT = /^Error: (?:Test|Hook) timed out in (\d+)ms\b/;
 const isTimeoutAttempt = (message) => message.startsWith(TIMEOUT_FINGERPRINT) || ATTEMPT_TIMEOUT.test(message);
+/** A failed Testing Library findBy/waitFor, as vitest 4.1.10 and 5.0.3 write it to the json report.
+ * Identical to a genuine absence (dom-testing-library#1085), so it only earns a hint, never a re-run. */
+const TL_ASYNC_MISS = /^Error: (?:Unable to find |Timed out in waitFor)|\bat waitForWrapper\b/;
 /** A whole-file beforeAll/afterAll timeout lands on the suite, value intact. */
 const HOOK_TIMEOUT = /^Hook timed out in (\d+)ms/;
-/** realpath where possible — vitest reports /private/tmp for a file created under /tmp on macOS. */
-const canonical = (p) => {
-    try {
-        return realpathSync(p);
-    }
-    catch {
-        return resolve(p);
-    }
-};
 /**
  * Read vitest's json report into the two facts worth printing.
  *
@@ -58,10 +53,12 @@ export function readDiagnosis(resultsFile, exitCode = 0) {
         // failed: a.test.ts, a.test.ts" reads as two problems. Insertion order is preserved, so the list
         // still matches the order vitest reported.
         const failedFiles = new Set();
+        const collection = new Map();
         const flaky = [];
         const failedTests = new Map();
         let allTimedOut = true;
         let timeoutMs = null;
+        let testingLibrary = false;
         const observe = (ms) => {
             if (Number.isFinite(ms) && ms > 0)
                 timeoutMs = Math.max(timeoutMs ?? 0, Math.round(ms));
@@ -77,6 +74,8 @@ export function readDiagnosis(resultsFile, exitCode = 0) {
                     failed = true;
                     const name = a.fullName ?? a.title ?? '';
                     failedTests.set(`${file}\0${name}`, { file, name });
+                    if (messages.some((m) => TL_ASYNC_MISS.test(m)))
+                        testingLibrary = true;
                     if (messages.length >= 2 && messages.every(isTimeoutAttempt)) {
                         const budgets = messages.map((m) => ATTEMPT_TIMEOUT.exec(m)?.[1]);
                         if (budgets.every(Boolean)) {
@@ -110,13 +109,21 @@ export function readDiagnosis(resultsFile, exitCode = 0) {
                     observe(Number(hook[1]));
                 else if (suite.message || !failed)
                     allTimedOut = false;
+                // No assertion results at all: nothing ran, so the message is why the file never loaded.
+                if (!hook && suite.message && !suite.assertionResults?.length) {
+                    collection.set(file, { file, message: suite.message.slice(0, 2000) });
+                }
             }
             if (failed || suite.status === 'failed')
                 failedFiles.add(file);
         }
         const diagnosis = { failedFiles: [...failedFiles], flaky };
+        if (collection.size > 0)
+            diagnosis.collection = [...collection.values()];
         if (failedFiles.size > 0) {
             diagnosis.failures = { tests: [...failedTests.values()], allTimedOut, timeoutMs };
+            if (testingLibrary)
+                diagnosis.failures.testingLibrary = true;
         }
         else if (exitCode !== 0) {
             diagnosis.unhandled = readUnhandled(join(dirname(resultsFile), UNHANDLED_NAME), exitCode);
@@ -128,25 +135,6 @@ export function readDiagnosis(resultsFile, exitCode = 0) {
         // there is nothing to say — and none of them may cost somebody their test run.
         return null;
     }
-}
-/** The reporter's errors, once each (vitest projects repeat them), or one generic entry when it wrote
- * none: a threshold miss or an empty filter is no error at all, and an older vitest never calls it. */
-function readUnhandled(file, exitCode) {
-    try {
-        const parsed = JSON.parse(readFileSync(file, 'utf8'));
-        const unique = new Map(parsed.map((e) => [`${e.file}\0${e.message}`, e]));
-        if (unique.size > 0)
-            return [...unique.values()];
-    }
-    catch {
-        /* absent or torn — fall through to the generic cause */
-    }
-    return [
-        {
-            file: null,
-            message: `vitest exited ${exitCode} with no failed test — its output above names why: an unhandled error, a coverage threshold, or no test files matched`,
-        },
-    ];
 }
 /**
  * Absolute paths of the staged files, or null when git cannot answer.
@@ -164,11 +152,11 @@ export function stagedFiles(cwd) {
         stdio: ['ignore', 'pipe', 'ignore'],
     });
     try {
-        const top = canonical(git(['rev-parse', '--show-toplevel']).trim());
+        const top = canonicalPath(git(['rev-parse', '--show-toplevel']).trim());
         return git(['diff', '--cached', '--name-only', '-z'])
             .split('\0')
             .filter(Boolean)
-            .map((p) => canonical(join(top, p)));
+            .map((p) => canonicalPath(join(top, p)));
     }
     catch {
         return null;
@@ -192,11 +180,11 @@ export function stagedIntersection(failedFiles, staged) {
     if (staged === null)
         return null;
     const set = new Set(staged);
-    return failedFiles.map(canonical).filter((f) => set.has(f));
+    return failedFiles.map(canonicalPath).filter((f) => set.has(f));
 }
 /** Repo-relative where that is shorter and inside cwd; absolute otherwise. Paths are for humans. */
 export function displayPath(file, cwd) {
-    const rel = relative(canonical(cwd), canonical(file));
+    const rel = relative(canonicalPath(cwd), canonicalPath(file));
     return rel && !rel.startsWith('..') ? rel : file;
 }
 /** "4m", "2h", "3d" — how old the discarded artifact is, so its relevance is judgeable at a glance. */
@@ -211,6 +199,15 @@ export function humanAge(ms) {
 export const RERUN_FLOOR_MS = 25_000;
 /** How far above the observed ceiling a load-starved re-run is given. */
 export const RERUN_MULTIPLIER = 5;
+/** Set to RERUN_MULTIPLIER on the re-run only, for a consumer setup file to scale its own waits by. */
+export const RERUN_SCALE_ENV = 'DEVKIT_COVERAGE_RERUN_SCALE';
+/** The env a pass runs under. Pass 1 strips the scale so an inherited value cannot raise its waits. */
+export function passEnv(rerun, env = process.env) {
+    const { [RERUN_SCALE_ENV]: _inherited, ...rest } = env;
+    return rerun ? { ...rest, [RERUN_SCALE_ENV]: String(RERUN_MULTIPLIER) } : rest;
+}
+/** The consumer-side line that lets a re-run raise Testing Library's findBy/waitFor wait too. */
+export const TL_SCALE_SNIPPET = `configure({ asyncUtilTimeout: 1000 * (Number(process.env.${RERUN_SCALE_ENV}) || 1) })`;
 /** The re-run's timeout: observed ceiling × RERUN_MULTIPLIER, never below RERUN_FLOOR_MS. Observed,
  * not read from config — see the coverage-gate decision (sc-3473). */
 export function raisedTimeoutMs(failures) {
@@ -243,6 +240,7 @@ export function markerCause(diagnosis) {
     return {
         failedFiles: diagnosis?.failedFiles ?? [],
         unhandledErrors: diagnosis?.unhandled,
+        collectionErrors: diagnosis?.collection,
     };
 }
 /** A marker entry we could have written; anything else came from a hand edit and is dropped. */
@@ -267,6 +265,9 @@ export function readClearMarker(coverageDir) {
             failedFiles: Array.isArray(parsed.failedFiles) ? parsed.failedFiles : [],
             ...(Array.isArray(parsed.unhandledErrors) && {
                 unhandledErrors: parsed.unhandledErrors.filter(isUnhandledError),
+            }),
+            ...(Array.isArray(parsed.collectionErrors) && {
+                collectionErrors: parsed.collectionErrors.filter((e) => isUnhandledError(e) && e.file !== null),
             }),
         };
     }
@@ -294,11 +295,15 @@ export function formatDiagnosis(diagnosis, cwd, staged) {
         if (hidden > 0)
             lines.push(`     …and ${hidden} more`);
         lines.push(...stagedSentence(diagnosis.failedFiles, staged, cwd));
+        lines.push(...formatCollectionErrors(diagnosis.collection ?? [], cwd));
         // Said HERE, where the run failed — not only after a rescue — so the remedy arrives before the
         // next full run is spent rather than after it (sc-3473).
         if (diagnosis.failures?.allTimedOut) {
             lines.push('   Every failure timed out — the load-flake shape, not a broken test.');
             lines.push(`   Re-run with a bigger budget: -- --testTimeout=${raisedTimeoutMs(diagnosis.failures)} --maxWorkers=50%`);
+        }
+        if (diagnosis.failures?.testingLibrary) {
+            lines.push('   A Testing Library findBy/waitFor gave up. If it passes alone, it may be load: its wait', '   (asyncUtilTimeout) is not raised by --testTimeout. To let the re-run raise it too, add to', `   your vitest setup file: ${TL_SCALE_SNIPPET}`);
         }
     }
     if (diagnosis.unhandled) {
@@ -325,6 +330,21 @@ function stagedSentence(files, staged, cwd) {
             : `   In your staged diff: ${mine.map((f) => displayPath(f, cwd)).join(', ')}`,
     ];
 }
+/** Files vitest could not load: the first cause, and the install that fixes it when one is named. */
+function formatCollectionErrors(errors, cwd) {
+    const [first] = errors;
+    if (!first)
+        return [];
+    const cause = first.message.split('\n')[0];
+    const lines = [
+        `🚫 ${errors.length} test file(s) failed to COLLECT — no test in them ran. First cause:`,
+        `     ${displayPath(first.file, cwd)} — ${cause}`,
+    ];
+    const remedy = collectionRemedy(first.message, cwd);
+    if (remedy)
+        lines.push(`   A dependency is not installed. Run: ${remedy}`);
+    return lines;
+}
 const formatUnhandled = (errors, cwd) => errors.map((e) => `     ${e.file ? displayPath(e.file, cwd) : 'file unknown'} — ${e.message}`);
 /** The gate's extra lines when the artifact is absent BECAUSE a failed run discarded it. */
 export function formatClearMarker(marker, cwd, now = Date.now()) {
@@ -338,6 +358,7 @@ export function formatClearMarker(marker, cwd, now = Date.now()) {
     if (marker.failedFiles.length > 0) {
         lines.push(`   Failed: ${marker.failedFiles.map((f) => displayPath(f, cwd)).join(', ')}`);
     }
+    lines.push(...formatCollectionErrors(marker.collectionErrors ?? [], cwd));
     if (marker.unhandledErrors?.length) {
         lines.push('   No test failed; the run ended on:');
         lines.push(...formatUnhandled(marker.unhandledErrors, cwd).slice(0, MAX_LISTED_FILES));
@@ -351,6 +372,7 @@ export function formatRerunNotice(budgetMs) {
         '   A retry cannot help here: vitest re-runs a timed-out test at the same ceiling, and under',
         '   load it starves again. The artifact is published only if this complete run passes.',
         '   Opt out with DEVKIT_COVERAGE_NO_RERUN=1 or --retry=0, or pass your own --testTimeout.',
+        `   ${RERUN_SCALE_ENV}=${RERUN_MULTIPLIER} is set for this run, for setup files that scale their waits.`,
         '   Still starving? Also lower parallelism: -- --maxWorkers=50%',
     ];
 }

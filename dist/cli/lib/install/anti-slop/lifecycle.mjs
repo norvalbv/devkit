@@ -8,7 +8,7 @@ import { dirname, join, relative } from 'node:path';
 import { withLock, writeFileAtomic } from '../../atomic-write.mjs';
 import { check } from '../../doctor/check-result.mjs';
 import { digest, packageDir } from '../../fs-helpers.mjs';
-import { assertOxcCapabilityReady, oxcBaseCapabilityIssue, resolveOxlintEntryConfig, syncOxcCapability, } from '../oxc/lifecycle.mjs';
+import { assertOxcCapabilityReady, isOverlayOxcInstall, OVERLAY_ENTRY_REL, oxcBaseCapabilityIssue, resolveOxlintEntryConfig, syncOxcCapability, } from '../oxc/lifecycle.mjs';
 import { resolveOxcRuntime } from '../oxc/runtime.mjs';
 import { ANTI_SLOP_BASELINE_MODE, ANTI_SLOP_BASELINE_LOCK_REL, ANTI_SLOP_CONFIG_REL, ANTI_SLOP_EXECUTION_MODE_ENV, ANTI_SLOP_LOCK_REL, ANTI_SLOP_MANAGED_REL, ANTI_SLOP_MANIFEST_REL, ANTI_SLOP_PLUGIN_API_VERSION, ANTI_SLOP_DEVKIT_RULE_IDS, ANTI_SLOP_RULE_IDS, ANTI_SLOP_UPSTREAM, renderAntiSlopConfig, } from './constants.mjs';
 import { installExecutionModeWrapper } from './execution-mode.mjs';
@@ -241,6 +241,12 @@ function probeIntegration(cwd) {
         };
     }
 }
+/** A stamped overlay lints through its root entry config; without it no lint judges the repo. */
+function overlayEntryIssue(cwd) {
+    if (!isOverlayOxcInstall(cwd) || resolveOxlintEntryConfig(cwd) !== null)
+        return null;
+    return `overlay entry ${OVERLAY_ENTRY_REL} is missing — run \`devkit doctor --fix\``;
+}
 function capabilityHealth(cwd) {
     const manifest = readAntiSlopManifest(cwd);
     if (!manifest) {
@@ -268,7 +274,7 @@ function capabilityHealth(cwd) {
         digest(readFileSync(config)) === manifest.configDigest &&
         digest(readFileSync(probe)) === manifest.probeDigest &&
         digest(readFileSync(probeConfig)) === manifest.probeConfigDigest;
-    const baseIssue = oxcBaseCapabilityIssue(cwd);
+    const baseIssue = oxcBaseCapabilityIssue(cwd) ?? overlayEntryIssue(cwd);
     const baseIntegrated = baseIssue === null;
     const runtime = rulesComplete && bytesOk && baseIntegrated
         ? probeIntegration(cwd)

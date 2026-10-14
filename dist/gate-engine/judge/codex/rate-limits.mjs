@@ -1,5 +1,5 @@
-/** Read the codex account's rate-limit state without spending a token: `account/rateLimits/read`
- *  answers in ~1s while `codex exec` refuses. Advisory-only; every failure mode returns null. */
+/** Read the codex account's rate-limit state and model list without spending a token: both RPCs
+ *  answer in ~1s while `codex exec` refuses. Advisory-only; every failure mode returns null. */
 import { spawn } from 'node:child_process';
 import { plausibleReset } from '../outage/classify.mjs';
 /** Matches judgeBinForModel's resolution so the preflight probes the binary the judges will use. */
@@ -11,6 +11,9 @@ const PROBE_TIMEOUT_MS = 15_000;
 const MAX_OUTPUT = 512 * 1024;
 const INITIALIZE_ID = 1;
 const READ_ID = 2;
+const MODEL_LIST_ID = 3;
+/** Plans whose credits are not trusted to serve `codex exec` past a spent plan limit. */
+const UNCREDITED_PLANS = new Set(['free', 'go']);
 /** A field is reported only when it is a usable number — this also rejects a wrong-typed value,
  *  because `Number.isFinite` is false for strings, null and undefined alike. */
 const usableNumber = (v) => Number.isFinite(v) ? v : undefined;
@@ -78,24 +81,70 @@ export function parseRateLimitsReply(line) {
     // Absent `rateLimitReachedType` alone is NOT "not reached" — the backend maps an unknown kind to
     // None — so a spent window is the second positive signal.
     const planLimited = reachedType !== undefined || exhaustedWindow !== undefined;
+    const planType = usableText(limits.planType);
     // An allowlist: workspace_* kinds void credits upstream, and an unknown kind stays a lock.
-    const covered = creditsUsable && (reachedType === undefined || reachedType === 'rate_limit_reached');
+    // Free/Go credits did not serve codex exec on a live account; paid plans' did (a heuristic).
+    const covered = creditsUsable &&
+        (reachedType === undefined || reachedType === 'rate_limit_reached') &&
+        !(planType !== undefined && UNCREDITED_PLANS.has(planType));
     const snapshot = {
         reached: planLimited && !covered,
         onCredits: planLimited && covered,
     };
     if (reachedType !== undefined)
         snapshot.reachedType = reachedType;
-    const planType = usableText(limits.planType);
     if (planType !== undefined)
         snapshot.planType = planType;
     if (exhaustedWindow !== undefined)
         snapshot.exhaustedWindow = exhaustedWindow;
+    // Raw facts for the telemetry row. With a credits field, false means it named none spendable.
+    if (credits)
+        snapshot.creditsUsable = creditsUsable;
+    const ordinary = parsed.result?.ordinaryUsageAllowed;
+    if (ordinary === true || ordinary === false)
+        snapshot.ordinaryUsageAllowed = ordinary;
     // The reported window is the spent one; with none spent, primary as before.
     const shown = exhaustedWindow === 'secondary' ? secondary : primary;
     if (shown)
         Object.assign(snapshot, shown);
     return snapshot;
+}
+/** The codex CLI version from the `initialize` reply's `userAgent` ("<client>/<version> (…)"), or
+ *  undefined when the line is not that reply or names no version. */
+export function parseInitializeReply(line) {
+    try {
+        // SAFETY: every field is optional and re-checked below, as in parseRateLimitsReply.
+        const parsed = JSON.parse(line);
+        if (parsed?.id !== INITIALIZE_ID)
+            return undefined;
+        return /^[^/\s]+\/(\d[^\s]*)/.exec(usableText(parsed.result?.userAgent) ?? '')?.[1];
+    }
+    catch {
+        return undefined;
+    }
+}
+/** The `model/list` reply as `{ models }`, or null when the line is not that reply. `models` is
+ *  absent for an error (an older codex) or a partial page: neither proves a model is missing. */
+export function parseModelListReply(line) {
+    let parsed;
+    try {
+        // SAFETY: every field is optional and re-checked below, as in parseRateLimitsReply.
+        parsed = JSON.parse(line);
+    }
+    catch {
+        return null;
+    }
+    if (parsed.id !== MODEL_LIST_ID)
+        return null;
+    const data = parsed.result?.data;
+    if (!Array.isArray(data) || parsed.result?.nextCursor)
+        return {};
+    const ids = (list) => [
+        ...new Set(list
+            .flatMap((m) => [usableText(m?.id), usableText(m?.model)])
+            .filter((id) => id !== undefined)),
+    ];
+    return { models: ids(data), visibleModels: ids(data.filter((m) => m?.hidden !== true)) };
 }
 /** Ask the local codex install for its rate-limit state. Resolves null for every unhappy path;
  *  never throws, never blocks, never spends. */
@@ -118,7 +167,11 @@ export function readCodexRateLimits(timeoutMs = PROBE_TIMEOUT_MS) {
         }
         let settled = false;
         let buffered = '';
-        const finish = (value) => {
+        let snapshot = null;
+        let modelList = null;
+        let cliVersion;
+        // A slow or unknown model/list must not erase a rate-limit answer that already arrived.
+        const finish = () => {
             if (settled)
                 return;
             settled = true;
@@ -130,24 +183,26 @@ export function readCodexRateLimits(timeoutMs = PROBE_TIMEOUT_MS) {
             catch {
                 /* already gone */
             }
-            resolve(value);
+            if (snapshot && cliVersion !== undefined)
+                snapshot = { ...snapshot, cliVersion };
+            resolve(snapshot && modelList?.models ? { ...snapshot, ...modelList } : snapshot);
         };
-        const timer = setTimeout(() => finish(null), timeoutMs);
+        const timer = setTimeout(finish, timeoutMs);
         // A daemon that never answers must not keep the ship's event loop alive past its own timeout.
         timer.unref?.();
-        child.on('error', () => finish(null));
+        child.on('error', finish);
         // A child that exits before reading gets EPIPE as an async stream 'error', which the write's try
         // cannot catch; unhandled, it is an uncaught exception that fails the whole run.
-        child.stdin?.on('error', () => finish(null));
-        // Exiting before the reply arrived is itself an answer: we learned nothing.
-        child.on('close', () => finish(null));
+        child.stdin?.on('error', finish);
+        // Exiting early is itself an answer: whatever arrived before it is all we learned.
+        child.on('close', finish);
         child.stderr?.on('data', () => {
             /* diagnostics only; the reply is on stdout */
         });
         child.stdout?.on('data', (chunk) => {
             buffered += chunk.toString();
             if (buffered.length > MAX_OUTPUT) {
-                finish(null);
+                finish();
                 return;
             }
             const lines = buffered.split('\n');
@@ -155,22 +210,23 @@ export function readCodexRateLimits(timeoutMs = PROBE_TIMEOUT_MS) {
             for (const line of lines) {
                 if (!line.trim())
                     continue;
-                const snapshot = parseRateLimitsReply(line);
-                if (snapshot)
-                    finish(snapshot);
+                cliVersion = parseInitializeReply(line) ?? cliVersion;
+                snapshot = parseRateLimitsReply(line) ?? snapshot;
+                modelList = parseModelListReply(line) ?? modelList;
+                if (snapshot && modelList)
+                    finish();
             }
         });
-        // The two JSON-RPC requests this module ever sends; a named shape keeps the writer typed.
+        // The three JSON-RPC requests this module ever sends; a named shape keeps the writer typed.
         const send = (payload) => {
             try {
                 child.stdin?.write(`${JSON.stringify(payload)}\n`);
             }
             catch {
-                finish(null);
+                finish();
             }
         };
-        // `initialize` is mandatory before any other method; the server replies with its own identity,
-        // which we ignore — the handshake is the point, not the answer.
+        // `initialize` is mandatory before any other method; its reply names the CLI version.
         send({
             jsonrpc: '2.0',
             id: INITIALIZE_ID,
@@ -178,5 +234,11 @@ export function readCodexRateLimits(timeoutMs = PROBE_TIMEOUT_MS) {
             params: { clientInfo: { name: 'devkit', title: 'devkit ship preflight', version: '1' } },
         });
         send({ jsonrpc: '2.0', id: READ_ID, method: 'account/rateLimits/read', params: {} });
+        send({
+            jsonrpc: '2.0',
+            id: MODEL_LIST_ID,
+            method: 'model/list',
+            params: { includeHidden: true, limit: 200 },
+        });
     });
 }

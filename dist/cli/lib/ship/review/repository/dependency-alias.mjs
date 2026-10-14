@@ -3,7 +3,7 @@
 import { spawnSync } from 'node:child_process';
 import { lstatSync, realpathSync, statSync } from 'node:fs';
 import { basename, dirname, join, relative, resolve } from 'node:path';
-import { dependencyInstallRemedy, missingDeclaredDependencies, } from '../../dependency-preflight.mjs';
+import { dependencyInstallRemedy, missingDeclaredDependencies, } from '../../../../../gate-engine/coverage/dependencies.mjs';
 import { reviewPathWithin } from '../runtime-paths.mjs';
 import { fail, gitEnvironment } from '../shared/common.mjs';
 /** Tool caches a shared install churns under every worktree's runs; the private runtime regenerates

@@ -1,18 +1,19 @@
 // One digest row per blocking fingerprint (sc-3212): cut to one line, `reason` named only the
 // first, so waiving it still left the ship blocked. See the gate-verdict-attribution note.
-import { shellWord } from '../../../../gate-engine/review/valve/shell-word.mjs';
+import { waiveCommand } from '../../../../gate-engine/review/valve/shell-word.mjs';
 import { count, oneLine, textOf } from './fields.mjs';
+import { issuesUnder } from './trend.mjs';
 const FINGERPRINT = /^[0-9a-f]{12}$/;
-const SHA = /^[0-9a-f]{7,64}$/;
 /** The detail of each row a review_result FAIL contributes, with the fingerprint it names. */
 export function blockingFindings(e) {
     const reviewer = oneLine(textOf(e.reviewer)) || 'unknown';
-    const sha = textOf(e.blocking_base);
-    const base = SHA.test(sha) ? ` --base ${sha}` : '';
-    const rows = entries(e).map((b) => ({
-        detail: detail(reviewer, b, base),
-        fp: b.fp,
-    }));
+    const base = textOf(e.blocking_base);
+    const all = entries(e);
+    const rows = all.map((b) => {
+        const issues = manyIssues(e, b, all);
+        const row = { detail: detail(reviewer, b, base, issues), fp: b.fp };
+        return issues ? { ...row, findings: issues } : row;
+    });
     const omitted = count(e.blocking_omitted);
     if (omitted > 0) {
         rows.push({
@@ -44,11 +45,19 @@ function entries(e) {
 }
 /** `<lens> [<fp>]` first so the ID survives any cut; a waive hint only from the exact lens, since
  * any other label waives nothing. oneLine capped the lens, so the hint stays bounded. */
-function detail(reviewer, b, base) {
-    const head = `${b.lens} [${b.fp}]`;
-    if (!b.exact)
-        return `${head} — the waive command is in the log`;
-    // The same command shape blockingNote prints, so a copied hint records the waiver it names.
-    const target = shellWord(`${reviewer}:${b.lens}`);
-    return `${head} — fix it, or: guard-review waive ${target} ${b.fp}${base} "why this is not a real defect"`;
+function detail(reviewer, b, base, issues) {
+    const head = `${b.lens} [${b.fp}]${issues ? ` · ${issues} issues, each listed in the log` : ''}`;
+    // The same renderer blockingNote uses, so a copied hint records the waiver it names.
+    const command = b.exact && waiveCommand({ reviewer, lens: b.lens, fp: b.fp, base });
+    const fix = issues ? 'fix them all' : 'fix it';
+    return command ? `${head} — ${fix}, or: ${command}` : `${head} — the waive command is in the log`;
+}
+/** How many issues sit under this ID when more than one, else 0. A cut label, a lens split across
+ * IDs, or a list that dropped IDs cannot be matched to one item, so each of those reads 0. */
+function manyIssues(e, b, all) {
+    const oneId = count(e.blocking_omitted) === 0 && all.filter((o) => o.lens === b.lens).length === 1;
+    if (!b.exact || !oneId)
+        return 0;
+    const issues = issuesUnder(e, b.lens) ?? 0;
+    return issues > 1 ? issues : 0;
 }

@@ -1,7 +1,7 @@
 /** Baseline growth, activation migration, and inherited-debt checks for anti-slop gates. */
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { failLine } from '../../../../gate-engine/deterministic/reason.mjs';
+import { failLine, writeGateReason } from '../../../../gate-engine/deterministic/reason.mjs';
 import { AntiSlopCapabilityError } from './base-capability.mjs';
 import { baselineFromGroups, baselineIncreases, compareBaseline, migrateBaselineRenames, removedBaselineMigrationReceipts, } from './baseline.mjs';
 import { activatedRuleIdsBetween, committedBaselineProbe, withBaseAntiSlopSnapshot, } from './git-snapshot.mjs';
@@ -62,6 +62,10 @@ export function printNewAntiSlopFindings(groups) {
         console.log(`${tag} ${group.ruleId} ${group.file}:${group.line}:${group.column} (+${group.additionalCount})`);
         console.log(`      ${group.diagnostic}`);
     }
+}
+/** Record each new error's rule and location, so the aggregated verdict names what to fix. */
+export function recordErrorLocations(groups) {
+    writeGateReason(groups.map((group) => `ERROR ${group.ruleId} ${group.file}:${group.line}:${group.column} (+${group.additionalCount})`));
 }
 /**
  * Baseline debt still keyed at a path Git renamed. Without a committed baseline only debt that

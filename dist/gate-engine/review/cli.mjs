@@ -12,6 +12,7 @@
  *   guard-review transcript <ref>                print a persisted agent transcript by its ref
  *   guard-review record-agent <label>            record one Task-dispatched agent run (stdin)
  *   guard-review record-feedback prior-art --run <id> ...  claim a correction to a recorded run
+ *   guard-review reference-checkouts [--json]    resolve research.referenceCheckouts to directories
  *
  * Everything resolves from resolveGuardConfig(process.cwd()) — the CONSUMER repo, never the
  * package dir (W-3). Exit contract per sub-engine (run-review.mjs / completeness.mjs headers).
@@ -24,6 +25,7 @@ import { recordAgentRun } from '../judge/run-judge.mjs';
 import { readTranscript } from '../judge/transcript-store.mjs';
 import { clearCache, loadCache } from './cache.mjs';
 import { runRecordFeedback } from '../prior-art/feedback.mjs';
+import { checkReferenceCheckouts, resolveReferenceCheckouts, } from '../prior-art/reference-checkouts.mjs';
 import { runCompleteness } from './completeness.mjs';
 import { gitCached, stagedFiles } from './evidence/staged-git.mjs';
 import { loadReviewerTargetsBlocks, reviewerTargetSalts } from './evidence/targets-block.mjs';
@@ -173,6 +175,12 @@ function recordAgent(label, rest) {
     const billing = flag('billing');
     if (billing)
         extra.billing = billing;
+    // The local leg's counts are self-reported, so a wrong 0 would otherwise read as an honest one.
+    const checkouts = label === 'prior-art' ? checkReferenceCheckouts(output) : {};
+    Object.assign(extra, checkouts);
+    if (checkouts.checkouts_check === 'mismatch')
+        console.error(`guard-review: prior-art reported ${JSON.stringify(checkouts.checkouts_claimed)} reference ` +
+            `checkouts; \`guard-review reference-checkouts\` resolves ${JSON.stringify(checkouts.checkouts_actual)}`);
     const { ref, telemetry } = recordAgentRun({
         label,
         output,
@@ -183,7 +191,19 @@ function recordAgent(label, rest) {
         ...(Number.isFinite(duration) && duration >= 0 ? { durationMs: duration } : {}),
         extra,
     });
-    console.log(JSON.stringify({ ...receipt, transcript_ref: ref, telemetry }));
+    console.log(JSON.stringify({ ...receipt, ...checkouts, transcript_ref: ref, telemetry }));
+    return 0;
+}
+/** `guard-review reference-checkouts [--json]` — what the prior-art local leg may read. */
+function printReferenceCheckouts(json) {
+    const { declared, resolved } = resolveReferenceCheckouts();
+    const counts = { declaredCheckouts: declared.length, resolvedCheckouts: resolved.length };
+    if (json)
+        console.log(JSON.stringify({ ...counts, resolved }));
+    else
+        console.log([`${counts.resolvedCheckouts} resolved from ${counts.declaredCheckouts} declared`]
+            .concat(resolved)
+            .join('\n'));
     return 0;
 }
 async function run(argv) {
@@ -245,6 +265,8 @@ async function run(argv) {
         process.env.DEVKIT_AGENT_RUN_ID ||= `feedback-${randomUUID()}`;
         return runRecordFeedback(rest.slice(1));
     }
+    if (cmd === 'reference-checkouts')
+        return printReferenceCheckouts(rest.includes('--json'));
     console.error('Usage: guard-review --gate | completeness --gate <msg-file> | scan | lens <reviewer>[:<lens>] | clear-cache | ' +
         'waive <reviewer>[:<lens>] <id> [--base <sha>] "<why>" | waive --list | transcript <ref> | ' +
         'record-agent <label> [--request-file <path>] [--model <m>] [--duration-ms <n>] ' +
@@ -252,7 +274,7 @@ async function run(argv) {
         '[--input-tokens <n>] [--output-tokens <n>] [--cache-creation <n>] [--cache-read <n>] ' +
         '[--cost-usd <n>] [--session-id <dispatched-agent-session>] [--billing subscription] | ' +
         'record-feedback prior-art --run <invocation_id> --claimed-verdict <V> [--claimed-framing <F>] ' +
-        '[--supersedes <feedback_id>] --source root|user --reason "<why>"');
+        '[--supersedes <feedback_id>] --source root|user --reason "<why>" | reference-checkouts [--json]');
     return 2;
 }
 run(process.argv.slice(2)).then((code) => process.exit(code), (e) => {

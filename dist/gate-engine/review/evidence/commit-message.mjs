@@ -27,7 +27,7 @@ const MESSAGE_CAP_BYTES = 2_048;
 // adjacent authoritative blocks) and the machine-parsed tokens (reviewers.mts VERDICT/OFFENDING
 // regexes tolerate [\s>*#-]* prefixes, so quoting with `>` would NOT defuse them — a leading `¦`
 // breaks the anchored prefix class for both).
-const INSTRUCTION_SHAPED_LINE = /^\s*(?:#{1,6}\s|[\s>*#-]*\**(?:VERDICT|OFFENDING|VIOLATION)\b)/i;
+const FORGEABLE_DIRECTIVE_LINE = /^\s*(?:#{1,6}\s|[\s>*#\-\p{Extended_Pictographic}\u{FE0F}\u{200D}]*\**(?:VERDICT|OFFENDING|VIOLATION)\b)/iu;
 /** Read DEVKIT_COMMIT_MSG_FILE. null on unset/unreadable/empty — NEVER throws (constraint: a
  * missing message degrades to a placeholder, it can't fail a commit). Refuses COMMIT_EDITMSG. */
 export function loadCommitMessage(env = process.env) {
@@ -55,8 +55,8 @@ export function renderCommitMessageBlock(msg) {
         body = `${Buffer.from(body, 'utf8').subarray(0, MESSAGE_CAP_BYTES).toString('utf8')}\n[TRUNCATED: commit message over the ${MESSAGE_CAP_BYTES}-byte cap — ${dropped} bytes dropped]`;
     }
     const neutralized = body
-        .split('\n')
-        .map((line) => (INSTRUCTION_SHAPED_LINE.test(line) ? `¦ ${line}` : line))
+        .split(/\r\n|[\r\n\u2028\u2029]/)
+        .map((line) => (FORGEABLE_DIRECTIVE_LINE.test(line) ? `¦ ${line}` : line))
         .join('\n');
     return ("The commit message (the change's STATED INTENT — advisory context):\n" +
         `─────\n${neutralized}\n─────\n` +

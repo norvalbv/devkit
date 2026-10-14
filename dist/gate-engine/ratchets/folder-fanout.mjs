@@ -12,13 +12,14 @@
 //
 //   bunx guard-fanout freeze   # re-count + write the consumer's baseline
 //   bunx guard-fanout gate     # fail on growth (pre-commit)
+//   bunx guard-fanout preflight -- <path...>   # would adding these paths block?
 //
 // PARAMETERIZED (W-3): scanRoots / fanoutCap / fanoutExempt come from
 // resolveGuardConfig(cwd) — the CONSUMER's guard.config.json + GUARD_* env, never
 // hardcoded. The baseline (.devkit/baselines/fanout.json) is per-repo STATE: it is
 // read/written under the CONSUMER cwd, never the package dir.
 import { existsSync, readdirSync, realpathSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { CONFIG_FILENAME, resolveGuardConfig, resolveTreeExtensions, sourceMatchers, } from '../config.mjs';
 import { exitGate } from '../deterministic/reason.mjs';
@@ -195,6 +196,73 @@ export function fanoutSplitHints(root, files) {
         return [];
     }
 }
+function parent(file) {
+    return file.split('/').slice(0, -1).join('/');
+}
+// A CLI path (./-prefixed, absolute, symlinked, OS separators) in the tally's repo-relative form.
+// The nearest existing ancestor is realpath'd; the leaf never is, since git tracks a symlink itself.
+function toRepoPath(realRoot, file) {
+    const abs = resolve(realRoot, file);
+    let existing = dirname(abs);
+    const missing = [basename(abs)];
+    while (!existsSync(existing) && dirname(existing) !== existing) {
+        missing.unshift(basename(existing));
+        existing = dirname(existing);
+    }
+    return relative(realRoot, join(realpathSync(existing), ...missing))
+        .split(sep)
+        .join('/');
+}
+// Whether the gate's tally would count this one path at all (in scope, impl, not exempt).
+function isCounted(root, file) {
+    return countFanoutFrom(root, [file])?.[parent(file)] !== undefined;
+}
+// The gate's one block rule: over the allowance and, during a commit, grown since HEAD.
+export function fanoutGrew(n, allowed, head, inCommit) {
+    return n > allowed && (!inCommit || n > head);
+}
+// Answers "would adding these paths trip the gate?" before they exist: tracked index plus the paths,
+// judged against HEAD exactly as a commit of them would be. Exit 0 ok, 1 blocks, 2 unavailable.
+export function preflightFanout(root, paths) {
+    const realRoot = realpathSync(root);
+    const requested = paths.map((file) => toRepoPath(realRoot, file));
+    const cfg = resolveGuardConfig(root);
+    const judged = judgeFanout(root, cfg.fanoutCap);
+    if (judged.failOpen) {
+        console.log('guard-fanout preflight: ungoverned repo and no fan-out baseline — opted out');
+        return 2;
+    }
+    const index = indexFiles(root);
+    if (index === null) {
+        console.error('guard-fanout preflight unavailable: could not read the git index');
+        return 2;
+    }
+    const before = countFanoutFrom(root, index) ?? {};
+    const after = countFanoutFrom(root, [...new Set([...index, ...requested])]) ?? {};
+    const head = countFanoutFrom(root, treeFilesAtRef(root, 'HEAD')) ?? {};
+    const judgedPaths = requested.filter((file) => isCounted(root, file));
+    const dirs = [...new Set(judgedPaths.map(parent))].sort();
+    const unjudged = requested.filter((file) => !judgedPaths.includes(file));
+    console.log(`guard-fanout preflight — vs HEAD (cap ${cfg.fanoutCap})`);
+    let blocked = false;
+    for (const dir of dirs) {
+        const [was, now, allowed] = [before[dir] ?? 0, after[dir], judged.allowed(dir)];
+        const row = `   ${dir}: ${was}→${now}/${allowed} impl files`;
+        if (!fanoutGrew(now, allowed, head[dir] ?? 0, true)) {
+            console.log(`${row} — ok (headroom ${Math.max(allowed - now, 0)})`);
+            continue;
+        }
+        blocked = true;
+        const register = isDomainGated(cfg, dir)
+            ? ' and register it in the tree’s structure libDomains'
+            : '';
+        console.log(`${row} — blocks: split into a subfolder${register}`);
+    }
+    if (unjudged.length > 0) {
+        console.log(`   not judged (test, barrel, exempt or outside scanRoots): ${unjudged.join(', ')}`);
+    }
+    return blocked ? 1 : 0;
+}
 function runCli(cmd) {
     const root = process.cwd();
     const cfg = resolveGuardConfig(root);
@@ -243,7 +311,7 @@ function runCli(cmd) {
         // With a clean index (CI or a manual audit) there is no change to attribute, so the whole tree is
         // the subject and drift still blocks. An unborn HEAD has no prior state, which correctly makes
         // every over-cap folder part of the initial commit.
-        const grew = Object.entries(over).filter(([dir, n]) => n > allowed(dir) && (!inCommit || n > (headCounts[dir] ?? 0)));
+        const grew = Object.entries(over).filter(([dir, n]) => fanoutGrew(n, allowed(dir), headCounts[dir] ?? 0, inCommit));
         if (grew.length > 0) {
             const why = [
                 `🚫 Folder fan-out exceeded (cap ${frozen.cap} impl files/folder, any depth):`,
@@ -280,7 +348,11 @@ function runCli(cmd) {
         }
         process.exit(0);
     }
-    console.error('usage: guard-fanout <freeze|gate>');
+    const paths = process.argv.slice(4);
+    if (cmd === 'preflight' && process.argv[3] === '--' && paths.length > 0) {
+        process.exit(preflightFanout(root, paths));
+    }
+    console.error('usage: guard-fanout <freeze|gate|preflight -- path...>');
     process.exit(2);
 }
 // existsSync first: realpathSync throws on a missing argv[1], which would make a plain import throw.

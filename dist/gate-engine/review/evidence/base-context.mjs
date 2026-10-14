@@ -4,7 +4,9 @@
  */
 import { execFileSync } from 'node:child_process';
 import { z } from 'zod';
+import { emitAdvisoryResult } from '../../judge/advisory/emit.mjs';
 import { emitGateEvent } from '../../judge/gate-events.mjs';
+import { ADVISORY_CAP } from '../contracts/response.mjs';
 import { headHash } from './staged-git.mjs';
 const SHA_RE = /^[0-9a-f]{7,40}$/;
 /** A FULL object id (SHA-1 or SHA-256): a stored base is compared exactly, never by prefix. */
@@ -186,14 +188,6 @@ export function boundedCause(cause) {
     const flat = cause.replace(/\s+/g, ' ').trim();
     return flat.length > MAX_CAUSE_CHARS ? `${flat.slice(0, MAX_CAUSE_CHARS - 1)}…` : flat;
 }
-export const CACHED_RETRIEVAL_UNPROVEN = 'cached PASS carries no retrieval record (written before sc-2317, or the record is malformed)';
-/** Why a replayed commit-guard PASS is DEGRADED; only an entry stamped `retrieval: 'ok'` is clean. */
-export function cachedRetrievalDegradation(reviewer, meta) {
-    if (reviewer !== RETRIEVAL_REVIEWER || meta.retrieval === 'ok')
-        return undefined;
-    const cause = z.string().trim().min(1).safeParse(meta.degraded_cause).data;
-    return cause === undefined ? CACHED_RETRIEVAL_UNPROVEN : boundedCause(cause);
-}
 /** The remedy a replayed MCP-degraded PASS names: its cache key does not see the registry, so only a
  * clear forces the re-judge once codebase is back (sc-2837). */
 export const MCP_DEGRADED_REMEDY = 'run guard-review clear-cache to re-judge once codebase is available';
@@ -211,6 +205,23 @@ export function reportMcpDegraded(name, cause, cached = false) {
     const detail = cached ? `${cause} — ${MCP_DEGRADED_REMEDY}` : cause;
     console.error(`⚠️  guard-review: ${name} — DEGRADED: ${detail}`);
     emitGateEvent({ type: 'gate_degraded', judge: name, cause, detail });
+}
+const storedAdvisories = z.array(z.string().min(1));
+/** The advisories the cached PASS entries stored (every part of a split); malformed reads as none. */
+export function cachedAdvisories(...metas) {
+    const all = metas.flatMap((m) => storedAdvisories.safeParse(m.advisories).data ?? []);
+    return all.length ? [...new Set(all)].slice(0, ADVISORY_CAP) : undefined;
+}
+/** A PASS's `ADVISORY:` findings: self-labelled lines (a split merge prints no verdict line to sit
+ * under), where the full reasoning lives, and ONE advisory_result — the digest keeps one per gate. */
+export function reportAdvisories(name, advisories, ref) {
+    if (!advisories?.length)
+        return;
+    for (const a of advisories)
+        console.error(`guard-review: ${name} — advisory (non-blocking): ${a}`);
+    if (ref)
+        console.error(`guard-review: ${name} — full reasoning: guard-review transcript ${ref}`);
+    emitAdvisoryResult(`review:${name}`, 'finding', advisories.join(' | '));
 }
 /** A cached PASS line (`tail` = its provenance), marked and reported when it replays MCP-degraded. */
 export function printCachedPass(name, meta, tail) {

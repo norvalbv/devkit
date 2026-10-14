@@ -1,12 +1,25 @@
-// ONE decision for spawned eslint: --preserve-symlinks only for a symlinked node_modules (gate
-// worktrees) — pnpm's isolated layout already roots correctly and the flag breaks it (sc-2309, #469).
-import { lstatSync } from 'node:fs';
+// ONE decision for spawned eslint, twin of the overlay hook's: --preserve-symlinks only for a linked
+// hoisted install. An isolated store (pnpm, bun --linker isolated) links eslint itself; the flag breaks it.
+import { existsSync, lstatSync } from 'node:fs';
 import { join } from 'node:path';
-export function eslintNodeFlags(cwd) {
+function isLink(path) {
     try {
-        return lstatSync(join(cwd, 'node_modules')).isSymbolicLink() ? ['--preserve-symlinks'] : [];
+        return lstatSync(path).isSymbolicLink();
     }
     catch {
-        return []; // no node_modules at all: nothing to preserve
+        return false;
     }
+}
+export function eslintNodeFlags(cwd) {
+    const modules = join(cwd, 'node_modules');
+    const preserve = isLink(modules) &&
+        !isLink(join(modules, 'eslint')) &&
+        existsSync(join(modules, 'eslint', 'bin', 'eslint.js'));
+    return preserve ? ['--preserve-symlinks'] : [];
+}
+export const LINKED_ISOLATED_STORE = 'a linked isolated install (pnpm, bun --linker isolated) cannot root structure lint at this worktree — run it where node_modules is installed';
+/** A linked node_modules whose eslint is itself a link: no spawn can root the plugin at this worktree. */
+export function linkedIsolatedStore(cwd) {
+    const modules = join(cwd, 'node_modules');
+    return isLink(modules) && isLink(join(modules, 'eslint'));
 }
