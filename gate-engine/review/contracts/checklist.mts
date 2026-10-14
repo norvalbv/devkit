@@ -10,12 +10,14 @@ import {
   RETRIEVAL_REVIEWER,
 } from '../evidence/base-context.mts';
 import { attachItems } from '../evidence/items.mts';
+import { lensGroupId } from '../lens/groups.mts';
 import type { CachedHit } from '../lens/split.mts';
 import { overriddenLine } from '../overrides.mts';
-import type { ReviewerSelection } from '../reviewers.mts';
+import type { Reviewer, ReviewerSelection } from '../reviewers.mts';
 import {
   type ChecklistState,
   cleanupChecklistState,
+  deniedCalls,
   isNamedSkip,
   readChecklistState,
   type ReviewOutcome,
@@ -32,20 +34,20 @@ export async function enforceChecklistContract(
   cwd: string,
   recoveryScheduled: boolean,
   retry: (reason: string) => Promise<ReviewOutcome>,
+  denied?: string[] | null,
 ): Promise<ReviewOutcome> {
   // No stateFile means no artifact to verify; that reviewer's brief carries its own contract.
   if (initial.status !== 'pass' || !selection.reviewer.stateFile) return initial;
   let result = initial;
   const initialState = readChecklistState(cwd, selection.reviewer);
-  const hole = verifyChecklist(initialState, 'PASS');
+  const hole = verifyChecklist(initialState, 'PASS', denied);
   if (hole && recoveryScheduled) {
+    // No "retrying" here: the callback runs no judge, and the solo phase announces itself.
     console.error(
-      `guard-review: ${selection.reviewer.name} — checklist contract not satisfied; retrying once (${hole})`,
+      `guard-review: ${selection.reviewer.name} — checklist contract not satisfied (${hole})`,
     );
     cleanupChecklistState(cwd, selection.reviewer);
     result = await retry(hole);
-    if (initial.transcript && result.transcript)
-      result.transcript = `${initial.transcript}\n\n───── CHECKLIST-CONTRACT RETRY ─────\n${result.transcript}`;
     // The freshest artifact wins: a callback that ran its own judge left one, and classifying that
     // attempt from the pre-cleanup state would report the FIRST attempt's items. Falls back
     // to the captured state for today's callbacks, which run no judge and leave nothing.
@@ -61,6 +63,28 @@ export async function enforceChecklistContract(
     result.inconclusiveCause = 'response-contract';
   }
   return result;
+}
+
+/** The refused tool calls of a cascade's latest spawn; null until a spawn measures them. */
+export interface SpawnDenials {
+  denied: string[] | null;
+}
+
+const DENIED_SHOWN = 3;
+
+/** Name the refused tool calls beside a non-pass outcome; a PASS that lost a test run stays quiet. */
+export function reportDeniedCalls(
+  reviewer: Reviewer,
+  status: ReviewOutcome['status'],
+  denied: string[] | null,
+): void {
+  if (status === 'pass' || !denied?.length) return;
+  const lens = reviewer.lens?.length ? ` [${lensGroupId(reviewer.lens)}]` : '';
+  const more = denied.length > DENIED_SHOWN ? ` (+${denied.length - DENIED_SHOWN} more)` : '';
+  const shown = denied.slice(0, DENIED_SHOWN).map(boundedCause).join(' | ');
+  console.error(
+    `⚠️  guard-review: ${reviewer.name}${lens} — ${deniedCalls(denied)}: ${shown}${more}`,
+  );
 }
 
 /** The recorded retrieval outcome. Anything else — absent, a typo'd status, a blank cause — is not

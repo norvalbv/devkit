@@ -21,6 +21,7 @@ import { parsePriorArtResponse } from '../prior-art/response-contract.mts';
 import {
   type JudgeUsage,
   parseJudgeUsage,
+  recordPermissionDenials,
   unwrapClaudeResult,
   withResultArgs,
 } from './claude-result.mts';
@@ -50,7 +51,6 @@ import {
   type JudgeOutageKind,
 } from './outage/classify.mts';
 import { unavailableMessage, warnNoOutput } from './outage/wording.mts';
-
 import { saveCodexCommands } from './codex/commands.mts';
 import { composeTranscript, saveTranscriptUnique } from './transcript-store.mts';
 
@@ -140,6 +140,8 @@ interface ExecJudgeOpts {
   codexReadOnly?: boolean;
   /** Split-reviewer lens group for judge_exec spend attribution; all parts share one judge label. */
   lens?: string;
+  /** Fires once per measured claude spawn with the tool calls its permission gate refused. */
+  onPermissionDenials?: (denied: string[]) => void;
 }
 
 /** The `--model <m>` value from a judge argv, for the telemetry event; null when absent. */
@@ -270,6 +272,7 @@ function emitJudgeExec(
   if (outageDetail !== undefined) extra.outage_detail = outageDetail;
   const commandsRef = saveCodexCommands(opts.label, stdout, opts.lens);
   if (commandsRef) extra.commands_ref = commandsRef;
+  Object.assign(extra, recordPermissionDenials(opts, stdout));
   recordAgentRun({
     label: opts.label,
     output,
@@ -399,9 +402,6 @@ export function execJudge(opts: ExecJudgeOpts): string | null {
  * count). Callback-form execFile because the promisified variant cannot take stdin: the prompt's
  * evidence (diffstat) goes to the child's stdin by hand. maxBuffer is explicit — an investigating
  * judge's transcript (tool output included) can exceed the 1 MB default.
- *
- * @param {{ label: string, args: string[], input?: string, timeout: number, cwd?: string, onOutage?: (outage: JudgeOutage) => void }} opts
- * @returns {Promise<string|null>}
  */
 export function execJudgeAsync(opts: ExecJudgeOpts): Promise<string | null> {
   const { label, args, input, timeout, cwd, env, onOutage } = opts;

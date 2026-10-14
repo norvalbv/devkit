@@ -26,7 +26,12 @@ import {
   wrapConventionsPrompt,
   wrapPrompt,
 } from '../reviewers.mts';
-import { enforceChecklistContract, retrievalDegradation } from '../contracts/checklist.mts';
+import {
+  enforceChecklistContract,
+  reportDeniedCalls,
+  retrievalDegradation,
+  type SpawnDenials,
+} from '../contracts/checklist.mts';
 import {
   agentBody,
   cleanupChecklistState,
@@ -36,6 +41,7 @@ import {
   readChecklistState,
   withStagedFiles,
 } from '../runtime.mts';
+import { retryableReason } from '../recovery/settle.mts';
 import { checklistAssetRoot } from './consumer-assets.mts';
 
 /** One reviewer cascade outcome, including its persisted transcript when a judge ran. */
@@ -131,14 +137,21 @@ export async function runCascade(
     // private config fail, between the two (sc-2837).
     const mcpSpawn = mcpSpawnTracker(opts.mcpDegradedCause);
     const exec = opts.exec ?? execJudgeAsync;
-    const observed: typeof execJudgeAsync = (o) =>
-      exec({
+    // Reset per exec: only the spawn that produced the verdict may explain it.
+    const spawn: SpawnDenials = { denied: null };
+    const observed: typeof execJudgeAsync = (o) => {
+      spawn.denied = null;
+      return exec({
         ...o,
         onMcpPrepared: (fingerprint, cause) => {
           o.onMcpPrepared?.(fingerprint, cause);
           mcpSpawn.observe(cause);
         },
+        onPermissionDenials: (denied) => {
+          spawn.denied = denied;
+        },
       });
+    };
     let res = await cascadeVerdict(sel, { ...opts, exec: observed }, checklistRoot);
     // Recovery below only schedules/classifies; it deletes this attempt's artifact without
     // running another judge. Keep its exact private evidence for the resulting inconclusive row.
@@ -165,7 +178,9 @@ export async function runCascade(
         // schedule no recovery, so enforceChecklistContract never invokes this callback at all.
         throw new Error(`checklist recovery has no scheduling mode — ${reason}`);
       },
+      spawn.denied,
     );
+    if (!retryableReason(res)) reportDeniedCalls(sel.reviewer, res.status, spawn.denied);
     const disposition = applyOverrideValve(sel, res, cwd, {
       readState: () => readChecklistState(cwd, sel.reviewer),
       stagedDiff: () => gitCached(cwd, [], sel.files),
