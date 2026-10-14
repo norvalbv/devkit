@@ -3,14 +3,11 @@ import path from 'node:path';
 import { loadScopedTargets, matchScope } from '../../decisions/check-alignment.mts';
 import { emitGateEvent } from '../../judge/gate-events.mts';
 import { readTranscript } from '../../judge/transcript-store.mts';
+import { issueLocations, LOCATION_RE } from '../contracts/response.mts';
 import type { ReviewItem, ReviewOutcome } from '../runtime.mts';
 
 const FINDINGS_CAP = 12;
 const ISSUE_LINE_CHARS = 160;
-// A real code location, not any dotted-name:port — the extension allowlist keeps `db.internal:5432`
-// out of the file:line bucket so unrelated findings never fold together.
-const LOCATION_RE =
-  /([\w@./-]+\.(?:tsx?|mts|cts|jsx?|mjs|cjs|py|go|rs|java|rb|swift|kt|sh|bash|zsh|sql|css|scss|html|vue|svelte|json|ya?ml|toml|md)):(\d+)\b/i;
 const LINE_BUCKET = 5;
 /** Printed once per run under the first findings block, whichever reviewer or lens it came from. */
 export const CLASS_FIX_HINT =
@@ -23,14 +20,6 @@ export interface FindingsSummary {
   total: number;
   /** Issue strings folded into an earlier line (same lens + file + 5-line bucket, or same text). */
   deduped: number;
-}
-
-/** Every `file:line` an issue string cites, in order — the same allowlist as the fold key. */
-export function issueLocations(issue: string): { file: string; line: number }[] {
-  return [...String(issue).matchAll(new RegExp(LOCATION_RE.source, 'gi'))].map((m) => ({
-    file: m[1],
-    line: Number(m[2]),
-  }));
 }
 
 function fingerprint(lens: string, issue: string): string {
