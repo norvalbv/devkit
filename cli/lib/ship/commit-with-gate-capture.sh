@@ -492,6 +492,18 @@ SHIP_HOOK_WRAPPER
     printf '%s\n' "$digest_text" | tee -a "$log" "$ship_log" >&2 2>/dev/null || true
   fi
 
+  # A failed config extraGates command is re-run at the cut commit: one line when it fails there too.
+  # Narration under the digest's rules above: after $rc, errexit-suppressed, silent when unsure.
+  if [ "$blocked_json" = '"deterministic"' ]; then
+    local base_tool base_text=""
+    base_tool="$(dirname "${BASH_SOURCE[0]}")/digest/base-attribution.mts"
+    [ -f "$base_tool" ] || base_tool="${base_tool%.mts}.mjs"
+    if [ -f "$base_tool" ]; then
+      base_text="$(node "$base_tool" "$wt" "${ship_log%.log}" 2>/dev/null)" || base_text=""
+    fi
+    [ -z "$base_text" ] || printf '%s\n' "$base_text" | tee -a "$log" "$ship_log" >&2 2>/dev/null || true
+  fi
+
   # sc-2299. The path brief again, next to the verdict. The resume banner already printed it in FULL,
   # but a blocked ship is read by tailing (the digest note above says so), minutes and often megabytes
   # of gate output later — and the question a contradicting finding raises is which files the gates
