@@ -148,8 +148,10 @@ async function publish({ cwd, repo, pr, head, failed }: PublishArgs): Promise<vo
 /** This ship attempt's screenshot reminder, read from its own gate events; null when it was quiet. */
 function uiEvidenceDetail(env: NodeJS.ProcessEnv): string | null {
   const events = readShipEvents(env.DEVKIT_GATE_EVENTS ?? '', env.DEVKIT_SHIP_ID ?? '');
-  // One ship id can span attempts; rows before the newest attempt marker belong to an earlier run.
-  const mine = events.slice(events.map((e) => e.type).lastIndexOf(ATTEMPT) + 1);
+  // One ship id can span attempts: only rows after the newest marker are this run's. With no
+  // marker the rows cannot be attributed, and a reminder that cannot tell stays quiet.
+  const opened = events.map((e) => e.type).lastIndexOf(ATTEMPT);
+  const mine = opened < 0 ? [] : events.slice(opened);
   const rows = mine.filter((e) => e.type === 'advisory_result' && e.gate === UI_EVIDENCE);
   return rows[rows.length - 1]?.detail || null;
 }
