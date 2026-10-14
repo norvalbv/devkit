@@ -33,7 +33,7 @@ export const FALLOW_STAGED = `if command -v fallow >/dev/null 2>&1; then
     [ -z "$DK_FALLOW_DIFF" ] || rm -f "$DK_FALLOW_DIFF"
     if [ "$DK_FALLOW_RC" -eq 1 ]; then
 ${shipRehearsalHint('        ')}
-        exit 1
+        __dk_block_deterministic fallow
     elif [ "$DK_FALLOW_RC" -ne 0 ]; then
         # Exit 2+ is a fallow error (no detectable base branch, bad config), never a finding.
         echo "devkit fallow gate: fallow exited $DK_FALLOW_RC without a verdict (its message is above) — audit skipped, commit not blocked."

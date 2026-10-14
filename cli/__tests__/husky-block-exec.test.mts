@@ -889,17 +889,38 @@ describe('overlay staged gates run before the AI guards (sc-3020)', () => {
     'baseline --preserve-symlinks node_modules/eslint/bin/eslint.js -c eslint.config.devkit.mjs';
   const overlay = (extra = {}) => ({ builder: 'overlay', fallow: true, staged: true, ...extra });
 
-  for (const mode of ['', 'ship', 'dry-gates']) {
+  for (const mode of ['', 'ship']) {
     it(`a failing fallow audit blocks before any AI guard runs (mode=${mode || 'commit'})`, () => {
-      // dry-gates selects only DEVKIT_REVIEW_GUARDS; comments,review models --with-reviewers.
-      const env = { FALLOW_RC: '1', DEVKIT_RUN_MODE: mode };
-      if (mode === 'dry-gates') env.DEVKIT_REVIEW_GUARDS = 'comments,review';
-      const r = runHook(env, REVIEWED, overlay());
+      const r = runHook({ FALLOW_RC: '1', DEVKIT_RUN_MODE: mode }, REVIEWED, overlay());
       expect(r.status).toBe(1);
       expect(r.calls).toContain('fallow audit --diff-stdin');
       for (const ai of AI_CALLS) expect(r.calls).not.toContain(ai);
     });
   }
+
+  // A rehearsal never commits, so --with-reviewers (comments,review) still gets verdicts.
+  it('a failing fallow audit under dry-gates defers, and the reviewers still run', () => {
+    const r = runHook(
+      { FALLOW_RC: '1', DEVKIT_RUN_MODE: 'dry-gates', DEVKIT_REVIEW_GUARDS: 'comments,review' },
+      REVIEWED,
+      overlay(),
+    );
+    expect(r.status).toBe(1);
+    expect(r.calls.indexOf('guard-review --gate')).toBeGreaterThan(r.calls.indexOf('fallow audit'));
+    expect(r.calls).not.toContain('guard-decisions');
+    expect(r.stdout).toContain('✗ dry-gates: failed gates: fallow (findings above).');
+  });
+
+  it('a failing biome overlay in review mode still exits 1, through the finalizer', () => {
+    const r = runHook(
+      { BIOME_RC: '1', DEVKIT_RUN_MODE: 'review', DEVKIT_REVIEW_GUARDS: 'review' },
+      REVIEWED,
+      overlay({ fallow: false, biomeOverlay: true }),
+    );
+    expect(r.status).toBe(1);
+    expect(r.calls.indexOf('biome')).toBeGreaterThan(r.calls.indexOf('guard-review --gate'));
+    expect(r.stdout).toContain('✗ review: failed gates: biome-overlay (findings above).');
+  });
 
   it('a passing fallow audit runs first, then every AI guard', () => {
     const r = runHook({}, REVIEWED, overlay());
@@ -1060,7 +1081,32 @@ describe('overlay lint blocks name the ship --dry-gates rehearsal (sc-2695)', ()
       expect(r.status).toBe(1);
       expect(`${r.stdout}${r.stderr}`).not.toContain(LEAD);
     });
+
+    it(`a failing ${arm} overlay under dry-gates --with-reviewers defers to the finalizer`, () => {
+      const env = { ...rc, DEVKIT_RUN_MODE: 'dry-gates', DEVKIT_REVIEW_GUARDS: 'comments,review' };
+      const r = runHook(env, REVIEWED, overlay(fixture));
+      const label = arm === 'fallow' ? arm : `${arm}-overlay`;
+      expect(r.status).toBe(1);
+      expect(r.calls).toContain('guard-review --gate');
+      expect(r.stdout).toContain(`✗ dry-gates: failed gates: ${label} (findings above).`);
+    });
   }
+
+  it('a plain dry-gates rehearsal reports every failing overlay, then exits 1', () => {
+    const r = runHook(
+      {
+        ESLINT_RC: '1',
+        BIOME_RC: '1',
+        DEVKIT_RUN_MODE: 'dry-gates',
+        DEVKIT_REVIEW_GUARDS: 'comments',
+      },
+      REVIEWED,
+      overlay({ eslintOverlay: true, biomeOverlay: true }),
+    );
+    expect(r.status).toBe(1);
+    expect(r.calls).not.toContain('guard-review');
+    expect(r.stdout).toContain('failed gates: eslint-overlay biome-overlay (findings above).');
+  });
 
   it('an exported-but-empty command (the helper failed) prints no dangling lead', () => {
     const r = runHook(
@@ -1141,6 +1187,13 @@ describe.each(['package', 'standalone'])('staged fallow gate (%s hook)', (builde
     expect(r.status).toBe(1);
     expect(r.calls).toContain('fallow audit --diff-stdin');
     expect(r.calls).not.toContain('guard-review');
+  });
+
+  it('defers a fail verdict under dry-gates, so the selected reviewers still run', () => {
+    const r = run({ FALLOW_RC: '1', DEVKIT_RUN_MODE: 'dry-gates', DEVKIT_REVIEW_GUARDS: 'review' });
+    expect(r.status).toBe(1);
+    expect(r.calls).toContain('guard-review --gate');
+    expect(r.stdout).toContain('✗ dry-gates: failed gates: fallow (findings above).');
   });
 
   it('does not block when fallow errors (exit 2: no detectable base branch, bad config)', () => {

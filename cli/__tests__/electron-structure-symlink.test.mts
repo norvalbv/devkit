@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { structureCmdFor } from '../lib/components.mts';
+import { DK_GATE_BLOCK_HELPERS } from '../lib/husky/gate-policy/block-helpers.mts';
 import { buildOverlayHook } from '../lib/husky/husky-block.mts';
 import { eslintOverlayContent } from '../lib/install/overlay-lint-configs.mts';
 import { testSpawnSync as spawnSync } from './_helpers.mts';
@@ -117,7 +118,10 @@ export default [{
       hook.indexOf('# devkit lint overlay — review mode'),
     );
     expect(step).toContain('devkit eslint overlay (staged)');
-    const result = spawnSync('sh', ['-e', '-c', step], { cwd: worktree, encoding: 'utf8' });
+    const result = spawnSync('sh', ['-e', '-c', `${DK_GATE_BLOCK_HELPERS}\n${step}`], {
+      cwd: worktree,
+      encoding: 'utf8',
+    });
 
     expect(result.status, `stdout: ${result.stdout}\nstderr: ${result.stderr}`).toBe(1);
     expect(result.stdout).toContain('project-structure/folder-structure');
