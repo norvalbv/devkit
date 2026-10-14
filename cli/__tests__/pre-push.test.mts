@@ -270,6 +270,62 @@ describe('devkit repository pre-push hook', () => {
       `${realpathSync(root)}\trun test:run`,
     ]);
   });
+
+  // devkit ci-probe pushes a scratch commit that CI tests at once. The skip is bound to that exact sha
+  // AND to the devkit-probe/ namespace, so the variable can never wave a real branch through.
+  it.each([
+    ['the exact sha to a devkit-probe ref', 'refs/heads/devkit-probe/abc', 'head', true],
+    ['the exact sha to a real branch', 'refs/heads/main', 'head', false],
+    ['another sha to a devkit-probe ref', 'refs/heads/devkit-probe/abc', 'other', false],
+  ])('a probe push of %s (%s, sha=%s) skips the suite: %s', (_label, remoteRef, sha, skipped) => {
+    const { fakeBin, logPath, root } = seedRepository();
+    const head = git(root, 'rev-parse', 'HEAD');
+
+    const result = runPrePush(root, fakeBin, logPath, `HEAD ${head} ${remoteRef} ${ZERO_OID}\n`, {
+      DEVKIT_PROBE_PREPUSH_SKIP_SHA: sha === 'head' ? head : 'c'.repeat(40),
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stderr.includes('is a devkit ci-probe')).toBe(skipped);
+    if (skipped) expect(() => readFileSync(logPath, 'utf8')).toThrow();
+    else expect(readLog(logPath)).toHaveLength(2);
+  });
+
+  it('runs the full suite when a probe push carries a tag, so a tag never rides the skip', () => {
+    const { fakeBin, logPath, root, tagOid } = seedRepository();
+    const head = git(root, 'rev-parse', 'HEAD');
+
+    const result = runPrePush(
+      root,
+      fakeBin,
+      logPath,
+      `HEAD ${head} refs/heads/devkit-probe/abc ${ZERO_OID}\n` +
+        `refs/tags/v1.0.0 ${tagOid} refs/tags/v1.0.0 ${ZERO_OID}\n`,
+      { DEVKIT_PROBE_PREPUSH_SKIP_SHA: head },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).not.toContain('devkit ci-probe');
+    expect(readLog(logPath)).toHaveLength(2);
+  });
+
+  it('runs the full suite when a probe push carries a second, non-probe branch', () => {
+    const { fakeBin, logPath, root } = seedRepository();
+    const head = git(root, 'rev-parse', 'HEAD');
+
+    const result = runPrePush(
+      root,
+      fakeBin,
+      logPath,
+      `HEAD ${head} refs/heads/devkit-probe/abc ${ZERO_OID}\n` +
+        `refs/heads/main ${head} refs/heads/main ${ZERO_OID}\n`,
+      { DEVKIT_PROBE_PREPUSH_SKIP_SHA: head },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).not.toContain('devkit ci-probe');
+    expect(readLog(logPath)).toHaveLength(2);
+  });
 });
 
 // sc-2198: a blocked push now names its base so a correct block is not read as flake. The block
