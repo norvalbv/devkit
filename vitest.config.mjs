@@ -47,6 +47,7 @@ const GIT_INTEGRATION_TESTS = [
   'cli/__tests__/ship-wait-ci.test.mts',
   'cli/__tests__/test-subprocess.test.mts',
   'gate-engine/decisions/__tests__/integrity-staged.test.mts',
+  'gate-engine/deterministic/__tests__/staged-set-scaling.test.mts',
   'gate-engine/ratchets/__tests__/git-index.test.mts',
 ];
 const SHARED_TEST_CONFIG = {
