@@ -78,6 +78,25 @@ const failRow = (gate: string, status = 'fail'): Row => ({
   status,
 });
 
+function writeConfig(dir: string, gates: Record<string, string>): void {
+  writeFileSync(join(dir, 'guard.config.json'), JSON.stringify({ extraGates: gates }));
+}
+
+/** Tracked at the base: the worktree's copy changes. Otherwise untracked, linked in as ship does. */
+function linkOrOverrideConfig(
+  root: string,
+  wt: string,
+  gates: Record<string, string>,
+  tracked: boolean,
+): void {
+  if (tracked) {
+    writeConfig(wt, gates);
+    return;
+  }
+  writeConfig(root, gates);
+  symlinkSync(join(root, 'guard.config.json'), join(wt, 'guard.config.json'));
+}
+
 /** A repo, a gate worktree cut from its HEAD with one staged long file, and the ship's env. */
 function fixture(options: FixtureOptions = {}) {
   const gates = options.gates ?? { 'max-lines': 'node check.mjs' };
@@ -94,22 +113,12 @@ function fixture(options: FixtureOptions = {}) {
   git(root, 'config', 'user.name', 'Devkit Test');
   const files = { 'check.mjs': CHECK, 'base.txt': options.baseText ?? LONG, ...options.files };
   for (const [name, text] of Object.entries(files)) writeFileSync(join(root, name), text);
-  if (options.trackedGates) {
-    writeFileSync(
-      join(root, 'guard.config.json'),
-      JSON.stringify({ extraGates: options.trackedGates }),
-    );
-  }
+  if (options.trackedGates) writeConfig(root, options.trackedGates);
   git(root, 'add', '.');
   git(root, 'commit', '-qm', 'base');
   const sha = git(root, 'rev-parse', 'HEAD');
   git(root, 'worktree', 'add', '-q', '--detach', wt, sha);
-  if (options.trackedGates) {
-    writeFileSync(join(wt, 'guard.config.json'), JSON.stringify({ extraGates: gates }));
-  } else {
-    writeFileSync(join(root, 'guard.config.json'), JSON.stringify({ extraGates: gates }));
-    symlinkSync(join(root, 'guard.config.json'), join(wt, 'guard.config.json'));
-  }
+  linkOrOverrideConfig(root, wt, gates, options.trackedGates !== undefined);
   writeFileSync(join(wt, 'mine.txt'), LONG);
   git(wt, 'add', 'mine.txt');
   const rows = options.rows ?? [failRow('max-lines')];
@@ -214,6 +223,16 @@ describe('attributeToBase', () => {
     expect(f.worktrees()).toBe(2);
   });
 
+  // The narration contract: an unfinished run is non-zero and silent, never a partial answer.
+  it('the CLI exits non-zero and prints nothing when the run fails', () => {
+    const f = fixture();
+    const outPrefix = join(f.tmp, 'no-such-dir', 'ship');
+    const run = testSpawnSync(process.execPath, [MODULE, f.wt, outPrefix], { encoding: 'utf8' });
+
+    expect(run.status).toBe(1);
+    expect(run.stdout).toBe('');
+  });
+
   it.each([
     ['adds the gate', {}],
     ['changes the gate command', { 'max-lines': 'node check.mjs --all' }],
@@ -310,7 +329,7 @@ setInterval(() => {}, 1000);
     try {
       await waitForPath(f.pidFile, 60_000, cli);
       cli.kill('SIGTERM');
-      expect(await exited).toBe(0);
+      expect(await exited).toBe(1);
     } finally {
       cli.kill('SIGKILL');
     }
