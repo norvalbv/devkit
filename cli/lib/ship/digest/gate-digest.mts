@@ -9,6 +9,7 @@
  * blocked: the shell settled that and published it on this ship's ship_result row, which this
  * reader consumes, so the two can never disagree.
  */
+import { groupAdvisories } from './advisory-rows.mts';
 import { blockingFindings } from './blocking.mts';
 import { count, oneLine, textOf } from './fields.mts';
 import { scanBackward } from './tail.mts';
@@ -286,7 +287,7 @@ export function summarise(events: GateEvent[], shipId: string): DigestRow[] {
         gate: e.gate ?? 'unknown',
         state: e.status === 'could_not_run' ? 'could-not-run' : 'finding',
         blocking: false,
-        detail: oneLine(e.detail),
+        detail: textOf(e.detail), // whole: groupAdvisories reads it, then cuts it to one line
         advisory: true,
       });
     } else if (e.type === 'gate_degraded') {
@@ -350,7 +351,7 @@ export function summarise(events: GateEvent[], shipId: string): DigestRow[] {
     }),
     // NOT passed through the `unattributed` null-blocking arm: that arm exists for a run whose
     // blocker is unknowable, and an advisory's non-blocking status is knowable on every run.
-    ...firstPerGate(advisory),
+    ...groupAdvisories(advisory),
     // Deduped for the same reason: pre-commit and commit-msg can both replay one stale verdict.
     ...firstPerGate(unverified),
     ...cached,
