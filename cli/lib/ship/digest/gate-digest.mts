@@ -64,6 +64,8 @@ export interface GateEvent {
   blocking?: { lens?: string; fp?: string }[];
   blocking_omitted?: number;
   blocking_base?: string;
+  /** review_result only: the per-lens checklist vector; absent when it spilled or was never kept. */
+  items?: unknown[];
 }
 
 /** One gate's contribution to this attempt. `gate` is the event's own label, never parsed prose.
@@ -77,7 +79,7 @@ export interface DigestRow {
   detail: string;
   /** The finding's fingerprint, when the gate named one — one gate can yield several rows. */
   fp?: string;
-  /** How many findings this row stands for, when not one: the emitter's omitted-blocking tally. */
+  /** How many findings this row stands for, when not one: omitted IDs, or the issues under one. */
   findings?: number;
   /** From a stage that holds no exit: the reader acts on it, but never by retrying the ship. */
   advisory?: true;
