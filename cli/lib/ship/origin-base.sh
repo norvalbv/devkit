@@ -487,3 +487,48 @@ ship_suggest_base() {
     *) echo "  no branch on origin could be resolved as a base${repo:+ for $repo}; choose the base yourself and pass --base <branch>." ;;
   esac
 }
+
+# usage: ship_pin_origin_base <root> <base> <label> — print origin's <base> oid. The fetch writes no ref,
+# so a sibling fetch holding refs/remotes/origin/<base>.lock cannot fail it. Needs bounded_remote_git.
+ship_pin_origin_base() {
+  local root=$1 base_ref=$2 label=$3 advert pinned="" attempt=0 status oid ref extra lines
+  local candidate_oid candidate_ref candidate_extra
+  advert=$(mktemp "${TMPDIR:-/tmp}/ship-base-advertisement.XXXXXX") || return 1
+  # A force-update between ls-remote and fetch can make the advertised object unavailable; retry once.
+  while [ "$attempt" -lt 2 ] && [ -z "$pinned" ]; do
+    attempt=$((attempt + 1))
+    status=0
+    bounded_remote_git -C "$root" ls-remote --exit-code --heads origin "refs/heads/$base_ref" > "$advert" 2>/dev/null || status=$?
+    case "$status" in
+      0) ;;
+      2) rm -f "$advert"
+         echo "--base: no branch origin/$base_ref (a PR base must be a remote branch — not a sha or a tag)" >&2
+         return 1 ;;
+      *) rm -f "$advert"
+         echo "$label: could not verify origin/$base_ref (ls-remote exit $status)" >&2
+         return 1 ;;
+    esac
+    oid="" ref="" extra="" lines=0
+    while read -r candidate_oid candidate_ref candidate_extra; do
+      lines=$((lines + 1))
+      oid=$candidate_oid ref=$candidate_ref extra=$candidate_extra
+    done < "$advert"
+    if [ "$lines" -ne 1 ] || [ "$ref" != "refs/heads/$base_ref" ] || [ -n "$extra" ]; then
+      rm -f "$advert"
+      echo "$label: origin/$base_ref returned an invalid advertised identity; refusing to guess" >&2
+      return 1
+    fi
+    bounded_remote_git -C "$root" fetch -q --no-tags --no-write-fetch-head --refmap= origin "refs/heads/$base_ref" 2>/dev/null || {
+      rm -f "$advert"
+      echo "$label: could not fetch the advertised origin/$base_ref commit" >&2
+      return 1
+    }
+    if git -C "$root" cat-file -e "$oid^{commit}" 2>/dev/null; then pinned=$oid; fi
+  done
+  rm -f "$advert"
+  [ -n "$pinned" ] || {
+    echo "$label: origin/$base_ref moved incompatibly during both pin attempts; retry" >&2
+    return 1
+  }
+  printf '%s\n' "$pinned"
+}

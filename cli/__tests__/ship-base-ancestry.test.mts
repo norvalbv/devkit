@@ -464,6 +464,30 @@ describe('ship --base refuses an unrelated base before anything exists (sc-2357)
     expect(git(['rev-parse', 'HEAD']).trim()).toBe(headBefore);
   });
 
+  it('refuses a --base that origin rewound off the branch point since this checkout last fetched', () => {
+    const { dir, env, git, bare } = seedShipRepoLocalRemote();
+    const c0 = git(['rev-parse', 'HEAD']).trim();
+    writeFileSync(join(dir, 'note.txt'), 'c1\n');
+    git(['add', 'note.txt'], { stdio: 'ignore' });
+    git(['commit', '-q', '-m', 'landed on work, then rewound on origin'], { stdio: 'ignore' });
+    git(['push', '-q', 'origin', 'HEAD:work'], { stdio: 'ignore' });
+    execFileSync('git', ['-C', bare, 'branch', '-f', 'work', c0], {
+      env: { ...process.env, ...GIT_ENV },
+    });
+    writeFileSync(join(dir, 'note.txt'), 'c1 edited\n');
+
+    const r = spawnSync(
+      '/bin/bash',
+      [scriptPath, 'feat/rewound', 'ship it', '--base', 'work', '--', 'note.txt'],
+      { cwd: dir, input: 'b\n', encoding: 'utf8', env: { ...env, SHIP_DRY_RUN: '1' } },
+    );
+
+    // The pin writes no tracking ref, so the branch point is still the commit this work was cut from.
+    expect(r.status, r.stderr).not.toBe(0);
+    expect(r.stderr).toContain("origin/work moved off this work's branch point");
+    expect(localBranchExists(git, 'feat/rewound')).toBe(false);
+  });
+
   it('fires from a DETACHED checkout, which is the shape the incident was reported from', () => {
     // --base is the one arm that accepts a detached HEAD, so every provisioned worktree reaches this
     // check and the resolvers behind it must not depend on HEAD being a branch.

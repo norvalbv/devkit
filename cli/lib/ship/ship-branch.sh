@@ -423,68 +423,10 @@ if [ "$FROM_BRANCH" -eq 1 ]; then
   # not an input. Pre-commit/new runs pin it before the network step and never chase a moving HEAD.
   [ -n "$LOCAL_BRANCH_EXISTS" ] || SOURCE_HEAD=$(git -C "$ROOT" rev-parse HEAD)
 
-  # Pin the advertised branch OID, then fetch its objects without a destination or FETCH_HEAD. This
-  # uses the normal fetch transport (including HTTPS remote helpers) while creating no ref that can
-  # survive SIGKILL. A force-update between the two calls can make the advertised object unavailable;
-  # one retry obtains a new coherent advertisement rather than guessing.
-  BASE_ADVERTISEMENT=$(mktemp "${TMPDIR:-/tmp}/ship-base-advertisement.XXXXXX")
-  BASE=""
-  base_attempt=0
-  while [ "$base_attempt" -lt 2 ] && [ -z "$BASE" ]; do
-    base_attempt=$((base_attempt + 1))
-    set +e
-    bounded_remote_git -C "$ROOT" ls-remote --exit-code --heads origin "refs/heads/$BASE_REF" > "$BASE_ADVERTISEMENT" 2>/dev/null
-    base_advertise_status=$?
-    set -e
-    case "$base_advertise_status" in
-      0) ;;
-      2) rm -f "$BASE_ADVERTISEMENT"
-         echo "--base: no branch origin/$BASE_REF (a PR base must be a remote branch — not a sha or a tag)" >&2
-         exit 1 ;;
-      *) rm -f "$BASE_ADVERTISEMENT"
-         echo "--from-branch: could not verify origin/$BASE_REF (ls-remote exit $base_advertise_status)" >&2
-         exit 1 ;;
-    esac
-    advertised_oid=""
-    advertised_ref=""
-    advertised_extra=""
-    advertised_lines=0
-    while read -r candidate_oid candidate_ref candidate_extra; do
-      advertised_lines=$((advertised_lines + 1))
-      advertised_oid=$candidate_oid
-      advertised_ref=$candidate_ref
-      advertised_extra=$candidate_extra
-    done < "$BASE_ADVERTISEMENT"
-    if [ "$advertised_lines" -ne 1 ] || [ "$advertised_ref" != "refs/heads/$BASE_REF" ] || [ -n "$advertised_extra" ]; then
-      rm -f "$BASE_ADVERTISEMENT"
-      echo "--from-branch: origin/$BASE_REF returned an invalid advertised identity; refusing to guess" >&2
-      exit 1
-    fi
-    bounded_remote_git -C "$ROOT" fetch -q --no-tags --no-write-fetch-head --refmap= origin "refs/heads/$BASE_REF" 2>/dev/null || {
-      rm -f "$BASE_ADVERTISEMENT"
-      echo "--from-branch: could not fetch the advertised origin/$BASE_REF commit" >&2
-      exit 1
-    }
-    if git -C "$ROOT" cat-file -e "$advertised_oid^{commit}" 2>/dev/null; then BASE=$advertised_oid; fi
-  done
-  rm -f "$BASE_ADVERTISEMENT"
-  [ -n "$BASE" ] || {
-    echo "--from-branch: origin/$BASE_REF moved incompatibly during both pin attempts; retry" >&2
-    exit 1
-  }
+  BASE=$(ship_pin_origin_base "$ROOT" "$BASE_REF" --from-branch) || exit 1
 elif [ -n "$BASE_FLAG" ]; then
-  # origin's tip, not the local copy: in a shared parallel-agent checkout the local base branch is
-  # routinely stale, and a worktree cut from a stale base makes the gates judge code GitHub will never
-  # merge into. (The PR DIFF would still be right — GitHub diffs from the merge-base — so this buys
-  # gate accuracy, not diff accuracy.) reship.sh sets the precedent: it fetches its base the same way.
-  # The source ref is fully-qualified `refs/heads/` — NOT a bare ref, which would also match a tag: a
-  # PR base must be a BRANCH, so a sha or tag has to fail HERE, not at `gh pr create` after the push.
-  # One round-trip proves both (the branch exists AND it is a branch).
-  git fetch -q origin "refs/heads/$BASE_REF" 2>/dev/null || {
-    echo "--base: no branch origin/$BASE_REF (a PR base must be a remote branch — not a sha or a tag)" >&2
-    exit 1
-  }
-  BASE=$(git rev-parse FETCH_HEAD)
+  # origin's tip, not a stale local copy, and a branch (a sha or tag fails here, before the push).
+  BASE=$(ship_pin_origin_base "$ROOT" "$BASE_REF" --base) || exit 1
 
   # Is this base RELATED to the work at all — does it contain the commit this checkout is built on?
   # BLOCKING, and deliberately a different question from the advisory below it (sc-2357). Drift asks
