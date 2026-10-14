@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -7,6 +7,7 @@ import { relIntentPath } from '../lib/ship/ship-intent.mts';
 import { testExecFileSync as execFileSync, testSpawnSync as spawnSync } from './_helpers.mts';
 import {
   createPreservedCommit,
+  dirs,
   ghStub,
   installHook,
   localBranchExists,
@@ -728,6 +729,44 @@ describe('ship --body-file and attempt telemetry', () => {
     expect(intents[0].ship_id).toBe(attempts[0].ship_id);
     expect(intents[1].ship_id).toBe(attempts[1].ship_id);
     expect(attempts[0].ship_id).not.toBe(attempts[1].ship_id);
+    git(['worktree', 'prune']);
+  });
+
+  it('telemetry: a ship launched from a linked worktree names that worktree as root', () => {
+    const { dir, env, git } = seedResumableRepo();
+    const linked = mkdtempSync(join(tmpdir(), 'ship-linked-'));
+    dirs.push(linked);
+    git(['worktree', 'add', '-q', '-b', 'linked-src', linked]);
+    // The seed's hook and manifest ignore are untracked, so a fresh linked checkout has neither.
+    mkdirSync(join(linked, '.husky/_'), { recursive: true });
+    installHook(linked, 'exit 0');
+    writeFileSync(join(linked, '.gitignore'), '.devkit/\n');
+    writeFileSync(join(linked, 'note.txt'), 'hello\n');
+    const sink = join(dir, 'events.jsonl');
+
+    const shipped = runShip(linked, env, ['feat/linked', 'x', '--', 'note.txt'], {
+      input: 'b\n',
+      extraEnv: { SHIP_DRY_RUN: '1', DEVKIT_GATE_EVENTS: sink },
+    });
+    expect(shipped.status, shipped.stderr).toBe(0);
+
+    const toplevel = (cwd) =>
+      execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd, env, encoding: 'utf8' }).trim();
+    const roots = Object.fromEntries(
+      readFileSync(sink, 'utf8')
+        .trim()
+        .split('\n')
+        .map((l) => JSON.parse(l))
+        .filter((e) => e.type.startsWith('ship_'))
+        .map((e) => [e.type, e.root]),
+    );
+    // The caller's checkout: neither the main checkout nor the ephemeral worktree the gates ran in.
+    expect(toplevel(linked)).not.toBe(toplevel(dir));
+    expect(roots).toEqual({
+      ship_intent: toplevel(linked),
+      ship_attempt: toplevel(linked),
+      ship_result: toplevel(linked),
+    });
     git(['worktree', 'prune']);
   });
 });
