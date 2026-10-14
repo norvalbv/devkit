@@ -5,6 +5,7 @@ import {
   SUMMARY_NAME,
   produceTestReport,
 } from '../../lib/baseline-status/produce.mts';
+import { withoutSeparators } from '../../../gate-engine/coverage/vitest-cli.mts';
 
 export const meta = {
   name: 'test-report-run',
@@ -53,5 +54,5 @@ alongside them, never in place of them. Vitest-only; \`devkit baseline-status\` 
 };
 
 export default async function testReportRun(args: string[], cwd: string) {
-  return await produceTestReport(cwd, args);
+  return await produceTestReport(cwd, withoutSeparators(args));
 }

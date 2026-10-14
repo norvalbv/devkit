@@ -8,6 +8,7 @@
  */
 import { formatMissingRootDependencies } from '../../../gate-engine/coverage/dependencies.mts';
 import { produceCoverage } from '../../../gate-engine/coverage/produce.mts';
+import { withoutSeparators } from '../../../gate-engine/coverage/vitest-cli.mts';
 
 export const meta = {
   name: 'coverage-run',
@@ -70,5 +71,5 @@ Exits with vitest's exit code (the re-run's, when one ran). Vitest-only; the gat
 export default async function coverageRun(args: string[], cwd: string) {
   // Seconds now instead of a suite of import failures later. Warns only: not every run needs them all.
   for (const line of formatMissingRootDependencies(cwd)) console.error(line);
-  return await produceCoverage(cwd, args);
+  return await produceCoverage(cwd, withoutSeparators(args));
 }
