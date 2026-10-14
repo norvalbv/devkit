@@ -46,4 +46,14 @@ devkit_parent_session_json() {
   printf ',"parent_session_id":"%s"' "$id"
 }
 
+# The ship caller's checkout as a `,"root":"…"` fragment. Omitted when a control character would
+# invalidate the row, or past 400 bytes: bash splits an append longer than 1024 across two writes.
+devkit_ship_root_json() {
+  local LC_ALL=C root
+  case $1 in ''|*[[:cntrl:]]*) return 0 ;; esac
+  root=$(devkit_json_escape "$1")
+  [ "${#root}" -le 400 ] || return 0
+  printf ',"root":"%s"' "$root"
+}
+
 export DEVKIT_TELEMETRY_VERSION="$(devkit_telemetry_version)"

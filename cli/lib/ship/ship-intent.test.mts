@@ -983,6 +983,7 @@ describe('ship-intent CLI protocol', () => {
     const ev = JSON.parse(readFileSync(sink, 'utf8').trim());
     expect(ev).toMatchObject({
       type: 'ship_intent',
+      root,
       mode: 'ship',
       source_mode: 'explicit',
       ship_id: 'test-ship-1',
@@ -1313,7 +1314,7 @@ describe('recorded --body-file path and resume drift warning (sc-2527)', () => {
     expect(recordOf(o.root).bodyFile).toBe(newer);
   });
 
-  it('keeps the absolute path out of the ship_intent telemetry event', () => {
+  it('keeps the body-file path out of the ship_intent telemetry event', () => {
     const root = seedRepo();
     const sink = join(root, 'events.jsonl');
     writeFileSync(join(root, 'body.md'), 'x');

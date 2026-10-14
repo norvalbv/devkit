@@ -244,6 +244,8 @@ describe('commit_with_gate_capture — executable hook proof', () => {
     const rows = events.filter((e) => e.type === 'ship_attempt' || e.type === 'ship_result');
     expect(rows).toHaveLength(2);
     for (const row of rows) expect(row.parent_session_id).toBe(expected);
+    // The helper is handed the caller's root as its second argument, distinct from the worktree.
+    for (const row of rows) expect(row.root).toBe(root);
   });
 
   // Values must stay free of single quotes: the row is spliced into a single-quoted printf argument.
