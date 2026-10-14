@@ -15,7 +15,7 @@ import {
   BIN_DIRS,
   type BinDir,
   DK_DETERMINISTIC_GATE_HELPER,
-  DK_GATE_BLOCK_HELPERS,
+  gateBlockPrelude,
   REVIEW_FAILURE_FINALIZER,
   shipRehearsalHint,
 } from './gate-policy/block-helpers.mts';
@@ -23,12 +23,7 @@ import { buildPreCommitExit, PRE_COMMIT_PASS_EXIT } from './gate-policy/commit-g
 import { FALLOW_STAGED, FALLOW_STAGED_BLOCK, indent } from './gate-policy/fallow-staged.mts';
 import { formatFragment, overlayFormatters, type StepFormatter } from './format-fragment.mts';
 import { markEnd, markStart } from './husky.mts';
-import {
-  DK_COMMIT_INDEX_CAPTURE,
-  DK_HOOK_HELPERS,
-  DK_REVIEW_BASELINE_HELPER,
-  selectedFragment,
-} from './review-fragments.mts';
+import { DK_COMMIT_INDEX_CAPTURE, selectedFragment } from './review-fragments.mts';
 import { sentryShipPrewarmFragment } from './sentry-fragments.mts';
 import {
   ESLINT_OVERLAY_FILE,
@@ -139,13 +134,7 @@ export function buildGuardBlock(
   { binDir = 'package', preAi, postGuards, formatChain }: BlockOptions = {},
 ): string {
   const handoff = selection.guards?.some((id) => id === 'review' || id === 'sentry') ?? false;
-  const pieces = [
-    buildPreCommitExit(handoff),
-    ...DK_HOOK_HELPERS,
-    BIN_DIRS[binDir].open,
-    DK_REVIEW_BASELINE_HELPER,
-    DK_GATE_BLOCK_HELPERS,
-  ];
+  const pieces = [buildPreCommitExit(handoff), ...gateBlockPrelude(BIN_DIRS[binDir].open)];
   // First so a first-gate block still records the run's terminal (the trap covers every exit path).
   if (!pkgRel && (selection.biome || formatChain))
     pieces.push(formatFragment(BIN_DIRS[binDir].formatter, formatChain));
