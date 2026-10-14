@@ -668,18 +668,41 @@ describe('prepare_gate_worktree — the worktree must have a hook chain git will
  *  `set -euo pipefail`, so the tolerated-exit mapping has to live INSIDE the function. */
 describe('ship_judge_preflight — advisory, and errexit-safe by construction', () => {
   /** Source the real function and call it exactly as ship-branch.sh does: bare, under set -e. */
-  const callUnderErrexit = (root: string, extraEnv: Record<string, string> = {}) =>
+  const callUnderErrexit = (root: string, extraEnv: Record<string, string> = {}, flag = '') =>
     spawnSync(
       'bash',
       [
         '-c',
         `set -euo pipefail
 . ${JSON.stringify(scriptPath)}
-ship_judge_preflight ${JSON.stringify(root)}
+ship_judge_preflight ${JSON.stringify(root)} ${flag}
 echo "SURVIVED:$?"`,
       ],
       { encoding: 'utf8', env: { ...process.env, ...GIT_ENV, ...extraEnv } },
     );
+
+  /** A root with the reviewer gate selected on the codex family, and a codex that cannot resolve. */
+  const NO_CODEX = { GUARD_CODEX_BIN: join(tmpdir(), 'no-such-codex-xyz') };
+  function codexFamilyRoot(): string {
+    const root = mkdtempSync(join(tmpdir(), 'jp-nobin-'));
+    dirs.push(root);
+    mkdirSync(join(root, '.devkit'), { recursive: true });
+    writeFileSync(
+      join(root, '.devkit/config.json'),
+      JSON.stringify({ components: { guards: ['review'] } }),
+    );
+    writeFileSync(
+      join(root, 'guard.config.json'),
+      JSON.stringify({
+        review: {
+          model: 'gpt-5.6-sol',
+          escalationModel: 'gpt-5.6-sol',
+          correctnessModel: 'gpt-5.6-sol',
+        },
+      }),
+    );
+    return root;
+  }
 
   it('says nothing at all when the reviewer gate is not selected', () => {
     const root = mkdtempSync(join(tmpdir(), 'jp-noreview-'));
@@ -705,28 +728,22 @@ echo "SURVIVED:$?"`,
   });
 
   it('survives an unresolvable judge binary rather than reporting a ship failure', () => {
-    const root = mkdtempSync(join(tmpdir(), 'jp-nobin-'));
-    dirs.push(root);
-    mkdirSync(join(root, '.devkit'), { recursive: true });
-    writeFileSync(
-      join(root, '.devkit/config.json'),
-      JSON.stringify({ components: { guards: ['review'] } }),
-    );
-    writeFileSync(
-      join(root, 'guard.config.json'),
-      JSON.stringify({
-        review: {
-          model: 'gpt-5.6-sol',
-          escalationModel: 'gpt-5.6-sol',
-          correctnessModel: 'gpt-5.6-sol',
-        },
-      }),
-    );
-
-    const r = callUnderErrexit(root, { GUARD_CODEX_BIN: join(tmpdir(), 'no-such-codex-xyz') });
+    const r = callUnderErrexit(codexFamilyRoot(), NO_CODEX);
 
     expect(r.stdout).toContain('SURVIVED:0');
     expect(r.stderr).toContain('not installed or not on PATH');
+    expect(r.stderr).toContain('the gates below will still run');
+  });
+
+  // The joint the unit and ship-level tests each stop short of: the flag crossing the real entry.
+  it('labels the report informational when the caller passes the rehearsal flag', () => {
+    const r = callUnderErrexit(codexFamilyRoot(), NO_CODEX, '--informational');
+
+    expect(r.stdout).toContain('SURVIVED:0');
+    expect(r.stderr).toContain('informational: this rehearsal runs no judge');
+    expect(r.stderr).toContain('not installed or not on PATH');
+    expect(r.stderr).toContain('on the real ship every reviewer');
+    expect(r.stderr).not.toContain('the gates below will still run');
   });
 });
 

@@ -171,9 +171,17 @@ function describeWindow(mins: number): string {
 
 /** Render the report, in the style of `guard-size preflight`. The consequence and remedy appear
  *  only when something is wrong, phrased so an agent cannot read it as "retry and it will work". */
-export function renderPreflight(statuses: ModelStatus[], now: number = Date.now()): string[] {
+export function renderPreflight(
+  statuses: ModelStatus[],
+  now: number = Date.now(),
+  informational = false,
+): string[] {
   if (statuses.length === 0) return [];
-  const lines = ['guard-judge preflight — judge reachability, before the gate chain'];
+  const lines = [
+    informational
+      ? 'guard-judge preflight — judge reachability (informational: this rehearsal runs no judge)'
+      : 'guard-judge preflight — judge reachability, before the gate chain',
+  ];
   for (const s of statuses) {
     const detail: string[] = [];
     // The unavailable verdict names the plan itself.
@@ -210,8 +218,11 @@ export function renderPreflight(statuses: ModelStatus[], now: number = Date.now(
   const locked = blocked.filter((s) => s.state === 'rate-limited');
   const reset = locked.find((s) => s.resetsAt !== undefined)?.resetsAt;
   lines.push(
-    '⚠️  guard-judge preflight: the gates below will still run, but every reviewer that is not ' +
-      'already cached will fail closed.',
+    informational
+      ? '⚠️  guard-judge preflight: this rehearsal runs no judge, but on the real ship every reviewer ' +
+          'that is not already cached will fail closed.'
+      : '⚠️  guard-judge preflight: the gates below will still run, but every reviewer that is not ' +
+          'already cached will fail closed.',
   );
   // Avoids the word "transient" rather than negating it: an agent grepping for that label must
   // not find it here, since a six-day lock wearing it is why this line exists.
@@ -287,18 +298,20 @@ export function preflightEvent(statuses: ModelStatus[]) {
 async function main(argv: string[]): Promise<number> {
   const root = argv[0];
   if (!root) {
-    console.error('usage: ship preflight judge <consumer-root>');
+    console.error('usage: ship preflight judge <consumer-root> [--informational]');
     return 2;
   }
   const guards = selectedJudgeGuards(root);
   if (!guards.review && !guards.sentry) return 0;
   const statuses = await judgeReachability(root, DEFAULT_DEPS, guards);
-  for (const line of renderPreflight(statuses)) console.error(line);
-  // stdout carries ONLY the remedy: ship captures it for the blocked-attempt tail.
+  const informational = argv.includes('--informational');
+  for (const line of renderPreflight(statuses, Date.now(), informational)) console.error(line);
+  // stdout carries ONLY the remedy: ship captures it for the blocked-attempt and dry-gates tails.
   const remedy = familyRemedy(statuses);
   if (remedy) console.log(remedy);
-  // Last, so a telemetry fault can never cost the report or the remedy.
-  emitGateEvent(preflightEvent(statuses));
+  // Last, so a telemetry fault can never cost the report or the remedy. An informational reading
+  // predicts no judge run, so it has no outcome to be joined with and records no row.
+  if (!informational) emitGateEvent(preflightEvent(statuses));
   return 0;
 }
 
