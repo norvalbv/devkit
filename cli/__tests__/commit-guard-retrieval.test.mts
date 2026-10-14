@@ -141,3 +141,38 @@ describe('commit-guard finalize --retrieval (sc-2317)', () => {
     expect(existsSync(join(repo, 'INJECTED'))).toBe(false);
   });
 });
+
+describe('commit-guard check-file records every duplicate on a file', () => {
+  const pending: CommitGuardState = {
+    files: [{ path: 'src/a.ts', status: 'pending', issues: [] }],
+  };
+  const checkFile = (repo: string, ...args: string[]) =>
+    spawnSync('node', [SCRIPT, 'check-file', 'src/a.ts', ...args], {
+      cwd: repo,
+      encoding: 'utf8',
+      env: GATE_ENV,
+    });
+
+  it('appends one issue per --fail call, and finalize lists them all', () => {
+    const { repo, stateFile } = repoWith(pending);
+    expect(checkFile(repo, '--fail', 'fmt src/a.ts:3 copies format').status).toBe(0);
+    expect(checkFile(repo, '--fail', 'pad src/a.ts:9 copies leftPad').status).toBe(0);
+    expect(stored(stateFile).files[0].issues).toEqual([
+      'fmt src/a.ts:3 copies format',
+      'pad src/a.ts:9 copies leftPad',
+    ]);
+    const r = finalize(repo, ['--retrieval', 'ok']);
+    expect(r.status).toBe(1);
+    expect(r.stdout).toContain('fmt src/a.ts:3');
+    expect(r.stdout).toContain('pad src/a.ts:9');
+  });
+
+  it('a later --pass clears every recorded issue, so a fixed file can finalize', () => {
+    const { repo, stateFile } = repoWith(pending);
+    checkFile(repo, '--fail', 'fmt src/a.ts:3 copies format');
+    checkFile(repo, '--fail', 'pad src/a.ts:9 copies leftPad');
+    expect(checkFile(repo, '--pass').status).toBe(0);
+    expect(stored(stateFile).files[0]).toEqual({ path: 'src/a.ts', status: 'pass', issues: [] });
+    expect(finalize(repo, ['--retrieval', 'ok']).status).toBe(0);
+  });
+});

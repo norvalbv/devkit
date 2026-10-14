@@ -18,12 +18,24 @@ export interface FindingsSummary {
   lines: string[];
   /** Distinct blocking findings before the cap. */
   total: number;
-  /** Issue strings folded into an earlier line (same lens + file + 5-line bucket, or same text). */
+  /** Issue strings folded into an earlier line (same lens + file + 5-line bucket, or same text;
+   * a file-keyed lens folds on the same line). */
   deduped: number;
+}
+
+const LEADING_DOT_SLASH_RE = /^\.?\//;
+
+/** Whether a lens is itself the file an issue cites — commit-guard keys its items on paths. */
+function lensIsCitedFile(lens: string, cited: string): boolean {
+  const file = cited.replace(LEADING_DOT_SLASH_RE, '');
+  return lens === file || lens.endsWith(`/${file}`);
 }
 
 function fingerprint(lens: string, issue: string): string {
   const loc = issue.match(LOCATION_RE);
+  // A lens that IS the cited file separates nothing, so the 5-line bucket would merge two distinct
+  // findings in one file: fold those on the exact line only.
+  if (loc && lensIsCitedFile(lens, loc[1])) return `${lens}||${loc[2]}`;
   if (loc) return `${lens}|${loc[1]}|${Math.floor(Number(loc[2]) / LINE_BUCKET)}`;
   return `${lens}|${issue.toLowerCase().replace(/\s+/g, ' ').trim().slice(0, 80)}`;
 }
