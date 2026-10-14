@@ -20,3 +20,4 @@ created: 2026-10-10
 **Scope:** cli/lib/ship/evidence/**,cli/lib/ship/publish-evidence.sh
 **Source:** shortcut · sc-5175
 - 2026-10-11 — sc-5176: the reserved verdict line is now filled. The line reads '**Merge verdict:** <verdict> (<reason>) · advisory, at <head>', and the data line gains an optional mergeVerdict object holding the verdict and every reason that fired. A block written before this still reads; a reader that predates the key treats the block as absent and recomputes it.
+- 2026-10-14 — devkit pr-body is the sanctioned way to change a PR description after ship: it replaces the caller text through carryEvidenceBlock, refuses before any write when the current body cannot be read, and does not carry third-party text below the block. Ship's no-delta --pr --body arm is not documented for this, since a path that differs from origin makes a gated commit.

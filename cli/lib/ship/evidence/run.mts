@@ -137,8 +137,12 @@ async function publish({ cwd, repo, pr, head, failed }: PublishArgs): Promise<vo
   const block = renderEvidenceBlock(produced.outcome, produced.evidence, verdict);
   const result = publishEvidenceBlock(repo, pr, head, block);
   const { status, reason, detail } = produced.outcome;
+  const edit =
+    result === 'written'
+      ? `; edit it with devkit pr-body ${pr} --body-file <f>, not gh pr edit`
+      : '';
   console.error(
-    `evidence: ${status}${reason ? ` (${reason})` : ''}: ${detail} [PR body ${result}]`,
+    `evidence: ${status}${reason ? ` (${reason})` : ''}: ${detail} [PR body ${result}${edit}]`,
   );
 }
 
