@@ -13,6 +13,7 @@
  *   guard-review transcript <ref>                print a persisted agent transcript by its ref
  *   guard-review record-agent <label>            record one Task-dispatched agent run (stdin)
  *   guard-review record-feedback prior-art --run <id> ...  claim a correction to a recorded run
+ *   guard-review record-gate <gate>              record a hook-shell gate's block for the ship digest
  *   guard-review reference-checkouts [--json]    resolve research.referenceCheckouts to directories
  *
  * Everything resolves from resolveGuardConfig(process.cwd()) — the CONSUMER repo, never the
@@ -22,6 +23,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { envFlag, resolveGuardConfig } from '../config.mts';
+import { emitGateEvent } from '../judge/gate-events.mts';
 import { markGateRun } from '../judge/run-context.mts';
 import { type RecordAgentRunOpts, recordAgentRun } from '../judge/run-judge.mts';
 import { readTranscript } from '../judge/transcript-store.mts';
@@ -245,6 +247,25 @@ function printReferenceCheckouts(json: boolean): number {
   return 0;
 }
 
+/** The hook-shell gates that block with no node process of their own to report the verdict. */
+const SHELL_GATES = new Set(['fallow', 'eslint-overlay', 'biome-overlay']);
+
+/**
+ * `guard-review record-gate <gate>` — the generated hook's narration after a shell gate blocked.
+ * No `family`: the digest then matches the row against the gate's own blocked_gate token.
+ */
+function recordGate(gate: string): number {
+  if (!SHELL_GATES.has(gate)) return 2;
+  markGateRun();
+  emitGateEvent({
+    type: 'gate_result',
+    gate,
+    status: 'fail',
+    detail: 'its report is above in the log',
+  });
+  return 0;
+}
+
 async function run(argv: string[]): Promise<number> {
   const [cmd, ...rest] = argv;
   if (cmd === '--gate' || (cmd === 'completeness' && rest[0] === '--gate')) markGateRun();
@@ -300,6 +321,7 @@ async function run(argv: string[]): Promise<number> {
     process.env.DEVKIT_AGENT_RUN_ID ||= `feedback-${randomUUID()}`;
     return runRecordFeedback(rest.slice(1));
   }
+  if (cmd === 'record-gate' && rest[0]) return recordGate(rest[0]);
   if (cmd === 'reference-checkouts') return printReferenceCheckouts(rest.includes('--json'));
   console.error(
     'Usage: guard-review --gate | completeness --gate <msg-file> | scan | lens <reviewer>[:<lens>] | clear-cache | ' +
@@ -309,7 +331,8 @@ async function run(argv: string[]): Promise<number> {
       '[--input-tokens <n>] [--output-tokens <n>] [--cache-creation <n>] [--cache-read <n>] ' +
       '[--cost-usd <n>] [--session-id <dispatched-agent-session>] [--billing subscription] | ' +
       'record-feedback prior-art --run <invocation_id> --claimed-verdict <V> [--claimed-framing <F>] ' +
-      '[--supersedes <feedback_id>] --source root|user --reason "<why>" | reference-checkouts [--json]',
+      '[--supersedes <feedback_id>] --source root|user --reason "<why>" | ' +
+      'record-gate fallow|eslint-overlay|biome-overlay | reference-checkouts [--json]',
   );
   return 2;
 }
