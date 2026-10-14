@@ -31,6 +31,10 @@ function harness() {
       return { env: {} };
     },
     showQueue: () => 'running: (none)',
+    listAdvisories: (_cwd: string, branch: string) => ({
+      text: `advisories for ${branch}`,
+      code: 0,
+    }),
   } satisfies ShipDependencies;
   return {
     dependencies,
@@ -194,6 +198,41 @@ describe('devkit ship machine-wide queue wiring (sc-3785)', () => {
 
     expect(ship(['--queue', 'extra'], '/consumer', test.dependencies)).toBe(1);
     expect(test.events).toEqual([]);
+    error.mockRestore();
+  });
+
+  it("lists a branch's advisories for --advisories <branch> without queueing or running a script", () => {
+    const test = harness();
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+
+    expect(ship(['--advisories', 'feat/a'], '/consumer', test.dependencies)).toBe(0);
+    expect(log).toHaveBeenCalledWith('advisories for feat/a');
+    expect(test.events).toEqual([]);
+    log.mockRestore();
+  });
+
+  it.each([[['--advisories']], [['--advisories', 'a', 'b']]])(
+    'rejects %j: --advisories takes exactly one branch',
+    (args) => {
+      const test = harness();
+      const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+      expect(ship(args, '/consumer', test.dependencies)).toBe(1);
+      expect(error.mock.calls.flat().join('\n')).toContain('devkit ship --advisories <branch>');
+      expect(test.events).toEqual([]);
+      error.mockRestore();
+    },
+  );
+
+  it('fails --advisories with a message when the history cannot be read', () => {
+    const test = harness();
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    test.dependencies.listAdvisories = () => {
+      throw new Error('not a git repository');
+    };
+
+    expect(ship(['--advisories', 'feat/a'], '/consumer', test.dependencies)).toBe(1);
+    expect(error.mock.calls.flat().join('\n')).toContain('could not read the advisories');
     error.mockRestore();
   });
 

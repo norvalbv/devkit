@@ -9,10 +9,10 @@
  * blocked: the shell settled that and published it on this ship's ship_result row, which this
  * reader consumes, so the two can never disagree.
  */
+import { branchNarration } from './advisories.mts';
 import { blockingFindings } from './blocking.mts';
 import { count, oneLine, textOf } from './fields.mts';
 import { scanBackward } from './tail.mts';
-import { readBranchHistory, renderTrend, summariseTrend } from './trend.mts';
 
 /**
  * The fields this digest reads off a gate event, and only those. The sink is an append-only stream
@@ -490,7 +490,7 @@ if (/[/\\]gate-digest\.m[jt]s$/.test(process.argv[1] ?? '') && process.argv[2] =
   const key = { shipId, repo, branch };
   const text = [
     render(summarise(readShipEvents(sink, shipId), shipId), logPath),
-    renderTrend(summariseTrend(readBranchHistory(sink, key), key)),
+    branchNarration(sink, key),
   ]
     .filter(Boolean)
     .join('\n');
