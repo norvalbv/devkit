@@ -124,6 +124,7 @@ jobs:
         # The runner is dedicated, unlike a dev box: 3 workers on its 4 vCPUs instead of '50%' = 2.
         env:
           VITEST_MAX_WORKERS: 3
+          DEVKIT_INSTALL_LAYOUTS: 1
         run: bun run test:run:report
 
       # Uploaded on RED runs too — a red run is precisely the one `devkit baseline-status` exists to
