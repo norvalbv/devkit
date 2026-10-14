@@ -43,7 +43,7 @@ describe('gate.yml required job', () => {
   });
 
   it('runs on every pull request, so no PR waits forever on a check that never reports', () => {
-    expect(text).toMatch(/^ {2}pull_request:\n(?! {4})/m);
+    expect(text).toMatch(/^ {2}pull_request:\n(?!(?:[ \t]*\n)* {3})/m);
   });
 
   it.each([
