@@ -7,7 +7,7 @@ import { FOUR_WAY_LENS_GROUPS, lensGroupId } from '../lens/split.mts';
 import { REVIEWERS } from '../reviewers.mts';
 import { runReviewGate } from '../run-review.mts';
 import { runCascade } from '../cascade/reviewer.mts';
-import { reportDeniedCalls } from '../contracts/checklist.mts';
+import { reportDeniedCalls, reportFailedItems } from '../contracts/checklist.mts';
 import { resolveGuardConfig } from '../../config.mts';
 import {
   cleanupReviewFixtures,
@@ -15,6 +15,7 @@ import {
   mkExec,
   passWithArtifact,
   reviewAssets,
+  reviewerFromLabel,
   unprojected,
   writeArtifact,
 } from './run-review-fixtures.mts';
@@ -788,6 +789,60 @@ describe('reportDeniedCalls', () => {
   });
 });
 
+describe('reportFailedItems (sc-5720)', () => {
+  const fail = (name: string, issues: string[] = []) => ({ name, status: 'fail', issues });
+  const reviewer = (name: string) => {
+    const r = REVIEWERS.find((x) => x.name === name);
+    if (!r) throw new Error(`${name} is not registered`);
+    return r;
+  };
+
+  it('tags a split lens part, so concurrent lens lines stay attributable', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const lensJudge = {
+      ...reviewer('correctness-reviewer'),
+      lens: ['error-and-edge-classification'],
+    };
+    reportFailedItems(lensJudge, {
+      items: [fail('error-and-edge-classification', ['0 read as absent'])],
+    });
+    expect(err).toHaveBeenCalledWith(
+      '⚠️  guard-review: correctness-reviewer [error-and-edge-classification] — FAILED checklist item under a PASS verdict: error-and-edge-classification — 0 read as absent',
+    );
+  });
+
+  it("names commit-guard's files[] rows by path", () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    reportFailedItems(reviewer('commit-guard'), {
+      files: [{ path: 'src/a.ts', status: 'fail', issues: ['dup'] }],
+    });
+    expect(err).toHaveBeenCalledWith(expect.stringMatching(/: src\/a\.ts — dup$/));
+  });
+
+  it('a whitespace-only issue prints the name alone, with no dangling separator', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    reportFailedItems(reviewer('api-security-reviewer'), { items: [fail('check-1', [' \r\n '])] });
+    expect(err).toHaveBeenCalledWith(expect.stringMatching(/PASS verdict: check-1$/));
+  });
+
+  it('exactly three failed items print no "(+0 more)" line', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    reportFailedItems(reviewer('api-security-reviewer'), {
+      items: [fail('a'), fail('b'), fail('c'), { name: 'd', status: 'pass' }],
+    });
+    expect(err).toHaveBeenCalledTimes(3);
+  });
+
+  it('stays silent without a failed item or an artifact', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    reportFailedItems(reviewer('api-security-reviewer'), null);
+    reportFailedItems(reviewer('api-security-reviewer'), {
+      items: [{ name: 'p', status: 'pending' }],
+    });
+    expect(err).not.toHaveBeenCalled();
+  });
+});
+
 describe('runReviewGate — staged paths outside a reviewer list reach its judges', () => {
   it('names an out-of-root staged template as staged in the first pass AND the escalation', async () => {
     const repo = consumerRepo({ backend: true });
@@ -811,5 +866,97 @@ describe('runReviewGate — staged paths outside a reviewer list reach its judge
       expect(also, label).toContain(template);
       expect(also, label).not.toContain('src/main/db.ts');
     }
+  });
+});
+
+describe('runReviewGate — a voided PASS prints its FAILED items (sc-5720)', () => {
+  const TARGET = 'review:api-security-reviewer';
+  const LINE = 'api-security-reviewer — FAILED checklist item under a PASS verdict: ';
+  const shipEnv = (repo: string) => {
+    process.env.GUARD_AI_STRICT = '1';
+    process.env.GUARD_REVIEW_CONCURRENCY = '3';
+    process.env.DEVKIT_GATE_EVENTS = join(repo, 'events.jsonl');
+    process.env.DEVKIT_SHIP_ID = 'ship-sc-5720';
+  };
+  // TARGET says PASS while its checklist FAILS one item per `issues` entry, on the attempts named.
+  const judgeContradicting = (
+    repo: string,
+    failOn: (attempt: number) => boolean,
+    issues: string[][],
+  ) => {
+    let attempt = 0;
+    return mkExec(async ({ label }) => {
+      if (label !== TARGET || !failOn(++attempt)) {
+        writeArtifact(repo, label);
+        return 'VERDICT: PASS';
+      }
+      const items = issues.map((i, n) => ({
+        name: `check-fail-${n + 1}`,
+        status: 'fail',
+        issues: i,
+      }));
+      writeFileSync(
+        join(repo, reviewerFromLabel(label).stateFile),
+        JSON.stringify({ items: [{ name: 'check-pass-0', status: 'pass', issues: [] }, ...items] }),
+      );
+      return 'VERDICT: PASS';
+    });
+  };
+  const failedLines = (err) =>
+    err.mock.calls
+      .flat()
+      .map(String)
+      .filter((l) => l.includes('FAILED checklist item'));
+
+  it('a retry that passes leaves the voided item text in the log, never in the retry prompt', async () => {
+    const repo = consumerRepo({ backend: true });
+    shipEnv(repo);
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exec = judgeContradicting(repo, (a) => a === 1, [['empty list\n  returns undefined']]);
+    expect(await runReviewGate(repo, { exec })).toBe(0);
+    // Flattened onto one line: judge text cannot forge a log line of its own.
+    expect(failedLines(err)).toEqual([
+      `⚠️  guard-review: ${LINE}check-fail-1 — empty list returns undefined`,
+    ]);
+    const retryPrompt = exec.mock.calls.filter(([o]) => o.label === TARGET)[1][0].args[1];
+    expect(retryPrompt).toContain('check-fail-1');
+    expect(retryPrompt).not.toContain('returns undefined');
+  });
+
+  it('a retry that contradicts again prints both attempts and fails the ship closed', async () => {
+    const repo = consumerRepo({ backend: true });
+    shipEnv(repo);
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(await runReviewGate(repo, { exec: judgeContradicting(repo, () => true, [['x']]) })).toBe(
+      3,
+    );
+    expect(failedLines(err)).toHaveLength(2);
+  });
+
+  it('an item with no issue text prints its name alone', async () => {
+    const repo = consumerRepo({ backend: true });
+    shipEnv(repo);
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    await runReviewGate(repo, { exec: judgeContradicting(repo, (a) => a === 1, [[]]) });
+    expect(failedLines(err)).toEqual([`⚠️  guard-review: ${LINE}check-fail-1`]);
+  });
+
+  it('plain git commit prints the item on its fail-open path too, where no retry runs', async () => {
+    const repo = consumerRepo({ backend: true });
+    process.env.DEVKIT_GATE_EVENTS = join(repo, 'events.jsonl');
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exec = judgeContradicting(repo, () => true, [['x']]);
+    expect(await runReviewGate(repo, { exec })).toBe(2);
+    expect(failedLines(err)).toEqual([`⚠️  guard-review: ${LINE}check-fail-1 — x`]);
+  });
+
+  it('caps the printed items at three and counts the rest', async () => {
+    const repo = consumerRepo({ backend: true });
+    shipEnv(repo);
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const issues = [['a'], ['b'], ['c'], ['d'], ['e']];
+    await runReviewGate(repo, { exec: judgeContradicting(repo, (a) => a === 1, issues) });
+    expect(failedLines(err)).toHaveLength(3);
+    expect(err).toHaveBeenCalledWith('⚠️  guard-review: api-security-reviewer — (+2 more)');
   });
 });
