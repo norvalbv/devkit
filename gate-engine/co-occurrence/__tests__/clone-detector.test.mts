@@ -94,6 +94,7 @@ describe('resolveJscpdBin', () => {
 
 const here = dirname(fileURLToPath(import.meta.url));
 const DETECTOR = resolve(here, '..', 'clone-detector.mts');
+const ALLOWLIST_CLI = resolve(here, '..', 'allowlist-cli.mts');
 // devkit package root (where node_modules/.bin/jscpd lives): __tests__ → co-occurrence → gate-engine → devkit.
 const pkgRoot = resolve(here, '..', '..', '..');
 const JSCPD_BIN = process.env.JSCPD_BIN || resolve(pkgRoot, 'node_modules/.bin/jscpd');
@@ -115,6 +116,12 @@ const SHARED = `export function computeWidgetTotals(items) {
   return { total, count, average, label: 'widget-totals-summary-block' };
 }
 `;
+
+// Two files whose only shared code is `body` — one cross-file clone.
+function writeClonePair(dir: string, body: string): void {
+  writeFileSync(join(dir, 'a.ts'), `${body}\nexport const A_ONLY = 1;\n`);
+  writeFileSync(join(dir, 'b.ts'), `${body}\nexport const B_ONLY = 2;\n`);
+}
 
 // The gate's exit-code contract is what a pre-commit hook depends on:
 //   1 = new clone → block · 0 = clean · 2 = could-not-run → fail-open.
@@ -299,6 +306,26 @@ describe.skipIf(!HAS_JSCPD)('clone-detector --gate exit-code contract', () => {
     expect(stdout).toMatch(LINES_RE);
     expect(stdout).toMatch(RANGE_A_RE);
     expect(stdout).toMatch(RANGE_B_RE);
+    // The command carries no --decay-days, so the output must say what lifetime that buys.
+    expect(stdout).toContain('lasts until the duplicated code changes');
+  });
+
+  // The control for a durable approval: it must cover the approved code and nothing else.
+  it('a default add-clone approval suppresses the clone, then blocks once its code changes', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'clone-durable-'));
+    const al = join(tmp, 'allowlist-durable.json');
+    writeClonePair(dir, SHARED);
+    const { fragmentHash } = JSON.parse(run(['json', '--paths', dir], {}).stdout)[0];
+    execFileSync(
+      'node',
+      [ALLOWLIST_CLI, 'add-clone', fragmentHash, 'a.ts', 'b.ts', '--description', 'by design'],
+      { env: { ...process.env, CO_OCCURRENCE_ALLOWLIST: al } },
+    );
+    const gate = ['scan', '--gate', '--paths', dir];
+    expect(run(gate, { CO_OCCURRENCE_ALLOWLIST: al }).status).toBe(0);
+    writeClonePair(dir, SHARED.replace('item.value > 0', 'item.value > 1'));
+    expect(run(gate, { CO_OCCURRENCE_ALLOWLIST: al }).status).toBe(1);
+    rmSync(dir, { recursive: true, force: true });
   });
 });
 

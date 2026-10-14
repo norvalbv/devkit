@@ -62,7 +62,7 @@ Some pairs are **intentional deploy artifacts**, not real dups: one path is a *g
 | Command | What | When |
 |---|---|---|
 | `guard-dup-allowlist add <symA> <fileA> <symB> <fileB> --description "..."` | Approve a pair | Gate blocked + dup is intentional. **Prefer the gate's pre-filled command** (has `--similarity` + `--range-a/-b` filled). `--description` is required. |
-| `guard-dup-allowlist add-clone <hash> <fileA> <fileB> --description "..."` | Approve a clone | Same — copy gate's command. |
+| `guard-dup-allowlist add-clone <hash> <fileA> <fileB> --description "..."` | Approve a clone | Same — copy gate's command. Lasts until the duplicated code changes; add `--decay-days N` only for a temporary waiver. |
 | `guard-dup-allowlist remove <symA> <fileA> <symB> <fileB>` | Retire an approval | After refactoring the dup away. |
 | `guard-dup-allowlist remove-clone <hash>` | Retire a clone approval | After refactoring. |
 | `guard-dup-allowlist check <symA> <fileA> <symB> <fileB>` | exit 0 if allowlisted | Before duplicating something — coverage check. |
@@ -74,7 +74,7 @@ Some pairs are **intentional deploy artifacts**, not real dups: one path is a *g
 
 `reconcile` vs `prune` — easy to confuse:
 
-- `prune` asks "is this entry past its expiry?" (calendar). Drops 7-day `add` entries. **Doesn't hit baseline** (decayDays 3650).
+- `prune` asks "is this entry past its expiry?" (calendar). Drops 7-day `add` entries and `add-clone` entries given `--decay-days`. **Doesn't hit baseline or default `add-clone` approvals** (decayDays 3650): retire those with `remove-clone`.
 - `reconcile` asks "does this dup still exist?" (detection). Drops dead baseline entries. **Doesn't care about expiry.**
 
 ## Burning down the baseline

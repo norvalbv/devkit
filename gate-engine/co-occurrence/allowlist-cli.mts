@@ -16,6 +16,8 @@
  *   remove <symA> <fileA> <symB> <fileB>      remove-clone <hash>
  *   check <symA> <fileA> <symB> <fileB>       # exit 0 if a live entry covers it, 1 if not
  *   list [--json]                             prune   # drop entries past date + decayDays
+ * Lifetime: `add` expires after 7 days; `add-clone` lasts until the duplicated code changes.
+ * `--decay-days N` overrides either.
  *
  * Every mutation is read-`loadAllowlist`-modify-`saveAllowlist`; a corrupt allowlist makes
  * `loadAllowlist` refuse (exit 2) without writing, so no verb can wipe baselined entries.
@@ -105,11 +107,15 @@ function usageError(msg: string): never {
 const isBaseline = (p: AllowlistPair): boolean =>
   String(p.description ?? '').startsWith('baseline ') || (p.decayDays ?? 0) >= BASELINE_DECAY;
 
-// A decay of < 1 day is instantly expired — the approval would report success yet the gate
-// would keep blocking (a silently useless entry). Reject it rather than write a dead approval.
+// A decay < 1 day is instantly expired and a malformed one falls through to the durable default;
+// both would report success while writing the wrong approval, so refuse them before any write.
 function requirePositiveDecay(flags: Record<string, string | true>): number | undefined {
-  const d = numFlag(flags['decay-days']);
-  if (d !== undefined && d < 1) usageError('--decay-days must be an integer >= 1.');
+  const raw = flags['decay-days'];
+  if (raw === undefined) return undefined;
+  const d = Number(raw);
+  if (raw === true || !Number.isFinite(d) || d < 1) {
+    usageError('--decay-days must be an integer >= 1.');
+  }
   return d;
 }
 
@@ -172,7 +178,8 @@ function runAddClone({ positionals, flags }: Parsed): void {
   if (lines !== undefined) entry.lines = lines;
   if (rangeA) entry.rangeA = rangeA;
   if (rangeB) entry.rangeB = rangeB;
-  if (decayDays !== undefined) entry.decayDays = decayDays;
+  // The fragment hash already pins the approval to this code, so a calendar is opt-in.
+  entry.decayDays = decayDays ?? BASELINE_DECAY;
 
   const existing = clones.some((c) => c.fragmentHash === fragmentHash);
   const next = existing
@@ -351,6 +358,10 @@ Modes:
   list [--json]
   prune                                   drop entries past date + decayDays
   baseline-clones [--decay-days N]        freeze every clone on stdin (\`guard-clone json\`)
+
+Lifetime:
+  add        expires 7 days after approval unless --decay-days N.
+  add-clone  lasts until the duplicated code changes; --decay-days N makes it a temporary waiver.
 
 Allowlist path: $CO_OCCURRENCE_ALLOWLIST or guard.config.json allowlistPath (default .co-occurrence-allowlist.json).`);
 }
