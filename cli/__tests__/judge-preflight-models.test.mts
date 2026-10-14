@@ -9,7 +9,7 @@ import {
   parseModelListReply,
   readCodexRateLimits,
 } from '../../gate-engine/judge/codex/rate-limits.mts';
-import { judgeReachability, renderPreflight } from '../lib/ship/preflight/judge.mts';
+import { familyRemedy, judgeReachability, renderPreflight } from '../lib/ship/preflight/judge.mts';
 
 /** Model ids `model/list {includeHidden:true}` returned on a free plan (codex 0.162.1). */
 const FREE_PLAN_DATA = [
@@ -143,6 +143,74 @@ describe('judgeReachability — model availability', () => {
     const review = { ...SOL_ON_CORRECTNESS, correctnessModel: 'gpt-5.6-sol@bogus' };
     const statuses = await reach({ ...HEALTHY, planType: 'free', ...fetched }, review);
     expect(statuses.map((s) => s.state)).toEqual(['ok', 'ok', 'ok']);
+  });
+
+  // The live 2026-10-14 ship: terra answered on credits while sol was refused.
+  it('a refused model alone names only its roles and no family move, keeping the working lane', async () => {
+    const onCredits: CodexRateLimits = {
+      reached: false,
+      onCredits: true,
+      planType: 'free',
+      usedPercent: 100,
+      windowDurationMins: 43200,
+      ...fetched,
+    };
+    const review = { ...SOL_ON_CORRECTNESS, escalationModel: 'gpt-5.6-sol' };
+    const statuses = await reach(onCredits, review);
+    expect(statuses.map((s) => s.state)).toEqual(['unverified', 'unavailable', 'unavailable']);
+    const out = renderPreflight(statuses).join('\n');
+    expect(out).toContain(
+      'review: gpt-5.6-terra@high via codex — plan limit reached — credit service unverified',
+    );
+    expect(out).toContain(
+      'every uncached judge on the escalation and correctness roles will fail closed ' +
+        '(escalation also judges completeness and every escalated FAIL)',
+    );
+    expect(out).toContain(
+      "Moving review or escalation discards every unpinned reviewer's cached PASS; moving correctness alone keeps them.",
+    );
+    for (const absent of ['EXHAUSTED', 'every reviewer', 'GUARD_REVIEW_MODEL=haiku'])
+      expect(out).not.toContain(absent);
+    expect(familyRemedy(statuses)).toBe('');
+  });
+
+  it('a refused correctness model alone states no cache cost and no completeness clause', async () => {
+    const out = renderPreflight(
+      await reach({ ...HEALTHY, planType: 'free', ...fetched }, SOL_ON_CORRECTNESS),
+    ).join('\n');
+    expect(out).toContain('every uncached judge on the correctness role will fail closed;');
+    expect(out).not.toContain('discards');
+    expect(out).not.toContain('completeness');
+  });
+
+  // `ship --dry-gates` renders the same scoped warning, pointed at the real ship.
+  it('a rehearsal scopes the warning to the refused roles too', async () => {
+    const statuses = await reach({ ...HEALTHY, planType: 'free', ...fetched }, SOL_ON_CORRECTNESS);
+    const out = renderPreflight(statuses, Date.now(), true).join('\n');
+    expect(out).toContain(
+      'this rehearsal runs no judge, but on the real ship every uncached judge on the correctness role will fail closed;',
+    );
+    expect(out).not.toContain('every reviewer');
+  });
+
+  it('an empty served list names the knobs without an empty target list', async () => {
+    const statuses = await reach(
+      { ...HEALTHY, planType: 'free', models: ['gpt-reserve'], visibleModels: [] },
+      SOL_ON_CORRECTNESS,
+    );
+    const out = renderPreflight(statuses).join('\n');
+    expect(out).toContain('(with GUARD_CORRECTNESS_CHUNK=off).');
+    expect(out).not.toContain('the account serves');
+  });
+
+  it('every role refused keeps the whole-install warning', async () => {
+    const allSol = {
+      model: 'gpt-5.6-sol',
+      escalationModel: 'gpt-5.6-sol',
+      correctnessModel: 'gpt-5.6-sol',
+    };
+    const out = renderPreflight(await reach({ ...HEALTHY, planType: 'free', ...fetched }, allSol));
+    expect(out.join('\n')).toContain('every reviewer that is not already cached will fail closed');
   });
 
   it('groups every role refused on one model into a single remedy line', async () => {
