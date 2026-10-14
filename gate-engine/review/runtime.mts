@@ -9,6 +9,7 @@ import {
   readReviewAsset,
   reviewBriefPath,
 } from './cascade/consumer-assets.mts';
+import type { DegradedKind } from './contracts/degraded-kinds.mts';
 import type { ReviewInconclusiveCause } from './contracts/response.mts';
 import type { RecordedWaiver } from './overrides.mts';
 import {
@@ -223,7 +224,7 @@ export interface ReviewOutcome {
   model?: string;
   /** Set only on a PASS whose core check did not fully run — sc-2317 retrieval (`degraded`), sc-2837
    * no codebase MCP (`mcpDegraded`, apart so `retrieval:'ok'` stays retrieval-only). Never bare PASS. */
-  degraded?: { cause: string };
+  degraded?: { cause: string; kind: DegradedKind };
   mcpDegraded?: { cause: string };
 }
 

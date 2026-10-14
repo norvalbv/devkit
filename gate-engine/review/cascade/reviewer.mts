@@ -188,10 +188,11 @@ export async function runCascade(
     const finalState = readChecklistState(cwd, sel.reviewer) ?? captureState;
     attachItems(res, finalState, disposition, { full: opts.fullItems });
     // Read before the finally deletes the artifact — the flag lives nowhere else (sc-2317).
-    const degraded = retrievalDegradation(sel.reviewer.name, finalState, res.status);
+    const mcpCause = mcpSpawn.cause();
+    const evidence = { mcpCause, denied: spawn.denied };
+    const degraded = retrievalDegradation(sel.reviewer.name, finalState, res.status, evidence);
     if (degraded) res.degraded = degraded;
     // A named skip judged nothing, so a missing tool weakened nothing — same rule as retrieval.
-    const mcpCause = mcpSpawn.cause();
     if (mcpCause && res.status === 'pass' && !isNamedSkip(finalState))
       res.mcpDegraded = { cause: mcpCause };
     return res;
