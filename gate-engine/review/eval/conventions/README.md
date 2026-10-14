@@ -243,7 +243,11 @@ when any of these differ from the run that produced the baseline:
   them so prompt iteration can't overfit them; baseline/gate runs always include them.
 - Decoys by kind (from `coverage`): `working-as-intended=9 · out-of-scope=5 · recorded-decision=1`.
 - `node bench.mts coverage` prints the full category × verdict × difficulty matrix — zero claude
-  calls.
+  calls — then `UNCOVERED:`, the categories declared in `coverage.mts` (`DECLARED_CATEGORIES`) that
+  no row exercises. A reviewer change aimed at an uncovered category is unmeasured by this bench.
+  Every row's `category` must be declared there (`lintCases` rejects the rest). A category is a
+  per-row label, not a scan of rule text: a row whose CLAUDE.md also carries a size rule still counts
+  only under its own category.
 
 ## Cost + outage policy
 
