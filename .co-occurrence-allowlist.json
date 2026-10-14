@@ -840,40 +840,44 @@
       "fileA": "gate-engine/review/eval/bench.mts",
       "fileB": "gate-engine/review/eval/conventions/bench.mts",
       "description": "Sibling benchmark executables intentionally retain their own baseline-write, exit-code, and direct-invocation lifecycle.",
-      "date": "2026-10-09",
+      "date": "2026-10-14",
       "lines": 23,
       "rangeA": "635-657",
-      "rangeB": "916-938"
+      "rangeB": "916-938",
+      "decayDays": 3650
     },
     {
       "fragmentHash": "1c20d49576fb3c10",
       "fileA": "gate-engine/review/eval/bench.mts",
       "fileB": "gate-engine/review/eval/conventions/bench.mts",
       "description": "Sibling benchmarks intentionally keep audit reporting and mode validation local to their independently versioned instruments.",
-      "date": "2026-10-09",
+      "date": "2026-10-14",
       "lines": 20,
       "rangeA": "245-264",
-      "rangeB": "785-804"
+      "rangeB": "785-804",
+      "decayDays": 3650
     },
     {
       "fragmentHash": "cca08c32dbef3828",
       "fileA": "gate-engine/review/eval/scoring.mts",
       "fileB": "gate-engine/review/eval/conventions/bench.mts",
       "description": "Sibling benchmarks intentionally keep paired flip comparison local because their admissible metrics and regression meanings differ.",
-      "date": "2026-10-09",
+      "date": "2026-10-14",
       "lines": 18,
       "rangeA": "175-192",
-      "rangeB": "580-597"
+      "rangeB": "580-597",
+      "decayDays": 3650
     },
     {
       "fragmentHash": "c38a71479979c752",
       "fileA": "gate-engine/review/eval/baseline-audit.mts",
       "fileB": "gate-engine/review/eval/conventions/bench.mts",
       "description": "Sibling matcher audits intentionally keep transcript-to-label aggregation local so each benchmark owns its audit provenance.",
-      "date": "2026-10-09",
+      "date": "2026-10-14",
       "lines": 14,
       "rangeA": "77-90",
-      "rangeB": "706-719"
+      "rangeB": "706-719",
+      "decayDays": 3650
     },
     {
       "fragmentHash": "8e3d3e04c8121b12",
@@ -890,20 +894,22 @@
       "fileA": "gate-engine/review/eval/bench.mts",
       "fileB": "gate-engine/review/eval/conventions/bench.mts",
       "description": "Sibling benchmarks intentionally keep variant reporting and baseline comparison dispatch local to each summary type.",
-      "date": "2026-10-09",
+      "date": "2026-10-14",
       "lines": 9,
       "rangeA": "605-613",
-      "rangeB": "891-899"
+      "rangeB": "891-899",
+      "decayDays": 3650
     },
     {
       "fragmentHash": "56f4174499c6b643",
       "fileA": "gate-engine/review/eval/scoring.mts",
       "fileB": "gate-engine/review/eval/conventions/bench.mts",
       "description": "Sibling scorers intentionally share the Wilson interval display convention while retaining distinct typed summary ownership.",
-      "date": "2026-10-09",
+      "date": "2026-10-14",
       "lines": 8,
       "rangeA": "53-60",
-      "rangeB": "454-461"
+      "rangeB": "454-461",
+      "decayDays": 3650
     },
     {
       "fragmentHash": "80f772ab3032129c",
@@ -920,10 +926,11 @@
       "fileA": "gate-engine/review/eval/scoring.mts",
       "fileB": "gate-engine/review/eval/conventions/bench.mts",
       "description": "Sibling baseline comparisons intentionally keep benchmark-specific informational delta reporting beside their own regression logic.",
-      "date": "2026-10-09",
+      "date": "2026-10-14",
       "lines": 8,
       "rangeA": "142-149",
-      "rangeB": "530-537"
+      "rangeB": "530-537",
+      "decayDays": 3650
     },
     {
       "fragmentHash": "aeb4a9d2ddfeeac5",
@@ -940,30 +947,33 @@
       "fileA": "gate-engine/review/eval/bench.mts",
       "fileB": "gate-engine/review/eval/conventions/bench.mts",
       "description": "Sibling benchmark reports intentionally keep outage and matcher-audit telemetry beside their own headline metrics.",
-      "date": "2026-10-09",
+      "date": "2026-10-14",
       "lines": 7,
       "rangeA": "596-602",
-      "rangeB": "887-893"
+      "rangeB": "887-893",
+      "decayDays": 3650
     },
     {
       "fragmentHash": "42621188a23644e2",
       "fileA": "gate-engine/review/eval/baseline-audit.mts",
       "fileB": "gate-engine/review/eval/conventions/bench.mts",
       "description": "Sibling matcher audits intentionally keep label iteration local because transcript and model binding rules differ.",
-      "date": "2026-10-09",
+      "date": "2026-10-14",
       "lines": 7,
       "rangeA": "67-73",
-      "rangeB": "701-707"
+      "rangeB": "701-707",
+      "decayDays": 3650
     },
     {
       "fragmentHash": "775c6da204b71fa2",
       "fileA": "gate-engine/review/eval/cases.mts",
       "fileB": "gate-engine/review/eval/conventions/bench.mts",
       "description": "Sibling benchmark corpus contracts intentionally remain local because completeness and conventions own distinct row semantics.",
-      "date": "2026-10-09",
+      "date": "2026-10-14",
       "lines": 17,
       "rangeA": "18-34",
-      "rangeB": "157-173"
+      "rangeB": "157-174",
+      "decayDays": 3650
     },
     {
       "fragmentHash": "a7255f933290e294",

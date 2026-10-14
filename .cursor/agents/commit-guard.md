@@ -105,7 +105,7 @@ or repeated inline JSX. The jscpd-backed clone detector catches those (verbatim,
 - Focus on clones touching a STAGED file (a clone between two untouched files isn't introduced by this commit).
 - For each: `guard-dup-allowlist check-clone <fragmentHash>` — skip (exit 0) if allowlisted. Pre-existing clones are baseline-frozen, so only NEW clones surface.
 - Surface unapproved clones to root with fileA, fileB, lines — root asks the human to approve (intentional) or refactor.
-- If approved: `guard-dup-allowlist add-clone <fragmentHash> <fileA> <fileB> --description "<reason>" --lines <N> --range-a <startA-endA> --range-b <startB-endB>` (ranges from the detector output — findability metadata).
+- If approved: `guard-dup-allowlist add-clone <fragmentHash> <fileA> <fileB> --description "<reason>" --lines <N> --range-a <startA-endA> --range-b <startB-endB>` (ranges from the detector output — findability metadata). The approval lasts until the duplicated code changes; add `--decay-days <N>` only for a temporary waiver.
 
 ## 4. Finalize
 ```bash
