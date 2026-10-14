@@ -197,7 +197,20 @@ describe('a lens-split reviewer', () => {
       ({ res: outcome('pass', transcript), secs: 1, task }) as LensPart;
     const parts = [part(ADVISED), part('ADVISORY: c.ts:3 — third\nVERDICT: PASS')];
     emitMergedLensResults(new Map([[REVIEWER, parts]]), 'sonnet');
-    expect(advisoryRows()).toHaveLength(1);
-    expect(advisoryRows()[0].detail).toContain('c.ts:3 — third');
+    expect(advisoryRows().map((r) => r.detail)).toEqual([
+      '`src/a.ts:1` — mobile passes the display status, unlike desktop',
+      'c.ts:3 — third',
+    ]);
+  });
+});
+
+describe('a PASS with several long advisories', () => {
+  it('emits one row per advisory, so none falls past the sink cap of a joined detail', () => {
+    const long = (i: number) => `src/a.ts:${i} — ${'consequence '.repeat(33)}end ${i}`;
+    const raw = [1, 2, 3, 4, 5].map((i) => `ADVISORY: ${long(i)}`).join('\n');
+    settleReviewOutcome(ctx(cwd), plan(cwd).tasks[0], outcome('pass', `${raw}\nVERDICT: PASS`), 1);
+    const details = advisoryRows().map((r) => r.detail);
+    expect(details).toEqual([1, 2, 3, 4, 5].map((i) => long(i).trim()));
+    expect(details.every((d) => d.length > 400 && d.length <= 500)).toBe(true);
   });
 });

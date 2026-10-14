@@ -291,7 +291,7 @@ export function cachedAdvisories(...metas: VerdictMeta[]): string[] | undefined 
 }
 
 /** A PASS's non-blocking findings: self-labelled lines printed whole (a split merge prints no
- * verdict line to sit under), where the full reasoning lives, and ONE advisory_result. */
+ * verdict line to sit under), where the full reasoning lives, and one advisory_result EACH. */
 export function reportAdvisories(
   name: string,
   advisories: string[] | undefined,
@@ -305,7 +305,8 @@ export function reportAdvisories(
       `guard-review: ${name} — ${advisories.length} findings, ${ADVISORY_CAP} shown; the rest are in the transcript`,
     );
   if (ref) console.error(`guard-review: ${name} — full reasoning: guard-review transcript ${ref}`);
-  emitAdvisoryResult(`review:${name}`, 'finding', advisories.join(' | '));
+  // One row per finding: a joined detail hits the sink's 500-char cap and drops the later ones.
+  for (const a of advisories) emitAdvisoryResult(`review:${name}`, 'finding', a);
 }
 
 /** A cached PASS line (`tail` = its provenance), marked and reported when it replays MCP-degraded,
