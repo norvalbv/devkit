@@ -340,6 +340,24 @@ credits is usually the shared window crossing 100% while the ship ran. An answer
 row's `resets_at` (epoch milliseconds) is the window clearing. `no role` marks a judge on a model the preflight did
 not list. A ship id reused across attempts joins to its newest reading.
 
+## Which deterministic gate is slow?
+
+Each gate `guard-deterministic` spawns writes one `gate_step` row to
+`~/.devkit/telemetry/gate-events.jsonl`, whether the gate is built in, an `extraGates` command, or
+structure-lint. A row holds `gate`, `status` (`pass`, `fail` or `could_not_run`), `exit_code` and
+`duration_ms`. A gate skipped by a cached prefix writes none; coverage re-runs on a cache hit, so it
+still writes its row. To rank one repo's gates by their slowest run:
+
+```
+rg --no-filename '"type":"gate_step"' ~/.devkit/telemetry/gate-events.jsonl | jq -rs --arg repo devkit '
+  map(select(.repo == $repo and .run_origin == "gate")) | group_by(.gate)
+  | map({gate: .[0].gate, runs: length, max: (map(.duration_ms) | max),
+         p50: (map(.duration_ms) | sort | .[length / 2 | floor])})
+  | sort_by(-.max) | .[] | "\(.max)ms max\t\(.p50)ms p50\t\(.runs) runs\t\(.gate)"'
+```
+
+`run_origin == "gate"` keeps hook and ship runs and drops a hand-run `guard-deterministic`.
+
 ## A reviewer shows `PASS over an incomplete packet` (or `partial evidence`)
 
 Each AI reviewer reads a capped diff packet. On a large diff, files past the budget are OMITTED or
