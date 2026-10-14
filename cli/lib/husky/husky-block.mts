@@ -205,7 +205,7 @@ if [ -n "$DK_STAGED" ] && [ -f ${config} ]; then
         echo "${label}"
         echo "$DK_STAGED" | xargs ${run} || {
 ${failHint}${shipRehearsalHint('            ')}
-            exit 1
+            __dk_block_deterministic ${tool}-overlay
         }
     else
         echo "devkit ${tool} overlay: skipped — node_modules/.bin/${tool} not found (install the repo's dependencies)"
