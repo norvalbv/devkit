@@ -66,7 +66,12 @@ export function privateSourceRoot(directory: string): string {
 
 /** Operates on an already reconstructed, explicit-base private source snapshot; never searches
  * for a merely applicable base, stages source files, or invokes a reviewer. */
-export function censusSource(serialized: string, caseId: string, directory: string) {
+export function censusSource(
+  serialized: string,
+  caseId: string,
+  directory: string,
+  planTasks = planFixture,
+) {
   if (
     ['GIT_DIR', 'GIT_COMMON_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE'].some((key) => process.env[key])
   )
@@ -125,7 +130,7 @@ export function censusSource(serialized: string, caseId: string, directory: stri
         throw new Error('POSTIMAGE_MISMATCH');
     }
   }
-  const plan = planFixture(sel, cwd, { cap: 400, groups, diff: frozenDiff([], sel.files) });
+  const plan = planTasks(sel, cwd, { cap: 400, groups, diff: frozenDiff([], sel.files) });
   const tasks = plan.tasks.map((task) => {
     const scoped = frozenDiff([], task.sel.files);
     if (scoped !== task.diffText) throw new Error('TASK_DIFF_CHANGED');
