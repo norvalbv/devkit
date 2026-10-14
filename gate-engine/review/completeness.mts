@@ -79,6 +79,7 @@ import {
   stripFrontmatter,
 } from './reviewers.mts';
 import { agentBody } from './runtime.mts';
+import { reportNoVerdict } from './valve/inconclusive.mts';
 
 const AGENT_NAME = 'feature-completeness-reviewer';
 const TOOLS = 'Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(git status:*)';
@@ -478,10 +479,9 @@ export async function runCompleteness(
     return finish(0);
   }
   if (verdict !== 'FAIL') {
-    // A response carrying no parseable verdict is a HEALTHY judge breaking its contract, so it is
-    // a non-run rather than a verdict — the same distinction the outage arm draws above.
+    // A healthy judge that broke its contract: a non-run, reported and exited as the fleet's.
     emitNoRun('response_contract');
-    return finish(0);
+    return finish(reportNoVerdict('completeness', raw, envFlag('AI_STRICT')));
   }
   // Above the hard/soft split below: a GUARD_COMPLETENESS_HARD=0 soften still MADE this finding,
   // and a run that exits 0 on it is exactly the run whose reader has nothing else to go on.

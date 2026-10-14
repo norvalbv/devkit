@@ -773,6 +773,12 @@ describe('assembled commit-msg hook is sh -e-safe (fail-open 2 → 0, confirmed 
     expect(r.stdout).toContain('NOT a gate rejection');
   });
 
+  it('a strict non-run (exit 3: outage or no verdict) fails closed rather than continuing', () => {
+    const r = runCommitMsgHook(3);
+    expect(r.status).toBe(1);
+    expect(r.stdout).toContain('judge unavailable or returned no verdict');
+  });
+
   it('a confirmed block (exit 1) blocks the commit with the guidance echoed', () => {
     const r = runCommitMsgHook(1);
     expect(r.status).toBe(1);
