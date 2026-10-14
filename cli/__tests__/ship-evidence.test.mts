@@ -296,6 +296,8 @@ describe('devkit ship evidence block', () => {
     expect(
       body(attempt + reminder('ship-1', 'stale') + attempt + reminder('ship-1', 'fresh')),
     ).toBe(`mine\n\n${UI_ITEM_BEGIN}\n- [ ] 📸 fresh\n${UI_ITEM_END}\n`);
+    // No attempt marker: the row cannot be told apart from an earlier run's, so it adds nothing.
+    expect(body(reminder('ship-1', 'unattributed'))).toBe('mine\n');
     // The sink is per machine: a parallel ship's reminder is not this ship's.
     expect(body(attempt + reminder('ship-2', 'theirs'))).toBe('mine\n');
   });
