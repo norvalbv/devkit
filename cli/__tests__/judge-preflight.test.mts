@@ -373,11 +373,14 @@ describe('renderPreflight', () => {
     expect(familyRemedy(claudeDark)).toContain(judgeEnvUnsetLine());
   });
 
-  it('familyRemedy is empty when nothing is dark, both CLIs are dark, or the bin is compound', () => {
+  it('familyRemedy is empty when no provider is dark, both CLIs are dark, or the bin is compound', () => {
     const ok = { role: 'review' as const, model: 'haiku', bin: 'claude', state: 'ok' as const };
     const unknown = { ...locked[0], state: 'unknown' as const };
     const claudeOut = { ...ok, role: 'correctness' as const, state: 'unauthenticated' as const };
     const compound = { ...locked[0], bin: 'codex+claude' };
+    const refused = { ...locked[0], state: 'unavailable' as const };
+    const unverified = { ...locked[0], state: 'unverified' as const };
+    expect(familyRemedy([refused, unverified])).toBe('');
     expect(familyRemedy([ok, unknown])).toBe('');
     expect(familyRemedy([...locked, claudeOut])).toBe('');
     expect(familyRemedy([compound])).toBe('');
@@ -685,6 +688,54 @@ describe('ship_judge_preflight — the remedy reaches the shell, the report stay
     expect(r.stdout).toBe('');
     expect(r.stderr).toContain('REPORT');
     expect(r.stderr).toContain('[REMEDY]');
+  });
+
+  // The live 2026-10-14 account: plan spent on credits, terra served, sol refused. A non-empty
+  // remedy here is what made the blocked ship's tail tell the agent to move every judge to claude.
+  it('hands over no remedy when credits may serve and only a model is refused', () => {
+    const root = repo(['review'], {
+      model: 'gpt-5.6-terra@high',
+      escalationModel: 'gpt-5.6-sol',
+      correctnessModel: 'gpt-5.6-sol',
+    });
+    const limits = JSON.stringify({
+      id: 2,
+      result: {
+        ordinaryUsageAllowed: false,
+        rateLimits: {
+          primary: { usedPercent: 100, windowDurationMins: 43200 },
+          credits: { hasCredits: true, unlimited: false },
+          spendControlReached: false,
+          planType: 'free',
+          rateLimitReachedType: 'rate_limit_reached',
+        },
+      },
+    });
+    const models = JSON.stringify({
+      id: 3,
+      result: { data: [{ id: 'gpt-5.6-terra', model: 'gpt-5.6-terra' }], nextCursor: null },
+    });
+    const codex = join(root, 'codex');
+    writeFileSync(
+      codex,
+      `#!/bin/sh\n[ "$1" = login ] && { echo 'Logged in'; exit 0; }\necho '${limits}'\necho '${models}'\n`,
+    );
+    chmodSync(codex, 0o755);
+    const script = '. "$1"; ship_judge_preflight "$2"; printf "[%s]" "$SHIP_JUDGE_REMEDY" >&2';
+    const r = testSpawnSync('/bin/bash', ['-c', script, 'sh', helper, root], {
+      env: {
+        ...process.env,
+        DEVKIT_GATE_EVENTS: join(root, 'gate-events.jsonl'),
+        DEVKIT_SHIP_ID: 'credits-unverified',
+        GUARD_CODEX_BIN: codex,
+      },
+      encoding: 'utf8',
+    });
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).toContain(`gpt-5.6-terra@high via ${codex} — plan limit reached — credit`);
+    expect(r.stderr).toContain('NOT AVAILABLE ON THIS ACCOUNT (plan free)');
+    expect(r.stderr).not.toContain('EXHAUSTED');
+    expect(r.stderr).toMatch(/\[\]\s*$/);
   });
 
   it('still reports and hands over the remedy when the telemetry sink cannot be written', () => {

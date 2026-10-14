@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseRateLimitsReply } from '../../gate-engine/judge/codex/rate-limits.mts';
 import {
+  familyRemedy,
   judgeReachability,
   type PreflightDeps,
   preflightEvent,
@@ -62,7 +63,8 @@ const CREDITS_LIVE_REPLY = JSON.stringify({
   },
 });
 
-/** A Free-plan account's live reply, identical in kind but for planType, while every judge was refused. */
+/** A Free-plan account's live reply, identical in kind but for planType. Every judge was refused under
+ *  it on 2026-10-09 and every terra judge answered under it on 2026-10-14. */
 const FREE_PLAN_CREDITS_REPLY = JSON.stringify({
   id: 2,
   result: {
@@ -272,27 +274,20 @@ describe('parseRateLimitsReply — a fully consumed window is a lock', () => {
     }
   });
 
-  it('Free and Go credits do not carry a spent plan; an unnamed plan still does', () => {
+  it('credits carry a spent plan on every plan type: no plan proves they will or will not serve', () => {
     expect(parseRateLimitsReply(FREE_PLAN_CREDITS_REPLY)).toMatchObject({
-      reached: true,
-      onCredits: false,
+      reached: false,
+      onCredits: true,
       planType: 'free',
       windowDurationMins: 43200,
     });
-    const go = reply({
-      primary: { usedPercent: 100 },
-      credits: { hasCredits: true },
-      planType: 'go',
-    });
-    expect(parseRateLimitsReply(go)).toMatchObject({ reached: true, onCredits: false });
-    // codex serializes an unrecognized plan as "unknown"; it is no evidence against credits.
-    for (const planType of [undefined, 'unknown']) {
-      const unnamed = reply({
+    for (const planType of ['go', 'pro', undefined, 'unknown']) {
+      const spent = reply({
         primary: { usedPercent: 100 },
         credits: { hasCredits: true },
         planType,
       });
-      expect(parseRateLimitsReply(unnamed)).toMatchObject({ reached: false, onCredits: true });
+      expect(parseRateLimitsReply(spent)).toMatchObject({ reached: false, onCredits: true });
     }
   });
 
@@ -326,7 +321,7 @@ describe('parseRateLimitsReply — a fully consumed window is a lock', () => {
         credits: { hasCredits: true },
       }),
     );
-    // "running on credits (40% of a 5h window used)" would contradict itself.
+    // "plan limit reached (40% of a 5h window used)" would contradict itself.
     expect(snap).toMatchObject({
       reached: false,
       onCredits: true,
@@ -401,39 +396,42 @@ describe('the preflight report for an exhausted window (sc-3207 acceptance)', ()
     expect(out).not.toContain('resets in');
   });
 
-  it('credits keep a full window reachable, and no remedy is printed', async () => {
+  it('unlimited credits on a full window read unverified, and no remedy is printed', async () => {
     const statuses = await judgeReachability(
       repo(CODEX_FAMILY),
       deps(reply({ primary: { usedPercent: 100 }, credits: { unlimited: true } })),
     );
-    expect(statuses.every((s) => s.state === 'ok')).toBe(true);
+    expect(statuses.every((s) => s.state === 'unverified')).toBe(true);
     const out = renderPreflight(statuses, NOW).join('\n');
-    expect(out).toContain('reachable — plan limit reached, running on credits');
+    expect(out).toContain('plan limit reached — credit service unverified');
     expect(out).not.toContain('⚠️');
   });
 
-  it('a credit-backed plan lock prints no lock, fail-closed claim, or family move (sc-4339)', async () => {
-    const statuses = await judgeReachability(repo(CODEX_FAMILY), deps(CREDITS_LIVE_REPLY));
-    expect(statuses.every((s) => s.state === 'ok' && s.onCredits)).toBe(true);
-    const out = renderPreflight(statuses, NOW).join('\n');
-    expect(out).toContain(
-      'gpt-5.6-sol via codex — reachable — plan limit reached, running on credits (plan pro, 100% of a 7d window used)',
-    );
-    for (const absent of ['EXHAUSTED', 'fail closed', 'will not help', '⚠️', 'GUARD_REVIEW_MODEL='])
-      expect(out).not.toContain(absent);
-  });
-
-  it('a Free-plan lock with credits is EXHAUSTED and names the family move before the chain', async () => {
-    const statuses = await judgeReachability(repo(CODEX_FAMILY), deps(FREE_PLAN_CREDITS_REPLY));
-    expect(statuses.every((s) => s.state === 'rate-limited')).toBe(true);
-    const out = renderPreflight(statuses, NOW).join('\n');
-    expect(out).toContain(
-      'EXHAUSTED — USAGE LIMIT REACHED (plan free, 100% of a 30d window used, resets in 4d',
-    );
-    expect(out).toContain('re-running will not help for another 4d');
-    expect(out).toContain('GUARD_REVIEW_MODEL=haiku');
-    expect(out).not.toContain('— reachable');
-  });
+  // The same payload was refused on a free plan on 10-09 and served on 10-14: neither is predicted.
+  it.each([
+    ['pro', CREDITS_LIVE_REPLY, '7d'],
+    ['free', FREE_PLAN_CREDITS_REPLY, '30d'],
+  ])(
+    'a %s plan lock with credits claims neither a lock nor service, and names no move',
+    async (plan, payload, window) => {
+      const statuses = await judgeReachability(repo(CODEX_FAMILY), deps(payload));
+      expect(statuses.every((s) => s.state === 'unverified' && s.onCredits)).toBe(true);
+      const out = renderPreflight(statuses, NOW).join('\n');
+      expect(out).toContain(
+        `gpt-5.6-sol via codex — plan limit reached — credit service unverified (plan ${plan}, 100% of a ${window} window used)`,
+      );
+      for (const absent of [
+        'EXHAUSTED',
+        'reachable',
+        'fail closed',
+        'will not help',
+        '⚠️',
+        'GUARD_REVIEW_MODEL=',
+      ])
+        expect(out).not.toContain(absent);
+      expect(familyRemedy(statuses)).toBe('');
+    },
+  );
 });
 
 /** The row a later reader joins to the same ship's judge_exec rows: raw facts beside the verdict. */
@@ -441,7 +439,7 @@ describe('preflightEvent — the reading is recorded, not only printed', () => {
   const event = async (payload: string, review = CODEX_FAMILY) =>
     preflightEvent(await judgeReachability(repo(review), deps(payload)));
 
-  it('a Free-plan lock with credits records the credits the verdict set aside', async () => {
+  it('a Free-plan lock with credits records the credits beside its unverified reading', async () => {
     const row = await event(FREE_PLAN_CREDITS_REPLY);
     expect(row).toMatchObject({
       type: 'judge_preflight',
@@ -453,19 +451,18 @@ describe('preflightEvent — the reading is recorded, not only printed', () => {
       window_mins: 43200,
       resets_at: PRIMARY_RESET * 1000,
     });
-    // The verdict's own reading is absent, so the two shapes stay distinguishable.
-    expect(row.on_credits).toBeUndefined();
+    expect(row.on_credits).toBe(true);
     expect(row.roles).toEqual([
-      { role: 'review', model: 'gpt-5.6-terra', bin: 'codex', state: 'rate-limited' },
-      { role: 'escalation', model: 'gpt-5.6-sol', bin: 'codex', state: 'rate-limited' },
-      { role: 'correctness', model: 'gpt-5.6-sol', bin: 'codex', state: 'rate-limited' },
+      { role: 'review', model: 'gpt-5.6-terra', bin: 'codex', state: 'unverified' },
+      { role: 'escalation', model: 'gpt-5.6-sol', bin: 'codex', state: 'unverified' },
+      { role: 'correctness', model: 'gpt-5.6-sol', bin: 'codex', state: 'unverified' },
     ]);
   });
 
-  it('a paid plan on credits records the same payload shape with the opposite verdict', async () => {
+  it('a paid plan on credits records the same payload shape with the same verdict', async () => {
     const row = await event(CREDITS_LIVE_REPLY);
     expect(row).toMatchObject({ plan_type: 'pro', credits_usable: true, on_credits: true });
-    expect(row.roles.map((r) => r.state)).toEqual(['ok', 'ok', 'ok']);
+    expect(row.roles.map((r) => r.state)).toEqual(['unverified', 'unverified', 'unverified']);
   });
 
   it('an account with no credits object records no credits fact at all', async () => {

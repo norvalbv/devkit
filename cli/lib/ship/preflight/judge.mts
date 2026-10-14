@@ -29,7 +29,12 @@ type Reachability =
   | 'unauthenticated'
   | 'rate-limited'
   | 'unavailable'
+  // Plan limit spent with usable credits: the read cannot say whether exec will be served.
+  | 'unverified'
   | 'unknown';
+
+/** The states where the provider itself refuses every model, so only a family move helps. */
+const PROVIDER_DARK = new Set<Reachability>(['rate-limited', 'absent', 'unauthenticated']);
 
 interface ModelStatus {
   role: JudgeRole;
@@ -42,7 +47,7 @@ interface ModelStatus {
   usedPercent?: number;
   /** The window that percentage is measured over, so "80% used" carries its own urgency. */
   windowMins?: number;
-  /** Plan limit spent but credits serve the calls, so `ok` must not read as plain headroom. */
+  /** Plan limit spent with usable credits — the raw reading behind an `unverified` state. */
   onCredits?: true;
   /** The account's plan, when the provider named one. */
   planType?: string;
@@ -136,7 +141,7 @@ export async function judgeReachability(
         status.served = codexLimits?.visibleModels;
       } else if (codexLimits?.reached) status.state = 'rate-limited';
       else if (codexLimits) {
-        status.state = 'ok';
+        status.state = codexLimits.onCredits ? 'unverified' : 'ok';
         if (codexLimits.onCredits) status.onCredits = true;
       }
       // else: the RPC said nothing this version understands — 'unknown', reported as such.
@@ -197,18 +202,18 @@ export function renderPreflight(
     const suffix = detail.length > 0 ? ` (${detail.join(', ')})` : '';
     const verdict =
       s.state === 'ok'
-        ? s.onCredits
-          ? 'reachable — plan limit reached, running on credits'
-          : 'reachable'
-        : s.state === 'absent'
-          ? `\`${s.bin}\` not installed or not on PATH`
-          : s.state === 'unauthenticated'
-            ? `\`${s.bin}\` not authenticated`
-            : s.state === 'rate-limited'
-              ? 'EXHAUSTED — USAGE LIMIT REACHED'
-              : s.state === 'unavailable'
-                ? `NOT AVAILABLE ON THIS ACCOUNT (plan ${s.planType})`
-                : 'not verified';
+        ? 'reachable'
+        : s.state === 'unverified'
+          ? 'plan limit reached — credit service unverified'
+          : s.state === 'absent'
+            ? `\`${s.bin}\` not installed or not on PATH`
+            : s.state === 'unauthenticated'
+              ? `\`${s.bin}\` not authenticated`
+              : s.state === 'rate-limited'
+                ? 'EXHAUSTED — USAGE LIMIT REACHED'
+                : s.state === 'unavailable'
+                  ? `NOT AVAILABLE ON THIS ACCOUNT (plan ${s.planType})`
+                  : 'not verified';
     lines.push(`  ${s.role}: ${s.model} via ${s.bin} — ${verdict}${suffix}`);
   }
 
@@ -217,13 +222,7 @@ export function renderPreflight(
 
   const locked = blocked.filter((s) => s.state === 'rate-limited');
   const reset = locked.find((s) => s.resetsAt !== undefined)?.resetsAt;
-  lines.push(
-    informational
-      ? '⚠️  guard-judge preflight: this rehearsal runs no judge, but on the real ship every reviewer ' +
-          'that is not already cached will fail closed.'
-      : '⚠️  guard-judge preflight: the gates below will still run, but every reviewer that is not ' +
-          'already cached will fail closed.',
-  );
+  lines.push(failClosedBanner(statuses, blocked, informational));
   // Avoids the word "transient" rather than negating it: an agent grepping for that label must
   // not find it here, since a six-day lock wearing it is why this line exists.
   if (locked.length > 0)
@@ -236,14 +235,23 @@ export function renderPreflight(
   for (const model of new Set(refused.map((s) => s.model))) {
     const rows = refused.filter((s) => s.model === model);
     const knobs = rows.map((s) => `${s.role} via ${ROLE_ENV[s.role]}`).join('; ');
+    const served = rows[0].served ?? [];
+    const target =
+      served.length > 0 ? ` — to a model the account serves: ${served.join(', ')}` : '';
+    // An unpinned reviewer's verdict is salted with BOTH the review and the escalation model.
+    const cost = rows.some((s) => s.role === 'review' || s.role === 'escalation')
+      ? " Moving review or escalation discards every unpinned reviewer's cached PASS; moving correctness alone keeps them."
+      : '';
     lines.push(
-      `   This plan does not serve ${model}, so re-running will not help. Move ${knobs} — to a ` +
-        `model the account serves: ${rows[0].served?.join(', ')}.`,
+      `   This plan does not serve ${model}, so re-running will not help. Move ${knobs}${target}.${cost}`,
     );
   }
+  // A refused model alone needs only its own role moved, never the whole family.
+  const providerBlocked = blocked.filter((s) => PROVIDER_DARK.has(s.state));
+  if (providerBlocked.length === 0) return lines;
   // Naming the override, never taking it: a runtime cross-family swap moves spend to an unwatched
   // subscription and puts its verdicts outside the model-keyed cache salt (review-gate-in-chain).
-  const dark = singleDarkBin(blocked);
+  const dark = singleDarkBin(providerBlocked);
   lines.push(
     dark === undefined
       ? '   Both judge CLIs are dark, so no family move helps — install or authenticate one of them.'
@@ -253,7 +261,30 @@ export function renderPreflight(
 }
 
 const darkStatuses = (statuses: ModelStatus[]): ModelStatus[] =>
-  statuses.filter((s) => s.state !== 'ok' && s.state !== 'unknown');
+  statuses.filter((s) => PROVIDER_DARK.has(s.state) || s.state === 'unavailable');
+
+/** Names only the roles that will fail closed: a refused escalation model does not stop the
+ *  first-pass reviewers from answering. */
+function failClosedBanner(
+  statuses: ModelStatus[],
+  blocked: ModelStatus[],
+  informational: boolean,
+): string {
+  const lead = informational
+    ? '⚠️  guard-judge preflight: this rehearsal runs no judge, but on the real ship '
+    : '⚠️  guard-judge preflight: the gates below will still run, but ';
+  if (blocked.length === statuses.length)
+    return `${lead}every reviewer that is not already cached will fail closed.`;
+  const roles = blocked.map((s) => s.role);
+  const list = new Intl.ListFormat('en', { type: 'conjunction' }).format(roles);
+  const escalation = roles.includes('escalation')
+    ? ' (escalation also judges completeness and every escalated FAIL)'
+    : '';
+  return (
+    `${lead}every uncached judge on the ${list} role${roles.length > 1 ? 's' : ''} will fail ` +
+    `closed${escalation}; judges on the other roles still run.`
+  );
+}
 
 /** The one dark judge CLI, or undefined when both are dark. */
 function singleDarkBin(blocked: ModelStatus[]): { bin: string; present: boolean } | undefined {
@@ -264,9 +295,9 @@ function singleDarkBin(blocked: ModelStatus[]): { bin: string; present: boolean 
 }
 
 /** The family move ship repeats at the tail of a blocked attempt, or '' when no single move helps
- *  (nothing dark, both CLIs dark, or a compound bin whose dark family is unknown). */
+ *  (no provider dark, both CLIs dark, or a compound bin whose dark family is unknown). */
 export function familyRemedy(statuses: ModelStatus[]): string {
-  const dark = singleDarkBin(darkStatuses(statuses));
+  const dark = singleDarkBin(statuses.filter((s) => PROVIDER_DARK.has(s.state)));
   if (dark === undefined || judgeProviderOfBin(dark.bin) === null) return '';
   return familyOverrideRemedy(dark.bin, dark.present);
 }
