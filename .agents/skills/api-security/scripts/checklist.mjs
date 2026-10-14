@@ -1,0 +1,267 @@
+#!/usr/bin/env node
+
+/**
+ * API Security Review Checklist
+ *
+ * Checks backend/API code against security best practices.
+ * Only runs on backend files (src/main/, vercel-serverless/, socket-server/).
+ */
+
+import { execFileSync } from 'node:child_process';
+import { createChecklistStore } from '../../_devkit/checklist-store.mjs';
+import {
+  assertStagedSetSane,
+  resolveReviewRoots,
+  stagedFilesOverride,
+  toGitPathspecs,
+} from '../../_devkit/review-roots.mjs';
+
+const CHECKLIST_PATH = '.claude/.api-security-review.json';
+
+// Top-level regex patterns for performance
+const RE_AUTH = /\b(auth|login|signin|signup|password|credential|encryption|encrypt|decrypt|hash)/i;
+const RE_JWT = /\b(jwt|jsonwebtoken|token|sign|verify|bearer|expiresIn|algorithm)/i;
+// `state`/`scope` as bare words matched nearly every diff (state machines, block scope), and
+// `authorization` matched ordinary bearer-auth headers that RE_AUTH already covers.
+const RE_OAUTH = /\b(oauth|redirect_uri|client_id|client_secret|response_type)/i;
+// Bare `query` matched router.query/useQuery and any path containing "queries"; `req\.`
+// already covers req.query.
+const RE_INPUT = /\b(body|params|input|req\.|request\.|zod|schema|validate)/i;
+// Statement-shaped SQL or qualified ORM/raw invocations — bare verbs (`query`, `update`,
+// `delete`, `where`) matched nearly every backend diff, and unqualified `execute`/`sql`
+// matched non-database calls like command.execute().
+const RE_SQL =
+  /\bselect\b[\s\S]{0,120}?\bfrom\b|\binsert\s+into\b|\bupdate\b[\s\S]{0,80}?\bset\b|\bdelete\s+from\b|\$(query|execute)Raw|\.(query|execute)Raw\s*\(|\.execute\s*\(\s*['"`]|\bsql\s*[`(]|\b(findMany|findUnique|findFirst)\b/i;
+const RE_XXE = /\b(xml|yaml|parseXML|DOMParser|yaml\.load)/i;
+const RE_ENDPOINT = /\b(router|handler|endpoint|route|get|post|put|patch|delete)\s*[.(]/i;
+const RE_RATE_LIMIT = /\b(rate|limit|throttle|rateLimit)/i;
+const RE_RESPONSE = /\b(res\.|response\.|json\(|send\(|return.*Response)/i;
+const RE_HEADERS = /\b(header|X-Content-Type|X-Frame|Content-Security-Policy|HSTS|X-Powered-By)/i;
+// Bare `error`/`stack` matched any variable; `file` matched any path; `\blog` matched
+// login/logic and `info|warn|error` any prose — keep only handler/logger constructs.
+const RE_ERROR = /\b(catch|throw|exception)/i;
+const RE_PROCESSING = /\b(debug|DEBUG|NODE_ENV|upload|multer|stream)/i;
+const RE_LOGGING = /\b(logger|console\.|audit|monitor)/i;
+// Injection/authz surfaces beyond SQL (coverage from OWASP ASVS v5 V1/V2/V4/V8 — see SKILL.md
+// Provenance). Two-regex items AND a sink pattern with a request-input marker so the item only
+// fires when both halves are present in the staged diff.
+const RE_MASS_ASSIGN =
+  /\.\.\.\s*(req\.(body|query|params)|body|payload)\b|Object\.assign\([^)]*\breq\./;
+const RE_COMMAND = /\b(exec|execSync|spawn|spawnSync|execFile|execFileSync)\s*\(|child_process/;
+const RE_FS_SINK =
+  /\b(sendFile|createReadStream|createWriteStream|readFile|writeFile|appendFile|unlink|rmSync|rm|mkdir|readdir|stat)\w*\s*\(/;
+const RE_REQ_INPUT = /\breq\.(params|query|body)\b|\bparams\.\w+/;
+const RE_OBJECT_LOOKUP =
+  /\b(findUnique|findFirst|findById|getById|updateMany|deleteMany|update|delete)\s*\(/;
+const RE_REDIRECT = /\bredirect\s*\(/i;
+const RE_OUTBOUND_DYNAMIC = /\b(fetch|axios[.\w]*|got)\s*\(\s*(`[^`\n]*\$\{|[^'"`\s)])/;
+
+// Prose files under a root ride along with source commits; their text trips the item
+// regexes (a README mentioning "password") and hands the judge prose to hallucinate on.
+const RE_PROSE_FILE = /\.(md|mdx|markdown|txt)$/i;
+
+const log = console.log;
+
+const store = createChecklistStore({
+  path: CHECKLIST_PATH,
+  label: 'API Security',
+  cleanupLabel: 'API security',
+  log,
+});
+const { save: saveChecklist, status, checkItem, finalize } = store;
+
+// Backend roots to review — from guard.config.json `review.backendRoots` (NOT hardcoded), so the
+// checklist scopes to ANY repo's layout. No/unreadable config, a non-object config, or an absent
+// review.backendRoots → all staged files (the gate never silently no-ops). A PRESENT but invalid
+// value (not an array of non-empty strings) warns loudly and falls back to scan-all, rather than
+// letting a bad entry crash the git call into an empty result that would wave the commit through.
+function backendRoots() {
+  return resolveReviewRoots({
+    envName: 'DEVKIT_REVIEW_BACKEND_ROOTS',
+    configKey: 'backendRoots',
+    reviewerName: 'api-security',
+  });
+}
+
+function getStagedFiles() {
+  const override = stagedFilesOverride();
+  if (override) return override.filter((f) => !RE_PROSE_FILE.test(f));
+  const pathspecs = toGitPathspecs(backendRoots());
+  try {
+    const output = execFileSync(
+      'git',
+      ['diff', '--cached', '--name-only', '--diff-filter=ACMR', '--', ...pathspecs],
+      { encoding: 'utf-8' },
+    );
+    // ACMR hides deletions, so an all-deletions index reads as "nothing staged" here. Never report
+    // that as zero items — a reviewer that examined nothing must not read as a pass.
+    if (!output.trim()) assertStagedSetSane(pathspecs, 'api-security');
+    return output
+      .trim()
+      .split('\n')
+      .filter((f) => f.length > 0)
+      .filter((f) => !RE_PROSE_FILE.test(f));
+  } catch {
+    return [];
+  }
+}
+
+function getFileDiff(file) {
+  try {
+    return execFileSync('git', ['diff', '--cached', '--', file], { encoding: 'utf-8' });
+  } catch {
+    return '';
+  }
+}
+
+function detectSecurityPatterns(_files, diffs) {
+  const items = [];
+  const fullDiff = diffs.join('\n');
+
+  if (RE_AUTH.test(fullDiff)) {
+    items.push({
+      name: 'auth-mechanism',
+      category: 'Authentication',
+      status: 'pending',
+      issues: [],
+    });
+  }
+  if (RE_JWT.test(fullDiff)) {
+    items.push({ name: 'jwt-security', category: 'JWT', status: 'pending', issues: [] });
+  }
+  if (RE_OAUTH.test(fullDiff)) {
+    items.push({ name: 'oauth-security', category: 'OAuth', status: 'pending', issues: [] });
+  }
+  if (RE_INPUT.test(fullDiff)) {
+    items.push({ name: 'input-validation', category: 'Input', status: 'pending', issues: [] });
+  }
+  if (RE_SQL.test(fullDiff)) {
+    items.push({ name: 'sql-injection', category: 'Input', status: 'pending', issues: [] });
+  }
+  if (RE_XXE.test(fullDiff)) {
+    items.push({ name: 'xxe-prevention', category: 'Input', status: 'pending', issues: [] });
+  }
+  if (RE_MASS_ASSIGN.test(fullDiff)) {
+    items.push({ name: 'mass-assignment', category: 'Input', status: 'pending', issues: [] });
+  }
+  if (RE_COMMAND.test(fullDiff)) {
+    items.push({ name: 'command-injection', category: 'Input', status: 'pending', issues: [] });
+  }
+  if (RE_FS_SINK.test(fullDiff) && RE_REQ_INPUT.test(fullDiff)) {
+    items.push({ name: 'path-traversal', category: 'Input', status: 'pending', issues: [] });
+  }
+  if (RE_OUTBOUND_DYNAMIC.test(fullDiff)) {
+    items.push({ name: 'ssrf-prevention', category: 'Input', status: 'pending', issues: [] });
+  }
+  if (RE_ENDPOINT.test(fullDiff)) {
+    items.push({
+      name: 'endpoint-auth',
+      category: 'Access Control',
+      status: 'pending',
+      issues: [],
+    });
+  }
+  if (RE_RATE_LIMIT.test(fullDiff)) {
+    items.push({
+      name: 'rate-limiting',
+      category: 'Access Control',
+      status: 'pending',
+      issues: [],
+    });
+  }
+  if (RE_OBJECT_LOOKUP.test(fullDiff) && RE_REQ_INPUT.test(fullDiff)) {
+    items.push({
+      name: 'object-level-authz',
+      category: 'Access Control',
+      status: 'pending',
+      issues: [],
+    });
+  }
+  if (RE_REDIRECT.test(fullDiff)) {
+    items.push({ name: 'open-redirect', category: 'Output', status: 'pending', issues: [] });
+  }
+  if (RE_RESPONSE.test(fullDiff)) {
+    items.push({ name: 'output-security', category: 'Output', status: 'pending', issues: [] });
+  }
+  if (RE_HEADERS.test(fullDiff)) {
+    items.push({ name: 'security-headers', category: 'Output', status: 'pending', issues: [] });
+  }
+  if (RE_ERROR.test(fullDiff)) {
+    items.push({ name: 'error-handling', category: 'Output', status: 'pending', issues: [] });
+  }
+  if (RE_PROCESSING.test(fullDiff)) {
+    items.push({
+      name: 'processing-security',
+      category: 'Processing',
+      status: 'pending',
+      issues: [],
+    });
+  }
+  if (RE_LOGGING.test(fullDiff)) {
+    items.push({ name: 'logging-security', category: 'Monitoring', status: 'pending', issues: [] });
+  }
+  if (items.length === 0) {
+    items.push({ name: 'general-security', category: 'General', status: 'pending', issues: [] });
+  }
+  return items;
+}
+
+function generate() {
+  const stagedFiles = getStagedFiles();
+  if (stagedFiles.length === 0) {
+    log(
+      '⏭️  No staged backend files under review.backendRoots (guard.config.json). Skipping API security review.',
+    );
+    // sc-1439: the GATE selected this reviewer, so an artifact must exist — a named skip, never
+    // an absence (verifyChecklist voids a PASS on a missing artifact).
+    if (stagedFilesOverride())
+      saveChecklist({
+        items: [],
+        skipped:
+          "gate-selected files were all excluded by this checklist's own filters (prose/tests/extensions/deletions) — deliberate skip, not an unfinished review",
+      });
+    process.exit(0);
+  }
+  const diffs = stagedFiles.map((f) => getFileDiff(f));
+  const items = detectSecurityPatterns(stagedFiles, diffs);
+  const data = { generated: new Date().toISOString(), files: stagedFiles, items };
+  saveChecklist(data);
+  log(`✅ API Security: ${stagedFiles.length} files, ${items.length} checks`);
+  log('');
+  log('Items to review:');
+  for (const item of items) log(`  - [${item.category}] ${item.name}`);
+}
+
+const args = process.argv.slice(2);
+const cmd = args[0];
+switch (cmd) {
+  case 'generate':
+    generate();
+    break;
+  case 'status':
+    status();
+    break;
+  case 'check-item': {
+    const name = args[1];
+    const pass = args.includes('--pass');
+    const failIdx = args.indexOf('--fail');
+    const failReason = failIdx !== -1 ? args[failIdx + 1] : null;
+    if (!name || (!pass && failIdx === -1)) {
+      log('Usage: check-item <name> --pass OR --fail "reason"');
+      process.exit(1);
+    }
+    checkItem(name, pass, failReason);
+    break;
+  }
+  case 'finalize':
+    finalize();
+    break;
+  default:
+    log('API Security Review Commands:');
+    log('  generate                    Create checklist');
+    log('  status                      Show progress');
+    log('  check-item <name> --pass    Mark passed');
+    log('  check-item <name> --fail    Mark failed');
+    log('  finalize                    Verify every item was resolved');
+    process.exit(1);
+}
