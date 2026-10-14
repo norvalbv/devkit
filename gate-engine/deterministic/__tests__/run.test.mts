@@ -275,6 +275,35 @@ describe('runDeterministic — comments joins the aggregated set', () => {
     expect(out).not.toContain('could-not-run');
   });
 
+  it.each([
+    ['', false],
+    [' under strict', true],
+  ])('decision-checks exit 2 blocks as could-not-run, never an opt-out%s', (_, strict) => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    if (strict) process.env.GUARD_DETERMINISTIC_STRICT = '1';
+    const d = repo(['decisions']);
+    const sink = join(d, 'events.jsonl');
+    process.env.DEVKIT_GATE_EVENTS = sink;
+    expect(runDeterministic(d, { exec: mkExec({ 'ruling-checks/enforce': 2 }) })).toBe(1);
+    const out = err.mock.calls.flat().join('\n');
+    expect(out).toContain('deterministic gates failed: guard-decision-checks(could-not-run)');
+    expect(out).not.toContain('opted out');
+    expect(eventsOf(sink)).toEqual([
+      expect.objectContaining({ gate: 'decision-checks', status: 'could_not_run' }),
+    ]);
+  });
+
+  it('a failing decision Check stays a fail in telemetry', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const d = repo(['decisions']);
+    const sink = join(d, 'events.jsonl');
+    process.env.DEVKIT_GATE_EVENTS = sink;
+    expect(runDeterministic(d, { exec: mkExec({ 'ruling-checks/enforce': 1 }) })).toBe(1);
+    expect(eventsOf(sink)).toEqual([
+      expect.objectContaining({ gate: 'decision-checks', status: 'fail' }),
+    ]);
+  });
+
   it("the exit-4 label is comments' own — another gate's exit 4 stays unexpected:4", () => {
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
     const exec = mkExec({ 'size-disable': 4, 'comment-firewall/cli': 4 });

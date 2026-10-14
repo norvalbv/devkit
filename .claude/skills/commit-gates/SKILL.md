@@ -63,6 +63,9 @@ command. Do not pre-run every gate or replace the managed chain with a hand-writ
   a decision Target when the commit touches its Scope, and print the ruling on failure. Fix the code;
   do not weaken the check. If the ruling itself changed, commit the new Target or the unlink
   (`guard-decisions enforce link <slug> --check none --reason "<why>"`) on its own first.
+  `guard-decision-checks(could-not-run)` means the Check never reached a verdict (not found, killed,
+  or past its 120 s bound, e.g. waiting on a busy test queue): the code is not at fault. Read the
+  Check's own output above it and re-run; re-link the Check only if its command moved.
 - **Local pre-ship loop.** Stage the paths (`git add <paths>`), then run `guard-deterministic`
   (in devkit itself: `node gate-engine/deterministic/run.mts`). It runs the same aggregated set
   a ship attempt runs, without the ship round. Single checks: `guard-comments gate` (reads the
