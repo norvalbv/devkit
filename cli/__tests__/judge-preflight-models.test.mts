@@ -192,7 +192,8 @@ describe('readCodexRateLimits — the model/list leg of the spawn', () => {
   });
 
   it('keeps the rate-limit answer when model/list never replies', async () => {
-    const snap = await withFake([LIMITS, 'sleep 30'].join('\n'), 700);
+    // `sleep 1` stands in for a loaded machine: the first reply can take seconds to arrive.
+    const snap = await withFake(['sleep 1', LIMITS, 'sleep 30'].join('\n'), 5000);
     expect(snap).toMatchObject({ planType: 'free', usedPercent: 10 });
     expect(snap?.models).toBeUndefined();
   });
