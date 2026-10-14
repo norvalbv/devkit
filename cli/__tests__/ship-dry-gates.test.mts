@@ -49,7 +49,7 @@ describe('ship-branch.sh — --dry-gates', () => {
       hookBody: `
 [ "\${DEVKIT_RUN_MODE:-}" = dry-gates ] || exit 0
 test "$DEVKIT_RUN_MODE" = dry-gates || exit 91
-test "$DEVKIT_REVIEW_GUARDS" = comments || exit 92
+test "$DEVKIT_REVIEW_GUARDS" = comments,ui-evidence || exit 92
 test "$DEVKIT_SHIP_BASE_SHA" = "$EXPECTED_BASE" || exit 93
 test "$(git diff --cached --name-only)" = note.txt || exit 94
 test "$(cat note.txt)" = finalized || exit 95
@@ -196,7 +196,7 @@ describe('ship-branch.sh — --dry-gates --with-reviewers', () => {
     const { dir, env, git, bare, studioTip } = seedBaseRepo({
       hookBody: `
 [ "\${DEVKIT_RUN_MODE:-}" = dry-gates ] || exit 0
-test "$DEVKIT_REVIEW_GUARDS" = comments,review || exit 81
+test "$DEVKIT_REVIEW_GUARDS" = comments,review,ui-evidence || exit 81
 test "\${DEVKIT_SHIP_DRY_REVIEWERS:-}" = 1 || exit 82
 test "$DEVKIT_SHIP_BASE_SHA" = "$EXPECTED_BASE" || exit 83
 test "$(git diff --cached --name-only)" = note.txt || exit 84
@@ -257,7 +257,7 @@ printf 'DRY_REVIEW_HOOK_OK\\n'
     const { dir, env, git } = seedShipRepo({
       hookBody: `
 [ "\${DEVKIT_RUN_MODE:-}" = dry-gates ] || exit 0
-test "$DEVKIT_REVIEW_GUARDS" = comments || exit 91
+test "$DEVKIT_REVIEW_GUARDS" = comments,ui-evidence || exit 91
 test -z "\${DEVKIT_SHIP_DRY_REVIEWERS:-}" || exit 92`,
     });
     writeFileSync(join(dir, 'note.txt'), 'plain\n');

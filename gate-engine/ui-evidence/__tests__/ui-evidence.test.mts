@@ -225,6 +225,23 @@ describe('guard-ui-evidence CLI', () => {
     expect(r).toMatchObject({ code: 0, stderr: '', events: [] });
   });
 
+  it('a dry-gates rehearsal speaks on a staged UI file', () => {
+    const r = runGate(stagedRepo({ 'src/Card.tsx': 'x' }), null, { DEVKIT_RUN_MODE: 'dry-gates' });
+    expect(r.code).toBe(0);
+    expect(r.stderr).toContain('📸 ui-evidence: Add before (base branch) and after (this branch)');
+    expect(r.events).toHaveLength(1);
+  });
+
+  it('a dry-gates rehearsal never asks the judge about non-UI code', () => {
+    const dir = stagedRepo({ 'src/price.ts': 'x' });
+    const r = runGate(dir, null, {
+      ...judgeStub(dir, 'echo VISIBLE'),
+      DEVKIT_RUN_MODE: 'dry-gates',
+    });
+    expect(r).toMatchObject({ code: 0, stderr: '', events: [] });
+    expect(judgeCalls(dir)).toBe(0);
+  });
+
   it('reads uiEvidence.paths from guard.config.json', () => {
     const dir = stagedRepo({
       'guard.config.json': JSON.stringify({ uiEvidence: { paths: ['src/api/**'] } }),

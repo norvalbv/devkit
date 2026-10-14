@@ -1481,14 +1481,14 @@ else
     if [ "$WITH_REVIEWERS" -eq 1 ]; then
       # Completeness stays off without a guard here: commit-with-gate-capture.sh never exports a
       # message file under dry-gates, and the hook refuses to arm the judge in this mode anyway.
-      export DEVKIT_REVIEW_GUARDS=comments,review
+      export DEVKIT_REVIEW_GUARDS=comments,review,ui-evidence
       export DEVKIT_SHIP_DRY_REVIEWERS=1
-      echo "🧪 Ship dry gates: exact base/path staging; running formatter, configured deterministic/structure/extra gates (comment budget included), and the domain reviewers." >&2
+      echo "🧪 Ship dry gates: exact base/path staging; running formatter, configured deterministic/structure/extra gates (comment budget included), the path-only UI screenshot reminder, and the domain reviewers." >&2
       echo "   Skipping decision, completeness, commit, push, and PR creation." >&2
     else
-      export DEVKIT_REVIEW_GUARDS=comments
+      export DEVKIT_REVIEW_GUARDS=comments,ui-evidence
       unset DEVKIT_SHIP_DRY_REVIEWERS
-      echo "🧪 Ship dry gates: exact base/path staging; running formatter, configured deterministic/structure/extra gates (comment budget included)." >&2
+      echo "🧪 Ship dry gates: exact base/path staging; running formatter, configured deterministic/structure/extra gates (comment budget included), and the path-only UI screenshot reminder." >&2
       echo "   Skipping decision, domain reviewer, completeness, commit, push, and PR creation." >&2
     fi
   else
