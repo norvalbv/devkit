@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 // Ship's evidence step, run by publish-evidence.sh after the PR exists. `budget` sizes the bound,
-// `publish` captures red/green and writes the block, `body` cleans a caller body before gh sees it.
+// `publish` writes the red/green block, `body` cleans a caller body and adds the UI task item.
 import { readFileSync, realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
@@ -11,6 +11,9 @@ import {
   type PreparedRegressionRepository,
   prepareRegressionRepository,
 } from '../../baseline-status/regression-repository.mts';
+import { UI_EVIDENCE } from '../../../../gate-engine/ui-evidence/check.mts';
+import { textOf } from '../digest/fields.mts';
+import { ATTEMPT, readShipEvents } from '../digest/gate-digest.mts';
 import { errorMessage } from '../review/shared/common.mts';
 import type { VerdictInput } from '../merge-verdict/ship-change.mts';
 import {
@@ -24,6 +27,7 @@ import { type EvidenceConfig, expandCommand, readEvidenceConfig } from './config
 import { type EvidenceOutcome, inconclusive, notRun, outcomeFromRegression } from './outcome.mts';
 import { publishEvidenceBlock, readPull } from './pr-body.mts';
 import { buildRedCommit, classifyChange, prBase, treeOf } from './red-ref.mts';
+import { withUiItem } from './ui-item.mts';
 
 const REPORT = '.devkit-evidence-report.json';
 
@@ -142,6 +146,18 @@ async function publish({ cwd, repo, pr, head, failed }: PublishArgs): Promise<vo
   );
 }
 
+/** This ship attempt's screenshot reminder, read from its own gate events; null when it was quiet. */
+function uiEvidenceDetail(env: NodeJS.ProcessEnv): string | null {
+  const events = readShipEvents(env.DEVKIT_GATE_EVENTS ?? '', env.DEVKIT_SHIP_ID ?? '');
+  // One ship id can span attempts: only rows after the newest marker are this run's. With no
+  // marker the rows cannot be attributed, and a reminder that cannot tell stays quiet.
+  const opened = events.map((e) => e.type).lastIndexOf(ATTEMPT);
+  const mine = opened < 0 ? [] : events.slice(opened);
+  const rows = mine.filter((e) => e.type === 'advisory_result' && e.gate === UI_EVIDENCE);
+  // A sink row is arbitrary JSON, so a non-string detail reads as no reminder instead of throwing.
+  return textOf(rows[rows.length - 1]?.detail) || null;
+}
+
 function required(values: Record<string, string | undefined>, name: string): string {
   const value = values[name];
   if (!value) throw new Error(`--${name} is required`);
@@ -172,7 +188,8 @@ async function main(argv: string[]): Promise<void> {
         `evidence: the current PR body was not read, so its block is not carried: ${errorMessage(error)}`,
       );
     }
-    process.stdout.write(carryEvidenceBlock(caller, current));
+    const body = carryEvidenceBlock(caller, current);
+    process.stdout.write(withUiItem(body, current, uiEvidenceDetail(process.env)));
     return;
   }
   if (command !== 'publish') throw new Error('usage: run.mts budget <dir> | publish … | body …');

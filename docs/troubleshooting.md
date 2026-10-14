@@ -410,6 +410,11 @@ changed, say so in the PR description rather than attaching screenshots. To be r
 the judge misses, add their globs to `uiEvidence.paths` in `guard.config.json`; to drop the reminder
 entirely, deselect the `ui-evidence` guard with `devkit init --guards <the guards you keep>`.
 
+`devkit ship --dry-gates` runs the path rule only, so a rehearsal shows the reminder before you write
+the PR body. A ship that writes the PR body also leaves an unticked `📸` task item there. Devkit never
+ticks or removes it; tick it yourself once the PR carries the screenshots or the no-visible-change
+note.
+
 ## `bun install` fails: `no commit matching "<sha>" found for "@norvalbv/devkit"`
 
 Also seen as `error: GET https://codeload.github.com/norvalbv/devkit/legacy.tar.gz/<sha> - 404`. Two shapes,

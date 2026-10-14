@@ -12,6 +12,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { EVIDENCE_BEGIN, readEvidenceBlock, VERDICT_SLOT } from '../lib/ship/evidence/block.mts';
+import { UI_ITEM_BEGIN, UI_ITEM_END } from '../lib/ship/evidence/ui-item.mts';
 import { testSpawnSync as spawnSync } from './_helpers.mts';
 import {
   dirs,
@@ -22,6 +23,7 @@ import {
 } from './_ship-branch-fixture.mts';
 
 const RUN = fileURLToPath(new URL('../lib/ship/evidence/run.mts', import.meta.url));
+const UI_GATE = fileURLToPath(new URL('../../gate-engine/ui-evidence/cli.mts', import.meta.url));
 const VITEST = fileURLToPath(new URL('../../node_modules/vitest/vitest.mjs', import.meta.url));
 const COMMAND = [
   process.execPath,
@@ -218,6 +220,89 @@ describe('devkit ship evidence block', () => {
     expect(readFileSync(repo.log, 'utf8')).not.toMatch(/--json body|pr edit/);
     expect(readFileSync(repo.state, 'utf8')).not.toContain(EVIDENCE_BEGIN);
   }, 240_000);
+
+  it('a UI ship leaves an unticked screenshot item; re-ships keep its tick and add one when the PR has none', () => {
+    const repo = shipRepo(null, 'feat/ui');
+    // Installed after the seed commit, so only the ship and re-ship run the real reminder.
+    write(repo.dir, {
+      '.husky/_/pre-commit': `#!/bin/sh\n"${process.execPath}" "${UI_GATE}" || true\n`,
+    });
+    write(repo.dir, { 'src/Card.tsx': 'export const Card = 1;\n' });
+
+    const shipped = bash(repo.dir, repo.env, [scriptPath, 'feat/ui', 'feat: card', 'src/Card.tsx']);
+    expect(shipped.status, shipped.stderr).toBe(0);
+    const item = /<!-- devkit:ui-evidence:begin -->\n.*\n<!-- devkit:ui-evidence:end -->/.exec(
+      readFileSync(repo.state, 'utf8'),
+    )?.[0];
+    expect(item).toMatch(/^.*\n- \[ \] 📸 Add before .*UI paths changed: src\/Card\.tsx\n.*$/);
+
+    // The author ticks it; a markdown-only re-ship fires no reminder and must not reset or drop it.
+    const done = item!.replace('- [ ]', '- [x]');
+    writeFileSync(repo.state, `b\n\n${done}\n`);
+    write(repo.dir, { 'docs/note.md': 'note\n' });
+    const reworded = bash(repo.dir, repo.env, [
+      reshipScript,
+      'feat/ui',
+      'feat: card',
+      '--pr',
+      '--body',
+      'reworded',
+      '--',
+      'docs/note.md',
+    ]);
+    expect(reworded.status, reworded.stderr).toBe(0);
+    expect(readFileSync(repo.state, 'utf8')).toBe(`reworded\n\n${done}\n`);
+    expect(done).toContain(UI_ITEM_BEGIN);
+    expect(done).toContain(UI_ITEM_END);
+
+    // Re-ship is the other body writer. The PR holds no item now, so its own reminder adds one.
+    writeFileSync(repo.state, 'reworded\n');
+    write(repo.dir, { 'src/Panel.tsx': 'export const Panel = 1;\n' });
+    const widened = bash(repo.dir, repo.env, [
+      reshipScript,
+      'feat/ui',
+      'feat: card',
+      '--pr',
+      '--body',
+      'widened',
+      '--',
+      'src/Panel.tsx',
+    ]);
+    expect(widened.status, widened.stderr).toBe(0);
+    expect(readFileSync(repo.state, 'utf8')).toMatch(
+      /^widened\n\n<!-- devkit:ui-evidence:begin -->\n- \[ \] 📸 Add before .*UI paths changed: src\/Panel\.tsx\n<!-- devkit:ui-evidence:end -->\n$/,
+    );
+  }, 360_000);
+
+  it('the body step reads the reminder from the newest attempt of its own ship id only', () => {
+    const sink = join(mkdtempSync(join(tmpdir(), 'evidence-sink-')), 'events.jsonl');
+    dirs.push(dirname(sink));
+    const row = (shipId: string, fields: Record<string, string | number>) =>
+      `${JSON.stringify({ ship_id: shipId, ...fields })}\n`;
+    const attempt = row('ship-1', { type: 'ship_attempt' });
+    const reminder = (shipId: string, detail: string | number) =>
+      row(shipId, { type: 'advisory_result', gate: 'ui-evidence', status: 'finding', detail });
+    const body = (events: string) => {
+      writeFileSync(sink, events);
+      return spawnSync(process.execPath, [RUN, 'body', '--repo', 'acme/app'], {
+        input: 'mine\n',
+        encoding: 'utf8',
+        env: { ...process.env, DEVKIT_GATE_EVENTS: sink, DEVKIT_SHIP_ID: 'ship-1' },
+      }).stdout;
+    };
+
+    // A blocked attempt reminded, then a resumed attempt under the same id stayed quiet.
+    expect(body(attempt + reminder('ship-1', 'stale') + attempt)).toBe('mine\n');
+    expect(
+      body(attempt + reminder('ship-1', 'stale') + attempt + reminder('ship-1', 'fresh')),
+    ).toBe(`mine\n\n${UI_ITEM_BEGIN}\n- [ ] 📸 fresh\n${UI_ITEM_END}\n`);
+    // A sink row is arbitrary JSON: a non-string detail adds nothing and must not fail the step.
+    expect(body(attempt + reminder('ship-1', 7))).toBe('mine\n');
+    // No attempt marker: the row cannot be told apart from an earlier run's, so it adds nothing.
+    expect(body(reminder('ship-1', 'unattributed'))).toBe('mine\n');
+    // The sink is per machine: a parallel ship's reminder is not this ship's.
+    expect(body(attempt + reminder('ship-2', 'theirs'))).toBe('mine\n');
+  });
 
   it('drops a block pasted into the caller body before the PR is created', () => {
     const repo = shipRepo(null, 'feat/pasted');

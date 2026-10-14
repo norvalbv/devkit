@@ -7,6 +7,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { testSpawnSync as spawnSync } from './_helpers.mts';
 import {
@@ -18,6 +19,8 @@ import {
   seedBaseRepo,
   seedShipRepo,
 } from './_ship-branch-fixture.mts';
+
+const UI_GATE = fileURLToPath(new URL('../../gate-engine/ui-evidence/cli.mts', import.meta.url));
 
 describe('ship-branch.sh — --dry-gates', () => {
   it('supports the same committed --from-branch source snapshot without keeping a branch', () => {
@@ -49,7 +52,7 @@ describe('ship-branch.sh — --dry-gates', () => {
       hookBody: `
 [ "\${DEVKIT_RUN_MODE:-}" = dry-gates ] || exit 0
 test "$DEVKIT_RUN_MODE" = dry-gates || exit 91
-test "$DEVKIT_REVIEW_GUARDS" = comments || exit 92
+test "$DEVKIT_REVIEW_GUARDS" = comments,ui-evidence || exit 92
 test "$DEVKIT_SHIP_BASE_SHA" = "$EXPECTED_BASE" || exit 93
 test "$(git diff --cached --name-only)" = note.txt || exit 94
 test "$(cat note.txt)" = finalized || exit 95
@@ -94,6 +97,27 @@ printf 'DRY_GATES_HOOK_OK\n'
     expect(realpathSync(dirname(gateLog))).toBe(realpathSync(join(dir, '.devkit')));
     expect(basename(gateLog)).toMatch(/^last-ship-gates-.+\.log$/);
     expect(readFileSync(gateLog, 'utf8')).toContain('DRY_GATES_HOOK_OK');
+  });
+
+  it('a rehearsal on a UI path prints the screenshot reminder from the real gate', () => {
+    const { dir, env } = seedShipRepo();
+    // Written after seeding, so only the rehearsal runs the reminder.
+    writeFileSync(
+      join(dir, '.husky/_/pre-commit'),
+      `#!/bin/sh\n"${process.execPath}" "${UI_GATE}" || true\n`,
+    );
+    mkdirSync(join(dir, 'src'));
+    writeFileSync(join(dir, 'src/Card.tsx'), 'export const Card = 1;\n');
+
+    const r = spawnSync(
+      '/bin/bash',
+      [scriptPath, 'feat/dry-ui', 'ship it', '--dry-gates', '--', 'src/Card.tsx'],
+      { cwd: dir, input: '', encoding: 'utf8', env },
+    );
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).toContain('📸 ui-evidence: Add before (base branch) and after (this branch)');
+    expect(r.stderr).toContain('UI paths changed: src/Card.tsx');
   });
 
   it('returns the hook failure and still removes its ephemeral branch', () => {
@@ -196,7 +220,7 @@ describe('ship-branch.sh — --dry-gates --with-reviewers', () => {
     const { dir, env, git, bare, studioTip } = seedBaseRepo({
       hookBody: `
 [ "\${DEVKIT_RUN_MODE:-}" = dry-gates ] || exit 0
-test "$DEVKIT_REVIEW_GUARDS" = comments,review || exit 81
+test "$DEVKIT_REVIEW_GUARDS" = comments,review,ui-evidence || exit 81
 test "\${DEVKIT_SHIP_DRY_REVIEWERS:-}" = 1 || exit 82
 test "$DEVKIT_SHIP_BASE_SHA" = "$EXPECTED_BASE" || exit 83
 test "$(git diff --cached --name-only)" = note.txt || exit 84
@@ -257,7 +281,7 @@ printf 'DRY_REVIEW_HOOK_OK\\n'
     const { dir, env, git } = seedShipRepo({
       hookBody: `
 [ "\${DEVKIT_RUN_MODE:-}" = dry-gates ] || exit 0
-test "$DEVKIT_REVIEW_GUARDS" = comments || exit 91
+test "$DEVKIT_REVIEW_GUARDS" = comments,ui-evidence || exit 91
 test -z "\${DEVKIT_SHIP_DRY_REVIEWERS:-}" || exit 92`,
     });
     writeFileSync(join(dir, 'note.txt'), 'plain\n');

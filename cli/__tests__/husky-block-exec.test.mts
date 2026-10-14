@@ -18,6 +18,8 @@ import {
 } from '../lib/install/overlay-lint-configs.mts';
 import { ALL_GUARDS, cleanupHomes, hasDash, homes, runHook } from './_husky-hook-harness.mts';
 
+const WITH_UI_EVIDENCE = { biome: false, guards: [...ALL_GUARDS, 'ui-evidence'] };
+
 // The hook's SHELL contract: commit/ship fail fast, review/dry-gates defer per lane, and it all
 // survives dash + a hook path with spaces. The orchestrator's own aggregation is tested in run.test.mjs.
 
@@ -72,31 +74,37 @@ describe('assembled hook execution (stubbed bins, sh -e)', () => {
   });
 
   it('dry-gates remembers deterministic failure and skips expensive gates', () => {
-    const r = runHook({
-      DET_RC: '1',
-      DEVKIT_RUN_MODE: 'dry-gates',
-      DEVKIT_REVIEW_GUARDS: 'comments',
-    });
+    const r = runHook(
+      {
+        DET_RC: '1',
+        DEVKIT_RUN_MODE: 'dry-gates',
+        DEVKIT_REVIEW_GUARDS: 'comments,ui-evidence',
+      },
+      WITH_UI_EVIDENCE,
+    );
     expect(r.status).toBe(1);
     expect(r.calls).toContain('guard-deterministic');
     // sc-2753: the comment budget runs inside guard-deterministic, never as its own hook step.
     expect(r.calls).not.toContain('guard-comments');
     expect(r.calls).not.toContain('guard-decisions');
     expect(r.calls).not.toContain('guard-review');
-    expect(r.calls).not.toContain('guard-ui-evidence');
+    expect(r.calls).toContain('guard-ui-evidence');
   });
 
-  it('dry-gates with reviewers runs the fleet after a deterministic failure, never decisions or ui-evidence', () => {
-    const r = runHook({
-      DET_RC: '1',
-      DEVKIT_RUN_MODE: 'dry-gates',
-      DEVKIT_REVIEW_GUARDS: 'comments,review',
-    });
+  it('dry-gates with reviewers runs the fleet and the UI reminder after a deterministic failure, never decisions', () => {
+    const r = runHook(
+      {
+        DET_RC: '1',
+        DEVKIT_RUN_MODE: 'dry-gates',
+        DEVKIT_REVIEW_GUARDS: 'comments,review,ui-evidence',
+      },
+      WITH_UI_EVIDENCE,
+    );
     expect(r.status).toBe(1);
     expect(r.calls).toContain('guard-deterministic');
     expect(r.calls).toContain('guard-review --gate');
     expect(r.calls).not.toContain('guard-decisions');
-    expect(r.calls).not.toContain('guard-ui-evidence');
+    expect(r.calls).toContain('guard-ui-evidence');
   });
 
   it('dry-gates with reviewers never arms the completeness judge, even with a message file present', () => {
