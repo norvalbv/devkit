@@ -594,10 +594,11 @@ else
   # Before the intent write too: no later push can reach a non-open PR, so nothing is worth resuming.
   [ -n "${SHIP_DRY_RUN:-}" ] || reship_refuse_closed_pr "" "nothing pushed" || exit 1
   # Tracked-dist drift is named against the PR's fork point, where CI judges it, not the PR tip,
-  # which already carries the PR's own new artifacts. Dry runs never ask gh, so fall back to origin/HEAD.
-  DRIFT_REF=${PR_SEEN_BASE:+origin/$PR_SEEN_BASE}
-  [ -n "$DRIFT_REF" ] || DRIFT_REF=$(git symbolic-ref -q --short refs/remotes/origin/HEAD) || DRIFT_REF=
-  DRIFT_TARGET=$([ -n "$DRIFT_REF" ] && git merge-base "$BASE" "$DRIFT_REF" 2>/dev/null) || DRIFT_TARGET=
+  # which already carries the PR's own new artifacts. origin/HEAD covers dry runs and an unfetched base.
+  DRIFT_TARGET=
+  for DRIFT_REF in ${PR_SEEN_BASE:+"origin/$PR_SEEN_BASE"} "$(git symbolic-ref -q --short refs/remotes/origin/HEAD || true)"; do
+    [ -n "$DRIFT_REF" ] && DRIFT_TARGET=$(git merge-base "$BASE" "$DRIFT_REF" 2>/dev/null) && break
+  done
 fi
 
 . "$SCRIPT_DIR/ship-run-record.sh"

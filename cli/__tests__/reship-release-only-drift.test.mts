@@ -123,4 +123,27 @@ describe('reship — release-only drift on an append', () => {
     expect(r.stderr).toContain('    dist/cli/next.mjs');
     expect(r.stderr).not.toContain('    dist/cli/new.mjs');
   });
+
+  it('falls back to origin/HEAD when the PR base was never fetched, never to the PR tip', () => {
+    const { forkPoint, root } = openPr();
+    write(root, 'dist/cli/new.mjs', 'export const v = 2;\n');
+    write(root, 'dist/cli/a.mjs', 'export const a = 2;\n');
+    const gh = ghOpenPrInto('unfetched');
+
+    const r = testSpawnSync(
+      '/bin/bash',
+      [reship, 'feat/pr', 'v2', '--pr', '--', 'dist/cli/new.mjs'],
+      {
+        cwd: root,
+        input: 'body\n',
+        encoding: 'utf8',
+        env: { ...ENV, PATH: `${gh}:${ENV.PATH}` },
+      },
+    );
+
+    expect(r.stderr).toContain(
+      `1 regenerated dist file(s) are release-only drift from ${forkPoint.slice(0, 12)}`,
+    );
+    expect(r.stderr).not.toContain('    dist/cli/new.mjs');
+  });
 });
