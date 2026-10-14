@@ -344,6 +344,27 @@ describe('the coverage-run stop pattern using-devkit documents', () => {
   });
 });
 
+describe('the ship progress file using-devkit documents', () => {
+  // A renamed file would leave agents polling a path that never appears, reading "not started" forever.
+  const skill = readFileSync(join(SKILLS_DIR, 'using-devkit', 'SKILL.md'), 'utf8');
+  const writer = readFileSync(
+    join(ROOT, 'cli', 'lib', 'ship', 'commit-with-gate-capture.sh'),
+    'utf8',
+  );
+
+  it('names the file the ship gate capture writes, slashes as dashes', () => {
+    expect(skill).toContain('`.devkit/review-progress-<branch>.json`');
+    expect(skill).toContain('(`/` in the branch becomes `-`');
+    expect(writer).toContain('local branch_safe="${br//\\//-}"');
+    expect(writer).toContain('local progress="$root/.devkit/review-progress-$branch_safe.json"');
+  });
+
+  it('names the separate file a dry-gates rehearsal writes', () => {
+    expect(skill).toContain('`…-<branch>-dry-*.json`');
+    expect(writer).toContain('progress="$root/.devkit/review-progress-$branch_safe-dry-');
+  });
+});
+
 // The from-source form devkit's own root docs give agents; a renamed verb would leave it dead.
 describe('verbs the root docs run from source', () => {
   it('are all dispatched by cli/index.mts', () => {
