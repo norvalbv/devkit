@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
+import { DK_GATE_BLOCK_HELPERS } from '../lib/husky/gate-policy/block-helpers.mts';
 import { buildOverlayHook } from '../lib/husky/husky-block.mts';
 import { eslintOverlayContent } from '../lib/install/overlay-lint-configs.mts';
 import { testSpawnSync as spawnSync } from './_helpers.mts';
@@ -91,7 +92,10 @@ function overlayStep(cwd: string) {
     hook.indexOf('# devkit lint overlay — STAGED'),
     hook.indexOf('# devkit lint overlay — review mode'),
   );
-  return spawnSync('sh', ['-e', '-c', step], { cwd, encoding: 'utf8' });
+  return spawnSync('sh', ['-e', '-c', `${DK_GATE_BLOCK_HELPERS}\n${step}`], {
+    cwd,
+    encoding: 'utf8',
+  });
 }
 
 function structureGate(cwd: string) {

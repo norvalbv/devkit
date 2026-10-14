@@ -15,6 +15,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
+import { DK_GATE_BLOCK_HELPERS } from '../lib/husky/gate-policy/block-helpers.mts';
 import { FALLOW_STAGED } from '../lib/husky/gate-policy/fallow-staged.mts';
 import { DK_NO_GIT_ENV_HELPER } from '../lib/husky/review-fragments.mts';
 import { rebaseWorktreeCoverage } from '../lib/ship/coverage/coverage-rebase.mts';
@@ -125,7 +126,7 @@ function fixture(pkgRel: string, artifact?: (file: string) => string): Fixture {
 
 /** Run the generated staged-gate block as a hook would, in `cwd`. */
 function runGate(f: Fixture, cwd = f.cwd, env: Record<string, string> = {}, shell = 'sh') {
-  const script = `${DK_NO_GIT_ENV_HELPER}\n__dk_package_bin_dir="${f.bin}"\n${FALLOW_STAGED}\n`;
+  const script = `${DK_NO_GIT_ENV_HELPER}\n${DK_GATE_BLOCK_HELPERS}\n__dk_package_bin_dir="${f.bin}"\n${FALLOW_STAGED}\n`;
   const r = spawnSync(shell, ['-e', '-c', script], {
     cwd,
     encoding: 'utf8',
