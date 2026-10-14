@@ -189,7 +189,7 @@ export function writeIntent(
     return fail(e instanceof Error ? e.message : String(e)); // lock contention → record nothing
   }
   process.stdout.write(`${intent.generation}\n`);
-  emitShipIntentEvent(intent, opts.resumed);
+  emitShipIntentEvent(intent, opts.resumed, opts.root);
   return 0;
 }
 
