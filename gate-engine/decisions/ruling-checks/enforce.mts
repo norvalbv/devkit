@@ -163,7 +163,10 @@ function dueChecks(links: Link[], staged: string[]): Map<string, Due> {
   return due;
 }
 
-function printRemedy(violated: boolean): void {
+/** Prints the remedy and returns the exit: 0 none failed, 1 one failed, 2 none reached a verdict. */
+function remedy(failures: Failure[]): number {
+  if (!failures.length) return 0;
+  const violated = failures.some((f) => f.verdict);
   if (violated) {
     console.error('   Fix the code, do not weaken the check.');
     console.error(
@@ -176,9 +179,10 @@ function printRemedy(violated: boolean): void {
   }
   console.error("   If the check's path moved, re-link it with the new command:");
   console.error('     guard-decisions enforce link <slug> --check "<cmd>" --reason "<why>"');
+  return violated ? 1 : NO_VERDICT;
 }
 
-/** The decision-checks gate: 0 every Check passed, 1 one failed, 2 one never reached a verdict. */
+/** The decision-checks gate: 0 every Check passed, 1 one failed, 2 none reached a verdict. */
 export async function runGate(cwd = process.cwd(), spawn: Spawn = spawnSync): Promise<number> {
   if (envFlag(BYPASS_SUFFIX)) {
     emitGateBypass(GATE, `GUARD_${BYPASS_SUFFIX}`);
@@ -200,8 +204,7 @@ export async function runGate(cwd = process.cwd(), spawn: Spawn = spawnSync): Pr
   }
   const due = dueChecks(links, staged);
   const unstaged = due.size ? changedFiles(cwd, []) : [];
-  let violated = false;
-  let unrun = false;
+  const failures: Failure[] = [];
   for (const [key, l] of due) {
     if (l.named.length) {
       console.error(
@@ -217,14 +220,12 @@ export async function runGate(cwd = process.cwd(), spawn: Spawn = spawnSync): Pr
     console.log(`▶ ${GATE}: ${l.slug} — ${l.cmd}`);
     const failure = runCheck(cwd, l.cmd, spawn);
     if (failure === null) continue;
-    if (failure.verdict) violated = true;
-    else unrun = true;
+    failures.push(failure);
     const unlinked = indexKeys.has(key) ? '' : ' (unlinked in this commit)';
     failLine(`${l.slug}${unlinked}: \`${l.cmd}\` ${failure.why}`);
     failLine(`Ruling (${l.slug}): ${capped(l.ruling)}`);
   }
-  if (violated || unrun) printRemedy(violated);
-  return violated ? 1 : unrun ? NO_VERDICT : 0;
+  return remedy(failures);
 }
 
 function refuse(why: string): number {
