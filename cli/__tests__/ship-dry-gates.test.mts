@@ -7,6 +7,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { testSpawnSync as spawnSync } from './_helpers.mts';
 import {
@@ -18,6 +19,8 @@ import {
   seedBaseRepo,
   seedShipRepo,
 } from './_ship-branch-fixture.mts';
+
+const UI_GATE = fileURLToPath(new URL('../../gate-engine/ui-evidence/cli.mts', import.meta.url));
 
 describe('ship-branch.sh — --dry-gates', () => {
   it('supports the same committed --from-branch source snapshot without keeping a branch', () => {
@@ -94,6 +97,27 @@ printf 'DRY_GATES_HOOK_OK\n'
     expect(realpathSync(dirname(gateLog))).toBe(realpathSync(join(dir, '.devkit')));
     expect(basename(gateLog)).toMatch(/^last-ship-gates-.+\.log$/);
     expect(readFileSync(gateLog, 'utf8')).toContain('DRY_GATES_HOOK_OK');
+  });
+
+  it('a rehearsal on a UI path prints the screenshot reminder from the real gate', () => {
+    const { dir, env } = seedShipRepo();
+    // Written after seeding, so only the rehearsal runs the reminder.
+    writeFileSync(
+      join(dir, '.husky/_/pre-commit'),
+      `#!/bin/sh\n"${process.execPath}" "${UI_GATE}" || true\n`,
+    );
+    mkdirSync(join(dir, 'src'));
+    writeFileSync(join(dir, 'src/Card.tsx'), 'export const Card = 1;\n');
+
+    const r = spawnSync(
+      '/bin/bash',
+      [scriptPath, 'feat/dry-ui', 'ship it', '--dry-gates', '--', 'src/Card.tsx'],
+      { cwd: dir, input: '', encoding: 'utf8', env },
+    );
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).toContain('📸 ui-evidence: Add before (base branch) and after (this branch)');
+    expect(r.stderr).toContain('UI paths changed: src/Card.tsx');
   });
 
   it('returns the hook failure and still removes its ephemeral branch', () => {

@@ -10,6 +10,8 @@ describe('ui-evidence PR-body item', () => {
     const body = withUiItem('Fixes the card.\n', '', DETAIL);
     expect(body).toBe(`Fixes the card.\n\n${renderUiItem(DETAIL)}\n`);
     expect(body).toContain(`${UI_ITEM_BEGIN}\n- [ ] 📸 ${DETAIL}\n${UI_ITEM_END}`);
+    // A ship with no body at all: the item is the whole PR body, with no leading blank lines.
+    expect(withUiItem('', '', DETAIL)).toBe(`${renderUiItem(DETAIL)}\n`);
   });
 
   it('adds nothing when the reminder stayed quiet and the PR has no item', () => {
@@ -33,6 +35,15 @@ describe('ui-evidence PR-body item', () => {
     expect(body.split(UI_ITEM_BEGIN)).toHaveLength(2);
   });
 
+  it('carries a ticked item out of a CRLF body, as GitHub stores a web-edited description', () => {
+    const current = `old body\n\n${ticked(renderUiItem(DETAIL))}\n`.replaceAll('\n', '\r\n');
+    const once = withUiItem('new body', current, null);
+    expect(once).toContain('- [x] 📸');
+    expect(once.split(UI_ITEM_BEGIN)).toHaveLength(2);
+    // The carried item keeps its CR bytes; the next re-ship must still find it.
+    expect(withUiItem('newer body', once, null)).toContain('- [x] 📸');
+  });
+
   it("the caller's own item wins and is never duplicated", () => {
     const caller = `mine\n\n${ticked(renderUiItem(DETAIL))}`;
     expect(withUiItem(caller, renderUiItem(DETAIL), DETAIL)).toBe(caller);
@@ -54,5 +65,15 @@ describe('ui-evidence PR-body item', () => {
     expect(body).toContain(evidence);
     expect(body).toContain(renderUiItem(DETAIL));
     expect(body.startsWith('new')).toBe(true);
+  });
+
+  it("the evidence step's caller cleaning leaves a ticked item in the caller body intact", () => {
+    const evidence = `${EVIDENCE_BEGIN}\nverdict\n${EVIDENCE_END}`;
+    const caller = `screenshots attached\n\n${ticked(renderUiItem(DETAIL))}`;
+    const current = `old\n\n${renderUiItem(DETAIL)}\n\n${evidence}\n`;
+    const body = withUiItem(carryEvidenceBlock(caller, current), current, DETAIL);
+    expect(body).toContain(ticked(renderUiItem(DETAIL)));
+    expect(body).not.toContain('- [ ] 📸');
+    expect(body).toContain(evidence);
   });
 });
