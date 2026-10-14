@@ -252,7 +252,7 @@ Every piece of code that loads scoped Targets, the hook stage it runs in, and wh
 
 | Code (devkit package) | Stage | Call | Blocks |
 |---|---|---|---|
-| `gate-engine/decisions/detect.mts` | pre-commit | `guard-decisions detect --gate` | yes: an unrecorded decision |
+| `gate-engine/decisions/capture/block-remedy.mts` | pre-commit | `guard-decisions detect --gate` | yes: an unrecorded decision |
 | `gate-engine/review/evidence/targets-block.mts` | pre-commit | `guard-review --gate` | yes: security and performance reviewers' Targets block |
 | `gate-engine/review/evidence/commit-message.mts` | pre-commit | `guard-review --gate` | yes: same reviewer fleet |
 | `gate-engine/review/evidence/findings.mts` | pre-commit | `guard-review --gate` | no: an advisory hint when a failed reviewer cites a Target outside its Scope |

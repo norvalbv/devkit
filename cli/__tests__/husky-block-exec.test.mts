@@ -138,6 +138,7 @@ describe('assembled hook execution (stubbed bins, sh -e)', () => {
     });
     expect(r.status).toBe(1);
     expect(r.calls).toContain('guard-decisions');
+    expect(r.stdout).toContain("with the user's OK: GUARD_NO_LOG=1 git commit");
     expect(r.calls).toContain('guard-review --gate');
   });
 
@@ -247,7 +248,7 @@ describe('assembled hook execution (stubbed bins, sh -e)', () => {
     const r = runHook({ DEC_RC: '3' });
     expect(r.status).toBe(1);
     expect(r.stdout).toContain('strict ship mode failed closed');
-    expect(r.stdout).not.toContain('Record the decision target');
+    expect(r.stdout).not.toContain('GUARD_NO_LOG=1 git commit');
   });
 
   // sc-2753: an installed guard-comments bin is never the hook's own step any more — a stale

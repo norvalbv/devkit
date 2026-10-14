@@ -668,6 +668,7 @@ describe('--gate (integration, real git repo)', () => {
         const result = gateStubbed(judgeRecordedTarget);
         expect(capturedArgs()).not.toContain('Adopt dependency b for the existing direction');
         expect(result.status).toBe(1);
+        expect(result.stderr).toContain('No recorded Target is scoped to these files.');
       });
 
       it('still blocks when the judge returns DECISION with a relevant Target present', () => {
@@ -680,6 +681,12 @@ describe('--gate (integration, real git repo)', () => {
         const result = gateStubbed('echo DECISION\n');
         expect(capturedArgs()).toContain('Adopt dependency b for the existing direction');
         expect(result.status).toBe(1);
+        // The remedy names the Target the judge read, a FILE scope (never the dep name), and
+        // warns off staging into the ignored, symlinked log.
+        expect(result.stderr).toContain('Targets scoped to these files: policy.');
+        expect(result.stderr).toContain('--scope "package.json"');
+        expect(result.stderr).not.toContain('--scope "b"');
+        expect(result.stderr).toContain('docs/decisions is git-ignored or linked here');
       });
 
       it.each(['', '1'])(
@@ -691,6 +698,9 @@ describe('--gate (integration, real git repo)', () => {
           const result = gateStubbed('echo DECISION\n', { GUARD_AI_STRICT: strict });
           expect(result.status).toBe(1);
           expect(capturedArgs()).toMatch(/RECORDED TARGETS[^\n]*UNAVAILABLE/);
+          // An unreadable log must not read as "no Target scoped" in the remedy (strict only exits
+          // 3 on an outage; a DECISION verdict still exits 1 and prints it).
+          expect(result.stderr).toContain('Recorded Targets could not be read.');
         },
       );
 
