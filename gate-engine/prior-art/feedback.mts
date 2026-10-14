@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { emitGateEvent } from '../judge/gate-events.mts';
 import { telemetrySink } from '../judge/run-context.mts';
+import { parsePriorArtResponse } from './response-contract.mts';
 import {
   PRIOR_ART_FRAMINGS,
   PRIOR_ART_VERDICTS,
@@ -149,4 +150,20 @@ export function runRecordFeedback(argv: string[]): number {
   const telemetry = emitGateEvent({ ...parsed.event, type: 'agent_feedback' });
   console.log(JSON.stringify({ feedback_id: parsed.event.feedback_id, telemetry }));
   return 0;
+}
+
+/** Keep the validated outcome queryable after its transcript expires, without copying prose. */
+export function priorArtTelemetry(output: string) {
+  const parsed = parsePriorArtResponse(output);
+  if (!parsed.ok) return { prior_art_status: 'invalid', prior_art_error: parsed.error.code };
+  const result = parsed.value;
+  if (result.status !== 'reviewed') return { prior_art_status: result.status };
+  return {
+    prior_art_status: result.status,
+    prior_art_verdict: result.verdict,
+    prior_art_framing: result.frameChallenge?.framing,
+    prior_art_boundary: result.frameChallenge?.boundaryMustExist,
+    prior_art_next_step: result.suggestedNextStep?.kind,
+    prior_art_confidence: result.confidence,
+  };
 }

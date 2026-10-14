@@ -17,7 +17,7 @@
 // regex floor still blocks. Each caller describes its own consequence where it differs.
 
 import { execFile, execFileSync } from 'node:child_process';
-import { parsePriorArtResponse } from '../prior-art/response-contract.mts';
+import { priorArtTelemetry } from '../prior-art/feedback.mts';
 import {
   type JudgeUsage,
   parseJudgeUsage,
@@ -142,6 +142,8 @@ interface ExecJudgeOpts {
   lens?: string;
   /** Fires once per measured claude spawn with the tool calls its permission gate refused. */
   onPermissionDenials?: (denied: string[]) => void;
+  /** Receives the ref of the transcript this spawn stored, for a gate line that names it. */
+  onTranscript?: (ref: string) => void;
 }
 
 /** The `--model <m>` value from a judge argv, for the telemetry event; null when absent. */
@@ -175,22 +177,6 @@ export interface RecordAgentRunOpts {
   transcript?: boolean;
   /** Extra event keys (e.g. a disposition); core and derived prior_art_* fields are reserved. */
   extra?: Record<string, unknown>;
-}
-
-/** Keep the validated outcome queryable after its transcript expires, without copying prose. */
-function priorArtTelemetry(output: string) {
-  const parsed = parsePriorArtResponse(output);
-  if (!parsed.ok) return { prior_art_status: 'invalid', prior_art_error: parsed.error.code };
-  const result = parsed.value;
-  if (result.status !== 'reviewed') return { prior_art_status: result.status };
-  return {
-    prior_art_status: result.status,
-    prior_art_verdict: result.verdict,
-    prior_art_framing: result.frameChallenge?.framing,
-    prior_art_boundary: result.frameChallenge?.boundaryMustExist,
-    prior_art_next_step: result.suggestedNextStep?.kind,
-    prior_art_confidence: result.confidence,
-  };
 }
 
 /**
@@ -273,7 +259,7 @@ function emitJudgeExec(
   const commandsRef = saveCodexCommands(opts.label, stdout, opts.lens);
   if (commandsRef) extra.commands_ref = commandsRef;
   Object.assign(extra, recordPermissionDenials(opts, stdout));
-  recordAgentRun({
+  const { ref } = recordAgentRun({
     label: opts.label,
     output,
     input: opts.input,
@@ -283,6 +269,7 @@ function emitJudgeExec(
     transcript: opts.transcript,
     extra: Object.keys(extra).length > 0 ? extra : undefined,
   });
+  if (ref) opts.onTranscript?.(ref);
 }
 
 /**
