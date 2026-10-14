@@ -3,6 +3,7 @@
 import { waiveCommand } from '../../../../gate-engine/review/valve/shell-word.mts';
 import { count, oneLine, textOf } from './fields.mts';
 import type { GateEvent } from './gate-digest.mts';
+import { issuesUnder } from './trend.mts';
 
 const FINGERPRINT = /^[0-9a-f]{12}$/;
 
@@ -12,10 +13,12 @@ export function blockingFindings(
 ): { detail: string; fp?: string; findings?: number }[] {
   const reviewer = oneLine(textOf(e.reviewer)) || 'unknown';
   const base = textOf(e.blocking_base);
-  const rows: { detail: string; fp?: string; findings?: number }[] = entries(e).map((b) => ({
-    detail: detail(reviewer, b, base),
-    fp: b.fp,
-  }));
+  const all = entries(e);
+  const rows: { detail: string; fp?: string; findings?: number }[] = all.map((b) => {
+    const issues = manyIssues(e, b, all);
+    const row = { detail: detail(reviewer, b, base, issues), fp: b.fp };
+    return issues ? { ...row, findings: issues } : row;
+  });
   const omitted = count(e.blocking_omitted);
   if (omitted > 0) {
     rows.push({
@@ -53,9 +56,20 @@ interface Entry {
 
 /** `<lens> [<fp>]` first so the ID survives any cut; a waive hint only from the exact lens, since
  * any other label waives nothing. oneLine capped the lens, so the hint stays bounded. */
-function detail(reviewer: string, b: Entry, base: string): string {
-  const head = `${b.lens} [${b.fp}]`;
+function detail(reviewer: string, b: Entry, base: string, issues: number): string {
+  const head = `${b.lens} [${b.fp}]${issues ? ` · ${issues} issues, each listed in the log` : ''}`;
   // The same renderer blockingNote uses, so a copied hint records the waiver it names.
   const command = b.exact && waiveCommand({ reviewer, lens: b.lens, fp: b.fp, base });
-  return command ? `${head} — fix it, or: ${command}` : `${head} — the waive command is in the log`;
+  const fix = issues ? 'fix them all' : 'fix it';
+  return command ? `${head} — ${fix}, or: ${command}` : `${head} — the waive command is in the log`;
+}
+
+/** How many issues sit under this ID when more than one, else 0. A cut label, a lens split across
+ * IDs, or a list that dropped IDs cannot be matched to one item, so each of those reads 0. */
+function manyIssues(e: GateEvent, b: Entry, all: Entry[]): number {
+  const oneId =
+    count(e.blocking_omitted) === 0 && all.filter((o) => o.lens === b.lens).length === 1;
+  if (!b.exact || !oneId) return 0;
+  const issues = issuesUnder(e, b.lens) ?? 0;
+  return issues > 1 ? issues : 0;
 }
