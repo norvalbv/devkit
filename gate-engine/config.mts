@@ -457,7 +457,9 @@ export function resolveFromCwd(
 
 // The test-file infix (`.test.` / `.spec.`) — constant, so it lives at module scope; the
 // extension set is what varies, and that's a plain suffix check (no dynamic RegExp needed).
-const TEST_INFIX = /\.(test|spec)\./;
+export const TEST_INFIX = /\.(test|spec)\./;
+/** Any JavaScript or TypeScript file, whatever `sourceExtensions` a repository declares. */
+export const JS_TS_SOURCE_RE = /\.(?:[cm]?[jt]sx?)$/i;
 
 /**
  * Build the impl-file matchers for a `sourceExtensions` list (e.g. `['ts','tsx']` or `['mjs','js']`),
