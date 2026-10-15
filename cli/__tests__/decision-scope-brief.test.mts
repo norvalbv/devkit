@@ -144,7 +144,10 @@ describe('decision-scope-brief', () => {
     // scoped-targets writes JSON on EVERY path, so exit 0 with nothing is a contract violation —
     // not the "nothing governs" answer it used to be silently folded into.
     stubBin('');
-    expect(run({ file_path: 'src/a.ts' })).toContain('DID NOT RUN');
+    const out = run({ file_path: 'src/a.ts' });
+    expect(out).toContain('DID NOT RUN');
+    // Exit 0 is not the cause here; reporting "exit 0" would read as a clean run.
+    expect(out).toContain('Cause: no JSON array on stdout (ran');
   });
 
   it('reports that retrieval did not run when the output parses but is not an array', () => {
@@ -155,7 +158,10 @@ describe('decision-scope-brief', () => {
 
   it('notices the outage once per session, without consuming the file own brief slot', () => {
     stubBin('boom', 1);
-    expect(run({ file_path: 'src/a.ts' }, 'Edit', 'sticky')).toContain('DID NOT RUN');
+    const notice = run({ file_path: 'src/a.ts' }, 'Edit', 'sticky');
+    expect(notice).toContain('DID NOT RUN');
+    // The repeat below is silent, so the one notice must say silence is not a clean answer.
+    expect(notice).toContain('a repeat failure this session is not announced again');
     expect(run({ file_path: 'src/b.ts' }, 'Edit', 'sticky')).toBe('');
 
     // The stamp must NOT have burned src/a.ts's slot: once the tool works again, the real brief
@@ -201,7 +207,40 @@ describe('decision-scope-brief — failure shapes and the real CLI behind it', (
     // spawnSync reports status null for a killed child — the same shape as the 10s timeout, which
     // no other test reaches. The classifier must not read null as "exit 0".
     rawStubBin('#!/bin/sh\nkill -9 $$\n');
-    expect(run({ file_path: 'src/a.ts' })).toContain('DID NOT RUN');
+    const out = run({ file_path: 'src/a.ts' });
+    expect(out).toContain('DID NOT RUN');
+    expect(out).toContain('Cause: killed by SIGKILL (ran');
+  });
+
+  // A text search for the path cannot match a Scope glob such as `src/**`, so the fallback must
+  // point at the one command that evaluates globs, never at a hand grep.
+  it('points the outage at re-running scoped-targets, not at a hand search', () => {
+    stubBin('boom', 1);
+    const ctx = JSON.parse(run({ file_path: 'src/a.ts' })).hookSpecificOutput.additionalContext;
+    expect(ctx).toContain('`guard-decisions scoped-targets --files src/a.ts`');
+    expect(ctx).toContain('UNBRIEFED, not ungoverned');
+    expect(ctx).not.toMatch(/grep/i);
+  });
+
+  it('names the exit code and the first stderr lines, clipped', () => {
+    rawStubBin(
+      `#!/bin/sh\necho 'first line' >&2\necho >&2\necho '${'x'.repeat(1000)}' >&2\necho third >&2\nexit 3\n`,
+    );
+    const ctx: string = JSON.parse(run({ file_path: 'src/a.ts' })).hookSpecificOutput
+      .additionalContext;
+    expect(ctx).toContain('Cause: exit 3 — first line xxx');
+    expect(ctx).not.toContain('third');
+    expect(ctx).not.toContain('x'.repeat(250));
+    expect(ctx).toContain('node_modules/.bin/guard-decisions');
+  });
+
+  // A spawn error has no exit status and no signal, so the cause must come from the error itself.
+  it('names the spawn error when the CLI cannot be executed at all', () => {
+    rawStubBin('#!/bin/sh\necho []\n');
+    chmodSync(join(root, 'node_modules', '.bin', 'guard-decisions'), 0o644);
+    const out = run({ file_path: 'src/a.ts' });
+    expect(out).toContain('Cause: EACCES (ran');
+    expect(out).not.toContain('exit null');
   });
 
   it('reports that retrieval did not run when the CLI prints JSON null', () => {
@@ -228,7 +267,9 @@ describe('decision-scope-brief — failure shapes and the real CLI behind it', (
     );
     rawStubBin(`#!/bin/sh\nexec node --import ${preload} ${CLI} "$@"\n`);
 
-    expect(run({ file_path: 'src/a.ts' })).toContain('DID NOT RUN');
+    const out = run({ file_path: 'src/a.ts' });
+    expect(out).toContain('DID NOT RUN');
+    expect(out).toContain('decision engine UNAVAILABLE');
   });
 });
 
