@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { mainWithWorktree } from './_worktree-fixture.mts';
 
 const BRIEF = fileURLToPath(new URL('../../agents-hooks/base-drift-brief.mjs', import.meta.url));
 const SESSION = fileURLToPath(
@@ -133,6 +134,7 @@ interface ToolInput {
 
 /** The harness payloads these hooks are driven with — a PreToolUse call or a SessionStart event. */
 interface HookInput {
+  cwd?: string;
   hook_event_name?: string;
   source?: string;
   tool_name?: string;
@@ -321,6 +323,36 @@ describe('base-drift-brief (PreToolUse)', () => {
     });
     expect(run.status).toBe(0);
     expect(run.stdout.trim()).toBe('');
+  });
+});
+
+describe('base-drift hooks in a project-config-root session', () => {
+  it('ask base-status about the linked worktree the payload cwd names', () => {
+    // CLAUDE_PROJECT_DIR stays on the main checkout while the agent works in a linked worktree.
+    const { main, worktree } = mainWithWorktree(mk);
+    const calls: string[][] = [];
+    for (const checkout of [main, worktree]) {
+      root = checkout;
+      stubDevkitRecordingAll(payload(), calls);
+    }
+    const rootArg = (hook: string, input: HookInput) => {
+      spawnSync(process.execPath, [hook], {
+        cwd: main,
+        encoding: 'utf8',
+        env: { ...process.env, CLAUDE_PROJECT_DIR: main, TMPDIR: markerHome },
+        input: JSON.stringify(input),
+      });
+      drainRecorders();
+      const args = calls.at(-1) ?? [];
+      return args[args.indexOf('--root') + 1];
+    };
+    const edit = { tool_name: 'Edit', tool_input: { file_path: join(worktree, 'a.mts') } };
+    const start = { hook_event_name: 'SessionStart', source: 'startup' };
+
+    expect(rootArg(BRIEF, { ...edit, session_id: 'wt-1', cwd: worktree })).toBe(worktree);
+    expect(rootArg(SESSION, { ...start, session_id: 'wt-2', cwd: worktree })).toBe(worktree);
+    // No cwd in the payload: CLAUDE_PROJECT_DIR, as before.
+    expect(rootArg(BRIEF, { ...edit, session_id: 'wt-3' })).toBe(main);
   });
 });
 

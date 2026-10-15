@@ -128,6 +128,21 @@ export function emit(input, hookEventName, additionalContext) {
   }
 }
 
-export function projectRoot() {
-  return process.env.CLAUDE_PROJECT_DIR || process.cwd();
+/** `git rev-parse` output lines for `dir`, or [] when it is not inside a git work tree. */
+function revParse(dir, ...args) {
+  const run = spawnSync('git', ['-C', dir, 'rev-parse', ...args], { encoding: 'utf8' });
+  return run.status === 0 ? run.stdout.split('\n') : [];
+}
+
+/**
+ * The checkout to act on. The payload cwd follows the agent into a linked worktree while
+ * CLAUDE_PROJECT_DIR stays put; a cwd in the same checkout or an unrelated repository keeps the root.
+ */
+export function projectRoot(input) {
+  const root = process.env.CLAUDE_PROJECT_DIR || process.cwd();
+  if (!input?.cwd?.trim?.()) return root;
+  const at = ['--path-format=absolute', '--show-toplevel', '--git-common-dir'];
+  const [cdup, top, common] = revParse(input.cwd, '--show-cdup', ...at);
+  const [rootTop, rootCommon] = revParse(root, ...at);
+  return common && top !== rootTop && common === rootCommon ? path.resolve(input.cwd, cdup) : root;
 }

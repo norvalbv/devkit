@@ -14,6 +14,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { hasAnyCommand, rootRegistry } from './_helpers.mts';
+import { mainWithWorktree } from './_worktree-fixture.mts';
 
 const HOOK = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -38,13 +39,13 @@ const seedEslint = (root, code = 1) => {
   chmodSync(bin, 0o755);
 };
 
-const editFile = (root, rel, env = process.env) => {
+const editFile = (root, rel, { projectDir = root, cwd = undefined, env = process.env } = {}) => {
   const abs = join(root, rel);
   mkdirSync(dirname(abs), { recursive: true });
   writeFileSync(abs, 'export const x = 1;\n');
   return spawnSync('bash', [HOOK], {
-    input: JSON.stringify({ file_path: abs }),
-    env: { ...env, CLAUDE_PROJECT_DIR: root },
+    input: JSON.stringify({ file_path: abs, cwd }),
+    env: { ...env, CLAUDE_PROJECT_DIR: projectDir },
     encoding: 'utf8',
   });
 };
@@ -81,6 +82,23 @@ describe.skipIf(!HAS_BUN)('format-after-edit.sh runtime-agnostic scanRoots resol
     expect(r.stderr).not.toContain('ESLINT_RAN');
   });
 
+  it("lints a worktree file with the worktree's own config when cwd is a linked worktree", () => {
+    // Project-config-root sessions: CLAUDE_PROJECT_DIR is the main checkout, cwd the worktree.
+    const { main, worktree } = mainWithWorktree(mkTmp);
+    writeFileSync(
+      join(worktree, 'guard.config.json'),
+      JSON.stringify({ scanRoots: ['components'] }),
+    );
+    seedEslint(worktree, 1);
+    const outside = editFile(worktree, 'components/widget.tsx', { projectDir: main });
+    expect(outside.status).toBe(0);
+    expect(outside.stderr).not.toContain('ESLINT_RAN');
+
+    const r = editFile(worktree, 'components/widget.tsx', { projectDir: main, cwd: worktree });
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain('ESLINT_RAN');
+  });
+
   it('degrade-skips when guard.config.json is absent (resolver yields no scanRoots)', () => {
     const root = mkTmp('fae-hook-');
     seedEslint(root, 1); // eslint present, but no guard.config.json → resolver exits 1 → skip
@@ -99,8 +117,7 @@ describe('format-after-edit.sh on a single JS runtime', () => {
       writeFileSync(join(root, 'guard.config.json'), JSON.stringify({ scanRoots: ['components'] }));
       seedEslint(root, 1);
       const r = editFile(root, 'components/widget.tsx', {
-        ...process.env,
-        PATH: isolatedPath(root, [runtime]),
+        env: { ...process.env, PATH: isolatedPath(root, [runtime]) },
       });
       expect(r.status).toBe(2);
       expect(r.stderr).toContain('ESLINT_RAN');
@@ -112,8 +129,7 @@ describe('format-after-edit.sh on a single JS runtime', () => {
     writeFileSync(join(root, 'guard.config.json'), JSON.stringify({ scanRoots: ['components'] }));
     seedEslint(root, 1);
     const r = editFile(root, 'components/widget.tsx', {
-      ...process.env,
-      PATH: isolatedPath(root, []),
+      env: { ...process.env, PATH: isolatedPath(root, []) },
     });
     expect(r.status).toBe(0);
     expect(r.stdout.trim()).toBe('{}');

@@ -60,6 +60,25 @@ function resolveBin(root) {
   return found || null;
 }
 
+/** `git rev-parse` output lines for `dir`, or [] when it is not inside a git work tree. */
+function revParse(dir, ...args) {
+  const run = spawnSync('git', ['-C', dir, 'rev-parse', ...args], { encoding: 'utf8' });
+  return run.status === 0 ? run.stdout.split('\n') : [];
+}
+
+/**
+ * The checkout to brief on. The payload cwd follows the agent into a linked worktree while
+ * CLAUDE_PROJECT_DIR stays put; a cwd in the same checkout or an unrelated repository keeps the root.
+ */
+function workspaceRoot(input) {
+  const root = process.env.CLAUDE_PROJECT_DIR || process.cwd();
+  if (!input?.cwd?.trim?.()) return root;
+  const at = ['--path-format=absolute', '--show-toplevel', '--git-common-dir'];
+  const [cdup, top, common] = revParse(input.cwd, '--show-cdup', ...at);
+  const [rootTop, rootCommon] = revParse(root, ...at);
+  return common && top !== rootTop && common === rootCommon ? path.resolve(input.cwd, cdup) : root;
+}
+
 /** One brief per (session, file): the stamp marking that `key` was briefed in this session. */
 function stampPath(sessionId, root, key) {
   const id = Buffer.from(`${root}\x00${key}`).toString('base64url').slice(-64);
@@ -106,7 +125,7 @@ function main() {
   const file = filePathOf(input);
   if (!file) return;
 
-  const root = process.env.CLAUDE_PROJECT_DIR || process.cwd();
+  const root = workspaceRoot(input);
   const rel = path.isAbsolute(file) ? path.relative(root, file) : file;
   // Outside the project (or above it) is not ours to brief on.
   if (!rel || rel.startsWith('..')) return;
