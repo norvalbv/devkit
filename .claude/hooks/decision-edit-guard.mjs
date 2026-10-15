@@ -93,21 +93,33 @@ function workspaceRoot(input) {
     : root;
 }
 
+/** The worktree the agent works in and the project root: an edit may reach either decision log. */
+function guardedRoots(input) {
+  const project = process.env.CLAUDE_PROJECT_DIR || process.cwd();
+  return [...new Set([workspaceRoot(input), project])];
+}
+
+/** The decision log under `root` that one of `paths` would change, or null. */
+function blockedLog(root, paths, env) {
+  const configured = configuredDir(root, env);
+  if (!configured) return null;
+  const protectedDir = canonicalizeAvailableParent(resolve(root, configured));
+  const blocked = paths.some((filePath) =>
+    inside(canonicalizeAvailableParent(resolve(root, filePath)), protectedDir),
+  );
+  return blocked ? relative(root, protectedDir) || configured : null;
+}
+
 /** Return the denial reason for a known in-scope mutation, otherwise null (fail-open). */
-export function decide(input, root = workspaceRoot(input), env = process.env) {
+export function decide(input, roots = guardedRoots(input), env = process.env) {
   try {
     const toolName = input?.tool_name;
     if (!MUTATING_TOOLS.has(toolName)) return null;
-    const configured = configuredDir(root, env);
-    if (!configured) return null;
-    const protectedDir = canonicalizeAvailableParent(resolve(root, configured));
     const paths = collectPaths(input?.tool_input);
-    const blocked = paths.find((filePath) =>
-      inside(canonicalizeAvailableParent(resolve(root, filePath)), protectedDir),
-    );
-    if (!blocked) return null;
+    const log = [roots].flat().map((root) => blockedLog(root, paths, env)).find(Boolean);
+    if (!log) return null;
     return (
-      `Blocked: direct agent edits under ${relative(root, protectedDir) || configured} are disabled ` +
+      `Blocked: direct agent edits under ${log} are disabled ` +
       "because decision history is append-only. Use `guard-decisions add …` to record an entry or " +
       "`guard-decisions amend …` to correct an uncommitted entry — the newest note, or the newest " +
       'Target with its trailing notes kept as written.'

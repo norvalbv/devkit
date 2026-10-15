@@ -120,6 +120,9 @@ describe('decision-edit-guard in a project-config-root session', () => {
       tool_input: { file_path: join(main, 'docs/decisions/a.md') },
     };
     expect(JSON.parse(guard(noCwd)).hookSpecificOutput.permissionDecision).toBe('deny');
+    // From the worktree, the main checkout's decisions directory stays protected too.
+    const mainFromWorktree = { ...noCwd, cwd: worktree };
+    expect(JSON.parse(guard(mainFromWorktree)).hookSpecificOutput.permissionDecision).toBe('deny');
   });
 });
 
