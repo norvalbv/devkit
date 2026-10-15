@@ -49,14 +49,7 @@ import { coverageBypassed, deterministicStrict } from '../config.mts';
 import { emitGateBypass, emitGateEvent, finishGateTiming } from '../judge/gate-events.mts';
 import { markGateRun } from '../judge/run-context.mts';
 import { describeCachedPrefix, prefixEntry, recordPrefix } from '../prefix-cache/prefix-cache.mts';
-import {
-  type GateFailure,
-  gateEnv,
-  readGateReason,
-  reasonDetail,
-  reasonReport,
-  withReasonFiles,
-} from './reason.mts';
+import { type GateFailure, gateEnv, readGateReason, withReasonFiles } from './reason.mts';
 import {
   bypassedSuffixes,
   configExtraGates,
@@ -64,7 +57,8 @@ import {
   type ExtraGate,
   structureBypassed,
 } from './command-gates.mts';
-import { printRecheckFooter, recheckCommand, recheckLines, registryRecheck } from './recheck.mts';
+import { recheckCommand, recheckLines, registryRecheck } from './recheck.mts';
+import { DETERMINISTIC_FAMILY, type FailedGate, reportFailures } from './report.mts';
 import { type ConfigComponent, DETERMINISTIC, type RawDevkitComponents } from './registry.mts';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -80,14 +74,6 @@ const GUARD_PREFIX_RE = /^guard-/;
 // stays reserved for a gate whose exit 2 was never an opt-out (an `--extra` command's fatal config
 // error): both are could-not-run for telemetry, but only this one is an opt-out we chose to reject.
 const COULD_NOT_RUN = '(could-not-run)';
-/** The blocked_gate token the ship script publishes for this whole chain (see the emits below). */
-const DETERMINISTIC_FAMILY = 'deterministic';
-// 127 is the shell's "command not found", so the gate's own binary never resolved — a dependency
-// problem, not a lint finding. Naming it matters because the raw text ("biome: command not found")
-// sends the reader after the linter: under `devkit ship` the gates run in an ephemeral worktree whose
-// dependencies are SYMLINKED in, and a link resolved to a checkout with nothing installed produces
-// exactly this (sc-1243). Worded for any layout — a repo may legitimately have no node_modules.
-const NOT_FOUND_RE = /\(unexpected:127\)/;
 const OBJECT_ID = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
 
 interface RawDevkitConfig {
@@ -159,6 +145,7 @@ interface Gate {
   /** sc-3443: the local command that re-judges this gate, and its documented short form. */
   recheck?: string;
   alias?: string;
+  afterGreen?: true;
 }
 
 export function parseOpts(argv: string[]): ParsedOpts {
@@ -352,7 +339,7 @@ export function runDeterministic(cwd = process.cwd(), opts: RunDeterministicOpts
   const fails: GateFailure[] = [];
   // Whether each failure reached a verdict, decided where its exit code is read — never re-derived
   // from the label, which an `--extra` spec controls (sc-2753).
-  const failed: Array<{ gate: string; verdict: boolean }> = [];
+  const failed: FailedGate[] = [];
   const rechecks: string[] = [];
   const fail = (gate: Gate, suffix = '', verdict = suffix === '', reason: string[] = []) => {
     fails.push({ id: gate.id, label: `${gate.label}${suffix}`, reason });
@@ -387,12 +374,22 @@ export function runDeterministic(cwd = process.cwd(), opts: RunDeterministicOpts
       ...registryRecheck(g, argv, cwd),
     };
   });
-  for (const x of skip ? [] : extra) gates.push(commandGate(x.label, cwd, x.cmd));
+  const extras = skip ? [] : extra;
+  for (const x of extras.filter((g) => !g.afterGreen)) gates.push(commandGate(x.label, cwd, x.cmd));
   if (!skip && opts.structure && !bypassStructure) {
     gates.push(commandGate('structure-lint', cwd, opts.structure));
   }
+  for (const x of extras.filter((g) => g.afterGreen)) {
+    gates.push({ ...commandGate(x.label, cwd, x.cmd), afterGreen: true });
+  }
+  // afterGreen gates are slow and their verdict on an already-red tree is discarded by the fix.
+  const notRun: string[] = [];
   withReasonFiles((fileFor) => {
     gates.forEach((gate, i) => {
+      if (gate.afterGreen && fails.length > 0 && !reviewMode) {
+        notRun.push(gate.label);
+        return;
+      }
       if (!gate.argv) {
         fail(gate, '(unrunnable: empty command)', true);
         return;
@@ -432,50 +429,7 @@ export function runDeterministic(cwd = process.cwd(), opts: RunDeterministicOpts
     );
   }
   if (fails.length > 0) {
-    // Telemetry (best-effort): one gate_result per failing gate so the usage tracker can attribute a
-    // blocked ship — or a blocked commit; the default sink takes both unless DEVKIT_NO_TELEMETRY=1 —
-    // to the exact gate(s). Both `(unexpected:rc)` and `(could-not-run)` mean the gate never reached
-    // a verdict, so neither is a `fail`: counting them as findings would inflate the fail rate with
-    // gates that never ran.
-    for (const [i, { label, reason }] of fails.entries()) {
-      emitGateEvent({
-        type: 'gate_result',
-        gate: failed[i].gate,
-        // This chain reports PER GATE (`fanout`, `anti-slop`), one level finer than the
-        // blocked_gate vocabulary the ship script publishes, which names the family. Without the
-        // family a reader cannot join the two, and the ship terminus digest reported the very gate
-        // that stopped the run as "did NOT block this run" (sc-2488).
-        family: DETERMINISTIC_FAMILY,
-        status: failed[i].verdict ? 'fail' : 'could_not_run',
-        detail: reasonDetail(label, reason),
-      });
-    }
-    console.error(`✗ deterministic gates failed:${fails.map((f) => ` ${f.label}`).join('')}`);
-    for (const line of reasonReport(fails)) console.error(line);
-    console.error('   Fix every failure above together, then commit once.');
-    console.error('   On commit or ship, decision and reviewer gates run only after these pass.');
-    printRecheckFooter(rechecks);
-    if (fails.some((f) => f.label.startsWith('structure-lint'))) {
-      console.error(
-        '   Base branch structure debt that your diff did not cause? Re-run with the explicit',
-      );
-      console.error('   one-run assertion:  export GUARD_STRUCTURE_OK=1');
-      console.error(
-        '   A structure violation introduced by your own change must be fixed instead.',
-      );
-    }
-    if (fails.some((f) => NOT_FOUND_RE.test(f.label))) {
-      console.error(
-        '   exit 127 = command not found: the gate ran, but its BINARY did not resolve — a',
-      );
-      console.error(
-        '   dependency problem, not a code finding. Under `devkit ship` the gates run in an',
-      );
-      console.error(
-        '   ephemeral worktree whose dependencies are symlinked in; check the "↳ linked …" lines',
-      );
-      console.error('   above for where each one actually resolved to.');
-    }
+    reportFailures(fails, failed, rechecks, notRun);
     return finish(1, skip ? 'partial' : 'none');
   }
   // All green (or a prefix-skip, already recorded): record the key so an identical staged tree skips
