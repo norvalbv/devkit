@@ -19,9 +19,11 @@
 import { execFile, execFileSync } from 'node:child_process';
 import { parsePriorArtResponse } from '../prior-art/response-contract.mts';
 import {
+  claudeFailure,
   type JudgeUsage,
   parseJudgeUsage,
   recordPermissionDenials,
+  saveClaudeCommands,
   unwrapClaudeResult,
   withResultArgs,
 } from './claude-result.mts';
@@ -37,7 +39,7 @@ import {
 import { emitGateEvent, type TelemetryStatus } from './gate-events.mts';
 import { trackJudge } from './process/heartbeat.mts';
 import { type CodexSandbox, prepareCodexSandbox } from './codex/workspace.mts';
-import { withoutGitEnv } from './judge-isolation.mts';
+import { JUDGE_MAX_BUFFER, withoutGitEnv } from './judge-isolation.mts';
 import {
   type JudgeMcpProfile,
   type PreparedJudgeMcpProfile,
@@ -259,8 +261,7 @@ function emitJudgeExec(
   outageDetail?: string,
   stdout?: string,
 ): void {
-  // Omitted entirely when unreadable — see parseJudgeUsage on why a zero-filled row is worse
-  // than an absent one.
+  // Omitted when unreadable: a zero-filled row is worse than an absent one (see parseJudgeUsage).
   const extra: Partial<JudgeUsage> & {
     lens?: string;
     outage_detail?: string;
@@ -270,7 +271,8 @@ function emitJudgeExec(
   // The sc-2538 evidence sat in a stderr line nobody kept. On the ledger it is queryable: the
   // dashboard can answer "which outage, and until when" without re-running the ship.
   if (outageDetail !== undefined) extra.outage_detail = outageDetail;
-  const commandsRef = saveCodexCommands(opts.label, stdout, opts.lens);
+  const save = judgeBinFor(opts.args) === 'claude' ? saveClaudeCommands : saveCodexCommands;
+  const commandsRef = save(opts.label, stdout, opts.lens);
   if (commandsRef) extra.commands_ref = commandsRef;
   Object.assign(extra, recordPermissionDenials(opts, stdout));
   recordAgentRun({
@@ -289,23 +291,21 @@ function emitJudgeExec(
  * Unwrap one judge's stdout into the verdict text its caller expects, plus the spend to bill it.
  * Both come from the SAME parse of the same bytes, so a run can never be recorded with a cost that
  * belongs to different output. The parser follows the binary that produced the bytes — a codex
- * JSONL stream fed to the claude unwrapper would hand the verdict parser raw event noise. A codex
- * stream carrying a terminal failure event (`turn.failed` / `error`) reads as a FAILURE, never as
+ * JSONL stream fed to the claude unwrapper would hand the verdict parser raw event noise. A failed
+ * stream (codex `turn.failed` / `error`, claude with no result) reads as a FAILURE, never as
  * verdict text: falling through would record outcome 'ok' with raw JSONL as the transcript.
  */
 function readJudgeOutput(
   stdout: string,
   cli: JudgeCli,
 ): { text: string; usage: JudgeUsage | null } | { failure: JudgeError; usage: JudgeUsage | null } {
-  if (cli.codex) {
-    const failure = codexFailure(stdout);
-    // A failed turn's stream can still carry its usage event — those tokens were burned whether or
-    // not a verdict arrived, and dropping them under-counts exactly the most expensive failures.
-    if (failure !== null)
-      return { failure: { providerFailure: failure, stdout }, usage: parseCodexUsage(stdout) };
-    return { text: unwrapCodexResult(stdout) ?? stdout, usage: parseCodexUsage(stdout) };
-  }
-  return { text: unwrapClaudeResult(stdout) ?? stdout, usage: parseJudgeUsage(stdout) };
+  const failure = cli.codex ? codexFailure(stdout) : claudeFailure(stdout);
+  // A failed turn's stream can still carry its usage event — those tokens were burned whether or
+  // not a verdict arrived, and dropping them under-counts exactly the most expensive failures.
+  const usage = cli.codex ? parseCodexUsage(stdout) : parseJudgeUsage(stdout);
+  if (failure !== null) return { failure: { providerFailure: failure, stdout }, usage };
+  const text = cli.codex ? unwrapCodexResult(stdout) : unwrapClaudeResult(stdout);
+  return { text: text ?? stdout, usage };
 }
 
 /**
@@ -362,8 +362,8 @@ export function execJudge(opts: ExecJudgeOpts): string | null {
       // Nothing was ever displayed from it, so piping it changes no output.
       stdio: ['pipe', 'pipe', 'pipe'],
       // REQUIRED by the line above: stderr now counts against maxBuffer, so the 1 MB default would
-      // turn a chatty-but-healthy judge into an ENOBUFS failure. 10 MB matches the async twin.
-      maxBuffer: 10 * 1024 * 1024,
+      // turn a chatty-but-healthy judge into an ENOBUFS failure. Shared with the async twin.
+      maxBuffer: JUDGE_MAX_BUFFER,
     });
     if (!out || !String(out).trim()) {
       warnNoOutput(label, judgeBinFor(args));
@@ -455,7 +455,7 @@ export function execJudgeAsync(opts: ExecJudgeOpts): Promise<string | null> {
           timeout,
           // See the execJudge twin: SIGKILL so the cap is a guaranteed kill, not a trappable request.
           killSignal: 'SIGKILL',
-          maxBuffer: 10 * 1024 * 1024,
+          maxBuffer: JUDGE_MAX_BUFFER,
         },
         // The third parameter was omitted, silently dropping stderr — the channel a claude-family
         // quota message arrives on (sc-2538). The sync twin's `stdio` change is this one's mirror.

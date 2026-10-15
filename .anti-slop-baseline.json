@@ -2083,14 +2083,6 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/no-unknown-parameters",
-      "file": "gate-engine/judge/run-judge.mts",
-      "diagnostic": "Parameter `e` leaves input unparsed. Accept a named domain type; run the expected schema or parser at the I/O boundary before calling this function.",
-      "context": "function isJudgeTimeout(e: unknown): boolean {",
-      "fingerprint": "2fd4b2cc28290afad07040e68497da10eae65d51b1a0ae6a673f2c1bdefe37ba",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/no-runtime-typeof",
       "file": "gate-engine/review/lens/split.mts",
       "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
@@ -3291,14 +3283,6 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/no-runtime-typeof",
-      "file": "gate-engine/judge/claude-result.mts",
-      "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
-      "context": "typeof value === 'object' && value !== null && !Array.isArray(value);",
-      "fingerprint": "49291061080f2532eea58b38565da5979c1da2267bb3869a6c3f741340378f24",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
       "file": "gate-engine/critique/eval/bench.mts",
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
@@ -3728,14 +3712,6 @@
       "diagnostic": "This dictionary's unknown value type gives callers no concrete value contract. Use an owner/schema-derived value type; parse external payloads before insertion.",
       "context": "[key: string]: unknown;",
       "fingerprint": "548d5f75c29f20f66b6d18b12417a76c19cdbd62203b273fb832a80c979fbf62",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/no-runtime-typeof",
-      "file": "gate-engine/judge/claude-result.mts",
-      "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
-      "context": "typeof envelope.result === 'string' &&",
-      "fingerprint": "549a65aa4a826dfec1f00fb75c1ed842248253fd903bca3faa096e7251400d1e",
       "count": 1
     },
     {
@@ -4259,14 +4235,6 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/no-unsafe-dictionary-type",
-      "file": "gate-engine/judge/claude-result.mts",
-      "diagnostic": "This dictionary's unknown value type gives callers no concrete value contract. Use an owner/schema-derived value type; parse external payloads before insertion.",
-      "context": "const isRecord = (value: unknown): value is Record<string, unknown> =>",
-      "fingerprint": "5ffa9e44fcff979b83e245d898c2cb397d367f9524c6714e43de2bf31b1a5894",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/no-runtime-typeof",
       "file": "cli/lib/ship/review/repository/manifest.mts",
       "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
@@ -4691,14 +4659,6 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
-      "file": "gate-engine/judge/claude-result.mts",
-      "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
-      "context": "const envelope = JSON.parse(raw) as unknown;",
-      "fingerprint": "68b4609a064b58250955a9157e28465192374511f18468c0824500439cde63a7",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/no-unsafe-dictionary-type",
       "file": "gate-engine/critique/response-contract.mts",
       "diagnostic": "This dictionary's unknown value type gives callers no concrete value contract. Use an owner/schema-derived value type; parse external payloads before insertion.",
@@ -4944,14 +4904,6 @@
       "diagnostic": "The explicit open dictionary type on binding `SIGNAL_STATUS` discards known type evidence. Keep inference, validate with `satisfies`, or use a named owner contract.",
       "context": "const SIGNAL_STATUS: Record<ForwardedSignal, number> = {",
       "fingerprint": "6c96c8a08f44d8a5be19052b493a3c2cfac570eaef4b469e5d53419b7395f9e4",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/no-unknown-parameters",
-      "file": "gate-engine/judge/claude-result.mts",
-      "diagnostic": "Parameter `value` leaves input unparsed. Accept a named domain type; run the expected schema or parser at the I/O boundary before calling this function.",
-      "context": "const isRecord = (value: unknown): value is Record<string, unknown> =>",
-      "fingerprint": "6d5d29a17d29094432b9735dd6c8566cbf8ce18d01d03e5b3d3db4c8525c4a6c",
       "count": 1
     },
     {
@@ -7704,14 +7656,6 @@
       "diagnostic": "This dictionary's unknown value type gives callers no concrete value contract. Use an owner/schema-derived value type; parse external payloads before insertion.",
       "context": "function exactObject(value: unknown, fields: readonly string[]): Record<string, unknown> | null {",
       "fingerprint": "a3c72077201eff8e655a29b78dcbb361fca1ed13bd8ddcabb3e9b8e2347a8e6a",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/no-unknown-parameters",
-      "file": "gate-engine/judge/run-judge.mts",
-      "diagnostic": "Parameter `err` leaves input unparsed. Accept a named domain type; run the expected schema or parser at the I/O boundary before calling this function.",
-      "context": "const fail = (err: unknown) => {",
-      "fingerprint": "a3f53abe7b2f227a77f981a80bc493dc3b6e0ebc42843282c42d9012eb2870cc",
       "count": 1
     },
     {
@@ -10544,14 +10488,6 @@
       "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
       "context": "rawCode: typeof row.raw_code === 'string' ? row.raw_code : null,",
       "fingerprint": "de873055fab804532fbe9665b4da32a5aff1cc0d3592d17be5fb414a34ede9bc",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/no-conditional-empty-object-spread",
-      "file": "gate-engine/judge/run-judge.mts",
-      "diagnostic": "This conditional spread hides property omission behind an empty object. Build the object in separate statements and add the property only when present.",
-      "context": "...(usage ? { extra: { ...usage } } : {}),",
-      "fingerprint": "ded0fc08edaaf9cd92a5233f45e3df791ccb5911fe24baec44da8c172158e547",
       "count": 1
     },
     {

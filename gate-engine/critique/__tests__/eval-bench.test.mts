@@ -92,7 +92,7 @@ describe('argv builders', () => {
     expect(prompt).toBeGreaterThan(-1);
     expect(args[prompt].startsWith(BENCHMARK_DIRECTIVE)).toBe(true);
     expect(prompt).toBeGreaterThan(args.indexOf('--no-session-persistence'));
-    expect(args.slice(prompt - 2, prompt)).toEqual(CLAUDE_RESULT_ARGS);
+    expect(args.slice(prompt - CLAUDE_RESULT_ARGS.length, prompt)).toEqual(CLAUDE_RESULT_ARGS);
     expect(args.indexOf('--disallowedTools')).toBeGreaterThan(prompt);
     expect(args[args.indexOf('--append-system-prompt') + 1]).toBe('AGENT BODY');
     expect(args[args.indexOf('--model') + 1]).toBe('opus');
@@ -103,7 +103,7 @@ describe('argv builders', () => {
     const prompt = args.indexOf('PROPOSAL');
     const allowed = args.indexOf('--allowedTools');
     expect(prompt).toBeGreaterThan(-1);
-    expect(args.slice(prompt - 2, prompt)).toEqual(CLAUDE_RESULT_ARGS);
+    expect(args.slice(prompt - CLAUDE_RESULT_ARGS.length, prompt)).toEqual(CLAUDE_RESULT_ARGS);
     expect(allowed).toBeGreaterThan(prompt);
     expect(args[allowed + 1]).toBe(WORKFLOW_TOOLS);
     expect(args.filter((a) => a === '--allowedTools')).toHaveLength(1);
