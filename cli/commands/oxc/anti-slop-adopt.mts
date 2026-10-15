@@ -1,4 +1,4 @@
-/** `devkit anti-slop adopt-renames|adopt-relocations` — re-anchor moved debt, never re-snapshot. */
+/** `devkit anti-slop adopt-renames|adopt-relocations|adopt-activation|prune` — never re-snapshot. */
 
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -6,13 +6,16 @@ import { join } from 'node:path';
 import { withLock } from '../../lib/atomic-write.mts';
 import {
   type AntiSlopBaseline,
+  adoptBaselineRuleFindings,
   compareBaseline,
   migrateBaselineRenames,
+  pruneBaseline,
   readBaseline,
   writeBaseline,
 } from '../../lib/install/anti-slop/baseline.mts';
 import {
   inheritedBaseAllowance,
+  printNewAntiSlopFindings,
   relocationBound,
   relocationEvidence,
 } from '../../lib/install/anti-slop/baseline-envelope.mts';
@@ -25,6 +28,11 @@ import {
   withStableGitIndex,
   withStagedAntiSlopSnapshot,
 } from '../../lib/install/anti-slop/git-snapshot.mts';
+import {
+  clearPendingAntiSlopBaselineActivation,
+  readInstalledAntiSlopBaselineMigrationId,
+  readPendingAntiSlopBaselineActivation,
+} from '../../lib/install/anti-slop/managed-state.mts';
 import {
   classifyRelocations,
   formatSources,
@@ -239,5 +247,75 @@ export function adoptRelocations(
         return 0;
       },
     );
+  });
+}
+
+/**
+ * Adopt ONLY the pre-existing findings of rules a devkit release just activated, leaving all other
+ * fingerprint counts untouched — overlay's sole route to adopt debt without laundering it.
+ */
+export function adoptActivation(cwd: string): number {
+  if (!capabilityReady(cwd)) return 2;
+  return withLock(join(cwd, ANTI_SLOP_BASELINE_LOCK_REL), () => {
+    const existing = baselineOrExplain(cwd);
+    if (!existing) return 2;
+    const pending = readPendingAntiSlopBaselineActivation(cwd);
+    if (!pending) {
+      console.log('anti-slop: no pending rule activation to adopt');
+      return 0;
+    }
+    const installed = readInstalledAntiSlopBaselineMigrationId(cwd);
+    if (pending.migrationId !== installed) {
+      console.error(
+        `anti-slop: pending activation ${pending.migrationId} does not match the installed capability (${installed ?? 'none'}); run \`devkit doctor --fix\` first`,
+      );
+      return 2;
+    }
+    const groups = collectAntiSlopGroups(cwd, []);
+    const next = adoptBaselineRuleFindings(
+      existing,
+      groups,
+      pending.activatedRuleIds,
+      pending.migrationId,
+    );
+    writeBaseline(cwd, next);
+    clearPendingAntiSlopBaselineActivation(cwd, pending.migrationId);
+    console.log(
+      `anti-slop: adopted ${pending.activatedRuleIds.size} newly activated rule(s) into ${ANTI_SLOP_BASELINE_REL} — ${count(next.entries)} finding(s) in ${next.entries.length} fingerprint(s)`,
+    );
+    return 0;
+  });
+}
+
+export function prune(cwd: string, args: string[]): number {
+  if (!capabilityReady(cwd)) return 2;
+  return withLock(join(cwd, ANTI_SLOP_BASELINE_LOCK_REL), () => {
+    const baseline = baselineOrExplain(cwd);
+    if (!baseline) return 2;
+    const scope = resolveAntiSlopScope(cwd, args);
+    const groups = collectAntiSlopGroups(cwd, args);
+    const selected: AntiSlopBaseline = {
+      ...baseline,
+      entries: baseline.entries.filter((entry) => scope.includes(entry.file)),
+    };
+    const comparison = compareBaseline(selected, groups);
+    printNewAntiSlopFindings(comparison.newGroups);
+    if (comparison.newGroups.some((group) => group.severity === 'error')) {
+      console.error('anti-slop: prune refused — new error finding(s) exist; baseline unchanged');
+      return 1;
+    }
+    const pruned = pruneBaseline(selected, groups);
+    const next: AntiSlopBaseline = {
+      ...baseline,
+      entries: [
+        ...baseline.entries.filter((entry) => !scope.includes(entry.file)),
+        ...pruned.entries,
+      ].sort((a, b) => a.fingerprint.localeCompare(b.fingerprint)),
+    };
+    writeBaseline(cwd, next);
+    console.log(
+      `anti-slop: pruned ${comparison.resolvedCount} fixed finding(s); ${next.entries.reduce((sum, entry) => sum + entry.count, 0)} remain`,
+    );
+    return 0;
   });
 }
