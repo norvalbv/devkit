@@ -3,12 +3,11 @@
 
 import { SHIP_REHEARSAL_LEAD } from '../../../../gate-engine/deterministic/recheck.mts';
 
-// Commit/ship exit on a block. Review remembers both lanes and dry-gates the deterministic one, so
-// every selected gate still reports before REVIEW_FAILURE_FINALIZER (safe under `sh -e`).
+// Every mode remembers a deterministic block (CHEAP_GATE_FLUSH stops commit/ship before the AI
+// gates); an AI block exits at once outside review. Safe under `sh -e`.
 export const DK_GATE_BLOCK_HELPERS = `dk_review_failed=0
 dk_review_failed_gates=""
 __dk_block_deterministic() {
-    case "\${DEVKIT_RUN_MODE:-}" in review|dry-gates) ;; *) exit 1 ;; esac
     dk_review_failed=1
     dk_review_failed_gates="$dk_review_failed_gates $1"
 }
@@ -23,6 +22,15 @@ export const DK_DETERMINISTIC_GATE_HELPER = `__dk_gate_deterministic() {
     [ "$dk_det_rc" -eq 0 ] && return 0
     __dk_block_deterministic deterministic-gates
 }`;
+// Commit/ship: every cheap gate has reported, so a doomed commit stops here and never pays for a judge.
+export const CHEAP_GATE_FLUSH = `# devkit:cheap-gate-flush
+case "\${DEVKIT_RUN_MODE:-}" in review|dry-gates) ;; *)
+    if [ "\${dk_review_failed:-0}" -ne 0 ]; then
+        echo "✗ commit blocked before the AI gates:$dk_review_failed_gates (findings above) — fix them together, then commit once."
+        exit 1
+    fi ;;
+esac
+# /devkit:cheap-gate-flush`;
 // Always the block's last gate line: a monorepo package subshell holds the flag, and overlay chains after it.
 export const REVIEW_FAILURE_FINALIZER = `# devkit:review-failure-finalizer
 if [ "\${dk_review_failed:-0}" -ne 0 ]; then
