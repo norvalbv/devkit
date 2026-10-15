@@ -285,7 +285,6 @@ gate_rebase_coverage() {
 # caller may also name the main checkout through an alias (macOS /var → /private/var), which must not
 # read as "a linked worktree borrowing main".
 #
-# <rel> is a normalized path whose first component is `coverage` (gate_normalize_rel).
 # Physical path of a FILE: follow its symlink chain (bounded), then resolve the final parent with
 # `pwd -P`. `cd -P` alone resolves directories only, so it cannot see a symlinked report.
 gate_physical_file() {
@@ -302,27 +301,42 @@ gate_physical_file() {
   printf '%s/%s\n' "$dir" "$(basename -- "$path")"
 }
 
+# <rel> is a normalized path (gate_normalize_rel): root `coverage[/…]`, a package's `…/coverage`, or
+# that dir's coverage-final.json. <cov_dir> is the coverage dir compared against main's.
 gate_coverage_source() {
-  local root=$1 main_root=$2 rel=${3:-coverage} real_root real_main real_main_cov real_cov borrowed
+  local root=$1 main_root=$2 rel=${3:-coverage} cov_dir real_root real_main real_main_cov real_cov borrowed
   [ -e "$root/$rel" ] || return 1
+  case /$rel/ in
+    /coverage/*) cov_dir=coverage ;;
+    *) cov_dir=$rel ;;
+  esac
   real_root=$(cd -P "$root" 2>/dev/null && pwd) || real_root=$root
   real_main=$(cd -P "$main_root" 2>/dev/null && pwd) || real_main=$main_root
-  real_main_cov=$(cd -P "$main_root/coverage" 2>/dev/null && pwd) || real_main_cov=
+  real_main_cov=$(cd -P "$main_root/$cov_dir" 2>/dev/null && pwd) || real_main_cov=
   if [ "$real_root" != "$real_main" ] && real_cov=$(cd -P "$root/$rel" 2>/dev/null && pwd); then
     borrowed="$root/$rel/ is the MAIN checkout's ($real_cov)"
     # A local coverage/ can still hold a report symlinked into main, so the gate reads the FILE's path.
-    if [ "$rel" = coverage ] && [ -L "$root/$rel/coverage-final.json" ]; then
+    if [ "$rel" = "$cov_dir" ] && [ -L "$root/$rel/coverage-final.json" ]; then
       real_cov=$(gate_physical_file "$root/$rel/coverage-final.json") || real_cov=
       borrowed="$root/$rel/coverage-final.json is the MAIN checkout's ($real_cov)"
     fi
     case "$real_cov/" in
-      "$real_main/coverage/"* | "${real_main_cov:-/nonexistent-main-coverage}/"*)
+      "$real_main/$cov_dir/"* | "${real_main_cov:-/nonexistent-main-coverage}/"*)
         echo "  ⚠️  $borrowed, not this worktree's — the coverage" >&2
         echo "     gate will judge another tree's numbers. Remove the link and run \`devkit coverage-run\` here." >&2
         ;;
     esac
   fi
   printf '%s\n' "$root/$rel"
+}
+
+# Is this normalized link path a coverage artifact? Matches the last component only, so a
+# `packages/coverage/node_modules` stays an ordinary dependency link.
+gate_is_coverage_rel() {
+  case /$1 in
+    /coverage | /coverage/* | */coverage | */coverage/coverage-final.json) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
 # Lexically normalize a relative link path: drop empty and `.` components, fold `..` (an unmatched one
@@ -610,7 +624,7 @@ prepare_gate_worktree() {
     else
       rel=$(gate_normalize_rel "$d" && printf .) && rel=${rel%.}
       case "$d" in /*) rel= ;; esac
-      if [ "$rel" = coverage ] || [[ "$rel" == coverage/* ]]; then
+      if gate_is_coverage_rel "$rel"; then
         source=$(gate_coverage_source "$root" "$main_root" "$rel" && printf .) || continue
         d=$rel
       elif [ "$rel" = .devkit ] && [ -n "$overlay_root" ]; then
