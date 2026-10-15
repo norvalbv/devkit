@@ -36,7 +36,7 @@
  *   rescope <slug> --scope "glob,glob" --reason "..."  append-only Scope correction (a tagged note)
  *   amend <slug> --target …|--note … replace an entry absent from HEAD: the newest note, or the
  *     newest Target (its trailing draft notes are preserved byte-for-byte)
- *   amend <slug> --note-replace OLD NEW  replace one unique substring in that draft note
+ *   amend <slug> --note-replace|--target-replace OLD NEW  replace one unique substring in that draft
  *   query "<text>" [--top K] [--json] [--full]  rank axes — semantic (Ollama), lexical floor on
  *     fallback; --json emits the bench's envelope; --full prints each matched axis's whole file
  *     body in rank order instead of the truncated ruling (exclusive with --json)
@@ -390,18 +390,19 @@ export async function cmdReindex(cwd = process.cwd()) {
 }
 // ─── Dispatch (run-as-main only, so tests can import the pure helpers) ───────────
 const OPTION_TOKEN =
-  /^--(?:anchored-bet|category|consequences|context|evidence-change|full|json|new|note|note-replace|reason|ref|rejected|researched|revisit-when|ruling|scope|source|supersedes|target|title|top|tradeoff|vision-fit)$/;
+  /^--(?:anchored-bet|category|consequences|context|evidence-change|full|json|new|note|note-replace|reason|ref|rejected|researched|revisit-when|ruling|scope|source|supersedes|target|target-replace|title|top|tradeoff|vision-fit)$/;
 function flag(rest: string[], name: string, offset = 1): string | undefined {
   const i = rest.indexOf(name);
   return i !== -1 && !OPTION_TOKEN.test(rest[i + offset] ?? '') ? rest[i + offset] : undefined;
 }
+const pair = (rest: string[], name: string): AddOptions['noteReplace'] =>
+  rest.includes(name) ? [flag(rest, name), flag(rest, name, 2)] : undefined;
 function optionsFromFlags(rest: string[]): AddOptions {
   return {
     isTarget: rest.includes('--target'),
     note: flag(rest, '--note'),
-    noteReplace: rest.includes('--note-replace')
-      ? [flag(rest, '--note-replace'), flag(rest, '--note-replace', 2)]
-      : undefined,
+    noteReplace: pair(rest, '--note-replace'),
+    targetReplace: pair(rest, '--target-replace'),
     title: flag(rest, '--title'),
     context: flag(rest, '--context'),
     ruling: flag(rest, '--ruling'),

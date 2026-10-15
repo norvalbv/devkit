@@ -64,6 +64,7 @@ export interface AddOptions {
   isNew?: boolean;
   note?: string;
   noteReplace?: [oldText: string | undefined, newText: string | undefined];
+  targetReplace?: [oldText: string | undefined, newText: string | undefined];
   title?: string;
   context?: string;
   ruling?: string;
@@ -213,7 +214,7 @@ export function renderDecision(fm: Record<string, string>, body: string) {
   return `---\n${keys.map((key) => `${key}: ${fm[key]}`).join('\n')}\n---\n${body}`;
 }
 
-function firstClause(value: string | undefined) {
+export function firstClause(value: string | undefined) {
   const text = String(value).trim();
   const cut = text.search(TITLE_CUT_RE);
   const clause = cut > 0 ? text.slice(0, cut) : text;
