@@ -3,6 +3,7 @@ import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { configExtraGates } from '../../gate-engine/deterministic/command-gates.mts';
 import { relatedPaths, runRelatedTests } from '../lib/husky/gate-policy/related-tests.mts';
 
 function fakeExec(status: number | null) {
@@ -125,5 +126,16 @@ describe('runRelatedTests', () => {
       ['related', '--run', '--reporter=dot', 'b.mts'],
       expect.anything(),
     );
+  });
+});
+
+describe('self-host registration', () => {
+  it("devkit's guard.config.json declares related-tests afterGreen, so a cheap failure skips it", () => {
+    const root = join(import.meta.dirname, '..', '..');
+    expect(configExtraGates(root)).toContainEqual({
+      label: 'related-tests',
+      cmd: 'node cli/lib/husky/gate-policy/related-tests.mts',
+      afterGreen: true,
+    });
   });
 });

@@ -408,6 +408,9 @@ all-and-**aggregate**: instead of failing fast on the first, they collect every 
 naming each (`guard-<id>`). Fix each named gate (see **A pre-commit gate blocked my commit** above) and
 re-commit. To converge without a ship round, stage the paths and run `guard-deterministic` locally.
 `guard-comments(unreadable-evidence)` is not a rejection: the gate could not read the staged content.
+A slow `extraGates` entry declared `{ "cmd": …, "afterGreen": true }` runs last and only when every
+other gate passed, so a red run lists it under `NOT run (an earlier gate failed)` and it runs on the
+next attempt. `devkit review` runs it regardless.
 On a commit or ship, the decision and reviewer gates run only after this stage passes, one finding
 at a time, by design.
 
