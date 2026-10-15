@@ -92,20 +92,26 @@ export interface AgentHookLines {
   'agents-hooks/lint-check.sh': string[];
 }
 
+/** Trails every rendered line, so whoever edits one in a hook sees the lock on the line itself. */
+export const AGENT_HOOK_MARKER =
+  '# devkit: must equal renderAgentHookLines (cli/lib/husky/format-fragment.mts)';
+
+const marked = (lines: string[]): string[] => lines.map((l) => `${l} ${AGENT_HOOK_MARKER}`);
+
 export function renderAgentHookLines(f: ConsumerFormatter): AgentHookLines {
   const gate = `{ ${f.configProbes.map((p) => `[ -f "${p}" ]`).join(' || ')}; }`;
   const bin = `[ -x "./node_modules/.bin/${f.tool}" ]`;
   return {
-    'agents-hooks/format-after-edit.sh': [
+    'agents-hooks/format-after-edit.sh': marked([
       `if [[ "$file_path" =~ \\.(ts|tsx|js|jsx|json|jsonc)$ ]] && ${gate}; then`,
       `  if command -v bun &>/dev/null && [ -f "package.json" ] && ${bin}; then`,
       `    bun run ${f.tool} ${f.agentArgs.afterEdit} "$file_path" 2>/dev/null || true`,
-    ],
-    'agents-hooks/lint-check.sh': [
+    ]),
+    'agents-hooks/lint-check.sh': marked([
       `if ${bin} && ${gate}; then`,
       `    lint_output=$(bun run ${f.tool} ${f.agentArgs.lintCheck} "\${biome_files[@]}" 2>&1)`,
       `      echo "Run 'bun run ${f.tool} ${f.agentArgs.afterEdit} <file>' to auto-fix." >&2`,
-    ],
+    ]),
   };
 }
 

@@ -136,6 +136,19 @@ describe('format-after-edit.sh — session-edits ledger writer', () => {
     expect(r.stdout.trim()).toBe('{}');
     expect(existsSync(join(tmp, 'devkit-session-edits', `${repoKey(root)}-s1`))).toBe(false);
   });
+
+  it.skipIf(!HAS_BUN)('runs biome on the edited file through its marked, locked lines', () => {
+    const root = mkTmp('sesfb-');
+    write(root, 'src/mine.ts');
+    write(root, 'package.json', JSON.stringify({ name: 'fx', version: '0.0.0' }));
+    write(root, 'biome.json', '{}\n');
+    writeExec(root, 'node_modules/.bin/biome', '#!/bin/sh\necho "$@" > biome-args.txt\n');
+    const abs = join(root, 'src/mine.ts');
+    const r = runHook(FORMAT_HOOK, root, { session_id: 's1', file_path: abs }, mkTmp('sesfb-t-'));
+    expect(r.status).toBe(0);
+    expect(r.stdout.trim()).toBe('{}');
+    expect(readFileSync(join(root, 'biome-args.txt'), 'utf8')).toBe(`check --write ${abs}\n`);
+  });
 });
 
 // Two eslint-stylish blocks (absolute-path headers, indented error rows) — the shape a real
@@ -253,6 +266,20 @@ describe.skipIf(!HAS_BUN)('lint-check.sh — session scoping', () => {
     const r = runHook(LINT_HOOK, root, { session_id: 's1' }, tmp);
     expect(r.status).toBe(0);
     expect(existsSync(join(root, 'biome-args.txt'))).toBe(false);
+  });
+
+  it('a biome failure blocks with the fix hint, and the locked lines keep their marker out of it', () => {
+    const root = mkTmp('sesbf-');
+    write(root, 'src/mine.ts');
+    write(root, 'package.json', JSON.stringify({ name: 'fx', version: '0.0.0' }));
+    write(root, 'biome.json', '{}\n');
+    writeExec(root, 'node_modules/.bin/biome', '#!/bin/sh\necho "BIOME_DIAG $@"\nexit 1\n');
+    const tmp = seedSessionLedger(root, 's1', ['src/mine.ts']);
+    const r = runHook(LINT_HOOK, root, { session_id: 's1' }, tmp);
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain('BIOME_DIAG check --no-errors-on-unmatched src/mine.ts');
+    expect(r.stderr).toContain("Run 'bun run biome check --write <file>' to auto-fix.\n");
+    expect(r.stderr).not.toContain('# devkit');
   });
 
   it('fail-open when session-edits-lib.sh is missing (sync-hooks --only partial install)', () => {

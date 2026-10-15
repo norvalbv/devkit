@@ -50,22 +50,21 @@ truncate() { if [ ${#1} -gt 1500 ]; then echo "${1:0:1500}... (truncated)"; else
 # transitive dependency, and configless it checks against its own defaults (tabs, double quotes), so
 # a repo that formats with prettier/oxfmt/dprint would fail this gate on every file — including ones
 # the session never touched — while its real format gate passes. Scoped to the session's own edited
-# files (biome-supported extensions only), not the whole repo. Its invocation is rendered verbatim
-# from the formatter descriptor (cli/lib/husky/format-fragment.mts) and still runs through bun, so
-# the step skips without bun rather than reporting bun's exit 127 as lint errors.
-if [ -x "./node_modules/.bin/biome" ] && { [ -f "biome.json" ] || [ -f "biome.jsonc" ]; }; then
+# files (biome-supported extensions only), not the whole repo. The invocation still runs through
+# bun, so the step skips without bun rather than reporting bun's exit 127 as lint errors.
+if [ -x "./node_modules/.bin/biome" ] && { [ -f "biome.json" ] || [ -f "biome.jsonc" ]; }; then # devkit: must equal renderAgentHookLines (cli/lib/husky/format-fragment.mts)
   biome_files=()
   while IFS= read -r f; do
     [[ "$f" =~ \.(ts|tsx|js|jsx|json|jsonc)$ ]] && biome_files+=("$f")
   done < "$LEDGER"
   if [ ${#biome_files[@]} -gt 0 ] && command -v bun &>/dev/null; then
-    lint_output=$(bun run biome check --no-errors-on-unmatched "${biome_files[@]}" 2>&1)
+    lint_output=$(bun run biome check --no-errors-on-unmatched "${biome_files[@]}" 2>&1) # devkit: must equal renderAgentHookLines (cli/lib/husky/format-fragment.mts)
     if [ $? -ne 0 ]; then
       echo "Biome lint/format errors detected in files you edited. Please fix these issues:" >&2
       echo "" >&2
       truncate "$lint_output" >&2
       echo "" >&2
-      echo "Run 'bun run biome check --write <file>' to auto-fix." >&2
+      echo "Run 'bun run biome check --write <file>' to auto-fix." >&2 # devkit: must equal renderAgentHookLines (cli/lib/husky/format-fragment.mts)
       exit 2
     fi
   fi

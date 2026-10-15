@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { defaultSelection } from '../lib/components.mts';
 import {
+  AGENT_HOOK_MARKER,
   CONSUMER_FORMATTER,
   type ConsumerFormatter,
   FORMAT_TOOL_SETUP,
@@ -155,7 +156,7 @@ describe('the gate — exact comparisons', () => {
       agentArgs: { afterEdit: '--write', lintCheck: '--check' },
     });
     expect(lines['agents-hooks/format-after-edit.sh']).toContain(
-      '    bun run oxfmt --write "$file_path" 2>/dev/null || true',
+      `    bun run oxfmt --write "$file_path" 2>/dev/null || true ${AGENT_HOOK_MARKER}`,
     );
     expect(lines['agents-hooks/lint-check.sh'].join('\n')).toContain(
       'bun run oxfmt --check "${biome_files[@]}"',
@@ -168,8 +169,19 @@ describe('the gate — exact comparisons', () => {
       t.replace('|| [ -f "biome.jsonc" ]', ''),
     );
     expect(checkFormatterIdentity(bad).join('\n')).toMatch(
-      /agents-hooks\/lint-check\.sh no longer carries `if \[ -x "\.\/node_modules\/\.bin\/biome" \] && \{ \[ -f "biome\.json" \] \|\| \[ -f "biome\.jsonc" \]; \}; then`/,
+      /agents-hooks\/lint-check\.sh no longer carries `if \[ -x "\.\/node_modules\/\.bin\/biome" \] && \{ \[ -f "biome\.json" \] \|\| \[ -f "biome\.jsonc" \]; \}; then # devkit:/,
     );
+  });
+
+  it('a locked hook line stripped of its marker fails, so the marker stays where the lock is', () => {
+    for (const path of ['agents-hooks/format-after-edit.sh', 'agents-hooks/lint-check.sh']) {
+      const bad = withHook(path, (t) => t.replace(` ${AGENT_HOOK_MARKER}`, ''));
+      const out = checkFormatterIdentity(bad).join('\n');
+      expect(out, path).toMatch(
+        /no longer carries `if .*# devkit: must equal renderAgentHookLines/,
+      );
+      expect(out, path).toMatch(/runs biome in a line the descriptor does not render/);
+    }
   });
 
   it('an agent hook that runs another formatter fails; the same word in a comment does not', () => {
