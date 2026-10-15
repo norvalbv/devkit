@@ -150,7 +150,7 @@ export async function runReviewGate(
       }
       if (preJudgeTree === null || postTree === null) {
         console.error(
-          'guard-review: staged tree is UNVERIFIABLE (git write-tree failed — reason above) — blocking: write-capable judges may run in this gate and their effect on the commit cannot be ruled out. Resolve the index and re-run.',
+          'guard-review: staged tree is UNVERIFIABLE (could not hash the staged tree — reason above) — blocking: write-capable judges may run in this gate and their effect on the commit cannot be ruled out. Resolve the index and re-run.',
         );
         return timing.finish(1);
       }

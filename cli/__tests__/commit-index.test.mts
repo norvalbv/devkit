@@ -387,11 +387,23 @@ describe('commitIndexTree: lock-free staged tree identity', () => {
     const saved = process.env.TMPDIR;
     process.env.TMPDIR = join(mkTmp('commit-index-gone-'), 'missing');
     try {
-      expect(commitIndexTree(root)).toMatchObject({ tree: null, error: /ENOENT/ });
+      expect(commitIndexTree(root)).toMatchObject({
+        tree: null,
+        error: expect.stringMatching(/ENOENT/),
+      });
     } finally {
       if (saved === undefined) delete process.env.TMPDIR;
       else process.env.TMPDIR = saved;
     }
+  });
+
+  it('names a missing git binary as the spawn error, not a TypeError from reading its stderr', () => {
+    const root = seedRepo();
+    const result = commitIndexTree(root, { ...process.env, PATH: mkTmp('commit-index-nogit-') });
+    expect(result).toMatchObject({
+      tree: null,
+      error: expect.stringMatching(/^git rev-parse: .*ENOENT/),
+    });
   });
 
   it('removes its private index copy on success and on failure', () => {
@@ -405,7 +417,10 @@ describe('commitIndexTree: lock-free staged tree identity', () => {
     try {
       expect(commitIndexTree(root).tree).not.toBeNull();
       // Fails at write-tree, after the copy exists.
-      expect(commitIndexTree(corrupt)).toMatchObject({ tree: null, error: /write-tree/ });
+      expect(commitIndexTree(corrupt)).toMatchObject({
+        tree: null,
+        error: expect.stringMatching(/write-tree/),
+      });
     } finally {
       if (saved === undefined) delete process.env.TMPDIR;
       else process.env.TMPDIR = saved;

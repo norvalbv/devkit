@@ -125,7 +125,7 @@ export function stagedFiles(cwd: string): string[] {
 export function stagedTreeHash(cwd: string, use: string): string | null {
   const result = commitIndexTree(cwd);
   if (result.tree !== null) return result.tree;
-  const line = `guard-review: git write-tree failed (${use}): ${result.error.replace(/\s+/g, ' ')}\n`;
+  const line = `guard-review: could not hash the staged tree (${use}): ${result.error.replace(/\s+/g, ' ')}\n`;
   if (!reportedTreeFailures.has(line)) {
     reportedTreeFailures.add(line);
     process.stderr.write(line);

@@ -75,8 +75,23 @@ type GitRun = { ok: true; out: string } | { ok: false; error: string };
 function runGit(root: string, args: string[], env: NodeJS.ProcessEnv): GitRun {
   const result = spawnSync('git', args, { cwd: root, env, encoding: 'utf8' });
   if (result.status === 0) return { ok: true, out: result.stdout.replace(/\n$/, '') };
-  const reason = result.stderr.trim() || result.error?.message || `exit ${result.status}`;
+  const reason = result.stderr?.trim() || result.error?.message || `exit ${result.status}`;
   return { ok: false, error: `git ${args[0]}: ${reason}` };
+}
+
+// Unsplit, so the write lands in the copy alone and never adds a sharedindex.* to the git dir.
+// Env, not `-c`: argv stays `write-tree`, the shape wrappers and shims match on.
+function scratchIndexEnv(env: NodeJS.ProcessEnv, copy: string): NodeJS.ProcessEnv {
+  const configs = Number.parseInt(env.GIT_CONFIG_COUNT ?? '', 10);
+  const slot = Number.isSafeInteger(configs) && configs > 0 ? configs : 0;
+  return {
+    ...env,
+    GIT_INDEX_FILE: copy,
+    GIT_OPTIONAL_LOCKS: '0',
+    GIT_CONFIG_COUNT: String(slot + 1),
+    [`GIT_CONFIG_KEY_${slot}`]: 'core.splitIndex',
+    [`GIT_CONFIG_VALUE_${slot}`]: 'false',
+  };
 }
 
 /** The commit index's tree, hashed from a private copy: write-tree takes its index's lock and dies
@@ -93,18 +108,7 @@ export function commitIndexTree(
     const index = resolve(root, located.out);
     temp = mkdtempSync(join(tmpdir(), 'devkit-tree-index-'));
     const copy = join(temp, 'index');
-    const configs = Number.parseInt(env.GIT_CONFIG_COUNT ?? '', 10);
-    const slot = Number.isSafeInteger(configs) && configs > 0 ? configs : 0;
-    // Unsplit, so the write lands in the copy alone and never adds a sharedindex.* to the git dir.
-    // Env, not `-c`: argv stays `write-tree`, the shape wrappers and shims match on.
-    const copyEnv = {
-      ...env,
-      GIT_INDEX_FILE: copy,
-      GIT_OPTIONAL_LOCKS: '0',
-      GIT_CONFIG_COUNT: String(slot + 1),
-      [`GIT_CONFIG_KEY_${slot}`]: 'core.splitIndex',
-      [`GIT_CONFIG_VALUE_${slot}`]: 'false',
-    };
+    const copyEnv = scratchIndexEnv(env, copy);
     if (existsSync(index)) copyFileSync(index, copy);
     else {
       const empty = runGit(root, ['read-tree', '--empty'], copyEnv);

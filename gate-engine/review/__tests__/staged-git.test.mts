@@ -251,7 +251,9 @@ describe('stagedTreeHash', () => {
       expect(stagedTreeHash(root, 'dedupe probe')).toBeNull();
     const named = stderr.filter((line) => line.includes('(dedupe probe)'));
     expect(named).toHaveLength(1);
-    expect(named[0]).toMatch(/^guard-review: git write-tree failed \(dedupe probe\): .+\n$/);
+    expect(named[0]).toMatch(
+      /^guard-review: could not hash the staged tree \(dedupe probe\): .+\n$/,
+    );
   });
 
   it('attributes the same failure separately to each caller that depends on it', () => {
