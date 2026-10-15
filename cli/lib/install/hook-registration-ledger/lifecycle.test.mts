@@ -110,6 +110,19 @@ describe('trusted provider-native hook projection', () => {
     });
   });
 
+  it('projects a provider-restricted registration only to its listed providers', () => {
+    const projection = projectHookRegistrations(
+      ['antiSlop'],
+      ['claude', 'codex', 'cursor'],
+      'shared',
+    );
+    const ids = (provider: AgentProvider) =>
+      providerEntries(projection, provider).map((entry) => entry.registrationId);
+    expect(ids('claude')).toEqual(['anti-slop:preflight', 'anti-slop:preflight-bash']);
+    expect(ids('codex')).toEqual(['anti-slop:preflight']);
+    expect(ids('cursor')).toEqual(['anti-slop:preflight']);
+  });
+
   it('rejects a caller-forged projection at the destructive boundary', () => {
     expect(() =>
       installProjectedHookRegistrations({}, { entries: [] }, null, 'claude', 'shared'),

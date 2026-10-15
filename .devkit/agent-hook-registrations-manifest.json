@@ -39,6 +39,18 @@
       }
     },
     {
+      "registrationId": "anti-slop:preflight-bash",
+      "ownerId": "antiSlop",
+      "provider": "claude",
+      "installScope": "shared",
+      "destinationRel": ".claude/settings.json",
+      "native": {
+        "event": "PostToolUse",
+        "matcher": "Bash",
+        "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/anti-slop-preflight.sh\" --bash-writes"
+      }
+    },
+    {
       "registrationId": "base-drift:pre-edit",
       "ownerId": "baseDrift",
       "provider": "claude",
