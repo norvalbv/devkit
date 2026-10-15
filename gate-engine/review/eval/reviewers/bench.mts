@@ -59,6 +59,7 @@ export * from './corpus.mts';
 export * from './progress.mts';
 export * from './stats.mts';
 export * from './corpus/row.mts';
+import { benchJudgeRoles, preflightBenchJudges } from './corpus/judge-preflight.mts';
 import { runRow, unscoredResult } from './corpus/row.mts';
 
 import {
@@ -128,14 +129,6 @@ async function mapLimit(items, limit, fn) {
   };
   await Promise.all(Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, worker));
   return results;
-}
-
-function preflightClaude() {
-  try {
-    execFileSync('claude', ['--version'], { encoding: 'utf8', timeout: 30000 });
-  } catch {
-    throw new BenchAbort(2, 'reviewer-eval: `claude` CLI not available — cannot benchmark');
-  }
 }
 
 // ─── Baseline / compare ───────────────────────────────────────────────────────────
@@ -358,14 +351,15 @@ async function runBench(targets, { dev, only, writeBaseline, failMode, fresh, ag
   const abMode = !!against;
   if (abMode && writeBaseline)
     throw new BenchAbort(2, 'reviewer-eval: --against is a read-only A/B; drop --baseline');
-  preflightClaude();
-  if (fresh) rmSync(progressFile(MODEL, CASCADE), { force: true });
   const plan = targets.map((reviewer) => {
     assertRepairFamilies(loadRows(reviewer));
     return { reviewer, rows: loadRows(reviewer, { dev, only }) };
   });
   const totalRows = plan.reduce((s, p) => s + p.rows.length, 0);
   if (totalRows === 0) throw new BenchAbort(2, 'reviewer-eval: no rows selected');
+  const roleOpts = { effModel, effCascade, escalationModel: ESCALATION_MODEL };
+  await preflightBenchJudges(benchJudgeRoles(plan, roleOpts), repoRoot);
+  if (fresh) rmSync(progressFile(MODEL, CASCADE), { force: true });
   const census = preflightPlans(plan.flatMap((p) => p.rows));
   console.log(
     `native execution: ${census.reduce((n, p) => n + p.taskCount, 0)} first-pass tasks; ${census.filter((p) => p.chunkCount > 1).length} chunked rows; cap=${BENCH_CHUNK_LOC ?? 'off'}`,
