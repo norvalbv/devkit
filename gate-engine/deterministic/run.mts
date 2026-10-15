@@ -50,6 +50,8 @@ import { emitGateBypass, emitGateEvent, finishGateTiming } from '../judge/gate-e
 import { markGateRun } from '../judge/run-context.mts';
 import { describeCachedPrefix, prefixEntry, recordPrefix } from '../prefix-cache/prefix-cache.mts';
 import {
+  crashGuarded,
+  fixLine,
   type GateFailure,
   gateEnv,
   readGateReason,
@@ -291,7 +293,7 @@ function commandGate(label: string, cwd: string, cmd?: string): Gate {
   if (!tokens.length) return { label, argv: null, failOpen2: false };
   if (tokens[0] === 'guard-structure') {
     const argv = ['node', path.resolve(HERE, `../structure/run${SELF_EXT}`), ...tokens.slice(1)];
-    return { label, argv, failOpen2: true, recheck: recheckCommand(argv, cwd) };
+    return { label, ...crashGuarded(argv), failOpen2: true, recheck: recheckCommand(argv, cwd) };
   }
   // The tokens that RUN, quoted — never the raw string, which a shell would parse differently.
   return { label, argv: tokens, failOpen2: false, recheck: recheckCommand(tokens) };
@@ -380,10 +382,9 @@ export function runDeterministic(cwd = process.cwd(), opts: RunDeterministicOpts
     return {
       id: g.id,
       label: `guard-${g.id}`,
-      argv,
       failOpen2:
         !('failOpen2' in g) || (g.failOpen2 === 'review' ? reviewMode : g.failOpen2 !== false),
-      rcLabels: 'rcLabels' in g ? g.rcLabels : undefined,
+      ...crashGuarded(argv, 'rcLabels' in g ? g.rcLabels : undefined),
       ...registryRecheck(g, argv, cwd),
     };
   });
@@ -452,7 +453,7 @@ export function runDeterministic(cwd = process.cwd(), opts: RunDeterministicOpts
     }
     console.error(`✗ deterministic gates failed:${fails.map((f) => ` ${f.label}`).join('')}`);
     for (const line of reasonReport(fails)) console.error(line);
-    console.error('   Fix every failure above together, then commit once.');
+    console.error(fixLine(failed));
     console.error('   On commit or ship, decision and reviewer gates run only after these pass.');
     printRecheckFooter(rechecks);
     if (fails.some((f) => f.label.startsWith('structure-lint'))) {

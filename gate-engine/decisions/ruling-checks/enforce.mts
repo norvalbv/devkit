@@ -9,7 +9,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { matchesRepoGlob } from '../../../skills/_devkit/review-roots.mjs';
 import { envFlag, resolveFromCwd, resolveGuardConfig } from '../../config.mts';
-import { failLine, GATE_REASON_ENV } from '../../deterministic/reason.mts';
+import { crashExit, failLine, GATE_REASON_ENV } from '../../deterministic/reason.mts';
 import { emitGateBypass } from '../../judge/gate-events.mts';
 import { git } from '../git-io.mts';
 import type { LiveLink } from './links.mts';
@@ -292,8 +292,5 @@ export async function main(argv: string[]): Promise<void> {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
-  main(process.argv.slice(2)).catch((error) => {
-    failLine(`${GATE}: ${error instanceof Error ? error.message : String(error)}`);
-    process.exit(1);
-  });
+  main(process.argv.slice(2)).catch(crashExit);
 }
