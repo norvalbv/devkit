@@ -8,7 +8,7 @@
  * are both available. Consumer repos no-op: this is devkit's own release topology, not a portable
  * guard.
  */
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -257,15 +257,13 @@ export async function inspectDistIntegrity(
   const physical = filesUnder(root, 'dist');
   const physicalSet = new Set(physical);
   const briefed = new Set(briefedPaths.map(briefPath));
-  // A briefed path this ship stages as a DELETION is the one case where briefing does NOT put the
-  // file in the commit: ship-branch.sh skips the force-add for it on purpose (sc-1489 — otherwise a
-  // regenerable artifact back on disk silently re-adds itself and the deletion can never land). It
-  // reports as D because `git diff <commit>` never sees an untracked file, so a path dropped from
-  // the index while still on disk looks deleted against the base the worktree is cut from.
-  // Plumbing, not porcelain `git diff`: that refreshes and REWRITES the shared index even under
-  // --no-optional-locks, and an A/D answer needs no refresh.
+  // A briefed DELETION is not committed (ship-branch.sh skips its force-add). Judged at the fork point
+  // staging anchors at (patch-anchor.sh), not BASE: an append's BASE is the PR tip, new dist and all.
+  const fork = spawnSync('git', ['-C', root, 'merge-base', base, 'HEAD'], { encoding: 'utf8' });
+  const anchor = fork.stdout.trim() || base;
+  // Plumbing: porcelain `git diff` refreshes and REWRITES the shared index.
   const deleted = new Set(
-    git(root, ['diff-index', '--name-only', '-z', '--diff-filter=D', base, '--', 'dist']).filter(
+    git(root, ['diff-index', '--name-only', '-z', '--diff-filter=D', anchor, '--', 'dist']).filter(
       (file) => briefed.has(file),
     ),
   );
