@@ -5,6 +5,8 @@
  * A call already in literal mode (`--literal-pathspecs`, directly or via its wrapper) must not also
  * carry `:(literal)`: git reads the prefix as filename text and matches nothing (`mixed`).
  *
+ * `git … -z | tr '\0' '\n'` re-splits on a byte a filename may hold, fragmenting the name (`nul`).
+ *
  * Reads worktree text, like `bun run lint`. Not seen: argv built by `args.push('--', …)`, and git
  * reached through `set -- git …` or a supervisor's `-- git`.
  */
@@ -28,7 +30,7 @@ export interface Hit {
   line: number;
   sub: string;
   arg: string;
-  kind: 'raw' | 'mixed';
+  kind: 'raw' | 'mixed' | 'nul';
 }
 
 /** Subcommands whose post-`--` operands are pathspecs that glob; mv, ls-tree, check-ignore etc. do not. */
@@ -39,6 +41,9 @@ const SPAWNERS = new Set(['spawnSync', 'execFileSync', 'spawn', 'execFile']);
 const DECLARERS = new Set(['local', 'declare', 'typeset', 'readonly', 'export']);
 const SHELL_MARKER = /#\s*pathspec:\s*\S/;
 const TS_MARKER = /\/\/\s*pathspec:\s*\S/;
+const NUL_MARKER = /#\s*pathlist:\s*\S/;
+const NUL_ARGS = new Set(['\\0', '\\000']);
+const NEWLINE_ARGS = new Set(['\\n', '\\012', '\n']);
 const LITERAL_ENV = /GIT_LITERAL_PATHSPECS['"]?\s*[:=]\s*['"]?1/;
 const LITERAL_MAGIC = /^:\([^)]*\bliteral\b/;
 const SAFE_MAGIC = /^:\([^)]*\b(?:literal|glob)\b/;
@@ -148,11 +153,36 @@ function shellArgSafety(arg: string, arrays: Map<string, boolean[]>): Safety {
   return assigned?.length && assigned.every(Boolean) ? 'magic' : 'raw';
 }
 
+function isCommand(node: JsonObject, name: string): boolean {
+  return node.type === 'Command' && wordValue(node.name) === name;
+}
+
+/** The `git … -z` stage of a pipeline whose later `tr '\0' '\n'` stage re-splits it on newlines. */
+function nulResplit(pipeline: JsonObject): JsonObject | undefined {
+  const stages = wordList(pipeline.commands);
+  const at = stages.findIndex(
+    (s) => isCommand(s, 'git') && wordValues(s.suffix).some((w) => w === '-z' || w === '--null'),
+  );
+  const resplit = stages.slice(at + 1).some((s) => {
+    const [from = '', to = ''] = wordValues(s.suffix);
+    return isCommand(s, 'tr') && NUL_ARGS.has(from) && NEWLINE_ARGS.has(to);
+  });
+  return at >= 0 && resplit ? stages[at] : undefined;
+}
+
 /** Hits in one shell file; `arrays` comes from collectShellArrays over every scanned shell file. */
 export function scanShell(text: string, file: string, arrays: Map<string, boolean[]>): Hit[] {
   const hits: Hit[] = [];
   walk(shellAst(text), (node) => {
-    if (node.type !== 'Command' || wordValue(node.name) !== 'git') return;
+    const nul = node.type === 'Pipeline' ? nulResplit(node) : undefined;
+    if (nul) {
+      const words = wordValues(nul.suffix);
+      const name = isJsonObject(nul.name) ? nul.name : {};
+      const line = lineAt(text, isJsonInteger(name.pos) ? name.pos : 0);
+      const sub = words[subcommandIndex(words)] ?? '';
+      if (!marked(text, line, NUL_MARKER)) hits.push({ file, line, sub, arg: 'tr', kind: 'nul' });
+    }
+    if (!isCommand(node, 'git')) return;
     const suffix = wordList(node.suffix);
     const words = suffix.map(wordValue);
     const at = subcommandIndex(words);
@@ -373,6 +403,13 @@ function trackedSources(root: string): string[] {
     .filter((f) => f && !f.includes('__tests__/') && existsSync(resolve(root, f)));
 }
 
+const REMEDY = {
+  raw: "prefix the argument with ':(literal)' (':(top,literal)' if cwd may not be the repo root) or add a 'pathspec: <reason>' comment on that line or the line above.",
+  mixed:
+    "the call already runs with --literal-pathspecs, which reads ':(literal)' as filename text — drop the prefix.",
+  nul: "a filename may hold a newline — read the -z output with `while IFS= read -r -d '' p`, or add a 'pathlist: <reason>' comment on that line or the line above.",
+} satisfies Record<Hit['kind'], string>;
+
 function readIfExists(path: string): string | undefined {
   return existsSync(path) ? readFileSync(path, 'utf8') : undefined;
 }
@@ -399,11 +436,16 @@ export function main(root = process.cwd()): number {
   if (hits.length === 0) return 0;
   for (const h of hits)
     console.error(
-      `${h.file}:${h.line}  ${h.kind === 'mixed' ? 'mixed literal mode' : 'raw pathspec'}  git ${h.sub} -- ${h.arg}`,
+      h.kind === 'nul'
+        ? `${h.file}:${h.line}  -z re-split on newlines  git ${h.sub} … -z | tr '\\0' '\\n'`
+        : `${h.file}:${h.line}  ${h.kind === 'mixed' ? 'mixed literal mode' : 'raw pathspec'}  git ${h.sub} -- ${h.arg}`,
     );
+  const kinds = [...new Set(hits.map((h) => h.kind))];
   console.error(
-    `git-pathspec: ${hits.length} site(s). raw: prefix the argument with ':(literal)' (':(top,literal)' if cwd may not be the repo root) or add a 'pathspec: <reason>' comment on that line or the line above.\n` +
-      "mixed: the call already runs with --literal-pathspecs, which reads ':(literal)' as filename text — drop the prefix.",
+    [
+      `git-pathspec: ${hits.length} site(s).`,
+      ...kinds.map((kind) => `${kind}: ${REMEDY[kind]}`),
+    ].join('\n'),
   );
   return 1;
 }
