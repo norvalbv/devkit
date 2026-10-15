@@ -15,6 +15,7 @@ const PERMISSIONS = { allow: ['Bash(git status:*)'] };
 
 let roots: string[] = [];
 afterEach(() => {
+  vi.restoreAllMocks();
   for (const root of roots) rmSync(root, { recursive: true, force: true });
   roots = [];
 });
@@ -110,7 +111,6 @@ describe('checkHookRegistrations — the Claude settings file the scope does not
     expect(log).toHaveBeenCalledWith(
       `  [dry-run] remove .claude/settings.local.json PreToolUse[Bash]: ${RETIRED} (retired)`,
     );
-    log.mockRestore();
     expect(readFileSync(join(root, rel), 'utf8')).toBe(before);
   });
 
