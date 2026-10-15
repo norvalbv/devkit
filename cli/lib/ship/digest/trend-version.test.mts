@@ -93,6 +93,15 @@ describe('renderVersionChange — silence', () => {
     expect(renderVersionChange(rows, key('s2'))).toBe('');
   });
 
+  it("ignores an inherited ship id's older result row when this attempt wrote none", () => {
+    const rows = [
+      ...attempt('s1', '0.64.0', 1),
+      ...attempt('s2', '0.65.0', 1),
+      ...attempt('s2', '0.67.0'),
+    ];
+    expect(renderVersionChange(rows, key('s2'))).toBe('');
+  });
+
   it('stays silent for an unkeyed ship', () => {
     const rows = [...attempt('s1', '0.64.0', 1), ...attempt('s2', '0.67.0', 1)];
     expect(renderVersionChange(rows, { shipId: 's2', repo: '', branch: '' })).toBe('');
@@ -122,7 +131,7 @@ function digest(rows: TrendRow[], shipId: string, env: Record<string, string>): 
 describe('gate-digest CLI — the wiring a ship actually runs', () => {
   const rows = [...attempt('s1', '0.64.0', 1), ...attempt('s2', '0.67.0', 1)];
 
-  it('reads the sink once for both branch-history lines', () => {
+  it('renders the upgrade line from a sink file in-process', () => {
     expect(renderBranchHistory(sinkWith(rows), key('s2'))).toBe(line('0.64.0', '0.67.0'));
   });
 
