@@ -354,6 +354,9 @@ interface ChangedParagraph {
  * copy never shares its twin's identity. */
 type TwinDiscriminator = { ordinal: number } | null;
 
+/** A touched paragraph blocks at this many added or edited text lines; unchanged lines are free. */
+export const PARAGRAPH_CHANGED_LINE_LIMIT = 3;
+
 function changedParagraphs(
   file: string,
   source: string,
@@ -390,7 +393,7 @@ function changedParagraphs(
     const textLines = changedTextLineCount(token, addedLines, meaningfulLine);
     const anchor = anchorFor(file, context, contextOrdinal);
     recordParagraph(inventory, { anchor, textLines: textLineCount(token, meaningfulLine) });
-    if (textLines >= 3) {
+    if (textLines >= PARAGRAPH_CHANGED_LINE_LIMIT) {
       const twin = (totals.get(key) ?? 0) > 1 ? { ordinal } : null;
       changed.push({ token, twin, anchor, textLines });
     }
