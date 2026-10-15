@@ -1,5 +1,5 @@
 /**
- * The `--output-format json` envelope reader (sc-1527). Two things ride on it: every judge's caller
+ * The claude result-envelope reader. Two things ride on it: every judge's caller
  * still receives plain verdict text, and the spend it now bills is the spend of THAT run.
  *
  * The failure mode worth guarding is not a crash — it is a plausible zero. A judge whose envelope
@@ -36,7 +36,7 @@ describe('withResultArgs', () => {
   // has to lead — the bug this ordering exists to prevent.
   it('PREPENDS, so a variadic terminal flag cannot swallow it', () => {
     const args = withResultArgs(['-p', 'prompt', '--allowedTools', 'Read']);
-    expect(args.slice(0, 2)).toEqual([...CLAUDE_RESULT_ARGS]);
+    expect(args.slice(0, CLAUDE_RESULT_ARGS.length)).toEqual([...CLAUDE_RESULT_ARGS]);
     expect(args.at(-1)).toBe('Read');
   });
 
@@ -64,11 +64,8 @@ describe('unwrapClaudeResult', () => {
     expect(unwrapClaudeResult(null)).toBeNull();
   });
 
-  it('falls back rather than returning an empty verdict', () => {
-    // An envelope whose result is blank must not read as "the judge said nothing of substance" —
-    // the caller's own empty-output handling should see the original bytes and decide.
-    const blank = envelope({ result: '   ' });
-    expect(unwrapClaudeResult(blank)).toBe(blank);
+  it('a blank result is no verdict, never the envelope bytes', () => {
+    expect(unwrapClaudeResult(envelope({ result: '   ' }))).toBeNull();
   });
 });
 
