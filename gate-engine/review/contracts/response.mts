@@ -65,6 +65,13 @@ const ADVISORY_LINE_RE = /^(?:(?![\r\n])[\s*#>-])*ADVISORY:\**[^\S\r\n]*(.+)$/gi
 export const ADVISORY_CAP = 5;
 const ADVISORY_CHARS = 200;
 
+/** The writer half of parseAdvisories: only a final-reply marker line ever reaches the author. */
+export const PASS_ADVISORY_RULE =
+  'FAIL only for a finding that must block THIS commit. Every concrete in-charter defect that ' +
+  'does not block, on a PASS too, goes in your FINAL reply directly above the VERDICT line as ' +
+  'ADVISORY: <file:line> — <finding> (a plain line number). A defect named only in a bullet, in ' +
+  'earlier narration or in the verdict reason never reaches the author.';
+
 /** The judge's `ADVISORY:` lines citing a code location — non-blocking, to resolve before merge. */
 export function parseAdvisories(raw: string, maxChars = ADVISORY_CHARS): string[] {
   const texts = [...normalizeLineEndings(raw).matchAll(ADVISORY_LINE_RE)]
