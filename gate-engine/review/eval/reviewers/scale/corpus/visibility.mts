@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto';
-import { splitDiffByFile } from '../../../../../judge/diff-focus.mts';
+import { diffPathsOf, filePathOf, splitDiffByFile } from '../../../../../judge/diff-focus.mts';
 import { buildCappedDiffEvidence } from '../../../../diff-evidence.mts';
-import { postImagePathOf, unquoteGitPath } from '../../../../lens/chunk.mts';
 
 export interface RequiredSpan {
   file: string;
@@ -43,19 +42,6 @@ function validatedLines(span: RequiredSpan, evidence: Evidence): string[] {
   )
     throw new Error('INVALID_REQUIRED_SPAN');
   return lines;
-}
-
-function basePath(segment: string): string | null {
-  const header = segment.split(/^@@ /m, 1)[0];
-  const renamed = header.match(/^(?:rename|copy) from (.+)$/m)?.[1];
-  if (renamed !== undefined) return unquoteGitPath(renamed);
-  const minus = header.match(/^--- (.+)$/m)?.[1];
-  if (minus === '/dev/null') return null;
-  if (minus !== undefined) {
-    const path = unquoteGitPath(minus);
-    return path.startsWith('a/') ? path.slice(2) : path;
-  }
-  return postImagePathOf(header);
 }
 
 /** The native renderer keeps a prefix of each included segment. Read its emitted marker, rather
@@ -128,16 +114,16 @@ export function measureSpan(
   if (!evidence.rendered.endsWith(`\n${body}`)) throw new Error('INVALID_RENDERED_EVIDENCE');
   const original = splitDiffByFile(evidence.diff);
   const rendered = splitDiffByFile(body);
-  const selected = new Set(evidence.selectedFiles.map(unquoteGitPath));
+  const selected = new Set(evidence.selectedFiles);
   const totalLines = span.end - span.start + 1;
   const result = (status: Visibility, shownLines = 0) => ({ status, shownLines, totalLines });
   const segments = original
     .map((segment, index) => ({ segment, index }))
     .filter(
       ({ segment }) =>
-        (span.side === 'base' ? basePath(segment) : postImagePathOf(segment)) === span.file,
+        (span.side === 'base' ? diffPathsOf(segment).oldPath : filePathOf(segment)) === span.file,
     );
-  const scoped = segments.filter(({ segment }) => selected.has(postImagePathOf(segment) ?? ''));
+  const scoped = segments.filter(({ segment }) => selected.has(filePathOf(segment) ?? ''));
   if (segments.length ? !scoped.length : !selected.has(span.file)) return result('out-of-scope');
   const present = new Set<number>();
   const shown = new Set<number>();

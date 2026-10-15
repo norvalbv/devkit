@@ -16,6 +16,7 @@ import { execFileSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
+import { filePathOf, splitDiffByFile } from '../../../judge/diff-focus.mts';
 import { overlapCount } from './match.mts';
 import { ANCHOR_PHRASE, classifyPromptVariant, EXCLUDED_REPOS, sha8 } from './schema.mts';
 
@@ -43,8 +44,7 @@ const TEST_CMD_RE = /\b(vitest|bun (run )?test|npm (run )?test|yarn test|pytest)
  *     (solution leakage; methodology audit / SWE-Bench+ 2410.06992);
  *  3. any in-turn/nearest-preceding stat-ish git output kept separately as statText (nameStatus hint).
  */
-const DIFF_HEADER_FILE_RE = /^diff --git a\/(\S+) b\//gm;
-const diffFiles = (output) => [...output.matchAll(DIFF_HEADER_FILE_RE)].map((m) => m[1]);
+const diffFiles = (output) => splitDiffByFile(output).map(filePathOf).filter(Boolean);
 
 const pickDiff = (events, invocationPos, endPos, editedFiles = []) => {
   const inTurn = events.filter((e) => e.pos > invocationPos && e.pos < endPos);

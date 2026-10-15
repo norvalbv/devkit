@@ -8,7 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { wilsonScoreInterval } from '../../../../eval/statistics.mts';
-import { splitDiffByFile } from '../../../../judge/diff-focus.mts';
+import { filePathOf, splitDiffByFile } from '../../../../judge/diff-focus.mts';
 import { identityByPath } from '../../../lens/chunk.mts';
 import { arg, argInt } from './bench-args.mts';
 import {
@@ -216,10 +216,7 @@ export function stratifiedSample(extras: Extra[], n: number, seed: number, min =
 
 /** The finding's own file hunk from the archived diff, windowed around its line when it has one. */
 export function hunkFor(e: Extra, diff: string, window = 60): string {
-  const part = splitDiffByFile(diff).find((p) => {
-    const m = p.match(/^\+\+\+ b\/(.+)$/m) ?? p.match(/^diff --git a\/(.+?) b\//m);
-    return m?.[1] === e.file;
-  });
+  const part = splitDiffByFile(diff).find((p) => filePathOf(p) === e.file);
   if (!part) return '(file hunk not found in archived diff)';
   if (e.line === null)
     return part
