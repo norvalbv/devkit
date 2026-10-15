@@ -1,16 +1,23 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { readBranchHistory, renderTrend, summariseTrend, type TrendRow } from './trend.mts';
+import {
+  readBranchHistory,
+  renderTrend,
+  summariseTrend,
+  trendSuppression,
+  type TrendRow,
+} from './trend.mts';
 
 const CR = 'correctness-reviewer';
 const where = { repo: 'acme/app', branch: 'feat/x' };
 /** A review row before attempt() stamps the ship's envelope (ship_id, repo, branch) on it. */
 type Row = Omit<TrendRow, 'ship_id'> & { ship_id?: string };
 
-/** One finished ship attempt: its marker, the review rows, then the shell's result row. */
+/** One finished ship attempt: the intent ship-branch.sh writes before its marker, the marker, the
+ * review rows, then the shell's result row. */
 function attempt(
   id: string,
   review: Row[],
@@ -18,6 +25,7 @@ function attempt(
   at: Partial<Row> = where,
 ): TrendRow[] {
   return [
+    { type: 'ship_intent', ship_id: id, ...at },
     { type: 'ship_attempt', ship_id: id, ...at },
     ...review.map((r) => ({ ship_id: id, ...at, ...r })),
     { type: 'ship_result', ship_id: id, ...at, ...result },
@@ -357,7 +365,8 @@ describe('summariseTrend — streak boundaries', () => {
   });
 
   it('ignores rows with no open marker (an attempt cut by the backward read) instead of guessing', () => {
-    const cut = attempt('s1', [fail(4)]).slice(1);
+    // Its review row and result survive; the read cut off its intent and marker.
+    const cut = attempt('s1', [fail(4)]).slice(-2);
     const events = [...cut, ...attempt('s2', [fail(4)]), ...attempt('s3', [fail(4)])];
     expect(trendOf(events, 's3')).toBe('');
   });
@@ -496,9 +505,9 @@ describe('summariseTrend — what counts as a finding', () => {
     const two = jsonl(attempt('s2', []));
     const raw = [
       ...jsonl(attempt('s1', [fail(2)])),
-      two[0],
+      ...two.slice(0, -1),
       tallied,
-      two[1],
+      ...two.slice(-1),
       ...jsonl(attempt('s3', [fail(1)])),
     ];
     expect(trendOf(readBranchHistory(sinkWith(raw), keyOf('s3')), 's3')).toBe('');
@@ -506,7 +515,7 @@ describe('summariseTrend — what counts as a finding', () => {
 
   it('treats a round with wrong-typed lens fields as unknown, without throwing', () => {
     const raw = [
-      ...jsonl(attempt('s1', [])).slice(0, 1),
+      ...jsonl(attempt('s1', [])).slice(0, -1),
       JSON.stringify({
         ship_id: 's1',
         ...where,
@@ -517,8 +526,8 @@ describe('summariseTrend — what counts as a finding', () => {
         item_tally: { fail: 'two' },
         items_ref: 7,
       }),
-      ...jsonl(attempt('s1', [])).slice(1),
-      ...jsonl(attempt('s2', [])).slice(0, 1),
+      ...jsonl(attempt('s1', [])).slice(-1),
+      ...jsonl(attempt('s2', [])).slice(0, -1),
       JSON.stringify({
         ship_id: 's2',
         ...where,
@@ -527,12 +536,109 @@ describe('summariseTrend — what counts as a finding', () => {
         status: 'fail',
         items: [null, 5, { status: 'fail', disposition: 'blocking', issues: 'abc' }],
       }),
-      ...jsonl(attempt('s2', [])).slice(1),
+      ...jsonl(attempt('s2', [])).slice(-1),
       ...jsonl(attempt('s3', [fail(2)])),
     ];
     const history = readBranchHistory(sinkWith(raw), keyOf('s3'));
     // Neither round can be counted, so there is no known earlier round to compare against.
     expect(trendOf(history, 's3')).toBe('');
+  });
+});
+
+/** A same-id retry after a killed attempt, then the current blocked attempt under that id. */
+const killedSameIdRetry = (current: Row = fail(4)) => [
+  ...attempt('same', [fail(4)]),
+  { type: 'ship_attempt', ship_id: 'same', ...where },
+  { ship_id: 'same', ...where, ...fail(9) },
+  ...attempt('same', [current]),
+];
+
+describe('trendSuppression — the trace an ambiguity bail-out leaves', () => {
+  it('names a same-id marker while one is open', () => {
+    expect(trendSuppression(killedSameIdRetry(), keyOf('same'))).toEqual({
+      reason: 'same_id_marker',
+      shipId: 'same',
+    });
+  });
+
+  it('names a foreign row inside an open attempt', () => {
+    const events = [
+      ...attempt('s1', [fail(4)]),
+      { type: 'ship_attempt', ship_id: 's2', ...where },
+      { type: 'ship_result', ship_id: 's0', ...where, exit_code: 1 },
+      { ship_id: 's2', ...where, ...fail(4) },
+      { type: 'ship_result', ship_id: 's2', ...where, exit_code: 1 },
+    ];
+    expect(trendSuppression(events, keyOf('s2'))).toEqual({ reason: 'foreign_row', shipId: 's0' });
+  });
+
+  it('names a displaced attempt that writes again', () => {
+    const events = [
+      { type: 'ship_attempt', ship_id: 's2', ...where },
+      ...attempt('s3', [fail(4)]),
+      { ship_id: 's2', ...where, ...pass() },
+      ...attempt('s4', [fail(4)]),
+    ];
+    expect(trendSuppression(events, keyOf('s4'))).toEqual({
+      reason: 'displaced_write',
+      shipId: 's2',
+    });
+  });
+
+  it('stays quiet when the current attempt did not block on review', () => {
+    expect(trendSuppression(killedSameIdRetry(pass()), keyOf('same'))).toBeUndefined();
+  });
+
+  it("does not count a concurrent ship's fail inside the current attempt as the ship's own", () => {
+    const events = [
+      ...attempt('s1', [fail(4)]),
+      { type: 'ship_attempt', ship_id: 's4', ...where },
+      { ship_id: 's9', ...where, ...fail(4) },
+      { ship_id: 's4', ...where, ...pass() },
+      { type: 'ship_result', ship_id: 's4', ...where, exit_code: 1 },
+    ];
+    expect(trendSuppression(events, keyOf('s4'))).toBeUndefined();
+  });
+
+  it('stays quiet on a clean history and on an unkeyed ship', () => {
+    const { events, current } = series([4, 4, 4]);
+    expect(trendSuppression(events, keyOf(current))).toBeUndefined();
+    const blank = { repo: '', branch: '' };
+    const unkeyed = killedSameIdRetry().map((r) => ({ ...r, ...blank }));
+    expect(trendSuppression(unkeyed, keyOf('same', blank))).toBeUndefined();
+  });
+
+  it('judges a replayed ship as of its own result — later ambiguity cannot silence it', () => {
+    const later = [
+      { type: 'ship_attempt', ship_id: 's9', ...where },
+      { type: 'ship_attempt', ship_id: 's9', ...where },
+    ];
+    const { events, current } = series([4, 4, 4]);
+    expect(trendOf([...events, ...later], current)).toContain(': 3 blocking rounds');
+    expect(trendSuppression([...events, ...later], keyOf(current))).toBeUndefined();
+  });
+
+  it('cuts an inherited id at its LAST result, not its first', () => {
+    const events = [
+      ...attempt('same', [fail(4)]),
+      ...attempt('same', [fail(4)]),
+      ...attempt('same', [fail(4)]),
+      { type: 'ship_attempt', ship_id: 'same', ...where },
+      { type: 'ship_attempt', ship_id: 'same', ...where },
+    ];
+    expect(trendOf(events, 'same')).toContain(': 3 blocking rounds');
+  });
+
+  it("skips another ship's trend_suppressed row written inside an open attempt", () => {
+    const events = [
+      ...attempt('s1', [fail(4)]),
+      { type: 'ship_attempt', ship_id: 's2', ...where },
+      { type: 'trend_suppressed', ship_id: 's1', ...where },
+      { ship_id: 's2', ...where, ...fail(4) },
+      { type: 'ship_result', ship_id: 's2', ...where, exit_code: 1 },
+      ...attempt('s3', [fail(4)]),
+    ];
+    expect(trendOf(events, 's3')).toContain(': 3 blocking rounds');
   });
 });
 
@@ -563,7 +669,8 @@ describe('readBranchHistory — the sink read', () => {
       detail: 'n'.repeat(1000),
     });
     const filler = Array.from({ length: 1000 }, () => noise);
-    const sink = sinkWith([...lines.slice(0, 3), ...filler, ...lines.slice(3)]);
+    const first = lines.length / 3;
+    const sink = sinkWith([...lines.slice(0, first), ...filler, ...lines.slice(first)]);
     expect(trendOf(readBranchHistory(sink, keyOf(current)), current)).toContain(
       ': 3 blocking rounds',
     );
@@ -578,11 +685,13 @@ const shellLines = (events: TrendRow[]) =>
 
 const CLI = join(import.meta.dirname, 'gate-digest.mts');
 /** Runs the digest the way commit-with-gate-capture.sh does, with the ship's exported envelope. */
-const digest = (lines: string[], shipId: string, env: Record<string, string> = {}) =>
-  execFileSync('node', [CLI, 'digest', sinkWith(lines), shipId], {
+const runDigest = (sink: string, shipId: string, env: Record<string, string> = {}) =>
+  execFileSync('node', [CLI, 'digest', sink, shipId], {
     encoding: 'utf8',
     env: { ...process.env, DEVKIT_SHIP_REPO: '', DEVKIT_SHIP_BRANCH: '', ...env },
   });
+const digest = (lines: string[], shipId: string, env: Record<string, string> = {}) =>
+  runDigest(sinkWith(lines), shipId, env);
 const shipEnv = { DEVKIT_SHIP_REPO: where.repo, DEVKIT_SHIP_BRANCH: where.branch };
 
 describe('gate-digest CLI — the wiring a ship actually runs', () => {
@@ -597,6 +706,39 @@ describe('gate-digest CLI — the wiring a ship actually runs', () => {
     const out = digest(shellLines(attempt('solo', [fail(5)])), 'solo', shipEnv);
     expect(out).toContain('BLOCKED this run');
     expect(out).not.toContain('blocking rounds');
+  });
+
+  it('records one trend_suppressed row, unprinted, when an ambiguity silences a live blocked ship', () => {
+    // A real sink ends in a newline, so an appended row starts a line of its own.
+    const sink = sinkWith([...shellLines(killedSameIdRetry()), '']);
+    // The ship's own envelope: its id, and the sink it both reads and appends to.
+    const live = { ...shipEnv, DEVKIT_SHIP_ID: 'same', DEVKIT_GATE_EVENTS: sink };
+    const out = runDigest(sink, 'same', live);
+    expect(out).toContain('BLOCKED this run');
+    expect(out).not.toContain('trend_suppressed');
+    const rows = readFileSync(sink, 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map((l) => JSON.parse(l))
+      .filter((r) => r.type === 'trend_suppressed');
+    expect(rows).toEqual([
+      expect.objectContaining({
+        reason: 'same_id_marker',
+        offending_ship_id: 'same',
+        ship_id: 'same',
+        ...where,
+      }),
+    ]);
+    // Its own row now sits after its result: a later replay of the ship must print the same digest.
+    expect(runDigest(sink, 'same', { ...shipEnv, DEVKIT_GATE_EVENTS: sink })).toBe(out);
+  });
+
+  it('writes nothing when replaying a past ship outside that ship', () => {
+    const sink = sinkWith(shellLines(killedSameIdRetry()));
+    const before = readFileSync(sink, 'utf8');
+    // DEVKIT_SHIP_ID is unset (vitest.setup scrubs it), as in the documented replay command.
+    runDigest(sink, 'same', { ...shipEnv, DEVKIT_GATE_EVENTS: sink });
+    expect(readFileSync(sink, 'utf8')).toBe(before);
   });
 
   it('prints no trend when the ship envelope is not exported (an ad-hoc digest call)', () => {

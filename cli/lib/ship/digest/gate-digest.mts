@@ -12,7 +12,7 @@
 import { blockingFindings } from './blocking.mts';
 import { count, oneLine, textOf } from './fields.mts';
 import { scanBackward } from './tail.mts';
-import { readBranchHistory, renderTrend, summariseTrend } from './trend.mts';
+import { readBranchHistory, trendNarration } from './trend.mts';
 
 /**
  * The fields this digest reads off a gate event, and only those. The sink is an append-only stream
@@ -490,7 +490,7 @@ if (/[/\\]gate-digest\.m[jt]s$/.test(process.argv[1] ?? '') && process.argv[2] =
   const key = { shipId, repo, branch };
   const text = [
     render(summarise(readShipEvents(sink, shipId), shipId), logPath),
-    renderTrend(summariseTrend(readBranchHistory(sink, key), key)),
+    trendNarration(readBranchHistory(sink, key), key),
   ]
     .filter(Boolean)
     .join('\n');
