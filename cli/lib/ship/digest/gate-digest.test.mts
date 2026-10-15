@@ -102,6 +102,22 @@ describe('summarise', () => {
     expect(other[0].blocking).toBe(false);
   });
 
+  it('a crashed deterministic gate blocks as could-not-run and names the crash, never a finding', () => {
+    const detail = 'guard-size(crashed): .devkit/baselines/size-lines.json is ignored by Git';
+    const crashed = ev({
+      type: 'gate_result',
+      gate: 'size',
+      family: 'deterministic',
+      status: 'could_not_run',
+      detail,
+    });
+    const rows = summarise([crashed, shipResult('deterministic')], SHIP);
+    expect(rows).toEqual([
+      expect.objectContaining({ gate: 'size', state: 'could-not-run', blocking: true }),
+    ]);
+    expect(render(rows)).toContain(`✗ size — BLOCKED this run — ${detail}`);
+  });
+
   it('nothing is blocking when the run did not stop on a gate (timeout, green, clobber)', () => {
     const rows = summarise([completenessFail('gap'), shipResult('timeout')], SHIP);
     expect(rows[0].blocking).toBe(false);

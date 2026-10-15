@@ -11,9 +11,13 @@ export type ConfigComponent = Exclude<keyof RawDevkitComponents, 'guards'>;
 const ANTI_SLOP_COMPONENT: ConfigComponent = 'antiSlop';
 // guard-comments' exit 4 blocks, but like unexpected/could-not-run it is not a verdict.
 export const UNREADABLE_EVIDENCE = '(unreadable-evidence)';
+// Node exits 1 on an uncaught throw, the code a finding uses; ./crash-exit.mts re-exits a crash 70.
+export const CRASH_EXIT = 70;
+export const CRASHED = '(crashed)';
 
 // Fixed run order; each runs as `node <sibling module> <args>`, so every install mode resolves it.
-// Exit contract: 0 clean, 1 violation, 2 fail-open (could-not-run) unless `failOpen2` says otherwise.
+// Exit contract: 0 clean, 1 violation, 2 fail-open (could-not-run) unless `failOpen2` says otherwise,
+// 70 crashed (blocks, never a verdict).
 export const DETERMINISTIC = [
   { id: 'size', module: '../ratchets/size-disable.mjs', args: ['gate'] },
   { id: 'fanout', module: '../ratchets/folder-fanout.mjs', args: ['gate'] },

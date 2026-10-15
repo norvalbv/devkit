@@ -17,6 +17,7 @@
  * Consumers install prebuilt .mjs — no build on their side.
  */
 import { readFileSync } from 'node:fs';
+import { crashExit, GATE_REASON_ENV } from '../gate-engine/deterministic/reason.mts';
 import { assertGit } from './lib/guard/require-git.mts';
 import { type CommandMeta, renderCommandHelp, renderTopLevelHelp } from './lib/help/render.mts';
 import { wantsCommandHelp } from './lib/help/wants-help.mts';
@@ -169,6 +170,8 @@ async function main() {
 }
 
 main().catch((e) => {
+  // Run as a gate (anti-slop), a throw is a crash, never the exit 1 that means a finding.
+  if (process.env[GATE_REASON_ENV]) crashExit(e);
   console.error(`devkit: ${e.message}`);
   process.exit(1);
 });
