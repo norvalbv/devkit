@@ -21,7 +21,12 @@
 
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { defaultSelection, RECOMMENDED_GUARD_IDS, type Selection } from '../components.mts';
+import {
+  defaultSelection,
+  RECOMMENDED_GUARD_IDS,
+  type Selection,
+  structureCmdFor,
+} from '../components.mts';
 import { readJson } from '../fs-helpers.mts';
 import {
   BIN_DIRS,
@@ -43,7 +48,8 @@ import {
 
 // Structure-lint and the hard Biome lint/assist gate fold into the deterministic orchestrator via
 // `--extra`. Self-host-only for formatting: its SCOPE (proven allowlist) and hard FAILURE POLICY.
-export const SELF_HOST_STRUCTURE_CMD = 'bun run lint:structure';
+// Structure is the consumers' change-scoped command; CI's `lint:structure` still lints the whole tree.
+export const SELF_HOST_STRUCTURE_CMD = structureCmdFor('generic');
 // An extra with a GUARD_*_OK bypass also needs a GATE_BYPASSES entry (command-gates.mts).
 export const SELF_HOST_EXTRAS: Array<{ label: string; cmd: string }> = [
   { label: 'lint', cmd: 'bun run lint' },

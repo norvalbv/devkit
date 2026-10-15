@@ -83,8 +83,13 @@ function pathInScope(file: string, scope: StagedScope): boolean {
   return pathInRoot(file, scope.root) && scope.extensions.includes(extname(file).slice(1));
 }
 
-function isPolicyPath(file: string): boolean {
-  return POLICY_PATH_RE.test(file);
+// A staged deletion or rename of a policy file changes policy as surely as an edit does.
+function stagesPolicy(changed: string[], destructive: string[], routingInputs: string[]): boolean {
+  return [...changed, ...destructive].some((file) => isPolicyPath(file, routingInputs));
+}
+
+function isPolicyPath(file: string, routingInputs: string[]): boolean {
+  return POLICY_PATH_RE.test(file) || routingInputs.includes(file);
 }
 
 function unique(paths: string[]): string[] {
@@ -98,10 +103,8 @@ export function planStagedStructureLint(
   unstaged: string[],
   routingInputs: string[] = [],
 ): StagedPlan {
-  const isPolicy = (file: string) => isPolicyPath(file) || routingInputs.includes(file);
-  const unstablePolicy = unstaged.some(isPolicy);
-  // A staged deletion or rename of a policy file changes policy as surely as an edit does.
-  const stagedPolicy = [...changed, ...destructive].some(isPolicy);
+  const unstablePolicy = unstaged.some((file) => isPolicyPath(file, routingInputs));
+  const stagedPolicy = stagesPolicy(changed, destructive, routingInputs);
   const deferred: string[] = [];
   const probeScopes = new Map<string, StagedScope>();
   const unstableScopes = new Set(
@@ -117,7 +120,7 @@ export function planStagedStructureLint(
     if (!hasRelevantInput) continue;
     if (unstablePolicy || unstableScopes.has(scope.root)) {
       if (unstablePolicy) deferred.push('structure policy');
-      if (hasDestructiveChange) deferred.push(scope.root);
+      if (stagedPolicy || hasDestructiveChange) deferred.push(scope.root);
       continue;
     }
     if (stagedPolicy || hasDestructiveChange) probeScopes.set(`${scope.leg}:${scope.root}`, scope);
@@ -268,6 +271,16 @@ function runPresetLint(cwd: string, targets: string[]): StructureGateResult {
   }
 }
 
+// The grammar leg reads the INDEX's files, so a gitignored source that a clean CI checkout never has
+// cannot block; the preset leg hands the root to the consumer's own eslint and its own ignores.
+function policyLintTargets(cwd: string, scopes: StagedScope[], leg: StructureLeg): string[] {
+  const owned = scopes.filter((scope) => scope.leg === leg);
+  if (leg === 'preset') return owned.map((scope) => scope.root);
+  const indexed = (scope: StagedScope) =>
+    gitPaths(cwd, ['ls-files', '-z', '--', scope.root]).filter((file) => pathInScope(file, scope));
+  return unique(owned.flatMap(indexed));
+}
+
 function firstProbeFile(
   cwd: string,
   scope: StagedScope,
@@ -322,6 +335,9 @@ export async function runStagedStructureGate(cwd = process.cwd()): Promise<Struc
     // A probe also reads worktree bytes. Do not select a dirty source as the representative file
     // for a deletion/rename check; its result would not describe the staged tree either.
     const unstableSources = new Set(unstaged);
+    // A policy edit can invalidate any file under a root, not just the probed one, so it re-lints each
+    // stable root whole; every staged target then lies inside one of those roots.
+    const wholeRoots = stagesPolicy(changed, destructive, routingInputs);
     const probes = plan.probeScopes.map((scope) => ({
       scope,
       target: firstProbeFile(cwd, scope, unstableSources),
@@ -348,9 +364,11 @@ export async function runStagedStructureGate(cwd = process.cwd()): Promise<Struc
     // Route each file to every leg whose scope owns it — a grammar root nested in a scanRoot is
     // linted by both, so neither leg's rules are lost to the other.
     const legFiles = (leg: StructureLeg) =>
-      unique([...plan.targets, ...probeTargets]).filter((file) =>
-        scopes.some((scope) => scope.leg === leg && pathInScope(file, scope)),
-      );
+      wholeRoots
+        ? policyLintTargets(cwd, plan.probeScopes, leg)
+        : unique([...plan.targets, ...probeTargets]).filter((file) =>
+            scopes.some((scope) => scope.leg === leg && pathInScope(file, scope)),
+          );
     const presetFiles = legFiles('preset');
     const grammarFiles = legFiles('grammar');
     if (presetFiles.length) results.push(runPresetLint(cwd, presetFiles));

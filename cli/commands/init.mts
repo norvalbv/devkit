@@ -1029,7 +1029,7 @@ async function run(args: string[], cwd: string): Promise<number> {
     }
   }
 
-  // Self-host runs structure via `bun run lint:structure` (eslint), not a template preset, so skip
+  // Self-host runs structure via its own guard.config.json trees, not a template preset, so skip
   // the "no preset → disable structure" flip (which would otherwise print a misleading notice).
   if (!selfHost && !STRUCTURE_STACKS.has(stack) && selection.structure) {
     selection.structure = false; // no template for this stack — silently skip (noted below)
