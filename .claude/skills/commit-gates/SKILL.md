@@ -44,6 +44,13 @@ command. Do not pre-run every gate or replace the managed chain with a hand-writ
    selected guard, freeze a baseline to absorb new debt, or invent an environment variable. A
    `guard-review waive` backed by a reproduction (see the reviewer gates below) is a dispute, not a bypass.
 
+**A past ship's evidence.** The first line of every gate log is `devkit-ship-hook-start:<ship-id>`.
+That attempt's full log, ending with its findings digest, is kept at
+`~/.devkit/telemetry/logs/<ship-id>.log` (beside the `DEVKIT_GATE_EVENTS` sink when that is set);
+`ls -t` there lists the newest. Its reviewer transcripts sit under `transcripts/<ship-id>/` in the
+same directory, kept for the newest 300 runs only (`DEVKIT_TELEMETRY_KEEP`), and a PASS line's
+`· transcript <ref>` prints with `guard-review transcript <ref>`.
+
 ## Managed gate families
 
 - **Run order.** `devkit doctor` prints each installed hook's stages in the order the file runs them
