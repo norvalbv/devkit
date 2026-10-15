@@ -593,6 +593,17 @@ describe('gate-digest CLI — the wiring a ship actually runs', () => {
     expect(out).toContain(`${CR}: 3 blocking rounds on this branch`);
   });
 
+  it('prints the trend line and the devkit upgrade line together', () => {
+    const { events, current } = series([5, 5, 5]);
+    const versioned = events.map((e) => ({
+      ...e,
+      devkit_version: e.ship_id === current ? '0.67.0' : '0.64.0',
+    }));
+    const out = digest(shellLines(versioned), current, shipEnv);
+    expect(out).toContain(`${CR}: 3 blocking rounds on this branch`);
+    expect(out).toContain('↑ devkit 0.64.0 → 0.67.0 since this branch');
+  });
+
   it('prints no trend for a ship whose per-ship sink holds only itself', () => {
     const out = digest(shellLines(attempt('solo', [fail(5)])), 'solo', shipEnv);
     expect(out).toContain('BLOCKED this run');
