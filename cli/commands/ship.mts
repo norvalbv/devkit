@@ -231,8 +231,8 @@ gate, and holds it until it exits — or until --wait-ci starts polling, which n
 by default; ~/.devkit/ship-queue/config.json {"slots": N} (1..4) lets N ships run at once. A
 waiting ship prints its position once. A slot frees itself when its ship (and that ship's whole
 process group) is gone. There is no way to skip it; \`devkit ship --queue\` names the running ship
-with the \`ps\` that inspects it if it looks stuck. Every attempt ends with one
-\`attempt <id> <branch>: queued Ns · setup Ns · gates Ns …\` line, also kept in
+with the \`ps\` that inspects it if it looks stuck. Every attempt prints one
+\`attempt <id> <branch>: queued Ns · setup Ns · gates Ns …\` line above its gate digest, also kept in
 ~/.devkit/telemetry/logs/<id>.log. Every blocked attempt records its
 invocation — retry with \`devkit ship --resume <branch>\` instead of re-typing the command.`,
 };
