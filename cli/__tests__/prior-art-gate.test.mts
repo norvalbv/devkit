@@ -80,7 +80,7 @@ describe('decide (PreToolUse)', () => {
   it('passes every non-gated call silently, including the prior-art spawn itself', () => {
     expect(decide(pre('Task', 'prior-art'), root, tmp)).toBeNull();
     expect(decide(pre('Task', 'Explore'), root, tmp)).toBeNull();
-    expect(decide(pre('Edit'), root, tmp)).toBeNull();
+    expect(decide(pre('Read'), root, tmp)).toBeNull();
     expect(existsSync(markerPaths(root, 'sess-1', tmp).snoozed)).toBe(false);
   });
 
@@ -172,6 +172,88 @@ describe('decide (PreToolUse)', () => {
     expect(decide(null, root, tmp)).toBeNull();
     expect(decide({ tool_name: 42 }, root, tmp)).toBeNull();
     expect(decide(undefined, root, tmp)).toBeNull();
+  });
+});
+
+type HookCaller = { agent_id?: string; agent_type?: string; session_id?: string };
+type ToolInput = {
+  file_path?: string;
+  old_string?: string;
+  new_string?: string;
+  content?: string;
+  edits?: { old_string: string; new_string: string }[];
+  input?: string;
+};
+
+const write = (toolName: string, toolInput: ToolInput, extra: HookCaller = {}) => ({
+  hook_event_name: 'PreToolUse',
+  tool_name: toolName,
+  tool_input: toolInput,
+  session_id: 'sess-1',
+  ...extra,
+});
+
+describe('decide — the first file edit', () => {
+  it.each([
+    ['Edit', { file_path: 'src/a.ts', old_string: 'a', new_string: 'b' }],
+    ['Write', { file_path: 'src/a.ts', content: 'export {};' }],
+    ['MultiEdit', { file_path: 'src/a.ts', edits: [{ old_string: 'a', new_string: 'b' }] }],
+  ])('denies the first %s with no prior-art run, then the retry passes', (tool, input) => {
+    expect(decide(write(tool, input), root, tmp)).toContain('prior-art');
+    expect(decide(write(tool, input), root, tmp)).toBeNull();
+    // the one deny is spent for the session — plan exit is not taxed again
+    expect(decide(pre('ExitPlanMode'), root, tmp)).toBeNull();
+  });
+
+  it('never denies an edit once a prior-art run is recorded', () => {
+    recordRun(post('Agent', 'prior-art'), root, tmp);
+    expect(decide(write('Edit', { new_string: 'x' }), root, tmp)).toBeNull();
+    expect(existsSync(markerPaths(root, 'sess-1', tmp).snoozed)).toBe(false);
+  });
+
+  it('passes a plan-file Write carrying the Prior-art: line, and the pass covers plan exit', () => {
+    const plan = { file_path: '/plans/p.md', content: '# Plan\n\nPrior-art: skipped — rename\n' };
+    expect(decide(write('Write', plan), root, tmp)).toBeNull();
+    expect(existsSync(markerPaths(root, 'sess-1', tmp).snoozed)).toBe(true);
+    expect(decide(pre('ExitPlanMode'), root, tmp)).toBeNull();
+  });
+
+  it('accepts the token anywhere in the input, old_string included (a fail-open false pass)', () => {
+    const edit = { file_path: 'p.md', old_string: 'Prior-art: x', new_string: 'y' };
+    expect(decide(write('Edit', edit), root, tmp)).toBeNull();
+  });
+
+  it('exempts subagent and teammate calls without spending the lead session reminder', () => {
+    const sub = { agent_id: 'agent-7', agent_type: 'general-purpose' };
+    expect(decide(write('Edit', { new_string: 'x' }, sub), root, tmp)).toBeNull();
+    expect(decide({ ...pre('ExitPlanMode'), ...sub }, root, tmp)).toBeNull();
+    expect(existsSync(markerPaths(root, 'sess-1', tmp).snoozed)).toBe(false);
+    expect(decide(write('Edit', { new_string: 'x' }), root, tmp)).not.toBeNull();
+  });
+
+  it('gates a --agent main thread, which carries agent_type but no agent_id', () => {
+    const main = write('Edit', { new_string: 'x' }, { agent_type: 'reviewer' });
+    expect(decide(main, root, tmp)).not.toBeNull();
+  });
+
+  it('stays inert on Codex, whose edits report tool_name apply_patch', () => {
+    expect(decide(write('apply_patch', { input: '*** Begin Patch' }), root, tmp)).toBeNull();
+    expect(existsSync(markerPaths(root, 'sess-1', tmp).snoozed)).toBe(false);
+  });
+
+  it('re-arms in a new session even when the planning session ran prior-art', () => {
+    recordRun(post('Task', 'prior-art', 'sess-1'), root, tmp);
+    const next = write('Edit', { new_string: 'x' }, { session_id: 'sess-2' });
+    expect(decide(next, root, tmp)).not.toBeNull();
+  });
+
+  it('routes the disposition to a plan or reply, never a code file, and names routine skips', () => {
+    const reason = decide(write('Edit', { new_string: 'x' }), root, tmp);
+    expect(reason).toContain('feature-critique');
+    expect(reason).toContain('line in your plan file');
+    expect(reason).toContain('never in a code file');
+    expect(reason).toContain('routine or trivial work');
+    expect(reason).toContain('same batch');
   });
 });
 

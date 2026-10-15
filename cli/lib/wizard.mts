@@ -106,7 +106,7 @@ const ANTI_SLOP_OPTION = {
 const PRIOR_ART_GATE_OPTION = {
   id: 'priorArtGate',
   label: 'prior-art gate',
-  hint: 'deny-once hook: plans must run (or explicitly skip) step-0 prior-art (off by default)',
+  hint: 'deny-once hook: run (or explicitly skip) step-0 prior-art before editing (off by default)',
 };
 
 // base-drift: same opt-in shape, and out of COMPONENTS for a different reason — it is the first

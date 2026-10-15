@@ -204,8 +204,8 @@ export interface Selection {
    */
   adhd: boolean;
   /**
-   * The deny-once step-0 ordering gate (agents-hooks/prior-art-gate.mjs): the first ExitPlanMode
-   * or feature-critique dispatch in a session with no recorded prior-art run is denied once with
+   * The deny-once step-0 ordering gate (agents-hooks/prior-art-gate.mjs): the first file edit,
+   * ExitPlanMode or feature-critique dispatch with no recorded prior-art run is denied once with
    * the skip predicate; retries pass. Opt-in even under --yes: it denies harness tool calls, which
    * a repo must choose (carve-out ruled in docs/decisions/devkit-gates-repo-not-harness.md).
    */
@@ -408,7 +408,7 @@ export const OPTIONAL_COMPONENTS: OptionalComponent[] = [
     id: 'priorArtGate',
     kind: 'hook',
     label: 'prior-art gate',
-    hint: 'deny-once PreToolUse gate: plans must run (or explicitly skip) step-0 prior-art',
+    hint: 'deny-once PreToolUse gate: run (or explicitly skip) step-0 prior-art before editing',
     flag: '--prior-art-gate',
     since: '0.51.0',
   },
