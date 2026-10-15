@@ -2,11 +2,15 @@
 
 // Ship's evidence step, run by publish-evidence.sh after the PR exists. `budget` sizes the bound,
 // `publish` captures red/green and writes the block, `body` cleans a caller body before gh sees it.
-import { readFileSync, realpathSync } from 'node:fs';
+import { mkdtempSync, readFileSync, realpathSync, renameSync } from 'node:fs';
+import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import type { RegressionEvidence } from '../../baseline-status/regression-evidence.mts';
-import { captureRegressionEvidence } from '../../baseline-status/regression-proof.mts';
+import {
+  type CapturedRegression,
+  captureRegressionEvidence,
+} from '../../baseline-status/regression-proof.mts';
 import {
   type PreparedRegressionRepository,
   prepareRegressionRepository,
@@ -30,20 +34,21 @@ const REPORT = '.devkit-evidence-report.json';
 interface Produced {
   outcome: EvidenceOutcome;
   evidence: RegressionEvidence | null;
+  evidenceDir?: string;
 }
 
 /** The capture's own SIGTERM path stops the test tree and removes both clones at the deadline. */
 async function captureWithin(
   prepared: PreparedRegressionRepository,
   seconds: number,
-): Promise<RegressionEvidence> {
+): Promise<CapturedRegression> {
   let timedOut = false;
   const timer = setTimeout(() => {
     timedOut = true;
     process.kill(process.pid, 'SIGTERM');
   }, seconds * 1000);
   try {
-    return (await captureRegressionEvidence(prepared)).evidence;
+    return await captureRegressionEvidence(prepared);
   } catch (error) {
     throw timedOut ? new Error(`the tests did not finish within ${seconds}s`) : error;
   } finally {
@@ -81,8 +86,8 @@ async function produce(
     ['--red', red, '--green', head, '--vitest-report', REPORT, '--', ...argv],
     cwd,
   );
-  const evidence = await captureWithin(prepared, config.timeoutSeconds);
-  return { outcome: outcomeFromRegression(evidence, head, base), evidence };
+  const { evidence, evidenceDir } = await captureWithin(prepared, config.timeoutSeconds);
+  return { outcome: outcomeFromRegression(evidence, head, base), evidence, evidenceDir };
 }
 
 /** Loaded only once a block is being written, so a ship that writes none never pays for it. */
@@ -95,26 +100,53 @@ async function shipVerdict(input: VerdictInput): Promise<PrintedVerdict> {
   }
 }
 
-interface PublishArgs {
+export interface PublishArgs {
   cwd: string;
   repo: string;
   pr: string;
   head: string;
-  failed: string | undefined;
+  failed?: string;
+  /** Where a non-captured run's logs are moved, out of a capture root its caller deletes. */
+  keepIn?: string;
+  /** Replace a same-head block that recorded inconclusive. */
+  recapture?: boolean;
 }
 
-async function publish({ cwd, repo, pr, head, failed }: PublishArgs): Promise<void> {
+function keepEvidence(dir: string | undefined, keepIn: string | undefined, captured: boolean) {
+  if (!dir || !keepIn || captured) return;
+  try {
+    const kept = join(mkdtempSync(join(keepIn, 'devkit-evidence-kept-')), 'evidence');
+    renameSync(dir, kept);
+    console.error(`evidence: kept the red/green logs at ${kept}`);
+  } catch (error) {
+    console.error(`evidence: the red/green logs were not kept: ${errorMessage(error)}`);
+  }
+}
+
+/** True once the PR body holds this run's block. */
+export async function publish(args: PublishArgs): Promise<boolean> {
+  const { cwd, repo, pr, head, failed } = args;
   const pull = readPull(repo, pr);
   if (pull.headRefOid !== head) {
     console.error(`evidence: PR head is no longer ${head.slice(0, 12)}; nothing was published`);
-    return;
+    return false;
   }
-  if (readEvidenceBlock(pull.body, head)?.stale === false) {
-    console.error('evidence: the PR body already records evidence for this head');
-    return;
+  const recorded = readEvidenceBlock(pull.body, head);
+  const current = recorded?.stale === false ? recorded : null;
+  const redo = args.recapture === true && current?.status === 'inconclusive';
+  if (current && !redo) {
+    const hint =
+      current.status === 'inconclusive' ? `; re-capture it with devkit pr-evidence ${pr}` : '';
+    console.error(
+      `evidence: the PR body already records ${current.status} evidence for this head${hint}`,
+    );
+    return false;
   }
   const config = readEvidenceConfig(cwd);
-  if (!config) return;
+  if (!config) {
+    console.error('evidence: guard.config.json has no evidence entry; nothing was published');
+    return false;
+  }
   const env = { ...process.env };
   let produced: Produced = { outcome: inconclusive(failed ?? '', head, null), evidence: null };
   if (!failed) {
@@ -124,6 +156,10 @@ async function publish({ cwd, repo, pr, head, failed }: PublishArgs): Promise<vo
       const detail = `evidence could not be produced: ${errorMessage(error)}`;
       produced = { outcome: inconclusive(detail, head, null), evidence: null };
     }
+  }
+  if (redo && current) {
+    const detail = `${produced.outcome.detail} (recaptured; previously inconclusive: ${current.detail})`;
+    produced.outcome = { ...produced.outcome, detail };
   }
   const { title, baseRefOid } = pull;
   const verdict = await shipVerdict({
@@ -140,6 +176,8 @@ async function publish({ cwd, repo, pr, head, failed }: PublishArgs): Promise<vo
   console.error(
     `evidence: ${status}${reason ? ` (${reason})` : ''}: ${detail} [PR body ${result}]`,
   );
+  keepEvidence(produced.evidenceDir, args.keepIn, status === 'captured');
+  return result === 'written' || result === 'unchanged';
 }
 
 function required(values: Record<string, string | undefined>, name: string): string {
@@ -160,6 +198,7 @@ async function main(argv: string[]): Promise<void> {
     pr: { type: 'string' },
     head: { type: 'string' },
     failed: { type: 'string' },
+    'keep-in': { type: 'string' },
   } as const;
   const { values } = parseArgs({ args: rest, options, strict: true });
   if (command === 'body') {
@@ -182,6 +221,7 @@ async function main(argv: string[]): Promise<void> {
     pr: required(values, 'pr'),
     head: required(values, 'head'),
     failed: values.failed,
+    keepIn: values['keep-in'],
   });
 }
 
