@@ -86,6 +86,8 @@ command. Do not pre-run every gate or replace the managed chain with a hand-writ
   behaviour. A test asserting the opposite is a question, not an answer: read why it exists, then
   either change it with the fix and tell the user, or waive explaining why the finding's premise is
   wrong. A disagreeing test alone is not a rationale.
+  A FAIL on lines the evidence lists under MOVED LINES is pre-existing when `git show <base>:<old
+  path>` has the same defective line and nothing else in the commit reaches it: fix it, or waive with that output.
   A lens PASS is one sample from a nondeterministic judge, not a certificate that its concern is
   clean. A later attempt can fail the same lens on code you did not touch. Treat that as an
   ordinary finding and fix it: it was missed, not caused by your last edit.
