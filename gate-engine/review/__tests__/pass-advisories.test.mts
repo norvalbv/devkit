@@ -5,12 +5,12 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { loadCache } from '../cache.mts';
 import { reportCachedHitNotes } from '../contracts/checklist.mts';
-import { parseAdvisories } from '../contracts/response.mts';
+import { PASS_ADVISORY_RULE, parseAdvisories } from '../contracts/response.mts';
 import { cachedAdvisories, resetReviewBaseContext } from '../evidence/base-context.mts';
 import { emitMergedLensResults } from '../lens/merge-results.mts';
 import { type LensPart, planReviewWork } from '../lens/split.mts';
 import { settleReviewOutcome, type SettleCtx } from '../recovery/settle.mts';
-import { REVIEWERS } from '../reviewers.mts';
+import { escalatePrompt, hasChecklist, REVIEWERS, wrapPrompt } from '../reviewers.mts';
 import type { ReviewOutcome } from '../runtime.mts';
 import { ReviewGateTiming } from '../telemetry/timing.mts';
 
@@ -91,6 +91,36 @@ describe('parseAdvisories', () => {
     const got = parseAdvisories(raw);
     expect(got).toHaveLength(5);
     expect(got.every((a) => a.length === 200)).toBe(true);
+  });
+});
+
+describe('the PASS advisory rule', () => {
+  it('closes every checklist reviewer prompt, so a PASS names its defect on a parsed line', () => {
+    const checklisted = REVIEWERS.filter(hasChecklist);
+    expect(checklisted.length).toBeGreaterThan(0);
+    for (const r of checklisted)
+      expect(wrapPrompt('body', r, ['a.ts']).endsWith(PASS_ADVISORY_RULE)).toBe(true);
+  });
+
+  it('survives escalation, so an overturned FAIL that PASSes still reports its advisories', () => {
+    const [r] = REVIEWERS.filter(hasChecklist);
+    expect(escalatePrompt(wrapPrompt('body', r, ['a.ts']), 'notes')).toContain(PASS_ADVISORY_RULE);
+  });
+
+  it('still reads the line range the reported PASS cited', () => {
+    expect(parseAdvisories('ADVISORY: `cli/lib/fs-helpers.mts:99-103` — stale comment')).toEqual([
+      '`cli/lib/fs-helpers.mts:99-103` — stale comment',
+    ]);
+  });
+
+  it('asks for exactly the line shape the parser reads', () => {
+    const template = /ADVISORY: <file:line> — <finding>/.exec(PASS_ADVISORY_RULE)?.[0] ?? '';
+    const line = template
+      .replace('<file:line>', 'cli/lib/fs-helpers.mts:99')
+      .replace('<finding>', 'stale comment');
+    expect(parseAdvisories(`${line}\nVERDICT: PASS — clean`)).toEqual([
+      'cli/lib/fs-helpers.mts:99 — stale comment',
+    ]);
   });
 });
 
