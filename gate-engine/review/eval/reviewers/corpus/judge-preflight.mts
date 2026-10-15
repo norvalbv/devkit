@@ -43,6 +43,13 @@ function darkReason(s, now) {
   return `usage limit reached${reset}`;
 }
 
+/** A missing or logged-out CLI is fixed on this machine; a plan refusal or lock is not. */
+function darkRemedy(s) {
+  if (s.state === 'absent' || s.state === 'unauthenticated')
+    return `Install or log in to \`${s.bin}\` and re-run, or move the role with`;
+  return 'Re-running will not help; move the role with';
+}
+
 /** Throws BenchAbort(2) naming every dark role; an unverified role proceeds (positive signal only). */
 export async function preflightBenchJudges(
   roles,
@@ -57,12 +64,12 @@ export async function preflightBenchJudges(
   if (dark.length === 0) return statuses;
   const lines = dark.map(
     (s) =>
-      `  ${s.role}: ${s.model} via ${s.bin} — ${darkReason(s, now)}. Move it with ${ROLE_KNOB[s.role]}.`,
+      `  ${s.role}: ${s.model} via ${s.bin} — ${darkReason(s, now)}. ${darkRemedy(s)} ${ROLE_KNOB[s.role]}.`,
   );
   throw new BenchAbort(
     2,
     [
-      'reviewer-eval: a judge this run needs cannot answer — no task was spent, and re-running will not help:',
+      'reviewer-eval: a judge this run needs cannot answer — no task was spent:',
       ...lines,
       'An off-pin model is keyed as its own section, so it never compares against the pinned baseline.',
     ].join('\n'),

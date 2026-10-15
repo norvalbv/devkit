@@ -210,12 +210,13 @@ function assertScoredRow(row) {
 // A timeout or contract miss is the judge's own failure, so only the provider causes count here.
 const OUTAGE_CAUSES = new Set(['outage', 'rate-limited', 'absent', 'model-unavailable']);
 
-/** An inconclusive part the provider caused, read from its structured cause before its wording. */
+/** An inconclusive part the provider caused: its structured cause decides, its wording only without one. */
 export function isOutagePart(part) {
   if (part.res.status !== 'inconclusive') return false;
-  return (
-    OUTAGE_CAUSES.has(part.res.inconclusiveCause) || subcause(part.res.reason ?? '') === 'outage'
-  );
+  const cause = part.res.inconclusiveCause;
+  return cause === undefined
+    ? subcause(part.res.reason ?? '') === 'outage'
+    : OUTAGE_CAUSES.has(cause);
 }
 
 /** Existing labeled-row API; execution remains shared with exploratory reviews. */
