@@ -750,9 +750,6 @@ echo "SURVIVED:$?"`,
 // sc-1292 wiring under the errexit shell real callers use; unit behaviour lives in
 // cli/lib/ship/coverage/coverage-rebase.test.mts.
 describe('prepare_gate_worktree — fallow gets rekeyed coverage, the gate keeps the link', () => {
-  // Raw leaf git calls still carry a native bound so one cannot wedge a git-integration worker.
-  const LEAF_TIMEOUT_MS = 30_000;
-
   /** A real git worktree (as ship creates) under a root with a SPACE, as real consumer paths have. */
   function seedShipWorktree(coverageKeyRoot: (main: string) => string) {
     const root = realpathSync(mkdtempSync(join(tmpdir(), 'gatewt cov-')));
@@ -760,12 +757,7 @@ describe('prepare_gate_worktree — fallow gets rekeyed coverage, the gate keeps
     const main = join(root, 'main');
     mkdirSync(join(main, 'src'), { recursive: true });
     const git = (args: string[], cwd = main) =>
-      rawExecFileSync('git', args, {
-        cwd,
-        encoding: 'utf8',
-        env: { ...process.env, ...GIT_ENV },
-        timeout: LEAF_TIMEOUT_MS,
-      });
+      rawExecFileSync('git', args, { cwd, encoding: 'utf8', env: { ...process.env, ...GIT_ENV } });
     git(['init', '-q', '-b', 'main']);
     git(['config', 'user.email', 'a@b.c']);
     git(['config', 'user.name', 'a']);
@@ -815,19 +807,14 @@ describe('prepare_gate_worktree — fallow gets rekeyed coverage, the gate keeps
     const gitDir = rawExecFileSync('git', ['rev-parse', '--absolute-git-dir'], {
       cwd: wt,
       encoding: 'utf8',
-      timeout: LEAF_TIMEOUT_MS,
     }).trim();
     expect(r.exported).toBe(join(gitDir, 'devkit-fallow-coverage.json'));
     const report = coverageMapSchema.parse(JSON.parse(readFileSync(r.exported ?? '', 'utf8')));
     expect(Object.keys(report)).toEqual([`${realpathSync(wt)}/src/a.ts`]);
     // Linked AFTER staging: nothing the ship could commit may appear.
-    expect(
-      rawExecFileSync('git', ['status', '--porcelain'], {
-        cwd: wt,
-        encoding: 'utf8',
-        timeout: LEAF_TIMEOUT_MS,
-      }),
-    ).toBe('');
+    expect(rawExecFileSync('git', ['status', '--porcelain'], { cwd: wt, encoding: 'utf8' })).toBe(
+      '',
+    );
   });
 
   it('exports nothing when the report already names the worktree paths', () => {
