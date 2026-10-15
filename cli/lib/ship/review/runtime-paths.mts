@@ -32,6 +32,11 @@ export function reviewPathWithin(root: string, candidate: string): boolean {
   return rel === '' || (!isAbsolute(rel) && rel !== '..' && !rel.startsWith(`..${sep}`));
 }
 
+/** True when either path is, or sits inside, the other. */
+export function reviewPathsOverlap(first: string, second: string): boolean {
+  return reviewPathWithin(first, second) || reviewPathWithin(second, first);
+}
+
 /** Resolve an existing directory physically so later containment checks cannot follow an ancestor. */
 export function canonicalReviewDirectory(path: string, label: string): string {
   let canonical: string;
