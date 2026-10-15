@@ -242,7 +242,7 @@ export async function runDeferredRecoveries(
       continue;
     }
     console.error(
-      `guard-review: ${p.task.sel.reviewer.name} — checklist contract not satisfied under the concurrent wave; retrying solo (${p.reason})`,
+      `guard-review: ${taskLabel(p.task)} — checklist contract not satisfied under the concurrent wave; retrying solo (${p.reason})`,
     );
     const t0 = Date.now();
     const res = await runOne(p.task, p.reason, remaining - RECOVERY_SETTLE_MARGIN_MS);

@@ -44,7 +44,7 @@ export async function enforceChecklistContract(
   if (hole && recoveryScheduled) {
     // No "retrying" here: the callback runs no judge, and the solo phase announces itself.
     console.error(
-      `guard-review: ${selection.reviewer.name} — checklist contract not satisfied (${hole})`,
+      `guard-review: ${selection.reviewer.name}${lensTag(selection.reviewer)} — checklist contract not satisfied (${hole})`,
     );
     cleanupChecklistState(cwd, selection.reviewer);
     result = await retry(hole);
@@ -72,6 +72,10 @@ export interface SpawnDenials {
 
 const DENIED_SHOWN = 3;
 
+/** ` [lens]` for a split lens part, so its log lines match its completion line; '' otherwise. */
+const lensTag = (reviewer: Reviewer): string =>
+  reviewer.lens?.length ? ` [${lensGroupId(reviewer.lens)}]` : '';
+
 /** Name the refused tool calls beside a non-pass outcome; a PASS that lost a test run stays quiet. */
 export function reportDeniedCalls(
   reviewer: Reviewer,
@@ -79,11 +83,10 @@ export function reportDeniedCalls(
   denied: string[] | null,
 ): void {
   if (status === 'pass' || !denied?.length) return;
-  const lens = reviewer.lens?.length ? ` [${lensGroupId(reviewer.lens)}]` : '';
   const more = denied.length > DENIED_SHOWN ? ` (+${denied.length - DENIED_SHOWN} more)` : '';
   const shown = denied.slice(0, DENIED_SHOWN).map(boundedCause).join(' | ');
   console.error(
-    `⚠️  guard-review: ${reviewer.name}${lens} — ${deniedCalls(denied)}: ${shown}${more}`,
+    `⚠️  guard-review: ${reviewer.name}${lensTag(reviewer)} — ${deniedCalls(denied)}: ${shown}${more}`,
   );
 }
 
