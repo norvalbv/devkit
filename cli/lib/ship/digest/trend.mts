@@ -221,7 +221,8 @@ export function renderVersionChange(rows: TrendRow[], key: ShipKey): string {
     (r) => r.type === 'ship_result' && r.ship_id === key.shipId,
   );
   const prior = lastBefore(mine, at - 1, (r) => isAttempt(r) && r.ship_id !== key.shipId);
-  if (at < 0 || prior < 0 || result < 0 || !mine[result].exit_code) return '';
+  // A result row before `at` belongs to an earlier attempt that reused this ship id.
+  if (at < 0 || prior < 0 || result < at || !mine[result].exit_code) return '';
   const from = mine[prior].devkit_version ?? '';
   const to = mine[at].devkit_version ?? '';
   if (!RELEASE_VERSION.test(from) || !RELEASE_VERSION.test(to)) return '';
