@@ -18,6 +18,8 @@
  * which event). It carries no consumer-specific paths beyond $CLAUDE_PROJECT_DIR.
  */
 
+import type { AgentProvider } from '../agent-assets/agent-providers.mts';
+
 export const PKG = 'node_modules/@norvalbv/devkit';
 
 /** Anchored at the CONSUMER's node_modules, so it carries dist/ and is never .mts — see the
@@ -38,6 +40,8 @@ export interface HookRegistration {
   /** Package-relative target of a command that runs a file inside the installed package, carried as
    * data so doctor resolves it without parsing shell. Absent = a consumer-anchored .claude/hooks script. */
   scriptRel?: string;
+  /** Only these providers get the registration; absent = every provider that can project it. */
+  providers?: readonly AgentProvider[];
 }
 
 /** A command this registry USED to emit for a still-live registration, in SOURCE form. Ruled in
@@ -225,6 +229,15 @@ export const HOOK_REGISTRATIONS: Record<string, HookRegistration[]> = {
       event: 'PostToolUse',
       matcher: 'Edit|Write|MultiEdit',
       command: 'bash "$CLAUDE_PROJECT_DIR/.claude/hooks/anti-slop-preflight.sh"',
+    },
+    // Bash writes are found through the payload's duration_ms, which only Claude sends. The flag also
+    // keeps the command distinct: one command under two matchers of an event reads as a moved one.
+    {
+      registrationId: 'anti-slop:preflight-bash',
+      event: 'PostToolUse',
+      matcher: 'Bash',
+      command: 'bash "$CLAUDE_PROJECT_DIR/.claude/hooks/anti-slop-preflight.sh" --bash-writes',
+      providers: ['claude'],
     },
   ],
   // fallow: devkit's staged-scope wrapper. Bound to the FALLOW component, not agentHooks — a repo

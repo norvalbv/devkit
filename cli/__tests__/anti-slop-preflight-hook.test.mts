@@ -8,6 +8,8 @@ import {
   readFileSync,
   realpathSync,
   symlinkSync,
+  unlinkSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -74,8 +76,8 @@ function write(
   return abs;
 }
 
-function run(root: string, input: string, projectDir = root) {
-  return spawnSync(BASH, [HOOK], {
+function run(root: string, input: string, projectDir = root, args: string[] = []) {
+  return spawnSync(BASH, [HOOK, ...args], {
     input,
     cwd: root,
     env: { ...process.env, PATH: ISOLATED_PATH, CLAUDE_PROJECT_DIR: projectDir },
@@ -88,6 +90,45 @@ const claudePayload = (file: string) =>
   JSON.stringify({ session_id: 's1', tool_name: 'Write', tool_input: { file_path: file } });
 const argv = (log: string) =>
   existsSync(log) ? readFileSync(log, 'utf8').split('\n').filter(Boolean) : [];
+
+// The hook's git must judge the fixture repo, never one a surrounding git hook exported.
+const GIT_ENV = Object.fromEntries(
+  Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')),
+);
+const GIT_IDENTITY = [
+  '-c',
+  'user.email=t@example.com',
+  '-c',
+  'user.name=t',
+  '-c',
+  'commit.gpgsign=false',
+];
+const git = (cwd: string, ...args: string[]) =>
+  spawnSync('git', [...GIT_IDENTITY, ...args], { cwd, env: GIT_ENV, encoding: 'utf8' });
+
+/** repo() as a git repository with one commit, so status separates this call's writes from HEAD. */
+function gitRepo(mode: StubMode = 'fail') {
+  const made = repo(mode);
+  writeFileSync(join(made.root, '.gitignore'), 'node_modules/\nstub.log\ndist/\n');
+  git(made.root, 'init', '-q', '-b', 'main');
+  git(made.root, 'add', '-A');
+  git(made.root, 'commit', '-qm', 'base');
+  return made;
+}
+
+const bashPayload = (cwd: string, durationMs?: number) =>
+  JSON.stringify({
+    session_id: 's1',
+    tool_name: 'Bash',
+    tool_input: { command: "python3 - <<'EOF'" },
+    cwd,
+    duration_ms: durationMs,
+  });
+const runBash = (root: string, input: string, projectDir = root) =>
+  run(root, input, projectDir, ['--bash-writes']);
+/** Backdate a file to before any Bash call's window, the way an earlier write would sit. */
+const backdate = (path: string) =>
+  utimesSync(path, Date.now() / 1000 - 600, Date.now() / 1000 - 600);
 
 describe('anti-slop-preflight.sh', () => {
   it('blocks with exit 2 and forwards BOTH streams when the check reports a FAIL', () => {
@@ -182,7 +223,7 @@ describe('anti-slop-preflight.sh', () => {
     expect(argv(log)).toEqual(['anti-slop', 'check', '--', 'src/a.ts']);
   });
 
-  it('ignores a file outside the project (a sibling checkout the agent also edits)', () => {
+  it('ignores a file outside every root (a sibling checkout, payload without cwd)', () => {
     const { root, log } = repo('fail');
     const sibling = mkTmp('anti-slop-preflight-sibling-');
     expect(run(root, claudePayload(write(sibling, 'src/a.ts'))).status).toBe(0);
@@ -336,5 +377,125 @@ describe('anti-slop-preflight.sh', () => {
     write(root, 'src/a.ts');
     expect(run(root, claudePayload(`${link}/src/a.ts`), realpathSync(root)).status).toBe(2);
     expect(argv(log).at(-1)).toBe('src/a.ts');
+  });
+
+  describe('Bash writes', () => {
+    it('checks a source file a Bash heredoc wrote, with the output an Edit of it gets', () => {
+      const { root, log } = gitRepo('fail');
+      write(root, 'src/a.ts');
+      const r = runBash(root, bashPayload(root, 500));
+      expect(r.status).toBe(2);
+      expect(r.stderr).toContain('ERROR anti-slop/no-module-mocking src/a.test.ts:2:1');
+      expect(r.stderr).toContain('anti-slop: FAIL');
+      expect(argv(log)).toEqual(['anti-slop', 'check', '--', 'src/a.ts']);
+    });
+
+    it('still checks a file the same Bash call staged (status compares with HEAD, not the index)', () => {
+      const { root, log } = gitRepo('fail');
+      write(root, 'src/a.ts');
+      git(root, 'add', 'src/a.ts');
+      expect(runBash(root, bashPayload(root, 500)).status).toBe(2);
+      expect(argv(log)).toEqual(['anti-slop', 'check', '--', 'src/a.ts']);
+    });
+
+    it('checks a tracked file a Bash call rewrote in place', () => {
+      const { root, log } = gitRepo('fail');
+      backdate(write(root, 'src/a.ts', 'export const a = 1;\n'));
+      git(root, 'add', '-A');
+      git(root, 'commit', '-qm', 'a');
+      write(root, 'src/a.ts');
+      expect(runBash(root, bashPayload(root, 500)).status).toBe(2);
+      expect(argv(log)).toEqual(['anti-slop', 'check', '--', 'src/a.ts']);
+    });
+
+    it('leaves a dirty file written before the call alone, so an Edit-checked file is not re-reported', () => {
+      const { root, log } = gitRepo('fail');
+      backdate(write(root, 'src/old.ts'));
+      write(root, 'src/new.ts');
+      expect(runBash(root, bashPayload(root, 500)).status).toBe(2);
+      expect(argv(log)).toEqual(['anti-slop', 'check', '--', 'src/new.ts']);
+    });
+
+    it('checks nothing when the payload carries no duration_ms (an older harness)', () => {
+      const { root, log } = gitRepo('fail');
+      write(root, 'src/a.ts');
+      const r = runBash(root, bashPayload(root));
+      expect(r.status).toBe(0);
+      expect(r.stdout.trim()).toBe('{}');
+      expect(argv(log)).toEqual([]);
+    });
+
+    it('never checks non-source, gitignored or deleted paths a Bash call touched', () => {
+      const { root, log } = gitRepo('fail');
+      backdate(write(root, 'src/gone.ts', 'export const g = 1;\n'));
+      git(root, 'add', '-A');
+      git(root, 'commit', '-qm', 'gone');
+      unlinkSync(join(root, 'src', 'gone.ts'));
+      write(root, 'README.md', 'x\n');
+      write(root, 'dist/built.ts');
+      expect(runBash(root, bashPayload(root, 500)).status).toBe(0);
+      expect(argv(log)).toEqual([]);
+    });
+
+    it('skips an unmerged file a conflicted merge left, which is not code the agent wrote', () => {
+      const { root, log } = gitRepo('fail');
+      backdate(write(root, 'src/c.ts', 'export const c = 1;\n'));
+      git(root, 'add', '-A');
+      git(root, 'commit', '-qm', 'c1');
+      git(root, 'checkout', '-qb', 'other');
+      write(root, 'src/c.ts', 'export const c = 2;\n');
+      git(root, 'commit', '-qam', 'c2');
+      git(root, 'checkout', '-q', 'main');
+      write(root, 'src/c.ts', 'export const c = 3;\n');
+      git(root, 'commit', '-qam', 'c3');
+      expect(git(root, 'merge', 'other').status).not.toBe(0);
+      expect(runBash(root, bashPayload(root, 500)).status).toBe(0);
+      expect(argv(log)).toEqual([]);
+    });
+  });
+
+  describe('workspace root from the payload cwd', () => {
+    /** A main checkout plus a linked worktree outside it, the Frink layout: the session's
+     * CLAUDE_PROJECT_DIR is the main checkout while the agent works in the worktree. */
+    function linkedWorktree() {
+      const { root, log } = gitRepo('fail');
+      const worktree = join(mkTmp('anti-slop-preflight-wt-'), 'wt');
+      git(root, 'worktree', 'add', '-q', worktree);
+      return { root, log, worktree: realpathSync(worktree) };
+    }
+
+    it('checks a Bash write in a linked worktree, never the main checkout dirty files', () => {
+      const { root, log, worktree } = linkedWorktree();
+      write(root, 'src/main-only.ts');
+      write(worktree, 'src/a.ts');
+      expect(runBash(root, bashPayload(worktree, 500)).status).toBe(2);
+      expect(argv(log)).toEqual(['anti-slop', 'check', '--', 'src/a.ts']);
+    });
+
+    it('checks an Edit in a linked worktree when CLAUDE_PROJECT_DIR is the main checkout', () => {
+      const { root, log, worktree } = linkedWorktree();
+      const edit = JSON.stringify({
+        tool_name: 'Write',
+        tool_input: { file_path: write(worktree, 'src/a.ts') },
+        cwd: worktree,
+      });
+      expect(run(root, edit).status).toBe(2);
+      expect(argv(log)).toEqual(['anti-slop', 'check', '--', 'src/a.ts']);
+    });
+
+    it('bounds a nested worktree by its own root, so an outer overlay install never checks it', () => {
+      const { root, log } = gitRepo('fail');
+      const nested = join(root, '.claude', 'worktrees', 'x');
+      git(root, 'worktree', 'add', '-q', nested);
+      // An overlay manifest is git-excluded, so a fresh worktree has none of its own.
+      unlinkSync(join(nested, '.devkit', 'anti-slop', 'manifest.json'));
+      const edit = JSON.stringify({
+        tool_name: 'Write',
+        tool_input: { file_path: write(nested, 'src/a.ts') },
+        cwd: nested,
+      });
+      expect(run(root, edit).status).toBe(0);
+      expect(argv(log)).toEqual([]);
+    });
   });
 });
