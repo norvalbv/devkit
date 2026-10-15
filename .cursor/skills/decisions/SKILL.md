@@ -20,7 +20,7 @@ local patch ("flow editor got a modal") *churns*. Write the durable thing.
 - `docs/decisions/INDEX.md` — derived spine: current **Target** per axis. Shows the Target, never a
   note. Regenerable; holds no history.
 
-CLI: `guard-decisions` (`add --target` · `add --note` · `amend --target` · `amend --note` · `amend --note-replace` · `rescope` · `query` · `list` · `show` · `check` · `reindex`).
+CLI: `guard-decisions` (`add --target` · `add --note` · `amend --target` · `amend --note` · `amend --note-replace` · `amend --target-replace` · `rescope` · `query` · `list` · `show` · `check` · `reindex`).
 
 ## The bar — is this log-worthy, and at what altitude? (LAYERED)
 
@@ -168,8 +168,9 @@ Every consumer reads the **current (last) Target block** of an axis. None is sho
 - A note can help retrieval find an axis and prints in `query`, but a clarification written as a
   note changes nothing a judge reads. Only tagged notes are parsed: `**Scope:**` (from `rescope`),
   `**Check:**` (from `enforce link`) and `**Amends:**` (from `--supersedes`).
-- Wording the gates must act on lives in the Ruling. `amend --target` fixes an uncommitted Target; a
-  committed one moves only by a re-target, which still needs a real `--evidence-change`.
+- Wording the gates must act on lives in the Ruling. `amend --target` fixes an uncommitted Target, and
+  `amend --target-replace` fixes one clause of it; a committed one moves only by a re-target, which
+  still needs a real `--evidence-change`.
 - A Scope-only correction is `guard-decisions rescope <slug> --scope "<globs>" --reason "<why>"`,
   not a re-target. It replaces the effective Scope of the current Target.
 - A new Target starts from its own `--scope`. Nothing is inherited from the previous block or its
@@ -185,8 +186,12 @@ already sit under it, and those notes are kept byte-for-byte. Earlier committed 
 preserved, and the CLI refuses if committed history changed — a committed Target moves only through
 a new `add --target … --evidence-change`. For a small correction in a long draft note, use
 `amend <slug> --note-replace "<old>" "<new>"`; it changes exactly one matching substring and refuses
-missing or ambiguous matches. While the decisions guard is selected, direct native agent edits are blocked only
-under the configured decisions directory; shell commands and unsupported payloads remain outside
+missing or ambiguous matches. `amend <slug> --target-replace "<old>" "<new>"` does the same inside the
+newest uncommitted Target's fields, keeps every other byte, refuses an edit that touches a field label
+or Consequences bullet, starts a heading or note line, empties a value or sets an unknown Category,
+re-derives an auto-generated heading title, and refreshes INDEX. Replace modes ignore field flags.
+While the decisions guard is selected, direct native agent edits are blocked only under the
+configured decisions directory; shell commands and unsupported payloads remain outside
 this enforcement and fail open.
 To retire a mis-filed (non-epic) entry: **archive, don't delete** — move it under a
 `## [archived — impl-note, not an epic]` heading in the same file (INDEX stops surfacing it; the
