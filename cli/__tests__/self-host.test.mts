@@ -253,7 +253,8 @@ describe('buildSelfHostHook', () => {
     expect(hook).toContain('--extra "lint=bun run lint"');
     expect(hook).not.toContain('--extra "anti-slop=');
     expect(hook).toContain('--extra "benchmarks=bun run benchmarks:check -- --mode staged"');
-    expect(hook).toContain('--structure "bun run lint:structure"');
+    // Literally `guard-structure`: only that token gets the runner's exit 2 as a non-blocking skip.
+    expect(hook).toContain('--structure "guard-structure staged"');
     expect(hook).toContain('node_modules/.bin/oxfmt --threads 1 --write');
     expect(hook).toContain('(cli|gate-engine)/');
     expect(hook).toContain('skills/.*\\.mjs');

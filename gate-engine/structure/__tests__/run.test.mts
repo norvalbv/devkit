@@ -296,6 +296,16 @@ describe('guard-structure staged plan', () => {
     ).toEqual({ targets: [], probeScopes: [], deferred: ['src/Feature/index.ts'] });
   });
 
+  it('defers a root that a staged policy edit governs when it holds an unrelated working-tree source', () => {
+    expect(
+      planStagedStructureLint(scopes, ['guard.config.json'], [], ['src/Feature/Wip.ts']),
+    ).toEqual({
+      targets: [],
+      probeScopes: scopes.slice(1),
+      deferred: ['src'],
+    });
+  });
+
   it('defers every staged file in a topology root with an unrelated working-tree source', () => {
     expect(
       planStagedStructureLint(scopes, ['src/Feature/index.ts'], [], ['src/Feature/Uncommitted.ts']),
@@ -347,6 +357,25 @@ describe('guard-structure staged execution', () => {
     await expect(runStagedStructureGate(pkg)).resolves.toMatchObject({ code: 0 });
   });
 
+  it('a staged policy edit from a package subdirectory re-lints that package, not siblings', async () => {
+    const root = repo();
+    const pkg = join(root, 'packages', 'lib');
+    write(pkg, 'guard.config.json', JSON.stringify(config));
+    write(pkg, 'src/Ok.ts');
+    write(pkg, 'src/committed-debt.ts');
+    write(root, 'packages/other/src/sibling-debt.ts');
+    initializeGit(root);
+    execFileSync('git', ['add', '-A'], { cwd: root });
+    execFileSync('git', ['commit', '-qm', 'base'], { cwd: root });
+    write(pkg, 'guard.config.json', `${JSON.stringify(config)}\n`);
+    execFileSync('git', ['add', '--', 'packages/lib/guard.config.json'], { cwd: root });
+
+    const result = await runStagedStructureGate(pkg);
+    expect(result.code).toBe(1);
+    expect(result.text).toContain('committed-debt');
+    expect(result.text).not.toContain('sibling-debt');
+  });
+
   it('does not treat unstaged worktree bytes as a verdict on a staged file', async () => {
     const root = repo();
     write(root, 'guard.config.json', JSON.stringify(config));
@@ -395,6 +424,75 @@ describe('guard-structure staged execution', () => {
     execFileSync('git', ['rm', '-q', '--', 'src/Gone.ts', 'src/Ok.ts'], { cwd: root });
     const result = await runStagedStructureGate(root);
     expect(result.code).toBe(2); // the deletion emptied the root: its probe could not run
+    expect(result.text).toContain('src');
+  });
+
+  function commitAll(root: string) {
+    execFileSync('git', ['add', '-A'], { cwd: root });
+    execFileSync('git', ['commit', '-qm', 'base'], { cwd: root });
+  }
+
+  it('does not blame a staged change for a violation already committed at the base', async () => {
+    const root = repo();
+    write(root, 'guard.config.json', JSON.stringify(config));
+    write(root, 'src/Ok.ts');
+    write(root, 'src/base-debt.ts');
+    initializeGit(root);
+    commitAll(root);
+    write(root, 'src/Added.ts');
+    execFileSync('git', ['add', '--', 'src/Added.ts'], { cwd: root });
+
+    expect((await runStructureGate(root)).code).toBe(1); // the whole tree is red at the base
+    await expect(runStagedStructureGate(root)).resolves.toMatchObject({ code: 0 });
+    write(root, 'src/also-bad.ts');
+    execFileSync('git', ['add', '--', 'src/also-bad.ts'], { cwd: root });
+    await expect(runStagedStructureGate(root)).resolves.toMatchObject({ code: 1 });
+  });
+
+  it('a staged policy edit lints every file it governs, not one probe file', async () => {
+    const root = repo();
+    const loose = structuredClone(config);
+    loose.structure.trees[0].grammar.files = ['{pascal}', '{kebab}'];
+    write(root, 'guard.config.json', JSON.stringify(loose));
+    for (const name of ['A', 'B', 'C', 'D']) write(root, `src/${name}.ts`);
+    write(root, 'src/now-invalid.ts');
+    initializeGit(root);
+    commitAll(root);
+    write(root, 'guard.config.json', JSON.stringify(config));
+    execFileSync('git', ['add', '--', 'guard.config.json'], { cwd: root });
+
+    const result = await runStagedStructureGate(root);
+    expect(result.code).toBe(1);
+    expect(result.text).toContain('now-invalid');
+  });
+
+  it('a staged policy edit never judges a gitignored source that a clean checkout lacks', async () => {
+    const root = repo();
+    write(root, 'guard.config.json', JSON.stringify(config));
+    write(root, 'src/Ok.ts');
+    write(root, '.gitignore', 'src/generated/\n');
+    initializeGit(root);
+    commitAll(root);
+    write(root, 'src/generated/schema-types.ts'); // codegen output: violates {pascal}, never committed
+    write(root, 'guard.config.json', `${JSON.stringify(config)}\n`);
+    execFileSync('git', ['add', '--', 'guard.config.json'], { cwd: root });
+
+    await expect(runStagedStructureGate(root)).resolves.toMatchObject({ code: 0 });
+  });
+
+  it('a staged policy edit that leaves a root without sources is could-not-run, not clean', async () => {
+    const root = repo();
+    write(root, 'guard.config.json', JSON.stringify(config));
+    write(root, 'src/Ok.ts');
+    write(root, 'src/README.md', 'notes\n'); // keeps src/ on disk, so ESLint finds nothing to lint
+    initializeGit(root);
+    commitAll(root);
+    execFileSync('git', ['rm', '-q', '--', 'src/Ok.ts'], { cwd: root });
+    write(root, 'guard.config.json', `${JSON.stringify(config)}\n`);
+    execFileSync('git', ['add', '--', 'guard.config.json'], { cwd: root });
+
+    const result = await runStagedStructureGate(root);
+    expect(result.code).toBe(2);
     expect(result.text).toContain('src');
   });
 
@@ -653,8 +751,8 @@ if (names.some((f) => String(f).includes('Bad'))) { console.log('PRESET-VIOLATIO
     commitAll(root);
     execFileSync('git', ['rm', '-q', '--', '.devkit/config.json'], { cwd: root });
     const result = await runStagedStructureGate(root);
-    expect(result.code).toBe(1); // detected electron still owns src/, and the probe reached it
-    expect(presetCalls(root)).toEqual([['src/Bad.ts']]);
+    expect(result.code).toBe(1); // detected electron still owns src/, and the policy lint reached it
+    expect(presetCalls(root)).toEqual([['src']]);
   });
 
   it('never routes a non-electron repo without grammar to a local eslint (stack decides the leg)', async () => {
