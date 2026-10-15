@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { installHookRegistrations } from '../install-hooks.mts';
 import { checkHookRegistrations } from './check.mts';
 
@@ -104,8 +104,13 @@ describe('checkHookRegistrations — the Claude settings file the scope does not
     const rel = writeSettings(root, 'settings.local.json', RETIRED);
     const before = readFileSync(join(root, rel), 'utf8');
 
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     installHookRegistrations(root, [], { targets: ['claude'], dryRun: true });
 
+    expect(log).toHaveBeenCalledWith(
+      `  [dry-run] remove .claude/settings.local.json PreToolUse[Bash]: ${RETIRED} (retired)`,
+    );
+    log.mockRestore();
     expect(readFileSync(join(root, rel), 'utf8')).toBe(before);
   });
 

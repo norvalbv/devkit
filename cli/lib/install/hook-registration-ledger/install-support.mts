@@ -68,6 +68,23 @@ export interface OwnedHandler {
   command: string;
 }
 
+/** A handler the reconcile took out of a provider document, and why. */
+export interface DroppedHandler extends OwnedHandler {
+  reason: string;
+}
+
+function reclaimReason(
+  provider: AgentProvider,
+  owned: readonly OwnedHandler[],
+  event: string,
+  command: string,
+  sitsHere: (handler: OwnedHandler) => boolean,
+) {
+  if (isRetired(provider, command)) return 'retired';
+  const ownedHere = owned.some((h) => h.event === event && h.command === command && sitsHere(h));
+  return ownedHere ? 'superseded' : null;
+}
+
 /** Reclaim fallow's agent gate anywhere, whoever wrote it (devkit's staged wrapper replaces it),
  * plus what a previous devkit release wrote; `owned` stays inside the event its row names. */
 export function stripReclaimedCommands(
@@ -75,23 +92,22 @@ export function stripReclaimedCommands(
   provider: AgentProvider,
   owned: readonly OwnedHandler[] = [],
 ) {
-  if (!RETIRED_SCRIPT.has(provider) && !owned.length) return { document, changed: false };
+  const dropped: DroppedHandler[] = [];
+  if (!RETIRED_SCRIPT.has(provider) && !owned.length) return { document, changed: false, dropped };
   const root = dataRecord(document);
   const hooks = dataRecord(root?.hooks);
-  if (!root || !hooks) return { document, changed: false };
+  if (!root || !hooks) return { document, changed: false, dropped };
   const nextHooks = { ...hooks };
   let changed = false;
   for (const [event, rawList] of Object.entries(hooks)) {
     if (!Array.isArray(rawList)) continue;
     if (provider === 'cursor') {
       const list = rawList.filter((entry) => {
-        const item = dataRecord(entry);
-        const command = String(item?.command ?? '');
+        const command = String(dataRecord(entry)?.command ?? '');
         // Cursor keeps a FLAT list per event, so the event alone locates a handler.
-        return (
-          !isRetired(provider, command) &&
-          !owned.some((handler) => handler.event === event && handler.command === command)
-        );
+        const reason = reclaimReason(provider, owned, event, command, () => true);
+        if (reason) dropped.push({ event, matcher: null, command, reason });
+        return !reason;
       });
       if (list.length === rawList.length) continue;
       changed = true;
@@ -108,20 +124,15 @@ export function stripReclaimedCommands(
         list.push(rawGroup);
         continue;
       }
+      // Mirrors lifecycle.mts matcherGroup: null means the group carries no `matcher` key.
+      const matcher = Object.hasOwn(group, 'matcher') ? String(group.matcher) : null;
       const kept = handlers.filter((entry) => {
         const command = String(dataRecord(entry)?.command ?? '');
-        return (
-          !isRetired(provider, command) &&
-          !owned.some(
-            (handler) =>
-              handler.event === event &&
-              handler.command === command &&
-              // Mirrors lifecycle.mts matcherGroup: null means the group carries no `matcher` key.
-              (handler.matcher === null
-                ? !Object.hasOwn(group, 'matcher')
-                : group.matcher === handler.matcher),
-          )
+        const reason = reclaimReason(provider, owned, event, command, (handler) =>
+          handler.matcher === null ? matcher === null : group.matcher === handler.matcher,
         );
+        if (reason) dropped.push({ event, matcher, command, reason });
+        return !reason;
       });
       if (kept.length === handlers.length) {
         list.push(rawGroup);
@@ -136,8 +147,23 @@ export function stripReclaimedCommands(
     if (list.length) nextHooks[event] = list;
     else delete nextHooks[event];
   }
-  return changed ? { document: { ...root, hooks: nextHooks }, changed } : { document, changed };
+  const next = changed ? { ...root, hooks: nextHooks } : document;
+  return { document: next, changed, dropped };
 }
+
+/** One line per removed handler, so a settings diff never reads as consumer data loss. */
+export function reportDropped(rel: string, dropped: readonly DroppedHandler[], dryRun: boolean) {
+  for (const { event, matcher, command, reason } of dropped) {
+    const where = `${rel} ${event}${matcher ? `[${matcher}]` : ''}`;
+    console.log(`  ${dryRun ? '[dry-run] remove' : '✓ removed'} ${where}: ${command} (${reason})`);
+  }
+}
+
+export const asDropped = (
+  entries: readonly HookRegistrationOwnershipV1[],
+  verb: string,
+): DroppedHandler[] =>
+  entries.map(({ native, ownerId }) => ({ ...native, reason: `${verb}: ${ownerId}` }));
 
 /** A retired command in the Claude settings file the scope does NOT own; Claude Code runs both. */
 export function retiredElsewhere(root: string, provider: AgentProvider, scope: HookInstallScope) {
@@ -154,7 +180,7 @@ export function retiredElsewhere(root: string, provider: AgentProvider, scope: H
   if (!stripped.changed) return null;
   // Overlay must stay git-invisible, so a committed settings.json is reported, never edited.
   const repairable = scope === 'shared' || !isTracked(root, rel);
-  return { rel, document: stripped.document, repairable };
+  return { rel, document: stripped.document, dropped: stripped.dropped, repairable };
 }
 
 export function reclaimRetiredElsewhere(
@@ -166,7 +192,7 @@ export function reclaimRetiredElsewhere(
   const elsewhere = retiredElsewhere(root, provider, scope);
   if (!elsewhere?.repairable) return;
   if (!dryRun) writeProvider(root, { provider, ...elsewhere, changed: true });
-  console.log(`  ${dryRun ? '[dry-run] strip' : '✓ stripped'} retired hook from ${elsewhere.rel}`);
+  reportDropped(elsewhere.rel, elsewhere.dropped, dryRun);
 }
 
 export function providerDocument(root: string, provider: AgentProvider, rel: string): unknown {

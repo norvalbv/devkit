@@ -48,6 +48,7 @@ import {
 import {
   adopt,
   adoptExactLegacy,
+  asDropped,
   type HookRegistrationOptions,
   ledgerOf,
   ownedKey,
@@ -56,6 +57,7 @@ import {
   publishPlan,
   reclaimRetiredElsewhere,
   release,
+  reportDropped,
   skipProvider,
   stripReclaimedCommands,
 } from './hook-registration-ledger/install-support.mts';
@@ -374,6 +376,8 @@ export function installHookRegistrations(
           installed.ownershipEntries.length > 0,
       };
       published = publishPlan(root, plan, entries, published, dryRun);
+      const deselected = asDropped(removed.removed, 'deselected');
+      reportDropped(rel, [...retired.dropped, ...deselected], dryRun);
       if (plan.report) wrote.push(plan.rel);
     }
     if (wrote.length && published.entries.length) wrote.push(HOOK_REGISTRATION_LEDGER_REL);
@@ -445,6 +449,8 @@ export function removeHookRegistrations(
         changed: retired.changed || removed.changed,
       };
       published = publishPlan(root, plan, entries, published, dryRun);
+      const uninstalled = asDropped(removed.removed, 'uninstalled');
+      reportDropped(rel, [...retired.dropped, ...uninstalled], dryRun);
       if (plan.changed) stripped.add(rel);
     }
     console.log(`  ${dryRun ? '[dry-run] remove' : '✓ removed'} hook registrations`);
