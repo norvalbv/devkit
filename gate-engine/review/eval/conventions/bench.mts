@@ -89,6 +89,7 @@ import {
 import { runCascade } from '../../run-review.mts';
 import { appendLedger, preflightJudge } from '../../../decisions/eval/bench-runtime.mts';
 import { parseConventionFindings } from '../../evidence/conventions.mts';
+import { DECLARED_CATEGORIES, printCoverage } from './coverage.mts';
 import { CONVENTIONS_GATE_HASH_INPUTS, CONVENTIONS_MATCHER_HASH_INPUTS } from './hash-inputs.mts';
 import {
   accumulateFindingMetrics,
@@ -197,6 +198,8 @@ export function lintCases(rows: ConventionsCase[]): string[] {
       errors.push(`${at}: bad provenance ${r.provenance}`);
     if (r.expectedVerdict && !['PASS', 'FAIL'].includes(r.expectedVerdict))
       errors.push(`${at}: bad expectedVerdict ${r.expectedVerdict}`);
+    if (r.category && !DECLARED_CATEGORIES.includes(r.category))
+      errors.push(`${at}: undeclared category ${r.category} (declare it in coverage.mts)`);
     for (const d of r.decoys ?? []) {
       if (d.kind === 'recorded-decision') {
         // Mirrors completeness-eval's rule: a recorded-decision decoy must be BACKED by a real
@@ -641,48 +644,6 @@ function validate({ dev = false }: { dev?: boolean } = {}) {
   }
   if (bad > 0) throw new BenchAbort(1, `conventions-eval: validate found ${bad} bad row(s)`);
   console.log('\nvalidate: all rows OK');
-}
-
-/** Coverage matrix (zero claude calls): category × expectedVerdict × difficulty cell counts, plus
- * provenance/holdout/variant/decoy-kind tallies. */
-function printCoverage(rows: ConventionsCase[]) {
-  console.log(`── conventions (${rows.length} rows) ──`);
-  const cells: Record<string, number> = {};
-  const tag: {
-    provenance: Record<string, number>;
-    holdout: number;
-    variants: number;
-    decoyKinds: Record<string, number>;
-  } = { provenance: {}, holdout: 0, variants: 0, decoyKinds: {} };
-  for (const r of rows) {
-    const key = `${r.category.padEnd(24)} ${(r.expectedVerdict ?? 'unset').padEnd(6)} ${r.difficulty ?? 'unset'}`;
-    cells[key] = (cells[key] ?? 0) + 1;
-    const p = r.provenance ?? 'adapted';
-    tag.provenance[p] = (tag.provenance[p] ?? 0) + 1;
-    if (r.holdout) tag.holdout += 1;
-    if (r.variantOf) tag.variants += 1;
-    for (const d of r.decoys) tag.decoyKinds[d.kind] = (tag.decoyKinds[d.kind] ?? 0) + 1;
-  }
-  console.log(`  ${'category'.padEnd(24)} ${'verdict'.padEnd(6)} difficulty  rows`);
-  for (const key of Object.keys(cells).sort()) console.log(`  ${key}  ${cells[key]}`);
-  const goldTotal = rows.reduce((s, r) => s + r.gold.length, 0);
-  const decoyTotal = rows.reduce((s, r) => s + r.decoys.length, 0);
-  console.log(
-    `  gold slots: ${goldTotal} · decoy slots: ${decoyTotal} · provenance: ${Object.entries(
-      tag.provenance,
-    )
-      .map(([k, v]) => `${k}=${v}`)
-      .join(' ')} · holdout=${tag.holdout} · variant rows=${tag.variants}`,
-  );
-  console.log(
-    `  decoys by kind: ${
-      Object.entries(tag.decoyKinds)
-        .map(([k, v]) => `${k}=${v}`)
-        .join(' ') || '—'
-    }`,
-  );
-  const unset = rows.filter((r) => !r.difficulty).length;
-  if (unset) console.log(`  COVERAGE DEBT: ${unset} row(s) missing a difficulty tag`);
 }
 
 // ─── Matcher audit ──────────────────────────────────────────────────────────────────
