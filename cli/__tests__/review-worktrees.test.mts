@@ -11,11 +11,10 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { rootRegistry } from './_helpers.mts';
+import { runWorktreeHelper } from './review-snapshot-fixture.mts';
 
-const WORKTREE_SCRIPT = fileURLToPath(new URL('../lib/ship/review/worktrees.sh', import.meta.url));
 const { mkTmp, cleanup } = rootRegistry();
 const REAL_GIT = execFileSync('/bin/bash', ['-c', 'command -v git'], {
   encoding: 'utf8',
@@ -46,18 +45,7 @@ function stageRawBlob(root: string, path: string, content: string | Buffer, mode
 }
 
 function runHelper(name: string, args: string[], env: NodeJS.ProcessEnv = GIT_ENV) {
-  return spawnSync(
-    '/bin/bash',
-    [
-      '-c',
-      'set -euo pipefail; source "$1"; shift; helper=$1; shift; "$helper" "$@"',
-      'review-worktree-test',
-      WORKTREE_SCRIPT,
-      name,
-      ...args,
-    ],
-    { env, encoding: 'utf8' },
-  );
+  return runWorktreeHelper(name, args, env);
 }
 
 function fixture(name = 'devkit review worktrees-') {
@@ -231,7 +219,7 @@ describe('review tree materialization', () => {
     );
     const matched = runHelper('review_worktree_matches_tree', [destination, rawTree, stagedTree]);
     expect(matched.status, matched.stderr).toBe(0);
-    chmodSync(join(destination, 'executable.sh'), 0o654);
+    chmodSync(join(destination, 'executable.sh'), 0o744);
     expect(
       runHelper('review_worktree_matches_tree', [destination, rawTree, stagedTree]).status,
     ).toBe(0);
