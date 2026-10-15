@@ -8,7 +8,7 @@ import { mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSyn
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { devkitVersion } from '../../../gate-engine/devkit-version.mts';
-import { emitShipIntentEvent } from './ship-intent-event.mts';
+import { emitShipIntentEvent, printStaleRecovery } from './ship-intent-event.mts';
 import { fail, parseArgs } from './ship-intent-args.mts';
 import {
   advisoryBodyFile,
@@ -17,7 +17,7 @@ import {
   cleanupFailedSourceMembership,
   cleanupReplacedSourceMembership,
   emitFields,
-  freshRecordStamp,
+  recordStampAge,
   handlePathCodecCommand,
   NO_RECORD,
   originRepo,
@@ -266,12 +266,12 @@ export function ownsIntentGeneration(root: string, branch: string, generation: s
   }
 }
 
-/** Parse + validate the stored manifest, or return a refusal string (never both). */
+/** Parse + validate the stored manifest, or refuse; only a stale-only refusal carries the record. */
 export function readIntent(
   root: string,
   branch: string,
   nowMs: number = Date.now(),
-): { intent: ShipIntent } | { reason: string } {
+): { intent: ShipIntent } | { reason: string; stale?: ShipIntent } {
   const file = intentFile(root, branch);
   let raw: string;
   try {
@@ -401,10 +401,9 @@ export function readIntent(
       reason: `recorded branch-source frozen membership failed its Git binding — run the full command, which re-records`,
     };
   const createdAt = provenString(r.createdAt) ?? '';
-  if (!freshRecordStamp(createdAt, nowMs))
-    return {
-      reason: `recorded invocation is stale or misdated (recorded ${String(r.createdAt)}; every live attempt re-records) — run the full command`,
-    };
+  const age = recordStampAge(createdAt, nowMs);
+  const staleReason = `recorded invocation is stale or misdated (recorded ${String(r.createdAt)}; every live attempt re-records) — run the full command`;
+  if (age === 'misdated') return { reason: staleReason };
   const intent: ShipIntent = {
     version: storedVersion,
     mode,
@@ -424,7 +423,8 @@ export function readIntent(
   };
   if (sourceAttemptId) intent.sourceAttemptId = sourceAttemptId;
   intent.bodyFile = advisoryBodyFile(r.bodyFile);
-  return { intent };
+  // Stale is the last check, so `stale` carries a record that passed every other one.
+  return age === 'stale' ? { reason: staleReason, stale: intent } : { intent };
 }
 
 function main(): number {
@@ -464,7 +464,11 @@ function main(): number {
   }
   if (sub === 'read') {
     const result = readIntent(root, branch);
-    if ('reason' in result) return fail(result.reason);
+    if ('reason' in result) {
+      fail(result.reason);
+      if (result.stale) printStaleRecovery(result.stale, relIntentPath(branch));
+      return 1;
+    }
     emitFields(result.intent);
     return 0;
   }
