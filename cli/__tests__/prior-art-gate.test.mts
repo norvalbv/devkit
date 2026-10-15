@@ -260,14 +260,17 @@ describe('decide — the first file edit', () => {
 
 const HOOK = join(import.meta.dirname, '../../agents-hooks/prior-art-gate.mjs');
 
-/** Run the real hook script as its own process, the way the harness does; resolves its stdout. */
+/** Run the real hook script as its own process, the way the harness does; resolves its stdout.
+ * TMPDIR keeps its markers in this test's temp dir; `timeout` kills a wedged child. */
 function runHook(projectDir: string, input: ReturnType<typeof write>): Promise<string> {
   return new Promise((done) => {
     const child = spawn(process.execPath, [HOOK, 'edit'], {
-      env: { ...process.env, CLAUDE_PROJECT_DIR: projectDir },
+      env: { ...process.env, CLAUDE_PROJECT_DIR: projectDir, TMPDIR: tmp },
+      timeout: 10_000,
     });
     let out = '';
     child.stdout.on('data', (chunk) => (out += chunk));
+    child.on('error', () => done(''));
     child.on('close', () => done(out));
     child.stdin.end(JSON.stringify(input));
   });
@@ -283,6 +286,7 @@ describe('main — a parallel batch of gated calls', () => {
       );
       const outs = await Promise.all(Array.from({ length: 12 }, () => runHook(root, input)));
       expect(outs.filter((out) => out.includes('"deny"'))).toHaveLength(1);
+      expect(existsSync(markerPaths(root, input.session_id, tmp).snoozed)).toBe(true);
     }
   });
 });
