@@ -58,7 +58,9 @@ describe('preflightBenchJudges', () => {
     expect(error.message).toContain(
       'not served on this free plan (serves: gpt-6-luna, gpt-5.6-terra)',
     );
-    expect(error.message).toContain('BENCH_CORRECTNESS_MODEL');
+    expect(error.message).toContain(
+      'Re-running will not help; move the role with BENCH_CORRECTNESS_MODEL',
+    );
   });
 
   it('refuses a usage-locked account and says when it resets', async () => {
@@ -85,7 +87,9 @@ describe('preflightBenchJudges', () => {
     const error = await abortOf(
       run([{ role: 'correctness', model: SOL }], { codexOut: () => true }),
     );
-    expect(error.message).toContain('is not authenticated');
+    expect(error.message).toContain(
+      'is not authenticated. Install or log in to `codex` and re-run',
+    );
   });
 
   it('proceeds on a reachable claude judge and refuses a missing or broken one', async () => {
@@ -150,6 +154,8 @@ describe('isOutagePart', () => {
   it('leaves a timeout or a response-contract miss as an engine error', () => {
     expect(isOutagePart(part('timeout', 'judge timed out'))).toBe(false);
     expect(isOutagePart(part('response-contract', 'no VERDICT line'))).toBe(false);
+    // The structured cause outranks wording that happens to say outage.
+    expect(isOutagePart(part('timeout', 'judge outage after timeout'))).toBe(false);
     expect(isOutagePart({ res: { status: 'error', reason: 'judge outage' } })).toBe(false);
   });
 });
