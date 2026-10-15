@@ -1,9 +1,11 @@
 /** attachItems' off-wire `itemsFull` (sc-2493): full issue text for a bench, never on the event, and
  * the 200-char inline copy plus its byte budget unchanged. */
+import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import { resolveGuardConfig } from '../../config.mts';
 import { runCascade } from '../cascade/reviewer.mts';
 import { attachItems, itemFields, reviewCaptureSchema } from '../evidence/items.mts';
@@ -256,4 +258,95 @@ it.each([
 ])('isNamedSkip(%j) is %s', (state, expected) => {
   // SAFETY: deliberately malformed artifacts — the parse under test is what rejects them.
   expect(isNamedSkip(state as never)).toBe(expected);
+});
+
+// The commit-gates skill's finding-search recipe, run against rows built by the real writer: a
+// rename of items/issues/disposition, or a recipe that also greps PR bodies, fails here.
+describe('commit-gates finding-search recipe', () => {
+  const skill = readFileSync(
+    new URL('../../../skills/commit-gates/SKILL.md', import.meta.url),
+    'utf8',
+  );
+  const recipe = /```sh\n([\s\S]*?)```/.exec(
+    skill.split('## Sizing how often a reviewer finding recurs')[1] ?? '',
+  )?.[1];
+  const hasJq = spawnSync('jq', ['--version']).status === 0;
+  it('finds the recipe under its heading', () => expect(recipe).toContain('review_result'));
+  const root = mkdtempSync(join(tmpdir(), 'finding-recipe-'));
+  afterAll(() => rmSync(root, { recursive: true, force: true }));
+  const run = (sink: string) => {
+    const cwd = mkdtempSync(join(root, 'cwd-'));
+    const out = execFileSync('bash', ['-c', recipe ?? ''], {
+      cwd,
+      encoding: 'utf8',
+      env: { ...process.env, DEVKIT_GATE_EVENTS: sink },
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    return { out, hits: readFileSync(join(cwd, 'hits.tsv'), 'utf8') };
+  };
+  const reviewRow = (
+    shipId: string,
+    reviewer: string,
+    issue: string,
+    reason = '',
+    status = 'fail',
+  ) => {
+    const res = outcome();
+    const lensState = { items: [{ name: 'state-transitions', status: 'fail', issues: [issue] }] };
+    // SAFETY: the same minimal ChecklistState shape the cases above use.
+    attachItems(res, lensState as never, new Map([['state-transitions', 'blocking']]));
+    return JSON.stringify({
+      type: 'review_result',
+      ts: '2026-08-29T15:41:13Z',
+      repo: 'devkit',
+      reviewer,
+      model: 'm1',
+      status,
+      reason,
+      ship_id: shipId,
+      ...itemFields(res),
+    });
+  };
+
+  it.skipIf(!hasJq)('counts review findings once per ship and never PR bodies or causes', () => {
+    const sink = join(root, 'gate-events.jsonl');
+    const finding = 'src/a.ts:9 — under bun test the shim leaks';
+    writeFileSync(
+      sink,
+      `${[
+        JSON.stringify({ type: 'ship_intent', ts: '2026-08-01T00:00:00Z', body: 'ran bun test' }),
+        reviewRow('ship-a', 'correctness-reviewer', finding),
+        JSON.stringify({ type: 'judge_exec', outcome: 'outage', outage_detail: 'bun test hung' }),
+        reviewRow('ship-a', 'correctness-reviewer', finding),
+        reviewRow('ship-b', 'commit-guard', 'unrelated', 'Bun Test output cited'),
+        reviewRow('ship-c', 'commit-guard', 'unrelated'),
+        reviewRow('ship-d', 'commit-guard', 'unrelated', 'bun test output reviewed', 'pass'),
+        reviewRow(
+          'ship-e',
+          'commit-guard',
+          'unrelated',
+          'bun test judge timed out',
+          'inconclusive',
+        ),
+      ].join('\n')}\n`,
+    );
+    const { out, hits } = run(sink);
+    const rows = hits
+      .trim()
+      .split('\n')
+      .map((line) => line.split('\t'));
+    expect(rows.map((r) => [r[2], r[3], r[5], r[6]])).toEqual([
+      ['correctness-reviewer', 'state-transitions', 'blocking', 'ship-a'],
+      ['correctness-reviewer', 'state-transitions', 'blocking', 'ship-a'],
+      ['commit-guard', '-', 'fail', 'ship-b'],
+    ]);
+    expect(out).toContain(`${sink}: 2026-08-01T00:00:00Z → 2026-08-29T15:41:13Z`);
+    expect(out).toMatch(/^\s*1 commit-guard$/m);
+    expect(out).toMatch(/^\s*1 correctness-reviewer$/m);
+  });
+
+  it.skipIf(!hasJq)('names a missing sink instead of reading it as zero', () => {
+    const missing = join(root, 'absent', 'gate-events.jsonl');
+    expect(run(missing).out).toContain(`no sink at ${missing}: telemetry is off here`);
+  });
 });

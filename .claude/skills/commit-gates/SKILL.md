@@ -1,6 +1,6 @@
 ---
 name: commit-gates
-description: Use when a Devkit-managed commit or ship gate blocks, or before considering a GUARD_* bypass. Diagnose the exact gate and apply its intended remediation without weakening unrelated verification.
+description: Use when a Devkit-managed commit or ship gate blocks, before considering a GUARD_* bypass, or when sizing how often a reviewer finding or false-block class recurs. Diagnose the exact gate and apply its intended remediation without weakening unrelated verification.
 ---
 
 # Commit gates
@@ -183,6 +183,41 @@ Code moved between files is not new debt, so do not rewrite it to pass. Delete i
 `git add` both files, then run `devkit anti-slop adopt-relocations` for a partial move, or
 `devkit anti-slop adopt-renames` when Git reports a rename, and stage the baseline where it is
 tracked. The FAIL output names the source file when a new finding repeats debt baselined elsewhere.
+
+## Sizing how often a reviewer finding recurs
+
+Every gate appends to one per-machine JSONL sink, and only its `review_result` rows carry finding
+text. A plain grep also matches PR bodies (`ship_intent`) and outage causes, and overcounts. Set `P`
+to the phrase; this needs `jq`:
+
+```sh
+P='bun test'
+S="${DEVKIT_GATE_EVENTS:-$HOME/.devkit/telemetry/gate-events.jsonl}"
+[ -f "$S" ] || echo "no sink at $S: telemetry is off here, so this is not a zero"
+echo "$S: $(head -1 "$S" | jq -r .ts) → $(tail -1 "$S" | jq -r .ts)"
+grep -F '"type":"review_result"' "$S" | jq -r --arg p "$P" '
+  select(.type == "review_result") as $r
+  | ([(.items // [])[] | . as $i | ($i.issues // [])[]
+      | {lens: $i.lens, d: ($i.disposition // $i.status), t: .}]
+     + [select(.status == "fail") | {lens: "-", d: .status, t: (.reason // "")}])[]
+  | select(.t | ascii_downcase | contains($p | ascii_downcase))
+  | [$r.ts, $r.repo, $r.reviewer, .lens, $r.model, .d, $r.ship_id, (.t | gsub("\\s+"; " "))]
+  | @tsv' > hits.tsv
+cut -f3,7 hits.tsv | sort -u | cut -f1 | sort | uniq -c   # distinct ships per reviewer
+```
+
+`hits.tsv` holds one row per hit: date, repo, reviewer, lens, model, disposition, ship id, issue.
+
+- Count distinct ship ids, not rows: a failing reviewer re-runs on every attempt of the same ship.
+- `reason` is searched only on `fail` rows: on a pass, inconclusive or error row it is not a finding.
+- A zero covers only the printed date range, and only this machine's ships.
+- `repo` is the committing checkout's directory name, so a worktree logs under its own name and
+  older rows may lack it. Read it, but do not filter on it.
+- Each issue is cut to 200 characters, so a phrase that appears only past the cut never matches.
+  `guard-review transcript <transcript_ref>` prints the full reasoning behind a hit.
+- A row whose findings spilled carries `items_ref` instead of `items`. Search those with
+  `grep -r -l -i -F --include='items-*.txt' "$P" "$(dirname "$S")/transcripts"`; only the newest
+  300 runs are kept.
 
 ## Judge outage: re-targeting, not bypassing
 
