@@ -19,11 +19,17 @@ SHIP_SKIP_SHA="${DEVKIT_SHIP_PREPUSH_SKIP_SHA:-}"
 if ! { [[ "$SHIP_SKIP_SHA" =~ ^[0-9a-f]{40}$ ]] || [[ "$SHIP_SKIP_SHA" =~ ^[0-9a-f]{64}$ ]]; }; then
   SHIP_SKIP_SHA=
 fi
+# `devkit ci-probe` pushes a scratch commit that CI tests at once; honoured only on devkit-probe/* refs.
+PROBE_SKIP_SHA="${DEVKIT_PROBE_PREPUSH_SKIP_SHA:-}"
+if ! { [[ "$PROBE_SKIP_SHA" =~ ^[0-9a-f]{40}$ ]] || [[ "$PROBE_SKIP_SHA" =~ ^[0-9a-f]{64}$ ]]; }; then
+  PROBE_SKIP_SHA=
+fi
 GATE_PHASE=
 GATE_HEAD_OID=
 gate_rc=0
 NON_TAG_UPDATE_COUNT=0
 NON_TAG_MATCH_COUNT=0
+PROBE_MATCH_COUNT=0
 UPDATES_FILE=$(mktemp "${TMPDIR:-/tmp}/devkit-pre-push-updates.XXXXXX")
 TAG_TEMP_ROOT=
 TAG_WORKTREE=
@@ -263,6 +269,10 @@ while read -r local_ref local_oid remote_ref remote_oid; do
     if [ -n "$SHIP_SKIP_SHA" ] && [ "$local_oid" = "$SHIP_SKIP_SHA" ]; then
       NON_TAG_MATCH_COUNT=$((NON_TAG_MATCH_COUNT + 1))
     fi
+    if [ -n "$PROBE_SKIP_SHA" ] && [ "$local_oid" = "$PROBE_SKIP_SHA" ] \
+       && [[ "$remote_ref" == refs/heads/devkit-probe/* ]]; then
+      PROBE_MATCH_COUNT=$((PROBE_MATCH_COUNT + 1))
+    fi
     continue
   fi
   is_zero_oid "$local_oid" && continue
@@ -283,6 +293,12 @@ if [ "$HAS_UPDATES" -eq 0 ] || [ "$HAS_NON_TAG_UPDATE" -eq 1 ]; then
     echo "devkit pre-push: $SHIP_SKIP_SHA is a devkit ship — typecheck + test:run are gated by CI" >&2
     echo "  (.github/workflows/gate.yml) on the PR; skipping the local pre-push suite." >&2
     echo "  A plain git push still runs the full suite." >&2
+    exit 0
+  fi
+  if [ -n "$PROBE_SKIP_SHA" ] && [ "$NON_TAG_UPDATE_COUNT" -gt 0 ] \
+     && [ "$PROBE_MATCH_COUNT" -eq "$NON_TAG_UPDATE_COUNT" ] && [ "${#TAG_COMMITS[@]}" -eq 0 ]; then
+    echo "devkit pre-push: $PROBE_SKIP_SHA is a devkit ci-probe — CI runs typecheck + test:run on it;" >&2
+    echo "  skipping the local pre-push suite. A plain git push still runs the full suite." >&2
     exit 0
   fi
   run_checks "$ROOT" || gate_rc=$?
