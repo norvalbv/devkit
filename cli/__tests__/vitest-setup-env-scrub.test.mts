@@ -190,6 +190,11 @@ describe('vitest.setup.mjs scrubs inherited gate policy', () => {
     expect(INHERITED_RUN_ENV).not.toContain('DEVKIT_RUN_ORIGIN');
   });
 
+  it("scrubs an inherited gate reason file, which turns a spawned CLI's throw into the crash exit", () => {
+    const env = envAfterSetup({ DEVKIT_GATE_REASON_FILE: '/tmp/outer/reason.txt' });
+    expect(env.DEVKIT_GATE_REASON_FILE).toBeUndefined();
+  });
+
   it('covers every one-run bypass `devkit ship --help` documents, in both envFlag spellings', () => {
     const envBlock = meta.help.split('\nEnv:\n')[1]?.split('\n\n')[0] ?? '';
     const flags = [...envBlock.matchAll(/\bGUARD_([A-Z_]+)=1/g)].map((m) => m[1]);

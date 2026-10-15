@@ -25,13 +25,13 @@ afterEach(() => {
 /** A fake gate runner where only the coverage module exits with `code`. */
 const coverageExits = (code: number) =>
   vi.fn((_node: string, argv: string[]) => {
-    if (code !== 0 && argv[0]?.includes('coverage/run')) {
+    if (code !== 0 && argv[2]?.includes('coverage/run')) {
       throw Object.assign(new Error(`exit ${code}`), { status: code });
     }
   });
 
 const coverageRuns = (exec: ReturnType<typeof coverageExits>) =>
-  exec.mock.calls.filter(([, argv]) => argv[0]?.includes('coverage/run')).length;
+  exec.mock.calls.filter(([, argv]) => argv[2]?.includes('coverage/run')).length;
 
 function review(): void {
   vi.stubEnv('DEVKIT_SHIP', '1'); // run-gates-with-capture.sh arms the prefix cache under review too

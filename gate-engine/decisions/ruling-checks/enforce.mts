@@ -9,7 +9,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { matchesRepoGlob } from '../../../skills/_devkit/review-roots.mjs';
 import { envFlag, resolveFromCwd, resolveGuardConfig } from '../../config.mts';
-import { failLine, GATE_REASON_ENV } from '../../deterministic/reason.mts';
+import { crashExit, failLine, GATE_REASON_ENV } from '../../deterministic/reason.mts';
 import { emitGateBypass } from '../../judge/gate-events.mts';
 import { git } from '../git-io.mts';
 import type { LiveLink } from './links.mts';
@@ -119,8 +119,9 @@ export async function linkedChecks(cwd: string, staged: string[]): Promise<Link[
 /** Why one Check failed, or null when it passed: argv-split, no shell, no stdin, bounded. */
 function runCheck(cwd: string, cmd: string, spawn: Spawn): string | null {
   const [bin, ...args] = argvOf(cmd);
-  // The Check's own children must not write into this gate's failure reason.
-  const env = { ...process.env, [GATE_REASON_ENV]: '' };
+  // The Check is not a gate: its children neither write this gate's reason nor exit as a crash.
+  const env = { ...process.env };
+  delete env[GATE_REASON_ENV];
   const r = spawn(bin, args, {
     cwd,
     env,
@@ -292,8 +293,5 @@ export async function main(argv: string[]): Promise<void> {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
-  main(process.argv.slice(2)).catch((error) => {
-    failLine(`${GATE}: ${error instanceof Error ? error.message : String(error)}`);
-    process.exit(1);
-  });
+  main(process.argv.slice(2)).catch(crashExit);
 }

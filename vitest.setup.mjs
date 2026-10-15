@@ -128,6 +128,8 @@ export const TEST_ONLY_ADDITIONS = [
   // The coverage gate runs this suite inside a 'gate'-marked process. Kept out of INHERITED_RUN_ENV
   // because `devkit review` must keep an inherited 'bench'.
   'DEVKIT_RUN_ORIGIN',
+  // related-tests runs this suite as a gate: inherited, a spawned CLI's throw exits 70, not 1.
+  'DEVKIT_GATE_REASON_FILE',
 ];
 
 // One-run gate bypasses, in both spellings envFlag reads: everything `devkit ship --help` documents,
