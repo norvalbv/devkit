@@ -16,7 +16,7 @@
  */
 
 import { join } from 'node:path';
-import { AGENT_TARGETS } from '../../lib/components.mts';
+import type { Selection } from '../../lib/components.mts';
 import { detectGitRoot } from '../../lib/detect-git-root.mts';
 import { readJson } from '../../lib/fs-helpers.mts';
 import {
@@ -27,22 +27,13 @@ import {
 import {
   DECISION_EDIT_HOOK,
   DECISION_SCOPE_BRIEF_HOOK,
-  hookScriptsFor,
+  selectedHookAssets,
 } from '../../lib/install/hook-registration-ledger/selection.mts';
 import { syncHookScripts } from '../../lib/install/install-hooks.mts';
 
 // The relevant slice of `.devkit/config.json` this command reads.
 interface DevkitConfig {
-  components?: {
-    agentTargets?: string[];
-    agentHooks?: boolean;
-    fallow?: boolean;
-    adhd?: boolean;
-    priorArtGate?: boolean;
-    baseDrift?: boolean;
-    antiSlop?: boolean;
-    guards?: string[];
-  };
+  components?: Partial<Selection>;
 }
 
 // `--flag a,b` → ['a','b']; undefined when the flag is absent (so a caller-default can apply).
@@ -79,29 +70,19 @@ Registration-free: writes the hook FILES + manifest only; your settings.json hoo
 export default function run(args: string[], cwd: string): number {
   const { gitRoot } = detectGitRoot(cwd);
   // Config is package-local in a monorepo even though hook assets are repo-wide.
-  const cfg: DevkitConfig | null = readJson(join(cwd, '.devkit', 'config.json'));
+  const configPath = join(cwd, '.devkit', 'config.json');
+  const cfg: DevkitConfig | null = readJson(configPath);
+  // With no recorded selection a full sync would select nothing and prune every devkit-owned hook.
+  if (!cfg) {
+    console.error(`sync-hooks: no ${configPath} — run devkit init first`);
+    return 1;
+  }
+  const components = cfg.components ?? {};
   const only = listFlag(args, '--only');
-  const decisions = cfg?.components?.guards?.includes('decisions') ?? false;
-  // The fallow staged gate belongs to the FALLOW component, so a full sync must read the recorded
-  // selection: omitting it makes `desired` exclude an installed gate, and exact reconciliation then
-  // prunes it as deselected — silently disabling the gate on every `devkit sync-hooks`.
-  const fallow = cfg?.components?.fallow ?? false;
-  // Same reason as fallow above: the adhd SessionStart hook is owned by the ADHD component, so a
-  // full sync that ignored the recorded selection would prune an installed hook as deselected.
-  const adhd = cfg?.components?.adhd ?? false;
-  // Same again: the prior-art gate hook is owned by the priorArtGate component.
-  const priorArtGate = cfg?.components?.priorArtGate ?? false;
-  // And again for base-drift: reading it here is what stops a full sync PRUNING an installed
-  // hook as though the component had been deselected.
-  const baseDrift = cfg?.components?.baseDrift ?? false;
-  // And for the anti-slop preflight hook, owned by the antiSlop component.
-  const antiSlop = cfg?.components?.antiSlop ?? false;
-  const explicitTargets = listFlag(args, '--targets');
+  const decisions = components.guards?.includes('decisions') ?? false;
   const targets =
-    explicitTargets ??
-    (cfg
-      ? resolveExistingAgentProviders(gitRoot, cfg.components?.agentTargets, ['hooks'])
-      : AGENT_TARGETS);
+    listFlag(args, '--targets') ??
+    resolveExistingAgentProviders(gitRoot, components.agentTargets, ['hooks']);
   const bad = targets.filter((target) => !isAgentProvider(target));
   if (bad.length) {
     console.error(
@@ -119,17 +100,8 @@ export default function run(args: string[], cwd: string): number {
     return 1;
   }
   const override = args.includes('--force') ? () => true : undefined;
-  const desired = only
-    ? undefined
-    : hookScriptsFor({
-        agentHooks: true,
-        decisions,
-        fallow,
-        adhd,
-        priorArtGate,
-        baseDrift,
-        antiSlop,
-      });
+  // The selection-to-scripts derivation init, upgrade and doctor share, so no component is missed.
+  const desired = only ? undefined : selectedHookAssets(components).scripts;
   syncHookScripts(gitRoot, {
     dryRun: args.includes('--dry-run'),
     targets,
