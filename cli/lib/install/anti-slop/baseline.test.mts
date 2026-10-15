@@ -157,3 +157,76 @@ describe('anti-slop shrink-only baseline', () => {
     ).toEqual([expect.objectContaining({ additionalCount: 1, file: 'src/renamed.ts' })]);
   });
 });
+
+const onLine = (
+  context: string,
+  line: number,
+  identity: { ruleId?: string; file?: string; diagnostic?: string } = {},
+): FindingGroup => ({
+  ...group(context, 1),
+  ruleId: identity.ruleId ?? 'anti-slop/no-unsafe-dictionary-type',
+  file: identity.file ?? 'src/file.ts',
+  diagnostic: identity.diagnostic ?? 'Avoid Record<string, unknown>.',
+  context,
+  line,
+});
+
+describe('anti-slop debt on an edited line', () => {
+  const debt = onLine('function emit(ev: Record<string, unknown>): void {', 4);
+  const edited = onLine('function emit(ev: Record<string, unknown>): Status {', 4);
+
+  it('carries debt whose line changed elsewhere and keeps it through prune', () => {
+    const baseline = baselineFromGroups([debt]);
+    const compared = compareBaseline(baseline, [edited]);
+
+    expect(compared.newGroups).toEqual([]);
+    expect(compared).toMatchObject({ swappedCount: 1, resolvedCount: 0, debtCount: 1 });
+    expect(pruneBaseline(baseline, [edited])).toEqual(baseline);
+  });
+
+  it('still reports a second offending finding, at the later line', () => {
+    const second = onLine('extra: Record<string, unknown>,', 5);
+    const compared = compareBaseline(baselineFromGroups([debt]), [second, edited]);
+
+    expect(compared.newGroups).toEqual([
+      expect.objectContaining({ fingerprint: second.fingerprint, additionalCount: 1 }),
+    ]);
+    expect(compared.swappedCount).toBe(1);
+  });
+
+  it('never credits debt of another rule, diagnostic or file', () => {
+    for (const other of [
+      onLine(edited.context, 4, { ruleId: 'anti-slop/no-object-parameters' }),
+      onLine(edited.context, 4, { diagnostic: 'Another diagnostic.' }),
+      onLine(edited.context, 4, { file: 'src/other.ts' }),
+    ]) {
+      const compared = compareBaseline(baselineFromGroups([debt]), [other]);
+
+      expect(compared.newGroups).toEqual([expect.objectContaining({ additionalCount: 1 })]);
+      expect(compared).toMatchObject({ swappedCount: 0, resolvedCount: 1 });
+    }
+  });
+
+  it('carries debt a formatter reflows across lines, in either direction', () => {
+    const joined = {
+      ...onLine('function emit(a: Record<string, unknown>, b: Record<string, unknown>) {', 4),
+      count: 2,
+    };
+    const split = [
+      onLine('a: Record<string, unknown>,', 5),
+      onLine('b: Record<string, unknown>,', 6),
+    ];
+
+    const wrapped = baselineFromGroups([joined]);
+    expect(compareBaseline(wrapped, split)).toMatchObject({ newGroups: [], swappedCount: 2 });
+    expect(pruneBaseline(wrapped, split)).toEqual(wrapped);
+
+    const unwrapped = baselineFromGroups(split);
+    expect(compareBaseline(unwrapped, [joined])).toMatchObject({ newGroups: [], swappedCount: 2 });
+    expect(pruneBaseline(unwrapped, [joined])).toEqual(unwrapped);
+  });
+
+  it('prunes the carried entry once the edited finding is fixed', () => {
+    expect(pruneBaseline(baselineFromGroups([debt]), []).entries).toEqual([]);
+  });
+});

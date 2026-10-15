@@ -345,3 +345,24 @@ describe('relocation source formatting', () => {
     expect(formatSources(['d.ts', 'c.ts', 'a.ts', 'b.ts'])).toBe('a.ts, b.ts, c.ts +1 more');
   });
 });
+
+describe('relocation credit after an edited-line carry', () => {
+  it('never spends one vanished count on both an edited line and a move', () => {
+    const edited = finding('src/a.ts', 1, { context: 'export function widen(value: object): 1 {' });
+    const bound = baselineOf(finding('src/a.ts'));
+    const candidate = [edited, finding('src/b.ts')];
+
+    expect(
+      vacatedDebt(
+        bound,
+        baselineOf(finding('src/a.ts')),
+        candidate,
+        changed('src/a.ts'),
+        everywhere,
+      ).size,
+    ).toBe(0);
+    expect(newGroupsOf(bound, candidate)).toEqual([
+      expect.objectContaining({ file: 'src/b.ts', additionalCount: 1 }),
+    ]);
+  });
+});
