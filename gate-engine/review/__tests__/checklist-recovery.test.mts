@@ -193,6 +193,44 @@ describe('runReviewGate — deferred checklist recovery (sc-1476)', () => {
     expect(rows[0].retried).toBe(true);
     expect(targetCalls).toBe(2);
   });
+
+  // The real cache round-trip: a re-run replays the three groups the first run PASSed, and the
+  // merged row has to say which entries were replayed rather than leave it to a NULL model.
+  it('a re-run marks only the replayed groups cached in the merged lens_parts', async () => {
+    delete process.env.GUARD_CORRECTNESS_SPLIT;
+    const repo = consumerRepo({ backend: true });
+    reviewEnv(repo);
+    const failLens = 'state-transitions';
+    const groups: readonly (readonly string[])[] = FOUR_WAY_LENS_GROUPS;
+    const judge = (failing: boolean) =>
+      mkExec(async ({ label, args }) => {
+        writeArtifact(repo, label);
+        const group = groups.find((g) => args[1].includes(g[0]));
+        if (label !== 'review:correctness-reviewer' || !group) return 'VERDICT: PASS';
+        const fails = failing && group[0] === failLens;
+        writeFileSync(
+          join(repo, `.claude/.correctness-review-${lensGroupId(group)}.json`),
+          JSON.stringify({
+            items: [{ name: group[0], category: 'X', status: fails ? 'fail' : 'pass', issues: [] }],
+          }),
+        );
+        return fails ? 'VERDICT: FAIL — a dead state' : 'VERDICT: PASS';
+      });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    await runReviewGate(repo, { exec: judge(true) });
+    writeFileSync(join(repo, 'events.jsonl'), '');
+    const rerun = judge(false);
+    expect(await runReviewGate(repo, { exec: rerun })).toBe(0);
+    const judged = rerun.mock.calls.filter((c) => c[0].label === 'review:correctness-reviewer');
+    expect(judged).toHaveLength(1); // only the failed group is judged again
+    const row = events(repo).find(
+      (e) => e.type === 'review_result' && e.reviewer === 'correctness-reviewer',
+    );
+    // SAFETY: a split reviewer's merged row always carries lens_parts with these fields.
+    const parts = row?.lens_parts as { lens: string; cached?: true; model?: string }[];
+    expect(parts).toHaveLength(FOUR_WAY_LENS_GROUPS.length);
+    for (const p of parts) expect(p.cached).toBe(p.lens === failLens ? undefined : true);
+  });
 });
 
 describe('runReviewGate — checklist recovery on the strict ship path (sc-2088)', () => {

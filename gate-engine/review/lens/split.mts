@@ -145,6 +145,8 @@ export type LensPart = {
   /** This part's verdict came from the post-wave recovery attempt (sc-1476) — kept per-part so a
    * recovered lens stays attributable in the merged row's lens_parts. Never in a cache key. */
   retried?: boolean;
+  /** Served from the verdict cache, not judged this run — so readers need not infer it. */
+  cached?: true;
 };
 
 export type ReviewTask = {
@@ -368,6 +370,7 @@ export function planReviewWork(
         } as LensPart['res'],
         secs: 0,
         task: p,
+        cached: true,
       });
       splitParts.set(p.splitOf, held);
     }
