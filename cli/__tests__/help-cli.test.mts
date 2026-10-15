@@ -20,6 +20,7 @@ describe('devkit help surface', () => {
       'guard-branch',
       'base-status',
       'prove-regression',
+      'ci-verdict',
     ]) {
       expect(r.stdout).toContain(`devkit ${name}`);
     }

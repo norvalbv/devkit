@@ -151,7 +151,8 @@ Usage:
                       agent reading non-zero would retry --resume against a record the push deleted.
                       Grep the line, or read the ship_ci telemetry row. Valid for a new ship and for
                       --pr. NOT replayed by --resume: it observes a PR that already exists rather
-                      than describing what shipped, so re-request it on the retry.
+                      than describing what shipped, so re-request it on the retry. For a PR that is
+                      already open, \`devkit ci-verdict <pr>\` prints the same line.
   --wait-ci-required  With --wait-ci only: wait on the branch-protection REQUIRED checks alone, so
                       an advisory check (a review bot) neither holds the wait open nor turns it red.
                       gh lists only required checks that have already REPORTED (cli/cli#8855): one
