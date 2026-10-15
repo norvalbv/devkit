@@ -102,8 +102,8 @@ export const testSpawnSync = ((
   return nodeSpawnSync(process.execPath, supervised.args, supervised.options);
 }) as typeof nodeSpawnSync;
 
-/** Exec-style counterpart to testSpawnSync. It retains execFileSync's return/throw contract while
- * routing short leaf commands through the supervisor's process-group kill path. */
+/** Exec-style counterpart to testSpawnSync: execFileSync's return/throw contract, with the
+ * command's process group bounded by the supervisor. */
 export const testExecFileSync = ((
   command: string,
   argsOrOptions?: readonly string[] | Record<string, unknown>,

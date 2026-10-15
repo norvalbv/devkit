@@ -4,13 +4,18 @@
  * reviewer framing swaps only the words around the rulings, and the size cap drops whole rulings
  * NAMED — silent truncation would read as "no other Targets govern".
  */
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
   COMPLETENESS_TARGETS_FRAMING,
+  loadReviewerTargetsBlocks,
   REVIEWER_TARGETS_FRAMING,
   renderTargets,
   type TargetBlock,
 } from '../evidence/targets-block.mts';
+
+const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
 const block = (slug: string, ruling = 'Ruling text.'): TargetBlock => ({
   slug,
@@ -73,5 +78,18 @@ describe('renderTargets — shared governing-Targets block', () => {
     expect(renderTargets([ascii], COMPLETENESS_TARGETS_FRAMING, 2_600)).toContain(
       'x'.repeat(1_000),
     );
+  });
+});
+
+describe("devkit's own spawn-site ruling, as its reviewers receive it", () => {
+  // A ruling compressed to a bare "Leaf verbs stay raw." drew opposite FAILs on consecutive ships.
+  it('tells a git-integration test reviewer that leaf verbs need no native timeout', async () => {
+    const { saltBlock } = await loadReviewerTargetsBlocks(REPO, [
+      'cli/__tests__/prepare-gate-worktree.test.mts',
+    ]);
+    expect(saltBlock).toContain('### suite-hangs-bound-at-the-spawn-site');
+    expect(saltBlock).toMatch(/Leaf verbs \([^)]*\) MAY stay raw and need no native timeout/);
+    expect(saltBlock).toContain('no other raw call is required to');
+    expect(saltBlock).not.toContain('OMITTED:');
   });
 });
