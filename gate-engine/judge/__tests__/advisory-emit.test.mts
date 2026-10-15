@@ -6,7 +6,12 @@ import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { emitAdvisoryResult, reportFallowAudit, summariseFallowAudit } from '../advisory/emit.mts';
+import {
+  emitAdvisoryResult,
+  reportFallowAudit,
+  reportFallowSkipped,
+  summariseFallowAudit,
+} from '../advisory/emit.mts';
 
 // vitest.setup holds DEVKIT_NO_TELEMETRY=1 suite-wide; an explicit sink + ship id opts back in.
 const ENV_KEYS = ['DEVKIT_GATE_EVENTS', 'DEVKIT_SHIP_ID', 'DEVKIT_SHIP_BRANCH'];
@@ -145,6 +150,16 @@ describe('reportFallowAudit', () => {
       }, false),
     ).toBe('unreadable');
     expect(events()[0]).toMatchObject({ status: 'could_not_run' });
+  });
+
+  it('names a skipped audit as having verified nothing, carrying the reason the hook gave', () => {
+    expect(reportFallowSkipped('could not capture the staged diff')).toBe('unreadable');
+    expect(events()).toHaveLength(1);
+    expect(events()[0]).toMatchObject({
+      gate: 'fallow-advisory',
+      status: 'could_not_run',
+      detail: 'could not capture the staged diff',
+    });
   });
 });
 
