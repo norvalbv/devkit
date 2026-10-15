@@ -27,14 +27,15 @@ interface DiffEntry {
   path: string;
   added: number;
   deleted: number;
-  depChanged?: boolean;
   depKeys?: string[];
 }
 
 // A (smell label, contributing-file) pair — the file that CAUSES the smell, not the whole diff.
+// `dep` names the changed dependency of a dep-change, whose path is the manifest that declares it.
 interface SmellSource {
   label: string;
   path: string;
+  dep?: string;
 }
 
 // The dependency sections of a parsed package.json (name → version spec). External JSON boundary.
@@ -87,7 +88,7 @@ export function decisionFileRe(decisionsRel: string): RegExp {
  * The (label, contributing-file) pairs that drive each smell — the file that *causes* the smell, not
  * the whole diff. A per-session seen-set keyed on these pairs re-arms only on a genuinely new
  * decision (a never-seen pair), so a growing single-decision footprint never re-nags. For dep-change
- * the "path" is the changed dependency NAME, so two distinct dep decisions yield distinct pairs and a
+ * the `dep` is the changed dependency NAME, so two distinct dep decisions yield distinct pairs and a
  * second unrelated bump is not collapsed into the first.
  *
  * @param entries Pure renames/copies (status R/C) must already be excluded by the caller (move noise).
@@ -104,8 +105,7 @@ export function smellSources(entries: DiffEntry[], boundaries: string[] = []): S
 
   for (const e of real)
     if (PKG_RE.test(e.path))
-      for (const name of e.depKeys ?? (e.depChanged ? [e.path] : []))
-        sources.push({ label: 'dep-change', path: name });
+      for (const dep of e.depKeys ?? []) sources.push({ label: 'dep-change', path: e.path, dep });
 
   const boundariesHit = boundaries.filter((b) => real.some((e) => e.path.startsWith(b)));
   if (boundariesHit.length >= 2)
@@ -209,13 +209,7 @@ export function gatherEntries(cwd: string, mode: DiffMode = 'cached'): DiffEntry
     const file = parts[parts.length - 1];
     const c = counts.get(file) ?? { added: 0, deleted: 0 };
     const depKeys = PKG_RE.test(file) ? readDepChangedKeys(cwd, file, mode) : [];
-    entries.push({
-      status,
-      path: file,
-      ...c,
-      depChanged: depKeys.length > 0,
-      depKeys,
-    });
+    entries.push({ status, path: file, ...c, depKeys });
   }
   return entries;
 }
@@ -251,13 +245,10 @@ export function buildDetectJudgeInput(
   boundaries: string[] = [],
 ): string {
   const smellPaths = new Set<string>();
-  for (const s of smellSources(entries, boundaries))
-    if (s.label !== 'dep-change') smellPaths.add(s.path); // dep-change "path" is a dep NAME, not a file
+  for (const s of smellSources(entries, boundaries)) smellPaths.add(s.path);
   const adds = entries.filter((e) => e.status === 'A');
   for (const e of entries) {
     if (LOCKFILE_RE.test(e.path)) continue; // lockfile churn is never evidence (mirrors smellSources)
-    if (PKG_RE.test(e.path) && (e.depChanged || (e.depKeys?.length ?? 0) > 0))
-      smellPaths.add(e.path);
     // A module-replace smell points at the ADDED file; ONLY its same-basename/different-dir
     // deletion counterpart is evidence (mirrors the smellSources predicate — an unrelated big
     // deletion must not eat the evidence budget unless it is itself a legacy-deletion smell,
@@ -497,6 +488,11 @@ async function runGate() {
   }
 }
 
+// One `scan --files` line. The file column stays a path so the Stop hook can match its edit ledger.
+export function scanLine(s: SmellSource): string {
+  return [s.label, s.path, ...(s.dep ? [s.dep] : [])].join('\t');
+}
+
 function runScan(args: string[]): void {
   const cwd = process.cwd();
   // Reason: two independent decision-gate CLIs (alignment flip-flop vs architectural smell); the resolve-scan-exit shape rhymes but each scans a different thing; sharing would add the cross-engine dependency the engines avoid
@@ -505,11 +501,9 @@ function runScan(args: string[]): void {
     const cfg = resolveGuardConfig(cwd);
     const entries = gatherEntries(cwd, args.includes('--working') ? 'working' : 'cached');
     if (args.includes('--files')) {
-      // (label, contributing-file) pairs for the Stop-hook seen-set — sorted+deduped so membership
-      // (grep -vxF) is stable: re-arm keys on a never-seen pair, not on the cumulative set changing.
-      const pairs = [
-        ...new Set(smellSources(entries, cfg.boundaries).map((s) => `${s.label}\t${s.path}`)),
-      ].sort();
+      // label\tfile[\tdep] lines for the Stop-hook seen-set — sorted+deduped so membership (grep -vxF)
+      // is stable: re-arm keys on a never-seen line, not on the cumulative set changing.
+      const pairs = [...new Set(smellSources(entries, cfg.boundaries).map(scanLine))].sort();
       if (pairs.length) console.log(pairs.join('\n'));
     } else {
       const smells = detectSmells(entries, cfg.boundaries);
