@@ -207,6 +207,8 @@ devkit command.
   A whole-file percentage on a large existing file mostly measures code your change never touched,
   so 40% there can be 80%+ of what you added. Run `devkit coverage-run` first; the report names the
   uncovered added lines, which is where any extra test belongs — not padding the rest of the file.
+  Shell scripts are listed apart as not measurable: name the test that runs each added shell
+  branch, and confirm that reverting the edit fails it.
 - **Coverage gate in diff scope (`"scope": "diff"` in `guard.config.json`): run only your tests.**
   `devkit coverage-run <your test files>` takes seconds and is all the gate needs; it blocks on
   added lines that ran under none of them, and on a source file those tests never loaded. Re-run it
