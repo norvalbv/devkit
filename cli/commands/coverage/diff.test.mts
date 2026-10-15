@@ -1,5 +1,5 @@
 /** `devkit coverage-diff` against real git repos and real `devkit coverage-run` manifests. */
-import { rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -9,6 +9,7 @@ import {
   repo,
   write,
 } from '../../../gate-engine/coverage/__tests__/_provenance-fixtures.mts';
+import { type ClearMarker, writeClearMarker } from '../../../gate-engine/coverage/failures.mts';
 import { snapshotSource } from '../../../gate-engine/coverage/provenance.mts';
 import coverageDiff from './diff.mts';
 
@@ -55,6 +56,13 @@ function cov(root: string, files: Record<string, [number, number][]>): string {
     ),
   );
 }
+
+const marker: ClearMarker = {
+  clearedAt: new Date().toISOString(),
+  previousMtime: null,
+  head: 'abc1234',
+  failedFiles: [],
+};
 
 const lines = (n: number) => Array.from({ length: n }, (_, i) => `l${i + 1}`).join('\n') + '\n';
 
@@ -266,6 +274,36 @@ describe('devkit coverage-diff — the artifact', () => {
     const { code, out } = run(root);
     expect(code).toBe(1);
     expect(out).toMatch(/absent.*devkit coverage-run/);
+  });
+
+  it('says why the artifact is absent when a failed run cleared it', () => {
+    const { root } = featureRepo();
+    write(root, 'red.test.ts', 'x');
+    const failedFiles = [join(root, 'red.test.ts')];
+    mkdirSync(join(root, 'coverage'));
+    writeClearMarker(join(root, 'coverage'), { ...marker, failedFiles });
+    const { code, out } = run(root);
+    expect(code).toBe(1);
+    expect(out).toMatch(
+      /discarded by a test run that produced no report[\s\S]*Failed: red\.test\.ts/,
+    );
+  });
+
+  it('prints no marker when there is none, or it is corrupt', () => {
+    const { root } = featureRepo();
+    expect(run(root).out).not.toMatch(/discarded/);
+    write(root, 'coverage/.last-clear.json', '{torn');
+    expect(run(root).out).not.toMatch(/discarded/);
+  });
+
+  // A marker beside a malformed artifact is not what made it unreadable, so it must not explain it.
+  it('prints no marker for an artifact that exists but is malformed', () => {
+    const { root } = featureRepo();
+    write(root, 'coverage/coverage-final.json', '{not json');
+    writeClearMarker(join(root, 'coverage'), marker);
+    const { out } = run(root);
+    expect(out).toMatch(/malformed/);
+    expect(out).not.toMatch(/discarded/);
   });
 
   it('exits 1 on a malformed artifact rather than reading garbage as coverage', () => {

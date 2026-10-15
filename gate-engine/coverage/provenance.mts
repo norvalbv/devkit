@@ -18,6 +18,7 @@ import {
 import { join, relative, resolve, sep } from 'node:path';
 import { z } from 'zod';
 import { commitIndexEnv } from '../ratchets/commit-index.mts';
+import { canonicalPath } from './dependencies.mts';
 
 export const MANIFEST_NAME = 'coverage-manifest.json';
 /** A path that existed at HEAD but not in the working tree when the run started. */
@@ -390,4 +391,39 @@ export function checkProvenance(
   } catch {
     return { state: 'unknown', reason: 'git could not compare the briefed files' };
   }
+}
+
+/**
+ * Absolute paths of the staged files, or null when git cannot answer (e.g. outside a work tree).
+ *
+ * null is NOT an empty diff: only [] licenses the claim "none of them are staged".
+ */
+export function stagedFiles(cwd: string): string[] | null {
+  try {
+    const top = canonicalPath(git(cwd, ['rev-parse', '--show-toplevel']).trim());
+    return nulList(git(cwd, ['diff', '--cached', '--name-only', '-z'])).map((p) =>
+      canonicalPath(join(top, p)),
+    );
+  } catch {
+    return null;
+  }
+}
+
+/** The short HEAD sha, or null outside a work tree. Recorded so a stale marker dates itself. */
+export function headSha(cwd: string): string | null {
+  try {
+    return git(cwd, ['rev-parse', '--short', 'HEAD']).trim();
+  } catch {
+    return null;
+  }
+}
+
+/** Failed files that are also staged. null propagates: unknown stays unknown, never "none". */
+export function stagedIntersection(
+  failedFiles: string[],
+  staged: string[] | null,
+): string[] | null {
+  if (staged === null) return null;
+  const set = new Set(staged);
+  return failedFiles.map(canonicalPath).filter((f) => set.has(f));
 }

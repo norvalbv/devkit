@@ -328,8 +328,9 @@ describe('a run that verified nothing', () => {
 
   // The fail-closed guarantee, end to end against real vitest — the arrangement the unit tests could
   // not reproduce, because it depends on vitest deleting its own reports directory.
-  it('clears a previous report when the suite actually fails', () => {
+  it('clears a previous report when the suite actually fails, and points the unstaged file at CI', () => {
     const root = makeRoot();
+    testSpawnSync('git', ['init', '-q'], { cwd: root });
     symlinkSync(join(DEVKIT_ROOT, 'node_modules'), join(root, 'node_modules'));
     writeFileSync(
       join(root, 'vitest.config.mjs'),
@@ -356,6 +357,8 @@ describe('a run that verified nothing', () => {
     expect(result.status).not.toBe(0);
     expect(result.stdout).toContain('boom.test.mjs');
     expect(existsSync(join(root, COVERAGE_FILE))).toBe(false);
+    // Read from this repo's real index: nothing is staged, so the failure is not presumed pre-existing.
+    expect(result.stderr).toContain('devkit baseline-status --file boom.test.mjs');
   });
 
   it('refuses to forward the reports-directory flag it owns', async () => {

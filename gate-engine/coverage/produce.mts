@@ -41,7 +41,6 @@ import {
   formatDiagnosis,
   formatRerunNotice,
   formatRerunRescue,
-  headSha,
   markerCause,
   passEnv,
   raisedTimeoutMs,
@@ -51,7 +50,6 @@ import {
   RESULTS_NAME,
   RETRY_CONDITION,
   type RunDiagnosis,
-  stagedFiles,
   UNHANDLED_REPORTER,
   writeClearMarker,
 } from './failures.mts';
@@ -69,10 +67,12 @@ import {
   supportsRetryCondition,
 } from './vitest-version.mts';
 import {
+  headSha,
   markTouchedDuringRun,
   publishManifest,
   type SourceSnapshot,
   snapshotSource,
+  stagedFiles,
   stageManifest,
 } from './provenance.mts';
 
