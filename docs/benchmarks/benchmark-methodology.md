@@ -85,6 +85,32 @@ Distilled from the report + its sources; each item names the failure it prevents
 20. **Treat measured precision as a lower bound** when gold recall is incomplete; never
     hard-fail a variant solely on unmatched extra findings.
 
+**Observational telemetry measurements** — any number read from gate telemetry (the collector DB,
+the gate-events sink or the diff archive) that a PR or decision record cites. State each item in the result's README before the
+first ship; the review judges otherwise find them one ship attempt at a time.
+
+21. **Frozen input window**: record an explicit `--until` instant with the result, and the exact
+    command that reproduces it. Item 13 bounds leakage; this keeps the *population* reproducible
+    while the collector keeps writing.
+22. **Sample provenance**: define one sample and exclude cache replays. Only rows with a recorded
+    judge are judgements ([gate-telemetry-self-describing](../decisions/gate-telemetry-self-describing.md)).
+23. **Undeterminable stays out of denominators**: name every undeterminable class (capped evidence,
+    citations outside the diff, missing archive), count each by reason, and partition before
+    attributing ([correctness-lens-hole-instrument](../decisions/correctness-lens-hole-instrument.md)).
+24. **Evidence integrity**: archived bytes count as evidence only when they hash to their recorded
+    `diff_sha256`; a mismatch is undeterminable.
+25. **One snapshot**: read every table inside one read transaction. Separate `sqlite3` calls are
+    separate snapshots of a database the collector is writing.
+26. **Exact claim semantics**: every claimed equality ("unchanged", "identical") names its unit, e.g.
+    per-file hunk identity vs whole-file bytes. A corrected number is appended, never overwritten
+    ([benchmark-evidence-append-only](../decisions/benchmark-evidence-append-only.md)).
+
+Reference implementation: `readSnapshot`, `--until` and `readDiff` in
+`gate-engine/review/eval/reviewers/finding-location-audit/cli.mts`; worked example
+[`2026-10-01-lens-stability`](experiments/2026-10-01-lens-stability/README.md). Sources: RECORD
+statement items 12.2, 13.1, 19.1 (https://pmc.ncbi.nlm.nih.gov/articles/PMC4595218/);
+https://www.sqlite.org/isolation.html.
+
 ### Known house exposures (quick scan — verify per benchmark before trusting)
 - **sentry-eval / claude-md-eval**: single-label rows (low clustering risk) and baseline-paired
   by design ✓ — but no κ, no label-noise floor, labeler==judge family unblinded.
