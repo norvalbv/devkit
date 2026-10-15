@@ -18,6 +18,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { diffPathsOf, filePathOf, splitDiffByFile } from '../../judge/diff-focus.mts';
 import { excerptDiff } from './lib/excerpt.mts';
 import { overlapCount } from './lib/match.mts';
 import { EXCERPT_ALLOWLIST, validateCase } from './lib/schema.mts';
@@ -28,12 +29,7 @@ const proposalsPath = path.join(here, 'raw', 'proposals.jsonl');
 const casesPath = path.join(here, 'cases.jsonl');
 const append = process.argv.includes('--append');
 
-const DIFF_SECTION_RE = /^diff --git /m;
-const FILE_B_RE = / b\/(\S+)/;
-const FILE_A_RE = /^a\/(\S+)/;
-const NEW_FILE_RE = /^new file mode/m;
-const DELETED_FILE_RE = /^deleted file mode/m;
-const PLUS_FILE_RE = /^\+\+\+ b\/(\S+)/gm;
+const PLUS_FILE_RE = /^\+\+\+ b\/(.+?)\t?$/gm;
 const STAT_LINE_RE = /^ ([\w./@-]+[\w./@-]) +\| +\d/gm;
 
 const readJsonl = (file) =>
@@ -47,11 +43,12 @@ const readJsonl = (file) =>
 /** Derive a name-status list from diff headers (A/D/M per file). */
 const nameStatusOf = (diff, statText) => {
   const entries = [];
-  const sections = diff?.split(DIFF_SECTION_RE).slice(1) ?? [];
+  const sections = splitDiffByFile(diff ?? '').filter((s) => s.startsWith('diff --git '));
   for (const s of sections) {
-    const file = s.match(FILE_B_RE)?.[1] ?? s.match(FILE_A_RE)?.[1];
+    const { oldPath, newPath } = diffPathsOf(s);
+    const file = newPath ?? oldPath;
     if (!file) continue;
-    const status = NEW_FILE_RE.test(s) ? 'A' : DELETED_FILE_RE.test(s) ? 'D' : 'M';
+    const status = oldPath === null ? 'A' : newPath === null ? 'D' : 'M';
     entries.push(`${status}\t${file}`);
   }
   if (entries.length) return entries.join('\n');
@@ -202,9 +199,7 @@ for (const p of proposals) {
     if (c.anchor.diffExcerpt) {
       // same file-list semantics as coverage — a raw substring scan over the excerpt body would
       // let short names match inside unrelated paths/code ("index.ts" inside "reindex.ts")
-      const excerptFiles = [...c.anchor.diffExcerpt.matchAll(/^diff --git a\/(\S+) b\//gm)].map(
-        (m) => m[1],
-      );
+      const excerptFiles = splitDiffByFile(c.anchor.diffExcerpt).map(filePathOf).filter(Boolean);
       c.anchor.excerptCoverage = Number(
         (
           c.findings.filter((f) => overlapCount(f.files, excerptFiles) > 0).length /

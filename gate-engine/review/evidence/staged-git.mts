@@ -13,7 +13,10 @@ export function gitCached(cwd: string, args: string[], files: string[]): string 
   const pathspecs = files.map(
     (file) => `:(top,literal)${normalizeRepositoryFile(file, 'review evidence file')}`,
   );
-  return execFileSync('git', ['diff', '--cached', ...args, '--', ...pathspecs], {
+  // Explicit a/ b/ prefixes override a consumer's diff.noprefix / mnemonicPrefix / srcPrefix,
+  // so filePathOf can strip them.
+  const prefixes = ['--src-prefix=a/', '--dst-prefix=b/'];
+  return execFileSync('git', ['diff', '--cached', ...prefixes, ...args, '--', ...pathspecs], {
     cwd,
     env: commitIndexEnv(cwd),
     encoding: 'utf8',
