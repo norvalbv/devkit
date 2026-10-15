@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { agentAssetDir } from '../../../cli/lib/install/agent-assets/agent-assets.mts';
+import { SUPPORTED_AGENT_PROVIDERS } from '../../../cli/lib/install/agent-assets/agent-providers.mts';
 import {
   PLAN_CRITIQUE_ACTION_KINDS,
   PLAN_CRITIQUE_EDGE_CASE_CATEGORIES,
@@ -36,6 +38,7 @@ describe('feature-critique guidance', () => {
       '**Data Flow and State Correctness**',
       '**Runtime Behavior Across Configurations**',
       'Frame Second-Opinion + Deterministic Gate',
+      'Correctness self-check on your own advice',
       'Burden of proof for blockers',
       'FABRICATED BLOCKER',
     ];
@@ -105,5 +108,14 @@ describe('feature-critique guidance', () => {
       expect(text).toMatch(/Do not (?:schedule|run) periodic critique/u);
       expect(text).toContain('wrong_phase');
     }
+  });
+
+  it('self-checks its advice against every provider-installed correctness skill, quietly', () => {
+    const selfCheck = agent.split('\n').find((l) => l.includes('Correctness self-check'));
+    for (const provider of SUPPORTED_AGENT_PROVIDERS) {
+      const root = agentAssetDir(provider, 'skills').replace(/skills$/u, '');
+      expect(selfCheck).toContain(`\`${root}\``);
+    }
+    expect(selfCheck).toContain('`analysis.missingConsiderations`, never a finding');
   });
 });
