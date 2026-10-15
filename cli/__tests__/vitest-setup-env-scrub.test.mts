@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
   existsSync,
@@ -358,6 +358,39 @@ describe('vitest.setup.mjs keeps git auto-maintenance out of fixture repos', () 
         expect(auto, gitDir).toBe('false');
         expect(readdirSync(path.join(gitDir, 'objects', 'pack')), gitDir).toEqual([]);
       }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+// Nested sandbox-exec is refused inside a sandbox (exit 71), as when a sandboxed reviewer runs this.
+const SANDBOX_OK =
+  process.platform === 'darwin' &&
+  spawnSync('sandbox-exec', ['-p', '(version 1)(allow default)', '/usr/bin/true']).status === 0;
+
+describe('vitest.setup.mjs pins the macOS xcrun cache out of a redirected TMPDIR', () => {
+  /** /usr/bin/git (the xcrun shim) under a mach-lookup-denying sandbox, as codex runs it. */
+  const sandboxedGit = (env: Record<string, string | undefined>) =>
+    spawnSync(
+      'sandbox-exec',
+      ['-p', '(version 1)(allow default)(deny mach-lookup)', '/usr/bin/git', '--version'],
+      { env },
+    );
+
+  it.skipIf(!SANDBOX_OK)('a git spawn leaves the test-owned TMPDIR empty', () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), 'devkit-suite-xcrun-'));
+    try {
+      const { xcrun_db, ...unpinned } = envAfterSetup({ xcrun_db: '' });
+      expect(xcrun_db).toBe(path.join(os.tmpdir(), 'xcrun_db'));
+      const [bare, pinned] = ['bare', 'pinned'].map((d) => path.join(root, d));
+      mkdirSync(bare);
+      mkdirSync(pinned);
+      // Control: without the pin the sandbox reproduces the fallback, so the pinned run is not vacuous.
+      expect(sandboxedGit({ ...unpinned, TMPDIR: bare }).status).toBe(0);
+      expect(readdirSync(bare)).toContain('xcrun_db');
+      expect(sandboxedGit({ ...unpinned, xcrun_db, TMPDIR: pinned }).status).toBe(0);
+      expect(readdirSync(pinned)).toEqual([]);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
