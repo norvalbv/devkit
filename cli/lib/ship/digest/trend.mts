@@ -1,6 +1,7 @@
 /** sc-2165: names a reviewer whose blocks on this branch are not converging. Narration only — no exit,
  * never fed to a reviewer; why it exists: decision ship-gates-converge-not-restart. */
 import { z } from 'zod';
+import { emitGateEvent } from '../../../../gate-engine/judge/gate-events.mts';
 import { scanBackward } from './tail.mts';
 
 /** Below this many consecutive blocks a re-ship is ordinary iteration, not a loop. */
@@ -51,6 +52,13 @@ interface Attempt {
   result?: TrendRow;
 }
 
+/** Why attemptsOf could not order the branch's rounds; `shipId` names the row that broke it. */
+export interface Ambiguity {
+  reason: 'same_id_marker' | 'foreign_row' | 'displaced_write';
+  shipId: string;
+}
+type Why = { ambiguity?: Ambiguity };
+
 /** The I/O boundary: one sink line in, a row carrying a ship_id or nothing. */
 export function parseTrendRow(line: string): TrendRow | undefined {
   try {
@@ -61,12 +69,33 @@ export function parseTrendRow(line: string): TrendRow | undefined {
   }
 }
 
-/** Rows a ship writes before its own marker; inside a killed open attempt they would read as foreign. */
-const PRE_MARKER = new Set(['ship_intent', 'judge_preflight']);
+/** Rows that are no round's: a retry's pre-marker rows and this module's own trend_suppressed event.
+ * Inside an open attempt they would read as foreign. */
+const PRE_MARKER = new Set(['ship_intent', 'judge_preflight', 'trend_suppressed']);
+
+/** Records why the history is ambiguous, for a caller that asked, and bails like before. */
+function bail(why: Why | undefined, reason: Ambiguity['reason'], shipId: string): null {
+  if (why) why.ambiguity = { reason, shipId };
+  return null;
+}
+
+const isKeyed = (row: TrendRow, key: ShipKey) =>
+  row.ship_id === key.shipId && row.repo === key.repo && row.branch === key.branch;
+
+/** Index of the last `type` row this ship wrote on its branch, or -1. */
+function lastKeyed(rows: TrendRow[], type: string, key: ShipKey): number {
+  for (let i = rows.length - 1; i >= 0; i--) {
+    if (rows[i].type === type && isKeyed(rows[i], key)) return i;
+  }
+  return -1;
+}
+
+const isReviewFail = (row: TrendRow) =>
+  row.type === 'review_result' && row.status === 'fail' && !!row.reviewer;
 
 /** This branch's rows → its attempts in order, or null when two overlap (completion order is then not
  * round order). Markers open attempts: an inherited DEVKIT_SHIP_ID can span several. */
-function attemptsOf(rows: TrendRow[], key: ShipKey): Attempt[] | null {
+function attemptsOf(rows: TrendRow[], key: ShipKey, why?: Why): Attempt[] | null {
   const done: Attempt[] = [];
   let current: Attempt | undefined;
   const displaced = new Set<string>();
@@ -74,17 +103,17 @@ function attemptsOf(rows: TrendRow[], key: ShipKey): Attempt[] | null {
     if (row.repo !== key.repo || row.branch !== key.branch || PRE_MARKER.has(row.type ?? ''))
       continue;
     // A displaced attempt that writes again was not killed: it overlapped, so rounds are out of order.
-    if (displaced.has(row.ship_id)) return null;
+    if (displaced.has(row.ship_id)) return bail(why, 'displaced_write', row.ship_id);
     if (row.type === 'ship_attempt') {
       // Same id while open: an inherited id cannot tell a kill from an overlap. A new id: the open one died.
-      if (current?.shipId === row.ship_id) return null;
+      if (current?.shipId === row.ship_id) return bail(why, 'same_id_marker', row.ship_id);
       if (current) displaced.add(current.shipId);
       current = { shipId: row.ship_id, rows: [] };
     } else if (!current) {
       // Outside any seen attempt: one the backward read cut off. Dropped, never guessed at.
       continue;
     } else if (row.ship_id !== current.shipId) {
-      return null;
+      return bail(why, 'foreign_row', row.ship_id);
     } else if (row.type === 'ship_result') {
       current.result = row;
       done.push(current);
@@ -137,11 +166,19 @@ export function issuesUnder(row: Pick<TrendRow, 'items'>, lens: string): number 
   return counts.length === 1 ? counts[0] : null;
 }
 
-/** This branch's finished attempts up to the current one, or null when the ship cannot be keyed. */
-function branchAttempts(rows: TrendRow[], key: ShipKey) {
+/** Rows through this ship's last result: later rows did not exist when its live digest ran, so a
+ * replay must not let them silence it. Null when the ship cannot be keyed or has no result. */
+function asOfResult(rows: TrendRow[], key: ShipKey): TrendRow[] | null {
   // Never key on an empty repo or branch: that would blend every unkeyed ship on the machine.
   if (!key.shipId || !key.repo || !key.branch) return null;
-  const all = attemptsOf(rows, key);
+  const end = lastKeyed(rows, 'ship_result', key);
+  return end < 0 ? null : rows.slice(0, end + 1);
+}
+
+/** This branch's finished attempts up to the current one, or null when the ship cannot be keyed. */
+function branchAttempts(rows: TrendRow[], key: ShipKey) {
+  const window = asOfResult(rows, key);
+  const all = window && attemptsOf(window, key);
   if (!all) return null;
   const current = all.filter((a) => a.shipId === key.shipId).pop();
   return current ? { current, mine: all.slice(0, all.indexOf(current) + 1) } : null;
@@ -173,11 +210,7 @@ function stalled(counts: (number | null)[]): boolean {
 export function summariseTrend(rows: TrendRow[], key: ShipKey): TrendLine[] {
   const keyed = branchAttempts(rows, key);
   if (!keyed) return [];
-  const blocking = new Set(
-    keyed.current.rows
-      .filter((r) => r.type === 'review_result' && r.status === 'fail' && r.reviewer)
-      .map((r) => r.reviewer ?? ''),
-  );
+  const blocking = new Set(keyed.current.rows.filter(isReviewFail).map((r) => r.reviewer ?? ''));
   const lines: TrendLine[] = [];
   for (const reviewer of blocking) {
     const streak = streakOf(keyed.mine, reviewer);
@@ -186,6 +219,31 @@ export function summariseTrend(rows: TrendRow[], key: ShipKey): TrendLine[] {
     if (stalled(counts)) lines.push({ reviewer, counts });
   }
   return lines;
+}
+
+/** The ambiguity that silenced this ship's trend, when its own current attempt blocked on review. */
+export function trendSuppression(rows: TrendRow[], key: ShipKey): Ambiguity | undefined {
+  const window = asOfResult(rows, key);
+  const why: Why = {};
+  if (!window || attemptsOf(window, key, why)) return undefined;
+  const start = lastKeyed(window, 'ship_attempt', key);
+  const blocked = start >= 0 && window.slice(start).some((r) => isKeyed(r, key) && isReviewFail(r));
+  return blocked ? why.ambiguity : undefined;
+}
+
+/** The digest's trend text. A live ship whose line an ambiguity hid also records why, unprinted. */
+export function trendNarration(rows: TrendRow[], key: ShipKey): string {
+  // Only the ship itself: a replay of a past id must not write rows stamped with the replayer's run.
+  const live = process.env.DEVKIT_SHIP_ID === key.shipId;
+  const suppressed = live ? trendSuppression(rows, key) : undefined;
+  if (suppressed) {
+    emitGateEvent({
+      type: 'trend_suppressed',
+      reason: suppressed.reason,
+      offending_ship_id: suppressed.shipId,
+    });
+  }
+  return renderTrend(summariseTrend(rows, key));
 }
 
 /** The newest HISTORY_CAP attempts of this ship's branch, read backward. Never throws. */
