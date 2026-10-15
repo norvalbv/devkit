@@ -231,7 +231,9 @@ gate, and holds it until it exits — or until --wait-ci starts polling, which n
 by default; ~/.devkit/ship-queue/config.json {"slots": N} (1..4) lets N ships run at once. A
 waiting ship prints its position once. A slot frees itself when its ship (and that ship's whole
 process group) is gone. There is no way to skip it; \`devkit ship --queue\` names the running ship
-with the \`ps\` that inspects it if it looks stuck. Every blocked attempt records its
+with the \`ps\` that inspects it if it looks stuck. Every attempt ends with one
+\`attempt <id> <branch>: queued Ns · setup Ns · gates Ns …\` line, also kept in
+~/.devkit/telemetry/logs/<id>.log. Every blocked attempt records its
 invocation — retry with \`devkit ship --resume <branch>\` instead of re-typing the command.`,
 };
 
@@ -371,6 +373,7 @@ async function queueThenRun(
   // <branch> is the first positional in every form (`--resume <branch>`, `--pr <branch>`, `<branch> …`).
   const branch = args.find((arg) => !arg.startsWith('--')) ?? '(unknown)';
   let queued: Awaited<ReturnType<ShipDependencies['enterQueue']>>;
+  const enqueuedAt = Date.now();
   try {
     queued = await dependencies.enterQueue({ env, repo: repoRoot(cwd), branch, mode: queueMode });
   } catch (cause) {
@@ -379,11 +382,17 @@ async function queueThenRun(
     console.error('  Fix the cause above and re-run; the queue cannot be skipped.');
     return 1;
   }
+  const grantedAt = Date.now();
+  // The shell prints these on its `attempt …` line, so a queue wait never reads as gate time.
+  const timing = {
+    DEVKIT_SHIP_QUEUED_S: String(Math.round((grantedAt - enqueuedAt) / 1000)),
+    DEVKIT_SHIP_GRANTED_AT: String(Math.floor(grantedAt / 1000)),
+  };
   try {
     return await dependencies.runManagedScript(`${mode}.sh`, args, {
       command: 'devkit ship',
       cwd,
-      env: { ...env, ...queued.env },
+      env: { ...env, ...queued.env, ...timing },
     });
   } finally {
     queued.handle?.release();

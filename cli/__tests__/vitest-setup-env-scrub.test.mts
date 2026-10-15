@@ -211,8 +211,9 @@ describe('vitest.setup.mjs scrubs inherited gate policy', () => {
     for (const name of knobs) expect(env[name], name).toBeUndefined();
   });
 
-  it('scrubs the queue slot of the ship running the suite', () => {
-    const slot = [SLOT_ENV, SLOT_DIR_ENV, SLOT_RELEASE_ENV];
+  it('scrubs the queue slot and queue wait of the ship running the suite', () => {
+    const timing = ['DEVKIT_SHIP_QUEUED_S', 'DEVKIT_SHIP_GRANTED_AT'];
+    const slot = [SLOT_ENV, SLOT_DIR_ENV, SLOT_RELEASE_ENV, ...timing];
     expect([...SHIP_QUEUE_ENV].sort()).toEqual([...slot].sort());
     const env = envAfterSetup(Object.fromEntries(slot.map((name) => [name, '1'])));
     for (const name of slot) expect(env[name], name).toBeUndefined();
