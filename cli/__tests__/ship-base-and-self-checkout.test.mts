@@ -398,6 +398,103 @@ describe('ship-branch.sh — the branch is checked out in THIS worktree (sc-2261
       expect(retry.status, retry.stderr).toBe(0);
       expect(remoteBranchExists(bare, 'story')).toBe(true);
     });
+
+    it('names a dirty committed path between the rename and the ancestry blocker', () => {
+      const { env, git, wt, wtGit, tip } = seedFromBranch({ behind: true });
+      writeFileSync(join(wt, 'own.txt'), 'dirty\n');
+
+      const r = ship(wt, env);
+
+      expect(r.status, r.stderr).not.toBe(0);
+      const order = [
+        /git branch -m 'story' "devkit-freed-/,
+        /also blocked — --from-branch refuses uncommitted overlays/,
+        /^ {2}own\.txt \(worktree\)$/m,
+        /also blocked — --from-branch: origin\/work \(\w+\) is not an ancestor/,
+      ].map((re) => r.stderr.search(re));
+      expect(order[0], r.stderr).toBeGreaterThan(-1);
+      expect(order, r.stderr).toEqual([...order].sort((a, b) => a - b));
+      expect(wtGit(['rev-parse', 'story']).trim()).toBe(tip);
+      expect(git(['worktree', 'list'], { encoding: 'utf8' })).not.toMatch(EPHEMERAL_WT_RE);
+    });
+
+    it('the three printed remedies, applied in order, let the same ship through', () => {
+      const { env, wt, wtGit, bare } = seedFromBranch({ behind: true });
+      writeFileSync(join(wt, 'own.txt'), 'dirty\n');
+
+      const refused = ship(wt, env);
+      const ren = refused.stderr.match(/^ {4}(git branch -m .*)$/m);
+      expect(ren, refused.stderr).toBeTruthy();
+      execFileSync('/bin/bash', ['-c', ren[1]], { cwd: wt, env: { ...process.env, ...GIT_ENV } });
+      wtGit(['checkout', '--', 'own.txt']);
+      wtGit(['fetch', '-q', 'origin', 'work']);
+      wtGit(['rebase', '-q', 'origin/work']);
+
+      const retry = ship(wt, { ...env, PATH: `${ghStub('exit 0')}:${process.env.PATH}` });
+
+      expect(retry.status, retry.stderr).toBe(0);
+      expect(remoteBranchExists(bare, 'story')).toBe(true);
+    });
+
+    it('names a dirty committed path after the rename even when the base is current', () => {
+      const { env, wt } = seedFromBranch({ behind: false });
+      writeFileSync(join(wt, 'own.txt'), 'dirty\n');
+
+      const r = ship(wt, env);
+
+      expect(r.status, r.stderr).not.toBe(0);
+      const rename = r.stderr.search(/git branch -m 'story' "devkit-freed-/);
+      const overlay = r.stderr.search(/also blocked — --from-branch refuses uncommitted overlays/);
+      expect(rename, r.stderr).toBeGreaterThan(-1);
+      expect(overlay, r.stderr).toBeGreaterThan(rename);
+      expect(r.stderr).not.toMatch(/not an ancestor/);
+    });
+
+    it('scans only what the branch committed, never a path only the moved base changed', () => {
+      const { env, wt } = seedFromBranch({ behind: true });
+      writeFileSync(join(wt, 'moved.txt'), 'untracked here, committed on the base\n');
+
+      const r = ship(wt, env);
+
+      expect(r.status, r.stderr).not.toBe(0);
+      expect(r.stderr).toMatch(/also blocked — --from-branch: .* is not an ancestor/);
+      expect(r.stderr).not.toMatch(/uncommitted overlays|moved\.txt/);
+    });
+
+    it('still names the ancestry blocker when HEAD shares no history with the base', () => {
+      const { env, wt, wtGit } = seedFromBranch({ behind: true });
+      wtGit(['checkout', '-q', '--orphan', 'lone']);
+      wtGit(['commit', '-q', '-m', 'unrelated root']);
+
+      const r = spawnSync('/bin/bash', [scriptPath, 'other', ...FROM_BRANCH_ARGS.slice(1)], {
+        cwd: wt,
+        encoding: 'utf8',
+        env,
+      });
+
+      expect(r.status, r.stderr).toBe(1);
+      expect(r.stderr).toMatch(/^--from-branch: origin\/work \(\w+\) is not an ancestor/m);
+      expect(r.stderr).not.toMatch(/uncommitted overlays|could not/);
+    });
+
+    it('names the overlay before the ancestry blocker when the branch is not self-held', () => {
+      const { env, git, wt } = seedFromBranch({ behind: true });
+      writeFileSync(join(wt, 'own.txt'), 'dirty\n');
+
+      const r = spawnSync('/bin/bash', [scriptPath, 'other', ...FROM_BRANCH_ARGS.slice(1)], {
+        cwd: wt,
+        encoding: 'utf8',
+        env,
+      });
+
+      expect(r.status, r.stderr).not.toBe(0);
+      const overlay = r.stderr.search(/^--from-branch refuses uncommitted overlays/m);
+      const ancestry = r.stderr.search(/also blocked — --from-branch: .* is not an ancestor/);
+      expect(overlay, r.stderr).toBeGreaterThan(-1);
+      expect(ancestry, r.stderr).toBeGreaterThan(overlay);
+      expect(r.stderr).not.toMatch(/git branch -m/);
+      expect(localBranchExists(git, 'other')).toBe(false);
+    });
   });
 });
 
