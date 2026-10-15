@@ -606,3 +606,159 @@ describe('gate-digest CLI — the wiring a ship actually runs', () => {
     expect(out).not.toContain('blocking rounds');
   });
 });
+
+const CG = 'commit-guard';
+const FILE = 'cli/lib/ship/digest/trend.mts';
+/** A domain reviewer's blocking lens whose `n` issues each cite `file:line`. */
+const failAt = (n: number, file: string, lens = 'concurrency-races', reviewer = CR): Row => ({
+  type: 'review_result',
+  reviewer,
+  status: 'fail',
+  items: [
+    {
+      lens,
+      status: 'fail',
+      disposition: 'blocking',
+      issues: Array.from({ length: n }, (_, i) => `${file}:${67 + i} — instance ${i}`),
+    },
+  ],
+});
+/** commit-guard's real shape: the item's lens IS the path, and its issue cites only a bare line. */
+const guardAt = (file: string): Row => ({
+  type: 'review_result',
+  reviewer: CG,
+  status: 'fail',
+  item_artifact: 'files',
+  items: [{ lens: file, status: 'fail', issues: ['line 74: a displaced attempt finishing first'] }],
+});
+/** Rounds alternating reviewers on one file; neither reviewer alone reaches a 3-round streak. */
+const handoffRounds = (middle: TrendRow[]) => [
+  ...attempt('s1', [guardAt(FILE)]),
+  ...attempt('s2', [failAt(2, FILE)]),
+  ...middle,
+  ...attempt('s4', [guardAt(FILE)]),
+  ...attempt('s5', [failAt(2, FILE)]),
+];
+
+describe('summariseTrend — a class moving between reviewers on one file', () => {
+  // The reported ship: one class on trend.mts, three correctness lenses, then commit-guard alone.
+  const incident = [
+    ...attempt('s1', [failAt(3, FILE, 'writer-reader-contracts')]),
+    ...attempt('s2', [failAt(1, FILE, 'concurrency-races')]),
+    ...attempt('s3', [failAt(2, FILE, 'writer-reader-contracts')]),
+    ...attempt('s4', [failAt(1, FILE), guardAt(FILE)]),
+    ...attempt('s5', [pass(), guardAt(FILE)]),
+  ];
+
+  it('leaves the round a reviewer streak already names to that streak alone', () => {
+    const text = trendOf(incident, 's4');
+    expect(text).toContain(`${CR}: 4 blocking rounds`);
+    expect(text).not.toContain('↻ review:');
+  });
+
+  it('names the file once correctness passes and commit-guard alone blocks it', () => {
+    expect(trendOf(incident, 's5')).toContain(
+      `↻ review: ${FILE} drew blocking findings in 5 rounds running across reviewers (${CR}, ${CG}) — 3 → 1 → 2 → 2 → 1 blocking findings per round, not converging`,
+    );
+  });
+
+  it('never joins rounds that block on unrelated files', () => {
+    const across = (a: string, b: string, c: string) => [
+      ...attempt('s1', [failAt(2, a)]),
+      ...attempt('s2', [guardAt(b)]),
+      ...attempt('s3', [guardAt(c)]),
+    ];
+    expect(trendOf(across('a.mts', 'b.mts', 'c.mts'), 's3')).toBe('');
+    expect(trendOf(across('a.mts', 'a.mts', 'a.mts'), 's3')).toContain('↻ review: a.mts');
+  });
+
+  it('stays silent when a reviewer with its own streak is converging, even if the sum is not', () => {
+    const events = [
+      ...attempt('s1', [failAt(3, FILE)]),
+      ...attempt('s2', [failAt(2, FILE)]),
+      ...attempt('s3', [failAt(1, FILE), guardAt(FILE)]),
+    ];
+    expect(trendOf(events, 's3')).toBe('');
+  });
+
+  it('ends the run at a round whose files are unknown (a spilled vector)', () => {
+    const spilled: Row = { type: 'review_result', reviewer: CG, status: 'fail' };
+    const events = [
+      ...attempt('s1', [failAt(2, FILE)]),
+      ...attempt('s2', [spilled]),
+      ...attempt('s3', [guardAt(FILE)]),
+    ];
+    expect(trendOf(events, 's3')).toBe('');
+  });
+
+  it('skips a round another gate blocked, and stops at an all-pass round or a green ship', () => {
+    const gate = attempt('s3', [], { exit_code: 1 });
+    expect(trendOf(handoffRounds(gate), 's5')).toContain('in 4 rounds running');
+    const outage = attempt('s3', [{ type: 'review_result', reviewer: CR, status: 'inconclusive' }]);
+    expect(trendOf(handoffRounds(outage), 's5')).toContain('in 4 rounds running');
+    const allPass = attempt('s3', [pass(), pass(CG)], { exit_code: 1 });
+    expect(trendOf(handoffRounds(allPass), 's5')).toBe('');
+    const cached = attempt('s3', [{ type: 'cache_hit', judge: `review:${CG}` }]);
+    expect(trendOf(handoffRounds(cached), 's5')).toBe('');
+    expect(trendOf(handoffRounds(attempt('s3', [], { exit_code: 0 })), 's5')).toBe('');
+  });
+
+  it('identifies a file only by its exact repo path — a bare basename never joins one', () => {
+    const BP = 'backend-performance-reviewer';
+    /** One blocking lens whose issues cite each of `files`. */
+    const cites = (reviewer: string, ...files: string[]): Row => ({
+      ...failAt(1, files[0], 'n-plus-one', reviewer),
+      items: [{ lens: 'n-plus-one', status: 'fail', issues: files.map((f) => `${f}:3 x`) }],
+    });
+    const run = (r1: Row, r2: Row, r3: Row) => [
+      ...attempt('s1', [r1]),
+      ...attempt('s2', [r2]),
+      ...attempt('s3', [r3]),
+    ];
+    expect(trendOf(run(cites(CR, FILE), guardAt(FILE), guardAt(FILE)), 's3')).toContain(
+      `↻ review: ${FILE}`,
+    );
+    expect(trendOf(run(cites(CR, 'trend.mts'), guardAt(FILE), guardAt(FILE)), 's3')).toBe('');
+    // Bare current round against two directories, then two directories against bare earlier rounds.
+    const [a, b] = ['src/a/index.ts', 'src/b/index.ts'];
+    expect(trendOf(run(guardAt(b), cites(BP, a, b), cites(CR, 'index.ts')), 's3')).toBe('');
+    const twoDirsLast = run(cites(CR, 'index.ts'), cites(BP, 'index.ts'), cites(CR, a, b));
+    expect(trendOf(twoDirsLast, 's3')).toBe('');
+  });
+
+  it('names the longest path when every round cites the file both bare and in full', () => {
+    const both = (reviewer: string): Row => ({
+      ...failAt(2, FILE, 'state-transitions', reviewer),
+      items: [
+        { lens: 'state-transitions', status: 'fail', issues: ['trend.mts:3 a', `${FILE}:9 b`] },
+      ],
+    });
+    const BP = 'backend-performance-reviewer';
+    const events = [
+      ...attempt('s1', [both(CR)]),
+      ...attempt('s2', [both(BP)]),
+      ...attempt('s3', [both(CR)]),
+    ];
+    expect(trendOf(events, 's3')).toContain(`↻ review: ${FILE} drew`);
+  });
+
+  it('stays silent when the cross-reviewer count on one file is falling', () => {
+    const BP = 'backend-performance-reviewer';
+    const falling = [
+      ...attempt('s1', [failAt(3, FILE)]),
+      ...attempt('s2', [failAt(2, FILE, 'n-plus-one', BP)]),
+      ...attempt('s3', [failAt(1, FILE)]),
+    ];
+    expect(trendOf(falling, 's3')).toBe('');
+  });
+
+  it('goes silent when the attempts are ambiguous', () => {
+    const reopened = [{ type: 'ship_attempt', ship_id: 's5', ...where }, ...attempt('s5', [])];
+    expect(trendOf([...handoffRounds([]), ...reopened], 's5')).toBe('');
+  });
+
+  it('reaches the digest CLI a ship runs', () => {
+    const out = digest(shellLines(incident), 's5', shipEnv);
+    expect(out).toContain(`↻ review: ${FILE} drew blocking findings in 5 rounds`);
+  });
+});
