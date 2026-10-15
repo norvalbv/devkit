@@ -3,7 +3,7 @@
 import { failLine, writeGateReason } from '../../../../gate-engine/deterministic/reason.mts';
 import type { AntiSlopBaseline, BaselineEntry, BaselineIncrease } from './baseline.mts';
 import { ANTI_SLOP_BASELINE_REL } from './constants.mts';
-import type { FindingGroup } from './diagnostics.mts';
+import { type FindingGroup, formatGroupSites } from './diagnostics.mts';
 
 /** A changed candidate path that may have vacated debt, and the base path its evidence lives at. */
 export interface RelocationSource {
@@ -225,7 +225,7 @@ export function printRelocatedAntiSlopFindings(groups: readonly RelocatedGroup[]
   for (const group of groups) {
     const tag = group.severity === 'error' ? 'RELOCATED' : 'RELOCATED-WARN';
     console.log(
-      `${tag} ${group.ruleId} ${group.file}:${group.line}:${group.column} <- ${formatSources(group.sources)} (+${group.relocatedCount})`,
+      `${tag} ${group.ruleId} ${formatGroupSites(group, group.relocatedCount, 'relocated')} <- ${formatSources(group.sources)}`,
     );
     console.log(`      ${group.diagnostic}`);
   }
@@ -248,7 +248,7 @@ export function reportRelocatedFailure(
   writeGateReason(
     errors.map(
       (group) =>
-        `RELOCATED ${group.ruleId} ${group.file}:${group.line}:${group.column} (+${group.relocatedCount})`,
+        `RELOCATED ${group.ruleId} ${formatGroupSites(group, group.relocatedCount, 'relocated')}`,
     ),
   );
 }

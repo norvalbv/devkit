@@ -8,7 +8,7 @@ import {
   pruneBaseline,
   removedBaselineMigrationReceipts,
 } from './baseline.mts';
-import type { FindingGroup } from './diagnostics.mts';
+import { type FindingGroup, formatGroupSites } from './diagnostics.mts';
 
 const group = (
   fingerprint: string,
@@ -24,9 +24,22 @@ const group = (
   line: 1,
   column: 1,
   count,
+  locations: Array.from({ length: count }, (_, index) => ({ line: index + 1, column: 1 })),
 });
 
 describe('anti-slop shrink-only baseline', () => {
+  it('keeps finding sites out of the committed baseline', () => {
+    const [entry] = baselineFromGroups([group('a', 2)]).entries;
+    expect(Object.keys(entry ?? {}).sort()).toEqual([
+      'context',
+      'count',
+      'diagnostic',
+      'file',
+      'fingerprint',
+      'ruleId',
+    ]);
+  });
+
   it('allows existing debt but surfaces only counts above the baseline', () => {
     const baseline = baselineFromGroups([group('a', 2), group('b', 1)]);
     const compared = compareBaseline(baseline, [group('a', 3), group('c', 1, 'warning')]);
@@ -36,6 +49,15 @@ describe('anti-slop shrink-only baseline', () => {
       expect.objectContaining({ fingerprint: 'c', additionalCount: 1, severity: 'warning' }),
     ]);
     expect(compared.resolvedCount).toBe(1);
+  });
+
+  it('names every identical site when baselined debt gains a copy, counting only the excess', () => {
+    const baseline = baselineFromGroups([group('a', 2)]);
+    const [grown] = compareBaseline(baseline, [group('a', 3)]).newGroups;
+    if (!grown) throw new Error('expected the grown fingerprint');
+    expect(formatGroupSites(grown, grown.additionalCount, 'new')).toBe(
+      'src/file.ts:1:1, src/file.ts:2:1, src/file.ts:3:1 (1 new of 3 identical)',
+    );
   });
 
   it('prunes absent/decreased debt and never adds a current unbaselined finding', () => {

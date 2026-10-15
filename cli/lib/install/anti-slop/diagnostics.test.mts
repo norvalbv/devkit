@@ -63,7 +63,14 @@ describe('anti-slop fingerprints', () => {
     if (!one) throw new Error('expected one anti-slop finding');
     const groups = groupFindings([one, { ...one, severity: 'error', column: 20 }]);
     expect(groups).toHaveLength(1);
-    expect(groups[0]).toMatchObject({ count: 2, severity: 'error' });
+    expect(groups[0]).toMatchObject({
+      count: 2,
+      severity: 'error',
+      locations: [
+        { line: 1, column: one.column },
+        { line: 1, column: 20 },
+      ],
+    });
   });
 
   it('rejects diagnostics outside the repository', () => {
