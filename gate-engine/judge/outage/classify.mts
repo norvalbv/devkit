@@ -161,6 +161,13 @@ function firstSentence(text: string): string | undefined {
 /** Classify one failed spawn. Order matters: a cap kill is decided before any provider text, so a
  *  judge killed mid-quota-warning still reads as a timeout — the remedy that actually works. */
 export function classifyJudgeOutage(e: JudgeError): JudgeOutage {
+  // A sync overflow arrives as ENOBUFS + SIGTERM, which reads as a timeout no longer cap would fix.
+  if (e.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' || e.code === 'ENOBUFS')
+    return {
+      kind: 'transient',
+      detail: 'judge output exceeded the spawn buffer',
+      permanent: false,
+    };
   if (isJudgeTimeout(e)) return { kind: 'timeout', permanent: true };
   if (e.code === 'ENOENT') return { kind: 'absent', permanent: true };
 

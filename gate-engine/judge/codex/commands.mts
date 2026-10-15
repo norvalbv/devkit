@@ -1,6 +1,6 @@
 // The commands a codex judge ran (`command_execution` items; codex emits no duration), stored for
 // every outcome so a FAIL caused by the judge's own command stays diagnosable after the run.
-import { saveTranscriptUnique } from '../transcript-store.mts';
+import { saveSidecar } from '../transcript-store.mts';
 import { type CodexEventItem, codexEventsOf } from './result.mts';
 
 // Output is kept only for a failed command, and only this much: enough to name the error, too
@@ -32,10 +32,5 @@ export function saveCodexCommands(
   raw: string | undefined,
   lens?: string,
 ): string | null {
-  const lines = raw ? codexCommandLines(raw) : [];
-  if (lines.length === 0) return null;
-  return saveTranscriptUnique(
-    `${label}.commands`,
-    `${lens ? `lens: ${lens}\n` : ''}${lines.join('\n')}\n`,
-  );
+  return saveSidecar(`${label}.commands`, raw ? codexCommandLines(raw) : [], lens);
 }

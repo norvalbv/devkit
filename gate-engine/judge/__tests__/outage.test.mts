@@ -35,6 +35,19 @@ describe('classifyJudgeOutage', () => {
     expect(outage.permanent).toBe(true);
   });
 
+  it('a buffer overflow is not a timeout, though the sync spawn reports it as SIGTERM', () => {
+    // The error shapes Node 22 hands back: execFileSync, then execFile, overflowing a live child.
+    const overflows = [
+      { code: 'ENOBUFS', signal: 'SIGTERM' },
+      { code: 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' },
+    ];
+    for (const e of overflows) {
+      const outage = classifyJudgeOutage(e);
+      expect(outage).toMatchObject({ kind: 'transient', permanent: false });
+      expect(outage.detail).toMatch(/spawn buffer/);
+    }
+  });
+
   it('ENOENT is an absent binary, and no retry can install one', () => {
     const outage = classifyJudgeOutage({ code: 'ENOENT' });
     expect(outage.kind).toBe('absent');
