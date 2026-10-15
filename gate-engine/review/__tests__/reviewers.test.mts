@@ -491,6 +491,16 @@ describe('allowedToolsFor', () => {
     expect(tools).toContain(',mcp__codebase__searchCode');
     expect(tools).toContain('Bash(node .claude/skills/commit-guard/scripts/checklist.mjs:*)');
   });
+  it('commit-guard may run only the read-only allowlist lookup, not the writes or search-code', () => {
+    const guard = REVIEWERS.find((r) => r.name === 'commit-guard');
+    const bash = allowedToolsFor(guard, cfg)
+      .split(',')
+      .filter((t) => t.startsWith('Bash('));
+    expect(bash).toContain('Bash(guard-dup-allowlist check:*)');
+    expect(bash.filter((t) => t.includes('guard-dup-allowlist'))).toHaveLength(1);
+    expect(bash.join()).not.toMatch(/search-code|vitest/);
+    expect(allowedToolsFor(REVIEWERS[0], cfg)).not.toContain('guard-dup-allowlist');
+  });
   it('grants a provider-projected checklist path when the consumer resolver supplies one', () => {
     const tools = allowedToolsFor(REVIEWERS[0], cfg, '.agents');
     expect(tools).toContain('Bash(node .agents/skills/api-security/scripts/checklist.mjs:*)');
