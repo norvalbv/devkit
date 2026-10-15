@@ -26,10 +26,12 @@ import {
   SKIPPED_ON_GREEN,
 } from '../lib/baseline-status/regression-evidence.mts';
 import * as windowsSupervisor from '../lib/baseline-status/regression-windows-supervisor.mts';
+import { captureRegressionEvidence } from '../lib/baseline-status/regression-proof.mts';
 import {
   createRegressionClone,
   linkRegressionDependencies,
   localizedDependencyLink,
+  prepareRegressionRepository,
   snapshotRegressionCaller,
   splitNulPathBytes,
 } from '../lib/baseline-status/regression-repository.mts';
@@ -488,6 +490,24 @@ describe('devkit prove-regression', () => {
     expect(evidence.red.testCounts).toBeNull();
     expect(evidence.green.testCounts).toBeNull();
   });
+
+  it('marks each phase where it starts, so a caller bills each operand its own run', async () => {
+    const fx = fixture();
+    const sleep = [process.execPath, '-e', 'setTimeout(() => {}, 1200)'];
+    const prepared = prepareRegressionRepository(
+      ['--red', fx.red, '--green', fx.green, '--', ...sleep],
+      fx.cwd,
+    );
+    const marks: Array<[string, number]> = [];
+    await captureRegressionEvidence(prepared, (name) => marks.push([name, performance.now()]));
+
+    expect(marks.map(([name]) => name)).toEqual(['red', 'green', 'cleanup']);
+    // SAFETY: the toEqual above pinned exactly three marks.
+    const [red, green, cleanup] = marks.map(([, at]) => at) as [number, number, number];
+    // A mark moved before or after its operand's run would bill ~0 ms to that operand.
+    expect(green - red).toBeGreaterThanOrEqual(1200);
+    expect(cleanup - green).toBeGreaterThanOrEqual(1200);
+  }, 60_000);
 
   it('makes an explicitly requested but missing report inconclusive', () => {
     const fx = fixture();
