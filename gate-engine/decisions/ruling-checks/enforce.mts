@@ -21,6 +21,8 @@ const NOTE_LINE = '^- [0-9]{4}-[0-9]{2}-[0-9]{2} — \\*\\*Check:\\*\\*';
 const NOTE_LINE_RE = /^- \d{4}-\d{2}-\d{2} — \*\*Check:\*\*/m;
 export const BYPASS_SUFFIX = 'DECISION_CHECKS_OK';
 const TIMEOUT_MS = 120_000;
+// guard-deterministic labels this exit could-not-run: it still blocks, but is no verdict.
+const NO_VERDICT = 2;
 const RULING_CAP = 2000;
 const WS_RE = /\s+/;
 const DOT_SLASH_RE = /^(?:\.\/)+/;
@@ -116,8 +118,15 @@ export async function linkedChecks(cwd: string, staged: string[]): Promise<Link[
   ];
 }
 
+interface Failure {
+  why: string;
+  /** False when the Check never reached a verdict: it says nothing about the code. */
+  verdict: boolean;
+}
+const unrun = (why: string): Failure => ({ why: `could not run: ${why}`, verdict: false });
+
 /** Why one Check failed, or null when it passed: argv-split, no shell, no stdin, bounded. */
-function runCheck(cwd: string, cmd: string, spawn: Spawn): string | null {
+function runCheck(cwd: string, cmd: string, spawn: Spawn): Failure | null {
   const [bin, ...args] = argvOf(cmd);
   // The Check's own children must not write into this gate's failure reason.
   const env = { ...process.env, [GATE_REASON_ENV]: '' };
@@ -128,11 +137,12 @@ function runCheck(cwd: string, cmd: string, spawn: Spawn): string | null {
     timeout: TIMEOUT_MS,
   });
   const code = r.error && 'code' in r.error ? r.error.code : undefined;
-  if (code === 'ENOENT') return 'could not run: command not found';
-  if (code === 'ETIMEDOUT') return `could not run: no exit within ${TIMEOUT_MS / 1000}s`;
-  if (r.error) return `could not run: ${r.error.message}`;
+  if (code === 'ENOENT') return unrun('command not found');
+  if (code === 'ETIMEDOUT') return unrun(`no exit within ${TIMEOUT_MS / 1000}s`);
+  if (r.error) return unrun(r.error.message);
   if (r.status === 0) return null;
-  return r.status === null ? 'could not run: killed by a signal' : `exited ${r.status}`;
+  if (r.status === null) return unrun('killed by a signal');
+  return { why: `exited ${r.status}`, verdict: true };
 }
 
 interface Due extends Link {
@@ -153,15 +163,26 @@ function dueChecks(links: Link[], staged: string[]): Map<string, Due> {
   return due;
 }
 
-function printRemedy(): void {
-  console.error('   Fix the code, do not weaken the check.');
-  console.error('   If the ruling changed, commit the new Target or the unlink on its own first:');
-  console.error('     guard-decisions enforce link <slug> --check none --reason "<why>"');
+/** Prints the remedy and returns the exit: 0 none failed, 1 one failed, 2 none reached a verdict. */
+function remedy(failures: Failure[]): number {
+  if (!failures.length) return 0;
+  const violated = failures.some((f) => f.verdict);
+  if (violated) {
+    console.error('   Fix the code, do not weaken the check.');
+    console.error(
+      '   If the ruling changed, commit the new Target or the unlink on its own first:',
+    );
+    console.error('     guard-decisions enforce link <slug> --check none --reason "<why>"');
+  } else {
+    console.error('   No Check reached a verdict, so this is not a finding against your code.');
+    console.error('   Its own output above names what held it; re-run once that clears.');
+  }
   console.error("   If the check's path moved, re-link it with the new command:");
   console.error('     guard-decisions enforce link <slug> --check "<cmd>" --reason "<why>"');
+  return violated ? 1 : NO_VERDICT;
 }
 
-/** The decision-checks gate: 0 when every Check this commit touches passes, else 1. */
+/** The decision-checks gate: 0 every Check passed, 1 one failed, 2 none reached a verdict. */
 export async function runGate(cwd = process.cwd(), spawn: Spawn = spawnSync): Promise<number> {
   if (envFlag(BYPASS_SUFFIX)) {
     emitGateBypass(GATE, `GUARD_${BYPASS_SUFFIX}`);
@@ -183,7 +204,7 @@ export async function runGate(cwd = process.cwd(), spawn: Spawn = spawnSync): Pr
   }
   const due = dueChecks(links, staged);
   const unstaged = due.size ? changedFiles(cwd, []) : [];
-  let failed = false;
+  const failures: Failure[] = [];
   for (const [key, l] of due) {
     if (l.named.length) {
       console.error(
@@ -197,15 +218,14 @@ export async function runGate(cwd = process.cwd(), spawn: Spawn = spawnSync): Pr
       );
     }
     console.log(`▶ ${GATE}: ${l.slug} — ${l.cmd}`);
-    const why = runCheck(cwd, l.cmd, spawn);
-    if (why === null) continue;
-    failed = true;
+    const failure = runCheck(cwd, l.cmd, spawn);
+    if (failure === null) continue;
+    failures.push(failure);
     const unlinked = indexKeys.has(key) ? '' : ' (unlinked in this commit)';
-    failLine(`${l.slug}${unlinked}: \`${l.cmd}\` ${why}`);
+    failLine(`${l.slug}${unlinked}: \`${l.cmd}\` ${failure.why}`);
     failLine(`Ruling (${l.slug}): ${capped(l.ruling)}`);
   }
-  if (failed) printRemedy();
-  return failed ? 1 : 0;
+  return remedy(failures);
 }
 
 function refuse(why: string): number {
@@ -238,8 +258,9 @@ export async function linkCheck(
       return refuse(`"${slug}" has no Scope, so its Check would never run; rescope it first.`);
     }
     console.log(`▶ running \`${check}\` before linking it`);
-    const why = runCheck(cwd, check, spawn);
-    if (why !== null) return refuse(`\`${check}\` ${why}; a Check must pass before it is linked.`);
+    const failure = runCheck(cwd, check, spawn);
+    if (failure)
+      return refuse(`\`${check}\` ${failure.why}; a Check must pass before it is linked.`);
   }
   const { cmdAdd } = await import('../decisions.mts');
   cmdAdd(slug, { note: `${CHECK_TAG} ${check} — ${reason.trim()}` }, cwd);
@@ -294,6 +315,6 @@ export async function main(argv: string[]): Promise<void> {
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   main(process.argv.slice(2)).catch((error) => {
     failLine(`${GATE}: ${error instanceof Error ? error.message : String(error)}`);
-    process.exit(1);
+    process.exit(NO_VERDICT);
   });
 }

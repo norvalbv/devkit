@@ -65,7 +65,12 @@ import {
   structureBypassed,
 } from './command-gates.mts';
 import { printRecheckFooter, recheckCommand, recheckLines, registryRecheck } from './recheck.mts';
-import { type ConfigComponent, DETERMINISTIC, type RawDevkitComponents } from './registry.mts';
+import {
+  COULD_NOT_RUN,
+  type ConfigComponent,
+  DETERMINISTIC,
+  type RawDevkitComponents,
+} from './registry.mts';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 // Sibling gate modules are spawned as `node <path>`. In dev the tree is .mts (Node strips types at
@@ -76,10 +81,6 @@ const SELF_EXT = import.meta.url.endsWith('.mts') ? '.mts' : '.mjs';
 // Telemetry: strip the `guard-` bin prefix to get the bare gate name (module-level per biome's
 // useTopLevelRegex). Outcome suffixes are recorded apart from the label, never parsed back off it.
 const GUARD_PREFIX_RE = /^guard-/;
-// The suffix a STRICT run appends to a gate that opted out. Distinct from `(unexpected:2)`, which
-// stays reserved for a gate whose exit 2 was never an opt-out (an `--extra` command's fatal config
-// error): both are could-not-run for telemetry, but only this one is an opt-out we chose to reject.
-const COULD_NOT_RUN = '(could-not-run)';
 /** The blocked_gate token the ship script publishes for this whole chain (see the emits below). */
 const DETERMINISTIC_FAMILY = 'deterministic';
 // 127 is the shell's "command not found", so the gate's own binary never resolved — a dependency
