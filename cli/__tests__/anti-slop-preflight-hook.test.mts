@@ -437,6 +437,18 @@ describe('anti-slop-preflight.sh', () => {
       expect(argv(log)).toEqual([]);
     });
 
+    it('reads porcelain paths from the repo toplevel when CLAUDE_PROJECT_DIR is a subdirectory', () => {
+      const { root, log } = gitRepo('fail');
+      const app = join(root, 'packages', 'app');
+      mkdirSync(join(app, '.devkit', 'anti-slop'), { recursive: true });
+      writeFileSync(join(app, '.devkit', 'anti-slop', 'manifest.json'), '{}\n');
+      symlinkSync(join(root, 'node_modules'), join(app, 'node_modules'));
+      write(app, 'src/a.ts');
+      const payload = JSON.stringify({ tool_name: 'Bash', duration_ms: 500 });
+      expect(runBash(root, payload, app).status).toBe(2);
+      expect(argv(log)).toEqual(['anti-slop', 'check', '--', 'src/a.ts']);
+    });
+
     it('skips an unmerged file a conflicted merge left, which is not code the agent wrote', () => {
       const { root, log } = gitRepo('fail');
       backdate(write(root, 'src/c.ts', 'export const c = 1;\n'));
@@ -487,7 +499,7 @@ describe('anti-slop-preflight.sh', () => {
       const { root, log } = gitRepo('fail');
       const nested = join(root, '.claude', 'worktrees', 'x');
       git(root, 'worktree', 'add', '-q', nested);
-      // An overlay manifest is git-excluded, so a fresh worktree has none of its own.
+      // Models an overlay install: its manifest is git-excluded, so the worktree checks out without one.
       unlinkSync(join(nested, '.devkit', 'anti-slop', 'manifest.json'));
       const edit = JSON.stringify({
         tool_name: 'Write',

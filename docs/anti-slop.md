@@ -156,10 +156,12 @@ payload's `duration_ms` plus two seconds for coarse filesystem clocks. Each Bash
 - a Bash call that exits non-zero, which fires PostToolUseFailure instead;
 - a write made by a backgrounded command after it was launched;
 - a copy that preserves modification times (`cp -p`, `rsync -a`);
+- a file the same call also commits, which leaves it clean (the commit gates still check it);
 - any harness without `duration_ms`. Codex and Cursor do not get the Bash registration.
 
 A `cwd` outside any repository falls back to `CLAUDE_PROJECT_DIR`, still limited to that call's
-window. When a check fails, the output also prints a
+window. A file an Edit wrote within about two seconds before a short Bash call can be reported
+by both hooks. When a check fails, the output also prints a
 hint for each rule that has one (for example, a `deps` parameter instead of module mocking), plus the
 acceptance route for the install mode: a path-scoped override in the repository Oxlint config, or a
 local `create --force` in overlay. Anti-slop deliberately has no `GUARD_*` one-run bypass.

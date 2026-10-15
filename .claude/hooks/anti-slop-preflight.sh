@@ -35,7 +35,7 @@ const { dirname, join, relative, sep } = require("node:path");
 const startedAt = Date.now();
 const gitEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_")));
 const git = (dir, args) =>
-  execFileSync("git", ["-c", "core.fsmonitor=false", "-C", dir, ...args], { encoding: "utf8", env: gitEnv, stdio: ["ignore", "pipe", "ignore"] });
+  execFileSync("git", ["-c", "core.fsmonitor=false", "-C", dir, ...args], { encoding: "utf8", env: gitEnv, maxBuffer: 256 * 1024 * 1024, stdio: ["ignore", "pipe", "ignore"] });
 const toplevel = (dir) => { try { return realpathSync(git(dir, ["rev-parse", "--show-toplevel"]).trim()); } catch { return null; } };
 // Porcelain -z with --no-renames: one `XY path` record per entry; unmerged (U*, *U, AA, DD) skipped.
 const bashWrites = (root, durationMs) =>
@@ -53,7 +53,9 @@ process.stdin.on("data", (chunk) => (raw += chunk)).on("end", () => {
     const roots = [workspace, project].filter(Boolean);
     const holders = [payload, payload?.tool_input, ...(Array.isArray(payload?.tool_input?.edits) ? payload.tool_input.edits : [])];
     const named = holders.flatMap((h) => [h?.file_path, h?.path]).filter((p) => typeof p === "string" && p !== "");
-    if (process.env.ANTI_SLOP_BASH_WRITES === "1" && Number.isFinite(payload?.duration_ms)) named.push(...bashWrites(workspace ?? project, payload.duration_ms));
+    // Porcelain paths are relative to the repo toplevel, which a subdirectory project is not.
+    const bashRoot = workspace ?? toplevel(project);
+    if (process.env.ANTI_SLOP_BASH_WRITES === "1" && bashRoot && Number.isFinite(payload?.duration_ms)) named.push(...bashWrites(bashRoot, payload.duration_ms));
     const lines = new Set();
     for (const path of new Set(named)) {
       if (!/\.(?:[cm]?[jt]s|[jt]sx)$/.test(path) || !existsSync(path) || !statSync(path).isFile()) continue;

@@ -2,11 +2,11 @@
   "schemaVersion": 2,
   "kind": "hooks",
   "devkitRef": "v0.71.0",
-  "generatedAt": "2026-10-15T09:34:30.295Z",
+  "generatedAt": "2026-10-15T09:53:37.052Z",
   "files": {
     "adhd-prompt-anchor.mjs": "002e1ee4dd7f10ccef97babb57b7cf0e01c76433a18b4c8be4aa04ab89288504",
     "adhd-session-start.mjs": "b5257348cb11fe85742178f43bbde30a94d7b58cb8f67281e060c875bbe8bc80",
-    "anti-slop-preflight.sh": "09105bd684d3864d8b0ad72a154f27b1fb0a0ccdc4e1f7f5a50637056b242786",
+    "anti-slop-preflight.sh": "74dfe12de835dcd805c85e87528de9c19ecd30fdf4e37eb4b3af82d6d6ed75ea",
     "base-drift-brief.mjs": "6e1a6649f4ebb48bf26e4ff3adc6877f911d7e5648ddcf18183e84d660ee758d",
     "base-drift-lib.mjs": "4ba49ab26df20ad74535bfcd46606919c13d208e529f692140ede7c6a518d33b",
     "base-drift-session.mjs": "3d04656f26b9f470df367b1c5548cf7d932a1e6a24b697b1afc76758076d14bd",
@@ -19,7 +19,7 @@
       "files": {
         "adhd-prompt-anchor.mjs": "002e1ee4dd7f10ccef97babb57b7cf0e01c76433a18b4c8be4aa04ab89288504",
         "adhd-session-start.mjs": "b5257348cb11fe85742178f43bbde30a94d7b58cb8f67281e060c875bbe8bc80",
-        "anti-slop-preflight.sh": "09105bd684d3864d8b0ad72a154f27b1fb0a0ccdc4e1f7f5a50637056b242786",
+        "anti-slop-preflight.sh": "74dfe12de835dcd805c85e87528de9c19ecd30fdf4e37eb4b3af82d6d6ed75ea",
         "base-drift-brief.mjs": "6e1a6649f4ebb48bf26e4ff3adc6877f911d7e5648ddcf18183e84d660ee758d",
         "base-drift-lib.mjs": "4ba49ab26df20ad74535bfcd46606919c13d208e529f692140ede7c6a518d33b",
         "base-drift-session.mjs": "3d04656f26b9f470df367b1c5548cf7d932a1e6a24b697b1afc76758076d14bd",
@@ -32,7 +32,7 @@
       "files": {
         "adhd-prompt-anchor.mjs": "002e1ee4dd7f10ccef97babb57b7cf0e01c76433a18b4c8be4aa04ab89288504",
         "adhd-session-start.mjs": "b5257348cb11fe85742178f43bbde30a94d7b58cb8f67281e060c875bbe8bc80",
-        "anti-slop-preflight.sh": "09105bd684d3864d8b0ad72a154f27b1fb0a0ccdc4e1f7f5a50637056b242786",
+        "anti-slop-preflight.sh": "74dfe12de835dcd805c85e87528de9c19ecd30fdf4e37eb4b3af82d6d6ed75ea",
         "base-drift-brief.mjs": "6e1a6649f4ebb48bf26e4ff3adc6877f911d7e5648ddcf18183e84d660ee758d",
         "base-drift-lib.mjs": "4ba49ab26df20ad74535bfcd46606919c13d208e529f692140ede7c6a518d33b",
         "base-drift-session.mjs": "3d04656f26b9f470df367b1c5548cf7d932a1e6a24b697b1afc76758076d14bd",
@@ -45,7 +45,7 @@
       "files": {
         "adhd-prompt-anchor.mjs": "002e1ee4dd7f10ccef97babb57b7cf0e01c76433a18b4c8be4aa04ab89288504",
         "adhd-session-start.mjs": "b5257348cb11fe85742178f43bbde30a94d7b58cb8f67281e060c875bbe8bc80",
-        "anti-slop-preflight.sh": "09105bd684d3864d8b0ad72a154f27b1fb0a0ccdc4e1f7f5a50637056b242786",
+        "anti-slop-preflight.sh": "74dfe12de835dcd805c85e87528de9c19ecd30fdf4e37eb4b3af82d6d6ed75ea",
         "base-drift-brief.mjs": "6e1a6649f4ebb48bf26e4ff3adc6877f911d7e5648ddcf18183e84d660ee758d",
         "base-drift-lib.mjs": "4ba49ab26df20ad74535bfcd46606919c13d208e529f692140ede7c6a518d33b",
         "base-drift-session.mjs": "3d04656f26b9f470df367b1c5548cf7d932a1e6a24b697b1afc76758076d14bd",
