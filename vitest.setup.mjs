@@ -205,6 +205,10 @@ Object.assign(process.env, SUITE_GIT_IDENTITY);
   process.env.GIT_TEMPLATE_DIR = template;
 }
 
+// In a mach-lookup-denying sandbox, macOS git's xcrun shim caches into $TMPDIR/xcrun_db; pin it
+// here so a test's own TMPDIR stays empty there as it does locally.
+if (process.platform === 'darwin') process.env.xcrun_db ||= path.join(os.tmpdir(), 'xcrun_db');
+
 // The ship-path tests (ship-branch / reship / reconcile / …) spawn a REAL commit-with-gate-capture.sh
 // whose gate-events emitter defaults its sink to ~/.devkit/telemetry/gate-events.jsonl — the
 // developer's real ship telemetry. Redirect it to a throwaway per-worker temp file so test ships
