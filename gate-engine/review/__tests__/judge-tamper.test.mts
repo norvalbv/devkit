@@ -117,6 +117,14 @@ describe('staged-tree tamper detection', () => {
     expect(err).toContain('UNVERIFIABLE');
   });
 
+  it('an index.lock a parallel lane holds throughout the gate is not read as UNVERIFIABLE', async () => {
+    const repo = consumerRepo({ backend: true });
+    // The parallel completeness lane, or any judge's git status, holding the shared index's lock.
+    writeFileSync(join(repo, '.git', 'index.lock'), '');
+    expect(await runReviewGate(repo, { exec: passWithArtifact(repo) })).toBe(0);
+    expect(vi.mocked(console.error).mock.calls.flat().join('\n')).not.toContain('UNVERIFIABLE');
+  });
+
   it('working-tree-only writes (the checklist state file pattern) do not trip it', async () => {
     const repo = consumerRepo({ backend: true });
     const exec = mkExec(async ({ label }) => {

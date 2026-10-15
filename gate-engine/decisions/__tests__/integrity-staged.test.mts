@@ -89,6 +89,21 @@ function stage(root: string, files: Record<string, string>): void {
 
 const D = 'docs/decisions';
 
+// Leaves `file` unmerged via a conflicting merge, so the index cannot form a tree.
+function conflictOn(root: string, file: string, body: string): void {
+  git(root, 'checkout', '-q', '-b', 'side');
+  stage(root, { [file]: `${body}side\n` });
+  git(root, '-c', 'core.hooksPath=/dev/null', 'commit', '-qm', 'side');
+  git(root, 'checkout', '-q', 'main');
+  stage(root, { [file]: `${body}main\n` });
+  git(root, '-c', 'core.hooksPath=/dev/null', 'commit', '-qm', 'main');
+  try {
+    git(root, 'merge', '--no-commit', 'side');
+  } catch {
+    /* the conflict on `file` is the state under test */
+  }
+}
+
 describe('judgeStagedIntegrity', () => {
   it('reads nothing and passes when no decision record is staged', () => {
     const root = seed({ [`${D}/a.md`]: record('a', '2026-01-01', [target('2026-01-01', 'one')]) });
@@ -505,28 +520,19 @@ describe('judgeStagedIntegrity — one frozen snapshot', () => {
     expect(verdict.blocking.map((f) => f.check)).toContain('retarget-missing-evidence-change');
   });
 
-  it('is inert, never a live read, when another git process holds index.lock', () => {
+  it('still judges the staged change while another git process holds index.lock', () => {
     const root = clean();
     stage(root, { [`${D}/a.md`]: retargeted() });
     writeFileSync(join(root, '.git', 'index.lock'), '');
     const verdict = judgeStagedIntegrity(root);
-    expect(verdict).toMatchObject({ code: 0, blocking: [], scoped: [] });
-    expect(verdict.inert).toMatch(/could not freeze the index/);
+    expect(verdict.inert).toBeNull();
+    expect(verdict).toMatchObject({ code: 1, scoped: ['a'] });
+    expect(verdict.blocking.map((f) => f.check)).toContain('index-stale');
   });
 
   it('is inert when the index has unmerged paths', () => {
     const root = clean();
-    git(root, 'checkout', '-q', '-b', 'side');
-    stage(root, { [`${D}/a.md`]: `${retargeted()}side\n` });
-    git(root, '-c', 'core.hooksPath=/dev/null', 'commit', '-qm', 'side');
-    git(root, 'checkout', '-q', 'main');
-    stage(root, { [`${D}/a.md`]: `${retargeted()}main\n` });
-    git(root, '-c', 'core.hooksPath=/dev/null', 'commit', '-qm', 'main');
-    try {
-      git(root, 'merge', '--no-commit', 'side');
-    } catch {
-      /* the conflict on a.md is the state under test */
-    }
+    conflictOn(root, `${D}/a.md`, retargeted());
     const verdict = judgeStagedIntegrity(root);
     expect(verdict.code).toBe(0);
     expect(verdict.inert).toMatch(/could not freeze the index/);
@@ -623,13 +629,7 @@ describe('runStagedIntegrity — printed verdict and exit code', () => {
 
   it('exits 0 and says nothing was judged when the index cannot be frozen', () => {
     const root = cleanRepo();
-    stage(root, {
-      [`${D}/a.md`]: record('a', '2026-01-01', [
-        target('2026-01-01', 'one'),
-        target('2026-02-01', 'two', true),
-      ]),
-    });
-    writeFileSync(join(root, '.git', 'index.lock'), '');
+    conflictOn(root, `${D}/a.md`, record('a', '2026-01-01', [target('2026-01-01', 'one')]));
     expect(runStagedIntegrity(root)).toBe(0);
     expect(out.join('\n')).toContain('could not freeze the index');
     expect(out.join('\n')).toContain('nothing was judged');
