@@ -137,16 +137,24 @@ commit_with_gate_capture() {
   # resumed/body_bytes: the shell-safe fields of the retry-cost story (bare JSON bool/number — no
   # escaping needed). The body ITSELF rides the node-side ship_intent event, which can JSON-escape
   # arbitrary bytes; a printf %s of the body here could tear the line on a quote.
-  local dur_start resumed_json body_bytes
+  local dur_start start_utc resumed_json body_bytes queued_json="" attempt_split=""
   dur_start=$(date +%s)
+  start_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   resumed_json=false; [ "${DEVKIT_SHIP_RESUMED:-0}" = "1" ] && resumed_json=true
   body_bytes=$(printf '%s' "$body" | wc -c | tr -d ' ')
+  # Set by `devkit ship` after its queue slot is granted; absent when this shell runs on its own.
+  case "${DEVKIT_SHIP_QUEUED_S:-x}${DEVKIT_SHIP_GRANTED_AT:-x}" in
+    *[!0-9]*) ;;
+    *)
+      queued_json=",\"queued_s\":$((10#$DEVKIT_SHIP_QUEUED_S))"
+      attempt_split="queued $((10#$DEVKIT_SHIP_QUEUED_S))s · setup $((dur_start - 10#$DEVKIT_SHIP_GRANTED_AT))s · " ;;
+  esac
   if [ "$ship_dry_gates" -eq 0 ]; then
-    printf '{"type":"ship_attempt","ship_id":"%s","repo":"%s","branch":"%s","devkit_version":"%s"%s,"mode":"%s","resumed":%s,"body_bytes":%d,"log_path":"%s","ts":"%s"}\n' \
+    printf '{"type":"ship_attempt","ship_id":"%s","repo":"%s","branch":"%s","devkit_version":"%s"%s,"mode":"%s","resumed":%s,"body_bytes":%d%s,"log_path":"%s","ts":"%s"}\n' \
       "$(devkit_json_escape "$DEVKIT_SHIP_ID")" "$(devkit_json_escape "$repo_name")" "$(devkit_json_escape "$br")" \
       "$(devkit_json_escape "$DEVKIT_TELEMETRY_VERSION")" "$(devkit_parent_session_json)" \
-      "$(devkit_json_escape "${DEVKIT_SHIP_MODE:-ship}")" "$resumed_json" "$body_bytes" \
-      "$(devkit_json_escape "$ship_log")" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      "$(devkit_json_escape "${DEVKIT_SHIP_MODE:-ship}")" "$resumed_json" "$body_bytes" "$queued_json" \
+      "$(devkit_json_escape "$ship_log")" "$start_utc" \
       >> "$DEVKIT_GATE_EVENTS" 2>/dev/null || true
   fi
 
@@ -353,11 +361,14 @@ SHIP_HOOK_WRAPPER
   elif grep -qE 'guard-review: .* (FAILED|INCONCLUSIVE)' "$log" 2>/dev/null; then blocked_json='"review"'; timed_out=false
   else blocked_json='"unknown"'; timed_out=false
   fi
+  local gates_s end_utc
+  gates_s=$(( $(date +%s) - dur_start ))
+  end_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   if [ "$ship_dry_gates" -eq 0 ]; then
     printf '{"type":"ship_result","ship_id":"%s","repo":"%s","branch":"%s","devkit_version":"%s"%s,"exit_code":%d,"timed_out":%s,"blocked_gate":%s,"duration_s":%d,"log_path":"%s","ts":"%s"}\n' \
       "$(devkit_json_escape "$DEVKIT_SHIP_ID")" "$(devkit_json_escape "$repo_name")" "$(devkit_json_escape "$br")" \
       "$(devkit_json_escape "$DEVKIT_TELEMETRY_VERSION")" "$(devkit_parent_session_json)" "$rc" "$timed_out" "$blocked_json" \
-      "$(( $(date +%s) - dur_start ))" "$(devkit_json_escape "$ship_log")" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      "$gates_s" "$(devkit_json_escape "$ship_log")" "$end_utc" \
       >> "$DEVKIT_GATE_EVENTS" 2>/dev/null || true
   fi
 
@@ -461,6 +472,13 @@ SHIP_HOOK_WRAPPER
         fi ;;
     esac
   fi
+
+  # One timing line per attempt, every outcome, above the digest so a tail read still ends there.
+  local attempt_outcome="${blocked_json//\"/}"
+  [ "$attempt_outcome" != null ] || attempt_outcome=pass
+  printf 'attempt %s %s: %sgates %ss · %s → %s · outcome=%s · log %s\n' \
+    "$DEVKIT_SHIP_ID" "$br" "$attempt_split" "$gates_s" "$start_utc" "$end_utc" "$attempt_outcome" "$ship_log" \
+    | tee -a "$log" "$ship_log" >&2 2>/dev/null || true
 
   # sc-2488. ONE call site, below every terminal arm above, so a tail-based read — the read the
   # `--resume` line invites — sees the gates that found something but did NOT stop this run. The
