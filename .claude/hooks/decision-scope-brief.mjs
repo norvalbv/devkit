@@ -36,6 +36,8 @@ const PATH_KEYS = ['file_path', 'path', 'target_file', 'target_path'];
 /** Keep a brief short enough to be read: the ruling is the payload, the rest is a pointer. */
 const RULING_CHARS = 320;
 const MAX_AXES = 3;
+const TIMEOUT_MS = 10_000;
+const STDERR_CHARS = 200;
 
 function readInput() {
   try {
@@ -93,6 +95,22 @@ function claimed(stamp) {
   }
 }
 
+/** Why retrieval did not run, so a broken install reads differently from a timeout under load. */
+function outageCause(run, bin) {
+  let cause = 'no JSON array on stdout';
+  if (run.error?.code === 'ETIMEDOUT') cause = `timed out after ${TIMEOUT_MS / 1000}s`;
+  else if (run.signal) cause = `killed by ${run.signal}`;
+  else if (run.error) cause = run.error.code ?? run.error.message;
+  else if (run.status !== 0) cause = `exit ${run.status}`;
+  const lines = String(run.stderr ?? '')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const stderr = lines.slice(0, 2).join(' ');
+  const clipped = stderr.length > STDERR_CHARS ? `${stderr.slice(0, STDERR_CHARS)}…` : stderr;
+  return `${cause}${clipped ? ` — ${clipped}` : ''} (ran \`${bin}\`)`;
+}
+
 /** The ONLY output channel. Advisory by construction: additionalContext, never permissionDecision. */
 function emit(text) {
   process.stdout.write(
@@ -122,7 +140,7 @@ function main() {
       spawnSync(bin, ['scoped-targets', '--files', rel, '--brief-again', `${tool},${secs}`], {
         cwd: root,
         stdio: 'ignore',
-        timeout: 10_000,
+        timeout: TIMEOUT_MS,
       });
     }
     return;
@@ -135,7 +153,7 @@ function main() {
   const run = spawnSync(bin, ['scoped-targets', '--files', rel, '--brief', spec], {
     cwd: root,
     encoding: 'utf8',
-    timeout: 10_000,
+    timeout: TIMEOUT_MS,
   });
   // CAUSE-AGNOSTIC. Anything other than "exit 0 carrying a JSON array" means retrieval DID NOT RUN:
   // a spawn timeout (status null), a non-zero exit, empty stdout from a command whose every path
@@ -159,9 +177,10 @@ function main() {
     emit(
       `Decision retrieval DID NOT RUN for \`${rel}\` — \`guard-decisions scoped-targets\` failed, so ` +
         `this edit is UNBRIEFED, not ungoverned. Do not read the absence of a brief as "nothing rules ` +
-        `here". Check by hand before deciding: list the decisions directory (guard.config.json → ` +
-        `\`decisionsDir\`, default \`docs/decisions/\`) and grep it for \`**Scope:**\` globs covering this ` +
-        `path. Diagnose with \`guard-decisions scoped-targets --files ${rel}\`.`,
+        `here". Re-run \`guard-decisions scoped-targets --files ${rel}\` before deciding: it is what ` +
+        `evaluates Scope globs, and a text search for the path cannot match globs such as \`dir/**\`. ` +
+        `A later edit to this file re-checks, but a repeat failure this session is not announced ` +
+        `again, so silence then is not a clean answer. Cause: ${outageCause(run, bin)}.`,
     );
     return;
   }
