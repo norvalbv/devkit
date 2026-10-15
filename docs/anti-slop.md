@@ -139,11 +139,29 @@ entries sort by fingerprint, making identical repositories byte-for-byte determi
 ## Authoring-time check
 
 With the anti-slop component installed, `devkit init` also installs the `anti-slop-preflight.sh`
-agent hook (Claude PostToolUse `Edit|Write|MultiEdit`, Cursor `afterFileEdit`). It runs
+agent hook (Claude PostToolUse `Edit|Write|MultiEdit` and `Bash`, Cursor `afterFileEdit`). It runs
 `devkit anti-slop check <file>` on each JavaScript/TypeScript file an agent writes and feeds new
 findings back right away, so a violation shows after the first offending file instead of at commit.
 It blocks only on the check's own FAIL verdict and fails open otherwise (no capability, no
-resolvable `devkit` bin, a file outside the project). When a check fails, the output also prints a
+resolvable `devkit` bin, a file outside the workspace).
+
+The workspace is the Git toplevel of the hook payload's `cwd`, which follows Claude into a
+worktree, and also `CLAUDE_PROJECT_DIR`. The `cwd` root wins when both contain the file.
+
+A Bash call names no file, so the Bash registration (`--bash-writes`) checks the dirty files
+(staged, unstaged or untracked, never unmerged) whose modification time falls inside that call: the
+payload's `duration_ms` plus two seconds for coarse filesystem clocks. Each Bash call pays one
+`git status`, which measured about 85 ms in this repository. Some writes are not covered:
+
+- a Bash call that exits non-zero, which fires PostToolUseFailure instead;
+- a write made by a backgrounded command after it was launched;
+- a copy that preserves modification times (`cp -p`, `rsync -a`);
+- a file the same call also commits, which leaves it clean (the commit gates still check it);
+- any harness without `duration_ms`. Codex and Cursor do not get the Bash registration.
+
+A `cwd` outside any repository falls back to `CLAUDE_PROJECT_DIR`, still limited to that call's
+window. A file an Edit wrote within about two seconds before a short Bash call can be reported
+by both hooks. When a check fails, the output also prints a
 hint for each rule that has one (for example, a `deps` parameter instead of module mocking), plus the
 acceptance route for the install mode: a path-scoped override in the repository Oxlint config, or a
 local `create --force` in overlay. Anti-slop deliberately has no `GUARD_*` one-run bypass.
