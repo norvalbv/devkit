@@ -200,8 +200,10 @@ export function wrapCompleteness(
     `${stripFrontmatter(agentBody)}\n` +
     '───── END BRIEF ─────\n' +
     'Judge ONLY what this commit claims to be (per its message) against what it ships. List the ' +
-    'gaps that matter (one line each); minor nice-to-haves are not findings. END with exactly one line:\n' +
-    'VERDICT: PASS | FAIL — <one-line reason>\n' +
+    'gaps that matter (one line each); minor nice-to-haves are not findings. A limitation a code comment ' +
+    'present at HEAD records as accepted, in code this commit reuses unchanged, is inherited, not a gap; it ' +
+    'IS one if the message claims a guarantee it rules out (e.g. "race-free") or this diff adds or edits that note.\n' +
+    'END with exactly one line:\nVERDICT: PASS | FAIL — <one-line reason>\n' +
     'FAIL only for a gap that makes the shipped change misleading or operationally unsafe.'
   );
 }
