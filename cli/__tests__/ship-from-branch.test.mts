@@ -121,7 +121,9 @@ describe('ship-branch.sh — --from-branch committed scope (sc-2352)', () => {
     );
     expect(Date.now() - started).toBeLessThan(5_000);
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain('ls-remote exit 124');
+    expect(result.stderr).toContain(
+      'could not verify origin/work (ls-remote exit 124: no clean finish within the 0.1s bound) — machine load or network; re-run ship, or raise DEVKIT_REMOTE_TIMEOUT_SECONDS',
+    );
     expect(localBranchExists(git, 'feat/bounded-remote')).toBe(false);
   });
 
