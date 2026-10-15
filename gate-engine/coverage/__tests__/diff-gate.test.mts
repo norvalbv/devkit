@@ -68,6 +68,8 @@ describe('scope "diff": the added-line threshold', () => {
     const { code, out } = gate(halfCovered(51));
     expect(code).toBe(1);
     expect(out).toContain('uncovered: 4-5');
+    // Every changed file is measured, so a "measure them" remedy would send the agent the wrong way.
+    expect(out).not.toContain('--changed=');
     expect(out).toContain('GUARD_COVERAGE_OK=1');
   });
 
@@ -103,6 +105,8 @@ describe('scope "diff": fail closed', () => {
     expect(code).toBe(1);
     expect(out).toContain('Not measured');
     expect(out).toContain('src/b.mts');
+    expect(out).toContain(`devkit coverage-run --changed=${git(root, 'rev-parse', 'HEAD')}`);
+    expect(out).not.toContain('exclude them');
   });
 
   it('an entry without istanbul maps is corrupt data; empty maps are a file with no statements', () => {
@@ -146,7 +150,7 @@ describe('scope "diff": fail closed', () => {
     const { code, out } = gate(root);
     expect(code).toBe(1);
     expect(out).toContain('src/a.mts');
-    expect(out).toContain('devkit coverage-run <test files');
+    expect(out).toContain(`devkit coverage-run --changed=${git(root, 'rev-parse', 'HEAD')}`);
     expect(out).toContain('GUARD_COVERAGE_OK=1');
   });
 
@@ -158,6 +162,9 @@ describe('scope "diff": fail closed', () => {
     const { code, out } = gate(root);
     expect(code).toBe(1);
     expect(out).toContain('measured no files');
+    // What a --changed run leaves when no test imports any changed file: say so, not "pick tests".
+    expect(out).toContain(`devkit coverage-run --changed=${git(root, 'rev-parse', 'HEAD')}`);
+    expect(out).toContain('measured no files? No test imports them');
   });
 
   it('review mode reports a stale artifact as NOT MEASURED, never as a block', () => {

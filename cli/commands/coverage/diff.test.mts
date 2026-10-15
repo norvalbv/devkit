@@ -103,6 +103,8 @@ describe('devkit coverage-diff — what counts as added', () => {
     expect(out).toMatch(/3\/4\s+75\.0%\s+src\/a\.mts\s+uncovered: 3/);
     expect(out).toContain('Total: 3/4 added executable lines covered (75.0%).');
     expect(out).not.toMatch(/stale|provenance unknown/);
+    // Uncovered lines in a measured file need a test, not a re-run: no "measure them" hint.
+    expect(out).not.toContain('--changed=');
   });
 
   it('reports NEW-side line numbers when deletions above shift the file', () => {
@@ -158,6 +160,8 @@ describe('devkit coverage-diff — what counts as added', () => {
     const { out } = run(root);
     expect(out).toContain('Total: 1/1');
     expect(out).toMatch(/Not measured[^\n]*\n\s+src\/unmeasured\.mts$/m);
+    const base = git(root, 'merge-base', 'HEAD', 'origin/main');
+    expect(out).toContain(`devkit coverage-run --changed=${base}`);
     expect(out).not.toContain('a.test.mts');
     expect(out).not.toContain('notes.txt');
   });

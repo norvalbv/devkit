@@ -25,6 +25,15 @@ export const OPT_OUT_REMEDY = [
   '   reads that file from the COMMITTED tree, so a local-only edit changes nothing.',
 ];
 
+/** The run that measures every changed file a test reaches: vitest's --changed walks its import graph. */
+export function changedRunHint(sha: string): string[] {
+  return [
+    `   Measure them: \`devkit coverage-run --changed=${sha}\` runs every test that imports a changed file`,
+    '   (every suite if package.json or a vite/vitest config changed). Still unmeasured after it, or it',
+    "   measured no files? No test imports them (spawned, mocked or computed imports don't count): write one.",
+  ];
+}
+
 const MAX_LISTED = 10;
 
 export function listPaths(paths: string[], cwd: string, top: string): string[] {
