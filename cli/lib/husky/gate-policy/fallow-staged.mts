@@ -2,6 +2,12 @@
 
 import { shipRehearsalHint } from './block-helpers.mts';
 
+/** Runs a git command against the commit's index, which may be an alternate one (`commit -a`). */
+export const STAGED_DIFF_ENV = `__dk_no_git_env env \${DEVKIT_COMMIT_INDEX_FILE:+"GIT_INDEX_FILE=$DEVKIT_COMMIT_INDEX_FILE"}`;
+export const STAGED_DIFF_CMD = 'git diff --cached --binary --full-index --find-renames --relative';
+/** Above this many bytes fallow's --diff-stdin drops the line filter and reports the whole project. */
+export const DIFF_STDIN_CAP_BYTES = 10485760;
+
 // Scoped to the index: a ref range cannot express the staged set. Blocks on fallow's fail verdict
 // (exit 1) only; an absent fallow, an empty or over-cap diff, and a fallow error all skip the audit.
 export const FALLOW_STAGED = `if command -v fallow >/dev/null 2>&1; then
@@ -9,12 +15,12 @@ export const FALLOW_STAGED = `if command -v fallow >/dev/null 2>&1; then
     DK_FALLOW_RC=0
     # Git's relative GIT_DIR/GIT_INDEX_FILE break after a package cd, so the repo is rediscovered
     # from here; an alternate commit index arrives through the absolute devkit carrier.
-    if [ -z "$DK_FALLOW_DIFF" ] || ! __dk_no_git_env env \${DEVKIT_COMMIT_INDEX_FILE:+"GIT_INDEX_FILE=$DEVKIT_COMMIT_INDEX_FILE"} \\
-        git diff --cached --binary --full-index --find-renames --relative >"$DK_FALLOW_DIFF"; then
+    if [ -z "$DK_FALLOW_DIFF" ] || ! ${STAGED_DIFF_ENV} \\
+        ${STAGED_DIFF_CMD} >"$DK_FALLOW_DIFF"; then
         echo "devkit fallow gate: could not capture the staged diff — audit skipped."
     elif [ ! -s "$DK_FALLOW_DIFF" ]; then
         :
-    elif [ "$(($(wc -c <"$DK_FALLOW_DIFF")))" -gt 10485760 ]; then
+    elif [ "$(($(wc -c <"$DK_FALLOW_DIFF")))" -gt ${DIFF_STDIN_CAP_BYTES} ]; then
         # Above its --diff-stdin cap fallow drops the line filter and reports the whole project.
         echo "devkit fallow gate: staged diff exceeds fallow's 10 MiB --diff-stdin cap — audit skipped."
     else
