@@ -95,10 +95,11 @@ export function decide(
         input?.tool_input?.subagent_type === GATED_SUBAGENT);
     if (!gated) return null; // incl. the Task call that spawns prior-art itself
     const markers = markerPaths(root, input?.session_id, tmp);
-    if (existsSync(markers.ran) || existsSync(markers.snoozed)) return null;
-    // The marker means "acknowledged or already-reminded" — sticky either way.
+    if (existsSync(markers.ran)) return null;
+    // The marker means "acknowledged or already-reminded" — sticky either way. Exclusive create
+    // (throws EEXIST → the catch allows) so one call of a parallel batch claims the session's deny.
     mkdirSync(markers.dir, { recursive: true });
-    writeFileSync(markers.snoozed, "");
+    writeFileSync(markers.snoozed, "", { flag: "wx" });
     // Whole-input match: one expression covers plan, prompt, content and new_string alike.
     if (JSON.stringify(input?.tool_input ?? {}).includes(ACK_TOKEN)) return null;
     return (

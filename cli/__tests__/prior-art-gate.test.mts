@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -254,6 +255,35 @@ describe('decide — the first file edit', () => {
     expect(reason).toContain('never in a code file');
     expect(reason).toContain('routine or trivial work');
     expect(reason).toContain('same batch');
+  });
+});
+
+const HOOK = join(import.meta.dirname, '../../agents-hooks/prior-art-gate.mjs');
+
+/** Run the real hook script as its own process, the way the harness does; resolves its stdout. */
+function runHook(projectDir: string, input: ReturnType<typeof write>): Promise<string> {
+  return new Promise((done) => {
+    const child = spawn(process.execPath, [HOOK, 'edit'], {
+      env: { ...process.env, CLAUDE_PROJECT_DIR: projectDir },
+    });
+    let out = '';
+    child.stdout.on('data', (chunk) => (out += chunk));
+    child.on('close', () => done(out));
+    child.stdin.end(JSON.stringify(input));
+  });
+}
+
+describe('main — a parallel batch of gated calls', () => {
+  it('denies exactly one call when a batch races for the session snooze', async () => {
+    for (const round of [1, 2, 3]) {
+      const input = write(
+        'Edit',
+        { new_string: 'x' },
+        { session_id: `batch-${Date.now()}-${round}` },
+      );
+      const outs = await Promise.all(Array.from({ length: 12 }, () => runHook(root, input)));
+      expect(outs.filter((out) => out.includes('"deny"'))).toHaveLength(1);
+    }
   });
 });
 
