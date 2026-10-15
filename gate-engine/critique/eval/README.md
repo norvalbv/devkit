@@ -117,7 +117,7 @@ Verbatim house rules (decisions-eval README §Statistical honesty), plus the clu
   prompt fix carry `holdout: true`: `--dev` excludes them (iterate freely), baseline/gate runs
   include them.
 
-## Dataset card (33 rows: 13 intrinsic · 20 workflow · 5 decoy-only)
+## Dataset card (34 rows: 13 intrinsic · 21 workflow · 5 decoy-only)
 
 Every row carries a mandatory `note` (why the label is right), `difficulty`
 (clear/borderline/adversarial), `provenance` (authored/mined/adapted), optional
@@ -130,15 +130,15 @@ Labeling protocol: **mined rows are labelled by outcome, never by the old agent'
 not accuracy). Sources: (a) the 5 seed trap cases from `scripts/agent-benchmarks` (absorbed here;
 that runner is deleted); (b) devkit history with known outcomes — git+ssh default (sc-1057),
 hooks-import-the-package, release-by-direct-push, BSD `\s` greps (sc-1042), the `.cursor/`
-hardcode, the bench-gates-on-flips decision; (c) 5 verbatim real critique prompts from local
-session transcripts (219 runs enumerated; session ids in the corpus notes), labels from
+hardcode, the bench-gates-on-flips decision, the exit-before-drain ship FAIL (sc-4264); (c) 5
+verbatim real critique prompts from local session transcripts (219 runs enumerated; session ids in the corpus notes), labels from
 git-verified ships / the architecture that actually got built; (d) authored decoys, security
 anchors, and adversarial keyword/verbosity confounds. Wild-format rows keep the real input shape
 ("## The bug" / "## Verified facts"), which differs from SKILL.md's canonical sections — format
 sensitivity is visible per category.
 
 Known limitations: (1) most non-mined row text is model-written — an in-family judge may be
-gentler on in-family text (preference leakage); mined rows (15/33) are the counterweight, prefer
+gentler on in-family text (preference leakage); mined rows (16/34) are the counterweight, prefer
 them as the corpus grows. (2) `feasibility` has one gold slot — documented coverage debt; grow
 toward it. (3) Contract validity is strict per trial across both row modes.
 Benchmark-only extraction keeps semantic quality observable for exactly one semantically valid
@@ -152,7 +152,7 @@ inferred-heeded (a different architecture shipped), stated in their notes.
 
 ## Cost (printed before any token is spent) + outage policy
 
-Budget at K=3: 13 intrinsic × ~45 s × 3 + 20 workflow × ~3.5 min × 3 ≈ 3.8 h serial, ~1.5–2 h at
+Budget at K=3: 13 intrinsic × ~45 s × 3 + 21 workflow × ~3.5 min × 3 ≈ 4 h serial, ~1.5–2 h at
 concurrency 3; matcher ≈ 25 slots × 3 votes × 3 trials × ~12 s interleaved haiku. `--dev --only`
 is the iteration tier. Outages are asymmetric by cost: an intrinsic dark row aborts the run
 (exit 2 — a polluted cheap run is worth less than a rerun); a workflow row tolerates per-trial
