@@ -12,7 +12,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import {
@@ -30,7 +30,10 @@ import {
   membershipStreamError,
   pathStreamError,
   sourceMembershipRef,
+  recordStampAge,
+  type ShipIntent,
 } from './ship-intent-codec.mts';
+import { printStaleRecovery, replayableArgv } from './ship-intent-event.mts';
 
 const cliPath = fileURLToPath(new URL('./ship-intent.mts', import.meta.url));
 const GIT_ENV = { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' };
@@ -1409,5 +1412,172 @@ describe('recorded --body-file path and resume drift warning (sc-2527)', () => {
     const rec = recordOf(o.root);
     expect(rec.bodyFile).toBe(o.file);
     expect(rec.generation).not.toBe(gen); // the write happened (not a superseded no-op)
+  });
+});
+
+describe('stale record recovery: the refusal hands the invocation back', () => {
+  const HOUR = 60 * 60 * 1000;
+  const setStamp = (root: string, branch: string, createdAt: string) => {
+    const file = join(root, relIntentPath(branch));
+    const j = JSON.parse(readFileSync(file, 'utf8'));
+    j.createdAt = createdAt;
+    writeFileSync(file, JSON.stringify(j));
+  };
+  const age = (root: string, branch: string) =>
+    setStamp(root, branch, new Date(Date.now() - 7 * HOUR).toISOString());
+  /** `read` with TMPDIR pinned to a fresh dir, so a body file written (or not) is observable. */
+  const staleRead = (
+    root: string,
+    branch = 'feat/x',
+    tmp = mkdtempSync(join(tmpdir(), 'si-tmp-')),
+  ) => {
+    dirs.push(tmp);
+    const r = spawnSync('node', [cliPath, 'read', '--root', root, '--branch', branch], {
+      env: { ...process.env, TMPDIR: tmp },
+    });
+    return { status: r.status, stdout: r.stdout, stderr: r.stderr.toString(), tmp };
+  };
+  /** The hint line, re-parsed by bash into argv (`devkit ship` swapped for a NUL printer). */
+  const hintArgv = (stderr: string) => {
+    const line = stderr.split('\n').find((l) => l.startsWith('  devkit ship '))!;
+    const printed = execFileSync('bash', ['-c', line.replace('devkit ship', "printf '%s\\0'")]);
+    return { line, argv: printed.toString('utf8').split('\0').slice(0, -1) };
+  };
+
+  it('prints a re-runnable, unredacted command and a byte-exact body file; stdout stays empty', () => {
+    const body = Buffer.concat([Buffer.from('para\r\n'), Buffer.from([0xff]), Buffer.from('\n')]);
+    const paths = ['a b.txt', "it's.txt", '-dash.txt'];
+    const opts = base({
+      title: 'fix password: reset flow',
+      base: 'main',
+      links: ['idx'],
+      draft: true,
+      body,
+    });
+    writeIntent(opts, paths);
+    age(opts.root, 'feat/x');
+    // A temp dir with spaces (macOS app-support style) must survive the shell round trip.
+    const r = staleRead(opts.root, 'feat/x', mkdtempSync(join(tmpdir(), 'si tmp ')));
+    expect(r.status).toBe(1);
+    expect(r.stdout.length).toBe(0); // the NUL read protocol
+    expect(r.stderr.indexOf('stale or misdated')).toBeLessThan(r.stderr.indexOf('  devkit ship '));
+    const { argv } = hintArgv(r.stderr);
+    const bodyFile = argv[argv.indexOf('--body-file') + 1];
+    expect(argv).toEqual([
+      'feat/x',
+      'fix password: reset flow',
+      '--base',
+      'main',
+      '--link',
+      'idx',
+      '--draft',
+      '--body-file',
+      bodyFile,
+      '--',
+      ...paths,
+    ]);
+    expect(bodyFile.startsWith(r.tmp)).toBe(true);
+    expect(readFileSync(bodyFile).equals(body)).toBe(true);
+    expect(r.stderr).toContain('`devkit ship --resume feat/x` regenerates it');
+  });
+
+  it('a reship that kept its PR description replays the body on stdin, never --body-file', () => {
+    const kept = base({ mode: 'reship', body: Buffer.from('commit only') });
+    writeIntent(kept, ['p.txt']);
+    age(kept.root, 'feat/x');
+    const { line, argv } = hintArgv(staleRead(kept.root).stderr);
+    expect(argv).toEqual(['feat/x', 'ship it', '--pr', '--', 'p.txt']);
+    const redirect = / < '?([^']+?)'?$/.exec(line)![1];
+    expect(readFileSync(redirect, 'utf8')).toBe('commit only');
+
+    const refreshed = base({ mode: 'reship', updatePrBody: true });
+    writeIntent(refreshed, ['p.txt']);
+    age(refreshed.root, 'feat/x');
+    expect(hintArgv(staleRead(refreshed.root).stderr).argv).toContain('--body-file');
+
+    // An empty body still gets a flag: a bare full command would read the body from the terminal.
+    const empty = base({ body: Buffer.alloc(0) });
+    writeIntent(empty, ['p.txt']);
+    age(empty.root, 'feat/x');
+    const emptyArgv = hintArgv(staleRead(empty.root).stderr).argv;
+    expect(readFileSync(emptyArgv[emptyArgv.indexOf('--body-file') + 1]).length).toBe(0);
+  });
+
+  it('a branch-source record prints the full --from-branch form, never the refused --resume', () => {
+    const opts = base();
+    writeIntent(opts, ['p.txt']);
+    const r = readIntent(opts.root, 'feat/x', Date.now() + 7 * HOUR);
+    expect(r).not.toHaveProperty('intent');
+    if (!('reason' in r) || !r.stale) throw new Error('expected a stale-only refusal');
+    const intent: ShipIntent = { ...r.stale, sourceMode: 'branch', base: 'work' };
+    expect(replayableArgv(intent, false)).toEqual([
+      'devkit',
+      'ship',
+      'feat/x',
+      'ship it',
+      '--base',
+      'work',
+      '--from-branch',
+    ]);
+    // No `--` in branch mode, so the body flag must land at the end, not inside the positionals.
+    const printed = vi.spyOn(console, 'error').mockImplementation(() => {});
+    printStaleRecovery(intent, relIntentPath('feat/x'));
+    const { argv } = hintArgv(String(printed.mock.calls[0][0]));
+    printed.mockRestore();
+    const bodyFile = argv.at(-1)!;
+    dirs.push(dirname(bodyFile));
+    expect(argv).toEqual([
+      'feat/x',
+      'ship it',
+      '--base',
+      'work',
+      '--from-branch',
+      '--body-file',
+      bodyFile,
+    ]);
+  });
+
+  it('the age split keeps both replay-window edges where the boolean check had them', () => {
+    const now = Date.parse('2026-10-15T12:00:00.000Z');
+    const at = (ms: number) => new Date(now + ms).toISOString();
+    expect(recordStampAge(at(-6 * HOUR), now)).toBe('fresh');
+    expect(recordStampAge(at(-6 * HOUR - 1), now)).toBe('stale');
+    expect(recordStampAge(at(5 * 60 * 1000), now)).toBe('fresh');
+    expect(recordStampAge(at(5 * 60 * 1000 + 1), now)).toBe('misdated');
+    expect(recordStampAge('', now)).toBe('misdated');
+  });
+
+  it('a misdated or foreign record keeps the bare refusal: no command, no body file', () => {
+    const future = base();
+    writeIntent(future, ['p.txt']);
+    setStamp(future.root, 'feat/x', new Date(Date.now() + 24 * HOUR).toISOString());
+    const rollover = base();
+    writeIntent(rollover, ['p.txt']);
+    setStamp(rollover.root, 'feat/x', '2026-02-30T00:00:00.000Z');
+    const foreign = base({ branch: 'a/b' });
+    writeIntent(foreign, ['p.txt']);
+    age(foreign.root, 'a/b');
+    writeFileSync(
+      join(foreign.root, relIntentPath('a-b')),
+      readFileSync(join(foreign.root, relIntentPath('a/b'))),
+    );
+    for (const r of [
+      staleRead(future.root),
+      staleRead(rollover.root),
+      staleRead(foreign.root, 'a-b'),
+    ]) {
+      expect(r.status).toBe(1);
+      expect(r.stderr).not.toContain('re-run the full command');
+      expect(readdirSync(r.tmp)).toEqual([]);
+    }
+  });
+
+  it('an unwritable temp dir still prints the command and points at the record bytes', () => {
+    const opts = base();
+    writeIntent(opts, ['p.txt']);
+    age(opts.root, 'feat/x');
+    const r = staleRead(opts.root, 'feat/x', join(seedRepo(), 'missing'));
+    expect(hintArgv(r.stderr).argv).toEqual(['feat/x', 'ship it', '--', 'p.txt']);
+    expect(r.stderr).toContain(`base64 in ${relIntentPath('feat/x')}`);
   });
 });

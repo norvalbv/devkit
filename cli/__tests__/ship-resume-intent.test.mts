@@ -334,6 +334,30 @@ describe('ship --resume: record on block, replay on retry', () => {
     expect(r.stderr).toContain('full devkit ship command');
   });
 
+  it('--resume on a stale record refuses, then prints the full command that re-records it', () => {
+    const { dir, env, git } = seedResumableRepo({ hookBody: 'exit 1' });
+    writeFileSync(join(dir, 'note.txt'), 'hello\n');
+    const blocked = runShip(dir, env, ['feat/aged', 'aged title', '--', 'note.txt'], {
+      input: 'b\n',
+      extraEnv: { SHIP_DRY_RUN: '1' },
+    });
+    expect(blocked.status).not.toBe(0);
+    const file = intentFileOf(dir, 'feat/aged');
+    const record = JSON.parse(readFileSync(file, 'utf8'));
+    record.createdAt = new Date(Date.now() - 7 * 60 * 60 * 1000).toISOString();
+    writeFileSync(file, JSON.stringify(record));
+
+    const r = runShip(dir, env, ['--resume', 'feat/aged']);
+    expect(r.status).not.toBe(0);
+    const refusal = r.stderr.indexOf('stale or misdated');
+    expect(refusal).toBeGreaterThan(-1);
+    expect(r.stderr.indexOf("devkit ship feat/aged 'aged title' --body-file ")).toBeGreaterThan(
+      refusal,
+    );
+    expect(existsSync(file)).toBe(true); // the refusal keeps the record, so a re-run regenerates the hint
+    git(['worktree', 'prune']);
+  });
+
   it('a gate-blocked --draft ship still opens a DRAFT when replayed by --resume', () => {
     const { dir, env, git } = seedResumableRepo({ hookBody: 'exit 1' });
     writeFileSync(join(dir, 'note.txt'), 'hello\n');

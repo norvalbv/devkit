@@ -265,14 +265,11 @@ const FUTURE_SKEW_MS = 5 * 60 * 1000;
 
 /** Two-sided replay window, and canonical ISO only: the round-trip refuses rollover dates
  * (2026-02-30 parses as March 2), since the writer never emits one. */
-export function freshRecordStamp(createdAt: string, nowMs: number): boolean {
+export function recordStampAge(createdAt: string, nowMs: number): 'fresh' | 'stale' | 'misdated' {
   const created = Date.parse(createdAt);
-  return (
-    Number.isFinite(created) &&
-    new Date(created).toISOString() === createdAt &&
-    nowMs - created <= MAX_AGE_MS &&
-    created - nowMs <= FUTURE_SKEW_MS
-  );
+  if (!Number.isFinite(created) || new Date(created).toISOString() !== createdAt) return 'misdated';
+  if (created - nowMs > FUTURE_SKEW_MS) return 'misdated';
+  return nowMs - created <= MAX_AGE_MS ? 'fresh' : 'stale';
 }
 
 /** An absolute, non-stream (/dev, /proc) path free of line-breaking characters, else undefined —
