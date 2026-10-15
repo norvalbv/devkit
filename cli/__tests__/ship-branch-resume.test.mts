@@ -67,7 +67,7 @@ describe('ship-branch.sh — resume when the base moved', () => {
     });
 
     expect(first.status, first.stderr).toBe(124);
-    // Pair every 124 with OUR banner: testSpawnSync also returns 124 at its own deadline, so an
+    // Pair every 124 with OUR banner: testSpawnSync's linger reap also returns 124, so an
     // unpaired status assertion cannot say which supervisor fired.
     expect(first.stderr).toMatch(REAPED_15S_BANNER);
     const preserved = git(['rev-parse', 'feat/base-advance']).trim();
