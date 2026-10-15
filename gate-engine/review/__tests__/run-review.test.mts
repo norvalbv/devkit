@@ -1553,7 +1553,7 @@ describe('runReviewGate — strict ship mode (GUARD_AI_STRICT)', () => {
     const out = err.mock.calls.flat().join('\n');
     expect(out).toContain('retrying once');
     expect(out).toContain('strict ship mode fails closed');
-    expect(out).toContain('re-run devkit ship');
+    expect(out).toContain('devkit ship --resume');
   });
 
   it('timeout outage is NOT retried (a re-run burns the same budget) — one attempt each, still exit 3', async () => {

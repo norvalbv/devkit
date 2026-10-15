@@ -3,6 +3,7 @@ import { judgeBinForModel } from '../../judge/codex/result.mts';
 import { JUDGE_ISOLATION } from '../../judge/judge-isolation.mts';
 import { mcpSpawnTracker, namedAgentMcpProfile } from '../../judge/mcp/profile.mts';
 import type { JudgeOutage } from '../../judge/outage/classify.mts';
+import { spawnWithRetry } from '../../judge/outage/retry.mts';
 import { DEEP_JUDGE_TIMEOUT_MS, execJudgeAsync, remedyCause } from '../../judge/run-judge.mts';
 import { renderGoverningClaudeMd } from '../claude-md.mts';
 import { renderStagedLineCounts } from '../evidence/line-counts.mts';
@@ -268,7 +269,6 @@ async function cascadeVerdict(
   // Per-lens spend attribution: every split part deliberately shares one judge LABEL (the reviewer
   // identity the caches and warehouse key on), so the lens rides the judge_exec event as its own field.
   const lens = reviewer.lens?.length ? lensGroupId(reviewer.lens) : undefined;
-  let firstOutage: JudgeOutage | undefined;
   const firstOpts = {
     label: `review:${reviewer.name}`,
     args: args(prompt, passModel),
@@ -279,23 +279,21 @@ async function cascadeVerdict(
     mcpProfile,
     env,
     lens,
-    onOutage: (outage: JudgeOutage) => {
-      firstOutage = outage;
-    },
   };
-  let first = await exec(firstOpts);
-  let initialRetryUsed = false;
-  // `permanent`, not `!== 'timeout'`: a usage lock cannot clear inside a retry, and re-spawning it
-  // cost EIGHT wasted judge calls per ship for six days. A timeout stays permanent as before.
-  if (first === null && retryFirst && !firstOutage?.permanent) {
-    initialRetryUsed = true;
-    console.error(
-      `guard-review: ${reviewer.name}: judge run failed (${firstOutage?.kind ?? 'transient'}), retrying once…`,
-    );
-    cleanupChecklistState(cwd, reviewer);
-    initializeCommitGuardChecklist(cwd, reviewer, checklistRoot, env);
-    first = await exec(firstOpts);
-  }
+  const firstRun = await spawnWithRetry(
+    (timeout, onOutage) => exec({ ...firstOpts, timeout, onOutage }),
+    {
+      retry: retryFirst,
+      label: reviewer.name,
+      capMs: budgetLeft(),
+      beforeRetry: () => {
+        cleanupChecklistState(cwd, reviewer);
+        initializeCommitGuardChecklist(cwd, reviewer, checklistRoot, env);
+      },
+    },
+  );
+  let first = firstRun.result;
+  const { outage: firstOutage, retried: initialRetryUsed } = firstRun;
   if (first === null) {
     const outcome: ReviewOutcome = {
       name: reviewer.name,
