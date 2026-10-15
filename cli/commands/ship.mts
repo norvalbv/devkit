@@ -121,8 +121,9 @@ Usage:
                       --body-file override the recorded body — note an amended body re-pays the
                       completeness judge, while an unchanged one replays its cached PASS. Works for
                       both a blocked new ship and a blocked --pr re-push (the record knows which it
-                      was). A pushed ship deletes its record; a stale (>6h) or foreign record is
-                      refused by name.
+                      was). A pushed ship deletes its record; a foreign record is refused by name.
+                      A stale (>6h) record is refused too, but the refusal prints the full command
+                      (which re-records) and saves the recorded body to a temp file it names.
   --draft             Open the PR as a DRAFT instead of ready-for-review. New ships only — a --pr
                       re-push targets a PR that already exists (convert one back with
                       \`gh pr ready --undo <branch>\`). Recorded with the invocation, so a
