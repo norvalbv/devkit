@@ -66,9 +66,9 @@ export const ADVISORY_CAP = 5;
 const ADVISORY_CHARS = 200;
 
 /** The judge's `ADVISORY:` lines citing a code location — non-blocking, to resolve before merge. */
-export function parseAdvisories(raw: string): string[] {
+export function parseAdvisories(raw: string, maxChars = ADVISORY_CHARS): string[] {
   const texts = [...normalizeLineEndings(raw).matchAll(ADVISORY_LINE_RE)]
-    .map((m) => m[1].replace(/\*+/g, '').replace(/\s+/g, ' ').trim().slice(0, ADVISORY_CHARS))
+    .map((m) => m[1].replace(/\*+/g, '').replace(/\s+/g, ' ').trim().slice(0, maxChars))
     // The contract asks for a file:line, so `none` or an echoed `<file:line>` is not a finding.
     .filter((text) => issueLocations(text).length > 0);
   return [...new Set(texts)].slice(0, ADVISORY_CAP);

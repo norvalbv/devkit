@@ -22,6 +22,7 @@ import { execJudgeAsync } from '../../../../judge/run-judge.mts';
 import { readTranscript } from '../../../../judge/transcript-store.mts';
 import type { GuardConfig } from '../../../../config.mts';
 import { runCascade } from '../../../cascade/reviewer.mts';
+import { parseAdvisories } from '../../../contracts/response.mts';
 import { reviewCaptureItemSchema } from '../../../evidence/items.mts';
 import { identityBytesByPath, packDiffIntoChunks } from '../../../lens/chunk.mts';
 import { deriveLensReviewer, lensGroupId, resolveLensGroups } from '../../../lens/split.mts';
@@ -53,6 +54,8 @@ export interface CheckpointRow {
   status: string;
   reason: string;
   issues: Array<{ lens: string; text: string }>;
+  /** A PASS's `ADVISORY:` findings, full text: production prints them, so the bench scores them. */
+  advisories?: Array<{ lens: string; text: string }>;
   ms: number;
   at: string;
   /** sha256-12 of {base, assetsSha, issueCap}. Absent on legacy rows (reusable only for whole-diff
@@ -398,6 +401,13 @@ export async function runLensWave(
         status: res.status,
         reason: (res.reason ?? '').slice(0, 400),
         issues: capture.items.flatMap((it) => it.issues.map((text) => ({ lens: it.lens, text }))),
+        advisories:
+          res.status === 'pass'
+            ? parseAdvisories(res.transcript ?? '', Infinity).map((text) => ({
+                lens: lensGroupId(t.group),
+                text,
+              }))
+            : [],
         ms: Date.now() - started,
         at: new Date().toISOString(),
         identity: o.identity,

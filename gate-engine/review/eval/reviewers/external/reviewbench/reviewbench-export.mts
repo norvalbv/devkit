@@ -52,7 +52,7 @@ export function exportReviewBench(o: {
   let withheldFileNoLineStrict = 0;
   let crossFile = 0;
   for (const row of terminal)
-    for (const issue of row.issues) {
+    for (const issue of [...row.issues, ...(row.advisories ?? [])]) {
       const locs = extractRanges(issue.text).map((l) => ({
         file: resolveToStaged(l.file, o.staged),
         line: l.line,

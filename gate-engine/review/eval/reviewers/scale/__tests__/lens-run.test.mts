@@ -96,6 +96,42 @@ describe('banked terminal capture', () => {
       items: [],
     });
   });
+  it('banks the located ADVISORY lines of a PASS transcript in full and none from a FAIL', async () => {
+    const dir = privateOutput();
+    const reviewer = REVIEWERS.find((r) => r.name === 'correctness-reviewer')!;
+    const selection = { reviewer, files: ['src/a.ts', 'src/b.ts'] };
+    const tasks = planLensTasks({ arm: 'whole', sel: selection, diffText: diff, keyPrefix: 'd' });
+    const long = `src/a.ts:2 — b shadows the cached value ${'and the reader sees it '.repeat(12)}END`;
+    const transcript = `ADVISORY: ${long}\nADVISORY: none.\nVERDICT: PASS — ok`;
+    const executeCascade = vi.fn<typeof runCascade>(async (task) =>
+      result({
+        status: task.reviewer.lens?.[0] === tasks[0].group[0] ? 'pass' : 'fail',
+        transcript,
+      }),
+    );
+    const rows = await runLensWave(
+      {
+        tasks,
+        sel: selection,
+        wt: dir,
+        cfg: resolveGuardConfig(dir),
+        model: 'test-model',
+        issueCap: '3',
+        identity: 'conditions',
+        diffSha: 'd',
+        base: 'base-sha',
+        log: () => {},
+        concurrency: 1,
+        ckpt: openLensCheckpoint(join(dir, 'checkpoint.jsonl')),
+      },
+      executeCascade,
+    );
+    expect(long.length).toBeGreaterThan(200);
+    expect(rows[0].advisories).toEqual([{ lens: tasks[0].group[0], text: long }]);
+    expect(rows.slice(1).every((r) => r.status === 'fail' && r.advisories?.length === 0)).toBe(
+      true,
+    );
+  });
   it('round trips exact claims and scope, with a stable full parent roster across resume and distinct fresh namespaces', async () => {
     const dir = privateOutput();
     const reviewer = REVIEWERS.find((r) => r.name === 'correctness-reviewer')!;
