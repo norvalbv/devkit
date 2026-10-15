@@ -3,6 +3,7 @@ import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { configExtraGates } from '../../gate-engine/deterministic/command-gates.mts';
 import { collectShellArrays, main, scanShell, scanTs } from '../../scripts/git-pathspec-check.mts';
 import { rootRegistry } from './_helpers.mts';
 
@@ -105,6 +106,36 @@ describe('scanShell', () => {
   });
 });
 
+describe('scanShell: -z output re-split on newlines', () => {
+  it('flags the shipped regression: git -z piped into tr NUL-to-newline inside $(…)', () => {
+    expect(
+      shell(
+        String.raw`c=$(GIT_INDEX_FILE=$t git -C "$r" ls-files -u -z | tr '\0' '\n' | cut -f2- | uniq)`,
+      ),
+    ).toEqual(['1 nul']);
+  });
+
+  it('flags the octal and ANSI-C spellings, and a pipe feeding a loop by process substitution', () => {
+    expect(shell(String.raw`git diff --name-only -z | sort -z | tr '\000' '\012'`)).toEqual([
+      '1 nul',
+    ]);
+    expect(shell(String.raw`git ls-files -z | tr '\0' $'\n'`)).toEqual(['1 nul']);
+    expect(
+      shell(String.raw`while read -r p; do :; done < <(git ls-files -z | tr '\0' '\n')`),
+    ).toEqual(['1 nul']);
+  });
+
+  it('ignores tr over a file, and -z output read NUL-delimited', () => {
+    expect(shell(String.raw`tr '\0' '\n' < "$f" | sort -u`)).toEqual([]);
+    expect(shell("git diff --name-only -z | while IFS= read -r -d '' f; do :; done")).toEqual([]);
+  });
+
+  it('honours a pathlist marker with a reason', () => {
+    expect(shell(String.raw`git ls-files -z | tr '\0' '\n' # pathlist: display only`)).toEqual([]);
+    expect(shell(String.raw`git ls-files -z | tr '\0' '\n' # pathlist:`)).toEqual(['1 nul']);
+  });
+});
+
 describe('scanTs', () => {
   it('flags a raw identifier passed to a spawned git or a git wrapper', () => {
     expect(tsHits("spawnSync('git', ['add', '--', rel], { cwd });")).toEqual(['1 raw rel']);
@@ -190,6 +221,18 @@ describe('main', () => {
     expect(rows).toEqual(['scripts/run.mts:2  raw pathspec  git add -- f']);
   });
 
+  it('names a nul site and prints only the remedy for the kinds it found', () => {
+    const dir = repo({ 'cli/nul.sh': String.raw`git ls-files -z | tr '\0' '\n'` + '\n' });
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    expect(main(dir)).toBe(1);
+    const [row, summary] = errors.mock.calls.map(([line]) => String(line));
+    expect(row).toBe(
+      String.raw`cli/nul.sh:1  -z re-split on newlines  git ls-files … -z | tr '\0' '\n'`,
+    );
+    expect(summary).toMatch(/^git-pathspec: 1 site\(s\)\.\nnul: .*read -r -d ''/);
+    expect(summary).not.toMatch(/^(raw|mixed):/m);
+  });
+
   it('runs as a script from a path containing a space, so the gate cannot silently pass', () => {
     const dir = repo({ 'cli/x.sh': 'git status -- "$p"\n' });
     const spaced = join(mkTmp('pathspec-link-'), 'with space');
@@ -201,6 +244,14 @@ describe('main', () => {
     });
     expect(run.status, run.stderr).toBe(1);
     expect(run.stderr).toContain('cli/x.sh:1  raw pathspec');
+  });
+
+  it("is registered as one of devkit's own extra gates, and devkit's tree passes it", () => {
+    const root = join(dirname(SCRIPT), '..');
+    expect(configExtraGates(root).map((g) => g.label)).toEqual(
+      expect.arrayContaining(['git-pathspec', 'related-tests']),
+    );
+    expect(main(root)).toBe(0);
   });
 });
 
