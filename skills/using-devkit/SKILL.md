@@ -150,7 +150,17 @@ devkit command.
   the ship mid-gates as exit 143 with no banner. Poll the shell output for the per-reviewer heartbeat
   lines (`guard-review: <name> — PASS … (checkpointed)`). A judge still in flight (completeness can
   take many minutes) prints `guard-review: still running — <lane> <elapsed> (killed in ≤<bound>) · log:
-  <path>` about every 45s; while those keep arriving the gate is alive, not hung.
+  <path>` about every 45s; while those keep arriving the gate is alive, not hung. Before polling,
+  read the `guard-judge preflight` block near the top of the output. If it says
+  `every reviewer that is not already cached will fail closed`, this attempt will fail closed at
+  the reviewers: stop it now, take the move its `To ship inside this window,` line names
+  (commit-gates skill, "Judge outage"), then re-run the same full `devkit ship` command in the same
+  shell command, since an export does not outlive the tool call that ran it. An attempt stopped this
+  early has recorded nothing, so `--resume` refuses it. If it says
+  `Both judge CLIs are dark`, install or authenticate one instead. The one exception is a
+  `--resume` whose previous attempt already printed every reviewer's PASS: those replay from
+  cache, and moving the judges re-pays them. `--dry-gates` prints the same block without running a
+  reviewer.
 - **A blocked or timed-out ship retries with `devkit ship --resume <branch>` — never re-type the
   invocation.** Reviewer PASSes checkpoint as they land, cleared decisions judgements and the
   deterministic gate prefix are cached, so a retry only pays for the unfinished work; `--resume`

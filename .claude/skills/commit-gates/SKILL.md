@@ -192,6 +192,11 @@ usage limit with the wait it carries. Re-running clears none of those. Exit 3 wi
 `<gate>: could not run — <error>` banner is not a judge outage: the gate itself failed (a git read,
 say), so fix that error instead of re-targeting.
 
+The same move applies before a first attempt pays for the chain. When a ship's opening
+`guard-judge preflight` says `every reviewer that is not already cached will fail closed`, stop
+it, make the move below, and re-run the full `devkit ship` command rather than waiting for exit 3:
+an attempt stopped that early has recorded nothing for `--resume` to replay.
+
 The lever is moving every judge away from the CLI the remedy names. It skips nothing — the same
 reviewers still run, judged elsewhere — so it is not a `GUARD_NO_*` bypass and does not need the
 authorization those require. Run it in the shell the ship runs in.
