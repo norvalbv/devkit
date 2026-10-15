@@ -625,9 +625,8 @@ elif [ "$BODY_FILE_SET" -eq 1 ]; then
   BODY=$(cat -- "$BODY_FILE_FLAG" && printf x) || { echo "--body-file: unreadable: $BODY_FILE_FLAG" >&2; exit 1; }
   BODY=${BODY%x}
 elif [ "$RESUME" -eq 1 ]; then BODY="$RESUME_BODY"
-  # Replaying recorded bytes: say so if the --body-file they came from has since been edited
-  # (sc-2527). Here — past the mode hand-off, before any worktree or gate — so it prints once.
-  node "$SHIP_INTENT" body-drift --root "$ROOT" --branch "$BR" --generation "$RESUME_GENERATION" || true
+  # Replaying recorded bytes: warn now, before any gate, if --body-file has since been edited.
+  BODY_DRIFT_TAIL=$(node "$SHIP_INTENT" body-drift --root "$ROOT" --branch "$BR" --generation "$RESUME_GENERATION") || BODY_DRIFT_TAIL=
 elif [ -t 0 ]; then BODY=""
 else ship_read_stdin_body; fi
 # Match new-ship: the body is the only stdin read, so hand descendants /dev/null and make credential
@@ -894,7 +893,7 @@ if git -C "$WT" diff --cached --quiet; then
     fi
     body_receipt_delete
     rewrite_publish_lock_release
-    echo "$PR_URL"
+    ship_print_pr_url "$PR_URL"
     exit 0
   fi
   if [ "$RESUME" -eq 1 ]; then
@@ -1210,7 +1209,7 @@ if [ -n "$PR_URL" ]; then
   # durable — a gh failure here can never cost work that already landed.
   READY_STATUS=0
   reship_mark_ready "${PR_NUM:-}" || READY_STATUS=1
-  echo "$PR_URL"
+  ship_print_pr_url "$PR_URL"
   if [[ "$PR_NUM" =~ ^[0-9]+$ ]]; then publish_evidence_block "$WT" "$PR_NUM" "$REPO" "$SHIP_COMMIT"; fi
   # The wait comes after the ready flip so it observes the check set that flip triggers — but a
   # FAILED flip skips it: the operator has an actionable remedy above, and burying it under up to two

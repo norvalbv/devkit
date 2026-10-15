@@ -286,9 +286,9 @@ export function advisoryBodyFile(v: string | null | undefined): string | undefin
   return p;
 }
 
-/** sc-2527: warn when the recorded body no longer matches its `--body-file`. Never re-reads the
- * file into the body (the completeness PASS keys on exact bytes); every unknown is silence. */
-export function bodyDriftWarning(intent: ShipIntent): string | null {
+/** Warn when the recorded body no longer matches its `--body-file`: an early line, and a tail for
+ * the PR URL. Never re-reads the file into the body (the completeness PASS keys on exact bytes). */
+export function bodyDrift(intent: ShipIntent): { warning: string; tail: string } | null {
   if (!intent.bodyFile) return null;
   let onDisk: Buffer;
   let fd: number | undefined;
@@ -305,26 +305,38 @@ export function bodyDriftWarning(intent: ShipIntent): string | null {
   }
   const recorded = Buffer.from(intent.bodyB64, 'base64');
   if (recorded.equals(onDisk)) return null;
-  const refresh = `devkit ship --resume ${shQuote(intent.branch)} --body-file ${shQuote(intent.bodyFile)}`;
-  return (
-    `ship: ${intent.bodyFile} changed since this invocation was recorded ` +
-    `(${recorded.length} bytes recorded, ${onDisk.length} on disk) — replaying the RECORDED body. ` +
-    (intent.mode === 'reship'
-      ? 'Using the file also rewrites the PR description: '
-      : 'To use the file: ') +
-    refresh
-  );
+  const file = shQuote(intent.bodyFile);
+  const refresh = `devkit ship --resume ${shQuote(intent.branch)} --body-file ${file}`;
+  // The intent is spent once the PR URL prints; a no-delta --pr run swaps only the description and
+  // keeps ship's evidence block. --base on --pr means a rewrite, so it is never carried.
+  const sync = [intent.branch, intent.title, '--body-file', intent.bodyFile, '--', ...intent.paths];
+  return {
+    warning:
+      `ship: ${intent.bodyFile} changed since this invocation was recorded ` +
+      `(${recorded.length} bytes recorded, ${onDisk.length} on disk) — replaying the RECORDED body. ` +
+      (intent.mode === 'reship'
+        ? 'Using the file also rewrites the PR description: '
+        : 'To use the file: ') +
+      refresh,
+    tail:
+      `ship: the PR description is the RECORDED body (${recorded.length} bytes), not ${file} ` +
+      `(${onDisk.length} bytes when this run started). To publish the file without a new commit, ` +
+      `run while those paths are unchanged: devkit ship --pr ${sync.map(shQuote).join(' ')}`,
+  };
 }
 
-/** `ship-intent body-drift`: print the drift line, if any; exit 0 always. Pinned to the generation
- * the resume replays — a record replaced since then holds some other attempt's body. */
+/** `ship-intent body-drift`: the early line on stderr, the PR-URL tail on stdout; exit 0 always.
+ * Pinned to the generation the resume replays — a newer record holds some other attempt's body. */
 export function reportBodyDrift(
   result: { intent: ShipIntent } | { reason: string },
   generation: string | undefined,
 ): number {
   const replayed = 'intent' in result && result.intent.generation === generation;
-  const warning = replayed ? bodyDriftWarning(result.intent) : null;
-  if (warning) console.error(warning);
+  const drift = replayed ? bodyDrift(result.intent) : null;
+  if (drift) {
+    console.error(drift.warning);
+    console.log(drift.tail);
+  }
   return 0;
 }
 

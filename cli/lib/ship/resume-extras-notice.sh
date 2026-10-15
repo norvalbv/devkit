@@ -2,6 +2,15 @@
 # Sourced by ship-branch.sh + reship.sh. A --resume that exits before its record write leaves the
 # older, narrower path list on disk, so the next bare --resume would silently judge base copies.
 
+BODY_DRIFT_TAIL= # set by a resume that replays a body its --body-file no longer matches
+
+# ship_print_pr_url — the PR URL on stdout, then (stderr) any body drift the resume replayed, so the
+# line a reader tails for sits right beside it.
+ship_print_pr_url() {
+  echo "$1"
+  [ -z "$BODY_DRIFT_TAIL" ] || printf '%s\n' "$BODY_DRIFT_TAIL" >&2
+}
+
 # ship_resume_brief — list the caller's PATHS one per line, marking what this retry briefed beyond
 # the record, and arm the notice below until a record write is attempted.
 ship_resume_brief() {

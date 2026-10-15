@@ -756,9 +756,8 @@ elif [ "$BODY_FILE_SET" -eq 1 ]; then
   BODY=$(cat -- "$BODY_FILE_FLAG" && printf x) || { echo "--body-file: unreadable: $BODY_FILE_FLAG" >&2; exit 1; }
   BODY=${BODY%x}
 elif [ "$RESUME" -eq 1 ]; then BODY="$RESUME_BODY"
-  # Replaying recorded bytes: say so if the --body-file they came from has since been edited
-  # (sc-2527). Here — past the mode hand-off, before any worktree or gate — so it prints once.
-  node "$SHIP_INTENT" body-drift --root "$ROOT" --branch "$BR" --generation "$RESUME_GENERATION" || true
+  # Replaying recorded bytes: warn now, before any gate, if --body-file has since been edited.
+  BODY_DRIFT_TAIL=$(node "$SHIP_INTENT" body-drift --root "$ROOT" --branch "$BR" --generation "$RESUME_GENERATION") || BODY_DRIFT_TAIL=
 elif [ -t 0 ]; then BODY=""
 else ship_read_stdin_body; fi
 # The body is the ONLY thing ship reads from stdin, and it has been read. Hand every descendant
@@ -1558,7 +1557,7 @@ else
 fi
 PR_NUM=""
 if [ -z "$PR_CREATE_FAILED" ]; then
-  echo "$PR_URL"   # surface the PR URL (we captured gh's stdout to recover the PR number below)
+  ship_print_pr_url "$PR_URL" # surface the PR URL (we captured gh's stdout to recover the PR number below)
   # The PR number is the trailing path segment of the URL gh just printed (one gh call, not two).
   PR_NUM=${PR_URL##*/}
   [[ "$PR_NUM" =~ ^[0-9]+$ ]] || PR_NUM=""
