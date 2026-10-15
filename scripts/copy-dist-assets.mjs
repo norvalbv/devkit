@@ -99,7 +99,7 @@ export function copyDistAssets(root, dist) {
   for (const rel of shippedTreeFiles(root, MIRRORED_EXT)) cpSync(join(root, rel), join(dist, rel));
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   const root = join(dirname(fileURLToPath(import.meta.url)), '..');
   try {
     const dist = resolveDistDir(process.argv.slice(2), root);
