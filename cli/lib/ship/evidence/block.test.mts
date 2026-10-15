@@ -88,6 +88,15 @@ describe('evidence block', () => {
     expect(readEvidenceBlock(block, 'f'.repeat(40))?.stale).toBe(true);
   });
 
+  it('names each green failure and green file error, bounded like the red ones', () => {
+    const fileError = { fullName: '<checkout>/src/extra.test.mjs', message: 'x'.repeat(400) };
+    const green = { ...operand(HEAD, 1, 1), fileErrors: [fileError] };
+    const block = renderEvidenceBlock(captured, { ...evidence, green });
+    expect(block).toContain('- green failure `"value is fixed"`');
+    expect(block).toMatch(/- green file error: `"<checkout>\/src\/extra\.test\.mjs"`: `"x{239}…"`/);
+    expect(renderEvidenceBlock(captured, evidence)).not.toContain('green failure');
+  });
+
   it('names the abstention reason and renders no runs when nothing was captured', () => {
     const block = renderEvidenceBlock(notRun('docs-only', 'only Markdown', HEAD, BASE), null);
     expect(block).toContain('**not-run (docs-only)**: only Markdown');

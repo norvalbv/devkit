@@ -77,6 +77,17 @@ function operandRow(name: string, tree: string, operand: RegressionOperandEviden
   return `| ${name} | ${tree} | ${exit} | ${cells} |`;
 }
 
+function operandNotes(
+  operand: RegressionOperandEvidence,
+  failureLabel: string,
+  fileErrorLabel: string,
+): string[] {
+  return [
+    ...operand.failures.slice(0, SHOWN_FAILURES).map((item) => failureLine(failureLabel, item)),
+    ...operand.fileErrors.slice(0, SHOWN_FAILURES).map((item) => failureLine(fileErrorLabel, item)),
+  ];
+}
+
 function runLines(evidence: RegressionEvidence): string[] {
   const { argv } = evidence.command;
   const shown =
@@ -84,12 +95,8 @@ function runLines(evidence: RegressionEvidence): string[] {
       ? [...argv.slice(0, SHOWN_ARGS), `… ${argv.length - SHOWN_ARGS} more arguments`]
       : argv;
   const notes = [
-    ...evidence.red.failures
-      .slice(0, SHOWN_FAILURES)
-      .map((item) => failureLine('red failure', item)),
-    ...evidence.red.fileErrors
-      .slice(0, SHOWN_FAILURES)
-      .map((item) => failureLine('red file error, not counted:', item)),
+    ...operandNotes(evidence.red, 'red failure', 'red file error, not counted:'),
+    ...operandNotes(evidence.green, 'green failure', 'green file error:'),
   ];
   return [
     '| run | tree | exit | passed | failed | skipped |',

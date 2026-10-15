@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   writeFileSync,
 } from 'node:fs';
@@ -12,7 +13,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { EVIDENCE_BEGIN, readEvidenceBlock, VERDICT_SLOT } from '../lib/ship/evidence/block.mts';
-import { testSpawnSync as spawnSync } from './_helpers.mts';
+import { CLI, testSpawnSync as spawnSync } from './_helpers.mts';
 import {
   dirs,
   GIT_ENV,
@@ -22,6 +23,7 @@ import {
 } from './_ship-branch-fixture.mts';
 
 const RUN = fileURLToPath(new URL('../lib/ship/evidence/run.mts', import.meta.url));
+const SHIP_DIR = fileURLToPath(new URL('../lib/ship', import.meta.url));
 const VITEST = fileURLToPath(new URL('../../node_modules/vitest/vitest.mjs', import.meta.url));
 const COMMAND = [
   process.execPath,
@@ -38,6 +40,7 @@ const BROKEN = "export const value = () => 'broken';\n";
 const FIXED = "export const value = () => 'fixed';\n";
 const VALUE_TEST =
   "import { value } from './value.mjs';\nit('is fixed', () => expect(value()).toBe('fixed'));\n";
+const GREEN_FAILS = `${VALUE_TEST}it('still broken', () => expect(1).toBe(2));\n`;
 
 /** A recording gh: `pr view` serves the stored body plus the branch tips from the bare origin. */
 const GH_STUB = `#!/usr/bin/env node
@@ -257,6 +260,7 @@ describe('devkit ship evidence block', () => {
     const body = readFileSync(repo.state, 'utf8');
     expect(readEvidenceBlock(body, tipOf(repo.bare, 'feat/slow'))?.status).toBe('inconclusive');
     expect(body).toContain('did not finish within 10s');
+    expect(shipped.stdout + shipped.stderr).not.toContain('evidence: kept');
     expect(body).toContain('**Merge verdict:** human-review (no-captured-proof: inconclusive)');
     const pid = Number(readFileSync(pidFile, 'utf8'));
     expect(() => process.kill(pid, 0)).toThrow();
@@ -279,6 +283,7 @@ function publishRun(
   git('init', '-q', '-b', 'main');
   git('config', 'user.email', 'a@b.c');
   git('config', 'user.name', 'a');
+  git('remote', 'add', 'origin', 'https://github.com/acme/app.git');
   const commit = (files: Record<string, string>) => {
     write(root, files);
     git('add', '-A');
@@ -289,17 +294,57 @@ function publishRun(
   const base = commit({ 'guard.config.json': config, 'src/value.mjs': BROKEN, ...baseFiles });
   const head = commit(headFiles);
   const gh = ghEnv({ GH_HEAD_OID: head, GH_BASE_OID: base });
-  const publish = (headArg = head, extra: Record<string, string> = {}) =>
+  const publish = (headArg = head, extra: Record<string, string> = {}, args: string[] = []) =>
     spawnSync(
       process.execPath,
-      [RUN, 'publish', '--cwd', root, '--repo', 'acme/app', '--pr', '42', '--head', headArg],
+      [
+        RUN,
+        'publish',
+        '--cwd',
+        root,
+        '--repo',
+        'acme/app',
+        '--pr',
+        '42',
+        '--head',
+        headArg,
+        ...args,
+      ],
       {
         env: { ...gh.env, ...extra },
         encoding: 'utf8',
         timeout: 200_000,
       },
     );
-  return { head, gh, publish };
+  const recapture = (extra: Record<string, string> = {}, cwd = root) =>
+    spawnSync(process.execPath, [CLI, 'pr-evidence', '42'], {
+      cwd,
+      env: { ...gh.env, ...extra },
+      encoding: 'utf8',
+      timeout: 200_000,
+    });
+  /** Ship's own wrapper, which deletes the capture's temp root once publish returns. */
+  const shellPublish = (tmp: string) =>
+    spawnSync(
+      '/bin/bash',
+      [
+        '-c',
+        'SCRIPT_DIR=$1; . "$1/publish-evidence.sh"; publish_evidence_block "$2" 42 acme/app "$3"',
+        'bash',
+        SHIP_DIR,
+        root,
+        head,
+      ],
+      { env: { ...gh.env, TMPDIR: tmp }, encoding: 'utf8', timeout: 200_000 },
+    );
+  return { root, head, gh, commit, publish, recapture, shellPublish };
+}
+
+/** The kept-logs path a run printed, registered for cleanup. */
+function keptPath(stderr: string): string | undefined {
+  const kept = stderr.match(/evidence: kept the red\/green logs at (\S+)/)?.[1];
+  if (kept) dirs.push(dirname(kept));
+  return kept;
 }
 
 describe('evidence outcomes', () => {
@@ -391,5 +436,83 @@ describe('evidence outcomes', () => {
     expect(r.status).toBe(0);
     expect(r.stderr).toContain('nothing was published');
     expect(readFileSync(run.gh.log, 'utf8')).not.toContain('pr edit');
+  });
+});
+
+describe('an inconclusive capture', () => {
+  it('names the green failure, keeps its logs, and re-captures only through devkit pr-evidence', () => {
+    const run = publishRun({}, { 'src/value.mjs': FIXED, 'src/value.test.mjs': GREEN_FAILS });
+    const keep = mkdtempSync(join(tmpdir(), 'evidence-keep-'));
+    dirs.push(keep);
+    const first = run.shellPublish(keep);
+    expect(first.status, first.stderr).toBe(0);
+    expect(readdirSync(keep).filter((name) => name.startsWith('devkit-evidence.'))).toEqual([]);
+    const body = readFileSync(run.gh.state, 'utf8');
+    expect(readEvidenceBlock(body, run.head)).toMatchObject({
+      status: 'inconclusive',
+      detail: 'expected red nonzero and green zero; got 1/1',
+    });
+    expect(body).toContain('- green failure `"still broken"`');
+    const kept = keptPath(first.stderr);
+    expect(kept?.startsWith(keep)).toBe(true);
+    expect(existsSync(join(kept ?? '', 'evidence.json'))).toBe(true);
+    expect(existsSync(join(kept ?? '', 'green.stdout.log'))).toBe(true);
+
+    const again = run.publish();
+    expect(again.stderr).toContain(
+      'already records inconclusive evidence for this head; re-capture it with devkit pr-evidence 42',
+    );
+    expect(readFileSync(run.gh.state, 'utf8')).toBe(body);
+
+    const redone = run.recapture({}, join(run.root, 'src'));
+    expect(redone.status, redone.stderr).toBe(0);
+    keptPath(redone.stderr);
+    const rewritten = readFileSync(run.gh.state, 'utf8');
+    expect(readEvidenceBlock(rewritten, run.head)?.detail).toBe(
+      'expected red nonzero and green zero; got 1/1 (recaptured; previously inconclusive: ' +
+        'expected red nonzero and green zero; got 1/1)',
+    );
+    expect(rewritten).toContain('**Merge verdict:** human-review');
+  });
+
+  it('keeps nothing for a captured run, and devkit pr-evidence refuses to replace it', () => {
+    const run = publishRun({}, { 'src/value.mjs': FIXED, 'src/value.test.mjs': VALUE_TEST });
+    const first = run.publish(run.head, {}, ['--keep-in', tmpdir()]);
+    expect(first.status, first.stderr).toBe(0);
+    expect(first.stderr).not.toContain('evidence: kept');
+    const body = readFileSync(run.gh.state, 'utf8');
+    expect(readEvidenceBlock(body, run.head)?.status).toBe('captured');
+
+    const redone = run.recapture();
+    expect(redone.status).toBe(1);
+    expect(redone.stderr).toContain('already records captured evidence for this head');
+    expect(readFileSync(run.gh.state, 'utf8')).toBe(body);
+  });
+
+  it('publishes when the logs cannot be kept, and a re-capture at a new head is a fresh one', () => {
+    const run = publishRun({}, { 'src/value.mjs': FIXED, 'src/value.test.mjs': GREEN_FAILS });
+    const unwritable = join(run.root, 'guard.config.json');
+    const first = run.publish(run.head, {}, ['--keep-in', unwritable]);
+    expect(first.status, first.stderr).toBe(0);
+    expect(first.stderr).toContain('evidence: the red/green logs were not kept');
+    expect(readEvidenceBlock(readFileSync(run.gh.state, 'utf8'), run.head)?.status).toBe(
+      'inconclusive',
+    );
+
+    const next = run.commit({ 'src/value.test.mjs': VALUE_TEST });
+    const r = run.recapture({ GH_HEAD_OID: next });
+    expect(r.status, r.stderr).toBe(0);
+    expect(readEvidenceBlock(readFileSync(run.gh.state, 'utf8'), next)).toMatchObject({
+      status: 'captured',
+      detail: '1 of 1 red-failing tests passed on green',
+    });
+  });
+
+  it('devkit pr-evidence refuses a checkout that is not at the PR head', () => {
+    const run = publishRun({}, { 'src/value.mjs': FIXED, 'src/value.test.mjs': VALUE_TEST });
+    const r = run.recapture({ GH_HEAD_OID: 'f'.repeat(40) });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('check out the PR head first (gh pr checkout 42)');
+    expect(existsSync(run.gh.log) && readFileSync(run.gh.log, 'utf8')).not.toContain('pr edit');
   });
 });
