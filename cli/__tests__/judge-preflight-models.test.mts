@@ -160,7 +160,7 @@ describe('readCodexRateLimits — the model/list leg of the spawn', () => {
   async function withFake(body: string, timeout: number): Promise<CodexRateLimits | null> {
     const dir = mkdtempSync(join(tmpdir(), 'fake-codex-'));
     const bin = join(dir, 'codex');
-    writeFileSync(bin, `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+    writeFileSync(bin, `#!/bin/sh\n${body}\nexec cat >/dev/null\n`, { mode: 0o755 });
     chmodSync(bin, 0o755);
     process.env.GUARD_CODEX_BIN = bin;
     return readCodexRateLimits(timeout);
@@ -169,10 +169,7 @@ describe('readCodexRateLimits — the model/list leg of the spawn', () => {
 
   it('resolves as soon as both replies arrive, carrying the models', async () => {
     const started = Date.now();
-    const snap = await withFake(
-      [LIMITS, `echo '${listReply(FREE_PLAN_DATA)}'`, 'sleep 30'].join('\n'),
-      10_000,
-    );
+    const snap = await withFake([LIMITS, `echo '${listReply(FREE_PLAN_DATA)}'`].join('\n'), 10_000);
     expect(Date.now() - started).toBeLessThan(5000);
     expect(snap).toMatchObject({
       planType: 'free',
@@ -181,10 +178,7 @@ describe('readCodexRateLimits — the model/list leg of the spawn', () => {
   });
 
   it('resolves whichever reply arrives first: both RPCs hit the network', async () => {
-    const snap = await withFake(
-      [`echo '${listReply(FREE_PLAN_DATA)}'`, LIMITS, 'sleep 30'].join('\n'),
-      10_000,
-    );
+    const snap = await withFake([`echo '${listReply(FREE_PLAN_DATA)}'`, LIMITS].join('\n'), 10_000);
     expect(snap).toMatchObject({
       planType: 'free',
       visibleModels: ['gpt-6-luna', 'gpt-5.6-terra'],
@@ -192,7 +186,7 @@ describe('readCodexRateLimits — the model/list leg of the spawn', () => {
   });
 
   it('keeps the rate-limit answer when model/list never replies', async () => {
-    const snap = await withFake([LIMITS, 'sleep 30'].join('\n'), 700);
+    const snap = await withFake(LIMITS, 5000);
     expect(snap).toMatchObject({ planType: 'free', usedPercent: 10 });
     expect(snap?.models).toBeUndefined();
   });
