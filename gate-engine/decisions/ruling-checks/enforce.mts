@@ -119,8 +119,9 @@ export async function linkedChecks(cwd: string, staged: string[]): Promise<Link[
 /** Why one Check failed, or null when it passed: argv-split, no shell, no stdin, bounded. */
 function runCheck(cwd: string, cmd: string, spawn: Spawn): string | null {
   const [bin, ...args] = argvOf(cmd);
-  // The Check's own children must not write into this gate's failure reason.
-  const env = { ...process.env, [GATE_REASON_ENV]: '' };
+  // The Check is not a gate: its children neither write this gate's reason nor exit as a crash.
+  const env = { ...process.env };
+  delete env[GATE_REASON_ENV];
   const r = spawn(bin, args, {
     cwd,
     env,
