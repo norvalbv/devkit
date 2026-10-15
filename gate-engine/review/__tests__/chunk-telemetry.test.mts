@@ -20,6 +20,8 @@ interface WireLensPart {
   status: string;
   chunk_index: number | null;
   chunk_files_sha: string | null;
+  cached?: true;
+  retried?: true;
 }
 
 interface WireEvent {
@@ -135,6 +137,29 @@ describe('chunk-assigned tasks (the sc-1907 path, exercised directly)', () => {
       [0, 'aaaaaaaaaaaa'],
       [1, 'bbbbbbbbbbbb'],
       [null, null],
+    ]);
+  });
+
+  it('only a replayed part carries cached:true, and never beside retried', () => {
+    const sink = join(consumerRepo({ backend: true }), 'events.jsonl');
+    process.env.DEVKIT_GATE_EVENTS = sink;
+    const parts = new Map([
+      [
+        'correctness-reviewer',
+        [
+          { ...partFor('state-transitions', assign(0, 'aaaaaaaaaaaa')), cached: true as const },
+          partFor('state-transitions', assign(1, 'bbbbbbbbbbbb')),
+          { ...partFor('concurrency-races'), retried: true },
+        ],
+      ],
+    ]);
+    emitMergedLensResults(parts, 'sonnet');
+    const [result] = readEvents(sink).filter((e) => e.type === 'review_result');
+    const lensParts = result.lens_parts ?? [];
+    expect(lensParts.map((p) => [p.chunk_index, p.cached, p.retried])).toEqual([
+      [0, true, undefined],
+      [1, undefined, undefined],
+      [null, undefined, true],
     ]);
   });
 
