@@ -130,6 +130,8 @@ describe('decision-checks gate', () => {
     expect(opts).toMatchObject({ cwd: root, stdio: ['ignore', 'inherit', 'inherit'] });
     expect(opts.shell).toBeUndefined();
     expect(opts.timeout).toBe(120_000);
+    // Unset, not '': an empty reason path still marks a gate, and a devkit CLI it runs would exit 70.
+    expect(opts.env).not.toHaveProperty('DEVKIT_GATE_REASON_FILE');
   });
 
   it('blocks on a failing Check and prints the slug, command, ruling and remedy', async () => {
