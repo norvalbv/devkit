@@ -1,5 +1,6 @@
 /** A gate's own GUARD_*_OK bypass must reach every site that acts on it: the prefix-cache salt,
- * cache-hit telemetry, the test-suite env scrub, and `devkit ship --help` for a self-host extra. */
+ * cache-hit telemetry, the test-suite env scrub, and `devkit ship --help` for a self-host extra.
+ * devkit's own declared extra gates must all load, and its typecheck must reach e2e/. */
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -9,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SCRUBBED_ENV } from '../../../vitest.setup.mjs';
 import { meta } from '../../../cli/commands/ship.mts';
 import { SELF_HOST_EXTRAS } from '../../../cli/lib/husky/self-host.mts';
-import { GATE_BYPASSES } from '../command-gates.mts';
+import { configExtraGates, GATE_BYPASSES } from '../command-gates.mts';
 import { DETERMINISTIC } from '../registry.mts';
 import { runDeterministic } from '../run.mts';
 
@@ -123,5 +124,21 @@ describe('a prefix-cached retry still records a gate bypass', () => {
     expect(runDeterministic(dir, opts)).toBe(0);
     expect(runDeterministic(dir, opts)).toBe(0);
     expect(bypasses()).toEqual([]);
+  });
+});
+
+describe('self-host gate coverage', () => {
+  it('runs every extra gate guard.config.json declares', () => {
+    const labels = configExtraGates(REPO).map((g) => g.label);
+    expect(labels).toEqual(['git-pathspec', 'related-tests', 'typecheck']);
+  });
+
+  it('typechecks the e2e suites, which no test run covers', () => {
+    const tsc = join(REPO, 'node_modules', '@typescript', 'native', 'bin', 'tsc');
+    const files = execFileSync(process.execPath, [tsc, '-p', 'tsconfig.json', '--listFilesOnly'], {
+      cwd: REPO,
+      encoding: 'utf8',
+    });
+    expect(files).toContain(join(REPO, 'e2e', 'no-vacuous-pass.e2e.test.mts'));
   });
 });

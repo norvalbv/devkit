@@ -14,6 +14,7 @@ import { execFileSync, spawnSync, type SpawnSyncReturns } from 'node:child_proce
 import { createHash } from 'node:crypto';
 import {
   copyFileSync,
+  type Dirent,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -81,7 +82,7 @@ const SKIP_DIRS = new Set(['node_modules', 'dist', '.git', '__tests__', 'coverag
 
 /** Recursively collect files under a dir, skipping build/vcs/test noise. */
 export function collectFiles(abs: string, rel: string, out: string[]): void {
-  let entries: ReturnType<typeof readdirSync>;
+  let entries: Dirent[];
   try {
     entries = readdirSync(abs, { withFileTypes: true });
   } catch {
