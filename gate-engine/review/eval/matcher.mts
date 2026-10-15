@@ -40,6 +40,7 @@ import {
   voteSlot,
 } from '../../judge/matcher-core.mts';
 import { execJudgeAsync } from '../../judge/run-judge.mts';
+import { FINDING_LINE_RE, ISSUES_LINE_RE } from '../contracts/response.mts';
 
 export type { MatcherOptions, SlotOutcome };
 export { kappa, MATCH_TIMEOUT_MS, mapPool, parseSlotReply, voteSlot };
@@ -76,12 +77,6 @@ export interface DecoySlot {
 
 // ─── Deterministic transcript parsing ─────────────────────────────────────────────
 
-// A findings line per the brief's output format, tolerant of markdown dressing the model adds
-// (`**CRITICAL**:`, `- IMPORTANT:`, `### LOW:`). The colon is required — bare severity words in
-// prose ("this is a CRITICAL gap") must not start a finding.
-const FINDING_LINE_RE = /^[\s>*#-]*\**(CRITICAL|IMPORTANT|LOW)\**\s*:\s*(.+)$/;
-const ISSUES_LINE_RE =
-  /^[\s>*#-]*\**ISSUES\**\s*:\s*(\d+)\s*critical\D+(\d+)\s*important\D+(\d+)\s*low/i;
 const VERDICT_LINE_RE = /^[\s>*#-]*\**VERDICT\**\s*:/i;
 const MAX_CONTEXT_LINES = 5; // the brief allows 2–5 context lines per finding
 
