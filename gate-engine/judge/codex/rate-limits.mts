@@ -15,8 +15,6 @@ const MAX_OUTPUT = 512 * 1024;
 const INITIALIZE_ID = 1;
 const READ_ID = 2;
 const MODEL_LIST_ID = 3;
-/** Plans whose credits are not trusted to serve `codex exec` past a spent plan limit. */
-const UNCREDITED_PLANS = new Set(['free', 'go']);
 
 export interface CodexRateLimits {
   /** Percentage of the primary window consumed, when the payload carried one. */
@@ -30,7 +28,8 @@ export interface CodexRateLimits {
   /** Provider reported a limit reached, or a window is fully spent with no usable credits (sc-3207:
    *  `rateLimitReachedType` is nullable upstream and was absent on a locked account). */
   reached: boolean;
-  /** The plan limit is hit, but usable credits on a paid plan serve calls. */
+  /** The plan limit is hit, but usable credits may serve calls. The read cannot say whether they
+   *  will: the same payload was both served and refused on a free plan. */
   onCredits: boolean;
   /** The provider's own enum value, e.g. `rate_limit_reached`. Reported, never interpreted. */
   reachedType?: string;
@@ -40,7 +39,7 @@ export interface CodexRateLimits {
   models?: string[];
   /** The non-hidden subset: the ones worth suggesting as a move target. */
   visibleModels?: string[];
-  /** Credits the payload calls spendable, whether or not `onCredits` trusts them on this plan. */
+  /** Credits the payload calls spendable, whether or not the reached kind lets them count. */
   creditsUsable?: boolean;
   /** The backend's own word on included usage; it says nothing about credit-served calls. */
   ordinaryUsageAllowed?: boolean;
@@ -139,11 +138,8 @@ export function parseRateLimitsReply(line: string): CodexRateLimits | null {
   const planLimited = reachedType !== undefined || exhaustedWindow !== undefined;
   const planType = usableText(limits.planType);
   // An allowlist: workspace_* kinds void credits upstream, and an unknown kind stays a lock.
-  // Free/Go credits did not serve codex exec on a live account; paid plans' did (a heuristic).
   const covered =
-    creditsUsable &&
-    (reachedType === undefined || reachedType === 'rate_limit_reached') &&
-    !(planType !== undefined && UNCREDITED_PLANS.has(planType));
+    creditsUsable && (reachedType === undefined || reachedType === 'rate_limit_reached');
   const snapshot: CodexRateLimits = {
     reached: planLimited && !covered,
     onCredits: planLimited && covered,

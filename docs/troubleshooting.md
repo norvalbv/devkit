@@ -332,8 +332,11 @@ rg --no-filename '"type":"judge_(preflight|exec)"' ~/.devkit/telemetry/gate-even
 
 Each line is a count, then plan, usable credits, the provider's reached type, the state the
 preflight printed for that model, and what the judge call returned. A `rate-limited` or
-`unavailable` state beside an `ok` outcome is a reading the provider contradicted; so is an `ok`
-state beside `rate-limited` when `credits_usable` is true.
+`unavailable` state beside an `ok` outcome is a reading the provider contradicted.
+
+An `unverified` state means the plan limit is spent and usable credits remain. The read cannot say
+whether those credits will serve the call, so neither an answer nor a refusal contradicts it.
+The judge call's own outcome settles it.
 
 Two pairs are not misreads. An `ok` state followed by a refusal on an account without usable
 credits is usually the shared window crossing 100% while the ship ran. An answer later than the
