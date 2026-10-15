@@ -1,12 +1,16 @@
 /** Briefed deletions are judged at the caller's fork point, where ship staging anchors — not at BASE. */
-import { execFileSync, spawnSync } from 'node:child_process';
 import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { inspectDistIntegrity } from '../lib/ship/dist-integrity.mts';
 import { recordShip } from '../lib/ship/reconcile-manifest-write.mts';
-import { buildableFixture, rootRegistry } from './_helpers.mts';
+import {
+  buildableFixture,
+  rootRegistry,
+  testExecFileSync as execFileSync,
+  testSpawnSync as spawnSync,
+} from './_helpers.mts';
 
 const GIT_ENV = { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' };
 const reshipScript = fileURLToPath(new URL('../lib/ship/reship.sh', import.meta.url));
