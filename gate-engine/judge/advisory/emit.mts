@@ -50,7 +50,44 @@ interface FallowAttribution {
 interface FallowAudit {
   verdict?: string;
   attribution?: FallowAttribution;
+  complexity?: FallowComplexity | null;
+  crapEstimated?: boolean;
 }
+
+/** One `complexity.findings[]` entry, reduced to the three fields that say a score was estimated. */
+interface FallowComplexityFinding {
+  introduced?: boolean;
+  exceeded?: string;
+  coverage_source?: string;
+}
+
+/** fallow's complexity section; only its per-finding list is read. */
+interface FallowComplexity {
+  findings?: ReadonlyArray<FallowComplexityFinding | null>;
+}
+
+/** fallow tags each finding `istanbul` or one of these; there is no report-level flag to read. */
+const ESTIMATED_SOURCES: readonly string[] = ['estimated', 'estimated_component_inherited'];
+
+/**
+ * Only a CRAP-alone breach qualifies: a cyclomatic or cognitive breach survives measured coverage,
+ * so naming a coverage run for it would send the reader on a re-ship that cannot change anything.
+ */
+const isEstimatedCrapOnly = (f: FallowComplexityFinding | null): boolean =>
+  f?.exceeded === 'crap' &&
+  // Absent under `gate all`, where every finding decides the verdict; only `false` means inherited.
+  f.introduced !== false &&
+  ESTIMATED_SOURCES.includes(f.coverage_source ?? '');
+
+/** Array.isArray guards the read: a reshaped vendor field means no marker, never a throw. */
+function hasEstimatedCrap(complexity: FallowComplexity | null | undefined): boolean {
+  const findings = complexity?.findings;
+  return Array.isArray(findings) && findings.some(isEstimatedCrapOnly);
+}
+
+/** The remedy is the devkit step that feeds ship's FALLOW_COVERAGE, not fallow's own command. */
+const ESTIMATED_CRAP_REMEDY =
+  ' (CRAP estimated, no coverage: run `devkit coverage-run <their tests>` in this checkout, then re-ship)';
 
 /** The counters paired with the words devkit prints for them. */
 const INTRODUCED: ReadonlyArray<readonly [field: keyof FallowAttribution, label: string]> = [
@@ -89,7 +126,11 @@ function readReport(text: string): FallowAudit {
   if (!VERDICTS.includes(report.verdict ?? '')) return {};
   // `?? {}` covers a literal `attribution: null`, which the parameter default cannot: a default
   // fires only on undefined, so null would reach the counter reads and throw inside the hook.
-  return { verdict: report.verdict, attribution: report.attribution ?? {} };
+  return {
+    verdict: report.verdict,
+    attribution: report.attribution ?? {},
+    crapEstimated: hasEstimatedCrap(report.complexity),
+  };
 }
 
 /** The verdicts fallow emits and this module can interpret; anything else is an unreadable report. */
@@ -99,9 +140,12 @@ const VERDICTS: readonly string[] = ['pass', 'warn', 'fail'];
 const isClean = (verdict: string, parts: string[]): boolean =>
   verdict === 'pass' && parts.length === 0;
 
-/** What the terminus prints: fallow's verdict, its own counters, and where the prose is. */
-const detailFor = (verdict: string, parts: string[]): string =>
-  `verdict=${verdict}${parts.length > 0 ? ` · ${parts.join(', ')} introduced` : ''} — read the fallow section of the log`;
+/**
+ * What the terminus prints: fallow's verdict, its own counters, and where the prose is. The remedy
+ * sits beside the verdict because the digest cuts each row at 140 chars, and counters can run long.
+ */
+const detailFor = (verdict: string, parts: string[], crapEstimated = false): string =>
+  `verdict=${verdict}${crapEstimated ? ESTIMATED_CRAP_REMEDY : ''}${parts.length > 0 ? ` · ${parts.join(', ')} introduced` : ''} — read the fallow section of the log`;
 
 /**
  * CLEAN needs a `pass` verdict AND zero introduced counters: fallow returns warn with EXIT 0 for a
@@ -110,11 +154,11 @@ const detailFor = (verdict: string, parts: string[]): string =>
 export function summariseFallowAudit(
   text: string,
 ): { token: Exclude<AdvisoryToken, 'unreadable'>; detail: string } | null {
-  const { verdict, attribution } = readReport(text);
+  const { verdict, attribution, crapEstimated } = readReport(text);
   if (!verdict) return null;
   const parts = introducedParts(attribution);
   if (isClean(verdict, parts)) return { token: 'clean', detail: '' };
-  return { token: 'findings', detail: detailFor(verdict, parts) };
+  return { token: 'findings', detail: detailFor(verdict, parts, crapEstimated) };
 }
 
 /** `absent` is its own case rather than a silent skip — gate-opt-out-is-visible-and-detectable. */
