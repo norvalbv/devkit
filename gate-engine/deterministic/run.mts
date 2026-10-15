@@ -51,7 +51,6 @@ import { markGateRun } from '../judge/run-context.mts';
 import { describeCachedPrefix, prefixEntry, recordPrefix } from '../prefix-cache/prefix-cache.mts';
 import {
   type GateFailure,
-  gateEnv,
   readGateReason,
   reasonDetail,
   reasonReport,
@@ -60,7 +59,9 @@ import {
 import {
   bypassedSuffixes,
   configExtraGates,
+  emitGateStep,
   reportCachedBypasses,
+  runArgv,
   type ExtraGate,
   structureBypassed,
 } from './command-gates.mts';
@@ -266,21 +267,6 @@ export function prefixCacheScope(scope?: string, effectiveIds?: string[]): strin
     : extraBase;
 }
 
-// Run one gate as a subprocess; return its exit code (0 on success). stdio inherited so the gate's
-// output reaches the user as if run directly; its failure reason returns via `reasonFile`.
-function runArgv(cwd: string, argv: string[], exec: typeof execFileSync, reasonFile: string) {
-  try {
-    exec(argv[0], argv.slice(1), { cwd, stdio: 'inherit', env: gateEnv(reasonFile) });
-    return 0;
-  } catch (e: unknown) {
-    // spawn failure / kill → treat as a real fail
-    if (e && typeof e === 'object' && 'status' in e && typeof e.status === 'number') {
-      return e.status;
-    }
-    return 1;
-  }
-}
-
 // A `--structure` / `--extra` command → a runnable gate descriptor. `guard-structure …` resolves to
 // the sibling module (same no-bunx resolution as the built-ins) and keeps the trichotomy (its exit
 // 2 = could-not-run → fail-open); any other command spawns its own argv[0] via PATH and BLOCKS on
@@ -398,16 +384,23 @@ export function runDeterministic(cwd = process.cwd(), opts: RunDeterministicOpts
         return;
       }
       const reasonFile = fileFor(i);
+      const startedAt = Date.now();
       const rc = runArgv(cwd, gate.argv, exec, reasonFile);
+      const [nFailed, nSkipped] = [failed.length, skipped.length];
       const failRc = (suffix = '') => fail(gate, suffix, undefined, readGateReason(reasonFile));
       // failOpen2 belongs to the GATE (exit 2 = opt-out), strict to the RUN: so an `--extra`'s
       // fatal exit 2 (never an opt-out) stays `(unexpected:2)` under strict, not a skip.
-      if (rc === 1) failRc();
-      else if (gate.rcLabels && Object.hasOwn(gate.rcLabels, rc)) failRc(gate.rcLabels[rc]);
-      else if (rc === 2 && gate.failOpen2) {
-        if (deterministicStrict()) failRc(COULD_NOT_RUN);
-        else skipped.push(gate.label);
-      } else if (rc !== 0) failRc(`(unexpected:${rc})`);
+      // `finally`, so an early return added to this classification still records the gate's step.
+      try {
+        if (rc === 1) failRc();
+        else if (gate.rcLabels && Object.hasOwn(gate.rcLabels, rc)) failRc(gate.rcLabels[rc]);
+        else if (rc === 2 && gate.failOpen2) {
+          if (deterministicStrict()) failRc(COULD_NOT_RUN);
+          else skipped.push(gate.label);
+        } else if (rc !== 0) failRc(`(unexpected:${rc})`);
+      } finally {
+        emitGateStep(gate.label, rc, startedAt, failed[nFailed], skipped.length > nSkipped);
+      }
     });
   });
   // Before the failure branch, so this prints on a GREEN run too — the case that motivated it: a

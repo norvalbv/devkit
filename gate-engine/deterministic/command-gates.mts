@@ -2,9 +2,11 @@
  * Repo-supplied command gates: the hook's `--structure` / `--extra` flags and guard.config.json
  * `extraGates`. guard-deterministic runs each one beside the built-in gates; non-zero blocks.
  */
+import type { execFileSync } from 'node:child_process';
 import { z } from 'zod';
-import { CONFIG_FILENAME, envFlag, resolveGuardConfig } from '../config.mts';
-import { emitGateBypass } from '../judge/gate-events.mts';
+import { CONFIG_FILENAME, coverageBypassed, envFlag, resolveGuardConfig } from '../config.mts';
+import { emitGateBypass, emitGateEvent } from '../judge/gate-events.mts';
+import { gateEnv } from './reason.mts';
 import { DETERMINISTIC } from './registry.mts';
 
 /** One command gate. A missing `cmd` marks a malformed spec, which blocks as unrunnable. */
@@ -84,4 +86,55 @@ export function reportCachedBypasses(ran: string[]): string[] {
     if (ran.includes(gate)) emitGateBypass(gate, `GUARD_${suffix}`);
   }
   return bypassed.map(([, suffix]) => `GUARD_${suffix}`);
+}
+
+// Run one gate as a subprocess; return its exit code (0 on success). stdio inherited so the gate's
+// output reaches the user as if run directly; its failure reason returns via `reasonFile`.
+export function runArgv(
+  cwd: string,
+  argv: string[],
+  exec: typeof execFileSync,
+  reasonFile: string,
+) {
+  try {
+    exec(argv[0], argv.slice(1), { cwd, stdio: 'inherit', env: gateEnv(reasonFile) });
+    return 0;
+  } catch (e: unknown) {
+    // spawn failure / kill → treat as a real fail
+    if (e && typeof e === 'object' && 'status' in e && typeof e.status === 'number') {
+      return e.status;
+    }
+    return 1;
+  }
+}
+
+const GUARD_PREFIX_RE = /^guard-/;
+
+/** Did this gate exit 0 only because its own one-run bypass flag told it to skip? */
+function selfBypassed(gate: string): boolean {
+  if (gate === 'coverage') return coverageBypassed();
+  return Object.entries(GATE_BYPASSES).some(([name, suffix]) => name === gate && envFlag(suffix));
+}
+
+/**
+ * One `gate_step` row per spawned gate: status in gate_result's vocabulary, exit code, duration.
+ * `failure` is the failure this gate recorded, if any; `optedOut` that it failed open.
+ */
+export function emitGateStep(
+  label: string,
+  rc: number,
+  startedAt: number,
+  failure: { verdict: boolean } | undefined,
+  optedOut: boolean,
+): void {
+  const gate = label.replace(GUARD_PREFIX_RE, '');
+  const unverified = failure ? !failure.verdict : optedOut || selfBypassed(gate);
+  emitGateEvent({
+    type: 'gate_step',
+    gate,
+    family: 'deterministic',
+    status: unverified ? 'could_not_run' : failure ? 'fail' : 'pass',
+    exit_code: rc,
+    duration_ms: Math.max(0, Date.now() - startedAt),
+  });
 }
