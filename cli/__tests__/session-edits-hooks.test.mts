@@ -255,7 +255,7 @@ describe.skipIf(!HAS_BUN)('lint-check.sh — session scoping', () => {
     expect(existsSync(join(root, 'biome-args.txt'))).toBe(false);
   });
 
-  it('fail-open when session-edits-lib.sh is missing (sync-hooks --only partial install)', () => {
+  it('fail-open when session-edits-lib.sh is missing', () => {
     const root = lintFixture();
     const hookDir = mkTmp('seslib-');
     writeFileSync(join(hookDir, 'lint-check.sh'), readFileSync(LINT_HOOK, 'utf8'));

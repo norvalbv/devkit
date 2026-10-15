@@ -18,3 +18,4 @@ created: 2026-06-30
 **Anchored-bet:** [TODO]
 **Scope:** cli/commands/sync-skills.mjs,cli/commands/sync-agents.mjs,cli/lib/install/install-hooks.mjs,cli/lib/sync-manifest.mjs,cli/commands/init.mjs,cli/lib/overlay.mjs
 **Source:** collab · fix/preserve-non-devkit-assets
+- 2026-10-15 — sc-4312: devkit sync-hooks --only is removed and now exits 1 with a remedy. A name-filtered slice skipped the libs a hook sources (session-edits-lib.sh, base-drift-lib.mjs) and the component that owns it, while upgrade and doctor --fix already reconcile the full recorded selection. A stale session-edits-lib.sh can now only be a preserved or git-tracked consumer copy, so the Stop hooks fail open against it instead of carrying per-helper fallback shims.
