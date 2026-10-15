@@ -259,6 +259,8 @@ if [ -n "$BASE_FLAG" ]; then
     [ "$rewrite_known" -eq 1 ] || RESUME_EXTRA_PATHS+=("$p")
   done
 fi
+ship_prequeue_defer_if_ahead "$BR"
+ship_prequeue_defer_if_ahead "${BASE_REF:-}"
 
 # Announced AFTER the rewrite canonicalisation above, never before it: that pass strips `./` and
 # dedupes, so a brief printed earlier would name a count and a path set the gates never receive —
@@ -642,51 +644,54 @@ export DEVKIT_SHIP_ID="${DEVKIT_SHIP_ID:-$(uuidgen 2>/dev/null || echo "${BR//\/
 export DEVKIT_SHIP_REPO="$(devkit_repo_identity "$ROOT")" DEVKIT_SHIP_BRANCH="$BR"
 export DEVKIT_SHIP_FROM_BRANCH="${FROM_BRANCH:-0}"
 export DEVKIT_SHIP_RESUMED=$RESUME
-# See ship-branch.sh: advisory judge reachability, placed after the exports so its row carries the
-# ship id. Fail-open; the BLOCKING preflights run after the intent write below (sc-2535).
-ship_judge_preflight "$ROOT"
-SHIP_INTENT_ARGS=(write --root "$ROOT" --branch "$BR" --mode reship --title "$TITLE")
-[ "$REWRITE" -eq 0 ] || SHIP_INTENT_ARGS+=(--base "$BASE_REF")
-for d in ${LINK_EXTRA[@]+"${LINK_EXTRA[@]}"}; do SHIP_INTENT_ARGS+=(--link "$d"); done
-[ "$UPDATE_PR_BODY" -eq 0 ] || SHIP_INTENT_ARGS+=(--update-pr-body)
-# See ship-branch.sh: the body file's path rides the record for the resume drift warning (sc-2527).
-[ "$BODY_FILE_SET" -eq 0 ] || SHIP_INTENT_ARGS+=(--body-file-path "$BODY_FILE_FLAG")
-[ "$RESUME" -eq 0 ] || [ "$BODY_SET" -eq 1 ] || [ "$BODY_FILE_SET" -eq 1 ] || SHIP_INTENT_ARGS+=(--keep-body-file)
-if [ "$RESUME" -eq 1 ]; then
-  SHIP_INTENT_ARGS+=(--resumed --merge-paths --expect-generation "$RESUME_GENERATION")
-  for p in ${RESUME_EXTRA_PATHS[@]+"${RESUME_EXTRA_PATHS[@]}"}; do SHIP_INTENT_ARGS+=(--donate "$p"); done
-fi
-# Capture the record's generation stamp — success deletes only what this attempt wrote (see
-# ship-branch.sh's twin). Serialize this lineage replacement with recovery's locked ownership check:
-# once a recovery proves ownership, no fresher invocation can replace the record before its edit.
-rewrite_publish_lock_acquire || exit 1
-RESUME_EXTRAS_UNRECORDED=0
-SHIP_INTENT_GENERATION=$(printf '%s' "$BODY" | node "$SHIP_INTENT" "${SHIP_INTENT_ARGS[@]}" -- "${PATHS[@]}") \
-  || SHIP_INTENT_GENERATION=""
-if [ -z "$SHIP_INTENT_GENERATION" ]; then
-  if [ "$UPDATE_PR_BODY" -eq 1 ] && [ -z "${SHIP_DRY_RUN:-}" ]; then
-    rewrite_publish_lock_release
-    echo "reship: explicit PR-body publication requires a recorded invocation; no gates, push, or PR edit attempted" >&2
-    echo "  run 'devkit doctor --fix', then re-run the full devkit ship --pr command" >&2
-    exit 1
+# The pre-queue pass records nothing: no judge row, no publish lock, no intent write.
+if ! ship_prequeue_active; then
+  # See ship-branch.sh: advisory judge reachability, placed after the exports so its row carries the
+  # ship id. Fail-open; the BLOCKING preflights run after the intent write below (sc-2535).
+  ship_judge_preflight "$ROOT"
+  SHIP_INTENT_ARGS=(write --root "$ROOT" --branch "$BR" --mode reship --title "$TITLE")
+  [ "$REWRITE" -eq 0 ] || SHIP_INTENT_ARGS+=(--base "$BASE_REF")
+  for d in ${LINK_EXTRA[@]+"${LINK_EXTRA[@]}"}; do SHIP_INTENT_ARGS+=(--link "$d"); done
+  [ "$UPDATE_PR_BODY" -eq 0 ] || SHIP_INTENT_ARGS+=(--update-pr-body)
+  # See ship-branch.sh: the body file's path rides the record for the resume drift warning (sc-2527).
+  [ "$BODY_FILE_SET" -eq 0 ] || SHIP_INTENT_ARGS+=(--body-file-path "$BODY_FILE_FLAG")
+  [ "$RESUME" -eq 0 ] || [ "$BODY_SET" -eq 1 ] || [ "$BODY_FILE_SET" -eq 1 ] || SHIP_INTENT_ARGS+=(--keep-body-file)
+  if [ "$RESUME" -eq 1 ]; then
+    SHIP_INTENT_ARGS+=(--resumed --merge-paths --expect-generation "$RESUME_GENERATION")
+    for p in ${RESUME_EXTRA_PATHS[@]+"${RESUME_EXTRA_PATHS[@]}"}; do SHIP_INTENT_ARGS+=(--donate "$p"); done
   fi
-  echo "reship: invocation not recorded — the retry needs the full command (non-fatal)" >&2
+  # Capture the record's generation stamp — success deletes only what this attempt wrote (see
+  # ship-branch.sh's twin). Serialize this lineage replacement with recovery's locked ownership check:
+  # once a recovery proves ownership, no fresher invocation can replace the record before its edit.
+  rewrite_publish_lock_acquire || exit 1
+  RESUME_EXTRAS_UNRECORDED=0
+  SHIP_INTENT_GENERATION=$(printf '%s' "$BODY" | node "$SHIP_INTENT" "${SHIP_INTENT_ARGS[@]}" -- "${PATHS[@]}") \
+    || SHIP_INTENT_GENERATION=""
+  if [ -z "$SHIP_INTENT_GENERATION" ]; then
+    if [ "$UPDATE_PR_BODY" -eq 1 ] && [ -z "${SHIP_DRY_RUN:-}" ]; then
+      rewrite_publish_lock_release
+      echo "reship: explicit PR-body publication requires a recorded invocation; no gates, push, or PR edit attempted" >&2
+      echo "  run 'devkit doctor --fix', then re-run the full devkit ship --pr command" >&2
+      exit 1
+    fi
+    echo "reship: invocation not recorded — the retry needs the full command (non-fatal)" >&2
+  fi
+  if [ "$REWRITE" -eq 1 ] && [ "$RESUME" -eq 1 ] && [ "$UPDATE_PR_BODY" -eq 1 ] &&
+     [ -n "$SHIP_INTENT_GENERATION" ]; then
+    body_orphan_proofs_prune "$EXPECTED_REMOTE" || {
+      rewrite_publish_lock_release
+      echo "reship: could not retire unpublished rewrite proof; no gates or publication attempted" >&2
+      exit 1
+    }
+  fi
+  rewrite_publish_lock_release
+  # Same exported flag as ship-branch.sh: the subprocess timeout banner must not advertise --resume
+  # for an attempt that was never recorded.
+  export DEVKIT_SHIP_INTENT_RECORDED=$([ -n "$SHIP_INTENT_GENERATION" ] && echo 1 || echo 0)
 fi
-if [ "$REWRITE" -eq 1 ] && [ "$RESUME" -eq 1 ] && [ "$UPDATE_PR_BODY" -eq 1 ] &&
-   [ -n "$SHIP_INTENT_GENERATION" ]; then
-  body_orphan_proofs_prune "$EXPECTED_REMOTE" || {
-    rewrite_publish_lock_release
-    echo "reship: could not retire unpublished rewrite proof; no gates or publication attempted" >&2
-    exit 1
-  }
-fi
-rewrite_publish_lock_release
-# Same exported flag as ship-branch.sh: the subprocess timeout banner must not advertise --resume
-# for an attempt that was never recorded.
-export DEVKIT_SHIP_INTENT_RECORDED=$([ -n "$SHIP_INTENT_GENERATION" ] && echo 1 || echo 0)
 
 # Advisory raw-line preview; it never refuses (the in-worktree guard-size decides).
-ship_size_preflight "$ROOT" "$BASE" "${PATHS[@]}"
+ship_prequeue_active || ship_size_preflight "$ROOT" "$BASE" "${PATHS[@]}"
 # The blocking preflights, after recording like new-ship's (sc-2389, sc-2535): a refusal leaves this
 # invocation replayable via `devkit ship --resume <branch>`, and each still runs against the caller
 # checkout before the detached worktree exists. See ship-branch.sh (sc-3883) for the hook-dir check.
@@ -696,6 +701,7 @@ gate_hook_source_preflight "$ROOT" "$BASE" shipping || exit 1
 DIST_INTEGRITY="$SCRIPT_DIR/dist-integrity.mts"
 [ -f "$DIST_INTEGRITY" ] || DIST_INTEGRITY="$SCRIPT_DIR/dist-integrity.mjs"
 node "$DIST_INTEGRITY" --root "$ROOT" --base "$BASE" -- "${PATHS[@]}"
+ship_prequeue_done
 
 STAGED_STATE=$(mktemp "${TMPDIR:-/tmp}/reship-staged.XXXXXX")
 BODY_RECOVERY_INDEX=

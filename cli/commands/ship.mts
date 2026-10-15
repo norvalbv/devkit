@@ -13,10 +13,13 @@ import {
   judgeEnvUnsetLine,
 } from '../../gate-engine/judge/outage/family-override.mts';
 import { findsFlag } from '../lib/help/wants-help.mts';
-import { enterShipQueue } from '../lib/ship/queue/enter.mts';
+import { enterShipQueue, prequeueEnv, queueAhead } from '../lib/ship/queue/enter.mts';
 import { formatShipQueue, readShipQueue } from '../lib/ship/queue/status.mts';
 import { reportShipRuntimeProvenance } from '../lib/ship/runtime-provenance.mts';
-import { runManagedPackagedScript } from '../lib/ship/run-packaged-script.mts';
+import {
+  runManagedPackagedScript,
+  runPackagedScriptQuiet,
+} from '../lib/ship/run-packaged-script.mts';
 
 export interface ShipDependencies {
   reportRuntimeProvenance: typeof reportShipRuntimeProvenance;
@@ -24,6 +27,9 @@ export interface ShipDependencies {
     ...args: Parameters<typeof runManagedPackagedScript>
   ) => number | Promise<number>;
   enterQueue: typeof enterShipQueue;
+  /** Branches ahead of this ship's waiting ticket; undefined when it is not waiting. */
+  queueAhead: () => string[] | undefined;
+  runPrequeue: typeof runPackagedScriptQuiet;
   showQueue: () => string;
 }
 
@@ -31,6 +37,8 @@ const DEFAULT_DEPENDENCIES: ShipDependencies = {
   reportRuntimeProvenance: reportShipRuntimeProvenance,
   runManagedScript: runManagedPackagedScript,
   enterQueue: enterShipQueue,
+  queueAhead: () => queueAhead(),
+  runPrequeue: runPackagedScriptQuiet,
   showQueue: () => formatShipQueue(readShipQueue()),
 };
 
@@ -229,8 +237,9 @@ A commit that never lands auto-deletes the empty branch.
 Ships queue machine-wide: every ship waits for a slot, first come first served, before its first
 gate, and holds it until it exits — or until --wait-ci starts polling, which needs no slot. One slot
 by default; ~/.devkit/ship-queue/config.json {"slots": N} (1..4) lets N ships run at once. A
-waiting ship prints its position once. A slot frees itself when its ship (and that ship's whole
-process group) is gone. There is no way to skip it; \`devkit ship --queue\` names the running ship
+waiting ship prints its position once, then runs its own pre-worktree refusals without a slot and
+exits there, unrecorded and dequeued, instead of failing on them after the wait. A slot frees
+itself when its ship (and that ship's whole process group) is gone. There is no way to skip it; \`devkit ship --queue\` names the running ship
 with the \`ps\` that inspects it if it looks stuck. Every blocked attempt records its
 invocation — retry with \`devkit ship --resume <branch>\` instead of re-typing the command.`,
 };
@@ -359,6 +368,9 @@ function repoRoot(cwd: string): string {
   return result.status === 0 ? result.stdout.trim() : cwd;
 }
 
+const PREQUEUE_REFUSAL =
+  'ship: refused before queueing — nothing was queued or recorded, so --resume has nothing to replay; fix the cause above and re-run the full command (add any new path to it).';
+
 /** One machine-wide slot before the first gate (sc-3785); see ../lib/ship/queue/ship-queue.mts. */
 async function queueThenRun(
   args: string[],
@@ -370,9 +382,26 @@ async function queueThenRun(
 ): Promise<number> {
   // <branch> is the first positional in every form (`--resume <branch>`, `--pr <branch>`, `<branch> …`).
   const branch = args.find((arg) => !arg.startsWith('--')) ?? '(unknown)';
+  // Not awaited yet: entering publishes this ship's ticket synchronously, so the pass below cannot
+  // cost it its place, and a ship arriving during the pass still sees it as ahead.
+  const entering = dependencies.enterQueue({ env, repo: repoRoot(cwd), branch, mode: queueMode });
+  const ahead = dependencies.queueAhead();
+  if (ahead) {
+    console.error(`ship: ${ahead.length} ship(s) ahead — checking this ship's own refusals first`);
+    const status = dependencies.runPrequeue(`${mode}.sh`, args, {
+      command: 'devkit ship',
+      cwd,
+      env: prequeueEnv(env, ahead),
+    });
+    if (status !== 0) {
+      entering.catch(() => {}); // the ticket drops at exit; a late queue error has nothing to add
+      console.error(PREQUEUE_REFUSAL);
+      return status;
+    }
+  }
   let queued: Awaited<ReturnType<ShipDependencies['enterQueue']>>;
   try {
-    queued = await dependencies.enterQueue({ env, repo: repoRoot(cwd), branch, mode: queueMode });
+    queued = await entering;
   } catch (cause) {
     const message = cause instanceof Error ? cause.message : String(cause);
     console.error(`ship: could not join the machine-wide ship queue: ${message}`);

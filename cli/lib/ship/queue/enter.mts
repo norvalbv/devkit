@@ -10,6 +10,7 @@ import {
   ensureRoot,
   holderAlive,
   type QueueProbe,
+  type QueueTicket,
   queueRoot,
   findHolder,
   SLOT_ENV,
@@ -18,6 +19,7 @@ import {
   withSlotLock,
   writeGuestLocked,
 } from './ship-queue.mts';
+import { readShipQueue } from './status.mts';
 
 export { SLOT_ENV };
 
@@ -26,6 +28,9 @@ export const RETIRED_ENVS = ['DEVKIT_SHIP_NO_QUEUE', 'DEVKIT_SHIP_QUEUE_DIR'] as
 export const SLOT_DIR_ENV = 'DEVKIT_SHIP_SLOT_DIR';
 /** Set only by the acquirer: tells its bash that IT may release the slot before --wait-ci. */
 export const SLOT_RELEASE_ENV = 'DEVKIT_SHIP_SLOT_RELEASE';
+/** Marks the slot-free pass that runs a waiting ship's own refusals (queue/slot.sh). */
+export const PREQUEUE_ENV = 'DEVKIT_SHIP_PREQUEUE';
+export const PREQUEUE_AHEAD_ENV = 'DEVKIT_SHIP_PREQUEUE_AHEAD';
 
 export interface EnteredQueue {
   env: Record<string, string>;
@@ -155,4 +160,39 @@ export async function enterShipQueue(options: EnterOptions): Promise<EnteredQueu
     handle,
     env: { [SLOT_ENV]: handle.token, [SLOT_DIR_ENV]: handle.slotDir, [SLOT_RELEASE_ENV]: '1' },
   };
+}
+
+/** The part of the queue view that orders ships: who runs, and who waits in which place. */
+interface QueueOrder {
+  running: ReadonlyArray<Pick<QueueTicket, 'branch'>>;
+  waiters: ReadonlyArray<Pick<QueueTicket, 'branch' | 'seq' | 'pid'>>;
+}
+
+/** Branches of every ship ahead of this process's waiting ticket; undefined when it is not waiting
+ *  (it claimed at once, joined as a guest, or the queue could not be read). */
+export function queueAhead(
+  pid = process.pid,
+  read: () => QueueOrder = readShipQueue,
+): string[] | undefined {
+  let view: QueueOrder;
+  try {
+    view = read();
+  } catch {
+    return undefined;
+  }
+  const mine = view.waiters.find((ticket) => ticket.pid === pid);
+  if (!mine) return undefined;
+  const earlier = view.waiters.filter((ticket) => ticket.seq < mine.seq);
+  return [...view.running, ...earlier].map((ship) => ship.branch);
+}
+
+/** The pre-queue pass holds no slot, so it must never see (and register under) one. */
+export function prequeueEnv(env: NodeJS.ProcessEnv, ahead: readonly string[]): NodeJS.ProcessEnv {
+  const next: NodeJS.ProcessEnv = {
+    ...env,
+    [PREQUEUE_ENV]: '1',
+    [PREQUEUE_AHEAD_ENV]: ahead.join('\n'),
+  };
+  for (const name of [SLOT_ENV, SLOT_DIR_ENV, SLOT_RELEASE_ENV]) delete next[name];
+  return next;
 }

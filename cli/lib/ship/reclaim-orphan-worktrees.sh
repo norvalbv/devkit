@@ -216,6 +216,8 @@ _ship_orphan_consider() {
     return 1
   fi
 
+  # The pre-queue pass never mutates: the queued run reclaims, then re-checks everything after it.
+  ship_prequeue_done
   _ship_orphan_reclaim "$repo" "$br" "$path" "$r_pid" "$r_identity" "$r_base" "$r_created"
   return 0
 }
