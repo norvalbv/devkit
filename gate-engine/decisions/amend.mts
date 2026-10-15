@@ -5,6 +5,7 @@ import { writeFileAtomic } from './atomic-write.mts';
 import {
   type AddOptions,
   currentTarget,
+  firstClause,
   hasTargetFields,
   parseDecision,
   parseIndex,
@@ -19,6 +20,7 @@ import {
   warnIfFolded,
   whyHook,
 } from './decision-format.mts';
+import { validateCategory } from './recall/categories.mts';
 import { effectiveScope } from './recall/retrieval.mts';
 
 export interface DecisionPaths {
@@ -32,6 +34,8 @@ const TIMELINE_ENTRY_RE = /^(?:## Target · \d{4}-\d{2}-\d{2}\b.*|- \d{4}-\d{2}-
 const ENTRY_DATE_RE = /^(?:## Target · |- )(\d{4}-\d{2}-\d{2})\b/;
 const TARGET_DATE_RE = /^## Target · (\d{4}-\d{2}-\d{2})\b/;
 const NOTE_PREFIX_RE = /^- \d{4}-\d{2}-\d{2}\s+—\s+/;
+const LINE_END_RE = /\r?\n/;
+const LINE_LABEL_RE = /^[ \t]*(?:\*\*[^:\r\n]+:\*\*|- (?:Positive|Negative):)/;
 
 interface Timeline {
   prefix: string;
@@ -191,6 +195,60 @@ function warnTargetReplacement(
   }
 }
 
+/** Offset of the one occurrence of oldText in text; overlapping repeats count as ambiguous. */
+function uniqueOffset(text: string, oldText: string, where: string) {
+  const matches = [];
+  for (let index = text.indexOf(oldText); index !== -1; index = text.indexOf(oldText, index + 1)) {
+    matches.push(index);
+  }
+  if (matches.length === 0) throw new Error(`"${oldText}" does not occur in ${where}`);
+  if (matches.length > 1)
+    throw new Error(`"${oldText}" occurs ${matches.length} times in ${where}`);
+  return matches[0];
+}
+
+/** Replace one substring in a Target's fields; an auto-derived heading title follows the Ruling. */
+function replaceInTarget(block: string, oldText: string, newText: string) {
+  const headingEnd = block.search(LINE_END_RE);
+  const heading = headingEnd === -1 ? block : block.slice(0, headingEnd);
+  const fields = headingEnd === -1 ? '' : block.slice(headingEnd);
+  const at = uniqueOffset(fields, oldText, 'the newest draft Target');
+  const lineStart = fields.lastIndexOf('\n', at) + 1;
+  const next = fields.indexOf('\n', at);
+  const lineEnd = next === -1 ? fields.length : next;
+  const line = fields.slice(lineStart, lineEnd);
+  const offset = at - lineStart;
+  const editedLine = `${line.slice(0, offset)}${foldLines(newText)}${line.slice(offset + oldText.length)}`;
+  const label = line.match(LINE_LABEL_RE)?.[0] ?? '';
+  if (
+    (editedLine.match(LINE_LABEL_RE)?.[0] ?? '') !== label ||
+    (line.slice(label.length).trim() && !editedLine.slice(label.length).trim())
+  ) {
+    throw new Error(
+      `replacing "${oldText}" would change a **Field:** label or empty a field; ` +
+        'replace text inside a single field value',
+    );
+  }
+  const categoryError = label.endsWith('**Category:**')
+    ? validateCategory(editedLine.slice(label.length))
+    : null;
+  if (categoryError) throw new Error(categoryError);
+  const edited = `${fields.slice(0, lineStart)}${editedLine}${fields.slice(lineEnd)}`;
+  const before = parseTargetFields(fields);
+  const after = parseTargetFields(edited);
+  const autoTitle = ` — ${foldLines(firstClause(before.ruling ?? ''))}`;
+  const title = heading.endsWith(autoTitle)
+    ? `${heading.slice(0, -autoTitle.length)} — ${foldLines(firstClause(after.ruling ?? ''))}`
+    : heading;
+  const result = `${title}${edited}`;
+  if (currentTarget(result)?.block !== result.trim()) {
+    throw new Error(
+      `replacing "${oldText}" would start a new heading or note line inside the Target`,
+    );
+  }
+  return result;
+}
+
 function regenerateIndex(paths: DecisionPaths) {
   const previous = existsSync(paths.indexPath)
     ? parseIndex(readFileSync(paths.indexPath, 'utf8'))
@@ -226,20 +284,25 @@ export function amendDecision(slug: string, options: AddOptions, paths: Decision
   const modeCount =
     Number(Boolean(options.isTarget)) +
     Number(options.note !== undefined) +
-    Number(options.noteReplace !== undefined);
+    Number(options.noteReplace !== undefined) +
+    Number(options.targetReplace !== undefined);
   if (!slug || modeCount !== 1) {
     throw new Error(
-      'Usage: guard-decisions amend <slug> --target … | --note "…" | --note-replace "<old>" "<new>"',
+      'Usage: guard-decisions amend <slug> --target … | --note "…" | ' +
+        '--note-replace "<old>" "<new>" | --target-replace "<old>" "<new>" ' +
+        '(a replace mode ignores field flags)',
     );
   }
-  if (
-    options.noteReplace &&
-    (options.noteReplace[0] === undefined || options.noteReplace[1] === undefined)
-  ) {
-    throw new Error('amend --note-replace requires both "<old>" and "<new>" arguments');
+  const replaceFlag = options.targetReplace ? '--target-replace' : '--note-replace';
+  const replacePair = options.targetReplace ?? options.noteReplace;
+  if (replacePair && (replacePair[0] === undefined || replacePair[1] === undefined)) {
+    throw new Error(`amend ${replaceFlag} requires both "<old>" and "<new>" arguments`);
   }
-  if (options.noteReplace?.[0] === '') {
-    throw new Error('amend --note-replace requires a non-empty "<old>" substring');
+  if (replacePair?.[0] === '') {
+    throw new Error(`amend ${replaceFlag} requires a non-empty "<old>" substring`);
+  }
+  if (options.targetReplace && /[\r\n]/.test(options.targetReplace[0] ?? '')) {
+    throw new Error('amend --target-replace requires a single-line "<old>" substring');
   }
   if (options.note === '') throw new Error('amend --note requires a non-empty note');
   if (options.isTarget && !hasTargetFields(options)) {
@@ -251,7 +314,7 @@ export function amendDecision(slug: string, options: AddOptions, paths: Decision
   if (!existsSync(file)) throw new Error(`No decision axis "${slug}".`);
   const current = readFileSync(file, 'utf8');
   const committed = committedDecision(file, paths.cwd);
-  const kind = options.isTarget ? 'target' : 'note';
+  const kind = options.isTarget || options.targetReplace ? 'target' : 'note';
   const { workingParsed, selected, date, trailing } = validateAmendment(
     slug,
     current,
@@ -267,27 +330,28 @@ export function amendDecision(slug: string, options: AddOptions, paths: Decision
   ) {
     throw new Error('amending an appended Target requires --evidence-change "<what shifted>"');
   }
+  const bodyOffset = current.length - workingParsed.body.length;
+  if (options.targetReplace) {
+    const [oldText = '', newText = ''] = options.targetReplace;
+    const block = currentTarget(selected.text)?.block ?? selected.text;
+    const start = bodyOffset + selected.start;
+    const edited = replaceInTarget(block, oldText, newText);
+    writeFileAtomic(
+      file,
+      `${current.slice(0, start)}${edited}${current.slice(start + block.length)}`,
+    );
+    regenerateIndex(paths);
+    warnIfFolded('--target-replace', newText);
+    console.log(`Amended draft target on "${slug}" (${date}).`);
+    return;
+  }
   if (options.noteReplace) {
     const [oldText, newText] = options.noteReplace as [string, string];
     const prefix = selected.text.match(NOTE_PREFIX_RE)?.[0];
     if (!prefix) throw new Error('newest draft note has an invalid date prefix');
     const noteText = selected.text.slice(prefix.length);
-    const matches = [];
-    for (
-      let index = noteText.indexOf(oldText);
-      index !== -1;
-      index = noteText.indexOf(oldText, index + 1)
-    ) {
-      matches.push(index);
-    }
-    if (matches.length === 0) {
-      throw new Error(`"${oldText}" does not occur in the newest draft note`);
-    }
-    if (matches.length > 1) {
-      throw new Error(`"${oldText}" occurs ${matches.length} times in the newest draft note`);
-    }
-    const bodyOffset = current.length - workingParsed.body.length;
-    const start = bodyOffset + selected.start + prefix.length + matches[0];
+    const at = uniqueOffset(noteText, oldText, 'the newest draft note');
+    const start = bodyOffset + selected.start + prefix.length + at;
     const replacement = foldLines(newText);
     writeFileAtomic(
       file,
