@@ -1,15 +1,27 @@
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterAll } from 'vitest';
-import { testExecFileSync as execFileSync } from './_helpers.mts';
+import { testExecFileSync as execFileSync, testSpawnSync as spawnSync } from './_helpers.mts';
 
 // The `reship --pr --base` rewrite fixture, shared by reship.test.mts and the pin-supervisor suite.
 const GENV = { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' };
+const RESHIP = fileURLToPath(new URL('../lib/ship/reship.sh', import.meta.url));
 const dirs = [];
 afterAll(() => {
   for (const d of dirs) rmSync(d, { recursive: true, force: true });
 });
+
+/** Runs reship.sh in a fixture repo with a piped body and hermetic git config. */
+export function runReship(args, dir, env) {
+  return spawnSync('/bin/bash', [RESHIP, ...args], {
+    cwd: dir,
+    input: 'body\n',
+    encoding: 'utf8',
+    env: { ...process.env, ...GENV, ...env },
+  });
+}
 
 /** Existing PR off an old base plus a caller snapshot already resolved on today's main. The raw
  * origin stays GitHub-shaped for PR identity checks; url.insteadOf keeps every fetch/push hermetic. */

@@ -220,6 +220,11 @@ reship_refuse_closed_pr() {
   print_closed_pr_remedy "$PR_SEEN_BASE" "--$paths" "then re-run this command"
   return 1
 }
+# The copyable append-mode form of this invocation: the same branch, title and paths, minus --base.
+reship_append_command() {
+  printf 'devkit ship %q %q --pr --' "$BR" "$TITLE"
+  printf ' %q' "${PATHS[@]}"
+}
 # Resolve owner/repo from origin (best-effort — only used for the final PR-URL print, which falls
 # back to a plain message; a non-GitHub origin still re-pushes fine).
 ORIGIN_URL=$(git config --get remote.origin.url || git remote get-url origin)
@@ -563,8 +568,7 @@ if [ "$REWRITE" -eq 1 ]; then
   if [ "${#MISSING_SCOPE[@]}" -gt 0 ] && [ "$REWRITE_RECEIPT_PROVEN" -eq 0 ]; then
     echo "rewrite brief omits paths from the existing PR:" >&2
     for p in "${MISSING_SCOPE[@]}"; do printf '  %q\n' "$p" >&2; done
-    brief_paths=; for p in "${PATHS[@]}"; do brief_paths="$brief_paths $(printf '%q' "$p")"; done
-    echo "  to ADD a commit on top of the PR instead, drop --base: devkit ship $(printf '%q' "$BR") $(printf '%q' "$TITLE") --pr --$brief_paths" >&2
+    echo "  to ADD a commit on top of the PR instead, drop --base: $(reship_append_command)" >&2
     echo "  to REWRITE the PR as one commit, re-run with every listed path added to the brief" >&2
     exit 1
   fi
@@ -586,6 +590,11 @@ if [ "$REWRITE" -eq 1 ]; then
       exit 1
     fi
   done
+  # Before any preflight or gate: a title written for an appended delta fails completeness here.
+  if [ "$REWRITE_RECEIPT_PROVEN" -eq 0 ]; then
+    echo "ship --pr --base: REWRITE — replaces PR #$PR_NUM's $(git rev-list --count "$OLD_MERGE_BASE..$EXPECTED_REMOTE") commit(s) on origin/$BR with ONE commit on origin/$BASE_REF; the title and body are judged against the whole PR diff, not just your new change" >&2
+    echo "  to ADD a commit on top of the PR instead, drop --base: $(reship_append_command)" >&2
+  fi
 else
   git fetch origin "$BR" 2>/dev/null || {
     echo "no remote branch origin/$BR to re-push to — open the PR first (ship without --pr)" >&2; exit 1
