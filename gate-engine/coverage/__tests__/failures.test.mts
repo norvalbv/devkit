@@ -1,7 +1,5 @@
-import { execFileSync } from 'node:child_process';
 import {
   existsSync,
-  mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
@@ -9,7 +7,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, join } from 'node:path';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ResolvedConfig, Vitest } from 'vitest/node';
 import {
@@ -18,14 +16,11 @@ import {
   formatDiagnosis,
   formatRerunNotice,
   formatRerunRescue,
-  headSha,
   humanAge,
   passEnv,
   readClearMarker,
   readDiagnosis,
   removeClearMarker,
-  stagedFiles,
-  stagedIntersection,
   RERUN_FLOOR_MS,
   RERUN_SCALE_ENV,
   raisedTimeoutMs,
@@ -128,65 +123,66 @@ describe('readDiagnosis', () => {
   });
 });
 
-describe('the staged-diff claim', () => {
-  const git = (root: string, args: string[]) =>
-    execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
-  const repo = () => {
-    const root = makeRoot();
-    git(root, ['init', '-q', '-b', 'main']);
-    git(root, ['config', 'user.email', 't@t.t']);
-    git(root, ['config', 'user.name', 't']);
-    return root;
-  };
+describe('whether a failure is yours', () => {
+  const fail = (failedFiles: string[], allTimedOut = false) =>
+    formatDiagnosis(
+      { failedFiles, flaky: [], failures: { tests: [], allTimedOut, timeoutMs: null } },
+      '/repo',
+      [],
+    );
+  const pointer = (file: string) =>
+    `   Already red on the default branch? Check in seconds: devkit baseline-status --file ${file}`;
 
-  it('finds a failed file that is staged', () => {
-    const root = repo();
-    mkdirSync(join(root, 'src'), { recursive: true });
-    writeFileSync(join(root, 'src', 'a.test.ts'), 'x');
-    git(root, ['add', 'src/a.test.ts']);
-
-    const staged = stagedFiles(root);
-    expect(stagedIntersection([join(root, 'src', 'a.test.ts')], staged)).toHaveLength(1);
-    expect(stagedIntersection([join(root, 'src', 'other.test.ts')], staged)).toEqual([]);
-  });
-
-  // FRINK'S ACTUAL MODEL. Every agent here runs in a `git worktree`, whose staged diff is its own and
-  // whose toplevel is NOT the main checkout's. Resolving against the wrong root would compare this
-  // agent's failures to a sibling agent's staged files and answer "not in your diff" about a file
-  // that is — the one sentence in this feature an agent would act on by shipping.
-  it('answers from the worktree it was run in, not the main checkout', () => {
-    const root = repo();
-    writeFileSync(join(root, 'seed.txt'), 'x');
-    git(root, ['add', 'seed.txt']);
-    git(root, ['commit', '-qm', 'seed']);
-    const tree = join(root, '..', `${basename(root)}-wt`);
-    git(root, ['worktree', 'add', '-q', '-b', 'side', tree]);
-    roots.push(tree);
-    mkdirSync(join(tree, 'src'), { recursive: true });
-    writeFileSync(join(tree, 'src', 'mine.test.ts'), 'x');
-    git(tree, ['add', 'src/mine.test.ts']);
-    // Staged in the MAIN checkout only — it must not leak into the worktree's answer.
-    writeFileSync(join(root, 'theirs.test.ts'), 'x');
-    git(root, ['add', 'theirs.test.ts']);
-
-    const staged = stagedFiles(tree);
-    expect(stagedIntersection([join(tree, 'src', 'mine.test.ts')], staged)).toHaveLength(1);
-    expect(stagedIntersection([join(root, 'theirs.test.ts')], staged)).toEqual([]);
-    expect(headSha(tree)).not.toBeNull();
-  });
-
-  it('cannot be answered outside a git work tree, and says so with null', () => {
-    const root = makeRoot(); // no git init
-    expect(stagedFiles(root)).toBeNull();
-    expect(stagedIntersection(['/repo/a.test.ts'], null)).toBeNull();
-    expect(headSha(root)).toBeNull();
-  });
-
-  it('omits the staged sentence entirely when git could not answer', () => {
+  it('omits the staged sentence and the pointer entirely when git could not answer', () => {
     const lines = formatDiagnosis({ failedFiles: ['/repo/a.test.ts'], flaky: [] }, '/repo', null);
-    expect(lines.join('\n')).not.toMatch(/staged/);
-    const answered = formatDiagnosis({ failedFiles: ['/repo/a.test.ts'], flaky: [] }, '/repo', []);
-    expect(answered.join('\n')).toMatch(/None of them are in your staged diff/);
+    expect(lines.join('\n')).not.toMatch(/staged|baseline-status/);
+  });
+
+  // Nothing is staged while an agent works in its worktree, so "not staged" must not read as "not mine".
+  it('does not call an unstaged failure pre-existing, and names the check that would say', () => {
+    expect(fail(['/repo/a.test.ts']).slice(-2)).toEqual([
+      '   None of them are staged — that alone does not make them pre-existing.',
+      pointer('a.test.ts'),
+    ]);
+  });
+
+  it('keeps a staged failure exactly as before, with no pointer', () => {
+    const lines = formatDiagnosis({ failedFiles: ['/repo/a.test.ts'], flaky: [] }, '/repo', [
+      '/repo/a.test.ts',
+    ]);
+    expect(lines).toEqual([
+      '🚫 1 test file(s) failed:',
+      '     a.test.ts',
+      '   In your staged diff: a.test.ts',
+    ]);
+  });
+
+  it('points at the unstaged file when only some failures are staged', () => {
+    const lines = formatDiagnosis(
+      { failedFiles: ['/repo/mine.test.ts', '/repo/red.test.ts'], flaky: [] },
+      '/repo',
+      ['/repo/mine.test.ts'],
+    );
+    expect(lines.slice(-2)).toEqual([
+      '   In your staged diff: mine.test.ts',
+      pointer('red.test.ts'),
+    ]);
+  });
+
+  it('quotes a path the shell would split', () => {
+    expect(fail(['/repo/app/[id]/page one.test.ts']).at(-1)).toBe(
+      pointer("'app/[id]/page one.test.ts'"),
+    );
+  });
+
+  it('leaves an all-timeout failure to the raised-budget remedy', () => {
+    expect(fail(['/repo/a.test.ts'], true).join('\n')).not.toMatch(/baseline-status/);
+  });
+
+  it('adds no pointer to a run that ended on an unhandled error', () => {
+    const unhandled = [{ file: '/repo/late.test.ts', message: 'Error: boom' }];
+    const lines = formatDiagnosis({ failedFiles: [], flaky: [], unhandled }, '/repo', []);
+    expect(lines.join('\n')).not.toMatch(/baseline-status/);
   });
 });
 
@@ -856,7 +852,7 @@ describe('a run that exits non-zero with no failed test', () => {
       '🚫 vitest exited non-zero, but no test failed — the run ended on:',
       '     late.test.ts — Error: boom',
       '     file unknown — Error: no path',
-      '   None of them are in your staged diff.',
+      '   None of them are staged — that alone does not make them pre-existing.',
       '   The coverage artifact was discarded: devkit publishes only from a run vitest calls green.',
     ]);
   });

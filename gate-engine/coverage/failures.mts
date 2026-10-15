@@ -1,9 +1,9 @@
-import { execFileSync } from 'node:child_process';
-import { commitIndexEnv } from '../ratchets/commit-index.mts';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { shellWord } from '../review/valve/shell-word.mts';
 import { canonicalPath, type CollectionError, collectionRemedy } from './dependencies.mts';
+import { stagedIntersection } from './provenance.mts';
 import { readUnhandled, UNHANDLED_NAME, type UnhandledError } from './unhandled-reporter.mts';
 
 /**
@@ -198,56 +198,6 @@ export function readDiagnosis(resultsFile: string, exitCode = 0): RunDiagnosis |
   }
 }
 
-/**
- * Absolute paths of the staged files, or null when git cannot answer.
- *
- * null is NOT an empty diff, and the caller must not collapse the two: an empty list licenses the
- * sentence "none of them are in your staged diff", which is a claim. devkit runs inside a repo it does
- * not own and may be invoked outside a work tree entirely — same reason sc-1959 ruled that a gate
- * which cannot run git must not report a missing catalog.
- */
-export function stagedFiles(cwd: string): string[] | null {
-  const git = (args: string[]): string =>
-    execFileSync('git', args, {
-      cwd,
-      env: commitIndexEnv(cwd),
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    });
-  try {
-    const top = canonicalPath(git(['rev-parse', '--show-toplevel']).trim());
-    return git(['diff', '--cached', '--name-only', '-z'])
-      .split('\0')
-      .filter(Boolean)
-      .map((p) => canonicalPath(join(top, p)));
-  } catch {
-    return null;
-  }
-}
-
-/** The short HEAD sha, or null outside a work tree. Recorded so a stale marker dates itself. */
-export function headSha(cwd: string): string | null {
-  try {
-    return execFileSync('git', ['rev-parse', '--short', 'HEAD'], {
-      cwd,
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    }).trim();
-  } catch {
-    return null;
-  }
-}
-
-/** Failed files that are also staged. null propagates: unknown stays unknown, never "none". */
-export function stagedIntersection(
-  failedFiles: string[],
-  staged: string[] | null,
-): string[] | null {
-  if (staged === null) return null;
-  const set = new Set(staged);
-  return failedFiles.map(canonicalPath).filter((f) => set.has(f));
-}
-
 /** Repo-relative where that is shorter and inside cwd; absolute otherwise. Paths are for humans. */
 export function displayPath(file: string, cwd: string): string {
   const rel = relative(canonicalPath(cwd), canonicalPath(file));
@@ -379,6 +329,8 @@ export function formatDiagnosis(
     const hidden = diagnosis.failedFiles.length - MAX_LISTED_FILES;
     if (hidden > 0) lines.push(`     …and ${hidden} more`);
     lines.push(...stagedSentence(diagnosis.failedFiles, staged, cwd));
+    if (!diagnosis.failures?.allTimedOut)
+      lines.push(...baselinePointer(diagnosis.failedFiles, staged, cwd));
     lines.push(...formatCollectionErrors(diagnosis.collection ?? [], cwd));
     // Said HERE, where the run failed — not only after a rescue — so the remedy arrives before the
     // next full run is spent rather than after it (sc-3473).
@@ -416,8 +368,20 @@ function stagedSentence(files: string[], staged: string[] | null, cwd: string): 
   if (mine === null) return [];
   return [
     mine.length === 0
-      ? '   None of them are in your staged diff.'
+      ? '   None of them are staged — that alone does not make them pre-existing.'
       : `   In your staged diff: ${mine.map((f) => displayPath(f, cwd)).join(', ')}`,
+  ];
+}
+
+/** An unstaged failure may predate your change: name the check that answers in seconds, not a verdict. */
+function baselinePointer(files: string[], staged: string[] | null, cwd: string): string[] {
+  if (staged === null) return [];
+  const mine = new Set(staged);
+  const other = files.find((f) => !mine.has(canonicalPath(f)));
+  if (!other) return [];
+  const file = shellWord(displayPath(other, cwd));
+  return [
+    `   Already red on the default branch? Check in seconds: devkit baseline-status --file ${file}`,
   ];
 }
 

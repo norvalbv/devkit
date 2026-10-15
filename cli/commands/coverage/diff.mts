@@ -3,6 +3,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { resolveGuardConfig, sourceMatchers } from '../../../gate-engine/config.mts';
+import { formatClearMarker, readClearMarker } from '../../../gate-engine/coverage/failures.mts';
 import {
   addedLineCoverage,
   addedLinesOf,
@@ -183,6 +184,8 @@ export default function coverageDiff(args: string[], cwd: string): number {
     console.error(
       `🚫 ${COVERAGE_FILE} is ${why}. Produce it with \`devkit coverage-run\`, then re-run.`,
     );
+    const marker = why === 'absent' ? readClearMarker(resolve(cwd, COVERAGE_DIR)) : null;
+    if (marker) for (const line of formatClearMarker(marker, cwd)) console.error(line);
     return 1;
   }
 
