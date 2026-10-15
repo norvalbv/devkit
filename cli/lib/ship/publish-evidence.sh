@@ -17,7 +17,7 @@ evidence_caller_body() {
 
 # usage: publish_evidence_block <worktree> <pr-number> <repo> <head-sha>
 publish_evidence_block() {
-  local wt=$1 pr=$2 repo=$3 head=$4 run supervisor budget tmp status=0
+  local wt=$1 pr=$2 repo=$3 head=$4 run supervisor budget tmp status=0 keep=${TMPDIR:-/tmp}
   run=$(evidence_run_script)
   supervisor="$SCRIPT_DIR/review/process/gate-supervisor.mts"
   [ -f "$supervisor" ] || supervisor="$SCRIPT_DIR/review/process/gate-supervisor.mjs"
@@ -26,7 +26,8 @@ publish_evidence_block() {
   # Owned here so a capture killed at the outer bound cannot leak its clones.
   tmp=$(mktemp -d "${TMPDIR:-/tmp}/devkit-evidence.XXXXXX") || return 0
   TMPDIR=$tmp node "$supervisor" "$((budget + 60))" -- \
-    node "$run" publish --cwd "$wt" --repo "$repo" --pr "$pr" --head "$head" </dev/null || status=$?
+    node "$run" publish --cwd "$wt" --repo "$repo" --pr "$pr" --head "$head" --keep-in "$keep" \
+    </dev/null || status=$?
   if [ "$status" -ne 0 ]; then
     TMPDIR=$tmp node "$supervisor" 60 -- node "$run" publish --cwd "$wt" --repo "$repo" --pr "$pr" \
       --head "$head" --failed "the evidence step stopped with exit $status" </dev/null || true

@@ -111,7 +111,9 @@ devkit command.
   red (PR base plus only the PR's test files) and green (PR head) after the PR opens and writes the
   outcome there: captured, inconclusive or not-run, never "proved", and stale once the head moves.
   An explicit `--body` keeps the current block, a block pasted into a body is dropped, and a
-  re-ship that pushes rewrites only the block. It can never fail the ship.
+  re-ship that pushes rewrites only the block. It can never fail the ship. An inconclusive block
+  names the red and green failures, and ship prints `evidence: kept the red/green logs at <path>`.
+  After fixing a flaky cause, `devkit pr-evidence <pr>` re-captures it from a checkout at the PR head.
 - **`another ship for <branch> is still running` → wait or stop that run; never force-remove it.**
   Ship reclaims the worktree and branch a KILLED ship left behind automatically, so a refusal means
   it proved the owner is alive. When the message says the shell is gone but the gate tree survives,

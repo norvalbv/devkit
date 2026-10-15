@@ -185,6 +185,16 @@ Don't `git pull` / `git restore` by hand on a shared tree. Run `devkit reconcile
 `devkit reconcile --apply` — it confirms each PR is merged, restores only still-pristine files, and never
 moves the shared HEAD or clobbers a concurrent edit.
 
+## The PR's evidence block reads `inconclusive`
+
+The block names the red and green failures it saw, up to three of each. When the run produced logs,
+ship prints `evidence: kept the red/green logs at <path>` under your temp directory: `evidence.md`,
+`evidence.json` and both runs' stdout and stderr. A green failure usually means the head itself fails
+one of the selected tests; push a fix and the next ship re-captures. If the cause was the
+environment (a flake, a missing install), re-capture the same head from a checkout at the PR head
+with `devkit pr-evidence <pr>`. It replaces only an inconclusive block, and the new detail keeps the
+previous outcome. Its merge verdict reads `human-review`, because no ship gate run vouches for it.
+
 ## `devkit ship` stopped at `⏱ ship: gate chain hit the …s ceiling (exit 124)`
 
 This is **budget, not a hang** — the banner says so. The gate chain has a **hang ceiling**
