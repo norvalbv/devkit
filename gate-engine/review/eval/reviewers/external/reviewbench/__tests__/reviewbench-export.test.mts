@@ -56,6 +56,23 @@ describe('exportReviewBench', () => {
     expect(out.file?.usage.time_in_ms).toBe(5);
   });
 
+  it('sends the advisories of a PASS row to the judge beside the blocking issues', () => {
+    const out = exportReviewBench({
+      ...base,
+      rows: [
+        row({ issues: [{ lens: 'state-transitions', text: 'src/a.ts:3 drops the write' }] }),
+        row({
+          status: 'pass',
+          advisories: [{ lens: 'concurrency-races', text: 'src/b.ts:9 — two writers race' }],
+        }),
+      ],
+    });
+    expect(out.file?.findings.map((f) => [f.file, f.start_line, f.message])).toEqual([
+      ['src/a.ts', 3, '[state-transitions] src/a.ts:3 drops the write'],
+      ['src/b.ts', 9, '[concurrency-races] src/b.ts:9 — two writers race'],
+    ]);
+  });
+
   it('omits a PR whose every lens task errored, and exports [] for a clean pass', () => {
     expect(exportReviewBench({ ...base, rows: [row({ status: 'error' })] }).file).toBeNull();
     expect(exportReviewBench({ ...base, rows: [row({ status: 'pass' })] }).file?.findings).toEqual(
