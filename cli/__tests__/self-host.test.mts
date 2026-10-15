@@ -63,6 +63,40 @@ const HOOK_SEL = {
   extras: SELF_HOST_EXTRAS,
 };
 
+/** Shadows a system command on the harness's closed PATH. */
+function shadowBin(binDir: string, name: string, body: string) {
+  writeFileSync(join(binDir, name), `#!/bin/sh\n${body}\n`);
+  chmodSync(join(binDir, name), 0o755);
+}
+
+/** A ship worktree's shape: a staged edit beside never-staged edits and untracked files. */
+function fallowRepo(staged: boolean, altIndex: boolean) {
+  const repo = mkdtempSync(join(tmpdir(), 'fallow-repo-'));
+  const git = (...args: string[]) =>
+    execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...args], { cwd: repo });
+  git('init', '-q');
+  writeFileSync(join(repo, 'staged.js'), 'export const a = 1;\n');
+  writeFileSync(join(repo, 'unstaged.js'), 'export const b = 1;\n');
+  git('add', '-A');
+  git('-c', 'commit.gpgsign=false', 'commit', '-qm', 'base');
+  writeFileSync(join(repo, 'unstaged.js'), 'export const b = "UNSTAGED";\n');
+  writeFileSync(join(repo, 'untracked.js'), 'export const c = "UNTRACKED";\n');
+  if (staged) {
+    writeFileSync(join(repo, 'staged.js'), 'export const a = "STAGED";\n');
+    git('add', 'staged.js');
+  }
+  // The fragment calls the emitter by its devkit-relative path, so the repo borrows devkit's.
+  symlinkSync(join(ROOT, 'gate-engine'), join(repo, 'gate-engine'), 'dir');
+  if (!altIndex) return { repo, env: {} };
+  // A second index staging only the untracked file, as `git commit -a` / `git commit <path>` use.
+  const index = join(repo, '.git', 'alt-index');
+  execFileSync('sh', ['-c', 'git read-tree HEAD && git add untracked.js'], {
+    cwd: repo,
+    env: { ...process.env, GIT_INDEX_FILE: index },
+  });
+  return { repo, env: { DEVKIT_COMMIT_INDEX_FILE: index } };
+}
+
 /**
  * Runs the fallow advisory fragment for real, against a stub `fallow` and a per-test telemetry sink.
  * DEVKIT_GATE_EVENTS and DEVKIT_SHIP_ID below are pinned deliberately — see their own comments.
@@ -72,36 +106,48 @@ function runFallowFragment(
   {
     stub = true,
     mktempFails = false,
+    gitFails = false,
+    diffBytes,
+    staged = true,
+    altIndex = false,
     stubExit = 0,
-  }: { stub?: boolean; mktempFails?: boolean; stubExit?: number } = {},
+  }: {
+    stub?: boolean;
+    mktempFails?: boolean;
+    gitFails?: boolean;
+    diffBytes?: number;
+    staged?: boolean;
+    altIndex?: boolean;
+    stubExit?: number;
+  } = {},
 ) {
   const fragment = extractGuardBlock(hook, '')?.match(
     /# devkit:fallow-advisory[\s\S]*?# \/devkit:fallow-advisory/,
   )?.[0];
   expect(fragment).toBeDefined();
+  const { repo, env: repoEnv } = fallowRepo(staged, altIndex);
   const binDir = mkdtempSync(join(tmpdir(), 'fallow-stub-'));
   // A CLOSED PATH — binDir plus the system dirs, never the developer's. `stub: false` has to mean
   // fallow is genuinely unreachable, and this machine has a real fallow on PATH that would answer.
   symlinkSync(process.execPath, join(binDir, 'node'));
   const log = join(binDir, 'invocations');
+  const stdinLog = join(binDir, 'stdins');
   const sink = join(binDir, 'gate-events.jsonl');
-  if (mktempFails) {
-    // Shadows the system mktemp on the closed PATH. Real trigger: an unset, unwritable or full
-    // TMPDIR — ordinary in a constrained CI container or a sandboxed runner.
-    const path = join(binDir, 'mktemp');
-    writeFileSync(path, '#!/bin/sh\nexit 1\n');
-    chmodSync(path, 0o755);
-  }
+  // Real triggers: an unset, unwritable or full TMPDIR; a corrupt index; a diff over fallow's cap.
+  if (mktempFails) shadowBin(binDir, 'mktemp', 'exit 1');
+  if (gitFails) shadowBin(binDir, 'git', 'exit 128');
+  // Padded as BSD wc prints it, so the hook's arithmetic must strip the leading blanks.
+  if (diffBytes !== undefined) shadowBin(binDir, 'wc', `printf '%12d\\n' ${diffBytes}`);
   if (stub) {
-    const path = join(binDir, 'fallow');
     // Invocations go to a FILE, not stdout: the JSON pass is /dev/null'd, so stdout only ever
     // witnesses the conditional human report. The mktemp path is masked to keep assertions stable.
-    writeFileSync(
-      path,
+    shadowBin(
+      binDir,
+      'fallow',
       [
-        '#!/bin/sh',
         // biome-ignore lint/suspicious/noTemplateCurlyInString: shell ${VAR:-default}, not a JS template
         'echo "$(echo "$*" | sed -E "s#(--output-file )[^ ]+#\\1<tmp>#") GIT_DIR:${GIT_DIR:-unset}" >> "$FALLOW_STUB_LOG"',
+        '{ cat; echo "<<eof>>"; } >> "$FALLOW_STUB_STDIN"',
         'echo "fallow report"',
         'dk_out=""; dk_prev=""',
         'for dk_a in "$@"; do [ "$dk_prev" = "--output-file" ] && dk_out="$dk_a"; dk_prev="$dk_a"; done',
@@ -109,7 +155,6 @@ function runFallowFragment(
         `exit ${stubExit}`,
       ].join('\n'),
     );
-    chmodSync(path, 0o755);
   }
   // The review arm calls a helper the surrounding block would normally define; stub it to a no-op
   // so the fragment under test is the only thing being exercised.
@@ -117,15 +162,18 @@ function runFallowFragment(
   return (extra: Record<string, string>, json = '{"verdict":"pass"}') => {
     writeFileSync(sink, '');
     writeFileSync(log, '');
+    writeFileSync(stdinLog, '');
     const stdout = execFileSync('sh', ['-c', script], {
       encoding: 'utf8',
-      cwd: ROOT,
+      cwd: repo,
       env: {
         PATH: `${binDir}:/usr/bin:/bin`,
         DEVKIT_GATE_EVENTS: sink, // else homedir() resolves via getpwuid and this writes the dev's live sink
         DEVKIT_SHIP_ID: 'ship-fallow-test', // else runEnvelope derives a commit id via `git write-tree`
         FALLOW_STUB_JSON: json,
         FALLOW_STUB_LOG: log,
+        FALLOW_STUB_STDIN: stdinLog,
+        ...repoEnv,
         ...extra,
       },
     });
@@ -135,6 +183,7 @@ function runFallowFragment(
       stdout,
       events: lines(sink).map((line) => JSON.parse(line)),
       invocations,
+      stdins: readFileSync(stdinLog, 'utf8').split('<<eof>>\n').slice(0, -1),
       audits: invocations.length,
     };
   };
@@ -408,7 +457,7 @@ describe('buildSelfHostHook', () => {
     // Every arm is `|| true`-guarded: the audit, the emitter, and the conditional human re-run.
     // An advisory that could exit non-zero would be a blocking gate wearing the wrong label.
     expect(hook).toContain(
-      '[ "$DK_FALLOW_STATE" = "clean" ] || __dk_no_git_env fallow audit $FALLOW_BASE_ARGS || true',
+      '[ "$DK_FALLOW_STATE" = "clean" ] || __dk_no_git_env fallow audit $FALLOW_BASE_ARGS --diff-stdin <"$DK_FALLOW_DIFF" || true',
     );
     expect(hook).toContain('advisory/emit.mts fallow-advisory --absent >/dev/null 2>&1 || true');
     // Inside the devkit-guards block: after the start marker, before the end marker — so
@@ -432,9 +481,11 @@ describe('buildSelfHostHook', () => {
     expect(hook).toContain('FALLOW_BASE_ARGS="--base $DEVKIT_SHIP_BASE_SHA"');
     const run = runFallowFragment(hook);
 
-    expect(run({}).invocations[0]).toBe('audit --format json --output-file <tmp> GIT_DIR:unset');
+    expect(run({}).invocations[0]).toBe(
+      'audit --diff-stdin --format json --output-file <tmp> GIT_DIR:unset',
+    );
     expect(run({ DEVKIT_SHIP_BASE_SHA: 'deadbeef' }).invocations[0]).toBe(
-      'audit --base deadbeef --format json --output-file <tmp> GIT_DIR:unset',
+      'audit --base deadbeef --diff-stdin --format json --output-file <tmp> GIT_DIR:unset',
     );
     // The scrub itself: git's linked-worktree hook env must not reach fallow's worktree machinery.
     expect(run({ GIT_DIR: '/repo/.git/worktrees/devkit-ship-x' }).invocations[0]).toContain(
@@ -488,19 +539,58 @@ describe('buildSelfHostHook', () => {
     expect(review.audits).toBe(0);
   });
 
-  // Losing the scratch file loses the ROW while the prose still prints, silently restoring the
-  // pre-sc-2526 shape. mktemp fails for ordinary reasons: an unset, unwritable or full TMPDIR.
-  it('still names the advisory when the scratch file cannot be created, instead of reverting to prose-only', () => {
-    const run = runFallowFragment(buildSelfHostHook(HOOK_SEL, '', ROOT), { mktempFails: true });
-    const result = run({}, '{"verdict":"fail","attribution":{"complexity_introduced":2}}');
+  // Without a scratch file there is no staged diff to scope by, and an unscoped audit is the
+  // misattribution the scope exists to prevent: skip it, but name the advisory as having verified nothing.
+  it('names the advisory as having verified nothing when the staged diff cannot be captured', () => {
+    const hook = buildSelfHostHook(HOOK_SEL, '', ROOT);
+    for (const opts of [{ mktempFails: true }, { gitFails: true }]) {
+      const result = runFallowFragment(hook, opts)({});
+      expect(result.audits).toBe(0);
+      expect(result.stdout).toContain('could not capture the staged diff — audit skipped.');
+      expect(result.events).toHaveLength(1);
+      expect(result.events[0]).toMatchObject({ gate: 'fallow-advisory', status: 'could_not_run' });
+      expect(result.events[0].detail).toContain('could not capture the staged diff');
+    }
+  });
 
-    expect(result.events).toHaveLength(1);
-    expect(result.events[0]).toMatchObject({
-      gate: 'fallow-advisory',
-      status: 'could_not_run',
-    });
-    // The human report is still printed: a lost verdict must make the hook say MORE, not less.
-    expect(result.audits).toBe(1);
+  // A ship worktree's refreshed managed assets are unstaged or untracked; a base ref alone made
+  // fallow attribute their functions to the commit under audit.
+  it('hands fallow only the staged diff, on the JSON pass and the human re-run alike', () => {
+    const run = runFallowFragment(buildSelfHostHook(HOOK_SEL, '', ROOT));
+    const result = run({ DEVKIT_SHIP_BASE_SHA: 'deadbeef' }, '{"verdict":"fail"}');
+
+    expect(result.audits).toBe(2);
+    expect(result.invocations[1]).toBe('audit --base deadbeef --diff-stdin GIT_DIR:unset');
+    for (const diff of result.stdins) {
+      expect(diff).toContain('+export const a = "STAGED";');
+      expect(diff).not.toContain('UNSTAGED');
+      expect(diff).not.toContain('UNTRACKED');
+    }
+    expect(result.stdins).toHaveLength(2);
+  });
+
+  it('reads the staged diff from the alternate commit index when the hook carries one', () => {
+    const result = runFallowFragment(buildSelfHostHook(HOOK_SEL, '', ROOT), { altIndex: true })({});
+    expect(result.stdins[0]).toContain('+export const c = "UNTRACKED";');
+    expect(result.stdins[0]).not.toContain('STAGED');
+  });
+
+  it('stays silent on an empty staged set, and skips an over-cap diff fallow would stop scoping', () => {
+    const hook = buildSelfHostHook(HOOK_SEL, '', ROOT);
+    const empty = runFallowFragment(hook, { staged: false })({});
+    expect(empty.audits).toBe(0);
+    expect(empty.events).toEqual([]);
+
+    // fallow keeps its line filter AT the cap and drops it one byte above.
+    const atCap = runFallowFragment(hook, { diffBytes: 10485760 })({});
+    expect(atCap.audits).toBe(1);
+    expect(atCap.events).toEqual([]);
+
+    const overCap = runFallowFragment(hook, { diffBytes: 10485761 })({});
+    expect(overCap.audits).toBe(0);
+    expect(overCap.events).toHaveLength(1);
+    expect(overCap.events[0]).toMatchObject({ status: 'could_not_run' });
+    expect(overCap.events[0].detail).toContain("exceeds fallow's 10 MiB --diff-stdin cap");
   });
 
   // The shell must hand the emitter the audit's exit code, or a clean report from a failed audit

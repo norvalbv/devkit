@@ -144,6 +144,11 @@ export function reportFallowAudit(
   return 'findings';
 }
 
+/** An audit the hook declined to run, e.g. because it could not scope it to the staged set. */
+export function reportFallowSkipped(detail: string): AdvisoryToken {
+  return verifiedNothing(detail);
+}
+
 /** A gate that verified NOTHING must not read like a gate that found nothing. */
 function verifiedNothing(detail: string): AdvisoryToken {
   emitAdvisoryResult(FALLOW_ADVISORY, 'could_not_run', detail);
@@ -159,8 +164,8 @@ function summariseSafely(read: () => string): ReturnType<typeof summariseFallowA
   }
 }
 
-// CLI: `node advisory/emit.mjs fallow-advisory <json-path>|--absent` prints ONE token — clean |
-// findings | unreadable. Narration only: it always exits 0 and may never change a verdict.
+// CLI: `node advisory/emit.mjs fallow-advisory <json-path> [rc]|--absent|--skipped <detail>` prints
+// ONE token — clean | findings | unreadable. Narration only: it always exits 0, never a verdict.
 if (
   /[/\\]advisory[/\\]emit\.m[jt]s$/.test(process.argv[1] ?? '') &&
   process.argv[2] === FALLOW_ADVISORY
@@ -169,11 +174,14 @@ if (
   let token: AdvisoryToken = 'unreadable';
   try {
     const { readFileSync } = await import('node:fs');
-    token = reportFallowAudit(
-      () => readFileSync(arg, 'utf8'),
-      arg === '--absent',
-      (process.argv[4] ?? '0') !== '0',
-    );
+    token =
+      arg === '--skipped'
+        ? reportFallowSkipped(process.argv[4] ?? '')
+        : reportFallowAudit(
+            () => readFileSync(arg, 'utf8'),
+            arg === '--absent',
+            (process.argv[4] ?? '0') !== '0',
+          );
   } catch {
     /* narration only — the default token already tells the caller to print the human report */
   }
