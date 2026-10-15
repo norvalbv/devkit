@@ -18,7 +18,7 @@ import {
   readManifest,
   sha256,
 } from '../../../gate-engine/coverage/provenance.mts';
-import { TEST_PATH } from '../../../gate-engine/coverage/gate-shared.mts';
+import { changedRunHint, TEST_PATH } from '../../../gate-engine/coverage/gate-shared.mts';
 import { computePercentages } from '../../../gate-engine/coverage/run.mts';
 import { type GitRun, gitRunner, line, ok } from '../../lib/ship/base-drift/git-run.mts';
 import { resolveBase } from '../../lib/ship/base-drift/resolve-base.mts';
@@ -254,6 +254,7 @@ export default function coverageDiff(args: string[], cwd: string): number {
   if (notMeasured.length) {
     console.log(`Not measured — changed source files absent from ${COVERAGE_FILE}:`);
     for (const l of listCapped(notMeasured.sort())) console.log(l);
+    for (const l of changedRunHint(mb.sha)) console.log(l);
   }
   if (!bound) {
     console.log(
