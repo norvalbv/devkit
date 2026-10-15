@@ -471,6 +471,93 @@ describe('prepare_gate_worktree — coverage resolves from the consumer root onl
   });
 });
 
+// A monorepo package's coverage gate reads <pkg>/coverage, which only reaches a ship worktree via
+// --link; it gets the same root-only rule as the repo root's coverage/.
+describe('prepare_gate_worktree — a package coverage --link resolves from the consumer root only', () => {
+  it.each([
+    'pkg/coverage',
+    './pkg/coverage',
+    'pkg/coverage/',
+    'pkg/x/../coverage',
+    'pkg/coverage/coverage-final.json',
+  ])('never borrows the main checkout copy for %j (fail-closed)', (spelling) => {
+    const { main, linked, wt } = seedRepoWithLinkedWorktree();
+    seedFiles(main, { 'pkg/coverage/coverage-final.json': '{}' });
+
+    const r = prepare(wt, linked, spelling);
+
+    expect(r.status, `stderr: ${r.stderr}`).toBe(0);
+    expect(lstatSafe(join(wt, 'pkg', 'coverage'))).toBe(false);
+    expect(r.stderr).not.toMatch(/linked pkg\/coverage/);
+  });
+
+  it("links the linked worktree's OWN package coverage, with no warning", () => {
+    const { main, linked, wt } = seedRepoWithLinkedWorktree();
+    seedFiles(main, { 'pkg/coverage/coverage-final.json': '{}' });
+    seedFiles(linked, { 'pkg/coverage/coverage-final.json': '{}' });
+
+    const r = prepare(wt, linked, 'pkg/coverage');
+
+    expect(r.status, `stderr: ${r.stderr}`).toBe(0);
+    expect(linkTarget(join(wt, 'pkg', 'coverage'))).toBe(join(linked, 'pkg', 'coverage'));
+    expect(r.stderr).not.toMatch(/MAIN checkout/);
+  });
+
+  it("WARNS when the package coverage dir is a hand-made symlink into main's", () => {
+    const { main, linked, wt } = seedRepoWithLinkedWorktree();
+    seedFiles(main, { 'pkg/coverage/coverage-final.json': '{}' });
+    mkdirSync(join(linked, 'pkg'));
+    symlinkSync(join(main, 'pkg', 'coverage'), join(linked, 'pkg', 'coverage'));
+
+    const r = prepare(wt, linked, 'pkg/coverage');
+
+    expect(r.status, `stderr: ${r.stderr}`).toBe(0);
+    expect(r.stderr).toMatch(/pkg\/coverage\/ is the MAIN checkout's/);
+  });
+
+  it("WARNS when a local package coverage dir holds a report symlinked into main's", () => {
+    const { main, linked, wt } = seedRepoWithLinkedWorktree();
+    seedFiles(main, { 'pkg/coverage/coverage-final.json': '{}' });
+    mkdirSync(join(linked, 'pkg', 'coverage'), { recursive: true });
+    symlinkSync(
+      join(main, 'pkg', 'coverage', 'coverage-final.json'),
+      join(linked, 'pkg', 'coverage', 'coverage-final.json'),
+    );
+
+    const r = prepare(wt, linked, 'pkg/coverage');
+
+    expect(r.status, `stderr: ${r.stderr}`).toBe(0);
+    expect(r.stderr).toMatch(/pkg\/coverage\/coverage-final\.json is the MAIN checkout's/);
+  });
+
+  it("WARNS when main's package coverage is itself a symlink and the linked root points at it", () => {
+    const { main, linked, wt } = seedRepoWithLinkedWorktree();
+    const shared = `${dirname(main)}/shared-pkg-coverage`;
+    seedFiles(shared, { 'coverage-final.json': '{}' });
+    mkdirSync(join(main, 'pkg'));
+    symlinkSync(shared, join(main, 'pkg', 'coverage'));
+    mkdirSync(join(linked, 'pkg'));
+    symlinkSync(join(main, 'pkg', 'coverage'), join(linked, 'pkg', 'coverage'));
+
+    const r = prepare(wt, linked, 'pkg/coverage');
+
+    expect(r.status, `stderr: ${r.stderr}`).toBe(0);
+    expect(r.stderr).toMatch(/pkg\/coverage\/ is the MAIN checkout's/);
+  });
+
+  it('a node_modules under a package NAMED coverage still falls back to the main checkout', () => {
+    // Only the LAST component classifies: `packages/coverage` is a package, not a report dir.
+    const { main, linked, wt } = seedRepoWithLinkedWorktree();
+    seedFiles(main, { 'packages/coverage/node_modules/dep.js': 'x' });
+
+    const r = prepare(wt, linked, 'packages/coverage/node_modules');
+
+    expect(r.status, `stderr: ${r.stderr}`).toBe(0);
+    const rel = join('packages', 'coverage', 'node_modules');
+    expect(linkTarget(join(wt, rel))).toBe(join(main, rel));
+  });
+});
+
 // sc-1267. "Populated" only proves that an install exists; it does not prove that the install
 // satisfies the commit selected as the ship base. When origin/main adds a dependency after the
 // shared checkout last ran `bun install`, an unrelated ship can otherwise pass early binary-based
