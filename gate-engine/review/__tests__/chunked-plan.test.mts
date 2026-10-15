@@ -31,12 +31,17 @@ function segment(path: string, lines: number): string {
 const keyOf = (name: string, diff: string, salt: string): string =>
   `${name}::${salt}::len${diff.length}`;
 
-function plan(files: string[], diff: string, chunkCap: number | null) {
+function plan(
+  files: string[],
+  diff: string,
+  chunkCap: number | null,
+  cache: Record<string, { at?: string }> = {},
+) {
   const sel: ReviewerSelection = { reviewer: correctness, files };
   return planReviewWork(
     [sel],
     [diff],
-    {},
+    cache,
     new Map([[correctness.name, 'SALT']]),
     keyOf,
     FOUR_WAY_LENS_GROUPS,
@@ -168,6 +173,18 @@ describe('chunked mode', () => {
     expect(events).toHaveLength(1);
     expect(events[0].chunk_count).toBe(chunkCount);
     expect(events[0].chunks).toHaveLength(chunkCount);
+  });
+
+  it('a cached chunk part is held as cached:true with its chunk; its siblings still run', () => {
+    process.env.DEVKIT_GATE_EVENTS = join(consumerRepo({ backend: true }), 'events.jsonl');
+    // SAFETY: the plan above proves a chunked diff yields chunk-assigned local tasks.
+    const target = plan(files, bigDiff, 400).tasks.find((t) => t.chunk) as ReviewTask;
+    const after = plan(files, bigDiff, 400, { [target.key]: { at: 'n' } });
+    expect(after.tasks.map((t) => t.key)).not.toContain(target.key);
+    const held = after.splitParts.get(correctness.name) ?? [];
+    expect(held).toHaveLength(1);
+    expect(held[0].cached).toBe(true);
+    expect(held[0].task.chunk).toEqual(target.chunk);
   });
 
   it("packs at the configured cap — chunk count follows the cap, concurrency is the pool's job", () => {
