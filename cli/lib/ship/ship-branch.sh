@@ -281,6 +281,7 @@ LINK_DIRS=()
 . "$SCRIPT_DIR/closed-pr-remedy.sh"
 PREFLIGHT_HINT=
 PREFLIGHT_SELF=   # set when the branch's holder is THIS worktree; changes the closing advice below
+ship_prequeue_defer_if_ahead "$BR"
 # SHIP_RESOLVE_ONLY promises no side effects, so it must not reclaim anything.
 [ -n "${SHIP_RESOLVE_ONLY:-}" ] || ship_reclaim_orphan_worktrees "$PWD" "$BR" || exit 1
 
@@ -373,6 +374,7 @@ REPO=$(git remote get-url origin | sed -E 's#^.*github\.com[^:/]*[:/]##; s#\.git
 [[ "$REPO" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || {
   echo "could not resolve origin to owner/repo: '$REPO'" >&2; exit 1
 }
+ship_prequeue_defer_if_ahead "$BASE_REF"
 
 # Test seam: print the resolved PR target + repo, then exit before any side effect
 # (no worktree, no stdin read, no push). Lets the regression test that guards the
@@ -473,7 +475,7 @@ elif [ -n "$BASE_FLAG" ]; then
   # incapable of failing the ship: the same fail-open polarity ship_size_preflight uses.
   BASE_DRIFT="$SCRIPT_DIR/base-drift/cli.mts"
   [ -f "$BASE_DRIFT" ] || BASE_DRIFT="$SCRIPT_DIR/base-drift/cli.mjs"
-  if [ -f "$BASE_DRIFT" ]; then
+  if [ -f "$BASE_DRIFT" ] && ! ship_prequeue_active; then
     node "$BASE_DRIFT" --root "$ROOT" --base "$BASE_REF" --ship --exit-zero -- "${PATHS[@]}" || true
   fi
 else
@@ -780,7 +782,8 @@ export DEVKIT_SHIP_FROM_BRANCH="$FROM_BRANCH"
 export DEVKIT_SHIP_RESUMED=$RESUME
 # Advisory judge reachability, after the exports above so its telemetry row carries this ship's id.
 # A plain --dry-gates runs no judge, so its report is informational; a rehearsal labels its row as one.
-if [ "$DRY_GATES" -eq 0 ]; then ship_judge_preflight "$ROOT"
+if ship_prequeue_active; then :
+elif [ "$DRY_GATES" -eq 0 ]; then ship_judge_preflight "$ROOT"
 elif [ "$WITH_REVIEWERS" -eq 1 ]; then DEVKIT_SHIP_MODE=dry-gates ship_judge_preflight "$ROOT"
 else DEVKIT_SHIP_MODE=dry-gates ship_judge_preflight "$ROOT" --informational; fi
 SHIP_INTENT_GENERATION=""
@@ -823,6 +826,7 @@ fi
 record_ship_intent() {
   RESUME_EXTRAS_UNRECORDED=0
   [ "$DRY_GATES" -eq 0 ] || return 0
+  ! ship_prequeue_active || return 0
   # Capture the record's ownership token (write prints a per-attempt random generation): success may delete ONLY the
   # record this attempt wrote — a concurrent attempt's newer record must survive for ITS --resume.
   SHIP_INTENT_GENERATION=$(printf '%s' "$BODY" | node "$SHIP_INTENT" "${SHIP_INTENT_ARGS[@]}" -- "${PATHS[@]}") \
@@ -950,7 +954,7 @@ gate_signal_handoff_init
 
 # Advisory raw-line preview against BASE: it measures the caller's pre-merge bytes, so it never blocks.
 # The in-worktree guard-size reports an overrun together with the other deterministic gates.
-if [ "$FROM_BRANCH" -eq 0 ] || [ -z "$LOCAL_BRANCH_EXISTS" ]; then
+if { [ "$FROM_BRANCH" -eq 0 ] || [ -z "$LOCAL_BRANCH_EXISTS" ]; } && ! ship_prequeue_active; then
   ship_size_preflight "$ROOT" "$BASE" "${PATHS[@]}"
 fi
 # Before `git worktree add -b` (sc-3883): a missing hook dir used to surface only inside
@@ -969,6 +973,8 @@ node "$DIST_INTEGRITY" --root "$ROOT" --base "$BASE" -- "${PATHS[@]}"
 DIST_INTEGRITY_STATUS=$?
 set -e
 [ "$DIST_INTEGRITY_STATUS" -eq 0 ] || ship_abort_resumable "$DIST_INTEGRITY_STATUS"
+# The pre-queue pass ends here: the preserved-commit checks below read this attempt's intent record.
+ship_prequeue_done
 
 if [ -n "$LOCAL_BRANCH_EXISTS" ]; then
   # Resume only when the existing branch proves it is the exact output this invocation would have

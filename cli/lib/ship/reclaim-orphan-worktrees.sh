@@ -37,7 +37,7 @@
 # telling it to delete the branch it is re-pushing would be wrong twice over.
 ship_reclaim_orphan_worktrees() {
   local repo=$1 br=$2 mode=${3:-ship}
-  local common record status= refuse=0
+  local common record status= refuse=0 reclaim_pending=
   local path= wt_branch= locked= lock_reason= entry_n=0
   local paths=() branches=() locks=() lock_reasons=()
   local self_admin= self_top=
@@ -90,7 +90,9 @@ ship_reclaim_orphan_worktrees() {
     i=$((i + 1))
   done
 
-  [ "$refuse" -eq 0 ]
+  [ "$refuse" -eq 0 ] || return 1
+  # A pre-queue pass ends once every entry is judged: all later checks read the reclaimed state.
+  [ -z "$reclaim_pending" ] || exit 0
 }
 
 # _ship_orphan_consider <repo> <common> <branch> <path> <wt-branch> <locked> <lock-reason> [mode]
@@ -216,6 +218,8 @@ _ship_orphan_consider() {
     return 1
   fi
 
+  # The pre-queue pass never mutates; the queued run reclaims (sets the caller's reclaim_pending).
+  [ -z "${DEVKIT_SHIP_PREQUEUE:-}" ] || { reclaim_pending=1; return 0; }
   _ship_orphan_reclaim "$repo" "$br" "$path" "$r_pid" "$r_identity" "$r_base" "$r_created"
   return 0
 }
