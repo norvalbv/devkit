@@ -171,7 +171,7 @@ async function main() {
 
 main().catch((e) => {
   // Run as a gate (anti-slop), a throw is a crash, never the exit 1 that means a finding.
-  if (process.env[GATE_REASON_ENV]) crashExit(e);
+  if (process.env[GATE_REASON_ENV] !== undefined) crashExit(e);
   console.error(`devkit: ${e.message}`);
   process.exit(1);
 });

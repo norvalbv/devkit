@@ -36,11 +36,12 @@ const reasonOf = (file: string) => {
 };
 
 /** Spawn `node <args>` in a non-git dir with a reason file armed, as guard-deterministic does. */
-function spawnGate(args: string[], reasonEnv = true) {
+function spawnGate(args: string[], reasonEnv: boolean | '' = true) {
   const d = tmp();
   const reason = join(d, 'reason.txt');
   const env = { ...process.env, GIT_CEILING_DIRECTORIES: d, [GATE_REASON_ENV]: reason };
-  if (!reasonEnv) delete env[GATE_REASON_ENV];
+  if (reasonEnv === false) delete env[GATE_REASON_ENV];
+  if (reasonEnv === '') env[GATE_REASON_ENV] = ''; // no usable TMPDIR: the gate still runs
   const r = spawnSync(process.execPath, args, { cwd: d, env, encoding: 'utf8' });
   return { status: r.status, reason: reasonOf(reason) };
 }
@@ -88,6 +89,7 @@ describe('gates that catch their own throw', () => {
     const gate = spawnGate(args);
     expect(gate.status).toBe(CRASH_EXIT);
     expect(gate.reason).toContain('git');
+    expect(spawnGate(args, '').status).toBe(CRASH_EXIT);
     expect(spawnGate(args, false).status).toBe(1);
   });
 
