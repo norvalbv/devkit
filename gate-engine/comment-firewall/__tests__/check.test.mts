@@ -115,6 +115,18 @@ describe('commentCheck', () => {
     expect(result.remedy).toContain('Comments outlive tickets');
   });
 
+  it('bounds a long reference comment to one short line', () => {
+    const root = fixture({ comments: { forbiddenRefs: ['\\bsc-\\d+\\b'] } });
+    write(
+      root,
+      'src/a.ts',
+      `// Kept until replies are typed (sc-3836) ${'detail '.repeat(60)}\nexport const a = 1;\n`,
+    );
+    const [ref] = commentCheck(['src/a.ts'], root).items;
+    expect(ref?.line).not.toContain('\n');
+    expect(ref?.line.length).toBeLessThan(200);
+  });
+
   it('adds a bracketed path literally rather than as a glob', () => {
     const root = fixture();
     mkdirSync(path.join(root, 'src/[id]'));

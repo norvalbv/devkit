@@ -85,6 +85,12 @@ describe('comment-budget-preflight hook', () => {
     expect(readFileSync(join(root, 'argv.log'), 'utf8')).toBe('check src/a.ts\n');
   });
 
+  it('checks a root file whose name merely starts with two dots', () => {
+    stubBin({ items: [], remedy: '' });
+    run('..helpers.ts', 'dots');
+    expect(readFileSync(join(root, 'argv.log'), 'utf8')).toBe('check ..helpers.ts\n');
+  });
+
   it('stays silent on a CLI without the verb, and never spawns it for a non-JS or outside file', () => {
     stubBin({ items: [item('ccc333', 'x')], remedy: '' }, 4);
     const old = run('src/a.ts', 'old-bin');
@@ -110,6 +116,7 @@ describe('comment-budget-preflight hook', () => {
     const second = context(run('src/big.ts', session).stdout);
     expect(second).toContain('src/big.ts:41-43');
     expect(second).not.toContain('src/big.ts:1-3');
+    expect(second).toContain('40 more');
   });
 
   it('runs when the project dir and the edited path spell the checkout differently', () => {

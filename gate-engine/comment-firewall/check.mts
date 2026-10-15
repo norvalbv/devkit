@@ -100,11 +100,11 @@ function resultFor({ findings, refFindings }: DetectionResult): CheckResult {
 }
 
 export function commentCheck(files: string[], cwd = process.cwd()): CheckResult {
-  sweepStale();
   const relative = files.map((file) =>
     path.relative(cwd, path.resolve(cwd, file)).split(path.sep).join('/'),
   );
   try {
+    sweepStale();
     return resultFor(detectAsStaged(cwd, relative));
   } catch (cause) {
     const error = cause instanceof Error ? cause.message : String(cause);

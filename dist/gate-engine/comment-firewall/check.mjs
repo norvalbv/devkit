@@ -83,9 +83,9 @@ function resultFor({ findings, refFindings }) {
     return { items, remedy: remedy.filter(Boolean).join('\n\n') };
 }
 export function commentCheck(files, cwd = process.cwd()) {
-    sweepStale();
     const relative = files.map((file) => path.relative(cwd, path.resolve(cwd, file)).split(path.sep).join('/'));
     try {
+        sweepStale();
         return resultFor(detectAsStaged(cwd, relative));
     }
     catch (cause) {
