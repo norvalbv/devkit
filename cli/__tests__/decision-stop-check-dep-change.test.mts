@@ -65,6 +65,8 @@ describe('decision-stop-check.sh — dep-change nudge with the real scan output'
 
   it('stays silent when this session did not edit package.json', () => {
     const root = consumerRepo();
+    mkdirSync(join(root, 'src'));
+    writeFileSync(join(root, 'src', 'x.ts'), 'export {};\n'); // the hook drops ledger paths that no longer exist
     const tmp = seedSessionLedger(root, 's1', ['src/x.ts']);
     writeFileSync(join(root, 'package.json'), manifest({ a: '1.0.0' }));
     const r = stop(root, tmp);
