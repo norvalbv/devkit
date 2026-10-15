@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { notRun } from '../evidence/outcome.mts';
@@ -36,12 +36,17 @@ const lines = (n: number) => 'x\n'.repeat(n);
 const policy = (limit: number) =>
   JSON.stringify({ mergeVerdict: { limits: { default: { maxSourceLines: limit } } } });
 
-function shipEnv(shipId: string) {
+const gatedRows = (heads: string[]) =>
+  heads
+    .map((head) => JSON.stringify({ type: 'ship_gated', head, bypasses: [], ts: new Date() }))
+    .join('\n');
+
+/** A sink holding a clean gate record for each of `heads`. */
+function shipEnv(...heads: string[]) {
   const sink = join(mkdtempSync(join(tmpdir(), 'ship-change-sink-')), 'gate-events.jsonl');
   roots.push(dirname(sink));
-  const row = (type: string, extra = {}) => JSON.stringify({ ship_id: shipId, type, ...extra });
-  writeFileSync(sink, `${row('ship_attempt')}\n${row('ship_result', { exit_code: 0 })}\n`);
-  return { DEVKIT_SHIP_ID: shipId, DEVKIT_GATE_EVENTS: sink };
+  writeFileSync(sink, `${gatedRows(heads)}\n`);
+  return { DEVKIT_GATE_EVENTS: sink };
 }
 
 function verdictFor(root: string, base: string, head: string, env: NodeJS.ProcessEnv = {}) {
@@ -69,7 +74,7 @@ describe('printVerdict', () => {
     const { root, commit } = repo();
     const base = commit({ 'guard.config.json': policy(10) });
     const head = commit({ 'src/fix.mts': lines(12) });
-    const printed = verdictFor(root, base, head, shipEnv('s1'));
+    const printed = verdictFor(root, base, head, shipEnv(head));
     expect(printed.line).toBe(
       `**Merge verdict:** human-review (over-size: 12/10 lines, 1/4 files, default limit) · advisory, at \`${head.slice(0, 12)}\``,
     );
@@ -80,7 +85,7 @@ describe('printVerdict', () => {
     const { root, commit } = repo();
     const base = commit({ 'guard.config.json': policy(10) });
     const head = commit({ 'guard.config.json': policy(500), 'src/fix.mts': lines(12) });
-    expect(verdictFor(root, base, head, shipEnv('s2')).verdict?.reasons).toContainEqual({
+    expect(verdictFor(root, base, head, shipEnv(head)).verdict?.reasons).toContainEqual({
       code: 'over-size',
       detail: '12/10 lines, 1/4 files, default limit',
     });
@@ -91,16 +96,46 @@ describe('printVerdict', () => {
     const base = commit({ 'README.md': 'x\n' });
     const head = commit({ 'src/fix.mts': lines(12) });
     writeFileSync(join(root, 'guard.config.json'), policy(10));
-    expect(verdictFor(root, base, head, shipEnv('s3')).verdict?.reasons[0].code).toBe('over-size');
+    expect(verdictFor(root, base, head, shipEnv(head)).verdict?.reasons[0].code).toBe('over-size');
   });
 
-  it('reads the bypass record as unknown outside a ship', () => {
+  it('reads the bypass record as unknown with no telemetry sink', () => {
     const { root, commit } = repo();
     const base = commit({ 'README.md': 'x\n' });
     const head = commit({ 'src/fix.mts': lines(1) });
-    expect(verdictFor(root, base, head).line).toContain(
+    expect(verdictFor(root, base, head, { DEVKIT_NO_TELEMETRY: '1' }).line).toContain(
       'human-review (bypass-unknown: no devkit ship gate run)',
     );
+  });
+
+  it('reads the default sink when the ship env names none, as a gate-less resume does', () => {
+    const { root, commit } = repo();
+    const base = commit({ 'README.md': 'x\n' });
+    const head = commit({ 'src/fix.test.mts': lines(1) });
+    // vitest.setup.mjs gives each test process its own HOME; never touch a real one.
+    expect(homedir()).toBe(process.env.DEVKIT_SUITE_HOME);
+    const sink = join(homedir(), '.devkit', 'telemetry', 'gate-events.jsonl');
+    mkdirSync(dirname(sink), { recursive: true });
+    writeFileSync(sink, `${gatedRows([head])}\n`);
+    try {
+      expect(verdictFor(root, base, head).line).toContain('auto-merge-eligible (test-only)');
+    } finally {
+      rmSync(sink, { force: true });
+    }
+  });
+
+  it('reads every commit since the base by sha, so one ungated commit is unknown', () => {
+    const { root, commit } = repo();
+    const base = commit({ 'README.md': 'x\n' });
+    const first = commit({ 'src/fix.mts': lines(1) });
+    const head = commit({ 'src/fix.test.mts': lines(1) });
+    const codes = (env: NodeJS.ProcessEnv) =>
+      verdictFor(root, base, head, env).verdict?.reasons.map((r) => r.code);
+    expect(codes(shipEnv(first, head))).toEqual(['no-captured-proof']);
+    expect(verdictFor(root, base, head, shipEnv(head)).verdict?.reasons[0]).toEqual({
+      code: 'bypass-unknown',
+      detail: `no passing devkit ship gate record for ${first.slice(0, 12)}`,
+    });
   });
 
   it('says the verdict is unavailable, and why, when a fact cannot be read', () => {
