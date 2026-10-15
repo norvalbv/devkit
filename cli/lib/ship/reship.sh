@@ -1011,6 +1011,8 @@ fi
 # it skips its typecheck + test:run for this one commit (CI re-runs both on the PR); any other ref fails
 # closed to the full suite.
 SHIP_COMMIT=$(git -C "$WT" rev-parse HEAD)
+ship_sync_gate_rewrites "$ROOT" "$STAGED_STATE" "$SHIP_COMMIT" ||
+  echo "reship: could not sync gate-rewritten files into your working copy (non-fatal)" >&2
 if { [ "$REWRITE" -eq 1 ] || [ "$UPDATE_PR_BODY" -eq 1 ]; } &&
    [ "$REWRITE_PUBLISH_OWNED" -eq 0 ]; then
   # A body-bearing append shares the rewrite publisher's per-branch lock from push through metadata

@@ -124,6 +124,30 @@ describe('ship-branch.sh — transient push failures', () => {
     expect(remoteBranchExists(bare, 'feat/outage')).toBe(true);
   });
 
+  // The retry rebuilds from the caller's files; unsynced formatter output used to refuse it as drift.
+  it('converges after the push fails when a gate reformatted the briefed file', () => {
+    const { dir, env, bare } = seedShipRepoLocalRemote({
+      hookBody: "printf 'formatted\\n' > note.txt\ngit add -- note.txt\nexit 0",
+    });
+    const failing = shipEnv(dir, env, { fails: 9, attempts: '1' });
+    expect(ship(dir, failing.env, 'feat/fmt-outage').status).toBe(1);
+    expect(readFileSync(join(dir, 'note.txt'), 'utf8')).toBe('formatted\n');
+
+    const retry = spawnSync(
+      '/bin/bash',
+      [scriptPath, 'feat/fmt-outage', 'ship it', '--', 'note.txt'],
+      {
+        cwd: dir,
+        input: 'pr body\n',
+        encoding: 'utf8',
+        env: shipEnv(dir, env).env,
+      },
+    );
+    expect(retry.status, retry.stderr).toBe(0);
+    expect(retry.stderr).toContain('gate receipt verified');
+    expect(remoteBranchExists(bare, 'feat/fmt-outage')).toBe(true);
+  });
+
   it('treats a failed push whose commit reached origin as landed, without a retry', () => {
     const { dir, env, bare } = seedShipRepoLocalRemote();
     const { count, env: runEnv } = shipEnv(dir, env, { fails: 1 });
