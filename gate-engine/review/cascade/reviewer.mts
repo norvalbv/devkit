@@ -6,6 +6,7 @@ import type { JudgeOutage } from '../../judge/outage/classify.mts';
 import { DEEP_JUDGE_TIMEOUT_MS, execJudgeAsync, remedyCause } from '../../judge/run-judge.mts';
 import { renderGoverningClaudeMd } from '../claude-md.mts';
 import { renderStagedLineCounts } from '../evidence/line-counts.mts';
+import { renderMovedLines } from '../evidence/packet/moved-lines.mts';
 import { parseReviewVerdict } from '../contracts/response.mts';
 import { buildCappedDiffEvidence } from '../diff-evidence.mts';
 import { omissionHintFor } from '../evidence/packet/omission-hint.mts';
@@ -251,7 +252,7 @@ async function cascadeVerdict(
   // A shell-less judge gets a Read hint beside each OMITTED/TRUNCATED marker (sc-2305).
   const input = buildCappedDiffEvidence(
     gitCached(cwd, [], files),
-    inventory,
+    `${inventory}${renderMovedLines(cwd, files, promptExtras?.stagedFiles ?? [])}`,
     omissionHintFor(reviewer, passModel),
   );
   const allowedTools = allowedToolsFor(reviewer, cfg, checklistRoot);

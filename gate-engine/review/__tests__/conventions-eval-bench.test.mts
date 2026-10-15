@@ -59,6 +59,9 @@ it('hashes the shared conventions parser as both gate and matcher code', () => {
   expect(CONVENTIONS_GATE_HASH_INPUTS).toContain(response);
   expect(CONVENTIONS_MATCHER_HASH_INPUTS).toContain(response);
   expect(CONVENTIONS_GATE_HASH_INPUTS).toContain('gate-engine/ratchets/size-line-authority.mts');
+  expect(CONVENTIONS_GATE_HASH_INPUTS).toContain(
+    'gate-engine/review/evidence/packet/moved-lines.mts',
+  );
 });
 
 function makeRow(overrides: Partial<ConventionsCase> = {}): ConventionsCase {

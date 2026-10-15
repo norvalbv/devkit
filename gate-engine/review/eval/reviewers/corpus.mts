@@ -204,6 +204,10 @@ export function benchGateHash(reviewer) {
       readFileSync(path.join(repoRoot, 'gate-engine/review/evidence/targets-block.mts'), 'utf8'),
       readFileSync(path.join(repoRoot, 'gate-engine/review/evidence/commit-message.mts'), 'utf8'),
       readFileSync(path.join(repoRoot, 'gate-engine/review/evidence/staged-git.mts'), 'utf8'),
+      readFileSync(
+        path.join(repoRoot, 'gate-engine/review/evidence/packet/moved-lines.mts'),
+        'utf8',
+      ),
       // Every shared helper, for the same reason the checklist itself is hashed: it ships into the
       // fixture and its edits change what the gate does, so a baseline earned under the old one is
       // not comparable.
