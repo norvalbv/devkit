@@ -157,6 +157,21 @@ describe('detectChangedComments', () => {
     ]);
   });
 
+  it.each([
+    [2, []],
+    [3, [3]],
+  ])('counts only the %i edited lines of a six-line legacy paragraph', (edited, expected) => {
+    const root = fixture();
+    const legacy = ['one', 'two', 'three', 'four', 'five', 'six'].map((word) => `// ${word}`);
+    writeFileSync(path.join(root, 'src/a.ts'), `${legacy.join('\n')}\nconst x = 1;\n`);
+    commitAll(root, 'base');
+    const staged = legacy.map((line, index) => (index < edited ? `${line} edited` : line));
+    writeFileSync(path.join(root, 'src/a.ts'), `${staged.join('\n')}\nconst x = 1;\n`);
+    git(root, ['add', 'src/a.ts']);
+
+    expect(detectChangedComments(root).findings.map((item) => item.textLines)).toEqual(expected);
+  });
+
   it('inventories every touched comment by text-line bucket plus trailing comments', () => {
     const root = fixture();
     writeFileSync(
@@ -756,6 +771,20 @@ describe('gate outcome across attempts', () => {
     );
     git(root, ['add', 'src/a.ts']);
     expect(attempt(root).exit).toBe(0);
+  });
+
+  it('prints the changed-line count of a legacy paragraph, which deleting unchanged lines never lowers', () => {
+    const root = fixture();
+    const legacy = ['one', 'two', 'three', 'four', 'five', 'six'].map((word) => `// ${word}`);
+    writeFileSync(path.join(root, 'src/a.ts'), `${legacy.join('\n')}\nconst x = 1;\n`);
+    commitAll(root, 'base');
+    const staged = [...legacy.slice(0, 3).map((line) => `${line} edited`), ...legacy.slice(4)];
+    writeFileSync(path.join(root, 'src/a.ts'), `${staged.join('\n')}\nconst x = 1;\n`);
+    git(root, ['add', 'src/a.ts']);
+
+    const { exit, output } = attempt(root);
+    expect(exit).toBe(1);
+    expect(output).toContain('src/a.ts:1-5 (3 changed lines)');
   });
 
   it('shares the shown store with a linked worktree, as a ship gate worktree does', () => {
