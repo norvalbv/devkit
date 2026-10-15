@@ -47,6 +47,10 @@ over engineer.
   `skills/commit-gates/SKILL.md` (diagnosing a gate block), `skills/decisions/SKILL.md` (recording
   the why), `skills/structure-governance/SKILL.md` (placing a file).
 - Shortcut: tickets, guidance, and work material.
+- Consumer state: an overlay consumer git-excludes its `guard.config.json` and
+  `.devkit/config.json`, so no committed ref holds them. Read them on disk in the checkout
+  `research.referenceCheckouts` names (resolved from the main worktree), or run `devkit doctor`
+  there.
 - Research: arxiv papers (or alternatives) for greenfield areas.
 </sources>
 
