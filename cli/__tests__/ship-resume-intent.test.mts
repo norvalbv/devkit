@@ -467,8 +467,44 @@ describe('ship --resume: overrides and refusals', () => {
       expect(stale.stderr).toContain('--resume feat/drift --body-file ');
       // Before any gate: the warning precedes the worktree the gate chain runs in.
       expect(stale.stderr.indexOf(DRIFT)).toBeLessThan(stale.stderr.indexOf('devkit-ship-'));
+      // No PR opened, so no PR-URL tail; and the captured tail never leaks onto stdout (the URL's).
+      expect(stale.stdout + stale.stderr).not.toContain('the PR description is the RECORDED body');
       expect(git(['log', '-1', '--format=%b', 'feat/drift']).trim()).toBe('attempt one');
       git(['worktree', 'prune']);
+    });
+
+    it('repeats the drift on the line right after the PR URL; a re-passed --body-file does not', () => {
+      const TAIL = 'the PR description is the RECORDED body (12 bytes)';
+      const URL = 'https://github.com/acme/app/pull/42';
+      /** stderr merged into stdout, so the test sees the order a reader of the terminal sees. */
+      const merged = (dir, env, argv) =>
+        spawnSync('/bin/bash', ['-c', '/bin/bash "$@" 2>&1', '_', scriptPath, ...argv], {
+          cwd: dir,
+          encoding: 'utf8',
+          env,
+        }).stdout;
+      for (const [branch, extra, expectTail] of [
+        ['feat/stale', [], true],
+        ['feat/fresh', ['--body-file', 'body.md'], false],
+      ]) {
+        const { dir, env, git } = seedFileRecord(branch, 'attempt one\n');
+        installHook(dir, 'exit 0');
+        writeFileSync(join(dir, 'body.md'), 'attempt two, corrected\n');
+        const lines = merged(dir, publishEnvFor(dir, env).publishEnv, [
+          '--resume',
+          branch,
+          ...extra,
+        ]).split('\n');
+        const at = lines.indexOf(URL);
+        expect(at, lines.join('\n')).toBeGreaterThan(-1);
+        expect(lines.filter((l) => l.includes(TAIL))).toHaveLength(expectTail ? 1 : 0);
+        if (expectTail) {
+          expect(lines[at + 1]).toContain(TAIL);
+          expect(lines[at + 1]).toContain(`devkit ship --pr ${branch} x --body-file `);
+          expect(count(lines.join('\n'), DRIFT)).toBe(1); // the early line is still printed once
+        }
+        git(['worktree', 'prune']);
+      }
     });
 
     it('re-passing --body-file on the resume commits the edit and prints no warning', () => {

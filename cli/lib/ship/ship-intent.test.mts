@@ -24,7 +24,7 @@ import {
 } from './ship-intent.mts';
 import {
   bindSourceMembership,
-  bodyDriftWarning,
+  bodyDrift,
   filterMembershipStream,
   frozenDriftStream,
   membershipStreamError,
@@ -1116,7 +1116,11 @@ describe('recorded --body-file path and resume drift warning (sc-2527)', () => {
   /** What `ship-intent body-drift` computes: read the record, then compare its file. */
   const driftFor = (root: string) => {
     const r = readIntent(root, 'feat/x');
-    return 'reason' in r ? null : bodyDriftWarning(r.intent);
+    return 'reason' in r ? null : (bodyDrift(r.intent)?.warning ?? null);
+  };
+  const tailFor = (root: string) => {
+    const r = readIntent(root, 'feat/x');
+    return 'reason' in r ? '' : (bodyDrift(r.intent)?.tail ?? '');
   };
   const recordOf = (root: string) =>
     JSON.parse(readFileSync(join(root, relIntentPath('feat/x')), 'utf8'));
@@ -1193,6 +1197,44 @@ describe('recorded --body-file path and resume drift warning (sc-2527)', () => {
       .split('\0');
     expect(argv.slice(0, 4)).toEqual(['ship', '--resume', 'feat/x', '--body-file']);
     expect(argv[4]).toBe(file);
+  });
+
+  it('the PR-URL tail names both sizes and a body-only --pr sync, never --base/--draft/--link/--resume', () => {
+    const o = recordFromFile('attempt three\n', {
+      base: 'release',
+      draft: true,
+      links: ['../lib'],
+    });
+    writeFileSync(o.file, 'the corrected, longer body\n');
+    const tail = tailFor(o.root);
+    expect(tail).toContain('RECORDED body (14 bytes)');
+    expect(tail).toContain('27 bytes when this run started');
+    expect(tail).toContain(`devkit ship --pr feat/x 'ship it' --body-file ${o.file} -- p.txt`);
+    for (const flag of ['--base', '--draft', '--link', '--resume'])
+      expect(tail).not.toContain(flag);
+    expect(tailFor(recordFromFile('same\n').root)).toBe(''); // no drift, no tail
+  });
+
+  it('the tail sync command round-trips a quoted title and a spaced path through the shell', () => {
+    const o = base({ body: Buffer.from('a'), title: `fix "it" — don't` });
+    const file = join(o.root, 'body.md');
+    writeFileSync(file, 'b');
+    writeIntent({ ...o, bodyFilePath: file }, ['dir with space/p.txt']);
+    const tail = tailFor(o.root);
+    const cmd = tail.slice(tail.indexOf('devkit ship --pr') + 'devkit '.length);
+    const argv = execFileSync('bash', ['-c', `printf '%s\\0' ${cmd}`])
+      .toString()
+      .split('\0');
+    expect(argv.slice(0, -1)).toEqual([
+      'ship',
+      '--pr',
+      'feat/x',
+      `fix "it" — don't`,
+      '--body-file',
+      file,
+      '--',
+      'dir with space/p.txt',
+    ]);
   });
 
   it('a recorded re-push says the refresh also rewrites the PR description', () => {
@@ -1355,8 +1397,9 @@ describe('recorded --body-file path and resume drift warning (sc-2527)', () => {
       recordOf(o.root).generation,
     ]);
     expect(r.status).toBe(0);
-    expect(r.stdout).toBe('');
+    expect(r.stdout).toContain('the PR description is the RECORDED body'); // the scripts capture it
     expect(r.stderr).toContain('changed since this invocation was recorded');
+    expect(r.stderr).not.toContain('RECORDED body (');
     // An unreadable/absent record is equally silent and equally non-blocking.
     const none = run(['--root', o.root, '--branch', 'feat/none']);
     expect(none.status).toBe(0);
@@ -1377,6 +1420,7 @@ describe('recorded --body-file path and resume drift warning (sc-2527)', () => {
     const stale = run(replayedGen);
     expect(stale.status).toBe(0);
     expect(stale.stderr).toBe(''); // a different record's body is not what this resume replays
+    expect(stale.stdout).toBe(''); // nor is its PR-URL tail
     expect(run(recordOf(o.root).generation).stderr).toContain('changed since');
   });
 
