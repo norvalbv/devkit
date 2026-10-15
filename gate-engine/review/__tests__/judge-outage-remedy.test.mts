@@ -87,6 +87,7 @@ describe('runCompleteness — a rate-limited judge', () => {
       return null;
     });
     expect(await runCompleteness(msg(repo, 'feat: x'), repo, { exec })).toBe(3);
+    expect(exec).toHaveBeenCalledTimes(1);
     const out = err.mock.calls.flat().join('\n');
     expect(out).toContain('SKIPPED (judge hit the provider usage limit)');
     expect(out).toMatch(/for another \d+d/);
@@ -94,7 +95,7 @@ describe('runCompleteness — a rate-limited judge', () => {
     // is deliberately absent from it: the binder only ever writes claude, never back to codex.
     expect(out).toContain('unset GUARD_REVIEW_MODEL');
     expect(out).toContain('the packaged codex family');
-    expect(out).not.toContain('CLI auth/quota, then re-run devkit ship');
+    expect(out).not.toContain('CLI auth/quota, then resume');
   });
 });
 
@@ -120,14 +121,16 @@ describe('an ABSENT judge binary', () => {
     expect(exec).toHaveBeenCalledTimes(5);
     const out = err.mock.calls.flat().join('\n');
     expect(out).toContain('is not installed or not on PATH — this is NOT an auth/quota problem');
-    expect(out).not.toContain('CLI auth/quota, then re-run devkit ship');
+    expect(out).not.toContain('CLI auth/quota, then resume');
   });
 
   it('completeness names it in its SKIP line and gives the install-first remedy', async () => {
     const repo = consumerRepo({ backend: true });
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
     process.env.GUARD_AI_STRICT = '1';
-    expect(await runCompleteness(msg(repo, 'feat: x'), repo, { exec: absent() })).toBe(3);
+    const exec = absent();
+    expect(await runCompleteness(msg(repo, 'feat: x'), repo, { exec })).toBe(3);
+    expect(exec).toHaveBeenCalledTimes(1);
     const out = err.mock.calls.flat().join('\n');
     expect(out).toContain('SKIPPED (judge CLI is not installed)');
     expect(out).toContain('is not installed or not on PATH — this is NOT an auth/quota problem');
@@ -159,16 +162,80 @@ describe('a MODEL the account does not serve', () => {
     expect(out).toContain('judge model `gpt-5.6-sol` is not available on this account');
     expect(out).toContain('plan does not serve it, so re-running cannot succeed');
     expect(out).not.toContain('retrying once');
-    expect(out).not.toContain('CLI auth/quota, then re-run devkit ship');
+    expect(out).not.toContain('CLI auth/quota, then resume');
   });
 
   it('completeness names it in its SKIP line', async () => {
     const repo = consumerRepo({ backend: true });
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
     process.env.GUARD_AI_STRICT = '1';
-    expect(await runCompleteness(msg(repo, 'feat: x'), repo, { exec: refused() })).toBe(3);
+    const exec = refused();
+    expect(await runCompleteness(msg(repo, 'feat: x'), repo, { exec })).toBe(3);
+    expect(exec).toHaveBeenCalledTimes(1);
     const out = err.mock.calls.flat().join('\n');
     expect(out).toContain('SKIPPED (judge model is not available on this account)');
     expect(out).toContain('plan does not serve it, so re-running cannot succeed');
+  });
+});
+
+// One codex call at capacity while its siblings answered once failed a whole strict ship, and the
+// remedy's family move threw away every sibling PASS. Completeness now gets the cascade's retry.
+describe('a TRANSIENT judge failure (a model at capacity)', () => {
+  const msg = (repo, text) => {
+    const f = join(repo, '.git', 'COMMIT_EDITMSG_TEST');
+    writeFileSync(f, text);
+    return f;
+  };
+  const capacity = {
+    kind: 'transient',
+    permanent: false,
+    detail: 'Selected model is at capacity.',
+  };
+  /** Fails `failures` times at capacity, then answers PASS. */
+  const blips = (failures) =>
+    mkExec(async (opts) => {
+      if (failures-- > 0) {
+        opts.onOutage?.(capacity);
+        return null;
+      }
+      return 'VERDICT: PASS';
+    });
+
+  it('strict completeness retries once and passes in the same attempt', async () => {
+    const repo = consumerRepo({ backend: true });
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    process.env.GUARD_AI_STRICT = '1';
+    const exec = blips(1);
+    expect(await runCompleteness(msg(repo, 'feat: x'), repo, { exec })).toBe(0);
+    expect(exec).toHaveBeenCalledTimes(2);
+    expect(err.mock.calls.flat().join('\n')).toContain(
+      'completeness: judge run failed (transient), retrying once',
+    );
+    // The retry's PASS is banked like any other, so the ship's next attempt never re-pays it.
+    const dark = mkExec(async () => null);
+    expect(await runCompleteness(msg(repo, 'feat: x'), repo, { exec: dark })).toBe(0);
+    expect(dark).not.toHaveBeenCalled();
+  });
+
+  it('a second failure fails closed with the PASS-keeping resume before the family move', async () => {
+    const repo = consumerRepo({ backend: true });
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    process.env.GUARD_AI_STRICT = '1';
+    const exec = blips(2);
+    expect(await runCompleteness(msg(repo, 'feat: x'), repo, { exec })).toBe(3);
+    expect(exec).toHaveBeenCalledTimes(2);
+    const out = err.mock.calls.flat().join('\n');
+    expect(out).toContain('SKIPPED (judge outage)');
+    const resume = out.indexOf('devkit ship --resume <branch>');
+    expect(resume).toBeGreaterThan(-1);
+    expect(resume).toBeLessThan(out.indexOf('move the judges'));
+  });
+
+  it('a normal commit fails open without a retry', async () => {
+    const repo = consumerRepo({ backend: true });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exec = blips(1);
+    expect(await runCompleteness(msg(repo, 'feat: x'), repo, { exec })).toBe(2);
+    expect(exec).toHaveBeenCalledTimes(1);
   });
 });
