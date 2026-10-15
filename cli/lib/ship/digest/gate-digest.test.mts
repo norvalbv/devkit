@@ -2,6 +2,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { summariseFallowAudit } from '../../../../gate-engine/judge/advisory/emit.mts';
 import { blockingFields } from '../../../../gate-engine/review/evidence/items.mts';
 import { blockingNote } from '../../../../gate-engine/review/overrides.mts';
 import { type GateEvent, readShipEvents, render, summarise } from './gate-digest.mts';
@@ -500,6 +501,29 @@ describe('advisory_result', () => {
       SHIP,
     );
     expect(rows.map((r) => r.gate)).toEqual(['fallow-advisory', 'skill-projection']);
+  });
+
+  it('keeps the estimated-CRAP remedy inside the digest row cut, at any counter size', () => {
+    // The digest flattens every detail to 140 chars, so a remedy placed after the counters is cut.
+    const finding = { exceeded: 'crap', coverage_source: 'estimated', introduced: true };
+    for (const n of [1, Number.MAX_SAFE_INTEGER]) {
+      const attribution = {
+        complexity_introduced: n,
+        duplication_introduced: n,
+        dead_code_introduced: n,
+        styling_introduced: n,
+      };
+      const complexity = { findings: [finding] };
+      const report = JSON.stringify({ verdict: 'fail', attribution, complexity });
+      const detail = summariseFallowAudit(report)?.detail ?? '';
+      const rows = summarise(
+        [advisory('fallow-advisory', 'finding', detail), shipResult(null)],
+        SHIP,
+      );
+      expect(render(rows)).toContain(
+        '`devkit coverage-run <their tests>` in this checkout, then re-ship',
+      );
+    }
   });
 });
 
