@@ -196,7 +196,8 @@ what is devkit-specific:
 Coverage of a diff means the lines the change added. `node cli/index.mts coverage-run <test files>`
 followed by `node cli/index.mts coverage-diff` prints, per file, how many added executable lines ran
 and which did not. Scope the run to your own test files: a failed run publishes no
-report.
+report. Shell scripts are listed apart as not measurable: for each added shell branch, name the test
+that runs it, and confirm that reverting the edit fails that test.
 
 `bun run test:run:coverage:changed` prints whole-file coverage for the files changed since the
 remote `main` branch (vitest's `--changed` picks the covering tests). It still prints when a test
