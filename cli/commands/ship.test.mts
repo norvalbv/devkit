@@ -30,6 +30,11 @@ function harness() {
       events.push('queue');
       return { env: {} };
     },
+    queueAhead: (): string[] | undefined => undefined,
+    runPrequeue(): number {
+      events.push('prequeue');
+      return 0;
+    },
     showQueue: () => 'running: (none)',
   } satisfies ShipDependencies;
   return {
@@ -243,5 +248,52 @@ describe('devkit ship machine-wide queue wiring (sc-3785)', () => {
       await ship(['feat/q', 't', '--body', '--queue', 'a.txt'], '/consumer', test.dependencies),
     ).toBe(0);
     expect(test.events).toEqual(['provenance', 'queue', 'script']);
+  });
+
+  it('skips the pre-queue pass when the ship is not waiting', async () => {
+    const test = harness();
+
+    expect(await ship(['feat/q', 't', 'a.txt'], '/consumer', test.dependencies)).toBe(0);
+    expect(test.events).toEqual(['provenance', 'queue', 'script']);
+  });
+
+  it("runs a waiting ship's pass after its ticket is published, slot-free, then the script", async () => {
+    const test = harness();
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    let passEnv: NodeJS.ProcessEnv | undefined;
+    let passScript = '';
+    vi.stubEnv('DEVKIT_SHIP_SLOT', 'leaked-token');
+    try {
+      test.dependencies.queueAhead = () => ['feat/a', 'feat/b'];
+      test.dependencies.runPrequeue = (script, _args, options) => {
+        test.events.push('prequeue');
+        passScript = script;
+        passEnv = options.env;
+        return 0;
+      };
+      expect(await ship(['--pr', 'feat/q', 't', 'a.txt'], '/consumer', test.dependencies)).toBe(0);
+    } finally {
+      vi.unstubAllEnvs();
+      error.mockRestore();
+    }
+    expect(test.events).toEqual(['provenance', 'queue', 'prequeue', 'script']);
+    expect(passScript).toBe('reship.sh');
+    expect(passEnv?.DEVKIT_SHIP_PREQUEUE).toBe('1');
+    expect(passEnv?.DEVKIT_SHIP_PREQUEUE_AHEAD).toBe('feat/a\nfeat/b');
+    expect(passEnv?.DEVKIT_SHIP_SLOT).toBeUndefined();
+  });
+
+  it('returns a pass refusal without running the ship, naming a full re-run', async () => {
+    const test = harness();
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    test.dependencies.queueAhead = () => ['feat/a'];
+    test.dependencies.runPrequeue = () => 1;
+
+    expect(await ship(['feat/q', 't', 'a.txt'], '/consumer', test.dependencies)).toBe(1);
+    expect(test.scripts).toEqual([]);
+    expect(error.mock.calls.flat().join('\n')).toContain(
+      'refused before queueing — nothing was queued or recorded',
+    );
+    error.mockRestore();
   });
 });
