@@ -711,6 +711,7 @@ describe('reship --base — replace a conflicted PR from a caller-prepared snaps
     );
     expect(preview.status, preview.stderr).toBe(0);
     expect(preview.stderr).toContain('skipped reconcile + the recorded PR-body update');
+    expect(preview.stderr).not.toContain('REWRITE —');
     expect(existsSync(ghBody)).toBe(false);
     expect(readFileSync(join(dir, '.devkit/reconcile-manifest.json'), 'utf8')).toBe(
       manifestBeforePreview,

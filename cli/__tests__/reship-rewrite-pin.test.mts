@@ -1,29 +1,16 @@
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
-import { testSpawnSync as spawnSync } from './_helpers.mts';
-import { rewriteRepo } from './_reship-rewrite-fixture.mts';
+import { rewriteRepo, runReship as run } from './_reship-rewrite-fixture.mts';
 
 // `ship --pr --base` pins the PR head and base with one fetch under the remote supervisor. A repo
 // past gc.auto made that fetch start a detached auto-gc the supervisor reaped as its own (sc-3761).
 
-const scriptPath = fileURLToPath(new URL('../lib/ship/reship.sh', import.meta.url));
-const GENV = { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' };
 const dirs = [];
 afterAll(() => {
   for (const d of dirs) rmSync(d, { recursive: true, force: true });
 });
-
-function run(args, dir, env) {
-  return spawnSync('/bin/bash', [scriptPath, ...args], {
-    cwd: dir,
-    input: 'body\n',
-    encoding: 'utf8',
-    env: { ...process.env, ...GENV, ...env },
-  });
-}
 
 const PIN_RE = /cannot pin origin\/feat\/pr and origin\/(\S+)/;
 
