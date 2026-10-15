@@ -9,7 +9,7 @@ import { prequeueEnv, queueAhead } from '../lib/ship/queue/enter.mts';
 import { runPackagedScriptQuiet } from '../lib/ship/run-packaged-script.mts';
 import { readIntent } from '../lib/ship/ship-intent.mts';
 import { rewriteRepo } from './_reship-rewrite-fixture.mts';
-import { testExecFileSync as execFileSync, testSpawnSync as spawnSync } from './_helpers.mts';
+import { testSpawnSync as spawnSync } from './_helpers.mts';
 import {
   createPreservedCommit,
   dirs,
@@ -256,34 +256,33 @@ describe('reship.sh pre-queue pass', () => {
   });
 });
 
-/** A dead ship's worktree on `branch`, with the run record the reclaim preflight reads. */
-function deadOrphan(s: Seeded, branch: string): string {
+/** A dead ship's worktree on `branch` with the run record the reclaim preflight reads; `kept`
+ *  makes it a detached worktree that ship preserved on purpose, which the preflight refuses. */
+function deadOrphan(s: Seeded, branch: string, kept = false): string {
   const wt = mkdtempSync(join(tmpdir(), 'ship-prequeue-orphan-'));
   dirs.push(wt);
   rmSync(wt, { recursive: true, force: true });
-  s.git(['worktree', 'add', '-q', '-b', branch, wt, 'work']);
+  s.git(['worktree', 'add', '-q', ...(kept ? ['--detach'] : ['-b', branch]), wt, 'work']);
   const admin = s.git(['-C', wt, 'rev-parse', '--absolute-git-dir']).trim();
   const base = s.git(['rev-parse', 'work']).trim();
   const fields = { v: 1, branch, wt, pid: DEAD_PID, identity: 'x', base, branch_created: 1 };
-  const record = Object.entries({ ...fields, mode: 'live' }).map(([k, v]) => `${k}=${v}\n`);
+  const extra = kept ? { keep: 1 } : {};
+  const record = Object.entries({ ...fields, ...extra, mode: 'live' }).map(
+    ([k, v]) => `${k}=${v}\n`,
+  );
   writeFileSync(join(admin, 'devkit-ship-run'), record.join(''));
   return wt;
 }
 
-function reclaim(s: Seeded, branch: string, env: NodeJS.ProcessEnv): void {
+/** The reclaim preflight alone, sourced without queue/slot.sh as ship-run-record.test does. */
+function reclaim(s: Seeded, branch: string, env: NodeJS.ProcessEnv): number | null {
   const lib = dirname(scriptPath);
-  execFileSync(
-    '/bin/bash',
-    [
-      '-c',
-      `set -euo pipefail
-. "${lib}/queue/slot.sh"; . "${lib}/worktree-registry.sh"; . "${lib}/ship-run-record.sh"
-. "${lib}/reclaim-orphan-worktrees.sh"
+  const script = `set -euo pipefail
+. "${lib}/worktree-registry.sh"; . "${lib}/ship-run-record.sh"; . "${lib}/reclaim-orphan-worktrees.sh"
 PREFLIGHT_HINT=; PREFLIGHT_SELF=
-ship_reclaim_orphan_worktrees "${s.dir}" "${branch}"`,
-    ],
-    { cwd: s.dir, encoding: 'utf8', stdio: 'pipe', env: { ...s.env, ...env } },
-  );
+ship_reclaim_orphan_worktrees "${s.dir}" "${branch}"`;
+  const opts = { cwd: s.dir, encoding: 'utf8' as const, env: { ...s.env, ...env } };
+  return spawnSync('/bin/bash', ['-c', script], opts).status;
 }
 
 describe('orphan reclaim in the pre-queue pass', () => {
@@ -292,10 +291,21 @@ describe('orphan reclaim in the pre-queue pass', () => {
     const wt = deadOrphan(s, 'feat/orphan');
     mkdirSync(join(s.dir, '.devkit'), { recursive: true });
 
-    reclaim(s, 'feat/orphan', { DEVKIT_SHIP_PREQUEUE: '1' });
+    expect(reclaim(s, 'feat/orphan', { DEVKIT_SHIP_PREQUEUE: '1' })).toBe(0);
     expect(existsSync(wt)).toBe(true);
 
-    reclaim(s, 'feat/orphan', {});
+    expect(reclaim(s, 'feat/orphan', {})).toBe(0);
     expect(existsSync(wt)).toBe(false);
+  });
+
+  // The queued run would refuse on the kept worktree, so the pass must too: a pending reclaim
+  // elsewhere in the list may not end the pass before every entry is judged.
+  it('still refuses on a kept worktree when another entry would be reclaimed', () => {
+    const s = seedShipRepo();
+    const orphan = deadOrphan(s, 'feat/both');
+    deadOrphan(s, 'feat/both', true);
+
+    expect(reclaim(s, 'feat/both', { DEVKIT_SHIP_PREQUEUE: '1' })).toBe(1);
+    expect(existsSync(orphan)).toBe(true);
   });
 });

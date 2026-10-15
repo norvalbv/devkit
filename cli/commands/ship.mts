@@ -239,9 +239,10 @@ gate, and holds it until it exits — or until --wait-ci starts polling, which n
 by default; ~/.devkit/ship-queue/config.json {"slots": N} (1..4) lets N ships run at once. A
 waiting ship prints its position once, then runs its own pre-worktree refusals without a slot and
 exits there, unrecorded and dequeued, instead of failing on them after the wait. A slot frees
-itself when its ship (and that ship's whole process group) is gone. There is no way to skip it; \`devkit ship --queue\` names the running ship
-with the \`ps\` that inspects it if it looks stuck. Every blocked attempt records its
-invocation — retry with \`devkit ship --resume <branch>\` instead of re-typing the command.`,
+itself when its ship (and that ship's whole process group) is gone. There is no way to skip it;
+\`devkit ship --queue\` names the running ship with the \`ps\` that inspects it if it looks stuck.
+Every blocked attempt records its invocation — retry with \`devkit ship --resume <branch>\` instead
+of re-typing the command.`,
 };
 
 /** reship.sh strips the whole leading --pr/--resume run; ship-branch.sh strips one leading --resume. */
