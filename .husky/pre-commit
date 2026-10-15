@@ -215,7 +215,6 @@ __dk_review_baseline_gate() {
 dk_review_failed=0
 dk_review_failed_gates=""
 __dk_block_deterministic() {
-    case "${DEVKIT_RUN_MODE:-}" in review|dry-gates) ;; *) exit 1 ;; esac
     dk_review_failed=1
     dk_review_failed_gates="$dk_review_failed_gates $1"
 }
@@ -301,6 +300,15 @@ __dk_gate_deterministic() {
 echo "🚧 Deterministic gates (aggregated)..."
 __dk_gate_deterministic node gate-engine/deterministic/run.mts --hook "${DK_HOOK_PATH:-$0}" --structure "bun run lint:structure" --extra "lint=bun run lint" --extra "hook-parity=node cli/lib/husky/hook-parity.mts --gate" --extra "formatter-identity=node cli/lib/husky/format-identity/formatter-identity.mts --gate" --extra "decisions-integrity=node gate-engine/decisions/cli.mts integrity --staged" --extra "release-only-dist=node cli/lib/ship/dist-integrity.mts --ship-staged" --extra "benchmarks=bun run benchmarks:check -- --mode staged" --extra "corpus-lint=bun run benchmarks:corpus"
 # /devkit:deterministic
+
+# devkit:cheap-gate-flush
+case "${DEVKIT_RUN_MODE:-}" in review|dry-gates) ;; *)
+    if [ "${dk_review_failed:-0}" -ne 0 ]; then
+        echo "✗ commit blocked before the AI gates:$dk_review_failed_gates (findings above) — fix them together, then commit once."
+        exit 1
+    fi ;;
+esac
+# /devkit:cheap-gate-flush
 
 if __dk_gate_selected decisions; then
 # devkit:guard-decisions

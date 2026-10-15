@@ -328,9 +328,8 @@ SHIP_HOOK_WRAPPER
   fi
 
   # Ship result telemetry — the outcome + a coarse blocked_gate tag derived from the captured log
-  # (the per-gate/per-reviewer events carry the precise cause). Chain order is deterministic →
-  # decisions → review, and each hook step is `|| exit`, so exactly one gate blocks; grep in that
-  # order attributes it.
+  # (the per-gate/per-reviewer events carry the precise cause). Chain order is cheap gates (one
+  # flush line) → decisions → review, and each AI step is `|| exit`; grep in that order attributes it.
   local blocked_json timed_out
   if [ -n "$blocked_override" ]; then blocked_json=$blocked_override; timed_out=false
   elif [ "$hook_setup_failed" -eq 1 ]; then blocked_json='"hook_setup"'; timed_out=false
@@ -346,8 +345,9 @@ SHIP_HOOK_WRAPPER
   # is the one that dies, so a grep would blame it for a failure it did not cause.
   elif [ "$staged_missing" -eq 1 ]; then blocked_json='"staged_objects_missing"'; timed_out=false
   # sc-2753: guard-comments aggregates in the deterministic stage; alone, it keeps its own name.
-  elif grep -qE '✗ deterministic gates failed: guard-comments(\([^)]*\))?$' "$log" 2>/dev/null; then blocked_json='"comments"'; timed_out=false
-  elif grep -q '✗ deterministic gates failed' "$log" 2>/dev/null; then blocked_json='"deterministic"'; timed_out=false
+  elif grep -qE '✗ deterministic gates failed: guard-comments(\([^)]*\))?$' "$log" 2>/dev/null &&
+    ! grep -qE '✗ commit blocked before the AI gates:.* (fallow|[a-z]+-overlay)( |$)' "$log" 2>/dev/null; then blocked_json='"comments"'; timed_out=false
+  elif grep -qE '✗ (deterministic gates failed|commit blocked before the AI gates)' "$log" 2>/dev/null; then blocked_json='"deterministic"'; timed_out=false
   elif grep -q 'decision smells:' "$log" 2>/dev/null; then blocked_json='"decisions"'; timed_out=false
   elif grep -q 'guard-comments: .* need a decision' "$log" 2>/dev/null; then blocked_json='"comments"'; timed_out=false
   elif grep -qE 'guard-review: .* (FAILED|INCONCLUSIVE)' "$log" 2>/dev/null; then blocked_json='"review"'; timed_out=false

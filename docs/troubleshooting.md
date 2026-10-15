@@ -408,8 +408,9 @@ all-and-**aggregate**: instead of failing fast on the first, they collect every 
 naming each (`guard-<id>`). Fix each named gate (see **A pre-commit gate blocked my commit** above) and
 re-commit. To converge without a ship round, stage the paths and run `guard-deterministic` locally.
 `guard-comments(unreadable-evidence)` is not a rejection: the gate could not read the staged content.
-On a commit or ship, the decision and reviewer gates run only after this stage passes, one finding
-at a time, by design.
+On a commit or ship, the staged fallow audit and overlay eslint/biome steps still run after a failure
+here, then `✗ commit blocked before the AI gates: <names>` stops the commit with every cheap finding
+above it. The decision and reviewer gates run only after all of them pass, one finding at a time, by design.
 
 ## `✗ review: failed gates: <names>`
 

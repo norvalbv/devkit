@@ -18,7 +18,7 @@ import {
 } from '../lib/install/overlay-lint-configs.mts';
 import { ALL_GUARDS, cleanupHomes, hasDash, homes, runHook } from './_husky-hook-harness.mts';
 
-// The hook's SHELL contract: commit/ship fail fast, review/dry-gates defer per lane, and it all
+// The hook's SHELL contract: commit/ship stop before the AI gates, review/dry-gates defer per lane, and it all
 // survives dash + a hook path with spaces. The orchestrator's own aggregation is tested in run.test.mjs.
 
 afterEach(cleanupHomes);
@@ -949,7 +949,7 @@ describe('overlay staged gates run before the AI guards (sc-3020)', () => {
     for (const ai of AI_CALLS) expect(r.calls.indexOf(ai)).toBeGreaterThan(fallowAt);
   });
 
-  it('the deterministic orchestrator still runs before fallow, and its failure skips fallow', () => {
+  it('the deterministic orchestrator still runs before fallow, and its failure still runs fallow', () => {
     const passing = runHook({}, { biome: false, guards: ['size', 'review'] }, overlay());
     expect(passing.calls.indexOf('guard-deterministic')).toBeLessThan(
       passing.calls.indexOf('fallow audit'),
@@ -960,7 +960,7 @@ describe('overlay staged gates run before the AI guards (sc-3020)', () => {
       overlay(),
     );
     expect(failing.status).toBe(1);
-    expect(failing.calls).not.toContain('fallow');
+    expect(failing.calls).toContain('fallow audit');
     expect(failing.calls).not.toContain('guard-review');
   });
 

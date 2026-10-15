@@ -509,7 +509,10 @@ describe('buildOverlayHook — gates-only guard for the global init.sh shim', ()
     const firstAi = hook.indexOf('# devkit:guard-decisions');
     expect(firstAi).toBeGreaterThan(0);
     expect(hook.indexOf('fallow audit --diff-stdin')).toBeLessThan(firstAi);
-    expect(hook.indexOf('xargs $DK_ESLINT -c eslint.config.devkit.mjs')).toBeLessThan(firstAi);
+    expect(hook.indexOf('xargs $DK_ESLINT -c eslint.config.devkit.mjs')).toBeLessThan(
+      hook.indexOf('# devkit:cheap-gate-flush'),
+    );
+    expect(hook.indexOf('# devkit:cheap-gate-flush')).toBeLessThan(firstAi);
     expect(hook.indexOf('# devkit:guard-ui-evidence')).toBeGreaterThan(
       hook.indexOf('fallow audit --diff-stdin'),
     );
