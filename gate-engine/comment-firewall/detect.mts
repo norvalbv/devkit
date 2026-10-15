@@ -437,7 +437,10 @@ function findingFor(
   };
 }
 
-export function detectChangedComments(cwd = process.cwd()): DetectionResult {
+export function detectChangedComments(
+  cwd = process.cwd(),
+  only?: ReadonlySet<string>,
+): DetectionResult {
   const cfg = resolveGuardConfig(cwd);
   const roots = cfg.scanRoots.map((root) => normalizedRoot(cwd, root));
   const isConfiguredSource = sourceMatchers(cfg.sourceExtensions).isSource;
@@ -451,6 +454,7 @@ export function detectChangedComments(cwd = process.cwd()): DetectionResult {
     decisionsDir !== '' && [...stagedPaths(cwd)].some((file) => insideRoots(file, [decisionsDir]));
   const { files, head: headRenames, merge: mergeRenamed } = changedPaths(cwd);
   for (const file of files.sort()) {
+    if (only && !only.has(file)) continue;
     if (!insideRoots(file, roots) || !isConfiguredSource(file)) continue;
     const extension = extensionOf(file);
     if (!SUPPORTED_EXTENSIONS.has(extension)) {

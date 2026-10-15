@@ -15,6 +15,8 @@ export const BASE_DRIFT_BRIEF_HOOK = 'base-drift-brief.mjs';
 export const BASE_DRIFT_LIB = 'base-drift-lib.mjs';
 /** The authoring-time anti-slop check (sc-3469); owned by the antiSlop component it checks for. */
 export const ANTI_SLOP_PREFLIGHT_HOOK = 'anti-slop-preflight.sh';
+/** The edit-time guard-comments advisory; owned by the comments guard whose verdict it previews. */
+export const COMMENT_PREFLIGHT_HOOK = 'comment-budget-preflight.mjs';
 
 export function bundledHookNames(): string[] {
   return readdirSync(join(packageDir(), 'agents-hooks'), {
@@ -36,6 +38,7 @@ export function hookScriptsFor({
   // an explicit false gives.
   baseDrift = false,
   antiSlop = false,
+  comments = false,
 }: {
   agentHooks: boolean;
   decisions: boolean;
@@ -44,6 +47,7 @@ export function hookScriptsFor({
   priorArtGate: boolean;
   baseDrift?: boolean;
   antiSlop?: boolean;
+  comments?: boolean;
 }): string[] {
   const all = bundledHookNames();
   // Scripts owned by a component OTHER than agentHooks — selecting agent hooks must not drag them
@@ -62,6 +66,7 @@ export function hookScriptsFor({
     FALLOW_STAGED_GATE,
     PRIOR_ART_GATE_HOOK,
     ANTI_SLOP_PREFLIGHT_HOOK,
+    COMMENT_PREFLIGHT_HOOK,
     ...decisionsOwned,
     ...adhdOwned,
     ...baseDriftOwned,
@@ -74,7 +79,8 @@ export function hookScriptsFor({
       (adhd && adhdOwned.has(name)) ||
       (priorArtGate && name === PRIOR_ART_GATE_HOOK) ||
       (baseDrift && baseDriftOwned.has(name)) ||
-      (antiSlop && name === ANTI_SLOP_PREFLIGHT_HOOK),
+      (antiSlop && name === ANTI_SLOP_PREFLIGHT_HOOK) ||
+      (comments && name === COMMENT_PREFLIGHT_HOOK),
   );
 }
 
@@ -86,6 +92,7 @@ export interface SelectedHookAssets {
 
 function hookComponents(selection: Partial<Selection>, searchSteering: boolean): string[] {
   const decisions = selection.guards?.includes('decisions') ?? false;
+  const comments = selection.guards?.includes('comments') ?? false;
   return [
     searchSteering && selection.searchSteering && 'searchSteering',
     selection.agentHooks && 'agentHooks',
@@ -95,6 +102,7 @@ function hookComponents(selection: Partial<Selection>, searchSteering: boolean):
     selection.priorArtGate && 'priorArtGate',
     selection.baseDrift && 'baseDrift',
     selection.antiSlop && 'antiSlop',
+    comments && 'comments',
   ].filter((value): value is string => Boolean(value));
 }
 
@@ -116,6 +124,7 @@ export function selectedHookAssets(
       priorArtGate: Boolean(selection.priorArtGate),
       baseDrift: Boolean(selection.baseDrift),
       antiSlop: Boolean(selection.antiSlop),
+      comments: selection.guards?.includes('comments') ?? false,
     }),
   };
 }
