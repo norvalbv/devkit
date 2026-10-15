@@ -72,7 +72,7 @@ describe('parseUiVerdict', () => {
     expect(parseUiVerdict('VISIBLE\nNothing a user sees changes on a rendered screen.')).toBeNull();
   });
 
-  it('the last VERDICT line wins, markdown dressing and all', () => {
+  it('the closing VERDICT line wins, markdown dressing and all', () => {
     const raw = 'VERDICT: VISIBLE\nOn reflection, only CLI output changes.\n\n- **VERDICT:** NONE';
     expect(parseUiVerdict(raw)).toEqual({
       visible: false,
@@ -92,7 +92,11 @@ describe('parseUiVerdict', () => {
     });
   });
 
-  it('a verdict word that does not end its line is prose or an echoed format, not a verdict', () => {
+  it('a VERDICT line followed by a negating reason is verdict-first, so it stays silent', () => {
+    expect(parseUiVerdict('VERDICT: VISIBLE\nNothing a user sees changes.')).toBeNull();
+  });
+
+  it('a verdict word that does not close the reply is prose or an echoed format', () => {
     expect(parseUiVerdict('VERDICT: VISIBLE or NONE')).toBeNull();
     expect(parseUiVerdict('Final verdict: none of these files render anything.')).toBeNull();
   });
@@ -174,7 +178,11 @@ function runGate(dir: string, subject: string | null, extra: Record<string, stri
 describe('guard-ui-evidence CLI', () => {
   it('a staged UI file prints the screenshot instruction without asking the judge', () => {
     const dir = stagedRepo({ 'src/Card.tsx': 'x' });
-    const r = runGate(dir, 'feat: card', judgeStub(dir, 'echo VISIBLE'));
+    const r = runGate(
+      dir,
+      'feat: card',
+      judgeStub(dir, 'printf "a card changes\\nVERDICT: VISIBLE\\n"'),
+    );
     expect(r.code).toBe(0);
     expect(r.stderr).toContain('📸 ui-evidence: Add before (base branch) and after (this branch)');
     expect(r.stderr).toContain('— UI paths changed: src/Card.tsx');
@@ -272,7 +280,7 @@ describe('guard-ui-evidence CLI', () => {
 
   it('a diff of only docs, lockfiles and tests never asks the judge', () => {
     const dir = stagedRepo({ 'README.md': 'x', 'bun.lock': 'x', 'src/a.test.ts': 'x' });
-    const r = runGate(dir, null, judgeStub(dir, 'echo VISIBLE'));
+    const r = runGate(dir, null, judgeStub(dir, 'printf "a card changes\\nVERDICT: VISIBLE\\n"'));
     expect(r).toMatchObject({ code: 0, stderr: '', events: [] });
     expect(judgeCalls(dir)).toBe(0);
   });

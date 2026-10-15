@@ -27,16 +27,16 @@ export const UI_JUDGE_PROMPT = [
 
 // Verdict last, so it follows the reason; a verdict-first reply let the label contradict it.
 // No bare-word fallback: the reason itself says "visible", so absence must stay unparseable.
-const VERDICT_RE = /\bVERDICT:\s*\**\s*(VISIBLE|NONE)[ \t\r*.]*$/gim;
+const VERDICT_RE = /\bVERDICT:\s*\**\s*(VISIBLE|NONE)[\s*.]*$/i;
 
 export interface UiVerdict {
   visible: boolean;
   why: string;
 }
 
-/** The judge's reply as a verdict (the last `VERDICT:` wins, even mid-line), or null without one. */
+/** The judge's reply as a verdict when a `VERDICT:` closes it (even mid-line), else null. */
 export function parseUiVerdict(raw: string): UiVerdict | null {
-  const last = [...raw.matchAll(VERDICT_RE)].at(-1);
+  const last = raw.match(VERDICT_RE);
   if (!last) return null;
   const before = raw.slice(0, last.index).replace(/[\s*#>-]+$/, '');
   const why = (before.split('\n').at(-1) ?? '').replace(/\s+/g, ' ').trim().slice(0, WHY_CAP);
