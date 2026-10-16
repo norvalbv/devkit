@@ -24,7 +24,10 @@ const { mkTmp } = rootRegistry();
 /** Run a snippet under `sh -e` and report whether the trailing `echo REACHED` ran. */
 function reachesUnderErrexit(snippet: string): boolean {
   try {
-    const out = execFileSync('sh', ['-e', '-c', `${snippet}\necho REACHED`], { encoding: 'utf8' });
+    const out = execFileSync('sh', ['-e', '-c', `${snippet}\necho REACHED`], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
     return out.includes('REACHED');
   } catch {
     return false;
@@ -239,10 +242,10 @@ describe('regressions found by the reviewer gate', () => {
   });
 
   it('catches the one-line `if …; then cmd; rc=$?; fi` shape', () => {
+    expect(reachesUnderErrexit('if true; then false; vrc=$?; fi')).toBe(false);
     // splitStatements yields `then node …` for this; skipping every statement starting with a
     // block keyword dropped the body along with the structure.
     const one = 'if [ -f package.json ]; then node scripts/check-vision.mjs --gate; vrc=$?; fi';
-    expect(reachesUnderErrexit(one)).toBe(false);
     const found = unguardedGateCalls(one);
     expect(found).toHaveLength(1);
     expect(found[0]?.command).toBe('node scripts/check-vision.mjs --gate');
