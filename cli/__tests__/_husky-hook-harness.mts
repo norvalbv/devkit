@@ -13,7 +13,9 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { gateBlockPrelude } from '../lib/husky/gate-policy/block-helpers.mts';
 import { buildFullHook, buildOverlayHook } from '../lib/husky/husky-block.mts';
+import { testSpawnSync } from './_helpers.mts';
 
 // Runs an ASSEMBLED hook under a real `sh -e` with per-tool stubs whose exit codes come from env
 // knobs; every invocation lands in calls.log, so ordering is read off the log.
@@ -26,6 +28,32 @@ export const ALL_GUARDS = ['size', 'fanout', 'dup', 'clone', 'comments', 'decisi
 // Hooks run under whatever /bin/sh the OS ships — dash on Debian/Ubuntu, bash on macOS. The
 // fragments are POSIX sh; prove it where dash is installed instead of assuming.
 export const hasDash = existsSync('/bin/dash');
+
+/** The overlay hook's STAGED lint step, cut out of the generated hook text. */
+export function overlayStagedStep() {
+  const hook = buildOverlayHook({ biome: false, guards: [] });
+  return hook.slice(
+    hook.indexOf('# devkit lint overlay — STAGED'),
+    hook.indexOf('# devkit lint overlay — review mode'),
+  );
+}
+
+/** Run one generated fragment under `sh -e` behind the real gate-block prelude. */
+export function runHookFragment(
+  fragment: string,
+  { cwd, env, shell = 'sh', binOpen = '' }: FragmentRun,
+) {
+  const script = [...gateBlockPrelude(binOpen), fragment].join('\n');
+  return testSpawnSync(shell, ['-e', '-c', script], { cwd, env, encoding: 'utf8' });
+}
+
+interface FragmentRun {
+  cwd: string;
+  env?: NodeJS.ProcessEnv;
+  shell?: string;
+  /** Stands in for the bin-dir lookup, e.g. `__dk_package_bin_dir="/path"`. */
+  binOpen?: string;
+}
 
 // Stubs log to calls.log and exit with the named env knob, so ordering is read off the log.
 function writeStub(path, name, rcVar) {

@@ -6,10 +6,9 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { DK_GATE_BLOCK_HELPERS } from '../lib/husky/gate-policy/block-helpers.mts';
-import { buildOverlayHook } from '../lib/husky/husky-block.mts';
 import { eslintOverlayContent } from '../lib/install/overlay-lint-configs.mts';
 import { testSpawnSync as spawnSync } from './_helpers.mts';
+import { overlayStagedStep, runHookFragment } from './_husky-hook-harness.mts';
 import {
   INSTALL_LAYOUTS,
   INSTALL_LAYOUTS_ENABLED,
@@ -87,15 +86,7 @@ function linkedWorktree(layout: InstallLayout): string {
 }
 
 function overlayStep(cwd: string) {
-  const hook = buildOverlayHook({ biome: false, guards: [] });
-  const step = hook.slice(
-    hook.indexOf('# devkit lint overlay — STAGED'),
-    hook.indexOf('# devkit lint overlay — review mode'),
-  );
-  return spawnSync('sh', ['-e', '-c', `${DK_GATE_BLOCK_HELPERS}\n${step}`], {
-    cwd,
-    encoding: 'utf8',
-  });
+  return runHookFragment(overlayStagedStep(), { cwd });
 }
 
 function structureGate(cwd: string) {

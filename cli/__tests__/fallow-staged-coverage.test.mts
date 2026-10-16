@@ -15,11 +15,10 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
-import { DK_GATE_BLOCK_HELPERS } from '../lib/husky/gate-policy/block-helpers.mts';
 import { FALLOW_STAGED } from '../lib/husky/gate-policy/fallow-staged.mts';
-import { DK_NO_GIT_ENV_HELPER } from '../lib/husky/review-fragments.mts';
 import { rebaseWorktreeCoverage } from '../lib/ship/coverage/coverage-rebase.mts';
 import { testExecFileSync as execFileSync, testSpawnSync as spawnSync } from './_helpers.mts';
+import { runHookFragment } from './_husky-hook-harness.mts';
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const GIT_ENV = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' };
@@ -126,11 +125,11 @@ function fixture(pkgRel: string, artifact?: (file: string) => string): Fixture {
 
 /** Run the generated staged-gate block as a hook would, in `cwd`. */
 function runGate(f: Fixture, cwd = f.cwd, env: Record<string, string> = {}, shell = 'sh') {
-  const script = `${DK_NO_GIT_ENV_HELPER}\n${DK_GATE_BLOCK_HELPERS}\n__dk_package_bin_dir="${f.bin}"\n${FALLOW_STAGED}\n`;
-  const r = spawnSync(shell, ['-e', '-c', script], {
+  const r = runHookFragment(FALLOW_STAGED, {
     cwd,
-    encoding: 'utf8',
+    shell,
     env: { ...BASE_ENV, TMPDIR: f.tmp, ...env },
+    binOpen: `__dk_package_bin_dir="${f.bin}"`,
   });
   return { status: r.status, out: `${r.stdout}${r.stderr}` };
 }
