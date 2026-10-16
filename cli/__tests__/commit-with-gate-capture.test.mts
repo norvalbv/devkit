@@ -418,6 +418,56 @@ describe('commit_with_gate_capture — executable hook proof', () => {
     }
   });
 
+  // The per-branch log is overwritten by every retry; the per-attempt archive is not.
+  const ARCHIVE_LINE = "this attempt's gate log is kept at";
+
+  it('a blocked ship names the per-attempt archive, which holds this attempt', () => {
+    const { root, wt, base } = fixture(true, BLOCKED_HOOK);
+    const [branchLog, archive] = retainedLogs(root);
+
+    const result = runCommit(root, wt, base);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(
+      `ship: ${ARCHIVE_LINE} ${archive} (ship id sc1537-test); ${branchLog} is overwritten by the next attempt.`,
+    );
+    expect(readFileSync(archive, 'utf8')).toContain('REAL_PRE_COMMIT_RAN');
+  });
+
+  it('a hook-setup failure names the archive too — it holds the setup error', () => {
+    const { root, wt, base } = fixture(false);
+
+    const result = runCommit(root, wt, base);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(ARCHIVE_LINE);
+  });
+
+  it('names no archive when it could not be written, and keeps the gate verdict', () => {
+    const { root, wt, base } = fixture(true, BLOCKED_HOOK);
+    mkdirSync(join(root, 'telemetry'));
+    writeFileSync(join(root, 'telemetry/logs'), 'a file where the archive dir should be\n');
+
+    const result = runCommit(root, wt, base);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('✗ review:correctness — BLOCKED this run');
+    expect(result.stderr).not.toContain(ARCHIVE_LINE);
+  });
+
+  it('a green ship and a failing dry-gates rehearsal never name the archive', () => {
+    const green = fixture(true);
+    const dry = fixture(true, "echo 'REAL_PRE_COMMIT_RAN' >&2\nexit 1\n");
+
+    const passed = runCommit(green.root, green.wt, green.base);
+    const rehearsal = runCommit(dry.root, dry.wt, dry.base, false, true);
+
+    expect(passed.status, passed.stderr).toBe(0);
+    expect(passed.stderr).not.toContain(ARCHIVE_LINE);
+    expect(rehearsal.status).not.toBe(0);
+    expect(rehearsal.stderr).not.toContain(ARCHIVE_LINE);
+  });
+
   it.each([
     ['guard-comments: 1 added/modified comment paragraph need a decision.', 'comments'],
     // sc-2753: aggregated in the deterministic stage — alone it keeps its name, mixed it is the family.
