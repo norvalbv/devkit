@@ -204,4 +204,34 @@ describe('guard-size base-aware preflight', () => {
     expect(result.status).toBe(2);
     expect(result.stderr).toContain('preflight unavailable while reading source files');
   });
+
+  it('classifies an unexpected throw as unavailable, not as a line overrun', () => {
+    const root = makeRoot();
+    write(
+      root,
+      'guard.config.json',
+      JSON.stringify({ scanRoots: ['src'], sourceExtensions: [1], maxLines: 50 }),
+    );
+    write(root, 'src/a.ts', big(1));
+    execFileSync('git', ['add', '-A'], { cwd: root });
+    execFileSync('git', ['commit', '-qm', 'base'], { cwd: root });
+
+    const result = run(root, 'preflight', '--base', 'HEAD', '--', 'src/a.ts');
+
+    expect(result.status, result.stderr).toBe(2);
+    expect(result.stderr).toContain('guard-size preflight unavailable:');
+    expect(result.stderr).not.toMatch(/\n\s+at /);
+  });
+
+  it('classifies a corrupt working-tree baseline as unavailable, not as a line overrun', () => {
+    const root = makeRoot();
+    seedBaseline(root);
+    write(root, '.devkit/baselines/size-lines.json', '{ not json');
+
+    const result = run(root, 'preflight', '--base', 'HEAD', '--', 'src/legacy.ts');
+
+    expect(result.status, result.stderr).toBe(2);
+    expect(result.stderr).toContain('guard-size preflight unavailable:');
+    expect(result.stderr).toContain('invalid line baseline JSON');
+  });
 });

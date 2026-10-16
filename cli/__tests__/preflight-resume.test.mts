@@ -274,6 +274,25 @@ describe('the size preview is advisory: a crash in it never ends the ship', () =
     expect(r.stderr).toContain('guard-size preflight failed unexpectedly (exit 7) — continuing');
     expect(r.status, r.stderr).toBe(0);
   });
+
+  it('names an unavailable preview (exit 2) as unavailable, never as an overrun', () => {
+    const s = seedShipRepo();
+    mkdirSync(join(s.dir, 'src'), { recursive: true });
+    writeFileSync(join(s.dir, 'src/big.ts'), lines(3));
+
+    const r = run(
+      scriptPath,
+      s,
+      ['feat/pre-unavailable', 't', '--', 'src/big.ts'],
+      sizePreviewShim(s, 'exit 2'),
+      'b\n',
+    );
+    dropWorktree(s.git, r.stderr);
+
+    expect(r.stderr).toContain('guard-size base-aware preflight unavailable');
+    expect(r.stderr).not.toContain("ship's gate chain judges this");
+    expect(r.status, r.stderr).toBe(0);
+  });
 });
 
 describe('ship-branch.sh — a fresh failure record never clobbers a concurrent attempt (sc-2535)', () => {
