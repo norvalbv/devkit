@@ -29,6 +29,7 @@ import { ACCEPT_VIA_OVERRIDE, antiSlopFailRemedy, antiSlopRemedyLines } from './
 
 const MOCKING = 'anti-slop/no-module-mocking';
 const ASSERTION = 'anti-slop/require-safety-comment-for-type-assertion';
+const SPREAD = 'anti-slop/no-conditional-empty-object-spread';
 const EMPTY_BASELINE = `${JSON.stringify(
   { schemaVersion: 1, upstreamCommit: ANTI_SLOP_UPSTREAM, entries: [] },
   null,
@@ -66,6 +67,16 @@ describe('antiSlopRemedyLines', () => {
     expect(lines[0]).toContain('require-safety-comment-for-type-assertion:');
     expect(lines[1]).toContain('no-module-mocking:');
     expect(lines[2]).toContain(ACCEPT_VIA_OVERRIDE);
+  });
+
+  it('points a conditional empty spread at a named type that is also the return type', () => {
+    const hints = antiSlopRemedyLines([SPREAD, SPREAD], false).filter((line) =>
+      line.includes('hint —'),
+    );
+    expect(hints).toHaveLength(1);
+    expect(hints[0]).toContain('named `type`');
+    expect(hints[0]).toContain("the function's return type");
+    expect(hints[0]).toMatch(/in plain JavaScript, .*separate statements/u);
   });
 
   it('still names the acceptance route when no rule has a hint', () => {
@@ -239,6 +250,44 @@ describe('anti-slop check FAIL output (wiring)', () => {
       expect.stringMatching(/^ERROR \S+ src\/a\.test\.ts:3:\d+ \(\+1\)$/u),
     ]);
     expect(locations[0]).toContain(MOCKING);
+  });
+
+  it('prints the named-type hint when the real rule blocks a conditional empty spread', () => {
+    const cwd = repository(false);
+    writeFileSync(join(cwd, 'src', 'a.test.ts'), 'export const clean = 1;\n');
+    writeFileSync(
+      join(cwd, 'src', 'env.ts'),
+      "export function env(c: boolean): Record<string, unknown> {\n  return { a: 1, ...(c ? { x: 'y' } : {}) };\n}\n",
+    );
+    git(cwd, ['add', '-A']);
+
+    expect(antiSlop(['check', '--staged'], cwd)).toBe(1);
+    expect(out.join('\n')).toContain(SPREAD);
+    expect(err.join('\n')).toMatch(/hint — no-conditional-empty-object-spread: .*named `type`/u);
+  });
+
+  // Each route the spread hint names must itself pass, or following the hint draws a second FAIL.
+  it.each([
+    [
+      'env.ts',
+      "type Env = { a: number; x?: string };\n\nexport function env(c: boolean): Env {\n  const out: Env = { a: 1 };\n  if (c) out.x = 'y';\n  return out;\n}\n",
+    ],
+    [
+      'env.ts',
+      "type Env = { a: number; x?: string };\n\nexport function env(c: boolean) {\n  const out: Env = { a: 1 };\n  if (c) out.x = 'y';\n  return out;\n}\n",
+    ],
+    [
+      'env.mjs',
+      "export function env(c) {\n  const out = { a: 1 };\n  if (c) out.x = 'y';\n  return out;\n}\n",
+    ],
+  ])('passes every anti-slop rule on the spread hint rewrite in %s (%#)', (file, source) => {
+    const cwd = repository(false);
+    writeFileSync(join(cwd, 'src', 'a.test.ts'), 'export const clean = 1;\n');
+    writeFileSync(join(cwd, 'src', file), source);
+    git(cwd, ['add', '-A']);
+
+    expect(antiSlop(['check', '--staged'], cwd)).toBe(0);
+    expect(err.join('\n')).not.toContain('FAIL');
   });
 
   it('prints the schema-parse hint when the real rule blocks a cast on JSON.parse output', () => {
