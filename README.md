@@ -219,6 +219,9 @@ bun run lint:structure
 bun run benchmarks:check
 ```
 
+The full `bun run test:run` takes tens of minutes; the `test_suite` workflow in
+[`AGENTS.md`](AGENTS.md) covers targeted runs and where the full verdict comes from.
+
 `bun run devkit -- <command>` is the self-host entrypoint: it runs `cli/index.mts` so maintenance
 commands use the current source instead of the last compiled package bin. Benchmark tracker
 development additionally uses `bun run benchmarks:typecheck`. Release builds compile `.mts` sources
