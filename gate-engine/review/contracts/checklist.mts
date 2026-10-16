@@ -45,7 +45,7 @@ export async function enforceChecklistContract(
   if (hole && recoveryScheduled) {
     // No "retrying" here: the callback runs no judge, and the solo phase announces itself.
     console.error(
-      `guard-review: ${selection.reviewer.name} — checklist contract not satisfied (${hole})`,
+      `guard-review: ${selection.reviewer.name}${lensTag(selection.reviewer)} — checklist contract not satisfied (${hole})`,
     );
     cleanupChecklistState(cwd, selection.reviewer);
     result = await retry(hole);
@@ -93,6 +93,10 @@ export function reportFailedItems(reviewer: Reviewer, state: ChecklistState | nu
       `⚠️  guard-review: ${reviewer.name}${lensTag(reviewer)} — (+${failed.length - FAILED_SHOWN} more)`,
     );
 }
+
+/** ` [lens]` for a split lens part, so its log lines match its completion line; '' otherwise. */
+const lensTag = (reviewer: Reviewer): string =>
+  reviewer.lens?.length ? ` [${lensGroupId(reviewer.lens)}]` : '';
 
 /** Name the refused tool calls beside a non-pass outcome; a PASS that lost a test run stays quiet. */
 export function reportDeniedCalls(
