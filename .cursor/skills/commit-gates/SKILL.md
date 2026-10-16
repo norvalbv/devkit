@@ -82,6 +82,11 @@ command. Do not pre-run every gate or replace the managed chain with a hand-writ
   the reviewed code gives the correct result, waive it with the command and its output as the
   rationale. Do not add tests or edits only to change the diff and re-sample the judge: any real
   change voids the waiver and proves nothing. A race that did not reproduce is not disproved.
+  Gate judges read code; they are not meant to run it. A claim about runtime behaviour, above all a
+  third-party tool's, is an inference even when it quotes exact lines from `node_modules` or `dist`:
+  check it with a minimal fixture before you comply. A completeness finding has no waive path. When a
+  fixture refutes one, show the user the command and its output and ask whether to re-run that one
+  commit with `GUARD_COMPLETENESS_HARD=0`, which still records the finding and ship reports as a bypass.
   Before complying with a finding that changes existing behaviour, search the tests for that
   behaviour. A test asserting the opposite is a question, not an answer: read why it exists, then
   either change it with the fix and tell the user, or waive explaining why the finding's premise is
