@@ -69,20 +69,13 @@ function sourcePaths(
 // Compare the caller's current bytes with the raw-line baseline from the exact ref a ship will use.
 // A missing ref baseline is an overlay/untracked baseline, which ship links from the working copy.
 export function preflightLines(root: string, ref: string, requested: string[] = []): number {
-  let cfg: ReturnType<typeof resolveGuardConfig>;
-  let local: DecodedLineBaseline;
-  try {
-    cfg = resolveGuardConfig(root);
-    if (!cfg.maxLines && !cfg.maxTestLines) return 0;
-    const localBaseline = readRatchetBaseline(root, LINES_BASELINE);
-    local = readLinesBaseline(
-      localBaseline?.contents ?? null,
-      localBaseline?.relativePath ?? LINES_BASELINE,
-    );
-  } catch (error) {
-    console.error(`guard-size preflight unavailable: ${String(error)}`);
-    return 2;
-  }
+  const cfg = resolveGuardConfig(root);
+  if (!cfg.maxLines && !cfg.maxTestLines) return 0;
+  const localBaseline = readRatchetBaseline(root, LINES_BASELINE);
+  let local = readLinesBaseline(
+    localBaseline?.contents ?? null,
+    localBaseline?.relativePath ?? LINES_BASELINE,
+  );
   let committed: DecodedLineBaseline | null;
   try {
     committed = readLinesBaselineAtRef(root, ref);
@@ -161,5 +154,11 @@ export function runPreflightCli(args: string[]): never {
     console.error('usage: guard-size preflight --base <ref> [-- path...]');
     process.exit(2);
   }
-  process.exit(preflightLines(process.cwd(), args[1], args.slice(3)));
+  // Exit 1 means a proven overrun, so an unexpected throw must not reach Node's default exit 1.
+  try {
+    process.exit(preflightLines(process.cwd(), args[1], args.slice(3)));
+  } catch (error) {
+    console.error(`guard-size preflight unavailable: ${String(error)}`);
+    process.exit(2);
+  }
 }
