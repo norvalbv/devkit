@@ -122,6 +122,9 @@ command. Do not pre-run every gate or replace the managed chain with a hand-writ
   Stop re-shipping blind: fix the remaining findings as a class, waive any you judge not real with
   the `guard-review waive` line and a rationale, or ask the user for the reviewer skip the block note
   names. `--no-verify` is never the landing path.
+- **A `↑ devkit X → Y` line** means devkit was upgraded since this branch's last ship attempt, so a
+  rule may now block code that passed before. The block still stands; the compare URL lists what
+  changed between the two releases.
 - **Sentry gate** judges commit-message intent for newly introduced runtime error classes. Add the
   capture on the named surface, or surface a disputed verdict to the user before any bypass.
 - **UI evidence** (`ui-evidence`) runs on every commit, plain or shipped, and never blocks. It
