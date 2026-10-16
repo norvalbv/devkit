@@ -830,6 +830,7 @@ exec ${JSON.stringify(process.execPath)} "$@"
     const before = repositoryEvidence(target.root);
     const beforeLogs = logs(target.root);
 
+    // Named 124-sentinel carve-out: supervising this call would give its 124 assertion two sources.
     const result = spawnSync(cliNode, [CLI, 'review'], {
       cwd: target.root,
       encoding: 'utf8',
