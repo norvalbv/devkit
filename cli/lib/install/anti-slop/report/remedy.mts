@@ -27,6 +27,10 @@ const RULE_REMEDIES = new Map([
     'anti-slop/require-safety-comment-for-type-assertion',
     'require-safety-comment-for-type-assertion: if the value comes from I/O (JSON.parse, env, argv, a file or network body), decode it where it enters with a schema (e.g. zod `Schema.safeParse(JSON.parse(text))`) instead of casting; otherwise state the invariant on a `// SAFETY:` line directly above the assertion',
   ],
+  [
+    'anti-slop/no-conditional-empty-object-spread',
+    "no-conditional-empty-object-spread: in plain JavaScript, build the object in separate statements and set the field in an `if`. In TypeScript, declare a named `type` with the field optional (`x?: T`), bind `const out: Owner = { ... }`, set the field in an `if`, and make `Owner` the function's return type (or drop the annotation so it infers); a `Record<string, unknown>` or inline object-type binding, or returning the binding from a function still typed `Record<string, unknown>`, trips no-unsafe-dictionary-type and no-known-value-widening",
+  ],
 ]);
 
 /** One hint per distinct rule, then the acceptance route this install mode actually supports. */
