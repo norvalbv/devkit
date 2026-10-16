@@ -62,7 +62,8 @@
     "driftCode": 0.8,
     "driftDesc": 0.88,
     "minLoc": 15,
-    "minTokens": 50
+    "minTokens": 50,
+    "similarity": 0.9
   },
 
   "//indexPath": "search-code embedding index for the semantic duplication matcher. null (or omit) => matcher opts out / fails open; guard-clone + ratchets still run. OMITTING is not the same as writing null: `devkit doctor` reports drift when the key is ABSENT while .search-code/index.db exists (or search-code was selected at init), because that combination is devkit's own wiring lost rather than a choice. An explicit null is the DECLARED opt-out and is always silent. Env: GUARD_INDEX_PATH (or SEARCH_CODE_DB, matcher-only).",

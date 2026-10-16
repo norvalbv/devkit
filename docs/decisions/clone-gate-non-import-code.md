@@ -18,3 +18,4 @@ created: 2026-08-02
 **Revisit-when:** jscpd ships native import-statement exclusion (drop the hand-rolled patterns), or corpus/telemetry evidence shows real duplications recurring sub-floor behind import blocks (lower min-tokens or revisit the exclusion)
 **Scope:** gate-engine/co-occurrence/**
 **Source:** collab · https://github.com/norvalbv/devkit/pull/308
+- 2026-10-16 — sc-5612 — The tokenizer-level import exclusion carries over unchanged to jscpd 5.4.1: --ignore-pattern still removes import preambles before matching (a 14-import shared preamble still produces no clone, and a real body behind one still blocks). The --similarity pass compares whole functions, so import statements never enter it. Novelty and the allowlist key moved to the clone-gate-head-novelty axis.
