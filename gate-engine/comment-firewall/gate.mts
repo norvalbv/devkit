@@ -50,7 +50,7 @@ function printParagraphs(findings: CommentFinding[]): void {
   writeGateReason(
     findings.map(
       (f) =>
-        `${findingLocation(f)} [${f.id}] — 3+-line comment paragraph: shorten it, or retry unchanged (blocks once)`,
+        `[${f.id}] ${findingLocation(f)} — 3+-line comment paragraph: shorten it, or retry unchanged (blocks once)`,
     ),
   );
 }

@@ -2,7 +2,8 @@ import { existsSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { GATE_REASON_ENV, readGateReason } from '../../deterministic/reason.mts';
+import { oneLine } from '../../../cli/lib/ship/digest/fields.mts';
+import { GATE_REASON_ENV, readGateReason, reasonDetail } from '../../deterministic/reason.mts';
 import { runCommentCli } from '../cli.mts';
 import { runCommentFirewall } from '../gate.mts';
 import { emptyInventory } from '../inventory.mts';
@@ -274,9 +275,20 @@ describe('runCommentFirewall — reason for the aggregated verdict', () => {
     expect(runCommentFirewall('/repo', { ...fresh(), detect })).toBe(1);
     expect(readGateReason(file)).toEqual([
       'guard-comments: 2 added/modified comment paragraphs need a decision.',
-      'src/a.ts:2-4 [a1b2c3d4e5f6] — 3+-line comment paragraph: shorten it, or retry unchanged (blocks once)',
+      '[a1b2c3d4e5f6] src/a.ts:2-4 — 3+-line comment paragraph: shorten it, or retry unchanged (blocks once)',
       'src/c.ts:7 cites sc-3836 — state the fact or drop the reference',
     ]);
+  });
+
+  it.each([1, 2])('keeps the first finding ID in the capped digest detail (%i long paths)', (n) => {
+    capture();
+    const file = reasonFile();
+    const path = 'gate-engine/deterministic/__tests__/a-deeply-nested-probe.test.mts';
+    const findings = [finding, second].slice(0, n).map((f) => ({ ...f, path }));
+    expect(runCommentFirewall('/repo', { ...fresh(), detect: () => detection(findings) })).toBe(1);
+    expect(oneLine(reasonDetail('guard-comments', readGateReason(file)))).toContain(
+      `[${finding.id}]`,
+    );
   });
 
   it('records why an unsupported language exits 4', () => {

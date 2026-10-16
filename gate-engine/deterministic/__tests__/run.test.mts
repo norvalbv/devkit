@@ -12,6 +12,7 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { oneLine } from '../../../cli/lib/ship/digest/fields.mts';
 import { deterministicStrict } from '../../config.mts';
 import { recheckCommand } from '../recheck.mts';
 import { parseOpts, prefixCacheScope, runDeterministic, selectedIds } from '../run.mts';
@@ -311,11 +312,16 @@ describe('runDeterministic — comments joins the aggregated set', () => {
   });
 
   it('runs the REAL firewall end-to-end: a staged 3-line comment paragraph blocks in the aggregate', () => {
-    const { status, stderr } = runRealGates(['comments'], { 'src/a.ts': PROSE_3 });
+    const sink = join(mkdtempSync(join(tmpdir(), 'comments-sink-')), 'events.jsonl');
+    process.env.DEVKIT_GATE_EVENTS = sink;
+    const long = 'src/a-deliberately-long-file-name-that-would-push-an-id-past-the-cap.ts';
+    const { status, stderr } = runRealGates(['comments'], { [long]: PROSE_3 });
     expect(status).toBe(1);
     // The child's own first line stays byte-stable for the collector, then the aggregate names it.
     expect(stderr).toContain('guard-comments: 1 added/modified comment paragraph need a decision.');
     expect(stderr).toContain('✗ deterministic gates failed: guard-comments\n');
+    // The ship digest prints this detail capped; the finding ID must survive a long path.
+    expect(oneLine(eventsOf(sink)[0]?.detail)).toMatch(/\[[0-9a-f]{12}\]/);
   });
 
   it('a size overrun and a comment paragraph fail together in ONE real aggregated run', () => {
